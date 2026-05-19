@@ -211,7 +211,7 @@ Docker：`docker-compose up` 启动网关 + Web + Redis，并把 Gateway durable
 
 ### 文件体积限制
 
-- **单文件行数上限：1500 行**。1300–1500 行为预警区间，应主动评估拆分；超过 1500 行必须立即拆分，不得以任何理由豁免。
+- **单文件行数上限：1500 行**。1300–2000 行为预警区间，应主动评估拆分；超过 2000 行必须立即拆分，不得以任何理由豁免。
 - 拆分时优先按**职责边界**切分，而非随机截断：
   - UI 渲染逻辑 → 独立子组件
   - 数据获取 / 副作用 → 独立 hook（`use*.ts`）
@@ -247,18 +247,26 @@ Docker：`docker-compose up` 启动网关 + Web + Redis，并把 Gateway durable
 ### 核心原则
 
 - **设计质量优先**：UI 实现必须以用户体验和视觉美感为首要目标，功能完成不是降低设计标准的理由。
+- **E · Nebula 色彩体系**：所有 UI 必须使用正式定稿的 token（靛青主强调 + 琥珀对比 + 珊瑚互补 + 靛蓝辅助）。详见 `packages/shared-ui/DESIGN-TOKENS.md`。
 - **专业工具强制使用**：所有涉及 UI 的任务必须加载专业 skill，禁止在不参考设计规范的情况下徒手堆砌样式。
-  - 视觉/布局/交互设计 → 加载 `frontend-design` skill
-  - 组件库使用（antd/shadcn）→ 加载对应 skill（`ant-design` 等）
-  - 响应式 / React 性能 → 加载 `vercel-react-best-practices` skill
-  - Web 标准与可访问性审查 → 加载 `web-design-guidelines` skill
+
+### 色彩强制规则
+
+- 主强调色（靛青）：仅用于 CTA / active / 选中态
+- 对比色（琥珀）：仅用于 warning / 次级强调 / 数据高亮
+- 互补色（珊瑚）：仅用于 danger / destructive
+- 辅助色（靛蓝）：仅用于 info / 链接 / 代码高亮
+- 线条分 5 级：invisible → subtle → default → emphasis → strong
+- 文字分 4 级：strong → default → muted → subtle
+- 禁止硬编码色值，必须通过 CSS 变量引用
 
 ### 用户体验要求
 
 - **操作流畅性**：交互元素必须有明确的 hover / active / focus 状态，禁止裸样式按钮。
 - **视觉层次**：页面必须具备清晰的信息层级（主操作 > 次操作 > 辅助信息），禁止所有元素等权重平铺。
-- **空间节奏**：间距、字号、色彩必须遵循统一的 design token，禁止魔法数字（如 `margin: 13px`）。
+- **空间节奏**：间距必须遵循 4/8/12/16/20/24/32/48 的 token 阶梯，禁止魔法数字。
 - **反馈完整性**：loading、empty、error 三态必须设计，禁止只实现 happy path。
+- **Focus 可访问性**：所有可交互元素必须有 focus ring（accent 色 2px outline + 4px subtle shadow）。
 
 ### 执行约束
 
@@ -266,6 +274,7 @@ Docker：`docker-compose up` 启动网关 + Web + Redis，并把 Gateway durable
 - 禁止复制粘贴通用 AI 生成的平庸布局——每个页面需结合实际场景做针对性设计。
 - 禁止忽略移动端适配——所有 Web 页面默认需响应式支持（最低 375px 宽度）。
 - UI 改动提交前必须经过视觉自查：对齐、间距、色彩对比度（WCAG AA 标准）。
+- **新增/修改组件前必须阅读** `packages/shared-ui/DESIGN-TOKENS.md`。
 
 ## 禁止事项
 

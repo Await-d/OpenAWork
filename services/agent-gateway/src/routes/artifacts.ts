@@ -17,7 +17,7 @@ import {
   listImageWorkbenchArtifacts,
   revertArtifactToVersion,
   updateArtifact,
-} from '../artifact-content-store.js';
+} from '../session/artifact-content-store.js';
 
 const ARTIFACTS_DIR = resolveGatewayArtifactsDir();
 const ARTIFACTS_INDEX = resolveGatewayArtifactsIndexPath();

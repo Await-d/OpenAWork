@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { appendMessage as dbAppendMessage } from '../db/session-store.js';
 import { useGatewayClient } from './useGatewayClient.js';
-import type { MobileChatMessage } from '../chat-message-content.js';
+import type { MobileChatMessage } from '../chat/chat-message-content.js';
 import { buildChatStreamToken, shouldApplyChatStreamMutation } from './chat-stream-guard.js';
 
 export function useChatStreamState({

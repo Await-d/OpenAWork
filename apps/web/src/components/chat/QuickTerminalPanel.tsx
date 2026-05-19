@@ -17,7 +17,7 @@ import {
   closeTerminal,
   createSessionTerminal,
   type SessionTerminalView,
-} from '../session-conversation/runtime/terminals-api.js';
+} from '../conversation-runtime/terminals/terminals-api.js';
 import { InteractiveTerminalView } from './InteractiveTerminalView.js';
 
 interface QuickTerminalPanelProps {
@@ -274,10 +274,10 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
                     padding: '2px 4px 2px 8px',
                     borderRadius: 4,
                     background: isActive
-                      ? 'color-mix(in srgb, #34d399 14%, var(--surface))'
+                      ? 'color-mix(in srgb, var(--success, var(--success, #3dd49a)) 14%, var(--surface))'
                       : 'transparent',
                     border: isActive
-                      ? '1px solid color-mix(in srgb, #34d399 50%, transparent)'
+                      ? '1px solid color-mix(in srgb, var(--success) 50%, transparent)'
                       : '1px solid transparent',
                     cursor: 'pointer',
                     flexShrink: 0,
@@ -290,7 +290,7 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
                     style={{
                       border: 'none',
                       background: 'transparent',
-                      color: isActive ? '#34d399' : 'var(--text-2)',
+                      color: isActive ? 'var(--success, var(--success, #3dd49a))' : 'var(--text-2)',
                       fontSize: 11,
                       fontWeight: isActive ? 600 : 500,
                       cursor: 'pointer',
@@ -373,8 +373,8 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
         <div
           style={{
             padding: '4px 10px',
-            background: 'color-mix(in srgb, #ef4444 12%, transparent)',
-            color: '#ef4444',
+            background: 'color-mix(in srgb, var(--danger) 12%, transparent)',
+            color: 'var(--danger, var(--danger, #f06b7e))',
             fontSize: 11,
           }}
         >

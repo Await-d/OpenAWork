@@ -1,7 +1,7 @@
 import React, { useState as useLocalState, useEffect as useLocalEffect } from 'react';
 import { createWorkspaceClient } from '@openAwork/web-client';
-import type { FileTreeNode } from '../WorkspacePickerModal.js';
-import { FileIcon, FolderIcon } from '../FileIcon.js';
+import type { FileTreeNode } from '../common/WorkspacePickerModal.js';
+import { FileIcon, FolderIcon } from '../file-editor/FileIcon.js';
 
 export interface FileTreeContextTarget {
   path: string;

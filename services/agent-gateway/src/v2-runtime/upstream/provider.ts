@@ -30,7 +30,7 @@ import {
 } from '@ai-sdk/openai-compatible';
 import { createAnthropic, type AnthropicProviderSettings } from '@ai-sdk/anthropic';
 import { createOpenAI, type OpenAIProviderSettings } from '@ai-sdk/openai';
-import { buildAnthropicBetas, formatAnthropicBetaHeader } from '../../anthropic-betas.js';
+import { buildAnthropicBetas, formatAnthropicBetaHeader } from '../../provider/anthropic-betas.js';
 
 /**
  * Cross-version `LanguageModel` alias.

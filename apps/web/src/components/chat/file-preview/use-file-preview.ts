@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { createWorkspaceClient } from '@openAwork/web-client';
 import { useAuthStore } from '../../../stores/auth.js';
 import { useUIStateStore } from '../../../stores/uiState.js';
-import { getFilePreviewKind, isBinaryPreviewKind } from '../../../utils/file-preview.js';
+import { getFilePreviewKind, isBinaryPreviewKind } from '../../../utils/file/file-preview.js';
 import { extractSnippet, type FileSnippet } from './extract-snippet.js';
 import { resolveBareFilename } from './resolve-bare-filename.js';
 

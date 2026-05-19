@@ -32,7 +32,7 @@ import {
   subscribeToolCatalogChanges,
   type OAuthRedirectEvent,
   type ToolCatalogChangeEvent,
-} from '../mcp-tool-catalog.js';
+} from '../mcp/mcp-tool-catalog.js';
 
 const HEARTBEAT_INTERVAL_MS = 25_000;
 

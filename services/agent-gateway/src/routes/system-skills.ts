@@ -13,7 +13,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { startRequestWorkflow } from '../request-workflow.js';
-import { syncSystemSkillsForUser } from '../system-skills.js';
+import { syncSystemSkillsForUser } from '../skill/system-skills.js';
 
 export async function systemSkillsRoutes(app: FastifyInstance): Promise<void> {
   app.post(

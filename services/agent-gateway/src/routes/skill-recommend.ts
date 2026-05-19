@@ -27,22 +27,22 @@ import { BUILTIN_SKILLS } from '@openAwork/skills';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { sqliteAll, sqliteGet, sqliteRun, sqliteTransaction } from '../db.js';
-import { getProviderConfigForSelection } from '../provider-config.js';
-import { resolveModelRoute, resolveModelRouteFromProvider } from '../model-router.js';
+import { getProviderConfigForSelection } from '../provider/provider-config.js';
+import { resolveModelRoute, resolveModelRouteFromProvider } from '../provider/model-router.js';
 import { startRequestWorkflow } from '../request-workflow.js';
-import { DEFAULT_WORKSPACE_PATH_KEY, normalizeWorkspacePathForWrite } from '../skill-selection.js';
+import { DEFAULT_WORKSPACE_PATH_KEY, normalizeWorkspacePathForWrite } from '../skill/skill-selection.js';
 import {
   recommendByHeuristic,
   type HeuristicCandidate,
   type HeuristicRecommendation,
   type HeuristicRejection,
-} from '../skill-recommend-heuristic.js';
+} from '../skill/skill-recommend-heuristic.js';
 import { runUpstreamGenerate } from '../v2-runtime/upstream/index.js';
 import {
   collectWorkspaceSignals,
   computeSignalDigest,
   type WorkspaceSignals,
-} from '../workspace-skill-signals.js';
+} from '../workspace/workspace-skill-signals.js';
 
 const BUILTIN_SKILL_IDS = new Set(BUILTIN_SKILLS.map((entry) => entry.manifest.id));
 

@@ -53,7 +53,7 @@
 }
 
 .tool-icon[data-state='completed'] {
-  color: var(--success, #22c55e);
+  color: var(--success, var(--success, var(--success, #3dd49a)));
 }
 
 .tool-icon[data-state='running'] {
@@ -455,6 +455,6 @@
 }
 
 .tool-call-block-exit-code[data-exit-ok='true'] {
-  color: #22c55e;
-  background: color-mix(in srgb, #22c55e 10%, transparent);
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 10%, transparent);
 }

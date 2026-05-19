@@ -1,0 +1,474 @@
+/**
+ * BaseSessionRow — 会话列表行的共享骨架组件
+ *
+ * 提供统一的行容器、标题行（图标 + 标题 + 时间）、副行（元信息 / hover 操作切换）、
+ * 以及可选的扩展内容插槽。chat 和 team 两侧通过 props/children 注入各自的差异化内容。
+ *
+ * 视觉结构：
+ *   ┌─────────────────────────────────────────────┐
+ *   │ [icon slot]  title ···················· time │  ← headRow
+ *   │ [meta slot / hover actions]                  │  ← metaRow
+ *   │ [extra slot]                                 │  ← optional
+ *   └─────────────────────────────────────────────┘
+ */
+
+import React, { type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+
+// ─── Density presets ─────────────────────────────────────────────────────────
+
+export type BaseSessionRowDensity = 'compact' | 'cozy';
+
+interface DensityTokens {
+  rowGap: number;
+  rowPadding: string;
+  rowMargin: string;
+  headGap: number;
+  metaMinHeight: number;
+}
+
+const DENSITY: Record<BaseSessionRowDensity, DensityTokens> = {
+  // 紧凑模式：chat 端使用，最大化每屏可见的会话条数
+  compact: {
+    rowGap: 0,
+    rowPadding: '2px 6px',
+    rowMargin: '0',
+    headGap: 6,
+    metaMinHeight: 14,
+  },
+  // 宽松模式：team 端使用，给进度条 / agent 头像留出呼吸空间
+  cozy: {
+    rowGap: 3,
+    rowPadding: '5px 8px',
+    rowMargin: '0 4px 1px',
+    headGap: 7,
+    metaMinHeight: 16,
+  },
+};
+
+// ─── Styles ──────────────────────────────────────────────────────────────────
+
+const TITLE_STYLE: CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  fontSize: 12,
+  lineHeight: '1.35',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+};
+
+const TIME_STYLE: CSSProperties = {
+  flexShrink: 0,
+  fontSize: 10,
+  color: 'var(--text-3)',
+  fontVariantNumeric: 'tabular-nums',
+  whiteSpace: 'nowrap',
+  lineHeight: '16px',
+};
+
+const META_ROW_BASE_STYLE: CSSProperties = {
+  position: 'relative',
+};
+
+const ACTION_BTN_STYLE: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 22,
+  height: 22,
+  borderRadius: 5,
+  background: 'transparent',
+  border: 'none',
+  color: 'var(--text-3)',
+  cursor: 'pointer',
+  padding: 0,
+  flexShrink: 0,
+};
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+export interface BaseSessionRowAction {
+  key: string;
+  title: string;
+  icon: ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  danger?: boolean;
+}
+
+export interface BaseSessionRowProps {
+  /** 唯一标识 */
+  sessionId: string;
+  /** 标题文本 */
+  title: string;
+  /** 时间显示文本 */
+  timeLabel?: string;
+  /** 时间 tooltip */
+  timeTitle?: string;
+  /** 是否选中态 */
+  active?: boolean;
+  /** 是否 hover 态 */
+  hovered?: boolean;
+  /** 图标插槽（左侧 icon box） */
+  icon?: ReactNode;
+  /** 元信息插槽（标题下方，非 hover 时显示） */
+  meta?: ReactNode;
+  /** 额外内容插槽（meta 行下方，始终显示） */
+  extra?: ReactNode;
+  /** hover 时显示的操作按钮 */
+  actions?: BaseSessionRowAction[];
+  /** 是否在 hover 时隐藏 meta 行（切换为 actions） */
+  hideMetaOnHover?: boolean;
+  /** 点击行 */
+  onSelect?: (sessionId: string) => void;
+  /** 右键菜单 */
+  onContextMenu?: (event: MouseEvent, sessionId: string) => void;
+  /** hover 状态变化 */
+  onHoverChange?: (sessionId: string | null) => void;
+  /** 鼠标进入时的预加载回调 */
+  onPreload?: (sessionId: string) => void;
+  /** 指针位置变化（用于恢复 hover） */
+  onPointerPositionChange?: (position: { x: number; y: number } | null) => void;
+  /** 行缩进深度 */
+  depth?: number;
+  /** 自定义 data 属性 */
+  dataState?: string;
+  /** aria-label */
+  ariaLabel?: string;
+  /** 是否正在重命名 */
+  renaming?: boolean;
+  /** 重命名输入框内容 */
+  renameValue?: string;
+  /** 重命名输入框变化 */
+  onRenameChange?: (value: string) => void;
+  /** 提交重命名 */
+  onRenameCommit?: (sessionId: string) => void;
+  /**
+   * 行密度。compact = chat 端紧凑模式，cozy = team 端宽松模式（默认）。
+   * 影响内边距、行间距、meta 行最小高度。
+   */
+  density?: BaseSessionRowDensity;
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function isNestedInteractiveTarget(target: EventTarget | null): target is Element {
+  return target instanceof Element && target.closest('button, input, textarea, select, a') !== null;
+}
+
+// ─── Component ───────────────────────────────────────────────────────────────
+
+export function BaseSessionRow({
+  sessionId,
+  title,
+  timeLabel,
+  timeTitle,
+  active = false,
+  hovered = false,
+  icon,
+  meta,
+  extra,
+  actions,
+  hideMetaOnHover = true,
+  onSelect,
+  onContextMenu,
+  onHoverChange,
+  onPreload,
+  onPointerPositionChange,
+  depth = 0,
+  dataState,
+  ariaLabel,
+  renaming = false,
+  renameValue,
+  onRenameChange,
+  onRenameCommit,
+  density = 'cozy',
+}: BaseSessionRowProps) {
+  const tokens = DENSITY[density];
+  const handleClick = (event: MouseEvent<HTMLDivElement>) => {
+    if (isNestedInteractiveTarget(event.target)) return;
+    onSelect?.(sessionId);
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (isNestedInteractiveTarget(event.target)) return;
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      onSelect?.(sessionId);
+    }
+  };
+
+  const showActions = hovered && !renaming && actions && actions.length > 0;
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      data-session-id={sessionId}
+      data-session-state={dataState}
+      onClick={handleClick}
+      onKeyDown={handleKeyDown}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        onContextMenu?.(event, sessionId);
+      }}
+      onMouseEnter={(event) => {
+        onPreload?.(sessionId);
+        onPointerPositionChange?.({ x: event.clientX, y: event.clientY });
+        onHoverChange?.(sessionId);
+      }}
+      onMouseMove={(event) => {
+        onPointerPositionChange?.({ x: event.clientX, y: event.clientY });
+      }}
+      onMouseLeave={() => {
+        onPointerPositionChange?.(null);
+        onHoverChange?.(null);
+      }}
+      onFocusCapture={() => {
+        onPreload?.(sessionId);
+        onHoverChange?.(sessionId);
+      }}
+      onBlurCapture={(event) => {
+        const nextTarget = event.relatedTarget;
+        if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+          onHoverChange?.(null);
+        }
+      }}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: tokens.rowGap,
+        padding: tokens.rowPadding,
+        margin: tokens.rowMargin,
+        paddingLeft: `${parseInt(tokens.rowPadding.split(' ')[1] ?? '10', 10) + depth * 12}px`,
+        borderRadius: 8,
+        border: '1px solid transparent',
+        cursor: 'pointer',
+        transition: 'background 120ms ease, border-color 120ms ease',
+        outline: 'none',
+        position: 'relative',
+        background: active
+          ? 'color-mix(in srgb, var(--accent) 10%, var(--surface))'
+          : hovered
+            ? 'color-mix(in srgb, var(--text-3) 5%, transparent)'
+            : 'transparent',
+        borderColor: active ? 'color-mix(in srgb, var(--accent) 32%, transparent)' : 'transparent',
+      }}
+      title={title}
+      aria-current={active ? 'true' : undefined}
+      aria-label={ariaLabel ?? title}
+    >
+      {/* Head row: icon + title (+ time when cozy) */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: density === 'compact' ? 'flex-start' : 'center',
+          gap: tokens.headGap,
+          minWidth: 0,
+        }}
+      >
+        {depth > 0 && (
+          <span
+            aria-hidden="true"
+            style={{
+              width: 12,
+              flexShrink: 0,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--text-3)',
+              fontSize: 10,
+              fontWeight: 700,
+            }}
+          >
+            ↳
+          </span>
+        )}
+        {icon}
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: density === 'compact' ? 0 : 1,
+          }}
+        >
+          {renaming ? (
+            <input
+              className="session-rename-input"
+              ref={(element) => element?.focus()}
+              value={renameValue ?? ''}
+              onChange={(event) => onRenameChange?.(event.target.value)}
+              onKeyDown={(event) => {
+                event.stopPropagation();
+                if (event.key === 'Enter' || event.key === 'Escape') {
+                  onRenameCommit?.(sessionId);
+                }
+              }}
+              onBlur={() => onRenameCommit?.(sessionId)}
+              style={{
+                flex: 1,
+                minWidth: 0,
+                background: 'var(--bg-2)',
+                border: '1px solid var(--accent)',
+                borderRadius: 6,
+                padding: '3px 6px',
+                color: 'var(--text)',
+                fontSize: 12,
+              }}
+            />
+          ) : (
+            <span
+              style={{
+                ...TITLE_STYLE,
+                lineHeight: density === 'compact' ? '1.25' : '1.35',
+                fontWeight: active ? 600 : 400,
+                color: active ? 'var(--text)' : 'var(--text-2)',
+              }}
+            >
+              {title}
+            </span>
+          )}
+        </div>
+        {/* cozy 模式下时间挂在标题右侧；compact 模式下时间随 meta 行靠右对齐 */}
+        {density === 'cozy' && timeLabel && (
+          <span style={TIME_STYLE} title={timeTitle}>
+            {timeLabel}
+          </span>
+        )}
+      </div>
+
+      {/* Meta row: info / time (compact) / hover actions */}
+      {(meta || (actions && actions.length > 0) || (density === 'compact' && timeLabel)) && (
+        <div style={{ ...META_ROW_BASE_STYLE, minHeight: tokens.metaMinHeight }}>
+          {(meta || (density === 'compact' && timeLabel)) && (
+            <span
+              style={{
+                position: hideMetaOnHover ? 'absolute' : 'relative',
+                inset: hideMetaOnHover ? 0 : undefined,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                opacity: hideMetaOnHover && showActions ? 0 : 1,
+                transition: 'opacity 120ms ease-out',
+                pointerEvents: hideMetaOnHover && showActions ? 'none' : 'auto',
+                willChange: 'opacity',
+              }}
+            >
+              {meta}
+              {density === 'compact' && timeLabel && (
+                <span
+                  style={{ ...TIME_STYLE, marginLeft: 'auto', lineHeight: '14px' }}
+                  title={timeTitle}
+                >
+                  {timeLabel}
+                </span>
+              )}
+            </span>
+          )}
+          {actions && actions.length > 0 && (
+            <div
+              className="session-actions"
+              style={{
+                position: hideMetaOnHover ? 'absolute' : 'relative',
+                inset: hideMetaOnHover ? 0 : undefined,
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: 4,
+                alignItems: 'center',
+                opacity: showActions ? 1 : 0,
+                transition: 'opacity 120ms ease-out',
+                pointerEvents: showActions ? 'auto' : 'none',
+                willChange: 'opacity',
+              }}
+            >
+              {actions.map((action) => (
+                <button
+                  key={action.key}
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    action.onClick();
+                  }}
+                  tabIndex={showActions ? 0 : -1}
+                  disabled={action.disabled}
+                  title={action.title}
+                  style={{
+                    ...ACTION_BTN_STYLE,
+                    color: action.danger ? 'var(--danger, #d4574e)' : ACTION_BTN_STYLE.color,
+                    opacity: action.disabled ? 0.45 : 1,
+                    cursor: action.disabled ? 'wait' : 'pointer',
+                  }}
+                >
+                  {action.icon}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Extra slot */}
+      {extra}
+    </div>
+  );
+}
+
+// ─── Shared Icons ────────────────────────────────────────────────────────────
+
+export const RenameIcon = (
+  <svg
+    width="12"
+    height="12"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M12 20h9" />
+    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+  </svg>
+);
+
+export const ExportIcon = (
+  <svg
+    width="12"
+    height="12"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="7 10 12 15 17 10" />
+    <line x1="12" y1="15" x2="12" y2="3" />
+  </svg>
+);
+
+export const DeleteIcon = (
+  <svg
+    width="12"
+    height="12"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <polyline points="3 6 5 6 21 6" />
+    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+    <path d="M10 11v6" />
+    <path d="M14 11v6" />
+  </svg>
+);
+
+export { ACTION_BTN_STYLE as baseSessionActionButtonStyle };

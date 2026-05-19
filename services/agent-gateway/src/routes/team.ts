@@ -2,21 +2,20 @@ import { randomUUID } from 'crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { FIXED_TEAM_CORE_ROLE_BINDINGS, FIXED_TEAM_CORE_ROLE_ORDER } from '@openAwork/shared';
-import { listManagedAgentsForUser } from '../agent-catalog.js';
+import { listManagedAgentsForUser } from '../agent/agent-catalog.js';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
-import { resolveAuxiliaryLlmConfig } from '../auxiliary-llm-config.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
 import { startRequestWorkflow } from '../request-workflow.js';
 import {
   normalizeIncomingSessionMetadata,
   parseSessionMetadataJson,
   validateSessionMetadataPatch,
-} from '../session-workspace-metadata.js';
-import { resolveSessionWorkspacePath } from '../session-workspace-resolution.js';
-import { mergeRuntimeTaskGroups } from '../team-runtime-task-groups.js';
-import { listSharedSessionsForRecipient } from '../session-shared-access.js';
-import { listTeamAuditLogs, logTeamAudit, type TeamAuditAction } from '../team-audit-store.js';
+} from '../session/session-workspace-metadata.js';
+import { resolveSessionWorkspacePath } from '../session/session-workspace-resolution.js';
+import { mergeRuntimeTaskGroups } from '../team/team-runtime-task-groups.js';
+import { listSharedSessionsForRecipient } from '../session/session-shared-access.js';
+import { listTeamAuditLogs, logTeamAudit, type TeamAuditAction } from '../team/team-audit-store.js';
 import {
   buildMergedSessionTaskProjection,
   extractParentSessionIdFromMetadata,
@@ -25,13 +24,7 @@ import {
   validateParentSessionBinding,
 } from './sessions.js';
 import { validateImportedMessagesPayload } from './session-route-helpers.js';
-import { isHandoffModeEnabled } from '../handoff/feature-flags.js';
-import {
-  createHandoff as createHandoffRecord,
-  type HandoffRoleLayer,
-} from '../handoff/handoff-store.js';
-import { publishHandoffEvent as publishHandoffEventFromTeamRoute } from '../handoff/team-events-bus.js';
-import { createTeamSession } from '../handoff/team-session-create.js';
+import { createTeamSession } from '../handoff/bus/team-session-create.js';
 
 const createMemberSchema = z.object({
   name: z.string().min(1),
@@ -258,33 +251,10 @@ const workflowTeamTemplateSchema = z.object({
 });
 
 // ─── Phase B T-09/T-10 helpers ──────────────────────────────────────────────
-
-/**
- * 找到或创建一个 reception 层 session 作为 handoff 的 from_session_id。
- * Phase B MVP：每次都创建一个新的（简单但不浪费——每条 handoff 链有独立 root）。
- * Phase C 可以改为复用同一 workspace 下的 reception session。
- */
-function findOrCreateReceptionSession(userId: string, _teamWorkspaceId: string | null): string {
-  const { sessionId } = createTeamSession({
-    userId,
-    roleLayer: 'reception',
-  });
-  return sessionId;
-}
-
-/**
- * 把 team-leader dispatch 的 assigneeRole 映射到 HandoffRoleLayer。
- */
-function mapDispatchRoleToHandoffLayer(role: string): HandoffRoleLayer {
-  const map: Record<string, HandoffRoleLayer> = {
-    planner: 'pm1',
-    researcher: 'pm2',
-    executor: 'executor',
-    reviewer: 'reviewer',
-    leader: 'pm2',
-  };
-  return map[role] ?? 'executor';
-}
+//
+// 旧路径 helper（findOrCreateReceptionSession / mapDispatchRoleToHandoffLayer）
+// 已与 /team/interaction-agent/rewrite + /team/leader/dispatch 路由一并移除。
+// 新路径走 reception-orchestrator → watcher 自动链。
 
 export async function teamRoutes(app: FastifyInstance): Promise<void> {
   const SESSION_TEAM_WORKSPACE_ID_SQL =
@@ -364,11 +334,11 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
   }): SessionRow[] => {
     const query =
       typeof input.teamWorkspaceId === 'string' && input.teamWorkspaceId.length > 0
-        ? `SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at
+        ? `SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at, team_parent_session_id
            FROM sessions
            WHERE user_id = ? AND ${SESSION_TEAM_WORKSPACE_ID_SQL} = ?
            ORDER BY updated_at DESC`
-        : `SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at
+        : `SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at, team_parent_session_id
            FROM sessions
            WHERE user_id = ? AND ${SESSION_TEAM_WORKSPACE_ID_SQL} IS NOT NULL
            ORDER BY updated_at DESC`;
@@ -449,22 +419,32 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
     updatedAt: row.updated_at,
   });
 
-  const mapRuntimeSessionRow = (userId: string, row: SessionRow) => ({
-    id: row.id,
-    metadataJson: row.metadata_json,
-    parentSessionId:
+  const mapRuntimeSessionRow = (userId: string, row: SessionRow) => {
+    // team_parent_session_id 列不在 SessionRow 接口中（接口是通用的），
+    // 但 listTeamRuntimeSessionRows 的 SELECT 包含了它。用 unknown 中转读取。
+    const rawRow = row as unknown as Record<string, unknown>;
+    const teamParentSessionId =
+      typeof rawRow['team_parent_session_id'] === 'string' && rawRow['team_parent_session_id']
+        ? rawRow['team_parent_session_id']
+        : null;
+    const metadataParentSessionId =
       typeof parseSessionMetadataJson(row.metadata_json)['parentSessionId'] === 'string'
         ? (parseSessionMetadataJson(row.metadata_json)['parentSessionId'] as string) || null
-        : null,
-    stateStatus: row.state_status ?? 'idle',
-    title: row.title ?? null,
-    updatedAt: row.updated_at,
-    workspacePath: getWorkspacePathFromMetadataJson({
+        : null;
+    return {
+      id: row.id,
       metadataJson: row.metadata_json,
-      sessionId: row.id,
-      userId,
-    }),
-  });
+      parentSessionId: teamParentSessionId ?? metadataParentSessionId,
+      stateStatus: row.state_status ?? 'idle',
+      title: row.title ?? null,
+      updatedAt: row.updated_at,
+      workspacePath: getWorkspacePathFromMetadataJson({
+        metadataJson: row.metadata_json,
+        sessionId: row.id,
+        userId,
+      }),
+    };
+  };
 
   const buildWorkspaceRuntimeTaskGroups = async (input: {
     sessionRows: SessionRow[];
@@ -1894,525 +1874,6 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  const interactionRewriteSchema = z.object({
-    intent: z.string().min(1).max(2000),
-    context: z.string().max(4000).optional(),
-  });
-
-  app.post(
-    '/team/interaction-agent/rewrite',
-    { onRequest: [requireAuth] },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const { step, child } = startRequestWorkflow(request, 'team.interaction-agent.rewrite');
-
-      const parseStep = child('parse-body');
-      const body = interactionRewriteSchema.safeParse(request.body);
-      if (!body.success) {
-        parseStep.fail('invalid input');
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
-      parseStep.succeed();
-
-      // Use the same auxiliary LLM resolver as workflows.ts: prefer the
-      // user's configured "fast / inline" provider (with full
-      // providerType + upstreamProtocol so non–chat-completions
-      // providers are honoured), falling back to env vars only as a
-      // last resort.
-      const user = request.user as JwtPayload;
-      const llmConfig = await resolveAuxiliaryLlmConfig(user.sub);
-      if (!llmConfig) {
-        step.fail('no llm config');
-        return reply.status(503).send({ error: 'Interaction agent LLM is not configured' });
-      }
-
-      const rewriteStep = child('llm-rewrite');
-      const contextBlock = body.data.context
-        ? `\n\n当前工作区上下文摘要：\n${body.data.context}`
-        : '';
-      const prompt = `你是一个团队协作交互代理（interaction-agent）。你的任务是将用户的自然语言意图改写为结构化的团队任务指令。
-
-改写要求：
-1. 保留用户原始意图的核心语义
-2. 将模糊需求拆解为可执行的子任务
-3. 为每个子任务推荐合适的执行角色（planner/researcher/executor/reviewer）
-4. 给出推荐的下一步动作
-5. 用中文输出
-
-用户意图：${body.data.intent}${contextBlock}
-
-请按以下格式输出：
-【改写结果】<改写后的结构化意图>
-【推荐角色】<planner/researcher/executor/reviewer>
-【下一步】<推荐的下一步动作>`;
-
-      try {
-        const { requestWorkflowLlmCompletion } = await import('./workflow-llm.js');
-        const rewritten = await requestWorkflowLlmCompletion({
-          apiBaseUrl: llmConfig.apiBaseUrl,
-          apiKey: llmConfig.apiKey,
-          model: llmConfig.model,
-          ...(llmConfig.providerType ? { providerType: llmConfig.providerType } : {}),
-          ...(llmConfig.upstreamProtocol ? { upstreamProtocol: llmConfig.upstreamProtocol } : {}),
-          prompt,
-          temperature: 0.3,
-        });
-        rewriteStep.succeed(undefined, { outputLength: rewritten.length });
-
-        const rewrittenIntent = extractField(rewritten, '改写结果') || rewritten;
-        const recommendedRole = extractField(rewritten, '推荐角色') || 'planner';
-        const recommendedNextStep =
-          extractField(rewritten, '下一步') ||
-          '可将这条改写结果继续落到 Team 任务、共享运行跟进项或执行角色分工。';
-
-        step.succeed();
-
-        // 260515-team-phase-b · T-09：feature flag 开启时记录 handoff(reception→pm1)
-        if (isHandoffModeEnabled()) {
-          try {
-            const teamWorkspaceId =
-              typeof (request.query as Record<string, string>)['teamWorkspaceId'] === 'string'
-                ? (request.query as Record<string, string>)['teamWorkspaceId']
-                : null;
-            // 找到或创建一个 reception session 作为 from_session_id
-            // Phase B MVP：用 user 最近的 team session 或创建一个临时的
-            const receptionSession = findOrCreateReceptionSession(
-              user.sub,
-              teamWorkspaceId ?? null,
-            );
-            const handoff = createHandoffRecord({
-              userId: user.sub,
-              fromSessionId: receptionSession,
-              fromRoleLayer: 'reception',
-              toRoleLayer: 'pm1',
-              payload: {
-                sourceIntent: body.data.intent,
-                rewrittenIntent,
-                recommendedRole,
-                recommendedNextStep,
-              },
-            });
-            publishHandoffEventFromTeamRoute({
-              type: 'handoff.created',
-              record: handoff,
-            });
-          } catch (err) {
-            console.warn(
-              `[team.interaction-agent.rewrite] handoff record creation failed: ${err instanceof Error ? err.message : String(err)}`,
-            );
-          }
-        }
-
-        return reply.send({
-          createdAt: Date.now(),
-          recommendedNextStep,
-          rewrittenIntent,
-          sourceIntent: body.data.intent,
-          status: 'completed',
-          recommendedRole,
-        });
-      } catch (_error: unknown) {
-        rewriteStep.fail('llm error');
-        step.fail('llm error');
-        return reply.status(500).send({ error: 'Interaction agent rewrite failed' });
-      }
-    },
-  );
-
-  // ─── Team Leader Dispatch ───
-
-  const leaderDispatchSchema = z.object({
-    rewrittenIntent: z.string().min(1),
-    recommendedRole: z.string().optional(),
-    sourceIntent: z.string().optional(),
-    context: z.string().max(4000).optional(),
-    teamRoster: z
-      .array(
-        z.object({
-          role: z.string().min(1),
-          agentId: z.string().min(1),
-          agentLabel: z.string().min(1),
-          capability: z.string().optional(),
-        }),
-      )
-      .min(1)
-      .default([]),
-  });
-
-  interface LeaderDispatchedTask {
-    assigneeRole: string;
-    assigneeAgentId: string;
-    priority: 'low' | 'medium' | 'high';
-    taskId: string;
-    title: string;
-  }
-
-  interface LeaderDispatchResult {
-    dispatchedTasks: LeaderDispatchedTask[];
-    leaderAnalysis: string;
-    status: 'completed';
-  }
-
-  // Build a roster entry description for the prompt
-  function buildRosterTablePrompt(
-    roster: Array<{ role: string; agentId: string; agentLabel: string; capability?: string }>,
-  ): string {
-    const header = '| Role | Agent | Core Capability | When to Assign |';
-    const sep = '|------|-------|----------------|----------------|';
-    const rows = roster.map((member) => {
-      const cap = member.capability ?? inferCapabilityFromRole(member.role);
-      return `| ${member.role} | ${member.agentLabel} | ${cap} | 需要${cap}时 |`;
-    });
-    return `${header}\n${sep}\n${rows.join('\n')}`;
-  }
-
-  function buildDecisionMatrixPrompt(
-    roster: Array<{ role: string; agentId: string; agentLabel: string; capability?: string }>,
-  ): string {
-    const header = '| Task Domain | Assign To |';
-    const sep = '|-------------|-----------|';
-    const rows = roster.map((member) => {
-      const cap = member.capability ?? inferCapabilityFromRole(member.role);
-      return `| ${cap} | \`${member.role}\` |`;
-    });
-    return `${header}\n${sep}\n${rows.join('\n')}`;
-  }
-
-  function inferCapabilityFromRole(role: string): string {
-    const known: Record<string, string> = {
-      leader: '任务拆解、角色分派、协作编排',
-      planner: '架构设计、方案评审、战略规划',
-      researcher: '信息检索、文档查找、模式探索',
-      executor: '代码实现、工程落地、深度修改',
-      reviewer: '质量审查、风险挑刺、方案挑战',
-      general: '通用任务处理与执行',
-    };
-    return known[role] ?? `${role}相关任务`;
-  }
-
-  app.post(
-    '/team/leader/dispatch',
-    { onRequest: [requireAuth] },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const { step, child } = startRequestWorkflow(request, 'team.leader.dispatch');
-      const user = request.user as JwtPayload;
-
-      const parseStep = child('parse-body');
-      const body = leaderDispatchSchema.safeParse(request.body);
-      if (!body.success) {
-        parseStep.fail('invalid input');
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
-      parseStep.succeed();
-
-      // See the rewrite handler above for why this prefers the user's
-      // configured fast/inline provider before falling back to env
-      // vars: it is the only path that carries providerType +
-      // upstreamProtocol, without which custom-protocol providers
-      // silently degrade to chat_completions.
-      const llmConfig = await resolveAuxiliaryLlmConfig(user.sub);
-      if (!llmConfig) {
-        step.fail('no llm config');
-        return reply.status(503).send({ error: 'Team leader LLM is not configured' });
-      }
-
-      // Merge fixed bindings with dynamic roster; roster takes precedence
-      const rosterMap = new Map<
-        string,
-        { agentId: string; agentLabel: string; capability?: string }
-      >();
-      for (const [role, agentId] of Object.entries(FIXED_TEAM_CORE_ROLE_BINDINGS)) {
-        rosterMap.set(role, {
-          agentId,
-          agentLabel: agentId,
-          capability: inferCapabilityFromRole(role),
-        });
-      }
-      for (const member of body.data.teamRoster) {
-        rosterMap.set(member.role, {
-          agentId: member.agentId,
-          agentLabel: member.agentLabel,
-          capability: member.capability,
-        });
-      }
-      const fullRoster = Array.from(rosterMap.entries()).map(([role, info]) => ({ role, ...info }));
-      const validRoles = fullRoster.map((m) => m.role);
-
-      const analyzeStep = child('llm-analyze');
-      const contextBlock = body.data.context ? `\n\n当前工作区上下文：\n${body.data.context}` : '';
-      const recommendedRoleHint = body.data.recommendedRole
-        ? `\ninteraction-agent 推荐首选角色：${body.data.recommendedRole}（请在拆解时优先考虑该角色的职责范围）`
-        : '';
-      const rosterTable = buildRosterTablePrompt(fullRoster);
-      const decisionMatrix = buildDecisionMatrixPrompt(fullRoster);
-      const validRolesList = validRoles.join(', ');
-      const prompt = `<identity>
-You are Zeus — the Team Leader of a multi-agent collaboration team.
-
-In Greek mythology, Zeus is the king of the gods who delegates dominion to his siblings and children. You do the same: you receive structured intent, decompose it into concrete tasks, and assign each task to the most suitable team member.
-
-You are a commander, not a soldier. A conductor, not a musician. You DECOMPOSE, ASSIGN, and COORDINATE.
-You never execute tasks yourself. You orchestrate specialists who do.
-</identity>
-
-<mission>
-Receive the interaction-agent's rewritten intent, decompose it into concrete executable tasks, and assign each task to the most suitable team role. One task per assignment. Parallel when independent. Cover all work streams.
-</mission>
-
-<team_roster>
-## Available Team Members
-
-${rosterTable}
-
-## Decision Matrix
-
-${decisionMatrix}
-
-**Each task MUST be assigned to exactly one role from the roster above. NO EXCEPTIONS.**
-</team_roster>
-
-<decomposition_rules>
-## 6 Decomposition Principles
-
-1. **MECE decomposition**: Tasks must be Mutually Exclusive and Collectively Exhaustive — no overlap, no gaps. Every piece of work belongs to exactly one task.
-
-2. **Single-responsibility**: Each task is owned by exactly one role. If a task spans multiple roles, split it into separate tasks with explicit dependencies.
-
-3. **Dependency ordering**: Tasks with dependencies MUST be ordered so prerequisites come first. Mark dependent tasks with \`medium\` or \`low\` priority; mark unblocked critical-path tasks as \`high\`.
-
-4. **Actionable titles**: Task titles MUST be imperative, specific, and verifiable.
-   - ❌ BAD: "处理问题" / "优化代码" / "研究一下"
-   - ✅ GOOD: "定位 /api/auth 502 错误的根因并输出诊断报告" / "将 UserService.extractProfile 拆分为 validateInput + transformOutput 两个纯函数"
-
-5. **Right-sizing**: Each task should be completable in one agent session. If too broad, split further. If trivially small, merge with related work.
-
-6. **Review gate**: Any task that modifies production code MUST have a corresponding reviewer task (if a reviewer role exists in the roster). No production change goes unreviewed.
-</decomposition_rules>
-
-<workflow>
-## Step 1: Intent Analysis
-
-Read the rewritten intent and answer:
-- What are the key work streams?
-- What are the dependencies between work streams?
-- What is the critical path?
-- What assumptions or risks exist?
-
-## Step 2: Task Decomposition
-
-For each work stream, decompose into tasks following the 6 principles above.
-
-**Before finalizing each task, verify:**
-\`\`\`
-TASK QUALITY CHECKLIST:
-□ Assigned to exactly one role from the roster?
-□ Title is imperative, specific, and verifiable?
-□ Scope is right-sized for one agent session?
-□ Dependencies on earlier tasks are noted?
-□ Priority reflects critical-path and dependency status?
-\`\`\`
-
-**If any answer is NO → rework the task before outputting.**
-
-## Step 3: Dependency & Priority Assignment
-
-| Priority | When to Use |
-|----------|-------------|
-| \`high\` | Critical-path tasks with no unmet dependencies; must-complete-first |
-| \`medium\` | Important but has dependency on a high-priority task; or non-critical-path |
-| \`low\` | Nice-to-have, optional, or depends on multiple prior tasks |
-
-## Step 4: Review Gate Check
-
-Before outputting, verify:
-\`\`\`
-REVIEW GATE CHECKLIST:
-□ Every production-code-changing task has a reviewer task? (if reviewer exists)
-□ No task is assigned to a role not in the roster?
-□ No two tasks overlap in scope?
-□ All dependencies are respected in priority ordering?
-\`\`\`
-</workflow>
-
-<boundaries>
-## What You DO vs What You DO NOT
-
-| You DO | You DO NOT |
-|--------|------------|
-| Decompose intent into tasks | Execute tasks yourself |
-| Assign tasks to roles | Write code, fix bugs, create files |
-| Determine priority & dependencies | Make implementation decisions |
-| Ensure coverage & no gaps | Skip the review gate |
-| Coordinate across roles | Assign tasks to roles not in the roster |
-</boundaries>
-
-<input>
-【改写后的意图】${body.data.rewrittenIntent}${recommendedRoleHint}${contextBlock}
-</input>
-
-<output_format>
-**Output exactly ONE 【分析】 block followed by one or more 【任务】 lines. NOTHING ELSE.**
-
-【分析】
-<Your decomposition strategy: What are the key work streams? What are the dependencies? Why did you assign each role? What risks or assumptions exist? Be specific — not "I assigned researcher because research is needed" but "librarian is assigned to locate the OAuth2 token refresh logic in src/auth/ because the executor will need the exact file path before modifying the flow.">
-
-【任务】<role>|<priority>|<title>
-【任务】<role>|<priority>|<title>
-...
-</output_format>
-
-<critical_overrides>
-## Critical Rules
-
-**NEVER**:
-- Assign a task to a role not in the roster
-- Output vague or non-actionable task titles
-- Skip the review gate for production code changes
-- Merge unrelated work into one task
-- Output anything outside the 【分析】/【任务】 format
-- Use English in your output (all content in Chinese)
-
-**ALWAYS**:
-- Assign each task to exactly one role from: ${validRolesList}
-- Use priority values: high, medium, low
-- Include exactly one 【分析】 block
-- Include one or more 【任务】 lines
-- Make task titles imperative and verifiable
-- Consider the recommended role hint when provided
-</critical_overrides>`;
-
-      try {
-        const { requestWorkflowLlmCompletion } = await import('./workflow-llm.js');
-        const analysis = await requestWorkflowLlmCompletion({
-          apiBaseUrl: llmConfig.apiBaseUrl,
-          apiKey: llmConfig.apiKey,
-          model: llmConfig.model,
-          ...(llmConfig.providerType ? { providerType: llmConfig.providerType } : {}),
-          ...(llmConfig.upstreamProtocol ? { upstreamProtocol: llmConfig.upstreamProtocol } : {}),
-          prompt,
-          temperature: 0.3,
-        });
-        analyzeStep.succeed(undefined, { outputLength: analysis.length });
-
-        // Parse tasks from LLM output
-        const leaderAnalysis = extractField(analysis, '分析') || analysis;
-        const taskPattern = /【任务】(.+?)\|(.+?)\|(.+?)(?:【|$)/gs;
-        const parsedTasks: Array<{ role: string; priority: string; title: string }> = [];
-        let match: RegExpExecArray | null;
-        while ((match = taskPattern.exec(analysis)) !== null) {
-          parsedTasks.push({
-            role: match[1]!.trim(),
-            priority: match[2]!.trim(),
-            title: match[3]!.trim(),
-          });
-        }
-
-        // If LLM failed to produce structured tasks, create a single fallback task
-        if (parsedTasks.length === 0) {
-          const fallbackRole = validRoles.includes(body.data.recommendedRole ?? '')
-            ? body.data.recommendedRole!
-            : (validRoles[0] ?? 'planner');
-          parsedTasks.push({
-            priority: 'medium',
-            role: fallbackRole,
-            title: body.data.rewrittenIntent,
-          });
-        }
-
-        // Create team_task records
-        const insertStep = child('insert-tasks');
-        const dispatchedTasks: LeaderDispatchedTask[] = [];
-
-        for (const task of parsedTasks) {
-          // Resolve agent ID from roster: try exact match, then partial match
-          const rosterMapEntry = rosterMap.get(task.role);
-          const rosterFullEntry = fullRoster.find(
-            (m) => m.role === task.role || task.role.includes(m.role) || m.role.includes(task.role),
-          );
-          const assigneeAgentId = rosterMapEntry?.agentId ?? rosterFullEntry?.agentId ?? task.role;
-          const assigneeRole = rosterFullEntry?.role ?? task.role;
-          const validPriority = ['low', 'medium', 'high'].includes(task.priority)
-            ? (task.priority as 'low' | 'medium' | 'high')
-            : 'medium';
-
-          const taskId = randomUUID();
-          sqliteRun(
-            `INSERT INTO team_tasks (id, user_id, title, assignee_id, status, priority, result) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [taskId, user.sub, task.title, assigneeAgentId, 'pending', validPriority, null],
-          );
-
-          dispatchedTasks.push({
-            assigneeRole,
-            assigneeAgentId,
-            priority: validPriority,
-            taskId,
-            title: task.title,
-          });
-        }
-        insertStep.succeed(undefined, { taskCount: dispatchedTasks.length });
-
-        logTeamAudit({
-          action: 'task_created',
-          actorEmail: user.email,
-          actorUserId: user.sub,
-          detail: `team-leader 自动分派 ${dispatchedTasks.length} 个任务：${dispatchedTasks.map((t) => `${t.title}→${t.assigneeRole}`).join('；')}`,
-          entityId: dispatchedTasks[0]?.taskId ?? 'batch',
-          entityType: 'team_task',
-          summary: `team-leader 从 interaction-agent 改写结果自动创建 ${dispatchedTasks.length} 个任务`,
-          userId: user.sub,
-        });
-
-        step.succeed(undefined, { taskCount: dispatchedTasks.length });
-
-        // 260515-team-phase-b · T-10：feature flag 开启时记录 handoff(pm1→executor) × N
-        if (isHandoffModeEnabled()) {
-          try {
-            const teamWorkspaceId =
-              typeof (request.query as Record<string, string>)['teamWorkspaceId'] === 'string'
-                ? (request.query as Record<string, string>)['teamWorkspaceId']
-                : null;
-            const pm1Session = findOrCreateReceptionSession(user.sub, teamWorkspaceId ?? null);
-            for (const task of dispatchedTasks) {
-              const toLayer = mapDispatchRoleToHandoffLayer(task.assigneeRole);
-              const handoff = createHandoffRecord({
-                userId: user.sub,
-                fromSessionId: pm1Session,
-                fromRoleLayer: 'pm1',
-                toRoleLayer: toLayer,
-                payload: {
-                  taskId: task.taskId,
-                  title: task.title,
-                  assigneeRole: task.assigneeRole,
-                  assigneeAgentId: task.assigneeAgentId,
-                  priority: task.priority,
-                },
-              });
-              publishHandoffEventFromTeamRoute({
-                type: 'handoff.created',
-                record: handoff,
-              });
-            }
-          } catch (err) {
-            console.warn(
-              `[team.leader.dispatch] handoff record creation failed: ${err instanceof Error ? err.message : String(err)}`,
-            );
-          }
-        }
-
-        return reply.send({
-          dispatchedTasks,
-          leaderAnalysis,
-          status: 'completed',
-        } satisfies LeaderDispatchResult);
-      } catch (_error: unknown) {
-        analyzeStep.fail('llm error');
-        step.fail('llm error');
-        return reply.status(500).send({ error: 'Team leader dispatch failed' });
-      }
-    },
-  );
-
   // ─── L1.3 §1.3 反向消息通道：POST /team/sessions/:sessionId/inbound-messages ───
   // 关联文档：docs/team-architecture-l1-3-streaming-handoff-spec.md §1.3
   // 关联实现：handoff/inbound-store.ts
@@ -2457,7 +1918,7 @@ REVIEW GATE CHECKLIST:
 
       const submitStep = child('submit-inbound');
       try {
-        const { submitInboundMessage } = await import('../handoff/inbound-store.js');
+        const { submitInboundMessage } = await import('../handoff/store/inbound-store.js');
         const expiresAtIso =
           typeof body.data.expiresAt === 'number'
             ? new Date(body.data.expiresAt)
@@ -2469,9 +1930,11 @@ REVIEW GATE CHECKLIST:
         const result = submitInboundMessage({
           userId: user.sub,
           toSessionId: sessionId,
-          // 来源：reception 会话由 b 转发用户输入（fromRoleLayer='reception'）；
-          //      其他场景由系统组件写入（'system'）。HTTP 入口默认按 reception。
-          fromRoleLayer: 'reception',
+          // L1.4 capability：HTTP 入口的发送方语义。
+          //   - 目标是 reception 会话 → 'user'（用户直接发到 b）
+          //   - 目标是其他层会话 → 'reception'（b 代为转发用户的回答给 c/d/e/f/g）
+          // 这与 layer-capabilities 矩阵的 canReceiveInboundFrom 对齐。
+          fromRoleLayer: session.role_layer === 'reception' ? 'user' : 'reception',
           messageType: body.data.messageType,
           payload: body.data.payload ?? {},
           clientIdempotencyKey: body.data.clientIdempotencyKey ?? null,
@@ -2482,20 +1945,69 @@ REVIEW GATE CHECKLIST:
           reused: result.reused,
         });
 
+        // ─── L1.4 audit log：escape hatch 使用记录 ─────────────────────
+        // cancel_signal / pause_signal / escalation_request 是 escape hatch 调用，
+        // 必须写 audit log（L1.4.3 要求）。
+        const isEscapeHatch =
+          body.data.messageType === 'cancel_signal' ||
+          body.data.messageType === 'pause_signal' ||
+          body.data.messageType === 'resume_signal' ||
+          body.data.messageType === 'escalation_request';
+        if (isEscapeHatch && !result.reused) {
+          const hatchType =
+            body.data.messageType === 'escalation_request'
+              ? '#1 escalation'
+              : body.data.messageType === 'cancel_signal' || body.data.messageType === 'pause_signal'
+                ? '#3 cancel/pause'
+                : '#3 resume';
+          try {
+            logTeamAudit({
+              action: 'escape_hatch_used' as TeamAuditAction,
+              actorEmail: user.email,
+              actorUserId: user.sub,
+              detail: JSON.stringify({
+                hatchType,
+                messageType: body.data.messageType,
+                targetSessionId: sessionId,
+                decisionSource: 'user',
+              }),
+              entityId: result.record.id,
+              entityType: 'session_inbound_message',
+              summary: `Escape hatch ${hatchType}: ${body.data.messageType} → session ${sessionId.slice(0, 8)}`,
+              userId: user.sub,
+            });
+          } catch {
+            // audit log 写入失败不阻塞
+          }
+        }
+
+        // ─── 同步：把用户消息写入 session 消息流（所有 session 类型） ─────
+        // 无论是否触发 B1 编排，user_input 都应该在 session 的消息流中可见。
+        // 这样 reload 后前端能立刻看到自己发的话。
+        // 注意：只对 user_input 且非 reused 写入（避免 cancel/pause 等信号
+        // 或幂等重试产生重复消息）。
+        if (body.data.messageType === 'user_input' && !result.reused) {
+          const userInputText =
+            typeof body.data.payload?.['text'] === 'string' ? body.data.payload['text'] : '';
+          if (userInputText.trim().length > 0) {
+            try {
+              const { appendSessionMessageV2 } = await import('../message/message-v2-adapter.js');
+              appendSessionMessageV2({
+                sessionId,
+                userId: user.sub,
+                role: 'user',
+                content: [{ type: 'text', text: userInputText }],
+                clientRequestId: body.data.clientIdempotencyKey ?? null,
+              });
+            } catch (err) {
+              console.warn(
+                `[team.session.inbound] persist user msg failed: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            }
+          }
+        }
+
         // ─── B1 自动编排（只对 reception session 的 user_input 触发） ─────────
-        // user_input 到达 reception 会话 → 自动调 interaction-agent 改写 +
-        // 创建 handoff(reception → pm1)，推动 b → c 链路。
-        // 设计要点：
-        //   - 已 reused（同 idempotency key）→ 跳过，避免重复编排
-        //   - 非 reception session（如直接给 c 发 user_input）→ 跳过
-        //   - cancel/pause/clarification_answer 等 → 跳过
-        //   - feature flag 关闭 → 跳过（feature-flags.ts 决定）
-        //
-        // 性能约束（L1.6）：a→b 确认 p95 < 2s。LLM 改写可能需要 3-10s，
-        // 因此：
-        //   1. 同步在响应前把用户消息写入 reception session（让 reload 能看到）
-        //   2. orchestration 异步后台执行（assistant ack 会在 LLM 返回后落库，
-        //      前端通过 WS substate.changed 事件感知后再次 reload 即可）
         const shouldOrchestrate =
           !result.reused &&
           session.role_layer === 'reception' &&
@@ -2520,35 +2032,19 @@ REVIEW GATE CHECKLIST:
             }
           }
 
-          // 同步：把用户消息写到 reception session（保证 reload 能看到）
-          try {
-            const { persistReceptionUserMessage } =
-              await import('../handoff/reception-orchestrator.js');
-            persistReceptionUserMessage({
-              userId: user.sub,
-              receptionSessionId: sessionId,
-              userIntent: userInputText,
-              clientIdempotencyKey: body.data.clientIdempotencyKey ?? null,
-            });
-          } catch (err) {
-            console.warn(
-              `[team.session.inbound] persist user msg failed: ${err instanceof Error ? err.message : String(err)}`,
-            );
-          }
-
           // 异步：把 LLM 改写 + handoff 创建放到后台。assistant ack 由
           // orchestrator 在完成时落库，前端可通过 WS 或下一次 reload 看到。
           void (async () => {
             try {
               const { orchestrateReceptionInput } =
-                await import('../handoff/reception-orchestrator.js');
+                await import('../handoff/runner/reception-orchestrator.js');
               await orchestrateReceptionInput({
                 userId: user.sub,
                 receptionSessionId: sessionId,
                 userIntent: userInputText,
                 teamWorkspaceId: teamWorkspaceIdFromMeta,
                 clientIdempotencyKey: body.data.clientIdempotencyKey ?? null,
-                // user 消息已在同步路径写过，避免重复写
+                // user 消息已在上面同步写过，避免重复写
                 persistUserMessage: false,
               });
             } catch (err) {
@@ -2560,6 +2056,16 @@ REVIEW GATE CHECKLIST:
         }
 
         step.succeed(undefined, { messageId: result.record.id });
+
+        // L1.6 延迟监控：记录 a→b 确认延迟（从请求开始到响应）
+        try {
+          const { recordLatency } = await import('../handoff/bus/latency-monitor.js');
+          const requestStartMs = (request as unknown as { startTime?: number }).startTime;
+          if (typeof requestStartMs === 'number') {
+            recordLatency('a_to_b_ack', Date.now() - requestStartMs);
+          }
+        } catch { /* latency monitor 不阻塞 */ }
+
         return reply.status(result.reused ? 200 : 201).send({
           messageId: result.record.id,
           createdAt: result.record.createdAt,
@@ -2572,10 +2078,4 @@ REVIEW GATE CHECKLIST:
       }
     },
   );
-}
-
-function extractField(text: string, label: string): string | null {
-  const pattern = new RegExp(`【${label}】(.+?)(?:【|$)`, 's');
-  const match = pattern.exec(text);
-  return match?.[1]?.trim() ?? null;
 }

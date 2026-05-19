@@ -3,7 +3,7 @@
  * 260517 · LayeredConversationView 双栏 Smoke 测试
  *
  * 验收 chat-conversation-reuse-plan v1.4 §9.2：点击 timeline 行后右栏渲染
- * 对应 to_session 的 TeamSessionView。再次点击同条 handoff 取消选中。
+ * 对应 to_session 的 TeamConversationView。再次点击同条 handoff 取消选中。
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -13,10 +13,10 @@ import {
   useLayerStore,
   type HandoffEntry,
   type LayerNode,
-} from '../../../../../stores/team-events.js';
+} from '../../../../../stores/team/team-events.js';
 
-vi.mock('../../shell/TeamSessionView.js', () => ({
-  TeamSessionView: ({ sessionId }: { sessionId: string }) => (
+vi.mock('../../../conversation/TeamConversationView.js', () => ({
+  TeamConversationView: ({ sessionId }: { sessionId: string }) => (
     <div data-testid="team-session-view-mock" data-session-id={sessionId} />
   ),
 }));
@@ -75,7 +75,7 @@ describe('LayeredConversationView — 双栏交互', () => {
     expect(screen.queryByTestId('team-session-view-mock')).toBeNull();
   });
 
-  it('点击 timeline 行后右栏渲染对应 session 的 TeamSessionView', () => {
+  it('点击 timeline 行后右栏渲染对应 session 的 TeamConversationView', () => {
     seedLayerNodes([
       {
         sessionId: 'sess-pm1-002',

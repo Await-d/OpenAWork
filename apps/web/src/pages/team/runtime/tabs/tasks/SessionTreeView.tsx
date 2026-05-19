@@ -10,7 +10,7 @@ import {
   useLayerStore,
   type LayerNode,
   type TeamRoleLayer,
-} from '../../../../../stores/team-events.js';
+} from '../../../../../stores/team/team-events.js';
 
 const TREE_CONTAINER_STYLE: CSSProperties = {
   display: 'grid',
@@ -144,7 +144,7 @@ export function SessionTreeView({ onSelectSession }: SessionTreeViewProps) {
             style={{
               marginLeft: 'auto',
               fontSize: 10,
-              color: node.state === 'running' ? 'var(--success, #22c55e)' : 'var(--text-3)',
+              color: node.state === 'running' ? 'var(--success, var(--success, var(--success, #3dd49a)))' : 'var(--text-3)',
             }}
           >
             {node.state}

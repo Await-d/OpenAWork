@@ -1,11 +1,11 @@
 /**
- * substate 常量定义（L1.3 spec §1.2.2 同步，Phase 2c 前端契约先行）
+ * substate 常量定义（L1.3 spec §1.2.2 同步）
  *
  * **后端依据**：`docs/team-architecture-l1-3-streaming-handoff-spec.md` §1.2.2
  *
- * 当前阶段：sessions 表的 substate 字段还未落地（L1.3 spec §0.A.2 改造 2 待做）。
- * 本文件定义前端使用的 substate 字符串常量 + 进度顺序 + 显示文案，等后端落地
- * 后无需改动即可使用。
+ * 后端 sessions 表的 substate / substate_updated_at 字段已落地（db.ts ensureColumn）。
+ * substate-store.ts 的 setSubstate 会原子写入并广播 team event。
+ * 本文件定义前端使用的 substate 字符串常量 + 进度顺序 + 显示文案。
  *
  * 全局禁止任何 UI 代码硬编码 substate 字符串——必须 import 这里的常量。
  */

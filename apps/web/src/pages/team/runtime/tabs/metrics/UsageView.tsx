@@ -7,7 +7,7 @@
  */
 
 import { useMemo, useState, type CSSProperties } from 'react';
-import { useTeamUsageStore, type UsageBucket } from '../../../../../stores/team-usage.js';
+import { useTeamUsageStore, type UsageBucket } from '../../../../../stores/team/team-usage.js';
 import { TabContainer } from '../TabContainer.js';
 
 const CONTAINER_STYLE: CSSProperties = {

@@ -5,7 +5,7 @@ import type {
   ComposerMenuState,
   MentionItem,
   SlashCommandItem,
-} from '../session-conversation/runtime/support.js';
+} from '../conversation-runtime/messages/support.js';
 import type { PromptCandidate, PromptOptimizerResult } from '@openAwork/web-client';
 import { ProviderMark } from './chat-provider-display.js';
 import { ChatImageGenerationControls } from './ChatImageGenerationControls.js';
@@ -15,8 +15,8 @@ import {
   composerListPrimaryTextStyle,
   getSlashBadgeStyle,
 } from './chat-composer-primitives.js';
-import { detectThinkKeyword } from '../session-conversation/runtime/think-keyword-detector.js';
-import type { SavedChatImageDefaults } from '../../utils/chat-session-defaults.js';
+import { detectThinkKeyword } from '../conversation-runtime/reveal/think-keyword-detector.js';
+import type { SavedChatImageDefaults } from '../../utils/chat/chat-session-defaults.js';
 import type { ChatImageGenerationReferenceArtifact } from './ChatImageGenerationControls.js';
 
 interface ChatComposerProps {
@@ -319,17 +319,19 @@ export function ChatComposer({
   return (
     <div
       style={{
-        padding: '4px 10px 8px',
-        background: 'var(--bg)',
+        padding: '0 16px 12px',
+        background: 'transparent',
         transition: 'padding 220ms ease',
+        borderTop: '1px solid var(--border-subtle)',
       }}
     >
       <div
         style={{
-          maxWidth: editorMode ? 680 : 740,
+          maxWidth: editorMode ? 800 : 880,
           margin: '0 auto',
           width: '100%',
           position: 'relative',
+          paddingTop: 12,
           transform: 'translateY(0)',
           transition: 'max-width 240ms ease, transform 240ms ease',
         }}
@@ -603,9 +605,7 @@ export function ChatComposer({
               display: 'flex',
               flexDirection: 'column',
               gap: 7,
-              borderRadius: 14,
-              // composer-shell 现在被 flex row 包裹（左侧）；让它占满除 buddy chip
-              // 之外的所有水平空间，避免输入框跑去窄成一条。
+              borderRadius: 12,
               flex: 1,
               minWidth: 0,
               transition:
@@ -619,9 +619,9 @@ export function ChatComposer({
                 : {}),
               ...(composerDragging
                 ? {
-                    borderColor: 'var(--accent)',
+                    borderColor: 'var(--accent-border)',
                     borderStyle: 'dashed',
-                    background: 'color-mix(in oklch, var(--accent) 4%, var(--bg-2))',
+                    background: 'var(--accent-subtle)',
                   }
                 : {}),
             }}
@@ -744,15 +744,15 @@ export function ChatComposer({
                         padding: '3px 8px',
                         borderRadius: 999,
                         border: item.requiresAttachmentRebind
-                          ? '1px solid color-mix(in srgb, #f59e0b 28%, var(--border))'
+                          ? '1px solid color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 28%, var(--border))'
                           : '1px solid color-mix(in oklch, var(--accent) 18%, var(--border))',
                         background: item.requiresAttachmentRebind
-                          ? 'color-mix(in srgb, #f59e0b 12%, transparent)'
+                          ? 'color-mix(in srgb, var(--warning) 12%, transparent)'
                           : index === 0
                             ? 'color-mix(in oklch, var(--accent) 10%, transparent)'
                             : 'color-mix(in oklch, var(--surface) 80%, transparent)',
                         color: item.requiresAttachmentRebind
-                          ? '#fcd34d'
+                          ? 'var(--warning, var(--warning, #f0b429))'
                           : index === 0
                             ? 'var(--accent)'
                             : 'var(--text-2)',
@@ -829,7 +829,7 @@ export function ChatComposer({
               style={{
                 border: 'none',
                 background: isHomeVariant
-                  ? 'linear-gradient(180deg, color-mix(in oklch, var(--bg-2) 94%, var(--surface) 6%), var(--bg-2))'
+                  ? 'linear-gradient(180deg, var(--bg-raised), var(--bg-overlay))'
                   : 'transparent',
                 borderRadius: 10,
                 padding: '6px 8px 6px',
@@ -932,7 +932,7 @@ export function ChatComposer({
                       padding: '2px 8px',
                       borderRadius: 6,
                       background: 'color-mix(in oklch, var(--accent) 8%, transparent)',
-                      color: 'color-mix(in oklch, var(--accent) 70%, white 30%)',
+                      color: 'color-mix(in oklch, var(--accent) 70%, var(--fg-on-accent) 30%)',
                       fontSize: 10,
                       letterSpacing: 0.3,
                       lineHeight: 1.5,
@@ -965,8 +965,8 @@ export function ChatComposer({
                     gap: 4,
                     padding: '2px 8px',
                     borderRadius: 6,
-                    background: 'color-mix(in srgb, rgb(239 68 68) 8%, transparent)',
-                    color: 'color-mix(in srgb, rgb(239 68 68) 80%, white 20%)',
+                    background: 'color-mix(in srgb, var(--danger) 8%, transparent)',
+                    color: 'color-mix(in srgb, var(--danger) 80%, var(--fg-on-accent) 20%)',
                     fontSize: 10,
                     lineHeight: 1.5,
                     flexShrink: 0,
@@ -1040,8 +1040,8 @@ export function ChatComposer({
                           justifyContent: 'center',
                           borderRadius: 999,
                           background:
-                            'color-mix(in oklch, var(--success, #10b981) 14%, transparent)',
-                          color: 'color-mix(in oklch, var(--success, #10b981) 82%, white 18%)',
+                            'color-mix(in oklch, var(--success, var(--success, var(--success, #3dd49a))) 14%, transparent)',
+                          color: 'color-mix(in oklch, var(--success, var(--success, var(--success, #3dd49a))) 82%, var(--fg-on-accent) 18%)',
                           flexShrink: 0,
                           fontSize: 9,
                         }}
@@ -1080,7 +1080,7 @@ export function ChatComposer({
                         color: 'var(--text-2)',
                         lineHeight: 1.5,
                         borderBottom: '1px solid var(--border-subtle)',
-                        background: 'color-mix(in oklch, var(--success, #10b981) 4%, transparent)',
+                        background: 'color-mix(in oklch, var(--success, var(--success, var(--success, #3dd49a))) 4%, transparent)',
                       }}
                     >
                       {optimizeResult.rationale}
@@ -1112,11 +1112,11 @@ export function ChatComposer({
                             width: '100%',
                             textAlign: 'left',
                             border: isRecommended
-                              ? '1px solid color-mix(in oklch, var(--success, #10b981) 30%, var(--border-subtle))'
+                              ? '1px solid color-mix(in oklch, var(--success, var(--success, var(--success, #3dd49a))) 30%, var(--border-subtle))'
                               : '1px solid var(--border-subtle)',
                             borderRadius: 8,
                             background: isRecommended
-                              ? 'color-mix(in oklch, var(--success, #10b981) 6%, transparent)'
+                              ? 'color-mix(in oklch, var(--success, var(--success, var(--success, #3dd49a))) 6%, transparent)'
                               : 'transparent',
                             color: 'var(--text)',
                             padding: '6px 8px',
@@ -1133,7 +1133,7 @@ export function ChatComposer({
                                 fontSize: 10,
                                 fontWeight: isRecommended ? 700 : 600,
                                 color: isRecommended
-                                  ? 'color-mix(in oklch, var(--success, #10b981) 82%, white 18%)'
+                                  ? 'color-mix(in oklch, var(--success, var(--success, var(--success, #3dd49a))) 82%, var(--fg-on-accent) 18%)'
                                   : 'var(--text-2)',
                               }}
                             >
@@ -1169,7 +1169,7 @@ export function ChatComposer({
                                     borderRadius: 999,
                                     background:
                                       'color-mix(in oklch, var(--accent) 8%, transparent)',
-                                    color: 'color-mix(in oklch, var(--accent) 70%, white 30%)',
+                                    color: 'color-mix(in oklch, var(--accent) 70%, var(--fg-on-accent) 30%)',
                                     whiteSpace: 'nowrap',
                                   }}
                                 >
@@ -1284,7 +1284,7 @@ export function ChatComposer({
                           ? 'color-mix(in oklch, var(--accent) 10%, transparent)'
                           : 'transparent',
                         color: thinkingEnabled
-                          ? 'color-mix(in oklch, var(--accent) 80%, white 20%)'
+                          ? 'color-mix(in oklch, var(--accent) 80%, var(--fg-on-accent) 20%)'
                           : 'var(--text-3)',
                         display: 'flex',
                         alignItems: 'center',
@@ -1344,10 +1344,10 @@ export function ChatComposer({
                       justifyContent: 'center',
                       opacity: streaming || imageGenerationBusy ? 0.45 : 1,
                       background: webSearchEnabled
-                        ? 'color-mix(in oklch, var(--info, #3b82f6) 10%, transparent)'
+                        ? 'color-mix(in oklch, var(--info, var(--aux, var(--aux, #8b9cf5))) 10%, transparent)'
                         : 'var(--surface)',
                       color: webSearchEnabled
-                        ? 'color-mix(in oklch, var(--info, #3b82f6) 82%, white 18%)'
+                        ? 'color-mix(in oklch, var(--info, var(--aux, var(--aux, #8b9cf5))) 82%, var(--fg-on-accent) 18%)'
                         : 'var(--text-3)',
                       transition:
                         'width 220ms ease, height 220ms ease, opacity 150ms ease, background 150ms ease, color 150ms ease',
@@ -1401,7 +1401,7 @@ export function ChatComposer({
                         ? 'color-mix(in oklch, var(--accent) 10%, transparent)'
                         : 'var(--surface)',
                       color: showVoice
-                        ? 'color-mix(in oklch, var(--accent) 82%, white 18%)'
+                        ? 'color-mix(in oklch, var(--accent) 82%, var(--fg-on-accent) 18%)'
                         : 'var(--text-3)',
                       transition:
                         'width 220ms ease, height 220ms ease, opacity 150ms ease, background 150ms ease, color 150ms ease',
@@ -1493,7 +1493,7 @@ export function ChatComposer({
                         border: optimizeLoading
                           ? '1px solid color-mix(in oklch, var(--accent) 45%, var(--border-subtle))'
                           : optimizeResult
-                            ? '1px solid color-mix(in oklch, var(--success, #10b981) 40%, var(--border-subtle))'
+                            ? '1px solid color-mix(in oklch, var(--success, var(--success, var(--success, #3dd49a))) 40%, var(--border-subtle))'
                             : '1px solid var(--border-subtle)',
                         borderRadius: 8,
                         width: 26,
@@ -1505,13 +1505,13 @@ export function ChatComposer({
                         background: optimizeLoading
                           ? 'color-mix(in oklch, var(--accent) 12%, transparent)'
                           : optimizeResult
-                            ? 'color-mix(in oklch, var(--success, #10b981) 10%, transparent)'
+                            ? 'color-mix(in oklch, var(--success, var(--success, var(--success, #3dd49a))) 10%, transparent)'
                             : 'var(--surface)',
                         color: optimizeLoading
-                          ? 'color-mix(in oklch, var(--accent) 82%, white 18%)'
+                          ? 'color-mix(in oklch, var(--accent) 82%, var(--fg-on-accent) 18%)'
                           : optimizeResult
-                            ? 'color-mix(in oklch, var(--success, #10b981) 82%, white 18%)'
-                            : 'color-mix(in oklch, var(--accent) 72%, white 28%)',
+                            ? 'color-mix(in oklch, var(--success, var(--success, var(--success, #3dd49a))) 82%, var(--fg-on-accent) 18%)'
+                            : 'color-mix(in oklch, var(--accent) 72%, var(--fg-on-accent) 28%)',
                         cursor: optimizeLoading ? 'wait' : 'pointer',
                         transition:
                           'background 150ms ease, color 150ms ease, border-color 150ms ease',
@@ -1635,7 +1635,7 @@ export function ChatComposer({
                       transition: 'height 220ms ease, padding 220ms ease, opacity 150ms ease',
                       background: showStopAction
                         ? effectiveStopCapability === 'best_effort'
-                          ? 'color-mix(in srgb, #f59e0b 14%, transparent)'
+                          ? 'color-mix(in srgb, var(--warning) 14%, transparent)'
                           : 'rgba(239, 68, 68, 0.14)'
                         : sessionBusyState === 'running'
                           ? 'color-mix(in oklch, var(--accent) 14%, transparent)'
@@ -1644,12 +1644,12 @@ export function ChatComposer({
                             : undefined,
                       color: showStopAction
                         ? effectiveStopCapability === 'best_effort'
-                          ? '#fcd34d'
+                          ? 'var(--warning, var(--warning, #f0b429))'
                           : 'rgb(252, 165, 165)'
                         : sessionBusyState === 'running'
                           ? 'var(--accent)'
                           : sessionBusyState === 'paused'
-                            ? '#fcd34d'
+                            ? 'var(--warning, var(--warning, #f0b429))'
                             : undefined,
                     }}
                   >

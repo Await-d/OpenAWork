@@ -9,9 +9,9 @@ import { ArtifactPreview } from './ArtifactPreview.js';
 
 const VERDICT_STYLES: Record<string, CSSProperties> = {
   pass: {
-    color: 'var(--success, #22c55e)',
-    border: '1px solid color-mix(in srgb, var(--success, #22c55e) 40%, transparent)',
-    background: 'color-mix(in srgb, var(--success, #22c55e) 8%, var(--surface))',
+    color: 'var(--success, var(--success, var(--success, #3dd49a)))',
+    border: '1px solid color-mix(in srgb, var(--success, var(--success, var(--success, #3dd49a))) 40%, transparent)',
+    background: 'color-mix(in srgb, var(--success, var(--success, var(--success, #3dd49a))) 8%, var(--surface))',
   },
   'implementation-failure': {
     color: 'var(--danger, #d4574e)',
@@ -19,9 +19,9 @@ const VERDICT_STYLES: Record<string, CSSProperties> = {
     background: 'color-mix(in srgb, var(--danger, #d4574e) 8%, var(--surface))',
   },
   'planning-failure': {
-    color: '#f59e0b',
-    border: '1px solid color-mix(in srgb, #f59e0b 40%, transparent)',
-    background: 'color-mix(in srgb, #f59e0b 8%, var(--surface))',
+    color: 'var(--warning, var(--warning, #f0b429))',
+    border: '1px solid color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 40%, transparent)',
+    background: 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 8%, var(--surface))',
   },
 };
 

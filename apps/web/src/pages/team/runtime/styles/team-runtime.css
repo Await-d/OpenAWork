@@ -405,8 +405,8 @@
     color 120ms ease;
 }
 .team-icon-danger:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--danger, var(--error, #ef4444)) 18%, transparent);
-  color: var(--danger, var(--error, #ef4444));
+  background: color-mix(in srgb, var(--danger, var(--error, var(--danger, var(--danger, #f06b7e)))) 18%, transparent);
+  color: var(--danger, var(--error, var(--danger, var(--danger, #f06b7e))));
 }
 
 /* dashed-add：dashed-border 新建按钮 hover 把边色变成 accent + 内底变浅 */

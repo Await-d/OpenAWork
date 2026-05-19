@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 const PlusIcon = () => (
   <svg
@@ -182,6 +182,7 @@ export default function WorkspaceGroupMenu({
   onToggleCollapse,
   onDelete,
 }: WorkspaceGroupMenuProps) {
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const deleteLabel =
     sessionCount > 0
       ? workspacePath === null
@@ -189,26 +190,33 @@ export default function WorkspaceGroupMenu({
         : `删除工作区及 ${sessionCount} 个会话`
       : `移除工作区 ${workspaceLabel}`;
 
+  // 关菜单策略：全局监听器（capture phase mousedown）。
+  // 不用 fullscreen overlay 按钮——它会拦截二次右键，导致菜单只能弹一次。
+  useEffect(() => {
+    const handleMouseDown = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        onClose();
+      }
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('mousedown', handleMouseDown, true);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown, true);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [onClose]);
+
   return (
     <>
-      <button
-        type="button"
-        aria-label="关闭菜单"
-        onClick={onClose}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') onClose();
-        }}
-        style={{
-          position: 'fixed',
-          inset: 0,
-          zIndex: 9998,
-          background: 'transparent',
-          border: 'none',
-          cursor: 'default',
-          padding: 0,
-        }}
-      />
-      <div style={{ ...menuStyle, top: y, left: x }} role="menu" aria-label="工作区操作菜单">
+      <div
+        ref={menuRef}
+        style={{ ...menuStyle, top: y, left: x }}
+        role="menu"
+        aria-label="工作区操作菜单"
+      >
         <MenuItem
           label="在此新建会话"
           icon={<PlusIcon />}

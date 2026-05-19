@@ -7,40 +7,40 @@ import {
   type PermissionDecision,
   type PermissionRequestStatus,
   type PermissionRiskLevel,
-} from '../permission-contract.js';
+} from '../permission/permission-contract.js';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
-import { createPermissionRepliedEvent } from '../session-permission-events.js';
-import { createQuestionRepliedEvent } from '../session-question-events.js';
+import { createPermissionRepliedEvent } from '../session/session-permission-events.js';
+import { createQuestionRepliedEvent } from '../session/session-question-events.js';
 import {
   createSharedSessionComment,
   listSharedSessionComments,
-} from '../session-shared-comment-store.js';
+} from '../session/session-shared-comment-store.js';
 import {
   listSharedSessionPresence,
   touchSharedSessionPresence,
-} from '../session-shared-presence-store.js';
-import { filterVisibleSessionMessages } from '../session-message-store.js';
-import { listSessionMessagesV2, listRuntimeSafeSessionMessagesV2 } from '../message-v2-adapter.js';
+} from '../session/session-shared-presence-store.js';
+import { filterVisibleSessionMessages } from '../session/session-message-store.js';
+import { listSessionMessagesV2, listRuntimeSafeSessionMessagesV2 } from '../message/message-v2-adapter.js';
 import {
   getSharedSessionForRecipient,
   listSharedSessionsForRecipient,
-} from '../session-shared-access.js';
-import { buildSessionFileChangesProjection } from '../session-file-changes-projection.js';
-import { listSessionFileDiffs } from '../session-file-diff-store.js';
-import { listSessionRunEvents } from '../session-run-events.js';
-import { listSessionSnapshots } from '../session-snapshot-store.js';
-import { reconcileSessionRuntime } from '../session-runtime-reconciler.js';
+} from '../session/session-shared-access.js';
+import { buildSessionFileChangesProjection } from '../session/session-file-changes-projection.js';
+import { listSessionFileDiffs } from '../session/session-file-diff-store.js';
+import { listSessionRunEvents } from '../session/session-run-events.js';
+import { listSessionSnapshots } from '../session/session-snapshot-store.js';
+import { reconcileSessionRuntime } from '../session/session-runtime-reconciler.js';
 import { startRequestWorkflow } from '../request-workflow.js';
 import {
   parseSessionMetadataJson,
   sanitizeSessionMetadataJson,
-} from '../session-workspace-metadata.js';
-import { listSessionTodos } from '../todo-tools.js';
-import { formatAnsweredQuestionOutput, type QuestionToolInput } from '../question-tools.js';
-import { shouldExitPlanModeFromAnswers } from '../plan-mode-tools.js';
-import { publishSessionRunEvent } from '../session-run-events.js';
+} from '../session/session-workspace-metadata.js';
+import { listSessionTodos } from '../tools/todo-tools.js';
+import { formatAnsweredQuestionOutput, type QuestionToolInput } from '../tools/question-tools.js';
+import { shouldExitPlanModeFromAnswers } from '../tools/plan-mode-tools.js';
+import { publishSessionRunEvent } from '../session/session-run-events.js';
 import {
   resumeAnsweredQuestionRequest,
   resumeApprovedPermissionRequest,
@@ -48,10 +48,10 @@ import {
 import { type ApprovedPermissionResumePayload } from './stream.js';
 import { expirePendingPermissionRequests } from './permissions.js';
 import { expirePendingQuestionRequests } from './questions.js';
-import { persistWorkspacePermanentPermission } from '../workspace-safety.js';
-import { logTeamAudit } from '../team-audit-store.js';
+import { persistWorkspacePermanentPermission } from '../workspace/workspace-safety.js';
+import { logTeamAudit } from '../team/team-audit-store.js';
 import { toPublicSessionResponse } from './session-route-helpers.js';
-import { mergeRuntimeSafeSessionMessages } from '../runtime-safe-message-merge.js';
+import { mergeRuntimeSafeSessionMessages } from '../session/runtime-safe-message-merge.js';
 
 interface SessionRow {
   created_at: string;

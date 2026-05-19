@@ -57,10 +57,27 @@ src/
 - 颜色/间距从 `./tokens.js` 导入，禁止硬编码。
 - 按业务领域命名，而非控件类型（不用 Button、Input 等通用名）。
 - 此包参与代码检查（严格 TS 规则）。
+- **新增/修改组件前必须阅读 `DESIGN-TOKENS.md`**——该文件定义了 E · Nebula 色彩体系的强制执行标准。
+
+## 设计 Token 强制规则
+
+详见 `DESIGN-TOKENS.md`，以下为摘要：
+
+1. **四色系统**：accent(靛青) / contrast(琥珀) / complement(珊瑚) / aux(靛蓝)
+2. **线条 5 级**：invisible → subtle → default → emphasis → strong
+3. **文字 4 级**：strong → default → muted → subtle
+4. **间距 8 级**：4 / 8 / 12 / 16 / 20 / 24 / 32 / 48 px
+5. **圆角 6 级**：xs(4) / sm(6) / md(8) / lg(12) / xl(16) / pill(9999)
+6. **动效 3 级**：micro(100ms) / normal(200ms) / emphasis(350ms)
+7. **所有交互元素必须有 focus ring**
+8. **所有组件必须覆盖 default/hover/active/focus/disabled 状态**
 
 ## 禁止事项
 
 - 禁止添加通用抽象组件（Button、Input 等）——使用 `src/primitives/`。
-- 禁止硬编码颜色/间距——使用 `tokens.ts`。
+- 禁止硬编码颜色/间距——使用 `tokens.ts` 或 CSS 变量。
 - 新增组件后必须在 `src/index.ts` 补充导出。
 - 禁止从 `dist/` 导入。
+- **禁止使用 `DESIGN.md` 中的旧色值（靛紫 #5e6ad2 等）**——已废弃，使用 E · Nebula token。
+- **禁止无 focus 态的交互元素**。
+- **禁止单一状态组件**——必须覆盖完整交互状态。

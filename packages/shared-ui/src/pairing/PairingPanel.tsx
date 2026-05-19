@@ -1,0 +1,200 @@
+import { color } from '../tokens.js';
+import { useState } from 'react';
+import { QRCodeDisplay } from './QRCodeDisplay.js';
+import { QRCodeScanner } from './QRCodeScanner.js';
+
+export type PairingMode = 'host' | 'client';
+
+export interface PairedDevice {
+  id: string;
+  name: string;
+  connectedAt: number;
+}
+
+export interface PairingHostProps {
+  qrData: string;
+  expiresAt: number;
+  pairedDevices?: PairedDevice[];
+  onRefreshToken?: () => void;
+  onDisconnect?: (deviceId: string) => void;
+}
+
+export interface PairingClientProps {
+  onScanned?: (data: string) => void;
+  onManualCode?: (code: string) => void;
+  connecting?: boolean;
+  error?: string;
+}
+
+export interface PairingPanelProps {
+  mode?: PairingMode;
+  onModeChange?: (mode: PairingMode) => void;
+  host?: PairingHostProps;
+  client?: PairingClientProps;
+}
+
+function HostView({ host }: { host: PairingHostProps }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, alignItems: 'center' }}>
+      <div style={{ fontSize: 12, color: 'var(--fg-muted, #7b8a9e)', textAlign: 'center' }}>
+        在其他设备上扫描此二维码以连接
+      </div>
+      <QRCodeDisplay
+        qrData={host.qrData}
+        expiresAt={host.expiresAt}
+        onRefresh={host.onRefreshToken}
+        size={180}
+      />
+      {host.pairedDevices && host.pairedDevices.length > 0 && (
+        <div style={{ width: '100%' }}>
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 600,
+              color: 'var(--fg-muted, #7b8a9e)',
+              marginBottom: 6,
+            }}
+          >
+            已配对设备
+          </div>
+          {host.pairedDevices.map((d) => (
+            <div
+              key={d.id}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '5px 8px',
+                background: 'var(--bg-overlay, #121721)',
+                borderRadius: 5,
+                border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+                marginBottom: 4,
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 12 }}>{d.name}</div>
+                <div style={{ fontSize: 10, color: 'var(--fg-muted, #7b8a9e)' }}>
+                  已连接 {new Date(d.connectedAt).toLocaleTimeString()}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => host.onDisconnect?.(d.id)}
+                style={{
+                  fontSize: 11,
+                  padding: '2px 7px',
+                  border: '1px solid var(--danger, #f06b7e)',
+                  color: color.danger,
+                  background: 'none',
+                  borderRadius: 3,
+                  cursor: 'pointer',
+                }}
+              >
+                移除
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {(!host.pairedDevices || host.pairedDevices.length === 0) && (
+        <div style={{ fontSize: 12, color: 'var(--fg-muted, #7b8a9e)' }}>暂无已连接设备</div>
+      )}
+    </div>
+  );
+}
+
+function ClientView({ client }: { client: PairingClientProps }) {
+  const [manualCode, setManualCode] = useState('');
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ fontSize: 12, color: 'var(--fg-muted, #7b8a9e)', textAlign: 'center' }}>
+        扫描主机设备上显示的二维码
+      </div>
+      <QRCodeScanner onScan={client.onScanned ?? (() => undefined)} />
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input
+          value={manualCode}
+          onChange={(e) => setManualCode(e.target.value)}
+          placeholder="或手动输入码"
+          style={{
+            flex: 1,
+            background: 'var(--bg-overlay, #121721)',
+            border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+            borderRadius: 4,
+            padding: '4px 8px',
+            color: 'inherit',
+            fontSize: 12,
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => {
+            client.onManualCode?.(manualCode);
+            setManualCode('');
+          }}
+          disabled={!manualCode}
+          style={{
+            padding: '4px 10px',
+            background: 'var(--accent, #5cd4c0)',
+            color: color.fgOnAccent,
+            border: 'none',
+            borderRadius: 4,
+            cursor: manualCode ? 'pointer' : 'default',
+            opacity: manualCode ? 1 : 0.5,
+            fontSize: 12,
+          }}
+        >
+          连接
+        </button>
+      </div>
+      {client.connecting && (
+        <div style={{ textAlign: 'center', fontSize: 12, color: 'var(--accent, #5cd4c0)' }}>
+          连接中…
+        </div>
+      )}
+      {client.error && (
+        <div style={{ textAlign: 'center', fontSize: 12, color: color.danger }}>{client.error}</div>
+      )}
+    </div>
+  );
+}
+
+export function PairingPanel({ mode = 'host', onModeChange, host, client }: PairingPanelProps) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 16, maxWidth: 360 }}>
+      <div
+        style={{
+          display: 'flex',
+          gap: 0,
+          background: 'var(--bg-overlay, #121721)',
+          borderRadius: 6,
+          padding: 2,
+          border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+        }}
+      >
+        {(['host', 'client'] as PairingMode[]).map((m) => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => onModeChange?.(m)}
+            style={{
+              flex: 1,
+              padding: '4px 0',
+              border: 'none',
+              borderRadius: 4,
+              cursor: 'pointer',
+              fontSize: 12,
+              fontWeight: mode === m ? 600 : 400,
+              background: mode === m ? 'var(--accent, #5cd4c0)' : 'transparent',
+              color: mode === m ? color.fgOnAccent : 'var(--fg-muted, #7b8a9e)',
+            }}
+          >
+            {m === 'host' ? '主机（桌面端）' : '客户端（移动端）'}
+          </button>
+        ))}
+      </div>
+      {mode === 'host' && host && <HostView host={host} />}
+      {mode === 'client' && client && <ClientView client={client} />}
+    </div>
+  );
+}

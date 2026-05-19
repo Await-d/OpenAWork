@@ -19,13 +19,13 @@ import {
   parseAssistantTraceContent,
   parseCopiedToolCardContent,
   readAssistantTracePayload,
-} from '../session-conversation/runtime/support.js';
+} from '../conversation-runtime/messages/support.js';
 import {
   resolveTaskToolRuntimeSnapshot,
   type TaskToolRuntimeLookup,
-} from '../session-conversation/runtime/task-tool-runtime.js';
-import type { DialogueMode } from '../../pages/dialogue-mode.js';
-import { DIALOGUE_MODE_OPTIONS } from '../../pages/dialogue-mode.js';
+} from '../../pages/chat-page/conversation/render/task-tool-runtime.js';
+import type { DialogueMode } from '../../pages/chat-page/dialogue-mode.js';
+import { DIALOGUE_MODE_OPTIONS } from '../../pages/chat-page/dialogue-mode.js';
 import { resolveAgentAccentColor } from './agent-color-map.js';
 import {
   AssistantErrorContent,
@@ -59,10 +59,10 @@ export const sharedUiThemeVars = {
   '--color-muted': 'var(--text-3)',
   '--color-accent': 'var(--accent)',
   '--color-accent-hover': 'var(--accent-hover)',
-  '--color-success': 'var(--success, #10b981)',
-  '--color-warning': 'var(--warning, #f59e0b)',
+  '--color-success': 'var(--success, var(--success, var(--success, #3dd49a)))',
+  '--color-warning': 'var(--warning, var(--warning, var(--warning, #f0b429)))',
   '--color-danger': 'var(--danger)',
-  '--color-info': 'var(--info, #3b82f6)',
+  '--color-info': 'var(--info, var(--aux, var(--aux, #8b9cf5)))',
 } as React.CSSProperties;
 
 export { ModelPicker, ModelSettingsPopover } from './model-picker-panels.js';
@@ -143,7 +143,7 @@ export function MessageRow({
     ? {
         borderColor: `color-mix(in oklch, ${agentAccent} 40%, var(--border) 60%)`,
         background: `linear-gradient(135deg, color-mix(in oklch, ${agentAccent} 18%, var(--surface) 82%), color-mix(in oklch, var(--surface) 92%, var(--bg-2) 8%))`,
-        color: `color-mix(in oklch, ${agentAccent} 82%, white 18%)`,
+        color: `color-mix(in oklch, ${agentAccent} 82%, var(--fg-on-accent) 18%)`,
       }
     : undefined;
   const metaItems: Array<{
@@ -457,7 +457,7 @@ function UserAttachedImagesGallery({ images }: { images: ReturnType<typeof extra
                       borderRadius: 999,
                       background: 'rgba(0,0,0,0.55)',
                       backdropFilter: 'blur(6px)',
-                      color: '#fff',
+                      color: 'var(--fg-on-accent, #ffffff)',
                       fontSize: 16,
                       display: 'flex',
                       alignItems: 'center',
@@ -1244,7 +1244,7 @@ export function WelcomeScreen({
             height: 42,
             borderRadius: 13,
             background:
-              'linear-gradient(135deg, var(--accent), color-mix(in oklch, var(--accent) 65%, #a855f7))',
+              'linear-gradient(135deg, var(--accent), color-mix(in oklch, var(--accent) 65%, var(--chart-5, var(--chart-5, #c4b5fd))))',
             marginBottom: 10,
             boxShadow: '0 4px 24px color-mix(in srgb, var(--accent) 28%, transparent)',
             animation: 'ws-float 3s ease-in-out infinite',
@@ -1390,7 +1390,7 @@ export function WelcomeScreen({
                         height: 16,
                         borderRadius: '50%',
                         background: accent.color,
-                        color: '#fff',
+                        color: 'var(--fg-on-accent, #ffffff)',
                         fontSize: 9,
                         fontWeight: 700,
                         lineHeight: 1,
@@ -1650,7 +1650,7 @@ export function InlinePermissionQuickBar({
                   width: 5,
                   height: 5,
                   borderRadius: '50%',
-                  background: '#f59e0b',
+                  background: 'var(--warning, var(--warning, #f0b429))',
                   flexShrink: 0,
                 }}
               />
@@ -1755,7 +1755,7 @@ function CompanionInlineBlock({ content }: { content: string }) {
         background: 'color-mix(in oklch, var(--accent) 6%, var(--surface))',
         fontSize: 12,
         lineHeight: 1.5,
-        color: 'color-mix(in oklch, var(--accent) 82%, white 18%)',
+        color: 'color-mix(in oklch, var(--accent) 82%, var(--fg-on-accent) 18%)',
         display: 'flex',
         alignItems: 'flex-start',
         gap: 8,

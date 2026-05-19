@@ -53,10 +53,10 @@ const STATE_LABEL: Record<HandoffRecord['state'], string> = {
 };
 
 const STATE_COLOR: Record<HandoffRecord['state'], string> = {
-  pending: 'var(--warning, #f59e0b)',
-  claimed: '#3b82f6',
-  running: '#22c55e',
-  completed: 'var(--success, #22c55e)',
+  pending: 'var(--warning, var(--warning, var(--warning, #f0b429)))',
+  claimed: 'var(--aux, var(--aux, #8b9cf5))',
+  running: 'var(--success, var(--success, #3dd49a))',
+  completed: 'var(--success, var(--success, var(--success, #3dd49a)))',
   failed: 'var(--danger, #d4574e)',
   cancelled: 'var(--text-3)',
 };
@@ -100,7 +100,14 @@ function isDispatchPayload(value: unknown): value is DispatchPayload {
 function parseDispatchPackage(record: HandoffRecord): DispatchPackagePayload | null {
   const payload = record.payload;
   if (!isDispatchPayload(payload)) return null;
-  return payload.dispatch_package ?? null;
+  // 后端 pm2-runner 直接把 dispatch package 作为 payload 写入（不嵌套在 dispatch_package 下）
+  // 兼容两种格式：payload.dispatch_package（旧）或 payload 本身就是 package（新）
+  if (payload.dispatch_package) return payload.dispatch_package;
+  // 检查 payload 本身是否有 dispatch package 的特征字段
+  if (typeof (payload as Record<string, unknown>)['goal'] === 'string') {
+    return payload as unknown as DispatchPackagePayload;
+  }
+  return null;
 }
 
 export function DispatchTab({ selectedTeamId, onCancelHandoff }: DispatchTabProps) {

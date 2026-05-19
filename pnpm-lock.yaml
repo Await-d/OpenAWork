@@ -250,6 +250,9 @@ importers:
       mammoth:
         specifier: ^1.12.0
         version: 1.12.0
+      monaco-editor:
+        specifier: ^0.55.1
+        version: 0.55.1
       react:
         specifier: ^19.0.0
         version: 19.2.4
@@ -326,7 +329,7 @@ importers:
     devDependencies:
       '@vitest/coverage-v8':
         specifier: ^4.1.0
-        version: 4.1.5(vitest@2.1.9(@types/node@25.5.0)(jsdom@29.0.0)(lightningcss@1.32.0)(msw@2.13.6(@types/node@25.5.0)(typescript@5.9.3))(terser@5.46.1))
+        version: 4.1.5(vitest@4.1.5)
     optionalDependencies:
       '@types/better-sqlite3':
         specifier: ^7.6.0
@@ -1986,7 +1989,7 @@ packages:
 
   '@expo/bunyan@4.0.1':
     resolution: {integrity: sha512-+Lla7nYSiHZirgK+U/uYzsLv/X+HaJienbD5AKX1UQZHYfWaP+9uuQluRB4GrEVWF0GZ7vEVp/jzaOT9k/SQlg==}
-    engines: {node: '>=0.10.0'}
+    engines: {'0': node >=0.10.0}
 
   '@expo/cli@0.22.28':
     resolution: {integrity: sha512-lvt72KNitGuixYD2l3SZmRKVu2G4zJpmg5V7WfUBNpmUU5oODBw/6qmiJ6kSLAlfDozscUk+BBGknBBzxUrwrA==}
@@ -11994,20 +11997,6 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@vitest/coverage-v8@4.1.5(vitest@2.1.9(@types/node@25.5.0)(jsdom@29.0.0)(lightningcss@1.32.0)(msw@2.13.6(@types/node@25.5.0)(typescript@5.9.3))(terser@5.46.1))':
-    dependencies:
-      '@bcoe/v8-coverage': 1.0.2
-      '@vitest/utils': 4.1.5
-      ast-v8-to-istanbul: 1.0.0
-      istanbul-lib-coverage: 3.2.2
-      istanbul-lib-report: 3.0.1
-      istanbul-reports: 3.2.0
-      magicast: 0.5.2
-      obug: 2.1.1
-      std-env: 4.0.0
-      tinyrainbow: 3.1.0
-      vitest: 2.1.9(@types/node@25.5.0)(jsdom@29.0.0)(lightningcss@1.32.0)(msw@2.13.6(@types/node@25.5.0)(typescript@5.9.3))(terser@5.46.1)
-
   '@vitest/coverage-v8@4.1.5(vitest@4.1.5)':
     dependencies:
       '@bcoe/v8-coverage': 1.0.2
@@ -12021,7 +12010,6 @@ snapshots:
       std-env: 4.0.0
       tinyrainbow: 3.1.0
       vitest: 4.1.5(@opentelemetry/api@1.9.0)(@types/node@25.5.0)(@vitest/coverage-v8@4.1.5)(jsdom@29.0.0)(msw@2.13.6(@types/node@25.5.0)(typescript@5.9.3))(vite@6.4.1(@types/node@25.5.0)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.2))
-    optional: true
 
   '@vitest/expect@2.1.9':
     dependencies:

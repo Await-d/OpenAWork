@@ -3,7 +3,7 @@ import {
   describeReasoningEffort,
   getSupportedReasoningEffortsForModel,
 } from '@openAwork/shared-ui';
-import type { ReasoningEffort } from '../session-conversation/runtime/support.js';
+import type { ReasoningEffort } from '../conversation-runtime/messages/support.js';
 import { buildFilteredModelGroups, type ModelPickerProvider } from './model-picker-search.js';
 
 function formatContextWindow(value: number | undefined): string | null {
@@ -30,7 +30,7 @@ function CapabilityTag({
     accent: { bg: 'var(--accent-muted)', color: 'var(--accent)' },
     emerald: {
       bg: 'color-mix(in oklch, var(--success) 14%, transparent)',
-      color: 'color-mix(in oklch, var(--success) 82%, white 18%)',
+      color: 'color-mix(in oklch, var(--success) 82%, var(--fg-on-accent) 18%)',
     },
     violet: {
       bg: 'color-mix(in oklch, var(--accent) 14%, transparent)',
@@ -804,7 +804,7 @@ export function ModelSettingsPopover({
                         ? 'color-mix(in oklch, var(--accent) 14%, transparent)'
                         : 'transparent',
                       color: active
-                        ? 'color-mix(in oklch, var(--accent) 82%, white 18%)'
+                        ? 'color-mix(in oklch, var(--accent) 82%, var(--fg-on-accent) 18%)'
                         : 'var(--text-2)',
                       padding: '7px 9px',
                       cursor: canConfigureThinking ? 'pointer' : 'not-allowed',

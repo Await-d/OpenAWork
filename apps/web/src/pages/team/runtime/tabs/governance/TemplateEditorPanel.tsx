@@ -442,7 +442,7 @@ function TemplateEditor({
                   key={agentId}
                   type="button"
                   onClick={() => toggleAgent(agentId)}
-                  style={pillButtonStyle(state.optionalAgentIds.has(agentId), '#f59e0b')}
+                  style={pillButtonStyle(state.optionalAgentIds.has(agentId), 'var(--warning, var(--warning, #f0b429))')}
                 >
                   {label}
                 </button>

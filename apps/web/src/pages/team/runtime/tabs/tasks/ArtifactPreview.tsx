@@ -36,9 +36,9 @@ const BADGE_STYLES: Record<string, CSSProperties> = {
     borderRadius: 4,
     fontSize: 11,
     fontWeight: 700,
-    background: 'color-mix(in srgb, #3b82f6 12%, var(--surface))',
-    color: '#3b82f6',
-    border: '1px solid color-mix(in srgb, #3b82f6 30%, transparent)',
+    background: 'color-mix(in srgb, var(--aux, var(--aux, #8b9cf5)) 12%, var(--surface))',
+    color: 'var(--aux, var(--aux, #8b9cf5))',
+    border: '1px solid color-mix(in srgb, var(--aux, var(--aux, #8b9cf5)) 30%, transparent)',
   },
   story: {
     display: 'inline-flex',
@@ -46,9 +46,9 @@ const BADGE_STYLES: Record<string, CSSProperties> = {
     borderRadius: 4,
     fontSize: 11,
     fontWeight: 700,
-    background: 'color-mix(in srgb, #22c55e 12%, var(--surface))',
-    color: '#22c55e',
-    border: '1px solid color-mix(in srgb, #22c55e 30%, transparent)',
+    background: 'color-mix(in srgb, var(--success, var(--success, #3dd49a)) 12%, var(--surface))',
+    color: 'var(--success, var(--success, #3dd49a))',
+    border: '1px solid color-mix(in srgb, var(--success, var(--success, #3dd49a)) 30%, transparent)',
   },
 };
 

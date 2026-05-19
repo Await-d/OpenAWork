@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import type { ChatMessage } from '../session-conversation/runtime/support.js';
+import type { ChatMessage } from '../conversation-runtime/messages/support.js';
 
 export interface MultiSelectState {
   enabled: boolean;

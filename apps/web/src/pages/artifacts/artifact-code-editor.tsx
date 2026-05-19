@@ -2,7 +2,7 @@ import React, { lazy, Suspense } from 'react';
 import type { ArtifactContentType } from '@openAwork/artifacts';
 import { tokens } from '@openAwork/shared-ui';
 import { getArtifactEditorLanguage } from './artifact-workbench-utils.js';
-import { MonacoErrorBoundary } from '../../components/MonacoErrorBoundary.js';
+import { MonacoErrorBoundary } from '../../components/file-editor/MonacoErrorBoundary.js';
 
 const MonacoEditor = lazy(() =>
   import('@monaco-editor/react').then((module) => ({ default: module.default })),
@@ -63,6 +63,7 @@ export function ArtifactCodeEditor({ content, type, onChange }: ArtifactCodeEdit
                 wordWrap: 'on',
                 tabSize: 2,
                 automaticLayout: true,
+                fixedOverflowWidgets: true,
               }}
             />
           </div>

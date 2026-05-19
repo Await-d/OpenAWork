@@ -386,7 +386,7 @@ const panelStyles = `
   background: rgba(239, 68, 68, 0.08);
   border: 1px solid rgba(239, 68, 68, 0.2);
   font-size: 12px;
-  color: var(--danger, #ef4444);
+  color: var(--danger, var(--danger, var(--danger, #f06b7e)));
 }
 .iqp-error-icon {
   font-weight: 700;

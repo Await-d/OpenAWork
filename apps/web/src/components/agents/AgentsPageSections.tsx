@@ -219,15 +219,15 @@ function Tag({
     },
     accent: {
       background: 'rgba(99, 102, 241, 0.16)',
-      color: '#a5b4fc',
+      color: 'var(--chart-5, var(--chart-5, #c4b5fd))',
     },
     warning: {
       background: 'rgba(251, 191, 36, 0.14)',
-      color: '#fcd34d',
+      color: 'var(--warning, var(--warning, #f0b429))',
     },
     success: {
       background: 'rgba(16, 185, 129, 0.16)',
-      color: '#86efac',
+      color: 'var(--success, var(--success, #3dd49a))',
     },
   };
 
@@ -292,7 +292,7 @@ function primaryButtonStyle(disabled: boolean): React.CSSProperties {
     background: disabled
       ? 'rgba(99, 102, 241, 0.35)'
       : 'linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%)',
-    color: '#fff',
+    color: 'var(--fg-on-accent, #ffffff)',
     padding: '11px 16px',
     fontSize: 13,
     fontWeight: 700,
@@ -320,7 +320,7 @@ function dangerButtonStyle(disabled = false): React.CSSProperties {
     border: '1px solid rgba(248, 113, 113, 0.35)',
     borderRadius: 14,
     background: disabled ? 'rgba(127, 29, 29, 0.06)' : 'rgba(127, 29, 29, 0.12)',
-    color: disabled ? 'rgba(252, 165, 165, 0.65)' : '#fca5a5',
+    color: disabled ? 'rgba(252, 165, 165, 0.65)' : 'var(--danger, var(--danger, #f06b7e))',
     padding: '11px 16px',
     fontSize: 13,
     fontWeight: 700,
@@ -543,7 +543,7 @@ export function AgentsListPanel({
                   textAlign: 'left',
                   borderRadius: 18,
                   border: active
-                    ? '1px solid color-mix(in oklch, var(--accent) 56%, white 18%)'
+                    ? '1px solid color-mix(in oklch, var(--accent) 56%, var(--fg-on-accent) 18%)'
                     : '1px solid var(--border-subtle)',
                   background: active
                     ? 'color-mix(in oklab, var(--accent-muted) 70%, var(--surface) 30%)'
@@ -675,7 +675,7 @@ function ToggleRow({
           width: 44,
           height: 24,
           borderRadius: 999,
-          background: checked ? '#6366f1' : 'rgba(148, 163, 184, 0.25)',
+          background: checked ? 'var(--accent, var(--accent, #5cd4c0))' : 'rgba(148, 163, 184, 0.25)',
           display: 'inline-flex',
           alignItems: 'center',
           padding: 3,
@@ -687,7 +687,7 @@ function ToggleRow({
             width: 18,
             height: 18,
             borderRadius: '50%',
-            background: '#fff',
+            background: 'var(--fg-on-accent, #ffffff)',
             boxShadow: '0 2px 6px rgba(15, 23, 42, 0.28)',
           }}
         />
@@ -1011,7 +1011,7 @@ export function AgentsEditorPanel({
             state={editorState}
             setState={setEditorState}
           />
-          {saveMessage && <div style={{ color: '#86efac', fontSize: 13 }}>{saveMessage}</div>}
+          {saveMessage && <div style={{ color: 'var(--success, var(--success, #3dd49a))', fontSize: 13 }}>{saveMessage}</div>}
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <button
               type="button"

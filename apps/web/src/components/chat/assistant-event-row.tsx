@@ -1,4 +1,4 @@
-import type { AssistantEventPayload } from '../session-conversation/runtime/support.js';
+import type { AssistantEventPayload } from '../conversation-runtime/messages/support.js';
 
 export function AssistantEventRow({ payload }: { payload: AssistantEventPayload }) {
   const kindLabel =
@@ -29,12 +29,12 @@ export function AssistantEventRow({ payload }: { payload: AssistantEventPayload 
           : '错误';
   const statusColor =
     payload.status === 'running'
-      ? '#93c5fd'
+      ? 'var(--aux, var(--aux, #8b9cf5))'
       : payload.status === 'success'
-        ? '#86efac'
+        ? 'var(--success, var(--success, #3dd49a))'
         : payload.status === 'paused'
-          ? '#fcd34d'
-          : '#fca5a5';
+          ? 'var(--warning, var(--warning, #f0b429))'
+          : 'var(--danger, var(--danger, #f06b7e))';
   const statusBackground =
     payload.status === 'running'
       ? 'rgba(59, 130, 246, 0.16)'

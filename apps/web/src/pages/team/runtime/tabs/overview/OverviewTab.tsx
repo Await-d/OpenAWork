@@ -112,9 +112,9 @@ export function OverviewTab({
             {(() => {
               const statusColor =
                 selectedTeam.status === 'running'
-                  ? 'var(--success, #22c55e)'
+                  ? 'var(--success, var(--success, var(--success, #3dd49a)))'
                   : selectedTeam.status === 'paused'
-                    ? 'var(--warning, #f59e0b)'
+                    ? 'var(--warning, var(--warning, var(--warning, #f0b429)))'
                     : selectedTeam.status === 'failed'
                       ? 'var(--danger, #d4574e)'
                       : 'var(--text-3)';

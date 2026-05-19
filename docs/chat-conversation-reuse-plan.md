@@ -1,17 +1,25 @@
-# Chat 对话布局复用方案（v1.4）
+# Chat 对话布局复用方案（v1.5）
+
+> ⚠️ **superseded**：本方案已被 `.agentdocs/workflow/260518-team-conversation-decouple-plan.md` 取代。
+> chat 与 team 不再共享 `SessionConversationView`，而是各自拥有 `ChatConversationView` / `TeamConversationView`，
+> 通过共享 `components/conversation-runtime/` + chat atoms 实现 UI 复用。
+>
+> 本文档保留作为演化历史与协议层（v0.3 流式 / Q-P / scroll manager）的设计依据。
+> 后续涉及对话装配的改动请参考新方案。
 
 > 用途：把 ChatPage 的"单 session 对话布局"抽成 `<SessionConversationView>`，让 TeamPageV2 直接复用，避免 team 在 `ConversationArea.tsx` 重新发明一套消息列表 + composer + 流式渲染。
 >
 > 关联文档：
 >
+> - **后继方案**：`.agentdocs/workflow/260518-team-conversation-decouple-plan.md`（chat / team 解耦）
 > - L1 基线：`team-architecture-l1-baseline.md`（特别是 L1.3 / L1.8）
 > - **L1.3 详细 spec**：`team-architecture-l1-3-streaming-handoff-spec.md`（Phase 2b/2c 的后端依据）
 > - 思想分析归档：`team-architecture-spec-kit-borrowing-discussion.md`
 > - 当前 team v2 方案：`.agentdocs/workflow/260516-team-page-功能加强方案.md`
 >
 > 创建时间：2026-05-16
-> 最近更新：2026-05-17（v1.4：完成主对话区/层级对话/消息总线三处的 chat 渲染统一；composer feature flag 接入；前端契约就绪）
-> 当前状态：**Phase 1 + 2a 全量落地 + 2b 前端契约 + composer feature flag 接入；待后端 L1.3 改造启用 inbound 写入**
+> 最近更新：2026-05-18（v1.5：D5 决策落地；同日被 260518-team-conversation-decouple-plan 取代）
+> 当前状态：**已被取代（superseded）**。`SessionConversationView` 已重命名为 `ChatConversationView`，team 端独立装配 `TeamConversationView` 已落地。
 
 ---
 
@@ -410,6 +418,7 @@ const metadata = {
 | **D2（原 A2 共识）**         | team 接入 SessionConversationView 时 **composer 默认 disabled**，等 Phase 2b 落地后再开                                                                                                                                                                                                     | Phase 2a 的 SessionConversationView `composerDisabled = true`；UI 显示但提示"该会话正在执行中，请通过 b 与团队对话" |
 | **D3（原 Phase 2b 优先级）** | Phase 2b（L1.3 inbound_messages 协议）**不立即排期**，等 Phase 2a 上线观察 1-2 周后再排                                                                                                                                                                                                     | 给团队留时间验证只读复用是否真减少了 team 的视图工作量；同时 L1.3 spec 改造 1+3+4 由 L1.3 团队主导，本方案只接入    |
 | **D4（v1.2 修订）**          | **不做 hook v1.0 完整内化**。Phase 2a 用 v0.1 骨架版 hook + chat 端继续用 ChatPage 现有 hook 链路（不切走）。Phase 2b 启动时只给 hook 增加 inbound writer 能力（~50 行），不下放 chat stream 协议——这与 L1.3 §0.A.4 规定的"team 反向通道走 inbound_messages 不走 chat stream"对齐           | 避免让 team 学坏 chat 的写入协议，保持各自协议清晰                                                                  |
+| **D5（v1.5 修订，260518）**  | **C 路径 + 读侧合并**：team 端按 `(roleLayer, substate)` 区分写入路径——`substate === 'clarifying'` 走 inbound（保留 L1.3 spec 语义），其它一律走 chat stream（让 b/c/pm1/pm2/executor/reviewer session 都能拿到真流式回复）。同时 hook 升级到 v0.3，把"读侧"运行时（streaming token/segments、scroll manager、Q/P 回复 writer）下放到 `useSessionConversationState`，chat 与 team 共享同一份。chat 端 ChatPage 暂不切到新 hook，零回归 | D4 决策保留（"team 不学坏 chat 写入协议"）只针对 c.clarifying 这一具体语义点；其它团队会话（含 reception 与受 b 路由的子 session）走 stream 不破坏 b 路由层——b runner 仍可通过 handoff 决策点决定是否打断子 session。读侧共享让 team 立刻拿到真流式 + Q/P 回复 + 滚动管理，体验与 chat 对齐 |
 
 ### 5.2 暂未拍板（按需触发）
 
@@ -558,6 +567,112 @@ Phase 2b 启动时唯一需要给 hook 增加的能力是 **inbound writer**：
 - 顶部 LayerConversationDrawer 抽屉非 reviewer 层同步用 chat 渲染
 - 「对话 / 消息」总线 + 「对话 / 待回复」MentionsView 卡片代码 / 链接 / 列表与 chat 端样式一致
 - 设置 feature flag 后，team composer 解锁并通过 inbound 通道写入
+
+---
+
+## 10. v1.5 增量（260518）：D5 · C 路径 + 读侧合并
+
+> v1.4 完成 UI 链路对齐但 team composer 提交后只能等 2.5s polling 拉新消息；
+> v1.5 把"读侧"运行时合并到 hook，让 team 拿到真流式 + Q/P 回复 + 滚动管理，
+> 同时按 D5 决策把写入路径改为 `(roleLayer, substate)` 双路由。
+
+### 10.1 决策路径（D5）
+
+写入路径策略（`apps/web/src/pages/team/runtime/shell/TeamSessionView.tsx`
+中的 `resolveSubmitStrategy`）：
+
+- `substate === 'clarifying'` → **inbound**（`clarification_answer`），保留
+  L1.3 spec §0.A.4 的"c 受 b 路由"语义；后端 c runner 在 LLM 循环里消费
+  inbound 队列，避免用户绕过 b 决策直接打断 c。
+- 其它（含 `roleLayer === 'reception'` 的 b session 与 pm1/pm2/executor/
+  reviewer 子 session） → **chat stream**（`POST /sessions/:id/stream/{ws,sse}`）。
+  team 子 session 在 sessions 表里就是普通的 chat-style session，stream
+  写入不会破坏 b 路由：b runner 通过 handoff_records 异步推进，不监听用户
+  消息流；用户对子 session 的输入只是"补一条 user 消息"，下一次 LLM 循环
+  自然 pickup。
+
+inbound 端点不可用（404 / 5xx）时 fallback 到 stream，保证用户至少能看到
+回复。
+
+### 10.2 hook v0.3：读侧合并
+
+`useSessionConversationState` 升级要点（`apps/web/src/components/
+session-conversation/use-session-conversation-state.ts`）：
+
+- 新增 `enableWriters?: boolean` 选项；team 设为 `composerEnabled` 同步开关
+- 新增 `useConversationStream`（`runtime/use-conversation-stream.ts`）：
+  封装通用流消费——text/thinking/tool segments、usage、permission、question
+  事件累积；chat-only 事件（terminal / dev-server / sub-agent / task_update
+  等）通过 `onChatOnlyEvent` 钩子上抛，本 hook 不感知，避免破坏 ChatPage
+  现有路径
+- 接 `useStreamReveal` + `useScrollManager`，把 `streamBuffer` /
+  `streamThinkingBlocks` / `streamingSegments` / `showScrollToBottom` /
+  `hasPendingFollowContent` 真状态接通
+- 新增 writers：
+  - `startStream(text, opts?)` → 用 `useGatewayClient` 跑 SSE/WS，事件经
+    `useConversationStream` 累积到 messages
+  - `stopStream()` → `POST /sessions/:id/stream/stop`
+  - `replyPermission(requestId, decision, feedback?)` →
+    `POST /sessions/:id/permissions/reply`
+  - `replyQuestion(requestId, status, answers?)` →
+    `POST /sessions/:id/questions/reply`
+  - `loadProviders()` → 拉 `/settings/providers` 并 hydrate
+    `providers` / `activeProviderId` / `activeModelId` / 思考偏好；
+    `enableWriters = true` 时自动调一次
+
+`enableWriters = false` 时所有 writer 抛 `'writers disabled'`，保持 hook
+v0.2 契约——chat 端调用方不会无意中调用 writer。
+
+### 10.3 TeamSessionView 升级
+
+`apps/web/src/pages/team/runtime/shell/TeamSessionView.tsx`：
+
+- `composerEnabled` 透传到 `useSessionConversationState({ enableWriters })`
+- `handleComposerSubmit` 改用 `resolveSubmitStrategy` 路由
+- `composerExtras` 放开 `multiSelect / bookmarks / promptTemplate /
+  commandPalette` —— 这些是通用对话能力，与 team 数据流无关
+- 接 `useComposerWorkspaceCatalog(composerEnabled)`，让 @ 工作区 mention
+  生效
+- 接 `useChatKeyboardShortcuts({ onSearch })`，至少把 Cmd/Ctrl+F 搜索
+  快捷键打通；其它快捷键（多选切换、模板）等下个 PR 跟 chat 对齐
+- 接通 inline question 的本地 state：`inlineQuestionAnswers /
+  inlineQuestionCustomInputs / inlineQuestionReplyStatus /
+  inlineQuestionReplyError + onToggle / onChange / onReply` 全部走
+  `state.replyQuestion` 真写入
+- 用 `<LatestAssistantMessageContext.Provider>` 包裹，让最新一条 assistant
+  消息自动展开折叠态（与 chat 体验一致）
+- 把 `state.onScroll` / `state.scrollToBottom` 真接到
+  `SessionConversationView`，删除原 noop handlers
+- composer stop 按钮（`canStopCurrentSessionStream` / `onStopComposer`）
+  接 `state.stopStream`
+
+### 10.4 chat 端零回归
+
+`ChatPage.tsx` 这次 PR 完全没动：
+
+- chat 仍走 `useGatewayClient.stream` + 自己驱动的 ~700 行 `sendMessage`
+- chat 不调 `useSessionConversationState`（那个 hook 仅 team 用）
+- 408 + 4 新增 = 412 个测试全绿
+
+后续若决定把 chat 也切到统一 hook（"减肥 ChatPage"），需要把 ChatPage
+sendMessage 中的 chat-only 副作用（terminal / dev-server-detect /
+right-panel / sub-agent / audit_ref / task_update / permission auto-respond
+等）通过 `onChatOnlyEvent` 钩子注入到 `useConversationStream`，独立 PR
+推进，不在本次范围。
+
+### 10.5 v1.5 验收
+
+- `pnpm --filter @openAwork/web typecheck` ✅
+- `pnpm --filter @openAwork/web test` 412/412 ✅
+  - 新增 `TeamSessionView.test.tsx`（4 tests）覆盖 `resolveSubmitStrategy`
+    四类组合
+- 现有 408 个 chat / team / shared 测试全部保持绿色（chat 零回归）
+- team `/team/<workspace>` 启用 composer flag 后：
+  - 提交后立刻看到打字流式效果（不再等 2.5s polling）
+  - 滚动到中段后底部出现 "↓" 按钮，点击/有新消息时自动跟随
+  - pending question 出现时可在内联面板真回复
+  - 模型选择器列表非空（loadProviders 自动 hydrate）
+  - Cmd+F 打开 chat 搜索浮层
 
 ---
 

@@ -5,12 +5,12 @@ import path from 'node:path';
 import Fastify from 'fastify';
 import authPlugin from '../auth.js';
 import { closeDb, connectDb, migrate, sqliteGet, sqliteRun } from '../db.js';
-import { appendSessionMessageV2 as appendSessionMessage } from '../message-v2-adapter.js';
-import { persistSessionFileBackup } from '../session-file-backup-store.js';
-import { persistSessionFileDiffs } from '../session-file-diff-store.js';
+import { appendSessionMessageV2 as appendSessionMessage } from '../message/message-v2-adapter.js';
+import { persistSessionFileBackup } from '../session/session-file-backup-store.js';
+import { persistSessionFileDiffs } from '../session/session-file-diff-store.js';
 import requestWorkflowPlugin from '../request-workflow.js';
-import { publishSessionRunEvent } from '../session-run-events.js';
-import { persistSessionSnapshot, createRequestSnapshotRef } from '../session-snapshot-store.js';
+import { publishSessionRunEvent } from '../session/session-run-events.js';
+import { persistSessionSnapshot, createRequestSnapshotRef } from '../session/session-snapshot-store.js';
 import { sessionsRoutes } from '../routes/sessions.js';
 import { withTempEnv } from './task-verification-helpers.js';
 

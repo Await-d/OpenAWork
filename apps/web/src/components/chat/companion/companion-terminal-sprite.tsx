@@ -216,7 +216,7 @@ export function CompanionTerminalSprite({
               lineHeight: 1.02,
               color:
                 petting && index === 0
-                  ? 'color-mix(in oklch, var(--danger) 82%, white 18%)'
+                  ? 'color-mix(in oklch, var(--danger) 82%, var(--fg-on-accent) 18%)'
                   : spriteColor,
               textShadow: fading
                 ? 'none'

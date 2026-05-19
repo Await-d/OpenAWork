@@ -18,7 +18,7 @@ import {
   type HandoffEntry,
   type HandoffState,
   type TeamRoleLayer,
-} from '../../../../../stores/team-events.js';
+} from '../../../../../stores/team/team-events.js';
 import { TabContainer } from '../TabContainer.js';
 
 const LAYER_LABELS: Record<TeamRoleLayer, string> = {
@@ -34,9 +34,9 @@ const LAYER_ORDER: TeamRoleLayer[] = ['reception', 'pm1', 'pm2', 'executor', 're
 
 const STATE_COLORS: Record<HandoffState | 'idle', string> = {
   idle: 'var(--text-3)',
-  pending: '#f59e0b',
-  claimed: '#3b82f6',
-  running: 'var(--success, #22c55e)',
+  pending: 'var(--warning, var(--warning, #f0b429))',
+  claimed: 'var(--aux, var(--aux, #8b9cf5))',
+  running: 'var(--success, var(--success, var(--success, #3dd49a)))',
   completed: 'var(--text-3)',
   failed: 'var(--danger, #d4574e)',
   cancelled: 'var(--text-3)',
@@ -280,9 +280,9 @@ function StatCard({
 }) {
   const valueColor =
     accent === 'success'
-      ? 'var(--success, #22c55e)'
+      ? 'var(--success, var(--success, var(--success, #3dd49a)))'
       : accent === 'warning'
-        ? '#f59e0b'
+        ? 'var(--warning, var(--warning, #f0b429))'
         : accent === 'danger'
           ? 'var(--danger, #d4574e)'
           : 'var(--text)';
@@ -381,7 +381,7 @@ function CompletedGantt({ entries }: { entries: HandoffEntry[] }) {
         const widthPct = Math.max(2, (dur / maxDur) * 100);
         const color =
           entry.state === 'completed'
-            ? 'var(--success, #22c55e)'
+            ? 'var(--success, var(--success, var(--success, #3dd49a)))'
             : entry.state === 'failed'
               ? 'var(--danger, #d4574e)'
               : 'var(--text-3)';

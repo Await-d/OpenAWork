@@ -21,7 +21,8 @@
 1. `AGENTS.md`
 2. `DESIGN.md`
 3. `DESIGN.openawork.md`
-4. 目标页面与 `packages/shared-ui` 中已存在的相似实现
+4. `packages/shared-ui/DESIGN-TOKENS.md`
+5. 目标页面与 `packages/shared-ui` 中已存在的相似实现
 
 ---
 
@@ -76,15 +77,16 @@ OpenAWork 是 AI Agent 工作台，不是营销站。
 - 不在工作台页面使用大段空旷留白来制造“高级感”。
 - 不让功能页面看起来像 landing page。
 
-### 3. 不把紫色变成全局装饰色
+### 3. 不把强调色变成全局装饰色
 
-- `DESIGN.md` 中的靛紫色只应被理解为“单一主强调色策略”的示例。
-- OpenAWork 可以沿用这一方向，但强调色只能用于：
+- OpenAWork 的主强调色为靛青（`#5cd4c0` 暗 / `#6471f0` 亮），对比色为琥珀。
+- 强调色只能用于：
   - 主要 CTA
   - 选中状态
   - 活跃导航
   - 可交互重点
 - 不允许把强调色用于大面积背景装饰或无语义点缀。
+- 琥珀色仅用于 warning 语义和数据对比高亮，不做装饰。
 
 ### 4. 不丢失 OpenAWork 自己的语义颜色
 
@@ -256,42 +258,86 @@ OpenAWork 更像“代理控制台 + 工作台”，而不是品牌秀场。
 
 ---
 
-## 推荐 token 方向
+## 正式设计 Token（E · Nebula 定稿）
 
-以下不是硬编码复制值，而是 OpenAWork 的推荐方向。
+以下为 OpenAWork 正式采用的设计 token。所有 UI 实现必须严格引用这些变量，禁止硬编码色值。
 
-### Surface
+### 色彩哲学
 
-- Page background: `#08090a`
-- Sidebar / panel background: `#0f1011`
-- Elevated surface: `#191a1b`
-- Hover / higher surface: `#28282c`
+- **主强调色（accent）**：靛青 — 用于 active / CTA / 选中态
+- **对比色（contrast）**：琥珀 — 用于 warning / 次级强调 / 数据高亮（冷暖对比）
+- **互补色（complement）**：珊瑚 — 用于 danger / destructive（色环对面）
+- **辅助色（aux）**：靛蓝 — 用于 info / 链接 / 代码高亮 / read 类工具
 
-### Text
+每种色都有 4 个层级：实色 / muted(14%) / subtle(7%) / border(30%)
 
-- Primary text: `#f7f8f8`
-- Secondary text: `#d0d6e0`
-- Muted text: `#8a8f98`
-- Subtle text: `#62666d`
+### 暗色主题
 
-### Border
+```
+bg-base: #080b12          bg-raised: #0d1119
+bg-overlay: #121721       bg-surface: #171d29
+bg-elevated: #1d2535      bg-hover: #232d40
 
-- Default border: `rgba(255,255,255,0.08)`
-- Subtle border: `rgba(255,255,255,0.05)`
+fg-strong: #f1f4f8        fg-default: #c8d1e0
+fg-muted: #7b8a9e         fg-subtle: #4d5b6e
+
+accent: #5cd4c0           contrast: #f0b429
+complement: #f06b7e       aux: #8b9cf5
+success: #3dd49a
+
+border-invisible: hsla(215,20%,50%,0.03)
+border-subtle: hsla(215,20%,50%,0.07)
+border-default: hsla(215,18%,50%,0.12)
+border-emphasis: hsla(215,16%,55%,0.20)
+border-strong: hsla(215,14%,60%,0.30)
+```
+
+### 亮色主题
+
+```
+bg-base: #f4f6ff          bg-raised: #ffffff
+bg-overlay: #eef1ff       bg-surface: #e4e8fa
+
+fg-strong: #161a3a        fg-default: #43497a
+fg-muted: #7c83a9         fg-subtle: #a8aec8
+
+accent: #6471f0           contrast: #a06bff
+complement: #e0497a       aux: #3aa0ff
+
+border-default: rgba(15,23,60,0.08)
+border-emphasis: rgba(15,23,60,0.14)
+```
+
+### 图表配色（8 色）
+
+暗: `#5cd4c0` `#f0b429` `#8b9cf5` `#f06b7e` `#c4b5fd` `#86efac` `#67e8f9` `#fda4af`
+亮: `#6471f0` `#a06bff` `#3aa0ff` `#e0497a` `#7c3aed` `#16a34a` `#0891b2` `#e11d48`
+
+### 代码语法高亮
+
+keyword=靛蓝 / function=靛青 / type=琥珀 / string=青柠 / number=玫瑰 / comment=subtle
 
 ### Radius
 
-- Micro: 2px
-- Functional: 6px
-- Card: 8px
-- Panel: 12px
-- Pill: 9999px
+xs: 4px · sm: 6px · md: 8px · lg: 12px · xl: 16px · pill: 9999px
 
-### Accent
+### 动效
 
-- 仅保留一支主强调色体系。
-- 默认建议先沿用 `DESIGN.md` 的靛紫方向。
-- 若未来需要替换为 OpenAWork 自身品牌色，必须保留“单一强调色、克制使用”的原则。
+- micro: 100ms `cubic-bezier(0.4, 0, 0.2, 1)`
+- normal: 200ms `cubic-bezier(0.16, 1, 0.3, 1)`
+- emphasis: 350ms `cubic-bezier(0.34, 1.56, 0.64, 1)`
+
+### 间距
+
+4 / 8 / 12 / 16 / 20 / 24 / 32 / 48 px（8px 基准网格）
+
+### 阴影
+
+- sm: 卡片默认（多层,含 inset 高光）
+- md: 浮层/下拉
+- lg: Modal/弹窗
+- glow: CTA 强调（accent 色发光）
+
 
 ---
 
@@ -340,7 +386,7 @@ OpenAWork 更像“代理控制台 + 工作台”，而不是品牌秀场。
 如果你正在为 OpenAWork 编写或修改 UI，请遵守以下规则：
 
 1. 先读取 `DESIGN.md`，再读取本文件。
-2. OpenAWork 的全局气质应是：**Linear 的秩序感 + Raycast 的工具效率感 + Claude 的局部聊天温度**。
+2. OpenAWork 的全局气质应是：**Linear 的秩序感 + Raycast 的工具效率感 + Claude 的局部聊天温度**。色彩体系为 E · Nebula（靛青主强调 + 琥珀对比 + 珊瑚互补 + 靛蓝辅助），详见"正式设计 Token"章节。
 3. 全局骨架、面板、列表、设置、工作流、日志遵循本文件，不得营销页化。
 4. 聊天区可以更柔和，但不能脱离全局 token、边框和层级系统。
 5. 优先复用现有 shared-ui 组件与模式，不凭空发明新视觉体系。

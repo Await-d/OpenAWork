@@ -16,20 +16,20 @@
 import { randomUUID } from 'node:crypto';
 import { Effect } from 'effect';
 import { connectDb, db, migrate, sqliteRun } from '../db.js';
-import { insertMessage, insertPart, transitionToolToRunning } from '../message-store-v2.js';
+import { insertMessage, insertPart, transitionToolToRunning } from '../message/message-store-v2.js';
 import {
   appendSessionEvent,
   listSessionEvents,
   replaySessionEntries,
-} from '../session-entry-store.js';
-import { makeSessionEventId } from '../session-event.js';
+} from '../session/session-entry-store.js';
+import { makeSessionEventId } from '../session/session-event.js';
 import {
   makeMessageId,
   makePartId,
   type AssistantMessage,
   type ToolPart,
   type ToolStatePending,
-} from '../message-v2-schema.js';
+} from '../message/message-v2-schema.js';
 import {
   bootV2Runtime,
   getDrizzleHandle,

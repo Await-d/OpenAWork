@@ -3,10 +3,10 @@ import { Routes, Route, Navigate, useNavigate } from 'react-router';
 import { listen } from '@tauri-apps/api/event';
 import { useAuthStore } from '../../web/src/stores/auth.js';
 import OnboardingWizard from './onboarding/OnboardingWizard.js';
-import ArtifactsPage from '../../web/src/pages/ArtifactsPage.js';
-import ChatPage from '../../web/src/pages/ChatPage.js';
-import SessionsPage from '../../web/src/pages/SessionsPage.js';
-import SettingsPage from '../../web/src/pages/SettingsPage.js';
+import ArtifactsPage from '../../web/src/pages/artifacts/ArtifactsPage.js';
+import ChatPage from '../../web/src/pages/chat-page/ChatPage.js';
+import SessionsPage from '../../web/src/pages/sessions-page/SessionsPage.js';
+import SettingsPage from '../../web/src/pages/settings/SettingsPage.js';
 import Layout from './components/layout/Layout.js';
 import { UpdateProgressDialog } from './updater/UpdateProgressDialog.js';
 import {

@@ -22,8 +22,8 @@ import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { sqliteGet } from '../db.js';
 import { startRequestWorkflow } from '../request-workflow.js';
-import { scanMemoryWriteContent, type MemoryWriteScanResult } from '../memory-security-scanner.js';
-import { getTeamConstitution, updateTeamConstitution } from '../team-constitution-store.js';
+import { scanMemoryWriteContent, type MemoryWriteScanResult } from '../memory/memory-security-scanner.js';
+import { getTeamConstitution, updateTeamConstitution } from '../team/team-constitution-store.js';
 import {
   ensureDefaultPersonasForUser,
   getAgentPersona,
@@ -32,16 +32,16 @@ import {
   resolveEffectiveSoul,
   upsertAgentPersona,
   VALID_SOUL_ROLE_LAYERS,
-} from '../team-personas-store.js';
-import { getUserMemory, updateUserMemory } from '../team-user-memory-store.js';
-import { getForceApplyState, recordForceApply } from '../team-force-apply-store.js';
-import { buildTeamInstructionStack } from '../team-instruction-stack.js';
+} from '../team/team-personas-store.js';
+import { getUserMemory, updateUserMemory } from '../team/team-user-memory-store.js';
+import { getForceApplyState, recordForceApply } from '../team/team-force-apply-store.js';
+import { buildTeamInstructionStack } from '../team/team-instruction-stack.js';
 import {
   CONSTITUTION_TEMPLATES,
   DEFAULT_SOULS,
   SOUL_ROLE_LAYER_ORDER,
 } from '../team-phase-a-content/index.js';
-import { resolveSessionWorkspacePath } from '../session-workspace-resolution.js';
+import { resolveSessionWorkspacePath } from '../session/session-workspace-resolution.js';
 
 const constitutionUpdateSchema = z.object({
   body: z.string().max(64 * 1024),

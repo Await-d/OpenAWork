@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { ToolDefinition } from '../tool-contract.js';
+import type { ToolDefinition } from './tool-contract.js';
 
 export const lspDiagnosticsTool: ToolDefinition<
   z.ZodObject<{ filePath: z.ZodOptional<z.ZodString> }>,

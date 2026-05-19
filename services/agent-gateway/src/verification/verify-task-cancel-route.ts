@@ -69,8 +69,8 @@ async function main(): Promise<void> {
             import('../request-workflow.js'),
             import('../routes/sessions.js'),
             import('../db.js'),
-            import('../tool-sandbox.js'),
-            import('../message-v2-adapter.js'),
+            import('../tools/tool-sandbox.js'),
+            import('../message/message-v2-adapter.js'),
           ]);
 
           await dbModule.connectDb();

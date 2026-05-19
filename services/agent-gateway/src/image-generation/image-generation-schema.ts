@@ -4,7 +4,7 @@ import {
   DEFAULT_IMAGE_GENERATION_DEFAULTS,
   imageGenerationDefaultsSchema,
   type ImageGenerationDefaults,
-} from '../provider-config.js';
+} from '../provider/provider-config.js';
 
 export const imageGenerationRequestSchema = imageGenerationDefaultsSchema.partial().extend({
   inputArtifacts: z

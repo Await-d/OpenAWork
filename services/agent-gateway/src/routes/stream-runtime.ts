@@ -1,23 +1,23 @@
 import { randomUUID } from 'node:crypto';
 import type { FileDiffContent, RunEvent } from '@openAwork/shared';
 import { WorkflowLogger, createRequestContext } from '@openAwork/logger';
-import { filterEnabledGatewayToolsForSession } from '../session-tool-visibility.js';
-import { parseSessionMetadataJson } from '../session-workspace-metadata.js';
+import { filterEnabledGatewayToolsForSession } from '../session/session-tool-visibility.js';
+import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
 import {
   appendSessionMessageV2 as appendSessionMessage,
   truncateSessionMessagesAfterV2 as truncateSessionMessagesAfter,
   approveToolPermission,
   rejectToolPermission,
-} from '../message-v2-adapter.js';
-import { publishSessionRunEvent, subscribeSessionRunEvents } from '../session-run-events.js';
-import { persistSessionFileDiffs } from '../session-file-diff-store.js';
+} from '../message/message-v2-adapter.js';
+import { publishSessionRunEvent, subscribeSessionRunEvents } from '../session/session-run-events.js';
+import { persistSessionFileDiffs } from '../session/session-file-diff-store.js';
 import {
   collectFileDiffsFromToolOutput,
   mergeFileDiffs,
   traceFileDiffs,
-} from '../modified-files-summary.js';
-import { createDefaultSandbox, reconcileResumedTaskChildSession } from '../tool-sandbox.js';
-import { buildToolResultContent, buildToolResultRunEvent } from '../tool-result-contract.js';
+} from '../tools/modified-files-summary.js';
+import { createDefaultSandbox, reconcileResumedTaskChildSession } from '../tools/tool-sandbox.js';
+import { buildToolResultContent, buildToolResultRunEvent } from '../tools/tool-result-contract.js';
 import {
   CLARIFY_LSP_TOOL_GUIDANCE_SYSTEM_PROMPT,
   DIALOGUE_MODE_SYSTEM_PROMPTS,
@@ -52,18 +52,18 @@ import {
   getAnyInFlightStreamRequestForSession,
   registerInFlightStreamRequest,
 } from './stream-cancellation.js';
-import { persistMonthlyUsageRecord } from '../usage-records-store.js';
-import { resolveSessionInteractionStateUpdate } from '../session-runtime-state.js';
-import { autoExtractMemoriesForRequest, buildMemoryBlockForSession } from '../memory-runtime.js';
-import { buildTeamInstructionStack } from '../team-instruction-stack.js';
-import { mapAgentToTeamRoleLayer } from '../team-role-layer-mapping.js';
+import { persistMonthlyUsageRecord } from '../session/usage-records-store.js';
+import { resolveSessionInteractionStateUpdate } from '../session/session-runtime-state.js';
+import { autoExtractMemoriesForRequest, buildMemoryBlockForSession } from '../memory/memory-runtime.js';
+import { buildTeamInstructionStack } from '../team/team-instruction-stack.js';
+import { mapAgentToTeamRoleLayer } from '../team/team-role-layer-mapping.js';
 import {
   clearSessionRuntimeThread,
   SESSION_RUNTIME_THREAD_HEARTBEAT_MS,
   touchSessionRuntimeThread,
   upsertSessionRuntimeThread,
-} from '../session-runtime-thread-store.js';
-import { buildCompanionPrompt, loadCompanionSettingsForUser } from '../companion-settings.js';
+} from '../session/session-runtime-thread-store.js';
+import { buildCompanionPrompt, loadCompanionSettingsForUser } from '../workspace/companion-settings.js';
 
 async function continueFromApprovedToolResult(input: {
   initialToolResult: {

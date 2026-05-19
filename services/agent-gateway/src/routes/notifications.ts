@@ -10,7 +10,7 @@ import {
   NOTIFICATION_PREFERENCE_CHANNELS,
   NOTIFICATION_PREFERENCE_EVENT_TYPES,
   upsertNotificationPreferences,
-} from '../notification-store.js';
+} from '../session/notification-store.js';
 import { startRequestWorkflow } from '../request-workflow.js';
 
 const notificationsQuerySchema = z.object({

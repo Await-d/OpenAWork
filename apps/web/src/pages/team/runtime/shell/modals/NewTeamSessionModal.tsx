@@ -308,9 +308,9 @@ const STEP_INDEX_ACTIVE_STYLE: CSSProperties = {
 
 const STEP_INDEX_DONE_STYLE: CSSProperties = {
   ...STEP_INDEX_BASE_STYLE,
-  background: 'color-mix(in srgb, var(--success, #22c55e) 18%, transparent)',
-  color: 'var(--success, #22c55e)',
-  borderColor: 'color-mix(in srgb, var(--success, #22c55e) 50%, transparent)',
+  background: 'color-mix(in srgb, var(--success, var(--success, var(--success, #3dd49a))) 18%, transparent)',
+  color: 'var(--success, var(--success, var(--success, #3dd49a)))',
+  borderColor: 'color-mix(in srgb, var(--success, var(--success, var(--success, #3dd49a))) 50%, transparent)',
 };
 
 const FORM_PANE_STYLE: CSSProperties = {
@@ -474,7 +474,7 @@ const ROLE_AVATAR_STYLE: CSSProperties = {
   placeItems: 'center',
   fontSize: 14,
   fontWeight: 800,
-  color: '#fff',
+  color: 'var(--fg-on-accent, #ffffff)',
   flexShrink: 0,
 };
 
@@ -583,15 +583,15 @@ function getInitial(label: string | undefined | null): string {
 function colorForRole(role: string): string {
   switch (role) {
     case 'planner':
-      return '#6366f1'; // indigo
+      return 'var(--accent, var(--accent, #5cd4c0))'; // indigo
     case 'researcher':
-      return '#0ea5e9'; // sky
+      return 'var(--chart-7, var(--chart-7, #67e8f9))'; // sky
     case 'executor':
-      return '#22c55e'; // green
+      return 'var(--success, var(--success, #3dd49a))'; // green
     case 'reviewer':
-      return '#f59e0b'; // amber
+      return 'var(--warning, var(--warning, #f0b429))'; // amber
     default:
-      return '#71717a'; // gray
+      return 'var(--fg-muted, #7b8a9e)'; // gray
   }
 }
 
@@ -626,43 +626,43 @@ const OPTIONAL_GROUP_META: Record<string, Omit<OptionalAgentGroup, 'key'>> = {
   leader: {
     label: '领导层',
     description: '统筹全局，可作为团队代理人下发任务',
-    color: '#a855f7',
+    color: 'var(--chart-5, var(--chart-5, #c4b5fd))',
     hint: '会出现在「领导」层级，介入跨子流程的协调与拍板。',
   },
   general: {
     label: '通用助手',
     description: '通用型 agent，灵活补位',
-    color: '#0ea5e9',
+    color: 'var(--chart-7, var(--chart-7, #67e8f9))',
     hint: '会出现在主对话流，按需被引用作为辅助回答与协作。',
   },
   planner: {
     label: '规划补位',
     description: '在 planner 层提供额外协作思路',
-    color: '#6366f1',
+    color: 'var(--accent, var(--accent, #5cd4c0))',
     hint: '与核心 planner 并行，作为额外的拆解视角参与「规划」层。',
   },
   researcher: {
     label: '研究补位',
     description: '在 researcher 层补充信息源',
-    color: '#0ea5e9',
+    color: 'var(--chart-7, var(--chart-7, #67e8f9))',
     hint: '与核心 researcher 并行，作为额外检索通道参与「研究」层。',
   },
   executor: {
     label: '执行补位',
     description: '在 executor 层提供额外执行能力',
-    color: '#22c55e',
+    color: 'var(--success, var(--success, #3dd49a))',
     hint: '与核心 executor 并行，作为额外执行节点参与「执行」层。',
   },
   reviewer: {
     label: '评审补位',
     description: '在 reviewer 层加强审查',
-    color: '#f59e0b',
+    color: 'var(--warning, var(--warning, #f0b429))',
     hint: '与核心 reviewer 并行，作为额外评审视角参与「评审」层。',
   },
   unknown: {
     label: '未分层',
     description: '未声明 canonical role 的 agent',
-    color: '#71717a',
+    color: 'var(--fg-muted, #7b8a9e)',
     hint: '未声明 canonical role，默认作为通用辅助 agent 加入。',
   },
 };
@@ -689,13 +689,13 @@ function badgeToneStyle(tone?: string): CSSProperties {
       };
     case 'success':
       return {
-        background: 'color-mix(in srgb, var(--success, #22c55e) 18%, transparent)',
-        color: 'var(--success, #22c55e)',
+        background: 'color-mix(in srgb, var(--success, var(--success, var(--success, #3dd49a))) 18%, transparent)',
+        color: 'var(--success, var(--success, var(--success, #3dd49a)))',
       };
     case 'warning':
       return {
-        background: 'color-mix(in srgb, var(--warning, #f59e0b) 22%, transparent)',
-        color: 'var(--warning, #f59e0b)',
+        background: 'color-mix(in srgb, var(--warning, var(--warning, var(--warning, #f0b429))) 22%, transparent)',
+        color: 'var(--warning, var(--warning, var(--warning, #f0b429)))',
       };
     default:
       return {
@@ -834,7 +834,7 @@ export function NewTeamSessionModal({
                     {done ? (
                       <CheckIcon
                         size={14}
-                        color={active ? 'var(--accent-text, #fff)' : 'var(--success, #22c55e)'}
+                        color={active ? 'var(--accent-text, #fff)' : 'var(--success, var(--success, var(--success, #3dd49a)))'}
                       />
                     ) : (
                       s.index
@@ -1025,9 +1025,9 @@ export function NewTeamSessionModal({
                         gap: 8,
                         padding: '10px 12px',
                         borderRadius: 10,
-                        background: 'color-mix(in srgb, var(--warning, #f59e0b) 10%, transparent)',
+                        background: 'color-mix(in srgb, var(--warning, var(--warning, var(--warning, #f0b429))) 10%, transparent)',
                         border:
-                          '1px solid color-mix(in srgb, var(--warning, #f59e0b) 30%, transparent)',
+                          '1px solid color-mix(in srgb, var(--warning, var(--warning, var(--warning, #f0b429))) 30%, transparent)',
                         fontSize: 11,
                         color: 'var(--text-2)',
                         lineHeight: 1.6,
@@ -1039,7 +1039,7 @@ export function NewTeamSessionModal({
                         height="14"
                         viewBox="0 0 24 24"
                         fill="none"
-                        stroke="var(--warning, #f59e0b)"
+                        stroke="var(--warning, var(--warning, var(--warning, #f0b429)))"
                         strokeWidth="2"
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -1050,7 +1050,7 @@ export function NewTeamSessionModal({
                         <line x1="12" y1="17" x2="12.01" y2="17" />
                       </svg>
                       <span>
-                        <strong style={{ color: 'var(--warning, #b45309)' }}>实验性功能：</strong>
+                        <strong style={{ color: 'var(--warning, var(--warning, #f0b429))' }}>实验性功能：</strong>
                         已保存模板沿用旧版数据结构，与新版会话契约可能不完全兼容；新版的模板体系仍在设计中。建议优先选择「空白会话」开始。
                       </span>
                     </div>
@@ -1900,11 +1900,11 @@ export function NewTeamSessionModal({
                 role="alert"
                 style={{
                   fontSize: 12,
-                  color: 'var(--error, #ef4444)',
-                  background: 'color-mix(in srgb, var(--error, #ef4444) 10%, transparent)',
+                  color: 'var(--error, var(--danger, var(--danger, #f06b7e)))',
+                  background: 'color-mix(in srgb, var(--error, var(--danger, var(--danger, #f06b7e))) 10%, transparent)',
                   padding: '8px 10px',
                   borderRadius: 6,
-                  border: '1px solid color-mix(in srgb, var(--error, #ef4444) 30%, transparent)',
+                  border: '1px solid color-mix(in srgb, var(--error, var(--danger, var(--danger, #f06b7e))) 30%, transparent)',
                 }}
               >
                 {roleBindings.error}

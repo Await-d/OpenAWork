@@ -68,8 +68,8 @@ const STATUS_META: Record<TabPlaceholderStatus, { label: string; color: string; 
   },
   'data-pending': {
     label: '待数据接入',
-    color: '#b45309',
-    bg: 'color-mix(in srgb, #f59e0b 22%, transparent)',
+    color: 'var(--warning, #f0b429)',
+    bg: 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 22%, transparent)',
   },
 };
 

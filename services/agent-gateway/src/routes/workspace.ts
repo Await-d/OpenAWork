@@ -17,14 +17,14 @@ import {
   validateWorkspacePath,
   validateWorkspaceRelativePath,
   isPathWithinRoot,
-} from '../workspace-paths.js';
-import { ensureIgnoreRulesLoadedForPath } from '../workspace-safety.js';
-import { isPathInUserAllowlist } from '../user-workspace-allowlist.js';
+} from '../workspace/workspace-paths.js';
+import { ensureIgnoreRulesLoadedForPath } from '../workspace/workspace-safety.js';
+import { isPathInUserAllowlist } from '../workspace/user-workspace-allowlist.js';
 import {
   getWorkspaceReviewDiff,
   listWorkspaceReviewChanges,
   revertWorkspaceReviewPath,
-} from '../workspace-review.js';
+} from '../workspace/workspace-review.js';
 
 /**
  * Reject workspace operations that target a path outside the user's

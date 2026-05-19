@@ -238,7 +238,7 @@ function CompanionPreviewCard({
                 lineHeight: 1.02,
                 color:
                   petting && index === 0
-                    ? 'color-mix(in oklch, var(--danger) 82%, white 18%)'
+                    ? 'color-mix(in oklch, var(--danger) 82%, var(--fg-on-accent) 18%)'
                     : profile.accentColor,
                 textShadow: '0 0 10px color-mix(in oklch, currentColor 10%, transparent)',
                 fontVariantLigatures: 'none',
@@ -343,7 +343,7 @@ function CompanionPreviewCard({
                   borderRadius: 999,
                   background: highlighted
                     ? `linear-gradient(90deg, ${rarityVisual.color}, ${profile.accentColor})`
-                    : `linear-gradient(90deg, ${profile.accentColor}, color-mix(in oklch, ${profile.accentColor} 72%, white 28%))`,
+                    : `linear-gradient(90deg, ${profile.accentColor}, color-mix(in oklch, ${profile.accentColor} 72%, var(--fg-on-accent) 28%))`,
                 }}
               />
             </div>

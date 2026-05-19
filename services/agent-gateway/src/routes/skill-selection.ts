@@ -9,7 +9,7 @@ import {
   normalizeWorkspacePathForWrite,
   resolveEffectiveSkills,
   type EffectiveSkill,
-} from '../skill-selection.js';
+} from '../skill/skill-selection.js';
 import { BUILTIN_SKILLS } from '@openAwork/skills';
 
 const BUILTIN_SKILL_IDS = new Set(BUILTIN_SKILLS.map((entry) => entry.manifest.id));

@@ -21,8 +21,8 @@ const PERMISSION_LABELS: Record<TeamSessionShareRecord['permission'], string> = 
 
 const PERMISSION_COLORS: Record<TeamSessionShareRecord['permission'], string> = {
   view: 'var(--text-3)',
-  comment: '#3b82f6',
-  operate: 'var(--success, #22c55e)',
+  comment: 'var(--aux, var(--aux, #8b9cf5))',
+  operate: 'var(--success, var(--success, var(--success, #3dd49a)))',
 };
 
 const CONTAINER_STYLE: CSSProperties = {

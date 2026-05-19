@@ -5,7 +5,7 @@ import {
   sizeForPreset,
   validateImageGenerationSize,
 } from '@openAwork/shared';
-import type { SavedChatImageDefaults } from '../../utils/chat-session-defaults.js';
+import type { SavedChatImageDefaults } from '../../utils/chat/chat-session-defaults.js';
 
 export interface ChatImageGenerationReferenceArtifact {
   artifactId: string;

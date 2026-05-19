@@ -1,4 +1,4 @@
-import { PRESENTED_TO_CANONICAL } from '../claude-code-tool-surface-profiles.js';
+import { PRESENTED_TO_CANONICAL } from '../claude-code/claude-code-tool-surface-profiles.js';
 
 const LEGACY_ENABLED_TOOL_NAME_MAP = {
   web_search: 'websearch',

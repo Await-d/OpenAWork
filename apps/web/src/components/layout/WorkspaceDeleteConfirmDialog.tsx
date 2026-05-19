@@ -40,8 +40,8 @@ const styles: Record<string, CSSProperties> = {
     width: 'fit-content',
     padding: '4px 10px',
     borderRadius: 999,
-    background: 'color-mix(in srgb, #ef4444 12%, transparent)',
-    color: '#fca5a5',
+    background: 'color-mix(in srgb, var(--danger, var(--danger, #f06b7e)) 12%, transparent)',
+    color: 'var(--danger, var(--danger, #f06b7e))',
     fontSize: 10,
     fontWeight: 800,
     letterSpacing: '0.04em',
@@ -88,8 +88,8 @@ const styles: Record<string, CSSProperties> = {
   },
   warning: {
     borderRadius: 12,
-    border: '1px solid color-mix(in srgb, #ef4444 28%, var(--border-subtle))',
-    background: 'color-mix(in srgb, #ef4444 8%, var(--surface))',
+    border: '1px solid color-mix(in srgb, var(--danger, var(--danger, #f06b7e)) 28%, var(--border-subtle))',
+    background: 'color-mix(in srgb, var(--danger, var(--danger, #f06b7e)) 8%, var(--surface))',
     color: 'var(--text-2)',
     padding: '10px 12px',
     fontSize: 11,
@@ -114,13 +114,13 @@ const styles: Record<string, CSSProperties> = {
   dangerButton: {
     border: 'none',
     background: 'var(--danger)',
-    color: '#fff',
+    color: 'var(--fg-on-accent, #ffffff)',
     borderRadius: 10,
     padding: '9px 14px',
     fontSize: 12,
     fontWeight: 800,
     cursor: 'pointer',
-    boxShadow: '0 10px 24px color-mix(in srgb, #ef4444 28%, transparent)',
+    boxShadow: '0 10px 24px color-mix(in srgb, var(--danger, var(--danger, #f06b7e)) 28%, transparent)',
   },
 };
 

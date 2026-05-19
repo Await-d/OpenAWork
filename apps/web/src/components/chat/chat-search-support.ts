@@ -1,4 +1,4 @@
-import type { ChatMessage } from '../session-conversation/runtime/support.js';
+import type { ChatMessage } from '../conversation-runtime/messages/support.js';
 
 export interface ChatSearchMatch {
   /** Stable id of the matching `ChatMessage`. */

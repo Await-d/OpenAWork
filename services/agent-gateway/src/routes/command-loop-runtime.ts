@@ -9,7 +9,7 @@ import { RalphLoopImpl } from '@openAwork/agent-core';
 import {
   appendSessionMessageV2 as appendSessionMessage,
   listSessionMessagesV2 as listSessionMessages,
-} from '../message-v2-adapter.js';
+} from '../message/message-v2-adapter.js';
 import { sqliteGet, sqliteRun } from '../db.js';
 
 const execFileAsync = promisify(execFile);

@@ -15,8 +15,8 @@
  */
 
 import { useEffect, useState } from 'react';
-import { useHandoffStore } from '../../../../stores/team-events.js';
-import { useTeamNotificationStore } from '../../../../stores/team-events.js';
+import { useHandoffStore } from '../../../../stores/team/team-events.js';
+import { useTeamNotificationStore } from '../../../../stores/team/team-events.js';
 
 export type TeamPageMode = 'idle' | 'running' | 'paused';
 export type TeamPageBreakpoint = 'mobile' | 'tablet' | 'desktop';

@@ -58,8 +58,8 @@ const ICON_BADGE_STYLE: CSSProperties = {
   borderRadius: 12,
   display: 'grid',
   placeItems: 'center',
-  background: 'color-mix(in srgb, var(--error, #ef4444) 14%, transparent)',
-  color: 'var(--error, #ef4444)',
+  background: 'color-mix(in srgb, var(--error, var(--danger, var(--danger, #f06b7e))) 14%, transparent)',
+  color: 'var(--error, var(--danger, var(--danger, #f06b7e)))',
   flexShrink: 0,
 };
 
@@ -113,8 +113,8 @@ const NOTICE_STYLE: CSSProperties = {
   lineHeight: 1.6,
   padding: 10,
   borderRadius: 8,
-  background: 'color-mix(in srgb, var(--warning, #f59e0b) 10%, transparent)',
-  border: '1px solid color-mix(in srgb, var(--warning, #f59e0b) 30%, transparent)',
+  background: 'color-mix(in srgb, var(--warning, var(--warning, var(--warning, #f0b429))) 10%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--warning, var(--warning, var(--warning, #f0b429))) 30%, transparent)',
 };
 
 const FIELD_STYLE: CSSProperties = {
@@ -160,8 +160,8 @@ const DANGER_BUTTON_STYLE: CSSProperties = {
   padding: '8px 18px',
   borderRadius: 8,
   border: 'none',
-  background: 'var(--error, #ef4444)',
-  color: '#fff',
+  background: 'var(--error, var(--danger, var(--danger, #f06b7e)))',
+  color: 'var(--fg-on-accent, #ffffff)',
   fontSize: 13,
   fontWeight: 700,
   cursor: 'pointer',
@@ -169,11 +169,11 @@ const DANGER_BUTTON_STYLE: CSSProperties = {
 
 const ERROR_STYLE: CSSProperties = {
   fontSize: 12,
-  color: 'var(--error, #ef4444)',
-  background: 'color-mix(in srgb, var(--error, #ef4444) 10%, transparent)',
+  color: 'var(--error, var(--danger, var(--danger, #f06b7e)))',
+  background: 'color-mix(in srgb, var(--error, var(--danger, var(--danger, #f06b7e))) 10%, transparent)',
   padding: '8px 10px',
   borderRadius: 6,
-  border: '1px solid color-mix(in srgb, var(--error, #ef4444) 30%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--error, var(--danger, var(--danger, #f06b7e))) 30%, transparent)',
 };
 
 export function ConfirmDeleteWorkspaceModal({
@@ -322,7 +322,7 @@ export function ConfirmDeleteWorkspaceModal({
         </div>
 
         <div style={NOTICE_STYLE}>
-          <strong style={{ color: 'var(--warning, #b45309)' }}>注意：</strong>
+          <strong style={{ color: 'var(--warning, var(--warning, #f0b429))' }}>注意：</strong>
           删除工作区后，所有关联的会话历史记录将保留（不会级联删除），但无法继续在此工作区中创建新的协作运行。
         </div>
 

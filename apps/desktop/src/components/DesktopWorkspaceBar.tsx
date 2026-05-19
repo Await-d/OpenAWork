@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { useWorkspace } from '../../../web/src/hooks/useWorkspace.js';
+import { useWorkspace } from '../../../web/src/hooks/workspace/useWorkspace.js';
 
 interface DesktopWorkspaceBarProps {
   sessionId: string | null;

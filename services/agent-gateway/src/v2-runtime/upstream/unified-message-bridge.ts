@@ -45,7 +45,7 @@ import type {
   ToolResultMessage,
   UnifiedMessage,
   UserMessageUnified,
-} from '../../message-to-model-messages.js';
+} from '../../message/message-to-model-messages.js';
 
 interface ReasoningPart {
   type: 'reasoning';

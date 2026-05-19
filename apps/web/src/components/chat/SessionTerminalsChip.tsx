@@ -8,7 +8,7 @@
  */
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import type { SessionTerminalView } from '../session-conversation/runtime/terminals-api.js';
+import type { SessionTerminalView } from '../conversation-runtime/terminals/terminals-api.js';
 import { SessionTerminalsPanel } from './SessionTerminalsPanel.js';
 
 interface SessionTerminalsChipProps {
@@ -42,7 +42,7 @@ export function SessionTerminalsChip(props: SessionTerminalsChipProps) {
   }, [open, handleClose]);
 
   const activeIndicatorColor =
-    props.runningCount > 0 ? '#34d399' : hasAny ? 'var(--text-3)' : 'var(--text-3)';
+    props.runningCount > 0 ? 'var(--success, var(--success, #3dd49a))' : hasAny ? 'var(--text-3)' : 'var(--text-3)';
 
   return (
     <>
@@ -63,10 +63,10 @@ export function SessionTerminalsChip(props: SessionTerminalsChipProps) {
           padding: '0 8px',
           borderRadius: 5,
           border: 'none',
-          background: open ? 'color-mix(in srgb, #34d399 18%, var(--surface))' : 'transparent',
-          color: props.runningCount > 0 ? '#34d399' : 'var(--text-3)',
+          background: open ? 'color-mix(in srgb, var(--success) 18%, var(--surface))' : 'transparent',
+          color: props.runningCount > 0 ? 'var(--success, var(--success, #3dd49a))' : 'var(--text-3)',
           boxShadow: open
-            ? 'inset 0 0 0 1px color-mix(in srgb, #34d399 50%, var(--border))'
+            ? 'inset 0 0 0 1px color-mix(in srgb, var(--success) 50%, var(--border))'
             : 'none',
           fontSize: 11,
           fontWeight: 600,

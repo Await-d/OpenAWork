@@ -558,15 +558,15 @@ L2/L3/L4 修改不需要这套流程，按各自规则处理。
 
 | L1 决策                      | v3.10/v3.11 决策 | 实施状态                     | 实施位置                                                                           |
 | ---------------------------- | ---------------- | ---------------------------- | ---------------------------------------------------------------------------------- |
-| L1.1 五层架构                | D11+D12          | ✅ **已实施**                | Phase B 落地（260515-team-phase-b）                                                |
-| L1.2 d/b 拆分原则            | （新增）         | ⚠️ **未实施**                | 需要团队 review 后启动                                                             |
-| L1.3 流式 handoff            | （修改 D14）     | ⚠️ **部分实施 + 需增量改造** | Phase C/D 实现了原子 handoff，反向通道未实现（artifact-chain.ts 行 22 已预留位置） |
-| L1.4 跨层调用 + escape hatch | （修订 D24）     | ⚠️ **未明确实施**            | 需要 review 现有代码是否符合此约束                                                 |
+| L1.1 五层架构                | D11+D12          | ✅ **已实施**                | Phase B 落地 + 260518 五层链路打通                                                 |
+| L1.2 d/b 拆分原则            | （新增）         | ✅ **已实施**                | `reception-router.ts`（b.router）+ `reception-orchestrator.ts`（b.companion）+ `scheduler.ts`（b.scheduler）；`pm2-runner.ts`（d.1/d.2/d.3/d.5）|
+| L1.3 流式 handoff            | （修改 D14）     | ✅ **已实施**                | `session_inbound_messages` 表 + `substate` 字段 + `inbound-store.ts` + `artifact-chain.ts` wait-for-inbound |
+| L1.4 跨层调用 + escape hatch | （修订 D24）     | ✅ **已实施**                | `team-events-bus.ts` escape hatch 事件 + `routes/team.ts` audit log + `reception-orchestrator.ts` route decision log |
 | L1.5 项目记忆双存储          | D34 + D55        | ✅ **已实施**                | Phase A 落地（260515-team-phase-a）                                                |
-| L1.6 延迟硬约束              | （新增）         | ⚠️ **未实施**                | 需要团队 review + 接入 telemetry                                                   |
-| L1.7 Handoff 存储位置        | D14              | ✅ **已实施**                | `handoff_records` 表已建（db.ts:1063+）                                            |
-| L1.8 Session 状态机扩展      | D13 + D18 + D42  | ⚠️ **部分实施**              | sessions 5 字段已加，但缺 `substate` / `structural_depth` / `execution_depth`      |
-| L1.9 BackgroundTaskScheduler | D40              | ✅ **已实施**                | `InProcessScheduler` 已在 Phase B 落地                                             |
+| L1.6 延迟硬约束              | （新增）         | ✅ **已实施**                | `latency-monitor.ts` 滑动窗口 + inbound 端点采样                                  |
+| L1.7 Handoff 存储位置        | D14              | ✅ **已实施**                | `handoff_records` 表 + `handoff-store.ts` claim_token 防双 claim                   |
+| L1.8 Session 状态机扩展      | D13 + D18 + D42  | ✅ **已实施**                | sessions 全部字段已加（team_parent_session_id / role_layer / handoff_state / substate / substate_updated_at / intent_state / structural_depth / execution_depth / last_heartbeat） |
+| L1.9 BackgroundTaskScheduler | D40              | ✅ **已实施**                | `InProcessScheduler` 9 方法全覆盖                                                  |
 
 ### 5.2 真正需要团队 review 的项目（v1.1 修订聚焦）
 

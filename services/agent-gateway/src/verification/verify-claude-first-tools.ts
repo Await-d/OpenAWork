@@ -7,7 +7,7 @@ import requestWorkflowPlugin from '../request-workflow.js';
 import { questionsRoutes } from '../routes/questions.js';
 import { sessionsRoutes } from '../routes/sessions.js';
 import { streamRoutes } from '../routes/stream-routes-plugin.js';
-import { createDefaultSandbox } from '../tool-sandbox.js';
+import { createDefaultSandbox } from '../tools/tool-sandbox.js';
 import { AgentTaskManagerImpl } from '@openAwork/agent-core';
 import {
   assert,

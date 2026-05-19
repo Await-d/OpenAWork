@@ -14,7 +14,7 @@ import {
   useHandoffStore,
   type HandoffEntry,
   type TeamRoleLayer,
-} from '../../../../../stores/team-events.js';
+} from '../../../../../stores/team/team-events.js';
 import { TabContainer } from '../TabContainer.js';
 
 const STUCK_THRESHOLD_MS = 2 * 60 * 1000;
@@ -76,8 +76,8 @@ const FAILED_ROW_STYLE: CSSProperties = {
 
 const STUCK_ROW_STYLE: CSSProperties = {
   ...ROW_STYLE,
-  borderColor: 'color-mix(in srgb, #f59e0b 50%, transparent)',
-  background: 'color-mix(in srgb, #f59e0b 8%, var(--surface))',
+  borderColor: 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 50%, transparent)',
+  background: 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 8%, var(--surface))',
 };
 
 const EMPTY_STYLE: CSSProperties = {
@@ -285,9 +285,9 @@ function HealthStat({
 }) {
   const color =
     tone === 'success'
-      ? 'var(--success, #22c55e)'
+      ? 'var(--success, var(--success, var(--success, #3dd49a)))'
       : tone === 'warning'
-        ? '#f59e0b'
+        ? 'var(--warning, var(--warning, #f0b429))'
         : tone === 'danger'
           ? 'var(--danger, #d4574e)'
           : 'var(--text)';
@@ -350,8 +350,8 @@ function StuckRow({
         style={{
           padding: '1px 8px',
           borderRadius: 999,
-          background: 'color-mix(in srgb, #f59e0b 14%, transparent)',
-          color: '#b45309',
+          background: 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 14%, transparent)',
+          color: 'var(--warning, #f0b429)',
           fontSize: 10,
           fontWeight: 700,
           textTransform: 'uppercase',

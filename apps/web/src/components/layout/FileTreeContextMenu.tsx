@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 const FilePlusIcon = () => (
   <svg
@@ -302,6 +302,7 @@ export default function FileTreeContextMenu({
   onDelete,
   onRename,
 }: FileTreeContextMenuProps) {
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const baseLabel =
     targetType === 'root'
       ? '根目录'
@@ -309,26 +310,39 @@ export default function FileTreeContextMenu({
         ? targetLabel
         : `${targetLabel} 所在目录`;
 
+  // 关闭策略：使用全局 mousedown / contextmenu 监听，不用 fullscreen overlay 按钮。
+  // 这样：(1) 用户在菜单外部点击 → 关闭菜单；(2) 用户在菜单外部右键 → 关闭当前菜单
+  // 但事件能继续传到目标元素，由其自己的 onContextMenu 触发新的菜单。
+  // 之前用 overlay button 的方式会拦截二次右键，导致只能触发一次。
+  useEffect(() => {
+    const handleMouseDown = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        // 不调用 preventDefault：让右键事件继续传播到目标元素
+        onClose();
+      }
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    // 用 capture phase 确保比目标元素的 onContextMenu 先收到（关菜单），
+    // 但不阻止 contextmenu 事件的默认行为或冒泡，所以目标元素的 handler
+    // 仍然可以触发并打开新菜单。
+    document.addEventListener('mousedown', handleMouseDown, true);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown, true);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [onClose]);
+
   return (
     <>
-      <button
-        type="button"
-        aria-label="关闭菜单"
-        onClick={onClose}
-        onKeyDown={(event) => {
-          if (event.key === 'Escape') onClose();
-        }}
-        style={{
-          position: 'fixed',
-          inset: 0,
-          zIndex: 9998,
-          background: 'transparent',
-          border: 'none',
-          cursor: 'default',
-          padding: 0,
-        }}
-      />
-      <div style={{ ...menuStyle, top: y, left: x }} role="menu" aria-label="文件树操作菜单">
+      <div
+        ref={menuRef}
+        style={{ ...menuStyle, top: y, left: x }}
+        role="menu"
+        aria-label="文件树操作菜单"
+      >
         <div
           style={{
             padding: '6px 12px 8px',

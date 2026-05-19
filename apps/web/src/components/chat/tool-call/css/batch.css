@@ -122,7 +122,7 @@
 }
 
 .tool-call-batch-child[data-batch-sub-status='completed'] .tool-call-batch-child-status {
-  color: var(--success, #22c55e);
+  color: var(--success, var(--success, var(--success, #3dd49a)));
 }
 
 .tool-call-batch-child[data-batch-sub-status='failed'] .tool-call-batch-child-status {
@@ -242,13 +242,13 @@
 .tool-call-approval-button[data-variant='primary'] {
   border-color: color-mix(in oklch, var(--accent) 48%, var(--border) 52%);
   background: color-mix(in oklch, var(--accent) 16%, var(--surface) 84%);
-  color: color-mix(in oklch, var(--accent) 82%, white 18%);
+  color: color-mix(in oklch, var(--accent) 82%, var(--fg-on-accent) 18%);
 }
 
 .tool-call-approval-button[data-variant='danger'] {
   border-color: color-mix(in oklch, var(--danger) 40%, var(--border) 60%);
   background: color-mix(in oklch, var(--danger) 12%, var(--surface) 88%);
-  color: color-mix(in oklch, var(--danger) 82%, white 18%);
+  color: color-mix(in oklch, var(--danger) 82%, var(--fg-on-accent) 18%);
 }
 
 .tool-call-approval-notes {

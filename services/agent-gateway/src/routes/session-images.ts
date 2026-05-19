@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { ArtifactManagerImpl } from '@openAwork/artifacts';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
-import { createArtifact, getArtifactById } from '../artifact-content-store.js';
+import { createArtifact, getArtifactById } from '../session/artifact-content-store.js';
 import { sqliteGet } from '../db.js';
 import {
   imageGenerationRequestSchema,
@@ -15,8 +15,8 @@ import {
   generateImageWithOpenAi,
   OpenAiImageGenerationError,
 } from '../image-generation/openai-image-generation.js';
-import { resolveModelRouteFromProvider } from '../model-router.js';
-import { getImageProviderConfig, parseStoredImageGenerationDefaults } from '../provider-config.js';
+import { resolveModelRouteFromProvider } from '../provider/model-router.js';
+import { getImageProviderConfig, parseStoredImageGenerationDefaults } from '../provider/provider-config.js';
 import { resolveGatewayArtifactsIndexPath } from '../storage-paths.js';
 
 interface UserSettingRow {

@@ -114,14 +114,14 @@ export const PRIMARY_TAB_BAR_STYLE: CSSProperties = {
   alignItems: 'stretch',
   gap: 2,
   paddingInline: 10,
-  paddingTop: 2,
+  paddingTop: 0,
   borderBottom: '1px solid color-mix(in srgb, var(--border) 45%, transparent)',
   flexShrink: 0,
   background: 'var(--surface)',
   overflowX: 'auto',
   overflowY: 'hidden',
   scrollbarWidth: 'thin',
-  height: 36,
+  height: 34,
 };
 
 export const PRIMARY_TAB_BTN_STYLE: CSSProperties = {

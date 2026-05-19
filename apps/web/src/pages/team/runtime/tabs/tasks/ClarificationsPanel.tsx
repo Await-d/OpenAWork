@@ -21,7 +21,7 @@ import { useMemo, useState, type CSSProperties, type FormEvent, type ReactNode }
 import {
   useClarificationStore,
   type ClarificationItem,
-} from '../../../../../stores/team-events.js';
+} from '../../../../../stores/team/team-events.js';
 import { useAuthStore } from '../../../../../stores/auth.js';
 import { createTeamInboundClient } from '@openAwork/web-client';
 
@@ -31,8 +31,8 @@ const PANEL_STYLE: CSSProperties = {
   gap: 10,
   padding: '14px 16px',
   borderRadius: 12,
-  border: '1px solid color-mix(in srgb, #f59e0b 36%, transparent)',
-  background: 'color-mix(in srgb, #f59e0b 6%, var(--surface))',
+  border: '1px solid color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 36%, transparent)',
+  background: 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 6%, var(--surface))',
 };
 
 const HEADER_STYLE: CSSProperties = {
@@ -44,7 +44,7 @@ const HEADER_STYLE: CSSProperties = {
 const TITLE_STYLE: CSSProperties = {
   fontSize: 13,
   fontWeight: 800,
-  color: '#b45309',
+  color: 'var(--warning, #f0b429)',
   letterSpacing: '0.005em',
 };
 
@@ -128,8 +128,8 @@ const ANSWERED_LIST_STYLE: CSSProperties = {
   gap: 6,
   padding: '8px 12px',
   borderRadius: 8,
-  background: 'color-mix(in srgb, var(--success, #22c55e) 5%, var(--surface))',
-  border: '1px solid color-mix(in srgb, var(--success, #22c55e) 30%, transparent)',
+  background: 'color-mix(in srgb, var(--success, var(--success, var(--success, #3dd49a))) 5%, var(--surface))',
+  border: '1px solid color-mix(in srgb, var(--success, var(--success, var(--success, #3dd49a))) 30%, transparent)',
 };
 
 interface ClarificationsPanelProps {

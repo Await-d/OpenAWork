@@ -4,9 +4,9 @@ import fp from 'fastify-plugin';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import { z } from 'zod';
 import { redis, sqliteGet, sqliteRun } from './db.js';
-import { ensureDefaultInstalledSkills } from './default-skills.js';
+import { ensureDefaultInstalledSkills } from './skill/default-skills.js';
 import { ensureDefaultWorkflowTemplates } from './default-workflow-templates.js';
-import { syncSystemSkillsForUser } from './system-skills.js';
+import { syncSystemSkillsForUser } from './skill/system-skills.js';
 import { startRequestWorkflow } from './request-workflow.js';
 
 const JWT_SECRET = globalThis.process?.env['JWT_SECRET'] ?? 'change-me-in-production-min-32-chars';

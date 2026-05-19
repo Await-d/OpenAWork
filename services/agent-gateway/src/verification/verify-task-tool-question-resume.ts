@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { AgentTaskManagerImpl } from '@openAwork/agent-core';
 import { closeDb, connectDb, migrate, sqliteGet, sqliteRun, WORKSPACE_ROOT } from '../db.js';
-import { listSessionMessagesV2 as listSessionMessages } from '../message-v2-adapter.js';
-import { createDefaultSandbox } from '../tool-sandbox.js';
-import { formatAnsweredQuestionOutput } from '../question-tools.js';
-import type { QuestionToolInput } from '../question-tools.js';
+import { listSessionMessagesV2 as listSessionMessages } from '../message/message-v2-adapter.js';
+import { createDefaultSandbox } from '../tools/tool-sandbox.js';
+import { formatAnsweredQuestionOutput } from '../tools/question-tools.js';
+import type { QuestionToolInput } from '../tools/question-tools.js';
 import { resumeAnsweredQuestionRequest } from '../routes/stream-runtime.js';
 import {
   assert,

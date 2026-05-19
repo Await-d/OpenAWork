@@ -16,7 +16,7 @@
  */
 
 import { Context, Effect, Layer, Stream } from 'effect';
-import { publishBusEvent, subscribeBusEvents } from '../../sync-event.js';
+import { publishBusEvent, subscribeBusEvents } from '../../session/sync-event.js';
 
 export interface BusEventEnvelope {
   type: string;

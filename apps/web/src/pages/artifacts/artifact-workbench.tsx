@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { ArtifactRecord, ArtifactVersionRecord } from '@openAwork/artifacts';
 import { tokens } from '@openAwork/shared-ui';
-import { toast } from '../../components/ToastNotification.js';
+import { toast } from '../../components/common/ToastNotification.js';
 import { ArtifactCodeEditor } from './artifact-code-editor.js';
 import { ArtifactPreviewSurface } from './artifact-preview-surface.js';
 import {

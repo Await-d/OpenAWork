@@ -6,8 +6,8 @@ import { closeDb, connectDb, migrate, sqliteRun } from '../db.js';
 import requestWorkflowPlugin from '../request-workflow.js';
 import { streamRoutes } from '../routes/stream-routes-plugin.js';
 import { sessionsRoutes } from '../routes/sessions.js';
-import { persistSessionRunEventForRequest, publishSessionRunEvent } from '../session-run-events.js';
-import { upsertSessionRuntimeThread } from '../session-runtime-thread-store.js';
+import { persistSessionRunEventForRequest, publishSessionRunEvent } from '../session/session-run-events.js';
+import { upsertSessionRuntimeThread } from '../session/session-runtime-thread-store.js';
 import { assert, withTempEnv } from './task-verification-helpers.js';
 
 function parseSseEnvelopes(body: string): Array<Record<string, unknown>> {

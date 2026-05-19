@@ -5,16 +5,16 @@ import { requireAuth } from '../auth.js';
 import { sqliteGet } from '../db.js';
 import { startRequestWorkflow } from '../request-workflow.js';
 import { buildCommandDescriptors } from './command-descriptors.js';
-import { buildGatewayToolDefinitions, getVisibleToolName } from '../tool-definitions.js';
+import { buildGatewayToolDefinitions, getVisibleToolName } from '../tools/tool-definitions.js';
 import { BUILTIN_SKILLS } from '@openAwork/skills';
-import { listEnabledAgentCapabilitiesForUser } from '../agent-catalog.js';
-import { filterEnabledGatewayToolsForSession } from '../session-tool-visibility.js';
+import { listEnabledAgentCapabilitiesForUser } from '../agent/agent-catalog.js';
+import { filterEnabledGatewayToolsForSession } from '../session/session-tool-visibility.js';
 import {
   getEffectiveSkillsForSession,
   getEffectiveSkillsForUser,
-} from '../skill-selection-context.js';
-import { BUILTIN_MCP_IDS } from '../builtin-mcps.js';
-import { loadConfiguredMcpServersForUser } from '../mcp-runtime.js';
+} from '../skill/skill-selection-context.js';
+import { BUILTIN_MCP_IDS } from '../mcp/builtin-mcps.js';
+import { loadConfiguredMcpServersForUser } from '../mcp/mcp-runtime.js';
 
 interface SessionMetadataRow {
   metadata_json: string;

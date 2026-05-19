@@ -17,7 +17,7 @@ const lbToolBtnStyle: React.CSSProperties = {
   border: '1px solid rgba(255,255,255,0.2)',
   background: 'rgba(255,255,255,0.12)',
   backdropFilter: 'blur(8px)',
-  color: '#fff',
+  color: 'var(--fg-on-accent, #ffffff)',
   fontSize: 15,
   cursor: 'pointer',
   display: 'flex',

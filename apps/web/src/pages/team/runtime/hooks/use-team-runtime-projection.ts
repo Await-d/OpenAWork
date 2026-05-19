@@ -23,7 +23,7 @@ import {
   formatWorkspaceLabel,
   getSharedSessionStateLabel,
 } from '../data/team-runtime-model.js';
-import { groupSessionTreesByWorkspace } from '../../../../utils/session-grouping.js';
+import { groupSessionTreesByWorkspace } from '../../../../utils/session/session-grouping.js';
 
 interface TeamRuntimeProjectionInput {
   auditLogs: TeamAuditLogRecord[];

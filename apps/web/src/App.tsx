@@ -9,15 +9,15 @@ export function useFileEditorContext() {
   return useContext(FileEditorContext);
 }
 import { Routes, Route, Navigate, useNavigate } from 'react-router';
-import { UnlockOverlay } from './components/UnlockOverlay.js';
-import { tauriInvoke } from './pages/settings/settings-page-helpers.js';
+import { UnlockOverlay } from './components/common/UnlockOverlay.js';
+import { tauriInvoke } from './pages/settings/shared/settings-page-helpers.js';
 import { useAuthStore } from './stores/auth.js';
-import LoginPage from './pages/LoginPage.js';
+import LoginPage from './pages/misc/LoginPage.js';
 import Layout from './components/Layout.js';
-import OnboardingModal from './components/OnboardingModal.js';
-import PageTransitionLoader from './components/PageTransitionLoader.js';
-import { ToastContainer } from './components/ToastNotification.js';
-import UpdateBanner from './components/UpdateBanner.js';
+import OnboardingModal from './components/onboarding/OnboardingModal.js';
+import PageTransitionLoader from './components/common/PageTransitionLoader.js';
+import { ToastContainer } from './components/common/ToastNotification.js';
+import UpdateBanner from './components/common/UpdateBanner.js';
 import { usePrefersReducedMotion } from './hooks/usePrefersReducedMotion.js';
 import { PRELOADABLE_ROUTE_MODULES } from './routes/preloadable-route-modules.js';
 import { TelemetryConsentModal } from '@openAwork/shared-ui';
@@ -30,7 +30,7 @@ import {
   readDesktopGatewayMode,
   startDesktopGateway,
   waitForGatewayHealth,
-} from './utils/desktop-gateway.js';
+} from './utils/gateway/desktop-gateway.js';
 
 type UnlistenFn = () => void;
 

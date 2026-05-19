@@ -1,5 +1,5 @@
 import { memo, type CSSProperties } from 'react';
-import { SessionModeBadges } from '../../components/SessionModeBadges.js';
+import { SessionModeBadges } from '../../components/common/SessionModeBadges.js';
 import type { SessionRow } from './session-page-types.js';
 import {
   isNestedInteractiveTarget,
@@ -122,7 +122,7 @@ export const SessionCard = memo(function SessionCard({
             borderRadius: '50%',
             background: statusDotColor(s.state_status),
             flexShrink: 0,
-            boxShadow: s.state_status === 'running' ? '0 0 6px #22c55e' : 'none',
+            boxShadow: s.state_status === 'running' ? '0 0 6px var(--success, var(--success, #3dd49a))' : 'none',
           }}
         />
         <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6 }}>

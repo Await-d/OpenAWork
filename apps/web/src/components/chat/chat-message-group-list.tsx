@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ChatMessage, ChatUsageDetails } from '../session-conversation/runtime/support.js';
-import { readAssistantTracePayload } from '../session-conversation/runtime/support.js';
-import { CHAT_SCROLL_BOTTOM_SPACER_HEIGHT } from '../session-conversation/runtime/use-chat-scroll.js';
+import type { ChatMessage, ChatUsageDetails } from '../conversation-runtime/messages/support.js';
+import { readAssistantTracePayload } from '../conversation-runtime/messages/support.js';
+import { CHAT_SCROLL_BOTTOM_SPACER_HEIGHT } from '../../pages/chat-page/conversation/render/use-chat-scroll.js';
 import {
   InlinePermissionQuickBar,
   MessageRow,

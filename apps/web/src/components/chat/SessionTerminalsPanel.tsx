@@ -14,11 +14,11 @@
 
 import { useEffect, useState } from 'react';
 import type { SessionTerminalStatus } from '@openAwork/shared';
-import type { SessionTerminalView } from '../session-conversation/runtime/terminals-api.js';
+import type { SessionTerminalView } from '../conversation-runtime/terminals/terminals-api.js';
 import {
   closeTerminal,
   deleteSessionTerminal,
-} from '../session-conversation/runtime/terminals-api.js';
+} from '../conversation-runtime/terminals/terminals-api.js';
 import { InteractiveTerminalView } from './InteractiveTerminalView.js';
 
 interface SessionTerminalsPanelProps {
@@ -56,34 +56,34 @@ const STATUS_LABELS: Record<SessionTerminalStatus, string> = {
 };
 
 const STATUS_COLORS: Record<SessionTerminalStatus, { fg: string; bg: string; dot: string }> = {
-  running: { fg: '#34d399', bg: 'color-mix(in srgb, #34d399 18%, transparent)', dot: '#34d399' },
+  running: { fg: 'var(--success, var(--success, #3dd49a))', bg: 'color-mix(in srgb, var(--success) 18%, transparent)', dot: 'var(--success, var(--success, #3dd49a))' },
   idle: {
-    fg: '#3b82f6',
-    bg: 'color-mix(in srgb, #3b82f6 14%, transparent)',
-    dot: '#3b82f6',
+    fg: 'var(--aux, var(--aux, #8b9cf5))',
+    bg: 'color-mix(in srgb, var(--aux) 14%, transparent)',
+    dot: 'var(--aux, var(--aux, #8b9cf5))',
   },
   exited: {
     fg: 'var(--text-2)',
     bg: 'color-mix(in srgb, var(--text-3) 12%, transparent)',
     dot: 'var(--text-3)',
   },
-  aborted: { fg: '#f59e0b', bg: 'color-mix(in srgb, #f59e0b 18%, transparent)', dot: '#f59e0b' },
-  timeout: { fg: '#f59e0b', bg: 'color-mix(in srgb, #f59e0b 18%, transparent)', dot: '#f59e0b' },
+  aborted: { fg: 'var(--warning, var(--warning, #f0b429))', bg: 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 18%, transparent)', dot: 'var(--warning, var(--warning, #f0b429))' },
+  timeout: { fg: 'var(--warning, var(--warning, #f0b429))', bg: 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 18%, transparent)', dot: 'var(--warning, var(--warning, #f0b429))' },
   spawn_error: {
-    fg: '#ef4444',
-    bg: 'color-mix(in srgb, #ef4444 18%, transparent)',
-    dot: '#ef4444',
+    fg: 'var(--danger, var(--danger, #f06b7e))',
+    bg: 'color-mix(in srgb, var(--danger) 18%, transparent)',
+    dot: 'var(--danger, var(--danger, #f06b7e))',
   },
-  killed: { fg: '#ef4444', bg: 'color-mix(in srgb, #ef4444 18%, transparent)', dot: '#ef4444' },
+  killed: { fg: 'var(--danger, var(--danger, #f06b7e))', bg: 'color-mix(in srgb, var(--danger) 18%, transparent)', dot: 'var(--danger, var(--danger, #f06b7e))' },
   stale: {
     fg: 'var(--text-3)',
     bg: 'color-mix(in srgb, var(--text-3) 10%, transparent)',
     dot: 'var(--text-3)',
   },
   'tmux-spawned': {
-    fg: '#3b82f6',
-    bg: 'color-mix(in srgb, #3b82f6 18%, transparent)',
-    dot: '#3b82f6',
+    fg: 'var(--aux, var(--aux, #8b9cf5))',
+    bg: 'color-mix(in srgb, var(--aux) 18%, transparent)',
+    dot: 'var(--aux, var(--aux, #8b9cf5))',
   },
   'tmux-killed': {
     fg: 'var(--text-3)',
@@ -230,9 +230,9 @@ function TerminalRow({
             onClick={onKill}
             style={{
               fontSize: 11,
-              border: '1px solid color-mix(in srgb, #ef4444 50%, transparent)',
-              background: 'color-mix(in srgb, #ef4444 14%, transparent)',
-              color: '#ef4444',
+              border: '1px solid color-mix(in srgb, var(--danger) 50%, transparent)',
+              background: 'color-mix(in srgb, var(--danger) 14%, transparent)',
+              color: 'var(--danger, var(--danger, #f06b7e))',
               padding: '3px 8px',
               borderRadius: 5,
               cursor: pendingKill ? 'wait' : 'pointer',
@@ -302,7 +302,7 @@ function TerminalRow({
           <div
             style={{
               height: 240,
-              background: '#0b1117',
+              background: 'var(--bg-base, #080b12)',
             }}
           >
             <InteractiveTerminalView
@@ -488,8 +488,8 @@ export function SessionTerminalsPanel({
           <div
             style={{
               padding: '8px 14px',
-              background: 'color-mix(in srgb, #ef4444 12%, transparent)',
-              color: '#ef4444',
+              background: 'color-mix(in srgb, var(--danger) 12%, transparent)',
+              color: 'var(--danger, var(--danger, #f06b7e))',
               fontSize: 11,
             }}
           >

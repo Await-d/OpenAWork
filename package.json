@@ -16,8 +16,8 @@
     "test": "pnpm -r run test",
     "test:e2e": "pnpm -r run test:e2e",
     "clean": "pnpm -r run clean && rm -rf node_modules",
-    "version:bump": "node scripts/release-version.mjs",
-    "version:bump:dry-run": "node scripts/release-version.mjs --bump auto --dry-run",
+    "version:bump": "node scripts/release/release-version.mjs",
+    "version:bump:dry-run": "node scripts/release/release-version.mjs --bump auto --dry-run",
     "prepare": "husky"
   },
   "devDependencies": {

@@ -1,62 +1,62 @@
-export { ChatMessage } from './ChatMessage.js';
-export type { ChatMessageProps } from './ChatMessage.js';
-export { StreamRenderer } from './StreamRenderer.js';
-export type { StreamRendererProps } from './StreamRenderer.js';
-export { ToolCallCard } from './ToolCallCard.js';
-export type { ToolCallCardDisplayData, ToolCallCardProps, ToolKind } from './ToolCallCard.js';
-export { resolveToolCallCardDisplayData } from './ToolCallCard.js';
-export { BashTerminalCard } from './tool-call-card-bash-terminal.js';
-export type { BashTerminalView } from './tool-call-card-bash-terminal.js';
-export { BatchTerminalCard } from './tool-call-card-batch-terminal.js';
-export type { BatchTerminalView } from './tool-call-card-batch-terminal.js';
-export { ToolKindIcon } from './tool-call-card-meta.js';
+export { ChatMessage } from './chat/ChatMessage.js';
+export type { ChatMessageProps } from './chat/ChatMessage.js';
+export { StreamRenderer } from './chat/StreamRenderer.js';
+export type { StreamRendererProps } from './chat/StreamRenderer.js';
+export { ToolCallCard } from './tools/ToolCallCard.js';
+export type { ToolCallCardDisplayData, ToolCallCardProps, ToolKind } from './tools/ToolCallCard.js';
+export { resolveToolCallCardDisplayData } from './tools/ToolCallCard.js';
+export { BashTerminalCard } from './tools/tool-call-card-bash-terminal.js';
+export type { BashTerminalView } from './tools/tool-call-card-bash-terminal.js';
+export { BatchTerminalCard } from './tools/tool-call-card-batch-terminal.js';
+export type { BatchTerminalView } from './tools/tool-call-card-batch-terminal.js';
+export { ToolKindIcon } from './tools/tool-call-card-meta.js';
 export {
   resolveToolIconKey,
   resolveToolKind,
   resolveToolStatusMeta,
   resolveToolVisualStatus,
   ToolGlyph,
-} from './tool-visual-meta.js';
-export type { ToolIconKey, ToolVisualStatus } from './tool-visual-meta.js';
-export { PlanPanel } from './PlanPanel.js';
-export type { PlanPanelProps, PlanTask } from './PlanPanel.js';
-export { WorkflowModeToggle } from './WorkflowModeToggle.js';
-export type { WorkflowModeToggleProps, WorkflowMode } from './WorkflowModeToggle.js';
-export { RootCausePanel } from './RootCausePanel.js';
-export type { RootCausePanelProps, RootCauseInfo } from './RootCausePanel.js';
-export { QRCodeDisplay } from './QRCodeDisplay.js';
-export type { QRCodeDisplayProps } from './QRCodeDisplay.js';
-export { QRCodeScanner } from './QRCodeScanner.js';
-export type { QRCodeScannerProps } from './QRCodeScanner.js';
-export { AuditLogExportButton } from './AuditLogExportButton.js';
-export type { AuditLogExportButtonProps } from './AuditLogExportButton.js';
-export { DiagnosticCard } from './DiagnosticCard.js';
-export type { DiagnosticCardProps, Diagnostic, DiagnosticSeverity } from './DiagnosticCard.js';
-export { PermissionPrompt } from './PermissionPrompt.js';
-export type { PermissionPromptProps, PermissionDecision } from './PermissionPrompt.js';
-export { FileStatusPanel } from './FileStatusPanel.js';
-export type { FileStatusPanelProps, FileChange, FileChangeStatus } from './FileStatusPanel.js';
-export { FileChangeReviewPanel } from './FileChangeReviewPanel.js';
-export { ToolDiffCollection } from './ToolDiffCollection.js';
-export type { ToolDiffCollectionProps, ToolDiffFileView } from './ToolDiffCollection.js';
-export { UnifiedCodeDiff } from './UnifiedCodeDiff.js';
-export type { UnifiedCodeDiffProps, UnifiedCodeDiffSummary } from './UnifiedCodeDiff.js';
-export { FileSearch } from './FileSearch.js';
-export type { FileSearchProps, FileSearchResult, FileSearchMode } from './FileSearch.js';
-export { ProviderSettings } from './ProviderSettings.js';
+} from './tools/tool-visual-meta.js';
+export type { ToolIconKey, ToolVisualStatus } from './tools/tool-visual-meta.js';
+export { PlanPanel } from './agent/PlanPanel.js';
+export type { PlanPanelProps, PlanTask } from './agent/PlanPanel.js';
+export { WorkflowModeToggle } from './workflow/WorkflowModeToggle.js';
+export type { WorkflowModeToggleProps, WorkflowMode } from './workflow/WorkflowModeToggle.js';
+export { RootCausePanel } from './agent/RootCausePanel.js';
+export type { RootCausePanelProps, RootCauseInfo } from './agent/RootCausePanel.js';
+export { QRCodeDisplay } from './pairing/QRCodeDisplay.js';
+export type { QRCodeDisplayProps } from './pairing/QRCodeDisplay.js';
+export { QRCodeScanner } from './pairing/QRCodeScanner.js';
+export type { QRCodeScannerProps } from './pairing/QRCodeScanner.js';
+export { AuditLogExportButton } from './misc/AuditLogExportButton.js';
+export type { AuditLogExportButtonProps } from './misc/AuditLogExportButton.js';
+export { DiagnosticCard } from './agent/DiagnosticCard.js';
+export type { DiagnosticCardProps, Diagnostic, DiagnosticSeverity } from './agent/DiagnosticCard.js';
+export { PermissionPrompt } from './permissions/PermissionPrompt.js';
+export type { PermissionPromptProps, PermissionDecision } from './permissions/PermissionPrompt.js';
+export { FileStatusPanel } from './file/FileStatusPanel.js';
+export type { FileStatusPanelProps, FileChange, FileChangeStatus } from './file/FileStatusPanel.js';
+export { FileChangeReviewPanel } from './file/FileChangeReviewPanel.js';
+export { ToolDiffCollection } from './tools/ToolDiffCollection.js';
+export type { ToolDiffCollectionProps, ToolDiffFileView } from './tools/ToolDiffCollection.js';
+export { UnifiedCodeDiff } from './tools/UnifiedCodeDiff.js';
+export type { UnifiedCodeDiffProps, UnifiedCodeDiffSummary } from './tools/UnifiedCodeDiff.js';
+export { FileSearch } from './file/FileSearch.js';
+export type { FileSearchProps, FileSearchResult, FileSearchMode } from './file/FileSearch.js';
+export { ProviderSettings } from './models/ProviderSettings.js';
 export {
   canConfigureThinkingForModel,
   describeReasoningEffort,
   getSupportedReasoningEffortsForModel,
-} from './model-reasoning-support.js';
-export type { SupportedReasoningEffort } from './model-reasoning-support.js';
-export { buildFilteredModelGroups } from './model-picker-search.js';
+} from './models/model-reasoning-support.js';
+export type { SupportedReasoningEffort } from './models/model-reasoning-support.js';
+export { buildFilteredModelGroups } from './models/model-picker-search.js';
 export type {
   ModelPickerGroup,
   ModelPickerModel,
   ModelPickerProvider,
   SearchableModelOption,
-} from './model-picker-search.js';
+} from './models/model-picker-search.js';
 export type {
   ProviderSettingsProps,
   AIProviderRef,
@@ -67,139 +67,139 @@ export type {
   ThinkingModeRef,
   ReasoningEffortRef,
   ProviderEditData,
-} from './ProviderSettings.js';
-export { ModelManager } from './ModelManager.js';
-export type { ModelManagerProps, AIProviderItem, AIModelConfigItem } from './ModelManager.js';
-export { OAuthButton } from './OAuthButton.js';
-export type { OAuthButtonProps } from './OAuthButton.js';
-export { CostOverview } from './CostOverview.js';
-export type { CostOverviewProps, CostBreakdownItem } from './CostOverview.js';
-export { ChannelManager } from './ChannelManager.js';
+} from './models/ProviderSettings.js';
+export { ModelManager } from './models/ModelManager.js';
+export type { ModelManagerProps, AIProviderItem, AIModelConfigItem } from './models/ModelManager.js';
+export { OAuthButton } from './misc/OAuthButton.js';
+export type { OAuthButtonProps } from './misc/OAuthButton.js';
+export { CostOverview } from './cost/CostOverview.js';
+export type { CostOverviewProps, CostBreakdownItem } from './cost/CostOverview.js';
+export { ChannelManager } from './misc/ChannelManager.js';
 export type {
   ChannelManagerProps,
   ChannelConfig,
   ChannelType,
   ChannelStatus,
-} from './ChannelManager.js';
-export { CronManager } from './CronManager.js';
-export type { CronManagerProps, CronJob, ScheduleKind, CronJobStatus } from './CronManager.js';
-export { TeammateCard } from './TeammateCard.js';
-export type { TeammateCardProps, TeamMember, MemberStatus } from './TeammateCard.js';
-export { TeamPanel } from './TeamPanel.js';
-export type { TeamPanelProps, TeamTask, TaskStatus, TeamMessage } from './TeamPanel.js';
-export { ContextPanel } from './ContextPanel.js';
-export type { ContextPanelProps, ContextItem, ContextItemKind } from './ContextPanel.js';
-export { FileTreePanel } from './FileTreePanel.js';
+} from './misc/ChannelManager.js';
+export { CronManager } from './misc/CronManager.js';
+export type { CronManagerProps, CronJob, ScheduleKind, CronJobStatus } from './misc/CronManager.js';
+export { TeammateCard } from './team/TeammateCard.js';
+export type { TeammateCardProps, TeamMember, MemberStatus } from './team/TeammateCard.js';
+export { TeamPanel } from './team/TeamPanel.js';
+export type { TeamPanelProps, TeamTask, TaskStatus, TeamMessage } from './team/TeamPanel.js';
+export { ContextPanel } from './misc/ContextPanel.js';
+export type { ContextPanelProps, ContextItem, ContextItemKind } from './misc/ContextPanel.js';
+export { FileTreePanel } from './file/FileTreePanel.js';
 export type {
   FileTreePanelProps,
   FileTreeNode,
   FileTreeNodeKind,
   FileTreeNodeStatus,
-} from './FileTreePanel.js';
-export { PermissionHistory } from './PermissionHistory.js';
-export type { PermissionHistoryProps, PermissionDecisionRecord } from './PermissionHistory.js';
-export { PermissionRulesEditor } from './PermissionRulesEditor.js';
+} from './file/FileTreePanel.js';
+export { PermissionHistory } from './permissions/PermissionHistory.js';
+export type { PermissionHistoryProps, PermissionDecisionRecord } from './permissions/PermissionHistory.js';
+export { PermissionRulesEditor } from './permissions/PermissionRulesEditor.js';
 export type {
   PermissionRulesEditorProps,
   PermissionRuleEntry,
   PermissionAction as PermissionRuleAction,
   PermissionCategoryMeta,
-} from './PermissionRulesEditor.js';
-export { ArtifactList } from './ArtifactList.js';
-export type { ArtifactListProps, ArtifactItem, ArtifactType } from './ArtifactList.js';
-export { ArtifactPreview } from './ArtifactPreview.js';
-export type { ArtifactPreviewProps } from './ArtifactPreview.js';
-export { SkillManagerMobile } from './SkillManagerMobile.js';
-export type { SkillManagerMobileProps, InstalledSkill, AuthStatus } from './SkillManagerMobile.js';
-export { SkillManagerDesktop } from './SkillManagerDesktop.js';
-export type { SkillManagerDesktopProps } from './SkillManagerDesktop.js';
-export { MCPServerConfig } from './MCPServerConfig.js';
-export type { MCPServerConfigProps, MCPServerEntry } from './MCPServerConfig.js';
-export { MCPServerList } from './MCPServerList.js';
-export type { MCPServerListProps, MCPServerStatus } from './MCPServerList.js';
-export { ModelCostDisplay } from './ModelCostDisplay.js';
-export type { ModelCostDisplayProps } from './ModelCostDisplay.js';
-export { ProviderUpdateBadge } from './ProviderUpdateBadge.js';
-export type { ProviderUpdateBadgeProps } from './ProviderUpdateBadge.js';
-export { FileFilterSettings } from './FileFilterSettings.js';
-export type { FileFilterSettingsProps } from './FileFilterSettings.js';
-export { AttributionConfigUI } from './AttributionConfigUI.js';
-export type { AttributionConfigUIProps, AttributionConfig } from './AttributionConfigUI.js';
-export { LogViewer } from './LogViewer.js';
-export type { LogViewerProps, LogEntry, LogLevel } from './LogViewer.js';
-export { TelemetryConsentModal } from './TelemetryConsentModal.js';
-export type { TelemetryConsentModalProps } from './TelemetryConsentModal.js';
-export { SkillMarketHome } from './SkillMarketHome.js';
-export type { SkillMarketHomeProps, MarketSkill } from './SkillMarketHome.js';
-export { SkillDetailPage } from './SkillDetailPage.js';
-export type { SkillDetailPageProps, MarketSkillDetail } from './SkillDetailPage.js';
-export { RegistrySourceManager } from './RegistrySourceManager.js';
-export type { RegistrySourceManagerProps, RegistrySource } from './RegistrySourceManager.js';
-export { InstalledSkillsManager } from './InstalledSkillsManager.js';
+} from './permissions/PermissionRulesEditor.js';
+export { ArtifactList } from './artifacts/ArtifactList.js';
+export type { ArtifactListProps, ArtifactItem, ArtifactType } from './artifacts/ArtifactList.js';
+export { ArtifactPreview } from './artifacts/ArtifactPreview.js';
+export type { ArtifactPreviewProps } from './artifacts/ArtifactPreview.js';
+export { SkillManagerMobile } from './skills/SkillManagerMobile.js';
+export type { SkillManagerMobileProps, InstalledSkill, AuthStatus } from './skills/SkillManagerMobile.js';
+export { SkillManagerDesktop } from './skills/SkillManagerDesktop.js';
+export type { SkillManagerDesktopProps } from './skills/SkillManagerDesktop.js';
+export { MCPServerConfig } from './mcp/MCPServerConfig.js';
+export type { MCPServerConfigProps, MCPServerEntry } from './mcp/MCPServerConfig.js';
+export { MCPServerList } from './mcp/MCPServerList.js';
+export type { MCPServerListProps, MCPServerStatus } from './mcp/MCPServerList.js';
+export { ModelCostDisplay } from './models/ModelCostDisplay.js';
+export type { ModelCostDisplayProps } from './models/ModelCostDisplay.js';
+export { ProviderUpdateBadge } from './models/ProviderUpdateBadge.js';
+export type { ProviderUpdateBadgeProps } from './models/ProviderUpdateBadge.js';
+export { FileFilterSettings } from './file/FileFilterSettings.js';
+export type { FileFilterSettingsProps } from './file/FileFilterSettings.js';
+export { AttributionConfigUI } from './misc/AttributionConfigUI.js';
+export type { AttributionConfigUIProps, AttributionConfig } from './misc/AttributionConfigUI.js';
+export { LogViewer } from './misc/LogViewer.js';
+export type { LogViewerProps, LogEntry, LogLevel } from './misc/LogViewer.js';
+export { TelemetryConsentModal } from './telemetry/TelemetryConsentModal.js';
+export type { TelemetryConsentModalProps } from './telemetry/TelemetryConsentModal.js';
+export { SkillMarketHome } from './skills/SkillMarketHome.js';
+export type { SkillMarketHomeProps, MarketSkill } from './skills/SkillMarketHome.js';
+export { SkillDetailPage } from './skills/SkillDetailPage.js';
+export type { SkillDetailPageProps, MarketSkillDetail } from './skills/SkillDetailPage.js';
+export { RegistrySourceManager } from './skills/RegistrySourceManager.js';
+export type { RegistrySourceManagerProps, RegistrySource } from './skills/RegistrySourceManager.js';
+export { InstalledSkillsManager } from './skills/InstalledSkillsManager.js';
 export type {
   InstalledSkillsManagerProps,
   InstalledSkill as MarketInstalledSkill,
-} from './InstalledSkillsManager.js';
-export { InstallProgressUI } from './InstallProgressUI.js';
+} from './skills/InstalledSkillsManager.js';
+export { InstallProgressUI } from './skills/InstallProgressUI.js';
 export type {
   InstallProgressUIProps,
   InstallStep,
   InstallStepStatus,
-} from './InstallProgressUI.js';
-export { PermissionConfirmDialog } from './PermissionConfirmDialog.js';
-export { TelemetryConsentDialog } from './TelemetryConsentDialog.js';
-export type { TelemetryConsentDialogProps } from './TelemetryConsentDialog.js';
-export type { PermissionConfirmDialogProps, PermissionItem } from './PermissionConfirmDialog.js';
+} from './skills/InstallProgressUI.js';
+export { PermissionConfirmDialog } from './permissions/PermissionConfirmDialog.js';
+export { TelemetryConsentDialog } from './telemetry/TelemetryConsentDialog.js';
+export type { TelemetryConsentDialogProps } from './telemetry/TelemetryConsentDialog.js';
+export type { PermissionConfirmDialogProps, PermissionItem } from './permissions/PermissionConfirmDialog.js';
 
-export { StepRow } from './StepRow.js';
-export type { StepRowProps } from './StepRow.js';
-export { PlanHistoryPanel } from './PlanHistoryPanel.js';
-export type { PlanHistoryPanelProps, HistoricalPlan } from './PlanHistoryPanel.js';
-export { AgentDAGGraph } from './AgentDAGGraph.js';
-export type { AgentDAGGraphProps, DAGNodeInfo, DAGEdgeInfo } from './AgentDAGGraph.js';
-export { CostBadge } from './CostBadge.js';
-export type { CostBadgeProps } from './CostBadge.js';
-export { UsageDashboard } from './UsageDashboard.js';
-export type { UsageDashboardProps, MonthlyRecord } from './UsageDashboard.js';
-export { WorkerStatusIndicator } from './WorkerStatusIndicator.js';
-export type { WorkerStatusIndicatorProps, WorkerEntry } from './WorkerStatusIndicator.js';
-export { BudgetAlert } from './BudgetAlert.js';
-export type { BudgetAlertProps } from './BudgetAlert.js';
-export { ModelPriceConfig } from './ModelPriceConfig.js';
-export type { ModelPriceConfigProps, ModelPriceEntry } from './ModelPriceConfig.js';
-export { WorkflowCanvas } from './WorkflowCanvas.js';
-export type { WorkflowCanvasProps, WFNode, WFEdge } from './WorkflowCanvas.js';
-export { WorkflowTemplateLibrary } from './WorkflowTemplateLibrary.js';
+export { StepRow } from './chat/StepRow.js';
+export type { StepRowProps } from './chat/StepRow.js';
+export { PlanHistoryPanel } from './agent/PlanHistoryPanel.js';
+export type { PlanHistoryPanelProps, HistoricalPlan } from './agent/PlanHistoryPanel.js';
+export { AgentDAGGraph } from './agent/AgentDAGGraph.js';
+export type { AgentDAGGraphProps, DAGNodeInfo, DAGEdgeInfo } from './agent/AgentDAGGraph.js';
+export { CostBadge } from './cost/CostBadge.js';
+export type { CostBadgeProps } from './cost/CostBadge.js';
+export { UsageDashboard } from './cost/UsageDashboard.js';
+export type { UsageDashboardProps, MonthlyRecord } from './cost/UsageDashboard.js';
+export { WorkerStatusIndicator } from './agent/WorkerStatusIndicator.js';
+export type { WorkerStatusIndicatorProps, WorkerEntry } from './agent/WorkerStatusIndicator.js';
+export { BudgetAlert } from './cost/BudgetAlert.js';
+export type { BudgetAlertProps } from './cost/BudgetAlert.js';
+export { ModelPriceConfig } from './models/ModelPriceConfig.js';
+export type { ModelPriceConfigProps, ModelPriceEntry } from './models/ModelPriceConfig.js';
+export { WorkflowCanvas } from './workflow/WorkflowCanvas.js';
+export type { WorkflowCanvasProps, WFNode, WFEdge } from './workflow/WorkflowCanvas.js';
+export { WorkflowTemplateLibrary } from './workflow/WorkflowTemplateLibrary.js';
 export type {
   WorkflowTemplateLibraryProps,
   WorkflowTemplateSummary,
-} from './WorkflowTemplateLibrary.js';
-export { AttachmentBar } from './AttachmentBar.js';
-export type { AttachmentBarProps, AttachmentItem } from './AttachmentBar.js';
-export { VoiceRecorder } from './VoiceRecorder.js';
-export type { VoiceRecorderProps } from './VoiceRecorder.js';
-export { ImagePreview } from './ImagePreview.js';
-export type { ImagePreviewProps } from './ImagePreview.js';
-export { GitHubTriggerConfig } from './GitHubTriggerConfig.js';
-export type { GitHubTriggerConfigProps } from './GitHubTriggerConfig.js';
-export { GenerativeUIRenderer } from './GenerativeUI.js';
-export type { GenerativeUIMessage, GenerativeUIRendererProps } from './GenerativeUI.js';
+} from './workflow/WorkflowTemplateLibrary.js';
+export { AttachmentBar } from './chat/AttachmentBar.js';
+export type { AttachmentBarProps, AttachmentItem } from './chat/AttachmentBar.js';
+export { VoiceRecorder } from './chat/VoiceRecorder.js';
+export type { VoiceRecorderProps } from './chat/VoiceRecorder.js';
+export { ImagePreview } from './chat/ImagePreview.js';
+export type { ImagePreviewProps } from './chat/ImagePreview.js';
+export { GitHubTriggerConfig } from './misc/GitHubTriggerConfig.js';
+export type { GitHubTriggerConfigProps } from './misc/GitHubTriggerConfig.js';
+export { GenerativeUIRenderer } from './misc/GenerativeUI.js';
+export type { GenerativeUIMessage, GenerativeUIRendererProps } from './misc/GenerativeUI.js';
 export {
   ALLOWED_SUBMIT_ROUTES,
   sanitizePayload,
   validateGenerativeUIMessage,
-} from './GenerativeUIValidator.js';
-export type { GenerativeUIValidationResult } from './GenerativeUIValidator.js';
+} from './misc/GenerativeUIValidator.js';
+export type { GenerativeUIValidationResult } from './misc/GenerativeUIValidator.js';
 export {
   MobileResponsiveWrapper,
   useMobileLayout,
   MobileLayoutContext,
-} from './MobileResponsiveWrapper.js';
-export type { MobileResponsiveWrapperProps } from './MobileResponsiveWrapper.js';
-export { ScheduleManagerUI } from './ScheduleManagerUI.js';
-export type { ScheduleManagerUIProps, ScheduleTaskItem } from './ScheduleManagerUI.js';
-export { CommandPalette } from './CommandPalette.js';
-export type { CommandPaletteProps, CommandItem } from './CommandPalette.js';
+} from './misc/MobileResponsiveWrapper.js';
+export type { MobileResponsiveWrapperProps } from './misc/MobileResponsiveWrapper.js';
+export { ScheduleManagerUI } from './misc/ScheduleManagerUI.js';
+export type { ScheduleManagerUIProps, ScheduleTaskItem } from './misc/ScheduleManagerUI.js';
+export { CommandPalette } from './misc/CommandPalette.js';
+export type { CommandPaletteProps, CommandItem } from './misc/CommandPalette.js';
 export { tokens } from './tokens.js';
 export type { Tokens } from './tokens.js';
 export { ShellCard, RailButton, PanelSection, StatusPill } from './primitives/index.js';
@@ -210,23 +210,23 @@ export type {
   StatusPillProps,
 } from './primitives/index.js';
 
-export { DeveloperModePanel } from './DeveloperModePanel.js';
-export type { DeveloperModePanelProps, DevEvent } from './DeveloperModePanel.js';
-export { SSHConnectionPanel } from './SSHConnectionPanel.js';
+export { DeveloperModePanel } from './agent/DeveloperModePanel.js';
+export type { DeveloperModePanelProps, DevEvent } from './agent/DeveloperModePanel.js';
+export { SSHConnectionPanel } from './misc/SSHConnectionPanel.js';
 export type {
   SSHConnectionPanelProps,
   SSHConnectionEntry,
   SSHAuthType,
-} from './SSHConnectionPanel.js';
-export { AgentVizPanel } from './AgentVizPanel.js';
-export type { AgentVizPanelProps, AgentVizEvent, AgentVizEventType } from './AgentVizPanel.js';
-export { PairingPanel } from './PairingPanel.js';
+} from './misc/SSHConnectionPanel.js';
+export { AgentVizPanel } from './agent/AgentVizPanel.js';
+export type { AgentVizPanelProps, AgentVizEvent, AgentVizEventType } from './agent/AgentVizPanel.js';
+export { PairingPanel } from './pairing/PairingPanel.js';
 export type {
   PairingPanelProps,
   PairingMode,
   PairedDevice,
   PairingHostProps,
   PairingClientProps,
-} from './PairingPanel.js';
-export { WorkspaceSelector } from './WorkspaceSelector.js';
-export type { WorkspaceSelectorProps } from './WorkspaceSelector.js';
+} from './pairing/PairingPanel.js';
+export { WorkspaceSelector } from './misc/WorkspaceSelector.js';
+export type { WorkspaceSelectorProps } from './misc/WorkspaceSelector.js';

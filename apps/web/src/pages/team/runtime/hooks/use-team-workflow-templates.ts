@@ -302,14 +302,14 @@ function buildTemplateEdges(roleLabels: string[]): WorkflowEdgeRecord[] {
 
 function buildRoleRows(roleLabels: string[]): Array<Array<{ color: string; label: string }>> {
   const roleColorMap = new Map([
-    ['团队领导', '#b45309'],
-    ['团队负责人', '#d59b11'],
-    ['研究员', '#5b5bd8'],
-    ['执行者', '#378dff'],
-    ['批评者', '#d04e4e'],
+    ['团队领导', 'var(--warning, #f0b429)'],
+    ['团队负责人', 'var(--warning, #f0b429)'],
+    ['研究员', 'var(--accent, var(--accent, #5cd4c0))'],
+    ['执行者', 'var(--aux, var(--aux, #8b9cf5))'],
+    ['批评者', 'var(--danger, #f06b7e)'],
   ]);
   const tags = roleLabels.map((label) => ({
-    color: roleColorMap.get(label) ?? '#7c52ff',
+    color: roleColorMap.get(label) ?? 'var(--chart-5, var(--chart-5, #c4b5fd))',
     label,
   }));
 

@@ -1,7 +1,7 @@
 /**
  * @deprecated TeamPage V1 路径专用 · TeamPageV2 不再引用本组件。
  *
- * V2 已切换到 `<TeamSessionView/>` + chat 渲染（由 ConversationArea 内嵌）。
+ * V2 已切换到 `<TeamConversationView/>` + chat 渲染（由 ConversationArea 内嵌）。
  * 本文件仅在 `localStorage['teamV2.enabled']='0'` 显式回退到 V1 时还会被
  * `MainWorkspace.tsx` 路由到。当 V1 fallback 移除时本文件可一并删除。
  *
@@ -581,7 +581,7 @@ export function ConversationTab({
                         display: 'grid',
                         placeItems: 'center',
                         background: `linear-gradient(135deg, ${chip.accent}, color-mix(in oklch, ${chip.accent} 70%, #000))`,
-                        color: '#fff',
+                        color: 'var(--fg-on-accent, #ffffff)',
                         fontSize: 10,
                         fontWeight: 800,
                         flexShrink: 0,

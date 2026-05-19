@@ -3,12 +3,12 @@ import type { PendingPermissionRequest, Session, SessionTask } from '@openAwork/
 import { ContextPanel, PlanHistoryPanel } from '@openAwork/shared-ui';
 import type { AttachmentItem, ContextItem, HistoricalPlan } from '@openAwork/shared-ui';
 import { Link } from 'react-router';
-import type { DialogueMode } from '../dialogue-mode.js';
-import type { ChatContextUsageSnapshot } from '../../components/session-conversation/runtime/context-usage.js';
+import type { DialogueMode } from './dialogue-mode.js';
+import type { ChatContextUsageSnapshot } from '../../components/conversation-runtime/messages/context-usage.js';
 import type {
   ChatMessage,
   WorkspaceFileMentionItem,
-} from '../../components/session-conversation/runtime/support.js';
+} from '../../components/conversation-runtime/messages/support.js';
 
 type HierarchicalSessionTask = SessionTask & {
   completedSubtaskCount?: number;
@@ -85,23 +85,23 @@ function getSessionTodoBadgeTone(todo: SessionTodoItem): {
 } {
   if (todo.status === 'in_progress') {
     return {
-      border: '1px solid color-mix(in srgb, #38bdf8 38%, var(--border))',
-      color: '#7dd3fc',
-      background: 'color-mix(in srgb, #38bdf8 10%, transparent)',
+      border: '1px solid color-mix(in srgb, var(--chart-7, var(--chart-7, #67e8f9)) 38%, var(--border))',
+      color: 'var(--chart-7, var(--chart-7, #67e8f9))',
+      background: 'color-mix(in srgb, var(--chart-7, var(--chart-7, #67e8f9)) 10%, transparent)',
     };
   }
   if (todo.status === 'completed') {
     return {
-      border: '1px solid color-mix(in srgb, #34d399 40%, var(--border))',
-      color: '#86efac',
-      background: 'color-mix(in srgb, #34d399 10%, transparent)',
+      border: '1px solid color-mix(in srgb, var(--success, var(--success, #3dd49a)) 40%, var(--border))',
+      color: 'var(--success, var(--success, #3dd49a))',
+      background: 'color-mix(in srgb, var(--success, var(--success, #3dd49a)) 10%, transparent)',
     };
   }
   if (todo.status === 'cancelled') {
     return {
-      border: '1px solid color-mix(in srgb, #f59e0b 45%, var(--border))',
-      color: '#fcd34d',
-      background: 'color-mix(in srgb, #f59e0b 10%, transparent)',
+      border: '1px solid color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 45%, var(--border))',
+      color: 'var(--warning, var(--warning, #f0b429))',
+      background: 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 10%, transparent)',
     };
   }
   return {
@@ -324,9 +324,9 @@ export function ChatHistoryTabContent(props: {
                           lineHeight: 1,
                           padding: '1px 4px',
                           borderRadius: 999,
-                          border: '1px solid color-mix(in srgb, #f59e0b 55%, var(--border))',
-                          color: '#fbbf24',
-                          background: 'color-mix(in srgb, #f59e0b 10%, transparent)',
+                          border: '1px solid color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 55%, var(--border))',
+                          color: 'var(--warning, var(--warning, #f0b429))',
+                          background: 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 10%, transparent)',
                         }}
                       >
                         等待前置
@@ -349,8 +349,8 @@ export function ChatHistoryTabContent(props: {
                         fontSize: 10,
                         color:
                           task.errorMessage || task.terminalReason
-                            ? '#fca5a5'
-                            : 'color-mix(in srgb, #86efac 90%, var(--text-3))',
+                            ? 'var(--danger, var(--danger, #f06b7e))'
+                            : 'color-mix(in srgb, var(--success, var(--success, #3dd49a)) 90%, var(--text-3))',
                         whiteSpace: 'nowrap',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
@@ -419,7 +419,7 @@ export function ChatHistoryTabContent(props: {
                   >
                     <span
                       style={{
-                        color: todo.status === 'completed' ? '#34d399' : '#fbbf24',
+                        color: todo.status === 'completed' ? 'var(--success, var(--success, #3dd49a))' : 'var(--warning, var(--warning, #f0b429))',
                         lineHeight: '18px',
                       }}
                     >
@@ -514,7 +514,7 @@ export function ChatHistoryTabContent(props: {
                   >
                     <span
                       style={{
-                        color: todo.status === 'completed' ? '#34d399' : '#fbbf24',
+                        color: todo.status === 'completed' ? 'var(--success, var(--success, #3dd49a))' : 'var(--warning, var(--warning, #f0b429))',
                         lineHeight: '18px',
                       }}
                     >
@@ -1081,7 +1081,7 @@ export function ChatOverviewTabContent(props: {
               style={{
                 fontSize: 11,
                 fontWeight: 700,
-                color: sessionStateStatus === 'paused' ? 'var(--warning, #f59e0b)' : 'var(--text)',
+                color: sessionStateStatus === 'paused' ? 'var(--warning, var(--warning, var(--warning, #f0b429)))' : 'var(--text)',
                 marginBottom: 2,
               }}
             >

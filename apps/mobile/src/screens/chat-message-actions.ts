@@ -1,5 +1,5 @@
 import type { InputImageContent } from '@openAwork/shared';
-import type { MobileChatMessage } from '../chat-message-content.js';
+import type { MobileChatMessage } from '../chat/chat-message-content.js';
 
 export interface ChatMessageSearchMatch {
   index: number;

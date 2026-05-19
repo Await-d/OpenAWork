@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 const PinIcon = () => (
   <svg
@@ -186,26 +186,34 @@ export default function SessionContextMenu({
   onPin,
   onDelete,
 }: SessionContextMenuProps) {
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // 点击/右键菜单外的任意位置关闭。
+  // 关键：右键 (mousedown button=2) 时关闭当前菜单但**不**阻止事件传播，
+  // 这样下层元素的 contextmenu handler 仍能触发，立刻打开新菜单。
+  useEffect(() => {
+    const handleMouseDown = (event: MouseEvent) => {
+      if (menuRef.current && menuRef.current.contains(event.target as Node)) {
+        return; // 点击菜单内部不关闭
+      }
+      onClose();
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    // 用 capture 阶段监听 mousedown，确保在其他 listener 之前响应；不调用 preventDefault
+    document.addEventListener('mousedown', handleMouseDown, true);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown, true);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [onClose]);
+
   return (
     <>
-      <button
-        type="button"
-        aria-label="关闭菜单"
-        onClick={onClose}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') onClose();
-        }}
-        style={{
-          position: 'fixed',
-          inset: 0,
-          zIndex: 9998,
-          background: 'transparent',
-          border: 'none',
-          cursor: 'default',
-          padding: 0,
-        }}
-      />
       <div
+        ref={menuRef}
         style={{
           ...menuStyle,
           top: y,

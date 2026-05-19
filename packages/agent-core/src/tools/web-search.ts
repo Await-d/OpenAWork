@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { ToolDefinition } from '../tool-contract.js';
+import type { ToolDefinition } from './tool-contract.js';
 
 type WebSearchProvider =
   | 'duckduckgo'

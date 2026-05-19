@@ -12,11 +12,11 @@
 
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useAuthStore } from '../../../../../stores/auth.js';
-import { useHandoffStore, useLayerStore } from '../../../../../stores/team-events.js';
+import { useHandoffStore, useLayerStore } from '../../../../../stores/team/team-events.js';
 import { ArtifactChainWizard } from './ArtifactChainWizard.js';
 import { DispatchPackageView } from './DispatchPackageView.js';
 import { ReviewReportView } from './ReviewReportView.js';
-import { FailureFlowIndicator, type FailureAction } from '../../shell/FailureFlowIndicator.js';
+import { FailureFlowIndicator, type FailureAction } from '../../shell/controls/FailureFlowIndicator.js';
 import { SessionTreeView } from './SessionTreeView.js';
 
 const SECTION_STYLE: CSSProperties = {

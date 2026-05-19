@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import type { ChatUsageDetails } from '../session-conversation/runtime/support.js';
-import type { ChatMessage } from '../session-conversation/runtime/support.js';
-import { readAssistantTracePayload } from '../session-conversation/runtime/support.js';
+import type { ChatUsageDetails } from '../conversation-runtime/messages/support.js';
+import type { ChatMessage } from '../conversation-runtime/messages/support.js';
+import { readAssistantTracePayload } from '../conversation-runtime/messages/support.js';
 import { MessageRow, sharedUiThemeVars } from './ChatPageSections.js';
 
 export interface ChatRenderAction {

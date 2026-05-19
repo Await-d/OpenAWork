@@ -6,9 +6,9 @@ import type {
   NotificationPreferenceRecord,
   NotificationRecord,
 } from '@openAwork/web-client';
-import { subscribeNotificationPreferenceRefresh } from '../../utils/notification-preference-events.js';
+import { subscribeNotificationPreferenceRefresh } from '../../utils/chat/notification-preference-events.js';
 import { preloadRouteModuleByPath } from '../../routes/preloadable-route-modules.js';
-import { toast } from '../ToastNotification.js';
+import { toast } from '../common/ToastNotification.js';
 
 type NotificationPreferenceMap = Record<NotificationPreferenceEventType, boolean>;
 
@@ -37,17 +37,17 @@ interface NotificationTypeMeta {
 const NOTIFICATION_TYPE_META: Record<string, NotificationTypeMeta> = {
   permission_asked: {
     bg: 'rgba(245, 158, 11, 0.12)',
-    color: '#d97706',
+    color: 'var(--warning, #f0b429)',
     label: '权限请求',
   },
   question_asked: {
     bg: 'rgba(59, 130, 246, 0.12)',
-    color: '#2563eb',
+    color: 'var(--aux, var(--aux, #8b9cf5))',
     label: '提问',
   },
   task_update: {
     bg: 'rgba(16, 185, 129, 0.12)',
-    color: '#059669',
+    color: 'var(--success, #3dd49a)',
     label: '任务',
   },
 };
@@ -385,7 +385,7 @@ export default function NotificationCenter({
                 width: 8,
                 height: 8,
                 borderRadius: 999,
-                background: '#f59e0b',
+                background: 'var(--warning, var(--warning, #f0b429))',
                 boxShadow: '0 0 0 2px var(--nav-rail-bg)',
                 animation: 'permissionPulse 1.5s ease-in-out infinite',
               }}
@@ -606,7 +606,7 @@ export default function NotificationCenter({
                             borderRadius: 5,
                             border: '1px solid rgba(245,158,11,0.35)',
                             background: 'rgba(245,158,11,0.1)',
-                            color: '#d97706',
+                            color: 'var(--warning, #f0b429)',
                             cursor: 'pointer',
                             justifySelf: 'start',
                           }}

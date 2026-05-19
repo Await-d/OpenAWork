@@ -1,0 +1,581 @@
+/**
+ * 260518 · 五层各自的内置指令实现
+ *
+ * 每个指令调用 registerInstruction 注册到中央注册表。
+ *
+ * 设计原则：
+ *   - 指令是"代码端能力"的薄包装：handler 调 createHandoff / submitInboundMessage / setSubstate
+ *     等已有函数。layer-capabilities guard 自动接管层级强制。
+ *   - 指令的 schema 必须与对应数据库 / 函数签名对齐，避免 LLM 输出无法落库。
+ *   - 错误返回 { ok: false, errorCode, message } 给 LLM 自我纠正（软拒绝）。
+ */
+
+import { z } from 'zod';
+import { registerInstruction, type InstructionContext, type InstructionResult } from './builtin-instructions.js';
+import { createHandoff } from '../store/handoff-store.js';
+import { submitInboundMessage } from '../store/inbound-store.js';
+import { setSubstate } from '../store/substate-store.js';
+import { sqliteRun, sqliteGet } from '../../db.js';
+import { randomUUID } from 'node:crypto';
+import { publishHandoffEvent, publishTeamEvent } from '../bus/team-events-bus.js';
+
+// ─── b: reception 层指令 ────────────────────────────────────────────────────
+
+/**
+ * route_to_orchestrate: b 层把用户意图转换为 handoff(reception → pm1)。
+ * 取代直接调 createHandoff，让 LLM 通过结构化指令派发。
+ */
+registerInstruction({
+  name: 'route_to_orchestrate',
+  ownerLayer: 'reception',
+  description:
+    '把用户的原始意图转交给 PM1 任务规划层（c）。用于复杂任务（开发/修复/重构等）。' +
+    '调用前请确认用户意图清晰；模糊请求应先用 request_user_input 追问。',
+  schema: z.object({
+    sourceIntent: z.string().min(1).describe('用户原始自然语言意图'),
+    rewrittenIntent: z.string().min(1).describe('改写后的结构化意图'),
+    recommendedRole: z.enum(['planner', 'researcher', 'executor', 'reviewer']).optional(),
+    teamWorkspaceId: z.string().nullable().optional(),
+  }),
+  handler: async (ctx, args): Promise<InstructionResult> => {
+    const handoff = createHandoff({
+      userId: ctx.userId,
+      fromSessionId: ctx.sessionId,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+      payload: {
+        sourceIntent: args.sourceIntent,
+        rewrittenIntent: args.rewrittenIntent,
+        recommendedRole: args.recommendedRole ?? 'planner',
+        teamWorkspaceId: args.teamWorkspaceId ?? null,
+      },
+    });
+    publishHandoffEvent({
+      type: 'handoff.created',
+      record: handoff,
+      payload: { orchestrator: 'instruction:route_to_orchestrate' },
+    });
+    return {
+      ok: true,
+      message: `已派发到 PM1（handoff=${handoff.id.slice(0, 8)}）`,
+      data: { handoffId: handoff.id },
+    };
+  },
+});
+
+/**
+ * reply_direct: b 层直接回复用户（不派发下游）。LLM 应用于简单问答 / 闲聊。
+ */
+registerInstruction({
+  name: 'reply_direct',
+  ownerLayer: 'reception',
+  description: '直接回答用户的简单问题，不需要派发给团队下游。仅用于知识查询、闲聊、状态汇报。',
+  schema: z.object({
+    text: z.string().min(1).max(4000).describe('给用户的回答内容（Markdown）'),
+  }),
+  handler: async (ctx, args): Promise<InstructionResult> => {
+    // 通过普通消息流写回；reception layer 直答模式
+    const { appendSessionMessageV2 } = await import('../../message/message-v2-adapter.js');
+    appendSessionMessageV2({
+      sessionId: ctx.sessionId,
+      userId: ctx.userId,
+      role: 'assistant',
+      content: [{ type: 'text', text: args.text }],
+    });
+    return {
+      ok: true,
+      message: '已直接回复用户。',
+    };
+  },
+});
+
+/**
+ * request_user_input: b 层向用户追问（意图不清时）。
+ */
+registerInstruction({
+  name: 'request_user_input',
+  ownerLayer: 'reception',
+  description: '当用户意图模糊时向用户追问。用具体问题缩小理解范围。',
+  schema: z.object({
+    question: z.string().min(1).max(2000).describe('需要用户回答的问题'),
+    options: z.array(z.string()).optional().describe('可选项列表（如有）'),
+  }),
+  handler: async (ctx, args): Promise<InstructionResult> => {
+    const { appendSessionMessageV2 } = await import('../../message/message-v2-adapter.js');
+    const optionsBlock = args.options && args.options.length > 0
+      ? `\n\n可选项：\n${args.options.map((o, i) => `${i + 1}. ${o}`).join('\n')}`
+      : '';
+    appendSessionMessageV2({
+      sessionId: ctx.sessionId,
+      userId: ctx.userId,
+      role: 'assistant',
+      content: [{ type: 'text', text: `${args.question}${optionsBlock}` }],
+    });
+    return { ok: true, message: '已向用户追问。' };
+  },
+});
+
+/**
+ * cancel_downstream: b 层向某个下游 handoff 发送 cancel_signal。
+ * 注意：取消的级联由 watcher 处理（已在 handoff-store 实现）。
+ */
+registerInstruction({
+  name: 'cancel_downstream',
+  ownerLayer: 'reception',
+  description: '取消某个正在跑的下游任务。LLM 在用户明确要求取消时调用。',
+  schema: z.object({
+    handoffId: z.string().min(1).describe('要取消的 handoff id'),
+    reason: z.string().min(1).max(500).describe('取消原因（写入 audit log）'),
+  }),
+  handler: async (ctx, args): Promise<InstructionResult> => {
+    // 找到 handoff 的 to_session
+    const handoff = sqliteGet<{ to_session_id: string | null; user_id: string }>(
+      `SELECT to_session_id, user_id FROM handoff_records WHERE id = ? LIMIT 1`,
+      [args.handoffId],
+    );
+    if (!handoff || handoff.user_id !== ctx.userId) {
+      return { ok: false, errorCode: 'handoff-not-found', message: 'handoff 不存在或不属于当前用户。' };
+    }
+    if (!handoff.to_session_id) {
+      return { ok: false, errorCode: 'no-target-session', message: 'handoff 尚未 claim，没有目标 session。' };
+    }
+    submitInboundMessage({
+      userId: ctx.userId,
+      toSessionId: handoff.to_session_id,
+      fromRoleLayer: 'system',
+      messageType: 'cancel_signal',
+      payload: { reason: args.reason, handoffId: args.handoffId, requestedBy: 'reception' },
+    });
+    return { ok: true, message: `已发送 cancel_signal 到 handoff ${args.handoffId.slice(0, 8)}。` };
+  },
+});
+
+/**
+ * push_notification: b 层向用户推送任务进度通知（构思 §3B.3 推送模式）。
+ */
+registerInstruction({
+  name: 'push_notification',
+  ownerLayer: 'reception',
+  description: '主动向用户推送任务进度（如"plan 已就绪"、"e/f/g 全部完成"）。仅用于汇报，不阻塞用户。',
+  schema: z.object({
+    text: z.string().min(1).max(2000).describe('推送内容（Markdown）'),
+    priority: z.enum(['blocking', 'info', 'silent']).default('info'),
+  }),
+  handler: async (ctx, args): Promise<InstructionResult> => {
+    const { appendSessionMessageV2 } = await import('../../message/message-v2-adapter.js');
+    const prefix = args.priority === 'blocking' ? '🔴 ' : args.priority === 'info' ? '🟡 ' : '🟢 ';
+    appendSessionMessageV2({
+      sessionId: ctx.sessionId,
+      userId: ctx.userId,
+      role: 'assistant',
+      content: [{ type: 'text', text: `${prefix}${args.text}` }],
+    });
+    return { ok: true, message: '已推送通知。' };
+  },
+});
+
+// ─── c: pm1 层指令 ─────────────────────────────────────────────────────────
+
+/**
+ * submit_artifact: c 层提交 spec/plan/tasks 产物。
+ */
+registerInstruction({
+  name: 'submit_artifact',
+  ownerLayer: 'pm1',
+  description: '提交 spec / plan / tasks 产物到 artifacts 表。phase 必须是 spec / plan / tasks 之一。',
+  schema: z.object({
+    phase: z.enum(['spec', 'plan', 'tasks']).describe('产物阶段'),
+    title: z.string().min(1).max(200),
+    content: z.string().min(1).max(64000).describe('Markdown 内容'),
+    parentArtifactId: z.string().nullable().optional().describe('父 artifact id（plan 依赖 spec、tasks 依赖 plan）'),
+    teamWorkspaceId: z.string().nullable().optional(),
+  }),
+  handler: async (ctx, args): Promise<InstructionResult> => {
+    const id = randomUUID();
+    sqliteRun(
+      `INSERT INTO artifacts (
+         id, session_id, user_id, type, title, content, version,
+         phase, team_workspace_id, parent_artifact_id
+       ) VALUES (?, ?, ?, 'markdown', ?, ?, 1, ?, ?, ?)`,
+      [
+        id,
+        ctx.sessionId,
+        ctx.userId,
+        args.title,
+        args.content,
+        args.phase,
+        args.teamWorkspaceId ?? null,
+        args.parentArtifactId ?? null,
+      ],
+    );
+    return {
+      ok: true,
+      message: `已提交 ${args.phase} artifact (id=${id.slice(0, 8)})`,
+      data: { artifactId: id, phase: args.phase },
+    };
+  },
+});
+
+/**
+ * request_clarification: c 层向用户请求澄清。注入 escalation_request 到 reception。
+ */
+registerInstruction({
+  name: 'request_clarification',
+  ownerLayer: 'pm1',
+  description: '当 spec 中存在模糊需求时，向用户请求澄清。问题列表会被推到 b 接待层。',
+  schema: z.object({
+    questions: z
+      .array(
+        z.object({
+          id: z.string().describe('问题唯一 id'),
+          question: z.string().min(1).describe('问题正文'),
+          context: z.string().optional().describe('问题相关的上下文'),
+        }),
+      )
+      .min(1)
+      .max(20),
+    fromSessionId: z.string().describe('当前 c session 的 from_session_id（reception session）'),
+  }),
+  handler: async (ctx, args): Promise<InstructionResult> => {
+    submitInboundMessage({
+      userId: ctx.userId,
+      toSessionId: args.fromSessionId,
+      fromRoleLayer: 'pm1',
+      messageType: 'escalation_request',
+      payload: {
+        fromLayer: 'pm1',
+        fromSessionId: ctx.sessionId,
+        reason: 'needs_clarification',
+        questions: args.questions,
+      },
+    });
+    return {
+      ok: true,
+      message: `已向接待层推送 ${args.questions.length} 个澄清问题。`,
+    };
+  },
+});
+
+// ─── d: pm2 层指令 ─────────────────────────────────────────────────────────
+
+/**
+ * dispatch_package: d 层为单个任务创建 d→executor / d→reviewer handoff。
+ */
+registerInstruction({
+  name: 'dispatch_package',
+  ownerLayer: 'pm2',
+  description:
+    '为单个任务创建派发包，指定 goal / context / 工具集 / 目标角色（executor 或 reviewer）。' +
+    '调用前应已通过 constitution_check。',
+  schema: z.object({
+    goal: z.string().min(1).max(2000),
+    context: z.string().max(8000).default(''),
+    role: z.enum(['executor', 'reviewer']),
+    toolsets: z.array(z.string()).min(1),
+    taskId: z.string().describe('tasks.md 中的任务 id（如 T001）'),
+    parallel: z.boolean().default(false),
+    artifactRefs: z
+      .object({
+        specId: z.string().optional(),
+        planId: z.string().optional(),
+        tasksId: z.string().optional(),
+      })
+      .optional(),
+  }),
+  handler: async (ctx, args): Promise<InstructionResult> => {
+    const handoff = createHandoff({
+      userId: ctx.userId,
+      fromSessionId: ctx.sessionId,
+      fromRoleLayer: 'pm2',
+      toRoleLayer: args.role,
+      payload: {
+        goal: args.goal,
+        context: args.context,
+        toolsets: args.toolsets,
+        role: args.role,
+        artifactRefs: args.artifactRefs ?? {},
+        taskMarkers: { taskId: args.taskId, parallel: args.parallel },
+      },
+    });
+    publishHandoffEvent({
+      type: 'handoff.created',
+      record: handoff,
+      payload: { orchestrator: 'instruction:dispatch_package', taskId: args.taskId },
+    });
+    return {
+      ok: true,
+      message: `已派发任务 ${args.taskId} 给 ${args.role}（handoff=${handoff.id.slice(0, 8)}）`,
+      data: { handoffId: handoff.id, taskId: args.taskId },
+    };
+  },
+});
+
+/**
+ * constitution_check: d 层结果记录（实际 LLM 调用在 pm2-runner 内部已处理）。
+ * 这个指令让 LLM 主动声明检查结果并写入 audit log。
+ */
+registerInstruction({
+  name: 'constitution_check',
+  ownerLayer: 'pm2',
+  description: '声明 Constitution Check 的结果（pass / fail）并附违反条款列表。失败应触发 escalate_to_user。',
+  schema: z.object({
+    pass: z.boolean(),
+    violations: z.array(z.string()).default([]),
+    planArtifactId: z.string().describe('被检查的 plan artifact id'),
+  }),
+  handler: async (ctx, args): Promise<InstructionResult> => {
+    const violations = args.violations ?? [];
+    sqliteRun(
+      `INSERT INTO team_audit_logs (user_id, action, entity_type, entity_id, summary, detail, created_at)
+       VALUES (?, 'constitution_check', 'artifact', ?, ?, ?, datetime('now'))`,
+      [
+        ctx.userId,
+        args.planArtifactId,
+        `Constitution Check: ${args.pass ? 'PASS' : 'FAIL'} (${violations.length} 违反)`,
+        JSON.stringify({ pass: args.pass, violations, sessionId: ctx.sessionId }),
+      ],
+    );
+    return {
+      ok: true,
+      message: args.pass
+        ? '已记录 Constitution Check 通过。'
+        : `已记录 Constitution Check 失败：${violations.length} 项违反。`,
+      data: { pass: args.pass, violationCount: violations.length },
+    };
+  },
+});
+
+/**
+ * escalate_to_user: d 层升级到用户（escape hatch #1，跨层送 escalation_request 到 reception）。
+ */
+registerInstruction({
+  name: 'escalate_to_user',
+  ownerLayer: 'pm2',
+  description: '当 Constitution Check 失败、review 反复失败、或遇到无法决策的情况时，升级到用户。',
+  schema: z.object({
+    reason: z.string().min(1).max(500),
+    context: z.string().max(4000).optional(),
+    fromSessionId: z.string().describe('当前 d session 的 from_session_id（pm1 session）'),
+    receptionSessionId: z.string().describe('最终目标 reception session id（用户对话所在）'),
+    suggestedActions: z.array(z.object({ label: z.string(), action: z.string() })).default([]),
+  }),
+  handler: async (ctx, args): Promise<InstructionResult> => {
+    submitInboundMessage({
+      userId: ctx.userId,
+      toSessionId: args.receptionSessionId,
+      fromRoleLayer: 'pm2',
+      messageType: 'escalation_request',
+      payload: {
+        fromLayer: 'pm2',
+        fromSessionId: ctx.sessionId,
+        pm1SessionId: args.fromSessionId,
+        reason: args.reason,
+        context: args.context ?? '',
+        suggestedActions: args.suggestedActions,
+      },
+    });
+    return { ok: true, message: '已升级到用户。' };
+  },
+});
+
+/**
+ * quality_review: d 层在 e/f/g 全部完成后做综合质量评审（声明结果）。
+ */
+registerInstruction({
+  name: 'quality_review',
+  ownerLayer: 'pm2',
+  description: '所有 executor/reviewer 完成后，声明综合质量评审结果。',
+  schema: z.object({
+    passCount: z.number().int().nonnegative(),
+    failCount: z.number().int().nonnegative(),
+    summary: z.string().min(1).max(4000),
+    decision: z.enum(['accept', 'request_retry', 'escalate']),
+  }),
+  handler: async (ctx, args): Promise<InstructionResult> => {
+    sqliteRun(
+      `INSERT INTO team_audit_logs (user_id, action, entity_type, entity_id, summary, detail, created_at)
+       VALUES (?, 'quality_review', 'session', ?, ?, ?, datetime('now'))`,
+      [
+        ctx.userId,
+        ctx.sessionId,
+        `Quality review: ${args.decision} (${args.passCount} pass / ${args.failCount} fail)`,
+        JSON.stringify(args),
+      ],
+    );
+    return { ok: true, message: `已记录质量评审：${args.decision}`, data: { decision: args.decision } };
+  },
+});
+
+// ─── e/f/g: executor / reviewer 共享指令 ────────────────────────────────────
+
+/**
+ * report_progress: 执行层向 b 层推送进度（escape hatch #2）。
+ */
+function makeReportProgress(ownerLayer: 'executor' | 'reviewer'): void {
+  registerInstruction({
+    name: 'report_progress',
+    ownerLayer,
+    description:
+      '向 b 接待层推送进度更新（仅 substate + 简短描述，不携带业务上下文）。' +
+      '用于"3/8 task 完成"这类汇报。',
+    schema: z.object({
+      receptionSessionId: z.string().describe('最终接待 session id'),
+      progressText: z.string().min(1).max(500),
+      percent: z.number().min(0).max(100).optional(),
+    }),
+    handler: async (ctx, args): Promise<InstructionResult> => {
+      submitInboundMessage({
+        userId: ctx.userId,
+        toSessionId: args.receptionSessionId,
+        fromRoleLayer: ownerLayer,
+        messageType: 'progress_report',
+        payload: {
+          fromLayer: ownerLayer,
+          fromSessionId: ctx.sessionId,
+          progressText: args.progressText,
+          ...(args.percent !== undefined ? { percent: args.percent } : {}),
+        },
+      });
+      return { ok: true, message: '已推送进度。' };
+    },
+  });
+}
+
+/**
+ * mark_completed: 执行层 / 评审层 / pm1 / pm2 自我标记完成。
+ * 实际 completeHandoff 由 watcher 兜底；这里写 substate + 自报进度。
+ */
+function makeMarkCompleted(ownerLayer: 'pm1' | 'pm2' | 'executor' | 'reviewer'): void {
+  registerInstruction({
+    name: 'mark_completed',
+    ownerLayer,
+    description: '声明本次工作已完成。layer 终态 substate=completed。watcher 会自动 completeHandoff。',
+    schema: z.object({
+      summary: z.string().max(2000).optional().describe('完成摘要'),
+    }),
+    handler: async (ctx, args): Promise<InstructionResult> => {
+      setSubstate({
+        sessionId: ctx.sessionId,
+        substate: 'completed',
+        userId: ctx.userId,
+        roleLayer: ownerLayer,
+      });
+      if (args.summary && args.summary.length > 0) {
+        publishTeamEvent({
+          type: 'session.substate.changed',
+          sessionId: ctx.sessionId,
+          taskId: ctx.handoffId ?? ctx.sessionId,
+          layer: ownerLayer,
+          timestamp: Date.now(),
+          userId: ctx.userId,
+          payload: { substate: 'completed', summary: args.summary },
+        });
+      }
+      return { ok: true, message: '已标记完成。' };
+    },
+  });
+}
+
+/**
+ * mark_failed: 执行层 / 评审层 / pm1 / pm2 自我标记失败。
+ */
+function makeMarkFailed(ownerLayer: 'pm1' | 'pm2' | 'executor' | 'reviewer'): void {
+  registerInstruction({
+    name: 'mark_failed',
+    ownerLayer,
+    description: '声明本次工作失败。watcher catch 会自动 failHandoff + 写 audit log。',
+    schema: z.object({
+      reason: z.string().min(1).max(2000),
+    }),
+    handler: async (ctx, args): Promise<InstructionResult> => {
+      setSubstate({
+        sessionId: ctx.sessionId,
+        substate: 'failed',
+        userId: ctx.userId,
+        roleLayer: ownerLayer,
+      });
+      // 抛错让上游 watcher catch 接管 failHandoff；这里只更新 substate
+      // 不直接 throw 因为这会破坏 instruction 的"软拒绝"语义；返回 ok=true 让 LLM 知道已记录
+      return {
+        ok: true,
+        message: `已标记失败：${args.reason}`,
+        data: { reason: args.reason },
+      };
+    },
+  });
+}
+
+/**
+ * submit_patch: executor 提交代码 patch artifact。
+ */
+registerInstruction({
+  name: 'submit_patch',
+  ownerLayer: 'executor',
+  description: 'executor 提交一份代码 patch（结构化输出）作为 artifact。phase=patch 或 implementation。',
+  schema: z.object({
+    phase: z.enum(['patch', 'implementation']).default('patch'),
+    title: z.string().min(1).max(200),
+    content: z.string().min(1).max(128000),
+    teamWorkspaceId: z.string().nullable().optional(),
+  }),
+  handler: async (ctx, args): Promise<InstructionResult> => {
+    const id = randomUUID();
+    sqliteRun(
+      `INSERT INTO artifacts (
+         id, session_id, user_id, type, title, content, version,
+         phase, team_workspace_id, parent_artifact_id
+       ) VALUES (?, ?, ?, 'markdown', ?, ?, 1, ?, ?, NULL)`,
+      [id, ctx.sessionId, ctx.userId, args.title, args.content, args.phase, args.teamWorkspaceId ?? null],
+    );
+    return {
+      ok: true,
+      message: `已提交 ${args.phase} artifact (id=${id.slice(0, 8)})`,
+      data: { artifactId: id, phase: args.phase },
+    };
+  },
+});
+
+/**
+ * submit_review: reviewer 提交评审报告。
+ */
+registerInstruction({
+  name: 'submit_review',
+  ownerLayer: 'reviewer',
+  description: 'reviewer 提交评审报告 artifact（phase=review_report）。',
+  schema: z.object({
+    title: z.string().min(1).max(200),
+    content: z.string().min(1).max(64000),
+    decision: z.enum(['pass', 'fail', 'needs_revision']),
+    teamWorkspaceId: z.string().nullable().optional(),
+  }),
+  handler: async (ctx, args): Promise<InstructionResult> => {
+    const id = randomUUID();
+    sqliteRun(
+      `INSERT INTO artifacts (
+         id, session_id, user_id, type, title, content, version,
+         phase, team_workspace_id, parent_artifact_id
+       ) VALUES (?, ?, ?, 'markdown', ?, ?, 1, 'review_report', ?, NULL)`,
+      [id, ctx.sessionId, ctx.userId, args.title, args.content, args.teamWorkspaceId ?? null],
+    );
+    return {
+      ok: true,
+      message: `已提交评审报告 (decision=${args.decision}, id=${id.slice(0, 8)})`,
+      data: { artifactId: id, decision: args.decision },
+    };
+  },
+});
+
+// ─── 注册多层共享指令 ───────────────────────────────────────────────────────
+
+makeReportProgress('executor');
+makeReportProgress('reviewer');
+
+makeMarkCompleted('pm1');
+makeMarkCompleted('pm2');
+makeMarkCompleted('executor');
+makeMarkCompleted('reviewer');
+
+makeMarkFailed('pm1');
+makeMarkFailed('pm2');
+makeMarkFailed('executor');
+makeMarkFailed('reviewer');

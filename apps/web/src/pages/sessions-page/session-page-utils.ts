@@ -21,7 +21,7 @@ export function statusLabel(s: string): string {
 }
 
 export function statusDotColor(s: string): string {
-  if (s === 'running') return '#22c55e';
+  if (s === 'running') return 'var(--success, var(--success, #3dd49a))';
   if (s === 'error') return 'var(--danger)';
   if (s === 'paused') return 'var(--warning)';
   return 'var(--accent)';
@@ -35,7 +35,7 @@ export function statusBadgeBg(s: string): string {
 }
 
 export function statusBadgeFg(s: string): string {
-  if (s === 'running') return '#22c55e';
+  if (s === 'running') return 'var(--success, var(--success, #3dd49a))';
   if (s === 'error') return 'var(--danger)';
   if (s === 'paused') return 'var(--warning)';
   return 'var(--accent)';

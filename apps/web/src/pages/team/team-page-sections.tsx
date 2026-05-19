@@ -9,7 +9,7 @@ import type {
   TeamSessionShareRecord,
   TeamTaskRecord,
 } from '@openAwork/web-client';
-import QuestionPromptCard from '../../components/QuestionPromptCard.js';
+import QuestionPromptCard from '../../components/common/QuestionPromptCard.js';
 
 const panelStyle: React.CSSProperties = {
   display: 'flex',
@@ -102,11 +102,11 @@ function parseTeamLeaderMessage(content: string): {
 export function getTaskStatusMeta(status: TeamTaskRecord['status']) {
   switch (status) {
     case 'in_progress':
-      return { label: '进行中', style: pillStyle('#7dd3fc', 'rgba(14, 165, 233, 0.18)') };
+      return { label: '进行中', style: pillStyle('var(--chart-7, var(--chart-7, #67e8f9))', 'rgba(14, 165, 233, 0.18)') };
     case 'completed':
-      return { label: '已完成', style: pillStyle('#86efac', 'rgba(34, 197, 94, 0.18)') };
+      return { label: '已完成', style: pillStyle('var(--success, var(--success, #3dd49a))', 'rgba(34, 197, 94, 0.18)') };
     case 'failed':
-      return { label: '受阻', style: pillStyle('#fda4af', 'rgba(244, 63, 94, 0.16)') };
+      return { label: '受阻', style: pillStyle('var(--complement, #f06b7e)', 'rgba(244, 63, 94, 0.16)') };
     default:
       return { label: '待开始', style: pillStyle('#cbd5f5', 'rgba(148, 163, 184, 0.18)') };
   }
@@ -115,30 +115,30 @@ export function getTaskStatusMeta(status: TeamTaskRecord['status']) {
 export function getMessageTypeMeta(type: TeamMessageRecord['type']) {
   switch (type) {
     case 'question':
-      return { label: '问题', style: pillStyle('#fde68a', 'rgba(245, 158, 11, 0.18)') };
+      return { label: '问题', style: pillStyle('var(--warning-muted)', 'rgba(245, 158, 11, 0.18)') };
     case 'result':
-      return { label: '结果', style: pillStyle('#93c5fd', 'rgba(59, 130, 246, 0.16)') };
+      return { label: '结果', style: pillStyle('var(--aux, var(--aux, #8b9cf5))', 'rgba(59, 130, 246, 0.16)') };
     case 'error':
-      return { label: '阻塞', style: pillStyle('#fda4af', 'rgba(244, 63, 94, 0.16)') };
+      return { label: '阻塞', style: pillStyle('var(--complement, #f06b7e)', 'rgba(244, 63, 94, 0.16)') };
     default:
-      return { label: '同步', style: pillStyle('#c4b5fd', 'rgba(139, 92, 246, 0.16)') };
+      return { label: '同步', style: pillStyle('var(--chart-5, #c4b5fd)', 'rgba(139, 92, 246, 0.16)') };
   }
 }
 
 export function getAuditActionMeta(action: TeamAuditLogRecord['action']) {
   switch (action) {
     case 'shared_comment_created':
-      return { label: '共享评论', style: pillStyle('#f9a8d4', 'rgba(236, 72, 153, 0.16)') };
+      return { label: '共享评论', style: pillStyle('var(--complement, #f06b7e)', 'rgba(236, 72, 153, 0.16)') };
     case 'shared_permission_replied':
-      return { label: '权限处理', style: pillStyle('#c4b5fd', 'rgba(139, 92, 246, 0.18)') };
+      return { label: '权限处理', style: pillStyle('var(--chart-5, #c4b5fd)', 'rgba(139, 92, 246, 0.18)') };
     case 'shared_question_replied':
-      return { label: '问题处理', style: pillStyle('#fcd34d', 'rgba(245, 158, 11, 0.18)') };
+      return { label: '问题处理', style: pillStyle('var(--warning, var(--warning, #f0b429))', 'rgba(245, 158, 11, 0.18)') };
     case 'share_permission_updated':
-      return { label: '权限变更', style: pillStyle('#93c5fd', 'rgba(59, 130, 246, 0.16)') };
+      return { label: '权限变更', style: pillStyle('var(--aux, var(--aux, #8b9cf5))', 'rgba(59, 130, 246, 0.16)') };
     case 'share_deleted':
-      return { label: '取消共享', style: pillStyle('#fda4af', 'rgba(244, 63, 94, 0.16)') };
+      return { label: '取消共享', style: pillStyle('var(--complement, #f06b7e)', 'rgba(244, 63, 94, 0.16)') };
     default:
-      return { label: '新增共享', style: pillStyle('#86efac', 'rgba(34, 197, 94, 0.18)') };
+      return { label: '新增共享', style: pillStyle('var(--success, var(--success, #3dd49a))', 'rgba(34, 197, 94, 0.18)') };
   }
 }
 
@@ -501,7 +501,7 @@ export function TeamMessagesPanel({
                   </span>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                     {agentMessage?.statusLabel ? (
-                      <span style={pillStyle('#fef3c7', 'rgba(245, 158, 11, 0.16)')}>
+                      <span style={pillStyle('var(--warning-subtle)', 'rgba(245, 158, 11, 0.16)')}>
                         {agentMessage?.statusLabel}
                       </span>
                     ) : null}
@@ -927,7 +927,7 @@ export function TeamSharedSessionsPanel({
                         </div>
                         <span
                           style={pillStyle(
-                            entry.active ? '#86efac' : '#cbd5f5',
+                            entry.active ? 'var(--success, var(--success, #3dd49a))' : '#cbd5f5',
                             entry.active ? 'rgba(34, 197, 94, 0.18)' : 'rgba(148, 163, 184, 0.16)',
                           )}
                         >

@@ -4,8 +4,8 @@ import type { PendingPermissionRequest, Session, SessionTask } from '@openAwork/
 import {
   normalizeChatMessages,
   type ChatMessage,
-} from '../../components/session-conversation/runtime/support.js';
-import { filterTranscriptMessages } from '../../components/session-conversation/runtime/transcript-visibility.js';
+} from '../../components/conversation-runtime/messages/support.js';
+import { filterTranscriptMessages } from '../../components/conversation-runtime/messages/transcript-visibility.js';
 
 export interface SubSessionDetailState {
   error: string | null;

@@ -4,7 +4,24 @@ import App from './App.js';
 import './index.css';
 import './styles/loaders.css';
 import './styles/ui-hovers.css';
-import { installMonacoAsyncErrorFilter } from './components/MonacoErrorBoundary.js';
+import { installMonacoAsyncErrorFilter } from './components/file-editor/MonacoErrorBoundary.js';
+import { installExtensionNoiseFilter } from './lib/extension-noise-filter.js';
+import { installMonacoI18n } from './lib/monaco/monaco-i18n.js';
+
+// Configure Monaco to load from local bundle instead of CDN.
+// This prevents "Monaco initialization: error" when the CDN is unreachable.
+import './lib/monaco/monaco-loader.js';
+
+// Translate Monaco's right-click menu (and related overlays) to
+// Chinese. Calling here in addition to monaco-loader so the install
+// doesn't depend on Monaco's own module evaluation succeeding first.
+installMonacoI18n();
+
+// Suppress noisy errors thrown by browser extensions (Tampermonkey,
+// ad-blockers, ...) injecting scripts into our sandboxed preview
+// iframes. These can't be fixed in our code and only clutter the
+// console. See lib/extension-noise-filter.ts.
+installExtensionNoiseFilter();
 
 // Suppress noisy Monaco post-dispose async errors that fire from the
 // editor's own setTimeout / rAF callbacks. They are benign in dev (only

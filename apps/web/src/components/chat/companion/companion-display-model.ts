@@ -79,11 +79,11 @@ const COMPANION_PALETTES = [
     accentTint: 'color-mix(in oklch, var(--accent) 14%, transparent)',
   },
   {
-    accentColor: 'color-mix(in oklch, var(--success) 82%, white 18%)',
+    accentColor: 'color-mix(in oklch, var(--success) 82%, var(--fg-on-accent) 18%)',
     accentTint: 'color-mix(in oklch, var(--success) 14%, transparent)',
   },
   {
-    accentColor: 'color-mix(in oklch, var(--warning) 82%, white 18%)',
+    accentColor: 'color-mix(in oklch, var(--warning) 82%, var(--fg-on-accent) 18%)',
     accentTint: 'color-mix(in oklch, var(--warning) 16%, transparent)',
   },
 ];
@@ -117,11 +117,11 @@ const HUBBY_TRAIT_SETS = [
 ];
 const HUBBY_PALETTES = [
   {
-    accentColor: 'color-mix(in oklch, var(--warning) 82%, white 18%)',
+    accentColor: 'color-mix(in oklch, var(--warning) 82%, var(--fg-on-accent) 18%)',
     accentTint: 'color-mix(in oklch, var(--warning) 14%, transparent)',
   },
   {
-    accentColor: 'color-mix(in oklch, var(--danger) 72%, white 28%)',
+    accentColor: 'color-mix(in oklch, var(--danger) 72%, var(--fg-on-accent) 28%)',
     accentTint: 'color-mix(in oklch, var(--danger) 12%, transparent)',
   },
   {

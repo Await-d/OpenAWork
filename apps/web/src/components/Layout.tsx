@@ -1,14 +1,14 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import NavRail from './layout/NavRail.js';
-import WorkspacePickerModal from './WorkspacePickerModal.js';
-import { CachedRouteOutlet } from './CachedRouteOutlet.js';
-import QuestionPromptCard from './QuestionPromptCard.js';
+import WorkspacePickerModal from './common/WorkspacePickerModal.js';
+import { CachedRouteOutlet } from './common/CachedRouteOutlet.js';
+import QuestionPromptCard from './common/QuestionPromptCard.js';
 import { useUIStateStore } from '../stores/uiState.js';
 import { useNavigate, useLocation } from 'react-router';
 import { useAuthStore } from '../stores/auth.js';
 import { CommandPalette, PermissionPrompt, PermissionConfirmDialog } from '@openAwork/shared-ui';
 import type { CommandItem, PermissionDecision, PermissionItem } from '@openAwork/shared-ui';
-import type { FileTreeNode } from './WorkspacePickerModal.js';
+import type { FileTreeNode } from './common/WorkspacePickerModal.js';
 import { useCommandRegistry } from '../hooks/useCommandRegistry.js';
 import { preloadRouteModuleByPath } from '../routes/preloadable-route-modules.js';
 import { createQuestionsClient, createSessionsClient } from '@openAwork/web-client';
@@ -19,14 +19,14 @@ import {
   subscribeCurrentSessionRefresh,
   subscribeSessionPendingPermission,
   subscribeSessionPendingQuestion,
-} from '../utils/session-list-events.js';
+} from '../utils/session/session-list-events.js';
 import {
   toSessionPendingPermissionStateFromRequest,
   type SessionPendingPermissionState,
-} from '../utils/pending-permission-state.js';
-import { toast } from './ToastNotification.js';
-import { getRecoveryPendingInteractions } from './session-conversation/runtime/recovery-read-model.js';
-import { replyPermissionRequest } from '../utils/permission-reply.js';
+} from '../utils/permission/pending-permission-state.js';
+import { toast } from './common/ToastNotification.js';
+import { getRecoveryPendingInteractions } from './conversation-runtime/session/recovery-read-model.js';
+import { replyPermissionRequest } from '../utils/permission/permission-reply.js';
 
 type PendingQuestionReplyStatus = 'answered' | 'dismissed';
 

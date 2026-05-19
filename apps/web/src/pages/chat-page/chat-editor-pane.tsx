@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { FileEditorPanel } from '../../components/FileEditorPanel.js';
+import { FileEditorPanel } from '../../components/file-editor/FileEditorPanel.js';
 import { BuiltInBrowser } from '../../components/chat/BuiltInBrowser.js';
 import type { OpenFile } from '../../hooks/useFileEditor.js';
 
@@ -20,6 +20,7 @@ export interface ChatEditorPaneProps {
     setActiveFilePath: (path: string | null) => void;
     closeFile: (path: string) => void;
     updateContent: (path: string, content: string) => void;
+    reorderFiles?: (fromIndex: number, toIndex: number) => void;
   };
   saving: boolean;
   handleSaveFile: (path: string) => Promise<void>;
@@ -191,6 +192,7 @@ export function ChatEditorPane({
             onClose={fileEditor.closeFile}
             onChange={fileEditor.updateContent}
             onSave={handleSaveFile}
+            onReorder={fileEditor.reorderFiles}
           />
         </div>
 

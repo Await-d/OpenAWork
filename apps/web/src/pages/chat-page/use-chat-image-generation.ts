@@ -4,7 +4,7 @@ import { DEFAULT_IMAGE_GENERATION_SIZE, validateImageGenerationSize } from '@ope
 import type {
   ChatSettingsProvider,
   SavedChatImageDefaults,
-} from '../../utils/chat-session-defaults.js';
+} from '../../utils/chat/chat-session-defaults.js';
 
 const DEFAULT_CHAT_IMAGE_DEFAULTS: SavedChatImageDefaults = {
   providerId: '',

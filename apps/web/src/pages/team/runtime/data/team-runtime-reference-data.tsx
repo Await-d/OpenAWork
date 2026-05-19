@@ -145,7 +145,7 @@ const TeamRuntimeReferenceDataContext = createContext<TeamRuntimeReferenceViewDa
 
 const ROLE_SLOT_CONFIG = [
   {
-    accent: '#d59b11',
+    accent: 'var(--warning, #f0b429)',
     badge: '团',
     fallbackLabel: '团队负责人',
     fallbackProvider: 'Planner',
@@ -153,7 +153,7 @@ const ROLE_SLOT_CONFIG = [
     leader: true,
   },
   {
-    accent: '#5b5bd8',
+    accent: 'var(--accent, var(--accent, #5cd4c0))',
     badge: '研',
     fallbackLabel: '研究员A',
     fallbackProvider: 'Researcher',
@@ -161,7 +161,7 @@ const ROLE_SLOT_CONFIG = [
     leader: false,
   },
   {
-    accent: '#c03d7a',
+    accent: 'var(--complement, #f06b7e)',
     badge: '执',
     fallbackLabel: '执行者',
     fallbackProvider: 'Executor',
@@ -169,7 +169,7 @@ const ROLE_SLOT_CONFIG = [
     leader: false,
   },
   {
-    accent: '#d04e4e',
+    accent: 'var(--danger, #f06b7e)',
     badge: '审',
     fallbackLabel: '批评者',
     fallbackProvider: 'Reviewer',
@@ -1102,6 +1102,7 @@ export function useResolvedTeamRuntimeReferenceData(
       collaboration.sessions,
       collaboration.sharedSessions,
       collaboration.selectedSharedSessionId,
+      createdSessionId,
     ]);
 
   // --- Split memos: metric cards ---

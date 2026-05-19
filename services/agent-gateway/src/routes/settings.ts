@@ -2,13 +2,13 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { loadAppVersion } from '../app-version.js';
-import { resolveAuxiliaryLlmConfig } from '../auxiliary-llm-config.js';
+import { resolveAuxiliaryLlmConfig } from '../provider/auxiliary-llm-config.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
 import {
   COMPACTION_SETTINGS_KEY,
   compactionSettingsSchema,
   readCompactionSettings,
-} from '../compaction-policy.js';
+} from '../compaction/compaction-policy.js';
 import {
   activeSelectionSchema,
   filterEnabledProviderConfig,
@@ -18,32 +18,32 @@ import {
   parseStoredImageGenerationDefaults,
   providerSettingsBodySchema,
   providerSettingsQuerySchema,
-} from '../provider-config.js';
+} from '../provider/provider-config.js';
 import { startRequestWorkflow } from '../request-workflow.js';
 import { listRequestWorkflowLogs } from '../request-workflow-log-store.js';
 import {
   isMcpServerConnectedForUser,
   loadConfiguredMcpServersForUser,
   retryMcpConnectionForUser,
-} from '../mcp-runtime.js';
-import { BUILTIN_MCP_IDS } from '../builtin-mcps.js';
+} from '../mcp/mcp-runtime.js';
+import { BUILTIN_MCP_IDS } from '../mcp/builtin-mcps.js';
 import {
   readUpstreamRetrySettings,
   UPSTREAM_RETRY_SETTINGS_KEY,
   upstreamRetrySettingsSchema,
-} from '../upstream-retry-policy.js';
+} from '../provider/upstream-retry-policy.js';
 import {
   readWebsearchPolicy,
   WEBSEARCH_POLICY_KEY,
   websearchPolicySchema,
-} from '../websearch-policy.js';
+} from '../provider/websearch-policy.js';
 import {
   buildCompanionFeatureState,
   companionSettingsUpdateSchema,
   resolveCompanionProfileForAgent,
   getCompanionSettingsKey,
   loadCompanionSettingsForUser,
-} from '../companion-settings.js';
+} from '../workspace/companion-settings.js';
 import {
   listEffectiveWorkspacePermissionRules,
   loadWorkspacePermissionConfig,
@@ -1397,14 +1397,14 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(503).send({ error: 'Companion chat LLM is not configured' });
       }
 
-      const { loadCompanionSettingsForUser } = await import('../companion-settings.js');
+      const { loadCompanionSettingsForUser } = await import('../workspace/companion-settings.js');
       const companionSettings = loadCompanionSettingsForUser(
         user.sub,
         user.email,
         body.data.agentId,
       );
       const profile = companionSettings.profile;
-      const intro = (await import('../companion-settings.js')).buildCompanionIntroText(profile);
+      const intro = (await import('../workspace/companion-settings.js')).buildCompanionIntroText(profile);
 
       const contextParts: string[] = [];
       if (body.data.context) {

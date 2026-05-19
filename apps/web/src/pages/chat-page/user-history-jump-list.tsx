@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react';
-import type { ChatMessage } from '../../components/session-conversation/runtime/support.js';
+import type { ChatMessage } from '../../components/conversation-runtime/messages/support.js';
 
 /**
  * UserHistoryJumpList · chat-only 右侧浮动跳转栏
@@ -129,23 +129,24 @@ const CONTAINER_STYLE: CSSProperties = {
 
 /** 折叠态:窄竖条 + 数字徽章 + 提示文字。永远占据微小空间,不挡内容。 */
 const COLLAPSED_STRIPE_STYLE: CSSProperties = {
-  width: 22,
-  minHeight: 96,
+  width: 18,
+  minHeight: 84,
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'center',
   justifyContent: 'center',
   gap: 6,
   padding: '10px 2px',
-  borderRadius: '10px 0 0 10px',
+  borderRadius: '8px 0 0 8px',
   border: '1px solid var(--border-subtle)',
   borderRight: 'none',
-  background: 'color-mix(in oklch, var(--surface) 88%, transparent)',
-  color: 'var(--text-3)',
+  background: 'var(--bg-overlay)',
+  color: 'var(--fg-subtle)',
   cursor: 'pointer',
+  opacity: 0.6,
   // stripe 自身的反馈 — 跟 panel 进入动画区分。出场时配合 panel 一并淡出。
   transition:
-    'background 200ms ease, color 200ms ease, transform 320ms cubic-bezier(0.22, 1, 0.36, 1), opacity 220ms ease',
+    'background 200ms ease, color 200ms ease, opacity 200ms ease, transform 320ms cubic-bezier(0.22, 1, 0.36, 1)',
   willChange: 'transform, opacity',
 };
 
@@ -153,11 +154,11 @@ const COLLAPSED_BADGE_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  minWidth: 16,
-  height: 16,
+  minWidth: 14,
+  height: 14,
   padding: '0 4px',
   borderRadius: 999,
-  background: 'color-mix(in oklch, var(--accent) 18%, var(--surface))',
+  background: 'var(--accent-subtle)',
   color: 'var(--accent)',
   fontSize: 9,
   fontWeight: 700,
@@ -167,10 +168,10 @@ const COLLAPSED_BADGE_STYLE: CSSProperties = {
 const COLLAPSED_LABEL_STYLE: CSSProperties = {
   writingMode: 'vertical-rl',
   textOrientation: 'mixed',
-  fontSize: 9.5,
-  fontWeight: 700,
+  fontSize: 9,
+  fontWeight: 600,
   letterSpacing: '0.08em',
-  color: 'var(--text-2)',
+  color: 'var(--fg-muted)',
   whiteSpace: 'nowrap',
 };
 
@@ -178,21 +179,18 @@ const EXPANDED_PANEL_BASE_STYLE: CSSProperties = {
   position: 'absolute',
   right: 0,
   top: '50%',
-  width: 200,
+  width: 220,
   maxHeight: '70vh',
   display: 'flex',
   flexDirection: 'column',
   padding: '10px 8px 10px 10px',
   borderRadius: '10px 0 0 10px',
-  border: '1px solid var(--border-subtle)',
+  border: '1px solid var(--border-default)',
   borderRight: 'none',
-  background: 'color-mix(in oklch, var(--surface) 96%, transparent)',
-  boxShadow: '-8px 0 32px rgba(0,0,0,0.18)',
-  backdropFilter: 'blur(10px)',
+  background: 'var(--bg-overlay)',
+  boxShadow: 'var(--shadow-lg)',
   overflow: 'hidden',
   transformOrigin: '100% 50%',
-  // 切换:transform(滑入 + 缩放)+ opacity 同步缓动,cubic-bezier 给一点
-  // overshoot 视觉,比线性更"灵动";收起延后 visibility 切换避免硬切。
   transition: 'transform 320ms cubic-bezier(0.22, 1, 0.36, 1), opacity 240ms ease',
   willChange: 'transform, opacity',
 };
@@ -445,6 +443,7 @@ export function UserHistoryJumpList({
       {/* Collapsed stripe — 始终渲染,通过 opacity/visibility 切换 */}
       <button
         type="button"
+        data-history-jump-stripe="true"
         aria-label={`展开历史输入(共 ${orderedItems.length} 条)`}
         title={`历史输入 · ${orderedItems.length} 条 · 鼠标悬停展开`}
         onClick={() => {
@@ -453,7 +452,7 @@ export function UserHistoryJumpList({
         }}
         style={{
           ...COLLAPSED_STRIPE_STYLE,
-          opacity: expanded ? 0 : 1,
+          opacity: expanded ? 0 : 0.5,
           // 折叠状态可点击,展开后让出指针给面板。
           pointerEvents: expanded ? 'none' : 'auto',
           transform: expanded ? 'translateX(8px)' : 'translateX(0)',

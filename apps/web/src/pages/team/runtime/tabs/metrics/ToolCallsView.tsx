@@ -11,7 +11,7 @@ import {
   useTeamToolCallStore,
   quantile,
   type ToolCallStats,
-} from '../../../../../stores/team-usage.js';
+} from '../../../../../stores/team/team-usage.js';
 import { TabContainer } from '../TabContainer.js';
 
 const CONTAINER_STYLE: CSSProperties = {
@@ -162,8 +162,8 @@ function ToolRow({ tool }: { tool: ToolStatsDerived }) {
     failurePct > 30
       ? 'var(--danger, #d4574e)'
       : failurePct > 10
-        ? '#f59e0b'
-        : 'var(--success, #22c55e)';
+        ? 'var(--warning, var(--warning, #f0b429))'
+        : 'var(--success, var(--success, var(--success, #3dd49a)))';
   return (
     <div style={ROW_STYLE}>
       <div

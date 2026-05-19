@@ -3,7 +3,7 @@ import { createWorkspaceClient } from '@openAwork/web-client';
 import { useAuthStore } from '../stores/auth.js';
 import { useUIStateStore } from '../stores/uiState.js';
 import { resolveBareFilename } from '../components/chat/file-preview/resolve-bare-filename.js';
-import { getFilePreviewKind, isBinaryPreviewKind } from '../utils/file-preview.js';
+import { getFilePreviewKind, isBinaryPreviewKind } from '../utils/file/file-preview.js';
 
 export interface OpenFile {
   path: string;
@@ -242,6 +242,34 @@ export function useFileEditor(workspacePath?: string | null) {
     setOpenFiles((prev) => prev.map((f) => (f.path === path ? { ...f, content } : f)));
   }, []);
 
+  /**
+   * Reorder open file tabs by moving the file at `fromIndex` to `toIndex`.
+   *
+   * The new order is also written back to the workspace bucket so it
+   * survives page reloads. No-ops when indices are out of range or
+   * identical.
+   */
+  const reorderFiles = useCallback(
+    (fromIndex: number, toIndex: number) => {
+      setOpenFiles((prev) => {
+        if (fromIndex === toIndex) return prev;
+        if (fromIndex < 0 || fromIndex >= prev.length) return prev;
+        if (toIndex < 0 || toIndex >= prev.length) return prev;
+        const next = prev.slice();
+        const [moved] = next.splice(fromIndex, 1);
+        if (!moved) return prev;
+        next.splice(toIndex, 0, moved);
+        // Persist the new order immediately so a refresh restores it.
+        setOpenFilePathsForWorkspace(
+          workspacePath ?? null,
+          next.map((f) => f.path),
+        );
+        return next;
+      });
+    },
+    [setOpenFilePathsForWorkspace, workspacePath],
+  );
+
   const saveFile = useCallback(
     async (path: string) => {
       const file = openFiles.find((f) => f.path === path);
@@ -279,6 +307,7 @@ export function useFileEditor(workspacePath?: string | null) {
     closeFile,
     updateContent,
     saveFile,
+    reorderFiles,
     setActiveFilePath,
     isDirty,
   };

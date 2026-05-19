@@ -14,7 +14,7 @@
 
 import { useState, type CSSProperties } from 'react';
 import type { AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
-import { useTeamNotificationStore } from '../../../../../stores/team-events.js';
+import { useTeamNotificationStore } from '../../../../../stores/team/team-events.js';
 import { MessagesTab } from './MessagesTab.js';
 import { MentionsView } from './MentionsView.js';
 
@@ -59,7 +59,7 @@ const BADGE_STYLE: CSSProperties = {
   height: 16,
   borderRadius: 999,
   background: 'var(--danger, #d4574e)',
-  color: '#fff',
+  color: 'var(--fg-on-accent, #ffffff)',
   fontSize: 9,
   fontWeight: 700,
   display: 'inline-flex',

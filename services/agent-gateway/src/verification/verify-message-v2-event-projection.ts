@@ -8,10 +8,10 @@ import {
   emitSessionDeleted,
   emitSessionUpdated,
   listSessionMessagesV2,
-} from '../message-v2-adapter.js';
-import type { MessageID } from '../message-v2-schema.js';
-import { listMessagesWithParts } from '../message-store-v2.js';
-import { replayEventsForAggregate } from '../sync-event.js';
+} from '../message/message-v2-adapter.js';
+import type { MessageID } from '../message/message-v2-schema.js';
+import { listMessagesWithParts } from '../message/message-store-v2.js';
+import { replayEventsForAggregate } from '../session/sync-event.js';
 import { assert, withTempEnv } from './task-verification-helpers.js';
 
 function extractText(message: { content: Array<{ type: string; text?: string }> }): string {

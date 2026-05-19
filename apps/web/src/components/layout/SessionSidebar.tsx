@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router';
 import { createWorkspaceClient } from '@openAwork/web-client';
 import { useUIStateStore } from '../../stores/uiState.js';
 import { useAuthStore } from '../../stores/auth.js';
-import { useSessions } from '../../hooks/useSessions.js';
+import { useSessions } from '../../hooks/workspace/useSessions.js';
 import SessionContextMenu from './SessionContextMenu.js';
 import FileTreeContextMenu from './FileTreeContextMenu.js';
 import {
@@ -16,11 +17,11 @@ import { SessionSidebarSessionRow } from './SessionSidebarSessionRow.js';
 import WorkspaceGroupMenu from './WorkspaceGroupMenu.js';
 import { WorkspaceDeleteConfirmDialog } from './WorkspaceDeleteConfirmDialog.js';
 import { WorkspaceGitBadge, FileTreeView, type FileTreeContextTarget } from './SidebarHelpers.js';
-import type { FileTreeNode } from '../WorkspacePickerModal.js';
+import type { FileTreeNode } from '../common/WorkspacePickerModal.js';
 import { preloadRouteModuleByPath } from '../../routes/preloadable-route-modules.js';
-import { toast } from '../ToastNotification.js';
-import { dispatchComposerReference } from '../../utils/composer-reference-events.js';
-import { UNBOUND_WORKSPACE_GROUP_KEY, getWorkspaceGroupKey } from '../../utils/session-grouping.js';
+import { toast } from '../common/ToastNotification.js';
+import { dispatchComposerReference } from '../../utils/chat/composer-reference-events.js';
+import { UNBOUND_WORKSPACE_GROUP_KEY, getWorkspaceGroupKey } from '../../utils/session/session-grouping.js';
 
 function getParentDir(path: string): string {
   if (path === '/') return '/';
@@ -867,6 +868,10 @@ export function SessionSidebar({
               flex: 1,
               height: 28,
               padding: '0 8px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 5,
               borderRadius: 7,
               border: sidebarTab === tab ? '1px solid var(--border)' : '1px solid transparent',
               background: sidebarTab === tab ? 'var(--surface)' : 'transparent',
@@ -877,7 +882,36 @@ export function SessionSidebar({
               transition: 'background 150ms ease, color 150ms ease',
             }}
           >
-            {tab === 'sessions' ? '会话' : '文件树'}
+            {tab === 'sessions' ? (
+              <svg
+                aria-hidden="true"
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+            ) : (
+              <svg
+                aria-hidden="true"
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+              </svg>
+            )}
+            <span>{tab === 'sessions' ? '会话' : '文件树'}</span>
           </button>
         ))}
       </div>
@@ -921,7 +955,7 @@ export function SessionSidebar({
           padding: 6,
           display: 'flex',
           flexDirection: 'column',
-          gap: 2,
+          gap: 0,
         }}
       >
         {sidebarTab === 'sessions' && sessions.length === 0 && groupedSessionTrees.length === 0 && (
@@ -1216,7 +1250,7 @@ export function SessionSidebar({
             return (
               <div
                 key={groupKey}
-                style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 4 }}
+                style={{ display: 'flex', flexDirection: 'column', gap: 0, marginBottom: 2 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center' }}>
                   <button
@@ -1412,36 +1446,40 @@ export function SessionSidebar({
       </div>
 
       {contextMenu &&
-        (() => {
-          const ctxSession = sessions.find((s) => s.id === contextMenu.sessionId);
-          const pinned = ctxSession ? isPinned(ctxSession.id) : false;
-          return (
-            <SessionContextMenu
-              sessionId={contextMenu.sessionId}
-              sessionTitle={ctxSession?.title ?? null}
-              x={contextMenu.x}
-              y={contextMenu.y}
-              isPinned={pinned}
-              hasMessages
-              onClose={() => setContextMenu(null)}
-              onRename={() => {
-                if (ctxSession) startRename(ctxSession);
-              }}
-              onExportMarkdown={() => exportSessionAsMarkdown(contextMenu.sessionId)}
-              onExportJson={() => exportSessionAsJson(contextMenu.sessionId)}
-              onClearMessages={() => alert('清空功能开发中')}
-              onPin={() => togglePinSession(contextMenu.sessionId)}
-              onDelete={() => void quickDeleteSession(contextMenu.sessionId)}
-            />
-          );
-        })()}
-      {fileTreeContextMenu && (
-        <FileTreeContextMenu
-          x={fileTreeContextMenu.x}
-          y={fileTreeContextMenu.y}
-          targetLabel={
-            fileTreeContextMenu.targetType === 'root' ? '工作区根目录' : fileTreeContextMenu.name
-          }
+        createPortal(
+          (() => {
+            const ctxSession = sessions.find((s) => s.id === contextMenu.sessionId);
+            const pinned = ctxSession ? isPinned(ctxSession.id) : false;
+            return (
+              <SessionContextMenu
+                sessionId={contextMenu.sessionId}
+                sessionTitle={ctxSession?.title ?? null}
+                x={contextMenu.x}
+                y={contextMenu.y}
+                isPinned={pinned}
+                hasMessages
+                onClose={() => setContextMenu(null)}
+                onRename={() => {
+                  if (ctxSession) startRename(ctxSession);
+                }}
+                onExportMarkdown={() => exportSessionAsMarkdown(contextMenu.sessionId)}
+                onExportJson={() => exportSessionAsJson(contextMenu.sessionId)}
+                onClearMessages={() => alert('清空功能开发中')}
+                onPin={() => togglePinSession(contextMenu.sessionId)}
+                onDelete={() => void quickDeleteSession(contextMenu.sessionId)}
+              />
+            );
+          })(),
+          document.body,
+        )}
+      {fileTreeContextMenu &&
+        createPortal(
+          <FileTreeContextMenu
+            x={fileTreeContextMenu.x}
+            y={fileTreeContextMenu.y}
+            targetLabel={
+              fileTreeContextMenu.targetType === 'root' ? '工作区根目录' : fileTreeContextMenu.name
+            }
           targetType={fileTreeContextMenu.targetType}
           relativePath={getFileTreeRelativePath(fileTreeRootPath, fileTreeContextMenu.path)}
           canOpen={fileTreeContextMenu.targetType === 'file' && Boolean(onOpenFile)}
@@ -1543,33 +1581,36 @@ export function SessionSidebar({
                 }
               : undefined
           }
-        />
-      )}
-      {workspaceContextMenu && (
-        <WorkspaceGroupMenu
-          workspacePath={workspaceContextMenu.workspacePath}
-          workspaceLabel={workspaceContextMenu.workspaceLabel}
-          sessionCount={workspaceContextMenu.actualSessionCount}
-          x={workspaceContextMenu.x}
-          y={workspaceContextMenu.y}
-          isCollapsed={collapsedGroups.has(workspaceContextMenu.groupKey)}
-          canDelete={
-            workspaceContextMenu.workspacePath !== null ||
-            workspaceContextMenu.actualSessionCount > 0
-          }
-          onClose={() => setWorkspaceContextMenu(null)}
-          onNewSession={() => void newSession(workspaceContextMenu.workspacePath)}
-          onToggleCollapse={() => toggleGroupCollapsed(workspaceContextMenu.groupKey)}
-          onDelete={() => {
-            setPendingWorkspaceDeletion({
-              groupKey: workspaceContextMenu.groupKey,
-              sessionIds: workspaceContextMenu.allSessionIds,
-              workspaceLabel: workspaceContextMenu.workspaceLabel,
-              workspacePath: workspaceContextMenu.workspacePath,
-            });
-          }}
-        />
-      )}
+        />,
+          document.body,
+        )}
+      {workspaceContextMenu &&
+        createPortal(
+          <WorkspaceGroupMenu
+            workspacePath={workspaceContextMenu.workspacePath}
+            workspaceLabel={workspaceContextMenu.workspaceLabel}
+            sessionCount={workspaceContextMenu.actualSessionCount}
+            x={workspaceContextMenu.x}
+            y={workspaceContextMenu.y}
+            isCollapsed={collapsedGroups.has(workspaceContextMenu.groupKey)}
+            canDelete={
+              workspaceContextMenu.workspacePath !== null ||
+              workspaceContextMenu.actualSessionCount > 0
+            }
+            onClose={() => setWorkspaceContextMenu(null)}
+            onNewSession={() => void newSession(workspaceContextMenu.workspacePath)}
+            onToggleCollapse={() => toggleGroupCollapsed(workspaceContextMenu.groupKey)}
+            onDelete={() => {
+              setPendingWorkspaceDeletion({
+                groupKey: workspaceContextMenu.groupKey,
+                sessionIds: workspaceContextMenu.allSessionIds,
+                workspaceLabel: workspaceContextMenu.workspaceLabel,
+                workspacePath: workspaceContextMenu.workspacePath,
+              });
+            }}
+          />,
+          document.body,
+        )}
       <WorkspaceDeleteConfirmDialog
         open={pendingWorkspaceDeletion !== null}
         workspaceLabel={pendingWorkspaceDeletion?.workspaceLabel ?? ''}

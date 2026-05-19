@@ -255,7 +255,7 @@ export function WorkflowEditor({ workflowId }: WorkflowEditorProps) {
           保存
         </button>
         {saved ? (
-          <span style={{ fontSize: 12, color: 'var(--success, #22c55e)' }}>已保存</span>
+          <span style={{ fontSize: 12, color: 'var(--success, var(--success, var(--success, #3dd49a)))' }}>已保存</span>
         ) : null}
         {error ? (
           <span style={{ fontSize: 12, color: 'var(--danger, #d4574e)' }}>{error}</span>

@@ -19,10 +19,10 @@ import {
   updateMemory,
   upsertExtractedMemories,
   writeMemorySettings,
-} from '../memory-store.js';
+} from '../memory/memory-store.js';
 import { sqliteGet } from '../db.js';
-import { buildMemoryExtractionTextForSession } from '../memory-runtime.js';
-import { scanMemoryWriteContent } from '../memory-security-scanner.js';
+import { buildMemoryExtractionTextForSession } from '../memory/memory-runtime.js';
+import { scanMemoryWriteContent } from '../memory/memory-security-scanner.js';
 import { z } from 'zod';
 
 interface SessionSelectionRow {

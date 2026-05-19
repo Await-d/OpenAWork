@@ -8,12 +8,12 @@ import websocket from '@fastify/websocket';
 import authPlugin from '../auth.js';
 import { closeDb, connectDb, migrate, sqliteAll, sqliteGet, sqliteRun } from '../db.js';
 import requestWorkflowPlugin from '../request-workflow.js';
-import { listSessionMessagesV2 as listSessionMessages } from '../message-v2-adapter.js';
-import { listSessionRunEvents } from '../session-run-events.js';
-import { listSessionSnapshots } from '../session-snapshot-store.js';
+import { listSessionMessagesV2 as listSessionMessages } from '../message/message-v2-adapter.js';
+import { listSessionRunEvents } from '../session/session-run-events.js';
+import { listSessionSnapshots } from '../session/session-snapshot-store.js';
 import { sessionsRoutes } from '../routes/sessions.js';
 import { streamRoutes } from '../routes/stream-routes-plugin.js';
-import { listStoredToolResults } from '../tool-result-contract.js';
+import { listStoredToolResults } from '../tools/tool-result-contract.js';
 import { withTempEnv } from './task-verification-helpers.js';
 
 function assert(condition: unknown, message: string): asserts condition {

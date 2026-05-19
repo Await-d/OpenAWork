@@ -4,7 +4,7 @@ import {
   findMissingTeamTemplateDefaultBindingRoles,
   type TeamTemplateDefaultBindings,
   type TeamTemplateRole,
-} from './team-template-metadata.js';
+} from './team/team-template-metadata.js';
 
 interface UserRow {
   id: string;

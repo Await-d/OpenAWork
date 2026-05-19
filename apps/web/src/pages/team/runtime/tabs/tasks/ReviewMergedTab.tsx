@@ -24,7 +24,7 @@ import { ReviewReportView } from './ReviewReportView.js';
 import { ReviewTab } from './ReviewTab.js';
 import { useSessionHandoffs } from '../../hooks/use-session-handoffs.js';
 import { useReviewDisposition } from '../../hooks/use-review-disposition.js';
-import { FailureFlowIndicator } from '../../shell/FailureFlowIndicator.js';
+import { FailureFlowIndicator } from '../../shell/controls/FailureFlowIndicator.js';
 
 type ReviewSegment = 'report' | 'queue';
 
@@ -152,10 +152,10 @@ export function ReviewMergedTab({ selectedTeam, selectedTeamId }: ReviewMergedTa
                 borderRadius: '50%',
                 background:
                   review.overallVerdict === 'pass'
-                    ? 'var(--success, #22c55e)'
+                    ? 'var(--success, var(--success, var(--success, #3dd49a)))'
                     : review.overallVerdict === 'implementation-failure'
                       ? 'var(--danger, #d4574e)'
-                      : '#f59e0b',
+                      : 'var(--warning, var(--warning, #f0b429))',
               }}
             />
           ) : null}

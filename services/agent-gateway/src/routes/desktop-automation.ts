@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { requireAuth } from '../auth.js';
 import { startRequestWorkflow } from '../request-workflow.js';
-import { desktopAutomationManager } from '../desktop-automation.js';
+import { desktopAutomationManager } from '../tools/desktop-automation.js';
 
 export async function desktopAutomationRoutes(app: FastifyInstance): Promise<void> {
   app.get(

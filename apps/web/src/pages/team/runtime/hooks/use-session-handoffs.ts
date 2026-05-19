@@ -22,7 +22,7 @@ import {
   type HandoffRecord,
   type TeamHandoffsClient,
 } from '@openAwork/web-client';
-import { useHandoffStore } from '../../../../stores/team-events.js';
+import { useHandoffStore } from '../../../../stores/team/team-events.js';
 import { useAuthStore } from '../../../../stores/auth.js';
 
 export interface UseSessionHandoffsResult {

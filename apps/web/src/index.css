@@ -1,74 +1,163 @@
 @import 'tailwindcss';
 
 :root {
-  --nav-rail-bg: oklch(0.105 0.012 50);
-  --header-bg: oklch(0.13 0.013 50);
-  --card-bg: oklch(0.15 0.014 50);
-  --card-border: oklch(0.21 0.016 50);
-  --bg: oklch(0.1 0.012 50);
-  --bg-2: oklch(0.13 0.014 50);
-  --bg-3: oklch(0.16 0.016 50);
-  --bg-glass: oklch(0.13 0.013 50 / 0.75);
-  --bg-glass-border: oklch(0.3 0.022 50 / 0.45);
-  --surface: oklch(0.15 0.015 50);
-  --surface-2: oklch(0.19 0.016 50);
-  --surface-hover: oklch(0.22 0.016 50);
-  --border: oklch(0.24 0.016 50);
-  --border-subtle: oklch(0.18 0.013 50);
-  --text: oklch(0.95 0.008 70);
-  --text-2: oklch(0.72 0.01 60);
-  --text-3: oklch(0.5 0.008 60);
-  --accent: oklch(0.62 0.18 255);
-  --accent-hover: oklch(0.68 0.2 255);
-  --accent-muted: oklch(0.62 0.18 255 / 0.15);
-  --accent-text: oklch(0.98 0.006 70);
-  --success: oklch(0.6 0.16 155);
-  --warning: oklch(0.6 0.11 95);
-  --danger: oklch(0.6 0.22 20);
-  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.45);
-  --shadow-md: 0 4px 16px oklch(0 0 0 / 0.5);
-  --shadow-lg: 0 20px 60px -8px oklch(0 0 0 / 0.6);
-  /* ── Tool-call summary semantic colors (OpenCode-inspired) ──
-     Each token corresponds to a parser kind in `colorize-summary.tsx`
-     and a `.tc-tok-<kind>` class in `tool-call/css/tokens.css`. */
-  --tc-path: oklch(0.78 0.13 200);
-  --tc-cmd: oklch(0.8 0.13 125);
-  --tc-string: oklch(0.78 0.14 30);
-  --tc-num: oklch(0.74 0.14 290);
-  --tc-url: oklch(0.7 0.16 230);
-  --tc-keyword: oklch(0.74 0.16 145);
-  /* Tool-name pill category colors. The category is computed by
-     `getToolCategory()` and applied as `[data-tool-category]`. */
-  --tc-cat-read: oklch(0.72 0.13 230);
-  --tc-cat-edit: oklch(0.78 0.16 60);
-  --tc-cat-shell: oklch(0.72 0.16 145);
-  --tc-cat-think: oklch(0.74 0.17 290);
-  --tc-cat-net: oklch(0.7 0.16 230);
-  --tc-cat-state: oklch(0.78 0.14 30);
-  /* File-extension hue rotation. Applied via `[data-ext]` on
-     `.tc-tok-path` so the path stripe gets a per-language tint. */
-  --tc-ext-ts: oklch(0.7 0.14 240);
-  --tc-ext-py: oklch(0.84 0.16 90);
-  --tc-ext-md: oklch(0.78 0.04 250);
-  --tc-ext-json: oklch(0.78 0.13 30);
-  --tc-ext-css: oklch(0.74 0.18 290);
-  --tc-ext-html: oklch(0.7 0.18 25);
-  --tc-ext-go: oklch(0.74 0.13 200);
-  --tc-ext-rs: oklch(0.7 0.16 30);
-  --tc-ext-rb: oklch(0.72 0.18 20);
-  --tc-ext-sh: oklch(0.78 0.16 130);
-  color-scheme: dark;
-  --color-bg: var(--bg);
-  --color-surface: var(--surface);
-  --color-surface-raised: var(--bg-2);
-  --color-border: var(--border);
-  --color-text: var(--text);
-  --color-muted: var(--text-3);
-  --color-fg: var(--text);
+  /* ═══ E · Nebula 暗色主题 ═══ */
+
+  /* 表面层级 */
+  --bg-base: #080b12;
+  --bg-raised: #0d1119;
+  --bg-overlay: #121721;
+  --bg-surface: #171d29;
+  --bg-elevated: #1d2535;
+  --bg-hover: #232d40;
+  --bg-active: #2a3650;
+
+  /* 文字层级 */
+  --fg-strong: #f1f4f8;
+  --fg-default: #c8d1e0;
+  --fg-muted: #7b8a9e;
+  --fg-subtle: #4d5b6e;
+  --fg-on-accent: #052e22;
+  --fg-on-contrast: #1f1200;
+  --fg-on-complement: #1f0508;
+
+  /* 主强调色: 靛青 */
+  --accent: var(--accent, #5cd4c0);
+  --accent-hover: var(--accent-hover, #72e0ce);
+  --accent-active: var(--accent-active, #4ac4b0);
+  --accent-muted: rgba(92, 212, 192, 0.14);
+  --accent-subtle: rgba(92, 212, 192, 0.07);
+  --accent-border: rgba(92, 212, 192, 0.30);
+
+  /* 对比色: 琥珀 */
+  --contrast: var(--warning, #f0b429);
+  --contrast-hover: #f5c84d;
+  --contrast-muted: rgba(240, 180, 41, 0.14);
+  --contrast-subtle: rgba(240, 180, 41, 0.07);
+  --contrast-border: rgba(240, 180, 41, 0.30);
+
+  /* 互补色: 珊瑚 */
+  --complement: var(--danger, #f06b7e);
+  --complement-hover: #f5919f;
+  --complement-muted: rgba(240, 107, 126, 0.14);
+  --complement-subtle: rgba(240, 107, 126, 0.07);
+  --complement-border: rgba(240, 107, 126, 0.30);
+
+  /* 辅助色: 靛蓝 */
+  --aux: var(--aux, #8b9cf5);
+  --aux-hover: var(--aux-hover, #a8b5fc);
+  --aux-muted: rgba(139, 156, 245, 0.14);
+  --aux-subtle: rgba(139, 156, 245, 0.07);
+  --aux-border: rgba(139, 156, 245, 0.30);
+
+  /* 语义色 */
+  --success: var(--success, #3dd49a);
+  --success-muted: rgba(61, 212, 154, 0.14);
+  --success-border: rgba(61, 212, 154, 0.30);
+  --warning: var(--contrast);
+  --warning-muted: var(--contrast-muted);
+  --warning-border: var(--contrast-border);
+  --danger: var(--complement);
+  --danger-muted: var(--complement-muted);
+  --danger-border: var(--complement-border);
+  --info: var(--aux);
+  --info-muted: var(--aux-muted);
+  --info-border: var(--aux-border);
+
+  /* 线条层级 */
+  --border-invisible: hsla(215, 20%, 50%, 0.03);
+  --border-subtle: hsla(215, 20%, 50%, 0.07);
+  --border-default: hsla(215, 18%, 50%, 0.12);
+  --border-emphasis: hsla(215, 16%, 55%, 0.20);
+  --border-strong: hsla(215, 14%, 60%, 0.30);
+
+  /* 阴影 */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.02);
+  --shadow-md: 0 2px 4px rgba(0,0,0,0.2), 0 8px 24px -8px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.02);
+  --shadow-lg: 0 4px 8px rgba(0,0,0,0.2), 0 24px 56px -16px rgba(0,0,0,0.5);
+  --shadow-glow: 0 0 16px -4px rgba(92, 212, 192, 0.25);
+
+  /* 动效 */
+  --ease-micro: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-normal: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-emphasis: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-micro: 100ms;
+  --dur-normal: 200ms;
+  --dur-emphasis: 350ms;
+
+  /* 图表配色 */
+  --chart-1: var(--accent, #5cd4c0);
+  --chart-2: var(--warning, #f0b429);
+  --chart-3: var(--aux, #8b9cf5);
+  --chart-4: var(--danger, #f06b7e);
+  --chart-5: var(--chart-5, #c4b5fd);
+  --chart-6: var(--success, var(--success, #3dd49a));
+  --chart-7: var(--chart-7, #67e8f9);
+  --chart-8: var(--complement, #f06b7e);
+
+  /* 语法高亮 */
+  --hl-keyword: var(--aux, #8b9cf5);
+  --hl-function: var(--accent, #5cd4c0);
+  --hl-type: var(--warning, #f0b429);
+  --hl-string: var(--success, var(--success, #3dd49a));
+  --hl-number: var(--complement, #f06b7e);
+  --hl-comment: #4d5b6e;
+
+  /* ── 向后兼容映射 ── */
+  --nav-rail-bg: var(--bg-raised);
+  --header-bg: var(--bg-overlay);
+  --card-bg: var(--bg-overlay);
+  --card-border: var(--border-default);
+  --bg: var(--bg-base);
+  --bg-2: var(--bg-raised);
+  --bg-3: var(--bg-overlay);
+  --bg-glass: rgba(18, 23, 33, 0.75);
+  --bg-glass-border: var(--border-default);
+  --surface: var(--bg-overlay);
+  --surface-2: var(--bg-surface);
+  --surface-hover: var(--bg-hover);
+  --border: var(--border-default);
+  --text: var(--fg-strong);
+  --text-2: var(--fg-default);
+  --text-3: var(--fg-muted);
+  --accent-text: var(--fg-on-accent);
+  --color-bg: var(--bg-base);
+  --color-surface: var(--bg-overlay);
+  --color-surface-raised: var(--bg-raised);
+  --color-border: var(--border-default);
+  --color-text: var(--fg-strong);
+  --color-muted: var(--fg-muted);
+  --color-fg: var(--fg-strong);
   --color-accent: var(--accent);
   --color-accent-hover: var(--accent-hover);
-  --color-accent-text: var(--accent-text);
+  --color-accent-text: var(--fg-on-accent);
   --color-warning: var(--warning);
+
+  /* Tool-call 语义色 */
+  --tc-path: var(--aux);
+  --tc-cmd: var(--success);
+  --tc-string: var(--contrast);
+  --tc-num: var(--chart-8);
+  --tc-url: var(--aux);
+  --tc-keyword: var(--success);
+  --tc-cat-read: var(--aux);
+  --tc-cat-edit: var(--contrast);
+  --tc-cat-shell: var(--accent);
+  --tc-cat-think: var(--chart-5);
+  --tc-cat-net: var(--aux);
+  --tc-cat-state: var(--contrast);
+  --tc-ext-ts: var(--aux);
+  --tc-ext-py: var(--contrast);
+  --tc-ext-md: var(--fg-muted);
+  --tc-ext-json: var(--contrast);
+  --tc-ext-css: var(--chart-5);
+  --tc-ext-html: var(--complement);
+  --tc-ext-go: var(--accent);
+  --tc-ext-rs: var(--complement);
+  --tc-ext-rb: var(--complement);
+  --tc-ext-sh: var(--success);
+
+  color-scheme: dark;
 }
 
 :root {
@@ -80,58 +169,140 @@
 }
 
 :root.light {
-  --nav-rail-bg: oklch(0.94 0.008 60);
-  --header-bg: oklch(0.97 0.005 60);
-  --card-bg: oklch(0.995 0.003 70);
-  --card-border: oklch(0.87 0.014 55);
-  --bg: oklch(0.975 0.01 65);
-  --bg-2: oklch(0.95 0.01 60);
-  --bg-3: oklch(0.92 0.013 58);
-  --bg-glass: oklch(0.98 0.006 65 / 0.82);
-  --bg-glass-border: oklch(0.78 0.018 55 / 0.5);
-  --surface: oklch(0.995 0.005 70);
-  --surface-2: oklch(0.955 0.009 62);
-  --surface-hover: oklch(0.93 0.012 60);
-  --border: oklch(0.88 0.012 58);
-  --border-subtle: oklch(0.93 0.007 62);
-  --text: oklch(0.16 0.018 40);
-  --text-2: oklch(0.4 0.014 45);
-  --text-3: oklch(0.58 0.01 50);
-  --accent: oklch(0.52 0.2 35);
-  --accent-hover: oklch(0.47 0.2 35);
-  --accent-muted: oklch(0.52 0.2 35 / 0.12);
-  --accent-text: oklch(0.99 0.005 70);
-  --success: oklch(0.48 0.16 155);
-  --warning: oklch(0.54 0.18 75);
-  --danger: oklch(0.52 0.22 20);
-  --shadow-sm: 0 1px 2px oklch(0.3 0.02 50 / 0.1);
-  --shadow-md: 0 4px 16px oklch(0.3 0.02 50 / 0.08);
-  --shadow-lg: 0 20px 60px -8px oklch(0.3 0.02 50 / 0.1);
-  /* Light theme: lower lightness + higher chroma so the same hues
-     stay perceivable on the warm cream background. Tuned slightly
-     lighter than 0.5 so summaries don't feel heavier than body text. */
-  --tc-path: oklch(0.52 0.13 200);
-  --tc-cmd: oklch(0.54 0.14 125);
-  --tc-string: oklch(0.52 0.16 30);
-  --tc-num: oklch(0.52 0.16 290);
-  --tc-url: oklch(0.5 0.18 240);
-  --tc-keyword: oklch(0.5 0.15 145);
-  --tc-cat-read: oklch(0.5 0.16 230);
-  --tc-cat-edit: oklch(0.54 0.17 60);
-  --tc-cat-shell: oklch(0.5 0.15 145);
-  --tc-cat-think: oklch(0.52 0.18 290);
-  --tc-cat-net: oklch(0.5 0.18 230);
-  --tc-cat-state: oklch(0.54 0.16 30);
-  --tc-ext-ts: oklch(0.48 0.18 240);
-  --tc-ext-py: oklch(0.55 0.18 90);
-  --tc-ext-md: oklch(0.5 0.04 250);
-  --tc-ext-json: oklch(0.5 0.16 30);
-  --tc-ext-css: oklch(0.5 0.2 290);
-  --tc-ext-html: oklch(0.5 0.2 25);
-  --tc-ext-go: oklch(0.48 0.14 200);
-  --tc-ext-rs: oklch(0.5 0.18 30);
-  --tc-ext-rb: oklch(0.5 0.2 20);
-  --tc-ext-sh: oklch(0.48 0.18 130);
+  /* ═══ Aurora 亮色主题 — 极光雾气配色 ═══ */
+  --bg-base: #f4f6ff;
+  --bg-raised: var(--fg-on-accent);
+  --bg-overlay: #eef1ff;
+  --bg-surface: #e4e8fa;
+  --bg-elevated: #d8defa;
+  --bg-hover: #ccd4f5;
+  --bg-active: #c0caf0;
+
+  --fg-strong: #161a3a;
+  --fg-default: #43497a;
+  --fg-muted: #7c83a9;
+  --fg-subtle: var(--fg-subtle, #4d5b6e);
+  --fg-on-accent: var(--fg-on-accent);
+  --fg-on-contrast: var(--fg-on-accent);
+  --fg-on-complement: var(--fg-on-accent);
+
+  /* 主强调色: 靛紫 */
+  --accent: var(--accent, #5cd4c0);
+  --accent-hover: #515fe8;
+  --accent-active: #4452d8;
+  --accent-muted: rgba(100, 113, 240, 0.12);
+  --accent-subtle: rgba(100, 113, 240, 0.06);
+  --accent-border: rgba(100, 113, 240, 0.30);
+
+  /* 对比色: 紫粉 */
+  --contrast: var(--chart-5, var(--chart-5, #c4b5fd));
+  --contrast-hover: #8e55f5;
+  --contrast-muted: rgba(160, 107, 255, 0.12);
+  --contrast-subtle: rgba(160, 107, 255, 0.06);
+  --contrast-border: rgba(160, 107, 255, 0.30);
+
+  /* 互补色: 玫瑰 */
+  --complement: var(--danger, #f06b7e);
+  --complement-hover: #d13668;
+  --complement-muted: rgba(224, 73, 122, 0.10);
+  --complement-subtle: rgba(224, 73, 122, 0.05);
+  --complement-border: rgba(224, 73, 122, 0.28);
+
+  /* 辅助色: 天蓝 */
+  --aux: var(--aux, #8b9cf5);
+  --aux-hover: #2a8def;
+  --aux-muted: rgba(58, 160, 255, 0.12);
+  --aux-subtle: rgba(58, 160, 255, 0.06);
+  --aux-border: rgba(58, 160, 255, 0.30);
+
+  /* 语义色 */
+  --success: var(--success, #3dd49a);
+  --success-muted: rgba(22, 163, 122, 0.10);
+  --success-border: rgba(22, 163, 122, 0.28);
+  --warning: var(--contrast);
+  --warning-muted: var(--contrast-muted);
+  --warning-border: var(--contrast-border);
+  --danger: var(--complement);
+  --danger-muted: var(--complement-muted);
+  --danger-border: var(--complement-border);
+  --info: var(--aux);
+  --info-muted: var(--aux-muted);
+  --info-border: var(--aux-border);
+
+  /* 线条层级 — 偏冷的蓝紫调 */
+  --border-invisible: rgba(15, 23, 60, 0.03);
+  --border-subtle: rgba(15, 23, 60, 0.05);
+  --border-default: rgba(15, 23, 60, 0.08);
+  --border-emphasis: rgba(15, 23, 60, 0.16);
+  --border-strong: rgba(15, 23, 60, 0.25);
+
+  /* 阴影 — 带蓝紫调 */
+  --shadow-sm: 0 1px 3px rgba(60, 75, 180, 0.06), inset 0 1px 0 rgba(255,255,255,0.5);
+  --shadow-md: 0 4px 16px -4px rgba(60, 75, 180, 0.10), inset 0 1px 0 rgba(255,255,255,0.5);
+  --shadow-lg: 0 24px 60px -16px rgba(60, 75, 180, 0.20);
+  --shadow-glow: 0 0 20px -4px rgba(124, 92, 255, 0.25);
+
+  /* 图表配色 — 极光色系 */
+  --chart-1: var(--accent, #5cd4c0);
+  --chart-2: var(--chart-5, var(--chart-5, #c4b5fd));
+  --chart-3: var(--aux, #8b9cf5);
+  --chart-4: var(--danger, #f06b7e);
+  --chart-5: var(--chart-5, var(--chart-5, #c4b5fd));
+  --chart-6: var(--success, #3dd49a);
+  --chart-7: var(--chart-7, #67e8f9);
+  --chart-8: var(--chart-8, #fda4af);
+
+  /* 语法高亮 */
+  --hl-keyword: var(--accent, #5cd4c0);
+  --hl-function: var(--chart-5, var(--chart-5, #c4b5fd));
+  --hl-type: var(--aux, #8b9cf5);
+  --hl-string: var(--success, #3dd49a);
+  --hl-number: var(--danger, #f06b7e);
+  --hl-comment: var(--fg-subtle, #4d5b6e);
+
+  /* 向后兼容 */
+  --nav-rail-bg: rgba(255, 255, 255, 0.85);
+  --header-bg: rgba(255, 255, 255, 0.75);
+  --card-bg: var(--bg-raised);
+  --card-border: var(--border-default);
+  --bg: var(--bg-base);
+  --bg-2: var(--bg-overlay);
+  --bg-3: var(--bg-surface);
+  --bg-glass: rgba(255, 255, 255, 0.70);
+  --bg-glass-border: var(--border-default);
+  --surface: var(--bg-raised);
+  --surface-2: var(--bg-overlay);
+  --surface-hover: var(--bg-hover);
+  --border: var(--border-default);
+  --text: var(--fg-strong);
+  --text-2: var(--fg-default);
+  --text-3: var(--fg-muted);
+  --accent-text: var(--fg-on-accent);
+
+  /* Tool-call 语义色(亮色) */
+  --tc-path: var(--aux);
+  --tc-cmd: var(--success);
+  --tc-string: var(--contrast);
+  --tc-num: var(--complement);
+  --tc-url: var(--aux);
+  --tc-keyword: var(--accent);
+  --tc-cat-read: var(--aux);
+  --tc-cat-edit: var(--contrast);
+  --tc-cat-shell: var(--accent);
+  --tc-cat-think: var(--chart-5);
+  --tc-cat-net: var(--aux);
+  --tc-cat-state: var(--contrast);
+  --tc-ext-ts: var(--accent);
+  --tc-ext-py: var(--contrast);
+  --tc-ext-md: var(--fg-muted);
+  --tc-ext-json: var(--complement);
+  --tc-ext-css: var(--contrast);
+  --tc-ext-html: var(--complement);
+  --tc-ext-go: var(--aux);
+  --tc-ext-rs: var(--complement);
+  --tc-ext-rb: var(--complement);
+  --tc-ext-sh: var(--success);
+
   color-scheme: light;
 }
 
@@ -432,7 +603,7 @@ textarea {
   transform: scale(0.97);
 }
 .nav-rail-btn:focus-visible {
-  outline: 2px solid color-mix(in oklch, var(--accent) 70%, white 8%);
+  outline: 2px solid color-mix(in oklch, var(--accent) 70%, var(--fg-on-accent) 8%);
   outline-offset: -2px;
 }
 
@@ -663,7 +834,7 @@ textarea {
   animation: none;
 }
 .nav-rail-status-dot[data-status='warning'] {
-  background: var(--warning, #f59e0b);
+  background: var(--warning, var(--warning, var(--warning, #f0b429)));
 }
 
 .nav-rail-scroll {
@@ -712,7 +883,7 @@ textarea {
   background: var(--surface-hover) !important;
 }
 .session-item:focus-within {
-  outline: 2px solid color-mix(in oklch, var(--accent) 72%, white 8%);
+  outline: 2px solid color-mix(in oklch, var(--accent) 72%, var(--fg-on-accent) 8%);
   outline-offset: 1px;
 }
 .session-item.active:hover {
@@ -726,7 +897,7 @@ textarea {
 }
 .session-item button:focus-visible,
 .session-item input:focus-visible {
-  outline: 2px solid color-mix(in oklch, var(--accent) 72%, white 8%);
+  outline: 2px solid color-mix(in oklch, var(--accent) 72%, var(--fg-on-accent) 8%);
   outline-offset: 1px;
 }
 
@@ -845,7 +1016,7 @@ textarea {
   color: var(--text-2) !important;
 }
 .toolbar-btn:focus-visible {
-  outline: 2px solid color-mix(in oklch, var(--accent) 78%, white 8%);
+  outline: 2px solid color-mix(in oklch, var(--accent) 78%, var(--fg-on-accent) 8%);
   outline-offset: 1px;
 }
 
@@ -935,17 +1106,16 @@ textarea {
   box-shadow: 0 0 0 2px var(--accent-muted);
 }
 .composer-shell {
-  border: 1px solid color-mix(in oklch, var(--border) 72%, var(--accent) 28%);
-  border-radius: 16px;
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
   background: linear-gradient(
     180deg,
-    color-mix(in oklch, var(--surface) 94%, var(--bg-2) 6%),
-    color-mix(in oklch, var(--surface) 82%, var(--bg-2) 18%)
+    var(--bg-overlay),
+    var(--bg-surface)
   );
   box-shadow:
-    var(--shadow-sm),
-    0 12px 32px -24px oklch(0 0 0 / 0.85),
-    inset 0 1px 0 oklch(1 0 0 / 0.05);
+    0 1px 0 var(--border-subtle),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
   transition:
     border-color 150ms ease,
     box-shadow 150ms ease,
@@ -1020,11 +1190,10 @@ textarea {
   opacity: 0.7;
 }
 .composer-shell:focus-within {
-  border-color: var(--accent);
+  border-color: var(--accent-border);
   box-shadow:
-    0 0 0 2px var(--accent-muted),
-    var(--shadow-sm),
-    0 16px 36px -24px oklch(0 0 0 / 0.9);
+    0 0 0 2px var(--accent-subtle),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 .composer-shell.agent-override {
   border-color: color-mix(in oklch, var(--warning) 50%, var(--accent) 50%);
@@ -1037,10 +1206,10 @@ textarea {
     0 16px 36px -24px oklch(0 0 0 / 0.9);
 }
 :root.light .nav-rail-btn:hover {
-  background: oklch(0.89 0.014 58) !important;
+  background: var(--bg-hover) !important;
 }
 :root.light .nav-rail-btn:active {
-  background: oklch(0.85 0.018 56) !important;
+  background: var(--bg-active) !important;
 }
 .page-title {
   font-size: 13px;
@@ -1591,4 +1760,538 @@ textarea {
   .login-glow--secondary {
     animation: none;
   }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   E · Nebula 全局交互细节
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── 卡片微渐变 + 顶部高光线 ── */
+.content-card,
+[data-card] {
+  background: linear-gradient(180deg, var(--bg-overlay), var(--bg-raised));
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  box-shadow: var(--shadow-sm);
+  position: relative;
+  overflow: hidden;
+  transition:
+    border-color var(--dur-micro) var(--ease-micro),
+    transform var(--dur-micro) var(--ease-micro),
+    box-shadow var(--dur-micro) var(--ease-micro);
+}
+.content-card::after,
+[data-card]::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 12px; right: 12px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--border-subtle), transparent);
+  pointer-events: none;
+}
+.content-card:hover,
+[data-card]:hover {
+  border-color: var(--border-emphasis);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+/* ── 全局 Focus Ring ── */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
+/* ── 按钮全局交互态 ── */
+.btn-accent,
+[data-btn-primary] {
+  transition:
+    background var(--dur-micro) var(--ease-micro),
+    transform var(--dur-micro) var(--ease-micro),
+    box-shadow var(--dur-micro) var(--ease-micro);
+  box-shadow: var(--shadow-sm), 0 4px 16px -6px rgba(92, 212, 192, 0.20);
+}
+.btn-accent:hover,
+[data-btn-primary]:hover {
+  background: var(--accent-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-glow), inset 0 1px 0 rgba(255,255,255,0.1);
+}
+.btn-accent:active,
+[data-btn-primary]:active {
+  transform: translateY(0);
+  box-shadow: var(--shadow-sm);
+}
+.btn-accent:disabled,
+[data-btn-primary]:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+  cursor: not-allowed;
+}
+
+/* ── 输入框交互态 ── */
+.chat-input,
+input[type="text"],
+input[type="search"],
+input[type="email"],
+input[type="password"],
+input[type="url"],
+textarea,
+select {
+  transition:
+    border-color var(--dur-micro) var(--ease-micro),
+    box-shadow var(--dur-micro) var(--ease-micro),
+    background var(--dur-micro) var(--ease-micro);
+}
+input:hover:not(:disabled):not(:focus),
+textarea:hover:not(:disabled):not(:focus),
+select:hover:not(:disabled):not(:focus) {
+  border-color: var(--border-emphasis);
+}
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--accent-border) !important;
+  box-shadow: 0 0 0 3px var(--accent-subtle) !important;
+  outline: none;
+}
+input:disabled,
+textarea:disabled,
+select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── 列表项 hover 态 ── */
+.session-item,
+.nav-rail-btn,
+[data-list-item] {
+  transition:
+    background var(--dur-micro) var(--ease-micro),
+    border-color var(--dur-micro) var(--ease-micro),
+    color var(--dur-micro) var(--ease-micro),
+    transform var(--dur-micro) var(--ease-micro);
+}
+
+/* ── 工具卡片交互 ── */
+[data-tool-card],
+.tool-call-card {
+  transition:
+    border-color var(--dur-micro) var(--ease-micro),
+    background var(--dur-micro) var(--ease-micro),
+    box-shadow var(--dur-micro) var(--ease-micro);
+}
+[data-tool-card]:hover,
+.tool-call-card:hover {
+  border-color: var(--border-emphasis);
+  background: var(--bg-surface);
+}
+
+/* ── Badge / Pill 统一样式 ── */
+[data-badge],
+[data-tool-card-meta-label] {
+  border: 1px solid;
+  transition: opacity var(--dur-micro) var(--ease-micro);
+}
+[data-badge="success"],
+[data-tool-card-meta-label="success"] {
+  background: var(--success-muted);
+  color: var(--success);
+  border-color: var(--success-border);
+}
+[data-badge="warning"],
+[data-tool-card-meta-label="warning"] {
+  background: var(--warning-muted);
+  color: var(--warning);
+  border-color: var(--warning-border);
+}
+[data-badge="danger"],
+[data-tool-card-meta-label="danger"] {
+  background: var(--danger-muted);
+  color: var(--danger);
+  border-color: var(--danger-border);
+}
+[data-badge="info"],
+[data-tool-card-meta-label="info"] {
+  background: var(--info-muted);
+  color: var(--info);
+  border-color: var(--info-border);
+}
+[data-badge="accent"],
+[data-tool-card-meta-label="accent"] {
+  background: var(--accent-muted);
+  color: var(--accent);
+  border-color: var(--accent-border);
+}
+[data-badge="muted"],
+[data-tool-card-meta-label="muted"] {
+  background: var(--bg-surface);
+  color: var(--fg-muted);
+  border-color: var(--border-default);
+}
+
+/* ── 脉冲状态指示器 ── */
+@keyframes nebula-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px var(--success-muted); }
+  50% { box-shadow: 0 0 0 6px transparent; }
+}
+[data-status-dot="active"],
+.nav-rail-status-dot {
+  animation: nebula-pulse 2.4s ease-in-out infinite;
+}
+
+/* ── Spinner ── */
+@keyframes nebula-spin {
+  to { transform: rotate(360deg); }
+}
+.spinner,
+[data-spinner] {
+  border: 2px solid var(--accent);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: nebula-spin 0.8s linear infinite;
+}
+
+/* ── 主题切换过渡 ── */
+body.theme-transitioning *,
+body.theme-transitioning *::before,
+body.theme-transitioning *::after {
+  transition-duration: 250ms !important;
+  transition-timing-function: var(--ease-normal) !important;
+}
+
+/* ── 骨架屏 shimmer ── */
+@keyframes nebula-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+[data-skeleton] {
+  background: linear-gradient(90deg, var(--bg-surface) 25%, var(--bg-elevated) 50%, var(--bg-surface) 75%);
+  background-size: 200% 100%;
+  animation: nebula-shimmer 1.5s ease-in-out infinite;
+  border-radius: 4px;
+}
+
+/* ── Toast 入场动画 ── */
+@keyframes nebula-toast-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+[data-toast] {
+  animation: nebula-toast-in 300ms var(--ease-normal);
+}
+
+/* ── 快捷入口箭头动效 ── */
+[data-shortcut-arrow] {
+  transition: transform var(--dur-micro) var(--ease-micro), color var(--dur-micro) var(--ease-micro);
+}
+[data-shortcut]:hover [data-shortcut-arrow] {
+  color: var(--accent);
+  transform: translateX(3px);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Aurora 亮色主题 — 极光氛围层
+   只在亮色主题下生效,给页面加上柔和的青蓝→紫粉雾气
+   ═══════════════════════════════════════════════════════════ */
+
+:root.light body {
+  background:
+    radial-gradient(ellipse 60% 30% at 15% -5%, rgba(58, 160, 255, 0.05), transparent 60%),
+    radial-gradient(ellipse 50% 25% at 90% -10%, rgba(160, 107, 255, 0.04), transparent 60%),
+    var(--bg-base);
+  background-attachment: fixed;
+}
+
+/* 亮色主题下卡片更"白雾玻璃感" */
+:root.light .content-card,
+:root.light [data-card] {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.95));
+  backdrop-filter: blur(8px) saturate(1.1);
+  -webkit-backdrop-filter: blur(8px) saturate(1.1);
+}
+
+/* 亮色主题下 hero 类大区块的极光描边氛围 */
+:root.light .hero-card {
+  box-shadow:
+    var(--shadow-md),
+    0 0 0 1px var(--border-subtle);
+}
+
+/* 亮色主题下品牌渐变 — 给 logo / brand 标记一种极光感 */
+:root.light [data-brand-mark] {
+  background: linear-gradient(135deg, var(--aux, #8b9cf5), var(--chart-5, var(--chart-5, #c4b5fd)));
+  color: var(--fg-on-accent);
+}
+
+/* 亮色主题下 active 导航项的渐变高亮线 */
+:root.light .nav-rail-link-active {
+  background: linear-gradient(
+    90deg,
+    rgba(58, 160, 255, 0.12),
+    rgba(160, 107, 255, 0.10)
+  ) !important;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Aurora 亮色主题 — 精修细节
+   只在 :root.light 下生效,深色不受影响
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── A. Sidebar 区域融合极光雾气 ─────────────────────────── */
+:root.light .session-sidebar,
+:root.light [data-sidebar],
+:root.light aside.session-list {
+  background:
+    radial-gradient(ellipse 80% 30% at 50% 0%, rgba(58, 160, 255, 0.04), transparent 60%),
+    var(--bg-overlay) !important;
+  border-right-color: var(--border-default);
+}
+
+/* sidebar 内的列表/分组继承雾气底色,不是死灰 */
+:root.light .session-sidebar > *,
+:root.light [data-sidebar] > * {
+  background: transparent;
+}
+
+/* ── B. Model Badge 统一语义色 ──────────────────────────── */
+/* claude 系列 → accent (靛紫) */
+:root.light [data-model*="claude" i],
+:root.light .model-badge[data-model*="claude" i] {
+  background: var(--accent-muted);
+  color: var(--accent);
+  border: 1px solid var(--accent-border);
+}
+/* gpt / openai → aux (天蓝) */
+:root.light [data-model*="gpt" i],
+:root.light [data-model*="openai" i],
+:root.light .model-badge[data-model*="gpt" i] {
+  background: var(--aux-muted);
+  color: var(--aux);
+  border: 1px solid var(--aux-border);
+}
+/* gemini → contrast (紫粉) */
+:root.light [data-model*="gemini" i] {
+  background: var(--contrast-muted);
+  color: var(--contrast);
+  border: 1px solid var(--contrast-border);
+}
+/* deepseek / qwen → success (翡翠) */
+:root.light [data-model*="deepseek" i],
+:root.light [data-model*="qwen" i] {
+  background: var(--success-muted);
+  color: var(--success);
+  border: 1px solid var(--success-border);
+}
+
+/* 通用 model badge 样式(无具体 model 时) */
+:root.light .model-badge,
+:root.light [data-model-pill] {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  background: var(--bg-surface);
+  color: var(--fg-muted);
+  border: 1px solid var(--border-default);
+  white-space: nowrap;
+}
+
+/* ── C. Hero / 特性卡片 — 增强渐变描边 ───────────────────── */
+@property --aurora-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+@keyframes aurora-rotate {
+  to { --aurora-angle: 360deg; }
+}
+
+:root.light .hero-feature-card,
+:root.light [data-feature-card][data-active="true"] {
+  position: relative;
+  isolation: isolate;
+}
+:root.light .hero-feature-card::after,
+:root.light [data-feature-card][data-active="true"]::after {
+  content: '';
+  position: absolute; inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(
+    from var(--aurora-angle, 0deg),
+    rgba(58, 160, 255, 0.5),
+    rgba(160, 107, 255, 0.6),
+    rgba(224, 73, 122, 0.4),
+    rgba(58, 160, 255, 0.5)
+  );
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  pointer-events: none;
+  animation: aurora-rotate 8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root.light .hero-feature-card::after,
+  :root.light [data-feature-card][data-active="true"]::after {
+    animation: none;
+  }
+}
+
+/* 普通卡片在亮色下加强 hover 时的描边层级 */
+:root.light .content-card:hover,
+:root.light [data-card]:hover {
+  border-color: var(--accent-border);
+  box-shadow:
+    var(--shadow-md),
+    0 0 0 1px var(--accent-subtle);
+}
+
+/* ── D. 输入框区域 — Aurora focus ring ──────────────────── */
+:root.light .composer-shell,
+:root.light .chat-composer,
+:root.light [data-composer] {
+  background: linear-gradient(
+    180deg,
+    var(--bg-raised),
+    var(--bg-overlay)
+  ) !important;
+  backdrop-filter: none;
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
+  position: relative;
+  box-shadow:
+    0 1px 0 var(--border-subtle),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  transition:
+    border-color var(--dur-micro) var(--ease-micro),
+    box-shadow var(--dur-micro) var(--ease-micro);
+}
+/* 顶部高光线 */
+:root.light .composer-shell::before,
+:root.light [data-composer]::before {
+  content: '';
+  position: absolute; top: 0; left: 16px; right: 16px; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(100, 113, 240, 0.20), transparent);
+  pointer-events: none;
+  z-index: 1;
+}
+/* focus 时极光发光（克制版） */
+:root.light .composer-shell:focus-within,
+:root.light [data-composer]:focus-within {
+  border-color: rgba(100, 113, 240, 0.40) !important;
+  box-shadow:
+    0 0 0 2px rgba(100, 113, 240, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5) !important;
+}
+
+/* ── E. 顶部 Tabs — 渐变下划线 ──────────────────────────── */
+:root.light [role="tab"],
+:root.light .mode-pill-btn,
+:root.light .toolbar-btn {
+  position: relative;
+  transition:
+    color var(--dur-micro) var(--ease-micro),
+    background var(--dur-micro) var(--ease-micro);
+}
+:root.light [role="tab"][aria-selected="true"]::after,
+:root.light .mode-pill-btn[data-active="true"]::after,
+:root.light .toolbar-btn.active::after {
+  content: '';
+  position: absolute;
+  left: 8px; right: 8px; bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--contrast));
+  box-shadow: 0 0 8px rgba(100, 113, 240, 0.4);
+}
+
+/* ── F. 退出登录按钮 — Complement 危险提示 ─────────────────── */
+:root.light .nav-rail-logout,
+:root.light [data-action="logout"],
+:root.light [data-danger="true"] {
+  color: var(--fg-muted);
+  transition:
+    color var(--dur-micro) var(--ease-micro),
+    background var(--dur-micro) var(--ease-micro);
+}
+:root.light .nav-rail-logout:hover,
+:root.light [data-action="logout"]:hover,
+:root.light [data-danger="true"]:hover {
+  color: var(--complement) !important;
+  background: var(--complement-muted) !important;
+}
+:root.light .nav-rail-logout:hover .nav-rail-icon,
+:root.light [data-action="logout"]:hover svg {
+  color: var(--complement) !important;
+}
+
+/* 同样规则应用到暗色主题(保持一致性) */
+:root .nav-rail-logout:hover,
+:root [data-action="logout"]:hover {
+  color: var(--complement);
+  background: var(--complement-muted);
+}
+
+/* ── 额外:亮色下导航激活态的玻璃质感 ──────────────────────── */
+:root.light .nav-rail-link-active,
+:root.light a[aria-current="page"] {
+  position: relative;
+  background: linear-gradient(
+    90deg,
+    rgba(58, 160, 255, 0.10),
+    rgba(160, 107, 255, 0.08)
+  ) !important;
+  color: var(--fg-strong) !important;
+  border: 1px solid rgba(100, 113, 240, 0.20);
+}
+:root.light .nav-rail-link-active::before {
+  content: '';
+  position: absolute; left: -2px; top: 8px; bottom: 8px;
+  width: 2px; border-radius: 2px;
+  background: linear-gradient(180deg, var(--aux, #8b9cf5), var(--chart-5, var(--chart-5, #c4b5fd)));
+  box-shadow: 0 0 8px rgba(100, 113, 240, 0.3);
+}
+
+/* ── 会话项在亮色下的 hover/active 极光感 ─────────────────── */
+:root.light .session-item {
+  transition: all var(--dur-micro) var(--ease-micro);
+  border: 1px solid transparent;
+}
+:root.light .session-item:hover {
+  background: rgba(255, 255, 255, 0.6) !important;
+  border-color: var(--border-subtle);
+}
+:root.light .session-item.active {
+  background: linear-gradient(
+    90deg,
+    rgba(58, 160, 255, 0.08),
+    rgba(160, 107, 255, 0.06)
+  ) !important;
+  border-color: rgba(100, 113, 240, 0.25);
+  box-shadow: 0 1px 3px rgba(60, 75, 180, 0.05);
+}
+
+/* ── 用户消息历史跳转条 (右侧浮层) — 默认半透明,hover 显现 ── */
+[data-history-jump-stripe]:hover,
+[data-history-jump-stripe]:focus-visible,
+[data-history-jump-stripe][data-active="true"] {
+  opacity: 1 !important;
+  background: var(--bg-surface) !important;
+  color: var(--fg-default) !important;
 }

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import type { PersistedQueuedComposerMessage } from '../components/session-conversation/runtime/queued-composer-state.js';
+import type { PersistedQueuedComposerMessage } from '../pages/chat-page/conversation/composer/queued-composer-state.js';
 
 interface ChatQueueStore {
   queuesByScope: Record<string, PersistedQueuedComposerMessage[]>;

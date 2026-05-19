@@ -25,14 +25,14 @@ import {
   resizeTerminal,
   spawnPersistentTerminal,
   writeStdinToTerminal,
-} from '../persistent-terminals.js';
-import { subscribeSessionRunEvents } from '../session-run-events.js';
+} from '../session/persistent-terminals.js';
+import { subscribeSessionRunEvents } from '../session/session-run-events.js';
 import {
   deleteTerminalRecord,
   getTerminal,
   killTerminal,
   listSessionTerminals,
-} from '../session-terminal-registry.js';
+} from '../session/session-terminal-registry.js';
 
 interface SessionOwnerRow {
   user_id: string;

@@ -1,7 +1,7 @@
 import type { ArtifactRecord } from '@openAwork/artifacts';
 import { tokens } from '@openAwork/shared-ui';
 import MarkdownMessageContent from '../../components/chat/markdown-message-content.js';
-import { FilePreviewPane } from '../../components/FilePreviewPane.js';
+import { FilePreviewPane } from '../../components/file-editor/FilePreviewPane.js';
 import {
   buildArtifactVirtualPath,
   buildSvgPreviewDocument,
@@ -243,5 +243,5 @@ const previewFrameStyle: React.CSSProperties = {
   minHeight: 380,
   border: `1px solid ${tokens.color.borderSubtle}`,
   borderRadius: tokens.radius.lg,
-  background: '#ffffff',
+  background: 'var(--fg-on-accent, #ffffff)',
 };

@@ -1,7 +1,7 @@
 import { Fragment } from 'react';
 import { ToolKindIcon, resolveToolCallCardDisplayData, tokens } from '@openAwork/shared-ui';
 import type { ToolCallCardProps } from '@openAwork/shared-ui';
-import type { TaskToolRuntimeSnapshot } from '../session-conversation/runtime/task-tool-runtime.js';
+import type { TaskToolRuntimeSnapshot } from '../../pages/chat-page/conversation/render/task-tool-runtime.js';
 
 interface TaskToolInlineProps {
   approvalActions?: ToolCallCardProps['approvalActions'];

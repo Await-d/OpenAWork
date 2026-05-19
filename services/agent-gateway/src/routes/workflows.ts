@@ -6,9 +6,9 @@ import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
 import { startRequestWorkflow } from '../request-workflow.js';
-import { buildFixedTeamTemplateDefaultBindings } from '../team-template-metadata.js';
+import { buildFixedTeamTemplateDefaultBindings } from '../team/team-template-metadata.js';
 import * as agentCore from '@openAwork/agent-core';
-import { resolveAuxiliaryLlmConfig } from '../auxiliary-llm-config.js';
+import { resolveAuxiliaryLlmConfig } from '../provider/auxiliary-llm-config.js';
 import { requestWorkflowLlmCompletion } from './workflow-llm.js';
 
 type AgentCoreWithExtras = typeof agentCore & {

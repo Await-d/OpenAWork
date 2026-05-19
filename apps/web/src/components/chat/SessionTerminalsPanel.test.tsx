@@ -16,7 +16,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import type { SessionTerminalView } from '../session-conversation/runtime/terminals-api.js';
+import type { SessionTerminalView } from '../conversation-runtime/terminals/terminals-api.js';
 import { SessionTerminalsPanel } from './SessionTerminalsPanel.js';
 
 // xterm.js relies on browser-only APIs (matchMedia, canvas) that jsdom

@@ -35,9 +35,9 @@ async function main(): Promise<void> {
     import('../auth.js'),
     import('../request-workflow.js'),
     import('../db.js'),
-    import('../session-file-diff-store.js'),
-    import('../session-snapshot-store.js'),
-    import('../session-file-backup-store.js'),
+    import('../session/session-file-diff-store.js'),
+    import('../session/session-snapshot-store.js'),
+    import('../session/session-file-backup-store.js'),
     import('../routes/sessions.js'),
   ]);
 

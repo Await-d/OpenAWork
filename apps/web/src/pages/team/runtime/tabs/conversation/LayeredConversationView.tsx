@@ -5,7 +5,7 @@
  *
  * **改造要点（v2）**：从原来的"单栏 handoff timeline"升级为双栏：
  *   - 左栏：handoff timeline（按层过滤，时间倒序）
- *   - 右栏：点击某条 handoff 后，把对应 to_session 用 `<TeamSessionView/>`
+ *   - 右栏：点击某条 handoff 后，把对应 to_session 用 `<TeamConversationView/>`
  *     渲染出来，实现"层级对话 = 真正能看到会话内容"的体感
  *
  * 兼容点：
@@ -20,8 +20,8 @@ import {
   useLayerStore,
   type HandoffEntry,
   type TeamRoleLayer,
-} from '../../../../../stores/team-events.js';
-import { TeamSessionView } from '../../shell/TeamSessionView.js';
+} from '../../../../../stores/team/team-events.js';
+import { TeamConversationView } from '../../../conversation/TeamConversationView.js';
 import { TabContainer } from '../TabContainer.js';
 
 const LAYER_LABELS: Record<TeamRoleLayer, string> = {
@@ -37,9 +37,9 @@ const LAYER_ORDER: TeamRoleLayer[] = ['user', 'reception', 'pm1', 'pm2', 'execut
 
 const STATE_COLORS: Record<string, string> = {
   idle: 'var(--text-3)',
-  pending: '#f59e0b',
-  claimed: '#3b82f6',
-  running: 'var(--success, #22c55e)',
+  pending: 'var(--warning, var(--warning, #f0b429))',
+  claimed: 'var(--aux, var(--aux, #8b9cf5))',
+  running: 'var(--success, var(--success, var(--success, #3dd49a)))',
   completed: 'var(--text-3)',
   failed: 'var(--danger, #d4574e)',
   cancelled: 'var(--text-3)',
@@ -276,7 +276,7 @@ export function LayeredConversationView({ onSelectSessionDrawer }: LayeredConver
 
           <div style={SESSION_PANE_STYLE}>
             {selectedSessionId ? (
-              <TeamSessionView sessionId={selectedSessionId} />
+              <TeamConversationView sessionId={selectedSessionId} />
             ) : (
               <div style={EMPTY_STYLE}>
                 <span style={{ fontSize: 26 }} aria-hidden>

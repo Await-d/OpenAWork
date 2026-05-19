@@ -2,11 +2,11 @@ import { useCallback } from 'react';
 import type { SessionMessageRatingRecord, SessionMessageRatingValue } from '@openAwork/web-client';
 import type { GenerativeUIMessage } from '@openAwork/shared-ui';
 import type { InputImageContent } from '@openAwork/shared';
-import type { ChatMessage } from '../../components/session-conversation/runtime/support.js';
+import type { ChatMessage } from '../../components/conversation-runtime/messages/support.js';
 import {
   parseAssistantEventContent,
   readAssistantTracePayload,
-} from '../../components/session-conversation/runtime/support.js';
+} from '../../components/conversation-runtime/messages/support.js';
 
 export interface HistoryEditPrompt {
   hasCodeMarkers: boolean;

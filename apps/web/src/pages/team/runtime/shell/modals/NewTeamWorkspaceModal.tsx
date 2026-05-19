@@ -22,7 +22,7 @@
 
 import { useCallback, useMemo, useState, type CSSProperties } from 'react';
 import { createWorkspaceClient } from '@openAwork/web-client';
-import WorkspacePickerModal from '../../../../../components/WorkspacePickerModal.js';
+import WorkspacePickerModal from '../../../../../components/common/WorkspacePickerModal.js';
 import { useAuthStore } from '../../../../../stores/auth.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
 import { XIcon } from '../../shared/TeamIcons.js';
@@ -61,7 +61,7 @@ const MODAL_STYLE: CSSProperties = {
 const HERO_PANE_STYLE: CSSProperties = {
   background:
     'linear-gradient(160deg, color-mix(in srgb, var(--accent) 90%, var(--surface)) 0%, color-mix(in srgb, var(--accent) 55%, var(--surface)) 100%)',
-  color: '#fff',
+  color: 'var(--fg-on-accent, #ffffff)',
   padding: 24,
   display: 'flex',
   flexDirection: 'column',
@@ -195,7 +195,7 @@ const INPUT_STYLE: CSSProperties = {
 
 const INPUT_ERROR_STYLE: CSSProperties = {
   ...INPUT_STYLE,
-  borderColor: 'var(--error, #ef4444)',
+  borderColor: 'var(--error, var(--danger, var(--danger, #f06b7e)))',
 };
 
 const TEXTAREA_STYLE: CSSProperties = {
@@ -237,16 +237,16 @@ const SECONDARY_BUTTON_STYLE: CSSProperties = {
 
 const ERROR_STYLE: CSSProperties = {
   fontSize: 12,
-  color: 'var(--error, #ef4444)',
-  background: 'color-mix(in srgb, var(--error, #ef4444) 10%, transparent)',
+  color: 'var(--error, var(--danger, var(--danger, #f06b7e)))',
+  background: 'color-mix(in srgb, var(--error, var(--danger, var(--danger, #f06b7e))) 10%, transparent)',
   padding: '8px 10px',
   borderRadius: 6,
-  border: '1px solid color-mix(in srgb, var(--error, #ef4444) 30%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--error, var(--danger, var(--danger, #f06b7e))) 30%, transparent)',
 };
 
 const FIELD_ERROR_STYLE: CSSProperties = {
   fontSize: 11,
-  color: 'var(--error, #ef4444)',
+  color: 'var(--error, var(--danger, var(--danger, #f06b7e)))',
   display: 'flex',
   alignItems: 'center',
   gap: 4,
@@ -464,7 +464,7 @@ export function NewTeamWorkspaceModal({ onClose, onCreated }: NewTeamWorkspaceMo
 
             <div style={FIELD_STYLE}>
               <label htmlFor="new-ws-name" style={LABEL_STYLE}>
-                名称 <span style={{ color: 'var(--error, #ef4444)' }}>*</span>
+                名称 <span style={{ color: 'var(--error, var(--danger, var(--danger, #f06b7e)))' }}>*</span>
               </label>
               <input
                 id="new-ws-name"

@@ -96,7 +96,7 @@ export function ArtifactChainWizard({
                 background: isActive
                   ? 'color-mix(in srgb, var(--accent) 16%, var(--surface))'
                   : isPast
-                    ? 'color-mix(in srgb, var(--success, #22c55e) 8%, var(--surface))'
+                    ? 'color-mix(in srgb, var(--success, var(--success, var(--success, #3dd49a))) 8%, var(--surface))'
                     : 'transparent',
                 borderColor: isActive
                   ? 'color-mix(in srgb, var(--accent) 40%, transparent)'
@@ -104,7 +104,7 @@ export function ArtifactChainWizard({
                 color: isActive
                   ? 'var(--text)'
                   : isPast
-                    ? 'var(--success, #22c55e)'
+                    ? 'var(--success, var(--success, var(--success, #3dd49a)))'
                     : 'var(--text-3)',
               }}
               onClick={() => onStepChange?.(step)}
@@ -158,11 +158,11 @@ export function ArtifactChainWizard({
                     padding: '4px 10px',
                     borderRadius: 6,
                     fontSize: 11,
-                    border: `1px solid ${w.status === 'conflict' ? 'color-mix(in srgb, var(--danger, #d4574e) 40%, transparent)' : 'color-mix(in srgb, #f59e0b 40%, transparent)'}`,
+                    border: `1px solid ${w.status === 'conflict' ? 'color-mix(in srgb, var(--danger, #d4574e) 40%, transparent)' : 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 40%, transparent)'}`,
                     background:
                       w.status === 'conflict'
                         ? 'color-mix(in srgb, var(--danger, #d4574e) 6%, var(--surface))'
-                        : 'color-mix(in srgb, #f59e0b 6%, var(--surface))',
+                        : 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 6%, var(--surface))',
                   }}
                 >
                   {w.status === 'conflict' ? '❌' : '⚠️'} {w.clause}：{w.note}

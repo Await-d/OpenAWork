@@ -5,9 +5,9 @@ import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
 import { startRequestWorkflow } from '../request-workflow.js';
-import { extractMessageText } from '../session-message-store.js';
-import { listSessionMessagesV2 } from '../message-v2-adapter.js';
-import { parseSessionMetadataJson } from '../session-workspace-metadata.js';
+import { extractMessageText } from '../session/session-message-store.js';
+import { listSessionMessagesV2 } from '../message/message-v2-adapter.js';
+import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
 import { runSessionInBackground } from '../routes/stream-runtime.js';
 import { AutoReplyPipeline } from './auto-reply.js';
 import { resolveSendableChannel } from './channel-access.js';
@@ -28,7 +28,7 @@ import {
   channelUpdateSchema,
   createChannelInstance,
   materializeStoredChannels,
-} from '../channel-config.js';
+} from './channel-config.js';
 
 interface UserSettingRow {
   user_id?: string;

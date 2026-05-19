@@ -773,28 +773,25 @@ export function CompanionStage({
           display: 'inline-flex',
           alignItems: 'center',
           gap: 4,
-          padding: '4px 6px',
-          // 让 chip 自己撑开高度，sprite 通常需要 60~80px。视觉上跟输入框
-          // 同高，所以 minHeight 用 composer 的高度 (96px) 略小一点。
-          minHeight: 60,
+          padding: '3px 5px',
+          // 缩小 chip 高度,让它更克制地"贴在"输入框旁边而不是当副主角
+          minHeight: 36,
           alignSelf: 'stretch',
-          borderRadius: 12,
+          borderRadius: 10,
           border: panelOpen
-            ? '1px solid color-mix(in oklch, var(--accent) 38%, var(--border-subtle))'
+            ? '1px solid var(--accent-border)'
             : '1px solid var(--border-subtle)',
           background: panelOpen
-            ? 'color-mix(in oklch, var(--accent) 8%, var(--surface))'
-            : 'color-mix(in oklch, var(--bg-glass) 60%, var(--surface))',
-          backdropFilter: 'blur(8px)',
-          color: 'var(--text-2)',
+            ? 'var(--accent-subtle)'
+            : 'var(--bg-overlay)',
+          color: 'var(--fg-muted)',
           cursor: 'pointer',
           flexShrink: 0,
           transition: baseTransition,
-          // Glow when buddy was just triggered or has live output, so the
-          // chip itself reads as a small animation effect.
+          // Glow when buddy was just triggered or has live output
           boxShadow:
             buddyTriggerActive || (liveOutput && !muted)
-              ? '0 0 0 2px color-mix(in oklch, var(--accent) 22%, transparent)'
+              ? '0 0 0 2px var(--accent-subtle)'
               : 'none',
         }}
       >

@@ -33,32 +33,32 @@ function getStatusStyle(status: SubAgentDisplayStatus): React.CSSProperties {
 
   if (status === 'paused') {
     return {
-      background: 'color-mix(in srgb, #f59e0b 10%, var(--surface))',
-      border: '1px solid color-mix(in srgb, #f59e0b 30%, var(--border))',
-      color: '#fcd34d',
+      background: 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 10%, var(--surface))',
+      border: '1px solid color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 30%, var(--border))',
+      color: 'var(--warning, var(--warning, #f0b429))',
     };
   }
 
   if (status === 'completed') {
     return {
-      background: 'color-mix(in srgb, #34d399 12%, var(--surface))',
-      border: '1px solid color-mix(in srgb, #34d399 35%, var(--border))',
-      color: '#86efac',
+      background: 'color-mix(in srgb, var(--success, var(--success, #3dd49a)) 12%, var(--surface))',
+      border: '1px solid color-mix(in srgb, var(--success, var(--success, #3dd49a)) 35%, var(--border))',
+      color: 'var(--success, var(--success, #3dd49a))',
     };
   }
 
   if (status === 'failed' || status === 'cancelled') {
     return {
-      background: 'color-mix(in srgb, #ef4444 10%, var(--surface))',
-      border: '1px solid color-mix(in srgb, #ef4444 30%, var(--border))',
-      color: '#fca5a5',
+      background: 'color-mix(in srgb, var(--danger, var(--danger, #f06b7e)) 10%, var(--surface))',
+      border: '1px solid color-mix(in srgb, var(--danger, var(--danger, #f06b7e)) 30%, var(--border))',
+      color: 'var(--danger, var(--danger, #f06b7e))',
     };
   }
 
   return {
-    background: 'color-mix(in srgb, #f59e0b 10%, var(--surface))',
-    border: '1px solid color-mix(in srgb, #f59e0b 30%, var(--border))',
-    color: '#fcd34d',
+    background: 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 10%, var(--surface))',
+    border: '1px solid color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 30%, var(--border))',
+    color: 'var(--warning, var(--warning, #f0b429))',
   };
 }
 
@@ -268,10 +268,10 @@ function SubAgentItemCard({
               item.status === 'running'
                 ? 'var(--accent)'
                 : item.status === 'completed'
-                  ? '#34d399'
+                  ? 'var(--success, var(--success, #3dd49a))'
                   : item.status === 'failed'
-                    ? '#ef4444'
-                    : '#f59e0b',
+                    ? 'var(--danger, var(--danger, #f06b7e))'
+                    : 'var(--warning, var(--warning, #f0b429))',
             boxShadow:
               item.status === 'running'
                 ? '0 0 0 2px color-mix(in oklch, var(--accent) 16%, transparent)'
@@ -333,7 +333,7 @@ function SubAgentItemCard({
           style={{
             paddingLeft: 12,
             fontSize: 8,
-            color: item.errorMessage ? '#fca5a5' : 'var(--text-3)',
+            color: item.errorMessage ? 'var(--danger, var(--danger, #f06b7e))' : 'var(--text-3)',
             lineHeight: 1.3,
             overflow: 'hidden',
             textOverflow: 'ellipsis',
@@ -349,7 +349,7 @@ function SubAgentItemCard({
           style={{
             paddingLeft: 12,
             fontSize: 8,
-            color: '#fbbf24',
+            color: 'var(--warning, var(--warning, #f0b429))',
             lineHeight: 1.25,
             overflow: 'hidden',
             textOverflow: 'ellipsis',

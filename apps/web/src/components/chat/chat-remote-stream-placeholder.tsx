@@ -47,11 +47,11 @@ export function ChatRemoteStreamPlaceholder({ status }: { status: 'running' | 'p
           borderRadius: 10,
           border:
             status === 'paused'
-              ? '1px solid color-mix(in srgb, #f59e0b 28%, var(--border))'
+              ? '1px solid color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 28%, var(--border))'
               : '1px solid color-mix(in oklch, var(--accent) 24%, var(--border))',
           background:
             status === 'paused'
-              ? 'color-mix(in srgb, #f59e0b 6%, var(--surface))'
+              ? 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 6%, var(--surface))'
               : 'color-mix(in oklch, var(--surface) 92%, var(--accent) 8%)',
         }}
       >

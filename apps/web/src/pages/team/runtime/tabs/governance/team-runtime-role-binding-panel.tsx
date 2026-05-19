@@ -28,7 +28,7 @@ export function TeamRuntimeRoleBindingPanel({
       {error ? (
         <div
           className="content-card"
-          style={{ padding: 12, borderColor: 'rgba(244, 63, 94, 0.35)', color: '#fecdd3' }}
+          style={{ padding: 12, borderColor: 'rgba(244, 63, 94, 0.35)', color: 'var(--danger-muted)' }}
         >
           {error}
         </div>

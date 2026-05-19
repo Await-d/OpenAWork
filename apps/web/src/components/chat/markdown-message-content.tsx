@@ -561,8 +561,8 @@ ${escapeForInlineScript(code)}
       body {
         margin: 0;
         min-height: 100%;
-        background: #ffffff;
-        color: #111827;
+        background: var(--bg-raised);
+        color: var(--fg-strong);
       }
 
       body {

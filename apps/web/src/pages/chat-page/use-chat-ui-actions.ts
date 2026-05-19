@@ -3,10 +3,10 @@ import type { CommandResultCard, RunEvent } from '@openAwork/shared';
 import {
   createCommandCardContent,
   matchServerSlashCommand,
-} from '../../components/session-conversation/runtime/support.js';
-import { executeServerCommand } from '../../components/session-conversation/runtime/server-command-item.js';
-import { requestSessionListRefresh } from '../../utils/session-list-events.js';
-import { applyChatRightPanelEvent, type ChatRightPanelState } from '../chat-stream-state.js';
+} from '../../components/conversation-runtime/messages/support.js';
+import { executeServerCommand } from './conversation/composer/server-command-item.js';
+import { requestSessionListRefresh } from '../../utils/session/session-list-events.js';
+import { applyChatRightPanelEvent, type ChatRightPanelState } from './chat-stream-state.js';
 
 import type { RightPanelTabId } from './right-panel-tabs.js';
 type CapabilityKind = 'agent' | 'mcp' | 'skill' | 'tool';

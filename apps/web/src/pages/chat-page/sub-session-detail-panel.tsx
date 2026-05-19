@@ -17,10 +17,10 @@ import {
   hasActivePendingPermissionRequest,
   type AssistantTraceToolCall,
   type ChatMessage,
-} from '../../components/session-conversation/runtime/support.js';
+} from '../../components/conversation-runtime/messages/support.js';
 import { useSubSessionDetail } from './use-sub-session-detail.js';
-import type { TaskToolRuntimeLookup } from '../../components/session-conversation/runtime/task-tool-runtime.js';
-import { requestCurrentSessionRefresh } from '../../utils/session-list-events.js';
+import type { TaskToolRuntimeLookup } from './conversation/render/task-tool-runtime.js';
+import { requestCurrentSessionRefresh } from '../../utils/session/session-list-events.js';
 
 type CancelableSessionsClient = ReturnType<typeof createSessionsClient> & {
   cancelTask: (
@@ -49,24 +49,24 @@ function getTaskStatusStyle(status: string | undefined): React.CSSProperties {
 
   if (status === 'completed') {
     return {
-      background: 'color-mix(in srgb, #34d399 12%, var(--surface))',
-      border: '1px solid color-mix(in srgb, #34d399 34%, var(--border-subtle))',
-      color: '#86efac',
+      background: 'color-mix(in srgb, var(--success, var(--success, #3dd49a)) 12%, var(--surface))',
+      border: '1px solid color-mix(in srgb, var(--success, var(--success, #3dd49a)) 34%, var(--border-subtle))',
+      color: 'var(--success, var(--success, #3dd49a))',
     };
   }
 
   if (status === 'failed' || status === 'cancelled') {
     return {
-      background: 'color-mix(in srgb, #ef4444 10%, var(--surface))',
-      border: '1px solid color-mix(in srgb, #ef4444 30%, var(--border-subtle))',
-      color: '#fca5a5',
+      background: 'color-mix(in srgb, var(--danger, var(--danger, #f06b7e)) 10%, var(--surface))',
+      border: '1px solid color-mix(in srgb, var(--danger, var(--danger, #f06b7e)) 30%, var(--border-subtle))',
+      color: 'var(--danger, var(--danger, #f06b7e))',
     };
   }
 
   return {
-    background: 'color-mix(in srgb, #f59e0b 10%, var(--surface))',
-    border: '1px solid color-mix(in srgb, #f59e0b 28%, var(--border-subtle))',
-    color: '#fcd34d',
+    background: 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 10%, var(--surface))',
+    border: '1px solid color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 28%, var(--border-subtle))',
+    color: 'var(--warning, var(--warning, #f0b429))',
   };
 }
 
@@ -680,9 +680,9 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
             <span style={{ color: 'var(--accent)' }}>运行中 {runningTaskCount}</span>
           )}
           {completedTaskCount > 0 && (
-            <span style={{ color: '#86efac' }}>完成 {completedTaskCount}</span>
+            <span style={{ color: 'var(--success, var(--success, #3dd49a))' }}>完成 {completedTaskCount}</span>
           )}
-          {failedTaskCount > 0 && <span style={{ color: '#fca5a5' }}>失败 {failedTaskCount}</span>}
+          {failedTaskCount > 0 && <span style={{ color: 'var(--danger, var(--danger, #f06b7e))' }}>失败 {failedTaskCount}</span>}
           <button
             type="button"
             onClick={() => onOpenFullSession(childSessionId)}
@@ -714,7 +714,7 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
             gap: 6,
             padding: '4px 4px',
             fontSize: 9,
-            color: '#fcd34d',
+            color: 'var(--warning, var(--warning, #f0b429))',
           }}
         >
           <span
@@ -723,12 +723,12 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
               width: 5,
               height: 5,
               borderRadius: '50%',
-              background: '#f59e0b',
+              background: 'var(--warning, var(--warning, #f0b429))',
               flexShrink: 0,
             }}
           />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 9, fontWeight: 700, color: '#fcd34d' }}>等待权限审批</div>
+            <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--warning, var(--warning, #f0b429))' }}>等待权限审批</div>
             {pendingPermissions
               .filter((permission) => permission.status === 'pending')
               .slice(0, 2)
@@ -1014,7 +1014,7 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
             <div
               style={{
                 fontSize: 10,
-                color: '#fca5a5',
+                color: 'var(--danger, var(--danger, #f06b7e))',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',

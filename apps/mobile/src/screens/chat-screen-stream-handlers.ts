@@ -1,4 +1,4 @@
-import { extractRuntimeTextDelta } from '../chat-message-content.js';
+import { extractRuntimeTextDelta } from '../chat/chat-message-content.js';
 import type { AgentActivity } from '../components/AgentActivityPanel.js';
 import type { ActivityEvent, StreamHandlers } from '../hooks/useGatewayClient.js';
 import { upsertTaskActivity } from './chat-task-activities.js';

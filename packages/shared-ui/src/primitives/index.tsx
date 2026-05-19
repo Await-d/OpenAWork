@@ -1,20 +1,24 @@
 import { useState, type CSSProperties, type HTMLAttributes, type ReactNode } from 'react';
-import { tokens } from '../tokens.js';
+import { color, radius, spacing, shadow, motion } from '../tokens.js';
+
+// ── ShellCard ─────────────────────────────────────────────
 
 export interface ShellCardProps {
   children: ReactNode;
   style?: CSSProperties;
+  variant?: 'default' | 'featured';
 }
 
-export function ShellCard({ children, style }: ShellCardProps) {
+export function ShellCard({ children, style, variant = 'default' }: ShellCardProps) {
   return (
     <div
       style={{
-        background: tokens.color.surfaceGlass,
-        border: `1px solid ${tokens.color.border}`,
-        borderRadius: tokens.radius.lg,
-        boxShadow: tokens.shadow.glass,
-        backdropFilter: tokens.blur.md,
+        background: `linear-gradient(180deg, ${color.bgOverlay}, ${color.bgRaised})`,
+        border: `1px solid ${variant === 'featured' ? color.accentBorder : color.borderDefault}`,
+        borderRadius: radius.lg,
+        boxShadow: variant === 'featured' ? shadow.glow : shadow.sm,
+        position: 'relative',
+        overflow: 'hidden',
         ...style,
       }}
     >
@@ -23,41 +27,77 @@ export function ShellCard({ children, style }: ShellCardProps) {
   );
 }
 
+// ── RailButton ────────────────────────────────────────────
+
 export interface RailButtonProps {
-  icon: string;
+  icon: ReactNode;
   label: string;
   isActive: boolean;
   onClick: () => void;
+  badge?: string | number;
 }
 
-export function RailButton({ icon, label, isActive, onClick }: RailButtonProps) {
+export function RailButton({ icon, label, isActive, onClick, badge }: RailButtonProps) {
   return (
     <button
       type="button"
       title={label}
       onClick={onClick}
       style={{
-        width: 48,
-        height: 48,
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'center',
-        background: isActive
-          ? `color-mix(in srgb, ${tokens.color.accent} 15%, transparent)`
-          : 'transparent',
-        border: 'none',
-        borderLeft: isActive ? `2px solid ${tokens.color.accent}` : '2px solid transparent',
+        gap: spacing[3],
+        padding: `${spacing[2]}px ${spacing[3]}px`,
+        borderRadius: radius.sm,
+        background: isActive ? color.accentSubtle : 'transparent',
+        border: `1px solid ${isActive ? color.accentBorder : 'transparent'}`,
         cursor: 'pointer',
-        fontSize: 15,
-        color: isActive ? tokens.color.accent : tokens.color.muted,
-        transition: 'background 0.15s, color 0.15s',
-        flexShrink: 0,
+        fontSize: 12.5,
+        fontWeight: 500,
+        color: isActive ? color.fgStrong : color.fgMuted,
+        transition: `all ${motion.micro.duration} ${motion.micro.easing}`,
+        position: 'relative',
+        width: '100%',
+        textAlign: 'left',
       }}
     >
-      {icon}
+      <span
+        style={{
+          width: 18,
+          height: 18,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: isActive ? color.accent : color.fgSubtle,
+          flexShrink: 0,
+        }}
+      >
+        {icon}
+      </span>
+      <span style={{ flex: 1, minWidth: 0 }}>{label}</span>
+      {badge != null && (
+        <span
+          style={{
+            minWidth: 18,
+            height: 18,
+            padding: '0 5px',
+            borderRadius: radius.pill,
+            background: color.accent,
+            color: color.fgOnAccent,
+            fontSize: 10,
+            fontWeight: 700,
+            display: 'grid',
+            placeItems: 'center',
+          }}
+        >
+          {badge}
+        </span>
+      )}
     </button>
   );
 }
+
+// ── PanelSection ──────────────────────────────────────────
 
 export interface PanelSectionProps {
   title: string;
@@ -80,12 +120,12 @@ export function PanelSection({
           type="button"
           onClick={() => setOpen((o) => !o)}
           style={{
-            padding: '8px 12px',
-            fontSize: 11,
+            padding: `${spacing[2]}px ${spacing[3]}px`,
+            fontSize: 10,
             fontWeight: 600,
-            letterSpacing: '0.08em',
+            letterSpacing: '0.12em',
             textTransform: 'uppercase',
-            color: tokens.color.muted,
+            color: color.fgSubtle,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -94,6 +134,7 @@ export function PanelSection({
             border: 'none',
             cursor: 'pointer',
             userSelect: 'none',
+            transition: `color ${motion.micro.duration} ${motion.micro.easing}`,
           }}
         >
           <span>{title}</span>
@@ -102,12 +143,12 @@ export function PanelSection({
       ) : (
         <div
           style={{
-            padding: '8px 12px',
-            fontSize: 11,
+            padding: `${spacing[3]}px ${spacing[3]}px ${spacing[1]}px`,
+            fontSize: 10,
             fontWeight: 600,
-            letterSpacing: '0.08em',
+            letterSpacing: '0.12em',
             textTransform: 'uppercase',
-            color: tokens.color.muted,
+            color: color.fgSubtle,
           }}
         >
           {title}
@@ -118,54 +159,43 @@ export function PanelSection({
   );
 }
 
-type StatusColor = 'success' | 'warning' | 'danger' | 'info' | 'muted';
+// ── StatusPill ────────────────────────────────────────────
+
+type StatusColor = 'success' | 'warning' | 'danger' | 'info' | 'accent' | 'muted';
 
 export interface StatusPillProps {
   label: string;
   color: StatusColor;
 }
 
-const colorMap: Record<StatusColor, { bg: string; text: string }> = {
-  success: {
-    bg: `color-mix(in srgb, ${tokens.color.success} 15%, transparent)`,
-    text: tokens.color.success,
-  },
-  warning: {
-    bg: `color-mix(in srgb, ${tokens.color.warning} 15%, transparent)`,
-    text: tokens.color.warning,
-  },
-  danger: {
-    bg: `color-mix(in srgb, ${tokens.color.danger} 15%, transparent)`,
-    text: tokens.color.danger,
-  },
-  info: {
-    bg: `color-mix(in srgb, ${tokens.color.info} 15%, transparent)`,
-    text: tokens.color.info,
-  },
-  muted: {
-    bg: `color-mix(in srgb, ${tokens.color.muted} 15%, transparent)`,
-    text: tokens.color.muted,
-  },
+const pillColorMap: Record<StatusColor, { bg: string; fg: string; border: string }> = {
+  success: { bg: color.successMuted, fg: color.success, border: color.successBorder },
+  warning: { bg: color.warningMuted, fg: color.warning, border: color.warningBorder },
+  danger: { bg: color.dangerMuted, fg: color.danger, border: color.dangerBorder },
+  info: { bg: color.infoMuted, fg: color.info, border: color.infoBorder },
+  accent: { bg: color.accentMuted, fg: color.accent, border: color.accentBorder },
+  muted: { bg: color.bgSurface, fg: color.fgMuted, border: color.borderDefault },
 };
 
 export function StatusPill({
   label,
-  color,
+  color: statusColor,
   ...rest
 }: StatusPillProps & HTMLAttributes<HTMLSpanElement>) {
-  const c = colorMap[color];
+  const c = pillColorMap[statusColor];
   return (
     <span
       {...rest}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        padding: `${tokens.spacing.xxs}px ${tokens.spacing.sm}px`,
-        borderRadius: 999,
+        padding: `3px ${spacing[3]}px`,
+        borderRadius: radius.pill,
         fontSize: 11,
         fontWeight: 600,
         background: c.bg,
-        color: c.text,
+        color: c.fg,
+        border: `1px solid ${c.border}`,
         whiteSpace: 'nowrap',
       }}
     >

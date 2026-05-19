@@ -4,11 +4,11 @@ import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
 import { startRequestWorkflow } from '../request-workflow.js';
-import { formatAnsweredQuestionOutput, type QuestionToolInput } from '../question-tools.js';
-import { parseSessionMetadataJson } from '../session-workspace-metadata.js';
-import { createQuestionRepliedEvent } from '../session-question-events.js';
-import { publishSessionRunEvent } from '../session-run-events.js';
-import { shouldExitPlanModeFromAnswers } from '../plan-mode-tools.js';
+import { formatAnsweredQuestionOutput, type QuestionToolInput } from '../tools/question-tools.js';
+import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
+import { createQuestionRepliedEvent } from '../session/session-question-events.js';
+import { publishSessionRunEvent } from '../session/session-run-events.js';
+import { shouldExitPlanModeFromAnswers } from '../tools/plan-mode-tools.js';
 import { setPersistedSessionStateStatus, type ApprovedPermissionResumePayload } from './stream.js';
 import { resumeAnsweredQuestionRequest } from './stream-runtime.js';
 

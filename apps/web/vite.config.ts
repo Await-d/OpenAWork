@@ -51,6 +51,10 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // Monaco editor + workers are large; exclude them from precache
+        // and let the browser cache them normally via HTTP caching.
+        globIgnores: ['**/*worker*.js'],
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5 MiB
         runtimeCaching: [
           {
             urlPattern: /^\/api\//,
@@ -90,6 +94,7 @@ export default defineConfig({
           react: ['react', 'react-dom'],
           router: ['react-router'],
           zustand: ['zustand'],
+          'monaco-editor': ['monaco-editor'],
         },
       },
     },

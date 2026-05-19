@@ -2,12 +2,12 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { requireAuth } from '../auth.js';
 import { sqliteGet } from '../db.js';
 import { startRequestWorkflow } from '../request-workflow.js';
-import { buildGatewayToolDefinitions } from '../tool-definitions.js';
-import { filterEnabledGatewayToolsForSession } from '../session-tool-visibility.js';
+import { buildGatewayToolDefinitions } from '../tools/tool-definitions.js';
+import { filterEnabledGatewayToolsForSession } from '../session/session-tool-visibility.js';
 import {
   getEffectiveSkillsForSession,
   getEffectiveSkillsForUser,
-} from '../skill-selection-context.js';
+} from '../skill/skill-selection-context.js';
 
 interface SessionMetadataRow {
   metadata_json: string;

@@ -53,7 +53,7 @@ import ExpoPersistenceAdapter, {
   loadImageGenerationDefaults,
   type MobileImageGenerationDefaults,
 } from '../store/providerPersistence';
-import { normalizeMobileChatMessages, type MobileChatMessage } from '../chat-message-content.js';
+import { normalizeMobileChatMessages, type MobileChatMessage } from '../chat/chat-message-content.js';
 import {
   buildChatDraftSummary,
   findChatMessageMatches,

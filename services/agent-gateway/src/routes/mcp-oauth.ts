@@ -30,9 +30,9 @@
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { clearPendingOAuthFlow, findOAuthEntryByState } from '../mcp-oauth-store.js';
-import { finalizeOAuthFromCallback, McpOAuthProvider } from '../mcp-oauth-provider.js';
-import { getConfiguredServerByIdForUser } from '../mcp-runtime.js';
+import { clearPendingOAuthFlow, findOAuthEntryByState } from '../mcp/mcp-oauth-store.js';
+import { finalizeOAuthFromCallback, McpOAuthProvider } from '../mcp/mcp-oauth-provider.js';
+import { getConfiguredServerByIdForUser } from '../mcp/mcp-runtime.js';
 
 const HTML_SUCCESS = `<!DOCTYPE html>
 <html>

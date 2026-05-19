@@ -36,16 +36,16 @@ const NEEDS_CLARIFICATION_STYLE: CSSProperties = {
 
 const PARALLEL_STYLE: CSSProperties = {
   ...BADGE_BASE,
-  background: 'color-mix(in srgb, #3b82f6 14%, transparent)',
-  color: '#3b82f6',
-  border: '1px solid color-mix(in srgb, #3b82f6 36%, transparent)',
+  background: 'color-mix(in srgb, var(--aux, var(--aux, #8b9cf5)) 14%, transparent)',
+  color: 'var(--aux, var(--aux, #8b9cf5))',
+  border: '1px solid color-mix(in srgb, var(--aux, var(--aux, #8b9cf5)) 36%, transparent)',
 };
 
 const STORY_STYLE: CSSProperties = {
   ...BADGE_BASE,
-  background: 'color-mix(in srgb, var(--success, #22c55e) 14%, transparent)',
-  color: 'var(--success, #22c55e)',
-  border: '1px solid color-mix(in srgb, var(--success, #22c55e) 36%, transparent)',
+  background: 'color-mix(in srgb, var(--success, var(--success, var(--success, #3dd49a))) 14%, transparent)',
+  color: 'var(--success, var(--success, var(--success, #3dd49a)))',
+  border: '1px solid color-mix(in srgb, var(--success, var(--success, var(--success, #3dd49a))) 36%, transparent)',
 };
 
 interface ArtifactMarkerInfo {

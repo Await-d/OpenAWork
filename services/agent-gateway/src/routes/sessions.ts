@@ -13,26 +13,26 @@ import { z } from 'zod';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { WORKSPACE_ROOT, sqliteAll, sqliteGet, sqliteRun } from '../db.js';
-import { filterVisibleSessionMessages } from '../session-message-store.js';
+import { filterVisibleSessionMessages } from '../session/session-message-store.js';
 import {
   hydrateLegacySessionMessagesForSearch,
   searchSessionMessages,
-} from '../session-search-store.js';
+} from '../session/session-search-store.js';
 import {
   deleteSessionMessageRating,
   hasSessionMessage,
   listSessionMessageRatings,
   upsertSessionMessageRating,
-} from '../session-message-rating-store.js';
+} from '../session/session-message-rating-store.js';
 import {
   collectSessionBackupStoragePaths,
   captureBeforeWriteBackup,
   garbageCollectBackupStoragePaths,
   getSessionFileBackup,
   readSessionFileBackupContent,
-} from '../session-file-backup-store.js';
+} from '../session/session-file-backup-store.js';
 import { startRequestWorkflow } from '../request-workflow.js';
-import { buildFileDiff } from '../file-diff-format.js';
+import { buildFileDiff } from '../tools/file-diff-format.js';
 import { registerSessionSharedReadRoutes } from './session-shared-read-routes.js';
 import { buildSessionTaskProjection, type SessionTaskResponse } from './session-task-projection.js';
 import {
@@ -40,9 +40,9 @@ import {
   toPublicSessionResponse,
   validateImportedMessagesPayload,
 } from './session-route-helpers.js';
-import { validateWorkspacePath } from '../workspace-paths.js';
-import { invalidateUserWorkspaceAllowlist } from '../user-workspace-allowlist.js';
-import { listWorkspaceReviewChangesWithAvailability } from '../workspace-review.js';
+import { validateWorkspacePath } from '../workspace/workspace-paths.js';
+import { invalidateUserWorkspaceAllowlist } from '../workspace/user-workspace-allowlist.js';
+import { listWorkspaceReviewChangesWithAvailability } from '../workspace/workspace-review.js';
 import {
   extractSessionWorkingDirectory,
   isSessionWorkspaceRebindingAttempt,
@@ -51,33 +51,33 @@ import {
   parseSessionMetadataJson,
   sanitizeSessionMetadataJson,
   validateSessionMetadataPatch,
-} from '../session-workspace-metadata.js';
-import { filterSessionsByPath } from '../session-path-filter.js';
-import { listSessionTodoLanes, listSessionTodos } from '../todo-tools.js';
-import { terminateChildSession } from '../tool-sandbox.js';
-import { clearPendingTaskParentAutoResumesForSession } from '../task-parent-auto-resume.js';
+} from '../session/session-workspace-metadata.js';
+import { filterSessionsByPath } from '../session/session-path-filter.js';
+import { listSessionTodoLanes, listSessionTodos } from '../tools/todo-tools.js';
+import { terminateChildSession } from '../tools/tool-sandbox.js';
+import { clearPendingTaskParentAutoResumesForSession } from '../task/task-parent-auto-resume.js';
 import {
   getLatestSessionRunEventSeqByRequest,
   listSessionRunEvents,
   listSessionRunEventsByRequest,
-} from '../session-run-events.js';
+} from '../session/session-run-events.js';
 import {
   getAnyInFlightStreamRequestForSession,
   stopAllInFlightStreamRequestsForSession,
 } from './stream-cancellation.js';
-import { reconcileSessionRuntime } from '../session-runtime-reconciler.js';
-import { deleteSessionWithMalformedRecovery } from '../session-delete-recovery.js';
+import { reconcileSessionRuntime } from '../session/session-runtime-reconciler.js';
+import { deleteSessionWithMalformedRecovery } from '../session/session-delete-recovery.js';
 import {
   buildSessionFileChangesProjection,
   buildSessionTurnDiffReadModel,
-} from '../session-file-changes-projection.js';
+} from '../session/session-file-changes-projection.js';
 import {
   listRequestFileDiffs,
   listRequestFileDiffsWithText,
   listSessionFileDiffs,
   listSessionFileDiffsWithText,
   persistSessionFileDiffs,
-} from '../session-file-diff-store.js';
+} from '../session/session-file-diff-store.js';
 import { isSqliteMalformedError } from '../sqlite-error-utils.js';
 import {
   compareSessionSnapshots,
@@ -86,19 +86,19 @@ import {
   listRequestSnapshots,
   listSessionSnapshots,
   persistSessionSnapshot,
-} from '../session-snapshot-store.js';
+} from '../session/session-snapshot-store.js';
 import {
   getFreshSessionRuntimeThread,
   hasFreshSessionRuntimeThread,
-} from '../session-runtime-thread-store.js';
-import { hasPendingSessionInteraction } from '../session-runtime-state.js';
+} from '../session/session-runtime-thread-store.js';
+import { hasPendingSessionInteraction } from '../session/session-runtime-state.js';
 import {
   listSessionMessagesV2,
   listRuntimeSafeSessionMessagesV2,
   truncateSessionMessagesAfterV2 as truncateSessionMessagesAfter,
-} from '../message-v2-adapter.js';
-import { countUserMessages } from '../message-store-v2.js';
-import { mergeRuntimeSafeSessionMessages } from '../runtime-safe-message-merge.js';
+} from '../message/message-v2-adapter.js';
+import { countUserMessages } from '../message/message-store-v2.js';
+import { mergeRuntimeSafeSessionMessages } from '../session/runtime-safe-message-merge.js';
 
 const createSessionSchema = z.object({
   metadata: z.record(z.unknown()).optional().default({}),

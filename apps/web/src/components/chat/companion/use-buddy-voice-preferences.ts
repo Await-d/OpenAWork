@@ -10,6 +10,7 @@ import {
 import { createSettingsClient } from '@openAwork/web-client';
 import type {
   CompanionAgentBinding,
+  CompanionThemeVariant,
   CompanionVoiceOutputMode,
   CompanionVoiceVariant,
 } from '@openAwork/shared';
@@ -35,6 +36,7 @@ interface CompanionSettingsResponse {
     injectionMode?: CompanionInjectionMode;
     muted?: boolean;
     reducedMotion?: boolean;
+    themeVariant?: CompanionThemeVariant;
     verbosity?: 'minimal' | 'normal';
     voiceOutputEnabled?: boolean;
     voiceOutputMode?: CompanionVoiceOutputMode;
@@ -50,6 +52,7 @@ interface BuddyVoicePreferencesState {
   muted: boolean;
   quietMode: boolean;
   reducedMotion: boolean;
+  themeVariant: CompanionThemeVariant;
   voiceOutputEnabled: boolean;
   voiceOutputMode: CompanionVoiceOutputMode;
   voiceRate: number;
@@ -92,6 +95,7 @@ const DEFAULT_BUDDY_VOICE_PREFERENCES: BuddyVoicePreferencesState = {
   muted: false,
   quietMode: false,
   reducedMotion: false,
+  themeVariant: 'default',
   voiceOutputEnabled: false,
   voiceOutputMode: 'buddy_only',
   voiceRate: 1.02,
@@ -104,6 +108,25 @@ function buildStorageKey(scope: string): string {
 
 function normalizeInjectionMode(value: unknown): CompanionInjectionMode {
   return value === 'off' || value === 'always' || value === 'mention_only' ? value : 'mention_only';
+}
+
+function normalizeThemeVariant(value: unknown): CompanionThemeVariant {
+  return value === 'playful' ? 'playful' : 'default';
+}
+
+function normalizeVoiceOutputMode(value: unknown): CompanionVoiceOutputMode {
+  return value === 'off' || value === 'important_only' ? value : 'buddy_only';
+}
+
+function normalizeVoiceVariant(value: unknown): CompanionVoiceVariant {
+  return value === 'bright' || value === 'calm' ? value : 'system';
+}
+
+function clampVoiceRate(value: unknown): number {
+  const numeric = typeof value === 'number' && Number.isFinite(value) ? value : 1.02;
+  if (numeric < 0.5) return 0.5;
+  if (numeric > 2) return 2;
+  return numeric;
 }
 
 function readStoredVoicePreferences(scope: string): BuddyVoicePreferencesState {
@@ -131,10 +154,11 @@ function readStoredVoicePreferences(scope: string): BuddyVoicePreferencesState {
       muted: parsed.muted === true,
       quietMode: parsed.quietMode === true,
       reducedMotion: parsed.reducedMotion === true,
+      themeVariant: normalizeThemeVariant(parsed.themeVariant),
       voiceOutputEnabled: parsed.voiceOutputEnabled === true,
-      voiceOutputMode: 'buddy_only',
-      voiceRate: 1.02,
-      voiceVariant: 'system',
+      voiceOutputMode: normalizeVoiceOutputMode(parsed.voiceOutputMode),
+      voiceRate: clampVoiceRate(parsed.voiceRate),
+      voiceVariant: normalizeVoiceVariant(parsed.voiceVariant),
     };
   } catch {
     return DEFAULT_BUDDY_VOICE_PREFERENCES;
@@ -162,15 +186,26 @@ export function useBuddyVoicePreferences(
   reducedMotion: boolean;
   syncStatus: PreferenceSyncState;
   syncStatusLabel: string;
+  themeVariant: CompanionThemeVariant;
+  voiceOutputMode: CompanionVoiceOutputMode;
+  voiceRate: number;
+  voiceVariant: CompanionVoiceVariant;
   setEnabled: Dispatch<SetStateAction<boolean>>;
   setInjectionMode: Dispatch<SetStateAction<CompanionInjectionMode>>;
   setMuted: Dispatch<SetStateAction<boolean>>;
   setQuietMode: Dispatch<SetStateAction<boolean>>;
   setReducedMotion: Dispatch<SetStateAction<boolean>>;
+  setThemeVariant: Dispatch<SetStateAction<CompanionThemeVariant>>;
+  setVerbosity: Dispatch<SetStateAction<'minimal' | 'normal'>>;
+  setVoiceOutputMode: Dispatch<SetStateAction<CompanionVoiceOutputMode>>;
+  setVoiceRate: Dispatch<SetStateAction<number>>;
+  setVoiceVariant: Dispatch<SetStateAction<CompanionVoiceVariant>>;
   voiceOutputEnabled: boolean;
   setVoiceOutputEnabled: Dispatch<SetStateAction<boolean>>;
   saveAgentBinding: (agentId: string, binding: CompanionAgentBinding) => Promise<void>;
   removeAgentBinding: (agentId: string) => Promise<void>;
+  resetPreferencesToDefault: () => void;
+  retrySync: () => Promise<void>;
 } {
   const accessToken = useAuthStore((state) => state.accessToken);
   const gatewayUrl = useAuthStore((state) => state.gatewayUrl);
@@ -199,8 +234,12 @@ export function useBuddyVoicePreferences(
         injectionMode: value.injectionMode,
         muted: value.muted,
         reducedMotion: value.reducedMotion,
+        themeVariant: value.themeVariant,
         verbosity: value.quietMode ? 'minimal' : 'normal',
         voiceOutputEnabled: value.voiceOutputEnabled,
+        voiceOutputMode: value.voiceOutputMode,
+        voiceRate: value.voiceRate,
+        voiceVariant: value.voiceVariant,
       }),
     [],
   );
@@ -278,6 +317,75 @@ export function useBuddyVoicePreferences(
     [updatePreference],
   );
 
+  const setThemeVariantWithTracking = useCallback<Dispatch<SetStateAction<CompanionThemeVariant>>>(
+    (value) => {
+      updatePreference((current) => ({
+        ...current,
+        themeVariant: normalizeThemeVariant(
+          typeof value === 'function' ? value(current.themeVariant) : value,
+        ),
+      }));
+    },
+    [updatePreference],
+  );
+
+  const setVoiceOutputModeWithTracking = useCallback<
+    Dispatch<SetStateAction<CompanionVoiceOutputMode>>
+  >(
+    (value) => {
+      updatePreference((current) => ({
+        ...current,
+        voiceOutputMode: normalizeVoiceOutputMode(
+          typeof value === 'function' ? value(current.voiceOutputMode) : value,
+        ),
+      }));
+    },
+    [updatePreference],
+  );
+
+  const setVoiceVariantWithTracking = useCallback<Dispatch<SetStateAction<CompanionVoiceVariant>>>(
+    (value) => {
+      updatePreference((current) => ({
+        ...current,
+        voiceVariant: normalizeVoiceVariant(
+          typeof value === 'function' ? value(current.voiceVariant) : value,
+        ),
+      }));
+    },
+    [updatePreference],
+  );
+
+  const setVoiceRateWithTracking = useCallback<Dispatch<SetStateAction<number>>>(
+    (value) => {
+      updatePreference((current) => ({
+        ...current,
+        voiceRate: clampVoiceRate(
+          typeof value === 'function' ? value(current.voiceRate) : value,
+        ),
+      }));
+    },
+    [updatePreference],
+  );
+
+  const setVerbosityWithTracking = useCallback<Dispatch<SetStateAction<'minimal' | 'normal'>>>(
+    (value) => {
+      updatePreference((current) => {
+        const currentVerbosity: 'minimal' | 'normal' = current.quietMode ? 'minimal' : 'normal';
+        const next = typeof value === 'function' ? value(currentVerbosity) : value;
+        return {
+          ...current,
+          quietMode: next === 'minimal',
+        };
+      });
+    },
+    [updatePreference],
+  );
+
+  const resetPreferencesToDefault = useCallback(() => {
+    hasLocalOverrideRef.current = true;
+    setPreferences({ ...DEFAULT_BUDDY_VOICE_PREFERENCES });
+  }, []);
+
   useEffect(() => {
     setPreferences(readStoredVoicePreferences(scope));
     setActiveBinding(undefined);
@@ -291,21 +399,20 @@ export function useBuddyVoicePreferences(
     hasLocalOverrideRef.current = false;
   }, [accessToken, scope]);
 
-  useEffect(() => {
-    if (!accessToken) {
-      setHasRemoteHydrated(true);
-      setSyncStatus('local');
-      return;
-    }
+  const loadCompanionSettings = useCallback(
+    async (signal?: AbortSignal): Promise<void> => {
+      if (!accessToken) {
+        setHasRemoteHydrated(true);
+        setSyncStatus('local');
+        return;
+      }
 
-    setSyncStatus('loading');
-    const abortController = new AbortController();
-    void createSettingsClient(gatewayUrl)
-      .getCompanion(accessToken, {
-        signal: abortController.signal,
-        ...(agentId ? { agentId } : {}),
-      })
-      .then((rawData) => {
+      setSyncStatus('loading');
+      try {
+        const rawData = await createSettingsClient(gatewayUrl).getCompanion(accessToken, {
+          ...(signal ? { signal } : {}),
+          ...(agentId ? { agentId } : {}),
+        });
         const data = rawData as CompanionSettingsResponse;
         const remotePreferences: BuddyVoicePreferencesState = {
           enabled: data.preferences?.enabled !== false,
@@ -313,10 +420,11 @@ export function useBuddyVoicePreferences(
           muted: data.preferences?.muted === true,
           quietMode: data.preferences?.verbosity === 'minimal',
           reducedMotion: data.preferences?.reducedMotion === true,
+          themeVariant: normalizeThemeVariant(data.preferences?.themeVariant),
           voiceOutputEnabled: data.preferences?.voiceOutputEnabled === true,
-          voiceOutputMode: data.preferences?.voiceOutputMode ?? 'buddy_only',
-          voiceRate: data.preferences?.voiceRate ?? 1.02,
-          voiceVariant: data.preferences?.voiceVariant ?? 'system',
+          voiceOutputMode: normalizeVoiceOutputMode(data.preferences?.voiceOutputMode),
+          voiceRate: clampVoiceRate(data.preferences?.voiceRate),
+          voiceVariant: normalizeVoiceVariant(data.preferences?.voiceVariant),
         };
         remoteValueRef.current = serializeRemotePreferences(remotePreferences);
         setActiveBinding(data.activeBinding);
@@ -330,20 +438,24 @@ export function useBuddyVoicePreferences(
           setPreferences(remotePreferences);
         }
         setSyncStatus('synced');
-      })
-      .catch(() => {
+      } catch {
         setSyncStatus('error');
-      })
-      .finally(() => {
-        if (!abortController.signal.aborted) {
+      } finally {
+        if (!signal?.aborted) {
           setHasRemoteHydrated(true);
         }
-      });
+      }
+    },
+    [accessToken, agentId, gatewayUrl, serializeRemotePreferences],
+  );
 
+  useEffect(() => {
+    const abortController = new AbortController();
+    void loadCompanionSettings(abortController.signal);
     return () => {
       abortController.abort();
     };
-  }, [accessToken, agentId, gatewayUrl, serializeRemotePreferences]);
+  }, [loadCompanionSettings]);
 
   useEffect(() => {
     if (typeof globalThis.window === 'undefined') {
@@ -391,6 +503,7 @@ export function useBuddyVoicePreferences(
                 injectionMode: preferences.injectionMode,
                 muted: preferences.muted,
                 reducedMotion: preferences.reducedMotion,
+                themeVariant: preferences.themeVariant,
                 verbosity: preferences.quietMode ? 'minimal' : 'normal',
                 voiceOutputEnabled: preferences.voiceOutputEnabled,
                 voiceOutputMode: preferences.voiceOutputMode,
@@ -549,15 +662,26 @@ export function useBuddyVoicePreferences(
     reducedMotion: preferences.reducedMotion,
     syncStatus,
     syncStatusLabel,
+    themeVariant: preferences.themeVariant,
+    voiceOutputMode: preferences.voiceOutputMode,
+    voiceRate: preferences.voiceRate,
+    voiceVariant: preferences.voiceVariant,
     setEnabled: setEnabledWithTracking,
     setInjectionMode: setInjectionModeWithTracking,
     setMuted: setMutedWithTracking,
     setQuietMode: setQuietModeWithTracking,
     setReducedMotion: setReducedMotionWithTracking,
+    setThemeVariant: setThemeVariantWithTracking,
+    setVerbosity: setVerbosityWithTracking,
+    setVoiceOutputMode: setVoiceOutputModeWithTracking,
+    setVoiceRate: setVoiceRateWithTracking,
+    setVoiceVariant: setVoiceVariantWithTracking,
     voiceOutputEnabled: preferences.voiceOutputEnabled,
     setVoiceOutputEnabled: setVoiceOutputEnabledWithTracking,
     saveAgentBinding,
     removeAgentBinding,
+    resetPreferencesToDefault,
+    retrySync: () => loadCompanionSettings(),
   };
 }
 

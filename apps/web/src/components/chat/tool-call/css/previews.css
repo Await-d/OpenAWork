@@ -321,11 +321,11 @@
 }
 
 .tool-call-review-row[data-status='added'] .tool-call-review-glyph {
-  color: var(--success, #16a34a);
+  color: var(--success, var(--success, #3dd49a));
 }
 
 .tool-call-review-row[data-status='modified'] .tool-call-review-glyph {
-  color: var(--warning, #d97706);
+  color: var(--warning, var(--warning, #f0b429));
 }
 
 .tool-call-review-row[data-status='deleted'] .tool-call-review-glyph {
@@ -364,7 +364,7 @@
 }
 
 .tool-call-review-add {
-  color: var(--success, #16a34a);
+  color: var(--success, var(--success, #3dd49a));
 }
 
 .tool-call-review-del {
@@ -603,7 +603,7 @@
   font-weight: 500;
   word-break: break-all;
   padding-bottom: 2px;
-  border-bottom: 1px solid color-mix(in oklch, var(--border-subtle, #e5e7eb) 50%, transparent);
+  border-bottom: 1px solid color-mix(in oklch, var(--border-subtle, var(--fg-default, #c8d1e0)) 50%, transparent);
 }
 
 .grep-hits-row {
@@ -841,7 +841,7 @@
 .param-list-num {
   font-variant-numeric: tabular-nums;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  color: color-mix(in oklch, var(--brand, #4f46e5) 70%, var(--text-1));
+  color: color-mix(in oklch, var(--brand, var(--aux, var(--aux, #8b9cf5))) 70%, var(--text-1));
 }
 
 .param-list-str {

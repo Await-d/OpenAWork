@@ -25,14 +25,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { createSkillsClient } from '@openAwork/web-client';
-import SkillRecommendationDrawer from '../../pages/SkillRecommendationDrawer.js';
+import SkillRecommendationDrawer from '../../pages/skills/SkillRecommendationDrawer.js';
 import {
   buildSelectionExport,
   estimatePinnedTokenUsage,
   parseImportedSelection,
   reorderRowsByMove,
   type PinnedTokenEstimate,
-} from '../../pages/skill-selection-helpers.js';
+} from '../../pages/skills/skill-selection-helpers.js';
 
 interface InstalledSkillDto {
   skillId: string;
@@ -185,7 +185,7 @@ const TOOL_BUTTON_PRIMARY: React.CSSProperties = {
   ...TOOL_BUTTON_BASE,
   borderColor: 'transparent',
   background: 'var(--accent)',
-  color: '#fff',
+  color: 'var(--fg-on-accent, #ffffff)',
 };
 
 const ORIGIN_LABEL: Record<EffectiveSkillDto['origin'], string> = {
@@ -197,8 +197,8 @@ const ORIGIN_LABEL: Record<EffectiveSkillDto['origin'], string> = {
 
 const ORIGIN_PILL_STYLE: Record<EffectiveSkillDto['origin'], React.CSSProperties> = {
   workspace: { background: 'var(--accent-soft, rgba(99,102,241,0.12))', color: 'var(--accent)' },
-  'workspace-fallback': { background: 'rgba(217,119,6,0.14)', color: '#d97706' },
-  'session-override': { background: 'rgba(220,38,38,0.14)', color: '#dc2626' },
+  'workspace-fallback': { background: 'var(--warning-muted)', color: 'var(--warning, var(--warning, #f0b429))' },
+  'session-override': { background: 'var(--danger-muted)', color: 'var(--danger, var(--danger, #f06b7e))' },
   builtin: { background: 'rgba(100,116,139,0.16)', color: 'var(--text-3)' },
 };
 
@@ -571,7 +571,7 @@ export default function SkillSettingsPanel(
         ) : null}
       </div>
 
-      {error ? <div style={{ padding: 8, color: '#dc2626', fontSize: 11 }}>{error}</div> : null}
+      {error ? <div style={{ padding: 8, color: 'var(--danger, var(--danger, #f06b7e))', fontSize: 11 }}>{error}</div> : null}
       {hint ? <div style={{ padding: 8, color: 'var(--accent)', fontSize: 11 }}>{hint}</div> : null}
 
       {tab === 'workspace' ? (
@@ -1057,7 +1057,7 @@ function TokenEstimateBar({ estimate }: { estimate: PinnedTokenEstimate }): Reac
   const overCap = estimate.ratio > 1.0;
   const nearCap = estimate.ratio > 0.75 && !overCap;
   const fillPct = Math.min(100, estimate.ratio * 100);
-  const barColor = overCap ? '#dc2626' : nearCap ? '#d97706' : 'var(--accent)';
+  const barColor = overCap ? 'var(--danger, var(--danger, #f06b7e))' : nearCap ? 'var(--warning, #f0b429)' : 'var(--accent)';
   const message = overCap
     ? '超出上限，后端会从低优先级开始截断'
     : nearCap

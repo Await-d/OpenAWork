@@ -9,7 +9,7 @@ import {
   REASONING_COLOR_TOKENS,
   REASONING_UI_TOKENS,
 } from '@openAwork/shared';
-import type { MobileChatMessage } from '../chat-message-content.js';
+import type { MobileChatMessage } from '../chat/chat-message-content.js';
 import {
   parseMobileMessageSegments,
   summarizeMobileCodeBlock,

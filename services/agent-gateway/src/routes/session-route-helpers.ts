@@ -1,5 +1,5 @@
 import type { FileDiffContent, Message, MessageContent, RunEvent } from '@openAwork/shared';
-import type { SessionTodo } from '../todo-tools.js';
+import type { SessionTodo } from '../tools/todo-tools.js';
 
 const SLIM_STRING_MAX = 800;
 const SLIM_INPUT_MAX = 2000;

@@ -41,67 +41,67 @@ function createPreloadableRouteModule(
 export const PRELOADABLE_ROUTE_MODULES = {
   about: createPreloadableRouteModule(
     'about',
-    () => import('../pages/AboutPage.js'),
+    () => import('../pages/misc/AboutPage.js'),
     '关于 OpenAWork',
   ),
   agents: createPreloadableRouteModule(
     'agents',
-    () => import('../pages/AgentsPage.js'),
+    () => import('../pages/misc/AgentsPage.js'),
     'Agent 管理',
   ),
   artifacts: createPreloadableRouteModule(
     'artifacts',
-    () => import('../pages/ArtifactsPage.js'),
+    () => import('../pages/artifacts/ArtifactsPage.js'),
     '产物中心',
   ),
   channels: createPreloadableRouteModule(
     'channels',
-    () => import('../pages/ChannelsPage.js'),
+    () => import('../pages/misc/ChannelsPage.js'),
     '消息频道',
   ),
-  chat: createPreloadableRouteModule('chat', () => import('../pages/ChatPage.js'), '会话工作台'),
+  chat: createPreloadableRouteModule('chat', () => import('../pages/chat-page/ChatPage.js'), '会话工作台'),
   images: createPreloadableRouteModule(
     'images',
-    () => import('../pages/ImagesPage.js'),
+    () => import('../pages/artifacts/ImagesPage.js'),
     '图片工作台',
   ),
   schedules: createPreloadableRouteModule(
     'schedules',
-    () => import('../pages/SchedulesPage.js'),
+    () => import('../pages/misc/SchedulesPage.js'),
     '计划任务',
   ),
   sessions: createPreloadableRouteModule(
     'sessions',
-    () => import('../pages/SessionsPage.js'),
+    () => import('../pages/sessions-page/SessionsPage.js'),
     '会话列表',
   ),
   settings: createPreloadableRouteModule(
     'settings',
-    () => import('../pages/SettingsPage.js'),
+    () => import('../pages/settings/SettingsPage.js'),
     '设置中心',
   ),
   team: createPreloadableRouteModule(
     'team',
-    () => import('../pages/TeamPageDispatcher.js'),
+    () => import('../pages/team/TeamPageDispatcher.js'),
     '团队协作',
   ),
   templates: createPreloadableRouteModule(
     'templates',
-    () => import('../pages/TeamTemplatesPage.js'),
+    () => import('../pages/team/TeamTemplatesPage.js'),
     '模板管理',
   ),
   workflows: createPreloadableRouteModule(
     'workflows',
-    () => import('../pages/WorkflowsPage.js'),
+    () => import('../pages/workflows/WorkflowsPage.js'),
     '工作流工作台',
   ),
-  skills: createPreloadableRouteModule('skills', () => import('../pages/SkillsPage.js'), '技能库'),
+  skills: createPreloadableRouteModule('skills', () => import('../pages/skills/SkillsPage.js'), '技能库'),
   skillSelection: createPreloadableRouteModule(
     'skill-selection',
-    () => import('../pages/SkillSelectionPage.js'),
+    () => import('../pages/skills/SkillSelectionPage.js'),
     'Skill 工作区选择集',
   ),
-  usage: createPreloadableRouteModule('usage', () => import('../pages/UsagePage.js'), '用量统计'),
+  usage: createPreloadableRouteModule('usage', () => import('../pages/misc/UsagePage.js'), '用量统计'),
 } as const;
 
 export type PreloadableRouteKey = keyof typeof PRELOADABLE_ROUTE_MODULES;

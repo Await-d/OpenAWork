@@ -9,16 +9,16 @@ import { ModelPicker, ModelSettingsPopover } from './ChatPageSections.js';
 import type {
   ChatSettingsProvider,
   SavedChatImageDefaults,
-} from '../../utils/chat-session-defaults.js';
-import type { DialogueMode } from '../../pages/dialogue-mode.js';
+} from '../../utils/chat/chat-session-defaults.js';
+import type { DialogueMode } from '../../pages/chat-page/dialogue-mode.js';
 import type {
   ComposerMenuState,
   ReasoningEffort,
   WorkspaceFileMentionItem,
-} from '../session-conversation/runtime/support.js';
-import type { ImageEditReferenceArtifact } from '../session-conversation/runtime/image-edit-reference-artifacts.js';
+} from '../conversation-runtime/messages/support.js';
+import type { ImageEditReferenceArtifact } from '../../pages/chat-page/conversation/render/image-edit-reference-artifacts.js';
 import type { ChatImageGenerationReferenceArtifact } from './ChatImageGenerationControls.js';
-import type { ComposerWorkspaceCatalog } from '../../hooks/useComposerWorkspaceCatalog.js';
+import type { ComposerWorkspaceCatalog } from '../../hooks/chat/useComposerWorkspaceCatalog.js';
 import { useUnifiedComposerState } from './unified-composer/use-unified-composer-state.js';
 
 export interface UnifiedComposerFeatures {

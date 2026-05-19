@@ -45,7 +45,7 @@ function primaryButtonStyle(disabled: boolean): React.CSSProperties {
     background: disabled
       ? 'rgba(99, 102, 241, 0.35)'
       : 'linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%)',
-    color: '#fff',
+    color: 'var(--fg-on-accent, #ffffff)',
     padding: '11px 16px',
     fontSize: 13,
     fontWeight: 700,

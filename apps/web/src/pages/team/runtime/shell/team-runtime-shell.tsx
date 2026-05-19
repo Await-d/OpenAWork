@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuthStore } from '../../../../stores/auth.js';
-import { connectTeamEvents, disconnectTeamEvents } from '../../../../stores/team-events.js';
+import { connectTeamEvents, disconnectTeamEvents } from '../../../../stores/team/team-events.js';
 import type {
   SharedSessionDetailRecord,
   SharedSessionSummaryRecord,
@@ -43,11 +43,11 @@ import {
 } from '../data/team-runtime-model.js';
 import { buildTeamRuntimeShellViewModel } from './build-team-runtime-shell-view-model.js';
 import { TeamRuntimeShellFrame } from './team-runtime-shell-frame.js';
-import { TeamStatusBar } from './TeamStatusBar.js';
-import { LayerConversationDrawer } from './LayerConversationDrawer.js';
+import { TeamStatusBar } from './header/TeamStatusBar.js';
+import { LayerConversationDrawer } from './session-view/LayerConversationDrawer.js';
 import { TeamArtifactSection } from '../tabs/tasks/TeamArtifactSection.js';
 import { useTeamRuntimeProjection } from '../hooks/use-team-runtime-projection.js';
-import type { WorkspaceSessionTreeNode } from '../../../../utils/session-grouping.js';
+import type { WorkspaceSessionTreeNode } from '../../../../utils/session/session-grouping.js';
 
 type RuntimeTabKey =
   | 'overview'

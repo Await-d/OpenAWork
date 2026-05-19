@@ -7,19 +7,19 @@
  */
 
 export const BUILTIN_AGENT_COLORS: Record<string, string> = {
-  build: '#6B7280',
-  plan: '#8B5CF6',
-  general: '#3B82F6',
-  explore: '#10B981',
-  sisyphus: '#A855F7',
-  hephaestus: '#F97316',
-  prometheus: '#EF4444',
-  oracle: '#6366F1',
-  zeus: '#EAB308',
-  librarian: '#14B8A6',
-  metis: '#2563EB',
-  momus: '#F59E0B',
-  atlas: '#0EA5E9',
+  build: 'var(--fg-muted, #7b8a9e)',
+  plan: 'var(--chart-5, var(--chart-5, #c4b5fd))',
+  general: 'var(--aux, var(--aux, #8b9cf5))',
+  explore: 'var(--success, var(--success, #3dd49a))',
+  sisyphus: 'var(--chart-5, var(--chart-5, #c4b5fd))',
+  hephaestus: 'var(--contrast, var(--warning, #f0b429))',
+  prometheus: 'var(--danger, var(--danger, #f06b7e))',
+  oracle: 'var(--accent, var(--accent, #5cd4c0))',
+  zeus: 'var(--warning, var(--warning, #f0b429))',
+  librarian: 'var(--accent, var(--accent, #5cd4c0))',
+  metis: 'var(--aux, var(--aux, #8b9cf5))',
+  momus: 'var(--warning, var(--warning, #f0b429))',
+  atlas: 'var(--chart-7, var(--chart-7, #67e8f9))',
 };
 
 const FALLBACK_PALETTE = [

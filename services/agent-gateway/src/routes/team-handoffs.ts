@@ -27,9 +27,11 @@ import {
   getHandoff,
   listHandoffsBySession,
   type HandoffRoleLayer,
-} from '../handoff/handoff-store.js';
-import { publishHandoffEvent } from '../handoff/team-events-bus.js';
-import { createTeamSession, validateTeamParentSession } from '../handoff/team-session-create.js';
+} from '../handoff/store/handoff-store.js';
+import { publishHandoffEvent } from '../handoff/bus/team-events-bus.js';
+import { createTeamSession, validateTeamParentSession } from '../handoff/bus/team-session-create.js';
+import { submitInboundMessage } from '../handoff/store/inbound-store.js';
+import { setSubstate } from '../handoff/store/substate-store.js';
 
 const TEAM_ROLE_LAYERS = ['user', 'reception', 'pm1', 'pm2', 'executor', 'reviewer'] as const;
 
@@ -199,6 +201,37 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
       }
       const after = getHandoff({ userId: user.sub, handoffId });
       if (after) {
+        // 同时把 to_session 的 substate 推到 'cancelled'，让前端进度条立刻反映终态
+        if (after.toSessionId) {
+          try {
+            setSubstate({
+              sessionId: after.toSessionId,
+              substate: 'cancelled',
+              userId: after.userId,
+              roleLayer: after.toRoleLayer,
+            });
+          } catch (e) {
+            console.warn(
+              `[team-handoffs] setSubstate('cancelled') 失败：${e instanceof Error ? e.message : String(e)}`,
+            );
+          }
+
+          // 注入 cancel_signal 到 inbound queue，让正在跑的 runner（artifact-chain
+          // / pm2-runner）能在下一轮检查时主动退出，而不是等到自然结束
+          try {
+            submitInboundMessage({
+              userId: after.userId,
+              toSessionId: after.toSessionId,
+              fromRoleLayer: 'system',
+              messageType: 'cancel_signal',
+              payload: { reason: 'user-cancelled', handoffId: after.id },
+            });
+          } catch (e) {
+            console.warn(
+              `[team-handoffs] cancel_signal 注入失败：${e instanceof Error ? e.message : String(e)}`,
+            );
+          }
+        }
         publishHandoffEvent({ type: 'handoff.cancelled', record: after });
       }
       step.succeed(undefined, { handoffId });

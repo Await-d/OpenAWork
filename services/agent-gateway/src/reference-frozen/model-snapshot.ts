@@ -1,4 +1,4 @@
-import type { ReferenceModelEntry } from '../task-model-reference-snapshot.js';
+import type { ReferenceModelEntry } from '../task/task-model-reference-snapshot.js';
 
 export const FROZEN_AGENT_MODEL_ENTRIES: Record<string, ReferenceModelEntry[]> = {
   explore: [

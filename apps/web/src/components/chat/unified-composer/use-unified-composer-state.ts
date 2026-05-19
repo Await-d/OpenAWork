@@ -1,32 +1,32 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AttachmentItem } from '@openAwork/shared-ui';
 import type { CommandDescriptor } from '@openAwork/shared';
-import { useComposerCallbacks } from '../../session-conversation/runtime/use-composer-callbacks.js';
-import { useComposerMenuItems } from '../../session-conversation/runtime/use-composer-menu-items.js';
-import { useComposerQueue } from '../../session-conversation/runtime/use-composer-queue.js';
+import { useComposerCallbacks } from '../../../pages/chat-page/conversation/composer/use-composer-callbacks.js';
+import { useComposerMenuItems } from '../../../pages/chat-page/conversation/composer/use-composer-menu-items.js';
+import { useComposerQueue } from '../../../pages/chat-page/conversation/composer/use-composer-queue.js';
 
-import { buildQueuedComposerScopeKey } from '../../session-conversation/runtime/chat-page-utils.js';
+import { buildQueuedComposerScopeKey } from '../../../pages/chat-page/conversation/render/chat-page-utils.js';
 import {
   createQueuedComposerPreview,
   hydrateQueuedComposerMessage,
   type QueuedComposerMessage,
   toPersistedQueuedComposerMessage,
-} from '../../session-conversation/runtime/queued-composer-state.js';
+} from '../../../pages/chat-page/conversation/composer/queued-composer-state.js';
 import {
   deleteQueuedComposerFiles,
   restoreQueuedComposerFiles,
-} from '../../session-conversation/runtime/queued-composer-file-store.js';
+} from '../../../pages/chat-page/conversation/composer/queued-composer-file-store.js';
 import type {
   ComposerMenuState,
   WorkspaceFileMentionItem,
-} from '../../session-conversation/runtime/support.js';
+} from '../../conversation-runtime/messages/support.js';
 import { useChatQueueStore } from '../../../stores/chat-queue.js';
-import type { ChatSettingsProvider } from '../../../utils/chat-session-defaults.js';
-import type { SavedChatImageDefaults } from '../../../utils/chat-session-defaults.js';
-import type { DialogueMode } from '../../../pages/dialogue-mode.js';
+import type { ChatSettingsProvider } from '../../../utils/chat/chat-session-defaults.js';
+import type { SavedChatImageDefaults } from '../../../utils/chat/chat-session-defaults.js';
+import type { DialogueMode } from '../../../pages/chat-page/dialogue-mode.js';
 import type { UnifiedComposerFeatures, UnifiedComposerSubmitPayload } from '../UnifiedComposer.js';
-import type { ImageEditReferenceArtifact } from '../../session-conversation/runtime/image-edit-reference-artifacts.js';
-import type { ComposerWorkspaceCatalog } from '../../../hooks/useComposerWorkspaceCatalog.js';
+import type { ImageEditReferenceArtifact } from '../../../pages/chat-page/conversation/render/image-edit-reference-artifacts.js';
+import type { ComposerWorkspaceCatalog } from '../../../hooks/chat/useComposerWorkspaceCatalog.js';
 
 export interface UseUnifiedComposerStateOptions {
   sessionId: string | null;

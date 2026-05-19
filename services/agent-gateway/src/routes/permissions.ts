@@ -11,22 +11,22 @@ import {
   type PermissionDecision,
   type PermissionRequestStatus,
   type PermissionRiskLevel,
-} from '../permission-contract.js';
+} from '../permission/permission-contract.js';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
 import {
   createPermissionAskedEvent,
   createPermissionRepliedEvent,
-} from '../session-permission-events.js';
-import { publishSessionRunEvent } from '../session-run-events.js';
+} from '../session/session-permission-events.js';
+import { publishSessionRunEvent } from '../session/session-run-events.js';
 import { startRequestWorkflow } from '../request-workflow.js';
 import { setPersistedSessionStateStatus } from './stream.js';
 import {
   resumeApprovedPermissionRequest,
   resumeRejectedPermissionRequest,
 } from './stream-runtime.js';
-import { persistWorkspacePermanentPermission } from '../workspace-safety.js';
+import { persistWorkspacePermanentPermission } from '../workspace/workspace-safety.js';
 import { resolvePermissionCategory } from '@openAwork/agent-core';
 
 const createPermissionRequestSchema = z.object({

@@ -25,9 +25,9 @@ const BADGE_STYLE: CSSProperties = {
 };
 
 const ROLE_COLORS: Record<string, string> = {
-  executor: '#22c55e',
-  tester: '#3b82f6',
-  reviewer: '#f59e0b',
+  executor: 'var(--success, var(--success, #3dd49a))',
+  tester: 'var(--aux, var(--aux, #8b9cf5))',
+  reviewer: 'var(--warning, var(--warning, #f0b429))',
 };
 
 export interface DispatchPackageViewProps {
@@ -89,9 +89,9 @@ export function DispatchPackageView({ packages }: DispatchPackageViewProps) {
                 <span
                   style={{
                     ...BADGE_STYLE,
-                    color: '#3b82f6',
-                    border: '1px solid #3b82f640',
-                    background: '#3b82f610',
+                    color: 'var(--aux, var(--aux, #8b9cf5))',
+                    border: '1px solid var(--aux, var(--aux, #8b9cf5))40',
+                    background: 'var(--aux, var(--aux, #8b9cf5))10',
                   }}
                 >
                   [P]
@@ -101,9 +101,9 @@ export function DispatchPackageView({ packages }: DispatchPackageViewProps) {
                 <span
                   style={{
                     ...BADGE_STYLE,
-                    color: '#22c55e',
-                    border: '1px solid #22c55e40',
-                    background: '#22c55e10',
+                    color: 'var(--success, var(--success, #3dd49a))',
+                    border: '1px solid var(--success, var(--success, #3dd49a))40',
+                    background: 'var(--success, var(--success, #3dd49a))10',
                   }}
                 >
                   [{pkg.taskMarkers.story}]

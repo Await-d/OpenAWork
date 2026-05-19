@@ -35,7 +35,7 @@ export type {
   AgentEvent,
   ConversationSession,
   SessionCheckpoint,
-} from './types.js';
+} from './session/types.js';
 
 export {
   createInitialState,
@@ -43,9 +43,9 @@ export {
   canTransition,
   isTerminal,
   isActive,
-} from './state-machine.js';
+} from './workflow/state-machine.js';
 
-export type { RetryOptions } from './retry.js';
+export type { RetryOptions } from './error/retry.js';
 export {
   DEFAULT_RETRY_OPTIONS,
   computeDelay,
@@ -53,19 +53,19 @@ export {
   RetryExhaustedError,
   withRetry,
   createCancellableTask,
-} from './retry.js';
+} from './error/retry.js';
 
-export type { ToolDefinition, ToolCallRequest, ToolCallResult } from './tool-contract.js';
+export type { ToolDefinition, ToolCallRequest, ToolCallResult } from './tools/tool-contract.js';
 export {
   ToolValidationError,
   ToolNotFoundError,
   ToolTimeoutError,
   ToolRegistry,
-} from './tool-contract.js';
+} from './tools/tool-contract.js';
 
-export type { SessionStore } from './session-store.js';
-export { InMemorySessionStore, SessionNotFoundError } from './session-store.js';
-export { SQLiteSessionStore } from './sqlite-session-store.js';
+export type { SessionStore } from './session/session-store.js';
+export { InMemorySessionStore, SessionNotFoundError } from './session/session-store.js';
+export { SQLiteSessionStore } from './session/sqlite-session-store.js';
 
 export type { AgentIgnoreManager, IgnoreRuleSet } from './filesystem/ignore.js';
 export { createAgentIgnoreManager, defaultIgnoreManager } from './filesystem/ignore.js';
@@ -162,7 +162,7 @@ export {
   isSubAgentPrompt,
   buildSubAgentPrompt,
   SUB_AGENT_PROMPT_PREFIX,
-} from './routing.js';
+} from './context/routing.js';
 export type {
   RouteLevel,
   RoutingDimensions,
@@ -170,7 +170,7 @@ export type {
   ClarificationQuestion,
   ClarificationDimension,
   SessionContext,
-} from './routing.js';
+} from './context/routing.js';
 
 export type {
   ProviderType,

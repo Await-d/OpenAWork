@@ -5,13 +5,13 @@ import { WorkflowLogger } from '@openAwork/logger';
 import authPlugin from './auth.js';
 import { connectDb, closeDb, db, migrate, sqliteGet, sqliteRun } from './db.js';
 import { bootV2Runtime, getRuntimeFlags, shutdownV2Runtime } from './v2-runtime/index.js';
-import { skillMcpPool } from './skill-mcp-connection-pool.js';
-import { ensureDefaultInstalledSkillsForAllUsers } from './default-skills.js';
-import { syncSystemSkillsForAllUsers } from './system-skills.js';
+import { skillMcpPool } from './skill/skill-mcp-connection-pool.js';
+import { ensureDefaultInstalledSkillsForAllUsers } from './skill/default-skills.js';
+import { syncSystemSkillsForAllUsers } from './skill/system-skills.js';
 import { ensureDefaultWorkflowTemplatesForAllUsers } from './default-workflow-templates.js';
 import { backgroundScheduler } from './background-scheduler.js';
 import { refreshRegistryCaches } from './routes/skills.js';
-import { checkInstalledSkillUpdates } from './skill-update-checker.js';
+import { checkInstalledSkillUpdates } from './skill/skill-update-checker.js';
 import { createHash, randomUUID } from 'crypto';
 import requestWorkflowPlugin, { startRequestWorkflow } from './request-workflow.js';
 import { startParentProcessWatch } from './parent-watch.js';
@@ -62,8 +62,8 @@ import { desktopAutomationRoutes } from './routes/desktop-automation.js';
 import { sshRoutes } from './routes/ssh.js';
 import { toolsRoutes } from './routes/tools.js';
 import { artifactsRoutes } from './routes/artifacts.js';
-import { reconcileAllSessionRuntimes } from './session-runtime-reconciler.js';
-import { reconcileStaleRunningTerminalsAtBoot } from './session-terminal-registry.js';
+import { reconcileAllSessionRuntimes } from './session/session-runtime-reconciler.js';
+import { reconcileStaleRunningTerminalsAtBoot } from './session/session-terminal-registry.js';
 import qrcodeTerminal from 'qrcode-terminal';
 import { pairingManager, pairingRoutes } from './routes/pairing.js';
 import { memoriesRoutes } from './routes/memories.js';
@@ -342,8 +342,11 @@ try {
   if (!handoffWatcherDisabled) {
     step = bootLogger.start('gateway.start-handoff-watcher');
     try {
-      const { startHandoffWatcher } = await import('./handoff/watcher.js');
-      const { createPhaseCAwareRunner } = await import('./handoff/pm1-runner.js');
+      const { startHandoffWatcher } = await import('./handoff/runner/watcher.js');
+      const { createPhaseCAwareRunner } = await import('./handoff/runner/pm1-runner.js');
+      // 加载内置指令注册表（每层专属 LLM-facing 函数工具）
+      // 这一行触发 builtin-instructions-impl 顶层 registerInstruction(...) 调用
+      await import('./handoff/capability/builtin-instructions-impl.js');
       const watcher = startHandoffWatcher({
         taskRunner: createPhaseCAwareRunner(),
       });

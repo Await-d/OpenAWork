@@ -17,15 +17,15 @@ import {
   lspPrepareRenameToolDefinition,
   lspRenameToolDefinition,
   lspSymbolsToolDefinition,
-} from '../lsp-tools.js';
+} from '../tools/lsp-tools.js';
 import { lspManager } from '../lsp/router.js';
 import requestWorkflowPlugin from '../request-workflow.js';
 import { capabilitiesRoutes } from '../routes/capabilities.js';
-import { buildGatewayToolDefinitions } from '../tool-definitions.js';
+import { buildGatewayToolDefinitions } from '../tools/tool-definitions.js';
 import {
   isGatewayToolEnabledForSessionMetadata,
   filterEnabledGatewayToolsForSession,
-} from '../session-tool-visibility.js';
+} from '../session/session-tool-visibility.js';
 import { assert, withTempEnv } from './task-verification-helpers.js';
 
 const LSP_VISIBILITY_CLASSIFICATION: Record<string, 'read' | 'edit'> = {

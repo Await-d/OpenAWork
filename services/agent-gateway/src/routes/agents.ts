@@ -10,7 +10,7 @@ import {
   resetAllManagedAgentsForUser,
   resetManagedAgentForUser,
   updateManagedAgentForUser,
-} from '../agent-catalog.js';
+} from '../agent/agent-catalog.js';
 import { startRequestWorkflow } from '../request-workflow.js';
 
 const canonicalRoleSchema = z

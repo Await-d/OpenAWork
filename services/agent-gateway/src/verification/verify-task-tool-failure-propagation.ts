@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { AgentTaskManagerImpl } from '@openAwork/agent-core';
 import type { MessageContent } from '@openAwork/shared';
 import { closeDb, connectDb, migrate, sqliteRun, WORKSPACE_ROOT } from '../db.js';
-import { listSessionMessagesV2 as listSessionMessages } from '../message-v2-adapter.js';
-import { createDefaultSandbox } from '../tool-sandbox.js';
+import { listSessionMessagesV2 as listSessionMessages } from '../message/message-v2-adapter.js';
+import { createDefaultSandbox } from '../tools/tool-sandbox.js';
 import {
   assert,
   createChatCompletionsStream,

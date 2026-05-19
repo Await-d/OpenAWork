@@ -282,7 +282,7 @@ function RuntimeActivityRail({
           }}
         >
           <div style={{ display: 'flex', gap: 4 }}>
-            {['#ef4444', '#f59e0b', '#22c55e'].map((color) => (
+            {['var(--danger, var(--danger, #f06b7e))', 'var(--warning, var(--warning, #f0b429))', 'var(--success, var(--success, #3dd49a))'].map((color) => (
               <span
                 key={color}
                 style={{
@@ -992,7 +992,7 @@ function RuntimeStatusBar({
               width: 8,
               height: 8,
               borderRadius: '50%',
-              background: (statusBarSummary?.activeCount ?? 0) > 0 ? '#22c55e' : 'var(--text-3)',
+              background: (statusBarSummary?.activeCount ?? 0) > 0 ? 'var(--success, var(--success, #3dd49a))' : 'var(--text-3)',
               boxShadow:
                 (statusBarSummary?.activeCount ?? 0) > 0 ? '0 0 12px rgba(34,197,94,0.55)' : 'none',
             }}
@@ -1055,13 +1055,13 @@ function RuntimeStatusBar({
               总 <strong style={{ color: 'var(--text)' }}>{statusBarSummary.totalCount}</strong>
             </span>
             <span style={{ color: 'var(--text-3)' }}>
-              运行 <strong style={{ color: '#22c55e' }}>{statusBarSummary.runningCount}</strong>
+              运行 <strong style={{ color: 'var(--success, var(--success, #3dd49a))' }}>{statusBarSummary.runningCount}</strong>
             </span>
             <span style={{ color: 'var(--text-3)' }}>
-              等待 <strong style={{ color: '#f59e0b' }}>{statusBarSummary.waitingCount}</strong>
+              等待 <strong style={{ color: 'var(--warning, var(--warning, #f0b429))' }}>{statusBarSummary.waitingCount}</strong>
             </span>
             <span style={{ color: 'var(--text-3)' }}>
-              异常 <strong style={{ color: '#ef4444' }}>{statusBarSummary.errorCount}</strong>
+              异常 <strong style={{ color: 'var(--danger, var(--danger, #f06b7e))' }}>{statusBarSummary.errorCount}</strong>
             </span>
             <span style={{ color: 'var(--accent)' }}>{statusBarSummary.todayTokens}</span>
             <span style={{ color: 'var(--text-3)' }}>{statusBarSummary.runtimeLabel}</span>
@@ -1194,7 +1194,7 @@ export function TeamRuntimeShellFrame({
                   }}
                 >
                   <div aria-hidden="true" style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
-                    {['#ef4444', '#f59e0b', '#22c55e'].map((color) => (
+                    {['var(--danger, var(--danger, #f06b7e))', 'var(--warning, var(--warning, #f0b429))', 'var(--success, var(--success, #3dd49a))'].map((color) => (
                       <span
                         key={color}
                         style={{ width: 10, height: 10, borderRadius: '50%', background: color }}

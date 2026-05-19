@@ -15,7 +15,7 @@
 import { useMemo, type ReactNode } from 'react';
 import type { OfficeSceneState } from './office/OfficeScene.js';
 import type { AgentTeamsSidebarTeam } from '../data/team-runtime-types.js';
-import type { HandoffEntry } from '../../../../stores/team-events.js';
+import type { HandoffEntry } from '../../../../stores/team/team-events.js';
 import { OfficeThreeCanvas } from './office/OfficeThreeCanvas.js';
 import { OverviewTab } from './overview/OverviewTab.js';
 import { MessagesMergedTab } from './conversation/MessagesMergedTab.js';
@@ -35,7 +35,7 @@ import { SharesView } from './governance/SharesView.js';
 import { TemplatesTab } from './governance/TemplatesTab.js';
 import { DispatchTab } from './tasks/DispatchTab.js';
 import { ClarificationsPanel } from './tasks/ClarificationsPanel.js';
-import { FailureFlowIndicator } from '../shell/FailureFlowIndicator.js';
+import { FailureFlowIndicator } from '../shell/controls/FailureFlowIndicator.js';
 import { useReviewDisposition } from '../hooks/use-review-disposition.js';
 import { useSessionHandoffs } from '../hooks/use-session-handoffs.js';
 import { UsageView } from './metrics/UsageView.js';
@@ -219,7 +219,7 @@ export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
       );
 
     case 'conversation':
-      // 「对话」tab 由 TeamPageV2 直接处理（messagesOverride 走 TeamSessionView 分支）。
+      // 「对话」tab 由 TeamPageV2 直接处理（messagesOverride 走 TeamConversationView 分支）。
       // 这里返回 null 仅用于 TS 穷尽检查，正常路径不会进入。
       return null;
 
@@ -314,7 +314,7 @@ function HandoffCancelInline({
               width: 6,
               height: 6,
               borderRadius: 999,
-              background: entry.state === 'running' ? 'var(--success, #22c55e)' : '#f59e0b',
+              background: entry.state === 'running' ? 'var(--success, var(--success, var(--success, #3dd49a)))' : 'var(--warning, var(--warning, #f0b429))',
               flexShrink: 0,
             }}
           />

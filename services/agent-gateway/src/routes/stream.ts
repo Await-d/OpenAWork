@@ -13,7 +13,7 @@ import type {
 } from '@openAwork/shared';
 import { z } from 'zod';
 import type { JwtPayload } from '../auth.js';
-import { COMPACTION_SETTINGS_KEY, readCompactionSettings } from '../compaction-policy.js';
+import { COMPACTION_SETTINGS_KEY, readCompactionSettings } from '../compaction/compaction-policy.js';
 import { sqliteGet, sqliteRun } from '../db.js';
 import { writeAuditLog } from '../audit-log.js';
 import {
@@ -22,26 +22,26 @@ import {
   resolveCompactionRoute,
   resolveModelRoute,
   resolveModelRouteFromProvider,
-} from '../model-router.js';
+} from '../provider/model-router.js';
 import {
   getCompactionProviderConfig,
   getFastProviderConfig,
   getProviderConfigForSelection,
-} from '../provider-config.js';
+} from '../provider/provider-config.js';
 import { WorkflowLogger, createRequestContext } from '@openAwork/logger';
-import { isContextNearOverflow, isContextOverflow } from '../session-message-store.js';
+import { isContextNearOverflow, isContextOverflow } from '../session/session-message-store.js';
 import {
   appendSessionMessageV2,
   deleteSessionMessagesByRequestScope,
   getSessionMessageByRequestId,
   listSessionMessagesByRequestScope,
   listSessionMessagesV2,
-} from '../message-v2-adapter.js';
+} from '../message/message-v2-adapter.js';
 import {
   executeSessionCompaction,
   isAutoCompactCircuitBreakerTripped,
-} from '../session-compaction.js';
-import { persistStreamUserMessage } from '../stream-session-title.js';
+} from '../session/session-compaction.js';
+import { persistStreamUserMessage } from '../session/stream-session-title.js';
 import { buildCapabilityContext } from './capabilities.js';
 import {
   CLARIFY_LSP_TOOL_GUIDANCE_SYSTEM_PROMPT,
@@ -57,42 +57,42 @@ import {
   listSessionRunEventsByRequest,
   publishSessionRunEvent,
   subscribeSessionRunEvents,
-} from '../session-run-events.js';
-import { deriveRunEventBookend } from '../run-event-envelope.js';
+} from '../session/session-run-events.js';
+import { deriveRunEventBookend } from '../session/run-event-envelope.js';
 import {
   collectFileDiffsFromToolOutput,
   mergeFileDiffs,
   traceFileDiffs,
-} from '../modified-files-summary.js';
-import { persistSessionFileDiffs } from '../session-file-diff-store.js';
-import { buildToolResultContent, buildToolResultRunEvent } from '../tool-result-contract.js';
-import { createDefaultSandbox } from '../tool-sandbox.js';
-import type { SandboxExecutionContext } from '../tool-sandbox.js';
-import { cancelDescendantSessionStreams } from '../cancel-descendant-streams.js';
-import { buildGatewayToolDefinitions } from '../tool-definitions.js';
-import { buildFlatMcpToolDefinitions } from '../mcp-flat-tool-defs.js';
-import { listMcpToolsForSession } from '../mcp-runtime.js';
-import { isFlatMcpToolsDisabled } from '../mcp-tool-naming.js';
-import { getEffectiveSkillsFromSessionContext } from '../skill-selection-context.js';
-import type { EffectiveSkill } from '../skill-selection.js';
+} from '../tools/modified-files-summary.js';
+import { persistSessionFileDiffs } from '../session/session-file-diff-store.js';
+import { buildToolResultContent, buildToolResultRunEvent } from '../tools/tool-result-contract.js';
+import { createDefaultSandbox } from '../tools/tool-sandbox.js';
+import type { SandboxExecutionContext } from '../tools/tool-sandbox.js';
+import { cancelDescendantSessionStreams } from '../session/cancel-descendant-streams.js';
+import { buildGatewayToolDefinitions } from '../tools/tool-definitions.js';
+import { buildFlatMcpToolDefinitions } from '../mcp/mcp-flat-tool-defs.js';
+import { listMcpToolsForSession } from '../mcp/mcp-runtime.js';
+import { isFlatMcpToolsDisabled } from '../mcp/mcp-tool-naming.js';
+import { getEffectiveSkillsFromSessionContext } from '../skill/skill-selection-context.js';
+import type { EffectiveSkill } from '../skill/skill-selection.js';
 import {
   applyPinnedSnapshot,
   buildPinnedSkillsPromptSection,
   snapshotFromEffective,
   type PinnedSkillsSnapshot,
-} from '../pinned-skills-prompt.js';
+} from '../skill/pinned-skills-prompt.js';
 import {
   loadDynamicToolsForWorkspace,
   buildDynamicGatewayToolDefinitions,
   type DynamicToolEntry,
-} from '../dynamic-tool-loader.js';
+} from '../tools/dynamic-tool-loader.js';
 import { buildStreamUsageChunk } from './stream-usage-event.js';
 import { isEnabledToolName } from './tool-name-compat.js';
-import { sanitizeSessionMetadataJson } from '../session-workspace-metadata.js';
-import { parseSessionMetadataJson } from '../session-workspace-metadata.js';
-import { validateWorkspacePath } from '../workspace-paths.js';
-import { filterEnabledGatewayToolsForSession } from '../session-tool-visibility.js';
-import { resolveCanonicalName } from '../claude-code-tool-surface.js';
+import { sanitizeSessionMetadataJson } from '../session/session-workspace-metadata.js';
+import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
+import { validateWorkspacePath } from '../workspace/workspace-paths.js';
+import { filterEnabledGatewayToolsForSession } from '../session/session-tool-visibility.js';
+import { resolveCanonicalName } from '../claude-code/claude-code-tool-surface.js';
 import {
   clearInFlightStreamRequest,
   getAnyInFlightStreamRequestForSession,
@@ -104,40 +104,40 @@ import {
   isTaskParentAutoResumeClientRequestId,
   MAX_CONSECUTIVE_TASK_PARENT_AUTO_RESUMES,
   noteManualSessionInteraction,
-} from '../task-parent-auto-resume.js';
-import { listSessionTodos } from '../todo-tools.js';
+} from '../task/task-parent-auto-resume.js';
+import { listSessionTodos } from '../tools/todo-tools.js';
 import {
   detectRecoveryErrorType,
   recoverToolResultMissing,
   recoverThinkingDisabledViolation,
   recoverThinkingBlockOrder,
   type RecoveryResult,
-} from '../session-recovery.js';
-import { detectDelegateTaskError, buildRetryGuidance } from '../delegate-task-retry.js';
-import { truncateToolOutputUniversal } from '../tool-output-truncator.js';
-import { normalizeToolArgumentsForStorage } from '../tool-result-contract.js';
-import { detectEmptyTaskResponse } from '../empty-task-response-detector.js';
-import { buildDynamicOrchestratorPrompt } from '../dynamic-agent-prompt-builder.js';
-import { appendTaskResumeInfo } from '../task-resume-info.js';
-import { checkAiComments } from '../comment-checker.js';
-import { checkNonInteractiveBash, buildBannedCommandWarning } from '../non-interactive-env.js';
+} from '../session/session-recovery.js';
+import { detectDelegateTaskError, buildRetryGuidance } from '../task/delegate-task-retry.js';
+import { truncateToolOutputUniversal } from '../tools/tool-output-truncator.js';
+import { normalizeToolArgumentsForStorage } from '../tools/tool-result-contract.js';
+import { detectEmptyTaskResponse } from '../task/empty-task-response-detector.js';
+import { buildDynamicOrchestratorPrompt } from '../agent/dynamic-agent-prompt-builder.js';
+import { appendTaskResumeInfo } from '../task/task-resume-info.js';
+import { checkAiComments } from '../tools/comment-checker.js';
+import { checkNonInteractiveBash, buildBannedCommandWarning } from '../workspace/non-interactive-env.js';
 import {
   checkAtlasGuard,
   buildAtlasPostProcessReminder,
   SINGLE_TASK_DIRECTIVE,
-} from '../atlas-guard.js';
-import { checkRalphLoopContinuation } from '../ralph-loop.js';
+} from '../session/atlas-guard.js';
+import { checkRalphLoopContinuation } from '../session/ralph-loop.js';
 import {
   detectStartWorkKeyword as detectUltraworkKeyword,
   processStartWork,
-} from '../start-work.js';
-import { detectActiveCommandContext } from '../command-templates.js';
+} from '../workspace/start-work.js';
+import { detectActiveCommandContext } from '../tools/command-templates.js';
 import {
   checkPrometheusToolGuard,
   PLANNING_CONSULT_WARNING,
   PROMETHEUS_WORKFLOW_REMINDER,
 } from '../prometheus-md-only.js';
-import { shouldInjectNotepadDirective, NOTEPAD_DIRECTIVE } from '../sisyphus-junior-notepad.js';
+import { shouldInjectNotepadDirective, NOTEPAD_DIRECTIVE } from '../session/sisyphus-junior-notepad.js';
 import { runModelRound } from './stream-model-round.js';
 import { dispatchChatMessage } from '../plugin-host.js';
 import {
@@ -145,23 +145,23 @@ import {
   SESSION_RUNTIME_THREAD_HEARTBEAT_MS,
   touchSessionRuntimeThread,
   upsertSessionRuntimeThread,
-} from '../session-runtime-thread-store.js';
-import { resolveSessionInteractionStateUpdate } from '../session-runtime-state.js';
-import { persistMonthlyUsageRecord } from '../usage-records-store.js';
-import { listManagedAgentsForUser } from '../agent-catalog.js';
-import { selectDelegatedModelForUser } from '../task-model-selection.js';
+} from '../session/session-runtime-thread-store.js';
+import { resolveSessionInteractionStateUpdate } from '../session/session-runtime-state.js';
+import { persistMonthlyUsageRecord } from '../session/usage-records-store.js';
+import { listManagedAgentsForUser } from '../agent/agent-catalog.js';
+import { selectDelegatedModelForUser } from '../task/task-model-selection.js';
 import {
   DEFAULT_UPSTREAM_RETRY_MAX_RETRIES,
   readUpstreamRetrySettings,
   UPSTREAM_RETRY_MAX_RETRIES_KEY,
   UPSTREAM_RETRY_SETTINGS_KEY,
   upstreamRetryMaxRetriesSchema,
-} from '../upstream-retry-policy.js';
-import { autoExtractMemoriesForRequest, buildMemoryBlockForSession } from '../memory-runtime.js';
-import { buildCompanionPrompt, loadCompanionSettingsForUser } from '../companion-settings.js';
-import { checkDoomLoop, resetDoomLoopHistory } from '../doom-loop-detector.js';
-import { buildTeamInstructionStack } from '../team-instruction-stack.js';
-import { mapAgentToTeamRoleLayer } from '../team-role-layer-mapping.js';
+} from '../provider/upstream-retry-policy.js';
+import { autoExtractMemoriesForRequest, buildMemoryBlockForSession } from '../memory/memory-runtime.js';
+import { buildCompanionPrompt, loadCompanionSettingsForUser } from '../workspace/companion-settings.js';
+import { checkDoomLoop, resetDoomLoopHistory } from '../session/doom-loop-detector.js';
+import { buildTeamInstructionStack } from '../team/team-instruction-stack.js';
+import { mapAgentToTeamRoleLayer } from '../team/team-role-layer-mapping.js';
 
 type PersistedSessionStateStatus = 'idle' | 'running' | 'paused';
 
@@ -2119,14 +2119,51 @@ export async function handleStreamRequest(input: {
         allTools,
         input.sessionContext.metadataJson,
       );
+
+      // ─── L1.2.3 toolset-gate + 内置指令注入 ────────────────────────────
+      // 读取 session 的 role_layer，如果属于团队五层之一，则：
+      //   1. 用 toolset 白名单过滤通用工具（read/write/shell/lsp 等）
+      //   2. 注入该层专属内置指令（route_to_orchestrate / submit_artifact / ...）
+      // 这是构思 §2B.7 "不在一个 agent 里塞所有工具" 的代码级落地。
+      const sessionRoleLayer = input.sessionContext.roleLayer ?? null;
+      let layerFilteredTools = filteredTools;
+      if (sessionRoleLayer && ['reception', 'pm1', 'pm2', 'executor', 'reviewer'].includes(sessionRoleLayer)) {
+        try {
+          const { LAYER_CAPABILITIES } = await import('../handoff/capability/layer-capabilities.js');
+          const { getInstructionsForLayer, toToolDefinition } = await import(
+            '../handoff/capability/builtin-instructions.js'
+          );
+          const { filterToolsByAllowedSets } = await import('../handoff/capability/toolset-gate.js');
+          const layer = sessionRoleLayer as 'reception' | 'pm1' | 'pm2' | 'executor' | 'reviewer';
+          const caps = LAYER_CAPABILITIES[layer];
+          // 1. 通用工具 toolset 过滤
+          if (caps.allowedToolsetCategories.length > 0) {
+            layerFilteredTools = filterToolsByAllowedSets(
+              filteredTools,
+              caps.allowedToolsetCategories as never[],
+            );
+          }
+          // 2. 内置指令注入（每层专属 LLM-facing 函数工具）
+          const layerInstructions = getInstructionsForLayer(layer);
+          if (layerInstructions.length > 0) {
+            const instructionDefs = layerInstructions.map((inst) => toToolDefinition(inst));
+            layerFilteredTools = [...layerFilteredTools, ...instructionDefs];
+          }
+        } catch (err) {
+          console.warn(
+            `[stream] layer-aware tool filter failed for ${sessionRoleLayer}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
       const shouldDeferToolLoading =
         route.deferToolLoading === true || sessionMeta['deferToolLoading'] === true;
       const enabledTools = shouldDeferToolLoading
-        ? filteredTools.map((tool) => ({
+        ? layerFilteredTools.map((tool) => ({
             ...tool,
             function: { ...tool.function, deferLoading: true },
           }))
-        : filteredTools;
+        : layerFilteredTools;
       const enabledToolNames = new Set(enabledTools.map((tool) => tool.function.name));
       const turnFileDiffs = new Map<string, FileDiffContent>();
       const memoryBlock = buildMemoryBlockForSession(

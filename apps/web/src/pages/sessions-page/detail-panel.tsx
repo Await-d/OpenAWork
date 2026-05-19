@@ -10,7 +10,7 @@ import {
 } from '@openAwork/web-client';
 import { FileChangeReviewPanel } from '@openAwork/shared-ui';
 import type { FileChange } from '@openAwork/shared-ui';
-import { extractWorkingDirectory } from '../../utils/session-metadata.js';
+import { extractWorkingDirectory } from '../../utils/session/session-metadata.js';
 import type { SessionRow } from './session-page-types.js';
 import { WorkspaceWarpDialog } from './workspace-warp-dialog.js';
 import { statusBadgeBg, statusBadgeFg, statusLabel } from './session-page-utils.js';

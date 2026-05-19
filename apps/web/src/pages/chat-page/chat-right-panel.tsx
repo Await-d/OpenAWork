@@ -20,8 +20,8 @@ import type { PendingPermissionRequest, Session, SessionTask } from '@openAwork/
 import { TaskToolInline } from '../../components/chat/task-tool-inline.js';
 import SkillSettingsPanel from '../../components/chat/SkillSettingsPanel.js';
 import { ChatHistoryTabContent, ChatOverviewTabContent } from './right-panel-sections.js';
-import type { SessionTerminalView } from '../../components/session-conversation/runtime/terminals-api.js';
-import { deleteSessionTerminal } from '../../components/session-conversation/runtime/terminals-api.js';
+import type { SessionTerminalView } from '../../components/conversation-runtime/terminals/terminals-api.js';
+import { deleteSessionTerminal } from '../../components/conversation-runtime/terminals/terminals-api.js';
 import type { SessionTerminalStatus } from '@openAwork/shared';
 import { SubSessionDetailPanel } from './sub-session-detail-panel.js';
 import { BookmarksPanel } from '../../components/chat/bookmarks-panel.js';
@@ -34,17 +34,17 @@ import type { RightPanelTabId } from './right-panel-tabs.js';
 import type {
   ChatMessage,
   WorkspaceFileMentionItem,
-} from '../../components/session-conversation/runtime/support.js';
-import type { ChatContextUsageSnapshot } from '../../components/session-conversation/runtime/context-usage.js';
+} from '../../components/conversation-runtime/messages/support.js';
+import type { ChatContextUsageSnapshot } from '../../components/conversation-runtime/messages/context-usage.js';
 import type {
   SessionStateStatus,
   SessionTodoItem,
-} from '../../components/session-conversation/runtime/session-runtime.js';
+} from '../../components/conversation-runtime/session/session-runtime.js';
 import type {
   TaskToolRuntimeLookup,
   TaskToolRuntimeSnapshot,
-} from '../../components/session-conversation/runtime/task-tool-runtime.js';
-import type { DialogueMode } from '../dialogue-mode.js';
+} from './conversation/render/task-tool-runtime.js';
+import type { DialogueMode } from './dialogue-mode.js';
 
 const EMPTY_KILL_SET = new Set<string>();
 
@@ -62,16 +62,16 @@ const TERMINAL_STATUS_LABELS: Record<SessionTerminalStatus, string> = {
 };
 
 const TERMINAL_STATUS_COLORS: Record<SessionTerminalStatus, string> = {
-  running: '#34d399',
-  idle: '#94a3b8',
-  exited: '#94a3b8',
-  aborted: '#f59e0b',
-  timeout: '#f59e0b',
-  spawn_error: '#ef4444',
-  killed: '#ef4444',
-  stale: '#64748b',
-  'tmux-spawned': '#3b82f6',
-  'tmux-killed': '#94a3b8',
+  running: 'var(--success, var(--success, #3dd49a))',
+  idle: 'var(--fg-muted, #7b8a9e)',
+  exited: 'var(--fg-muted, #7b8a9e)',
+  aborted: 'var(--warning, var(--warning, #f0b429))',
+  timeout: 'var(--warning, var(--warning, #f0b429))',
+  spawn_error: 'var(--danger, var(--danger, #f06b7e))',
+  killed: 'var(--danger, var(--danger, #f06b7e))',
+  stale: 'var(--fg-muted, #7b8a9e)',
+  'tmux-spawned': 'var(--aux, var(--aux, #8b9cf5))',
+  'tmux-killed': 'var(--fg-muted, #7b8a9e)',
 };
 
 const ACTIVE_TERMINAL_STATUSES: ReadonlySet<SessionTerminalStatus> = new Set([
@@ -622,7 +622,7 @@ function RightPanelTerminalsContent({
         )}
         {loading && <span style={{ fontSize: 10, color: 'var(--text-3)' }}>加载中…</span>}
       </div>
-      {error && <div style={{ fontSize: 11, color: '#ef4444', padding: '4px 0' }}>{error}</div>}
+      {error && <div style={{ fontSize: 11, color: 'var(--danger, var(--danger, #f06b7e))', padding: '4px 0' }}>{error}</div>}
       {sorted.length === 0 ? (
         <div style={{ fontSize: 11, color: 'var(--text-3)', padding: '6px 2px' }}>
           当前会话还没有跑过终端命令。
@@ -632,7 +632,7 @@ function RightPanelTerminalsContent({
           const isActive = ACTIVE_TERMINAL_STATUSES.has(terminal.status);
           const isExpanded = expandedId === terminal.terminalId;
           const isPendingKill = pendingKillIds.has(terminal.terminalId);
-          const statusColor = TERMINAL_STATUS_COLORS[terminal.status] ?? '#94a3b8';
+          const statusColor = TERMINAL_STATUS_COLORS[terminal.status] ?? 'var(--fg-muted, #7b8a9e)';
           const statusLabel = TERMINAL_STATUS_LABELS[terminal.status] ?? terminal.status;
           return (
             <div
@@ -642,7 +642,7 @@ function RightPanelTerminalsContent({
                 borderRadius: 8,
                 padding: '8px 10px',
                 background: isActive
-                  ? 'color-mix(in oklch, var(--surface) 94%, #34d399 6%)'
+                  ? 'color-mix(in oklch, var(--surface) 94%, var(--success, var(--success, #3dd49a)) 6%)'
                   : 'var(--surface)',
                 display: 'flex',
                 flexDirection: 'column',
@@ -712,9 +712,9 @@ function RightPanelTerminalsContent({
                     style={{
                       fontSize: 10,
                       fontWeight: 600,
-                      border: '1px solid color-mix(in srgb, #ef4444 50%, transparent)',
-                      background: 'color-mix(in srgb, #ef4444 14%, transparent)',
-                      color: '#ef4444',
+                      border: '1px solid color-mix(in srgb, var(--danger, var(--danger, #f06b7e)) 50%, transparent)',
+                      background: 'color-mix(in srgb, var(--danger, var(--danger, #f06b7e)) 14%, transparent)',
+                      color: 'var(--danger, var(--danger, #f06b7e))',
                       padding: '2px 7px',
                       borderRadius: 5,
                       cursor: isPendingKill ? 'wait' : 'pointer',
@@ -770,7 +770,7 @@ function RightPanelTerminalsContent({
                   {terminal.cwd}
                 </span>
                 {terminal.exitCode !== undefined && (
-                  <span style={{ color: terminal.exitCode === 0 ? '#34d399' : '#ef4444' }}>
+                  <span style={{ color: terminal.exitCode === 0 ? 'var(--success, var(--success, #3dd49a))' : 'var(--danger, var(--danger, #f06b7e))' }}>
                     exit {terminal.exitCode}
                   </span>
                 )}

@@ -5,7 +5,7 @@ import type {
   ArtifactRecord,
   ArtifactVersionRecord,
 } from '@openAwork/artifacts';
-import { toast } from '../../components/ToastNotification.js';
+import { toast } from '../../components/common/ToastNotification.js';
 import type {
   ArtifactSessionSummary,
   ArtifactVersionsResponse,

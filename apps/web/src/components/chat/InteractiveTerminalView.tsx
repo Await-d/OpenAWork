@@ -17,12 +17,12 @@ import { useEffect, useRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
-import type { SessionTerminalView } from '../session-conversation/runtime/terminals-api.js';
+import type { SessionTerminalView } from '../conversation-runtime/terminals/terminals-api.js';
 import {
   openTerminalStream,
   resizeTerminal,
   writeTerminalStdin,
-} from '../session-conversation/runtime/terminals-api.js';
+} from '../conversation-runtime/terminals/terminals-api.js';
 
 interface InteractiveTerminalViewProps {
   gatewayUrl: string;
@@ -63,9 +63,9 @@ export function InteractiveTerminalView({
       fontFamily:
         'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
       theme: {
-        background: '#0b1117',
-        foreground: '#dcdcdc',
-        cursor: '#7dd3fc',
+        background: 'var(--bg-base, #080b12)',
+        foreground: 'var(--fg-default, #c8d1e0)',
+        cursor: 'var(--accent, var(--accent, #5cd4c0))',
       },
       allowProposedApi: true,
       convertEol: true,
@@ -192,7 +192,7 @@ export function InteractiveTerminalView({
       style={{
         width: '100%',
         height: '100%',
-        background: '#0b1117',
+        background: 'var(--bg-base, #080b12)',
         padding: 4,
         boxSizing: 'border-box',
         overflow: 'hidden',

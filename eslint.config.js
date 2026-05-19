@@ -77,6 +77,68 @@ export default [
       '@typescript-eslint/no-unsafe-argument': 'off',
     },
   },
+  // ─── conversation 装配产权边界 ──────────────────────────────────────
+  // 防止 chat 与 team 两端对话装配互相引用。详见
+  // `.agentdocs/workflow/260518-team-conversation-decouple-plan.md` §6.6。
+  // 注意：当前 root config 的 ignores 里包含 'apps/web/**'，所以这些规则
+  // 在 web app 里暂不生效；保留作为 feature flag，等 web lint 重启时自动
+  // 启用。同时已通过各目录 AGENTS.md 显式说明边界。
+  {
+    files: ['apps/web/src/pages/chat-page/conversation/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/pages/team/**'],
+              message:
+                'chat-page/conversation 不可引用 team 装配。共享逻辑应放在 components/conversation-runtime/。',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['apps/web/src/pages/team/conversation/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/pages/chat-page/**'],
+              message:
+                'team/conversation 不可引用 chat 装配（TeamConversationLayout.tsx 的现有跨引为历史例外，新代码不应引入）。共享逻辑应放在 components/conversation-runtime/。',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['apps/web/src/components/conversation-runtime/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/pages/team/**'],
+              message:
+                'conversation-runtime 是协议层，不可依赖 team 装配。',
+            },
+            {
+              group: ['**/pages/chat-page/**'],
+              message:
+                'conversation-runtime 是协议层，不可依赖 chat 装配。',
+            },
+          ],
+        },
+      ],
+    },
+  },
   {
     files: ['**/*.test.ts', '**/*.test.tsx', '**/__tests__/**/*.ts', '**/__tests__/**/*.tsx'],
     languageOptions: {

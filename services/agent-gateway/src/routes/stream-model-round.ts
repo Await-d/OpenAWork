@@ -1,24 +1,24 @@
 import type { FileDiffContent, MessageContent, RunEvent, StreamChunk } from '@openAwork/shared';
 import type { WorkflowLogger, createRequestContext } from '@openAwork/logger';
-import { validateThinkingBlocks } from '../thinking-block-validator.js';
-import { isContextOverflow } from '../session-message-store.js';
-import { classifyUpstreamError } from '../retry-classify.js';
+import { validateThinkingBlocks } from '../session/thinking-block-validator.js';
+import { isContextOverflow } from '../session/session-message-store.js';
+import { classifyUpstreamError } from '../provider/retry-classify.js';
 import {
   toModelMessages,
   filterCompacted,
   type UnifiedMessage,
-} from '../message-to-model-messages.js';
+} from '../message/message-to-model-messages.js';
 import {
   appendSessionMessageV2,
   updateSessionMessagesStatusByRequestScope,
-} from '../message-v2-adapter.js';
-import { streamMessagesWithParts } from '../message-store-v2.js';
-import { buildModifiedFilesSummaryContent } from '../modified-files-summary.js';
-import { persistSessionSnapshot, createRequestSnapshotRef } from '../session-snapshot-store.js';
-import { appendSnapshotPart, appendPatchPart } from '../message-v2-adapter.js';
-import type { MessageID } from '../message-v2-schema.js';
-import { upsertArtifactsFromAssistantMessage } from '../assistant-content-artifacts.js';
-import { touchSessionHeartbeat } from '../handoff/heartbeat.js';
+} from '../message/message-v2-adapter.js';
+import { streamMessagesWithParts } from '../message/message-store-v2.js';
+import { buildModifiedFilesSummaryContent } from '../tools/modified-files-summary.js';
+import { persistSessionSnapshot, createRequestSnapshotRef } from '../session/session-snapshot-store.js';
+import { appendSnapshotPart, appendPatchPart } from '../message/message-v2-adapter.js';
+import type { MessageID } from '../message/message-v2-schema.js';
+import { upsertArtifactsFromAssistantMessage } from '../session/assistant-content-artifacts.js';
+import { touchSessionHeartbeat } from '../handoff/bus/heartbeat.js';
 import type { StreamUsageSummary } from './stream-usage.js';
 import {
   THINKING_LANGUAGE_HINT_MARKERS,
@@ -26,7 +26,7 @@ import {
   buildTwoPartSystemPrompts,
   type SyntheticRequestContext,
 } from './stream-system-prompts.js';
-import type { resolveModelRoute } from '../model-router.js';
+import type { resolveModelRoute } from '../provider/model-router.js';
 import type { SessionStreamContext } from './stream.js';
 import { createRunEventMeta, createStreamErrorChunk } from './stream.js';
 import type { getEnabledTools } from './stream.js';
@@ -39,13 +39,13 @@ import {
   extractReasoningTexts,
   markReasoningBlockEnded,
   type ReasoningBlock,
-} from '../reasoning-blocks.js';
+} from '../session/reasoning-blocks.js';
 import {
   appendSessionEvent,
   createStreamSessionEventState,
   persistStreamChunkAsSessionEvents,
-} from '../session-entry-store.js';
-import { makeSessionEventId } from '../session-event.js';
+} from '../session/session-entry-store.js';
+import { makeSessionEventId } from '../session/session-event.js';
 import {
   buildAISdkProvider,
   runUpstreamStream,

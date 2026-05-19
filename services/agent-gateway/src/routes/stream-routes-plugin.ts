@@ -15,7 +15,7 @@ import {
   streamRequestSchema,
   createStreamErrorChunk,
 } from './stream.js';
-import { buildRunEventEnvelope, deriveRunEventBookend } from '../run-event-envelope.js';
+import { buildRunEventEnvelope, deriveRunEventBookend } from '../session/run-event-envelope.js';
 import {
   getRunEventRunId,
   getLatestSessionRunEventSeqByRequest,
@@ -23,9 +23,9 @@ import {
   listSessionRunEventsByRequestAfterSeq,
   subscribeSessionRunEvents,
   type PublishRunEventMeta,
-} from '../session-run-events.js';
-import { getFreshSessionRuntimeThread } from '../session-runtime-thread-store.js';
-import { clearPendingTaskParentAutoResumesForSession } from '../task-parent-auto-resume.js';
+} from '../session/session-run-events.js';
+import { getFreshSessionRuntimeThread } from '../session/session-runtime-thread-store.js';
+import { clearPendingTaskParentAutoResumesForSession } from '../task/task-parent-auto-resume.js';
 import {
   stopAnyInFlightStreamRequestForSession,
   stopInFlightStreamRequest,

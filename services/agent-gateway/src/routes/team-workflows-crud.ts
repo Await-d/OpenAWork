@@ -13,8 +13,8 @@ import { startRequestWorkflow } from '../request-workflow.js';
 import {
   teamWorkflowSchema,
   validateWorkflowConsistency,
-} from '../handoff/workflow-template-schema.js';
-import { BUILTIN_WORKFLOWS } from '../handoff/workflow-builtin-packs.js';
+} from '../handoff/workflow/workflow-template-schema.js';
+import { BUILTIN_WORKFLOWS } from '../handoff/workflow/workflow-builtin-packs.js';
 import { randomUUID } from 'node:crypto';
 
 const createWorkflowSchema = z.object({

@@ -10,7 +10,7 @@
  */
 
 import { useMemo, useState, type CSSProperties } from 'react';
-import { useTeamNotificationStore, type HandoffEvent } from '../../../../../stores/team-events.js';
+import { useTeamNotificationStore, type HandoffEvent } from '../../../../../stores/team/team-events.js';
 import MarkdownMessageContent from '../../../../../components/chat/markdown-message-content.js';
 
 const CONTAINER_STYLE: CSSProperties = {
@@ -57,8 +57,8 @@ const CARD_STYLE: CSSProperties = {
 
 const BLOCKING_CARD_STYLE: CSSProperties = {
   ...CARD_STYLE,
-  borderColor: 'color-mix(in srgb, #f59e0b 50%, transparent)',
-  background: 'color-mix(in srgb, #f59e0b 8%, var(--surface))',
+  borderColor: 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 50%, transparent)',
+  background: 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 8%, var(--surface))',
 };
 
 const EMPTY_STYLE: CSSProperties = {
@@ -202,8 +202,8 @@ export function MentionsView() {
                     style={{
                       padding: '1px 8px',
                       borderRadius: 999,
-                      background: 'color-mix(in srgb, #f59e0b 22%, transparent)',
-                      color: '#b45309',
+                      background: 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 22%, transparent)',
+                      color: 'var(--warning, #f0b429)',
                       fontSize: 10,
                       fontWeight: 800,
                       textTransform: 'uppercase',

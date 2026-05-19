@@ -1,5 +1,5 @@
 import React from 'react';
-import type { SlashCommandItem } from '../session-conversation/runtime/support.js';
+import type { SlashCommandItem } from '../conversation-runtime/messages/support.js';
 
 export function getSlashBadgeStyle(source: SlashCommandItem['source']): React.CSSProperties {
   switch (source) {
@@ -10,18 +10,18 @@ export function getSlashBadgeStyle(source: SlashCommandItem['source']): React.CS
       };
     case 'mcp':
       return {
-        background: 'color-mix(in oklch, var(--info, #3b82f6) 14%, transparent)',
-        color: 'color-mix(in oklch, var(--info, #3b82f6) 82%, white 18%)',
+        background: 'color-mix(in oklch, var(--info, var(--aux, var(--aux, #8b9cf5))) 14%, transparent)',
+        color: 'color-mix(in oklch, var(--info, var(--aux, var(--aux, #8b9cf5))) 82%, var(--fg-on-accent) 18%)',
       };
     case 'skill':
       return {
         background: 'color-mix(in oklch, var(--accent) 14%, transparent)',
-        color: 'color-mix(in oklch, var(--accent) 80%, white 20%)',
+        color: 'color-mix(in oklch, var(--accent) 80%, var(--fg-on-accent) 20%)',
       };
     case 'tool':
       return {
-        background: 'color-mix(in oklch, var(--success, #10b981) 14%, transparent)',
-        color: 'color-mix(in oklch, var(--success, #10b981) 82%, white 18%)',
+        background: 'color-mix(in oklch, var(--success, var(--success, var(--success, #3dd49a))) 14%, transparent)',
+        color: 'color-mix(in oklch, var(--success, var(--success, var(--success, #3dd49a))) 82%, var(--fg-on-accent) 18%)',
       };
     default:
       return {

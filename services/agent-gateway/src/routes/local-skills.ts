@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { sqliteAll, sqliteRun } from '../db.js';
-import { discoverLocalSkills, installLocalSkillFromDir } from '../local-skills.js';
+import { discoverLocalSkills, installLocalSkillFromDir } from '../skill/local-skills.js';
 import { startRequestWorkflow } from '../request-workflow.js';
 
 interface InstalledSkillIdRow {

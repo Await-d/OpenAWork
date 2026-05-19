@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import DialogueModeToggle from '../../pages/DialogueModeToggle.js';
-import type { DialogueMode } from '../../pages/dialogue-mode.js';
+import DialogueModeToggle from '../../pages/chat-page/DialogueModeToggle.js';
+import type { DialogueMode } from '../../pages/chat-page/dialogue-mode.js';
 import {
   ChatTodoFloatingPanel,
   ChatTopBarTodoSlot,
   type ChatTodoController,
-} from '../session-conversation/runtime/todo-bar.js';
+} from '../conversation-runtime/views/todo-bar.js';
 
 interface ChatTopBarProps {
   dialogueMode: DialogueMode;
@@ -55,6 +55,20 @@ interface ChatTopBarProps {
   todoController?: ChatTodoController;
   /** id for aria-controls linking the slot button to the floating panel. */
   todoDetailsId?: string;
+  /**
+   * 隐藏 DialogueModeToggle（澄清/编程/程序员切换器）。
+   * team 页面使用：reception 层的路由决策由后端 b.router 自动判断，
+   * 不需要用户手动切换对话模式。
+   */
+  hideDialogueModeToggle?: boolean;
+  /**
+   * 隐藏 YOLO 模式切换。team 页面不支持 YOLO（工具权限由 layer capability 控制）。
+   */
+  hideYoloToggle?: boolean;
+  /**
+   * 隐藏右面板切换按钮。team 页面暂不接入 ChatRightPanel。
+   */
+  hideRightPanelToggle?: boolean;
 }
 
 // ChatTopBar 总宽度小于此阈值时，todo 入口切到 compact 徽章形态。
@@ -84,6 +98,9 @@ export function ChatTopBar({
   onToggleSidebar,
   todoController,
   todoDetailsId,
+  hideDialogueModeToggle = false,
+  hideYoloToggle = false,
+  hideRightPanelToggle = false,
 }: ChatTopBarProps) {
   // 测量自身宽度，决定 todo slot 是 compact（徽章）还是 full（摘要）。
   const barRef = useRef<HTMLDivElement>(null);
@@ -180,11 +197,13 @@ export function ChatTopBar({
           </button>
         )}
 
-        <DialogueModeToggle
-          mode={dialogueMode}
-          onChange={onChangeDialogueMode}
-          style={{ flexShrink: 0 }}
-        />
+        {hideDialogueModeToggle ? null : (
+          <DialogueModeToggle
+            mode={dialogueMode}
+            onChange={onChangeDialogueMode}
+            style={{ flexShrink: 0 }}
+          />
+        )}
 
         {/* Command palette trigger */}
         {onOpenCommandPalette && (
@@ -309,45 +328,47 @@ export function ChatTopBar({
       >
         {terminalsChip}
         {quickTerminalToggle}
-        <button
-          type="button"
-          aria-pressed={yoloMode}
-          onClick={onToggleYolo}
-          title="YOLO 模式：更少确认、直达结果"
-          style={{
-            height: 26,
-            padding: '0 7px',
-            borderRadius: 5,
-            border: 'none',
-            background: yoloMode
-              ? 'color-mix(in srgb, #f59e0b 22%, var(--surface))'
-              : 'transparent',
-            color: yoloMode ? '#fbbf24' : 'var(--text-3)',
-            boxShadow: yoloMode
-              ? 'inset 0 0 0 1px color-mix(in srgb, #f59e0b 50%, var(--border))'
-              : 'none',
-            fontSize: 10,
-            fontWeight: 600,
-            cursor: 'pointer',
-            flexShrink: 0,
-            letterSpacing: '0.04em',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 3,
-          }}
-        >
-          <svg
-            aria-hidden="true"
-            width="10"
-            height="10"
-            viewBox="0 0 24 24"
-            fill="currentColor"
-            stroke="none"
+        {hideYoloToggle ? null : (
+          <button
+            type="button"
+            aria-pressed={yoloMode}
+            onClick={onToggleYolo}
+            title="YOLO 模式：更少确认、直达结果"
+            style={{
+              height: 26,
+              padding: '0 7px',
+              borderRadius: 5,
+              border: 'none',
+              background: yoloMode
+                ? 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 22%, var(--surface))'
+                : 'transparent',
+              color: yoloMode ? 'var(--warning, var(--warning, #f0b429))' : 'var(--text-3)',
+              boxShadow: yoloMode
+                ? 'inset 0 0 0 1px color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 50%, var(--border))'
+                : 'none',
+              fontSize: 10,
+              fontWeight: 600,
+              cursor: 'pointer',
+              flexShrink: 0,
+              letterSpacing: '0.04em',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 3,
+            }}
           >
-            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-          </svg>
-          YOLO
-        </button>
+            <svg
+              aria-hidden="true"
+              width="10"
+              height="10"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              stroke="none"
+            >
+              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+            </svg>
+            YOLO
+          </button>
+        )}
         <button
           type="button"
           onClick={() => {
@@ -435,36 +456,38 @@ export function ChatTopBar({
             </svg>
           </button>
         )}
-        <button
-          type="button"
-          onClick={onToggleRightOpen}
-          title={rightOpen ? '收起面板' : '展开面板'}
-          className={`icon-btn${rightOpen ? ' active' : ''}`}
-          style={{
-            width: 28,
-            height: 28,
-            borderRadius: 6,
-            border: 'none',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <svg
-            aria-hidden="true"
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+        {hideRightPanelToggle ? null : (
+          <button
+            type="button"
+            onClick={onToggleRightOpen}
+            title={rightOpen ? '收起面板' : '展开面板'}
+            className={`icon-btn${rightOpen ? ' active' : ''}`}
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 6,
+              border: 'none',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
           >
-            <rect x="3" y="3" width="18" height="18" rx="2" />
-            <line x1="15" y1="3" x2="15" y2="21" />
-          </svg>
-        </button>
+            <svg
+              aria-hidden="true"
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <line x1="15" y1="3" x2="15" y2="21" />
+            </svg>
+          </button>
+        )}
       </div>
     </div>
   );

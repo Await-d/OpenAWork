@@ -14,18 +14,18 @@ import {
 import { z } from 'zod';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
-import { COMPACTION_SETTINGS_KEY, readCompactionSettings } from '../compaction-policy.js';
-import { collectDeadCodeDiagnostics, formatDeadCodeCandidates } from '../dead-code-diagnostics.js';
+import { COMPACTION_SETTINGS_KEY, readCompactionSettings } from '../compaction/compaction-policy.js';
+import { collectDeadCodeDiagnostics, formatDeadCodeCandidates } from '../tools/dead-code-diagnostics.js';
 import { WORKSPACE_ROOT, sqliteGet, sqliteRun } from '../db.js';
-import { resolveCompactionRoute, type ModelRouteConfig } from '../model-router.js';
-import { getCompactionProviderConfig, getProviderConfigForSelection } from '../provider-config.js';
+import { resolveCompactionRoute, type ModelRouteConfig } from '../provider/model-router.js';
+import { getCompactionProviderConfig, getProviderConfigForSelection } from '../provider/provider-config.js';
 import {
   appendSessionMessageV2 as appendSessionMessage,
   listSessionMessagesV2,
-} from '../message-v2-adapter.js';
-import { executeSessionCompaction } from '../session-compaction.js';
+} from '../message/message-v2-adapter.js';
+import { executeSessionCompaction } from '../session/session-compaction.js';
 import { startRequestWorkflow } from '../request-workflow.js';
-import { stringifyToolResultOutput } from '../tool-result-contract.js';
+import { stringifyToolResultOutput } from '../tools/tool-result-contract.js';
 import { parseUlwVerifyDecision } from './command-helpers.js';
 import { buildCommandDescriptors } from './command-descriptors.js';
 import {

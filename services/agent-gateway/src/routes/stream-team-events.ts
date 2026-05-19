@@ -12,7 +12,7 @@
  *   - apps/web/src/pages/team/runtime/tabs/metrics/（UI 消费方）
  */
 
-import { publishTeamEvent } from '../handoff/team-events-bus.js';
+import { publishTeamEvent } from '../handoff/bus/team-events-bus.js';
 import type { SessionStreamContext } from './stream.js';
 
 function _parseTeamWorkspaceId(metadataJson: string): string | null {

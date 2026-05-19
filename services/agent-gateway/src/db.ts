@@ -7,14 +7,14 @@ import {
   discoverWorkspaceRoot,
   parseConfiguredWorkspaceRoots,
   parseWorkspaceAccessMode,
-} from './workspace-config.js';
+} from './workspace/workspace-config.js';
 import { loadAppVersion } from './app-version.js';
 import { resolveGatewayDatabasePath } from './storage-paths.js';
 import {
   normalizeToolArgumentsForStorage,
   normalizeToolResultOutputForStorage,
   stringifyToolResultOutput,
-} from './tool-result-contract.js';
+} from './tools/tool-result-contract.js';
 import { normalizeSqliteBindParams, type SqliteBindableValue } from './sqlite-bind-params.js';
 
 interface SqliteStatement {
@@ -1040,6 +1040,9 @@ export async function migrate(): Promise<void> {
   ensureColumn('sessions', 'handoff_state', 'TEXT DEFAULT NULL');
   // intent_state：JSON 文本，存当前层级对意图的理解（Phase C 真正用，B 阶段先占位）
   ensureColumn('sessions', 'intent_state', 'TEXT DEFAULT NULL');
+  // L1.8 D18：结构深度 + 执行深度（用于前端 session 树可视化 + 深度限制）
+  ensureColumn('sessions', 'structural_depth', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('sessions', 'execution_depth', 'INTEGER NOT NULL DEFAULT 0');
   // last_heartbeat：T-04/T-06 崩溃恢复用；ISO 'YYYY-MM-DD HH:MM:SS' UTC
   ensureColumn('sessions', 'last_heartbeat', 'TEXT DEFAULT NULL');
   db.exec(

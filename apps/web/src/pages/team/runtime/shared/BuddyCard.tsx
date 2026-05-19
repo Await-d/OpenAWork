@@ -7,7 +7,7 @@
  */
 
 import { type CSSProperties } from 'react';
-import { useHandoffStore, useLayerStore } from '../../../../stores/team-events.js';
+import { useHandoffStore, useLayerStore } from '../../../../stores/team/team-events.js';
 
 const CARD_STYLE: CSSProperties = {
   display: 'grid',
@@ -60,7 +60,7 @@ export function BuddyCard() {
         </div>
         <div style={STAT_CELL_STYLE}>
           <span style={{ fontSize: 10, color: 'var(--text-3)' }}>运行中</span>
-          <strong style={{ fontSize: 16, color: 'var(--success, #22c55e)' }}>{runningTasks}</strong>
+          <strong style={{ fontSize: 16, color: 'var(--success, var(--success, var(--success, #3dd49a)))' }}>{runningTasks}</strong>
         </div>
       </div>
 

@@ -15,7 +15,7 @@ import {
   useLayerStore,
   type HandoffState,
   type TeamRoleLayer,
-} from '../../../../../stores/team-events.js';
+} from '../../../../../stores/team/team-events.js';
 import { TabContainer } from '../TabContainer.js';
 
 const LAYER_ORDER: TeamRoleLayer[] = ['reception', 'pm1', 'pm2', 'executor', 'reviewer'];
@@ -31,9 +31,9 @@ const LAYER_META: Record<TeamRoleLayer, { name: string; sub: string; icon: strin
 
 const STATE_COLORS: Record<HandoffState | 'idle', string> = {
   idle: 'var(--text-3)',
-  pending: '#f59e0b',
-  claimed: '#3b82f6',
-  running: 'var(--success, #22c55e)',
+  pending: 'var(--warning, var(--warning, #f0b429))',
+  claimed: 'var(--aux, var(--aux, #8b9cf5))',
+  running: 'var(--success, var(--success, var(--success, #3dd49a)))',
   completed: 'var(--text-3)',
   failed: 'var(--danger, #d4574e)',
   cancelled: 'var(--text-3)',
@@ -85,8 +85,8 @@ const NODE_STYLE: CSSProperties = {
 
 const NODE_ACTIVE_STYLE: CSSProperties = {
   ...NODE_STYLE,
-  borderColor: 'var(--success, #22c55e)',
-  boxShadow: '0 0 0 4px color-mix(in srgb, var(--success, #22c55e) 18%, transparent)',
+  borderColor: 'var(--success, var(--success, var(--success, #3dd49a)))',
+  boxShadow: '0 0 0 4px color-mix(in srgb, var(--success, var(--success, var(--success, #3dd49a))) 18%, transparent)',
 };
 
 const NODE_FAILED_STYLE: CSSProperties = {
@@ -278,7 +278,7 @@ function Node({ data }: { data: NodeData }) {
             right: -8,
             padding: '1px 7px',
             borderRadius: 999,
-            background: 'var(--success, #22c55e)',
+            background: 'var(--success, var(--success, var(--success, #3dd49a)))',
             color: 'white',
             fontSize: 10,
             fontWeight: 800,
@@ -314,7 +314,7 @@ function Edge({ data }: { data: EdgeData }) {
   const color = failed
     ? 'var(--danger, #d4574e)'
     : active
-      ? 'var(--success, #22c55e)'
+      ? 'var(--success, var(--success, var(--success, #3dd49a)))'
       : 'color-mix(in srgb, var(--border) 70%, transparent)';
   return (
     <div style={EDGE_STYLE}>
