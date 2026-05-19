@@ -335,7 +335,7 @@ function runArchitectureLint(
     for (const prohibition of prohibitions) {
       // 提取禁止条款中的关键名词（去掉停用词）
       const keywords = prohibition
-        .replace(/[，。、；：""''（）\[\]{}]/g, ' ')
+        .replace(/[，。、；：""''（）[\]{}]/g, ' ')
         .split(/\s+/)
         .filter((w) => w.length >= 2)
         .filter(

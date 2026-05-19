@@ -11,7 +11,7 @@
  */
 
 import { z } from 'zod';
-import { registerInstruction, type InstructionContext, type InstructionResult } from './builtin-instructions.js';
+import { registerInstruction, type InstructionResult } from './builtin-instructions.js';
 import { createHandoff } from '../store/handoff-store.js';
 import { submitInboundMessage } from '../store/inbound-store.js';
 import { setSubstate } from '../store/substate-store.js';

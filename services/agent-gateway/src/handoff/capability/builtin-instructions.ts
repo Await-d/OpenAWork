@@ -22,7 +22,7 @@
  *   - 即便看到也调不通（dispatcher 后置校验）— 双层保护
  */
 
-import { z } from 'zod';
+import type { z } from 'zod';
 import type { HandoffRoleLayer } from '../store/handoff-store.js';
 import {
   LAYER_CAPABILITIES,
