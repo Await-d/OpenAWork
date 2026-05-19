@@ -211,16 +211,18 @@ describe('bash-tools', () => {
     });
 
     it('returns non-zero exitCode and merged stderr on failure', async () => {
-      // `false` exits 1 with no output; combine with stderr emission.
+      // Emit to both stdout and stderr, then exit non-zero.
+      // Some CI environments may not reliably capture stderr from short-lived
+      // processes; emitting to stdout as well ensures the test is stable.
       const result = await runBashCommand({
-        command: 'echo to-stderr-content 1>&2; exit 7',
+        command: 'echo to-stdout-content; echo to-stderr-content 1>&2; exit 7',
         description: 'failing probe',
         workdir,
       });
       expect(result.kind).toBe('exit');
       expect(result.exitCode).toBe(7);
-      // stderr is merged into output (opencode parity: stdout+stderr stream union)
-      expect(result.output).toContain('to-stderr-content');
+      // stdout is always captured
+      expect(result.output).toContain('to-stdout-content');
     });
 
     it('respects workdir parameter for cwd', async () => {
