@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { createSessionsClient } from '@openAwork/web-client';
 import { useNavigate, useLocation, useParams } from 'react-router';
-import { useAuthStore } from '../../../../web/src/stores/auth.js';
+import { useAuthStore } from '../../../../web/src/stores/auth/auth.js';
 
 interface SessionRow {
   id: string;

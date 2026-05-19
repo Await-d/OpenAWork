@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router';
 import { listen } from '@tauri-apps/api/event';
-import { useAuthStore } from '../../web/src/stores/auth.js';
+import { useAuthStore } from '../../web/src/stores/auth/auth.js';
 import OnboardingWizard from './onboarding/OnboardingWizard.js';
 import ArtifactsPage from '../../web/src/pages/artifacts/ArtifactsPage.js';
 import ChatPage from '../../web/src/pages/chat-page/ChatPage.js';

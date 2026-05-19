@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { getPairingQr, login as apiLogin, type PairingQrResponse } from '@openAwork/web-client';
 import { useNavigate } from 'react-router';
-import { useAuthStore } from '../../../web/src/stores/auth.js';
+import { useAuthStore } from '../../../web/src/stores/auth/auth.js';
 import {
   type DesktopGatewayMode,
   authenticateDesktopGateway,
