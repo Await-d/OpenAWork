@@ -866,9 +866,7 @@ export function DetailPanel({
                           border: active
                             ? '1px solid var(--accent)'
                             : '1px solid var(--border-subtle)',
-                          background: active
-                            ? 'var(--accent-muted)'
-                            : 'var(--bg-overlay)',
+                          background: active ? 'var(--accent-muted)' : 'var(--bg-overlay)',
                           overflow: 'hidden',
                         }}
                       >
@@ -976,7 +974,9 @@ export function DetailPanel({
                                   borderColor: hasPreviewConflicts
                                     ? 'color-mix(in oklch, var(--warning) 38%, var(--border-default))'
                                     : 'var(--border-default)',
-                                  color: hasPreviewConflicts ? 'var(--warning)' : 'var(--fg-default)',
+                                  color: hasPreviewConflicts
+                                    ? 'var(--warning)'
+                                    : 'var(--fg-default)',
                                 }}
                               >
                                 {applyLoading

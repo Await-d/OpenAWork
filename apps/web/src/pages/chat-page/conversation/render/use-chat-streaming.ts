@@ -1,7 +1,10 @@
 import { useCallback, useRef, useState } from 'react';
 import type { ChatBackendUsageSnapshot } from '../../../../components/conversation-runtime/stream/stream-usage.js';
 import type { RecoveredActiveAssistantStream } from '../../../../components/conversation-runtime/stream/stream-recovery.js';
-import { calculateStreamingRevealDelay, calculateStreamingRevealStep } from '../../../../components/conversation-runtime/reveal/streaming-reveal.js';
+import {
+  calculateStreamingRevealDelay,
+  calculateStreamingRevealStep,
+} from '../../../../components/conversation-runtime/reveal/streaming-reveal.js';
 
 export interface UseChatStreamingReturn {
   streaming: boolean;

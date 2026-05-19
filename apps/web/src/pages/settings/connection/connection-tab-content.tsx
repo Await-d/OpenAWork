@@ -11,7 +11,11 @@ import {
   type MCPServerEntry,
   type MCPServerStatus,
 } from '@openAwork/shared-ui';
-import type { ProviderEditData, ThinkingDefaultsRef, ThinkingModeRef } from '../state/settings-types.js';
+import type {
+  ProviderEditData,
+  ThinkingDefaultsRef,
+  ThinkingModeRef,
+} from '../state/settings-types.js';
 import { BP, IS, SS, ST, UV } from '../shared/settings-section-styles.js';
 import { UpstreamRetrySection } from './upstream-retry-section.js';
 import { WebsearchSection } from './websearch-section.js';
@@ -143,7 +147,10 @@ export function ConnectionTabContent({
             </strong>
           </div>
         ) : null}
-        <label htmlFor="gw-url" style={{ fontSize: 12, color: 'var(--fg-strong)', fontWeight: 500 }}>
+        <label
+          htmlFor="gw-url"
+          style={{ fontSize: 12, color: 'var(--fg-strong)', fontWeight: 500 }}
+        >
           网关地址
         </label>
         <div style={{ display: 'flex', gap: 8 }}>

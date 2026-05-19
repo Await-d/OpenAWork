@@ -16,7 +16,10 @@ import {
   OpenAiImageGenerationError,
 } from '../image-generation/openai-image-generation.js';
 import { resolveModelRouteFromProvider } from '../provider/model-router.js';
-import { getImageProviderConfig, parseStoredImageGenerationDefaults } from '../provider/provider-config.js';
+import {
+  getImageProviderConfig,
+  parseStoredImageGenerationDefaults,
+} from '../provider/provider-config.js';
 import { resolveGatewayArtifactsIndexPath } from '../infra/storage-paths.js';
 
 interface UserSettingRow {

@@ -288,7 +288,9 @@ function CreateTemplateForm({
       <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-strong)' }}>新建团队模板</span>
 
       <div style={{ display: 'grid', gap: 6 }}>
-        <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--fg-default)' }}>模板名称</label>
+        <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--fg-default)' }}>
+          模板名称
+        </label>
         <input
           type="text"
           placeholder="例如：代码审查流水线"
@@ -499,7 +501,9 @@ export function TemplatesTab({ onNewTemplate }: { onNewTemplate: () => void }) {
             <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-default)' }}>
               暂无团队模板
             </span>
-            <span style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.6, maxWidth: 360 }}>
+            <span
+              style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.6, maxWidth: 360 }}
+            >
               创建一个持久化团队模板后，所有团队成员可复用同一工作流配置，快速启动新的协作会话。
             </span>
           </div>

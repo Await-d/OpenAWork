@@ -306,7 +306,9 @@ export function ChatImageGenerationControls({
               );
             })}
             {group.tier === '2k' && (
-              <span style={{ fontSize: 9, color: 'var(--fg-muted)', fontStyle: 'italic' }}>~4MP</span>
+              <span style={{ fontSize: 9, color: 'var(--fg-muted)', fontStyle: 'italic' }}>
+                ~4MP
+              </span>
             )}
             {group.tier === '4k' && (
               <span

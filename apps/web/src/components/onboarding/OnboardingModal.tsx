@@ -813,9 +813,13 @@ function BrowserOnboardingModal({ onComplete }: Props) {
               onRevoke={() => {}}
             />
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0.5rem 0' }}>
-              <hr style={{ flex: 1, border: 'none', borderTop: '1px solid var(--border-default)' }} />
+              <hr
+                style={{ flex: 1, border: 'none', borderTop: '1px solid var(--border-default)' }}
+              />
               <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>或使用邮箱</span>
-              <hr style={{ flex: 1, border: 'none', borderTop: '1px solid var(--border-default)' }} />
+              <hr
+                style={{ flex: 1, border: 'none', borderTop: '1px solid var(--border-default)' }}
+              />
             </div>
             {loginError && (
               <div

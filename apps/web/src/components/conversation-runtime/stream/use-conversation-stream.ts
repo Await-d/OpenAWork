@@ -114,11 +114,7 @@ export interface ConversationStreamConfig {
   /** Optional hook fired when the round's first token arrives (any kind). */
   onFirstToken?: (latencyMs: number) => void;
   /** Optional hook called once the stream is fully done (success/error/cancel). */
-  onStreamDone?: (
-    stopReason?: string,
-    cancellation?: unknown,
-    finalAgentId?: string,
-  ) => void;
+  onStreamDone?: (stopReason?: string, cancellation?: unknown, finalAgentId?: string) => void;
   /** Optional hook called when an error event arrives. */
   onStreamError?: (code: string, message?: string) => void;
 }
@@ -230,11 +226,7 @@ export function useConversationStream(
       }));
       const toolCalls = Array.from(acc.liveToolCalls.values()).map((tc) => {
         const status: 'running' | 'paused' | 'completed' | 'failed' =
-          tc.status === 'completed'
-            ? 'completed'
-            : tc.isError === true
-              ? 'failed'
-              : 'running';
+          tc.status === 'completed' ? 'completed' : tc.isError === true ? 'failed' : 'running';
         return {
           toolCallId: tc.toolCallId,
           toolName: tc.toolName,

@@ -468,7 +468,9 @@ export default function SkillSelectionPage(): React.ReactElement {
             {saving ? '保存中…' : '保存'}
           </button>
         </div>
-        {error ? <div style={{ color: 'var(--danger))', fontSize: 12, marginTop: 8 }}>{error}</div> : null}
+        {error ? (
+          <div style={{ color: 'var(--danger))', fontSize: 12, marginTop: 8 }}>{error}</div>
+        ) : null}
         {hint ? (
           <div style={{ color: 'var(--accent)', fontSize: 12, marginTop: 8 }}>{hint}</div>
         ) : null}

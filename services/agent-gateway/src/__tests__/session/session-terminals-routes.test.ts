@@ -69,7 +69,8 @@ beforeAll(async () => {
   dbModule = await import('../../infra/db.js');
   authPlugin = (await import('../../infra/auth.js')).default;
   requestWorkflowPlugin = (await import('../../runtime/request-workflow.js')).default;
-  sessionTerminalsRoutes = (await import('../../routes/session-terminals.js')).sessionTerminalsRoutes;
+  sessionTerminalsRoutes = (await import('../../routes/session-terminals.js'))
+    .sessionTerminalsRoutes;
   registry = await import('../../session/session-terminal-registry.js');
   await dbModule.connectDb();
   await dbModule.migrate();

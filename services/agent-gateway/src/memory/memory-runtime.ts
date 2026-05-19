@@ -7,7 +7,10 @@ import {
   readMemorySettings,
   upsertExtractedMemories,
 } from './memory-store.js';
-import { listSessionMessagesByRequestScope, listSessionMessagesV2 } from '../message/message-v2-adapter.js';
+import {
+  listSessionMessagesByRequestScope,
+  listSessionMessagesV2,
+} from '../message/message-v2-adapter.js';
 
 function readWorkspaceRootFromMetadata(metadataJson: string): string | null {
   try {

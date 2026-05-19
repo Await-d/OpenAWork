@@ -403,9 +403,7 @@ export function WorkspaceSwitcher({
                       aria-label="工作区新名称"
                     />
                     {renameError ? (
-                      <span style={{ fontSize: 10, color: 'var(--error)' }}>
-                        {renameError}
-                      </span>
+                      <span style={{ fontSize: 10, color: 'var(--error)' }}>{renameError}</span>
                     ) : (
                       <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
                         Enter 保存 / Esc 取消

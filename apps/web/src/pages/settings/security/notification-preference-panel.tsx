@@ -62,7 +62,9 @@ export function NotificationPreferencePanel() {
         }}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-strong)' }}>浏览器提醒授权</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-strong)' }}>
+            浏览器提醒授权
+          </div>
           <div style={{ fontSize: 12, color: 'var(--fg-default)', lineHeight: 1.6 }}>
             {browserPermission === 'granted'
               ? '当前浏览器已允许本站发送系统提醒。'

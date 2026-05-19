@@ -454,7 +454,8 @@ export function SessionCard({
             <span
               style={{
                 ...AGENT_CHIP_STYLE,
-                background: 'var(--surface-2, color-mix(in srgb, var(--fg-muted) 16%, transparent))',
+                background:
+                  'var(--surface-2, color-mix(in srgb, var(--fg-muted) 16%, transparent))',
                 color: 'var(--fg-default)',
               }}
             >

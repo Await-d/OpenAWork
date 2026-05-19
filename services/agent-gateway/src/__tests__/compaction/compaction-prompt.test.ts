@@ -17,7 +17,10 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { COMPACTION_SYSTEM_PROMPT, buildCompactionUserPrompt } from '../../compaction/compaction-prompt.js';
+import {
+  COMPACTION_SYSTEM_PROMPT,
+  buildCompactionUserPrompt,
+} from '../../compaction/compaction-prompt.js';
 
 const REQUIRED_SECTIONS = [
   '## 目标',

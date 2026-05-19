@@ -349,12 +349,13 @@ export default function WorkspacePickerModal({
             padding: '12px 14px',
             borderRadius: 10,
             border: '1px solid var(--border-default)',
-            background:
-              'linear-gradient(135deg, var(--bg-surface), var(--bg-overlay))',
+            background: 'linear-gradient(135deg, var(--bg-surface), var(--bg-overlay))',
           }}
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <span style={{ fontSize: 12, color: 'var(--fg-strong)', fontWeight: 600 }}>工作区路径</span>
+            <span style={{ fontSize: 12, color: 'var(--fg-strong)', fontWeight: 600 }}>
+              工作区路径
+            </span>
             <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
               输入框同步显示当前目录，也可以直接编辑绝对路径后打开。
             </span>

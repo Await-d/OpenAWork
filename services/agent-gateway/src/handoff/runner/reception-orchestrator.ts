@@ -404,11 +404,7 @@ function writeAck(userId: string, sessionId: string, text: string): void {
 
 // ─── L1.4 audit log（路由决策记录） ─────────────────────────────────────────
 
-function logRouteDecision(
-  userId: string,
-  sessionId: string,
-  route: RouteResult,
-): void {
+function logRouteDecision(userId: string, sessionId: string, route: RouteResult): void {
   try {
     dbSqliteRun(
       `INSERT INTO team_audit_logs (id, user_id, action, entity_type, entity_id, summary, detail, created_at)

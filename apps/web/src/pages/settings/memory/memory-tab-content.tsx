@@ -665,7 +665,9 @@ function SettingsPanel({
         </label>
 
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 160 }}>
-          <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--fg-default)' }}>最低置信度</span>
+          <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--fg-default)' }}>
+            最低置信度
+          </span>
           <input
             type="number"
             min={0}

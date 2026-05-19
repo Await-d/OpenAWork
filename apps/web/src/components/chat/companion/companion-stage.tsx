@@ -249,9 +249,7 @@ function CompanionOutputRow({
         gap: 4,
         borderRadius: 8,
         border: '1px solid var(--border-subtle)',
-        background: isLatest
-          ? 'var(--bg-hover)'
-          : 'var(--bg-overlay)',
+        background: isLatest ? 'var(--bg-hover)' : 'var(--bg-overlay)',
         padding: '5px 6px',
       }}
     >
@@ -778,12 +776,8 @@ export function CompanionStage({
           minHeight: 36,
           alignSelf: 'stretch',
           borderRadius: 10,
-          border: panelOpen
-            ? '1px solid var(--accent-border)'
-            : '1px solid var(--border-subtle)',
-          background: panelOpen
-            ? 'var(--accent-subtle)'
-            : 'var(--bg-overlay)',
+          border: panelOpen ? '1px solid var(--accent-border)' : '1px solid var(--border-subtle)',
+          background: panelOpen ? 'var(--accent-subtle)' : 'var(--bg-overlay)',
           color: 'var(--fg-muted)',
           cursor: 'pointer',
           flexShrink: 0,
@@ -910,7 +904,9 @@ export function CompanionStage({
                             flexWrap: 'wrap',
                           }}
                         >
-                          <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--fg-strong)' }}>
+                          <span
+                            style={{ fontSize: 10, fontWeight: 800, color: 'var(--fg-strong)' }}
+                          >
                             {profile.name}
                           </span>
                           <span
@@ -1139,8 +1135,7 @@ export function CompanionStage({
                                 gap: 3,
                                 padding: '0 4px',
                                 borderRadius: 999,
-                                background:
-                                  'var(--bg-hover)',
+                                background: 'var(--bg-hover)',
                                 color: 'var(--fg-default)',
                                 fontSize: 7.5,
                                 fontWeight: 700,
@@ -1162,8 +1157,7 @@ export function CompanionStage({
                               alignItems: 'center',
                               padding: '0 3px',
                               borderRadius: 999,
-                              background:
-                                'var(--bg-hover)',
+                              background: 'var(--bg-hover)',
                               color: 'var(--fg-default)',
                               fontSize: 7.5,
                               fontWeight: 700,

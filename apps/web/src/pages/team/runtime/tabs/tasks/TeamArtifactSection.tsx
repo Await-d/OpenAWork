@@ -16,7 +16,10 @@ import { useHandoffStore, useLayerStore } from '../../../../../stores/team/team-
 import { ArtifactChainWizard } from './ArtifactChainWizard.js';
 import { DispatchPackageView } from './DispatchPackageView.js';
 import { ReviewReportView } from './ReviewReportView.js';
-import { FailureFlowIndicator, type FailureAction } from '../../shell/controls/FailureFlowIndicator.js';
+import {
+  FailureFlowIndicator,
+  type FailureAction,
+} from '../../shell/controls/FailureFlowIndicator.js';
 import { SessionTreeView } from './SessionTreeView.js';
 
 const SECTION_STYLE: CSSProperties = {

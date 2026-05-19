@@ -8,7 +8,10 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { mapPermissionRequestRow, parsePermissionAlwaysJson } from '../../permission/permission-contract.js';
+import {
+  mapPermissionRequestRow,
+  parsePermissionAlwaysJson,
+} from '../../permission/permission-contract.js';
 import { createPermissionAskedEvent } from '../../session/session-permission-events.js';
 
 describe('parsePermissionAlwaysJson', () => {

@@ -181,19 +181,17 @@ export function TeamConversationView({
 
   // 默认 topBar：进度条。外层可传 topBar 覆盖。
   // 优化：reception 层 idle 状态下不显示进度条（没有有用信息），减少垂直空间占用。
-  const effectiveTopBar = topBar ?? (
-    state.roleLayer === 'reception' &&
+  const effectiveTopBar =
+    topBar ??
+    (state.roleLayer === 'reception' &&
     (!state.substate || state.substate === 'idle' || state.substate === 'chatting') &&
-    state.sessionStateStatus !== 'running'
-      ? null
-      : (
-          <TeamSubstateProgressBar
-            roleLayer={state.roleLayer}
-            substate={state.substate}
-            stateStatus={state.sessionStateStatus}
-          />
-        )
-  );
+    state.sessionStateStatus !== 'running' ? null : (
+      <TeamSubstateProgressBar
+        roleLayer={state.roleLayer}
+        substate={state.substate}
+        stateStatus={state.sessionStateStatus}
+      />
+    ));
 
   // Starter chip 点击：把文本填入 composer（不发送），让用户编辑后再发出。
   const handleSelectStarter = useCallback(
@@ -343,16 +341,13 @@ export function TeamConversationView({
     [],
   );
 
-  const onChangeInlineQuestionCustomInput = useCallback(
-    (questionIndex: number, value: string) => {
-      setInlineQuestionCustomInputs((prev) => {
-        const next = prev.slice();
-        next[questionIndex] = value;
-        return next;
-      });
-    },
-    [],
-  );
+  const onChangeInlineQuestionCustomInput = useCallback((questionIndex: number, value: string) => {
+    setInlineQuestionCustomInputs((prev) => {
+      const next = prev.slice();
+      next[questionIndex] = value;
+      return next;
+    });
+  }, []);
 
   const onReplyInlineQuestion = useCallback(
     async (status: 'answered' | 'dismissed') => {

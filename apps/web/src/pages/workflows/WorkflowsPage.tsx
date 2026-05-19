@@ -96,7 +96,11 @@ export default function WorkflowsPage() {
             {error ? (
               <div
                 className="content-card"
-                style={{ padding: 12, borderColor: 'rgba(244, 63, 94, 0.35)', color: 'var(--danger-muted)' }}
+                style={{
+                  padding: 12,
+                  borderColor: 'rgba(244, 63, 94, 0.35)',
+                  color: 'var(--danger-muted)',
+                }}
               >
                 {error}
               </div>

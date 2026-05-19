@@ -72,7 +72,9 @@ export function DevtoolsWorkerSection({
         }}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>Worker 工作台</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
+            Worker 工作台
+          </div>
           <div
             style={{
               display: 'flex',

@@ -425,7 +425,9 @@ function RuntimeSidebar({
           Team Runtime
         </span>
         <span style={{ fontSize: 17, fontWeight: 800, letterSpacing: '-0.03em' }}>工作台导航</span>
-        <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.6 }}>{countsLine}</span>
+        <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.6 }}>
+          {countsLine}
+        </span>
       </div>
 
       <div style={{ display: 'grid', gap: 0, minHeight: 0, overflowY: 'auto' }}>
@@ -484,7 +486,10 @@ function RuntimeSidebar({
                   >
                     <span style={{ fontSize: 13, fontWeight: 700 }}>{workspace.label}</span>
                     <span
-                      style={{ fontSize: 10, color: isActive ? 'var(--accent)' : 'var(--fg-muted)' }}
+                      style={{
+                        fontSize: 10,
+                        color: isActive ? 'var(--accent)' : 'var(--fg-muted)',
+                      }}
                     >
                       {workspace.runningCount} run
                     </span>
@@ -992,7 +997,8 @@ function RuntimeStatusBar({
               width: 8,
               height: 8,
               borderRadius: '50%',
-              background: (statusBarSummary?.activeCount ?? 0) > 0 ? 'var(--success))' : 'var(--fg-muted)',
+              background:
+                (statusBarSummary?.activeCount ?? 0) > 0 ? 'var(--success))' : 'var(--fg-muted)',
               boxShadow:
                 (statusBarSummary?.activeCount ?? 0) > 0 ? '0 0 12px rgba(34,197,94,0.55)' : 'none',
             }}
@@ -1052,16 +1058,20 @@ function RuntimeStatusBar({
         {statusBarSummary ? (
           <>
             <span style={{ color: 'var(--fg-muted)' }}>
-              总 <strong style={{ color: 'var(--fg-strong)' }}>{statusBarSummary.totalCount}</strong>
+              总{' '}
+              <strong style={{ color: 'var(--fg-strong)' }}>{statusBarSummary.totalCount}</strong>
             </span>
             <span style={{ color: 'var(--fg-muted)' }}>
-              运行 <strong style={{ color: 'var(--success))' }}>{statusBarSummary.runningCount}</strong>
+              运行{' '}
+              <strong style={{ color: 'var(--success))' }}>{statusBarSummary.runningCount}</strong>
             </span>
             <span style={{ color: 'var(--fg-muted)' }}>
-              等待 <strong style={{ color: 'var(--warning))' }}>{statusBarSummary.waitingCount}</strong>
+              等待{' '}
+              <strong style={{ color: 'var(--warning))' }}>{statusBarSummary.waitingCount}</strong>
             </span>
             <span style={{ color: 'var(--fg-muted)' }}>
-              异常 <strong style={{ color: 'var(--danger))' }}>{statusBarSummary.errorCount}</strong>
+              异常{' '}
+              <strong style={{ color: 'var(--danger))' }}>{statusBarSummary.errorCount}</strong>
             </span>
             <span style={{ color: 'var(--accent)' }}>{statusBarSummary.todayTokens}</span>
             <span style={{ color: 'var(--fg-muted)' }}>{statusBarSummary.runtimeLabel}</span>
@@ -1170,7 +1180,8 @@ export function TeamRuntimeShellFrame({
                 display: 'grid',
                 gap: 10,
                 padding: '12px 16px',
-                borderBottom: '1px solid color-mix(in srgb, var(--border-default) 78%, transparent)',
+                borderBottom:
+                  '1px solid color-mix(in srgb, var(--border-default) 78%, transparent)',
                 background:
                   'linear-gradient(180deg, color-mix(in srgb, var(--bg-overlay) 94%, var(--bg-base) 0%, var(--bg-base)',
               }}
@@ -1346,7 +1357,8 @@ export function TeamRuntimeShellFrame({
                         bottom: 16,
                         width: 14,
                         borderRadius: 999,
-                        border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
+                        border:
+                          '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
                         background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
                         cursor: 'col-resize',
                         zIndex: 2,
@@ -1409,7 +1421,8 @@ export function TeamRuntimeShellFrame({
                         bottom: 16,
                         width: 14,
                         borderRadius: 999,
-                        border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
+                        border:
+                          '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
                         background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
                         cursor: 'col-resize',
                         zIndex: 2,

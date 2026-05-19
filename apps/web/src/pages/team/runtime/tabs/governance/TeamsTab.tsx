@@ -62,7 +62,9 @@ function TeamCard({
         <div
           style={{ display: 'flex', justifyContent: 'space-between', gap: 6, alignItems: 'center' }}
         >
-          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-strong)' }}>{team.title}</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-strong)' }}>
+            {team.title}
+          </span>
           <span
             style={{
               padding: '1px 6px',

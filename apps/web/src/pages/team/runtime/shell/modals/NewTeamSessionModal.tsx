@@ -1026,8 +1026,7 @@ export function NewTeamSessionModal({
                         padding: '10px 12px',
                         borderRadius: 10,
                         background: 'color-mix(in srgb, var(--warning) 10%, transparent)',
-                        border:
-                          '1px solid color-mix(in srgb, var(--warning) 30%, transparent)',
+                        border: '1px solid color-mix(in srgb, var(--warning) 30%, transparent)',
                         fontSize: 11,
                         color: 'var(--fg-default)',
                         lineHeight: 1.6,
@@ -1072,7 +1071,8 @@ export function NewTeamSessionModal({
                           padding: '32px 24px',
                           textAlign: 'center',
                           borderRadius: 12,
-                          border: '1px dashed color-mix(in srgb, var(--border-default) 60%, transparent)',
+                          border:
+                            '1px dashed color-mix(in srgb, var(--border-default) 60%, transparent)',
                           color: 'var(--fg-muted)',
                           fontSize: 12,
                           display: 'grid',
@@ -1220,7 +1220,9 @@ export function NewTeamSessionModal({
                   </div>
                   <span style={HINT_STYLE}>
                     留空将自动以
-                    <strong style={{ color: 'var(--fg-default)' }}>「团队会话 + 当前时间戳」</strong>
+                    <strong style={{ color: 'var(--fg-default)' }}>
+                      「团队会话 + 当前时间戳」
+                    </strong>
                     作为标题，可随时在会话列表里重命名。
                   </span>
                 </div>
@@ -1319,7 +1321,8 @@ export function NewTeamSessionModal({
                       padding: '28px 24px',
                       textAlign: 'center',
                       borderRadius: 12,
-                      border: '1px dashed color-mix(in srgb, var(--border-default) 60%, transparent)',
+                      border:
+                        '1px dashed color-mix(in srgb, var(--border-default) 60%, transparent)',
                       color: 'var(--fg-muted)',
                       fontSize: 12,
                       display: 'grid',
@@ -1400,7 +1403,8 @@ export function NewTeamSessionModal({
                                 gap: 10,
                                 padding: '12px 14px',
                                 borderRadius: 12,
-                                background: 'color-mix(in srgb, var(--accent) 6%, var(--bg-overlay))',
+                                background:
+                                  'color-mix(in srgb, var(--accent) 6%, var(--bg-overlay))',
                                 border:
                                   '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
                               }}
@@ -1592,7 +1596,8 @@ export function NewTeamSessionModal({
                           style={{
                             flex: 1,
                             height: 1,
-                            background: 'color-mix(in srgb, var(--border-default) 60%, transparent)',
+                            background:
+                              'color-mix(in srgb, var(--border-default) 60%, transparent)',
                           }}
                         />
                         <span style={{ textTransform: 'none', fontSize: 10, fontWeight: 400 }}>

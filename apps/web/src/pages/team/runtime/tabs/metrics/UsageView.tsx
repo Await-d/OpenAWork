@@ -197,7 +197,9 @@ export function UsageView() {
                 <span style={{ minWidth: 90, color: 'var(--fg-default)' }}>
                   {event.provider ?? '—'}
                 </span>
-                <span style={{ minWidth: 80, color: 'var(--fg-default)' }}>{event.model ?? ''}</span>
+                <span style={{ minWidth: 80, color: 'var(--fg-default)' }}>
+                  {event.model ?? ''}
+                </span>
                 <span style={{ flex: 1 }} />
                 <span style={{ fontVariantNumeric: 'tabular-nums' }}>
                   in {formatTokens(event.inputTokens)} · out {formatTokens(event.outputTokens)}
@@ -250,7 +252,8 @@ function UsageRow({ label, bucket }: { label: string; bucket: UsageBucket }) {
         in <strong style={{ color: 'var(--fg-strong)' }}>{formatTokens(bucket.inputTokens)}</strong>
       </span>
       <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--fg-default)' }}>
-        out <strong style={{ color: 'var(--fg-strong)' }}>{formatTokens(bucket.outputTokens)}</strong>
+        out{' '}
+        <strong style={{ color: 'var(--fg-strong)' }}>{formatTokens(bucket.outputTokens)}</strong>
       </span>
       {bucket.cacheReadTokens > 0 ? (
         <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--fg-muted)' }}>

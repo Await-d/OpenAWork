@@ -87,7 +87,9 @@ export function RepoClonePreview({ data }: { data: RepoCloneOutputShape }) {
           </span>
         )}
       </div>
-      <div style={{ color: 'var(--fg-default)', fontFamily: 'var(--mono)', wordBreak: 'break-all' }}>
+      <div
+        style={{ color: 'var(--fg-default)', fontFamily: 'var(--mono)', wordBreak: 'break-all' }}
+      >
         {data.localPath}
       </div>
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', color: 'var(--fg-muted)' }}>

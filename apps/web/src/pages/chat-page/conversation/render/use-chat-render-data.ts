@@ -17,10 +17,17 @@ import {
   resolveModelPriceEntry,
 } from './chat-page-utils.js';
 import { mergeStreamingEntryIntoHistoricalEntries } from './chat-render-merge.js';
-import { buildChatContextUsageSnapshot, type ChatContextUsageSnapshot } from '../../../../components/conversation-runtime/messages/context-usage.js';
+import {
+  buildChatContextUsageSnapshot,
+  type ChatContextUsageSnapshot,
+} from '../../../../components/conversation-runtime/messages/context-usage.js';
 import type { ChatBackendUsageSnapshot } from '../../../../components/conversation-runtime/stream/stream-usage.js';
 import { hasUsableReportedUsageSnapshot } from '../../../../components/conversation-runtime/stream/stream-usage.js';
-import type { ChatMessage, ChatMessagePart, ChatUsageDetails } from '../../../../components/conversation-runtime/messages/support.js';
+import type {
+  ChatMessage,
+  ChatMessagePart,
+  ChatUsageDetails,
+} from '../../../../components/conversation-runtime/messages/support.js';
 import {
   clearResolvedPendingPermissionFromMessage,
   createAssistantTraceContent,

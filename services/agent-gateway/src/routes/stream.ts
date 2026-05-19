@@ -13,7 +13,10 @@ import type {
 } from '@openAwork/shared';
 import { z } from 'zod';
 import type { JwtPayload } from '../infra/auth.js';
-import { COMPACTION_SETTINGS_KEY, readCompactionSettings } from '../compaction/compaction-policy.js';
+import {
+  COMPACTION_SETTINGS_KEY,
+  readCompactionSettings,
+} from '../compaction/compaction-policy.js';
 import { sqliteGet, sqliteRun } from '../infra/db.js';
 import { writeAuditLog } from '../infra/audit-log.js';
 import {
@@ -120,7 +123,10 @@ import { detectEmptyTaskResponse } from '../task/empty-task-response-detector.js
 import { buildDynamicOrchestratorPrompt } from '../agent/dynamic-agent-prompt-builder.js';
 import { appendTaskResumeInfo } from '../task/task-resume-info.js';
 import { checkAiComments } from '../tools/comment-checker.js';
-import { checkNonInteractiveBash, buildBannedCommandWarning } from '../workspace/non-interactive-env.js';
+import {
+  checkNonInteractiveBash,
+  buildBannedCommandWarning,
+} from '../workspace/non-interactive-env.js';
 import {
   checkAtlasGuard,
   buildAtlasPostProcessReminder,
@@ -137,7 +143,10 @@ import {
   PLANNING_CONSULT_WARNING,
   PROMETHEUS_WORKFLOW_REMINDER,
 } from '../app/prometheus-md-only.js';
-import { shouldInjectNotepadDirective, NOTEPAD_DIRECTIVE } from '../session/sisyphus-junior-notepad.js';
+import {
+  shouldInjectNotepadDirective,
+  NOTEPAD_DIRECTIVE,
+} from '../session/sisyphus-junior-notepad.js';
 import { runModelRound } from './stream-model-round.js';
 import { dispatchChatMessage } from '../runtime/plugin-host.js';
 import {
@@ -157,8 +166,14 @@ import {
   UPSTREAM_RETRY_SETTINGS_KEY,
   upstreamRetryMaxRetriesSchema,
 } from '../provider/upstream-retry-policy.js';
-import { autoExtractMemoriesForRequest, buildMemoryBlockForSession } from '../memory/memory-runtime.js';
-import { buildCompanionPrompt, loadCompanionSettingsForUser } from '../workspace/companion-settings.js';
+import {
+  autoExtractMemoriesForRequest,
+  buildMemoryBlockForSession,
+} from '../memory/memory-runtime.js';
+import {
+  buildCompanionPrompt,
+  loadCompanionSettingsForUser,
+} from '../workspace/companion-settings.js';
 import { checkDoomLoop, resetDoomLoopHistory } from '../session/doom-loop-detector.js';
 import { buildTeamInstructionStack } from '../team/team-instruction-stack.js';
 import { mapAgentToTeamRoleLayer } from '../team/team-role-layer-mapping.js';
@@ -2127,13 +2142,17 @@ export async function handleStreamRequest(input: {
       // 这是构思 §2B.7 "不在一个 agent 里塞所有工具" 的代码级落地。
       const sessionRoleLayer = input.sessionContext.roleLayer ?? null;
       let layerFilteredTools = filteredTools;
-      if (sessionRoleLayer && ['reception', 'pm1', 'pm2', 'executor', 'reviewer'].includes(sessionRoleLayer)) {
+      if (
+        sessionRoleLayer &&
+        ['reception', 'pm1', 'pm2', 'executor', 'reviewer'].includes(sessionRoleLayer)
+      ) {
         try {
-          const { LAYER_CAPABILITIES } = await import('../handoff/capability/layer-capabilities.js');
-          const { getInstructionsForLayer, toToolDefinition } = await import(
-            '../handoff/capability/builtin-instructions.js'
-          );
-          const { filterToolsByAllowedSets } = await import('../handoff/capability/toolset-gate.js');
+          const { LAYER_CAPABILITIES } =
+            await import('../handoff/capability/layer-capabilities.js');
+          const { getInstructionsForLayer, toToolDefinition } =
+            await import('../handoff/capability/builtin-instructions.js');
+          const { filterToolsByAllowedSets } =
+            await import('../handoff/capability/toolset-gate.js');
           const layer = sessionRoleLayer as 'reception' | 'pm1' | 'pm2' | 'executor' | 'reviewer';
           const caps = LAYER_CAPABILITIES[layer];
           // 1. 通用工具 toolset 过滤

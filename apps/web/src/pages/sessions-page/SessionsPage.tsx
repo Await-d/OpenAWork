@@ -700,7 +700,9 @@ export default function SessionsPage() {
                             flex: 1,
                           }}
                         >
-                          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-default)' }}>
+                          <span
+                            style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-default)' }}
+                          >
                             {group.workspaceLabel}
                           </span>
                           <span
@@ -900,7 +902,15 @@ function TopBar({
         flexShrink: 0,
       }}
     >
-      <h2 style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-strong)', margin: 0, flexShrink: 0 }}>
+      <h2
+        style={{
+          fontSize: 12,
+          fontWeight: 700,
+          color: 'var(--fg-strong)',
+          margin: 0,
+          flexShrink: 0,
+        }}
+      >
         会话
       </h2>
       <span

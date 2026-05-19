@@ -162,10 +162,9 @@ export function getHandoff(input: {
  * 不做 userId 过滤——只在受信任的 server 内代码调用，**禁止**暴露给路由。
  */
 export function getHandoffById(handoffId: string): HandoffRecord | undefined {
-  const row = sqliteGet<HandoffRow>(
-    `SELECT * FROM handoff_records WHERE id = ? LIMIT 1`,
-    [handoffId],
-  );
+  const row = sqliteGet<HandoffRow>(`SELECT * FROM handoff_records WHERE id = ? LIMIT 1`, [
+    handoffId,
+  ]);
   return row ? mapRow(row) : undefined;
 }
 

@@ -622,7 +622,9 @@ function RightPanelTerminalsContent({
         )}
         {loading && <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>加载中…</span>}
       </div>
-      {error && <div style={{ fontSize: 11, color: 'var(--danger))', padding: '4px 0' }}>{error}</div>}
+      {error && (
+        <div style={{ fontSize: 11, color: 'var(--danger))', padding: '4px 0' }}>{error}</div>
+      )}
       {sorted.length === 0 ? (
         <div style={{ fontSize: 11, color: 'var(--fg-muted)', padding: '6px 2px' }}>
           当前会话还没有跑过终端命令。
@@ -770,7 +772,11 @@ function RightPanelTerminalsContent({
                   {terminal.cwd}
                 </span>
                 {terminal.exitCode !== undefined && (
-                  <span style={{ color: terminal.exitCode === 0 ? 'var(--success))' : 'var(--danger))' }}>
+                  <span
+                    style={{
+                      color: terminal.exitCode === 0 ? 'var(--success))' : 'var(--danger))',
+                    }}
+                  >
                     exit {terminal.exitCode}
                   </span>
                 )}

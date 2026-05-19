@@ -28,7 +28,9 @@ vi.mock('../../infra/db.js', () => ({
 }));
 
 vi.mock('../../message/message-v2-adapter.js', async () => {
-  const actual = await vi.importActual<typeof MessageV2Adapter>('../../message/message-v2-adapter.js');
+  const actual = await vi.importActual<typeof MessageV2Adapter>(
+    '../../message/message-v2-adapter.js',
+  );
   return {
     ...actual,
     getLatestReferencedToolResult: mocks.getLatestReferencedToolResultMock,

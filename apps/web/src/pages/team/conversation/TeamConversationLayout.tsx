@@ -28,7 +28,10 @@ import type { CommandDescriptor } from '@openAwork/shared';
 import type { AttachmentItem } from '@openAwork/shared-ui';
 import type { PendingPermissionRequest, PendingQuestionRequest } from '@openAwork/web-client';
 import { ChatMessageGroupList } from '../../../components/chat/message/chat-message-group-list.js';
-import type { ChatRenderEntry, ChatRenderGroup } from '../../../components/chat/message/chat-message-group-list.js';
+import type {
+  ChatRenderEntry,
+  ChatRenderGroup,
+} from '../../../components/chat/message/chat-message-group-list.js';
 import { ChatRemoteStreamPlaceholder } from '../../../components/chat/session/chat-remote-stream-placeholder.js';
 import { ChatSearchOverlay } from '../../../components/chat/search/chat-search-overlay.js';
 import type { useChatSearch } from '../../../components/chat/search/chat-search-overlay.js';
@@ -58,7 +61,10 @@ import { ChatStreamErrorBar } from '../../../components/conversation-runtime/vie
 // ChatTodoFloatingPanel 现在由 ChatTopBar 内部挂载（顶部右侧），本组件不再渲染浮层；
 // 仅保留与 todo 相关的最小 props（sessionTodos / rightOpen），用于消息列展示。
 import { SessionRunStateBar } from '../../../components/conversation-runtime/views/session-run-state-bar.js';
-import type { SessionStateStatus, SessionTodoItem } from '../../../components/conversation-runtime/session/session-runtime.js';
+import type {
+  SessionStateStatus,
+  SessionTodoItem,
+} from '../../../components/conversation-runtime/session/session-runtime.js';
 import type {
   ChatMessage,
   ComposerMenuState,

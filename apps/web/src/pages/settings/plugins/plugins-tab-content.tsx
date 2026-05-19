@@ -345,7 +345,9 @@ export function PluginsTabContent({
           <>
             {/* Header */}
             <div>
-              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--fg-strong)' }}>图片插件</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--fg-strong)' }}>
+                图片插件
+              </div>
               <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginTop: 2 }}>
                 为 Agent 提供专用图片生成 Tool。
               </div>

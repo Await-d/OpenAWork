@@ -282,7 +282,11 @@ export function OfficeSidebar({
               }}
             >
               <span
-                style={{ fontSize: 9, color: 'var(--fg-muted)', fontVariantNumeric: 'tabular-nums' }}
+                style={{
+                  fontSize: 9,
+                  color: 'var(--fg-muted)',
+                  fontVariantNumeric: 'tabular-nums',
+                }}
               >
                 位置: ({selectedAgent.x}%, {selectedAgent.y}%)
               </span>

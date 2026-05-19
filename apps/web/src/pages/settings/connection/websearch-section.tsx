@@ -189,7 +189,9 @@ export function WebsearchSection({
 
       {/* Rollout mode picker */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-default)' }}>Rollout 模式</div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-default)' }}>
+          Rollout 模式
+        </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {ROLLOUT_MODES.map((mode) => {
             const selected = mode.id === policy.rolloutMode;

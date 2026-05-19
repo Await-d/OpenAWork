@@ -450,7 +450,8 @@ export function TasksTab({ selectedTeam = null }: { selectedTeam?: AgentTeamsSid
                       width: '100%',
                       minHeight: 28,
                       borderRadius: 8,
-                      border: '1px dashed color-mix(in oklch, var(--border-default) 50%, transparent)',
+                      border:
+                        '1px dashed color-mix(in oklch, var(--border-default) 50%, transparent)',
                       color: 'var(--fg-muted)',
                       background: 'transparent',
                       fontSize: 11,

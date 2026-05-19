@@ -8,7 +8,10 @@ import type { ArtifactMetadata, ArtifactVersionActor } from '@openAwork/artifact
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
 import { sqliteGet } from '../infra/db.js';
-import { resolveGatewayArtifactsDir, resolveGatewayArtifactsIndexPath } from '../infra/storage-paths.js';
+import {
+  resolveGatewayArtifactsDir,
+  resolveGatewayArtifactsIndexPath,
+} from '../infra/storage-paths.js';
 import {
   createArtifact,
   getArtifactById,

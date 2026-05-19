@@ -1039,8 +1039,7 @@ export function ChatComposer({
                           alignItems: 'center',
                           justifyContent: 'center',
                           borderRadius: 999,
-                          background:
-                            'color-mix(in oklch, var(--success) 14%, transparent)',
+                          background: 'color-mix(in oklch, var(--success) 14%, transparent)',
                           color: 'color-mix(in oklch, var(--success) 82%, var(--fg-on-accent) 18%)',
                           flexShrink: 0,
                           fontSize: 9,
@@ -1169,7 +1168,8 @@ export function ChatComposer({
                                     borderRadius: 999,
                                     background:
                                       'color-mix(in oklch, var(--accent) 8%, transparent)',
-                                    color: 'color-mix(in oklch, var(--accent) 70%, var(--fg-on-accent) 30%)',
+                                    color:
+                                      'color-mix(in oklch, var(--accent) 70%, var(--fg-on-accent) 30%)',
                                     whiteSpace: 'nowrap',
                                   }}
                                 >

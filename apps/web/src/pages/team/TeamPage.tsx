@@ -3,10 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createTeamClient } from '@openAwork/web-client';
 // 团队页专属样式（含 team-* hover 工具类）— V1 fallback 也加载
 import './runtime/styles/team-runtime.css';
-import type {
-  AgentTeamsSidebarTeam,
-  AgentTeamsTabKey,
-} from './runtime/data/team-runtime-types.js';
+import type { AgentTeamsSidebarTeam, AgentTeamsTabKey } from './runtime/data/team-runtime-types.js';
 import {
   TeamRuntimeReferenceDataProvider,
   useTeamRuntimeReferenceViewData,
@@ -19,7 +16,10 @@ import { FooterBar, MainWorkspace } from './runtime/shell/header/MainWorkspace.j
 import { NewTeamSessionModal } from './runtime/shell/modals/NewTeamSessionModal.js';
 import { NewTeamTemplateModal } from './runtime/shell/modals/NewTeamTemplateModal.js';
 import { LayerConversationDrawer } from './runtime/shell/session-view/LayerConversationDrawer.js';
-import { PauseConfirmDialog, ResumeStaleDialog } from './runtime/shell/controls/PauseResumeControls.js';
+import {
+  PauseConfirmDialog,
+  ResumeStaleDialog,
+} from './runtime/shell/controls/PauseResumeControls.js';
 import { SessionTreeView } from './runtime/tabs/tasks/SessionTreeView.js';
 import { TeamArtifactSection } from './runtime/tabs/tasks/TeamArtifactSection.js';
 import { SessionSidebar } from './runtime/shell/sidebar/TeamSessionSidebar.js';
@@ -27,7 +27,11 @@ import { TeamStatusBar } from './runtime/shell/header/TeamStatusBar.js';
 import { useTeamWorkspaceSnapshotState } from './hooks/use-team-workspace-snapshot-state.js';
 import { useTeamWorkspaceState } from './hooks/use-team-workspace-state.js';
 import { useAuthStore } from '../../stores/auth/auth.js';
-import { connectTeamEvents, disconnectTeamEvents, useHandoffStore } from '../../stores/team/team-events.js';
+import {
+  connectTeamEvents,
+  disconnectTeamEvents,
+  useHandoffStore,
+} from '../../stores/team/team-events.js';
 import type { TeamSessionCreationDraft } from './runtime/data/team-session-creation.types.js';
 
 function TeamPageLayout({
@@ -364,8 +368,7 @@ function TeamPageLayout({
             style={{
               minHeight: 0,
               overflow: 'auto',
-              background:
-                'linear-gradient(180deg, var(--bg-overlay) 0%, var(--bg-base)',
+              background: 'linear-gradient(180deg, var(--bg-overlay) 0%, var(--bg-base)',
             }}
           >
             {mainContent}

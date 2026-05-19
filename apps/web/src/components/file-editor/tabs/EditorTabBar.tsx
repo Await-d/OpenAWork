@@ -90,10 +90,7 @@ export function EditorTabBar({
       if (clientX < rect.left + edge && el.scrollLeft > 0) {
         autoScrollDirRef.current = -1;
         ensureAutoScrollLoop();
-      } else if (
-        clientX > rect.right - edge &&
-        el.scrollLeft + el.clientWidth < el.scrollWidth
-      ) {
+      } else if (clientX > rect.right - edge && el.scrollLeft + el.clientWidth < el.scrollWidth) {
         autoScrollDirRef.current = 1;
         ensureAutoScrollLoop();
       } else {

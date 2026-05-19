@@ -24,7 +24,10 @@
  */
 
 import type { MCPToolDef } from '@openAwork/mcp-client';
-import { mcpConnectionPool, type ToolListChangedListener } from '../skill/skill-mcp-connection-pool.js';
+import {
+  mcpConnectionPool,
+  type ToolListChangedListener,
+} from '../skill/skill-mcp-connection-pool.js';
 
 interface CatalogEntry {
   /** Tools as last fetched from the server (post `disabledTools` filter). */

@@ -87,12 +87,8 @@ export function WorkflowTemplateEditor({ initialJson, onSave }: WorkflowTemplate
         spellCheck={false}
       />
 
-      {error ? (
-        <span style={{ fontSize: 12, color: 'var(--danger))' }}>{error}</span>
-      ) : null}
-      {saved ? (
-        <span style={{ fontSize: 12, color: 'var(--success))' }}>已保存</span>
-      ) : null}
+      {error ? <span style={{ fontSize: 12, color: 'var(--danger))' }}>{error}</span> : null}
+      {saved ? <span style={{ fontSize: 12, color: 'var(--success))' }}>已保存</span> : null}
 
       <button
         type="button"

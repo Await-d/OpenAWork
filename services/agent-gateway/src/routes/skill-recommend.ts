@@ -30,7 +30,10 @@ import { sqliteAll, sqliteGet, sqliteRun, sqliteTransaction } from '../infra/db.
 import { getProviderConfigForSelection } from '../provider/provider-config.js';
 import { resolveModelRoute, resolveModelRouteFromProvider } from '../provider/model-router.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
-import { DEFAULT_WORKSPACE_PATH_KEY, normalizeWorkspacePathForWrite } from '../skill/skill-selection.js';
+import {
+  DEFAULT_WORKSPACE_PATH_KEY,
+  normalizeWorkspacePathForWrite,
+} from '../skill/skill-selection.js';
 import {
   recommendByHeuristic,
   type HeuristicCandidate,

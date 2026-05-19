@@ -359,9 +359,7 @@ export function useBuddyVoicePreferences(
     (value) => {
       updatePreference((current) => ({
         ...current,
-        voiceRate: clampVoiceRate(
-          typeof value === 'function' ? value(current.voiceRate) : value,
-        ),
+        voiceRate: clampVoiceRate(typeof value === 'function' ? value(current.voiceRate) : value),
       }));
     },
     [updatePreference],

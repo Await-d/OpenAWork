@@ -1,6 +1,9 @@
 import type { ArtifactRecord } from '@openAwork/artifacts';
 import { tokens } from '@openAwork/shared-ui';
-import { formatArtifactTimestamp, formatArtifactTypeLabel } from '../workspace/artifact-workbench-utils.js';
+import {
+  formatArtifactTimestamp,
+  formatArtifactTypeLabel,
+} from '../workspace/artifact-workbench-utils.js';
 
 interface ArtifactRecordListProps {
   artifacts: ArtifactRecord[];
@@ -50,7 +53,12 @@ export function ArtifactRecordList({
             Artifact Stack
           </div>
           <h2
-            style={{ margin: '6px 0 0', fontSize: 18, color: 'var(--fg-strong)', textWrap: 'balance' }}
+            style={{
+              margin: '6px 0 0',
+              fontSize: 18,
+              color: 'var(--fg-strong)',
+              textWrap: 'balance',
+            }}
           >
             当前会话产物
           </h2>
@@ -139,7 +147,9 @@ export function ArtifactRecordList({
                   </span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 11, color: 'var(--fg-default)' }}>v{artifact.version}</span>
+                  <span style={{ fontSize: 11, color: 'var(--fg-default)' }}>
+                    v{artifact.version}
+                  </span>
                   <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
                     {formatArtifactTimestamp(artifact.updatedAt)}
                   </span>

@@ -29,10 +29,10 @@ beforeEach(() => {
   // 清掉 audit log 让每个测试独立
   dbModule.sqliteRun('DELETE FROM team_audit_logs', []);
   // 种一个用户给 audit log 写入用（FK 约束）
-  dbModule.sqliteRun(
-    "INSERT OR IGNORE INTO users (id, email, password_hash) VALUES (?, ?, 'x')",
-    ['u-test', 'cap-test@example.com'],
-  );
+  dbModule.sqliteRun("INSERT OR IGNORE INTO users (id, email, password_hash) VALUES (?, ?, 'x')", [
+    'u-test',
+    'cap-test@example.com',
+  ]);
 });
 
 afterAll(async () => {

@@ -102,9 +102,10 @@ registerInstruction({
   }),
   handler: async (ctx, args): Promise<InstructionResult> => {
     const { appendSessionMessageV2 } = await import('../../message/message-v2-adapter.js');
-    const optionsBlock = args.options && args.options.length > 0
-      ? `\n\n可选项：\n${args.options.map((o, i) => `${i + 1}. ${o}`).join('\n')}`
-      : '';
+    const optionsBlock =
+      args.options && args.options.length > 0
+        ? `\n\n可选项：\n${args.options.map((o, i) => `${i + 1}. ${o}`).join('\n')}`
+        : '';
     appendSessionMessageV2({
       sessionId: ctx.sessionId,
       userId: ctx.userId,
@@ -134,10 +135,18 @@ registerInstruction({
       [args.handoffId],
     );
     if (!handoff || handoff.user_id !== ctx.userId) {
-      return { ok: false, errorCode: 'handoff-not-found', message: 'handoff 不存在或不属于当前用户。' };
+      return {
+        ok: false,
+        errorCode: 'handoff-not-found',
+        message: 'handoff 不存在或不属于当前用户。',
+      };
     }
     if (!handoff.to_session_id) {
-      return { ok: false, errorCode: 'no-target-session', message: 'handoff 尚未 claim，没有目标 session。' };
+      return {
+        ok: false,
+        errorCode: 'no-target-session',
+        message: 'handoff 尚未 claim，没有目标 session。',
+      };
     }
     submitInboundMessage({
       userId: ctx.userId,
@@ -156,7 +165,8 @@ registerInstruction({
 registerInstruction({
   name: 'push_notification',
   ownerLayer: 'reception',
-  description: '主动向用户推送任务进度（如"plan 已就绪"、"e/f/g 全部完成"）。仅用于汇报，不阻塞用户。',
+  description:
+    '主动向用户推送任务进度（如"plan 已就绪"、"e/f/g 全部完成"）。仅用于汇报，不阻塞用户。',
   schema: z.object({
     text: z.string().min(1).max(2000).describe('推送内容（Markdown）'),
     priority: z.enum(['blocking', 'info', 'silent']).default('info'),
@@ -182,12 +192,17 @@ registerInstruction({
 registerInstruction({
   name: 'submit_artifact',
   ownerLayer: 'pm1',
-  description: '提交 spec / plan / tasks 产物到 artifacts 表。phase 必须是 spec / plan / tasks 之一。',
+  description:
+    '提交 spec / plan / tasks 产物到 artifacts 表。phase 必须是 spec / plan / tasks 之一。',
   schema: z.object({
     phase: z.enum(['spec', 'plan', 'tasks']).describe('产物阶段'),
     title: z.string().min(1).max(200),
     content: z.string().min(1).max(64000).describe('Markdown 内容'),
-    parentArtifactId: z.string().nullable().optional().describe('父 artifact id（plan 依赖 spec、tasks 依赖 plan）'),
+    parentArtifactId: z
+      .string()
+      .nullable()
+      .optional()
+      .describe('父 artifact id（plan 依赖 spec、tasks 依赖 plan）'),
     teamWorkspaceId: z.string().nullable().optional(),
   }),
   handler: async (ctx, args): Promise<InstructionResult> => {
@@ -317,7 +332,8 @@ registerInstruction({
 registerInstruction({
   name: 'constitution_check',
   ownerLayer: 'pm2',
-  description: '声明 Constitution Check 的结果（pass / fail）并附违反条款列表。失败应触发 escalate_to_user。',
+  description:
+    '声明 Constitution Check 的结果（pass / fail）并附违反条款列表。失败应触发 escalate_to_user。',
   schema: z.object({
     pass: z.boolean(),
     violations: z.array(z.string()).default([]),
@@ -402,7 +418,11 @@ registerInstruction({
         JSON.stringify(args),
       ],
     );
-    return { ok: true, message: `已记录质量评审：${args.decision}`, data: { decision: args.decision } };
+    return {
+      ok: true,
+      message: `已记录质量评审：${args.decision}`,
+      data: { decision: args.decision },
+    };
   },
 });
 
@@ -449,7 +469,8 @@ function makeMarkCompleted(ownerLayer: 'pm1' | 'pm2' | 'executor' | 'reviewer'):
   registerInstruction({
     name: 'mark_completed',
     ownerLayer,
-    description: '声明本次工作已完成。layer 终态 substate=completed。watcher 会自动 completeHandoff。',
+    description:
+      '声明本次工作已完成。layer 终态 substate=completed。watcher 会自动 completeHandoff。',
     schema: z.object({
       summary: z.string().max(2000).optional().describe('完成摘要'),
     }),
@@ -511,7 +532,8 @@ function makeMarkFailed(ownerLayer: 'pm1' | 'pm2' | 'executor' | 'reviewer'): vo
 registerInstruction({
   name: 'submit_patch',
   ownerLayer: 'executor',
-  description: 'executor 提交一份代码 patch（结构化输出）作为 artifact。phase=patch 或 implementation。',
+  description:
+    'executor 提交一份代码 patch（结构化输出）作为 artifact。phase=patch 或 implementation。',
   schema: z.object({
     phase: z.enum(['patch', 'implementation']).default('patch'),
     title: z.string().min(1).max(200),
@@ -525,7 +547,15 @@ registerInstruction({
          id, session_id, user_id, type, title, content, version,
          phase, team_workspace_id, parent_artifact_id
        ) VALUES (?, ?, ?, 'markdown', ?, ?, 1, ?, ?, NULL)`,
-      [id, ctx.sessionId, ctx.userId, args.title, args.content, args.phase, args.teamWorkspaceId ?? null],
+      [
+        id,
+        ctx.sessionId,
+        ctx.userId,
+        args.title,
+        args.content,
+        args.phase,
+        args.teamWorkspaceId ?? null,
+      ],
     );
     return {
       ok: true,

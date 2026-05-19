@@ -433,7 +433,8 @@ export function DevtoolsLogsSection({
                               borderRadius: 4,
                               padding: '1px 5px',
                               border: '1px solid var(--border-default)',
-                              background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+                              background:
+                                'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
                               fontSize: 10,
                               color: 'var(--fg-muted)',
                               fontFamily: 'monospace',
@@ -551,7 +552,9 @@ export function DevtoolsLogsSection({
                     >
                       {selectedLog.level}
                     </span>
-                    <span style={{ fontSize: 10, color: 'var(--fg-muted)', fontFamily: 'monospace' }}>
+                    <span
+                      style={{ fontSize: 10, color: 'var(--fg-muted)', fontFamily: 'monospace' }}
+                    >
                       {selectedLog.source ?? 'settings'}
                     </span>
                     {selectedLog.requestId ? (

@@ -88,7 +88,10 @@ export function registerInstruction<TArgs>(instruction: BuiltinInstruction<TArgs
       `[builtin-instructions] 注册失败：指令 "${instruction.name}" 不在 ${instruction.ownerLayer} 的 allowedBuiltinInstructions 中`,
     );
   }
-  REGISTRY.set(makeKey(instruction.name, instruction.ownerLayer), instruction as BuiltinInstruction);
+  REGISTRY.set(
+    makeKey(instruction.name, instruction.ownerLayer),
+    instruction as BuiltinInstruction,
+  );
 }
 
 export function unregisterInstruction(name: string, ownerLayer: HandoffRoleLayer): void {
@@ -102,7 +105,10 @@ export function __clearRegistryForTesting(): void {
 /**
  * 按 (name, ownerLayer) 查指令。dispatcher 必须传 ownerLayer，避免歧义。
  */
-export function getInstruction(name: string, ownerLayer: HandoffRoleLayer): BuiltinInstruction | undefined {
+export function getInstruction(
+  name: string,
+  ownerLayer: HandoffRoleLayer,
+): BuiltinInstruction | undefined {
   return REGISTRY.get(makeKey(name, ownerLayer));
 }
 

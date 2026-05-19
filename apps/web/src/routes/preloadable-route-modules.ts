@@ -59,7 +59,11 @@ export const PRELOADABLE_ROUTE_MODULES = {
     () => import('../pages/misc/ChannelsPage.js'),
     '消息频道',
   ),
-  chat: createPreloadableRouteModule('chat', () => import('../pages/chat-page/ChatPage.js'), '会话工作台'),
+  chat: createPreloadableRouteModule(
+    'chat',
+    () => import('../pages/chat-page/ChatPage.js'),
+    '会话工作台',
+  ),
   images: createPreloadableRouteModule(
     'images',
     () => import('../pages/artifacts/ImagesPage.js'),
@@ -95,13 +99,21 @@ export const PRELOADABLE_ROUTE_MODULES = {
     () => import('../pages/workflows/WorkflowsPage.js'),
     '工作流工作台',
   ),
-  skills: createPreloadableRouteModule('skills', () => import('../pages/skills/SkillsPage.js'), '技能库'),
+  skills: createPreloadableRouteModule(
+    'skills',
+    () => import('../pages/skills/SkillsPage.js'),
+    '技能库',
+  ),
   skillSelection: createPreloadableRouteModule(
     'skill-selection',
     () => import('../pages/skills/selection/SkillSelectionPage.js'),
     'Skill 工作区选择集',
   ),
-  usage: createPreloadableRouteModule('usage', () => import('../pages/misc/UsagePage.js'), '用量统计'),
+  usage: createPreloadableRouteModule(
+    'usage',
+    () => import('../pages/misc/UsagePage.js'),
+    '用量统计',
+  ),
 } as const;
 
 export type PreloadableRouteKey = keyof typeof PRELOADABLE_ROUTE_MODULES;

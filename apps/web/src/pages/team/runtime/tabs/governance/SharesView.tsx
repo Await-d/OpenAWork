@@ -174,7 +174,8 @@ export function SharesView() {
                             padding: '2px 10px',
                             borderRadius: 999,
                             background: 'var(--bg-overlay)',
-                            border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+                            border:
+                              '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
                             fontSize: 11,
                           }}
                         >
@@ -222,7 +223,8 @@ export function SharesView() {
                         padding: '1px 8px',
                         borderRadius: 999,
                         background: 'var(--bg-overlay)',
-                        border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+                        border:
+                          '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
                         color: 'var(--fg-default)',
                         fontSize: 10,
                         fontWeight: 700,

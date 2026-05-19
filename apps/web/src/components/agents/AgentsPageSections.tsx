@@ -168,8 +168,7 @@ const PANEL: React.CSSProperties = {
 
 const HEADER_PANEL: React.CSSProperties = {
   ...PANEL,
-  background:
-    'linear-gradient(180deg, var(--bg-overlay), var(--bg-overlay))',
+  background: 'linear-gradient(180deg, var(--bg-overlay), var(--bg-overlay))',
 };
 
 const HERO_PANEL: React.CSSProperties = {
@@ -335,8 +334,7 @@ function StatCard({ label, value }: { label: string; value: string }) {
       style={{
         ...PANEL,
         padding: '14px 16px',
-        background:
-          'linear-gradient(180deg, var(--bg-overlay), var(--bg-overlay))',
+        background: 'linear-gradient(180deg, var(--bg-overlay), var(--bg-overlay))',
       }}
     >
       <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginBottom: 8 }}>{label}</div>
@@ -653,9 +651,7 @@ function ToggleRow({
       style={{
         border: '1px solid var(--border-subtle)',
         borderRadius: 14,
-        background: checked
-          ? 'rgba(99, 102, 241, 0.08)'
-          : 'var(--bg-overlay)',
+        background: checked ? 'rgba(99, 102, 241, 0.08)' : 'var(--bg-overlay)',
         color: 'var(--fg-strong)',
         padding: '12px 14px',
         display: 'flex',
@@ -815,7 +811,9 @@ function AgentForm({
         }}
       >
         <div style={{ display: 'grid', gap: 4 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-strong)' }}>默认模型路由</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-strong)' }}>
+            默认模型路由
+          </div>
           <div style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.7 }}>
             为这个角色指定默认模型、variant 与 fallback 链。留空时，系统会回退到参考默认值。
           </div>
@@ -1011,7 +1009,9 @@ export function AgentsEditorPanel({
             state={editorState}
             setState={setEditorState}
           />
-          {saveMessage && <div style={{ color: 'var(--success))', fontSize: 13 }}>{saveMessage}</div>}
+          {saveMessage && (
+            <div style={{ color: 'var(--success))', fontSize: 13 }}>{saveMessage}</div>
+          )}
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <button
               type="button"

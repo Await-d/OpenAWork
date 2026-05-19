@@ -61,8 +61,8 @@ export function CompanionFeatureBanner({ buddy }: CompanionFeatureBannerProps) {
         >
           <span style={{ fontSize: 12, fontWeight: 700 }}>Buddy 伴侣已关闭</span>
           <span style={{ fontSize: 11, lineHeight: 1.6, flex: '1 1 240px', minWidth: 0 }}>
-            后端 companion feature flag 当前为关闭。下方设置仍可保存，但 Chat 页的
-            Buddy 入口与 prompt 注入会停用，直到管理员重新启用。
+            后端 companion feature flag 当前为关闭。下方设置仍可保存，但 Chat 页的 Buddy 入口与
+            prompt 注入会停用，直到管理员重新启用。
           </span>
         </div>
       ) : null}
@@ -83,7 +83,8 @@ export function CompanionFeatureBanner({ buddy }: CompanionFeatureBannerProps) {
               color: 'var(--fg-default)',
             }}
           >
-            刚才读取或保存 companion 配置时遇到问题。当前编辑仍在本地生效；点右侧重试会重新和远端同步。
+            刚才读取或保存 companion
+            配置时遇到问题。当前编辑仍在本地生效；点右侧重试会重新和远端同步。
           </span>
           <button
             aria-disabled={retrying}

@@ -26,8 +26,7 @@ const styles: Record<string, CSSProperties> = {
     maxWidth: 'calc(100vw - 32px)',
     borderRadius: 16,
     border: '1px solid color-mix(in oklch, var(--danger) 20%, var(--border-subtle))',
-    background:
-      'linear-gradient(180deg, var(--bg-overlay) 0%, var(--bg-base)',
+    background: 'linear-gradient(180deg, var(--bg-overlay) 0%, var(--bg-base)',
     boxShadow: '0 24px 64px rgba(0, 0, 0, 0.34)',
     padding: 20,
     display: 'flex',

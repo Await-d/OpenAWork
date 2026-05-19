@@ -862,7 +862,9 @@ export function DesktopTabContent() {
             }}
           >
             <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>空闲自动锁</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
+                空闲自动锁
+              </div>
               <div
                 style={{
                   marginTop: 3,
@@ -1036,10 +1038,7 @@ export function DesktopTabContent() {
             ) : null}
 
             {pinError ? (
-              <div
-                role="alert"
-                style={{ fontSize: 11, color: 'var(--danger))', lineHeight: 1.5 }}
-              >
+              <div role="alert" style={{ fontSize: 11, color: 'var(--danger))', lineHeight: 1.5 }}>
                 {pinError}
               </div>
             ) : null}

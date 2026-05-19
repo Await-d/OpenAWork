@@ -9,7 +9,10 @@ import {
   approveToolPermission,
   rejectToolPermission,
 } from '../message/message-v2-adapter.js';
-import { publishSessionRunEvent, subscribeSessionRunEvents } from '../session/session-run-events.js';
+import {
+  publishSessionRunEvent,
+  subscribeSessionRunEvents,
+} from '../session/session-run-events.js';
 import { persistSessionFileDiffs } from '../session/session-file-diff-store.js';
 import {
   collectFileDiffsFromToolOutput,
@@ -54,7 +57,10 @@ import {
 } from './stream-cancellation.js';
 import { persistMonthlyUsageRecord } from '../session/usage-records-store.js';
 import { resolveSessionInteractionStateUpdate } from '../session/session-runtime-state.js';
-import { autoExtractMemoriesForRequest, buildMemoryBlockForSession } from '../memory/memory-runtime.js';
+import {
+  autoExtractMemoriesForRequest,
+  buildMemoryBlockForSession,
+} from '../memory/memory-runtime.js';
 import { buildTeamInstructionStack } from '../team/team-instruction-stack.js';
 import { mapAgentToTeamRoleLayer } from '../team/team-role-layer-mapping.js';
 import {
@@ -63,7 +69,10 @@ import {
   touchSessionRuntimeThread,
   upsertSessionRuntimeThread,
 } from '../session/session-runtime-thread-store.js';
-import { buildCompanionPrompt, loadCompanionSettingsForUser } from '../workspace/companion-settings.js';
+import {
+  buildCompanionPrompt,
+  loadCompanionSettingsForUser,
+} from '../workspace/companion-settings.js';
 
 async function continueFromApprovedToolResult(input: {
   initialToolResult: {

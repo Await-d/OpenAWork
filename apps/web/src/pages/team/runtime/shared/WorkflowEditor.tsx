@@ -137,7 +137,8 @@ export function WorkflowSelector({ onSelect, selectedId }: WorkflowSelectorProps
                         padding: '1px 5px',
                         borderRadius: 3,
                         background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
-                        border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+                        border:
+                          '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
                       }}
                     >
                       {s.label}
@@ -254,12 +255,8 @@ export function WorkflowEditor({ workflowId }: WorkflowEditorProps) {
         <button type="button" style={BUTTON_PRIMARY} onClick={() => void handleSave()}>
           保存
         </button>
-        {saved ? (
-          <span style={{ fontSize: 12, color: 'var(--success))' }}>已保存</span>
-        ) : null}
-        {error ? (
-          <span style={{ fontSize: 12, color: 'var(--danger))' }}>{error}</span>
-        ) : null}
+        {saved ? <span style={{ fontSize: 12, color: 'var(--success))' }}>已保存</span> : null}
+        {error ? <span style={{ fontSize: 12, color: 'var(--danger))' }}>{error}</span> : null}
       </div>
     </div>
   );

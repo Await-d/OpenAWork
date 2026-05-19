@@ -5,7 +5,10 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { scanMemoryWriteContent, scanMemoryWriteFields } from '../../memory/memory-security-scanner.js';
+import {
+  scanMemoryWriteContent,
+  scanMemoryWriteFields,
+} from '../../memory/memory-security-scanner.js';
 
 describe('scanMemoryWriteContent', () => {
   it('放行干净文本', () => {

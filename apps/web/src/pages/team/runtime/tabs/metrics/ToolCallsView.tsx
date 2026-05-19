@@ -137,7 +137,8 @@ export function ToolCallsView() {
                             padding: '2px 10px',
                             borderRadius: 999,
                             background: 'var(--bg-overlay)',
-                            border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+                            border:
+                              '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
                             fontSize: 11,
                             color: 'var(--fg-default)',
                           }}
@@ -159,11 +160,7 @@ export function ToolCallsView() {
 function ToolRow({ tool }: { tool: ToolStatsDerived }) {
   const failurePct = Math.round(tool.failureRate * 100);
   const failureColor =
-    failurePct > 30
-      ? 'var(--danger))'
-      : failurePct > 10
-        ? 'var(--warning))'
-        : 'var(--success))';
+    failurePct > 30 ? 'var(--danger))' : failurePct > 10 ? 'var(--warning))' : 'var(--success))';
   return (
     <div style={ROW_STYLE}>
       <div

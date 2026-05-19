@@ -106,7 +106,9 @@ export function DevtoolsToolbarSection({
                 ? '1px solid color-mix(in srgb, var(--danger) 40%, var(--border-default))'
                 : '1px solid var(--border-default)',
             borderLeft:
-              counts.diagnostics > 0 ? '3px solid var(--danger)' : '1px solid var(--border-default)',
+              counts.diagnostics > 0
+                ? '3px solid var(--danger)'
+                : '1px solid var(--border-default)',
             background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
             padding: '7px 10px',
             color: 'var(--fg-strong)',

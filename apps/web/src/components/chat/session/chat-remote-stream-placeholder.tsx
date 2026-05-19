@@ -31,8 +31,7 @@ export function ChatRemoteStreamPlaceholder({ status }: { status: 'running' | 'p
           height: 28,
           borderRadius: '50%',
           flexShrink: 0,
-          background:
-            'color-mix(in oklch, var(--accent) 28%, var(--bg-overlay))',
+          background: 'color-mix(in oklch, var(--accent) 28%, var(--bg-overlay))',
           border: '1px solid color-mix(in oklch, var(--accent) 32%, var(--border-default))',
         }}
       />

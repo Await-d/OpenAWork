@@ -143,7 +143,9 @@ function CompanionPreviewCard({
         }}
       >
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--fg-strong)' }}>{profile.name}</div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--fg-strong)' }}>
+            {profile.name}
+          </div>
           <div style={{ marginTop: 3, fontSize: 11, color: 'var(--fg-default)' }}>
             {profile.species} · {profile.rarityStars}
           </div>
@@ -450,7 +452,9 @@ export function CompanionVisualShowcase({
             >
               伴侣图鉴
             </div>
-            <div style={{ marginTop: 4, fontSize: 12, lineHeight: 1.6, color: 'var(--fg-default)' }}>
+            <div
+              style={{ marginTop: 4, fontSize: 12, lineHeight: 1.6, color: 'var(--fg-default)' }}
+            >
               下方完整展示源仓 companion 物种与 idle / pet 动画。悬停或点击卡片会触发一次 pet
               hearts，但不会切换你当前正在使用的 Persona。
             </div>

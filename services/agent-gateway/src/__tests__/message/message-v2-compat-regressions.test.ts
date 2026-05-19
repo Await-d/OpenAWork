@@ -209,7 +209,10 @@ describe('message-v2 compatibility regressions', () => {
   });
 
   it('keeps legacy stream tool-result writes idempotent', () => {
-    const streamRouteSource = readFileSync(new URL('../../routes/stream.ts', import.meta.url), 'utf8');
+    const streamRouteSource = readFileSync(
+      new URL('../../routes/stream.ts', import.meta.url),
+      'utf8',
+    );
     const toolResultWrite = streamRouteSource.match(
       /appendSessionMessageV2\(\{[\s\S]*?role: 'tool',[\s\S]*?clientRequestId: createToolResultRequestId\(input\.clientRequestId, toolCallId\),[\s\S]*?replaceExisting: true,[\s\S]*?\}\);/,
     );

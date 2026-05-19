@@ -59,11 +59,7 @@ function seedReceptionSession(): void {
   db.sqliteRun(
     `INSERT OR IGNORE INTO sessions (id, user_id, title, metadata_json, role_layer, state_status)
      VALUES (?, ?, 'Reception', ?, 'reception', 'idle')`,
-    [
-      RECEPTION_SESSION_ID,
-      USER_ID,
-      JSON.stringify({ teamWorkspaceId: TEAM_WORKSPACE_ID }),
-    ],
+    [RECEPTION_SESSION_ID, USER_ID, JSON.stringify({ teamWorkspaceId: TEAM_WORKSPACE_ID })],
   );
 }
 
@@ -281,10 +277,9 @@ describe('c 层（pm1 / artifact-chain）', () => {
     expect(spec?.phase).toBe('spec');
     expect(spec?.content).toContain('OAuth');
 
-    const plan = db.sqliteGet<{ phase: string }>(
-      `SELECT phase FROM artifacts WHERE id = ?`,
-      [result.planArtifactId],
-    );
+    const plan = db.sqliteGet<{ phase: string }>(`SELECT phase FROM artifacts WHERE id = ?`, [
+      result.planArtifactId,
+    ]);
     expect(plan?.phase).toBe('plan');
 
     const tasks = db.sqliteGet<{ phase: string; content: string }>(
@@ -313,8 +308,10 @@ describe('c 层（pm1 / artifact-chain）', () => {
     );
 
     const mockLlm = async (system: string): Promise<string> => {
-      if (system.includes('功能规格文档')) return '# 规格\n\n## 用户故事 1\n\n## 需求\n- **FR-001**: x';
-      if (system.includes('实施计划')) return '# 计划\n\n## 技术上下文\n\nTS\n\n## 宪法对齐检查\n\n| 宪法条目 | 本计划是否符合 | 备注 |\n|---|---|---|\n| x | ✅ | ok |';
+      if (system.includes('功能规格文档'))
+        return '# 规格\n\n## 用户故事 1\n\n## 需求\n- **FR-001**: x';
+      if (system.includes('实施计划'))
+        return '# 计划\n\n## 技术上下文\n\nTS\n\n## 宪法对齐检查\n\n| 宪法条目 | 本计划是否符合 | 备注 |\n|---|---|---|\n| x | ✅ | ok |';
       return '# 任务\n\n## Phase 1\n- [ ] T001 [US1] 做事';
     };
 
@@ -367,8 +364,10 @@ describe('c 层（pm1 / artifact-chain）', () => {
     });
 
     const mockLlm = async (system: string): Promise<string> => {
-      if (system.includes('功能规格文档')) return '# 规格\n\n## 用户故事 1\n\n## 需求\n- **FR-001**: x';
-      if (system.includes('实施计划')) return '# 计划\n\n## 技术上下文\n\nTS\n\n## 宪法对齐检查\n\n| 宪法条目 | 本计划是否符合 | 备注 |\n|---|---|---|\n| x | ✅ | ok |';
+      if (system.includes('功能规格文档'))
+        return '# 规格\n\n## 用户故事 1\n\n## 需求\n- **FR-001**: x';
+      if (system.includes('实施计划'))
+        return '# 计划\n\n## 技术上下文\n\nTS\n\n## 宪法对齐检查\n\n| 宪法条目 | 本计划是否符合 | 备注 |\n|---|---|---|\n| x | ✅ | ok |';
       return '# 任务\n\n## Phase 1\n- [ ] T001 [US1] 做事';
     };
 
@@ -415,17 +414,14 @@ describe('c 层（pm1 / artifact-chain）', () => {
     const watcherInstance = new watcher.HandoffWatcher({
       taskRunner: async (input) => {
         // 模拟 artifact-chain 完成：写 result_json
-        db.sqliteRun(
-          `UPDATE handoff_records SET result_json = ? WHERE id = ?`,
-          [
-            JSON.stringify({
-              specArtifactId: 'spec-123',
-              planArtifactId: 'plan-123',
-              tasksArtifactId: 'tasks-123',
-            }),
-            input.handoff.id,
-          ],
-        );
+        db.sqliteRun(`UPDATE handoff_records SET result_json = ? WHERE id = ?`, [
+          JSON.stringify({
+            specArtifactId: 'spec-123',
+            planArtifactId: 'plan-123',
+            tasksArtifactId: 'tasks-123',
+          }),
+          input.handoff.id,
+        ]);
       },
     });
 
@@ -435,7 +431,11 @@ describe('c 层（pm1 / artifact-chain）', () => {
     await new Promise((r) => setTimeout(r, 200));
 
     // 验证自动创建了 pm1→pm2 handoff
-    const allHandoffs = db.sqliteAll<{ from_role_layer: string; to_role_layer: string; state: string }>(
+    const allHandoffs = db.sqliteAll<{
+      from_role_layer: string;
+      to_role_layer: string;
+      state: string;
+    }>(
       `SELECT from_role_layer, to_role_layer, state FROM handoff_records WHERE user_id = ? ORDER BY created_at ASC`,
       [USER_ID],
     );

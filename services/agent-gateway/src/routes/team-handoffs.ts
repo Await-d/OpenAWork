@@ -29,7 +29,10 @@ import {
   type HandoffRoleLayer,
 } from '../handoff/store/handoff-store.js';
 import { publishHandoffEvent } from '../handoff/bus/team-events-bus.js';
-import { createTeamSession, validateTeamParentSession } from '../handoff/bus/team-session-create.js';
+import {
+  createTeamSession,
+  validateTeamParentSession,
+} from '../handoff/bus/team-session-create.js';
 import { submitInboundMessage } from '../handoff/store/inbound-store.js';
 import { setSubstate } from '../handoff/store/substate-store.js';
 

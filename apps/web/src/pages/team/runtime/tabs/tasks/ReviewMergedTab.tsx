@@ -238,9 +238,7 @@ function ReportSegment({
     return <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>正在加载评审报告…</div>;
   }
   if (error) {
-    return (
-      <div style={{ fontSize: 12, color: 'var(--danger))' }}>评审报告拉取失败：{error}</div>
-    );
+    return <div style={{ fontSize: 12, color: 'var(--danger))' }}>评审报告拉取失败：{error}</div>;
   }
   return (
     <ReviewReportView

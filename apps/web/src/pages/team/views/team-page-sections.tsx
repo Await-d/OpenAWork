@@ -115,7 +115,10 @@ export function getTaskStatusMeta(status: TeamTaskRecord['status']) {
 export function getMessageTypeMeta(type: TeamMessageRecord['type']) {
   switch (type) {
     case 'question':
-      return { label: '问题', style: pillStyle('var(--warning-muted)', 'rgba(245, 158, 11, 0.18)') };
+      return {
+        label: '问题',
+        style: pillStyle('var(--warning-muted)', 'rgba(245, 158, 11, 0.18)'),
+      };
     case 'result':
       return { label: '结果', style: pillStyle('var(--aux))', 'rgba(59, 130, 246, 0.16)') };
     case 'error':
@@ -128,7 +131,10 @@ export function getMessageTypeMeta(type: TeamMessageRecord['type']) {
 export function getAuditActionMeta(action: TeamAuditLogRecord['action']) {
   switch (action) {
     case 'shared_comment_created':
-      return { label: '共享评论', style: pillStyle('var(--complement))', 'rgba(236, 72, 153, 0.16)') };
+      return {
+        label: '共享评论',
+        style: pillStyle('var(--complement))', 'rgba(236, 72, 153, 0.16)'),
+      };
     case 'shared_permission_replied':
       return { label: '权限处理', style: pillStyle('var(--chart-5))', 'rgba(139, 92, 246, 0.18)') };
     case 'shared_question_replied':
@@ -136,7 +142,10 @@ export function getAuditActionMeta(action: TeamAuditLogRecord['action']) {
     case 'share_permission_updated':
       return { label: '权限变更', style: pillStyle('var(--aux))', 'rgba(59, 130, 246, 0.16)') };
     case 'share_deleted':
-      return { label: '取消共享', style: pillStyle('var(--complement))', 'rgba(244, 63, 94, 0.16)') };
+      return {
+        label: '取消共享',
+        style: pillStyle('var(--complement))', 'rgba(244, 63, 94, 0.16)'),
+      };
     default:
       return { label: '新增共享', style: pillStyle('var(--success))', 'rgba(34, 197, 94, 0.18)') };
   }
@@ -164,7 +173,9 @@ export function TeamSectionHeader({ eyebrow, title, description }: SectionHeader
       </span>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         <span style={{ fontSize: 18, fontWeight: 700, color: 'var(--fg-strong)' }}>{title}</span>
-        <span style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--fg-muted)' }}>{description}</span>
+        <span style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--fg-muted)' }}>
+          {description}
+        </span>
       </div>
     </div>
   );
@@ -912,13 +923,16 @@ export function TeamSharedSessionsPanel({
                           alignItems: 'center',
                           padding: 10,
                           borderRadius: 12,
-                          border: '1px solid color-mix(in srgb, var(--border-default) 82%, transparent)',
+                          border:
+                            '1px solid color-mix(in srgb, var(--border-default) 82%, transparent)',
                           background:
                             'color-mix(in srgb, var(--bg-overlay) 96%, rgba(91, 140, 255, 0.05))',
                         }}
                       >
                         <div style={{ display: 'grid', gap: 4 }}>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-strong)' }}>
+                          <span
+                            style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-strong)' }}
+                          >
                             {entry.viewerEmail}
                           </span>
                           <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
@@ -951,7 +965,8 @@ export function TeamSharedSessionsPanel({
                           gap: 4,
                           padding: 12,
                           borderRadius: 12,
-                          border: '1px solid color-mix(in srgb, var(--border-default) 82%, transparent)',
+                          border:
+                            '1px solid color-mix(in srgb, var(--border-default) 82%, transparent)',
                           background:
                             'color-mix(in srgb, var(--bg-overlay) 94%, rgba(15, 23, 42, 0.2))',
                         }}
@@ -990,7 +1005,8 @@ export function TeamSharedSessionsPanel({
                           gap: 4,
                           padding: 12,
                           borderRadius: 12,
-                          border: '1px solid color-mix(in srgb, var(--border-default) 82%, transparent)',
+                          border:
+                            '1px solid color-mix(in srgb, var(--border-default) 82%, transparent)',
                           background:
                             'color-mix(in srgb, var(--bg-overlay) 95%, rgba(91, 140, 255, 0.06))',
                         }}

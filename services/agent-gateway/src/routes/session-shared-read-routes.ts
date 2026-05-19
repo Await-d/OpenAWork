@@ -22,7 +22,10 @@ import {
   touchSharedSessionPresence,
 } from '../session/session-shared-presence-store.js';
 import { filterVisibleSessionMessages } from '../session/session-message-store.js';
-import { listSessionMessagesV2, listRuntimeSafeSessionMessagesV2 } from '../message/message-v2-adapter.js';
+import {
+  listSessionMessagesV2,
+  listRuntimeSafeSessionMessagesV2,
+} from '../message/message-v2-adapter.js';
 import {
   getSharedSessionForRecipient,
   listSharedSessionsForRecipient,

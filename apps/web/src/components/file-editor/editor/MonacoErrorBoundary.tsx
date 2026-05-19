@@ -150,10 +150,7 @@ export function installMonacoAsyncErrorFilter(): void {
 
   window.addEventListener('error', (event) => {
     // Script load errors from Monaco's CDN loader
-    if (
-      event.target instanceof HTMLScriptElement &&
-      /monaco/i.test(event.target.src ?? '')
-    ) {
+    if (event.target instanceof HTMLScriptElement && /monaco/i.test(event.target.src ?? '')) {
       event.preventDefault();
       event.stopImmediatePropagation();
       return;

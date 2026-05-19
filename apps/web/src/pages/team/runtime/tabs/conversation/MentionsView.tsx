@@ -10,7 +10,10 @@
  */
 
 import { useMemo, useState, type CSSProperties } from 'react';
-import { useTeamNotificationStore, type HandoffEvent } from '../../../../../stores/team/team-events.js';
+import {
+  useTeamNotificationStore,
+  type HandoffEvent,
+} from '../../../../../stores/team/team-events.js';
 import MarkdownMessageContent from '../../../../../components/chat/markdown/markdown-message-content.js';
 
 const CONTAINER_STYLE: CSSProperties = {
@@ -212,7 +215,9 @@ export function MentionsView() {
                     阻塞
                   </span>
                 ) : null}
-                <span style={{ fontWeight: 700, color: 'var(--fg-default)' }}>{item.event.type}</span>
+                <span style={{ fontWeight: 700, color: 'var(--fg-default)' }}>
+                  {item.event.type}
+                </span>
                 {item.event.layer ? <span>· {item.event.layer}</span> : null}
                 <span style={{ flex: 1 }} />
                 <span style={{ fontVariantNumeric: 'tabular-nums' }}>

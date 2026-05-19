@@ -136,7 +136,12 @@ export function submitInboundMessage(input: SubmitInboundInput): SubmitInboundRe
     const toRoleLayer = toSession.role_layer as HandoffRoleLayer;
     // 只对已知 HandoffRoleLayer 做校验，不识别的 role_layer（旧数据）跳过
     const knownLayers: ReadonlyArray<HandoffRoleLayer> = [
-      'user', 'reception', 'pm1', 'pm2', 'executor', 'reviewer',
+      'user',
+      'reception',
+      'pm1',
+      'pm2',
+      'executor',
+      'reviewer',
     ];
     if (knownLayers.includes(toRoleLayer)) {
       assertCanReceiveInbound({

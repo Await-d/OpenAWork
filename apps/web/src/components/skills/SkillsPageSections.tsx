@@ -20,8 +20,7 @@ const PANEL: React.CSSProperties = {
 
 const HEADER_PANEL: React.CSSProperties = {
   ...PANEL,
-  background:
-    'linear-gradient(180deg, var(--bg-overlay), var(--bg-overlay))',
+  background: 'linear-gradient(180deg, var(--bg-overlay), var(--bg-overlay))',
 };
 
 const HERO_PANEL: React.CSSProperties = {
@@ -74,8 +73,7 @@ function StatCard({ label, value }: { label: string; value: string }) {
       style={{
         ...PANEL,
         padding: '14px 16px',
-        background:
-          'linear-gradient(180deg, var(--bg-overlay), var(--bg-overlay))',
+        background: 'linear-gradient(180deg, var(--bg-overlay), var(--bg-overlay))',
       }}
     >
       <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginBottom: 8 }}>{label}</div>
@@ -235,7 +233,9 @@ export function SkillsMarketSection({
             <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--fg-strong)' }}>{title}</div>
           ) : null}
           {subtitle ? (
-            <div style={{ fontSize: 13, color: 'var(--fg-muted)', lineHeight: 1.6 }}>{subtitle}</div>
+            <div style={{ fontSize: 13, color: 'var(--fg-muted)', lineHeight: 1.6 }}>
+              {subtitle}
+            </div>
           ) : null}
         </div>
       )}

@@ -415,7 +415,9 @@ function ReceptionStarterCard({
                 <span style={{ color: 'var(--fg-muted)' }}>
                   {describeOptionalGroup(member.canonicalRole)}
                 </span>
-                <span style={{ color: 'var(--fg-strong)', fontWeight: 600 }}>{member.agentLabel}</span>
+                <span style={{ color: 'var(--fg-strong)', fontWeight: 600 }}>
+                  {member.agentLabel}
+                </span>
               </span>
             ))}
           </div>

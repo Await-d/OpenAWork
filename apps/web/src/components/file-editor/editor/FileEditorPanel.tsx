@@ -188,12 +188,9 @@ export function FileEditorPanel({
 
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
-  const handleTabContextMenu = useCallback(
-    (path: string, x: number, y: number) => {
-      setContextMenu({ kind: 'tab', targetPath: path, x, y });
-    },
-    [],
-  );
+  const handleTabContextMenu = useCallback((path: string, x: number, y: number) => {
+    setContextMenu({ kind: 'tab', targetPath: path, x, y });
+  }, []);
 
   const handlePreviewContextMenu = useCallback(
     (x: number, y: number) => {
@@ -440,7 +437,8 @@ export function FileEditorPanel({
                       padding: '0 10px',
                       borderRadius: 6,
                       border: 'none',
-                      background: effectivePanelMode === 'code' ? 'var(--bg-overlay)' : 'transparent',
+                      background:
+                        effectivePanelMode === 'code' ? 'var(--bg-overlay)' : 'transparent',
                       color: effectivePanelMode === 'code' ? 'var(--fg-strong)' : 'var(--fg-muted)',
                       fontSize: 11,
                       fontWeight: effectivePanelMode === 'code' ? 600 : 500,
@@ -461,7 +459,8 @@ export function FileEditorPanel({
                       border: 'none',
                       background:
                         effectivePanelMode === 'preview' ? 'var(--bg-overlay)' : 'transparent',
-                      color: effectivePanelMode === 'preview' ? 'var(--fg-strong)' : 'var(--fg-muted)',
+                      color:
+                        effectivePanelMode === 'preview' ? 'var(--fg-strong)' : 'var(--fg-muted)',
                       fontSize: 11,
                       fontWeight: effectivePanelMode === 'preview' ? 600 : 500,
                       cursor: 'pointer',

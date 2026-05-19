@@ -52,13 +52,8 @@ export function CompanionPreviewTester({ buddy }: CompanionPreviewTesterProps) {
 
   const cooldownActive = cooldownUntil > Date.now();
   const trimmed = draft.trim();
-  const canSend =
-    Boolean(accessToken) && trimmed.length > 0 && !submitting && !cooldownActive;
-  const sendLabel = submitting
-    ? '发送中…'
-    : cooldownActive
-      ? '稍后再试'
-      : '发送';
+  const canSend = Boolean(accessToken) && trimmed.length > 0 && !submitting && !cooldownActive;
+  const sendLabel = submitting ? '发送中…' : cooldownActive ? '稍后再试' : '发送';
 
   const speakReply = (text: string) => {
     if (!voiceOutputEnabled || !SUPPORTS_TTS || text.length === 0) return;
@@ -82,7 +77,9 @@ export function CompanionPreviewTester({ buddy }: CompanionPreviewTesterProps) {
       const reply = (data.text ?? '').trim();
       const profileName = data.profileName ?? buddy.profile?.name ?? 'Buddy';
       const id = ++turnIdRef.current;
-      setHistory((prev) => [{ id, message: trimmed, reply, profileName }, ...prev].slice(0, HISTORY_LIMIT));
+      setHistory((prev) =>
+        [{ id, message: trimmed, reply, profileName }, ...prev].slice(0, HISTORY_LIMIT),
+      );
       setDraft('');
       failuresRef.current = 0;
       speakReply(reply);
@@ -123,7 +120,13 @@ export function CompanionPreviewTester({ buddy }: CompanionPreviewTesterProps) {
           }}
           placeholder="例如：现在该不该提醒我休息？（Cmd/Ctrl+Enter 发送）"
           rows={2}
-          style={{ ...IS, flex: '1 1 280px', minHeight: 56, padding: '8px 10px', resize: 'vertical' }}
+          style={{
+            ...IS,
+            flex: '1 1 280px',
+            minHeight: 56,
+            padding: '8px 10px',
+            resize: 'vertical',
+          }}
           value={draft}
         />
         <button
@@ -144,7 +147,9 @@ export function CompanionPreviewTester({ buddy }: CompanionPreviewTesterProps) {
       </div>
 
       {!accessToken ? (
-        <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>未登录无法试聊。先连接到一个 gateway。</div>
+        <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+          未登录无法试聊。先连接到一个 gateway。
+        </div>
       ) : null}
 
       {error ? (

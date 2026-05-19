@@ -278,7 +278,9 @@ function ForceApplySection({
           刷新状态
         </button>
         {state?.lastAppliedAt ? (
-          <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>上次：{state.lastAppliedAt}</span>
+          <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+            上次：{state.lastAppliedAt}
+          </span>
         ) : null}
       </div>
 

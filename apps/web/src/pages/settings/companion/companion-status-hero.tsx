@@ -116,7 +116,9 @@ export function CompanionStatusHero({ buddy }: CompanionStatusHeroProps) {
             Companion prompt 与 Chat 页舞台都会跟随这里的状态变化。
           </div>
           {profile ? (
-            <div style={{ marginTop: 10, fontSize: 12, lineHeight: 1.6, color: 'var(--fg-default)' }}>
+            <div
+              style={{ marginTop: 10, fontSize: 12, lineHeight: 1.6, color: 'var(--fg-default)' }}
+            >
               {profile.name} · {profile.species}
             </div>
           ) : null}

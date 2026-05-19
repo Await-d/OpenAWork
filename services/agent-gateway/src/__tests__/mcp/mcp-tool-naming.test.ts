@@ -16,7 +16,11 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { flatMcpToolName, parseFlatMcpToolName, MCP_FLAT_TOOL_PREFIX } from '../../mcp/mcp-tool-naming.js';
+import {
+  flatMcpToolName,
+  parseFlatMcpToolName,
+  MCP_FLAT_TOOL_PREFIX,
+} from '../../mcp/mcp-tool-naming.js';
 
 const TOOL_NAME_REGEX = /^[a-zA-Z0-9_-]{1,64}$/;
 

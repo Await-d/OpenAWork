@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { truncateToolOutput, truncateToolOutputUniversal } from '../../tools/tool-output-truncator.js';
+import {
+  truncateToolOutput,
+  truncateToolOutputUniversal,
+} from '../../tools/tool-output-truncator.js';
 
 const NOTICE_FRAGMENT = '[输出已截断';
 

@@ -605,103 +605,104 @@ export function TeamSessionListSidebar({
       {/* 仅本组件使用的 keyframes（team-v2-status-spin / team-v2-status-pulse /
           team-v2-status-pulse-fade）已统一迁移至 `styles/team-runtime.css`，
           通过 `TeamPageV2.tsx` 的全局 import 加载，避免与其他全局 keyframe 同名冲突。 */}
-      {!chromeless && <header style={HEADER_STYLE}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
-          <strong
-            style={{
-              fontSize: 13,
-              fontWeight: 700,
-              color: 'var(--fg-strong)',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            会话
-          </strong>
-          {(() => {
-            const total = workspaceGroups.reduce((acc, g) => acc + g.sessions.length, 0);
-            const running = workspaceGroups.reduce(
-              (acc, g) => acc + g.sessions.filter((s) => s.status === 'running').length,
-              0,
-            );
-            if (total === 0) return null;
-            return (
-              <span
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  padding: '1px 7px',
-                  borderRadius: 999,
-                  background: 'color-mix(in srgb, var(--fg-muted) 14%, transparent)',
-                  fontSize: 10,
-                  fontWeight: 700,
-                  color: 'var(--fg-default)',
-                  fontVariantNumeric: 'tabular-nums',
+      {!chromeless && (
+        <header style={HEADER_STYLE}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
+            <strong
+              style={{
+                fontSize: 13,
+                fontWeight: 700,
+                color: 'var(--fg-strong)',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              会话
+            </strong>
+            {(() => {
+              const total = workspaceGroups.reduce((acc, g) => acc + g.sessions.length, 0);
+              const running = workspaceGroups.reduce(
+                (acc, g) => acc + g.sessions.filter((s) => s.status === 'running').length,
+                0,
+              );
+              if (total === 0) return null;
+              return (
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '1px 7px',
+                    borderRadius: 999,
+                    background: 'color-mix(in srgb, var(--fg-muted) 14%, transparent)',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: 'var(--fg-default)',
+                    fontVariantNumeric: 'tabular-nums',
+                  }}
+                  title={`共 ${total} 个会话，${running} 个运行中`}
+                >
+                  {running > 0 ? (
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        width: 6,
+                        height: 6,
+                        borderRadius: '50%',
+                        background: 'var(--success))',
+                        boxShadow: '0 0 0 2px color-mix(in srgb, var(--success) 30%, transparent)',
+                      }}
+                    />
+                  ) : null}
+                  {running > 0 ? `${running}/${total}` : total}
+                </span>
+              );
+            })()}
+          </div>
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 }}>
+            {onSubmitDraft ? (
+              <button
+                type="button"
+                onClick={() => {
+                  if (!teamWorkspaceId) {
+                    console.warn('[TeamSessionListSidebar] 请先选择工作空间');
+                    return;
+                  }
+                  setShowNewSessionModal(true);
                 }}
-                title={`共 ${total} 个会话，${running} 个运行中`}
+                className="team-cta-accent"
+                style={CREATE_BTN_STYLE}
+                aria-label="新建会话"
+                title={teamWorkspaceId ? '新建会话' : '请先选择工作空间'}
               >
-                {running > 0 ? (
-                  <span
-                    aria-hidden="true"
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: '50%',
-                      background: 'var(--success))',
-                      boxShadow:
-                        '0 0 0 2px color-mix(in srgb, var(--success) 30%, transparent)',
-                    }}
-                  />
-                ) : null}
-                {running > 0 ? `${running}/${total}` : total}
-              </span>
-            );
-          })()}
-        </div>
-        <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 }}>
-          {onSubmitDraft ? (
+                <svg
+                  aria-hidden="true"
+                  width="11"
+                  height="11"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+                新建
+              </button>
+            ) : null}
             <button
               type="button"
-              onClick={() => {
-                if (!teamWorkspaceId) {
-                  console.warn('[TeamSessionListSidebar] 请先选择工作空间');
-                  return;
-                }
-                setShowNewSessionModal(true);
-              }}
-              className="team-cta-accent"
-              style={CREATE_BTN_STYLE}
-              aria-label="新建会话"
-              title={teamWorkspaceId ? '新建会话' : '请先选择工作空间'}
+              onClick={onToggleCollapsed}
+              style={COLLAPSE_BTN_STYLE}
+              aria-label="折叠会话列表"
+              title="折叠"
             >
-              <svg
-                aria-hidden="true"
-                width="11"
-                height="11"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <line x1="12" y1="5" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
-              新建
+              ◀
             </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={onToggleCollapsed}
-            style={COLLAPSE_BTN_STYLE}
-            aria-label="折叠会话列表"
-            title="折叠"
-          >
-            ◀
-          </button>
-        </div>
-      </header>}
+          </div>
+        </header>
+      )}
 
       {/* 多 workspace 切换器（仅在 workspaceGroups > 1 时出现）；
           单 workspace 时不再显示 workspaceLabel 静态框，避免与顶部 page-header 重复 */}
@@ -759,7 +760,11 @@ export function TeamSessionListSidebar({
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               placeholder="搜索会话..."
-              style={{ ...SEARCH_INPUT_STYLE, paddingLeft: 30, paddingRight: searchQuery ? 28 : 10 }}
+              style={{
+                ...SEARCH_INPUT_STYLE,
+                paddingLeft: 30,
+                paddingRight: searchQuery ? 28 : 10,
+              }}
               aria-label="搜索会话"
             />
             {searchQuery ? (

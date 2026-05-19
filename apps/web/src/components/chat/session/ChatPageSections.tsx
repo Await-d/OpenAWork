@@ -33,7 +33,10 @@ import {
 } from '../assistant/assistant-error-content.js';
 import { AssistantEventRow } from '../assistant/assistant-event-row.js';
 import { shouldStreamLocalReasoningBlock } from '../assistant/assistant-reasoning-block.helpers.js';
-import { AssistantReasoningBlock, buildReasoningBlockKey } from '../assistant/assistant-reasoning-block.js';
+import {
+  AssistantReasoningBlock,
+  buildReasoningBlockKey,
+} from '../assistant/assistant-reasoning-block.js';
 import {
   normalizeProviderKey,
   ProviderAvatar,
@@ -46,7 +49,11 @@ import { MessageHoverActions } from '../message/message-hover-actions.js';
 import { ModifiedFilesSummaryCard } from '../misc/modified-files-summary-card.js';
 import StreamingMarkdownContent from '../markdown/streaming-markdown-content.js';
 import { TaskToolInline } from '../tool-call/display/task-tool-inline.js';
-import { GroupedToolCallPill, groupConsecutiveTools, ToolCallDisplay } from '../tool-call/display/tool-call-inline.js';
+import {
+  GroupedToolCallPill,
+  groupConsecutiveTools,
+  ToolCallDisplay,
+} from '../tool-call/display/tool-call-inline.js';
 
 export const sharedUiThemeVars = {
   '--color-bg': 'var(--bg-base)',
@@ -1316,7 +1323,9 @@ export function WelcomeScreen({
                   gap: 8,
                   padding: '14px 13px 12px',
                   borderRadius: 12,
-                  border: isActive ? `1.5px solid ${accent.color}` : '1px solid var(--border-default)',
+                  border: isActive
+                    ? `1.5px solid ${accent.color}`
+                    : '1px solid var(--border-default)',
                   background: isActive ? accent.bg : 'var(--bg-overlay)',
                   color: 'var(--fg-strong)',
                   cursor: 'pointer',

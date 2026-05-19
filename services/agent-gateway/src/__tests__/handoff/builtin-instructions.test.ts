@@ -27,10 +27,10 @@ const USER_ID = 'u-builtin';
 const SESSION_ID = 's-builtin';
 
 function seedUser(): void {
-  dbModule.sqliteRun(
-    "INSERT OR IGNORE INTO users (id, email, password_hash) VALUES (?, ?, 'x')",
-    [USER_ID, 'builtin@example.com'],
-  );
+  dbModule.sqliteRun("INSERT OR IGNORE INTO users (id, email, password_hash) VALUES (?, ?, 'x')", [
+    USER_ID,
+    'builtin@example.com',
+  ]);
 }
 
 function seedSession(roleLayer: string): void {

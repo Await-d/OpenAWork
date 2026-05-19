@@ -1,7 +1,10 @@
 import { useEffect } from 'react';
 import { createSettingsClient } from '@openAwork/web-client';
 import type { MCPServerStatus } from '@openAwork/shared-ui';
-import type { WorkspaceFileMentionItem, WorkspaceTreeNode } from '../../../../components/conversation-runtime/messages/support.js';
+import type {
+  WorkspaceFileMentionItem,
+  WorkspaceTreeNode,
+} from '../../../../components/conversation-runtime/messages/support.js';
 import { flattenWorkspaceFiles } from '../../../../components/conversation-runtime/messages/support.js';
 
 interface WorkspaceLike {

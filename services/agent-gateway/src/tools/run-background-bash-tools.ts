@@ -30,7 +30,11 @@ import { randomBytes } from 'node:crypto';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import { z } from 'zod';
 import { runBashCommand } from './bash-tools.js';
-import { getTerminal, killTerminal, listSessionTerminals } from '../session/session-terminal-registry.js';
+import {
+  getTerminal,
+  killTerminal,
+  listSessionTerminals,
+} from '../session/session-terminal-registry.js';
 
 const DEFAULT_BACKGROUND_TIMEOUT_MS = (() => {
   const raw = process.env['OPENAWORK_BACKGROUND_BASH_DEFAULT_TIMEOUT_MS'];

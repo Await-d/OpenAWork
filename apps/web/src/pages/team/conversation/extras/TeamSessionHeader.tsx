@@ -71,43 +71,66 @@ const HINT_STYLE: CSSProperties = {
 
 function colorForRole(role: string): string {
   switch (role) {
-    case 'planner': return 'var(--accent))';
-    case 'researcher': return 'var(--chart-7))';
-    case 'executor': return 'var(--success))';
-    case 'reviewer': return 'var(--warning))';
-    case 'leader': return 'var(--chart-5))';
-    default: return 'var(--fg-muted))';
+    case 'planner':
+      return 'var(--accent))';
+    case 'researcher':
+      return 'var(--chart-7))';
+    case 'executor':
+      return 'var(--success))';
+    case 'reviewer':
+      return 'var(--warning))';
+    case 'leader':
+      return 'var(--chart-5))';
+    default:
+      return 'var(--fg-muted))';
   }
 }
 
 function substateLabel(substate: string | null | undefined): string {
   switch (substate) {
-    case 'routing': return '🔄 正在分析意图…';
-    case 'dispatching': return '📤 已派发给规划层';
-    case 'clarifying': return '❓ 等待你回答澄清问题';
-    case 'drafting_spec': return '📝 正在生成规格…';
-    case 'spec_ready': return '✅ 规格已就绪';
-    case 'drafting_plan': return '📋 正在生成计划…';
-    case 'plan_ready': return '✅ 计划已就绪';
-    case 'drafting_tasks': return '📦 正在生成任务…';
-    case 'tasks_ready': return '✅ 任务已就绪';
-    case 'completed': return '🎉 已完成';
+    case 'routing':
+      return '🔄 正在分析意图…';
+    case 'dispatching':
+      return '📤 已派发给规划层';
+    case 'clarifying':
+      return '❓ 等待你回答澄清问题';
+    case 'drafting_spec':
+      return '📝 正在生成规格…';
+    case 'spec_ready':
+      return '✅ 规格已就绪';
+    case 'drafting_plan':
+      return '📋 正在生成计划…';
+    case 'plan_ready':
+      return '✅ 计划已就绪';
+    case 'drafting_tasks':
+      return '📦 正在生成任务…';
+    case 'tasks_ready':
+      return '✅ 任务已就绪';
+    case 'completed':
+      return '🎉 已完成';
     case 'idle':
     case null:
     case undefined:
       return '';
-    default: return `⏳ ${substate}`;
+    default:
+      return `⏳ ${substate}`;
   }
 }
 
 function roleLayerLabel(roleLayer: string | null | undefined): { text: string; color: string } {
   switch (roleLayer) {
-    case 'reception': return { text: '接待层 (b)', color: 'var(--accent)' };
-    case 'pm1': return { text: '规划层 (c)', color: 'var(--accent))' };
-    case 'pm2': return { text: '主管层 (d)', color: 'var(--chart-5))' };
-    case 'executor': return { text: '执行层 (e)', color: 'var(--success))' };
-    case 'reviewer': return { text: '评审层 (g)', color: 'var(--warning))' };
-    default: return { text: '团队会话', color: 'var(--fg-default)' };
+    case 'reception':
+      return { text: '接待层 (b)', color: 'var(--accent)' };
+    case 'pm1':
+      return { text: '规划层 (c)', color: 'var(--accent))' };
+    case 'pm2':
+      return { text: '主管层 (d)', color: 'var(--chart-5))' };
+    case 'executor':
+      return { text: '执行层 (e)', color: 'var(--success))' };
+    case 'reviewer':
+      return { text: '评审层 (g)', color: 'var(--warning))' };
+    default:
+      return { text: '团队会话', color: 'var(--fg-default)' };
   }
 }
 
@@ -139,19 +162,29 @@ export function TeamSessionHeader({
 
         {/* 状态 */}
         {stateStatus === 'running' ? (
-          <span style={{ ...BADGE_STYLE, background: 'color-mix(in srgb, var(--success) 15%, transparent)', color: 'var(--success)' }}>
+          <span
+            style={{
+              ...BADGE_STYLE,
+              background: 'color-mix(in srgb, var(--success) 15%, transparent)',
+              color: 'var(--success)',
+            }}
+          >
             运行中
           </span>
         ) : stateStatus === 'paused' ? (
-          <span style={{ ...BADGE_STYLE, background: 'color-mix(in srgb, var(--warning) 15%, transparent)', color: 'var(--warning)' }}>
+          <span
+            style={{
+              ...BADGE_STYLE,
+              background: 'color-mix(in srgb, var(--warning) 15%, transparent)',
+              color: 'var(--warning)',
+            }}
+          >
             已暂停
           </span>
         ) : null}
 
         {/* substate 进度提示（内联） */}
-        {statusText ? (
-          <span style={HINT_STYLE}>{statusText}</span>
-        ) : null}
+        {statusText ? <span style={HINT_STYLE}>{statusText}</span> : null}
       </div>
 
       {/* 角色 chips（仅在有 teamDef 时显示，紧凑排列） */}
@@ -159,7 +192,9 @@ export function TeamSessionHeader({
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
           {teamDef.roles.map((r) => (
             <span key={r.role} style={ROLE_CHIP_STYLE}>
-              <span style={{ width: 5, height: 5, borderRadius: 999, background: colorForRole(r.role) }} />
+              <span
+                style={{ width: 5, height: 5, borderRadius: 999, background: colorForRole(r.role) }}
+              />
               {r.role}
             </span>
           ))}
@@ -184,8 +219,9 @@ function parseTeamDef(metadata?: Record<string, unknown> | null): ParsedTeamDef 
 
   const sourceObj = (teamDef['source'] as Record<string, unknown> | undefined) ?? {};
   const kind = typeof sourceObj['kind'] === 'string' ? sourceObj['kind'] : 'blank';
-  const templateName = typeof sourceObj['templateName'] === 'string' ? sourceObj['templateName'] : null;
-  const sourceLabel = kind === 'blank' ? '空白' : templateName ?? '模板';
+  const templateName =
+    typeof sourceObj['templateName'] === 'string' ? sourceObj['templateName'] : null;
+  const sourceLabel = kind === 'blank' ? '空白' : (templateName ?? '模板');
 
   const required = Array.isArray(teamDef['requiredRoleBindings'])
     ? (teamDef['requiredRoleBindings'] as unknown[])

@@ -12,7 +12,12 @@
  *   └─────────────────────────────────────────────┘
  */
 
-import React, { type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+import React, {
+  type CSSProperties,
+  type KeyboardEvent,
+  type MouseEvent,
+  type ReactNode,
+} from 'react';
 
 // ─── Density presets ─────────────────────────────────────────────────────────
 

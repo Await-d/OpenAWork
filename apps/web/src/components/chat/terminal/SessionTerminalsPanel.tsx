@@ -56,7 +56,11 @@ const STATUS_LABELS: Record<SessionTerminalStatus, string> = {
 };
 
 const STATUS_COLORS: Record<SessionTerminalStatus, { fg: string; bg: string; dot: string }> = {
-  running: { fg: 'var(--success))', bg: 'color-mix(in srgb, var(--success) 18%, transparent)', dot: 'var(--success))' },
+  running: {
+    fg: 'var(--success))',
+    bg: 'color-mix(in srgb, var(--success) 18%, transparent)',
+    dot: 'var(--success))',
+  },
   idle: {
     fg: 'var(--aux))',
     bg: 'color-mix(in srgb, var(--aux) 14%, transparent)',
@@ -67,14 +71,26 @@ const STATUS_COLORS: Record<SessionTerminalStatus, { fg: string; bg: string; dot
     bg: 'color-mix(in srgb, var(--fg-muted) 12%, transparent)',
     dot: 'var(--fg-muted)',
   },
-  aborted: { fg: 'var(--warning))', bg: 'color-mix(in srgb, var(--warning) 18%, transparent)', dot: 'var(--warning))' },
-  timeout: { fg: 'var(--warning))', bg: 'color-mix(in srgb, var(--warning) 18%, transparent)', dot: 'var(--warning))' },
+  aborted: {
+    fg: 'var(--warning))',
+    bg: 'color-mix(in srgb, var(--warning) 18%, transparent)',
+    dot: 'var(--warning))',
+  },
+  timeout: {
+    fg: 'var(--warning))',
+    bg: 'color-mix(in srgb, var(--warning) 18%, transparent)',
+    dot: 'var(--warning))',
+  },
   spawn_error: {
     fg: 'var(--danger))',
     bg: 'color-mix(in srgb, var(--danger) 18%, transparent)',
     dot: 'var(--danger))',
   },
-  killed: { fg: 'var(--danger))', bg: 'color-mix(in srgb, var(--danger) 18%, transparent)', dot: 'var(--danger))' },
+  killed: {
+    fg: 'var(--danger))',
+    bg: 'color-mix(in srgb, var(--danger) 18%, transparent)',
+    dot: 'var(--danger))',
+  },
   stale: {
     fg: 'var(--fg-muted)',
     bg: 'color-mix(in srgb, var(--fg-muted) 10%, transparent)',

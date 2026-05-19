@@ -107,7 +107,9 @@ export function OverviewTab({
               >
                 {selectedTeam.title}
               </span>
-              <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>{selectedTeam.subtitle}</span>
+              <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
+                {selectedTeam.subtitle}
+              </span>
             </div>
             {(() => {
               const statusColor =
@@ -216,7 +218,9 @@ export function OverviewTab({
                     >
                       <Icon name={card.icon as IconKey} size={11} color="var(--accent)" />
                     </span>
-                    <span style={{ fontWeight: 600, color: 'var(--fg-default)' }}>{card.label}</span>
+                    <span style={{ fontWeight: 600, color: 'var(--fg-default)' }}>
+                      {card.label}
+                    </span>
                   </div>
                   <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                     {trend ? (
@@ -255,7 +259,12 @@ export function OverviewTab({
                   </div>
                 </div>
                 <span
-                  style={{ fontSize: 26, lineHeight: 1.1, fontWeight: 800, color: 'var(--fg-strong)' }}
+                  style={{
+                    fontSize: 26,
+                    lineHeight: 1.1,
+                    fontWeight: 800,
+                    color: 'var(--fg-strong)',
+                  }}
                 >
                   {card.value}
                 </span>

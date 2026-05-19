@@ -14,11 +14,20 @@ import {
 import { z } from 'zod';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
-import { COMPACTION_SETTINGS_KEY, readCompactionSettings } from '../compaction/compaction-policy.js';
-import { collectDeadCodeDiagnostics, formatDeadCodeCandidates } from '../tools/dead-code-diagnostics.js';
+import {
+  COMPACTION_SETTINGS_KEY,
+  readCompactionSettings,
+} from '../compaction/compaction-policy.js';
+import {
+  collectDeadCodeDiagnostics,
+  formatDeadCodeCandidates,
+} from '../tools/dead-code-diagnostics.js';
 import { WORKSPACE_ROOT, sqliteGet, sqliteRun } from '../infra/db.js';
 import { resolveCompactionRoute, type ModelRouteConfig } from '../provider/model-router.js';
-import { getCompactionProviderConfig, getProviderConfigForSelection } from '../provider/provider-config.js';
+import {
+  getCompactionProviderConfig,
+  getProviderConfigForSelection,
+} from '../provider/provider-config.js';
 import {
   appendSessionMessageV2 as appendSessionMessage,
   listSessionMessagesV2,

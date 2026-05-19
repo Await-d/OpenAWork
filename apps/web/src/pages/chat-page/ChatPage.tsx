@@ -59,7 +59,10 @@ import {
   type ChatRenderGroup,
 } from '../../components/chat/message/chat-message-group-list.js';
 import { ChatRemoteStreamPlaceholder } from '../../components/chat/session/chat-remote-stream-placeholder.js';
-import { ChatSearchOverlay, useChatSearch } from '../../components/chat/search/chat-search-overlay.js';
+import {
+  ChatSearchOverlay,
+  useChatSearch,
+} from '../../components/chat/search/chat-search-overlay.js';
 import { ChatSessionSkeleton } from '../../components/chat/session/chat-session-skeleton.js';
 import { CompanionStage } from '../../components/chat/companion/companion-stage.js';
 import { InlineQuestionPanel } from '../../components/chat/misc/InlineQuestionPanel.js';

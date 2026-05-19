@@ -134,7 +134,10 @@ import {
 } from '../session/session-manager-tools.js';
 import { createPermissionAskedEvent } from '../session/session-permission-events.js';
 import { createQuestionAskedEvent } from '../session/session-question-events.js';
-import { deleteSessionRunEventsByRequest, publishSessionRunEvent } from '../session/session-run-events.js';
+import {
+  deleteSessionRunEventsByRequest,
+  publishSessionRunEvent,
+} from '../session/session-run-events.js';
 import { reconcileSessionStateStatus } from '../session/session-runtime-state.js';
 import { deleteRequestSnapshots } from '../session/session-snapshot-store.js';
 import {
@@ -4108,9 +4111,8 @@ async function executeGatewayManagedToolImpl(
         sessionRow?.role_layer &&
         ['reception', 'pm1', 'pm2', 'executor', 'reviewer'].includes(sessionRow.role_layer)
       ) {
-        const { getInstruction, invokeInstruction } = await import(
-          '../handoff/capability/builtin-instructions.js'
-        );
+        const { getInstruction, invokeInstruction } =
+          await import('../handoff/capability/builtin-instructions.js');
         const layer = sessionRow.role_layer as
           | 'reception'
           | 'pm1'

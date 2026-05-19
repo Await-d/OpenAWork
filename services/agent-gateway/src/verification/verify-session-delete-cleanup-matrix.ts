@@ -10,7 +10,10 @@ import { persistSessionFileBackup } from '../session/session-file-backup-store.j
 import { persistSessionFileDiffs } from '../session/session-file-diff-store.js';
 import requestWorkflowPlugin from '../runtime/request-workflow.js';
 import { publishSessionRunEvent } from '../session/session-run-events.js';
-import { persistSessionSnapshot, createRequestSnapshotRef } from '../session/session-snapshot-store.js';
+import {
+  persistSessionSnapshot,
+  createRequestSnapshotRef,
+} from '../session/session-snapshot-store.js';
 import { sessionsRoutes } from '../routes/sessions.js';
 import { withTempEnv } from './task-verification-helpers.js';
 

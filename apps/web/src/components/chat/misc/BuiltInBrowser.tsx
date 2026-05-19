@@ -1021,7 +1021,11 @@ export function BuiltInBrowser({
                 ? 'color-mix(in oklch, var(--danger) 8%, transparent)'
                 : 'transparent',
             color:
-              errorCount > 0 ? 'var(--danger)' : consoleOpen ? 'var(--accent)' : 'var(--fg-default)',
+              errorCount > 0
+                ? 'var(--danger)'
+                : consoleOpen
+                  ? 'var(--accent)'
+                  : 'var(--fg-default)',
             cursor: 'pointer',
             flexShrink: 0,
             fontSize: 0,
@@ -1166,7 +1170,8 @@ export function BuiltInBrowser({
                   padding: '6px 10px',
                   borderRadius: 6,
                   background: 'color-mix(in oklch, var(--bg-overlay) 95%, var(--warning) 5%)',
-                  border: '1px solid color-mix(in oklch, var(--warning) 30%, var(--border-default))',
+                  border:
+                    '1px solid color-mix(in oklch, var(--warning) 30%, var(--border-default))',
                   fontSize: 10,
                   color: 'var(--fg-default)',
                   pointerEvents: 'none',

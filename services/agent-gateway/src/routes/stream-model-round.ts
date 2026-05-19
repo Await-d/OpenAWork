@@ -14,7 +14,10 @@ import {
 } from '../message/message-v2-adapter.js';
 import { streamMessagesWithParts } from '../message/message-store-v2.js';
 import { buildModifiedFilesSummaryContent } from '../tools/modified-files-summary.js';
-import { persistSessionSnapshot, createRequestSnapshotRef } from '../session/session-snapshot-store.js';
+import {
+  persistSessionSnapshot,
+  createRequestSnapshotRef,
+} from '../session/session-snapshot-store.js';
 import { appendSnapshotPart, appendPatchPart } from '../message/message-v2-adapter.js';
 import type { MessageID } from '../message/message-v2-schema.js';
 import { upsertArtifactsFromAssistantMessage } from '../session/assistant-content-artifacts.js';

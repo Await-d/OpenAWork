@@ -45,9 +45,15 @@ import {
   type PendingQuestionRequest,
   type PermissionDecision,
 } from '@openAwork/web-client';
-import type { ChatMessage, ChatMessagePart } from '../../../components/conversation-runtime/messages/support.js';
+import type {
+  ChatMessage,
+  ChatMessagePart,
+} from '../../../components/conversation-runtime/messages/support.js';
 import { normalizeChatMessages } from '../../../components/conversation-runtime/messages/support.js';
-import type { SessionStateStatus, SessionTodoItem } from '../../../components/conversation-runtime/session/session-runtime.js';
+import type {
+  SessionStateStatus,
+  SessionTodoItem,
+} from '../../../components/conversation-runtime/session/session-runtime.js';
 import type { ChatBackendUsageSnapshot } from '../../../components/conversation-runtime/stream/stream-usage.js';
 import type { StreamingThinkingBlock } from '../../../components/conversation-runtime/stream/streaming-thinking.js';
 import {
@@ -340,26 +346,22 @@ export function useTeamConversationState(
   }, [streaming, streamingSegments.length, streamBuffer.length]);
 
   // ─── stream reveal + scroll manager ───────────────────────────────
-  const {
-    streamingRef,
-    stoppingStreamRef,
-    currentAssistantStreamMessageIdRef,
-    resetStreamState,
-  } = useStreamReveal(prefersReducedMotion, {
-    setStreamBuffer,
-    setStreamThinkingBuffer,
-    setStreamThinkingBlocks,
-    setStreamingSegments,
-    setRecoveredStreamSnapshot: () => {
-      // session-conversation v0.3 does not surface RecoveredActiveAssistantStream
-      // outside the hook; this setter is a no-op so useStreamReveal can call it
-      // during reset without crashing.
-    },
-    setStreaming,
-    setStoppingStream,
-    setActiveStreamStartedAt,
-    setActiveStreamFirstTokenLatencyMs,
-  });
+  const { streamingRef, stoppingStreamRef, currentAssistantStreamMessageIdRef, resetStreamState } =
+    useStreamReveal(prefersReducedMotion, {
+      setStreamBuffer,
+      setStreamThinkingBuffer,
+      setStreamThinkingBlocks,
+      setStreamingSegments,
+      setRecoveredStreamSnapshot: () => {
+        // session-conversation v0.3 does not surface RecoveredActiveAssistantStream
+        // outside the hook; this setter is a no-op so useStreamReveal can call it
+        // during reset without crashing.
+      },
+      setStreaming,
+      setStoppingStream,
+      setActiveStreamStartedAt,
+      setActiveStreamFirstTokenLatencyMs,
+    });
 
   const { handleScroll: scrollManagerHandleScroll, scrollToBottom } = useScrollManager(
     {

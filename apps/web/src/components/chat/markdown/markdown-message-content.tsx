@@ -730,7 +730,8 @@ function MarkdownPreviewCodeBlock({
               previewOpen
                 ? {
                     background: 'color-mix(in oklch, var(--accent) 16%, var(--bg-overlay) 84%)',
-                    borderColor: 'color-mix(in oklch, var(--accent) 30%, var(--border-default) 70%)',
+                    borderColor:
+                      'color-mix(in oklch, var(--accent) 30%, var(--border-default) 70%)',
                     color: 'var(--accent)',
                   }
                 : undefined
@@ -795,8 +796,7 @@ function MarkdownPreviewCodeBlock({
               style={{
                 marginTop: -64,
                 height: 64,
-                background:
-                  'linear-gradient(transparent, var(--bg-overlay))',
+                background: 'linear-gradient(transparent, var(--bg-overlay))',
                 pointerEvents: 'none',
               }}
             />

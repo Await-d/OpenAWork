@@ -173,10 +173,9 @@ export function createPm2Runner(): HandoffTaskRunner {
     // 检查 plan 中是否违反基本架构规则（如：不允许直接操作 DB、必须通过 API 层等）
     // 增强：如果 workspace 有 architecture.md，从中提取禁止条款做对比。
     if (planArtifactId) {
-      const planRow = sqliteGet<{ content: string }>(
-        `SELECT content FROM artifacts WHERE id = ?`,
-        [planArtifactId],
-      );
+      const planRow = sqliteGet<{ content: string }>(`SELECT content FROM artifacts WHERE id = ?`, [
+        planArtifactId,
+      ]);
       if (planRow?.content) {
         // 尝试读取 workspace 的 architecture.md
         let architectureContent: string | null = null;
@@ -272,10 +271,7 @@ export function createPm2Runner(): HandoffTaskRunner {
  *
  * 返回违反描述列表（空 = 通过）。
  */
-function runArchitectureLint(
-  planContent: string,
-  architectureContent?: string | null,
-): string[] {
+function runArchitectureLint(planContent: string, architectureContent?: string | null): string[] {
   const violations: string[] = [];
   const lower = planContent.toLowerCase();
 
@@ -339,17 +335,14 @@ function runArchitectureLint(
         .split(/\s+/)
         .filter((w) => w.length >= 2)
         .filter(
-          (w) =>
-            !['使用', '进行', '操作', '任何', '所有', '相关', '直接', '间接'].includes(w),
+          (w) => !['使用', '进行', '操作', '任何', '所有', '相关', '直接', '间接'].includes(w),
         )
         .slice(0, 5);
 
       if (keywords.length === 0) continue;
 
       // 如果 plan 中包含该条款的多个关键词，视为潜在违反
-      const matchCount = keywords.filter(
-        (kw) => lower.includes(kw.toLowerCase()),
-      ).length;
+      const matchCount = keywords.filter((kw) => lower.includes(kw.toLowerCase())).length;
       if (matchCount >= Math.ceil(keywords.length * 0.6)) {
         violations.push(`可能违反 architecture.md 条款：「${prohibition.slice(0, 80)}」`);
       }

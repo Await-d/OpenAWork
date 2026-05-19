@@ -282,7 +282,9 @@ export function LayeredConversationView({ onSelectSessionDrawer }: LayeredConver
                 <span style={{ fontSize: 26 }} aria-hidden>
                   💬
                 </span>
-                <strong style={{ color: 'var(--fg-default)' }}>选择左侧 handoff 查看会话内容</strong>
+                <strong style={{ color: 'var(--fg-default)' }}>
+                  选择左侧 handoff 查看会话内容
+                </strong>
                 <span>右侧将以 chat 视图渲染对应 session 的执行流。</span>
               </div>
             )}

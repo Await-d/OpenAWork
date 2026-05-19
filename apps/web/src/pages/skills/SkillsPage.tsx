@@ -668,9 +668,7 @@ export default function SkillsPage() {
     return (
       <div className="page-root" style={{ overflowY: 'auto' }}>
         {detailLoading || !selectedDetail ? (
-          <div style={{ padding: '2rem', color: 'var(--fg-muted)', fontSize: 14 }}>
-            加载中...
-          </div>
+          <div style={{ padding: '2rem', color: 'var(--fg-muted)', fontSize: 14 }}>加载中...</div>
         ) : (
           <SkillDetailPage
             skill={selectedDetail}

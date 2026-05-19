@@ -142,7 +142,9 @@ export function UnlockOverlay({ onUnlocked }: { onUnlocked: () => void }) {
         </div>
 
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--fg-strong)', marginBottom: 6 }}>
+          <div
+            style={{ fontSize: 18, fontWeight: 700, color: 'var(--fg-strong)', marginBottom: 6 }}
+          >
             OpenAWork 已锁定
           </div>
           <div style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
@@ -174,7 +176,9 @@ export function UnlockOverlay({ onUnlocked }: { onUnlocked: () => void }) {
           ) : null}
         </div>
 
-        <div style={{ fontSize: 10, color: 'var(--fg-muted)', textAlign: 'center', lineHeight: 1.5 }}>
+        <div
+          style={{ fontSize: 10, color: 'var(--fg-muted)', textAlign: 'center', lineHeight: 1.5 }}
+        >
           忘记 PIN？请在桌面端可用时进入「设置 → 桌面端 → 解锁 PIN」， 或手动删除{' '}
           <code>~/.openAwork/desktop-settings.json</code> 中的 <code>pinHash</code> 字段。
         </div>

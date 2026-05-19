@@ -21,7 +21,10 @@ import type { FileTreeNode } from '../../common/modal/WorkspacePickerModal.js';
 import { preloadRouteModuleByPath } from '../../../routes/preloadable-route-modules.js';
 import { toast } from '../../common/feedback/ToastNotification.js';
 import { dispatchComposerReference } from '../../../utils/chat/composer-reference-events.js';
-import { UNBOUND_WORKSPACE_GROUP_KEY, getWorkspaceGroupKey } from '../../../utils/session/session-grouping.js';
+import {
+  UNBOUND_WORKSPACE_GROUP_KEY,
+  getWorkspaceGroupKey,
+} from '../../../utils/session/session-grouping.js';
 
 function getParentDir(path: string): string {
   if (path === '/') return '/';
@@ -873,7 +876,8 @@ export function SessionSidebar({
               justifyContent: 'center',
               gap: 5,
               borderRadius: 7,
-              border: sidebarTab === tab ? '1px solid var(--border-default)' : '1px solid transparent',
+              border:
+                sidebarTab === tab ? '1px solid var(--border-default)' : '1px solid transparent',
               background: sidebarTab === tab ? 'var(--bg-overlay)' : 'transparent',
               color: sidebarTab === tab ? 'var(--fg-strong)' : 'var(--fg-muted)',
               fontSize: 12,
@@ -1115,7 +1119,8 @@ export function SessionSidebar({
                 style={{
                   padding: '8px 10px',
                   borderRadius: 8,
-                  border: '1px solid color-mix(in oklab, var(--danger) 32%, var(--border-default) 68%)',
+                  border:
+                    '1px solid color-mix(in oklab, var(--danger) 32%, var(--border-default) 68%)',
                   background: 'color-mix(in oklab, var(--danger) 10%, var(--bg-overlay) 90%)',
                   color: 'var(--fg-default)',
                   fontSize: 11,
@@ -1480,108 +1485,108 @@ export function SessionSidebar({
             targetLabel={
               fileTreeContextMenu.targetType === 'root' ? '工作区根目录' : fileTreeContextMenu.name
             }
-          targetType={fileTreeContextMenu.targetType}
-          relativePath={getFileTreeRelativePath(fileTreeRootPath, fileTreeContextMenu.path)}
-          canOpen={fileTreeContextMenu.targetType === 'file' && Boolean(onOpenFile)}
-          canCreateSession={Boolean(fileTreeContextMenu.path)}
-          onClose={() => setFileTreeContextMenu(null)}
-          onOpen={() => {
-            if (fileTreeContextMenu.targetType === 'file') {
-              onOpenFile?.(fileTreeContextMenu.path);
-            }
-          }}
-          onCopyPath={() => handleCopyFileTreePath(fileTreeContextMenu.path, '完整路径')}
-          onCopyRelativePath={() => {
-            const relativePath = getFileTreeRelativePath(
-              fileTreeRootPath,
-              fileTreeContextMenu.path,
-            );
-            if (relativePath) {
-              handleCopyFileTreePath(relativePath, '相对路径');
-            }
-          }}
-          onReferenceInChat={() => handleReferenceFileTreeTarget(fileTreeContextMenu)}
-          onCreateSession={() => handleCreateSessionFromFileTreeTarget(fileTreeContextMenu)}
-          onCreateFile={() => {
-            const label =
-              fileTreeContextMenu.targetType === 'root'
-                ? '工作区根目录'
-                : fileTreeContextMenu.targetType === 'file'
-                  ? `${fileTreeContextMenu.name} 所在目录`
-                  : fileTreeContextMenu.name;
-            void handleCreateEntry('file', fileTreeContextMenu.directoryPath, label);
-          }}
-          onCreateFolder={() => {
-            const label =
-              fileTreeContextMenu.targetType === 'root'
-                ? '工作区根目录'
-                : fileTreeContextMenu.targetType === 'file'
-                  ? `${fileTreeContextMenu.name} 所在目录`
-                  : fileTreeContextMenu.name;
-            void handleCreateEntry('directory', fileTreeContextMenu.directoryPath, label);
-          }}
-          onRefresh={() => {
-            void refreshDirectory(fileTreeContextMenu.directoryPath);
-          }}
-          onDelete={
-            fileTreeContextMenu.targetType !== 'root'
-              ? () => {
-                  const targetPath = fileTreeContextMenu.path;
-                  const targetName = fileTreeContextMenu.name;
-                  const targetType = fileTreeContextMenu.targetType;
-                  const confirmMsg =
-                    targetType === 'directory'
-                      ? `确定要删除文件夹「${targetName}」及其所有内容吗？此操作不可撤销。`
-                      : `确定要删除文件「${targetName}」吗？此操作不可撤销。`;
-                  if (!window.confirm(confirmMsg)) return;
-                  void (async () => {
-                    try {
-                      if (!accessToken) return;
-                      await workspaceClient.deleteEntry(accessToken, targetPath);
-                      toast(`已删除: ${targetName}`, 'success');
-                      // Refresh the parent directory
-                      void refreshDirectory(fileTreeContextMenu.directoryPath);
-                      bumpWorkspaceTreeVersion();
-                    } catch (err) {
-                      const msg = err instanceof Error ? err.message : '删除失败';
-                      toast(msg, 'error');
-                    }
-                  })();
-                }
-              : undefined
-          }
-          onRename={
-            fileTreeContextMenu.targetType !== 'root'
-              ? () => {
-                  const targetPath = fileTreeContextMenu.path;
-                  const targetName = fileTreeContextMenu.name;
-                  const newName = window.prompt(`重命名「${targetName}」为：`, targetName);
-                  if (!newName || newName === targetName || !newName.trim()) return;
-                  if (!isValidFileTreeEntryName(newName.trim())) {
-                    toast('名称无效，请检查是否包含特殊字符', 'warning');
-                    return;
+            targetType={fileTreeContextMenu.targetType}
+            relativePath={getFileTreeRelativePath(fileTreeRootPath, fileTreeContextMenu.path)}
+            canOpen={fileTreeContextMenu.targetType === 'file' && Boolean(onOpenFile)}
+            canCreateSession={Boolean(fileTreeContextMenu.path)}
+            onClose={() => setFileTreeContextMenu(null)}
+            onOpen={() => {
+              if (fileTreeContextMenu.targetType === 'file') {
+                onOpenFile?.(fileTreeContextMenu.path);
+              }
+            }}
+            onCopyPath={() => handleCopyFileTreePath(fileTreeContextMenu.path, '完整路径')}
+            onCopyRelativePath={() => {
+              const relativePath = getFileTreeRelativePath(
+                fileTreeRootPath,
+                fileTreeContextMenu.path,
+              );
+              if (relativePath) {
+                handleCopyFileTreePath(relativePath, '相对路径');
+              }
+            }}
+            onReferenceInChat={() => handleReferenceFileTreeTarget(fileTreeContextMenu)}
+            onCreateSession={() => handleCreateSessionFromFileTreeTarget(fileTreeContextMenu)}
+            onCreateFile={() => {
+              const label =
+                fileTreeContextMenu.targetType === 'root'
+                  ? '工作区根目录'
+                  : fileTreeContextMenu.targetType === 'file'
+                    ? `${fileTreeContextMenu.name} 所在目录`
+                    : fileTreeContextMenu.name;
+              void handleCreateEntry('file', fileTreeContextMenu.directoryPath, label);
+            }}
+            onCreateFolder={() => {
+              const label =
+                fileTreeContextMenu.targetType === 'root'
+                  ? '工作区根目录'
+                  : fileTreeContextMenu.targetType === 'file'
+                    ? `${fileTreeContextMenu.name} 所在目录`
+                    : fileTreeContextMenu.name;
+              void handleCreateEntry('directory', fileTreeContextMenu.directoryPath, label);
+            }}
+            onRefresh={() => {
+              void refreshDirectory(fileTreeContextMenu.directoryPath);
+            }}
+            onDelete={
+              fileTreeContextMenu.targetType !== 'root'
+                ? () => {
+                    const targetPath = fileTreeContextMenu.path;
+                    const targetName = fileTreeContextMenu.name;
+                    const targetType = fileTreeContextMenu.targetType;
+                    const confirmMsg =
+                      targetType === 'directory'
+                        ? `确定要删除文件夹「${targetName}」及其所有内容吗？此操作不可撤销。`
+                        : `确定要删除文件「${targetName}」吗？此操作不可撤销。`;
+                    if (!window.confirm(confirmMsg)) return;
+                    void (async () => {
+                      try {
+                        if (!accessToken) return;
+                        await workspaceClient.deleteEntry(accessToken, targetPath);
+                        toast(`已删除: ${targetName}`, 'success');
+                        // Refresh the parent directory
+                        void refreshDirectory(fileTreeContextMenu.directoryPath);
+                        bumpWorkspaceTreeVersion();
+                      } catch (err) {
+                        const msg = err instanceof Error ? err.message : '删除失败';
+                        toast(msg, 'error');
+                      }
+                    })();
                   }
-                  void (async () => {
-                    try {
-                      if (!accessToken) return;
-                      const parentDir = fileTreeContextMenu.directoryPath;
-                      const newPath = joinFileTreePath(
-                        parentDir === targetPath ? getParentDir(targetPath) : parentDir,
-                        newName.trim(),
-                      );
-                      await workspaceClient.renameEntry(accessToken, targetPath, newPath);
-                      toast(`已重命名为: ${newName.trim()}`, 'success');
-                      void refreshDirectory(fileTreeContextMenu.directoryPath);
-                      bumpWorkspaceTreeVersion();
-                    } catch (err) {
-                      const msg = err instanceof Error ? err.message : '重命名失败';
-                      toast(msg, 'error');
+                : undefined
+            }
+            onRename={
+              fileTreeContextMenu.targetType !== 'root'
+                ? () => {
+                    const targetPath = fileTreeContextMenu.path;
+                    const targetName = fileTreeContextMenu.name;
+                    const newName = window.prompt(`重命名「${targetName}」为：`, targetName);
+                    if (!newName || newName === targetName || !newName.trim()) return;
+                    if (!isValidFileTreeEntryName(newName.trim())) {
+                      toast('名称无效，请检查是否包含特殊字符', 'warning');
+                      return;
                     }
-                  })();
-                }
-              : undefined
-          }
-        />,
+                    void (async () => {
+                      try {
+                        if (!accessToken) return;
+                        const parentDir = fileTreeContextMenu.directoryPath;
+                        const newPath = joinFileTreePath(
+                          parentDir === targetPath ? getParentDir(targetPath) : parentDir,
+                          newName.trim(),
+                        );
+                        await workspaceClient.renameEntry(accessToken, targetPath, newPath);
+                        toast(`已重命名为: ${newName.trim()}`, 'success');
+                        void refreshDirectory(fileTreeContextMenu.directoryPath);
+                        bumpWorkspaceTreeVersion();
+                      } catch (err) {
+                        const msg = err instanceof Error ? err.message : '重命名失败';
+                        toast(msg, 'error');
+                      }
+                    })();
+                  }
+                : undefined
+            }
+          />,
           document.body,
         )}
       {workspaceContextMenu &&

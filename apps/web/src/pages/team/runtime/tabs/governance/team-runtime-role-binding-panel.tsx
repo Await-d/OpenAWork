@@ -28,7 +28,11 @@ export function TeamRuntimeRoleBindingPanel({
       {error ? (
         <div
           className="content-card"
-          style={{ padding: 12, borderColor: 'rgba(244, 63, 94, 0.35)', color: 'var(--danger-muted)' }}
+          style={{
+            padding: 12,
+            borderColor: 'rgba(244, 63, 94, 0.35)',
+            color: 'var(--danger-muted)',
+          }}
         >
           {error}
         </div>
@@ -77,7 +81,8 @@ export function TeamRuntimeRoleBindingPanel({
                         alignItems: 'center',
                         padding: '4px 10px',
                         borderRadius: 999,
-                        border: '1px solid color-mix(in srgb, var(--border-default) 80%, transparent)',
+                        border:
+                          '1px solid color-mix(in srgb, var(--border-default) 80%, transparent)',
                         fontSize: 11,
                         color: 'var(--fg-default)',
                       }}

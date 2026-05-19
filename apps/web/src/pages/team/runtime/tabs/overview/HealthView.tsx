@@ -360,7 +360,9 @@ function StuckRow({
         {entry.state}
       </span>
       <span style={{ flex: 1 }} />
-      <span style={{ color: 'var(--fg-strong)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+      <span
+        style={{ color: 'var(--fg-strong)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}
+      >
         已等待 {formatMs(waitedMs)}
       </span>
       {onCancel ? (

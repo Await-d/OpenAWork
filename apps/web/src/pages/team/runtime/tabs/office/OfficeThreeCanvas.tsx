@@ -572,7 +572,14 @@ function addWorkstation(scene: THREE.Scene, x: number, z: number, faceAngle: num
     ctx.fillStyle = '#0b1323';
     ctx.fillRect(0, 0, 160, 100);
     ctx.font = '5px ui-monospace, monospace';
-    const lineColors = ['var(--aux))', 'var(--success))', 'var(--fg-muted))', 'var(--warning))', 'var(--aux))', 'var(--success))'];
+    const lineColors = [
+      'var(--aux))',
+      'var(--success))',
+      'var(--fg-muted))',
+      'var(--warning))',
+      'var(--aux))',
+      'var(--success))',
+    ];
     for (let row = 0; row < 12; row++) {
       const indent = row % 3 === 0 ? 8 : row % 3 === 1 ? 16 : 12;
       const lineW = 30 + Math.floor(Math.random() * 80);

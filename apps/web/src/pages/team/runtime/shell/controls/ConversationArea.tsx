@@ -23,7 +23,10 @@
  */
 
 import { useMemo, type CSSProperties, type ReactNode } from 'react';
-import { useTeamNotificationStore, type HandoffEvent } from '../../../../../stores/team/team-events.js';
+import {
+  useTeamNotificationStore,
+  type HandoffEvent,
+} from '../../../../../stores/team/team-events.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
 import { SuggestionBar } from './SuggestionBar.js';
 import { TeamConversationView } from '../../../conversation/TeamConversationView.js';
@@ -230,7 +233,9 @@ function LoadingState() {
   return (
     <div style={STATE_PANEL_STYLE} role="status" aria-live="polite">
       <span style={SPINNER_STYLE} aria-hidden="true" />
-      <span style={{ fontSize: 'var(--team-font-sm)', color: 'var(--fg-default)', fontWeight: 700 }}>
+      <span
+        style={{ fontSize: 'var(--team-font-sm)', color: 'var(--fg-default)', fontWeight: 700 }}
+      >
         正在连接团队...
       </span>
     </div>
@@ -311,7 +316,9 @@ function ErrorState({
         <strong style={{ fontSize: 'var(--team-font-md)', color: 'var(--fg-strong)' }}>
           ⚠️ 网络连接已断开
         </strong>
-        <span style={{ color: 'var(--fg-default)' }}>当前离线 — 可查看历史记录，无法执行新任务</span>
+        <span style={{ color: 'var(--fg-default)' }}>
+          当前离线 — 可查看历史记录，无法执行新任务
+        </span>
         <span style={{ color: 'var(--fg-muted)', fontSize: 'var(--team-font-xxs)' }}>{error}</span>
       </div>
       <button
@@ -403,7 +410,9 @@ function PushMessageCard({ message }: { message: PushMessage }) {
           {message.timestamp}
         </time>
       </div>
-      <span style={{ color: 'var(--fg-default)', lineHeight: 1.55, fontSize: 12 }}>{message.body}</span>
+      <span style={{ color: 'var(--fg-default)', lineHeight: 1.55, fontSize: 12 }}>
+        {message.body}
+      </span>
       {message.actions ? (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
           {message.actions.map((action) => (

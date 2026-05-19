@@ -682,7 +682,9 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
           {completedTaskCount > 0 && (
             <span style={{ color: 'var(--success))' }}>完成 {completedTaskCount}</span>
           )}
-          {failedTaskCount > 0 && <span style={{ color: 'var(--danger))' }}>失败 {failedTaskCount}</span>}
+          {failedTaskCount > 0 && (
+            <span style={{ color: 'var(--danger))' }}>失败 {failedTaskCount}</span>
+          )}
           <button
             type="button"
             onClick={() => onOpenFullSession(childSessionId)}
@@ -728,7 +730,9 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
             }}
           />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--warning))' }}>等待权限审批</div>
+            <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--warning))' }}>
+              等待权限审批
+            </div>
             {pendingPermissions
               .filter((permission) => permission.status === 'pending')
               .slice(0, 2)

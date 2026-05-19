@@ -63,7 +63,9 @@ export function SessionTerminalsChip(props: SessionTerminalsChipProps) {
           padding: '0 8px',
           borderRadius: 5,
           border: 'none',
-          background: open ? 'color-mix(in srgb, var(--success) 18%, var(--bg-overlay))' : 'transparent',
+          background: open
+            ? 'color-mix(in srgb, var(--success) 18%, var(--bg-overlay))'
+            : 'transparent',
           color: props.runningCount > 0 ? 'var(--success))' : 'var(--fg-muted)',
           boxShadow: open
             ? 'inset 0 0 0 1px color-mix(in srgb, var(--success) 50%, var(--border-default))'

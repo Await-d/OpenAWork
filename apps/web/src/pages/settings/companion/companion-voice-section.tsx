@@ -98,7 +98,10 @@ export function CompanionVoiceSection({ buddy }: CompanionVoiceSectionProps) {
         </label>
 
         <div style={{ display: 'grid', gap: 6 }}>
-          <span id={RATE_LABEL_ID} style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
+          <span
+            id={RATE_LABEL_ID}
+            style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}
+          >
             语速
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

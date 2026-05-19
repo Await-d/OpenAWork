@@ -47,7 +47,9 @@ export default function RetryModeDialog({
         }}
       >
         <div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--fg-strong)' }}>选择重试方式</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--fg-strong)' }}>
+            选择重试方式
+          </div>
           <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.6, color: 'var(--fg-default)' }}>
             你可以清空这轮回答后在当前会话重新生成，也可以从这里新建会话，避免影响现有历史。
           </div>

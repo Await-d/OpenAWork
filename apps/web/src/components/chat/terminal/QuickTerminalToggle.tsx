@@ -28,7 +28,9 @@ export function QuickTerminalToggle({ open, onToggle, disabled }: QuickTerminalT
         border: 'none',
         background: open ? 'color-mix(in srgb, var(--aux) 18%, var(--bg-overlay))' : 'transparent',
         color: open ? 'var(--aux))' : 'var(--fg-muted)',
-        boxShadow: open ? 'inset 0 0 0 1px color-mix(in srgb, var(--aux) 50%, var(--border-default))' : 'none',
+        boxShadow: open
+          ? 'inset 0 0 0 1px color-mix(in srgb, var(--aux) 50%, var(--border-default))'
+          : 'none',
         fontSize: 11,
         fontWeight: 600,
         cursor: disabled ? 'not-allowed' : 'pointer',

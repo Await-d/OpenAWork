@@ -435,7 +435,9 @@ export default function NotificationCenter({
             }}
           >
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-strong)' }}>通知中心</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-strong)' }}>
+                通知中心
+              </span>
               <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
                 {notifications.length === 0 ? '已全部清空' : `${notifications.length} 条未读`}
               </span>
@@ -481,7 +483,8 @@ export default function NotificationCenter({
                   padding: '4px 8px',
                   borderRadius: 6,
                   border: '1px solid var(--border-subtle)',
-                  background: notifications.length === 0 ? 'var(--bg-overlay)' : 'var(--bg-overlay)',
+                  background:
+                    notifications.length === 0 ? 'var(--bg-overlay)' : 'var(--bg-overlay)',
                   color: notifications.length === 0 ? 'var(--fg-muted)' : 'var(--fg-default)',
                   cursor: notifications.length === 0 ? 'not-allowed' : 'pointer',
                 }}

@@ -21,7 +21,12 @@ import { TeamsTab } from '../../tabs/governance/TeamsTab.js';
 import { ChromeBadge, CompactMetricPill } from '../team-runtime-shell-primitives.js';
 import { Icon } from '../../shared/TeamIcons.js';
 import type { IconKey } from '../../shared/TeamIcons.js';
-import { ViewGridIcon, ViewListIcon, ViewKanbanIcon, ViewSingleIcon } from '../../shared/TeamIcons.js';
+import {
+  ViewGridIcon,
+  ViewListIcon,
+  ViewKanbanIcon,
+  ViewSingleIcon,
+} from '../../shared/TeamIcons.js';
 
 const FULLSCREEN_OVERLAY_STYLE: CSSProperties = {
   position: 'fixed',
@@ -134,7 +139,9 @@ export function MainWorkspace({
           }}
         >
           <div style={{ display: 'grid', gap: 3 }}>
-            <span style={{ fontSize: 11, color: 'var(--fg-muted)', fontWeight: 700 }}>当前会话</span>
+            <span style={{ fontSize: 11, color: 'var(--fg-muted)', fontWeight: 700 }}>
+              当前会话
+            </span>
             <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--fg-strong)' }}>
               {selectedTeam.title}
             </span>

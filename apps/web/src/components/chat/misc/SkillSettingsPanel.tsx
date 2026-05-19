@@ -567,11 +567,15 @@ export default function SkillSettingsPanel(
           Workspace 默认
         </button>
         {loading ? (
-          <span style={{ fontSize: 11, color: 'var(--fg-muted)', alignSelf: 'center' }}>加载中…</span>
+          <span style={{ fontSize: 11, color: 'var(--fg-muted)', alignSelf: 'center' }}>
+            加载中…
+          </span>
         ) : null}
       </div>
 
-      {error ? <div style={{ padding: 8, color: 'var(--danger))', fontSize: 11 }}>{error}</div> : null}
+      {error ? (
+        <div style={{ padding: 8, color: 'var(--danger))', fontSize: 11 }}>{error}</div>
+      ) : null}
       {hint ? <div style={{ padding: 8, color: 'var(--accent)', fontSize: 11 }}>{hint}</div> : null}
 
       {tab === 'workspace' ? (

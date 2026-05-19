@@ -209,7 +209,9 @@ function TemplateDetailView({
     <div style={{ display: 'grid', gap: 14, padding: '16px 20px', overflow: 'auto' }}>
       {/* Header with actions */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--fg-strong)' }}>{template.name}</span>
+        <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--fg-strong)' }}>
+          {template.name}
+        </span>
         <div style={{ display: 'flex', gap: 6 }}>
           <button
             type="button"

@@ -17,10 +17,10 @@
  */
 
 export type LatencyType =
-  | 'a_to_b_direct'       // 用户输入 → b 直答回复
-  | 'a_to_b_ack'          // 用户输入 → "已开始处理"确认
-  | 'substate_push'       // substate 变更 → 前端收到推送
-  | 'progress_interval';  // 两次进度推送之间的间隔
+  | 'a_to_b_direct' // 用户输入 → b 直答回复
+  | 'a_to_b_ack' // 用户输入 → "已开始处理"确认
+  | 'substate_push' // substate 变更 → 前端收到推送
+  | 'progress_interval'; // 两次进度推送之间的间隔
 
 interface LatencyThreshold {
   p95Ms: number;

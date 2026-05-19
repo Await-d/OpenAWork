@@ -272,7 +272,10 @@ async function waitForClarificationAnswers(input: {
     }
     if (hasPendingCancelSignal(input.sessionId)) {
       // cancel_signal 优先级最高（ORDER BY priority=0），consumePending 一定返回它
-      const cancelMsg = consumePendingInboundMessage({ toSessionId: input.sessionId, loopIteration });
+      const cancelMsg = consumePendingInboundMessage({
+        toSessionId: input.sessionId,
+        loopIteration,
+      });
       if (cancelMsg && cancelMsg.messageType === 'cancel_signal') {
         throw new Error('cancelled-by-inbound');
       }
@@ -283,7 +286,8 @@ async function waitForClarificationAnswers(input: {
         if (cancelMsg.messageType === 'clarification_answer') {
           const payload = (cancelMsg.payload ?? {}) as Record<string, unknown>;
           const answerText = typeof payload['answer'] === 'string' ? payload['answer'] : '';
-          const questionId = typeof payload['questionId'] === 'string' ? payload['questionId'] : null;
+          const questionId =
+            typeof payload['questionId'] === 'string' ? payload['questionId'] : null;
           if (answerText.trim()) {
             collected.push({ questionId, answer: answerText, receivedAt: cancelMsg.createdAt });
           }

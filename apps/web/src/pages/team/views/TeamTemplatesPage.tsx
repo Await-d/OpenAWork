@@ -16,12 +16,7 @@ import {
   editorStateToTemplateData,
 } from '../runtime/tabs/governance/TemplateEditorPanel.js';
 import { TemplateDetailView } from '../runtime/tabs/governance/TemplateDetailView.js';
-import {
-  PlusIcon,
-  TemplateIcon,
-  SyncIcon,
-  CollapseLeftIcon,
-} from '../runtime/shared/TeamIcons.js';
+import { PlusIcon, TemplateIcon, SyncIcon, CollapseLeftIcon } from '../runtime/shared/TeamIcons.js';
 
 /* ── Template list item ───────────────────────────────────────────────── */
 
@@ -362,7 +357,9 @@ export default function TeamTemplatesPage() {
               <CollapseLeftIcon size={14} color="currentColor" />
             </button>
             <TemplateIcon size={18} color="var(--accent)" />
-            <span style={{ fontSize: 17, fontWeight: 800, color: 'var(--fg-strong)' }}>模板管理</span>
+            <span style={{ fontSize: 17, fontWeight: 800, color: 'var(--fg-strong)' }}>
+              模板管理
+            </span>
             <span
               style={{
                 minWidth: 22,
@@ -591,7 +588,9 @@ export default function TeamTemplatesPage() {
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--fg-strong)' }}>确认删除</span>
+            <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--fg-strong)' }}>
+              确认删除
+            </span>
             <span style={{ fontSize: 12, color: 'var(--fg-default)', lineHeight: 1.6 }}>
               删除后无法恢复，确定要删除此模板吗？
             </span>

@@ -27,15 +27,8 @@ export function CompanionDefaultPersonaSection({
   buddy,
   email,
 }: CompanionDefaultPersonaSectionProps) {
-  const {
-    enabled,
-    profile,
-    reducedMotion,
-    setEnabled,
-    setThemeVariant,
-    syncStatus,
-    themeVariant,
-  } = buddy;
+  const { enabled, profile, reducedMotion, setEnabled, setThemeVariant, syncStatus, themeVariant } =
+    buddy;
 
   return (
     <section style={SS} aria-labelledby="buddy-default-persona-title">
@@ -44,9 +37,7 @@ export function CompanionDefaultPersonaSection({
       </div>
 
       <label style={{ display: 'grid', gap: 6 }}>
-        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
-          默认主题
-        </span>
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>默认主题</span>
         <select
           aria-label="Buddy 默认主题"
           value={themeVariant}

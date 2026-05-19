@@ -120,9 +120,7 @@ export function ArtifactVersionTimeline({
                         padding: '0 10px',
                         borderRadius: tokens.radius.sm,
                         border: `1px solid ${tokens.color.borderSubtle}`,
-                        background: disabled
-                          ? 'var(--bg-overlay)'
-                          : 'var(--bg-overlay)',
+                        background: disabled ? 'var(--bg-overlay)' : 'var(--bg-overlay)',
                         color: disabled ? 'var(--fg-muted)' : 'var(--fg-strong)',
                         fontSize: 11,
                         cursor: disabled ? 'not-allowed' : 'pointer',

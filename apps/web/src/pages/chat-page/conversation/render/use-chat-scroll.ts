@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { isScrollTopNearLatest, resolveLatestScrollTop } from '../../../../components/conversation-runtime/scroll/scroll-alignment.js';
+import {
+  isScrollTopNearLatest,
+  resolveLatestScrollTop,
+} from '../../../../components/conversation-runtime/scroll/scroll-alignment.js';
 import {
   CHAT_SCROLL_BOTTOM_PADDING,
   CHAT_SCROLL_BOTTOM_SPACER_HEIGHT,

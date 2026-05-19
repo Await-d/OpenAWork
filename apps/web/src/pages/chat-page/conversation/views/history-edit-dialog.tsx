@@ -166,7 +166,9 @@ export default function HistoryEditDialog({
           </div>
         )}
         <div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--fg-strong)' }}>编辑历史消息</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--fg-strong)' }}>
+            编辑历史消息
+          </div>
           <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.6, color: 'var(--fg-default)' }}>
             这是历史消息。你可以编辑后重新发送（截断后续消息），在末尾追加，或从这里新建子会话。
           </div>

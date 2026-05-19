@@ -718,7 +718,9 @@ export function ModelSettingsPopover({
           模型设置
         </div>
         <div style={{ marginBottom: 9 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-strong)', marginBottom: 4 }}>
+          <div
+            style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-strong)', marginBottom: 4 }}
+          >
             {modelLabel}
           </div>
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>

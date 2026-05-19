@@ -364,7 +364,9 @@ export default function SkillRecommendationDrawer(
               <span
                 style={{
                   ...PILL,
-                  background: recommendation.fellBackToHeuristic ? 'var(--warning-subtle)' : 'var(--accent-soft)',
+                  background: recommendation.fellBackToHeuristic
+                    ? 'var(--warning-subtle)'
+                    : 'var(--accent-soft)',
                   color: recommendation.fellBackToHeuristic ? 'var(--warning))' : 'var(--accent)',
                   alignSelf: 'center',
                 }}
@@ -383,7 +385,9 @@ export default function SkillRecommendationDrawer(
           ) : null}
 
           {!recommendation && !loading ? (
-            <div style={{ fontSize: 13, color: 'var(--fg-muted)', padding: 16, textAlign: 'center' }}>
+            <div
+              style={{ fontSize: 13, color: 'var(--fg-muted)', padding: 16, textAlign: 'center' }}
+            >
               尚无推荐结果。点击「生成推荐」让 AI 基于项目信号给出建议。
             </div>
           ) : null}

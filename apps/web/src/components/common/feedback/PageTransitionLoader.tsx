@@ -211,8 +211,7 @@ const PageTransitionLoader = memo(function PageTransitionLoader({
               position: 'absolute',
               inset: 0,
               borderRadius: 999,
-              background:
-                'linear-gradient(90deg, transparent, var(--accent-muted), transparent)',
+              background: 'linear-gradient(90deg, transparent, var(--accent-muted), transparent)',
               animation: animate
                 ? 'route-loader-track-tail 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite'
                 : undefined,
@@ -225,8 +224,7 @@ const PageTransitionLoader = memo(function PageTransitionLoader({
               position: 'absolute',
               inset: 0,
               borderRadius: 999,
-              background:
-                'linear-gradient(90deg, transparent, var(--accent), transparent)',
+              background: 'linear-gradient(90deg, transparent, var(--accent), transparent)',
               animation: animate
                 ? 'route-loader-track 1.5s cubic-bezier(0.22, 1, 0.36, 1) infinite'
                 : undefined,

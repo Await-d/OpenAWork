@@ -89,7 +89,9 @@ export function RailEmptyState({ description, title }: { description: string; ti
   return (
     <div style={TEAM_RUNTIME_INSET_PANEL_STYLE}>
       <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-strong)' }}>{title}</span>
-      <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.65 }}>{description}</span>
+      <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.65 }}>
+        {description}
+      </span>
     </div>
   );
 }

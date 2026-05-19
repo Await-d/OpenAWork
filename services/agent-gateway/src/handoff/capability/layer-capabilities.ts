@@ -241,7 +241,9 @@ export class LayerCapabilityViolationError extends Error {
     target: string;
     detail: string;
   }) {
-    super(`[layer-capability] ${input.callerLayer} → ${input.kind}=${input.target}: ${input.detail}`);
+    super(
+      `[layer-capability] ${input.callerLayer} → ${input.kind}=${input.target}: ${input.detail}`,
+    );
     this.name = 'LayerCapabilityViolationError';
     this.kind = input.kind;
     this.callerLayer = input.callerLayer;

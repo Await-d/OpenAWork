@@ -6,7 +6,10 @@ import { closeDb, connectDb, migrate, sqliteRun } from '../infra/db.js';
 import requestWorkflowPlugin from '../runtime/request-workflow.js';
 import { streamRoutes } from '../routes/stream-routes-plugin.js';
 import { sessionsRoutes } from '../routes/sessions.js';
-import { persistSessionRunEventForRequest, publishSessionRunEvent } from '../session/session-run-events.js';
+import {
+  persistSessionRunEventForRequest,
+  publishSessionRunEvent,
+} from '../session/session-run-events.js';
 import { upsertSessionRuntimeThread } from '../session/session-runtime-thread-store.js';
 import { assert, withTempEnv } from './task-verification-helpers.js';
 

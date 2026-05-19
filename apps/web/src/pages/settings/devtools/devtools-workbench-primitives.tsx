@@ -94,7 +94,9 @@ export function InlineFailureNotice({ title, message }: { title: string; message
       }}
     >
       <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--danger)' }}>{title}</div>
-      <div style={{ fontSize: 12, color: 'var(--fg-default)', wordBreak: 'break-word' }}>{message}</div>
+      <div style={{ fontSize: 12, color: 'var(--fg-default)', wordBreak: 'break-word' }}>
+        {message}
+      </div>
     </div>
   );
 }
@@ -182,9 +184,17 @@ export function SourceOverviewCard({
           ) : null}
         </div>
       </div>
-      <div style={{ fontSize: 11, color: 'var(--fg-default)', lineHeight: 1.4 }}>{source.detail}</div>
+      <div style={{ fontSize: 11, color: 'var(--fg-default)', lineHeight: 1.4 }}>
+        {source.detail}
+      </div>
       <div
-        style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 10, color: 'var(--fg-muted)' }}
+        style={{
+          display: 'flex',
+          gap: 8,
+          flexWrap: 'wrap',
+          fontSize: 10,
+          color: 'var(--fg-muted)',
+        }}
       >
         <span>更新：{formatUpdatedAt(source.updatedAt)}</span>
         {source.count !== null ? <span>{source.count} 条</span> : null}
@@ -504,7 +514,9 @@ export function LogDetailsPanel({ log }: { log: SettingsDevLogRecord | null }) {
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-strong)' }}>{log.message}</div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-strong)' }}>
+            {log.message}
+          </div>
           <div
             style={{
               display: 'flex',
@@ -661,7 +673,9 @@ export function WorkerDetailsPanel({ worker }: { worker: WorkerEntry | null }) {
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-strong)' }}>{worker.name}</div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-strong)' }}>
+            {worker.name}
+          </div>
           <div
             style={{
               display: 'flex',

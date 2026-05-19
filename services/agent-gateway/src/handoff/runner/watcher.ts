@@ -280,7 +280,11 @@ export class HandoffWatcher {
           if (didComplete) {
             publishHandoffEvent({
               type: 'handoff.completed',
-              record: { ...input.handoff, toSessionId: input.toSessionId, state: 'completed' as const },
+              record: {
+                ...input.handoff,
+                toSessionId: input.toSessionId,
+                state: 'completed' as const,
+              },
             });
           }
 
@@ -315,7 +319,9 @@ export class HandoffWatcher {
               if (completedRow?.result_json) {
                 try {
                   resultJson = JSON.parse(completedRow.result_json) as Record<string, unknown>;
-                } catch { /* ignore */ }
+                } catch {
+                  /* ignore */
+                }
               }
               // 从原始 handoff payload 读 teamWorkspaceId
               const originalPayload = input.handoff.payload as Record<string, unknown> | null;
@@ -354,18 +360,27 @@ export class HandoffWatcher {
           ) {
             try {
               const { sqliteAll, sqliteGet } = await import('../../infra/db.js');
-              const { appendSessionMessageV2 } = await import('../../message/message-v2-adapter.js');
+              const { appendSessionMessageV2 } =
+                await import('../../message/message-v2-adapter.js');
               const { setSubstate } = await import('../store/substate-store.js');
-              const { resolveAuxiliaryLlmConfig } = await import('../../provider/auxiliary-llm-config.js');
-              const { runReviewAggregation, checkAllChildrenCompleted, determineFailureDisposition } =
-                await import('../workflow/review-aggregator.js');
+              const { resolveAuxiliaryLlmConfig } =
+                await import('../../provider/auxiliary-llm-config.js');
+              const {
+                runReviewAggregation,
+                checkAllChildrenCompleted,
+                determineFailureDisposition,
+              } = await import('../workflow/review-aggregator.js');
               const { getTeamConstitution } = await import('../../team/team-constitution-store.js');
 
               // 找到 pm2 session（即当前 handoff 的 from_session_id）
               const pm2SessionId = input.handoff.fromSessionId;
 
               // 找到 pm2 handoff（to_session_id = pm2SessionId）
-              const pm2HandoffRow = sqliteGet<{ id: string; payload_json: string; user_id: string }>(
+              const pm2HandoffRow = sqliteGet<{
+                id: string;
+                payload_json: string;
+                user_id: string;
+              }>(
                 `SELECT id, payload_json, user_id FROM handoff_records
                  WHERE to_session_id = ? AND to_role_layer = 'pm2'
                  ORDER BY created_at DESC LIMIT 1`,
@@ -394,7 +409,10 @@ export class HandoffWatcher {
               let specContent = '';
               let constitutionBody = '';
               try {
-                const pm2Payload = JSON.parse(pm2HandoffRow.payload_json || '{}') as Record<string, unknown>;
+                const pm2Payload = JSON.parse(pm2HandoffRow.payload_json || '{}') as Record<
+                  string,
+                  unknown
+                >;
                 const resultJson = pm2Payload['resultJson'] as Record<string, unknown> | null;
                 const specArtifactId = resultJson?.['specArtifactId'] as string | null;
                 const teamWorkspaceId = (pm2Payload['teamWorkspaceId'] as string) ?? null;
@@ -421,14 +439,17 @@ export class HandoffWatcher {
               // 尝试获取 LLM 配置来跑完整 review
               const llmConfig = await resolveAuxiliaryLlmConfig(input.handoff.userId);
               if (llmConfig) {
-                const { requestWorkflowLlmCompletion } = await import('../../routes/workflow-llm.js');
+                const { requestWorkflowLlmCompletion } =
+                  await import('../../routes/workflow-llm.js');
                 const callLlm = async (system: string, user: string): Promise<string> => {
                   return requestWorkflowLlmCompletion({
                     apiBaseUrl: llmConfig.apiBaseUrl,
                     apiKey: llmConfig.apiKey,
                     model: llmConfig.model,
                     ...(llmConfig.providerType ? { providerType: llmConfig.providerType } : {}),
-                    ...(llmConfig.upstreamProtocol ? { upstreamProtocol: llmConfig.upstreamProtocol } : {}),
+                    ...(llmConfig.upstreamProtocol
+                      ? { upstreamProtocol: llmConfig.upstreamProtocol }
+                      : {}),
                     prompt: `${system}\n\n---\n\n${user}`,
                     temperature: 0.1,
                   });
@@ -487,7 +508,12 @@ export class HandoffWatcher {
                       sessionId: pm2SessionId,
                       userId: input.handoff.userId,
                       role: 'assistant',
-                      content: [{ type: 'text', text: `⚠️ 实现型失败，准备重新派发。原因：${disposition.reason}` }],
+                      content: [
+                        {
+                          type: 'text',
+                          text: `⚠️ 实现型失败，准备重新派发。原因：${disposition.reason}`,
+                        },
+                      ],
                     });
                     // 注：实际重新派发需要重新调 pm2-runner 的 dispatch 逻辑。
                     // 当前通过 retry_count+1 + 退回 pending 让 watcher 重新 claim 来实现。
@@ -512,7 +538,12 @@ export class HandoffWatcher {
                       sessionId: pm2SessionId,
                       userId: input.handoff.userId,
                       role: 'assistant',
-                      content: [{ type: 'text', text: `⚠️ 规划型失败，退回 PM1 重新规划。原因：${disposition.reason}` }],
+                      content: [
+                        {
+                          type: 'text',
+                          text: `⚠️ 规划型失败，退回 PM1 重新规划。原因：${disposition.reason}`,
+                        },
+                      ],
                     });
                     // 通知 reception 层（通过 inbound escalation_request）
                     const { submitInboundMessage } = await import('../store/inbound-store.js');
@@ -555,7 +586,12 @@ export class HandoffWatcher {
                       sessionId: pm2SessionId,
                       userId: input.handoff.userId,
                       role: 'assistant',
-                      content: [{ type: 'text', text: `🔴 多次重试仍未通过评审，需要用户介入。原因：${disposition.reason}` }],
+                      content: [
+                        {
+                          type: 'text',
+                          text: `🔴 多次重试仍未通过评审，需要用户介入。原因：${disposition.reason}`,
+                        },
+                      ],
                     });
                     // 通知 reception
                     const { submitInboundMessage } = await import('../store/inbound-store.js');

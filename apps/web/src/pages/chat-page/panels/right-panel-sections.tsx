@@ -293,7 +293,8 @@ export function ChatHistoryTabContent(props: {
                           lineHeight: 1,
                           padding: '1px 4px',
                           borderRadius: 999,
-                          border: '1px solid color-mix(in oklch, var(--accent) 24%, var(--border-default))',
+                          border:
+                            '1px solid color-mix(in oklch, var(--accent) 24%, var(--border-default))',
                           color: 'color-mix(in oklch, var(--accent) 80%, var(--fg-muted))',
                           background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
                         }}
@@ -324,7 +325,8 @@ export function ChatHistoryTabContent(props: {
                           lineHeight: 1,
                           padding: '1px 4px',
                           borderRadius: 999,
-                          border: '1px solid color-mix(in srgb, var(--warning) 55%, var(--border-default))',
+                          border:
+                            '1px solid color-mix(in srgb, var(--warning) 55%, var(--border-default))',
                           color: 'var(--warning))',
                           background: 'color-mix(in srgb, var(--warning) 10%, transparent)',
                         }}
@@ -566,11 +568,17 @@ export function ChatHistoryTabContent(props: {
               {compactions.map((item) => (
                 <div key={item.id} style={{ fontSize: 12, color: 'var(--fg-strong)' }}>
                   <div
-                    style={{ ...PANEL_SECTION_LABEL_STYLE, marginBottom: 4, color: 'var(--fg-strong)' }}
+                    style={{
+                      ...PANEL_SECTION_LABEL_STYLE,
+                      marginBottom: 4,
+                      color: 'var(--fg-strong)',
+                    }}
                   >
                     {item.trigger === 'manual' ? '手动压缩' : '自动压缩'}
                   </div>
-                  <div style={{ color: 'var(--fg-default)', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+                  <div
+                    style={{ color: 'var(--fg-default)', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}
+                  >
                     {item.summary}
                   </div>
                 </div>
@@ -598,12 +606,22 @@ export function ChatHistoryTabContent(props: {
                   }}
                 >
                   <div
-                    style={{ fontSize: 11, fontWeight: 700, color: 'var(--fg-strong)', lineHeight: 1.4 }}
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: 'var(--fg-strong)',
+                      lineHeight: 1.4,
+                    }}
                   >
                     {permission.toolName}
                   </div>
                   <div
-                    style={{ fontSize: 10, color: 'var(--fg-muted)', marginTop: 2, lineHeight: 1.45 }}
+                    style={{
+                      fontSize: 10,
+                      color: 'var(--fg-muted)',
+                      marginTop: 2,
+                      lineHeight: 1.45,
+                    }}
                   >
                     {permission.reason}
                   </div>
@@ -1166,7 +1184,9 @@ export function ChatOverviewTabContent(props: {
           }}
         >
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--fg-strong)', marginBottom: 2 }}>
+            <div
+              style={{ fontSize: 11, fontWeight: 700, color: 'var(--fg-strong)', marginBottom: 2 }}
+            >
               上下文
             </div>
             <div style={{ fontSize: 10, color: 'var(--fg-muted)', lineHeight: 1.4 }}>

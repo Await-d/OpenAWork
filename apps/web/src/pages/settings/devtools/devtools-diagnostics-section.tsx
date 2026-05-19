@@ -284,7 +284,9 @@ export function DevtoolsDiagnosticsSection({
                   style={{
                     flex: 1,
                     background: 'var(--bg-overlay)',
-                    border: diagnosticQuery ? '1px solid var(--danger)' : '1px solid var(--border-default)',
+                    border: diagnosticQuery
+                      ? '1px solid var(--danger)'
+                      : '1px solid var(--border-default)',
                     borderRadius: 6,
                     padding: '7px 32px 7px 10px',
                     color: 'var(--fg-strong)',
@@ -468,7 +470,9 @@ export function DevtoolsDiagnosticsSection({
                   alignItems: 'center',
                 }}
               >
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-strong)' }}>错误列表</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-strong)' }}>
+                  错误列表
+                </div>
                 <div
                   style={{
                     fontSize: 11,
@@ -711,7 +715,9 @@ export function DevtoolsDiagnosticsSection({
           }}
         >
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-strong)', marginBottom: 4 }}>
+            <div
+              style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-strong)', marginBottom: 4 }}
+            >
               当前筛选条件无匹配结果
             </div>
             <div style={{ fontSize: 12, color: 'var(--fg-default)' }}>

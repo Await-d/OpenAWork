@@ -385,7 +385,13 @@ export function WorkspaceTabContent({
               .crushignore 规则
             </span>
           </div>
-          <div style={{ borderRadius: 6, border: '1px solid var(--border-default)', overflow: 'hidden' }}>
+          <div
+            style={{
+              borderRadius: 6,
+              border: '1px solid var(--border-default)',
+              overflow: 'hidden',
+            }}
+          >
             <FileFilterSettings
               patterns={filePatterns}
               onAdd={(p) => setFilePatterns((prev) => [...prev, p])}
@@ -481,7 +487,13 @@ export function WorkspaceTabContent({
               当前模式：{desktopAutomationEnabled ? '桌面 Sidecar' : 'Web 降级'}
             </div>
             {desktopAutomationEnabled ? (
-              <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border-default)' }}>
+              <div
+                style={{
+                  marginTop: 6,
+                  paddingTop: 6,
+                  borderTop: '1px solid var(--border-default)',
+                }}
+              >
                 <span style={{ ...SECTION_SUB, fontWeight: 700, color: 'var(--fg-default)' }}>
                   操作控制台
                 </span>
@@ -731,7 +743,12 @@ export function WorkspaceTabContent({
                   {GITHUB_EVENTS.map((ev) => (
                     <label
                       key={ev}
-                      style={{ ...ROW, fontSize: 10, color: 'var(--fg-default)', cursor: 'pointer' }}
+                      style={{
+                        ...ROW,
+                        fontSize: 10,
+                        color: 'var(--fg-default)',
+                        cursor: 'pointer',
+                      }}
                     >
                       <input
                         type="checkbox"
@@ -758,7 +775,9 @@ export function WorkspaceTabContent({
                     setTriggerForm((f) => ({ ...f, agentPromptTemplate: e.target.value }))
                   }
                 />
-                <label style={{ ...ROW, fontSize: 10, color: 'var(--fg-default)', cursor: 'pointer' }}>
+                <label
+                  style={{ ...ROW, fontSize: 10, color: 'var(--fg-default)', cursor: 'pointer' }}
+                >
                   <input
                     type="checkbox"
                     checked={triggerForm.autoApprove}

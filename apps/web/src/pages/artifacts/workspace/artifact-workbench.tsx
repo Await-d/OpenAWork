@@ -69,8 +69,7 @@ export function ArtifactWorkbench({
           padding: tokens.spacing.xl,
           borderRadius: tokens.radius.xl,
           border: `1px solid ${tokens.color.borderSubtle}`,
-          background:
-            'linear-gradient(180deg, var(--bg-overlay), var(--bg-base))',
+          background: 'linear-gradient(180deg, var(--bg-overlay), var(--bg-base))',
           color: 'var(--fg-muted)',
           textAlign: 'center',
           lineHeight: 1.7,

@@ -109,7 +109,9 @@ export function TabPlaceholder({
         </div>
 
         {subtitle ? (
-          <span style={{ fontSize: 13, color: 'var(--fg-default)', lineHeight: 1.6 }}>{subtitle}</span>
+          <span style={{ fontSize: 13, color: 'var(--fg-default)', lineHeight: 1.6 }}>
+            {subtitle}
+          </span>
         ) : null}
 
         {bullets && bullets.length > 0 ? (

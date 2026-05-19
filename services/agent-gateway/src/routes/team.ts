@@ -1957,7 +1957,8 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           const hatchType =
             body.data.messageType === 'escalation_request'
               ? '#1 escalation'
-              : body.data.messageType === 'cancel_signal' || body.data.messageType === 'pause_signal'
+              : body.data.messageType === 'cancel_signal' ||
+                  body.data.messageType === 'pause_signal'
                 ? '#3 cancel/pause'
                 : '#3 resume';
           try {
@@ -2064,7 +2065,9 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           if (typeof requestStartMs === 'number') {
             recordLatency('a_to_b_ack', Date.now() - requestStartMs);
           }
-        } catch { /* latency monitor 不阻塞 */ }
+        } catch {
+          /* latency monitor 不阻塞 */
+        }
 
         return reply.status(result.reused ? 200 : 201).send({
           messageId: result.record.id,

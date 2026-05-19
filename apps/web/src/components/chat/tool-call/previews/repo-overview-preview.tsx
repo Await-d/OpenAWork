@@ -134,7 +134,9 @@ export function RepoOverviewPreview({ data }: { data: RepoOverviewOutputShape })
           when `repository` is set so users see both the human-readable
           name and the absolute cache location. */}
       {data.repository && (
-        <div style={{ color: 'var(--fg-default)', fontFamily: 'var(--mono)', wordBreak: 'break-all' }}>
+        <div
+          style={{ color: 'var(--fg-default)', fontFamily: 'var(--mono)', wordBreak: 'break-all' }}
+        >
           {data.path}
         </div>
       )}

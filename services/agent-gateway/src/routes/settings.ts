@@ -1404,7 +1404,9 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         body.data.agentId,
       );
       const profile = companionSettings.profile;
-      const intro = (await import('../workspace/companion-settings.js')).buildCompanionIntroText(profile);
+      const intro = (await import('../workspace/companion-settings.js')).buildCompanionIntroText(
+        profile,
+      );
 
       const contextParts: string[] = [];
       if (body.data.context) {

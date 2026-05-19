@@ -133,7 +133,11 @@ export function ConversationTab({
                 }}
               >
                 {meta && (
-                  <Icon name={meta.icon} size={9} color={isActive ? meta.color : 'var(--fg-muted)'} />
+                  <Icon
+                    name={meta.icon}
+                    size={9}
+                    color={isActive ? meta.color : 'var(--fg-muted)'}
+                  />
                 )}
                 {opt.label}
               </button>

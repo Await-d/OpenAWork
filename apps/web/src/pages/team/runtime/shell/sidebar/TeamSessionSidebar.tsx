@@ -745,7 +745,12 @@ export function SessionSidebar({
                   }}
                 >
                   <span
-                    style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-strong)', lineHeight: 1.3 }}
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: 'var(--fg-strong)',
+                      lineHeight: 1.3,
+                    }}
                   >
                     {item.title}
                   </span>

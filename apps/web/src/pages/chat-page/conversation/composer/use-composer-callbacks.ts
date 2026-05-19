@@ -1,6 +1,13 @@
 import { useCallback } from 'react';
-import type { SlashCommandItem, MentionItem, ComposerMenuState } from '../../../../components/conversation-runtime/messages/support.js';
-import { sanitizeComposerPlainText, detectComposerTrigger } from '../../../../components/conversation-runtime/messages/support.js';
+import type {
+  SlashCommandItem,
+  MentionItem,
+  ComposerMenuState,
+} from '../../../../components/conversation-runtime/messages/support.js';
+import {
+  sanitizeComposerPlainText,
+  detectComposerTrigger,
+} from '../../../../components/conversation-runtime/messages/support.js';
 
 export interface ComposerCallbacksOptions {
   composerMenu: ComposerMenuState | null;

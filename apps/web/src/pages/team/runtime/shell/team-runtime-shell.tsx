@@ -735,7 +735,9 @@ export function TeamRuntimeShell({
                           {runtimeTask?.unmetDependencyCount ?? 0}
                         </span>
                         {task.result ? (
-                          <span style={{ fontSize: 12, color: 'var(--fg-default)', lineHeight: 1.7 }}>
+                          <span
+                            style={{ fontSize: 12, color: 'var(--fg-default)', lineHeight: 1.7 }}
+                          >
                             {task.result}
                           </span>
                         ) : null}

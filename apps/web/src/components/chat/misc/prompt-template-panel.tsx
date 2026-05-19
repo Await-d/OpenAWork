@@ -1,5 +1,8 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { usePromptTemplateStore, type PromptTemplate } from '../../../stores/chat/prompt-templates.js';
+import {
+  usePromptTemplateStore,
+  type PromptTemplate,
+} from '../../../stores/chat/prompt-templates.js';
 
 interface PromptTemplatePanelProps {
   isOpen: boolean;
@@ -92,7 +95,9 @@ export function PromptTemplatePanel({ isOpen, onClose, onInsert }: PromptTemplat
             <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-1)' }}>
               📋 提示词模板
             </span>
-            <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>{templates.length} 个模板</span>
+            <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+              {templates.length} 个模板
+            </span>
           </div>
           <div style={{ display: 'flex', gap: 4 }}>
             <button

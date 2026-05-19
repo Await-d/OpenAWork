@@ -8,7 +8,10 @@ import type {
   PendingQuestionRequest,
 } from '@openAwork/web-client';
 import type { ChatMessage } from '../../../../components/conversation-runtime/messages/support.js';
-import type { SessionStateStatus, SessionTodoItem } from '../../../../components/conversation-runtime/session/session-runtime.js';
+import type {
+  SessionStateStatus,
+  SessionTodoItem,
+} from '../../../../components/conversation-runtime/session/session-runtime.js';
 import type { RecoveredActiveAssistantStream } from '../../../../components/conversation-runtime/stream/stream-recovery.js';
 import { createSessionsClient } from '@openAwork/web-client';
 import type { ChatRightPanelState } from '../../state/chat-stream-state.js';
