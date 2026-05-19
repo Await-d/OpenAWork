@@ -61,7 +61,7 @@ export function ArtifactPreviewSurface({ artifact, content }: ArtifactPreviewSur
             padding: tokens.spacing.lg,
             borderRadius: tokens.radius.lg,
             border: `1px solid ${tokens.color.borderSubtle}`,
-            background: 'color-mix(in oklch, var(--bg-overlay) 92%, var(--bg-base) 8%)',
+            background: 'var(--bg-overlay)',
             overflow: 'auto',
           }}
         >
@@ -91,7 +91,7 @@ export function ArtifactPreviewSurface({ artifact, content }: ArtifactPreviewSur
             padding: tokens.spacing.lg,
             borderRadius: tokens.radius.lg,
             border: `1px solid ${tokens.color.borderSubtle}`,
-            background: 'color-mix(in oklch, var(--bg-overlay) 88%, var(--bg-base) 12%)',
+            background: 'var(--bg-overlay)',
           }}
         >
           <img
@@ -115,7 +115,7 @@ export function ArtifactPreviewSurface({ artifact, content }: ArtifactPreviewSur
             borderRadius: tokens.radius.lg,
             border: `1px solid ${tokens.color.borderSubtle}`,
             overflow: 'auto',
-            background: 'color-mix(in oklch, var(--bg-overlay) 90%, var(--bg-base) 10%)',
+            background: 'var(--bg-overlay)',
           }}
         >
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 480 }}>
@@ -186,7 +186,7 @@ function PreviewShell(props: { children: React.ReactNode; note: string; title: s
           padding: '10px 12px',
           borderRadius: tokens.radius.lg,
           border: `1px solid ${tokens.color.borderSubtle}`,
-          background: 'color-mix(in oklch, var(--bg-overlay) 88%, var(--bg-base) 12%)',
+          background: 'var(--bg-overlay)',
         }}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
@@ -224,7 +224,7 @@ function CodeFallback({ content }: { content: string }) {
         padding: tokens.spacing.lg,
         borderRadius: tokens.radius.lg,
         border: `1px solid ${tokens.color.borderSubtle}`,
-        background: 'color-mix(in oklch, var(--bg-overlay) 88%, var(--bg-base) 12%)',
+        background: 'var(--bg-overlay)',
         color: 'var(--fg-strong)',
         fontSize: 12,
         lineHeight: 1.6,

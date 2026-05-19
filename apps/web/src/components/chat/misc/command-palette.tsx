@@ -187,7 +187,7 @@ export function CommandPalette({ items, isOpen, onClose }: CommandPaletteProps) 
               borderRadius: 4,
               border: '1px solid var(--border-subtle)',
               color: 'var(--fg-muted)',
-              background: 'color-mix(in oklch, var(--bg-overlay) 60%, transparent)',
+              background: 'var(--bg-overlay)',
             }}
           >
             Esc
@@ -301,7 +301,7 @@ export function CommandPalette({ items, isOpen, onClose }: CommandPaletteProps) 
                             borderRadius: 4,
                             border: '1px solid var(--border-subtle)',
                             color: 'var(--fg-muted)',
-                            background: 'color-mix(in oklch, var(--bg-overlay) 60%, transparent)',
+                            background: 'var(--bg-overlay)',
                             flexShrink: 0,
                           }}
                         >

@@ -40,7 +40,7 @@ const META_PILL_STYLE: CSSProperties = {
   padding: '0 9px',
   borderRadius: 999,
   border: '1px solid var(--border-subtle)',
-  background: 'color-mix(in oklch, var(--bg-overlay) 82%, var(--bg-overlay) 18%)',
+  background: 'var(--bg-overlay)',
   color: 'var(--fg-default)',
   fontSize: 11,
   fontWeight: 600,
@@ -262,7 +262,7 @@ function ComparisonPanel({ comparison }: { comparison: SessionSnapshotComparison
                 gap: 8,
                 padding: '8px 10px',
                 borderRadius: 10,
-                background: 'color-mix(in oklch, var(--bg-overlay) 86%, var(--bg-overlay) 14%)',
+                background: 'var(--bg-overlay)',
                 border: '1px solid var(--border-subtle)',
               }}
             >
@@ -345,7 +345,7 @@ function RestorePreviewPanel({ preview }: { preview: SessionRestorePreviewResult
               gap: 10,
               padding: '8px 10px',
               borderRadius: 10,
-              background: 'color-mix(in oklch, var(--bg-overlay) 86%, var(--bg-overlay) 14%)',
+              background: 'var(--bg-overlay)',
               border: '1px solid var(--border-subtle)',
             }}
           >
@@ -868,7 +868,7 @@ export function DetailPanel({
                             : '1px solid var(--border-subtle)',
                           background: active
                             ? 'var(--accent-muted)'
-                            : 'color-mix(in oklch, var(--bg-overlay) 90%, var(--bg-overlay) 10%)',
+                            : 'var(--bg-overlay)',
                           overflow: 'hidden',
                         }}
                       >

@@ -86,7 +86,7 @@ export default function DialogueModeToggle({
         gap: 1,
         borderRadius: 8,
         padding: 2,
-        background: 'color-mix(in oklch, var(--bg-overlay) 90%, transparent)',
+        background: 'var(--bg-overlay)',
         border: '1px solid var(--border-subtle)',
         opacity: disabled ? 0.55 : 1,
         ...style,

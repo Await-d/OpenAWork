@@ -39,7 +39,7 @@ const SPLIT_PILL_STYLE: CSSProperties = {
   padding: '3px 4px',
   borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--border-default) 45%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 60%, transparent)',
+  background: 'var(--bg-overlay)',
   fontSize: 11,
   lineHeight: 1.2,
   cursor: 'default',

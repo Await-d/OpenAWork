@@ -391,7 +391,7 @@ function HandoffRow({
         style={{
           padding: '1px 8px',
           borderRadius: 999,
-          background: 'color-mix(in srgb, var(--bg-overlay) 60%, transparent)',
+          background: 'var(--bg-overlay)',
           border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
           color: 'var(--fg-default)',
           fontSize: 10,

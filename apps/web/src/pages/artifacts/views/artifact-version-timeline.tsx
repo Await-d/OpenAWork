@@ -46,7 +46,7 @@ export function ArtifactVersionTimeline({
           padding: tokens.spacing.sm,
           borderRadius: tokens.radius.lg,
           border: `1px solid ${tokens.color.borderSubtle}`,
-          background: 'color-mix(in oklch, var(--bg-overlay) 78%, transparent)',
+          background: 'var(--bg-overlay)',
           minHeight: 160,
         }}
       >
@@ -121,8 +121,8 @@ export function ArtifactVersionTimeline({
                         borderRadius: tokens.radius.sm,
                         border: `1px solid ${tokens.color.borderSubtle}`,
                         background: disabled
-                          ? 'color-mix(in oklch, var(--bg-overlay) 66%, transparent)'
-                          : 'color-mix(in oklch, var(--bg-overlay) 86%, var(--bg-base) 14%)',
+                          ? 'var(--bg-overlay)'
+                          : 'var(--bg-overlay)',
                         color: disabled ? 'var(--fg-muted)' : 'var(--fg-strong)',
                         fontSize: 11,
                         cursor: disabled ? 'not-allowed' : 'pointer',
@@ -145,7 +145,7 @@ export function ArtifactVersionTimeline({
                       margin: 0,
                       padding: '8px 10px',
                       borderRadius: tokens.radius.sm,
-                      background: 'color-mix(in oklch, var(--bg-overlay) 64%, transparent)',
+                      background: 'var(--bg-overlay)',
                       color: 'var(--fg-default)',
                       fontSize: 11,
                       lineHeight: 1.5,

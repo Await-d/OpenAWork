@@ -87,7 +87,7 @@ const FIELD_GROUP: CSSProperties = {
   borderRadius: 14,
   border: '1px solid var(--border-subtle)',
   padding: '14px 16px',
-  background: 'color-mix(in oklch, var(--bg-overlay) 92%, transparent)',
+  background: 'var(--bg-overlay)',
 };
 
 const SUMMARY_PILL: CSSProperties = {
@@ -319,7 +319,7 @@ export function BuddyAgentBindingPanel({
           borderRadius: 14,
           border: '1px solid var(--border-subtle)',
           padding: '14px 16px',
-          background: 'color-mix(in oklch, var(--bg-overlay) 92%, transparent)',
+          background: 'var(--bg-overlay)',
           display: 'grid',
           gap: 10,
         }}
@@ -673,7 +673,7 @@ export function BuddyAgentBindingPanel({
               borderRadius: 12,
               border: '1px solid var(--border-subtle)',
               padding: '12px 14px',
-              background: 'color-mix(in oklch, var(--bg-overlay) 92%, transparent)',
+              background: 'var(--bg-overlay)',
             }}
           >
             <div style={{ minWidth: 0, flex: '1 1 260px' }}>

@@ -70,7 +70,7 @@ export function ArtifactWorkbench({
           borderRadius: tokens.radius.xl,
           border: `1px solid ${tokens.color.borderSubtle}`,
           background:
-            'linear-gradient(180deg, color-mix(in oklch, var(--bg-overlay) 82%, transparent), color-mix(in oklch, var(--bg-base) 92%, transparent))',
+            'linear-gradient(180deg, var(--bg-overlay), var(--bg-base))',
           color: 'var(--fg-muted)',
           textAlign: 'center',
           lineHeight: 1.7,
@@ -103,7 +103,7 @@ export function ArtifactWorkbench({
           borderRadius: tokens.radius.xl,
           border: `1px solid ${tokens.color.borderSubtle}`,
           background:
-            'radial-gradient(circle at top left, color-mix(in oklch, var(--accent) 16%, transparent), transparent 36%), color-mix(in oklch, var(--bg-overlay) 84%, transparent)',
+            'radial-gradient(circle at top left, color-mix(in oklch, var(--accent) 16%, transparent), transparent 36%), var(--bg-overlay)',
           boxShadow: tokens.shadow.md,
         }}
       >
@@ -155,7 +155,7 @@ export function ArtifactWorkbench({
                     padding: 2,
                     borderRadius: 999,
                     border: `1px solid ${tokens.color.borderSubtle}`,
-                    background: 'color-mix(in oklch, var(--bg-overlay) 72%, transparent)',
+                    background: 'var(--bg-overlay)',
                   }}
                 >
                   <button
@@ -259,7 +259,7 @@ const inputStyle: React.CSSProperties = {
   padding: '0 12px',
   borderRadius: tokens.radius.md,
   border: `1px solid ${tokens.color.borderSubtle}`,
-  background: 'color-mix(in oklch, var(--bg-overlay) 88%, var(--bg-base) 12%)',
+  background: 'var(--bg-overlay)',
   color: 'var(--fg-strong)',
   fontSize: 13,
 };
@@ -270,7 +270,7 @@ const badgeStyle: React.CSSProperties = {
   lineHeight: 1,
   padding: '4px 7px',
   borderRadius: 999,
-  background: 'color-mix(in oklch, var(--bg-overlay) 72%, transparent)',
+  background: 'var(--bg-overlay)',
   color: 'var(--fg-default)',
   border: `1px solid ${tokens.color.borderSubtle}`,
 };
@@ -315,7 +315,7 @@ const secondaryButtonStyle: React.CSSProperties = {
   padding: '0 12px',
   borderRadius: tokens.radius.md,
   border: `1px solid ${tokens.color.borderSubtle}`,
-  background: 'color-mix(in oklch, var(--bg-overlay) 72%, transparent)',
+  background: 'var(--bg-overlay)',
   color: 'var(--fg-strong)',
   fontSize: 12,
   fontWeight: 600,

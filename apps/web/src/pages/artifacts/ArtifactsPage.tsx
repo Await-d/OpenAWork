@@ -109,7 +109,7 @@ export default function ArtifactsPage() {
                   padding: '10px 14px',
                   borderRadius: tokens.radius.lg,
                   border: `1px solid ${tokens.color.borderSubtle}`,
-                  background: 'color-mix(in oklch, var(--bg-overlay) 76%, transparent)',
+                  background: 'var(--bg-overlay)',
                 }}
               >
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>

@@ -58,7 +58,7 @@ const ROLE_CHIP_STYLE: CSSProperties = {
   borderRadius: 6,
   fontSize: 10,
   fontWeight: 600,
-  background: 'color-mix(in srgb, var(--bg-overlay) 80%, transparent)',
+  background: 'var(--bg-overlay)',
   border: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
   color: 'var(--fg-default)',
 };

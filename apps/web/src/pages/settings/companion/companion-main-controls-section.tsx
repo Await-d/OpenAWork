@@ -30,7 +30,7 @@ function ToggleRow({ checked, description, label, onToggle }: ToggleRowProps) {
         border: '1px solid var(--border-subtle)',
         borderRadius: 10,
         padding: '10px 12px',
-        background: 'color-mix(in oklch, var(--bg-overlay) 92%, transparent)',
+        background: 'var(--bg-overlay)',
       }}
     >
       <div style={{ minWidth: 0, flex: 1 }}>

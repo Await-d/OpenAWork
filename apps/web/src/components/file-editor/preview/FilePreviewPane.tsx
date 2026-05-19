@@ -166,7 +166,7 @@ export function FilePreviewPane({
               padding: '10px 12px',
               border: '1px solid var(--border-subtle)',
               borderRadius: 12,
-              background: 'color-mix(in oklch, var(--bg-overlay) 92%, var(--bg-base) 8%)',
+              background: 'var(--bg-overlay)',
             }}
           >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
@@ -206,7 +206,7 @@ export function FilePreviewPane({
               borderRadius: 14,
               background: 'var(--fg-on-accent))',
               display: 'block',
-              boxShadow: '0 18px 36px color-mix(in oklch, var(--bg-base) 72%, transparent)',
+              boxShadow: '0 18px 36px var(--bg-base)',
             }}
           />
         </div>
@@ -352,7 +352,7 @@ const MarkdownRendererInner = lazy(async () => {
                 margin: '12px 0',
                 padding: '14px 16px',
                 borderRadius: 8,
-                background: 'color-mix(in oklch, var(--bg-base) 60%, var(--bg-overlay) 40%)',
+                background: 'var(--bg-base)',
                 border: '1px solid var(--border-subtle)',
                 overflow: 'auto',
                 fontSize: 12,
@@ -384,7 +384,7 @@ const MarkdownRendererInner = lazy(async () => {
                 textAlign: 'left',
                 fontWeight: 600,
                 fontSize: 12,
-                background: 'color-mix(in oklch, var(--bg-overlay) 80%, var(--bg-base) 20%)',
+                background: 'var(--bg-overlay)',
               }}
             >
               {children}

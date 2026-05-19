@@ -188,7 +188,7 @@ export function UsageView() {
                   gap: 8,
                   padding: '4px 8px',
                   borderRadius: 6,
-                  background: 'color-mix(in srgb, var(--bg-overlay) 60%, transparent)',
+                  background: 'var(--bg-overlay)',
                 }}
               >
                 <span style={{ minWidth: 90, color: 'var(--fg-muted)' }}>

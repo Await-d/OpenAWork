@@ -136,7 +136,7 @@ export function ToolCallsView() {
                           style={{
                             padding: '2px 10px',
                             borderRadius: 999,
-                            background: 'color-mix(in srgb, var(--bg-overlay) 80%, transparent)',
+                            background: 'var(--bg-overlay)',
                             border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
                             fontSize: 11,
                             color: 'var(--fg-default)',

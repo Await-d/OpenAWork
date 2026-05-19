@@ -72,7 +72,7 @@ export function ArtifactRecordList({
           padding: tokens.spacing.sm,
           borderRadius: tokens.radius.lg,
           border: `1px solid ${tokens.color.borderSubtle}`,
-          background: 'color-mix(in oklch, var(--bg-overlay) 80%, transparent)',
+          background: 'var(--bg-overlay)',
           boxShadow: tokens.shadow.sm,
           minHeight: 260,
         }}
@@ -101,7 +101,7 @@ export function ArtifactRecordList({
                     : `1px solid ${tokens.color.borderSubtle}`,
                   background: selected
                     ? 'color-mix(in oklch, var(--accent) 14%, var(--bg-overlay) 86%)'
-                    : 'color-mix(in oklch, var(--bg-overlay) 62%, transparent)',
+                    : 'var(--bg-overlay)',
                   display: 'flex',
                   flexDirection: 'column',
                   gap: 6,
@@ -170,7 +170,7 @@ const ghostButtonStyle: React.CSSProperties = {
   padding: '0 12px',
   borderRadius: tokens.radius.md,
   border: `1px solid ${tokens.color.borderSubtle}`,
-  background: 'color-mix(in oklch, var(--bg-overlay) 72%, transparent)',
+  background: 'var(--bg-overlay)',
   color: 'var(--fg-strong)',
   fontSize: 12,
   fontWeight: 600,

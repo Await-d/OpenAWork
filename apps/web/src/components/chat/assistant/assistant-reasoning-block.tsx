@@ -120,7 +120,7 @@ export const AssistantReasoningBlock = memo(function AssistantReasoningBlock({
               position: 'absolute',
               inset: 0,
               background:
-                'linear-gradient(to bottom, transparent 0%, color-mix(in oklch, var(--bg-base) 50%, transparent) 50%, var(--bg-base) 100%)',
+                'linear-gradient(to bottom, transparent 0%, var(--bg-base) 50%, var(--bg-base) 100%)',
               pointerEvents: 'none',
             }}
           />

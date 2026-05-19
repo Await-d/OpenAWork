@@ -342,7 +342,7 @@ const LOAD_EARLIER_BTN_STYLE: CSSProperties = {
   padding: '0 14px',
   borderRadius: 999,
   border: '1px solid var(--border-default)',
-  background: 'color-mix(in oklch, var(--bg-overlay) 90%, transparent)',
+  background: 'var(--bg-overlay)',
   color: 'var(--fg-default)',
   fontSize: 11,
   fontWeight: 600,

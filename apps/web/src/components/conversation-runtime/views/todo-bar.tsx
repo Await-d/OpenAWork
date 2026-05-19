@@ -29,11 +29,11 @@ const STATUS_META: Record<
     label: '待开始',
     marker: '○',
     rowBorder: '1px solid var(--border-subtle)',
-    rowBackground: 'color-mix(in oklch, var(--bg-overlay) 90%, var(--bg-overlay) 10%)',
+    rowBackground: 'var(--bg-overlay)',
     tone: {
       border: '1px solid var(--border-default)',
       color: 'var(--fg-muted)',
-      background: 'color-mix(in srgb, var(--bg-overlay) 72%, transparent)',
+      background: 'var(--bg-overlay)',
     },
   },
   in_progress: {
@@ -51,7 +51,7 @@ const STATUS_META: Record<
     label: '已完成',
     marker: '●',
     rowBorder: '1px solid var(--border-subtle)',
-    rowBackground: 'color-mix(in oklch, var(--bg-overlay) 88%, var(--bg-overlay) 12%)',
+    rowBackground: 'var(--bg-overlay)',
     tone: {
       border: '1px solid color-mix(in srgb, var(--success) 40%, var(--border-default))',
       color: 'var(--success))',
@@ -62,7 +62,7 @@ const STATUS_META: Record<
     label: '已取消',
     marker: '△',
     rowBorder: '1px solid var(--border-subtle)',
-    rowBackground: 'color-mix(in oklch, var(--bg-overlay) 88%, var(--bg-overlay) 12%)',
+    rowBackground: 'var(--bg-overlay)',
     tone: {
       border: '1px solid color-mix(in srgb, var(--warning) 45%, var(--border-default))',
       color: 'var(--warning))',
@@ -91,7 +91,7 @@ const PRIORITY_META: Record<
     tone: {
       border: '1px solid var(--border-subtle)',
       color: 'var(--fg-default)',
-      background: 'color-mix(in oklch, var(--bg-overlay) 84%, var(--bg-overlay) 16%)',
+      background: 'var(--bg-overlay)',
     },
   },
   low: {

@@ -365,7 +365,7 @@ function TeamPageLayout({
               minHeight: 0,
               overflow: 'auto',
               background:
-                'linear-gradient(180deg, var(--bg-overlay) 0%, color-mix(in srgb, var(--bg-overlay) 96%, var(--bg-base) 100%)',
+                'linear-gradient(180deg, var(--bg-overlay) 0%, var(--bg-base)',
             }}
           >
             {mainContent}

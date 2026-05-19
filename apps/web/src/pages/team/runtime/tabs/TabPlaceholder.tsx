@@ -52,7 +52,7 @@ const CARD_STYLE: CSSProperties = {
   borderRadius: 16,
   border: '1px dashed color-mix(in srgb, var(--accent) 36%, transparent)',
   background:
-    'linear-gradient(135deg, color-mix(in srgb, var(--accent) 5%, var(--bg-overlay) 0%, color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base) 100%)',
+    'linear-gradient(135deg, color-mix(in srgb, var(--accent) 5%, var(--bg-overlay) 0%, var(--bg-base)',
 };
 
 const STATUS_META: Record<TabPlaceholderStatus, { label: string; color: string; bg: string }> = {

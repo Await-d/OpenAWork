@@ -55,7 +55,7 @@ export function ArtifactSessionRail({
           padding: tokens.spacing.sm,
           borderRadius: tokens.radius.lg,
           border: `1px solid ${tokens.color.borderSubtle}`,
-          background: 'color-mix(in oklch, var(--bg-overlay) 82%, transparent)',
+          background: 'var(--bg-overlay)',
           boxShadow: tokens.shadow.sm,
           minHeight: 260,
         }}
@@ -84,7 +84,7 @@ export function ArtifactSessionRail({
                     : `1px solid ${tokens.color.borderSubtle}`,
                   background: selected
                     ? 'color-mix(in oklch, var(--accent) 16%, var(--bg-overlay) 84%)'
-                    : 'color-mix(in oklch, var(--bg-overlay) 64%, transparent)',
+                    : 'var(--bg-overlay)',
                   cursor: 'pointer',
                   display: 'flex',
                   flexDirection: 'column',

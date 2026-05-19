@@ -103,7 +103,7 @@
     color 150ms ease;
 }
 .ui-hover-icon-pop:hover:not(:disabled) {
-  background: color-mix(in oklch, var(--bg-overlay) 70%, var(--bg-overlay) 30%);
+  background: var(--bg-overlay);
   opacity: 1;
 }
 .ui-hover-icon-pop[data-tone='danger']:hover:not(:disabled) {

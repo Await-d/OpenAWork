@@ -83,7 +83,7 @@ export function CompanionDefaultPersonaSection({
             borderRadius: 14,
             border: '1px solid var(--border-subtle)',
             padding: '14px 16px',
-            background: 'color-mix(in oklch, var(--bg-overlay) 92%, transparent)',
+            background: 'var(--bg-overlay)',
             display: 'grid',
             gap: 8,
           }}

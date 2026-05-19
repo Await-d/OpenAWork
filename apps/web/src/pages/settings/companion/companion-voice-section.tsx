@@ -150,7 +150,7 @@ export function CompanionVoiceSection({ buddy }: CompanionVoiceSectionProps) {
           borderRadius: 12,
           border: '1px solid var(--border-subtle)',
           padding: '10px 12px',
-          background: 'color-mix(in oklch, var(--bg-overlay) 92%, transparent)',
+          background: 'var(--bg-overlay)',
         }}
       >
         <div style={{ minWidth: 0, flex: '1 1 240px', fontSize: 11, color: 'var(--fg-default)' }}>

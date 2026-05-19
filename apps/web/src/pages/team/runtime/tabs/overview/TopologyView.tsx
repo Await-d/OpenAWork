@@ -61,7 +61,7 @@ const FLOW_GRID_STYLE: CSSProperties = {
   padding: '20px 12px',
   borderRadius: 14,
   background:
-    'linear-gradient(135deg, color-mix(in srgb, var(--accent) 4%, var(--bg-overlay) 0%, color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base) 100%)',
+    'linear-gradient(135deg, color-mix(in srgb, var(--accent) 4%, var(--bg-overlay) 0%, var(--bg-base)',
   border: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
   overflow: 'auto',
 };
@@ -407,7 +407,7 @@ function PillStat({ label, value, color }: { label: string; value: number; color
         gap: 4,
         padding: '1px 8px',
         borderRadius: 999,
-        background: 'color-mix(in srgb, var(--bg-overlay) 60%, transparent)',
+        background: 'var(--bg-overlay)',
         border: `1px solid ${color}`,
         color: 'var(--fg-default)',
         fontSize: 10,

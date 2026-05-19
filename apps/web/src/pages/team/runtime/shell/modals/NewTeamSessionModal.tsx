@@ -346,7 +346,7 @@ const FORM_FOOTER_STYLE: CSSProperties = {
   justifyContent: 'space-between',
   gap: 10,
   flexShrink: 0,
-  background: 'color-mix(in srgb, var(--bg-overlay) 30%, var(--bg-overlay))',
+  background: 'var(--bg-overlay)',
 };
 
 const FIELD_STYLE: CSSProperties = {
@@ -505,7 +505,7 @@ const REVIEW_CARD_STYLE: CSSProperties = {
   gap: 10,
   padding: '16px 18px',
   borderRadius: 14,
-  background: 'color-mix(in srgb, var(--bg-overlay) 30%, var(--bg-overlay))',
+  background: 'var(--bg-overlay)',
   border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
 };
 
@@ -1858,7 +1858,7 @@ export function NewTeamSessionModal({
                             key={id}
                             style={{
                               ...BADGE_BASE_STYLE,
-                              background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-overlay))',
+                              background: 'var(--bg-overlay)',
                               color: 'var(--fg-default)',
                               border:
                                 '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',

@@ -1027,7 +1027,7 @@ function ScopeHelp({ scope }: { scope: ScopeTab }): React.ReactElement {
         padding: '7px 9px',
         borderRadius: 8,
         border: '1px solid var(--border-subtle)',
-        background: 'color-mix(in oklch, var(--bg-overlay) 90%, var(--bg-base) 10%)',
+        background: 'var(--bg-overlay)',
       }}
     >
       <div>

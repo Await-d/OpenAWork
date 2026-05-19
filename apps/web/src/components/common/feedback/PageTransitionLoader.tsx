@@ -34,7 +34,7 @@ const PageTransitionLoader = memo(function PageTransitionLoader({
         pointerEvents: isFullscreen ? undefined : 'none',
         background: isFullscreen
           ? 'radial-gradient(circle at 50% 18%, var(--accent-muted), transparent 36%), radial-gradient(circle at 50% 82%, color-mix(in oklch, var(--success) 18%, transparent), transparent 42%), var(--bg-base)'
-          : 'linear-gradient(180deg, color-mix(in oklch, var(--bg-base) 6%, transparent), color-mix(in oklch, var(--bg-base) 18%, transparent))',
+          : 'linear-gradient(180deg, var(--bg-base), var(--bg-base))',
         backdropFilter: isFullscreen ? undefined : 'blur(2px) saturate(1.05)',
         WebkitBackdropFilter: isFullscreen ? undefined : 'blur(2px) saturate(1.05)',
         zIndex: isFullscreen ? undefined : 4,

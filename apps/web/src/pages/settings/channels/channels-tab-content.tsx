@@ -188,7 +188,7 @@ export function ChannelsTabContent({
   return (
     <>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: '1.5rem' }}>
-        <h2 style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', flex: 1 }}>消息频道</h2>
+        <h2 style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)', flex: 1 }}>消息频道</h2>
         {connectedCount > 0 && <StatusPill label={`${connectedCount} 已连接`} color="success" />}
         {disconnectedCount > 0 && (
           <StatusPill label={`${disconnectedCount} 未连接`} color="muted" />
@@ -200,7 +200,7 @@ export function ChannelsTabContent({
             style={{
               ...UV,
               marginBottom: 12,
-              color: 'var(--danger, var(--danger, var(--danger, #f06b7e)))',
+              color: 'var(--danger)',
               fontSize: 12,
               fontWeight: 600,
             }}

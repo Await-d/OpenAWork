@@ -79,7 +79,7 @@ export function OverviewTab({
               padding: '10px 12px',
               borderRadius: 12,
               background:
-                'linear-gradient(135deg, color-mix(in oklch, var(--accent) 8%, var(--bg-overlay) 0%, color-mix(in oklch, var(--bg-overlay) 90%, var(--bg-base) 100%)',
+                'linear-gradient(135deg, color-mix(in oklch, var(--accent) 8%, var(--bg-overlay) 0%, var(--bg-base)',
               border: '1px solid color-mix(in srgb, var(--accent) 24%, transparent)',
             }}
           >

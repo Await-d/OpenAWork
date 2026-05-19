@@ -118,8 +118,8 @@ function CompanionPreviewCard({
           : '1px solid color-mix(in oklch, var(--border-default) 88%, transparent)',
         borderRadius: 14,
         background: hero
-          ? `linear-gradient(180deg, ${profile.accentTint}, color-mix(in oklch, var(--bg-overlay) 94%, transparent))`
-          : `linear-gradient(180deg, color-mix(in oklch, ${profile.accentTint} 84%, transparent), color-mix(in oklch, var(--bg-overlay) 94%, transparent))`,
+          ? `linear-gradient(180deg, ${profile.accentTint}, var(--bg-overlay))`
+          : `linear-gradient(180deg, color-mix(in oklch, ${profile.accentTint} 84%, transparent), var(--bg-overlay))`,
         padding: hero ? 16 : 14,
         display: 'grid',
         gap: 10,
@@ -181,7 +181,7 @@ function CompanionPreviewCard({
               height: 20,
               padding: '0 8px',
               borderRadius: 999,
-              background: 'color-mix(in oklch, var(--bg-overlay) 84%, transparent)',
+              background: 'var(--bg-overlay)',
               color: 'var(--fg-default)',
               fontSize: 10,
               fontWeight: 700,
@@ -197,7 +197,7 @@ function CompanionPreviewCard({
         style={{
           borderRadius: 12,
           border: '1px solid color-mix(in oklch, var(--border-subtle) 88%, transparent)',
-          background: 'color-mix(in oklch, var(--bg-overlay) 90%, transparent)',
+          background: 'var(--bg-overlay)',
           padding: '10px 12px',
           display: 'grid',
           gap: 10,
@@ -208,7 +208,7 @@ function CompanionPreviewCard({
             maxWidth: 280,
             borderRadius: 12,
             border: '1px solid color-mix(in oklch, var(--border-default) 78%, transparent)',
-            background: 'color-mix(in oklch, var(--bg-overlay) 92%, transparent)',
+            background: 'var(--bg-overlay)',
             padding: '10px 12px',
             fontSize: 11,
             lineHeight: 1.55,
@@ -283,7 +283,7 @@ function CompanionPreviewCard({
               height: 22,
               padding: '0 8px',
               borderRadius: 999,
-              background: 'color-mix(in oklch, var(--bg-overlay) 84%, transparent)',
+              background: 'var(--bg-overlay)',
               color: 'var(--fg-default)',
               fontSize: 10,
               fontWeight: 700,
@@ -307,7 +307,7 @@ function CompanionPreviewCard({
             style={{
               borderRadius: 10,
               border: '1px solid color-mix(in oklch, var(--border-subtle) 88%, transparent)',
-              background: 'color-mix(in oklch, var(--bg-overlay) 90%, transparent)',
+              background: 'var(--bg-overlay)',
               padding: '8px 9px',
               display: 'grid',
               gap: 6,
@@ -332,7 +332,7 @@ function CompanionPreviewCard({
               style={{
                 height: 6,
                 borderRadius: 999,
-                background: 'color-mix(in oklch, var(--bg-hover) 88%, transparent)',
+                background: 'var(--bg-hover)',
                 overflow: 'hidden',
               }}
             >
@@ -471,7 +471,7 @@ export function CompanionVisualShowcase({
               style={{
                 borderRadius: 999,
                 border: '1px solid var(--border-subtle)',
-                background: 'color-mix(in oklch, var(--bg-overlay) 88%, transparent)',
+                background: 'var(--bg-overlay)',
                 color: 'var(--fg-default)',
                 minHeight: 30,
                 padding: '0 10px',
@@ -513,7 +513,7 @@ export function CompanionVisualShowcase({
                 borderRadius: 14,
                 border: '1px solid var(--border-subtle)',
                 padding: '12px 14px',
-                background: 'color-mix(in oklch, var(--bg-overlay) 92%, transparent)',
+                background: 'var(--bg-overlay)',
                 fontSize: 12,
                 lineHeight: 1.7,
                 color: 'var(--fg-default)',

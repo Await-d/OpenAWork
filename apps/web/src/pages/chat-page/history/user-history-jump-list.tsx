@@ -216,7 +216,7 @@ const HEADER_BADGE_STYLE: CSSProperties = {
   padding: '0 5px',
   borderRadius: 999,
   border: '1px solid var(--border-subtle)',
-  background: 'color-mix(in oklch, var(--bg-overlay) 82%, transparent)',
+  background: 'var(--bg-overlay)',
   fontSize: 8,
   fontWeight: 700,
   color: 'var(--fg-muted)',
@@ -280,7 +280,7 @@ function UserHistoryItemCard({
             border: '1px solid var(--border-subtle)',
             background: selected
               ? 'color-mix(in oklch, var(--accent) 22%, var(--bg-overlay))'
-              : 'color-mix(in oklch, var(--bg-overlay) 82%, transparent)',
+              : 'var(--bg-overlay)',
             color: selected ? 'var(--accent)' : 'var(--fg-muted)',
             fontSize: 8.5,
             fontWeight: 700,

@@ -63,7 +63,7 @@ export function AssistantEventRow({ payload }: { payload: AssistantEventPayload 
           alignItems: 'center',
           justifyContent: 'center',
           flexShrink: 0,
-          background: 'color-mix(in oklab, var(--bg-overlay) 84%, var(--bg-overlay) 16%)',
+          background: 'var(--bg-overlay)',
           border: '1px solid var(--border-subtle)',
           color: 'var(--fg-strong)',
         }}

@@ -279,7 +279,7 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
               padding: '6px 2px',
               borderRight: '1px solid var(--border-subtle)',
               flexShrink: 0,
-              background: 'color-mix(in oklch, var(--bg-base) 30%, var(--bg-overlay) 70%)',
+              background: 'var(--bg-overlay)',
               overflowY: 'auto',
               overflowX: 'hidden',
             }}
@@ -854,7 +854,7 @@ function renderToolsPanel(
               background:
                 toolFilter === f
                   ? 'color-mix(in oklch, var(--accent) 14%, var(--bg-overlay))'
-                  : 'color-mix(in oklch, var(--bg-overlay) 86%, transparent)',
+                  : 'var(--bg-overlay)',
               color: toolFilter === f ? 'var(--accent)' : 'var(--fg-muted)',
             }}
           >

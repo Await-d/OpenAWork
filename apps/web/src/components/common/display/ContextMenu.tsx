@@ -173,7 +173,7 @@ const MENU_STYLE: CSSProperties = {
   borderRadius: 8,
   background: 'var(--bg-overlay)',
   border: '1px solid var(--border-default)',
-  boxShadow: '0 12px 28px color-mix(in oklch, var(--bg-base) 70%, transparent)',
+  boxShadow: '0 12px 28px var(--bg-base)',
   fontSize: 12,
   color: 'var(--text-1)',
   userSelect: 'none',

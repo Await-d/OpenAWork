@@ -156,7 +156,7 @@
   background: linear-gradient(
     135deg,
     color-mix(in oklch, var(--accent) 18%, var(--bg-overlay) 82%),
-    color-mix(in oklch, var(--bg-overlay) 92%, var(--bg-overlay) 8%)
+    var(--bg-overlay)
   );
   color: color-mix(in oklch, var(--accent) 82%, var(--fg-on-accent) 18%);
   font-size: 9px;
@@ -223,7 +223,7 @@
   gap: 6px;
   padding: 6px 8px 6px 10px;
   border-radius: 999px;
-  background: color-mix(in oklch, var(--bg-overlay) 92%, var(--bg-overlay) 8%);
+  background: var(--bg-overlay);
   border: 1px solid var(--border-default);
   box-shadow: 0 8px 28px -10px color-mix(in oklch, var(--bg-base) 70%, transparent);
   color: var(--fg-strong);
@@ -376,7 +376,7 @@
   gap: 4px;
   padding: 2px;
   border-radius: 999px;
-  background: color-mix(in oklch, var(--bg-overlay) 88%, var(--bg-overlay) 12%);
+  background: var(--bg-overlay);
   border: 1px solid var(--border-subtle);
   box-shadow: 0 4px 14px -8px color-mix(in oklch, var(--bg-base) 60%, transparent);
   opacity: 0;
@@ -584,7 +584,7 @@
 }
 
 .chat-todo-topbar-summary:hover {
-  background: color-mix(in oklch, var(--bg-overlay) 70%, var(--bg-overlay) 30%);
+  background: var(--bg-overlay);
   border-color: color-mix(in oklch, var(--accent) 18%, var(--border-default) 82%);
 }
 
@@ -612,7 +612,7 @@
   flex-shrink: 0;
   padding: 0 5px;
   border-radius: 999px;
-  background: color-mix(in oklch, var(--bg-overlay) 70%, var(--bg-overlay) 30%);
+  background: var(--bg-overlay);
   color: var(--fg-muted);
   font-size: 9px;
   font-weight: 600;
@@ -652,7 +652,7 @@
 }
 
 .chat-todo-topbar-badge:hover {
-  background: color-mix(in oklch, var(--bg-overlay) 70%, var(--bg-overlay) 30%);
+  background: var(--bg-overlay);
   border-color: color-mix(in oklch, var(--accent) 18%, var(--border-default) 82%);
 }
 
@@ -798,7 +798,7 @@
 }
 
 .chat-todo-floating-close:hover {
-  background: color-mix(in oklch, var(--bg-overlay) 86%, var(--bg-overlay) 14%);
+  background: var(--bg-overlay);
   color: var(--fg-strong);
   border-color: var(--border-subtle);
 }
@@ -888,7 +888,7 @@
 }
 
 .chat-todo-row:hover {
-  background: color-mix(in oklch, var(--bg-overlay) 84%, var(--bg-overlay) 16%);
+  background: var(--bg-overlay);
 }
 
 /* 高优先级 + 未完成：左边一条红色提示线 */
@@ -1026,7 +1026,7 @@
 }
 
 .chat-todo-toggle:hover {
-  background: color-mix(in oklch, var(--bg-overlay) 90%, var(--bg-overlay) 10%);
+  background: var(--bg-overlay);
 }
 
 .chat-todo-toggle:focus-visible {
@@ -1114,7 +1114,7 @@
   padding: 2px 6px;
   border: 1px solid var(--border-subtle);
   border-radius: 999px;
-  background: color-mix(in oklch, var(--bg-overlay) 90%, var(--bg-overlay) 10%);
+  background: var(--bg-overlay);
 }
 
 .chat-todo-summary-lane[data-lane='temp'] {
@@ -1161,7 +1161,7 @@
   padding: 0 5px;
   border: 1px solid var(--border-subtle);
   border-radius: 999px;
-  background: color-mix(in oklch, var(--bg-overlay) 88%, var(--bg-overlay) 12%);
+  background: var(--bg-overlay);
   color: var(--fg-default);
   font-size: 8.5px;
   font-weight: 600;
@@ -1219,7 +1219,7 @@
   padding: 2px 5px;
   border: 1px solid var(--border-subtle);
   border-radius: 999px;
-  background: color-mix(in oklch, var(--bg-overlay) 88%, var(--bg-overlay) 12%);
+  background: var(--bg-overlay);
   color: var(--fg-muted);
   font-size: 8px;
   font-weight: 600;
@@ -1558,7 +1558,7 @@
   padding: 0 8px;
   border-radius: 999px;
   border: 1px solid var(--border-subtle);
-  background: color-mix(in oklch, var(--bg-overlay) 90%, var(--bg-overlay) 10%);
+  background: var(--bg-overlay);
   color: var(--fg-default);
   font-size: 10px;
   font-weight: 600;
@@ -2288,7 +2288,7 @@
   flex-shrink: 0;
   padding: 2px 10px;
   border-radius: 999px;
-  background: color-mix(in oklch, var(--bg-overlay) 80%, var(--bg-overlay) 20%);
+  background: var(--bg-overlay);
   color: color-mix(in oklch, var(--fg-strong) 55%, transparent);
   font-size: 11px;
   font-weight: 500;
@@ -2315,7 +2315,7 @@
   max-width: min(560px, calc(100vw - 16px));
   border: 1px solid color-mix(in oklch, var(--accent) 20%, var(--border-default) 80%);
   border-radius: 10px;
-  background: color-mix(in oklch, var(--bg-overlay) 96%, var(--bg-base) 4%);
+  background: var(--bg-overlay);
   box-shadow:
     0 12px 32px -8px color-mix(in oklch, black 60%, transparent),
     0 0 0 1px color-mix(in oklch, var(--accent) 8%, transparent);

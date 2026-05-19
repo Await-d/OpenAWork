@@ -169,7 +169,7 @@ const PANEL: React.CSSProperties = {
 const HEADER_PANEL: React.CSSProperties = {
   ...PANEL,
   background:
-    'linear-gradient(180deg, color-mix(in oklab, var(--bg-overlay) 84%, var(--bg-overlay) 16%), var(--bg-overlay))',
+    'linear-gradient(180deg, var(--bg-overlay), var(--bg-overlay))',
 };
 
 const HERO_PANEL: React.CSSProperties = {
@@ -214,7 +214,7 @@ function Tag({
 }) {
   const styles: Record<typeof tone, React.CSSProperties> = {
     default: {
-      background: 'color-mix(in oklab, var(--bg-overlay) 80%, var(--bg-overlay) 20%)',
+      background: 'var(--bg-overlay)',
       color: 'var(--fg-default)',
     },
     accent: {
@@ -252,7 +252,7 @@ function fieldStyle(): React.CSSProperties {
     width: '100%',
     borderRadius: 14,
     border: '1px solid var(--border-subtle)',
-    background: 'color-mix(in oklab, var(--bg-overlay) 86%, var(--bg-overlay) 14%)',
+    background: 'var(--bg-overlay)',
     color: 'var(--fg-strong)',
     padding: '11px 12px',
     fontSize: 13,
@@ -305,7 +305,7 @@ function secondaryButtonStyle(disabled = false): React.CSSProperties {
   return {
     border: '1px solid var(--border-subtle)',
     borderRadius: 14,
-    background: 'color-mix(in oklab, var(--bg-overlay) 88%, var(--bg-overlay) 12%)',
+    background: 'var(--bg-overlay)',
     color: disabled ? 'var(--fg-muted)' : 'var(--fg-default)',
     padding: '11px 16px',
     fontSize: 13,
@@ -336,7 +336,7 @@ function StatCard({ label, value }: { label: string; value: string }) {
         ...PANEL,
         padding: '14px 16px',
         background:
-          'linear-gradient(180deg, color-mix(in oklab, var(--bg-overlay) 88%, var(--bg-overlay) 12%), var(--bg-overlay))',
+          'linear-gradient(180deg, var(--bg-overlay), var(--bg-overlay))',
       }}
     >
       <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginBottom: 8 }}>{label}</div>
@@ -626,7 +626,7 @@ function InfoRow({ label, value }: { label: string; value: string }) {
         alignItems: 'start',
         padding: '10px 12px',
         borderRadius: 14,
-        background: 'color-mix(in oklab, var(--bg-overlay) 88%, var(--bg-overlay) 12%)',
+        background: 'var(--bg-overlay)',
       }}
     >
       <span style={{ fontSize: 12, color: 'var(--fg-muted)', fontWeight: 600 }}>{label}</span>
@@ -655,7 +655,7 @@ function ToggleRow({
         borderRadius: 14,
         background: checked
           ? 'rgba(99, 102, 241, 0.08)'
-          : 'color-mix(in oklab, var(--bg-overlay) 88%, var(--bg-overlay) 12%)',
+          : 'var(--bg-overlay)',
         color: 'var(--fg-strong)',
         padding: '12px 14px',
         display: 'flex',

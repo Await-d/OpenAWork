@@ -29,7 +29,7 @@ export function ArtifactCodeEditor({ content, type, onChange }: ArtifactCodeEdit
                 borderRadius: tokens.radius.lg,
                 border: `1px solid ${tokens.color.borderSubtle}`,
                 color: 'var(--fg-muted)',
-                background: 'color-mix(in oklch, var(--bg-overlay) 90%, var(--bg-base) 10%)',
+                background: 'var(--bg-overlay)',
               }}
             >
               加载编辑器…

@@ -61,7 +61,7 @@ export function CompanionStatusHero({ buddy }: CompanionStatusHeroProps) {
             borderRadius: 12,
             border: '1px solid var(--border-default)',
             padding: '12px 14px',
-            background: 'color-mix(in oklch, var(--bg-overlay) 94%, var(--bg-base) 6%)',
+            background: 'var(--bg-overlay)',
           }}
         >
           <div

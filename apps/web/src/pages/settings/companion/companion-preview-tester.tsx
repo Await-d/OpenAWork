@@ -162,7 +162,7 @@ export function CompanionPreviewTester({ buddy }: CompanionPreviewTesterProps) {
                 borderRadius: 12,
                 border: '1px solid var(--border-subtle)',
                 padding: '10px 12px',
-                background: 'color-mix(in oklch, var(--bg-overlay) 92%, transparent)',
+                background: 'var(--bg-overlay)',
                 display: 'grid',
                 gap: 6,
               }}

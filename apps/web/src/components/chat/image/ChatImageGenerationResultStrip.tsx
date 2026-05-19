@@ -22,7 +22,7 @@ export function ChatImageGenerationResultStrip({
         borderRadius: 12,
         border: '1px solid color-mix(in oklch, var(--accent) 24%, var(--border-subtle))',
         background:
-          'linear-gradient(180deg, color-mix(in oklch, var(--bg-overlay) 92%, var(--accent) 8%), color-mix(in oklch, var(--bg-overlay) 98%, transparent))',
+          'linear-gradient(180deg, color-mix(in oklch, var(--bg-overlay) 92%, var(--accent) 8%), var(--bg-overlay))',
         padding: '10px 12px',
         display: 'flex',
         alignItems: 'center',

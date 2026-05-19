@@ -335,7 +335,7 @@ function RunningRow({ entry, dur }: { entry: HandoffEntry; dur: number }) {
         style={{
           padding: '1px 8px',
           borderRadius: 999,
-          background: 'color-mix(in srgb, var(--bg-overlay) 60%, transparent)',
+          background: 'var(--bg-overlay)',
           border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
           color: 'var(--fg-default)',
           fontSize: 10,
@@ -404,7 +404,7 @@ function CompletedGantt({ entries }: { entries: HandoffEntry[] }) {
                 flex: 1,
                 height: 14,
                 borderRadius: 4,
-                background: 'color-mix(in srgb, var(--bg-overlay) 70%, transparent)',
+                background: 'var(--bg-overlay)',
                 position: 'relative',
                 overflow: 'hidden',
               }}

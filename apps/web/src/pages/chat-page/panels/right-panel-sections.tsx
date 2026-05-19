@@ -32,7 +32,7 @@ const PANEL_SECTION_STYLE: React.CSSProperties = {
   padding: '8px 10px',
   borderRadius: 10,
   border: '1px solid color-mix(in oklch, var(--border-default) 84%, transparent)',
-  background: 'color-mix(in oklch, var(--bg-overlay) 80%, transparent)',
+  background: 'var(--bg-overlay)',
 };
 
 const PANEL_SECTION_LABEL_STYLE: React.CSSProperties = {
@@ -107,7 +107,7 @@ function getSessionTodoBadgeTone(todo: SessionTodoItem): {
   return {
     border: '1px solid var(--border-default)',
     color: 'var(--fg-muted)',
-    background: 'color-mix(in srgb, var(--bg-overlay) 72%, transparent)',
+    background: 'var(--bg-overlay)',
   };
 }
 
@@ -237,7 +237,7 @@ export function ChatHistoryTabContent(props: {
                     textAlign: 'left',
                     border: 'none',
                     borderRadius: 8,
-                    background: 'color-mix(in oklch, var(--bg-overlay) 70%, transparent)',
+                    background: 'var(--bg-overlay)',
                     color: 'var(--fg-strong)',
                     padding: '7px 9px',
                     cursor: 'pointer',
@@ -311,7 +311,7 @@ export function ChatHistoryTabContent(props: {
                           borderRadius: 999,
                           border: '1px solid var(--border-default)',
                           color: 'var(--fg-muted)',
-                          background: 'color-mix(in srgb, var(--bg-overlay) 70%, transparent)',
+                          background: 'var(--bg-overlay)',
                         }}
                       >
                         {task.completedSubtaskCount ?? 0}/{task.subtaskCount ?? 0} 子项
@@ -393,7 +393,7 @@ export function ChatHistoryTabContent(props: {
                     borderRadius: 999,
                     border: '1px solid var(--border-default)',
                     color: 'var(--fg-muted)',
-                    background: 'color-mix(in srgb, var(--bg-overlay) 70%, transparent)',
+                    background: 'var(--bg-overlay)',
                   }}
                 >
                   {
@@ -414,7 +414,7 @@ export function ChatHistoryTabContent(props: {
                       gap: 6,
                       padding: '4px 6px',
                       borderRadius: 7,
-                      background: 'color-mix(in oklch, var(--bg-overlay) 68%, transparent)',
+                      background: 'var(--bg-overlay)',
                     }}
                   >
                     <span
@@ -488,7 +488,7 @@ export function ChatHistoryTabContent(props: {
                     borderRadius: 999,
                     border: '1px solid var(--border-default)',
                     color: 'var(--fg-muted)',
-                    background: 'color-mix(in srgb, var(--bg-overlay) 70%, transparent)',
+                    background: 'var(--bg-overlay)',
                   }}
                 >
                   {
@@ -509,7 +509,7 @@ export function ChatHistoryTabContent(props: {
                       gap: 6,
                       padding: '4px 6px',
                       borderRadius: 7,
-                      background: 'color-mix(in oklch, var(--bg-overlay) 68%, transparent)',
+                      background: 'var(--bg-overlay)',
                     }}
                   >
                     <span
@@ -691,7 +691,7 @@ export function ChatHistoryTabContent(props: {
                                         : 'color-mix(in srgb, var(--accent) 34%, var(--border-default))'
                                   }`,
                                   background: action.disabled
-                                    ? 'color-mix(in srgb, var(--bg-overlay) 82%, transparent)'
+                                    ? 'var(--bg-overlay)'
                                     : action.primary
                                       ? 'linear-gradient(180deg, color-mix(in srgb, var(--accent) 24%, transparent), color-mix(in srgb, var(--accent) 12%, transparent))'
                                       : action.danger
@@ -1041,7 +1041,7 @@ export function ChatOverviewTabContent(props: {
               gap: 1,
               padding: '5px 7px',
               borderRadius: 7,
-              background: 'color-mix(in oklch, var(--bg-overlay) 70%, transparent)',
+              background: 'var(--bg-overlay)',
               border: accent
                 ? '1px solid color-mix(in oklch, var(--accent) 30%, var(--border-default))'
                 : '1px solid transparent',

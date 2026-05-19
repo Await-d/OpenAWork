@@ -34,7 +34,7 @@ interface WorkspaceWarpDialogProps {
 const OVERLAY_STYLE: React.CSSProperties = {
   position: 'fixed',
   inset: 0,
-  background: 'color-mix(in srgb, var(--bg-base) 50%, transparent)',
+  background: 'var(--bg-base)',
   zIndex: 100,
   display: 'flex',
   alignItems: 'center',

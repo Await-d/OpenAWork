@@ -750,7 +750,7 @@ export function ChatComposer({
                           ? 'color-mix(in srgb, var(--warning) 12%, transparent)'
                           : index === 0
                             ? 'color-mix(in oklch, var(--accent) 10%, transparent)'
-                            : 'color-mix(in oklch, var(--bg-overlay) 80%, transparent)',
+                            : 'var(--bg-overlay)',
                         color: item.requiresAttachmentRebind
                           ? 'var(--warning))'
                           : index === 0
@@ -888,7 +888,7 @@ export function ChatComposer({
                         : '1px solid var(--border-subtle)',
                       background: hasAgentOverride
                         ? 'color-mix(in oklch, var(--accent) 10%, var(--bg-overlay))'
-                        : 'color-mix(in oklch, var(--bg-overlay) 80%, transparent)',
+                        : 'var(--bg-overlay)',
                       color: hasAgentOverride ? 'var(--accent)' : 'var(--fg-muted)',
                       fontSize: 10,
                       fontWeight: hasAgentOverride ? 600 : 500,

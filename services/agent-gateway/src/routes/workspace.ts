@@ -39,6 +39,13 @@ function checkUserWorkspaceAccess(
   reply: FastifyReply,
   safePath: string,
 ): boolean {
+  // In unrestricted mode the global WORKSPACE_ROOTS check (via
+  // validateWorkspacePath) is sufficient — the per-user allowlist
+  // only makes sense when access IS restricted and multiple users
+  // share the same root.
+  if (!WORKSPACE_ACCESS_RESTRICTED) {
+    return true;
+  }
   const user = request.user as JwtPayload | undefined;
   if (!user?.sub) {
     reply.status(401).send({ error: 'unauthorized' });

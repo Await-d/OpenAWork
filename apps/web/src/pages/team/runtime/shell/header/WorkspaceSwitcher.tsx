@@ -49,7 +49,7 @@ const TRIGGER_BUTTON_STYLE: CSSProperties = {
   padding: '2px 8px',
   borderRadius: 6,
   border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 80%, transparent)',
+  background: 'var(--bg-overlay)',
   color: 'var(--fg-default)',
   fontSize: 12,
   fontWeight: 500,

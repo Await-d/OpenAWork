@@ -52,7 +52,7 @@ export const sharedUiThemeVars = {
   '--color-bg': 'var(--bg-base)',
   '--color-surface': 'var(--bg-overlay)',
   '--color-surface-2': 'var(--bg-overlay)',
-  '--color-surface-glass': 'color-mix(in oklch, var(--bg-overlay) 90%, transparent)',
+  '--color-surface-glass': 'var(--bg-overlay)',
   '--color-border': 'var(--border-default)',
   '--color-border-subtle': 'var(--border-subtle)',
   '--color-text': 'var(--fg-strong)',
@@ -142,7 +142,7 @@ export function MessageRow({
   const agentPillStyle: React.CSSProperties | undefined = agentAccent
     ? {
         borderColor: `color-mix(in oklch, ${agentAccent} 40%, var(--border-default) 60%)`,
-        background: `linear-gradient(135deg, color-mix(in oklch, ${agentAccent} 18%, var(--bg-overlay) 82%), color-mix(in oklch, var(--bg-overlay) 92%, var(--bg-overlay) 8%))`,
+        background: `linear-gradient(135deg, color-mix(in oklch, ${agentAccent} 18%, var(--bg-overlay) 82%), var(--bg-overlay))`,
         color: `color-mix(in oklch, ${agentAccent} 82%, var(--fg-on-accent) 18%)`,
       }
     : undefined;

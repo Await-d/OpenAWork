@@ -10,7 +10,7 @@ export const CHANNEL_SUBSCRIPTION_SETTINGS_STYLES = `
   border: 1px solid color-mix(in srgb, var(--border-default) 72%, transparent);
   border-radius: 12px;
   overflow: hidden;
-  background: color-mix(in srgb, var(--surface) 97%, white 3%);
+  background: color-mix(in srgb, var(--bg-overlay) 97%, white 3%);
   box-shadow: none;
 }
 
@@ -42,7 +42,7 @@ export const CHANNEL_SUBSCRIPTION_SETTINGS_STYLES = `
   margin: 0;
   font-size: 15px;
   line-height: 1.15;
-  color: var(--text);
+  color: var(--fg-strong);
 }
 
 .channel-sidebar__description,
@@ -71,7 +71,7 @@ export const CHANNEL_SUBSCRIPTION_SETTINGS_STYLES = `
   border-radius: 999px;
   border: 1px solid rgba(148, 163, 184, 0.18);
   background: rgba(148, 163, 184, 0.1);
-  color: var(--text);
+  color: var(--fg-strong);
   font-size: 10px;
   font-weight: 600;
 }
@@ -89,7 +89,7 @@ export const CHANNEL_SUBSCRIPTION_SETTINGS_STYLES = `
   border-radius: 8px;
   border: 1px solid color-mix(in srgb, var(--border-default) 80%, transparent);
   background: color-mix(in srgb, var(--bg-base) 92%, var(--fg-on-accent) 8%);
-  color: var(--text);
+  color: var(--fg-strong);
   padding: 7px 9px;
   font-size: 11px;
   outline: none;
@@ -127,7 +127,7 @@ export const CHANNEL_SUBSCRIPTION_SETTINGS_STYLES = `
 .channel-group__title {
   font-size: 10px;
   font-weight: 700;
-  color: var(--text);
+  color: var(--fg-strong);
   letter-spacing: 0.03em;
   text-transform: uppercase;
 }
@@ -177,7 +177,7 @@ export const CHANNEL_SUBSCRIPTION_SETTINGS_STYLES = `
   border-radius: 8px;
   border: 1px solid rgba(148, 163, 184, 0.12);
   background: rgba(148, 163, 184, 0.06);
-  color: var(--text);
+  color: var(--fg-strong);
   font-size: 11px;
   font-weight: 700;
 }
@@ -186,7 +186,7 @@ export const CHANNEL_SUBSCRIPTION_SETTINGS_STYLES = `
 .channel-instance__name {
   font-size: 11px;
   font-weight: 700;
-  color: var(--text);
+  color: var(--fg-strong);
 }
 
 .channel-descriptor__desc,
@@ -263,7 +263,7 @@ export const CHANNEL_SUBSCRIPTION_SETTINGS_STYLES = `
   border-radius: 999px;
   border: 1px solid rgba(148, 163, 184, 0.16);
   background: rgba(148, 163, 184, 0.08);
-  color: var(--text);
+  color: var(--fg-strong);
   font-size: 10px;
   font-weight: 600;
 }
@@ -296,7 +296,7 @@ export const CHANNEL_SUBSCRIPTION_SETTINGS_STYLES = `
 
 .channel-button--ghost {
   background: transparent;
-  color: var(--text);
+  color: var(--fg-strong);
   border: 1px solid rgba(148, 163, 184, 0.16);
 }
 
@@ -345,7 +345,7 @@ export const CHANNEL_SUBSCRIPTION_SETTINGS_STYLES = `
   margin: 0;
   font-size: 12px;
   font-weight: 700;
-  color: var(--text);
+  color: var(--fg-strong);
 }
 
 .channel-section__body {
@@ -362,7 +362,7 @@ export const CHANNEL_SUBSCRIPTION_SETTINGS_STYLES = `
   display: flex;
   align-items: center;
   gap: 6px;
-  color: var(--text);
+  color: var(--fg-strong);
   font-size: 10px;
   font-weight: 700;
 }
@@ -407,7 +407,7 @@ export const CHANNEL_SUBSCRIPTION_SETTINGS_STYLES = `
 }
 
 .channel-check-card__title {
-  color: var(--text);
+  color: var(--fg-strong);
   font-size: 11px;
   font-weight: 700;
 }
@@ -441,7 +441,7 @@ export const CHANNEL_SUBSCRIPTION_SETTINGS_STYLES = `
   padding: 4px 8px;
   background: rgba(99, 102, 241, 0.08);
   border: 1px solid rgba(99, 102, 241, 0.18);
-  color: var(--text);
+  color: var(--fg-strong);
   font-size: 10px;
 }
 
@@ -477,7 +477,7 @@ export const CHANNEL_SUBSCRIPTION_SETTINGS_STYLES = `
 .channel-target-name {
   font-size: 11px;
   font-weight: 700;
-  color: var(--text);
+  color: var(--fg-strong);
 }
 
 .channel-target-id {

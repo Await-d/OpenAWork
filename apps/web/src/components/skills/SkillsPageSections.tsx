@@ -21,7 +21,7 @@ const PANEL: React.CSSProperties = {
 const HEADER_PANEL: React.CSSProperties = {
   ...PANEL,
   background:
-    'linear-gradient(180deg, color-mix(in oklab, var(--bg-overlay) 84%, var(--bg-overlay) 16%), var(--bg-overlay))',
+    'linear-gradient(180deg, var(--bg-overlay), var(--bg-overlay))',
 };
 
 const HERO_PANEL: React.CSSProperties = {
@@ -58,7 +58,7 @@ function secondaryButtonStyle(disabled = false): React.CSSProperties {
   return {
     border: '1px solid var(--border-subtle)',
     borderRadius: 14,
-    background: 'color-mix(in oklab, var(--bg-overlay) 88%, var(--bg-overlay) 12%)',
+    background: 'var(--bg-overlay)',
     color: disabled ? 'var(--fg-muted)' : 'var(--fg-default)',
     padding: '11px 16px',
     fontSize: 13,
@@ -75,7 +75,7 @@ function StatCard({ label, value }: { label: string; value: string }) {
         ...PANEL,
         padding: '14px 16px',
         background:
-          'linear-gradient(180deg, color-mix(in oklab, var(--bg-overlay) 88%, var(--bg-overlay) 12%), var(--bg-overlay))',
+          'linear-gradient(180deg, var(--bg-overlay), var(--bg-overlay))',
       }}
     >
       <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginBottom: 8 }}>{label}</div>
@@ -171,7 +171,7 @@ export function SkillsToolbar({
           style={{
             display: 'flex',
             gap: 4,
-            background: 'color-mix(in oklab, var(--bg-overlay) 88%, var(--bg-overlay) 12%)',
+            background: 'var(--bg-overlay)',
             borderRadius: 14,
             padding: 4,
             border: '1px solid var(--border-subtle)',

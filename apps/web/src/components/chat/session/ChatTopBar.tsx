@@ -322,7 +322,7 @@ export function ChatTopBar({
           flexShrink: 0,
           padding: '2px 3px',
           borderRadius: 8,
-          background: 'color-mix(in oklch, var(--bg-overlay) 80%, transparent)',
+          background: 'var(--bg-overlay)',
           border: '1px solid var(--border-subtle)',
         }}
       >

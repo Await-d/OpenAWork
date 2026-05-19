@@ -27,7 +27,7 @@ const styles: Record<string, CSSProperties> = {
     borderRadius: 16,
     border: '1px solid color-mix(in oklch, var(--danger) 20%, var(--border-subtle))',
     background:
-      'linear-gradient(180deg, color-mix(in oklch, var(--bg-overlay) 94%, transparent) 0%, color-mix(in oklch, var(--bg-overlay) 88%, var(--bg-base) 100%)',
+      'linear-gradient(180deg, var(--bg-overlay) 0%, var(--bg-base)',
     boxShadow: '0 24px 64px rgba(0, 0, 0, 0.34)',
     padding: 20,
     display: 'flex',
@@ -62,7 +62,7 @@ const styles: Record<string, CSSProperties> = {
   summaryCard: {
     borderRadius: 14,
     border: '1px solid var(--border-subtle)',
-    background: 'color-mix(in oklch, var(--bg-overlay) 88%, transparent)',
+    background: 'var(--bg-overlay)',
     padding: '12px 14px',
     display: 'grid',
     gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',

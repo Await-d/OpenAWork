@@ -104,7 +104,7 @@ const ROW_STYLE: React.CSSProperties = {
   border: '1px solid var(--border-subtle)',
   borderRadius: 10,
   padding: '10px 12px',
-  background: 'color-mix(in oklch, var(--bg-overlay) 92%, transparent)',
+  background: 'var(--bg-overlay)',
 };
 
 const PATH_BOX: React.CSSProperties = {
@@ -974,7 +974,7 @@ export function DesktopTabContent() {
               padding: '16px 18px',
               borderRadius: 10,
               border: '1px solid var(--border-subtle)',
-              background: 'color-mix(in oklch, var(--bg-overlay) 92%, transparent)',
+              background: 'var(--bg-overlay)',
             }}
           >
             {pinMode === 'change' || pinMode === 'remove' ? (

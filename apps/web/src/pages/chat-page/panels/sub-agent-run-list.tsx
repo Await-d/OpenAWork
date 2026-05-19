@@ -436,7 +436,7 @@ export function SubAgentRunList({
               padding: '0 5px',
               borderRadius: 999,
               border: '1px solid var(--border-subtle)',
-              background: 'color-mix(in oklch, var(--bg-overlay) 82%, transparent)',
+              background: 'var(--bg-overlay)',
               fontSize: 8,
               fontWeight: 700,
               color: 'var(--fg-muted)',

@@ -89,7 +89,7 @@ function CompanionMetaCard({ label, value }: { label: string; value: React.React
         flex: '1 1 140px',
         borderRadius: 7,
         border: '1px solid var(--border-subtle)',
-        background: 'color-mix(in oklch, var(--bg-overlay) 88%, transparent)',
+        background: 'var(--bg-overlay)',
         padding: '4px 5px',
         display: 'flex',
         alignItems: 'flex-start',
@@ -250,8 +250,8 @@ function CompanionOutputRow({
         borderRadius: 8,
         border: '1px solid var(--border-subtle)',
         background: isLatest
-          ? 'color-mix(in oklch, var(--bg-hover) 72%, transparent)'
-          : 'color-mix(in oklch, var(--bg-overlay) 90%, transparent)',
+          ? 'var(--bg-hover)'
+          : 'var(--bg-overlay)',
         padding: '5px 6px',
       }}
     >
@@ -954,7 +954,7 @@ export function CompanionStage({
                                 padding: '0 4px',
                                 borderRadius: 999,
                                 border: '1px solid var(--border-subtle)',
-                                background: 'color-mix(in oklch, var(--bg-overlay) 90%, transparent)',
+                                background: 'var(--bg-overlay)',
                                 color: 'var(--fg-default)',
                                 fontSize: 7.5,
                                 fontWeight: 700,
@@ -995,7 +995,7 @@ export function CompanionStage({
                               alignItems: 'center',
                               padding: '0 3px',
                               borderRadius: 999,
-                              background: 'color-mix(in oklch, var(--bg-overlay) 88%, transparent)',
+                              background: 'var(--bg-overlay)',
                               color: 'var(--fg-default)',
                               fontSize: 7.5,
                               fontWeight: 700,
@@ -1106,7 +1106,7 @@ export function CompanionStage({
                         borderRadius: 8,
                         border: '1px solid var(--border-subtle)',
                         padding: '4px 5px 4px',
-                        background: 'color-mix(in oklch, var(--bg-overlay) 92%, transparent)',
+                        background: 'var(--bg-overlay)',
                       }}
                     >
                       <div style={{ minWidth: 0, flex: '1 1 220px' }}>
@@ -1140,7 +1140,7 @@ export function CompanionStage({
                                 padding: '0 4px',
                                 borderRadius: 999,
                                 background:
-                                  'color-mix(in oklch, var(--bg-hover) 88%, transparent)',
+                                  'var(--bg-hover)',
                                 color: 'var(--fg-default)',
                                 fontSize: 7.5,
                                 fontWeight: 700,
@@ -1163,7 +1163,7 @@ export function CompanionStage({
                               padding: '0 3px',
                               borderRadius: 999,
                               background:
-                                'color-mix(in oklch, var(--bg-hover) 86%, transparent)',
+                                'var(--bg-hover)',
                               color: 'var(--fg-default)',
                               fontSize: 7.5,
                               fontWeight: 700,
@@ -1237,7 +1237,7 @@ export function CompanionStage({
                         gap: 4,
                         borderRadius: 8,
                         border: '1px solid var(--border-subtle)',
-                        background: 'color-mix(in oklch, var(--bg-overlay) 92%, transparent)',
+                        background: 'var(--bg-overlay)',
                         padding: '4px 5px 4px',
                       }}
                     >

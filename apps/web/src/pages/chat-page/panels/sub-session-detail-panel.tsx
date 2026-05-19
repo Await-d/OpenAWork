@@ -878,7 +878,7 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
                     style={{
                       height: 52,
                       borderRadius: 10,
-                      background: 'color-mix(in oklab, var(--bg-overlay) 82%, var(--bg-overlay))',
+                      background: 'var(--bg-overlay)',
                       border: '1px solid var(--border-default)',
                     }}
                   />
@@ -916,7 +916,7 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
               style={{
                 border: '1px dashed var(--border-subtle)',
                 borderRadius: 12,
-                background: 'color-mix(in oklch, var(--bg-overlay) 88%, transparent)',
+                background: 'var(--bg-overlay)',
                 padding: '14px 12px',
                 fontSize: 11,
                 color: 'var(--fg-muted)',
@@ -957,7 +957,7 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
                 : '1px solid var(--border-default)',
               background: hasPendingFollowContent
                 ? 'color-mix(in oklch, var(--bg-overlay) 82%, var(--accent) 18%)'
-                : 'color-mix(in oklch, var(--bg-overlay) 90%, transparent)',
+                : 'var(--bg-overlay)',
               color: hasPendingFollowContent ? 'var(--fg-strong)' : 'var(--fg-default)',
               boxShadow: 'var(--shadow-md)',
               backdropFilter: 'blur(10px)',

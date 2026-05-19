@@ -52,7 +52,7 @@ export function NotificationPreferencePanel() {
         style={{
           borderRadius: 12,
           border: '1px solid var(--border-default)',
-          background: 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-overlay))',
+          background: 'var(--bg-overlay)',
           padding: '12px 14px',
           display: 'flex',
           justifyContent: 'space-between',
@@ -129,7 +129,7 @@ export function NotificationPreferencePanel() {
                   : '1px solid var(--border-default)',
                 background: enabled
                   ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))'
-                  : 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-overlay))',
+                  : 'var(--bg-overlay)',
                 padding: '14px 16px',
                 minHeight: 148,
                 justifyContent: 'space-between',

@@ -453,7 +453,7 @@ export function PluginsTabContent({
                     padding: '10px 12px',
                     borderRadius: 8,
                     border: '1px solid var(--border-subtle)',
-                    background: 'color-mix(in oklch, var(--bg-overlay) 95%, transparent)',
+                    background: 'var(--bg-overlay)',
                   }}
                 >
                   <div

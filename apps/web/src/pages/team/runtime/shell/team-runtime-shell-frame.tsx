@@ -24,7 +24,7 @@ const APP_FRAME_STYLE: CSSProperties = {
   overflow: 'hidden',
   border: '1px solid color-mix(in srgb, var(--border-default) 82%, transparent)',
   background:
-    'linear-gradient(180deg, color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base) 0%, color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base) 100%)',
+    'linear-gradient(180deg, color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base) 0%, var(--bg-base)',
   boxShadow: 'var(--shadow-lg)',
 };
 
@@ -48,7 +48,7 @@ const PANEL_HEADER_STYLE: CSSProperties = {
   padding: '14px 14px 12px',
   borderBottom: '1px solid color-mix(in srgb, var(--border-default) 76%, transparent)',
   background:
-    'linear-gradient(180deg, color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base) 0%, color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base) 100%)',
+    'linear-gradient(180deg, color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base) 0%, var(--bg-base)',
 };
 
 const ACTIVITY_BUTTON_BASE_STYLE: CSSProperties = {
@@ -261,7 +261,7 @@ function RuntimeActivityRail({
         width: 56,
         borderRight: '1px solid color-mix(in srgb, var(--border-default) 76%, transparent)',
         background:
-          'linear-gradient(180deg, color-mix(in srgb, var(--bg-overlay) 94%, var(--bg-base) 0%, color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base) 100%)',
+          'linear-gradient(180deg, color-mix(in srgb, var(--bg-overlay) 94%, var(--bg-base) 0%, var(--bg-base)',
       }}
     >
       <div
@@ -727,7 +727,7 @@ function RuntimeMainPanel({
           overflow: 'auto',
           padding: 16,
           background:
-            'linear-gradient(180deg, color-mix(in srgb, var(--bg-base) 94%, var(--bg-overlay) 0%, color-mix(in srgb, var(--bg-base) 100%, var(--bg-overlay) 100%)',
+            'linear-gradient(180deg, color-mix(in srgb, var(--bg-base) 94%, var(--bg-overlay) 0%, var(--bg-base)',
         }}
       >
         {mainContent}
@@ -982,7 +982,7 @@ function RuntimeStatusBar({
         borderTop: '1px solid color-mix(in srgb, var(--border-default) 76%, transparent)',
         borderRadius: 0,
         background:
-          'linear-gradient(180deg, color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base) 0%, color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base) 100%)',
+          'linear-gradient(180deg, color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base) 0%, var(--bg-base)',
       }}
     >
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1172,7 +1172,7 @@ export function TeamRuntimeShellFrame({
                 padding: '12px 16px',
                 borderBottom: '1px solid color-mix(in srgb, var(--border-default) 78%, transparent)',
                 background:
-                  'linear-gradient(180deg, color-mix(in srgb, var(--bg-overlay) 94%, var(--bg-base) 0%, color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base) 100%)',
+                  'linear-gradient(180deg, color-mix(in srgb, var(--bg-overlay) 94%, var(--bg-base) 0%, var(--bg-base)',
               }}
             >
               <div

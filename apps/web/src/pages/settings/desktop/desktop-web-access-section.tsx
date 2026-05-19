@@ -60,7 +60,7 @@ const ROW_STYLE: React.CSSProperties = {
   border: '1px solid var(--border-subtle)',
   borderRadius: 10,
   padding: '10px 12px',
-  background: 'color-mix(in oklch, var(--bg-overlay) 92%, transparent)',
+  background: 'var(--bg-overlay)',
 };
 
 const SECONDARY_BTN: React.CSSProperties = {

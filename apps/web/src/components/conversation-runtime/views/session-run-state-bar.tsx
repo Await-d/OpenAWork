@@ -222,7 +222,7 @@ export function SessionRunStateBar({
                 padding: '0 7px',
                 borderRadius: 999,
                 border: '1px solid var(--border-subtle)',
-                background: 'color-mix(in oklch, var(--bg-overlay) 82%, transparent)',
+                background: 'var(--bg-overlay)',
                 color: 'var(--fg-default)',
                 fontSize: 10,
                 fontWeight: 600,

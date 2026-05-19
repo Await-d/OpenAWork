@@ -103,7 +103,7 @@ export function getCompanionRarityVisual(rarity: CompanionSpriteRarity): {
   switch (rarity) {
     case 'common':
       return {
-        background: 'color-mix(in oklch, var(--bg-overlay) 84%, transparent)',
+        background: 'var(--bg-overlay)',
         borderColor: 'color-mix(in oklch, var(--border-default) 78%, transparent)',
         color: 'var(--fg-muted)',
         label: RARITY_LABELS[rarity],

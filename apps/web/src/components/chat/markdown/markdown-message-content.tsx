@@ -796,7 +796,7 @@ function MarkdownPreviewCodeBlock({
                 marginTop: -64,
                 height: 64,
                 background:
-                  'linear-gradient(transparent, color-mix(in oklch, var(--bg-overlay) 92%, transparent))',
+                  'linear-gradient(transparent, var(--bg-overlay))',
                 pointerEvents: 'none',
               }}
             />
@@ -981,7 +981,7 @@ function ThinkingCodeBlock({ codeContent }: { codeContent: ReactNode }) {
             marginTop: -30,
             height: 30,
             background:
-              'linear-gradient(to bottom, transparent 0%, color-mix(in oklch, var(--bg-base) 80%, transparent) 40%, var(--bg-base) 100%)',
+              'linear-gradient(to bottom, transparent 0%, var(--bg-base) 40%, var(--bg-base) 100%)',
             pointerEvents: 'none',
             borderRadius: '0 0 6px 6px',
           }}

@@ -41,7 +41,7 @@ export function ChatScrollBottomButton({
           : '1px solid var(--border-default)',
         background: hasPendingFollowContent
           ? 'color-mix(in oklch, var(--bg-overlay) 82%, var(--accent) 18%)'
-          : 'color-mix(in oklch, var(--bg-overlay) 90%, transparent)',
+          : 'var(--bg-overlay)',
         color: hasPendingFollowContent ? 'var(--fg-strong)' : 'var(--fg-default)',
         boxShadow: 'var(--shadow-md)',
         backdropFilter: 'blur(10px)',

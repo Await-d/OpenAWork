@@ -32,7 +32,7 @@ export function ChatRemoteStreamPlaceholder({ status }: { status: 'running' | 'p
           borderRadius: '50%',
           flexShrink: 0,
           background:
-            'color-mix(in oklch, var(--accent) 28%, color-mix(in oklch, var(--bg-overlay) 80%, transparent))',
+            'color-mix(in oklch, var(--accent) 28%, var(--bg-overlay))',
           border: '1px solid color-mix(in oklch, var(--accent) 32%, var(--border-default))',
         }}
       />

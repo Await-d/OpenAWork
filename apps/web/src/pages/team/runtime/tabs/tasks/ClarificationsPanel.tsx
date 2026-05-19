@@ -60,7 +60,7 @@ const CARD_STYLE: CSSProperties = {
   padding: '12px 14px',
   borderRadius: 10,
   border: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
-  background: 'var(--card-bg, color-mix(in srgb, var(--bg-overlay) 92%, transparent))',
+  background: 'var(--card-bg, var(--bg-overlay))',
 };
 
 const QUESTION_STYLE: CSSProperties = {
