@@ -53,9 +53,7 @@ export function SkillManagerMobile({
           borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         }}
       >
-        <h2
-          style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--fg-default))' }}
-        >
+        <h2 style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--fg-default))' }}>
           Installed Skills
         </h2>
       </div>
@@ -84,7 +82,9 @@ export function SkillManagerMobile({
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   padding: '0.75rem 1rem',
-                  borderBottom: isLast ? 'none' : '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+                  borderBottom: isLast
+                    ? 'none'
+                    : '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
                   opacity: skill.enabled ? 1 : 0.55,
                   gap: 10,
                 }}

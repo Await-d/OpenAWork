@@ -66,14 +66,19 @@ export function RootCausePanel({
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontSize: 12, fontWeight: 600, color: color.complementHover }}>✗ 失败：{nodeLabel}</span>
-        <span style={{ fontSize: 11, color: 'var(--fg-muted))' }}>
-          {attempts} 次尝试
+        <span style={{ fontSize: 12, fontWeight: 600, color: color.complementHover }}>
+          ✗ 失败：{nodeLabel}
         </span>
+        <span style={{ fontSize: 11, color: 'var(--fg-muted))' }}>{attempts} 次尝试</span>
       </div>
 
       <div
-        style={{ fontSize: 12, color: color.complementHover, fontFamily: 'monospace', wordBreak: 'break-all' }}
+        style={{
+          fontSize: 12,
+          color: color.complementHover,
+          fontFamily: 'monospace',
+          wordBreak: 'break-all',
+        }}
       >
         {error}
       </div>
@@ -108,9 +113,7 @@ export function RootCausePanel({
             )}
           </div>
 
-          <div style={{ fontSize: 12, color: 'var(--fg-muted))' }}>
-            {analysis.whyRetryFailed}
-          </div>
+          <div style={{ fontSize: 12, color: 'var(--fg-muted))' }}>{analysis.whyRetryFailed}</div>
 
           <div style={{ fontSize: 12, color: 'var(--fg-strong))', fontStyle: 'italic' }}>
             建议：{analysis.fixSuggestion}

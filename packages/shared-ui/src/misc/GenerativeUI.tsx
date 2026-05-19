@@ -81,7 +81,9 @@ function UITable({ payload }: { payload: Record<string, unknown> }) {
     <div style={{ overflowX: 'auto' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
         <thead>
-          <tr style={{ borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' }}>
+          <tr
+            style={{ borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' }}
+          >
             {cols.map((c) => (
               <th
                 key={c}
@@ -107,14 +109,13 @@ function UITable({ payload }: { payload: Record<string, unknown> }) {
                 key={rowKey}
                 style={{
                   borderBottom:
-                    ri < rows.length - 1 ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' : 'none',
+                    ri < rows.length - 1
+                      ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))'
+                      : 'none',
                 }}
               >
                 {cols.map((c) => (
-                  <td
-                    key={c}
-                    style={{ padding: '0.4rem 0.75rem', color: 'var(--fg-strong))' }}
-                  >
+                  <td key={c} style={{ padding: '0.4rem 0.75rem', color: 'var(--fg-strong))' }}>
                     {row[c] !== null && row[c] !== undefined
                       ? typeof row[c] === 'object'
                         ? JSON.stringify(row[c])
@@ -279,9 +280,7 @@ function UICodeDiff({ payload }: { payload: Record<string, unknown> }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {(payload.filename as string) && (
-        <div style={{ fontSize: 11, color: 'var(--fg-muted))' }}>
-          {payload.filename as string}
-        </div>
+        <div style={{ fontSize: 11, color: 'var(--fg-muted))' }}>{payload.filename as string}</div>
       )}
       <div style={{ display: 'flex', gap: 8 }}>
         <div style={cell}>{before}</div>

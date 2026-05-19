@@ -147,7 +147,8 @@ export function ChannelManager({
               alignItems: 'center',
               gap: 10,
               padding: '0.6rem 0.875rem',
-              borderTop: i > 0 ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' : 'none',
+              borderTop:
+                i > 0 ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' : 'none',
             }}
           >
             <span

@@ -52,9 +52,7 @@ export function SkillManagerDesktop({
           borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         }}
       >
-        <h2
-          style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--fg-default))' }}
-        >
+        <h2 style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--fg-default))' }}>
           技能 — 已安装
         </h2>
       </div>
@@ -73,7 +71,9 @@ export function SkillManagerDesktop({
       ) : (
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
-            <tr style={{ borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' }}>
+            <tr
+              style={{ borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' }}
+            >
               {['名称', '版本', '认证', '描述', '来源', '最后更新', ''].map((h) => (
                 <th
                   key={h}
@@ -98,15 +98,15 @@ export function SkillManagerDesktop({
                 <tr
                   key={skill.id}
                   style={{
-                    borderBottom: isLast ? 'none' : '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+                    borderBottom: isLast
+                      ? 'none'
+                      : '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
                     opacity: skill.enabled ? 1 : 0.55,
                   }}
                 >
                   <td style={cell}>
                     <div style={{ fontWeight: 600 }}>{skill.name}</div>
-                    <div
-                      style={{ fontSize: 11, color: 'var(--fg-muted))', marginTop: 1 }}
-                    >
+                    <div style={{ fontSize: 11, color: 'var(--fg-muted))', marginTop: 1 }}>
                       {skill.id}
                     </div>
                   </td>

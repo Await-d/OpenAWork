@@ -72,7 +72,9 @@ export function DiagnosticCard({ filePath, diagnostics, onGoToLine, style }: Dia
         </span>
         <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
           {errors > 0 && <span style={{ fontSize: 11, color: color.danger }}>✗ {errors}</span>}
-          {warnings > 0 && <span style={{ fontSize: 11, color: color.contrast }}>⚠ {warnings}</span>}
+          {warnings > 0 && (
+            <span style={{ fontSize: 11, color: color.contrast }}>⚠ {warnings}</span>
+          )}
         </div>
       </div>
 
@@ -89,7 +91,8 @@ export function DiagnosticCard({ filePath, diagnostics, onGoToLine, style }: Dia
               padding: '0.4rem 0.75rem',
               background: 'transparent',
               border: 'none',
-              borderTop: i > 0 ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' : 'none',
+              borderTop:
+                i > 0 ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' : 'none',
               cursor: onGoToLine ? 'pointer' : 'default',
               textAlign: 'left',
               width: '100%',

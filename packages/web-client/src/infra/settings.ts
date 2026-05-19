@@ -8,7 +8,14 @@
  * 类型做收敛——避免重复同步两份 schema。
  */
 
-import { authHeader, expectJson, expectOk, HttpError, jsonAuthHeaders, withQuery } from '../gateway/http.js';
+import {
+  authHeader,
+  expectJson,
+  expectOk,
+  HttpError,
+  jsonAuthHeaders,
+  withQuery,
+} from '../gateway/http.js';
 
 export interface SettingsClient {
   // Providers / 模型选择

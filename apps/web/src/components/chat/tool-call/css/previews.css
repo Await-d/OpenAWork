@@ -40,7 +40,9 @@
 .tool-call-todo-panel::before {
   content: '';
   position: absolute;
-  top: 0; left: 12px; right: 12px;
+  top: 0;
+  left: 12px;
+  right: 12px;
   height: 1px;
   background: linear-gradient(90deg, transparent, var(--border-subtle), transparent);
   pointer-events: none;

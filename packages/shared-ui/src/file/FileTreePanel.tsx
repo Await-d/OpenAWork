@@ -135,9 +135,7 @@ function FileRow({
             padding: 0,
           }}
         >
-          <span
-            style={{ fontSize: 10, color: 'var(--fg-muted)', width: 10, flexShrink: 0 }}
-          >
+          <span style={{ fontSize: 10, color: 'var(--fg-muted)', width: 10, flexShrink: 0 }}>
             {isDir ? (expanded ? '▾' : '▸') : ''}
           </span>
           {node.status && !isDir ? (

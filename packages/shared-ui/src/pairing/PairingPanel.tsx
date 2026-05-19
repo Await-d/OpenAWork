@@ -148,9 +148,7 @@ function ClientView({ client }: { client: PairingClientProps }) {
         </button>
       </div>
       {client.connecting && (
-        <div style={{ textAlign: 'center', fontSize: 12, color: 'var(--accent))' }}>
-          连接中…
-        </div>
+        <div style={{ textAlign: 'center', fontSize: 12, color: 'var(--accent))' }}>连接中…</div>
       )}
       {client.error && (
         <div style={{ textAlign: 'center', fontSize: 12, color: color.danger }}>{client.error}</div>

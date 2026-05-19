@@ -1643,8 +1643,10 @@
 .chat-markdown-h2::before {
   content: '';
   position: absolute;
-  left: 0; top: 50%;
-  width: 3px; height: 70%;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 70%;
   border-radius: 2px;
   background: linear-gradient(180deg, var(--accent), var(--contrast));
   transform: translateY(-50%);
@@ -1708,7 +1710,8 @@
   font-size: 12.8px;
   line-height: 1.55;
   padding: 6px 10px;
-  border-left: 3px solid var(--accent-border, color-mix(in oklch, var(--accent) 60%, var(--border-default) 40%));
+  border-left: 3px solid
+    var(--accent-border, color-mix(in oklch, var(--accent) 60%, var(--border-default) 40%));
   background: var(--accent-subtle, color-mix(in oklch, var(--accent) 8%, transparent));
   border-radius: 0 6px 6px 0;
   margin: 2px 0;
@@ -1738,7 +1741,9 @@
   text-underline-offset: 2px;
   text-decoration-color: var(--accent-border);
   text-decoration-thickness: 1px;
-  transition: text-decoration-color 150ms ease, color 150ms ease;
+  transition:
+    text-decoration-color 150ms ease,
+    color 150ms ease;
 }
 .chat-markdown a:hover {
   color: var(--accent-hover);
@@ -1762,20 +1767,18 @@
   color: var(--accent);
   font-size: 0.9em;
   line-height: 1.5;
-  font-family: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family:
+    'JetBrains Mono', 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-weight: 500;
 }
 
 /* 代码块容器 */
 .chat-markdown-code-block {
   overflow: hidden;
-  border: 1px solid var(--border-default, color-mix(in oklch, var(--accent) 14%, var(--border-default) 86%));
+  border: 1px solid
+    var(--border-default, color-mix(in oklch, var(--accent) 14%, var(--border-default) 86%));
   border-radius: 8px;
-  background: linear-gradient(
-    180deg,
-    var(--bg-overlay),
-    var(--bg-surface)
-  );
+  background: linear-gradient(180deg, var(--bg-overlay), var(--bg-surface));
   box-shadow: var(--shadow-sm);
   margin: 2px 0;
   position: relative;
@@ -1784,7 +1787,9 @@
 .chat-markdown-code-block::before {
   content: '';
   position: absolute;
-  top: 0; left: 16px; right: 16px;
+  top: 0;
+  left: 16px;
+  right: 16px;
   height: 1px;
   background: linear-gradient(90deg, transparent, var(--border-subtle), transparent);
   pointer-events: none;
@@ -1912,7 +1917,8 @@
   padding: 8px 12px;
   overflow-x: auto;
   background: transparent;
-  font-family: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family:
+    'JetBrains Mono', 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
   line-height: 1.55;
   color: var(--fg-default);
@@ -1923,7 +1929,8 @@
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: stretch;
-  font-family: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family:
+    'JetBrains Mono', 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 .chat-markdown-code-gutter {
@@ -2113,7 +2120,9 @@
   text-decoration: underline;
   text-underline-offset: 2px;
   text-decoration-color: var(--accent-border);
-  transition: color 150ms ease, text-decoration-color 150ms ease;
+  transition:
+    color 150ms ease,
+    text-decoration-color 150ms ease;
 }
 
 .chat-markdown-link:hover {

@@ -478,7 +478,8 @@ export function ProviderSettings({
     return (
       <div
         style={{
-          borderTop: '1px solid var(--border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
+          borderTop:
+            '1px solid var(--border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
           paddingTop: 12,
           display: 'flex',
           flexDirection: 'column',
@@ -531,9 +532,7 @@ export function ProviderSettings({
               fontWeight: 600,
               cursor: controlEnabled ? 'pointer' : 'not-allowed',
               opacity: controlEnabled ? 1 : 0.45,
-              color: !current.enabled
-                ? 'var(--accent))'
-                : 'var(--fg-default))',
+              color: !current.enabled ? 'var(--accent))' : 'var(--fg-default))',
               background: !current.enabled
                 ? 'var(--accent-muted, rgba(99, 102, 241, 0.12))'
                 : 'var(--bg-raised)',
@@ -557,9 +556,7 @@ export function ProviderSettings({
                   fontWeight: 600,
                   cursor: controlEnabled ? 'pointer' : 'not-allowed',
                   opacity: controlEnabled ? 1 : 0.45,
-                  color: activeLevel
-                    ? 'var(--accent))'
-                    : 'var(--fg-default))',
+                  color: activeLevel ? 'var(--accent))' : 'var(--fg-default))',
                   background: activeLevel
                     ? 'var(--accent-muted, rgba(99, 102, 241, 0.12))'
                     : 'var(--bg-raised)',
@@ -661,9 +658,7 @@ export function ProviderSettings({
             gap: 8,
             textAlign: 'left',
             cursor: 'pointer',
-            background: isActive
-              ? 'var(--accent-muted, rgba(99, 102, 241, 0.12))'
-              : 'transparent',
+            background: isActive ? 'var(--accent-muted, rgba(99, 102, 241, 0.12))' : 'transparent',
             color: 'var(--fg-default))',
           }}
         >
@@ -735,7 +730,8 @@ export function ProviderSettings({
               alignItems: 'center',
               gap: 5,
               padding: '5px 0 3px',
-              borderTop: '1px solid var(--border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
+              borderTop:
+                '1px solid var(--border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
             }}
           >
             <div
@@ -744,7 +740,8 @@ export function ProviderSettings({
                 height: 15,
                 borderRadius: 4,
                 background: 'var(--bg-overlay))',
-                border: '1px solid var(--border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
+                border:
+                  '1px solid var(--border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
                 overflow: 'hidden',
                 display: 'flex',
                 alignItems: 'center',
@@ -879,9 +876,7 @@ export function ProviderSettings({
                     background: isActiveProvider
                       ? 'var(--accent-muted, rgba(99, 102, 241, 0.12))'
                       : 'transparent',
-                    color: isActiveProvider
-                      ? 'var(--accent))'
-                      : 'var(--fg-default)',
+                    color: isActiveProvider ? 'var(--accent))' : 'var(--fg-default)',
                     padding: '0.28rem 0.65rem',
                     fontSize: 11,
                     fontWeight: 600,
@@ -903,7 +898,8 @@ export function ProviderSettings({
             gap: 7,
             height: 30,
             borderRadius: 8,
-            border: '1px solid var(--border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
+            border:
+              '1px solid var(--border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
             background: 'var(--bg-raised)',
             padding: '0 9px',
           }}
@@ -952,7 +948,8 @@ export function ProviderSettings({
             flexDirection: 'column',
             gap: 0,
             paddingRight: 2,
-            borderTop: '1px solid var(--border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
+            borderTop:
+              '1px solid var(--border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
           }}
         >
           {showingSearchResults ? (
@@ -1053,7 +1050,8 @@ export function ProviderSettings({
     return (
       <div
         style={{
-          borderTop: '1px solid var(--border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
+          borderTop:
+            '1px solid var(--border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
           paddingTop: 12,
           display: 'grid',
           gap: 12,
@@ -1096,9 +1094,7 @@ export function ProviderSettings({
                 </button>
               ))}
               {group.tier === '2k' && (
-                <span
-                  style={{ fontSize: 9, color: 'var(--fg-muted))', fontStyle: 'italic' }}
-                >
+                <span style={{ fontSize: 9, color: 'var(--fg-muted))', fontStyle: 'italic' }}>
                   ~4MP
                 </span>
               )}
@@ -1110,8 +1106,7 @@ export function ProviderSettings({
                     color: 'var(--danger))',
                     borderRadius: 4,
                     padding: '1px 5px',
-                    background:
-                      'color-mix(in oklch, var(--danger) 10%, transparent)',
+                    background: 'color-mix(in oklch, var(--danger) 10%, transparent)',
                   }}
                 >
                   ~8MP · 实验性
@@ -1219,7 +1214,8 @@ export function ProviderSettings({
           style={{
             marginBottom: 12,
             paddingBottom: 10,
-            borderBottom: '1px solid var(--border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
+            borderBottom:
+              '1px solid var(--border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -1363,9 +1359,7 @@ export function ProviderSettings({
 
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 600, fontSize: 12 }}>{provider.name}</div>
-                    <div
-                      style={{ fontSize: 11, color: 'var(--fg-muted))', marginTop: 2 }}
-                    >
+                    <div style={{ fontSize: 11, color: 'var(--fg-muted))', marginTop: 2 }}>
                       {provider.type} &nbsp;·&nbsp; {provider.defaultModels.length} 个模型
                       {provider.baseUrl ? (
                         <>
@@ -1402,7 +1396,9 @@ export function ProviderSettings({
                       type="button"
                       onClick={() => onToggleProvider?.(provider.id)}
                       style={{
-                        background: provider.enabled ? 'var(--accent))' : 'var(--border-default, hsla(215, 18%, 50%, 0.12))',
+                        background: provider.enabled
+                          ? 'var(--accent))'
+                          : 'var(--border-default, hsla(215, 18%, 50%, 0.12))',
                         border: 'none',
                         borderRadius: 12,
                         width: 40,

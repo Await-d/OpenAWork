@@ -47,7 +47,9 @@ export function FileChangeReviewPanel({
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-strong)' }}>文件改动审阅</span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-strong)' }}>
+            文件改动审阅
+          </span>
           <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
             查看差异并决定接受或还原单个变更
           </span>

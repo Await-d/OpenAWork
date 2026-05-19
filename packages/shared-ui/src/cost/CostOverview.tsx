@@ -65,9 +65,7 @@ export function CostOverview({ monthlyCostUsd, breakdown, style }: CostOverviewP
           gap: 4,
         }}
       >
-        <span style={{ fontSize: 12, color: 'var(--fg-muted))' }}>
-          Current Month Total
-        </span>
+        <span style={{ fontSize: 12, color: 'var(--fg-muted))' }}>Current Month Total</span>
         <span
           style={{
             fontSize: 30,

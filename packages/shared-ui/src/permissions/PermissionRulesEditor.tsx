@@ -422,9 +422,7 @@ export function PermissionRulesEditor({
             </span>
           )}
         </div>
-        {saving && (
-          <span style={{ fontSize: 10, color: 'var(--fg-muted))' }}>保存中…</span>
-        )}
+        {saving && <span style={{ fontSize: 10, color: 'var(--fg-muted))' }}>保存中…</span>}
       </div>
 
       <div

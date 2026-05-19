@@ -75,9 +75,7 @@ export function MCPServerList({ servers, onRetry, style }: MCPServerListProps) {
           borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         }}
       >
-        <h2
-          style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--fg-default))' }}
-        >
+        <h2 style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--fg-default))' }}>
           MCP 服务器
         </h2>
       </div>
@@ -106,7 +104,9 @@ export function MCPServerList({ servers, onRetry, style }: MCPServerListProps) {
                   alignItems: 'center',
                   gap: 12,
                   padding: '0.75rem 1.5rem',
-                  borderBottom: isLast ? 'none' : '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+                  borderBottom: isLast
+                    ? 'none'
+                    : '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
                 }}
               >
                 <span
@@ -174,9 +174,7 @@ export function MCPServerList({ servers, onRetry, style }: MCPServerListProps) {
                   >
                     {STATUS_LABEL[server.status]}
                     {server.authType && (
-                      <span style={{ color: 'var(--fg-muted))' }}>
-                        · {server.authType}
-                      </span>
+                      <span style={{ color: 'var(--fg-muted))' }}>· {server.authType}</span>
                     )}
                   </div>
                 </div>

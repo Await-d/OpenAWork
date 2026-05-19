@@ -139,7 +139,8 @@ export function CronManager({
               alignItems: 'center',
               gap: 10,
               padding: '0.6rem 0.875rem',
-              borderTop: i > 0 ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' : 'none',
+              borderTop:
+                i > 0 ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' : 'none',
               flexWrap: 'wrap',
             }}
           >
@@ -284,13 +285,12 @@ export function CronManager({
                   disabled={job.status === 'running'}
                   title={job.status === 'running' ? '运行中' : 'Run now'}
                   style={{
-                    background:
-                      job.status === 'running'
-                        ? 'var(--bg-raised)'
-                        : 'var(--accent))',
+                    background: job.status === 'running' ? 'var(--bg-raised)' : 'var(--accent))',
                     color: job.status === 'running' ? 'var(--fg-muted))' : color.fgOnAccent,
                     border:
-                      job.status === 'running' ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' : 'none',
+                      job.status === 'running'
+                        ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))'
+                        : 'none',
                     borderRadius: 5,
                     padding: '0.25rem 0.6rem',
                     fontSize: 11,

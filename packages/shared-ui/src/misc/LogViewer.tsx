@@ -93,7 +93,10 @@ export function LogViewer({ logs, onExport, style }: LogViewerProps) {
           onClick={() => setActiveLevel(null)}
           style={{
             ...btnBase,
-            background: activeLevel === null ? 'var(--border-default, hsla(215, 18%, 50%, 0.12))' : 'transparent',
+            background:
+              activeLevel === null
+                ? 'var(--border-default, hsla(215, 18%, 50%, 0.12))'
+                : 'transparent',
             color: 'var(--fg-muted))',
           }}
         >
@@ -109,7 +112,9 @@ export function LogViewer({ logs, onExport, style }: LogViewerProps) {
               background: activeLevel === lvl ? `${LEVEL_COLORS[lvl]}22` : 'transparent',
               color: LEVEL_COLORS[lvl],
               borderColor:
-                activeLevel === lvl ? `${LEVEL_COLORS[lvl]}55` : 'var(--border-default, hsla(215, 18%, 50%, 0.12))',
+                activeLevel === lvl
+                  ? `${LEVEL_COLORS[lvl]}55`
+                  : 'var(--border-default, hsla(215, 18%, 50%, 0.12))',
             }}
           >
             {lvl}

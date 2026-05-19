@@ -110,22 +110,10 @@ function NodeShape({
         style={isRunning ? { animation: 'dag-pulse 1.2s ease-in-out infinite' } : undefined}
       />
       <rect x={p.x} y={p.y} width={4} height={NODE_H} rx={2} fill={NODE_COLOR[n.type]} />
-      <text
-        x={p.x + 14}
-        y={p.y + 20}
-        fontSize={10}
-        fontWeight={600}
-        fill="var(--fg-muted))"
-      >
+      <text x={p.x + 14} y={p.y + 20} fontSize={10} fontWeight={600} fill="var(--fg-muted))">
         {n.type}
       </text>
-      <text
-        x={p.x + 14}
-        y={p.y + 36}
-        fontSize={12}
-        fontWeight={500}
-        fill="var(--fg-strong))"
-      >
+      <text x={p.x + 14} y={p.y + 36} fontSize={12} fontWeight={500} fill="var(--fg-strong))">
         {n.label.length > 14 ? n.label.slice(0, 13) + '\u2026' : n.label}
       </text>
     </>

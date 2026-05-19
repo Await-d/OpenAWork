@@ -77,10 +77,7 @@ export function FileSearch({ onSearch, onResultClick, style }: FileSearchProps) 
               borderRadius: 4,
               cursor: 'pointer',
               background: mode === m ? 'var(--accent)' : 'transparent',
-              color:
-                mode === m
-                  ? 'var(--fg-on-accent)'
-                  : 'var(--fg-muted)',
+              color: mode === m ? 'var(--fg-on-accent)' : 'var(--fg-muted)',
             }}
           >
             {MODE_LABELS[m]}
@@ -104,11 +101,7 @@ export function FileSearch({ onSearch, onResultClick, style }: FileSearchProps) 
       </div>
 
       {loading && (
-        <div
-          style={{ fontSize: 12, color: 'var(--fg-muted)', padding: '0.25rem 0' }}
-        >
-          搜索中…
-        </div>
+        <div style={{ fontSize: 12, color: 'var(--fg-muted)', padding: '0.25rem 0' }}>搜索中…</div>
       )}
 
       {!loading && results.length > 0 && (

@@ -93,11 +93,7 @@ export function CopyActionButton({
       style={{
         appearance: 'none',
         border: `1px solid ${copied ? color.successBorder : failed ? color.dangerBorder : color.borderSubtle}`,
-        background: copied
-          ? color.successMuted
-          : failed
-            ? color.dangerMuted
-            : color.bgSurface,
+        background: copied ? color.successMuted : failed ? color.dangerMuted : color.bgSurface,
         color: copied ? color.success : failed ? color.danger : color.fgMuted,
         borderRadius: radius.pill,
         padding: `2px ${spacing[2]}px`,

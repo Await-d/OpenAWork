@@ -126,13 +126,11 @@ export default [
           patterns: [
             {
               group: ['**/pages/team/**'],
-              message:
-                'conversation-runtime 是协议层，不可依赖 team 装配。',
+              message: 'conversation-runtime 是协议层，不可依赖 team 装配。',
             },
             {
               group: ['**/pages/chat-page/**'],
-              message:
-                'conversation-runtime 是协议层，不可依赖 chat 装配。',
+              message: 'conversation-runtime 是协议层，不可依赖 chat 装配。',
             },
           ],
         },

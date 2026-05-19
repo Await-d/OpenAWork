@@ -425,9 +425,7 @@ export function VoiceRecorder({
             background: busy
               ? 'color-mix(in oklch, var(--danger) 12%, transparent)'
               : 'var(--bg-overlay)',
-            color: busy
-              ? 'color-mix(in oklch, var(--danger) 82%, white 18%)'
-              : 'var(--fg-muted)',
+            color: busy ? 'color-mix(in oklch, var(--danger) 82%, white 18%)' : 'var(--fg-muted)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -552,8 +550,7 @@ export function VoiceRecorder({
             fontSize: 10,
             color: 'color-mix(in oklch, var(--danger) 80%, white 20%)',
             background: 'color-mix(in oklch, var(--danger) 8%, transparent)',
-            border:
-              '1px solid color-mix(in oklch, var(--danger) 20%, var(--border-subtle))',
+            border: '1px solid color-mix(in oklch, var(--danger) 20%, var(--border-subtle))',
             borderRadius: 6,
             padding: '4px 8px',
             lineHeight: 1.5,

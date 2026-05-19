@@ -47,12 +47,8 @@ export function CostBadge({ costUsd, inputTokens, outputTokens, compact, style }
       }}
     >
       <span style={{ fontWeight: 700, color: color.success }}>{costStr}</span>
-      <span style={{ color: 'var(--fg-muted))' }}>
-        {inputTokens.toLocaleString()} in
-      </span>
-      <span style={{ color: 'var(--fg-muted))' }}>
-        {outputTokens.toLocaleString()} out
-      </span>
+      <span style={{ color: 'var(--fg-muted))' }}>{inputTokens.toLocaleString()} in</span>
+      <span style={{ color: 'var(--fg-muted))' }}>{outputTokens.toLocaleString()} out</span>
     </div>
   );
 }

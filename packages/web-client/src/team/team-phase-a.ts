@@ -8,7 +8,13 @@
  * expectJson / HttpError）完成，与仓库其他客户端保持一致。
  */
 
-import { authHeader, appendQueryParam, expectJson, jsonAuthHeaders, withQuery } from '../gateway/http.js';
+import {
+  authHeader,
+  appendQueryParam,
+  expectJson,
+  jsonAuthHeaders,
+  withQuery,
+} from '../gateway/http.js';
 
 export type SoulRoleLayer = 'reception' | 'pm1' | 'pm2' | 'executor' | 'reviewer';
 

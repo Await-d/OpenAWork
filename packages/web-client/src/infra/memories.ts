@@ -4,7 +4,13 @@
  * 用于 Settings → 记忆管理面板。响应保留 `unknown`，由调用方收敛实际形状。
  */
 
-import { authHeader, expectJson, HttpError, jsonAuthHeaders, readJsonErrorData } from '../gateway/http.js';
+import {
+  authHeader,
+  expectJson,
+  HttpError,
+  jsonAuthHeaders,
+  readJsonErrorData,
+} from '../gateway/http.js';
 
 export interface MemoriesClient {
   list(token: string, options?: { signal?: AbortSignal }): Promise<unknown>;

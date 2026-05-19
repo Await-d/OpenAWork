@@ -47,9 +47,7 @@ export function UsageDashboard({ records, budgetUsd, style }: UsageDashboardProp
           return (
             <div key={r.month}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                <span
-                  style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong))' }}
-                >
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong))' }}>
                   {r.month}
                 </span>
                 <span style={{ fontSize: 12, color: color.success, fontWeight: 700 }}>

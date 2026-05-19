@@ -150,7 +150,9 @@ export function PermissionConfirmDialog({
                   key={`${perm.type}-${perm.scope}`}
                   style={{
                     ...s.permRow,
-                    borderBottom: isLast ? 'none' : '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+                    borderBottom: isLast
+                      ? 'none'
+                      : '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
                   }}
                 >
                   <span style={s.permType}>{perm.type}</span>

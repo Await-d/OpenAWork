@@ -133,7 +133,9 @@ export function FileFilterSettings({ patterns, onAdd, onRemove, style }: FileFil
           onClick={handleAdd}
           disabled={!draft.trim()}
           style={{
-            background: draft.trim() ? 'var(--accent))' : 'var(--border-default, hsla(215, 18%, 50%, 0.12))',
+            background: draft.trim()
+              ? 'var(--accent))'
+              : 'var(--border-default, hsla(215, 18%, 50%, 0.12))',
             color: color.fgOnAccent,
             border: 'none',
             borderRadius: 6,

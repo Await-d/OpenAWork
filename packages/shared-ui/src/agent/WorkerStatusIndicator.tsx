@@ -62,7 +62,8 @@ export function WorkerStatusIndicator({ workers, onStop, onConnect }: WorkerStat
               alignItems: 'center',
               gap: 12,
               padding: '0.65rem 0.875rem',
-              borderTop: index === 0 ? 'none' : '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+              borderTop:
+                index === 0 ? 'none' : '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
             }}
           >
             <span

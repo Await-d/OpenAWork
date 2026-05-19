@@ -68,7 +68,10 @@ export function PlanHistoryPanel({ plans, onReplay, style }: PlanHistoryPanelPro
         <div
           key={plan.id}
           style={{
-            borderBottom: i < plans.length - 1 ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' : 'none',
+            borderBottom:
+              i < plans.length - 1
+                ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))'
+                : 'none',
           }}
         >
           <button
@@ -139,9 +142,7 @@ export function PlanHistoryPanel({ plans, onReplay, style }: PlanHistoryPanelPro
           {expanded[plan.id] && (
             <div style={{ padding: '0 1rem 0.75rem 2.5rem' }}>
               {plan.goal && (
-                <div
-                  style={{ fontSize: 11, color: 'var(--fg-muted))', marginBottom: 6 }}
-                >
+                <div style={{ fontSize: 11, color: 'var(--fg-muted))', marginBottom: 6 }}>
                   {plan.goal}
                 </div>
               )}

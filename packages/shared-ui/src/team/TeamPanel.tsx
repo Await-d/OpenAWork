@@ -168,7 +168,8 @@ export function TeamPanel({
               key={m.id}
               member={m}
               style={{
-                borderTop: i > 0 ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' : 'none',
+                borderTop:
+                  i > 0 ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' : 'none',
               }}
             />
           ))
@@ -177,7 +178,10 @@ export function TeamPanel({
 
       <div
         style={{
-          borderBottom: messages.length > 0 ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' : 'none',
+          borderBottom:
+            messages.length > 0
+              ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))'
+              : 'none',
         }}
       >
         <div
@@ -211,7 +215,8 @@ export function TeamPanel({
                 alignItems: 'center',
                 gap: 8,
                 padding: '0.5rem 0.875rem',
-                borderTop: i > 0 ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' : 'none',
+                borderTop:
+                  i > 0 ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' : 'none',
               }}
             >
               <span
@@ -227,10 +232,7 @@ export function TeamPanel({
                 style={{
                   flex: 1,
                   fontSize: 12,
-                  color:
-                    t.status === 'completed'
-                      ? 'var(--fg-muted))'
-                      : 'var(--fg-strong))',
+                  color: t.status === 'completed' ? 'var(--fg-muted))' : 'var(--fg-strong))',
                   textDecoration: t.status === 'completed' ? 'line-through' : 'none',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
@@ -284,7 +286,8 @@ export function TeamPanel({
                 display: 'flex',
                 gap: 8,
                 padding: '0.45rem 0.875rem',
-                borderTop: i > 0 ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' : 'none',
+                borderTop:
+                  i > 0 ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' : 'none',
               }}
             >
               <span
@@ -308,9 +311,7 @@ export function TeamPanel({
               </span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 1 }}>
-                  <span
-                    style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-strong))' }}
-                  >
+                  <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-strong))' }}>
                     {msg.memberId}
                   </span>
                   <span style={{ fontSize: 10, color: 'var(--fg-muted))' }}>

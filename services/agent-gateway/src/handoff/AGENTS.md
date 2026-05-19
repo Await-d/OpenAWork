@@ -25,11 +25,13 @@ handoff/
 ### store/ — 数据访问层
 
 **放什么**：
+
 - 与 SQLite 表直接交互的 CRUD 函数（`sqliteRun` / `sqliteGet` / `sqliteAll`）
 - 状态机过渡逻辑（pending → claimed → running → completed/failed/cancelled）
 - 数据模型类型定义（`HandoffRecord` / `InboundMessageRecord` 等）
 
 **不放什么**：
+
 - 业务编排逻辑（属于 runner/）
 - 事件发布（属于 bus/）
 - LLM 调用（属于 runner/）
@@ -39,6 +41,7 @@ handoff/
 ### runner/ — 运行时执行体
 
 **放什么**：
+
 - 各层的 LLM 调用 + 产物生成逻辑（artifact-chain / pm2-runner 等）
 - 守护进程（watcher：轮询 + claim + schedule）
 - 调度器（scheduler：任务生命周期管理）
@@ -46,6 +49,7 @@ handoff/
 - 编排器（reception-orchestrator：intent rewrite + handoff 创建）
 
 **不放什么**：
+
 - 纯数据 CRUD（属于 store/）
 - 层级约束校验（属于 capability/）
 - 事件定义（属于 bus/）
@@ -55,6 +59,7 @@ handoff/
 ### capability/ — 层级约束系统
 
 **放什么**：
+
 - 五层 capability 矩阵（`layer-capabilities.ts`）
 - Guard 函数（`assertCanHandoffTo` / `assertCanReceiveInbound` / `assertSubstateAllowed` / `assertCanWriteArtifactPhase`）
 - 内置指令注册表 + dispatcher（`builtin-instructions.ts`）
@@ -63,12 +68,14 @@ handoff/
 - Dispatch package 标准结构（`dispatch-package.ts`）
 
 **不放什么**：
+
 - 实际执行逻辑（属于 runner/）
 - DB 操作（属于 store/）
 
 **命名规范**：`layer-*.ts` / `builtin-*.ts` / `toolset-*.ts` / `dispatch-*.ts` / `instructions-*.ts`
 
 **扩展规则**：
+
 - 新增内置指令 → 在 `builtin-instructions-impl.ts` 中 `registerInstruction()`
 - 当 `builtin-instructions-impl.ts` 超过 1500 行 → 按层拆分为独立文件
 - 新增 capability 维度 → 在 `layer-capabilities.ts` 的 `LayerCapabilities` interface 加字段 + 矩阵加列
@@ -77,12 +84,14 @@ handoff/
 ### bus/ — 事件通信
 
 **放什么**：
+
 - 事件总线（`team-events-bus.ts`：publish / subscribe / event types）
 - Session 创建辅助（`team-session-create.ts`）
 - 心跳机制（`heartbeat.ts`：touch / clear / stale cutoff）
 - 延迟监控（`latency-monitor.ts`：L1.6 p95 约束）
 
 **不放什么**：
+
 - 事件消费逻辑（属于 runner/ 或 routes/）
 - DB 状态机（属于 store/）
 
@@ -91,6 +100,7 @@ handoff/
 ### workflow/ — 工作流模板
 
 **放什么**：
+
 - 模板 schema 定义（`workflow-template-schema.ts`）
 - 模板解析 + 角色绑定（`workflow-resolver.ts`）
 - 内置工作流包（`workflow-builtin-packs.ts`）
@@ -99,6 +109,7 @@ handoff/
 - 角色适配矩阵（`role-adapter.ts`）
 
 **不放什么**：
+
 - 非模板驱动的 runner 逻辑（属于 runner/）
 - 层级约束（属于 capability/）
 

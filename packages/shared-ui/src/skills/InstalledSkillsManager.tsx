@@ -174,7 +174,9 @@ export function InstalledSkillsManager({
       ) : (
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
-            <tr style={{ borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' }}>
+            <tr
+              style={{ borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' }}
+            >
               {['名称', '版本', '来源', '状态', ''].map((h) => (
                 <th
                   key={h}
@@ -201,7 +203,9 @@ export function InstalledSkillsManager({
                 <tr
                   key={skill.id}
                   style={{
-                    borderBottom: isLast ? 'none' : '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+                    borderBottom: isLast
+                      ? 'none'
+                      : '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
                     opacity: skill.enabled ? 1 : 0.55,
                   }}
                 >
@@ -220,9 +224,7 @@ export function InstalledSkillsManager({
                         </span>
                       )}
                     </div>
-                    <div
-                      style={{ fontSize: 11, color: 'var(--fg-muted))', marginTop: 1 }}
-                    >
+                    <div style={{ fontSize: 11, color: 'var(--fg-muted))', marginTop: 1 }}>
                       {skill.id}
                     </div>
                   </td>

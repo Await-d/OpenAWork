@@ -107,7 +107,9 @@ export function ModelPriceConfig({ models, onUpdate, style }: ModelPriceConfigPr
     >
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
         <thead>
-          <tr style={{ borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' }}>
+          <tr
+            style={{ borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' }}
+          >
             {['模型', '提供商', '输入 $/M', '输出 $/M'].map((h) => (
               <th
                 key={h}
@@ -134,7 +136,9 @@ export function ModelPriceConfig({ models, onUpdate, style }: ModelPriceConfigPr
                 key={m.id || i}
                 style={{
                   borderBottom:
-                    i < models.length - 1 ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' : 'none',
+                    i < models.length - 1
+                      ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))'
+                      : 'none',
                 }}
               >
                 <td

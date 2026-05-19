@@ -58,7 +58,9 @@ export function ScheduleManagerUI({ tasks, onToggle, onRemove, onAdd }: Schedule
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
-            <tr style={{ borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' }}>
+            <tr
+              style={{ borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' }}
+            >
               <th style={headerCell}>名称</th>
               <th style={headerCell}>类型</th>
               <th style={headerCell}>表达式</th>
@@ -82,7 +84,10 @@ export function ScheduleManagerUI({ tasks, onToggle, onRemove, onAdd }: Schedule
                 <tr
                   key={task.id}
                   style={{
-                    borderTop: index === 0 ? 'none' : '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+                    borderTop:
+                      index === 0
+                        ? 'none'
+                        : '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
                   }}
                 >
                   <td style={bodyCell}>{task.name}</td>
@@ -182,7 +187,8 @@ export function ScheduleManagerUI({ tasks, onToggle, onRemove, onAdd }: Schedule
           style={{
             border: 'none',
             borderRadius: 6,
-            background: !onAdd || !canAdd ? 'var(--border-default, hsla(215, 18%, 50%, 0.12))' : '#4338ca',
+            background:
+              !onAdd || !canAdd ? 'var(--border-default, hsla(215, 18%, 50%, 0.12))' : '#4338ca',
             color: !onAdd || !canAdd ? 'var(--fg-muted))' : 'var(--fg-default))',
             padding: '0.45rem 0.85rem',
             fontSize: 12,

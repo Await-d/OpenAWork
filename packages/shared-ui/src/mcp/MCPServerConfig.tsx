@@ -87,19 +87,18 @@ export function MCPServerConfig({ servers, onAdd, onRemove, style }: MCPServerCo
       }}
     >
       <div
-        style={{ padding: '1rem 1.5rem', borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' }}
+        style={{
+          padding: '1rem 1.5rem',
+          borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+        }}
       >
-        <h2
-          style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--fg-default))' }}
-        >
+        <h2 style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--fg-default))' }}>
           MCP 服务器配置
         </h2>
       </div>
 
       {servers.length === 0 ? (
-        <div
-          style={{ padding: '1.25rem 1.5rem', color: 'var(--fg-muted))', fontSize: 12 }}
-        >
+        <div style={{ padding: '1.25rem 1.5rem', color: 'var(--fg-muted))', fontSize: 12 }}>
           暂无服务器配置。
         </div>
       ) : (
@@ -113,7 +112,9 @@ export function MCPServerConfig({ servers, onAdd, onRemove, style }: MCPServerCo
                 justifyContent: 'space-between',
                 padding: '0.75rem 1.5rem',
                 borderBottom:
-                  idx < servers.length - 1 ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' : 'none',
+                  idx < servers.length - 1
+                    ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))'
+                    : 'none',
                 gap: 10,
               }}
             >
@@ -265,7 +266,9 @@ export function MCPServerConfig({ servers, onAdd, onRemove, style }: MCPServerCo
           onClick={handleAdd}
           disabled={!canAdd}
           style={{
-            background: canAdd ? 'var(--accent))' : 'var(--border-default, hsla(215, 18%, 50%, 0.12))',
+            background: canAdd
+              ? 'var(--accent))'
+              : 'var(--border-default, hsla(215, 18%, 50%, 0.12))',
             color: color.fgOnAccent,
             border: 'none',
             borderRadius: 6,

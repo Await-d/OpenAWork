@@ -69,19 +69,14 @@ export function StepRow({ index, title, description, status, style }: StepRowPro
           style={{
             fontSize: 12,
             fontWeight: 500,
-            color:
-              status === 'completed' || status === 'skipped'
-                ? color.fgMuted
-                : color.fgStrong,
+            color: status === 'completed' || status === 'skipped' ? color.fgMuted : color.fgStrong,
             textDecoration: status === 'completed' ? 'line-through' : 'none',
           }}
         >
           {title}
         </div>
         {description && (
-          <div style={{ fontSize: 11, color: 'var(--fg-muted))', marginTop: 2 }}>
-            {description}
-          </div>
+          <div style={{ fontSize: 11, color: 'var(--fg-muted))', marginTop: 2 }}>{description}</div>
         )}
       </div>
     </div>

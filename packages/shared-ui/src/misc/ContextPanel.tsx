@@ -186,7 +186,8 @@ export function ContextPanel({
               alignItems: 'center',
               gap: 8,
               padding: '0.5rem 0.875rem',
-              borderTop: i > 0 ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' : 'none',
+              borderTop:
+                i > 0 ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' : 'none',
               background: item.pinned ? 'var(--bg-raised)' : 'transparent',
             }}
           >

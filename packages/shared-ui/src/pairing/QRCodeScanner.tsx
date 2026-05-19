@@ -100,9 +100,21 @@ export function QRCodeScanner({ onScan, onError, style }: QRCodeScannerProps) {
       </button>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div style={{ flex: 1, height: 1, background: 'var(--border-default, hsla(215, 18%, 50%, 0.12))' }} />
+        <div
+          style={{
+            flex: 1,
+            height: 1,
+            background: 'var(--border-default, hsla(215, 18%, 50%, 0.12))',
+          }}
+        />
         <span style={{ fontSize: 11, color: 'var(--fg-muted))' }}>或手动输入</span>
-        <div style={{ flex: 1, height: 1, background: 'var(--border-default, hsla(215, 18%, 50%, 0.12))' }} />
+        <div
+          style={{
+            flex: 1,
+            height: 1,
+            background: 'var(--border-default, hsla(215, 18%, 50%, 0.12))',
+          }}
+        />
       </div>
 
       <div style={{ display: 'flex', gap: 8 }}>

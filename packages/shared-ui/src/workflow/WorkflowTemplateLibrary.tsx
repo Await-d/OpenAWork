@@ -217,9 +217,7 @@ export function WorkflowTemplateLibrary({
             <span style={{ fontSize: 11, color: 'var(--fg-muted))', lineHeight: 1.4 }}>
               {t.description}
             </span>
-            <span style={{ fontSize: 10, color: 'var(--fg-muted))' }}>
-              {t.nodeCount} 个节点
-            </span>
+            <span style={{ fontSize: 10, color: 'var(--fg-muted))' }}>{t.nodeCount} 个节点</span>
           </button>
         ))}
         {filtered.length === 0 && (

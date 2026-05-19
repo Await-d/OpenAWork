@@ -80,9 +80,7 @@ export function PermissionHistory({ decisions, onExport, style }: PermissionHist
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-default))' }}>
-          权限历史
-        </span>
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-default))' }}>权限历史</span>
         <button
           type="button"
           onClick={onExport}
@@ -150,9 +148,7 @@ export function PermissionHistory({ decisions, onExport, style }: PermissionHist
                 RISK_COLORS[rec.riskLevel] ?? 'var(--fg-muted))',
                 RISK_LABELS[rec.riskLevel] ?? rec.riskLevel,
               )}
-              <span
-                style={{ fontSize: 10, color: 'var(--fg-muted))', flex: '0 0 auto' }}
-              >
+              <span style={{ fontSize: 10, color: 'var(--fg-muted))', flex: '0 0 auto' }}>
                 {new Date(rec.timestamp).toLocaleString()}
               </span>
             </div>

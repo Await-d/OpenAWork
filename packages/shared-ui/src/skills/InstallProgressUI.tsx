@@ -116,10 +116,7 @@ export function InstallProgressUI({ skillName, steps, onCancel }: InstallProgres
                 <div
                   style={{
                     ...s.label,
-                    color:
-                      step.status === 'running'
-                        ? 'var(--accent))'
-                        : 'var(--fg-default))',
+                    color: step.status === 'running' ? 'var(--accent))' : 'var(--fg-default))',
                   }}
                 >
                   {step.label}

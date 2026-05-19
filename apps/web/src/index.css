@@ -27,33 +27,33 @@
   --accent-active: #4ac4b0;
   --accent-muted: rgba(92, 212, 192, 0.14);
   --accent-subtle: rgba(92, 212, 192, 0.07);
-  --accent-border: rgba(92, 212, 192, 0.30);
+  --accent-border: rgba(92, 212, 192, 0.3);
 
   /* 对比色: 琥珀 */
   --contrast: #f0b429;
   --contrast-hover: #f5c84d;
   --contrast-muted: rgba(240, 180, 41, 0.14);
   --contrast-subtle: rgba(240, 180, 41, 0.07);
-  --contrast-border: rgba(240, 180, 41, 0.30);
+  --contrast-border: rgba(240, 180, 41, 0.3);
 
   /* 互补色: 珊瑚 */
   --complement: #f06b7e;
   --complement-hover: #f5919f;
   --complement-muted: rgba(240, 107, 126, 0.14);
   --complement-subtle: rgba(240, 107, 126, 0.07);
-  --complement-border: rgba(240, 107, 126, 0.30);
+  --complement-border: rgba(240, 107, 126, 0.3);
 
   /* 辅助色: 靛蓝 */
   --aux: #8b9cf5;
   --aux-hover: #a8b5fc;
   --aux-muted: rgba(139, 156, 245, 0.14);
   --aux-subtle: rgba(139, 156, 245, 0.07);
-  --aux-border: rgba(139, 156, 245, 0.30);
+  --aux-border: rgba(139, 156, 245, 0.3);
 
   /* 语义色 */
   --success: #3dd49a;
   --success-muted: rgba(61, 212, 154, 0.14);
-  --success-border: rgba(61, 212, 154, 0.30);
+  --success-border: rgba(61, 212, 154, 0.3);
   --warning: var(--contrast);
   --warning-muted: var(--contrast-muted);
   --warning-border: var(--contrast-border);
@@ -68,13 +68,15 @@
   --border-invisible: hsla(215, 20%, 50%, 0.03);
   --border-subtle: hsla(215, 20%, 50%, 0.07);
   --border-default: hsla(215, 18%, 50%, 0.12);
-  --border-emphasis: hsla(215, 16%, 55%, 0.20);
-  --border-strong: hsla(215, 14%, 60%, 0.30);
+  --border-emphasis: hsla(215, 16%, 55%, 0.2);
+  --border-strong: hsla(215, 14%, 60%, 0.3);
 
   /* 阴影 */
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.02);
-  --shadow-md: 0 2px 4px rgba(0,0,0,0.2), 0 8px 24px -8px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.02);
-  --shadow-lg: 0 4px 8px rgba(0,0,0,0.2), 0 24px 56px -16px rgba(0,0,0,0.5);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.02);
+  --shadow-md:
+    0 2px 4px rgba(0, 0, 0, 0.2), 0 8px 24px -8px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.02);
+  --shadow-lg: 0 4px 8px rgba(0, 0, 0, 0.2), 0 24px 56px -16px rgba(0, 0, 0, 0.5);
   --shadow-glow: 0 0 16px -4px rgba(92, 212, 192, 0.25);
 
   /* 动效 */
@@ -169,19 +171,19 @@
   --accent-active: #4452d8;
   --accent-muted: rgba(100, 113, 240, 0.12);
   --accent-subtle: rgba(100, 113, 240, 0.06);
-  --accent-border: rgba(100, 113, 240, 0.30);
+  --accent-border: rgba(100, 113, 240, 0.3);
 
   /* 对比色: 紫粉 */
   --contrast: #a06bff;
   --contrast-hover: #8e55f5;
   --contrast-muted: rgba(160, 107, 255, 0.12);
   --contrast-subtle: rgba(160, 107, 255, 0.06);
-  --contrast-border: rgba(160, 107, 255, 0.30);
+  --contrast-border: rgba(160, 107, 255, 0.3);
 
   /* 互补色: 玫瑰 */
   --complement: #e0497a;
   --complement-hover: #d13668;
-  --complement-muted: rgba(224, 73, 122, 0.10);
+  --complement-muted: rgba(224, 73, 122, 0.1);
   --complement-subtle: rgba(224, 73, 122, 0.05);
   --complement-border: rgba(224, 73, 122, 0.28);
 
@@ -190,11 +192,11 @@
   --aux-hover: #2a8def;
   --aux-muted: rgba(58, 160, 255, 0.12);
   --aux-subtle: rgba(58, 160, 255, 0.06);
-  --aux-border: rgba(58, 160, 255, 0.30);
+  --aux-border: rgba(58, 160, 255, 0.3);
 
   /* 语义色 */
   --success: #16a37a;
-  --success-muted: rgba(22, 163, 122, 0.10);
+  --success-muted: rgba(22, 163, 122, 0.1);
   --success-border: rgba(22, 163, 122, 0.28);
   --warning: var(--contrast);
   --warning-muted: var(--contrast-muted);
@@ -214,9 +216,9 @@
   --border-strong: rgba(15, 23, 60, 0.25);
 
   /* 阴影 — 带蓝紫调 */
-  --shadow-sm: 0 1px 3px rgba(60, 75, 180, 0.06), inset 0 1px 0 rgba(255,255,255,0.5);
-  --shadow-md: 0 4px 16px -4px rgba(60, 75, 180, 0.10), inset 0 1px 0 rgba(255,255,255,0.5);
-  --shadow-lg: 0 24px 60px -16px rgba(60, 75, 180, 0.20);
+  --shadow-sm: 0 1px 3px rgba(60, 75, 180, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  --shadow-md: 0 4px 16px -4px rgba(60, 75, 180, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  --shadow-lg: 0 24px 60px -16px rgba(60, 75, 180, 0.2);
   --shadow-glow: 0 0 20px -4px rgba(124, 92, 255, 0.25);
 
   /* 图表配色 — 极光色系 */
@@ -236,8 +238,6 @@
   --hl-string: #16a37a;
   --hl-number: #e0497a;
   --hl-comment: #a8aec8;
-
-
 
   /* Tool-call 语义色(亮色) */
   --tc-path: var(--aux);
@@ -1059,11 +1059,7 @@ textarea {
 .composer-shell {
   border: 1px solid var(--border-default);
   border-radius: 12px;
-  background: linear-gradient(
-    180deg,
-    var(--bg-overlay),
-    var(--bg-surface)
-  );
+  background: linear-gradient(180deg, var(--bg-overlay), var(--bg-surface));
   box-shadow:
     0 1px 0 var(--border-subtle),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
@@ -1759,7 +1755,9 @@ textarea {
 [data-card]::after {
   content: '';
   position: absolute;
-  top: 0; left: 12px; right: 12px;
+  top: 0;
+  left: 12px;
+  right: 12px;
   height: 1px;
   background: linear-gradient(90deg, transparent, var(--border-subtle), transparent);
   pointer-events: none;
@@ -1794,13 +1792,17 @@ textarea:focus-visible {
     background var(--dur-micro) var(--ease-micro),
     transform var(--dur-micro) var(--ease-micro),
     box-shadow var(--dur-micro) var(--ease-micro);
-  box-shadow: var(--shadow-sm), 0 4px 16px -6px rgba(92, 212, 192, 0.20);
+  box-shadow:
+    var(--shadow-sm),
+    0 4px 16px -6px rgba(92, 212, 192, 0.2);
 }
 .btn-accent:hover,
 [data-btn-primary]:hover {
   background: var(--accent-hover);
   transform: translateY(-1px);
-  box-shadow: var(--shadow-glow), inset 0 1px 0 rgba(255,255,255,0.1);
+  box-shadow:
+    var(--shadow-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 .btn-accent:active,
 [data-btn-primary]:active {
@@ -1816,11 +1818,11 @@ textarea:focus-visible {
 
 /* ── 输入框交互态 ── */
 .chat-input,
-input[type="text"],
-input[type="search"],
-input[type="email"],
-input[type="password"],
-input[type="url"],
+input[type='text'],
+input[type='search'],
+input[type='email'],
+input[type='password'],
+input[type='url'],
 textarea,
 select {
   transition:
@@ -1878,38 +1880,38 @@ select:disabled {
   border: 1px solid;
   transition: opacity var(--dur-micro) var(--ease-micro);
 }
-[data-badge="success"],
-[data-tool-card-meta-label="success"] {
+[data-badge='success'],
+[data-tool-card-meta-label='success'] {
   background: var(--success-muted);
   color: var(--success);
   border-color: var(--success-border);
 }
-[data-badge="warning"],
-[data-tool-card-meta-label="warning"] {
+[data-badge='warning'],
+[data-tool-card-meta-label='warning'] {
   background: var(--warning-muted);
   color: var(--warning);
   border-color: var(--warning-border);
 }
-[data-badge="danger"],
-[data-tool-card-meta-label="danger"] {
+[data-badge='danger'],
+[data-tool-card-meta-label='danger'] {
   background: var(--danger-muted);
   color: var(--danger);
   border-color: var(--danger-border);
 }
-[data-badge="info"],
-[data-tool-card-meta-label="info"] {
+[data-badge='info'],
+[data-tool-card-meta-label='info'] {
   background: var(--info-muted);
   color: var(--info);
   border-color: var(--info-border);
 }
-[data-badge="accent"],
-[data-tool-card-meta-label="accent"] {
+[data-badge='accent'],
+[data-tool-card-meta-label='accent'] {
   background: var(--accent-muted);
   color: var(--accent);
   border-color: var(--accent-border);
 }
-[data-badge="muted"],
-[data-tool-card-meta-label="muted"] {
+[data-badge='muted'],
+[data-tool-card-meta-label='muted'] {
   background: var(--bg-surface);
   color: var(--fg-muted);
   border-color: var(--border-default);
@@ -1917,17 +1919,24 @@ select:disabled {
 
 /* ── 脉冲状态指示器 ── */
 @keyframes nebula-pulse {
-  0%, 100% { box-shadow: 0 0 0 3px var(--success-muted); }
-  50% { box-shadow: 0 0 0 6px transparent; }
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px var(--success-muted);
+  }
+  50% {
+    box-shadow: 0 0 0 6px transparent;
+  }
 }
-[data-status-dot="active"],
+[data-status-dot='active'],
 .nav-rail-status-dot {
   animation: nebula-pulse 2.4s ease-in-out infinite;
 }
 
 /* ── Spinner ── */
 @keyframes nebula-spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 .spinner,
 [data-spinner] {
@@ -1947,11 +1956,20 @@ body.theme-transitioning *::after {
 
 /* ── 骨架屏 shimmer ── */
 @keyframes nebula-shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
 }
 [data-skeleton] {
-  background: linear-gradient(90deg, var(--bg-surface) 25%, var(--bg-elevated) 50%, var(--bg-surface) 75%);
+  background: linear-gradient(
+    90deg,
+    var(--bg-surface) 25%,
+    var(--bg-elevated) 50%,
+    var(--bg-surface) 75%
+  );
   background-size: 200% 100%;
   animation: nebula-shimmer 1.5s ease-in-out infinite;
   border-radius: 4px;
@@ -1959,8 +1977,14 @@ body.theme-transitioning *::after {
 
 /* ── Toast 入场动画 ── */
 @keyframes nebula-toast-in {
-  from { opacity: 0; transform: translateY(-8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 [data-toast] {
   animation: nebula-toast-in 300ms var(--ease-normal);
@@ -1968,7 +1992,9 @@ body.theme-transitioning *::after {
 
 /* ── 快捷入口箭头动效 ── */
 [data-shortcut-arrow] {
-  transition: transform var(--dur-micro) var(--ease-micro), color var(--dur-micro) var(--ease-micro);
+  transition:
+    transform var(--dur-micro) var(--ease-micro),
+    color var(--dur-micro) var(--ease-micro);
 }
 [data-shortcut]:hover [data-shortcut-arrow] {
   color: var(--accent);
@@ -2011,11 +2037,7 @@ body.theme-transitioning *::after {
 
 /* 亮色主题下 active 导航项的渐变高亮线 */
 :root.light .nav-rail-link-active {
-  background: linear-gradient(
-    90deg,
-    rgba(58, 160, 255, 0.12),
-    rgba(160, 107, 255, 0.10)
-  ) !important;
+  background: linear-gradient(90deg, rgba(58, 160, 255, 0.12), rgba(160, 107, 255, 0.1)) !important;
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -2041,29 +2063,29 @@ body.theme-transitioning *::after {
 
 /* ── B. Model Badge 统一语义色 ──────────────────────────── */
 /* claude 系列 → accent (靛紫) */
-:root.light [data-model*="claude" i],
-:root.light .model-badge[data-model*="claude" i] {
+:root.light [data-model*='claude' i],
+:root.light .model-badge[data-model*='claude' i] {
   background: var(--accent-muted);
   color: var(--accent);
   border: 1px solid var(--accent-border);
 }
 /* gpt / openai → aux (天蓝) */
-:root.light [data-model*="gpt" i],
-:root.light [data-model*="openai" i],
-:root.light .model-badge[data-model*="gpt" i] {
+:root.light [data-model*='gpt' i],
+:root.light [data-model*='openai' i],
+:root.light .model-badge[data-model*='gpt' i] {
   background: var(--aux-muted);
   color: var(--aux);
   border: 1px solid var(--aux-border);
 }
 /* gemini → contrast (紫粉) */
-:root.light [data-model*="gemini" i] {
+:root.light [data-model*='gemini' i] {
   background: var(--contrast-muted);
   color: var(--contrast);
   border: 1px solid var(--contrast-border);
 }
 /* deepseek / qwen → success (翡翠) */
-:root.light [data-model*="deepseek" i],
-:root.light [data-model*="qwen" i] {
+:root.light [data-model*='deepseek' i],
+:root.light [data-model*='qwen' i] {
   background: var(--success-muted);
   color: var(--success);
   border: 1px solid var(--success-border);
@@ -2092,18 +2114,21 @@ body.theme-transitioning *::after {
   inherits: false;
 }
 @keyframes aurora-rotate {
-  to { --aurora-angle: 360deg; }
+  to {
+    --aurora-angle: 360deg;
+  }
 }
 
 :root.light .hero-feature-card,
-:root.light [data-feature-card][data-active="true"] {
+:root.light [data-feature-card][data-active='true'] {
   position: relative;
   isolation: isolate;
 }
 :root.light .hero-feature-card::after,
-:root.light [data-feature-card][data-active="true"]::after {
+:root.light [data-feature-card][data-active='true']::after {
   content: '';
-  position: absolute; inset: -1px;
+  position: absolute;
+  inset: -1px;
   border-radius: inherit;
   padding: 1px;
   background: conic-gradient(
@@ -2117,13 +2142,13 @@ body.theme-transitioning *::after {
     linear-gradient(#fff 0 0) content-box,
     linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
-          mask-composite: exclude;
+  mask-composite: exclude;
   pointer-events: none;
   animation: aurora-rotate 8s linear infinite;
 }
 @media (prefers-reduced-motion: reduce) {
   :root.light .hero-feature-card::after,
-  :root.light [data-feature-card][data-active="true"]::after {
+  :root.light [data-feature-card][data-active='true']::after {
     animation: none;
   }
 }
@@ -2141,11 +2166,7 @@ body.theme-transitioning *::after {
 :root.light .composer-shell,
 :root.light .chat-composer,
 :root.light [data-composer] {
-  background: linear-gradient(
-    180deg,
-    var(--bg-raised),
-    var(--bg-overlay)
-  ) !important;
+  background: linear-gradient(180deg, var(--bg-raised), var(--bg-overlay)) !important;
   backdrop-filter: none;
   border: 1px solid var(--border-default);
   border-radius: 12px;
@@ -2161,22 +2182,26 @@ body.theme-transitioning *::after {
 :root.light .composer-shell::before,
 :root.light [data-composer]::before {
   content: '';
-  position: absolute; top: 0; left: 16px; right: 16px; height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(100, 113, 240, 0.20), transparent);
+  position: absolute;
+  top: 0;
+  left: 16px;
+  right: 16px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(100, 113, 240, 0.2), transparent);
   pointer-events: none;
   z-index: 1;
 }
 /* focus 时极光发光（克制版） */
 :root.light .composer-shell:focus-within,
 :root.light [data-composer]:focus-within {
-  border-color: rgba(100, 113, 240, 0.40) !important;
+  border-color: rgba(100, 113, 240, 0.4) !important;
   box-shadow:
     0 0 0 2px rgba(100, 113, 240, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.5) !important;
 }
 
 /* ── E. 顶部 Tabs — 渐变下划线 ──────────────────────────── */
-:root.light [role="tab"],
+:root.light [role='tab'],
 :root.light .mode-pill-btn,
 :root.light .toolbar-btn {
   position: relative;
@@ -2184,12 +2209,14 @@ body.theme-transitioning *::after {
     color var(--dur-micro) var(--ease-micro),
     background var(--dur-micro) var(--ease-micro);
 }
-:root.light [role="tab"][aria-selected="true"]::after,
-:root.light .mode-pill-btn[data-active="true"]::after,
+:root.light [role='tab'][aria-selected='true']::after,
+:root.light .mode-pill-btn[data-active='true']::after,
 :root.light .toolbar-btn.active::after {
   content: '';
   position: absolute;
-  left: 8px; right: 8px; bottom: -1px;
+  left: 8px;
+  right: 8px;
+  bottom: -1px;
   height: 2px;
   border-radius: 2px;
   background: linear-gradient(90deg, var(--accent), var(--contrast));
@@ -2198,47 +2225,47 @@ body.theme-transitioning *::after {
 
 /* ── F. 退出登录按钮 — Complement 危险提示 ─────────────────── */
 :root.light .nav-rail-logout,
-:root.light [data-action="logout"],
-:root.light [data-danger="true"] {
+:root.light [data-action='logout'],
+:root.light [data-danger='true'] {
   color: var(--fg-muted);
   transition:
     color var(--dur-micro) var(--ease-micro),
     background var(--dur-micro) var(--ease-micro);
 }
 :root.light .nav-rail-logout:hover,
-:root.light [data-action="logout"]:hover,
-:root.light [data-danger="true"]:hover {
+:root.light [data-action='logout']:hover,
+:root.light [data-danger='true']:hover {
   color: var(--complement) !important;
   background: var(--complement-muted) !important;
 }
 :root.light .nav-rail-logout:hover .nav-rail-icon,
-:root.light [data-action="logout"]:hover svg {
+:root.light [data-action='logout']:hover svg {
   color: var(--complement) !important;
 }
 
 /* 同样规则应用到暗色主题(保持一致性) */
 :root .nav-rail-logout:hover,
-:root [data-action="logout"]:hover {
+:root [data-action='logout']:hover {
   color: var(--complement);
   background: var(--complement-muted);
 }
 
 /* ── 额外:亮色下导航激活态的玻璃质感 ──────────────────────── */
 :root.light .nav-rail-link-active,
-:root.light a[aria-current="page"] {
+:root.light a[aria-current='page'] {
   position: relative;
-  background: linear-gradient(
-    90deg,
-    rgba(58, 160, 255, 0.10),
-    rgba(160, 107, 255, 0.08)
-  ) !important;
+  background: linear-gradient(90deg, rgba(58, 160, 255, 0.1), rgba(160, 107, 255, 0.08)) !important;
   color: var(--fg-strong) !important;
-  border: 1px solid rgba(100, 113, 240, 0.20);
+  border: 1px solid rgba(100, 113, 240, 0.2);
 }
 :root.light .nav-rail-link-active::before {
   content: '';
-  position: absolute; left: -2px; top: 8px; bottom: 8px;
-  width: 2px; border-radius: 2px;
+  position: absolute;
+  left: -2px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 2px;
   background: linear-gradient(180deg, var(--aux), var(--chart-5));
   box-shadow: 0 0 8px rgba(100, 113, 240, 0.3);
 }
@@ -2265,7 +2292,7 @@ body.theme-transitioning *::after {
 /* ── 用户消息历史跳转条 (右侧浮层) — 默认半透明,hover 显现 ── */
 [data-history-jump-stripe]:hover,
 [data-history-jump-stripe]:focus-visible,
-[data-history-jump-stripe][data-active="true"] {
+[data-history-jump-stripe][data-active='true'] {
   opacity: 1 !important;
   background: var(--bg-surface) !important;
   color: var(--fg-default) !important;

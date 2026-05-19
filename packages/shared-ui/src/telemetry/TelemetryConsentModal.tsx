@@ -108,7 +108,9 @@ export function TelemetryConsentModal({ open, onAccept, onDecline }: TelemetryCo
                 marginBottom: 5,
               }}
             >
-              <span style={{ color: color.success, fontSize: 12, flexShrink: 0, marginTop: 1 }}>+</span>
+              <span style={{ color: color.success, fontSize: 12, flexShrink: 0, marginTop: 1 }}>
+                +
+              </span>
               <span style={{ fontSize: 12, color: 'var(--fg-default))', lineHeight: 1.4 }}>
                 {point}
               </span>
@@ -116,9 +118,7 @@ export function TelemetryConsentModal({ open, onAccept, onDecline }: TelemetryCo
           ))}
         </div>
 
-        <p
-          style={{ margin: 0, fontSize: 12, color: 'var(--fg-muted))', lineHeight: 1.5 }}
-        >
+        <p style={{ margin: 0, fontSize: 12, color: 'var(--fg-muted))', lineHeight: 1.5 }}>
           你可以随时在偏好设置中更改此选项。数据以匿名方式发送，绝不会与第三方共享。
         </p>
 

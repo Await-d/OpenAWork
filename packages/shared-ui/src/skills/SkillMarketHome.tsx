@@ -290,9 +290,7 @@ export function SkillMarketHome({
           <SkillCard key={sk.id} skill={sk} onInstall={onInstall} onSelect={onSelect} />
         ))}
         {filtered.length === 0 && (
-          <div style={{ color: 'var(--fg-muted))', fontSize: 12 }}>
-            该分类下暂无技能。
-          </div>
+          <div style={{ color: 'var(--fg-muted))', fontSize: 12 }}>该分类下暂无技能。</div>
         )}
       </div>
 

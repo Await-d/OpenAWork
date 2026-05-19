@@ -40,6 +40,7 @@ team/
 ### session-view/ — 五层架构 session 视图
 
 **放什么**：
+
 - `TeamSessionView.tsx`：五层架构的 session 对话入口组件
 - `TeamSessionHeader.tsx`：session 头部（roleLayer / substate / metadata）
 - `TeamSessionEmptyState.tsx`：空态引导 + starter chips
@@ -48,6 +49,7 @@ team/
 - 未来：`TeamClarificationPanel.tsx`（澄清问题面板）
 
 **不放什么**：
+
 - 与 session 无关的全局 UI（属于 header/）
 - 列表/导航（属于 sidebar/）
 
@@ -56,17 +58,20 @@ team/
 ### sidebar/ — session 列表侧边栏
 
 **放什么**：
+
 - `TeamSessionListSidebar.tsx`：session 列表容器
 - `TeamSessionSidebar.tsx`：侧边栏外壳（含搜索 / 过滤）
 - `SessionCard.tsx`：单条 session 卡片
 
 **不放什么**：
+
 - session 内部视图（属于 session-view/）
 - 全局头部（属于 header/）
 
 ### header/ — 顶部导航 + 工作区布局
 
 **放什么**：
+
 - `TopTeamHeader.tsx`：顶部导航栏
 - `TeamHeaderMetrics.tsx`：指标展示（任务数 / 完成率）
 - `TeamStatusBar.tsx`：全局状态栏
@@ -74,12 +79,14 @@ team/
 - `WorkspaceSwitcher.tsx`：工作区切换下拉
 
 **不放什么**：
+
 - 具体 tab 内容（属于 tabs/）
 - session 视图（属于 session-view/）
 
 ### controls/ — 交互控件
 
 **放什么**：
+
 - `ConversationArea.tsx`：对话输入区域
 - `PauseResumeControls.tsx`：暂停/恢复按钮组
 - `FailureFlowIndicator.tsx`：失败流指示器
@@ -87,12 +94,14 @@ team/
 - `TabRow.tsx`：tab 切换行
 
 **不放什么**：
+
 - 完整页面布局（属于 header/）
 - 弹窗（属于 modals/）
 
 ### modals/ — 弹窗组件
 
 **放什么**：
+
 - 所有 Modal / Dialog 组件
 - 确认对话框、创建表单弹窗
 
@@ -130,14 +139,15 @@ team/
 
 以下文件保留在 `shell/` 根目录，因为它们是 shell 框架本身：
 
-| 文件 | 职责 | 预警 |
-|---|---|---|
-| `team-runtime-shell.tsx` | shell 主入口（状态管理 + 路由） | 1292 行，接近预警 |
-| `team-runtime-shell-frame.tsx` | shell 框架布局（slot 组合） | 1462 行，预警区间 |
-| `team-runtime-shell-primitives.tsx` | 原子组件（ChromeBadge 等） | 正常 |
-| `build-team-runtime-shell-view-model.ts` | view model 构建 | 正常 |
+| 文件                                     | 职责                            | 预警              |
+| ---------------------------------------- | ------------------------------- | ----------------- |
+| `team-runtime-shell.tsx`                 | shell 主入口（状态管理 + 路由） | 1292 行，接近预警 |
+| `team-runtime-shell-frame.tsx`           | shell 框架布局（slot 组合）     | 1462 行，预警区间 |
+| `team-runtime-shell-primitives.tsx`      | 原子组件（ChromeBadge 等）      | 正常              |
+| `build-team-runtime-shell-view-model.ts` | view model 构建                 | 正常              |
 
 **当 `team-runtime-shell.tsx` 或 `team-runtime-shell-frame.tsx` 超过 1500 行时**：
+
 - 从中提取独立子组件到对应子目录
 - 保持 shell 根文件只做"组合 + 状态分发"，不做具体渲染
 

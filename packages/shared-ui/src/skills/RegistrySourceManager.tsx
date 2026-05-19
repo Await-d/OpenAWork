@@ -110,9 +110,7 @@ export function RegistrySourceManager({
     <div style={s.root}>
       <div style={s.hdr}>
         <h2 style={s.title}>注册源管理</h2>
-        <span style={{ fontSize: 12, color: 'var(--fg-muted))' }}>
-          {sources.length} 个来源
-        </span>
+        <span style={{ fontSize: 12, color: 'var(--fg-muted))' }}>{sources.length} 个来源</span>
       </div>
 
       {sources.length === 0 && (

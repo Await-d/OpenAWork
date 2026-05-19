@@ -353,9 +353,7 @@ export function ModelManager({
           borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         }}
       >
-        <h2
-          style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--fg-default))' }}
-        >
+        <h2 style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--fg-default))' }}>
           {provider.name} — 模型
         </h2>
         <div
@@ -400,7 +398,11 @@ export function ModelManager({
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', minWidth: 940, borderCollapse: 'collapse' }}>
             <thead>
-              <tr style={{ borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' }}>
+              <tr
+                style={{
+                  borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+                }}
+              >
                 {[
                   '模型',
                   '上下文',
@@ -440,9 +442,7 @@ export function ModelManager({
                 >
                   <td style={cellStyle}>
                     <div style={{ fontWeight: 500 }}>{model.label}</div>
-                    <div
-                      style={{ fontSize: 11, color: 'var(--fg-muted))', marginTop: 1 }}
-                    >
+                    <div style={{ fontSize: 11, color: 'var(--fg-muted))', marginTop: 1 }}>
                       {model.id}
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>

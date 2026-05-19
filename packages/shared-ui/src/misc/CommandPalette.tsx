@@ -146,7 +146,12 @@ export function CommandPalette({
           overflow: 'hidden',
         }}
       >
-        <div style={{ padding: '0.75rem', borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' }}>
+        <div
+          style={{
+            padding: '0.75rem',
+            borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+          }}
+        >
           <input
             ref={inputRef}
             value={query}
@@ -195,7 +200,10 @@ export function CommandPalette({
                     width: '100%',
                     textAlign: 'left',
                     border: 'none',
-                    borderTop: index === 0 ? 'none' : '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+                    borderTop:
+                      index === 0
+                        ? 'none'
+                        : '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
                     background: selected ? 'rgba(99, 102, 241, 0.2)' : 'transparent',
                     color: 'var(--fg-strong))',
                     padding: '0.65rem 0.75rem',

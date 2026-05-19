@@ -83,7 +83,8 @@ export function FileStatusPanel({ changes, onFileClick, style }: FileStatusPanel
             padding: '0.45rem 0.75rem',
             background: 'transparent',
             border: 'none',
-            borderTop: i > 0 ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' : 'none',
+            borderTop:
+              i > 0 ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' : 'none',
             cursor: onFileClick ? 'pointer' : 'default',
             width: '100%',
             textAlign: 'left',

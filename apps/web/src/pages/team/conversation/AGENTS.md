@@ -33,9 +33,11 @@ team/conversation/
       - `pages/chat-page/conversation/views/retry-mode-dialog`（chat-only 对话框，team 端传 `retryPrompt={null}` 不会渲染内容）
 
     这 3 处剩余跨引都是 chat-only feature 的对话框 / 类型实体，不是协议工具。team 端永远传 null，运行时无影响。后续 audit 时若 Layout 做更彻底的改造（拆分能力开关或彻底 fork 副本），可以彻底剥离。
+
   - **已下沉的协议工具（不再跨引）**：
     - `groupChatRenderEntries` → `components/conversation-runtime/messages/group-render-entries.ts`
     - scroll 常量 → `components/conversation-runtime/scroll/scroll-constants.ts`
+
 - ✅ **允许** import `components/conversation-runtime/**`（共享协议层）
 - ✅ **允许** import `components/chat/**`（共享 atoms：UnifiedComposer / ChatMessageGroupList / InlineQuestionPanel / chat-search-overlay 等）
 - ✅ **允许** import `pages/team/**`（同产品的 team runtime / shell / tabs / stores）

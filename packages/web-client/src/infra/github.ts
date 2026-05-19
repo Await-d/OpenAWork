@@ -2,7 +2,13 @@
  * `/github/triggers` 客户端：注册 GitHub webhook 触发器。
  */
 
-import { authHeader, expectJson, jsonAuthHeaders, readJsonErrorData, HttpError } from '../gateway/http.js';
+import {
+  authHeader,
+  expectJson,
+  jsonAuthHeaders,
+  readJsonErrorData,
+  HttpError,
+} from '../gateway/http.js';
 
 export interface GitHubTrigger {
   events: string[];

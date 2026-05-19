@@ -92,9 +92,7 @@ export function DeveloperModePanel({
             fontSize: 11,
           }}
         />
-        <span style={{ color: 'var(--fg-muted))', fontSize: 11 }}>
-          {visible.length} 个事件
-        </span>
+        <span style={{ color: 'var(--fg-muted))', fontSize: 11 }}>{visible.length} 个事件</span>
         {onClear && (
           <button
             type="button"
@@ -123,8 +121,7 @@ export function DeveloperModePanel({
                 textAlign: 'left',
                 padding: '3px 10px',
                 cursor: 'pointer',
-                background:
-                  selected?.id === ev.id ? 'var(--bg-overlay))' : 'transparent',
+                background: selected?.id === ev.id ? 'var(--bg-overlay))' : 'transparent',
                 border: 'none',
                 borderLeft: `3px solid ${TYPE_COLOR[ev.type] ?? 'var(--fg-muted))'}`,
                 display: 'flex',
