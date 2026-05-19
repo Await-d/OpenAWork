@@ -1,4 +1,4 @@
-import { tokens, color } from '../tokens.js';
+import { color } from '../tokens.js';
 import type { StatusMeta, ToolCardStatus, ToolKind } from './tool-call-card-shared.js';
 
 export type ToolVisualStatus = ToolCardStatus | 'cancelled' | 'idle' | 'pending';

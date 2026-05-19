@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { tokens, color} from '../tokens.js';
+import { tokens } from '../tokens.js';
 import { UnifiedCodeDiff } from './UnifiedCodeDiff.js';
 
 export interface ToolDiffFileView {

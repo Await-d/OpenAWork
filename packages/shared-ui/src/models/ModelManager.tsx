@@ -1,6 +1,6 @@
 import type { CSSProperties, ChangeEvent, KeyboardEvent, ReactNode } from 'react';
 import { useEffect, useState } from 'react';
-import { tokens, color, spacing, radius } from '../tokens.js';
+import { tokens, color } from '../tokens.js';
 
 export interface AIModelConfigItem {
   id: string;

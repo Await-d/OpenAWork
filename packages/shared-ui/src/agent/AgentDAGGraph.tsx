@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
-import { tokens, color } from '../tokens.js';
+import { color } from '../tokens.js';
 
 export interface DAGNodeInfo {
   id: string;

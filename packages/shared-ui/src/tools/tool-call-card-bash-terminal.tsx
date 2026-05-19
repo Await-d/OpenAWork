@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
-import { tokens, color as c, color} from '../tokens.js';
+import { tokens, color} from '../tokens.js';
 
 export interface BashTerminalView {
   command?: string;

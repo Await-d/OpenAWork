@@ -1,5 +1,5 @@
 import React from 'react';
-import { tokens, color} from '../tokens.js';
+import { tokens } from '../tokens.js';
 
 type DiffSideKind = 'added' | 'context' | 'empty' | 'removed';
 

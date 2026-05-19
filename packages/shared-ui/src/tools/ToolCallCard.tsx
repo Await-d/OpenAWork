@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { tokens, color} from '../tokens.js';
+import { tokens } from '../tokens.js';
 import type { ToolDiffFileView } from './ToolDiffCollection.js';
 import { ToolDiffCollection } from './ToolDiffCollection.js';
 import { UnifiedCodeDiff, summarizeSnapshotDiff, summarizeUnifiedDiff } from './UnifiedCodeDiff.js';

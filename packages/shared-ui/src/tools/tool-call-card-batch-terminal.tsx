@@ -1,6 +1,6 @@
 import { useEffect, useRef, type CSSProperties } from 'react';
 import type { BatchSubToolProgress, BatchSubToolStatus } from '@openAwork/shared';
-import { tokens, color as clr, color} from '../tokens.js';
+import { tokens, color as clr } from '../tokens.js';
 
 export interface BatchTerminalView {
   subTools: BatchSubToolProgress[];
