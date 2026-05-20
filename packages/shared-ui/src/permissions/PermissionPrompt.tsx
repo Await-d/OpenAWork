@@ -1,5 +1,5 @@
 import { color } from '../tokens.js';
-import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { PermissionDecision, PermissionRiskLevel } from '@openAwork/shared';
 
 export type { PermissionDecision } from '@openAwork/shared';
@@ -31,6 +31,65 @@ interface PermissionDecisionOption {
   tone: 'primary' | 'secondary' | 'subtle' | 'danger';
 }
 
+/**
+ * Represents a categorized scope level for the "always" patterns.
+ * The patterns are ordered from most specific (full command) to broadest (base).
+ */
+export interface AlwaysScopeLevel {
+  /** Display label for this scope level. */
+  label: string;
+  /** The pattern string for this level. */
+  pattern: string;
+  /** Category identifier: 'full' | 'partial' | 'base'. */
+  category: 'full' | 'partial' | 'base';
+}
+
+/**
+ * Categorize the `always` patterns + previewAction/scope into three levels:
+ * - Full command: the complete command (most specific, narrowest approval)
+ * - Partial: intermediate pattern (moderate breadth)
+ * - Base: the broadest pattern (widest approval)
+ *
+ * When there are fewer than 3 distinct patterns, only the available levels
+ * are returned. The full command is always derived from `previewAction ?? scope`.
+ */
+export function categorizeAlwaysPatterns(
+  previewAction: string | undefined,
+  scope: string,
+  always: string[] | undefined,
+): AlwaysScopeLevel[] {
+  const fullCommand = previewAction ?? scope;
+  // Dedupe: remove patterns identical to the full command
+  const uniqueAlways = (always ?? []).filter(
+    (pattern) => pattern !== fullCommand && pattern !== scope,
+  );
+
+  const levels: AlwaysScopeLevel[] = [
+    { label: 'Full command', pattern: fullCommand, category: 'full' },
+  ];
+
+  if (uniqueAlways.length === 0) {
+    // No broader patterns — only the full command is available
+    return levels;
+  }
+
+  if (uniqueAlways.length === 1) {
+    // One broader pattern → treat as "Base"
+    levels.push({ label: 'Base', pattern: uniqueAlways[0]!, category: 'base' });
+  } else {
+    // Two or more broader patterns → first is "Partial", last is "Base"
+    // (patterns are assumed ordered from narrower to broader by the gateway)
+    levels.push({ label: 'Partial', pattern: uniqueAlways[0]!, category: 'partial' });
+    levels.push({
+      label: 'Base',
+      pattern: uniqueAlways[uniqueAlways.length - 1]!,
+      category: 'base',
+    });
+  }
+
+  return levels;
+}
+
 export interface PermissionPromptProps {
   requestId: string;
   toolName: string;
@@ -47,6 +106,13 @@ export interface PermissionPromptProps {
   pendingDecision?: PermissionDecision | null;
   errorMessage?: string;
   onDecide: (requestId: string, decision: PermissionDecision) => void;
+  /**
+   * Callback invoked when the user selects a scope level from the categorized
+   * "always" patterns. The parent can use this to adjust the approval scope
+   * sent to the gateway. When omitted, the default behavior (approve with
+   * the broadest pattern) is used.
+   */
+  onScopeLevelChange?: (level: AlwaysScopeLevel) => void;
   /**
    * Title of the session that originated the permission request.
    * When provided, rendered above the tool name so the user knows which
@@ -85,6 +151,7 @@ export function PermissionPrompt({
   pendingDecision = null,
   errorMessage,
   onDecide,
+  onScopeLevelChange,
   sessionTitle,
   onNavigateToSession,
   style,
@@ -96,10 +163,9 @@ export function PermissionPrompt({
     : null;
   const isSubmitting = activeDecision !== null;
 
-  // Dedupe always patterns against scope so we don't render "批准会覆盖：`ls -la`"
-  // when the user already sees `ls -la` in the command preview directly above.
-  const broadPatterns =
-    always && always.length > 0 ? always.filter((pattern) => pattern !== scope) : [];
+  // Categorize always patterns into selectable scope levels
+  const scopeLevels = categorizeAlwaysPatterns(previewAction, scope, always);
+  const [selectedLevelIndex, setSelectedLevelIndex] = useState(0);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -156,7 +222,9 @@ export function PermissionPrompt({
         flexDirection: 'column',
         gap: 10,
         maxWidth: 440,
+        minWidth: 340,
         boxShadow: '0 22px 56px rgba(15, 23, 42, 0.45)',
+        willChange: 'transform, opacity',
         ...style,
       }}
     >
@@ -286,25 +354,72 @@ export function PermissionPrompt({
         </code>
       </PromptSection>
 
-      {broadPatterns.length > 0 && (
-        <PromptSection label="本会话 / 永久允许会覆盖">
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {broadPatterns.map((pattern) => (
-              <code
-                key={pattern}
-                style={{
-                  fontFamily: 'var(--font-mono, monospace)',
-                  fontSize: 10.5,
-                  padding: '2px 8px',
-                  borderRadius: 999,
-                  background: 'rgba(99,102,241,0.12)',
-                  border: '1px solid rgba(99,102,241,0.3)',
-                  color: 'var(--accent))',
-                }}
-              >
-                {pattern}
-              </code>
-            ))}
+      {scopeLevels.length > 1 && (
+        <PromptSection label={'审批范围（选择后\u201c本会话/永久允许\u201d将覆盖该模式）'}>
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+              borderRadius: 8,
+              overflow: 'hidden',
+            }}
+          >
+            {scopeLevels.map((level, index) => {
+              const isSelected = index === selectedLevelIndex;
+              return (
+                <button
+                  key={level.category}
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => {
+                    setSelectedLevelIndex(index);
+                    onScopeLevelChange?.(level);
+                  }}
+                  style={{
+                    appearance: 'none',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 2,
+                    padding: '8px 10px',
+                    borderRadius: 6,
+                    border: isSelected
+                      ? '1px solid rgba(99,102,241,0.55)'
+                      : '1px solid rgba(148,163,184,0.15)',
+                    background: isSelected
+                      ? 'rgba(99,102,241,0.10)'
+                      : 'rgba(15,23,42,0.30)',
+                    cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                    opacity: isSubmitting ? 0.7 : 1,
+                    textAlign: 'left',
+                    transition: 'border-color 120ms ease, background 120ms ease',
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: isSelected ? 'var(--accent))' : 'var(--fg-muted))',
+                      letterSpacing: 0.3,
+                    }}
+                  >
+                    {level.label}
+                  </span>
+                  <code
+                    style={{
+                      fontFamily: 'var(--font-mono, monospace)',
+                      fontSize: 11,
+                      color: isSelected ? 'var(--accent))' : 'var(--fg-muted))',
+                      wordBreak: 'break-all',
+                      whiteSpace: 'pre-wrap',
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {level.pattern}
+                  </code>
+                </button>
+              );
+            })}
           </div>
         </PromptSection>
       )}
@@ -476,7 +591,7 @@ function btnStyle(
     cursor: options?.disabled ? 'not-allowed' : 'pointer',
     fontWeight: tone === 'primary' ? 700 : 600,
     opacity: options?.disabled ? 0.72 : 1,
-    transform: options?.active ? 'translateY(-1px)' : undefined,
+    transform: options?.active ? 'translateY(-1px)' : 'translateY(0)',
     transition: 'opacity 120ms ease, transform 120ms ease, background 120ms ease',
     display: 'inline-flex',
     alignItems: 'center',

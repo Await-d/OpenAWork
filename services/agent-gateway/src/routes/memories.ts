@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { JwtPayload } from '../infra/auth.js';
+import { parseBody, parseQuery } from '../infra/parse-request.js';
 import { requireAuth } from '../infra/auth.js';
 import {
   createMemorySchema,
@@ -38,13 +39,9 @@ export async function memoriesRoutes(app: FastifyInstance): Promise<void> {
       const { step } = startRequestWorkflow(request, 'memories.list');
       const user = request.user as JwtPayload;
 
-      const parsed = memoryListQuerySchema.safeParse(request.query ?? {});
-      if (!parsed.success) {
-        step.fail('invalid query');
-        return reply.status(400).send({ error: 'Invalid query', issues: parsed.error.issues });
-      }
+      const parsed = parseQuery(memoryListQuerySchema, request.query);
 
-      const memories = listMemories(user.sub, parsed.data);
+      const memories = listMemories(user.sub, parsed);
       step.succeed(undefined, { count: memories.length });
       return reply.send({ memories });
     },
@@ -57,16 +54,12 @@ export async function memoriesRoutes(app: FastifyInstance): Promise<void> {
       const { step } = startRequestWorkflow(request, 'memories.create');
       const user = request.user as JwtPayload;
 
-      const parsed = createMemorySchema.safeParse(request.body);
-      if (!parsed.success) {
-        step.fail('invalid body');
-        return reply.status(400).send({ error: 'Invalid body', issues: parsed.error.issues });
-      }
+      const parsed = parseBody(createMemorySchema, request.body);
 
       // 260515-team-phase-a · T-07：拒绝包含注入载荷 / Unicode 异常 / 超大记忆
       for (const [field, content] of [
-        ['key', parsed.data.key],
-        ['value', parsed.data.value],
+        ['key', parsed.key],
+        ['value', parsed.value],
       ] as const) {
         const scan = scanMemoryWriteContent(content);
         if (!scan.ok) {
@@ -81,7 +74,7 @@ export async function memoriesRoutes(app: FastifyInstance): Promise<void> {
         }
       }
 
-      const memory = createMemory(user.sub, parsed.data);
+      const memory = createMemory(user.sub, parsed);
       step.succeed(undefined, { memoryId: memory.id });
       return reply.status(201).send({ memory });
     },
@@ -127,16 +120,12 @@ export async function memoriesRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
       const { memoryId } = request.params as { memoryId: string };
 
-      const parsed = updateMemorySchema.safeParse(request.body);
-      if (!parsed.success) {
-        step.fail('invalid body');
-        return reply.status(400).send({ error: 'Invalid body', issues: parsed.error.issues });
-      }
+      const parsed = parseBody(updateMemorySchema, request.body);
 
       // 260515-team-phase-a · T-07：用户更新 memory 时同样跑一遍安全扫描
       for (const [field, content] of [
-        ['key', parsed.data.key],
-        ['value', parsed.data.value],
+        ['key', parsed.key],
+        ['value', parsed.value],
       ] as const) {
         if (typeof content !== 'string') continue;
         const scan = scanMemoryWriteContent(content);
@@ -152,7 +141,7 @@ export async function memoriesRoutes(app: FastifyInstance): Promise<void> {
         }
       }
 
-      const memory = updateMemory(user.sub, memoryId, parsed.data);
+      const memory = updateMemory(user.sub, memoryId, parsed);
       if (!memory) {
         step.fail('not found');
         return reply.status(404).send({ error: 'Memory not found' });
@@ -193,21 +182,17 @@ export async function memoriesRoutes(app: FastifyInstance): Promise<void> {
         sessionId: z.string().trim().min(1).max(200).optional(),
         text: z.string().trim().min(1).max(32768).optional(),
       });
-      const parsed = bodySchema.safeParse(request.body);
-      if (!parsed.success) {
-        step.fail('invalid body');
-        return reply.status(400).send({ error: 'Invalid body', issues: parsed.error.issues });
-      }
+      const parsed = parseBody(bodySchema, request.body);
 
-      let extractionText = parsed.data.text ?? null;
+      let extractionText = parsed.text ?? null;
       let extractedFromSessionId: string | null = null;
       let session: SessionSelectionRow | undefined;
 
       if (!extractionText) {
-        session = parsed.data.sessionId
+        session = parsed.sessionId
           ? sqliteGet<SessionSelectionRow>(
               'SELECT id, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
-              [parsed.data.sessionId, user.sub],
+              [parsed.sessionId, user.sub],
             )
           : sqliteGet<SessionSelectionRow>(
               'SELECT id, metadata_json FROM sessions WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1',
@@ -263,15 +248,11 @@ export async function memoriesRoutes(app: FastifyInstance): Promise<void> {
       const { step } = startRequestWorkflow(request, 'memories.settings.put');
       const user = request.user as JwtPayload;
 
-      const parsed = memorySettingsSchema.safeParse(request.body);
-      if (!parsed.success) {
-        step.fail('invalid body');
-        return reply.status(400).send({ error: 'Invalid body', issues: parsed.error.issues });
-      }
+      const parsed = parseBody(memorySettingsSchema, request.body);
 
-      writeMemorySettings(user.sub, parsed.data);
-      step.succeed(undefined, { enabled: parsed.data.enabled });
-      return reply.send({ settings: parsed.data });
+      writeMemorySettings(user.sub, parsed);
+      step.succeed(undefined, { enabled: parsed.enabled });
+      return reply.send({ settings: parsed });
     },
   );
 }

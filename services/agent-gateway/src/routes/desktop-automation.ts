@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { requireAuth } from '../infra/auth.js';
+import { parseBody } from '../infra/parse-request.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { desktopAutomationManager } from '../tools/desktop-automation.js';
 
@@ -24,12 +25,8 @@ export async function desktopAutomationRoutes(app: FastifyInstance): Promise<voi
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step } = startRequestWorkflow(request, 'desktop-automation.start');
-      const body = z.object({ url: z.string().url().optional() }).safeParse(request.body);
-      if (!body.success) {
-        step.fail('invalid input');
-        return reply.status(400).send({ ok: false });
-      }
-      await desktopAutomationManager.start(body.data.url);
+      const body = parseBody(z.object({ url: z.string().url().optional() }), request.body);
+      await desktopAutomationManager.start(body.url);
       step.succeed();
       return reply.send({ ok: true });
     },
@@ -40,12 +37,8 @@ export async function desktopAutomationRoutes(app: FastifyInstance): Promise<voi
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step } = startRequestWorkflow(request, 'desktop-automation.goto');
-      const body = z.object({ url: z.string().url() }).safeParse(request.body);
-      if (!body.success) {
-        step.fail('invalid input');
-        return reply.status(400).send({ ok: false });
-      }
-      await desktopAutomationManager.goto(body.data.url);
+      const body = parseBody(z.object({ url: z.string().url() }), request.body);
+      await desktopAutomationManager.goto(body.url);
       step.succeed();
       return reply.send({ ok: true });
     },
@@ -56,12 +49,8 @@ export async function desktopAutomationRoutes(app: FastifyInstance): Promise<voi
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step } = startRequestWorkflow(request, 'desktop-automation.click');
-      const body = z.object({ selector: z.string().min(1) }).safeParse(request.body);
-      if (!body.success) {
-        step.fail('invalid input');
-        return reply.status(400).send({ ok: false });
-      }
-      await desktopAutomationManager.click(body.data.selector);
+      const body = parseBody(z.object({ selector: z.string().min(1) }), request.body);
+      await desktopAutomationManager.click(body.selector);
       step.succeed();
       return reply.send({ ok: true });
     },
@@ -72,14 +61,11 @@ export async function desktopAutomationRoutes(app: FastifyInstance): Promise<voi
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step } = startRequestWorkflow(request, 'desktop-automation.type');
-      const body = z
-        .object({ selector: z.string().min(1), text: z.string() })
-        .safeParse(request.body);
-      if (!body.success) {
-        step.fail('invalid input');
-        return reply.status(400).send({ ok: false });
-      }
-      await desktopAutomationManager.type(body.data.selector, body.data.text);
+      const body = parseBody(
+        z.object({ selector: z.string().min(1), text: z.string() }),
+        request.body,
+      );
+      await desktopAutomationManager.type(body.selector, body.text);
       step.succeed();
       return reply.send({ ok: true });
     },

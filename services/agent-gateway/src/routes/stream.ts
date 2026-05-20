@@ -22,15 +22,13 @@ import { writeAuditLog } from '../infra/audit-log.js';
 import {
   modelRequestSchema,
   type ModelRouteConfig,
-  resolveCompactionRoute,
   resolveModelRoute,
   resolveModelRouteFromProvider,
 } from '../provider/model-router.js';
 import {
-  getCompactionProviderConfig,
-  getFastProviderConfig,
-  getProviderConfigForSelection,
-} from '../provider/provider-config.js';
+  getFastProvider,
+  getProviderForSelection,
+} from '../provider/provider-catalog.js';
 import { WorkflowLogger, createRequestContext } from '@openAwork/logger';
 import {
   appendSessionMessageV2,
@@ -119,7 +117,7 @@ import {
   type RecoveryResult,
 } from '../session/session-recovery.js';
 import { detectDelegateTaskError, buildRetryGuidance } from '../task/delegate-task-retry.js';
-import { truncateToolOutputUniversal, truncateToolOutputDynamicUniversal } from '../tools/tool-output-truncator.js';
+import { truncateToolOutputUniversal } from '../tools/tool-output-truncator.js';
 import { normalizeToolArgumentsForStorage } from '../tools/tool-result-contract.js';
 import { detectEmptyTaskResponse } from '../task/empty-task-response-detector.js';
 import { buildDynamicOrchestratorPrompt } from '../agent/dynamic-agent-prompt-builder.js';
@@ -1149,14 +1147,6 @@ export async function resolveStreamModelRoute(input: {
   requestData: StreamRequest;
   userId: string;
 }): Promise<ResolvedStreamModelRoute> {
-  const providerRow = sqliteGet<{ value: string }>(
-    `SELECT value FROM user_settings WHERE user_id = ? AND key = 'providers'`,
-    [input.userId],
-  );
-  const selectionRow = sqliteGet<{ value: string }>(
-    `SELECT value FROM user_settings WHERE user_id = ? AND key = 'active_selection'`,
-    [input.userId],
-  );
   const sessionSelection = parseSessionProviderSelection(input.metadataJson);
   const agentSelection = resolveStreamAgentSelection({
     requestedAgentId: input.requestData.agentId,
@@ -1179,9 +1169,8 @@ export async function resolveStreamModelRoute(input: {
       agentSelection.systemPrompt ??
       sessionSelection.systemPrompt,
   };
-  const providerConfig = await getProviderConfigForSelection(
-    parseStoredJson(providerRow?.value),
-    parseStoredJson(selectionRow?.value),
+  const providerConfig = await getProviderForSelection(
+    input.userId,
     {
       providerId: resolvedRequestData.providerId,
       modelId: resolvedRequestData.model,
@@ -1970,18 +1959,7 @@ export async function handleStreamRequest(input: {
       resetDoomLoopHistory(input.sessionId);
 
       // Resolve fast model route for LLM title generation (falls back to chat route)
-      const titleProviderRow = sqliteGet<{ value: string }>(
-        `SELECT value FROM user_settings WHERE user_id = ? AND key = 'providers'`,
-        [input.user.sub],
-      );
-      const titleSelectionRow = sqliteGet<{ value: string }>(
-        `SELECT value FROM user_settings WHERE user_id = ? AND key = 'active_selection'`,
-        [input.user.sub],
-      );
-      const fastProviderConfig = await getFastProviderConfig(
-        parseStoredJson(titleProviderRow?.value),
-        parseStoredJson(titleSelectionRow?.value),
-      );
+      const fastProviderConfig = await getFastProvider(input.user.sub);
       const titleRoute = fastProviderConfig
         ? resolveModelRouteFromProvider(fastProviderConfig.provider, fastProviderConfig.modelId, {
             maxTokens: 100,
@@ -2239,7 +2217,7 @@ export async function handleStreamRequest(input: {
         // Dynamic context window: resolve the effective limit for this user+model,
         // which may be lower than the preset if a provider error previously revealed
         // a smaller actual limit (e.g. relay supports 200K but preset says 1M).
-        const effectiveContextWindow = resolveEffectiveContextWindow(
+        const _effectiveContextWindow = resolveEffectiveContextWindow(
           input.user.sub,
           route.model,
           route.contextWindow,

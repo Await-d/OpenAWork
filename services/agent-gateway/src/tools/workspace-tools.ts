@@ -45,7 +45,7 @@ const MAX_READ_LINE_LIMIT = 2000;
 const MAX_READ_LINE_CHARS = 2000;
 const READ_LINE_TRUNCATION_NOTICE = '...[line truncated]';
 const MAX_GLOB_MATCHES = 100;
-const MAX_SEARCH_RESULTS = 50;
+const _MAX_SEARCH_RESULTS = 50;
 const MAX_SEARCH_FILE_BYTES = 512 * 1024;
 
 const workspaceTreeInputSchema = z.object({
@@ -170,11 +170,13 @@ const workspaceWriteFileOutputSchema = z.object({
 const writeInputSchema = workspaceWriteFileInputSchema;
 const writeOutputSchema = workspaceWriteFileOutputSchema;
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- used via z.infer<typeof>
 const workspaceCreateFileInputSchema = z.object({
   path: z.string().min(1),
   content: z.string().default(''),
 });
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- used via z.infer<typeof>
 const workspaceCreateFileOutputSchema = z.object({
   after: z.string(),
   before: z.string(),

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import NavRail from './layout/nav/NavRail.js';
 import WorkspacePickerModal from './common/modal/WorkspacePickerModal.js';
 import { CachedRouteOutlet } from './common/routing/CachedRouteOutlet.js';
@@ -250,11 +250,39 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
     useState<PendingQuestionReplyStatus | null>(null);
   const [pendingQuestionReplyError, setPendingQuestionReplyError] = useState<string | null>(null);
 
+  const pendingPermissionRef = useRef<SessionPendingPermissionState | null>(null);
+
   const updatePendingPermission = useCallback(
     (next: SessionPendingPermissionState | null) => {
+      const current = pendingPermissionRef.current;
+
+      // Avoid unnecessary re-renders when the same request is published again
+      // (e.g., from pendingPermissions array reference changes in ChatPage).
+      if (next !== null && current?.requestId === next.requestId) {
+        // Preserve existing sessionTitle if already resolved
+        if (current.sessionTitle && !next.sessionTitle) {
+          return;
+        }
+        // Only update if something meaningful changed
+        if (
+          current.scope === next.scope &&
+          current.toolName === next.toolName &&
+          current.reason === next.reason &&
+          current.riskLevel === next.riskLevel &&
+          current.previewAction === next.previewAction
+        ) {
+          return;
+        }
+      }
+
+      pendingPermissionRef.current = next;
       setPendingPermission(next);
-      setPermissionReplyPendingDecision(null);
-      setPermissionReplyError(null);
+
+      // Only reset reply state when the request actually changes
+      if (next === null || current?.requestId !== next.requestId) {
+        setPermissionReplyPendingDecision(null);
+        setPermissionReplyError(null);
+      }
 
       // Asynchronously resolve the session title so the prompt can show
       // which session the permission request originates from.
@@ -264,11 +292,12 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
           .then((session) => {
             const title = session?.title?.trim();
             if (title) {
-              setPendingPermission((current) =>
-                current?.requestId === next.requestId
-                  ? { ...current, sessionTitle: title }
-                  : current,
-              );
+              setPendingPermission((current) => {
+                if (current?.requestId !== next.requestId) return current;
+                const updated = { ...current, sessionTitle: title };
+                pendingPermissionRef.current = updated;
+                return updated;
+              });
             }
           })
           .catch(() => {
@@ -723,6 +752,7 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
       />
       {pendingPermission && (
         <PermissionPrompt
+          key={pendingPermission.requestId}
           requestId={pendingPermission.requestId}
           toolName={pendingPermission.toolName}
           scope={pendingPermission.scope}
@@ -747,8 +777,9 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
             position: 'fixed',
             top: 56,
             right: 16,
+            width: 440,
             zIndex: 500,
-            animation: 'permissionSlideIn 0.25s ease',
+            animation: 'permissionSlideIn 0.25s ease forwards',
           }}
         />
       )}

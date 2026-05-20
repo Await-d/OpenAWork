@@ -1,10 +1,10 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
+import { parseBody, parseQuery } from '../infra/parse-request.js';
 import { loadAppVersion } from '../app/app-version.js';
 import { resolveAuxiliaryLlmConfig } from '../provider/auxiliary-llm-config.js';
 import { invalidateCatalog } from '../provider/provider-catalog.js';
-import { parseBody } from '../infra/parse-request.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import {
   COMPACTION_SETTINGS_KEY,
@@ -248,20 +248,13 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
 
       const queryStep = child('parse-query');
-      const parsedQuery = companionSettingsQuerySchema.safeParse(request.query ?? {});
-      if (!parsedQuery.success) {
-        queryStep.fail('invalid companion query');
-        step.fail('invalid companion query');
-        return reply
-          .status(400)
-          .send({ error: 'Invalid companion query', issues: parsedQuery.error.issues });
-      }
+      const parsedQuery = parseQuery(companionSettingsQuerySchema, request.query);
       queryStep.succeed(undefined, {
-        agentId: parsedQuery.data.agentId ?? 'default',
+        agentId: parsedQuery.agentId ?? 'default',
       });
 
       const loadStep = child('load');
-      const settings = loadCompanionSettingsForUser(user.sub, user.email, parsedQuery.data.agentId);
+      const settings = loadCompanionSettingsForUser(user.sub, user.email, parsedQuery.agentId);
       loadStep.succeed(undefined, { found: true });
       step.succeed(undefined, { voiceOutputEnabled: settings.preferences.voiceOutputEnabled });
       return reply.send({
@@ -282,40 +275,26 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
 
       const queryStep = child('parse-query');
-      const parsedQuery = companionSettingsQuerySchema.safeParse(request.query ?? {});
-      if (!parsedQuery.success) {
-        queryStep.fail('invalid companion query');
-        step.fail('invalid companion query');
-        return reply
-          .status(400)
-          .send({ error: 'Invalid companion query', issues: parsedQuery.error.issues });
-      }
+      const parsedQuery = parseQuery(companionSettingsQuerySchema, request.query);
       queryStep.succeed(undefined, {
-        agentId: parsedQuery.data.agentId ?? 'default',
+        agentId: parsedQuery.agentId ?? 'default',
       });
 
       const parseStep = child('parse-body');
-      const parsed = companionSettingsUpdateSchema.safeParse(request.body);
-      if (!parsed.success) {
-        parseStep.fail('invalid companion body');
-        step.fail('invalid companion body');
-        return reply
-          .status(400)
-          .send({ error: 'Invalid companion settings', issues: parsed.error.issues });
-      }
+      const parsed = parseBody(companionSettingsUpdateSchema, request.body);
       parseStep.succeed(undefined, {
-        bindingCount: parsed.data.bindings ? Object.keys(parsed.data.bindings).length : 0,
-        preferenceCount: parsed.data.preferences ? Object.keys(parsed.data.preferences).length : 0,
+        bindingCount: parsed.bindings ? Object.keys(parsed.bindings).length : 0,
+        preferenceCount: parsed.preferences ? Object.keys(parsed.preferences).length : 0,
       });
 
       const loadStep = child('load-existing');
-      const existing = loadCompanionSettingsForUser(user.sub, user.email, parsedQuery.data.agentId);
+      const existing = loadCompanionSettingsForUser(user.sub, user.email, parsedQuery.agentId);
       loadStep.succeed(undefined, { found: true });
       const nextSettings = {
-        bindings: parsed.data.bindings ?? existing.bindings,
+        bindings: parsed.bindings ?? existing.bindings,
         preferences: {
           ...existing.preferences,
-          ...(parsed.data.preferences ?? {}),
+          ...(parsed.preferences ?? {}),
         },
         profile: existing.profile,
         updatedAt: new Date().toISOString(),
@@ -334,11 +313,11 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
 
       const resolved = {
         ...nextSettings,
-        activeBinding: parsedQuery.data.agentId
-          ? nextSettings.bindings[parsedQuery.data.agentId]
+        activeBinding: parsedQuery.agentId
+          ? nextSettings.bindings[parsedQuery.agentId]
           : undefined,
         profile: resolveCompanionProfileForAgent({
-          agentId: parsedQuery.data.agentId,
+          agentId: parsedQuery.agentId,
           bindings: nextSettings.bindings,
           preferences: nextSettings.preferences,
           userEmail: user.email,
@@ -504,20 +483,16 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
           }),
         ),
       });
-      const parsed = bodySchema.safeParse(request.body);
-      if (!parsed.success) {
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: parsed.error.issues });
-      }
+      const parsed = parseBody(bodySchema, request.body);
       const config = loadWorkspacePermissionConfig(WORKSPACE_ROOT);
       // Clear legacy `permanentGrants` on save so deletions from the
       // settings panel actually take effect. The GET handler already
       // surfaces these entries as `rules`, so any grant the user wanted
-      // to keep is round-tripped through `parsed.data.rules`.
-      const next = { ...config, rules: parsed.data.rules, permanentGrants: [] };
+      // to keep is round-tripped through `parsed.rules`.
+      const next = { ...config, rules: parsed.rules, permanentGrants: [] };
       writeWorkspacePermissionConfig(WORKSPACE_ROOT, next);
-      step.succeed(undefined, { count: parsed.data.rules.length });
-      return reply.send({ ok: true, rules: parsed.data.rules });
+      step.succeed(undefined, { count: parsed.rules.length });
+      return reply.send({ ok: true, rules: parsed.rules });
     },
   );
 
@@ -532,9 +507,8 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       const querySchema = z.object({
         date: z.string().optional(),
       });
-      const parsedQuery = querySchema.safeParse(request.query ?? {});
-      const dateFilter =
-        parsedQuery.success && parsedQuery.data.date ? parsedQuery.data.date : null;
+      const parsedQuery = parseQuery(querySchema, request.query);
+      const dateFilter = parsedQuery.date ?? null;
       queryParamsStep.succeed(undefined, { dateFilter: dateFilter ?? 'all' });
 
       const queryStep = child('query');
@@ -662,15 +636,8 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
 
       const queryStep = child('parse-query');
-      const parsedQuery = providerSettingsQuerySchema.safeParse(request.query ?? {});
-      if (!parsedQuery.success) {
-        queryStep.fail('invalid provider query');
-        step.fail('invalid provider query');
-        return reply
-          .status(400)
-          .send({ error: 'Invalid provider query', issues: parsedQuery.error.issues });
-      }
-      queryStep.succeed(undefined, { enabledOnly: parsedQuery.data.enabledOnly });
+      const parsedQuery = parseQuery(providerSettingsQuerySchema, request.query);
+      queryStep.succeed(undefined, { enabledOnly: parsedQuery.enabledOnly });
 
       const loadStep = child('load');
       const providerRow = sqliteGet<UserSettingRow>(
@@ -696,7 +663,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         parseStoredJson(providerRow?.value),
         parseStoredJson(selectionRow?.value),
       );
-      const { providers, activeSelection } = parsedQuery.data.enabledOnly
+      const { providers, activeSelection } = parsedQuery.enabledOnly
         ? filterEnabledProviderConfig(materialized)
         : materialized;
       const defaultThinking = parseStoredDefaultThinking(parseStoredJson(thinkingRow?.value));
@@ -738,30 +705,23 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       loadSelectionStep.succeed(undefined, { found: selectionRow !== undefined });
 
       const parseStep = child('parse-body');
-      const parsed = providerSettingsBodySchema.safeParse(request.body);
-      if (!parsed.success) {
-        parseStep.fail('invalid provider config');
-        step.fail('invalid provider config');
-        return reply
-          .status(400)
-          .send({ error: 'Invalid provider config', issues: parsed.error.issues });
-      }
+      const parsed = parseBody(providerSettingsBodySchema, request.body);
       parseStep.succeed();
 
       const materializeStep = child('materialize');
       const mergedActiveSelection = mergeActiveSelectionPreservingStored({
-        incoming: parsed.data.activeSelection,
+        incoming: parsed.activeSelection,
         stored: parseStoredJson(selectionRow?.value),
       });
       const { providers, activeSelection } = await materializeProviderConfig(
-        parsed.data.providers,
+        parsed.providers,
         mergedActiveSelection,
       );
-      const defaultThinking = parsed.data.defaultThinking
-        ? parsed.data.defaultThinking
+      const defaultThinking = parsed.defaultThinking
+        ? parsed.defaultThinking
         : parseStoredDefaultThinking(parseStoredJson(thinkingRow?.value));
       const imageGenerationDefaults = mergeImageGenerationDefaultsPreservingStored({
-        incoming: parsed.data.imageGenerationDefaults,
+        incoming: parsed.imageGenerationDefaults,
         stored: parseStoredJson(imageDefaultsRow?.value),
       });
       materializeStep.succeed(undefined, { providers: providers.length });
@@ -916,22 +876,18 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       const { step, child } = startRequestWorkflow(request, 'settings.upstream-retry.put');
       const user = request.user as JwtPayload;
 
-      const parsed = upstreamRetrySettingsSchema.safeParse(request.body);
-      if (!parsed.success) {
-        step.fail('invalid body');
-        return reply.status(400).send({ error: 'Invalid upstream retry settings' });
-      }
+      const parsed = parseBody(upstreamRetrySettingsSchema, request.body);
 
       const saveStep = child('save');
       sqliteRun(
         `INSERT INTO user_settings (user_id, key, value) VALUES (?, ?, ?)
          ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
-        [user.sub, UPSTREAM_RETRY_SETTINGS_KEY, JSON.stringify(parsed.data)],
+        [user.sub, UPSTREAM_RETRY_SETTINGS_KEY, JSON.stringify(parsed)],
       );
-      saveStep.succeed(undefined, { maxRetries: parsed.data.maxRetries });
+      saveStep.succeed(undefined, { maxRetries: parsed.maxRetries });
       step.succeed(undefined, { saved: true });
 
-      return reply.send(parsed.data);
+      return reply.send(parsed);
     },
   );
 
@@ -969,23 +925,19 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step, child } = startRequestWorkflow(request, 'settings.websearch.put');
       const user = request.user as JwtPayload;
-      const parsed = websearchPolicySchema.safeParse(request.body);
-      if (!parsed.success) {
-        step.fail('invalid body');
-        return reply.status(400).send({ error: 'Invalid websearch policy' });
-      }
+      const parsed = parseBody(websearchPolicySchema, request.body);
       const saveStep = child('save');
       sqliteRun(
         `INSERT INTO user_settings (user_id, key, value) VALUES (?, ?, ?)
          ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
-        [user.sub, WEBSEARCH_POLICY_KEY, JSON.stringify(parsed.data)],
+        [user.sub, WEBSEARCH_POLICY_KEY, JSON.stringify(parsed)],
       );
       saveStep.succeed(undefined, {
-        providers: parsed.data.providers.length,
-        rolloutMode: parsed.data.rolloutMode,
+        providers: parsed.providers.length,
+        rolloutMode: parsed.rolloutMode,
       });
       step.succeed(undefined, { saved: true });
-      return reply.send(parsed.data);
+      return reply.send(parsed);
     },
   );
 
@@ -1020,26 +972,22 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       const { step, child } = startRequestWorkflow(request, 'settings.compaction.put');
       const user = request.user as JwtPayload;
 
-      const parsed = compactionSettingsSchema.safeParse(request.body);
-      if (!parsed.success) {
-        step.fail('invalid body');
-        return reply.status(400).send({ error: 'Invalid compaction settings' });
-      }
+      const parsed = parseBody(compactionSettingsSchema, request.body);
 
       const saveStep = child('save');
       sqliteRun(
         `INSERT INTO user_settings (user_id, key, value) VALUES (?, ?, ?)
          ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
-        [user.sub, COMPACTION_SETTINGS_KEY, JSON.stringify(parsed.data)],
+        [user.sub, COMPACTION_SETTINGS_KEY, JSON.stringify(parsed)],
       );
       saveStep.succeed(undefined, {
-        auto: parsed.data.auto,
-        prune: parsed.data.prune,
-        ...(typeof parsed.data.reserved === 'number' ? { reserved: parsed.data.reserved } : {}),
+        auto: parsed.auto,
+        prune: parsed.prune,
+        ...(typeof parsed.reserved === 'number' ? { reserved: parsed.reserved } : {}),
       });
       step.succeed(undefined, { saved: true });
 
-      return reply.send(parsed.data);
+      return reply.send(parsed);
     },
   );
 
@@ -1091,24 +1039,18 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       const { step, child } = startRequestWorkflow(request, 'settings.plugins.put');
       const user = request.user as JwtPayload;
 
-      const parsed = pluginSettingsSchema.safeParse(request.body);
-      if (!parsed.success) {
-        step.fail('invalid body');
-        return reply
-          .status(400)
-          .send({ error: 'Invalid plugin settings', issues: parsed.error.issues });
-      }
+      const parsed = parseBody(pluginSettingsSchema, request.body);
 
       const saveStep = child('save');
       sqliteRun(
         `INSERT INTO user_settings (user_id, key, value) VALUES (?, 'plugin_settings', ?)
          ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
-        [user.sub, JSON.stringify(parsed.data)],
+        [user.sub, JSON.stringify(parsed)],
       );
       saveStep.succeed();
       step.succeed(undefined, { saved: true });
 
-      return reply.send(parsed.data);
+      return reply.send(parsed);
     },
   );
 
@@ -1300,16 +1242,12 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step } = startRequestWorkflow(request, 'settings.file-patterns.put');
       const user = request.user as JwtPayload;
-      const body = z.object({ patterns: z.array(z.string()) }).safeParse(request.body);
-      if (!body.success) {
-        step.fail('invalid body');
-        return reply.status(400).send({ error: body.error.issues });
-      }
+      const body = parseBody(z.object({ patterns: z.array(z.string()) }), request.body);
       sqliteRun(
         `INSERT OR REPLACE INTO user_settings (user_id, key, value) VALUES (?, 'file_patterns', ?)`,
-        [user.sub, JSON.stringify(body.data.patterns)],
+        [user.sub, JSON.stringify(body.patterns)],
       );
-      step.succeed(undefined, { saved: body.data.patterns.length });
+      step.succeed(undefined, { saved: body.patterns.length });
       return reply.send({ ok: true });
     },
   );
@@ -1380,12 +1318,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
 
       const parseStep = child('parse-body');
-      const body = buddyChatSchema.safeParse(request.body);
-      if (!body.success) {
-        parseStep.fail('invalid input');
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(buddyChatSchema, request.body);
       parseStep.succeed();
 
       // Use the shared auxiliary LLM resolver so the companion chat
@@ -1404,7 +1337,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       const companionSettings = loadCompanionSettingsForUser(
         user.sub,
         user.email,
-        body.data.agentId,
+        body.agentId,
       );
       const profile = companionSettings.profile;
       const intro = (await import('../workspace/companion-settings.js')).buildCompanionIntroText(
@@ -1412,8 +1345,8 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       );
 
       const contextParts: string[] = [];
-      if (body.data.context) {
-        const ctx = body.data.context;
+      if (body.context) {
+        const ctx = body.context;
         if (ctx.sessionBusy) contextParts.push('当前会话正在运行中');
         if (ctx.pendingApprovals && ctx.pendingApprovals > 0)
           contextParts.push(`${ctx.pendingApprovals} 个待审批项`);
@@ -1447,7 +1380,7 @@ ${profile.name} 的定位：${profile.archetype}。
 5. 用中文回复，控制在 40 字以内
 ${contextBlock}
 
-用户对你说：${body.data.message}
+用户对你说：${body.message}
 
 请以 ${profile.name} 的身份简短回复：`;
 

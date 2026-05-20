@@ -3,8 +3,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { FIXED_TEAM_CORE_ROLE_ORDER } from '@openAwork/shared';
 import type { JwtPayload } from '../infra/auth.js';
-import { requireAuth } from '../infra/auth.js';
 import { parseBody } from '../infra/parse-request.js';
+import { requireAuth } from '../infra/auth.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { buildFixedTeamTemplateDefaultBindings } from '../team/team-template-metadata.js';
@@ -139,15 +139,10 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
 
       const parseStep = child('parse-body');
-      const body = createTemplateSchema.safeParse(request.body);
-      if (!body.success) {
-        parseStep.fail('invalid input');
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(createTemplateSchema, request.body);
       parseStep.succeed();
 
-      const { name, description, category, metadata, nodes, edges } = body.data;
+      const { name, description, category, metadata, nodes, edges } = body;
       const normalizedMetadata =
         category === 'team-playbook'
           ? {
@@ -197,11 +192,7 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step } = startRequestWorkflow(request, 'workflow.prompt.optimize');
-      const body = optimizePromptSchema.safeParse(request.body);
-      if (!body.success) {
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(optimizePromptSchema, request.body);
 
       // Prefer the user's chat-configured "fast / inline" provider so
       // the prompt optimizer reuses the same credentials the user
@@ -230,7 +221,7 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
       });
 
       try {
-        const result = await optimizer.optimize(body.data);
+        const result = await optimizer.optimize(body);
         step.succeed(undefined, {
           requestId: result.requestId,
           candidates: result.candidates.length,
@@ -252,11 +243,7 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step } = startRequestWorkflow(request, 'workflow.translate');
-      const body = translateSchema.safeParse(request.body);
-      if (!body.success) {
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(translateSchema, request.body);
 
       const user = request.user as JwtPayload;
       const llmConfig = await resolveAuxiliaryLlmConfig(user.sub);
@@ -280,7 +267,7 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
         });
       });
 
-      const results = await workflow.batchTranslate(body.data.tasks);
+      const results = await workflow.batchTranslate(body.tasks);
       step.succeed(undefined, { tasks: results.length });
       return reply.send({ results });
     },
@@ -342,46 +329,41 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
       });
 
       const parseStep = child('parse-body');
-      const body = patchSchema.safeParse(request.body);
-      if (!body.success) {
-        parseStep.fail('invalid input');
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(patchSchema, request.body);
       parseStep.succeed();
 
       const existingMetadata = JSON.parse(existing.metadata_json || '{}') as Record<
         string,
         unknown
       >;
-      const mergedMetadata = body.data.metadata
-        ? { ...existingMetadata, ...body.data.metadata }
+      const mergedMetadata = body.metadata
+        ? { ...existingMetadata, ...body.metadata }
         : existingMetadata;
 
-      if (body.data.metadata?.teamTemplate && existing.category === 'team-playbook') {
+      if (body.metadata?.teamTemplate && existing.category === 'team-playbook') {
         const existingTeamTemplate = (
           existingMetadata as { teamTemplate?: Record<string, unknown> }
         )?.teamTemplate;
         mergedMetadata.teamTemplate = {
           ...(existingTeamTemplate ?? {}),
-          ...body.data.metadata.teamTemplate,
-          ...(body.data.metadata.teamTemplate.defaultBindings
+          ...body.metadata.teamTemplate,
+          ...(body.metadata.teamTemplate.defaultBindings
             ? {
                 defaultBindings: {
                   ...((existingTeamTemplate as { defaultBindings?: Record<string, unknown> })
                     ?.defaultBindings ?? {}),
-                  ...body.data.metadata.teamTemplate.defaultBindings,
+                  ...body.metadata.teamTemplate.defaultBindings,
                 },
               }
             : {}),
         };
       }
 
-      const newName = body.data.name ?? existing.name;
+      const newName = body.name ?? existing.name;
       const newDescription =
-        body.data.description !== undefined ? body.data.description : existing.description;
-      const newNodes = body.data.nodes ?? (JSON.parse(existing.nodes_json) as unknown[]);
-      const newEdges = body.data.edges ?? (JSON.parse(existing.edges_json) as unknown[]);
+        body.description !== undefined ? body.description : existing.description;
+      const newNodes = body.nodes ?? (JSON.parse(existing.nodes_json) as unknown[]);
+      const newEdges = body.edges ?? (JSON.parse(existing.edges_json) as unknown[]);
 
       const updateStep = child('update', undefined, { templateId: id });
       sqliteRun(

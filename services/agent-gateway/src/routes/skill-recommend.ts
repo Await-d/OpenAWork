@@ -25,6 +25,7 @@ import { z } from 'zod';
 import type { SkillManifest } from '@openAwork/skill-types';
 import { BUILTIN_SKILLS } from '@openAwork/skills';
 import type { JwtPayload } from '../infra/auth.js';
+import { parseBody } from '../infra/parse-request.js';
 import { requireAuth } from '../infra/auth.js';
 import { sqliteAll, sqliteGet, sqliteRun, sqliteTransaction } from '../infra/db.js';
 import { getProviderConfigForSelection } from '../provider/provider-config.js';
@@ -377,12 +378,8 @@ export async function skillRecommendRoutes(app: FastifyInstance): Promise<void> 
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step } = startRequestWorkflow(request, 'skills.recommend.create');
       const user = request.user as JwtPayload;
-      const parsed = recommendBodySchema.safeParse(request.body);
-      if (!parsed.success) {
-        step.fail('invalid body');
-        return reply.status(400).send({ error: 'Invalid recommendation request body' });
-      }
-      const normalized = normalizeWorkspacePathForWrite(parsed.data.workspacePath ?? null);
+      const parsed = parseBody(recommendBodySchema, request.body);
+      const normalized = normalizeWorkspacePathForWrite(parsed.workspacePath ?? null);
       const workspacePath = normalized ?? DEFAULT_WORKSPACE_PATH_KEY;
       const candidates = loadCandidates(user.sub);
       const candidateIds = new Set(candidates.map((entry) => entry.skillId));
@@ -393,7 +390,7 @@ export async function skillRecommendRoutes(app: FastifyInstance): Promise<void> 
       );
 
       // 24h cache short-circuit
-      if (!parsed.data.force) {
+      if (!parsed.force) {
         const cached = findRecentCachedRecommendation(user.sub, workspacePath, signalDigest);
         if (cached) {
           step.succeed(undefined, { cached: true, candidateCount: candidates.length });
@@ -466,11 +463,7 @@ export async function skillRecommendRoutes(app: FastifyInstance): Promise<void> 
         step.fail('not found');
         return reply.status(404).send({ error: 'Recommendation not found' });
       }
-      const parsed = applyOverridesSchema.safeParse(request.body ?? {});
-      if (!parsed.success) {
-        step.fail('invalid body');
-        return reply.status(400).send({ error: 'Invalid apply body' });
-      }
+      const parsed = parseBody(applyOverridesSchema, request.body);
 
       let payload: RecommendationResultBody = { recommendations: [], rejected: [] };
       try {
@@ -491,7 +484,7 @@ export async function skillRecommendRoutes(app: FastifyInstance): Promise<void> 
           [user.sub],
         ).map((r) => r.skill_id),
       );
-      const overrideEntries = Object.entries(parsed.data.overrides);
+      const overrideEntries = Object.entries(parsed.overrides);
       const illegalBuiltinOverride = overrideEntries.find(([skillId]) =>
         BUILTIN_SKILL_IDS.has(skillId),
       );

@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
+import { parseBody, parseQuery } from '../infra/parse-request.js';
 import {
   listNotificationPreferences,
   listNotifications,
@@ -47,20 +48,15 @@ export async function notificationsRoutes(app: FastifyInstance): Promise<void> {
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const user = request.user as JwtPayload;
-      const query = notificationsQuerySchema.safeParse(
+      const query = parseQuery(
+        notificationsQuerySchema,
         (request as FastifyRequest & { query: unknown }).query,
       );
       const { step } = startRequestWorkflow(request, 'notifications.list');
-      if (!query.success) {
-        step.fail('invalid query params');
-        return reply
-          .status(400)
-          .send({ error: 'Invalid query params', issues: query.error.issues });
-      }
 
       const notifications = listNotifications({
-        limit: query.data.limit,
-        status: query.data.status,
+        limit: query.limit,
+        status: query.status,
         userId: user.sub,
       });
       step.succeed(undefined, { count: notifications.length });
@@ -100,26 +96,17 @@ export async function notificationsRoutes(app: FastifyInstance): Promise<void> {
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const user = request.user as JwtPayload;
-      const query = notificationPreferencesQuerySchema.safeParse(
+      const query = parseQuery(
+        notificationPreferencesQuerySchema,
         (request as FastifyRequest & { query: unknown }).query,
       );
       const { step } = startRequestWorkflow(request, 'notifications.preferences.list');
-      if (!query.success) {
-        step.fail('invalid notification preference query');
-        return reply.status(400).send({
-          error: 'Invalid notification preference query',
-          issues: query.error.issues,
-        });
-      }
 
       const preferences = listNotificationPreferences({
-        channel: query.data.channel,
+        channel: query.channel,
         userId: user.sub,
       });
-      step.succeed(undefined, {
-        channel: query.data.channel,
-        count: preferences.length,
-      });
+      step.succeed(undefined, { channel: query.channel, count: preferences.length });
       return reply.send({ preferences });
     },
   );
@@ -129,25 +116,15 @@ export async function notificationsRoutes(app: FastifyInstance): Promise<void> {
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const user = request.user as JwtPayload;
-      const parsed = notificationPreferencesBodySchema.safeParse(request.body);
+      const parsed = parseBody(notificationPreferencesBodySchema, request.body);
       const { step } = startRequestWorkflow(request, 'notifications.preferences.update');
-      if (!parsed.success) {
-        step.fail('invalid notification preference body');
-        return reply.status(400).send({
-          error: 'Invalid notification preference payload',
-          issues: parsed.error.issues,
-        });
-      }
 
       const preferences = upsertNotificationPreferences({
-        channel: parsed.data.channel,
-        preferences: parsed.data.preferences,
+        channel: parsed.channel,
+        preferences: parsed.preferences,
         userId: user.sub,
       });
-      step.succeed(undefined, {
-        channel: parsed.data.channel,
-        count: preferences.length,
-      });
+      step.succeed(undefined, { channel: parsed.channel, count: preferences.length });
       return reply.send({ preferences });
     },
   );

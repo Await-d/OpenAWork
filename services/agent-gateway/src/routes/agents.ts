@@ -3,7 +3,6 @@ import { z } from 'zod';
 import type { CreateManagedAgentInput, UpdateManagedAgentInput } from '@openAwork/shared';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
-import { ApiError } from '../infra/error-response.js';
 import { parseBody, parseParams } from '../infra/parse-request.js';
 import {
   createManagedAgentForUser,

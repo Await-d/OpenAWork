@@ -108,13 +108,13 @@ export function parseContextLimitError(error: unknown): ParsedContextLimitError 
 
   if (typeof responseBody === 'string') textSources.push(responseBody);
   if (typeof errorMessage === 'string') textSources.push(errorMessage);
-  if (typeof errorData?.['message'] === 'string') textSources.push(errorData['message'] as string);
-  if (typeof errObj['body'] === 'string') textSources.push(errObj['body'] as string);
-  if (typeof errObj['details'] === 'string') textSources.push(errObj['details'] as string);
-  if (typeof errObj['reason'] === 'string') textSources.push(errObj['reason'] as string);
+  if (typeof errorData?.['message'] === 'string') textSources.push(errorData['message']);
+  if (typeof errObj['body'] === 'string') textSources.push(errObj['body']);
+  if (typeof errObj['details'] === 'string') textSources.push(errObj['details']);
+  if (typeof errObj['reason'] === 'string') textSources.push(errObj['reason']);
   if (typeof nestedError?.['message'] === 'string')
-    textSources.push(nestedError['message'] as string);
-  if (typeof dataObj?.['message'] === 'string') textSources.push(dataObj['message'] as string);
+    textSources.push(nestedError['message']);
+  if (typeof dataObj?.['message'] === 'string') textSources.push(dataObj['message']);
 
   if (textSources.length === 0) {
     try {

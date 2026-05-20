@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { FIXED_TEAM_CORE_ROLE_BINDINGS, FIXED_TEAM_CORE_ROLE_ORDER } from '@openAwork/shared';
 import { listManagedAgentsForUser } from '../agent/agent-catalog.js';
 import type { JwtPayload } from '../infra/auth.js';
+import { parseBody, parseQuery } from '../infra/parse-request.js';
 import { requireAuth } from '../infra/auth.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
@@ -536,12 +537,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       const { step, child } = startRequestWorkflow(request, 'team.workspace.create');
       const user = request.user as JwtPayload;
       const parseStep = child('parse-body');
-      const body = createWorkspaceSchema.safeParse(request.body);
-      if (!body.success) {
-        parseStep.fail('invalid input');
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(createWorkspaceSchema, request.body);
       parseStep.succeed();
 
       const teamWorkspaceId = randomUUID();
@@ -557,10 +553,10 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         [
           teamWorkspaceId,
           user.sub,
-          body.data.name,
-          body.data.description ?? null,
-          body.data.visibility,
-          body.data.defaultWorkingRoot ?? null,
+          body.name,
+          body.description ?? null,
+          body.visibility,
+          body.defaultWorkingRoot ?? null,
         ],
       );
 
@@ -578,10 +574,10 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           ? mapWorkspaceRow(created)
           : {
               id: teamWorkspaceId,
-              name: body.data.name,
-              description: body.data.description ?? null,
-              visibility: body.data.visibility,
-              defaultWorkingRoot: body.data.defaultWorkingRoot ?? null,
+              name: body.name,
+              description: body.description ?? null,
+              visibility: body.visibility,
+              defaultWorkingRoot: body.defaultWorkingRoot ?? null,
               createdByUserId: user.sub,
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
@@ -601,12 +597,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
 
       const parseStep = child('parse-body');
-      const body = updateWorkspaceSchema.safeParse(request.body);
-      if (!body.success) {
-        parseStep.fail('invalid input');
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(updateWorkspaceSchema, request.body);
       parseStep.succeed();
 
       const existing = sqliteGet<{ id: string }>(
@@ -620,21 +611,21 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
 
       const updates: string[] = [];
       const params: Array<string | null> = [];
-      if (body.data.name !== undefined) {
+      if (body.name !== undefined) {
         updates.push('name = ?');
-        params.push(body.data.name);
+        params.push(body.name);
       }
-      if (body.data.description !== undefined) {
+      if (body.description !== undefined) {
         updates.push('description = ?');
-        params.push(body.data.description ?? null);
+        params.push(body.description ?? null);
       }
-      if (body.data.visibility !== undefined) {
+      if (body.visibility !== undefined) {
         updates.push('visibility = ?');
-        params.push(body.data.visibility);
+        params.push(body.visibility);
       }
-      if (body.data.defaultWorkingRoot !== undefined) {
+      if (body.defaultWorkingRoot !== undefined) {
         updates.push('default_working_root = ?');
-        params.push(body.data.defaultWorkingRoot ?? null);
+        params.push(body.defaultWorkingRoot ?? null);
       }
       updates.push("updated_at = datetime('now')");
 
@@ -699,12 +690,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
 
       const parseStep = child('parse-body');
-      const body = createTeamSessionSchema.safeParse(request.body);
-      if (!body.success) {
-        parseStep.fail('invalid input');
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(createTeamSessionSchema, request.body);
       parseStep.succeed();
 
       const workspaceStep = child('resolve-workspace');
@@ -721,14 +707,14 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         name: string;
         teamTemplate: z.infer<typeof workflowTeamTemplateSchema>;
       } | null = null;
-      if (body.data.source?.kind === 'saved-template' && body.data.source.templateId) {
+      if (body.source?.kind === 'saved-template' && body.source.templateId) {
         const templateStep = child('resolve-template');
         const templateRow = sqliteGet<WorkflowTemplateLookupRow>(
           `SELECT id, name, metadata_json
            FROM workflow_templates
            WHERE user_id = ? AND id = ?
            LIMIT 1`,
-          [user.sub, body.data.source.templateId],
+          [user.sub, body.source.templateId],
         );
         if (!templateRow) {
           templateStep.fail('template not found');
@@ -745,21 +731,12 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           return reply.status(400).send({ error: 'Template metadata is invalid JSON' });
         }
 
-        const teamTemplate = workflowTeamTemplateSchema.safeParse(
-          (parsedMetadata as { teamTemplate?: unknown })?.teamTemplate,
-        );
-        if (!teamTemplate.success) {
-          templateStep.fail('template metadata missing');
-          step.fail('template metadata missing');
-          return reply
-            .status(400)
-            .send({ error: 'Template does not contain a valid teamTemplate metadata payload' });
-        }
+        const teamTemplate = parseBody(workflowTeamTemplateSchema, (parsedMetadata as { teamTemplate?: unknown })?.teamTemplate);
 
         templateLookup = {
           id: templateRow.id,
           name: templateRow.name,
-          teamTemplate: teamTemplate.data,
+          teamTemplate: teamTemplate,
         };
         templateStep.succeed(undefined, { templateId: templateRow.id });
       }
@@ -802,8 +779,8 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       const requiredAgentIds = new Set(requiredRoleBindings.map((binding) => binding.agentId));
       const optionalAgentIds = Array.from(
         new Set(
-          body.data.optionalAgentIds.length > 0
-            ? body.data.optionalAgentIds
+          body.optionalAgentIds.length > 0
+            ? body.optionalAgentIds
             : (templateLookup?.teamTemplate.optionalAgentIds ?? []),
         ),
       );
@@ -831,7 +808,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       const teamDefinition = {
         createdAt: new Date().toISOString(),
         defaultProvider:
-          body.data.defaultProvider ?? templateLookup?.teamTemplate.defaultProvider ?? null,
+          body.defaultProvider ?? templateLookup?.teamTemplate.defaultProvider ?? null,
         optionalMembers: optionalAgentIds.map((agentId) => {
           const agent = agentMap.get(agentId)!;
           return {
@@ -852,8 +829,8 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           };
         }),
         source: {
-          kind: body.data.source?.kind ?? 'blank',
-          ...(body.data.source?.templateId ? { templateId: body.data.source.templateId } : {}),
+          kind: body.source?.kind ?? 'blank',
+          ...(body.source?.templateId ? { templateId: body.source.templateId } : {}),
           ...(templateLookup ? { templateName: templateLookup.name } : {}),
         },
         // 模板内置的快捷起始建议（D 项 starter chips）。前端 empty state 渲染为
@@ -898,7 +875,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       // from_session_id，整条 b → c → d → e/f/g 链路无法挂载到这条会话上。
       // 这里改用 handoff/team-session-create.ts::createTeamSession 而不是
       // 直接 INSERT，统一与 Watcher 内部创建子 session 的语义。
-      const sessionTitle = body.data.title?.trim() || workspace.name;
+      const sessionTitle = body.title?.trim() || workspace.name;
       const { sessionId } = createTeamSession({
         userId: user.sub,
         roleLayer: 'reception',
@@ -936,12 +913,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
 
       const parseStep = child('parse-body');
-      const body = createThreadSchema.safeParse(request.body);
-      if (!body.success) {
-        parseStep.fail('invalid input');
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(createThreadSchema, request.body);
       parseStep.succeed();
 
       const workspaceStep = child('resolve-workspace');
@@ -960,7 +932,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       workspaceStep.succeed();
 
       const metadataPatch = validateSessionMetadataPatch({
-        ...body.data.metadata,
+        ...body.metadata,
         teamWorkspaceId,
         workingDirectory: workspace.default_working_root ?? undefined,
       });
@@ -990,7 +962,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       }
 
       // 与 /sessions 路径产出语义一致的 reception session
-      const sessionTitle = body.data.title?.trim() || workspace.name;
+      const sessionTitle = body.title?.trim() || workspace.name;
       const { sessionId } = createTeamSession({
         userId: user.sub,
         roleLayer: 'reception',
@@ -1039,15 +1011,10 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       workspaceStep.succeed();
 
       const parseStep = child('parse-body');
-      const body = importWorkspaceSessionSchema.safeParse(request.body);
-      if (!body.success) {
-        parseStep.fail('invalid import data');
-        step.fail('invalid import data');
-        return reply.status(400).send({ error: 'Invalid import data', issues: body.error.issues });
-      }
+      const body = parseBody(importWorkspaceSessionSchema, request.body);
       parseStep.succeed();
 
-      const normalizedMessages = normalizeImportedMessages(body.data.messages);
+      const normalizedMessages = normalizeImportedMessages(body.messages);
       const validation = validateImportedMessagesPayload(normalizedMessages);
       if (!validation.ok) {
         step.fail('import too large');
@@ -1168,17 +1135,12 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
 
       const queryStep = child('parse-query');
-      const query = teamRuntimeQuerySchema.safeParse(request.query);
-      if (!query.success) {
-        queryStep.fail('invalid query');
-        step.fail('invalid query');
-        return reply.status(400).send({ error: 'Invalid query', issues: query.error.issues });
-      }
-      queryStep.succeed(undefined, query.data.teamWorkspaceId ? query.data : undefined);
+      const query = parseQuery(teamRuntimeQuerySchema, request.query);
+      queryStep.succeed(undefined, query.teamWorkspaceId ? query : undefined);
 
-      if (query.data.teamWorkspaceId) {
+      if (query.teamWorkspaceId) {
         const workspaceStep = child('workspace');
-        const workspace = getTeamWorkspaceForUser(user.sub, query.data.teamWorkspaceId);
+        const workspace = getTeamWorkspaceForUser(user.sub, query.teamWorkspaceId);
         if (!workspace) {
           workspaceStep.fail('workspace not found');
           step.fail('workspace not found');
@@ -1209,7 +1171,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         ),
         listTeamRuntimeSessionRows({
           userId: user.sub,
-          teamWorkspaceId: query.data.teamWorkspaceId,
+          teamWorkspaceId: query.teamWorkspaceId,
         }),
       ];
 
@@ -1223,7 +1185,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       const sharesStep = child('session-shares');
       const shareRows = listTeamSessionShareRows({
         userId: user.sub,
-        teamWorkspaceId: query.data.teamWorkspaceId,
+        teamWorkspaceId: query.teamWorkspaceId,
       }).filter((row) => teamSessionIds.has(row.session_id));
       sharesStep.succeed(undefined, { count: shareRows.length });
 
@@ -1233,8 +1195,8 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         email: user.email,
         limit: 24,
         offset: 0,
-        ...(query.data.teamWorkspaceId
-          ? { teamWorkspaceId: query.data.teamWorkspaceId }
+        ...(query.teamWorkspaceId
+          ? { teamWorkspaceId: query.teamWorkspaceId }
           : { onlyTeamSessions: true }),
       });
 
@@ -1384,15 +1346,10 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
 
       const parseStep = child('parse-body');
-      const body = createMemberSchema.safeParse(request.body);
-      if (!body.success) {
-        parseStep.fail('invalid input');
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(createMemberSchema, request.body);
       parseStep.succeed();
 
-      const { name, email, role, avatarUrl } = body.data;
+      const { name, email, role, avatarUrl } = body;
       const existingStep = child('check-existing');
       const existing = sqliteGet<{ id: string }>(
         `SELECT id FROM team_members WHERE user_id = ? AND email = ?`,
@@ -1458,15 +1415,10 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
 
       const parseStep = child('parse-body');
-      const body = createTaskSchema.safeParse(request.body);
-      if (!body.success) {
-        parseStep.fail('invalid input');
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(createTaskSchema, request.body);
       parseStep.succeed();
 
-      const { title, assigneeId, status, priority } = body.data;
+      const { title, assigneeId, status, priority } = body;
       const taskId = randomUUID();
       const insertStep = child('insert', undefined, { taskId, priority, status });
       sqliteRun(
@@ -1498,12 +1450,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
 
       const parseStep = child('parse-body');
-      const body = updateTaskSchema.safeParse(request.body);
-      if (!body.success) {
-        parseStep.fail('invalid input');
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(updateTaskSchema, request.body);
       parseStep.succeed();
 
       const lookupStep = child('check-existing');
@@ -1527,9 +1474,9 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           updated_at = datetime('now')
          WHERE id = ? AND user_id = ?`,
         [
-          body.data.assigneeId ?? null,
-          body.data.status ?? null,
-          body.data.result ?? null,
+          body.assigneeId ?? null,
+          body.status ?? null,
+          body.result ?? null,
           taskId,
           user.sub,
         ],
@@ -1538,8 +1485,8 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
 
       step.succeed(undefined, {
         taskId,
-        status: body.data.status ?? 'unchanged',
-        assigneeChanged: body.data.assigneeId !== undefined,
+        status: body.status ?? 'unchanged',
+        assigneeChanged: body.assigneeId !== undefined,
       });
       return reply.send({ ok: true });
     },
@@ -1586,28 +1533,23 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
 
       const parseStep = child('parse-body');
-      const body = createMessageSchema.safeParse(request.body);
-      if (!body.success) {
-        parseStep.fail('invalid input');
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(createMessageSchema, request.body);
       parseStep.succeed();
 
       const id = randomUUID();
-      const insertStep = child('insert', undefined, { messageId: id, type: body.data.type });
+      const insertStep = child('insert', undefined, { messageId: id, type: body.type });
       sqliteRun(
         `INSERT INTO team_messages (id, user_id, sender_id, content, type) VALUES (?, ?, ?, ?, ?)`,
-        [id, user.sub, body.data.senderId ?? null, body.data.content, body.data.type],
+        [id, user.sub, body.senderId ?? null, body.content, body.type],
       );
       insertStep.succeed();
 
-      step.succeed(undefined, { messageId: id, type: body.data.type });
+      step.succeed(undefined, { messageId: id, type: body.type });
       return reply.status(201).send({
         id,
-        memberId: body.data.senderId ?? 'system',
-        content: body.data.content,
-        type: body.data.type,
+        memberId: body.senderId ?? 'system',
+        content: body.content,
+        type: body.type,
         timestamp: Date.now(),
       });
     },
@@ -1655,18 +1597,13 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
 
       const parseStep = child('parse-body');
-      const body = createSessionShareSchema.safeParse(request.body);
-      if (!body.success) {
-        parseStep.fail('invalid input');
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(createSessionShareSchema, request.body);
       parseStep.succeed();
 
       const sessionStep = child('check-session');
       const session = sqliteGet<{ id: string; metadata_json: string; title: string | null }>(
         `SELECT id, title, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1`,
-        [body.data.sessionId, user.sub],
+        [body.sessionId, user.sub],
       );
       if (!session) {
         sessionStep.fail('session not found');
@@ -1678,7 +1615,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       const memberStep = child('check-member');
       const member = sqliteGet<{ email: string; id: string; name: string }>(
         `SELECT id, name, email FROM team_members WHERE id = ? AND user_id = ? LIMIT 1`,
-        [body.data.memberId, user.sub],
+        [body.memberId, user.sub],
       );
       if (!member) {
         memberStep.fail('member not found');
@@ -1690,7 +1627,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       const existingStep = child('check-existing');
       const existing = sqliteGet<{ id: string }>(
         `SELECT id FROM session_shares WHERE user_id = ? AND session_id = ? AND member_id = ? LIMIT 1`,
-        [user.sub, body.data.sessionId, body.data.memberId],
+        [user.sub, body.sessionId, body.memberId],
       );
       if (existing) {
         existingStep.fail('share already exists');
@@ -1700,28 +1637,28 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       existingStep.succeed();
 
       const shareId = randomUUID();
-      const insertStep = child('insert', undefined, { shareId, permission: body.data.permission });
+      const insertStep = child('insert', undefined, { shareId, permission: body.permission });
       sqliteRun(
         `INSERT INTO session_shares (id, user_id, session_id, member_id, permission, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-        [shareId, user.sub, body.data.sessionId, body.data.memberId, body.data.permission],
+        [shareId, user.sub, body.sessionId, body.memberId, body.permission],
       );
       insertStep.succeed();
-      step.succeed(undefined, { shareId, permission: body.data.permission });
+      step.succeed(undefined, { shareId, permission: body.permission });
 
       const sessionWorkspacePath = getWorkspacePathFromMetadataJson({
         metadataJson: session.metadata_json,
-        sessionId: body.data.sessionId,
+        sessionId: body.sessionId,
         userId: user.sub,
       });
       logTeamAudit({
         action: 'share_created' satisfies TeamAuditAction,
         actorEmail: user.email,
         actorUserId: user.sub,
-        detail: `会话：${session.title ?? body.data.sessionId}；工作区：${sessionWorkspacePath ?? '未绑定工作区'}；成员：${member.name}；权限：${body.data.permission}`,
+        detail: `会话：${session.title ?? body.sessionId}；工作区：${sessionWorkspacePath ?? '未绑定工作区'}；成员：${member.name}；权限：${body.permission}`,
         entityId: shareId,
         entityType: 'session_share',
-        summary: `已将“${session.title ?? body.data.sessionId}”共享给 ${member.name}（${body.data.permission}）`,
+        summary: `已将“${session.title ?? body.sessionId}”共享给 ${member.name}（${body.permission}）`,
         userId: user.sub,
       });
 
@@ -1730,12 +1667,12 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(201).send({
         ...(createdShare ? mapSessionShareRow(user.sub, createdShare) : {}),
         id: createdShare?.id ?? shareId,
-        sessionId: createdShare?.session_id ?? body.data.sessionId,
-        memberId: createdShare?.member_id ?? body.data.memberId,
+        sessionId: createdShare?.session_id ?? body.sessionId,
+        memberId: createdShare?.member_id ?? body.memberId,
         memberName: createdShare?.member_name ?? member.name,
         memberEmail: createdShare?.member_email ?? member.email,
-        permission: createdShare?.permission ?? body.data.permission,
-        sessionLabel: createdShare?.label ?? session.title ?? body.data.sessionId,
+        permission: createdShare?.permission ?? body.permission,
+        sessionLabel: createdShare?.label ?? session.title ?? body.sessionId,
         workspacePath: createdShare
           ? getWorkspacePathFromMetadataJson({
               metadataJson: createdShare.session_metadata_json,
@@ -1765,12 +1702,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
 
       const parseStep = child('parse-body');
-      const body = updateSessionShareSchema.safeParse(request.body);
-      if (!body.success) {
-        parseStep.fail('invalid input');
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(updateSessionShareSchema, request.body);
       parseStep.succeed();
 
       const lookupStep = child('check-existing');
@@ -1782,15 +1714,15 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       }
       lookupStep.succeed(undefined, { currentPermission: existing.permission });
 
-      const changed = existing.permission !== body.data.permission;
+      const changed = existing.permission !== body.permission;
 
       if (changed) {
-        const updateStep = child('update', undefined, { nextPermission: body.data.permission });
+        const updateStep = child('update', undefined, { nextPermission: body.permission });
         sqliteRun(
           `UPDATE session_shares
            SET permission = ?, updated_at = datetime('now')
            WHERE id = ? AND user_id = ?`,
-          [body.data.permission, shareId, user.sub],
+          [body.permission, shareId, user.sub],
         );
         updateStep.succeed();
 
@@ -1798,10 +1730,10 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           action: 'share_permission_updated' satisfies TeamAuditAction,
           actorEmail: user.email,
           actorUserId: user.sub,
-          detail: `会话：${existing.label ?? existing.session_id}；工作区：${getWorkspacePathFromMetadataJson({ metadataJson: existing.session_metadata_json, sessionId: existing.session_id, userId: user.sub }) ?? '未绑定工作区'}；成员：${existing.member_name}；旧权限：${existing.permission}；新权限：${body.data.permission}`,
+          detail: `会话：${existing.label ?? existing.session_id}；工作区：${getWorkspacePathFromMetadataJson({ metadataJson: existing.session_metadata_json, sessionId: existing.session_id, userId: user.sub }) ?? '未绑定工作区'}；成员：${existing.member_name}；旧权限：${existing.permission}；新权限：${body.permission}`,
           entityId: shareId,
           entityType: 'session_share',
-          summary: `已将 ${existing.member_name} 对“${existing.label ?? existing.session_id}”的权限从 ${existing.permission} 调整为 ${body.data.permission}`,
+          summary: `已将 ${existing.member_name} 对“${existing.label ?? existing.session_id}”的权限从 ${existing.permission} 调整为 ${body.permission}`,
           userId: user.sub,
         });
       }
@@ -1812,10 +1744,10 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
 
       step.succeed(undefined, {
         changed,
-        permission: body.data.permission,
+        permission: body.permission,
       });
       return reply.send(
-        mapSessionShareRow(user.sub, { ...responseShare, permission: body.data.permission }),
+        mapSessionShareRow(user.sub, { ...responseShare, permission: body.permission }),
       );
     },
   );
@@ -1828,15 +1760,10 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
 
       const queryStep = child('parse-query');
-      const query = auditLogsQuerySchema.safeParse(request.query ?? {});
-      if (!query.success) {
-        queryStep.fail('invalid query');
-        step.fail('invalid query');
-        return reply.status(400).send({ error: 'Invalid query', issues: query.error.issues });
-      }
-      queryStep.succeed(undefined, { limit: query.data.limit });
+      const query = parseQuery(auditLogsQuerySchema, request.query);
+      queryStep.succeed(undefined, { limit: query.limit });
 
-      const rows = listTeamAuditLogs({ userId: user.sub, limit: query.data.limit });
+      const rows = listTeamAuditLogs({ userId: user.sub, limit: query.limit });
       step.succeed(undefined, { count: rows.length });
 
       return reply.send(rows);
@@ -1895,12 +1822,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
 
       const parseStep = child('parse-body');
-      const body = inboundSubmitSchema.safeParse(request.body);
-      if (!body.success) {
-        parseStep.fail('invalid input');
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(inboundSubmitSchema, request.body);
       parseStep.succeed();
 
       // 校验 session 归属
@@ -1920,8 +1842,8 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       try {
         const { submitInboundMessage } = await import('../handoff/store/inbound-store.js');
         const expiresAtIso =
-          typeof body.data.expiresAt === 'number'
-            ? new Date(body.data.expiresAt)
+          typeof body.expiresAt === 'number'
+            ? new Date(body.expiresAt)
                 .toISOString()
                 .replace('T', ' ')
                 .replace('Z', '')
@@ -1935,9 +1857,9 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           //   - 目标是其他层会话 → 'reception'（b 代为转发用户的回答给 c/d/e/f/g）
           // 这与 layer-capabilities 矩阵的 canReceiveInboundFrom 对齐。
           fromRoleLayer: session.role_layer === 'reception' ? 'user' : 'reception',
-          messageType: body.data.messageType,
-          payload: body.data.payload ?? {},
-          clientIdempotencyKey: body.data.clientIdempotencyKey ?? null,
+          messageType: body.messageType,
+          payload: body.payload ?? {},
+          clientIdempotencyKey: body.clientIdempotencyKey ?? null,
           ...(expiresAtIso ? { expiresAt: expiresAtIso } : {}),
         });
         submitStep.succeed(undefined, {
@@ -1949,16 +1871,16 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         // cancel_signal / pause_signal / escalation_request 是 escape hatch 调用，
         // 必须写 audit log（L1.4.3 要求）。
         const isEscapeHatch =
-          body.data.messageType === 'cancel_signal' ||
-          body.data.messageType === 'pause_signal' ||
-          body.data.messageType === 'resume_signal' ||
-          body.data.messageType === 'escalation_request';
+          body.messageType === 'cancel_signal' ||
+          body.messageType === 'pause_signal' ||
+          body.messageType === 'resume_signal' ||
+          body.messageType === 'escalation_request';
         if (isEscapeHatch && !result.reused) {
           const hatchType =
-            body.data.messageType === 'escalation_request'
+            body.messageType === 'escalation_request'
               ? '#1 escalation'
-              : body.data.messageType === 'cancel_signal' ||
-                  body.data.messageType === 'pause_signal'
+              : body.messageType === 'cancel_signal' ||
+                  body.messageType === 'pause_signal'
                 ? '#3 cancel/pause'
                 : '#3 resume';
           try {
@@ -1968,13 +1890,13 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
               actorUserId: user.sub,
               detail: JSON.stringify({
                 hatchType,
-                messageType: body.data.messageType,
+                messageType: body.messageType,
                 targetSessionId: sessionId,
                 decisionSource: 'user',
               }),
               entityId: result.record.id,
               entityType: 'session_inbound_message',
-              summary: `Escape hatch ${hatchType}: ${body.data.messageType} → session ${sessionId.slice(0, 8)}`,
+              summary: `Escape hatch ${hatchType}: ${body.messageType} → session ${sessionId.slice(0, 8)}`,
               userId: user.sub,
             });
           } catch {
@@ -1987,9 +1909,9 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         // 这样 reload 后前端能立刻看到自己发的话。
         // 注意：只对 user_input 且非 reused 写入（避免 cancel/pause 等信号
         // 或幂等重试产生重复消息）。
-        if (body.data.messageType === 'user_input' && !result.reused) {
+        if (body.messageType === 'user_input' && !result.reused) {
           const userInputText =
-            typeof body.data.payload?.['text'] === 'string' ? body.data.payload['text'] : '';
+            typeof body.payload?.['text'] === 'string' ? body.payload['text'] : '';
           if (userInputText.trim().length > 0) {
             try {
               const { appendSessionMessageV2 } = await import('../message/message-v2-adapter.js');
@@ -1998,7 +1920,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
                 userId: user.sub,
                 role: 'user',
                 content: [{ type: 'text', text: userInputText }],
-                clientRequestId: body.data.clientIdempotencyKey ?? null,
+                clientRequestId: body.clientIdempotencyKey ?? null,
               });
             } catch (err) {
               console.warn(
@@ -2012,10 +1934,10 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         const shouldOrchestrate =
           !result.reused &&
           session.role_layer === 'reception' &&
-          body.data.messageType === 'user_input';
+          body.messageType === 'user_input';
         if (shouldOrchestrate) {
           const userInputText =
-            typeof body.data.payload?.['text'] === 'string' ? body.data.payload['text'] : '';
+            typeof body.payload?.['text'] === 'string' ? body.payload['text'] : '';
           // 从 session metadata 读 teamWorkspaceId（reception session 创建时已写入）
           const sessionMeta = sqliteGet<{ metadata_json: string | null }>(
             `SELECT metadata_json FROM sessions WHERE id = ? LIMIT 1`,
@@ -2044,7 +1966,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
                 receptionSessionId: sessionId,
                 userIntent: userInputText,
                 teamWorkspaceId: teamWorkspaceIdFromMeta,
-                clientIdempotencyKey: body.data.clientIdempotencyKey ?? null,
+                clientIdempotencyKey: body.clientIdempotencyKey ?? null,
                 // user 消息已在上面同步写过，避免重复写
                 persistUserMessage: false,
               });

@@ -36,8 +36,8 @@ export type {
   Diagnostic,
   DiagnosticSeverity,
 } from './agent/DiagnosticCard.js';
-export { PermissionPrompt } from './permissions/PermissionPrompt.js';
-export type { PermissionPromptProps, PermissionDecision } from './permissions/PermissionPrompt.js';
+export { PermissionPrompt, categorizeAlwaysPatterns } from './permissions/PermissionPrompt.js';
+export type { PermissionPromptProps, PermissionDecision, AlwaysScopeLevel } from './permissions/PermissionPrompt.js';
 export { FileStatusPanel } from './file/FileStatusPanel.js';
 export type { FileStatusPanelProps, FileChange, FileChangeStatus } from './file/FileStatusPanel.js';
 export { FileChangeReviewPanel } from './file/FileChangeReviewPanel.js';

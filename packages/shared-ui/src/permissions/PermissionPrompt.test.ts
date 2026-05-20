@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { getPermissionDecisionOptions } from './PermissionPrompt.js';
+import { categorizeAlwaysPatterns, getPermissionDecisionOptions } from './PermissionPrompt.js';
 
 describe('getPermissionDecisionOptions', () => {
   it('orders buttons reject → once → session → permanent', () => {
@@ -47,5 +47,68 @@ describe('getPermissionDecisionOptions', () => {
     for (const option of options) {
       expect(option.hint.length).toBeGreaterThan(0);
     }
+  });
+});
+
+
+describe('categorizeAlwaysPatterns', () => {
+  it('returns only Full command when always is undefined', () => {
+    const levels = categorizeAlwaysPatterns('ls -la /tmp', 'ls -la /tmp', undefined);
+    expect(levels).toEqual([{ label: 'Full command', pattern: 'ls -la /tmp', category: 'full' }]);
+  });
+
+  it('returns only Full command when always is empty', () => {
+    const levels = categorizeAlwaysPatterns('ls -la /tmp', 'ls -la /tmp', []);
+    expect(levels).toEqual([{ label: 'Full command', pattern: 'ls -la /tmp', category: 'full' }]);
+  });
+
+  it('returns Full command + Base when always has one unique pattern', () => {
+    const levels = categorizeAlwaysPatterns('ls -la /tmp', 'ls -la /tmp', ['ls *']);
+    expect(levels).toEqual([
+      { label: 'Full command', pattern: 'ls -la /tmp', category: 'full' },
+      { label: 'Base', pattern: 'ls *', category: 'base' },
+    ]);
+  });
+
+  it('returns Full command + Partial + Base when always has two unique patterns', () => {
+    const levels = categorizeAlwaysPatterns(
+      'OBSIDIAN_API_KEY="abc" OBSIDIAN_HOST="127.0.0.1" timeout 5 uvx mcp-obsidian --help',
+      'OBSIDIAN_API_KEY="abc" OBSIDIAN_HOST="127.0.0.1" timeout 5 uvx mcp-obsidian --help',
+      ['OBSIDIAN_API_KEY="abc" OBSIDIAN_HOST="127.0.0.1" *', 'OBSIDIAN_API_KEY="abc" *'],
+    );
+    expect(levels).toEqual([
+      {
+        label: 'Full command',
+        pattern: 'OBSIDIAN_API_KEY="abc" OBSIDIAN_HOST="127.0.0.1" timeout 5 uvx mcp-obsidian --help',
+        category: 'full',
+      },
+      {
+        label: 'Partial',
+        pattern: 'OBSIDIAN_API_KEY="abc" OBSIDIAN_HOST="127.0.0.1" *',
+        category: 'partial',
+      },
+      { label: 'Base', pattern: 'OBSIDIAN_API_KEY="abc" *', category: 'base' },
+    ]);
+  });
+
+  it('deduplicates patterns that match the full command or scope', () => {
+    const levels = categorizeAlwaysPatterns('git status', 'git status', [
+      'git status',
+      'git *',
+    ]);
+    expect(levels).toEqual([
+      { label: 'Full command', pattern: 'git status', category: 'full' },
+      { label: 'Base', pattern: 'git *', category: 'base' },
+    ]);
+  });
+
+  it('uses previewAction over scope for the full command', () => {
+    const levels = categorizeAlwaysPatterns('执行命令: ls -la', 'ls -la', ['ls *']);
+    expect(levels[0]!.pattern).toBe('执行命令: ls -la');
+  });
+
+  it('falls back to scope when previewAction is undefined', () => {
+    const levels = categorizeAlwaysPatterns(undefined, 'ls -la', ['ls *']);
+    expect(levels[0]!.pattern).toBe('ls -la');
   });
 });

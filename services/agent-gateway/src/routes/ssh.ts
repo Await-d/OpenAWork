@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireAuth } from '../infra/auth.js';
+import { parseBody, parseQuery } from '../infra/parse-request.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import * as agentCore from '@openAwork/agent-core';
 
@@ -85,16 +86,12 @@ export async function sshRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/ssh/connections', { onRequest: [requireAuth] }, async (request, reply) => {
     const { step } = startRequestWorkflow(request, 'ssh.connections.add');
-    const parsed = connectionSchema.safeParse(request.body);
-    if (!parsed.success) {
-      step.fail('invalid body');
-      return reply.status(400).send({ error: 'Invalid body' });
-    }
+    const parsed = parseBody(connectionSchema, request.body);
     const connection: SSHConnection = {
       id: crypto.randomUUID(),
       status: 'disconnected',
       createdAt: Date.now(),
-      ...parsed.data,
+      ...parsed,
     };
     sshManager.addConnection(connection);
     step.succeed(undefined, { connectionId: connection.id });
@@ -121,49 +118,33 @@ export async function sshRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/ssh/connections/:id/bind', { onRequest: [requireAuth] }, async (request, reply) => {
     const { step } = startRequestWorkflow(request, 'ssh.connections.bind');
-    const parsed = bindSchema.safeParse(request.body);
-    if (!parsed.success) {
-      step.fail('invalid body');
-      return reply.status(400).send({ error: 'Invalid body' });
-    }
-    sshSessionBindings.bind(parsed.data.sessionId, (request.params as { id: string }).id);
-    step.succeed(undefined, { sessionId: parsed.data.sessionId });
+    const parsed = parseBody(bindSchema, request.body);
+    sshSessionBindings.bind(parsed.sessionId, (request.params as { id: string }).id);
+    step.succeed(undefined, { sessionId: parsed.sessionId });
     return reply.send({ ok: true });
   });
 
   app.get('/ssh/files', { onRequest: [requireAuth] }, async (request, reply) => {
     const { step } = startRequestWorkflow(request, 'ssh.files.list');
-    const parsed = fileSchema.safeParse(request.query);
-    if (!parsed.success) {
-      step.fail('invalid query');
-      return reply.status(400).send({ entries: [] });
-    }
-    const entries = await sshManager.listFiles(parsed.data.connectionId, parsed.data.path);
+    const parsed = parseQuery(fileSchema, request.query);
+    const entries = await sshManager.listFiles(parsed.connectionId, parsed.path);
     step.succeed(undefined, { count: entries.length });
     return reply.send({ entries });
   });
 
   app.get('/ssh/file', { onRequest: [requireAuth] }, async (request, reply) => {
     const { step } = startRequestWorkflow(request, 'ssh.file.read');
-    const parsed = fileSchema.safeParse(request.query);
-    if (!parsed.success) {
-      step.fail('invalid query');
-      return reply.status(400).send({ preview: null });
-    }
-    const preview = await sshManager.readFile(parsed.data.connectionId, parsed.data.path);
-    step.succeed(undefined, { path: parsed.data.path });
+    const parsed = parseQuery(fileSchema, request.query);
+    const preview = await sshManager.readFile(parsed.connectionId, parsed.path);
+    step.succeed(undefined, { path: parsed.path });
     return reply.send({ preview });
   });
 
   app.post('/ssh/upload', { onRequest: [requireAuth] }, async (request, reply) => {
     const { step } = startRequestWorkflow(request, 'ssh.file.upload');
-    const parsed = uploadSchema.safeParse(request.body);
-    if (!parsed.success) {
-      step.fail('invalid body');
-      return reply.status(400).send({ ok: false });
-    }
-    const bytes = Uint8Array.from(Buffer.from(parsed.data.contentBase64, 'base64'));
-    await sshManager.writeFile(parsed.data.connectionId, parsed.data.path, bytes);
+    const parsed = parseBody(uploadSchema, request.body);
+    const bytes = Uint8Array.from(Buffer.from(parsed.contentBase64, 'base64'));
+    await sshManager.writeFile(parsed.connectionId, parsed.path, bytes);
     step.succeed(undefined, { bytes: bytes.length });
     return reply.send({ ok: true });
   });

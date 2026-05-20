@@ -551,7 +551,7 @@ export function isContextOverflow(
   // it acts as the buffer directly (matching opencode's cfg.compaction.reserved path).
   // Otherwise we derive from model output limit.
   const OUTPUT_TOKEN_MAX = 32_000;
-  const COMPACTION_BUFFER = 20_000;
+  const _COMPACTION_BUFFER = 20_000;
   const effectiveMaxOutput = Math.min(modelMaxOutputTokens ?? OUTPUT_TOKEN_MAX, OUTPUT_TOKEN_MAX);
 
   let usable: number;

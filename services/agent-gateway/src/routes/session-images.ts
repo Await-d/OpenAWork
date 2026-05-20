@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import type { FastifyInstance } from 'fastify';
 import { ArtifactManagerImpl } from '@openAwork/artifacts';
 import type { JwtPayload } from '../infra/auth.js';
+import { parseBody } from '../infra/parse-request.js';
 import { requireAuth } from '../infra/auth.js';
 import { createArtifact, getArtifactById } from '../session/artifact-content-store.js';
 import { sqliteGet } from '../infra/db.js';
@@ -183,12 +184,7 @@ export async function sessionImagesRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(404).send({ error: 'Session not found' });
       }
 
-      const parsed = imageGenerationRequestSchema.safeParse(request.body);
-      if (!parsed.success) {
-        return reply
-          .status(400)
-          .send({ error: 'Invalid image generation payload', issues: parsed.error.issues });
-      }
+      const parsed = parseBody(imageGenerationRequestSchema, request.body);
 
       const providersRow = sqliteGet<UserSettingRow>(
         `SELECT value FROM user_settings WHERE user_id = ? AND key = 'providers'`,
@@ -218,7 +214,7 @@ export async function sessionImagesRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const defaults = parseStoredImageGenerationDefaults(parseStoredJson(defaultsRow?.value));
-      const resolved = resolveImageGenerationDefaults(parsed.data, defaults);
+      const resolved = resolveImageGenerationDefaults(parsed, defaults);
       const route = resolveModelRouteFromProvider(
         imageProviderConfig.provider,
         imageProviderConfig.modelId,
@@ -226,14 +222,14 @@ export async function sessionImagesRoutes(app: FastifyInstance): Promise<void> {
       );
 
       try {
-        const inputArtifact = parsed.data.inputArtifacts?.[0]
+        const inputArtifact = parsed.inputArtifacts?.[0]
           ? await resolveInputArtifact({
-              artifactId: parsed.data.inputArtifacts[0].artifactId,
+              artifactId: parsed.inputArtifacts[0].artifactId,
               sessionId,
               userId: user.sub,
             })
           : null;
-        if (parsed.data.inputArtifacts?.[0] && !inputArtifact) {
+        if (parsed.inputArtifacts?.[0] && !inputArtifact) {
           return reply.status(400).send({
             error: {
               code: 'image_input_invalid',
@@ -255,7 +251,7 @@ export async function sessionImagesRoutes(app: FastifyInstance): Promise<void> {
               },
               model: route.model,
               outputFormat: resolved.outputFormat,
-              prompt: parsed.data.prompt,
+              prompt: parsed.prompt,
               providerType: route.providerType,
               quality: resolved.quality,
               requestOverrides: route.requestOverrides,
@@ -267,7 +263,7 @@ export async function sessionImagesRoutes(app: FastifyInstance): Promise<void> {
               background: resolved.background,
               model: route.model,
               outputFormat: resolved.outputFormat,
-              prompt: parsed.data.prompt,
+              prompt: parsed.prompt,
               providerType: route.providerType,
               quality: resolved.quality,
               requestOverrides: route.requestOverrides,
@@ -284,17 +280,17 @@ export async function sessionImagesRoutes(app: FastifyInstance): Promise<void> {
               : 'png';
         const artifact = createArtifact(user.sub, {
           sessionId,
-          title: buildImageArtifactTitle(parsed.data.prompt),
+          title: buildImageArtifactTitle(parsed.prompt),
           content,
           type: 'image',
-          fileName: buildImageFileName(parsed.data.prompt, fileExtension),
+          fileName: buildImageFileName(parsed.prompt, fileExtension),
           mimeType: generated.mimeType,
           metadata: {
             sourceKind: inputArtifact ? 'gpt_image_2_edit' : 'gpt_image_2_generation',
             ...(inputArtifact ? { sourceArtifactId: inputArtifact.artifact.id } : {}),
             providerId: imageProviderConfig.provider.id,
             modelId: imageProviderConfig.modelId,
-            prompt: parsed.data.prompt,
+            prompt: parsed.prompt,
             revisedPrompt: generated.revisedPrompt,
             size: resolved.size,
             quality: resolved.quality,
@@ -321,7 +317,7 @@ export async function sessionImagesRoutes(app: FastifyInstance): Promise<void> {
             edited: Boolean(inputArtifact),
             modelId: imageProviderConfig.modelId,
             outputFormat: resolved.outputFormat,
-            prompt: parsed.data.prompt,
+            prompt: parsed.prompt,
             revisedPrompt: generated.revisedPrompt,
             size: resolved.size,
           }),

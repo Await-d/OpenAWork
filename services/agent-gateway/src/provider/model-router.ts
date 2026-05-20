@@ -260,21 +260,37 @@ export function resolveCompactionRoute(
   );
   const resolvedCompactionBaseUrl =
     normalizeBaseUrl(provider.baseUrl) || resolveProviderDefaultBaseUrl(provider.type);
-  const upstreamProtocol = resolveUpstreamProtocol({
-    model: modelId,
-    providerType: provider.type,
-    baseUrl: resolvedCompactionBaseUrl,
-    explicitOverride: provider.upstreamProtocol,
-  });
+
+  // 方案 5：插件优先解析协议
+  const upstreamProtocol = provider.upstreamProtocol
+    ?? runHookFirst('resolve.protocol', provider.type, { model: modelId, provider, baseUrl: resolvedCompactionBaseUrl })
+    ?? resolveUpstreamProtocol({
+      model: modelId,
+      providerType: provider.type,
+      baseUrl: resolvedCompactionBaseUrl,
+      explicitOverride: provider.upstreamProtocol,
+    });
+
+  // 方案 5：插件优先解析 API key
+  const apiKey = runHookFirst('resolve.apiKey', provider.type, { provider })
+    ?? resolveProviderApiKey(provider);
+
+  // 方案 5：插件注入 headers
+  const pluginHeaders: Record<string, string> = { ...(requestOverrides.headers ?? {}) };
+  runHookAll('request.headers', provider.type, { model: modelId, provider, headers: pluginHeaders });
+  const mergedOverrides = {
+    ...requestOverrides,
+    ...(Object.keys(pluginHeaders).length > 0 ? { headers: pluginHeaders } : {}),
+  };
 
   return {
     model: modelId,
     apiBaseUrl: resolvedCompactionBaseUrl,
-    apiKey: resolveProviderApiKey(provider),
-    maxTokens: requestOverrides.maxTokens ?? 4096,
+    apiKey,
+    maxTokens: mergedOverrides.maxTokens ?? 4096,
     temperature: 0,
     upstreamProtocol,
-    requestOverrides,
+    requestOverrides: mergedOverrides,
     contextWindow: modelConfig?.contextWindow,
     maxOutputTokens: modelConfig?.maxOutputTokens,
     providerType: provider.type,

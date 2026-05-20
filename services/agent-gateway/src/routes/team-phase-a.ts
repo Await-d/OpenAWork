@@ -19,8 +19,8 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { JwtPayload } from '../infra/auth.js';
-import { requireAuth } from '../infra/auth.js';
 import { parseBody, parseQuery } from '../infra/parse-request.js';
+import { requireAuth } from '../infra/auth.js';
 import { sqliteGet } from '../infra/db.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import {
@@ -125,16 +125,11 @@ export async function teamPhaseARoutes(app: FastifyInstance): Promise<void> {
       const teamWorkspaceId = (request.params as { teamWorkspaceId: string }).teamWorkspaceId;
 
       const parseStep = child('parse-body');
-      const body = constitutionUpdateSchema.safeParse(request.body);
-      if (!body.success) {
-        parseStep.fail('invalid input');
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(constitutionUpdateSchema, request.body);
       parseStep.succeed();
 
       const scanStep = child('security-scan');
-      const scan = scanMemoryWriteContent(body.data.body);
+      const scan = scanMemoryWriteContent(body.body);
       if (!scan.ok) {
         scanStep.fail(scan.reason ?? 'blocked');
         step.fail('security-scan-blocked');
@@ -146,8 +141,8 @@ export async function teamPhaseARoutes(app: FastifyInstance): Promise<void> {
       const result = updateTeamConstitution({
         userId: user.sub,
         teamWorkspaceId,
-        body: body.data.body,
-        expectedVersion: body.data.expectedVersion,
+        body: body.body,
+        expectedVersion: body.expectedVersion,
       });
       if (!result.ok) {
         updateStep.fail(result.reason);
@@ -212,21 +207,17 @@ export async function teamPhaseARoutes(app: FastifyInstance): Promise<void> {
         });
       }
 
-      const query = personaQuerySchema.safeParse(request.query ?? {});
-      if (!query.success) {
-        step.fail('invalid query');
-        return reply.status(400).send({ error: 'Invalid query', issues: query.error.issues });
-      }
+      const query = parseQuery(personaQuerySchema, request.query);
 
       const persona = getAgentPersona({
         userId: user.sub,
         roleLayer,
-        key: query.data.key,
+        key: query.key,
       });
       const effective = resolveEffectiveSoul({
         userId: user.sub,
         roleLayer,
-        key: query.data.key,
+        key: query.key,
       });
 
       step.succeed(undefined, {
@@ -236,7 +227,7 @@ export async function teamPhaseARoutes(app: FastifyInstance): Promise<void> {
 
       return reply.send({
         roleLayer,
-        key: query.data.key,
+        key: query.key,
         persona: persona ?? null,
         effective: {
           soulMd: effective.soulMd,
@@ -263,16 +254,11 @@ export async function teamPhaseARoutes(app: FastifyInstance): Promise<void> {
       }
 
       const parseStep = child('parse-body');
-      const body = personaUpdateSchema.safeParse(request.body);
-      if (!body.success) {
-        parseStep.fail('invalid input');
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(personaUpdateSchema, request.body);
       parseStep.succeed();
 
       const scanStep = child('security-scan');
-      const scan = scanMemoryWriteContent(body.data.soulMd);
+      const scan = scanMemoryWriteContent(body.soulMd);
       if (!scan.ok) {
         scanStep.fail(scan.reason ?? 'blocked');
         step.fail('security-scan-blocked');
@@ -283,10 +269,10 @@ export async function teamPhaseARoutes(app: FastifyInstance): Promise<void> {
       const persona = upsertAgentPersona({
         userId: user.sub,
         roleLayer,
-        key: body.data.key,
-        soulMd: body.data.soulMd,
+        key: body.key,
+        soulMd: body.soulMd,
       });
-      step.succeed(undefined, { roleLayer, key: body.data.key });
+      step.succeed(undefined, { roleLayer, key: body.key });
       return reply.send({ persona });
     },
   );
@@ -321,16 +307,11 @@ export async function teamPhaseARoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
 
       const parseStep = child('parse-body');
-      const body = userMemoryUpdateSchema.safeParse(request.body);
-      if (!body.success) {
-        parseStep.fail('invalid input');
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(userMemoryUpdateSchema, request.body);
       parseStep.succeed();
 
       const scanStep = child('security-scan');
-      const scan = scanMemoryWriteContent(body.data.body);
+      const scan = scanMemoryWriteContent(body.body);
       if (!scan.ok) {
         scanStep.fail(scan.reason ?? 'blocked');
         step.fail('security-scan-blocked');
@@ -338,7 +319,7 @@ export async function teamPhaseARoutes(app: FastifyInstance): Promise<void> {
       }
       scanStep.succeed();
 
-      const record = updateUserMemory({ userId: user.sub, body: body.data.body });
+      const record = updateUserMemory({ userId: user.sub, body: body.body });
       step.succeed();
       return reply.send(record);
     },
@@ -384,20 +365,16 @@ export async function teamPhaseARoutes(app: FastifyInstance): Promise<void> {
       const { step } = startRequestWorkflow(request, 'team.instruction-stack.preview');
       const user = request.user as JwtPayload;
 
-      const query = instructionStackPreviewQuerySchema.safeParse(request.query ?? {});
-      if (!query.success) {
-        step.fail('invalid query');
-        return reply.status(400).send({ error: 'Invalid query', issues: query.error.issues });
-      }
+      const query = parseQuery(instructionStackPreviewQuerySchema, request.query);
 
       let workspaceRoot: string | null = null;
-      if (query.data.sessionId) {
+      if (query.sessionId) {
         const sessionRow = sqliteGet<SessionWorkspaceRow>(
           `SELECT id, COALESCE(metadata_json, '{}') as metadata_json
            FROM sessions
            WHERE id = ? AND user_id = ?
            LIMIT 1`,
-          [query.data.sessionId, user.sub],
+          [query.sessionId, user.sub],
         );
         if (sessionRow) {
           workspaceRoot = resolveSessionWorkspacePath({
@@ -408,15 +385,15 @@ export async function teamPhaseARoutes(app: FastifyInstance): Promise<void> {
         }
       }
 
-      const roleLayer = query.data.roleLayer;
+      const roleLayer = query.roleLayer;
       const validRoleLayer = roleLayer && isSoulRoleLayer(roleLayer) ? roleLayer : null;
 
       const result = await buildTeamInstructionStack({
         userId: user.sub,
         workspaceRoot,
-        teamWorkspaceId: query.data.teamWorkspaceId ?? null,
+        teamWorkspaceId: query.teamWorkspaceId ?? null,
         roleLayer: validRoleLayer,
-        personaKey: query.data.personaKey,
+        personaKey: query.personaKey,
       });
 
       step.succeed(undefined, {
