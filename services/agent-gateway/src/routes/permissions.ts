@@ -150,8 +150,7 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
 
       const requestId = randomUUID();
       const clientRequestId = body.clientRequestId ?? `permission:${requestId}`;
-      const alwaysPatterns =
-        body.always && body.always.length > 0 ? body.always : null;
+      const alwaysPatterns = body.always && body.always.length > 0 ? body.always : null;
       sqliteRun(
         `INSERT INTO permission_requests
          (id, session_id, tool_name, scope, reason, risk_level, preview_action, request_payload_json, expires_at, always_json, status)
@@ -370,9 +369,7 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
         createPermissionRepliedEvent({
           requestId: body.requestId,
           decision: body.decision,
-          ...(body.decision === 'reject' && body.feedback
-            ? { feedback: body.feedback }
-            : {}),
+          ...(body.decision === 'reject' && body.feedback ? { feedback: body.feedback } : {}),
         }),
         requestClientRequestId ? { clientRequestId: requestClientRequestId } : undefined,
       );

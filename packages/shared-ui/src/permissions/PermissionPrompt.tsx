@@ -386,9 +386,7 @@ export function PermissionPrompt({
                     border: isSelected
                       ? '1px solid rgba(99,102,241,0.55)'
                       : '1px solid rgba(148,163,184,0.15)',
-                    background: isSelected
-                      ? 'rgba(99,102,241,0.10)'
-                      : 'rgba(15,23,42,0.30)',
+                    background: isSelected ? 'rgba(99,102,241,0.10)' : 'rgba(15,23,42,0.30)',
                     cursor: isSubmitting ? 'not-allowed' : 'pointer',
                     opacity: isSubmitting ? 0.7 : 1,
                     textAlign: 'left',

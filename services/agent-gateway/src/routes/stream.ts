@@ -25,10 +25,7 @@ import {
   resolveModelRoute,
   resolveModelRouteFromProvider,
 } from '../provider/model-router.js';
-import {
-  getFastProvider,
-  getProviderForSelection,
-} from '../provider/provider-catalog.js';
+import { getFastProvider, getProviderForSelection } from '../provider/provider-catalog.js';
 import { WorkflowLogger, createRequestContext } from '@openAwork/logger';
 import {
   appendSessionMessageV2,
@@ -37,9 +34,7 @@ import {
   listSessionMessagesByRequestScope,
   listSessionMessagesV2,
 } from '../message/message-v2-adapter.js';
-import {
-  resolveEffectiveContextWindow,
-} from '../compaction/context-window-resolver.js';
+import { resolveEffectiveContextWindow } from '../compaction/context-window-resolver.js';
 import {
   triggerProactiveCompaction,
   triggerOverflowCompaction,
@@ -174,7 +169,11 @@ import {
   buildCompanionPrompt,
   loadCompanionSettingsForUser,
 } from '../workspace/companion-settings.js';
-import { peekDoomLoop, recordDoomLoopEntry, resetDoomLoopHistory } from '../session/doom-loop-detector.js';
+import {
+  peekDoomLoop,
+  recordDoomLoopEntry,
+  resetDoomLoopHistory,
+} from '../session/doom-loop-detector.js';
 import { buildTeamInstructionStack } from '../team/team-instruction-stack.js';
 import { mapAgentToTeamRoleLayer } from '../team/team-role-layer-mapping.js';
 
@@ -1169,13 +1168,10 @@ export async function resolveStreamModelRoute(input: {
       agentSelection.systemPrompt ??
       sessionSelection.systemPrompt,
   };
-  const providerConfig = await getProviderForSelection(
-    input.userId,
-    {
-      providerId: resolvedRequestData.providerId,
-      modelId: resolvedRequestData.model,
-    },
-  );
+  const providerConfig = await getProviderForSelection(input.userId, {
+    providerId: resolvedRequestData.providerId,
+    modelId: resolvedRequestData.model,
+  });
 
   if (providerConfig) {
     return {

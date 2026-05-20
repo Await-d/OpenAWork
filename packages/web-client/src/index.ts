@@ -292,3 +292,14 @@ export type { SkillsClient } from './infra/skills.js';
 
 export { createMemoriesClient } from './infra/memories.js';
 export type { MemoriesClient } from './infra/memories.js';
+
+export { createPromptSnippetsClient } from './infra/prompt-snippets.js';
+export type {
+  CreateGroupInput,
+  CreateSnippetInput,
+  PromptSnippet,
+  PromptSnippetGroup,
+  PromptSnippetsClient,
+  UpdateGroupInput,
+  UpdateSnippetInput,
+} from './infra/prompt-snippets.js';

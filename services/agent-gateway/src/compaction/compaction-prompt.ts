@@ -158,9 +158,5 @@ export function buildCompactionUserPrompt(input?: { previousSummary?: string }):
     ].join('\n');
   }
 
-  return [
-    '基于以上对话历史创建一份详细的摘要。',
-    '',
-    COMPACTION_OUTPUT_TEMPLATE,
-  ].join('\n');
+  return ['基于以上对话历史创建一份详细的摘要。', '', COMPACTION_OUTPUT_TEMPLATE].join('\n');
 }

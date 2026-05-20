@@ -19,9 +19,7 @@ export async function registerOpenApi(app: FastifyInstance): Promise<void> {
         description: 'API for the OpenAWork agent gateway service',
         version: '0.5.8',
       },
-      servers: [
-        { url: 'http://localhost:3000', description: 'Local development' },
-      ],
+      servers: [{ url: 'http://localhost:3000', description: 'Local development' }],
       components: {
         securitySchemes: {
           bearerAuth: {

@@ -313,9 +313,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
 
       const resolved = {
         ...nextSettings,
-        activeBinding: parsedQuery.agentId
-          ? nextSettings.bindings[parsedQuery.agentId]
-          : undefined,
+        activeBinding: parsedQuery.agentId ? nextSettings.bindings[parsedQuery.agentId] : undefined,
         profile: resolveCompanionProfileForAgent({
           agentId: parsedQuery.agentId,
           bindings: nextSettings.bindings,
@@ -1334,11 +1332,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const { loadCompanionSettingsForUser } = await import('../workspace/companion-settings.js');
-      const companionSettings = loadCompanionSettingsForUser(
-        user.sub,
-        user.email,
-        body.agentId,
-      );
+      const companionSettings = loadCompanionSettingsForUser(user.sub, user.email, body.agentId);
       const profile = companionSettings.profile;
       const intro = (await import('../workspace/companion-settings.js')).buildCompanionIntroText(
         profile,

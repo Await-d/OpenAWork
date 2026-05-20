@@ -731,7 +731,10 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           return reply.status(400).send({ error: 'Template metadata is invalid JSON' });
         }
 
-        const teamTemplate = parseBody(workflowTeamTemplateSchema, (parsedMetadata as { teamTemplate?: unknown })?.teamTemplate);
+        const teamTemplate = parseBody(
+          workflowTeamTemplateSchema,
+          (parsedMetadata as { teamTemplate?: unknown })?.teamTemplate,
+        );
 
         templateLookup = {
           id: templateRow.id,
@@ -1473,13 +1476,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           result = COALESCE(?, result),
           updated_at = datetime('now')
          WHERE id = ? AND user_id = ?`,
-        [
-          body.assigneeId ?? null,
-          body.status ?? null,
-          body.result ?? null,
-          taskId,
-          user.sub,
-        ],
+        [body.assigneeId ?? null, body.status ?? null, body.result ?? null, taskId, user.sub],
       );
       updateStep.succeed();
 
@@ -1843,11 +1840,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         const { submitInboundMessage } = await import('../handoff/store/inbound-store.js');
         const expiresAtIso =
           typeof body.expiresAt === 'number'
-            ? new Date(body.expiresAt)
-                .toISOString()
-                .replace('T', ' ')
-                .replace('Z', '')
-                .slice(0, 19)
+            ? new Date(body.expiresAt).toISOString().replace('T', ' ').replace('Z', '').slice(0, 19)
             : undefined;
         const result = submitInboundMessage({
           userId: user.sub,
@@ -1879,8 +1872,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           const hatchType =
             body.messageType === 'escalation_request'
               ? '#1 escalation'
-              : body.messageType === 'cancel_signal' ||
-                  body.messageType === 'pause_signal'
+              : body.messageType === 'cancel_signal' || body.messageType === 'pause_signal'
                 ? '#3 cancel/pause'
                 : '#3 resume';
           try {
@@ -1932,9 +1924,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
 
         // ─── B1 自动编排（只对 reception session 的 user_input 触发） ─────────
         const shouldOrchestrate =
-          !result.reused &&
-          session.role_layer === 'reception' &&
-          body.messageType === 'user_input';
+          !result.reused && session.role_layer === 'reception' && body.messageType === 'user_input';
         if (shouldOrchestrate) {
           const userInputText =
             typeof body.payload?.['text'] === 'string' ? body.payload['text'] : '';

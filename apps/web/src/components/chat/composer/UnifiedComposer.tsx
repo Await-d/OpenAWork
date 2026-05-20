@@ -453,6 +453,28 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
         contextIsEstimated={props.contextIsEstimated}
         placeholder={props.placeholder}
         composerRightSlot={props.composerRightSlot}
+        gatewayUrl={gatewayUrl}
+        snippetsToken={token}
+        onInsertAtCursor={(text: string) => {
+          const textarea = textareaRef.current;
+          if (!textarea) {
+            setInput((prev) => prev + text);
+            return;
+          }
+          const start = textarea.selectionStart ?? 0;
+          const end = textarea.selectionEnd ?? 0;
+          setInput((prev) => {
+            const before = prev.slice(0, start);
+            const after = prev.slice(end);
+            return before + text + after;
+          });
+          // Restore cursor position after the inserted text
+          requestAnimationFrame(() => {
+            textarea.selectionStart = start + text.length;
+            textarea.selectionEnd = start + text.length;
+            textarea.focus();
+          });
+        }}
       />
 
       {features.modelPicker && showModelPicker && (

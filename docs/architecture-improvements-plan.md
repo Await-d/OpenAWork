@@ -8,6 +8,7 @@
 ## 方案 1：响应压缩（低成本高收益）
 
 ### 目标
+
 对 JSON 响应启用 gzip/deflate 压缩，减少 session 列表、消息历史等大 payload 的传输量。
 
 ### 实现步骤
@@ -62,6 +63,7 @@ curl -H "Accept-Encoding: gzip" http://localhost:3000/settings/providers \
 ```
 
 ### 预期收益
+
 - session 列表（含消息历史）JSON 通常 50-200KB，gzip 后约 5-20KB
 - 零代码改动风险，Fastify 插件自动处理
 
@@ -70,6 +72,7 @@ curl -H "Accept-Encoding: gzip" http://localhost:3000/settings/providers \
 ## 方案 2：统一错误格式中间件
 
 ### 目标
+
 消除各 handler 中重复的 `reply.status(400).send({error: ...})` 模式，
 统一 API 错误响应格式为：
 
@@ -106,10 +109,15 @@ export class ApiError extends Error {
   readonly statusCode: number;
   readonly response: ApiErrorResponse;
 
-  constructor(statusCode: number, name: ApiErrorName, message: string, opts?: {
-    kind?: ApiErrorResponse['data']['kind'];
-    issues?: z.ZodIssue[];
-  }) {
+  constructor(
+    statusCode: number,
+    name: ApiErrorName,
+    message: string,
+    opts?: {
+      kind?: ApiErrorResponse['data']['kind'];
+      issues?: z.ZodIssue[];
+    },
+  ) {
     super(message);
     this.statusCode = statusCode;
     this.response = {
@@ -118,7 +126,10 @@ export class ApiError extends Error {
     };
   }
 
-  static badRequest(message: string, opts?: { kind?: ApiErrorResponse['data']['kind']; issues?: z.ZodIssue[] }) {
+  static badRequest(
+    message: string,
+    opts?: { kind?: ApiErrorResponse['data']['kind']; issues?: z.ZodIssue[] },
+  ) {
     return new ApiError(400, 'BadRequest', message, opts);
   }
 
@@ -178,6 +189,7 @@ registerErrorHandler(app);
 **4. 逐步迁移 handler（示例）**
 
 迁移前：
+
 ```typescript
 const parsed = someSchema.safeParse(request.body);
 if (!parsed.success) {
@@ -186,6 +198,7 @@ if (!parsed.success) {
 ```
 
 迁移后：
+
 ```typescript
 import { ApiError } from '../infra/error-response.js';
 
@@ -205,7 +218,10 @@ import { ApiError, type ApiErrorResponse } from './error-response.js';
 export function parseBody<T extends z.ZodType>(schema: T, body: unknown): z.infer<T> {
   const result = schema.safeParse(body);
   if (!result.success) {
-    throw ApiError.badRequest('Invalid request body', { kind: 'Body', issues: result.error.issues });
+    throw ApiError.badRequest('Invalid request body', {
+      kind: 'Body',
+      issues: result.error.issues,
+    });
   }
   return result.data;
 }
@@ -213,7 +229,10 @@ export function parseBody<T extends z.ZodType>(schema: T, body: unknown): z.infe
 export function parseQuery<T extends z.ZodType>(schema: T, query: unknown): z.infer<T> {
   const result = schema.safeParse(query);
   if (!result.success) {
-    throw ApiError.badRequest('Invalid query parameters', { kind: 'Query', issues: result.error.issues });
+    throw ApiError.badRequest('Invalid query parameters', {
+      kind: 'Query',
+      issues: result.error.issues,
+    });
   }
   return result.data;
 }
@@ -221,13 +240,17 @@ export function parseQuery<T extends z.ZodType>(schema: T, query: unknown): z.in
 export function parseParams<T extends z.ZodType>(schema: T, params: unknown): z.infer<T> {
   const result = schema.safeParse(params);
   if (!result.success) {
-    throw ApiError.badRequest('Invalid path parameters', { kind: 'Params', issues: result.error.issues });
+    throw ApiError.badRequest('Invalid path parameters', {
+      kind: 'Params',
+      issues: result.error.issues,
+    });
   }
   return result.data;
 }
 ```
 
 ### 迁移策略
+
 - 新代码直接用 `throw ApiError.xxx()` + `parseBody/parseQuery`
 - 旧代码逐文件迁移，两种风格可共存（error handler 兜底，旧的 `reply.send` 仍然生效）
 - 前端统一按 `response.name` 字段判断错误类型
@@ -237,6 +260,7 @@ export function parseParams<T extends z.ZodType>(schema: T, params: unknown): z.
 ## 方案 3：Provider Catalog 缓存
 
 ### 目标
+
 避免每次请求都 `createProviderManager(rawProviders, rawActiveSelection)` 重建索引。
 启动时构建一次，配置变更时增量更新。
 
@@ -249,7 +273,10 @@ import type { AIProvider, ActiveSelection, AIModelConfig } from '@openAwork/agen
 import { ProviderManagerImpl } from '@openAwork/agent-core';
 import { sqliteGet } from '../infra/db.js';
 
-interface UserSettingRow { key: string; value: string; }
+interface UserSettingRow {
+  key: string;
+  value: string;
+}
 
 interface CatalogEntry {
   manager: InstanceType<typeof ProviderManagerImpl>;
@@ -266,9 +293,13 @@ const CACHE_TTL_MS = 30_000;
 
 function loadRawSettings(userId: string) {
   const providerRow = sqliteGet<UserSettingRow>(
-    `SELECT value FROM user_settings WHERE user_id = ? AND key = 'providers'`, [userId]);
+    `SELECT value FROM user_settings WHERE user_id = ? AND key = 'providers'`,
+    [userId],
+  );
   const selectionRow = sqliteGet<UserSettingRow>(
-    `SELECT value FROM user_settings WHERE user_id = ? AND key = 'active_selection'`, [userId]);
+    `SELECT value FROM user_settings WHERE user_id = ? AND key = 'active_selection'`,
+    [userId],
+  );
   return {
     rawProviders: providerRow?.value ? JSON.parse(providerRow.value) : null,
     rawSelection: selectionRow?.value ? JSON.parse(selectionRow.value) : null,
@@ -328,12 +359,8 @@ export async function getProviderForSelection(
   if (!selection?.providerId || !selection.modelId) {
     return getChatProvider(userId);
   }
-  const provider = catalog.providers.find(
-    p => p.id === selection.providerId && p.enabled
-  );
-  const model = provider?.defaultModels.find(
-    m => m.id === selection.modelId && m.enabled
-  );
+  const provider = catalog.providers.find((p) => p.id === selection.providerId && p.enabled);
+  const model = provider?.defaultModels.find((m) => m.id === selection.modelId && m.enabled);
   if (!provider || !model) return getChatProvider(userId);
   return { provider, modelId: model.id };
 }
@@ -361,6 +388,7 @@ const providerConfig = await getProviderForSelection(user.sub, override);
 ```
 
 ### 预期收益
+
 - stream 请求热路径减少 ~5-10ms（避免每次 JSON.parse + ProviderManager 构建）
 - 内存开销极小（每用户一个 ProviderManager 实例）
 - 配置变更时自动失效，无一致性风险
@@ -370,6 +398,7 @@ const providerConfig = await getProviderForSelection(user.sub, override);
 ## 方案 4：路由 Schema/Handler 分离
 
 ### 目标
+
 将路由文件拆分为「Schema 定义」和「业务逻辑」两层，为自动 OpenAPI 文档生成铺路。
 
 ### 目录结构
@@ -427,13 +456,16 @@ export const errorResponse = z.object({
 
 ```typescript
 import { z } from 'zod';
-import { providerSettingsBodySchema, providerSettingsQuerySchema } from '../../provider/provider-config.js';
+import {
+  providerSettingsBodySchema,
+  providerSettingsQuerySchema,
+} from '../../provider/provider-config.js';
 
 export const settingsSchemas = {
   'GET /settings/providers': {
     query: providerSettingsQuerySchema,
     response: z.object({
-      providers: z.array(z.any()),  // 引用已有 schema
+      providers: z.array(z.any()), // 引用已有 schema
       activeSelection: z.any(),
       defaultThinking: z.any(),
       imageGenerationDefaults: z.any(),
@@ -516,6 +548,7 @@ export async function registerOpenApi(app: FastifyInstance): Promise<void> {
 ```
 
 ### 迁移策略
+
 - 新路由直接按 schema/handler 分离写
 - 旧路由按优先级逐个迁移（settings → sessions → stream）
 - 路由注册文件保持 Fastify plugin 签名不变，对 `index.ts` 零影响
@@ -526,6 +559,7 @@ export async function registerOpenApi(app: FastifyInstance): Promise<void> {
 ## 方案 5：Provider 插件化
 
 ### 目标
+
 将 provider 特有逻辑（协议选择、header 注入、认证方式）从 `model-router.ts` 的大函数中抽出，
 每个 provider 一个独立模块，通过 hook 机制组合。
 
@@ -587,17 +621,12 @@ export interface ProviderPluginHooks {
   /**
    * 解析 API key — 返回 undefined 表示不处理
    */
-  'resolve.apiKey'?: (ctx: {
-    provider: AIProvider;
-  }) => string | undefined;
+  'resolve.apiKey'?: (ctx: { provider: AIProvider }) => string | undefined;
 
   /**
    * 模型过滤/增强 — 可以修改模型列表
    */
-  'models.filter'?: (ctx: {
-    provider: AIProvider;
-    models: AIModelConfig[];
-  }) => AIModelConfig[];
+  'models.filter'?: (ctx: { provider: AIProvider; models: AIModelConfig[] }) => AIModelConfig[];
 }
 
 export interface ProviderPlugin {
@@ -619,7 +648,7 @@ export function registerProviderPlugin(plugin: ProviderPlugin): void {
 }
 
 export function getPluginsForProvider(providerType: string): ProviderPlugin[] {
-  return pluginRegistry.filter(p => p.providerType === providerType || p.providerType === '*');
+  return pluginRegistry.filter((p) => p.providerType === providerType || p.providerType === '*');
 }
 
 /** 执行 hook 链 — 第一个返回非 undefined 的结果胜出 */
@@ -646,7 +675,9 @@ export function runHookAll<K extends keyof ProviderPluginHooks>(
   for (const plugin of getPluginsForProvider(providerType)) {
     const fn = plugin.hooks[hookName] as ((c: typeof ctx) => void) | undefined;
     if (!fn) continue;
-    try { fn(ctx); } catch (err) {
+    try {
+      fn(ctx);
+    } catch (err) {
       console.warn(`[provider-plugin] ${plugin.providerType}.${hookName} threw:`, err);
     }
   }
@@ -693,7 +724,9 @@ registerProviderPlugin({
       try {
         const url = new URL(baseUrl);
         if (OPENAI_OFFICIAL_HOSTS.has(url.hostname)) return 'responses';
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       return 'chat_completions';
     },
 
@@ -788,6 +821,7 @@ registerProviderPlugin({
 ```
 
 ### 迁移策略
+
 - 先实现插件框架 + 3 个核心插件（anthropic, openai, custom）
 - `model-router.ts` 中的 `resolveUpstreamProtocol` 调用改为 `runHookFirst`
 - 旧逻辑作为 fallback 保留，插件返回 `undefined` 时走旧路径
@@ -797,13 +831,13 @@ registerProviderPlugin({
 
 ## 实施路线图
 
-| 阶段 | 方案 | 预计工时 | 风险 |
-|------|------|---------|------|
-| Week 1 | 方案 1（压缩） | 0.5 天 | 极低 |
-| Week 1 | 方案 2（错误中间件） | 1 天 | 低 |
-| Week 2 | 方案 3（Catalog 缓存） | 1.5 天 | 低 |
-| Week 3-4 | 方案 4（Schema/Handler 分离） | 3-5 天 | 中（需逐文件迁移） |
-| Week 4-6 | 方案 5（Provider 插件化） | 5-7 天 | 中（需回归测试） |
+| 阶段     | 方案                          | 预计工时 | 风险               |
+| -------- | ----------------------------- | -------- | ------------------ |
+| Week 1   | 方案 1（压缩）                | 0.5 天   | 极低               |
+| Week 1   | 方案 2（错误中间件）          | 1 天     | 低                 |
+| Week 2   | 方案 3（Catalog 缓存）        | 1.5 天   | 低                 |
+| Week 3-4 | 方案 4（Schema/Handler 分离） | 3-5 天   | 中（需逐文件迁移） |
+| Week 4-6 | 方案 5（Provider 插件化）     | 5-7 天   | 中（需回归测试）   |
 
 ### 验收标准
 
@@ -864,4 +898,7 @@ src/routes/schemas/
 - `src/routes/workflows.ts` — 部分迁移
 - `src/routes/team-workflows-crud.ts` — 部分迁移
 - `package.json` — +@fastify/compress, +@fastify/swagger, +@fastify/swagger-ui
+
+```
+
 ```

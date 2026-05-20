@@ -528,7 +528,12 @@ function buildPreparedUpstreamConversationReport(input: {
 }
 
 export function isContextOverflow(
-  usage: { inputTokens: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number },
+  usage: {
+    inputTokens: number;
+    outputTokens?: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+  },
   contextWindow: number,
   reserved?: number,
   /** Model's max output token limit from preset. When provided, mirrors
@@ -579,7 +584,12 @@ export function isContextOverflow(
 export const PROACTIVE_COMPACTION_BUFFER_TOKENS = 30_000;
 
 export function isContextNearOverflow(
-  usage: { inputTokens: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number },
+  usage: {
+    inputTokens: number;
+    outputTokens?: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+  },
   contextWindow: number,
   reserved?: number,
   modelMaxOutputTokens?: number,
@@ -600,7 +610,8 @@ export function isContextNearOverflow(
     usable = Math.max(0, contextWindow - effectiveMaxOutput);
   }
 
-  const buffer = reserved ?? Math.max(PROACTIVE_COMPACTION_BUFFER_TOKENS, Math.floor(usable * 0.25));
+  const buffer =
+    reserved ?? Math.max(PROACTIVE_COMPACTION_BUFFER_TOKENS, Math.floor(usable * 0.25));
   const totalTokens =
     usage.inputTokens +
     (usage.outputTokens ?? 0) +

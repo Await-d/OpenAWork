@@ -33,15 +33,7 @@ describe('transformAsciiDiagrams', () => {
   });
 
   it('keeps a multi-section diagram with a single blank line as one block', () => {
-    const input = [
-      '┌──┐',
-      '│ A│',
-      '└──┘',
-      '',
-      '┌──┐',
-      '│ B│',
-      '└──┘',
-    ].join('\n');
+    const input = ['┌──┐', '│ A│', '└──┘', '', '┌──┐', '│ B│', '└──┘'].join('\n');
 
     const output = transformAsciiDiagrams(input);
     // Only one fence pair
@@ -58,13 +50,7 @@ describe('transformAsciiDiagrams', () => {
   });
 
   it('leaves content inside an existing fenced code block alone', () => {
-    const input = [
-      '```text',
-      '┌──┐',
-      '│ A│',
-      '└──┘',
-      '```',
-    ].join('\n');
+    const input = ['```text', '┌──┐', '│ A│', '└──┘', '```'].join('\n');
 
     const output = transformAsciiDiagrams(input);
     // No additional fence is introduced
@@ -73,31 +59,15 @@ describe('transformAsciiDiagrams', () => {
   });
 
   it('leaves content inside a 4-tick fence (its own previous output) alone', () => {
-    const wrapped = [
-      'Intro.',
-      '',
-      '````text',
-      '┌──┐',
-      '│ A│',
-      '└──┘',
-      '````',
-      '',
-      'Outro.',
-    ].join('\n');
+    const wrapped = ['Intro.', '', '````text', '┌──┐', '│ A│', '└──┘', '````', '', 'Outro.'].join(
+      '\n',
+    );
 
     expect(transformAsciiDiagrams(wrapped)).toBe(wrapped);
   });
 
   it('is idempotent — a second pass produces the same string', () => {
-    const input = [
-      'Before.',
-      '',
-      '┌──┐',
-      '│ A│',
-      '└──┘',
-      '',
-      'After.',
-    ].join('\n');
+    const input = ['Before.', '', '┌──┐', '│ A│', '└──┘', '', 'After.'].join('\n');
 
     const once = transformAsciiDiagrams(input);
     const twice = transformAsciiDiagrams(once);
@@ -164,13 +134,7 @@ describe('transformAsciiDiagrams', () => {
   });
 
   it('treats a tilde-fenced block as a fence', () => {
-    const input = [
-      '~~~text',
-      '┌──┐',
-      '│ A│',
-      '└──┘',
-      '~~~',
-    ].join('\n');
+    const input = ['~~~text', '┌──┐', '│ A│', '└──┘', '~~~'].join('\n');
 
     const output = transformAsciiDiagrams(input);
     expect(output).toBe(input);
@@ -180,13 +144,7 @@ describe('transformAsciiDiagrams', () => {
 
   it('recognises an indented (≤3 spaces) fence opener', () => {
     // CommonMark allows fences with up to 3 leading spaces.
-    const input = [
-      '   ```text',
-      '┌──┐',
-      '│ A│',
-      '└──┘',
-      '   ```',
-    ].join('\n');
+    const input = ['   ```text', '┌──┐', '│ A│', '└──┘', '   ```'].join('\n');
 
     const output = transformAsciiDiagrams(input);
     expect(output).toBe(input);

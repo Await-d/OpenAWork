@@ -43,10 +43,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * Returns the original request untouched when `toolName` is not a legacy
  * alias.
  */
-export function rewriteLegacyToolRequest(
-  toolName: string,
-  rawInput: unknown,
-): LegacyRewriteResult {
+export function rewriteLegacyToolRequest(toolName: string, rawInput: unknown): LegacyRewriteResult {
   const canonical = LEGACY_TOOL_NAME_TO_CANONICAL[toolName];
   if (!canonical) {
     return { toolName, rawInput, rewritten: false };

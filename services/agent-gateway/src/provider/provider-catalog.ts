@@ -119,12 +119,8 @@ export async function getProviderForSelection(
     return getChatProvider(userId);
   }
 
-  const provider = catalog.providers.find(
-    (p) => p.id === selection.providerId && p.enabled,
-  );
-  const model = provider?.defaultModels.find(
-    (m) => m.id === selection.modelId && m.enabled,
-  );
+  const provider = catalog.providers.find((p) => p.id === selection.providerId && p.enabled);
+  const model = provider?.defaultModels.find((m) => m.id === selection.modelId && m.enabled);
 
   if (!provider || !model) {
     return getChatProvider(userId);
@@ -144,12 +140,8 @@ export async function getCompactionProvider(
   const selection = config.active.compaction;
   if (!selection) return null;
 
-  const provider = catalog.providers.find(
-    (p) => p.id === selection.providerId && p.enabled,
-  );
-  const model = provider?.defaultModels.find(
-    (m) => m.id === selection.modelId && m.enabled,
-  );
+  const provider = catalog.providers.find((p) => p.id === selection.providerId && p.enabled);
+  const model = provider?.defaultModels.find((m) => m.id === selection.modelId && m.enabled);
   if (!provider || !model) return null;
 
   return { provider, modelId: model.id };
@@ -158,17 +150,17 @@ export async function getCompactionProvider(
 /**
  * 获取 image provider 配置
  */
-export async function getImageProvider(
-  userId: string,
-): Promise<{ provider: AIProvider; modelId: string; model: AIProvider['defaultModels'][number] } | null> {
+export async function getImageProvider(userId: string): Promise<{
+  provider: AIProvider;
+  modelId: string;
+  model: AIProvider['defaultModels'][number];
+} | null> {
   const catalog = await getCatalog(userId);
   const config = catalog.manager.getConfig();
   const selection = config.active.image;
   if (!selection) return null;
 
-  const provider = catalog.providers.find(
-    (p) => p.id === selection.providerId && p.enabled,
-  );
+  const provider = catalog.providers.find((p) => p.id === selection.providerId && p.enabled);
   const model = provider?.defaultModels.find(
     (m) => m.id === selection.modelId && m.enabled && m.supportsImageGeneration === true,
   );

@@ -112,8 +112,7 @@ export function parseContextLimitError(error: unknown): ParsedContextLimitError 
   if (typeof errObj['body'] === 'string') textSources.push(errObj['body']);
   if (typeof errObj['details'] === 'string') textSources.push(errObj['details']);
   if (typeof errObj['reason'] === 'string') textSources.push(errObj['reason']);
-  if (typeof nestedError?.['message'] === 'string')
-    textSources.push(nestedError['message']);
+  if (typeof nestedError?.['message'] === 'string') textSources.push(nestedError['message']);
   if (typeof dataObj?.['message'] === 'string') textSources.push(dataObj['message']);
 
   if (textSources.length === 0) {
@@ -220,10 +219,7 @@ function buildEnvContextOverrides(): Map<string, number> {
   // to any model. The pattern is matched as a substring of the model ID.
   for (const [key, value] of Object.entries(process.env)) {
     if (!key.startsWith('CONTEXT_WINDOW_OVERRIDE_') || !value) continue;
-    const pattern = key
-      .slice('CONTEXT_WINDOW_OVERRIDE_'.length)
-      .toLowerCase()
-      .replace(/_/g, '-');
+    const pattern = key.slice('CONTEXT_WINDOW_OVERRIDE_'.length).toLowerCase().replace(/_/g, '-');
     const limit = parseInt(value, 10);
     if (!Number.isNaN(limit) && limit > 0) {
       overrides.set(pattern, limit);
@@ -256,10 +252,7 @@ function getEnvContextOverride(modelId: string): number | undefined {
  * Key: `${userId}:${modelId}` — shared across sessions for the same user+model
  * because the provider limit is model-specific, not session-specific.
  */
-const effectiveContextWindowCache = new Map<
-  string,
-  { maxTokens: number; discoveredAt: number }
->();
+const effectiveContextWindowCache = new Map<string, { maxTokens: number; discoveredAt: number }>();
 
 /** Cache entries expire after 1 hour to allow re-discovery if limits change. */
 const CACHE_TTL_MS = 60 * 60 * 1000;
@@ -422,7 +415,16 @@ interface ToolOutputCandidate {
  * Returns a new message array with truncated outputs (does NOT mutate input).
  */
 export function aggressiveTruncateToolOutputs(
-  messages: Array<{ role: string; content: Array<{ type: string; output?: string; toolName?: string; toolCallId?: string; [key: string]: unknown }> }>,
+  messages: Array<{
+    role: string;
+    content: Array<{
+      type: string;
+      output?: string;
+      toolName?: string;
+      toolCallId?: string;
+      [key: string]: unknown;
+    }>;
+  }>,
   currentTokens: number,
   maxTokens: number,
   config = AGGRESSIVE_TRUNCATION_CONFIG,
@@ -451,7 +453,8 @@ export function aggressiveTruncateToolOutputs(
       const output = typeof content.output === 'string' ? content.output : '';
       if (output.length < config.minOutputSizeToTruncate) return;
       // Resolve tool name from the corresponding tool_call
-      const toolName = content.toolName ?? resolveToolNameFromMessages(messages, content.toolCallId) ?? 'unknown';
+      const toolName =
+        content.toolName ?? resolveToolNameFromMessages(messages, content.toolCallId) ?? 'unknown';
       candidates.push({ messageIndex, contentIndex, toolName, outputSize: output.length });
     });
   });
@@ -506,7 +509,15 @@ export function aggressiveTruncateToolOutputs(
 
 /** Helper to resolve tool name from a tool_call in the message history. */
 function resolveToolNameFromMessages(
-  messages: Array<{ role: string; content: Array<{ type: string; toolCallId?: string; toolName?: string; [key: string]: unknown }> }>,
+  messages: Array<{
+    role: string;
+    content: Array<{
+      type: string;
+      toolCallId?: string;
+      toolName?: string;
+      [key: string]: unknown;
+    }>;
+  }>,
   toolCallId: string | undefined,
 ): string | undefined {
   if (!toolCallId) return undefined;

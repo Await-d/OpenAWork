@@ -151,20 +151,25 @@ export function resolveModelRoute(request: ModelRequest): ModelRouteConfig {
   );
 
   // 方案 5：插件优先解析协议，fallback 到原有逻辑
-  const upstreamProtocol = (providerType && builtinProvider
-    ? runHookFirst('resolve.protocol', providerType, { model, provider: builtinProvider, baseUrl: apiBaseUrl })
-    : undefined
-  ) ?? resolveUpstreamProtocol({ model, providerType, baseUrl: apiBaseUrl });
+  const upstreamProtocol =
+    (providerType && builtinProvider
+      ? runHookFirst('resolve.protocol', providerType, {
+          model,
+          provider: builtinProvider,
+          baseUrl: apiBaseUrl,
+        })
+      : undefined) ?? resolveUpstreamProtocol({ model, providerType, baseUrl: apiBaseUrl });
 
   // 方案 5：插件优先解析 API key，fallback 到原有逻辑
-  const apiKey = (providerType && builtinProvider
-    ? runHookFirst('resolve.apiKey', providerType, { provider: builtinProvider })
-    : undefined
-  ) ?? (builtinProvider
-    ? resolveProviderApiKey(builtinProvider)
-    : isAnthropic
-      ? (globalThis.process?.env['ANTHROPIC_API_KEY'] ?? DEFAULT_API_KEY)
-      : DEFAULT_API_KEY);
+  const apiKey =
+    (providerType && builtinProvider
+      ? runHookFirst('resolve.apiKey', providerType, { provider: builtinProvider })
+      : undefined) ??
+    (builtinProvider
+      ? resolveProviderApiKey(builtinProvider)
+      : isAnthropic
+        ? (globalThis.process?.env['ANTHROPIC_API_KEY'] ?? DEFAULT_API_KEY)
+        : DEFAULT_API_KEY);
 
   return {
     model,
@@ -204,9 +209,14 @@ export function resolveModelRouteFromProvider(
     normalizeBaseUrl(provider.baseUrl) || resolveProviderDefaultBaseUrl(provider.type);
 
   // 方案 5：插件优先解析协议（显式 override 仍然最优先）
-  const upstreamProtocol = provider.upstreamProtocol
-    ?? runHookFirst('resolve.protocol', provider.type, { model: modelId, provider, baseUrl: resolvedProviderBaseUrl })
-    ?? resolveUpstreamProtocol({
+  const upstreamProtocol =
+    provider.upstreamProtocol ??
+    runHookFirst('resolve.protocol', provider.type, {
+      model: modelId,
+      provider,
+      baseUrl: resolvedProviderBaseUrl,
+    }) ??
+    resolveUpstreamProtocol({
       model: modelId,
       providerType: provider.type,
       baseUrl: resolvedProviderBaseUrl,
@@ -214,12 +224,16 @@ export function resolveModelRouteFromProvider(
     });
 
   // 方案 5：插件优先解析 API key
-  const apiKey = runHookFirst('resolve.apiKey', provider.type, { provider })
-    ?? resolveProviderApiKey(provider);
+  const apiKey =
+    runHookFirst('resolve.apiKey', provider.type, { provider }) ?? resolveProviderApiKey(provider);
 
   // 方案 5：插件注入额外 headers（合并到 requestOverrides.headers）
   const pluginHeaders: Record<string, string> = { ...(requestOverrides.headers ?? {}) };
-  runHookAll('request.headers', provider.type, { model: modelId, provider, headers: pluginHeaders });
+  runHookAll('request.headers', provider.type, {
+    model: modelId,
+    provider,
+    headers: pluginHeaders,
+  });
   const mergedOverrides = {
     ...requestOverrides,
     ...(Object.keys(pluginHeaders).length > 0 ? { headers: pluginHeaders } : {}),
@@ -262,9 +276,14 @@ export function resolveCompactionRoute(
     normalizeBaseUrl(provider.baseUrl) || resolveProviderDefaultBaseUrl(provider.type);
 
   // 方案 5：插件优先解析协议
-  const upstreamProtocol = provider.upstreamProtocol
-    ?? runHookFirst('resolve.protocol', provider.type, { model: modelId, provider, baseUrl: resolvedCompactionBaseUrl })
-    ?? resolveUpstreamProtocol({
+  const upstreamProtocol =
+    provider.upstreamProtocol ??
+    runHookFirst('resolve.protocol', provider.type, {
+      model: modelId,
+      provider,
+      baseUrl: resolvedCompactionBaseUrl,
+    }) ??
+    resolveUpstreamProtocol({
       model: modelId,
       providerType: provider.type,
       baseUrl: resolvedCompactionBaseUrl,
@@ -272,12 +291,16 @@ export function resolveCompactionRoute(
     });
 
   // 方案 5：插件优先解析 API key
-  const apiKey = runHookFirst('resolve.apiKey', provider.type, { provider })
-    ?? resolveProviderApiKey(provider);
+  const apiKey =
+    runHookFirst('resolve.apiKey', provider.type, { provider }) ?? resolveProviderApiKey(provider);
 
   // 方案 5：插件注入 headers
   const pluginHeaders: Record<string, string> = { ...(requestOverrides.headers ?? {}) };
-  runHookAll('request.headers', provider.type, { model: modelId, provider, headers: pluginHeaders });
+  runHookAll('request.headers', provider.type, {
+    model: modelId,
+    provider,
+    headers: pluginHeaders,
+  });
   const mergedOverrides = {
     ...requestOverrides,
     ...(Object.keys(pluginHeaders).length > 0 ? { headers: pluginHeaders } : {}),

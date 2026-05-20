@@ -64,9 +64,7 @@ export function registerProviderPlugin(plugin: ProviderPlugin): void {
 }
 
 export function getPluginsForProvider(providerType: string): ProviderPlugin[] {
-  return pluginRegistry.filter(
-    (p) => p.providerType === providerType || p.providerType === '*',
-  );
+  return pluginRegistry.filter((p) => p.providerType === providerType || p.providerType === '*');
 }
 
 export function runHookFirst<K extends keyof ProviderPluginHooks>(
@@ -75,9 +73,7 @@ export function runHookFirst<K extends keyof ProviderPluginHooks>(
   ctx: Parameters<NonNullable<ProviderPluginHooks[K]>>[0],
 ): ReturnType<NonNullable<ProviderPluginHooks[K]>> | undefined {
   for (const plugin of getPluginsForProvider(providerType)) {
-    const fn = plugin.hooks[hookName] as
-      | ((c: typeof ctx) => unknown)
-      | undefined;
+    const fn = plugin.hooks[hookName] as ((c: typeof ctx) => unknown) | undefined;
     if (!fn) continue;
     try {
       const result = fn(ctx);
@@ -98,9 +94,7 @@ export function runHookAll<K extends keyof ProviderPluginHooks>(
   ctx: Parameters<NonNullable<ProviderPluginHooks[K]>>[0],
 ): void {
   for (const plugin of getPluginsForProvider(providerType)) {
-    const fn = plugin.hooks[hookName] as
-      | ((c: typeof ctx) => void)
-      | undefined;
+    const fn = plugin.hooks[hookName] as ((c: typeof ctx) => void) | undefined;
     if (!fn) continue;
     try {
       fn(ctx);

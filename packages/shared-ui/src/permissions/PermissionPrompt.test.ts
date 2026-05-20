@@ -50,7 +50,6 @@ describe('getPermissionDecisionOptions', () => {
   });
 });
 
-
 describe('categorizeAlwaysPatterns', () => {
   it('returns only Full command when always is undefined', () => {
     const levels = categorizeAlwaysPatterns('ls -la /tmp', 'ls -la /tmp', undefined);
@@ -79,7 +78,8 @@ describe('categorizeAlwaysPatterns', () => {
     expect(levels).toEqual([
       {
         label: 'Full command',
-        pattern: 'OBSIDIAN_API_KEY="abc" OBSIDIAN_HOST="127.0.0.1" timeout 5 uvx mcp-obsidian --help',
+        pattern:
+          'OBSIDIAN_API_KEY="abc" OBSIDIAN_HOST="127.0.0.1" timeout 5 uvx mcp-obsidian --help',
         category: 'full',
       },
       {
@@ -92,10 +92,7 @@ describe('categorizeAlwaysPatterns', () => {
   });
 
   it('deduplicates patterns that match the full command or scope', () => {
-    const levels = categorizeAlwaysPatterns('git status', 'git status', [
-      'git status',
-      'git *',
-    ]);
+    const levels = categorizeAlwaysPatterns('git status', 'git status', ['git status', 'git *']);
     expect(levels).toEqual([
       { label: 'Full command', pattern: 'git status', category: 'full' },
       { label: 'Base', pattern: 'git *', category: 'base' },

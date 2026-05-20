@@ -5,7 +5,11 @@
  * - Headers：注入 anthropic-beta features
  * - API Key：优先 provider 配置，fallback 到环境变量
  */
-import { registerProviderPlugin, type RequestHeadersContext, type ResolveApiKeyContext } from '../provider-plugin.js';
+import {
+  registerProviderPlugin,
+  type RequestHeadersContext,
+  type ResolveApiKeyContext,
+} from '../provider-plugin.js';
 
 registerProviderPlugin({
   providerType: 'anthropic',

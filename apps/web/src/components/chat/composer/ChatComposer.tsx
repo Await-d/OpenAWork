@@ -18,6 +18,7 @@ import {
 import { detectThinkKeyword } from '../../conversation-runtime/reveal/think-keyword-detector.js';
 import type { SavedChatImageDefaults } from '../../../utils/chat/chat-session-defaults.js';
 import type { ChatImageGenerationReferenceArtifact } from '../image/ChatImageGenerationControls.js';
+import { PromptSnippetsTrigger } from '../prompt-snippets/PromptSnippetsTrigger.js';
 
 interface ChatComposerProps {
   variant: 'home' | 'session';
@@ -108,6 +109,12 @@ interface ChatComposerProps {
    * it visually attached to the composer area.
    */
   composerRightSlot?: React.ReactNode;
+  /** Gateway URL for prompt snippets API. */
+  gatewayUrl?: string;
+  /** Auth token for prompt snippets API. */
+  snippetsToken?: string | null;
+  /** Callback to insert text at cursor position in the textarea. */
+  onInsertAtCursor?: (text: string) => void;
 }
 
 export function ChatComposer({
@@ -182,6 +189,9 @@ export function ChatComposer({
   contextIsEstimated,
   placeholder,
   composerRightSlot,
+  gatewayUrl,
+  snippetsToken,
+  onInsertAtCursor,
 }: ChatComposerProps) {
   const [composerDragging, setComposerDragging] = useState(false);
   const composerDragCounterRef = useRef(0);
@@ -1458,6 +1468,14 @@ export function ChatComposer({
                       <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66L9.41 17.41a2 2 0 0 1-2.83-2.83l8.49-8.48" />
                     </svg>
                   </button>
+                  {gatewayUrl && onInsertAtCursor && (
+                    <PromptSnippetsTrigger
+                      gatewayUrl={gatewayUrl}
+                      token={snippetsToken ?? null}
+                      disabled={streaming || imageGenerationBusy}
+                      onInject={onInsertAtCursor}
+                    />
+                  )}
                   <ComposerHintChip label="/ 命令" />
                   <ComposerHintChip label="@ 文件" />
                 </div>

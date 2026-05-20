@@ -3033,8 +3033,7 @@ async function executeGatewayManagedToolImpl(
       // derive a short fallback from the prompt's first 40 chars so
       // downstream consumers (task graph, session title, display
       // messages) always have a non-empty label.
-      const effectiveTaskDescription =
-        parsed.data.description ?? parsed.data.prompt.slice(0, 40);
+      const effectiveTaskDescription = parsed.data.description ?? parsed.data.prompt.slice(0, 40);
 
       const taskManager = new AgentTaskManagerImpl();
       const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, sessionId);

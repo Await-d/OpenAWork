@@ -4,18 +4,18 @@
 
 ## 实施状态
 
-| Layer | 模块 | 状态 |
-|-------|------|------|
-| Layer 0 | Microcompact (`microcompact.ts`) | ✅ 已实现并集成 |
-| Layer 1 | Session Memory Compact (`session-memory-compact.ts`) | ✅ 已实现并集成到 overflow 路径 |
-| Layer 1 | Session Memory Store (`session-memory-store.ts`) | ✅ 已实现 |
+| Layer   | 模块                                                     | 状态                              |
+| ------- | -------------------------------------------------------- | --------------------------------- |
+| Layer 0 | Microcompact (`microcompact.ts`)                         | ✅ 已实现并集成                   |
+| Layer 1 | Session Memory Compact (`session-memory-compact.ts`)     | ✅ 已实现并集成到 overflow 路径   |
+| Layer 1 | Session Memory Store (`session-memory-store.ts`)         | ✅ 已实现                         |
 | Layer 1 | Session Memory Extractor (`session-memory-extractor.ts`) | ✅ 已实现并集成到 stream 结束流程 |
-| Layer 2 | Full Compact Prompt 升级 (`compaction-prompt.ts`) | ✅ 已升级为 9 章节 + analysis |
-| Layer 2 | Tail Budget 增大 (`compaction-tail-budget.ts`) | ✅ 10K-40K |
-| Layer 2 | Analysis 剥离 (`compaction-llm.ts`) | ✅ 已集成 stripAnalysisBlock |
-| Layer 3 | Reactive Compact (`reactive-compact.ts`) | ✅ 已实现 |
-| Layer 3 | Message Grouping (`message-grouping.ts`) | ✅ 已实现 |
-| Layer 3 | 集成到 Overflow 触发器 | ✅ 已集成 |
+| Layer 2 | Full Compact Prompt 升级 (`compaction-prompt.ts`)        | ✅ 已升级为 9 章节 + analysis     |
+| Layer 2 | Tail Budget 增大 (`compaction-tail-budget.ts`)           | ✅ 10K-40K                        |
+| Layer 2 | Analysis 剥离 (`compaction-llm.ts`)                      | ✅ 已集成 stripAnalysisBlock      |
+| Layer 3 | Reactive Compact (`reactive-compact.ts`)                 | ✅ 已实现                         |
+| Layer 3 | Message Grouping (`message-grouping.ts`)                 | ✅ 已实现                         |
+| Layer 3 | 集成到 Overflow 触发器                                   | ✅ 已集成                         |
 
 ---
 
@@ -54,22 +54,24 @@ Layer 3: Reactive Compaction（PTL 错误后逐组丢弃重试）
 2. **Time-based（时间触发）**：当距离上次 assistant 消息超过阈值（默认 30 分钟，表示 cache 已冷），清除所有旧 tool_result，保留最近 N 个
 
 **可压缩的工具列表（对齐 Claude Code）：**
+
 - file_read / file_write / file_edit
 - bash / shell
 - grep / glob
 - web_search / web_fetch
 
 **不压缩的工具：**
+
 - skill（技能内容需要跨压缩保留）
 
 ### 2.3 文件变更
 
-| 文件 | 变更类型 | 说明 |
-|------|----------|------|
-| `services/agent-gateway/src/compaction/microcompact.ts` | 新建 | 微压缩核心逻辑 |
-| `services/agent-gateway/src/compaction/microcompact-config.ts` | 新建 | 配置（阈值、保留数量、可压缩工具列表） |
-| `services/agent-gateway/src/routes/stream-model-round.ts` | 修改 | 在 `toModelMessages()` 后插入微压缩调用 |
-| `services/agent-gateway/src/session/session-message-store.ts` | 修改 | 将现有 `pruneToolResultsByTokenBudget` 整合为微压缩的一部分 |
+| 文件                                                           | 变更类型 | 说明                                                        |
+| -------------------------------------------------------------- | -------- | ----------------------------------------------------------- |
+| `services/agent-gateway/src/compaction/microcompact.ts`        | 新建     | 微压缩核心逻辑                                              |
+| `services/agent-gateway/src/compaction/microcompact-config.ts` | 新建     | 配置（阈值、保留数量、可压缩工具列表）                      |
+| `services/agent-gateway/src/routes/stream-model-round.ts`      | 修改     | 在 `toModelMessages()` 后插入微压缩调用                     |
+| `services/agent-gateway/src/session/session-message-store.ts`  | 修改     | 将现有 `pruneToolResultsByTokenBudget` 整合为微压缩的一部分 |
 
 ### 2.4 核心接口
 
@@ -78,9 +80,9 @@ Layer 3: Reactive Compaction（PTL 错误后逐组丢弃重试）
 
 export interface MicrocompactConfig {
   /** 触发阈值：可压缩 tool_result 数量超过此值时触发 */
-  triggerThreshold: number;       // default: 20
+  triggerThreshold: number; // default: 20
   /** 保留最近 N 个 tool_result */
-  keepRecent: number;             // default: 8
+  keepRecent: number; // default: 8
   /** 时间触发阈值（分钟）：距上次 assistant 消息超过此值时触发 */
   timeGapThresholdMinutes: number; // default: 30
   /** 可压缩的工具名称集合 */
@@ -138,14 +140,14 @@ export function microcompactMessages(
 
 ### 3.3 文件变更
 
-| 文件 | 变更类型 | 说明 |
-|------|----------|------|
-| `services/agent-gateway/src/compaction/session-memory-compact.ts` | 新建 | Session Memory 压缩路径 |
-| `services/agent-gateway/src/compaction/session-memory-extractor.ts` | 新建 | 后台提取逻辑 |
-| `services/agent-gateway/src/compaction/session-memory-template.ts` | 新建 | 提取 prompt 和模板 |
-| `services/agent-gateway/src/compaction/session-memory-config.ts` | 新建 | 配置（阈值、模板） |
-| `services/agent-gateway/src/compaction/auto-compaction-trigger.ts` | 修改 | 在 Full Compact 前尝试 Session Memory Compact |
-| `services/agent-gateway/src/memory/memory-runtime.ts` | 修改 | 整合 session memory 提取到现有 memory 系统 |
+| 文件                                                                | 变更类型 | 说明                                          |
+| ------------------------------------------------------------------- | -------- | --------------------------------------------- |
+| `services/agent-gateway/src/compaction/session-memory-compact.ts`   | 新建     | Session Memory 压缩路径                       |
+| `services/agent-gateway/src/compaction/session-memory-extractor.ts` | 新建     | 后台提取逻辑                                  |
+| `services/agent-gateway/src/compaction/session-memory-template.ts`  | 新建     | 提取 prompt 和模板                            |
+| `services/agent-gateway/src/compaction/session-memory-config.ts`    | 新建     | 配置（阈值、模板）                            |
+| `services/agent-gateway/src/compaction/auto-compaction-trigger.ts`  | 修改     | 在 Full Compact 前尝试 Session Memory Compact |
+| `services/agent-gateway/src/memory/memory-runtime.ts`               | 修改     | 整合 session memory 提取到现有 memory 系统    |
 
 ### 3.4 核心接口
 
@@ -154,11 +156,11 @@ export function microcompactMessages(
 
 export interface SessionMemoryCompactConfig {
   /** 压缩后保留的最小 token 数 */
-  minPreserveTokens: number;      // default: 10_000
+  minPreserveTokens: number; // default: 10_000
   /** 压缩后保留的最小文本消息数 */
-  minTextBlockMessages: number;   // default: 5
+  minTextBlockMessages: number; // default: 5
   /** 压缩后保留的最大 token 数 */
-  maxPreserveTokens: number;      // default: 40_000
+  maxPreserveTokens: number; // default: 40_000
 }
 
 export interface SessionMemoryCompactResult {
@@ -276,8 +278,8 @@ export const SESSION_MEMORY_UPDATE_PROMPT = `你是一个会话记忆提取助�
 
 ```typescript
 // compaction-tail-budget.ts 修改
-export const MIN_PRESERVE_RECENT_TOKENS = 10_000;  // 从 2K → 10K
-export const MAX_PRESERVE_RECENT_TOKENS = 40_000;  // 从 8K → 40K
+export const MIN_PRESERVE_RECENT_TOKENS = 10_000; // 从 2K → 10K
+export const MAX_PRESERVE_RECENT_TOKENS = 40_000; // 从 8K → 40K
 ```
 
 #### 4.2.4 增加 maxTurns
@@ -297,13 +299,13 @@ const limit = input.maxTurns ?? 4;
 
 ### 4.3 文件变更
 
-| 文件 | 变更类型 | 说明 |
-|------|----------|------|
-| `services/agent-gateway/src/compaction/compaction-prompt.ts` | 重写 | 升级为 9 章节 + analysis 格式 |
-| `services/agent-gateway/src/compaction/compaction-tail-budget.ts` | 修改 | 增大保留预算 |
-| `services/agent-gateway/src/compaction/compaction-llm.ts` | 修改 | PTL 重试改为按组丢弃 |
-| `services/agent-gateway/src/compaction/post-compact-attachments.ts` | 新建 | 压缩后文件重新注入 |
-| `services/agent-gateway/src/session/session-compaction.ts` | 修改 | 整合 Session Memory 优先路径 |
+| 文件                                                                | 变更类型 | 说明                          |
+| ------------------------------------------------------------------- | -------- | ----------------------------- |
+| `services/agent-gateway/src/compaction/compaction-prompt.ts`        | 重写     | 升级为 9 章节 + analysis 格式 |
+| `services/agent-gateway/src/compaction/compaction-tail-budget.ts`   | 修改     | 增大保留预算                  |
+| `services/agent-gateway/src/compaction/compaction-llm.ts`           | 修改     | PTL 重试改为按组丢弃          |
+| `services/agent-gateway/src/compaction/post-compact-attachments.ts` | 新建     | 压缩后文件重新注入            |
+| `services/agent-gateway/src/session/session-compaction.ts`          | 修改     | 整合 Session Memory 优先路径  |
 
 ---
 
@@ -325,11 +327,11 @@ const limit = input.maxTurns ?? 4;
 
 ### 5.3 文件变更
 
-| 文件 | 变更类型 | 说明 |
-|------|----------|------|
-| `services/agent-gateway/src/compaction/reactive-compact.ts` | 新建 | 逐组丢弃逻辑 |
-| `services/agent-gateway/src/compaction/message-grouping.ts` | 新建 | 按 API round 分组 |
-| `services/agent-gateway/src/compaction/auto-compaction-trigger.ts` | 修改 | 在 overflow 路径中先尝试 reactive compact |
+| 文件                                                               | 变更类型 | 说明                                      |
+| ------------------------------------------------------------------ | -------- | ----------------------------------------- |
+| `services/agent-gateway/src/compaction/reactive-compact.ts`        | 新建     | 逐组丢弃逻辑                              |
+| `services/agent-gateway/src/compaction/message-grouping.ts`        | 新建     | 按 API round 分组                         |
+| `services/agent-gateway/src/compaction/auto-compaction-trigger.ts` | 修改     | 在 overflow 路径中先尝试 reactive compact |
 
 ### 5.4 核心接口
 
@@ -388,13 +390,13 @@ export async function triggerOverflowCompaction(input): Promise<OverflowCompacti
   if (reactiveResult?.recovered) {
     return { triggered: true, recovered: true, ... };
   }
-  
+
   // Step 3: Session Memory compact (NEW)
   const smResult = await trySessionMemoryCompaction({ ... });
   if (smResult) {
     return { triggered: true, recovered: true, ... };
   }
-  
+
   // Step 4: Aggressive truncation (existing)
   // Step 5: Full compact (existing)
 }
@@ -481,22 +483,28 @@ export const compactionSettingsSchema = z.object({
   recentMessagesKept: z.number().int().min(0).default(6),
   reserved: z.number().int().min(0).optional(),
   // ─── 新增 ───
-  microcompact: z.object({
-    enabled: z.boolean().default(true),
-    triggerThreshold: z.number().int().min(1).default(20),
-    keepRecent: z.number().int().min(1).default(8),
-    timeGapThresholdMinutes: z.number().min(1).default(30),
-  }).default({}),
-  sessionMemory: z.object({
-    enabled: z.boolean().default(true),
-    minPreserveTokens: z.number().int().min(0).default(10_000),
-    maxPreserveTokens: z.number().int().min(0).default(40_000),
-  }).default({}),
-  tailBudget: z.object({
-    minTokens: z.number().int().min(0).default(10_000),
-    maxTokens: z.number().int().min(0).default(40_000),
-    maxTurns: z.number().int().min(1).default(4),
-  }).default({}),
+  microcompact: z
+    .object({
+      enabled: z.boolean().default(true),
+      triggerThreshold: z.number().int().min(1).default(20),
+      keepRecent: z.number().int().min(1).default(8),
+      timeGapThresholdMinutes: z.number().min(1).default(30),
+    })
+    .default({}),
+  sessionMemory: z
+    .object({
+      enabled: z.boolean().default(true),
+      minPreserveTokens: z.number().int().min(0).default(10_000),
+      maxPreserveTokens: z.number().int().min(0).default(40_000),
+    })
+    .default({}),
+  tailBudget: z
+    .object({
+      minTokens: z.number().int().min(0).default(10_000),
+      maxTokens: z.number().int().min(0).default(40_000),
+      maxTurns: z.number().int().min(1).default(4),
+    })
+    .default({}),
 });
 ```
 
@@ -527,10 +535,10 @@ export const compactionSettingsSchema = z.object({
 
 ## 十一、风险与缓解
 
-| 风险 | 缓解措施 |
-|------|----------|
-| 微压缩过于激进导致模型丢失上下文 | `keepRecent` 默认 8，且保护关键工具 |
-| Session Memory 提取质量不稳定 | 回退到 Full Compact；提取失败不阻塞主流程 |
-| 尾部保留增大导致压缩后仍超限 | `maxPreserveTokens` 硬上限 + autoCompactThreshold 检查 |
-| Reactive Compact 丢弃过多信息 | 只作为快速恢复，后续仍可触发 Full Compact |
-| 多层压缩交互导致状态不一致 | 统一通过 `metadataJson` 追踪压缩状态 |
+| 风险                             | 缓解措施                                               |
+| -------------------------------- | ------------------------------------------------------ |
+| 微压缩过于激进导致模型丢失上下文 | `keepRecent` 默认 8，且保护关键工具                    |
+| Session Memory 提取质量不稳定    | 回退到 Full Compact；提取失败不阻塞主流程              |
+| 尾部保留增大导致压缩后仍超限     | `maxPreserveTokens` 硬上限 + autoCompactThreshold 检查 |
+| Reactive Compact 丢弃过多信息    | 只作为快速恢复，后续仍可触发 Full Compact              |
+| 多层压缩交互导致状态不一致       | 统一通过 `metadataJson` 追踪压缩状态                   |

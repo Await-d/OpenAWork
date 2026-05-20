@@ -4,7 +4,11 @@
  * - 协议：官方 API 用 responses，代理/兼容端点用 chat_completions
  * - API Key：优先 provider 配置，fallback 到环境变量
  */
-import { registerProviderPlugin, type ResolveProtocolContext, type ResolveApiKeyContext } from '../provider-plugin.js';
+import {
+  registerProviderPlugin,
+  type ResolveProtocolContext,
+  type ResolveApiKeyContext,
+} from '../provider-plugin.js';
 
 const OPENAI_OFFICIAL_HOSTS = new Set(['api.openai.com']);
 
@@ -33,8 +37,7 @@ registerProviderPlugin({
     'resolve.apiKey': ({ provider }: ResolveApiKeyContext) => {
       if (provider.apiKey) return provider.apiKey;
       const envKey =
-        globalThis.process?.env['OPENAI_API_KEY'] ??
-        globalThis.process?.env['AI_API_KEY'];
+        globalThis.process?.env['OPENAI_API_KEY'] ?? globalThis.process?.env['AI_API_KEY'];
       if (envKey) return envKey;
       return undefined;
     },

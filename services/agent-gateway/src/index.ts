@@ -70,6 +70,7 @@ import { reconcileStaleRunningTerminalsAtBoot } from './session/session-terminal
 import qrcodeTerminal from 'qrcode-terminal';
 import { pairingManager, pairingRoutes } from './routes/pairing.js';
 import { memoriesRoutes } from './routes/memories.js';
+import { promptSnippetsRoutes } from './routes/prompt-snippets.js';
 import { notificationsRoutes } from './routes/notifications.js';
 import { sessionImagesRoutes } from './routes/session-images.js';
 import { sessionTerminalsRoutes } from './routes/session-terminals.js';
@@ -132,30 +133,39 @@ await app.register(skillRecommendRoutes);
 await app.register(capabilitiesRoutes);
 await app.register(pairingRoutes);
 await app.register(memoriesRoutes);
+await app.register(promptSnippetsRoutes);
 await app.register(notificationsRoutes);
 await app.register(sessionImagesRoutes);
 await app.register(sessionTerminalsRoutes);
 await app.register(mcpEventsRoutes);
 await app.register(mcpOAuthRoutes);
 
-app.get('/health', {
-  schema: {
-    description: 'Health check endpoint',
-    tags: ['system'],
-    response: { 200: { type: 'object', properties: { status: { type: 'string' } } } },
+app.get(
+  '/health',
+  {
+    schema: {
+      description: 'Health check endpoint',
+      tags: ['system'],
+      response: { 200: { type: 'object', properties: { status: { type: 'string' } } } },
+    },
   },
-}, (request, reply) => {
-  const { step } = startRequestWorkflow(request, 'gateway.health');
-  step.succeed(undefined, { status: 'ok' });
-  return reply.send({ status: 'ok' });
-});
+  (request, reply) => {
+    const { step } = startRequestWorkflow(request, 'gateway.health');
+    step.succeed(undefined, { status: 'ok' });
+    return reply.send({ status: 'ok' });
+  },
+);
 
 // OpenAPI spec as JSON (for SDK generators / CI)
-app.get('/docs/openapi.json', {
-  schema: { hide: true },
-}, (request, reply) => {
-  return reply.send(app.swagger());
-});
+app.get(
+  '/docs/openapi.json',
+  {
+    schema: { hide: true },
+  },
+  (request, reply) => {
+    return reply.send(app.swagger());
+  },
+);
 
 app.addHook('onClose', async () => {
   // Cron timers + messaging-channel websockets first — both wrap

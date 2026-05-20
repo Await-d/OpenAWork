@@ -1282,7 +1282,10 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       const { metadata, workingDirectory } = body;
       const metadataPatch = validateSessionMetadataPatch(metadata);
       if (!metadataPatch.success) {
-        throw ApiError.badRequest('Invalid metadata', { kind: 'Body', issues: metadataPatch.error.issues });
+        throw ApiError.badRequest('Invalid metadata', {
+          kind: 'Body',
+          issues: metadataPatch.error.issues,
+        });
       }
       const mergedMetadata =
         workingDirectory !== undefined
@@ -1667,9 +1670,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       return reply.send({
         fileChanges: {
           ...fileChanges,
-          fileDiffs: fileChanges.fileDiffs.map((diff) =>
-            toPublicFileDiff(diff, query.includeText),
-          ),
+          fileDiffs: fileChanges.fileDiffs.map((diff) => toPublicFileDiff(diff, query.includeText)),
           snapshots: fileChanges.snapshots.map((snapshot) =>
             toPublicSnapshot({ includeText: query.includeText, snapshot }),
           ),
@@ -1687,7 +1688,10 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         clientRequestId: string;
         sessionId: string;
       };
-      const query = parseQuery(fileChangesQuerySchema, (request as FastifyRequest & { query: unknown }).query);
+      const query = parseQuery(
+        fileChangesQuerySchema,
+        (request as FastifyRequest & { query: unknown }).query,
+      );
       const { step } = startRequestWorkflow(
         request,
         'session.request-file-changes.get',
@@ -1722,9 +1726,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         clientRequestId,
         fileChanges: {
           ...fileChanges,
-          fileDiffs: fileChanges.fileDiffs.map((diff) =>
-            toPublicFileDiff(diff, query.includeText),
-          ),
+          fileDiffs: fileChanges.fileDiffs.map((diff) => toPublicFileDiff(diff, query.includeText)),
           snapshots: fileChanges.snapshots.map((snapshot) =>
             toPublicSnapshot({ includeText: query.includeText, snapshot }),
           ),
@@ -1768,7 +1770,10 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       const { step } = startRequestWorkflow(request, 'session.snapshots.compare', undefined, {
         sessionId,
       });
-      const query = parseQuery(snapshotCompareQuerySchema, (request as FastifyRequest & { query: unknown }).query);
+      const query = parseQuery(
+        snapshotCompareQuerySchema,
+        (request as FastifyRequest & { query: unknown }).query,
+      );
 
       const session = sqliteGet<{ id: string; metadata_json: string }>(
         'SELECT id, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
@@ -1823,7 +1828,10 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         sessionId: string;
         snapshotRef: string;
       };
-      const query = parseQuery(fileChangesQuerySchema, (request as FastifyRequest & { query: unknown }).query);
+      const query = parseQuery(
+        fileChangesQuerySchema,
+        (request as FastifyRequest & { query: unknown }).query,
+      );
       const { step } = startRequestWorkflow(request, 'session.snapshot.get', undefined, {
         sessionId,
         snapshotRef,
@@ -2450,7 +2458,10 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       const { step } = startRequestWorkflow(request, 'session.children.list', undefined, {
         sessionId,
       });
-      const query = parseQuery(childSessionQuerySchema, (request as FastifyRequest & { query: unknown }).query);
+      const query = parseQuery(
+        childSessionQuerySchema,
+        (request as FastifyRequest & { query: unknown }).query,
+      );
 
       const parent = sqliteGet<SessionRow>(
         'SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',

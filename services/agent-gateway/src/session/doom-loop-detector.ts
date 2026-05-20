@@ -95,11 +95,7 @@ export function peekDoomLoop(sessionId: string, toolName: string, rawInput: unkn
  * this once they've confirmed the call is about to enter real
  * dispatch — see file header for rationale.
  */
-export function recordDoomLoopEntry(
-  sessionId: string,
-  toolName: string,
-  rawInput: unknown,
-): void {
+export function recordDoomLoopEntry(sessionId: string, toolName: string, rawInput: unknown): void {
   const entry: ToolCallEntry = { toolName, inputHash: hashInput(rawInput) };
   const history = getOrCreateHistory(sessionId);
   history.push(entry);

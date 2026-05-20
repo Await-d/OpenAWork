@@ -1332,7 +1332,12 @@ export async function runModelRound(input: {
     const overflow =
       !!v2Usage &&
       typeof effectiveCtxWindow === 'number' &&
-      isContextOverflow(v2Usage, effectiveCtxWindow, input.compactionReservedTokens, input.route.maxOutputTokens);
+      isContextOverflow(
+        v2Usage,
+        effectiveCtxWindow,
+        input.compactionReservedTokens,
+        input.route.maxOutputTokens,
+      );
     return {
       overflow,
       shouldContinue,

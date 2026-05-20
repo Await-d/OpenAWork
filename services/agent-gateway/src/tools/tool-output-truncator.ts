@@ -12,7 +12,10 @@
  * says 1M), tool output limits are scaled down proportionally.
  */
 
-import { resolveEffectiveContextWindow, hasDiscoveredLowerContextWindow } from '../compaction/context-window-resolver.js';
+import {
+  resolveEffectiveContextWindow,
+  hasDiscoveredLowerContextWindow,
+} from '../compaction/context-window-resolver.js';
 
 /** Default max output length in characters (~50k tokens ≈ ~200k chars) */
 const DEFAULT_MAX_CHARS = 200_000;
