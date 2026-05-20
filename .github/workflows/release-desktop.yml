@@ -284,6 +284,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENAWORK_SKIP_SIDECAR_BUNDLE: '1'
+          NODE_OPTIONS: '--max-old-space-size=6144'
         with:
           projectPath: apps/desktop
           tauriScript: ${{ env.TAURI_SCRIPT }}
@@ -301,6 +302,7 @@ jobs:
         env:
           DEPLOY_GTK_VERSION: '3'
           OPENAWORK_SKIP_SIDECAR_BUNDLE: '1'
+          NODE_OPTIONS: '--max-old-space-size=6144'
         run: |
           set -euo pipefail
           DEB_LOG="$RUNNER_TEMP/tauri-linux-deb.log"
@@ -414,6 +416,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENAWORK_SKIP_SIDECAR_BUNDLE: '1'
+          NODE_OPTIONS: '--max-old-space-size=6144'
           APPLE_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -434,6 +437,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENAWORK_SKIP_SIDECAR_BUNDLE: '1'
+          NODE_OPTIONS: '--max-old-space-size=6144'
           APPLE_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
