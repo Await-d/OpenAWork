@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && cross-env NODE_OPTIONS=--max-old-space-size=8192 vite build",
     "preview": "vite preview",
     "preview:ci": "vite --host 127.0.0.1 --port 4173 --strictPort",
     "test": "vitest run --passWithNoTests",
@@ -43,6 +43,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.0.0",
+    "cross-env": "^7.0.3",
     "jsdom": "^29.0.0",
     "tailwindcss": "^4.0.0",
     "tsx": "^4.0.0",
