@@ -528,39 +528,85 @@ function buildPreparedUpstreamConversationReport(input: {
 }
 
 export function isContextOverflow(
-  usage: { inputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number },
+  usage: { inputTokens: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number },
   contextWindow: number,
   reserved?: number,
+  /** Model's max output token limit from preset. When provided, mirrors
+   *  opencode's `usable = context - maxOutputTokens` formula exactly. */
+  modelMaxOutputTokens?: number,
 ): boolean {
   if (contextWindow <= 0) {
     return false;
   }
 
-  const buffer = reserved ?? Math.min(20_000, Math.floor(contextWindow * 0.15));
-  const usedInputTokens =
-    usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0);
-  return usedInputTokens >= contextWindow - buffer;
+  // Mirrors opencode's overflow.ts:
+  //   maxOutputTokens = min(model.limit.output, OUTPUT_TOKEN_MAX=32_000)
+  //   reserved = config.compaction?.reserved ?? min(COMPACTION_BUFFER=20_000, maxOutputTokens)
+  //   usable = model.limit.input
+  //     ? max(0, model.limit.input - reserved)
+  //     : max(0, context - maxOutputTokens)
+  //   isOverflow = totalTokens >= usable
+  //
+  // When `reserved` is explicitly provided (user's compaction.reserved setting),
+  // it acts as the buffer directly (matching opencode's cfg.compaction.reserved path).
+  // Otherwise we derive from model output limit.
+  const OUTPUT_TOKEN_MAX = 32_000;
+  const COMPACTION_BUFFER = 20_000;
+  const effectiveMaxOutput = Math.min(modelMaxOutputTokens ?? OUTPUT_TOKEN_MAX, OUTPUT_TOKEN_MAX);
+
+  let usable: number;
+  if (reserved !== undefined) {
+    // User-configured reserved: subtract directly from contextWindow
+    usable = Math.max(0, contextWindow - reserved);
+  } else {
+    // Default path: usable = context - maxOutputTokens (opencode formula)
+    usable = Math.max(0, contextWindow - effectiveMaxOutput);
+  }
+
+  // opencode counts total = input + output + cache.read + cache.write
+  const totalTokens =
+    usage.inputTokens +
+    (usage.outputTokens ?? 0) +
+    (usage.cacheReadTokens ?? 0) +
+    (usage.cacheWriteTokens ?? 0);
+  return totalTokens >= usable;
 }
 
 /** Proactive compaction threshold: trigger before overflow.
- * Uses a larger buffer (30K or 25% of contextWindow) so compaction
- * runs while there is still room for the next API round. */
+ * Uses a larger buffer so compaction runs while there is still room
+ * for the next API round. Mirrors oh-my-opencode's 70% warning threshold
+ * (CONTEXT_WARNING_THRESHOLD = 0.70). */
 export const PROACTIVE_COMPACTION_BUFFER_TOKENS = 30_000;
 
 export function isContextNearOverflow(
-  usage: { inputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number },
+  usage: { inputTokens: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number },
   contextWindow: number,
   reserved?: number,
+  modelMaxOutputTokens?: number,
 ): boolean {
   if (contextWindow <= 0) {
     return false;
   }
 
-  const buffer =
-    reserved ?? Math.max(PROACTIVE_COMPACTION_BUFFER_TOKENS, Math.floor(contextWindow * 0.25));
-  const usedInputTokens =
-    usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0);
-  return usedInputTokens >= contextWindow - buffer;
+  // Proactive threshold mirrors oh-my-opencode's CONTEXT_WARNING_THRESHOLD = 0.70:
+  // trigger compaction when usage reaches 70-75% of usable context.
+  const OUTPUT_TOKEN_MAX = 32_000;
+  const effectiveMaxOutput = Math.min(modelMaxOutputTokens ?? OUTPUT_TOKEN_MAX, OUTPUT_TOKEN_MAX);
+
+  let usable: number;
+  if (reserved !== undefined) {
+    usable = Math.max(0, contextWindow - reserved);
+  } else {
+    usable = Math.max(0, contextWindow - effectiveMaxOutput);
+  }
+
+  const buffer = reserved ?? Math.max(PROACTIVE_COMPACTION_BUFFER_TOKENS, Math.floor(usable * 0.25));
+  const totalTokens =
+    usage.inputTokens +
+    (usage.outputTokens ?? 0) +
+    (usage.cacheReadTokens ?? 0) +
+    (usage.cacheWriteTokens ?? 0);
+  return totalTokens >= usable - buffer;
 }
 
 export function buildNormalizedConversationFromHistory(

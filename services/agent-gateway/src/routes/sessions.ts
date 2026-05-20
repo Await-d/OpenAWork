@@ -12,6 +12,8 @@ import {
 import { z } from 'zod';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
+import { ApiError } from '../infra/error-response.js';
+import { parseBody, parseQuery } from '../infra/parse-request.js';
 import { WORKSPACE_ROOT, sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import { filterVisibleSessionMessages } from '../session/session-message-store.js';
 import {
@@ -1275,19 +1277,12 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step, child } = startRequestWorkflow(request, 'session.create');
       const user = request.user as JwtPayload;
-      const body = createSessionSchema.safeParse(request.body);
-      if (!body.success) {
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(createSessionSchema, request.body);
 
-      const { metadata, workingDirectory } = body.data;
+      const { metadata, workingDirectory } = body;
       const metadataPatch = validateSessionMetadataPatch(metadata);
       if (!metadataPatch.success) {
-        step.fail('invalid metadata');
-        return reply
-          .status(400)
-          .send({ error: 'Invalid metadata', issues: metadataPatch.error.issues });
+        throw ApiError.badRequest('Invalid metadata', { kind: 'Body', issues: metadataPatch.error.issues });
       }
       const mergedMetadata =
         workingDirectory !== undefined
@@ -1332,8 +1327,8 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step } = startRequestWorkflow(request, 'session.list');
       const user = request.user as JwtPayload;
-      const query = z
-        .object({
+      const query = parseQuery(
+        z.object({
           limit: z.coerce.number().min(1).max(100).default(20),
           offset: z.coerce.number().min(0).default(0),
           // P3-PATH (opencode #24849): optional absolute path that scopes the
@@ -1342,15 +1337,11 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
           // equality by explicitly passing "0" / "false".
           path: z.string().min(1).optional(),
           includeDescendants: z.coerce.boolean().optional().default(true),
-        })
-        .safeParse((request as FastifyRequest & { query: unknown }).query);
+        }),
+        (request as FastifyRequest & { query: unknown }).query,
+      );
 
-      if (!query.success) {
-        step.fail('invalid query params');
-        return reply.status(400).send({ error: 'Invalid query params' });
-      }
-
-      const { limit, offset, path, includeDescendants } = query.data;
+      const { limit, offset, path, includeDescendants } = query;
 
       // When a path filter is requested we have to pull the full candidate
       // set first, filter, and only then apply pagination — otherwise the
@@ -1401,22 +1392,17 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const user = request.user as JwtPayload;
-      const query = searchSessionsQuerySchema.safeParse(
+      const query = parseQuery(
+        searchSessionsQuerySchema,
         (request as FastifyRequest & { query: unknown }).query,
       );
       const { step } = startRequestWorkflow(request, 'session.search');
-      if (!query.success) {
-        step.fail('invalid query params');
-        return reply
-          .status(400)
-          .send({ error: 'Invalid query params', issues: query.error.issues });
-      }
 
       hydrateLegacySessionMessagesForSearch(user.sub);
 
       const results = searchSessionMessages({
-        limit: query.data.limit,
-        query: query.data.q,
+        limit: query.limit,
+        query: query.q,
         userId: user.sub,
       });
       step.succeed(undefined, { count: results.length });
@@ -1447,28 +1433,21 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const user = request.user as JwtPayload;
       const { messageId, sessionId } = request.params as { messageId: string; sessionId: string };
-      const body = sessionMessageRatingSchema.safeParse(request.body);
+      const body = parseBody(sessionMessageRatingSchema, request.body);
       const { step } = startRequestWorkflow(request, 'session.message-ratings.upsert', undefined, {
         messageId,
         sessionId,
       });
-      if (!body.success) {
-        step.fail('invalid rating payload');
-        return reply
-          .status(400)
-          .send({ error: 'Invalid rating payload', issues: body.error.issues });
-      }
 
       if (!hasSessionMessage({ messageId, sessionId, userId: user.sub })) {
-        step.fail('message not found');
-        return reply.status(404).send({ error: 'Message not found' });
+        throw ApiError.notFound('Message not found');
       }
 
       const record = upsertSessionMessageRating({
         messageId,
-        notes: body.data.notes,
-        rating: body.data.rating,
-        reason: body.data.reason,
+        notes: body.notes,
+        rating: body.rating,
+        reason: body.reason,
         sessionId,
         userId: user.sub,
       });
@@ -1508,8 +1487,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       );
 
       if (!session) {
-        step.fail('not found');
-        return reply.status(404).send({ error: 'Session not found' });
+        throw ApiError.notFound('Session not found');
       }
       const reconciledSession = await reconcileSessionRuntimeForResponse(session, user.sub);
       step.succeed();
@@ -1559,8 +1537,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       );
 
       if (!session) {
-        step.fail('not found');
-        return reply.status(404).send({ error: 'Session not found' });
+        throw ApiError.notFound('Session not found');
       }
 
       const status = await buildSessionStatusReadModel({ session, userId: user.sub });
@@ -1592,8 +1569,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       );
 
       if (!session) {
-        step.fail('not found');
-        return reply.status(404).send({ error: 'Session not found' });
+        throw ApiError.notFound('Session not found');
       }
 
       const query = request.query as Record<string, string | undefined>;
@@ -1639,8 +1615,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         [sessionId, user.sub],
       );
       if (!session) {
-        step.fail('not found');
-        return reply.status(404).send({ error: 'Session not found' });
+        throw ApiError.notFound('Session not found');
       }
 
       const readModel = buildSessionTurnDiffReadModel({
@@ -1662,29 +1637,23 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const user = request.user as JwtPayload;
       const { sessionId } = request.params as { sessionId: string };
-      const query = fileChangesQuerySchema.safeParse(
+      const query = parseQuery(
+        fileChangesQuerySchema,
         (request as FastifyRequest & { query: unknown }).query,
       );
       const { step } = startRequestWorkflow(request, 'session.file-changes.get', undefined, {
         sessionId,
       });
-      if (!query.success) {
-        step.fail('invalid query');
-        return reply
-          .status(400)
-          .send({ error: 'Invalid query params', issues: query.error.issues });
-      }
 
       const session = sqliteGet<{ id: string; metadata_json: string }>(
         'SELECT id, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
         [sessionId, user.sub],
       );
       if (!session) {
-        step.fail('not found');
-        return reply.status(404).send({ error: 'Session not found' });
+        throw ApiError.notFound('Session not found');
       }
 
-      const fileDiffs = query.data.includeText
+      const fileDiffs = query.includeText
         ? await listSessionFileDiffsWithText({ sessionId, userId: user.sub })
         : listSessionFileDiffs({ sessionId, userId: user.sub });
       const fileChanges = buildSessionFileChangesProjection({
@@ -1699,10 +1668,10 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         fileChanges: {
           ...fileChanges,
           fileDiffs: fileChanges.fileDiffs.map((diff) =>
-            toPublicFileDiff(diff, query.data.includeText),
+            toPublicFileDiff(diff, query.includeText),
           ),
           snapshots: fileChanges.snapshots.map((snapshot) =>
-            toPublicSnapshot({ includeText: query.data.includeText, snapshot }),
+            toPublicSnapshot({ includeText: query.includeText, snapshot }),
           ),
         },
       });
@@ -1718,9 +1687,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         clientRequestId: string;
         sessionId: string;
       };
-      const query = fileChangesQuerySchema.safeParse(
-        (request as FastifyRequest & { query: unknown }).query,
-      );
+      const query = parseQuery(fileChangesQuerySchema, (request as FastifyRequest & { query: unknown }).query);
       const { step } = startRequestWorkflow(
         request,
         'session.request-file-changes.get',
@@ -1730,23 +1697,16 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
           sessionId,
         },
       );
-      if (!query.success) {
-        step.fail('invalid query');
-        return reply
-          .status(400)
-          .send({ error: 'Invalid query params', issues: query.error.issues });
-      }
 
       const session = sqliteGet<{ id: string; metadata_json: string }>(
         'SELECT id, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
         [sessionId, user.sub],
       );
       if (!session) {
-        step.fail('not found');
-        return reply.status(404).send({ error: 'Session not found' });
+        throw ApiError.notFound('Session not found');
       }
 
-      const fileDiffs = query.data.includeText
+      const fileDiffs = query.includeText
         ? await listRequestFileDiffsWithText({ clientRequestId, sessionId, userId: user.sub })
         : listRequestFileDiffs({ clientRequestId, sessionId, userId: user.sub });
       const fileChanges = buildSessionFileChangesProjection({
@@ -1763,10 +1723,10 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         fileChanges: {
           ...fileChanges,
           fileDiffs: fileChanges.fileDiffs.map((diff) =>
-            toPublicFileDiff(diff, query.data.includeText),
+            toPublicFileDiff(diff, query.includeText),
           ),
           snapshots: fileChanges.snapshots.map((snapshot) =>
-            toPublicSnapshot({ includeText: query.data.includeText, snapshot }),
+            toPublicSnapshot({ includeText: query.includeText, snapshot }),
           ),
         },
       });
@@ -1788,8 +1748,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         [sessionId, user.sub],
       );
       if (!session) {
-        step.fail('not found');
-        return reply.status(404).send({ error: 'Session not found' });
+        throw ApiError.notFound('Session not found');
       }
 
       const snapshots = listSessionSnapshots({ sessionId, userId: user.sub }).map((snapshot) =>
@@ -1809,43 +1768,33 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       const { step } = startRequestWorkflow(request, 'session.snapshots.compare', undefined, {
         sessionId,
       });
-      const query = snapshotCompareQuerySchema.safeParse(
-        (request as FastifyRequest & { query: unknown }).query,
-      );
-      if (!query.success) {
-        step.fail('invalid query');
-        return reply
-          .status(400)
-          .send({ error: 'Invalid query params', issues: query.error.issues });
-      }
+      const query = parseQuery(snapshotCompareQuerySchema, (request as FastifyRequest & { query: unknown }).query);
 
       const session = sqliteGet<{ id: string; metadata_json: string }>(
         'SELECT id, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
         [sessionId, user.sub],
       );
       if (!session) {
-        step.fail('not found');
-        return reply.status(404).send({ error: 'Session not found' });
+        throw ApiError.notFound('Session not found');
       }
 
       const fromSnapshot = getSessionSnapshotByRef({
         sessionId,
         userId: user.sub,
-        snapshotRef: query.data.from,
+        snapshotRef: query.from,
       });
       const toSnapshot = getSessionSnapshotByRef({
         sessionId,
         userId: user.sub,
-        snapshotRef: query.data.to,
+        snapshotRef: query.to,
       });
       if (!fromSnapshot || !toSnapshot) {
-        step.fail('snapshot not found');
-        return reply.status(404).send({ error: 'Snapshot not found' });
+        throw ApiError.notFound('Snapshot not found');
       }
 
       const comparison = compareSessionSnapshots({ from: fromSnapshot, to: toSnapshot }).map(
         (item) =>
-          query.data.includeText
+          query.includeText
             ? item
             : {
                 file: item.file,
@@ -1859,8 +1808,8 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       step.succeed(undefined, { fileCount: comparison.length });
       return reply.send({
         comparison,
-        from: toPublicSnapshot({ includeText: query.data.includeText, snapshot: fromSnapshot }),
-        to: toPublicSnapshot({ includeText: query.data.includeText, snapshot: toSnapshot }),
+        from: toPublicSnapshot({ includeText: query.includeText, snapshot: fromSnapshot }),
+        to: toPublicSnapshot({ includeText: query.includeText, snapshot: toSnapshot }),
       });
     },
   );
@@ -1874,38 +1823,28 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         sessionId: string;
         snapshotRef: string;
       };
-      const query = fileChangesQuerySchema.safeParse(
-        (request as FastifyRequest & { query: unknown }).query,
-      );
+      const query = parseQuery(fileChangesQuerySchema, (request as FastifyRequest & { query: unknown }).query);
       const { step } = startRequestWorkflow(request, 'session.snapshot.get', undefined, {
         sessionId,
         snapshotRef,
       });
-      if (!query.success) {
-        step.fail('invalid query');
-        return reply
-          .status(400)
-          .send({ error: 'Invalid query params', issues: query.error.issues });
-      }
 
       const session = sqliteGet<{ id: string; metadata_json: string }>(
         'SELECT id, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
         [sessionId, user.sub],
       );
       if (!session) {
-        step.fail('not found');
-        return reply.status(404).send({ error: 'Session not found' });
+        throw ApiError.notFound('Session not found');
       }
 
       const snapshot = getSessionSnapshotByRef({ sessionId, userId: user.sub, snapshotRef });
       if (!snapshot) {
-        step.fail('snapshot not found');
-        return reply.status(404).send({ error: 'Snapshot not found' });
+        throw ApiError.notFound('Snapshot not found');
       }
 
       step.succeed(undefined, { fileCount: snapshot.files.length, snapshotRef });
       return reply.send({
-        snapshot: toPublicSnapshot({ includeText: query.data.includeText, snapshot }),
+        snapshot: toPublicSnapshot({ includeText: query.includeText, snapshot }),
       });
     },
   );
@@ -1916,47 +1855,42 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const user = request.user as JwtPayload;
       const { sessionId } = request.params as { sessionId: string };
-      const body = restorePreviewSchema.safeParse(request.body);
+      const body = parseBody(restorePreviewSchema, request.body);
       const { step } = startRequestWorkflow(request, 'session.restore.preview', undefined, {
         sessionId,
       });
-      if (!body.success) {
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
 
       const session = sqliteGet<{ id: string; metadata_json: string }>(
         'SELECT id, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
         [sessionId, user.sub],
       );
       if (!session) {
-        step.fail('not found');
-        return reply.status(404).send({ error: 'Session not found' });
+        throw ApiError.notFound('Session not found');
       }
       const workspaceRoot =
         extractSessionWorkingDirectory(parseSessionMetadataJson(session.metadata_json)) ??
         WORKSPACE_ROOT;
 
-      if (body.data.backupId) {
+      if (body.backupId) {
         const backup = getSessionFileBackup({
-          backupId: body.data.backupId,
+          backupId: body.backupId,
           sessionId,
           userId: user.sub,
         });
         if (!backup) {
           step.fail('backup not found');
-          return reply.status(404).send({ error: 'Backup not found' });
+          throw ApiError.notFound('Backup not found');
         }
 
         const backupContent = await readSessionFileBackupContent({
-          backupId: body.data.backupId,
+          backupId: body.backupId,
           sessionId,
           userId: user.sub,
         });
         const previewState = await buildBackupRestorePreviewState({
           backup,
           backupContent,
-          includeText: body.data.includeText,
+          includeText: body.includeText,
           workspaceRoot,
         });
         step.succeed(undefined, {
@@ -1983,16 +1917,15 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       const snapshot = getSessionSnapshotByRef({
         sessionId,
         userId: user.sub,
-        snapshotRef: body.data.snapshotRef!,
+        snapshotRef: body.snapshotRef!,
       });
       if (!snapshot) {
-        step.fail('snapshot not found');
-        return reply.status(404).send({ error: 'Snapshot not found' });
+        throw ApiError.notFound('Snapshot not found');
       }
 
       const previewState = await buildSnapshotRestorePreviewState({
         snapshot,
-        includeText: body.data.includeText,
+        includeText: body.includeText,
         workspaceRoot,
       });
       step.succeed(undefined, {
@@ -2003,7 +1936,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       return reply.send({
         validateOnly: true,
         mode: 'snapshot',
-        target: toPublicSnapshot({ includeText: body.data.includeText, snapshot }),
+        target: toPublicSnapshot({ includeText: body.includeText, snapshot }),
         validation: {
           canRestore: previewState.canRestore,
           fileCount: previewState.previews.length,
@@ -2020,52 +1953,47 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const user = request.user as JwtPayload;
       const { sessionId } = request.params as { sessionId: string };
-      const body = restoreApplySchema.safeParse(request.body);
+      const body = parseBody(restoreApplySchema, request.body);
       const { step } = startRequestWorkflow(request, 'session.restore.apply', undefined, {
         sessionId,
       });
-      if (!body.success) {
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
 
       const session = sqliteGet<{ id: string; metadata_json: string }>(
         'SELECT id, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
         [sessionId, user.sub],
       );
       if (!session) {
-        step.fail('not found');
-        return reply.status(404).send({ error: 'Session not found' });
+        throw ApiError.notFound('Session not found');
       }
       const workspaceRoot =
         extractSessionWorkingDirectory(parseSessionMetadataJson(session.metadata_json)) ??
         WORKSPACE_ROOT;
 
-      if (body.data.backupId) {
+      if (body.backupId) {
         const backup = getSessionFileBackup({
-          backupId: body.data.backupId,
+          backupId: body.backupId,
           sessionId,
           userId: user.sub,
         });
         if (!backup) {
           step.fail('backup not found');
-          return reply.status(404).send({ error: 'Backup not found' });
+          throw ApiError.notFound('Backup not found');
         }
         const backupContent = await readSessionFileBackupContent({
-          backupId: body.data.backupId,
+          backupId: body.backupId,
           sessionId,
           userId: user.sub,
         });
         const previewState = await buildBackupRestorePreviewState({
           backup,
           backupContent,
-          includeText: body.data.includeText,
+          includeText: body.includeText,
           workspaceRoot,
         });
         const hasConflicts =
           previewState.workspaceReview.available &&
           previewState.workspaceReview.conflicts.length > 0;
-        if (!previewState.canRestore || (hasConflicts && !body.data.forceConflicts)) {
+        if (!previewState.canRestore || (hasConflicts && !body.forceConflicts)) {
           step.fail('restore blocked', { mode: 'backup', hasConflicts });
           return reply.status(409).send({
             error: 'Restore apply blocked by current workspace state',
@@ -2113,26 +2041,25 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       const snapshot = getSessionSnapshotByRef({
         sessionId,
         userId: user.sub,
-        snapshotRef: body.data.snapshotRef!,
+        snapshotRef: body.snapshotRef!,
       });
       if (!snapshot) {
-        step.fail('snapshot not found');
-        return reply.status(404).send({ error: 'Snapshot not found' });
+        throw ApiError.notFound('Snapshot not found');
       }
       const previewState = await buildSnapshotRestorePreviewState({
         snapshot,
-        includeText: body.data.includeText,
+        includeText: body.includeText,
         workspaceRoot,
       });
       const hasConflicts =
         previewState.workspaceReview.available && previewState.workspaceReview.conflicts.length > 0;
-      if (!previewState.canRestore || (hasConflicts && !body.data.forceConflicts)) {
+      if (!previewState.canRestore || (hasConflicts && !body.forceConflicts)) {
         step.fail('restore blocked', { mode: 'snapshot', hasConflicts });
         return reply.status(409).send({
           error: 'Restore apply blocked by current workspace state',
           validateOnly: true,
           mode: 'snapshot',
-          target: toPublicSnapshot({ includeText: body.data.includeText, snapshot }),
+          target: toPublicSnapshot({ includeText: body.includeText, snapshot }),
           validation: {
             canRestore: previewState.canRestore,
             fileCount: previewState.previews.length,
@@ -2180,8 +2107,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         [sessionId, user.sub],
       );
       if (!session) {
-        step.fail('not found');
-        return reply.status(404).send({ error: 'Session not found' });
+        throw ApiError.notFound('Session not found');
       }
 
       const todos = listSessionTodos(sessionId);
@@ -2205,8 +2131,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         [sessionId, user.sub],
       );
       if (!session) {
-        step.fail('not found');
-        return reply.status(404).send({ error: 'Session not found' });
+        throw ApiError.notFound('Session not found');
       }
 
       const todoLanes = listSessionTodoLanes(sessionId);
@@ -2233,27 +2158,22 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       const { step } = startRequestWorkflow(request, 'session.messages.truncate', undefined, {
         sessionId,
       });
-      const body = truncateMessagesSchema.safeParse(request.body);
-      if (!body.success) {
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(truncateMessagesSchema, request.body);
 
       const session = sqliteGet<{ id: string }>(
         'SELECT id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
         [sessionId, user.sub],
       );
       if (!session) {
-        step.fail('not found');
-        return reply.status(404).send({ error: 'Session not found' });
+        throw ApiError.notFound('Session not found');
       }
 
       const messages = truncateSessionMessagesAfter({
         sessionId,
         userId: user.sub,
-        messageId: body.data.messageId,
-        inclusive: body.data.inclusive,
-        messageText: body.data.messageText,
+        messageId: body.messageId,
+        inclusive: body.inclusive,
+        messageText: body.messageText,
       });
       step.succeed(undefined, { count: messages.length });
       return reply.send({ messages });
@@ -2273,8 +2193,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         [sessionId, user.sub],
       );
       if (!session) {
-        step.fail('not found');
-        return reply.status(404).send({ error: 'Session not found' });
+        throw ApiError.notFound('Session not found');
       }
 
       const sessions = sqliteAll<SessionRow>(
@@ -2330,24 +2249,19 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       const { step, child } = startRequestWorkflow(request, 'session.patch', undefined, {
         sessionId,
       });
-      const body = patchSessionSchema.safeParse(request.body);
-      if (!body.success) {
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(patchSessionSchema, request.body);
 
       const session = sqliteGet<SessionRow>(
         'SELECT id, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
         [sessionId, user.sub],
       );
       if (!session) {
-        step.fail('not found');
-        return reply.status(404).send({ error: 'Session not found' });
+        throw ApiError.notFound('Session not found');
       }
 
       let nextMetadataJson: string | null = null;
-      if (body.data.metadata !== undefined) {
-        const metadataPatch = validateSessionMetadataPatch(body.data.metadata);
+      if (body.metadata !== undefined) {
+        const metadataPatch = validateSessionMetadataPatch(body.metadata);
         if (!metadataPatch.success) {
           step.fail('invalid metadata');
           return reply
@@ -2396,15 +2310,15 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         nextMetadataJson = JSON.stringify(normalizedMetadata.metadata);
       }
 
-      if (body.data.title !== undefined && nextMetadataJson !== null) {
+      if (body.title !== undefined && nextMetadataJson !== null) {
         sqliteRun(
           "UPDATE sessions SET title = ?, metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
-          [body.data.title, nextMetadataJson, sessionId, user.sub],
+          [body.title, nextMetadataJson, sessionId, user.sub],
         );
-      } else if (body.data.title !== undefined) {
+      } else if (body.title !== undefined) {
         sqliteRun(
           "UPDATE sessions SET title = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
-          [body.data.title, sessionId, user.sub],
+          [body.title, sessionId, user.sub],
         );
       } else if (nextMetadataJson !== null) {
         sqliteRun(
@@ -2450,24 +2364,19 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       const { step, child } = startRequestWorkflow(request, 'session.patch.workspace', undefined, {
         sessionId,
       });
-      const body = patchWorkspaceSchema.safeParse(request.body);
-      if (!body.success) {
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(patchWorkspaceSchema, request.body);
 
       const session = sqliteGet<SessionRow>(
         'SELECT id, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
         [sessionId, user.sub],
       );
       if (!session) {
-        step.fail('not found');
-        return reply.status(404).send({ error: 'Session not found' });
+        throw ApiError.notFound('Session not found');
       }
 
       const metadata = parseSessionMetadataJson(session.metadata_json);
       const currentWorkingDirectory = extractSessionWorkingDirectory(metadata);
-      const { workingDirectory, force } = body.data;
+      const { workingDirectory, force } = body;
       const isForcedWarp = force === true;
       let safeWorkingDirectory: string | null = null;
       if (workingDirectory === null) {
@@ -2541,13 +2450,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       const { step } = startRequestWorkflow(request, 'session.children.list', undefined, {
         sessionId,
       });
-      const query = childSessionQuerySchema.safeParse(
-        (request as FastifyRequest & { query: unknown }).query,
-      );
-      if (!query.success) {
-        step.fail('invalid query params');
-        return reply.status(400).send({ error: 'Invalid query params' });
-      }
+      const query = parseQuery(childSessionQuerySchema, (request as FastifyRequest & { query: unknown }).query);
 
       const parent = sqliteGet<SessionRow>(
         'SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
@@ -2555,8 +2458,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       );
 
       if (!parent) {
-        step.fail('not found');
-        return reply.status(404).send({ error: 'Session not found' });
+        throw ApiError.notFound('Session not found');
       }
 
       const sessions = sqliteAll<SessionRow>(
@@ -2574,7 +2476,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
             (childSessionId) => sessions.find((session) => session.id === childSessionId) ?? null,
           )
           .filter((session): session is SessionRow => session !== null)
-          .slice(query.data.offset, query.data.offset + query.data.limit),
+          .slice(query.offset, query.offset + query.limit),
         user.sub,
       );
 
@@ -2612,8 +2514,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       );
 
       if (!session) {
-        step.fail('not found');
-        return reply.status(404).send({ error: 'Session not found' });
+        throw ApiError.notFound('Session not found');
       }
 
       const sessions = sqliteAll<SessionRow>(
@@ -2662,8 +2563,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         [sessionId, user.sub],
       );
       if (!session) {
-        step.fail('not found');
-        return reply.status(404).send({ error: 'Session not found' });
+        throw ApiError.notFound('Session not found');
       }
 
       const sessions = sqliteAll<SessionRow>(
@@ -2724,14 +2624,10 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step } = startRequestWorkflow(request, 'session.import');
       const user = request.user as JwtPayload;
-      const body = importSessionSchema.safeParse(request.body);
-      if (!body.success) {
-        step.fail('invalid import data');
-        return reply.status(400).send({ error: 'Invalid import data', issues: body.error.issues });
-      }
+      const body = parseBody(importSessionSchema, request.body);
 
       const id = randomUUID();
-      const normalizedMessages = normalizeImportedMessages(body.data.messages);
+      const normalizedMessages = normalizeImportedMessages(body.messages);
       const validation = validateImportedMessagesPayload(normalizedMessages);
       if (!validation.ok) {
         step.fail('import too large');

@@ -770,7 +770,7 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
             description: '可选：命令超时（毫秒），默认 24h',
           },
         },
-        required: ['command', 'description'],
+        required: ['command'],
         additionalProperties: false,
       };
     case 'bash_output':
@@ -934,7 +934,7 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
             description: '触发本任务的命令',
           },
         },
-        required: ['description', 'prompt', 'load_skills', 'run_in_background'],
+        required: ['prompt'],
         additionalProperties: false,
       };
     case 'background_output':
@@ -1098,7 +1098,7 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
           run_in_background: { type: 'boolean' },
           session_id: { type: 'string' },
         },
-        required: ['description', 'prompt', 'subagent_type', 'run_in_background'],
+        required: ['prompt', 'subagent_type'],
         additionalProperties: false,
       };
     case 'skill_mcp':
@@ -1135,7 +1135,7 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
             description: '简明指出希望从输入中提取什么。',
           },
         },
-        required: ['goal'],
+        required: [],
         additionalProperties: false,
       };
     case 'generate_image':

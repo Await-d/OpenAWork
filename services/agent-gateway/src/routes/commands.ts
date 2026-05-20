@@ -14,6 +14,8 @@ import {
 import { z } from 'zod';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
+import { ApiError } from '../infra/error-response.js';
+import { parseBody } from '../infra/parse-request.js';
 import {
   COMPACTION_SETTINGS_KEY,
   readCompactionSettings,
@@ -157,12 +159,7 @@ export async function commandsRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
       const { sessionId } = request.params as { sessionId: string };
       const { step } = startRequestWorkflow(request, 'command.execute', undefined, { sessionId });
-      const body = executeCommandSchema.safeParse(request.body);
-
-      if (!body.success) {
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(executeCommandSchema, request.body);
 
       const session = sqliteGet<SessionRow>(
         'SELECT id, user_id, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
@@ -170,14 +167,12 @@ export async function commandsRoutes(app: FastifyInstance): Promise<void> {
       );
 
       if (!session) {
-        step.fail('session not found');
-        return reply.status(404).send({ error: 'Session not found' });
+        throw ApiError.notFound('Session not found');
       }
 
-      const command = buildCommandDescriptors().find((item) => item.id === body.data.commandId);
+      const command = buildCommandDescriptors().find((item) => item.id === body.commandId);
       if (!command || command.execution !== 'server') {
-        step.fail('unsupported command');
-        return reply.status(400).send({ error: 'Unsupported command' });
+        throw ApiError.badRequest('Unsupported command');
       }
 
       const storedMessages = listSessionMessagesV2({
@@ -187,18 +182,18 @@ export async function commandsRoutes(app: FastifyInstance): Promise<void> {
       const messages =
         storedMessages.length > 0
           ? storedMessages
-          : body.data.messages
-            ? normalizeMessageSnapshots(body.data.messages)
+          : body.messages
+            ? normalizeMessageSnapshots(body.messages)
             : storedMessages;
       const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, sessionId);
 
       const cmdParams = {
-        args: extractCommandArgs(body.data.rawInput, command.label),
+        args: extractCommandArgs(body.rawInput, command.label),
         commandId: command.id,
         graph,
         messages,
         metadataJson: session.metadata_json,
-        rawInput: body.data.rawInput,
+        rawInput: body.rawInput,
         sessionId,
         userId: user.sub,
       };
@@ -239,8 +234,7 @@ export async function commandsRoutes(app: FastifyInstance): Promise<void> {
           result = await executeHandoffCommand(cmdParams);
           break;
         default:
-          step.fail('unsupported action');
-          return reply.status(400).send({ error: 'Unsupported command action' });
+          throw ApiError.badRequest('Unsupported command action');
       }
 
       step.succeed(undefined, { commandId: command.id });

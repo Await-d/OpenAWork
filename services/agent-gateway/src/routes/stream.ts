@@ -32,7 +32,6 @@ import {
   getProviderConfigForSelection,
 } from '../provider/provider-config.js';
 import { WorkflowLogger, createRequestContext } from '@openAwork/logger';
-import { isContextNearOverflow, isContextOverflow } from '../session/session-message-store.js';
 import {
   appendSessionMessageV2,
   deleteSessionMessagesByRequestScope,
@@ -41,9 +40,12 @@ import {
   listSessionMessagesV2,
 } from '../message/message-v2-adapter.js';
 import {
-  executeSessionCompaction,
-  isAutoCompactCircuitBreakerTripped,
-} from '../session/session-compaction.js';
+  resolveEffectiveContextWindow,
+} from '../compaction/context-window-resolver.js';
+import {
+  triggerProactiveCompaction,
+  triggerOverflowCompaction,
+} from '../compaction/auto-compaction-trigger.js';
 import { persistStreamUserMessage } from '../session/stream-session-title.js';
 import { buildCapabilityContext } from './capabilities.js';
 import {
@@ -117,7 +119,7 @@ import {
   type RecoveryResult,
 } from '../session/session-recovery.js';
 import { detectDelegateTaskError, buildRetryGuidance } from '../task/delegate-task-retry.js';
-import { truncateToolOutputUniversal } from '../tools/tool-output-truncator.js';
+import { truncateToolOutputUniversal, truncateToolOutputDynamicUniversal } from '../tools/tool-output-truncator.js';
 import { normalizeToolArgumentsForStorage } from '../tools/tool-result-contract.js';
 import { detectEmptyTaskResponse } from '../task/empty-task-response-detector.js';
 import { buildDynamicOrchestratorPrompt } from '../agent/dynamic-agent-prompt-builder.js';
@@ -174,7 +176,7 @@ import {
   buildCompanionPrompt,
   loadCompanionSettingsForUser,
 } from '../workspace/companion-settings.js';
-import { checkDoomLoop, resetDoomLoopHistory } from '../session/doom-loop-detector.js';
+import { peekDoomLoop, recordDoomLoopEntry, resetDoomLoopHistory } from '../session/doom-loop-detector.js';
 import { buildTeamInstructionStack } from '../team/team-instruction-stack.js';
 import { mapAgentToTeamRoleLayer } from '../team/team-role-layer-mapping.js';
 
@@ -1382,13 +1384,23 @@ export async function executeToolCalls(input: {
     // Doom loop detection (mirrors opencode processor.ts):
     // If the same tool is called with the same arguments N consecutive times,
     // emit a synthetic error result to break the loop and warn the LLM.
-    // Only check for doom loop when the tool would otherwise execute normally
-    // (not blocked by guards or missing args).
-    const isDoomLoop =
+    //
+    // We only record an entry into the loop history once we've confirmed
+    // the call would otherwise dispatch normally — schema validation
+    // failures, missing-arg short-circuits and Prometheus blocks are
+    // *not* recorded. Recording them would inflate the counter on
+    // recoverable mistakes (e.g. a model that forgets `description`
+    // for `bash` three times in a row would get flagged as a doom loop
+    // even though each retry is a different attempt to fix the schema).
+    const willDispatch =
       !prometheusGuard.blocked &&
       !isMissingRequiredToolArguments(toolCall.toolName, normalizedInputText, parsedInput) &&
-      isEnabledToolName(toolCall.toolName, input.enabledToolNames) &&
-      checkDoomLoop(input.sessionId, toolCall.toolName, parsedInput);
+      isEnabledToolName(toolCall.toolName, input.enabledToolNames);
+    const isDoomLoop =
+      willDispatch && peekDoomLoop(input.sessionId, toolCall.toolName, parsedInput);
+    if (willDispatch && !isDoomLoop) {
+      recordDoomLoopEntry(input.sessionId, toolCall.toolName, parsedInput);
+    }
 
     const result = isDoomLoop
       ? {
@@ -2224,110 +2236,30 @@ export async function handleStreamRequest(input: {
 
       for (let round = 1; ; round += 1) {
         const roundStartedAt = Date.now();
+        // Dynamic context window: resolve the effective limit for this user+model,
+        // which may be lower than the preset if a provider error previously revealed
+        // a smaller actual limit (e.g. relay supports 200K but preset says 1M).
+        const effectiveContextWindow = resolveEffectiveContextWindow(
+          input.user.sub,
+          route.model,
+          route.contextWindow,
+        );
         // P0: Proactive compaction — compact before overflow if token usage is near threshold.
-        // This prevents the user-visible error → compact → retry cycle.
-        if (
-          round > 1 &&
-          compactionSettings.auto &&
-          lastRoundUsage &&
-          typeof route.contextWindow === 'number' &&
-          !isAutoCompactCircuitBreakerTripped(input.sessionContext.metadataJson) &&
-          isContextNearOverflow(lastRoundUsage, route.contextWindow, compactionSettings.reserved)
-        ) {
-          try {
-            const providerRow = sqliteGet<{ value: string }>(
-              `SELECT value FROM user_settings WHERE user_id = ? AND key = 'providers'`,
-              [input.user.sub],
-            );
-            const selectionRow = sqliteGet<{ value: string }>(
-              `SELECT value FROM user_settings WHERE user_id = ? AND key = 'active_selection'`,
-              [input.user.sub],
-            );
-            const compactionProviderConfig = await getCompactionProviderConfig(
-              parseStoredJson(providerRow?.value),
-              parseStoredJson(selectionRow?.value),
-            );
-            const compactionRoute = compactionProviderConfig
-              ? resolveCompactionRoute(
-                  compactionProviderConfig.provider,
-                  compactionProviderConfig.modelId,
-                )
-              : route;
-
-            const allMessages = listSessionMessagesV2({
-              sessionId: input.sessionId,
-              userId: input.user.sub,
-              statuses: ['final'],
-            });
-            const startedAt = Date.now();
-            publishSessionRunEvent(
-              input.sessionId,
-              {
-                type: 'compaction',
-                summary: '上下文接近阈值，正在预防性压缩。',
-                trigger: 'automatic',
-                phase: 'started',
-                cause: 'proactive_near_overflow',
-                strategy: 'summary_only',
-                eventId: `${requestData.clientRequestId}:proactive-compact:${round}:started`,
-                runId,
-                occurredAt: startedAt,
-              },
-              { clientRequestId: requestData.clientRequestId },
-            );
-            const compactionResult = await executeSessionCompaction({
-              metadataJson: input.sessionContext.metadataJson,
-              messages: allMessages,
-              prune: compactionSettings.prune,
-              recentMessagesKept: compactionSettings.recentMessagesKept,
-              route: compactionRoute,
-              sessionId: input.sessionId,
-              signal: abortController.signal,
-              trigger: 'automatic',
-              userId: input.user.sub,
-            });
-            input.sessionContext.metadataJson = compactionResult.metadataJson;
-
-            const signature = compactionResult.durableSummary?.signature ?? String(Date.now());
-            const compactedCount =
-              compactionResult.durableSummary?.newlySummarizedMessages ?? allMessages.length;
-            const representedCount =
-              compactionResult.durableSummary?.totalRepresentedMessages ?? allMessages.length;
-            publishSessionRunEvent(
-              input.sessionId,
-              {
-                type: 'compaction',
-                summary: `已预防性压缩 ${compactedCount} 条较早消息，保留 ${compactionSettings.recentMessagesKept} 条近期消息。`,
-                trigger: 'automatic',
-                phase: 'completed',
-                cause: 'proactive_near_overflow',
-                strategy: 'summary_only',
-                compactedMessages: compactedCount,
-                representedMessages: representedCount,
-                eventId: `${requestData.clientRequestId}:proactive-compact:${round}:${signature}:completed`,
-                runId,
-                occurredAt: Date.now(),
-              },
-              { clientRequestId: requestData.clientRequestId },
-            );
-          } catch (error: unknown) {
-            publishSessionRunEvent(
-              input.sessionId,
-              {
-                type: 'compaction',
-                summary:
-                  error instanceof Error ? error.message : '预防性压缩失败，保留当前上下文状态。',
-                trigger: 'automatic',
-                phase: 'failed',
-                cause: 'proactive_near_overflow',
-                strategy: 'summary_only',
-                eventId: `${requestData.clientRequestId}:proactive-compact:${round}:failed`,
-                runId,
-                occurredAt: Date.now(),
-              },
-              { clientRequestId: requestData.clientRequestId },
-            );
-            console.warn('proactive compaction failed', error);
+        if (round > 1 && lastRoundUsage) {
+          const proactiveResult = await triggerProactiveCompaction({
+            userId: input.user.sub,
+            sessionId: input.sessionId,
+            metadataJson: input.sessionContext.metadataJson,
+            clientRequestId: requestData.clientRequestId,
+            runId,
+            route,
+            compactionSettings,
+            signal: abortController.signal,
+            round,
+            lastRoundUsage,
+          });
+          if (proactiveResult.triggered) {
+            input.sessionContext.metadataJson = proactiveResult.metadataJson;
           }
         }
 
@@ -2427,151 +2359,32 @@ export async function handleStreamRequest(input: {
         }
 
         let recoveredFromOverflowError = false;
-        const shouldAutoCompact =
-          compactionSettings.auto &&
-          result.overflow === true &&
-          !isAutoCompactCircuitBreakerTripped(input.sessionContext.metadataJson) &&
-          ((result.usage &&
-            typeof route.contextWindow === 'number' &&
-            isContextOverflow(result.usage, route.contextWindow, compactionSettings.reserved)) ||
-            (!result.usage && result.stopReason === 'error'));
-
-        if (shouldAutoCompact) {
-          try {
-            const providerRow = sqliteGet<{ value: string }>(
-              `SELECT value FROM user_settings WHERE user_id = ? AND key = 'providers'`,
-              [input.user.sub],
-            );
-            const selectionRow = sqliteGet<{ value: string }>(
-              `SELECT value FROM user_settings WHERE user_id = ? AND key = 'active_selection'`,
-              [input.user.sub],
-            );
-            const compactionProviderConfig = await getCompactionProviderConfig(
-              parseStoredJson(providerRow?.value),
-              parseStoredJson(selectionRow?.value),
-            );
-            const compactionRoute = compactionProviderConfig
-              ? resolveCompactionRoute(
-                  compactionProviderConfig.provider,
-                  compactionProviderConfig.modelId,
-                )
-              : route;
-
-            const allMessages = listSessionMessagesV2({
-              sessionId: input.sessionId,
-              userId: input.user.sub,
-              statuses: ['final'],
-            });
-            const latestFinalMessage = allMessages.at(-1);
-            const replayMessage =
-              !result.usage && result.stopReason === 'error' && latestFinalMessage?.role === 'user'
-                ? latestFinalMessage
-                : null;
-            const cause = result.usage ? 'usage_overflow' : 'provider_overflow';
-            const strategy = replayMessage
-              ? ('replay' as const)
-              : !result.usage && result.stopReason === 'error'
-                ? ('synthetic_continue' as const)
-                : ('summary_only' as const);
-            const messagesForCompaction = replayMessage ? allMessages.slice(0, -1) : allMessages;
-            if (messagesForCompaction.length === 0) {
-              throw new Error('no earlier history available for overflow compaction recovery');
+        // Overflow compaction: detect context overflow and trigger recovery.
+        // Encapsulates error parsing, Phase 2 truncation, and Phase 3 summarization.
+        if (result.overflow === true) {
+          const overflowResult = await triggerOverflowCompaction({
+            userId: input.user.sub,
+            sessionId: input.sessionId,
+            metadataJson: input.sessionContext.metadataJson,
+            clientRequestId: requestData.clientRequestId,
+            runId,
+            route,
+            compactionSettings,
+            signal: abortController.signal,
+            round,
+            roundResult: {
+              overflow: result.overflow,
+              stopReason: result.stopReason,
+              usage: result.usage,
+              upstreamError: result.upstreamError,
+            },
+          });
+          if (overflowResult.triggered) {
+            input.sessionContext.metadataJson = overflowResult.metadataJson;
+            recoveredFromOverflowError = overflowResult.recovered;
+            if (overflowResult.syntheticContinuationPrompt) {
+              syntheticContinuationPrompt = overflowResult.syntheticContinuationPrompt;
             }
-            const startedAt = Date.now();
-            publishSessionRunEvent(
-              input.sessionId,
-              {
-                type: 'compaction',
-                summary: '正在压缩会话上下文。',
-                trigger: 'automatic',
-                phase: 'started',
-                cause,
-                strategy,
-                eventId: `${requestData.clientRequestId}:auto-compact:${round}:started`,
-                runId,
-                occurredAt: startedAt,
-              },
-              { clientRequestId: requestData.clientRequestId },
-            );
-            const compactionResult = await executeSessionCompaction({
-              metadataJson: input.sessionContext.metadataJson,
-              messages: messagesForCompaction,
-              prune: compactionSettings.prune,
-              recentMessagesKept: compactionSettings.recentMessagesKept,
-              route: compactionRoute,
-              sessionId: input.sessionId,
-              signal: abortController.signal,
-              trigger: 'automatic',
-              userId: input.user.sub,
-            });
-            input.sessionContext.metadataJson = compactionResult.metadataJson;
-
-            const signature = compactionResult.durableSummary?.signature ?? String(Date.now());
-            const compactedCount =
-              compactionResult.durableSummary?.newlySummarizedMessages ??
-              messagesForCompaction.length;
-            const representedCount =
-              compactionResult.durableSummary?.totalRepresentedMessages ??
-              messagesForCompaction.length;
-            if (compactionResult.llmErrorMessage) {
-              publishSessionRunEvent(
-                input.sessionId,
-                {
-                  type: 'compaction',
-                  summary: `压缩 LLM 失败，已回退到结构化摘要：${compactionResult.llmErrorMessage}`,
-                  trigger: 'automatic',
-                  phase: 'failed',
-                  cause,
-                  strategy: 'summary_only',
-                  eventId: `${requestData.clientRequestId}:auto-compact:${round}:${signature}:llm-failed`,
-                  runId,
-                  occurredAt: Date.now(),
-                },
-                { clientRequestId: requestData.clientRequestId },
-              );
-            }
-            publishSessionRunEvent(
-              input.sessionId,
-              {
-                type: 'compaction',
-                summary: replayMessage
-                  ? `已在上下文溢出后压缩 ${compactedCount} 条较早消息，并保留当前用户请求继续执行。`
-                  : `已在上下文溢出后压缩 ${compactedCount} 条较早消息，并注入继续执行提示。`,
-                trigger: 'automatic',
-                phase: 'completed',
-                cause,
-                strategy,
-                compactedMessages: compactedCount,
-                representedMessages: representedCount,
-                eventId: `${requestData.clientRequestId}:auto-compact:${round}:${signature}:completed`,
-                runId,
-                occurredAt: Date.now(),
-              },
-              { clientRequestId: requestData.clientRequestId },
-            );
-            recoveredFromOverflowError = replayMessage !== null;
-            if (!replayMessage) {
-              syntheticContinuationPrompt =
-                'The conversation was compacted after a context overflow. Continue if you have clear next steps, or ask for clarification if additional user input is required.';
-            }
-          } catch (error: unknown) {
-            publishSessionRunEvent(
-              input.sessionId,
-              {
-                type: 'compaction',
-                summary:
-                  error instanceof Error ? error.message : '自动压缩失败，保留当前上下文状态。',
-                trigger: 'automatic',
-                phase: 'failed',
-                cause: result.usage ? 'usage_overflow' : 'provider_overflow',
-                strategy: 'summary_only',
-                eventId: `${requestData.clientRequestId}:auto-compact:${round}:failed`,
-                runId,
-                occurredAt: Date.now(),
-              },
-              { clientRequestId: requestData.clientRequestId },
-            );
-            console.warn('automatic llm compaction failed', error);
           }
         }
 

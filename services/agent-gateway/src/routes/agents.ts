@@ -3,6 +3,8 @@ import { z } from 'zod';
 import type { CreateManagedAgentInput, UpdateManagedAgentInput } from '@openAwork/shared';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
+import { ApiError } from '../infra/error-response.js';
+import { parseBody, parseParams } from '../infra/parse-request.js';
 import {
   createManagedAgentForUser,
   listManagedAgentsForUser,
@@ -78,16 +80,10 @@ export async function agentsRoutes(app: FastifyInstance): Promise<void> {
   app.post('/agents', { onRequest: [requireAuth] }, async (request, reply) => {
     const { step } = startRequestWorkflow(request, 'agents.create');
     const user = request.user as JwtPayload;
-    const parsed = createManagedAgentSchema.safeParse(request.body ?? {});
-    if (!parsed.success) {
-      step.fail('invalid create payload');
-      return reply
-        .status(400)
-        .send({ error: 'Invalid create payload', issues: parsed.error.issues });
-    }
+    const parsed = parseBody(createManagedAgentSchema, request.body ?? {});
 
     try {
-      const agent = createManagedAgentForUser(user.sub, parsed.data as CreateManagedAgentInput);
+      const agent = createManagedAgentForUser(user.sub, parsed as CreateManagedAgentInput);
       step.succeed(undefined, { agentId: agent.id });
       return reply.status(201).send({ agent });
     } catch (error) {
@@ -101,24 +97,14 @@ export async function agentsRoutes(app: FastifyInstance): Promise<void> {
   app.put('/agents/:agentId', { onRequest: [requireAuth] }, async (request, reply) => {
     const { step } = startRequestWorkflow(request, 'agents.update');
     const user = request.user as JwtPayload;
-    const params = paramsSchema.safeParse(request.params ?? {});
-    if (!params.success) {
-      step.fail('invalid agentId');
-      return reply.status(400).send({ error: 'Invalid agentId', issues: params.error.issues });
-    }
-    const parsed = updateManagedAgentSchema.safeParse(request.body ?? {});
-    if (!parsed.success) {
-      step.fail('invalid update payload');
-      return reply
-        .status(400)
-        .send({ error: 'Invalid update payload', issues: parsed.error.issues });
-    }
+    const params = parseParams(paramsSchema, request.params ?? {});
+    const parsed = parseBody(updateManagedAgentSchema, request.body ?? {});
 
     try {
       const agent = updateManagedAgentForUser(
         user.sub,
-        params.data.agentId,
-        parsed.data as UpdateManagedAgentInput,
+        params.agentId,
+        parsed as UpdateManagedAgentInput,
       );
       step.succeed(undefined, { agentId: agent.id });
       return reply.send({ agent });
@@ -137,15 +123,11 @@ export async function agentsRoutes(app: FastifyInstance): Promise<void> {
   app.delete('/agents/:agentId', { onRequest: [requireAuth] }, async (request, reply) => {
     const { step } = startRequestWorkflow(request, 'agents.delete');
     const user = request.user as JwtPayload;
-    const params = paramsSchema.safeParse(request.params ?? {});
-    if (!params.success) {
-      step.fail('invalid agentId');
-      return reply.status(400).send({ error: 'Invalid agentId', issues: params.error.issues });
-    }
+    const params = parseParams(paramsSchema, request.params ?? {});
 
     try {
-      removeManagedAgentForUser(user.sub, params.data.agentId);
-      step.succeed(undefined, { agentId: params.data.agentId });
+      removeManagedAgentForUser(user.sub, params.agentId);
+      step.succeed(undefined, { agentId: params.agentId });
       return reply.status(204).send();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Delete failed';
@@ -158,14 +140,10 @@ export async function agentsRoutes(app: FastifyInstance): Promise<void> {
   app.post('/agents/:agentId/reset', { onRequest: [requireAuth] }, async (request, reply) => {
     const { step } = startRequestWorkflow(request, 'agents.reset-one');
     const user = request.user as JwtPayload;
-    const params = paramsSchema.safeParse(request.params ?? {});
-    if (!params.success) {
-      step.fail('invalid agentId');
-      return reply.status(400).send({ error: 'Invalid agentId', issues: params.error.issues });
-    }
+    const params = parseParams(paramsSchema, request.params ?? {});
 
     try {
-      const agent = resetManagedAgentForUser(user.sub, params.data.agentId);
+      const agent = resetManagedAgentForUser(user.sub, params.agentId);
       step.succeed(undefined, { agentId: agent.id });
       return reply.send({ agent });
     } catch (error) {

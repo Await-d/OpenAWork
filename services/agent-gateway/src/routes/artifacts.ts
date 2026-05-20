@@ -21,6 +21,7 @@ import {
   revertArtifactToVersion,
   updateArtifact,
 } from '../session/artifact-content-store.js';
+import { parseBody } from '../infra/parse-request.js';
 
 const ARTIFACTS_DIR = resolveGatewayArtifactsDir();
 const ARTIFACTS_INDEX = resolveGatewayArtifactsIndexPath();
@@ -153,28 +154,23 @@ export async function artifactsRoutes(app: FastifyInstance): Promise<void> {
 
   app.post<{ Body: unknown }>('/artifacts', { preHandler: requireAuth }, async (request, reply) => {
     const user = request.user as JwtPayload;
-    const parsed = createArtifactSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply
-        .status(400)
-        .send({ error: 'Invalid artifact payload', issues: parsed.error.issues });
-    }
+    const parsed = parseBody(createArtifactSchema, request.body);
 
-    const owned = await ensureSessionOwned(parsed.data.sessionId, user.sub);
+    const owned = await ensureSessionOwned(parsed.sessionId, user.sub);
     if (!owned) {
       return reply.status(404).send({ error: 'Session not found' });
     }
 
     const artifact = createArtifact(user.sub, {
-      sessionId: parsed.data.sessionId,
-      title: parsed.data.title,
-      content: parsed.data.content,
-      type: parsed.data.type,
-      fileName: parsed.data.fileName,
-      mimeType: parsed.data.mimeType,
-      metadata: normalizeMetadata(parsed.data.metadata),
-      createdBy: normalizeCreatedBy(parsed.data.createdBy),
-      createdByNote: parsed.data.createdByNote ?? null,
+      sessionId: parsed.sessionId,
+      title: parsed.title,
+      content: parsed.content,
+      type: parsed.type,
+      fileName: parsed.fileName,
+      mimeType: parsed.mimeType,
+      metadata: normalizeMetadata(parsed.metadata),
+      createdBy: normalizeCreatedBy(parsed.createdBy),
+      createdByNote: parsed.createdByNote ?? null,
     });
     return reply.status(201).send({ artifact });
   });
@@ -211,22 +207,17 @@ export async function artifactsRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: requireAuth },
     async (request, reply) => {
       const user = request.user as JwtPayload;
-      const parsed = updateArtifactSchema.safeParse(request.body);
-      if (!parsed.success) {
-        return reply
-          .status(400)
-          .send({ error: 'Invalid artifact payload', issues: parsed.error.issues });
-      }
+      const parsed = parseBody(updateArtifactSchema, request.body);
 
       const artifact = updateArtifact(user.sub, request.params.artifactId, {
-        title: parsed.data.title,
-        content: parsed.data.content,
-        type: parsed.data.type ?? null,
-        fileName: parsed.data.fileName ?? null,
-        mimeType: parsed.data.mimeType ?? null,
-        metadata: normalizeMetadata(parsed.data.metadata),
-        createdBy: normalizeCreatedBy(parsed.data.createdBy),
-        createdByNote: parsed.data.createdByNote ?? null,
+        title: parsed.title,
+        content: parsed.content,
+        type: parsed.type ?? null,
+        fileName: parsed.fileName ?? null,
+        mimeType: parsed.mimeType ?? null,
+        metadata: normalizeMetadata(parsed.metadata),
+        createdBy: normalizeCreatedBy(parsed.createdBy),
+        createdByNote: parsed.createdByNote ?? null,
       });
       if (!artifact) {
         return reply.status(404).send({ error: 'Artifact not found' });
@@ -240,17 +231,12 @@ export async function artifactsRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: requireAuth },
     async (request, reply) => {
       const user = request.user as JwtPayload;
-      const parsed = revertArtifactSchema.safeParse(request.body);
-      if (!parsed.success) {
-        return reply
-          .status(400)
-          .send({ error: 'Invalid revert payload', issues: parsed.error.issues });
-      }
+      const parsed = parseBody(revertArtifactSchema, request.body);
 
       const artifact = revertArtifactToVersion(user.sub, request.params.artifactId, {
-        versionId: parsed.data.versionId,
-        createdBy: normalizeCreatedBy(parsed.data.createdBy),
-        createdByNote: parsed.data.createdByNote ?? null,
+        versionId: parsed.versionId,
+        createdBy: normalizeCreatedBy(parsed.createdBy),
+        createdByNote: parsed.createdByNote ?? null,
       });
       if (!artifact) {
         return reply.status(404).send({ error: 'Artifact or version not found' });
@@ -270,14 +256,9 @@ export async function artifactsRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(404).send({ error: 'Session not found' });
       }
 
-      const parsed = uploadSchema.safeParse(request.body);
-      if (!parsed.success) {
-        return reply
-          .status(400)
-          .send({ error: 'Invalid upload payload', issues: parsed.error.issues });
-      }
+      const parsed = parseBody(uploadSchema, request.body);
 
-      const { name, mimeType, sizeBytes, contentBase64 } = parsed.data;
+      const { name, mimeType, sizeBytes, contentBase64 } = parsed;
       const safeName = basename(name);
       const artifactId = randomUUID();
       const targetDir = join(ARTIFACTS_DIR, sessionId);

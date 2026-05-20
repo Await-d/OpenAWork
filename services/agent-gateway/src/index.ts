@@ -1,8 +1,11 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import compress from '@fastify/compress';
 import websocket from '@fastify/websocket';
 import { WorkflowLogger } from '@openAwork/logger';
 import authPlugin from './infra/auth.js';
+import { registerErrorHandler } from './infra/error-handler.js';
+import { registerOpenApi } from './infra/openapi.js';
 import { connectDb, closeDb, db, migrate, sqliteGet, sqliteRun } from './infra/db.js';
 import { bootV2Runtime, getRuntimeFlags, shutdownV2Runtime } from './v2-runtime/index.js';
 import { skillMcpPool } from './skill/skill-mcp-connection-pool.js';
@@ -74,13 +77,27 @@ import { mcpEventsRoutes } from './routes/mcp-events.js';
 import { mcpOAuthRoutes } from './routes/mcp-oauth.js';
 import { ensurePluginsLoaded } from './runtime/plugin-host.js';
 
+// 方案 5：加载所有内置 provider 插件
+import './provider/plugins/index.js';
+
 const app = Fastify({ logger: true, disableRequestLogging: true });
 
 const port = Number(globalThis.process?.env['GATEWAY_PORT'] ?? 3000);
 const host = globalThis.process?.env['GATEWAY_HOST'] ?? '0.0.0.0';
 
 await app.register(cors, { origin: true });
+await app.register(compress, {
+  threshold: 1024,
+  encodings: ['gzip', 'deflate'],
+});
 await app.register(websocket);
+
+// 方案 4：自动 OpenAPI 文档（/docs 路径）
+await registerOpenApi(app);
+
+// 方案 2：统一错误处理（在路由注册之前）
+registerErrorHandler(app);
+
 await app.register(requestWorkflowPlugin);
 await app.register(authPlugin);
 await app.register(sessionsRoutes);
@@ -121,10 +138,23 @@ await app.register(sessionTerminalsRoutes);
 await app.register(mcpEventsRoutes);
 await app.register(mcpOAuthRoutes);
 
-app.get('/health', (request, reply) => {
+app.get('/health', {
+  schema: {
+    description: 'Health check endpoint',
+    tags: ['system'],
+    response: { 200: { type: 'object', properties: { status: { type: 'string' } } } },
+  },
+}, (request, reply) => {
   const { step } = startRequestWorkflow(request, 'gateway.health');
   step.succeed(undefined, { status: 'ok' });
   return reply.send({ status: 'ok' });
+});
+
+// OpenAPI spec as JSON (for SDK generators / CI)
+app.get('/docs/openapi.json', {
+  schema: { hide: true },
+}, (request, reply) => {
+  return reply.send(app.swagger());
 });
 
 app.addHook('onClose', async () => {

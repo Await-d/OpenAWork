@@ -4,6 +4,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
+import { parseBody, parseQuery } from '../infra/parse-request.js';
 import { defaultIgnoreManager } from '@openAwork/agent-core';
 import {
   WORKSPACE_ACCESS_MODE,
@@ -146,20 +147,15 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       const schema = z.object({ path: z.string() });
 
       const parseStep = child('parse-query');
-      const parsed = schema.safeParse(request.query);
-      if (!parsed.success) {
-        parseStep.fail('missing path');
-        step.fail('missing path');
-        return reply.status(400).send({ valid: false, path: '', error: 'Missing path' });
-      }
+      const parsed = parseQuery(schema, request.query);
       parseStep.succeed();
 
       const pathStep = child('path-safety');
-      const safePath = validateWorkspacePath(parsed.data.path);
+      const safePath = validateWorkspacePath(parsed.path);
       if (!safePath) {
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
-        return reply.status(403).send({ valid: false, path: parsed.data.path, error: 'Forbidden' });
+        return reply.status(403).send({ valid: false, path: parsed.path, error: 'Forbidden' });
       }
       pathStep.succeed();
       if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
@@ -200,16 +196,11 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       });
 
       const parseStep = child('parse-query');
-      const parsed = schema.safeParse(request.query);
-      if (!parsed.success) {
-        parseStep.fail('invalid query');
-        step.fail('invalid query');
-        return reply.status(400).send({ nodes: [] });
-      }
-      parseStep.succeed(undefined, { depth: parsed.data.depth });
+      const parsed = parseQuery(schema, request.query);
+      parseStep.succeed(undefined, { depth: parsed.depth });
 
       const pathStep = child('path-safety');
-      const safePath = validateWorkspacePath(parsed.data.path);
+      const safePath = validateWorkspacePath(parsed.path);
       if (!safePath) {
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
@@ -240,12 +231,12 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const readStep = child('read-tree', undefined, {
-        depth: parsed.data.depth,
+        depth: parsed.depth,
         maxDepth: MAX_DEPTH,
         maxEntries: MAX_ENTRIES,
       });
       const counter = { count: 0 };
-      const nodes = await readTree(safePath, parsed.data.depth, counter);
+      const nodes = await readTree(safePath, parsed.depth, counter);
       readStep.succeed(undefined, { returnedNodes: nodes.length, visitedEntries: counter.count });
       step.succeed(undefined, { returnedNodes: nodes.length, visitedEntries: counter.count });
 
@@ -273,16 +264,11 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       });
 
       const parseStep = child('parse-query');
-      const parsed = schema.safeParse(request.query);
-      if (!parsed.success) {
-        parseStep.fail('missing path');
-        step.fail('missing path');
-        return reply.status(400).send({ error: 'Missing path' });
-      }
+      const parsed = parseQuery(schema, request.query);
       parseStep.succeed();
 
       const pathStep = child('path-safety');
-      const safePath = validateWorkspacePath(parsed.data.path);
+      const safePath = validateWorkspacePath(parsed.path);
       if (!safePath) {
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
@@ -292,8 +278,8 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       // We resolve + validate the root the same way so a malformed /
       // non-workspace root is rejected before being used for the
       // prefix check.
-      if (parsed.data.workspaceRoot !== undefined) {
-        const safeRoot = validateWorkspacePath(parsed.data.workspaceRoot);
+      if (parsed.workspaceRoot !== undefined) {
+        const safeRoot = validateWorkspacePath(parsed.workspaceRoot);
         if (!safeRoot) {
           pathStep.fail('forbidden workspace root');
           step.fail('forbidden workspace root');
@@ -367,19 +353,15 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         path: z.string(),
         workspaceRoot: z.string().optional(),
       });
-      const parsed = schema.safeParse(request.query);
-      if (!parsed.success) {
-        step.fail('missing path');
-        return reply.status(400).send({ error: 'Missing path' });
-      }
+      const parsed = parseQuery(schema, request.query);
 
-      const safePath = validateWorkspacePath(parsed.data.path);
+      const safePath = validateWorkspacePath(parsed.path);
       if (!safePath) {
         step.fail('forbidden path');
         return reply.status(403).send({ error: 'Forbidden' });
       }
-      if (parsed.data.workspaceRoot !== undefined) {
-        const safeRoot = validateWorkspacePath(parsed.data.workspaceRoot);
+      if (parsed.workspaceRoot !== undefined) {
+        const safeRoot = validateWorkspacePath(parsed.workspaceRoot);
         if (!safeRoot || !isPathWithinRoot(safePath, safeRoot)) {
           step.fail('path outside workspace root');
           return reply.status(403).send({ error: 'Path outside requested workspace' });
@@ -449,16 +431,11 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       const schema = z.object({ path: z.string(), content: z.string() });
 
       const parseStep = child('parse-body');
-      const parsed = schema.safeParse(request.body);
-      if (!parsed.success) {
-        parseStep.fail('invalid body');
-        step.fail('invalid body');
-        return reply.status(400).send({ error: 'Missing path or content' });
-      }
+      const parsed = parseBody(schema, request.body);
       parseStep.succeed();
 
       const pathStep = child('path-safety');
-      const safePath = validateWorkspacePath(parsed.data.path);
+      const safePath = validateWorkspacePath(parsed.path);
       if (!safePath) {
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
@@ -470,9 +447,9 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
 
       const writeStep = child('write');
       try {
-        await fsp.writeFile(safePath, parsed.data.content, 'utf8');
-        writeStep.succeed(undefined, { bytes: parsed.data.content.length });
-        step.succeed(undefined, { bytes: parsed.data.content.length });
+        await fsp.writeFile(safePath, parsed.content, 'utf8');
+        writeStep.succeed(undefined, { bytes: parsed.content.length });
+        step.succeed(undefined, { bytes: parsed.content.length });
         return reply.send({ success: true, path: safePath });
       } catch (err) {
         writeStep.fail(String(err));
@@ -490,16 +467,11 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       const schema = z.object({ path: z.string(), content: z.string().default('') });
 
       const parseStep = child('parse-body');
-      const parsed = schema.safeParse(request.body);
-      if (!parsed.success) {
-        parseStep.fail('invalid body');
-        step.fail('invalid body');
-        return reply.status(400).send({ error: 'Missing path' });
-      }
+      const parsed = parseBody(schema, request.body);
       parseStep.succeed();
 
       const pathStep = child('path-safety');
-      const safePath = validateWorkspacePath(parsed.data.path);
+      const safePath = validateWorkspacePath(parsed.path);
       if (!safePath) {
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
@@ -528,12 +500,12 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       try {
         const handle = await fsp.open(safePath, 'wx');
         try {
-          await handle.writeFile(parsed.data.content, 'utf8');
+          await handle.writeFile(parsed.content, 'utf8');
         } finally {
           await handle.close();
         }
-        writeStep.succeed(undefined, { bytes: parsed.data.content.length });
-        step.succeed(undefined, { bytes: parsed.data.content.length });
+        writeStep.succeed(undefined, { bytes: parsed.content.length });
+        step.succeed(undefined, { bytes: parsed.content.length });
         return reply.send({ success: true, path: safePath });
       } catch (error) {
         if (error instanceof Error && 'code' in error) {
@@ -566,16 +538,11 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       const schema = z.object({ path: z.string() });
 
       const parseStep = child('parse-body');
-      const parsed = schema.safeParse(request.body);
-      if (!parsed.success) {
-        parseStep.fail('invalid body');
-        step.fail('invalid body');
-        return reply.status(400).send({ error: 'Missing path' });
-      }
+      const parsed = parseBody(schema, request.body);
       parseStep.succeed();
 
       const pathStep = child('path-safety');
-      const safePath = validateWorkspacePath(parsed.data.path);
+      const safePath = validateWorkspacePath(parsed.path);
       if (!safePath) {
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
@@ -619,14 +586,10 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step, child } = startRequestWorkflow(request, 'workspace.review.status');
       const schema = z.object({ path: z.string() });
-      const parsed = schema.safeParse(request.query);
-      if (!parsed.success) {
-        step.fail('missing path');
-        return reply.status(400).send({ changes: [] });
-      }
+      const parsed = parseQuery(schema, request.query);
 
       const pathStep = child('path-safety');
-      const safePath = validateWorkspacePath(parsed.data.path);
+      const safePath = validateWorkspacePath(parsed.path);
       if (!safePath) {
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
@@ -649,21 +612,17 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step, child } = startRequestWorkflow(request, 'workspace.review.diff');
       const schema = z.object({ path: z.string(), filePath: z.string() });
-      const parsed = schema.safeParse(request.query);
-      if (!parsed.success) {
-        step.fail('missing path or filePath');
-        return reply.status(400).send({ diff: '' });
-      }
+      const parsed = parseQuery(schema, request.query);
 
       const pathStep = child('path-safety');
-      const safePath = validateWorkspacePath(parsed.data.path);
+      const safePath = validateWorkspacePath(parsed.path);
       if (!safePath) {
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
         return reply.status(403).send({ diff: '' });
       }
 
-      const relativeFilePath = validateWorkspaceRelativePath(safePath, parsed.data.filePath);
+      const relativeFilePath = validateWorkspaceRelativePath(safePath, parsed.filePath);
       if (!relativeFilePath) {
         pathStep.fail('invalid filePath');
         step.fail('invalid filePath');
@@ -690,14 +649,10 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step, child } = startRequestWorkflow(request, 'workspace.review.revert');
       const schema = z.object({ path: z.string(), filePath: z.string() });
-      const parsed = schema.safeParse(request.body);
-      if (!parsed.success) {
-        step.fail('missing path or filePath');
-        return reply.status(400).send({ ok: false });
-      }
+      const parsed = parseBody(schema, request.body);
 
       const pathStep = child('path-safety');
-      const safePath = validateWorkspacePath(parsed.data.path);
+      const safePath = validateWorkspacePath(parsed.path);
       if (!safePath) {
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
@@ -705,7 +660,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       }
       await ensureIgnoreRulesLoadedForPath(safePath);
 
-      const relativeFilePath = validateWorkspaceRelativePath(safePath, parsed.data.filePath);
+      const relativeFilePath = validateWorkspaceRelativePath(safePath, parsed.filePath);
       if (!relativeFilePath) {
         pathStep.fail('invalid filePath');
         step.fail('invalid filePath');
@@ -745,12 +700,8 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         path: z.string(),
         maxResults: z.coerce.number().int().min(1).max(50).default(8),
       });
-      const parsed = schema.safeParse(request.query);
-      if (!parsed.success) {
-        step.fail('missing name or path');
-        return reply.status(400).send({ results: [], error: 'Missing name or path' });
-      }
-      const safePath = validateWorkspacePath(parsed.data.path);
+      const parsed = parseQuery(schema, request.query);
+      const safePath = validateWorkspacePath(parsed.path);
       if (!safePath) {
         step.fail('forbidden path');
         return reply.status(403).send({ results: [] });
@@ -758,7 +709,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
       await ensureIgnoreRulesLoadedForPath(safePath);
 
-      const { name, maxResults } = parsed.data;
+      const { name, maxResults } = parsed;
       const results: Array<{ path: string }> = [];
       const scanStep = child('scan', undefined, { maxResults });
 
@@ -802,16 +753,11 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       });
 
       const parseStep = child('parse-query');
-      const parsed = schema.safeParse(request.query);
-      if (!parsed.success) {
-        parseStep.fail('missing q or path');
-        step.fail('missing q or path');
-        return reply.status(400).send({ results: [], error: 'Missing q or path' });
-      }
-      parseStep.succeed(undefined, { maxResults: parsed.data.maxResults });
+      const parsed = parseQuery(schema, request.query);
+      parseStep.succeed(undefined, { maxResults: parsed.maxResults });
 
       const pathStep = child('path-safety');
-      const safePath = validateWorkspacePath(parsed.data.path);
+      const safePath = validateWorkspacePath(parsed.path);
       if (!safePath) {
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
@@ -821,7 +767,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
       await ensureIgnoreRulesLoadedForPath(safePath);
 
-      const { maxResults, q } = parsed.data;
+      const { maxResults, q } = parsed;
       const results: Array<{ path: string; line: number; text: string }> = [];
       let scannedFiles = 0;
       let skippedLargeFiles = 0;

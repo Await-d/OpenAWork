@@ -26,7 +26,7 @@ import {
   backgroundCancelToolDefinition,
   backgroundOutputToolDefinition,
 } from './background-task-tools.js';
-import { bashToolDefinition, runBashCommand } from './bash-tools.js';
+import { bashToolDefinition, deriveBashDescription, runBashCommand } from './bash-tools.js';
 import {
   bashKillToolDefinition,
   bashOutputToolDefinition,
@@ -208,8 +208,6 @@ import {
   hasWorkspacePermanentPermission,
 } from '../workspace/workspace-safety.js';
 import {
-  executeWorkspaceCreateFile,
-  executeWorkspaceWriteFile,
   executeWriteTool,
   globTool,
   grepTool,
@@ -218,16 +216,12 @@ import {
   resolveWorkspaceReviewFilePath,
   WORKSPACE_TOOL_NAMES,
   workspaceCreateDirectoryTool,
-  workspaceCreateFileTool,
-  workspaceReadFileTool,
   workspaceReviewDiffTool,
   workspaceReviewRevertTool,
   workspaceReviewStatusTool,
-  workspaceSearchTool,
-  workspaceTreeTool,
-  workspaceWriteFileTool,
   writeTool,
 } from './workspace-tools.js';
+import { rewriteLegacyToolRequest } from './legacy-tool-name-rewrite.js';
 
 function formatToolInputValidationOutput(
   toolName: string,
@@ -246,9 +240,6 @@ const FILE_TOOLS = new Set([
   'edit',
   'read',
   'write',
-  'workspace_read_file',
-  'workspace_write_file',
-  'workspace_create_file',
   'workspace_review_diff',
   'workspace_review_revert',
 ]);
@@ -1373,18 +1364,6 @@ function buildPermissionRequestContext(
   }
 
   switch (request.toolName) {
-    case 'workspace_write_file': {
-      const safePath = pathValue ? validateWorkspacePath(pathValue) : null;
-      if (!safePath) return null;
-      const rel = toRelativeScope(safePath);
-      return {
-        scope: rel,
-        reason: '需要覆盖写入工作区文件',
-        riskLevel: 'medium',
-        previewAction: `覆盖写入 ${safePath}`,
-        always: ['*'],
-      };
-    }
     case 'write': {
       const safePath = pathValue ? validateWorkspacePath(pathValue) : null;
       if (!safePath) return null;
@@ -1540,18 +1519,6 @@ function buildPermissionRequestContext(
         reason: '需要创建子任务和子会话',
         riskLevel: 'high',
         previewAction: `创建子任务 ${description}`,
-        always: ['*'],
-      };
-    }
-    case 'workspace_create_file': {
-      const safePath = pathValue ? validateWorkspacePath(pathValue) : null;
-      if (!safePath) return null;
-      const rel = toRelativeScope(safePath);
-      return {
-        scope: rel,
-        reason: '需要在工作区中新建文件',
-        riskLevel: 'medium',
-        previewAction: `创建文件 ${safePath}`,
         always: ['*'],
       };
     }
@@ -2125,7 +2092,7 @@ async function executeGatewayManagedToolImpl(
           toolName: request.toolName,
           output: await runLookAtTool({
             filePath: parsed.data.file_path,
-            goal: parsed.data.goal,
+            goal: parsed.data.goal ?? '提取并描述文件内容',
             imageData: parsed.data.image_data,
             parentSessionId: sessionId,
             userId,
@@ -2224,7 +2191,7 @@ async function executeGatewayManagedToolImpl(
         ...request,
         toolName: taskToolDefinition.name,
         rawInput: {
-          description: parsed.data.description,
+          description: parsed.data.description ?? parsed.data.prompt.slice(0, 40),
           prompt: parsed.data.prompt,
           subagent_type: normalizedAgent,
           load_skills: [],
@@ -2278,7 +2245,7 @@ async function executeGatewayManagedToolImpl(
         const output = parsed.data.run_in_background
           ? buildCallOmoAgentBackgroundOutput({
               agent: normalizedAgent,
-              description: parsed.data.description,
+              description: parsed.data.description ?? parsed.data.prompt.slice(0, 40),
               sessionId: taskOutput.sessionId,
               status: taskOutput.status ?? 'pending',
               taskId: taskOutput.taskId,
@@ -2527,7 +2494,7 @@ async function executeGatewayManagedToolImpl(
       };
     }
 
-    if (request.toolName === workspaceWriteFileTool.name || request.toolName === writeTool.name) {
+    if (request.toolName === writeTool.name) {
       const userId = getSessionOwnerUserId(sessionId);
       if (!userId) {
         return {
@@ -2539,9 +2506,7 @@ async function executeGatewayManagedToolImpl(
         };
       }
 
-      const toolDefinition =
-        request.toolName === workspaceWriteFileTool.name ? workspaceWriteFileTool : writeTool;
-      const parsed = toolDefinition.inputSchema.safeParse(rawInput);
+      const parsed = writeTool.inputSchema.safeParse(rawInput);
       if (!parsed.success) {
         return {
           toolCallId: request.toolCallId,
@@ -2552,57 +2517,20 @@ async function executeGatewayManagedToolImpl(
         };
       }
 
-      const output =
-        request.toolName === workspaceWriteFileTool.name
-          ? await executeWorkspaceWriteFile(parsed.data, {
-              beforeWriteBackup: async ({ content, filePath }) =>
-                captureBeforeWriteBackup({
-                  sessionId,
-                  userId,
-                  requestId: executionContext?.clientRequestId,
-                  toolCallId: request.toolCallId,
-                  toolName: request.toolName,
-                  filePath,
-                  content,
-                  kind: 'before_write',
-                }),
-            })
-          : await executeWriteTool(parsed.data, signal, {
-              beforeWriteBackup: async ({ content, filePath }) =>
-                captureBeforeWriteBackup({
-                  sessionId,
-                  userId,
-                  requestId: executionContext?.clientRequestId,
-                  toolCallId: request.toolCallId,
-                  toolName: request.toolName,
-                  filePath,
-                  content,
-                  kind: 'before_write',
-                }),
-            });
+      const output = await executeWriteTool(parsed.data, signal, {
+        beforeWriteBackup: async ({ content, filePath }) =>
+          captureBeforeWriteBackup({
+            sessionId,
+            userId,
+            requestId: executionContext?.clientRequestId,
+            toolCallId: request.toolCallId,
+            toolName: request.toolName,
+            filePath,
+            content,
+            kind: 'before_write',
+          }),
+      });
 
-      return {
-        toolCallId: request.toolCallId,
-        toolName: request.toolName,
-        output,
-        isError: false,
-        durationMs: 0,
-      };
-    }
-
-    if (request.toolName === workspaceCreateFileTool.name) {
-      const parsed = workspaceCreateFileTool.inputSchema.safeParse(rawInput);
-      if (!parsed.success) {
-        return {
-          toolCallId: request.toolCallId,
-          toolName: request.toolName,
-          output: formatToolInputValidationOutput(request.toolName, parsed.error.issues),
-          isError: true,
-          durationMs: 0,
-        };
-      }
-
-      const output = await executeWorkspaceCreateFile(parsed.data);
       return {
         toolCallId: request.toolCallId,
         toolName: request.toolName,
@@ -3100,6 +3028,14 @@ async function executeGatewayManagedToolImpl(
         };
       }
 
+      // `description` is now optional in the schema — models commonly
+      // omit it since `prompt` already carries the full intent. We
+      // derive a short fallback from the prompt's first 40 chars so
+      // downstream consumers (task graph, session title, display
+      // messages) always have a non-empty label.
+      const effectiveTaskDescription =
+        parsed.data.description ?? parsed.data.prompt.slice(0, 40);
+
       const taskManager = new AgentTaskManagerImpl();
       const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, sessionId);
       const parentEffective = getEffectiveSkillsForSession(sessionId) ?? undefined;
@@ -3174,7 +3110,7 @@ async function executeGatewayManagedToolImpl(
           ? existingTaskBySession
           : null;
       const childSessionId = resumableTask?.sessionId ?? requestedSessionId ?? randomUUID();
-      const childSessionTitle = `${parsed.data.description} (@${resolvedAgent.agentId})`;
+      const childSessionTitle = `${effectiveTaskDescription} (@${resolvedAgent.agentId})`;
       const childRequestData = buildDelegatedChildRequestData({
         agentId: resolvedAgent.agentId,
         childSessionId,
@@ -3336,7 +3272,7 @@ async function executeGatewayManagedToolImpl(
               message: buildTaskToolBackgroundMessage({
                 agent: resumableTask.assignedAgent ?? resolvedAgent.agentId,
                 category,
-                description: parsed.data.description,
+                description: effectiveTaskDescription,
                 sessionId: childSessionId,
                 status: mapTaskStatusToToolOutputStatus(resumableTask.status),
                 taskId: resumableTask.id,
@@ -3373,7 +3309,7 @@ async function executeGatewayManagedToolImpl(
           startedAt: canExecuteImmediately ? Date.now() : resumableTask.startedAt,
           status: canExecuteImmediately ? 'running' : 'pending',
           tags: taskTags,
-          title: parsed.data.description,
+          title: effectiveTaskDescription,
         });
         await taskManager.save(graph);
         if (canAutoResumeParentSession && autoResumeRequestData) {
@@ -3391,7 +3327,7 @@ async function executeGatewayManagedToolImpl(
         publishSessionRunEvent(sessionId, {
           type: 'task_update',
           taskId: resumableTask.id,
-          label: parsed.data.description,
+          label: effectiveTaskDescription,
           status: shouldRunInBackground || canExecuteImmediately ? 'in_progress' : 'pending',
           assignedAgent: resolvedAgent.agentId,
           ...(category ? { category } : {}),
@@ -3411,7 +3347,7 @@ async function executeGatewayManagedToolImpl(
               requestData: childRequestData,
               requestedSkills,
               taskCategory: category,
-              taskTitle: parsed.data.description,
+              taskTitle: effectiveTaskDescription,
               userId,
             });
           }, 0);
@@ -3427,7 +3363,7 @@ async function executeGatewayManagedToolImpl(
             requestData: childRequestData,
             requestedSkills,
             taskCategory: category,
-            taskTitle: parsed.data.description,
+            taskTitle: effectiveTaskDescription,
             userId,
           });
           const refreshedGraph = await taskManager.loadOrCreate(WORKSPACE_ROOT, sessionId);
@@ -3473,7 +3409,7 @@ async function executeGatewayManagedToolImpl(
             message: buildTaskToolBackgroundMessage({
               agent: resolvedAgent.agentId,
               category,
-              description: parsed.data.description,
+              description: effectiveTaskDescription,
               sessionId: childSessionId,
               status: shouldRunInBackground || canExecuteImmediately ? 'running' : 'pending',
               taskId: resumableTask.id,
@@ -3501,7 +3437,7 @@ async function executeGatewayManagedToolImpl(
       }
 
       const childTask = taskManager.addTask(graph, {
-        title: parsed.data.description,
+        title: effectiveTaskDescription,
         description: parsed.data.prompt,
         status: 'pending',
         blockedBy: [],
@@ -3535,7 +3471,7 @@ async function executeGatewayManagedToolImpl(
       publishSessionRunEvent(sessionId, {
         type: 'task_update',
         taskId: childTask.id,
-        label: parsed.data.description,
+        label: effectiveTaskDescription,
         status: shouldRunInBackground ? 'in_progress' : 'pending',
         assignedAgent: resolvedAgent.agentId,
         ...(category ? { category } : {}),
@@ -3555,7 +3491,7 @@ async function executeGatewayManagedToolImpl(
             requestData: childRequestData,
             requestedSkills,
             taskCategory: category,
-            taskTitle: parsed.data.description,
+            taskTitle: effectiveTaskDescription,
             userId,
           });
         }, 0);
@@ -3571,7 +3507,7 @@ async function executeGatewayManagedToolImpl(
           requestData: childRequestData,
           requestedSkills,
           taskCategory: category,
-          taskTitle: parsed.data.description,
+          taskTitle: effectiveTaskDescription,
           userId,
         });
         const refreshedGraph = await taskManager.loadOrCreate(WORKSPACE_ROOT, sessionId);
@@ -3623,7 +3559,7 @@ async function executeGatewayManagedToolImpl(
           message: buildTaskToolBackgroundMessage({
             agent: resolvedAgent.agentId,
             category,
-            description: parsed.data.description,
+            description: effectiveTaskDescription,
             sessionId: childSessionId,
             status: shouldRunInBackground ? 'running' : 'pending',
             taskId: childTask.id,
@@ -3957,7 +3893,9 @@ async function executeGatewayManagedToolImpl(
                   ? { clientRequestId: executionContext.clientRequestId }
                   : {}),
                 ...(request.toolCallId ? { toolCallId: request.toolCallId } : {}),
-                ...(parsed.data.description ? { description: parsed.data.description } : {}),
+                ...(parsed.data.description
+                  ? { description: parsed.data.description }
+                  : { description: deriveBashDescription(parsed.data.command) }),
               },
             }
           : {}),
@@ -5248,10 +5186,20 @@ export class ToolSandbox {
     sessionId: string,
     executionContext?: SandboxExecutionContext,
   ): Promise<ToolCallResult> {
+    // Rewrite legacy `workspace_*` names to their canonical equivalents
+    // before any other dispatch step. The canonical tools are the only
+    // ones registered with the sandbox now.
+    const legacyRewrite = rewriteLegacyToolRequest(request.toolName, request.rawInput);
+    const incomingRequest: ToolCallRequest = legacyRewrite.rewritten
+      ? { ...request, toolName: legacyRewrite.toolName, rawInput: legacyRewrite.rawInput }
+      : request;
+
     const dispatchedRequest = dispatchClaudeCodeTool(
-      request.toolName,
-      (request.rawInput && typeof request.rawInput === 'object' && !Array.isArray(request.rawInput)
-        ? request.rawInput
+      incomingRequest.toolName,
+      (incomingRequest.rawInput &&
+      typeof incomingRequest.rawInput === 'object' &&
+      !Array.isArray(incomingRequest.rawInput)
+        ? incomingRequest.rawInput
         : {}) as Record<string, unknown>,
     );
     if (dispatchedRequest.kind === 'unsupported') {
@@ -5640,19 +5588,9 @@ export function createDefaultSandbox(
     typeof lspCallHierarchyToolDefinition.inputSchema,
     typeof lspCallHierarchyToolDefinition.outputSchema
   >(lspCallHierarchyToolDefinition);
-  sandbox.register<typeof workspaceTreeTool.inputSchema, typeof workspaceTreeTool.outputSchema>(
-    workspaceTreeTool,
-  );
   sandbox.register<typeof listTool.inputSchema, typeof listTool.outputSchema>(listTool);
-  sandbox.register<
-    typeof workspaceReadFileTool.inputSchema,
-    typeof workspaceReadFileTool.outputSchema
-  >(workspaceReadFileTool);
   sandbox.register<typeof readTool.inputSchema, typeof readTool.outputSchema>(readTool);
   sandbox.register<typeof globTool.inputSchema, typeof globTool.outputSchema>(globTool);
-  sandbox.register<typeof workspaceSearchTool.inputSchema, typeof workspaceSearchTool.outputSchema>(
-    workspaceSearchTool,
-  );
   sandbox.register<typeof grepTool.inputSchema, typeof grepTool.outputSchema>(grepTool);
   sandbox.register<
     typeof astGrepSearchToolDefinition.inputSchema,
@@ -5670,15 +5608,7 @@ export function createDefaultSandbox(
     typeof workspaceReviewDiffTool.inputSchema,
     typeof workspaceReviewDiffTool.outputSchema
   >(workspaceReviewDiffTool);
-  sandbox.register<
-    typeof workspaceWriteFileTool.inputSchema,
-    typeof workspaceWriteFileTool.outputSchema
-  >(workspaceWriteFileTool);
   sandbox.register<typeof writeTool.inputSchema, typeof writeTool.outputSchema>(writeTool);
-  sandbox.register<
-    typeof workspaceCreateFileTool.inputSchema,
-    typeof workspaceCreateFileTool.outputSchema
-  >(workspaceCreateFileTool);
   sandbox.register<
     typeof workspaceCreateDirectoryTool.inputSchema,
     typeof workspaceCreateDirectoryTool.outputSchema

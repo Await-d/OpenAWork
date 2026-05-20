@@ -16,6 +16,7 @@ import {
 } from '../handoff/workflow/workflow-template-schema.js';
 import { BUILTIN_WORKFLOWS } from '../handoff/workflow/workflow-builtin-packs.js';
 import { randomUUID } from 'node:crypto';
+import { parseBody } from '../infra/parse-request.js';
 
 const createWorkflowSchema = z.object({
   workflow: teamWorkflowSchema,
@@ -71,30 +72,25 @@ export async function teamWorkflowsCrudRoutes(app: FastifyInstance): Promise<voi
       const user = request.user as JwtPayload;
 
       const parseStep = child('parse-body');
-      const body = createWorkflowSchema.safeParse(request.body);
-      if (!body.success) {
-        parseStep.fail('invalid input');
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(createWorkflowSchema, request.body);
       parseStep.succeed();
 
-      const validation = validateWorkflowConsistency(body.data.workflow);
+      const validation = validateWorkflowConsistency(body.workflow);
       if (!validation.valid) {
         step.fail('invalid workflow');
         return reply.status(400).send({ error: 'Invalid workflow', issues: validation.errors });
       }
 
       const id = randomUUID();
-      const metadataJson = JSON.stringify({ teamWorkflow: body.data.workflow });
+      const metadataJson = JSON.stringify({ teamWorkflow: body.workflow });
       sqliteRun(
         `INSERT INTO workflow_templates (id, user_id, name, category, metadata_json, nodes_json, edges_json)
          VALUES (?, ?, ?, 'team-playbook', ?, '[]', '[]')`,
-        [id, user.sub, body.data.workflow.name, metadataJson],
+        [id, user.sub, body.workflow.name, metadataJson],
       );
 
-      step.succeed(undefined, { workflowId: body.data.workflow.id });
-      return reply.status(201).send({ id, workflow: body.data.workflow });
+      step.succeed(undefined, { workflowId: body.workflow.id });
+      return reply.status(201).send({ id, workflow: body.workflow });
     },
   );
 
@@ -117,29 +113,24 @@ export async function teamWorkflowsCrudRoutes(app: FastifyInstance): Promise<voi
       }
 
       const parseStep = child('parse-body');
-      const body = updateWorkflowSchema.safeParse(request.body);
-      if (!body.success) {
-        parseStep.fail('invalid input');
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(updateWorkflowSchema, request.body);
       parseStep.succeed();
 
-      const validation = validateWorkflowConsistency(body.data.workflow);
+      const validation = validateWorkflowConsistency(body.workflow);
       if (!validation.valid) {
         step.fail('invalid workflow');
         return reply.status(400).send({ error: 'Invalid workflow', issues: validation.errors });
       }
 
-      const metadataJson = JSON.stringify({ teamWorkflow: body.data.workflow });
+      const metadataJson = JSON.stringify({ teamWorkflow: body.workflow });
       sqliteRun(
         `UPDATE workflow_templates SET name = ?, metadata_json = ?, updated_at = datetime('now')
          WHERE id = ? AND user_id = ?`,
-        [body.data.workflow.name, metadataJson, workflowDbId, user.sub],
+        [body.workflow.name, metadataJson, workflowDbId, user.sub],
       );
 
-      step.succeed(undefined, { workflowId: body.data.workflow.id });
-      return reply.send({ id: workflowDbId, workflow: body.data.workflow });
+      step.succeed(undefined, { workflowId: body.workflow.id });
+      return reply.send({ id: workflowDbId, workflow: body.workflow });
     },
   );
 

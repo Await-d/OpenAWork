@@ -35,6 +35,7 @@ import {
 } from '../handoff/bus/team-session-create.js';
 import { submitInboundMessage } from '../handoff/store/inbound-store.js';
 import { setSubstate } from '../handoff/store/substate-store.js';
+import { parseBody } from '../infra/parse-request.js';
 
 const TEAM_ROLE_LAYERS = ['user', 'reception', 'pm1', 'pm2', 'executor', 'reviewer'] as const;
 
@@ -63,20 +64,15 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
 
       const parseStep = child('parse-body');
-      const body = createTeamSessionSchema.safeParse(request.body);
-      if (!body.success) {
-        parseStep.fail('invalid input');
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(createTeamSessionSchema, request.body);
       parseStep.succeed();
 
       // 校验 parent 必须存在 + 同一用户
-      if (body.data.teamParentSessionId) {
+      if (body.teamParentSessionId) {
         const validateStep = child('validate-parent');
         const ok = validateTeamParentSession({
           userId: user.sub,
-          teamParentSessionId: body.data.teamParentSessionId,
+          teamParentSessionId: body.teamParentSessionId,
         });
         if (!ok) {
           validateStep.fail('parent not found');
@@ -86,19 +82,19 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
         validateStep.succeed();
       }
 
-      const metadataJson = body.data.metadata ? JSON.stringify(body.data.metadata) : '{}';
+      const metadataJson = body.metadata ? JSON.stringify(body.metadata) : '{}';
 
       const result = createTeamSession({
         userId: user.sub,
-        roleLayer: body.data.roleLayer as HandoffRoleLayer,
-        teamParentSessionId: body.data.teamParentSessionId ?? null,
-        title: body.data.title ?? null,
+        roleLayer: body.roleLayer as HandoffRoleLayer,
+        teamParentSessionId: body.teamParentSessionId ?? null,
+        title: body.title ?? null,
         metadataJson,
       });
 
       step.succeed(undefined, {
         sessionId: result.sessionId,
-        roleLayer: body.data.roleLayer,
+        roleLayer: body.roleLayer,
       });
       return reply.status(201).send({ sessionId: result.sessionId });
     },
@@ -114,19 +110,14 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
 
       const parseStep = child('parse-body');
-      const body = createHandoffSchema.safeParse(request.body);
-      if (!body.success) {
-        parseStep.fail('invalid input');
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(createHandoffSchema, request.body);
       parseStep.succeed();
 
       // from_session_id 必须存在且属于同一用户
       const validateStep = child('validate-from-session');
       const ok = validateTeamParentSession({
         userId: user.sub,
-        teamParentSessionId: body.data.fromSessionId,
+        teamParentSessionId: body.fromSessionId,
       });
       if (!ok) {
         validateStep.fail('from session not found');
@@ -137,10 +128,10 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
 
       const record = createHandoff({
         userId: user.sub,
-        fromSessionId: body.data.fromSessionId,
-        fromRoleLayer: body.data.fromRoleLayer as HandoffRoleLayer,
-        toRoleLayer: body.data.toRoleLayer as HandoffRoleLayer,
-        payload: body.data.payload,
+        fromSessionId: body.fromSessionId,
+        fromRoleLayer: body.fromRoleLayer as HandoffRoleLayer,
+        toRoleLayer: body.toRoleLayer as HandoffRoleLayer,
+        payload: body.payload,
       });
       publishHandoffEvent({ type: 'handoff.created', record });
 

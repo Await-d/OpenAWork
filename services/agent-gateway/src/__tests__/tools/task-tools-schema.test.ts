@@ -20,9 +20,9 @@
  *   - `subagent_type` ⊕ `category` (XOR) constraint stays intact:
  *     either one is required, never both.
  *
- *   - `run_in_background` and `load_skills` remain required (the
- *     opencode-derived contract that callers must pick a sync/async
- *     execution mode and an explicit skill set).
+ *   - `run_in_background` and `load_skills` default to `false` and
+ *     `[]` respectively when omitted (relaxed from the original
+ *     opencode-derived contract to improve model compatibility).
  */
 
 import { describe, expect, it } from 'vitest';
@@ -74,19 +74,25 @@ describe('task tool — input schema basics', () => {
     }
   });
 
-  it('requires run_in_background to be set explicitly', () => {
+  it('defaults run_in_background to false when omitted', () => {
     const { run_in_background: _omit, ...rest } = baseValid;
     const parsed = taskToolDefinition.inputSchema.safeParse(rest);
-    expect(parsed.success).toBe(false);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.run_in_background).toBe(false);
+    }
   });
 
-  it('requires load_skills to be present (use [] for no skills)', () => {
+  it('defaults load_skills to [] when omitted', () => {
     const { load_skills: _omit, ...rest } = baseValid;
     const parsed = taskToolDefinition.inputSchema.safeParse(rest);
-    expect(parsed.success).toBe(false);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.load_skills).toEqual([]);
+    }
   });
 
-  it('rejects empty description / prompt / category', () => {
+  it('rejects empty description / prompt / category when provided', () => {
     expect(
       taskToolDefinition.inputSchema.safeParse({ ...baseValid, description: '' }).success,
     ).toBe(false);

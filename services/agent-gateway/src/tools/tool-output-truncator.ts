@@ -6,7 +6,13 @@
  *
  * In oh-my-opencode this was a tool.execute.after hook using a dynamic truncator.
  * In OpenAWork it's a simpler character-based truncation applied in executeToolCalls.
+ *
+ * Enhanced with dynamic truncation support: when the effective context window
+ * is known to be smaller than the preset (e.g. relay supports 200K but preset
+ * says 1M), tool output limits are scaled down proportionally.
  */
+
+import { resolveEffectiveContextWindow, hasDiscoveredLowerContextWindow } from '../compaction/context-window-resolver.js';
 
 /** Default max output length in characters (~50k tokens ≈ ~200k chars) */
 const DEFAULT_MAX_CHARS = 200_000;
@@ -26,6 +32,9 @@ const WORKSPACE_REVIEW_DIFF_MAX_CHARS = 60_000;
  * context window. Set to ~50k tokens ≈ ~200k chars.
  */
 const UNIVERSAL_MAX_CHARS = 200_000;
+
+/** Reference context window for the default limits above (1M tokens). */
+const REFERENCE_CONTEXT_WINDOW = 1_000_000;
 
 const TRUNCATABLE_TOOLS = new Set([
   'bash',
@@ -62,6 +71,42 @@ function getToolMaxChars(toolName: string): number {
   return TRUNCATABLE_TOOLS.has(normalized)
     ? (TOOL_SPECIFIC_MAX_CHARS[normalized] ?? DEFAULT_MAX_CHARS)
     : UNIVERSAL_MAX_CHARS;
+}
+
+/**
+ * Get the dynamic max chars for a tool, scaled by the effective context window.
+ *
+ * When the effective context window is smaller than the reference (1M), all
+ * limits are scaled down proportionally. For example:
+ * - 1M context → 200K max chars (default)
+ * - 200K context → 40K max chars (scaled to 20%)
+ * - 400K context → 80K max chars (scaled to 40%)
+ *
+ * This prevents a single tool output from consuming too large a fraction of
+ * the available context when the actual limit is lower than expected.
+ */
+function getToolMaxCharsDynamic(
+  toolName: string,
+  userId?: string,
+  modelId?: string,
+  presetContextWindow?: number,
+): number {
+  const baseMax = getToolMaxChars(toolName);
+
+  // If we don't have enough info for dynamic scaling, use the static limit
+  if (!userId || !modelId) return baseMax;
+
+  // Check if we have a discovered lower context window
+  if (!hasDiscoveredLowerContextWindow(userId, modelId, presetContextWindow)) return baseMax;
+
+  const effectiveWindow = resolveEffectiveContextWindow(userId, modelId, presetContextWindow);
+  const scaleFactor = effectiveWindow / REFERENCE_CONTEXT_WINDOW;
+
+  // Don't scale below 10% of the original limit to keep outputs useful
+  const minScale = 0.1;
+  const clampedScale = Math.max(minScale, Math.min(1, scaleFactor));
+
+  return Math.floor(baseMax * clampedScale);
 }
 
 function safeSerializeOutput(output: unknown): string {
@@ -118,5 +163,65 @@ export function truncateToolOutputUniversal(toolName: string, output: unknown): 
   }
 
   // Truncate the serialized form
+  return serialized.slice(0, maxChars) + TRUNCATION_NOTICE;
+}
+
+/**
+ * Dynamic truncation entry point that adjusts limits based on the effective
+ * context window for the current user+model. Use this when the session context
+ * is available (i.e. during tool execution within a stream round).
+ *
+ * When the effective context window is lower than the preset (e.g. relay only
+ * supports 200K), tool output limits are scaled down proportionally to prevent
+ * a single output from consuming too much of the available context.
+ *
+ * Mirrors oh-my-opencode's `dynamicTruncate` pattern.
+ */
+export function truncateToolOutputDynamic(
+  toolName: string,
+  output: string,
+  context: { userId: string; modelId: string; presetContextWindow?: number },
+): string {
+  const maxChars = getToolMaxCharsDynamic(
+    toolName,
+    context.userId,
+    context.modelId,
+    context.presetContextWindow,
+  );
+
+  if (output.length <= maxChars) return output;
+
+  return output.slice(0, maxChars) + TRUNCATION_NOTICE;
+}
+
+/**
+ * Dynamic truncation for both string and object types.
+ * Combines `truncateToolOutputUniversal` with dynamic context-aware scaling.
+ */
+export function truncateToolOutputDynamicUniversal(
+  toolName: string,
+  output: unknown,
+  context: { userId: string; modelId: string; presetContextWindow?: number },
+): unknown {
+  if (typeof output === 'string') {
+    return truncateToolOutputDynamic(toolName, output, context);
+  }
+
+  if (output === null || output === undefined) {
+    return output;
+  }
+
+  const serialized = safeSerializeOutput(output);
+  const maxChars = getToolMaxCharsDynamic(
+    toolName,
+    context.userId,
+    context.modelId,
+    context.presetContextWindow,
+  );
+
+  if (serialized.length <= maxChars) {
+    return output;
+  }
+
   return serialized.slice(0, maxChars) + TRUNCATION_NOTICE;
 }

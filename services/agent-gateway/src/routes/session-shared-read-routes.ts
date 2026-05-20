@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { parseQuery } from '../infra/parse-request.js';
 import {
   mapPermissionRequestRow,
   parseApprovedPermissionResumePayload,
@@ -66,6 +67,7 @@ interface SessionRow {
   updated_at: string;
   user_id: string;
 }
+import { parseBody } from '../infra/parse-request.js';
 
 interface PermissionRequestRow {
   created_at: string;
@@ -293,18 +295,15 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
     async (request: FastifyRequest, reply: FastifyReply) => {
       const user = request.user as JwtPayload;
       const { step } = startRequestWorkflow(request, 'session.shared.list');
-      const query = sharedSessionsQuerySchema.safeParse(
+      const query = parseQuery(
+        sharedSessionsQuerySchema,
         (request as FastifyRequest & { query: unknown }).query,
       );
-      if (!query.success) {
-        step.fail('invalid query params');
-        return reply.status(400).send({ error: 'Invalid query params' });
-      }
 
       const shares = listSharedSessionsForRecipient({
         email: user.email,
-        limit: query.data.limit,
-        offset: query.data.offset,
+        limit: query.limit,
+        offset: query.offset,
       }).map((share) => ({
         sessionId: share.session.id,
         title: share.session.title,
@@ -429,11 +428,7 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
       const { step } = startRequestWorkflow(request, 'session.shared.comment.create', undefined, {
         sessionId,
       });
-      const body = sharedSessionCommentSchema.safeParse(request.body);
-      if (!body.success) {
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(sharedSessionCommentSchema, request.body);
 
       const sharedAccess = getSharedSessionForRecipient({ email: user.email, sessionId });
       if (!sharedAccess) {
@@ -451,13 +446,13 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
         sessionId,
         authorUserId: user.sub,
         authorEmail: user.email,
-        content: body.data.content,
+        content: body.content,
       });
       logTeamAudit({
         action: 'shared_comment_created',
         actorEmail: user.email,
         actorUserId: user.sub,
-        detail: `会话：${sharedAccess.session.title ?? sessionId}；工作区：${sharedAccess.session.workspacePath ?? '未绑定工作区'}；评论：${body.data.content}`,
+        detail: `会话：${sharedAccess.session.title ?? sessionId}；工作区：${sharedAccess.session.workspacePath ?? '未绑定工作区'}；评论：${body.content}`,
         entityId: comment.id,
         entityType: 'shared_session_comment',
         summary: `${user.email} 在“${sharedAccess.session.title ?? sessionId}”中新增了一条共享评论`,
@@ -505,11 +500,7 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
       const { step } = startRequestWorkflow(request, 'session.shared.permission.reply', undefined, {
         sessionId,
       });
-      const body = replyPermissionSchema.safeParse(request.body);
-      if (!body.success) {
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(replyPermissionSchema, request.body);
 
       const sharedAccess = getSharedSessionForRecipient({ email: user.email, sessionId });
       if (!sharedAccess) {
@@ -526,7 +517,7 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
          FROM permission_requests
          WHERE id = ? AND session_id = ?
          LIMIT 1`,
-        [body.data.requestId, sessionId],
+        [body.requestId, sessionId],
       );
       if (!permissionRequest) {
         step.fail('permission request not found');
@@ -542,9 +533,9 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
          SET status = ?, decision = ?, updated_at = datetime('now')
          WHERE id = ? AND session_id = ?`,
         [
-          body.data.decision === 'reject' ? 'rejected' : 'approved',
-          body.data.decision,
-          body.data.requestId,
+          body.decision === 'reject' ? 'rejected' : 'approved',
+          body.decision,
+          body.requestId,
           sessionId,
         ],
       );
@@ -553,15 +544,15 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
          (request_id, session_id, tool_name, scope, decision, workspace_root, created_at)
          VALUES (?, ?, ?, ?, ?, NULL, datetime('now'))`,
         [
-          body.data.requestId,
+          body.requestId,
           sessionId,
           permissionRequest.tool_name,
           permissionRequest.scope,
-          body.data.decision,
+          body.decision,
         ],
       );
 
-      if (body.data.decision === 'permanent') {
+      if (body.decision === 'permanent') {
         persistWorkspacePermanentPermission({
           sessionId,
           toolName: permissionRequest.tool_name,
@@ -584,14 +575,14 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
         }
       })();
       const resumePayload =
-        body.data.decision === 'reject'
+        body.decision === 'reject'
           ? null
           : parseApprovedPermissionResumePayload(permissionRequest.request_payload_json);
       publishSessionRunEvent(
         sessionId,
         createPermissionRepliedEvent({
-          requestId: body.data.requestId,
-          decision: body.data.decision,
+          requestId: body.requestId,
+          decision: body.decision,
         }),
         requestClientRequestId ? { clientRequestId: requestClientRequestId } : undefined,
       );
@@ -605,7 +596,7 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
           userId: sharedAccess.ownerUserId,
         }).catch((error) => {
           request.log.error(
-            { err: error, requestId: body.data.requestId, sessionId },
+            { err: error, requestId: body.requestId, sessionId },
             'failed to auto-resume approved shared permission request',
           );
         });
@@ -614,14 +605,14 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
         action: 'shared_permission_replied',
         actorEmail: user.email,
         actorUserId: user.sub,
-        detail: `会话：${sharedAccess.session.title ?? sessionId}；工作区：${sharedAccess.session.workspacePath ?? '未绑定工作区'}；工具：${permissionRequest.tool_name}；范围：${permissionRequest.scope}；决策：${body.data.decision}`,
-        entityId: body.data.requestId,
+        detail: `会话：${sharedAccess.session.title ?? sessionId}；工作区：${sharedAccess.session.workspacePath ?? '未绑定工作区'}；工具：${permissionRequest.tool_name}；范围：${permissionRequest.scope}；决策：${body.decision}`,
+        entityId: body.requestId,
         entityType: 'permission_request',
-        summary: `${user.email} 处理了“${sharedAccess.session.title ?? sessionId}”的权限请求（${body.data.decision}）`,
+        summary: `${user.email} 处理了“${sharedAccess.session.title ?? sessionId}”的权限请求（${body.decision}）`,
         userId: sharedAccess.ownerUserId,
       });
 
-      step.succeed(undefined, { requestId: body.data.requestId, decision: body.data.decision });
+      step.succeed(undefined, { requestId: body.requestId, decision: body.decision });
       return reply.send({ ok: true });
     },
   );
@@ -635,11 +626,7 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
       const { step } = startRequestWorkflow(request, 'session.shared.question.reply', undefined, {
         sessionId,
       });
-      const body = replyQuestionSchema.safeParse(request.body);
-      if (!body.success) {
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(replyQuestionSchema, request.body);
 
       const sharedAccess = getSharedSessionForRecipient({ email: user.email, sessionId });
       if (!sharedAccess) {
@@ -656,7 +643,7 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
          FROM question_requests
          WHERE id = ? AND session_id = ?
          LIMIT 1`,
-        [body.data.requestId, sessionId],
+        [body.requestId, sessionId],
       );
       if (!questionRequest) {
         step.fail('question request not found');
@@ -672,9 +659,9 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
          SET status = ?, answer_json = ?, updated_at = datetime('now')
          WHERE id = ? AND session_id = ?`,
         [
-          body.data.status,
-          body.data.status === 'answered' ? JSON.stringify(body.data.answers) : null,
-          body.data.requestId,
+          body.status,
+          body.status === 'answered' ? JSON.stringify(body.answers) : null,
+          body.requestId,
           sessionId,
         ],
       );
@@ -696,15 +683,15 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
       publishSessionRunEvent(
         sessionId,
         createQuestionRepliedEvent({
-          requestId: body.data.requestId,
-          status: body.data.status,
+          requestId: body.requestId,
+          status: body.status,
         }),
         requestClientRequestId ? { clientRequestId: requestClientRequestId } : undefined,
       );
 
-      if (body.data.status === 'answered') {
+      if (body.status === 'answered') {
         if (questionRequest.tool_name === 'ExitPlanMode') {
-          updateSessionPlanModeForExitDecision({ answers: body.data.answers, sessionId });
+          updateSessionPlanModeForExitDecision({ answers: body.answers, sessionId });
         }
         const payload = parseQuestionResumePayload(questionRequest.request_payload_json);
         if (payload) {
@@ -713,7 +700,7 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
           ) as QuestionToolInput['questions'];
           const answerOutput = formatAnsweredQuestionOutput({
             questions,
-            answers: body.data.answers,
+            answers: body.answers,
           });
           void resumeAnsweredQuestionRequest({
             payload: {
@@ -725,7 +712,7 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
             userId: sharedAccess.ownerUserId,
           }).catch((error) => {
             request.log.error(
-              { err: error, requestId: body.data.requestId, sessionId },
+              { err: error, requestId: body.requestId, sessionId },
               'failed to auto-resume answered shared question request',
             );
           });
@@ -735,14 +722,14 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
         action: 'shared_question_replied',
         actorEmail: user.email,
         actorUserId: user.sub,
-        detail: `会话：${sharedAccess.session.title ?? sessionId}；工作区：${sharedAccess.session.workspacePath ?? '未绑定工作区'}；问题：${questionRequest.title}；结果：${body.data.status}`,
-        entityId: body.data.requestId,
+        detail: `会话：${sharedAccess.session.title ?? sessionId}；工作区：${sharedAccess.session.workspacePath ?? '未绑定工作区'}；问题：${questionRequest.title}；结果：${body.status}`,
+        entityId: body.requestId,
         entityType: 'question_request',
-        summary: `${user.email} 处理了“${sharedAccess.session.title ?? sessionId}”的待回答问题（${body.data.status}）`,
+        summary: `${user.email} 处理了“${sharedAccess.session.title ?? sessionId}”的待回答问题（${body.status}）`,
         userId: sharedAccess.ownerUserId,
       });
 
-      step.succeed(undefined, { requestId: body.data.requestId, status: body.data.status });
+      step.succeed(undefined, { requestId: body.requestId, status: body.status });
       return reply.send({ ok: true });
     },
   );

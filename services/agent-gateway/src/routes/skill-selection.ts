@@ -20,6 +20,7 @@ const selectionItemSchema = z.object({
   pinned: z.boolean().default(false),
   reason: z.string().max(500).optional(),
 });
+import { parseBody } from '../infra/parse-request.js';
 
 const putSelectionSchema = z.object({
   workspacePath: z.string().nullable().optional(),
@@ -182,13 +183,9 @@ export async function skillSelectionRoutes(app: FastifyInstance): Promise<void> 
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step } = startRequestWorkflow(request, 'skills.selection.put');
       const user = request.user as JwtPayload;
-      const parsed = putSelectionSchema.safeParse(request.body);
-      if (!parsed.success) {
-        step.fail('invalid body');
-        return reply.status(400).send({ error: 'Invalid body', issues: parsed.error.issues });
-      }
+      const parsed = parseBody(putSelectionSchema, request.body);
 
-      const normalized = normalizeWorkspacePathForWrite(parsed.data.workspacePath ?? null);
+      const normalized = normalizeWorkspacePathForWrite(parsed.workspacePath ?? null);
       if (normalized === null) {
         step.fail('workspace path out of root');
         return reply
@@ -198,7 +195,7 @@ export async function skillSelectionRoutes(app: FastifyInstance): Promise<void> 
 
       // Defend the BUILTIN hard-invariant: caller may not write a BUILTIN id
       // (UI must not show those in selection list). Reject loudly.
-      const illegalBuiltin = parsed.data.items.find((item) => BUILTIN_SKILL_IDS.has(item.skillId));
+      const illegalBuiltin = parsed.items.find((item) => BUILTIN_SKILL_IDS.has(item.skillId));
       if (illegalBuiltin) {
         step.fail('attempted to write BUILTIN skill');
         return reply.status(400).send({
@@ -219,8 +216,8 @@ export async function skillSelectionRoutes(app: FastifyInstance): Promise<void> 
         // first / truncated last in the pinned prompt section. This lets
         // the management page expose a drag-reorder UX without introducing
         // a separate priority API.
-        for (let index = 0; index < parsed.data.items.length; index += 1) {
-          const item = parsed.data.items[index]!;
+        for (let index = 0; index < parsed.items.length; index += 1) {
+          const item = parsed.items[index]!;
           sqliteRun(
             `INSERT INTO chat_workspace_skill_selections
                (user_id, workspace_path, skill_id, enabled, pinned, reason, source, updated_at, priority)
@@ -252,10 +249,10 @@ export async function skillSelectionRoutes(app: FastifyInstance): Promise<void> 
         );
       });
 
-      step.succeed(undefined, { count: parsed.data.items.length });
+      step.succeed(undefined, { count: parsed.items.length });
       return reply.send({
         workspacePath: normalized,
-        count: parsed.data.items.length,
+        count: parsed.items.length,
       });
     },
   );
@@ -278,13 +275,9 @@ export async function skillSelectionRoutes(app: FastifyInstance): Promise<void> 
         return reply.status(404).send({ error: 'Session not found' });
       }
 
-      const parsed = patchSessionOverrideSchema.safeParse(request.body);
-      if (!parsed.success) {
-        step.fail('invalid body');
-        return reply.status(400).send({ error: 'Invalid body', issues: parsed.error.issues });
-      }
+      const parsed = parseBody(patchSessionOverrideSchema, request.body);
 
-      const illegalBuiltin = parsed.data.items.find((item) => BUILTIN_SKILL_IDS.has(item.skillId));
+      const illegalBuiltin = parsed.items.find((item) => BUILTIN_SKILL_IDS.has(item.skillId));
       if (illegalBuiltin) {
         step.fail('attempted to write BUILTIN skill');
         return reply.status(400).send({
@@ -294,7 +287,7 @@ export async function skillSelectionRoutes(app: FastifyInstance): Promise<void> 
 
       const now = Date.now();
       sqliteTransaction(() => {
-        for (const item of parsed.data.items) {
+        for (const item of parsed.items) {
           sqliteRun(
             `INSERT INTO chat_session_skill_overrides
                (session_id, skill_id, enabled, pinned, updated_at)
@@ -323,7 +316,7 @@ export async function skillSelectionRoutes(app: FastifyInstance): Promise<void> 
 
       step.succeed(undefined, {
         sessionId,
-        count: parsed.data.items.length,
+        count: parsed.items.length,
         effectiveCount: effective.length,
       });
       return reply.send({

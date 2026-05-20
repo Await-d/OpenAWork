@@ -4,7 +4,11 @@ import {
   runUpstreamGenerate,
   unifiedConversationToModelMessages,
 } from '../v2-runtime/upstream/index.js';
-import { COMPACTION_SYSTEM_PROMPT, buildCompactionUserPrompt } from './compaction-prompt.js';
+import {
+  COMPACTION_SYSTEM_PROMPT,
+  buildCompactionUserPrompt,
+  stripAnalysisBlock,
+} from './compaction-prompt.js';
 
 export interface CompactionLlmInput {
   conversationMessages: UnifiedMessage[];
@@ -97,8 +101,15 @@ async function callCompactionLlmOnce(input: CompactionLlmInput): Promise<Compact
   if (!summary) {
     throw new Error('Compaction LLM returned empty summary');
   }
+  // Strip the <analysis> drafting scratchpad — it improves summary quality
+  // but has no informational value once the summary is written.
+  // Also extracts content from <summary> tags if present.
+  const cleanedSummary = stripAnalysisBlock(summary);
+  if (!cleanedSummary) {
+    throw new Error('Compaction LLM returned empty summary after analysis stripping');
+  }
   return {
-    summary,
+    summary: cleanedSummary,
     inputTokens: result.inputTokens,
     outputTokens: result.outputTokens,
   };

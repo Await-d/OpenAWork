@@ -2,6 +2,8 @@ import type { FileDiffContent, MessageContent, RunEvent, StreamChunk } from '@op
 import type { WorkflowLogger, createRequestContext } from '@openAwork/logger';
 import { validateThinkingBlocks } from '../session/thinking-block-validator.js';
 import { isContextOverflow } from '../session/session-message-store.js';
+import { resolveEffectiveContextWindow } from '../compaction/context-window-resolver.js';
+import { microcompactMessages } from '../compaction/microcompact.js';
 import { classifyUpstreamError } from '../provider/retry-classify.js';
 import {
   toModelMessages,
@@ -786,12 +788,19 @@ export async function runModelRound(input: {
   // different (providerID, modelID) than the current call have their
   // reasoning metadata (signature/encryptedContent/summary) stripped so
   // we never replay an opaque payload an unrelated model cannot consume.
-  const unifiedMessages = toModelMessages(messagesV2, {
+  const unifiedMessagesRaw = toModelMessages(messagesV2, {
     currentModel: {
       providerID: input.route.providerType ?? 'unknown',
       modelID: input.route.model,
     },
   });
+
+  // ── Layer 0.5: Microcompact (Claude Code pattern) ──
+  // Clear stale tool_result outputs before sending to upstream.
+  // Zero LLM cost, delays full compaction trigger, keeps context lean.
+  // Operates on the rendered UnifiedMessage[] so DB data stays intact.
+  const microcompactResult = microcompactMessages(unifiedMessagesRaw);
+  const unifiedMessages = microcompactResult.messages;
 
   // Apply thinking language hint to conversation
   const thinkingUserHint =
@@ -1315,10 +1324,15 @@ export async function runModelRound(input: {
     });
 
     const shouldContinue = isToolUseStopReason(stopReason) ? state.toolCalls.size > 0 : false;
+    const effectiveCtxWindow = resolveEffectiveContextWindow(
+      input.userId,
+      input.route.model,
+      input.route.contextWindow,
+    );
     const overflow =
       !!v2Usage &&
-      typeof input.route.contextWindow === 'number' &&
-      isContextOverflow(v2Usage, input.route.contextWindow, input.compactionReservedTokens);
+      typeof effectiveCtxWindow === 'number' &&
+      isContextOverflow(v2Usage, effectiveCtxWindow, input.compactionReservedTokens, input.route.maxOutputTokens);
     return {
       overflow,
       shouldContinue,

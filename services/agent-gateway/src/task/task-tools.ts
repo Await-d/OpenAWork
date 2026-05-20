@@ -28,12 +28,12 @@ import { z } from 'zod';
  */
 const taskInputSchema = z
   .object({
-    description: z.string().min(1),
+    description: z.string().min(1).optional(),
     prompt: z.string().min(1),
     subagent_type: z.string().min(1).optional(),
     category: z.string().min(1).optional(),
-    load_skills: z.array(z.string().min(1)),
-    run_in_background: z.boolean(),
+    load_skills: z.array(z.string().min(1)).default([]),
+    run_in_background: z.boolean().default(false),
     session_id: z
       .string()
       .min(1)

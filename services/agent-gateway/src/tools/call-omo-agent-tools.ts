@@ -18,10 +18,10 @@ export const CALL_OMO_ALLOWED_AGENTS = [
 ] as const;
 
 const callOmoAgentInputSchema = z.object({
-  description: z.string().min(1),
+  description: z.string().min(1).optional(),
   prompt: z.string().min(1),
   subagent_type: z.string().min(1),
-  run_in_background: z.boolean(),
+  run_in_background: z.boolean().default(false),
   session_id: z.string().min(1).optional(),
 });
 

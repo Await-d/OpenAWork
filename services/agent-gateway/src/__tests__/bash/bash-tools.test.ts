@@ -20,7 +20,7 @@ vi.mock('../../infra/db.js', () => ({
   sqliteTransaction: vi.fn((fn: () => unknown) => fn()),
 }));
 
-const { bashToolDefinition, buildBashPermissionScope, runBashCommand } =
+const { bashToolDefinition, buildBashPermissionScope, deriveBashDescription, runBashCommand } =
   await import('../../tools/bash-tools.js');
 const { TRUNCATION_DIR } = await import('../../tools/bash-output-truncator.js');
 
@@ -63,11 +63,18 @@ describe('bash-tools', () => {
       expect(parsed.success).toBe(false);
     });
 
-    it('requires description (opencode parity)', () => {
+    it('treats description as optional (OpenAWork compatibility)', () => {
+      // OpenAWork relaxes opencode's `description: required` rule so
+      // models that omit the field don't fail at the schema gate. The
+      // missing field is later backfilled inside `runBashCommand` via
+      // `deriveBashDescription`. See comments in bash-tools.ts.
       const parsed = bashToolDefinition.inputSchema.safeParse({
         command: 'echo hi',
       });
-      expect(parsed.success).toBe(false);
+      expect(parsed.success).toBe(true);
+      if (parsed.success) {
+        expect(parsed.data.description).toBeUndefined();
+      }
     });
 
     it('rejects non-positive timeout', () => {
@@ -86,6 +93,33 @@ describe('bash-tools', () => {
         timeout: 60 * 60 * 1000, // 1h, above MAX_BASH_TIMEOUT_MS = 30min
       });
       expect(parsed.success).toBe(false);
+    });
+  });
+
+  describe('deriveBashDescription', () => {
+    it('produces a non-empty fallback for short commands', () => {
+      expect(deriveBashDescription('ls')).toContain('ls');
+      expect(deriveBashDescription('git status').length).toBeGreaterThan(0);
+    });
+
+    it('clips long single-line commands to a 50-char preview with an ellipsis', () => {
+      const cmd = 'echo ' + 'x'.repeat(80);
+      const out = deriveBashDescription(cmd);
+      // The clipped form keeps the leading slice + ellipsis marker
+      expect(out).toContain('…');
+      // Total length stays bounded (50 char clip + a small wrapper)
+      expect(out.length).toBeLessThan(80);
+    });
+
+    it('uses only the first line of a multi-line command for the preview', () => {
+      const out = deriveBashDescription('git status\necho hidden');
+      expect(out).toContain('git status');
+      expect(out).not.toContain('hidden');
+    });
+
+    it('falls back to a generic phrase for an empty / whitespace-only command', () => {
+      expect(deriveBashDescription('')).toBe('执行 bash 命令');
+      expect(deriveBashDescription('   ')).toBe('执行 bash 命令');
     });
   });
 

@@ -29,7 +29,7 @@
 import { randomBytes } from 'node:crypto';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import { z } from 'zod';
-import { runBashCommand } from './bash-tools.js';
+import { deriveBashDescription, runBashCommand } from './bash-tools.js';
 import {
   getTerminal,
   killTerminal,
@@ -57,8 +57,9 @@ const runBackgroundBashInputSchema = z.object({
   description: z
     .string()
     .min(1)
+    .optional()
     .describe(
-      '用 5-10 个词清晰描述这个后台命令。示例：\n输入：npm run dev\n输出：启动开发服务器\n\n输入：pnpm exec vitest run\n输出：运行单元测试\n\n输入：tail -F build.log\n输出：持续跟踪构建日志',
+      '可选：用 5-10 个词清晰描述这个后台命令。省略时由 command 前缀自动生成。示例：\n输入：npm run dev\n输出：启动开发服务器\n\n输入：pnpm exec vitest run\n输出：运行单元测试\n\n输入：tail -F build.log\n输出：持续跟踪构建日志',
     ),
   workdir: z.string().min(1).optional().describe('命令执行的工作目录绝对路径。默认工作区根目录。'),
   timeout: z
@@ -240,7 +241,7 @@ export async function dispatchRunBashInBackground(input: {
   // up-front with kind='background' and our pre-allocated terminalId.
   const bashInput = {
     command: parsed.data.command,
-    description: parsed.data.description,
+    description: parsed.data.description ?? deriveBashDescription(parsed.data.command),
     ...(parsed.data.workdir ? { workdir: parsed.data.workdir } : {}),
     timeout: parsed.data.timeout ?? DEFAULT_BACKGROUND_TIMEOUT_MS,
   };
@@ -257,7 +258,7 @@ export async function dispatchRunBashInBackground(input: {
       ...(input.context.toolCallId ? { toolCallId: input.context.toolCallId } : {}),
       toolName: 'run_bash_in_background',
       kind: 'background',
-      description: parsed.data.description,
+      description: parsed.data.description ?? deriveBashDescription(parsed.data.command),
       abortController,
       terminalId,
       metadata: {

@@ -378,6 +378,20 @@ async function continueFromApprovedToolResult(input: {
           } catch (error: unknown) {
             console.warn('memory auto extraction failed after resume completion', error);
           }
+          // Session memory extraction (Layer 1 compaction support).
+          // Fire-and-forget: extracts key session info for use by
+          // Session Memory Compact during future compaction rounds.
+          try {
+            const { extractSessionMemory } =
+              await import('../compaction/session-memory-extractor.js');
+            void extractSessionMemory({
+              sessionId: input.sessionId,
+              userId: input.userId,
+              route,
+            });
+          } catch {
+            // Intentionally silent — session memory extraction is best-effort
+          }
           return { pendingInteraction: shouldKeepPausedState, statusCode: result.statusCode };
         }
 

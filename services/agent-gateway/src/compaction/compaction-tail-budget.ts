@@ -16,9 +16,13 @@
 
 import type { Message } from '@openAwork/shared';
 
-/** Default token preserve budget when caller does not supply one. */
-export const MIN_PRESERVE_RECENT_TOKENS = 2_000;
-export const MAX_PRESERVE_RECENT_TOKENS = 8_000;
+/** Default token preserve budget when caller does not supply one.
+ * Increased from 2K/8K to 10K/40K to align with Claude Code's
+ * session-memory-compact config (minTokens=10K, maxTokens=40K).
+ * Preserving more recent context improves task continuity across
+ * compaction rounds, especially for long multi-step tasks. */
+export const MIN_PRESERVE_RECENT_TOKENS = 10_000;
+export const MAX_PRESERVE_RECENT_TOKENS = 40_000;
 
 /**
  * Default token estimator. ~4 characters per token is a coarse but
@@ -142,12 +146,13 @@ export interface TailBudgetSelection {
 export function selectTailByTokenBudget(input: {
   messages: Message[];
   preserveRecentTokens: number;
-  /** Maximum number of recent turns to consider — defaults to 2 like opencode. */
+  /** Maximum number of recent turns to consider — defaults to 4 (increased
+   * from opencode's 2 to preserve more context across compaction rounds). */
   maxTurns?: number;
   estimate?: (m: Message) => number;
 }): TailBudgetSelection {
   const estimate = input.estimate ?? estimateMessageTokens;
-  const limit = input.maxTurns ?? 2;
+  const limit = input.maxTurns ?? 4;
   if (input.messages.length === 0 || limit <= 0 || input.preserveRecentTokens <= 0) {
     return { boundary: input.messages.length, tailStartMessageId: undefined, tailTokenEstimate: 0 };
   }

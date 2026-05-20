@@ -14,6 +14,8 @@ import {
 } from '../permission/permission-contract.js';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
+import { ApiError } from '../infra/error-response.js';
+import { parseBody } from '../infra/parse-request.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import {
   createPermissionAskedEvent,
@@ -140,22 +142,16 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
       const { step } = startRequestWorkflow(request, 'permission.request.create', undefined, {
         sessionId,
       });
-      const body = createPermissionRequestSchema.safeParse(request.body);
-
-      if (!body.success) {
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(createPermissionRequestSchema, request.body);
 
       if (!ownsSession(sessionId, user.sub)) {
-        step.fail('session not found');
-        return reply.status(404).send({ error: 'Session not found' });
+        throw ApiError.notFound('Session not found');
       }
 
       const requestId = randomUUID();
-      const clientRequestId = body.data.clientRequestId ?? `permission:${requestId}`;
+      const clientRequestId = body.clientRequestId ?? `permission:${requestId}`;
       const alwaysPatterns =
-        body.data.always && body.data.always.length > 0 ? body.data.always : null;
+        body.always && body.always.length > 0 ? body.always : null;
       sqliteRun(
         `INSERT INTO permission_requests
          (id, session_id, tool_name, scope, reason, risk_level, preview_action, request_payload_json, expires_at, always_json, status)
@@ -163,11 +159,11 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
         [
           requestId,
           sessionId,
-          body.data.toolName,
-          body.data.scope,
-          body.data.reason,
-          body.data.riskLevel,
-          body.data.previewAction ?? null,
+          body.toolName,
+          body.scope,
+          body.reason,
+          body.riskLevel,
+          body.previewAction ?? null,
           JSON.stringify({ clientRequestId }),
           null,
           alwaysPatterns ? JSON.stringify(alwaysPatterns) : null,
@@ -178,11 +174,11 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
         sessionId,
         createPermissionAskedEvent({
           requestId,
-          toolName: body.data.toolName,
-          scope: body.data.scope,
-          reason: body.data.reason,
-          riskLevel: body.data.riskLevel,
-          previewAction: body.data.previewAction,
+          toolName: body.toolName,
+          scope: body.scope,
+          reason: body.reason,
+          riskLevel: body.riskLevel,
+          previewAction: body.previewAction,
           ...(alwaysPatterns ? { always: alwaysPatterns } : {}),
         }),
         { clientRequestId },
@@ -199,11 +195,11 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
       const fallback = {
         requestId,
         sessionId,
-        toolName: body.data.toolName,
-        scope: body.data.scope,
-        reason: body.data.reason,
-        riskLevel: body.data.riskLevel,
-        previewAction: body.data.previewAction,
+        toolName: body.toolName,
+        scope: body.scope,
+        reason: body.reason,
+        riskLevel: body.riskLevel,
+        previewAction: body.previewAction,
         ...(alwaysPatterns ? { always: alwaysPatterns } : {}),
         status: 'pending' as const,
         createdAt: new Date().toISOString(),
@@ -225,16 +221,10 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
       const { step } = startRequestWorkflow(request, 'permission.request.reply', undefined, {
         sessionId,
       });
-      const body = replyPermissionSchema.safeParse(request.body);
-
-      if (!body.success) {
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(replyPermissionSchema, request.body);
 
       if (!ownsSession(sessionId, user.sub)) {
-        step.fail('session not found');
-        return reply.status(404).send({ error: 'Session not found' });
+        throw ApiError.notFound('Session not found');
       }
 
       const permissionRequest = sqliteGet<PermissionRequestRow>(
@@ -242,11 +232,10 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
          FROM permission_requests
          WHERE id = ? AND session_id = ?
          LIMIT 1`,
-        [body.data.requestId, sessionId],
+        [body.requestId, sessionId],
       );
       if (!permissionRequest) {
-        step.fail('permission request not found');
-        return reply.status(404).send({ error: 'Permission request not found' });
+        throw ApiError.notFound('Permission request not found');
       }
       if (permissionRequest.status !== 'pending') {
         step.fail('permission request already resolved');
@@ -258,9 +247,9 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
          SET status = ?, decision = ?, updated_at = datetime('now')
          WHERE id = ? AND session_id = ?`,
         [
-          body.data.decision === 'reject' ? 'rejected' : 'approved',
-          body.data.decision,
-          body.data.requestId,
+          body.decision === 'reject' ? 'rejected' : 'approved',
+          body.decision,
+          body.requestId,
           sessionId,
         ],
       );
@@ -270,15 +259,15 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
          (request_id, session_id, tool_name, scope, decision, workspace_root, created_at)
          VALUES (?, ?, ?, ?, ?, NULL, datetime('now'))`,
         [
-          body.data.requestId,
+          body.requestId,
           sessionId,
           permissionRequest.tool_name,
           permissionRequest.scope,
-          body.data.decision,
+          body.decision,
         ],
       );
 
-      if (body.data.decision === 'permanent') {
+      if (body.decision === 'permanent') {
         // Use always patterns (from opencode ctx.ask always) for broad approval.
         // e.g. approving edit with always:["*"] → write rule { permission: "edit", pattern: "*" }
         // Legacy rows without an `always_json` (column added later) fall back
@@ -294,7 +283,7 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
             scope: pattern,
           });
         }
-      } else if (body.data.decision === 'session') {
+      } else if (body.decision === 'session') {
         // Mirror opencode's `permission.ask reply='always'` semantics: when
         // the user picks 本会话允许, push every `always` pattern into the set
         // of approved scopes for this session so subsequent requests in the
@@ -343,13 +332,13 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
       // Cascade reject: when rejecting, also reject all other pending requests in the same session.
       // This mirrors opencode's behavior where rejecting one permission cascades to all pending.
       const cascadedRequestIds: string[] = [];
-      if (body.data.decision === 'reject') {
+      if (body.decision === 'reject') {
         const otherPending = sqliteAll<PermissionRequestRow>(
           `SELECT id, session_id, tool_name, scope, reason, risk_level, preview_action, status, decision, request_payload_json, expires_at, created_at
            FROM permission_requests
            WHERE session_id = ? AND status = 'pending' AND id != ?
            ORDER BY created_at ASC`,
-          [sessionId, body.data.requestId],
+          [sessionId, body.requestId],
         );
         for (const pending of otherPending) {
           sqliteRun(
@@ -379,10 +368,10 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
       publishSessionRunEvent(
         sessionId,
         createPermissionRepliedEvent({
-          requestId: body.data.requestId,
-          decision: body.data.decision,
-          ...(body.data.decision === 'reject' && body.data.feedback
-            ? { feedback: body.data.feedback }
+          requestId: body.requestId,
+          decision: body.decision,
+          ...(body.decision === 'reject' && body.feedback
+            ? { feedback: body.feedback }
             : {}),
         }),
         requestClientRequestId ? { clientRequestId: requestClientRequestId } : undefined,
@@ -391,17 +380,17 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
       // Continue-on-deny: when enabled, feed the rejection as a tool error and
       // resume the LLM loop so it can try a different approach.
       const continueOnDeny =
-        body.data.decision === 'reject' &&
+        body.decision === 'reject' &&
         resumePayload &&
         process.env['OPENAWORK_CONTINUE_ON_DENY'] === 'true';
 
       setPersistedSessionStateStatus({
         sessionId,
-        status: body.data.decision === 'reject' && !continueOnDeny ? 'idle' : 'running',
+        status: body.decision === 'reject' && !continueOnDeny ? 'idle' : 'running',
         userId: user.sub,
       });
 
-      if (body.data.decision !== 'reject' && resumePayload) {
+      if (body.decision !== 'reject' && resumePayload) {
         void resumeApprovedPermissionRequest({
           payload: {
             ...resumePayload,
@@ -411,7 +400,7 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
           userId: user.sub,
         }).catch((error) => {
           request.log.error(
-            { err: error, requestId: body.data.requestId, sessionId },
+            { err: error, requestId: body.requestId, sessionId },
             'failed to auto-resume approved permission request',
           );
         });
@@ -421,20 +410,20 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
             ...resumePayload,
             toolName: permissionRequest.tool_name,
           },
-          feedback: body.data.feedback,
+          feedback: body.feedback,
           sessionId,
           userId: user.sub,
         }).catch((error) => {
           request.log.error(
-            { err: error, requestId: body.data.requestId, sessionId },
+            { err: error, requestId: body.requestId, sessionId },
             'failed to resume after rejected permission (continue-on-deny)',
           );
         });
       }
 
       step.succeed(undefined, {
-        requestId: body.data.requestId,
-        decision: body.data.decision,
+        requestId: body.requestId,
+        decision: body.decision,
         ...(cascadedRequestIds.length > 0 ? { cascadedCount: cascadedRequestIds.length } : {}),
       });
       return reply.send({ ok: true });

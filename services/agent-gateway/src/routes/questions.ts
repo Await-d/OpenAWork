@@ -2,6 +2,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
+import { ApiError } from '../infra/error-response.js';
+import { parseBody } from '../infra/parse-request.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { formatAnsweredQuestionOutput, type QuestionToolInput } from '../tools/question-tools.js';
@@ -116,15 +118,10 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
       const { step } = startRequestWorkflow(request, 'question.request.reply', undefined, {
         sessionId,
       });
-      const body = replyQuestionSchema.safeParse(request.body);
-      if (!body.success) {
-        step.fail('invalid input');
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
+      const body = parseBody(replyQuestionSchema, request.body);
 
       if (!ownsSession(sessionId, user.sub)) {
-        step.fail('session not found');
-        return reply.status(404).send({ error: 'Session not found' });
+        throw ApiError.notFound('Session not found');
       }
 
       const questionRequest = sqliteGet<QuestionRequestRow>(
@@ -132,11 +129,10 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
          FROM question_requests
          WHERE id = ? AND session_id = ?
          LIMIT 1`,
-        [body.data.requestId, sessionId],
+        [body.requestId, sessionId],
       );
       if (!questionRequest) {
-        step.fail('question request not found');
-        return reply.status(404).send({ error: 'Question request not found' });
+        throw ApiError.notFound('Question request not found');
       }
       if (questionRequest.status !== 'pending') {
         step.fail('question request already resolved');
@@ -148,9 +144,9 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
          SET status = ?, answer_json = ?, updated_at = datetime('now')
          WHERE id = ? AND session_id = ?`,
         [
-          body.data.status,
-          body.data.status === 'answered' ? JSON.stringify(body.data.answers) : null,
-          body.data.requestId,
+          body.status,
+          body.status === 'answered' ? JSON.stringify(body.answers) : null,
+          body.requestId,
           sessionId,
         ],
       );
@@ -161,14 +157,14 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
       publishSessionRunEvent(
         sessionId,
         createQuestionRepliedEvent({
-          requestId: body.data.requestId,
-          status: body.data.status,
+          requestId: body.requestId,
+          status: body.status,
         }),
         requestClientRequestId ? { clientRequestId: requestClientRequestId } : undefined,
       );
 
       const resumePayload =
-        body.data.status === 'answered'
+        body.status === 'answered'
           ? parseQuestionResumePayload(questionRequest.request_payload_json)
           : null;
 
@@ -185,10 +181,10 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
         userId: user.sub,
       });
 
-      if (body.data.status === 'answered') {
+      if (body.status === 'answered') {
         if (questionRequest.tool_name === 'ExitPlanMode') {
           updateSessionPlanModeForExitDecision({
-            answers: body.data.answers,
+            answers: body.answers,
             sessionId,
           });
         }
@@ -198,7 +194,7 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
           ) as QuestionToolInput['questions'];
           const answerOutput = formatAnsweredQuestionOutput({
             questions,
-            answers: body.data.answers,
+            answers: body.answers,
           });
           void resumeAnsweredQuestionRequest({
             payload: {
@@ -210,14 +206,14 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
             userId: user.sub,
           }).catch((error) => {
             request.log.error(
-              { err: error, requestId: body.data.requestId, sessionId },
+              { err: error, requestId: body.requestId, sessionId },
               'failed to auto-resume answered question request',
             );
           });
         }
       }
 
-      step.succeed(undefined, { requestId: body.data.requestId, status: body.data.status });
+      step.succeed(undefined, { requestId: body.requestId, status: body.status });
       return reply.send({ ok: true });
     },
   );

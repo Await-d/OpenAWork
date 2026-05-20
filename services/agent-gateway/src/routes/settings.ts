@@ -3,6 +3,8 @@ import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
 import { loadAppVersion } from '../app/app-version.js';
 import { resolveAuxiliaryLlmConfig } from '../provider/auxiliary-llm-config.js';
+import { invalidateCatalog } from '../provider/provider-catalog.js';
+import { parseBody } from '../infra/parse-request.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import {
   COMPACTION_SETTINGS_KEY,
@@ -793,6 +795,10 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         [user.sub, JSON.stringify(imageGenerationDefaults)],
       );
       saveImageDefaultsStep.succeed();
+
+      // 方案 3：配置变更后 invalidate catalog 缓存
+      invalidateCatalog(user.sub);
+
       step.succeed(undefined, { providers: providers.length });
 
       return reply.send({
@@ -846,11 +852,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         image: z.object({ providerId: z.string(), modelId: z.string() }).optional(),
         compaction: z.object({ providerId: z.string(), modelId: z.string() }).optional(),
       });
-      const parsed = schema.safeParse(request.body);
-      if (!parsed.success) {
-        step.fail('invalid body');
-        return reply.status(400).send({ error: 'Invalid body' });
-      }
+      const parsed = parseBody(schema, request.body);
       const loadStep = child('load-existing');
       const selectionRow = sqliteGet<UserSettingRow>(
         `SELECT value FROM user_settings WHERE user_id = ? AND key = 'active_selection'`,
@@ -868,10 +870,10 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
           ...(storedSelection?.fast ? { fast: storedSelection.fast } : {}),
           ...(storedSelection?.image ? { image: storedSelection.image } : {}),
           ...(storedSelection?.compaction ? { compaction: storedSelection.compaction } : {}),
-          ...(parsed.data.chat ? { chat: parsed.data.chat } : {}),
-          ...(parsed.data.fast ? { fast: parsed.data.fast } : {}),
-          ...(parsed.data.image ? { image: parsed.data.image } : {}),
-          ...(parsed.data.compaction ? { compaction: parsed.data.compaction } : {}),
+          ...(parsed.chat ? { chat: parsed.chat } : {}),
+          ...(parsed.fast ? { fast: parsed.fast } : {}),
+          ...(parsed.image ? { image: parsed.image } : {}),
+          ...(parsed.compaction ? { compaction: parsed.compaction } : {}),
         };
       })();
       const saveStep = child('save');
@@ -881,6 +883,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         [user.sub, JSON.stringify(mergedSelection)],
       );
       saveStep.succeed();
+      invalidateCatalog(user.sub);
       step.succeed();
       return reply.send({ ok: true });
     },

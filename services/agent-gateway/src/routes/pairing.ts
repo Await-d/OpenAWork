@@ -10,6 +10,7 @@ const pairingRequestSchema = z.object({
   deviceName: z.string().min(1).max(80).optional(),
   platform: z.enum(['ios', 'android', 'web']).optional(),
 });
+import { parseBody } from '../infra/parse-request.js';
 
 const ADMIN_EMAIL = globalThis.process?.env['ADMIN_EMAIL'] ?? 'admin@openAwork.local';
 
@@ -35,12 +36,9 @@ export async function pairingRoutes(app: FastifyInstance): Promise<void> {
   app.post<{
     Body: { token: string; deviceName?: string; platform?: string };
   }>('/pairing/connect', async (request, reply) => {
-    const parsed = pairingRequestSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.status(400).send({ error: 'Invalid input', issues: parsed.error.issues });
-    }
+    const parsed = parseBody(pairingRequestSchema, request.body);
 
-    const { token, deviceName = 'unknown', platform = 'web' } = parsed.data;
+    const { token, deviceName = 'unknown', platform = 'web' } = parsed;
     if (!pairingManager.verifyToken(token)) {
       return reply.status(401).send({ error: 'Invalid pairing token' });
     }
@@ -56,12 +54,9 @@ export async function pairingRoutes(app: FastifyInstance): Promise<void> {
   app.post<{
     Body: { token: string; deviceName?: string; platform?: string };
   }>('/pairing/login', async (request, reply) => {
-    const parsed = pairingRequestSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.status(400).send({ error: 'Invalid input', issues: parsed.error.issues });
-    }
+    const parsed = parseBody(pairingRequestSchema, request.body);
 
-    const { token, deviceName = 'unknown', platform = 'web' } = parsed.data;
+    const { token, deviceName = 'unknown', platform = 'web' } = parsed;
     if (!pairingManager.verifyToken(token)) {
       return reply.status(401).send({ error: 'Invalid pairing token' });
     }

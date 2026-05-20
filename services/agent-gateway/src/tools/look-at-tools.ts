@@ -34,7 +34,7 @@ const lookAtInputSchema = z
   .object({
     file_path: z.string().min(1).optional(),
     image_data: z.string().min(1).optional(),
-    goal: z.string().min(1),
+    goal: z.string().min(1).optional(),
   })
   .superRefine((value, context) => {
     if (!value.file_path && !value.image_data) {

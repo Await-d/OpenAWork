@@ -94,26 +94,6 @@ const globInputSchema = z.object({
 
 const globOutputSchema = z.string();
 
-const workspaceSearchInputSchema = z.object({
-  path: z.string().min(1),
-  query: z.string().min(1),
-  maxResults: z.number().int().min(1).max(MAX_SEARCH_RESULTS).default(20),
-});
-
-const workspaceSearchOutputSchema = z.object({
-  path: z.string(),
-  query: z.string(),
-  results: z.array(
-    z.object({
-      path: z.string(),
-      line: z.number().int(),
-      text: z.string(),
-    }),
-  ),
-  scannedFiles: z.number().int(),
-  skippedLargeFiles: z.number().int(),
-});
-
 const readInputSchema = workspaceReadFileInputSchema;
 const readOutputSchema = workspaceReadFileOutputSchema;
 
@@ -425,89 +405,6 @@ export function resolveWorkspaceReviewFilePath(rootPath: string, filePath: strin
   return resolvedFilePath.slice(normalizedRootPath.length).replace(/^\//u, '');
 }
 
-async function runWorkspaceSearch(input: z.infer<typeof workspaceSearchInputSchema>) {
-  const safePath = assertSearchablePath(input.path);
-  await ensureIgnoreRulesLoadedForPath(safePath);
-  await assertDirectory(safePath);
-
-  const results: Array<{ path: string; line: number; text: string }> = [];
-  let scannedFiles = 0;
-  let skippedLargeFiles = 0;
-
-  async function searchDirectory(dirPath: string): Promise<void> {
-    if (results.length >= input.maxResults) {
-      return;
-    }
-
-    let entries: Dirent[];
-    try {
-      entries = await fsp.readdir(dirPath, { withFileTypes: true });
-    } catch {
-      return;
-    }
-
-    for (const entry of entries) {
-      if (results.length >= input.maxResults) {
-        break;
-      }
-
-      if (IGNORED_NAMES.has(entry.name)) {
-        continue;
-      }
-
-      const fullPath = join(dirPath, entry.name);
-      if (defaultIgnoreManager.shouldIgnore(fullPath)) {
-        continue;
-      }
-
-      if (entry.isDirectory()) {
-        await searchDirectory(fullPath);
-        continue;
-      }
-
-      if (!entry.isFile()) {
-        continue;
-      }
-
-      let stat: Stats;
-      try {
-        stat = await fsp.stat(fullPath);
-      } catch {
-        continue;
-      }
-
-      scannedFiles += 1;
-      if (stat.size > MAX_SEARCH_FILE_BYTES) {
-        skippedLargeFiles += 1;
-        continue;
-      }
-
-      let content: string;
-      try {
-        content = await fsp.readFile(fullPath, 'utf8');
-      } catch {
-        continue;
-      }
-
-      const lines = content.split('\n');
-      for (let index = 0; index < lines.length && results.length < input.maxResults; index += 1) {
-        if (lines[index]?.includes(input.query)) {
-          results.push({ path: fullPath, line: index + 1, text: lines[index]!.trim() });
-        }
-      }
-    }
-  }
-
-  await searchDirectory(safePath);
-  return {
-    path: safePath,
-    query: input.query,
-    results,
-    scannedFiles,
-    skippedLargeFiles,
-  };
-}
-
 async function runGlobTool(input: z.infer<typeof globToolInputSchema>) {
   const safePath = assertSearchablePath(input.path ?? WORKSPACE_ROOT);
   await ensureIgnoreRulesLoadedForPath(safePath);
@@ -665,12 +562,13 @@ function sanitizeReviewChanges(changes: WorkspaceReviewChange[]) {
   return changes.filter((change) => !defaultIgnoreManager.shouldIgnore(join('/', change.path)));
 }
 
-export const workspaceTreeTool: ToolDefinition<
+export const listTool: ToolDefinition<
   typeof workspaceTreeInputSchema,
   typeof workspaceTreeOutputSchema
 > = {
-  name: 'workspace_tree',
-  description: '列出工作区目录的递归树状结构（带安全限制）。读取文件前先用它检视文件夹。',
+  name: 'list',
+  description:
+    '列出工作区路径下的文件与目录。读取文件前先用它检视目录结构。必填 JSON：{"path":"/absolute/workspace/path","depth":2}。',
   inputSchema: workspaceTreeInputSchema,
   outputSchema: workspaceTreeOutputSchema,
   timeout: 10000,
@@ -686,19 +584,6 @@ export const workspaceTreeTool: ToolDefinition<
       nodes,
     };
   },
-};
-
-export const listTool: ToolDefinition<
-  typeof workspaceTreeInputSchema,
-  typeof workspaceTreeOutputSchema
-> = {
-  name: 'list',
-  description:
-    '列出工作区路径下的文件与目录。读取文件前先用它检视目录结构。必填 JSON：{"path":"/absolute/workspace/path","depth":2}。',
-  inputSchema: workspaceTreeInputSchema,
-  outputSchema: workspaceTreeOutputSchema,
-  timeout: workspaceTreeTool.timeout,
-  execute: async (input, signal) => workspaceTreeTool.execute(input, signal),
 };
 
 function applyLineWindow(
@@ -771,30 +656,13 @@ async function readWorkspaceFileWithWindow(
   };
 }
 
-export const workspaceReadFileTool: ToolDefinition<
-  typeof workspaceReadFileInputSchema,
-  typeof workspaceReadFileOutputSchema
-> = {
-  name: 'workspace_read_file',
-  description:
-    '从工作区读取 UTF-8 文本文件（带大小限制与 agentignore 保护）。支持 offset（1-基起始行号）与 limit（最多行数，默认 2000）以分页读取大文件；超过 2000 字符的行会被截断。',
-  inputSchema: workspaceReadFileInputSchema,
-  outputSchema: workspaceReadFileOutputSchema,
-  timeout: 10000,
-  execute: async (input) => {
-    const safePath = assertAccessibleWorkspacePath(pickPathInput(input), 'file');
-    await ensureIgnoreRulesLoadedForPath(safePath);
-    return readWorkspaceFileWithWindow(safePath, input);
-  },
-};
-
 export const readTool: ToolDefinition<typeof readInputSchema, typeof readOutputSchema> = {
   name: 'read',
   description:
     '从工作区读取 UTF-8 文本文件（或列出目录）。支持 offset（1-基起始行号）与 limit（最多行数，默认 2000）以分页读取大文件；超过 2000 字符的行会被截断。需要先检视目录再选文件时，请先调 list。',
   inputSchema: readInputSchema,
   outputSchema: readOutputSchema,
-  timeout: workspaceReadFileTool.timeout,
+  timeout: 10000,
   execute: async (input) => {
     const safePath = assertAccessibleWorkspacePath(pickPathInput(input), 'file');
     await ensureIgnoreRulesLoadedForPath(safePath);
@@ -825,24 +693,12 @@ export const globTool: ToolDefinition<typeof globToolInputSchema, typeof globToo
   execute: async (input) => runGlobTool(input),
 };
 
-export const workspaceSearchTool: ToolDefinition<
-  typeof workspaceSearchInputSchema,
-  typeof workspaceSearchOutputSchema
-> = {
-  name: 'workspace_search',
-  description: '在工作区文件中搜索字面文本。用于查找符号、字符串或实现引用。',
-  inputSchema: workspaceSearchInputSchema,
-  outputSchema: workspaceSearchOutputSchema,
-  timeout: 15000,
-  execute: runWorkspaceSearch,
-};
-
 export const grepTool: ToolDefinition<typeof grepInputSchema, typeof grepOutputSchema> = {
   name: 'grep',
   description: '快速内容搜索工具（带安全限制：60s 超时、输出上限 256KB）。',
   inputSchema: grepInputSchema,
   outputSchema: grepOutputSchema,
-  timeout: workspaceSearchTool.timeout,
+  timeout: 15000,
   execute: async (input) => runCanonicalGrep(input),
 };
 
@@ -897,18 +753,6 @@ export const workspaceReviewDiffTool: ToolDefinition<
   },
 };
 
-export const workspaceWriteFileTool: ToolDefinition<
-  typeof workspaceWriteFileInputSchema,
-  typeof workspaceWriteFileOutputSchema
-> = {
-  name: 'workspace_write_file',
-  description: '以 UTF-8 文本覆盖工作区中已存在的文件。',
-  inputSchema: workspaceWriteFileInputSchema,
-  outputSchema: workspaceWriteFileOutputSchema,
-  timeout: 10000,
-  execute: async (input) => executeWorkspaceWriteFile(input),
-};
-
 export async function executeWorkspaceWriteFile(
   input: z.infer<typeof workspaceWriteFileInputSchema>,
   options?: {
@@ -957,7 +801,7 @@ export const writeTool: ToolDefinition<typeof writeInputSchema, typeof writeOutp
     '向工作区文件写入 UTF-8 文本：不存在则创建，已存在则覆盖。修改现有内容前请先读文件。',
   inputSchema: writeInputSchema,
   outputSchema: writeOutputSchema,
-  timeout: workspaceWriteFileTool.timeout,
+  timeout: 10000,
   execute: async (input, signal) => {
     return executeWriteTool(input, signal);
   },
@@ -993,18 +837,6 @@ export async function executeWriteTool(
 
   return executeWorkspaceCreateFile({ path: safePath, content: input.content });
 }
-
-export const workspaceCreateFileTool: ToolDefinition<
-  typeof workspaceCreateFileInputSchema,
-  typeof workspaceCreateFileOutputSchema
-> = {
-  name: 'workspace_create_file',
-  description: '在工作区创建一个新文件（仅当该文件尚不存在）。',
-  inputSchema: workspaceCreateFileInputSchema,
-  outputSchema: workspaceCreateFileOutputSchema,
-  timeout: 10000,
-  execute: async (input) => executeWorkspaceCreateFile(input),
-};
 
 export async function executeWorkspaceCreateFile(
   input: z.infer<typeof workspaceCreateFileInputSchema>,
@@ -1095,18 +927,13 @@ export const workspaceReviewRevertTool: ToolDefinition<
 };
 
 export const WORKSPACE_TOOL_NAMES = [
-  workspaceTreeTool.name,
   listTool.name,
-  workspaceReadFileTool.name,
   readTool.name,
   globTool.name,
-  workspaceSearchTool.name,
   grepTool.name,
   workspaceReviewStatusTool.name,
   workspaceReviewDiffTool.name,
-  workspaceWriteFileTool.name,
   writeTool.name,
-  workspaceCreateFileTool.name,
   workspaceCreateDirectoryTool.name,
   workspaceReviewRevertTool.name,
 ] as const;

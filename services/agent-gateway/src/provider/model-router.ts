@@ -3,6 +3,7 @@ import type { AIModelConfig, AIProvider, RequestOverrides } from '@openAwork/age
 import { z } from 'zod';
 import { resolveUpstreamProtocol } from '../routes/upstream-protocol.js';
 import type { UpstreamProtocol } from '../routes/upstream-protocol.js';
+import { runHookFirst, runHookAll } from './provider-plugin.js';
 
 const BUILTIN_PRESETS = getAllBuiltinPresets();
 
@@ -33,6 +34,10 @@ export interface ModelRouteConfig {
   apiBaseUrl: string;
   apiKey: string;
   contextWindow?: number;
+  /** Model's maximum output token limit (from preset). Used by the
+   *  compaction overflow formula to calculate usable input space.
+   *  Mirrors opencode's `model.limit.output`. */
+  maxOutputTokens?: number;
   maxTokens: number;
   temperature: number;
   upstreamProtocol: UpstreamProtocol;
@@ -144,13 +149,22 @@ export function resolveModelRoute(request: ModelRequest): ModelRouteConfig {
         ? (globalThis.process?.env['ANTHROPIC_API_BASE_URL'] ?? 'https://api.anthropic.com/v1')
         : OPENAI_BASE),
   );
-  const upstreamProtocol = resolveUpstreamProtocol({ model, providerType, baseUrl: apiBaseUrl });
 
-  const apiKey = builtinProvider
+  // 方案 5：插件优先解析协议，fallback 到原有逻辑
+  const upstreamProtocol = (providerType && builtinProvider
+    ? runHookFirst('resolve.protocol', providerType, { model, provider: builtinProvider, baseUrl: apiBaseUrl })
+    : undefined
+  ) ?? resolveUpstreamProtocol({ model, providerType, baseUrl: apiBaseUrl });
+
+  // 方案 5：插件优先解析 API key，fallback 到原有逻辑
+  const apiKey = (providerType && builtinProvider
+    ? runHookFirst('resolve.apiKey', providerType, { provider: builtinProvider })
+    : undefined
+  ) ?? (builtinProvider
     ? resolveProviderApiKey(builtinProvider)
     : isAnthropic
       ? (globalThis.process?.env['ANTHROPIC_API_KEY'] ?? DEFAULT_API_KEY)
-      : DEFAULT_API_KEY;
+      : DEFAULT_API_KEY);
 
   return {
     model,
@@ -162,6 +176,7 @@ export function resolveModelRoute(request: ModelRequest): ModelRouteConfig {
     upstreamProtocol,
     requestOverrides,
     contextWindow: builtinModel?.contextWindow,
+    maxOutputTokens: builtinModel?.maxOutputTokens,
     providerType,
     inputPricePerMillion: builtinModel?.inputPricePerMillion,
     outputPricePerMillion: builtinModel?.outputPricePerMillion,
@@ -187,23 +202,40 @@ export function resolveModelRouteFromProvider(
   );
   const resolvedProviderBaseUrl =
     normalizeBaseUrl(provider.baseUrl) || resolveProviderDefaultBaseUrl(provider.type);
-  const upstreamProtocol = resolveUpstreamProtocol({
-    model: modelId,
-    providerType: provider.type,
-    baseUrl: resolvedProviderBaseUrl,
-    explicitOverride: provider.upstreamProtocol,
-  });
+
+  // 方案 5：插件优先解析协议（显式 override 仍然最优先）
+  const upstreamProtocol = provider.upstreamProtocol
+    ?? runHookFirst('resolve.protocol', provider.type, { model: modelId, provider, baseUrl: resolvedProviderBaseUrl })
+    ?? resolveUpstreamProtocol({
+      model: modelId,
+      providerType: provider.type,
+      baseUrl: resolvedProviderBaseUrl,
+      explicitOverride: provider.upstreamProtocol,
+    });
+
+  // 方案 5：插件优先解析 API key
+  const apiKey = runHookFirst('resolve.apiKey', provider.type, { provider })
+    ?? resolveProviderApiKey(provider);
+
+  // 方案 5：插件注入额外 headers（合并到 requestOverrides.headers）
+  const pluginHeaders: Record<string, string> = { ...(requestOverrides.headers ?? {}) };
+  runHookAll('request.headers', provider.type, { model: modelId, provider, headers: pluginHeaders });
+  const mergedOverrides = {
+    ...requestOverrides,
+    ...(Object.keys(pluginHeaders).length > 0 ? { headers: pluginHeaders } : {}),
+  };
 
   return {
     model: modelId,
     variant: request.variant,
     apiBaseUrl: resolvedProviderBaseUrl,
-    apiKey: resolveProviderApiKey(provider),
-    maxTokens: requestOverrides.maxTokens ?? request.maxTokens,
-    temperature: requestOverrides.temperature ?? request.temperature,
+    apiKey,
+    maxTokens: mergedOverrides.maxTokens ?? request.maxTokens,
+    temperature: mergedOverrides.temperature ?? request.temperature,
     upstreamProtocol,
-    requestOverrides,
+    requestOverrides: mergedOverrides,
     contextWindow: modelConfig?.contextWindow,
+    maxOutputTokens: modelConfig?.maxOutputTokens,
     providerType: provider.type,
     inputPricePerMillion: modelConfig?.inputPricePerMillion,
     outputPricePerMillion: modelConfig?.outputPricePerMillion,
@@ -244,6 +276,7 @@ export function resolveCompactionRoute(
     upstreamProtocol,
     requestOverrides,
     contextWindow: modelConfig?.contextWindow,
+    maxOutputTokens: modelConfig?.maxOutputTokens,
     providerType: provider.type,
     supportsThinking: false,
   };

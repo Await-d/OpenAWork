@@ -20,6 +20,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
+import { parseBody, parseQuery } from '../infra/parse-request.js';
 import { sqliteGet } from '../infra/db.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import {

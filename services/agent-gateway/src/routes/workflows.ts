@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { FIXED_TEAM_CORE_ROLE_ORDER } from '@openAwork/shared';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
+import { parseBody } from '../infra/parse-request.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { buildFixedTeamTemplateDefaultBindings } from '../team/team-template-metadata.js';

@@ -144,10 +144,31 @@ const bashInputSchema = z.object({
   description: z
     .string()
     .min(1)
+    .optional()
     .describe(
-      "用 5-10 个词清晰描述这条命令的作用。示例：\n输入：ls\n输出：列出当前目录的文件\n\n输入：git status\n输出：查看工作树状态\n\n输入：npm install\n输出：安装 npm 依赖\n\n输入：mkdir foo\n输出：创建目录 'foo'",
+      "可选：用 5-10 个词清晰描述这条命令的作用。强烈建议提供，便于审计和回放；省略时 OpenAWork 会用 command 的前缀自动生成一个简短描述。示例：\n输入：ls\n输出：列出当前目录的文件\n\n输入：git status\n输出：查看工作树状态\n\n输入：npm install\n输出：安装 npm 依赖\n\n输入：mkdir foo\n输出：创建目录 'foo'",
     ),
 });
+
+/**
+ * Compute a short fallback description from the command itself when the
+ * model omits the `description` field. Used both at the storage layer
+ * (so `runBashCommand` always has a non-empty description to record)
+ * and at terminal-registration time.
+ *
+ * The heuristic: take the first non-empty line, then clip to 50 chars
+ * with an ellipsis, wrapped as `运行 \`...\``. Anything more elaborate
+ * would just duplicate the `command` field that the audit log already
+ * captures verbatim.
+ */
+export function deriveBashDescription(command: string): string {
+  const firstLine = command.split('\n')[0]?.trim() ?? '';
+  if (firstLine.length === 0) {
+    return '执行 bash 命令';
+  }
+  const clipped = firstLine.length > 50 ? `${firstLine.slice(0, 50)}…` : firstLine;
+  return `运行 \`${clipped}\``;
+}
 
 export type BashInput = z.infer<typeof bashInputSchema>;
 
@@ -576,6 +597,12 @@ export async function runBashCommand(
   assertSafeBashCommand(input.command);
   const cwd = await resolveBashWorkdir(input.workdir);
   const timeoutMs = input.timeout ?? DEFAULT_BASH_TIMEOUT_MS;
+  // Many models (especially smaller / non-Claude variants) skip the
+  // `description` field even though the tool schema requests it. We
+  // synthesize a short fallback from the command itself so the audit
+  // trail and the terminal registry never end up with an empty
+  // description, and we don't fail the call at the schema gate.
+  const effectiveDescription = input.description ?? deriveBashDescription(input.command);
 
   // Register the terminal up-front if tracking is requested. This lets
   // the UI render an in-flight row even before any output arrives, and
@@ -592,7 +619,7 @@ export async function runBashCommand(
       toolName: options.tracking.toolName,
       kind: options.tracking.kind,
       command: input.command,
-      ...(input.description ? { description: input.description } : {}),
+      description: effectiveDescription,
       cwd,
       ...(options.tracking.abortController
         ? { abortController: options.tracking.abortController }
@@ -714,7 +741,7 @@ export async function runBashCommand(
 
   const result: BashExecutionResult = {
     command: input.command,
-    description: input.description,
+    description: effectiveDescription,
     cwd,
     exitCode: outcome.code,
     kind: outcome.kind,
