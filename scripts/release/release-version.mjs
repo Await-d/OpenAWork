@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const rootDir = resolve(__dirname, '..');
+const rootDir = resolve(__dirname, '../..');
 
 const rootPackageJsonPath = resolve(rootDir, 'package.json');
 const mobileAppJsonPath = resolve(rootDir, 'apps/mobile/app.json');
