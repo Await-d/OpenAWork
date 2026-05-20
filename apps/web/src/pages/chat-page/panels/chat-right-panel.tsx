@@ -20,6 +20,7 @@ import type { PendingPermissionRequest, Session, SessionTask } from '@openAwork/
 import { TaskToolInline } from '../../../components/chat/tool-call/display/task-tool-inline.js';
 import SkillSettingsPanel from '../../../components/chat/misc/SkillSettingsPanel.js';
 import { ChatHistoryTabContent, ChatOverviewTabContent } from './right-panel-sections.js';
+import { SnapshotTimelinePanel } from '../../../components/chat/snapshot/SnapshotTimelinePanel.js';
 import type { SessionTerminalView } from '../../../components/conversation-runtime/terminals/terminals-api.js';
 import { deleteSessionTerminal } from '../../../components/conversation-runtime/terminals/terminals-api.js';
 import type { SessionTerminalStatus } from '@openAwork/shared';
@@ -62,16 +63,16 @@ const TERMINAL_STATUS_LABELS: Record<SessionTerminalStatus, string> = {
 };
 
 const TERMINAL_STATUS_COLORS: Record<SessionTerminalStatus, string> = {
-  running: 'var(--success))',
-  idle: 'var(--fg-muted))',
-  exited: 'var(--fg-muted))',
-  aborted: 'var(--warning))',
-  timeout: 'var(--warning))',
-  spawn_error: 'var(--danger))',
-  killed: 'var(--danger))',
-  stale: 'var(--fg-muted))',
-  'tmux-spawned': 'var(--aux))',
-  'tmux-killed': 'var(--fg-muted))',
+  running: 'var(--success)',
+  idle: 'var(--fg-muted)',
+  exited: 'var(--fg-muted)',
+  aborted: 'var(--warning)',
+  timeout: 'var(--warning)',
+  spawn_error: 'var(--danger)',
+  killed: 'var(--danger)',
+  stale: 'var(--fg-muted)',
+  'tmux-spawned': 'var(--aux)',
+  'tmux-killed': 'var(--fg-muted)',
 };
 
 const ACTIVE_TERMINAL_STATUSES: ReadonlySet<SessionTerminalStatus> = new Set([
@@ -558,6 +559,9 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
                       gatewayUrl={gatewayUrl}
                     />
                   )}
+                  {rightTab === 'snapshots' && currentSessionId && (
+                    <SnapshotTimelinePanel sessionId={currentSessionId} gatewayUrl={gatewayUrl} />
+                  )}
                 </div>
               </>
             )}
@@ -623,7 +627,7 @@ function RightPanelTerminalsContent({
         {loading && <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>加载中…</span>}
       </div>
       {error && (
-        <div style={{ fontSize: 11, color: 'var(--danger))', padding: '4px 0' }}>{error}</div>
+        <div style={{ fontSize: 11, color: 'var(--danger)', padding: '4px 0' }}>{error}</div>
       )}
       {sorted.length === 0 ? (
         <div style={{ fontSize: 11, color: 'var(--fg-muted)', padding: '6px 2px' }}>
@@ -634,7 +638,7 @@ function RightPanelTerminalsContent({
           const isActive = ACTIVE_TERMINAL_STATUSES.has(terminal.status);
           const isExpanded = expandedId === terminal.terminalId;
           const isPendingKill = pendingKillIds.has(terminal.terminalId);
-          const statusColor = TERMINAL_STATUS_COLORS[terminal.status] ?? 'var(--fg-muted))';
+          const statusColor = TERMINAL_STATUS_COLORS[terminal.status] ?? 'var(--fg-muted)';
           const statusLabel = TERMINAL_STATUS_LABELS[terminal.status] ?? terminal.status;
           return (
             <div
@@ -716,7 +720,7 @@ function RightPanelTerminalsContent({
                       fontWeight: 600,
                       border: '1px solid color-mix(in srgb, var(--danger) 50%, transparent)',
                       background: 'color-mix(in srgb, var(--danger) 14%, transparent)',
-                      color: 'var(--danger))',
+                      color: 'var(--danger)',
                       padding: '2px 7px',
                       borderRadius: 5,
                       cursor: isPendingKill ? 'wait' : 'pointer',
@@ -774,7 +778,7 @@ function RightPanelTerminalsContent({
                 {terminal.exitCode !== undefined && (
                   <span
                     style={{
-                      color: terminal.exitCode === 0 ? 'var(--success))' : 'var(--danger))',
+                      color: terminal.exitCode === 0 ? 'var(--success)' : 'var(--danger)',
                     }}
                   >
                     exit {terminal.exitCode}
@@ -852,14 +856,14 @@ function renderToolsPanel(
               borderRadius: 999,
               border:
                 toolFilter === f
-                  ? '1px solid color-mix(in oklch, var(--accent) 26%, var(--border-default))'
+                  ? '1px solid color-mix(in oklch, var(--accent) 26%, var(--border-default)'
                   : '1px solid var(--border-subtle)',
               fontSize: 10,
               fontWeight: 600,
               cursor: 'pointer',
               background:
                 toolFilter === f
-                  ? 'color-mix(in oklch, var(--accent) 14%, var(--bg-overlay))'
+                  ? 'color-mix(in oklch, var(--accent) 14%, var(--bg-overlay)'
                   : 'var(--bg-overlay)',
               color: toolFilter === f ? 'var(--accent)' : 'var(--fg-muted)',
             }}

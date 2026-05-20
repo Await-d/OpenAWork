@@ -303,3 +303,17 @@ export type {
   UpdateGroupInput,
   UpdateSnippetInput,
 } from './infra/prompt-snippets.js';
+
+export { createSnapshotTreesClient } from './session/snapshot-trees.js';
+export type {
+  RestoreApplyResult,
+  RestorePreviewFile,
+  RestorePreviewResult,
+  RestoreResult,
+  SnapshotTreeChainNode,
+  SnapshotTreeDetail,
+  SnapshotTreeEntry,
+  SnapshotTreeFileEntry,
+  SnapshotTreeScopeKind,
+  SnapshotTreesClient,
+} from './session/snapshot-trees.js';

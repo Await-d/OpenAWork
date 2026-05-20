@@ -488,6 +488,54 @@ export async function migrate(): Promise<void> {
     'CREATE INDEX IF NOT EXISTS idx_session_file_backups_kind_hash_tier ON session_file_backups(kind, content_hash, content_tier, hash_scope)',
   );
 
+  // ─── Shadow Git snapshot trees（docs/design/ultra-file-change-tracking.md） ───
+  // 每个 step / turn 对应一个 tree_hash，parent_tree_hash 形成因果链。
+  // shadow git 后端可用时为 strong guarantee，否则 row 不会被写入。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS snapshot_trees (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      client_request_id TEXT,
+      tree_hash TEXT NOT NULL,
+      parent_tree_hash TEXT,
+      scope_kind TEXT NOT NULL DEFAULT 'step',
+      source_kind TEXT NOT NULL DEFAULT 'session_snapshot',
+      guarantee_level TEXT NOT NULL DEFAULT 'strong',
+      files_changed INTEGER NOT NULL DEFAULT 0,
+      additions INTEGER NOT NULL DEFAULT 0,
+      deletions INTEGER NOT NULL DEFAULT 0,
+      tool_name TEXT,
+      tool_call_id TEXT,
+      observability_json TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(session_id, tree_hash)
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_snapshot_trees_session_created ON snapshot_trees(session_id, created_at DESC)',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_snapshot_trees_request ON snapshot_trees(session_id, client_request_id)',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_snapshot_trees_parent ON snapshot_trees(session_id, parent_tree_hash)',
+  );
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS snapshot_file_entries (
+      snapshot_tree_id INTEGER NOT NULL REFERENCES snapshot_trees(id) ON DELETE CASCADE,
+      file_path TEXT NOT NULL,
+      status TEXT NOT NULL,
+      additions INTEGER NOT NULL DEFAULT 0,
+      deletions INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY(snapshot_tree_id, file_path)
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_snapshot_file_entries_path ON snapshot_file_entries(file_path)',
+  );
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS artifacts (
       id TEXT PRIMARY KEY,

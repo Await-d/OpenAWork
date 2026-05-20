@@ -113,6 +113,20 @@ export const SESSION_DELETE_RECOVERY_STATEMENTS: ReadonlyArray<SessionDeleteReco
     sql: 'DELETE FROM session_file_backups WHERE session_id = ? AND user_id = ?',
     params: ({ sessionId, userId }) => [sessionId, userId],
   },
+  // Shadow-git tree metadata: file entries reference snapshot_trees rows, so
+  // delete the children before the parents to keep FK consistency on databases
+  // running without cascade triggers.
+  {
+    sql: `DELETE FROM snapshot_file_entries
+          WHERE snapshot_tree_id IN (
+            SELECT id FROM snapshot_trees WHERE session_id = ? AND user_id = ?
+          )`,
+    params: ({ sessionId, userId }) => [sessionId, userId],
+  },
+  {
+    sql: 'DELETE FROM snapshot_trees WHERE session_id = ? AND user_id = ?',
+    params: ({ sessionId, userId }) => [sessionId, userId],
+  },
   {
     sql: 'DELETE FROM permission_requests WHERE session_id = ?',
     params: ({ sessionId }) => [sessionId],

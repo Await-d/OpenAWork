@@ -7,6 +7,7 @@ export const RIGHT_PANEL_TABS = [
   { id: 'bookmarks', label: '收藏' },
   { id: 'terminals', label: '终端' },
   { id: 'skills', label: 'Skills' },
+  { id: 'snapshots', label: '快照' },
   { id: 'history', label: '历史' },
   { id: 'viz', label: '可视化' },
   { id: 'mcp', label: 'MCP' },
@@ -28,6 +29,10 @@ export const RIGHT_PANEL_TAB_META: Record<RightPanelTabId, { description: string
     skills: {
       title: 'Skill 设置',
       description: '调整 workspace 默认与本会话覆盖：拖拽排序、AI 推荐、导入/导出。',
+    },
+    snapshots: {
+      title: '快照时间线',
+      description: '查看文件变更快照，支持精确恢复到任意步骤或选择性回滚。',
     },
     history: { title: '会话历史', description: '查看子会话、审批、计划记录与历史待办。' },
     viz: { title: '执行可视化', description: '从图谱与事件时间线理解当前执行路径。' },
@@ -99,6 +104,15 @@ export function renderRightPanelTabIcon(tabId: RightPanelTabId): ReactNode {
       <svg aria-hidden="true" focusable="false" role="presentation" {...iconProps}>
         <path d="M12 4l1.7 4.6L18 10l-4.3 1.4L12 16l-1.7-4.6L6 10l4.3-1.4L12 4z" />
         <path d="M19 14l.8 2.1L22 17l-2.2.9L19 20l-.8-2.1L16 17l2.2-.9z" />
+      </svg>
+    );
+  }
+  if (tabId === 'snapshots') {
+    // Camera/snapshot icon — represents point-in-time captures
+    return (
+      <svg aria-hidden="true" focusable="false" role="presentation" {...iconProps}>
+        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+        <circle cx="12" cy="13" r="4" />
       </svg>
     );
   }

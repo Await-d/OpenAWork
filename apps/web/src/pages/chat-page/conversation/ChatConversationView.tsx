@@ -56,6 +56,8 @@ import {
 import type { ChatImageGenerationReferenceArtifact } from '../../../components/chat/image/ChatImageGenerationControls.js';
 import HistoryEditDialog from './views/history-edit-dialog.js';
 import RetryModeDialog from './views/retry-mode-dialog.js';
+import { useSnapshotAwareAction } from '../../../components/chat/snapshot/useSnapshotAwareAction.js';
+import { SnapshotRestoreConfirmDialog } from '../../../components/chat/snapshot/SnapshotRestoreConfirmDialog.js';
 import { ChatScrollBottomButton } from '../../../components/conversation-runtime/views/scroll-bottom-button.js';
 import { ChatStreamErrorBar } from '../../../components/conversation-runtime/views/stream-error-bar.js';
 // ChatTodoFloatingPanel 现在由 ChatTopBar 内部挂载（顶部右侧），本组件不再渲染浮层；
@@ -510,6 +512,8 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
 
   const composerFeatures = buildComposerFeatures(composerExtras);
 
+  const snapshotAwareAction = useSnapshotAwareAction({ sessionId, gatewayUrl });
+
   const showWelcome =
     welcomeScreen !== undefined &&
     !showSessionSwitchSkeleton &&
@@ -557,7 +561,10 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
         inputParts={historyEditPrompt?.inputParts as never}
         onClose={onCloseHistoryEdit}
         onResendCurrent={(text, editedInputParts) => {
-          onResendHistoryEdit(text, editedInputParts);
+          snapshotAwareAction.checkAndExecute({
+            action: 'edit',
+            onProceed: () => onResendHistoryEdit(text, editedInputParts),
+          });
         }}
         onContinueCurrent={(text, editedInputParts) => {
           onContinueHistoryEdit(text, editedInputParts);
@@ -571,8 +578,18 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
         open={retryPrompt !== null}
         messagePreview={retryPrompt?.text ?? ''}
         onClose={onCloseRetry}
-        onRetryCurrent={onRetryCurrent}
+        onRetryCurrent={() => {
+          snapshotAwareAction.checkAndExecute({
+            action: 'retry',
+            onProceed: onRetryCurrent,
+          });
+        }}
         onRetryBranch={onRetryBranch}
+      />
+
+      <SnapshotRestoreConfirmDialog
+        {...snapshotAwareAction.dialogProps}
+        restoring={snapshotAwareAction.restoring}
       />
 
       <div style={SPLIT_INNER_STYLE}>

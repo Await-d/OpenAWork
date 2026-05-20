@@ -76,6 +76,7 @@ import { sessionImagesRoutes } from './routes/session-images.js';
 import { sessionTerminalsRoutes } from './routes/session-terminals.js';
 import { mcpEventsRoutes } from './routes/mcp-events.js';
 import { mcpOAuthRoutes } from './routes/mcp-oauth.js';
+import { snapshotTreeRoutes } from './routes/snapshot-tree-routes.js';
 import { ensurePluginsLoaded } from './runtime/plugin-host.js';
 
 // 方案 5：加载所有内置 provider 插件
@@ -139,6 +140,7 @@ await app.register(sessionImagesRoutes);
 await app.register(sessionTerminalsRoutes);
 await app.register(mcpEventsRoutes);
 await app.register(mcpOAuthRoutes);
+await app.register(snapshotTreeRoutes);
 
 app.get(
   '/health',

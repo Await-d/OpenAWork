@@ -24,6 +24,13 @@ import { appendSnapshotPart, appendPatchPart } from '../message/message-v2-adapt
 import type { MessageID } from '../message/message-v2-schema.js';
 import { upsertArtifactsFromAssistantMessage } from '../session/assistant-content-artifacts.js';
 import { touchSessionHeartbeat } from '../handoff/bus/heartbeat.js';
+import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
+import { validateWorkspacePath } from '../workspace/workspace-paths.js';
+import { getSnapshotEngine } from '../snapshot/snapshot-engine.js';
+import {
+  getLatestSnapshotTreeForSession,
+  persistSnapshotTree,
+} from '../snapshot/snapshot-tree-store.js';
 import type { StreamUsageSummary } from './stream-usage.js';
 import {
   THINKING_LANGUAGE_HINT_MARKERS,
@@ -701,6 +708,72 @@ function mergeStreamUsageSummary(
   };
 }
 
+/**
+ * Capture a shadow-git tree snapshot for the just-finalized round and
+ * persist a row in `snapshot_trees`. Best-effort: any failure is logged
+ * but never propagated since the legacy snapshotRef path already covered
+ * persistence. Runs after `finalizeAssistant` returns so it never blocks
+ * the streaming response.
+ */
+async function captureSnapshotTreeBestEffort(input: {
+  clientRequestId: string;
+  round: number;
+  reason: StreamStopReason;
+  sessionContext: SessionStreamContext;
+  sessionId: string;
+  userId: string;
+  diffFiles: FileDiffContent[];
+}): Promise<void> {
+  try {
+    const metadata = parseSessionMetadataJson(input.sessionContext.metadataJson);
+    const rawWorkspace =
+      typeof metadata['workingDirectory'] === 'string' ? metadata['workingDirectory'] : null;
+    if (!rawWorkspace) return;
+
+    // Defense in depth: only capture when the workspace path passes the
+    // gateway's allowlist. This prevents a malicious or stale session
+    // metadata payload from steering the shadow-git engine at an
+    // unintended directory.
+    const workspaceRoot = validateWorkspacePath(rawWorkspace);
+    if (!workspaceRoot) return;
+
+    const engine = getSnapshotEngine();
+    if (!(await engine.isShadowGitEnabled())) return;
+
+    const captureResult = await engine.capture({ workspaceRoot });
+    if (captureResult.ref.kind !== 'git') return;
+
+    // Link the new tree to the previous one so traceSnapshotTreeChain can
+    // walk back to baseline. We pick the latest persisted tree for this
+    // session as the parent — turn-finalize is the natural sequencing
+    // boundary for the chain, so picking by created_at DESC is safe.
+    const previous = getLatestSnapshotTreeForSession({
+      sessionId: input.sessionId,
+      userId: input.userId,
+    });
+    const parentTreeHash =
+      previous && previous.treeHash !== captureResult.ref.hash ? previous.treeHash : null;
+
+    persistSnapshotTree({
+      sessionId: input.sessionId,
+      userId: input.userId,
+      clientRequestId: input.clientRequestId,
+      treeHash: captureResult.ref.hash,
+      parentTreeHash,
+      scopeKind: input.reason === 'tool_use' ? 'step' : 'turn',
+      sourceKind: 'session_snapshot',
+      guaranteeLevel: captureResult.guaranteeLevel,
+      fileDiffs: input.diffFiles,
+    });
+  } catch (error) {
+    // Don't fail the response on snapshot capture errors.
+    console.warn(
+      '[stream-model-round] shadow-git capture failed:',
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+}
+
 export async function runModelRound(input: {
   clientRequestId: string;
   enabledTools: ReturnType<typeof getEnabledTools>;
@@ -1074,6 +1147,21 @@ export async function runModelRound(input: {
           files: diffFiles.map((d) => d.file),
         });
       }
+
+      // Phase 2: shadow-git tree capture (best-effort, non-blocking).
+      // This produces a real git tree hash that supplements the legacy
+      // request-scope snapshotRef. When shadow git is unavailable the
+      // engine returns a noop and we silently skip (legacy backup path
+      // already handled the diffs above).
+      void captureSnapshotTreeBestEffort({
+        clientRequestId: input.clientRequestId,
+        round: input.round,
+        reason,
+        sessionContext: input.sessionContext,
+        sessionId: input.sessionId,
+        userId: input.userId,
+        diffFiles,
+      });
     }
   };
   const markFailedRequestScopeMessages = () => {
