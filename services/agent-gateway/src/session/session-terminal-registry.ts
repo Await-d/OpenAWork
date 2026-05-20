@@ -102,6 +102,7 @@ interface SessionTerminalRow {
   kind: string;
   command: string;
   description: string | null;
+  name: string | null;
   cwd: string;
   pid: number | null;
   status: string;
@@ -131,6 +132,7 @@ function rowToRecord(row: SessionTerminalRow): SessionTerminalRecord {
     kind: row.kind as SessionTerminalKind,
     command: row.command,
     ...(row.description ? { description: row.description } : {}),
+    ...(row.name ? { name: row.name } : {}),
     cwd: row.cwd,
     ...(row.pid !== null ? { pid: row.pid } : {}),
     status: row.status as SessionTerminalStatus,
@@ -629,6 +631,27 @@ export function deleteTerminalRecord(input: { terminalId: string; userId: string
     input.userId,
   ]);
   return { found: true, deleted: true, refusedRunning: false };
+}
+
+/**
+ * Rename a terminal — sets the user-defined display name. Pass `null`
+ * or empty string to clear the custom name and revert to auto-naming.
+ */
+export function renameTerminal(input: {
+  terminalId: string;
+  userId: string;
+  name: string | null;
+}): { found: boolean; renamed: boolean } {
+  const record = getTerminal(input.terminalId, input.userId);
+  if (!record) return { found: false, renamed: false };
+  const sanitized =
+    input.name && input.name.trim().length > 0 ? input.name.trim().slice(0, 64) : null;
+  sqliteRun('UPDATE session_terminals SET name = ? WHERE terminal_id = ? AND user_id = ?', [
+    sanitized,
+    input.terminalId,
+    input.userId,
+  ]);
+  return { found: true, renamed: true };
 }
 
 /** Test hook — clears the in-memory map and DB rows. */

@@ -1019,6 +1019,8 @@ export interface SessionTerminalSummary {
   kind: SessionTerminalKind;
   command: string;
   description?: string;
+  /** User-defined display name for the terminal tab. */
+  name?: string;
   cwd: string;
   pid?: number;
   status: SessionTerminalStatus;

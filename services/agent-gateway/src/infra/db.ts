@@ -440,6 +440,8 @@ export async function migrate(): Promise<void> {
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_session_terminals_status ON session_terminals(status, session_id)',
   );
+  // User-defined display name for terminal tabs (rename feature).
+  ensureColumn('session_terminals', 'name', 'TEXT');
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS session_snapshots (

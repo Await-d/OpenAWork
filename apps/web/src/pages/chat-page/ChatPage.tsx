@@ -5968,6 +5968,8 @@ export default function ChatPage() {
                 terminals={sessionTerminals.terminals}
                 loading={sessionTerminals.loading}
                 onReload={sessionTerminals.reload}
+                onRenameTerminal={sessionTerminals.renameTerminal}
+                onDismissTerminal={sessionTerminals.dismissTerminal}
               />
             ) : null}
           </LatestAssistantMessageContext.Provider>

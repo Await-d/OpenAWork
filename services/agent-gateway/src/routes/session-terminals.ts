@@ -32,6 +32,7 @@ import {
   getTerminal,
   killTerminal,
   listSessionTerminals,
+  renameTerminal,
 } from '../session/session-terminal-registry.js';
 
 interface SessionOwnerRow {
@@ -55,6 +56,7 @@ function toPublicTerminal(record: ReturnType<typeof getTerminal> & object) {
     kind: record.kind,
     command: record.command,
     ...(record.description ? { description: record.description } : {}),
+    ...('name' in record && record.name ? { name: record.name } : {}),
     cwd: record.cwd,
     ...(record.pid !== undefined ? { pid: record.pid } : {}),
     status: record.status,
@@ -167,6 +169,40 @@ export async function sessionTerminalsRoutes(app: FastifyInstance): Promise<void
         });
       }
       return reply.send({ deleted: result.deleted });
+    },
+  );
+
+  /**
+   * PATCH /sessions/:sessionId/terminals/:terminalId
+   * Rename a terminal — sets a user-defined display name for the tab.
+   * Pass `{ name: null }` or `{ name: "" }` to clear and revert to
+   * auto-naming.
+   */
+  app.patch(
+    '/sessions/:sessionId/terminals/:terminalId',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload | undefined;
+      if (!user?.sub) return reply.code(401).send({ error: 'unauthorized' });
+      const { sessionId, terminalId } = request.params as {
+        sessionId: string;
+        terminalId: string;
+      };
+      if (!ensureSessionOwnedByUser(sessionId, user.sub)) {
+        return reply.code(404).send({ error: 'session_not_found' });
+      }
+      const record = getTerminal(terminalId, user.sub);
+      if (!record || record.sessionId !== sessionId) {
+        return reply.code(404).send({ error: 'terminal_not_found' });
+      }
+      const body = (request.body ?? {}) as { name?: string | null };
+      const name = typeof body.name === 'string' ? body.name : null;
+      const result = renameTerminal({ terminalId, userId: user.sub, name });
+      const updated = getTerminal(terminalId, user.sub);
+      return reply.send({
+        renamed: result.renamed,
+        terminal: updated ? toPublicTerminal(updated) : null,
+      });
     },
   );
 

@@ -22,6 +22,7 @@ import type {
 import {
   killSessionTerminal,
   listSessionTerminals,
+  renameSessionTerminal,
   type SessionTerminalView,
 } from './terminals-api.js';
 
@@ -39,6 +40,10 @@ export interface UseSessionTerminalsResult {
   applyRunEvent: (event: RunEvent) => void;
   /** Kill a terminal (optimistic). Returns the server response. */
   killTerminal: (terminalId: string) => Promise<void>;
+  /** Rename a terminal. Updates local state optimistically. */
+  renameTerminal: (terminalId: string, name: string | null) => Promise<void>;
+  /** Remove a terminated terminal from local state (hides it from tabs). */
+  dismissTerminal: (terminalId: string) => void;
   /** True while a kill request is in-flight for this terminal id. */
   pendingKillIds: Set<string>;
 }
@@ -242,6 +247,49 @@ export function useSessionTerminals(
     setReloadNonce((prev) => prev + 1);
   }, []);
 
+  const renameTerminalFn = useCallback(
+    async (terminalId: string, name: string | null) => {
+      if (!currentSessionId || !token) return;
+      // Optimistic update
+      setTerminalsById((previous) => {
+        const existing = previous[terminalId];
+        if (!existing) return previous;
+        const updated = { ...existing };
+        if (name && name.trim().length > 0) {
+          updated.name = name.trim();
+        } else {
+          delete updated.name;
+        }
+        return { ...previous, [terminalId]: updated };
+      });
+      try {
+        const response = await renameSessionTerminal({
+          gatewayUrl,
+          sessionId: currentSessionId,
+          terminalId,
+          token,
+          name,
+        });
+        if (response.terminal) {
+          setTerminalsById((previous) => ({
+            ...previous,
+            [terminalId]: response.terminal as SessionTerminalView,
+          }));
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [currentSessionId, gatewayUrl, token],
+  );
+
+  const dismissTerminal = useCallback((terminalId: string) => {
+    setTerminalsById((previous) => {
+      const { [terminalId]: _removed, ...rest } = previous;
+      return rest;
+    });
+  }, []);
+
   const sortedTerminals = useMemo<SessionTerminalView[]>(() => {
     // Defensive sessionId filter: when the user switches sessions there
     // is a tick where `currentSessionId` updates but `terminalsById`
@@ -267,6 +315,8 @@ export function useSessionTerminals(
     reload,
     applyRunEvent,
     killTerminal,
+    renameTerminal: renameTerminalFn,
+    dismissTerminal,
     pendingKillIds: pendingKills,
   };
 }

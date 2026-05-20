@@ -222,7 +222,7 @@ function TerminalRow({
           }}
           title={terminal.command}
         >
-          {terminal.command}
+          {terminal.name || terminal.description || terminal.command}
         </code>
         <button
           type="button"

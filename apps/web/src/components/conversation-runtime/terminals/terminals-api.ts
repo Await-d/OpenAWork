@@ -82,6 +82,35 @@ export async function deleteSessionTerminal(
   return parseJsonResponse(response);
 }
 
+export interface RenameSessionTerminalParams {
+  gatewayUrl: string;
+  sessionId: string;
+  terminalId: string;
+  token: string;
+  name: string | null;
+  signal?: AbortSignal;
+}
+
+export async function renameSessionTerminal(
+  params: RenameSessionTerminalParams,
+): Promise<{ renamed: boolean; terminal: SessionTerminalView | null }> {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${params.token}`,
+    'Content-Type': 'application/json',
+  };
+  const init: RequestInit = {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({ name: params.name }),
+  };
+  if (params.signal) init.signal = params.signal;
+  const response = await fetch(
+    `${params.gatewayUrl}/sessions/${params.sessionId}/terminals/${params.terminalId}`,
+    init,
+  );
+  return parseJsonResponse(response);
+}
+
 /* ---------------------------------------------------------------------- */
 /* Persistent / interactive terminal helpers (阶段 1)                      */
 /* ---------------------------------------------------------------------- */

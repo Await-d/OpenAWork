@@ -30,24 +30,45 @@ interface QuickTerminalPanelProps {
   terminals: SessionTerminalView[];
   loading: boolean;
   onReload: () => void;
+  onRenameTerminal?: (terminalId: string, name: string | null) => Promise<void>;
+  onDismissTerminal?: (terminalId: string) => void;
 }
 
 const ACTIVE_STATUSES = new Set(['running', 'idle', 'tmux-spawned']);
 
 function shortLabel(term: SessionTerminalView, index: number): string {
+  // User-defined name takes priority
+  if (term.name && term.name.trim().length > 0) {
+    return term.name.trim();
+  }
+  // Description from agent (e.g. "安装依赖") takes second priority
+  if (term.description && term.description.trim().length > 0) {
+    const desc = term.description.trim();
+    return desc.length > 24 ? `${desc.slice(0, 22)}…` : desc;
+  }
   if (term.toolName === 'quick_terminal') {
     return `终端 ${index + 1}`;
   }
   if (term.command && term.command.length > 0) {
-    const trimmed = term.command.trim().split(/\s+/).slice(0, 2).join(' ');
+    const trimmed = term.command.trim().split(/\s+/).slice(0, 3).join(' ');
     return trimmed.length > 24 ? `${trimmed.slice(0, 22)}…` : trimmed;
   }
   return `终端 ${index + 1}`;
 }
 
 export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
-  const { open, onRequestClose, workspacePath, gatewayUrl, token, sessionId, terminals, onReload } =
-    props;
+  const {
+    open,
+    onRequestClose,
+    workspacePath,
+    gatewayUrl,
+    token,
+    sessionId,
+    terminals,
+    onReload,
+    onRenameTerminal,
+    onDismissTerminal,
+  } = props;
 
   const height = useUIStateStore((s) => s.quickTerminalHeight);
   const setHeight = useUIStateStore((s) => s.setQuickTerminalHeight);
@@ -143,6 +164,61 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
     },
     [activeId, gatewayUrl, sessionId, token, workspacePath, onReload, setActiveIdForWs],
   );
+
+  // ─── Inline rename state ───
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
+
+  const startRename = useCallback((terminalId: string, currentLabel: string) => {
+    setRenamingId(terminalId);
+    setRenameValue(currentLabel);
+  }, []);
+
+  const commitRename = useCallback(() => {
+    if (renamingId && onRenameTerminal) {
+      const trimmed = renameValue.trim();
+      void onRenameTerminal(renamingId, trimmed.length > 0 ? trimmed : null);
+    }
+    setRenamingId(null);
+    setRenameValue('');
+  }, [renamingId, renameValue, onRenameTerminal]);
+
+  const cancelRename = useCallback(() => {
+    setRenamingId(null);
+    setRenameValue('');
+  }, []);
+
+  useEffect(() => {
+    if (renamingId && renameInputRef.current) {
+      renameInputRef.current.focus();
+      renameInputRef.current.select();
+    }
+  }, [renamingId]);
+
+  // ─── Auto-dismiss terminated terminals from tab bar ───
+  // When a terminal exits, give a brief visual cue then remove it from
+  // the active tab list so it doesn't clutter the UI.
+  const prevTerminalsRef = useRef<SessionTerminalView[]>([]);
+  useEffect(() => {
+    const prev = prevTerminalsRef.current;
+    prevTerminalsRef.current = terminals;
+    if (!onDismissTerminal) return;
+    // Find terminals that just transitioned from active to closed
+    for (const term of terminals) {
+      if (ACTIVE_STATUSES.has(term.status)) continue;
+      const wasPreviouslyActive = prev.some(
+        (p) => p.terminalId === term.terminalId && ACTIVE_STATUSES.has(p.status),
+      );
+      if (wasPreviouslyActive) {
+        // Brief delay so the user sees the status change before removal
+        const tid = term.terminalId;
+        setTimeout(() => {
+          onDismissTerminal(tid);
+        }, 1500);
+      }
+    }
+  }, [terminals, onDismissTerminal]);
 
   // Drag-resize handle. We track movement via mousemove on window and
   // translate it into a height delta from the bottom of the viewport.
@@ -264,6 +340,7 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
             activeTerminals.map((term, index) => {
               const isActive = term.terminalId === activeId;
               const label = shortLabel(term, index);
+              const isRenaming = renamingId === term.terminalId;
               return (
                 <div
                   key={term.terminalId}
@@ -283,26 +360,52 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
                     flexShrink: 0,
                   }}
                 >
-                  <button
-                    type="button"
-                    onClick={() => setPendingActive(term.terminalId)}
-                    title={`${term.command} · ${term.cwd}`}
-                    style={{
-                      border: 'none',
-                      background: 'transparent',
-                      color: isActive ? 'var(--success))' : 'var(--fg-default)',
-                      fontSize: 11,
-                      fontWeight: isActive ? 600 : 500,
-                      cursor: 'pointer',
-                      padding: 0,
-                      maxWidth: 160,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {label}
-                  </button>
+                  {isRenaming ? (
+                    <input
+                      ref={renameInputRef}
+                      type="text"
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onBlur={commitRename}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') commitRename();
+                        if (e.key === 'Escape') cancelRename();
+                      }}
+                      style={{
+                        border: '1px solid var(--border-subtle)',
+                        background: 'var(--bg-base)',
+                        color: 'var(--fg-default)',
+                        fontSize: 11,
+                        fontWeight: 500,
+                        padding: '1px 4px',
+                        borderRadius: 3,
+                        width: 100,
+                        outline: 'none',
+                      }}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setPendingActive(term.terminalId)}
+                      onDoubleClick={() => startRename(term.terminalId, label)}
+                      title={`${term.command} · ${term.cwd}\n双击重命名`}
+                      style={{
+                        border: 'none',
+                        background: 'transparent',
+                        color: isActive ? 'var(--success))' : 'var(--fg-default)',
+                        fontSize: 11,
+                        fontWeight: isActive ? 600 : 500,
+                        cursor: 'pointer',
+                        padding: 0,
+                        maxWidth: 160,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {label}
+                    </button>
+                  )}
                   <button
                     type="button"
                     aria-label="关闭终端"
