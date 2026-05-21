@@ -23,16 +23,15 @@ import {
 } from '../../compaction/compaction-prompt.js';
 
 const REQUIRED_SECTIONS = [
-  '## 目标',
-  '## 约束与偏好',
-  '## 进度',
-  '### 已完成',
-  '### 进行中',
-  '### 阻塞',
-  '## 关键决策',
-  '## 下一步',
-  '## 关键上下文',
-  '## 相关文件',
+  '主要请求与意图',
+  '关键技术概念',
+  '文件与代码片段',
+  '错误与修复',
+  '问题解决',
+  '所有用户消息',
+  '待办任务',
+  '当前工作',
+  '下一步',
 ];
 
 describe('COMPACTION_SYSTEM_PROMPT', () => {
@@ -52,20 +51,22 @@ describe('COMPACTION_SYSTEM_PROMPT', () => {
 describe('buildCompactionUserPrompt', () => {
   it('emits a create-new instruction when no previousSummary is supplied', () => {
     const prompt = buildCompactionUserPrompt();
-    expect(prompt).toContain('创建一份新的锚点摘要');
+    expect(prompt).toContain('基于以上对话历史创建一份详细的摘要');
     expect(prompt).not.toContain('<previous-summary>');
   });
 
   it('emits a create-new instruction for explicit undefined', () => {
     const prompt = buildCompactionUserPrompt({ previousSummary: undefined });
-    expect(prompt).toContain('创建一份新的锚点摘要');
+    expect(prompt).toContain('基于以上对话历史创建一份详细的摘要');
     expect(prompt).not.toContain('<previous-summary>');
   });
 
   it('treats empty / whitespace-only previousSummary as absent', () => {
-    expect(buildCompactionUserPrompt({ previousSummary: '' })).toContain('创建一份新的锚点摘要');
+    expect(buildCompactionUserPrompt({ previousSummary: '' })).toContain(
+      '基于以上对话历史创建一份详细的摘要',
+    );
     expect(buildCompactionUserPrompt({ previousSummary: '   \n\t' })).toContain(
-      '创建一份新的锚点摘要',
+      '基于以上对话历史创建一份详细的摘要',
     );
   });
 
@@ -91,8 +92,8 @@ describe('buildCompactionUserPrompt', () => {
         expect(variant).toContain(section);
       }
       // Sanity check on the output rules block.
-      expect(variant).toContain('保留每一节，即使为空');
-      expect(variant).toContain('精确保留文件路径');
+      expect(variant).toContain('请根据到目前为止的对话提供你的摘要');
+      expect(variant).toContain('确保回答的精确性和全面性');
     }
   });
 

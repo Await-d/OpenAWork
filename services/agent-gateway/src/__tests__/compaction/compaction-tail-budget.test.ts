@@ -102,6 +102,6 @@ describe('boundPreserveTokens', () => {
   it('clamps to the documented [min, max] range', () => {
     expect(boundPreserveTokens(100)).toBe(MIN_PRESERVE_RECENT_TOKENS);
     expect(boundPreserveTokens(50_000)).toBe(MAX_PRESERVE_RECENT_TOKENS);
-    expect(boundPreserveTokens(4_000)).toBe(4_000);
+    expect(boundPreserveTokens(20_000)).toBe(20_000);
   });
 });
