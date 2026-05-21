@@ -94,6 +94,23 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 cache_root="\${XDG_CACHE_HOME:-\${HOME:-/tmp}/.cache}/openawork/sidecars"
 target="$cache_root/agent-gateway-$payload_hash"
 
+# 诊断日志：写入 cache_root 同级目录，方便排查 AppImage 启动失败。
+log_dir="\${XDG_CACHE_HOME:-\${HOME:-/tmp}/.cache}/openawork"
+mkdir -p "$log_dir" 2>/dev/null || true
+log_file="$log_dir/sidecar-launch.log"
+
+log() {
+  printf '[%s] %s\\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >> "$log_file" 2>/dev/null || true
+}
+
+log "=== sidecar wrapper start ==="
+log "payload_name=$payload_name"
+log "payload_hash=$payload_hash"
+log "script_dir=$script_dir"
+log "APPDIR=\${APPDIR:-<unset>}"
+log "cache_root=$cache_root"
+log "target=$target"
+
 find_payload() {
   # 1) 相对路径：deb/rpm 安装或直接运行场景。
   for candidate in \\
@@ -105,8 +122,11 @@ find_payload() {
     "$script_dir/../lib/openAwork/binaries/$payload_name"
   do
     if [ -f "$candidate" ]; then
+      log "FOUND (relative): $candidate"
       printf '%s\\n' "$candidate"
       return 0
+    else
+      log "miss: $candidate"
     fi
   done
 
@@ -114,6 +134,14 @@ find_payload() {
   #    resources 放在 $APPDIR/usr/lib/<binary-name>/。
   #    用确定性路径避免 find 扫描整个 FUSE 挂载（极慢）。
   if [ -n "\${APPDIR:-}" ]; then
+    log "AppImage mode detected, listing APPDIR structure:"
+    ls -la "$APPDIR/usr/bin/" >> "$log_file" 2>&1 || true
+    ls -la "$APPDIR/usr/lib/" >> "$log_file" 2>&1 || true
+    # 列出所有 lib 子目录
+    for d in "$APPDIR/usr/lib/"*/; do
+      [ -d "$d" ] && log "  lib subdir: $d" && ls "$d" >> "$log_file" 2>&1 || true
+    done
+
     for candidate in \\
       "$APPDIR/usr/bin/$payload_name" \\
       "$APPDIR/usr/bin/binaries/$payload_name" \\
@@ -128,35 +156,49 @@ find_payload() {
       "$APPDIR/usr/share/openAwork/binaries/$payload_name"
     do
       if [ -f "$candidate" ]; then
+        log "FOUND (appimage): $candidate"
         printf '%s\\n' "$candidate"
         return 0
+      else
+        log "miss: $candidate"
       fi
     done
     # 确定性路径未命中时 fallback 到 find，限制深度减少 FUSE 开销。
+    log "fallback: find APPDIR -maxdepth 4 -name $payload_name"
     found=$(find "$APPDIR" -maxdepth 4 -type f -name "$payload_name" -print -quit 2>/dev/null || true)
     if [ -n "$found" ]; then
+      log "FOUND (find): $found"
       printf '%s\\n' "$found"
       return 0
     fi
+    log "find returned nothing"
   fi
 
   # 3) 兜底：从 script_dir 向下搜索。
+  log "fallback: find script_dir -maxdepth 5 -name $payload_name"
   found=$(find "$script_dir" -maxdepth 5 -type f -name "$payload_name" -print -quit 2>/dev/null || true)
   if [ -n "$found" ]; then
+    log "FOUND (script_dir find): $found"
     printf '%s\\n' "$found"
     return 0
   fi
 
+  log "payload NOT FOUND anywhere"
   return 1
 }
 
 payload=$(find_payload) || {
+  log "FATAL: Cannot locate bundled agent-gateway payload: $payload_name"
   echo "Cannot locate bundled agent-gateway payload: $payload_name" >&2
+  echo "Diagnostics written to: $log_file" >&2
   exit 127
 }
 
+log "payload resolved: $payload"
+
 mkdir -p "$cache_root"
 if [ ! -x "$target" ]; then
+  log "decompressing payload to $target"
   tmp="$target.tmp.$$"
   gzip -dc "$payload" > "$tmp"
   chmod 755 "$tmp"
@@ -164,12 +206,17 @@ if [ ! -x "$target" ]; then
     # 并发启动：另一个进程可能已完成解压，mv 失败不致命。
     rm -f "$tmp" 2>/dev/null || true
     if [ ! -x "$target" ]; then
+      log "FATAL: Failed to stage agent-gateway binary to $target"
       echo "Failed to stage agent-gateway binary to $target" >&2
       exit 1
     fi
   }
+  log "decompression complete"
+else
+  log "using cached binary: $target"
 fi
 
+log "exec $target $@"
 exec "$target" "$@"
 `;
 }
