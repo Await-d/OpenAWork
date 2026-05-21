@@ -763,20 +763,25 @@ async fn spawn_gateway_sidecar(
 
     let state = app.state::<GatewayProcess>();
     let gateway_state = state.0.clone();
-    let mut guard = gateway_state.lock().map_err(|e| e.to_string())?;
-    let previous_port = guard.port;
-    if let Some(child) = guard.child.take() {
-        let _ = child.kill();
-        guard.port = None;
-    }
+
+    // 提前从 guard 中提取所需数据，然后在 spawn 之后再短暂加锁写回，
+    // 确保 MutexGuard 不会跨越任何 await 点（Tauri command 要求 future 为 Send）。
+    let (previous_port, generation, desktop_auth_token) = {
+        let mut guard = gateway_state.lock().map_err(|e| e.to_string())?;
+        let previous_port = guard.port;
+        if let Some(child) = guard.child.take() {
+            let _ = child.kill();
+            guard.port = None;
+        }
+        guard.generation = guard.generation.wrapping_add(1);
+        let generation = guard.generation;
+        let desktop_auth_token = guard.desktop_auth_token.clone();
+        (previous_port, generation, desktop_auth_token)
+    };
 
     if previous_port == Some(port) {
         std::thread::sleep(Duration::from_millis(250));
     }
-
-    guard.generation = guard.generation.wrapping_add(1);
-    let generation = guard.generation;
-    let desktop_auth_token = guard.desktop_auth_token.clone();
 
     // gateway 已编译为独立 Bun 二进制（binaries/agent-gateway-<triple>），
     // 无需传 entry 路径，也不依赖 node_modules，直接启动即可。
@@ -810,9 +815,12 @@ async fn spawn_gateway_sidecar(
 
     let (mut rx, child) = command.spawn().map_err(|e| e.to_string())?;
 
-    guard.child = Some(child);
-    guard.port = Some(port);
-    drop(guard);
+    // spawn 成功后短暂加锁写回 child 和 port。
+    {
+        let mut guard = gateway_state.lock().map_err(|e| e.to_string())?;
+        guard.child = Some(child);
+        guard.port = Some(port);
+    }
 
     // 等待网关变为健康后再返回，让前端的 waitForGatewayHealth 能快速通过。
     //
