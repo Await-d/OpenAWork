@@ -33,12 +33,17 @@ export async function registerOpenApi(app: FastifyInstance): Promise<void> {
     },
   });
 
-  await app.register(swaggerUi, {
-    routePrefix: '/docs',
-    uiConfig: {
-      docExpansion: 'list',
-      deepLinking: true,
-      defaultModelsExpandDepth: 3,
-    },
-  });
+  // 桌面端 sidecar（Bun --compile 产物）中 @fastify/swagger-ui 的静态资源
+  // 路径会被硬编码为 CI 构建机器的绝对路径，运行时必然 ENOENT。
+  // 桌面端用户不需要交互式 API 文档，跳过 swagger-ui 注册。
+  if (!process.env.DESKTOP_AUTOMATION) {
+    await app.register(swaggerUi, {
+      routePrefix: '/docs',
+      uiConfig: {
+        docExpansion: 'list',
+        deepLinking: true,
+        defaultModelsExpandDepth: 3,
+      },
+    });
+  }
 }

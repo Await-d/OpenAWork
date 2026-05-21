@@ -237,6 +237,7 @@ run('bun', [
   '--outfile', `dist/agent-gateway`,
   '--external', 'chromium-bidi',
   '--external', 'electron',
+  '--external', '@fastify/swagger-ui',
 ], { cwd: gatewayDir });
 
 // Step 3: 把 gateway 可执行文件复制到 binaries/ 并加上 Tauri 要求的目标三元组后缀。
