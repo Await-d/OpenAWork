@@ -7,8 +7,8 @@ interface CompanionFeatureBannerProps {
   buddy: BuddyState;
 }
 
-const FEATURE_OFF_BG = 'color-mix(in oklch, var(--bg-hover) 80%, var(--bg-overlay))';
-const SYNC_ERROR_BG = 'color-mix(in oklch, var(--danger) 14%, var(--bg-overlay))';
+const FEATURE_OFF_BG = 'color-mix(in oklch, var(--bg-hover) 80%, var(--bg-overlay)';
+const SYNC_ERROR_BG = 'color-mix(in oklch, var(--danger) 14%, var(--bg-overlay)';
 
 const BANNER_BASE = {
   borderRadius: 12,

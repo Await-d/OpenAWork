@@ -68,7 +68,7 @@ export function DevtoolsWorkerSection({
           padding: '8px 10px',
           borderRadius: 8,
           border: '1px solid var(--border-default)',
-          background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base))',
+          background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base)',
         }}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -124,7 +124,7 @@ export function DevtoolsWorkerSection({
             padding: '5px 10px',
             background:
               workerStatusFilter === 'all'
-                ? 'color-mix(in srgb, var(--accent) 12%, var(--bg-overlay))'
+                ? 'color-mix(in srgb, var(--accent) 12%, var(--bg-overlay)'
                 : 'var(--bg-overlay)',
             color: 'var(--fg-strong)',
             fontSize: 11,
@@ -141,12 +141,12 @@ export function DevtoolsWorkerSection({
             borderRadius: 8,
             border:
               workerStatusFilter === 'error'
-                ? '1px solid color-mix(in srgb, var(--danger) 40%, var(--border-default))'
+                ? '1px solid color-mix(in srgb, var(--danger) 40%, var(--border-default)'
                 : '1px solid var(--border-default)',
             padding: '5px 10px',
             background:
               workerStatusFilter === 'error'
-                ? 'color-mix(in srgb, var(--danger) 12%, var(--bg-overlay))'
+                ? 'color-mix(in srgb, var(--danger) 12%, var(--bg-overlay)'
                 : 'var(--bg-overlay)',
             color: workerStatusFilter === 'error' ? 'var(--danger)' : 'var(--fg-strong)',
             fontSize: 11,
@@ -163,12 +163,12 @@ export function DevtoolsWorkerSection({
             borderRadius: 8,
             border:
               workerStatusFilter === 'healthy'
-                ? '1px solid color-mix(in srgb, var(--accent) 40%, var(--border-default))'
+                ? '1px solid color-mix(in srgb, var(--accent) 40%, var(--border-default)'
                 : '1px solid var(--border-default)',
             padding: '5px 10px',
             background:
               workerStatusFilter === 'healthy'
-                ? 'color-mix(in srgb, var(--accent) 12%, var(--bg-overlay))'
+                ? 'color-mix(in srgb, var(--accent) 12%, var(--bg-overlay)'
                 : 'var(--bg-overlay)',
             color: workerStatusFilter === 'healthy' ? 'var(--accent)' : 'var(--fg-strong)',
             fontSize: 11,
@@ -202,9 +202,9 @@ export function DevtoolsWorkerSection({
           disabled={filteredWorkers.length === 0}
           style={{
             borderRadius: 8,
-            border: '1px solid color-mix(in srgb, var(--accent) 28%, var(--border-default))',
+            border: '1px solid color-mix(in srgb, var(--accent) 28%, var(--border-default)',
             padding: '5px 10px',
-            background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
+            background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay)',
             color: 'var(--fg-strong)',
             fontSize: 11,
             cursor: filteredWorkers.length > 0 ? 'pointer' : 'not-allowed',
@@ -240,14 +240,14 @@ export function DevtoolsWorkerSection({
                     ? '2px solid var(--danger)'
                     : `1px solid ${
                         isActive
-                          ? 'color-mix(in srgb, var(--accent) 40%, var(--border-default))'
+                          ? 'color-mix(in srgb, var(--accent) 40%, var(--border-default)'
                           : 'var(--border-default)'
                       }`,
                   background: isError
-                    ? 'color-mix(in srgb, var(--danger) 7%, var(--bg-overlay))'
+                    ? 'color-mix(in srgb, var(--danger) 7%, var(--bg-overlay)'
                     : isActive
-                      ? 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay))'
-                      : 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
+                      ? 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay)'
+                      : 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base)',
                   color: 'var(--fg-strong)',
                   padding: '7px 10px',
                   display: 'flex',

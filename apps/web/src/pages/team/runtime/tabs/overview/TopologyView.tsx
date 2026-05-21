@@ -31,11 +31,11 @@ const LAYER_META: Record<TeamRoleLayer, { name: string; sub: string; icon: strin
 
 const STATE_COLORS: Record<HandoffState | 'idle', string> = {
   idle: 'var(--fg-muted)',
-  pending: 'var(--warning))',
-  claimed: 'var(--aux))',
-  running: 'var(--success))',
+  pending: 'var(--warning)',
+  claimed: 'var(--aux)',
+  running: 'var(--success)',
   completed: 'var(--fg-muted)',
-  failed: 'var(--danger))',
+  failed: 'var(--danger)',
   cancelled: 'var(--fg-muted)',
 };
 
@@ -77,7 +77,7 @@ const NODE_STYLE: CSSProperties = {
   minHeight: 120,
   padding: '12px 8px',
   borderRadius: 14,
-  background: 'color-mix(in srgb, var(--bg-overlay) 95%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 95%, var(--bg-base)',
   border: '2px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
   flexShrink: 0,
   transition: 'all 200ms ease',
@@ -85,13 +85,13 @@ const NODE_STYLE: CSSProperties = {
 
 const NODE_ACTIVE_STYLE: CSSProperties = {
   ...NODE_STYLE,
-  borderColor: 'var(--success))',
+  borderColor: 'var(--success)',
   boxShadow: '0 0 0 4px color-mix(in srgb, var(--success) 18%, transparent)',
 };
 
 const NODE_FAILED_STYLE: CSSProperties = {
   ...NODE_STYLE,
-  borderColor: 'var(--danger))',
+  borderColor: 'var(--danger)',
   boxShadow: '0 0 0 4px color-mix(in srgb, var(--danger) 18%, transparent)',
 };
 
@@ -278,7 +278,7 @@ function Node({ data }: { data: NodeData }) {
             right: -8,
             padding: '1px 7px',
             borderRadius: 999,
-            background: 'var(--success))',
+            background: 'var(--success)',
             color: 'var(--fg-on-accent)',
             fontSize: 10,
             fontWeight: 800,
@@ -295,7 +295,7 @@ function Node({ data }: { data: NodeData }) {
             right: -8,
             padding: '1px 7px',
             borderRadius: 999,
-            background: 'var(--danger))',
+            background: 'var(--danger)',
             color: 'var(--fg-on-accent)',
             fontSize: 10,
             fontWeight: 800,
@@ -312,9 +312,9 @@ function Edge({ data }: { data: EdgeData }) {
   const active = data.runningCount > 0 || data.pendingCount > 0;
   const failed = data.failedCount > 0;
   const color = failed
-    ? 'var(--danger))'
+    ? 'var(--danger)'
     : active
-      ? 'var(--success))'
+      ? 'var(--success)'
       : 'color-mix(in srgb, var(--border-default) 70%, transparent)';
   return (
     <div style={EDGE_STYLE}>
@@ -337,7 +337,7 @@ function Edge({ data }: { data: EdgeData }) {
             top: -16,
             padding: '0 6px',
             borderRadius: 999,
-            background: 'color-mix(in srgb, var(--bg-overlay) 95%, var(--bg-base))',
+            background: 'color-mix(in srgb, var(--bg-overlay) 95%, var(--bg-base)',
             border: `1px solid ${color}`,
             color: 'var(--fg-default)',
             fontSize: 9,
@@ -381,7 +381,7 @@ function EdgeRow({ data }: { data: EdgeData }) {
         padding: '8px 12px',
         borderRadius: 8,
         border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
-        background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+        background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
         fontSize: 12,
       }}
     >

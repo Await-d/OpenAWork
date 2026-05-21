@@ -13,7 +13,7 @@ const EDITOR_STYLE: CSSProperties = {
   padding: 16,
   borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 86%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 86%, var(--bg-base)',
 };
 
 const TEXTAREA_STYLE: CSSProperties = {
@@ -22,7 +22,7 @@ const TEXTAREA_STYLE: CSSProperties = {
   padding: 10,
   borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
   color: 'var(--fg-strong)',
   fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)',
   fontSize: 12,
@@ -87,8 +87,8 @@ export function WorkflowTemplateEditor({ initialJson, onSave }: WorkflowTemplate
         spellCheck={false}
       />
 
-      {error ? <span style={{ fontSize: 12, color: 'var(--danger))' }}>{error}</span> : null}
-      {saved ? <span style={{ fontSize: 12, color: 'var(--success))' }}>已保存</span> : null}
+      {error ? <span style={{ fontSize: 12, color: 'var(--danger)' }}>{error}</span> : null}
+      {saved ? <span style={{ fontSize: 12, color: 'var(--success)' }}>已保存</span> : null}
 
       <button
         type="button"
@@ -99,7 +99,7 @@ export function WorkflowTemplateEditor({ initialJson, onSave }: WorkflowTemplate
           padding: '6px 14px',
           borderRadius: 8,
           border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
-          background: 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay))',
+          background: 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay)',
           color: 'var(--fg-strong)',
           fontSize: 12,
           fontWeight: 700,

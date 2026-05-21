@@ -34,7 +34,7 @@ const ROW_STYLE: CSSProperties = {
   padding: '10px 12px',
   borderRadius: 10,
   border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
 };
 
 const EMPTY_STYLE: CSSProperties = {
@@ -160,7 +160,7 @@ export function ToolCallsView() {
 function ToolRow({ tool }: { tool: ToolStatsDerived }) {
   const failurePct = Math.round(tool.failureRate * 100);
   const failureColor =
-    failurePct > 30 ? 'var(--danger))' : failurePct > 10 ? 'var(--warning))' : 'var(--success))';
+    failurePct > 30 ? 'var(--danger)' : failurePct > 10 ? 'var(--warning)' : 'var(--success)';
   return (
     <div style={ROW_STYLE}>
       <div
@@ -201,7 +201,7 @@ function ToolRow({ tool }: { tool: ToolStatsDerived }) {
                   padding: '1px 8px',
                   borderRadius: 999,
                   background: 'color-mix(in srgb, var(--danger) 12%, transparent)',
-                  color: 'var(--danger))',
+                  color: 'var(--danger)',
                   fontSize: 10,
                   fontWeight: 700,
                 }}

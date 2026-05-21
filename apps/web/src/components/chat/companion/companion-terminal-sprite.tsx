@@ -37,13 +37,13 @@ function resolveSpriteColor(
 
 function resolveBubbleBackground(tone: CompanionUtteranceSeed['tone'] | null): string {
   if (tone === 'notice') {
-    return 'linear-gradient(135deg, color-mix(in oklch, var(--warning) 12%, transparent), var(--bg-overlay))';
+    return 'linear-gradient(135deg, color-mix(in oklch, var(--warning) 12%, transparent), var(--bg-overlay)';
   }
   if (tone === 'intro') {
-    return 'linear-gradient(135deg, color-mix(in oklch, var(--success) 10%, transparent), var(--bg-overlay))';
+    return 'linear-gradient(135deg, color-mix(in oklch, var(--success) 10%, transparent), var(--bg-overlay)';
   }
   if (tone === 'active') {
-    return 'linear-gradient(135deg, color-mix(in oklch, var(--accent) 10%, transparent), var(--bg-overlay))';
+    return 'linear-gradient(135deg, color-mix(in oklch, var(--accent) 10%, transparent), var(--bg-overlay)';
   }
   return 'var(--bg-overlay)';
 }

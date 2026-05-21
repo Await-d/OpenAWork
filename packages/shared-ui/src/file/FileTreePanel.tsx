@@ -33,7 +33,7 @@ const STATUS_ICON: Record<string, string> = {
 
 const STATUS_COLOR: Record<string, string> = {
   added: color.success,
-  modified: 'var(--aux))',
+  modified: 'var(--aux)',
   deleted: color.danger,
   renamed: color.contrast,
 };
@@ -42,8 +42,8 @@ function LineDiff({ added, deleted }: { added?: number; deleted?: number }) {
   if (added === undefined && deleted === undefined) return null;
   return (
     <span style={{ fontSize: 10, flexShrink: 0, display: 'flex', gap: 3 }}>
-      {added !== undefined && <span style={{ color: 'var(--success))' }}>+{added}</span>}
-      {deleted !== undefined && <span style={{ color: 'var(--danger))' }}>-{deleted}</span>}
+      {added !== undefined && <span style={{ color: 'var(--success)' }}>+{added}</span>}
+      {deleted !== undefined && <span style={{ color: 'var(--danger)' }}>-{deleted}</span>}
     </span>
   );
 }
@@ -100,7 +100,7 @@ function FileRow({
   onRevertClick?: (path: string) => void;
 }) {
   const isDir = node.type === 'directory';
-  const statusColor = node.status ? STATUS_COLOR[node.status] : 'var(--fg-strong))';
+  const statusColor = node.status ? STATUS_COLOR[node.status] : 'var(--fg-strong)';
 
   return (
     <>
@@ -243,8 +243,8 @@ export function FileTreePanel({
       padding: '0.15rem 0.55rem',
       borderRadius: 4,
       border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-      background: active ? 'var(--accent))22' : 'transparent',
-      color: active ? 'var(--accent))' : 'var(--fg-muted))',
+      background: active ? 'var(--accent-subtle)' : 'transparent',
+      color: active ? 'var(--accent)' : 'var(--fg-muted)',
       cursor: 'pointer',
       fontWeight: active ? 600 : 400,
     }) as const;
@@ -266,8 +266,8 @@ export function FileTreePanel({
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '0.4rem 0.75rem',
-          borderBottom: '1px solid var(--border-default, var(--border-subtle))',
-          background: 'var(--bg-base, var(--header-bg))',
+          borderBottom: '1px solid var(--border-default, var(--border-subtle)',
+          background: 'var(--bg-base, var(--header-bg)',
           gap: 8,
         }}
       >
@@ -307,7 +307,7 @@ export function FileTreePanel({
               borderRadius: 4,
               border: '1px solid color-mix(in srgb, var(--danger) 25%, transparent)',
               background: 'color-mix(in srgb, var(--danger) 8%, transparent)',
-              color: 'var(--danger))',
+              color: 'var(--danger)',
               cursor: 'pointer',
             }}
           >
@@ -322,7 +322,7 @@ export function FileTreePanel({
             padding: '1rem',
             textAlign: 'center',
             fontSize: 12,
-            color: 'var(--fg-muted))',
+            color: 'var(--fg-muted)',
           }}
         >
           暂无变更
@@ -367,7 +367,7 @@ export function FileTreePanel({
                   textAlign: 'left',
                   fontSize: 12,
                   fontFamily: 'monospace',
-                  color: f.status ? STATUS_COLOR[f.status] : 'var(--fg-strong))',
+                  color: f.status ? STATUS_COLOR[f.status] : 'var(--fg-strong)',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',

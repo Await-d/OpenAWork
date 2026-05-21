@@ -225,7 +225,7 @@
   border-radius: 999px;
   background: var(--bg-overlay);
   border: 1px solid var(--border-default);
-  box-shadow: 0 8px 28px -10px color-mix(in oklch, var(--bg-base) 70%, transparent);
+  box-shadow: 0 8px 28px -10px var(--bg-base);
   color: var(--fg-strong);
   z-index: 30;
   animation: chat-search-overlay-in 130ms ease-out;
@@ -378,7 +378,7 @@
   border-radius: 999px;
   background: var(--bg-overlay);
   border: 1px solid var(--border-subtle);
-  box-shadow: 0 4px 14px -8px color-mix(in oklch, var(--bg-base) 60%, transparent);
+  box-shadow: 0 4px 14px -8px var(--bg-base);
   opacity: 0;
   pointer-events: none;
   transform: translateY(-4px);
@@ -572,7 +572,7 @@
   flex-shrink: 1;
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
-  background: color-mix(in oklch, var(--bg-overlay) 80%, transparent);
+  background: var(--bg-overlay);
   color: var(--fg-default);
   font-size: 10.5px;
   font-weight: 500;
@@ -640,7 +640,7 @@
   padding: 0 7px;
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
-  background: color-mix(in oklch, var(--bg-overlay) 80%, transparent);
+  background: var(--bg-overlay);
   color: var(--fg-default);
   font-size: 10.5px;
   font-weight: 600;
@@ -708,12 +708,10 @@
   display: flex;
   max-height: min(60vh, 420px);
   padding: 8px 10px 10px;
-  border: 1px solid color-mix(in oklch, var(--accent) 18%, var(--border-default) 82%);
+  border: 1px solid var(--border-default);
   border-radius: 10px;
-  background: color-mix(in oklch, var(--bg-overlay) 96%, transparent);
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.08),
-    0 12px 28px -12px rgba(0, 0, 0, 0.32);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-lg);
   flex-direction: column;
   gap: 6px;
   animation: chat-todo-floating-rise 160ms ease-out;
@@ -1003,7 +1001,7 @@
   overflow: hidden;
   border: 1px solid color-mix(in oklch, var(--border-subtle) 88%, var(--border-default) 12%);
   border-radius: 9px;
-  background: color-mix(in oklch, var(--bg-overlay) 92%, transparent);
+  background: var(--bg-overlay);
   transition:
     border-color 160ms ease,
     background 160ms ease;
@@ -1986,11 +1984,7 @@
   bottom: 0;
   height: 64px;
   pointer-events: none;
-  background: linear-gradient(
-    180deg,
-    transparent,
-    color-mix(in oklch, var(--bg-overlay) 92%, transparent)
-  );
+  background: linear-gradient(180deg, transparent, var(--bg-overlay));
 }
 
 .chat-markdown-code-expand {
@@ -2254,7 +2248,7 @@
   left: 50%;
   transform: translateX(-50%);
   z-index: 2;
-  box-shadow: 0 4px 14px -4px color-mix(in oklch, var(--bg-base) 60%, transparent);
+  box-shadow: 0 4px 14px -4px var(--bg-base);
 }
 
 .chat-markdown-fold-container[data-expanded='true'] .chat-markdown-fold-collapse {
@@ -2465,7 +2459,7 @@
 .chat-path-preview-footer {
   padding: 5px 10px;
   border-top: 1px solid var(--border-subtle);
-  background: color-mix(in oklch, var(--bg-overlay) 92%, transparent);
+  background: var(--bg-overlay);
   color: var(--fg-muted);
   font-size: 10px;
   text-align: center;

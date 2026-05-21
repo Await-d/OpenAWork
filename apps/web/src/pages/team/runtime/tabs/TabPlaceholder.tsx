@@ -68,7 +68,7 @@ const STATUS_META: Record<TabPlaceholderStatus, { label: string; color: string; 
   },
   'data-pending': {
     label: '待数据接入',
-    color: 'var(--warning))',
+    color: 'var(--warning)',
     bg: 'color-mix(in srgb, var(--warning) 22%, transparent)',
   },
 };
@@ -159,7 +159,7 @@ export function TabPlaceholder({
             style={{
               padding: '8px 12px',
               borderRadius: 8,
-              background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base))',
+              background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base)',
               border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
               fontSize: 11,
               color: 'var(--fg-muted)',

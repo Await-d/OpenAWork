@@ -32,7 +32,7 @@ function TemplateListItem({
   const subagentNodes = template.nodes.filter((n) => n.type === 'subagent');
   const roleTags = subagentNodes.map((n) => ({
     label: n.label.split(' · ')[0]?.trim() ?? n.label,
-    color: ROLE_COLOR_MAP[n.label.split(' · ')[0]?.trim() ?? ''] ?? 'var(--chart-5))',
+    color: ROLE_COLOR_MAP[n.label.split(' · ')[0]?.trim() ?? ''] ?? 'var(--chart-5)',
   }));
 
   return (

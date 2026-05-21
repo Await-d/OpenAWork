@@ -36,7 +36,7 @@ export function ArtifactList({ artifacts, onSelect, selectedId, style }: Artifac
   return (
     <div
       style={{
-        background: 'var(--bg-overlay))',
+        background: 'var(--bg-overlay)',
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         borderRadius: 10,
         padding: '0.75rem',
@@ -50,7 +50,7 @@ export function ArtifactList({ artifacts, onSelect, selectedId, style }: Artifac
         style={{
           fontSize: 11,
           fontWeight: 700,
-          color: 'var(--fg-muted))',
+          color: 'var(--fg-muted)',
           textTransform: 'uppercase',
           letterSpacing: 0.8,
           marginBottom: 4,
@@ -60,7 +60,7 @@ export function ArtifactList({ artifacts, onSelect, selectedId, style }: Artifac
       </div>
 
       {artifacts.length === 0 ? (
-        <div style={{ fontSize: 12, color: 'var(--fg-muted))', padding: '0.25rem 0' }}>
+        <div style={{ fontSize: 12, color: 'var(--fg-muted)', padding: '0.25rem 0' }}>
           暂无产物。
         </div>
       ) : (
@@ -76,7 +76,7 @@ export function ArtifactList({ artifacts, onSelect, selectedId, style }: Artifac
                 alignItems: 'center',
                 gap: 8,
                 padding: '0.4rem 0.6rem',
-                background: isSelected ? 'rgba(99,102,241,0.15)' : 'var(--bg-base))',
+                background: isSelected ? 'rgba(99,102,241,0.15)' : 'var(--bg-base)',
                 border: isSelected
                   ? '1px solid rgba(99,102,241,0.4)'
                   : '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
@@ -91,7 +91,7 @@ export function ArtifactList({ artifacts, onSelect, selectedId, style }: Artifac
                 style={{
                   fontSize: 12,
                   fontWeight: 500,
-                  color: 'var(--fg-default))',
+                  color: 'var(--fg-default)',
                   flex: 1,
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
@@ -104,7 +104,7 @@ export function ArtifactList({ artifacts, onSelect, selectedId, style }: Artifac
                 <span
                   style={{
                     fontSize: 10,
-                    color: 'var(--fg-muted))',
+                    color: 'var(--fg-muted)',
                     flex: '0 0 auto',
                   }}
                 >
@@ -114,7 +114,7 @@ export function ArtifactList({ artifacts, onSelect, selectedId, style }: Artifac
               <span
                 style={{
                   fontSize: 10,
-                  color: 'var(--fg-muted))',
+                  color: 'var(--fg-muted)',
                   flex: '0 0 auto',
                 }}
               >

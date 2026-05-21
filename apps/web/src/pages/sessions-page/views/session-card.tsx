@@ -122,7 +122,7 @@ export const SessionCard = memo(function SessionCard({
             borderRadius: '50%',
             background: statusDotColor(s.state_status),
             flexShrink: 0,
-            boxShadow: s.state_status === 'running' ? '0 0 6px var(--success))' : 'none',
+            boxShadow: s.state_status === 'running' ? '0 0 6px var(--success)' : 'none',
           }}
         />
         <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6 }}>

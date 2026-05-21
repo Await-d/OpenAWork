@@ -16,7 +16,7 @@ const BUTTON_STYLE: CSSProperties = {
   padding: '0 var(--team-space-3)',
   borderRadius: 'var(--team-radius-pill)',
   border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base)',
   color: 'var(--fg-default)',
   fontSize: 'var(--team-font-xs)',
   fontWeight: 700,

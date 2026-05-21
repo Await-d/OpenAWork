@@ -85,22 +85,22 @@ function getSessionTodoBadgeTone(todo: SessionTodoItem): {
 } {
   if (todo.status === 'in_progress') {
     return {
-      border: '1px solid color-mix(in srgb, var(--chart-7) 38%, var(--border-default))',
-      color: 'var(--chart-7))',
+      border: '1px solid color-mix(in srgb, var(--chart-7) 38%, var(--border-default)',
+      color: 'var(--chart-7)',
       background: 'color-mix(in srgb, var(--chart-7) 10%, transparent)',
     };
   }
   if (todo.status === 'completed') {
     return {
-      border: '1px solid color-mix(in srgb, var(--success) 40%, var(--border-default))',
-      color: 'var(--success))',
+      border: '1px solid color-mix(in srgb, var(--success) 40%, var(--border-default)',
+      color: 'var(--success)',
       background: 'color-mix(in srgb, var(--success) 10%, transparent)',
     };
   }
   if (todo.status === 'cancelled') {
     return {
-      border: '1px solid color-mix(in srgb, var(--warning) 45%, var(--border-default))',
-      color: 'var(--warning))',
+      border: '1px solid color-mix(in srgb, var(--warning) 45%, var(--border-default)',
+      color: 'var(--warning)',
       background: 'color-mix(in srgb, var(--warning) 10%, transparent)',
     };
   }
@@ -294,8 +294,8 @@ export function ChatHistoryTabContent(props: {
                           padding: '1px 4px',
                           borderRadius: 999,
                           border:
-                            '1px solid color-mix(in oklch, var(--accent) 24%, var(--border-default))',
-                          color: 'color-mix(in oklch, var(--accent) 80%, var(--fg-muted))',
+                            '1px solid color-mix(in oklch, var(--accent) 24%, var(--border-default)',
+                          color: 'color-mix(in oklch, var(--accent) 80%, var(--fg-muted)',
                           background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
                         }}
                         title={task.assignedAgent}
@@ -326,8 +326,8 @@ export function ChatHistoryTabContent(props: {
                           padding: '1px 4px',
                           borderRadius: 999,
                           border:
-                            '1px solid color-mix(in srgb, var(--warning) 55%, var(--border-default))',
-                          color: 'var(--warning))',
+                            '1px solid color-mix(in srgb, var(--warning) 55%, var(--border-default)',
+                          color: 'var(--warning)',
                           background: 'color-mix(in srgb, var(--warning) 10%, transparent)',
                         }}
                       >
@@ -351,8 +351,8 @@ export function ChatHistoryTabContent(props: {
                         fontSize: 10,
                         color:
                           task.errorMessage || task.terminalReason
-                            ? 'var(--danger))'
-                            : 'color-mix(in srgb, var(--success) 90%, var(--fg-muted))',
+                            ? 'var(--danger)'
+                            : 'color-mix(in srgb, var(--success) 90%, var(--fg-muted)',
                         whiteSpace: 'nowrap',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
@@ -421,7 +421,7 @@ export function ChatHistoryTabContent(props: {
                   >
                     <span
                       style={{
-                        color: todo.status === 'completed' ? 'var(--success))' : 'var(--warning))',
+                        color: todo.status === 'completed' ? 'var(--success)' : 'var(--warning)',
                         lineHeight: '18px',
                       }}
                     >
@@ -516,7 +516,7 @@ export function ChatHistoryTabContent(props: {
                   >
                     <span
                       style={{
-                        color: todo.status === 'completed' ? 'var(--success))' : 'var(--warning))',
+                        color: todo.status === 'completed' ? 'var(--success)' : 'var(--warning)',
                         lineHeight: '18px',
                       }}
                     >
@@ -703,10 +703,10 @@ export function ChatHistoryTabContent(props: {
                                   borderRadius: 999,
                                   border: `1px solid ${
                                     action.primary
-                                      ? 'color-mix(in srgb, var(--accent) 50%, var(--border-default))'
+                                      ? 'color-mix(in srgb, var(--accent) 50%, var(--border-default)'
                                       : action.danger
-                                        ? 'color-mix(in srgb, var(--danger) 42%, var(--border-default))'
-                                        : 'color-mix(in srgb, var(--accent) 34%, var(--border-default))'
+                                        ? 'color-mix(in srgb, var(--danger) 42%, var(--border-default)'
+                                        : 'color-mix(in srgb, var(--accent) 34%, var(--border-default)'
                                   }`,
                                   background: action.disabled
                                     ? 'var(--bg-overlay)'
@@ -1061,7 +1061,7 @@ export function ChatOverviewTabContent(props: {
               borderRadius: 7,
               background: 'var(--bg-overlay)',
               border: accent
-                ? '1px solid color-mix(in oklch, var(--accent) 30%, var(--border-default))'
+                ? '1px solid color-mix(in oklch, var(--accent) 30%, var(--border-default)'
                 : '1px solid transparent',
             }}
           >
@@ -1099,7 +1099,7 @@ export function ChatOverviewTabContent(props: {
               style={{
                 fontSize: 11,
                 fontWeight: 700,
-                color: sessionStateStatus === 'paused' ? 'var(--warning))' : 'var(--fg-strong)',
+                color: sessionStateStatus === 'paused' ? 'var(--warning)' : 'var(--fg-strong)',
                 marginBottom: 2,
               }}
             >

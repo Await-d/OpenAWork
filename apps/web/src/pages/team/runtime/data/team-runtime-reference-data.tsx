@@ -145,7 +145,7 @@ const TeamRuntimeReferenceDataContext = createContext<TeamRuntimeReferenceViewDa
 
 const ROLE_SLOT_CONFIG = [
   {
-    accent: 'var(--warning))',
+    accent: 'var(--warning)',
     badge: '团',
     fallbackLabel: '团队负责人',
     fallbackProvider: 'Planner',
@@ -153,7 +153,7 @@ const ROLE_SLOT_CONFIG = [
     leader: true,
   },
   {
-    accent: 'var(--accent))',
+    accent: 'var(--accent)',
     badge: '研',
     fallbackLabel: '研究员A',
     fallbackProvider: 'Researcher',
@@ -161,7 +161,7 @@ const ROLE_SLOT_CONFIG = [
     leader: false,
   },
   {
-    accent: 'var(--complement))',
+    accent: 'var(--complement)',
     badge: '执',
     fallbackLabel: '执行者',
     fallbackProvider: 'Executor',
@@ -169,7 +169,7 @@ const ROLE_SLOT_CONFIG = [
     leader: false,
   },
   {
-    accent: 'var(--danger))',
+    accent: 'var(--danger)',
     badge: '审',
     fallbackLabel: '批评者',
     fallbackProvider: 'Reviewer',

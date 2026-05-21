@@ -99,7 +99,7 @@ const ROW: React.CSSProperties = {
   padding: '10px 12px',
   borderRadius: 10,
   border: '1px solid var(--border-subtle)',
-  background: 'var(--surface-2, var(--bg-overlay))',
+  background: 'var(--surface-2, var(--bg-overlay)',
 };
 
 const PILL: React.CSSProperties = {
@@ -460,7 +460,7 @@ export default function SkillSelectionPage(): React.ReactElement {
               borderRadius: 8,
               border: 'none',
               background: 'var(--accent)',
-              color: 'var(--fg-on-accent))',
+              color: 'var(--fg-on-accent)',
               fontSize: 13,
               cursor: saving || loading ? 'wait' : 'pointer',
             }}
@@ -469,7 +469,7 @@ export default function SkillSelectionPage(): React.ReactElement {
           </button>
         </div>
         {error ? (
-          <div style={{ color: 'var(--danger))', fontSize: 12, marginTop: 8 }}>{error}</div>
+          <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 8 }}>{error}</div>
         ) : null}
         {hint ? (
           <div style={{ color: 'var(--accent)', fontSize: 12, marginTop: 8 }}>{hint}</div>
@@ -688,7 +688,7 @@ function TokenEstimateBar({ estimate }: { estimate: PinnedTokenEstimate }): Reac
   const overCap = estimate.ratio > 1.0;
   const nearCap = estimate.ratio > 0.75 && !overCap;
   const fillPct = Math.min(100, estimate.ratio * 100);
-  const barColor = overCap ? 'var(--danger))' : nearCap ? 'var(--warning))' : 'var(--accent)';
+  const barColor = overCap ? 'var(--danger)' : nearCap ? 'var(--warning)' : 'var(--accent)';
   const message = overCap
     ? `\u8d85\u51fa\u4e0a\u9650\uff0c\u540e\u7aef\u4f1a\u4ece\u4f4e\u4f18\u5148\u7ea7\u5f00\u59cb\u622a\u65ad`
     : nearCap

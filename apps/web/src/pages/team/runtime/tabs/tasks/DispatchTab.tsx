@@ -53,11 +53,11 @@ const STATE_LABEL: Record<HandoffRecord['state'], string> = {
 };
 
 const STATE_COLOR: Record<HandoffRecord['state'], string> = {
-  pending: 'var(--warning))',
-  claimed: 'var(--aux))',
-  running: 'var(--success))',
-  completed: 'var(--success))',
-  failed: 'var(--danger))',
+  pending: 'var(--warning)',
+  claimed: 'var(--aux)',
+  running: 'var(--success)',
+  completed: 'var(--success)',
+  failed: 'var(--danger)',
   cancelled: 'var(--fg-muted)',
 };
 
@@ -76,7 +76,7 @@ const PACKAGE_ROW_STYLE: CSSProperties = {
   padding: '12px 14px',
   borderRadius: 10,
   border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 84%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 84%, var(--bg-base)',
 };
 
 const ACTION_BTN_STYLE: CSSProperties = {
@@ -87,7 +87,7 @@ const ACTION_BTN_STYLE: CSSProperties = {
   borderRadius: 6,
   border: '1px solid color-mix(in srgb, var(--danger) 36%, transparent)',
   background: 'color-mix(in srgb, var(--danger) 8%, transparent)',
-  color: 'var(--danger))',
+  color: 'var(--danger)',
   fontSize: 11,
   fontWeight: 700,
   cursor: 'pointer',
@@ -198,7 +198,7 @@ export function DispatchTab({ selectedTeamId, onCancelHandoff }: DispatchTabProp
             padding: '8px 12px',
             borderRadius: 8,
             border: '1px solid color-mix(in srgb, var(--danger) 32%, transparent)',
-            color: 'var(--danger))',
+            color: 'var(--danger)',
             fontSize: 12,
             marginBottom: 12,
           }}
@@ -270,7 +270,7 @@ export function DispatchTab({ selectedTeamId, onCancelHandoff }: DispatchTabProp
                 </span>
               </div>
               {record.failureReason ? (
-                <span style={{ fontSize: 11, color: 'var(--danger))' }}>
+                <span style={{ fontSize: 11, color: 'var(--danger)' }}>
                   失败原因：{record.failureReason}
                 </span>
               ) : null}

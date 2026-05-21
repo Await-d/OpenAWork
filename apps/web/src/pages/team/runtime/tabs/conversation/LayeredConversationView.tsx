@@ -37,11 +37,11 @@ const LAYER_ORDER: TeamRoleLayer[] = ['user', 'reception', 'pm1', 'pm2', 'execut
 
 const STATE_COLORS: Record<string, string> = {
   idle: 'var(--fg-muted)',
-  pending: 'var(--warning))',
-  claimed: 'var(--aux))',
-  running: 'var(--success))',
+  pending: 'var(--warning)',
+  claimed: 'var(--aux)',
+  running: 'var(--success)',
   completed: 'var(--fg-muted)',
-  failed: 'var(--danger))',
+  failed: 'var(--danger)',
   cancelled: 'var(--fg-muted)',
 };
 
@@ -58,7 +58,7 @@ const HEADER_STYLE: CSSProperties = {
   padding: '6px 10px',
   borderRadius: 10,
   border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
   flexShrink: 0,
 };
 
@@ -109,7 +109,7 @@ const SESSION_PANE_STYLE: CSSProperties = {
   flexDirection: 'column',
   borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base)',
   overflow: 'hidden',
 };
 
@@ -313,7 +313,7 @@ function LayerTabBtn({
       style={{
         ...TAB_BTN_STYLE,
         background: active
-          ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay))'
+          ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay)'
           : 'transparent',
         borderColor: active ? 'color-mix(in srgb, var(--accent) 40%, transparent)' : 'transparent',
         color: active ? 'var(--fg-strong)' : 'var(--fg-muted)',
@@ -355,8 +355,8 @@ function HandoffRow({
           ? '1px solid color-mix(in srgb, var(--accent) 60%, transparent)'
           : '1px solid color-mix(in srgb, var(--border-default) 45%, transparent)',
         background: selected
-          ? 'color-mix(in srgb, var(--accent) 12%, var(--bg-overlay))'
-          : 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+          ? 'color-mix(in srgb, var(--accent) 12%, var(--bg-overlay)'
+          : 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
         fontSize: 12,
         cursor: clickable ? 'pointer' : 'default',
         opacity: clickable ? 1 : 0.55,

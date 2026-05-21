@@ -29,7 +29,7 @@ export function TelemetryConsentModal({ open, onAccept, onDecline }: TelemetryCo
   };
 
   const modalStyle: CSSProperties = {
-    background: 'var(--bg-overlay))',
+    background: 'var(--bg-overlay)',
     border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
     borderRadius: 14,
     padding: '1.5rem',
@@ -61,7 +61,7 @@ export function TelemetryConsentModal({ open, onAccept, onDecline }: TelemetryCo
               margin: 0,
               fontSize: 14,
               fontWeight: 700,
-              color: 'var(--fg-default))',
+              color: 'var(--fg-default)',
             }}
           >
             帮助改进 OpenAWork
@@ -70,7 +70,7 @@ export function TelemetryConsentModal({ open, onAccept, onDecline }: TelemetryCo
             style={{
               margin: '6px 0 0',
               fontSize: 12,
-              color: 'var(--fg-muted))',
+              color: 'var(--fg-muted)',
               lineHeight: 1.5,
             }}
           >
@@ -80,7 +80,7 @@ export function TelemetryConsentModal({ open, onAccept, onDecline }: TelemetryCo
 
         <div
           style={{
-            background: 'var(--bg-base))',
+            background: 'var(--bg-base)',
             border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
             borderRadius: 8,
             padding: '0.75rem 1rem',
@@ -90,7 +90,7 @@ export function TelemetryConsentModal({ open, onAccept, onDecline }: TelemetryCo
             style={{
               fontSize: 11,
               fontWeight: 600,
-              color: 'var(--fg-muted))',
+              color: 'var(--fg-muted)',
               textTransform: 'uppercase',
               letterSpacing: 0.5,
               marginBottom: 8,
@@ -111,22 +111,22 @@ export function TelemetryConsentModal({ open, onAccept, onDecline }: TelemetryCo
               <span style={{ color: color.success, fontSize: 12, flexShrink: 0, marginTop: 1 }}>
                 +
               </span>
-              <span style={{ fontSize: 12, color: 'var(--fg-default))', lineHeight: 1.4 }}>
+              <span style={{ fontSize: 12, color: 'var(--fg-default)', lineHeight: 1.4 }}>
                 {point}
               </span>
             </div>
           ))}
         </div>
 
-        <p style={{ margin: 0, fontSize: 12, color: 'var(--fg-muted))', lineHeight: 1.5 }}>
+        <p style={{ margin: 0, fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
           你可以随时在偏好设置中更改此选项。数据以匿名方式发送，绝不会与第三方共享。
         </p>
 
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button type="button" onClick={onDecline} style={btnStyle('var(--fg-muted))')}>
+          <button type="button" onClick={onDecline} style={btnStyle('var(--fg-muted)')}>
             不了，谢谢
           </button>
-          <button type="button" onClick={onAccept} style={btnStyle('var(--accent))')}>
+          <button type="button" onClick={onAccept} style={btnStyle('var(--accent)')}>
             启用遥测
           </button>
         </div>

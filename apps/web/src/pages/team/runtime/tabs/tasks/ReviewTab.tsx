@@ -382,7 +382,7 @@ export function ReviewTab({
                           borderRadius: 6,
                           border: 'none',
                           background: 'var(--success)',
-                          color: 'var(--fg-on-accent))',
+                          color: 'var(--fg-on-accent)',
                           fontSize: 10,
                           fontWeight: 700,
                           cursor: reviewBusy || !canReply ? 'not-allowed' : 'pointer',
@@ -393,7 +393,7 @@ export function ReviewTab({
                           transition: 'opacity 0.15s',
                         }}
                       >
-                        <Icon name="check" size={9} color="var(--fg-on-accent))" /> 通过
+                        <Icon name="check" size={9} color="var(--fg-on-accent)" /> 通过
                       </button>
                       <button
                         type="button"
@@ -408,7 +408,7 @@ export function ReviewTab({
                           borderRadius: 6,
                           border: 'none',
                           background: 'var(--danger)',
-                          color: 'var(--fg-on-accent))',
+                          color: 'var(--fg-on-accent)',
                           fontSize: 10,
                           fontWeight: 700,
                           cursor: reviewBusy || !canReply ? 'not-allowed' : 'pointer',
@@ -419,7 +419,7 @@ export function ReviewTab({
                           transition: 'opacity 0.15s',
                         }}
                       >
-                        <Icon name="x" size={9} color="var(--fg-on-accent))" /> 驳回
+                        <Icon name="x" size={9} color="var(--fg-on-accent)" /> 驳回
                       </button>
                     </>
                   )}

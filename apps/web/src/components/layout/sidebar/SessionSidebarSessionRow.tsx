@@ -111,7 +111,6 @@ export function SessionSidebarSessionRow({
         justifyContent: 'center',
         width: 20,
         height: 20,
-        marginTop: 2,
         borderRadius: 5,
         background: isActive
           ? 'color-mix(in oklch, var(--accent) 15%, transparent)'
@@ -200,8 +199,8 @@ export function SessionSidebarSessionRow({
             width: 7,
             height: 7,
             borderRadius: '50%',
-            background: 'var(--success))',
-            boxShadow: '0 0 5px var(--success))',
+            background: 'var(--success)',
+            boxShadow: '0 0 5px var(--success)',
             animation: 'pulse 1.5s ease-in-out infinite',
           }}
         />
@@ -216,7 +215,7 @@ export function SessionSidebarSessionRow({
             width: 7,
             height: 7,
             borderRadius: '50%',
-            background: 'var(--warning))',
+            background: 'var(--warning)',
           }}
         />
       )}

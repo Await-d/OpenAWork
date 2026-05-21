@@ -21,7 +21,7 @@ function Toggle({ enabled, onToggle }: { enabled: boolean; onToggle: () => void 
       type="button"
       onClick={onToggle}
       style={{
-        background: enabled ? 'var(--accent))' : 'var(--border-default, hsla(215, 18%, 50%, 0.12))',
+        background: enabled ? 'var(--accent)' : 'var(--border-default, hsla(215, 18%, 50%, 0.12))',
         border: 'none',
         borderRadius: 12,
         width: 40,
@@ -58,7 +58,7 @@ const rowStyle: CSSProperties = {
 
 const descStyle: CSSProperties = {
   fontSize: 11,
-  color: 'var(--fg-muted))',
+  color: 'var(--fg-muted)',
   marginTop: 2,
 };
 
@@ -76,7 +76,7 @@ export function AttributionConfigUI({
   return (
     <div
       style={{
-        background: 'var(--bg-overlay))',
+        background: 'var(--bg-overlay)',
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         borderRadius: 12,
         fontFamily: 'system-ui, sans-serif',
@@ -90,14 +90,14 @@ export function AttributionConfigUI({
           borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         }}
       >
-        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-default))' }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-default)' }}>
           Commit Attribution
         </span>
       </div>
 
       <div style={rowStyle}>
         <div>
-          <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--fg-default))' }}>
+          <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--fg-default)' }}>
             Co-Authored-By 联署行
           </div>
           <div style={descStyle}>在提交消息中添加 Co-Authored-By: AI</div>
@@ -107,7 +107,7 @@ export function AttributionConfigUI({
 
       <div style={{ ...rowStyle, borderBottom: 'none' }}>
         <div>
-          <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--fg-default))' }}>
+          <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--fg-default)' }}>
             Assisted-By 协助行
           </div>
           <div style={descStyle}>在提交消息中添加 Assisted-By: AI</div>
@@ -124,10 +124,7 @@ export function AttributionConfigUI({
           gap: 4,
         }}
       >
-        <label
-          htmlFor="attribution-author-name"
-          style={{ fontSize: 12, color: 'var(--fg-muted))' }}
-        >
+        <label htmlFor="attribution-author-name" style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
           作者名称覆盖
         </label>
         <input
@@ -137,10 +134,10 @@ export function AttributionConfigUI({
           value={authorName ?? ''}
           onChange={(e: ChangeEvent<HTMLInputElement>) => update({ authorName: e.target.value })}
           style={{
-            background: 'var(--bg-base))',
+            background: 'var(--bg-base)',
             border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
             borderRadius: 6,
-            color: 'var(--fg-default))',
+            color: 'var(--fg-default)',
             fontSize: 12,
             padding: '0.35rem 0.6rem',
             outline: 'none',

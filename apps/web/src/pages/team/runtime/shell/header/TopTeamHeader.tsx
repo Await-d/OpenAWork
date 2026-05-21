@@ -61,7 +61,7 @@ function RoleChip({
             padding: '0 5px',
             borderRadius: 999,
             background: 'color-mix(in oklch, var(--warning) 12%, transparent)',
-            color: 'var(--warning))',
+            color: 'var(--warning)',
             fontSize: 9,
             fontWeight: 700,
           }}
@@ -182,7 +182,7 @@ export function TopTeamHeader({
               background: isPaused
                 ? 'color-mix(in oklch, var(--warning) 12%, transparent)'
                 : 'color-mix(in oklch, var(--success) 15%, transparent)',
-              color: isPaused ? 'var(--warning))' : 'var(--success)',
+              color: isPaused ? 'var(--warning)' : 'var(--success)',
               fontSize: 10,
               fontWeight: 700,
               display: 'inline-flex',
@@ -195,7 +195,7 @@ export function TopTeamHeader({
                 width: 5,
                 height: 5,
                 borderRadius: '50%',
-                background: isPaused ? 'var(--warning))' : 'var(--success)',
+                background: isPaused ? 'var(--warning)' : 'var(--success)',
                 boxShadow: isPaused ? 'none' : '0 0 4px var(--success)',
               }}
             />

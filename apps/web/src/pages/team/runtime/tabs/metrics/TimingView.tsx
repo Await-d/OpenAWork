@@ -34,11 +34,11 @@ const LAYER_ORDER: TeamRoleLayer[] = ['reception', 'pm1', 'pm2', 'executor', 're
 
 const STATE_COLORS: Record<HandoffState | 'idle', string> = {
   idle: 'var(--fg-muted)',
-  pending: 'var(--warning))',
-  claimed: 'var(--aux))',
-  running: 'var(--success))',
+  pending: 'var(--warning)',
+  claimed: 'var(--aux)',
+  running: 'var(--success)',
   completed: 'var(--fg-muted)',
-  failed: 'var(--danger))',
+  failed: 'var(--danger)',
   cancelled: 'var(--fg-muted)',
 };
 
@@ -73,7 +73,7 @@ const STAT_CARD_STYLE: CSSProperties = {
   padding: '10px 12px',
   borderRadius: 10,
   border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
 };
 
 function formatMs(ms: number): string {
@@ -280,11 +280,11 @@ function StatCard({
 }) {
   const valueColor =
     accent === 'success'
-      ? 'var(--success))'
+      ? 'var(--success)'
       : accent === 'warning'
-        ? 'var(--warning))'
+        ? 'var(--warning)'
         : accent === 'danger'
-          ? 'var(--danger))'
+          ? 'var(--danger)'
           : 'var(--fg-strong)';
   return (
     <div style={STAT_CARD_STYLE}>
@@ -314,7 +314,7 @@ function RunningRow({ entry, dur }: { entry: HandoffEntry; dur: number }) {
         padding: '6px 10px',
         borderRadius: 8,
         border: '1px solid color-mix(in srgb, var(--border-default) 45%, transparent)',
-        background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+        background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
         fontSize: 12,
       }}
     >
@@ -381,9 +381,9 @@ function CompletedGantt({ entries }: { entries: HandoffEntry[] }) {
         const widthPct = Math.max(2, (dur / maxDur) * 100);
         const color =
           entry.state === 'completed'
-            ? 'var(--success))'
+            ? 'var(--success)'
             : entry.state === 'failed'
-              ? 'var(--danger))'
+              ? 'var(--danger)'
               : 'var(--fg-muted)';
         return (
           <div

@@ -25,13 +25,13 @@ const rowStyle: CSSProperties = {
 
 const labelStyle: CSSProperties = {
   fontSize: 12,
-  color: 'var(--fg-muted))',
+  color: 'var(--fg-muted)',
 };
 
 const valueStyle: CSSProperties = {
   fontSize: 12,
   fontWeight: 600,
-  color: 'var(--fg-default))',
+  color: 'var(--fg-default)',
   fontFamily: 'monospace',
 };
 
@@ -45,7 +45,7 @@ export function ModelCostDisplay({
   return (
     <div
       style={{
-        background: 'var(--bg-overlay))',
+        background: 'var(--bg-overlay)',
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         borderRadius: 10,
         padding: '0.75rem 1rem',
@@ -57,7 +57,7 @@ export function ModelCostDisplay({
         style={{
           fontSize: 12,
           fontWeight: 600,
-          color: 'var(--fg-default))',
+          color: 'var(--fg-default)',
           marginBottom: '0.6rem',
         }}
       >

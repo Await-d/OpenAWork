@@ -68,8 +68,8 @@ export function ErrorCommandCenter({
     <div
       style={{
         borderRadius: 10,
-        border: '2px solid color-mix(in srgb, var(--danger) 40%, var(--border-default))',
-        background: 'color-mix(in srgb, var(--danger) 5%, var(--bg-overlay))',
+        border: '2px solid color-mix(in srgb, var(--danger) 40%, var(--border-default)',
+        background: 'color-mix(in srgb, var(--danger) 5%, var(--bg-overlay)',
         padding: '10px 12px',
         display: 'flex',
         flexDirection: 'column',
@@ -168,10 +168,10 @@ export function ErrorCommandCenter({
                 style={{
                   flexShrink: 0,
                   borderRadius: 8,
-                  border: `1px solid ${isActive ? 'color-mix(in srgb, var(--danger) 60%, var(--border-default))' : 'color-mix(in srgb, var(--danger) 25%, var(--border-default))'}`,
+                  border: `1px solid ${isActive ? 'color-mix(in srgb, var(--danger) 60%, var(--border-default)' : 'color-mix(in srgb, var(--danger) 25%, var(--border-default)'}`,
                   background: isActive
-                    ? 'color-mix(in srgb, var(--danger) 14%, var(--bg-overlay))'
-                    : 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
+                    ? 'color-mix(in srgb, var(--danger) 14%, var(--bg-overlay)'
+                    : 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base)',
                   color: isActive ? 'var(--danger)' : 'var(--fg-default)',
                   padding: '4px 8px',
                   fontSize: 10,
@@ -206,8 +206,8 @@ export function ErrorCommandCenter({
           onClick={onCopyVisible}
           disabled={!hasErrors}
           style={btn(hasErrors, {
-            border: '1px solid color-mix(in srgb, var(--danger) 26%, var(--border-default))',
-            background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay))',
+            border: '1px solid color-mix(in srgb, var(--danger) 26%, var(--border-default)',
+            background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay)',
           })}
         >
           复制可见错误 {hasErrors ? `(${filteredDiagnostics.length})` : ''}
@@ -217,7 +217,7 @@ export function ErrorCommandCenter({
           onClick={onCopyRelatedContext}
           disabled={!hasSelected}
           style={btn(hasSelected, {
-            background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
+            background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay)',
           })}
         >
           复制关联上下文
@@ -257,8 +257,8 @@ export function ErrorCommandCenter({
         <div
           style={{
             borderRadius: 8,
-            border: '1px solid color-mix(in srgb, var(--danger) 28%, var(--border-default))',
-            background: 'color-mix(in srgb, var(--bg-overlay) 94%, var(--bg-base))',
+            border: '1px solid color-mix(in srgb, var(--danger) 28%, var(--border-default)',
+            background: 'color-mix(in srgb, var(--bg-overlay) 94%, var(--bg-base)',
             padding: '7px 10px',
             display: 'flex',
             flexDirection: 'column',

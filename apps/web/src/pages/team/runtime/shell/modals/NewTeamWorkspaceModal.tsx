@@ -61,7 +61,7 @@ const MODAL_STYLE: CSSProperties = {
 const HERO_PANE_STYLE: CSSProperties = {
   background:
     'linear-gradient(160deg, color-mix(in srgb, var(--accent) 90%, var(--bg-overlay) 0%, color-mix(in srgb, var(--accent) 55%, var(--bg-overlay) 100%)',
-  color: 'var(--fg-on-accent))',
+  color: 'var(--fg-on-accent)',
   padding: 24,
   display: 'flex',
   flexDirection: 'column',
@@ -117,7 +117,7 @@ const HERO_TITLE_STYLE: CSSProperties = {
 const HERO_DESC_STYLE: CSSProperties = {
   fontSize: 12,
   lineHeight: 1.7,
-  color: 'rgba(255, 255, 255, 0.92)',
+  color: 'var(--bg-raised)',
   position: 'relative',
 };
 
@@ -186,7 +186,7 @@ const INPUT_STYLE: CSSProperties = {
   padding: '9px 12px',
   borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base)',
   color: 'var(--fg-strong)',
   fontSize: 13,
   fontFamily: 'inherit',

@@ -13,17 +13,17 @@ export interface WorkerStatusIndicatorProps {
 }
 
 const STATUS_COLOR: Record<WorkerEntry['status'], string> = {
-  idle: 'var(--fg-muted))',
-  running: 'var(--success))',
-  stopped: 'var(--warning))',
-  error: 'var(--danger))',
+  idle: 'var(--fg-muted)',
+  running: 'var(--success)',
+  stopped: 'var(--warning)',
+  error: 'var(--danger)',
 };
 
 export function WorkerStatusIndicator({ workers, onStop, onConnect }: WorkerStatusIndicatorProps) {
   return (
     <div
       style={{
-        background: 'var(--bg-overlay))',
+        background: 'var(--bg-overlay)',
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         borderRadius: 10,
         overflow: 'hidden',
@@ -33,7 +33,7 @@ export function WorkerStatusIndicator({ workers, onStop, onConnect }: WorkerStat
         style={{
           padding: '0.65rem 0.875rem',
           borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-          color: 'var(--fg-muted))',
+          color: 'var(--fg-muted)',
           fontSize: 11,
           fontWeight: 700,
           textTransform: 'uppercase',
@@ -46,7 +46,7 @@ export function WorkerStatusIndicator({ workers, onStop, onConnect }: WorkerStat
         <div
           style={{
             padding: '1rem',
-            color: 'var(--fg-muted))',
+            color: 'var(--fg-muted)',
             fontSize: 12,
             textAlign: 'center',
           }}
@@ -78,7 +78,7 @@ export function WorkerStatusIndicator({ workers, onStop, onConnect }: WorkerStat
             <div style={{ flex: 1, minWidth: 0 }}>
               <div
                 style={{
-                  color: 'var(--fg-strong))',
+                  color: 'var(--fg-strong)',
                   fontSize: 12,
                   fontWeight: 600,
                   overflow: 'hidden',
@@ -91,7 +91,7 @@ export function WorkerStatusIndicator({ workers, onStop, onConnect }: WorkerStat
               {worker.mode && (
                 <div
                   style={{
-                    color: 'var(--fg-muted))',
+                    color: 'var(--fg-muted)',
                     fontSize: 10,
                     textTransform: 'uppercase',
                     letterSpacing: 0.5,
@@ -106,7 +106,7 @@ export function WorkerStatusIndicator({ workers, onStop, onConnect }: WorkerStat
               )}
               <div
                 style={{
-                  color: 'var(--fg-muted))',
+                  color: 'var(--fg-muted)',
                   fontSize: 11,
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
@@ -124,7 +124,7 @@ export function WorkerStatusIndicator({ workers, onStop, onConnect }: WorkerStat
                   style={{
                     border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
                     background: 'transparent',
-                    color: 'var(--fg-strong))',
+                    color: 'var(--fg-strong)',
                     borderRadius: 6,
                     fontSize: 11,
                     padding: '0.3rem 0.6rem',
@@ -141,7 +141,7 @@ export function WorkerStatusIndicator({ workers, onStop, onConnect }: WorkerStat
                   style={{
                     border: 'none',
                     background: 'oklch(from var(--danger) 0.22 0.1 20)',
-                    color: 'var(--danger))',
+                    color: 'var(--danger)',
                     borderRadius: 6,
                     fontSize: 11,
                     padding: '0.3rem 0.6rem',

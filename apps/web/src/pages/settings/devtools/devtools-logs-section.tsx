@@ -67,7 +67,7 @@ export function DevtoolsLogsSection({
           padding: '6px 10px',
           borderRadius: 8,
           border: '1px solid var(--border-default)',
-          background: 'color-mix(in srgb, var(--bg-overlay) 85%, var(--bg-base))',
+          background: 'color-mix(in srgb, var(--bg-overlay) 85%, var(--bg-base)',
           borderBottom: '2px solid var(--accent)',
         }}
       >
@@ -113,12 +113,12 @@ export function DevtoolsLogsSection({
                 borderRadius: 999,
                 padding: '2px 8px',
                 background: showOnlyErrorLogs
-                  ? 'color-mix(in srgb, var(--danger) 12%, var(--bg-overlay))'
-                  : 'color-mix(in srgb, var(--accent) 12%, var(--bg-overlay))',
+                  ? 'color-mix(in srgb, var(--danger) 12%, var(--bg-overlay)'
+                  : 'color-mix(in srgb, var(--accent) 12%, var(--bg-overlay)',
                 border: `1px solid ${
                   showOnlyErrorLogs
-                    ? 'color-mix(in srgb, var(--danger) 30%, var(--border-default))'
-                    : 'color-mix(in srgb, var(--accent) 30%, var(--border-default))'
+                    ? 'color-mix(in srgb, var(--danger) 30%, var(--border-default)'
+                    : 'color-mix(in srgb, var(--accent) 30%, var(--border-default)'
                 }`,
                 fontSize: 11,
                 fontWeight: 700,
@@ -178,7 +178,7 @@ export function DevtoolsLogsSection({
               borderRadius: 8,
               border: '1px solid var(--border-default)',
               padding: '6px 10px',
-              background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
+              background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay)',
               color: 'var(--fg-strong)',
               fontSize: 11,
               cursor: filteredLogs.length > 0 ? 'pointer' : 'not-allowed',
@@ -204,7 +204,7 @@ export function DevtoolsLogsSection({
             style={{
               borderRadius: 8,
               border: `1px solid ${logQuery ? 'var(--danger)' : 'var(--border-default)'}`,
-              background: 'color-mix(in srgb, var(--bg-overlay) 85%, var(--bg-base))',
+              background: 'color-mix(in srgb, var(--bg-overlay) 85%, var(--bg-base)',
               padding: '8px 10px',
               display: 'flex',
               gap: 8,
@@ -236,10 +236,10 @@ export function DevtoolsLogsSection({
               onClick={() => setShowOnlyErrorLogs((prev) => !prev)}
               style={{
                 borderRadius: 6,
-                border: `1px solid ${showOnlyErrorLogs ? 'color-mix(in srgb, var(--danger) 40%, var(--border-default))' : 'var(--border-default)'}`,
+                border: `1px solid ${showOnlyErrorLogs ? 'color-mix(in srgb, var(--danger) 40%, var(--border-default)' : 'var(--border-default)'}`,
                 padding: '6px 10px',
                 background: showOnlyErrorLogs
-                  ? 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay))'
+                  ? 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay)'
                   : 'var(--bg-overlay)',
                 color: showOnlyErrorLogs ? 'var(--danger)' : 'var(--fg-strong)',
                 fontSize: 11,
@@ -255,7 +255,7 @@ export function DevtoolsLogsSection({
                 borderRadius: 999,
                 padding: '3px 8px',
                 border: '1px solid var(--border-default)',
-                background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
+                background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base)',
                 fontSize: 11,
                 color: showOnlyErrorLogs ? 'var(--danger)' : 'var(--fg-muted)',
                 fontVariantNumeric: 'tabular-nums',
@@ -270,7 +270,7 @@ export function DevtoolsLogsSection({
             style={{
               borderRadius: 8,
               border: '1px solid var(--border-default)',
-              background: 'color-mix(in srgb, var(--bg-overlay) 85%, var(--bg-base))',
+              background: 'color-mix(in srgb, var(--bg-overlay) 85%, var(--bg-base)',
             }}
           >
             <div
@@ -298,7 +298,7 @@ export function DevtoolsLogsSection({
             style={{
               borderRadius: 8,
               border: '1px solid var(--border-default)',
-              background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
+              background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base)',
               display: 'flex',
               flexDirection: 'column',
             }}
@@ -345,20 +345,20 @@ export function DevtoolsLogsSection({
                         borderRadius: 6,
                         border: `1px solid ${
                           isActive && isError
-                            ? 'color-mix(in srgb, var(--danger) 50%, var(--border-default))'
+                            ? 'color-mix(in srgb, var(--danger) 50%, var(--border-default)'
                             : isActive
-                              ? 'color-mix(in srgb, var(--accent) 40%, var(--border-default))'
+                              ? 'color-mix(in srgb, var(--accent) 40%, var(--border-default)'
                               : isError
-                                ? 'color-mix(in srgb, var(--danger) 20%, var(--border-default))'
+                                ? 'color-mix(in srgb, var(--danger) 20%, var(--border-default)'
                                 : 'var(--border-default)'
                         }`,
                         background:
                           isActive && isError
-                            ? 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay))'
+                            ? 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay)'
                             : isActive
-                              ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))'
+                              ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay)'
                               : isError
-                                ? 'color-mix(in srgb, var(--danger) 5%, var(--bg-overlay))'
+                                ? 'color-mix(in srgb, var(--danger) 5%, var(--bg-overlay)'
                                 : 'var(--bg-overlay)',
                         color: 'var(--fg-strong)',
                         padding: '6px 8px',
@@ -434,7 +434,7 @@ export function DevtoolsLogsSection({
                               padding: '1px 5px',
                               border: '1px solid var(--border-default)',
                               background:
-                                'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+                                'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
                               fontSize: 10,
                               color: 'var(--fg-muted)',
                               fontFamily: 'monospace',
@@ -506,7 +506,7 @@ export function DevtoolsLogsSection({
             style={{
               borderRadius: 8,
               border: '1px solid var(--border-default)',
-              background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
+              background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base)',
               display: 'flex',
               flexDirection: 'column',
             }}
@@ -563,7 +563,7 @@ export function DevtoolsLogsSection({
                           borderRadius: 4,
                           padding: '2px 6px',
                           border: '1px solid var(--border-default)',
-                          background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+                          background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
                           fontSize: 10,
                           color: 'var(--fg-default)',
                           fontFamily: 'monospace',
@@ -646,7 +646,7 @@ export function DevtoolsLogsSection({
                       padding: '8px 10px',
                       borderRadius: 4,
                       border: '1px solid var(--border-default)',
-                      background: 'color-mix(in srgb, var(--bg-base) 60%, var(--bg-overlay))',
+                      background: 'color-mix(in srgb, var(--bg-base) 60%, var(--bg-overlay)',
                       fontSize: 11,
                       fontFamily: 'monospace',
                       lineHeight: 1.5,
@@ -682,7 +682,7 @@ export function DevtoolsLogsSection({
                       padding: '8px 10px',
                       borderRadius: 4,
                       border: '1px solid var(--border-default)',
-                      background: 'color-mix(in srgb, var(--bg-base) 60%, var(--bg-overlay))',
+                      background: 'color-mix(in srgb, var(--bg-base) 60%, var(--bg-overlay)',
                       fontSize: 11,
                       fontFamily: 'monospace',
                       lineHeight: 1.5,

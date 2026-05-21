@@ -168,7 +168,7 @@ export function ChatTopBar({
               alignItems: 'center',
               justifyContent: 'center',
               border: sidebarOpen
-                ? '1px solid color-mix(in oklch, var(--accent) 30%, var(--border-default))'
+                ? '1px solid color-mix(in oklch, var(--accent) 30%, var(--border-default)'
                 : '1px solid var(--border-subtle)',
               borderRadius: 6,
               background: sidebarOpen
@@ -340,11 +340,11 @@ export function ChatTopBar({
               borderRadius: 5,
               border: 'none',
               background: yoloMode
-                ? 'color-mix(in srgb, var(--warning) 22%, var(--bg-overlay))'
+                ? 'color-mix(in srgb, var(--warning) 22%, var(--bg-overlay)'
                 : 'transparent',
-              color: yoloMode ? 'var(--warning))' : 'var(--fg-muted)',
+              color: yoloMode ? 'var(--warning)' : 'var(--fg-muted)',
               boxShadow: yoloMode
-                ? 'inset 0 0 0 1px color-mix(in srgb, var(--warning) 50%, var(--border-default))'
+                ? 'inset 0 0 0 1px color-mix(in srgb, var(--warning) 50%, var(--border-default)'
                 : 'none',
               fontSize: 10,
               fontWeight: 600,

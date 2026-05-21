@@ -29,7 +29,7 @@ const DRAWER_STYLE: CSSProperties = {
   right: 0,
   zIndex: 100,
   borderTop: '1px solid color-mix(in srgb, var(--border-default) 82%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 96%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 96%, var(--bg-base)',
   boxShadow: '0 -4px 24px rgba(0,0,0,0.08)',
   transition: 'transform 200ms ease',
 };
@@ -49,7 +49,7 @@ const CLOSE_BUTTON_STYLE: CSSProperties = {
   height: 24,
   borderRadius: 6,
   border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base)',
   color: 'var(--fg-muted)',
   fontSize: 14,
   lineHeight: 1,
@@ -180,7 +180,7 @@ export function LayerConversationDrawer({
                   style={{
                     ...TAB_STYLE,
                     background: isActive
-                      ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay))'
+                      ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay)'
                       : 'transparent',
                     borderColor: isActive
                       ? 'color-mix(in srgb, var(--accent) 40%, transparent)'

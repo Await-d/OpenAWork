@@ -97,10 +97,10 @@ export function CompanionStatusHero({ buddy }: CompanionStatusHeroProps) {
                 borderRadius: 999,
                 background:
                   syncStatus === 'error'
-                    ? 'color-mix(in oklch, var(--danger) 14%, var(--bg-overlay))'
+                    ? 'color-mix(in oklch, var(--danger) 14%, var(--bg-overlay)'
                     : syncStatus === 'saving'
-                      ? 'color-mix(in oklch, var(--accent) 14%, var(--bg-overlay))'
-                      : 'color-mix(in oklch, var(--bg-hover) 80%, var(--bg-overlay))',
+                      ? 'color-mix(in oklch, var(--accent) 14%, var(--bg-overlay)'
+                      : 'color-mix(in oklch, var(--bg-hover) 80%, var(--bg-overlay)',
                 color: syncStatus === 'error' ? 'var(--danger)' : 'var(--fg-default)',
                 fontSize: 10,
                 fontWeight: 700,

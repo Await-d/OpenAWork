@@ -12,7 +12,7 @@ const CARD_STYLE: CSSProperties = {
   padding: 12,
   borderRadius: 10,
   border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base)',
 };
 
 const BADGE_STYLE: CSSProperties = {
@@ -25,9 +25,9 @@ const BADGE_STYLE: CSSProperties = {
 };
 
 const ROLE_COLORS: Record<string, string> = {
-  executor: 'var(--success))',
-  tester: 'var(--aux))',
-  reviewer: 'var(--warning))',
+  executor: 'var(--success)',
+  tester: 'var(--aux)',
+  reviewer: 'var(--warning)',
 };
 
 export interface DispatchPackageViewProps {
@@ -89,9 +89,9 @@ export function DispatchPackageView({ packages }: DispatchPackageViewProps) {
                 <span
                   style={{
                     ...BADGE_STYLE,
-                    color: 'var(--aux))',
-                    border: '1px solid var(--aux))40',
-                    background: 'var(--aux))10',
+                    color: 'var(--aux)',
+                    border: '1px solid var(--aux-muted)',
+                    background: 'var(--aux-subtle)',
                   }}
                 >
                   [P]
@@ -101,9 +101,9 @@ export function DispatchPackageView({ packages }: DispatchPackageViewProps) {
                 <span
                   style={{
                     ...BADGE_STYLE,
-                    color: 'var(--success))',
-                    border: '1px solid var(--success))40',
-                    background: 'var(--success))10',
+                    color: 'var(--success)',
+                    border: '1px solid var(--success-muted)',
+                    background: 'var(--success-muted)',
                   }}
                 >
                   [{pkg.taskMarkers.story}]
@@ -120,7 +120,7 @@ export function DispatchPackageView({ packages }: DispatchPackageViewProps) {
                     color: 'var(--fg-muted)',
                     padding: '1px 4px',
                     borderRadius: 3,
-                    background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+                    background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
                   }}
                 >
                   {t}

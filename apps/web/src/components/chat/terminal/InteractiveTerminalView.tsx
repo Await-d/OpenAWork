@@ -63,9 +63,9 @@ export function InteractiveTerminalView({
       fontFamily:
         'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
       theme: {
-        background: 'var(--bg-base))',
-        foreground: 'var(--fg-default))',
-        cursor: 'var(--accent))',
+        background: 'var(--bg-base)',
+        foreground: 'var(--fg-default)',
+        cursor: 'var(--accent)',
       },
       allowProposedApi: true,
       convertEol: true,
@@ -192,7 +192,7 @@ export function InteractiveTerminalView({
       style={{
         width: '100%',
         height: '100%',
-        background: 'var(--bg-base))',
+        background: 'var(--bg-base)',
         padding: 4,
         boxSizing: 'border-box',
         overflow: 'hidden',

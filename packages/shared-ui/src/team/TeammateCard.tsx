@@ -20,8 +20,8 @@ export interface TeammateCardProps {
 }
 
 const STATUS_COLOR: Record<MemberStatus, string> = {
-  idle: 'var(--fg-muted))',
-  working: 'var(--accent))',
+  idle: 'var(--fg-muted)',
+  working: 'var(--accent)',
   done: color.success,
   error: color.danger,
 };
@@ -86,7 +86,7 @@ export function TeammateCard({ member, style }: TeammateCardProps) {
           style={{
             fontSize: 12,
             fontWeight: 600,
-            color: 'var(--fg-strong))',
+            color: 'var(--fg-strong)',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -97,7 +97,7 @@ export function TeammateCard({ member, style }: TeammateCardProps) {
         <div
           style={{
             fontSize: 11,
-            color: 'var(--fg-muted))',
+            color: 'var(--fg-muted)',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',

@@ -186,9 +186,17 @@ export function buildNotificationFromRunEvent(input: {
 
 function mapRunEventToNotification(event: RunEvent): { body: string; title: string } | null {
   if (event.type === 'permission_asked') {
+    // Body format: "reason\npreviewAction\nscope\nriskLevel"
+    // Front-end parses this to show three-level structured display.
+    const parts = [
+      event.reason,
+      event.previewAction ?? '',
+      event.scope ?? '',
+      event.riskLevel ?? '',
+    ];
     return {
       title: `等待权限 · ${event.toolName}`,
-      body: event.previewAction ?? event.reason,
+      body: parts.join('\n'),
     };
   }
 

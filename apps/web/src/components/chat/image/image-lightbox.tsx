@@ -16,8 +16,8 @@ const lbToolBtnStyle: React.CSSProperties = {
   borderRadius: 10,
   border: '1px solid rgba(255,255,255,0.2)',
   background: 'rgba(255,255,255,0.12)',
-  backdropFilter: 'blur(8px)',
-  color: 'var(--fg-on-accent))',
+
+  color: 'var(--fg-on-accent)',
   fontSize: 15,
   cursor: 'pointer',
   display: 'flex',
@@ -90,7 +90,7 @@ export function ImageLightbox({ src, open, onClose, alt, caption, fileName }: Im
         alignItems: 'center',
         justifyContent: 'center',
         background: 'rgba(0,0,0,0.82)',
-        backdropFilter: 'blur(8px)',
+
         cursor: 'zoom-out',
         animation: 'fade-in 150ms ease-out',
       }}
@@ -243,7 +243,7 @@ export function ImageLightbox({ src, open, onClose, alt, caption, fileName }: Im
             borderRadius: 10,
             background: 'rgba(0,0,0,0.5)',
             backdropFilter: 'blur(6px)',
-            color: 'rgba(255,255,255,0.85)',
+            color: 'var(--bg-raised)',
             fontSize: 12,
             fontWeight: 500,
             textAlign: 'center',

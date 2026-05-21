@@ -205,7 +205,7 @@ export function WebsearchSection({
                 style={{
                   ...PILL_BUTTON,
                   background: selected
-                    ? 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay))'
+                    ? 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay)'
                     : PILL_BUTTON.background,
                   borderColor: selected ? 'var(--accent)' : 'var(--border-default)',
                   color: selected ? 'var(--accent)' : PILL_BUTTON.color,
@@ -331,7 +331,7 @@ export function WebsearchSection({
                     ...PILL_BUTTON,
                     minWidth: 32,
                     padding: '4px 8px',
-                    color: 'var(--danger))',
+                    color: 'var(--danger)',
                   }}
                 >
                   ×

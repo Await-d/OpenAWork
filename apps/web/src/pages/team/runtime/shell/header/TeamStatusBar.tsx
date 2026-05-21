@@ -71,11 +71,11 @@ const ESTIMATE_LABEL_STYLE: CSSProperties = {
 
 const LAYER_COLORS: Record<TeamRoleLayer, string> = {
   user: 'var(--fg-muted)',
-  reception: 'var(--accent))',
-  pm1: 'var(--chart-5))',
-  pm2: 'var(--chart-5))',
-  executor: 'var(--success))',
-  reviewer: 'var(--warning))',
+  reception: 'var(--accent)',
+  pm1: 'var(--chart-5)',
+  pm2: 'var(--chart-5)',
+  executor: 'var(--success)',
+  reviewer: 'var(--warning)',
 };
 
 export interface TeamStatusBarProps {
@@ -177,7 +177,7 @@ export function TeamStatusBar({ onPauseAll, onResumeAll, paused }: TeamStatusBar
 
       {/* 任务计数 */}
       {stats.running > 0 ? (
-        <span style={{ color: 'var(--success))', flexShrink: 0, whiteSpace: 'nowrap' }}>
+        <span style={{ color: 'var(--success)', flexShrink: 0, whiteSpace: 'nowrap' }}>
           ● {stats.running} 运行中
         </span>
       ) : null}
@@ -187,7 +187,7 @@ export function TeamStatusBar({ onPauseAll, onResumeAll, paused }: TeamStatusBar
         </span>
       ) : null}
       {stats.failed > 0 ? (
-        <span style={{ color: 'var(--danger))', flexShrink: 0, whiteSpace: 'nowrap' }}>
+        <span style={{ color: 'var(--danger)', flexShrink: 0, whiteSpace: 'nowrap' }}>
           ✗ {stats.failed}
         </span>
       ) : null}
@@ -257,7 +257,7 @@ export function TeamStatusBar({ onPauseAll, onResumeAll, paused }: TeamStatusBar
             padding: '2px 10px',
             borderRadius: 6,
             border: '1px solid color-mix(in srgb, var(--success) 40%, transparent)',
-            color: 'var(--success))',
+            color: 'var(--success)',
             fontSize: 11,
             cursor: 'pointer',
             flexShrink: 0,

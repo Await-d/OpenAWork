@@ -25,7 +25,7 @@ const thStyle: CSSProperties = {
   padding: '0.5rem 0.75rem',
   fontSize: 12,
   fontWeight: 500,
-  color: 'var(--fg-muted))',
+  color: 'var(--fg-muted)',
   textAlign: 'left',
   borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
 };
@@ -33,13 +33,13 @@ const thStyle: CSSProperties = {
 const tdStyle: CSSProperties = {
   padding: '0.6rem 0.75rem',
   fontSize: 12,
-  color: 'var(--fg-default))',
+  color: 'var(--fg-default)',
   verticalAlign: 'middle',
 };
 
 const tdMutedStyle: CSSProperties = {
   ...tdStyle,
-  color: 'var(--fg-muted))',
+  color: 'var(--fg-muted)',
 };
 
 export function CostOverview({ monthlyCostUsd, breakdown, style }: CostOverviewProps) {
@@ -50,13 +50,13 @@ export function CostOverview({ monthlyCostUsd, breakdown, style }: CostOverviewP
         flexDirection: 'column',
         gap: 24,
         fontFamily: 'system-ui, sans-serif',
-        color: 'var(--fg-default))',
+        color: 'var(--fg-default)',
         ...style,
       }}
     >
       <div
         style={{
-          background: 'var(--bg-overlay))',
+          background: 'var(--bg-overlay)',
           border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
           borderRadius: 12,
           padding: '1.5rem 2rem',
@@ -65,13 +65,13 @@ export function CostOverview({ monthlyCostUsd, breakdown, style }: CostOverviewP
           gap: 4,
         }}
       >
-        <span style={{ fontSize: 12, color: 'var(--fg-muted))' }}>Current Month Total</span>
+        <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>Current Month Total</span>
         <span
           style={{
             fontSize: 30,
             fontWeight: 700,
             letterSpacing: '-0.02em',
-            color: 'var(--fg-default))',
+            color: 'var(--fg-default)',
             fontVariantNumeric: 'tabular-nums',
           }}
         >
@@ -81,7 +81,7 @@ export function CostOverview({ monthlyCostUsd, breakdown, style }: CostOverviewP
 
       <div
         style={{
-          background: 'var(--bg-overlay))',
+          background: 'var(--bg-overlay)',
           border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
           borderRadius: 12,
           overflow: 'hidden',
@@ -101,7 +101,7 @@ export function CostOverview({ monthlyCostUsd, breakdown, style }: CostOverviewP
             style={{
               padding: '2rem',
               textAlign: 'center',
-              color: 'var(--fg-muted))',
+              color: 'var(--fg-muted)',
               fontSize: 12,
             }}
           >

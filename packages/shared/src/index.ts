@@ -700,6 +700,7 @@ export interface PermissionReplyPayload {
   requestId: string;
   decision: PermissionDecision;
   feedback?: string;
+  alwaysOverride?: string[];
 }
 
 export interface StreamTextChunk {

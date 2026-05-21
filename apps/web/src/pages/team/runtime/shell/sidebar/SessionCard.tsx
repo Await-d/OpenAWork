@@ -45,10 +45,10 @@ const STATUS_LABEL: Record<AgentTeamsSidebarTeam['status'], string> = {
 };
 
 const STATUS_COLOR: Record<AgentTeamsSidebarTeam['status'], string> = {
-  running: 'var(--success))',
-  paused: 'var(--warning))',
+  running: 'var(--success)',
+  paused: 'var(--warning)',
   completed: 'var(--fg-muted)',
-  failed: 'var(--danger))',
+  failed: 'var(--danger)',
 };
 
 const ICON_BOX_STYLE: CSSProperties = {
@@ -126,7 +126,7 @@ const AGENT_CHIP_STYLE: CSSProperties = {
   borderRadius: '50%',
   fontSize: 9,
   fontWeight: 700,
-  color: 'var(--fg-on-accent))',
+  color: 'var(--fg-on-accent)',
   letterSpacing: '0.01em',
   flexShrink: 0,
   border: '1.5px solid var(--bg-overlay)',
@@ -134,14 +134,14 @@ const AGENT_CHIP_STYLE: CSSProperties = {
 };
 
 const AGENT_PALETTE = [
-  'var(--aux))',
-  'var(--chart-5))',
-  'var(--complement))',
-  'var(--warning))',
-  'var(--success))',
-  'var(--chart-7))',
-  'var(--danger))',
-  'var(--chart-5))',
+  'var(--aux)',
+  'var(--chart-5)',
+  'var(--complement)',
+  'var(--warning)',
+  'var(--success)',
+  'var(--chart-7)',
+  'var(--danger)',
+  'var(--chart-5)',
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -360,14 +360,14 @@ export function SessionCard({
       ) : null}
 
       {taskRunning > 0 ? (
-        <Chip color="var(--success))" title={`${taskRunning} 个任务运行中`}>
+        <Chip color="var(--success)" title={`${taskRunning} 个任务运行中`}>
           <span
             aria-hidden
             style={{
               width: 5,
               height: 5,
               borderRadius: '50%',
-              background: 'var(--success))',
+              background: 'var(--success)',
               animation: 'pulse 1.5s ease-in-out infinite',
             }}
           />
@@ -376,7 +376,7 @@ export function SessionCard({
       ) : null}
 
       {taskFailed > 0 ? (
-        <Chip color="var(--danger))" title={`${taskFailed} 个任务失败`}>
+        <Chip color="var(--danger)" title={`${taskFailed} 个任务失败`}>
           <span aria-hidden style={{ fontWeight: 800, lineHeight: 1 }}>
             !
           </span>
@@ -430,7 +430,7 @@ export function SessionCard({
         <div style={TASK_LINE_STYLE}>
           <span
             aria-hidden
-            style={{ flexShrink: 0, color: currentTask ? 'var(--success))' : 'var(--fg-muted)' }}
+            style={{ flexShrink: 0, color: currentTask ? 'var(--success)' : 'var(--fg-muted)' }}
           >
             {currentTask ? '▶' : '💬'}
           </span>

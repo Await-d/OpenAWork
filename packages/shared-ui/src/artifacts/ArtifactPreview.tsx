@@ -16,7 +16,7 @@ export function ArtifactPreview({ artifact, onDownload, onShare, style }: Artifa
   return (
     <div
       style={{
-        background: 'var(--bg-overlay))',
+        background: 'var(--bg-overlay)',
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         borderRadius: 10,
         padding: '1rem',
@@ -33,7 +33,7 @@ export function ArtifactPreview({ artifact, onDownload, onShare, style }: Artifa
           style={{
             fontSize: 12,
             fontWeight: 600,
-            color: 'var(--fg-default))',
+            color: 'var(--fg-default)',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -43,11 +43,11 @@ export function ArtifactPreview({ artifact, onDownload, onShare, style }: Artifa
         </span>
         <div style={{ display: 'flex', gap: 6, flex: '0 0 auto' }}>
           {onShare && (
-            <button type="button" onClick={onShare} style={btnStyle('var(--fg-muted))')}>
+            <button type="button" onClick={onShare} style={btnStyle('var(--fg-muted)')}>
               分享
             </button>
           )}
-          <button type="button" onClick={onDownload} style={btnStyle('var(--accent))')}>
+          <button type="button" onClick={onDownload} style={btnStyle('var(--accent)')}>
             下载
           </button>
         </div>
@@ -56,7 +56,7 @@ export function ArtifactPreview({ artifact, onDownload, onShare, style }: Artifa
       {isImage && artifact.url ? (
         <div
           style={{
-            background: 'var(--bg-base))',
+            background: 'var(--bg-base)',
             borderRadius: 6,
             border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
             display: 'flex',
@@ -77,12 +77,12 @@ export function ArtifactPreview({ artifact, onDownload, onShare, style }: Artifa
           style={{
             margin: 0,
             padding: '0.75rem',
-            background: 'var(--bg-base))',
+            background: 'var(--bg-base)',
             border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
             borderRadius: 6,
             fontSize: 12,
             fontFamily: 'monospace',
-            color: 'var(--fg-default))',
+            color: 'var(--fg-default)',
             overflowX: 'auto',
             overflowY: 'auto',
             maxHeight: 320,
@@ -96,7 +96,7 @@ export function ArtifactPreview({ artifact, onDownload, onShare, style }: Artifa
         <div
           style={{
             fontSize: 12,
-            color: 'var(--fg-muted))',
+            color: 'var(--fg-muted)',
             padding: '0.5rem 0',
             fontStyle: 'italic',
           }}

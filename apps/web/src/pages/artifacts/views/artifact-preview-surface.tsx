@@ -243,5 +243,5 @@ const previewFrameStyle: React.CSSProperties = {
   minHeight: 380,
   border: `1px solid ${tokens.color.borderSubtle}`,
   borderRadius: tokens.radius.lg,
-  background: 'var(--fg-on-accent))',
+  background: 'var(--fg-on-accent)',
 };

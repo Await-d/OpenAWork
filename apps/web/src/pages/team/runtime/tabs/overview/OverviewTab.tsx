@@ -114,11 +114,11 @@ export function OverviewTab({
             {(() => {
               const statusColor =
                 selectedTeam.status === 'running'
-                  ? 'var(--success))'
+                  ? 'var(--success)'
                   : selectedTeam.status === 'paused'
-                    ? 'var(--warning))'
+                    ? 'var(--warning)'
                     : selectedTeam.status === 'failed'
-                      ? 'var(--danger))'
+                      ? 'var(--danger)'
                       : 'var(--fg-muted)';
               const statusLabel =
                 selectedTeam.status === 'running'
@@ -542,7 +542,7 @@ export function OverviewTab({
                       padding: '8px 10px',
                       borderRadius: 8,
                       background: isExpanded
-                        ? 'color-mix(in oklch, var(--accent) 4%, var(--bg-overlay))'
+                        ? 'color-mix(in oklch, var(--accent) 4%, var(--bg-overlay)'
                         : 'var(--bg-overlay)',
                       alignItems: 'flex-start',
                       cursor: 'pointer',

@@ -104,7 +104,7 @@ export function WorkflowCanvas({
     <div
       style={{
         position: 'relative',
-        background: 'var(--bg-overlay))',
+        background: 'var(--bg-overlay)',
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         borderRadius: 10,
         overflow: 'auto',
@@ -124,7 +124,7 @@ export function WorkflowCanvas({
         <title>工作流画布</title>
         <defs>
           <marker id="wf-arrow" markerWidth="8" markerHeight="8" refX="8" refY="3" orient="auto">
-            <path d="M0,0 L0,6 L8,3 z" fill="var(--fg-muted))" />
+            <path d="M0,0 L0,6 L8,3 z" fill="var(--fg-muted)" />
           </marker>
         </defs>
         {edges.map((e, ei) => {
@@ -142,7 +142,7 @@ export function WorkflowCanvas({
               key={e.id ?? ei}
               d={`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`}
               fill="none"
-              stroke="var(--fg-muted))"
+              stroke="var(--fg-muted)"
               strokeWidth={1.5}
               markerEnd="url(#wf-arrow)"
             />
@@ -171,7 +171,7 @@ export function WorkflowCanvas({
                 width: NODE_W,
                 height: NODE_H,
                 borderRadius: 8,
-                background: 'var(--bg-base))',
+                background: 'var(--bg-base)',
                 border: selected
                   ? `2px solid ${TYPE_COLOR[n.type]}`
                   : '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
@@ -196,7 +196,7 @@ export function WorkflowCanvas({
                 style={{
                   fontSize: 12,
                   fontWeight: 500,
-                  color: 'var(--fg-strong))',
+                  color: 'var(--fg-strong)',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',

@@ -153,7 +153,7 @@ const ROW: React.CSSProperties = {
   padding: '6px 8px',
   borderRadius: 8,
   border: '1px solid var(--border-subtle)',
-  background: 'var(--surface-2, var(--bg-overlay))',
+  background: 'var(--surface-2, var(--bg-overlay)',
 };
 
 const PILL: React.CSSProperties = {
@@ -185,7 +185,7 @@ const TOOL_BUTTON_PRIMARY: React.CSSProperties = {
   ...TOOL_BUTTON_BASE,
   borderColor: 'transparent',
   background: 'var(--accent)',
-  color: 'var(--fg-on-accent))',
+  color: 'var(--fg-on-accent)',
 };
 
 const ORIGIN_LABEL: Record<EffectiveSkillDto['origin'], string> = {
@@ -197,8 +197,8 @@ const ORIGIN_LABEL: Record<EffectiveSkillDto['origin'], string> = {
 
 const ORIGIN_PILL_STYLE: Record<EffectiveSkillDto['origin'], React.CSSProperties> = {
   workspace: { background: 'var(--accent-soft, rgba(99,102,241,0.12))', color: 'var(--accent)' },
-  'workspace-fallback': { background: 'var(--warning-muted)', color: 'var(--warning))' },
-  'session-override': { background: 'var(--danger-muted)', color: 'var(--danger))' },
+  'workspace-fallback': { background: 'var(--warning-muted)', color: 'var(--warning)' },
+  'session-override': { background: 'var(--danger-muted)', color: 'var(--danger)' },
   builtin: { background: 'rgba(100,116,139,0.16)', color: 'var(--fg-muted)' },
 };
 
@@ -574,7 +574,7 @@ export default function SkillSettingsPanel(
       </div>
 
       {error ? (
-        <div style={{ padding: 8, color: 'var(--danger))', fontSize: 11 }}>{error}</div>
+        <div style={{ padding: 8, color: 'var(--danger)', fontSize: 11 }}>{error}</div>
       ) : null}
       {hint ? <div style={{ padding: 8, color: 'var(--accent)', fontSize: 11 }}>{hint}</div> : null}
 
@@ -1061,7 +1061,7 @@ function TokenEstimateBar({ estimate }: { estimate: PinnedTokenEstimate }): Reac
   const overCap = estimate.ratio > 1.0;
   const nearCap = estimate.ratio > 0.75 && !overCap;
   const fillPct = Math.min(100, estimate.ratio * 100);
-  const barColor = overCap ? 'var(--danger))' : nearCap ? 'var(--warning))' : 'var(--accent)';
+  const barColor = overCap ? 'var(--danger)' : nearCap ? 'var(--warning)' : 'var(--accent)';
   const message = overCap
     ? '超出上限，后端会从低优先级开始截断'
     : nearCap

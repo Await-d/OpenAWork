@@ -139,7 +139,7 @@ export function CommandPalette({
         aria-modal="true"
         style={{
           width: 'min(680px, 92vw)',
-          background: 'var(--bg-overlay))',
+          background: 'var(--bg-overlay)',
           border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
           borderRadius: 10,
           boxShadow: '0 12px 40px rgba(2, 6, 23, 0.45)',
@@ -164,8 +164,8 @@ export function CommandPalette({
               width: '100%',
               border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
               borderRadius: 7,
-              background: 'var(--bg-base))',
-              color: 'var(--fg-strong))',
+              background: 'var(--bg-base)',
+              color: 'var(--fg-strong)',
               padding: '0.5rem 0.65rem',
               fontSize: 12,
               outline: 'none',
@@ -177,7 +177,7 @@ export function CommandPalette({
             <div
               style={{
                 padding: '0.9rem',
-                color: 'var(--fg-muted))',
+                color: 'var(--fg-muted)',
                 fontSize: 12,
                 textAlign: 'center',
               }}
@@ -205,7 +205,7 @@ export function CommandPalette({
                         ? 'none'
                         : '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
                     background: selected ? 'rgba(99, 102, 241, 0.2)' : 'transparent',
-                    color: 'var(--fg-strong))',
+                    color: 'var(--fg-strong)',
                     padding: '0.65rem 0.75rem',
                     cursor: 'pointer',
                     display: 'flex',
@@ -224,7 +224,7 @@ export function CommandPalette({
                           display: 'block',
                           marginTop: 2,
                           fontSize: 11,
-                          color: 'var(--fg-muted))',
+                          color: 'var(--fg-muted)',
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
@@ -238,7 +238,7 @@ export function CommandPalette({
                     <span
                       style={{
                         fontSize: 11,
-                        color: 'var(--fg-muted))',
+                        color: 'var(--fg-muted)',
                         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
                         borderRadius: 6,
                         padding: '0.15rem 0.4rem',

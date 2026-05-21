@@ -36,7 +36,7 @@ const CARD_STYLE: CSSProperties = {
   padding: '10px 12px',
   borderRadius: 10,
   border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
 };
 
 const TAB_BTN_STYLE: CSSProperties = {
@@ -52,7 +52,7 @@ const TAB_BTN_STYLE: CSSProperties = {
 
 const TAB_BTN_ACTIVE_STYLE: CSSProperties = {
   ...TAB_BTN_STYLE,
-  background: 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay))',
+  background: 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay)',
   borderColor: 'color-mix(in srgb, var(--accent) 40%, transparent)',
   color: 'var(--fg-strong)',
 };
@@ -231,7 +231,7 @@ function UsageRow({ label, bucket }: { label: string; bucket: UsageBucket }) {
         padding: '8px 12px',
         borderRadius: 10,
         border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
-        background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+        background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
         fontSize: 12,
       }}
     >

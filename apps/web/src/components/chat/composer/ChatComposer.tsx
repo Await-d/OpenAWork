@@ -754,15 +754,15 @@ export function ChatComposer({
                         padding: '3px 8px',
                         borderRadius: 999,
                         border: item.requiresAttachmentRebind
-                          ? '1px solid color-mix(in srgb, var(--warning) 28%, var(--border-default))'
-                          : '1px solid color-mix(in oklch, var(--accent) 18%, var(--border-default))',
+                          ? '1px solid color-mix(in srgb, var(--warning) 28%, var(--border-default)'
+                          : '1px solid color-mix(in oklch, var(--accent) 18%, var(--border-default)',
                         background: item.requiresAttachmentRebind
                           ? 'color-mix(in srgb, var(--warning) 12%, transparent)'
                           : index === 0
                             ? 'color-mix(in oklch, var(--accent) 10%, transparent)'
                             : 'var(--bg-overlay)',
                         color: item.requiresAttachmentRebind
-                          ? 'var(--warning))'
+                          ? 'var(--warning)'
                           : index === 0
                             ? 'var(--accent)'
                             : 'var(--fg-default)',
@@ -839,7 +839,7 @@ export function ChatComposer({
               style={{
                 border: 'none',
                 background: isHomeVariant
-                  ? 'linear-gradient(180deg, var(--bg-raised), var(--bg-overlay))'
+                  ? 'linear-gradient(180deg, var(--bg-raised), var(--bg-overlay)'
                   : 'transparent',
                 borderRadius: 10,
                 padding: '6px 8px 6px',
@@ -894,10 +894,10 @@ export function ChatComposer({
                       padding: '0 7px',
                       borderRadius: 999,
                       border: hasAgentOverride
-                        ? '1px solid color-mix(in oklch, var(--accent) 40%, var(--border-subtle))'
+                        ? '1px solid color-mix(in oklch, var(--accent) 40%, var(--border-subtle)'
                         : '1px solid var(--border-subtle)',
                       background: hasAgentOverride
-                        ? 'color-mix(in oklch, var(--accent) 10%, var(--bg-overlay))'
+                        ? 'color-mix(in oklch, var(--accent) 10%, var(--bg-overlay)'
                         : 'var(--bg-overlay)',
                       color: hasAgentOverride ? 'var(--accent)' : 'var(--fg-muted)',
                       fontSize: 10,
@@ -1121,7 +1121,7 @@ export function ChatComposer({
                             width: '100%',
                             textAlign: 'left',
                             border: isRecommended
-                              ? '1px solid color-mix(in oklch, var(--success) 30%, var(--border-subtle))'
+                              ? '1px solid color-mix(in oklch, var(--success) 30%, var(--border-subtle)'
                               : '1px solid var(--border-subtle)',
                             borderRadius: 8,
                             background: isRecommended
@@ -1509,9 +1509,9 @@ export function ChatComposer({
                       className={`icon-btn${optimizeResult ? ' active' : ''}`}
                       style={{
                         border: optimizeLoading
-                          ? '1px solid color-mix(in oklch, var(--accent) 45%, var(--border-subtle))'
+                          ? '1px solid color-mix(in oklch, var(--accent) 45%, var(--border-subtle)'
                           : optimizeResult
-                            ? '1px solid color-mix(in oklch, var(--success) 40%, var(--border-subtle))'
+                            ? '1px solid color-mix(in oklch, var(--success) 40%, var(--border-subtle)'
                             : '1px solid var(--border-subtle)',
                         borderRadius: 8,
                         width: 26,
@@ -1662,12 +1662,12 @@ export function ChatComposer({
                             : undefined,
                       color: showStopAction
                         ? effectiveStopCapability === 'best_effort'
-                          ? 'var(--warning))'
+                          ? 'var(--warning)'
                           : 'rgb(252, 165, 165)'
                         : sessionBusyState === 'running'
                           ? 'var(--accent)'
                           : sessionBusyState === 'paused'
-                            ? 'var(--warning))'
+                            ? 'var(--warning)'
                             : undefined,
                     }}
                   >

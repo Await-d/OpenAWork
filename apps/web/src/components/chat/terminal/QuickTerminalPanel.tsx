@@ -351,7 +351,7 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
                     padding: '2px 4px 2px 8px',
                     borderRadius: 4,
                     background: isActive
-                      ? 'color-mix(in srgb, var(--success) 14%, var(--bg-overlay))'
+                      ? 'color-mix(in srgb, var(--success) 14%, var(--bg-overlay)'
                       : 'transparent',
                     border: isActive
                       ? '1px solid color-mix(in srgb, var(--success) 50%, transparent)'
@@ -392,7 +392,7 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
                       style={{
                         border: 'none',
                         background: 'transparent',
-                        color: isActive ? 'var(--success))' : 'var(--fg-default)',
+                        color: isActive ? 'var(--success)' : 'var(--fg-default)',
                         fontSize: 11,
                         fontWeight: isActive ? 600 : 500,
                         cursor: 'pointer',
@@ -477,7 +477,7 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
           style={{
             padding: '4px 10px',
             background: 'color-mix(in srgb, var(--danger) 12%, transparent)',
-            color: 'var(--danger))',
+            color: 'var(--danger)',
             fontSize: 11,
           }}
         >

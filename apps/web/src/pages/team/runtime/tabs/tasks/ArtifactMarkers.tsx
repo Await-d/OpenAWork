@@ -30,21 +30,21 @@ const BADGE_BASE: CSSProperties = {
 const NEEDS_CLARIFICATION_STYLE: CSSProperties = {
   ...BADGE_BASE,
   background: 'color-mix(in srgb, var(--danger) 14%, transparent)',
-  color: 'var(--danger))',
+  color: 'var(--danger)',
   border: '1px solid color-mix(in srgb, var(--danger) 36%, transparent)',
 };
 
 const PARALLEL_STYLE: CSSProperties = {
   ...BADGE_BASE,
   background: 'color-mix(in srgb, var(--aux) 14%, transparent)',
-  color: 'var(--aux))',
+  color: 'var(--aux)',
   border: '1px solid color-mix(in srgb, var(--aux) 36%, transparent)',
 };
 
 const STORY_STYLE: CSSProperties = {
   ...BADGE_BASE,
   background: 'color-mix(in srgb, var(--success) 14%, transparent)',
-  color: 'var(--success))',
+  color: 'var(--success)',
   border: '1px solid color-mix(in srgb, var(--success) 36%, transparent)',
 };
 

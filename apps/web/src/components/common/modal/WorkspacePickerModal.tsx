@@ -325,7 +325,7 @@ export default function WorkspacePickerModal({
                 height: 36,
                 borderRadius: 10,
                 border: '1px solid var(--border-default)',
-                background: 'var(--surface-elevated, var(--bg-overlay))',
+                background: 'var(--surface-elevated, var(--bg-overlay)',
                 color: 'var(--fg-strong)',
                 padding: '0 12px',
                 outline: 'none',
@@ -349,7 +349,7 @@ export default function WorkspacePickerModal({
             padding: '12px 14px',
             borderRadius: 10,
             border: '1px solid var(--border-default)',
-            background: 'linear-gradient(135deg, var(--bg-surface), var(--bg-overlay))',
+            background: 'linear-gradient(135deg, var(--bg-surface), var(--bg-overlay)',
           }}
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -443,7 +443,7 @@ export default function WorkspacePickerModal({
             border: '1px solid var(--border-default)',
             borderRadius: 10,
             padding: 10,
-            background: 'var(--bg-2, var(--bg-base))',
+            background: 'var(--bg-2, var(--bg-base)',
           }}
         >
           {busy ? (

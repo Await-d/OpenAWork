@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { createNotificationsClient } from '@openAwork/web-client';
+import {
+  createNotificationsClient,
+  createPermissionsClient,
+  createSessionsClient,
+} from '@openAwork/web-client';
 import type {
   NotificationPreferenceEventType,
   NotificationPreferenceRecord,
   NotificationRecord,
+  PendingPermissionRequest,
+  PermissionDecision,
 } from '@openAwork/web-client';
 import { subscribeNotificationPreferenceRefresh } from '../../../utils/chat/notification-preference-events.js';
 import { preloadRouteModuleByPath } from '../../../routes/preloadable-route-modules.js';
@@ -37,17 +43,17 @@ interface NotificationTypeMeta {
 const NOTIFICATION_TYPE_META: Record<string, NotificationTypeMeta> = {
   permission_asked: {
     bg: 'rgba(245, 158, 11, 0.12)',
-    color: 'var(--warning))',
+    color: 'var(--warning)',
     label: '权限请求',
   },
   question_asked: {
     bg: 'rgba(59, 130, 246, 0.12)',
-    color: 'var(--aux))',
+    color: 'var(--aux)',
     label: '提问',
   },
   task_update: {
     bg: 'rgba(16, 185, 129, 0.12)',
-    color: 'var(--success))',
+    color: 'var(--success)',
     label: '任务',
   },
 };
@@ -77,6 +83,88 @@ function isBrowserNotificationEnabled(
   return true;
 }
 
+interface ParsedPermissionBody {
+  reason: string;
+  previewAction: string;
+  scope: string;
+  riskLevel: string;
+}
+
+/**
+ * Parse the structured notification body for permission_asked events.
+ * Format: "reason\npreviewAction\nscope\nriskLevel"
+ * Falls back gracefully for legacy notifications that only have a single line.
+ */
+function parsePermissionNotificationBody(body: string): ParsedPermissionBody | null {
+  const lines = body.split('\n');
+  if (lines.length < 2) {
+    return null;
+  }
+  return {
+    reason: lines[0] ?? '',
+    previewAction: lines[1] ?? '',
+    scope: lines[2] ?? '',
+    riskLevel: lines[3] ?? '',
+  };
+}
+
+interface ScopeLevel {
+  id: string;
+  label: string;
+  pattern: string;
+  description: string;
+}
+
+/**
+ * Compute three scope levels from a permission request's scope and always patterns.
+ * For a bash command like "npm install express":
+ *   - exact: "npm install express" (only this exact command)
+ *   - sub:   "npm install *" (sub-command wildcard)
+ *   - prefix: "npm *" (prefix wildcard, from always patterns)
+ */
+function computeScopeLevels(scope: string, always?: string[]): ScopeLevel[] {
+  const levels: ScopeLevel[] = [];
+  const trimmed = scope.trim();
+
+  // Level 1: exact scope
+  levels.push({
+    id: 'exact',
+    label: trimmed.length > 30 ? `${trimmed.slice(0, 30)}…` : trimmed,
+    pattern: trimmed,
+    description: '仅此操作',
+  });
+
+  // Level 2: sub-command wildcard (drop last token, add *)
+  const tokens = trimmed.split(/\s+/);
+  const firstToken = tokens[0] ?? '';
+  const computedPrefix =
+    always && always.length > 0 ? (always[0] ?? `${firstToken} *`) : `${firstToken} *`;
+  if (tokens.length > 2) {
+    const subPattern = tokens.slice(0, -1).join(' ') + ' *';
+    // Only add if different from exact and from prefix
+    if (subPattern !== trimmed && subPattern !== computedPrefix) {
+      levels.push({
+        id: 'sub',
+        label: subPattern.length > 30 ? `${subPattern.slice(0, 30)}…` : subPattern,
+        pattern: subPattern,
+        description: '同子命令',
+      });
+    }
+  }
+
+  // Level 3: prefix wildcard (from always patterns or first token + *)
+  if (computedPrefix !== trimmed) {
+    levels.push({
+      id: 'prefix',
+      label: computedPrefix.length > 30 ? `${computedPrefix.slice(0, 30)}…` : computedPrefix,
+      pattern: computedPrefix,
+      description: '同类操作',
+    });
+  }
+
+  return levels;
+}
+
 interface NotificationCenterProps {
   accessToken: string | null;
   gatewayUrl: string;
@@ -93,6 +181,11 @@ interface NotificationCenterProps {
    * `.nav-rail-label` rules.
    */
   labelStyleOverride?: React.CSSProperties;
+  /**
+   * Whether the nav rail is in expanded state. Used to align padding and
+   * justifyContent with sibling items.
+   */
+  expanded?: boolean;
 }
 
 export default function NotificationCenter({
@@ -100,6 +193,7 @@ export default function NotificationCenter({
   gatewayUrl,
   pendingPermissionIndicator = false,
   labelStyleOverride,
+  expanded = true,
 }: NotificationCenterProps) {
   const navigate = useNavigate();
   const preloadRoute = useCallback((path: string) => {
@@ -201,7 +295,17 @@ export default function NotificationCenter({
             if (!isBrowserNotificationEnabled(item.eventType, effectivePreferences)) {
               return;
             }
-            new Notification(item.title, { body: item.body, tag: item.id });
+            new Notification(item.title, {
+              body: (() => {
+                if (item.eventType !== 'permission_asked') return item.body;
+                const parsed = parsePermissionNotificationBody(item.body);
+                if (!parsed) return item.body;
+                return parsed.previewAction
+                  ? `${parsed.reason}\n${parsed.previewAction}`
+                  : parsed.reason;
+              })(),
+              tag: item.id,
+            });
           });
         } else {
           next.forEach((item) => {
@@ -262,6 +366,144 @@ export default function NotificationCenter({
       toast('标记全部已读失败，请稍后重试', 'error');
     }
   }, [accessToken, gatewayUrl, notifications]);
+
+  // --- Session title cache for showing source info ---
+  const [sessionTitles, setSessionTitles] = useState<Record<string, string>>({});
+  const sessionTitleFetchedRef = useRef<Set<string>>(new Set());
+
+  // --- Permission details cache for three-level display ---
+  const [permissionDetails, setPermissionDetails] = useState<
+    Record<string, PendingPermissionRequest>
+  >({});
+  const permissionDetailsFetchedRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!accessToken) {
+      return;
+    }
+    const sessionIds = notifications
+      .filter((n) => n.sessionId && !sessionTitleFetchedRef.current.has(n.sessionId))
+      .map((n) => n.sessionId as string);
+    const unique = [...new Set(sessionIds)];
+    if (unique.length === 0) {
+      return;
+    }
+    unique.forEach((id) => sessionTitleFetchedRef.current.add(id));
+    const client = createSessionsClient(gatewayUrl);
+    unique.forEach((sessionId) => {
+      void client
+        .get(accessToken, sessionId)
+        .then((session) => {
+          if (session?.title) {
+            setSessionTitles((prev) => ({ ...prev, [sessionId]: session.title as string }));
+          }
+        })
+        .catch(() => undefined);
+    });
+  }, [accessToken, gatewayUrl, notifications]);
+
+  // Fetch pending permission details for permission_asked notifications
+  useEffect(() => {
+    if (!accessToken) {
+      return;
+    }
+    const permNotifications = notifications.filter(
+      (n) =>
+        n.eventType === 'permission_asked' &&
+        n.sessionId &&
+        !permissionDetailsFetchedRef.current.has(n.id),
+    );
+    if (permNotifications.length === 0) {
+      return;
+    }
+    permNotifications.forEach((n) => permissionDetailsFetchedRef.current.add(n.id));
+    const permClient = createPermissionsClient(gatewayUrl);
+    // Group by sessionId to avoid duplicate fetches
+    const bySession = new Map<string, NotificationRecord[]>();
+    permNotifications.forEach((n) => {
+      const list = bySession.get(n.sessionId as string) ?? [];
+      list.push(n);
+      bySession.set(n.sessionId as string, list);
+    });
+    bySession.forEach((notifs, sessionId) => {
+      void permClient
+        .listPending(accessToken, sessionId)
+        .then((pending) => {
+          const firstPending = pending.find((p) => p.status === 'pending');
+          if (firstPending) {
+            // Map the first pending permission to all permission notifications for this session
+            const updates: Record<string, PendingPermissionRequest> = {};
+            notifs.forEach((n) => {
+              updates[n.id] = firstPending;
+            });
+            setPermissionDetails((prev) => ({ ...prev, ...updates }));
+          }
+        })
+        .catch(() => undefined);
+    });
+  }, [accessToken, gatewayUrl, notifications]);
+
+  // --- Quick permission reply ---
+  const [replyingIds, setReplyingIds] = useState<Set<string>>(new Set());
+  // Track selected scope level per notification: 'exact' | 'sub' | 'prefix'
+  const [selectedScopes, setSelectedScopes] = useState<Record<string, string>>({});
+
+  const handleQuickPermissionReply = useCallback(
+    async (notification: NotificationRecord, decision: PermissionDecision) => {
+      if (!accessToken || !notification.sessionId) {
+        return;
+      }
+      setReplyingIds((prev) => new Set(prev).add(notification.id));
+      try {
+        const permClient = createPermissionsClient(gatewayUrl);
+        // Use cached permission details if available, otherwise fetch
+        const details = permissionDetails[notification.id];
+        let requestId = details?.requestId;
+        if (!requestId) {
+          const pending = await permClient.listPending(accessToken, notification.sessionId);
+          const firstPending = pending.find((p) => p.status === 'pending');
+          if (!firstPending) {
+            toast('该权限请求已被处理或已过期', 'info');
+            void handleDismissNotification(notification);
+            return;
+          }
+          requestId = firstPending.requestId;
+        }
+        // Compute alwaysOverride based on selected scope level
+        let alwaysOverride: string[] | undefined;
+        if (decision !== 'once' && decision !== 'reject' && details) {
+          const scopeLevel = selectedScopes[notification.id] ?? 'prefix';
+          const levels = computeScopeLevels(details.scope, details.always);
+          const selectedLevel = levels.find((l) => l.id === scopeLevel);
+          if (selectedLevel) {
+            alwaysOverride = [selectedLevel.pattern];
+          }
+        }
+        await permClient.reply(accessToken, notification.sessionId, {
+          requestId,
+          decision,
+          ...(alwaysOverride ? { alwaysOverride } : {}),
+        });
+        const labels: Record<PermissionDecision, string> = {
+          once: '允许一次',
+          session: '本会话允许',
+          permanent: '永久允许',
+          reject: '已拒绝',
+        };
+        toast(`已提交：${labels[decision]}`, 'success');
+        void handleDismissNotification(notification);
+      } catch {
+        toast('审批操作失败，请稍后重试', 'error');
+      } finally {
+        setReplyingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(notification.id);
+          return next;
+        });
+      }
+    },
+    [accessToken, gatewayUrl, handleDismissNotification, permissionDetails, selectedScopes],
+  );
 
   // Initial fetch + polling.
   useEffect(() => {
@@ -328,7 +570,7 @@ export default function NotificationCenter({
           minHeight: 34,
           alignItems: 'center',
           gap: 10,
-          padding: '0 10px',
+          padding: expanded ? '0 12px' : '0',
           borderRadius: 9,
           color: 'var(--fg-muted)',
           background: 'transparent',
@@ -336,6 +578,7 @@ export default function NotificationCenter({
           cursor: 'pointer',
           overflow: 'visible',
           fontWeight: 500,
+          justifyContent: expanded ? 'flex-start' : 'center',
         }}
       >
         <span className="nav-rail-icon" style={{ position: 'relative' }}>
@@ -385,7 +628,7 @@ export default function NotificationCenter({
                 width: 8,
                 height: 8,
                 borderRadius: 999,
-                background: 'var(--warning))',
+                background: 'var(--warning)',
                 boxShadow: '0 0 0 2px var(--bg-raised)',
                 animation: 'permissionPulse 1.5s ease-in-out infinite',
               }}
@@ -508,6 +751,7 @@ export default function NotificationCenter({
             ) : (
               notifications.map((notification) => {
                 const typeMeta = getNotificationTypeMeta(notification.eventType);
+                const permDetail = permissionDetails[notification.id];
                 return (
                   <div
                     key={notification.id}
@@ -579,7 +823,11 @@ export default function NotificationCenter({
                           fontSize: 12,
                           color: 'var(--fg-default)',
                           lineHeight: 1.5,
-                          display: '-webkit-box',
+                          display:
+                            notification.eventType === 'permission_asked' &&
+                            (permDetail || parsePermissionNotificationBody(notification.body))
+                              ? 'none'
+                              : '-webkit-box',
                           WebkitLineClamp: 2,
                           WebkitBoxOrient: 'vertical',
                           overflow: 'hidden',
@@ -587,6 +835,109 @@ export default function NotificationCenter({
                       >
                         {notification.body}
                       </span>
+                      {/* Three-level permission detail display */}
+                      {notification.eventType === 'permission_asked' &&
+                        (() => {
+                          const parsed = permDetail
+                            ? {
+                                toolName: permDetail.toolName,
+                                reason: permDetail.reason,
+                                previewAction: permDetail.previewAction ?? '',
+                                riskLevel: permDetail.riskLevel,
+                              }
+                            : (() => {
+                                const p = parsePermissionNotificationBody(notification.body);
+                                if (!p) return null;
+                                // Extract toolName from title "等待权限 · bash"
+                                const titleMatch = notification.title.match(/·\s*(.+)$/);
+                                return {
+                                  toolName: titleMatch?.[1]?.trim() ?? '',
+                                  reason: p.reason,
+                                  previewAction: p.previewAction,
+                                  riskLevel: p.riskLevel,
+                                };
+                              })();
+                          if (!parsed) return null;
+                          return (
+                            <div
+                              style={{
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: 2,
+                                marginTop: 2,
+                                fontSize: 10,
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                                <span
+                                  style={{
+                                    width: 5,
+                                    height: 5,
+                                    borderRadius: '50%',
+                                    background: 'var(--warning)',
+                                    flexShrink: 0,
+                                  }}
+                                />
+                                <span style={{ fontWeight: 700, color: 'var(--accent)' }}>
+                                  {parsed.toolName}
+                                </span>
+                                {parsed.riskLevel && (
+                                  <span
+                                    style={{
+                                      fontSize: 9,
+                                      padding: '0 4px',
+                                      borderRadius: 3,
+                                      background:
+                                        parsed.riskLevel === 'high'
+                                          ? 'color-mix(in srgb, var(--danger) 14%, transparent)'
+                                          : parsed.riskLevel === 'medium'
+                                            ? 'color-mix(in srgb, var(--warning) 14%, transparent)'
+                                            : 'color-mix(in srgb, var(--success) 14%, transparent)',
+                                      color:
+                                        parsed.riskLevel === 'high'
+                                          ? 'var(--danger)'
+                                          : parsed.riskLevel === 'medium'
+                                            ? 'var(--warning)'
+                                            : 'var(--success)',
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    {parsed.riskLevel}
+                                  </span>
+                                )}
+                              </div>
+                              {parsed.reason && (
+                                <div
+                                  style={{
+                                    marginLeft: 10,
+                                    color: 'var(--fg-default)',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                  title={parsed.reason}
+                                >
+                                  {parsed.reason}
+                                </div>
+                              )}
+                              {parsed.previewAction && (
+                                <div
+                                  style={{
+                                    marginLeft: 10,
+                                    color: 'var(--fg-muted)',
+                                    fontFamily: 'var(--font-mono, monospace)',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                  title={parsed.previewAction}
+                                >
+                                  {parsed.previewAction}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
                       <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
                         {new Date(notification.createdAt).toLocaleString('zh-CN', {
                           month: 'short',
@@ -594,28 +945,182 @@ export default function NotificationCenter({
                           hour: '2-digit',
                           minute: '2-digit',
                         })}
+                        {notification.sessionId && sessionTitles[notification.sessionId] && (
+                          <>
+                            {' · '}
+                            <span title={`来自会话: ${sessionTitles[notification.sessionId]}`}>
+                              {sessionTitles[notification.sessionId]}
+                            </span>
+                          </>
+                        )}
                       </span>
                       {notification.eventType === 'permission_asked' && notification.sessionId && (
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void handleOpenNotification(notification);
-                          }}
+                        <div
                           style={{
-                            fontSize: 10,
-                            fontWeight: 600,
-                            padding: '3px 8px',
-                            borderRadius: 5,
-                            border: '1px solid rgba(245,158,11,0.35)',
-                            background: 'rgba(245,158,11,0.1)',
-                            color: 'var(--warning))',
-                            cursor: 'pointer',
-                            justifySelf: 'start',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 5,
+                            marginTop: 2,
                           }}
                         >
-                          去审批
-                        </button>
+                          {/* Scope level selector (only when details are loaded and has multiple levels) */}
+                          {permDetail &&
+                            computeScopeLevels(permDetail.scope, permDetail.always).length > 1 && (
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  gap: 4,
+                                  alignItems: 'center',
+                                  flexWrap: 'wrap',
+                                }}
+                              >
+                                <span
+                                  style={{ fontSize: 9, color: 'var(--fg-muted)', flexShrink: 0 }}
+                                >
+                                  范围:
+                                </span>
+                                {computeScopeLevels(permDetail.scope, permDetail.always).map(
+                                  (level) => {
+                                    const isSelected =
+                                      (selectedScopes[notification.id] ?? 'prefix') === level.id;
+                                    return (
+                                      <button
+                                        key={level.id}
+                                        type="button"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          setSelectedScopes((prev) => ({
+                                            ...prev,
+                                            [notification.id]: level.id,
+                                          }));
+                                        }}
+                                        title={`${level.description}: ${level.pattern}`}
+                                        style={{
+                                          fontSize: 9,
+                                          fontWeight: isSelected ? 700 : 500,
+                                          padding: '2px 6px',
+                                          borderRadius: 4,
+                                          border: isSelected
+                                            ? '1px solid var(--accent)'
+                                            : '1px solid var(--border-subtle)',
+                                          background: isSelected
+                                            ? 'color-mix(in srgb, var(--accent) 12%, transparent)'
+                                            : 'transparent',
+                                          color: isSelected ? 'var(--accent)' : 'var(--fg-muted)',
+                                          cursor: 'pointer',
+                                          fontFamily: 'var(--font-mono, monospace)',
+                                          maxWidth: 120,
+                                          overflow: 'hidden',
+                                          textOverflow: 'ellipsis',
+                                          whiteSpace: 'nowrap',
+                                        }}
+                                      >
+                                        {level.label}
+                                      </button>
+                                    );
+                                  },
+                                )}
+                              </div>
+                            )}
+                          {/* Decision buttons */}
+                          <div
+                            style={{
+                              display: 'flex',
+                              gap: 6,
+                              alignItems: 'center',
+                              flexWrap: 'wrap',
+                            }}
+                          >
+                            <button
+                              type="button"
+                              disabled={replyingIds.has(notification.id)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void handleQuickPermissionReply(notification, 'session');
+                              }}
+                              title="仅在当前会话内记住这次授权选择"
+                              style={{
+                                fontSize: 10,
+                                fontWeight: 700,
+                                padding: '3px 8px',
+                                borderRadius: 999,
+                                border: 'none',
+                                background: 'color-mix(in srgb, var(--accent) 18%, transparent)',
+                                color: 'var(--accent)',
+                                cursor: replyingIds.has(notification.id) ? 'wait' : 'pointer',
+                                opacity: replyingIds.has(notification.id) ? 0.55 : 1,
+                              }}
+                            >
+                              本会话允许
+                            </button>
+                            <button
+                              type="button"
+                              disabled={replyingIds.has(notification.id)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void handleQuickPermissionReply(notification, 'once');
+                              }}
+                              title="只批准当前这一次工具调用"
+                              style={{
+                                fontSize: 10,
+                                fontWeight: 700,
+                                padding: '3px 8px',
+                                borderRadius: 999,
+                                border: 'none',
+                                background: 'color-mix(in srgb, var(--accent) 10%, transparent)',
+                                color: 'var(--accent)',
+                                cursor: replyingIds.has(notification.id) ? 'wait' : 'pointer',
+                                opacity: replyingIds.has(notification.id) ? 0.55 : 1,
+                              }}
+                            >
+                              允许一次
+                            </button>
+                            <button
+                              type="button"
+                              disabled={replyingIds.has(notification.id)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void handleQuickPermissionReply(notification, 'permanent');
+                              }}
+                              title="会记住后续同类请求，请谨慎选择"
+                              style={{
+                                fontSize: 10,
+                                fontWeight: 700,
+                                padding: '3px 8px',
+                                borderRadius: 999,
+                                border: 'none',
+                                background: 'color-mix(in srgb, var(--accent) 10%, transparent)',
+                                color: 'var(--accent)',
+                                cursor: replyingIds.has(notification.id) ? 'wait' : 'pointer',
+                                opacity: replyingIds.has(notification.id) ? 0.55 : 1,
+                              }}
+                            >
+                              永久允许
+                            </button>
+                            <button
+                              type="button"
+                              disabled={replyingIds.has(notification.id)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void handleQuickPermissionReply(notification, 'reject');
+                              }}
+                              title="阻止本次调用，工具不会继续执行"
+                              style={{
+                                fontSize: 10,
+                                fontWeight: 700,
+                                padding: '3px 8px',
+                                borderRadius: 999,
+                                border: 'none',
+                                background: 'color-mix(in srgb, var(--danger) 14%, transparent)',
+                                color: 'var(--danger)',
+                                cursor: replyingIds.has(notification.id) ? 'wait' : 'pointer',
+                                opacity: replyingIds.has(notification.id) ? 0.55 : 1,
+                              }}
+                            >
+                              拒绝
+                            </button>
+                          </div>
+                        </div>
                       )}
                     </div>
                     <button

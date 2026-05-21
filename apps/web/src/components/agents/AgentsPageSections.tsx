@@ -168,7 +168,7 @@ const PANEL: React.CSSProperties = {
 
 const HEADER_PANEL: React.CSSProperties = {
   ...PANEL,
-  background: 'linear-gradient(180deg, var(--bg-overlay), var(--bg-overlay))',
+  background: 'linear-gradient(180deg, var(--bg-overlay), var(--bg-overlay)',
 };
 
 const HERO_PANEL: React.CSSProperties = {
@@ -218,15 +218,15 @@ function Tag({
     },
     accent: {
       background: 'rgba(99, 102, 241, 0.16)',
-      color: 'var(--chart-5))',
+      color: 'var(--chart-5)',
     },
     warning: {
       background: 'rgba(251, 191, 36, 0.14)',
-      color: 'var(--warning))',
+      color: 'var(--warning)',
     },
     success: {
       background: 'rgba(16, 185, 129, 0.16)',
-      color: 'var(--success))',
+      color: 'var(--success)',
     },
   };
 
@@ -291,7 +291,7 @@ function primaryButtonStyle(disabled: boolean): React.CSSProperties {
     background: disabled
       ? 'rgba(99, 102, 241, 0.35)'
       : 'linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%)',
-    color: 'var(--fg-on-accent))',
+    color: 'var(--fg-on-accent)',
     padding: '11px 16px',
     fontSize: 13,
     fontWeight: 700,
@@ -319,7 +319,7 @@ function dangerButtonStyle(disabled = false): React.CSSProperties {
     border: '1px solid rgba(248, 113, 113, 0.35)',
     borderRadius: 14,
     background: disabled ? 'rgba(127, 29, 29, 0.06)' : 'rgba(127, 29, 29, 0.12)',
-    color: disabled ? 'rgba(252, 165, 165, 0.65)' : 'var(--danger))',
+    color: disabled ? 'rgba(252, 165, 165, 0.65)' : 'var(--danger)',
     padding: '11px 16px',
     fontSize: 13,
     fontWeight: 700,
@@ -334,7 +334,7 @@ function StatCard({ label, value }: { label: string; value: string }) {
       style={{
         ...PANEL,
         padding: '14px 16px',
-        background: 'linear-gradient(180deg, var(--bg-overlay), var(--bg-overlay))',
+        background: 'linear-gradient(180deg, var(--bg-overlay), var(--bg-overlay)',
       }}
     >
       <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginBottom: 8 }}>{label}</div>
@@ -671,7 +671,7 @@ function ToggleRow({
           width: 44,
           height: 24,
           borderRadius: 999,
-          background: checked ? 'var(--accent))' : 'rgba(148, 163, 184, 0.25)',
+          background: checked ? 'var(--accent)' : 'rgba(148, 163, 184, 0.25)',
           display: 'inline-flex',
           alignItems: 'center',
           padding: 3,
@@ -683,7 +683,7 @@ function ToggleRow({
             width: 18,
             height: 18,
             borderRadius: '50%',
-            background: 'var(--fg-on-accent))',
+            background: 'var(--fg-on-accent)',
             boxShadow: '0 2px 6px rgba(15, 23, 42, 0.28)',
           }}
         />
@@ -804,7 +804,7 @@ function AgentForm({
           borderRadius: 18,
           border: '1px solid color-mix(in oklab, var(--accent) 24%, var(--border-subtle) 76%)',
           background:
-            'linear-gradient(180deg, color-mix(in oklab, var(--accent-muted) 32%, var(--bg-overlay) 68%), var(--bg-overlay))',
+            'linear-gradient(180deg, color-mix(in oklab, var(--accent-muted) 32%, var(--bg-overlay) 68%), var(--bg-overlay)',
           padding: 14,
           display: 'grid',
           gap: 12,
@@ -1010,7 +1010,7 @@ export function AgentsEditorPanel({
             setState={setEditorState}
           />
           {saveMessage && (
-            <div style={{ color: 'var(--success))', fontSize: 13 }}>{saveMessage}</div>
+            <div style={{ color: 'var(--success)', fontSize: 13 }}>{saveMessage}</div>
           )}
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <button

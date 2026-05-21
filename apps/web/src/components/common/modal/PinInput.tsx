@@ -86,7 +86,7 @@ export function PinInput({
                       : 'var(--border-default)'
               }`,
               background: filled
-                ? 'color-mix(in srgb, var(--accent) 12%, var(--bg-overlay))'
+                ? 'color-mix(in srgb, var(--accent) 12%, var(--bg-overlay)'
                 : 'var(--bg-overlay)',
               display: 'flex',
               alignItems: 'center',

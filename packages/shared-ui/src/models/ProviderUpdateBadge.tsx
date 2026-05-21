@@ -40,7 +40,7 @@ export function ProviderUpdateBadge({
           width: 7,
           height: 7,
           borderRadius: '50%',
-          background: 'var(--accent))',
+          background: 'var(--accent)',
           flexShrink: 0,
         }}
       />
@@ -48,7 +48,7 @@ export function ProviderUpdateBadge({
         style={{
           fontSize: 12,
           fontWeight: 600,
-          color: 'var(--fg-default))',
+          color: 'var(--fg-default)',
         }}
       >
         {updatedCount} model{updatedCount !== 1 ? 's' : ''} updated
@@ -56,7 +56,7 @@ export function ProviderUpdateBadge({
       <span
         style={{
           fontSize: 11,
-          color: 'var(--fg-muted))',
+          color: 'var(--fg-muted)',
         }}
       >
         {formatRelativeTime(lastUpdated)}
@@ -68,7 +68,7 @@ export function ProviderUpdateBadge({
         style={{
           background: 'transparent',
           border: 'none',
-          color: 'var(--fg-muted))',
+          color: 'var(--fg-muted)',
           cursor: 'pointer',
           padding: '0 2px',
           fontSize: 12,

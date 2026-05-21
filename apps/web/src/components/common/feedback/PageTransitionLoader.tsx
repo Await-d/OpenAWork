@@ -34,7 +34,7 @@ const PageTransitionLoader = memo(function PageTransitionLoader({
         pointerEvents: isFullscreen ? undefined : 'none',
         background: isFullscreen
           ? 'radial-gradient(circle at 50% 18%, var(--accent-muted), transparent 36%), radial-gradient(circle at 50% 82%, color-mix(in oklch, var(--success) 18%, transparent), transparent 42%), var(--bg-base)'
-          : 'linear-gradient(180deg, var(--bg-base), var(--bg-base))',
+          : 'linear-gradient(180deg, var(--bg-base), var(--bg-base)',
         backdropFilter: isFullscreen ? undefined : 'blur(2px) saturate(1.05)',
         WebkitBackdropFilter: isFullscreen ? undefined : 'blur(2px) saturate(1.05)',
         zIndex: isFullscreen ? undefined : 4,
@@ -50,8 +50,7 @@ const PageTransitionLoader = memo(function PageTransitionLoader({
           background: 'var(--bg-overlay)',
           border: '1px solid var(--border-default)',
           boxShadow: 'var(--shadow-md), var(--shadow-lg), inset 0 1px 0 rgba(255, 255, 255, 0.04)',
-          backdropFilter: 'blur(20px) saturate(1.4)',
-          WebkitBackdropFilter: 'blur(20px) saturate(1.4)',
+
           animation: animate
             ? 'route-loader-panel-in 320ms cubic-bezier(0.16, 1, 0.3, 1) both'
             : undefined,
@@ -138,7 +137,7 @@ const PageTransitionLoader = memo(function PageTransitionLoader({
                 height: 12,
                 borderRadius: '50%',
                 background:
-                  'radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.85), var(--accent) 70%)',
+                  'radial-gradient(circle at 30% 30%, var(--bg-raised), var(--accent) 70%)',
                 animation: animate ? 'route-loader-pulse 1.6s ease-in-out infinite' : undefined,
               }}
             />
@@ -228,7 +227,7 @@ const PageTransitionLoader = memo(function PageTransitionLoader({
               animation: animate
                 ? 'route-loader-track 1.5s cubic-bezier(0.22, 1, 0.36, 1) infinite'
                 : undefined,
-              filter: 'drop-shadow(0 0 6px var(--accent-muted))',
+              filter: 'drop-shadow(0 0 6px var(--accent-muted)',
               opacity: animate ? undefined : 0.7,
             }}
           />

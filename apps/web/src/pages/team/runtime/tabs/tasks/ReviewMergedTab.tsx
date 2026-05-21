@@ -152,10 +152,10 @@ export function ReviewMergedTab({ selectedTeam, selectedTeamId }: ReviewMergedTa
                 borderRadius: '50%',
                 background:
                   review.overallVerdict === 'pass'
-                    ? 'var(--success))'
+                    ? 'var(--success)'
                     : review.overallVerdict === 'implementation-failure'
-                      ? 'var(--danger))'
-                      : 'var(--warning))',
+                      ? 'var(--danger)'
+                      : 'var(--warning)',
               }}
             />
           ) : null}
@@ -238,7 +238,7 @@ function ReportSegment({
     return <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>正在加载评审报告…</div>;
   }
   if (error) {
-    return <div style={{ fontSize: 12, color: 'var(--danger))' }}>评审报告拉取失败：{error}</div>;
+    return <div style={{ fontSize: 12, color: 'var(--danger)' }}>评审报告拉取失败：{error}</div>;
   }
   return (
     <ReviewReportView

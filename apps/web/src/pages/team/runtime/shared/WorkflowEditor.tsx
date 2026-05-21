@@ -14,7 +14,7 @@ const PANEL_STYLE: CSSProperties = {
   padding: 16,
   borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 86%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 86%, var(--bg-base)',
 };
 
 const BUTTON_PRIMARY: CSSProperties = {
@@ -25,7 +25,7 @@ const BUTTON_PRIMARY: CSSProperties = {
   padding: '0 14px',
   borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay))',
+  background: 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay)',
   color: 'var(--fg-strong)',
   cursor: 'pointer',
   fontSize: 12,
@@ -117,8 +117,8 @@ export function WorkflowSelector({ onSelect, selectedId }: WorkflowSelectorProps
                     ? '1px solid color-mix(in srgb, var(--accent) 50%, transparent)'
                     : '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
                   background: isSelected
-                    ? 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay))'
-                    : 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+                    ? 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay)'
+                    : 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
                   cursor: 'pointer',
                   textAlign: 'left',
                 }}
@@ -136,7 +136,7 @@ export function WorkflowSelector({ onSelect, selectedId }: WorkflowSelectorProps
                         fontSize: 10,
                         padding: '1px 5px',
                         borderRadius: 3,
-                        background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+                        background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
                         border:
                           '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
                       }}
@@ -241,7 +241,7 @@ export function WorkflowEditor({ workflowId }: WorkflowEditorProps) {
           padding: 10,
           borderRadius: 8,
           border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-          background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+          background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
           fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)',
           fontSize: 11,
           lineHeight: 1.5,
@@ -255,8 +255,8 @@ export function WorkflowEditor({ workflowId }: WorkflowEditorProps) {
         <button type="button" style={BUTTON_PRIMARY} onClick={() => void handleSave()}>
           保存
         </button>
-        {saved ? <span style={{ fontSize: 12, color: 'var(--success))' }}>已保存</span> : null}
-        {error ? <span style={{ fontSize: 12, color: 'var(--danger))' }}>{error}</span> : null}
+        {saved ? <span style={{ fontSize: 12, color: 'var(--success)' }}>已保存</span> : null}
+        {error ? <span style={{ fontSize: 12, color: 'var(--danger)' }}>{error}</span> : null}
       </div>
     </div>
   );
@@ -297,7 +297,7 @@ export function AdapterConfigPanel() {
               padding: '8px 12px',
               borderRadius: 8,
               border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
-              background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+              background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
             }}
           >
             <strong style={{ fontSize: 12, minWidth: 80 }}>{layer}</strong>

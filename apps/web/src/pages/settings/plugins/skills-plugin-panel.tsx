@@ -242,7 +242,7 @@ export function SkillsPluginPanel(): React.ReactElement {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, ...NOTICE }}>
           {busy && <span style={{ color: 'var(--fg-default)' }}>处理中…</span>}
           {statusMessage && <span style={{ color: 'var(--accent)' }}>{statusMessage}</span>}
-          {error && <span style={{ color: 'var(--danger))' }}>{error}</span>}
+          {error && <span style={{ color: 'var(--danger)' }}>{error}</span>}
         </div>
       )}
 

@@ -28,7 +28,7 @@ export interface ChannelManagerProps {
 
 const STATUS_COLOR: Record<ChannelStatus, string> = {
   connected: color.success,
-  disconnected: 'var(--fg-muted))',
+  disconnected: 'var(--fg-muted)',
   error: color.danger,
   pending: color.contrast,
 };
@@ -76,7 +76,7 @@ export function ChannelManager({
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         borderRadius: 10,
         overflow: 'hidden',
-        background: 'var(--bg-overlay))',
+        background: 'var(--bg-overlay)',
         ...style,
       }}
     >
@@ -94,7 +94,7 @@ export function ChannelManager({
           style={{
             fontSize: 11,
             fontWeight: 700,
-            color: 'var(--fg-muted))',
+            color: 'var(--fg-muted)',
             textTransform: 'uppercase',
             letterSpacing: 0.6,
           }}
@@ -110,7 +110,7 @@ export function ChannelManager({
                 title={`添加 ${type}`}
                 onClick={() => onAdd(type)}
                 style={{
-                  background: 'var(--accent))',
+                  background: 'var(--accent)',
                   color: color.fgOnAccent,
                   border: 'none',
                   borderRadius: 5,
@@ -133,7 +133,7 @@ export function ChannelManager({
             padding: '1.25rem',
             textAlign: 'center',
             fontSize: 12,
-            color: 'var(--fg-muted))',
+            color: 'var(--fg-muted)',
           }}
         >
           暂无已配置渠道
@@ -173,7 +173,7 @@ export function ChannelManager({
                 style={{
                   fontSize: 12,
                   fontWeight: 600,
-                  color: 'var(--fg-strong))',
+                  color: 'var(--fg-strong)',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
@@ -185,7 +185,7 @@ export function ChannelManager({
                 <div
                   style={{
                     fontSize: 11,
-                    color: 'var(--fg-muted))',
+                    color: 'var(--fg-muted)',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
@@ -223,7 +223,7 @@ export function ChannelManager({
                   onClick={() => onConnect(ch.id)}
                   style={{
                     background: color.successMuted,
-                    color: 'var(--success))',
+                    color: 'var(--success)',
                     border: 'none',
                     borderRadius: 5,
                     padding: '0.25rem 0.6rem',
@@ -260,7 +260,7 @@ export function ChannelManager({
                   title="删除渠道"
                   style={{
                     background: 'transparent',
-                    color: 'var(--fg-muted))',
+                    color: 'var(--fg-muted)',
                     border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
                     borderRadius: 5,
                     padding: '0.25rem 0.5rem',

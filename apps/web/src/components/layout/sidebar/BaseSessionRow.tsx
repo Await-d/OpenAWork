@@ -204,6 +204,11 @@ export function BaseSessionRow({
   };
 
   const showActions = hovered && !renaming && actions && actions.length > 0;
+  const hasActions = !!actions && actions.length > 0;
+  // 紧凑模式：meta 与标题视觉上紧贴，嵌入到标题所在的列里
+  const inlineMeta = density === 'compact';
+  const hasInlineMetaContent = inlineMeta && (!!meta || hasActions);
+  const hasOuterMetaContent = !inlineMeta && (!!meta || hasActions);
 
   return (
     <div
@@ -253,7 +258,7 @@ export function BaseSessionRow({
         outline: 'none',
         position: 'relative',
         background: active
-          ? 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay))'
+          ? 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay)'
           : hovered
             ? 'color-mix(in srgb, var(--fg-muted) 5%, transparent)'
             : 'transparent',
@@ -263,11 +268,11 @@ export function BaseSessionRow({
       aria-current={active ? 'true' : undefined}
       aria-label={ariaLabel ?? title}
     >
-      {/* Head row: icon + title (+ time when cozy) */}
+      {/* Head row: icon + title (+ meta inline in compact) + time */}
       <div
         style={{
           display: 'flex',
-          alignItems: density === 'compact' ? 'flex-start' : 'center',
+          alignItems: 'center',
           gap: tokens.headGap,
           minWidth: 0,
         }}
@@ -296,7 +301,7 @@ export function BaseSessionRow({
             minWidth: 0,
             display: 'flex',
             flexDirection: 'column',
-            gap: density === 'compact' ? 0 : 1,
+            gap: density === 'compact' ? 1 : 1,
           }}
         >
           {renaming ? (
@@ -335,19 +340,96 @@ export function BaseSessionRow({
               {title}
             </span>
           )}
+
+          {/* compact 模式下 meta 直接嵌入在标题正下方，与标题同 X 对齐；actions 不再覆盖 meta，而是浮到行右下角（日期正下方） */}
+          {hasInlineMetaContent && !renaming && meta && (
+            <div
+              style={{
+                position: 'relative',
+                minHeight: 14,
+                display: 'flex',
+                alignItems: 'center',
+              }}
+            >
+              <span
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                }}
+              >
+                {meta}
+              </span>
+            </div>
+          )}
         </div>
-        {/* cozy 模式下时间挂在标题右侧；compact 模式下时间随 meta 行靠右对齐 */}
-        {density === 'cozy' && timeLabel && (
-          <span style={TIME_STYLE} title={timeTitle}>
+        {/* 时间挂在标题行右侧，与标题第一行对齐（不随 meta 居中） */}
+        {timeLabel && (
+          <span style={{ ...TIME_STYLE, alignSelf: 'flex-start' }} title={timeTitle}>
             {timeLabel}
           </span>
         )}
       </div>
 
-      {/* Meta row: info / time (compact) / hover actions */}
-      {(meta || (actions && actions.length > 0) || (density === 'compact' && timeLabel)) && (
+      {/* compact 模式下，hover actions 浮到 meta 行右侧（日期下方），不挤占 meta、不遮挡日期 */}
+      {inlineMeta && hasActions && !renaming && (
+        <div
+          className="session-actions"
+          style={{
+            position: 'absolute',
+            right: parseInt(tokens.rowPadding.split(' ')[1] ?? '6', 10),
+            bottom: parseInt(tokens.rowPadding.split(' ')[0] ?? '2', 10),
+            height: 16,
+            display: 'flex',
+            justifyContent: 'flex-end',
+            gap: 2,
+            alignItems: 'center',
+            opacity: showActions ? 1 : 0,
+            transform: showActions ? 'translateY(0)' : 'translateY(2px)',
+            transition: 'opacity 120ms ease-out, transform 120ms ease-out',
+            pointerEvents: showActions ? 'auto' : 'none',
+            willChange: 'opacity, transform',
+            background: active
+              ? 'color-mix(in srgb, var(--accent) 12%, var(--bg-overlay))'
+              : 'var(--bg-overlay)',
+            boxShadow: '-6px 0 8px -4px var(--bg-overlay)',
+            borderRadius: 4,
+            padding: '0 1px',
+          }}
+        >
+          {actions!.map((action) => (
+            <button
+              key={action.key}
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                action.onClick();
+              }}
+              tabIndex={showActions ? 0 : -1}
+              disabled={action.disabled}
+              title={action.title}
+              style={{
+                ...ACTION_BTN_STYLE,
+                width: 18,
+                height: 16,
+                borderRadius: 4,
+                color: action.danger ? 'var(--danger)' : ACTION_BTN_STYLE.color,
+                opacity: action.disabled ? 0.45 : 1,
+                cursor: action.disabled ? 'wait' : 'pointer',
+              }}
+            >
+              {action.icon}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* 非 compact 模式时才使用外层 meta 行 */}
+      {hasOuterMetaContent && (
         <div style={{ ...META_ROW_BASE_STYLE, minHeight: tokens.metaMinHeight }}>
-          {(meta || (density === 'compact' && timeLabel)) && (
+          {meta && (
             <span
               style={{
                 position: hideMetaOnHover ? 'absolute' : 'relative',
@@ -362,17 +444,9 @@ export function BaseSessionRow({
               }}
             >
               {meta}
-              {density === 'compact' && timeLabel && (
-                <span
-                  style={{ ...TIME_STYLE, marginLeft: 'auto', lineHeight: '14px' }}
-                  title={timeTitle}
-                >
-                  {timeLabel}
-                </span>
-              )}
             </span>
           )}
-          {actions && actions.length > 0 && (
+          {hasActions && (
             <div
               className="session-actions"
               style={{
@@ -388,7 +462,7 @@ export function BaseSessionRow({
                 willChange: 'opacity',
               }}
             >
-              {actions.map((action) => (
+              {actions!.map((action) => (
                 <button
                   key={action.key}
                   type="button"
@@ -401,7 +475,7 @@ export function BaseSessionRow({
                   title={action.title}
                   style={{
                     ...ACTION_BTN_STYLE,
-                    color: action.danger ? 'var(--danger))' : ACTION_BTN_STYLE.color,
+                    color: action.danger ? 'var(--danger)' : ACTION_BTN_STYLE.color,
                     opacity: action.disabled ? 0.45 : 1,
                     cursor: action.disabled ? 'wait' : 'pointer',
                   }}

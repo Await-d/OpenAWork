@@ -60,10 +60,10 @@ export function WorkflowTemplateLibrary({
           style={{
             flex: 1,
             padding: '0.4rem 0.75rem',
-            background: 'var(--bg-overlay))',
+            background: 'var(--bg-overlay)',
             border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
             borderRadius: 6,
-            color: 'var(--fg-strong))',
+            color: 'var(--fg-strong)',
             fontSize: 12,
           }}
         />
@@ -73,7 +73,7 @@ export function WorkflowTemplateLibrary({
             onClick={() => setShowSave((v) => !v)}
             style={{
               padding: '0.4rem 0.75rem',
-              background: 'var(--accent))',
+              background: 'var(--accent)',
               border: 'none',
               borderRadius: 6,
               color: color.fgOnAccent,
@@ -90,7 +90,7 @@ export function WorkflowTemplateLibrary({
       {showSave && onSave && (
         <div
           style={{
-            background: 'var(--bg-overlay))',
+            background: 'var(--bg-overlay)',
             border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
             borderRadius: 8,
             padding: '0.75rem 1rem',
@@ -106,10 +106,10 @@ export function WorkflowTemplateLibrary({
             onChange={(e) => setSaveName(e.target.value)}
             style={{
               padding: '0.35rem 0.6rem',
-              background: 'var(--bg-base))',
+              background: 'var(--bg-base)',
               border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
               borderRadius: 5,
-              color: 'var(--fg-strong))',
+              color: 'var(--fg-strong)',
               fontSize: 12,
             }}
           />
@@ -120,10 +120,10 @@ export function WorkflowTemplateLibrary({
             rows={2}
             style={{
               padding: '0.35rem 0.6rem',
-              background: 'var(--bg-base))',
+              background: 'var(--bg-base)',
               border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
               borderRadius: 5,
-              color: 'var(--fg-strong))',
+              color: 'var(--fg-strong)',
               fontSize: 12,
               resize: 'vertical',
             }}
@@ -134,7 +134,7 @@ export function WorkflowTemplateLibrary({
               onClick={handleSave}
               style={{
                 padding: '4px 14px',
-                background: 'var(--accent))',
+                background: 'var(--accent)',
                 border: 'none',
                 borderRadius: 5,
                 color: color.fgOnAccent,
@@ -153,7 +153,7 @@ export function WorkflowTemplateLibrary({
                 background: 'none',
                 border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
                 borderRadius: 5,
-                color: 'var(--fg-muted))',
+                color: 'var(--fg-muted)',
                 fontSize: 12,
                 cursor: 'pointer',
               }}
@@ -177,7 +177,7 @@ export function WorkflowTemplateLibrary({
             type="button"
             onClick={() => onSelect?.(t.id)}
             style={{
-              background: 'var(--bg-overlay))',
+              background: 'var(--bg-overlay)',
               border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
               borderRadius: 8,
               padding: '0.75rem 1rem',
@@ -196,7 +196,7 @@ export function WorkflowTemplateLibrary({
                 gap: 4,
               }}
             >
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong))' }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
                 {t.name}
               </span>
               {t.isPublic && (
@@ -214,14 +214,14 @@ export function WorkflowTemplateLibrary({
                 </span>
               )}
             </div>
-            <span style={{ fontSize: 11, color: 'var(--fg-muted))', lineHeight: 1.4 }}>
+            <span style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.4 }}>
               {t.description}
             </span>
-            <span style={{ fontSize: 10, color: 'var(--fg-muted))' }}>{t.nodeCount} 个节点</span>
+            <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>{t.nodeCount} 个节点</span>
           </button>
         ))}
         {filtered.length === 0 && (
-          <div style={{ fontSize: 12, color: 'var(--fg-muted))', gridColumn: '1/-1' }}>
+          <div style={{ fontSize: 12, color: 'var(--fg-muted)', gridColumn: '1/-1' }}>
             未找到模板。
           </div>
         )}

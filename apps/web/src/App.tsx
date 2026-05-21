@@ -351,7 +351,7 @@ export default function App() {
     };
   }, [desktopRuntime, navigate]);
 
-  // sidecar 崩溃自动重试：Rust 端 emit 'gateway:crashed' 后这里按 1s/3s/5s
+  // sidecar 崩溃自动重试：Rust 端 emit 'gateway:crashed' 后这里按 2s/5s/10s
   // 退避调用 start_gateway 重启 3 次。3 次失败则保留 Failed 健康状态供托盘显示。
   // 用户可在「设置 → 连接与模型」手动触发或在「设置 → 桌面端」查看状态。
   // 重启时按当前 store 中的 webExposeLan 决定 host，避免 LAN 共享设置在崩溃恢复后丢失。
@@ -366,9 +366,10 @@ export default function App() {
         const fn = await listenTauriEvent<{ port: number }>('gateway:crashed', (event) => {
           const port = event.payload.port ?? desktopRuntimeWebPort;
           const host = desktopRuntimeWebExposeLan ? '0.0.0.0' : '127.0.0.1';
-          // 退避重试：1s / 3s / 5s。
+          // 退避重试：2s / 5s / 10s。Linux/AppImage 场景下 sidecar 需要解压
+          // gzip payload，首次启动可能需要数秒，因此退避间隔适当加大。
           void (async () => {
-            for (const delay of [1000, 3000, 5000]) {
+            for (const delay of [2000, 5000, 10000]) {
               await new Promise((r) => setTimeout(r, delay));
               try {
                 await tauriInvoke('start_gateway', { port, host });

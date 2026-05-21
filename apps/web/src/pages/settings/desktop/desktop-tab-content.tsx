@@ -126,7 +126,7 @@ const SECONDARY_BTN: React.CSSProperties = {
 
 const DANGER_BTN: React.CSSProperties = {
   ...SECONDARY_BTN,
-  color: 'var(--danger))',
+  color: 'var(--danger)',
   borderColor: 'color-mix(in srgb, var(--danger) 40%, transparent)',
 };
 
@@ -535,7 +535,7 @@ export function DesktopTabContent() {
     return (
       <section style={SS}>
         <h3 style={ST}>桌面端</h3>
-        <div style={{ fontSize: 12, color: 'var(--danger))' }}>
+        <div style={{ fontSize: 12, color: 'var(--danger)' }}>
           {error ?? '桌面端配置加载失败。请重启应用后重试。'}
         </div>
       </section>
@@ -587,7 +587,7 @@ export function DesktopTabContent() {
             borderRadius: 8,
             border: '1px solid color-mix(in srgb, var(--danger) 40%, transparent)',
             background: 'color-mix(in srgb, var(--danger) 8%, transparent)',
-            color: 'var(--danger))',
+            color: 'var(--danger)',
             fontSize: 12,
           }}
         >
@@ -615,7 +615,7 @@ export function DesktopTabContent() {
                   cursor: 'pointer',
                   borderColor: active ? 'var(--accent)' : 'var(--border-subtle)',
                   background: active
-                    ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))'
+                    ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay)'
                     : ROW_STYLE.background,
                   textAlign: 'left',
                 }}
@@ -726,7 +726,7 @@ export function DesktopTabContent() {
                 autostartMsg.type === 'success'
                   ? 'color-mix(in srgb, var(--success) 8%, transparent)'
                   : 'color-mix(in srgb, var(--danger) 8%, transparent)',
-              color: autostartMsg.type === 'success' ? 'var(--success))' : 'var(--danger))',
+              color: autostartMsg.type === 'success' ? 'var(--success)' : 'var(--danger)',
             }}
           >
             <span aria-hidden style={{ fontSize: 13, lineHeight: 1, flexShrink: 0 }}>
@@ -776,7 +776,7 @@ export function DesktopTabContent() {
             style={{
               padding: '0 4px',
               borderRadius: 4,
-              background: 'var(--surface-raised, var(--bg-overlay))',
+              background: 'var(--surface-raised, var(--bg-overlay)',
               fontFamily: 'ui-monospace, monospace',
             }}
           >
@@ -788,7 +788,7 @@ export function DesktopTabContent() {
             style={{
               padding: '0 4px',
               borderRadius: 4,
-              background: 'var(--surface-raised, var(--bg-overlay))',
+              background: 'var(--surface-raised, var(--bg-overlay)',
               fontFamily: 'ui-monospace, monospace',
             }}
           >
@@ -889,7 +889,7 @@ export function DesktopTabContent() {
                       borderRadius: 6,
                       border: `1px solid ${active ? 'var(--accent)' : 'var(--border-default)'}`,
                       background: active
-                        ? 'color-mix(in srgb, var(--accent) 15%, var(--bg-overlay))'
+                        ? 'color-mix(in srgb, var(--accent) 15%, var(--bg-overlay)'
                         : 'var(--bg-overlay)',
                       color: active ? 'var(--accent)' : 'var(--fg-default)',
                       padding: '4px 10px',
@@ -1038,7 +1038,7 @@ export function DesktopTabContent() {
             ) : null}
 
             {pinError ? (
-              <div role="alert" style={{ fontSize: 11, color: 'var(--danger))', lineHeight: 1.5 }}>
+              <div role="alert" style={{ fontSize: 11, color: 'var(--danger)', lineHeight: 1.5 }}>
                 {pinError}
               </div>
             ) : null}
@@ -1107,7 +1107,7 @@ export function DesktopTabContent() {
                   borderRadius: 8,
                   border: '1px solid color-mix(in srgb, var(--danger) 40%, transparent)',
                   background: 'color-mix(in srgb, var(--danger) 8%, transparent)',
-                  color: 'var(--danger))',
+                  color: 'var(--danger)',
                   fontSize: 12,
                 }}
               >

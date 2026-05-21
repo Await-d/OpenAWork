@@ -33,7 +33,7 @@ const PANEL_STYLE: CSSProperties = {
   gap: 0,
   minWidth: 0,
   minHeight: 0,
-  background: 'color-mix(in srgb, var(--bg-overlay) 86%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 86%, var(--bg-base)',
 };
 
 const PANEL_SECTION_STYLE: CSSProperties = {
@@ -73,7 +73,7 @@ const PANE_CONTROL_BUTTON_STYLE: CSSProperties = {
   padding: '0 10px',
   borderRadius: 999,
   border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
   fontSize: 11,
   fontWeight: 700,
   color: 'var(--fg-default)',
@@ -225,7 +225,7 @@ function RuntimeRailCounter({ label, value }: { label: string; value: string }) 
         minHeight: 34,
         borderRadius: 10,
         border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-        background: 'color-mix(in srgb, var(--bg-overlay) 74%, var(--bg-base))',
+        background: 'color-mix(in srgb, var(--bg-overlay) 74%, var(--bg-base)',
         color: 'var(--fg-muted)',
       }}
     >
@@ -282,7 +282,7 @@ function RuntimeActivityRail({
           }}
         >
           <div style={{ display: 'flex', gap: 4 }}>
-            {['var(--danger))', 'var(--warning))', 'var(--success))'].map((color) => (
+            {['var(--danger)', 'var(--warning)', 'var(--success)'].map((color) => (
               <span
                 key={color}
                 style={{
@@ -326,7 +326,7 @@ function RuntimeActivityRail({
                   ? 'color-mix(in srgb, var(--accent) 36%, transparent)'
                   : 'transparent',
                 background: isActive
-                  ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay))'
+                  ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay)'
                   : 'transparent',
               }}
             >
@@ -471,8 +471,8 @@ function RuntimeSidebar({
                       ? 'color-mix(in srgb, var(--accent) 38%, transparent)'
                       : 'color-mix(in srgb, var(--border-default) 72%, transparent)',
                     background: isActive
-                      ? 'color-mix(in srgb, var(--accent) 13%, var(--bg-overlay))'
-                      : 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base))',
+                      ? 'color-mix(in srgb, var(--accent) 13%, var(--bg-overlay)'
+                      : 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base)',
                     cursor: 'pointer',
                   }}
                 >
@@ -538,8 +538,8 @@ function RuntimeSidebar({
                         ? 'color-mix(in srgb, var(--accent) 40%, transparent)'
                         : 'color-mix(in srgb, var(--border-default) 72%, transparent)',
                       background: isSelected
-                        ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay))'
-                        : 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base))',
+                        ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay)'
+                        : 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base)',
                       cursor: 'pointer',
                     }}
                   >
@@ -706,8 +706,8 @@ function RuntimeMainPanel({
                     ? '1px solid color-mix(in srgb, var(--accent) 40%, transparent)'
                     : '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
                   background: isActive
-                    ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay))'
-                    : 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base))',
+                    ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay)'
+                    : 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base)',
                   color: isActive ? 'var(--fg-strong)' : 'var(--fg-muted)',
                   cursor: 'pointer',
                 }}
@@ -825,8 +825,8 @@ function RuntimeDetailRail({
                     ? '1px solid color-mix(in srgb, var(--accent) 40%, transparent)'
                     : '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
                   background: isActive
-                    ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay))'
-                    : 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base))',
+                    ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay)'
+                    : 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base)',
                   color: isActive ? 'var(--fg-strong)' : 'var(--fg-muted)',
                   cursor: 'pointer',
                   fontSize: 11,
@@ -998,7 +998,7 @@ function RuntimeStatusBar({
               height: 8,
               borderRadius: '50%',
               background:
-                (statusBarSummary?.activeCount ?? 0) > 0 ? 'var(--success))' : 'var(--fg-muted)',
+                (statusBarSummary?.activeCount ?? 0) > 0 ? 'var(--success)' : 'var(--fg-muted)',
               boxShadow:
                 (statusBarSummary?.activeCount ?? 0) > 0 ? '0 0 12px rgba(34,197,94,0.55)' : 'none',
             }}
@@ -1038,7 +1038,7 @@ function RuntimeStatusBar({
                 borderRadius: 8,
                 border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
                 background: active
-                  ? 'color-mix(in srgb, var(--accent) 18%, var(--bg-overlay))'
+                  ? 'color-mix(in srgb, var(--accent) 18%, var(--bg-overlay)'
                   : 'transparent',
                 color: active ? 'var(--accent)' : 'var(--fg-muted)',
                 cursor: 'pointer',
@@ -1063,15 +1063,14 @@ function RuntimeStatusBar({
             </span>
             <span style={{ color: 'var(--fg-muted)' }}>
               运行{' '}
-              <strong style={{ color: 'var(--success))' }}>{statusBarSummary.runningCount}</strong>
+              <strong style={{ color: 'var(--success)' }}>{statusBarSummary.runningCount}</strong>
             </span>
             <span style={{ color: 'var(--fg-muted)' }}>
               等待{' '}
-              <strong style={{ color: 'var(--warning))' }}>{statusBarSummary.waitingCount}</strong>
+              <strong style={{ color: 'var(--warning)' }}>{statusBarSummary.waitingCount}</strong>
             </span>
             <span style={{ color: 'var(--fg-muted)' }}>
-              异常{' '}
-              <strong style={{ color: 'var(--danger))' }}>{statusBarSummary.errorCount}</strong>
+              异常 <strong style={{ color: 'var(--danger)' }}>{statusBarSummary.errorCount}</strong>
             </span>
             <span style={{ color: 'var(--accent)' }}>{statusBarSummary.todayTokens}</span>
             <span style={{ color: 'var(--fg-muted)' }}>{statusBarSummary.runtimeLabel}</span>
@@ -1205,7 +1204,7 @@ export function TeamRuntimeShellFrame({
                   }}
                 >
                   <div aria-hidden="true" style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
-                    {['var(--danger))', 'var(--warning))', 'var(--success))'].map((color) => (
+                    {['var(--danger)', 'var(--warning)', 'var(--success)'].map((color) => (
                       <span
                         key={color}
                         style={{ width: 10, height: 10, borderRadius: '50%', background: color }}
@@ -1287,12 +1286,12 @@ export function TeamRuntimeShellFrame({
                     ...TEAM_RUNTIME_INSET_PANEL_STYLE,
                     borderColor:
                       feedback.tone === 'success'
-                        ? 'color-mix(in srgb, var(--success) 42%, var(--border-default))'
-                        : 'color-mix(in srgb, var(--danger) 42%, var(--border-default))',
+                        ? 'color-mix(in srgb, var(--success) 42%, var(--border-default)'
+                        : 'color-mix(in srgb, var(--danger) 42%, var(--border-default)',
                     background:
                       feedback.tone === 'success'
-                        ? 'color-mix(in srgb, var(--success) 10%, var(--bg-overlay))'
-                        : 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay))',
+                        ? 'color-mix(in srgb, var(--success) 10%, var(--bg-overlay)'
+                        : 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay)',
                     color: feedback.tone === 'success' ? 'var(--success)' : 'var(--danger)',
                   }}
                 >
@@ -1304,8 +1303,8 @@ export function TeamRuntimeShellFrame({
                 <div
                   style={{
                     ...TEAM_RUNTIME_INSET_PANEL_STYLE,
-                    borderColor: 'color-mix(in srgb, var(--danger) 42%, var(--border-default))',
-                    background: 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay))',
+                    borderColor: 'color-mix(in srgb, var(--danger) 42%, var(--border-default)',
+                    background: 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay)',
                     color: 'var(--danger)',
                   }}
                 >
@@ -1359,7 +1358,7 @@ export function TeamRuntimeShellFrame({
                         borderRadius: 999,
                         border:
                           '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-                        background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
+                        background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base)',
                         cursor: 'col-resize',
                         zIndex: 2,
                       }}
@@ -1423,7 +1422,7 @@ export function TeamRuntimeShellFrame({
                         borderRadius: 999,
                         border:
                           '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-                        background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
+                        background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base)',
                         cursor: 'col-resize',
                         zIndex: 2,
                       }}

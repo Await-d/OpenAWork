@@ -20,13 +20,13 @@ const AUTH_COLOR: Record<string, string> = {
 const cell: CSSProperties = {
   padding: '0.65rem 1rem',
   fontSize: 12,
-  color: 'var(--fg-default))',
+  color: 'var(--fg-default)',
   verticalAlign: 'middle',
 };
 
 const muted: CSSProperties = {
   ...cell,
-  color: 'var(--fg-muted))',
+  color: 'var(--fg-muted)',
 };
 
 export function SkillManagerDesktop({
@@ -38,7 +38,7 @@ export function SkillManagerDesktop({
   return (
     <div
       style={{
-        background: 'var(--bg-overlay))',
+        background: 'var(--bg-overlay)',
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         borderRadius: 12,
         overflow: 'hidden',
@@ -52,7 +52,7 @@ export function SkillManagerDesktop({
           borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         }}
       >
-        <h2 style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--fg-default))' }}>
+        <h2 style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--fg-default)' }}>
           技能 — 已安装
         </h2>
       </div>
@@ -62,7 +62,7 @@ export function SkillManagerDesktop({
           style={{
             padding: '2rem',
             textAlign: 'center',
-            color: 'var(--fg-muted))',
+            color: 'var(--fg-muted)',
             fontSize: 12,
           }}
         >
@@ -92,7 +92,7 @@ export function SkillManagerDesktop({
           </thead>
           <tbody>
             {skills.map((skill, idx) => {
-              const color = AUTH_COLOR[skill.authStatus] ?? 'var(--fg-muted))';
+              const color = AUTH_COLOR[skill.authStatus] ?? 'var(--fg-muted)';
               const isLast = idx === skills.length - 1;
               return (
                 <tr
@@ -106,7 +106,7 @@ export function SkillManagerDesktop({
                 >
                   <td style={cell}>
                     <div style={{ fontWeight: 600 }}>{skill.name}</div>
-                    <div style={{ fontSize: 11, color: 'var(--fg-muted))', marginTop: 1 }}>
+                    <div style={{ fontSize: 11, color: 'var(--fg-muted)', marginTop: 1 }}>
                       {skill.id}
                     </div>
                   </td>
@@ -153,14 +153,14 @@ export function SkillManagerDesktop({
                       <button
                         type="button"
                         onClick={() => onInstall(skill.id)}
-                        style={actionBtn('var(--accent))')}
+                        style={actionBtn('var(--accent)')}
                       >
                         安装
                       </button>
                       <button
                         type="button"
                         onClick={() => onUninstall(skill.id)}
-                        style={actionBtn('var(--fg-subtle))', clr.danger as string)}
+                        style={actionBtn('var(--fg-subtle)', clr.danger as string)}
                       >
                         移除
                       </button>

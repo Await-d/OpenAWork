@@ -16,7 +16,7 @@
   border: 1px solid color-mix(in oklch, var(--border-default) 70%, transparent);
   border-radius: 6px;
   padding: 6px 8px;
-  background: color-mix(in oklch, var(--bg-overlay) 85%, transparent);
+  background: var(--bg-overlay);
 }
 
 .tool-call-batch[data-tool-status='failed'] {
@@ -209,7 +209,7 @@
 .tool-call-approval-button {
   appearance: none;
   border: 1px solid color-mix(in oklch, var(--border-default) 82%, transparent);
-  background: color-mix(in oklch, var(--bg-overlay) 90%, transparent);
+  background: var(--bg-overlay);
   color: var(--fg-default);
   border-radius: 999px;
   padding: 4px 10px;

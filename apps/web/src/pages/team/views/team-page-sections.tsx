@@ -102,11 +102,11 @@ function parseTeamLeaderMessage(content: string): {
 export function getTaskStatusMeta(status: TeamTaskRecord['status']) {
   switch (status) {
     case 'in_progress':
-      return { label: '进行中', style: pillStyle('var(--chart-7))', 'rgba(14, 165, 233, 0.18)') };
+      return { label: '进行中', style: pillStyle('var(--chart-7)', 'rgba(14, 165, 233, 0.18)') };
     case 'completed':
-      return { label: '已完成', style: pillStyle('var(--success))', 'rgba(34, 197, 94, 0.18)') };
+      return { label: '已完成', style: pillStyle('var(--success)', 'rgba(34, 197, 94, 0.18)') };
     case 'failed':
-      return { label: '受阻', style: pillStyle('var(--complement))', 'rgba(244, 63, 94, 0.16)') };
+      return { label: '受阻', style: pillStyle('var(--complement)', 'rgba(244, 63, 94, 0.16)') };
     default:
       return { label: '待开始', style: pillStyle('#cbd5f5', 'rgba(148, 163, 184, 0.18)') };
   }
@@ -120,11 +120,11 @@ export function getMessageTypeMeta(type: TeamMessageRecord['type']) {
         style: pillStyle('var(--warning-muted)', 'rgba(245, 158, 11, 0.18)'),
       };
     case 'result':
-      return { label: '结果', style: pillStyle('var(--aux))', 'rgba(59, 130, 246, 0.16)') };
+      return { label: '结果', style: pillStyle('var(--aux)', 'rgba(59, 130, 246, 0.16)') };
     case 'error':
-      return { label: '阻塞', style: pillStyle('var(--complement))', 'rgba(244, 63, 94, 0.16)') };
+      return { label: '阻塞', style: pillStyle('var(--complement)', 'rgba(244, 63, 94, 0.16)') };
     default:
-      return { label: '同步', style: pillStyle('var(--chart-5))', 'rgba(139, 92, 246, 0.16)') };
+      return { label: '同步', style: pillStyle('var(--chart-5)', 'rgba(139, 92, 246, 0.16)') };
   }
 }
 
@@ -133,21 +133,21 @@ export function getAuditActionMeta(action: TeamAuditLogRecord['action']) {
     case 'shared_comment_created':
       return {
         label: '共享评论',
-        style: pillStyle('var(--complement))', 'rgba(236, 72, 153, 0.16)'),
+        style: pillStyle('var(--complement)', 'rgba(236, 72, 153, 0.16)'),
       };
     case 'shared_permission_replied':
-      return { label: '权限处理', style: pillStyle('var(--chart-5))', 'rgba(139, 92, 246, 0.18)') };
+      return { label: '权限处理', style: pillStyle('var(--chart-5)', 'rgba(139, 92, 246, 0.18)') };
     case 'shared_question_replied':
-      return { label: '问题处理', style: pillStyle('var(--warning))', 'rgba(245, 158, 11, 0.18)') };
+      return { label: '问题处理', style: pillStyle('var(--warning)', 'rgba(245, 158, 11, 0.18)') };
     case 'share_permission_updated':
-      return { label: '权限变更', style: pillStyle('var(--aux))', 'rgba(59, 130, 246, 0.16)') };
+      return { label: '权限变更', style: pillStyle('var(--aux)', 'rgba(59, 130, 246, 0.16)') };
     case 'share_deleted':
       return {
         label: '取消共享',
-        style: pillStyle('var(--complement))', 'rgba(244, 63, 94, 0.16)'),
+        style: pillStyle('var(--complement)', 'rgba(244, 63, 94, 0.16)'),
       };
     default:
-      return { label: '新增共享', style: pillStyle('var(--success))', 'rgba(34, 197, 94, 0.18)') };
+      return { label: '新增共享', style: pillStyle('var(--success)', 'rgba(34, 197, 94, 0.18)') };
   }
 }
 
@@ -941,7 +941,7 @@ export function TeamSharedSessionsPanel({
                         </div>
                         <span
                           style={pillStyle(
-                            entry.active ? 'var(--success))' : '#cbd5f5',
+                            entry.active ? 'var(--success)' : '#cbd5f5',
                             entry.active ? 'rgba(34, 197, 94, 0.18)' : 'rgba(148, 163, 184, 0.16)',
                           )}
                         >

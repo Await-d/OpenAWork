@@ -26,15 +26,15 @@ export interface PermissionRulesEditorProps {
 }
 
 const ACTION_META: Record<PermissionAction, { label: string; color: string; icon: string }> = {
-  allow: { label: '允许', color: 'var(--success))', icon: '✓' },
-  deny: { label: '禁止', color: 'var(--danger))', icon: '✕' },
-  ask: { label: '询问', color: 'var(--warning))', icon: '?' },
+  allow: { label: '允许', color: 'var(--success)', icon: '✓' },
+  deny: { label: '禁止', color: 'var(--danger)', icon: '✕' },
+  ask: { label: '询问', color: 'var(--warning)', icon: '?' },
 };
 
 const ACTIONS: PermissionAction[] = ['allow', 'deny', 'ask'];
 
 const CARD: React.CSSProperties = {
-  background: 'var(--bg-overlay))',
+  background: 'var(--bg-overlay)',
   border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
   borderRadius: 10,
   padding: '1rem',
@@ -46,8 +46,8 @@ const CARD: React.CSSProperties = {
 const INPUT: React.CSSProperties = {
   borderRadius: 6,
   border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-  background: 'var(--bg-base))',
-  color: 'var(--fg-default))',
+  background: 'var(--bg-base)',
+  color: 'var(--fg-default)',
   fontSize: 12,
   padding: '6px 8px',
   outline: 'none',
@@ -72,7 +72,7 @@ const GHOST_BTN: React.CSSProperties = {
   background: 'transparent',
   border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
   borderRadius: 6,
-  color: 'var(--fg-muted))',
+  color: 'var(--fg-muted)',
   fontSize: 11,
   padding: '4px 8px',
   cursor: 'pointer',
@@ -117,7 +117,7 @@ function ActionToggle({
               padding: '3px 8px',
               borderRadius: 4,
               background: isActive ? `${meta.color}20` : 'transparent',
-              color: isActive ? meta.color : 'var(--fg-muted))',
+              color: isActive ? meta.color : 'var(--fg-muted)',
               border: isActive ? `1px solid ${meta.color}40` : '1px solid transparent',
               cursor: 'pointer',
               letterSpacing: 0.3,
@@ -154,7 +154,7 @@ function PatternRuleRow({
         alignItems: 'center',
         gap: 6,
         padding: '4px 8px',
-        background: 'var(--bg-base))',
+        background: 'var(--bg-base)',
         borderRadius: 5,
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         marginLeft: 16,
@@ -229,7 +229,7 @@ function CategoryRow({
       style={{
         borderRadius: 8,
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-        background: 'var(--bg-base))',
+        background: 'var(--bg-base)',
         overflow: 'hidden',
       }}
     >
@@ -243,15 +243,15 @@ function CategoryRow({
       >
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-default))' }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-default)' }}>
               {category.label}
             </span>
             <span
               style={{
                 fontSize: 10,
                 fontFamily: 'monospace',
-                color: 'var(--fg-muted))',
-                background: 'var(--bg-overlay))',
+                color: 'var(--fg-muted)',
+                background: 'var(--bg-overlay)',
                 padding: '1px 5px',
                 borderRadius: 3,
               }}
@@ -264,7 +264,7 @@ function CategoryRow({
                 onClick={onGlobalReset}
                 style={{
                   fontSize: 9,
-                  color: 'var(--fg-muted))',
+                  color: 'var(--fg-muted)',
                   background: 'transparent',
                   border: 'none',
                   cursor: 'pointer',
@@ -276,7 +276,7 @@ function CategoryRow({
               </button>
             )}
           </div>
-          <div style={{ fontSize: 10, color: 'var(--fg-muted))', marginTop: 2 }}>
+          <div style={{ fontSize: 10, color: 'var(--fg-muted)', marginTop: 2 }}>
             {category.description}
           </div>
         </div>
@@ -295,8 +295,8 @@ function CategoryRow({
               ...GHOST_BTN,
               padding: '2px 6px',
               fontSize: 9,
-              borderColor: expanded ? 'var(--accent))' : undefined,
-              color: expanded ? 'var(--accent))' : undefined,
+              borderColor: expanded ? 'var(--accent)' : undefined,
+              color: expanded ? 'var(--accent)' : undefined,
             }}
           >
             {expanded ? '收起' : '模式'}
@@ -404,7 +404,7 @@ export function PermissionRulesEditor({
     <div style={{ ...CARD, ...style }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-default))' }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-default)' }}>
             权限配置
           </span>
           {overrideCount > 0 && (
@@ -414,7 +414,7 @@ export function PermissionRulesEditor({
                 fontWeight: 700,
                 padding: '1px 6px',
                 borderRadius: 8,
-                background: 'var(--accent))',
+                background: 'var(--accent)',
                 color: color.fgOnAccent,
               }}
             >
@@ -422,13 +422,13 @@ export function PermissionRulesEditor({
             </span>
           )}
         </div>
-        {saving && <span style={{ fontSize: 10, color: 'var(--fg-muted))' }}>保存中…</span>}
+        {saving && <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>保存中…</span>}
       </div>
 
       <div
         style={{
           fontSize: 11,
-          color: 'var(--fg-muted))',
+          color: 'var(--fg-muted)',
           lineHeight: 1.5,
           padding: '0 0 2px',
         }}

@@ -796,7 +796,7 @@ function MarkdownPreviewCodeBlock({
               style={{
                 marginTop: -64,
                 height: 64,
-                background: 'linear-gradient(transparent, var(--bg-overlay))',
+                background: 'linear-gradient(transparent, var(--bg-overlay)',
                 pointerEvents: 'none',
               }}
             />

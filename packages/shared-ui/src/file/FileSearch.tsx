@@ -89,7 +89,7 @@ export function FileSearch({ onSearch, onResultClick, style }: FileSearchProps) 
           placeholder={`搜索 ${MODE_LABELS[mode]}…`}
           style={{
             flex: 1,
-            background: 'var(--bg-base, var(--bg-overlay))',
+            background: 'var(--bg-base, var(--bg-overlay)',
             border: '1px solid var(--border-default)',
             borderRadius: 6,
             padding: '0.3rem 0.6rem',
@@ -127,7 +127,7 @@ export function FileSearch({ onSearch, onResultClick, style }: FileSearchProps) 
                 padding: '0.4rem 0.75rem',
                 background: 'transparent',
                 border: 'none',
-                borderTop: i > 0 ? '1px solid var(--border-default, var(--border-subtle))' : 'none',
+                borderTop: i > 0 ? '1px solid var(--border-default, var(--border-subtle)' : 'none',
                 cursor: 'pointer',
                 width: '100%',
                 textAlign: 'left',

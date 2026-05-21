@@ -20,9 +20,9 @@ export function ChatImageGenerationResultStrip({
         maxWidth: 740,
         margin: '0 auto 10px',
         borderRadius: 12,
-        border: '1px solid color-mix(in oklch, var(--accent) 24%, var(--border-subtle))',
+        border: '1px solid color-mix(in oklch, var(--accent) 24%, var(--border-subtle)',
         background:
-          'linear-gradient(180deg, color-mix(in oklch, var(--bg-overlay) 92%, var(--accent) 8%), var(--bg-overlay))',
+          'linear-gradient(180deg, color-mix(in oklch, var(--bg-overlay) 92%, var(--accent) 8%), var(--bg-overlay)',
         padding: '10px 12px',
         display: 'flex',
         alignItems: 'center',

@@ -442,7 +442,7 @@ function TemplateEditor({
                   key={agentId}
                   type="button"
                   onClick={() => toggleAgent(agentId)}
-                  style={pillButtonStyle(state.optionalAgentIds.has(agentId), 'var(--warning))')}
+                  style={pillButtonStyle(state.optionalAgentIds.has(agentId), 'var(--warning)')}
                 >
                   {label}
                 </button>
@@ -534,7 +534,7 @@ function TemplateEditor({
               padding: '7px 16px',
               borderRadius: 8,
               border: '1px solid color-mix(in oklch, var(--success) 48%, transparent)',
-              background: 'color-mix(in oklch, var(--success) 12%, var(--bg-base))',
+              background: 'color-mix(in oklch, var(--success) 12%, var(--bg-base)',
               color: 'var(--success)',
               fontSize: 12,
               fontWeight: 700,

@@ -15,7 +15,7 @@ const CARD_STYLE: CSSProperties = {
   padding: 12,
   borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 6%, var(--bg-overlay))',
+  background: 'color-mix(in srgb, var(--accent) 6%, var(--bg-overlay)',
   fontSize: 12,
 };
 
@@ -30,7 +30,7 @@ const STAT_CELL_STYLE: CSSProperties = {
   gap: 2,
   padding: '6px 10px',
   borderRadius: 8,
-  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
   border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
 };
 
@@ -60,7 +60,7 @@ export function BuddyCard() {
         </div>
         <div style={STAT_CELL_STYLE}>
           <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>运行中</span>
-          <strong style={{ fontSize: 16, color: 'var(--success))' }}>{runningTasks}</strong>
+          <strong style={{ fontSize: 16, color: 'var(--success)' }}>{runningTasks}</strong>
         </div>
       </div>
 
@@ -69,13 +69,11 @@ export function BuddyCard() {
           style={{
             ...STAT_CELL_STYLE,
             border: '1px solid color-mix(in srgb, var(--danger) 40%, transparent)',
-            background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay))',
+            background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay)',
           }}
         >
           <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>需要关注</span>
-          <strong style={{ fontSize: 14, color: 'var(--danger))' }}>
-            {failedTasks} 个任务失败
-          </strong>
+          <strong style={{ fontSize: 14, color: 'var(--danger)' }}>{failedTasks} 个任务失败</strong>
         </div>
       ) : null}
     </div>

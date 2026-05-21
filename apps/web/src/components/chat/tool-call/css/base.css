@@ -190,7 +190,7 @@
 }
 
 .tool-call-grouped-header:hover {
-  background: color-mix(in oklch, var(--bg-surface) 40%, transparent);
+  background: var(--bg-surface);
   border-radius: 3px;
 }
 
@@ -287,7 +287,7 @@
 }
 
 .tool-call-block-header:hover {
-  background: color-mix(in oklch, var(--bg-surface) 40%, transparent);
+  background: var(--bg-surface);
   border-radius: 3px;
 }
 

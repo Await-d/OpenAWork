@@ -62,7 +62,7 @@ export function ContextPanel({
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         borderRadius: 10,
         overflow: 'hidden',
-        background: 'var(--bg-overlay))',
+        background: 'var(--bg-overlay)',
         ...style,
       }}
     >
@@ -80,7 +80,7 @@ export function ContextPanel({
           style={{
             fontSize: 11,
             fontWeight: 700,
-            color: 'var(--fg-muted))',
+            color: 'var(--fg-muted)',
             textTransform: 'uppercase',
             letterSpacing: 0.6,
           }}
@@ -93,9 +93,9 @@ export function ContextPanel({
               style={{
                 fontSize: 10,
                 fontWeight: 600,
-                color: overLimit ? color.danger : 'var(--fg-muted))',
-                background: overLimit ? color.dangerMuted : 'var(--bg-overlay))',
-                border: `1px solid ${overLimit ? 'var(--danger))40' : 'var(--border-default, hsla(215, 18%, 50%, 0.12))'}`,
+                color: overLimit ? color.danger : 'var(--fg-muted)',
+                background: overLimit ? color.dangerMuted : 'var(--bg-overlay)',
+                border: `1px solid ${overLimit ? 'var(--danger-muted)' : 'var(--border-default, hsla(215, 18%, 50%, 0.12))'}`,
                 borderRadius: 4,
                 padding: '0.15rem 0.45rem',
               }}
@@ -110,7 +110,7 @@ export function ContextPanel({
               onClick={onClear}
               style={{
                 background: 'transparent',
-                color: 'var(--fg-muted))',
+                color: 'var(--fg-muted)',
                 border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
                 borderRadius: 5,
                 padding: '0.2rem 0.5rem',
@@ -172,7 +172,7 @@ export function ContextPanel({
             padding: '1.25rem',
             textAlign: 'center',
             fontSize: 12,
-            color: 'var(--fg-muted))',
+            color: 'var(--fg-muted)',
           }}
         >
           暂无上下文
@@ -215,7 +215,7 @@ export function ContextPanel({
                 style={{
                   fontSize: 12,
                   fontWeight: 600,
-                  color: 'var(--fg-strong))',
+                  color: 'var(--fg-strong)',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
@@ -227,7 +227,7 @@ export function ContextPanel({
                 <div
                   style={{
                     fontSize: 11,
-                    color: 'var(--fg-muted))',
+                    color: 'var(--fg-muted)',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
@@ -242,7 +242,7 @@ export function ContextPanel({
               <span
                 style={{
                   fontSize: 10,
-                  color: 'var(--fg-muted))',
+                  color: 'var(--fg-muted)',
                   flexShrink: 0,
                 }}
               >
@@ -262,7 +262,7 @@ export function ContextPanel({
                   onClick={() => onPin(item.id)}
                   style={{
                     background: 'transparent',
-                    color: item.pinned ? tokens.color.accent : 'var(--fg-muted))',
+                    color: item.pinned ? tokens.color.accent : 'var(--fg-muted)',
                     border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
                     borderRadius: 4,
                     padding: '0.2rem 0.4rem',
@@ -280,7 +280,7 @@ export function ContextPanel({
                   onClick={() => onRemove(item.id)}
                   style={{
                     background: 'transparent',
-                    color: 'var(--fg-muted))',
+                    color: 'var(--fg-muted)',
                     border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
                     borderRadius: 4,
                     padding: '0.2rem 0.4rem',

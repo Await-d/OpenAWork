@@ -519,6 +519,7 @@ export default function NavRail({
             gatewayUrl={gatewayUrl}
             pendingPermissionIndicator={pendingPermissionIndicator}
             labelStyleOverride={labelStyle}
+            expanded={expanded}
           />
         )}
 

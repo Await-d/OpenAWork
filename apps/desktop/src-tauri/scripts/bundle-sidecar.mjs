@@ -95,10 +95,13 @@ cache_root="\${XDG_CACHE_HOME:-\${HOME:-/tmp}/.cache}/openawork/sidecars"
 target="$cache_root/agent-gateway-$payload_hash"
 
 find_payload() {
+  # 1) 相对路径：deb/rpm 安装或直接运行场景。
   for candidate in \\
     "$script_dir/$payload_name" \\
     "$script_dir/binaries/$payload_name" \\
-    "$script_dir/../binaries/$payload_name"
+    "$script_dir/../binaries/$payload_name" \\
+    "$script_dir/../lib/OpenAWork/binaries/$payload_name" \\
+    "$script_dir/../lib/openAwork/binaries/$payload_name"
   do
     if [ -f "$candidate" ]; then
       printf '%s\\n' "$candidate"
@@ -106,14 +109,35 @@ find_payload() {
     fi
   done
 
+  # 2) AppImage 场景：Tauri 2.x 把 externalBin 放在 $APPDIR/usr/bin/，
+  #    resources 放在 $APPDIR/usr/lib/<productName>/。
+  #    用确定性路径避免 find 扫描整个 FUSE 挂载（极慢）。
   if [ -n "\${APPDIR:-}" ]; then
-    found=$(find "$APPDIR" -type f -name "$payload_name" -print -quit 2>/dev/null || true)
+    for candidate in \\
+      "$APPDIR/usr/bin/$payload_name" \\
+      "$APPDIR/usr/bin/binaries/$payload_name" \\
+      "$APPDIR/usr/lib/OpenAWork/binaries/$payload_name" \\
+      "$APPDIR/usr/lib/OpenAWork/$payload_name" \\
+      "$APPDIR/usr/lib/openAwork/binaries/$payload_name" \\
+      "$APPDIR/usr/lib/openawork/binaries/$payload_name" \\
+      "$APPDIR/usr/lib/binaries/$payload_name" \\
+      "$APPDIR/usr/share/OpenAWork/binaries/$payload_name" \\
+      "$APPDIR/usr/share/openAwork/binaries/$payload_name"
+    do
+      if [ -f "$candidate" ]; then
+        printf '%s\\n' "$candidate"
+        return 0
+      fi
+    done
+    # 确定性路径未命中时 fallback 到 find，限制深度减少 FUSE 开销。
+    found=$(find "$APPDIR" -maxdepth 4 -type f -name "$payload_name" -print -quit 2>/dev/null || true)
     if [ -n "$found" ]; then
       printf '%s\\n' "$found"
       return 0
     fi
   fi
 
+  # 3) 兜底：从 script_dir 向下搜索。
   found=$(find "$script_dir" -maxdepth 5 -type f -name "$payload_name" -print -quit 2>/dev/null || true)
   if [ -n "$found" ]; then
     printf '%s\\n' "$found"
@@ -133,7 +157,14 @@ if [ ! -x "$target" ]; then
   tmp="$target.tmp.$$"
   gzip -dc "$payload" > "$tmp"
   chmod 755 "$tmp"
-  mv "$tmp" "$target"
+  mv -f "$tmp" "$target" 2>/dev/null || {
+    # 并发启动：另一个进程可能已完成解压，mv 失败不致命。
+    rm -f "$tmp" 2>/dev/null || true
+    if [ ! -x "$target" ]; then
+      echo "Failed to stage agent-gateway binary to $target" >&2
+      exit 1
+    fi
+  }
 fi
 
 exec "$target" "$@"

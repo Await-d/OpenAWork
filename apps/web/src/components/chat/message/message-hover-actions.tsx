@@ -85,7 +85,7 @@ export function MessageHoverActions({
           title={isBookmarked ? '取消收藏' : '收藏此消息'}
           aria-label={isBookmarked ? '取消收藏' : '收藏'}
           style={{
-            color: isBookmarked ? 'var(--warning))' : undefined,
+            color: isBookmarked ? 'var(--warning)' : undefined,
           }}
         >
           {isBookmarked ? '⭐' : '☆'}

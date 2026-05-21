@@ -105,8 +105,6 @@ export function UnlockOverlay({ onUnlocked }: { onUnlocked: () => void }) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        backdropFilter: 'blur(8px)',
-        WebkitBackdropFilter: 'blur(8px)',
       }}
     >
       <div
@@ -131,7 +129,7 @@ export function UnlockOverlay({ onUnlocked }: { onUnlocked: () => void }) {
             width: 56,
             height: 56,
             borderRadius: '50%',
-            background: 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay))',
+            background: 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -166,7 +164,7 @@ export function UnlockOverlay({ onUnlocked }: { onUnlocked: () => void }) {
           ariaLabel="PIN 输入"
         />
 
-        <div style={{ minHeight: 18, fontSize: 12, color: 'var(--danger))' }}>
+        <div style={{ minHeight: 18, fontSize: 12, color: 'var(--danger)' }}>
           {lockoutSeconds > 0 ? (
             <span>已锁定，剩余 {formatLockoutHint(lockoutSeconds)}</span>
           ) : error ? (

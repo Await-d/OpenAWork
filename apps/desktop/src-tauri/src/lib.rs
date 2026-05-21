@@ -814,9 +814,20 @@ async fn spawn_gateway_sidecar(
     guard.port = Some(port);
     drop(guard);
 
-    spawn_health_probe(&app, port);
+    // 等待网关变为健康后再返回，让前端的 waitForGatewayHealth 能快速通过。
+    //
+    // Linux sidecar 是 shell wrapper + gzip 解压，AppImage 场景下 FUSE 读取 +
+    // 解压可能需要数秒；Windows/macOS 是直接可执行文件，通常 1-3s 内启动。
+    // 使用自适应探测间隔：前 10 次 200ms（快速响应已缓存/非 Linux 场景），
+    // 之后 500ms，总计最多约 27s。
+    //
+    // 同时通过 Arc<AtomicBool> 监听 sidecar 退出事件——若进程提前崩溃则
+    // 立即跳出健康等待，避免白等 27s。
+    let process_exited = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let process_exited_clone = process_exited.clone();
 
     let app_for_task = app.clone();
+    let gateway_state_for_task = gateway_state.clone();
     tauri::async_runtime::spawn(async move {
         while let Some(event) = rx.recv().await {
             match event {
@@ -825,33 +836,56 @@ async fn spawn_gateway_sidecar(
             }
         }
 
-        // 区分「主动退出」与「崩溃」：主动退出时 stop_gateway / shutdown_gateway_child 会把
-        // generation +1；崩溃时 generation 保持与 spawn 时一致。
+        // 标记进程已退出，让健康等待循环能提前跳出。
+        process_exited_clone.store(true, std::sync::atomic::Ordering::Release);
+
+        // 区分「主动退出」与「崩溃」：主动退出时 stop_gateway / shutdown_gateway_child
+        // 会把 generation +1；崩溃时 generation 保持与 spawn 时一致。
         let crashed = {
-            match gateway_state.lock() {
+            match gateway_state_for_task.lock() {
                 Ok(guard) => guard.generation == generation,
                 Err(_) => false,
             }
         };
 
-        clear_gateway_child(&gateway_state, generation);
+        clear_gateway_child(&gateway_state_for_task, generation);
 
         if !crashed {
-            // 主动退出 → 标记 Stopped；watchdog 也退出。
             update_gateway_health(&app_for_task, GatewayHealth::Stopped);
             return;
         }
 
-        // 崩溃 → 标记 Failed 并 emit `gateway:crashed`。
-        // 前端 App.tsx 的 listener 收到后会按指数退避重试 `start_gateway`，
-        // 这样 Rust 侧 watchdog 不必递归调用 spawn_gateway_sidecar（async send 问题），
-        // 同时也把"是否要弹 toast / 阻塞 UI"等用户交互交给 Web 层统一管理。
         update_gateway_health(&app_for_task, GatewayHealth::Failed);
         let _ = app_for_task.emit(
             "gateway:crashed",
             serde_json::json!({ "port": port }),
         );
     });
+
+    // 健康等待循环。
+    let startup_healthy = {
+        let mut healthy = false;
+        for attempt in 0..60 {
+            let interval = if attempt < 10 { 200 } else { 500 };
+            tokio::time::sleep(Duration::from_millis(interval)).await;
+
+            if process_exited.load(std::sync::atomic::Ordering::Acquire) {
+                break;
+            }
+
+            if is_local_gateway_healthy(port).await {
+                healthy = true;
+                break;
+            }
+        }
+        healthy
+    };
+
+    if startup_healthy {
+        update_gateway_health(&app, GatewayHealth::Healthy);
+    }
+
+    spawn_health_probe(&app, port);
 
     Ok(())
 }

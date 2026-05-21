@@ -271,15 +271,15 @@ function createMonitorTexture(data: {
     ctx.fillRect(0, 0, w, h);
 
     // Top bar
-    ctx.fillStyle = 'var(--aux))';
+    ctx.fillStyle = 'var(--aux)';
     ctx.fillRect(0, 0, w, 3);
 
     // Title line
     const sl = topSummary.status === '已暂停' ? 'PAUSED' : 'ACTIVE';
-    const slColor = topSummary.status === '已暂停' ? 'var(--warning))' : 'var(--success))';
+    const slColor = topSummary.status === '已暂停' ? 'var(--warning)' : 'var(--success)';
     ctx.font = 'bold 16px ui-monospace, Menlo, monospace';
     ctx.textBaseline = 'top';
-    ctx.fillStyle = 'var(--aux))';
+    ctx.fillStyle = 'var(--aux)';
     const titleText =
       topSummary.title.length > 18 ? topSummary.title.slice(0, 18) + '…' : topSummary.title;
     ctx.fillText(`■ ${titleText}`, 10, 10);
@@ -292,7 +292,7 @@ function createMonitorTexture(data: {
     ctx.fillRect(0, 32, w, 1);
 
     // ── Left panel: 核心指标 ────────────────────────────────────────
-    ctx.fillStyle = 'var(--aux))';
+    ctx.fillStyle = 'var(--aux)';
     ctx.fillRect(10, 40, 4, 14);
     ctx.font = 'bold 13px ui-monospace, Menlo, monospace';
     ctx.fillStyle = '#8ab4ff';
@@ -303,9 +303,9 @@ function createMonitorTexture(data: {
     const metricY = 60;
     for (let i = 0; i < metricCards.length && i < 3; i++) {
       const mc = metricCards[i]!;
-      ctx.fillStyle = 'var(--fg-muted))';
+      ctx.fillStyle = 'var(--fg-muted)';
       ctx.fillText(`${mc.label}`, 20, metricY + i * 16);
-      ctx.fillStyle = 'var(--fg-default))';
+      ctx.fillStyle = 'var(--fg-default)';
       ctx.font = 'bold 11px ui-monospace, Menlo, monospace';
       ctx.fillText(`${mc.value}`, 70, metricY + i * 16);
       ctx.font = '11px ui-monospace, Menlo, monospace';
@@ -315,7 +315,7 @@ function createMonitorTexture(data: {
     const barY = metricY + metricCards.length * 16 + 4;
     for (let i = 0; i < footerStats.length && i < 4; i++) {
       const fs = footerStats[i]!;
-      const barColors = ['var(--aux))', 'var(--success))', 'var(--warning))', 'var(--danger))'];
+      const barColors = ['var(--aux)', 'var(--success)', 'var(--warning)', 'var(--danger)'];
       const val = parseInt(fs.value, 10) || 0;
       const maxVal = Math.max(val, 1);
       const barW = Math.min(val * 8, 100);
@@ -323,37 +323,37 @@ function createMonitorTexture(data: {
       ctx.fillRect(20, barY + i * 14, 100, 8);
       ctx.fillStyle = barColors[i % barColors.length]!;
       ctx.fillRect(22, barY + i * 14 + 2, Math.max(2, barW), 4);
-      ctx.fillStyle = 'var(--fg-muted))';
+      ctx.fillStyle = 'var(--fg-muted)';
       ctx.font = '9px ui-monospace, Menlo, monospace';
       ctx.fillText(`${fs.label} ${fs.value}`, 128, barY + i * 14 - 2);
     }
 
     // ── Right panel: Agent 状态 ─────────────────────────────────────
     const rx = 210;
-    ctx.fillStyle = 'var(--success))';
+    ctx.fillStyle = 'var(--success)';
     ctx.fillRect(rx, 40, 4, 14);
     ctx.font = 'bold 13px ui-monospace, Menlo, monospace';
-    ctx.fillStyle = 'var(--success))';
+    ctx.fillStyle = 'var(--success)';
     ctx.fillText('Agent 状态', rx + 10, 41);
 
     // Agent status list (real data)
     ctx.font = '10px ui-monospace, Menlo, monospace';
     const statusColors: Record<string, string> = {
-      working: 'var(--aux))',
-      discussing: 'var(--warning))',
-      resting: 'var(--success))',
+      working: 'var(--aux)',
+      discussing: 'var(--warning)',
+      resting: 'var(--success)',
     };
     const statusLabels: Record<string, string> = { working: '💻', discussing: '💬', resting: '☕' };
     for (let i = 0; i < officeAgents.length && i < 6; i++) {
       const ag = officeAgents[i]!;
       const ay = 60 + i * 14;
-      ctx.fillStyle = statusColors[ag.status] ?? 'var(--fg-muted))';
+      ctx.fillStyle = statusColors[ag.status] ?? 'var(--fg-muted)';
       ctx.fillText(
         `${statusLabels[ag.status] ?? '?'} ${ag.label.length > 10 ? ag.label.slice(0, 10) : ag.label}`,
         rx + 10,
         ay,
       );
-      ctx.fillStyle = 'var(--fg-muted))';
+      ctx.fillStyle = 'var(--fg-muted)';
       ctx.fillText(ag.status, rx + 110, ay);
     }
 
@@ -379,16 +379,16 @@ function createMonitorTexture(data: {
     let ax = 10;
     for (const [type, count] of actEntries) {
       const label = actLabels[type] ?? type.slice(0, 4);
-      ctx.fillStyle = 'var(--aux))';
+      ctx.fillStyle = 'var(--aux)';
       ctx.fillText(`${label}`, ax, 140);
-      ctx.fillStyle = 'var(--fg-default))';
+      ctx.fillStyle = 'var(--fg-default)';
       ctx.fillText(`${count}`, ax + 36, 140);
       ax += 62;
       if (ax > 350) break;
     }
 
     // Mini sparkline (activity pulse)
-    ctx.strokeStyle = 'var(--aux))';
+    ctx.strokeStyle = 'var(--aux)';
     ctx.lineWidth = 1;
     ctx.beginPath();
     for (let i = 0; i < 20; i++) {
@@ -399,7 +399,7 @@ function createMonitorTexture(data: {
     }
     ctx.stroke();
 
-    ctx.strokeStyle = 'var(--success))';
+    ctx.strokeStyle = 'var(--success)';
     ctx.beginPath();
     for (let i = 0; i < 20; i++) {
       const sx = 200 + i * 8;
@@ -439,14 +439,14 @@ function createLabelTexture(
   const w = label.length * cw + 16;
   const h = ch + 10;
   return makeCanvasTexture(w, h, (ctx) => {
-    ctx.fillStyle = 'var(--bg-base))';
+    ctx.fillStyle = 'var(--bg-base)';
     ctx.globalAlpha = 0.6;
     ctx.fillRect(0, 0, w, h);
     ctx.globalAlpha = 1;
     ctx.fillStyle = isHovered ? '#252540' : '#1a1c2c';
     ctx.fillRect(2, 2, w - 4, h - 4);
     if (isSelected) {
-      ctx.fillStyle = 'var(--aux))';
+      ctx.fillStyle = 'var(--aux)';
       ctx.fillRect(0, 0, w, 2);
       ctx.fillRect(0, h - 2, w, 2);
       ctx.fillRect(0, 0, 2, h);
@@ -458,7 +458,7 @@ function createLabelTexture(
     }
     ctx.font = `${ch}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
     ctx.textBaseline = 'top';
-    ctx.fillStyle = isHovered ? 'var(--aux))' : 'var(--fg-on-accent))';
+    ctx.fillStyle = isHovered ? 'var(--aux)' : 'var(--fg-on-accent)';
     ctx.fillText(label, 8, 5);
   });
 }
@@ -573,12 +573,12 @@ function addWorkstation(scene: THREE.Scene, x: number, z: number, faceAngle: num
     ctx.fillRect(0, 0, 160, 100);
     ctx.font = '5px ui-monospace, monospace';
     const lineColors = [
-      'var(--aux))',
-      'var(--success))',
-      'var(--fg-muted))',
-      'var(--warning))',
-      'var(--aux))',
-      'var(--success))',
+      'var(--aux)',
+      'var(--success)',
+      'var(--fg-muted)',
+      'var(--warning)',
+      'var(--aux)',
+      'var(--success)',
     ];
     for (let row = 0; row < 12; row++) {
       const indent = row % 3 === 0 ? 8 : row % 3 === 1 ? 16 : 12;
@@ -586,15 +586,15 @@ function addWorkstation(scene: THREE.Scene, x: number, z: number, faceAngle: num
       ctx.fillStyle = lineColors[row % lineColors.length]!;
       ctx.fillRect(indent, 8 + row * 7, lineW, 4);
     }
-    ctx.fillStyle = 'var(--aux))';
+    ctx.fillStyle = 'var(--aux)';
     ctx.fillRect(60, 50, 1, 6);
     ctx.fillStyle = '#1e2d40';
     ctx.fillRect(0, 0, 160, 6);
-    ctx.fillStyle = 'var(--danger))';
+    ctx.fillStyle = 'var(--danger)';
     ctx.fillRect(4, 2, 3, 3);
-    ctx.fillStyle = 'var(--warning))';
+    ctx.fillStyle = 'var(--warning)';
     ctx.fillRect(10, 2, 3, 3);
-    ctx.fillStyle = 'var(--success))';
+    ctx.fillStyle = 'var(--success)';
     ctx.fillRect(16, 2, 3, 3);
   });
   const scrMat = new THREE.MeshStandardMaterial({
@@ -796,7 +796,7 @@ function buildOffice(
     m.position.set(x, 0.006, z);
     scene.add(m);
   }
-  addFloorLabel('☕ REST', -ROOM_W / 2 + restW / 2, ROOM_D / 2 - restD / 2, 'var(--success))');
+  addFloorLabel('☕ REST', -ROOM_W / 2 + restW / 2, ROOM_D / 2 - restD / 2, 'var(--success)');
   // DISCUSS and WORK labels added after their zone definitions below
 
   // ── Glass walls around rest area (bottom-left, x<0, z>0) ────────
@@ -980,7 +980,7 @@ function buildOffice(
   for (let i = -1.5; i <= 1.5; i++) {
     addChair(scene, tableX + i * 1.0, tableZ + 1.2, FACE.NEG_Z);
   }
-  addFloorLabel('💬 DISCUSS', tableX, tableZ - tableD / 2 - 0.3, 'var(--warning))');
+  addFloorLabel('💬 DISCUSS', tableX, tableZ - tableD / 2 - 0.3, 'var(--warning)');
 
   // ── Work Zone: Realistic desk rows (z < 0) ──────────────────────
   // Two rows of 6 workstations facing each other with a center aisle
@@ -995,7 +995,7 @@ function buildOffice(
   for (const wx of wsXs) {
     addWorkstation(scene, wx, aisleZ + rowOffset, FACE.NEG_Z);
   }
-  addFloorLabel('💻 WORK', 0, aisleZ + 0.5, 'var(--aux))');
+  addFloorLabel('💻 WORK', 0, aisleZ + 0.5, 'var(--aux)');
 
   // ── Large wall monitor (back wall) ──────────────────────────────
   const monW = 3.6,
@@ -1737,9 +1737,9 @@ export function OfficeThreeCanvas({
             ctx.fillStyle = bgColors[slideIdx]!;
             ctx.fillRect(0, 0, 320, 200);
             // Title bar
-            ctx.fillStyle = 'var(--aux))';
+            ctx.fillStyle = 'var(--aux)';
             ctx.fillRect(0, 0, 320, 36);
-            ctx.fillStyle = 'var(--fg-on-accent))';
+            ctx.fillStyle = 'var(--fg-on-accent)';
             ctx.font = 'bold 16px ui-monospace, sans-serif';
             const titles = [
               'Q3 Roadmap',
@@ -1753,12 +1753,12 @@ export function OfficeThreeCanvas({
             // Content lines
             ctx.font = '10px ui-monospace, monospace';
             const contentColors = [
-              'var(--success))',
-              'var(--warning))',
-              'var(--fg-muted))',
-              'var(--aux))',
-              'var(--danger))',
-              'var(--success))',
+              'var(--success)',
+              'var(--warning)',
+              'var(--fg-muted)',
+              'var(--aux)',
+              'var(--danger)',
+              'var(--success)',
             ];
             for (let row = 0; row < 8; row++) {
               const lineW = 40 + Math.floor(Math.random() * 200);
@@ -1769,14 +1769,14 @@ export function OfficeThreeCanvas({
             ctx.fillStyle = '#3a4a6a';
             ctx.fillRect(200, 50, 100, 80);
             // Chart bars
-            const barColors = ['var(--aux))', 'var(--success))', 'var(--warning))'];
+            const barColors = ['var(--aux)', 'var(--success)', 'var(--warning)'];
             for (let b = 0; b < 3; b++) {
               const bh = 20 + Math.floor(Math.random() * 50);
               ctx.fillStyle = barColors[b]!;
               ctx.fillRect(210 + b * 30, 130 - bh, 20, bh);
             }
             // Page indicator
-            ctx.fillStyle = 'var(--fg-muted))';
+            ctx.fillStyle = 'var(--fg-muted)';
             ctx.font = '8px ui-monospace, monospace';
             ctx.fillText(`${slideIdx + 1} / 6`, 270, 190);
           });
@@ -2224,10 +2224,10 @@ export function OfficeThreeCanvas({
                       ? '1px solid color-mix(in oklch, var(--success) 50%, transparent)'
                       : '1px solid color-mix(in oklch, var(--warning) 50%, transparent)',
                   background: isSessionPaused
-                    ? 'color-mix(in oklch, var(--bg-overlay) 88%, var(--bg-base))'
+                    ? 'color-mix(in oklch, var(--bg-overlay) 88%, var(--bg-base)'
                     : isPaused
-                      ? 'color-mix(in oklch, var(--success) 15%, var(--bg-base))'
-                      : 'color-mix(in oklch, var(--warning) 15%, var(--bg-base))',
+                      ? 'color-mix(in oklch, var(--success) 15%, var(--bg-base)'
+                      : 'color-mix(in oklch, var(--warning) 15%, var(--bg-base)',
                   color: isSessionPaused
                     ? 'var(--fg-muted)'
                     : isPaused

@@ -204,7 +204,7 @@ export function FilePreviewPane({
               width: '100%',
               border: '1px solid var(--border-subtle)',
               borderRadius: 14,
-              background: 'var(--fg-on-accent))',
+              background: 'var(--fg-on-accent)',
               display: 'block',
               boxShadow: '0 18px 36px var(--bg-base)',
             }}
@@ -706,7 +706,7 @@ function BinaryFileNotice({ path, kind }: { path: string; kind: FilePreviewKind 
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          background: 'color-mix(in oklch, var(--accent) 12%, var(--bg-overlay))',
+          background: 'color-mix(in oklch, var(--accent) 12%, var(--bg-overlay)',
           color: 'var(--accent)',
           fontSize: 24,
         }}

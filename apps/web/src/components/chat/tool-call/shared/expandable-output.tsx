@@ -60,7 +60,7 @@ export function ExpandableOutput({
               left: 0,
               right: 0,
               height: 48,
-              background: 'linear-gradient(transparent, var(--bg-overlay))',
+              background: 'linear-gradient(transparent, var(--bg-overlay)',
               pointerEvents: 'none',
             }}
           />

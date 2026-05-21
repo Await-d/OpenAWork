@@ -44,7 +44,7 @@ const BADGE: React.CSSProperties = {
 const CARD: React.CSSProperties = {
   borderRadius: 12,
   border: '1px solid var(--border-default)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 94%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 94%, var(--bg-base)',
   padding: '14px 16px',
   display: 'flex',
   flexDirection: 'column',
@@ -86,8 +86,8 @@ const STAT_LABEL: React.CSSProperties = {
 
 const ERROR_BOX: React.CSSProperties = {
   borderRadius: 10,
-  border: '1px solid color-mix(in srgb, var(--danger) 42%, var(--border-default))',
-  background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay))',
+  border: '1px solid color-mix(in srgb, var(--danger) 42%, var(--border-default)',
+  background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay)',
   padding: '14px 16px',
   display: 'flex',
   flexDirection: 'column',
@@ -97,7 +97,7 @@ const ERROR_BOX: React.CSSProperties = {
 const EMPTY_BOX: React.CSSProperties = {
   borderRadius: 10,
   border: '1px dashed var(--border-default)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 96%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 96%, var(--bg-base)',
   padding: '32px 20px',
   display: 'flex',
   flexDirection: 'column',
@@ -144,7 +144,7 @@ const BTN_GHOST: React.CSSProperties = {
 
 const BTN_DANGER: React.CSSProperties = {
   background: 'transparent',
-  border: '1px solid color-mix(in srgb, var(--danger) 40%, var(--border-default))',
+  border: '1px solid color-mix(in srgb, var(--danger) 40%, var(--border-default)',
   borderRadius: 8,
   padding: '4px 8px',
   fontSize: 10,
@@ -268,15 +268,15 @@ function ActionFeedbackBar({
 
   const colorMap = {
     pending: {
-      bg: 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay))',
+      bg: 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay)',
       color: 'var(--accent)',
     },
     success: {
-      bg: 'color-mix(in srgb, var(--success) 10%, var(--bg-overlay))',
+      bg: 'color-mix(in srgb, var(--success) 10%, var(--bg-overlay)',
       color: 'var(--success)',
     },
     error: {
-      bg: 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay))',
+      bg: 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay)',
       color: 'var(--danger)',
     },
     idle: {
@@ -454,7 +454,7 @@ function MemoryCard({
             color: 'var(--fg-default)',
             padding: '8px 10px',
             borderRadius: 8,
-            background: 'color-mix(in srgb, var(--bg-overlay) 75%, var(--bg-base))',
+            background: 'color-mix(in srgb, var(--bg-overlay) 75%, var(--bg-base)',
             border: '1px solid var(--border-subtle)',
             wordBreak: 'break-word',
           }}

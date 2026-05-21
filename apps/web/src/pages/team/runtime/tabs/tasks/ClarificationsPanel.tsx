@@ -32,7 +32,7 @@ const PANEL_STYLE: CSSProperties = {
   padding: '14px 16px',
   borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--warning) 36%, transparent)',
-  background: 'color-mix(in srgb, var(--warning) 6%, var(--bg-overlay))',
+  background: 'color-mix(in srgb, var(--warning) 6%, var(--bg-overlay)',
 };
 
 const HEADER_STYLE: CSSProperties = {
@@ -44,7 +44,7 @@ const HEADER_STYLE: CSSProperties = {
 const TITLE_STYLE: CSSProperties = {
   fontSize: 13,
   fontWeight: 800,
-  color: 'var(--warning))',
+  color: 'var(--warning)',
   letterSpacing: '0.005em',
 };
 
@@ -60,7 +60,7 @@ const CARD_STYLE: CSSProperties = {
   padding: '12px 14px',
   borderRadius: 10,
   border: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
-  background: 'var(--card-bg, var(--bg-overlay))',
+  background: 'var(--card-bg, var(--bg-overlay)',
 };
 
 const QUESTION_STYLE: CSSProperties = {
@@ -128,7 +128,7 @@ const ANSWERED_LIST_STYLE: CSSProperties = {
   gap: 6,
   padding: '8px 12px',
   borderRadius: 8,
-  background: 'color-mix(in srgb, var(--success) 5%, var(--bg-overlay))',
+  background: 'color-mix(in srgb, var(--success) 5%, var(--bg-overlay)',
   border: '1px solid color-mix(in srgb, var(--success) 30%, transparent)',
 };
 

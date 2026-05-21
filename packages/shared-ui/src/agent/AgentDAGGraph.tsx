@@ -104,16 +104,16 @@ function NodeShape({
         width={NODE_W}
         height={NODE_H}
         rx={8}
-        fill="var(--bg-base))"
+        fill="var(--bg-base)"
         stroke={STATUS_BORDER[n.status]}
         strokeWidth={isRunning ? 2 : 1}
         style={isRunning ? { animation: 'dag-pulse 1.2s ease-in-out infinite' } : undefined}
       />
       <rect x={p.x} y={p.y} width={4} height={NODE_H} rx={2} fill={NODE_COLOR[n.type]} />
-      <text x={p.x + 14} y={p.y + 20} fontSize={10} fontWeight={600} fill="var(--fg-muted))">
+      <text x={p.x + 14} y={p.y + 20} fontSize={10} fontWeight={600} fill="var(--fg-muted)">
         {n.type}
       </text>
-      <text x={p.x + 14} y={p.y + 36} fontSize={12} fontWeight={500} fill="var(--fg-strong))">
+      <text x={p.x + 14} y={p.y + 36} fontSize={12} fontWeight={500} fill="var(--fg-strong)">
         {n.label.length > 14 ? n.label.slice(0, 13) + '\u2026' : n.label}
       </text>
     </>
@@ -140,7 +140,7 @@ export function AgentDAGGraph({ nodes, edges, onNodeClick, style }: AgentDAGGrap
   return (
     <div
       style={{
-        background: 'var(--bg-overlay))',
+        background: 'var(--bg-overlay)',
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         borderRadius: 10,
         overflow: 'auto',
@@ -151,7 +151,7 @@ export function AgentDAGGraph({ nodes, edges, onNodeClick, style }: AgentDAGGrap
         <title>Agent DAG 图</title>
         <defs>
           <marker id="dag-arrow" markerWidth="8" markerHeight="8" refX="8" refY="3" orient="auto">
-            <path d="M0,0 L0,6 L8,3 z" fill="var(--fg-muted))" />
+            <path d="M0,0 L0,6 L8,3 z" fill="var(--fg-muted)" />
           </marker>
         </defs>
         {edges.map((e) => {
@@ -168,7 +168,7 @@ export function AgentDAGGraph({ nodes, edges, onNodeClick, style }: AgentDAGGrap
               <path
                 d={`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`}
                 fill="none"
-                stroke="var(--fg-muted))"
+                stroke="var(--fg-muted)"
                 strokeWidth={1.5}
                 markerEnd="url(#dag-arrow)"
               />
@@ -178,7 +178,7 @@ export function AgentDAGGraph({ nodes, edges, onNodeClick, style }: AgentDAGGrap
                   y={(y1 + y2) / 2 - 4}
                   textAnchor="middle"
                   fontSize={9}
-                  fill="var(--fg-muted))"
+                  fill="var(--fg-muted)"
                 >
                   {e.label}
                 </text>

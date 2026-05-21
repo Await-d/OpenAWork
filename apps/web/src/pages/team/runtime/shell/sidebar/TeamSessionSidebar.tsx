@@ -938,11 +938,11 @@ export function SessionSidebar({
                                       : 'var(--surface-3)',
                               color:
                                 badge.tone === 'accent'
-                                  ? 'var(--chart-5))'
+                                  ? 'var(--chart-5)'
                                   : badge.tone === 'success'
-                                    ? 'var(--success))'
+                                    ? 'var(--success)'
                                     : badge.tone === 'warning'
-                                      ? 'var(--warning))'
+                                      ? 'var(--warning)'
                                       : 'var(--fg-default)',
                               fontSize: 8,
                               fontWeight: 700,
@@ -999,7 +999,7 @@ export function SessionSidebar({
             justifyContent: 'space-between',
             alignItems: 'center',
             flexShrink: 0,
-            background: 'color-mix(in oklch, var(--bg-base) 95%, var(--bg-overlay))',
+            background: 'color-mix(in oklch, var(--bg-base) 95%, var(--bg-overlay)',
           }}
         >
           <span style={{ fontSize: 9, color: 'var(--fg-muted)' }}>

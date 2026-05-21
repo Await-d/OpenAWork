@@ -109,8 +109,8 @@ export function MultiSelectToolbar({
         alignItems: 'center',
         gap: 8,
         padding: '8px 14px',
-        background: 'color-mix(in oklch, var(--accent) 10%, var(--bg-overlay))',
-        borderBottom: '1px solid color-mix(in oklch, var(--accent) 35%, var(--border-default))',
+        background: 'color-mix(in oklch, var(--accent) 10%, var(--bg-overlay)',
+        borderBottom: '1px solid color-mix(in oklch, var(--accent) 35%, var(--border-default)',
         flexWrap: 'wrap',
       }}
     >
@@ -123,7 +123,7 @@ export function MultiSelectToolbar({
           width: 22,
           height: 22,
           borderRadius: 6,
-          background: 'color-mix(in oklch, var(--accent) 24%, var(--bg-overlay))',
+          background: 'color-mix(in oklch, var(--accent) 24%, var(--bg-overlay)',
           color: 'var(--accent)',
         }}
       >

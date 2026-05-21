@@ -72,7 +72,7 @@
 }
 
 .tool-call-copy-btn:hover {
-  background: color-mix(in oklch, var(--bg-surface) 60%, transparent);
+  background: var(--bg-surface);
   color: var(--text-1);
 }
 
@@ -104,7 +104,7 @@
 
 .tool-search-badge-empty {
   color: var(--fg-muted);
-  background: color-mix(in oklch, var(--bg-surface) 40%, transparent);
+  background: var(--bg-surface);
   border-color: color-mix(in oklch, var(--border-default) 40%, transparent);
 }
 
@@ -143,7 +143,7 @@
   line-height: 1.6;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color: var(--fg-default);
-  background: color-mix(in oklch, var(--bg-surface) 50%, transparent);
+  background: var(--bg-surface);
   border-radius: 4px;
   white-space: pre-wrap;
   word-break: break-word;
@@ -219,11 +219,11 @@
 .tool-call-block-search-item {
   padding: 4px 8px;
   border-radius: 4px;
-  background: color-mix(in oklch, var(--bg-surface) 30%, transparent);
+  background: var(--bg-surface);
 }
 
 .tool-call-block-search-item:hover {
-  background: color-mix(in oklch, var(--bg-surface) 50%, transparent);
+  background: var(--bg-surface);
 }
 
 .tool-call-block-search-title {
@@ -279,7 +279,7 @@
   font-size: 12px;
   line-height: 1.65;
   color: var(--fg-default);
-  background: color-mix(in oklch, var(--bg-surface) 30%, transparent);
+  background: var(--bg-surface);
   border-radius: 4px;
   max-height: 320px;
   overflow-y: auto;
@@ -319,14 +319,14 @@
   font-size: 11px;
   padding: 1px 4px;
   border-radius: 3px;
-  background: color-mix(in oklch, var(--bg-surface) 60%, transparent);
+  background: var(--bg-surface);
 }
 
 .tool-call-block-web-markdown pre {
   margin: 4px 0;
   padding: 6px 8px;
   border-radius: 4px;
-  background: color-mix(in oklch, var(--bg-surface) 50%, transparent);
+  background: var(--bg-surface);
   font-size: 11px;
   overflow-x: auto;
 }
@@ -337,7 +337,7 @@
   font-size: 12px;
   line-height: 1.65;
   color: var(--fg-default);
-  background: color-mix(in oklch, var(--bg-surface) 50%, transparent);
+  background: var(--bg-surface);
   border-radius: 4px;
   white-space: pre-wrap;
   word-break: break-word;

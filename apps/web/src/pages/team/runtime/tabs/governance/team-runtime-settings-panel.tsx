@@ -49,7 +49,7 @@ const PANEL_INSET_STYLE: CSSProperties = {
   padding: 12,
   borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base)',
 };
 
 const SECTION_HEADER_STYLE: CSSProperties = {
@@ -65,7 +65,7 @@ const TEXTAREA_STYLE: CSSProperties = {
   padding: 10,
   borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
   color: 'var(--fg-strong)',
   fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)',
   fontSize: 12,
@@ -81,7 +81,7 @@ const PRIMARY_BUTTON_STYLE: CSSProperties = {
   padding: '0 14px',
   borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay))',
+  background: 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay)',
   color: 'var(--fg-strong)',
   cursor: 'pointer',
   fontSize: 12,
@@ -96,7 +96,7 @@ const SECONDARY_BUTTON_STYLE: CSSProperties = {
   padding: '0 12px',
   borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
   color: 'var(--fg-default)',
   cursor: 'pointer',
   fontSize: 12,
@@ -112,13 +112,13 @@ const TINY_LABEL_STYLE: CSSProperties = {
 
 const ERROR_STYLE: CSSProperties = {
   fontSize: 12,
-  color: 'var(--danger))',
+  color: 'var(--danger)',
   paddingTop: 4,
 };
 
 const SUCCESS_STYLE: CSSProperties = {
   fontSize: 12,
-  color: 'var(--success))',
+  color: 'var(--success)',
   paddingTop: 4,
 };
 
@@ -290,7 +290,7 @@ function ForceApplySection({
           aria-label="ForceApply 确认对话框"
           style={{
             ...PANEL_INSET_STYLE,
-            background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
+            background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay)',
           }}
         >
           <strong style={{ fontSize: 12 }}>确认触发 ForceApply？</strong>
@@ -652,7 +652,7 @@ function PersonasSection({
               style={{
                 ...SECONDARY_BUTTON_STYLE,
                 background: active
-                  ? 'color-mix(in srgb, var(--accent) 18%, var(--bg-overlay))'
+                  ? 'color-mix(in srgb, var(--accent) 18%, var(--bg-overlay)'
                   : SECONDARY_BUTTON_STYLE.background,
                 borderColor: active
                   ? 'color-mix(in srgb, var(--accent) 50%, transparent)'
@@ -752,7 +752,7 @@ function InstructionStackPreviewSection({
               ...SECONDARY_BUTTON_STYLE,
               background:
                 layer === previewLayer
-                  ? 'color-mix(in srgb, var(--accent) 18%, var(--bg-overlay))'
+                  ? 'color-mix(in srgb, var(--accent) 18%, var(--bg-overlay)'
                   : SECONDARY_BUTTON_STYLE.background,
             }}
             onClick={() => setPreviewLayer(layer)}
@@ -843,7 +843,7 @@ export function MemoryWriteBadge({ field, threat, reason, sample }: MemoryWriteB
       style={{
         ...PANEL_INSET_STYLE,
         borderColor: 'color-mix(in srgb, var(--danger) 60%, transparent)',
-        background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay))',
+        background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay)',
       }}
     >
       <strong style={{ fontSize: 12 }}>记忆写入被安全扫描拒绝</strong>

@@ -37,13 +37,14 @@ interface DesktopWebAccessSectionProps {
   migrationInFlight: boolean;
 }
 
-type BusyKind = null | 'starting' | 'stopping' | 'switching' | 'port';
+type BusyKind = null | 'starting' | 'stopping' | 'switching' | 'port' | 'restarting';
 
 const BUSY_LABELS: Record<Exclude<BusyKind, null>, string> = {
   starting: '正在启动本地网关…',
   stopping: '正在停止本地网关…',
   switching: '正在切换暴露范围…',
   port: '正在应用新端口…',
+  restarting: '正在重启本地网关…',
 };
 
 interface AdminPasswordStatus {
@@ -412,6 +413,80 @@ export function DesktopWebAccessSection({
     webPort,
   ]);
 
+  /**
+   * 手动重启网关：stop → start，保持当前端口和暴露范围不变。
+   * 用于网关异常（健康检查失败、连接超时等）时让用户手动恢复。
+   *
+   * 失败处理：若 stop 成功但 start 失败，sidecar 实际已停止，必须把
+   * webAccessEnabled 同步置 false，避免 UI 显示「已启用」但实际 sidecar
+   * 已不可用的状态不一致。
+   *
+   * 安全：重启后重新检查 admin 密码状态。理论上密码持久化在 SQLite，
+   * 重启不会变化，但数据迁移、备份恢复等场景可能导致回退到默认值。
+   * 若在 LAN 模式下检测到默认密码，立即降级到 localhost 模式重启一次，
+   * 避免默认密码暴露到局域网。
+   */
+  const handleRestart = useCallback(async () => {
+    if (interactiveDisabled || !webAccessEnabled) return;
+    setError(null);
+    setBusy('restarting');
+
+    // 用闭包跟踪 sidecar 实际是否在跑：每次 stop 成功 → false，start 成功 → true。
+    // 失败时根据这个值决定是否要把 store 的 webAccessEnabled 同步置 false。
+    let sidecarRunning = true;
+    try {
+      try {
+        await stopDesktopGateway();
+        sidecarRunning = false;
+      } catch (err) {
+        logger.warn('stop_gateway failed during restart', err);
+        // stop 失败时不能确定 sidecar 是否仍在跑——保守认为仍在跑（true），
+        // 后续 start 会再覆盖一次状态。
+      }
+
+      await startSidecar(webPort, webExposeLan);
+      sidecarRunning = true;
+
+      // 重启后校验 admin 密码状态。若 LAN 模式下检测到默认密码，
+      // 立即降级到 localhost 模式重启避免暴露。
+      if (webExposeLan) {
+        const status = await refreshPasswordStatus();
+        if (status?.isDefault) {
+          logger.warn(
+            'default admin password detected after restart in LAN mode, falling back to localhost',
+          );
+          await stopDesktopGateway();
+          sidecarRunning = false;
+          await startSidecar(webPort, false);
+          sidecarRunning = true;
+          // 降级成功后用 setError 而不是抛错——sidecar 已经在安全模式下运行。
+          setError(
+            '检测到 admin 仍为默认密码，已自动降级到「仅本机」模式。请在上方修改密码后再重新启用 LAN 共享。',
+          );
+        }
+      }
+    } catch (err) {
+      // sidecar 不在跑时把 webAccessEnabled 同步置 false，避免 UI 与实际状态不一致。
+      // sidecar 仍在跑时保持 webAccessEnabled=true（虽然降级失败但旧 LAN 模式仍可用，
+      // 或第一次 stop 失败但旧 sidecar 仍在跑）。
+      if (!sidecarRunning) {
+        setWebAccess(false, webPort, webExposeLan);
+      }
+      setError(err instanceof Error ? err.message : '重启本地网关失败');
+      logger.error('restart gateway failed', err);
+    } finally {
+      setBusy(null);
+    }
+  }, [
+    interactiveDisabled,
+    refreshPasswordStatus,
+    setWebAccess,
+    startSidecar,
+    webAccessEnabled,
+    webExposeLan,
+    webPort,
+  ]);
+
   const urls = useMemo(() => {
     if (!webAccessEnabled) return [] as string[];
     const list = [`http://localhost:${webPort}`, `http://127.0.0.1:${webPort}`];
@@ -677,6 +752,17 @@ export function DesktopWebAccessSection({
           >
             {busy === 'port' ? '应用中…' : '应用'}
           </button>
+          {webAccessEnabled ? (
+            <button
+              type="button"
+              onClick={() => void handleRestart()}
+              disabled={interactiveDisabled}
+              style={{ ...SECONDARY_BTN, opacity: interactiveDisabled ? 0.4 : 1 }}
+              title="停止并重新启动本地网关（保持当前端口和暴露范围）"
+            >
+              {busy === 'restarting' ? '重启中…' : '重启网关'}
+            </button>
+          ) : null}
         </div>
         <div style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
           应用后会停止再启动 sidecar 并自动重新认证；范围 1024 – 65535。
@@ -782,7 +868,7 @@ function ExposeOption({
         cursor: disabled ? 'not-allowed' : 'pointer',
         borderColor: active ? 'var(--accent)' : 'var(--border-subtle)',
         background: active
-          ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))'
+          ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay)'
           : ROW_STYLE.background,
         textAlign: 'left',
         opacity: disabled ? 0.6 : 1,

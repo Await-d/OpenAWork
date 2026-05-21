@@ -29,12 +29,12 @@ export function AssistantEventRow({ payload }: { payload: AssistantEventPayload 
           : '错误';
   const statusColor =
     payload.status === 'running'
-      ? 'var(--aux))'
+      ? 'var(--aux)'
       : payload.status === 'success'
-        ? 'var(--success))'
+        ? 'var(--success)'
         : payload.status === 'paused'
-          ? 'var(--warning))'
-          : 'var(--danger))';
+          ? 'var(--warning)'
+          : 'var(--danger)';
   const statusBackground =
     payload.status === 'running'
       ? 'rgba(59, 130, 246, 0.16)'

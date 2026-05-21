@@ -241,7 +241,7 @@ export function WorkspaceWarpDialog({
             disabled={submitting}
           />
           {!willClear && !isAbsolute && draft.length > 0 && (
-            <span style={{ fontSize: 11, color: 'var(--danger))' }}>路径必须以 / 开头</span>
+            <span style={{ fontSize: 11, color: 'var(--danger)' }}>路径必须以 / 开头</span>
           )}
         </div>
 
@@ -305,10 +305,10 @@ export function WorkspaceWarpDialog({
             role="alert"
             style={{
               padding: '8px 10px',
-              border: '1px solid var(--danger))',
+              border: '1px solid var(--danger)',
               borderRadius: 6,
               background: 'color-mix(in srgb, var(--danger) 8%, transparent)',
-              color: 'var(--danger))',
+              color: 'var(--danger)',
               fontSize: 12,
               lineHeight: 1.6,
             }}

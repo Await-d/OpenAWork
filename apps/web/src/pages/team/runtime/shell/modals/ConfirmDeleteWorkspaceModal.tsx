@@ -82,7 +82,7 @@ const META_BOX_STYLE: CSSProperties = {
   padding: 12,
   borderRadius: 10,
   border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base)',
   fontSize: 12,
 };
 
@@ -133,7 +133,7 @@ const INPUT_STYLE: CSSProperties = {
   padding: '8px 10px',
   borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base)',
   color: 'var(--fg-strong)',
   fontSize: 13,
   fontFamily: 'inherit',
@@ -161,7 +161,7 @@ const DANGER_BUTTON_STYLE: CSSProperties = {
   borderRadius: 8,
   border: 'none',
   background: 'var(--error)',
-  color: 'var(--fg-on-accent))',
+  color: 'var(--fg-on-accent)',
   fontSize: 13,
   fontWeight: 700,
   cursor: 'pointer',
@@ -322,7 +322,7 @@ export function ConfirmDeleteWorkspaceModal({
         </div>
 
         <div style={NOTICE_STYLE}>
-          <strong style={{ color: 'var(--warning))' }}>注意：</strong>
+          <strong style={{ color: 'var(--warning)' }}>注意：</strong>
           删除工作区后，所有关联的会话历史记录将保留（不会级联删除），但无法继续在此工作区中创建新的协作运行。
         </div>
 

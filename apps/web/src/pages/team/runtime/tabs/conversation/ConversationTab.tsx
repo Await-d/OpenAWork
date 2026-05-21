@@ -585,7 +585,7 @@ export function ConversationTab({
                         display: 'grid',
                         placeItems: 'center',
                         background: `linear-gradient(135deg, ${chip.accent}, color-mix(in oklch, ${chip.accent} 70%, #000))`,
-                        color: 'var(--fg-on-accent))',
+                        color: 'var(--fg-on-accent)',
                         fontSize: 10,
                         fontWeight: 800,
                         flexShrink: 0,

@@ -37,7 +37,7 @@ function TeamCard({
         borderRadius: 10,
         border: isSelected ? '1px solid var(--accent)' : '1px solid var(--border-subtle)',
         background: isSelected
-          ? 'color-mix(in oklch, var(--accent) 6%, var(--bg-overlay))'
+          ? 'color-mix(in oklch, var(--accent) 6%, var(--bg-overlay)'
           : 'var(--bg-overlay)',
         display: 'grid',
         gap: 5,

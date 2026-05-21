@@ -127,7 +127,7 @@ function UnsupportedKindNotice({ kind, path }: { kind: OfficeKind; path: string 
           width: 64,
           height: 64,
           borderRadius: 16,
-          background: 'color-mix(in oklch, var(--accent) 14%, var(--bg-overlay))',
+          background: 'color-mix(in oklch, var(--accent) 14%, var(--bg-overlay)',
           color: 'var(--accent)',
           display: 'flex',
           alignItems: 'center',

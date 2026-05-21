@@ -8,7 +8,7 @@ import ChatPage from '../../web/src/pages/chat-page/ChatPage.js';
 import SessionsPage from '../../web/src/pages/sessions-page/SessionsPage.js';
 import SettingsPage from '../../web/src/pages/settings/SettingsPage.js';
 import Layout from './components/layout/Layout.js';
-import { UpdateProgressDialog } from './updater/UpdateProgressDialog.js';
+import { UpdateActionPanel } from './updater/UpdateActionPanel.js';
 import {
   authenticateDesktopGateway,
   DESKTOP_DEFAULT_EMAIL,
@@ -235,7 +235,7 @@ export default function App() {
   }, []);
 
   const updateDialog = showUpdateDialog ? (
-    <UpdateProgressDialog autoCheck onClose={() => setShowUpdateDialog(false)} />
+    <UpdateActionPanel onClose={() => setShowUpdateDialog(false)} />
   ) : null;
 
   if (!onboarded) {

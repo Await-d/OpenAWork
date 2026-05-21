@@ -41,32 +41,32 @@ function formatTaskStatus(status: string | undefined): string {
 function getTaskStatusStyle(status: string | undefined): React.CSSProperties {
   if (status === 'running') {
     return {
-      background: 'color-mix(in oklch, var(--accent) 16%, var(--bg-overlay))',
-      border: '1px solid color-mix(in oklch, var(--accent) 40%, var(--border-subtle))',
+      background: 'color-mix(in oklch, var(--accent) 16%, var(--bg-overlay)',
+      border: '1px solid color-mix(in oklch, var(--accent) 40%, var(--border-subtle)',
       color: 'var(--accent)',
     };
   }
 
   if (status === 'completed') {
     return {
-      background: 'color-mix(in srgb, var(--success) 12%, var(--bg-overlay))',
-      border: '1px solid color-mix(in srgb, var(--success) 34%, var(--border-subtle))',
-      color: 'var(--success))',
+      background: 'color-mix(in srgb, var(--success) 12%, var(--bg-overlay)',
+      border: '1px solid color-mix(in srgb, var(--success) 34%, var(--border-subtle)',
+      color: 'var(--success)',
     };
   }
 
   if (status === 'failed' || status === 'cancelled') {
     return {
-      background: 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay))',
-      border: '1px solid color-mix(in srgb, var(--danger) 30%, var(--border-subtle))',
-      color: 'var(--danger))',
+      background: 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay)',
+      border: '1px solid color-mix(in srgb, var(--danger) 30%, var(--border-subtle)',
+      color: 'var(--danger)',
     };
   }
 
   return {
-    background: 'color-mix(in srgb, var(--warning) 10%, var(--bg-overlay))',
-    border: '1px solid color-mix(in srgb, var(--warning) 28%, var(--border-subtle))',
-    color: 'var(--warning))',
+    background: 'color-mix(in srgb, var(--warning) 10%, var(--bg-overlay)',
+    border: '1px solid color-mix(in srgb, var(--warning) 28%, var(--border-subtle)',
+    color: 'var(--warning)',
   };
 }
 
@@ -680,10 +680,10 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
             <span style={{ color: 'var(--accent)' }}>运行中 {runningTaskCount}</span>
           )}
           {completedTaskCount > 0 && (
-            <span style={{ color: 'var(--success))' }}>完成 {completedTaskCount}</span>
+            <span style={{ color: 'var(--success)' }}>完成 {completedTaskCount}</span>
           )}
           {failedTaskCount > 0 && (
-            <span style={{ color: 'var(--danger))' }}>失败 {failedTaskCount}</span>
+            <span style={{ color: 'var(--danger)' }}>失败 {failedTaskCount}</span>
           )}
           <button
             type="button"
@@ -716,7 +716,7 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
             gap: 6,
             padding: '4px 4px',
             fontSize: 9,
-            color: 'var(--warning))',
+            color: 'var(--warning)',
           }}
         >
           <span
@@ -725,12 +725,12 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
               width: 5,
               height: 5,
               borderRadius: '50%',
-              background: 'var(--warning))',
+              background: 'var(--warning)',
               flexShrink: 0,
             }}
           />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--warning))' }}>
+            <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--warning)' }}>
               等待权限审批
             </div>
             {pendingPermissions
@@ -957,7 +957,7 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
               maxWidth: 'calc(100% - 28px)',
               borderRadius: 999,
               border: hasPendingFollowContent
-                ? '1px solid color-mix(in oklch, var(--accent) 55%, var(--border-default))'
+                ? '1px solid color-mix(in oklch, var(--accent) 55%, var(--border-default)'
                 : '1px solid var(--border-default)',
               background: hasPendingFollowContent
                 ? 'color-mix(in oklch, var(--bg-overlay) 82%, var(--accent) 18%)'
@@ -1018,7 +1018,7 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
             <div
               style={{
                 fontSize: 10,
-                color: 'var(--danger))',
+                color: 'var(--danger)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',

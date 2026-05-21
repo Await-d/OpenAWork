@@ -24,7 +24,7 @@ const HEADER_STYLE: CSSProperties = {
   gap: 8,
   padding: '8px 16px',
   borderBottom: '1px solid color-mix(in srgb, var(--border-default) 20%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 3%, var(--bg-overlay))',
+  background: 'color-mix(in srgb, var(--accent) 3%, var(--bg-overlay)',
   flexShrink: 0,
   flexWrap: 'wrap',
   minHeight: 36,
@@ -72,17 +72,17 @@ const HINT_STYLE: CSSProperties = {
 function colorForRole(role: string): string {
   switch (role) {
     case 'planner':
-      return 'var(--accent))';
+      return 'var(--accent)';
     case 'researcher':
-      return 'var(--chart-7))';
+      return 'var(--chart-7)';
     case 'executor':
-      return 'var(--success))';
+      return 'var(--success)';
     case 'reviewer':
-      return 'var(--warning))';
+      return 'var(--warning)';
     case 'leader':
-      return 'var(--chart-5))';
+      return 'var(--chart-5)';
     default:
-      return 'var(--fg-muted))';
+      return 'var(--fg-muted)';
   }
 }
 
@@ -122,13 +122,13 @@ function roleLayerLabel(roleLayer: string | null | undefined): { text: string; c
     case 'reception':
       return { text: '接待层 (b)', color: 'var(--accent)' };
     case 'pm1':
-      return { text: '规划层 (c)', color: 'var(--accent))' };
+      return { text: '规划层 (c)', color: 'var(--accent)' };
     case 'pm2':
-      return { text: '主管层 (d)', color: 'var(--chart-5))' };
+      return { text: '主管层 (d)', color: 'var(--chart-5)' };
     case 'executor':
-      return { text: '执行层 (e)', color: 'var(--success))' };
+      return { text: '执行层 (e)', color: 'var(--success)' };
     case 'reviewer':
-      return { text: '评审层 (g)', color: 'var(--warning))' };
+      return { text: '评审层 (g)', color: 'var(--warning)' };
     default:
       return { text: '团队会话', color: 'var(--fg-default)' };
   }

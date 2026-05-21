@@ -720,7 +720,7 @@ export default function ImagesPage() {
                 style={{
                   padding: '0.6rem 0.8rem',
                   borderRadius: 8,
-                  background: 'var(--danger-muted, var(--fg-strong))',
+                  background: 'var(--danger-muted, var(--fg-strong)',
                   color: 'var(--danger)',
                   fontSize: 12,
                 }}

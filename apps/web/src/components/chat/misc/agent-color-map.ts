@@ -7,19 +7,19 @@
  */
 
 export const BUILTIN_AGENT_COLORS: Record<string, string> = {
-  build: 'var(--fg-muted))',
-  plan: 'var(--chart-5))',
-  general: 'var(--aux))',
-  explore: 'var(--success))',
-  sisyphus: 'var(--chart-5))',
+  build: 'var(--fg-muted)',
+  plan: 'var(--chart-5)',
+  general: 'var(--aux)',
+  explore: 'var(--success)',
+  sisyphus: 'var(--chart-5)',
   hephaestus: 'var(--contrast)',
-  prometheus: 'var(--danger))',
-  oracle: 'var(--accent))',
-  zeus: 'var(--warning))',
-  librarian: 'var(--accent))',
-  metis: 'var(--aux))',
-  momus: 'var(--warning))',
-  atlas: 'var(--chart-7))',
+  prometheus: 'var(--danger)',
+  oracle: 'var(--accent)',
+  zeus: 'var(--warning)',
+  librarian: 'var(--accent)',
+  metis: 'var(--aux)',
+  momus: 'var(--warning)',
+  atlas: 'var(--chart-7)',
 };
 
 const FALLBACK_PALETTE = [

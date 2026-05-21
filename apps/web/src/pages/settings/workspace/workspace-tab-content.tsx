@@ -52,14 +52,14 @@ interface WorkspaceTabContentProps {
 const CARD: React.CSSProperties = {
   borderRadius: 8,
   border: '1px solid var(--border-default)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base)',
   padding: '8px 10px',
 };
 
 const DASHED_CARD: React.CSSProperties = {
   borderRadius: 8,
   border: '1px dashed var(--border-default)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 94%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 94%, var(--bg-base)',
   padding: '8px 10px',
 };
 
@@ -134,7 +134,7 @@ const DANGER_BTN: React.CSSProperties = {
 const FIELD_INPUT: React.CSSProperties = {
   borderRadius: 6,
   border: '1px solid var(--border-default)',
-  background: 'color-mix(in srgb, var(--bg-base) 70%, var(--bg-overlay))',
+  background: 'color-mix(in srgb, var(--bg-base) 70%, var(--bg-overlay)',
   color: 'var(--fg-strong)',
   fontSize: 10,
   padding: '5px 8px',
@@ -154,16 +154,16 @@ function eventPillStyle(event: string): React.CSSProperties {
   let color = 'var(--fg-default)';
   if (event.startsWith('push')) {
     bg = 'color-mix(in srgb, var(--aux) 18%, transparent)';
-    color = 'var(--aux))';
+    color = 'var(--aux)';
   } else if (event.startsWith('pull_request')) {
     bg = 'color-mix(in srgb, var(--chart-5) 18%, transparent)';
-    color = 'var(--chart-5))';
+    color = 'var(--chart-5)';
   } else if (event.startsWith('issues')) {
     bg = 'color-mix(in srgb, var(--warning) 18%, transparent)';
-    color = 'var(--warning))';
+    color = 'var(--warning)';
   } else if (event.startsWith('workflow_run')) {
     bg = 'color-mix(in srgb, var(--success) 18%, transparent)';
-    color = 'var(--success))';
+    color = 'var(--success)';
   }
   return {
     display: 'inline-flex',
@@ -408,7 +408,7 @@ export function WorkspaceTabContent({
                   gap: 3,
                   padding: '1px 6px',
                   borderRadius: 4,
-                  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+                  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
                   border: '1px solid var(--border-default)',
                   fontFamily: 'monospace',
                   fontSize: 10,
@@ -467,7 +467,7 @@ export function WorkspaceTabContent({
                     width: 8,
                     height: 8,
                     borderRadius: '50%',
-                    background: desktopAutomationEnabled ? 'var(--success))' : 'var(--fg-muted)',
+                    background: desktopAutomationEnabled ? 'var(--success)' : 'var(--fg-muted)',
                     flexShrink: 0,
                   }}
                 />
@@ -588,7 +588,7 @@ export function WorkspaceTabContent({
                         background: automationResult.ok
                           ? 'color-mix(in srgb, var(--success) 15%, transparent)'
                           : 'color-mix(in srgb, var(--danger) 15%, transparent)',
-                        color: automationResult.ok ? 'var(--success))' : 'var(--danger)',
+                        color: automationResult.ok ? 'var(--success)' : 'var(--danger)',
                         border: `1px solid ${automationResult.ok ? 'color-mix(in srgb, var(--success) 35%, transparent)' : 'color-mix(in srgb, var(--danger) 35%, transparent)'}`,
                       }}
                     >
@@ -669,7 +669,7 @@ export function WorkspaceTabContent({
                       gap: 4,
                       padding: '6px 8px',
                       borderRadius: 7,
-                      background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+                      background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
                       border: '1px solid var(--border-default)',
                     }}
                   >
@@ -707,7 +707,7 @@ export function WorkspaceTabContent({
                   padding: '10px 12px',
                   borderRadius: 8,
                   border: '1px dashed var(--border-default)',
-                  background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base))',
+                  background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base)',
                 }}
               >
                 <input
@@ -825,7 +825,7 @@ export function WorkspaceTabContent({
                   margin: '6px 0 0',
                   padding: '8px 10px',
                   borderRadius: 7,
-                  background: 'color-mix(in srgb, var(--bg-base) 80%, var(--bg-overlay))',
+                  background: 'color-mix(in srgb, var(--bg-base) 80%, var(--bg-overlay)',
                   border: '1px solid var(--border-default)',
                   fontSize: 10,
                   color: 'var(--fg-default)',
@@ -886,7 +886,7 @@ export function WorkspaceTabContent({
                 <span
                   style={{
                     fontSize: 10,
-                    color: 'var(--success))',
+                    color: 'var(--success)',
                     fontWeight: 600,
                     background: 'color-mix(in srgb, var(--success) 12%, transparent)',
                     borderRadius: 5,
@@ -901,7 +901,7 @@ export function WorkspaceTabContent({
                 <span
                   style={{
                     fontSize: 10,
-                    color: 'var(--warning))',
+                    color: 'var(--warning)',
                     fontWeight: 600,
                     background: 'color-mix(in srgb, var(--warning) 12%, transparent)',
                     borderRadius: 5,
@@ -918,7 +918,7 @@ export function WorkspaceTabContent({
               {versionInfo.checkedAt ? new Date(versionInfo.checkedAt).toLocaleString() : '—'}
             </p>
             {versionInfo.checkError && (
-              <p style={{ ...SECTION_SUB, margin: '4px 0 0', color: 'var(--danger))' }}>
+              <p style={{ ...SECTION_SUB, margin: '4px 0 0', color: 'var(--danger)' }}>
                 {versionInfo.checkError}
               </p>
             )}
@@ -931,7 +931,7 @@ export function WorkspaceTabContent({
                   background: 'color-mix(in srgb, var(--warning) 10%, transparent)',
                   border: '1px solid color-mix(in srgb, var(--warning) 30%, transparent)',
                   fontSize: 11,
-                  color: 'var(--warning))',
+                  color: 'var(--warning)',
                   fontWeight: 600,
                 }}
               >
@@ -974,7 +974,7 @@ export function WorkspaceTabContent({
                   padding: '6px 8px',
                   borderRadius: 7,
                   border: '1px solid var(--border-default)',
-                  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+                  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
                 }}
               >
                 <span
@@ -1012,7 +1012,7 @@ export function WorkspaceTabContent({
                       conn.status === 'connected'
                         ? 'color-mix(in srgb, var(--success) 18%, transparent)'
                         : 'color-mix(in srgb, var(--fg-muted) 15%, transparent)',
-                    color: conn.status === 'connected' ? 'var(--success))' : 'var(--fg-muted)',
+                    color: conn.status === 'connected' ? 'var(--success)' : 'var(--fg-muted)',
                   }}
                 >
                   {conn.status === 'connected' ? '已连接' : '断开'}
@@ -1040,7 +1040,7 @@ export function WorkspaceTabContent({
               padding: 10,
               borderRadius: 7,
               border: '1px dashed var(--border-default)',
-              background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base))',
+              background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base)',
               marginBottom: 8,
             }}
           >

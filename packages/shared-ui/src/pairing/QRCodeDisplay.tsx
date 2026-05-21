@@ -48,7 +48,7 @@ export function QRCodeDisplay({
         alignItems: 'center',
         gap: 12,
         padding: '1.5rem',
-        background: 'var(--bg-overlay))',
+        background: 'var(--bg-overlay)',
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         borderRadius: 12,
         ...style,
@@ -87,7 +87,7 @@ export function QRCodeDisplay({
       <div
         style={{
           fontSize: 12,
-          color: expired ? color.danger : urgent ? color.contrast : 'var(--fg-muted))',
+          color: expired ? color.danger : urgent ? color.contrast : 'var(--fg-muted)',
           fontVariantNumeric: 'tabular-nums',
         }}
       >
@@ -99,7 +99,7 @@ export function QRCodeDisplay({
           type="button"
           onClick={onRefresh}
           style={{
-            background: 'var(--accent))',
+            background: 'var(--accent)',
             color: color.fgOnAccent,
             border: 'none',
             borderRadius: 6,

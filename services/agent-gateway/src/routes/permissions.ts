@@ -45,6 +45,7 @@ const replyPermissionSchema = z.object({
   requestId: z.string().min(1),
   decision: permissionDecisionSchema,
   feedback: z.string().max(2000).optional(),
+  alwaysOverride: z.array(z.string().min(1)).optional(),
 });
 
 interface SessionOwnershipRow {
@@ -272,9 +273,16 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
         // Legacy rows without an `always_json` (column added later) fall back
         // to the original request scope so we never silently broaden a
         // permanent grant to "*" just because the column was missing.
+        // If the client provides `alwaysOverride`, use that instead — this
+        // allows the UI to let users pick a narrower or broader scope.
         const category = resolvePermissionCategory(permissionRequest.tool_name);
-        const parsedAlways = parsePermissionAlwaysJson(permissionRequest.always_json);
-        const alwaysPatterns = parsedAlways.length > 0 ? parsedAlways : [permissionRequest.scope];
+        const alwaysPatterns =
+          body.alwaysOverride && body.alwaysOverride.length > 0
+            ? body.alwaysOverride
+            : (() => {
+                const parsedAlways = parsePermissionAlwaysJson(permissionRequest.always_json);
+                return parsedAlways.length > 0 ? parsedAlways : [permissionRequest.scope];
+              })();
         for (const pattern of alwaysPatterns) {
           persistWorkspacePermanentPermission({
             sessionId,
@@ -294,9 +302,15 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
         // decision='session', scope=<pattern>) — `findApprovedPermission` then
         // matches via wildcard. Synthetic rows are keyed by (tool_name, scope)
         // to stay idempotent if the same broad approval is granted twice.
+        // If the client provides `alwaysOverride`, use that instead.
         const category = resolvePermissionCategory(permissionRequest.tool_name);
-        const parsedAlways = parsePermissionAlwaysJson(permissionRequest.always_json);
-        const alwaysPatterns = parsedAlways.length > 0 ? parsedAlways : [permissionRequest.scope];
+        const alwaysPatterns =
+          body.alwaysOverride && body.alwaysOverride.length > 0
+            ? body.alwaysOverride
+            : (() => {
+                const parsedAlways = parsePermissionAlwaysJson(permissionRequest.always_json);
+                return parsedAlways.length > 0 ? parsedAlways : [permissionRequest.scope];
+              })();
         for (const pattern of alwaysPatterns) {
           const existing = sqliteGet<{ id: string }>(
             `SELECT id FROM permission_requests

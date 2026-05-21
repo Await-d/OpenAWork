@@ -1,16 +1,16 @@
 import type { WorkflowTemplateScale } from '@openAwork/web-client';
 
 export const ROLE_COLOR_MAP: Record<string, string> = {
-  团队领导: 'var(--warning))',
-  领导: 'var(--warning))',
-  团队负责人: 'var(--warning))',
-  规划: 'var(--warning))',
-  研究员: 'var(--accent))',
-  研究: 'var(--accent))',
-  执行者: 'var(--aux))',
-  执行: 'var(--aux))',
-  批评者: 'var(--danger))',
-  审查: 'var(--danger))',
+  团队领导: 'var(--warning)',
+  领导: 'var(--warning)',
+  团队负责人: 'var(--warning)',
+  规划: 'var(--warning)',
+  研究员: 'var(--accent)',
+  研究: 'var(--accent)',
+  执行者: 'var(--aux)',
+  执行: 'var(--aux)',
+  批评者: 'var(--danger)',
+  审查: 'var(--danger)',
 };
 
 export const BUILTIN_AGENT_LABELS: Record<string, string> = {

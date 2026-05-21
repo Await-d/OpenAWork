@@ -87,7 +87,7 @@ export default function WorkflowsPage() {
                     feedback.tone === 'success'
                       ? 'rgba(34, 197, 94, 0.35)'
                       : 'rgba(244, 63, 94, 0.35)',
-                  color: feedback.tone === 'success' ? 'var(--success))' : 'var(--danger-muted)',
+                  color: feedback.tone === 'success' ? 'var(--success)' : 'var(--danger-muted)',
                 }}
               >
                 {feedback.message}

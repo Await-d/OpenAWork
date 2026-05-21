@@ -61,7 +61,7 @@ const CONTAINER_STYLE: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   minHeight: 0,
-  background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base)',
   overflow: 'hidden',
 };
 
@@ -124,7 +124,7 @@ const ITEM_STYLE: CSSProperties = {
 
 const ITEM_ACTIVE_STYLE: CSSProperties = {
   ...ITEM_STYLE,
-  background: 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay))',
+  background: 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay)',
   borderColor: 'color-mix(in srgb, var(--accent) 40%, transparent)',
   boxShadow: '0 1px 3px color-mix(in srgb, var(--accent) 20%, transparent)',
   color: 'var(--fg-strong)',
@@ -186,13 +186,13 @@ const QUICK_BTN_STYLE: CSSProperties = {
 function dotColor(status: AgentTeamsSidebarTeam['status']): string {
   switch (status) {
     case 'running':
-      return 'var(--success))';
+      return 'var(--success)';
     case 'paused':
-      return 'var(--warning))';
+      return 'var(--warning)';
     case 'completed':
       return 'var(--fg-muted)';
     case 'failed':
-      return 'var(--danger))';
+      return 'var(--danger)';
     default:
       return 'color-mix(in srgb, var(--border-default) 80%, transparent)';
   }
@@ -218,7 +218,7 @@ const SEARCH_INPUT_STYLE: CSSProperties = {
   padding: '6px 10px',
   borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-base) 60%, var(--bg-overlay))',
+  background: 'color-mix(in srgb, var(--bg-base) 60%, var(--bg-overlay)',
   color: 'var(--fg-strong)',
   fontSize: 12,
   outline: 'none',
@@ -232,7 +232,7 @@ const CREATE_BTN_STYLE: CSSProperties = {
   padding: '6px 12px',
   borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay))',
+  background: 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay)',
   color: 'var(--accent)',
   fontSize: 11,
   fontWeight: 700,
@@ -304,7 +304,7 @@ const WORKSPACE_SELECT_STYLE: CSSProperties = {
   padding: '7px 10px',
   borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-base) 60%, var(--bg-overlay))',
+  background: 'color-mix(in srgb, var(--bg-base) 60%, var(--bg-overlay)',
   color: 'var(--fg-strong)',
   fontSize: 12,
   outline: 'none',
@@ -570,7 +570,7 @@ export function TeamSessionListSidebar({
                       ? '2px solid color-mix(in srgb, var(--accent) 60%, transparent)'
                       : '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
                     background: active
-                      ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay))'
+                      ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay)'
                       : 'transparent',
                     cursor: 'pointer',
                     display: 'grid',
@@ -648,7 +648,7 @@ export function TeamSessionListSidebar({
                         width: 6,
                         height: 6,
                         borderRadius: '50%',
-                        background: 'var(--success))',
+                        background: 'var(--success)',
                         boxShadow: '0 0 0 2px color-mix(in srgb, var(--success) 30%, transparent)',
                       }}
                     />
@@ -853,7 +853,7 @@ export function TeamSessionListSidebar({
                 borderRadius: 12,
                 display: 'grid',
                 placeItems: 'center',
-                background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
+                background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay)',
                 fontSize: 24,
               }}
             >
@@ -1000,7 +1000,7 @@ export function TeamSessionListSidebar({
                 }}
                 className="team-menu-item"
                 data-tone="danger"
-                style={{ ...CONTEXT_MENU_ITEM_STYLE, color: 'var(--danger))' }}
+                style={{ ...CONTEXT_MENU_ITEM_STYLE, color: 'var(--danger)' }}
                 onClick={handleDeleteClick}
               >
                 🔴 删除会话
@@ -1040,8 +1040,8 @@ export function TeamSessionListSidebar({
                   padding: '6px 14px',
                   borderRadius: 8,
                   border: 'none',
-                  background: 'var(--danger))',
-                  color: 'var(--fg-on-accent))',
+                  background: 'var(--danger)',
+                  color: 'var(--fg-on-accent)',
                   fontSize: 12,
                   fontWeight: 700,
                   cursor: 'pointer',

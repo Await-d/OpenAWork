@@ -20,7 +20,7 @@ export interface PermissionHistoryProps {
 }
 
 const DECISION_COLORS: Record<PermissionDecision, string> = {
-  once: 'var(--accent))',
+  once: 'var(--accent)',
   session: color.accent,
   permanent: color.aux,
   reject: color.danger,
@@ -69,7 +69,7 @@ export function PermissionHistory({ decisions, onExport, style }: PermissionHist
   return (
     <div
       style={{
-        background: 'var(--bg-overlay))',
+        background: 'var(--bg-overlay)',
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         borderRadius: 10,
         padding: '1rem',
@@ -80,16 +80,16 @@ export function PermissionHistory({ decisions, onExport, style }: PermissionHist
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-default))' }}>权限历史</span>
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-default)' }}>权限历史</span>
         <button
           type="button"
           onClick={onExport}
           style={{
-            background: 'var(--bg-base))',
+            background: 'var(--bg-base)',
             border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
             borderRadius: 6,
             padding: '0.35rem 0.75rem',
-            color: 'var(--fg-muted))',
+            color: 'var(--fg-muted)',
             fontSize: 12,
             cursor: 'pointer',
             fontWeight: 600,
@@ -100,7 +100,7 @@ export function PermissionHistory({ decisions, onExport, style }: PermissionHist
       </div>
 
       {decisions.length === 0 ? (
-        <div style={{ fontSize: 12, color: 'var(--fg-muted))', padding: '0.5rem 0' }}>
+        <div style={{ fontSize: 12, color: 'var(--fg-muted)', padding: '0.5rem 0' }}>
           暂无权限决策记录。
         </div>
       ) : (
@@ -113,7 +113,7 @@ export function PermissionHistory({ decisions, onExport, style }: PermissionHist
                 alignItems: 'center',
                 gap: 8,
                 padding: '0.5rem 0.6rem',
-                background: 'var(--bg-base))',
+                background: 'var(--bg-base)',
                 borderRadius: 6,
                 border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
                 flexWrap: 'wrap' as const,
@@ -123,7 +123,7 @@ export function PermissionHistory({ decisions, onExport, style }: PermissionHist
                 style={{
                   fontSize: 12,
                   fontWeight: 600,
-                  color: 'var(--fg-default))',
+                  color: 'var(--fg-default)',
                   minWidth: 80,
                   flex: '0 0 auto',
                 }}
@@ -133,7 +133,7 @@ export function PermissionHistory({ decisions, onExport, style }: PermissionHist
               <span
                 style={{
                   fontSize: 11,
-                  color: 'var(--fg-muted))',
+                  color: 'var(--fg-muted)',
                   fontFamily: 'monospace',
                   flex: 1,
                   overflow: 'hidden',
@@ -145,10 +145,10 @@ export function PermissionHistory({ decisions, onExport, style }: PermissionHist
               </span>
               {badge(DECISION_COLORS[rec.decision], DECISION_LABELS[rec.decision])}
               {badge(
-                RISK_COLORS[rec.riskLevel] ?? 'var(--fg-muted))',
+                RISK_COLORS[rec.riskLevel] ?? 'var(--fg-muted)',
                 RISK_LABELS[rec.riskLevel] ?? rec.riskLevel,
               )}
-              <span style={{ fontSize: 10, color: 'var(--fg-muted))', flex: '0 0 auto' }}>
+              <span style={{ fontSize: 10, color: 'var(--fg-muted)', flex: '0 0 auto' }}>
                 {new Date(rec.timestamp).toLocaleString()}
               </span>
             </div>

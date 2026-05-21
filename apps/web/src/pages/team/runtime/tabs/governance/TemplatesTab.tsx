@@ -29,14 +29,14 @@ function TemplateCard({
     .map((node) => ({
       label: node.label.split(' · ')[0]?.trim() ?? node.label,
       color: node.label.includes('负责人')
-        ? 'var(--warning))'
+        ? 'var(--warning)'
         : node.label.includes('研究员')
-          ? 'var(--accent))'
+          ? 'var(--accent)'
           : node.label.includes('执行者')
-            ? 'var(--aux))'
+            ? 'var(--aux)'
             : node.label.includes('批评者')
-              ? 'var(--danger))'
-              : 'var(--chart-5))',
+              ? 'var(--danger)'
+              : 'var(--chart-5)',
     }));
 
   return (
@@ -103,11 +103,11 @@ function TemplateCard({
                           : 'var(--surface-3)',
                   color:
                     badge.tone === 'accent'
-                      ? 'var(--chart-5))'
+                      ? 'var(--chart-5)'
                       : badge.tone === 'success'
-                        ? 'var(--success))'
+                        ? 'var(--success)'
                         : badge.tone === 'warning'
-                          ? 'var(--warning))'
+                          ? 'var(--warning)'
                           : 'var(--fg-default)',
                   fontSize: 9,
                   fontWeight: 700,

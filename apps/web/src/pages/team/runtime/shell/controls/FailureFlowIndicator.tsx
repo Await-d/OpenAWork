@@ -26,7 +26,7 @@ const INDICATOR_STYLE: CSSProperties = {
   padding: '14px 16px',
   borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base)',
 };
 
 const HEADER_ROW_STYLE: CSSProperties = {
@@ -92,7 +92,7 @@ const SECONDARY_BTN_STYLE: CSSProperties = {
 const DANGER_BTN_STYLE: CSSProperties = {
   ...SECONDARY_BTN_STYLE,
   borderColor: 'color-mix(in srgb, var(--danger) 36%, transparent)',
-  color: 'var(--danger))',
+  color: 'var(--danger)',
 };
 
 export type FailureAction = 'redispatch' | 'return-to-c' | 'escalate-to-user';
@@ -104,19 +104,19 @@ const ACTION_META: Record<
   redispatch: {
     icon: '🔄',
     label: '重派给 executor / reviewer',
-    color: 'var(--warning))',
+    color: 'var(--warning)',
     description: '实现型失败 → 重新派发到执行层（沿用现有 spec / plan / tasks）',
   },
   'return-to-c': {
     icon: '↩️',
     label: '退回 PM1 重新规划',
-    color: 'var(--chart-5))',
+    color: 'var(--chart-5)',
     description: '规划型失败 → 退回 c 层重写 spec / plan / tasks',
   },
   'escalate-to-user': {
     icon: '⬆️',
     label: '已升级给你决策',
-    color: 'var(--danger))',
+    color: 'var(--danger)',
     description: '多轮重试仍未通过 → 团队等待你介入（编辑宪法 / 修改原始需求 / 直接回答）',
   },
 };

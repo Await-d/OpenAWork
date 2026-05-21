@@ -26,7 +26,7 @@ export interface SSHConnectionPanelProps {
 
 const STATUS_COLOR = {
   connected: color.success,
-  disconnected: 'var(--fg-muted))',
+  disconnected: 'var(--fg-muted)',
   error: color.danger,
 };
 
@@ -66,8 +66,8 @@ export function SSHConnectionPanel({
           type="button"
           onClick={() => setShowForm((v) => !v)}
           style={{
-            background: 'var(--accent))',
-            color: 'var(--fg-on-accent))',
+            background: 'var(--accent)',
+            color: 'var(--fg-on-accent)',
             border: 'none',
             borderRadius: 4,
             padding: '3px 10px',
@@ -85,7 +85,7 @@ export function SSHConnectionPanel({
             display: 'flex',
             flexDirection: 'column',
             gap: 6,
-            background: 'var(--bg-overlay))',
+            background: 'var(--bg-overlay)',
             borderRadius: 6,
             padding: 10,
             border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
@@ -128,7 +128,7 @@ export function SSHConnectionPanel({
               onChange={(e) => setForm((f) => ({ ...f, authType: e.target.value as SSHAuthType }))}
               style={{
                 flex: 1,
-                background: 'var(--bg-overlay))',
+                background: 'var(--bg-overlay)',
                 border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
                 borderRadius: 4,
                 padding: '3px 6px',
@@ -176,8 +176,8 @@ export function SSHConnectionPanel({
             type="button"
             onClick={handleSubmit}
             style={{
-              background: 'var(--accent))',
-              color: 'var(--fg-on-accent))',
+              background: 'var(--accent)',
+              color: 'var(--fg-on-accent)',
               border: 'none',
               borderRadius: 4,
               padding: '4px 0',
@@ -193,7 +193,7 @@ export function SSHConnectionPanel({
       {connections.length === 0 && !showForm && (
         <div
           style={{
-            color: 'var(--fg-muted))',
+            color: 'var(--fg-muted)',
             fontSize: 12,
             textAlign: 'center',
             padding: '12px 0',
@@ -210,7 +210,7 @@ export function SSHConnectionPanel({
             display: 'flex',
             alignItems: 'center',
             gap: 8,
-            background: 'var(--bg-overlay))',
+            background: 'var(--bg-overlay)',
             borderRadius: 6,
             padding: '6px 10px',
             border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
@@ -237,7 +237,7 @@ export function SSHConnectionPanel({
             >
               {conn.name}
             </div>
-            <div style={{ fontSize: 11, color: 'var(--fg-muted))' }}>
+            <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
               {conn.username}@{conn.host}:{conn.port}
             </div>
           </div>
@@ -249,8 +249,8 @@ export function SSHConnectionPanel({
                 style={{
                   fontSize: 11,
                   padding: '2px 7px',
-                  border: '1px solid var(--accent))',
-                  color: 'var(--accent))',
+                  border: '1px solid var(--accent)',
+                  color: 'var(--accent)',
                   background: 'none',
                   borderRadius: 3,
                   cursor: 'pointer',
@@ -266,7 +266,7 @@ export function SSHConnectionPanel({
                   fontSize: 11,
                   padding: '2px 7px',
                   border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-                  color: 'var(--fg-muted))',
+                  color: 'var(--fg-muted)',
                   background: 'none',
                   borderRadius: 3,
                   cursor: 'pointer',
@@ -282,8 +282,8 @@ export function SSHConnectionPanel({
                 style={{
                   fontSize: 11,
                   padding: '2px 7px',
-                  border: '1px solid var(--success))',
-                  color: 'var(--success))',
+                  border: '1px solid var(--success)',
+                  color: 'var(--success)',
                   background: 'none',
                   borderRadius: 3,
                   cursor: 'pointer',

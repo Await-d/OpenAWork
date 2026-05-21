@@ -624,7 +624,7 @@ export function DevtoolsTabContent({
             { label: '正常', value: healthyCount, color: 'var(--accent)' },
             { label: '载入中', value: loadingCount, color: 'var(--fg-default)' },
             { label: '空数据', value: emptyCount, color: 'var(--fg-default)' },
-            { label: '未接入', value: unavailableCount, color: 'var(--warning))' },
+            { label: '未接入', value: unavailableCount, color: 'var(--warning)' },
             { label: '失败', value: errorSources.length, color: 'var(--danger)' },
           ].map((item) => (
             <div
@@ -632,7 +632,7 @@ export function DevtoolsTabContent({
               style={{
                 borderRadius: 999,
                 padding: '3px 8px',
-                background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base))',
+                background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base)',
                 border: '1px solid var(--border-default)',
                 fontSize: 11,
                 color: item.color,
@@ -646,7 +646,7 @@ export function DevtoolsTabContent({
             style={{
               borderRadius: 999,
               padding: '3px 8px',
-              background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base))',
+              background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base)',
               border: '1px solid var(--border-default)',
               fontSize: 11,
               color: 'var(--fg-default)',
@@ -659,7 +659,7 @@ export function DevtoolsTabContent({
             style={{
               borderRadius: 999,
               padding: '3px 8px',
-              background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base))',
+              background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base)',
               border: '1px solid var(--border-default)',
               fontSize: 11,
               color: workerErrors > 0 ? 'var(--danger)' : 'var(--fg-default)',

@@ -347,8 +347,8 @@ export function BuddyAgentBindingPanel({
             style={{
               ...SUMMARY_PILL,
               background: selectedBinding
-                ? 'color-mix(in oklch, var(--accent) 14%, var(--bg-overlay))'
-                : 'color-mix(in oklch, var(--bg-hover) 82%, var(--bg-overlay))',
+                ? 'color-mix(in oklch, var(--accent) 14%, var(--bg-overlay)'
+                : 'color-mix(in oklch, var(--bg-hover) 82%, var(--bg-overlay)',
               color: selectedBinding ? 'var(--accent)' : 'var(--fg-default)',
             }}
           >
@@ -392,7 +392,7 @@ export function BuddyAgentBindingPanel({
                     padding: '0 10px',
                     borderColor: selected ? 'var(--accent)' : 'var(--border-subtle)',
                     background: selected
-                      ? 'color-mix(in oklch, var(--accent) 12%, var(--bg-overlay))'
+                      ? 'color-mix(in oklch, var(--accent) 12%, var(--bg-overlay)'
                       : QUIET_BUTTON.background,
                     color: selected ? 'var(--accent)' : QUIET_BUTTON.color,
                     opacity: submitting ? 0.65 : 1,

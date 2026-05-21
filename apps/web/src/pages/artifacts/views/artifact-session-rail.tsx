@@ -80,7 +80,7 @@ export function ArtifactSessionRail({
                   padding: '10px 11px',
                   borderRadius: tokens.radius.md,
                   border: selected
-                    ? '1px solid color-mix(in oklch, var(--accent) 44%, var(--border-default))'
+                    ? '1px solid color-mix(in oklch, var(--accent) 44%, var(--border-default)'
                     : `1px solid ${tokens.color.borderSubtle}`,
                   background: selected
                     ? 'color-mix(in oklch, var(--accent) 16%, var(--bg-overlay) 84%)'

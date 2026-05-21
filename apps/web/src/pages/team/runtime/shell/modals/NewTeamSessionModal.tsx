@@ -309,7 +309,7 @@ const STEP_INDEX_ACTIVE_STYLE: CSSProperties = {
 const STEP_INDEX_DONE_STYLE: CSSProperties = {
   ...STEP_INDEX_BASE_STYLE,
   background: 'color-mix(in srgb, var(--success) 18%, transparent)',
-  color: 'var(--success))',
+  color: 'var(--success)',
   borderColor: 'color-mix(in srgb, var(--success) 50%, transparent)',
 };
 
@@ -371,7 +371,7 @@ const INPUT_STYLE: CSSProperties = {
   padding: '9px 12px',
   borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base)',
   color: 'var(--fg-strong)',
   fontSize: 13,
   fontFamily: 'inherit',
@@ -383,7 +383,7 @@ const SOURCE_TAB_BAR_STYLE: CSSProperties = {
   gap: 8,
   padding: 4,
   borderRadius: 10,
-  background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base)',
 };
 
 const SOURCE_TAB_BTN_BASE_STYLE: CSSProperties = {
@@ -425,7 +425,7 @@ const CARD_BASE_STYLE: CSSProperties = {
 const CARD_SELECTED_STYLE: CSSProperties = {
   ...CARD_BASE_STYLE,
   borderColor: 'var(--accent)',
-  background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
+  background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay)',
   boxShadow: '0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent)',
 };
 
@@ -463,7 +463,7 @@ const ROLE_CARD_STYLE: CSSProperties = {
   padding: '12px 14px',
   borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 6%, var(--bg-overlay))',
+  background: 'color-mix(in srgb, var(--accent) 6%, var(--bg-overlay)',
 };
 
 const ROLE_AVATAR_STYLE: CSSProperties = {
@@ -474,7 +474,7 @@ const ROLE_AVATAR_STYLE: CSSProperties = {
   placeItems: 'center',
   fontSize: 14,
   fontWeight: 800,
-  color: 'var(--fg-on-accent))',
+  color: 'var(--fg-on-accent)',
   flexShrink: 0,
 };
 
@@ -496,7 +496,7 @@ const AGENT_CHIP_BASE_STYLE: CSSProperties = {
 const AGENT_CHIP_SELECTED_STYLE: CSSProperties = {
   ...AGENT_CHIP_BASE_STYLE,
   borderColor: 'var(--accent)',
-  background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-overlay))',
+  background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-overlay)',
   color: 'var(--accent)',
 };
 
@@ -583,15 +583,15 @@ function getInitial(label: string | undefined | null): string {
 function colorForRole(role: string): string {
   switch (role) {
     case 'planner':
-      return 'var(--accent))'; // indigo
+      return 'var(--accent)'; // indigo
     case 'researcher':
-      return 'var(--chart-7))'; // sky
+      return 'var(--chart-7)'; // sky
     case 'executor':
-      return 'var(--success))'; // green
+      return 'var(--success)'; // green
     case 'reviewer':
-      return 'var(--warning))'; // amber
+      return 'var(--warning)'; // amber
     default:
-      return 'var(--fg-muted))'; // gray
+      return 'var(--fg-muted)'; // gray
   }
 }
 
@@ -626,43 +626,43 @@ const OPTIONAL_GROUP_META: Record<string, Omit<OptionalAgentGroup, 'key'>> = {
   leader: {
     label: '领导层',
     description: '统筹全局，可作为团队代理人下发任务',
-    color: 'var(--chart-5))',
+    color: 'var(--chart-5)',
     hint: '会出现在「领导」层级，介入跨子流程的协调与拍板。',
   },
   general: {
     label: '通用助手',
     description: '通用型 agent，灵活补位',
-    color: 'var(--chart-7))',
+    color: 'var(--chart-7)',
     hint: '会出现在主对话流，按需被引用作为辅助回答与协作。',
   },
   planner: {
     label: '规划补位',
     description: '在 planner 层提供额外协作思路',
-    color: 'var(--accent))',
+    color: 'var(--accent)',
     hint: '与核心 planner 并行，作为额外的拆解视角参与「规划」层。',
   },
   researcher: {
     label: '研究补位',
     description: '在 researcher 层补充信息源',
-    color: 'var(--chart-7))',
+    color: 'var(--chart-7)',
     hint: '与核心 researcher 并行，作为额外检索通道参与「研究」层。',
   },
   executor: {
     label: '执行补位',
     description: '在 executor 层提供额外执行能力',
-    color: 'var(--success))',
+    color: 'var(--success)',
     hint: '与核心 executor 并行，作为额外执行节点参与「执行」层。',
   },
   reviewer: {
     label: '评审补位',
     description: '在 reviewer 层加强审查',
-    color: 'var(--warning))',
+    color: 'var(--warning)',
     hint: '与核心 reviewer 并行，作为额外评审视角参与「评审」层。',
   },
   unknown: {
     label: '未分层',
     description: '未声明 canonical role 的 agent',
-    color: 'var(--fg-muted))',
+    color: 'var(--fg-muted)',
     hint: '未声明 canonical role，默认作为通用辅助 agent 加入。',
   },
 };
@@ -690,12 +690,12 @@ function badgeToneStyle(tone?: string): CSSProperties {
     case 'success':
       return {
         background: 'color-mix(in srgb, var(--success) 18%, transparent)',
-        color: 'var(--success))',
+        color: 'var(--success)',
       };
     case 'warning':
       return {
         background: 'color-mix(in srgb, var(--warning) 22%, transparent)',
-        color: 'var(--warning))',
+        color: 'var(--warning)',
       };
     default:
       return {
@@ -834,7 +834,7 @@ export function NewTeamSessionModal({
                     {done ? (
                       <CheckIcon
                         size={14}
-                        color={active ? 'var(--fg-on-accent)' : 'var(--success))'}
+                        color={active ? 'var(--fg-on-accent)' : 'var(--success)'}
                       />
                     ) : (
                       s.index
@@ -1038,7 +1038,7 @@ export function NewTeamSessionModal({
                         height="14"
                         viewBox="0 0 24 24"
                         fill="none"
-                        stroke="var(--warning))"
+                        stroke="var(--warning)"
                         strokeWidth="2"
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -1049,7 +1049,7 @@ export function NewTeamSessionModal({
                         <line x1="12" y1="17" x2="12.01" y2="17" />
                       </svg>
                       <span>
-                        <strong style={{ color: 'var(--warning))' }}>实验性功能：</strong>
+                        <strong style={{ color: 'var(--warning)' }}>实验性功能：</strong>
                         已保存模板沿用旧版数据结构，与新版会话契约可能不完全兼容；新版的模板体系仍在设计中。建议优先选择「空白会话」开始。
                       </span>
                     </div>
@@ -1404,7 +1404,7 @@ export function NewTeamSessionModal({
                                 padding: '12px 14px',
                                 borderRadius: 12,
                                 background:
-                                  'color-mix(in srgb, var(--accent) 6%, var(--bg-overlay))',
+                                  'color-mix(in srgb, var(--accent) 6%, var(--bg-overlay)',
                                 border:
                                   '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
                               }}

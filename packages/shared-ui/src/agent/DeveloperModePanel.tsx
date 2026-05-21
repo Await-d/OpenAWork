@@ -25,11 +25,11 @@ function payloadString(p: unknown): string {
 }
 
 const TYPE_COLOR: Record<string, string> = {
-  tool_call: 'var(--aux))',
+  tool_call: 'var(--aux)',
   tool_result: color.success,
-  text: 'var(--fg-default))',
+  text: 'var(--fg-default)',
   error: color.danger,
-  raw: 'var(--aux))',
+  raw: 'var(--aux)',
 };
 
 export function DeveloperModePanel({
@@ -77,14 +77,14 @@ export function DeveloperModePanel({
           borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         }}
       >
-        <span style={{ fontWeight: 600, color: 'var(--accent))' }}>开发者检查器</span>
+        <span style={{ fontWeight: 600, color: 'var(--accent)' }}>开发者检查器</span>
         <input
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           placeholder="过滤…"
           style={{
             flex: 1,
-            background: 'var(--bg-overlay))',
+            background: 'var(--bg-overlay)',
             border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
             borderRadius: 4,
             padding: '2px 6px',
@@ -92,7 +92,7 @@ export function DeveloperModePanel({
             fontSize: 11,
           }}
         />
-        <span style={{ color: 'var(--fg-muted))', fontSize: 11 }}>{visible.length} 个事件</span>
+        <span style={{ color: 'var(--fg-muted)', fontSize: 11 }}>{visible.length} 个事件</span>
         {onClear && (
           <button
             type="button"
@@ -100,7 +100,7 @@ export function DeveloperModePanel({
             style={{
               background: 'none',
               border: 'none',
-              color: 'var(--fg-muted))',
+              color: 'var(--fg-muted)',
               cursor: 'pointer',
               fontSize: 11,
             }}
@@ -121,9 +121,9 @@ export function DeveloperModePanel({
                 textAlign: 'left',
                 padding: '3px 10px',
                 cursor: 'pointer',
-                background: selected?.id === ev.id ? 'var(--bg-overlay))' : 'transparent',
+                background: selected?.id === ev.id ? 'var(--bg-overlay)' : 'transparent',
                 border: 'none',
-                borderLeft: `3px solid ${TYPE_COLOR[ev.type] ?? 'var(--fg-muted))'}`,
+                borderLeft: `3px solid ${TYPE_COLOR[ev.type] ?? 'var(--fg-muted)'}`,
                 display: 'flex',
                 gap: 8,
                 alignItems: 'baseline',
@@ -131,10 +131,10 @@ export function DeveloperModePanel({
                 font: 'inherit',
               }}
             >
-              <span style={{ color: 'var(--fg-muted))', fontSize: 10, minWidth: 60 }}>
+              <span style={{ color: 'var(--fg-muted)', fontSize: 10, minWidth: 60 }}>
                 {new Date(ev.ts).toISOString().slice(11, 23)}
               </span>
-              <span style={{ color: TYPE_COLOR[ev.type] ?? 'var(--fg-muted))', minWidth: 70 }}>
+              <span style={{ color: TYPE_COLOR[ev.type] ?? 'var(--fg-muted)', minWidth: 70 }}>
                 {ev.type}
               </span>
               <span
@@ -162,7 +162,7 @@ export function DeveloperModePanel({
           >
             <div
               style={{
-                color: TYPE_COLOR[selected.type] ?? 'var(--fg-muted))',
+                color: TYPE_COLOR[selected.type] ?? 'var(--fg-muted)',
                 marginBottom: 6,
                 fontWeight: 600,
               }}
@@ -170,7 +170,7 @@ export function DeveloperModePanel({
               {selected.label}
             </div>
             {selected.sessionId && (
-              <div style={{ color: 'var(--fg-muted))', fontSize: 10, marginBottom: 4 }}>
+              <div style={{ color: 'var(--fg-muted)', fontSize: 10, marginBottom: 4 }}>
                 会话：{selected.sessionId}
               </div>
             )}

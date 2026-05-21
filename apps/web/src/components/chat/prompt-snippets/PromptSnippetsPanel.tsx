@@ -18,7 +18,8 @@
  *   />
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   createPromptSnippetsClient,
   type PromptSnippet,
@@ -59,10 +60,46 @@ export function PromptSnippetsPanel({
   const [formTitle, setFormTitle] = useState('');
   const [formContent, setFormContent] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [popoverPosition, setPopoverPosition] = useState<{ bottom: number; left: number } | null>(
+    null,
+  );
 
   const panelRef = useRef<HTMLDivElement>(null);
 
   const client = useMemo(() => createPromptSnippetsClient(gatewayUrl), [gatewayUrl]);
+
+  // ─── Popover position (same pattern as CompanionStage) ──────────────────
+
+  useLayoutEffect(() => {
+    if (!open || !anchorRef?.current) {
+      setPopoverPosition(null);
+      return;
+    }
+    const update = (): void => {
+      const rect = anchorRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const viewportW = globalThis.window?.innerWidth ?? rect.right;
+      const viewportH = globalThis.window?.innerHeight ?? rect.bottom;
+      const POPOVER_WIDTH = 480;
+      const preferredLeft = rect.left;
+      const maxLeft = viewportW - POPOVER_WIDTH - 8;
+      const left = Math.max(8, Math.min(preferredLeft, maxLeft));
+      setPopoverPosition({
+        bottom: Math.max(8, viewportH - rect.top + 6),
+        left,
+      });
+    };
+    update();
+    if (typeof globalThis.window !== 'undefined') {
+      globalThis.window.addEventListener('resize', update);
+      globalThis.window.addEventListener('scroll', update, true);
+      return () => {
+        globalThis.window.removeEventListener('resize', update);
+        globalThis.window.removeEventListener('scroll', update, true);
+      };
+    }
+    return undefined;
+  }, [open, anchorRef]);
 
   // ─── Data fetching ──────────────────────────────────────────────────────
 
@@ -90,19 +127,7 @@ export function PromptSnippetsPanel({
   }, [open, fetchData]);
 
   // ─── Click outside to close ─────────────────────────────────────────────
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (panelRef.current && !panelRef.current.contains(target)) {
-        if (anchorRef?.current && anchorRef.current.contains(target)) return;
-        onClose();
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open, onClose, anchorRef]);
+  // Uses a transparent fixed scrim button (same pattern as CompanionStage).
 
   // ─── Escape to close ────────────────────────────────────────────────────
 
@@ -192,355 +217,407 @@ export function PromptSnippetsPanel({
 
   if (!open) return null;
 
-  // ─── Render ─────────────────────────────────────────────────────────────
+  // ─── Render (portal to body, same as CompanionStage) ────────────────────
 
-  return (
-    <div
-      ref={panelRef}
-      role="dialog"
-      aria-label="快捷提示词"
-      style={{
-        position: 'absolute',
-        bottom: 'calc(100% + 8px)',
-        left: 0,
-        zIndex: 100,
-        width: 380,
-        maxHeight: 460,
-        background: 'var(--bg-overlay)',
-        border: '1px solid var(--border-default)',
-        borderRadius: 12,
-        boxShadow: '0 12px 40px rgba(15, 23, 42, 0.35)',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-      }}
-    >
-      {/* Header */}
-      <div
+  return createPortal(
+    <>
+      {/* Click-outside scrim — same pattern as CompanionStage */}
+      <button
+        type="button"
+        aria-label="关闭快捷提示词面板"
+        onClick={onClose}
         style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'transparent',
+          border: 'none',
+          padding: 0,
+          margin: 0,
+          zIndex: 998,
+          cursor: 'default',
+        }}
+      />
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-label="快捷提示词"
+        style={{
+          position: 'fixed',
+          bottom: popoverPosition?.bottom ?? 80,
+          left: popoverPosition?.left ?? 16,
+          zIndex: 999,
+          width: 'min(480px, calc(100vw - 24px))',
+          maxHeight: 'min(560px, calc(100vh - 96px))',
+          background: 'var(--bg-overlay)',
+          border: '1px solid var(--border-default)',
+          borderRadius: 12,
+          boxShadow: '0 12px 40px rgba(15, 23, 42, 0.35)',
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '12px 14px 10px',
-          borderBottom: '1px solid var(--border-default)',
+          flexDirection: 'column',
+          overflow: 'hidden',
         }}
       >
-        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-strong)' }}>
-          ⚡ 快捷提示词
-        </span>
-        <button type="button" onClick={onClose} style={iconBtnStyle} aria-label="关闭">
-          ✕
-        </button>
-      </div>
+        {/* Header */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '12px 14px 10px',
+            borderBottom: '1px solid var(--border-default)',
+          }}
+        >
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-strong)' }}>
+            ⚡ 快捷提示词
+          </span>
+          <button type="button" onClick={onClose} style={iconBtnStyle} aria-label="关闭">
+            ✕
+          </button>
+        </div>
 
-      {/* Body */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '10px 14px' }}>
-        {view === 'list' && (
-          <>
-            {/* Group tabs */}
-            <div
-              style={{
-                display: 'flex',
-                gap: 6,
-                flexWrap: 'wrap',
-                marginBottom: 10,
-              }}
-            >
-              {groups.map((g) => (
-                <button
-                  key={g.id}
-                  type="button"
-                  onClick={() => setActiveGroupId(g.id)}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    setEditingGroup(g);
-                    setFormName(g.name);
-                    setView('edit-group');
-                  }}
-                  style={{
-                    padding: '4px 10px',
-                    borderRadius: 6,
-                    border:
-                      activeGroupId === g.id
-                        ? '1px solid var(--accent)'
-                        : '1px solid var(--border-subtle)',
-                    background:
-                      activeGroupId === g.id
-                        ? 'color-mix(in oklch, var(--accent) 12%, transparent)'
-                        : 'transparent',
-                    color: activeGroupId === g.id ? 'var(--accent)' : 'var(--fg-muted)',
-                    fontSize: 11,
-                    fontWeight: 500,
-                    cursor: 'pointer',
-                    transition: 'all 120ms ease',
-                  }}
-                >
-                  {g.name}
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => {
-                  setFormName('');
-                  setView('add-group');
-                }}
+        {/* Body */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '10px 14px' }}>
+          {view === 'list' && (
+            <>
+              {/* Group tabs */}
+              <div
                 style={{
-                  ...iconBtnStyle,
-                  fontSize: 13,
-                  width: 24,
-                  height: 24,
+                  display: 'flex',
+                  gap: 6,
+                  flexWrap: 'wrap',
+                  marginBottom: 10,
                 }}
-                title="添加分组"
               >
-                +
-              </button>
-            </div>
-
-            {/* Snippet list */}
-            {loading ? (
-              <div style={{ fontSize: 12, color: 'var(--fg-muted)', padding: 8 }}>加载中…</div>
-            ) : filteredSnippets.length === 0 ? (
-              <div style={{ fontSize: 12, color: 'var(--fg-muted)', padding: 8 }}>
-                {groups.length === 0 ? '请先创建一个分组' : '当前分组暂无提示词'}
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {filteredSnippets.map((s) => (
+                {groups.map((g) => (
                   <div
-                    key={s.id}
+                    key={g.id}
                     style={{
-                      padding: '8px 10px',
-                      borderRadius: 8,
-                      border: '1px solid var(--border-subtle)',
-                      background: 'var(--bg-surface, var(--bg-base))',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 4,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 2,
+                      padding: '3px 4px 3px 10px',
+                      borderRadius: 6,
+                      border:
+                        activeGroupId === g.id
+                          ? '1px solid var(--accent)'
+                          : '1px solid var(--border-subtle)',
+                      background:
+                        activeGroupId === g.id
+                          ? 'color-mix(in oklch, var(--accent) 12%, transparent)'
+                          : 'transparent',
+                      transition: 'all 120ms ease',
                     }}
                   >
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
+                    <button
+                      type="button"
+                      onClick={() => setActiveGroupId(g.id)}
+                      onDoubleClick={() => {
+                        setEditingGroup(g);
+                        setFormName(g.name);
+                        setView('edit-group');
                       }}
-                    >
-                      <span
-                        style={{
-                          fontSize: 12,
-                          fontWeight: 600,
-                          color: 'var(--fg-strong)',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                          flex: 1,
-                        }}
-                      >
-                        {s.title}
-                      </span>
-                      <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-                        <button
-                          type="button"
-                          onClick={() => handleCopy(s.content, s.id)}
-                          title="复制"
-                          style={smallBtnStyle}
-                        >
-                          {copiedId === s.id ? '✓' : '📋'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleInject(s.content)}
-                          title="注入到输入框"
-                          style={{
-                            ...smallBtnStyle,
-                            background: 'color-mix(in oklch, var(--accent) 12%, transparent)',
-                            color: 'var(--accent)',
-                            border: '1px solid color-mix(in oklch, var(--accent) 30%, transparent)',
-                          }}
-                        >
-                          ↵
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingSnippet(s);
-                            setFormTitle(s.title);
-                            setFormContent(s.content);
-                            setView('edit-snippet');
-                          }}
-                          title="编辑"
-                          style={smallBtnStyle}
-                        >
-                          ✎
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void handleDeleteSnippet(s.id)}
-                          title="删除"
-                          style={{ ...smallBtnStyle, color: 'var(--danger, #ef4444)' }}
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    </div>
-                    <div
                       style={{
+                        background: 'none',
+                        border: 'none',
+                        padding: 0,
+                        color: activeGroupId === g.id ? 'var(--accent)' : 'var(--fg-muted)',
                         fontSize: 11,
+                        fontWeight: 500,
+                        cursor: 'pointer',
+                      }}
+                      title="点击选中，双击编辑"
+                    >
+                      {g.name}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void handleDeleteGroup(g.id);
+                      }}
+                      title="删除分组"
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        padding: '0 2px',
+                        cursor: 'pointer',
                         color: 'var(--fg-muted)',
-                        lineHeight: 1.4,
-                        overflow: 'hidden',
-                        display: '-webkit-box',
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: 'vertical',
+                        fontSize: 10,
+                        lineHeight: 1,
+                        opacity: 0.6,
+                        borderRadius: 3,
                       }}
                     >
-                      {s.content}
-                    </div>
+                      ✕
+                    </button>
                   </div>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFormName('');
+                    setView('add-group');
+                  }}
+                  style={{
+                    ...iconBtnStyle,
+                    fontSize: 13,
+                    width: 24,
+                    height: 24,
+                  }}
+                  title="添加分组"
+                >
+                  +
+                </button>
               </div>
-            )}
 
-            {/* Add snippet button */}
-            {activeGroupId && (
-              <button
-                type="button"
-                onClick={() => {
-                  setFormTitle('');
-                  setFormContent('');
-                  setView('add-snippet');
+              {/* Snippet list */}
+              {loading ? (
+                <div style={{ fontSize: 12, color: 'var(--fg-muted)', padding: 8 }}>加载中…</div>
+              ) : filteredSnippets.length === 0 ? (
+                <div style={{ fontSize: 12, color: 'var(--fg-muted)', padding: 8 }}>
+                  {groups.length === 0 ? '请先创建一个分组' : '当前分组暂无提示词'}
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {filteredSnippets.map((s) => (
+                    <div
+                      key={s.id}
+                      style={{
+                        padding: '8px 10px',
+                        borderRadius: 8,
+                        border: '1px solid var(--border-subtle)',
+                        background: 'var(--bg-surface, var(--bg-base)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 4,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 600,
+                            color: 'var(--fg-strong)',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            flex: 1,
+                          }}
+                        >
+                          {s.title}
+                        </span>
+                        <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                          <button
+                            type="button"
+                            onClick={() => handleCopy(s.content, s.id)}
+                            title="复制"
+                            style={smallBtnStyle}
+                          >
+                            {copiedId === s.id ? '✓' : '📋'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleInject(s.content)}
+                            title="注入到输入框"
+                            style={{
+                              ...smallBtnStyle,
+                              background: 'color-mix(in oklch, var(--accent) 12%, transparent)',
+                              color: 'var(--accent)',
+                              border:
+                                '1px solid color-mix(in oklch, var(--accent) 30%, transparent)',
+                            }}
+                          >
+                            ↵
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingSnippet(s);
+                              setFormTitle(s.title);
+                              setFormContent(s.content);
+                              setView('edit-snippet');
+                            }}
+                            title="编辑"
+                            style={smallBtnStyle}
+                          >
+                            ✎
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteSnippet(s.id)}
+                            title="删除"
+                            style={{ ...smallBtnStyle, color: 'var(--danger, #ef4444)' }}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: 'var(--fg-muted)',
+                          lineHeight: 1.4,
+                          overflow: 'hidden',
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical',
+                        }}
+                      >
+                        {s.content}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Add snippet button */}
+              {activeGroupId && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFormTitle('');
+                    setFormContent('');
+                    setView('add-snippet');
+                  }}
+                  style={{
+                    marginTop: 8,
+                    padding: '6px 12px',
+                    borderRadius: 7,
+                    border: '1px dashed var(--border-subtle)',
+                    background: 'transparent',
+                    color: 'var(--fg-muted)',
+                    fontSize: 11,
+                    cursor: 'pointer',
+                    width: '100%',
+                    textAlign: 'center',
+                  }}
+                >
+                  + 添加提示词
+                </button>
+              )}
+            </>
+          )}
+
+          {/* Add Group Form */}
+          {view === 'add-group' && (
+            <FormSection
+              title="新建分组"
+              onCancel={() => setView('list')}
+              onConfirm={() => void handleCreateGroup()}
+              confirmLabel="创建"
+              confirmDisabled={!formName.trim()}
+            >
+              <input
+                type="text"
+                value={formName}
+                onChange={(e) => setFormName(e.target.value)}
+                placeholder="分组名称"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void handleCreateGroup();
                 }}
-                style={{
-                  marginTop: 8,
-                  padding: '6px 12px',
-                  borderRadius: 7,
-                  border: '1px dashed var(--border-subtle)',
-                  background: 'transparent',
-                  color: 'var(--fg-muted)',
-                  fontSize: 11,
-                  cursor: 'pointer',
-                  width: '100%',
-                  textAlign: 'center',
+                style={inputStyle}
+              />
+            </FormSection>
+          )}
+
+          {/* Edit Group Form */}
+          {view === 'edit-group' && (
+            <FormSection
+              title="编辑分组"
+              onCancel={() => {
+                setView('list');
+                setEditingGroup(null);
+              }}
+              onConfirm={() => void handleUpdateGroup()}
+              confirmLabel="保存"
+              confirmDisabled={!formName.trim()}
+              onDelete={() => {
+                if (editingGroup) void handleDeleteGroup(editingGroup.id);
+                setView('list');
+                setEditingGroup(null);
+              }}
+            >
+              <input
+                type="text"
+                value={formName}
+                onChange={(e) => setFormName(e.target.value)}
+                placeholder="分组名称"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void handleUpdateGroup();
                 }}
-              >
-                + 添加提示词
-              </button>
-            )}
-          </>
-        )}
+                style={inputStyle}
+              />
+            </FormSection>
+          )}
 
-        {/* Add Group Form */}
-        {view === 'add-group' && (
-          <FormSection
-            title="新建分组"
-            onCancel={() => setView('list')}
-            onConfirm={() => void handleCreateGroup()}
-            confirmLabel="创建"
-            confirmDisabled={!formName.trim()}
-          >
-            <input
-              type="text"
-              value={formName}
-              onChange={(e) => setFormName(e.target.value)}
-              placeholder="分组名称"
-              autoFocus
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void handleCreateGroup();
+          {/* Add Snippet Form */}
+          {view === 'add-snippet' && (
+            <FormSection
+              title="新建提示词"
+              onCancel={() => setView('list')}
+              onConfirm={() => void handleCreateSnippet()}
+              confirmLabel="创建"
+              confirmDisabled={!formTitle.trim() || !formContent.trim()}
+            >
+              <input
+                type="text"
+                value={formTitle}
+                onChange={(e) => setFormTitle(e.target.value)}
+                placeholder="标题（简短描述）"
+                autoFocus
+                style={inputStyle}
+              />
+              <textarea
+                value={formContent}
+                onChange={(e) => setFormContent(e.target.value)}
+                placeholder="提示词内容"
+                rows={4}
+                style={{ ...inputStyle, resize: 'vertical', minHeight: 80 }}
+              />
+            </FormSection>
+          )}
+
+          {/* Edit Snippet Form */}
+          {view === 'edit-snippet' && (
+            <FormSection
+              title="编辑提示词"
+              onCancel={() => {
+                setView('list');
+                setEditingSnippet(null);
               }}
-              style={inputStyle}
-            />
-          </FormSection>
-        )}
-
-        {/* Edit Group Form */}
-        {view === 'edit-group' && (
-          <FormSection
-            title="编辑分组"
-            onCancel={() => {
-              setView('list');
-              setEditingGroup(null);
-            }}
-            onConfirm={() => void handleUpdateGroup()}
-            confirmLabel="保存"
-            confirmDisabled={!formName.trim()}
-            onDelete={() => {
-              if (editingGroup) void handleDeleteGroup(editingGroup.id);
-              setView('list');
-              setEditingGroup(null);
-            }}
-          >
-            <input
-              type="text"
-              value={formName}
-              onChange={(e) => setFormName(e.target.value)}
-              placeholder="分组名称"
-              autoFocus
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void handleUpdateGroup();
-              }}
-              style={inputStyle}
-            />
-          </FormSection>
-        )}
-
-        {/* Add Snippet Form */}
-        {view === 'add-snippet' && (
-          <FormSection
-            title="新建提示词"
-            onCancel={() => setView('list')}
-            onConfirm={() => void handleCreateSnippet()}
-            confirmLabel="创建"
-            confirmDisabled={!formTitle.trim() || !formContent.trim()}
-          >
-            <input
-              type="text"
-              value={formTitle}
-              onChange={(e) => setFormTitle(e.target.value)}
-              placeholder="标题（简短描述）"
-              autoFocus
-              style={inputStyle}
-            />
-            <textarea
-              value={formContent}
-              onChange={(e) => setFormContent(e.target.value)}
-              placeholder="提示词内容"
-              rows={4}
-              style={{ ...inputStyle, resize: 'vertical', minHeight: 80 }}
-            />
-          </FormSection>
-        )}
-
-        {/* Edit Snippet Form */}
-        {view === 'edit-snippet' && (
-          <FormSection
-            title="编辑提示词"
-            onCancel={() => {
-              setView('list');
-              setEditingSnippet(null);
-            }}
-            onConfirm={() => void handleUpdateSnippet()}
-            confirmLabel="保存"
-            confirmDisabled={!formTitle.trim() || !formContent.trim()}
-          >
-            <input
-              type="text"
-              value={formTitle}
-              onChange={(e) => setFormTitle(e.target.value)}
-              placeholder="标题"
-              autoFocus
-              style={inputStyle}
-            />
-            <textarea
-              value={formContent}
-              onChange={(e) => setFormContent(e.target.value)}
-              placeholder="提示词内容"
-              rows={4}
-              style={{ ...inputStyle, resize: 'vertical', minHeight: 80 }}
-            />
-          </FormSection>
-        )}
+              onConfirm={() => void handleUpdateSnippet()}
+              confirmLabel="保存"
+              confirmDisabled={!formTitle.trim() || !formContent.trim()}
+            >
+              <input
+                type="text"
+                value={formTitle}
+                onChange={(e) => setFormTitle(e.target.value)}
+                placeholder="标题"
+                autoFocus
+                style={inputStyle}
+              />
+              <textarea
+                value={formContent}
+                onChange={(e) => setFormContent(e.target.value)}
+                placeholder="提示词内容"
+                rows={4}
+                style={{ ...inputStyle, resize: 'vertical', minHeight: 80 }}
+              />
+            </FormSection>
+          )}
+        </div>
       </div>
-    </div>
+    </>,
+    document.body,
   );
 }
 

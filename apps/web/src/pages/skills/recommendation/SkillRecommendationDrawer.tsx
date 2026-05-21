@@ -106,7 +106,7 @@ const ROW: React.CSSProperties = {
   padding: '10px 12px',
   borderRadius: 10,
   border: '1px solid var(--border-subtle)',
-  background: 'var(--surface-2, var(--bg-overlay))',
+  background: 'var(--surface-2, var(--bg-overlay)',
 };
 
 const SECTION_LABEL: React.CSSProperties = {
@@ -128,7 +128,7 @@ const STAT_CARD: React.CSSProperties = {
   padding: '10px 12px',
   borderRadius: 10,
   border: '1px solid var(--border-subtle)',
-  background: 'var(--surface-2, var(--bg-overlay))',
+  background: 'var(--surface-2, var(--bg-overlay)',
   marginBottom: 6,
 };
 
@@ -154,8 +154,8 @@ const PILL: React.CSSProperties = {
 };
 
 function deltaColor(origin: RowDecision['origin']): string {
-  if (origin === 'recommended-only') return 'var(--success))';
-  if (origin === 'current-only') return 'var(--danger))';
+  if (origin === 'recommended-only') return 'var(--success)';
+  if (origin === 'current-only') return 'var(--danger)';
   return 'var(--fg-muted)';
 }
 
@@ -367,7 +367,7 @@ export default function SkillRecommendationDrawer(
                   background: recommendation.fellBackToHeuristic
                     ? 'var(--warning-subtle)'
                     : 'var(--accent-soft)',
-                  color: recommendation.fellBackToHeuristic ? 'var(--warning))' : 'var(--accent)',
+                  color: recommendation.fellBackToHeuristic ? 'var(--warning)' : 'var(--accent)',
                   alignSelf: 'center',
                 }}
               >
@@ -381,7 +381,7 @@ export default function SkillRecommendationDrawer(
           </div>
 
           {error ? (
-            <div style={{ color: 'var(--danger))', fontSize: 12, marginBottom: 8 }}>{error}</div>
+            <div style={{ color: 'var(--danger)', fontSize: 12, marginBottom: 8 }}>{error}</div>
           ) : null}
 
           {!recommendation && !loading ? (
@@ -408,11 +408,11 @@ export default function SkillRecommendationDrawer(
                   <div style={STAT_LABEL}>Pinned</div>
                 </div>
                 <div>
-                  <div style={{ ...STAT_VALUE, color: 'var(--success))' }}>+{summary.added}</div>
+                  <div style={{ ...STAT_VALUE, color: 'var(--success)' }}>+{summary.added}</div>
                   <div style={STAT_LABEL}>新增</div>
                 </div>
                 <div>
-                  <div style={{ ...STAT_VALUE, color: 'var(--danger))' }}>-{summary.removed}</div>
+                  <div style={{ ...STAT_VALUE, color: 'var(--danger)' }}>-{summary.removed}</div>
                   <div style={STAT_LABEL}>移除</div>
                 </div>
               </div>
@@ -562,7 +562,7 @@ export default function SkillRecommendationDrawer(
                 borderRadius: 8,
                 border: 'none',
                 background: 'var(--accent)',
-                color: 'var(--fg-on-accent))',
+                color: 'var(--fg-on-accent)',
                 fontSize: 13,
                 cursor: applying ? 'wait' : 'pointer',
                 opacity: !recommendation || totalRows === 0 ? 0.5 : 1,

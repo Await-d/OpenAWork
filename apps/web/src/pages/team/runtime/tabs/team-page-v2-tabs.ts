@@ -161,7 +161,7 @@ export const SUB_TAB_BAR_STYLE: CSSProperties = {
   paddingInline: 12,
   paddingBlock: 4,
   borderBottom: '1px solid color-mix(in srgb, var(--border-default) 25%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base)',
   flexShrink: 0,
   overflowX: 'auto',
   overflowY: 'hidden',

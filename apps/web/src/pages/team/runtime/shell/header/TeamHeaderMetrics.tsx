@@ -88,7 +88,7 @@ const ACTIVITY_BADGE_BASE: CSSProperties = {
 const RUNNING_BADGE_STYLE: CSSProperties = {
   ...ACTIVITY_BADGE_BASE,
   background: 'color-mix(in srgb, var(--success) 14%, transparent)',
-  color: 'var(--success))',
+  color: 'var(--success)',
   border: '1px solid color-mix(in srgb, var(--success) 35%, transparent)',
 };
 

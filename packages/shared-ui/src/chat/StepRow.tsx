@@ -76,7 +76,7 @@ export function StepRow({ index, title, description, status, style }: StepRowPro
           {title}
         </div>
         {description && (
-          <div style={{ fontSize: 11, color: 'var(--fg-muted))', marginTop: 2 }}>{description}</div>
+          <div style={{ fontSize: 11, color: 'var(--fg-muted)', marginTop: 2 }}>{description}</div>
         )}
       </div>
     </div>

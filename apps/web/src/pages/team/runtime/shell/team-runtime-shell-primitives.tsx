@@ -7,7 +7,7 @@ const STATUS_BADGE_STYLE: CSSProperties = {
   padding: '0 9px',
   borderRadius: 999,
   border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 76%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 76%, var(--bg-base)',
   fontSize: 11,
   color: 'var(--fg-default)',
   whiteSpace: 'nowrap',
@@ -19,7 +19,7 @@ export const TEAM_RUNTIME_INSET_PANEL_STYLE: CSSProperties = {
   padding: 12,
   borderRadius: 14,
   border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base)',
 };
 
 export function ChromeBadge({ children }: { children: ReactNode }) {
@@ -46,7 +46,7 @@ export function CompactMetricPill({
         padding: '8px 10px',
         borderRadius: 12,
         border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-        background: 'color-mix(in srgb, var(--bg-overlay) 76%, var(--bg-base))',
+        background: 'color-mix(in srgb, var(--bg-overlay) 76%, var(--bg-base)',
       }}
     >
       <div

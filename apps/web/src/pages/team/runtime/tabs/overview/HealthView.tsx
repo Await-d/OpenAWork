@@ -54,7 +54,7 @@ const STAT_CARD_STYLE: CSSProperties = {
   padding: '10px 12px',
   borderRadius: 10,
   border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
 };
 
 const ROW_STYLE: CSSProperties = {
@@ -64,20 +64,20 @@ const ROW_STYLE: CSSProperties = {
   padding: '8px 12px',
   borderRadius: 10,
   border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
   fontSize: 12,
 };
 
 const FAILED_ROW_STYLE: CSSProperties = {
   ...ROW_STYLE,
   borderColor: 'color-mix(in srgb, var(--danger) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay))',
+  background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay)',
 };
 
 const STUCK_ROW_STYLE: CSSProperties = {
   ...ROW_STYLE,
   borderColor: 'color-mix(in srgb, var(--warning) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--warning) 8%, var(--bg-overlay))',
+  background: 'color-mix(in srgb, var(--warning) 8%, var(--bg-overlay)',
 };
 
 const EMPTY_STYLE: CSSProperties = {
@@ -232,7 +232,7 @@ export function HealthView({ onCancelHandoff }: HealthViewProps) {
                       padding: '2px 10px',
                       borderRadius: 999,
                       background: 'color-mix(in srgb, var(--danger) 14%, transparent)',
-                      color: 'var(--danger))',
+                      color: 'var(--danger)',
                       fontSize: 11,
                       fontWeight: 700,
                     }}
@@ -285,11 +285,11 @@ function HealthStat({
 }) {
   const color =
     tone === 'success'
-      ? 'var(--success))'
+      ? 'var(--success)'
       : tone === 'warning'
-        ? 'var(--warning))'
+        ? 'var(--warning)'
         : tone === 'danger'
-          ? 'var(--danger))'
+          ? 'var(--danger)'
           : 'var(--fg-strong)';
   return (
     <div style={STAT_CARD_STYLE}>
@@ -351,7 +351,7 @@ function StuckRow({
           padding: '1px 8px',
           borderRadius: 999,
           background: 'color-mix(in srgb, var(--warning) 14%, transparent)',
-          color: 'var(--warning))',
+          color: 'var(--warning)',
           fontSize: 10,
           fontWeight: 700,
           textTransform: 'uppercase',
@@ -374,7 +374,7 @@ function StuckRow({
             borderRadius: 6,
             border: '1px solid color-mix(in srgb, var(--danger) 40%, transparent)',
             background: 'color-mix(in srgb, var(--danger) 8%, transparent)',
-            color: 'var(--danger))',
+            color: 'var(--danger)',
             fontSize: 11,
             fontWeight: 700,
             cursor: 'pointer',

@@ -91,7 +91,7 @@ const STATE_PANEL_STYLE: CSSProperties = {
   textAlign: 'center',
   borderRadius: 'var(--team-radius-xl)',
   border: '1px dashed color-mix(in srgb, var(--border-default) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base)',
 };
 
 const SPINNER_STYLE: CSSProperties = {
@@ -115,7 +115,7 @@ const PUSH_STRIP_STYLE: CSSProperties = {
   gap: 6,
   padding: '8px 16px',
   borderTop: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base)',
   flexShrink: 0,
   maxHeight: 240,
   overflowY: 'auto',
@@ -279,7 +279,7 @@ function EmptyState({
               padding: '0 var(--team-space-3)',
               borderRadius: 'var(--team-radius-pill)',
               border: '1px solid color-mix(in srgb, var(--accent) 34%, transparent)',
-              background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
+              background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay)',
               color: 'var(--fg-strong)',
               fontSize: 'var(--team-font-xs)',
               fontWeight: 700,
@@ -308,7 +308,7 @@ function ErrorState({
       style={{
         ...STATE_PANEL_STYLE,
         borderColor: 'color-mix(in srgb, var(--danger) 40%, transparent)',
-        background: 'color-mix(in srgb, var(--danger) 7%, var(--bg-overlay))',
+        background: 'color-mix(in srgb, var(--danger) 7%, var(--bg-overlay)',
       }}
       role="alert"
     >
@@ -329,7 +329,7 @@ function ErrorState({
           padding: '0 var(--team-space-4)',
           borderRadius: 'var(--team-radius-pill)',
           border: '1px solid color-mix(in srgb, var(--danger) 44%, transparent)',
-          background: 'color-mix(in srgb, var(--danger) 12%, var(--bg-overlay))',
+          background: 'color-mix(in srgb, var(--danger) 12%, var(--bg-overlay)',
           color: 'var(--fg-strong)',
           fontSize: 'var(--team-font-xs)',
           fontWeight: 800,
@@ -376,7 +376,7 @@ function PushMessageCard({ message }: { message: PushMessage }) {
           borderRadius: 8,
           border: '1px solid color-mix(in srgb, var(--success) 24%, transparent)',
           borderLeft: '3px solid var(--success)',
-          background: 'color-mix(in srgb, var(--success) 5%, var(--bg-overlay))',
+          background: 'color-mix(in srgb, var(--success) 5%, var(--bg-overlay)',
           color: 'var(--fg-default)',
           fontSize: 11,
         }}

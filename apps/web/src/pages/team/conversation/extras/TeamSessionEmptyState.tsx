@@ -182,7 +182,7 @@ const RECEPTION_CARD_STYLE: CSSProperties = {
   maxWidth: 560,
   borderRadius: 16,
   border: '1px solid color-mix(in srgb, var(--accent) 28%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 5%, var(--bg-overlay))',
+  background: 'color-mix(in srgb, var(--accent) 5%, var(--bg-overlay)',
 };
 
 const CARD_HEADER_STYLE: CSSProperties = {
@@ -277,17 +277,17 @@ const HINT_BLOCK_STYLE: CSSProperties = {
 function colorForRole(role: string): string {
   switch (role) {
     case 'planner':
-      return 'var(--accent))';
+      return 'var(--accent)';
     case 'researcher':
-      return 'var(--chart-7))';
+      return 'var(--chart-7)';
     case 'executor':
-      return 'var(--success))';
+      return 'var(--success)';
     case 'reviewer':
-      return 'var(--warning))';
+      return 'var(--warning)';
     case 'leader':
-      return 'var(--chart-5))';
+      return 'var(--chart-5)';
     default:
-      return 'var(--fg-muted))';
+      return 'var(--fg-muted)';
   }
 }
 

@@ -21,19 +21,19 @@ export interface RegistrySourceManagerProps {
 
 const TYPE_COLOR: Record<string, string> = {
   official: color.success,
-  community: 'var(--accent))',
+  community: 'var(--accent)',
   enterprise: color.contrast,
-  local: 'var(--accent))',
+  local: 'var(--accent)',
 };
 const TRUST_COLOR: Record<string, string> = {
   full: color.success,
-  verified: 'var(--accent))',
+  verified: 'var(--accent)',
   untrusted: color.danger,
 };
 
 const s: Record<string, CSSProperties> = {
   root: {
-    background: 'var(--bg-overlay))',
+    background: 'var(--bg-overlay)',
     border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
     borderRadius: 12,
     overflow: 'hidden',
@@ -46,7 +46,7 @@ const s: Record<string, CSSProperties> = {
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  title: { margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--fg-default))' },
+  title: { margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--fg-default)' },
   row: {
     display: 'flex',
     alignItems: 'center',
@@ -54,8 +54,8 @@ const s: Record<string, CSSProperties> = {
     padding: '0.75rem 1.5rem',
     borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
   },
-  name: { fontSize: 12, fontWeight: 600, color: 'var(--fg-default))', flex: 1 },
-  url: { fontSize: 11, color: 'var(--fg-muted))', fontFamily: 'monospace', flex: 2 },
+  name: { fontSize: 12, fontWeight: 600, color: 'var(--fg-default)', flex: 1 },
+  url: { fontSize: 11, color: 'var(--fg-muted)', fontFamily: 'monospace', flex: 2 },
   badge: {
     fontSize: 10,
     fontWeight: 700,
@@ -67,12 +67,12 @@ const s: Record<string, CSSProperties> = {
   addRow: { padding: '0.75rem 1.5rem', display: 'flex', gap: 8 },
   input: {
     flex: 1,
-    background: 'var(--bg-base))',
+    background: 'var(--bg-base)',
     border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
     borderRadius: 6,
     padding: '0.4rem 0.75rem',
     fontSize: 12,
-    color: 'var(--fg-default))',
+    color: 'var(--fg-default)',
     outline: 'none',
   },
 };
@@ -110,7 +110,7 @@ export function RegistrySourceManager({
     <div style={s.root}>
       <div style={s.hdr}>
         <h2 style={s.title}>注册源管理</h2>
-        <span style={{ fontSize: 12, color: 'var(--fg-muted))' }}>{sources.length} 个来源</span>
+        <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>{sources.length} 个来源</span>
       </div>
 
       {sources.length === 0 && (
@@ -118,7 +118,7 @@ export function RegistrySourceManager({
           style={{
             padding: '2rem',
             textAlign: 'center',
-            color: 'var(--fg-muted))',
+            color: 'var(--fg-muted)',
             fontSize: 12,
           }}
         >
@@ -127,8 +127,8 @@ export function RegistrySourceManager({
       )}
 
       {sources.map((src) => {
-        const typeColor = TYPE_COLOR[src.type] ?? 'var(--fg-muted))';
-        const trustColor = TRUST_COLOR[src.trust] ?? 'var(--fg-muted))';
+        const typeColor = TYPE_COLOR[src.type] ?? 'var(--fg-muted)';
+        const trustColor = TRUST_COLOR[src.trust] ?? 'var(--fg-muted)';
         return (
           <div key={src.id} style={{ ...s.row, opacity: src.enabled ? 1 : 0.55 }}>
             <div style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: 2 }}>
@@ -143,7 +143,7 @@ export function RegistrySourceManager({
             </span>
             <button
               type="button"
-              style={btn(src.enabled ? color.success : 'var(--fg-muted))')}
+              style={btn(src.enabled ? color.success : 'var(--fg-muted)')}
               disabled={src.readonly}
               onClick={() => onToggle(src.id, !src.enabled)}
             >
@@ -172,7 +172,7 @@ export function RegistrySourceManager({
             if (e.key === 'Enter') handleAdd();
           }}
         />
-        <button type="button" style={btn('var(--accent))')} onClick={handleAdd}>
+        <button type="button" style={btn('var(--accent)')} onClick={handleAdd}>
           添加来源
         </button>
       </div>

@@ -57,14 +57,14 @@ const STATUS_LABELS: Record<SessionTerminalStatus, string> = {
 
 const STATUS_COLORS: Record<SessionTerminalStatus, { fg: string; bg: string; dot: string }> = {
   running: {
-    fg: 'var(--success))',
+    fg: 'var(--success)',
     bg: 'color-mix(in srgb, var(--success) 18%, transparent)',
-    dot: 'var(--success))',
+    dot: 'var(--success)',
   },
   idle: {
-    fg: 'var(--aux))',
+    fg: 'var(--aux)',
     bg: 'color-mix(in srgb, var(--aux) 14%, transparent)',
-    dot: 'var(--aux))',
+    dot: 'var(--aux)',
   },
   exited: {
     fg: 'var(--fg-default)',
@@ -72,24 +72,24 @@ const STATUS_COLORS: Record<SessionTerminalStatus, { fg: string; bg: string; dot
     dot: 'var(--fg-muted)',
   },
   aborted: {
-    fg: 'var(--warning))',
+    fg: 'var(--warning)',
     bg: 'color-mix(in srgb, var(--warning) 18%, transparent)',
-    dot: 'var(--warning))',
+    dot: 'var(--warning)',
   },
   timeout: {
-    fg: 'var(--warning))',
+    fg: 'var(--warning)',
     bg: 'color-mix(in srgb, var(--warning) 18%, transparent)',
-    dot: 'var(--warning))',
+    dot: 'var(--warning)',
   },
   spawn_error: {
-    fg: 'var(--danger))',
+    fg: 'var(--danger)',
     bg: 'color-mix(in srgb, var(--danger) 18%, transparent)',
-    dot: 'var(--danger))',
+    dot: 'var(--danger)',
   },
   killed: {
-    fg: 'var(--danger))',
+    fg: 'var(--danger)',
     bg: 'color-mix(in srgb, var(--danger) 18%, transparent)',
-    dot: 'var(--danger))',
+    dot: 'var(--danger)',
   },
   stale: {
     fg: 'var(--fg-muted)',
@@ -97,9 +97,9 @@ const STATUS_COLORS: Record<SessionTerminalStatus, { fg: string; bg: string; dot
     dot: 'var(--fg-muted)',
   },
   'tmux-spawned': {
-    fg: 'var(--aux))',
+    fg: 'var(--aux)',
     bg: 'color-mix(in srgb, var(--aux) 18%, transparent)',
-    dot: 'var(--aux))',
+    dot: 'var(--aux)',
   },
   'tmux-killed': {
     fg: 'var(--fg-muted)',
@@ -248,7 +248,7 @@ function TerminalRow({
               fontSize: 11,
               border: '1px solid color-mix(in srgb, var(--danger) 50%, transparent)',
               background: 'color-mix(in srgb, var(--danger) 14%, transparent)',
-              color: 'var(--danger))',
+              color: 'var(--danger)',
               padding: '3px 8px',
               borderRadius: 5,
               cursor: pendingKill ? 'wait' : 'pointer',
@@ -318,7 +318,7 @@ function TerminalRow({
           <div
             style={{
               height: 240,
-              background: 'var(--bg-base))',
+              background: 'var(--bg-base)',
             }}
           >
             <InteractiveTerminalView
@@ -505,7 +505,7 @@ export function SessionTerminalsPanel({
             style={{
               padding: '8px 14px',
               background: 'color-mix(in srgb, var(--danger) 12%, transparent)',
-              color: 'var(--danger))',
+              color: 'var(--danger)',
               fontSize: 11,
             }}
           >

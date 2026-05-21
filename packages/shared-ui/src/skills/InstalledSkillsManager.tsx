@@ -40,10 +40,10 @@ export interface InstalledSkillsManagerProps {
 const cell: CSSProperties = {
   padding: '0.65rem 1rem',
   fontSize: 12,
-  color: 'var(--fg-default))',
+  color: 'var(--fg-default)',
   verticalAlign: 'middle',
 };
-const muted: CSSProperties = { ...cell, color: 'var(--fg-muted))' };
+const muted: CSSProperties = { ...cell, color: 'var(--fg-muted)' };
 
 const preinstalledBadge: CSSProperties = {
   display: 'inline-flex',
@@ -54,7 +54,7 @@ const preinstalledBadge: CSSProperties = {
   borderRadius: 999,
   fontSize: 10,
   fontWeight: 700,
-  color: 'var(--accent))',
+  color: 'var(--accent)',
   background: 'rgba(56,189,248,0.14)',
   border: '1px solid rgba(56,189,248,0.22)',
 };
@@ -68,7 +68,7 @@ const systemBadge: CSSProperties = {
   borderRadius: 999,
   fontSize: 10,
   fontWeight: 700,
-  color: 'var(--aux))',
+  color: 'var(--aux)',
   background: 'rgba(167,139,250,0.14)',
   border: '1px solid rgba(167,139,250,0.22)',
 };
@@ -122,7 +122,7 @@ export function InstalledSkillsManager({
   return (
     <div
       style={{
-        background: 'var(--bg-overlay))',
+        background: 'var(--bg-overlay)',
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         borderRadius: 12,
         overflow: 'hidden',
@@ -144,7 +144,7 @@ export function InstalledSkillsManager({
               margin: 0,
               fontSize: 12,
               fontWeight: 600,
-              color: 'var(--fg-default))',
+              color: 'var(--fg-default)',
             }}
           >
             已安装技能
@@ -155,7 +155,7 @@ export function InstalledSkillsManager({
             </span>
           )}
         </div>
-        <button type="button" style={btn('var(--accent))')} onClick={onCheckUpdates}>
+        <button type="button" style={btn('var(--accent)')} onClick={onCheckUpdates}>
           检查更新
         </button>
       </div>
@@ -165,7 +165,7 @@ export function InstalledSkillsManager({
           style={{
             padding: '2rem',
             textAlign: 'center',
-            color: 'var(--fg-muted))',
+            color: 'var(--fg-muted)',
             fontSize: 12,
           }}
         >
@@ -224,7 +224,7 @@ export function InstalledSkillsManager({
                         </span>
                       )}
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--fg-muted))', marginTop: 1 }}>
+                    <div style={{ fontSize: 11, color: 'var(--fg-muted)', marginTop: 1 }}>
                       {skill.id}
                     </div>
                   </td>
@@ -265,7 +265,7 @@ export function InstalledSkillsManager({
                         background: skill.enabled
                           ? 'rgba(52,211,153,0.15)'
                           : 'rgba(100,116,139,0.15)',
-                        color: skill.enabled ? color.success : 'var(--fg-muted))',
+                        color: skill.enabled ? color.success : 'var(--fg-muted)',
                         textTransform: 'uppercase' as const,
                         letterSpacing: 0.3,
                       };
@@ -342,7 +342,7 @@ export function InstalledSkillsManager({
                         <>
                           <button
                             type="button"
-                            style={btn('var(--warning))')}
+                            style={btn('var(--warning)')}
                             onClick={() => setConfirmingRemovalId(null)}
                           >
                             取消

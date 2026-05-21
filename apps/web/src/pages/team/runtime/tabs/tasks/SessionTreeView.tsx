@@ -18,7 +18,7 @@ const TREE_CONTAINER_STYLE: CSSProperties = {
   padding: 12,
   borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base)',
 };
 
 const TREE_DEPTH_INDENT = 14;
@@ -144,7 +144,7 @@ export function SessionTreeView({ onSelectSession }: SessionTreeViewProps) {
             style={{
               marginLeft: 'auto',
               fontSize: 10,
-              color: node.state === 'running' ? 'var(--success))' : 'var(--fg-muted)',
+              color: node.state === 'running' ? 'var(--success)' : 'var(--fg-muted)',
             }}
           >
             {node.state}

@@ -31,8 +31,8 @@ export function ChatRemoteStreamPlaceholder({ status }: { status: 'running' | 'p
           height: 28,
           borderRadius: '50%',
           flexShrink: 0,
-          background: 'color-mix(in oklch, var(--accent) 28%, var(--bg-overlay))',
-          border: '1px solid color-mix(in oklch, var(--accent) 32%, var(--border-default))',
+          background: 'color-mix(in oklch, var(--accent) 28%, var(--bg-overlay)',
+          border: '1px solid color-mix(in oklch, var(--accent) 32%, var(--border-default)',
         }}
       />
       <div
@@ -46,11 +46,11 @@ export function ChatRemoteStreamPlaceholder({ status }: { status: 'running' | 'p
           borderRadius: 10,
           border:
             status === 'paused'
-              ? '1px solid color-mix(in srgb, var(--warning) 28%, var(--border-default))'
-              : '1px solid color-mix(in oklch, var(--accent) 24%, var(--border-default))',
+              ? '1px solid color-mix(in srgb, var(--warning) 28%, var(--border-default)'
+              : '1px solid color-mix(in oklch, var(--accent) 24%, var(--border-default)',
           background:
             status === 'paused'
-              ? 'color-mix(in srgb, var(--warning) 6%, var(--bg-overlay))'
+              ? 'color-mix(in srgb, var(--warning) 6%, var(--bg-overlay)'
               : 'color-mix(in oklch, var(--bg-overlay) 92%, var(--accent) 8%)',
         }}
       >

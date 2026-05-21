@@ -20,7 +20,7 @@ const PANEL: React.CSSProperties = {
 
 const HEADER_PANEL: React.CSSProperties = {
   ...PANEL,
-  background: 'linear-gradient(180deg, var(--bg-overlay), var(--bg-overlay))',
+  background: 'linear-gradient(180deg, var(--bg-overlay), var(--bg-overlay)',
 };
 
 const HERO_PANEL: React.CSSProperties = {
@@ -44,7 +44,7 @@ function primaryButtonStyle(disabled: boolean): React.CSSProperties {
     background: disabled
       ? 'rgba(99, 102, 241, 0.35)'
       : 'linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%)',
-    color: 'var(--fg-on-accent))',
+    color: 'var(--fg-on-accent)',
     padding: '11px 16px',
     fontSize: 13,
     fontWeight: 700,
@@ -73,7 +73,7 @@ function StatCard({ label, value }: { label: string; value: string }) {
       style={{
         ...PANEL,
         padding: '14px 16px',
-        background: 'linear-gradient(180deg, var(--bg-overlay), var(--bg-overlay))',
+        background: 'linear-gradient(180deg, var(--bg-overlay), var(--bg-overlay)',
       }}
     >
       <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginBottom: 8 }}>{label}</div>

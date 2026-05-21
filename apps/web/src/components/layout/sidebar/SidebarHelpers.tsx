@@ -279,10 +279,10 @@ export function FileTreeView({
                   padding: `2px 8px 2px ${8 + depth * INDENT_PX}px`,
                   borderRadius: 5,
                   border: isActive
-                    ? '1px solid color-mix(in oklch, var(--accent) 30%, var(--border-default))'
+                    ? '1px solid color-mix(in oklch, var(--accent) 30%, var(--border-default)'
                     : '1px solid transparent',
                   background: isActive
-                    ? 'color-mix(in oklch, var(--accent) 12%, var(--bg-overlay))'
+                    ? 'color-mix(in oklch, var(--accent) 12%, var(--bg-overlay)'
                     : isHighlighted
                       ? 'color-mix(in oklch, var(--accent) 10%, transparent)'
                       : 'transparent',

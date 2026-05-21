@@ -160,196 +160,288 @@ export default function LoginPage({ theme, onToggleTheme }: LoginPageProps = {})
 
   return (
     <div className="login-scene">
+      {/* Animated background elements */}
+      <div className="login-bg-grid" />
       <div className="login-glow login-glow--primary" />
       <div className="login-glow login-glow--secondary" />
+      <div className="login-glow login-glow--tertiary" />
 
       {onToggleTheme && <ThemeToggle theme={theme} onToggleTheme={onToggleTheme} />}
 
-      <div className="login-card">
-        <div className="login-brand">
-          <div className="login-brand-icon">
-            <AppIcon size={28} />
-          </div>
-          <div className="login-brand-title">OpenAWork</div>
-          <p className="login-brand-subtitle">AI Agent Workbench</p>
-        </div>
-
-        <div className="login-heading">
-          <h2>欢迎回来</h2>
-          <p>登录以继续使用</p>
-        </div>
-
-        <form
-          onSubmit={(e) => {
-            void handleSubmit(e);
-          }}
-        >
-          {error && (
-            <div className="login-error">
-              <ErrorIcon />
-              <span>{error}</span>
+      <div className="login-split">
+        {/* Left: Hero / Branding */}
+        <div className="login-hero">
+          <div className="login-hero-content">
+            <div className="login-hero-badge">
+              <SparkleIcon />
+              <span>AI-Powered Workspace</span>
             </div>
-          )}
 
-          <div className="login-field">
-            <label className="login-label" htmlFor="login-email">
-              邮箱
-            </label>
-            <input
-              id="login-email"
-              className="login-input"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              autoComplete="email"
-              placeholder="your@email.com"
-            />
-          </div>
+            <div className="login-hero-brand">
+              <div className="login-hero-logo">
+                <AppIcon size={36} />
+              </div>
+              <h1 className="login-hero-title">OpenAWork</h1>
+            </div>
 
-          <div className="login-field">
-            <label className="login-label" htmlFor="login-password">
-              密码
-            </label>
-            <input
-              id="login-password"
-              className="login-input"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              autoComplete="current-password"
-              placeholder="••••••••"
-            />
-          </div>
+            <p className="login-hero-tagline">
+              下一代 AI Agent 工作台
+              <br />
+              <span className="login-hero-tagline-accent">让智能体为你工作</span>
+            </p>
 
-          <div className="login-field">
-            <button
-              type="button"
-              className="login-advanced-toggle"
-              onClick={() => setShowAdvanced((v) => !v)}
-            >
-              <ChevronIcon expanded={showAdvanced} />
-              服务器设置
-            </button>
-
-            {showAdvanced && (
-              <div className="login-advanced-panel">
-                {desktopRuntime && (
-                  <div className="login-server-mode-grid">
-                    <div
-                      className={`login-server-card${gatewayMode === 'local' ? ' login-server-card--active' : ''}`}
-                    >
-                      <div>
-                        <div className="login-server-card-title">本地服务端</div>
-                        <p className="login-server-card-copy">
-                          启动桌面端内置 Gateway，适合单机使用。
-                        </p>
-                      </div>
-                      <label className="login-label" htmlFor="login-local-port">
-                        本地端口
-                      </label>
-                      <input
-                        id="login-local-port"
-                        className="login-input"
-                        type="number"
-                        min={1}
-                        max={65535}
-                        value={portInput}
-                        onChange={(e) => setPortInput(e.target.value)}
-                      />
-                      <button
-                        type="button"
-                        className="login-server-action"
-                        disabled={localStatus === 'starting'}
-                        onClick={() => void handleStartLocalGateway()}
-                      >
-                        {localStatus === 'starting'
-                          ? '正在启动…'
-                          : localStatus === 'ok'
-                            ? '本地已就绪'
-                            : '使用本地服务端'}
-                      </button>
-                    </div>
-
-                    <div
-                      className={`login-server-card${gatewayMode === 'remote' ? ' login-server-card--active' : ''}`}
-                    >
-                      <div>
-                        <div className="login-server-card-title">远程服务端</div>
-                        <p className="login-server-card-copy">
-                          连接团队、NAS 或云端部署的 OpenAWork Gateway。
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        className="login-server-action login-server-action--secondary"
-                        disabled={remoteStatus === 'testing'}
-                        onClick={() => void handleUseRemoteGateway()}
-                      >
-                        {remoteStatus === 'testing'
-                          ? '正在测试…'
-                          : remoteStatus === 'ok'
-                            ? '远程已就绪'
-                            : remoteStatus === 'fail'
-                              ? '重试远程连接'
-                              : '测试并使用远程'}
-                      </button>
-                    </div>
+            <div className="login-features">
+              <div className="login-feature">
+                <div className="login-feature-icon">
+                  <AgentIcon />
+                </div>
+                <div className="login-feature-text">
+                  <div className="login-feature-title">多模型 Agent 编排</div>
+                  <div className="login-feature-desc">
+                    灵活调度 GPT、Claude、本地模型，构建复杂工作流
                   </div>
-                )}
-                <label className="login-label" htmlFor="login-gateway">
-                  Gateway 地址
+                </div>
+              </div>
+              <div className="login-feature">
+                <div className="login-feature-icon">
+                  <ToolIcon />
+                </div>
+                <div className="login-feature-text">
+                  <div className="login-feature-title">丰富工具生态</div>
+                  <div className="login-feature-desc">文件操作、代码执行、网络搜索，一站式集成</div>
+                </div>
+              </div>
+              <div className="login-feature">
+                <div className="login-feature-icon">
+                  <ShieldIcon />
+                </div>
+                <div className="login-feature-text">
+                  <div className="login-feature-title">本地优先 · 隐私安全</div>
+                  <div className="login-feature-desc">
+                    数据不离开你的设备，完全掌控你的 AI 工作流
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="login-hero-stats">
+              <div className="login-stat">
+                <div className="login-stat-value">10+</div>
+                <div className="login-stat-label">内置工具</div>
+              </div>
+              <div className="login-stat-divider" />
+              <div className="login-stat">
+                <div className="login-stat-value">∞</div>
+                <div className="login-stat-label">可能性</div>
+              </div>
+              <div className="login-stat-divider" />
+              <div className="login-stat">
+                <div className="login-stat-value">100%</div>
+                <div className="login-stat-label">开源</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Decorative floating orbs */}
+          <div className="login-orb login-orb--1" />
+          <div className="login-orb login-orb--2" />
+          <div className="login-orb login-orb--3" />
+        </div>
+
+        {/* Right: Login Form */}
+        <div className="login-form-side">
+          <div className="login-card">
+            <div className="login-card-header">
+              <h2>欢迎回来</h2>
+              <p>登录以继续使用 OpenAWork</p>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                void handleSubmit(e);
+              }}
+            >
+              {error && (
+                <div className="login-error">
+                  <ErrorIcon />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              <div className="login-field">
+                <label className="login-label" htmlFor="login-email">
+                  邮箱
                 </label>
-                <input
-                  id="login-gateway"
-                  className="login-input"
-                  type="url"
-                  value={gatewayInput}
-                  onChange={(e) => setGatewayInput(e.target.value)}
-                  onBlur={handleGatewayBlur}
-                  placeholder="http://localhost:3000"
-                  autoComplete="url"
-                />
-                <p className="login-advanced-hint">
-                  {desktopRuntime
-                    ? gatewayMode === 'local'
-                      ? '当前使用桌面端内置本地服务端。'
-                      : '当前使用远程服务端地址。'
-                    : 'API 网关地址，默认 http://localhost:3000'}
-                </p>
-                {serverError && (
-                  <div className="login-server-error">
-                    <ErrorIcon />
-                    <span>{serverError}</span>
+                <div className="login-input-wrapper">
+                  <MailIcon />
+                  <input
+                    id="login-email"
+                    className="login-input login-input--icon"
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    autoComplete="email"
+                    placeholder="your@email.com"
+                  />
+                </div>
+              </div>
+
+              <div className="login-field">
+                <label className="login-label" htmlFor="login-password">
+                  密码
+                </label>
+                <div className="login-input-wrapper">
+                  <LockIcon />
+                  <input
+                    id="login-password"
+                    className="login-input login-input--icon"
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    autoComplete="current-password"
+                    placeholder="••••••••"
+                  />
+                </div>
+              </div>
+
+              <div className="login-field">
+                <button
+                  type="button"
+                  className="login-advanced-toggle"
+                  onClick={() => setShowAdvanced((v) => !v)}
+                >
+                  <ChevronIcon expanded={showAdvanced} />
+                  服务器设置
+                </button>
+
+                {showAdvanced && (
+                  <div className="login-advanced-panel">
+                    {desktopRuntime && (
+                      <div className="login-server-mode-grid">
+                        <div
+                          className={`login-server-card${gatewayMode === 'local' ? ' login-server-card--active' : ''}`}
+                        >
+                          <div>
+                            <div className="login-server-card-title">本地服务端</div>
+                            <p className="login-server-card-copy">
+                              启动桌面端内置 Gateway，适合单机使用。
+                            </p>
+                          </div>
+                          <label className="login-label" htmlFor="login-local-port">
+                            本地端口
+                          </label>
+                          <input
+                            id="login-local-port"
+                            className="login-input"
+                            type="number"
+                            min={1}
+                            max={65535}
+                            value={portInput}
+                            onChange={(e) => setPortInput(e.target.value)}
+                          />
+                          <button
+                            type="button"
+                            className="login-server-action"
+                            disabled={localStatus === 'starting'}
+                            onClick={() => void handleStartLocalGateway()}
+                          >
+                            {localStatus === 'starting'
+                              ? '正在启动…'
+                              : localStatus === 'ok'
+                                ? '本地已就绪'
+                                : '使用本地服务端'}
+                          </button>
+                        </div>
+
+                        <div
+                          className={`login-server-card${gatewayMode === 'remote' ? ' login-server-card--active' : ''}`}
+                        >
+                          <div>
+                            <div className="login-server-card-title">远程服务端</div>
+                            <p className="login-server-card-copy">
+                              连接团队、NAS 或云端部署的 OpenAWork Gateway。
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            className="login-server-action login-server-action--secondary"
+                            disabled={remoteStatus === 'testing'}
+                            onClick={() => void handleUseRemoteGateway()}
+                          >
+                            {remoteStatus === 'testing'
+                              ? '正在测试…'
+                              : remoteStatus === 'ok'
+                                ? '远程已就绪'
+                                : remoteStatus === 'fail'
+                                  ? '重试远程连接'
+                                  : '测试并使用远程'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    <label className="login-label" htmlFor="login-gateway">
+                      Gateway 地址
+                    </label>
+                    <input
+                      id="login-gateway"
+                      className="login-input"
+                      type="url"
+                      value={gatewayInput}
+                      onChange={(e) => setGatewayInput(e.target.value)}
+                      onBlur={handleGatewayBlur}
+                      placeholder="http://localhost:3000"
+                      autoComplete="url"
+                    />
+                    <p className="login-advanced-hint">
+                      {desktopRuntime
+                        ? gatewayMode === 'local'
+                          ? '当前使用桌面端内置本地服务端。'
+                          : '当前使用远程服务端地址。'
+                        : 'API 网关地址，默认 http://localhost:3000'}
+                    </p>
+                    {serverError && (
+                      <div className="login-server-error">
+                        <ErrorIcon />
+                        <span>{serverError}</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
-            )}
+
+              <button
+                type="submit"
+                disabled={loading || localStatus === 'starting' || remoteStatus === 'testing'}
+                className="login-submit-btn"
+              >
+                <span className="login-btn-shine" />
+                {loading ? (
+                  <>
+                    <LoadingSpinner />
+                    登录中…
+                  </>
+                ) : (
+                  <>
+                    登录
+                    <ArrowRightIcon />
+                  </>
+                )}
+              </button>
+            </form>
+
+            <div className="login-footer">
+              <span className="login-footer-dot" />由 OpenAWork 开源社区驱动
+            </div>
           </div>
-
-          <button
-            type="submit"
-            disabled={loading || localStatus === 'starting' || remoteStatus === 'testing'}
-            className="login-submit-btn"
-          >
-            <span className="login-btn-shine" />
-            {loading ? (
-              <>
-                <LoadingSpinner />
-                登录中…
-              </>
-            ) : (
-              '登录'
-            )}
-          </button>
-        </form>
-
-        <div className="login-footer">由 OpenAWork 驱动</div>
+        </div>
       </div>
     </div>
   );
 }
+
+/* ─── Icon Components ─── */
 
 function AppIcon({ size }: { size: number }) {
   return (
@@ -389,6 +481,130 @@ function AppIcon({ size }: { size: number }) {
         transform="rotate(240, 14, 14)"
       />
       <circle cx="14" cy="14" r="2.2" fill="currentColor" />
+    </svg>
+  );
+}
+
+function SparkleIcon() {
+  return (
+    <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+      <path d="M6 0l1.5 4.5L12 6l-4.5 1.5L6 12l-1.5-4.5L0 6l4.5-1.5z" />
+    </svg>
+  );
+}
+
+function AgentIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="8" cy="5" r="3" />
+      <path d="M3 14c0-2.8 2.2-5 5-5s5 2.2 5 5" />
+      <circle cx="12" cy="4" r="1.5" />
+      <path d="M12 5.5c1.4 0 2.5 1.1 2.5 2.5" />
+    </svg>
+  );
+}
+
+function ToolIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M10.5 2.5l3 3-8.5 8.5H2v-3l8.5-8.5z" />
+      <path d="M9 4l3 3" />
+      <path d="M2 10l4 4" />
+    </svg>
+  );
+}
+
+function ShieldIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M8 1.5l5 2v4c0 3.5-2.5 5.5-5 6.5-2.5-1-5-3-5-6.5v-4l5-2z" />
+      <path d="M6 8l1.5 1.5L10 6.5" />
+    </svg>
+  );
+}
+
+function MailIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="1.5" y="3" width="11" height="8" rx="1.5" />
+      <path d="M1.5 4.5L7 8l5.5-3.5" />
+    </svg>
+  );
+}
+
+function LockIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="6.5" width="8" height="5.5" rx="1.5" />
+      <path d="M4.5 6.5V4.5a2.5 2.5 0 0 1 5 0v2" />
+    </svg>
+  );
+}
+
+function ArrowRightIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 7h8M8 4l3 3-3 3" />
     </svg>
   );
 }

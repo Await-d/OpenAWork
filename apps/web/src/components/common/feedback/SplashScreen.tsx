@@ -49,7 +49,7 @@ export default function SplashScreen() {
             xmlns="http://www.w3.org/2000/svg"
             style={{
               position: 'relative',
-              filter: 'drop-shadow(0 6px 20px var(--accent-muted))',
+              filter: 'drop-shadow(0 6px 20px var(--accent-muted)',
             }}
           >
             <title>OpenAWork</title>

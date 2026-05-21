@@ -253,7 +253,7 @@ function AddTemplateForm({
       style={{
         padding: '12px 16px',
         borderBottom: '1px solid var(--border-subtle)',
-        background: 'color-mix(in oklch, var(--accent) 4%, var(--bg-overlay))',
+        background: 'color-mix(in oklch, var(--accent) 4%, var(--bg-overlay)',
       }}
     >
       <input
@@ -372,7 +372,7 @@ function TemplateRow({
         style={{
           padding: '10px 16px',
           borderBottom: '1px solid var(--border-subtle)',
-          background: 'color-mix(in oklch, var(--accent) 4%, var(--bg-overlay))',
+          background: 'color-mix(in oklch, var(--accent) 4%, var(--bg-overlay)',
         }}
       >
         <input

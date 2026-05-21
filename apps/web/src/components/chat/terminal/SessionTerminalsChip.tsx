@@ -42,7 +42,7 @@ export function SessionTerminalsChip(props: SessionTerminalsChipProps) {
   }, [open, handleClose]);
 
   const activeIndicatorColor =
-    props.runningCount > 0 ? 'var(--success))' : hasAny ? 'var(--fg-muted)' : 'var(--fg-muted)';
+    props.runningCount > 0 ? 'var(--success)' : hasAny ? 'var(--fg-muted)' : 'var(--fg-muted)';
 
   return (
     <>
@@ -64,11 +64,11 @@ export function SessionTerminalsChip(props: SessionTerminalsChipProps) {
           borderRadius: 5,
           border: 'none',
           background: open
-            ? 'color-mix(in srgb, var(--success) 18%, var(--bg-overlay))'
+            ? 'color-mix(in srgb, var(--success) 18%, var(--bg-overlay)'
             : 'transparent',
-          color: props.runningCount > 0 ? 'var(--success))' : 'var(--fg-muted)',
+          color: props.runningCount > 0 ? 'var(--success)' : 'var(--fg-muted)',
           boxShadow: open
-            ? 'inset 0 0 0 1px color-mix(in srgb, var(--success) 50%, var(--border-default))'
+            ? 'inset 0 0 0 1px color-mix(in srgb, var(--success) 50%, var(--border-default)'
             : 'none',
           fontSize: 11,
           fontWeight: 600,

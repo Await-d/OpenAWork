@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { getPairingQr, login, type PairingQrResponse } from '@openAwork/web-client';
-import { PairingPanel, OAuthButton } from '@openAwork/shared-ui';
+import { PairingPanel } from '@openAwork/shared-ui';
 import { logger } from '../../utils/log/logger.js';
 import type { PairingMode } from '@openAwork/shared-ui';
 import {
@@ -22,18 +22,6 @@ import {
   writeDesktopGatewayMode,
 } from '../../utils/gateway/desktop-gateway.js';
 
-const inputStyle: React.CSSProperties = {
-  background: 'var(--bg-overlay)',
-  border: '1px solid var(--border-default)',
-  borderRadius: 8,
-  padding: '8px 12px',
-  color: 'var(--fg-strong)',
-  fontSize: 12,
-  outline: 'none',
-  width: '100%',
-  boxSizing: 'border-box',
-};
-
 type Step = 'mode' | 'connect' | 'login' | 'pairing';
 type LocalStatus = 'idle' | 'starting' | 'ok' | 'fail';
 
@@ -51,6 +39,139 @@ export default function OnboardingModal(props: Props) {
 
   return <BrowserOnboardingModal {...props} />;
 }
+
+/* ─── Shared header & icons ─── */
+
+function OnboardingHeader({ subtitle }: { subtitle?: string }) {
+  return (
+    <div className="onboarding-brand">
+      <div className="onboarding-brand-icon">
+        <AppIcon size={22} />
+      </div>
+      <div>
+        <div className="onboarding-brand-title">OpenAWork</div>
+        {subtitle && <div className="onboarding-brand-subtitle">{subtitle}</div>}
+      </div>
+    </div>
+  );
+}
+
+function CloseButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} aria-label="关闭引导" className="onboarding-close">
+      <svg
+        aria-hidden="true"
+        width="12"
+        height="12"
+        viewBox="0 0 12 12"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      >
+        <path d="M2 2l8 8M10 2l-8 8" />
+      </svg>
+    </button>
+  );
+}
+
+function AppIcon({ size }: { size: number }) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 28 28"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path
+        d="M 14,2.6 C 22.75,2.6 25.4,10.5 14,14"
+        stroke="currentColor"
+        strokeWidth="2.45"
+        strokeLinecap="round"
+        fill="none"
+        opacity="0.92"
+        transform="rotate(0, 14, 14)"
+      />
+      <path
+        d="M 14,2.6 C 22.75,2.6 25.4,10.5 14,14"
+        stroke="currentColor"
+        strokeWidth="2.45"
+        strokeLinecap="round"
+        fill="none"
+        opacity="0.92"
+        transform="rotate(120, 14, 14)"
+      />
+      <path
+        d="M 14,2.6 C 22.75,2.6 25.4,10.5 14,14"
+        stroke="currentColor"
+        strokeWidth="2.45"
+        strokeLinecap="round"
+        fill="none"
+        opacity="0.92"
+        transform="rotate(240, 14, 14)"
+      />
+      <circle cx="14" cy="14" r="2.2" fill="currentColor" />
+    </svg>
+  );
+}
+
+function ServerIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="18"
+      height="18"
+      viewBox="0 0 18 18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="2.5" y="2.5" width="13" height="5" rx="1.5" />
+      <rect x="2.5" y="10.5" width="13" height="5" rx="1.5" />
+      <circle cx="5" cy="5" r="0.5" fill="currentColor" />
+      <circle cx="5" cy="13" r="0.5" fill="currentColor" />
+    </svg>
+  );
+}
+
+function CloudIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="18"
+      height="18"
+      viewBox="0 0 18 18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M5 13.5h8.5a3 3 0 0 0 0.4-5.97A4.5 4.5 0 0 0 4.7 8 3.25 3.25 0 0 0 5 13.5z" />
+    </svg>
+  );
+}
+
+function ErrorIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      style={{ flexShrink: 0, marginTop: 1 }}
+    >
+      <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1ZM7.25 5a.75.75 0 0 1 1.5 0v3a.75.75 0 0 1-1.5 0V5ZM8 10.5A.75.75 0 1 1 8 12a.75.75 0 0 1 0-1.5Z" />
+    </svg>
+  );
+}
+
+/* ─── Desktop Onboarding ─── */
 
 function DesktopGatewayOnboarding({ onComplete }: Props) {
   const { gatewayUrl, setGatewayUrl, setAuth, setWebAccess, webPort } = useAuthStore();
@@ -154,97 +275,45 @@ function DesktopGatewayOnboarding({ onComplete }: Props) {
   }
 
   return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 9999,
-        background: 'rgba(0, 0, 0, 0.7)',
-        backdropFilter: 'blur(6px)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
-      <div
-        style={{
-          background: 'var(--bg-overlay)',
-          border: '1px solid var(--border-default)',
-          borderRadius: 16,
-          padding: '2rem',
-          width: step === 'mode' ? 680 : 420,
-          maxWidth: 'calc(100vw - 32px)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '1.25rem',
-        }}
-      >
-        <h1 style={{ fontSize: 18, fontWeight: 700, color: 'var(--accent)', margin: 0 }}>
-          OpenAWork Desktop
-        </h1>
-        <p style={{ fontSize: 12, color: 'var(--fg-muted)', margin: 0, lineHeight: 1.6 }}>
+    <div className="onboarding-overlay">
+      <div className={`onboarding-modal${step === 'mode' ? ' onboarding-modal--wide' : ''}`}>
+        <OnboardingHeader subtitle="Desktop Setup" />
+
+        <p className="onboarding-tagline">
           桌面端会使用默认本地身份进入工作台。首次启动只需要选择网关来源，后续可在设置中切换。
         </p>
 
         {step === 'mode' ? (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-              gap: 12,
-            }}
-          >
-            <section
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 12,
-                minHeight: 230,
-                padding: 16,
-                border: '1px solid var(--accent-muted)',
-                borderRadius: 14,
-                background: 'var(--accent-muted)',
-              }}
-            >
-              <strong style={{ fontSize: 15, color: 'var(--fg-strong)' }}>使用本地网关</strong>
-              <span style={{ color: 'var(--fg-muted)', fontSize: 12, lineHeight: 1.55 }}>
+          <div className="onboarding-grid">
+            <section className="onboarding-mode-card onboarding-mode-card--primary">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div className="onboarding-mode-icon">
+                  <ServerIcon />
+                </div>
+                <div className="onboarding-mode-title">使用本地网关</div>
+              </div>
+              <p className="onboarding-mode-desc">
                 适合单机使用。桌面端会启动内置 Gateway，并自动进入工作台。
-              </span>
-              <label
-                style={{
-                  fontSize: 12,
-                  color: 'var(--fg-muted)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 4,
-                }}
-              >
-                本地端口
+              </p>
+              <div className="onboarding-form-field">
+                <label className="onboarding-form-label" htmlFor="onboarding-local-port">
+                  本地端口
+                </label>
                 <input
+                  id="onboarding-local-port"
+                  className="onboarding-input"
                   type="number"
                   min={1}
                   max={65535}
                   value={portInput}
                   onChange={(event) => setPortInput(event.target.value)}
-                  style={inputStyle}
                 />
-              </label>
+              </div>
               <button
                 type="button"
                 onClick={() => void chooseLocalGateway()}
                 disabled={localStatus === 'starting'}
-                style={{
-                  marginTop: 'auto',
-                  background: 'var(--accent)',
-                  color: 'var(--fg-on-accent)',
-                  border: 'none',
-                  borderRadius: 8,
-                  padding: '0.7rem',
-                  fontSize: 12,
-                  fontWeight: 700,
-                  cursor: localStatus === 'starting' ? 'not-allowed' : 'pointer',
-                  opacity: localStatus === 'starting' ? 0.72 : 1,
-                }}
+                className="onboarding-mode-action"
               >
                 {localStatus === 'starting'
                   ? '正在启动并进入…'
@@ -254,54 +323,34 @@ function DesktopGatewayOnboarding({ onComplete }: Props) {
               </button>
             </section>
 
-            <section
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 12,
-                minHeight: 230,
-                padding: 16,
-                border: '1px solid var(--border-default)',
-                borderRadius: 14,
-                background: 'var(--bg-hover)',
-              }}
-            >
-              <strong style={{ fontSize: 15, color: 'var(--fg-strong)' }}>连接远程网关</strong>
-              <span style={{ color: 'var(--fg-muted)', fontSize: 12, lineHeight: 1.55 }}>
+            <section className="onboarding-mode-card">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div className="onboarding-mode-icon">
+                  <CloudIcon />
+                </div>
+                <div className="onboarding-mode-title">连接远程网关</div>
+              </div>
+              <p className="onboarding-mode-desc">
                 适合连接团队服务器、NAS、云端部署或已经运行的 OpenAWork Gateway。
-              </span>
+              </p>
               <button
                 type="button"
                 onClick={chooseRemoteGateway}
-                style={{
-                  marginTop: 'auto',
-                  background: 'transparent',
-                  color: 'var(--fg-strong)',
-                  border: '1px solid var(--border-default)',
-                  borderRadius: 8,
-                  padding: '0.7rem',
-                  fontSize: 12,
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
+                className="onboarding-mode-action onboarding-mode-action--secondary"
               >
                 输入远程网关地址
               </button>
             </section>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <label
-              style={{
-                fontSize: 12,
-                color: 'var(--fg-muted)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 4,
-              }}
-            >
-              远程网关地址
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div className="onboarding-form-field">
+              <label className="onboarding-form-label" htmlFor="onboarding-remote-url">
+                远程网关地址
+              </label>
               <input
+                id="onboarding-remote-url"
+                className="onboarding-input"
                 type="url"
                 value={urlInput}
                 onChange={(event) => {
@@ -309,61 +358,42 @@ function DesktopGatewayOnboarding({ onComplete }: Props) {
                   setRemoteStatus('idle');
                 }}
                 placeholder="https://gateway.example.com"
-                style={inputStyle}
               />
-            </label>
-            <label
-              style={{
-                fontSize: 12,
-                color: 'var(--fg-muted)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 4,
-              }}
-            >
-              管理员邮箱
+            </div>
+            <div className="onboarding-form-field">
+              <label className="onboarding-form-label" htmlFor="onboarding-remote-email">
+                管理员邮箱
+              </label>
               <input
+                id="onboarding-remote-email"
+                className="onboarding-input"
                 type="email"
                 value={remoteEmail}
                 onChange={(event) => setRemoteEmail(event.target.value)}
                 autoComplete="username"
                 placeholder={DESKTOP_DEFAULT_EMAIL}
-                style={inputStyle}
               />
-            </label>
-            <label
-              style={{
-                fontSize: 12,
-                color: 'var(--fg-muted)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 4,
-              }}
-            >
-              管理员密码
+            </div>
+            <div className="onboarding-form-field">
+              <label className="onboarding-form-label" htmlFor="onboarding-remote-pwd">
+                管理员密码
+              </label>
               <input
+                id="onboarding-remote-pwd"
+                className="onboarding-input"
                 type="password"
                 value={remotePassword}
                 onChange={(event) => setRemotePassword(event.target.value)}
                 autoComplete="current-password"
                 placeholder="远程 Gateway 管理员密码"
-                style={inputStyle}
               />
-            </label>
-            <div style={{ display: 'flex', gap: 8 }}>
+            </div>
+
+            <div className="onboarding-actions">
               <button
                 type="button"
                 onClick={() => setStep('mode')}
-                style={{
-                  flex: 1,
-                  background: 'transparent',
-                  color: 'var(--fg-muted)',
-                  border: '1px solid var(--border-default)',
-                  borderRadius: 8,
-                  padding: '0.6rem',
-                  fontSize: 12,
-                  cursor: 'pointer',
-                }}
+                className="onboarding-action-btn onboarding-action-btn--ghost"
               >
                 返回
               </button>
@@ -371,18 +401,7 @@ function DesktopGatewayOnboarding({ onComplete }: Props) {
                 type="button"
                 onClick={() => void connectRemoteGateway()}
                 disabled={remoteStatus === 'testing'}
-                style={{
-                  flex: 1,
-                  background: 'var(--accent)',
-                  color: 'var(--fg-on-accent)',
-                  border: 'none',
-                  borderRadius: 8,
-                  padding: '0.6rem',
-                  fontSize: 12,
-                  fontWeight: 700,
-                  cursor: remoteStatus === 'testing' ? 'not-allowed' : 'pointer',
-                  opacity: remoteStatus === 'testing' ? 0.72 : 1,
-                }}
+                className="onboarding-action-btn onboarding-action-btn--primary"
               >
                 {remoteStatus === 'testing'
                   ? '正在连接并进入…'
@@ -394,11 +413,18 @@ function DesktopGatewayOnboarding({ onComplete }: Props) {
           </div>
         )}
 
-        {error ? <p style={{ color: 'var(--danger)', fontSize: 12, margin: 0 }}>{error}</p> : null}
+        {error && (
+          <div className="onboarding-error" style={{ display: 'flex', gap: 8 }}>
+            <ErrorIcon />
+            <span>{error}</span>
+          </div>
+        )}
       </div>
     </div>
   );
 }
+
+/* ─── Browser Onboarding ─── */
 
 function BrowserOnboardingModal({ onComplete }: Props) {
   const desktopRuntime = isTauriRuntime();
@@ -537,136 +563,64 @@ function BrowserOnboardingModal({ onComplete }: Props) {
     }
   }
 
+  const showCloseButton = !(desktopRuntime && step === 'mode');
+
   return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 9999,
-        background: 'rgba(0, 0, 0, 0.7)',
-        backdropFilter: 'blur(6px)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
-      <div
-        style={{
-          position: 'relative',
-          background: 'var(--bg-overlay)',
-          border: '1px solid var(--border-default)',
-          borderRadius: 16,
-          padding: '2rem',
-          width: step === 'mode' ? 680 : 400,
-          maxWidth: 'calc(100vw - 32px)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '1.25rem',
-        }}
-      >
-        {desktopRuntime && step === 'mode' ? null : (
-          <button
-            type="button"
-            onClick={onComplete}
-            aria-label="关闭引导"
-            className="ui-hover-text-bg"
-            style={{
-              position: 'absolute',
-              top: 12,
-              right: 12,
-              width: 28,
-              height: 28,
-              borderRadius: 6,
-              background: 'transparent',
-              border: '1px solid var(--border-default)',
-              color: 'var(--fg-muted)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-            }}
-          >
-            <svg
-              aria-hidden="true"
-              width="12"
-              height="12"
-              viewBox="0 0 12 12"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-            >
-              <path d="M2 2l8 8M10 2l-8 8" />
-            </svg>
-          </button>
-        )}
-        <h1 style={{ fontSize: 18, fontWeight: 700, color: 'var(--accent)' }}>OpenAWork</h1>
+    <div className="onboarding-overlay">
+      <div className={`onboarding-modal${step === 'mode' ? ' onboarding-modal--wide' : ''}`}>
+        {showCloseButton && <CloseButton onClick={onComplete} />}
+
+        <OnboardingHeader
+          subtitle={
+            step === 'mode'
+              ? '初始设置'
+              : step === 'connect'
+                ? '连接 Gateway'
+                : step === 'login'
+                  ? '登录账号'
+                  : '设备配对'
+          }
+        />
+
         {step === 'mode' ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <p style={{ fontSize: 12, color: 'var(--fg-muted)', margin: 0 }}>
-              首次启动桌面端时，请选择服务端连接方式。
-            </p>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-                gap: 12,
-              }}
-            >
-              <section
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 12,
-                  minHeight: 230,
-                  padding: 16,
-                  border: '1px solid var(--accent-muted)',
-                  borderRadius: 14,
-                  background: 'var(--accent-muted)',
-                }}
-              >
-                <strong style={{ fontSize: 15, color: 'var(--fg-strong)' }}>启动本地服务端</strong>
-                <span style={{ color: 'var(--fg-muted)', fontSize: 12, lineHeight: 1.55 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <p className="onboarding-tagline">首次启动桌面端时，请选择服务端连接方式。</p>
+            <div className="onboarding-grid">
+              <section className="onboarding-mode-card onboarding-mode-card--primary">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div className="onboarding-mode-icon">
+                    <ServerIcon />
+                  </div>
+                  <div className="onboarding-mode-title">启动本地服务端</div>
+                </div>
+                <p className="onboarding-mode-desc">
                   适合单机使用。桌面端会启动内置 Gateway，并自动连接到本机地址。
-                </span>
-                <label
-                  style={{
-                    fontSize: 12,
-                    color: 'var(--fg-muted)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 4,
-                  }}
-                >
-                  本地端口
+                </p>
+                <div className="onboarding-form-field">
+                  <label className="onboarding-form-label" htmlFor="browser-onboarding-port">
+                    本地端口
+                  </label>
                   <input
+                    id="browser-onboarding-port"
+                    className="onboarding-input"
                     type="number"
                     min={1}
                     max={65535}
                     value={portInput}
                     onChange={(e) => setPortInput(e.target.value)}
-                    style={inputStyle}
                   />
-                </label>
-                {localError ? (
-                  <p style={{ color: 'var(--danger)', fontSize: 12, margin: 0 }}>{localError}</p>
-                ) : null}
+                </div>
+                {localError && (
+                  <div className="onboarding-error" style={{ display: 'flex', gap: 8 }}>
+                    <ErrorIcon />
+                    <span>{localError}</span>
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={() => void chooseLocalGateway()}
                   disabled={localStatus === 'starting'}
-                  style={{
-                    marginTop: 'auto',
-                    background: 'var(--accent)',
-                    color: 'var(--fg-on-accent)',
-                    border: 'none',
-                    borderRadius: 8,
-                    padding: '0.7rem',
-                    fontSize: 12,
-                    fontWeight: 700,
-                    cursor: localStatus === 'starting' ? 'not-allowed' : 'pointer',
-                    opacity: localStatus === 'starting' ? 0.72 : 1,
-                  }}
+                  className="onboarding-mode-action"
                 >
                   {localStatus === 'starting'
                     ? '正在启动本地服务端…'
@@ -676,36 +630,20 @@ function BrowserOnboardingModal({ onComplete }: Props) {
                 </button>
               </section>
 
-              <section
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 12,
-                  minHeight: 230,
-                  padding: 16,
-                  border: '1px solid var(--border-default)',
-                  borderRadius: 14,
-                  background: 'var(--bg-hover)',
-                }}
-              >
-                <strong style={{ fontSize: 15, color: 'var(--fg-strong)' }}>连接远程服务端</strong>
-                <span style={{ color: 'var(--fg-muted)', fontSize: 12, lineHeight: 1.55 }}>
+              <section className="onboarding-mode-card">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div className="onboarding-mode-icon">
+                    <CloudIcon />
+                  </div>
+                  <div className="onboarding-mode-title">连接远程服务端</div>
+                </div>
+                <p className="onboarding-mode-desc">
                   适合连接团队服务器、NAS、云端部署或已经运行的 OpenAWork Gateway。
-                </span>
+                </p>
                 <button
                   type="button"
                   onClick={chooseRemoteGateway}
-                  style={{
-                    marginTop: 'auto',
-                    background: 'transparent',
-                    color: 'var(--fg-strong)',
-                    border: '1px solid var(--border-default)',
-                    borderRadius: 8,
-                    padding: '0.7rem',
-                    fontSize: 12,
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                  }}
+                  className="onboarding-mode-action onboarding-mode-action--secondary"
                 >
                   输入远程服务端地址
                 </button>
@@ -714,18 +652,14 @@ function BrowserOnboardingModal({ onComplete }: Props) {
           </div>
         ) : step === 'connect' ? (
           <>
-            <p style={{ fontSize: 12, color: 'var(--fg-muted)' }}>输入网关地址以连接。</p>
-            <label
-              style={{
-                fontSize: 12,
-                color: 'var(--fg-muted)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 4,
-              }}
-            >
-              网关地址
+            <p className="onboarding-tagline">输入网关地址以连接。</p>
+            <div className="onboarding-form-field">
+              <label className="onboarding-form-label" htmlFor="browser-onboarding-url">
+                网关地址
+              </label>
               <input
+                id="browser-onboarding-url"
+                className="onboarding-input"
                 type="url"
                 value={urlInput}
                 onChange={(e) => {
@@ -735,23 +669,13 @@ function BrowserOnboardingModal({ onComplete }: Props) {
                 placeholder={
                   desktopRuntime ? 'https://gateway.example.com' : 'http://localhost:3000'
                 }
-                style={inputStyle}
               />
-            </label>
-            <div style={{ display: 'flex', gap: 8 }}>
+            </div>
+            <div className="onboarding-actions">
               <button
                 type="button"
                 onClick={() => void testConnection()}
-                style={{
-                  flex: 1,
-                  background: 'var(--accent-muted)',
-                  color: 'var(--accent)',
-                  border: '1px solid var(--accent-muted)',
-                  borderRadius: 8,
-                  padding: '0.6rem',
-                  fontSize: 12,
-                  cursor: 'pointer',
-                }}
+                className="onboarding-action-btn onboarding-action-btn--accent-ghost"
               >
                 {testStatus === 'testing'
                   ? '测试中…'
@@ -765,36 +689,12 @@ function BrowserOnboardingModal({ onComplete }: Props) {
                 type="button"
                 onClick={saveAndContinue}
                 disabled={testStatus !== 'ok'}
-                style={{
-                  flex: 1,
-                  background: 'var(--accent)',
-                  color: 'var(--fg-on-accent)',
-                  border: 'none',
-                  borderRadius: 8,
-                  padding: '0.6rem',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: testStatus !== 'ok' ? 'not-allowed' : 'pointer',
-                  opacity: testStatus !== 'ok' ? 0.5 : 1,
-                }}
+                className="onboarding-action-btn onboarding-action-btn--primary"
               >
                 继续
               </button>
             </div>
-            <button
-              type="button"
-              onClick={onComplete}
-              className="ui-hover-color"
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: 'var(--fg-muted)',
-                fontSize: 12,
-                cursor: 'pointer',
-                alignSelf: 'center',
-                marginTop: '0.25rem',
-              }}
-            >
+            <button type="button" onClick={onComplete} className="onboarding-link-btn">
               跳过引导，直接登录
             </button>
           </>
@@ -803,108 +703,57 @@ function BrowserOnboardingModal({ onComplete }: Props) {
             onSubmit={(e) => {
               void handleLogin(e);
             }}
-            style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}
+            style={{ display: 'flex', flexDirection: 'column', gap: 14 }}
           >
-            <p style={{ fontSize: 12, color: 'var(--fg-muted)' }}>登录您的账号。</p>
-            <OAuthButton
-              providerName="GitHub"
-              isAuthorized={false}
-              onAuthorize={() => logger.info('OAuth: GitHub authorize triggered')}
-              onRevoke={() => {}}
-            />
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0.5rem 0' }}>
-              <hr
-                style={{ flex: 1, border: 'none', borderTop: '1px solid var(--border-default)' }}
-              />
-              <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>或使用邮箱</span>
-              <hr
-                style={{ flex: 1, border: 'none', borderTop: '1px solid var(--border-default)' }}
-              />
-            </div>
+            <p className="onboarding-tagline">登录您的账号。</p>
             {loginError && (
-              <div
-                style={{
-                  background: 'oklch(from var(--danger) l c h / 0.1)',
-                  border: '1px solid oklch(from var(--danger) l c h / 0.3)',
-                  borderRadius: 6,
-                  padding: '0.5rem 0.75rem',
-                  color: 'var(--danger)',
-                  fontSize: 12,
-                }}
-              >
-                {loginError}
+              <div className="onboarding-error" style={{ display: 'flex', gap: 8 }}>
+                <ErrorIcon />
+                <span>{loginError}</span>
               </div>
             )}
-            <label
-              style={{
-                fontSize: 12,
-                color: 'var(--fg-muted)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 4,
-              }}
-            >
-              邮箱
+            <div className="onboarding-form-field">
+              <label className="onboarding-form-label" htmlFor="browser-onboarding-email">
+                邮箱
+              </label>
               <input
+                id="browser-onboarding-email"
+                className="onboarding-input"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 autoComplete="email"
-                style={inputStyle}
+                placeholder="your@email.com"
               />
-            </label>
-            <label
-              style={{
-                fontSize: 12,
-                color: 'var(--fg-muted)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 4,
-              }}
-            >
-              密码
+            </div>
+            <div className="onboarding-form-field">
+              <label className="onboarding-form-label" htmlFor="browser-onboarding-password">
+                密码
+              </label>
               <input
+                id="browser-onboarding-password"
+                className="onboarding-input"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 autoComplete="current-password"
-                style={inputStyle}
+                placeholder="••••••••"
               />
-            </label>
-            <div style={{ display: 'flex', gap: 8 }}>
+            </div>
+            <div className="onboarding-actions">
               <button
                 type="button"
                 onClick={() => setStep(desktopRuntime && mode === 'local' ? 'mode' : 'connect')}
-                style={{
-                  flex: 1,
-                  background: 'transparent',
-                  color: 'var(--fg-muted)',
-                  border: '1px solid var(--border-default)',
-                  borderRadius: 8,
-                  padding: '0.6rem',
-                  fontSize: 12,
-                  cursor: 'pointer',
-                }}
+                className="onboarding-action-btn onboarding-action-btn--ghost"
               >
                 返回
               </button>
               <button
                 type="submit"
                 disabled={logging}
-                style={{
-                  flex: 1,
-                  background: 'var(--accent)',
-                  color: 'var(--fg-on-accent)',
-                  border: 'none',
-                  borderRadius: 8,
-                  padding: '0.6rem',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: logging ? 'not-allowed' : 'pointer',
-                  opacity: logging ? 0.7 : 1,
-                }}
+                className="onboarding-action-btn onboarding-action-btn--primary"
               >
                 {logging ? '登录中…' : '登录'}
               </button>
@@ -912,23 +761,14 @@ function BrowserOnboardingModal({ onComplete }: Props) {
             <button
               type="button"
               onClick={() => setStep('pairing')}
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: 'var(--fg-muted)',
-                fontSize: 12,
-                cursor: 'pointer',
-                textDecoration: 'underline',
-                marginTop: '0.25rem',
-                alignSelf: 'center',
-              }}
+              className="onboarding-link-btn onboarding-link-btn--underline"
             >
               设备配对（可选）
             </button>
           </form>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <p style={{ fontSize: 12, color: 'var(--fg-muted)' }}>将另一台设备与此工作区配对。</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <p className="onboarding-tagline">将另一台设备与此工作区配对。</p>
             <PairingPanel
               mode="host"
               host={{
@@ -941,46 +781,34 @@ function BrowserOnboardingModal({ onComplete }: Props) {
               client={{ onScanned: () => {}, onManualCode: () => {} }}
               onModeChange={(_mode: PairingMode) => {}}
             />
-            {pairingLoading ? (
-              <p style={{ fontSize: 12, color: 'var(--fg-muted)' }}>正在生成配对二维码…</p>
-            ) : null}
-            {pairingError ? (
-              <p style={{ fontSize: 12, color: 'var(--danger)' }}>{pairingError}</p>
-            ) : null}
-            {pairingQr ? (
-              <p style={{ fontSize: 11, color: 'var(--fg-muted)' }}>Gateway: {pairingQr.hostUrl}</p>
-            ) : null}
-            <div style={{ display: 'flex', gap: 8 }}>
+            {pairingLoading && (
+              <p style={{ fontSize: 12, color: 'var(--fg-muted)', margin: 0 }}>
+                正在生成配对二维码…
+              </p>
+            )}
+            {pairingError && (
+              <div className="onboarding-error" style={{ display: 'flex', gap: 8 }}>
+                <ErrorIcon />
+                <span>{pairingError}</span>
+              </div>
+            )}
+            {pairingQr && (
+              <p style={{ fontSize: 11, color: 'var(--fg-muted)', margin: 0 }}>
+                Gateway: {pairingQr.hostUrl}
+              </p>
+            )}
+            <div className="onboarding-actions">
               <button
                 type="button"
                 onClick={() => setStep('login')}
-                style={{
-                  flex: 1,
-                  background: 'transparent',
-                  color: 'var(--fg-muted)',
-                  border: '1px solid var(--border-default)',
-                  borderRadius: 8,
-                  padding: '0.6rem',
-                  fontSize: 12,
-                  cursor: 'pointer',
-                }}
+                className="onboarding-action-btn onboarding-action-btn--ghost"
               >
                 返回
               </button>
               <button
                 type="button"
                 onClick={onComplete}
-                style={{
-                  flex: 1,
-                  background: 'var(--accent)',
-                  color: 'var(--fg-on-accent)',
-                  border: 'none',
-                  borderRadius: 8,
-                  padding: '0.6rem',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
+                className="onboarding-action-btn onboarding-action-btn--primary"
               >
                 跳过
               </button>

@@ -22,8 +22,8 @@ export function GenerateImageFetchErrorCard({
     <div
       style={{
         borderRadius: 10,
-        border: '1px solid color-mix(in oklch, var(--warning) 22%, var(--border-subtle))',
-        background: 'color-mix(in oklch, var(--warning) 5%, var(--bg-overlay))',
+        border: '1px solid color-mix(in oklch, var(--warning) 22%, var(--border-subtle)',
+        background: 'color-mix(in oklch, var(--warning) 5%, var(--bg-overlay)',
         padding: '10px 14px',
         display: 'flex',
         flexDirection: 'column',
@@ -82,8 +82,8 @@ export function GenerateImageToolErrorCard({ rawOutput }: { rawOutput?: unknown 
     <div
       style={{
         borderRadius: 10,
-        border: '1px solid color-mix(in oklch, var(--danger) 20%, var(--border-subtle))',
-        background: 'color-mix(in oklch, var(--danger) 4%, var(--bg-overlay))',
+        border: '1px solid color-mix(in oklch, var(--danger) 20%, var(--border-subtle)',
+        background: 'color-mix(in oklch, var(--danger) 4%, var(--bg-overlay)',
         padding: '10px 14px',
         display: 'flex',
         flexDirection: 'column',
@@ -108,7 +108,7 @@ export function GenerateImageToolErrorCard({ rawOutput }: { rawOutput?: unknown 
           style={{
             fontSize: 11,
             lineHeight: 1.6,
-            color: 'color-mix(in oklch, var(--danger) 70%, var(--fg-muted))',
+            color: 'color-mix(in oklch, var(--danger) 70%, var(--fg-muted)',
             wordBreak: 'break-word',
           }}
         >

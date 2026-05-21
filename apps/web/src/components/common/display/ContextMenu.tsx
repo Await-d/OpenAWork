@@ -131,7 +131,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
             style={{
               ...ITEM_STYLE,
               color: item.danger
-                ? 'var(--danger))'
+                ? 'var(--danger)'
                 : item.disabled
                   ? 'var(--fg-muted)'
                   : 'var(--text-1)',

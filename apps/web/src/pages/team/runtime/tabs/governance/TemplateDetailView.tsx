@@ -329,7 +329,7 @@ function TemplateDetailView({
               padding: '3px 8px',
               borderRadius: 6,
               background: 'color-mix(in oklch, var(--accent) 14%, transparent)',
-              color: 'var(--chart-5))',
+              color: 'var(--chart-5)',
               fontSize: 10,
               fontWeight: 700,
             }}
@@ -379,7 +379,7 @@ function TemplateDetailView({
           <span style={fieldLabelStyle}>额外增援</span>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {optionalAgents.map((label) => (
-              <span key={label} style={pillButtonStyle(true, 'var(--warning))')}>
+              <span key={label} style={pillButtonStyle(true, 'var(--warning)')}>
                 {label}
               </span>
             ))}

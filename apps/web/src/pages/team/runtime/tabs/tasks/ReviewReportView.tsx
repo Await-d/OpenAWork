@@ -9,19 +9,19 @@ import { ArtifactPreview } from './ArtifactPreview.js';
 
 const VERDICT_STYLES: Record<string, CSSProperties> = {
   pass: {
-    color: 'var(--success))',
+    color: 'var(--success)',
     border: '1px solid color-mix(in srgb, var(--success) 40%, transparent)',
-    background: 'color-mix(in srgb, var(--success) 8%, var(--bg-overlay))',
+    background: 'color-mix(in srgb, var(--success) 8%, var(--bg-overlay)',
   },
   'implementation-failure': {
-    color: 'var(--danger))',
+    color: 'var(--danger)',
     border: '1px solid color-mix(in srgb, var(--danger) 40%, transparent)',
-    background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay))',
+    background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay)',
   },
   'planning-failure': {
-    color: 'var(--warning))',
+    color: 'var(--warning)',
     border: '1px solid color-mix(in srgb, var(--warning) 40%, transparent)',
-    background: 'color-mix(in srgb, var(--warning) 8%, var(--bg-overlay))',
+    background: 'color-mix(in srgb, var(--warning) 8%, var(--bg-overlay)',
   },
 };
 

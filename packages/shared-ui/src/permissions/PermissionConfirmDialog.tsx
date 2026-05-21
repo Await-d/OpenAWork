@@ -18,7 +18,7 @@ export interface PermissionConfirmDialogProps {
 
 const TRUST_COLOR: Record<string, string> = {
   full: color.success,
-  standard: 'var(--accent))',
+  standard: 'var(--accent)',
   restricted: color.danger,
 };
 const TRUST_LABEL: Record<string, string> = {
@@ -27,7 +27,7 @@ const TRUST_LABEL: Record<string, string> = {
   restricted: '受限',
 };
 
-const RISK_COLOR: Record<string, string> = { true: color.danger, false: 'var(--fg-muted))' };
+const RISK_COLOR: Record<string, string> = { true: color.danger, false: 'var(--fg-muted)' };
 
 const s: Record<string, CSSProperties> = {
   overlay: {
@@ -40,7 +40,7 @@ const s: Record<string, CSSProperties> = {
     zIndex: 1000,
   },
   dialog: {
-    background: 'var(--bg-overlay))',
+    background: 'var(--bg-overlay)',
     border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
     borderRadius: 14,
     padding: '1.5rem',
@@ -55,8 +55,8 @@ const s: Record<string, CSSProperties> = {
     alignItems: 'flex-start',
     marginBottom: '1rem',
   },
-  title: { margin: 0, fontSize: 14, fontWeight: 700, color: 'var(--fg-default))' },
-  subtitle: { margin: '0.25rem 0 0', fontSize: 12, color: 'var(--fg-muted))' },
+  title: { margin: 0, fontSize: 14, fontWeight: 700, color: 'var(--fg-default)' },
+  subtitle: { margin: '0.25rem 0 0', fontSize: 12, color: 'var(--fg-muted)' },
   badge: {
     fontSize: 10,
     fontWeight: 700,
@@ -86,10 +86,10 @@ const s: Record<string, CSSProperties> = {
   permType: {
     fontFamily: 'monospace',
     fontSize: 12,
-    color: 'var(--accent))',
+    color: 'var(--accent)',
     minWidth: 80,
   },
-  permScope: { color: 'var(--fg-default))', flex: 1, fontSize: 12 },
+  permScope: { color: 'var(--fg-default)', flex: 1, fontSize: 12 },
   footer: { display: 'flex', gap: 8, justifyContent: 'flex-end' },
 };
 
@@ -117,7 +117,7 @@ export function PermissionConfirmDialog({
 }: PermissionConfirmDialogProps) {
   if (!open) return null;
 
-  const trustColor = TRUST_COLOR[trustLevel] ?? 'var(--fg-muted))';
+  const trustColor = TRUST_COLOR[trustLevel] ?? 'var(--fg-muted)';
   const requiredCount = permissions.filter((p) => p.required).length;
 
   return (
@@ -190,12 +190,12 @@ export function PermissionConfirmDialog({
         )}
 
         <div style={s.footer}>
-          <button type="button" style={actionBtn('var(--fg-muted))')} onClick={onCancel}>
+          <button type="button" style={actionBtn('var(--fg-muted)')} onClick={onCancel}>
             取消
           </button>
           <button
             type="button"
-            style={actionBtn(color.fgOnAccent, 'var(--accent))')}
+            style={actionBtn(color.fgOnAccent, 'var(--accent)')}
             onClick={onConfirm}
           >
             确认安装

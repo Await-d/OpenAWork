@@ -28,8 +28,8 @@ export interface CronManagerProps {
 }
 
 const KIND_COLOR: Record<ScheduleKind, string> = {
-  at: 'var(--accent))',
-  every: 'var(--aux))',
+  at: 'var(--accent)',
+  every: 'var(--aux)',
   cron: color.warning,
 };
 
@@ -41,7 +41,7 @@ const KIND_LABEL: Record<ScheduleKind, string> = {
 
 const STATUS_COLOR: Record<CronJobStatus, string> = {
   enabled: color.success,
-  disabled: 'var(--fg-muted))',
+  disabled: 'var(--fg-muted)',
   running: color.contrast,
 };
 
@@ -74,7 +74,7 @@ export function CronManager({
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         borderRadius: 10,
         overflow: 'hidden',
-        background: 'var(--bg-overlay))',
+        background: 'var(--bg-overlay)',
         ...style,
       }}
     >
@@ -92,7 +92,7 @@ export function CronManager({
           style={{
             fontSize: 11,
             fontWeight: 700,
-            color: 'var(--fg-muted))',
+            color: 'var(--fg-muted)',
             textTransform: 'uppercase',
             letterSpacing: 0.6,
           }}
@@ -104,7 +104,7 @@ export function CronManager({
             type="button"
             onClick={onAdd}
             style={{
-              background: 'var(--accent))',
+              background: 'var(--accent)',
               color: color.fgOnAccent,
               border: 'none',
               borderRadius: 5,
@@ -125,7 +125,7 @@ export function CronManager({
             padding: '1.25rem',
             textAlign: 'center',
             fontSize: 12,
-            color: 'var(--fg-muted))',
+            color: 'var(--fg-muted)',
           }}
         >
           暂无定时任务配置
@@ -157,7 +157,7 @@ export function CronManager({
                   style={{
                     fontSize: 12,
                     fontWeight: 600,
-                    color: 'var(--fg-strong))',
+                    color: 'var(--fg-strong)',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
@@ -183,7 +183,7 @@ export function CronManager({
                 <span
                   style={{
                     fontSize: 11,
-                    color: 'var(--fg-muted))',
+                    color: 'var(--fg-muted)',
                     fontFamily: 'monospace',
                     flexShrink: 0,
                   }}
@@ -199,13 +199,13 @@ export function CronManager({
                   flexWrap: 'wrap',
                 }}
               >
-                <span style={{ fontSize: 11, color: 'var(--fg-muted))' }}>
+                <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
                   上次：{fmtTime(job.lastFiredAt)}
                 </span>
-                <span style={{ fontSize: 11, color: 'var(--fg-muted))' }}>
+                <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
                   下次：{fmtTime(job.nextFireAt)}
                 </span>
-                <span style={{ fontSize: 11, color: 'var(--fg-muted))' }}>
+                <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
                   运行次数：{job.fireCount}
                 </span>
               </div>
@@ -248,7 +248,7 @@ export function CronManager({
                   onClick={() => onEnable(job.id)}
                   style={{
                     background: color.successMuted,
-                    color: 'var(--success))',
+                    color: 'var(--success)',
                     border: 'none',
                     borderRadius: 5,
                     padding: '0.25rem 0.6rem',
@@ -285,8 +285,8 @@ export function CronManager({
                   disabled={job.status === 'running'}
                   title={job.status === 'running' ? '运行中' : 'Run now'}
                   style={{
-                    background: job.status === 'running' ? 'var(--bg-raised)' : 'var(--accent))',
-                    color: job.status === 'running' ? 'var(--fg-muted))' : color.fgOnAccent,
+                    background: job.status === 'running' ? 'var(--bg-raised)' : 'var(--accent)',
+                    color: job.status === 'running' ? 'var(--fg-muted)' : color.fgOnAccent,
                     border:
                       job.status === 'running'
                         ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))'
@@ -326,7 +326,7 @@ export function CronManager({
                   title="删除任务"
                   style={{
                     background: 'transparent',
-                    color: 'var(--fg-muted))',
+                    color: 'var(--fg-muted)',
                     border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
                     borderRadius: 5,
                     padding: '0.25rem 0.5rem',

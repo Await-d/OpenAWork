@@ -406,7 +406,7 @@ export default function AgentsPage() {
                 padding: '14px 16px',
               }}
             >
-              <div style={{ color: 'var(--danger))', fontSize: 13 }}>{error}</div>
+              <div style={{ color: 'var(--danger)', fontSize: 13 }}>{error}</div>
             </section>
           )}
 

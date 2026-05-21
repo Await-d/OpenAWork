@@ -117,7 +117,7 @@ export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
               padding: '6px 10px',
               borderRadius: 8,
               border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
-              background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base))',
+              background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base)',
               color: 'var(--fg-strong)',
               fontSize: 11,
               fontWeight: 700,
@@ -305,7 +305,7 @@ function HandoffCancelInline({
             padding: '6px 10px',
             borderRadius: 8,
             border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
-            background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+            background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
             fontSize: 12,
           }}
         >
@@ -314,7 +314,7 @@ function HandoffCancelInline({
               width: 6,
               height: 6,
               borderRadius: 999,
-              background: entry.state === 'running' ? 'var(--success))' : 'var(--warning))',
+              background: entry.state === 'running' ? 'var(--success)' : 'var(--warning)',
               flexShrink: 0,
             }}
           />
@@ -338,7 +338,7 @@ function HandoffCancelInline({
               borderRadius: 6,
               border: '1px solid color-mix(in srgb, var(--danger) 40%, transparent)',
               background: 'color-mix(in srgb, var(--danger) 8%, transparent)',
-              color: 'var(--danger))',
+              color: 'var(--danger)',
               fontSize: 10,
               fontWeight: 700,
               cursor: 'pointer',

@@ -344,13 +344,13 @@ function normalizeDraft(draft: ChannelDraft): ChannelDraft {
 function getStatusTone(status: ChannelEditorStatus): { label: string; color: string } {
   switch (status) {
     case 'connected':
-      return { label: '运行中', color: 'var(--success))' };
+      return { label: '运行中', color: 'var(--success)' };
     case 'error':
-      return { label: '异常', color: 'var(--danger))' };
+      return { label: '异常', color: 'var(--danger)' };
     case 'pending':
-      return { label: '待创建', color: 'var(--warning))' };
+      return { label: '待创建', color: 'var(--warning)' };
     default:
-      return { label: '已停止', color: 'var(--fg-muted))' };
+      return { label: '已停止', color: 'var(--fg-muted)' };
   }
 }
 
@@ -971,7 +971,7 @@ export function ChannelSubscriptionSettings({
                     <div key={field.key} className="channel-field">
                       <div className="channel-field__label">
                         {field.label}
-                        {field.required ? <span style={{ color: 'var(--danger))' }}>*</span> : null}
+                        {field.required ? <span style={{ color: 'var(--danger)' }}>*</span> : null}
                       </div>
                       {field.description ? (
                         <div className="channel-field__hint">{field.description}</div>
