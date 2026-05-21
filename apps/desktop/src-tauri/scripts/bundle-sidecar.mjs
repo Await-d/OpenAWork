@@ -100,6 +100,7 @@ find_payload() {
     "$script_dir/$payload_name" \\
     "$script_dir/binaries/$payload_name" \\
     "$script_dir/../binaries/$payload_name" \\
+    "$script_dir/../lib/openAwork-desktop/binaries/$payload_name" \\
     "$script_dir/../lib/OpenAWork/binaries/$payload_name" \\
     "$script_dir/../lib/openAwork/binaries/$payload_name"
   do
@@ -110,12 +111,14 @@ find_payload() {
   done
 
   # 2) AppImage 场景：Tauri 2.x 把 externalBin 放在 $APPDIR/usr/bin/，
-  #    resources 放在 $APPDIR/usr/lib/<productName>/。
+  #    resources 放在 $APPDIR/usr/lib/<binary-name>/。
   #    用确定性路径避免 find 扫描整个 FUSE 挂载（极慢）。
   if [ -n "\${APPDIR:-}" ]; then
     for candidate in \\
       "$APPDIR/usr/bin/$payload_name" \\
       "$APPDIR/usr/bin/binaries/$payload_name" \\
+      "$APPDIR/usr/lib/openAwork-desktop/binaries/$payload_name" \\
+      "$APPDIR/usr/lib/openAwork-desktop/$payload_name" \\
       "$APPDIR/usr/lib/OpenAWork/binaries/$payload_name" \\
       "$APPDIR/usr/lib/OpenAWork/$payload_name" \\
       "$APPDIR/usr/lib/openAwork/binaries/$payload_name" \\
