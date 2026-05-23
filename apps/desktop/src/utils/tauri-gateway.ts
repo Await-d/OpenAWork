@@ -24,6 +24,10 @@ export async function stopDesktopGateway(): Promise<void> {
   await invoke<void>('stop_gateway');
 }
 
+export async function restartDesktopApp(): Promise<void> {
+  await invoke<void>('restart_app');
+}
+
 export async function isLocalDesktopGatewayHealthy(port: number): Promise<boolean> {
   return await invoke<boolean>('check_local_gateway_health', { port });
 }

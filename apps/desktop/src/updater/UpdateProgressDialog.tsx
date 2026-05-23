@@ -8,6 +8,7 @@ import {
   type GitHubProxy,
 } from './auto-update.js';
 import { UpdateErrorDialog } from './UpdateErrorDialog.js';
+import { restartDesktopApp } from '../utils/tauri-gateway.js';
 
 type UpdateState =
   | 'idle'
@@ -17,16 +18,6 @@ type UpdateState =
   | 'installing'
   | 'done'
   | 'up-to-date';
-
-async function tauriInvoke<T>(cmd: string): Promise<T> {
-  const tauri = (
-    window as Window & {
-      __TAURI__?: { core: { invoke: (c: string) => Promise<T> } };
-    }
-  ).__TAURI__;
-  if (!tauri) throw new Error('Not running in Tauri');
-  return tauri.core.invoke(cmd);
-}
 
 export interface UpdateProgressDialogProps {
   autoCheck?: boolean;
@@ -325,7 +316,7 @@ ${releaseNotes}`
           {state === 'done' && !isProxyMode && (
             <button
               type="button"
-              onClick={() => tauriInvoke('restart_app')}
+              onClick={() => void restartDesktopApp()}
               style={{
                 padding: '6px 14px',
                 background: 'hsl(142 71% 45%)',

@@ -4,6 +4,7 @@ use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -1017,6 +1018,17 @@ async fn stop_gateway(
 }
 
 #[tauri::command]
+async fn restart_app(app: tauri::AppHandle, state: State<'_, GatewayProcess>) -> Result<(), String> {
+    let _ = stop_gateway(app.clone(), state).await;
+    let current_exe = std::env::current_exe().map_err(|error| error.to_string())?;
+    Command::new(current_exe)
+        .spawn()
+        .map_err(|error| error.to_string())?;
+    app.exit(0);
+    Ok(())
+}
+
+#[tauri::command]
 async fn gateway_status(state: State<'_, GatewayProcess>) -> Result<bool, String> {
     let guard = state.0.lock().map_err(|e| e.to_string())?;
     Ok(guard.child.is_some())
@@ -1768,6 +1780,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             start_gateway,
             stop_gateway,
+            restart_app,
             list_lan_addresses,
             check_local_gateway_health,
             gateway_status,
