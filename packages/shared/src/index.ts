@@ -95,6 +95,239 @@ export function isFixedTeamCoreAgentId(agentId: string): boolean {
   return FIXED_TEAM_CORE_AGENT_IDS.includes(agentId);
 }
 
+export type TeamRuntimeLayer = 'reception' | 'pm1' | 'pm2' | 'executor' | 'reviewer';
+
+export type TeamMemberSpecialty =
+  | 'intake'
+  | 'product-planning'
+  | 'task-planning'
+  | 'tech-lead'
+  | 'dispatch'
+  | 'release'
+  | 'frontend'
+  | 'backend'
+  | 'data'
+  | 'workflow'
+  | 'integration'
+  | 'qa'
+  | 'docs'
+  | 'devops'
+  | 'platform'
+  | 'code-review'
+  | 'security'
+  | 'sre'
+  | 'observability'
+  | 'quality';
+
+export interface FixedTeamMemberSlot {
+  id: string;
+  layer: TeamRuntimeLayer;
+  specialty: TeamMemberSpecialty;
+  displayName: string;
+  personaKey: string;
+  toolsets: string[];
+  required: boolean;
+}
+
+export const DEFAULT_FIXED_TEAM_MEMBER_SLOTS: FixedTeamMemberSlot[] = [
+  {
+    id: 'reception-intake',
+    layer: 'reception',
+    specialty: 'intake',
+    displayName: '接待官 / 需求澄清官',
+    personaKey: 'reception:intake',
+    toolsets: ['read'],
+    required: true,
+  },
+  {
+    id: 'pm1-product-planner',
+    layer: 'pm1',
+    specialty: 'product-planning',
+    displayName: '产品规划师',
+    personaKey: 'pm1:product-planning',
+    toolsets: ['read'],
+    required: true,
+  },
+  {
+    id: 'pm1-task-planner',
+    layer: 'pm1',
+    specialty: 'task-planning',
+    displayName: '任务拆解师',
+    personaKey: 'pm1:task-planning',
+    toolsets: ['read'],
+    required: true,
+  },
+  {
+    id: 'pm2-tech-lead',
+    layer: 'pm2',
+    specialty: 'tech-lead',
+    displayName: '技术负责人',
+    personaKey: 'pm2:tech-lead',
+    toolsets: ['read', 'lsp', 'review'],
+    required: true,
+  },
+  {
+    id: 'pm2-dispatcher',
+    layer: 'pm2',
+    specialty: 'dispatch',
+    displayName: '调度派发官',
+    personaKey: 'pm2:dispatch',
+    toolsets: ['read'],
+    required: true,
+  },
+  {
+    id: 'pm2-release-manager',
+    layer: 'pm2',
+    specialty: 'release',
+    displayName: '发布经理',
+    personaKey: 'pm2:release',
+    toolsets: ['read', 'review'],
+    required: false,
+  },
+  {
+    id: 'executor-frontend',
+    layer: 'executor',
+    specialty: 'frontend',
+    displayName: '前端开发者',
+    personaKey: 'executor:frontend',
+    toolsets: ['read', 'write', 'shell', 'lsp', 'test'],
+    required: true,
+  },
+  {
+    id: 'executor-backend',
+    layer: 'executor',
+    specialty: 'backend',
+    displayName: '后端开发者',
+    personaKey: 'executor:backend',
+    toolsets: ['read', 'write', 'shell', 'lsp', 'test'],
+    required: true,
+  },
+  {
+    id: 'executor-data',
+    layer: 'executor',
+    specialty: 'data',
+    displayName: '数据工程师',
+    personaKey: 'executor:data',
+    toolsets: ['read', 'write', 'shell', 'lsp', 'test'],
+    required: false,
+  },
+  {
+    id: 'executor-workflow',
+    layer: 'executor',
+    specialty: 'workflow',
+    displayName: '工作流工程师',
+    personaKey: 'executor:workflow',
+    toolsets: ['read', 'write', 'shell', 'lsp', 'test'],
+    required: false,
+  },
+  {
+    id: 'executor-integration',
+    layer: 'executor',
+    specialty: 'integration',
+    displayName: '集成工程师',
+    personaKey: 'executor:integration',
+    toolsets: ['read', 'write', 'shell', 'lsp', 'test', 'web'],
+    required: false,
+  },
+  {
+    id: 'executor-qa',
+    layer: 'executor',
+    specialty: 'qa',
+    displayName: '测试验证工程师',
+    personaKey: 'executor:qa',
+    toolsets: ['read', 'write', 'shell', 'lsp', 'test'],
+    required: false,
+  },
+  {
+    id: 'executor-docs',
+    layer: 'executor',
+    specialty: 'docs',
+    displayName: '文档工程师',
+    personaKey: 'executor:docs',
+    toolsets: ['read', 'write'],
+    required: false,
+  },
+  {
+    id: 'executor-devops',
+    layer: 'executor',
+    specialty: 'devops',
+    displayName: 'DevOps 工程师',
+    personaKey: 'executor:devops',
+    toolsets: ['read', 'write', 'shell', 'test'],
+    required: false,
+  },
+  {
+    id: 'executor-platform',
+    layer: 'executor',
+    specialty: 'platform',
+    displayName: '平台工程师',
+    personaKey: 'executor:platform',
+    toolsets: ['read', 'write', 'shell', 'lsp', 'test'],
+    required: false,
+  },
+  {
+    id: 'reviewer-code',
+    layer: 'reviewer',
+    specialty: 'code-review',
+    displayName: '代码评审员',
+    personaKey: 'reviewer:code-review',
+    toolsets: ['read', 'lsp', 'review'],
+    required: true,
+  },
+  {
+    id: 'reviewer-security',
+    layer: 'reviewer',
+    specialty: 'security',
+    displayName: '安全评审员',
+    personaKey: 'reviewer:security',
+    toolsets: ['read', 'lsp', 'review'],
+    required: false,
+  },
+  {
+    id: 'reviewer-sre',
+    layer: 'reviewer',
+    specialty: 'sre',
+    displayName: 'SRE / 运维评审员',
+    personaKey: 'reviewer:sre',
+    toolsets: ['read', 'shell', 'review'],
+    required: false,
+  },
+  {
+    id: 'reviewer-observability',
+    layer: 'reviewer',
+    specialty: 'observability',
+    displayName: '可观测性评审员',
+    personaKey: 'reviewer:observability',
+    toolsets: ['read', 'review'],
+    required: false,
+  },
+  {
+    id: 'reviewer-quality',
+    layer: 'reviewer',
+    specialty: 'quality',
+    displayName: '质量评审员',
+    personaKey: 'reviewer:quality',
+    toolsets: ['read', 'lsp', 'test', 'review'],
+    required: false,
+  },
+];
+
+export const TEAM_RUNTIME_LAYER_ORDER = [
+  'reception',
+  'pm1',
+  'pm2',
+  'executor',
+  'reviewer',
+] as const;
+
+export const TEAM_RUNTIME_LAYER_LABELS: Record<TeamRuntimeLayer, string> = {
+  reception: '接待层',
+  pm1: 'PM1 规划层',
+  pm2: 'PM2 管控层',
+  executor: '执行层',
+  reviewer: '评审层',
+};
+
 export type RolePreset =
   | 'default'
   | 'coordinator'

@@ -10,6 +10,9 @@ import type {
   SharedSessionSummaryRecord,
 } from '../session/sessions.js';
 import { replySharedSessionPermissionRequest } from '../session/sessions.js';
+import type { FixedTeamMemberSlot } from '@openAwork/shared';
+
+export type TeamMemberSlotInput = FixedTeamMemberSlot;
 
 export type TeamWorkspaceVisibility = 'open' | 'closed' | 'private';
 
@@ -19,6 +22,7 @@ export interface TeamWorkspaceSummary {
   description: string | null;
   visibility: TeamWorkspaceVisibility;
   defaultWorkingRoot: string | null;
+  defaultTeamRoster: TeamMemberSlotInput[];
   createdByUserId: string;
   createdAt: string;
   updatedAt: string;
@@ -31,6 +35,7 @@ export interface CreateTeamWorkspaceInput {
   description?: string | null;
   visibility?: TeamWorkspaceVisibility;
   defaultWorkingRoot?: string | null;
+  defaultTeamRoster?: TeamMemberSlotInput[];
 }
 
 export interface UpdateTeamWorkspaceInput {
@@ -38,6 +43,7 @@ export interface UpdateTeamWorkspaceInput {
   description?: string | null;
   visibility?: TeamWorkspaceVisibility;
   defaultWorkingRoot?: string | null;
+  defaultTeamRoster?: TeamMemberSlotInput[];
 }
 
 export interface CreateTeamThreadInput {
@@ -53,6 +59,7 @@ export interface CreateTeamSessionInput {
     kind: TeamSessionTemplateSourceKind;
     templateId?: string;
   };
+  memberSlots?: TeamMemberSlotInput[];
   optionalAgentIds?: string[];
   defaultProvider?: string | null;
 }

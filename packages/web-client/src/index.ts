@@ -38,6 +38,7 @@ export type {
   TeamAuditLogRecord,
   TeamClient,
   TeamMemberRecord,
+  TeamMemberSlotInput,
   TeamMessageRecord,
   TeamRuntimeReadModel,
   TeamRuntimeTaskGroupRecord,

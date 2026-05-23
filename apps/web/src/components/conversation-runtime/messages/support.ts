@@ -2105,6 +2105,43 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
         // arrive without a well-formed content array (e.g. stringified
         // legacy traces).
         const orderedParts = partsFromOrderedAssistantContent(id, content);
+        // Reconcile tool part statuses: `partsFromOrderedAssistantContent`
+        // defaults tool parts to `running` when no paired `tool_result` is
+        // found in the content array. However, for finalized messages loaded
+        // from history, the `assistantToolCalls` array (built from
+        // `extractToolCalls` + `extractToolResults`) has the correct
+        // `inferredStatus` which defaults to `completed`. Align the parts
+        // with the authoritative status so the UI doesn't show a perpetual
+        // spinner after page refresh when the tool has actually completed.
+        if (orderedParts.length > 0 && assistantToolCalls.length > 0) {
+          const statusByCallId = new Map(
+            assistantToolCalls
+              .filter((tc) => tc.toolCallId)
+              .map((tc) => [tc.toolCallId, tc] as const),
+          );
+          for (let i = 0; i < orderedParts.length; i += 1) {
+            const part = orderedParts[i];
+            if (part && part.type === 'tool' && part.status === 'running') {
+              const authoritative = statusByCallId.get(part.toolCallId);
+              if (authoritative && authoritative.status && authoritative.status !== 'running') {
+                orderedParts[i] = {
+                  ...part,
+                  ...(authoritative.output !== undefined ? { output: authoritative.output } : {}),
+                  ...(authoritative.isError ? { isError: true } : {}),
+                  ...(authoritative.fileDiffs ? { fileDiffs: authoritative.fileDiffs } : {}),
+                  ...(authoritative.observability
+                    ? { observability: authoritative.observability }
+                    : {}),
+                  ...(authoritative.pendingPermissionRequestId
+                    ? { pendingPermissionRequestId: authoritative.pendingPermissionRequestId }
+                    : {}),
+                  ...(authoritative.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
+                  status: authoritative.status,
+                };
+              }
+            }
+          }
+        }
         const partsForMessage =
           orderedParts.length > 0
             ? orderedParts

@@ -115,6 +115,7 @@ export function createPendingPermissionRequestSnapshot(
     sessionId,
     status: 'pending',
     toolName: event.toolName,
+    ...(event.always && event.always.length > 0 ? { always: event.always } : {}),
   };
 }
 
