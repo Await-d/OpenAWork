@@ -12,7 +12,7 @@ import type {
 
 export const TABS = [
   { id: 'connection', label: '连接与模型' },
-  { id: 'desktop', label: '桌面端' },
+  { id: 'desktop', label: '桌面与关于' },
   { id: 'channels', label: '消息频道' },
   { id: 'companion', label: 'Buddy 伴侣' },
   { id: 'memory', label: '记忆管理' },

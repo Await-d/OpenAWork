@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useActionState, useEffect, useState } from 'react';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { getPairingQr, login, type PairingQrResponse } from '@openAwork/web-client';
 import { PairingPanel } from '@openAwork/shared-ui';
@@ -437,10 +437,6 @@ function BrowserOnboardingModal({ onComplete }: Props) {
   const [localStatus, setLocalStatus] = useState<LocalStatus>('idle');
   const [localError, setLocalError] = useState<string | null>(null);
   const [step, setStep] = useState<Step>(() => (desktopRuntime ? 'mode' : 'connect'));
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [loginError, setLoginError] = useState<string | null>(null);
-  const [logging, setLogging] = useState(false);
   const [pairingQr, setPairingQr] = useState<PairingQrResponse | null>(null);
   const [pairingError, setPairingError] = useState<string | null>(null);
   const [pairingLoading, setPairingLoading] = useState(false);
@@ -511,7 +507,6 @@ function BrowserOnboardingModal({ onComplete }: Props) {
     setWebAccess(true, port);
     setLocalStatus('starting');
     setLocalError(null);
-    setLoginError(null);
     setTestStatus('idle');
 
     try {
@@ -534,33 +529,12 @@ function BrowserOnboardingModal({ onComplete }: Props) {
     setWebAccess(false, parseGatewayPort(portInput, webPort || DEFAULT_GATEWAY_PORT));
     setLocalStatus('idle');
     setLocalError(null);
-    setLoginError(null);
     setTestStatus('idle');
     setStep('connect');
 
     void stopDesktopGateway().catch((error: unknown) => {
       logger.warn('Failed to stop local desktop gateway before remote setup', error);
     });
-  }
-
-  async function handleLogin(e: React.SyntheticEvent) {
-    e.preventDefault();
-    setLoginError(null);
-    setLogging(true);
-    const url = normalizeGatewayUrl(urlInput);
-    try {
-      const data = await login(url, email, password);
-      setAuth(data.accessToken, email, data.refreshToken, data.expiresIn);
-      localStorage.setItem('onboarded', '1');
-      if (desktopRuntime && mode) {
-        writeDesktopGatewayMode(mode);
-      }
-      onComplete();
-    } catch (err) {
-      setLoginError(err instanceof Error ? err.message : '网络错误 — Gateway 是否正在运行？');
-    } finally {
-      setLogging(false);
-    }
   }
 
   const showCloseButton = !(desktopRuntime && step === 'mode');
@@ -699,73 +673,19 @@ function BrowserOnboardingModal({ onComplete }: Props) {
             </button>
           </>
         ) : step === 'login' ? (
-          <form
-            onSubmit={(e) => {
-              void handleLogin(e);
+          <BrowserOnboardingLoginForm
+            urlInput={urlInput}
+            onAuthenticated={(data, email) => {
+              setAuth(data.accessToken, email, data.refreshToken, data.expiresIn);
+              localStorage.setItem('onboarded', '1');
+              if (desktopRuntime && mode) {
+                writeDesktopGatewayMode(mode);
+              }
+              onComplete();
             }}
-            style={{ display: 'flex', flexDirection: 'column', gap: 14 }}
-          >
-            <p className="onboarding-tagline">登录您的账号。</p>
-            {loginError && (
-              <div className="onboarding-error" style={{ display: 'flex', gap: 8 }}>
-                <ErrorIcon />
-                <span>{loginError}</span>
-              </div>
-            )}
-            <div className="onboarding-form-field">
-              <label className="onboarding-form-label" htmlFor="browser-onboarding-email">
-                邮箱
-              </label>
-              <input
-                id="browser-onboarding-email"
-                className="onboarding-input"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                autoComplete="email"
-                placeholder="your@email.com"
-              />
-            </div>
-            <div className="onboarding-form-field">
-              <label className="onboarding-form-label" htmlFor="browser-onboarding-password">
-                密码
-              </label>
-              <input
-                id="browser-onboarding-password"
-                className="onboarding-input"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                autoComplete="current-password"
-                placeholder="••••••••"
-              />
-            </div>
-            <div className="onboarding-actions">
-              <button
-                type="button"
-                onClick={() => setStep(desktopRuntime && mode === 'local' ? 'mode' : 'connect')}
-                className="onboarding-action-btn onboarding-action-btn--ghost"
-              >
-                返回
-              </button>
-              <button
-                type="submit"
-                disabled={logging}
-                className="onboarding-action-btn onboarding-action-btn--primary"
-              >
-                {logging ? '登录中…' : '登录'}
-              </button>
-            </div>
-            <button
-              type="button"
-              onClick={() => setStep('pairing')}
-              className="onboarding-link-btn onboarding-link-btn--underline"
-            >
-              设备配对（可选）
-            </button>
-          </form>
+            onBack={() => setStep(desktopRuntime && mode === 'local' ? 'mode' : 'connect')}
+            onPair={() => setStep('pairing')}
+          />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <p className="onboarding-tagline">将另一台设备与此工作区配对。</p>
@@ -817,5 +737,111 @@ function BrowserOnboardingModal({ onComplete }: Props) {
         )}
       </div>
     </div>
+  );
+}
+
+/* ─── Browser Onboarding · Login Form 子组件 ─── */
+
+interface BrowserLoginAuthData {
+  accessToken: string;
+  refreshToken?: string;
+  expiresIn?: string;
+}
+
+interface BrowserOnboardingLoginFormProps {
+  urlInput: string;
+  onAuthenticated: (data: BrowserLoginAuthData, email: string) => void;
+  onBack: () => void;
+  onPair: () => void;
+}
+
+/**
+ * 把 useActionState 局部化到子组件——这样 BrowserOnboardingModal 切到非 login
+ * step 时子组件 unmount，actionState 自动重置，避免用户再切回来仍看到旧的 loginError。
+ */
+function BrowserOnboardingLoginForm({
+  urlInput,
+  onAuthenticated,
+  onBack,
+  onPair,
+}: BrowserOnboardingLoginFormProps) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+
+  // React 19 Actions：表单提交由 useActionState 管理 pending / error。
+  const [loginError, loginAction, logging] = useActionState<string | null>(async () => {
+    const url = normalizeGatewayUrl(urlInput);
+    try {
+      const data = await login(url, email, password);
+      onAuthenticated(data, email);
+      return null;
+    } catch (err) {
+      return err instanceof Error ? err.message : '网络错误 — Gateway 是否正在运行？';
+    }
+  }, null);
+
+  return (
+    <form action={loginAction} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <p className="onboarding-tagline">登录您的账号。</p>
+      {loginError && (
+        <div className="onboarding-error" style={{ display: 'flex', gap: 8 }}>
+          <ErrorIcon />
+          <span>{loginError}</span>
+        </div>
+      )}
+      <div className="onboarding-form-field">
+        <label className="onboarding-form-label" htmlFor="browser-onboarding-email">
+          邮箱
+        </label>
+        <input
+          id="browser-onboarding-email"
+          className="onboarding-input"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+          autoComplete="email"
+          placeholder="your@email.com"
+        />
+      </div>
+      <div className="onboarding-form-field">
+        <label className="onboarding-form-label" htmlFor="browser-onboarding-password">
+          密码
+        </label>
+        <input
+          id="browser-onboarding-password"
+          className="onboarding-input"
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+          autoComplete="current-password"
+          placeholder="••••••••"
+        />
+      </div>
+      <div className="onboarding-actions">
+        <button
+          type="button"
+          onClick={onBack}
+          className="onboarding-action-btn onboarding-action-btn--ghost"
+        >
+          返回
+        </button>
+        <button
+          type="submit"
+          disabled={logging}
+          className="onboarding-action-btn onboarding-action-btn--primary"
+        >
+          {logging ? '登录中…' : '登录'}
+        </button>
+      </div>
+      <button
+        type="button"
+        onClick={onPair}
+        className="onboarding-link-btn onboarding-link-btn--underline"
+      >
+        设备配对（可选）
+      </button>
+    </form>
   );
 }

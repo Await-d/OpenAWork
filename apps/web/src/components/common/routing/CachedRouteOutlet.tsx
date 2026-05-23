@@ -240,7 +240,7 @@ export function CachedRouteOutlet({ maxCacheEntries }: CachedRouteOutletProps) {
         const shouldDisplay = isActive || isLeaving;
 
         return (
-          <PageActivationContext.Provider key={entry.cacheKey} value={isActive}>
+          <PageActivationContext key={entry.cacheKey} value={isActive}>
             <div
               data-route-cache-key={entry.cacheKey}
               data-route-transition-state={isEntering ? 'entering' : isLeaving ? 'leaving' : 'idle'}
@@ -279,7 +279,7 @@ export function CachedRouteOutlet({ maxCacheEntries }: CachedRouteOutletProps) {
                 </UNSAFE_RouteContext.Provider>
               </UNSAFE_LocationContext.Provider>
             </div>
-          </PageActivationContext.Provider>
+          </PageActivationContext>
         );
       })}
 

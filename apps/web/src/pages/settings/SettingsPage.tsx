@@ -55,7 +55,6 @@ import {
   isTauri,
   normalizeActiveSelectionProviders,
   parseStructuredPayload,
-  readErrorMessage,
   SETTINGS_LAYOUT_MAX_WIDTH,
   SETTINGS_TAB_CONTENT_GAP,
   SETTINGS_TAB_NAV_WIDTH,
@@ -161,7 +160,11 @@ function SettingsNavIcon({ id }: { id: string }) {
   );
 }
 
-export default function SettingsPage() {
+export interface SettingsPageProps {
+  onCheckDesktopUpdates?: () => void;
+}
+
+export default function SettingsPage({ onCheckDesktopUpdates }: SettingsPageProps = {}) {
   const {
     gatewayUrl,
     setGatewayUrl,
@@ -1645,7 +1648,9 @@ export default function SettingsPage() {
                     activeImageModelId={activeSelection.image?.modelId}
                   />
                 )}
-                {activeTab === 'desktop' && isTauri && <DesktopTabContent />}
+                {activeTab === 'desktop' && isTauri && (
+                  <DesktopTabContent onCheckUpdates={onCheckDesktopUpdates} />
+                )}
                 {activeTab === 'devtools' && (
                   <DevtoolsTabContent
                     devLogs={devLogs}

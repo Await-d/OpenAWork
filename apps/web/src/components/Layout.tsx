@@ -6,8 +6,8 @@ import QuestionPromptCard from './common/display/QuestionPromptCard.js';
 import { useUIStateStore } from '../stores/ui/uiState.js';
 import { useNavigate, useLocation } from 'react-router';
 import { useAuthStore } from '../stores/auth/auth.js';
-import { CommandPalette, PermissionPrompt, PermissionConfirmDialog } from '@openAwork/shared-ui';
-import type { CommandItem, PermissionDecision, PermissionItem } from '@openAwork/shared-ui';
+import { CommandPalette, PermissionConfirmDialog } from '@openAwork/shared-ui';
+import type { CommandItem, PermissionItem } from '@openAwork/shared-ui';
 import type { FileTreeNode } from './common/modal/WorkspacePickerModal.js';
 import { useCommandRegistry } from '../hooks/command/useCommandRegistry.js';
 import { preloadRouteModuleByPath } from '../routes/preloadable-route-modules.js';
@@ -26,57 +26,9 @@ import {
 } from '../utils/permission/pending-permission-state.js';
 import { toast } from './common/feedback/ToastNotification.js';
 import { getRecoveryPendingInteractions } from './conversation-runtime/session/recovery-read-model.js';
-import { replyPermissionRequest } from '../utils/permission/permission-reply.js';
+import { FloatingPermissionPrompt } from './layout/FloatingPermissionPrompt.js';
 
 type PendingQuestionReplyStatus = 'answered' | 'dismissed';
-
-function resolvePermissionReplyError(error: unknown): {
-  dismissPrompt: boolean;
-  inlineMessage: string;
-  toastMessage?: string;
-} {
-  const httpError =
-    typeof error === 'object' && error !== null && typeof Reflect.get(error, 'status') === 'number'
-      ? {
-          status: Reflect.get(error, 'status') as number,
-          data: Reflect.get(error, 'data') as { error?: string } | undefined,
-        }
-      : null;
-
-  if (httpError) {
-    if (httpError.status === 409 && httpError.data?.error === 'Permission request expired') {
-      return {
-        dismissPrompt: true,
-        inlineMessage: '该权限请求已过期，正在重新同步。',
-        toastMessage: '权限请求已过期，已重新同步状态。',
-      };
-    }
-
-    if (
-      httpError.status === 409 &&
-      httpError.data?.error === 'Permission request already resolved'
-    ) {
-      return {
-        dismissPrompt: true,
-        inlineMessage: '该权限请求已被处理，正在重新同步。',
-        toastMessage: '权限请求已被处理，已重新同步状态。',
-      };
-    }
-
-    if (httpError.status === 404) {
-      return {
-        dismissPrompt: true,
-        inlineMessage: '权限请求已不存在，正在重新同步。',
-        toastMessage: '权限请求已不存在，已重新同步状态。',
-      };
-    }
-  }
-
-  return {
-    dismissPrompt: false,
-    inlineMessage: error instanceof Error ? error.message : '权限处理失败，请重试。',
-  };
-}
 
 function resolveQuestionReplyError(error: unknown): {
   dismissPrompt: boolean;
@@ -233,12 +185,7 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
   const [paletteSearchResults, setPaletteSearchResults] = useState<SessionSearchResult[]>([]);
   const paletteDescriptors = useCommandRegistry('palette');
 
-  const [pendingPermission, setPendingPermission] = useState<SessionPendingPermissionState | null>(
-    null,
-  );
-  const [permissionReplyPendingDecision, setPermissionReplyPendingDecision] =
-    useState<PermissionDecision | null>(null);
-  const [permissionReplyError, setPermissionReplyError] = useState<string | null>(null);
+  const [pendingPermissionIndicator, setPendingPermissionIndicator] = useState(false);
   const [pendingConfirmDialog, setPendingConfirmDialog] = useState<{
     skillName: string;
     permissions: PermissionItem[];
@@ -252,61 +199,13 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
 
   const pendingPermissionRef = useRef<SessionPendingPermissionState | null>(null);
 
-  const updatePendingPermission = useCallback(
-    (next: SessionPendingPermissionState | null) => {
-      const current = pendingPermissionRef.current;
-
-      // Avoid unnecessary re-renders when the same request is published again
-      // (e.g., from pendingPermissions array reference changes in ChatPage).
-      if (next !== null && current?.requestId === next.requestId) {
-        // Preserve existing sessionTitle if already resolved
-        if (current.sessionTitle && !next.sessionTitle) {
-          return;
-        }
-        // Only update if something meaningful changed
-        if (
-          current.scope === next.scope &&
-          current.toolName === next.toolName &&
-          current.reason === next.reason &&
-          current.riskLevel === next.riskLevel &&
-          current.previewAction === next.previewAction
-        ) {
-          return;
-        }
-      }
-
-      pendingPermissionRef.current = next;
-      setPendingPermission(next);
-
-      // Only reset reply state when the request actually changes
-      if (next === null || current?.requestId !== next.requestId) {
-        setPermissionReplyPendingDecision(null);
-        setPermissionReplyError(null);
-      }
-
-      // Asynchronously resolve the session title so the prompt can show
-      // which session the permission request originates from.
-      if (next && !next.sessionTitle && accessToken) {
-        createSessionsClient(gatewayUrl)
-          .get(accessToken, next.targetSessionId)
-          .then((session) => {
-            const title = session?.title?.trim();
-            if (title) {
-              setPendingPermission((current) => {
-                if (current?.requestId !== next.requestId) return current;
-                const updated = { ...current, sessionTitle: title };
-                pendingPermissionRef.current = updated;
-                return updated;
-              });
-            }
-          })
-          .catch(() => {
-            /* best-effort — prompt still works without the title */
-          });
-      }
-    },
-    [accessToken, gatewayUrl],
-  );
+  const updatePendingPermission = useCallback((next: SessionPendingPermissionState | null) => {
+    // Only update the ref and boolean indicator — the actual PermissionPrompt
+    // UI is rendered by FloatingPermissionPrompt which has its own subscription.
+    // This avoids triggering a full Layout re-render on permission state changes.
+    pendingPermissionRef.current = next;
+    setPendingPermissionIndicator(next !== null);
+  }, []);
 
   const applyPendingQuestion = useCallback(
     (
@@ -381,15 +280,22 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
   // session so the prompt is actionable even when the user is on a non-chat
   // page (e.g. Skills, Settings).  The targetSessionId inside the payload
   // ensures the reply is sent to the correct session.
+  // NOTE: The actual PermissionPrompt UI is rendered by FloatingPermissionPrompt
+  // which manages its own subscription. This subscription only updates the
+  // ref (for loadPendingInteractionState compat) and the boolean indicator
+  // for NavRail. It does NOT call setPendingPermission to avoid re-rendering
+  // the entire Layout tree.
   useEffect(() => {
     if (!accessToken) {
-      updatePendingPermission(null);
+      pendingPermissionRef.current = null;
+      setPendingPermissionIndicator(false);
       return;
     }
     return subscribeSessionPendingPermission((_sessionId, permission) => {
-      updatePendingPermission(permission);
+      pendingPermissionRef.current = permission;
+      setPendingPermissionIndicator(permission !== null);
     });
-  }, [accessToken, updatePendingPermission]);
+  }, [accessToken]);
 
   useEffect(() => {
     if (!accessToken || !currentChatSessionId) {
@@ -663,77 +569,6 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
     [addSavedWorkspacePath, setFileTreeRootPath, setSelectedWorkspacePath],
   );
 
-  const refreshSessionsAfterPermissionReply = useCallback(
-    (currentSessionId: string | null, targetSessionId: string) => {
-      const refreshTargets = new Set<string>();
-      if (currentSessionId) {
-        refreshTargets.add(currentSessionId);
-      }
-      refreshTargets.add(targetSessionId);
-
-      const flushRefresh = () => {
-        refreshTargets.forEach((sessionId) => {
-          requestCurrentSessionRefresh(sessionId);
-        });
-        requestSessionListRefresh();
-      };
-
-      flushRefresh();
-      // Follow up once more after the backend has had time to resume and persist
-      // the post-approval turn, so the chat page does not stay on a stale paused snapshot.
-      window.setTimeout(() => {
-        flushRefresh();
-      }, 2000);
-    },
-    [],
-  );
-
-  const handlePermissionDecision = useCallback(
-    async (requestId: string, decision: PermissionDecision) => {
-      if (!accessToken || !pendingPermission) {
-        updatePendingPermission(null);
-        return;
-      }
-
-      const currentSessionId = currentChatSessionId;
-      const targetSessionId = pendingPermission.targetSessionId;
-
-      setPermissionReplyPendingDecision(decision);
-      setPermissionReplyError(null);
-
-      try {
-        await replyPermissionRequest({
-          decision,
-          requestId,
-          gatewayUrl,
-          sessionId: targetSessionId,
-          token: accessToken,
-        });
-        updatePendingPermission(null);
-        refreshSessionsAfterPermissionReply(currentSessionId, targetSessionId);
-      } catch (error) {
-        const resolved = resolvePermissionReplyError(error);
-        if (resolved.dismissPrompt) {
-          updatePendingPermission(null);
-          toast(resolved.toastMessage ?? resolved.inlineMessage, 'warning', 4200);
-          refreshSessionsAfterPermissionReply(currentSessionId, targetSessionId);
-        } else {
-          setPermissionReplyError(resolved.inlineMessage);
-        }
-      } finally {
-        setPermissionReplyPendingDecision(null);
-      }
-    },
-    [
-      accessToken,
-      currentChatSessionId,
-      gatewayUrl,
-      pendingPermission,
-      refreshSessionsAfterPermissionReply,
-      updatePendingPermission,
-    ],
-  );
-
   return (
     <>
       <style>{`@keyframes toast-in { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
@@ -750,39 +585,7 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
         placeholder="搜索命令、会话内容…"
         query={paletteQuery}
       />
-      {pendingPermission && (
-        <PermissionPrompt
-          key={pendingPermission.requestId}
-          requestId={pendingPermission.requestId}
-          toolName={pendingPermission.toolName}
-          scope={pendingPermission.scope}
-          reason={pendingPermission.reason}
-          riskLevel={pendingPermission.riskLevel}
-          previewAction={pendingPermission.previewAction}
-          always={pendingPermission.always}
-          pendingDecision={permissionReplyPendingDecision}
-          errorMessage={permissionReplyError ?? undefined}
-          onDecide={(requestId: string, decision: PermissionDecision) => {
-            void handlePermissionDecision(requestId, decision);
-          }}
-          sessionTitle={pendingPermission.sessionTitle}
-          onNavigateToSession={
-            pendingPermission.targetSessionId
-              ? () => {
-                  navigate(`/chat/${pendingPermission.targetSessionId}`);
-                }
-              : undefined
-          }
-          style={{
-            position: 'fixed',
-            top: 56,
-            right: 16,
-            width: 440,
-            zIndex: 500,
-            animation: 'permissionSlideIn 0.25s ease forwards',
-          }}
-        />
-      )}
+      <FloatingPermissionPrompt onPendingChange={setPendingPermissionIndicator} />
       {pendingQuestion && !isChatRoute && (
         <QuestionPromptCard
           answers={pendingQuestionAnswers}
@@ -847,7 +650,7 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
             isChatRoute={isChatRoute}
             leftSidebarOpen={leftSidebarOpen}
             onExpandSidebar={() => setLeftSidebarOpen(true)}
-            pendingPermissionIndicator={!!pendingPermission}
+            pendingPermissionIndicator={pendingPermissionIndicator}
           />
 
           {/* 会话列表 (SessionSidebar) 已迁至 ChatPage 内部渲染。

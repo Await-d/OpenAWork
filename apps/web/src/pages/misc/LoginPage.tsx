@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useActionState, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Navigate } from 'react-router';
 import { useAuthStore } from '../../stores/auth/auth.js';
@@ -37,9 +37,7 @@ export default function LoginPage({ theme, onToggleTheme }: LoginPageProps = {})
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [gatewayInput, setGatewayInput] = useState(gatewayUrl || 'http://localhost:3000');
   const [gatewayMode, setGatewayMode] = useState<DesktopGatewayMode>(
     () => readDesktopGatewayMode() ?? desktopGatewayModeForUrl(gatewayUrl),
@@ -51,14 +49,9 @@ export default function LoginPage({ theme, onToggleTheme }: LoginPageProps = {})
   const [remoteStatus, setRemoteStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
   const [showAdvanced, setShowAdvanced] = useState(false);
 
-  if (token) {
-    return <Navigate to="/chat" replace />;
-  }
-
-  async function handleSubmit(e: React.SyntheticEvent) {
-    e.preventDefault();
-    setError(null);
-    setLoading(true);
+  // React 19 Actions：表单提交由 useActionState 管理 pending / error，
+  // 不再手写 setLoading / setError 三件套。
+  const [error, loginAction, isPending] = useActionState<string | null>(async () => {
     try {
       const resolvedUrl = normalizeGatewayUrl(gatewayInput) || gatewayUrl;
       setGatewayUrl(resolvedUrl);
@@ -74,18 +67,19 @@ export default function LoginPage({ theme, onToggleTheme }: LoginPageProps = {})
       setAuth(data.accessToken, email, data.refreshToken, data.expiresIn);
       void preloadRouteModuleByPath('/chat');
       void navigate('/chat', { replace: true });
+      return null;
     } catch (err) {
       const isTimeout = err instanceof DOMException && err.name === 'TimeoutError';
-      setError(
-        isTimeout
-          ? '登录超时 — Gateway 响应过慢，请检查服务是否正常运行'
-          : err instanceof Error
-            ? err.message
-            : '网络错误 — Gateway 是否正在运行？',
-      );
-    } finally {
-      setLoading(false);
+      return isTimeout
+        ? '登录超时 — Gateway 响应过慢，请检查服务是否正常运行'
+        : err instanceof Error
+          ? err.message
+          : '网络错误 — Gateway 是否正在运行？';
     }
+  }, null);
+
+  if (token) {
+    return <Navigate to="/chat" replace />;
   }
 
   function handleGatewayBlur() {
@@ -256,11 +250,7 @@ export default function LoginPage({ theme, onToggleTheme }: LoginPageProps = {})
               <p>登录以继续使用 OpenAWork</p>
             </div>
 
-            <form
-              onSubmit={(e) => {
-                void handleSubmit(e);
-              }}
-            >
+            <form action={loginAction}>
               {error && (
                 <div className="login-error">
                   <ErrorIcon />
@@ -413,11 +403,11 @@ export default function LoginPage({ theme, onToggleTheme }: LoginPageProps = {})
 
               <button
                 type="submit"
-                disabled={loading || localStatus === 'starting' || remoteStatus === 'testing'}
+                disabled={isPending || localStatus === 'starting' || remoteStatus === 'testing'}
                 className="login-submit-btn"
               >
                 <span className="login-btn-shine" />
-                {loading ? (
+                {isPending ? (
                   <>
                     <LoadingSpinner />
                     登录中…

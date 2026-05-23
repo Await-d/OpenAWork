@@ -527,13 +527,13 @@ export default function App() {
         <Route
           element={
             <ProtectedRoute>
-              <FileEditorContext.Provider value={openFileRef}>
+              <FileEditorContext value={openFileRef}>
                 <Layout
                   theme={theme}
                   onToggleTheme={toggleTheme}
                   onOpenFile={(path) => openFileRef.current?.(path)}
                 />
-              </FileEditorContext.Provider>
+              </FileEditorContext>
             </ProtectedRoute>
           }
         >

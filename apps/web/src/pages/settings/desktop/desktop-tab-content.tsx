@@ -11,6 +11,7 @@ import {
   localGatewayUrl,
   waitForGatewayHealth,
 } from '../../../utils/gateway/desktop-gateway.js';
+import { DesktopAboutUpdateSection } from './desktop-about-update-section.js';
 import { DesktopWebAccessSection } from './desktop-web-access-section.js';
 import { isTauri, tauriInvoke } from '../shared/settings-page-helpers.js';
 import { BP, IS, SS, ST } from '../shared/settings-section-styles.js';
@@ -178,8 +179,12 @@ function ToggleSwitch({
   );
 }
 
+interface DesktopTabContentProps {
+  onCheckUpdates?: () => void;
+}
+
 /** 仅在 Tauri 运行时渲染——非桌面端时显示一个降级提示。 */
-export function DesktopTabContent() {
+export function DesktopTabContent({ onCheckUpdates }: DesktopTabContentProps = {}) {
   const webPort = useAuthStore((state) => state.webPort);
   const webAccessEnabled = useAuthStore((state) => state.webAccessEnabled);
   const webExposeLan = useAuthStore((state) => state.webExposeLan);
@@ -524,21 +529,27 @@ export function DesktopTabContent() {
 
   if (loading) {
     return (
-      <section style={SS}>
-        <h3 style={ST}>桌面端</h3>
-        <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>正在加载桌面端配置…</div>
-      </section>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <DesktopAboutUpdateSection onCheckUpdates={onCheckUpdates} />
+        <section style={SS}>
+          <h3 style={ST}>桌面端</h3>
+          <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>正在加载桌面端配置…</div>
+        </section>
+      </div>
     );
   }
 
   if (!view) {
     return (
-      <section style={SS}>
-        <h3 style={ST}>桌面端</h3>
-        <div style={{ fontSize: 12, color: 'var(--danger)' }}>
-          {error ?? '桌面端配置加载失败。请重启应用后重试。'}
-        </div>
-      </section>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <DesktopAboutUpdateSection onCheckUpdates={onCheckUpdates} />
+        <section style={SS}>
+          <h3 style={ST}>桌面端</h3>
+          <div style={{ fontSize: 12, color: 'var(--danger)' }}>
+            {error ?? '桌面端配置加载失败。请重启应用后重试。'}
+          </div>
+        </section>
+      </div>
     );
   }
 
@@ -547,6 +558,8 @@ export function DesktopTabContent() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <DesktopAboutUpdateSection onCheckUpdates={onCheckUpdates} />
+
       {busy !== null ? (
         <div
           role="status"
@@ -615,7 +628,7 @@ export function DesktopTabContent() {
                   cursor: 'pointer',
                   borderColor: active ? 'var(--accent)' : 'var(--border-subtle)',
                   background: active
-                    ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay)'
+                    ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))'
                     : ROW_STYLE.background,
                   textAlign: 'left',
                 }}
@@ -776,7 +789,7 @@ export function DesktopTabContent() {
             style={{
               padding: '0 4px',
               borderRadius: 4,
-              background: 'var(--surface-raised, var(--bg-overlay)',
+              background: 'var(--surface-raised, var(--bg-overlay))',
               fontFamily: 'ui-monospace, monospace',
             }}
           >
@@ -788,7 +801,7 @@ export function DesktopTabContent() {
             style={{
               padding: '0 4px',
               borderRadius: 4,
-              background: 'var(--surface-raised, var(--bg-overlay)',
+              background: 'var(--surface-raised, var(--bg-overlay))',
               fontFamily: 'ui-monospace, monospace',
             }}
           >
@@ -889,7 +902,7 @@ export function DesktopTabContent() {
                       borderRadius: 6,
                       border: `1px solid ${active ? 'var(--accent)' : 'var(--border-default)'}`,
                       background: active
-                        ? 'color-mix(in srgb, var(--accent) 15%, var(--bg-overlay)'
+                        ? 'color-mix(in srgb, var(--accent) 15%, var(--bg-overlay))'
                         : 'var(--bg-overlay)',
                       color: active ? 'var(--accent)' : 'var(--fg-default)',
                       padding: '4px 10px',
