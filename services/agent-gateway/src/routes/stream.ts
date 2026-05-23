@@ -2621,6 +2621,7 @@ export async function handleStreamRequest(input: {
       content: buildErrorContent('STREAM_ERROR', String(err)),
       clientRequestId: requestData.clientRequestId,
       status: 'error',
+      replaceExisting: true,
     });
     emitChunk(createStreamErrorChunk('STREAM_ERROR', String(err), runId));
     wl.flush(ctx, 500);

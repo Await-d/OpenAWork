@@ -1362,6 +1362,7 @@ export async function runModelRound(input: {
         content: buildErrorContent('V2_UPSTREAM_ERROR', classification.message ?? message),
         clientRequestId: input.clientRequestId,
         status: 'error',
+        replaceExisting: true,
       });
       input.writeChunk(
         createStreamErrorChunk('V2_UPSTREAM_ERROR', classification.message ?? message, input.runId),
@@ -1479,6 +1480,7 @@ export async function runModelRound(input: {
       content: buildErrorContent('STREAM_ERROR', message),
       clientRequestId: input.clientRequestId,
       status: 'error',
+      replaceExisting: true,
     });
     input.writeChunk(createStreamErrorChunk('STREAM_ERROR', message, input.runId));
     input.wl.flush(input.ctx, 500);

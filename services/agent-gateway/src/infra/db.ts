@@ -224,6 +224,7 @@ export async function migrate(): Promise<void> {
       UNIQUE(session_id, seq)
     )
   `);
+  dedupeLegacySessionMessagesByRequestRole();
   db.exec(
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_session_messages_request_role ON session_messages(session_id, client_request_id, role) WHERE client_request_id IS NOT NULL',
   );
@@ -1366,6 +1367,19 @@ function migrateSessionFileDiffsDropLegacyTextColumns(): void {
   `);
   db.exec('DROP TABLE session_file_diffs');
   db.exec('ALTER TABLE session_file_diffs_new RENAME TO session_file_diffs');
+}
+
+function dedupeLegacySessionMessagesByRequestRole(): void {
+  db.exec(`
+    DELETE FROM session_messages
+    WHERE client_request_id IS NOT NULL
+      AND rowid NOT IN (
+        SELECT MAX(rowid)
+        FROM session_messages
+        WHERE client_request_id IS NOT NULL
+        GROUP BY session_id, client_request_id, role
+      )
+  `);
 }
 
 function migrateSyncEventTables(): void {

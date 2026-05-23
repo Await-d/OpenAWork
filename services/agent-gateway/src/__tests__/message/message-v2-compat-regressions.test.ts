@@ -208,6 +208,34 @@ describe('message-v2 compatibility regressions', () => {
     );
   });
 
+  it('replaces existing assistant request-role mirrors for error writes', () => {
+    const clientRequestId = 'parent-req:assistant:error-1';
+    mocks.sqliteAll.mockReturnValueOnce([]).mockReturnValueOnce([{ id: 'old-assistant-message' }]);
+    mocks.sqliteGet.mockReturnValue({ max_seq: 0 });
+
+    appendSessionMessageV2({
+      sessionId: 'session-1',
+      userId: 'user-1',
+      role: 'assistant',
+      messageId: 'new-assistant-message',
+      createdAt: 123,
+      clientRequestId,
+      replaceExisting: true,
+      status: 'error',
+      content: [{ type: 'text', text: '[错误: STREAM_ERROR] boom' }],
+    });
+
+    const deleteLegacyCallIndex = mocks.sqliteRun.mock.calls.findIndex((call) =>
+      String(call[0]).includes('DELETE FROM session_messages\n     WHERE session_id = ?'),
+    );
+    const insertLegacyCallIndex = mocks.sqliteRun.mock.calls.findIndex((call) =>
+      String(call[0]).includes('INSERT INTO session_messages'),
+    );
+
+    expect(deleteLegacyCallIndex).toBeGreaterThanOrEqual(0);
+    expect(insertLegacyCallIndex).toBeGreaterThan(deleteLegacyCallIndex);
+  });
+
   it('keeps legacy stream tool-result writes idempotent', () => {
     const streamRouteSource = readFileSync(
       new URL('../../routes/stream.ts', import.meta.url),
@@ -218,6 +246,27 @@ describe('message-v2 compatibility regressions', () => {
     );
 
     expect(toolResultWrite).not.toBeNull();
+  });
+
+  it('keeps stream error writes idempotent', () => {
+    const streamRouteSource = readFileSync(
+      new URL('../../routes/stream.ts', import.meta.url),
+      'utf8',
+    );
+    const streamModelRoundSource = readFileSync(
+      new URL('../../routes/stream-model-round.ts', import.meta.url),
+      'utf8',
+    );
+
+    expect(streamRouteSource).toMatch(
+      /buildErrorContent\('STREAM_ERROR', String\(err\)\)[\s\S]*?replaceExisting: true/,
+    );
+    expect(streamModelRoundSource).toMatch(
+      /buildErrorContent\('V2_UPSTREAM_ERROR', classification\.message \?\? message\)[\s\S]*?replaceExisting: true/,
+    );
+    expect(streamModelRoundSource).toMatch(
+      /buildErrorContent\('STREAM_ERROR', message\)[\s\S]*?replaceExisting: true/,
+    );
   });
 
   it('recognizes message_v2 rows when validating message ratings', () => {

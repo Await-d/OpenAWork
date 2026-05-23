@@ -70,4 +70,92 @@ describe('app_meta version stamp', () => {
     expect(stamp.upgraded).toBe(false);
     expect(dbModule.getAppMetaValue('previous_app_version')).toBe(before);
   });
+
+  it('deduplicates legacy session_messages request-role mirrors before recreating the unique index', async () => {
+    const sessionId = 'session-legacy-dedupe';
+    const userId = 'user-legacy-dedupe';
+    const clientRequestId = 'request-legacy-dedupe';
+
+    dbModule.sqliteRun('INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)', [
+      userId,
+      'legacy-dedupe@example.com',
+      'hash',
+    ]);
+    dbModule.sqliteRun('INSERT INTO sessions (id, user_id) VALUES (?, ?)', [sessionId, userId]);
+    dbModule.sqliteRun('DROP INDEX IF EXISTS idx_session_messages_request_role');
+
+    dbModule.sqliteRun(
+      `INSERT INTO session_messages (
+        id, session_id, user_id, seq, role, content_json, status, client_request_id, created_at_ms, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+      [
+        'legacy-message-1',
+        sessionId,
+        userId,
+        1,
+        'assistant',
+        JSON.stringify([{ type: 'text', text: 'older duplicate' }]),
+        'error',
+        clientRequestId,
+        100,
+      ],
+    );
+    dbModule.sqliteRun(
+      `INSERT INTO session_messages (
+        id, session_id, user_id, seq, role, content_json, status, client_request_id, created_at_ms, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+      [
+        'legacy-message-2',
+        sessionId,
+        userId,
+        2,
+        'assistant',
+        JSON.stringify([{ type: 'text', text: 'latest duplicate' }]),
+        'error',
+        clientRequestId,
+        200,
+      ],
+    );
+
+    await dbModule.migrate();
+
+    const legacyRows = dbModule.sqliteAll<{ id: string; content_json: string }>(
+      `SELECT id, content_json
+       FROM session_messages
+       WHERE session_id = ? AND user_id = ? AND client_request_id = ? AND role = ?
+       ORDER BY created_at_ms ASC, id ASC`,
+      [sessionId, userId, clientRequestId, 'assistant'],
+    );
+    const migratedRows = dbModule.sqliteAll<{ id: string }>(
+      'SELECT id FROM message_v2 WHERE session_id = ? AND user_id = ? ORDER BY time_created ASC, id ASC',
+      [sessionId, userId],
+    );
+
+    expect(legacyRows).toHaveLength(1);
+    expect(legacyRows[0]?.id).toBe('legacy-message-2');
+    expect(legacyRows[0]?.content_json).toContain('latest duplicate');
+    expect(migratedRows).toHaveLength(1);
+    expect(migratedRows[0]?.id).toBe('legacy-message-2');
+
+    expect(() =>
+      dbModule.sqliteRun(
+        `INSERT INTO session_messages (
+          id, session_id, user_id, seq, role, content_json, status, client_request_id, created_at_ms, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+        [
+          'legacy-message-3',
+          sessionId,
+          userId,
+          3,
+          'assistant',
+          JSON.stringify([{ type: 'text', text: 'duplicate after migrate' }]),
+          'error',
+          clientRequestId,
+          300,
+        ],
+      ),
+    ).toThrow(
+      /UNIQUE constraint failed: session_messages\.session_id, session_messages\.client_request_id, session_messages\.role/,
+    );
+  });
 });
