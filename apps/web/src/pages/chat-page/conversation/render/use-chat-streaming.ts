@@ -1,10 +1,13 @@
 import { useCallback, useRef, useState } from 'react';
 import type { ChatBackendUsageSnapshot } from '../../../../components/conversation-runtime/stream/stream-usage.js';
 import type { RecoveredActiveAssistantStream } from '../../../../components/conversation-runtime/stream/stream-recovery.js';
+import type { SessionActiveStream } from '@openAwork/web-client';
 import {
   calculateStreamingRevealDelay,
   calculateStreamingRevealStep,
 } from '../../../../components/conversation-runtime/reveal/streaming-reveal.js';
+import type { StreamingThinkingBlock } from '../../../../components/conversation-runtime/stream/streaming-thinking.js';
+import type { ChatMessagePart } from '../../../../components/conversation-runtime/messages/support.js';
 
 export interface UseChatStreamingReturn {
   streaming: boolean;
@@ -15,8 +18,14 @@ export interface UseChatStreamingReturn {
   setStreamBuffer: React.Dispatch<React.SetStateAction<string>>;
   streamThinkingBuffer: string;
   setStreamThinkingBuffer: React.Dispatch<React.SetStateAction<string>>;
+  streamThinkingBlocks: StreamingThinkingBlock[];
+  setStreamThinkingBlocks: React.Dispatch<React.SetStateAction<StreamingThinkingBlock[]>>;
+  streamingSegments: ChatMessagePart[];
+  setStreamingSegments: React.Dispatch<React.SetStateAction<ChatMessagePart[]>>;
   reportedStreamUsage: ChatBackendUsageSnapshot | null;
   setReportedStreamUsage: React.Dispatch<React.SetStateAction<ChatBackendUsageSnapshot | null>>;
+  recoveryActiveStream: SessionActiveStream | null;
+  setRecoveryActiveStream: React.Dispatch<React.SetStateAction<SessionActiveStream | null>>;
   recoveredStreamSnapshot: RecoveredActiveAssistantStream | null;
   setRecoveredStreamSnapshot: React.Dispatch<
     React.SetStateAction<RecoveredActiveAssistantStream | null>
@@ -62,7 +71,12 @@ export function useChatStreaming(): UseChatStreamingReturn {
   const [stoppingStream, setStoppingStream] = useState(false);
   const [streamBuffer, setStreamBuffer] = useState('');
   const [streamThinkingBuffer, setStreamThinkingBuffer] = useState('');
+  const [streamThinkingBlocks, setStreamThinkingBlocks] = useState<StreamingThinkingBlock[]>([]);
+  const [streamingSegments, setStreamingSegments] = useState<ChatMessagePart[]>([]);
   const [reportedStreamUsage, setReportedStreamUsage] = useState<ChatBackendUsageSnapshot | null>(
+    null,
+  );
+  const [recoveryActiveStream, setRecoveryActiveStream] = useState<SessionActiveStream | null>(
     null,
   );
   const [recoveredStreamSnapshot, setRecoveredStreamSnapshot] =
@@ -96,12 +110,17 @@ export function useChatStreaming(): UseChatStreamingReturn {
     streamRevealNextAllowedAtRef.current = 0;
     setStreamBuffer('');
     setStreamThinkingBuffer('');
+    setStreamThinkingBlocks([]);
+    setStreamingSegments([]);
+    setReportedStreamUsage(null);
     setRecoveredStreamSnapshot(null);
+    setRecoveryActiveStream(null);
     streamingRef.current = false;
     setStreaming(false);
     setStoppingStream(false);
     setActiveStreamStartedAt(null);
     setActiveStreamFirstTokenLatencyMs(null);
+    setStreamError(null);
     currentAssistantStreamMessageIdRef.current = null;
   }, []);
 
@@ -159,8 +178,14 @@ export function useChatStreaming(): UseChatStreamingReturn {
     setStreamBuffer,
     streamThinkingBuffer,
     setStreamThinkingBuffer,
+    streamThinkingBlocks,
+    setStreamThinkingBlocks,
+    streamingSegments,
+    setStreamingSegments,
     reportedStreamUsage,
     setReportedStreamUsage,
+    recoveryActiveStream,
+    setRecoveryActiveStream,
     recoveredStreamSnapshot,
     setRecoveredStreamSnapshot,
     activeStreamStartedAt,

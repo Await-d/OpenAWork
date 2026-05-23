@@ -5,22 +5,17 @@ import type {
   RunEvent,
   StreamThinkingChunk,
 } from '@openAwork/shared';
-import type { AttachmentItem, MCPServerStatus } from '@openAwork/shared-ui';
+import type { AttachmentItem } from '@openAwork/shared-ui';
 import type {
-  PendingPermissionRequest,
-  PendingQuestionRequest,
-  PermissionDecision,
   Session,
   SessionActiveStream,
   SessionMessageRatingRecord,
-  SessionMessageRatingValue,
   SessionRecoveryReadModel,
   SessionTask,
 } from '@openAwork/web-client';
 import {
   createArtifactsClient,
   createPendingPermissionRequestSnapshot,
-  createQuestionsClient,
   createSessionsClient,
   createWorkflowsClient,
   dedupePendingPermissionRequests,
@@ -73,7 +68,6 @@ import { useComposerWorkspaceCatalog } from '../../hooks/chat/useComposerWorkspa
 import { useFileEditor } from '../../hooks/editor/useFileEditor.js';
 import { useGatewayClient } from '../../hooks/gateway/useGatewayClient.js';
 import { usePrefersReducedMotion } from '../../hooks/ui/usePrefersReducedMotion.js';
-import { useWorkspace } from '../../hooks/workspace/useWorkspace.js';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { useUIStateStore } from '../../stores/ui/uiState.js';
 import {
@@ -85,17 +79,10 @@ import {
   isComposerReferenceEvent,
 } from '../../utils/chat/composer-reference-events.js';
 import { logger } from '../../utils/log/logger.js';
+import { replyPermissionRequest } from '../../utils/permission/permission-reply.js';
 import {
-  getPermissionReplyStatusCode,
-  getPermissionReplySuccessMessage,
-  replyPermissionRequest,
-} from '../../utils/permission/permission-reply.js';
-import {
-  publishSessionPendingPermission,
-  publishSessionPendingQuestion,
   requestCurrentSessionRefresh,
   requestSessionListRefresh,
-  subscribeCurrentSessionRefresh,
 } from '../../utils/session/session-list-events.js';
 import { extractWorkingDirectory } from '../../utils/session/session-metadata.js';
 import {
@@ -124,7 +111,6 @@ import {
   prepareSessionRecoveryState,
   REMOTE_STREAM_RECOVERY_POLL_MS,
   SESSION_SWITCH_DEFER_THRESHOLD,
-  type SessionsClientWithActiveStop,
 } from './conversation/render/chat-page-utils.js';
 import { ChatRightPanel } from './panels/chat-right-panel.js';
 import { SessionSidebar } from '../../components/layout/sidebar/SessionSidebar.js';
@@ -142,6 +128,10 @@ import { deleteQueuedComposerFiles } from './conversation/composer/queued-compos
 import RetryModeDialog from './conversation/views/retry-mode-dialog.js';
 import { startSequentialPolling } from '../../components/conversation-runtime/session/sequential-polling.js';
 import { executeServerCommand } from './conversation/composer/server-command-item.js';
+import { prepareImageGenerationInput } from './conversation/composer/prepare-image-generation-input.js';
+import { prepareStandardChatSendInput } from './conversation/composer/prepare-standard-chat-send-input.js';
+import { startStandardChatStream } from './conversation/composer/start-standard-chat-stream.js';
+import { submitImageGeneration } from './conversation/composer/submit-image-generation.js';
 import {
   SessionRunStateBar,
   SessionRunStatePlaceholder,
@@ -151,7 +141,6 @@ import {
   type SessionStateStatus,
   type SessionTodoItem,
   shouldPollSessionRuntime,
-  toSessionPendingPermissionState,
 } from '../../components/conversation-runtime/session/session-runtime.js';
 import {
   type RecoveredActiveAssistantStream,
@@ -230,29 +219,26 @@ import {
   type RetryPrompt,
   useChatMessageActions,
 } from './hooks/use-chat-message-actions.js';
+import { useChatBranchSession } from './hooks/use-chat-branch-session.js';
 import { useChatRenderData } from './conversation/render/use-chat-render-data.js';
+import { useChatPendingActions } from './hooks/use-chat-pending-actions.js';
+import { useChatRetryAndEdit } from './hooks/use-chat-retry-and-edit.js';
+import { useChatSessionLifecycle } from './hooks/use-chat-session-lifecycle.js';
+import { useChatStopActiveMessage } from './hooks/use-chat-stop-active-message.js';
 import { useChatUiActions } from './hooks/use-chat-ui-actions.js';
-import { readSplitPos, writeSplitPos } from './state/split-pos-storage.js';
+import { useChatUiState } from './hooks/use-chat-ui-state.js';
 import { useModelPrices } from './conversation/settings/use-model-prices.js';
 import { useProviderModelInfo } from './conversation/settings/use-provider-model-info.js';
 import { useScrollManager } from '../../components/conversation-runtime/scroll/use-scroll-manager.js';
 import { useSessionContentArtifactCount } from './conversation/snapshot/use-session-content-artifact-count.js';
 import { useSessionTerminals } from '../../components/conversation-runtime/terminals/use-session-terminals.js';
-import {
-  detectDevServerUrl,
-  isLikelyDevServerCommand,
-} from '../../components/conversation-runtime/attachments/dev-server-detect.js';
+import { detectTerminalDevServer } from './conversation/render/detect-terminal-dev-server.js';
 import { useSessionSettingsCallbacks } from './conversation/settings/use-session-settings-callbacks.js';
 import { useSessionSidebarRunState } from './conversation/snapshot/use-session-sidebar-run-state.js';
 import { useSessionSnapshotLoader } from './conversation/snapshot/use-session-snapshot-loader.js';
 import { type SessionArtifactsResponse } from '../artifacts/workspace/artifact-workspace-types.js';
-import {
-  type SessionViewStreamingSnapshot,
-  useSessionViewCache,
-} from './conversation/snapshot/use-session-view-cache.js';
-import { useSessionViewGuard } from './conversation/snapshot/use-session-view-guard.js';
+import { type SessionViewStreamingSnapshot } from './conversation/snapshot/use-session-view-cache.js';
 import { useStreamAttachRetry } from '../../components/conversation-runtime/attach/use-stream-attach-retry.js';
-import { useStreamReveal } from '../../components/conversation-runtime/reveal/use-stream-reveal.js';
 import {
   applyChatRightPanelChunk,
   applyChatRightPanelEvent,
@@ -264,6 +250,19 @@ import {
   startChatRightPanelRun,
 } from './state/chat-stream-state.js';
 import { type DialogueMode, getDefaultAgentForDialogueMode } from './mode/dialogue-mode.js';
+import { useChatStreaming } from './conversation/render/use-chat-streaming.js';
+import { buildStreamAssistantTrace } from './conversation/render/build-stream-assistant-trace.js';
+import { commitStreamingRound } from './conversation/render/commit-streaming-round.js';
+import {
+  applyStreamToolProgress,
+  applyStreamToolResult,
+} from './conversation/render/apply-stream-tool-event.js';
+import { handlePendingInteractionEvent } from './conversation/render/handle-pending-interaction-event.js';
+import {
+  applySessionChildRuntimeEvent,
+  applyTaskUpdateRuntimeEvent,
+} from './conversation/render/apply-session-runtime-event.js';
+import { finalizeStreamMessage } from './conversation/render/finalize-stream-message.js';
 import {
   CommandPalette,
   useCommandPalette,
@@ -297,62 +296,52 @@ export default function ChatPage() {
   const token = useAuthStore((s) => s.accessToken);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
 
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(sessionId ?? null);
-  const workspace = useWorkspace(currentSessionId);
-  const [showWorkspaceSelector, setShowWorkspaceSelector] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [messageRatings, setMessageRatings] = useState<Record<string, SessionMessageRatingRecord>>(
-    {},
-  );
+  // ─── 会话生命周期域 — 抽到 useChatSessionLifecycle。
+  // 参见 docs/architecture/chat-page-split-plan.md 域 A。
+  const sessionLifecycle = useChatSessionLifecycle({
+    routeSessionId: sessionId,
+    gatewayUrl,
+    token,
+    defaultVisibleMessageCount: DEFAULT_VISIBLE_MESSAGE_COUNT,
+  });
+  const {
+    currentSessionId,
+    setCurrentSessionId,
+    messages,
+    setMessages,
+    messageRatings,
+    setMessageRatings,
+    sessionReloadNonce,
+    setSessionReloadNonce,
+    hasPendingFollowContent,
+    setHasPendingFollowContent,
+    isSessionLoading,
+    setIsSessionLoading,
+    visibleMessageCount,
+    setVisibleMessageCount,
+    serverTotalTurnCount,
+    setServerTotalTurnCount,
+    messagesRef,
+    activeSessionRef,
+    currentLoadedSessionIdRef,
+    sessionViewEpochRef,
+    currentSessionViewRef,
+    pendingBootstrapSessionRef,
+    previousRouteSessionIdRef,
+    pendingSessionNormalizeTimeoutRef,
+    workspace,
+    sessionViewCache,
+    activateSessionView,
+    isCurrentSessionView,
+    isCurrentSessionRequest,
+    handleToggleMessageRating,
+  } = sessionLifecycle;
   const [activeProviderId, setActiveProviderId] = useState<string>('');
   const [activeModelId, setActiveModelId] = useState<string>('');
   const currentUserEmail = useAuthStore((s) => s.email) ?? '';
   const [providers, setProviders] = useState<ChatSettingsProvider[]>([]);
   const [input, setInput] = useState('');
-  const [streaming, setStreaming] = useState(false);
-  const [stoppingStream, setStoppingStream] = useState(false);
-  const [streamBuffer, setStreamBuffer] = useState('');
-  const [streamThinkingBuffer, setStreamThinkingBuffer] = useState('');
-  const [streamThinkingBlocks, setStreamThinkingBlocks] = useState<StreamingThinkingBlock[]>([]);
-  // Ordered live-stream parts (reasoning / text / tool) preserving the wire
-  // arrival sequence. Drives both the live render (so interleaving like
-  // tool → text → tool is faithful) and the per-round commit message so the
-  // committed messages match the gateway's ordered persistence. Empty when
-  // there is no active stream.
-  const [streamingSegments, setStreamingSegments] = useState<ChatMessagePart[]>([]);
-  const [reportedStreamUsage, setReportedStreamUsage] = useState<ChatBackendUsageSnapshot | null>(
-    null,
-  );
-  const [recoveryActiveStream, setRecoveryActiveStream] = useState<SessionActiveStream | null>(
-    null,
-  );
-  const [recoveredStreamSnapshot, setRecoveredStreamSnapshot] =
-    useState<RecoveredActiveAssistantStream | null>(null);
-  const [activeStreamStartedAt, setActiveStreamStartedAt] = useState<number | null>(null);
-  const [activeStreamFirstTokenLatencyMs, setActiveStreamFirstTokenLatencyMs] = useState<
-    number | null
-  >(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const contentColumnRef = useRef<HTMLDivElement>(null);
-  const scrollRegionRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const pendingScrollFrameRef = useRef<number | null>(null);
-  const messagesRef = useRef<ChatMessage[]>([]);
-  messagesRef.current = messages;
-  const pendingSessionNormalizeTimeoutRef = useRef<number | null>(null);
-  const activeSessionRef = useRef<string | null>(sessionId ?? null);
-  const currentLoadedSessionIdRef = useRef<string | null>(currentSessionId);
-  const sessionViewEpochRef = useRef(0);
-  const currentSessionViewRef = useRef<{
-    epoch: number;
-    sessionId: string | null;
-  }>({
-    epoch: 0,
-    sessionId: sessionId ?? null,
-  });
   const lastParentTaskSyncMarkerRef = useRef<string | null>(null);
-  const pendingBootstrapSessionRef = useRef<string | null>(null);
-  const previousRouteSessionIdRef = useRef<string | null>(sessionId ?? null);
   const hasAppliedSavedImageDefaultsRef = useRef(false);
   const savedChatDefaultsRef = useRef<{
     modelId: string;
@@ -361,32 +350,6 @@ export default function ChatPage() {
     thinkingEnabled: boolean;
   } | null>(null);
 
-  const rightTabRaw = useUIStateStore((s) => s.rightTab);
-  const setRightTabStore = useUIStateStore((s) => s.setRightTab);
-  const rightTab = (rightTabRaw as RightPanelTabId) ?? 'overview';
-  const setRightTab = useCallback(
-    (value: RightPanelTabId | ((prev: RightPanelTabId) => RightPanelTabId)) => {
-      const next =
-        typeof value === 'function'
-          ? (value as (p: RightPanelTabId) => RightPanelTabId)(rightTab)
-          : value;
-      setRightTabStore(next);
-    },
-    [rightTab, setRightTabStore],
-  );
-  const [toolFilter, setToolFilter] = useState<'all' | 'lsp' | 'file' | 'network' | 'other'>('all');
-  const [mcpServers, setMcpServers] = useState<MCPServerStatus[]>([]);
-  const rightOpen = useUIStateStore((s) => s.rightOpen);
-  const setRightOpenStore = useUIStateStore((s) => s.setRightOpen);
-  const setRightOpen = useCallback(
-    (value: boolean | ((prev: boolean) => boolean)) => {
-      const next =
-        typeof value === 'function' ? (value as (p: boolean) => boolean)(rightOpen) : value;
-      setRightOpenStore(next);
-    },
-    [rightOpen, setRightOpenStore],
-  );
-  const [companionPanelSignal, setCompanionPanelSignal] = useState(0);
   const [dialogueMode, setDialogueMode] = useState<DialogueMode>('coding');
   const [manualAgentId, setManualAgentId] = useState('');
   const [yoloMode, setYoloMode] = useState(false);
@@ -394,14 +357,45 @@ export default function ChatPage() {
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('medium');
   const [streamError, setStreamError] = useState<string | null>(null);
-  const [sessionReloadNonce, setSessionReloadNonce] = useState(0);
-  const [hasPendingFollowContent, setHasPendingFollowContent] = useState(false);
-  const [isSessionLoading, setIsSessionLoading] = useState(false);
-  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
-  const [visibleMessageCount, setVisibleMessageCount] = useState(DEFAULT_VISIBLE_MESSAGE_COUNT);
-  const [serverTotalTurnCount, setServerTotalTurnCount] = useState<number | null>(null);
   const modelPrices = useModelPrices(gatewayUrl, token);
   const [rightPanelState, setRightPanelState] = useState(() => createInitialChatRightPanelState());
+  const streamingState = useChatStreaming();
+  const {
+    streaming,
+    setStreaming,
+    stoppingStream,
+    setStoppingStream,
+    streamBuffer,
+    setStreamBuffer,
+    streamThinkingBuffer,
+    setStreamThinkingBuffer,
+    streamThinkingBlocks,
+    setStreamThinkingBlocks,
+    streamingSegments,
+    setStreamingSegments,
+    reportedStreamUsage,
+    setReportedStreamUsage,
+    recoveryActiveStream,
+    setRecoveryActiveStream,
+    recoveredStreamSnapshot,
+    setRecoveredStreamSnapshot,
+    activeStreamStartedAt,
+    setActiveStreamStartedAt,
+    activeStreamFirstTokenLatencyMs,
+    setActiveStreamFirstTokenLatencyMs,
+    streamingRef,
+    stoppingStreamRef,
+    currentAssistantStreamMessageIdRef,
+    pendingStreamRevealFrameRef,
+    streamRevealTargetRef,
+    streamRevealVisibleRef,
+    streamRevealTargetCodePointsRef,
+    streamRevealVisibleCodePointCountRef,
+    streamRevealNextAllowedAtRef,
+    resetStreamState,
+    scheduleStreamReveal,
+    isImmediatelyRenderableStructuredContent,
+  } = streamingState;
   // Live refs that mirror streaming/right-panel state so that effects (especially
   // session-switch cleanup) can read the latest values without depending on them.
   const streamBufferRef = useRef('');
@@ -416,6 +410,33 @@ export default function ChatPage() {
   activeStreamStartedAtRef.current = activeStreamStartedAt;
   const rightPanelStateRef = useRef<ChatRightPanelState>(rightPanelState);
   rightPanelStateRef.current = rightPanelState;
+
+  // ─── 待处理操作域 — 抽到 useChatPendingActions。
+  // 参见 docs/architecture/chat-page-split-plan.md 域 C。
+  const pendingActions = useChatPendingActions({
+    gatewayUrl,
+    token,
+    currentSessionId,
+    setMessages,
+    setRightPanelState,
+    setStreamError,
+  });
+  const {
+    pendingPermissions,
+    setPendingPermissions,
+    pendingQuestions,
+    setPendingQuestions,
+    activePendingQuestion,
+    inlineQuestionAnswers,
+    inlineQuestionCustomInputs,
+    inlineQuestionReplyStatus,
+    inlineQuestionReplyError,
+    toggleInlineQuestionOption,
+    handleInlineQuestionCustomInput,
+    replyInlineQuestion,
+    resolveInlinePermissionActions,
+  } = pendingActions;
+
   const [childSessions, setChildSessions] = useState<Session[]>([]);
   const [selectedChildSessionId, setSelectedChildSessionId] = useState<string | null>(null);
   const [sessionTodos, setSessionTodos] = useState<SessionTodoItem[]>([]);
@@ -424,8 +445,6 @@ export default function ChatPage() {
   const todoController = useChatTodoController(sessionTodos);
   const todoDetailsId = useId();
   const [sessionTasks, setSessionTasks] = useState<SessionTask[]>([]);
-  const [pendingPermissions, setPendingPermissions] = useState<PendingPermissionRequest[]>([]);
-  const [pendingQuestions, setPendingQuestions] = useState<PendingQuestionRequest[]>([]);
   const [latestGeneratedImageResult, setLatestGeneratedImageResult] = useState<{
     artifactId: string;
     artifactTitle: string;
@@ -437,40 +456,14 @@ export default function ChatPage() {
   const [selectedImageEditReferenceArtifactId, setSelectedImageEditReferenceArtifactId] = useState<
     string | null
   >(null);
-  const [inlineQuestionAnswers, setInlineQuestionAnswers] = useState<string[][]>([]);
-  const [inlineQuestionCustomInputs, setInlineQuestionCustomInputs] = useState<string[]>([]);
-  const [inlineQuestionReplyStatus, setInlineQuestionReplyStatus] = useState<
-    'answered' | 'dismissed' | null
-  >(null);
-  const [inlineQuestionReplyError, setInlineQuestionReplyError] = useState<string | null>(null);
-  const [inlinePermissionPendingDecision, setInlinePermissionPendingDecision] = useState<{
-    decision: PermissionDecision;
-    requestId: string;
-  } | null>(null);
-  const browserActive = useUIStateStore((s) => s.browserActive);
-  const setBrowserActive = useUIStateStore((s) => s.setBrowserActive);
-  const editorPaneTabByWorkspace = useUIStateStore((s) => s.editorPaneTabByWorkspace);
-  const setEditorPaneTabForWorkspace = useUIStateStore((s) => s.setEditorPaneTabForWorkspace);
-  const browserPreviewUrlByWorkspace = useUIStateStore((s) => s.browserPreviewUrlByWorkspace);
-  const setBrowserPreviewUrlForWorkspace = useUIStateStore(
-    (s) => s.setBrowserPreviewUrlForWorkspace,
-  );
-  // 快捷终端面板:by-workspace 持久化是否开启 + 全局共用高度。
-  const quickTerminalOpenByWorkspace = useUIStateStore((s) => s.quickTerminalOpenByWorkspace);
-  const setQuickTerminalOpenForWorkspace = useUIStateStore(
-    (s) => s.setQuickTerminalOpenForWorkspace,
-  );
-  // browserPreviewUrl / setBrowserPreviewUrl 在 effectiveWorkingDirectory 定义之后才声明
-  // (见下方),因为它们依赖 workspace path。
   const devServerDetectedTerminalIdsRef = useRef<Set<string>>(new Set());
-  const [inlinePermissionErrors, setInlinePermissionErrors] = useState<Record<string, string>>({});
   const [sessionStateStatus, setSessionStateStatus] = useState<SessionStateStatus | null>(null);
   const [isSessionSnapshotReady, setIsSessionSnapshotReady] = useState(false);
   const sessionMetadataDirtyRef = useRef(false);
   const sessionRestoredFromCacheRef = useRef(false);
   const [historyEditPrompt, setHistoryEditPrompt] = useState<HistoryEditPrompt | null>(null);
-  const [, startSessionSwitchTransition] = useTransition();
   const [retryPrompt, setRetryPrompt] = useState<RetryPrompt | null>(null);
+  const [, startSessionSwitchTransition] = useTransition();
   const [sessionModesHydrated, setSessionModesHydrated] = useState(false);
   const [sessionMetadataDirty, setSessionMetadataDirty] = useState(false);
   const [workspaceFileItems, setWorkspaceFileItems] = useState<WorkspaceFileMentionItem[]>([]);
@@ -483,16 +476,6 @@ export default function ChatPage() {
   const lastPersistedSessionMetadataSnapshotRef = useRef<string | null>(null);
   const composerCommandDescriptors = useCommandRegistry('composer');
   const prefersReducedMotion = usePrefersReducedMotion();
-  const editorMode = useUIStateStore((s) => s.editorMode);
-  const setEditorMode = useUIStateStore((s) => s.setEditorMode);
-  // splitPos 完全独立于 zustand UI state,直接走自己的小 localStorage 键:
-  //   1) 不订阅,避免拖动结束 commit 触发整树 rerender
-  //   2) 不走 zustand persist,避免每次 commit 都把 75 个字段的整个
-  //      UI state JSON.stringify 写盘 (即 [Violation] 'click'/
-  //      'requestIdleCallback' handler took 70~167ms 的根因)
-  // 见 ./chat-page/split-pos-storage.ts 的注释。
-  const [splitPos] = useState(() => readSplitPos());
-  const setSplitPos = writeSplitPos;
   const navigateToHome = useUIStateStore((s) => s.navigateToHome);
   const navigateToSession = useUIStateStore((s) => s.navigateToSession);
   const chatView = useUIStateStore((s) => s.chatView);
@@ -502,80 +485,9 @@ export default function ChatPage() {
   const addSavedWorkspacePath = useUIStateStore((s) => s.addSavedWorkspacePath);
   const setFileTreeRootPath = useUIStateStore((s) => s.setFileTreeRootPath);
   const setLastChatPath = useUIStateStore((s) => s.setLastChatPath);
-  const toggleLeftSidebar = useUIStateStore((s) => s.toggleLeftSidebar);
-  const leftSidebarOpen = useUIStateStore((s) => s.leftSidebarOpen);
-  const setLeftSidebarOpen = useUIStateStore((s) => s.setLeftSidebarOpen);
 
-  // 窄屏(≤960px)下 sidebar 改为 overlay 模式,会浮在主对话区上而不是占位。
-  const [isNarrowViewport, setIsNarrowViewport] = useState(() =>
-    typeof window !== 'undefined' ? window.innerWidth <= 960 : false,
-  );
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
-    const media = window.matchMedia('(max-width: 960px)');
-    const update = () => setIsNarrowViewport(media.matches);
-    update();
-    media.addEventListener('change', update);
-    return () => media.removeEventListener('change', update);
-  }, []);
-
-  // 自愈:首次进入 chat 路由 + 宽屏时,如果 sidebar 因历史原因被关闭,自动展开一次。
-  // 只在 ChatPage 挂载的"首次"跑(empty deps),用户后续手动关闭后不会被强制重开。
-  const sidebarSelfHealRef = useRef(false);
-  useEffect(() => {
-    if (sidebarSelfHealRef.current) return;
-    sidebarSelfHealRef.current = true;
-    if (!leftSidebarOpen && !isNarrowViewport) {
-      setLeftSidebarOpen(true);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const shouldOverlaySidebar = isNarrowViewport;
-  const sidebarWidth = shouldOverlaySidebar
-    ? 'min(86vw, var(--sidebar-width, 260px))'
-    : 'var(--sidebar-width, 260px)';
-  const splitDragging = useRef(false);
-  const rightOpenRef = useRef(rightOpen);
-  const {
-    streamRevealTargetRef,
-    streamRevealVisibleRef,
-    streamRevealTargetCodePointsRef,
-    streamRevealVisibleCodePointCountRef,
-    streamRevealNextAllowedAtRef,
-    pendingStreamRevealFrameRef,
-    streamingRef,
-    stoppingStreamRef,
-    currentAssistantStreamMessageIdRef,
-    resetStreamState,
-    scheduleStreamReveal,
-  } = useStreamReveal(prefersReducedMotion, {
-    setStreamBuffer,
-    setStreamThinkingBuffer,
-    setStreamThinkingBlocks,
-    setStreamingSegments,
-    setRecoveredStreamSnapshot,
-    setStreaming,
-    setStoppingStream,
-    setActiveStreamStartedAt,
-    setActiveStreamFirstTokenLatencyMs,
-  });
-  const attachAttemptedSessionRef = useRef<string | null>(null);
-  // Tracks the last logged attach-eligibility signature so the diagnostic
-  // [ATTACH_ELIGIBILITY] line in the effect below only prints when the
-  // decision-relevant inputs actually change (not on every token delta).
-  const attachEligibilitySignatureRef = useRef<string | null>(null);
-  const { attachRetryNonce, cancelAttachRetry, scheduleAttachRetry } = useStreamAttachRetry();
-  const sessionViewCache = useSessionViewCache();
-  const { activateSessionView, isCurrentSessionView, isCurrentSessionRequest } =
-    useSessionViewGuard({
-      activeSessionRef,
-      sessionViewEpochRef,
-      currentSessionViewRef,
-    });
-  const splitContainerRef = useRef<HTMLDivElement>(null);
-  const editorPaneRef = useRef<HTMLDivElement>(null);
-  const [saving, setSaving] = useState(false);
+  // sidebar / viewport / overlay 自愈 + 整个 UI 状态域 — 抽到 useChatUiState。
+  // 参见 docs/architecture/chat-page-split-plan.md 域 D。
   const openFileRef = useFileEditorContext();
   const effectiveWorkingDirectory = currentSessionId
     ? workspace.workingDirectory
@@ -583,35 +495,64 @@ export default function ChatPage() {
   // useFileEditor 按 workspace 隔离打开的文件:跨 workspace 切换时自动加载对应 workspace
   // 上次留下的文件,而不是共享一个全局文件列表。
   const fileEditor = useFileEditor(effectiveWorkingDirectory);
-  // 快捷终端面板:by-workspace 持久化(跟 BuiltInBrowser / fileEditor 同一套 wsKey 兜底)。
-  const quickTerminalWorkspaceKey =
-    effectiveWorkingDirectory && effectiveWorkingDirectory.trim().length > 0
-      ? effectiveWorkingDirectory
-      : '__default__';
-  const quickTerminalOpen = quickTerminalOpenByWorkspace[quickTerminalWorkspaceKey] ?? false;
-  // 浏览器预览 URL 按 workspace 路径派生:同 workspace 的会话共享 url,跨 workspace
-  // 自动切到对应 workspace 的 url(若无则 null)。无 workspace 的会话归入 __default__ 桶。
-  const browserWorkspaceKey =
-    effectiveWorkingDirectory && effectiveWorkingDirectory.trim().length > 0
-      ? effectiveWorkingDirectory
-      : '__default__';
-  const browserPreviewUrl = browserPreviewUrlByWorkspace[browserWorkspaceKey] ?? null;
-  const setBrowserPreviewUrl = useCallback(
-    (url: string | null) => {
-      setBrowserPreviewUrlForWorkspace(effectiveWorkingDirectory, url);
-      if (url) setBrowserActive(true);
-    },
-    [effectiveWorkingDirectory, setBrowserPreviewUrlForWorkspace, setBrowserActive],
-  );
-  // editor pane 当前 tab(code/browser)按 workspace 持久化,跨 workspace 切换时
-  // 各自互不影响;用户上次在 workspace A 留在 code,B 留在 browser → 切回时自动恢复。
-  const editorPaneTab = editorPaneTabByWorkspace[browserWorkspaceKey] ?? 'code';
-  const setEditorPaneTab = useCallback(
-    (tab: 'code' | 'browser') => {
-      setEditorPaneTabForWorkspace(effectiveWorkingDirectory, tab);
-    },
-    [effectiveWorkingDirectory, setEditorPaneTabForWorkspace],
-  );
+  const ui = useChatUiState({ effectiveWorkingDirectory });
+  const {
+    // 右侧面板
+    rightTab,
+    setRightTab,
+    rightOpen,
+    setRightOpen,
+    rightOpenRef,
+    // 工具过滤 / MCP
+    toolFilter,
+    setToolFilter,
+    mcpServers,
+    setMcpServers,
+    // 编辑器模式 / 分屏 / 保存
+    editorMode,
+    setEditorMode,
+    splitPos,
+    setSplitPos,
+    splitDragging,
+    splitContainerRef,
+    editorPaneRef,
+    saving,
+    setSaving,
+    // editor pane tab / 浏览器预览(workspace-keyed)
+    editorPaneTab,
+    setEditorPaneTab,
+    browserPreviewUrl,
+    setBrowserPreviewUrl,
+    // 快捷终端
+    quickTerminalOpen,
+    setQuickTerminalOpenForWorkspace,
+    // 弹窗 / 信号
+    showWorkspaceSelector,
+    setShowWorkspaceSelector,
+    companionPanelSignal,
+    bumpCompanionPanelSignal,
+    // 滚动
+    bottomRef,
+    contentColumnRef,
+    scrollRegionRef,
+    textareaRef,
+    pendingScrollFrameRef,
+    showScrollToBottom,
+    setShowScrollToBottom,
+    // sidebar 透传
+    leftSidebarOpen,
+    setLeftSidebarOpen,
+    toggleLeftSidebar,
+    isNarrowViewport,
+    shouldOverlaySidebar,
+    sidebarWidth,
+  } = ui;
+  const attachAttemptedSessionRef = useRef<string | null>(null);
+  // Tracks the last logged attach-eligibility signature so the diagnostic
+  // [ATTACH_ELIGIBILITY] line in the effect below only prints when the
+  // decision-relevant inputs actually change (not on every token delta).
+  const attachEligibilitySignatureRef = useRef<string | null>(null);
+  const { attachRetryNonce, cancelAttachRetry, scheduleAttachRetry } = useStreamAttachRetry();
   const artifactsWorkspaceHref = currentSessionId
     ? `/artifacts?sessionId=${encodeURIComponent(currentSessionId)}`
     : null;
@@ -767,23 +708,12 @@ export default function ChatPage() {
     previousRouteSessionIdRef.current = nextSessionId;
   }, [sessionId]);
 
+  // 任务同步 marker 与会话生命周期耦合(切会话即清空,避免上一会话的
+  // task marker 误导新会话的 polling 比较),但 marker 本身属任务同步域,
+  // 留在父组件管理。useChatSessionLifecycle 负责其它 ref 的镜像。
   useEffect(() => {
-    activeSessionRef.current = sessionId ?? currentSessionId ?? null;
-    currentLoadedSessionIdRef.current = currentSessionId;
     lastParentTaskSyncMarkerRef.current = null;
   }, [currentSessionId, sessionId]);
-
-  useEffect(() => {
-    return subscribeCurrentSessionRefresh((targetSessionId) => {
-      if (targetSessionId === activeSessionRef.current) {
-        setSessionReloadNonce((value) => value + 1);
-      }
-    });
-  }, []);
-
-  useEffect(() => {
-    rightOpenRef.current = rightOpen;
-  }, [rightOpen]);
 
   useEffect(() => {
     setLastChatPath(location.pathname);
@@ -1281,153 +1211,6 @@ export default function ChatPage() {
     syncRecoveredStreamSnapshot,
     token,
   ]);
-
-  useEffect(() => {
-    if (!currentSessionId) {
-      return;
-    }
-
-    publishSessionPendingPermission(
-      currentSessionId,
-      toSessionPendingPermissionState(pendingPermissions),
-    );
-  }, [currentSessionId, pendingPermissions]);
-
-  useEffect(() => {
-    if (!currentSessionId) {
-      return;
-    }
-
-    publishSessionPendingQuestion(
-      currentSessionId,
-      pendingQuestions.find((question) => question.status === 'pending') ?? null,
-    );
-  }, [currentSessionId, pendingQuestions]);
-
-  const activePendingQuestion = useMemo(
-    () => pendingQuestions.find((q) => q.status === 'pending') ?? null,
-    [pendingQuestions],
-  );
-
-  useEffect(() => {
-    if (!activePendingQuestion) {
-      return;
-    }
-    setInlineQuestionAnswers(activePendingQuestion.questions.map(() => []));
-    setInlineQuestionCustomInputs(activePendingQuestion.questions.map(() => ''));
-    setInlineQuestionReplyStatus(null);
-    setInlineQuestionReplyError(null);
-  }, [activePendingQuestion?.requestId]);
-
-  const toggleInlineQuestionOption = useCallback(
-    (questionIndex: number, optionLabel: string, multiple: boolean) => {
-      setInlineQuestionAnswers((prev) => {
-        const next = prev.map((a) => [...a]);
-        while (next.length <= questionIndex) {
-          next.push([]);
-        }
-        const current = next[questionIndex] ?? [];
-        if (multiple) {
-          next[questionIndex] = current.includes(optionLabel)
-            ? current.filter((a) => a !== optionLabel)
-            : [...current, optionLabel];
-        } else {
-          next[questionIndex] = current.includes(optionLabel) ? [] : [optionLabel];
-        }
-        return next;
-      });
-    },
-    [],
-  );
-
-  const handleInlineQuestionCustomInput = useCallback((questionIndex: number, value: string) => {
-    setInlineQuestionCustomInputs((prev) => {
-      const next = [...prev];
-      while (next.length <= questionIndex) {
-        next.push('');
-      }
-      next[questionIndex] = value;
-      return next;
-    });
-  }, []);
-
-  const replyInlineQuestion = useCallback(
-    async (status: 'answered' | 'dismissed') => {
-      if (!token || !activePendingQuestion) {
-        return;
-      }
-
-      const mergedAnswers = activePendingQuestion.questions.map((_, index) => {
-        const selected = inlineQuestionAnswers[index] ?? [];
-        const custom = (inlineQuestionCustomInputs[index] ?? '').trim();
-        return custom ? [...selected, custom] : selected;
-      });
-
-      const payload =
-        status === 'answered'
-          ? {
-              answers: mergedAnswers,
-              requestId: activePendingQuestion.requestId,
-              status,
-            }
-          : { requestId: activePendingQuestion.requestId, status };
-
-      try {
-        setInlineQuestionReplyStatus(status);
-        setInlineQuestionReplyError(null);
-        await createQuestionsClient(gatewayUrl).reply(
-          token,
-          activePendingQuestion.sessionId,
-          payload,
-        );
-        setPendingQuestions((prev) =>
-          prev.filter((q) => q.requestId !== activePendingQuestion.requestId),
-        );
-        if (currentSessionId) {
-          requestCurrentSessionRefresh(currentSessionId);
-        }
-        requestSessionListRefresh();
-      } catch (error) {
-        const isHttp =
-          typeof error === 'object' &&
-          error !== null &&
-          typeof Reflect.get(error, 'status') === 'number';
-        if (isHttp) {
-          const httpStatus = Reflect.get(error, 'status') as number;
-          const data = Reflect.get(error, 'data') as { error?: string } | undefined;
-          if (
-            (httpStatus === 409 || httpStatus === 404) &&
-            (data?.error === 'Question request expired' ||
-              data?.error === 'Question request already resolved' ||
-              httpStatus === 404)
-          ) {
-            setPendingQuestions((prev) =>
-              prev.filter((q) => q.requestId !== activePendingQuestion.requestId),
-            );
-            toast('问题已过期或已处理，已重新同步。', 'warning', 3000);
-            if (currentSessionId) {
-              requestCurrentSessionRefresh(currentSessionId);
-            }
-            requestSessionListRefresh();
-            return;
-          }
-        }
-        setInlineQuestionReplyError(
-          error instanceof Error ? error.message : '提交回答失败，请重试。',
-        );
-      } finally {
-        setInlineQuestionReplyStatus(null);
-      }
-    },
-    [
-      token,
-      gatewayUrl,
-      activePendingQuestion,
-      currentSessionId,
-      inlineQuestionAnswers,
-      inlineQuestionCustomInputs,
-    ],
-  );
 
   useSessionSidebarRunState({
     activeStreamSessionId: activeGatewayStreamSessionId,
@@ -2033,43 +1816,6 @@ export default function ChatPage() {
     };
   }, [appendTextToComposer]);
 
-  const handleToggleMessageRating = useCallback(
-    async (message: ChatMessage, rating: SessionMessageRatingValue) => {
-      if (!token || !currentSessionId || message.role !== 'assistant' || !message.rawContent) {
-        return;
-      }
-
-      const existingRating = messageRatings[message.id]?.rating;
-      const sessionsClient = createSessionsClient(gatewayUrl);
-
-      try {
-        if (existingRating === rating) {
-          await sessionsClient.deleteMessageRating(token, currentSessionId, message.id);
-          setMessageRatings((previous) => {
-            const next = { ...previous };
-            delete next[message.id];
-            return next;
-          });
-          return;
-        }
-
-        const nextRating = await sessionsClient.setMessageRating(
-          token,
-          currentSessionId,
-          message.id,
-          { rating },
-        );
-        setMessageRatings((previous) => ({
-          ...previous,
-          [message.id]: nextRating,
-        }));
-      } catch (error) {
-        logger.error('message rating failed', error);
-      }
-    },
-    [currentSessionId, gatewayUrl, messageRatings, token],
-  );
-
   const {
     getCopyableMessageText,
     handleCopyMessage,
@@ -2088,99 +1834,27 @@ export default function ChatPage() {
     setRetryPrompt,
   });
 
-  const createBranchSessionFromMessage = useCallback(
-    async (text: string, sourceMessageId: string, inputParts?: InputImageContent[]) => {
-      if (!token) return;
-      const originSessionId = activeSessionRef.current;
-
-      const baseRecovery = currentSessionId
-        ? await createSessionsClient(gatewayUrl).getRecovery(token, currentSessionId)
-        : null;
-      const baseSession = baseRecovery?.session ?? null;
-      const baseMessages = Array.isArray(baseSession?.messages) ? baseSession.messages : [];
-      const sourceIndex = baseMessages.findIndex((message) => message.id === sourceMessageId);
-      const truncatedMessages = (sourceIndex >= 0 ? baseMessages.slice(0, sourceIndex) : []).map(
-        (message) => ({
-          ...message,
-          id: makeOrderedMessageId(),
-        }),
-      );
-
-      const imported = await createSessionsClient(gatewayUrl).importSession(token, {
-        messages: truncatedMessages,
-      });
-      const branchMetadata = buildSessionMetadata({
-        editSourceMessageId: sourceMessageId,
-        ...(currentSessionId ? { parentSessionId: currentSessionId } : {}),
-      });
-      await createSessionsClient(gatewayUrl).updateMetadata(
-        token,
-        imported.sessionId,
-        branchMetadata,
-      );
-      lastPersistedSessionMetadataSnapshotRef.current =
-        createSessionMetadataSnapshot(buildSessionMetadata());
-
-      if (activeSessionRef.current !== originSessionId) {
-        return;
-      }
-
-      activeSessionRef.current = imported.sessionId;
-      pendingBootstrapSessionRef.current = imported.sessionId;
-      setCurrentSessionId(imported.sessionId);
-      setMessages(filterTranscriptMessages(normalizeChatMessages(truncatedMessages)));
-      clearSessionMetadataDirty();
-      setSessionModesHydrated(true);
-      resetStreamState();
-      setStreamError(null);
-      if (inputParts && inputParts.length > 0) {
-        requestSessionListRefresh();
-        void navigate(`/chat/${imported.sessionId}`);
-        await sendMessage(text, {
-          existingInputParts: inputParts,
-          forcedSessionId: imported.sessionId,
-        });
-      } else {
-        focusComposerWithText(text);
-        requestSessionListRefresh();
-        void navigate(`/chat/${imported.sessionId}`);
-      }
-      return imported.sessionId;
+  const { createBranchSessionFromMessage } = useChatBranchSession({
+    token,
+    gatewayUrl,
+    currentSessionId,
+    activeSessionRef,
+    pendingBootstrapSessionRef,
+    setCurrentSessionId,
+    setMessages,
+    clearSessionMetadataDirty,
+    buildSessionMetadata,
+    lastPersistedSessionMetadataSnapshotRef,
+    setSessionModesHydrated,
+    resetStreamState,
+    setStreamError,
+    focusComposerWithText,
+    requestSessionListRefresh,
+    navigateToSession: (nextSessionId) => {
+      void navigate(`/chat/${nextSessionId}`);
     },
-    [
-      buildSessionMetadata,
-      clearSessionMetadataDirty,
-      currentSessionId,
-      focusComposerWithText,
-      gatewayUrl,
-      navigate,
-      resetStreamState,
-      sendMessage,
-      token,
-    ],
-  );
-
-  const truncateSessionMessagesInPlace = useCallback(
-    async (sessionId: string, messageId: string, messageText?: string): Promise<Message[]> => {
-      if (!token) return [];
-      return createSessionsClient(gatewayUrl).truncateMessages(token, sessionId, messageId, {
-        inclusive: true,
-        ...(messageText !== undefined ? { messageText } : {}),
-      });
-    },
-    [gatewayUrl, token],
-  );
-
-  const trimMessagesFromSource = useCallback(
-    <TMessage extends { id: string }>(
-      sourceMessages: TMessage[],
-      sourceMessageId: string,
-    ): TMessage[] => {
-      const sourceIndex = sourceMessages.findIndex((message) => message.id === sourceMessageId);
-      return sourceIndex >= 0 ? sourceMessages.slice(0, sourceIndex) : sourceMessages;
-    },
-    [],
-  );
+    sendMessage,
+  });
 
   async function ensureSession(): Promise<string> {
     if (currentSessionId) {
@@ -2377,44 +2051,11 @@ export default function ChatPage() {
         return false;
       }
 
-      let imageEditArtifacts:
-        | Array<{ artifactId: string; fileName?: string; mimeType?: string }>
-        | undefined;
-      let localImageInputs: InputImageContent[] | undefined;
       if (selectedImageEditReferenceArtifact && effectiveFiles.length > 0) {
         const message = '当前图片编辑一次只支持一张参考图，请在会话图片和新上传图片之间二选一。';
         setStreamError(message);
         toast(message, 'warning');
         return false;
-      }
-
-      if (selectedImageEditReferenceArtifact) {
-        imageEditArtifacts = [
-          {
-            artifactId: selectedImageEditReferenceArtifact.artifactId,
-            ...(selectedImageEditReferenceArtifact.fileName
-              ? { fileName: selectedImageEditReferenceArtifact.fileName }
-              : {}),
-            ...(selectedImageEditReferenceArtifact.mimeType
-              ? { mimeType: selectedImageEditReferenceArtifact.mimeType }
-              : {}),
-          },
-        ];
-        localImageInputs = [
-          {
-            type: 'input_image',
-            artifactId: selectedImageEditReferenceArtifact.artifactId,
-            ...(selectedImageEditReferenceArtifact.imageUrl
-              ? { imageUrl: selectedImageEditReferenceArtifact.imageUrl }
-              : {}),
-            ...(selectedImageEditReferenceArtifact.fileName
-              ? { fileName: selectedImageEditReferenceArtifact.fileName }
-              : {}),
-            ...(selectedImageEditReferenceArtifact.mimeType
-              ? { mimeType: selectedImageEditReferenceArtifact.mimeType }
-              : {}),
-          },
-        ];
       }
 
       if (effectiveFiles.length > 0) {
@@ -2425,92 +2066,43 @@ export default function ChatPage() {
           toast(message, 'warning');
           return false;
         }
-
-        const uploadedAttachments = await uploadChatAttachments({
-          files: effectiveFiles,
-          gatewayUrl,
-          sessionId: sid,
-          token,
-        });
-        imageEditArtifacts = uploadedAttachments
-          .filter((attachment) => attachment.type === 'image')
-          .map((attachment) => ({
-            artifactId: attachment.artifactId,
-            ...(attachment.fileName ? { fileName: attachment.fileName } : {}),
-            ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
-          }));
-        localImageInputs = uploadedAttachments
-          .filter((attachment) => attachment.type === 'image')
-          .map((attachment) => ({
-            type: 'input_image',
-            artifactId: attachment.artifactId,
-            ...(attachment.dataUrl ? { imageUrl: attachment.dataUrl } : {}),
-            ...(attachment.fileName ? { fileName: attachment.fileName } : {}),
-            ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
-          }));
       }
 
-      const requestStartedAt = Date.now();
-      const userMsg: ChatMessage = {
-        id: makeOrderedMessageId(requestStartedAt),
-        role: 'user',
-        content: text,
-        ...(localImageInputs ? { rawContent: [{ type: 'text', text }, ...localImageInputs] } : {}),
-        createdAt: requestStartedAt,
-        tokenEstimate: estimateTokenCount(text),
-        status: 'completed',
-      };
-      setMessages((prev) => [...prev, userMsg]);
+      const { imageEditArtifacts, localImageInputs } = await prepareImageGenerationInput({
+        files: effectiveFiles,
+        gatewayUrl,
+        selectedImageEditReferenceArtifact,
+        sessionId: sid,
+        token,
+      });
 
-      if (options?.queuedMessageId && queuedComposerScope) {
-        void deleteQueuedComposerFiles({
-          queueId: options.queuedMessageId,
-          scope: queuedComposerScope,
-        });
-      }
-
-      try {
-        const payload = await generateImageForSession({
-          ...(imageEditArtifacts ? { inputArtifacts: imageEditArtifacts } : {}),
-          prompt: text,
-          sessionId: sid,
-        });
-        if (activeSessionRef.current !== sid) {
-          return false;
-        }
-
-        const responsePayload = payload as SessionImageGenerationResponse;
-
-        appendImageGenerationSummaryMessage({
-          artifactTitle: responsePayload.artifact.title,
-          messageSummary: responsePayload.messageSummary,
-          modelId: responsePayload.parameters.modelId,
-          providerId: responsePayload.parameters.providerId,
-          revisedPrompt: responsePayload.revisedPrompt,
-          sourcePrompt: text,
-        });
-        setLatestGeneratedImageResult({
-          artifactId: responsePayload.artifact.id,
-          artifactTitle: responsePayload.artifact.title,
-          modelLabel: imageModelLabel || responsePayload.parameters.modelId,
-        });
-        setSessionReloadNonce((value) => value + 1);
-        requestSessionListRefresh();
-        toast(
-          imageEditArtifacts
-            ? '图片已处理，可在产物工作区查看。'
-            : '图片已生成，可在产物工作区查看。',
-          'success',
-        );
-        return true;
-      } catch (error) {
-        if (activeSessionRef.current === sid) {
-          const message = error instanceof Error ? error.message : '图片生成失败，请稍后重试。';
+      return submitImageGeneration({
+        activeSessionRef,
+        appendImageGenerationSummaryMessage,
+        generateImageForSession,
+        ...(imageEditArtifacts ? { imageEditArtifacts } : {}),
+        imageModelLabel,
+        ...(localImageInputs ? { localImageInputs } : {}),
+        onError: (message) => {
           setStreamError(message);
           toast(message, 'error');
-        }
-        return false;
-      }
+        },
+        onQueuedMessageConsumed: () => {
+          if (options?.queuedMessageId && queuedComposerScope) {
+            void deleteQueuedComposerFiles({
+              queueId: options.queuedMessageId,
+              scope: queuedComposerScope,
+            });
+          }
+        },
+        requestSessionListRefresh,
+        sessionId: sid,
+        setLatestGeneratedImageResult,
+        setMessages,
+        setSessionReloadNonce,
+        sourcePrompt: text,
+        toast,
+      });
     }
 
     const matchedClientCommand =
@@ -2523,7 +2115,7 @@ export default function ChatPage() {
         : null;
 
     if (matchedClientCommand?.action.kind === 'open_companion_panel') {
-      setCompanionPanelSignal((value) => value + 1);
+      bumpCompanionPanelSignal();
       return true;
     }
 
@@ -2570,71 +2162,51 @@ export default function ChatPage() {
       return false;
     }
 
-    let requestInputParts: InputImageContent[] | undefined;
-    let localRequestInputParts: InputImageContent[] | undefined;
+    const preparedStandardInput = await prepareStandardChatSendInput({
+      ...(options?.existingInputParts ? { existingInputParts: options.existingInputParts } : {}),
+      files: effectiveFiles,
+      gatewayUrl,
+      sessionId: sid,
+      text,
+      token,
+    });
+    text = preparedStandardInput.text;
+    const { requestInputParts, localRequestInputParts } = preparedStandardInput;
 
-    if (effectiveFiles.length > 0) {
-      const uploadedAttachments = await uploadChatAttachments({
-        files: effectiveFiles,
-        gatewayUrl,
-        sessionId: sid,
-        token,
-      });
-      const imageInputParts: InputImageContent[] = uploadedAttachments
-        .filter((attachment) => attachment.type === 'image')
-        .map((attachment) => ({
-          type: 'input_image',
-          artifactId: attachment.artifactId,
-          ...(attachment.fileName ? { fileName: attachment.fileName } : {}),
-          ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
-        }));
-      const localImageParts: InputImageContent[] = uploadedAttachments
-        .filter((attachment) => attachment.type === 'image')
-        .map((attachment) => ({
-          type: 'input_image',
-          artifactId: attachment.artifactId,
-          ...(attachment.dataUrl ? { imageUrl: attachment.dataUrl } : {}),
-          ...(attachment.fileName ? { fileName: attachment.fileName } : {}),
-          ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
-        }));
-      const uploadedAttachmentLines = uploadedAttachments
-        .filter((attachment) => attachment.type !== 'image')
-        .map((attachment) => buildUploadedAttachmentSummaryLine(attachment));
-      text = appendAttachmentSummary(text, uploadedAttachmentLines);
-
-      if (imageInputParts.length > 0) {
-        requestInputParts = imageInputParts;
-        localRequestInputParts = localImageParts;
-      }
-    } else if (options?.existingInputParts && options.existingInputParts.length > 0) {
-      requestInputParts = options.existingInputParts;
-      localRequestInputParts = options.existingInputParts;
-    }
-
-    // ── Reset refs (no re-render) ──
-    currentAssistantStreamMessageIdRef.current = makeOrderedMessageId();
-    streamingRef.current = true;
-    stoppingStreamRef.current = false;
-    streamRevealTargetRef.current = '';
-    streamRevealVisibleRef.current = '';
-    streamRevealTargetCodePointsRef.current = [];
-    streamRevealVisibleCodePointCountRef.current = 0;
-    streamRevealNextAllowedAtRef.current = 0;
-    isNearBottomRef.current = true;
-
-    // ── Batch state updates (single React render) ──
-    const requestStartedAt = Date.now();
-    setStreaming(true);
-    setStoppingStream(false);
-    setSessionStateStatus('running');
-    setReportedStreamUsage(null);
-    setStreamBuffer('');
-    setStreamThinkingBuffer('');
-    setStreamThinkingBlocks([]);
-    setHasPendingFollowContent(false);
-    setShowScrollToBottom(false);
-    setActiveStreamStartedAt(requestStartedAt);
-    setActiveStreamFirstTokenLatencyMs(null);
+    const { displayMessageForStream, requestStartedAt, requestText } = startStandardChatStream({
+      currentAssistantStreamMessageIdRef,
+      isNearBottomRef,
+      ...(localRequestInputParts ? { localRequestInputParts } : {}),
+      onQueuedMessageConsumed: () => {
+        if (options?.queuedMessageId && queuedComposerScope) {
+          void deleteQueuedComposerFiles({
+            queueId: options.queuedMessageId,
+            scope: queuedComposerScope,
+          });
+        }
+      },
+      ...(requestInputParts ? { requestInputParts } : {}),
+      setActiveStreamFirstTokenLatencyMs,
+      setActiveStreamStartedAt,
+      setHasPendingFollowContent,
+      setMessages,
+      setReportedStreamUsage,
+      setSessionStateStatus,
+      setShowScrollToBottom,
+      setStoppingStream,
+      setStreamBuffer,
+      setStreamThinkingBlocks,
+      setStreamThinkingBuffer,
+      setStreaming,
+      stoppingStreamRef,
+      streamRevealNextAllowedAtRef,
+      streamRevealTargetCodePointsRef,
+      streamRevealTargetRef,
+      streamRevealVisibleCodePointCountRef,
+      streamRevealVisibleRef,
+      streamingRef,
+      text,
+    });
     const toolCallIds = new Set<string>();
     const liveToolCalls = new Map<string, LiveToolCallState>();
     const requestProviderId = activeProviderId || undefined;
@@ -2645,132 +2217,16 @@ export default function ChatPage() {
       messageId: string,
       textContent: string,
       finalStatus?: 'completed' | 'error' | 'cancelled' | 'paused',
-    ): {
-      content: string;
-      parts: ChatMessagePart[];
-      reasoningBlocksEndedFlags?: boolean[];
-      reasoningBlocksDurationsMs?: number[];
-    } => {
-      const toolCalls = Array.from(liveToolCalls.values()).map((toolCallState) => {
-        const nextToolState =
-          finalStatus === 'error' && toolCallState.status === 'streaming'
-            ? { ...toolCallState, isError: true, status: 'error' as const }
-            : finalStatus === 'completed' && toolCallState.status === 'streaming'
-              ? { ...toolCallState, status: 'completed' as const }
-              : (finalStatus === 'cancelled' || finalStatus === 'paused') &&
-                  toolCallState.status === 'streaming'
-                ? { ...toolCallState, status: 'paused' as const }
-                : toolCallState;
-        const hasPendingPermission = hasActivePendingPermissionRequest({
-          isError: nextToolState.isError,
-          pendingPermissionRequestId: nextToolState.pendingPermissionRequestId,
-          resumedAfterApproval: nextToolState.resumedAfterApproval,
-          status: nextToolState.status,
-        });
-        const status: 'running' | 'paused' | 'completed' | 'failed' =
-          nextToolState.status === 'error'
-            ? 'failed'
-            : nextToolState.status === 'paused'
-              ? 'paused'
-              : nextToolState.status === 'completed'
-                ? 'completed'
-                : 'running';
-
-        const durationMs =
-          nextToolState.completedAt && nextToolState.createdAt
-            ? nextToolState.completedAt - nextToolState.createdAt
-            : undefined;
-
-        return {
-          kind: resolveAssistantCapabilityKind(nextToolState.toolName),
-          toolCallId: nextToolState.toolCallId,
-          toolName: nextToolState.toolName,
-          input: {
-            ...parseToolCallInputText(nextToolState.inputText),
-            ...(nextToolState.batchProgress ? { _batchProgress: nextToolState.batchProgress } : {}),
-          },
-          output: nextToolState.output,
-          isError: nextToolState.isError,
-          ...(hasPendingPermission
-            ? {
-                pendingPermissionRequestId: nextToolState.pendingPermissionRequestId,
-              }
-            : {}),
-          resumedAfterApproval: nextToolState.resumedAfterApproval,
-          status,
-          ...(durationMs !== undefined ? { durationMs } : {}),
-        };
+    ) =>
+      buildStreamAssistantTrace({
+        accumulatedThinkingBlocks,
+        finalStatus,
+        messageId,
+        resolveAssistantCapabilityKind,
+        textContent,
+        toolCalls: liveToolCalls,
       });
 
-      const reasoningBlocks = extractStreamingThinkingTexts(accumulatedThinkingBlocks);
-      const reasoningBlocksEndedFlags =
-        reasoningBlocks.length > 0
-          ? extractStreamingThinkingEndedFlags(accumulatedThinkingBlocks)
-          : undefined;
-      const reasoningBlocksDurationsMs =
-        reasoningBlocks.length > 0
-          ? extractStreamingThinkingDurations(accumulatedThinkingBlocks)
-          : undefined;
-      const reasoningBlocksTimings =
-        reasoningBlocks.length > 0
-          ? accumulatedThinkingBlocks
-              .filter((block) => block.text.trim().length > 0)
-              .map((block) => ({
-                ...(typeof block.startedAt === 'number' ? { startedAt: block.startedAt } : {}),
-                ...(typeof block.endedAt === 'number' ? { endedAt: block.endedAt } : {}),
-              }))
-          : undefined;
-      const hasPersistableTiming =
-        reasoningBlocksTimings?.some(
-          (entry) => typeof entry.startedAt === 'number' || typeof entry.endedAt === 'number',
-        ) ?? false;
-      const tracePayload = {
-        ...(reasoningBlocks.length > 0 ? { reasoningBlocks } : {}),
-        ...(hasPersistableTiming && reasoningBlocksTimings ? { reasoningBlocksTimings } : {}),
-        text: textContent,
-        toolCalls,
-      };
-
-      const content = textContent;
-      const parts = partsFromAssistantTrace(messageId, tracePayload);
-
-      return {
-        content,
-        parts,
-        ...(reasoningBlocksEndedFlags ? { reasoningBlocksEndedFlags } : {}),
-        ...(reasoningBlocksDurationsMs ? { reasoningBlocksDurationsMs } : {}),
-      };
-    };
-
-    const userRawContent: Array<{ type: 'text'; text: string } | InputImageContent> = [
-      ...(text.length > 0 ? [{ type: 'text' as const, text }] : []),
-      ...(localRequestInputParts ?? requestInputParts ?? []),
-    ];
-    const displayMessageForStream =
-      text.length > 0
-        ? text
-        : requestInputParts && requestInputParts.length > 0
-          ? `上传了 ${requestInputParts.length} 张图片`
-          : text;
-    const userMsg: ChatMessage = {
-      id: makeOrderedMessageId(),
-      role: 'user',
-      content: text,
-      rawContent: userRawContent,
-      createdAt: requestStartedAt,
-      tokenEstimate: estimateTokenCount(text),
-      status: 'completed',
-    };
-    setMessages((prev) => [...prev, userMsg]);
-
-    if (options?.queuedMessageId && queuedComposerScope) {
-      void deleteQueuedComposerFiles({
-        queueId: options.queuedMessageId,
-        scope: queuedComposerScope,
-      });
-    }
-
-    const requestText = text;
     let accumulated = '';
     let accumulatedThinking = '';
     let accumulatedThinkingBlocks: StreamingThinkingBlock[] = [];
@@ -2834,82 +2290,47 @@ export default function ChatPage() {
     // any tool_call has been issued in this round, commit the current round
     // as a finalized assistant message and roll the message id forward.
     const closeCurrentStreamingRoundIntoMessage = (timestamp: number) => {
-      const closingMessageId = currentAssistantStreamMessageIdRef.current;
-      if (!closingMessageId) return;
-      if (
-        liveToolCalls.size === 0 &&
-        accumulatedThinking.trim().length === 0 &&
-        accumulated.trim().length === 0
-      ) {
-        return;
-      }
       // Cancel any pending RAF so the upcoming setStreamThinkingBlocks([])
       // / setStreamThinkingBuffer('') reset is not overwritten by a late flush.
       cancelThinkingFlush();
       cancelSegmentsFlush();
-      const { content } = buildAssistantTraceMessage(closingMessageId, accumulated, 'completed');
-      // Prefer the ordered segment list as the canonical parts source so the
-      // committed round message reflects the wire-arrival order. Fall back
-      // to the legacy reordered parts only when no segments were collected
-      // (e.g. attach scenarios that bypass this path).
-      const parts =
-        accumulatedSegments.length > 0
-          ? accumulatedSegments
-          : buildAssistantTraceMessage(closingMessageId, accumulated, 'completed').parts;
-      const roundToolCallIds = new Set(liveToolCalls.keys());
-      // Only the first round that finalizes after the first token observation
-      // should expose firstTokenLatencyMs; subsequent rounds reuse the same
-      // observation and would double-render the metric in their footers.
-      const shouldAttachFirstTokenLatency =
-        firstTokenObservedAt !== null && !firstTokenLatencyAttached;
-      setMessages((prev) =>
-        replaceOrAppendStreamedAssistantMessage(
-          prev,
-          {
-            id: closingMessageId,
-            role: 'assistant',
-            content,
-            parts,
-            createdAt: timestamp,
-            durationMs: timestamp - currentRoundStartedAt,
-            tokenEstimate: estimateTokenCount(
-              [accumulatedThinking, accumulated]
-                .filter((item) => item.trim().length > 0)
-                .join('\n\n'),
-            ),
-            toolCallCount: roundToolCallIds.size,
-            providerId: requestProviderId,
-            model: requestModelLabel,
-            agentId: requestAgentId,
-            ...(shouldAttachFirstTokenLatency && firstTokenObservedAt !== null
-              ? { firstTokenLatencyMs: firstTokenObservedAt - requestStartedAt }
-              : {}),
-            status: 'completed',
-          },
-          roundToolCallIds,
-        ),
-      );
-      if (shouldAttachFirstTokenLatency) {
-        firstTokenLatencyAttached = true;
-      }
-
-      accumulated = '';
-      accumulatedThinking = '';
-      accumulatedThinkingBlocks = [];
-      accumulatedSegments = [];
+      const committed = commitStreamingRound({
+        accumulated,
+        accumulatedSegments,
+        accumulatedThinking,
+        accumulatedThinkingBlocks,
+        buildTraceMessage: (messageId, textContent) =>
+          buildAssistantTraceMessage(messageId, textContent, 'completed'),
+        currentAssistantStreamMessageIdRef,
+        currentRoundStartedAt,
+        firstTokenLatencyAttached,
+        firstTokenObservedAt,
+        liveToolCalls,
+        requestAgentId,
+        requestModelLabel,
+        requestProviderId,
+        requestStartedAt,
+        setMessages,
+        setStreamBuffer,
+        setStreamThinkingBlocks,
+        setStreamThinkingBuffer,
+        setStreamingSegments,
+        streamRevealNextAllowedAtRef,
+        streamRevealTargetCodePointsRef,
+        streamRevealTargetRef,
+        streamRevealVisibleCodePointCountRef,
+        streamRevealVisibleRef,
+        timestamp,
+      });
+      if (!committed) return;
+      accumulated = committed.accumulated;
+      accumulatedThinking = committed.accumulatedThinking;
+      accumulatedThinkingBlocks = committed.accumulatedThinkingBlocks;
+      accumulatedSegments = committed.accumulatedSegments;
       reasoningSegmentMeta.clear();
       liveToolCalls.clear();
-      streamRevealTargetRef.current = '';
-      streamRevealVisibleRef.current = '';
-      streamRevealTargetCodePointsRef.current = [];
-      streamRevealVisibleCodePointCountRef.current = 0;
-      streamRevealNextAllowedAtRef.current = 0;
-      setStreamBuffer('');
-      setStreamThinkingBuffer('');
-      setStreamingSegments([]);
-      setStreamThinkingBlocks([]);
-      currentAssistantStreamMessageIdRef.current = makeOrderedMessageId();
-      currentRoundStartedAt = timestamp;
+      firstTokenLatencyAttached = committed.firstTokenLatencyAttached;
+      currentRoundStartedAt = committed.currentRoundStartedAt;
     };
 
     setRightPanelState((prev) => startChatRightPanelRun(prev, text));
@@ -2984,81 +2405,48 @@ export default function ChatPage() {
               (event as { terminalId: string }).terminalId,
             )
           ) {
-            const terminalId = (event as { terminalId: string }).terminalId;
-            const outputText =
-              event.type === 'terminal_output' ? (event as { outputTail: string }).outputTail : '';
-            const command =
-              event.type === 'terminal_started' ? (event as { command: string }).command : '';
-
-            if (
-              event.type === 'terminal_started' &&
-              command &&
-              !isLikelyDevServerCommand(command)
-            ) {
-              // Not a dev-server command — mark as skip so future output events are ignored
-              devServerDetectedTerminalIdsRef.current.add(terminalId);
-            } else if (outputText) {
-              const detected = detectDevServerUrl(outputText);
-              if (detected) {
-                devServerDetectedTerminalIdsRef.current.add(terminalId);
-                setBrowserPreviewUrl(detected.url);
-                // Open the editor pane with browser preview instead of right panel
-                setEditorMode(true);
-              }
+            const terminalEvent =
+              event.type === 'terminal_output'
+                ? {
+                    type: 'terminal_output' as const,
+                    outputTail: (event as { outputTail: string }).outputTail,
+                    terminalId: (event as { terminalId: string }).terminalId,
+                  }
+                : {
+                    type: 'terminal_started' as const,
+                    command: (event as { command: string }).command,
+                    terminalId: (event as { terminalId: string }).terminalId,
+                  };
+            const detected = detectTerminalDevServer({
+              detectedTerminalIds: devServerDetectedTerminalIdsRef.current,
+              event: terminalEvent,
+            });
+            if (detected.shouldMarkTerminalHandled) {
+              devServerDetectedTerminalIdsRef.current.add(terminalEvent.terminalId);
+            }
+            if (detected.detectedUrl) {
+              setBrowserPreviewUrl(detected.detectedUrl);
+              // Open the editor pane with browser preview instead of right panel
+              setEditorMode(true);
             }
           }
         }
 
         if (event.type === 'tool_progress') {
-          const previous = liveToolCalls.get(event.toolCallId);
-          liveToolCalls.set(event.toolCallId, {
-            createdAt: previous?.createdAt ?? event.occurredAt ?? Date.now(),
-            inputText: previous?.inputText ?? '',
-            output: previous?.output,
-            isError: previous?.isError,
-            toolCallId: event.toolCallId,
-            status: 'streaming',
-            toolName: event.toolName,
-            batchProgress: {
-              subTools: event.subTools,
-              completedCount: event.completedCount,
-              totalCount: event.totalCount,
-            },
-          });
+          applyStreamToolProgress({ event, liveToolCalls });
         }
 
         if (event.type === 'tool_result') {
           toolCallIds.add(event.toolCallId);
-          const previous = liveToolCalls.get(event.toolCallId);
-          const rawPendingPermissionRequestId = event.pendingPermissionRequestId;
           const hasPendingPermission = hasActivePendingPermissionRequest(event);
-          liveToolCalls.set(event.toolCallId, {
-            createdAt: previous?.createdAt ?? event.occurredAt ?? Date.now(),
-            completedAt: event.occurredAt ?? Date.now(),
-            inputText: previous?.inputText ?? '',
-            output: event.output,
-            isError: hasPendingPermission ? false : event.isError,
-            pendingPermissionRequestId: hasPendingPermission
-              ? event.pendingPermissionRequestId
-              : undefined,
-            resumedAfterApproval: event.resumedAfterApproval,
-            toolCallId: event.toolCallId,
-            status: hasPendingPermission ? 'paused' : event.isError ? 'error' : 'completed',
-            toolName: event.toolName,
-          });
-          // Update the matching tool segment with the result so the live
-          // render (and the about-to-be-committed round message) shows the
-          // tool output / error status alongside the right tool call.
-          accumulatedSegments = applyToolResultToStreamingSegment(accumulatedSegments, {
-            toolCallId: event.toolCallId,
-            output: event.output,
-            isError: hasPendingPermission ? false : event.isError,
-            status: hasPendingPermission ? 'paused' : event.isError ? 'failed' : 'completed',
-            ...(hasPendingPermission && rawPendingPermissionRequestId
-              ? { pendingPermissionRequestId: rawPendingPermissionRequestId }
-              : {}),
-            ...(event.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
-          });
+          const { accumulatedSegments: nextSegments, rawPendingPermissionRequestId } =
+            applyStreamToolResult({
+              accumulatedSegments,
+              event,
+              hasPendingPermission,
+              liveToolCalls,
+            });
+          accumulatedSegments = nextSegments;
           scheduleSegmentsFlush();
           setMessages((previousMessages) => {
             const nextMessages = applyToolResultToLocalAssistantMessages(previousMessages, event);
@@ -3082,135 +2470,80 @@ export default function ChatPage() {
         }
 
         if (event.type === 'session_child') {
-          setChildSessions((previous) => {
-            if (previous.some((session) => session.id === event.sessionId)) {
-              return previous.map((session) =>
-                session.id === event.sessionId
-                  ? { ...session, title: event.title ?? session.title }
-                  : session,
-              );
-            }
-
-            return [
-              {
-                id: event.sessionId,
-                title: event.title,
-              },
-              ...previous,
-            ];
-          });
+          setChildSessions((previous) => applySessionChildRuntimeEvent(previous, event));
         }
 
         if (event.type === 'task_update') {
-          setSessionTasks((previous) => {
-            const existingTask = previous.find((task) => task.id === event.taskId);
-            const nextTask: SessionTask = {
-              assignedAgent: event.assignedAgent ?? existingTask?.assignedAgent,
-              blockedBy: existingTask?.blockedBy ?? [],
-              completedSubtaskCount: existingTask?.completedSubtaskCount ?? 0,
-              createdAt: existingTask?.createdAt ?? event.occurredAt ?? Date.now(),
-              depth: event.parentTaskId ? 1 : (existingTask?.depth ?? 0),
-              errorMessage: event.errorMessage ?? existingTask?.errorMessage,
-              id: event.taskId,
-              parentTaskId: event.parentTaskId,
-              priority: existingTask?.priority ?? 'medium',
-              readySubtaskCount: existingTask?.readySubtaskCount ?? 0,
-              result: event.result ?? existingTask?.result,
-              sessionId: event.sessionId ?? existingTask?.sessionId,
-              status:
-                event.status === 'in_progress'
-                  ? 'running'
-                  : event.status === 'done'
-                    ? 'completed'
-                    : event.status,
-              subtaskCount: existingTask?.subtaskCount ?? 0,
-              tags: existingTask?.tags ?? [],
-              terminalReason: event.reason ?? existingTask?.terminalReason,
-              timeoutSource: event.timeoutSource ?? existingTask?.timeoutSource,
-              title: event.label,
-              unmetDependencyCount: existingTask?.unmetDependencyCount ?? 0,
-              updatedAt: event.occurredAt ?? Date.now(),
-            };
-
-            const existingIndex = previous.findIndex((task) => task.id === event.taskId);
-            if (existingIndex === -1) {
-              return [nextTask, ...previous];
-            }
-
-            return previous.map((task, index) =>
-              index === existingIndex ? { ...task, ...nextTask } : task,
-            );
-          });
+          setSessionTasks((previous) => applyTaskUpdateRuntimeEvent(previous, event));
         }
 
-        if (event.type === 'permission_asked') {
-          // Auto-accept: if enabled for this session, auto-reply 'once' without pausing.
-          // Mirrors opencode's permission-auto-respond pattern.
-          if (token && isAutoAcceptEnabled(sid)) {
-            void replyPermissionRequest({
-              decision: 'once',
-              gatewayUrl,
-              requestId: event.requestId,
-              sessionId: sid,
-              token,
-            }).catch(() => {
-              // Fallback: if auto-reply fails, show permission UI normally
+        if (
+          event.type === 'permission_asked' ||
+          event.type === 'permission_replied' ||
+          event.type === 'question_asked' ||
+          event.type === 'question_replied'
+        ) {
+          const handledPendingInteraction = handlePendingInteractionEvent({
+            event,
+            gatewayUrl,
+            isAutoAcceptEnabled,
+            onPermissionAsked: (permissionEvent) => {
               setSessionStateStatus('paused');
-              setMessages((previous) => upsertPermissionEventMessage(previous, event));
-            });
-          } else {
-            pausedForPermission = true;
-            setSessionStateStatus('paused');
-            setMessages((previous) => upsertPermissionEventMessage(previous, event));
-            setPendingPermissions((previous) => {
-              return dedupePendingPermissionRequests([
-                createPendingPermissionRequestSnapshot(event, sid),
-                ...previous,
-              ]);
-            });
-            // NOTE: Do NOT call resetStreamState() here.
-            // permission_asked arrives before onDone(tool_permission). Resetting stream state
-            // here clears currentAssistantStreamMessageIdRef, causing onDone to create a
-            // duplicate assistant message with a new ID. Let onDone handle the reset.
-            requestSessionListRefresh();
-          }
-        }
-
-        if (event.type === 'permission_replied') {
-          if (event.decision !== 'reject') {
-            setSessionStateStatus('running');
-          }
-          setMessages((previous) =>
-            dismissPermissionEventMessage(
-              applyPermissionDecisionToLocalAssistantMessages(
-                previous,
-                event.requestId,
-                event.decision,
-                event.feedback,
-              ),
-              event.requestId,
-            ),
-          );
-          setPendingPermissions((previous) =>
-            previous.filter((permission) => permission.requestId !== event.requestId),
-          );
-          setRightPanelState((previous) =>
-            clearResolvedPendingPermissionToolCalls(previous, event.requestId, event.decision),
-          );
-          requestCurrentSessionRefresh(sid);
-        }
-
-        if (event.type === 'question_asked') {
-          pausedForQuestion = true;
-          setSessionStateStatus('paused');
-          resetStreamState();
-          requestCurrentSessionRefresh(sid);
-          requestSessionListRefresh();
-        }
-
-        if (event.type === 'question_replied') {
-          setSessionStateStatus(event.status === 'answered' ? 'running' : 'idle');
-          requestCurrentSessionRefresh(sid);
+              setMessages((previous) => upsertPermissionEventMessage(previous, permissionEvent));
+              setPendingPermissions((previous) => {
+                return dedupePendingPermissionRequests([
+                  createPendingPermissionRequestSnapshot(permissionEvent, sid),
+                  ...previous,
+                ]);
+              });
+            },
+            onPermissionAskedAutoReplyFallback: (permissionEvent) => {
+              setSessionStateStatus('paused');
+              setMessages((previous) => upsertPermissionEventMessage(previous, permissionEvent));
+            },
+            onPermissionReplied: (permissionEvent) => {
+              if (permissionEvent.decision !== 'reject') {
+                setSessionStateStatus('running');
+              }
+              setMessages((previous) =>
+                dismissPermissionEventMessage(
+                  applyPermissionDecisionToLocalAssistantMessages(
+                    previous,
+                    permissionEvent.requestId,
+                    permissionEvent.decision,
+                    permissionEvent.feedback,
+                  ),
+                  permissionEvent.requestId,
+                ),
+              );
+              setPendingPermissions((previous) =>
+                previous.filter((permission) => permission.requestId !== permissionEvent.requestId),
+              );
+              setRightPanelState((previous) =>
+                clearResolvedPendingPermissionToolCalls(
+                  previous,
+                  permissionEvent.requestId,
+                  permissionEvent.decision,
+                ),
+              );
+            },
+            onQuestionAsked: () => {
+              setSessionStateStatus('paused');
+              resetStreamState();
+            },
+            onQuestionReplied: (questionEvent) => {
+              setSessionStateStatus(questionEvent.status === 'answered' ? 'running' : 'idle');
+            },
+            pausedForPermission,
+            pausedForQuestion,
+            refreshCurrentSession: () => requestCurrentSessionRefresh(sid),
+            requestSessionListRefresh,
+            replyPermissionRequest,
+            sessionId: sid,
+            token,
+          });
+          pausedForPermission = handledPendingInteraction.pausedForPermission;
+          pausedForQuestion = handledPendingInteraction.pausedForQuestion;
         }
 
         setRightPanelState((prev) => {
@@ -3260,7 +2593,7 @@ export default function ChatPage() {
           streamRevealNextAllowedAtRef.current = 0;
           setStreamBuffer(accumulated);
         } else {
-          scheduleStreamReveal();
+          scheduleStreamReveal({ prefersReducedMotion });
         }
         if (!isNearBottomRef.current) {
           setHasPendingFollowContent((previous) => previous || true);
@@ -3398,109 +2731,52 @@ export default function ChatPage() {
           toolCallIds.size > 0;
         if (hasRenderableAssistantReply || !wasCancelled) {
           const msgId = currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId();
-          const {
-            content,
-            parts: legacyParts,
-            reasoningBlocksEndedFlags,
-            reasoningBlocksDurationsMs,
-          } = buildAssistantTraceMessage(msgId, finalAccumulatedText, traceFinalStatus);
-          // Prefer the ordered segment list as the canonical parts source so
-          // the final committed message reflects the wire-arrival order. The
-          // legacy `partsFromAssistantTrace`-built parts are kept as a
-          // fallback for paths that don't accumulate segments (e.g. pre-flush
-          // races where text arrived but no segment was opened yet).
-          const parts = accumulatedSegments.length > 0 ? accumulatedSegments : legacyParts;
-          // After round-boundary commits, only the final round's tool calls are
-          // attached to this message; earlier rounds were already persisted as
-          // independent assistant messages by closeCurrentStreamingRoundIntoMessage.
-          const finalRoundToolCallIds = new Set(liveToolCalls.keys());
-          const shouldAttachFirstTokenLatency =
-            firstTokenObservedAt !== null && !firstTokenLatencyAttached;
-          setMessages((prev) =>
-            replaceOrAppendStreamedAssistantMessage(
-              prev,
-              {
-                id: msgId,
-                role: 'assistant',
-                content,
-                parts,
-                ...(reasoningBlocksEndedFlags ? { reasoningBlocksEndedFlags } : {}),
-                ...(reasoningBlocksDurationsMs ? { reasoningBlocksDurationsMs } : {}),
-                createdAt: finishedAt,
-                durationMs: finishedAt - currentRoundStartedAt,
-                stopReason: resolvedStopReason,
-                tokenEstimate: estimateTokenCount(
-                  [accumulatedThinking, finalAccumulatedText]
-                    .filter((item) => item.trim().length > 0)
-                    .join('\n\n'),
-                ),
-                toolCallCount: finalRoundToolCallIds.size,
-                providerId: requestProviderId,
-                model: requestModelLabel,
-                agentId: streamAgentId || requestAgentId,
-                ...(shouldAttachFirstTokenLatency && firstTokenObservedAt !== null
-                  ? {
-                      firstTokenLatencyMs: firstTokenObservedAt - requestStartedAt,
-                    }
-                  : {}),
-                status: 'completed',
-              },
-              finalRoundToolCallIds,
-            ),
-          );
-          if (shouldAttachFirstTokenLatency) {
-            firstTokenLatencyAttached = true;
-          }
+          const finalized = finalizeStreamMessage({
+            accumulatedSegments,
+            accumulatedThinking,
+            agentId: streamAgentId || requestAgentId,
+            buildTraceMessage: (messageId, textContent) =>
+              buildAssistantTraceMessage(messageId, textContent, traceFinalStatus),
+            contentText: finalAccumulatedText,
+            createdAt: finishedAt,
+            currentRoundStartedAt,
+            firstTokenLatencyAttached,
+            firstTokenObservedAt,
+            messageId: msgId,
+            model: requestModelLabel,
+            providerId: requestProviderId,
+            requestStartedAt,
+            setMessages,
+            status: 'completed',
+            stopReason: resolvedStopReason,
+            toolCallIds: new Set(liveToolCalls.keys()),
+            traceFinalStatus,
+          });
+          firstTokenLatencyAttached = finalized.firstTokenLatencyAttached;
         } else if (wasCancelled) {
           const msgId = currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId();
-          const {
-            content,
-            parts: legacyParts,
-            reasoningBlocksEndedFlags,
-            reasoningBlocksDurationsMs,
-          } = buildAssistantTraceMessage(msgId, '已停止', traceFinalStatus);
-          // Prefer the wire-ordered segments collected so far; only fall back
-          // to the legacy reasoning → text → tool flattening when no segments
-          // were captured (e.g. cancellation before any chunk arrived).
-          const parts = accumulatedSegments.length > 0 ? accumulatedSegments : legacyParts;
-          const finalRoundToolCallIds = new Set(liveToolCalls.keys());
-          const shouldAttachFirstTokenLatency =
-            firstTokenObservedAt !== null && !firstTokenLatencyAttached;
-          setMessages((prev) =>
-            replaceOrAppendStreamedAssistantMessage(
-              prev,
-              {
-                id: msgId,
-                role: 'assistant',
-                content,
-                parts,
-                ...(reasoningBlocksEndedFlags ? { reasoningBlocksEndedFlags } : {}),
-                ...(reasoningBlocksDurationsMs ? { reasoningBlocksDurationsMs } : {}),
-                createdAt: finishedAt,
-                durationMs: finishedAt - currentRoundStartedAt,
-                stopReason: resolvedStopReason,
-                tokenEstimate: estimateTokenCount(
-                  [accumulatedThinking, '已停止']
-                    .filter((item) => item.trim().length > 0)
-                    .join('\n\n'),
-                ),
-                toolCallCount: finalRoundToolCallIds.size,
-                providerId: requestProviderId,
-                model: requestModelLabel,
-                agentId: streamAgentId || requestAgentId,
-                ...(shouldAttachFirstTokenLatency && firstTokenObservedAt !== null
-                  ? {
-                      firstTokenLatencyMs: firstTokenObservedAt - requestStartedAt,
-                    }
-                  : {}),
-                status: 'completed',
-              },
-              finalRoundToolCallIds,
-            ),
-          );
-          if (shouldAttachFirstTokenLatency) {
-            firstTokenLatencyAttached = true;
-          }
+          const finalized = finalizeStreamMessage({
+            accumulatedSegments,
+            accumulatedThinking,
+            agentId: streamAgentId || requestAgentId,
+            buildTraceMessage: (messageId, textContent) =>
+              buildAssistantTraceMessage(messageId, textContent, traceFinalStatus),
+            contentText: '已停止',
+            createdAt: finishedAt,
+            currentRoundStartedAt,
+            firstTokenLatencyAttached,
+            firstTokenObservedAt,
+            messageId: msgId,
+            model: requestModelLabel,
+            providerId: requestProviderId,
+            requestStartedAt,
+            setMessages,
+            status: 'completed',
+            stopReason: resolvedStopReason,
+            toolCallIds: new Set(liveToolCalls.keys()),
+            traceFinalStatus,
+          });
+          firstTokenLatencyAttached = finalized.firstTokenLatencyAttached;
         }
         setSessionStateStatus(isPausedForPermission ? 'paused' : 'idle');
         resetStreamState();
@@ -3524,42 +2800,27 @@ export default function ChatPage() {
         const errorContent = message ? `[错误: ${code}] ${message}` : `[错误: ${code}]`;
         logger.error('stream error', message ? `${code}: ${message}` : code);
         const errorMsgId = makeOrderedMessageId();
-        const { content: errorTraceContent, parts: errorParts } = buildAssistantTraceMessage(
-          errorMsgId,
-          errorContent,
-          'error',
-        );
-        const errorRoundToolCallIds = new Set(liveToolCalls.keys());
-        const shouldAttachFirstTokenLatency =
-          firstTokenObservedAt !== null && !firstTokenLatencyAttached;
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: errorMsgId,
-            role: 'assistant',
-            content: errorTraceContent,
-            parts: errorParts,
-            createdAt: finishedAt,
-            durationMs: finishedAt - currentRoundStartedAt,
-            stopReason: 'error',
-            tokenEstimate: estimateTokenCount(
-              [accumulatedThinking, errorContent]
-                .filter((item) => item.trim().length > 0)
-                .join('\n\n'),
-            ),
-            toolCallCount: errorRoundToolCallIds.size,
-            providerId: requestProviderId,
-            model: requestModelLabel,
-            agentId: requestAgentId,
-            ...(shouldAttachFirstTokenLatency && firstTokenObservedAt !== null
-              ? { firstTokenLatencyMs: firstTokenObservedAt - requestStartedAt }
-              : {}),
-            status: 'error',
-          },
-        ]);
-        if (shouldAttachFirstTokenLatency) {
-          firstTokenLatencyAttached = true;
-        }
+        const finalized = finalizeStreamMessage({
+          accumulatedSegments: [],
+          accumulatedThinking,
+          agentId: requestAgentId,
+          buildTraceMessage: (messageId, textContent) =>
+            buildAssistantTraceMessage(messageId, textContent, 'error'),
+          contentText: errorContent,
+          createdAt: finishedAt,
+          currentRoundStartedAt,
+          firstTokenLatencyAttached,
+          firstTokenObservedAt,
+          messageId: errorMsgId,
+          model: requestModelLabel,
+          providerId: requestProviderId,
+          requestStartedAt,
+          setMessages,
+          status: 'error',
+          stopReason: 'error',
+          toolCallIds: new Set(liveToolCalls.keys()),
+        });
+        firstTokenLatencyAttached = finalized.firstTokenLatencyAttached;
         setSessionStateStatus('idle');
         resetStreamState();
         setStreamError(message ? `${code}: ${message}` : code);
@@ -3588,6 +2849,30 @@ export default function ChatPage() {
     setMessages,
   });
 
+  const { stopActiveMessage } = useChatStopActiveMessage({
+    client,
+    currentSessionId,
+    currentSessionViewRef,
+    gatewayUrl,
+    initialTurnLimit: INITIAL_TURN_LIMIT,
+    loadCurrentSessionSnapshot,
+    logger,
+    pendingStreamRevealFrameRef,
+    requestSessionListRefresh,
+    setStoppingStream,
+    setStreamError,
+    stopCapability,
+    stoppingStream,
+    stoppingStreamRef,
+    streamRevealNextAllowedAtRef,
+    streamRevealTargetCodePointsRef,
+    streamRevealTargetRef,
+    streamRevealVisibleCodePointCountRef,
+    streamRevealVisibleRef,
+    streaming,
+    token,
+  });
+
   const { appendCommandCard, handleCompactCurrentSession, handleSaveFile, handleSplitMouseDown } =
     useChatUiActions({
       token,
@@ -3610,170 +2895,23 @@ export default function ChatPage() {
       setSplitPos,
     });
 
-  const refreshSessionsAfterInlinePermissionReply = useCallback(
-    (targetSessionId: string) => {
-      const refreshTargets = new Set<string>();
-      if (currentSessionId) {
-        refreshTargets.add(currentSessionId);
-      }
-      refreshTargets.add(targetSessionId);
-
-      const flushRefresh = () => {
-        refreshTargets.forEach((sessionId) => {
-          requestCurrentSessionRefresh(sessionId);
-        });
-        requestSessionListRefresh();
-      };
-
-      flushRefresh();
-      window.setTimeout(() => {
-        flushRefresh();
-      }, 2000);
-    },
-    [currentSessionId],
-  );
-
-  const handleInlinePermissionDecision = useCallback(
-    async (request: PendingPermissionRequest, decision: PermissionDecision, feedback?: string) => {
-      if (!token) {
-        setStreamError('当前未登录，无法处理权限审批。');
-        return;
-      }
-
-      setInlinePermissionPendingDecision({
-        decision,
-        requestId: request.requestId,
-      });
-      setInlinePermissionErrors((previous) => {
-        const next = { ...previous };
-        delete next[request.requestId];
-        return next;
-      });
-
-      try {
-        await replyPermissionRequest({
-          decision,
-          feedback,
-          gatewayUrl,
-          requestId: request.requestId,
-          sessionId: request.sessionId,
-          token,
-        });
-        const successMessage = getPermissionReplySuccessMessage(decision);
-        setMessages((previous) =>
-          dismissPermissionEventMessage(
-            applyPermissionDecisionToLocalAssistantMessages(
-              previous,
-              request.requestId,
-              decision,
-              feedback,
-            ),
-            request.requestId,
-          ),
-        );
-        setPendingPermissions((previous) =>
-          previous.filter((permission) => permission.requestId !== request.requestId),
-        );
-        setRightPanelState((previous) =>
-          clearResolvedPendingPermissionToolCalls(previous, request.requestId, decision),
-        );
-        toast(successMessage, decision === 'reject' ? 'warning' : 'success', 2200);
-        refreshSessionsAfterInlinePermissionReply(request.sessionId);
-      } catch (error) {
-        const status = getPermissionReplyStatusCode(error);
-        const errorMessage = error instanceof Error ? error.message : '权限处理失败，请重试。';
-
-        if (status === 404 || status === 409) {
-          setPendingPermissions((previous) =>
-            previous.filter((permission) => permission.requestId !== request.requestId),
-          );
-          refreshSessionsAfterInlinePermissionReply(request.sessionId);
-        } else {
-          setInlinePermissionErrors((previous) => ({
-            ...previous,
-            [request.requestId]: errorMessage,
-          }));
-        }
-      } finally {
-        setInlinePermissionPendingDecision((current) =>
-          current?.requestId === request.requestId ? null : current,
-        );
-      }
-    },
-    [
+  // ─── 重试与历史编辑域 — 抽到 useChatRetryAndEdit。
+  // 参见 docs/architecture/chat-page-split-plan.md 域 E。
+  const { handleRetryInCurrentSession, handleEditResendInCurrentSession, handleRetryInNewSession } =
+    useChatRetryAndEdit({
       gatewayUrl,
-      refreshSessionsAfterInlinePermissionReply,
-      setRightPanelState,
       token,
+      currentSessionId,
+      messages,
+      setMessages,
+      resetStreamState,
       setStreamError,
-    ],
-  );
-
-  const pendingPermissionsById = useMemo(
-    () => new Map(pendingPermissions.map((permission) => [permission.requestId, permission])),
-    [pendingPermissions],
-  );
-
-  const resolveInlinePermissionActions = useCallback(
-    (requestId: string) => {
-      const request = pendingPermissionsById.get(requestId);
-      if (!request) {
-        return undefined;
-      }
-
-      const pendingDecision =
-        inlinePermissionPendingDecision?.requestId === requestId
-          ? inlinePermissionPendingDecision.decision
-          : null;
-      const disabled = pendingDecision !== null;
-
-      return {
-        items: [
-          {
-            id: 'session',
-            label: pendingDecision === 'session' ? '处理中…' : '本会话允许',
-            disabled,
-            hint: '仅在当前会话内记住这次授权选择，适合继续当前任务。',
-            primary: true,
-            onClick: () => void handleInlinePermissionDecision(request, 'session'),
-          },
-          {
-            id: 'once',
-            label: pendingDecision === 'once' ? '处理中…' : '允许一次',
-            disabled,
-            hint: '只批准当前这一次工具调用，不保留后续授权。',
-            onClick: () => void handleInlinePermissionDecision(request, 'once'),
-          },
-          {
-            id: 'permanent',
-            label: pendingDecision === 'permanent' ? '处理中…' : '永久允许',
-            disabled,
-            hint: '会记住后续同类请求，请在充分确认风险后再使用。',
-            onClick: () => void handleInlinePermissionDecision(request, 'permanent'),
-          },
-          {
-            id: 'reject',
-            label: pendingDecision === 'reject' ? '处理中…' : '拒绝',
-            danger: true,
-            disabled,
-            hint: '阻止本次调用，工具不会继续执行。',
-            onClick: () => void handleInlinePermissionDecision(request, 'reject'),
-          },
-        ],
-        pendingLabel: pendingDecision
-          ? '正在提交审批结果…'
-          : '推荐：本会话允许 · 临时：允许一次 · 持久：永久允许',
-        helperMessage: pendingDecision ? undefined : '永久允许会记住后续同类请求，请谨慎选择。',
-        errorMessage: inlinePermissionErrors[requestId],
-      };
-    },
-    [
-      handleInlinePermissionDecision,
-      inlinePermissionErrors,
-      inlinePermissionPendingDecision,
-      pendingPermissionsById,
-    ],
-  );
+      retryPrompt,
+      setRetryPrompt,
+      historyEditPrompt,
+      sendMessage,
+      createBranchSessionFromMessage,
+    });
 
   useEffect(() => {
     const attachEligibility = {
@@ -3933,152 +3071,61 @@ export default function ChatPage() {
       messageId: string,
       textContent: string,
       finalStatus?: 'completed' | 'error' | 'cancelled' | 'paused',
-    ): {
-      content: string;
-      parts: ChatMessagePart[];
-      reasoningBlocksEndedFlags?: boolean[];
-      reasoningBlocksDurationsMs?: number[];
-    } => {
-      const toolCalls = buildAttachToolCalls().map((toolCallState) => {
-        if (finalStatus === 'error' && toolCallState.status === 'running') {
-          return { ...toolCallState, isError: true, status: 'failed' as const };
-        }
-
-        if (finalStatus === 'completed' && toolCallState.status === 'running') {
-          return { ...toolCallState, status: 'completed' as const };
-        }
-
-        if (
-          (finalStatus === 'cancelled' || finalStatus === 'paused') &&
-          toolCallState.status === 'running'
-        ) {
-          return { ...toolCallState, status: 'paused' as const };
-        }
-
-        return toolCallState;
+    ) =>
+      buildStreamAssistantTrace({
+        accumulatedThinkingBlocks,
+        finalStatus,
+        messageId,
+        modifiedFilesSummary: recoveredModifiedFilesSummary,
+        resolveAssistantCapabilityKind,
+        textContent,
+        toolCalls: liveToolCalls,
       });
-
-      const reasoningBlocks = extractStreamingThinkingTexts(accumulatedThinkingBlocks);
-      const reasoningBlocksEndedFlags =
-        reasoningBlocks.length > 0
-          ? extractStreamingThinkingEndedFlags(accumulatedThinkingBlocks)
-          : undefined;
-      const reasoningBlocksDurationsMs =
-        reasoningBlocks.length > 0
-          ? extractStreamingThinkingDurations(accumulatedThinkingBlocks)
-          : undefined;
-      const reasoningBlocksTimings =
-        reasoningBlocks.length > 0
-          ? accumulatedThinkingBlocks
-              .filter((block) => block.text.trim().length > 0)
-              .map((block) => ({
-                ...(typeof block.startedAt === 'number' ? { startedAt: block.startedAt } : {}),
-                ...(typeof block.endedAt === 'number' ? { endedAt: block.endedAt } : {}),
-              }))
-          : undefined;
-      const hasPersistableTiming =
-        reasoningBlocksTimings?.some(
-          (entry) => typeof entry.startedAt === 'number' || typeof entry.endedAt === 'number',
-        ) ?? false;
-      const tracePayload = {
-        ...(recoveredModifiedFilesSummary
-          ? { modifiedFilesSummary: recoveredModifiedFilesSummary }
-          : {}),
-        ...(reasoningBlocks.length > 0 ? { reasoningBlocks } : {}),
-        ...(hasPersistableTiming && reasoningBlocksTimings ? { reasoningBlocksTimings } : {}),
-        text: textContent,
-        toolCalls,
-      };
-      const content = textContent;
-      const parts = partsFromAssistantTrace(messageId, tracePayload);
-      return {
-        content,
-        parts,
-        ...(reasoningBlocksEndedFlags ? { reasoningBlocksEndedFlags } : {}),
-        ...(reasoningBlocksDurationsMs ? { reasoningBlocksDurationsMs } : {}),
-      };
-    };
 
     // Mirror the main stream handler's round-boundary commit logic so attach
     // (session-recovery) keeps the same per-round assistant-message structure
     // the gateway persists.
     const closeCurrentAttachRoundIntoMessage = (timestamp: number) => {
-      const closingMessageId = currentAssistantStreamMessageIdRef.current;
-      if (!closingMessageId) return;
-      if (
-        liveToolCalls.size === 0 &&
-        accumulatedThinking.trim().length === 0 &&
-        accumulated.trim().length === 0
-      ) {
-        return;
-      }
       // Cancel pending RAF before resetting thinking buffers below.
       cancelThinkingFlush();
       cancelSegmentsFlush();
-      const {
-        content,
-        parts: legacyParts,
-        reasoningBlocksEndedFlags,
-        reasoningBlocksDurationsMs,
-      } = buildAttachTraceMessage(closingMessageId, accumulated, 'completed');
-      // Prefer ordered segments so the committed attach round mirrors the
-      // gateway's wire ordering. Fall back to the legacy reordered parts
-      // only when no segments accumulated (defensive — should not happen on
-      // normal paths since `ensureAttachStateInitialized` has run by now).
-      const parts = accumulatedSegments.length > 0 ? accumulatedSegments : legacyParts;
-      const roundToolCallIds = new Set(liveToolCalls.keys());
-      const shouldAttachFirstTokenLatency =
-        firstTokenObservedAt !== null && !firstTokenLatencyAttached;
-      setMessages((prev) =>
-        replaceOrAppendStreamedAssistantMessage(
-          prev,
-          {
-            id: closingMessageId,
-            role: 'assistant',
-            content,
-            parts,
-            ...(reasoningBlocksEndedFlags ? { reasoningBlocksEndedFlags } : {}),
-            ...(reasoningBlocksDurationsMs ? { reasoningBlocksDurationsMs } : {}),
-            createdAt: timestamp,
-            durationMs: timestamp - currentRoundStartedAt,
-            tokenEstimate: estimateTokenCount(
-              [accumulatedThinking, accumulated]
-                .filter((item) => item.trim().length > 0)
-                .join('\n\n'),
-            ),
-            toolCallCount: roundToolCallIds.size,
-            providerId: requestProviderId,
-            model: requestModelLabel,
-            agentId: requestAgentId,
-            ...(shouldAttachFirstTokenLatency && firstTokenObservedAt !== null
-              ? { firstTokenLatencyMs: firstTokenObservedAt - requestStartedAt }
-              : {}),
-            status: 'completed',
-          },
-          roundToolCallIds,
-        ),
-      );
-      if (shouldAttachFirstTokenLatency) {
-        firstTokenLatencyAttached = true;
-      }
-
-      accumulated = '';
-      accumulatedThinking = '';
-      accumulatedThinkingBlocks = [];
-      accumulatedSegments = [];
+      const committed = commitStreamingRound({
+        accumulated,
+        accumulatedSegments,
+        accumulatedThinking,
+        accumulatedThinkingBlocks,
+        buildTraceMessage: (messageId, textContent) =>
+          buildAttachTraceMessage(messageId, textContent, 'completed'),
+        currentAssistantStreamMessageIdRef,
+        currentRoundStartedAt,
+        firstTokenLatencyAttached,
+        firstTokenObservedAt,
+        liveToolCalls,
+        requestAgentId,
+        requestModelLabel,
+        requestProviderId,
+        requestStartedAt,
+        setMessages,
+        setStreamBuffer,
+        setStreamThinkingBlocks,
+        setStreamThinkingBuffer,
+        setStreamingSegments,
+        streamRevealNextAllowedAtRef,
+        streamRevealTargetCodePointsRef,
+        streamRevealTargetRef,
+        streamRevealVisibleCodePointCountRef,
+        streamRevealVisibleRef,
+        timestamp,
+      });
+      if (!committed) return;
+      accumulated = committed.accumulated;
+      accumulatedThinking = committed.accumulatedThinking;
+      accumulatedThinkingBlocks = committed.accumulatedThinkingBlocks;
+      accumulatedSegments = committed.accumulatedSegments;
       reasoningSegmentMeta.clear();
       liveToolCalls.clear();
-      streamRevealTargetRef.current = '';
-      streamRevealVisibleRef.current = '';
-      streamRevealTargetCodePointsRef.current = [];
-      streamRevealVisibleCodePointCountRef.current = 0;
-      streamRevealNextAllowedAtRef.current = 0;
-      setStreamBuffer('');
-      setStreamThinkingBuffer('');
-      setStreamingSegments([]);
-      setStreamThinkingBlocks([]);
-      currentAssistantStreamMessageIdRef.current = makeOrderedMessageId();
-      currentRoundStartedAt = timestamp;
+      firstTokenLatencyAttached = committed.firstTokenLatencyAttached;
+      currentRoundStartedAt = committed.currentRoundStartedAt;
     };
 
     const handleAttachReconnect = () => {
@@ -4335,53 +3382,19 @@ export default function ChatPage() {
           }
 
           if (event.type === 'tool_progress') {
-            const previous = liveToolCalls.get(event.toolCallId);
-            liveToolCalls.set(event.toolCallId, {
-              createdAt: previous?.createdAt ?? event.occurredAt ?? Date.now(),
-              inputText: previous?.inputText ?? '',
-              output: previous?.output,
-              isError: previous?.isError,
-              toolCallId: event.toolCallId,
-              status: 'streaming',
-              toolName: event.toolName,
-              batchProgress: {
-                subTools: event.subTools,
-                completedCount: event.completedCount,
-                totalCount: event.totalCount,
-              },
-            });
+            applyStreamToolProgress({ event, liveToolCalls });
           }
 
           if (event.type === 'tool_result') {
-            const previous = liveToolCalls.get(event.toolCallId);
-            const rawPendingPermissionRequestId = event.pendingPermissionRequestId;
             const hasPendingPermission = hasActivePendingPermissionRequest(event);
-            liveToolCalls.set(event.toolCallId, {
-              createdAt: previous?.createdAt ?? event.occurredAt ?? Date.now(),
-              completedAt: event.occurredAt ?? Date.now(),
-              inputText: previous?.inputText ?? '',
-              output: event.output,
-              isError: hasPendingPermission ? false : event.isError,
-              pendingPermissionRequestId: hasPendingPermission
-                ? event.pendingPermissionRequestId
-                : undefined,
-              resumedAfterApproval: event.resumedAfterApproval,
-              toolCallId: event.toolCallId,
-              status: hasPendingPermission ? 'paused' : event.isError ? 'error' : 'completed',
-              toolName: event.toolName,
-            });
-            accumulatedSegments = applyToolResultToStreamingSegment(accumulatedSegments, {
-              toolCallId: event.toolCallId,
-              output: event.output,
-              isError: hasPendingPermission ? false : event.isError,
-              status: hasPendingPermission ? 'paused' : event.isError ? 'failed' : 'completed',
-              ...(hasPendingPermission && rawPendingPermissionRequestId
-                ? {
-                    pendingPermissionRequestId: rawPendingPermissionRequestId,
-                  }
-                : {}),
-              ...(event.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
-            });
+            const { accumulatedSegments: nextSegments, rawPendingPermissionRequestId } =
+              applyStreamToolResult({
+                accumulatedSegments,
+                event,
+                hasPendingPermission,
+                liveToolCalls,
+              });
+            accumulatedSegments = nextSegments;
             scheduleSegmentsFlush();
             setMessages((previousMessages) => {
               const nextMessages = applyToolResultToLocalAssistantMessages(previousMessages, event);
@@ -4423,158 +3436,110 @@ export default function ChatPage() {
                 (event as { terminalId: string }).terminalId,
               )
             ) {
-              const terminalId = (event as { terminalId: string }).terminalId;
-              const outputText =
+              const terminalEvent =
                 event.type === 'terminal_output'
-                  ? (event as { outputTail: string }).outputTail
-                  : '';
-              const command =
-                event.type === 'terminal_started' ? (event as { command: string }).command : '';
-
-              if (
-                event.type === 'terminal_started' &&
-                command &&
-                !isLikelyDevServerCommand(command)
-              ) {
-                // Not a dev-server command — mark as skip
-                devServerDetectedTerminalIdsRef.current.add(terminalId);
-              } else if (outputText) {
-                const detected = detectDevServerUrl(outputText);
-                if (detected) {
-                  devServerDetectedTerminalIdsRef.current.add(terminalId);
-                  setBrowserPreviewUrl(detected.url);
-                  // Open the editor pane with browser preview
-                  setEditorMode(true);
-                }
+                  ? {
+                      type: 'terminal_output' as const,
+                      outputTail: (event as { outputTail: string }).outputTail,
+                      terminalId: (event as { terminalId: string }).terminalId,
+                    }
+                  : {
+                      type: 'terminal_started' as const,
+                      command: (event as { command: string }).command,
+                      terminalId: (event as { terminalId: string }).terminalId,
+                    };
+              const detected = detectTerminalDevServer({
+                detectedTerminalIds: devServerDetectedTerminalIdsRef.current,
+                event: terminalEvent,
+              });
+              if (detected.shouldMarkTerminalHandled) {
+                devServerDetectedTerminalIdsRef.current.add(terminalEvent.terminalId);
+              }
+              if (detected.detectedUrl) {
+                setBrowserPreviewUrl(detected.detectedUrl);
+                // Open the editor pane with browser preview
+                setEditorMode(true);
               }
             }
           }
 
           if (event.type === 'session_child') {
-            setChildSessions((previous) => {
-              if (previous.some((session) => session.id === event.sessionId)) {
-                return previous.map((session) =>
-                  session.id === event.sessionId
-                    ? { ...session, title: event.title ?? session.title }
-                    : session,
-                );
-              }
-
-              return [
-                {
-                  id: event.sessionId,
-                  title: event.title,
-                },
-                ...previous,
-              ];
-            });
+            setChildSessions((previous) => applySessionChildRuntimeEvent(previous, event));
           }
 
           if (event.type === 'task_update') {
-            setSessionTasks((previous) => {
-              const existingTask = previous.find((task) => task.id === event.taskId);
-              const nextTask: SessionTask = {
-                assignedAgent: event.assignedAgent ?? existingTask?.assignedAgent,
-                blockedBy: existingTask?.blockedBy ?? [],
-                completedSubtaskCount: existingTask?.completedSubtaskCount ?? 0,
-                createdAt: existingTask?.createdAt ?? event.occurredAt ?? Date.now(),
-                depth: event.parentTaskId ? 1 : (existingTask?.depth ?? 0),
-                errorMessage: event.errorMessage ?? existingTask?.errorMessage,
-                id: event.taskId,
-                parentTaskId: event.parentTaskId,
-                priority: existingTask?.priority ?? 'medium',
-                readySubtaskCount: existingTask?.readySubtaskCount ?? 0,
-                result: event.result ?? existingTask?.result,
-                sessionId: event.sessionId ?? existingTask?.sessionId,
-                status:
-                  event.status === 'in_progress'
-                    ? 'running'
-                    : event.status === 'done'
-                      ? 'completed'
-                      : event.status,
-                subtaskCount: existingTask?.subtaskCount ?? 0,
-                tags: existingTask?.tags ?? [],
-                terminalReason: event.reason ?? existingTask?.terminalReason,
-                timeoutSource: event.timeoutSource ?? existingTask?.timeoutSource,
-                title: event.label,
-                unmetDependencyCount: existingTask?.unmetDependencyCount ?? 0,
-                updatedAt: event.occurredAt ?? Date.now(),
-              };
-
-              const existingIndex = previous.findIndex((task) => task.id === event.taskId);
-              if (existingIndex === -1) {
-                return [nextTask, ...previous];
-              }
-
-              return previous.map((task, index) =>
-                index === existingIndex ? { ...task, ...nextTask } : task,
-              );
-            });
+            setSessionTasks((previous) => applyTaskUpdateRuntimeEvent(previous, event));
           }
 
-          if (event.type === 'permission_asked') {
-            if (token && isAutoAcceptEnabled(sid)) {
-              void replyPermissionRequest({
-                decision: 'once',
-                gatewayUrl,
-                requestId: event.requestId,
-                sessionId: sid,
-                token,
-              }).catch(() => {
+          if (
+            event.type === 'permission_asked' ||
+            event.type === 'permission_replied' ||
+            event.type === 'question_asked' ||
+            event.type === 'question_replied'
+          ) {
+            const handledPendingInteraction = handlePendingInteractionEvent({
+              event,
+              gatewayUrl,
+              isAutoAcceptEnabled,
+              onPermissionAsked: (permissionEvent) => {
                 setSessionStateStatus('paused');
-                setMessages((previous) => upsertPermissionEventMessage(previous, event));
-              });
-            } else {
-              pausedForPermission = true;
-              setSessionStateStatus('paused');
-              setMessages((previous) => upsertPermissionEventMessage(previous, event));
-              setPendingPermissions((previous) => {
-                return dedupePendingPermissionRequests([
-                  createPendingPermissionRequestSnapshot(event, sid),
-                  ...previous,
-                ]);
-              });
-              // NOTE: Do NOT call resetStreamState() here.
-              // permission_asked arrives before onDone(tool_permission). Resetting stream state
-              // here clears currentAssistantStreamMessageIdRef, causing onDone to create a
-              // duplicate assistant message with a new ID. Let onDone handle the reset.
-              requestSessionListRefresh();
-            }
-          }
-
-          if (event.type === 'permission_replied') {
-            if (event.decision !== 'reject') {
-              setSessionStateStatus('running');
-            }
-            setMessages((previous) =>
-              dismissPermissionEventMessage(
-                applyPermissionDecisionToLocalAssistantMessages(
-                  previous,
-                  event.requestId,
-                  event.decision,
-                  event.feedback,
-                ),
-                event.requestId,
-              ),
-            );
-            setPendingPermissions((previous) =>
-              previous.filter((permission) => permission.requestId !== event.requestId),
-            );
-            setRightPanelState((previous) =>
-              clearResolvedPendingPermissionToolCalls(previous, event.requestId, event.decision),
-            );
-          }
-
-          if (event.type === 'question_asked') {
-            pausedForQuestion = true;
-            setSessionStateStatus('paused');
-            resetStreamState();
-            requestCurrentSessionRefresh(sid);
-            requestSessionListRefresh();
-          }
-
-          if (event.type === 'question_replied') {
-            setSessionStateStatus(event.status === 'answered' ? 'running' : 'idle');
+                setMessages((previous) => upsertPermissionEventMessage(previous, permissionEvent));
+                setPendingPermissions((previous) => {
+                  return dedupePendingPermissionRequests([
+                    createPendingPermissionRequestSnapshot(permissionEvent, sid),
+                    ...previous,
+                  ]);
+                });
+              },
+              onPermissionAskedAutoReplyFallback: (permissionEvent) => {
+                setSessionStateStatus('paused');
+                setMessages((previous) => upsertPermissionEventMessage(previous, permissionEvent));
+              },
+              onPermissionReplied: (permissionEvent) => {
+                if (permissionEvent.decision !== 'reject') {
+                  setSessionStateStatus('running');
+                }
+                setMessages((previous) =>
+                  dismissPermissionEventMessage(
+                    applyPermissionDecisionToLocalAssistantMessages(
+                      previous,
+                      permissionEvent.requestId,
+                      permissionEvent.decision,
+                      permissionEvent.feedback,
+                    ),
+                    permissionEvent.requestId,
+                  ),
+                );
+                setPendingPermissions((previous) =>
+                  previous.filter(
+                    (permission) => permission.requestId !== permissionEvent.requestId,
+                  ),
+                );
+                setRightPanelState((previous) =>
+                  clearResolvedPendingPermissionToolCalls(
+                    previous,
+                    permissionEvent.requestId,
+                    permissionEvent.decision,
+                  ),
+                );
+              },
+              onQuestionAsked: () => {
+                setSessionStateStatus('paused');
+                resetStreamState();
+              },
+              onQuestionReplied: (questionEvent) => {
+                setSessionStateStatus(questionEvent.status === 'answered' ? 'running' : 'idle');
+              },
+              pausedForPermission,
+              pausedForQuestion,
+              refreshCurrentSession: () => requestCurrentSessionRefresh(sid),
+              requestSessionListRefresh,
+              replyPermissionRequest,
+              sessionId: sid,
+              token,
+            });
+            pausedForPermission = handledPendingInteraction.pausedForPermission;
+            pausedForQuestion = handledPendingInteraction.pausedForQuestion;
           }
 
           setRightPanelState((prev) => {
@@ -4630,7 +3595,7 @@ export default function ChatPage() {
             streamRevealNextAllowedAtRef.current = 0;
             setStreamBuffer(accumulated);
           } else {
-            scheduleStreamReveal();
+            scheduleStreamReveal({ prefersReducedMotion });
           }
           if (!isNearBottomRef.current) {
             setHasPendingFollowContent((previous) => previous || true);
@@ -4726,57 +3691,28 @@ export default function ChatPage() {
           if (hasRenderableAssistantReply || !wasCancelled) {
             const attachMsgId =
               currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId();
-            const {
-              content,
-              parts: legacyParts,
-              reasoningBlocksEndedFlags,
-              reasoningBlocksDurationsMs,
-            } = buildAttachTraceMessage(attachMsgId, finalAccumulatedText, traceFinalStatus);
-            // Prefer ordered segments so the final attach-committed message
-            // mirrors gateway wire ordering. legacyParts is the fallback for
-            // edge cases where no segments accumulated.
-            const parts = accumulatedSegments.length > 0 ? accumulatedSegments : legacyParts;
-            // After round-boundary commits, only the final round's tool calls are
-            // attached to this message; earlier rounds were already persisted as
-            // independent assistant messages by closeCurrentAttachRoundIntoMessage.
-            const finalRoundToolCallIds = new Set(liveToolCalls.keys());
-            const shouldAttachFirstTokenLatency =
-              firstTokenObservedAt !== null && !firstTokenLatencyAttached;
-            setMessages((prev) =>
-              replaceOrAppendStreamedAssistantMessage(
-                prev,
-                {
-                  id: attachMsgId,
-                  role: 'assistant',
-                  content,
-                  parts,
-                  ...(reasoningBlocksEndedFlags ? { reasoningBlocksEndedFlags } : {}),
-                  ...(reasoningBlocksDurationsMs ? { reasoningBlocksDurationsMs } : {}),
-                  createdAt: finishedAt,
-                  durationMs: finishedAt - currentRoundStartedAt,
-                  stopReason: resolvedStopReason,
-                  tokenEstimate: estimateTokenCount(
-                    [accumulatedThinking, finalAccumulatedText]
-                      .filter((item) => item.trim().length > 0)
-                      .join('\n\n'),
-                  ),
-                  toolCallCount: finalRoundToolCallIds.size,
-                  providerId: requestProviderId,
-                  model: requestModelLabel,
-                  agentId: streamAgentId || requestAgentId,
-                  ...(shouldAttachFirstTokenLatency && firstTokenObservedAt !== null
-                    ? {
-                        firstTokenLatencyMs: firstTokenObservedAt - requestStartedAt,
-                      }
-                    : {}),
-                  status: 'completed',
-                },
-                finalRoundToolCallIds,
-              ),
-            );
-            if (shouldAttachFirstTokenLatency) {
-              firstTokenLatencyAttached = true;
-            }
+            const finalized = finalizeStreamMessage({
+              accumulatedSegments,
+              accumulatedThinking,
+              agentId: streamAgentId || requestAgentId,
+              buildTraceMessage: (messageId, textContent) =>
+                buildAttachTraceMessage(messageId, textContent, traceFinalStatus),
+              contentText: finalAccumulatedText,
+              createdAt: finishedAt,
+              currentRoundStartedAt,
+              firstTokenLatencyAttached,
+              firstTokenObservedAt,
+              messageId: attachMsgId,
+              model: requestModelLabel,
+              providerId: requestProviderId,
+              requestStartedAt,
+              setMessages,
+              status: 'completed',
+              stopReason: resolvedStopReason,
+              toolCallIds: new Set(liveToolCalls.keys()),
+              traceFinalStatus,
+            });
+            firstTokenLatencyAttached = finalized.firstTokenLatencyAttached;
           }
           setSessionStateStatus(isPausedForPermission ? 'paused' : 'idle');
           resetStreamState();
@@ -4802,51 +3738,27 @@ export default function ChatPage() {
           logger.error('attach stream error', message ? `${code}: ${message}` : code);
           const attachErrorMsgId =
             currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId();
-          const {
-            content: attachErrorContent,
-            parts: attachErrorParts,
-            reasoningBlocksEndedFlags: attachErrorEndedFlags,
-            reasoningBlocksDurationsMs: attachErrorDurationsMs,
-          } = buildAttachTraceMessage(attachErrorMsgId, errorContent, 'error');
-          const errorRoundToolCallIds = new Set(liveToolCalls.keys());
-          const shouldAttachFirstTokenLatency =
-            firstTokenObservedAt !== null && !firstTokenLatencyAttached;
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: attachErrorMsgId,
-              role: 'assistant',
-              content: attachErrorContent,
-              parts: attachErrorParts,
-              ...(attachErrorEndedFlags
-                ? { reasoningBlocksEndedFlags: attachErrorEndedFlags }
-                : {}),
-              ...(attachErrorDurationsMs
-                ? { reasoningBlocksDurationsMs: attachErrorDurationsMs }
-                : {}),
-              createdAt: finishedAt,
-              durationMs: finishedAt - currentRoundStartedAt,
-              stopReason: 'error',
-              tokenEstimate: estimateTokenCount(
-                [accumulatedThinking, errorContent]
-                  .filter((item) => item.trim().length > 0)
-                  .join('\n\n'),
-              ),
-              toolCallCount: errorRoundToolCallIds.size,
-              providerId: requestProviderId,
-              model: requestModelLabel,
-              agentId: requestAgentId,
-              ...(shouldAttachFirstTokenLatency && firstTokenObservedAt !== null
-                ? {
-                    firstTokenLatencyMs: firstTokenObservedAt - requestStartedAt,
-                  }
-                : {}),
-              status: 'error',
-            },
-          ]);
-          if (shouldAttachFirstTokenLatency) {
-            firstTokenLatencyAttached = true;
-          }
+          const finalized = finalizeStreamMessage({
+            accumulatedSegments: [],
+            accumulatedThinking,
+            agentId: requestAgentId,
+            buildTraceMessage: (messageId, textContent) =>
+              buildAttachTraceMessage(messageId, textContent, 'error'),
+            contentText: errorContent,
+            createdAt: finishedAt,
+            currentRoundStartedAt,
+            firstTokenLatencyAttached,
+            firstTokenObservedAt,
+            messageId: attachErrorMsgId,
+            model: requestModelLabel,
+            providerId: requestProviderId,
+            requestStartedAt,
+            setMessages,
+            status: 'error',
+            stopReason: 'error',
+            toolCallIds: new Set(liveToolCalls.keys()),
+          });
+          firstTokenLatencyAttached = finalized.firstTokenLatencyAttached;
           setSessionStateStatus('idle');
           resetStreamState();
           setStreamError(message ? `${code}: ${message}` : code);
@@ -4910,167 +3822,6 @@ export default function ChatPage() {
     sessionStateStatus,
     sessionModesHydrated,
     streaming,
-  ]);
-
-  async function handleRetryInCurrentSession() {
-    if (!retryPrompt) return;
-    if (!currentSessionId || !token) return;
-    const remainingMessages = await truncateSessionMessagesInPlace(
-      currentSessionId,
-      retryPrompt.sourceMessageId,
-      retryPrompt.text,
-    );
-    const normalizedRemainingMessages = filterTranscriptMessages(
-      normalizeChatMessages(remainingMessages),
-    );
-    const fallbackMessages = trimMessagesFromSource(messages, retryPrompt.sourceMessageId);
-    const sourceFoundLocally =
-      messages.findIndex((message) => message.id === retryPrompt.sourceMessageId) >= 0;
-    // When the source message is found in the local messages array, prefer
-    // fallbackMessages (local truncation) because the backend truncation may
-    // silently fail: the frontend user message ID (makeOrderedMessageId) differs
-    // from the backend user message ID (makeMessageId), so the backend
-    // findIndex returns -1 and no messages are actually deleted. The previous
-    // heuristic (truncateRemovedSource) was always true in this case because
-    // the frontend ID was never present in the backend response, causing the
-    // error message to persist in normalizedRemainingMessages.
-    const nextMessages = sourceFoundLocally
-      ? fallbackMessages
-      : normalizedRemainingMessages.length > 0
-        ? normalizedRemainingMessages
-        : fallbackMessages;
-    setMessages(nextMessages);
-    resetStreamState();
-    setStreamError(null);
-    await sendMessage(retryPrompt.text, {
-      ...(retryPrompt.inputParts ? { existingInputParts: retryPrompt.inputParts } : {}),
-    });
-    setRetryPrompt(null);
-  }
-
-  async function handleEditResendInCurrentSession(
-    text: string,
-    sourceMessageId: string,
-    editedInputParts?: InputImageContent[],
-  ) {
-    if (!currentSessionId || !token) return;
-    const sourceMessage = messages.find((message) => message.id === sourceMessageId);
-    const remainingMessages = await truncateSessionMessagesInPlace(
-      currentSessionId,
-      sourceMessageId,
-      sourceMessage?.content,
-    );
-    const normalizedRemainingMessages = filterTranscriptMessages(
-      normalizeChatMessages(remainingMessages),
-    );
-    const fallbackMessages = trimMessagesFromSource(messages, sourceMessageId);
-    const sourceFoundLocally = messages.findIndex((message) => message.id === sourceMessageId) >= 0;
-    // Same rationale as handleRetryInCurrentSession: prefer local truncation
-    // when the source message is present in the local state, because backend
-    // truncation may silently fail due to frontend/backend message ID mismatch.
-    const nextMessages = sourceFoundLocally
-      ? fallbackMessages
-      : normalizedRemainingMessages.length > 0
-        ? normalizedRemainingMessages
-        : fallbackMessages;
-    setMessages(nextMessages);
-    resetStreamState();
-    setStreamError(null);
-    const effectiveInputParts = editedInputParts ?? historyEditPrompt?.inputParts;
-    await sendMessage(text, {
-      ...(effectiveInputParts ? { existingInputParts: effectiveInputParts } : {}),
-    });
-  }
-
-  async function handleRetryInNewSession() {
-    if (!retryPrompt) return;
-    if (retryPrompt.inputParts && retryPrompt.inputParts.length > 0) {
-      await createBranchSessionFromMessage(
-        retryPrompt.text,
-        retryPrompt.sourceMessageId,
-        retryPrompt.inputParts,
-      );
-    } else {
-      const branchSessionId = await createBranchSessionFromMessage(
-        retryPrompt.text,
-        retryPrompt.sourceMessageId,
-      );
-      if (!branchSessionId) return;
-      await sendMessage(retryPrompt.text, { forcedSessionId: branchSessionId });
-    }
-    setRetryPrompt(null);
-  }
-
-  const stopActiveMessage = useCallback(async () => {
-    if (stopCapability === 'none' || stopCapability === 'observe_only' || stoppingStream) {
-      return;
-    }
-
-    stoppingStreamRef.current = true;
-    const stopSessionViewEpoch = currentSessionViewRef.current.epoch;
-    if (pendingStreamRevealFrameRef.current !== null) {
-      cancelAnimationFrame(pendingStreamRevealFrameRef.current);
-      pendingStreamRevealFrameRef.current = null;
-    }
-    streamRevealTargetRef.current = streamRevealVisibleRef.current;
-    streamRevealTargetCodePointsRef.current = Array.from(streamRevealVisibleRef.current);
-    streamRevealVisibleCodePointCountRef.current = streamRevealTargetCodePointsRef.current.length;
-    streamRevealNextAllowedAtRef.current = 0;
-    setStoppingStream(true);
-    setStreamError(null);
-    try {
-      const sessionsClient = createSessionsClient(gatewayUrl) as SessionsClientWithActiveStop;
-      const stopped =
-        stopCapability === 'best_effort'
-          ? Boolean(
-              currentSessionId &&
-              token &&
-              (await sessionsClient.stopActiveStream(token, currentSessionId)),
-            )
-          : await client.stopStream();
-      if (!stopped) {
-        stoppingStreamRef.current = false;
-        setStoppingStream(false);
-        void (currentSessionId
-          ? loadCurrentSessionSnapshot(currentSessionId, {
-              expectedSessionViewEpoch: stopSessionViewEpoch,
-              messageLimit: INITIAL_TURN_LIMIT,
-            }).catch(() => undefined)
-          : Promise.resolve());
-        if (stopCapability === 'best_effort') {
-          setStreamError('当前会话没有可停止的活动运行，正在刷新状态。');
-        } else {
-          setStreamError('当前运行控制句柄已失效，正在刷新会话状态。');
-        }
-        return;
-      }
-
-      if (stopCapability === 'best_effort' || !streaming) {
-        stoppingStreamRef.current = false;
-        setStoppingStream(false);
-        void (currentSessionId
-          ? loadCurrentSessionSnapshot(currentSessionId, {
-              expectedSessionViewEpoch: stopSessionViewEpoch,
-              messageLimit: INITIAL_TURN_LIMIT,
-            }).catch(() => undefined)
-          : Promise.resolve());
-        requestSessionListRefresh();
-      }
-    } catch (error) {
-      stoppingStreamRef.current = false;
-      logger.error('stop stream failed', error);
-      setStoppingStream(false);
-      setStreamError(error instanceof Error ? error.message : '停止对话失败');
-    }
-  }, [
-    client,
-    currentSessionId,
-    gatewayUrl,
-    loadCurrentSessionSnapshot,
-    stopCapability,
-    stoppingStream,
-    streaming,
-    token,
   ]);
 
   const composerVariant =
@@ -5579,7 +4330,7 @@ export default function ChatPage() {
             validatePath={workspace.validatePath}
             loading={workspace.loading}
           />
-          <LatestAssistantMessageContext.Provider value={latestAssistantMessageId}>
+          <LatestAssistantMessageContext value={latestAssistantMessageId}>
             <ChatConversationView
               sessionId={currentSessionId}
               sessionSource="chat"
@@ -5972,7 +4723,7 @@ export default function ChatPage() {
                 onDismissTerminal={sessionTerminals.dismissTerminal}
               />
             ) : null}
-          </LatestAssistantMessageContext.Provider>
+          </LatestAssistantMessageContext>
         </div>
         <ChatEditorPane
           editorMode={editorMode}
