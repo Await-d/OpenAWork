@@ -24,7 +24,14 @@ export default defineConfig({
   },
   plugins: [
     versionPlugin(),
-    react(),
+    react({
+      // React Compiler（1.0 stable）：自动插入 useMemo / useCallback / React.memo。
+      // 启用后无需再手写大量手动 memoize；保留的手写 memo 不会被移除，编译器会跳过。
+      // target: '19' 与项目的 react@^19 对齐，避免 fallback runtime。
+      babel: {
+        plugins: [['babel-plugin-react-compiler', { target: '19' }]],
+      },
+    }),
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
