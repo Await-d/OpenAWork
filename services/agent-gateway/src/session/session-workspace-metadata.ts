@@ -1,10 +1,28 @@
 import { z } from 'zod';
+import { TEAM_RUNTIME_LAYER_ORDER, DEFAULT_FIXED_TEAM_MEMBER_SLOTS } from '@openAwork/shared';
 import { validateWorkspacePath } from '../workspace/workspace-paths.js';
 import { upstreamRetryMaxRetriesSchema } from '../provider/upstream-retry-policy.js';
+
+const specialtyValues = Array.from(
+  new Set(DEFAULT_FIXED_TEAM_MEMBER_SLOTS.map((slot) => slot.specialty)),
+) as [string, ...string[]];
+
+const teamMemberSlotSchema = z.object({
+  agentId: z.string().min(1).max(200).optional(),
+  agentLabel: z.string().min(1).max(200).optional(),
+  displayName: z.string().min(1).max(200),
+  id: z.string().min(1).max(120),
+  layer: z.enum(TEAM_RUNTIME_LAYER_ORDER),
+  personaKey: z.string().min(1).max(160),
+  required: z.boolean(),
+  specialty: z.enum(specialtyValues),
+  toolsets: z.array(z.string().min(1).max(80)).max(20),
+});
 
 const teamDefinitionSchema = z.object({
   createdAt: z.string().optional(),
   defaultProvider: z.string().nullable().optional(),
+  memberSlots: z.array(teamMemberSlotSchema).optional(),
   optionalMembers: z
     .array(
       z.object({
@@ -34,6 +52,7 @@ const teamDefinitionSchema = z.object({
    * 前端 ReceptionStarterCard 渲染为 chip。
    */
   starterSuggestions: z.array(z.string().min(1).max(200)).max(8).optional(),
+  version: z.number().int().min(1).optional(),
 });
 
 const sessionMetadataPatchSchema = z

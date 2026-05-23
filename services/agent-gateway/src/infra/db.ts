@@ -644,6 +644,7 @@ export async function migrate(): Promise<void> {
       description TEXT,
       visibility TEXT NOT NULL DEFAULT 'private',
       default_working_root TEXT,
+      default_team_roster_json TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
@@ -1040,6 +1041,7 @@ export async function migrate(): Promise<void> {
   // T-01: team_workspaces.constitution_md / constitution_version（乐观锁版本号）
   ensureColumn('team_workspaces', 'constitution_md', 'TEXT');
   ensureColumn('team_workspaces', 'constitution_version', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('team_workspaces', 'default_team_roster_json', "TEXT NOT NULL DEFAULT '[]'");
 
   // T-02: users.user_memory_md（用户级长期记忆，对应 7 层注入栈第 6 层）
   ensureColumn('users', 'user_memory_md', "TEXT NOT NULL DEFAULT ''");

@@ -18,6 +18,7 @@ import { setSubstate } from '../store/substate-store.js';
 import { sqliteRun, sqliteGet } from '../../infra/db.js';
 import { randomUUID } from 'node:crypto';
 import { publishHandoffEvent, publishTeamEvent } from '../bus/team-events-bus.js';
+import { inferTaskProfile, TOOLSET_CATEGORIES } from './dispatch-package.js';
 
 // ─── b: reception 层指令 ────────────────────────────────────────────────────
 
@@ -286,7 +287,7 @@ registerInstruction({
     goal: z.string().min(1).max(2000),
     context: z.string().max(8000).default(''),
     role: z.enum(['executor', 'reviewer']),
-    toolsets: z.array(z.string()).min(1),
+    toolsets: z.array(z.enum(TOOLSET_CATEGORIES)).min(1),
     taskId: z.string().describe('tasks.md 中的任务 id（如 T001）'),
     parallel: z.boolean().default(false),
     artifactRefs: z
@@ -309,6 +310,7 @@ registerInstruction({
         toolsets: args.toolsets,
         role: args.role,
         artifactRefs: args.artifactRefs ?? {},
+        taskProfile: inferTaskProfile({ title: args.goal, context: args.context }),
         taskMarkers: { taskId: args.taskId, parallel: args.parallel },
       },
     });

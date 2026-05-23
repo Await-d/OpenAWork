@@ -61,15 +61,17 @@ packages/web-client/src/
 export const TASKS_TEMPLATE = `# 任务清单：[功能名称]
 
 **来源**：plan.md + spec.md
-**格式**：\`[ID] [P?] [Story] 描述\`
+**格式**：\`[ID] [P?] [Story] [KIND:<kind>] [SURFACE:<surface>] 描述\`
 
 - **[P]**：可并行（不同文件，无依赖）
 - **[Story]**：所属用户故事（US1, US2, US3）
+- **[KIND]**：任务类型，必须是 build / fix / refactor / review / verify / docs 之一
+- **[SURFACE]**：任务领域，必须是 ui / backend / workflow / data / integration / cross-cutting 之一
 
 ## Phase 1: 基础设施（阻塞性前置）
 
-- [ ] T001 [描述]
-- [ ] T002 [P] [描述]
+- [ ] T001 [KIND:build] [SURFACE:backend] [描述]
+- [ ] T002 [P] [KIND:build] [SURFACE:ui] [描述]
 
 ---
 
@@ -78,9 +80,9 @@ export const TASKS_TEMPLATE = `# 任务清单：[功能名称]
 **目标**：[简述]
 **独立可测**：[验证方式]
 
-- [ ] T003 [US1] [描述]
-- [ ] T004 [P] [US1] [描述]
-- [ ] T005 [US1] [描述]
+- [ ] T003 [US1] [KIND:build] [SURFACE:data] [描述]
+- [ ] T004 [P] [US1] [KIND:fix] [SURFACE:ui] [描述]
+- [ ] T005 [US1] [KIND:verify] [SURFACE:integration] [描述]
 
 **检查点**：用户故事 1 独立可用
 
@@ -90,8 +92,8 @@ export const TASKS_TEMPLATE = `# 任务清单：[功能名称]
 
 **目标**：[简述]
 
-- [ ] T006 [US2] [描述]
-- [ ] T007 [P] [US2] [描述]
+- [ ] T006 [US2] [KIND:refactor] [SURFACE:workflow] [描述]
+- [ ] T007 [P] [US2] [KIND:review] [SURFACE:backend] [描述]
 
 **检查点**：用户故事 1 + 2 均独立可用
 
@@ -123,8 +125,11 @@ export const TASKS_SYSTEM_INSTRUCTION = `你是 PM1（任务规划师）。你�
 2. 任务按用户故事分组
 3. 每个任务必须有明确的文件路径
 4. 可并行任务标记 [P]
-5. 每个用户故事有独立检查点
-6. 全程使用中文
+5. 每个任务必须显式标记 [KIND:<kind>] 和 [SURFACE:<surface>]
+6. KIND 只能取 build / fix / refactor / review / verify / docs
+7. SURFACE 只能取 ui / backend / workflow / data / integration / cross-cutting
+8. 每个用户故事有独立检查点
+9. 全程使用中文
 
 模板：
 ${TASKS_TEMPLATE}`;

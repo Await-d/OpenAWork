@@ -51,11 +51,24 @@ export {
 
 // ─── Dispatch Package（d 层标准载荷）
 export {
+  assignedMemberSchema,
   dispatchPackageSchema,
+  taskProfileSchema,
   parseTaskLine,
   parseAllTasks,
   buildDispatchPackages,
+  inferTaskKind,
+  inferTaskSurface,
+  inferTaskProfile,
+  resolveAssignedMember,
+  buildTaskProfilePromptFragment,
   TOOLSET_CATEGORIES,
+  TASK_KINDS,
+  TASK_SURFACES,
   type DispatchPackage,
+  type AssignedMember,
+  type TaskProfile,
+  type TaskKind,
+  type TaskSurface,
   type ToolsetCategory,
 } from './dispatch-package.js';

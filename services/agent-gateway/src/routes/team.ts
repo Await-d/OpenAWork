@@ -1,7 +1,13 @@
 import { randomUUID } from 'crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { FIXED_TEAM_CORE_ROLE_BINDINGS, FIXED_TEAM_CORE_ROLE_ORDER } from '@openAwork/shared';
+import {
+  DEFAULT_FIXED_TEAM_MEMBER_SLOTS,
+  FIXED_TEAM_CORE_ROLE_BINDINGS,
+  FIXED_TEAM_CORE_ROLE_ORDER,
+  TEAM_RUNTIME_LAYER_ORDER,
+} from '@openAwork/shared';
+import type { TeamMemberSpecialty } from '@openAwork/shared';
 import { listManagedAgentsForUser } from '../agent/agent-catalog.js';
 import type { JwtPayload } from '../infra/auth.js';
 import { parseBody, parseQuery } from '../infra/parse-request.js';
@@ -14,6 +20,11 @@ import {
   validateSessionMetadataPatch,
 } from '../session/session-workspace-metadata.js';
 import { resolveSessionWorkspacePath } from '../session/session-workspace-resolution.js';
+import {
+  cloneDefaultTeamRoster,
+  normalizeTeamWorkspaceDefaultRoster,
+  parseTeamWorkspaceDefaultRosterJson,
+} from '../team/team-default-roster-store.js';
 import { mergeRuntimeTaskGroups } from '../team/team-runtime-task-groups.js';
 import { listSharedSessionsForRecipient } from '../session/session-shared-access.js';
 import { listTeamAuditLogs, logTeamAudit, type TeamAuditAction } from '../team/team-audit-store.js';
@@ -34,11 +45,26 @@ const createMemberSchema = z.object({
   avatarUrl: z.string().url().optional(),
 });
 
+const TEAM_MEMBER_SPECIALTY_VALUES = Array.from(
+  new Set(DEFAULT_FIXED_TEAM_MEMBER_SLOTS.map((slot) => slot.specialty)),
+) as [TeamMemberSpecialty, ...TeamMemberSpecialty[]];
+
+const teamMemberSlotSchema = z.object({
+  id: z.string().min(1).max(120),
+  layer: z.enum(TEAM_RUNTIME_LAYER_ORDER),
+  specialty: z.enum(TEAM_MEMBER_SPECIALTY_VALUES),
+  displayName: z.string().min(1).max(200),
+  personaKey: z.string().min(1).max(160),
+  toolsets: z.array(z.string().min(1).max(80)).max(20),
+  required: z.boolean(),
+});
+
 const createWorkspaceSchema = z.object({
   name: z.string().min(1),
   description: z.string().nullable().optional(),
   visibility: z.enum(['open', 'closed', 'private']).default('private'),
   defaultWorkingRoot: z.string().min(1).nullable().optional(),
+  defaultTeamRoster: z.array(teamMemberSlotSchema).optional(),
 });
 
 const updateWorkspaceSchema = z
@@ -47,13 +73,15 @@ const updateWorkspaceSchema = z
     description: z.string().nullable().optional(),
     visibility: z.enum(['open', 'closed', 'private']).optional(),
     defaultWorkingRoot: z.string().min(1).nullable().optional(),
+    defaultTeamRoster: z.array(teamMemberSlotSchema).optional(),
   })
   .refine(
     (input) =>
       input.name !== undefined ||
       input.description !== undefined ||
       input.visibility !== undefined ||
-      input.defaultWorkingRoot !== undefined,
+      input.defaultWorkingRoot !== undefined ||
+      input.defaultTeamRoster !== undefined,
     {
       message: 'At least one field is required',
     },
@@ -61,6 +89,7 @@ const updateWorkspaceSchema = z
 
 const createThreadSchema = z.object({
   metadata: z.record(z.unknown()).optional().default({}),
+  memberSlots: z.array(teamMemberSlotSchema).optional(),
   title: z.string().min(1).max(200).optional(),
 });
 
@@ -73,6 +102,7 @@ const createTeamSessionSchema = z
         templateId: z.string().min(1).optional(),
       })
       .optional(),
+    memberSlots: z.array(teamMemberSlotSchema).optional(),
     optionalAgentIds: z.array(z.string().min(1)).default([]),
     defaultProvider: z.string().nullable().optional(),
   })
@@ -181,6 +211,7 @@ interface MemberRow {
 interface TeamWorkspaceRow {
   created_at: string;
   default_working_root: string | null;
+  default_team_roster_json: string | null;
   description: string | null;
   id: string;
   name: string;
@@ -322,7 +353,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
     teamWorkspaceId: string,
   ): TeamWorkspaceRow | null =>
     sqliteGet<TeamWorkspaceRow>(
-      `SELECT id, user_id, name, description, visibility, default_working_root, created_at, updated_at
+      `SELECT id, user_id, name, description, visibility, default_working_root, default_team_roster_json, created_at, updated_at
        FROM team_workspaces
        WHERE user_id = ? AND id = ?
        LIMIT 1`,
@@ -415,6 +446,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
     description: row.description,
     visibility: row.visibility,
     defaultWorkingRoot: row.default_working_root,
+    defaultTeamRoster: parseTeamWorkspaceDefaultRosterJson(row.default_team_roster_json),
     createdByUserId: row.user_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -487,7 +519,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
 
       const rowsStep = child('query');
       const rows = sqliteAll<TeamWorkspaceRow>(
-        `SELECT id, user_id, name, description, visibility, default_working_root, created_at, updated_at
+        `SELECT id, user_id, name, description, visibility, default_working_root, default_team_roster_json, created_at, updated_at
          FROM team_workspaces
          WHERE user_id = ?
          ORDER BY updated_at DESC, created_at DESC`,
@@ -512,7 +544,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
 
       const queryStep = child('query');
       const row = sqliteGet<TeamWorkspaceRow>(
-        `SELECT id, user_id, name, description, visibility, default_working_root, created_at, updated_at
+        `SELECT id, user_id, name, description, visibility, default_working_root, default_team_roster_json, created_at, updated_at
          FROM team_workspaces
          WHERE user_id = ? AND id = ?
          LIMIT 1`,
@@ -541,6 +573,9 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       parseStep.succeed();
 
       const teamWorkspaceId = randomUUID();
+      const defaultTeamRoster = normalizeTeamWorkspaceDefaultRoster(
+        body.defaultTeamRoster ?? cloneDefaultTeamRoster(),
+      );
       sqliteRun(
         `INSERT INTO team_workspaces (
           id,
@@ -548,8 +583,9 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           name,
           description,
           visibility,
-          default_working_root
-        ) VALUES (?, ?, ?, ?, ?, ?)`,
+          default_working_root,
+          default_team_roster_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [
           teamWorkspaceId,
           user.sub,
@@ -557,11 +593,12 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           body.description ?? null,
           body.visibility,
           body.defaultWorkingRoot ?? null,
+          JSON.stringify(defaultTeamRoster),
         ],
       );
 
       const created = sqliteGet<TeamWorkspaceRow>(
-        `SELECT id, user_id, name, description, visibility, default_working_root, created_at, updated_at
+        `SELECT id, user_id, name, description, visibility, default_working_root, default_team_roster_json, created_at, updated_at
          FROM team_workspaces
          WHERE user_id = ? AND id = ?
          LIMIT 1`,
@@ -578,6 +615,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
               description: body.description ?? null,
               visibility: body.visibility,
               defaultWorkingRoot: body.defaultWorkingRoot ?? null,
+              defaultTeamRoster,
               createdByUserId: user.sub,
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
@@ -627,6 +665,10 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         updates.push('default_working_root = ?');
         params.push(body.defaultWorkingRoot ?? null);
       }
+      if (body.defaultTeamRoster !== undefined) {
+        updates.push('default_team_roster_json = ?');
+        params.push(JSON.stringify(normalizeTeamWorkspaceDefaultRoster(body.defaultTeamRoster)));
+      }
       updates.push("updated_at = datetime('now')");
 
       sqliteRun(`UPDATE team_workspaces SET ${updates.join(', ')} WHERE user_id = ? AND id = ?`, [
@@ -636,7 +678,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       ]);
 
       const updated = sqliteGet<TeamWorkspaceRow>(
-        `SELECT id, user_id, name, description, visibility, default_working_root, created_at, updated_at
+        `SELECT id, user_id, name, description, visibility, default_working_root, default_team_roster_json, created_at, updated_at
          FROM team_workspaces
          WHERE user_id = ? AND id = ?
          LIMIT 1`,
@@ -808,10 +850,44 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         required: requiredRoleBindings.length,
       });
 
+      const resolveLayerAgentId = (layer: string): string | null => {
+        switch (layer) {
+          case 'pm1':
+            return FIXED_TEAM_CORE_ROLE_BINDINGS.planner;
+          case 'pm2':
+            return FIXED_TEAM_CORE_ROLE_BINDINGS.leader;
+          case 'executor':
+            return FIXED_TEAM_CORE_ROLE_BINDINGS.executor;
+          case 'reviewer':
+            return FIXED_TEAM_CORE_ROLE_BINDINGS.reviewer;
+          default:
+            return null;
+        }
+      };
+      const rosterSource = normalizeTeamWorkspaceDefaultRoster(
+        body.memberSlots && body.memberSlots.length > 0
+          ? body.memberSlots
+          : parseTeamWorkspaceDefaultRosterJson(workspace.default_team_roster_json),
+      );
+      const memberSlots = rosterSource.map((slot) => {
+        const agentId = resolveLayerAgentId(slot.layer);
+        const agent = agentId ? agentMap.get(agentId) : null;
+        return {
+          ...slot,
+          ...(agent
+            ? {
+                agentId: agent.id,
+                agentLabel: agent.label,
+              }
+            : {}),
+        };
+      });
+
       const teamDefinition = {
         createdAt: new Date().toISOString(),
         defaultProvider:
           body.defaultProvider ?? templateLookup?.teamTemplate.defaultProvider ?? null,
+        memberSlots,
         optionalMembers: optionalAgentIds.map((agentId) => {
           const agent = agentMap.get(agentId)!;
           return {
@@ -841,6 +917,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         ...(templateLookup?.teamTemplate.starterSuggestions
           ? { starterSuggestions: templateLookup.teamTemplate.starterSuggestions }
           : {}),
+        version: 2,
       };
 
       const metadataPatch = validateSessionMetadataPatch({
@@ -860,6 +937,20 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         step.fail('forbidden path');
         return reply.status(403).send({ error: 'Forbidden' });
       }
+
+      normalizedMetadata.metadata = {
+        ...normalizedMetadata.metadata,
+        teamDefinition: {
+          ...(typeof normalizedMetadata.metadata['teamDefinition'] === 'object' &&
+          normalizedMetadata.metadata['teamDefinition'] !== null
+            ? (normalizedMetadata.metadata['teamDefinition'] as Record<string, unknown>)
+            : {}),
+          createdAt: new Date().toISOString(),
+          memberSlots,
+          source: { kind: 'blank' as const },
+          version: 2,
+        },
+      };
 
       const requestedParentSessionId = extractParentSessionIdFromMetadata(
         normalizedMetadata.metadata,
@@ -921,7 +1012,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
 
       const workspaceStep = child('resolve-workspace');
       const workspace = sqliteGet<TeamWorkspaceRow>(
-        `SELECT id, user_id, name, description, visibility, default_working_root, created_at, updated_at
+        `SELECT id, user_id, name, description, visibility, default_working_root, default_team_roster_json, created_at, updated_at
          FROM team_workspaces
          WHERE user_id = ? AND id = ?
          LIMIT 1`,
@@ -1000,7 +1091,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
 
       const workspaceStep = child('workspace');
       const workspace = sqliteGet<TeamWorkspaceRow>(
-        `SELECT id, user_id, name, description, visibility, default_working_root, created_at, updated_at
+        `SELECT id, user_id, name, description, visibility, default_working_root, default_team_roster_json, created_at, updated_at
          FROM team_workspaces
          WHERE user_id = ? AND id = ?
          LIMIT 1`,
@@ -1062,7 +1153,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
 
       const workspaceStep = child('workspace');
       const workspace = sqliteGet<TeamWorkspaceRow>(
-        `SELECT id, user_id, name, description, visibility, default_working_root, created_at, updated_at
+        `SELECT id, user_id, name, description, visibility, default_working_root, default_team_roster_json, created_at, updated_at
          FROM team_workspaces
          WHERE user_id = ? AND id = ?
          LIMIT 1`,

@@ -243,8 +243,8 @@ describe('invokeInstruction 合法路径', () => {
       ctx: { callerLayer: 'pm2', sessionId: SESSION_ID, userId: USER_ID },
       instructionName: 'dispatch_package',
       rawArgs: {
-        goal: '实现登录页',
-        context: '用户故事 US1',
+        goal: '修复前端登录页面样式问题',
+        context: '前端页面',
         role: 'executor',
         toolsets: ['read', 'write'],
         taskId: 'T001',
@@ -253,11 +253,22 @@ describe('invokeInstruction 合法路径', () => {
     });
     expect(result.ok).toBe(true);
 
-    const handoffRow = dbModule.sqliteGet<{ from_role_layer: string; to_role_layer: string }>(
-      `SELECT from_role_layer, to_role_layer FROM handoff_records ORDER BY created_at DESC LIMIT 1`,
+    const handoffRow = dbModule.sqliteGet<{
+      from_role_layer: string;
+      to_role_layer: string;
+      payload_json: string;
+    }>(
+      `SELECT from_role_layer, to_role_layer, payload_json FROM handoff_records ORDER BY created_at DESC LIMIT 1`,
     );
     expect(handoffRow?.from_role_layer).toBe('pm2');
     expect(handoffRow?.to_role_layer).toBe('executor');
+    const payload = handoffRow
+      ? (JSON.parse(handoffRow.payload_json) as {
+          taskProfile?: { kind?: string; surface?: string };
+        })
+      : null;
+    expect(payload?.taskProfile?.kind).toBe('fix');
+    expect(payload?.taskProfile?.surface).toBe('ui');
   });
 });
 

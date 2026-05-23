@@ -16,10 +16,12 @@ import type { HandoffTaskRunner } from './watcher.js';
 import { createHandoff, type HandoffRecord } from '../store/handoff-store.js';
 import { publishHandoffEvent } from '../bus/team-events-bus.js';
 import { getTeamConstitution } from '../../team/team-constitution-store.js';
+import { getTeamWorkspaceDefaultRoster } from '../../team/team-default-roster-store.js';
 import { sqliteGet } from '../../infra/db.js';
 import { resolveAuxiliaryLlmConfig } from '../../provider/auxiliary-llm-config.js';
 import { buildDispatchPackages, parseAllTasks } from '../capability/dispatch-package.js';
 import { setSubstate, SUBSTATES_D } from '../store/substate-store.js';
+import { resolveSessionWorkspacePath } from '../../session/session-workspace-resolution.js';
 
 const MIN_EXECUTOR_PARALLEL = 2;
 const DEFAULT_MAX_EXECUTOR_PARALLEL = 8;
@@ -182,9 +184,22 @@ export function createPm2Runner(): HandoffTaskRunner {
         if (teamWorkspaceId) {
           try {
             const { readFileSync } = await import('node:fs');
-            const { join } = await import('node:path');
-            const archPath = join(teamWorkspaceId, 'architecture.md');
-            architectureContent = readFileSync(archPath, 'utf-8');
+            const { join, resolve } = await import('node:path');
+            const sessionRow = sqliteGet<{ metadata_json: string }>(
+              `SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1`,
+              [input.toSessionId, input.handoff.userId],
+            );
+            const workspaceRoot = sessionRow
+              ? resolveSessionWorkspacePath({
+                  metadataJson: sessionRow.metadata_json,
+                  sessionId: input.toSessionId,
+                  userId: input.handoff.userId,
+                })
+              : null;
+            if (workspaceRoot) {
+              const archPath = resolve(join(workspaceRoot, 'architecture.md'));
+              architectureContent = readFileSync(archPath, 'utf-8');
+            }
           } catch {
             // architecture.md 不存在或不可读，跳过
           }
@@ -203,6 +218,12 @@ export function createPm2Runner(): HandoffTaskRunner {
 
     // 6. 构建 dispatch_packages
     const context = `来自 PM1 的任务清单，共 ${tasks.length} 个任务。`;
+    const assignedMemberRoster = teamWorkspaceId
+      ? getTeamWorkspaceDefaultRoster({
+          userId: input.handoff.userId,
+          teamWorkspaceId,
+        })?.memberSlots
+      : undefined;
     const packages = buildDispatchPackages({
       tasks,
       artifactRefs: {
@@ -211,6 +232,7 @@ export function createPm2Runner(): HandoffTaskRunner {
         tasksId: tasksArtifactId,
       },
       context,
+      ...(assignedMemberRoster ? { assignedMemberRoster } : {}),
     });
 
     // 6. D46 动态编制：确保 executor 并行数 ≥ MIN_EXECUTOR_PARALLEL

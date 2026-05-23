@@ -12,6 +12,11 @@
 import type { HandoffTaskRunner } from './watcher.js';
 import { runArtifactChain } from './artifact-chain.js';
 import { resolveAuxiliaryLlmConfig } from '../../provider/auxiliary-llm-config.js';
+import {
+  buildTaskProfilePromptFragment,
+  inferTaskProfile,
+  taskProfileSchema,
+} from '../capability/dispatch-package.js';
 
 /**
  * 创建一个 task runner，根据 toRoleLayer 分发。
@@ -54,6 +59,10 @@ async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promi
   const taskTitle = typeof payload?.['title'] === 'string' ? payload['title'] : '未命名任务';
   const taskContext = typeof payload?.['context'] === 'string' ? payload['context'] : '';
   const role = input.handoff.toRoleLayer; // 'executor' | 'reviewer'
+  const parsedProfile = taskProfileSchema.safeParse(payload?.['taskProfile']);
+  const taskProfile = parsedProfile.success
+    ? parsedProfile.data
+    : inferTaskProfile({ title: taskTitle, context: taskContext });
 
   const { setSubstate } = await import('../store/substate-store.js');
   const { runSessionInBackground } = await import('../../routes/stream-runtime.js');
@@ -77,12 +86,13 @@ async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promi
 
   const userMessage = [
     roleInstruction,
+    buildTaskProfilePromptFragment(taskProfile),
     '',
     `**任务**：${taskTitle}`,
     taskContext ? `\n**上下文**：\n${taskContext}` : '',
   ]
     .filter(Boolean)
-    .join('\n');
+    .join('\n\n');
 
   // 调用完整 stream 管线（和 chat 一样的协议）
   // 这会：
