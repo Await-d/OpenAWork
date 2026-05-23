@@ -42,28 +42,13 @@ export class DirectoryAgentsInjectorImpl implements DirectoryAgentsInjector {
   }
 
   async collectAllAgentsFiles(filePath: string, stopAt?: string): Promise<AgentsContextEntry[]> {
-    let currentDir = path.dirname(path.resolve(filePath));
-    const stopDir = stopAt ? path.resolve(stopAt) : path.parse(currentDir).root;
-    let depth = 0;
     const entries: AgentsContextEntry[] = [];
+    const startDir = await this.resolveStartDirectory(filePath);
+    const stopDir = stopAt ? path.resolve(stopAt) : startDir;
 
-    while (true) {
-      for (const fileName of this.agentsFileNames) {
-        const candidate = path.join(currentDir, fileName);
-        if (await this.fileExists(candidate)) {
-          const content = await fs.readFile(candidate, 'utf8');
-          entries.push({ filePath: candidate, content, depth });
-        }
-      }
+    await this.collectDescendantAgentsFiles(startDir, stopDir, 0, entries);
 
-      if (currentDir === stopDir) break;
-      const parent = path.dirname(currentDir);
-      if (parent === currentDir) break;
-      currentDir = parent;
-      depth += 1;
-    }
-
-    return entries.sort((a, b) => a.depth - b.depth);
+    return entries.sort((a, b) => a.depth - b.depth || a.filePath.localeCompare(b.filePath));
   }
 
   buildInjectionBlock(entries: AgentsContextEntry[]): string {
@@ -80,5 +65,56 @@ export class DirectoryAgentsInjectorImpl implements DirectoryAgentsInjector {
     } catch {
       return false;
     }
+  }
+
+  private async resolveStartDirectory(filePath: string): Promise<string> {
+    const resolved = path.resolve(filePath);
+    try {
+      const stat = await fs.stat(resolved);
+      return stat.isDirectory() ? resolved : path.dirname(resolved);
+    } catch {
+      return path.dirname(resolved);
+    }
+  }
+
+  private async collectDescendantAgentsFiles(
+    currentDir: string,
+    stopDir: string,
+    depth: number,
+    entries: AgentsContextEntry[],
+  ): Promise<void> {
+    if (!this.isWithinBoundary(currentDir, stopDir)) {
+      return;
+    }
+
+    for (const fileName of this.agentsFileNames) {
+      const candidate = path.join(currentDir, fileName);
+      if (await this.fileExists(candidate)) {
+        const content = await fs.readFile(candidate, 'utf8');
+        entries.push({ filePath: candidate, content, depth });
+      }
+    }
+
+    let children: string[] = [];
+    try {
+      children = await fs
+        .readdir(currentDir, { withFileTypes: true })
+        .then((dirents) =>
+          dirents
+            .filter((dirent) => dirent.isDirectory())
+            .map((dirent) => path.join(currentDir, dirent.name)),
+        );
+    } catch {
+      return;
+    }
+
+    for (const childDir of children) {
+      await this.collectDescendantAgentsFiles(childDir, stopDir, depth + 1, entries);
+    }
+  }
+
+  private isWithinBoundary(candidatePath: string, stopDir: string): boolean {
+    const relative = path.relative(stopDir, candidatePath);
+    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
   }
 }
