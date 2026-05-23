@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CompanionVoiceOutputMode, CompanionVoiceVariant } from '@openAwork/shared';
 import {
   deriveCompanionOutputPolicy,
@@ -83,6 +83,24 @@ export function useBuddyVoiceOutput({
   const isVoiceOutputAvailable = useMemo(() => canUseSpeechSynthesis(), []);
   const lastSpokenIdRef = useRef<string | null>(null);
   const lastSpokenAtByKeyRef = useRef<Map<string, number>>(new Map());
+  // 跟踪是否存在一个真正调用过 speak()、且尚未触发 onend/onerror 的 utterance。
+  // Chromium 内部 speechSynthesis 借助 AudioContext 渲染 TTS，无差别调用
+  // cancel() 会在没有用户手势的情况下反复触发 "AudioContext was not allowed
+  // to start" 警告——流式对话每来一个 chunk 都会让 effect 重跑一次，几分钟
+  // 就能攒出几千条。这里只在确实有待打断的播报时才真正调 cancel()。
+  const hasPendingUtteranceRef = useRef(false);
+
+  const cancelPendingUtterance = useCallback(() => {
+    if (!hasPendingUtteranceRef.current) {
+      return;
+    }
+    hasPendingUtteranceRef.current = false;
+    try {
+      globalThis.window.speechSynthesis.cancel();
+    } catch {
+      // 浏览器在异常环境（如 webview 卸载途中）可能抛错，忽略即可。
+    }
+  }, []);
 
   useEffect(() => {
     if (!enabled) {
@@ -104,7 +122,7 @@ export function useBuddyVoiceOutput({
       voiceInputVisible ||
       voiceOutputMode === 'off'
     ) {
-      globalThis.window.speechSynthesis.cancel();
+      cancelPendingUtterance();
       setIsSpeaking(false);
       return;
     }
@@ -142,18 +160,29 @@ export function useBuddyVoiceOutput({
     utterance.pitch = tuning.pitch;
     utterance.volume = tuning.volume;
     utterance.onstart = () => setIsSpeaking(true);
-    utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = () => setIsSpeaking(false);
+    utterance.onend = () => {
+      hasPendingUtteranceRef.current = false;
+      setIsSpeaking(false);
+    };
+    utterance.onerror = () => {
+      hasPendingUtteranceRef.current = false;
+      setIsSpeaking(false);
+    };
 
     try {
-      globalThis.window.speechSynthesis.cancel();
+      // 仅当上一条 utterance 还没结束时才打断，避免对空闲的
+      // speechSynthesis 反复触发 AudioContext 唤起。
+      cancelPendingUtterance();
       globalThis.window.speechSynthesis.speak(utterance);
+      hasPendingUtteranceRef.current = true;
       lastSpokenIdRef.current = liveOutputId;
       lastSpokenAtByKeyRef.current.set(nextCooldownKey, now);
     } catch {
+      hasPendingUtteranceRef.current = false;
       setIsSpeaking(false);
     }
   }, [
+    cancelPendingUtterance,
     enabled,
     featureEnabled,
     featureReady,
@@ -175,9 +204,9 @@ export function useBuddyVoiceOutput({
     }
 
     return () => {
-      globalThis.window.speechSynthesis.cancel();
+      cancelPendingUtterance();
     };
-  }, [isVoiceOutputAvailable]);
+  }, [cancelPendingUtterance, isVoiceOutputAvailable]);
 
   if (!isVoiceOutputAvailable) {
     return {
