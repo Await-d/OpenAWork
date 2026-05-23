@@ -109,7 +109,12 @@ export function TeamConversationView({
   });
 
   // Workspace catalog for @mention support — only fetched when composer is on.
-  const composerWorkspaceCatalog = useComposerWorkspaceCatalog(composerEnabled);
+  const composerWorkspaceCatalog = useComposerWorkspaceCatalog({
+    enabled: composerEnabled,
+    gatewayUrl,
+    sessionId,
+    token,
+  });
 
   // Multi-select state（共享 atom）。
   const multiSelect = useMessageMultiSelect();

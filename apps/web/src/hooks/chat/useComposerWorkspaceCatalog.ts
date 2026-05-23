@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { useAuthStore } from '../../stores/auth/auth.js';
 import { createCapabilitiesClient } from '@openAwork/web-client';
 import type {
   ComposerAgentTool,
@@ -21,13 +20,17 @@ const EMPTY_CATALOG: ComposerWorkspaceCatalog = {
   mcpServers: [],
 };
 
-export function useComposerWorkspaceCatalog(enabled: boolean): ComposerWorkspaceCatalog {
-  const accessToken = useAuthStore((state) => state.accessToken);
-  const gatewayUrl = useAuthStore((state) => state.gatewayUrl);
+export function useComposerWorkspaceCatalog(input: {
+  enabled: boolean;
+  gatewayUrl: string;
+  sessionId: string | null;
+  token: string | null;
+}): ComposerWorkspaceCatalog {
+  const { enabled, gatewayUrl, sessionId, token } = input;
   const [catalog, setCatalog] = useState<ComposerWorkspaceCatalog>(EMPTY_CATALOG);
 
   useEffect(() => {
-    if (!enabled || !accessToken) {
+    if (!enabled || !token) {
       setCatalog(EMPTY_CATALOG);
       return;
     }
@@ -35,7 +38,7 @@ export function useComposerWorkspaceCatalog(enabled: boolean): ComposerWorkspace
     let cancelled = false;
 
     void createCapabilitiesClient(gatewayUrl)
-      .list(accessToken)
+      .list(token, sessionId)
       .then((capabilities) => {
         if (cancelled) return;
 
@@ -101,7 +104,7 @@ export function useComposerWorkspaceCatalog(enabled: boolean): ComposerWorkspace
     return () => {
       cancelled = true;
     };
-  }, [accessToken, enabled, gatewayUrl]);
+  }, [enabled, gatewayUrl, sessionId, token]);
 
   return catalog;
 }

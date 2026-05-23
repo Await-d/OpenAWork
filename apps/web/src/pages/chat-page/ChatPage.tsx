@@ -597,7 +597,12 @@ export default function ChatPage() {
       ) ?? null,
     [availableImageEditReferenceArtifacts, selectedImageEditReferenceArtifactId],
   );
-  const composerWorkspaceCatalog = useComposerWorkspaceCatalog(Boolean(token));
+  const composerWorkspaceCatalog = useComposerWorkspaceCatalog({
+    enabled: Boolean(token),
+    gatewayUrl,
+    sessionId: currentSessionId,
+    token,
+  });
   const TAB_CYCLE_ALLOWED_AGENT_IDS = new Set(['hephaestus', 'sisyphus', 'prometheus']);
   const agentOptions = useMemo(
     () =>
