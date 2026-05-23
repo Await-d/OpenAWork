@@ -13,7 +13,11 @@ src/
 ├── index.css           # 全局 CSS 变量（--bg 等），主题（dark/light 通过 .light 类切换）
 ├── pages/              # 每个路由一个文件
 │   ├── LoginPage.tsx
-│   ├── ChatPage.tsx        # /chat、/chat/:sessionId
+│   ├── chat-page/
+│   │   ├── ChatPage.tsx    # /chat、/chat/:sessionId
+│   │   ├── hooks/          # ChatPage 域 hook（session / pending / retry / stop 等）
+│   │   ├── conversation/   # 流式渲染、composer、snapshot、render helper
+│   │   └── panels/         # 右栏、编辑器、子 Agent 等面板
 │   ├── SessionsPage.tsx
 │   ├── ArtifactsPage.tsx
 │   ├── SettingsPage.tsx
@@ -39,14 +43,20 @@ src/
 
 ## 查找指引
 
-| 任务                  | 位置                                    |
-| --------------------- | --------------------------------------- |
-| 新增页面/路由         | `src/pages/` + 在 `src/App.tsx` 注册    |
-| 认证 Token / 登录状态 | `src/stores/auth.ts`（Zustand persist） |
-| 全局布局/导航         | `src/components/Layout.tsx`             |
-| 网关 WS/SSE 客户端    | `src/hooks/useGatewayClient.ts`         |
-| 主题（深色/浅色）     | `App.tsx` + `src/index.css` CSS 变量    |
-| 共享 UI 组件          | `@openAwork/shared-ui`（非本地）        |
+| 任务                         | 位置                                                                                                                   |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| 新增页面/路由                | `src/pages/` + 在 `src/App.tsx` 注册                                                                                   |
+| ChatPage 主组装层            | `src/pages/chat-page/ChatPage.tsx`                                                                                     |
+| ChatPage 流式状态域          | `src/pages/chat-page/conversation/render/use-chat-streaming.ts`                                                        |
+| ChatPage 会话分支/重试       | `src/pages/chat-page/hooks/use-chat-branch-session.ts`、`use-chat-retry-and-edit.ts`                                   |
+| ChatPage 停止流 / 待处理交互 | `src/pages/chat-page/hooks/use-chat-stop-active-message.ts`、`conversation/render/handle-pending-interaction-event.ts` |
+| ChatPage composer helper     | `src/pages/chat-page/conversation/composer/`                                                                           |
+| ChatPage render helper       | `src/pages/chat-page/conversation/render/`                                                                             |
+| 认证 Token / 登录状态        | `src/stores/auth.ts`（Zustand persist）                                                                                |
+| 全局布局/导航                | `src/components/Layout.tsx`                                                                                            |
+| 网关 WS/SSE 客户端           | `src/hooks/useGatewayClient.ts`                                                                                        |
+| 主题（深色/浅色）            | `App.tsx` + `src/index.css` CSS 变量                                                                                   |
+| 共享 UI 组件                 | `@openAwork/shared-ui`（非本地）                                                                                       |
 
 ## 架构说明
 
@@ -97,6 +107,7 @@ pnpm --filter @openAwork/web build      # 生产构建 → dist/
 [ ] 是否有可提取为独立组件的渲染块（>80 行 或 >3 层嵌套）？
 [ ] 是否有在其他页面已存在的相似 UI 逻辑？→ 合并为共享组件
 [ ] 拆出的 hook/util 是否有对应单元测试？
+[ ] 若为大型页面（如 ChatPage），是否优先按自治状态域拆成 `hooks/` + `conversation/*` helper，而不是继续向主页面堆逻辑？
 
 ### 反模式（禁止）
 
@@ -128,6 +139,39 @@ pnpm --filter @openAwork/web build      # 生产构建 → dist/
 - 禁止复制粘贴通用 AI 生成的平庸布局——每个页面需结合实际场景做针对性设计。
 - 禁止忽略移动端适配——所有 Web 页面默认需响应式支持（最低 375px 宽度）。
 - UI 改动提交前必须经过视觉自查：对齐、间距、色彩对比度（WCAG AA 标准）。
+
+## React 19 适配约定
+
+> 项目运行在 `react@^19` + `babel-plugin-react-compiler@^1`（已在 `vite.config.ts` 启用，target=19）。
+> 新代码必须遵循下列约束；存量代码可渐进式跟进，但不得新增反模式。
+
+### 推荐写法
+
+- **表单异步提交**：`<form action={fn}>` + `useActionState`。**同一组件**内直接用 `useActionState` 返回的第三个值（`isPending`）；**跨组件 / 设计系统按钮**才需要 `useFormStatus()` 读 pending 避免 prop drilling。参考实现：
+  - `src/pages/misc/LoginPage.tsx` — 单组件 form
+  - `src/components/onboarding/OnboardingModal.tsx`（`BrowserOnboardingLoginForm`）— 抽出独立子组件，让 step 切走时 `useActionState` 随 unmount 自动重置，避免旧 error 残留
+  - `src/pages/team/runtime/tabs/tasks/ClarificationsPanel.tsx`（`PendingCard`）— 同一组件场景，直接用 `isPending` + 受控 `draft` 实现按钮 visual disabled
+- **Context Provider**：直接 `<FooContext value={...}>`，不要再写 `<FooContext.Provider value={...}>`。
+- **Ref 转发**：函数组件直接把 `ref` 当 prop 接收，**不要**再写 `forwardRef`。
+- **乐观更新**：用 `useOptimistic` 替代手写 "先渲染目标态、错误回滚" 模式。
+- **数据获取**：如果是一次性 Promise（模块级或 cache 层创建），优先 `use(promise)` + 父级 `<Suspense>`，不要在 `useEffect` 内 fetch + 手写 `setLoading` / `setError`。
+
+### 反模式（禁止）
+
+- ❌ `<FooContext.Provider>` —— 用 `<FooContext>`。**例外**：`react-router` 的 `UNSAFE_LocationContext.Provider` / `UNSAFE_RouteContext.Provider` 是库内部对象，必须保留 `.Provider` 写法。
+- ❌ `forwardRef` 包装函数组件。
+- ❌ `useFormState`（已弃用）—— 用 `useActionState`（从 `react` 导入，不是 `react-dom`）。
+- ❌ `<form onSubmit={async (e) => { e.preventDefault(); setLoading(true); ... }}>` 三件套 —— 用 `<form action>` + `useActionState`。
+- ❌ 手写大量 `useMemo` / `useCallback` / `React.memo` —— React Compiler 已自动处理；新代码默认不写，确实需要才补（少数热点 / 大列表稳定引用）。
+- ❌ 启用 React Compiler 后直接 mutate state / props（`array.push(...)` / `obj.foo = ...`）—— 编译器以不可变性为前提推断依赖，必须返回新对象 / 新数组。
+- ❌ 给 `use()` 传**在 render 中创建的 Promise** —— 会触发无限 Suspense 循环。Promise 必须来自模块级、缓存层或框架 loader。
+- ❌ 把 `useActionState` 的 dispatch 从非 form 事件（如 `onClick`）触发 —— 会失去 FormData 语义和表单重置行为。
+
+### 渐进迁移待办（参考）
+
+- 仍有 ~1100 处 `useMemo` / `useCallback` / `memo` 历史调用，**不要主动批量删除**；后续在改动文件时若编译器已接管，可顺手清理。
+- 仍有 ~160 处手写 `isLoading` / `isPending` / `setLoading` 模式，遇到时优先评估是否能迁 `useActionState` / `useTransition`。
+- 数据获取场景目前仍以 `useEffect + useState` 为主，迁 `use() + <Suspense>` 需要先建立 promise 缓存层（如 React Query 或自定义 cache utility），不要在 render 内裸 `fetch()`。
 
 ## 禁止事项
 

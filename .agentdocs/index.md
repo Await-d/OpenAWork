@@ -1,6 +1,7 @@
 # .agentdocs 索引
 
 ## Active Workflows
+- [260523-chat-page-split-b-e](workflow/260523-chat-page-split-b-e.md) — ChatPage 域 B 流式收尾 + 域 E 状态/测试/文档同步
 - [260516-team-page-重构调整方案](workflow/260516-team-page-重构调整方案.md) — TeamPage 重构：从"左侧 Sidebar + Tab 工作台"改为"对话中心 + 右侧可收起面板 + 顶部固定状态栏"；15 项任务 / 5 Wave / feature flag 保护
 - [260509-skill-workspace-selection-spec](workflow/260509-skill-workspace-selection-spec.md) — 让用户在 chat 工作区维度可控地选择启用哪些 skill（workspace 默认 + session 覆盖），支持 AI 一键根据项目特征推荐勾选集；BUILTIN 始终可用、不参与过滤；pinned 仅首轮注入 system prompt
 - [260507-web-图片生成工作台实施](workflow/260507-web-图片生成工作台实施.md) — 为 Web 左侧新增专用图片工作台入口，收口独立页面下的文生图、图片编辑、结果历史与产物联动能力
@@ -20,6 +21,9 @@
 - [260416-team-创建实施方案](workflow/260416-team-创建实施方案.md) — Team 会话创建向导、DTO/API、template metadata 与测试落地计划
 
 ## Done Workflows
+- [260522-team-fixed-roster-specialists](workflow/done/260522-team-fixed-roster-specialists.md) — ✅ 已完成 2026-05-22：默认固定团队升级为全层级可见成员槽位，含 DevOps/SRE/Platform/Security/Release/Observability，并写入 session teamDefinition 快照
+- [260522-team-explicit-task-profile-markers](workflow/done/260522-team-explicit-task-profile-markers.md) — ✅ 已完成 2026-05-22：PM1 tasks.md 显式输出 `[KIND] [SURFACE]` 画像标记，PM2 解析优先使用显式标记并保留 fallback 推断
+- [260522-team-task-classification-taxonomy](workflow/done/260522-team-task-classification-taxonomy.md) — ✅ 已完成 2026-05-22：Team / dispatch 链路引入任务画像 `kind + surface`，executor / reviewer prompt 可按任务类型与领域注入更具体的提示词
 - [260516-team-phase-e-实施方案](workflow/done/260516-team-phase-e-实施方案.md) — ✅ 已完成 2026-05-16：Workflow 模板栈 + Role Adapter 矩阵 + 5 个内置 workflow 包 + 模板编辑器 + 模板驱动 handoff；12 项任务全部完成
 - [260516-team-phase-d-实施方案](workflow/done/260516-team-phase-d-实施方案.md) — ✅ 已完成 2026-05-16：d 层结构化派发 + dispatch_package + 双重 review + D29 B3 失败分流 + toolset 门控 + 动态编制 + pm2-runner 生产接入；11 项任务全部完成
 - [260515-team-phase-c-实施方案](workflow/done/260515-team-phase-c-实施方案.md) — ✅ 已完成 2026-05-16：c 层产物链（spec/plan/tasks）+ Constitution Check + [NEEDS CLARIFICATION] 推送 + 产物查看器 + 标记高亮 + 三步向导 UI + pm1-runner 运行时接入；10 项任务全部完成 + 3 项补完全部完成
@@ -63,6 +67,9 @@
 - [260415-team-page-收口方案](workflow/done/260415-team-page-收口方案.md) — Team 页面收口、契约稳定化、shell adapter 与验收闭环
 
 ## Architecture Decisions
+- [2026-05-23] ChatPage 流式域采用“状态容器 hook + 页面内 attach/recovery 协调层”分离；`useChatStreaming` 只承接流式 state/refs/reset/reveal，跨域 attach/recovery effect 继续留在 `ChatPage.tsx`，避免形成第二套流式真相源。
+- [2026-05-22] Team workspace 默认固定团队最终采用 `team_workspaces.default_team_roster_json` 持久化；新 session 默认快照使用 workspace roster，PM2 派发通过 `resolveAssignedMember()` 按 `taskProfile + roster` 选择具体 `assignedMember`。
+- [2026-05-22] Team 默认固定团队采用 visible member slots / specialist personas，而不是新增 `roleLayer`；DevOps/Platform 归 executor，Release 归 pm2，Security/SRE/Observability/Quality 归 reviewer，并在 session `teamDefinition.version=2` 中保存不可变快照。
 - [2026-04-23] GPT Image 2 的最小产品闭环固定为“专用图片模型档 + 专用图片生成 route + 正常聊天流 `input_image` 扩展”，而不是复用 `activeSelection.chat` 或把文生图硬塞进文本主链。
 - [2026-04-23] 移动端的真实入口以 Expo Router `app/*` 为准；若共享实现放在 `src/screens/*`，必须由 `app/*` 明确委托，不能只修改未接入的 screen 文件。
 - [2026-04-20] `assistant_trace` 协议 helper 的最小治理固定为“shared 持有协议、web 保留接线”：`packages/shared/src/assistant-trace.ts` 负责类型、codec 与 parts transform，`apps/web/src/pages/chat-page/support.ts` 只保留 parse 依赖适配与业务接线，不再定义协议本体。
@@ -86,6 +93,7 @@
 - 若 gateway 需要同时支持 `chat_completions` 与 `responses`，优先先产出协议无关 IR，再由末端 renderer 负责最终 body；不要在 `stream-model-round.ts` 或任意 provider-specific helper 里重新拼一套语义。
 
 ## Known Pitfalls
+- `ChatPage` 的流式状态如果同时存在于页面本体和 `useChatStreaming`，会立刻引发重复声明与状态分叉；迁移时必须先统一单一真相源，再改调用点。
 - 移动端若继续同时保留 Expo Router `app/*` 与 `src/screens/*` 两套实现，后续功能很容易再次只改到未接入路径；改动前先确认真实入口。
 - WebSocket 鉴权若继续把 bearer token 放进 query string，会泄露给代理日志和调试链路；移动端现已改为 Authorization header，其他客户端也应避免回退。
 - `pendingPermissionRequestId` 的 paused 识别依赖 `isError !== true`；如果 gateway 在 fallback `tool_result` 里把“等待审批”继续标成 error，前端会把它当 failed 而不是 paused。

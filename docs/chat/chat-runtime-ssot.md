@@ -12,7 +12,7 @@ This document freezes the runtime source-of-truth for OpenAWork chat capabilitie
   - `packages/web-client/src/permissions.ts`
 - **Web read/write surfaces**:
   - `apps/web/src/components/Layout.tsx` for floating approval prompt
-  - `apps/web/src/pages/ChatPage.tsx` for session-scoped runtime sections in the right panel
+- `apps/web/src/pages/chat-page/ChatPage.tsx` for session-scoped runtime sections in the right panel
 
 Rules:
 
@@ -31,7 +31,7 @@ Gateway and Web surfaces:
 - `services/agent-gateway/src/routes/sessions.ts`
 - `services/agent-gateway/src/routes/commands.ts`
 - `services/agent-gateway/src/routes/command-loop-runtime.ts`
-- `apps/web/src/pages/ChatPage.tsx`
+- `apps/web/src/pages/chat-page/ChatPage.tsx`
 
 Rules:
 
