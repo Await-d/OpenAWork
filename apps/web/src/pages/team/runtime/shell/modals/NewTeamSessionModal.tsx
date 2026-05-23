@@ -37,6 +37,7 @@ interface NewTeamSessionModalProps {
   onSubmitDraft: (draft: TeamSessionCreationDraft) => void | Promise<void>;
   workspaceLabel: string;
   teamWorkspaceId: string;
+  defaultMemberSlots?: TeamSessionCreationDraft['memberSlots'];
 }
 
 interface StepDescriptor {
@@ -712,10 +713,14 @@ export function NewTeamSessionModal({
   onSubmitDraft,
   workspaceLabel,
   teamWorkspaceId,
+  defaultMemberSlots,
 }: NewTeamSessionModalProps) {
   const { templateLoading, templates } = useTeamRuntimeReferenceViewData();
   const roleBindings = useTeamRuntimeRoleBindings();
-  const creation = useTeamSessionCreation({ teamWorkspaceId });
+  const creation = useTeamSessionCreation({
+    defaultMemberSlots,
+    teamWorkspaceId,
+  });
   const [submitting, setSubmitting] = useState(false);
 
   // 来源 tab：根据当前 source 推断（workflow 已移除，仅保留 blank / template）

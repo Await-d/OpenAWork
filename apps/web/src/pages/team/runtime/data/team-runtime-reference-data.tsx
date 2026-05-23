@@ -474,9 +474,7 @@ export function TeamRuntimeReferenceDataProvider({
   value: TeamRuntimeReferenceViewData;
 }) {
   return (
-    <TeamRuntimeReferenceDataContext.Provider value={value}>
-      {children}
-    </TeamRuntimeReferenceDataContext.Provider>
+    <TeamRuntimeReferenceDataContext value={value}>{children}</TeamRuntimeReferenceDataContext>
   );
 }
 
@@ -574,6 +572,7 @@ export function useResolvedTeamRuntimeReferenceData(
       const payload: CreateTeamSessionInput = {
         ...(draft.title.trim() ? { title: draft.title.trim() } : {}),
         source: { kind: draft.source.kind },
+        memberSlots: draft.memberSlots,
         optionalAgentIds: draft.optionalAgentIds,
         defaultProvider: draft.defaultProvider,
       };

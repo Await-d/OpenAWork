@@ -1,6 +1,7 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { WorkflowTemplateRecord } from '@openAwork/web-client';
 import { FIXED_TEAM_CORE_ROLE_BINDINGS } from '@openAwork/shared';
+import type { FixedTeamMemberSlot } from '@openAwork/shared';
 import {
   createBlankTeamSessionDraft,
   type TeamSessionCreationDraft,
@@ -10,6 +11,7 @@ import {
 } from '../data/team-session-creation.types.js';
 
 interface UseTeamSessionCreationOptions {
+  defaultMemberSlots?: FixedTeamMemberSlot[];
   teamWorkspaceId: string;
 }
 
@@ -46,9 +48,23 @@ function hasBlockingErrors(
 
 export function useTeamSessionCreation(options: UseTeamSessionCreationOptions) {
   const [draft, setDraft] = useState<TeamSessionCreationDraft>(() =>
-    createBlankTeamSessionDraft(options.teamWorkspaceId),
+    createBlankTeamSessionDraft(options.teamWorkspaceId, options.defaultMemberSlots),
   );
   const [step, setStep] = useState<TeamSessionCreationStep>('source');
+
+  useEffect(() => {
+    const slots = options.defaultMemberSlots ?? [];
+    setDraft((current) => ({
+      ...current,
+      memberSlots:
+        slots.length > 0
+          ? slots.map((slot) => ({
+              ...slot,
+              toolsets: [...slot.toolsets],
+            }))
+          : [],
+    }));
+  }, [options.defaultMemberSlots]);
 
   const fieldErrors = useMemo(() => buildFieldErrors(draft), [draft]);
   const currentStepIndex = STEP_ORDER.indexOf(step);
@@ -113,6 +129,7 @@ export function useTeamSessionCreation(options: UseTeamSessionCreationOptions) {
     setDraft((current) => ({
       ...current,
       defaultProvider: teamTemplate?.defaultProvider ?? current.defaultProvider,
+      memberSlots: current.memberSlots,
       optionalAgentIds: [...(teamTemplate?.optionalAgentIds ?? [])],
       requiredRoleBindings,
       source: nextSource,
@@ -150,9 +167,9 @@ export function useTeamSessionCreation(options: UseTeamSessionCreationOptions) {
   }, []);
 
   const reset = useCallback(() => {
-    setDraft(createBlankTeamSessionDraft(options.teamWorkspaceId));
+    setDraft(createBlankTeamSessionDraft(options.teamWorkspaceId, options.defaultMemberSlots));
     setStep('source');
-  }, [options.teamWorkspaceId]);
+  }, [options.defaultMemberSlots, options.teamWorkspaceId]);
 
   return {
     canAdvance,

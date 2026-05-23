@@ -17,7 +17,7 @@
  *     这里只渲染 UI，由父组件决定是否拦截
  */
 
-import { useMemo, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
+import { useActionState, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import {
   useClarificationStore,
   type ClarificationItem,
@@ -249,23 +249,21 @@ function PendingCard({
   onSubmit: (answer: string) => Promise<void> | void;
   onDismiss: () => void;
 }) {
+  // React 19 Actions：FormData 承载提交数据，同时保留受控 draft 仅用于按钮
+  // disabled 的 visual feedback（与项目其他禁用按钮 UX 保持一致）。
+  // pending 状态直接取 useActionState 第三个返回值，在同一组件内使用无需 useFormStatus。
   const [draft, setDraft] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [, submitAnswer, isPending] = useActionState<string, FormData>(async (_prev, formData) => {
+    const trimmed = String(formData.get('answer') ?? '').trim();
+    if (!trimmed) return '';
+    await onSubmit(trimmed);
+    return '';
+  }, '');
 
-  const handle = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const trimmed = draft.trim();
-    if (!trimmed || busy) return;
-    setBusy(true);
-    try {
-      await onSubmit(trimmed);
-    } finally {
-      setBusy(false);
-    }
-  };
+  const canSubmit = !isPending && draft.trim().length > 0;
 
   return (
-    <form style={CARD_STYLE} onSubmit={handle}>
+    <form style={CARD_STYLE} action={submitAnswer}>
       <span style={QUESTION_STYLE}>
         <span aria-hidden style={{ marginRight: 6 }}>
           ❓
@@ -274,28 +272,30 @@ function PendingCard({
       </span>
       {item.context ? <pre style={CONTEXT_STYLE}>{item.context}</pre> : null}
       <textarea
+        name="answer"
         value={draft}
         onChange={(event) => setDraft(event.target.value)}
         placeholder="请输入你的回答（提交后 PM1 会在下一轮规划时使用）..."
         style={TEXTAREA_STYLE}
-        disabled={busy}
+        disabled={isPending}
+        required
       />
       <div style={ACTIONS_ROW_STYLE}>
         <button
           type="submit"
-          disabled={busy || !draft.trim()}
+          disabled={!canSubmit}
           style={{
             ...PRIMARY_BTN_STYLE,
-            opacity: busy || !draft.trim() ? 0.5 : 1,
-            cursor: busy || !draft.trim() ? 'not-allowed' : 'pointer',
+            opacity: canSubmit ? 1 : 0.5,
+            cursor: canSubmit ? 'pointer' : 'not-allowed',
           }}
         >
-          {busy ? '提交中…' : '提交回答'}
+          {isPending ? '提交中…' : '提交回答'}
         </button>
         <button
           type="button"
           onClick={onDismiss}
-          disabled={busy}
+          disabled={isPending}
           style={SECONDARY_BTN_STYLE}
           title="标记为不再询问（不会发送给 PM1）"
         >

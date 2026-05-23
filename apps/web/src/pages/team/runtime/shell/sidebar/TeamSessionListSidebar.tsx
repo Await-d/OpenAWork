@@ -325,6 +325,7 @@ export interface TeamSessionListSidebarProps {
   onSelectTeam: (teamId: string) => void;
   workspaceLabel?: string;
   teamWorkspaceId?: string;
+  defaultMemberSlots?: TeamSessionCreationDraft['memberSlots'];
   onSubmitDraft?: (draft: TeamSessionCreationDraft) => void | Promise<void>;
   onDeleteSession?: (sessionId: string) => void;
   selectedWorkspacePath?: string | null;
@@ -370,6 +371,7 @@ export function TeamSessionListSidebar({
   onSelectTeam,
   workspaceLabel,
   teamWorkspaceId,
+  defaultMemberSlots,
   onSubmitDraft,
   onDeleteSession,
   selectedWorkspacePath,
@@ -1060,6 +1062,7 @@ export function TeamSessionListSidebar({
           onSubmitDraft={onSubmitDraft}
           workspaceLabel={workspaceLabel ?? '默认工作区'}
           teamWorkspaceId={teamWorkspaceId}
+          defaultMemberSlots={defaultMemberSlots}
         />
       ) : null}
     </aside>

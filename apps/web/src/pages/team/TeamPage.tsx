@@ -36,6 +36,7 @@ import type { TeamSessionCreationDraft } from './runtime/data/team-session-creat
 
 function TeamPageLayout({
   activeWorkspaceId,
+  activeWorkspaceDefaultMemberSlots,
   activeWorkspaceName,
   onRefreshSnapshot,
   onRefreshWorkspaces,
@@ -44,6 +45,7 @@ function TeamPageLayout({
   setSelectedTeamId,
 }: {
   activeWorkspaceId: string | null;
+  activeWorkspaceDefaultMemberSlots?: TeamSessionCreationDraft['memberSlots'];
   activeWorkspaceName: string;
   onRefreshSnapshot: () => void;
   onRefreshWorkspaces: () => void;
@@ -385,6 +387,7 @@ function TeamPageLayout({
           onSubmitDraft={handleSubmitDraft}
           teamWorkspaceId={activeWorkspaceId}
           workspaceLabel={activeWorkspaceName}
+          defaultMemberSlots={activeWorkspaceDefaultMemberSlots}
         />
       )}
       <LayerConversationDrawer visible={showLayerDrawer} />
@@ -448,6 +451,7 @@ export default function TeamPage() {
     <TeamRuntimeReferenceDataProvider value={data}>
       <TeamPageLayout
         activeWorkspaceId={workspaceState.activeWorkspace?.id ?? null}
+        activeWorkspaceDefaultMemberSlots={workspaceState.activeWorkspace?.defaultTeamRoster}
         activeWorkspaceName={workspaceState.activeWorkspace?.name ?? '当前工作区'}
         onRefreshSnapshot={workspaceSnapshotState.refresh}
         onRefreshWorkspaces={workspaceState.refresh}

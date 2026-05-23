@@ -1,4 +1,5 @@
-import { FIXED_TEAM_CORE_ROLE_BINDINGS } from '@openAwork/shared';
+import { DEFAULT_FIXED_TEAM_MEMBER_SLOTS, FIXED_TEAM_CORE_ROLE_BINDINGS } from '@openAwork/shared';
+import type { FixedTeamMemberSlot } from '@openAwork/shared';
 
 export type TeamSourceKind = 'blank' | 'saved-template';
 
@@ -25,6 +26,7 @@ export interface TeamSessionCreationSource {
 
 export interface TeamSessionCreationDraft {
   defaultProvider: string | null;
+  memberSlots: FixedTeamMemberSlot[];
   optionalAgentIds: string[];
   requiredRoleBindings: Partial<Record<RequiredCoreRole, string>>;
   source: TeamSessionCreationSource;
@@ -37,9 +39,13 @@ export interface TeamSessionCreationFieldErrors {
   title?: string | null;
 }
 
-export function createBlankTeamSessionDraft(teamWorkspaceId: string): TeamSessionCreationDraft {
+export function createBlankTeamSessionDraft(
+  teamWorkspaceId: string,
+  memberSlots: FixedTeamMemberSlot[] = DEFAULT_FIXED_TEAM_MEMBER_SLOTS,
+): TeamSessionCreationDraft {
   return {
     defaultProvider: null,
+    memberSlots: memberSlots.map((slot) => ({ ...slot, toolsets: [...slot.toolsets] })),
     optionalAgentIds: [],
     requiredRoleBindings: { ...FIXED_TEAM_CORE_ROLE_BINDINGS },
     source: { kind: 'blank' },

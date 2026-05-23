@@ -19,6 +19,8 @@
  */
 
 import type { CSSProperties } from 'react';
+import { TEAM_RUNTIME_LAYER_LABELS, TEAM_RUNTIME_LAYER_ORDER } from '@openAwork/shared';
+import type { TeamRuntimeLayer } from '@openAwork/shared';
 
 export interface TeamSessionEmptyStateProps {
   /** session 的 role_layer（来自 sessions 表）。null 时显示通用文案。 */
@@ -48,6 +50,14 @@ interface ParsedTeamDefinition {
   requiredRoleBindings: Array<{
     role: string;
     agentLabel: string;
+  }>;
+  memberSlots: Array<{
+    id: string;
+    layer: TeamRuntimeLayer;
+    specialty: string;
+    displayName: string;
+    agentLabel: string | null;
+    required: boolean;
   }>;
   optionalMembers: Array<{
     agentLabel: string;
@@ -105,6 +115,37 @@ function parseTeamDefinition(
     })
     .filter((x): x is { role: string; agentLabel: string } => x !== null);
 
+  const memberSlotsRaw = Array.isArray(teamDef['memberSlots'])
+    ? (teamDef['memberSlots'] as unknown[])
+    : [];
+  const memberSlots = memberSlotsRaw
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null;
+      const rec = entry as Record<string, unknown>;
+      const layer = typeof rec['layer'] === 'string' ? rec['layer'] : null;
+      if (!layer || !TEAM_RUNTIME_LAYER_ORDER.includes(layer as TeamRuntimeLayer)) return null;
+      const id =
+        typeof rec['id'] === 'string' ? rec['id'] : `${layer}-${memberSlotsRaw.indexOf(entry)}`;
+      const displayName = typeof rec['displayName'] === 'string' ? rec['displayName'] : null;
+      const specialty = typeof rec['specialty'] === 'string' ? rec['specialty'] : 'general';
+      const agentLabel = typeof rec['agentLabel'] === 'string' ? rec['agentLabel'] : null;
+      const required = typeof rec['required'] === 'boolean' ? rec['required'] : false;
+      if (!displayName) return null;
+      return { id, layer: layer as TeamRuntimeLayer, specialty, displayName, agentLabel, required };
+    })
+    .filter(
+      (
+        x,
+      ): x is {
+        id: string;
+        layer: TeamRuntimeLayer;
+        specialty: string;
+        displayName: string;
+        agentLabel: string | null;
+        required: boolean;
+      } => x !== null,
+    );
+
   // optionalMembers
   const optional = Array.isArray(teamDef['optionalMembers'])
     ? (teamDef['optionalMembers'] as unknown[])
@@ -142,6 +183,7 @@ function parseTeamDefinition(
     sourceKind,
     sourceLabel,
     defaultProvider,
+    memberSlots,
     requiredRoleBindings,
     optionalMembers,
     starterSuggestions,
@@ -250,6 +292,37 @@ const ROLE_DOT_STYLE: CSSProperties = {
   height: 8,
   borderRadius: 999,
   flexShrink: 0,
+};
+
+const MEMBER_LAYER_GRID_STYLE: CSSProperties = {
+  display: 'grid',
+  gap: 10,
+};
+
+const MEMBER_LAYER_STYLE: CSSProperties = {
+  display: 'grid',
+  gap: 8,
+  padding: '10px 12px',
+  borderRadius: 12,
+  background: 'var(--bg-overlay)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+};
+
+const MEMBER_SLOT_GRID_STYLE: CSSProperties = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 6,
+};
+
+const MEMBER_SLOT_STYLE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+  padding: '5px 9px',
+  borderRadius: 999,
+  border: '1px solid color-mix(in srgb, var(--border-default) 45%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 86%, transparent)',
+  fontSize: 11,
 };
 
 const OPTIONAL_CHIP_STYLE: CSSProperties = {
@@ -402,6 +475,55 @@ function ReceptionStarterCard({
                 </span>
               </div>
             ))}
+          </div>
+        </div>
+      ) : null}
+
+      {teamDef.memberSlots.length > 0 ? (
+        <div>
+          <div style={SECTION_LABEL_STYLE}>默认固定团队（{teamDef.memberSlots.length}）</div>
+          <div style={MEMBER_LAYER_GRID_STYLE}>
+            {TEAM_RUNTIME_LAYER_ORDER.map((layer) => {
+              const slots = teamDef.memberSlots.filter((slot) => slot.layer === layer);
+              if (slots.length === 0) return null;
+              return (
+                <div key={layer} style={MEMBER_LAYER_STYLE}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 8,
+                    }}
+                  >
+                    <strong style={{ color: 'var(--fg-strong)', fontSize: 12 }}>
+                      {TEAM_RUNTIME_LAYER_LABELS[layer]}
+                    </strong>
+                    <span style={{ color: 'var(--fg-muted)', fontSize: 10 }}>
+                      {slots.length} 人
+                    </span>
+                  </div>
+                  <div style={MEMBER_SLOT_GRID_STYLE}>
+                    {slots.map((slot) => (
+                      <span key={slot.id} style={MEMBER_SLOT_STYLE} title={slot.specialty}>
+                        <span
+                          style={{ color: slot.required ? 'var(--accent)' : 'var(--fg-muted)' }}
+                        >
+                          {slot.required ? '●' : '○'}
+                        </span>
+                        <span style={{ fontWeight: 700, color: 'var(--fg-strong)' }}>
+                          {slot.displayName}
+                        </span>
+                        <span style={{ color: 'var(--fg-muted)' }}>{slot.specialty}</span>
+                        {slot.agentLabel ? (
+                          <span style={{ color: 'var(--fg-default)' }}>· {slot.agentLabel}</span>
+                        ) : null}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       ) : null}

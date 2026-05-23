@@ -427,7 +427,7 @@ export function TeamConversationView({
           requestAnimationFrame(() => state.textareaRef.current?.focus());
         }}
       />
-      <LatestAssistantMessageContext.Provider value={latestAssistantMessageId}>
+      <LatestAssistantMessageContext value={latestAssistantMessageId}>
         <TeamConversationLayout
           sessionId={sessionId}
           sessionSource="team"
@@ -558,7 +558,7 @@ export function TeamConversationView({
           onClearManualAgentId={noopVoid}
           composerPlaceholder={effectivePlaceholder}
         />
-      </LatestAssistantMessageContext.Provider>
+      </LatestAssistantMessageContext>
     </>
   );
 }

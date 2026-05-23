@@ -26,6 +26,7 @@ import {
 } from '@openAwork/web-client';
 import { AdapterConfigPanel } from '../../shared/WorkflowEditor.js';
 import { NewTeamTemplateModal } from '../../shell/modals/NewTeamTemplateModal.js';
+import { TeamDefaultRosterSection } from './team-default-roster-section.js';
 
 const ROLE_LAYER_ORDER: readonly SoulRoleLayer[] = [
   'reception',
@@ -125,6 +126,7 @@ const SUCCESS_STYLE: CSSProperties = {
 interface TeamRuntimeSettingsPanelProps {
   gatewayUrl: string;
   accessToken: string | null;
+  onWorkspaceChanged?: () => void;
   teamWorkspaceId: string | null;
 }
 
@@ -136,6 +138,7 @@ interface SaveFeedback {
 export function TeamRuntimeSettingsPanel({
   gatewayUrl,
   accessToken,
+  onWorkspaceChanged,
   teamWorkspaceId,
 }: TeamRuntimeSettingsPanelProps) {
   const client = useMemo(() => createTeamPhaseAClient(gatewayUrl), [gatewayUrl]);
@@ -161,11 +164,19 @@ export function TeamRuntimeSettingsPanel({
         <span style={{ fontSize: 14, fontWeight: 800 }}>团队设置</span>
         <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
           编辑保存后立即生效；如要让正在进行的会话也使用新内容，可以点
-          <strong>「ForceApply 应用更新」</strong>触发缓存刷新。
+          <strong>「ForceApply 应用更新」</strong>触发缓存刷新。默认固定团队会作为新会话的基础
+          roster。
         </span>
       </header>
 
       <ForceApplySection token={accessToken} client={client} />
+
+      <TeamDefaultRosterSection
+        gatewayUrl={gatewayUrl}
+        token={accessToken}
+        onSaved={onWorkspaceChanged}
+        teamWorkspaceId={teamWorkspaceId}
+      />
 
       {teamWorkspaceId ? (
         <ConstitutionSection

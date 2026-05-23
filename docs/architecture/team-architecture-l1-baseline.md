@@ -137,6 +137,49 @@ L1 决策：b 层 = router + companion + scheduler 三个独立组件
 
 ---
 
+### L1.2A 可见固定团队成员不是新的运行层 ★ 防止 roleLayer 爆炸
+
+**决策**：默认固定团队的人物（前端开发者、后端开发者、DevOps、SRE、安全评审、发布经理等）建模为 **visible member slots / specialist personas**，不新增 `roleLayer`。
+
+**边界定义**：
+
+| 概念               | 用途              | 示例                                                   | 是否进入 handoff/capability 矩阵 |
+| ------------------ | ----------------- | ------------------------------------------------------ | -------------------------------- |
+| `roleLayer`        | 运行时协议边界    | `reception` / `pm1` / `pm2` / `executor` / `reviewer`  | 是                               |
+| `memberSlot.layer` | 可见人物归属层    | `executor` 层的 DevOps 工程师                          | 否，映射到现有 roleLayer         |
+| `specialty`        | 人物专长/派发偏好 | `frontend` / `backend` / `devops` / `sre` / `security` | 否                               |
+| `personaKey`       | 同层 SOUL 变体    | `executor:devops` / `reviewer:security`                | 否                               |
+
+**默认固定团队矩阵**：
+
+| 运行层    | 默认人物                                                                                                            |
+| --------- | ------------------------------------------------------------------------------------------------------------------- |
+| reception | 接待官 / 需求澄清官                                                                                                 |
+| pm1       | 产品规划师、任务拆解师                                                                                              |
+| pm2       | 技术负责人、调度派发官、发布经理                                                                                    |
+| executor  | 前端开发者、后端开发者、数据工程师、工作流工程师、集成工程师、测试验证工程师、文档工程师、DevOps 工程师、平台工程师 |
+| reviewer  | 代码评审员、安全评审员、SRE / 运维评审员、可观测性评审员、质量评审员                                                |
+
+**为什么不新增运行层**：
+
+- 新增 `devops` / `sre` / `security` 等 `roleLayer` 会连带修改 capability matrix、handoff 拓扑、substate 白名单、persona seed、UI 过滤、测试与审计，属于结构性破坏。
+- 这些成员的差异主要是专业上下文与工具偏好，不是独立通信协议。
+- 真正需要独立层的标准是：需要独立 inbound / substate / artifact phase / handoff lifecycle。当前 DevOps/SRE/Security/Release 均不满足这个门槛。
+
+**派发原则**：
+
+- `taskProfile.kind` 决定终端层：实现/修复/重构/文档/验证 → `executor`；评审 → `reviewer`。
+- `taskProfile.surface` 与任务内容选择同层内的 `specialty` 成员。
+- `release/security/sre/observability` 默认作为 PM2/reviewer 门禁成员；当任务是“实现部署脚本 / 补日志 / 加告警”时，可作为 executor 层专长执行。
+
+**持久化原则**：
+
+- 工作区/模板可保存默认 roster；创建 session 时必须写入 `sessions.metadata_json.teamDefinition.version=2` 的不可变快照。
+- 历史 session 不受默认团队后续编辑影响。
+- UI 展示必须按运行层分组，但卡片展示具体人物、specialty、agent 绑定和 toolsets。
+
+---
+
 ### L1.3 跨层通信协议形态 ★ 决定核心通信机制
 
 **决策**：跨层通信采用**流式 handoff + 子状态机 + 双向消息通道**，而非原子 handoff。

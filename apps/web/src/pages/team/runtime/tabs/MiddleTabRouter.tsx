@@ -76,6 +76,7 @@ export interface MiddleTabRenderArgs {
   gatewayUrl: string | null;
   accessToken: string | null;
   activeWorkspaceName: string | undefined;
+  onWorkspaceChanged?: () => void;
   teamWorkspaceId: string | null;
 }
 
@@ -93,6 +94,7 @@ export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
     handoffs,
     gatewayUrl,
     accessToken,
+    onWorkspaceChanged,
     teamWorkspaceId,
   } = args;
 
@@ -213,6 +215,7 @@ export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
           <TeamRuntimeSettingsPanel
             gatewayUrl={gatewayUrl}
             accessToken={accessToken}
+            onWorkspaceChanged={onWorkspaceChanged}
             teamWorkspaceId={teamWorkspaceId}
           />
         </TabContainer>

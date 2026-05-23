@@ -567,6 +567,7 @@ export default function TeamPageV2() {
               onSelectTeam={handleSelectTeam}
               teamWorkspaceId={resolvedTeamWorkspaceId ?? undefined}
               workspaceLabel={workspaceState.activeWorkspace?.name}
+              defaultMemberSlots={workspaceState.activeWorkspace?.defaultTeamRoster}
               onSubmitDraft={handleSubmitDraft}
               onDeleteSession={handleDeleteSession}
               selectedWorkspacePath={selectedWorkspacePath}
@@ -861,6 +862,7 @@ export default function TeamPageV2() {
                       gatewayUrl,
                       accessToken,
                       activeWorkspaceName: workspaceState.activeWorkspace?.name ?? undefined,
+                      onWorkspaceChanged: workspaceState.refresh,
                       teamWorkspaceId: resolvedTeamWorkspaceId,
                     })}
                   </div>
