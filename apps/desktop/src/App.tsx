@@ -299,10 +299,10 @@ export default function App() {
             }
           />
           <Route
-            path="/settings"
+            path="/settings/:tab?"
             element={
               <ProtectedRoute>
-                <SettingsPage />
+                <SettingsPage onCheckDesktopUpdates={() => setShowUpdateDialog(true)} />
               </ProtectedRoute>
             }
           />

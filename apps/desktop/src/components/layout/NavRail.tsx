@@ -122,12 +122,32 @@ export default function NavRail() {
           marginBottom: 4,
         }}
       >
-        <span
-          className="select-none"
-          style={{ fontSize: 9, color: 'hsl(var(--muted-foreground) / 0.4)' }}
+        <button
+          type="button"
+          aria-label="打开关于与更新"
+          title="关于与更新"
+          onClick={() => void navigate('/settings/desktop')}
+          className="select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--accent))] focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--background))]"
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 1,
+            minWidth: 34,
+            padding: '4px 5px',
+            borderRadius: 8,
+            border: '1px solid hsl(var(--border-default) / 0.45)',
+            background: onSettings ? 'hsl(var(--primary) / 0.08)' : 'transparent',
+            color: onSettings ? 'hsl(var(--primary))' : 'hsl(var(--muted-foreground) / 0.7)',
+            cursor: 'pointer',
+            lineHeight: 1.1,
+          }}
         >
-          v0.1
-        </span>
+          <span style={{ fontSize: 9, fontWeight: 700 }} translate="no">
+            v{__APP_VERSION__}
+          </span>
+          <span style={{ fontSize: 8 }}>更新</span>
+        </button>
         <a
           href="https://github.com/Await-d/OpenAWork"
           target="_blank"
