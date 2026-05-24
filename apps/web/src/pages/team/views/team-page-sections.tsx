@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { PermissionPrompt } from '@openAwork/shared-ui';
+import type { AlwaysScopeLevel } from '@openAwork/shared-ui';
 import type {
   SharedSessionDetailRecord,
   SharedSessionSummaryRecord,
@@ -733,6 +734,7 @@ interface TeamSharedSessionsPanelProps {
   onReplyPermission: (
     requestId: string,
     decision: 'once' | 'session' | 'permanent' | 'reject',
+    scopeLevel?: AlwaysScopeLevel,
   ) => void;
   onReplyQuestion: (input: {
     answers?: string[][];
@@ -1067,7 +1069,9 @@ export function TeamSharedSessionsPanel({
                       previewAction={pendingPermission.previewAction}
                       always={pendingPermission.always}
                       errorMessage={sharedOperateError ?? undefined}
-                      onDecide={onReplyPermission}
+                      onDecide={(requestId, decision, scopeLevel) => {
+                        onReplyPermission(requestId, decision, scopeLevel);
+                      }}
                       style={{ maxWidth: '100%', position: 'static', boxShadow: 'none' }}
                     />
                   </div>

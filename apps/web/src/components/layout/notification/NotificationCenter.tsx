@@ -5,6 +5,8 @@ import {
   createPermissionsClient,
   createSessionsClient,
 } from '@openAwork/web-client';
+import { categorizeAlwaysPatterns } from '@openAwork/shared-ui';
+import type { AlwaysScopeLevel } from '@openAwork/shared-ui';
 import type {
   NotificationPreferenceEventType,
   NotificationPreferenceRecord,
@@ -106,63 +108,6 @@ function parsePermissionNotificationBody(body: string): ParsedPermissionBody | n
     scope: lines[2] ?? '',
     riskLevel: lines[3] ?? '',
   };
-}
-
-interface ScopeLevel {
-  id: string;
-  label: string;
-  pattern: string;
-  description: string;
-}
-
-/**
- * Compute three scope levels from a permission request's scope and always patterns.
- * For a bash command like "npm install express":
- *   - exact: "npm install express" (only this exact command)
- *   - sub:   "npm install *" (sub-command wildcard)
- *   - prefix: "npm *" (prefix wildcard, from always patterns)
- */
-function computeScopeLevels(scope: string, always?: string[]): ScopeLevel[] {
-  const levels: ScopeLevel[] = [];
-  const trimmed = scope.trim();
-
-  // Level 1: exact scope
-  levels.push({
-    id: 'exact',
-    label: trimmed.length > 30 ? `${trimmed.slice(0, 30)}…` : trimmed,
-    pattern: trimmed,
-    description: '仅此操作',
-  });
-
-  // Level 2: sub-command wildcard (drop last token, add *)
-  const tokens = trimmed.split(/\s+/);
-  const firstToken = tokens[0] ?? '';
-  const computedPrefix =
-    always && always.length > 0 ? (always[0] ?? `${firstToken} *`) : `${firstToken} *`;
-  if (tokens.length > 2) {
-    const subPattern = tokens.slice(0, -1).join(' ') + ' *';
-    // Only add if different from exact and from prefix
-    if (subPattern !== trimmed && subPattern !== computedPrefix) {
-      levels.push({
-        id: 'sub',
-        label: subPattern.length > 30 ? `${subPattern.slice(0, 30)}…` : subPattern,
-        pattern: subPattern,
-        description: '同子命令',
-      });
-    }
-  }
-
-  // Level 3: prefix wildcard (from always patterns or first token + *)
-  if (computedPrefix !== trimmed) {
-    levels.push({
-      id: 'prefix',
-      label: computedPrefix.length > 30 ? `${computedPrefix.slice(0, 30)}…` : computedPrefix,
-      pattern: computedPrefix,
-      description: '同类操作',
-    });
-  }
-
-  return levels;
 }
 
 interface NotificationCenterProps {
@@ -445,8 +390,9 @@ export default function NotificationCenter({
 
   // --- Quick permission reply ---
   const [replyingIds, setReplyingIds] = useState<Set<string>>(new Set());
-  // Track selected scope level per notification: 'exact' | 'sub' | 'prefix'
-  const [selectedScopes, setSelectedScopes] = useState<Record<string, string>>({});
+  const [selectedScopes, setSelectedScopes] = useState<
+    Record<string, AlwaysScopeLevel['category']>
+  >({});
 
   const handleQuickPermissionReply = useCallback(
     async (notification: NotificationRecord, decision: PermissionDecision) => {
@@ -472,9 +418,14 @@ export default function NotificationCenter({
         // Compute alwaysOverride based on selected scope level
         let alwaysOverride: string[] | undefined;
         if (decision !== 'once' && decision !== 'reject' && details) {
-          const scopeLevel = selectedScopes[notification.id] ?? 'prefix';
-          const levels = computeScopeLevels(details.scope, details.always);
-          const selectedLevel = levels.find((l) => l.id === scopeLevel);
+          const levels = categorizeAlwaysPatterns(
+            details.previewAction,
+            details.scope,
+            details.always,
+          );
+          const scopeCategory = selectedScopes[notification.id] ?? 'base';
+          const selectedLevel =
+            levels.find((level) => level.category === scopeCategory) ?? levels[levels.length - 1];
           if (selectedLevel) {
             alwaysOverride = [selectedLevel.pattern];
           }
@@ -963,35 +914,39 @@ export default function NotificationCenter({
                             marginTop: 2,
                           }}
                         >
-                          {/* Scope level selector (only when details are loaded and has multiple levels) */}
                           {permDetail &&
-                            computeScopeLevels(permDetail.scope, permDetail.always).length > 1 && (
-                              <div
-                                style={{
-                                  display: 'flex',
-                                  gap: 4,
-                                  alignItems: 'center',
-                                  flexWrap: 'wrap',
-                                }}
-                              >
-                                <span
-                                  style={{ fontSize: 9, color: 'var(--fg-muted)', flexShrink: 0 }}
+                            (() => {
+                              const levels = categorizeAlwaysPatterns(
+                                permDetail.previewAction,
+                                permDetail.scope,
+                                permDetail.always,
+                              );
+                              const selectedCategory = selectedScopes[notification.id] ?? 'base';
+                              return (
+                                <div
+                                  style={{
+                                    display: 'flex',
+                                    gap: 4,
+                                    alignItems: 'center',
+                                    flexWrap: 'wrap',
+                                  }}
                                 >
-                                  范围:
-                                </span>
-                                {computeScopeLevels(permDetail.scope, permDetail.always).map(
-                                  (level) => {
-                                    const isSelected =
-                                      (selectedScopes[notification.id] ?? 'prefix') === level.id;
+                                  <span
+                                    style={{ fontSize: 9, color: 'var(--fg-muted)', flexShrink: 0 }}
+                                  >
+                                    范围:
+                                  </span>
+                                  {levels.map((level) => {
+                                    const isSelected = selectedCategory === level.category;
                                     return (
                                       <button
-                                        key={level.id}
+                                        key={level.category}
                                         type="button"
                                         onClick={(event) => {
                                           event.stopPropagation();
                                           setSelectedScopes((prev) => ({
                                             ...prev,
-                                            [notification.id]: level.id,
+                                            [notification.id]: level.category,
                                           }));
                                         }}
                                         title={`${level.description}: ${level.pattern}`}
@@ -1018,11 +973,10 @@ export default function NotificationCenter({
                                         {level.label}
                                       </button>
                                     );
-                                  },
-                                )}
-                              </div>
-                            )}
-                          {/* Decision buttons */}
+                                  })}
+                                </div>
+                              );
+                            })()}
                           <div
                             style={{
                               display: 'flex',

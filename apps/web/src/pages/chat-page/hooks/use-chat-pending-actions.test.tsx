@@ -47,12 +47,17 @@ function makeQuestion(
 
 function makePermissionRequest(requestId: string): PendingPermissionRequest {
   return {
+    always: ['npm run *', 'npm *'],
+    createdAt: new Date(1700000000000).toISOString(),
+    previewAction: '执行命令: npm run build -- --watch',
+    reason: '需要执行工作区命令',
     requestId,
+    riskLevel: 'high',
+    scope: 'npm run build -- --watch',
     sessionId: SESSION_ID,
-    toolName: 'shell',
-    toolInput: { command: 'rm -rf /' },
-    createdAt: 1700000000000,
-  } as unknown as PendingPermissionRequest;
+    status: 'pending',
+    toolName: 'bash',
+  } satisfies PendingPermissionRequest;
 }
 
 function makeOptions(overrides?: Partial<Parameters<typeof useChatPendingActions>[0]>) {
@@ -293,6 +298,138 @@ describe('useChatPendingActions — handleInlinePermissionDecision', () => {
     expect(setMessages).toHaveBeenCalled();
     expect(setRightPanelState).toHaveBeenCalled();
   });
+
+  it('本会话允许默认把共享分类的同类指令范围作为 alwaysOverride 提交', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useChatPendingActions(makeOptions()));
+    const request = makePermissionRequest('p1');
+
+    await act(async () => {
+      await result.current.handleInlinePermissionDecision(request, 'session');
+    });
+
+    const firstCall = fetchMock.mock.calls[0] as [RequestInfo | URL, RequestInit] | undefined;
+    const body = JSON.parse(String(firstCall?.[1].body)) as {
+      alwaysOverride?: string[];
+    };
+    expect(body.alwaysOverride).toEqual(['npm *']);
+  });
+
+  it('本会话允许会使用用户选中的同子命令范围提交 alwaysOverride', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useChatPendingActions(makeOptions()));
+
+    act(() => {
+      result.current.setPendingPermissions([makePermissionRequest('p1')]);
+    });
+
+    const actions = result.current.resolveInlinePermissionActions('p1');
+    const partialLevel = actions?.scopeLevels?.find((level) => level.category === 'partial');
+    expect(actions?.scopeLevels?.map((level) => level.label)).toEqual([
+      '仅本次指令',
+      '同子命令',
+      '同类指令',
+    ]);
+    expect(partialLevel).toBeDefined();
+
+    act(() => {
+      if (partialLevel) {
+        actions?.onSelectScopeLevel?.(partialLevel);
+      }
+    });
+
+    await act(async () => {
+      await result.current.handleInlinePermissionDecision(makePermissionRequest('p1'), 'session');
+    });
+
+    const firstCall = fetchMock.mock.calls[0] as [RequestInfo | URL, RequestInit] | undefined;
+    const body = JSON.parse(String(firstCall?.[1].body)) as {
+      alwaysOverride?: string[];
+    };
+    expect(body.alwaysOverride).toEqual(['npm run *']);
+  });
+
+  it('永久允许会使用用户选中的仅本次指令范围提交 alwaysOverride', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useChatPendingActions(makeOptions()));
+
+    act(() => {
+      result.current.setPendingPermissions([makePermissionRequest('p1')]);
+    });
+
+    const actions = result.current.resolveInlinePermissionActions('p1');
+    const fullLevel = actions?.scopeLevels?.find((level) => level.category === 'full');
+    expect(fullLevel).toBeDefined();
+
+    act(() => {
+      if (fullLevel) {
+        actions?.onSelectScopeLevel?.(fullLevel);
+      }
+    });
+
+    await act(async () => {
+      await result.current.handleInlinePermissionDecision(makePermissionRequest('p1'), 'permanent');
+    });
+
+    const firstCall = fetchMock.mock.calls[0] as [RequestInfo | URL, RequestInit] | undefined;
+    const body = JSON.parse(String(firstCall?.[1].body)) as {
+      alwaysOverride?: string[];
+    };
+    expect(body.alwaysOverride).toEqual(['npm run build -- --watch']);
+  });
+
+  it('允许一次不会提交 alwaysOverride', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useChatPendingActions(makeOptions()));
+
+    await act(async () => {
+      await result.current.handleInlinePermissionDecision(makePermissionRequest('p1'), 'once');
+    });
+
+    const firstCall = fetchMock.mock.calls[0] as [RequestInfo | URL, RequestInit] | undefined;
+    const body = JSON.parse(String(firstCall?.[1].body)) as {
+      alwaysOverride?: string[];
+    };
+    expect(body.alwaysOverride).toBeUndefined();
+  });
+
+  it('拒绝不会提交 alwaysOverride', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useChatPendingActions(makeOptions()));
+
+    act(() => {
+      result.current.setPendingPermissions([makePermissionRequest('p1')]);
+    });
+
+    const actions = result.current.resolveInlinePermissionActions('p1');
+    const fullLevel = actions?.scopeLevels?.find((level) => level.category === 'full');
+
+    act(() => {
+      if (fullLevel) {
+        actions?.onSelectScopeLevel?.(fullLevel);
+      }
+    });
+
+    await act(async () => {
+      await result.current.handleInlinePermissionDecision(makePermissionRequest('p1'), 'reject');
+    });
+
+    const firstCall = fetchMock.mock.calls[0] as [RequestInfo | URL, RequestInit] | undefined;
+    const body = JSON.parse(String(firstCall?.[1].body)) as {
+      alwaysOverride?: string[];
+    };
+    expect(body.alwaysOverride).toBeUndefined();
+  });
 });
 
 describe('useChatPendingActions — resolveInlinePermissionActions', () => {
@@ -313,5 +450,11 @@ describe('useChatPendingActions — resolveInlinePermissionActions', () => {
     expect(actions?.items.map((it) => it.id)).toEqual(['session', 'once', 'permanent', 'reject']);
     expect(actions?.items.find((it) => it.id === 'reject')?.danger).toBe(true);
     expect(actions?.items.find((it) => it.id === 'session')?.primary).toBe(true);
+    expect(actions?.scopeLevels?.map((level) => level.label)).toEqual([
+      '仅本次指令',
+      '同子命令',
+      '同类指令',
+    ]);
+    expect(actions?.selectedScopeCategory).toBe('base');
   });
 });

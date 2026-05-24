@@ -34,6 +34,7 @@ async function main(): Promise<void> {
       DATABASE_URL: ':memory:',
       AI_API_KEY: 'test-key',
       AI_API_BASE_URL: 'https://unit-test.invalid/v1',
+      OPENAWORK_DISABLE_MCP_FLAT_TOOLS: '1',
     },
     async () => {
       await withMockFetch(
@@ -295,23 +296,23 @@ async function verifyAgent(input: {
   assert(result.isError === false, 'Agent tool should succeed');
   assert(typeof result.output === 'string', 'Agent tool should return a background summary string');
   assert(
-    String(result.output).includes('Background agent task launched successfully.'),
+    String(result.output).includes('后台 agent 任务已成功启动。'),
     'Agent tool should report that a background delegated run started',
   );
   assert(
-    String(result.output).includes('Description: 让子代理给出结论'),
+    String(result.output).includes('描述：让子代理给出结论'),
     'Agent output should include the delegated description',
   );
   assert(
-    String(result.output).includes('Agent: explore (subagent)'),
+    String(result.output).includes('Agent：explore（subagent）'),
     'Agent output should include the delegated agent label',
   );
   assert(
-    String(result.output).includes('Status: running'),
+    String(result.output).includes('状态：running'),
     'Agent output should include the delegated task status',
   );
 
-  const taskIdMatch = String(result.output).match(/Task ID: ([^\n]+)/u);
+  const taskIdMatch = String(result.output).match(/任务 ID：([^\n]+)/u);
   assert(taskIdMatch?.[1], 'Agent output should include the delegated task id');
   const taskId = taskIdMatch[1];
 

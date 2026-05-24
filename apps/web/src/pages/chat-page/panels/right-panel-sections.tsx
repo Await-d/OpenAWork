@@ -1,7 +1,12 @@
 import React from 'react';
 import type { PendingPermissionRequest, Session, SessionTask } from '@openAwork/web-client';
 import { ContextPanel, PlanHistoryPanel } from '@openAwork/shared-ui';
-import type { AttachmentItem, ContextItem, HistoricalPlan } from '@openAwork/shared-ui';
+import type {
+  AlwaysScopeLevel,
+  AttachmentItem,
+  ContextItem,
+  HistoricalPlan,
+} from '@openAwork/shared-ui';
 import { Link } from 'react-router';
 import type { DialogueMode } from '../mode/dialogue-mode.js';
 import type { ChatContextUsageSnapshot } from '../../../components/conversation-runtime/messages/context-usage.js';
@@ -191,6 +196,10 @@ export function ChatHistoryTabContent(props: {
           primary?: boolean;
         }>;
         pendingLabel?: string;
+        scopeLevels?: AlwaysScopeLevel[];
+        selectedScopeCategory?: AlwaysScopeLevel['category'];
+        selectedScopePattern?: string;
+        onSelectScopeLevel?: (level: AlwaysScopeLevel) => void;
       }
     | undefined;
   planHistory: HistoricalPlan[];
@@ -682,6 +691,51 @@ export function ChatHistoryTabContent(props: {
                             marginTop: 8,
                           }}
                         >
+                          {approvalActions.scopeLevels &&
+                            approvalActions.scopeLevels.length > 0 &&
+                            approvalActions.onSelectScopeLevel && (
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  flexWrap: 'wrap',
+                                  gap: 4,
+                                }}
+                              >
+                                {approvalActions.scopeLevels.map((level) => {
+                                  const isSelected =
+                                    approvalActions.selectedScopeCategory === level.category ||
+                                    approvalActions.selectedScopePattern === level.pattern;
+                                  return (
+                                    <button
+                                      key={level.category}
+                                      type="button"
+                                      onClick={() => approvalActions.onSelectScopeLevel?.(level)}
+                                      title={`${level.description} ${level.pattern}`}
+                                      aria-pressed={isSelected}
+                                      style={{
+                                        appearance: 'none',
+                                        minHeight: 22,
+                                        padding: '0 8px',
+                                        borderRadius: 999,
+                                        border: isSelected
+                                          ? '1px solid var(--accent)'
+                                          : '1px solid color-mix(in srgb, var(--accent) 24%, var(--border-default))',
+                                        background: isSelected
+                                          ? 'color-mix(in srgb, var(--accent) 18%, transparent)'
+                                          : 'var(--bg-overlay)',
+                                        color: isSelected ? 'var(--accent)' : 'var(--fg-muted)',
+                                        fontSize: 10,
+                                        fontWeight: 700,
+                                        lineHeight: 1,
+                                        cursor: 'pointer',
+                                      }}
+                                    >
+                                      {level.label}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
                           <div
                             style={{
                               display: 'flex',

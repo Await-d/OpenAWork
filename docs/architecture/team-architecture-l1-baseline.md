@@ -1,4 +1,4 @@
-# Team 架构 L1 基线决策（v1.1）
+# Team 架构 L1 基线决策（v1.2）
 
 > ⚠️ **复查发现的现状（2026-05-16）**：
 >
@@ -7,13 +7,14 @@
 > **追溯性审计已完成**（见 `team-architecture-traceback-audit.md`），9 项 L1 决策的真实状态：
 >
 > - ✅ **5 项已完整实施且符合假设**：L1.1 / L1.2（意外符合）/ L1.5 / L1.7 / L1.9
-> - ❌ **3 项未实施**：L1.3（流式 handoff，artifact-chain.ts 行 22 已注明）/ L1.6（延迟监控）/ L1.8 部分字段
+> - ❌ **2 项未实施/待完善**：L1.6（延迟监控）/ L1.8 剩余字段或展示链路
+> - ✅ **L1.3 已完成后端闭环**：反向消息通道、substate、c 层等待澄清、handoff 幂等/暂停字段均已落地（2026-05-24 收口）
 > - ⚠️ **1 项部分实施**：L1.4（feature flag 灰度而非"完全废弃"，但实际方案更稳妥）
 >
 > **真正需要做的事**（约 17-19 天工作量）：
 >
-> - 🔴 P0：L1.3 流式 handoff 增量改造（13.5 天，详见 `team-architecture-l1-3-streaming-handoff-spec.md`）
-> - 🟡 P1：L1.8 补缺失字段（0.5 天，可与 P0 合并）
+> - ✅ P0：L1.3 流式 handoff 增量改造已完成后端闭环（详见 `team-architecture-l1-3-streaming-handoff-spec.md` v1.2）
+> - 🟡 P1：L1.8 补缺失字段/展示链路（0.5 天，可继续独立收口）
 > - 🟡 P2：L1.6 延迟监控（3-5 天）
 >
 > ---
@@ -30,7 +31,7 @@
 > - **Phase A-E 实施记录**（已完成）：`.agentdocs/workflow/done/260515-team-phase-{a,b,c}-实施方案.md` 和 `260516-team-phase-{d,e}-实施方案.md`
 >
 > 创建时间：2026-05-16（v1.0 → v1.1 复查修订 + 追溯审计）
-> 当前状态：**v1.1 草稿，待团队 review**
+> 当前状态：**v1.2，L1.3 后端闭环已收口；L1.6/L1.8 待继续**
 
 ---
 
@@ -599,17 +600,17 @@ L2/L3/L4 修改不需要这套流程，按各自规则处理。
 
 ### 5.1 实施现状对照
 
-| L1 决策                      | v3.10/v3.11 决策 | 实施状态      | 实施位置                                                                                                                                                                           |
-| ---------------------------- | ---------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| L1.1 五层架构                | D11+D12          | ✅ **已实施** | Phase B 落地 + 260518 五层链路打通                                                                                                                                                 |
-| L1.2 d/b 拆分原则            | （新增）         | ✅ **已实施** | `reception-router.ts`（b.router）+ `reception-orchestrator.ts`（b.companion）+ `scheduler.ts`（b.scheduler）；`pm2-runner.ts`（d.1/d.2/d.3/d.5）                                   |
-| L1.3 流式 handoff            | （修改 D14）     | ✅ **已实施** | `session_inbound_messages` 表 + `substate` 字段 + `inbound-store.ts` + `artifact-chain.ts` wait-for-inbound                                                                        |
-| L1.4 跨层调用 + escape hatch | （修订 D24）     | ✅ **已实施** | `team-events-bus.ts` escape hatch 事件 + `routes/team.ts` audit log + `reception-orchestrator.ts` route decision log                                                               |
-| L1.5 项目记忆双存储          | D34 + D55        | ✅ **已实施** | Phase A 落地（260515-team-phase-a）                                                                                                                                                |
-| L1.6 延迟硬约束              | （新增）         | ✅ **已实施** | `latency-monitor.ts` 滑动窗口 + inbound 端点采样                                                                                                                                   |
-| L1.7 Handoff 存储位置        | D14              | ✅ **已实施** | `handoff_records` 表 + `handoff-store.ts` claim_token 防双 claim                                                                                                                   |
-| L1.8 Session 状态机扩展      | D13 + D18 + D42  | ✅ **已实施** | sessions 全部字段已加（team_parent_session_id / role_layer / handoff_state / substate / substate_updated_at / intent_state / structural_depth / execution_depth / last_heartbeat） |
-| L1.9 BackgroundTaskScheduler | D40              | ✅ **已实施** | `InProcessScheduler` 9 方法全覆盖                                                                                                                                                  |
+| L1 决策                      | v3.10/v3.11 决策 | 实施状态            | 实施位置                                                                                                                                                                           |
+| ---------------------------- | ---------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| L1.1 五层架构                | D11+D12          | ✅ **已实施**       | Phase B 落地 + 260518 五层链路打通                                                                                                                                                 |
+| L1.2 d/b 拆分原则            | （新增）         | ✅ **已实施**       | `reception-router.ts`（b.router）+ `reception-orchestrator.ts`（b.companion）+ `scheduler.ts`（b.scheduler）；`pm2-runner.ts`（d.1/d.2/d.3/d.5）                                   |
+| L1.3 流式 handoff            | （修改 D14）     | ✅ **已实施并收口** | `session_inbound_messages` 表 + `team-inbound.ts` + `substate` 字段 + `inbound-store.ts` + `artifact-chain.ts` answer/timeout/cancel/pause 等待闭环                                |
+| L1.4 跨层调用 + escape hatch | （修订 D24）     | ✅ **已实施**       | `team-events-bus.ts` escape hatch 事件 + `routes/team.ts` audit log + `reception-orchestrator.ts` route decision log                                                               |
+| L1.5 项目记忆双存储          | D34 + D55        | ✅ **已实施**       | Phase A 落地（260515-team-phase-a）                                                                                                                                                |
+| L1.6 延迟硬约束              | （新增）         | ✅ **已实施**       | `latency-monitor.ts` 滑动窗口 + inbound 端点采样                                                                                                                                   |
+| L1.7 Handoff 存储位置        | D14              | ✅ **已实施**       | `handoff_records` 表 + `handoff-store.ts` claim_token 防双 claim                                                                                                                   |
+| L1.8 Session 状态机扩展      | D13 + D18 + D42  | ✅ **已实施**       | sessions 全部字段已加（team_parent_session_id / role_layer / handoff_state / substate / substate_updated_at / intent_state / structural_depth / execution_depth / last_heartbeat） |
+| L1.9 BackgroundTaskScheduler | D40              | ✅ **已实施**       | `InProcessScheduler` 9 方法全覆盖                                                                                                                                                  |
 
 ### 5.2 真正需要团队 review 的项目（v1.1 修订聚焦）
 
@@ -624,7 +625,7 @@ L2/L3/L4 修改不需要这套流程，按各自规则处理。
 **B. 4 项需要新增/改造**
 
 - [ ] **L1.2 d/b 拆分原则**：现有 d 层是否一个 LLM 干所有事？需要看 Phase D 实施代码确认
-- [ ] **L1.3 流式 handoff 增量改造**：详细方案见 `team-architecture-l1-3-streaming-handoff-spec.md`，4 项改造任务（13.5 天工作量）
+- [x] **L1.3 流式 handoff 增量改造**：后端闭环已完成，详细收口记录见 `team-architecture-l1-3-streaming-handoff-spec.md` §0.B
 - [ ] **L1.4 escape hatch 协议**：需要在代码中加入 audit log 标记和 lint 规则
 - [ ] **L1.6 延迟约束**：需要新增 telemetry 监控
 
@@ -638,7 +639,7 @@ L2/L3/L4 修改不需要这套流程，按各自规则处理。
 
 1. **追溯性 review**：找一名熟悉 Phase A-E 实施的工程师确认 5.2.A 三项
 2. **L1.2 落地评估**：看 Phase D 真实代码确认 d 层是否需要拆分（最坏情况：全部已是单 LLM 实现，需要重写）
-3. **L1.3 增量改造启动**：见 `team-architecture-l1-3-streaming-handoff-spec.md` §0.A.2 的 4 项改造任务
+3. **L1.3 运行观察与独立 verification 排查**：L1.3 聚焦测试/构建/类型检查已通过；完整 gateway verification 当前被 `verify-task-tool-no-permission.ts` 独立阻塞
 4. **L1.4 lint 规则添加**：在 `services/agent-gateway/src/eslint-rules/` 加入"禁止跨层直连"规则
 5. **L1.6 telemetry 接入**：与现有埋点系统对齐，加入 4 个延迟指标
 6. **Phase A 决策文档校准**：v3.12 写的 Phase A 任务清单与实际 Phase A 实施有偏差（v3.12 写"5 天工作量+剥离 SOUL"，但真实 Phase A 已经引入 SOUL）—— 需要更新 `team-architecture-phase-a-decisions.md`

@@ -27,7 +27,7 @@ import {
 } from '../team/team-default-roster-store.js';
 import { mergeRuntimeTaskGroups } from '../team/team-runtime-task-groups.js';
 import { listSharedSessionsForRecipient } from '../session/session-shared-access.js';
-import { listTeamAuditLogs, logTeamAudit, type TeamAuditAction } from '../team/team-audit-store.js';
+import { listTeamAuditLogs } from '../team/team-audit-store.js';
 import {
   buildMergedSessionTaskProjection,
   extractParentSessionIdFromMetadata,
@@ -37,13 +37,7 @@ import {
 } from './sessions.js';
 import { validateImportedMessagesPayload } from './session-route-helpers.js';
 import { createTeamSession } from '../handoff/bus/team-session-create.js';
-
-const createMemberSchema = z.object({
-  name: z.string().min(1),
-  email: z.string().email(),
-  role: z.enum(['owner', 'admin', 'member']).default('member'),
-  avatarUrl: z.string().url().optional(),
-});
+import { teamCrudRoutes } from './team-crud.js';
 
 const TEAM_MEMBER_SPECIALTY_VALUES = Array.from(
   new Set(DEFAULT_FIXED_TEAM_MEMBER_SLOTS.map((slot) => slot.specialty)),
@@ -120,65 +114,6 @@ const importWorkspaceSessionSchema = z.object({
   id: z.string().optional(),
   messages: z.array(z.unknown()).default([]),
   exportedAt: z.string().optional(),
-});
-
-const createTaskSchema = z.object({
-  title: z.string().min(1),
-  assigneeId: z.string().optional(),
-  status: z.enum(['pending', 'in_progress', 'done']).default('pending'),
-  priority: z.enum(['low', 'medium', 'high']).default('medium'),
-});
-
-const updateTaskSchema = z.object({
-  assigneeId: z.string().nullable().optional(),
-  status: z.enum(['pending', 'in_progress', 'done', 'failed']).optional(),
-  result: z.string().nullable().optional(),
-});
-
-const createMessageSchema = z.object({
-  senderId: z.string().optional(),
-  content: z.string().min(1),
-  type: z.enum(['update', 'question', 'result', 'error']).default('update'),
-});
-
-// L1.3 §1.3 反向消息通道载荷 schema（与 packages/web-client/src/team-inbound.ts 协议对齐）
-const inboundSubmitSchema = z.object({
-  messageType: z.enum([
-    'cancel_signal',
-    'pause_signal',
-    'resume_signal',
-    'clarification_answer',
-    'user_input',
-    'escalation_request',
-    'progress_report',
-  ]),
-  // payload 由 messageType 决定形状；这里只校验是 object，具体 shape
-  // 由消费方 LLM 循环解释（避免每次扩展类型都要改 schema）。
-  payload: z.record(z.unknown()).optional(),
-  clientIdempotencyKey: z.string().min(1).max(200).optional(),
-  // 客户端可指定过期时间（毫秒 epoch），缺省由 inbound-store 按类型给默认 TTL
-  expiresAt: z.number().int().positive().optional(),
-});
-
-const createSessionShareSchema = z.object({
-  memberId: z.string().min(1),
-  permission: z.enum(['view', 'comment', 'operate']).default('view'),
-  sessionId: z.string().min(1),
-});
-
-const updateSessionShareSchema = z.object({
-  permission: z.enum(['view', 'comment', 'operate']),
-});
-
-const auditLogsQuerySchema = z.object({
-  limit: z
-    .preprocess((value) => {
-      if (typeof value === 'string' && value.trim().length > 0) {
-        return Number(value);
-      }
-      return value;
-    }, z.number().int().min(1).max(100).optional())
-    .default(20),
 });
 
 const teamRuntimeQuerySchema = z.object({
@@ -326,27 +261,6 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   });
-
-  const getSessionShareForUser = (userId: string, shareId: string): SessionShareRow | undefined =>
-    sqliteGet<SessionShareRow>(
-      `SELECT
-          ss.id,
-          ss.session_id,
-          ss.member_id,
-          ss.permission,
-          ss.created_at,
-          ss.updated_at,
-          tm.name AS member_name,
-          tm.email AS member_email,
-          sess.title AS label,
-          sess.metadata_json AS session_metadata_json
-        FROM session_shares ss
-        JOIN team_members tm ON tm.id = ss.member_id
-        JOIN sessions sess ON sess.id = ss.session_id
-       WHERE ss.id = ? AND ss.user_id = ?
-       LIMIT 1`,
-      [shareId, userId],
-    );
 
   const getTeamWorkspaceForUser = (
     userId: string,
@@ -979,9 +893,15 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       });
       step.succeed(undefined, { sessionId, teamWorkspaceId });
 
+      const insertedSession = sqliteGet<{ metadata_json: string }>(
+        `SELECT metadata_json FROM sessions WHERE id = ? LIMIT 1`,
+        [sessionId],
+      );
+
       return reply.status(201).send({
         id: sessionId,
-        metadata_json: JSON.stringify(normalizedMetadata.metadata),
+        metadata_json:
+          insertedSession?.metadata_json ?? JSON.stringify(normalizedMetadata.metadata),
         state_status: 'idle',
         title: sessionTitle,
       });
@@ -1043,6 +963,23 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(403).send({ error: 'Forbidden' });
       }
 
+      const legacyRosterSource = normalizeTeamWorkspaceDefaultRoster(
+        parseTeamWorkspaceDefaultRosterJson(workspace.default_team_roster_json),
+      );
+      normalizedMetadata.metadata = {
+        ...normalizedMetadata.metadata,
+        teamDefinition: {
+          ...(typeof normalizedMetadata.metadata['teamDefinition'] === 'object' &&
+          normalizedMetadata.metadata['teamDefinition'] !== null
+            ? (normalizedMetadata.metadata['teamDefinition'] as Record<string, unknown>)
+            : {}),
+          createdAt: new Date().toISOString(),
+          memberSlots: legacyRosterSource,
+          source: { kind: 'blank' as const },
+          version: 2,
+        },
+      };
+
       const requestedParentSessionId = extractParentSessionIdFromMetadata(
         normalizedMetadata.metadata,
       );
@@ -1070,9 +1007,15 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       reply.header('Deprecation', 'true');
       reply.header('Sunset', 'use POST /team/workspaces/:id/sessions instead');
 
+      const insertedSession = sqliteGet<{ metadata_json: string }>(
+        `SELECT metadata_json FROM sessions WHERE id = ? LIMIT 1`,
+        [sessionId],
+      );
+
       return reply.status(201).send({
         id: sessionId,
-        metadata_json: JSON.stringify(normalizedMetadata.metadata),
+        metadata_json:
+          insertedSession?.metadata_json ?? JSON.stringify(normalizedMetadata.metadata),
         state_status: 'idle',
         title: sessionTitle,
       });
@@ -1403,685 +1346,5 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  app.get(
-    '/team/members',
-    { onRequest: [requireAuth] },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const { step, child } = startRequestWorkflow(request, 'team.member.list');
-      const user = request.user as JwtPayload;
-
-      const queryStep = child('query');
-      const rows = sqliteAll<MemberRow>(
-        `SELECT id, name, email, role, avatar_url, status, created_at FROM team_members WHERE user_id = ? ORDER BY created_at ASC`,
-        [user.sub],
-      );
-      queryStep.succeed(undefined, { count: rows.length });
-      step.succeed(undefined, { count: rows.length });
-
-      return reply.send(
-        rows.map((row) => ({
-          id: row.id,
-          name: row.name,
-          email: row.email,
-          role: row.role,
-          avatarUrl: row.avatar_url,
-          status: normalizeMemberStatus(row.status),
-          createdAt: row.created_at,
-        })),
-      );
-    },
-  );
-
-  app.post(
-    '/team/members',
-    { onRequest: [requireAuth] },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const { step, child } = startRequestWorkflow(request, 'team.member.create');
-      const user = request.user as JwtPayload;
-
-      const parseStep = child('parse-body');
-      const body = parseBody(createMemberSchema, request.body);
-      parseStep.succeed();
-
-      const { name, email, role, avatarUrl } = body;
-      const existingStep = child('check-existing');
-      const existing = sqliteGet<{ id: string }>(
-        `SELECT id FROM team_members WHERE user_id = ? AND email = ?`,
-        [user.sub, email],
-      );
-      if (existing) {
-        existingStep.fail('member already exists');
-        step.fail('member already exists');
-        return reply.status(409).send({ error: 'Member with this email already exists' });
-      }
-      existingStep.succeed();
-
-      const memberId = randomUUID();
-      const insertStep = child('insert', undefined, { memberId, role });
-      sqliteRun(
-        `INSERT INTO team_members (id, user_id, name, email, role, avatar_url) VALUES (?, ?, ?, ?, ?, ?)`,
-        [memberId, user.sub, name, email, role, avatarUrl ?? null],
-      );
-      insertStep.succeed();
-      step.succeed(undefined, { memberId, role });
-
-      return reply
-        .status(201)
-        .send({ id: memberId, name, email, role, avatarUrl: avatarUrl ?? null, status: 'idle' });
-    },
-  );
-
-  app.get(
-    '/team/tasks',
-    { onRequest: [requireAuth] },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const { step, child } = startRequestWorkflow(request, 'team.task.list');
-      const user = request.user as JwtPayload;
-
-      const queryStep = child('query');
-      const rows = sqliteAll<TaskRow>(
-        `SELECT id, title, assignee_id, status, priority, result, created_at, updated_at FROM team_tasks WHERE user_id = ? ORDER BY created_at DESC`,
-        [user.sub],
-      );
-      queryStep.succeed(undefined, { count: rows.length });
-      step.succeed(undefined, { count: rows.length });
-
-      return reply.send(
-        rows.map((row) => ({
-          id: row.id,
-          title: row.title,
-          assigneeId: row.assignee_id,
-          status: row.status === 'done' ? 'completed' : row.status,
-          priority: row.priority,
-          result: row.result,
-          createdAt: row.created_at,
-          updatedAt: row.updated_at,
-        })),
-      );
-    },
-  );
-
-  app.post(
-    '/team/tasks',
-    { onRequest: [requireAuth] },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const { step, child } = startRequestWorkflow(request, 'team.task.create');
-      const user = request.user as JwtPayload;
-
-      const parseStep = child('parse-body');
-      const body = parseBody(createTaskSchema, request.body);
-      parseStep.succeed();
-
-      const { title, assigneeId, status, priority } = body;
-      const taskId = randomUUID();
-      const insertStep = child('insert', undefined, { taskId, priority, status });
-      sqliteRun(
-        `INSERT INTO team_tasks (id, user_id, title, assignee_id, status, priority, result) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [taskId, user.sub, title, assigneeId ?? null, status, priority, null],
-      );
-      insertStep.succeed();
-      step.succeed(undefined, { taskId, priority, status });
-
-      return reply.status(201).send({
-        id: taskId,
-        title,
-        assigneeId: assigneeId ?? null,
-        status,
-        priority,
-        result: null,
-      });
-    },
-  );
-
-  app.patch(
-    '/team/tasks/:id',
-    { onRequest: [requireAuth] },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const taskId = (request.params as { id: string }).id;
-      const { step, child } = startRequestWorkflow(request, 'team.task.update', undefined, {
-        taskId,
-      });
-      const user = request.user as JwtPayload;
-
-      const parseStep = child('parse-body');
-      const body = parseBody(updateTaskSchema, request.body);
-      parseStep.succeed();
-
-      const lookupStep = child('check-existing');
-      const existing = sqliteGet<{ id: string }>(
-        `SELECT id FROM team_tasks WHERE user_id = ? AND id = ?`,
-        [user.sub, taskId],
-      );
-      if (!existing) {
-        lookupStep.fail('task not found');
-        step.fail('task not found');
-        return reply.status(404).send({ error: 'Task not found' });
-      }
-      lookupStep.succeed();
-
-      const updateStep = child('update');
-      sqliteRun(
-        `UPDATE team_tasks SET
-          assignee_id = COALESCE(?, assignee_id),
-          status = COALESCE(?, status),
-          result = COALESCE(?, result),
-          updated_at = datetime('now')
-         WHERE id = ? AND user_id = ?`,
-        [body.assigneeId ?? null, body.status ?? null, body.result ?? null, taskId, user.sub],
-      );
-      updateStep.succeed();
-
-      step.succeed(undefined, {
-        taskId,
-        status: body.status ?? 'unchanged',
-        assigneeChanged: body.assigneeId !== undefined,
-      });
-      return reply.send({ ok: true });
-    },
-  );
-
-  app.get(
-    '/team/messages',
-    { onRequest: [requireAuth] },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const { step, child } = startRequestWorkflow(request, 'team.message.list');
-      const user = request.user as JwtPayload;
-
-      const queryStep = child('query');
-      const rows = sqliteAll<MessageRow>(
-        `SELECT id, sender_id, content, type, created_at FROM team_messages WHERE user_id = ? ORDER BY created_at ASC LIMIT 100`,
-        [user.sub],
-      );
-      queryStep.succeed(undefined, { count: rows.length });
-      step.succeed(undefined, { count: rows.length });
-
-      return reply.send(
-        rows.map((row) => ({
-          id: row.id,
-          memberId: row.sender_id ?? 'system',
-          content: row.content,
-          type:
-            row.type === 'update' ||
-            row.type === 'question' ||
-            row.type === 'result' ||
-            row.type === 'error'
-              ? row.type
-              : 'update',
-          timestamp: Date.parse(row.created_at) || Date.now(),
-        })),
-      );
-    },
-  );
-
-  app.post(
-    '/team/messages',
-    { onRequest: [requireAuth] },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const { step, child } = startRequestWorkflow(request, 'team.message.create');
-      const user = request.user as JwtPayload;
-
-      const parseStep = child('parse-body');
-      const body = parseBody(createMessageSchema, request.body);
-      parseStep.succeed();
-
-      const id = randomUUID();
-      const insertStep = child('insert', undefined, { messageId: id, type: body.type });
-      sqliteRun(
-        `INSERT INTO team_messages (id, user_id, sender_id, content, type) VALUES (?, ?, ?, ?, ?)`,
-        [id, user.sub, body.senderId ?? null, body.content, body.type],
-      );
-      insertStep.succeed();
-
-      step.succeed(undefined, { messageId: id, type: body.type });
-      return reply.status(201).send({
-        id,
-        memberId: body.senderId ?? 'system',
-        content: body.content,
-        type: body.type,
-        timestamp: Date.now(),
-      });
-    },
-  );
-
-  app.get(
-    '/team/session-shares',
-    { onRequest: [requireAuth] },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const { step, child } = startRequestWorkflow(request, 'team.session-share.list');
-      const user = request.user as JwtPayload;
-
-      const queryStep = child('query');
-      const rows = sqliteAll<SessionShareRow>(
-        `SELECT
-           ss.id,
-           ss.session_id,
-           ss.member_id,
-           ss.permission,
-           ss.created_at,
-           ss.updated_at,
-           tm.name AS member_name,
-           tm.email AS member_email,
-           sess.title AS label,
-           sess.metadata_json AS session_metadata_json
-         FROM session_shares ss
-         JOIN team_members tm ON tm.id = ss.member_id
-         JOIN sessions sess ON sess.id = ss.session_id
-         WHERE ss.user_id = ?
-         ORDER BY ss.created_at DESC`,
-        [user.sub],
-      );
-      queryStep.succeed(undefined, { count: rows.length });
-      step.succeed(undefined, { count: rows.length });
-
-      return reply.send(rows.map((row) => mapSessionShareRow(user.sub, row)));
-    },
-  );
-
-  app.post(
-    '/team/session-shares',
-    { onRequest: [requireAuth] },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const { step, child } = startRequestWorkflow(request, 'team.session-share.create');
-      const user = request.user as JwtPayload;
-
-      const parseStep = child('parse-body');
-      const body = parseBody(createSessionShareSchema, request.body);
-      parseStep.succeed();
-
-      const sessionStep = child('check-session');
-      const session = sqliteGet<{ id: string; metadata_json: string; title: string | null }>(
-        `SELECT id, title, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1`,
-        [body.sessionId, user.sub],
-      );
-      if (!session) {
-        sessionStep.fail('session not found');
-        step.fail('session not found');
-        return reply.status(404).send({ error: 'Session not found' });
-      }
-      sessionStep.succeed();
-
-      const memberStep = child('check-member');
-      const member = sqliteGet<{ email: string; id: string; name: string }>(
-        `SELECT id, name, email FROM team_members WHERE id = ? AND user_id = ? LIMIT 1`,
-        [body.memberId, user.sub],
-      );
-      if (!member) {
-        memberStep.fail('member not found');
-        step.fail('member not found');
-        return reply.status(404).send({ error: 'Member not found' });
-      }
-      memberStep.succeed();
-
-      const existingStep = child('check-existing');
-      const existing = sqliteGet<{ id: string }>(
-        `SELECT id FROM session_shares WHERE user_id = ? AND session_id = ? AND member_id = ? LIMIT 1`,
-        [user.sub, body.sessionId, body.memberId],
-      );
-      if (existing) {
-        existingStep.fail('share already exists');
-        step.fail('share already exists');
-        return reply.status(409).send({ error: 'Share already exists' });
-      }
-      existingStep.succeed();
-
-      const shareId = randomUUID();
-      const insertStep = child('insert', undefined, { shareId, permission: body.permission });
-      sqliteRun(
-        `INSERT INTO session_shares (id, user_id, session_id, member_id, permission, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-        [shareId, user.sub, body.sessionId, body.memberId, body.permission],
-      );
-      insertStep.succeed();
-      step.succeed(undefined, { shareId, permission: body.permission });
-
-      const sessionWorkspacePath = getWorkspacePathFromMetadataJson({
-        metadataJson: session.metadata_json,
-        sessionId: body.sessionId,
-        userId: user.sub,
-      });
-      logTeamAudit({
-        action: 'share_created' satisfies TeamAuditAction,
-        actorEmail: user.email,
-        actorUserId: user.sub,
-        detail: `会话：${session.title ?? body.sessionId}；工作区：${sessionWorkspacePath ?? '未绑定工作区'}；成员：${member.name}；权限：${body.permission}`,
-        entityId: shareId,
-        entityType: 'session_share',
-        summary: `已将“${session.title ?? body.sessionId}”共享给 ${member.name}（${body.permission}）`,
-        userId: user.sub,
-      });
-
-      const createdShare = getSessionShareForUser(user.sub, shareId);
-
-      return reply.status(201).send({
-        ...(createdShare ? mapSessionShareRow(user.sub, createdShare) : {}),
-        id: createdShare?.id ?? shareId,
-        sessionId: createdShare?.session_id ?? body.sessionId,
-        memberId: createdShare?.member_id ?? body.memberId,
-        memberName: createdShare?.member_name ?? member.name,
-        memberEmail: createdShare?.member_email ?? member.email,
-        permission: createdShare?.permission ?? body.permission,
-        sessionLabel: createdShare?.label ?? session.title ?? body.sessionId,
-        workspacePath: createdShare
-          ? getWorkspacePathFromMetadataJson({
-              metadataJson: createdShare.session_metadata_json,
-              sessionId: createdShare.session_id,
-              userId: user.sub,
-            })
-          : sessionWorkspacePath,
-        createdAt: createdShare?.created_at ?? new Date().toISOString(),
-        updatedAt: createdShare?.updated_at ?? new Date().toISOString(),
-      });
-    },
-  );
-
-  app.patch(
-    '/team/session-shares/:id',
-    { onRequest: [requireAuth] },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const shareId = (request.params as { id: string }).id;
-      const { step, child } = startRequestWorkflow(
-        request,
-        'team.session-share.update',
-        undefined,
-        {
-          shareId,
-        },
-      );
-      const user = request.user as JwtPayload;
-
-      const parseStep = child('parse-body');
-      const body = parseBody(updateSessionShareSchema, request.body);
-      parseStep.succeed();
-
-      const lookupStep = child('check-existing');
-      const existing = getSessionShareForUser(user.sub, shareId);
-      if (!existing) {
-        lookupStep.fail('share not found');
-        step.fail('share not found');
-        return reply.status(404).send({ error: 'Session share not found' });
-      }
-      lookupStep.succeed(undefined, { currentPermission: existing.permission });
-
-      const changed = existing.permission !== body.permission;
-
-      if (changed) {
-        const updateStep = child('update', undefined, { nextPermission: body.permission });
-        sqliteRun(
-          `UPDATE session_shares
-           SET permission = ?, updated_at = datetime('now')
-           WHERE id = ? AND user_id = ?`,
-          [body.permission, shareId, user.sub],
-        );
-        updateStep.succeed();
-
-        logTeamAudit({
-          action: 'share_permission_updated' satisfies TeamAuditAction,
-          actorEmail: user.email,
-          actorUserId: user.sub,
-          detail: `会话：${existing.label ?? existing.session_id}；工作区：${getWorkspacePathFromMetadataJson({ metadataJson: existing.session_metadata_json, sessionId: existing.session_id, userId: user.sub }) ?? '未绑定工作区'}；成员：${existing.member_name}；旧权限：${existing.permission}；新权限：${body.permission}`,
-          entityId: shareId,
-          entityType: 'session_share',
-          summary: `已将 ${existing.member_name} 对“${existing.label ?? existing.session_id}”的权限从 ${existing.permission} 调整为 ${body.permission}`,
-          userId: user.sub,
-        });
-      }
-
-      const responseShare = changed
-        ? (getSessionShareForUser(user.sub, shareId) ?? existing)
-        : existing;
-
-      step.succeed(undefined, {
-        changed,
-        permission: body.permission,
-      });
-      return reply.send(
-        mapSessionShareRow(user.sub, { ...responseShare, permission: body.permission }),
-      );
-    },
-  );
-
-  app.get(
-    '/team/audit-logs',
-    { onRequest: [requireAuth] },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const { step, child } = startRequestWorkflow(request, 'team.audit-log.list');
-      const user = request.user as JwtPayload;
-
-      const queryStep = child('parse-query');
-      const query = parseQuery(auditLogsQuerySchema, request.query);
-      queryStep.succeed(undefined, { limit: query.limit });
-
-      const rows = listTeamAuditLogs({ userId: user.sub, limit: query.limit });
-      step.succeed(undefined, { count: rows.length });
-
-      return reply.send(rows);
-    },
-  );
-
-  app.delete(
-    '/team/session-shares/:id',
-    { onRequest: [requireAuth] },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const shareId = (request.params as { id: string }).id;
-      const { step } = startRequestWorkflow(request, 'team.session-share.delete', undefined, {
-        shareId,
-      });
-      const user = request.user as JwtPayload;
-
-      const existing = getSessionShareForUser(user.sub, shareId);
-      sqliteRun('DELETE FROM session_shares WHERE id = ? AND user_id = ?', [shareId, user.sub]);
-
-      if (existing) {
-        logTeamAudit({
-          action: 'share_deleted' satisfies TeamAuditAction,
-          actorEmail: user.email,
-          actorUserId: user.sub,
-          detail: `会话：${existing.label ?? existing.session_id}；工作区：${getWorkspacePathFromMetadataJson({ metadataJson: existing.session_metadata_json, sessionId: existing.session_id, userId: user.sub }) ?? '未绑定工作区'}；成员：${existing.member_name}；删除前权限：${existing.permission}`,
-          entityId: shareId,
-          entityType: 'session_share',
-          summary: `已取消 ${existing.member_name} 对“${existing.label ?? existing.session_id}”的共享权限`,
-          userId: user.sub,
-        });
-      }
-
-      step.succeed();
-      return reply.status(204).send();
-    },
-  );
-
-  // ─── L1.3 §1.3 反向消息通道：POST /team/sessions/:sessionId/inbound-messages ───
-  // 关联文档：docs/team-architecture-l1-3-streaming-handoff-spec.md §1.3
-  // 关联实现：handoff/inbound-store.ts
-  //
-  // 用途：
-  //   - team 用户回答 c 的 [NEEDS CLARIFICATION] → clarification_answer
-  //   - team 用户中途追加输入 → user_input
-  //   - 取消 / 暂停 / 恢复信号
-  // 这条端点写入 session_inbound_messages 表，下游 session 在 LLM 循环中
-  // 通过 consumePendingInboundMessage 拉取消费。
-  app.post(
-    '/team/sessions/:sessionId/inbound-messages',
-    { onRequest: [requireAuth] },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const sessionId = (request.params as { sessionId: string }).sessionId;
-      const { step, child } = startRequestWorkflow(request, 'team.session.inbound', undefined, {
-        sessionId,
-      });
-      const user = request.user as JwtPayload;
-
-      const parseStep = child('parse-body');
-      const body = parseBody(inboundSubmitSchema, request.body);
-      parseStep.succeed();
-
-      // 校验 session 归属
-      const sessionStep = child('resolve-session');
-      const session = sqliteGet<{ id: string; user_id: string; role_layer: string | null }>(
-        `SELECT id, user_id, role_layer FROM sessions WHERE id = ? AND user_id = ? LIMIT 1`,
-        [sessionId, user.sub],
-      );
-      if (!session) {
-        sessionStep.fail('session not found');
-        step.fail('session not found');
-        return reply.status(404).send({ error: 'Session not found' });
-      }
-      sessionStep.succeed();
-
-      const submitStep = child('submit-inbound');
-      try {
-        const { submitInboundMessage } = await import('../handoff/store/inbound-store.js');
-        const expiresAtIso =
-          typeof body.expiresAt === 'number'
-            ? new Date(body.expiresAt).toISOString().replace('T', ' ').replace('Z', '').slice(0, 19)
-            : undefined;
-        const result = submitInboundMessage({
-          userId: user.sub,
-          toSessionId: sessionId,
-          // L1.4 capability：HTTP 入口的发送方语义。
-          //   - 目标是 reception 会话 → 'user'（用户直接发到 b）
-          //   - 目标是其他层会话 → 'reception'（b 代为转发用户的回答给 c/d/e/f/g）
-          // 这与 layer-capabilities 矩阵的 canReceiveInboundFrom 对齐。
-          fromRoleLayer: session.role_layer === 'reception' ? 'user' : 'reception',
-          messageType: body.messageType,
-          payload: body.payload ?? {},
-          clientIdempotencyKey: body.clientIdempotencyKey ?? null,
-          ...(expiresAtIso ? { expiresAt: expiresAtIso } : {}),
-        });
-        submitStep.succeed(undefined, {
-          messageId: result.record.id,
-          reused: result.reused,
-        });
-
-        // ─── L1.4 audit log：escape hatch 使用记录 ─────────────────────
-        // cancel_signal / pause_signal / escalation_request 是 escape hatch 调用，
-        // 必须写 audit log（L1.4.3 要求）。
-        const isEscapeHatch =
-          body.messageType === 'cancel_signal' ||
-          body.messageType === 'pause_signal' ||
-          body.messageType === 'resume_signal' ||
-          body.messageType === 'escalation_request';
-        if (isEscapeHatch && !result.reused) {
-          const hatchType =
-            body.messageType === 'escalation_request'
-              ? '#1 escalation'
-              : body.messageType === 'cancel_signal' || body.messageType === 'pause_signal'
-                ? '#3 cancel/pause'
-                : '#3 resume';
-          try {
-            logTeamAudit({
-              action: 'escape_hatch_used' as TeamAuditAction,
-              actorEmail: user.email,
-              actorUserId: user.sub,
-              detail: JSON.stringify({
-                hatchType,
-                messageType: body.messageType,
-                targetSessionId: sessionId,
-                decisionSource: 'user',
-              }),
-              entityId: result.record.id,
-              entityType: 'session_inbound_message',
-              summary: `Escape hatch ${hatchType}: ${body.messageType} → session ${sessionId.slice(0, 8)}`,
-              userId: user.sub,
-            });
-          } catch {
-            // audit log 写入失败不阻塞
-          }
-        }
-
-        // ─── 同步：把用户消息写入 session 消息流（所有 session 类型） ─────
-        // 无论是否触发 B1 编排，user_input 都应该在 session 的消息流中可见。
-        // 这样 reload 后前端能立刻看到自己发的话。
-        // 注意：只对 user_input 且非 reused 写入（避免 cancel/pause 等信号
-        // 或幂等重试产生重复消息）。
-        if (body.messageType === 'user_input' && !result.reused) {
-          const userInputText =
-            typeof body.payload?.['text'] === 'string' ? body.payload['text'] : '';
-          if (userInputText.trim().length > 0) {
-            try {
-              const { appendSessionMessageV2 } = await import('../message/message-v2-adapter.js');
-              appendSessionMessageV2({
-                sessionId,
-                userId: user.sub,
-                role: 'user',
-                content: [{ type: 'text', text: userInputText }],
-                clientRequestId: body.clientIdempotencyKey ?? null,
-              });
-            } catch (err) {
-              console.warn(
-                `[team.session.inbound] persist user msg failed: ${err instanceof Error ? err.message : String(err)}`,
-              );
-            }
-          }
-        }
-
-        // ─── B1 自动编排（只对 reception session 的 user_input 触发） ─────────
-        const shouldOrchestrate =
-          !result.reused && session.role_layer === 'reception' && body.messageType === 'user_input';
-        if (shouldOrchestrate) {
-          const userInputText =
-            typeof body.payload?.['text'] === 'string' ? body.payload['text'] : '';
-          // 从 session metadata 读 teamWorkspaceId（reception session 创建时已写入）
-          const sessionMeta = sqliteGet<{ metadata_json: string | null }>(
-            `SELECT metadata_json FROM sessions WHERE id = ? LIMIT 1`,
-            [sessionId],
-          );
-          let teamWorkspaceIdFromMeta: string | null = null;
-          if (sessionMeta?.metadata_json) {
-            try {
-              const parsed = JSON.parse(sessionMeta.metadata_json) as Record<string, unknown>;
-              if (typeof parsed['teamWorkspaceId'] === 'string') {
-                teamWorkspaceIdFromMeta = parsed['teamWorkspaceId'];
-              }
-            } catch {
-              // ignore
-            }
-          }
-
-          // 异步：把 LLM 改写 + handoff 创建放到后台。assistant ack 由
-          // orchestrator 在完成时落库，前端可通过 WS 或下一次 reload 看到。
-          void (async () => {
-            try {
-              const { orchestrateReceptionInput } =
-                await import('../handoff/runner/reception-orchestrator.js');
-              await orchestrateReceptionInput({
-                userId: user.sub,
-                receptionSessionId: sessionId,
-                userIntent: userInputText,
-                teamWorkspaceId: teamWorkspaceIdFromMeta,
-                clientIdempotencyKey: body.clientIdempotencyKey ?? null,
-                // user 消息已在上面同步写过，避免重复写
-                persistUserMessage: false,
-              });
-            } catch (err) {
-              console.warn(
-                `[team.session.inbound] orchestrate (async) failed: ${err instanceof Error ? err.message : String(err)}`,
-              );
-            }
-          })();
-        }
-
-        step.succeed(undefined, { messageId: result.record.id });
-
-        // L1.6 延迟监控：记录 a→b 确认延迟（从请求开始到响应）
-        try {
-          const { recordLatency } = await import('../handoff/bus/latency-monitor.js');
-          const requestStartMs = (request as unknown as { startTime?: number }).startTime;
-          if (typeof requestStartMs === 'number') {
-            recordLatency('a_to_b_ack', Date.now() - requestStartMs);
-          }
-        } catch {
-          /* latency monitor 不阻塞 */
-        }
-
-        return reply.status(result.reused ? 200 : 201).send({
-          messageId: result.record.id,
-          createdAt: result.record.createdAt,
-        });
-      } catch (err) {
-        const reason = err instanceof Error ? err.message : 'inbound submit failed';
-        submitStep.fail(reason);
-        step.fail(reason);
-        return reply.status(500).send({ error: reason });
-      }
-    },
-  );
+  await app.register(teamCrudRoutes);
 }

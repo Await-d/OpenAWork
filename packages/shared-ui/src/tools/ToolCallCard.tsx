@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { tokens } from '../tokens.js';
+import type { AlwaysScopeLevel } from '../permissions/PermissionPrompt.js';
 import type { ToolDiffFileView } from './ToolDiffCollection.js';
 import { ToolDiffCollection } from './ToolDiffCollection.js';
 import { UnifiedCodeDiff, summarizeSnapshotDiff, summarizeUnifiedDiff } from './UnifiedCodeDiff.js';
@@ -45,6 +46,10 @@ export interface ToolCallCardProps {
       primary?: boolean;
     }>;
     pendingLabel?: string;
+    scopeLevels?: AlwaysScopeLevel[];
+    selectedScopeCategory?: AlwaysScopeLevel['category'];
+    selectedScopePattern?: string;
+    onSelectScopeLevel?: (level: AlwaysScopeLevel) => void;
   };
   kind?: ToolKind;
   toolCallId?: string;

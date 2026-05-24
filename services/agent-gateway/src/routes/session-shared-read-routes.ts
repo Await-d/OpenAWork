@@ -1,9 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { parseQuery } from '../infra/parse-request.js';
 import {
   mapPermissionRequestRow,
   parseApprovedPermissionResumePayload,
+  parsePermissionAlwaysJson,
   permissionDecisionSchema,
   type PermissionDecision,
   type PermissionRequestStatus,
@@ -53,6 +55,7 @@ import { type ApprovedPermissionResumePayload } from './stream.js';
 import { expirePendingPermissionRequests } from './permissions.js';
 import { expirePendingQuestionRequests } from './questions.js';
 import { persistWorkspacePermanentPermission } from '../workspace/workspace-safety.js';
+import { resolvePermissionCategory } from '@openAwork/agent-core';
 import { logTeamAudit } from '../team/team-audit-store.js';
 import { toPublicSessionResponse } from './session-route-helpers.js';
 import { mergeRuntimeSafeSessionMessages } from '../session/runtime-safe-message-merge.js';
@@ -70,6 +73,7 @@ interface SessionRow {
 import { parseBody } from '../infra/parse-request.js';
 
 interface PermissionRequestRow {
+  always_json: string | null;
   created_at: string;
   decision: PermissionDecision | null;
   expires_at: number | null;
@@ -110,6 +114,7 @@ const sharedSessionCommentSchema = z.object({
 const replyPermissionSchema = z.object({
   requestId: z.string().min(1),
   decision: permissionDecisionSchema,
+  alwaysOverride: z.array(z.string().min(1)).optional(),
 });
 
 const replyQuestionSchema = z.object({
@@ -232,7 +237,7 @@ function updateSessionPlanModeForExitDecision(input: {
 
 function listSharedPendingPermissionRequests(input: { sessionId: string }) {
   return sqliteAll<PermissionRequestRow>(
-    `SELECT id, session_id, tool_name, scope, reason, risk_level, preview_action, status, decision, request_payload_json, expires_at, created_at
+    `SELECT id, session_id, tool_name, scope, reason, risk_level, preview_action, status, decision, request_payload_json, expires_at, always_json, created_at
      FROM permission_requests
      WHERE session_id = ? AND status = 'pending'
      ORDER BY created_at ASC`,
@@ -513,7 +518,7 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
       }
 
       const permissionRequest = sqliteGet<PermissionRequestRow>(
-        `SELECT id, session_id, tool_name, scope, reason, risk_level, preview_action, status, decision, request_payload_json, expires_at, created_at
+        `SELECT id, session_id, tool_name, scope, reason, risk_level, preview_action, status, decision, request_payload_json, expires_at, always_json, created_at
          FROM permission_requests
          WHERE id = ? AND session_id = ?
          LIMIT 1`,
@@ -552,12 +557,55 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
         ],
       );
 
+      const permissionCategory = resolvePermissionCategory(permissionRequest.tool_name);
+      const alwaysPatterns =
+        body.alwaysOverride && body.alwaysOverride.length > 0
+          ? body.alwaysOverride
+          : (() => {
+              const parsedAlways = parsePermissionAlwaysJson(permissionRequest.always_json);
+              return parsedAlways.length > 0 ? parsedAlways : [permissionRequest.scope];
+            })();
+
       if (body.decision === 'permanent') {
-        persistWorkspacePermanentPermission({
-          sessionId,
-          toolName: permissionRequest.tool_name,
-          scope: permissionRequest.scope,
-        });
+        for (const pattern of alwaysPatterns) {
+          persistWorkspacePermanentPermission({
+            sessionId,
+            toolName: permissionCategory,
+            scope: pattern,
+          });
+        }
+      } else if (body.decision === 'session') {
+        for (const pattern of alwaysPatterns) {
+          const existing = sqliteGet<{ id: string }>(
+            `SELECT id FROM permission_requests
+             WHERE session_id = ? AND tool_name = ? AND scope = ?
+               AND status = 'approved' AND decision = 'session'
+             LIMIT 1`,
+            [sessionId, permissionCategory, pattern],
+          );
+          if (existing) continue;
+          if (
+            permissionCategory === permissionRequest.tool_name &&
+            pattern === permissionRequest.scope
+          ) {
+            continue;
+          }
+          sqliteRun(
+            `INSERT INTO permission_requests
+             (id, session_id, tool_name, scope, reason, risk_level, preview_action, request_payload_json, expires_at, always_json, status, decision)
+             VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, 'approved', 'session')`,
+            [
+              randomUUID(),
+              sessionId,
+              permissionCategory,
+              pattern,
+              permissionRequest.reason,
+              permissionRequest.risk_level,
+              permissionRequest.preview_action,
+              JSON.stringify([pattern]),
+            ],
+          );
+        }
       }
 
       const requestClientRequestId = (() => {

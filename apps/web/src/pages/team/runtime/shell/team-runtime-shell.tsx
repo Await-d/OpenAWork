@@ -13,6 +13,7 @@ import type {
   TeamTaskRecord,
 } from '@openAwork/web-client';
 import type { CapabilityDescriptor, CoreRole, ManagedAgentRecord } from '@openAwork/shared';
+import type { AlwaysScopeLevel } from '@openAwork/shared-ui';
 import {
   submitInteractionAgentFlow,
   type InteractionAgentRewriteArtifact,
@@ -106,6 +107,7 @@ interface TeamRuntimeShellProps {
   onReplySharedPermission: (
     requestId: string,
     decision: 'once' | 'session' | 'permanent' | 'reject',
+    scopeLevel?: AlwaysScopeLevel,
   ) => void;
   onReplySharedQuestion: (input: {
     answers?: string[][];

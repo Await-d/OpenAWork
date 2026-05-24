@@ -7,7 +7,11 @@
 import type { WebSocket } from '@fastify/websocket';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { JwtPayload } from '../infra/auth.js';
+import { recordLatency } from '../handoff/bus/latency-monitor.js';
 import { subscribeToTeamEvents } from '../handoff/bus/team-events-bus.js';
+
+const TEAM_EVENTS_HEARTBEAT_INTERVAL_MS = 10_000;
+const TEAM_EVENTS_IDLE_TIMEOUT_MS = 45_000;
 
 export async function teamEventsRoutes(app: FastifyInstance): Promise<void> {
   app.get(
@@ -39,42 +43,111 @@ export async function teamEventsRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const userId = user.sub;
-      safeSend(socket, { type: 'connected', userId });
+      if (!safeSend(socket, { type: 'connected', userId })) {
+        try {
+          socket.close(1011, 'TEAM_EVENTS_CONNECT_SEND_FAILED');
+        } catch {
+          // socket 已处于关闭态，无需进一步处理。
+        }
+        return;
+      }
+
+      let closed = false;
+      let lastActivityAt = Date.now();
+      let heartbeat: NodeJS.Timeout | null = null;
+
+      const touchActivity = () => {
+        lastActivityAt = Date.now();
+      };
 
       const unsubscribe = subscribeToTeamEvents((event) => {
         if (event.userId !== userId) return;
-        safeSend(socket, event);
+        if (event.type === 'session.substate.changed') {
+          recordLatency('substate_push', Math.max(0, Date.now() - event.timestamp));
+        }
+        if (!safeSend(socket, event)) {
+          closeSocket(1011, 'TEAM_EVENTS_SEND_FAILED', 'SEND_FAILED');
+          return;
+        }
+        touchActivity();
       });
 
+      const cleanup = () => {
+        if (closed) return;
+        closed = true;
+        unsubscribe();
+        if (heartbeat) {
+          clearInterval(heartbeat);
+          heartbeat = null;
+        }
+      };
+
+      const closeSocket = (code: number, reason: string, errorCode?: string) => {
+        if (closed) return;
+        if (errorCode) {
+          safeSend(socket, { type: 'error', code: errorCode });
+        }
+        cleanup();
+        try {
+          socket.close(code, reason);
+        } catch {
+          // 底层连接已断开；cleanup 已经执行，不再重复处理。
+        }
+      };
+
+      heartbeat = setInterval(() => {
+        if (closed) return;
+        if (Date.now() - lastActivityAt > TEAM_EVENTS_IDLE_TIMEOUT_MS) {
+          closeSocket(1001, 'TEAM_EVENTS_IDLE_TIMEOUT', 'IDLE_TIMEOUT');
+          return;
+        }
+        try {
+          socket.ping();
+        } catch {
+          closeSocket(1011, 'TEAM_EVENTS_PING_FAILED', 'PING_FAILED');
+        }
+      }, TEAM_EVENTS_HEARTBEAT_INTERVAL_MS);
+
       socket.on('message', (data: Buffer) => {
+        touchActivity();
         const text = data.toString().trim();
         if (text.length === 0) return;
         try {
           const parsed = JSON.parse(text) as { type?: string };
           if (parsed.type === 'ping') {
-            safeSend(socket, { type: 'pong', timestamp: Date.now() });
+            if (!safeSend(socket, { type: 'pong', timestamp: Date.now() })) {
+              closeSocket(1011, 'TEAM_EVENTS_PONG_FAILED', 'SEND_FAILED');
+            }
+            return;
           }
+          if (parsed.type === 'pong') return;
+          safeSend(socket, { type: 'error', code: 'UNSUPPORTED_MESSAGE' });
         } catch (_parseErr) {
-          // 非法 JSON，静默忽略（客户端不应通过此通道发非 JSON）
           void _parseErr;
+          safeSend(socket, { type: 'error', code: 'INVALID_JSON' });
         }
       });
 
+      socket.on('pong', () => {
+        touchActivity();
+      });
+
       socket.on('close', () => {
-        unsubscribe();
+        cleanup();
       });
       socket.on('error', () => {
-        unsubscribe();
+        cleanup();
       });
     },
   );
 }
 
-function safeSend(socket: WebSocket, payload: unknown): void {
+function safeSend(socket: WebSocket, payload: unknown): boolean {
   try {
     socket.send(JSON.stringify(payload));
+    return true;
   } catch (_sendErr) {
-    // socket 已关闭，静默忽略
     void _sendErr;
+    return false;
   }
 }

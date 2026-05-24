@@ -28,6 +28,10 @@ const SESSION_ID = 's-artifact';
 const FROM_SESSION_ID = 's-from-artifact';
 const TEAM_WORKSPACE_ID = 'tw-artifact';
 
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function seedUser(id: string, email: string): void {
   dbModule.sqliteRun("INSERT OR IGNORE INTO users (id, email, password_hash) VALUES (?, ?, 'x')", [
     id,
@@ -320,5 +324,172 @@ describe('runArtifactChain', () => {
 
     // plan 输入里应该包含 OAuth 2.0 的回答
     expect(planPrompt).toContain('OAuth 2.0');
+  });
+
+  it('clarification 阻塞门禁：pause 后等待 resume，再消费答案注入 plan', async () => {
+    const handoff = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+      payload: {},
+    });
+
+    const inboundStore = await import('../../handoff/store/inbound-store.js');
+    inboundStore.__resetInboundForTesting(SESSION_ID);
+
+    inboundStore.submitInboundMessage({
+      userId: USER_ID,
+      toSessionId: SESSION_ID,
+      fromRoleLayer: 'reception',
+      messageType: 'pause_signal',
+      payload: { reason: '暂停等待人工确认' },
+    });
+
+    let planPrompt = '';
+    const mockLlm = async (system: string, user: string): Promise<string> => {
+      if (system.includes('实施计划')) {
+        if (!planPrompt) planPrompt = user;
+        return `# 实施计划
+
+## 技术上下文
+
+TypeScript
+
+## 宪法对齐
+
+| 宪法条目 | 本计划是否符合 | 备注 |
+|---|---|---|
+| 禁止空 catch | ✅ | ok |`;
+      }
+      if (system.includes('任务清单')) {
+        return `# 任务清单
+
+## Phase 1
+- [ ] T001 [US1] 任务`;
+      }
+      return `# 规格
+
+## 用户故事 1
+
+## 需求
+- **FR-001**: 系统必须 [NEEDS CLARIFICATION: 部署方式?]`;
+    };
+
+    const runPromise = artifactChain.runArtifactChain({
+      userId: USER_ID,
+      sessionId: SESSION_ID,
+      handoff,
+      sourceIntent: '原始',
+      rewrittenIntent: '改写',
+      teamWorkspaceId: null,
+      callLlm: mockLlm,
+    });
+
+    await wait(80);
+    const pausedSubstate = dbModule.sqliteGet<{ substate: string | null }>(
+      `SELECT substate FROM sessions WHERE id = ?`,
+      [SESSION_ID],
+    );
+    expect(pausedSubstate?.substate).toBe('clarifying');
+
+    inboundStore.submitInboundMessage({
+      userId: USER_ID,
+      toSessionId: SESSION_ID,
+      fromRoleLayer: 'reception',
+      messageType: 'clarification_answer',
+      payload: { answer: '优先支持 Docker 部署', answeredBy: 'user' },
+    });
+
+    await wait(60);
+    expect(planPrompt).toBe('');
+
+    inboundStore.submitInboundMessage({
+      userId: USER_ID,
+      toSessionId: SESSION_ID,
+      fromRoleLayer: 'reception',
+      messageType: 'resume_signal',
+      payload: { reason: '继续' },
+    });
+
+    await runPromise;
+
+    expect(planPrompt).toContain('优先支持 Docker 部署');
+  });
+
+  it('clarification 阻塞门禁：收到 cancel_signal 后中止并设置 cancelled substate', async () => {
+    const handoff = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+      payload: {},
+    });
+
+    const inboundStore = await import('../../handoff/store/inbound-store.js');
+    inboundStore.__resetInboundForTesting(SESSION_ID);
+
+    inboundStore.submitInboundMessage({
+      userId: USER_ID,
+      toSessionId: SESSION_ID,
+      fromRoleLayer: 'reception',
+      messageType: 'cancel_signal',
+      payload: { reason: '用户取消' },
+    });
+
+    let planPrompt = '';
+    const mockLlm = async (system: string, user: string): Promise<string> => {
+      if (system.includes('实施计划')) {
+        planPrompt = user;
+        return `# 实施计划
+
+## 技术上下文
+
+TypeScript
+
+## 宪法对齐
+
+| 宪法条目 | 本计划是否符合 | 备注 |
+|---|---|---|
+| 禁止空 catch | ✅ | ok |`;
+      }
+      if (system.includes('任务清单')) {
+        return `# 任务清单
+
+## Phase 1
+- [ ] T001 [US1] 任务`;
+      }
+      return `# 规格
+
+## 用户故事 1
+
+## 需求
+- **FR-001**: 系统必须 [NEEDS CLARIFICATION: 是否继续?]`;
+    };
+
+    await expect(
+      artifactChain.runArtifactChain({
+        userId: USER_ID,
+        sessionId: SESSION_ID,
+        handoff,
+        sourceIntent: '原始',
+        rewrittenIntent: '改写',
+        teamWorkspaceId: null,
+        callLlm: mockLlm,
+      }),
+    ).rejects.toThrow('cancelled-by-inbound');
+
+    const substate = dbModule.sqliteGet<{ substate: string | null }>(
+      `SELECT substate FROM sessions WHERE id = ?`,
+      [SESSION_ID],
+    );
+    const handoffRow = dbModule.sqliteGet<{ result_json: string | null }>(
+      `SELECT result_json FROM handoff_records WHERE id = ?`,
+      [handoff.id],
+    );
+
+    expect(substate?.substate).toBe('cancelled');
+    expect(handoffRow?.result_json).toBeNull();
+    expect(planPrompt).toBe('');
   });
 });

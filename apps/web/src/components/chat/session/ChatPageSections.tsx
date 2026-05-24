@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import '../message/chat-message.css';
-import type { GenerativeUIMessage } from '@openAwork/shared-ui';
+import type { AlwaysScopeLevel, GenerativeUIMessage } from '@openAwork/shared-ui';
 import { GenerativeUIRenderer } from '@openAwork/shared-ui';
 import { usePrefersReducedMotion } from '../../../hooks/ui/usePrefersReducedMotion.js';
 import {
@@ -383,6 +383,10 @@ export interface ChatToolRenderOptions {
           primary?: boolean;
         }>;
         pendingLabel?: string;
+        scopeLevels?: AlwaysScopeLevel[];
+        selectedScopeCategory?: AlwaysScopeLevel['category'];
+        selectedScopePattern?: string;
+        onSelectScopeLevel?: (level: AlwaysScopeLevel) => void;
       }
     | undefined;
   selectedChildSessionId?: string | null;
@@ -566,6 +570,10 @@ function renderToolCallContent(input: {
       primary?: boolean;
     }>;
     pendingLabel?: string;
+    scopeLevels?: AlwaysScopeLevel[];
+    selectedScopeCategory?: AlwaysScopeLevel['category'];
+    selectedScopePattern?: string;
+    onSelectScopeLevel?: (level: AlwaysScopeLevel) => void;
   };
   durationMs?: number;
   isError?: boolean;
@@ -1603,8 +1611,56 @@ export type ResolveInlinePermissionActionsFn = (requestId: string) =>
         primary?: boolean;
       }>;
       pendingLabel?: string;
+      scopeLevels?: AlwaysScopeLevel[];
+      selectedScopeCategory?: AlwaysScopeLevel['category'];
+      selectedScopePattern?: string;
+      onSelectScopeLevel?: (level: AlwaysScopeLevel) => void;
     }
   | undefined;
+
+function isScopeLevelSelected(
+  level: AlwaysScopeLevel,
+  actions: NonNullable<ReturnType<ResolveInlinePermissionActionsFn>>,
+): boolean {
+  return (
+    actions.selectedScopeCategory === level.category ||
+    actions.selectedScopePattern === level.pattern
+  );
+}
+
+function renderCompactScopeSelector(
+  actions: NonNullable<ReturnType<ResolveInlinePermissionActionsFn>>,
+  buttonStyle: React.CSSProperties,
+): React.ReactNode {
+  if (!actions.scopeLevels || actions.scopeLevels.length === 0 || !actions.onSelectScopeLevel) {
+    return null;
+  }
+
+  return actions.scopeLevels.map((level) => {
+    const isSelected = isScopeLevelSelected(level, actions);
+    return (
+      <button
+        key={level.category}
+        type="button"
+        onClick={() => actions.onSelectScopeLevel?.(level)}
+        title={`${level.description} ${level.pattern}`}
+        aria-pressed={isSelected}
+        style={{
+          ...buttonStyle,
+          border: isSelected
+            ? '1px solid var(--accent)'
+            : '1px solid color-mix(in srgb, var(--accent) 24%, var(--border-default))',
+          background: isSelected
+            ? 'color-mix(in srgb, var(--accent) 18%, transparent)'
+            : 'var(--bg-overlay)',
+          color: isSelected ? 'var(--accent)' : 'var(--fg-muted)',
+        }}
+      >
+        {level.label}
+      </button>
+    );
+  });
+}
 
 export interface InlinePermissionQuickBarProps {
   permissions: Array<{
@@ -1675,6 +1731,18 @@ export function InlinePermissionQuickBar({
               >
                 {permission.reason}
               </span>
+              {actions &&
+                renderCompactScopeSelector(actions, {
+                  appearance: 'none',
+                  height: 20,
+                  padding: '0 7px',
+                  borderRadius: 999,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  lineHeight: 1,
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                })}
               {actions &&
                 actions.items.length > 0 &&
                 actions.items.map((action) => (

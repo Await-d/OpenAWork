@@ -38,6 +38,7 @@ interface PermissionDecisionOption {
 export interface AlwaysScopeLevel {
   /** Display label for this scope level. */
   label: string;
+  description: string;
   /** The pattern string for this level. */
   pattern: string;
   /** Category identifier: 'full' | 'partial' | 'base'. */
@@ -50,44 +51,56 @@ export interface AlwaysScopeLevel {
  * - Partial: intermediate pattern (moderate breadth)
  * - Base: the broadest pattern (widest approval)
  *
- * When there are fewer than 3 distinct patterns, only the available levels
- * are returned. The full command is always derived from `previewAction ?? scope`.
+ * Always returns the three visible approval levels. When the gateway does not
+ * provide enough distinct broader patterns, the missing levels safely fall back
+ * to `scope` so choosing them never persists `previewAction` or an invented
+ * broad pattern.
  */
 export function categorizeAlwaysPatterns(
   previewAction: string | undefined,
   scope: string,
   always: string[] | undefined,
 ): AlwaysScopeLevel[] {
-  const fullCommand = previewAction ?? scope;
-  // Dedupe: remove patterns identical to the full command
-  const uniqueAlways = (always ?? []).filter(
-    (pattern) => pattern !== fullCommand && pattern !== scope,
-  );
+  void previewAction;
+  const fullCommand = scope;
+  const seenPatterns = new Set<string>([fullCommand]);
+  const uniqueAlways: string[] = [];
 
-  const levels: AlwaysScopeLevel[] = [
-    { label: 'Full command', pattern: fullCommand, category: 'full' },
-  ];
-
-  if (uniqueAlways.length === 0) {
-    // No broader patterns — only the full command is available
-    return levels;
+  for (const pattern of always ?? []) {
+    if (pattern.trim().length === 0 || seenPatterns.has(pattern)) continue;
+    seenPatterns.add(pattern);
+    uniqueAlways.push(pattern);
   }
 
-  if (uniqueAlways.length === 1) {
-    // One broader pattern → treat as "Base"
-    levels.push({ label: 'Base', pattern: uniqueAlways[0]!, category: 'base' });
-  } else {
-    // Two or more broader patterns → first is "Partial", last is "Base"
-    // (patterns are assumed ordered from narrower to broader by the gateway)
-    levels.push({ label: 'Partial', pattern: uniqueAlways[0]!, category: 'partial' });
-    levels.push({
-      label: 'Base',
-      pattern: uniqueAlways[uniqueAlways.length - 1]!,
+  const hasPartialPattern = uniqueAlways.length >= 2;
+  const hasBasePattern = uniqueAlways.length >= 1;
+  const partialPattern = hasPartialPattern ? uniqueAlways[0]! : fullCommand;
+  const basePattern = hasBasePattern ? uniqueAlways[uniqueAlways.length - 1]! : fullCommand;
+
+  return [
+    {
+      label: '仅本次指令',
+      description: '只覆盖当前命令，不会扩大到其它参数或子命令。',
+      pattern: fullCommand,
+      category: 'full',
+    },
+    {
+      label: '同子命令',
+      description: hasPartialPattern
+        ? '覆盖网关提供的相同子命令模式。'
+        : '当前没有可用的同子命令规则，选择后仍只覆盖当前命令。',
+      pattern: partialPattern,
+      category: 'partial',
+    },
+    {
+      label: '同类指令',
+      description: hasBasePattern
+        ? '覆盖网关提供的同类指令模式。'
+        : '当前没有可用的同类指令规则，选择后仍只覆盖当前命令。',
+      pattern: basePattern,
       category: 'base',
-    });
-  }
-
-  return levels;
+    },
+  ];
 }
 
 export interface PermissionPromptProps {
@@ -105,7 +118,11 @@ export interface PermissionPromptProps {
   always?: string[];
   pendingDecision?: PermissionDecision | null;
   errorMessage?: string;
-  onDecide: (requestId: string, decision: PermissionDecision) => void;
+  onDecide: (
+    requestId: string,
+    decision: PermissionDecision,
+    scopeLevel?: AlwaysScopeLevel,
+  ) => void;
   /**
    * Callback invoked when the user selects a scope level from the categorized
    * "always" patterns. The parent can use this to adjust the approval scope
@@ -165,7 +182,8 @@ export function PermissionPrompt({
 
   // Categorize always patterns into selectable scope levels
   const scopeLevels = categorizeAlwaysPatterns(previewAction, scope, always);
-  const [selectedLevelIndex, setSelectedLevelIndex] = useState(0);
+  const [selectedLevelIndex, setSelectedLevelIndex] = useState(scopeLevels.length - 1);
+  const selectedScopeLevel = scopeLevels[selectedLevelIndex] ?? scopeLevels[scopeLevels.length - 1];
 
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -194,18 +212,18 @@ export function PermissionPrompt({
 
       if (event.key === 'Escape') {
         event.preventDefault();
-        onDecide(requestId, 'reject');
+        onDecide(requestId, 'reject', selectedScopeLevel);
         return;
       }
       if (event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.metaKey) {
         event.preventDefault();
-        onDecide(requestId, 'session');
+        onDecide(requestId, 'session', selectedScopeLevel);
       }
     };
 
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isSubmitting, onDecide, requestId]);
+  }, [isSubmitting, onDecide, requestId, selectedScopeLevel]);
 
   return (
     <div
@@ -403,6 +421,15 @@ export function PermissionPrompt({
                   >
                     {level.label}
                   </span>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      color: 'var(--fg-muted)',
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    {level.description}
+                  </span>
                   <code
                     style={{
                       fontFamily: 'var(--font-mono, monospace)',
@@ -455,7 +482,7 @@ export function PermissionPrompt({
               type="button"
               aria-busy={isActive}
               disabled={isSubmitting}
-              onClick={() => onDecide(requestId, option.decision)}
+              onClick={() => onDecide(requestId, option.decision, selectedScopeLevel)}
               title={option.hint}
               style={btnStyle(option.tone, {
                 active: isActive,

@@ -9,6 +9,7 @@ export type TeamAuditAction =
   | 'shared_question_replied'
   | 'task_created'
   | 'escape_hatch_used'
+  | 'handoff_control'
   | 'route_decision';
 
 export type TeamAuditEntityType =
@@ -18,6 +19,7 @@ export type TeamAuditEntityType =
   | 'question_request'
   | 'team_task'
   | 'session_inbound_message'
+  | 'handoff'
   | 'session';
 
 interface TeamAuditLogRow {

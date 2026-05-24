@@ -33,8 +33,10 @@ import { setSubstate, SUBSTATES_C } from '../store/substate-store.js';
 import {
   consumePendingInboundMessage,
   hasPendingCancelSignal,
+  listPendingInboundMessages,
   submitInboundMessage,
 } from '../store/inbound-store.js';
+import type { InboundMessageRecord } from '../store/inbound-store.js';
 import { assertCanWriteArtifactPhase } from '../capability/layer-capabilities.js';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -248,6 +250,39 @@ interface CollectedClarificationAnswer {
   receivedAt: string;
 }
 
+function extractClarificationAnswer(
+  message: InboundMessageRecord,
+): CollectedClarificationAnswer | null {
+  if (message.messageType === 'clarification_answer') {
+    const payload = (message.payload ?? {}) as Record<string, unknown>;
+    const answerText = typeof payload['answer'] === 'string' ? payload['answer'] : '';
+    const questionId = typeof payload['questionId'] === 'string' ? payload['questionId'] : null;
+    return answerText.trim()
+      ? { questionId, answer: answerText, receivedAt: message.createdAt }
+      : null;
+  }
+
+  if (message.messageType === 'user_input') {
+    const payload = (message.payload ?? {}) as Record<string, unknown>;
+    const text = typeof payload['text'] === 'string' ? payload['text'] : '';
+    return text.trim() ? { questionId: null, answer: text, receivedAt: message.createdAt } : null;
+  }
+
+  return null;
+}
+
+function hasPendingPauseOrResumeSignal(sessionId: string): boolean {
+  return listPendingInboundMessages(sessionId).some(
+    (message) => message.messageType === 'pause_signal' || message.messageType === 'resume_signal',
+  );
+}
+
+async function sleepForNextInboundPoll(pollIntervalMs: number, deadline: number): Promise<void> {
+  const remainingMs = deadline - Date.now();
+  if (remainingMs <= 0) return;
+  await new Promise<void>((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, remainingMs)));
+}
+
 /**
  * 阻塞等待 clarification_answer 入库，或超时 / cancel 后退出。
  *
@@ -265,44 +300,41 @@ async function waitForClarificationAnswers(input: {
   const deadline = Date.now() + getClarificationTimeoutMs();
   const pollIntervalMs = getInboundPollIntervalMs();
   let loopIteration = 0;
+  let paused = false;
 
   while (Date.now() < deadline) {
     if (input.signal.aborted) {
       throw new Error('aborted');
     }
-    if (hasPendingCancelSignal(input.sessionId)) {
-      // cancel_signal 优先级最高（ORDER BY priority=0），consumePending 一定返回它
-      const cancelMsg = consumePendingInboundMessage({
-        toSessionId: input.sessionId,
-        loopIteration,
-      });
-      if (cancelMsg && cancelMsg.messageType === 'cancel_signal') {
-        throw new Error('cancelled-by-inbound');
-      }
-      // 极端边缘情况：hasPendingCancelSignal 和 consume 之间被其他线程消费了
-      // 此时 cancelMsg 可能是其他类型或 null，继续循环让下一轮重新检测
-      if (cancelMsg && cancelMsg.messageType !== 'cancel_signal') {
-        // 把非 cancel 消息当作正常消息处理
-        if (cancelMsg.messageType === 'clarification_answer') {
-          const payload = (cancelMsg.payload ?? {}) as Record<string, unknown>;
-          const answerText = typeof payload['answer'] === 'string' ? payload['answer'] : '';
-          const questionId =
-            typeof payload['questionId'] === 'string' ? payload['questionId'] : null;
-          if (answerText.trim()) {
-            collected.push({ questionId, answer: answerText, receivedAt: cancelMsg.createdAt });
-          }
-          if (collected.length >= input.expectedCount) break;
-        } else if (cancelMsg.messageType === 'user_input') {
-          const payload = (cancelMsg.payload ?? {}) as Record<string, unknown>;
-          const text = typeof payload['text'] === 'string' ? payload['text'] : '';
-          if (text.trim()) {
-            collected.push({ questionId: null, answer: text, receivedAt: cancelMsg.createdAt });
-          }
-          if (collected.length >= input.expectedCount) break;
+
+    if (paused) {
+      if (
+        hasPendingCancelSignal(input.sessionId) ||
+        hasPendingPauseOrResumeSignal(input.sessionId)
+      ) {
+        const controlMessage = consumePendingInboundMessage({
+          toSessionId: input.sessionId,
+          loopIteration,
+        });
+
+        if (controlMessage?.messageType === 'cancel_signal') {
+          throw new Error('cancelled-by-inbound');
         }
-        loopIteration += 1;
-        continue;
+        if (controlMessage?.messageType === 'resume_signal') {
+          paused = false;
+          loopIteration += 1;
+          continue;
+        }
+        if (controlMessage?.messageType === 'pause_signal') {
+          loopIteration += 1;
+          await sleepForNextInboundPoll(pollIntervalMs, deadline);
+          continue;
+        }
       }
+
+      loopIteration += 1;
+      await sleepForNextInboundPoll(pollIntervalMs, deadline);
+      continue;
     }
 
     const message = consumePendingInboundMessage({
@@ -310,44 +342,32 @@ async function waitForClarificationAnswers(input: {
       loopIteration,
     });
     if (message) {
-      if (message.messageType === 'clarification_answer') {
-        const payload = (message.payload ?? {}) as Record<string, unknown>;
-        const answerText = typeof payload['answer'] === 'string' ? payload['answer'] : '';
-        const questionId = typeof payload['questionId'] === 'string' ? payload['questionId'] : null;
-        if (answerText.trim()) {
-          collected.push({
-            questionId,
-            answer: answerText,
-            receivedAt: message.createdAt,
-          });
-        }
-        // 收够预期数量就提前结束等待
-        if (collected.length >= input.expectedCount) break;
-      } else if (message.messageType === 'user_input') {
-        // 用户中途追加输入：把 text 当作整体回答记录下来
-        const payload = (message.payload ?? {}) as Record<string, unknown>;
-        const text = typeof payload['text'] === 'string' ? payload['text'] : '';
-        if (text.trim()) {
-          collected.push({
-            questionId: null,
-            answer: text,
-            receivedAt: message.createdAt,
-          });
-        }
-        if (collected.length >= input.expectedCount) break;
-      } else if (message.messageType === 'pause_signal') {
-        // 暂停信号：当前循环不主动响应（保持等待状态由上层调度处理）
-        // 简化：把它视作"继续等"
+      if (message.messageType === 'cancel_signal') {
+        throw new Error('cancelled-by-inbound');
       }
-      // 其他消息类型（escalation_request / progress_report / resume_signal）不影响
-      // clarification 等待——直接忽略，下一轮 poll
+      if (message.messageType === 'pause_signal') {
+        paused = true;
+        loopIteration += 1;
+        await sleepForNextInboundPoll(pollIntervalMs, deadline);
+        continue;
+      }
+      if (message.messageType === 'resume_signal') {
+        loopIteration += 1;
+        continue;
+      }
+
+      const answer = extractClarificationAnswer(message);
+      if (answer) {
+        collected.push(answer);
+      }
+      if (collected.length >= input.expectedCount) break;
+
       loopIteration += 1;
       continue;
     }
 
-    // 无消息 → sleep 后重试
-    await new Promise<void>((resolve) => setTimeout(resolve, pollIntervalMs));
     loopIteration += 1;
+    await sleepForNextInboundPoll(pollIntervalMs, deadline);
   }
 
   return collected;

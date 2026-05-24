@@ -12,7 +12,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router';
 import { PermissionPrompt } from '@openAwork/shared-ui';
-import type { PermissionDecision } from '@openAwork/shared-ui';
+import type { AlwaysScopeLevel, PermissionDecision } from '@openAwork/shared-ui';
 import { createSessionsClient } from '@openAwork/web-client';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import {
@@ -22,6 +22,7 @@ import {
 } from '../../utils/session/session-list-events.js';
 import type { SessionPendingPermissionState } from '../../utils/permission/pending-permission-state.js';
 import { replyPermissionRequest } from '../../utils/permission/permission-reply.js';
+import { resolvePermissionAlwaysOverride } from '../../utils/permission/permission-scope.js';
 import { toast } from '../common/feedback/ToastNotification.js';
 
 function resolvePermissionReplyError(error: unknown): {
@@ -162,7 +163,7 @@ export function FloatingPermissionPrompt({ onPendingChange }: FloatingPermission
   }, [accessToken, updatePendingPermission]);
 
   const handleDecision = useCallback(
-    async (requestId: string, decision: PermissionDecision) => {
+    async (requestId: string, decision: PermissionDecision, scopeLevel?: AlwaysScopeLevel) => {
       const permission = pendingPermissionRef.current;
       if (!accessToken || !permission) {
         updatePendingPermission(null);
@@ -170,11 +171,15 @@ export function FloatingPermissionPrompt({ onPendingChange }: FloatingPermission
       }
 
       const targetSessionId = permission.targetSessionId;
+      const alwaysOverride = resolvePermissionAlwaysOverride(permission);
       setReplyPendingDecision(decision);
       setReplyError(null);
 
       try {
         await replyPermissionRequest({
+          ...(decision !== 'once' && decision !== 'reject'
+            ? { alwaysOverride: scopeLevel ? [scopeLevel.pattern] : alwaysOverride }
+            : {}),
           decision,
           requestId,
           gatewayUrl,
@@ -229,8 +234,12 @@ export function FloatingPermissionPrompt({ onPendingChange }: FloatingPermission
       always={pendingPermission.always}
       pendingDecision={replyPendingDecision}
       errorMessage={replyError ?? undefined}
-      onDecide={(requestId: string, decision: PermissionDecision) => {
-        void handleDecision(requestId, decision);
+      onDecide={(
+        requestId: string,
+        decision: PermissionDecision,
+        scopeLevel?: AlwaysScopeLevel,
+      ) => {
+        void handleDecision(requestId, decision, scopeLevel);
       }}
       sessionTitle={pendingPermission.sessionTitle}
       onNavigateToSession={

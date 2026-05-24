@@ -15,6 +15,7 @@
  */
 
 import { sqliteGet, sqliteRun } from '../../infra/db.js';
+import { recordLatency } from '../bus/latency-monitor.js';
 import { publishTeamEvent } from '../bus/team-events-bus.js';
 import { assertSubstateAllowed } from '../capability/layer-capabilities.js';
 import type { HandoffRoleLayer } from './handoff-store.js';
@@ -56,6 +57,8 @@ export const SUBSTATES_RECEPTION = {
 
 export type SubstateValue = string;
 
+const lastSubstateChangeAtBySession = new Map<string, number>();
+
 export interface SetSubstateInput {
   sessionId: string;
   /** null 表示清空（回到无 substate 状态）。 */
@@ -83,6 +86,13 @@ export function setSubstate(input: SetSubstateInput): void {
     sessionId: input.sessionId,
   });
 
+  const now = Date.now();
+  const previousAt = lastSubstateChangeAtBySession.get(input.sessionId);
+  if (typeof previousAt === 'number' && now > previousAt) {
+    recordLatency('progress_interval', now - previousAt);
+  }
+  lastSubstateChangeAtBySession.set(input.sessionId, now);
+
   sqliteRun(
     `UPDATE sessions
        SET substate = ?,
@@ -99,7 +109,7 @@ export function setSubstate(input: SetSubstateInput): void {
       sessionId: input.sessionId,
       taskId: input.sessionId, // event 总线要求带 taskId，这里用 sessionId 兜底
       layer: (input.roleLayer ?? 'unknown') as never,
-      timestamp: Date.now(),
+      timestamp: now,
       userId: input.userId,
       payload: { substate: input.substate },
     });

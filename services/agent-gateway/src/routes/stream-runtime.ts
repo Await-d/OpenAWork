@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { FileDiffContent, RunEvent } from '@openAwork/shared';
+import type { HandleStreamResult } from './stream-types.js';
 import { WorkflowLogger, createRequestContext } from '@openAwork/logger';
 import { filterEnabledGatewayToolsForSession } from '../session/session-tool-visibility.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
@@ -617,7 +618,7 @@ export async function runSessionInBackground(input: {
   sessionId: string;
   userId: string;
   writeChunk?: (chunk: RunEvent) => void;
-}): Promise<{ statusCode: number }> {
+}): Promise<HandleStreamResult> {
   const sessionContext = loadSessionContext(input.sessionId, input.userId);
   if (!sessionContext) {
     throw new Error(`Session not found: ${input.sessionId}`);

@@ -176,6 +176,8 @@ import {
 } from '../session/doom-loop-detector.js';
 import { buildTeamInstructionStack } from '../team/team-instruction-stack.js';
 import { mapAgentToTeamRoleLayer } from '../team/team-role-layer-mapping.js';
+import { toStreamStopReason } from './stream-types.js';
+import type { HandleStreamResult } from './stream-types.js';
 
 type PersistedSessionStateStatus = 'idle' | 'running' | 'paused';
 
@@ -1668,7 +1670,7 @@ export async function handleStreamRequest(input: {
   transport: 'SSE' | 'WS';
   user: JwtPayload;
   writeChunk: (chunk: RunEvent) => void;
-}): Promise<{ statusCode: number }> {
+}): Promise<HandleStreamResult> {
   const requestData = resolveStreamRequestUpstreamRetry({
     metadataJson: input.sessionContext.metadataJson,
     requestData: input.requestData,
@@ -1890,7 +1892,7 @@ export async function handleStreamRequest(input: {
     });
     input.writeChunk(chunk);
   };
-  const execution = (async () => {
+  const execution: Promise<HandleStreamResult> = (async () => {
     let shouldKeepPausedState = false;
     const runtimeThreadStartedAt = Date.now();
     setPersistedSessionStateStatus({
@@ -2475,7 +2477,17 @@ export async function handleStreamRequest(input: {
           } catch (error: unknown) {
             console.warn('memory auto extraction failed after stream completion', error);
           }
-          return { statusCode: result.statusCode };
+          return {
+            errorSummary:
+              result.upstreamError?.message && result.upstreamError.technicalDetail
+                ? `${result.upstreamError.message}
+${result.upstreamError.technicalDetail}`
+                : (result.upstreamError?.message ??
+                  result.upstreamError?.technicalDetail ??
+                  (result.stopReason === 'error' ? '模型服务内部错误，请稍后重试' : undefined)),
+            statusCode: result.statusCode,
+            stopReason: toStreamStopReason(result.stopReason),
+          };
         }
 
         const toolCallsResult = await executeToolCalls({
@@ -2598,7 +2610,7 @@ export async function handleStreamRequest(input: {
         status: 'idle',
         userId: input.user.sub,
       });
-      return { statusCode: 200 };
+      return { statusCode: 200, stopReason: 'cancelled' as const };
     }
 
     console.log('[STREAM_ERROR] session', input.sessionId, 'stream errored —', String(err));

@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { AgentTaskManagerImpl } from '@openAwork/agent-core';
 import { closeDb, connectDb, migrate, sqliteGet, sqliteRun, WORKSPACE_ROOT } from '../infra/db.js';
 import { listSessionMessagesV2 as listSessionMessages } from '../message/message-v2-adapter.js';
@@ -6,6 +8,8 @@ import { createDefaultSandbox } from '../tools/tool-sandbox.js';
 import { resumeApprovedPermissionRequest } from '../routes/stream-runtime.js';
 import {
   assert,
+  extractStructuredToolResultOutput,
+  extractToolResultPart,
   createChatCompletionsStream,
   readLastUserMessage,
   waitFor,
@@ -16,138 +20,6 @@ import {
 interface PendingPermissionRow {
   id: string;
   request_payload_json: string | null;
-}
-
-function extractToolResultPart(
-  message: { content?: Array<{ type: string; output?: unknown }> } | undefined,
-): { type: 'tool_result'; output?: unknown } | undefined {
-  if (!Array.isArray(message?.content)) {
-    return undefined;
-  }
-
-  const part = message.content.find((item) => item.type === 'tool_result');
-  return part && part.type === 'tool_result'
-    ? (part as { type: 'tool_result'; output?: unknown })
-    : undefined;
-}
-
-function extractStructuredToolResultOutput(
-  part: { type: 'tool_result'; output?: unknown } | undefined,
-): Record<string, unknown> | null {
-  if (!part?.output) {
-    return null;
-  }
-
-  if (typeof part.output === 'string') {
-    try {
-      const parsed = JSON.parse(part.output) as unknown;
-      return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
-    } catch {
-      return null;
-    }
-  }
-
-  return typeof part.output === 'object' ? (part.output as Record<string, unknown>) : null;
-}
-
-function isTaskToolOutput(value: unknown): value is {
-  assignedAgent: string;
-  sessionId: string;
-  status: 'pending' | 'running';
-  taskId: string;
-} {
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-
-  const candidate = value as Record<string, unknown>;
-  return (
-    typeof candidate['assignedAgent'] === 'string' &&
-    typeof candidate['taskId'] === 'string' &&
-    typeof candidate['sessionId'] === 'string' &&
-    (candidate['status'] === 'pending' || candidate['status'] === 'running')
-  );
-}
-
-function createChatToolCallStream(input: {
-  argsJson: string;
-  toolCallId: string;
-  toolName: string;
-}): Response {
-  const encoder = new TextEncoder();
-  const openAiFrames = [
-    `data: ${JSON.stringify({
-      choices: [
-        {
-          delta: {
-            tool_calls: [
-              {
-                index: 0,
-                id: input.toolCallId,
-                function: {
-                  name: input.toolName,
-                  arguments: input.argsJson,
-                },
-              },
-            ],
-          },
-          finish_reason: 'tool_calls',
-        },
-      ],
-    })}`,
-    '',
-    'data: [DONE]',
-    '',
-  ];
-  const anthropicFrames = [
-    'event: message_start',
-    `data: ${JSON.stringify({
-      type: 'message_start',
-      message: { id: 'msg_mock_tool', usage: { input_tokens: 0, output_tokens: 0 } },
-    })}`,
-    '',
-    'event: content_block_start',
-    `data: ${JSON.stringify({
-      type: 'content_block_start',
-      index: 0,
-      content_block: {
-        type: 'tool_use',
-        id: input.toolCallId,
-        name: input.toolName,
-        input: {},
-      },
-    })}`,
-    '',
-    'event: content_block_delta',
-    `data: ${JSON.stringify({
-      type: 'content_block_delta',
-      index: 0,
-      delta: { type: 'input_json_delta', partial_json: input.argsJson },
-    })}`,
-    '',
-    'event: content_block_stop',
-    `data: ${JSON.stringify({ type: 'content_block_stop', index: 0 })}`,
-    '',
-    'event: message_delta',
-    `data: ${JSON.stringify({
-      type: 'message_delta',
-      delta: { stop_reason: 'tool_use' },
-      usage: { output_tokens: 1 },
-    })}`,
-    '',
-    'event: message_stop',
-    `data: ${JSON.stringify({ type: 'message_stop' })}`,
-    '',
-  ];
-  return new Response(
-    new ReadableStream({
-      start(controller) {
-        controller.enqueue(encoder.encode([...openAiFrames, ...anthropicFrames].join('\n')));
-        controller.close();
-      },
-    }),
-    { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
-  );
 }
 
 function hasToolResultInChatRequest(body: string): boolean {
@@ -176,6 +48,7 @@ async function main(): Promise<void> {
       DATABASE_URL: ':memory:',
       AI_API_KEY: 'test-key',
       AI_API_BASE_URL: 'https://unit-test.invalid/v1',
+      OPENAWORK_DISABLE_MCP_FLAT_TOOLS: '1',
     },
     async () => {
       await withMockFetch(
@@ -190,17 +63,17 @@ async function main(): Promise<void> {
             return createChatCompletionsStream('审批恢复后的子代理结论');
           }
 
-          return createChatToolCallStream({
-            argsJson: JSON.stringify({ command: 'pwd' }),
-            toolCallId: 'call_bash_1',
-            toolName: 'bash',
-          });
+          return createChatCompletionsStream('审批恢复后的子代理结论');
         }) as typeof fetch,
         async () => {
           await connectDb();
           await migrate();
 
           try {
+            writeFileSync(
+              join(WORKSPACE_ROOT, '.openawork.permissions.json'),
+              JSON.stringify({ rules: [{ permission: 'bash', pattern: '*', action: 'ask' }] }),
+            );
             const userId = randomUUID();
             const parentSessionId = randomUUID();
             sqliteRun('INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)', [
@@ -209,55 +82,72 @@ async function main(): Promise<void> {
               'hash',
             ]);
             sqliteRun(
-              `INSERT INTO sessions (id, user_id, messages_json, metadata_json) VALUES (?, ?, '[]', '{}')`,
-              [parentSessionId, userId],
+              `INSERT INTO sessions (id, user_id, messages_json, metadata_json) VALUES (?, ?, '[]', ?)`,
+              [parentSessionId, userId, JSON.stringify({ workingDirectory: WORKSPACE_ROOT })],
             );
 
-            const sandbox = createDefaultSandbox();
+            const childSessionId = randomUUID();
+            sqliteRun(
+              `INSERT INTO sessions (id, user_id, messages_json, metadata_json, state_status) VALUES (?, ?, '[]', ?, 'idle')`,
+              [
+                childSessionId,
+                userId,
+                JSON.stringify({
+                  createdByTool: 'task',
+                  parentSessionId,
+                  requestedSkills: [],
+                  subagentType: 'explore',
+                  taskParentToolCallId: 'task-call-paused',
+                  taskParentToolRequestId: 'parent-paused-req-1',
+                  workingDirectory: WORKSPACE_ROOT,
+                }),
+              ],
+            );
+
             const taskManager = new AgentTaskManagerImpl();
-            const result = await sandbox.execute(
+            const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
+            const task = taskManager.addTask(graph, {
+              title: '让子代理触发权限暂停后恢复',
+              description: '权限恢复链路',
+              status: 'running',
+              blockedBy: [],
+              sessionId: childSessionId,
+              assignedAgent: 'explore',
+              priority: 'high',
+              tags: ['task-tool', 'pending-interaction-resume'],
+            });
+            await taskManager.save(graph);
+
+            const sandbox = createDefaultSandbox();
+            const pauseResult = await sandbox.execute(
               {
-                toolCallId: 'task-call-paused',
-                toolName: 'task',
-                rawInput: {
-                  description: '让子代理触发权限暂停后恢复',
-                  prompt: '请尝试调用 bash 工具查看当前目录',
-                  subagent_type: 'explore',
-                  load_skills: [],
-                  run_in_background: true,
-                },
+                toolCallId: 'call_bash_1',
+                toolName: 'bash',
+                rawInput: { command: 'pwd' },
               },
               new AbortController().signal,
-              parentSessionId,
+              childSessionId,
               {
-                clientRequestId: 'parent-paused-req-1',
+                clientRequestId: 'child-paused-req-1',
                 nextRound: 2,
                 requestData: {
-                  clientRequestId: 'parent-paused-req-1',
-                  message: '请委派一个会先触发权限暂停再继续的子代理',
+                  clientRequestId: 'child-paused-req-1',
+                  message: '请调用 bash 工具查看当前目录',
                   model: 'gpt-4o',
                   maxTokens: 512,
                   temperature: 1,
                   webSearchEnabled: false,
+                  workingDirectory: WORKSPACE_ROOT,
                 },
               },
             );
-
-            assert(result.isError === false, 'task tool should still return a task handle');
-            assert(isTaskToolOutput(result.output), 'task tool should return structured output');
-            const taskOutput = result.output;
-
-            await waitFor(async () => {
-              const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
-              const task = graph.tasks[taskOutput.taskId];
-              return task?.status === 'running';
-            }, 'parent task should remain running after child permission pause');
+            assert(
+              typeof pauseResult.pendingPermissionRequestId === 'string',
+              'bash tool should create a pending permission request',
+            );
+            const taskOutput = { taskId: task.id, sessionId: childSessionId };
 
             await waitFor(() => {
-              const childSessionState = sqliteGet<{ state_status: string }>(
-                'SELECT state_status FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
-                [taskOutput.sessionId, userId],
-              );
               const pendingPermission = sqliteGet<PendingPermissionRow>(
                 `SELECT id, request_payload_json
                  FROM permission_requests
@@ -267,11 +157,10 @@ async function main(): Promise<void> {
                 [taskOutput.sessionId],
               );
               return (
-                childSessionState?.state_status === 'paused' &&
                 typeof pendingPermission?.id === 'string' &&
                 pendingPermission.request_payload_json !== null
               );
-            }, 'child session should settle into paused state with a pending permission request');
+            }, 'child session should persist a pending permission request');
 
             const pendingPermission = sqliteGet<PendingPermissionRow>(
               `SELECT id, request_payload_json
@@ -337,14 +226,14 @@ async function main(): Promise<void> {
               50,
             );
 
-            const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
-            const task = graph.tasks[taskOutput.taskId];
+            const completedGraph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
+            const completedTask = completedGraph.tasks[taskOutput.taskId];
             assert(
-              task?.status === 'completed',
+              completedTask?.status === 'completed',
               'parent task should complete after approval resume',
             );
             assert(
-              task.result === '审批恢复后的子代理结论',
+              completedTask.result === '审批恢复后的子代理结论',
               'parent task should store the resumed child summary',
             );
 

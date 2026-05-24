@@ -16,6 +16,30 @@ export function ToolApprovalActions({
 
   return (
     <div className="tool-call-approval-actions" data-tool-approval-actions="true">
+      {approvalActions.scopeLevels &&
+        approvalActions.scopeLevels.length > 0 &&
+        approvalActions.onSelectScopeLevel && (
+          <div className="tool-call-approval-scope-selector" aria-label="审批范围">
+            {approvalActions.scopeLevels.map((level) => {
+              const isSelected =
+                approvalActions.selectedScopeCategory === level.category ||
+                approvalActions.selectedScopePattern === level.pattern;
+              return (
+                <button
+                  key={level.category}
+                  type="button"
+                  className="tool-call-approval-scope-button"
+                  aria-pressed={isSelected}
+                  data-selected={isSelected ? 'true' : 'false'}
+                  title={`${level.description} ${level.pattern}`}
+                  onClick={() => approvalActions.onSelectScopeLevel?.(level)}
+                >
+                  {level.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
       <div className="tool-call-approval-buttons">
         {approvalActions.items.map((action) => (
           <button

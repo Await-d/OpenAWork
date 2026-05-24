@@ -27,6 +27,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { categorizeAlwaysPatterns, type AlwaysScopeLevel } from '@openAwork/shared-ui';
 import {
   createQuestionsClient,
   type PendingPermissionRequest,
@@ -134,6 +135,10 @@ export interface ChatPendingActions {
         pendingLabel: string;
         helperMessage?: string;
         errorMessage?: string;
+        scopeLevels?: AlwaysScopeLevel[];
+        selectedScopeCategory?: AlwaysScopeLevel['category'];
+        selectedScopePattern?: string;
+        onSelectScopeLevel?: (level: AlwaysScopeLevel) => void;
       }
     | undefined;
 }
@@ -158,6 +163,9 @@ export function useChatPendingActions(options: UseChatPendingActionsOptions): Ch
     requestId: string;
   } | null>(null);
   const [inlinePermissionErrors, setInlinePermissionErrors] = useState<Record<string, string>>({});
+  const [selectedPermissionScopeLevels, setSelectedPermissionScopeLevels] = useState<
+    Record<string, AlwaysScopeLevel>
+  >({});
 
   // ── 派生 ─────────────────────────────────────────────────────────────
   const activePendingQuestion = useMemo(
@@ -360,8 +368,16 @@ export function useChatPendingActions(options: UseChatPendingActionsOptions): Ch
         return next;
       });
 
+      const selectedScopeLevel =
+        selectedPermissionScopeLevels[request.requestId] ??
+        categorizeAlwaysPatterns(request.previewAction, request.scope, request.always).at(-1);
+      const alwaysOverride = selectedScopeLevel ? [selectedScopeLevel.pattern] : [];
+
       try {
         await replyPermissionRequest({
+          ...(decision !== 'once' && decision !== 'reject' && alwaysOverride.length > 0
+            ? { alwaysOverride }
+            : {}),
           decision,
           feedback,
           gatewayUrl,
@@ -416,6 +432,7 @@ export function useChatPendingActions(options: UseChatPendingActionsOptions): Ch
       setMessages,
       setRightPanelState,
       setStreamError,
+      selectedPermissionScopeLevels,
       token,
     ],
   );
@@ -433,6 +450,13 @@ export function useChatPendingActions(options: UseChatPendingActionsOptions): Ch
           ? inlinePermissionPendingDecision.decision
           : null;
       const disabled = pendingDecision !== null;
+      const scopeLevels = categorizeAlwaysPatterns(
+        request.previewAction,
+        request.scope,
+        request.always,
+      );
+      const selectedScopeLevel =
+        selectedPermissionScopeLevels[requestId] ?? scopeLevels[scopeLevels.length - 1];
 
       return {
         items: [
@@ -472,6 +496,15 @@ export function useChatPendingActions(options: UseChatPendingActionsOptions): Ch
           : '推荐：本会话允许 · 临时：允许一次 · 持久：永久允许',
         helperMessage: pendingDecision ? undefined : '永久允许会记住后续同类请求，请谨慎选择。',
         errorMessage: inlinePermissionErrors[requestId],
+        scopeLevels,
+        selectedScopeCategory: selectedScopeLevel?.category,
+        selectedScopePattern: selectedScopeLevel?.pattern,
+        onSelectScopeLevel: (level: AlwaysScopeLevel) => {
+          setSelectedPermissionScopeLevels((previous) => ({
+            ...previous,
+            [requestId]: level,
+          }));
+        },
       };
     },
     [
@@ -479,6 +512,7 @@ export function useChatPendingActions(options: UseChatPendingActionsOptions): Ch
       inlinePermissionErrors,
       inlinePermissionPendingDecision,
       pendingPermissionsById,
+      selectedPermissionScopeLevels,
     ],
   );
 

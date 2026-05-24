@@ -51,25 +51,79 @@ describe('getPermissionDecisionOptions', () => {
 });
 
 describe('categorizeAlwaysPatterns', () => {
-  it('returns only Full command when always is undefined', () => {
+  it('returns three Chinese scope levels when always is undefined', () => {
     const levels = categorizeAlwaysPatterns('ls -la /tmp', 'ls -la /tmp', undefined);
-    expect(levels).toEqual([{ label: 'Full command', pattern: 'ls -la /tmp', category: 'full' }]);
-  });
-
-  it('returns only Full command when always is empty', () => {
-    const levels = categorizeAlwaysPatterns('ls -la /tmp', 'ls -la /tmp', []);
-    expect(levels).toEqual([{ label: 'Full command', pattern: 'ls -la /tmp', category: 'full' }]);
-  });
-
-  it('returns Full command + Base when always has one unique pattern', () => {
-    const levels = categorizeAlwaysPatterns('ls -la /tmp', 'ls -la /tmp', ['ls *']);
     expect(levels).toEqual([
-      { label: 'Full command', pattern: 'ls -la /tmp', category: 'full' },
-      { label: 'Base', pattern: 'ls *', category: 'base' },
+      {
+        label: '仅本次指令',
+        description: '只覆盖当前命令，不会扩大到其它参数或子命令。',
+        pattern: 'ls -la /tmp',
+        category: 'full',
+      },
+      {
+        label: '同子命令',
+        description: '当前没有可用的同子命令规则，选择后仍只覆盖当前命令。',
+        pattern: 'ls -la /tmp',
+        category: 'partial',
+      },
+      {
+        label: '同类指令',
+        description: '当前没有可用的同类指令规则，选择后仍只覆盖当前命令。',
+        pattern: 'ls -la /tmp',
+        category: 'base',
+      },
     ]);
   });
 
-  it('returns Full command + Partial + Base when always has two unique patterns', () => {
+  it('returns three Chinese scope levels when always is empty', () => {
+    const levels = categorizeAlwaysPatterns('ls -la /tmp', 'ls -la /tmp', []);
+    expect(levels).toEqual([
+      {
+        label: '仅本次指令',
+        description: '只覆盖当前命令，不会扩大到其它参数或子命令。',
+        pattern: 'ls -la /tmp',
+        category: 'full',
+      },
+      {
+        label: '同子命令',
+        description: '当前没有可用的同子命令规则，选择后仍只覆盖当前命令。',
+        pattern: 'ls -la /tmp',
+        category: 'partial',
+      },
+      {
+        label: '同类指令',
+        description: '当前没有可用的同类指令规则，选择后仍只覆盖当前命令。',
+        pattern: 'ls -la /tmp',
+        category: 'base',
+      },
+    ]);
+  });
+
+  it('returns three Chinese scope levels when always has one unique pattern', () => {
+    const levels = categorizeAlwaysPatterns('ls -la /tmp', 'ls -la /tmp', ['ls *']);
+    expect(levels).toEqual([
+      {
+        label: '仅本次指令',
+        description: '只覆盖当前命令，不会扩大到其它参数或子命令。',
+        pattern: 'ls -la /tmp',
+        category: 'full',
+      },
+      {
+        label: '同子命令',
+        description: '当前没有可用的同子命令规则，选择后仍只覆盖当前命令。',
+        pattern: 'ls -la /tmp',
+        category: 'partial',
+      },
+      {
+        label: '同类指令',
+        description: '覆盖网关提供的同类指令模式。',
+        pattern: 'ls *',
+        category: 'base',
+      },
+    ]);
+  });
+
+  it('returns three Chinese scope levels when always has two unique patterns', () => {
     const levels = categorizeAlwaysPatterns(
       'OBSIDIAN_API_KEY="abc" OBSIDIAN_HOST="127.0.0.1" timeout 5 uvx mcp-obsidian --help',
       'OBSIDIAN_API_KEY="abc" OBSIDIAN_HOST="127.0.0.1" timeout 5 uvx mcp-obsidian --help',
@@ -77,31 +131,110 @@ describe('categorizeAlwaysPatterns', () => {
     );
     expect(levels).toEqual([
       {
-        label: 'Full command',
+        label: '仅本次指令',
+        description: '只覆盖当前命令，不会扩大到其它参数或子命令。',
         pattern:
           'OBSIDIAN_API_KEY="abc" OBSIDIAN_HOST="127.0.0.1" timeout 5 uvx mcp-obsidian --help',
         category: 'full',
       },
       {
-        label: 'Partial',
+        label: '同子命令',
+        description: '覆盖网关提供的相同子命令模式。',
         pattern: 'OBSIDIAN_API_KEY="abc" OBSIDIAN_HOST="127.0.0.1" *',
         category: 'partial',
       },
-      { label: 'Base', pattern: 'OBSIDIAN_API_KEY="abc" *', category: 'base' },
+      {
+        label: '同类指令',
+        description: '覆盖网关提供的同类指令模式。',
+        pattern: 'OBSIDIAN_API_KEY="abc" *',
+        category: 'base',
+      },
     ]);
   });
 
-  it('deduplicates patterns that match the full command or scope', () => {
+  it('deduplicates patterns that match the full command or scope without removing choices', () => {
     const levels = categorizeAlwaysPatterns('git status', 'git status', ['git status', 'git *']);
     expect(levels).toEqual([
-      { label: 'Full command', pattern: 'git status', category: 'full' },
-      { label: 'Base', pattern: 'git *', category: 'base' },
+      {
+        label: '仅本次指令',
+        description: '只覆盖当前命令，不会扩大到其它参数或子命令。',
+        pattern: 'git status',
+        category: 'full',
+      },
+      {
+        label: '同子命令',
+        description: '当前没有可用的同子命令规则，选择后仍只覆盖当前命令。',
+        pattern: 'git status',
+        category: 'partial',
+      },
+      {
+        label: '同类指令',
+        description: '覆盖网关提供的同类指令模式。',
+        pattern: 'git *',
+        category: 'base',
+      },
     ]);
   });
 
-  it('uses previewAction over scope for the full command', () => {
+  it('falls back to scope for duplicate derived patterns so all categories remain visible', () => {
+    const levels = categorizeAlwaysPatterns('git status', 'git status', ['git *', 'git *']);
+    expect(levels).toEqual([
+      {
+        label: '仅本次指令',
+        description: '只覆盖当前命令，不会扩大到其它参数或子命令。',
+        pattern: 'git status',
+        category: 'full',
+      },
+      {
+        label: '同子命令',
+        description: '当前没有可用的同子命令规则，选择后仍只覆盖当前命令。',
+        pattern: 'git status',
+        category: 'partial',
+      },
+      {
+        label: '同类指令',
+        description: '覆盖网关提供的同类指令模式。',
+        pattern: 'git *',
+        category: 'base',
+      },
+    ]);
+  });
+
+  it('explains duplicate full-command patterns without hiding any level', () => {
+    const levels = categorizeAlwaysPatterns('pwd', 'pwd', ['pwd', 'pwd']);
+    expect(levels).toHaveLength(3);
+    expect(levels.map((level) => level.label)).toEqual(['仅本次指令', '同子命令', '同类指令']);
+    expect(levels.map((level) => level.pattern)).toEqual(['pwd', 'pwd', 'pwd']);
+    expect(levels[1]!.description).toContain('当前没有可用的同子命令规则');
+    expect(levels[2]!.description).toContain('当前没有可用的同类指令规则');
+  });
+
+  it('returns exactly three scope levels for every approval prompt', () => {
+    expect(categorizeAlwaysPatterns(undefined, 'pwd', undefined)).toHaveLength(3);
+    expect(categorizeAlwaysPatterns(undefined, 'pwd', [])).toHaveLength(3);
+    expect(categorizeAlwaysPatterns(undefined, 'pwd', ['pwd'])).toHaveLength(3);
+    expect(categorizeAlwaysPatterns(undefined, 'pwd', ['pwd', 'pwd'])).toHaveLength(3);
+    expect(categorizeAlwaysPatterns(undefined, 'pwd', ['p*'])).toHaveLength(3);
+    expect(categorizeAlwaysPatterns(undefined, 'pwd', ['p*', '*'])).toHaveLength(3);
+  });
+
+  it('uses Chinese labels for every approval prompt', () => {
+    const assertLabels = (always: string[] | undefined) => {
+      const levels = categorizeAlwaysPatterns(undefined, 'pwd', always);
+      expect(levels.map((level) => level.label)).toEqual(['仅本次指令', '同子命令', '同类指令']);
+    };
+
+    assertLabels(undefined);
+    assertLabels([]);
+    assertLabels(['pwd']);
+    assertLabels(['pwd', 'pwd']);
+    assertLabels(['p*']);
+    assertLabels(['p*', '*']);
+  });
+
+  it('uses scope rather than previewAction for the full command pattern', () => {
     const levels = categorizeAlwaysPatterns('执行命令: ls -la', 'ls -la', ['ls *']);
-    expect(levels[0]!.pattern).toBe('执行命令: ls -la');
+    expect(levels[0]!.pattern).toBe('ls -la');
   });
 
   it('falls back to scope when previewAction is undefined', () => {

@@ -11,6 +11,7 @@ import type * as AuthModule from '../../infra/auth.js';
 import type * as RequestWorkflowModule from '../../runtime/request-workflow.js';
 import type * as TeamHandoffsModule from '../../routes/team-handoffs.js';
 import type * as HandoffStoreModule from '../../handoff/store/handoff-store.js';
+import type * as TeamEventsBusModule from '../../handoff/bus/team-events-bus.js';
 
 process.env['DATABASE_URL'] = ':memory:';
 process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
@@ -20,6 +21,7 @@ let authPlugin: typeof AuthModule.default;
 let requestWorkflowPlugin: typeof RequestWorkflowModule.default;
 let teamHandoffsRoutes: typeof TeamHandoffsModule.teamHandoffsRoutes;
 let store: typeof HandoffStoreModule;
+let teamEventsBus: typeof TeamEventsBusModule;
 
 const USER_ID = 'u-handoff-rt';
 const FROM_SESSION_ID = 's-from-rt';
@@ -64,9 +66,13 @@ beforeAll(async () => {
   const team = await import('../../routes/team-handoffs.js');
   teamHandoffsRoutes = team.teamHandoffsRoutes;
   store = await import('../../handoff/store/handoff-store.js');
+  teamEventsBus = await import('../../handoff/bus/team-events-bus.js');
 });
 
 beforeEach(() => {
+  teamEventsBus.__clearTeamEventsBusForTesting();
+  dbModule.sqliteRun('DELETE FROM team_audit_logs', []);
+  dbModule.sqliteRun('DELETE FROM session_inbound_messages', []);
   dbModule.sqliteRun('DELETE FROM users', []);
   seedUser(USER_ID, 'rt@example.com');
   seedSession(FROM_SESSION_ID, USER_ID);
@@ -311,6 +317,211 @@ describe('POST /team/handoffs/:handoffId/cancel', () => {
       });
       expect(res.statusCode).toBe(409);
       expect((res.json() as { error: string }).error).toBe('cannot-cancel');
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('POST /team/handoffs/:handoffId/pause', () => {
+  it('running handoff 可以 pause，并写入控制信号、事件和审计', async () => {
+    const app = await buildApp();
+    const events: TeamEventsBusModule.TeamEventEnvelope[] = [];
+    const unsubscribe = teamEventsBus.subscribeToTeamEvents((event) => {
+      events.push(event);
+    });
+    try {
+      const created = store.createHandoff({
+        userId: USER_ID,
+        fromSessionId: FROM_SESSION_ID,
+        fromRoleLayer: 'pm2',
+        toRoleLayer: 'executor',
+      });
+      store.claimHandoff({ handoffId: created.id, claimToken: 'tok-pause' });
+      store.startHandoff({
+        handoffId: created.id,
+        claimToken: 'tok-pause',
+        toSessionId: TO_SESSION_ID,
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/team/handoffs/${created.id}/pause`,
+        headers: { authorization: bearer(app) },
+        payload: { reason: 'network-degraded' },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ handoff: { id: created.id, paused: true } });
+
+      const inbound = dbModule.sqliteGet<{ message_type: string; payload_json: string }>(
+        `SELECT message_type, payload_json
+           FROM session_inbound_messages
+          WHERE to_session_id = ?
+          ORDER BY created_at DESC
+          LIMIT 1`,
+        [TO_SESSION_ID],
+      );
+      expect(inbound?.message_type).toBe('pause_signal');
+      expect(JSON.parse(inbound?.payload_json ?? '{}')).toMatchObject({
+        action: 'pause',
+        handoffId: created.id,
+        reason: 'network-degraded',
+      });
+
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'scheduler.task-paused',
+          taskId: created.id,
+          sessionId: TO_SESSION_ID,
+          userId: USER_ID,
+        }),
+      );
+
+      const audit = dbModule.sqliteGet<{ action: string; entity_type: string; summary: string }>(
+        `SELECT action, entity_type, summary
+           FROM team_audit_logs
+          ORDER BY created_at DESC, id DESC
+          LIMIT 1`,
+        [],
+      );
+      expect(audit).toMatchObject({
+        action: 'handoff_control',
+        entity_type: 'handoff',
+      });
+      expect(audit?.summary).toContain('handoff pause');
+    } finally {
+      unsubscribe();
+      await app.close();
+    }
+  });
+
+  it('已 pause 的 handoff 再次 pause 返回 409', async () => {
+    const app = await buildApp();
+    try {
+      const created = store.createHandoff({
+        userId: USER_ID,
+        fromSessionId: FROM_SESSION_ID,
+        fromRoleLayer: 'reception',
+        toRoleLayer: 'pm1',
+      });
+      expect(store.pauseHandoff({ userId: USER_ID, handoffId: created.id })).toBe(true);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/team/handoffs/${created.id}/pause`,
+        headers: { authorization: bearer(app) },
+        payload: { reason: 'duplicate' },
+      });
+
+      expect(res.statusCode).toBe(409);
+      expect(res.json()).toMatchObject({
+        error: 'cannot-pause',
+        state: 'pending',
+        paused: true,
+      });
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('POST /team/handoffs/:handoffId/resume', () => {
+  it('paused handoff 可以 resume，并写入恢复信号、事件和审计', async () => {
+    const app = await buildApp();
+    const events: TeamEventsBusModule.TeamEventEnvelope[] = [];
+    const unsubscribe = teamEventsBus.subscribeToTeamEvents((event) => {
+      events.push(event);
+    });
+    try {
+      const created = store.createHandoff({
+        userId: USER_ID,
+        fromSessionId: FROM_SESSION_ID,
+        fromRoleLayer: 'pm2',
+        toRoleLayer: 'executor',
+      });
+      store.claimHandoff({ handoffId: created.id, claimToken: 'tok-resume' });
+      store.startHandoff({
+        handoffId: created.id,
+        claimToken: 'tok-resume',
+        toSessionId: TO_SESSION_ID,
+      });
+      expect(store.pauseHandoff({ userId: USER_ID, handoffId: created.id, reason: 'manual' })).toBe(
+        true,
+      );
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/team/handoffs/${created.id}/resume`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ handoff: { id: created.id, paused: false } });
+
+      const inbound = dbModule.sqliteGet<{ message_type: string; payload_json: string }>(
+        `SELECT message_type, payload_json
+           FROM session_inbound_messages
+          WHERE to_session_id = ?
+          ORDER BY created_at DESC
+          LIMIT 1`,
+        [TO_SESSION_ID],
+      );
+      expect(inbound?.message_type).toBe('resume_signal');
+      expect(JSON.parse(inbound?.payload_json ?? '{}')).toMatchObject({
+        action: 'resume',
+        handoffId: created.id,
+      });
+
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'scheduler.task-resumed',
+          taskId: created.id,
+          sessionId: TO_SESSION_ID,
+          userId: USER_ID,
+        }),
+      );
+
+      const audit = dbModule.sqliteGet<{ action: string; entity_type: string; summary: string }>(
+        `SELECT action, entity_type, summary
+           FROM team_audit_logs
+          ORDER BY created_at DESC, id DESC
+          LIMIT 1`,
+        [],
+      );
+      expect(audit).toMatchObject({
+        action: 'handoff_control',
+        entity_type: 'handoff',
+      });
+      expect(audit?.summary).toContain('handoff resume');
+    } finally {
+      unsubscribe();
+      await app.close();
+    }
+  });
+
+  it('未 pause 的 handoff 直接 resume 返回 409', async () => {
+    const app = await buildApp();
+    try {
+      const created = store.createHandoff({
+        userId: USER_ID,
+        fromSessionId: FROM_SESSION_ID,
+        fromRoleLayer: 'reception',
+        toRoleLayer: 'pm1',
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/team/handoffs/${created.id}/resume`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(res.statusCode).toBe(409);
+      expect(res.json()).toMatchObject({
+        error: 'cannot-resume',
+        state: 'pending',
+        paused: false,
+      });
     } finally {
       await app.close();
     }

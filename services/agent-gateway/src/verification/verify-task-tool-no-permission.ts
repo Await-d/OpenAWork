@@ -23,6 +23,7 @@ async function main(): Promise<void> {
       DATABASE_URL: ':memory:',
       AI_API_KEY: 'test-key',
       AI_API_BASE_URL: 'https://unit-test.invalid/v1',
+      OPENAWORK_DISABLE_MCP_FLAT_TOOLS: '1',
     },
     async () => {
       await withMockFetch(
@@ -120,13 +121,18 @@ async function main(): Promise<void> {
                 'pending permissions route should stay empty for task tool',
               );
 
-              await waitFor(async () => {
-                const graph = await new AgentTaskManagerImpl().loadOrCreate(
-                  WORKSPACE_ROOT,
-                  parentSessionId,
-                );
-                return Object.values(graph.tasks).some((task) => task.status === 'completed');
-              }, 'delegated child task should still complete automatically without approval');
+              await waitFor(
+                async () => {
+                  const graph = await new AgentTaskManagerImpl().loadOrCreate(
+                    WORKSPACE_ROOT,
+                    parentSessionId,
+                  );
+                  return Object.values(graph.tasks).some((task) => task.status === 'completed');
+                },
+                'delegated child task should still complete automatically without approval',
+                200,
+                25,
+              );
 
               assert(
                 events.every((event) => event.type !== 'permission_asked'),

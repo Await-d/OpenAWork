@@ -11,6 +11,7 @@ import type {
   TeamWorkspaceSummary,
 } from '@openAwork/web-client';
 import { createTeamClient } from '@openAwork/web-client';
+import { categorizeAlwaysPatterns } from '@openAwork/shared-ui';
 import type { CreateTeamSessionInput } from '@openAwork/web-client';
 import { useAuthStore } from '../../../../stores/auth/auth.js';
 import { useTeamCollaboration } from '../../hooks/use-team-collaboration.js';
@@ -718,7 +719,13 @@ export function useResolvedTeamRuntimeReferenceData(
         (request) => `permission-${request.requestId}` === cardId,
       );
       if (permissionRequest) {
+        const scopeLevel = categorizeAlwaysPatterns(
+          permissionRequest.previewAction,
+          permissionRequest.scope,
+          permissionRequest.always,
+        ).at(-1);
         return collaboration.replySharedSessionPermission(sessionId, {
+          ...(status === 'approved' && scopeLevel ? { alwaysOverride: [scopeLevel.pattern] } : {}),
           decision: status === 'approved' ? 'session' : 'reject',
           requestId: permissionRequest.requestId,
         });

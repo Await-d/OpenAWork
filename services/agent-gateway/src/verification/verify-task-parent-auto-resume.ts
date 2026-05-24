@@ -30,6 +30,7 @@ async function main(): Promise<void> {
       DATABASE_URL: ':memory:',
       AI_API_KEY: 'test-key',
       AI_API_BASE_URL: 'https://unit-test.invalid/v1',
+      OPENAWORK_DISABLE_MCP_FLAT_TOOLS: '1',
     },
     async () => {
       await withMockFetch(

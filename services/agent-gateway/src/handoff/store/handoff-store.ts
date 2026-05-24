@@ -55,6 +55,11 @@ interface HandoffRow {
   completed_at: string | null;
   failure_reason: string | null;
   retry_count: number;
+  idempotency_key: string | null;
+  paused: number;
+  paused_at: string | null;
+  paused_by_user_id: string | null;
+  pause_reason: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -74,6 +79,11 @@ export interface HandoffRecord {
   completedAt: string | null;
   failureReason: string | null;
   retryCount: number;
+  idempotencyKey: string | null;
+  paused: boolean;
+  pausedAt: string | null;
+  pausedByUserId: string | null;
+  pauseReason: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -103,6 +113,11 @@ function mapRow(row: HandoffRow): HandoffRecord {
     completedAt: row.completed_at,
     failureReason: row.failure_reason,
     retryCount: row.retry_count,
+    idempotencyKey: row.idempotency_key,
+    paused: row.paused === 1,
+    pausedAt: row.paused_at,
+    pausedByUserId: row.paused_by_user_id,
+    pauseReason: row.pause_reason,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -116,6 +131,7 @@ export interface CreateHandoffInput {
   fromRoleLayer: HandoffRoleLayer;
   toRoleLayer: HandoffRoleLayer;
   payload?: unknown;
+  idempotencyKey?: string | null;
 }
 
 export function createHandoff(input: CreateHandoffInput): HandoffRecord {
@@ -128,14 +144,34 @@ export function createHandoff(input: CreateHandoffInput): HandoffRecord {
     fromSessionId: input.fromSessionId,
   });
 
+  if (input.idempotencyKey) {
+    const existing = sqliteGet<HandoffRow>(
+      `SELECT * FROM handoff_records
+       WHERE user_id = ? AND idempotency_key = ?
+       LIMIT 1`,
+      [input.userId, input.idempotencyKey],
+    );
+    if (existing) {
+      return mapRow(existing);
+    }
+  }
+
   const id = randomUUID();
   const payloadJson = JSON.stringify(input.payload ?? {});
   sqliteRun(
     `INSERT INTO handoff_records (
        id, user_id, from_session_id, from_role_layer, to_role_layer,
-       payload_json, state, retry_count
-     ) VALUES (?, ?, ?, ?, ?, ?, 'pending', 0)`,
-    [id, input.userId, input.fromSessionId, input.fromRoleLayer, input.toRoleLayer, payloadJson],
+       payload_json, state, retry_count, idempotency_key
+     ) VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?)`,
+    [
+      id,
+      input.userId,
+      input.fromSessionId,
+      input.fromRoleLayer,
+      input.toRoleLayer,
+      payloadJson,
+      input.idempotencyKey ?? null,
+    ],
   );
   const row = sqliteGet<HandoffRow>(`SELECT * FROM handoff_records WHERE id = ? LIMIT 1`, [id]);
   if (!row) {
@@ -171,7 +207,7 @@ export function getHandoffById(handoffId: string): HandoffRecord | undefined {
 export function listPendingHandoffs(limit = 50): HandoffRecord[] {
   const rows = sqliteAll<HandoffRow>(
     `SELECT * FROM handoff_records
-     WHERE state = 'pending'
+     WHERE state = 'pending' AND paused = 0
      ORDER BY created_at ASC
      LIMIT ?`,
     [limit],
@@ -208,7 +244,7 @@ export function claimHandoff(input: {
            claim_token = ?,
            claimed_at = datetime('now'),
            updated_at = datetime('now')
-     WHERE id = ? AND state = 'pending'`,
+     WHERE id = ? AND state = 'pending' AND paused = 0`,
     [input.claimToken, input.handoffId],
   );
   // SQLite 无返回行数；通过回读判断是否成功
@@ -311,6 +347,60 @@ export function cancelHandoff(input: { userId: string; handoffId: string }): boo
            completed_at = datetime('now'),
            updated_at = datetime('now')
      WHERE id = ? AND user_id = ?`,
+    [input.handoffId, input.userId],
+  );
+  return true;
+}
+
+export function pauseHandoff(input: {
+  userId: string;
+  handoffId: string;
+  reason?: string | null;
+}): boolean {
+  const row = sqliteGet<HandoffRow>(
+    `SELECT state, paused FROM handoff_records WHERE id = ? AND user_id = ? LIMIT 1`,
+    [input.handoffId, input.userId],
+  );
+  if (!row) return false;
+  if (row.state === 'completed' || row.state === 'failed' || row.state === 'cancelled') {
+    return false;
+  }
+  if (row.paused === 1) {
+    return false;
+  }
+  sqliteRun(
+    `UPDATE handoff_records
+           SET paused = 1,
+               paused_at = datetime('now'),
+               paused_by_user_id = ?,
+               pause_reason = ?,
+               updated_at = datetime('now')
+         WHERE id = ? AND user_id = ? AND state NOT IN ('completed', 'failed', 'cancelled')`,
+    [input.userId, input.reason ?? null, input.handoffId, input.userId],
+  );
+  return true;
+}
+
+export function resumeHandoff(input: { userId: string; handoffId: string }): boolean {
+  const row = sqliteGet<HandoffRow>(
+    `SELECT state, paused FROM handoff_records WHERE id = ? AND user_id = ? LIMIT 1`,
+    [input.handoffId, input.userId],
+  );
+  if (!row) return false;
+  if (row.state === 'completed' || row.state === 'failed' || row.state === 'cancelled') {
+    return false;
+  }
+  if (row.paused !== 1) {
+    return false;
+  }
+  sqliteRun(
+    `UPDATE handoff_records
+           SET paused = 0,
+               paused_at = NULL,
+               paused_by_user_id = NULL,
+               pause_reason = NULL,
+               updated_at = datetime('now')
+         WHERE id = ? AND user_id = ? AND paused = 1 AND state NOT IN ('completed', 'failed', 'cancelled')`,
     [input.handoffId, input.userId],
   );
   return true;

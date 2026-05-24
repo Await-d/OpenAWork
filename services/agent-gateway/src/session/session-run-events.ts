@@ -220,12 +220,32 @@ export function publishSessionRunEvent(
   });
 }
 
-export function persistSessionRunEventForRequest(
+export function broadcastPersistedSessionRunEvent(
   sessionId: string,
   event: RunEvent,
   meta?: PublishRunEventMeta,
 ): void {
-  persistRunEventRow(sessionId, event, meta);
+  const handlers = sessionHandlers.get(sessionId);
+  if (!handlers) return;
+  handlers.forEach((handler) => {
+    try {
+      handler(event, meta);
+    } catch (error) {
+      console.error('session run event handler failed', {
+        error: error instanceof Error ? error.message : String(error),
+        eventType: event.type,
+        sessionId,
+      });
+    }
+  });
+}
+
+export function persistSessionRunEventForRequest(
+  sessionId: string,
+  event: RunEvent,
+  meta?: PublishRunEventMeta,
+): { seq: number | null } {
+  return persistRunEventRow(sessionId, event, meta);
 }
 
 export function listSessionRunEvents(sessionId: string): RunEvent[] {

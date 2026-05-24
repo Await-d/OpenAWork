@@ -13,6 +13,7 @@ import type { PendingQuestionRequest } from './questions.js';
 export type SessionSnapshotScopeKind = 'request' | 'backup' | 'scope' | 'unknown';
 
 export interface SharedSessionPermissionReplyInput {
+  alwaysOverride?: string[];
   decision: PermissionDecision;
   requestId: string;
 }

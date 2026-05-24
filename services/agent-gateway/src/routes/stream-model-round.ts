@@ -32,6 +32,7 @@ import {
   persistSnapshotTree,
 } from '../snapshot/snapshot-tree-store.js';
 import type { StreamUsageSummary } from './stream-usage.js';
+import type { StreamStopReason } from './stream-types.js';
 import {
   THINKING_LANGUAGE_HINT_MARKERS,
   buildSyntheticRequestContextBlock,
@@ -85,13 +86,6 @@ type UpstreamErrorDescriptor = {
 };
 
 type WorkflowStepHandle = ReturnType<WorkflowLogger['start']>;
-type StreamStopReason =
-  | 'end_turn'
-  | 'tool_use'
-  | 'max_tokens'
-  | 'error'
-  | 'cancelled'
-  | 'tool_permission';
 
 interface StreamAccumulationState {
   assistantThinkingBlocks: ReasoningBlock[];
@@ -1072,14 +1066,13 @@ export async function runModelRound(input: {
   };
   let stepStream: WorkflowStepHandle | undefined;
   const finalizeAssistant = (reason: StreamStopReason, usage?: StreamUsageSummary) => {
-    if (
-      reason === 'cancelled' &&
-      extractReasoningTexts(state.assistantThinkingBlocks).length === 0 &&
-      state.assistantText.trim().length === 0 &&
-      state.toolCalls.size === 0 &&
-      !state.reasoningEncryptedContent &&
-      !state.reasoningSummary
-    ) {
+    const hasAssistantContent =
+      extractReasoningTexts(state.assistantThinkingBlocks).length > 0 ||
+      state.assistantText.trim().length > 0 ||
+      state.toolCalls.size > 0 ||
+      !!state.reasoningEncryptedContent ||
+      !!state.reasoningSummary;
+    if ((reason === 'cancelled' || reason === 'error') && !hasAssistantContent) {
       return;
     }
     // Fail-safe: if the upstream stream ended (normally or abruptly) before
@@ -1458,6 +1451,7 @@ export async function runModelRound(input: {
       };
     }
     const message = err instanceof Error ? err.message : String(err);
+    const classification = classifyUpstreamError(err);
     if (stepStream && stepStream.status === 'pending') {
       input.wl.fail(stepStream, message, { round: input.round });
     }
@@ -1492,6 +1486,14 @@ export async function runModelRound(input: {
       stopReason: 'error',
       statusCode: 500,
       state,
+      upstreamError: {
+        code: `STREAM_${classification.category.toUpperCase()}`,
+        message: classification.message ?? message,
+        technicalDetail: message,
+        ...(classification.retryAfterMs !== undefined
+          ? { retryAfterMs: classification.retryAfterMs }
+          : {}),
+      },
       usage: undefined,
       usageOccurredAt: undefined,
     };

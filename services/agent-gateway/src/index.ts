@@ -48,6 +48,7 @@ import { streamRoutes } from './routes/stream-routes-plugin.js';
 import { usageRoutes } from './routes/usage.js';
 import { agentsRoutes } from './routes/agents.js';
 import { teamRoutes } from './routes/team.js';
+import { teamInboundRoutes } from './routes/team-inbound.js';
 import { teamPhaseARoutes } from './routes/team-phase-a.js';
 import { teamEventsRoutes } from './routes/team-events.js';
 import { teamHandoffsRoutes } from './routes/team-handoffs.js';
@@ -110,6 +111,7 @@ await app.register(streamRoutes);
 await app.register(usageRoutes);
 await app.register(agentsRoutes);
 await app.register(teamRoutes);
+await app.register(teamInboundRoutes);
 await app.register(teamPhaseARoutes);
 await app.register(teamEventsRoutes);
 await app.register(teamHandoffsRoutes);
@@ -164,7 +166,7 @@ app.get(
   {
     schema: { hide: true },
   },
-  (request, reply) => {
+  (_request, reply) => {
     return reply.send(app.swagger());
   },
 );

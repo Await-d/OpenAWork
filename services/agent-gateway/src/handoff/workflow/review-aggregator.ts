@@ -278,6 +278,11 @@ export function checkAllChildrenCompleted(pm2HandoffId: string): {
     completed_at: string | null;
     failure_reason: string | null;
     retry_count: number;
+    idempotency_key: string | null;
+    paused: number;
+    paused_at: string | null;
+    paused_by_user_id: string | null;
+    pause_reason: string | null;
     created_at: string;
     updated_at: string;
   }>(`SELECT * FROM handoff_records WHERE id IN (${childIds.map(() => '?').join(',')})`, childIds);
@@ -302,6 +307,11 @@ export function checkAllChildrenCompleted(pm2HandoffId: string): {
     completedAt: c.completed_at,
     failureReason: c.failure_reason,
     retryCount: c.retry_count,
+    idempotencyKey: c.idempotency_key,
+    paused: c.paused === 1,
+    pausedAt: c.paused_at,
+    pausedByUserId: c.paused_by_user_id,
+    pauseReason: c.pause_reason,
     createdAt: c.created_at,
     updatedAt: c.updated_at,
   }));

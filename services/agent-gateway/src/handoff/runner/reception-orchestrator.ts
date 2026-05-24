@@ -21,6 +21,7 @@ import { randomUUID } from 'node:crypto';
 import { resolveAuxiliaryLlmConfig } from '../../provider/auxiliary-llm-config.js';
 import { createHandoff } from '../store/handoff-store.js';
 import { publishHandoffEvent, publishTeamEvent } from '../bus/team-events-bus.js';
+import { recordLatency } from '../bus/latency-monitor.js';
 import { setSubstate, SUBSTATES_RECEPTION } from '../store/substate-store.js';
 import { appendSessionMessageV2 } from '../../message/message-v2-adapter.js';
 import { routeByRules, routeByLlm, type RouteResult } from './reception-router.js';
@@ -202,6 +203,7 @@ export async function orchestrateReceptionInput(
       userId: input.userId,
       roleLayer: 'reception',
     });
+    const directStartedAt = Date.now();
     try {
       const { runSessionInBackground } = await import('../../routes/stream-runtime.js');
       // 使用与 inbound 端点相同的 clientRequestId，这样 stream 管线的
@@ -223,6 +225,8 @@ export async function orchestrateReceptionInput(
       if (persistAck) {
         writeAck(input.userId, input.receptionSessionId, '直接回答时出错，请重试。');
       }
+    } finally {
+      recordLatency('a_to_b_direct', Date.now() - directStartedAt);
     }
     setSubstate({
       sessionId: input.receptionSessionId,

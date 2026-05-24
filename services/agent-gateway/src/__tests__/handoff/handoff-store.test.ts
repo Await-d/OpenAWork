@@ -63,10 +63,57 @@ describe('createHandoff / getHandoff', () => {
     expect(created.retryCount).toBe(0);
     expect(created.payload).toEqual({ intent: '测试意图' });
     expect(created.toSessionId).toBeNull();
+    expect(created.idempotencyKey).toBeNull();
+    expect(created.paused).toBe(false);
+    expect(created.pausedAt).toBeNull();
+    expect(created.pausedByUserId).toBeNull();
+    expect(created.pauseReason).toBeNull();
 
     const re = store.getHandoff({ userId: USER_ID, handoffId: created.id });
     expect(re).toBeDefined();
     expect(re?.state).toBe('pending');
+  });
+
+  it('同一用户同一 idempotencyKey 复用已有 handoff', () => {
+    const first = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+      payload: { intent: 'first' },
+      idempotencyKey: 'handoff-key-1',
+    });
+
+    const second = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+      payload: { intent: 'second' },
+      idempotencyKey: 'handoff-key-1',
+    });
+
+    expect(second.id).toBe(first.id);
+    expect(second.idempotencyKey).toBe('handoff-key-1');
+    expect(second.payload).toEqual({ intent: 'first' });
+  });
+
+  it('未提供 idempotencyKey 时每次创建新 handoff', () => {
+    const first = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+    });
+    const second = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+    });
+
+    expect(second.id).not.toBe(first.id);
+    expect(second.idempotencyKey).toBeNull();
   });
 });
 
@@ -206,6 +253,134 @@ describe('cancelHandoff', () => {
   });
 });
 
+describe('pauseHandoff / resumeHandoff', () => {
+  it('pending handoff 可以 pause 后 resume，并映射暂停字段', () => {
+    const created = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+    });
+
+    dbModule.sqliteRun(
+      `UPDATE handoff_records SET updated_at = '2000-01-01 00:00:00' WHERE id = ?`,
+      [created.id],
+    );
+
+    expect(
+      store.pauseHandoff({
+        userId: USER_ID,
+        handoffId: created.id,
+        reason: 'need-user-input',
+      }),
+    ).toBe(true);
+
+    const paused = store.getHandoff({ userId: USER_ID, handoffId: created.id });
+    expect(paused?.state).toBe('pending');
+    expect(paused?.paused).toBe(true);
+    expect(paused?.pausedAt).not.toBeNull();
+    expect(paused?.pausedByUserId).toBe(USER_ID);
+    expect(paused?.pauseReason).toBe('need-user-input');
+    expect(paused?.updatedAt).not.toBe('2000-01-01 00:00:00');
+
+    expect(store.resumeHandoff({ userId: USER_ID, handoffId: created.id })).toBe(true);
+    const resumed = store.getHandoff({ userId: USER_ID, handoffId: created.id });
+    expect(resumed?.paused).toBe(false);
+    expect(resumed?.pausedAt).toBeNull();
+    expect(resumed?.pausedByUserId).toBeNull();
+    expect(resumed?.pauseReason).toBeNull();
+  });
+
+  it('running handoff 可以 pause 后 resume 且不改变 state', () => {
+    const created = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'pm2',
+      toRoleLayer: 'executor',
+    });
+    store.claimHandoff({ handoffId: created.id, claimToken: 'tok' });
+    store.startHandoff({
+      handoffId: created.id,
+      claimToken: 'tok',
+      toSessionId: TO_SESSION_ID,
+    });
+
+    expect(store.pauseHandoff({ userId: USER_ID, handoffId: created.id })).toBe(true);
+    expect(store.getHandoff({ userId: USER_ID, handoffId: created.id })?.state).toBe('running');
+    expect(store.resumeHandoff({ userId: USER_ID, handoffId: created.id })).toBe(true);
+    expect(store.getHandoff({ userId: USER_ID, handoffId: created.id })?.state).toBe('running');
+  });
+
+  it('重复 pause 同一 handoff 返回 false，避免重复控制', () => {
+    const created = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+    });
+
+    expect(store.pauseHandoff({ userId: USER_ID, handoffId: created.id })).toBe(true);
+    expect(store.pauseHandoff({ userId: USER_ID, handoffId: created.id })).toBe(false);
+  });
+
+  it('其他用户不能 pause 或 resume', () => {
+    seedUser('u-other', 'other@example.com');
+    const created = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+    });
+
+    expect(store.pauseHandoff({ userId: 'u-other', handoffId: created.id })).toBe(false);
+    expect(store.pauseHandoff({ userId: USER_ID, handoffId: created.id })).toBe(true);
+    expect(store.resumeHandoff({ userId: 'u-other', handoffId: created.id })).toBe(false);
+  });
+
+  it('completed / failed / cancelled 终态拒绝 pause 和 resume', () => {
+    const completed = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+    });
+    store.claimHandoff({ handoffId: completed.id, claimToken: 'completed-token' });
+    store.startHandoff({
+      handoffId: completed.id,
+      claimToken: 'completed-token',
+      toSessionId: TO_SESSION_ID,
+    });
+    store.completeHandoff({ handoffId: completed.id, claimToken: 'completed-token' });
+
+    const failed = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'pm2',
+      toRoleLayer: 'executor',
+    });
+    store.claimHandoff({ handoffId: failed.id, claimToken: 'failed-token' });
+    store.startHandoff({
+      handoffId: failed.id,
+      claimToken: 'failed-token',
+      toSessionId: TO_SESSION_ID,
+    });
+    store.failHandoff({ handoffId: failed.id, claimToken: 'failed-token', reason: 'boom' });
+
+    const cancelled = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+    });
+    store.cancelHandoff({ userId: USER_ID, handoffId: cancelled.id });
+
+    for (const handoff of [completed, failed, cancelled]) {
+      expect(store.pauseHandoff({ userId: USER_ID, handoffId: handoff.id })).toBe(false);
+      expect(store.resumeHandoff({ userId: USER_ID, handoffId: handoff.id })).toBe(false);
+    }
+  });
+});
+
 describe('listPendingHandoffs / listHandoffsBySession', () => {
   it('listPending 按 created_at 升序', () => {
     const a = store.createHandoff({
@@ -224,6 +399,29 @@ describe('listPendingHandoffs / listHandoffsBySession', () => {
     const ids = pending.map((p) => p.id);
     expect(ids).toContain(a.id);
     expect(ids).toContain(b.id);
+  });
+
+  it('paused 的 pending handoff 不会出现在 pending 列表，也不能被 claim', () => {
+    const paused = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+    });
+    const active = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'pm1',
+      toRoleLayer: 'pm2',
+    });
+
+    expect(store.pauseHandoff({ userId: USER_ID, handoffId: paused.id })).toBe(true);
+
+    const pending = store.listPendingHandoffs(50);
+    expect(pending.map((item) => item.id)).toContain(active.id);
+    expect(pending.map((item) => item.id)).not.toContain(paused.id);
+    expect(store.claimHandoff({ handoffId: paused.id, claimToken: 'tok-paused' })).toBeNull();
+    expect(store.claimHandoff({ handoffId: active.id, claimToken: 'tok-active' })).not.toBeNull();
   });
 
   it('listHandoffsBySession 包含 from/to 两侧', () => {

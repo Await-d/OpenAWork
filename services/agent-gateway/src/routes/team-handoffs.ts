@@ -26,9 +26,12 @@ import {
   createHandoff,
   getHandoff,
   listHandoffsBySession,
+  pauseHandoff,
+  resumeHandoff,
+  type HandoffRecord,
   type HandoffRoleLayer,
 } from '../handoff/store/handoff-store.js';
-import { publishHandoffEvent } from '../handoff/bus/team-events-bus.js';
+import { publishHandoffEvent, publishTeamEvent } from '../handoff/bus/team-events-bus.js';
 import {
   createTeamSession,
   validateTeamParentSession,
@@ -36,6 +39,7 @@ import {
 import { submitInboundMessage } from '../handoff/store/inbound-store.js';
 import { setSubstate } from '../handoff/store/substate-store.js';
 import { parseBody } from '../infra/parse-request.js';
+import { logTeamAudit } from '../team/team-audit-store.js';
 
 const TEAM_ROLE_LAYERS = ['user', 'reception', 'pm1', 'pm2', 'executor', 'reviewer'] as const;
 
@@ -52,6 +56,97 @@ const createHandoffSchema = z.object({
   toRoleLayer: z.enum(TEAM_ROLE_LAYERS),
   payload: z.unknown().optional(),
 });
+
+const pauseHandoffSchema = z.object({
+  reason: z.string().trim().min(1).max(500).optional(),
+});
+
+type HandoffControlAction = 'cancel' | 'pause' | 'resume';
+type HandoffControlSignal = 'cancel_signal' | 'pause_signal' | 'resume_signal';
+
+function logHandoffControl(input: {
+  action: HandoffControlAction;
+  actorEmail?: string;
+  actorUserId: string;
+  record: HandoffRecord;
+  reason?: string | null;
+}): void {
+  try {
+    logTeamAudit({
+      action: 'handoff_control',
+      actorEmail: input.actorEmail,
+      actorUserId: input.actorUserId,
+      detail: JSON.stringify({
+        action: input.action,
+        handoffId: input.record.id,
+        fromRoleLayer: input.record.fromRoleLayer,
+        toRoleLayer: input.record.toRoleLayer,
+        fromSessionId: input.record.fromSessionId,
+        toSessionId: input.record.toSessionId,
+        state: input.record.state,
+        paused: input.record.paused,
+        reason: input.reason ?? null,
+      }),
+      entityId: input.record.id,
+      entityType: 'handoff',
+      summary: `handoff ${input.action}: ${input.record.id.slice(0, 8)} ${input.record.fromRoleLayer}→${input.record.toRoleLayer}`,
+      userId: input.record.userId,
+    });
+  } catch (err) {
+    console.warn(
+      `[team-handoffs] audit(${input.action}) 失败：${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
+function injectControlSignal(input: {
+  action: HandoffControlAction;
+  messageType: HandoffControlSignal;
+  reason?: string | null;
+  record: HandoffRecord;
+}): void {
+  if (!input.record.toSessionId) return;
+  try {
+    submitInboundMessage({
+      userId: input.record.userId,
+      toSessionId: input.record.toSessionId,
+      fromRoleLayer: 'system',
+      messageType: input.messageType,
+      payload: {
+        reason: input.reason ?? null,
+        handoffId: input.record.id,
+        action: input.action,
+      },
+    });
+  } catch (err) {
+    console.warn(
+      `[team-handoffs] ${input.messageType} 注入失败：${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
+function publishSchedulerControlEvent(input: {
+  type: 'scheduler.task-paused' | 'scheduler.task-resumed';
+  reason?: string | null;
+  record: HandoffRecord;
+}): void {
+  publishTeamEvent({
+    type: input.type,
+    taskId: input.record.id,
+    sessionId: input.record.toSessionId ?? input.record.fromSessionId,
+    layer: input.record.toRoleLayer,
+    timestamp: Date.now(),
+    userId: input.record.userId,
+    payload: {
+      handoffId: input.record.id,
+      fromRoleLayer: input.record.fromRoleLayer,
+      toRoleLayer: input.record.toRoleLayer,
+      state: input.record.state,
+      paused: input.record.paused,
+      reason: input.reason ?? input.record.pauseReason ?? null,
+    },
+  });
+}
 
 export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
   // ─── Team Sessions ──────────────────────────────────────────────────────
@@ -209,26 +304,130 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
               `[team-handoffs] setSubstate('cancelled') 失败：${e instanceof Error ? e.message : String(e)}`,
             );
           }
-
-          // 注入 cancel_signal 到 inbound queue，让正在跑的 runner（artifact-chain
-          // / pm2-runner）能在下一轮检查时主动退出，而不是等到自然结束
-          try {
-            submitInboundMessage({
-              userId: after.userId,
-              toSessionId: after.toSessionId,
-              fromRoleLayer: 'system',
-              messageType: 'cancel_signal',
-              payload: { reason: 'user-cancelled', handoffId: after.id },
-            });
-          } catch (e) {
-            console.warn(
-              `[team-handoffs] cancel_signal 注入失败：${e instanceof Error ? e.message : String(e)}`,
-            );
-          }
         }
+        injectControlSignal({
+          action: 'cancel',
+          messageType: 'cancel_signal',
+          reason: 'user-cancelled',
+          record: after,
+        });
+        logHandoffControl({
+          action: 'cancel',
+          actorEmail: user.email,
+          actorUserId: user.sub,
+          reason: 'user-cancelled',
+          record: after,
+        });
         publishHandoffEvent({ type: 'handoff.cancelled', record: after });
       }
       step.succeed(undefined, { handoffId });
+      return reply.send({ handoff: after });
+    },
+  );
+
+  app.post(
+    '/team/handoffs/:handoffId/pause',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'team.handoffs.pause');
+      const user = request.user as JwtPayload;
+      const handoffId = (request.params as { handoffId: string }).handoffId;
+
+      const parseStep = child('parse-body');
+      const body = parseBody(pauseHandoffSchema, request.body ?? {});
+      parseStep.succeed();
+
+      const before = getHandoff({ userId: user.sub, handoffId });
+      if (!before) {
+        step.fail('not found');
+        return reply.status(404).send({ error: 'Handoff not found' });
+      }
+
+      const ok = pauseHandoff({
+        userId: user.sub,
+        handoffId,
+        reason: body.reason ?? null,
+      });
+      if (!ok) {
+        step.fail(`cannot pause from state ${before.state}`);
+        return reply.status(409).send({
+          error: 'cannot-pause',
+          state: before.state,
+          paused: before.paused,
+        });
+      }
+
+      const after = getHandoff({ userId: user.sub, handoffId });
+      if (after) {
+        injectControlSignal({
+          action: 'pause',
+          messageType: 'pause_signal',
+          reason: body.reason ?? null,
+          record: after,
+        });
+        publishSchedulerControlEvent({
+          type: 'scheduler.task-paused',
+          reason: body.reason ?? null,
+          record: after,
+        });
+        logHandoffControl({
+          action: 'pause',
+          actorEmail: user.email,
+          actorUserId: user.sub,
+          reason: body.reason ?? null,
+          record: after,
+        });
+      }
+
+      step.succeed(undefined, { handoffId, paused: true });
+      return reply.send({ handoff: after });
+    },
+  );
+
+  app.post(
+    '/team/handoffs/:handoffId/resume',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'team.handoffs.resume');
+      const user = request.user as JwtPayload;
+      const handoffId = (request.params as { handoffId: string }).handoffId;
+
+      const before = getHandoff({ userId: user.sub, handoffId });
+      if (!before) {
+        step.fail('not found');
+        return reply.status(404).send({ error: 'Handoff not found' });
+      }
+
+      const ok = resumeHandoff({ userId: user.sub, handoffId });
+      if (!ok) {
+        step.fail(`cannot resume from state ${before.state}`);
+        return reply.status(409).send({
+          error: 'cannot-resume',
+          state: before.state,
+          paused: before.paused,
+        });
+      }
+
+      const after = getHandoff({ userId: user.sub, handoffId });
+      if (after) {
+        injectControlSignal({
+          action: 'resume',
+          messageType: 'resume_signal',
+          record: after,
+        });
+        publishSchedulerControlEvent({
+          type: 'scheduler.task-resumed',
+          record: after,
+        });
+        logHandoffControl({
+          action: 'resume',
+          actorEmail: user.email,
+          actorUserId: user.sub,
+          record: after,
+        });
+      }
+
+      step.succeed(undefined, { handoffId, paused: false });
       return reply.send({ handoff: after });
     },
   );

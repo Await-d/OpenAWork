@@ -16,6 +16,8 @@ interface SessionStateRow {
   state_status: string;
 }
 
+const DECIDING_INTERACTION_TIMEOUT_SQL = "datetime('now', '-10 minutes')";
+
 export interface SessionRuntimeReconciliationResult {
   previousStatus: PersistedSessionStateStatus | null;
   sessionContext: SessionContextRecord | null;
@@ -101,19 +103,31 @@ function normalizePersistedSessionStateStatus(value: string): PersistedSessionSt
   return 'idle';
 }
 
+function releaseStaleDecidingSessionRecords(sessionId: string): void {
+  for (const table of ['permission_requests', 'question_requests'] as const) {
+    sqliteRun(
+      `UPDATE ${table}
+       SET status = 'pending', updated_at = datetime('now')
+       WHERE session_id = ? AND status = 'deciding' AND updated_at < ${DECIDING_INTERACTION_TIMEOUT_SQL}`,
+      [sessionId],
+    );
+  }
+}
+
 function countPendingSessionRecords(
   table: 'permission_requests' | 'question_requests',
   sessionId: string,
 ): number {
   return (
     sqliteGet<CountRow>(
-      `SELECT COUNT(1) AS count FROM ${table} WHERE session_id = ? AND status = 'pending'`,
+      `SELECT COUNT(1) AS count FROM ${table} WHERE session_id = ? AND status IN ('pending', 'deciding')`,
       [sessionId],
     )?.count ?? 0
   );
 }
 
 export function hasPendingSessionInteraction(sessionId: string): boolean {
+  releaseStaleDecidingSessionRecords(sessionId);
   return (
     countPendingSessionRecords('permission_requests', sessionId) > 0 ||
     countPendingSessionRecords('question_requests', sessionId) > 0

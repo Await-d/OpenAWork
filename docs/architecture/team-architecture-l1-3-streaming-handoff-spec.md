@@ -1,4 +1,4 @@
-# L1.3 流式 Handoff 协议实施设计稿（v1.1）
+# L1.3 流式 Handoff 协议实施设计稿（v1.2）
 
 > ⚠️ **复查发现的现状（2026-05-16）**：
 >
@@ -27,8 +27,36 @@
 > - **Phase D 实施记录**：`.agentdocs/workflow/done/260516-team-phase-d-实施方案.md`（已完成）
 >
 > 创建时间：2026-05-16（v1.0 → v1.1 复查修订）
-> 当前状态：**v1.1 草稿，待团队 review**
-> 实施时机：**Phase F 增量改造**（不是 Phase B 的一部分，因 Phase B 已上线）
+> 当前状态：**v1.2 已完成后端闭环（2026-05-24）**
+> 实施时机：**Phase F 增量改造已落地**；剩余工作仅限更大范围运行验证与 UI/运维观察。
+
+---
+
+## 0.B 实施收口记录（2026-05-24）
+
+L1.3 后端闭环已完成，v1.1 中列出的 4 项增量改造均已落地：
+
+| 改造项                                  | 当前状态        | 主要落点                                                                                                                                                     |
+| --------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `session_inbound_messages` 反向消息通道 | ✅ 已落地       | `services/agent-gateway/src/handoff/store/inbound-store.ts`、`services/agent-gateway/src/routes/team-inbound.ts`                                             |
+| `sessions.substate` 子状态机            | ✅ 已落地       | `services/agent-gateway/src/handoff/store/substate-store.ts`、`artifact-chain.ts`、各层 runner                                                               |
+| c 层等待 inbound 澄清循环               | ✅ 已落地并加固 | `services/agent-gateway/src/handoff/runner/artifact-chain.ts` 支持 answer / timeout fallback / cancel / pause→resume                                         |
+| `handoff_records` 幂等与暂停字段        | ✅ 已落地       | `services/agent-gateway/src/handoff/store/handoff-store.ts` 映射 `idempotency_key`、`paused_at`、`paused_by_user_id`、`pause_reason` 并提供 pause/resume API |
+
+本次收口同时完成：
+
+- 将 `POST /team/sessions/:sessionId/inbound-messages` 从超大 `routes/team.ts` 拆到 `routes/team-inbound.ts`，保持认证、归属校验、幂等、用户消息持久化、异步 b 层编排与 audit 行为。
+- 新 inbound 消息发布 `session.inbound.submitted` 事件；幂等重放不重复发布，事件 payload 只含安全字段和短文本预览，不携带原始 payload。
+- `createTeamSession()` 为团队 session 补齐 `defaultProvider` / `defaultModel` / `dialogueMode` 默认元数据；显式 metadata 优先。
+- 旧 `/team/workspaces/:id/threads` 兼容入口也固化 `teamDefinition.memberSlots` 快照，并返回实际入库 metadata。
+
+验证记录：
+
+- ✅ LSP diagnostics：本次改动的 TypeScript 文件均无诊断。
+- ✅ L1.3 聚焦回归：`team-inbound-routes`、`team-workspace-roster-routes`、`team-handoffs-routes`、`inbound-store`、`handoff-store`、`team-session-create`、`artifact-chain`、`team-b-c-integration`、`team-events-bus` 共 80 个用例通过。
+- ✅ `pnpm --filter @openAwork/agent-gateway build` 通过。
+- ✅ `pnpm typecheck` 通过。
+- ⚠️ `pnpm --filter @openAwork/agent-gateway test` 的 verification 阶段仍被 `verify-task-tool-no-permission.ts` 阻塞：`delegated child task should still complete automatically without approval`。该失败位于 task 工具默认免审批验证链，与 L1.3 Team/handoff 改动文件无交集，需独立排查。
 
 ---
 
@@ -45,13 +73,13 @@
 | `handoff_records.target_session_id`                                | `to_session_id`                     | 命名不同           | 同上                                                |
 | `handoff_records.source_layer` / `target_layer`                    | `from_role_layer` / `to_role_layer` | 命名不同           | 同上                                                |
 | 时间戳 INTEGER ms epoch                                            | TEXT (ISO datetime)                 | 类型不同           | **保持现有类型 TEXT**（Phase B 已确定）             |
-| `handoff_records.idempotency_key`                                  | 不存在                              | **现有缺失**       | 需要新增（改造 4）                                  |
+| `handoff_records.idempotency_key`                                  | 已存在并已映射                      | ✅ 已完成          | `createHandoff(idempotencyKey)` 复用既有记录        |
 | `handoff_records.claim_token`                                      | 已存在                              | **现有有，本稿无** | 本稿采纳（这是真实防双 claim 机制）                 |
 | `sessions.last_heartbeat`                                          | 已存在（TEXT 类型）                 | 已实现             | 不动                                                |
-| `sessions.substate` / `substate_updated_at`                        | **不存在**                          | **本稿新增**       | 改造 2                                              |
-| `session_inbound_messages` 表                                      | **不存在**                          | **本稿新增**       | 改造 1                                              |
+| `sessions.substate` / `substate_updated_at`                        | 已存在并已写入                      | ✅ 已完成          | `substate-store.ts` + runner 全链路写入             |
+| `session_inbound_messages` 表                                      | 已存在并已接入                      | ✅ 已完成          | `inbound-store.ts` + `team-inbound.ts`              |
 | `sessions.structural_depth` / `execution_depth`                    | 看 D18 落地状态                     | 待确认             | 与 D18 对齐                                         |
-| `handoff_records.paused_at` / `paused_by_user_id` / `pause_reason` | **缺失**，只有 `paused`             | 部分实现           | 改造 4 补全（与 D42 对齐）                          |
+| `handoff_records.paused_at` / `paused_by_user_id` / `pause_reason` | 已存在并已映射                      | ✅ 已完成          | `pauseHandoff` / `resumeHandoff`                    |
 
 ### 0.A.2 真正需要的增量改造（4 项）
 

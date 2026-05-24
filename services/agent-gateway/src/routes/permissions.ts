@@ -284,11 +284,19 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
                 return parsedAlways.length > 0 ? parsedAlways : [permissionRequest.scope];
               })();
         for (const pattern of alwaysPatterns) {
-          persistWorkspacePermanentPermission({
-            sessionId,
-            toolName: category,
-            scope: pattern,
-          });
+          try {
+            persistWorkspacePermanentPermission({
+              sessionId,
+              toolName: category,
+              scope: pattern,
+            });
+          } catch (error) {
+            request.log.error(
+              { err: error, requestId: body.requestId, sessionId },
+              'failed to persist permanent permission',
+            );
+            throw ApiError.internal('Failed to persist permanent permission');
+          }
         }
       } else if (body.decision === 'session') {
         // Mirror opencode's `permission.ask reply='always'` semantics: when

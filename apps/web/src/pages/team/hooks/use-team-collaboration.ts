@@ -432,7 +432,11 @@ export function useTeamCollaboration(
   const replySharedSessionPermission = useCallback(
     async (
       sessionId: string,
-      input: { decision: 'once' | 'session' | 'permanent' | 'reject'; requestId: string },
+      input: {
+        alwaysOverride?: string[];
+        decision: 'once' | 'session' | 'permanent' | 'reject';
+        requestId: string;
+      },
     ) => {
       if (!accessToken) {
         return false;

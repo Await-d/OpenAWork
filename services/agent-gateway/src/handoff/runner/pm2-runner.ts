@@ -12,19 +12,39 @@
  *   6. 动态编制（D46：e 数量根据 [P] 标记动态决定，最少 2）
  */
 
+import { randomUUID } from 'node:crypto';
 import type { HandoffTaskRunner } from './watcher.js';
 import { createHandoff, type HandoffRecord } from '../store/handoff-store.js';
 import { publishHandoffEvent } from '../bus/team-events-bus.js';
 import { getTeamConstitution } from '../../team/team-constitution-store.js';
 import { getTeamWorkspaceDefaultRoster } from '../../team/team-default-roster-store.js';
-import { sqliteGet } from '../../infra/db.js';
+import { sqliteGet, sqliteRun } from '../../infra/db.js';
 import { resolveAuxiliaryLlmConfig } from '../../provider/auxiliary-llm-config.js';
 import { buildDispatchPackages, parseAllTasks } from '../capability/dispatch-package.js';
 import { setSubstate, SUBSTATES_D } from '../store/substate-store.js';
 import { resolveSessionWorkspacePath } from '../../session/session-workspace-resolution.js';
+import { assertCanWriteArtifactPhase } from '../capability/layer-capabilities.js';
 
 const MIN_EXECUTOR_PARALLEL = 2;
 const DEFAULT_MAX_EXECUTOR_PARALLEL = 8;
+
+type ArchitectureIssueSeverity = 'warning' | 'blocking';
+type ArchitectureIssueSource = 'builtin' | 'architecture-md';
+
+interface ArchitectureReviewIssue {
+  ruleId: string;
+  severity: ArchitectureIssueSeverity;
+  source: ArchitectureIssueSource;
+  message: string;
+}
+
+interface ArchitectureReviewResult {
+  passed: boolean;
+  issues: ArchitectureReviewIssue[];
+  warningCount: number;
+  blockingCount: number;
+  architectureMdLoaded: boolean;
+}
 
 // ─── Constitution Check 硬门禁 ──────────────────────────────────────────────
 
@@ -174,6 +194,8 @@ export function createPm2Runner(): HandoffTaskRunner {
     // 5. d.2 Architecture Review（规则代码，不用 LLM）
     // 检查 plan 中是否违反基本架构规则（如：不允许直接操作 DB、必须通过 API 层等）
     // 增强：如果 workspace 有 architecture.md，从中提取禁止条款做对比。
+    let architectureReviewResult: ArchitectureReviewResult | null = null;
+    let architectureReviewArtifactId: string | null = null;
     if (planArtifactId) {
       const planRow = sqliteGet<{ content: string }>(`SELECT content FROM artifacts WHERE id = ?`, [
         planArtifactId,
@@ -181,6 +203,7 @@ export function createPm2Runner(): HandoffTaskRunner {
       if (planRow?.content) {
         // 尝试读取 workspace 的 architecture.md
         let architectureContent: string | null = null;
+        let architectureMdLoaded = false;
         if (teamWorkspaceId) {
           try {
             const { readFileSync } = await import('node:fs');
@@ -199,16 +222,60 @@ export function createPm2Runner(): HandoffTaskRunner {
             if (workspaceRoot) {
               const archPath = resolve(join(workspaceRoot, 'architecture.md'));
               architectureContent = readFileSync(archPath, 'utf-8');
+              architectureMdLoaded = architectureContent.trim().length > 0;
             }
-          } catch {
-            // architecture.md 不存在或不可读，跳过
+          } catch (err) {
+            console.warn(
+              `[pm2-runner] 读取 architecture.md 失败：${err instanceof Error ? err.message : String(err)}`,
+            );
           }
         }
-        const archViolations = runArchitectureLint(planRow.content, architectureContent);
-        if (archViolations.length > 0) {
-          // 软警告：不阻断，但记录到 result_json
+        architectureReviewResult = runArchitectureLint(planRow.content, architectureContent, {
+          architectureMdLoaded,
+        });
+        architectureReviewArtifactId = createReviewArtifact({
+          sessionId: input.toSessionId,
+          userId: input.handoff.userId,
+          teamWorkspaceId,
+          result: architectureReviewResult,
+        });
+        if (architectureReviewResult.issues.length > 0) {
           console.warn(
-            `[pm2-runner] d.2 architecture lint 发现 ${archViolations.length} 个问题：${archViolations.join('；')}`,
+            `[pm2-runner] d.2 architecture review 发现 ${architectureReviewResult.issues.length} 个问题：${architectureReviewResult.issues.map((issue) => issue.message).join('；')}`,
+          );
+        }
+        if (!architectureReviewResult.passed) {
+          writeArchitectureReviewResult(input.handoff.id, {
+            architectureReview: architectureReviewResult,
+            architectureReviewArtifactId,
+            qualityReviewPending: false,
+          });
+          try {
+            const { appendSessionMessageV2 } = await import('../../message/message-v2-adapter.js');
+            appendSessionMessageV2({
+              sessionId: input.toSessionId,
+              userId: input.handoff.userId,
+              role: 'assistant',
+              content: [
+                {
+                  type: 'text',
+                  text: `❌ Architecture Review 未通过，已阻止继续派发：${architectureReviewResult.issues
+                    .filter((issue) => issue.severity === 'blocking')
+                    .map((issue) => issue.message)
+                    .join('；')}`,
+                },
+              ],
+            });
+          } catch (err) {
+            console.warn(
+              `[pm2-runner] 写 architecture review 失败消息失败：${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+          throw new Error(
+            `Architecture Review 未通过：${architectureReviewResult.issues
+              .filter((issue) => issue.severity === 'blocking')
+              .map((issue) => issue.message)
+              .join('；')}`,
           );
         }
       }
@@ -261,23 +328,14 @@ export function createPm2Runner(): HandoffTaskRunner {
     setD(SUBSTATES_D.AWAITING_EG);
 
     // 8. 写入 d 层 handoff 的 result_json（记录派发了哪些子 handoff）
-    const { sqliteRun } = await import('../../infra/db.js');
-    sqliteRun(
-      `UPDATE handoff_records SET result_json = ?, updated_at = datetime('now') WHERE id = ?`,
-      [
-        JSON.stringify({
-          dispatchedHandoffIds: createdHandoffs.map((h) => h.id),
-          packageCount: packages.length,
-          parallelCount: parallelExecutors.length,
-          // d.2 architecture review 结果
-          architectureLintPassed: true, // 当前只做软警告，不阻断
-          // d.4 spec/quality review：在 e/f/g 全部完成后由 watcher 触发
-          // runReviewAggregation（双重 review + 失败分流）
-          qualityReviewPending: true,
-        }),
-        input.handoff.id,
-      ],
-    );
+    writeArchitectureReviewResult(input.handoff.id, {
+      dispatchedHandoffIds: createdHandoffs.map((h) => h.id),
+      packageCount: packages.length,
+      parallelCount: parallelExecutors.length,
+      architectureReview: architectureReviewResult,
+      architectureReviewArtifactId,
+      qualityReviewPending: true,
+    });
   };
 }
 
@@ -291,42 +349,79 @@ export function createPm2Runner(): HandoffTaskRunner {
  *   2. 项目 architecture.md 规则提取（如果 workspace 有 architecture.md，
  *      从中提取"不允许"/"禁止"/"must not"条款做关键词匹配）
  *
- * 返回违反描述列表（空 = 通过）。
+ * 返回结构化 review 结果。
  */
-function runArchitectureLint(planContent: string, architectureContent?: string | null): string[] {
-  const violations: string[] = [];
+function runArchitectureLint(
+  planContent: string,
+  architectureContent?: string | null,
+  options?: { architectureMdLoaded?: boolean },
+): ArchitectureReviewResult {
+  const issues: ArchitectureReviewIssue[] = [];
   const lower = planContent.toLowerCase();
+  const pushIssue = (issue: ArchitectureReviewIssue) => {
+    issues.push(issue);
+  };
 
   // ─── 阶段 1：内置规则 ─────────────────────────────────────────────────
 
   // 规则 1：不允许直接操作数据库（应通过 store/repository 层）
   if (/直接.*sql|raw.*query|直接操作.*数据库/i.test(planContent)) {
-    violations.push('计划中包含直接 SQL 操作，应通过 store/repository 层');
+    pushIssue({
+      ruleId: 'builtin-no-direct-sql',
+      severity: 'blocking',
+      source: 'builtin',
+      message: '计划中包含直接 SQL 操作，应通过 store/repository 层',
+    });
   }
 
   // 规则 2：不允许在前端直接调后端内部接口
   if (/前端.*直接调.*内部|bypass.*gateway|绕过.*网关/i.test(planContent)) {
-    violations.push('计划中包含绕过 gateway 的直接调用');
+    pushIssue({
+      ruleId: 'builtin-no-bypass-gateway',
+      severity: 'blocking',
+      source: 'builtin',
+      message: '计划中包含绕过 gateway 的直接调用',
+    });
   }
 
   // 规则 3：不允许硬编码密钥/token
   if (/硬编码.*key|hardcode.*secret|明文.*密码/i.test(planContent)) {
-    violations.push('计划中包含硬编码密钥/密码');
+    pushIssue({
+      ruleId: 'builtin-no-hardcoded-secret',
+      severity: 'blocking',
+      source: 'builtin',
+      message: '计划中包含硬编码密钥/密码',
+    });
   }
 
   // 规则 4：不允许全局可变状态（应使用 store/context）
   if (/全局变量|global.*mutable|window\.\w+\s*=/i.test(lower)) {
-    violations.push('计划中使用全局可变状态');
+    pushIssue({
+      ruleId: 'builtin-no-global-mutable',
+      severity: 'warning',
+      source: 'builtin',
+      message: '计划中使用全局可变状态',
+    });
   }
 
   // 规则 5：不允许同步阻塞 I/O（应使用 async）
   if (/同步.*读取|readFileSync|同步.*请求|synchronous.*io/i.test(planContent)) {
-    violations.push('计划中包含同步阻塞 I/O 操作');
+    pushIssue({
+      ruleId: 'builtin-no-sync-io',
+      severity: 'warning',
+      source: 'builtin',
+      message: '计划中包含同步阻塞 I/O 操作',
+    });
   }
 
   // 规则 6：不允许跨层直接调用（应通过 handoff 协议）
   if (/直接调用.*executor|直接调用.*reviewer|跳过.*pm2|bypass.*handoff/i.test(planContent)) {
-    violations.push('计划中包含跨层直接调用，应通过 handoff 协议');
+    pushIssue({
+      ruleId: 'builtin-no-cross-layer-bypass',
+      severity: 'blocking',
+      source: 'builtin',
+      message: '计划中包含跨层直接调用，应通过 handoff 协议',
+    });
   }
 
   // ─── 阶段 2：从 architecture.md 提取禁止条款 ─────────────────────────
@@ -366,12 +461,97 @@ function runArchitectureLint(planContent: string, architectureContent?: string |
       // 如果 plan 中包含该条款的多个关键词，视为潜在违反
       const matchCount = keywords.filter((kw) => lower.includes(kw.toLowerCase())).length;
       if (matchCount >= Math.ceil(keywords.length * 0.6)) {
-        violations.push(`可能违反 architecture.md 条款：「${prohibition.slice(0, 80)}」`);
+        pushIssue({
+          ruleId: 'architecture-md-prohibition',
+          severity: 'warning',
+          source: 'architecture-md',
+          message: `可能违反 architecture.md 条款：「${prohibition.slice(0, 80)}」`,
+        });
       }
     }
   }
 
-  return violations;
+  const blockingCount = issues.filter((issue) => issue.severity === 'blocking').length;
+  const warningCount = issues.filter((issue) => issue.severity === 'warning').length;
+  return {
+    passed: blockingCount === 0,
+    issues,
+    warningCount,
+    blockingCount,
+    architectureMdLoaded: options?.architectureMdLoaded === true,
+  };
+}
+
+function buildArchitectureReviewMarkdown(result: ArchitectureReviewResult): string {
+  const lines: string[] = [
+    '# Architecture Review',
+    '',
+    `**总体判定**：${result.passed ? '✅ 通过' : '❌ 未通过'}`,
+    `**阻断问题数**：${result.blockingCount}`,
+    `**警告数**：${result.warningCount}`,
+    `**加载 architecture.md**：${result.architectureMdLoaded ? '是' : '否'}`,
+    '',
+  ];
+
+  const blockingIssues = result.issues.filter((issue) => issue.severity === 'blocking');
+  const warnings = result.issues.filter((issue) => issue.severity === 'warning');
+
+  lines.push('## Blocking Issues', '');
+  if (blockingIssues.length === 0) {
+    lines.push('无');
+  } else {
+    for (const issue of blockingIssues) {
+      lines.push(`- [${issue.source}] ${issue.message}`);
+    }
+  }
+
+  lines.push('', '## Warnings', '');
+  if (warnings.length === 0) {
+    lines.push('无');
+  } else {
+    for (const issue of warnings) {
+      lines.push(`- [${issue.source}] ${issue.message}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
+function createReviewArtifact(input: {
+  sessionId: string;
+  userId: string;
+  teamWorkspaceId: string | null;
+  result: ArchitectureReviewResult;
+}): string {
+  assertCanWriteArtifactPhase({
+    roleLayer: 'pm2',
+    phase: 'review_report',
+    userId: input.userId,
+    sessionId: input.sessionId,
+  });
+
+  const artifactId = randomUUID();
+  sqliteRun(
+    `INSERT INTO artifacts (
+       id, session_id, user_id, type, title, content, version,
+       phase, team_workspace_id, parent_artifact_id
+     ) VALUES (?, ?, ?, 'markdown', 'Architecture Review', ?, 1, 'review_report', ?, NULL)`,
+    [
+      artifactId,
+      input.sessionId,
+      input.userId,
+      buildArchitectureReviewMarkdown(input.result),
+      input.teamWorkspaceId,
+    ],
+  );
+  return artifactId;
+}
+
+function writeArchitectureReviewResult(handoffId: string, result: Record<string, unknown>): void {
+  sqliteRun(
+    `UPDATE handoff_records SET result_json = ?, updated_at = datetime('now') WHERE id = ?`,
+    [JSON.stringify(result), handoffId],
+  );
 }
 
 function readHandoffResultJson(handoffId: string): Record<string, unknown> | null {

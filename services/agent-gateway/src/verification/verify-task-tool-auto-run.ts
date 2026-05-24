@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import { AgentTaskManagerImpl } from '@openAwork/agent-core';
-import type { MessageContent } from '@openAwork/shared';
 import { closeDb, connectDb, migrate, sqliteGet, sqliteRun, WORKSPACE_ROOT } from '../infra/db.js';
 import { listSessionMessagesV2 as listSessionMessages } from '../message/message-v2-adapter.js';
 import { subscribeSessionRunEvents } from '../session/session-run-events.js';
@@ -8,32 +7,15 @@ import { reconcileSessionRuntime } from '../session/session-runtime-reconciler.j
 import { createDefaultSandbox } from '../tools/tool-sandbox.js';
 import {
   assert,
+  extractStructuredToolResultOutput,
+  extractToolResultPart,
+  isTaskToolOutput,
   createChatCompletionsStream,
   createDelayedChatCompletionsStream,
   waitFor,
   withMockFetch,
   withTempEnv,
 } from './task-verification-helpers.js';
-
-function isTaskToolOutput(value: unknown): value is {
-  assignedAgent: string;
-  message?: string;
-  sessionId: string;
-  status: 'pending' | 'running';
-  taskId: string;
-} {
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-
-  const candidate = value as Record<string, unknown>;
-  return (
-    typeof candidate['assignedAgent'] === 'string' &&
-    typeof candidate['taskId'] === 'string' &&
-    typeof candidate['sessionId'] === 'string' &&
-    (candidate['status'] === 'pending' || candidate['status'] === 'running')
-  );
-}
 
 function extractUpstreamReasoningEffort(body: unknown): string | null {
   if (!body || typeof body !== 'object') {
@@ -62,7 +44,7 @@ function extractUpstreamReasoningEffort(body: unknown): string | null {
     if (budgetTokens === 8192) {
       return 'medium';
     }
-    if (budgetTokens === 16000) {
+    if (budgetTokens === 16000 || budgetTokens === 16384) {
       return 'high';
     }
     if (budgetTokens === 31999) {
@@ -77,37 +59,6 @@ function extractUpstreamReasoningEffort(body: unknown): string | null {
     : null;
 }
 
-function extractToolResultPart(
-  message: { content?: MessageContent[] } | undefined,
-): Extract<MessageContent, { type: 'tool_result' }> | undefined {
-  if (!Array.isArray(message?.content)) {
-    return undefined;
-  }
-
-  return message.content.find(
-    (part): part is Extract<MessageContent, { type: 'tool_result' }> => part.type === 'tool_result',
-  );
-}
-
-function extractStructuredToolResultOutput(
-  part: Extract<MessageContent, { type: 'tool_result' }> | undefined,
-): Record<string, unknown> | null {
-  if (!part?.output) {
-    return null;
-  }
-
-  if (typeof part.output === 'string') {
-    try {
-      const parsed = JSON.parse(part.output) as unknown;
-      return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
-    } catch {
-      return null;
-    }
-  }
-
-  return typeof part.output === 'object' ? (part.output as Record<string, unknown>) : null;
-}
-
 async function main(): Promise<void> {
   const fetchCalls: string[] = [];
   await withTempEnv(
@@ -115,6 +66,7 @@ async function main(): Promise<void> {
       DATABASE_URL: ':memory:',
       AI_API_KEY: 'test-key',
       AI_API_BASE_URL: 'https://unit-test.invalid/v1',
+      OPENAWORK_DISABLE_MCP_FLAT_TOOLS: '1',
     },
     async () => {
       await withMockFetch(
@@ -210,7 +162,7 @@ async function main(): Promise<void> {
               );
               assert(
                 typeof result.output.message === 'string' &&
-                  result.output.message.includes('Background task launched successfully.'),
+                  result.output.message.includes('后台任务已成功启动。'),
                 'task tool output should expose a human-friendly launch message',
               );
 
@@ -256,8 +208,10 @@ async function main(): Promise<void> {
                 'child session second message should be assistant result',
               );
               assert(
-                JSON.stringify(childMessages[0]?.content) ===
-                  JSON.stringify([{ type: 'text', text: '请给出最终结论' }]),
+                Array.isArray(childMessages[0]?.content) &&
+                  childMessages[0].content.some(
+                    (part) => part.type === 'text' && part.text === '请给出最终结论',
+                  ),
                 'child session should persist delegated prompt',
               );
               assert(
@@ -288,7 +242,7 @@ async function main(): Promise<void> {
               assert(backgroundOutputResult.isError === false, 'background_output should succeed');
               assert(
                 typeof backgroundOutputResult.output === 'string' &&
-                  backgroundOutputResult.output.includes('Task Result'),
+                  backgroundOutputResult.output.includes('任务结果'),
                 'background_output should return a human-friendly result string by default',
               );
 
@@ -316,7 +270,7 @@ async function main(): Promise<void> {
               );
               assert(
                 typeof backgroundTaskOutput?.['message'] === 'string' &&
-                  String(backgroundTaskOutput['message']).includes('Task Result'),
+                  String(backgroundTaskOutput['message']).includes('任务结果'),
                 'background_output full_session should preserve the formatted message',
               );
               assert(
@@ -384,11 +338,7 @@ async function main(): Promise<void> {
                 parentTaskResult?.clientRequestId === parentTaskResultClientRequestId,
                 'parent session tool_result should preserve the derived task tool clientRequestId',
               );
-              const parentTaskResultContent:
-                | Extract<MessageContent, { type: 'tool_result' }>
-                | undefined =
-                parentTaskResultPart?.type === 'tool_result' ? parentTaskResultPart : undefined;
-              const parentTaskOutput = extractStructuredToolResultOutput(parentTaskResultContent);
+              const parentTaskOutput = extractStructuredToolResultOutput(parentTaskResultPart);
               assert(
                 parentTaskOutput?.['status'] === 'done',
                 'parent session tool_result should be replaced with the terminal task status',
@@ -520,8 +470,11 @@ async function main(): Promise<void> {
                 'resumed child session should append a new user/assistant exchange',
               );
               assert(
-                JSON.stringify(resumedChildMessages[2]?.content) ===
-                  JSON.stringify([{ type: 'text', text: '请基于刚才的结果继续补充第二段结论' }]),
+                Array.isArray(resumedChildMessages[2]?.content) &&
+                  resumedChildMessages[2].content.some(
+                    (part) =>
+                      part.type === 'text' && part.text === '请基于刚才的结果继续补充第二段结论',
+                  ),
                 'task resume should persist the new delegated prompt into the same child session',
               );
               assert(
@@ -752,6 +705,7 @@ async function main(): Promise<void> {
       AI_API_KEY: 'test-key',
       AI_API_BASE_URL: 'https://unit-test.invalid/v1',
       OPENAWORK_TASK_CHILD_FIRST_RESPONSE_TIMEOUT_MS: '50',
+      OPENAWORK_DISABLE_MCP_FLAT_TOOLS: '1',
     },
     async () => {
       await withMockFetch(

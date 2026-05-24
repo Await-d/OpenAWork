@@ -27,6 +27,7 @@ import {
   backgroundOutputToolDefinition,
 } from './background-task-tools.js';
 import { bashToolDefinition, deriveBashDescription, runBashCommand } from './bash-tools.js';
+import { bashCommandScope, tokenizeCommand } from './bash-arity.js';
 import {
   bashKillToolDefinition,
   bashOutputToolDefinition,
@@ -171,6 +172,7 @@ import {
   scheduleTaskParentAutoResume,
   upsertTaskParentAutoResumeContext,
 } from '../task/task-parent-auto-resume.js';
+import { tryResolveTaskPendingInteractionWithParent } from '../task/task-parent-auto-decision.js';
 import { extractLatestChildSessionSummary } from '../task/task-result-extraction.js';
 import { taskToolDefinition } from '../task/task-tools.js';
 import {
@@ -396,6 +398,7 @@ interface PermissionRequestPayload {
 interface TaskBackgroundRunResult {
   pendingInteraction: boolean;
   reason?: ChildSessionTerminalReason;
+  errorSummary?: string;
   statusCode: number;
   summary: string;
 }
@@ -1310,18 +1313,22 @@ function toRelativeScope(absolutePath: string): string {
   return absolutePath;
 }
 
-/**
- * Extract the first token (command name) from a bash command string.
- * Used to build `always` patterns like `"npm *"`, `"git *"` — matching
- * opencode's BashArity.prefix approach for coarser permission grouping.
- */
-function extractBashCommandPrefix(command: string): string {
-  const trimmed = command.trim();
-  // Handle piped / chained commands — use the first command's prefix
-  const first = trimmed.split(/[|&;]/)[0]?.trim() ?? trimmed;
-  // Extract the first token (command name), skip env vars like FOO=bar
-  const tokens = first.split(/\s+/).filter((t) => !t.includes('='));
-  return tokens[0] ?? '';
+function buildBashApprovalPatterns(command: string): string[] {
+  const tokens = tokenizeCommand(command.trim());
+  const patterns = new Set<string>();
+  if (tokens.length > 2) {
+    patterns.add(`${tokens.slice(0, -1).join(' ')} *`);
+  }
+  const arityPattern = bashCommandScope(command);
+  if (arityPattern.trim() !== '*') {
+    patterns.add(arityPattern);
+  }
+  const firstToken = tokens[0];
+  if (firstToken) {
+    patterns.add(`${firstToken} *`);
+  }
+  patterns.delete(command.trim());
+  return [...patterns];
 }
 
 function buildPermissionRequestContext(
@@ -1465,26 +1472,24 @@ function buildPermissionRequestContext(
       const workdirValue = typeof rawInput.workdir === 'string' ? rawInput.workdir : WORKSPACE_ROOT;
       const safeWorkdir = validateWorkspacePath(workdirValue);
       if (!command || !safeWorkdir) return null;
-      const cmdPrefix = extractBashCommandPrefix(command);
       return {
         scope: command,
         reason: '需要执行工作区命令',
         riskLevel: 'high',
         previewAction: `执行命令: ${command}`,
-        always: [cmdPrefix ? `${cmdPrefix} *` : '*'],
+        always: buildBashApprovalPatterns(command),
       };
     }
     case 'interactive_bash': {
       const tmuxCommand =
         typeof rawInput.tmux_command === 'string' ? rawInput.tmux_command.trim() : '';
       if (!tmuxCommand) return null;
-      const cmdPrefix = extractBashCommandPrefix(tmuxCommand);
       return {
         scope: tmuxCommand,
         reason: '需要执行 tmux 交互式命令',
         riskLevel: 'high',
         previewAction: `执行 tmux 命令: ${tmuxCommand}`,
-        always: [cmdPrefix ? `${cmdPrefix} *` : '*'],
+        always: buildBashApprovalPatterns(tmuxCommand),
       };
     }
     case 'ast_grep_replace': {
@@ -4440,10 +4445,16 @@ async function runChildTaskSessionInBackground(input: {
           break;
         }
 
+        const statusCode =
+          result.stopReason === 'error' && result.statusCode < 400 ? 500 : result.statusCode;
+        const childSummary = getChildSessionSummary(input.childSessionId, input.userId);
         finalResult = {
           pendingInteraction,
-          statusCode: result.statusCode,
-          summary: getChildSessionSummary(input.childSessionId, input.userId),
+          statusCode,
+          summary:
+            statusCode >= 400 && childSummary.length === 0
+              ? (result.errorSummary ?? '子代理执行失败：未产生可用结果。')
+              : childSummary,
         };
         break;
       } catch (error) {
@@ -4654,6 +4665,14 @@ async function finalizeChildTaskRun(input: {
   }
 
   if (input.result.pendingInteraction) {
+    const resolvedByParent = await tryResolveTaskPendingInteractionWithParent({
+      childSessionId: input.childSessionId,
+      userId: input.userId,
+    });
+    if (resolvedByParent) {
+      return;
+    }
+
     input.taskManager.updateTask(graph, task.id, {
       result: summary,
     });
@@ -4688,16 +4707,17 @@ async function finalizeChildTaskRun(input: {
     return;
   }
 
+  const didChildRunFail = input.result.statusCode >= 400;
   if (task.status === 'running') {
-    if (input.result.statusCode >= 400) {
+    if (didChildRunFail) {
       input.taskManager.failTask(graph, task.id, summary);
     } else {
       input.taskManager.completeTask(graph, task.id, summary);
     }
   } else {
     input.taskManager.updateTask(graph, task.id, {
-      errorMessage: input.result.statusCode >= 400 ? summary : undefined,
-      result: input.result.statusCode >= 400 ? task.result : summary,
+      errorMessage: didChildRunFail ? summary : undefined,
+      result: didChildRunFail ? task.result : summary,
     });
   }
 

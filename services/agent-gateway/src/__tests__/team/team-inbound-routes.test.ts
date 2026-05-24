@@ -1,0 +1,290 @@
+import Fastify, { type FastifyInstance } from 'fastify';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type * as DbModule from '../../infra/db.js';
+import type * as AuthModule from '../../infra/auth.js';
+import type * as RequestWorkflowModule from '../../runtime/request-workflow.js';
+import type * as TeamInboundModule from '../../routes/team-inbound.js';
+import type * as TeamEventsBusModule from '../../handoff/bus/team-events-bus.js';
+import { registerErrorHandler } from '../../infra/error-handler.js';
+
+process.env['DATABASE_URL'] = ':memory:';
+process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
+
+const orchestrateReceptionInputMock = vi.fn<() => Promise<{ triggered: boolean }>>();
+
+vi.mock('../../handoff/runner/reception-orchestrator.js', () => ({
+  orchestrateReceptionInput: orchestrateReceptionInputMock,
+}));
+
+let dbModule: typeof DbModule;
+let authPlugin: typeof AuthModule.default;
+let requestWorkflowPlugin: typeof RequestWorkflowModule.default;
+let teamInboundRoutes: typeof TeamInboundModule.teamInboundRoutes;
+let teamEventsBus: typeof TeamEventsBusModule;
+
+const USER_ID = 'u-team-inbound';
+const OTHER_USER_ID = 'u-team-inbound-other';
+const SESSION_ID = 's-team-inbound';
+const TEAM_WORKSPACE_ID = 'tw-team-inbound';
+
+async function buildApp(): Promise<FastifyInstance> {
+  const app = Fastify();
+  registerErrorHandler(app);
+  await app.register(requestWorkflowPlugin);
+  await app.register(authPlugin);
+  await app.register(teamInboundRoutes);
+  await app.ready();
+  return app;
+}
+
+function bearer(app: FastifyInstance, userId = USER_ID): string {
+  const token = app.jwt.sign({ sub: userId, email: `${userId}@example.com` });
+  return `Bearer ${token}`;
+}
+
+function seedUser(id: string): void {
+  dbModule.sqliteRun("INSERT OR IGNORE INTO users (id, email, password_hash) VALUES (?, ?, 'x')", [
+    id,
+    `${id}@example.com`,
+  ]);
+}
+
+function seedReceptionSession(sessionId: string, userId: string): void {
+  dbModule.sqliteRun(
+    `INSERT OR IGNORE INTO sessions (id, user_id, title, metadata_json, role_layer, state_status)
+     VALUES (?, ?, 'Reception', ?, 'reception', 'idle')`,
+    [sessionId, userId, JSON.stringify({ teamWorkspaceId: TEAM_WORKSPACE_ID })],
+  );
+}
+
+function countRows(tableName: string): number {
+  const row = dbModule.sqliteGet<{ c: number }>(`SELECT COUNT(*) AS c FROM ${tableName}`, []);
+  return row?.c ?? 0;
+}
+
+beforeAll(async () => {
+  dbModule = await import('../../infra/db.js');
+  await dbModule.migrate();
+  const auth = await import('../../infra/auth.js');
+  authPlugin = auth.default;
+  const requestWorkflow = await import('../../runtime/request-workflow.js');
+  requestWorkflowPlugin = requestWorkflow.default;
+  const teamInbound = await import('../../routes/team-inbound.js');
+  teamInboundRoutes = teamInbound.teamInboundRoutes;
+  teamEventsBus = await import('../../handoff/bus/team-events-bus.js');
+});
+
+beforeEach(() => {
+  teamEventsBus.__clearTeamEventsBusForTesting();
+  orchestrateReceptionInputMock.mockReset();
+  orchestrateReceptionInputMock.mockResolvedValue({ triggered: false });
+  dbModule.sqliteRun('DELETE FROM team_audit_logs', []);
+  dbModule.sqliteRun('DELETE FROM session_inbound_messages', []);
+  dbModule.sqliteRun('DELETE FROM part_v2', []);
+  dbModule.sqliteRun('DELETE FROM message_v2', []);
+  dbModule.sqliteRun('DELETE FROM session_entry', []);
+  dbModule.sqliteRun('DELETE FROM event_log', []);
+  dbModule.sqliteRun('DELETE FROM users', []);
+  seedUser(USER_ID);
+  seedUser(OTHER_USER_ID);
+  seedReceptionSession(SESSION_ID, USER_ID);
+});
+
+afterAll(async () => {
+  await dbModule.closeDb();
+});
+
+describe('POST /team/sessions/:sessionId/inbound-messages', () => {
+  it('需要认证', async () => {
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/team/sessions/${SESSION_ID}/inbound-messages`,
+        payload: { messageType: 'user_input', payload: { text: 'hello' } },
+      });
+
+      expect(res.statusCode).toBe(401);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('其他用户访问已有 session 时返回 404', async () => {
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/team/sessions/${SESSION_ID}/inbound-messages`,
+        headers: { authorization: bearer(app, OTHER_USER_ID) },
+        payload: { messageType: 'user_input', payload: { text: 'hello' } },
+      });
+
+      expect(res.statusCode).toBe(404);
+      expect(countRows('session_inbound_messages')).toBe(0);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('新 user_input 返回 201 并写入 inbound 与 message_v2', async () => {
+    const app = await buildApp();
+    const events: TeamEventsBusModule.TeamEventEnvelope[] = [];
+    const unsubscribe = teamEventsBus.subscribeToTeamEvents((event) => {
+      events.push(event);
+    });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/team/sessions/${SESSION_ID}/inbound-messages`,
+        headers: { authorization: bearer(app) },
+        payload: {
+          messageType: 'user_input',
+          payload: { text: '帮我实现 OAuth 登录' },
+          clientIdempotencyKey: 'route-user-input-1',
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+      const data = res.json() as { messageId: string; createdAt: string };
+      expect(data.messageId).toBeTruthy();
+      expect(data.createdAt).toBeTruthy();
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        type: 'session.inbound.submitted',
+        sessionId: SESSION_ID,
+        layer: 'user',
+        userId: USER_ID,
+        payload: {
+          messageId: data.messageId,
+          toSessionId: SESSION_ID,
+          messageType: 'user_input',
+          fromRoleLayer: 'user',
+          reused: false,
+          textPreview: '帮我实现 OAuth 登录',
+        },
+      });
+      expect(events[0]?.payload).not.toHaveProperty('payload');
+      expect(countRows('session_inbound_messages')).toBe(1);
+      expect(countRows('message_v2')).toBe(1);
+
+      const inbound = dbModule.sqliteGet<{
+        client_idempotency_key: string | null;
+        from_role_layer: string;
+        message_type: string;
+        payload_json: string;
+        to_session_id: string;
+      }>(`SELECT * FROM session_inbound_messages WHERE id = ? LIMIT 1`, [data.messageId]);
+      expect(inbound).toMatchObject({
+        client_idempotency_key: 'route-user-input-1',
+        from_role_layer: 'user',
+        message_type: 'user_input',
+        to_session_id: SESSION_ID,
+      });
+      expect(JSON.parse(inbound?.payload_json ?? '{}')).toEqual({ text: '帮我实现 OAuth 登录' });
+
+      const persistedMessage = dbModule.sqliteGet<{ data: string }>(
+        `SELECT data FROM message_v2 WHERE session_id = ? LIMIT 1`,
+        [SESSION_ID],
+      );
+      expect(persistedMessage?.data).toContain('user');
+      expect(orchestrateReceptionInputMock).toHaveBeenCalledWith({
+        userId: USER_ID,
+        receptionSessionId: SESSION_ID,
+        userIntent: '帮我实现 OAuth 登录',
+        teamWorkspaceId: TEAM_WORKSPACE_ID,
+        clientIdempotencyKey: 'route-user-input-1',
+        persistUserMessage: false,
+      });
+    } finally {
+      unsubscribe();
+      await app.close();
+    }
+  });
+
+  it('幂等重放返回 200 且不重复写入', async () => {
+    const app = await buildApp();
+    const events: TeamEventsBusModule.TeamEventEnvelope[] = [];
+    const unsubscribe = teamEventsBus.subscribeToTeamEvents((event) => {
+      events.push(event);
+    });
+    try {
+      const first = await app.inject({
+        method: 'POST',
+        url: `/team/sessions/${SESSION_ID}/inbound-messages`,
+        headers: { authorization: bearer(app) },
+        payload: {
+          messageType: 'user_input',
+          payload: { text: '第一次' },
+          clientIdempotencyKey: 'route-replay-1',
+        },
+      });
+      const second = await app.inject({
+        method: 'POST',
+        url: `/team/sessions/${SESSION_ID}/inbound-messages`,
+        headers: { authorization: bearer(app) },
+        payload: {
+          messageType: 'user_input',
+          payload: { text: '第二次' },
+          clientIdempotencyKey: 'route-replay-1',
+        },
+      });
+
+      expect(first.statusCode).toBe(201);
+      expect(second.statusCode).toBe(200);
+      expect(events).toHaveLength(1);
+      expect(events[0]?.type).toBe('session.inbound.submitted');
+      expect((second.json() as { messageId: string }).messageId).toBe(
+        (first.json() as { messageId: string }).messageId,
+      );
+      expect(countRows('session_inbound_messages')).toBe(1);
+      expect(countRows('message_v2')).toBe(1);
+      expect(orchestrateReceptionInputMock).toHaveBeenCalledTimes(1);
+    } finally {
+      unsubscribe();
+      await app.close();
+    }
+  });
+
+  it('非法 messageType 返回 400', async () => {
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/team/sessions/${SESSION_ID}/inbound-messages`,
+        headers: { authorization: bearer(app) },
+        payload: { messageType: 'not_allowed', payload: { text: 'hello' } },
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(countRows('session_inbound_messages')).toBe(0);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('escape hatch 新消息写入 audit log', async () => {
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/team/sessions/${SESSION_ID}/inbound-messages`,
+        headers: { authorization: bearer(app) },
+        payload: { messageType: 'cancel_signal', payload: { reason: 'stop' } },
+      });
+
+      expect(res.statusCode).toBe(201);
+      const audit = dbModule.sqliteGet<{ action: string; entity_type: string; summary: string }>(
+        `SELECT action, entity_type, summary FROM team_audit_logs LIMIT 1`,
+        [],
+      );
+      expect(audit).toMatchObject({
+        action: 'escape_hatch_used',
+        entity_type: 'session_inbound_message',
+      });
+      expect(audit?.summary).toContain('cancel_signal');
+    } finally {
+      await app.close();
+    }
+  });
+});

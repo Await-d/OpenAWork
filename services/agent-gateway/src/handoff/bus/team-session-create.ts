@@ -14,6 +14,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import type { DialogueMode } from '@openAwork/shared';
 import { sqliteGet, sqliteRun } from '../../infra/db.js';
 import type { HandoffRoleLayer } from '../store/handoff-store.js';
 
@@ -21,7 +22,6 @@ export interface CreateTeamSessionInput {
   userId: string;
   roleLayer: HandoffRoleLayer;
   teamParentSessionId?: string | null;
-  /** 写入 sessions.metadata_json，原样存（调用方负责合法性） */
   metadataJson?: string;
   /** 初始 handoff_state（pending/running/null） */
   handoffState?: 'pending' | 'running' | null;
@@ -31,6 +31,49 @@ export interface CreateTeamSessionInput {
 
 export interface CreateTeamSessionResult {
   sessionId: string;
+}
+
+const DEFAULT_DIALOGUE_MODE_BY_ROLE_LAYER: Record<HandoffRoleLayer, DialogueMode> = {
+  user: 'coding',
+  reception: 'clarify',
+  pm1: 'coding',
+  pm2: 'coding',
+  executor: 'coding',
+  reviewer: 'coding',
+};
+
+function parseMetadataJson(metadataJson: string | undefined): Record<string, unknown> {
+  if (metadataJson === undefined) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(metadataJson) as unknown;
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch (_error) {
+    return {};
+  }
+  return {};
+}
+
+export function withRoleLayerDialogueMetadataDefaults(input: {
+  metadataJson?: string;
+  roleLayer: HandoffRoleLayer;
+}): string {
+  const metadata = parseMetadataJson(input.metadataJson);
+
+  if (!Object.prototype.hasOwnProperty.call(metadata, 'defaultProvider')) {
+    metadata['defaultProvider'] = null;
+  }
+  if (!Object.prototype.hasOwnProperty.call(metadata, 'defaultModel')) {
+    metadata['defaultModel'] = null;
+  }
+  if (!Object.prototype.hasOwnProperty.call(metadata, 'dialogueMode')) {
+    metadata['dialogueMode'] = DEFAULT_DIALOGUE_MODE_BY_ROLE_LAYER[input.roleLayer];
+  }
+
+  return JSON.stringify(metadata);
 }
 
 /**
@@ -50,7 +93,10 @@ export function validateTeamParentSession(input: {
 
 export function createTeamSession(input: CreateTeamSessionInput): CreateTeamSessionResult {
   const sessionId = randomUUID();
-  const metadataJson = input.metadataJson ?? '{}';
+  const metadataJson = withRoleLayerDialogueMetadataDefaults({
+    metadataJson: input.metadataJson,
+    roleLayer: input.roleLayer,
+  });
 
   // L1.8 D18：计算 structural_depth 和 execution_depth
   // structural_depth = parent 的 structural_depth + 1（根 session = 0）

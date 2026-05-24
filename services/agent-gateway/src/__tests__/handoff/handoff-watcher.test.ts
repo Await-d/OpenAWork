@@ -129,6 +129,26 @@ describe('HandoffWatcher.tickOnce', () => {
     expect(result.claimed).toBe(0);
   });
 
+  it('paused 的 pending handoff 不会被 watcher claim', async () => {
+    const watcher = new watcherModule.HandoffWatcher({
+      scheduler: new InProcessScheduler(),
+    });
+    const paused = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+    });
+    expect(store.pauseHandoff({ userId: USER_ID, handoffId: paused.id })).toBe(true);
+
+    const result = await watcher.tickOnce();
+    expect(result.claimed).toBe(0);
+
+    const after = store.getHandoff({ userId: USER_ID, handoffId: paused.id });
+    expect(after?.state).toBe('pending');
+    expect(after?.paused).toBe(true);
+  });
+
   it('runner 抛错时 handoff 进入 failed', async () => {
     const watcher = new watcherModule.HandoffWatcher({
       scheduler: new InProcessScheduler(),

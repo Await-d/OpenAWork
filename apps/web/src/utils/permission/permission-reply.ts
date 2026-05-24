@@ -2,6 +2,7 @@ import { createPermissionsClient } from '@openAwork/web-client';
 import type { PermissionDecision } from '@openAwork/web-client';
 
 export async function replyPermissionRequest(input: {
+  alwaysOverride?: string[];
   decision: PermissionDecision;
   feedback?: string;
   gatewayUrl: string;
@@ -12,6 +13,7 @@ export async function replyPermissionRequest(input: {
   await createPermissionsClient(input.gatewayUrl).reply(input.token, input.sessionId, {
     requestId: input.requestId,
     decision: input.decision,
+    ...(input.alwaysOverride ? { alwaysOverride: input.alwaysOverride } : {}),
     ...(input.decision === 'reject' && input.feedback ? { feedback: input.feedback } : {}),
   });
 }
