@@ -37,9 +37,7 @@ export class QQChannelService implements MessagingChannelService {
       this.notify(event);
     } catch (err) {
       console.warn(
-        `[qq] channel notify handler threw: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
+        `[qq] channel notify handler threw: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
@@ -80,18 +78,21 @@ export class QQChannelService implements MessagingChannelService {
   async sendMessage(chatId: string, content: string): Promise<{ messageId: string }> {
     const token = await this.getAccessToken();
     const [channelId, msgId] = chatId.split(':');
-    const response = await channelFetch(`https://api.sgroup.qq.com/channels/${channelId}/messages`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `QQBot ${token}`,
+    const response = await channelFetch(
+      `https://api.sgroup.qq.com/channels/${channelId}/messages`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `QQBot ${token}`,
+        },
+        body: JSON.stringify({
+          content,
+          msg_type: 0,
+          ...(msgId ? { msg_id: msgId } : {}),
+        }),
       },
-      body: JSON.stringify({
-        content,
-        msg_type: 0,
-        ...(msgId ? { msg_id: msgId } : {}),
-      }),
-    });
+    );
     const data = (await response.json()) as { id?: string; code?: number; message?: string };
     if (data.code) {
       throw new Error(`QQ API error ${data.code}: ${data.message}`);

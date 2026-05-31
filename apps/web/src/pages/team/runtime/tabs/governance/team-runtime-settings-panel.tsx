@@ -527,7 +527,12 @@ function UserMemorySection({
   token: string;
   client: ReturnType<typeof createTeamPhaseAClient>;
 }) {
-  const { applyMemory, error: loadError, loading: loadLoading, memory } = useRecoverableUserMemoryRead({
+  const {
+    applyMemory,
+    error: loadError,
+    loading: loadLoading,
+    memory,
+  } = useRecoverableUserMemoryRead({
     client,
     token,
   });
@@ -624,12 +629,17 @@ function PersonasSection({
   client: ReturnType<typeof createTeamPhaseAClient>;
 }) {
   const [activeLayer, setActiveLayer] = useState<SoulRoleLayer>('reception');
-  const { applyPersonaResponse, error: loadError, loading: loadLoading, personaResponse, refresh } =
-    useRecoverablePersonaRead({
-      client,
-      roleLayer: activeLayer,
-      token,
-    });
+  const {
+    applyPersonaResponse,
+    error: loadError,
+    loading: loadLoading,
+    personaResponse,
+    refresh,
+  } = useRecoverablePersonaRead({
+    client,
+    roleLayer: activeLayer,
+    token,
+  });
   const [draft, setDraft] = useState('');
   const [isDefault, setIsDefault] = useState<boolean>(true);
   const [feedback, setFeedback] = useState<SaveFeedback>({ kind: 'idle' });
@@ -755,11 +765,7 @@ function PersonasSection({
         >
           保存
         </button>
-        <button
-          type="button"
-          style={SECONDARY_BUTTON_STYLE}
-          onClick={() => refresh()}
-        >
+        <button type="button" style={SECONDARY_BUTTON_STYLE} onClick={() => refresh()}>
           重置为默认
         </button>
       </div>

@@ -317,11 +317,7 @@ export function TeamDefaultRosterSection({
           </span>
         </div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            style={SECONDARY_BUTTON_STYLE}
-            onClick={() => refresh()}
-          >
+          <button type="button" style={SECONDARY_BUTTON_STYLE} onClick={() => refresh()}>
             刷新
           </button>
           <button
@@ -354,9 +350,7 @@ export function TeamDefaultRosterSection({
       {loading ? (
         <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>正在加载默认固定团队…</span>
       ) : null}
-      {loadError ? (
-        <span style={{ fontSize: 12, color: 'var(--danger)' }}>{loadError}</span>
-      ) : null}
+      {loadError ? <span style={{ fontSize: 12, color: 'var(--danger)' }}>{loadError}</span> : null}
 
       <div style={{ display: 'grid', gap: 10 }}>
         {TEAM_RUNTIME_LAYER_ORDER.map((layer) => {

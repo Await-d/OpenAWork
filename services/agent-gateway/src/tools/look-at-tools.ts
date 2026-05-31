@@ -68,9 +68,7 @@ async function assertLookAtFileWithinLimit(filePath: string): Promise<void> {
     return;
   }
   if (size > max) {
-    throw new Error(
-      `look_at file too large: ${size} bytes exceeds limit ${max} bytes`,
-    );
+    throw new Error(`look_at file too large: ${size} bytes exceeds limit ${max} bytes`);
   }
 }
 

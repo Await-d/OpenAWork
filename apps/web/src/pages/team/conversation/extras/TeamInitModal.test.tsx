@@ -83,7 +83,10 @@ describe('TeamInitModal', () => {
 
   it('phase=skipped 时不弹也不显示入口', () => {
     const { container } = render(
-      <TeamInitModal sessionId="s3" sessionMetadata={{ teamInit: { ...STATE, phase: 'skipped' } }} />,
+      <TeamInitModal
+        sessionId="s3"
+        sessionMetadata={{ teamInit: { ...STATE, phase: 'skipped' } }}
+      />,
     );
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(container.textContent).not.toContain('团队初始化准备未完成');

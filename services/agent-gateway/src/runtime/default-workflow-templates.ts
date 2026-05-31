@@ -533,7 +533,10 @@ export const DEFAULT_WORKFLOW_TEMPLATE_SEEDS: DefaultWorkflowTemplateSeed[] = [
         templateScale: 'large',
       },
     },
-    nodes: buildSeedTemplateNodes(REQUIRED_ROLES, bindingsFromLayerModels(TRI_PROVIDER_LAYER_MODELS)),
+    nodes: buildSeedTemplateNodes(
+      REQUIRED_ROLES,
+      bindingsFromLayerModels(TRI_PROVIDER_LAYER_MODELS),
+    ),
     edges: buildSeedTemplateEdges(REQUIRED_ROLES),
   },
   {

@@ -56,7 +56,10 @@ export function deriveLayerActivity(input: {
 }
 
 /** 根据某层的活动状态决定 agent 的 3D 状态。 */
-export function layerToOfficeStatus(layer: TeamRoleLayer, activity: LayerActivity): AgentOfficeStatus {
+export function layerToOfficeStatus(
+  layer: TeamRoleLayer,
+  activity: LayerActivity,
+): AgentOfficeStatus {
   if (activity.running.has(layer)) return 'working';
   if (activity.pending.has(layer)) return 'discussing';
   return 'resting';
@@ -90,9 +93,7 @@ function isLiveBindingEnabled(): boolean {
  * 消费 OfficeThreeCanvas 的 officeAgents，叠加真实 layer/handoff 状态。
  * flag 关闭或无活动时返回原数组。
  */
-export function useOfficeLayerBinding(
-  agents: AgentTeamsOfficeAgent[],
-): AgentTeamsOfficeAgent[] {
+export function useOfficeLayerBinding(agents: AgentTeamsOfficeAgent[]): AgentTeamsOfficeAgent[] {
   const layerNodes = useLayerStore((s) => s.nodes);
   const handoffs = useHandoffStore((s) => s.handoffs);
 

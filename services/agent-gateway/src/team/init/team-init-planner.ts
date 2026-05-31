@@ -39,12 +39,7 @@ const PROJECT_SIGNAL_ENTRIES = [
 ];
 
 /** 扫描目录时忽略的「噪声」条目——它们的存在不代表项目非空。 */
-const EMPTINESS_IGNORED_ENTRIES = new Set([
-  '.DS_Store',
-  '.gitkeep',
-  'Thumbs.db',
-  '.shadow-git',
-]);
+const EMPTINESS_IGNORED_ENTRIES = new Set(['.DS_Store', '.gitkeep', 'Thumbs.db', '.shadow-git']);
 
 export interface ProjectEmptinessProbe {
   projectKind: TeamInitProjectKind;

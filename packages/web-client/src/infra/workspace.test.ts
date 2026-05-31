@@ -107,9 +107,9 @@ describe('createWorkspaceClient mutation error handling', () => {
 
     const client = createWorkspaceClient('http://localhost:3000');
 
-    await expect(
-      client.writeFile('token-1', '/workspace/demo/file.ts', 'next'),
-    ).rejects.toThrow('file is locked');
+    await expect(client.writeFile('token-1', '/workspace/demo/file.ts', 'next')).rejects.toThrow(
+      'file is locked',
+    );
   });
 
   it('deleteEntry 网络异常时会转换成中文网络错误', async () => {

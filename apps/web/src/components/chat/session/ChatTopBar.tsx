@@ -470,9 +470,7 @@ export function ChatTopBar({
             onClick={onToggleEditorFullScreen}
             aria-pressed={editorFullScreen}
             title={
-              editorFullScreen
-                ? '退出全屏 · 恢复分屏对话'
-                : '全屏编辑器/浏览器 · 占据整个内容区'
+              editorFullScreen ? '退出全屏 · 恢复分屏对话' : '全屏编辑器/浏览器 · 占据整个内容区'
             }
             className={`icon-btn${editorFullScreen ? ' active' : ''}`}
             style={{

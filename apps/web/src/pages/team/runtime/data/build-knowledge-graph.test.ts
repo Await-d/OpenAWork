@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { buildKnowledgeGraph } from './build-knowledge-graph.js';
 import type { HandoffEntry, LayerNode } from '../../../../stores/team/team-events.js';
 
-function layer(partial: Partial<LayerNode> & Pick<LayerNode, 'sessionId' | 'roleLayer'>): LayerNode {
+function layer(
+  partial: Partial<LayerNode> & Pick<LayerNode, 'sessionId' | 'roleLayer'>,
+): LayerNode {
   return {
     parentSessionId: null,
     state: 'running',
@@ -55,7 +57,11 @@ describe('buildKnowledgeGraph', () => {
     });
     const handoffEdges = graph.edges.filter((e) => e.kind === 'handoff');
     expect(handoffEdges).toHaveLength(1);
-    expect(handoffEdges[0]).toMatchObject({ from: 'session:a', to: 'session:b', state: 'completed' });
+    expect(handoffEdges[0]).toMatchObject({
+      from: 'session:a',
+      to: 'session:b',
+      state: 'completed',
+    });
     const bNode = graph.nodes.find((n) => n.id === 'session:b');
     expect(bNode?.state).toBe('completed');
   });

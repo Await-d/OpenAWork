@@ -68,19 +68,23 @@ export function shouldAttemptPm2QualityReview(
   return nowMs - lastAttemptAt >= QUALITY_REVIEW_RETRY_INTERVAL_MS;
 }
 
-export function listPm2HandoffsReadyForQualityReview(input: {
-  nowMs?: number;
-  sessionIds?: string[];
-  userId?: string;
-} = {}): Pm2QualityReviewCandidate[] {
+export function listPm2HandoffsReadyForQualityReview(
+  input: {
+    nowMs?: number;
+    sessionIds?: string[];
+    userId?: string;
+  } = {},
+): Pm2QualityReviewCandidate[] {
   return listPm2HandoffsPendingQualityReview(input).filter((row) => row.readyNow);
 }
 
-export function listPm2HandoffsPendingQualityReview(input: {
-  nowMs?: number;
-  sessionIds?: string[];
-  userId?: string;
-} = {}): Pm2QualityReviewCandidate[] {
+export function listPm2HandoffsPendingQualityReview(
+  input: {
+    nowMs?: number;
+    sessionIds?: string[];
+    userId?: string;
+  } = {},
+): Pm2QualityReviewCandidate[] {
   const nowMs = input.nowMs ?? Date.now();
   const conditions = [`state = 'running'`, `to_role_layer = 'pm2'`];
   const params: Array<number | string> = [];
@@ -205,7 +209,8 @@ export async function reconcilePm2QualityReview(input: {
 
     const payload = parseJsonObject(row.payload_json);
     const resultJson = isRecord(payload?.['resultJson']) ? payload['resultJson'] : null;
-    const teamWorkspaceId = typeof payload?.['teamWorkspaceId'] === 'string' ? payload['teamWorkspaceId'] : null;
+    const teamWorkspaceId =
+      typeof payload?.['teamWorkspaceId'] === 'string' ? payload['teamWorkspaceId'] : null;
     const specArtifactId =
       resultJson && typeof resultJson['specArtifactId'] === 'string'
         ? (resultJson['specArtifactId'] as string)
@@ -228,9 +233,7 @@ export async function reconcilePm2QualityReview(input: {
           apiKey: llmConfig.apiKey,
           model: llmConfig.model,
           ...(llmConfig.providerType ? { providerType: llmConfig.providerType } : {}),
-          ...(llmConfig.upstreamProtocol
-            ? { upstreamProtocol: llmConfig.upstreamProtocol }
-            : {}),
+          ...(llmConfig.upstreamProtocol ? { upstreamProtocol: llmConfig.upstreamProtocol } : {}),
           prompt: `${system}\n\n---\n\n${user}`,
           temperature: 0.1,
         });
@@ -306,7 +309,9 @@ export async function reconcilePm2QualityReview(input: {
           sessionId: pm2SessionId,
           userId: input.userId,
           role: 'assistant',
-          content: [{ type: 'text', text: `⚠️ 实现型失败，准备重新派发。原因：${disposition.reason}` }],
+          content: [
+            { type: 'text', text: `⚠️ 实现型失败，准备重新派发。原因：${disposition.reason}` },
+          ],
         });
         const didRetryPm2 = retryRunningHandoffById(row.id);
         if (didRetryPm2) {
@@ -342,7 +347,9 @@ export async function reconcilePm2QualityReview(input: {
           sessionId: pm2SessionId,
           userId: input.userId,
           role: 'assistant',
-          content: [{ type: 'text', text: `⚠️ 规划型失败，退回 PM1 重新规划。原因：${disposition.reason}` }],
+          content: [
+            { type: 'text', text: `⚠️ 规划型失败，退回 PM1 重新规划。原因：${disposition.reason}` },
+          ],
         });
         submitEscalationToReception({
           payload: {
@@ -399,7 +406,12 @@ export async function reconcilePm2QualityReview(input: {
         sessionId: pm2SessionId,
         userId: input.userId,
         role: 'assistant',
-        content: [{ type: 'text', text: `🔴 多次重试仍未通过评审，需要用户介入。原因：${disposition.reason}` }],
+        content: [
+          {
+            type: 'text',
+            text: `🔴 多次重试仍未通过评审，需要用户介入。原因：${disposition.reason}`,
+          },
+        ],
       });
       submitEscalationToReception({
         payload: {
@@ -515,7 +527,9 @@ export async function reconcilePm2QualityReview(input: {
         sessionId: pm2SessionId,
         userId: input.userId,
         role: 'assistant',
-        content: [{ type: 'text', text: `⚠️ Quality Review 执行失败，将稍后自动重试。原因：${reason}` }],
+        content: [
+          { type: 'text', text: `⚠️ Quality Review 执行失败，将稍后自动重试。原因：${reason}` },
+        ],
       });
     }
     return { status: 'retryable-error' };

@@ -7,7 +7,11 @@
  */
 
 import { useMemo, useState, type CSSProperties } from 'react';
-import { useTeamUsageStore, type UsageBucket, type TeamUsageEvent } from '../../../../../stores/team/team-usage.js';
+import {
+  useTeamUsageStore,
+  type UsageBucket,
+  type TeamUsageEvent,
+} from '../../../../../stores/team/team-usage.js';
 import { TabContainer } from '../TabContainer.js';
 import { SessionStatsPanel } from './SessionStatsPanel.js';
 import { ToolCallsView } from './ToolCallsView.js';
@@ -112,7 +116,15 @@ export function UsageView(props: UsageViewProps = {}) {
           ]}
         />
       </div>
-      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
         {mode === 'usage' ? <UsageMetricsPanel {...props} /> : <ToolCallsView />}
       </div>
     </div>
@@ -219,11 +231,7 @@ function UsageMetricsPanel({ selectedSessionId, selectedSessionTitle }: UsageVie
               setExpandedLayer(null);
             }}
           />
-          <GroupBtn
-            label="按 layer"
-            active={group === 'layer'}
-            onClick={() => setGroup('layer')}
-          />
+          <GroupBtn label="按 layer" active={group === 'layer'} onClick={() => setGroup('layer')} />
           <GroupBtn
             label="按 session"
             active={group === 'session'}
@@ -256,9 +264,7 @@ function UsageMetricsPanel({ selectedSessionId, selectedSessionTitle }: UsageVie
                       : {})}
                   />
                   {expanded ? (
-                    <LayerDrilldown
-                      calls={recent.filter((event) => event.layer === key)}
-                    />
+                    <LayerDrilldown calls={recent.filter((event) => event.layer === key)} />
                   ) : null}
                 </div>
               );
@@ -422,7 +428,9 @@ function LayerDrilldown({ calls }: { calls: TeamUsageEvent[] }) {
             <span style={{ minWidth: 78, color: 'var(--fg-muted)' }}>
               {new Date(event.timestamp).toLocaleTimeString()}
             </span>
-            <span style={{ minWidth: 80, color: 'var(--fg-default)' }}>{event.provider ?? '—'}</span>
+            <span style={{ minWidth: 80, color: 'var(--fg-default)' }}>
+              {event.provider ?? '—'}
+            </span>
             <span style={{ minWidth: 90, color: 'var(--fg-default)' }}>{event.model ?? ''}</span>
             <span style={{ flex: 1 }} />
             <span style={{ fontVariantNumeric: 'tabular-nums' }}>

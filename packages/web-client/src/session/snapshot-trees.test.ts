@@ -95,8 +95,6 @@ describe('createSnapshotTreesClient', () => {
 
     const client = createSnapshotTreesClient('http://localhost:3000');
 
-    await expect(client.detail('token-1', 'session-1', 'tree-1')).rejects.toThrow(
-      '查询参数无效。',
-    );
+    await expect(client.detail('token-1', 'session-1', 'tree-1')).rejects.toThrow('查询参数无效。');
   });
 });

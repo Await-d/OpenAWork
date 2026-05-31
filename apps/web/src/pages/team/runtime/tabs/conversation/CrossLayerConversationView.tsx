@@ -12,10 +12,7 @@
  */
 
 import { useCallback, useMemo, useState, type CSSProperties } from 'react';
-import {
-  useHandoffStore,
-  type TeamRoleLayer,
-} from '../../../../../stores/team/team-events.js';
+import { useHandoffStore, type TeamRoleLayer } from '../../../../../stores/team/team-events.js';
 import { TeamConversationView } from '../../../conversation/TeamConversationView.js';
 import { TabContainer } from '../TabContainer.js';
 import { EmptyState, CK_BORDER, CK_SURFACE } from '../../shared/content-kit/index.js';

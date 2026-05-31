@@ -62,11 +62,15 @@ describe('@fastify/websocket maxPayload wiring', () => {
     app = Fastify();
     // Mirror index.ts: register with an explicit inbound-frame ceiling.
     await app.register(websocket, { options: { maxPayload: cap } });
-    app.get('/ws-echo', { websocket: true }, (socket: { send: (d: string) => void; on: (e: string, cb: (d: Buffer) => void) => void }) => {
-      socket.on('message', (raw: Buffer) => {
-        socket.send(raw.toString());
-      });
-    });
+    app.get(
+      '/ws-echo',
+      { websocket: true },
+      (socket: { send: (d: string) => void; on: (e: string, cb: (d: Buffer) => void) => void }) => {
+        socket.on('message', (raw: Buffer) => {
+          socket.send(raw.toString());
+        });
+      },
+    );
     await app.ready();
   });
 

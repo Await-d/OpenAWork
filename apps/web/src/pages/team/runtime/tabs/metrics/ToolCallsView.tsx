@@ -13,7 +13,12 @@ import {
   type ToolCallStats,
 } from '../../../../../stores/team/team-usage.js';
 import { TabContainer } from '../TabContainer.js';
-import { EmptyState, CK_SECTION_LABEL_STYLE, CK_BORDER, CK_SURFACE } from '../../shared/content-kit/index.js';
+import {
+  EmptyState,
+  CK_SECTION_LABEL_STYLE,
+  CK_BORDER,
+  CK_SURFACE,
+} from '../../shared/content-kit/index.js';
 
 const CONTAINER_STYLE: CSSProperties = {
   display: 'flex',

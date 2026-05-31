@@ -33,9 +33,7 @@ describe('HandoffWatcher timer-loop error isolation', () => {
       watcherIntervalMs: 50,
       recoveryIntervalMs: 50,
     });
-    const tickSpy = vi
-      .spyOn(watcher, 'tickOnce')
-      .mockRejectedValue(new Error('tick boom'));
+    const tickSpy = vi.spyOn(watcher, 'tickOnce').mockRejectedValue(new Error('tick boom'));
     const recoverySpy = vi
       .spyOn(watcher, 'recoveryTick')
       .mockRejectedValue(new Error('recovery boom'));

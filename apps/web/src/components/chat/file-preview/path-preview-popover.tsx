@@ -106,7 +106,9 @@ export function PathPreviewPopover({
                       data-highlight={isHighlight ? 'true' : undefined}
                     >
                       <span className="chat-path-preview-lineno">{lineNo}</span>
-                      <span className="chat-path-preview-text">{ln.length === 0 ? '\u00A0' : ln}</span>
+                      <span className="chat-path-preview-text">
+                        {ln.length === 0 ? '\u00A0' : ln}
+                      </span>
                     </div>
                   );
                 })}

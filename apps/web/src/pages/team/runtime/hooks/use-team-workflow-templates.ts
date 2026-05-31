@@ -379,11 +379,7 @@ export function useTeamWorkflowTemplates() {
   const [refreshTick, setRefreshTick] = useState(0);
   const templatesRef = useRef<WorkflowTemplateRecord[]>([]);
   const teamEventsRecoveredAt = useTeamEventsConnectionStore((state) => state.lastRecoveredAt);
-  const {
-    clearRetry,
-    resetRetry,
-    scheduleRetry,
-  } = useRecoverableRetryController();
+  const { clearRetry, resetRetry, scheduleRetry } = useRecoverableRetryController();
 
   const refresh = useCallback(() => {
     setRefreshTick((current) => current + 1);
@@ -458,15 +454,7 @@ export function useTeamWorkflowTemplates() {
     return () => {
       cancelled = true;
     };
-  }, [
-    accessToken,
-    clearRetry,
-    client,
-    refresh,
-    refreshTick,
-    resetRetry,
-    scheduleRetry,
-  ]);
+  }, [accessToken, clearRetry, client, refresh, refreshTick, resetRetry, scheduleRetry]);
 
   useEffect(() => {
     return () => {

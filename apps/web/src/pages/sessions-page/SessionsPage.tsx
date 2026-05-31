@@ -463,10 +463,7 @@ export default function SessionsPage() {
   const setScopeFilter = useUIStateStore((s) => s.setSessionsScopeFilter);
   const collapsedScopes = useUIStateStore((s) => s.sessionsCollapsedScopes);
   const toggleCollapsedScope = useUIStateStore((s) => s.toggleSessionsCollapsedScope);
-  const collapsedScopeSet = useMemo(
-    () => new Set(collapsedScopes),
-    [collapsedScopes],
-  );
+  const collapsedScopeSet = useMemo(() => new Set(collapsedScopes), [collapsedScopes]);
 
   const partitionedSessions = useMemo(() => {
     const personal: SessionRow[] = [];
@@ -503,10 +500,7 @@ export default function SessionsPage() {
   );
 
   const buildScopeView = useCallback(
-    (
-      kind: 'personal' | 'team',
-      collections: typeof personalCollections,
-    ) => ({
+    (kind: 'personal' | 'team', collections: typeof personalCollections) => ({
       kind,
       groups: collections.groups.map((group) => ({
         ...group,
@@ -514,10 +508,7 @@ export default function SessionsPage() {
       })),
       sessionCountByWorkspace: collections.sessionCountByWorkspace,
       sessionIdsByGroupKey: collections.sessionIdsByGroupKey,
-      totalSessionCount: collections.groups.reduce(
-        (sum, group) => sum + group.sessions.length,
-        0,
-      ),
+      totalSessionCount: collections.groups.reduce((sum, group) => sum + group.sessions.length, 0),
     }),
     [filteredSessionIds],
   );
@@ -547,8 +538,7 @@ export default function SessionsPage() {
     () =>
       visibleScopeViews.reduce(
         (sum, view) =>
-          sum +
-          view.groups.reduce((groupSum, group) => groupSum + group.sessions.length, 0),
+          sum + view.groups.reduce((groupSum, group) => groupSum + group.sessions.length, 0),
         0,
       ),
     [visibleScopeViews],
@@ -754,20 +744,14 @@ export default function SessionsPage() {
               <EmptyList
                 scope={scopeFilter}
                 onNew={() => void createSession()}
-                onShowAll={
-                  scopeFilter === 'all' ? undefined : () => setScopeFilter('all')
-                }
+                onShowAll={scopeFilter === 'all' ? undefined : () => setScopeFilter('all')}
               />
             ) : hasNoSearchMatches ? (
-              <NoSearchMatches
-                searchQuery={searchQuery}
-                onClearSearch={() => setSearchQuery('')}
-              />
+              <NoSearchMatches searchQuery={searchQuery} onClearSearch={() => setSearchQuery('')} />
             ) : (
               visibleScopeViews.map((scopeView) => {
                 const scopeCollapsed = collapsedScopeSet.has(scopeView.kind);
-                const showScopeHeader =
-                  scopeFilter === 'all' && visibleScopeViews.length > 1;
+                const showScopeHeader = scopeFilter === 'all' && visibleScopeViews.length > 1;
                 return (
                   <SessionScopeSection
                     key={scopeView.kind}
@@ -869,8 +853,7 @@ export default function SessionsPage() {
                 // Bulk delete from `/sessions` only operates on personal
                 // sessions; team-workspace sessions are managed from the
                 // team page's own workspace tooling.
-                sessionIds:
-                  personalScopeView.sessionIdsByGroupKey.get(groupKey) ?? [],
+                sessionIds: personalScopeView.sessionIdsByGroupKey.get(groupKey) ?? [],
                 workspaceLabel: workspaceContextMenu.workspaceLabel,
                 workspacePath: workspaceContextMenu.workspacePath,
               });
@@ -981,7 +964,9 @@ function TopBar({
           fontVariantNumeric: 'tabular-nums',
           transition: 'background 120ms ease, color 120ms ease',
         }}
-        title={isFiltering ? `匹配 ${visibleCount} / 共 ${totalCount} 个会话` : `共 ${totalCount} 个会话`}
+        title={
+          isFiltering ? `匹配 ${visibleCount} / 共 ${totalCount} 个会话` : `共 ${totalCount} 个会话`
+        }
       >
         {countLabel}
       </span>
@@ -997,12 +982,7 @@ function TopBar({
           minWidth: 0,
         }}
       />
-      <button
-        type="button"
-        onClick={onImport}
-        className="btn-secondary"
-        style={{ flexShrink: 0 }}
-      >
+      <button type="button" onClick={onImport} className="btn-secondary" style={{ flexShrink: 0 }}>
         导入
       </button>
       <div style={{ display: 'flex', gap: 0, flexShrink: 0 }}>
@@ -1073,11 +1053,7 @@ function EmptyList({
 }) {
   const isTeamScope = scope === 'team';
   const headline =
-    scope === 'team'
-      ? '还没有团队会话'
-      : scope === 'personal'
-        ? '还没有个人对话'
-        : '还没有会话';
+    scope === 'team' ? '还没有团队会话' : scope === 'personal' ? '还没有个人对话' : '还没有会话';
   const hint = isTeamScope
     ? '团队对话从「团队」页面发起,完成后会出现在这里。'
     : '创建一个新会话开始与 Agent 对话';
@@ -1293,7 +1269,6 @@ function NoSearchMatches({
   );
 }
 
-
 const SCOPE_TAB_BAR_STYLE: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
@@ -1436,10 +1411,7 @@ function SessionScopeSection({
   const headerHint = kind === 'team' ? '由团队发起的会话' : '你直接发起的会话';
 
   return (
-    <section
-      aria-label={headerLabel}
-      style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
-    >
+    <section aria-label={headerLabel} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <button
         type="button"
         onClick={onToggleCollapsed}

@@ -118,7 +118,9 @@ function buildInboundEventPayload(record: InboundMessageRecord): Record<string, 
     messageType: record.messageType,
     fromRoleLayer: record.fromRoleLayer,
     reused: false,
-    ...(typeof payload['fromSessionId'] === 'string' ? { fromSessionId: payload['fromSessionId'] } : {}),
+    ...(typeof payload['fromSessionId'] === 'string'
+      ? { fromSessionId: payload['fromSessionId'] }
+      : {}),
     ...(typeof payload['handoffId'] === 'string' ? { handoffId: payload['handoffId'] } : {}),
     ...(typeof payload['pm2HandoffId'] === 'string' ? { handoffId: payload['pm2HandoffId'] } : {}),
   };
@@ -551,7 +553,12 @@ export function resolveClarificationEscalationRequest(input: {
              state = ?,
              consumed_at = CASE WHEN ? = 1 THEN datetime('now') ELSE consumed_at END
        WHERE id = ?`,
-      [JSON.stringify(nextPayload), allResolved ? 'consumed' : 'pending', allResolved ? 1 : 0, row.id],
+      [
+        JSON.stringify(nextPayload),
+        allResolved ? 'consumed' : 'pending',
+        allResolved ? 1 : 0,
+        row.id,
+      ],
     );
 
     const updated = sqliteGet<InboundMessageRow>(

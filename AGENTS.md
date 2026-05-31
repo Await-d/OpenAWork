@@ -302,13 +302,13 @@ Docker：`docker-compose up` 启动网关 + Web + Redis，并把 Gateway durable
 
 核心包结构（`packages/agent-core/src/`）：
 
-| 模块                      | 说明                                                                                                               |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `state-machine.ts`        | Agent FSM：idle→running→tool-calling→retry→interrupted→error（纯函数，无副作用）                                   |
-| `tool-contract.ts`        | `ToolDefinition`、`ToolRegistry`——所有工具必须通过此注册                                                           |
-| `routing.ts`              | R0–R3 路由分级（只读/单文件/多文件/架构级），5 维度计算                                                            |
-| `sqlite-session-store.ts` | 生产级 SQLite 会话存储                                                                                             |
-| `retry.ts`                | `withRetry`、`computeDelay`、`RetryAbortedError`                                                                   |
+| 模块                      | 说明                                                                                                                                                                                                                                                  |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `state-machine.ts`        | Agent FSM：idle→running→tool-calling→retry→interrupted→error（纯函数，无副作用）                                                                                                                                                                      |
+| `tool-contract.ts`        | `ToolDefinition`、`ToolRegistry`——所有工具必须通过此注册                                                                                                                                                                                              |
+| `routing.ts`              | R0–R3 路由分级（只读/单文件/多文件/架构级），5 维度计算                                                                                                                                                                                               |
+| `sqlite-session-store.ts` | 生产级 SQLite 会话存储                                                                                                                                                                                                                                |
+| `retry.ts`                | `withRetry`、`computeDelay`、`RetryAbortedError`                                                                                                                                                                                                      |
 | `provider/`               | LLM Provider 管理：anthropic \| openai \| deepseek \| gemini \| ollama \| openrouter \| qwen \| moonshot \| mimo \| custom。平台「单一事实来源」在 `provider/catalog.ts`（`PROVIDER_CATALOG`），新增平台只需在 catalog 加一条 + `ProviderType` 加一员 |
-| `tools/hash-edit.ts`      | SHA-256 行哈希锚定编辑，防止行号漂移                                                                               |
-| `error/`                  | 自定义错误类型基类                                                                                                 |
+| `tools/hash-edit.ts`      | SHA-256 行哈希锚定编辑，防止行号漂移                                                                                                                                                                                                                  |
+| `error/`                  | 自定义错误类型基类                                                                                                                                                                                                                                    |

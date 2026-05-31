@@ -66,7 +66,10 @@ interface UseTeamSidebarFileTreeStateResult {
 export function useTeamSidebarFileTreeState(
   options: UseTeamSidebarFileTreeStateOptions,
 ): UseTeamSidebarFileTreeStateResult {
-  const workspaceClient = useMemo(() => createWorkspaceClient(options.gatewayUrl), [options.gatewayUrl]);
+  const workspaceClient = useMemo(
+    () => createWorkspaceClient(options.gatewayUrl),
+    [options.gatewayUrl],
+  );
   const [treeNodes, setTreeNodes] = useState<FileTreeNode[]>([]);
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   const [treeLoading, setTreeLoading] = useState(false);
@@ -223,30 +226,28 @@ export function useTeamSidebarFileTreeState(
         return;
       }
       setTreeError(null);
-      void workspaceClient
-        .fetchTreeResult(options.token, path, { depth: 1 })
-        .then((result) => {
-          if (!result.ok) {
-            const nextRetryAtMs = scheduleRetry({
-              computeDelay: computeTeamSidebarFileTreeRetryDelay,
-              onRetry: () => {
-                setRefreshTick((current) => current + 1);
-              },
-              retryable: result.retryable,
-            });
-            setTreeError(
-              formatTeamSidebarFileTreeLoadError({
-                hasCachedTree: treeNodesRef.current.length > 0,
-                nextRetryAtMs,
-                result,
-              }),
-            );
-            return;
-          }
-          resetRetry();
-          setTreeNodes((current) => injectChildren(current, path, result.nodes));
-          setTreeError(null);
-        });
+      void workspaceClient.fetchTreeResult(options.token, path, { depth: 1 }).then((result) => {
+        if (!result.ok) {
+          const nextRetryAtMs = scheduleRetry({
+            computeDelay: computeTeamSidebarFileTreeRetryDelay,
+            onRetry: () => {
+              setRefreshTick((current) => current + 1);
+            },
+            retryable: result.retryable,
+          });
+          setTreeError(
+            formatTeamSidebarFileTreeLoadError({
+              hasCachedTree: treeNodesRef.current.length > 0,
+              nextRetryAtMs,
+              result,
+            }),
+          );
+          return;
+        }
+        resetRetry();
+        setTreeNodes((current) => injectChildren(current, path, result.nodes));
+        setTreeError(null);
+      });
     },
     [options.token, resetRetry, scheduleRetry, workspaceClient],
   );

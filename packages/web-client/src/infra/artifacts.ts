@@ -306,12 +306,15 @@ export function createArtifactsClient<
       return performArtifactsRequest<unknown>({
         actionLabel: '生成图片',
         request: () =>
-          fetchWithTimeout(`${baseUrl}/sessions/${encodeURIComponent(sessionId)}/images/generations`, {
-            timeoutMs: 120_000,
-            method: 'POST',
-            headers: jsonAuthHeaders(token),
-            body: JSON.stringify(input),
-          }),
+          fetchWithTimeout(
+            `${baseUrl}/sessions/${encodeURIComponent(sessionId)}/images/generations`,
+            {
+              timeoutMs: 120_000,
+              method: 'POST',
+              headers: jsonAuthHeaders(token),
+              body: JSON.stringify(input),
+            },
+          ),
       });
     },
   };

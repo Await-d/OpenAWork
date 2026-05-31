@@ -69,7 +69,8 @@ const ROOT_METADATA = {
         providerId: 'openai',
         skillIds: [SKILL_ID],
         mcpServerIds: [MCP_ID],
-      },    ],
+      },
+    ],
   },
 };
 

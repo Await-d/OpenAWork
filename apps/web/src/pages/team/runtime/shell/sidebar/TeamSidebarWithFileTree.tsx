@@ -177,19 +177,13 @@ export function TeamSidebarWithFileTree({
     y: number;
     target: FileTreeContextTarget;
   } | null>(null);
-  const {
-    expandedDirs,
-    handleRefresh,
-    handleToggleDir,
-    treeError,
-    treeLoading,
-    treeNodes,
-  } = useTeamSidebarFileTreeState({
-    active: activeTab === 'files',
-    gatewayUrl,
-    token,
-    workspacePath,
-  });
+  const { expandedDirs, handleRefresh, handleToggleDir, treeError, treeLoading, treeNodes } =
+    useTeamSidebarFileTreeState({
+      active: activeTab === 'files',
+      gatewayUrl,
+      token,
+      workspacePath,
+    });
 
   // F5：单击文件树节点 → 内联预览（轻量，不进编辑器 tab）。
   const filePreview = useTeamFilePreview(workspacePath);

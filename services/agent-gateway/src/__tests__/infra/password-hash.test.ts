@@ -7,11 +7,7 @@
 
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import {
-  hashPassword,
-  verifyPassword,
-  isLegacyPasswordHash,
-} from '../../infra/password-hash.js';
+import { hashPassword, verifyPassword, isLegacyPasswordHash } from '../../infra/password-hash.js';
 
 describe('password-hash', () => {
   it('hashPassword 产出带盐 scrypt 格式，且能被 verifyPassword 验证', () => {

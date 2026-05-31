@@ -197,12 +197,11 @@ export function MentionsView({ onOpenBlockingTarget, onOpenClarifications }: Men
       return b.event.timestamp - a.event.timestamp;
     });
   }, [enriched, filter, readEventKeys]);
-  const blockingCount = useMemo(
-    () => enriched.filter((item) => item.blocking).length,
-    [enriched],
-  );
+  const blockingCount = useMemo(() => enriched.filter((item) => item.blocking).length, [enriched]);
   const primaryBlockingTarget = useMemo(
-    () => visible.find((item) => item.blocking && getBlockingActionLabel(item.event) !== null)?.event ?? null,
+    () =>
+      visible.find((item) => item.blocking && getBlockingActionLabel(item.event) !== null)?.event ??
+      null,
     [visible],
   );
 

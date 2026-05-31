@@ -191,9 +191,7 @@ export function TemplateMetaHeader({
           }
           style={{
             appearance: 'none',
-            border: editable
-              ? '1px solid var(--accent)'
-              : '1px solid var(--border-subtle)',
+            border: editable ? '1px solid var(--accent)' : '1px solid var(--border-subtle)',
             background: editable
               ? 'color-mix(in oklch, var(--accent) 12%, transparent)'
               : 'var(--bg-base)',
@@ -215,8 +213,7 @@ export function TemplateMetaHeader({
             style={{
               fontSize: 9,
               fontWeight: 700,
-              color:
-                assignedModelCount > 0 && editable ? 'var(--accent)' : 'var(--fg-muted)',
+              color: assignedModelCount > 0 && editable ? 'var(--accent)' : 'var(--fg-muted)',
               opacity: 0.85,
             }}
           >
@@ -372,7 +369,9 @@ export function TemplateMetaHeader({
           ) : (
             <div style={{ fontSize: 11, color: 'var(--fg-muted)', display: 'flex', gap: 6 }}>
               <span style={{ fontWeight: 700 }}>推荐起步：</span>
-              <span style={{ color: state.recommendedDefault ? 'var(--success)' : 'var(--fg-subtle)' }}>
+              <span
+                style={{ color: state.recommendedDefault ? 'var(--success)' : 'var(--fg-subtle)' }}
+              >
                 {state.recommendedDefault ? '✓ 已标记为推荐起步' : '未标记'}
               </span>
             </div>

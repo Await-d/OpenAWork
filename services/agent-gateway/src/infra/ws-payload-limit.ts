@@ -32,8 +32,5 @@ export const DEFAULT_WS_MAX_PAYLOAD_BYTES = 16 * 1024 * 1024;
  * override is non-positive or non-finite.
  */
 export function resolveWsMaxPayloadBytes(): number {
-  return resolveHttpBodyLimitBytes(
-    'OPENAWORK_WS_MAX_PAYLOAD_BYTES',
-    DEFAULT_WS_MAX_PAYLOAD_BYTES,
-  );
+  return resolveHttpBodyLimitBytes('OPENAWORK_WS_MAX_PAYLOAD_BYTES', DEFAULT_WS_MAX_PAYLOAD_BYTES);
 }

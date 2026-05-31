@@ -672,7 +672,9 @@ describe('POST /team/handoffs/:handoffId/review-actions/:action', () => {
         retryCount: 3,
         toSessionId: null,
       });
-      expect((after?.payload as Record<string, unknown>)['reviewDispositionHandledAt']).toBeUndefined();
+      expect(
+        (after?.payload as Record<string, unknown>)['reviewDispositionHandledAt'],
+      ).toBeUndefined();
     } finally {
       await app.close();
     }

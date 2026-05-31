@@ -84,9 +84,7 @@ describe('CronScheduler 单 job 重入保护', () => {
     expect(handler).toHaveBeenCalledTimes(1);
 
     // Exactly one running execution row for this job (no stacking).
-    const running = scheduler
-      .getExecutionHistory('slow-job')
-      .filter((e) => e.status === 'running');
+    const running = scheduler.getExecutionHistory('slow-job').filter((e) => e.status === 'running');
     expect(running).toHaveLength(1);
 
     // Settle the hung run, then the next tick fires normally.

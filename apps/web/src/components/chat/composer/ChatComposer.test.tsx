@@ -79,7 +79,9 @@ describe('ChatComposer', () => {
     fireEvent.click(screen.getByTitle('提示词优化'));
 
     await waitFor(() => {
-      const alerts = screen.getAllByText((content) => content.includes('网络异常，无法优化提示词。'));
+      const alerts = screen.getAllByText((content) =>
+        content.includes('网络异常，无法优化提示词。'),
+      );
       expect(alerts.length).toBeGreaterThan(0);
     });
   });

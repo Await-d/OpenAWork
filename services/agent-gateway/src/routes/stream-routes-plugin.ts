@@ -277,7 +277,9 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       // the socket + its run-event subscription would linger for the process
       // lifetime. The probe terminates a peer that stops answering pongs,
       // which then triggers the normal 'close' teardown below.
-      const stopHeartbeat = installWsHeartbeat(socket as unknown as Parameters<typeof installWsHeartbeat>[0]);
+      const stopHeartbeat = installWsHeartbeat(
+        socket as unknown as Parameters<typeof installWsHeartbeat>[0],
+      );
       socket.on('close', () => {
         stopHeartbeat();
         if (socketClosed) return;

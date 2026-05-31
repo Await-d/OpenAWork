@@ -356,134 +356,131 @@ export default function SkillSelectionPage(): React.ReactElement {
     <div className="page-root" style={{ overflowY: 'auto' }}>
       <div className="page-header">
         <span className="page-title">Skill 工作区选择集</span>
-        <span className="page-subtitle">
-          为指定的 chat 工作区选择启用哪些 skill
-        </span>
+        <span className="page-subtitle">为指定的 chat 工作区选择启用哪些 skill</span>
       </div>
       <div className="page-content">
-      <div style={{ maxWidth: 980, margin: '0 auto', padding: '20px 24px' }}>
+        <div style={{ maxWidth: 980, margin: '0 auto', padding: '20px 24px' }}>
+          <section style={{ ...PANEL, marginBottom: 16 }}>
+            <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-default)' }}>
+              Workspace 路径（绝对路径，留空 = 全局默认）
+            </label>
+            <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+              <input
+                value={workspacePath}
+                onChange={(e) => setWorkspacePath(e.target.value)}
+                placeholder="/home/alice/projects/alpha"
+                className="form-input"
+                style={{ flex: 1, minWidth: 200 }}
+              />
+              <button
+                type="button"
+                onClick={() => void refresh()}
+                disabled={loading}
+                className="btn-secondary"
+              >
+                {loading ? '加载中…' : '刷新'}
+              </button>
+              <button
+                type="button"
+                onClick={exportSelection}
+                disabled={loading || rows.length === 0}
+                className="btn-secondary"
+              >
+                导出
+              </button>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={loading}
+                className="btn-secondary"
+              >
+                导入
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/json,.json"
+                style={{ display: 'none' }}
+                onChange={(event) => void handleImportFileChange(event)}
+              />
+              <button
+                type="button"
+                onClick={() => setRecommendOpen(true)}
+                disabled={loading}
+                style={{
+                  padding: '0 14px',
+                  height: 32,
+                  borderRadius: 8,
+                  border: '1px solid var(--accent)',
+                  background: 'var(--accent-subtle)',
+                  color: 'var(--accent)',
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: loading ? 'wait' : 'pointer',
+                }}
+              >
+                AI 推荐
+              </button>
+              <button
+                type="button"
+                onClick={() => void save()}
+                disabled={saving || loading}
+                className="btn-accent"
+                style={{ height: 32, padding: '0 14px', fontSize: 13 }}
+              >
+                {saving ? '保存中…' : '保存'}
+              </button>
+            </div>
+            {error ? (
+              <div style={{ color: 'var(--complement)', fontSize: 12, marginTop: 8 }}>{error}</div>
+            ) : null}
+            {hint ? (
+              <div style={{ color: 'var(--accent)', fontSize: 12, marginTop: 8 }}>{hint}</div>
+            ) : null}
+          </section>
 
-      <section style={{ ...PANEL, marginBottom: 16 }}>
-        <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-default)' }}>
-          Workspace 路径（绝对路径，留空 = 全局默认）
-        </label>
-        <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-          <input
-            value={workspacePath}
-            onChange={(e) => setWorkspacePath(e.target.value)}
-            placeholder="/home/alice/projects/alpha"
-            className="form-input"
-            style={{ flex: 1, minWidth: 200 }}
+          <TokenEstimateBar estimate={tokenEstimate} />
+          <Group
+            title="Pinned (新会话自动注入到 system prompt · 拖拽调整优先级)"
+            rows={grouped.pinned}
+            onChange={updateRow}
+            onReorder={reorderPinned}
           />
-          <button
-            type="button"
-            onClick={() => void refresh()}
-            disabled={loading}
-            className="btn-secondary"
-          >
-            {loading ? '加载中…' : '刷新'}
-          </button>
-          <button
-            type="button"
-            onClick={exportSelection}
-            disabled={loading || rows.length === 0}
-            className="btn-secondary"
-          >
-            导出
-          </button>
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={loading}
-            className="btn-secondary"
-          >
-            导入
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="application/json,.json"
-            style={{ display: 'none' }}
-            onChange={(event) => void handleImportFileChange(event)}
+          <Group
+            title="Enabled (按需通过 skill 工具加载)"
+            rows={grouped.enabled}
+            onChange={updateRow}
           />
-          <button
-            type="button"
-            onClick={() => setRecommendOpen(true)}
-            disabled={loading}
-            style={{
-              padding: '0 14px',
-              height: 32,
-              borderRadius: 8,
-              border: '1px solid var(--accent)',
-              background: 'var(--accent-subtle)',
-              color: 'var(--accent)',
-              fontSize: 13,
-              fontWeight: 500,
-              cursor: loading ? 'wait' : 'pointer',
+          <Group title="Disabled" rows={grouped.disabled} onChange={updateRow} />
+          {grouped.orphaned.length > 0 ? (
+            <Group
+              title="选择集中已不存在对应安装 (建议保存以清理)"
+              rows={grouped.orphaned}
+              onChange={updateRow}
+              orphan
+            />
+          ) : null}
+          <BuiltinGroup rows={grouped.builtins} />
+          <SkillRecommendationDrawer
+            open={recommendOpen}
+            onClose={() => setRecommendOpen(false)}
+            gatewayUrl={gatewayUrl}
+            token={accessToken ?? ''}
+            workspacePath={workspacePath}
+            currentSelection={rows
+              .filter((row) => !row.isBuiltin && row.isInstalled && row.enabled)
+              .map((row) => ({
+                skillId: row.skillId,
+                enabled: row.enabled,
+                pinned: row.pinned,
+                displayName: row.displayName,
+              }))}
+            onApplied={async () => {
+              setHint('已应用 AI 推荐。下次新建会话生效。');
+              await refresh();
             }}
-          >
-            AI 推荐
-          </button>
-          <button
-            type="button"
-            onClick={() => void save()}
-            disabled={saving || loading}
-            className="btn-accent"
-            style={{ height: 32, padding: '0 14px', fontSize: 13 }}
-          >
-            {saving ? '保存中…' : '保存'}
-          </button>
+          />
         </div>
-        {error ? (
-          <div style={{ color: 'var(--complement)', fontSize: 12, marginTop: 8 }}>{error}</div>
-        ) : null}
-        {hint ? (
-          <div style={{ color: 'var(--accent)', fontSize: 12, marginTop: 8 }}>{hint}</div>
-        ) : null}
-      </section>
-
-      <TokenEstimateBar estimate={tokenEstimate} />
-      <Group
-        title="Pinned (新会话自动注入到 system prompt · 拖拽调整优先级)"
-        rows={grouped.pinned}
-        onChange={updateRow}
-        onReorder={reorderPinned}
-      />
-      <Group
-        title="Enabled (按需通过 skill 工具加载)"
-        rows={grouped.enabled}
-        onChange={updateRow}
-      />
-      <Group title="Disabled" rows={grouped.disabled} onChange={updateRow} />
-      {grouped.orphaned.length > 0 ? (
-        <Group
-          title="选择集中已不存在对应安装 (建议保存以清理)"
-          rows={grouped.orphaned}
-          onChange={updateRow}
-          orphan
-        />
-      ) : null}
-      <BuiltinGroup rows={grouped.builtins} />
-      <SkillRecommendationDrawer
-        open={recommendOpen}
-        onClose={() => setRecommendOpen(false)}
-        gatewayUrl={gatewayUrl}
-        token={accessToken ?? ''}
-        workspacePath={workspacePath}
-        currentSelection={rows
-          .filter((row) => !row.isBuiltin && row.isInstalled && row.enabled)
-          .map((row) => ({
-            skillId: row.skillId,
-            enabled: row.enabled,
-            pinned: row.pinned,
-            displayName: row.displayName,
-          }))}
-        onApplied={async () => {
-          setHint('已应用 AI 推荐。下次新建会话生效。');
-          await refresh();
-        }}
-      />
-      </div>
       </div>
     </div>
   );

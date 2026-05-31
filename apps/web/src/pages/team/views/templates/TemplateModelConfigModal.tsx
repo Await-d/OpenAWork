@@ -12,10 +12,7 @@
  */
 
 import { type CSSProperties, useEffect } from 'react';
-import {
-  TEAM_RUNTIME_LAYER_ORDER,
-  type FixedTeamMemberSlot,
-} from '@openAwork/shared';
+import { TEAM_RUNTIME_LAYER_ORDER, type FixedTeamMemberSlot } from '@openAwork/shared';
 import type {
   WorkflowTeamTemplateModelRef,
   WorkflowTeamTemplateModelStrategy,
@@ -71,9 +68,7 @@ const SECTION_HINT: CSSProperties = {
 
 const STRATEGY_BTN = (active: boolean): CSSProperties => ({
   appearance: 'none',
-  border: active
-    ? '1px solid var(--accent)'
-    : '1px solid var(--border-subtle)',
+  border: active ? '1px solid var(--accent)' : '1px solid var(--border-subtle)',
   background: active ? 'color-mix(in oklch, var(--accent) 14%, transparent)' : 'var(--bg-base)',
   color: active ? 'var(--accent)' : 'var(--fg-default)',
   fontSize: 11,

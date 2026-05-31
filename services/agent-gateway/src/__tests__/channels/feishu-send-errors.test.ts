@@ -27,10 +27,10 @@ function instance(): ChannelInstance {
 }
 
 function tokenResponse(): Response {
-  return new Response(
-    JSON.stringify({ code: 0, tenant_access_token: 't-abc', expire: 7200 }),
-    { status: 200, headers: { 'content-type': 'application/json' } },
-  );
+  return new Response(JSON.stringify({ code: 0, tenant_access_token: 't-abc', expire: 7200 }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
 }
 
 describe('FeishuChannelService send error handling', () => {
@@ -50,7 +50,9 @@ describe('FeishuChannelService send error handling', () => {
 
     const svc = new FeishuChannelService(instance(), () => undefined);
     await svc.start();
-    await expect(svc.sendMessage('chat-1', 'hi')).rejects.toThrow(/Feishu send failed: code 230002/);
+    await expect(svc.sendMessage('chat-1', 'hi')).rejects.toThrow(
+      /Feishu send failed: code 230002/,
+    );
   });
 
   it('code 0 且有 message_id 时正常返回', async () => {

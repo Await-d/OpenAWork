@@ -59,7 +59,12 @@ const BASE_STATE: TeamInitState = {
       status: 'done',
       requiresConfirm: true,
       usesLlm: false,
-      result: { directories: ['src', 'docs'], files: ['package.json'], directoryCount: 2, fileCount: 1 },
+      result: {
+        directories: ['src', 'docs'],
+        files: ['package.json'],
+        directoryCount: 2,
+        fileCount: 1,
+      },
     },
     {
       key: 'bind-tools-per-layer',

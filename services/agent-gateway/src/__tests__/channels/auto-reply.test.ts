@@ -75,10 +75,7 @@ function messageEvent(pluginId: string, content = 'hello'): ChannelEvent {
 }
 
 /** Install a fake service into the singleton manager via a one-off factory. */
-async function installFakeService(
-  id: string,
-  service: MessagingChannelService,
-): Promise<void> {
+async function installFakeService(id: string, service: MessagingChannelService): Promise<void> {
   channelManager.registerFactory('telegram', () => service);
   await channelManager.startPlugin(makeInstance(id), () => undefined);
 }

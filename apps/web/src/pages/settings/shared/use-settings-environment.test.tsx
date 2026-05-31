@@ -7,7 +7,9 @@ const mocks = vi.hoisted(() => ({
   createSettingsClient: vi.fn(() => ({
     getVersion: vi.fn(),
   })),
-  desktopGatewayModeForUrl: vi.fn((url: string) => (url.startsWith('http://127.0.0.1') ? 'local' : 'remote')),
+  desktopGatewayModeForUrl: vi.fn((url: string) =>
+    url.startsWith('http://127.0.0.1') ? 'local' : 'remote',
+  ),
   isLocalGatewayUrl: vi.fn((url: string) => url.startsWith('http://127.0.0.1')),
   isTauriRuntime: vi.fn(() => true),
   localGatewayUrl: vi.fn((port: number) => `http://127.0.0.1:${port}`),

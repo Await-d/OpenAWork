@@ -12,9 +12,7 @@ const DISALLOWED_PATTERNS: RegExp[] = [
   /\bSession expired\b/,
 ];
 
-const FILE_ALLOWLIST = new Set<string>([
-  'gateway/http.ts',
-]);
+const FILE_ALLOWLIST = new Set<string>(['gateway/http.ts']);
 
 function collectFiles(dir: string): string[] {
   const entries = readdirSync(dir);

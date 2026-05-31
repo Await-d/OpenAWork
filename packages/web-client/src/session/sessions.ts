@@ -671,10 +671,7 @@ function isRetryableSessionStatus(status: number): boolean {
   return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
-function buildSessionErrorMessage(
-  status: number,
-  data: SessionErrorData | undefined,
-): string {
+function buildSessionErrorMessage(status: number, data: SessionErrorData | undefined): string {
   const extracted = extractSessionErrorMessage(data);
   if (extracted) {
     return extracted;
@@ -738,7 +735,9 @@ function isGenericSessionNetworkErrorMessage(message: string): boolean {
 
 function normalizeSessionActionError(actionLabel: string, error: unknown): Error {
   if (error instanceof HttpError) {
-    const extracted = extractSessionErrorMessage((error.data ?? undefined) as SessionErrorData | undefined);
+    const extracted = extractSessionErrorMessage(
+      (error.data ?? undefined) as SessionErrorData | undefined,
+    );
     if (extracted) {
       return new HttpError(extracted, error.status, error.data);
     }
@@ -753,19 +752,24 @@ function normalizeSessionActionError(actionLabel: string, error: unknown): Error
   return new Error(`网络异常，${actionLabel}失败。`);
 }
 
-async function performSessionRequest<T, TError extends { error?: string } = { error?: string }>(
-  input: {
-    actionLabel: string;
-    parseJson?: boolean;
-    request: () => Promise<Response>;
-  },
-): Promise<T> {
+async function performSessionRequest<
+  T,
+  TError extends { error?: string } = { error?: string },
+>(input: {
+  actionLabel: string;
+  parseJson?: boolean;
+  request: () => Promise<Response>;
+}): Promise<T> {
   try {
     const res = await input.request();
     if (!res.ok) {
       const data = await readJsonErrorData<TError>(res);
       throw new HttpError(
-        buildSessionActionErrorMessage(input.actionLabel, res.status, data as SessionErrorData | undefined),
+        buildSessionActionErrorMessage(
+          input.actionLabel,
+          res.status,
+          data as SessionErrorData | undefined,
+        ),
         res.status,
         data,
       );
@@ -1025,10 +1029,7 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
     async getRecovery(token, sessionId, options) {
       const result = await getRecoveryResult(token, sessionId, options);
       if (!result.ok || !result.recovery) {
-        throw new HttpError(
-          result.errorMessage ?? '加载会话快照失败',
-          result.status ?? 500,
-        );
+        throw new HttpError(result.errorMessage ?? '加载会话快照失败', result.status ?? 500);
       }
       return result.recovery;
     },
@@ -1203,10 +1204,13 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
       return performSessionRequest<SessionSnapshotComparisonResult>({
         actionLabel: '比较会话快照',
         request: () =>
-          fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}/snapshots/compare?${params.toString()}`, {
-            headers: authHeader(token),
-            signal: options.signal,
-          }),
+          fetchWithTimeout(
+            `${gatewayUrl}/sessions/${sessionId}/snapshots/compare?${params.toString()}`,
+            {
+              headers: authHeader(token),
+              signal: options.signal,
+            },
+          ),
       });
     },
 

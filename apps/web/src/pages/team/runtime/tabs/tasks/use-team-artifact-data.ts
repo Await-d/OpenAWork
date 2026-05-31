@@ -157,7 +157,10 @@ export function useTeamArtifactData(
 
   useEffect(() => {
     let cancelled = false;
-    const contextKey = [options.pm1ArtifactSessionId ?? '', options.pm2ArtifactSessionId ?? ''].join('|');
+    const contextKey = [
+      options.pm1ArtifactSessionId ?? '',
+      options.pm2ArtifactSessionId ?? '',
+    ].join('|');
     clearRetry();
 
     if (!accessToken || !gatewayUrl) {
@@ -197,7 +200,9 @@ export function useTeamArtifactData(
       setReviewArtifact(null);
     }
 
-    const hasCachedArtifacts = Object.values(artifactsRef.current).some((artifact) => artifact !== null);
+    const hasCachedArtifacts = Object.values(artifactsRef.current).some(
+      (artifact) => artifact !== null,
+    );
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       resetRetry();
       setArtifactLoading(false);
@@ -258,8 +263,15 @@ export function useTeamArtifactData(
 
       const applyResult = (
         key: 'plan' | 'review' | 'spec' | 'tasks',
-        result: { ok: boolean; artifact: ArtifactData | null; errorMessage?: string; retryable: boolean },
-        setter: (value: ArtifactData | null | ((current: ArtifactData | null) => ArtifactData | null)) => void,
+        result: {
+          ok: boolean;
+          artifact: ArtifactData | null;
+          errorMessage?: string;
+          retryable: boolean;
+        },
+        setter: (
+          value: ArtifactData | null | ((current: ArtifactData | null) => ArtifactData | null),
+        ) => void,
       ): string | null => {
         if (result.ok) {
           setter(result.artifact);
@@ -270,12 +282,10 @@ export function useTeamArtifactData(
         } else {
           setter((current) => current);
         }
-        return `${getArtifactMessagePrefix(key)}：${
-          formatTeamArtifactsLoadError({
-            hasCachedArtifacts,
-            result,
-          })
-        }`;
+        return `${getArtifactMessagePrefix(key)}：${formatTeamArtifactsLoadError({
+          hasCachedArtifacts,
+          result,
+        })}`;
       };
 
       const errors = [
@@ -299,9 +309,7 @@ export function useTeamArtifactData(
         setArtifactLoading(false);
         setArtifactError(
           errors
-            .map((message) =>
-              nextRetryAtMs ? `${message} 系统将自动重试。` : message,
-            )
+            .map((message) => (nextRetryAtMs ? `${message} 系统将自动重试。` : message))
             .join('；'),
         );
         return;
@@ -345,7 +353,9 @@ export function useTeamArtifactData(
       setArtifactLoading(false);
       setArtifactError(
         formatTeamArtifactsLoadError({
-          hasCachedArtifacts: Object.values(artifactsRef.current).some((artifact) => artifact !== null),
+          hasCachedArtifacts: Object.values(artifactsRef.current).some(
+            (artifact) => artifact !== null,
+          ),
           result: {
             errorMessage: '当前网络离线，团队产物链暂时不可用。',
             retryable: true,

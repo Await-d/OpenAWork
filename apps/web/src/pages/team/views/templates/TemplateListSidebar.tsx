@@ -59,7 +59,10 @@ export function TemplateListSidebar({
   canCreate,
 }: Props) {
   // Group + sort
-  const grouped = new Map<string, { label: string; priority: number; items: WorkflowTemplateRecord[] }>();
+  const grouped = new Map<
+    string,
+    { label: string; priority: number; items: WorkflowTemplateRecord[] }
+  >();
   for (const template of templates) {
     const group = getGroup(template);
     const existing = grouped.get(group.id);
@@ -188,9 +191,7 @@ function TemplateCard({
     border: selected
       ? '1px solid color-mix(in oklch, var(--accent) 70%, transparent)'
       : '1px solid transparent',
-    background: selected
-      ? 'color-mix(in oklch, var(--accent) 10%, transparent)'
-      : 'transparent',
+    background: selected ? 'color-mix(in oklch, var(--accent) 10%, transparent)' : 'transparent',
     cursor: 'pointer',
     display: 'grid',
     gap: 6,
@@ -213,13 +214,13 @@ function TemplateCard({
         >
           {template.name}
         </span>
-        <span style={{ fontSize: 9, color: 'var(--fg-muted)', flexShrink: 0 }}>
-          {total} 人
-        </span>
+        <span style={{ fontSize: 9, color: 'var(--fg-muted)', flexShrink: 0 }}>{total} 人</span>
       </div>
 
       {(focus || scale) && (
-        <div style={{ display: 'flex', gap: 5, alignItems: 'center', flexWrap: 'wrap', minWidth: 0 }}>
+        <div
+          style={{ display: 'flex', gap: 5, alignItems: 'center', flexWrap: 'wrap', minWidth: 0 }}
+        >
           {scale && (
             <span
               style={{

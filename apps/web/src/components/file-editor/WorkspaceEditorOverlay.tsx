@@ -1,8 +1,5 @@
 import { type CSSProperties } from 'react';
-import {
-  EditorBrowserWorkspace,
-  type EditorPaneTab,
-} from './EditorBrowserWorkspace.js';
+import { EditorBrowserWorkspace, type EditorPaneTab } from './EditorBrowserWorkspace.js';
 import type { OpenFile, RevealTarget } from '../../hooks/editor/useFileEditor.js';
 
 /**
@@ -97,7 +94,7 @@ export function WorkspaceEditorOverlay({
   if (!open) return null;
 
   const activePath = fileEditor.activeFile?.path ?? null;
-  const activeName = activePath ? activePath.split('/').pop() ?? activePath : null;
+  const activeName = activePath ? (activePath.split('/').pop() ?? activePath) : null;
 
   return (
     <div style={OVERLAY_STYLE} role="dialog" aria-label={title}>

@@ -104,7 +104,7 @@ function buildOne(
 ): LayerCapabilitySummary {
   const caps = LAYER_CAPABILITIES[layer];
   const adapterKey = LAYER_ADAPTER_KEY[layer];
-  const adapter = adapterKey ? adapters.find((a) => a.key === adapterKey) ?? null : null;
+  const adapter = adapterKey ? (adapters.find((a) => a.key === adapterKey) ?? null) : null;
 
   // role-adapter.resolve 不依赖 context 的工具/agent 字段，这里给一个最小 stub。
   const resolution = adapter

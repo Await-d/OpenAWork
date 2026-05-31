@@ -18,10 +18,9 @@ vi.mock('../../../../../stores/auth/auth.js', () => ({
 }));
 
 vi.mock('../../../../../stores/team/team-events.js', () => ({
-  useTeamNotificationStore: Object.assign(
-    () => ({ events: [] }),
-    { subscribe: () => () => undefined },
-  ),
+  useTeamNotificationStore: Object.assign(() => ({ events: [] }), {
+    subscribe: () => () => undefined,
+  }),
 }));
 
 vi.mock('../../../../../components/chat/markdown/markdown-message-content.js', () => ({

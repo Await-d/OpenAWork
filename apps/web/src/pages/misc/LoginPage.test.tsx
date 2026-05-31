@@ -72,12 +72,18 @@ beforeEach(() => {
   authStore.setWebAccess.mockReset();
   gatewayMocks.desktopGatewayModeForUrl.mockReset().mockReturnValue('local');
   gatewayMocks.isTauriRuntime.mockReset().mockReturnValue(true);
-  gatewayMocks.localGatewayUrl.mockReset().mockImplementation((port: number) => `http://127.0.0.1:${port}`);
-  gatewayMocks.normalizeGatewayUrl.mockReset().mockImplementation((value: string) => value.trim().replace(/\/+$/, ''));
-  gatewayMocks.parseGatewayPort.mockReset().mockImplementation((value: string, fallback: number) => {
-    const parsed = Number.parseInt(value, 10);
-    return Number.isFinite(parsed) ? parsed : fallback;
-  });
+  gatewayMocks.localGatewayUrl
+    .mockReset()
+    .mockImplementation((port: number) => `http://127.0.0.1:${port}`);
+  gatewayMocks.normalizeGatewayUrl
+    .mockReset()
+    .mockImplementation((value: string) => value.trim().replace(/\/+$/, ''));
+  gatewayMocks.parseGatewayPort
+    .mockReset()
+    .mockImplementation((value: string, fallback: number) => {
+      const parsed = Number.parseInt(value, 10);
+      return Number.isFinite(parsed) ? parsed : fallback;
+    });
   gatewayMocks.readDesktopGatewayMode.mockReset().mockReturnValue('local');
   gatewayMocks.readGatewayPortFromUrl.mockReset().mockReturnValue(3000);
   gatewayMocks.startDesktopGateway.mockReset().mockResolvedValue(undefined);

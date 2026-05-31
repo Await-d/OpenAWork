@@ -238,10 +238,7 @@ function isRetryableWorkspaceStatus(status: number): boolean {
   return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
-function buildWorkspaceRootsErrorMessage(
-  status: number,
-  data: JsonErrorData | undefined,
-): string {
+function buildWorkspaceRootsErrorMessage(status: number, data: JsonErrorData | undefined): string {
   const extracted = extractJsonErrorMessage(data);
   if (extracted) {
     return extracted;
@@ -252,10 +249,7 @@ function buildWorkspaceRootsErrorMessage(
   return `加载工作区根目录失败（HTTP ${status}）。`;
 }
 
-function buildWorkspaceTreeErrorMessage(
-  status: number,
-  data: JsonErrorData | undefined,
-): string {
+function buildWorkspaceTreeErrorMessage(status: number, data: JsonErrorData | undefined): string {
   const extracted = extractJsonErrorMessage(data);
   if (extracted) {
     return extracted;
@@ -283,10 +277,7 @@ function buildWorkspaceReviewStatusErrorMessage(
   return `加载工作区改动状态失败（HTTP ${status}）。`;
 }
 
-function buildWorkspaceFileErrorMessage(
-  status: number,
-  data: JsonErrorData | undefined,
-): string {
+function buildWorkspaceFileErrorMessage(status: number, data: JsonErrorData | undefined): string {
   const extracted = extractJsonErrorMessage(data);
   if (extracted) {
     return extracted;
@@ -327,7 +318,9 @@ function isGenericWorkspaceNetworkErrorMessage(message: string): boolean {
 
 function normalizeWorkspaceActionError(actionLabel: string, error: unknown): Error {
   if (error instanceof HttpError) {
-    const extracted = extractJsonErrorMessage((error.data ?? undefined) as JsonErrorData | undefined);
+    const extracted = extractJsonErrorMessage(
+      (error.data ?? undefined) as JsonErrorData | undefined,
+    );
     if (extracted) {
       return new HttpError(extracted, error.status, error.data);
     }
@@ -455,10 +448,13 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
   ): Promise<WorkspaceReviewStatusLoadResult> => {
     const params = buildPathParams(path);
     try {
-      const response = await fetchWithTimeout(withQuery(`${baseUrl}/workspace/review/status`, params), {
-        headers: authHeader(token),
-        signal: options?.signal,
-      });
+      const response = await fetchWithTimeout(
+        withQuery(`${baseUrl}/workspace/review/status`, params),
+        {
+          headers: authHeader(token),
+          signal: options?.signal,
+        },
+      );
       if (!response.ok) {
         return {
           ok: false,
@@ -530,10 +526,7 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
     async listRoots(token, options) {
       const result = await listRootsResult(token, options);
       if (!result.ok) {
-        throw new HttpError(
-          result.errorMessage ?? '加载工作区根目录失败',
-          result.status ?? 500,
-        );
+        throw new HttpError(result.errorMessage ?? '加载工作区根目录失败', result.status ?? 500);
       }
       return result.roots;
     },
@@ -566,10 +559,13 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
         params.set('workspaceRoot', options.workspaceRoot);
       }
       try {
-        const response = await fetchWithTimeout(withQuery(`${baseUrl}/workspace/file/binary`, params), {
-          headers: authHeader(token),
-          signal: options?.signal,
-        });
+        const response = await fetchWithTimeout(
+          withQuery(`${baseUrl}/workspace/file/binary`, params),
+          {
+            headers: authHeader(token),
+            signal: options?.signal,
+          },
+        );
         if (!response.ok) {
           const data = await readJsonErrorData<JsonErrorData>(response);
           throw new HttpError(
@@ -628,9 +624,12 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
     async validatePath(token, path) {
       const params = buildPathParams(path);
       try {
-        const response = await fetchWithTimeout(withQuery(`${baseUrl}/workspace/validate`, params), {
-          headers: authHeader(token),
-        });
+        const response = await fetchWithTimeout(
+          withQuery(`${baseUrl}/workspace/validate`, params),
+          {
+            headers: authHeader(token),
+          },
+        );
         if (!response.ok) {
           return {
             valid: false,
@@ -689,10 +688,7 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
     async reviewStatus(token, path, options) {
       const result = await reviewStatusResult(token, path, options);
       if (!result.ok) {
-        throw new HttpError(
-          result.errorMessage ?? '加载工作区改动状态失败',
-          result.status ?? 500,
-        );
+        throw new HttpError(result.errorMessage ?? '加载工作区改动状态失败', result.status ?? 500);
       }
       return result.changes;
     },

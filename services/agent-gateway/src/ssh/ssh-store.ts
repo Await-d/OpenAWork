@@ -169,11 +169,9 @@ export function migrateSshTables(): void {
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_ssh_dialogs_user_recent ON ssh_dialogs(user_id, last_opened_at DESC)',
   );
+  db.exec('CREATE INDEX IF NOT EXISTS idx_ssh_dialogs_connection ON ssh_dialogs(connection_id)');
   db.exec(
-    'CREATE INDEX IF NOT EXISTS idx_ssh_dialogs_connection ON ssh_dialogs(connection_id)',
-  );
-  db.exec(
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_ssh_dialogs_user_connection ON ssh_dialogs(user_id, connection_id)",
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_ssh_dialogs_user_connection ON ssh_dialogs(user_id, connection_id)',
   );
 }
 
@@ -375,9 +373,9 @@ export function getSshConnection(
  */
 export function getSshConnectionUnscoped(connectionId: string): PersistedSshConnection | null {
   migrateSshTables();
-  const row = db
-    .prepare('SELECT * FROM ssh_connections WHERE id = ?')
-    .get(connectionId) as SshConnectionRow | undefined;
+  const row = db.prepare('SELECT * FROM ssh_connections WHERE id = ?').get(connectionId) as
+    | SshConnectionRow
+    | undefined;
   return row ? rowToConnection(row) : null;
 }
 
@@ -427,11 +425,7 @@ export function resetAllSshConnectionStatus(): void {
 
 // ─── Bindings ───────────────────────────────────────────────────────────────
 
-export function upsertSshBinding(
-  userId: string,
-  sessionId: string,
-  connectionId: string,
-): void {
+export function upsertSshBinding(userId: string, sessionId: string, connectionId: string): void {
   migrateSshTables();
   const now = Date.now();
   db.prepare(
@@ -494,9 +488,7 @@ export function upsertSshDialog(input: UpsertSshDialogInput): PersistedSshDialog
   migrateSshTables();
   const now = Date.now();
   const existing = db
-    .prepare(
-      'SELECT * FROM ssh_dialogs WHERE user_id = ? AND connection_id = ?',
-    )
+    .prepare('SELECT * FROM ssh_dialogs WHERE user_id = ? AND connection_id = ?')
     .get(input.userId, input.connectionId) as SshDialogRow | undefined;
 
   if (!existing) {
@@ -539,13 +531,11 @@ export function upsertSshDialog(input: UpsertSshDialogInput): PersistedSshDialog
   const next: SshDialogRow = {
     ...existing,
     title: input.title === undefined ? existing.title : input.title,
-    cwd: input.cwd === undefined ? existing.cwd : input.cwd && input.cwd.length > 0 ? input.cwd : '/',
-    last_file_path:
-      input.lastFilePath === undefined ? existing.last_file_path : input.lastFilePath,
+    cwd:
+      input.cwd === undefined ? existing.cwd : input.cwd && input.cwd.length > 0 ? input.cwd : '/',
+    last_file_path: input.lastFilePath === undefined ? existing.last_file_path : input.lastFilePath,
     last_file_encoding:
-      input.lastFileEncoding === undefined
-        ? existing.last_file_encoding
-        : input.lastFileEncoding,
+      input.lastFileEncoding === undefined ? existing.last_file_encoding : input.lastFileEncoding,
     pinned: input.pinned === undefined ? existing.pinned : input.pinned ? 1 : 0,
     last_opened_at: input.touch === false ? existing.last_opened_at : now,
     updated_at: now,
@@ -596,14 +586,12 @@ export function deleteSshDialog(userId: string, dialogId: string): boolean {
   return Number(result?.changes ?? 0) > 0;
 }
 
-export function deleteSshDialogsByConnection(
-  userId: string,
-  connectionId: string,
-): void {
+export function deleteSshDialogsByConnection(userId: string, connectionId: string): void {
   migrateSshTables();
-  db.prepare(
-    'DELETE FROM ssh_dialogs WHERE user_id = ? AND connection_id = ?',
-  ).run(userId, connectionId);
+  db.prepare('DELETE FROM ssh_dialogs WHERE user_id = ? AND connection_id = ?').run(
+    userId,
+    connectionId,
+  );
 }
 
 /**

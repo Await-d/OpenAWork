@@ -6,14 +6,20 @@ import {
   AGENT_INDEX_TO_LAYER,
   type LayerActivity,
 } from './use-office-layer-binding.js';
-import type { HandoffEntry, LayerNode, TeamRoleLayer } from '../../../../stores/team/team-events.js';
+import type {
+  HandoffEntry,
+  LayerNode,
+  TeamRoleLayer,
+} from '../../../../stores/team/team-events.js';
 import type { AgentTeamsOfficeAgent } from '../data/team-runtime-types.js';
 
 function agent(id: string): AgentTeamsOfficeAgent {
   return { id, accent: '#fff', label: id, note: '', status: 'resting', x: 0, y: 0 };
 }
 
-function node(partial: Partial<LayerNode> & Pick<LayerNode, 'sessionId' | 'roleLayer' | 'state'>): LayerNode {
+function node(
+  partial: Partial<LayerNode> & Pick<LayerNode, 'sessionId' | 'roleLayer' | 'state'>,
+): LayerNode {
   return { parentSessionId: null, ...partial };
 }
 

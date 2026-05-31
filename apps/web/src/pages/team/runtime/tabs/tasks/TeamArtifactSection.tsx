@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
-import {
-  type HandoffRecord,
-} from '@openAwork/web-client';
+import { type HandoffRecord } from '@openAwork/web-client';
 import {
   useClarificationStore,
   useLayerStore,
@@ -128,7 +126,7 @@ export function TeamArtifactSection({
   const nodes = useLayerStore((state) => state.nodes);
   const clarificationItems = useClarificationStore((state) => state.items);
   const selectedSessionRoleLayer = selectedTeamId
-    ? nodes.get(selectedTeamId)?.roleLayer ?? null
+    ? (nodes.get(selectedTeamId)?.roleLayer ?? null)
     : null;
   const selectedSessionHandoffs = useSessionHandoffs(selectedTeamId || null);
 
@@ -287,7 +285,10 @@ export function TeamArtifactSection({
 
   if (!selectedTeamId) {
     return (
-      <TabContainer title="任务与产物" subtitle="按当前会话和 handoff 上下文查看任务、派发与 PM1 / PM2 的产物。">
+      <TabContainer
+        title="任务与产物"
+        subtitle="按当前会话和 handoff 上下文查看任务、派发与 PM1 / PM2 的产物。"
+      >
         <TabPlaceholder
           emoji="🧱"
           title="未选择会话"
@@ -323,8 +324,8 @@ export function TeamArtifactSection({
             已定位到 Handoff #{focusHandoffId.slice(0, 8)}
           </strong>
           <span style={{ color: 'var(--fg-strong)', fontSize: 12, fontWeight: 700 }}>
-            {artifactContext.focusHandoff.fromRoleLayer} → {artifactContext.focusHandoff.toRoleLayer} ·{' '}
-            {artifactContext.focusHandoff.state}
+            {artifactContext.focusHandoff.fromRoleLayer} →{' '}
+            {artifactContext.focusHandoff.toRoleLayer} · {artifactContext.focusHandoff.state}
           </span>
           <div style={CONTEXT_META_ROW_STYLE}>
             {artifactContext.pm1ArtifactSessionId ? (
@@ -358,7 +359,9 @@ export function TeamArtifactSection({
         </section>
       ) : null}
 
-      {runtimeError ? <div style={ERROR_BANNER_STYLE}>handoff 上下文加载失败：{runtimeError}</div> : null}
+      {runtimeError ? (
+        <div style={ERROR_BANNER_STYLE}>handoff 上下文加载失败：{runtimeError}</div>
+      ) : null}
       {artifactError ? <div style={ERROR_BANNER_STYLE}>{artifactError}</div> : null}
 
       {disposition.action ? (

@@ -164,9 +164,7 @@ describe('team-runtime-telemetry', () => {
 
     expect(tracked).toHaveLength(1);
     expect(tracked[0]?.name).toBe('team_runtime_health');
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('track team_runtime_health 失败'),
-    );
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('track team_runtime_health 失败'));
   });
 
   it('alert transition telemetry 失败时不会抛出', () => {

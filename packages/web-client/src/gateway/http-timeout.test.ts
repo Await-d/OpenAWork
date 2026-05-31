@@ -1,9 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-  fetchWithTimeout,
-  DEFAULT_FETCH_TIMEOUT_MS,
-  isGenericFetchErrorMessage,
-} from './http.js';
+import { fetchWithTimeout, DEFAULT_FETCH_TIMEOUT_MS, isGenericFetchErrorMessage } from './http.js';
 
 const originalFetch = globalThis.fetch;
 
@@ -14,7 +10,9 @@ afterEach(() => {
 
 describe('fetchWithTimeout', () => {
   it('正常响应直接透传', async () => {
-    globalThis.fetch = vi.fn(async () => ({ ok: true, status: 200 }) as unknown as Response) as typeof fetch;
+    globalThis.fetch = vi.fn(
+      async () => ({ ok: true, status: 200 }) as unknown as Response,
+    ) as typeof fetch;
     const res = await fetchWithTimeout('http://localhost/x', { timeoutMs: 1000 });
     expect(res.ok).toBe(true);
   });
@@ -86,7 +84,8 @@ describe('fetchWithTimeout', () => {
 
   it('timeoutMs<=0 时禁用墙钟（不 arm 定时器，直接透传 fetch）', async () => {
     const fetchMock = vi.fn(
-      async (_input: string, _init?: RequestInit) => ({ ok: true, status: 200 }) as unknown as Response,
+      async (_input: string, _init?: RequestInit) =>
+        ({ ok: true, status: 200 }) as unknown as Response,
     );
     globalThis.fetch = fetchMock as unknown as typeof fetch;
     const res = await fetchWithTimeout('http://localhost/x', { timeoutMs: 0 });
@@ -101,12 +100,13 @@ describe('fetchWithTimeout', () => {
   });
 });
 
-
 describe('isGenericFetchErrorMessage', () => {
   it('识别浏览器原生的网络失败文案', () => {
     expect(isGenericFetchErrorMessage('Failed to fetch')).toBe(true);
     expect(isGenericFetchErrorMessage('Load failed')).toBe(true);
-    expect(isGenericFetchErrorMessage('NetworkError when attempting to fetch resource.')).toBe(true);
+    expect(isGenericFetchErrorMessage('NetworkError when attempting to fetch resource.')).toBe(
+      true,
+    );
   });
 
   it('识别 fetchWithTimeout 墙钟超时产生的 abort 文案（否则原始 "aborted" 会泄漏到 UI）', () => {

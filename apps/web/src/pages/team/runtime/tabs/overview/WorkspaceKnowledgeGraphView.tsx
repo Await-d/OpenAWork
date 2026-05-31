@@ -103,7 +103,9 @@ export function WorkspaceKnowledgeGraphView({
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [promptPreviewLayer, setPromptPreviewLayer] = useState<TeamRoleLayer | null>(null);
-  const dragRef = useRef<{ startX: number; startY: number; panX: number; panY: number } | null>(null);
+  const dragRef = useRef<{ startX: number; startY: number; panX: number; panY: number } | null>(
+    null,
+  );
 
   const handleWheel = useCallback((e: WheelEvent<HTMLDivElement>) => {
     if (!e.ctrlKey && !e.metaKey) return;
@@ -136,7 +138,7 @@ export function WorkspaceKnowledgeGraphView({
   const sessionNodeCount = graph.nodes.filter((n) => n.kind === 'session').length;
 
   const selectedSessionLayer: TeamRoleLayer | null = selectedSessionId
-    ? layerNodes.get(selectedSessionId)?.roleLayer ?? null
+    ? (layerNodes.get(selectedSessionId)?.roleLayer ?? null)
     : null;
 
   if (graph.nodes.length === 0) {
@@ -305,7 +307,7 @@ function EdgeLine({
   const midX = (x1 + x2) / 2;
   const color =
     edge.kind === 'handoff'
-      ? STATE_COLORS[edge.state ?? 'idle'] ?? 'var(--fg-muted)'
+      ? (STATE_COLORS[edge.state ?? 'idle'] ?? 'var(--fg-muted)')
       : edge.kind === 'produces'
         ? 'var(--accent)'
         : 'color-mix(in srgb, var(--border-default) 80%, transparent)';
@@ -335,7 +337,7 @@ function NodeBox({
   const accent = isArtifact
     ? 'var(--accent)'
     : node.state
-      ? STATE_COLORS[node.state] ?? 'var(--fg-muted)'
+      ? (STATE_COLORS[node.state] ?? 'var(--fg-muted)')
       : 'var(--fg-muted)';
   const clickable = Boolean(node.sessionId);
   return (
@@ -364,8 +366,18 @@ function NodeBox({
       >
         {truncate(node.label, 14)}
       </text>
-      <text x={24} y={NODE_H / 2 + 12} fontSize={9} fill="var(--fg-muted)" style={{ userSelect: 'none' }}>
-        {isArtifact ? `产物 · ${node.state ?? ''}` : node.layer ? KNOWLEDGE_GRAPH_LAYER_LABELS[node.layer] : '会话'}
+      <text
+        x={24}
+        y={NODE_H / 2 + 12}
+        fontSize={9}
+        fill="var(--fg-muted)"
+        style={{ userSelect: 'none' }}
+      >
+        {isArtifact
+          ? `产物 · ${node.state ?? ''}`
+          : node.layer
+            ? KNOWLEDGE_GRAPH_LAYER_LABELS[node.layer]
+            : '会话'}
       </text>
     </g>
   );
@@ -383,7 +395,9 @@ function GraphLegend() {
     { color: 'var(--accent)', label: '产物', dashed: true },
   ];
   return (
-    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 10, color: 'var(--fg-muted)' }}>
+    <div
+      style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 10, color: 'var(--fg-muted)' }}
+    >
       {items.map((item) => (
         <span key={item.label} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
           <span

@@ -118,7 +118,9 @@ function normalizeMemberSlot(entry: unknown): FixedTeamMemberSlot | null {
   // 派发优先级：同分排序权重。
   const dispatchPriorityRaw = rec['dispatchPriority'];
   const dispatchPriority =
-    dispatchPriorityRaw === 'high' || dispatchPriorityRaw === 'low' || dispatchPriorityRaw === 'normal'
+    dispatchPriorityRaw === 'high' ||
+    dispatchPriorityRaw === 'low' ||
+    dispatchPriorityRaw === 'normal'
       ? dispatchPriorityRaw
       : undefined;
 

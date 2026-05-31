@@ -485,9 +485,12 @@ describe('retryFailedHandoff', () => {
       sourceIntent: '需求',
     });
     expect(
-      (store.getHandoff({ userId: USER_ID, handoffId: created.id })?.payload as Record<string, unknown>)[
-        'reviewDispositionHandledAt'
-      ],
+      (
+        store.getHandoff({ userId: USER_ID, handoffId: created.id })?.payload as Record<
+          string,
+          unknown
+        >
+      )['reviewDispositionHandledAt'],
     ).toBeUndefined();
   });
 
@@ -570,9 +573,9 @@ describe('retryFailedHandoff', () => {
     expect(store.retryFailedHandoff({ userId: USER_ID, handoffId: escalatedToUser.id })).toBe(
       false,
     );
-    expect(
-      store.retryFailedHandoff({ userId: USER_ID, handoffId: degradedSummaryFailed.id }),
-    ).toBe(false);
+    expect(store.retryFailedHandoff({ userId: USER_ID, handoffId: degradedSummaryFailed.id })).toBe(
+      false,
+    );
   });
 
   it('PM2 failed handoff 会优先按结构化 reviewDisposition 判断是否可 retry', () => {

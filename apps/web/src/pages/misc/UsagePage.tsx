@@ -78,14 +78,31 @@ export default function UsagePage() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
               {[0, 1, 2].map((i) => (
                 <div key={i}>
-                  <div className="omo-skel" style={{ height: 12, width: 80, marginBottom: 10, borderRadius: 4 }} />
+                  <div
+                    className="omo-skel"
+                    style={{ height: 12, width: 80, marginBottom: 10, borderRadius: 4 }}
+                  />
                   <div
                     className="content-card"
-                    style={{ padding: '24px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}
+                    style={{
+                      padding: '24px 20px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 12,
+                    }}
                   >
-                    <div className="omo-skel" style={{ height: 14, width: '60%', borderRadius: 4 }} />
-                    <div className="omo-skel" style={{ height: 10, width: '40%', borderRadius: 4 }} />
-                    <div className="omo-skel" style={{ height: 32, width: '100%', borderRadius: 6 }} />
+                    <div
+                      className="omo-skel"
+                      style={{ height: 14, width: '60%', borderRadius: 4 }}
+                    />
+                    <div
+                      className="omo-skel"
+                      style={{ height: 10, width: '40%', borderRadius: 4 }}
+                    />
+                    <div
+                      className="omo-skel"
+                      style={{ height: 32, width: '100%', borderRadius: 6 }}
+                    />
                   </div>
                 </div>
               ))}

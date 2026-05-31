@@ -200,7 +200,9 @@ describe('createTeamPhaseAClient mutation error handling', () => {
     } catch (error) {
       expect(error).toBeInstanceOf(HttpError);
       expect((error as HttpError<{ state?: { usedInWindow?: number } }>).status).toBe(429);
-      expect((error as HttpError<{ state?: { usedInWindow?: number } }>).data?.state?.usedInWindow).toBe(5);
+      expect(
+        (error as HttpError<{ state?: { usedInWindow?: number } }>).data?.state?.usedInWindow,
+      ).toBe(5);
       expect((error as Error).message).toContain('24 小时后重试');
     }
   });

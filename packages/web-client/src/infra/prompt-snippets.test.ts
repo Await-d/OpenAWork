@@ -15,7 +15,11 @@ describe('createPromptSnippetsClient', () => {
     globalThis.fetch = vi.fn(async () => {
       return {
         ok: true,
-        json: async () => ({ groups: [{ id: 'group-1', name: '常用', userId: 'u', order: 0, createdAt: '', updatedAt: '' }] }),
+        json: async () => ({
+          groups: [
+            { id: 'group-1', name: '常用', userId: 'u', order: 0, createdAt: '', updatedAt: '' },
+          ],
+        }),
       } as unknown as Response;
     }) as typeof fetch;
 

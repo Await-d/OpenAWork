@@ -89,7 +89,8 @@ export function EditorBrowserWorkspace({
 
   // 当浏览器 tab 不可用(无 URL 且从未挂载)时,工作区只剩代码视图;
   // 此时即便外部 activeTab 仍记着 'browser' 也回落到 'code',避免空白。
-  const effectiveTab: EditorPaneTab = currentTab === 'browser' && !showBrowserTab ? 'code' : currentTab;
+  const effectiveTab: EditorPaneTab =
+    currentTab === 'browser' && !showBrowserTab ? 'code' : currentTab;
 
   // 只有「需要 tab 栏」或「需要全屏切换按钮」时才渲染顶部工具条。
   const showToolbar = showBrowserTab || !!onToggleFullScreen;

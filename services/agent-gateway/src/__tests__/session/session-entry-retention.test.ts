@@ -70,8 +70,12 @@ describe('session_entry scope retention', () => {
     }
 
     // Oldest two scopes were pruned wholesale.
-    expect(store.listSessionEvents({ sessionId: SESSION_ID, clientRequestId: 'req-0' })).toEqual([]);
-    expect(store.listSessionEvents({ sessionId: SESSION_ID, clientRequestId: 'req-1' })).toEqual([]);
+    expect(store.listSessionEvents({ sessionId: SESSION_ID, clientRequestId: 'req-0' })).toEqual(
+      [],
+    );
+    expect(store.listSessionEvents({ sessionId: SESSION_ID, clientRequestId: 'req-1' })).toEqual(
+      [],
+    );
 
     // Most recent three scopes are fully retained — sequences not truncated.
     for (const scope of ['req-2', 'req-3', 'req-4']) {

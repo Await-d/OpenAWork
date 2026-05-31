@@ -322,7 +322,13 @@ export function CustomRoleModal({
               onChange={(e) => setPrompt(e.target.value)}
               rows={6}
               placeholder="描述这个角色的职责、专长、工作方式和约束。例如：你是一名资深性能优化工程师，擅长定位前端渲染瓶颈与后端慢查询，给出可量化的优化方案…"
-              style={{ ...INPUT, resize: 'vertical', minHeight: 110, fontFamily: 'inherit', lineHeight: 1.6 }}
+              style={{
+                ...INPUT,
+                resize: 'vertical',
+                minHeight: 110,
+                fontFamily: 'inherit',
+                lineHeight: 1.6,
+              }}
             />
             {optimizeError && (
               <span style={{ fontSize: 10, color: 'var(--danger)' }}>{optimizeError}</span>
@@ -505,9 +511,7 @@ export function CustomRoleModal({
               <span style={LABEL}>派发优先级（同分排序）</span>
               <select
                 value={dispatchPriority}
-                onChange={(e) =>
-                  setDispatchPriority(e.target.value as 'high' | 'normal' | 'low')
-                }
+                onChange={(e) => setDispatchPriority(e.target.value as 'high' | 'normal' | 'low')}
                 style={{ ...INPUT, fontSize: 12, cursor: 'pointer' }}
               >
                 <option value="high">高 · 优先派发</option>

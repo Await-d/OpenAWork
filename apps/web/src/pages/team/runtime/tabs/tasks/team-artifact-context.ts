@@ -157,7 +157,7 @@ export function resolveTeamArtifactContext(input: {
   selectedSessionRoleLayer?: ArtifactRoleLayer;
 }): ResolvedTeamArtifactContext {
   const focusHandoff = input.focusHandoffId
-    ? input.handoffs.find((record) => record.id === input.focusHandoffId) ?? null
+    ? (input.handoffs.find((record) => record.id === input.focusHandoffId) ?? null)
     : null;
   const pm2Handoff = pickRelevantPm2Handoff(input.handoffs, focusHandoff);
 

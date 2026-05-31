@@ -706,9 +706,13 @@ export function __setGitBinaryForTests(binary: string | null): void {
 }
 
 /** 测试用：直接调用底层 git 执行器，用于验证超时 / maxBuffer 等护栏。 */
-export async function __runGitForTests(
-  input: { args: string[]; cwd: string; stdin?: string; maxBuffer?: number; timeoutMs?: number },
-): Promise<GitInvocationResult> {
+export async function __runGitForTests(input: {
+  args: string[];
+  cwd: string;
+  stdin?: string;
+  maxBuffer?: number;
+  timeoutMs?: number;
+}): Promise<GitInvocationResult> {
   return runGit(input);
 }
 

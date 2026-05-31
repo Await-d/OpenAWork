@@ -30,7 +30,12 @@ describe('WorkspacePickerModal', () => {
   it('初始化失败后可通过重试恢复目录列表', async () => {
     const fetchWorkspaceRoots = vi.fn(async () => ['/workspace/demo']);
     const fetchTree = vi
-      .fn<(_: string, __?: number) => Promise<Array<{ path: string; name: string; type: 'directory' }>>>()
+      .fn<
+        (
+          _: string,
+          __?: number,
+        ) => Promise<Array<{ path: string; name: string; type: 'directory' }>>
+      >()
       .mockRejectedValueOnce(new Error('tree unavailable'))
       .mockResolvedValueOnce([
         {

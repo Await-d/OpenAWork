@@ -1,5 +1,15 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
-import { SESSIONS_LIST_PANE_WIDTH_BOUNDS, clampSessionsListPaneWidth } from '../../../stores/ui/uiState.js';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+} from 'react';
+import {
+  SESSIONS_LIST_PANE_WIDTH_BOUNDS,
+  clampSessionsListPaneWidth,
+} from '../../../stores/ui/uiState.js';
 
 const HANDLE_BASE_STYLE: CSSProperties = {
   position: 'absolute',

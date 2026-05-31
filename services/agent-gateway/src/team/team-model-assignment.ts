@@ -96,7 +96,8 @@ function describeModel(model: AssignModelCandidate): string {
   if (model.supportsVision) caps.push('视觉');
   if (typeof model.contextWindow === 'number') caps.push(`上下文${model.contextWindow}`);
   const price =
-    typeof model.inputPricePerMillion === 'number' || typeof model.outputPricePerMillion === 'number'
+    typeof model.inputPricePerMillion === 'number' ||
+    typeof model.outputPricePerMillion === 'number'
       ? `价格(输入${model.inputPricePerMillion ?? '?'}/输出${model.outputPricePerMillion ?? '?'} 每百万tokens)`
       : '价格未知';
   const capText = caps.length > 0 ? caps.join('、') : '能力未知';
@@ -312,7 +313,9 @@ export function parseAssignmentResponse(
     if (!entry) continue;
     seen.add(layer);
     const trimmedReason =
-      typeof reason === 'string' && reason.trim().length > 0 ? reason.trim().slice(0, 120) : undefined;
+      typeof reason === 'string' && reason.trim().length > 0
+        ? reason.trim().slice(0, 120)
+        : undefined;
     result.push({
       layer,
       providerId: entry.providerId,
@@ -650,9 +653,7 @@ export async function assignTeamModels(
         ? { fallbackReasonCode: 'llm-error' as const, fallbackMessage: llmError.slice(0, 300) }
         : {
             fallbackReasonCode: 'llm-empty' as const,
-            ...(llmRawText
-              ? { llmRawSnippet: llmRawText.trim().slice(0, 300) }
-              : {}),
+            ...(llmRawText ? { llmRawSnippet: llmRawText.trim().slice(0, 300) } : {}),
           }),
     };
   }

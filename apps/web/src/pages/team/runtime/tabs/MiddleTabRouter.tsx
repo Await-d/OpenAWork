@@ -152,10 +152,7 @@ export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
 
     case 'health':
       return (
-        <HealthView
-          onCancelHandoff={onCancelHandoff}
-          onOpenHandoffContext={onOpenHandoffContext}
-        />
+        <HealthView onCancelHandoff={onCancelHandoff} onOpenHandoffContext={onOpenHandoffContext} />
       );
 
     // ─── B. 通讯 ────────────────────────────────────────────────────

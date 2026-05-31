@@ -1,5 +1,10 @@
 import type { TokenPair } from './auth.js';
-import { extractJsonErrorMessage, isGenericFetchErrorMessage, type JsonErrorData, fetchWithTimeout } from './http.js';
+import {
+  extractJsonErrorMessage,
+  isGenericFetchErrorMessage,
+  type JsonErrorData,
+  fetchWithTimeout,
+} from './http.js';
 
 const PAIRING_TIMEOUT_MS = 10_000;
 

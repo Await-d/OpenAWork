@@ -32,9 +32,7 @@ export interface ChatUiActionsDeps {
     saveFile: (path: string) => Promise<void>;
     openFile: (path: string, options?: OpenFileOptions) => Promise<void>;
   };
-  openFileRef: React.MutableRefObject<
-    ((path: string, options?: OpenFileOptions) => void) | null
-  >;
+  openFileRef: React.MutableRefObject<((path: string, options?: OpenFileOptions) => void) | null>;
   setEditorMode: (value: boolean) => void;
   /**
    * Force the editor pane onto the code tab when a file is opened

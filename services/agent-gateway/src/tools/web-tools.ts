@@ -1,10 +1,7 @@
 import type { ToolDefinition } from '@openAwork/agent-core';
 import TurndownService from 'turndown';
 import { z } from 'zod';
-import {
-  readResponseTextWithLimit,
-  resolveHttpBodyLimitBytes,
-} from '../infra/http-body-limit.js';
+import { readResponseTextWithLimit, resolveHttpBodyLimitBytes } from '../infra/http-body-limit.js';
 
 const MAX_WEBFETCH_TIMEOUT_SECONDS = 120;
 

@@ -9,9 +9,7 @@ import type * as TeamEventsBusModule from '../../handoff/bus/team-events-bus.js'
 import type * as TeamRuntimeDiagnosticsStoreModule from '../../team/team-runtime-diagnostics-store.js';
 import type * as TeamRuntimeAlertStoreModule from '../../team/team-runtime-alert-store.js';
 import type * as TeamRuntimeTelemetryModule from '../../team/team-runtime-telemetry.js';
-import {
-  SESSION_RUNTIME_THREAD_STALE_AFTER_MS,
-} from '../../session/session-runtime-thread-store.js';
+import { SESSION_RUNTIME_THREAD_STALE_AFTER_MS } from '../../session/session-runtime-thread-store.js';
 
 process.env['DATABASE_URL'] = ':memory:';
 process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
@@ -620,7 +618,11 @@ describe('GET /team/runtime', () => {
         ]),
       );
       expect(typeof data.diagnostics?.telemetry.enabled).toBe('boolean');
-      expect((data.diagnostics?.health.reasons ?? []).some((item) => item.includes('stale_runtime_threads=1'))).toBe(true);
+      expect(
+        (data.diagnostics?.health.reasons ?? []).some((item) =>
+          item.includes('stale_runtime_threads=1'),
+        ),
+      ).toBe(true);
       expect(
         (data.diagnostics?.health.reasons ?? []).some((item) =>
           item.includes('quality_review_redispatch=1'),
@@ -772,9 +774,9 @@ describe('GET /team/runtime', () => {
       };
 
       expect(data.diagnostics?.health.status).toBe('degraded');
-      expect(data.diagnostics?.activeAlerts.some((alert) => alert.code === 'latency-violation')).toBe(
-        true,
-      );
+      expect(
+        data.diagnostics?.activeAlerts.some((alert) => alert.code === 'latency-violation'),
+      ).toBe(true);
       expect(data.diagnostics?.alerts.some((alert) => alert.code === 'latency-violation')).toBe(
         true,
       );
@@ -798,9 +800,9 @@ describe('GET /team/runtime', () => {
           recentResolvedAlerts: Array<{ code: string; status: string }>;
         };
       };
-      expect(recoveryData.diagnostics?.activeAlerts.some((alert) => alert.code === 'latency-violation')).toBe(
-        false,
-      );
+      expect(
+        recoveryData.diagnostics?.activeAlerts.some((alert) => alert.code === 'latency-violation'),
+      ).toBe(false);
       expect(recoveryData.diagnostics?.recentResolvedAlerts[0]).toMatchObject({
         code: 'latency-violation',
         status: 'resolved',
@@ -1132,9 +1134,11 @@ describe('GET /team/runtime', () => {
           activeAlerts: Array<{ code: string }>;
         };
       };
-      expect(beforeData.diagnostics?.activeAlerts.some((alert) => alert.code === 'stale-runtime-threads')).toBe(
-        true,
-      );
+      expect(
+        beforeData.diagnostics?.activeAlerts.some(
+          (alert) => alert.code === 'stale-runtime-threads',
+        ),
+      ).toBe(true);
 
       const remediation = await app.inject({
         method: 'POST',
@@ -1166,12 +1170,14 @@ describe('GET /team/runtime', () => {
           recentResolvedAlerts: Array<{ code: string; status: string }>;
         };
       };
-      expect(afterData.diagnostics?.activeAlerts.some((alert) => alert.code === 'stale-runtime-threads')).toBe(
-        false,
-      );
-      expect(afterData.diagnostics?.recentResolvedAlerts.some((alert) => alert.code === 'stale-runtime-threads')).toBe(
-        true,
-      );
+      expect(
+        afterData.diagnostics?.activeAlerts.some((alert) => alert.code === 'stale-runtime-threads'),
+      ).toBe(false);
+      expect(
+        afterData.diagnostics?.recentResolvedAlerts.some(
+          (alert) => alert.code === 'stale-runtime-threads',
+        ),
+      ).toBe(true);
     } finally {
       await app.close();
     }
@@ -1205,9 +1211,9 @@ describe('GET /team/runtime', () => {
         };
       };
       expect(beforeData.diagnostics?.pendingInteractions.staleDecidingQuestionCount).toBe(1);
-      expect(beforeData.diagnostics?.activeAlerts.some((alert) => alert.code === 'stale-decisions')).toBe(
-        true,
-      );
+      expect(
+        beforeData.diagnostics?.activeAlerts.some((alert) => alert.code === 'stale-decisions'),
+      ).toBe(true);
 
       const remediation = await app.inject({
         method: 'POST',
@@ -1238,12 +1244,14 @@ describe('GET /team/runtime', () => {
         };
       };
       expect(afterData.diagnostics?.pendingInteractions.staleDecidingQuestionCount).toBe(0);
-      expect(afterData.diagnostics?.activeAlerts.some((alert) => alert.code === 'stale-decisions')).toBe(
-        false,
-      );
-      expect(afterData.diagnostics?.recentResolvedAlerts.some((alert) => alert.code === 'stale-decisions')).toBe(
-        true,
-      );
+      expect(
+        afterData.diagnostics?.activeAlerts.some((alert) => alert.code === 'stale-decisions'),
+      ).toBe(false);
+      expect(
+        afterData.diagnostics?.recentResolvedAlerts.some(
+          (alert) => alert.code === 'stale-decisions',
+        ),
+      ).toBe(true);
     } finally {
       await app.close();
     }
@@ -1329,9 +1337,9 @@ describe('GET /team/runtime', () => {
           activeAlerts: Array<{ code: string }>;
         };
       };
-      expect(beforeData.diagnostics?.activeAlerts.some((alert) => alert.code === 'handoff-failure')).toBe(
-        true,
-      );
+      expect(
+        beforeData.diagnostics?.activeAlerts.some((alert) => alert.code === 'handoff-failure'),
+      ).toBe(true);
 
       const remediation = await app.inject({
         method: 'POST',
@@ -1506,9 +1514,11 @@ describe('GET /team/runtime', () => {
           };
         };
       };
-      expect(beforeData.diagnostics?.activeAlerts.some((alert) => alert.code === 'quality-review-pending')).toBe(
-        true,
-      );
+      expect(
+        beforeData.diagnostics?.activeAlerts.some(
+          (alert) => alert.code === 'quality-review-pending',
+        ),
+      ).toBe(true);
       expect(beforeData.diagnostics?.qualityReview).toMatchObject({
         pendingCount: 1,
         retryableErrorCount: 0,
@@ -1602,9 +1612,11 @@ describe('GET /team/runtime', () => {
         };
       };
 
-      expect(beforeData.diagnostics?.activeAlerts.some((alert) => alert.code === 'quality-review-pending')).toBe(
-        true,
-      );
+      expect(
+        beforeData.diagnostics?.activeAlerts.some(
+          (alert) => alert.code === 'quality-review-pending',
+        ),
+      ).toBe(true);
       expect(beforeData.diagnostics?.qualityReview.pendingCount).toBe(1);
       expect(beforeData.diagnostics?.qualityReview.pendingHandoffs).toEqual([
         expect.objectContaining({
@@ -1712,9 +1724,11 @@ describe('GET /team/runtime', () => {
       expect(
         data.diagnostics?.activeAlerts.some((alert) => alert.code === 'quality-review-return-to-c'),
       ).toBe(false);
-      expect((data.diagnostics?.health.reasons ?? []).some((reason) => reason.includes('handoff_failure='))).toBe(
-        false,
-      );
+      expect(
+        (data.diagnostics?.health.reasons ?? []).some((reason) =>
+          reason.includes('handoff_failure='),
+        ),
+      ).toBe(false);
       expect(
         (data.diagnostics?.health.reasons ?? []).some((reason) =>
           reason.includes('quality_review_return_to_c='),

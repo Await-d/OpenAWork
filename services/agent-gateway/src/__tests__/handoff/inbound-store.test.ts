@@ -317,7 +317,9 @@ describe('resolveClarificationEscalationRequest', () => {
       userId: USER_ID,
     });
     expect(first?.state).toBe('pending');
-    expect((first?.payload as { questions: Array<Record<string, unknown>> }).questions[0]).toMatchObject({
+    expect(
+      (first?.payload as { questions: Array<Record<string, unknown>> }).questions[0],
+    ).toMatchObject({
       id: 'q-1',
       answer: 'OAuth',
       answeredAt: 123,
@@ -331,7 +333,9 @@ describe('resolveClarificationEscalationRequest', () => {
       userId: USER_ID,
     });
     expect(second?.state).toBe('consumed');
-    expect((second?.payload as { questions: Array<Record<string, unknown>> }).questions[1]).toMatchObject({
+    expect(
+      (second?.payload as { questions: Array<Record<string, unknown>> }).questions[1],
+    ).toMatchObject({
       id: 'q-2',
       answeredAt: 456,
       status: 'dismissed',

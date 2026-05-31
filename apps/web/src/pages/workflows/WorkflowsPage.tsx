@@ -84,8 +84,12 @@ export default function WorkflowsPage() {
                   padding: '10px 14px',
                   borderRadius: 10,
                   border: `1px solid ${feedback.tone === 'success' ? 'var(--success-border, rgba(34, 197, 94, 0.35))' : 'var(--complement-border)'}`,
-                  background: feedback.tone === 'success' ? 'var(--success-muted, rgba(34, 197, 94, 0.08))' : 'var(--complement-muted)',
-                  color: feedback.tone === 'success' ? 'var(--success, #22c55e)' : 'var(--complement)',
+                  background:
+                    feedback.tone === 'success'
+                      ? 'var(--success-muted, rgba(34, 197, 94, 0.08))'
+                      : 'var(--complement-muted)',
+                  color:
+                    feedback.tone === 'success' ? 'var(--success, #22c55e)' : 'var(--complement)',
                   fontSize: 12,
                   fontWeight: 500,
                 }}
@@ -183,12 +187,22 @@ export default function WorkflowsPage() {
                       <Link
                         to={`/team?workflowTemplateId=${encodeURIComponent(selectedTemplate.id)}&workflowTemplateName=${encodeURIComponent(selectedTemplate.name)}&workflowTemplateDescription=${encodeURIComponent(selectedTemplate.description ?? '')}&workflowTemplateNodeCount=${selectedTemplate.nodes.length}`}
                         className="btn-accent"
-                        style={{ textDecoration: 'none', height: 32, padding: '0 14px', fontSize: 12 }}
+                        style={{
+                          textDecoration: 'none',
+                          height: 32,
+                          padding: '0 14px',
+                          fontSize: 12,
+                        }}
                       >
                         在 Team 中发起
                       </Link>
                     ) : null}
-                    <button type="button" className="btn-secondary" onClick={addNode} disabled={busy}>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={addNode}
+                      disabled={busy}
+                    >
                       添加节点
                     </button>
                   </div>
@@ -263,9 +277,7 @@ export default function WorkflowsPage() {
                       <circle cx="12" cy="12" r="10" />
                       <path d="M8 12h8M12 8v8" />
                     </svg>
-                    <span style={{ fontSize: 12 }}>
-                      先在画布里选择一个节点，即可在此编辑属性。
-                    </span>
+                    <span style={{ fontSize: 12 }}>先在画布里选择一个节点，即可在此编辑属性。</span>
                   </div>
                 )}
               </div>

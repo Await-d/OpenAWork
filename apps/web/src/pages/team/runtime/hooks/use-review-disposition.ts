@@ -46,7 +46,10 @@ function isEligiblePm2DispositionRecord(record: HandoffRecord): boolean {
   );
 }
 
-function pickPm2Handoff(records: HandoffRecord[], focusHandoffId?: string | null): HandoffRecord | null {
+function pickPm2Handoff(
+  records: HandoffRecord[],
+  focusHandoffId?: string | null,
+): HandoffRecord | null {
   if (focusHandoffId) {
     const focused = records.find((record) => record.id === focusHandoffId);
     if (focused && isEligiblePm2DispositionRecord(focused)) {

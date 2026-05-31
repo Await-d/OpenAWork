@@ -17,11 +17,7 @@
  *     自然处理）。
  */
 
-import {
-  TEAM_INIT_STEP_ORDER,
-  type TeamInitState,
-  type TeamInitStepKey,
-} from '@openAwork/shared';
+import { TEAM_INIT_STEP_ORDER, type TeamInitState, type TeamInitStepKey } from '@openAwork/shared';
 import { loadTeamInitSessionContext } from './team-init-store.js';
 import { runTeamInitStep } from './team-init-runner.js';
 import { publishTeamEvent } from '../../handoff/bus/team-events-bus.js';

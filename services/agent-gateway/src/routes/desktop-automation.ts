@@ -5,7 +5,10 @@ import { parseBody } from '../infra/parse-request.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { desktopAutomationManager } from '../tools/desktop-automation.js';
 
-function classifyDesktopAutomationError(error: unknown, actionLabel: string): {
+function classifyDesktopAutomationError(
+  error: unknown,
+  actionLabel: string,
+): {
   code: string;
   error: string;
   statusCode: number;

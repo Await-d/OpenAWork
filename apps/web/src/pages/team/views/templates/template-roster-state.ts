@@ -372,9 +372,7 @@ export function templateToEditorState(template: WorkflowTemplateRecord): Templat
     recommendedFor: team?.recommendedFor ?? '',
     recommendedDefault: team?.recommendedDefault ?? false,
     memberSlots,
-    modelPool: Array.isArray(team?.modelPool)
-      ? team!.modelPool!.map((ref) => ({ ...ref }))
-      : [],
+    modelPool: Array.isArray(team?.modelPool) ? team!.modelPool!.map((ref) => ({ ...ref })) : [],
     modelAssignStrategy: team?.modelAssignStrategy ?? 'balanced',
   };
 }
@@ -392,7 +390,9 @@ export function editorStateToMetadata(state: TemplateEditorState): WorkflowTempl
       templateFocus: state.focus.trim() || null,
       recommendedFor: state.recommendedFor.trim() || null,
       recommendedDefault: state.recommendedDefault,
-      ...(state.modelPool.length > 0 ? { modelPool: state.modelPool.map((ref) => ({ ...ref })) } : {}),
+      ...(state.modelPool.length > 0
+        ? { modelPool: state.modelPool.map((ref) => ({ ...ref })) }
+        : {}),
       modelAssignStrategy: state.modelAssignStrategy,
     },
   };
@@ -631,7 +631,10 @@ function slotLabel(slot: FixedTeamMemberSlot): string {
  * 花名册成员的新增 / 移除 / 修改（按 personaKey 配对，修改再细分模型/提示词/工具/能力）。
  * 返回空数组表示无变更。
  */
-export function diffTemplateStates(original: TemplateEditorState, draft: TemplateEditorState): string[] {
+export function diffTemplateStates(
+  original: TemplateEditorState,
+  draft: TemplateEditorState,
+): string[] {
   const changes: string[] = [];
 
   if (original.name !== draft.name) {

@@ -105,9 +105,7 @@ export function ChatEditorPane({
           display: 'flex',
           flexDirection: 'column',
           borderLeft:
-            editorMode && !fullScreen
-              ? '1px solid var(--border-default)'
-              : '1px solid transparent',
+            editorMode && !fullScreen ? '1px solid var(--border-default)' : '1px solid transparent',
           opacity: editorMode ? 1 : 0,
           transform: editorMode ? 'translateX(0)' : 'translateX(10px)',
           pointerEvents: editorMode ? 'auto' : 'none',

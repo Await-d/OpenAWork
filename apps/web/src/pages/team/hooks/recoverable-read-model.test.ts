@@ -9,9 +9,7 @@ describe('computeExponentialRetryDelay', () => {
     expect(computeExponentialRetryDelay({ attempt: 0, baseMs: 2000, maxMs: 30000 })).toBe(2000);
     expect(computeExponentialRetryDelay({ attempt: 1, baseMs: 2000, maxMs: 30000 })).toBe(4000);
     expect(computeExponentialRetryDelay({ attempt: 2, baseMs: 2000, maxMs: 30000 })).toBe(8000);
-    expect(computeExponentialRetryDelay({ attempt: 10, baseMs: 2000, maxMs: 30000 })).toBe(
-      30000,
-    );
+    expect(computeExponentialRetryDelay({ attempt: 10, baseMs: 2000, maxMs: 30000 })).toBe(30000);
   });
 });
 

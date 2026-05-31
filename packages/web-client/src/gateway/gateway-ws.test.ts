@@ -171,9 +171,7 @@ describe('GatewayWebSocketClient onclose terminal safety', () => {
     // Clean shutdown after the terminal chunk must NOT emit a synthetic error.
     ws.onclose?.();
     expect(handler).toHaveBeenCalledTimes(1);
-    expect(handler).not.toHaveBeenCalledWith(
-      expect.objectContaining({ code: 'WS_CLOSED' }),
-    );
+    expect(handler).not.toHaveBeenCalledWith(expect.objectContaining({ code: 'WS_CLOSED' }));
   });
 
   it('调用方 disconnect() 触发的关闭不发合成错误', () => {
@@ -214,8 +212,6 @@ describe('GatewayWebSocketClient onclose terminal safety', () => {
     // The live socket's silent close still surfaces a terminal error.
     second.onclose?.();
     expect(handler).toHaveBeenCalledTimes(1);
-    expect(handler).toHaveBeenCalledWith(
-      expect.objectContaining({ code: 'WS_CLOSED' }),
-    );
+    expect(handler).toHaveBeenCalledWith(expect.objectContaining({ code: 'WS_CLOSED' }));
   });
 });

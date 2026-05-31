@@ -6,7 +6,11 @@
  */
 
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { createTeamWorkflowsClient, type TeamWorkflow, type TeamWorkflowWithDbId } from '@openAwork/web-client';
+import {
+  createTeamWorkflowsClient,
+  type TeamWorkflow,
+  type TeamWorkflowWithDbId,
+} from '@openAwork/web-client';
 import { useAuthStore } from '../../../../stores/auth/auth.js';
 
 const PANEL_STYLE: CSSProperties = {

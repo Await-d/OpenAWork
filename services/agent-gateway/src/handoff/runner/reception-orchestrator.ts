@@ -307,9 +307,8 @@ async function runReceptionOrchestrationBody(
   let effectiveContext = input.context ?? null;
   if (input.autoRunInit !== false) {
     try {
-      const { ensureTeamInitBeforeTask, buildInitContextFromState } = await import(
-        '../../team/init/team-init-autorun.js'
-      );
+      const { ensureTeamInitBeforeTask, buildInitContextFromState } =
+        await import('../../team/init/team-init-autorun.js');
       const { loadTeamInitSessionContext } = await import('../../team/init/team-init-store.js');
 
       // 预检：若有未完成、且存在待执行（proposed）步骤，先回一句「正在了解项目」让

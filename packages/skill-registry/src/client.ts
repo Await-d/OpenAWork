@@ -7,10 +7,7 @@ import type {
   SearchOptions,
   SkillEntry,
 } from './types.js';
-import {
-  fetchWithTimeout,
-  readResponseJsonWithLimit,
-} from './http.js';
+import { fetchWithTimeout, readResponseJsonWithLimit } from './http.js';
 
 export interface SkillRegistryClient {
   search(options?: SearchOptions): Promise<SkillEntry[]>;
@@ -222,9 +219,7 @@ export class SkillRegistryClientImpl implements SkillRegistryClient {
       throw new Error(`Search failed for source '${source.id}', HTTP ${response.status}`);
     }
 
-    const body = await readResponseJsonWithLimit<{ items?: SkillEntry[] } | SkillEntry[]>(
-      response,
-    );
+    const body = await readResponseJsonWithLimit<{ items?: SkillEntry[] } | SkillEntry[]>(response);
     const items = Array.isArray(body) ? body : (body.items ?? []);
     return items.map((item) => ({ ...item, sourceId: item.sourceId || source.id }));
   }

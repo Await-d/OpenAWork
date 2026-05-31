@@ -49,9 +49,10 @@ const PROMPT_SNIPPETS_ROUTE_ERROR_MESSAGES: Record<PromptSnippetsRouteErrorCode,
   prompt_snippet_not_found: '目标提示词不存在。',
 };
 
-function promptSnippetsRouteErrorPayload(
-  code: PromptSnippetsRouteErrorCode,
-): { code: PromptSnippetsRouteErrorCode; error: string } {
+function promptSnippetsRouteErrorPayload(code: PromptSnippetsRouteErrorCode): {
+  code: PromptSnippetsRouteErrorCode;
+  error: string;
+} {
   return {
     code,
     error: PROMPT_SNIPPETS_ROUTE_ERROR_MESSAGES[code],
@@ -267,9 +268,7 @@ export async function promptSnippetsRoutes(app: FastifyInstance): Promise<void> 
 
       if (!snippet) {
         step.fail('prompt_snippet_not_found');
-        return reply
-          .status(404)
-          .send(promptSnippetsRouteErrorPayload('prompt_snippet_not_found'));
+        return reply.status(404).send(promptSnippetsRouteErrorPayload('prompt_snippet_not_found'));
       }
 
       step.succeed(undefined, { snippetId });
@@ -288,9 +287,7 @@ export async function promptSnippetsRoutes(app: FastifyInstance): Promise<void> 
       const deleted = deleteSnippet(user.sub, snippetId);
       if (!deleted) {
         step.fail('prompt_snippet_not_found');
-        return reply
-          .status(404)
-          .send(promptSnippetsRouteErrorPayload('prompt_snippet_not_found'));
+        return reply.status(404).send(promptSnippetsRouteErrorPayload('prompt_snippet_not_found'));
       }
 
       step.succeed(undefined, { snippetId });

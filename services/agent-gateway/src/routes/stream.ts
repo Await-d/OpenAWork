@@ -2227,16 +2227,12 @@ export async function handleStreamRequest(input: {
             if (intersect.length > 0) allowedSets = intersect;
           }
           if (allowedSets.length > 0) {
-            layerFilteredTools = filterToolsByAllowedSets(
-              filteredTools,
-              allowedSets as never[],
-            );
+            layerFilteredTools = filterToolsByAllowedSets(filteredTools, allowedSets as never[]);
           } else {
             // fail-closed：层白名单异常为空时退回只读最小集，而不是「不过滤」放行全部。
-            layerFilteredTools = filterToolsByAllowedSets(
-              filteredTools,
-              [...READ_ONLY_FALLBACK] as never[],
-            );
+            layerFilteredTools = filterToolsByAllowedSets(filteredTools, [
+              ...READ_ONLY_FALLBACK,
+            ] as never[]);
           }
           // 2. 内置指令注入（每层专属 LLM-facing 函数工具）
           const layerInstructions = getInstructionsForLayer(layer);
@@ -2251,13 +2247,11 @@ export async function handleStreamRequest(input: {
             `[stream] layer-aware tool filter failed for ${sessionRoleLayer}（已 fail-closed 退回只读）：${err instanceof Error ? err.message : String(err)}`,
           );
           try {
-            const { filterToolsByAllowedSets } = await import(
-              '../handoff/capability/toolset-gate.js'
-            );
-            layerFilteredTools = filterToolsByAllowedSets(
-              filteredTools,
-              [...READ_ONLY_FALLBACK] as never[],
-            );
+            const { filterToolsByAllowedSets } =
+              await import('../handoff/capability/toolset-gate.js');
+            layerFilteredTools = filterToolsByAllowedSets(filteredTools, [
+              ...READ_ONLY_FALLBACK,
+            ] as never[]);
           } catch {
             // 连 toolset-gate 都加载不了：手动收敛到最保守集合（仅基础工具 + read 名）。
             const SAFE_NAMES = new Set([

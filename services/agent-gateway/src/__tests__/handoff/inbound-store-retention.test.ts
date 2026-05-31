@@ -97,8 +97,12 @@ describe('session_inbound_messages terminal-row retention', () => {
     }
 
     // old-1 / old-2 pruned; recent-1 + pending-old + 3 new pending survive = 5.
-    expect(dbModule.sqliteGet('SELECT id FROM session_inbound_messages WHERE id = ?', ['old-1'])).toBeUndefined();
-    expect(dbModule.sqliteGet('SELECT id FROM session_inbound_messages WHERE id = ?', ['old-2'])).toBeUndefined();
+    expect(
+      dbModule.sqliteGet('SELECT id FROM session_inbound_messages WHERE id = ?', ['old-1']),
+    ).toBeUndefined();
+    expect(
+      dbModule.sqliteGet('SELECT id FROM session_inbound_messages WHERE id = ?', ['old-2']),
+    ).toBeUndefined();
     expect(
       dbModule.sqliteGet('SELECT id FROM session_inbound_messages WHERE id = ?', ['recent-1']),
     ).not.toBeNull();

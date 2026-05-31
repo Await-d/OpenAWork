@@ -761,10 +761,7 @@ function extractTeamErrorMessage(data: TeamErrorData | undefined): string | null
   return null;
 }
 
-function buildTeamRuntimeErrorMessage(
-  status: number,
-  data: TeamErrorData | undefined,
-): string {
+function buildTeamRuntimeErrorMessage(status: number, data: TeamErrorData | undefined): string {
   const extracted = extractTeamErrorMessage(data);
   if (extracted) {
     return extracted;
@@ -896,7 +893,9 @@ function isGenericNetworkErrorMessage(message: string): boolean {
 
 function normalizeTeamActionError(actionLabel: string, error: unknown): Error {
   if (error instanceof HttpError) {
-    const extracted = extractTeamErrorMessage((error.data ?? undefined) as TeamErrorData | undefined);
+    const extracted = extractTeamErrorMessage(
+      (error.data ?? undefined) as TeamErrorData | undefined,
+    );
     if (extracted) {
       return new HttpError(extracted, error.status, error.data);
     }
@@ -928,11 +927,7 @@ async function performTeamRequest<T>(input: {
     if (!response.ok) {
       const data = await readJsonErrorData<TeamErrorData>(response);
       throw new HttpError(
-        buildTeamActionErrorMessage(
-          input.actionLabel,
-          response.status,
-          data,
-        ),
+        buildTeamActionErrorMessage(input.actionLabel, response.status, data),
         response.status,
         data,
       );
@@ -1045,10 +1040,13 @@ export function createTeamClient(baseUrl: string): TeamClient {
     sessionId: string,
   ): Promise<SharedSessionPresenceLoadResult> => {
     try {
-      const response = await fetchWithTimeout(`${baseUrl}/sessions/shared-with-me/${sessionId}/presence`, {
-        method: 'POST',
-        headers: buildAuthHeaders(token),
-      });
+      const response = await fetchWithTimeout(
+        `${baseUrl}/sessions/shared-with-me/${sessionId}/presence`,
+        {
+          method: 'POST',
+          headers: buildAuthHeaders(token),
+        },
+      );
       if (!response.ok) {
         const data = await readJsonErrorData<TeamErrorData>(response);
         return {
@@ -1083,9 +1081,12 @@ export function createTeamClient(baseUrl: string): TeamClient {
     }
     const suffix = params.toString();
     try {
-      const response = await fetchWithTimeout(`${baseUrl}/team/runtime${suffix ? `?${suffix}` : ''}`, {
-        headers: buildAuthHeaders(token),
-      });
+      const response = await fetchWithTimeout(
+        `${baseUrl}/team/runtime${suffix ? `?${suffix}` : ''}`,
+        {
+          headers: buildAuthHeaders(token),
+        },
+      );
       if (!response.ok) {
         const data = await readJsonErrorData<TeamErrorData>(response);
         return {
@@ -1221,14 +1222,17 @@ export function createTeamClient(baseUrl: string): TeamClient {
       return (await performTeamRequest<Session>({
         actionLabel: '创建团队线程',
         request: () =>
-          fetchWithTimeout(`${baseUrl}/team/workspaces/${encodeURIComponent(teamWorkspaceId)}/threads`, {
-            method: 'POST',
-            headers: {
-              ...buildAuthHeaders(token),
-              'Content-Type': 'application/json',
+          fetchWithTimeout(
+            `${baseUrl}/team/workspaces/${encodeURIComponent(teamWorkspaceId)}/threads`,
+            {
+              method: 'POST',
+              headers: {
+                ...buildAuthHeaders(token),
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(input),
             },
-            body: JSON.stringify(input),
-          }),
+          ),
       })) as Session;
     },
 
@@ -1240,14 +1244,17 @@ export function createTeamClient(baseUrl: string): TeamClient {
       return (await performTeamRequest<Session>({
         actionLabel: '创建团队会话',
         request: () =>
-          fetchWithTimeout(`${baseUrl}/team/workspaces/${encodeURIComponent(teamWorkspaceId)}/sessions`, {
-            method: 'POST',
-            headers: {
-              ...buildAuthHeaders(token),
-              'Content-Type': 'application/json',
+          fetchWithTimeout(
+            `${baseUrl}/team/workspaces/${encodeURIComponent(teamWorkspaceId)}/sessions`,
+            {
+              method: 'POST',
+              headers: {
+                ...buildAuthHeaders(token),
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(input),
             },
-            body: JSON.stringify(input),
-          }),
+          ),
       })) as Session;
     },
 
@@ -1259,14 +1266,17 @@ export function createTeamClient(baseUrl: string): TeamClient {
       return (await performTeamRequest<SessionImportResult>({
         actionLabel: '导入会话到团队工作区',
         request: () =>
-          fetchWithTimeout(`${baseUrl}/team/workspaces/${encodeURIComponent(teamWorkspaceId)}/imports`, {
-            method: 'POST',
-            headers: {
-              ...buildAuthHeaders(token),
-              'Content-Type': 'application/json',
+          fetchWithTimeout(
+            `${baseUrl}/team/workspaces/${encodeURIComponent(teamWorkspaceId)}/imports`,
+            {
+              method: 'POST',
+              headers: {
+                ...buildAuthHeaders(token),
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(input),
             },
-            body: JSON.stringify(input),
-          }),
+          ),
       })) as SessionImportResult;
     },
 

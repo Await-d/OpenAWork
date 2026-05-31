@@ -13,10 +13,7 @@
  */
 
 import { useState, type CSSProperties } from 'react';
-import {
-  createTeamHandoffsClient,
-  type HandoffReviewActionResult,
-} from '@openAwork/web-client';
+import { createTeamHandoffsClient, type HandoffReviewActionResult } from '@openAwork/web-client';
 import { useAuthStore } from '../../../../../stores/auth/auth.js';
 
 const INDICATOR_STYLE: CSSProperties = {

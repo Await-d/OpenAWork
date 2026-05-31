@@ -84,7 +84,8 @@ describe('parseAssignmentResponse', () => {
   });
 
   it('tolerates markdown code fences', () => {
-    const text = '```json\n{"assignments":[{"layer":"pm1","providerId":"p-strong","modelId":"strong-max"}]}\n```';
+    const text =
+      '```json\n{"assignments":[{"layer":"pm1","providerId":"p-strong","modelId":"strong-max"}]}\n```';
     const result = parseAssignmentResponse(text, POOL, [...layers]);
     expect(result).toEqual([{ layer: 'pm1', providerId: 'p-strong', modelId: 'strong-max' }]);
   });
@@ -195,7 +196,9 @@ describe('modelTierScore', () => {
     expect(score('claude-opus-4-8', 'Claude Opus 4.8')).toBeGreaterThan(
       score('claude-haiku-4', 'Claude Haiku 4'),
     );
-    expect(score('mimo-v2.5-pro', 'MiMo V2.5 Pro')).toBeGreaterThan(score('mimo-v2.5', 'MiMo V2.5'));
+    expect(score('mimo-v2.5-pro', 'MiMo V2.5 Pro')).toBeGreaterThan(
+      score('mimo-v2.5', 'MiMo V2.5'),
+    );
     expect(score('gpt-5.5', 'GPT-5.5')).toBeGreaterThan(score('gpt-5-mini', 'GPT-5 Mini'));
   });
 
@@ -221,8 +224,19 @@ describe('pickAnalysisModels', () => {
   it('returns one model per provider, strongest first', () => {
     const multiPool: AssignModelCandidate[] = [
       { providerId: 'mimo', modelId: 'mimo-v2.5', supportsTools: true, contextWindow: 100000 },
-      { providerId: 'mimo', modelId: 'mimo-v2.5-pro', supportsThinking: true, contextWindow: 100000 },
-      { providerId: 'openai', modelId: 'gpt', supportsTools: true, supportsThinking: true, contextWindow: 1000000 },
+      {
+        providerId: 'mimo',
+        modelId: 'mimo-v2.5-pro',
+        supportsThinking: true,
+        contextWindow: 100000,
+      },
+      {
+        providerId: 'openai',
+        modelId: 'gpt',
+        supportsTools: true,
+        supportsThinking: true,
+        contextWindow: 1000000,
+      },
     ];
     const out = pickAnalysisModels(multiPool);
     // distinct providers only
@@ -237,8 +251,20 @@ describe('pickAnalysisModels', () => {
 
   it('within a provider, prefers the flagship (pro) over the base model', () => {
     const pool: AssignModelCandidate[] = [
-      { providerId: 'mimo', modelId: 'mimo-v2.5', supportsTools: true, supportsThinking: true, contextWindow: 1000000 },
-      { providerId: 'mimo', modelId: 'mimo-v2.5-pro', supportsTools: true, supportsThinking: true, contextWindow: 1000000 },
+      {
+        providerId: 'mimo',
+        modelId: 'mimo-v2.5',
+        supportsTools: true,
+        supportsThinking: true,
+        contextWindow: 1000000,
+      },
+      {
+        providerId: 'mimo',
+        modelId: 'mimo-v2.5-pro',
+        supportsTools: true,
+        supportsThinking: true,
+        contextWindow: 1000000,
+      },
     ];
     const out = pickAnalysisModels(pool);
     expect(out).toHaveLength(1);

@@ -51,9 +51,7 @@ describe('buildWorkspaceContext context-file size bound', () => {
     // Small README.md within the cap.
     writeFileSync(join(tempDir, 'README.md'), '# Hello small readme', 'utf8');
 
-    const context = await buildWorkspaceContext(
-      JSON.stringify({ workingDirectory: tempDir }),
-    );
+    const context = await buildWorkspaceContext(JSON.stringify({ workingDirectory: tempDir }));
 
     expect(context).not.toBeNull();
     // The oversized AGENTS.md must NOT be injected.
@@ -67,9 +65,7 @@ describe('buildWorkspaceContext context-file size bound', () => {
     process.env['OPENAWORK_CONTEXT_FILE_MAX_BYTES'] = '1048576';
     writeFileSync(join(tempDir, 'AGENTS.md'), '# Project agent guide', 'utf8');
 
-    const context = await buildWorkspaceContext(
-      JSON.stringify({ workingDirectory: tempDir }),
-    );
+    const context = await buildWorkspaceContext(JSON.stringify({ workingDirectory: tempDir }));
 
     expect(context).toContain('directory_agents');
     expect(context).toContain('Project agent guide');

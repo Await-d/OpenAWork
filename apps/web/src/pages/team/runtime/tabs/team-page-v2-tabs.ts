@@ -106,4 +106,3 @@ export function getDefaultLeafFor(primaryKey: PrimaryTabKey): MiddleTabKey {
   }
   return first.key;
 }
-

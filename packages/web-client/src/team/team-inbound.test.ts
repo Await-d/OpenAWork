@@ -62,9 +62,9 @@ describe('createTeamInboundClient', () => {
 
     const client = createTeamInboundClient('http://localhost:3000');
 
-    await expect(
-      client.dismissClarification('token-1', 'session-1', 'question-1'),
-    ).rejects.toThrow('网络异常，忽略澄清问题失败。');
+    await expect(client.dismissClarification('token-1', 'session-1', 'question-1')).rejects.toThrow(
+      '网络异常，忽略澄清问题失败。',
+    );
   });
 
   it('submit 会读取 ApiErrorResponse.data.message', async () => {

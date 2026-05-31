@@ -405,7 +405,10 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
       const candidateConfigs: ResolvedAuxiliaryLlmConfig[] = [];
       for (const m of analysisModels) {
         const cfg = await resolveAuxiliaryLlmConfig(user.sub, m);
-        if (cfg && !candidateConfigs.some((c) => c.apiBaseUrl === cfg.apiBaseUrl && c.model === cfg.model)) {
+        if (
+          cfg &&
+          !candidateConfigs.some((c) => c.apiBaseUrl === cfg.apiBaseUrl && c.model === cfg.model)
+        ) {
           candidateConfigs.push(cfg);
         }
       }
@@ -503,9 +506,7 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
                 defaultProvider: z.string().nullable().optional(),
                 memberSlots: z.array(teamTemplateMemberSlotSchema).max(40).optional(),
                 modelPool: z.array(teamTemplateModelRefSchema).max(60).optional(),
-                modelAssignStrategy: z
-                  .enum(['quality', 'cost', 'balanced', 'single'])
-                  .optional(),
+                modelAssignStrategy: z.enum(['quality', 'cost', 'balanced', 'single']).optional(),
                 optionalAgentIds: z.array(z.string().min(1)).optional(),
                 requiredRoles: z
                   .array(z.enum(['leader', 'planner', 'researcher', 'executor', 'reviewer']))

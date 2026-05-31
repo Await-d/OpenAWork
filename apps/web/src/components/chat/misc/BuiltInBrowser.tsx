@@ -1170,7 +1170,8 @@ export function BuiltInBrowser({
                   padding: '6px 10px',
                   borderRadius: 6,
                   background: 'color-mix(in oklch, var(--bg-overlay) 95%, var(--warning) 5%)',
-                  border: '1px solid color-mix(in oklch, var(--warning) 30%, var(--border-default))',
+                  border:
+                    '1px solid color-mix(in oklch, var(--warning) 30%, var(--border-default))',
                   fontSize: 10,
                   color: 'var(--fg-default)',
                   pointerEvents: 'none',

@@ -107,7 +107,9 @@ describe('team-audit-store 保留裁剪', () => {
     logRouteDecision(USER_B, 1);
 
     expect(countAuditRows(USER_B)).toBe(2);
-    expect(countAuditRows(USER_A)).toBeLessThanOrEqual(3 + auditStore.TEAM_AUDIT_PRUNE_CHECK_INTERVAL);
+    expect(countAuditRows(USER_A)).toBeLessThanOrEqual(
+      3 + auditStore.TEAM_AUDIT_PRUNE_CHECK_INTERVAL,
+    );
   });
 
   it('保留上限设为非正数时关闭裁剪（行数随插入线性增长）', () => {

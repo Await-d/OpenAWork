@@ -49,9 +49,7 @@ import {
   resolveMemberModelForHandoff,
   resolveMemberSystemPrompt,
 } from '../bus/resolve-member-model.js';
-import {
-  reconcilePm2QualityReview,
-} from './pm2-quality-review-reconciler.js';
+import { reconcilePm2QualityReview } from './pm2-quality-review-reconciler.js';
 
 const DEFAULT_WATCHER_INTERVAL_MS = 100;
 const DEFAULT_RECOVERY_INTERVAL_MS = 5_000;
@@ -122,7 +120,10 @@ export class HandoffWatcher {
       // gateway. Direct callers (tests / manual triggers) still observe the
       // rejection normally.
       this.tickOnce().catch((err: unknown) => {
-        console.error('[watcher] tickOnce failed', err instanceof Error ? err.message : String(err));
+        console.error(
+          '[watcher] tickOnce failed',
+          err instanceof Error ? err.message : String(err),
+        );
       });
     }, this.options.watcherIntervalMs);
     // unref 让 watcher 不阻挡进程退出（生产 gateway 进程退出时不需要 watcher 强制 keep-alive）
@@ -240,7 +241,10 @@ export class HandoffWatcher {
               ? { currentPersonaKey: assignedPersonaKey }
               : {}),
           });
-          childMetadataJson = mergeTeamRosterManifestIntoMetadata(childMetadataJson, rosterManifest);
+          childMetadataJson = mergeTeamRosterManifestIntoMetadata(
+            childMetadataJson,
+            rosterManifest,
+          );
           const { sessionId: toSessionId } = createTeamSession({
             userId: record.userId,
             roleLayer: record.toRoleLayer,
@@ -451,10 +455,7 @@ export class HandoffWatcher {
         // stale cutoff, while a real crash stops the pump (interval dies with the
         // process) and recovery still fires after the full stale window.
         touchSessionHeartbeat(input.toSessionId);
-        const heartbeatPumpMs = Math.max(
-          1_000,
-          Math.floor(this.options.heartbeatStaleAfterMs / 3),
-        );
+        const heartbeatPumpMs = Math.max(1_000, Math.floor(this.options.heartbeatStaleAfterMs / 3));
         const heartbeatPump = setInterval(() => {
           try {
             touchSessionHeartbeat(input.toSessionId);

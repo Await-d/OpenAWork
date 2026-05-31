@@ -20,7 +20,9 @@ describe('createSkillsClient', () => {
     }) as typeof fetch;
 
     const client = createSkillsClient('http://localhost:3000');
-    const result = (await client.search('token-1', { q: 'git' })) as { items?: Array<{ id: string }> };
+    const result = (await client.search('token-1', { q: 'git' })) as {
+      items?: Array<{ id: string }>;
+    };
 
     expect(result.items?.[0]?.id).toBe('skill-1');
   });

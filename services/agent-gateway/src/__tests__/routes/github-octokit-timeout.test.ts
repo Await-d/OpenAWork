@@ -1,8 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-  createGitHubTimeoutFetch,
-  GITHUB_API_TIMEOUT_MS,
-} from '../../github/router.js';
+import { createGitHubTimeoutFetch, GITHUB_API_TIMEOUT_MS } from '../../github/router.js';
 
 /**
  * §0.154: the GitHub write-back path builds two Octokit v22 (native-fetch)

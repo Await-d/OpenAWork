@@ -61,7 +61,12 @@ function seedTask(taskId: string, userId: string): void {
   );
 }
 
-function seedSessionShare(shareId: string, userId: string, sessionId: string, memberId: string): void {
+function seedSessionShare(
+  shareId: string,
+  userId: string,
+  sessionId: string,
+  memberId: string,
+): void {
   dbModule.sqliteRun(
     `INSERT INTO session_shares (id, user_id, session_id, member_id, permission, created_at, updated_at)
      VALUES (?, ?, ?, ?, 'view', datetime('now'), datetime('now'))`,

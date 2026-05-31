@@ -39,11 +39,10 @@ function parseSessionWorkingDirectory(
 }
 
 export function useWorkspace(sessionId: string | null) {
-  const [workingDirectoryState, setWorkingDirectoryState] =
-    useState<SessionWorkingDirectoryState>({
-      path: null,
-      sessionId: null,
-    });
+  const [workingDirectoryState, setWorkingDirectoryState] = useState<SessionWorkingDirectoryState>({
+    path: null,
+    sessionId: null,
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);

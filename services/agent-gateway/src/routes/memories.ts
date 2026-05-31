@@ -53,7 +53,9 @@ function memoriesRouteErrorPayload(
   };
 }
 
-function readWorkspaceRootFromSessionMetadata(metadataJson: string | null | undefined): string | null {
+function readWorkspaceRootFromSessionMetadata(
+  metadataJson: string | null | undefined,
+): string | null {
   if (!metadataJson) {
     return null;
   }
@@ -99,16 +101,14 @@ export async function memoriesRoutes(app: FastifyInstance): Promise<void> {
         const scan = scanMemoryWriteContent(content);
         if (!scan.ok) {
           step.fail('memory_write_blocked');
-          return reply
-            .status(400)
-            .send(
-              memoriesRouteErrorPayload('memory_write_blocked', {
-                field,
-                threat: scan.threat,
-                reason: scan.reason,
-                sample: scan.sample,
-              }),
-            );
+          return reply.status(400).send(
+            memoriesRouteErrorPayload('memory_write_blocked', {
+              field,
+              threat: scan.threat,
+              reason: scan.reason,
+              sample: scan.sample,
+            }),
+          );
         }
       }
 
@@ -169,16 +169,14 @@ export async function memoriesRoutes(app: FastifyInstance): Promise<void> {
         const scan = scanMemoryWriteContent(content);
         if (!scan.ok) {
           step.fail('memory_write_blocked');
-          return reply
-            .status(400)
-            .send(
-              memoriesRouteErrorPayload('memory_write_blocked', {
-                field,
-                threat: scan.threat,
-                reason: scan.reason,
-                sample: scan.sample,
-              }),
-            );
+          return reply.status(400).send(
+            memoriesRouteErrorPayload('memory_write_blocked', {
+              field,
+              threat: scan.threat,
+              reason: scan.reason,
+              sample: scan.sample,
+            }),
+          );
         }
       }
 

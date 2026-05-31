@@ -30,10 +30,10 @@ beforeAll(async () => {
   stack = await import('../../team/team-instruction-stack.js');
   await dbModule.connectDb();
   await dbModule.migrate();
-  dbModule.sqliteRun(
-    "INSERT OR IGNORE INTO users (id, email, password_hash) VALUES (?, ?, 'x')",
-    [USER_ID, `${USER_ID}@example.com`],
-  );
+  dbModule.sqliteRun("INSERT OR IGNORE INTO users (id, email, password_hash) VALUES (?, ?, 'x')", [
+    USER_ID,
+    `${USER_ID}@example.com`,
+  ]);
 });
 
 afterAll(async () => {
@@ -56,11 +56,7 @@ describe('buildTeamInstructionStack 指令栈文件内存上限', () => {
     // architecture.md is well over the 128-byte cap → must be skipped.
     writeFileSync(join(workspaceRoot, 'architecture.md'), 'A'.repeat(50_000), 'utf8');
     // project-memory.md is tiny → must still be injected.
-    writeFileSync(
-      join(workspaceRoot, '.agentdocs', 'project-memory.md'),
-      '小巧的项目记忆',
-      'utf8',
-    );
+    writeFileSync(join(workspaceRoot, '.agentdocs', 'project-memory.md'), '小巧的项目记忆', 'utf8');
 
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const result = await stack.buildTeamInstructionStack({
@@ -74,9 +70,7 @@ describe('buildTeamInstructionStack 指令栈文件内存上限', () => {
     expect(result.layers.projectMemory).toBe(true);
     expect(result.stableBlock).not.toContain('AAAA');
     expect(result.stableBlock).toContain('小巧的项目记忆');
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining('跳过超限的指令栈文件'),
-    );
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('跳过超限的指令栈文件'));
     warn.mockRestore();
   });
 

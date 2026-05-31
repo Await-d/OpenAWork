@@ -341,7 +341,9 @@ function renderStepPreview(step: TeamInitStep): ReactNode {
               ) : null}
               <div style={{ display: 'grid', gap: 4 }}>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
-                  <span style={{ fontSize: 10, color: 'var(--fg-muted)', minWidth: 34 }}>skill</span>
+                  <span style={{ fontSize: 10, color: 'var(--fg-muted)', minWidth: 34 }}>
+                    skill
+                  </span>
                   <ChipRow items={binding.skillIds} emptyLabel="无" />
                 </div>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
@@ -435,7 +437,11 @@ function StepRow({
           <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
             <button
               type="button"
-              style={{ ...BTN_STYLE, opacity: isBusy ? 0.5 : 1, cursor: isBusy ? 'not-allowed' : 'pointer' }}
+              style={{
+                ...BTN_STYLE,
+                opacity: isBusy ? 0.5 : 1,
+                cursor: isBusy ? 'not-allowed' : 'pointer',
+              }}
               disabled={isBusy}
               onClick={onConfirm}
             >
@@ -477,7 +483,13 @@ function StepRow({
               onClick={() => setExpanded((v) => !v)}
               aria-expanded={expanded}
             >
-              <span aria-hidden style={{ transition: 'transform 150ms', transform: expanded ? 'rotate(90deg)' : 'none' }}>
+              <span
+                aria-hidden
+                style={{
+                  transition: 'transform 150ms',
+                  transform: expanded ? 'rotate(90deg)' : 'none',
+                }}
+              >
                 ▸
               </span>
               {expanded ? '收起预览' : '查看预览'}
@@ -486,7 +498,9 @@ function StepRow({
         </div>
       ) : null}
 
-      {expanded && hasPreview ? <div style={PREVIEW_PANEL_STYLE}>{renderStepPreview(step)}</div> : null}
+      {expanded && hasPreview ? (
+        <div style={PREVIEW_PANEL_STYLE}>{renderStepPreview(step)}</div>
+      ) : null}
     </div>
   );
 }
@@ -545,7 +559,11 @@ export function TeamInitChecklistBody({ checklist }: { checklist: TeamInitCheckl
           {hasPending ? (
             <button
               type="button"
-              style={{ ...BTN_STYLE, opacity: busy ? 0.5 : 1, cursor: busy ? 'not-allowed' : 'pointer' }}
+              style={{
+                ...BTN_STYLE,
+                opacity: busy ? 0.5 : 1,
+                cursor: busy ? 'not-allowed' : 'pointer',
+              }}
               disabled={busy}
               onClick={() => void checklist.confirmAllPending()}
             >
@@ -554,7 +572,11 @@ export function TeamInitChecklistBody({ checklist }: { checklist: TeamInitCheckl
           ) : null}
           <button
             type="button"
-            style={{ ...GHOST_BTN_STYLE, opacity: busy ? 0.5 : 1, cursor: busy ? 'not-allowed' : 'pointer' }}
+            style={{
+              ...GHOST_BTN_STYLE,
+              opacity: busy ? 0.5 : 1,
+              cursor: busy ? 'not-allowed' : 'pointer',
+            }}
             disabled={busy}
             onClick={() => void checklist.skipAll()}
           >
@@ -564,7 +586,13 @@ export function TeamInitChecklistBody({ checklist }: { checklist: TeamInitCheckl
       </div>
 
       {/* 进度条 */}
-      <div style={PROGRESS_TRACK_STYLE} role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+      <div
+        style={PROGRESS_TRACK_STYLE}
+        role="progressbar"
+        aria-valuenow={pct}
+        aria-valuemin={0}
+        aria-valuemax={100}
+      >
         <div
           style={{
             height: '100%',

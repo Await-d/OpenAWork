@@ -101,7 +101,9 @@ function buildRanges(pool: ModelCandidate[]): {
   const ctxValues = pool
     .map((m) => m.contextWindow)
     .filter((v): v is number => typeof v === 'number');
-  const priceValues = pool.map((m) => ((m.inputPricePerMillion ?? 0) + (m.outputPricePerMillion ?? 0)) / 2);
+  const priceValues = pool.map(
+    (m) => ((m.inputPricePerMillion ?? 0) + (m.outputPricePerMillion ?? 0)) / 2,
+  );
   return {
     ctxRange: {
       min: ctxValues.length ? Math.min(...ctxValues) : 0,
@@ -142,7 +144,7 @@ export function pickModelForLayer(
         break;
       case 'cost':
         // 价格优先：低价高分；能力作为极小权重打破平局
-        score = (1 - price) + cap * 0.05;
+        score = 1 - price + cap * 0.05;
         break;
       case 'balanced':
       default:
@@ -162,7 +164,8 @@ export function pickCheapest(pool: ModelCandidate[]): ModelCandidate | null {
   if (pool.length === 0) return null;
   return [...pool].sort(
     (a, b) =>
-      (a.inputPricePerMillion ?? 0) + (a.outputPricePerMillion ?? 0) -
+      (a.inputPricePerMillion ?? 0) +
+      (a.outputPricePerMillion ?? 0) -
       ((b.inputPricePerMillion ?? 0) + (b.outputPricePerMillion ?? 0)),
   )[0]!;
 }
@@ -276,7 +279,8 @@ export function clearAllModels(roster: FixedTeamMemberSlot[]): FixedTeamMemberSl
 
 /** 统计花名册中已分配模型的槽位数。 */
 export function countAssignedModels(roster: FixedTeamMemberSlot[]): number {
-  return roster.filter((slot) => typeof slot.modelId === 'string' && slot.modelId.length > 0).length;
+  return roster.filter((slot) => typeof slot.modelId === 'string' && slot.modelId.length > 0)
+    .length;
 }
 
 export const MODEL_STRATEGY_OPTIONS: Array<{

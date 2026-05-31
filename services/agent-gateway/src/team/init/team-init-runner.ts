@@ -130,9 +130,7 @@ async function execExtractProjectMemory(
     }
   }
   const digest =
-    found.length > 0
-      ? found.map((f) => `### ${f.label}\n${f.excerpt}`).join('\n\n')
-      : null;
+    found.length > 0 ? found.map((f) => `### ${f.label}\n${f.excerpt}`).join('\n\n') : null;
   return {
     result: {
       sources: found.map((f) => ({ label: f.label, chars: f.chars })),
@@ -212,9 +210,7 @@ async function execUnderstandArchitecture(
  * 这里走保守策略——把可用 skill / mcp 绑定到执行层（executor）与规划层（pm1/pm2），
  * 让链路一开始就带着工具。后续用户可在治理面板细调。
  */
-async function execBindToolsPerLayer(
-  ctx: TeamInitSessionContext,
-): Promise<{
+async function execBindToolsPerLayer(ctx: TeamInitSessionContext): Promise<{
   result: Record<string, unknown>;
   perLayer: Partial<Record<TeamRuntimeLayer, TeamInitLayerBinding>>;
 }> {
@@ -470,9 +466,7 @@ export async function runTeamInitStep(input: {
     );
     const nextBindings = {
       ...fresh.teamInit.bindings,
-      ...(perLayer
-        ? { perLayer: { ...fresh.teamInit.bindings.perLayer, ...perLayer } }
-        : {}),
+      ...(perLayer ? { perLayer: { ...fresh.teamInit.bindings.perLayer, ...perLayer } } : {}),
       ...(architectureSummary !== undefined ? { architectureSummary } : {}),
       ...(projectMemoryDigest !== undefined ? { projectMemoryDigest } : {}),
     };

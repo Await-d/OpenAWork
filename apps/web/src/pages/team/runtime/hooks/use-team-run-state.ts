@@ -23,13 +23,7 @@ import {
   useTeamNotificationStore,
 } from '../../../../stores/team/team-events.js';
 
-export type TeamRunPhase =
-  | 'idle'
-  | 'working'
-  | 'stalled'
-  | 'failed'
-  | 'completed'
-  | 'disconnected';
+export type TeamRunPhase = 'idle' | 'working' | 'stalled' | 'failed' | 'completed' | 'disconnected';
 
 export interface TeamRunState {
   phase: TeamRunPhase;
@@ -86,16 +80,14 @@ export function useTeamRunState(): TeamRunState {
 
     // 最近活跃 handoff 的目标层（用于「正在 X 层工作」提示）。
     const activeLayer =
-      activeEntries
-        .slice()
-        .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0]?.toRoleLayer ?? null;
+      activeEntries.slice().sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0]
+        ?.toRoleLayer ?? null;
 
     let phase: TeamRunPhase;
     if (connectionState === 'offline' || connectionState === 'stopped') {
       phase = 'disconnected';
     } else if (activeEntries.length > 0) {
-      const stalled =
-        lastActivityAgoMs !== null && lastActivityAgoMs > STALL_THRESHOLD_MS;
+      const stalled = lastActivityAgoMs !== null && lastActivityAgoMs > STALL_THRESHOLD_MS;
       phase = stalled ? 'stalled' : 'working';
     } else if (failedCount > 0 && completedCount === 0) {
       // 有失败且没有任何完成 → 整体失败态需要用户关注。

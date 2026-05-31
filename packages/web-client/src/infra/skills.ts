@@ -93,7 +93,9 @@ function buildSkillsActionErrorMessage(
 
 function normalizeSkillsError(actionLabel: string, error: unknown): Error {
   if (error instanceof HttpError) {
-    const extracted = extractJsonErrorMessage((error.data ?? undefined) as JsonErrorData | undefined);
+    const extracted = extractJsonErrorMessage(
+      (error.data ?? undefined) as JsonErrorData | undefined,
+    );
     if (extracted) {
       return new HttpError(extracted, error.status, error.data);
     }
@@ -413,12 +415,15 @@ export function createSkillsClient(baseUrl: string): SkillsClient {
       return performSkillsRequest<unknown>({
         actionLabel: '应用技能推荐',
         request: () =>
-          fetchWithTimeout(`${baseUrl}/skills/recommend/${encodeURIComponent(recommendationId)}/apply`, {
-            timeoutMs: 120_000,
-            method: 'POST',
-            headers: jsonAuthHeaders(token),
-            body: payload !== undefined ? JSON.stringify(payload) : undefined,
-          }),
+          fetchWithTimeout(
+            `${baseUrl}/skills/recommend/${encodeURIComponent(recommendationId)}/apply`,
+            {
+              timeoutMs: 120_000,
+              method: 'POST',
+              headers: jsonAuthHeaders(token),
+              body: payload !== undefined ? JSON.stringify(payload) : undefined,
+            },
+          ),
       });
     },
   };

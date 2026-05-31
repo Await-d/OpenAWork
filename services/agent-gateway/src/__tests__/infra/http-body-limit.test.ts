@@ -34,10 +34,7 @@ function streamFromChunks(chunks: Uint8Array[]): ReadableStream<Uint8Array> {
   });
 }
 
-function fakeResponse(input: {
-  body: Uint8Array[];
-  contentLength?: number;
-}): Response {
+function fakeResponse(input: { body: Uint8Array[]; contentLength?: number }): Response {
   const headers = new Headers();
   if (input.contentLength !== undefined) {
     headers.set('content-length', String(input.contentLength));
@@ -121,9 +118,7 @@ describe('readResponseJsonWithLimit', () => {
     // No content-length; stream past the 1024-byte cap.
     const chunk = new Uint8Array(600);
     const res = fakeResponse({ body: [chunk, chunk] });
-    await expect(readResponseJsonWithLimit(res, 1024)).rejects.toThrow(
-      /response body too large/,
-    );
+    await expect(readResponseJsonWithLimit(res, 1024)).rejects.toThrow(/response body too large/);
   });
 
   it('已限界但内容非法 JSON 时抛出 SyntaxError', async () => {

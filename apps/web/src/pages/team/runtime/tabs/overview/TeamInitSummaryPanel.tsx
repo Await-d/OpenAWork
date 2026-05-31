@@ -95,12 +95,18 @@ function ChipRow({ items, emptyLabel }: { items: string[]; emptyLabel: string })
   );
 }
 
-function findStepResult(steps: TeamInitStep[], key: TeamInitStep['key']): Record<string, unknown> | null {
+function findStepResult(
+  steps: TeamInitStep[],
+  key: TeamInitStep['key'],
+): Record<string, unknown> | null {
   const step = steps.find((s) => s.key === key);
   return (step?.result as Record<string, unknown> | undefined) ?? null;
 }
 
-export function TeamInitSummaryPanel({ sessionId, variant = 'compact' }: TeamInitSummaryPanelProps) {
+export function TeamInitSummaryPanel({
+  sessionId,
+  variant = 'compact',
+}: TeamInitSummaryPanelProps) {
   const accessToken = useAuthStore((s) => s.accessToken);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
   const client = useMemo(() => createTeamClient(gatewayUrl), [gatewayUrl]);
@@ -180,12 +186,11 @@ export function TeamInitSummaryPanel({ sessionId, variant = 'compact' }: TeamIni
   ).length;
 
   const level1 = teamInit ? findStepResult(teamInit.steps, 'read-project-level1') : null;
-  const memoryExcerpts =
-    teamInit
-      ? ((findStepResult(teamInit.steps, 'extract-project-memory')?.['excerpts'] as
-          | Array<{ label: string; excerpt: string }>
-          | undefined) ?? [])
-      : [];
+  const memoryExcerpts = teamInit
+    ? ((findStepResult(teamInit.steps, 'extract-project-memory')?.['excerpts'] as
+        | Array<{ label: string; excerpt: string }>
+        | undefined) ?? [])
+    : [];
   const bindResult = teamInit ? findStepResult(teamInit.steps, 'bind-tools-per-layer') : null;
   const perLayer =
     (bindResult?.['perLayer'] as
@@ -205,7 +210,10 @@ export function TeamInitSummaryPanel({ sessionId, variant = 'compact' }: TeamIni
     );
   }
 
-  if (level1 && ((level1['directories'] as string[])?.length || (level1['files'] as string[])?.length)) {
+  if (
+    level1 &&
+    ((level1['directories'] as string[])?.length || (level1['files'] as string[])?.length)
+  ) {
     sections.push(
       <div key="level1">
         <div style={SECTION_LABEL_STYLE}>项目一级结构</div>
@@ -227,7 +235,9 @@ export function TeamInitSummaryPanel({ sessionId, variant = 'compact' }: TeamIni
         <div style={{ ...SUBBLOCK_STYLE, display: 'grid', gap: 8 }}>
           {memoryExcerpts.map((ex) => (
             <div key={ex.label}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent)', marginBottom: 2 }}>
+              <div
+                style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent)', marginBottom: 2 }}
+              >
                 {ex.label}
               </div>
               <div style={{ color: 'var(--fg-strong)' }}>
@@ -248,7 +258,9 @@ export function TeamInitSummaryPanel({ sessionId, variant = 'compact' }: TeamIni
         <div style={{ ...SUBBLOCK_STYLE, display: 'grid', gap: 10 }}>
           {layerEntries.map(([layer, binding]) => (
             <div key={layer}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--fg-strong)' }}>{layer}</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--fg-strong)' }}>
+                {layer}
+              </div>
               {binding.rationale ? (
                 <div style={{ fontSize: 10, color: 'var(--fg-muted)', margin: '2px 0 4px' }}>
                   {binding.rationale}
@@ -256,7 +268,9 @@ export function TeamInitSummaryPanel({ sessionId, variant = 'compact' }: TeamIni
               ) : null}
               <div style={{ display: 'grid', gap: 4 }}>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
-                  <span style={{ fontSize: 10, color: 'var(--fg-muted)', minWidth: 34 }}>skill</span>
+                  <span style={{ fontSize: 10, color: 'var(--fg-muted)', minWidth: 34 }}>
+                    skill
+                  </span>
                   <ChipRow items={binding.skillIds} emptyLabel="无" />
                 </div>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
@@ -314,9 +328,7 @@ export function TeamInitSummaryPanel({ sessionId, variant = 'compact' }: TeamIni
             ) : null}
           </>
         ) : null}
-        {loading ? (
-          <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>加载中…</span>
-        ) : null}
+        {loading ? <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>加载中…</span> : null}
       </div>
 
       {/* 步骤状态一览 */}
@@ -347,9 +359,7 @@ export function TeamInitSummaryPanel({ sessionId, variant = 'compact' }: TeamIni
         <div style={{ display: 'grid', gap: 10 }}>{sections}</div>
       ) : (
         <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
-          {teamInit
-            ? '初始化尚未产出可展示的成果（步骤未执行或已跳过）。'
-            : ''}
+          {teamInit ? '初始化尚未产出可展示的成果（步骤未执行或已跳过）。' : ''}
         </div>
       )}
     </div>

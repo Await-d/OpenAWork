@@ -216,8 +216,8 @@ describe('ssh dialog routes', () => {
       lastOpenedAt: 1700000000000,
     };
     const fake = buildFakeService({ connections: [] });
-    (fake as unknown as { getLastOpenedDialog: () => typeof lastDialog }).getLastOpenedDialog = () =>
-      lastDialog;
+    (fake as unknown as { getLastOpenedDialog: () => typeof lastDialog }).getLastOpenedDialog =
+      () => lastDialog;
     sshServiceModule.__resetSshServiceForTests(fake);
 
     const app = await buildApp();
@@ -251,9 +251,11 @@ describe('ssh dialog routes', () => {
   it('POST /ssh/dialogs/touch 把面板状态写回 service', async () => {
     let captured: unknown = null;
     const fake = buildFakeService({ connections: [] });
-    (fake as unknown as {
-      upsertDialog: (input: unknown) => unknown;
-    }).upsertDialog = (input: unknown) => {
+    (
+      fake as unknown as {
+        upsertDialog: (input: unknown) => unknown;
+      }
+    ).upsertDialog = (input: unknown) => {
       captured = input;
       return {
         id: 'd-1',
@@ -338,9 +340,11 @@ describe('ssh dialog routes', () => {
   it('POST /ssh/bindings/unbind 调用 service.unbindSession 并返回 ok', async () => {
     let captured: { userId?: string; sessionId?: string } = {};
     const fake = buildFakeService({ connections: [] });
-    (fake as unknown as {
-      unbindSession: (userId: string, sessionId: string) => void;
-    }).unbindSession = (userId: string, sessionId: string) => {
+    (
+      fake as unknown as {
+        unbindSession: (userId: string, sessionId: string) => void;
+      }
+    ).unbindSession = (userId: string, sessionId: string) => {
       captured = { userId, sessionId };
     };
     sshServiceModule.__resetSshServiceForTests(fake);
@@ -364,9 +368,11 @@ describe('ssh dialog routes', () => {
 
   it('PATCH /ssh/connections/:id 不存在时返回 404', async () => {
     const fake = buildFakeService({ connections: [] });
-    (fake as unknown as {
-      updateConnection: () => null;
-    }).updateConnection = () => null;
+    (
+      fake as unknown as {
+        updateConnection: () => null;
+      }
+    ).updateConnection = () => null;
     sshServiceModule.__resetSshServiceForTests(fake);
 
     const app = await buildApp();

@@ -113,8 +113,7 @@ export function getTeamRuntimeIncidentCodeSummary(input?: {
       ? bucket.filter((incident) => incident.timestamp >= sinceMs)
       : bucket;
   const limit = input?.limit;
-  const sliced =
-    typeof limit === 'number' && limit > 0 ? filtered.slice(-limit) : filtered;
+  const sliced = typeof limit === 'number' && limit > 0 ? filtered.slice(-limit) : filtered;
 
   return sliced.reduce<Record<string, number>>((acc, incident) => {
     acc[incident.code] = (acc[incident.code] ?? 0) + 1;

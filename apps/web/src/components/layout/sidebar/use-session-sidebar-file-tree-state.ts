@@ -6,7 +6,10 @@ const SESSION_SIDEBAR_FILE_TREE_RETRY_MAX_MS = 30_000;
 
 function computeRetryDelay(attempt: number): number {
   const safeAttempt = Math.max(0, attempt);
-  return Math.min(SESSION_SIDEBAR_FILE_TREE_RETRY_BASE_MS * 2 ** safeAttempt, SESSION_SIDEBAR_FILE_TREE_RETRY_MAX_MS);
+  return Math.min(
+    SESSION_SIDEBAR_FILE_TREE_RETRY_BASE_MS * 2 ** safeAttempt,
+    SESSION_SIDEBAR_FILE_TREE_RETRY_MAX_MS,
+  );
 }
 
 type RetryAction =
@@ -49,10 +52,7 @@ interface UseSessionSidebarFileTreeStateOptions {
 }
 
 interface UseSessionSidebarFileTreeStateResult {
-  applyCreatedEntry: (input: {
-    directoryPath: string;
-    entry: FileTreeNode;
-  }) => void;
+  applyCreatedEntry: (input: { directoryPath: string; entry: FileTreeNode }) => void;
   applyDeletedEntry: (path: string) => void;
   applyRenamedEntry: (input: { newName: string; newPath: string; oldPath: string }) => void;
   ensureRootPath: () => Promise<string | null>;
@@ -106,7 +106,8 @@ export function removeSessionSidebarFileTreeNode(
 }
 
 function remapNodePath(node: FileTreeNode, oldPath: string, newPath: string): FileTreeNode {
-  const nextPath = node.path === oldPath ? newPath : node.path.replace(`${oldPath}/`, `${newPath}/`);
+  const nextPath =
+    node.path === oldPath ? newPath : node.path.replace(`${oldPath}/`, `${newPath}/`);
   return {
     ...node,
     path: nextPath,
@@ -174,29 +175,26 @@ export function useSessionSidebarFileTreeState(
     [],
   );
 
-  const collectLoadedExpandedDirectories = useCallback(
-    (nodes: FileTreeNode[]): string[] => {
-      const expandedDirectorySet = new Set(optionsRef.current.expandedDirsArr);
-      const directoryPaths: string[] = [];
+  const collectLoadedExpandedDirectories = useCallback((nodes: FileTreeNode[]): string[] => {
+    const expandedDirectorySet = new Set(optionsRef.current.expandedDirsArr);
+    const directoryPaths: string[] = [];
 
-      const visit = (entries: FileTreeNode[]) => {
-        for (const entry of entries) {
-          if (entry.type !== 'directory') {
-            continue;
-          }
-
-          if (expandedDirectorySet.has(entry.path) && entry.children) {
-            directoryPaths.push(entry.path);
-            visit(entry.children);
-          }
+    const visit = (entries: FileTreeNode[]) => {
+      for (const entry of entries) {
+        if (entry.type !== 'directory') {
+          continue;
         }
-      };
 
-      visit(nodes);
-      return directoryPaths;
-    },
-    [],
-  );
+        if (expandedDirectorySet.has(entry.path) && entry.children) {
+          directoryPaths.push(entry.path);
+          visit(entry.children);
+        }
+      }
+    };
+
+    visit(nodes);
+    return directoryPaths;
+  }, []);
 
   const collectNestedLoadedExpandedDirectories = useCallback(
     (directoryPath: string): string[] => {
@@ -205,7 +203,9 @@ export function useSessionSidebarFileTreeState(
         return [];
       }
 
-      return collectLoadedExpandedDirectories([targetNode]).filter((path) => path !== directoryPath);
+      return collectLoadedExpandedDirectories([targetNode]).filter(
+        (path) => path !== directoryPath,
+      );
     },
     [collectLoadedExpandedDirectories],
   );
@@ -228,8 +228,12 @@ export function useSessionSidebarFileTreeState(
     return rootPath;
   }, []);
 
-  const refreshDirectoryRef = useRef<(directoryPath: string) => Promise<boolean>>(async () => false);
-  const loadFileTreeRef = useRef<(preserveExpandedDirectories: boolean) => Promise<boolean>>(async () => false);
+  const refreshDirectoryRef = useRef<(directoryPath: string) => Promise<boolean>>(
+    async () => false,
+  );
+  const loadFileTreeRef = useRef<(preserveExpandedDirectories: boolean) => Promise<boolean>>(
+    async () => false,
+  );
   const toggleDirRef = useRef<(path: string) => void>(() => {});
 
   const runRetryAction = useCallback(() => {
@@ -248,18 +252,21 @@ export function useSessionSidebarFileTreeState(
     void toggleDirRef.current(action.path);
   }, []);
 
-  const scheduleRetry = useCallback((action: RetryAction) => {
-    lastRetryActionRef.current = action;
-    if (retryTimerRef.current !== null) {
-      return;
-    }
-    const delay = computeRetryDelay(retryAttemptRef.current);
-    retryAttemptRef.current += 1;
-    retryTimerRef.current = setTimeout(() => {
-      retryTimerRef.current = null;
-      runRetryAction();
-    }, delay);
-  }, [runRetryAction]);
+  const scheduleRetry = useCallback(
+    (action: RetryAction) => {
+      lastRetryActionRef.current = action;
+      if (retryTimerRef.current !== null) {
+        return;
+      }
+      const delay = computeRetryDelay(retryAttemptRef.current);
+      retryAttemptRef.current += 1;
+      retryTimerRef.current = setTimeout(() => {
+        retryTimerRef.current = null;
+        runRetryAction();
+      }, delay);
+    },
+    [runRetryAction],
+  );
 
   const loadFileTree = useCallback(
     async (preserveExpandedDirectories: boolean): Promise<boolean> => {
@@ -464,12 +471,7 @@ export function useSessionSidebarFileTreeState(
         }
       }
     },
-    [
-      clearRetry,
-      isActiveFileTreeRequest,
-      nextFileTreeRequest,
-      scheduleRetry,
-    ],
+    [clearRetry, isActiveFileTreeRequest, nextFileTreeRequest, scheduleRetry],
   );
 
   toggleDirRef.current = (path) => {
@@ -546,9 +548,7 @@ export function useSessionSidebarFileTreeState(
         setFileTree((current) => sortSessionSidebarFileTreeNodes([...current, entry]));
         return;
       }
-      setFileTree((current) =>
-        insertSessionSidebarFileTreeNode(current, directoryPath, entry),
-      );
+      setFileTree((current) => insertSessionSidebarFileTreeNode(current, directoryPath, entry));
     },
     applyDeletedEntry: (path) => {
       setFileTree((current) => removeSessionSidebarFileTreeNode(current, path));

@@ -27,11 +27,9 @@ const generateTextMock = vi.fn(
         reject(new DOMException('aborted', 'AbortError'));
         return;
       }
-      signal.addEventListener(
-        'abort',
-        () => reject(new DOMException('aborted', 'AbortError')),
-        { once: true },
-      );
+      signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), {
+        once: true,
+      });
     }),
 );
 

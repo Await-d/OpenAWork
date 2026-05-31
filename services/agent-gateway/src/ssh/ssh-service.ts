@@ -266,11 +266,7 @@ export class SshService {
 
   // ─── File access ─────────────────────────────────────────────────────────
 
-  async listFiles(
-    userId: string,
-    connectionId: string,
-    path: string,
-  ): Promise<SSHFileEntry[]> {
+  async listFiles(userId: string, connectionId: string, path: string): Promise<SSHFileEntry[]> {
     this.requireOwnedConnection(userId, connectionId);
     const entries = await this.manager.listFiles(connectionId, path);
     upsertSshDialog({
@@ -282,11 +278,7 @@ export class SshService {
     return entries;
   }
 
-  async readFile(
-    userId: string,
-    connectionId: string,
-    path: string,
-  ): Promise<SSHFilePreview> {
+  async readFile(userId: string, connectionId: string, path: string): Promise<SSHFilePreview> {
     this.requireOwnedConnection(userId, connectionId);
     const preview = await this.manager.readFile(connectionId, path);
     upsertSshDialog({

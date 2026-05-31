@@ -377,10 +377,7 @@ let worktreeProbeTimeoutMs = WORKTREE_PROBE_TIMEOUT_MS;
  * Test-only: override the worktree-probe git binary and/or timeout.
  * Passing `null` restores the defaults ('git', WORKTREE_PROBE_TIMEOUT_MS).
  */
-export function __setWorktreeProbeGitForTests(
-  binary: string | null,
-  timeoutMs?: number,
-): void {
+export function __setWorktreeProbeGitForTests(binary: string | null, timeoutMs?: number): void {
   worktreeProbeGitBinary = binary ?? 'git';
   worktreeProbeTimeoutMs =
     typeof timeoutMs === 'number' && timeoutMs > 0 ? timeoutMs : WORKTREE_PROBE_TIMEOUT_MS;
@@ -410,16 +407,20 @@ export async function resolveRequestedWorktree(
       };
     }
 
-    const { stdout } = await execFileAsync(worktreeProbeGitBinary, ['rev-parse', '--show-toplevel'], {
-      cwd: requestedPath,
-      // Bound the call: a git invocation can hang on index.lock contention or
-      // a stalled network filesystem. Without a deadline this worktree probe
-      // would leave the loop-execution setup pending forever. On timeout the
-      // rejection falls into the catch below and degrades to the "needs init"
-      // note rather than hanging.
-      timeout: worktreeProbeTimeoutMs,
-      maxBuffer: 1024 * 1024,
-    });
+    const { stdout } = await execFileAsync(
+      worktreeProbeGitBinary,
+      ['rev-parse', '--show-toplevel'],
+      {
+        cwd: requestedPath,
+        // Bound the call: a git invocation can hang on index.lock contention or
+        // a stalled network filesystem. Without a deadline this worktree probe
+        // would leave the loop-execution setup pending forever. On timeout the
+        // rejection falls into the catch below and degrades to the "needs init"
+        // note rather than hanging.
+        timeout: worktreeProbeTimeoutMs,
+        maxBuffer: 1024 * 1024,
+      },
+    );
     const worktreePath = stdout.trim();
     if (!worktreePath) {
       return {

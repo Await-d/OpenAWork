@@ -140,10 +140,7 @@ export interface RateLimited {
  */
 
 export interface TeamPhaseAClient {
-  getConstitutionResult(
-    token: string,
-    teamWorkspaceId: string,
-  ): Promise<ConstitutionLoadResult>;
+  getConstitutionResult(token: string, teamWorkspaceId: string): Promise<ConstitutionLoadResult>;
   getConstitution(token: string, teamWorkspaceId: string): Promise<ConstitutionRecord>;
   putConstitution(
     token: string,
@@ -204,7 +201,9 @@ export interface TeamPhaseAClient {
   listTeamArtifacts(
     token: string,
     options: { phase?: string; teamWorkspaceId?: string; sessionId?: string },
-  ): Promise<Array<{ id: string; content: string; phase: string | null; title: string; sessionId?: string }>>;
+  ): Promise<
+    Array<{ id: string; content: string; phase: string | null; title: string; sessionId?: string }>
+  >;
   listTeamArtifactsResult(
     token: string,
     options: { phase?: string; teamWorkspaceId?: string; sessionId?: string },
@@ -212,7 +211,13 @@ export interface TeamPhaseAClient {
 }
 
 export interface TeamArtifactsListResult {
-  artifacts: Array<{ id: string; content: string; phase: string | null; title: string; sessionId?: string }>;
+  artifacts: Array<{
+    id: string;
+    content: string;
+    phase: string | null;
+    title: string;
+    sessionId?: string;
+  }>;
   errorMessage?: string;
   ok: boolean;
   retryable: boolean;
@@ -271,10 +276,7 @@ function isRetryableTeamPhaseAStatus(status: number): boolean {
   return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
-function buildTeamArtifactsErrorMessage(
-  status: number,
-  data: JsonErrorData | undefined,
-): string {
+function buildTeamArtifactsErrorMessage(status: number, data: JsonErrorData | undefined): string {
   const extracted = extractJsonErrorMessage(data);
   if (extracted) {
     return extracted;
@@ -288,10 +290,7 @@ function buildTeamArtifactsErrorMessage(
   return `加载团队产物失败（HTTP ${status}）。`;
 }
 
-function buildConstitutionErrorMessage(
-  status: number,
-  data: JsonErrorData | undefined,
-): string {
+function buildConstitutionErrorMessage(status: number, data: JsonErrorData | undefined): string {
   const extracted = extractJsonErrorMessage(data);
   if (extracted) {
     return extracted;
@@ -319,10 +318,7 @@ function buildConstitutionTemplatesErrorMessage(
   return `加载团队宪法模板失败（HTTP ${status}）。`;
 }
 
-function buildUserMemoryErrorMessage(
-  status: number,
-  data: JsonErrorData | undefined,
-): string {
+function buildUserMemoryErrorMessage(status: number, data: JsonErrorData | undefined): string {
   const extracted = extractJsonErrorMessage(data);
   if (extracted) {
     return extracted;
@@ -333,10 +329,7 @@ function buildUserMemoryErrorMessage(
   return `加载个人长期记忆失败（HTTP ${status}）。`;
 }
 
-function buildPersonaErrorMessage(
-  status: number,
-  data: JsonErrorData | undefined,
-): string {
+function buildPersonaErrorMessage(status: number, data: JsonErrorData | undefined): string {
   const extracted = extractJsonErrorMessage(data);
   if (extracted) {
     return extracted;
@@ -347,10 +340,7 @@ function buildPersonaErrorMessage(
   return `加载角色 SOUL 失败（HTTP ${status}）。`;
 }
 
-function buildForceApplyStateErrorMessage(
-  status: number,
-  data: JsonErrorData | undefined,
-): string {
+function buildForceApplyStateErrorMessage(status: number, data: JsonErrorData | undefined): string {
   const extracted = extractJsonErrorMessage(data);
   if (extracted) {
     return extracted;
@@ -426,7 +416,9 @@ function isGenericTeamPhaseANetworkErrorMessage(message: string): boolean {
 
 function normalizeTeamPhaseAActionError(actionLabel: string, error: unknown): Error {
   if (error instanceof HttpError) {
-    const extracted = extractJsonErrorMessage((error.data ?? undefined) as JsonErrorData | undefined);
+    const extracted = extractJsonErrorMessage(
+      (error.data ?? undefined) as JsonErrorData | undefined,
+    );
     if (
       extracted &&
       extracted !== 'memory-write-blocked' &&
@@ -625,9 +617,7 @@ export function createTeamPhaseAClient(baseUrl: string): TeamPhaseAClient {
     }
   };
 
-  const getForceApplyStateResult = async (
-    token: string,
-  ): Promise<ForceApplyStateLoadResult> => {
+  const getForceApplyStateResult = async (token: string): Promise<ForceApplyStateLoadResult> => {
     try {
       const response = await fetchWithTimeout(`${baseUrl}/team/force-apply/state`, {
         headers: authHeader(token),
@@ -804,11 +794,14 @@ export function createTeamPhaseAClient(baseUrl: string): TeamPhaseAClient {
       return performTeamPhaseARequest<ConstitutionRecord>({
         actionLabel: '保存团队宪法',
         request: () =>
-          fetchWithTimeout(`${baseUrl}/team/workspaces/${encodeURIComponent(teamWorkspaceId)}/constitution`, {
-            method: 'PUT',
-            headers: jsonAuthHeaders(token),
-            body: JSON.stringify(input),
-          }),
+          fetchWithTimeout(
+            `${baseUrl}/team/workspaces/${encodeURIComponent(teamWorkspaceId)}/constitution`,
+            {
+              method: 'PUT',
+              headers: jsonAuthHeaders(token),
+              body: JSON.stringify(input),
+            },
+          ),
       });
     },
 

@@ -14,7 +14,9 @@ describe('createCronClient', () => {
     globalThis.fetch = vi.fn(async () => {
       return {
         ok: true,
-        json: async () => ({ jobs: [{ id: 'job-1', name: '每日同步', expression: '* * * * *', status: 'enabled' }] }),
+        json: async () => ({
+          jobs: [{ id: 'job-1', name: '每日同步', expression: '* * * * *', status: 'enabled' }],
+        }),
       } as unknown as Response;
     }) as typeof fetch;
 
@@ -47,9 +49,7 @@ describe('createCronClient', () => {
 
     const client = createCronClient('http://localhost:3000');
 
-    await expect(client.remove('token-1', 'job-1')).rejects.toThrow(
-      '网络异常，删除定时任务失败。',
-    );
+    await expect(client.remove('token-1', 'job-1')).rejects.toThrow('网络异常，删除定时任务失败。');
   });
 
   it('setEnabled 会读取 ApiErrorResponse.data.message', async () => {
@@ -66,8 +66,6 @@ describe('createCronClient', () => {
 
     const client = createCronClient('http://localhost:3000');
 
-    await expect(client.setEnabled('token-1', 'job-1', false)).rejects.toThrow(
-      '请求体参数无效。',
-    );
+    await expect(client.setEnabled('token-1', 'job-1', false)).rejects.toThrow('请求体参数无效。');
   });
 });

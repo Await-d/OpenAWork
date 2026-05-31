@@ -121,7 +121,12 @@ export function TemplateRosterToolbar({
       {/* Quick presets */}
       {editable && (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          <button type="button" style={QUICK_BTN} onClick={onApplyDefault} title="套用系统默认 20 人花名册">
+          <button
+            type="button"
+            style={QUICK_BTN}
+            onClick={onApplyDefault}
+            title="套用系统默认 20 人花名册"
+          >
             恢复默认
           </button>
           <button
@@ -134,7 +139,11 @@ export function TemplateRosterToolbar({
           </button>
           <button
             type="button"
-            style={{ ...QUICK_BTN, color: 'var(--danger)', borderColor: 'color-mix(in oklch, var(--danger) 30%, transparent)' }}
+            style={{
+              ...QUICK_BTN,
+              color: 'var(--danger)',
+              borderColor: 'color-mix(in oklch, var(--danger) 30%, transparent)',
+            }}
             onClick={onClearAll}
           >
             清空全部

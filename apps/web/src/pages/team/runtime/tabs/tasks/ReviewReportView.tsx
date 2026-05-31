@@ -57,14 +57,12 @@ export function ReviewReportView({
     overallVerdict === null
       ? '📝 已生成'
       : overallVerdict === 'pass'
-      ? '✅ 通过'
-      : overallVerdict === 'implementation-failure'
-        ? '❌ 实现型失败'
-        : '❌ 规划型失败';
-  const specLabel =
-    specReviewPassed === null ? '—' : specReviewPassed ? '✅' : '❌';
-  const qualityLabel =
-    qualityReviewPassed === null ? '—' : qualityReviewPassed ? '✅' : '❌';
+        ? '✅ 通过'
+        : overallVerdict === 'implementation-failure'
+          ? '❌ 实现型失败'
+          : '❌ 规划型失败';
+  const specLabel = specReviewPassed === null ? '—' : specReviewPassed ? '✅' : '❌';
+  const qualityLabel = qualityReviewPassed === null ? '—' : qualityReviewPassed ? '✅' : '❌';
 
   return (
     <div style={{ display: 'grid', gap: 12 }}>

@@ -20,11 +20,7 @@
  */
 
 import type { CSSProperties, ReactNode } from 'react';
-import {
-  PRIMARY_TABS,
-  type PrimaryTabKey,
-  type SubTabDef,
-} from '../../tabs/team-page-v2-tabs.js';
+import { PRIMARY_TABS, type PrimaryTabKey, type SubTabDef } from '../../tabs/team-page-v2-tabs.js';
 import type { MiddleTabKey } from '../../tabs/MiddleTabRouter.js';
 import { TeamRunStatePill } from '../../shared/TeamRunStatePill.js';
 
@@ -83,7 +79,8 @@ const PRIMARY_PILL_ACTIVE_STYLE: CSSProperties = {
   background: 'var(--bg-overlay)',
   color: 'var(--fg-strong)',
   fontWeight: 700,
-  boxShadow: '0 1px 3px rgba(0,0,0,0.12), 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent)',
+  boxShadow:
+    '0 1px 3px rgba(0,0,0,0.12), 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent)',
 };
 
 // ─── 3D 办公动作按钮 ─────────────────────────────────────────────

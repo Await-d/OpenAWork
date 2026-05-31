@@ -61,9 +61,7 @@ describe('useTeamRunState', () => {
 
   it('有活跃 handoff 但长时间无活动 → stalled', () => {
     setConnection('connected');
-    setHandoffs([
-      entry({ id: 'a', state: 'running', updatedAt: Date.now() - 5 * 60_000 }),
-    ]);
+    setHandoffs([entry({ id: 'a', state: 'running', updatedAt: Date.now() - 5 * 60_000 })]);
     const { result } = renderHook(() => useTeamRunState());
     expect(result.current.phase).toBe('stalled');
   });

@@ -282,10 +282,9 @@ function resolveExtractionLogMaxAgeHours(): number {
 }
 
 function pruneExtractionLogs(maxAgeHours: number): void {
-  sqliteRun(
-    `DELETE FROM memory_extraction_logs WHERE created_at < datetime('now', ?)`,
-    [`-${maxAgeHours} hours`],
-  );
+  sqliteRun(`DELETE FROM memory_extraction_logs WHERE created_at < datetime('now', ?)`, [
+    `-${maxAgeHours} hours`,
+  ]);
 }
 
 function maybePruneExtractionLogs(): void {

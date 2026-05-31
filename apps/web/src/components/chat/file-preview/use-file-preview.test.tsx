@@ -4,9 +4,7 @@ import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAuthStore } from '../../../stores/auth/auth.js';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
-import {
-  __clearBareFilenameResolutionCacheForTest,
-} from './resolve-bare-filename.js';
+import { __clearBareFilenameResolutionCacheForTest } from './resolve-bare-filename.js';
 import { invalidateFilePreviewCache } from './use-file-preview.js';
 import { useFilePreview } from './use-file-preview.js';
 
@@ -83,8 +81,8 @@ describe('useFilePreview', () => {
           return new Response(
             JSON.stringify({ content: 'line1\nline2\nline3\nline4\nline5\nline6' }),
             {
-            status: 200,
-            headers: { 'content-type': 'application/json' },
+              status: 200,
+              headers: { 'content-type': 'application/json' },
             },
           );
         }

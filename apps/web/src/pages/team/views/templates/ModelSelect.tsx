@@ -4,7 +4,11 @@
  */
 
 import type { CSSProperties } from 'react';
-import { compareModelsByName, type ModelAssignment, type ModelCandidate } from './model-assignment.js';
+import {
+  compareModelsByName,
+  type ModelAssignment,
+  type ModelCandidate,
+} from './model-assignment.js';
 
 interface Props {
   value: ModelAssignment | null;
@@ -68,9 +72,7 @@ export function ModelSelect({ value, options, editable, placeholder, onChange, s
     >
       <option value="">{placeholder ?? '默认（自动解析）'}</option>
       {/* 当前值不在池中时，仍显示一个占位项避免静默丢失 */}
-      {value && !known && (
-        <option value={current}>{`${value.modelId}（已不在池中）`}</option>
-      )}
+      {value && !known && <option value={current}>{`${value.modelId}（已不在池中）`}</option>}
       {sortedOptions.map((opt) => (
         <option key={encode(opt)} value={encode(opt)}>
           {opt.providerName} · {opt.label}

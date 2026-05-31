@@ -138,9 +138,7 @@ describe('runLookAtTool — file size guard', () => {
 
   it('小于上限的图片文件正常读取并打上游', async () => {
     mocks.stat.mockResolvedValue({ size: 1024 } as never);
-    mocks.readFile.mockResolvedValue(
-      Buffer.from('fakeimagebytes').toString('base64') as never,
-    );
+    mocks.readFile.mockResolvedValue(Buffer.from('fakeimagebytes').toString('base64') as never);
 
     const result = await runLookAtTool({
       filePath: '/tmp/workspace/small.png',

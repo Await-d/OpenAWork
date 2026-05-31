@@ -48,9 +48,7 @@ describe('createMemoriesClient', () => {
 
     const client = createMemoriesClient('http://localhost:3000');
 
-    await expect(client.remove('token-1', 'memory-1')).rejects.toThrow(
-      '网络异常，删除记忆失败。',
-    );
+    await expect(client.remove('token-1', 'memory-1')).rejects.toThrow('网络异常，删除记忆失败。');
   });
 
   it('getSettings 404 时会保留 HttpError 状态码', async () => {
@@ -88,8 +86,6 @@ describe('createMemoriesClient', () => {
 
     const client = createMemoriesClient('http://localhost:3000');
 
-    await expect(client.create('token-1', { body: 'memory' })).rejects.toThrow(
-      '请求体参数无效。',
-    );
+    await expect(client.create('token-1', { body: 'memory' })).rejects.toThrow('请求体参数无效。');
   });
 });

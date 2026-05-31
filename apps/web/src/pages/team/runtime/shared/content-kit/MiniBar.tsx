@@ -43,7 +43,9 @@ export function MiniBar({
 
   const content = (
     <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
+      <div
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}
+      >
         <span
           style={{
             display: 'flex',
@@ -91,7 +93,14 @@ export function MiniBar({
       <button
         type="button"
         onClick={onClick}
-        style={{ ...baseStyle, background: 'none', border: 'none', padding: 0, textAlign: 'left', cursor: 'pointer' }}
+        style={{
+          ...baseStyle,
+          background: 'none',
+          border: 'none',
+          padding: 0,
+          textAlign: 'left',
+          cursor: 'pointer',
+        }}
       >
         {content}
       </button>

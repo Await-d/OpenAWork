@@ -195,9 +195,9 @@ export function clearTeamRuntimeAlertControl(input: {
   if (!before) {
     return false;
   }
-  sqliteRun(
-    `DELETE FROM team_runtime_alert_controls WHERE user_id = ? AND alert_code = ?`,
-    [input.userId, input.alertCode],
-  );
+  sqliteRun(`DELETE FROM team_runtime_alert_controls WHERE user_id = ? AND alert_code = ?`, [
+    input.userId,
+    input.alertCode,
+  ]);
   return true;
 }

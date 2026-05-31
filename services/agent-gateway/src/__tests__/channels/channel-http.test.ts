@@ -62,8 +62,8 @@ describe('channelFetch', () => {
   });
 
   it('透传调用方 signal 的 abort 状态到底层 fetch', async () => {
-    const fetchSpy = vi.fn(
-      (_url: string, _init?: RequestInit) => Promise.resolve(new Response('noop')),
+    const fetchSpy = vi.fn((_url: string, _init?: RequestInit) =>
+      Promise.resolve(new Response('noop')),
     );
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
 

@@ -246,12 +246,7 @@ function TeamPageLayout({
       onRefreshWorkspaces();
       onRefreshSnapshot();
     },
-    [
-      activeWorkspaceId,
-      data,
-      onRefreshSnapshot,
-      onRefreshWorkspaces,
-    ],
+    [activeWorkspaceId, data, onRefreshSnapshot, onRefreshWorkspaces],
   );
 
   const mainContent = useMemo(

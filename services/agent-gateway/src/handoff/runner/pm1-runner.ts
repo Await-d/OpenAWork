@@ -182,9 +182,7 @@ async function runPm1(input: Parameters<HandoffTaskRunner>[0]): Promise<void> {
     if (input.signal.aborted) {
       throw new Error('aborted');
     }
-    const systemWithRoster = rosterManifest
-      ? `${systemPrompt}\n\n${rosterManifest}`
-      : systemPrompt;
+    const systemWithRoster = rosterManifest ? `${systemPrompt}\n\n${rosterManifest}` : systemPrompt;
     return requestWorkflowLlmCompletion({
       apiBaseUrl: llmConfig.apiBaseUrl,
       apiKey: llmConfig.apiKey,

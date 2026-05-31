@@ -304,25 +304,28 @@ export function useTeamCollaboration(
     };
   }, []);
 
-  const applySnapshot = useCallback((runtime: TeamRuntimeReadModel) => {
-    const snapshot = normalizeSnapshot(runtime);
-    setAuditLogs(snapshot.auditLogs);
-    setDiagnostics(snapshot.diagnostics);
-    setMembers(snapshot.members);
-    setTasks(snapshot.tasks);
-    setMessages(snapshot.messages);
-    setRuntimeTaskGroups(snapshot.runtimeTaskGroups);
-    setSessionShares(snapshot.sessionShares);
-    setSharedSessions(snapshot.sharedSessions);
-    setSessions(snapshot.sessions);
-    hydrateNotificationStore(snapshot.notifications);
-    hydrateClarificationStore(snapshot.clarifications);
-    hydrateTeamRuntimeStores({
-      handoffs: snapshot.handoffs,
-      sessions: snapshot.sessions,
-    });
-    snapshotLoadedRef.current = true;
-  }, [normalizeSnapshot]);
+  const applySnapshot = useCallback(
+    (runtime: TeamRuntimeReadModel) => {
+      const snapshot = normalizeSnapshot(runtime);
+      setAuditLogs(snapshot.auditLogs);
+      setDiagnostics(snapshot.diagnostics);
+      setMembers(snapshot.members);
+      setTasks(snapshot.tasks);
+      setMessages(snapshot.messages);
+      setRuntimeTaskGroups(snapshot.runtimeTaskGroups);
+      setSessionShares(snapshot.sessionShares);
+      setSharedSessions(snapshot.sharedSessions);
+      setSessions(snapshot.sessions);
+      hydrateNotificationStore(snapshot.notifications);
+      hydrateClarificationStore(snapshot.clarifications);
+      hydrateTeamRuntimeStores({
+        handoffs: snapshot.handoffs,
+        sessions: snapshot.sessions,
+      });
+      snapshotLoadedRef.current = true;
+    },
+    [normalizeSnapshot],
+  );
 
   const refresh = useCallback(async () => {
     if (refreshPromiseRef.current) {
@@ -569,7 +572,7 @@ export function useTeamCollaboration(
     );
     const hasCachedDetail = Boolean(
       selectedSharedSessionRef.current &&
-        selectedSharedSessionRef.current.share.sessionId === selectedSharedSessionId,
+      selectedSharedSessionRef.current.share.sessionId === selectedSharedSessionId,
     );
     if (!hasCachedDetail) {
       setSharedPresenceError(null);

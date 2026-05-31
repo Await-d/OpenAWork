@@ -42,9 +42,7 @@ afterAll(async () => {
 });
 
 function countAuditLogs(): number {
-  return (
-    dbModule.sqliteGet<{ c: number }>('SELECT COUNT(*) AS c FROM audit_logs', [])?.c ?? 0
-  );
+  return dbModule.sqliteGet<{ c: number }>('SELECT COUNT(*) AS c FROM audit_logs', [])?.c ?? 0;
 }
 
 describe('audit_logs retention', () => {

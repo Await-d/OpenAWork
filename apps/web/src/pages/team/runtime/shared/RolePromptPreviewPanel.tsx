@@ -33,7 +33,11 @@ import {
   mapTeamLayerToSoulLayer,
   useTeamRolePromptPreview,
 } from '../hooks/use-team-role-prompt-preview.js';
-import { parseSoulFrontmatter, soulFieldLabel, type ParsedSoul } from '../data/parse-soul-frontmatter.js';
+import {
+  parseSoulFrontmatter,
+  soulFieldLabel,
+  type ParsedSoul,
+} from '../data/parse-soul-frontmatter.js';
 import {
   parseInstructionStack,
   instructionSegmentLabel,
@@ -199,7 +203,8 @@ function Callout({ tone, children }: { tone: CalloutTone; children: ReactNode })
           tone === 'info'
             ? CK_DASHED_BORDER
             : `1px solid color-mix(in srgb, ${color} 30%, transparent)`,
-        background: tone === 'info' ? 'transparent' : `color-mix(in srgb, ${color} 8%, transparent)`,
+        background:
+          tone === 'info' ? 'transparent' : `color-mix(in srgb, ${color} 8%, transparent)`,
         color,
         fontSize: tone === 'danger' ? 12 : 11,
         lineHeight: 1.5,
@@ -331,7 +336,7 @@ export function RolePromptPreviewPanel({
   };
 
   // 当前模式对应的"可复制文本"（原文 / 指令栈）。
-  const copyText = mode === 'stack' ? instructionStack?.stableBlock ?? '' : soulMd;
+  const copyText = mode === 'stack' ? (instructionStack?.stableBlock ?? '') : soulMd;
   const canCopy = copyText.trim().length > 0 && (mode === 'raw' || mode === 'stack');
 
   if (!layer) return null;
@@ -371,7 +376,12 @@ export function RolePromptPreviewPanel({
           <div style={{ flex: 1 }} />
           {supported && !isEditing && canCopy ? <CopyButton text={copyText} /> : null}
           {supported && editable && !isEditing && !loading ? (
-            <button type="button" style={ACCENT_BTN_STYLE} onClick={beginEdit} title="编辑该层角色 SOUL">
+            <button
+              type="button"
+              style={ACCENT_BTN_STYLE}
+              onClick={beginEdit}
+              title="编辑该层角色 SOUL"
+            >
               ✎ 编辑
             </button>
           ) : null}
@@ -391,7 +401,13 @@ export function RolePromptPreviewPanel({
               刷新
             </button>
           ) : null}
-          <button type="button" style={BTN_STYLE} onClick={onClose} aria-label="关闭预览" title="关闭">
+          <button
+            type="button"
+            style={BTN_STYLE}
+            onClick={onClose}
+            aria-label="关闭预览"
+            title="关闭"
+          >
             ✕
           </button>
         </header>
@@ -541,7 +557,8 @@ function EditView({
       </div>
       {overGuideline && !tooLong ? (
         <Callout tone="warning">
-          建议 SOUL 控制在 {SOUL_GUIDELINE_LIMIT} 字符内，以免挤占指令栈 token 预算。仍可保存，但越长越可能触发自动压缩。
+          建议 SOUL 控制在 {SOUL_GUIDELINE_LIMIT} 字符内，以免挤占指令栈 token
+          预算。仍可保存，但越长越可能触发自动压缩。
         </Callout>
       ) : null}
       {saveError ? <Callout tone="danger">{saveError}</Callout> : null}
@@ -703,7 +720,9 @@ function CapabilityView({ capability }: { capability: LayerCapabilitySummary | n
         ：工具类别、可派发去向、可写产物、可调内置指令均由架构强制，运行时不可越界。标记
         <span style={CAPS_DEFAULT_BADGE_STYLE}>默认启用</span>
         的工具是该层 role-adapter 的默认值；天花板之内的
-        <strong style={{ color: 'var(--fg-default)' }}>具体启用项可在「治理 · 设置」与团队模板里按成员动态调整</strong>
+        <strong style={{ color: 'var(--fg-default)' }}>
+          具体启用项可在「治理 · 设置」与团队模板里按成员动态调整
+        </strong>
         （含 skill / MCP / 模型）。
       </p>
 
@@ -738,7 +757,9 @@ function CapabilityView({ capability }: { capability: LayerCapabilitySummary | n
                 background: CK_SURFACE_SOFT,
               }}
             >
-              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-strong)', minWidth: 56 }}>
+              <span
+                style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-strong)', minWidth: 56 }}
+              >
                 {tool.label}
               </span>
               <span style={{ flex: 1, fontSize: 11, color: 'var(--fg-muted)' }}>
@@ -787,7 +808,8 @@ function CapabilityView({ capability }: { capability: LayerCapabilitySummary | n
       ) : null}
 
       <p style={{ ...HINT_TEXT_STYLE, fontSize: 10 }}>
-        说明：Skills / MCP / 模型属于天花板内的动态绑定，在「治理 · 设置」与团队模板的角色编辑里配置；内置 skill 始终可用且不可禁用。
+        说明：Skills / MCP / 模型属于天花板内的动态绑定，在「治理 ·
+        设置」与团队模板的角色编辑里配置；内置 skill 始终可用且不可禁用。
       </p>
     </div>
   );
@@ -851,7 +873,8 @@ function StackView({ instructionStack }: { instructionStack: InstructionStackPre
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: CK_GAP }}>
       <p style={HINT_TEXT_STYLE}>
-        这是最终注入该层 system prompt 的稳定段，由 7 层按序拼接而成。下方徽章显示各层是否注入，再下方按层展开实际内容。
+        这是最终注入该层 system prompt 的稳定段，由 7
+        层按序拼接而成。下方徽章显示各层是否注入，再下方按层展开实际内容。
       </p>
 
       <div style={{ display: 'flex', gap: CK_GAP_SM, flexWrap: 'wrap' }}>
@@ -864,7 +887,9 @@ function StackView({ instructionStack }: { instructionStack: InstructionStackPre
               border: present
                 ? '1px solid color-mix(in srgb, var(--success) 40%, transparent)'
                 : `1px solid ${CK_BORDER}`,
-              background: present ? 'color-mix(in srgb, var(--success) 10%, transparent)' : 'transparent',
+              background: present
+                ? 'color-mix(in srgb, var(--success) 10%, transparent)'
+                : 'transparent',
               color: present ? 'var(--fg-strong)' : 'var(--fg-muted)',
             }}
           >
@@ -944,7 +969,9 @@ function StackSegmentCard({ segment }: { segment: InstructionStackSegment }) {
               <MarkdownMessageContent content={segment.body} />
             </div>
           ) : (
-            <pre style={{ ...CODE_BLOCK_STYLE, border: 'none', padding: 0, background: 'transparent' }}>
+            <pre
+              style={{ ...CODE_BLOCK_STYLE, border: 'none', padding: 0, background: 'transparent' }}
+            >
               {segment.body}
             </pre>
           )}

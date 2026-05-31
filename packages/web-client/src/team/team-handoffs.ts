@@ -151,9 +151,7 @@ export function isHandledReviewDispositionPayload(payload: unknown): boolean {
   );
 }
 
-export function getStructuredReviewDisposition(
-  payload: unknown,
-): HandoffReviewDisposition | null {
+export function getStructuredReviewDisposition(payload: unknown): HandoffReviewDisposition | null {
   if (!isRecord(payload)) {
     return null;
   }
@@ -281,10 +279,7 @@ function buildReviewActionHttpErrorMessage(input: {
   if (routeCode === 'team_handoff_cannot_redispatch' || legacyError === 'cannot-redispatch') {
     return '当前 handoff 无法重派，可能已被其他流程接管。';
   }
-  if (
-    routeCode === 'team_handoff_cannot_return_to_pm1' ||
-    legacyError === 'cannot-return-to-c'
-  ) {
+  if (routeCode === 'team_handoff_cannot_return_to_pm1' || legacyError === 'cannot-return-to-c') {
     return '当前 handoff 无法退回 PM1，可能缺少可回放的上游规划。';
   }
   if (
@@ -394,9 +389,12 @@ export function createTeamHandoffsClient(baseUrl: string): TeamHandoffsClient {
     async getHandoff(token, handoffId) {
       if (!token) return null;
       try {
-        const response = await fetchWithTimeout(`${trimmed}/team/handoffs/${encodeURIComponent(handoffId)}`, {
-          headers: jsonAuthHeaders(token),
-        });
+        const response = await fetchWithTimeout(
+          `${trimmed}/team/handoffs/${encodeURIComponent(handoffId)}`,
+          {
+            headers: jsonAuthHeaders(token),
+          },
+        );
         if (!response.ok) return null;
         const data = (await response.json()) as { handoff?: HandoffRecord };
         return data.handoff ?? null;

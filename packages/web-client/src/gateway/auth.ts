@@ -1,4 +1,9 @@
-import { extractJsonErrorMessage, isGenericFetchErrorMessage, type JsonErrorData, fetchWithTimeout } from './http.js';
+import {
+  extractJsonErrorMessage,
+  isGenericFetchErrorMessage,
+  type JsonErrorData,
+  fetchWithTimeout,
+} from './http.js';
 
 export interface TokenPair {
   accessToken: string;

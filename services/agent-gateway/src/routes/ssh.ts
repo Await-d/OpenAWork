@@ -238,11 +238,7 @@ export async function sshRoutes(app: FastifyInstance): Promise<void> {
     const { step } = startRequestWorkflow(request, 'ssh.files.list');
     const parsed = parseQuery(fileQuerySchema, request.query);
     try {
-      const entries = await service().listFiles(
-        userId(request),
-        parsed.connectionId,
-        parsed.path,
-      );
+      const entries = await service().listFiles(userId(request), parsed.connectionId, parsed.path);
       step.succeed(undefined, { count: entries.length });
       return reply.send({ entries });
     } catch (error) {
@@ -254,11 +250,7 @@ export async function sshRoutes(app: FastifyInstance): Promise<void> {
     const { step } = startRequestWorkflow(request, 'ssh.file.read');
     const parsed = parseQuery(fileQuerySchema, request.query);
     try {
-      const preview = await service().readFile(
-        userId(request),
-        parsed.connectionId,
-        parsed.path,
-      );
+      const preview = await service().readFile(userId(request), parsed.connectionId, parsed.path);
       step.succeed(undefined, { path: parsed.path });
       return reply.send({ preview });
     } catch (error) {
@@ -271,12 +263,7 @@ export async function sshRoutes(app: FastifyInstance): Promise<void> {
     const parsed = parseBody(uploadSchema, request.body);
     const bytes = Uint8Array.from(Buffer.from(parsed.contentBase64, 'base64'));
     try {
-      await service().writeFile(
-        userId(request),
-        parsed.connectionId,
-        parsed.path,
-        bytes,
-      );
+      await service().writeFile(userId(request), parsed.connectionId, parsed.path, bytes);
       step.succeed(undefined, { bytes: bytes.length });
       return reply.send({ ok: true });
     } catch (error) {
@@ -323,10 +310,7 @@ export async function sshRoutes(app: FastifyInstance): Promise<void> {
 
   app.delete('/ssh/dialogs/:id', { onRequest: [requireAuth] }, async (request, reply) => {
     const { step } = startRequestWorkflow(request, 'ssh.dialogs.delete');
-    const removed = service().deleteDialog(
-      userId(request),
-      (request.params as { id: string }).id,
-    );
+    const removed = service().deleteDialog(userId(request), (request.params as { id: string }).id);
     if (!removed) {
       step.fail('SSH 对话不存在。');
       return reply.status(404).send({ error: 'SSH 对话不存在。' });

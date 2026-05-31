@@ -1,7 +1,4 @@
-import {
-  createTeamClient,
-  type TeamWorkspaceSnapshot,
-} from '@openAwork/web-client';
+import { createTeamClient, type TeamWorkspaceSnapshot } from '@openAwork/web-client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuthStore } from '../../../stores/auth/auth.js';
 import { useTeamEventsConnectionStore } from '../../../stores/team/team-events.js';
@@ -55,11 +52,7 @@ export function useTeamWorkspaceSnapshotState(
   const [refreshTick, setRefreshTick] = useState(0);
   const snapshotRef = useRef<TeamWorkspaceSnapshot | null>(null);
   const teamEventsRecoveredAt = useTeamEventsConnectionStore((state) => state.lastRecoveredAt);
-  const {
-    clearRetry,
-    resetRetry,
-    scheduleRetry,
-  } = useRecoverableRetryController();
+  const { clearRetry, resetRetry, scheduleRetry } = useRecoverableRetryController();
 
   const refresh = useCallback(() => {
     setRefreshTick((value) => value + 1);
@@ -135,7 +128,16 @@ export function useTeamWorkspaceSnapshotState(
     return () => {
       cancelled = true;
     };
-  }, [accessToken, clearRetry, client, refresh, resetRetry, scheduleRetry, teamWorkspaceId, refreshTick]);
+  }, [
+    accessToken,
+    clearRetry,
+    client,
+    refresh,
+    resetRetry,
+    scheduleRetry,
+    teamWorkspaceId,
+    refreshTick,
+  ]);
 
   useEffect(() => {
     return () => {

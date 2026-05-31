@@ -1,7 +1,5 @@
 import { sqliteAll } from '../infra/db.js';
-import {
-  reconcileSessionRuntime,
-} from '../session/session-runtime-reconciler.js';
+import { reconcileSessionRuntime } from '../session/session-runtime-reconciler.js';
 import { SESSION_RUNTIME_THREAD_STALE_AFTER_MS } from '../session/session-runtime-thread-store.js';
 import {
   listPm2HandoffsPendingQualityReview,
@@ -9,10 +7,7 @@ import {
   reconcilePm2QualityReview,
   type ReconcilePm2QualityReviewResult,
 } from '../handoff/runner/pm2-quality-review-reconciler.js';
-import {
-  isRecoverableFailedHandoff,
-  retryFailedHandoff,
-} from '../handoff/store/handoff-store.js';
+import { isRecoverableFailedHandoff, retryFailedHandoff } from '../handoff/store/handoff-store.js';
 
 export const TEAM_RUNTIME_REMEDIATION_CODES = [
   'handoff-failure',

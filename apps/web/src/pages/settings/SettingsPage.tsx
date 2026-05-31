@@ -573,9 +573,7 @@ export default function SettingsPage({ onCheckDesktopUpdates }: SettingsPageProp
 
     try {
       const sshClient = createSshClient(gatewayUrl);
-      const nextConnections = (await sshClient.list(
-        token,
-      )) as unknown as SSHConnectionEntry[];
+      const nextConnections = (await sshClient.list(token)) as unknown as SSHConnectionEntry[];
       setSshConnections(nextConnections);
       // 同步拉取「最近 SSH 对话」用于恢复面板;旧网关未注册该端点时静默降级为空列表。
       void sshClient
@@ -1419,14 +1417,7 @@ export default function SettingsPage({ onCheckDesktopUpdates }: SettingsPageProp
     if (decision.shouldLoadFiles) {
       void loadSshFiles(decision.connectionId, decision.cwd);
     }
-  }, [
-    activeSSHConnectionId,
-    loadSshFiles,
-    sshConnections,
-    sshDialogs,
-    sshDialogsReady,
-    token,
-  ]);
+  }, [activeSSHConnectionId, loadSshFiles, sshConnections, sshDialogs, sshDialogsReady, token]);
 
   const addSshConnection = React.useCallback(
     (entry: Omit<SSHConnectionEntry, 'id' | 'status'>) => {

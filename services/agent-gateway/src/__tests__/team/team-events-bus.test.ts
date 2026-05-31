@@ -124,9 +124,7 @@ describe('publish/subscribe', () => {
       category: 'team_events_listener',
       code: 'team-events-listener-threw',
     });
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('写 runtime incident audit 失败'),
-    );
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('写 runtime incident audit 失败'));
   });
 
   it('runtime incident telemetry 失败时不会反噬事件总线主流程', () => {
@@ -151,8 +149,11 @@ describe('publish/subscribe', () => {
       category: 'team_events_listener',
       code: 'team-events-listener-threw',
     });
-    expect(warnSpy.mock.calls.some(([message]) =>
-      typeof message === 'string' && message.includes('track team_runtime_incident 失败'),
-    )).toBe(true);
+    expect(
+      warnSpy.mock.calls.some(
+        ([message]) =>
+          typeof message === 'string' && message.includes('track team_runtime_incident 失败'),
+      ),
+    ).toBe(true);
   });
 });

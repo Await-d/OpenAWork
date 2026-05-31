@@ -146,5 +146,4 @@ describe('TelemetryManager send timeout', () => {
     expect(body2.events).toHaveLength(1);
     expect(body2.events[0]?.properties.id).toBe(2);
   });
-
 });

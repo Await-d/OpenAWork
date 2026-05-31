@@ -30,10 +30,10 @@ beforeEach(() => {
   dbModule.sqliteRun('DELETE FROM team_messages', []);
   dbModule.sqliteRun('DELETE FROM users', []);
   for (const id of [USER_ID, OTHER_USER_ID]) {
-    dbModule.sqliteRun("INSERT OR IGNORE INTO users (id, email, password_hash) VALUES (?, ?, 'x')", [
-      id,
-      `${id}@example.com`,
-    ]);
+    dbModule.sqliteRun(
+      "INSERT OR IGNORE INTO users (id, email, password_hash) VALUES (?, ?, 'x')",
+      [id, `${id}@example.com`],
+    );
   }
 });
 

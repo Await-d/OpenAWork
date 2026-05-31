@@ -208,9 +208,7 @@ function hasNetworkErrorMessage(info: ClassifyInput): boolean {
   );
 }
 
-function buildNetworkClassification(
-  info: ClassifyInput,
-): UpstreamRetryClassification {
+function buildNetworkClassification(info: ClassifyInput): UpstreamRetryClassification {
   return {
     retryable: true,
     category: 'network',

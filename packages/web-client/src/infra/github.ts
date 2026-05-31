@@ -55,7 +55,9 @@ function isGenericGitHubNetworkErrorMessage(message: string): boolean {
 
 function normalizeGitHubError(actionLabel: string, error: unknown): Error {
   if (error instanceof HttpError) {
-    const extracted = extractJsonErrorMessage((error.data ?? undefined) as JsonErrorData | undefined);
+    const extracted = extractJsonErrorMessage(
+      (error.data ?? undefined) as JsonErrorData | undefined,
+    );
     if (extracted) {
       return new HttpError(extracted, error.status, error.data);
     }

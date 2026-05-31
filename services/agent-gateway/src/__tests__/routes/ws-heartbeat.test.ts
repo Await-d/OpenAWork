@@ -8,10 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import {
-  installWsHeartbeat,
-  type HeartbeatSocket,
-} from '../../routes/ws-heartbeat.js';
+import { installWsHeartbeat, type HeartbeatSocket } from '../../routes/ws-heartbeat.js';
 
 interface FakeSocket extends HeartbeatSocket {
   pingCount: number;

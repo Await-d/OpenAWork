@@ -208,7 +208,9 @@ export class SkillInstaller {
     const isAbsolutePath = path.startsWith('/');
     if (isAbsolutePath) {
       const fileUrl = `file://${path}`;
-      const fileResponse = await fetchWithTimeout(fileUrl, { method: 'GET' }).catch(() => undefined);
+      const fileResponse = await fetchWithTimeout(fileUrl, { method: 'GET' }).catch(
+        () => undefined,
+      );
       if (fileResponse?.ok) {
         return readResponseTextWithLimit(fileResponse);
       }

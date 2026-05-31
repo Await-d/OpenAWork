@@ -15,7 +15,11 @@
  * 该函数是纯函数（输入 → 输出），便于单测与在 WorkspaceKnowledgeGraphView 内消费。
  */
 
-import type { HandoffEntry, LayerNode, TeamRoleLayer } from '../../../../stores/team/team-events.js';
+import type {
+  HandoffEntry,
+  LayerNode,
+  TeamRoleLayer,
+} from '../../../../stores/team/team-events.js';
 
 export type GraphNodeKind = 'session' | 'artifact';
 
@@ -120,7 +124,13 @@ export function buildKnowledgeGraph(input: {
       });
     }
     if (nodes.has(toId)) {
-      addEdge({ id: `parent:${fromId}->${toId}`, from: fromId, to: toId, kind: 'parent', state: null });
+      addEdge({
+        id: `parent:${fromId}->${toId}`,
+        from: fromId,
+        to: toId,
+        kind: 'parent',
+        state: null,
+      });
     }
   }
 

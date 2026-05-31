@@ -18,10 +18,7 @@
  */
 
 import { useMemo, useState, type CSSProperties } from 'react';
-import {
-  getEffectiveReviewDisposition,
-  type HandoffRecord,
-} from '@openAwork/web-client';
+import { getEffectiveReviewDisposition, type HandoffRecord } from '@openAwork/web-client';
 import type { AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
 import { ReviewReportView } from './ReviewReportView.js';
 import { ReviewTab } from './ReviewTab.js';
@@ -174,7 +171,8 @@ export function ReviewMergedTab({
     [focusHandoffId, handoffs],
   );
   const focusedHandoff = useMemo(
-    () => (focusHandoffId ? handoffs.find((record) => record.id === focusHandoffId) ?? null : null),
+    () =>
+      focusHandoffId ? (handoffs.find((record) => record.id === focusHandoffId) ?? null) : null,
     [focusHandoffId, handoffs],
   );
   const focusedDisposition = useMemo(
@@ -183,9 +181,9 @@ export function ReviewMergedTab({
   );
   const focusedDispositionOwnedByCurrent = Boolean(
     focusedHandoff &&
-      focusedDisposition &&
-      disposition.pm2HandoffId &&
-      focusedHandoff.id === disposition.pm2HandoffId,
+    focusedDisposition &&
+    disposition.pm2HandoffId &&
+    focusedHandoff.id === disposition.pm2HandoffId,
   );
 
   return (

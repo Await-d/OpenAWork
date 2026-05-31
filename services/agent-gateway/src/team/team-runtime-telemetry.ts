@@ -1,17 +1,11 @@
-import {
-  TelemetryManager,
-  type TelemetryEventName,
-} from '@openAwork/telemetry';
+import { TelemetryManager, type TelemetryEventName } from '@openAwork/telemetry';
 import type { TeamRuntimeHealth } from './team-failure-policy.js';
 import type { TeamRuntimeIncident } from './team-runtime-diagnostics-store.js';
 
 interface TelemetrySink {
   isEnabled(): boolean;
   shutdown(): Promise<void>;
-  track(
-    name: TelemetryEventName,
-    properties: Record<string, string | number | boolean>,
-  ): void;
+  track(name: TelemetryEventName, properties: Record<string, string | number | boolean>): void;
 }
 
 const HEALTH_TRACK_DEDUPE_MS = 5 * 60 * 1000;

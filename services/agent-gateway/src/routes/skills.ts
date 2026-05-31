@@ -133,7 +133,9 @@ function rowToInstalledSkill(row: InstalledSkillRow) {
 // single corrupt row would throw and 500 the WHOLE installed-skills list. This
 // variant returns `null` + warn so the list path can skip the bad row and the
 // rest still loads.
-function tryRowToInstalledSkill(row: InstalledSkillRow): ReturnType<typeof rowToInstalledSkill> | null {
+function tryRowToInstalledSkill(
+  row: InstalledSkillRow,
+): ReturnType<typeof rowToInstalledSkill> | null {
   try {
     return rowToInstalledSkill(row);
   } catch (error) {
@@ -1200,9 +1202,7 @@ function pruneGitHubSourceCache(): void {
   }
   // Still over the cap (a flood of distinct queries within the window):
   // evict oldest-first until back at the ceiling.
-  const byAge = [...githubSourceCache.entries()].sort(
-    (a, b) => a[1].fetchedAt - b[1].fetchedAt,
-  );
+  const byAge = [...githubSourceCache.entries()].sort((a, b) => a[1].fetchedAt - b[1].fetchedAt);
   const excess = githubSourceCache.size - GITHUB_SOURCE_CACHE_MAX_ENTRIES;
   for (let i = 0; i < excess; i += 1) {
     const victim = byAge[i];
@@ -1739,12 +1739,10 @@ export async function skillsRoutes(app: FastifyInstance): Promise<void> {
       const bodyResult = installSkillBodySchema.safeParse(request.body);
       if (!bodyResult.success) {
         step.fail('invalid install body');
-        return reply
-          .status(400)
-          .send({
-            error: SKILLS_ERROR_MESSAGES.installBodyInvalid,
-            issues: bodyResult.error.issues,
-          });
+        return reply.status(400).send({
+          error: SKILLS_ERROR_MESSAGES.installBodyInvalid,
+          issues: bodyResult.error.issues,
+        });
       }
       const body = bodyResult.data;
 

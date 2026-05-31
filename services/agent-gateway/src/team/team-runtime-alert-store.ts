@@ -44,7 +44,10 @@ function getResolvedBucket(userId: string): TeamRuntimeAlertState[] {
   return next;
 }
 
-function takeRecentlyResolvedAlert(userId: string, code: TeamRuntimeAlert['code']): TeamRuntimeAlertState | null {
+function takeRecentlyResolvedAlert(
+  userId: string,
+  code: TeamRuntimeAlert['code'],
+): TeamRuntimeAlertState | null {
   const bucket = getResolvedBucket(userId);
   const index = bucket.findIndex((item) => item.code === code);
   if (index < 0) {

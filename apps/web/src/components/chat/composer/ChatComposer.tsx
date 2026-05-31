@@ -1497,7 +1497,9 @@ export function ChatComposer({
                             setOptimizeResult(result);
                           })
                           .catch((err: unknown) => {
-                            setOptimizeError(err instanceof Error ? err.message : '提示词优化失败。');
+                            setOptimizeError(
+                              err instanceof Error ? err.message : '提示词优化失败。',
+                            );
                           })
                           .finally(() => {
                             setOptimizeLoading(false);

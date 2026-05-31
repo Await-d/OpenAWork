@@ -305,7 +305,8 @@ export function buildTeamRosterManifest(input: {
   }
   if (lines.length === 0) return null;
 
-  const flow = '协作链路：接待 → PM1 规划 → PM2 管控 → 执行 / 评审（跨层只能经 handoff，不能直连）。';
+  const flow =
+    '协作链路：接待 → PM1 规划 → PM2 管控 → 执行 / 评审（跨层只能经 handoff，不能直连）。';
   return [
     '【团队编制清单（动态）】',
     '以下是当前团队的实时角色编制（含自定义角色）。理解你在团队中的位置、上下游有谁、各成员擅长什么，据此协作与交付。',

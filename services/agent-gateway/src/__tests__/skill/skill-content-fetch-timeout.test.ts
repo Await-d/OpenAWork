@@ -37,7 +37,8 @@ describe('fetchSkillText timeout', () => {
   });
 
   it('非 2xx 响应抛出带状态码的错误', async () => {
-    globalThis.fetch = (() => Promise.resolve(new Response('nope', { status: 404 }))) as typeof fetch;
+    globalThis.fetch = (() =>
+      Promise.resolve(new Response('nope', { status: 404 }))) as typeof fetch;
     await expect(fetchSkillText('https://cdn.test/skill.md')).rejects.toThrow('HTTP 404');
   });
 });

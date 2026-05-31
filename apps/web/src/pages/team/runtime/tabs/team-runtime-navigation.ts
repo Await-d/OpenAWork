@@ -1,9 +1,6 @@
 import type { HandoffEvent } from '../../../../stores/team/team-events.js';
 
-export type TeamRuntimeHandoffContextTab =
-  | 'artifacts'
-  | 'review'
-  | 'health';
+export type TeamRuntimeHandoffContextTab = 'artifacts' | 'review' | 'health';
 
 export interface TeamRuntimeHandoffContextInput {
   handoffId?: string | null;

@@ -53,10 +53,13 @@ function makeOptions(overrides?: Partial<Parameters<typeof useChatRetryAndEdit>[
 beforeEach(() => {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () => new Response(JSON.stringify([]), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    })),
+    vi.fn(
+      async () =>
+        new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    ),
   );
 });
 
@@ -94,11 +97,12 @@ describe('useChatRetryAndEdit — 工具回调', () => {
   });
 
   it('truncateSessionMessagesInPlace 有 token 时调用网关', async () => {
-    const fetchMock = vi.fn(async () =>
-      new Response(JSON.stringify([]), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      }),
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
     );
     vi.stubGlobal('fetch', fetchMock);
 

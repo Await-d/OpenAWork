@@ -1,8 +1,4 @@
-import type {
-  FileTreeNode,
-  WorkspaceClient,
-  WorkspaceValidateResult,
-} from '@openAwork/web-client';
+import type { FileTreeNode, WorkspaceClient, WorkspaceValidateResult } from '@openAwork/web-client';
 
 export interface WorkspacePickerDataSource {
   fetchRootPath: () => Promise<string>;

@@ -69,9 +69,7 @@ export function getEffectiveSkillsFromSessionContext(input: {
   metadataJson: string | null | undefined;
 }): EffectiveSkill[] {
   const metadata = input.metadataJson ? parseSessionMetadataJson(input.metadataJson) : {};
-  const workspacePath = input.metadataJson
-    ? extractSessionWorkingDirectory(metadata)
-    : null;
+  const workspacePath = input.metadataJson ? extractSessionWorkingDirectory(metadata) : null;
   const requested = metadata['requestedSkills'];
   const requestedSkillIds = Array.isArray(requested)
     ? requested.filter((v): v is string => typeof v === 'string' && v.length > 0)

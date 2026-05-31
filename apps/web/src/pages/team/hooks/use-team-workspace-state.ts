@@ -57,11 +57,7 @@ export function useTeamWorkspaceState(teamWorkspaceId?: string): TeamWorkspaceSt
   const workspacesRef = useRef<TeamWorkspaceSummary[]>([]);
   const activeWorkspaceRef = useRef<TeamWorkspaceDetail | null>(null);
   const teamEventsRecoveredAt = useTeamEventsConnectionStore((state) => state.lastRecoveredAt);
-  const {
-    clearRetry,
-    resetRetry,
-    scheduleRetry,
-  } = useRecoverableRetryController();
+  const { clearRetry, resetRetry, scheduleRetry } = useRecoverableRetryController();
 
   const refresh = useCallback(() => {
     setRefreshTick((t) => t + 1);
@@ -165,8 +161,7 @@ export function useTeamWorkspaceState(teamWorkspaceId?: string): TeamWorkspaceSt
         setLoading(false);
         setError(
           formatTeamWorkspaceStateLoadError({
-            hasCachedWorkspaceData:
-              listResult.workspaces.length > 0 || fallbackWorkspace !== null,
+            hasCachedWorkspaceData: listResult.workspaces.length > 0 || fallbackWorkspace !== null,
             nextRetryAtMs,
             result: detailResult,
           }),
@@ -183,7 +178,16 @@ export function useTeamWorkspaceState(teamWorkspaceId?: string): TeamWorkspaceSt
     return () => {
       cancelled = true;
     };
-  }, [accessToken, clearRetry, client, refresh, resetRetry, scheduleRetry, teamWorkspaceId, refreshTick]);
+  }, [
+    accessToken,
+    clearRetry,
+    client,
+    refresh,
+    resetRetry,
+    scheduleRetry,
+    teamWorkspaceId,
+    refreshTick,
+  ]);
 
   useEffect(() => {
     return () => {

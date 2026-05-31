@@ -121,9 +121,7 @@ export function isTeamInitFinished(state: TeamInitState | null | undefined): boo
  * 注意：phase='skipped' 是用户显式跳过的终态，不由本函数推导。
  */
 export function deriveTeamInitPhase(steps: TeamInitStep[]): Exclude<TeamInitPhase, 'skipped'> {
-  const actionable = steps.filter(
-    (step) => step.status !== 'not_applicable',
-  );
+  const actionable = steps.filter((step) => step.status !== 'not_applicable');
   if (actionable.length === 0) {
     return 'completed';
   }

@@ -195,5 +195,4 @@ describe('MobileGatewayClient resilience', () => {
     // 不重连。
     expect(FakeWebSocket.instances).toHaveLength(1);
   });
-
 });

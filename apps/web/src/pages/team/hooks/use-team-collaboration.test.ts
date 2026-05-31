@@ -80,9 +80,7 @@ function setNavigatorOnline(value: boolean): void {
   });
 }
 
-function createRuntimeFixture(
-  overrides: Partial<TeamRuntimeReadModel> = {},
-): TeamRuntimeReadModel {
+function createRuntimeFixture(overrides: Partial<TeamRuntimeReadModel> = {}): TeamRuntimeReadModel {
   return {
     auditLogs: [],
     clarifications: [],

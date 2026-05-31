@@ -68,6 +68,7 @@ import {
   importTemplateState,
   isSeedTemplate,
   modelPoolEquals,
+  moveCustomSlotToLayer,
   rosterEquals,
   templateToEditorState,
   updateCustomSlot,
@@ -245,34 +246,31 @@ export default function TeamTemplatesPage() {
   }, [draft]);
 
   /** 触发文件选择 → 读取 JSON → 导入为新建草稿。 */
-  const handleImportFile = useCallback(
-    (file: File) => {
-      void file
-        .text()
-        .then((text) => {
-          const result = importTemplateState(text);
-          if (!result.ok) {
-            setFeedback({ kind: 'error', message: `导入失败：${result.error}` });
-            return;
-          }
-          // 导入一律进入「新建草稿」态，避免覆盖已有模板；名称带「(导入)」后缀去重提示。
-          setCreating(true);
-          setSelectedId(null);
-          setDraft({
-            ...result.state,
-            name: result.state.name.trim() ? `${result.state.name}（导入）` : '导入的模板',
-          });
-          setFeedback({ kind: 'success', message: '已导入为新建草稿，确认后保存' });
-        })
-        .catch((err: unknown) => {
-          setFeedback({
-            kind: 'error',
-            message: err instanceof Error ? err.message : '读取文件失败',
-          });
+  const handleImportFile = useCallback((file: File) => {
+    void file
+      .text()
+      .then((text) => {
+        const result = importTemplateState(text);
+        if (!result.ok) {
+          setFeedback({ kind: 'error', message: `导入失败：${result.error}` });
+          return;
+        }
+        // 导入一律进入「新建草稿」态，避免覆盖已有模板；名称带「(导入)」后缀去重提示。
+        setCreating(true);
+        setSelectedId(null);
+        setDraft({
+          ...result.state,
+          name: result.state.name.trim() ? `${result.state.name}（导入）` : '导入的模板',
         });
-    },
-    [],
-  );
+        setFeedback({ kind: 'success', message: '已导入为新建草稿，确认后保存' });
+      })
+      .catch((err: unknown) => {
+        setFeedback({
+          kind: 'error',
+          message: err instanceof Error ? err.message : '读取文件失败',
+        });
+      });
+  }, []);
 
   /** 自定义角色弹窗提交：新增或更新一个 custom 成员，写回 roster。 */
   const handleCustomRoleSubmit = useCallback(
@@ -492,9 +490,7 @@ export default function TeamTemplatesPage() {
       };
       const ok = await updateTemplate(selectedTemplate.id, patch);
       setFeedback(
-        ok
-          ? { kind: 'success', message: '已保存修改' }
-          : { kind: 'error', message: '保存失败' },
+        ok ? { kind: 'success', message: '已保存修改' } : { kind: 'error', message: '保存失败' },
       );
     }
   }, [createTemplate, creating, draft, selectedTemplate, updateTemplate, validation]);
@@ -849,6 +845,11 @@ export default function TeamTemplatesPage() {
                       setCustomRoleModal({ layer: slot.layer, editingSlot: slot })
                     }
                     onPreviewPrompt={(layer) => setPreviewLayer(layer)}
+                    onMoveCustom={(slotId, targetLayer) =>
+                      patchDraft({
+                        memberSlots: moveCustomSlotToLayer(draft.memberSlots, slotId, targetLayer),
+                      })
+                    }
                   />
                 </div>
               </section>

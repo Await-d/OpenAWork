@@ -25,14 +25,12 @@ vi.mock('../../routes/sessions.js', async (importOriginal) => {
   const actual = await importOriginal<typeof SessionsRoutesModule>();
   return {
     ...actual,
-    buildMergedSessionTaskProjection: vi.fn(
-      async (input: { sessionId: string }) => {
-        if (input.sessionId === POISON_SESSION_ID) {
-          throw new Error('simulated task-graph load failure');
-        }
-        return { tasks: [], updatedAt: 0 };
-      },
-    ),
+    buildMergedSessionTaskProjection: vi.fn(async (input: { sessionId: string }) => {
+      if (input.sessionId === POISON_SESSION_ID) {
+        throw new Error('simulated task-graph load failure');
+      }
+      return { tasks: [], updatedAt: 0 };
+    }),
   };
 });
 

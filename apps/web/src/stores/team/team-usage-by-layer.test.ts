@@ -59,8 +59,20 @@ describe('useTeamUsageStore · byLayer', () => {
 
   it('recent 保留 layer 字段（供 UsageView 单层下钻按 layer 过滤）', () => {
     const { applyUsageEvent } = useTeamUsageStore.getState();
-    applyUsageEvent({ layer: 'pm1', provider: 'anthropic', inputTokens: 1, outputTokens: 1, timestamp: 1 });
-    applyUsageEvent({ layer: 'executor', provider: 'openai', inputTokens: 1, outputTokens: 1, timestamp: 2 });
+    applyUsageEvent({
+      layer: 'pm1',
+      provider: 'anthropic',
+      inputTokens: 1,
+      outputTokens: 1,
+      timestamp: 1,
+    });
+    applyUsageEvent({
+      layer: 'executor',
+      provider: 'openai',
+      inputTokens: 1,
+      outputTokens: 1,
+      timestamp: 2,
+    });
     const recent = useTeamUsageStore.getState().recent;
     expect(recent.filter((e) => e.layer === 'pm1')).toHaveLength(1);
     expect(recent.filter((e) => e.layer === 'pm1')[0]?.provider).toBe('anthropic');

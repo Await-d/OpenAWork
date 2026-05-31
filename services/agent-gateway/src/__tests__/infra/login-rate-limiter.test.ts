@@ -8,10 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import {
-  LoginRateLimiter,
-  buildLoginRateLimitKey,
-} from '../../infra/login-rate-limiter.js';
+import { LoginRateLimiter, buildLoginRateLimitKey } from '../../infra/login-rate-limiter.js';
 
 function makeClock(start = 1_700_000_000_000) {
   let t = start;

@@ -38,10 +38,7 @@ function isRetryableAgentsStatus(status: number): boolean {
   return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
-function buildAgentsListErrorMessage(
-  status: number,
-  data: JsonErrorData | undefined,
-): string {
+function buildAgentsListErrorMessage(status: number, data: JsonErrorData | undefined): string {
   const extracted = extractJsonErrorMessage(data);
   if (extracted) {
     return extracted;
@@ -79,7 +76,9 @@ function isGenericAgentsNetworkErrorMessage(message: string): boolean {
 
 function normalizeAgentsActionError(actionLabel: string, error: unknown): Error {
   if (error instanceof HttpError) {
-    const extracted = extractJsonErrorMessage((error.data ?? undefined) as JsonErrorData | undefined);
+    const extracted = extractJsonErrorMessage(
+      (error.data ?? undefined) as JsonErrorData | undefined,
+    );
     if (extracted) {
       return new HttpError(extracted, error.status, error.data);
     }
@@ -104,11 +103,7 @@ async function performAgentsRequest<T>(input: {
     if (!response.ok) {
       const data = await readJsonErrorData<JsonErrorData>(response);
       throw new HttpError(
-        buildAgentsActionErrorMessage(
-          input.actionLabel,
-          response.status,
-          data,
-        ),
+        buildAgentsActionErrorMessage(input.actionLabel, response.status, data),
         response.status,
         data,
       );

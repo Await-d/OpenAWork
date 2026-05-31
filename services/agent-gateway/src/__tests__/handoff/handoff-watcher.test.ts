@@ -417,7 +417,6 @@ describe('HandoffWatcher.tickOnce', () => {
     expect(after?.state).toBe('failed');
     expect(after?.failureReason).toBe('quality-review-degraded-summary-failed:1');
   });
-
 });
 
 describe('HandoffWatcher.recoveryTick', () => {

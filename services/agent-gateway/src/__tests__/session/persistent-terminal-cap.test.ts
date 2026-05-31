@@ -104,16 +104,31 @@ describe('spawnPersistentTerminal per-session cap', () => {
 
   it('不同 session 各自独立计数，互不影响', () => {
     const other = 's-term-cap-2';
-    dbModule.sqliteRun("INSERT OR IGNORE INTO sessions (id, user_id, title) VALUES (?, ?, 'demo')", [
-      other,
-      USER_ID,
-    ]);
+    dbModule.sqliteRun(
+      "INSERT OR IGNORE INTO sessions (id, user_id, title) VALUES (?, ?, 'demo')",
+      [other, USER_ID],
+    );
 
-    mod.spawnPersistentTerminal({ sessionId: SESSION_ID, userId: USER_ID, cwd: '/tmp', source: 'user' });
-    mod.spawnPersistentTerminal({ sessionId: SESSION_ID, userId: USER_ID, cwd: '/tmp', source: 'user' });
+    mod.spawnPersistentTerminal({
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      cwd: '/tmp',
+      source: 'user',
+    });
+    mod.spawnPersistentTerminal({
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      cwd: '/tmp',
+      source: 'user',
+    });
     // SESSION_ID is at cap; a different session still has its full budget.
     expect(() =>
-      mod.spawnPersistentTerminal({ sessionId: other, userId: USER_ID, cwd: '/tmp', source: 'user' }),
+      mod.spawnPersistentTerminal({
+        sessionId: other,
+        userId: USER_ID,
+        cwd: '/tmp',
+        source: 'user',
+      }),
     ).not.toThrow();
   });
 });

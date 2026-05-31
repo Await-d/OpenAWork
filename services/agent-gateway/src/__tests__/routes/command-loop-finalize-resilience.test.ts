@@ -47,18 +47,14 @@ afterAll(async () => {
 
 beforeEach(() => {
   workspaceRoot = mkdtempSync(join(tmpdir(), 'loop-finalize-'));
-  dbModule.sqliteRun(
-    "INSERT OR IGNORE INTO users (id, email, password_hash) VALUES (?, ?, 'x')",
-    [USER_ID, `${USER_ID}@example.com`],
-  );
+  dbModule.sqliteRun("INSERT OR IGNORE INTO users (id, email, password_hash) VALUES (?, ?, 'x')", [
+    USER_ID,
+    `${USER_ID}@example.com`,
+  ]);
   dbModule.sqliteRun(
     `INSERT INTO sessions (id, user_id, title, metadata_json, state_status)
      VALUES (?, ?, 'loop session', ?, 'running')`,
-    [
-      SESSION_ID,
-      USER_ID,
-      JSON.stringify({ activeLoopKind: 'ralph', activeLoopTaskId: TASK_ID }),
-    ],
+    [SESSION_ID, USER_ID, JSON.stringify({ activeLoopKind: 'ralph', activeLoopTaskId: TASK_ID })],
   );
 });
 

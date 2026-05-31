@@ -32,7 +32,8 @@ export const CK_ACCENT_SOFT = 'color-mix(in srgb, var(--accent) 12%, transparent
 export const CK_ACCENT_BORDER = 'color-mix(in srgb, var(--accent) 40%, transparent)';
 
 /** 虚线边框（空态 / 占位）。 */
-export const CK_DASHED_BORDER = '1px dashed color-mix(in srgb, var(--border-default) 60%, transparent)';
+export const CK_DASHED_BORDER =
+  '1px dashed color-mix(in srgb, var(--border-default) 60%, transparent)';
 
 // ─── 间距 / 圆角 ─────────────────────────────────────────────────
 

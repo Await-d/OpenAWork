@@ -52,7 +52,10 @@ describe('batch tool per-sub-call resilience', () => {
 
     const toolExecute = vi.fn(async () => ({ output: 'ok', isError: false, durationMs: 1 }));
 
-    const sandbox = new ToolSandbox({ allowedTools: ['unit_tool', 'batch'], defaultTimeoutMs: 1000 });
+    const sandbox = new ToolSandbox({
+      allowedTools: ['unit_tool', 'batch'],
+      defaultTimeoutMs: 1000,
+    });
     sandbox.register({
       name: 'unit_tool',
       description: 'unit tool',
@@ -76,7 +79,10 @@ describe('batch tool per-sub-call resilience', () => {
       'session-1',
     );
 
-    const output = result.output as { results: Array<{ isError: boolean; output: string }>; total: number };
+    const output = result.output as {
+      results: Array<{ isError: boolean; output: string }>;
+      total: number;
+    };
     expect(output.total).toBe(2);
     // index-0 degraded to an error result (threw), index-1 completed normally.
     expect(output.results[0]?.isError).toBe(true);

@@ -1451,8 +1451,14 @@ export function OfficeThreeCanvas({
   const slideIdxRef = useRef(0);
   const slideTimerRef = useRef(0);
   const hoveredIdRef = useRef<string | null>(null);
-  const { canManageRuntime, officeAgents: rawOfficeAgents, metricCards, topSummary, footerStats, activityStats } =
-    useTeamRuntimeReferenceViewData();
+  const {
+    canManageRuntime,
+    officeAgents: rawOfficeAgents,
+    metricCards,
+    topSummary,
+    footerStats,
+    activityStats,
+  } = useTeamRuntimeReferenceViewData();
   // Wave 5：叠加真实 layer/handoff 状态，让 3D agent 的工作/讨论/休息跟随实际运行态。
   const officeAgents = useOfficeLayerBinding(rawOfficeAgents);
   const officeAgentsRef = useRef<AgentTeamsOfficeAgent[]>([]);

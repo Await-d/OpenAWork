@@ -457,7 +457,10 @@ describe('createTeamClient 初始化（teamInit）方法', () => {
   it('confirmSessionInitStep POST 到 confirm 端点并返回最新 teamInit', async () => {
     const calls: Array<{ url: string; method?: string }> = [];
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      calls.push({ url: typeof input === 'string' ? input : input.toString(), method: init?.method });
+      calls.push({
+        url: typeof input === 'string' ? input : input.toString(),
+        method: init?.method,
+      });
       return {
         ok: true,
         json: async () => ({ teamInit: { phase: 'in_progress', projectKind: 'existing' } }),
@@ -465,7 +468,11 @@ describe('createTeamClient 初始化（teamInit）方法', () => {
     }) as typeof fetch;
 
     const client = createTeamClient('http://localhost:3000');
-    const result = await client.confirmSessionInitStep('token-1', 'session-1', 'read-project-level1');
+    const result = await client.confirmSessionInitStep(
+      'token-1',
+      'session-1',
+      'read-project-level1',
+    );
 
     expect(calls[0]?.url).toBe(
       'http://localhost:3000/team/sessions/session-1/init/steps/read-project-level1/confirm',
@@ -489,7 +496,11 @@ describe('createTeamClient 初始化（teamInit）方法', () => {
     }) as typeof fetch;
 
     const client = createTeamClient('http://localhost:3000');
-    const result = await client.confirmSessionInitStep('token-1', 'session-1', 'understand-architecture');
+    const result = await client.confirmSessionInitStep(
+      'token-1',
+      'session-1',
+      'understand-architecture',
+    );
 
     expect(result.ok).toBe(false);
     expect(result.status).toBe(500);

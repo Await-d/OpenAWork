@@ -29,9 +29,7 @@ afterAll(async () => {
 });
 
 function countEventLog(): number {
-  return (
-    dbModule.sqliteGet<{ cnt: number }>('SELECT COUNT(*) AS cnt FROM event_log', [])?.cnt ?? 0
-  );
+  return dbModule.sqliteGet<{ cnt: number }>('SELECT COUNT(*) AS cnt FROM event_log', [])?.cnt ?? 0;
 }
 
 describe('event_log retention', () => {

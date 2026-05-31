@@ -116,8 +116,7 @@ export class LoginRateLimiter {
    */
   private sweep(now: number): void {
     for (const [key, entry] of this.attempts) {
-      const live =
-        entry.lockedUntil > now || entry.failures.some((ts) => now - ts < this.windowMs);
+      const live = entry.lockedUntil > now || entry.failures.some((ts) => now - ts < this.windowMs);
       if (!live) this.attempts.delete(key);
     }
     if (this.attempts.size <= this.maxEntries) return;

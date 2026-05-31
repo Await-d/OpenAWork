@@ -71,10 +71,7 @@ async function openSocket(
     resolveClosed = resolve;
   });
 
-  const ws = (await app.injectWS(
-    path,
-    { headers: { authorization: `Bearer ${authToken}` } },
-    {
+  const ws = (await app.injectWS(path, { headers: { authorization: `Bearer ${authToken}` } }, {
     onInit: (clientWs: unknown) => {
       capturedWs = clientWs as typeof capturedWs;
       capturedWs?.on('message', (data: unknown) => {
@@ -90,8 +87,7 @@ async function openSocket(
         resolveClosed({ code: typeof code === 'number' ? code : 0 });
       });
     },
-    } as never,
-  )) as unknown as typeof capturedWs;
+  } as never)) as unknown as typeof capturedWs;
 
   const target = capturedWs ?? ws;
   return {

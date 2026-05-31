@@ -168,14 +168,18 @@ export function TemplateLayerRosterEditor({
           const keys = new Set(boundSlots.map((s) => `${s.providerId ?? ''}::${s.modelId}`));
           if (boundSlots.length === selectedCount && keys.size === 1) {
             const m = modelPool.find(
-              (c) => c.modelId === boundSlots[0]!.modelId && c.providerId === boundSlots[0]!.providerId,
+              (c) =>
+                c.modelId === boundSlots[0]!.modelId && c.providerId === boundSlots[0]!.providerId,
             );
             return {
               text: `模型：${m?.label ?? boundSlots[0]!.modelId}`,
               tone: 'uniform',
             };
           }
-          return { text: `模型：混合（${boundSlots.length}/${selectedCount} 已指定）`, tone: 'mixed' };
+          return {
+            text: `模型：混合（${boundSlots.length}/${selectedCount} 已指定）`,
+            tone: 'mixed',
+          };
         })();
 
         return (
@@ -288,7 +292,8 @@ export function TemplateLayerRosterEditor({
                   color: 'var(--fg-muted)',
                   minWidth: 200,
                   paddingLeft: 14,
-                  borderLeft: '1px solid color-mix(in oklch, var(--border-default) 45%, transparent)',
+                  borderLeft:
+                    '1px solid color-mix(in oklch, var(--border-default) 45%, transparent)',
                   alignSelf: 'stretch',
                   display: 'flex',
                   alignItems: 'center',
@@ -307,9 +312,7 @@ export function TemplateLayerRosterEditor({
                         (m) => m.modelId === slot.modelId && m.providerId === slot.providerId,
                       )
                     : undefined;
-                  const modelLabel = slot?.modelId
-                    ? (poolMatch?.label ?? slot.modelId)
-                    : undefined;
+                  const modelLabel = slot?.modelId ? (poolMatch?.label ?? slot.modelId) : undefined;
                   const providerName = poolMatch?.providerName ?? slot?.providerId;
                   return (
                     <SpecialtyChip
@@ -759,7 +762,9 @@ function CustomRoleCard({
           >
             {TEAM_RUNTIME_LAYER_ORDER.map((l) => (
               <option key={l} value={l}>
-                {l === slot.layer ? `↕ ${TEAM_LAYER_META[l].label}` : `→ ${TEAM_LAYER_META[l].label}`}
+                {l === slot.layer
+                  ? `↕ ${TEAM_LAYER_META[l].label}`
+                  : `→ ${TEAM_LAYER_META[l].label}`}
               </option>
             ))}
           </select>
@@ -1025,7 +1030,9 @@ function DetailPopover({
       )}
 
       {/* Required + remove */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+      <div
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}
+      >
         <label
           style={{
             display: 'flex',

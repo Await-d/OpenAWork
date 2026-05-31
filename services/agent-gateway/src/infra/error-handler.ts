@@ -32,8 +32,7 @@ export function registerErrorHandler(app: FastifyInstance): void {
       return reply.status(error.statusCode).send({
         name: error.statusCode === 404 ? 'NotFound' : 'BadRequest',
         data: {
-          message:
-            error.statusCode === 404 ? '请求的接口不存在。' : '请求参数无效。',
+          message: error.statusCode === 404 ? '请求的接口不存在。' : '请求参数无效。',
         },
       });
     }

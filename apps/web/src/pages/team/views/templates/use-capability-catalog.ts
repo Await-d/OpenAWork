@@ -74,17 +74,11 @@ export function useCapabilityCatalog(): CapabilityCatalogState {
   }, [accessToken, client, tick]);
 
   const skills = useMemo(
-    () =>
-      capabilities
-        .filter((c) => c.kind === 'skill' && c.enabled !== false)
-        .map(toOption),
+    () => capabilities.filter((c) => c.kind === 'skill' && c.enabled !== false).map(toOption),
     [capabilities],
   );
   const mcpServers = useMemo(
-    () =>
-      capabilities
-        .filter((c) => c.kind === 'mcp' && c.enabled !== false)
-        .map(toOption),
+    () => capabilities.filter((c) => c.kind === 'mcp' && c.enabled !== false).map(toOption),
     [capabilities],
   );
 

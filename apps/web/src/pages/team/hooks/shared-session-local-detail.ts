@@ -1,7 +1,4 @@
-import type {
-  SharedSessionCommentRecord,
-  SharedSessionDetailRecord,
-} from '@openAwork/web-client';
+import type { SharedSessionCommentRecord, SharedSessionDetailRecord } from '@openAwork/web-client';
 
 export function appendSharedSessionCommentPreview(
   detail: SharedSessionDetailRecord | null,
@@ -14,12 +11,14 @@ export function appendSharedSessionCommentPreview(
     return detail;
   }
 
-  const merged = [...detail.comments.filter((comment) => comment.id !== input.comment.id), input.comment]
-    .sort((left, right) =>
-      left.createdAt === right.createdAt
-        ? left.id.localeCompare(right.id)
-        : left.createdAt.localeCompare(right.createdAt),
-    );
+  const merged = [
+    ...detail.comments.filter((comment) => comment.id !== input.comment.id),
+    input.comment,
+  ].sort((left, right) =>
+    left.createdAt === right.createdAt
+      ? left.id.localeCompare(right.id)
+      : left.createdAt.localeCompare(right.createdAt),
+  );
 
   return {
     ...detail,

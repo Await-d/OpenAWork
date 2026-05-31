@@ -237,12 +237,7 @@ export function TeamInitModal({ sessionId, sessionMetadata }: TeamInitModalProps
                 if (e.target === e.currentTarget) setOpen(false);
               }}
             >
-              <div
-                style={MODAL_STYLE}
-                role="dialog"
-                aria-modal="true"
-                aria-label="团队初始化准备"
-              >
+              <div style={MODAL_STYLE} role="dialog" aria-modal="true" aria-label="团队初始化准备">
                 <div style={MODAL_HEADER_STYLE}>
                   <div>
                     <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--fg-strong)' }}>

@@ -378,7 +378,8 @@ export function HealthView({ onCancelHandoff, onOpenHandoffContext }: HealthView
                     🔄
                   </span>
                   <span style={{ color: 'var(--fg-strong)', fontWeight: 700 }}>
-                    近期有 {qualityReview.redispatchCount} 次实现型失败重派，执行层可能反复卡在测试或实现质量问题上。
+                    近期有 {qualityReview.redispatchCount}{' '}
+                    次实现型失败重派，执行层可能反复卡在测试或实现质量问题上。
                   </span>
                 </div>
               ) : null}
@@ -410,7 +411,9 @@ export function HealthView({ onCancelHandoff, onOpenHandoffContext }: HealthView
                           PM2 评审 #{pending.handoffId.slice(0, 8)}
                         </strong>
                         <span style={{ color: 'var(--fg-muted)', fontSize: 11 }}>
-                          {pending.lastError ? `最近错误：${pending.lastError}` : '最近一次评审未记录错误。'}
+                          {pending.lastError
+                            ? `最近错误：${pending.lastError}`
+                            : '最近一次评审未记录错误。'}
                         </span>
                         <span style={{ color: 'var(--fg-muted)', fontSize: 11 }}>
                           {pending.readyNow
@@ -463,7 +466,8 @@ export function HealthView({ onCancelHandoff, onOpenHandoffContext }: HealthView
                     ↩️
                   </span>
                   <span style={{ color: 'var(--fg-strong)', fontWeight: 700 }}>
-                    近期有 {qualityReview.returnToCCount} 次规划型失败退回 PM1，优先复查 spec / plan / tasks 是否跑偏。
+                    近期有 {qualityReview.returnToCCount} 次规划型失败退回 PM1，优先复查 spec / plan
+                    / tasks 是否跑偏。
                   </span>
                 </div>
               ) : null}
@@ -473,7 +477,8 @@ export function HealthView({ onCancelHandoff, onOpenHandoffContext }: HealthView
                     ⬆️
                   </span>
                   <span style={{ color: 'var(--fg-strong)', fontWeight: 700 }}>
-                    当前有 {qualityReview.escalateToUserCount} 次评审失败已升级给用户，团队正在等待人工介入决策。
+                    当前有 {qualityReview.escalateToUserCount}{' '}
+                    次评审失败已升级给用户，团队正在等待人工介入决策。
                   </span>
                 </div>
               ) : null}
@@ -486,7 +491,10 @@ export function HealthView({ onCancelHandoff, onOpenHandoffContext }: HealthView
             <span style={SECTION_TITLE_STYLE}>后端判定原因</span>
             <div style={{ display: 'grid', gap: 6 }}>
               {backendReasons.map((reason: string) => (
-                <div key={reason} style={backendHealth === 'critical' ? FAILED_ROW_STYLE : STUCK_ROW_STYLE}>
+                <div
+                  key={reason}
+                  style={backendHealth === 'critical' ? FAILED_ROW_STYLE : STUCK_ROW_STYLE}
+                >
                   <span aria-hidden style={{ fontSize: 14 }}>
                     {backendHealth === 'critical' ? '🛑' : '🩺'}
                   </span>
@@ -507,7 +515,11 @@ export function HealthView({ onCancelHandoff, onOpenHandoffContext }: HealthView
                   style={alert.severity === 'critical' ? FAILED_ROW_STYLE : STUCK_ROW_STYLE}
                 >
                   <span aria-hidden style={{ fontSize: 14 }}>
-                    {alert.severity === 'critical' ? '🚨' : alert.severity === 'warning' ? '🛠️' : 'ℹ️'}
+                    {alert.severity === 'critical'
+                      ? '🚨'
+                      : alert.severity === 'warning'
+                        ? '🛠️'
+                        : 'ℹ️'}
                   </span>
                   <div style={{ display: 'grid', gap: 2, flex: 1 }}>
                     <strong style={{ color: 'var(--fg-strong)' }}>
@@ -543,7 +555,7 @@ export function HealthView({ onCancelHandoff, onOpenHandoffContext }: HealthView
                                 ? '释放超时交互'
                                 : alert.code === 'quality-review-pending'
                                   ? '立即重试评审'
-                                : '重试可恢复失败'}
+                                  : '重试可恢复失败'}
                           </button>
                         ) : null}
                         <button
@@ -567,7 +579,10 @@ export function HealthView({ onCancelHandoff, onOpenHandoffContext }: HealthView
                           onClick={async () => {
                             setAlertActionBusy(alert.code);
                             try {
-                              await suppressRuntimeAlert(alert.code, { minutes: 60, note: '静音 1 小时' });
+                              await suppressRuntimeAlert(alert.code, {
+                                minutes: 60,
+                                note: '静音 1 小时',
+                              });
                             } finally {
                               setAlertActionBusy(null);
                             }
@@ -607,7 +622,10 @@ export function HealthView({ onCancelHandoff, onOpenHandoffContext }: HealthView
             <span style={SECTION_TITLE_STYLE}>最近恢复</span>
             <div style={{ display: 'grid', gap: 6 }}>
               {diagnostics.recentResolvedAlerts.slice(0, 4).map((alert) => (
-                <div key={`${alert.code}-${alert.resolvedAt ?? alert.lastDetectedAt}`} style={ROW_STYLE}>
+                <div
+                  key={`${alert.code}-${alert.resolvedAt ?? alert.lastDetectedAt}`}
+                  style={ROW_STYLE}
+                >
                   <span aria-hidden style={{ fontSize: 14 }}>
                     ✅
                   </span>
@@ -625,25 +643,29 @@ export function HealthView({ onCancelHandoff, onOpenHandoffContext }: HealthView
 
         {diagnostics?.incidents && diagnostics.incidents.length > 0 ? (
           <div style={{ display: 'grid', gap: 8 }}>
-            <span style={SECTION_TITLE_STYLE}>运行时事件（最近 {diagnostics.incidents.length} 条）</span>
+            <span style={SECTION_TITLE_STYLE}>
+              运行时事件（最近 {diagnostics.incidents.length} 条）
+            </span>
             <div style={{ display: 'grid', gap: 6 }}>
-              {diagnostics.incidents.slice(0, 8).map((incident: TeamRuntimeDiagnostics['incidents'][number]) => (
-                <div
-                  key={`${incident.code}-${incident.timestamp}`}
-                  style={incident.severity === 'error' ? FAILED_ROW_STYLE : STUCK_ROW_STYLE}
-                >
-                  <span aria-hidden style={{ fontSize: 14 }}>
-                    {incident.severity === 'error' ? '⚠️' : 'ℹ️'}
-                  </span>
-                  <span style={{ minWidth: 120, color: 'var(--fg-strong)', fontWeight: 700 }}>
-                    {incident.category}
-                  </span>
-                  <span style={{ flex: 1, color: 'var(--fg-default)' }}>{incident.message}</span>
-                  <span style={{ color: 'var(--fg-muted)', fontSize: 11 }}>
-                    {new Date(incident.timestamp).toLocaleTimeString()}
-                  </span>
-                </div>
-              ))}
+              {diagnostics.incidents
+                .slice(0, 8)
+                .map((incident: TeamRuntimeDiagnostics['incidents'][number]) => (
+                  <div
+                    key={`${incident.code}-${incident.timestamp}`}
+                    style={incident.severity === 'error' ? FAILED_ROW_STYLE : STUCK_ROW_STYLE}
+                  >
+                    <span aria-hidden style={{ fontSize: 14 }}>
+                      {incident.severity === 'error' ? '⚠️' : 'ℹ️'}
+                    </span>
+                    <span style={{ minWidth: 120, color: 'var(--fg-strong)', fontWeight: 700 }}>
+                      {incident.category}
+                    </span>
+                    <span style={{ flex: 1, color: 'var(--fg-default)' }}>{incident.message}</span>
+                    <span style={{ color: 'var(--fg-muted)', fontSize: 11 }}>
+                      {new Date(incident.timestamp).toLocaleTimeString()}
+                    </span>
+                  </div>
+                ))}
             </div>
           </div>
         ) : null}
@@ -681,11 +703,7 @@ export function HealthView({ onCancelHandoff, onOpenHandoffContext }: HealthView
             ) : null}
             <div style={{ display: 'grid', gap: 6 }}>
               {failed.map((entry) => (
-                <FailedRow
-                  key={entry.id}
-                  entry={entry}
-                  onOpenContext={onOpenHandoffContext}
-                />
+                <FailedRow key={entry.id} entry={entry} onOpenContext={onOpenHandoffContext} />
               ))}
             </div>
           </div>

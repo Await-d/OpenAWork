@@ -148,7 +148,10 @@ async function authPlugin(app: FastifyInstance): Promise<void> {
       return reply
         .status(429)
         .header('retry-after', String(limit.retryAfterSeconds))
-        .send({ error: '登录尝试过于频繁，请稍后再试。', retryAfterSeconds: limit.retryAfterSeconds });
+        .send({
+          error: '登录尝试过于频繁，请稍后再试。',
+          retryAfterSeconds: limit.retryAfterSeconds,
+        });
     }
 
     const lookupStep = child('lookup-user');

@@ -132,7 +132,10 @@ export function getMessageTypeMeta(type: TeamMessageRecord['type']) {
 export function getAuditActionMeta(action: TeamAuditLogRecord['action']) {
   switch (action) {
     case 'runtime_incident':
-      return { label: '运行异常', style: pillStyle('var(--complement)', 'rgba(244, 63, 94, 0.16)') };
+      return {
+        label: '运行异常',
+        style: pillStyle('var(--complement)', 'rgba(244, 63, 94, 0.16)'),
+      };
     case 'runtime_alert_control':
       return { label: '告警控制', style: pillStyle('var(--warning)', 'rgba(245, 158, 11, 0.18)') };
     case 'runtime_remediation':

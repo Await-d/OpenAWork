@@ -88,16 +88,14 @@ interface WorkspaceGroupSectionProps {
   deletingSessionIds: Set<string>;
   onToggleCollapsed: (groupKey: string) => void;
   onCreateInWorkspace: (workspacePath: string | null) => void;
-  onRequestContextMenu: (
-    args: {
-      groupKey: string;
-      workspaceLabel: string;
-      workspacePath: string | null;
-      sessionCount: number;
-      x: number;
-      y: number;
-    },
-  ) => void;
+  onRequestContextMenu: (args: {
+    groupKey: string;
+    workspaceLabel: string;
+    workspacePath: string | null;
+    sessionCount: number;
+    x: number;
+    y: number;
+  }) => void;
   onSessionHoverEnter: (sessionId: string, position?: { x: number; y: number }) => void;
   onSessionHoverMove: (sessionId: string, position: { x: number; y: number }) => void;
   onSessionHoverLeave: (sessionId: string) => void;
@@ -185,9 +183,7 @@ export const WorkspaceGroupSection = memo(function WorkspaceGroupSection({
           onContextMenu={onContextMenu}
           onKeyDown={onHeaderKeyDown}
           title={
-            workspacePath || actualSessionCount > 0
-              ? `右键管理工作区 ${workspaceLabel}`
-              : undefined
+            workspacePath || actualSessionCount > 0 ? `右键管理工作区 ${workspaceLabel}` : undefined
           }
           style={HEADER_BUTTON_STYLE}
         >

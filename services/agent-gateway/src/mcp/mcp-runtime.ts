@@ -332,7 +332,8 @@ export async function listMcpToolsForSession(
   if (filter?.allowedServerIds && filter.allowedServerIds.length > 0) {
     const allow = new Set(filter.allowedServerIds);
     selectedServers = selectedServers.filter(
-      (server) => allow.has(server.id) || (BUILTIN_MCP_IDS as readonly string[]).includes(server.id),
+      (server) =>
+        allow.has(server.id) || (BUILTIN_MCP_IDS as readonly string[]).includes(server.id),
     );
   }
 

@@ -26,10 +26,30 @@ vi.mock('../../data/team-runtime-reference-data.js', () => ({
 vi.mock('../../hooks/use-team-runtime-role-bindings.js', () => ({
   useTeamRuntimeRoleBindings: () => ({
     agents: [
-      { id: 'agent-planner', label: 'Planner', enabled: true, canonicalRole: { coreRole: 'planner' } },
-      { id: 'agent-researcher', label: 'Researcher', enabled: true, canonicalRole: { coreRole: 'researcher' } },
-      { id: 'agent-executor', label: 'Executor', enabled: true, canonicalRole: { coreRole: 'executor' } },
-      { id: 'agent-reviewer', label: 'Reviewer', enabled: true, canonicalRole: { coreRole: 'reviewer' } },
+      {
+        id: 'agent-planner',
+        label: 'Planner',
+        enabled: true,
+        canonicalRole: { coreRole: 'planner' },
+      },
+      {
+        id: 'agent-researcher',
+        label: 'Researcher',
+        enabled: true,
+        canonicalRole: { coreRole: 'researcher' },
+      },
+      {
+        id: 'agent-executor',
+        label: 'Executor',
+        enabled: true,
+        canonicalRole: { coreRole: 'executor' },
+      },
+      {
+        id: 'agent-reviewer',
+        label: 'Reviewer',
+        enabled: true,
+        canonicalRole: { coreRole: 'reviewer' },
+      },
     ],
     error: null,
   }),

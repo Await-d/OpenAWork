@@ -108,28 +108,28 @@ export function FileEditorPanel({
   // Monaco editor: select the range, scroll it to center, and focus so the
   // cursor is where the user expects. No-op when the editor isn't mounted
   // yet — the mount effect re-checks the pending target on attach.
-  const applyReveal = useCallback(
-    (target: RevealTarget) => {
-      const ed = editorRef.current;
-      if (!ed) return false;
-      const model = ed.getModel();
-      const maxLine = model ? model.getLineCount() : target.line;
-      const startLine = Math.min(Math.max(1, target.line), Math.max(1, maxLine));
-      const endLine = Math.min(Math.max(startLine, target.endLine ?? startLine), Math.max(1, maxLine));
-      const endColumn = model ? model.getLineMaxColumn(endLine) : 1;
-      ed.revealLinesInCenterIfOutsideViewport(startLine, endLine);
-      ed.setSelection({
-        startLineNumber: startLine,
-        startColumn: 1,
-        endLineNumber: endLine,
-        endColumn,
-      });
-      ed.setPosition({ lineNumber: startLine, column: 1 });
-      ed.focus();
-      return true;
-    },
-    [],
-  );
+  const applyReveal = useCallback((target: RevealTarget) => {
+    const ed = editorRef.current;
+    if (!ed) return false;
+    const model = ed.getModel();
+    const maxLine = model ? model.getLineCount() : target.line;
+    const startLine = Math.min(Math.max(1, target.line), Math.max(1, maxLine));
+    const endLine = Math.min(
+      Math.max(startLine, target.endLine ?? startLine),
+      Math.max(1, maxLine),
+    );
+    const endColumn = model ? model.getLineMaxColumn(endLine) : 1;
+    ed.revealLinesInCenterIfOutsideViewport(startLine, endLine);
+    ed.setSelection({
+      startLineNumber: startLine,
+      startColumn: 1,
+      endLineNumber: endLine,
+      endColumn,
+    });
+    ed.setPosition({ lineNumber: startLine, column: 1 });
+    ed.focus();
+    return true;
+  }, []);
 
   // Re-apply whenever a new reveal target arrives for the file that's
   // currently active. Runs after Monaco's value has been set for the file.

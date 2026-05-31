@@ -1,9 +1,6 @@
 import type { ToolDefinition } from '@openAwork/agent-core';
 import { z } from 'zod';
-import {
-  readResponseTextWithLimit,
-  resolveHttpBodyLimitBytes,
-} from '../infra/http-body-limit.js';
+import { readResponseTextWithLimit, resolveHttpBodyLimitBytes } from '../infra/http-body-limit.js';
 
 const EXA_MCP_URL = 'https://mcp.exa.ai/mcp';
 
@@ -13,10 +10,7 @@ const EXA_MCP_URL = 'https://mcp.exa.ai/mcp';
 // (§0.85/§0.86); override via OPENAWORK_CODESEARCH_MAX_BYTES, 0 disables.
 const DEFAULT_CODESEARCH_MAX_BYTES = 8 * 1024 * 1024;
 function resolveCodesearchMaxResponseBytes(): number {
-  return resolveHttpBodyLimitBytes(
-    'OPENAWORK_CODESEARCH_MAX_BYTES',
-    DEFAULT_CODESEARCH_MAX_BYTES,
-  );
+  return resolveHttpBodyLimitBytes('OPENAWORK_CODESEARCH_MAX_BYTES', DEFAULT_CODESEARCH_MAX_BYTES);
 }
 
 interface ExaCodeSearchResponse {

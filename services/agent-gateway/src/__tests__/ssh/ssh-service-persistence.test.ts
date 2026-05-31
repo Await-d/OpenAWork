@@ -22,10 +22,11 @@ beforeAll(async () => {
   // ON DELETE CASCADE machinery is happy.
   const { sqliteRun } = await import('../../infra/db.js');
   for (const id of [TEST_USER, OTHER_USER]) {
-    sqliteRun(
-      'INSERT OR IGNORE INTO users (id, email, password_hash) VALUES (?, ?, ?)',
-      [id, `${id}@example.test`, 'x'],
-    );
+    sqliteRun('INSERT OR IGNORE INTO users (id, email, password_hash) VALUES (?, ?, ?)', [
+      id,
+      `${id}@example.test`,
+      'x',
+    ]);
   }
 });
 
@@ -47,7 +48,12 @@ function createConnectingManager(behavior: 'ok' | 'fail') {
     },
     disconnect: async () => undefined,
     execCommand: async () => ({ stdout: '', stderr: '', exitCode: 0 }),
-    readFile: async () => ({ path: '/x', content: '', encoding: 'utf8' as const, truncated: false }),
+    readFile: async () => ({
+      path: '/x',
+      content: '',
+      encoding: 'utf8' as const,
+      truncated: false,
+    }),
     writeFile: async () => undefined,
     listFiles: async () => [],
     getStatus: () => 'disconnected' as const,
@@ -141,7 +147,12 @@ describe('SshService persistence', () => {
       username: 'root',
       authType: 'agent',
     });
-    svc.upsertDialog({ userId: TEST_USER, connectionId: c1.id, cwd: '/srv', lastFilePath: '/srv/a.log' });
+    svc.upsertDialog({
+      userId: TEST_USER,
+      connectionId: c1.id,
+      cwd: '/srv',
+      lastFilePath: '/srv/a.log',
+    });
     svc.upsertDialog({ userId: TEST_USER, connectionId: c2.id, cwd: '/var', pinned: false });
     // Touch c1 again so it becomes "most recent".
     svc.upsertDialog({ userId: TEST_USER, connectionId: c1.id, cwd: '/srv/logs' });
@@ -161,9 +172,7 @@ describe('SshService persistence', () => {
   it('listFiles / readFile / writeFile each touch the dialog and survive a restart', async () => {
     const manager = {
       ...createConnectingManager('ok'),
-      listFiles: async () => [
-        { name: 'a.txt', path: '/srv/a.txt', kind: 'file' as const },
-      ],
+      listFiles: async () => [{ name: 'a.txt', path: '/srv/a.txt', kind: 'file' as const }],
       readFile: async () => ({
         path: '/srv/a.txt',
         content: 'hello',

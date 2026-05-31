@@ -105,8 +105,7 @@ export function updateTeamInitStep(
   if (!ctx?.teamInit) return null;
 
   const steps = ctx.teamInit.steps.map((step) => (step.key === stepKey ? mutate(step) : step));
-  const phase =
-    ctx.teamInit.phase === 'skipped' ? 'skipped' : deriveTeamInitPhase(steps);
+  const phase = ctx.teamInit.phase === 'skipped' ? 'skipped' : deriveTeamInitPhase(steps);
 
   const nextState: TeamInitState = {
     ...ctx.teamInit,

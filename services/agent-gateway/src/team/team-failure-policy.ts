@@ -197,7 +197,8 @@ export function deriveTeamRuntimeAlerts(input: {
       code: 'architecture-review-blocked',
       message: `存在 ${input.architectureReviewBlockedCount} 条架构评审阻断，新的派发已被拦截。`,
       severity: 'critical',
-      suggestedAction: '先查看 Health 页的运行时事件与 Architecture Review artifact，修正计划后再重试。',
+      suggestedAction:
+        '先查看 Health 页的运行时事件与 Architecture Review artifact，修正计划后再重试。',
     });
   }
 
@@ -219,7 +220,8 @@ export function deriveTeamRuntimeAlerts(input: {
       code: 'quality-review-redispatch',
       message: `近期出现 ${input.qualityReviewRedispatchCount} 次实现型失败重派，PM2 正在尝试重新派发。`,
       severity: 'warning',
-      suggestedAction: '优先检查 review_report 与执行层结果，确认是否是测试或实现层反复失败导致的自动重派。',
+      suggestedAction:
+        '优先检查 review_report 与执行层结果，确认是否是测试或实现层反复失败导致的自动重派。',
     });
   }
 
@@ -244,7 +246,8 @@ export function deriveTeamRuntimeAlerts(input: {
       code: 'quality-review-return-to-c',
       message: `近期出现 ${input.qualityReviewReturnToCCount} 次规划型失败退回 PM1，当前 spec/plan/tasks 可能需要重写。`,
       severity: 'warning',
-      suggestedAction: '优先查看 review_report、Spec Review 问题列表与 PM1 规划结果，确认需求理解或架构设计是否有偏差。',
+      suggestedAction:
+        '优先查看 review_report、Spec Review 问题列表与 PM1 规划结果，确认需求理解或架构设计是否有偏差。',
     });
   }
 
@@ -253,7 +256,8 @@ export function deriveTeamRuntimeAlerts(input: {
       code: 'quality-review-escalate-to-user',
       message: `近期有 ${input.qualityReviewEscalateToUserCount} 次评审失败已升级给用户，团队正等待人工介入。`,
       severity: 'critical',
-      suggestedAction: '请直接介入当前任务：修改原始需求、补充约束，或确认是否继续推进当前实现路线。',
+      suggestedAction:
+        '请直接介入当前任务：修改原始需求、补充约束，或确认是否继续推进当前实现路线。',
     });
   }
 

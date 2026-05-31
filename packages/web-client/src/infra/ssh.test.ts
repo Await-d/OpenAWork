@@ -15,7 +15,11 @@ describe('createSshClient', () => {
     globalThis.fetch = vi.fn(async () => {
       return {
         ok: true,
-        json: async () => ({ connections: [{ id: 'ssh-1', host: 'localhost', port: 22, username: 'root', status: 'connected' }] }),
+        json: async () => ({
+          connections: [
+            { id: 'ssh-1', host: 'localhost', port: 22, username: 'root', status: 'connected' },
+          ],
+        }),
       } as unknown as Response;
     }) as typeof fetch;
 

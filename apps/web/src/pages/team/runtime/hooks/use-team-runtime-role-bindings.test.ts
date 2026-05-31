@@ -84,11 +84,14 @@ function createAgent(
   };
 }
 
-function createCapability(id: string, coreRole: CapabilityDescriptor['canonicalRole'] extends infer T
-  ? T extends { coreRole: infer R }
-    ? R
-    : never
-  : never): CapabilityDescriptor {
+function createCapability(
+  id: string,
+  coreRole: CapabilityDescriptor['canonicalRole'] extends infer T
+    ? T extends { coreRole: infer R }
+      ? R
+      : never
+    : never,
+): CapabilityDescriptor {
   return {
     id,
     kind: 'tool',
@@ -183,10 +186,7 @@ describe('useTeamRuntimeRoleBindings', () => {
           }
           return jsonResponse({
             capabilities: [
-              createCapability(
-                capabilitiesCallCount >= 3 ? 'planner-v2' : 'planner-v1',
-                'planner',
-              ),
+              createCapability(capabilitiesCallCount >= 3 ? 'planner-v2' : 'planner-v1', 'planner'),
             ],
           });
         }
@@ -198,9 +198,9 @@ describe('useTeamRuntimeRoleBindings', () => {
 
     await flushAsyncWork();
     expect(result.current.agents.map((agent) => agent.id)).toEqual(['prometheus', 'momus']);
-    expect(result.current.roleCards.find((card) => card.role === 'planner')?.selectedAgent?.id).toBe(
-      'prometheus',
-    );
+    expect(
+      result.current.roleCards.find((card) => card.role === 'planner')?.selectedAgent?.id,
+    ).toBe('prometheus');
     expect(
       result.current.roleCards.find((card) => card.role === 'planner')?.recommendedCapabilities[0]
         ?.id,
@@ -245,10 +245,7 @@ describe('useTeamRuntimeRoleBindings', () => {
           capabilitiesCallCount += 1;
           return jsonResponse({
             capabilities: [
-              createCapability(
-                capabilitiesCallCount >= 2 ? 'planner-v2' : 'planner-v1',
-                'planner',
-              ),
+              createCapability(capabilitiesCallCount >= 2 ? 'planner-v2' : 'planner-v1', 'planner'),
             ],
           });
         }

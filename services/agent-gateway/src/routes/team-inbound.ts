@@ -118,14 +118,16 @@ export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
         if (body.messageType === 'clarification_answer') {
           const questionId =
             typeof body.payload?.['questionId'] === 'string' ? body.payload['questionId'] : null;
-          const answer = typeof body.payload?.['answer'] === 'string' ? body.payload['answer'] : null;
+          const answer =
+            typeof body.payload?.['answer'] === 'string' ? body.payload['answer'] : null;
           const answeredAt =
-            typeof body.payload?.['answeredAt'] === 'number' ? body.payload['answeredAt'] : Date.now();
+            typeof body.payload?.['answeredAt'] === 'number'
+              ? body.payload['answeredAt']
+              : Date.now();
           if (questionId && answer) {
             try {
-              const {
-                resolveClarificationEscalationRequest,
-              } = await import('../handoff/store/inbound-store.js');
+              const { resolveClarificationEscalationRequest } =
+                await import('../handoff/store/inbound-store.js');
               resolveClarificationEscalationRequest({
                 answer,
                 answeredAt,
@@ -308,7 +310,8 @@ export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
 
       const dismissStep = child('dismiss-clarification');
       try {
-        const { resolveClarificationEscalationRequest } = await import('../handoff/store/inbound-store.js');
+        const { resolveClarificationEscalationRequest } =
+          await import('../handoff/store/inbound-store.js');
         const resolved = resolveClarificationEscalationRequest({
           answeredAt: body.answeredAt ?? Date.now(),
           questionId,

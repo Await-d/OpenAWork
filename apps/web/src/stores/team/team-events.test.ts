@@ -319,9 +319,7 @@ describe('useTeamNotificationStore read lifecycle', () => {
         type: 'progress_report',
       } as const;
       store.push(event);
-      useTeamNotificationStore
-        .getState()
-        .markEventRead(getTeamNotificationEventKey(event));
+      useTeamNotificationStore.getState().markEventRead(getTeamNotificationEventKey(event));
     }
     expect(useTeamNotificationStore.getState().events).toHaveLength(60);
     expect(useTeamNotificationStore.getState().readEventKeys.size).toBe(60);
@@ -347,9 +345,7 @@ describe('useTeamNotificationStore read lifecycle', () => {
     // unreadCount 与存活缓冲一致：100 条都未读。
     expect(finalState.unreadCount).toBe(100);
     // readEventKeys 中的每个 key 都必须对应一条仍存活的事件。
-    const survivingKeys = new Set(
-      finalState.events.map(getTeamNotificationEventKey),
-    );
+    const survivingKeys = new Set(finalState.events.map(getTeamNotificationEventKey));
     for (const key of finalState.readEventKeys) {
       expect(survivingKeys.has(key)).toBe(true);
     }

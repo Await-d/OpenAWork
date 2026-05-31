@@ -125,7 +125,9 @@ export interface TeamRuntimeReferenceViewData {
     alertCode: TeamRuntimeAlertControlRecord['alertCode'],
     note?: string,
   ) => Promise<boolean>;
-  clearRuntimeAlertControl: (alertCode: TeamRuntimeAlertControlRecord['alertCode']) => Promise<boolean>;
+  clearRuntimeAlertControl: (
+    alertCode: TeamRuntimeAlertControlRecord['alertCode'],
+  ) => Promise<boolean>;
   suppressRuntimeAlert: (
     alertCode: TeamRuntimeAlertControlRecord['alertCode'],
     input?: { minutes?: number; note?: string },
@@ -736,14 +738,10 @@ export function useResolvedTeamRuntimeReferenceData(
       }
       setSessionActionBusy(true);
       try {
-        const result = await teamClient.acknowledgeRuntimeAlert(
-          accessToken,
-          alertCode,
-          {
-            ...(note ? { note } : {}),
-            ...(options.teamWorkspaceId ? { teamWorkspaceId: options.teamWorkspaceId } : {}),
-          },
-        );
+        const result = await teamClient.acknowledgeRuntimeAlert(accessToken, alertCode, {
+          ...(note ? { note } : {}),
+          ...(options.teamWorkspaceId ? { teamWorkspaceId: options.teamWorkspaceId } : {}),
+        });
         const refreshed = await collaboration.refresh();
         if (!refreshed && result.runtime?.diagnostics) {
           collaboration.applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);

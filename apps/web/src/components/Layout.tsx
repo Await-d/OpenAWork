@@ -11,7 +11,11 @@ import { CommandPalette, PermissionConfirmDialog } from '@openAwork/shared-ui';
 import type { CommandItem, PermissionItem } from '@openAwork/shared-ui';
 import { useCommandRegistry } from '../hooks/command/useCommandRegistry.js';
 import { preloadRouteModuleByPath } from '../routes/preloadable-route-modules.js';
-import { createQuestionsClient, createSessionsClient, createWorkspaceClient } from '@openAwork/web-client';
+import {
+  createQuestionsClient,
+  createSessionsClient,
+  createWorkspaceClient,
+} from '@openAwork/web-client';
 import type { PendingQuestionRequest, SessionSearchResult } from '@openAwork/web-client';
 import {
   requestCurrentSessionRefresh,

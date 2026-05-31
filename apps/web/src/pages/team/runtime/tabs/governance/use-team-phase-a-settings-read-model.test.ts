@@ -124,7 +124,9 @@ describe('useRecoverableConstitutionRead', () => {
         }
         if (url === `${GATEWAY_URL}/team/constitution-templates`) {
           return jsonResponse({
-            templates: [{ id: 'tpl-1', name: '模板', description: 'desc', recommendedFor: '', body: 'body' }],
+            templates: [
+              { id: 'tpl-1', name: '模板', description: 'desc', recommendedFor: '', body: 'body' },
+            ],
           });
         }
         throw new Error(`unexpected fetch: ${url}`);

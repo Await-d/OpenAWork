@@ -82,7 +82,13 @@ describe('importTemplateState 容错', () => {
         openAworkTemplate: 1,
         name: 'x',
         memberSlots: [
-          { id: 'a', layer: 'executor', specialty: 'frontend', personaKey: 'k', toolsets: ['read'] },
+          {
+            id: 'a',
+            layer: 'executor',
+            specialty: 'frontend',
+            personaKey: 'k',
+            toolsets: ['read'],
+          },
           { id: 'broken' }, // 缺字段，应被过滤
         ],
       }),

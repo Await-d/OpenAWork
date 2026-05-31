@@ -58,11 +58,7 @@ export function useTeamRuntimeRoleBindings() {
   const agentsRef = useRef<ManagedAgentRecord[]>([]);
   const capabilitiesRef = useRef<CapabilityDescriptor[]>([]);
   const teamEventsRecoveredAt = useTeamEventsConnectionStore((state) => state.lastRecoveredAt);
-  const {
-    clearRetry,
-    resetRetry,
-    scheduleRetry,
-  } = useRecoverableRetryController();
+  const { clearRetry, resetRetry, scheduleRetry } = useRecoverableRetryController();
 
   useEffect(() => {
     agentsRef.current = agents;
@@ -127,7 +123,11 @@ export function useTeamRuntimeRoleBindings() {
         );
       }
 
-      const failedResult = !agentsResult.ok ? agentsResult : !capabilitiesResult.ok ? capabilitiesResult : null;
+      const failedResult = !agentsResult.ok
+        ? agentsResult
+        : !capabilitiesResult.ok
+          ? capabilitiesResult
+          : null;
       if (failedResult) {
         const nextRetryAtMs = scheduleRetry({
           computeDelay: computeTeamRoleBindingsRetryDelay,
@@ -159,14 +159,7 @@ export function useTeamRuntimeRoleBindings() {
     return () => {
       cancelled = true;
     };
-  }, [
-    accessToken,
-    clearRetry,
-    gatewayUrl,
-    refreshTick,
-    resetRetry,
-    scheduleRetry,
-  ]);
+  }, [accessToken, clearRetry, gatewayUrl, refreshTick, resetRetry, scheduleRetry]);
 
   useEffect(() => {
     return () => {

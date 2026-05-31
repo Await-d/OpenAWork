@@ -301,9 +301,7 @@ export async function snapshotTreeRoutes(app: FastifyInstance): Promise<void> {
       const workspaceRoot = resolveWorkspaceRoot(session.metadata_json);
       if (!workspaceRoot) {
         step.fail(undefined, { reason: 'workspace_root_unavailable' });
-        return reply
-          .status(400)
-          .send(snapshotTreeRouteErrorPayload('workspace_root_unavailable'));
+        return reply.status(400).send(snapshotTreeRouteErrorPayload('workspace_root_unavailable'));
       }
 
       const tree = getSnapshotTreeByHash({
@@ -474,9 +472,7 @@ export async function snapshotTreeRoutes(app: FastifyInstance): Promise<void> {
       const workspaceRoot = resolveWorkspaceRoot(session.metadata_json);
       if (!workspaceRoot) {
         step.fail(undefined, { reason: 'workspace_root_unavailable' });
-        return reply
-          .status(400)
-          .send(snapshotTreeRouteErrorPayload('workspace_root_unavailable'));
+        return reply.status(400).send(snapshotTreeRouteErrorPayload('workspace_root_unavailable'));
       }
 
       const engine = getSnapshotEngine();
@@ -747,9 +743,7 @@ export async function snapshotTreeRoutes(app: FastifyInstance): Promise<void> {
       const sourceSession = loadSessionRow(body.sourceSessionId, userId);
       if (!sourceSession) {
         step.fail(undefined, { reason: 'source_session_not_found' });
-        return reply
-          .status(404)
-          .send(snapshotTreeRouteErrorPayload('source_session_not_found'));
+        return reply.status(404).send(snapshotTreeRouteErrorPayload('source_session_not_found'));
       }
 
       // Validate the tree exists in the source session
@@ -765,9 +759,7 @@ export async function snapshotTreeRoutes(app: FastifyInstance): Promise<void> {
       const workspaceRoot = resolveWorkspaceRoot(session.metadata_json);
       if (!workspaceRoot) {
         step.fail(undefined, { reason: 'workspace_root_unavailable' });
-        return reply
-          .status(400)
-          .send(snapshotTreeRouteErrorPayload('workspace_root_unavailable'));
+        return reply.status(400).send(snapshotTreeRouteErrorPayload('workspace_root_unavailable'));
       }
 
       // Verify source workspace matches target workspace (shadow git is per-workspace)

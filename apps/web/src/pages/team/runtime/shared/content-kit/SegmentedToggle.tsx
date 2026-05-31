@@ -78,7 +78,9 @@ export function SegmentedToggle<V extends string>({
               padding: pad,
               borderRadius: 999,
               border: 'none',
-              background: active ? 'color-mix(in srgb, var(--accent) 16%, transparent)' : 'transparent',
+              background: active
+                ? 'color-mix(in srgb, var(--accent) 16%, transparent)'
+                : 'transparent',
               color: active ? 'var(--accent)' : 'var(--fg-muted)',
               fontSize,
               fontWeight: active ? 700 : 600,

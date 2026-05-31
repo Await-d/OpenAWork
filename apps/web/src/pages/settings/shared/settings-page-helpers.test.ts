@@ -21,7 +21,6 @@ describe('tauriInvoke', () => {
   });
 });
 
-
 describe('resolveSshDialogRestore', () => {
   it('命中第一个仍存在的对话，且连接已 connected 时拉文件', () => {
     const dialogs = [

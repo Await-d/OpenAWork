@@ -43,9 +43,9 @@ describe('pairing gateway helpers', () => {
       throw new Error('Failed to fetch');
     }) as typeof fetch;
 
-    await expect(
-      loginWithDesktopDefault('http://localhost:3000', 'desktop-token'),
-    ).rejects.toThrow('网络异常，桌面默认登录失败。');
+    await expect(loginWithDesktopDefault('http://localhost:3000', 'desktop-token')).rejects.toThrow(
+      '网络异常，桌面默认登录失败。',
+    );
   });
 
   it('loginWithPairingToken 失败时会保留后端 error 文案', async () => {
@@ -56,9 +56,9 @@ describe('pairing gateway helpers', () => {
       } as unknown as Response;
     }) as typeof fetch;
 
-    await expect(
-      loginWithPairingToken('http://localhost:3000', 'pairing-token'),
-    ).rejects.toThrow('pairing token expired');
+    await expect(loginWithPairingToken('http://localhost:3000', 'pairing-token')).rejects.toThrow(
+      'pairing token expired',
+    );
   });
 
   it('getPairingQr 会读取 ApiErrorResponse.data.message', async () => {

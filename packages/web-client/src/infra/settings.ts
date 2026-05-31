@@ -317,10 +317,13 @@ export function createSettingsClient(baseUrl: string): SettingsClient {
       return performSettingsRequest<unknown>({
         actionLabel: '重试 MCP 服务连接',
         request: () =>
-          fetchWithTimeout(`${baseUrl}/settings/mcp-servers/${encodeURIComponent(serverId)}/retry`, {
-            method: 'POST',
-            headers: authHeader(token),
-          }),
+          fetchWithTimeout(
+            `${baseUrl}/settings/mcp-servers/${encodeURIComponent(serverId)}/retry`,
+            {
+              method: 'POST',
+              headers: authHeader(token),
+            },
+          ),
       });
     },
 

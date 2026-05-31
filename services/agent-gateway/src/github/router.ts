@@ -44,9 +44,7 @@ export function createGitHubTimeoutFetch(timeoutMs: number): typeof fetch {
   return (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
     const timeoutSignal = AbortSignal.timeout(timeoutMs);
     const callerSignal = init?.signal ?? undefined;
-    const signal = callerSignal
-      ? AbortSignal.any([callerSignal, timeoutSignal])
-      : timeoutSignal;
+    const signal = callerSignal ? AbortSignal.any([callerSignal, timeoutSignal]) : timeoutSignal;
     return fetch(input, { ...init, signal });
   };
 }

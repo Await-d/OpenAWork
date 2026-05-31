@@ -98,7 +98,9 @@ export async function teamWorkflowsCrudRoutes(app: FastifyInstance): Promise<voi
         step.fail('invalid workflow');
         return reply
           .status(400)
-          .send(teamWorkflowRouteErrorPayload('team_workflow_invalid', { issues: validation.errors }));
+          .send(
+            teamWorkflowRouteErrorPayload('team_workflow_invalid', { issues: validation.errors }),
+          );
       }
 
       const id = randomUUID();
@@ -141,7 +143,9 @@ export async function teamWorkflowsCrudRoutes(app: FastifyInstance): Promise<voi
         step.fail('invalid workflow');
         return reply
           .status(400)
-          .send(teamWorkflowRouteErrorPayload('team_workflow_invalid', { issues: validation.errors }));
+          .send(
+            teamWorkflowRouteErrorPayload('team_workflow_invalid', { issues: validation.errors }),
+          );
       }
 
       const metadataJson = JSON.stringify({ teamWorkflow: body.workflow });

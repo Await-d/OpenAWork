@@ -292,10 +292,10 @@ describe('mergeMemberModelIntoMetadata', () => {
   });
 
   it('does not overwrite an existing modelId', () => {
-    const merged = resolver.mergeMemberModelIntoMetadata(
-      JSON.stringify({ modelId: 'existing' }),
-      { modelId: 'm1', providerId: 'p1' },
-    );
+    const merged = resolver.mergeMemberModelIntoMetadata(JSON.stringify({ modelId: 'existing' }), {
+      modelId: 'm1',
+      providerId: 'p1',
+    });
     expect(JSON.parse(merged!).modelId).toBe('existing');
   });
 

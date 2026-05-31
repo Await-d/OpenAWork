@@ -3,10 +3,7 @@ import type { SkillManifest } from '@openAwork/skill-types';
 import { BUILTIN_SKILLS } from '@openAwork/skills';
 import { z } from 'zod';
 import { sqliteAll, sqliteGet } from '../infra/db.js';
-import {
-  readResponseTextWithLimit,
-  resolveHttpBodyLimitBytes,
-} from '../infra/http-body-limit.js';
+import { readResponseTextWithLimit, resolveHttpBodyLimitBytes } from '../infra/http-body-limit.js';
 import type { EffectiveSkill } from './skill-selection.js';
 
 const skillInputSchema = z

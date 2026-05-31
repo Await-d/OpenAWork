@@ -260,9 +260,8 @@ describe('team-init-store + runner', () => {
       teamWorkspaceId: TEAM_WORKSPACE_ID,
       userId: USER_ID,
     });
-    const { validateSessionMetadataPatch } = await import(
-      '../../session/session-workspace-metadata.js'
-    );
+    const { validateSessionMetadataPatch } =
+      await import('../../session/session-workspace-metadata.js');
     const result = validateSessionMetadataPatch({ teamInit: state });
     expect(result.success).toBe(true);
   });

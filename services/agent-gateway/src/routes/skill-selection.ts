@@ -108,9 +108,7 @@ export async function skillSelectionRoutes(app: FastifyInstance): Promise<void> 
       const normalized = normalizeWorkspacePathForWrite(query.workspacePath ?? null);
       if (normalized === null) {
         step.fail('workspace path out of root');
-        return reply
-          .status(400)
-          .send({ error: 'workspacePath 必须位于已配置的工作区根目录内。' });
+        return reply.status(400).send({ error: 'workspacePath 必须位于已配置的工作区根目录内。' });
       }
 
       const sessionId = query.sessionId ?? null;
@@ -188,9 +186,7 @@ export async function skillSelectionRoutes(app: FastifyInstance): Promise<void> 
       const normalized = normalizeWorkspacePathForWrite(parsed.workspacePath ?? null);
       if (normalized === null) {
         step.fail('workspace path out of root');
-        return reply
-          .status(400)
-          .send({ error: 'workspacePath 必须位于已配置的工作区根目录内。' });
+        return reply.status(400).send({ error: 'workspacePath 必须位于已配置的工作区根目录内。' });
       }
 
       // Defend the BUILTIN hard-invariant: caller may not write a BUILTIN id

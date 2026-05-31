@@ -152,7 +152,9 @@ function isGenericTeamInboundNetworkErrorMessage(message: string): boolean {
 
 function normalizeTeamInboundError(actionLabel: string, error: unknown): Error {
   if (error instanceof HttpError) {
-    const extracted = extractJsonErrorMessage((error.data ?? undefined) as JsonErrorData | undefined);
+    const extracted = extractJsonErrorMessage(
+      (error.data ?? undefined) as JsonErrorData | undefined,
+    );
     if (extracted) {
       return new HttpError(extracted, error.status, error.data);
     }
@@ -193,11 +195,14 @@ export function createTeamInboundClient(baseUrl: string): TeamInboundClient {
       return performTeamInboundRequest<InboundSubmitResponse>({
         actionLabel: '提交团队反向消息',
         request: () =>
-          fetchWithTimeout(`${baseUrl}/team/sessions/${encodeURIComponent(sessionId)}/inbound-messages`, {
-            method: 'POST',
-            headers: jsonAuthHeaders(token),
-            body: JSON.stringify(request),
-          }),
+          fetchWithTimeout(
+            `${baseUrl}/team/sessions/${encodeURIComponent(sessionId)}/inbound-messages`,
+            {
+              method: 'POST',
+              headers: jsonAuthHeaders(token),
+              body: JSON.stringify(request),
+            },
+          ),
       });
     },
 

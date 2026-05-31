@@ -601,7 +601,7 @@ export default function TeamPageV2() {
   }, [data.workspaceGroups, handoffs, notificationEvents]);
 
   const focusedHandoffEntry = useMemo(
-    () => (focusedHandoffId ? handoffs.get(focusedHandoffId) ?? null : null),
+    () => (focusedHandoffId ? (handoffs.get(focusedHandoffId) ?? null) : null),
     [focusedHandoffId, handoffs],
   );
 
@@ -759,7 +759,9 @@ export default function TeamPageV2() {
                           当前聚焦 Handoff #{focusedHandoffId.slice(0, 8)}
                         </strong>
                         {focusedHandoffEntry ? (
-                          <span style={{ color: 'var(--fg-default)', fontSize: 12, fontWeight: 600 }}>
+                          <span
+                            style={{ color: 'var(--fg-default)', fontSize: 12, fontWeight: 600 }}
+                          >
                             {FOCUS_LAYER_LABELS[focusedHandoffEntry.fromRoleLayer]} →{' '}
                             {FOCUS_LAYER_LABELS[focusedHandoffEntry.toRoleLayer]} ·{' '}
                             {FOCUS_STATE_LABELS[focusedHandoffEntry.state]}
