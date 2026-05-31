@@ -38,6 +38,24 @@ const jobSchema = z.object({
   max_iterations: z.number().int().default(10),
 });
 
+type CronRouteErrorCode = 'cron_job_not_found' | 'invalid_cron_job';
+
+const CRON_ROUTE_ERROR_MESSAGES: Record<CronRouteErrorCode, string> = {
+  cron_job_not_found: '目标定时任务不存在。',
+  invalid_cron_job: '定时任务配置无效。',
+};
+
+function cronRouteErrorPayload(
+  code: CronRouteErrorCode,
+  extra?: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    code,
+    error: CRON_ROUTE_ERROR_MESSAGES[code],
+    ...(extra ?? {}),
+  };
+}
+
 export async function cronRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     '/cron/jobs',
@@ -63,7 +81,11 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
       if (!body.success) {
         parseStep.fail('invalid input');
         step.fail('invalid input');
-        return reply.status(400).send({ error: body.error.issues });
+        return reply.status(400).send(
+          cronRouteErrorPayload('invalid_cron_job', {
+            issues: body.error.issues,
+          }),
+        );
       }
       parseStep.succeed();
 
@@ -108,7 +130,7 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
       if (!job) {
         lookupStep.fail('job not found');
         step.fail('job not found');
-        return reply.status(404).send({ error: 'Job not found' });
+        return reply.status(404).send(cronRouteErrorPayload('cron_job_not_found'));
       }
       lookupStep.succeed();
 
@@ -133,6 +155,14 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
       const { step, child } = startRequestWorkflow(request, 'cron.job.delete', undefined, {
         jobId: id,
       });
+      const lookupStep = child('lookup', undefined, { jobId: id });
+      const job = cronScheduler.getJob(id);
+      if (!job) {
+        lookupStep.fail('job not found');
+        step.fail('job not found');
+        return reply.status(404).send(cronRouteErrorPayload('cron_job_not_found'));
+      }
+      lookupStep.succeed();
       const removeStep = child('remove', undefined, { jobId: id });
       cronScheduler.removeJob(id);
       removeStep.succeed();
@@ -149,6 +179,14 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
       const { step, child } = startRequestWorkflow(request, 'cron.job.history', undefined, {
         jobId: id,
       });
+      const lookupStep = child('lookup', undefined, { jobId: id });
+      const job = cronScheduler.getJob(id);
+      if (!job) {
+        lookupStep.fail('job not found');
+        step.fail('job not found');
+        return reply.status(404).send(cronRouteErrorPayload('cron_job_not_found'));
+      }
+      lookupStep.succeed();
       const historyStep = child('read', undefined, { jobId: id });
       const history = cronScheduler.getExecutionHistory(id);
       historyStep.succeed(undefined, { entries: history.length, jobId: id });
@@ -165,6 +203,14 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
       const { step, child } = startRequestWorkflow(request, 'cron.job.enable', undefined, {
         jobId: id,
       });
+      const lookupStep = child('lookup', undefined, { jobId: id });
+      const job = cronScheduler.getJob(id);
+      if (!job) {
+        lookupStep.fail('job not found');
+        step.fail('job not found');
+        return reply.status(404).send(cronRouteErrorPayload('cron_job_not_found'));
+      }
+      lookupStep.succeed();
       const applyStep = child('apply', undefined, { jobId: id });
       cronScheduler.updateJob(id, { enabled: true });
       applyStep.succeed();
@@ -181,6 +227,14 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
       const { step, child } = startRequestWorkflow(request, 'cron.job.disable', undefined, {
         jobId: id,
       });
+      const lookupStep = child('lookup', undefined, { jobId: id });
+      const job = cronScheduler.getJob(id);
+      if (!job) {
+        lookupStep.fail('job not found');
+        step.fail('job not found');
+        return reply.status(404).send(cronRouteErrorPayload('cron_job_not_found'));
+      }
+      lookupStep.succeed();
       const applyStep = child('apply', undefined, { jobId: id });
       cronScheduler.updateJob(id, { enabled: false });
       applyStep.succeed();

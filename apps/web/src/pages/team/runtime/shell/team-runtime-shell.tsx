@@ -132,6 +132,9 @@ interface TeamRuntimeShellProps {
   sharedCommentDraft: string;
   sharedOperateBusy: boolean;
   sharedOperateError: string | null;
+  sharedPresenceError: string | null;
+  sharedPresenceLastSyncedAt: number | null;
+  sharedPresenceNextRetryAt: number | null;
   sharedSessionLoading: boolean;
   sharedSessions: SharedSessionSummaryRecord[];
   taskForm: TaskFormState;
@@ -335,6 +338,9 @@ export function TeamRuntimeShell({
   sharedCommentDraft,
   sharedOperateBusy,
   sharedOperateError,
+  sharedPresenceError,
+  sharedPresenceLastSyncedAt,
+  sharedPresenceNextRetryAt,
   sharedSessionLoading,
   sharedSessions,
   taskForm,
@@ -681,6 +687,9 @@ export function TeamRuntimeShell({
               sharedCommentBusy={sharedCommentBusy}
               sharedOperateBusy={sharedOperateBusy}
               sharedOperateError={sharedOperateError}
+              sharedPresenceError={sharedPresenceError}
+              sharedPresenceLastSyncedAt={sharedPresenceLastSyncedAt}
+              sharedPresenceNextRetryAt={sharedPresenceNextRetryAt}
               sharedSessionLoading={sharedSessionLoading}
               sharedSessions={filteredSharedSessions}
             />
@@ -689,7 +698,7 @@ export function TeamRuntimeShell({
       case 'tasks':
         return (
           <div style={{ display: 'grid', gap: 16 }}>
-            <TeamArtifactSection />
+            <TeamArtifactSection selectedTeamId={selectedSharedSessionId ?? ''} />
             <section className="content-card" style={{ display: 'grid', gap: 12, padding: 18 }}>
               <TeamSectionHeader
                 eyebrow="Runtime tasks"

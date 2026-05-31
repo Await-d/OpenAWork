@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { z } from 'zod';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
 import { db, sqliteAll, sqliteGet, sqliteRun, sqliteTransaction } from '../infra/db.js';
@@ -10,6 +11,52 @@ import {
 import type { RegistrySource, SkillEntry } from '@openAwork/skill-registry';
 import { BUILTIN_SKILLS } from '@openAwork/skills';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
+import {
+  readResponseJsonWithLimit,
+  readResponseTextWithLimit,
+  resolveHttpBodyLimitBytes,
+} from '../infra/http-body-limit.js';
+
+const SKILLS_ERROR_MESSAGES = {
+  installBodyInvalid: '缺少技能标识或请求参数无效。',
+  skillInstallFailed: '安装技能失败。',
+  skillNotInstalled: '目标技能尚未安装。',
+  skillNotFound: '目标技能不存在。',
+  marketplaceSkillNotFound: '目标技能不存在或已下架。',
+  installedSkillToggleBodyInvalid: '启用状态参数无效。',
+  registrySourceBodyInvalid: '注册源参数无效。',
+  registrySourceIdReserved: '注册源标识被系统保留，不能使用。',
+  registrySourceReloadFailed: '注册源已创建，但重新加载失败。',
+  registrySourceBuiltinDeleteForbidden: '内置注册源不允许删除。',
+  registrySourceBuiltinToggleForbidden: '内置注册源不允许切换启用状态。',
+  registrySourceToggleBodyInvalid: '缺少启用状态参数或请求参数无效。',
+  registrySourceNotFound: '目标注册源不存在。',
+} as const;
+
+const installSkillBodySchema = z.object({
+  skillId: z.string().trim().min(1),
+  sourceId: z.string().trim().min(1).optional(),
+  manifestUrl: z.string().trim().min(1).optional(),
+});
+
+const installedSkillToggleBodySchema = z
+  .object({
+    enabled: z.boolean().optional(),
+  })
+  .passthrough();
+
+const registrySourceUpsertBodySchema = z.object({
+  id: z.string().trim().min(1).optional(),
+  name: z.string().trim().min(1),
+  url: z.string().trim().min(1),
+  type: z.string().trim().min(1).optional(),
+  trust: z.string().trim().min(1).optional(),
+  priority: z.number().int().optional(),
+});
+
+const registrySourceToggleBodySchema = z.object({
+  enabled: z.boolean(),
+});
 
 interface InstalledSkillRow {
   skill_id: string;
@@ -77,6 +124,26 @@ function rowToInstalledSkill(row: InstalledSkillRow) {
     latestVersion,
     latestVersionCheckedAt,
   };
+}
+
+// Corrupt-row tolerance (§0.89/§0.90 class): `manifest_json` /
+// `granted_permissions_json` are persisted via `JSON.stringify`, but a crash
+// mid-write, a disk error, or a hand-edited DB can leave a column that is not
+// valid JSON. `/skills/installed` does `rows.map(rowToInstalledSkill)`, so a
+// single corrupt row would throw and 500 the WHOLE installed-skills list. This
+// variant returns `null` + warn so the list path can skip the bad row and the
+// rest still loads.
+function tryRowToInstalledSkill(row: InstalledSkillRow): ReturnType<typeof rowToInstalledSkill> | null {
+  try {
+    return rowToInstalledSkill(row);
+  } catch (error) {
+    console.warn(
+      `[skills] installed skill ${row.skill_id} JSON 解析失败，已跳过：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return null;
+  }
 }
 
 function rowToSource(row: RegistrySourceRow) {
@@ -210,7 +277,36 @@ interface GitHubSourceCacheEntry {
 
 const GITHUB_SOURCE_CACHE_TTL_MS = 2 * 60 * 60 * 1000;
 const GITHUB_SOURCE_STALE_IF_ERROR_MS = 24 * 60 * 60 * 1000;
+/**
+ * Hard ceiling on `githubSourceCache` entries. Code-search sources key the
+ * cache on `${source.id}::${query}` where `query` comes straight from the
+ * authenticated `/skills/search?q=` request, so without a cap the map grows
+ * one entry per distinct query forever (the TTL only gates *reads*, it never
+ * deletes). We prune fully-expired entries (older than the stale-if-error
+ * window, so unusable even as an error fallback) and, if still over this cap,
+ * evict the oldest by `fetchedAt`.
+ */
+const GITHUB_SOURCE_CACHE_MAX_ENTRIES = 512;
 const GITHUB_FETCH_TIMEOUT_MS = 8000;
+/** Memory ceiling for a user-supplied registry source's /skills/search.json. */
+const DEFAULT_REGISTRY_SNAPSHOT_MAX_BYTES = 16 * 1024 * 1024;
+// SKILL.md manifest bodies are small; cap the read so a hostile registry /
+// raw URL can't stream gigabytes within the fetch deadline (§0.124 class).
+const DEFAULT_SKILL_MANIFEST_MAX_BYTES = 5 * 1024 * 1024;
+function resolveSkillManifestMaxBytes(): number {
+  return resolveHttpBodyLimitBytes(
+    'OPENAWORK_SKILL_MANIFEST_MAX_BYTES',
+    DEFAULT_SKILL_MANIFEST_MAX_BYTES,
+  );
+}
+// GitHub code-search / contents and Claude marketplace listing JSON.
+const DEFAULT_GITHUB_LISTING_MAX_BYTES = 16 * 1024 * 1024;
+function resolveGithubListingMaxBytes(): number {
+  return resolveHttpBodyLimitBytes(
+    'OPENAWORK_GITHUB_LISTING_MAX_BYTES',
+    DEFAULT_GITHUB_LISTING_MAX_BYTES,
+  );
+}
 const GITHUB_SOURCE_MAX_DIRECTORY_REQUESTS = 120;
 const GITHUB_SOURCE_MAX_SKILL_FILES = 200;
 const GITHUB_SOURCE_FETCH_CONCURRENCY = 6;
@@ -709,6 +805,23 @@ function parseCachedSkillEntry(row: RegistrySourceSkillCacheRow): SkillEntry {
   return JSON.parse(row.entry_json) as SkillEntry;
 }
 
+// Corrupt-row tolerance (§0.89/§0.90 class): a single cached entry whose
+// `entry_json` is not valid JSON would otherwise throw inside
+// `rows.map(parseCachedSkillEntry)` and 500 the WHOLE cached-skill search /
+// listing. This variant returns `null` + warn so callers skip the bad row.
+function tryParseCachedSkillEntry(row: RegistrySourceSkillCacheRow): SkillEntry | null {
+  try {
+    return parseCachedSkillEntry(row);
+  } catch (error) {
+    console.warn(
+      `[skills] 缓存技能条目 JSON 解析失败，已跳过：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return null;
+  }
+}
+
 export function filterSkillEntries(
   entries: ReadonlyArray<SkillEntry>,
   query?: string,
@@ -780,7 +893,10 @@ function listCachedRegistrySourceSkills(
       ORDER BY src.priority ASC, cache.skill_id ASC`,
     params,
   );
-  return rows.map(parseCachedSkillEntry);
+  return rows.flatMap((row) => {
+    const entry = tryParseCachedSkillEntry(row);
+    return entry ? [entry] : [];
+  });
 }
 
 function replaceRegistrySourceCache(
@@ -861,7 +977,18 @@ async function fetchRegistrySourceSnapshot(source: RegistrySource): Promise<Skil
     throw new Error(`Search failed for source '${source.id}', HTTP ${response.status}`);
   }
 
-  const body = (await response.json()) as { items?: SkillEntry[] } | SkillEntry[];
+  // Memory bound: `source.url` is fully user-supplied (registry-source upsert),
+  // so a misbehaving / hostile registry could stream gigabytes of JSON within
+  // the 8s fetch deadline and OOM the gateway. Cap the read like webfetch /
+  // skill content / codesearch (§0.85/§0.86/§0.123). Override via
+  // OPENAWORK_REGISTRY_SNAPSHOT_MAX_BYTES; 0 disables.
+  const body = await readResponseJsonWithLimit<{ items?: SkillEntry[] } | SkillEntry[]>(
+    response,
+    resolveHttpBodyLimitBytes(
+      'OPENAWORK_REGISTRY_SNAPSHOT_MAX_BYTES',
+      DEFAULT_REGISTRY_SNAPSHOT_MAX_BYTES,
+    ),
+  );
   const items = Array.isArray(body) ? body : (body.items ?? []);
   return items.map((item) => normalizeSkillEntry(item, source.id));
 }
@@ -1055,6 +1182,54 @@ function isGitHubCacheUsableOnError(entry: GitHubSourceCacheEntry): boolean {
   return Date.now() - entry.fetchedAt < GITHUB_SOURCE_STALE_IF_ERROR_MS;
 }
 
+/**
+ * Bound `githubSourceCache`. Called after each insert: first drop entries
+ * past the stale-if-error window (no longer usable for fresh reads OR error
+ * fallbacks), then, if still over the cap, evict oldest-first by `fetchedAt`
+ * until at/under the ceiling. Keeps the user-query-keyed cache bounded.
+ */
+function pruneGitHubSourceCache(): void {
+  const now = Date.now();
+  for (const [key, entry] of githubSourceCache) {
+    if (now - entry.fetchedAt >= GITHUB_SOURCE_STALE_IF_ERROR_MS) {
+      githubSourceCache.delete(key);
+    }
+  }
+  if (githubSourceCache.size <= GITHUB_SOURCE_CACHE_MAX_ENTRIES) {
+    return;
+  }
+  // Still over the cap (a flood of distinct queries within the window):
+  // evict oldest-first until back at the ceiling.
+  const byAge = [...githubSourceCache.entries()].sort(
+    (a, b) => a[1].fetchedAt - b[1].fetchedAt,
+  );
+  const excess = githubSourceCache.size - GITHUB_SOURCE_CACHE_MAX_ENTRIES;
+  for (let i = 0; i < excess; i += 1) {
+    const victim = byAge[i];
+    if (victim) githubSourceCache.delete(victim[0]);
+  }
+}
+
+/**
+ * Test-only seams for the githubSourceCache retention guard (§0.69). Kept
+ * minimal: seed an entry with an explicit `fetchedAt`, read the size, run the
+ * prune, and clear — so the cap / expiry logic is testable without network.
+ */
+export function __seedGitHubSourceCacheForTest(key: string, fetchedAtMs: number): void {
+  githubSourceCache.set(key, { fetchedAt: fetchedAtMs, items: [] });
+}
+export function __getGitHubSourceCacheSizeForTest(): number {
+  return githubSourceCache.size;
+}
+export function __pruneGitHubSourceCacheForTest(): void {
+  pruneGitHubSourceCache();
+}
+export function __clearGitHubSourceCacheForTest(): void {
+  githubSourceCache.clear();
+}
+export const __GITHUB_SOURCE_CACHE_MAX_ENTRIES_FOR_TEST = GITHUB_SOURCE_CACHE_MAX_ENTRIES;
+export const __GITHUB_SOURCE_STALE_IF_ERROR_MS_FOR_TEST = GITHUB_SOURCE_STALE_IF_ERROR_MS;
+
 function matchesGitHubSkillQuery(item: SkillEntry, query: string): boolean {
   if (!query) {
     return true;
@@ -1120,7 +1295,18 @@ async function buildGitHubFrontmatterSkillEntry(
     return undefined;
   }
 
-  const text = await mdRes.text();
+  // Per-file resilience: this runs inside the `Promise.all(skillFiles.map(...))`
+  // in `fetchGitHubSkills`. The function's contract is "return undefined on
+  // failure", but `mdRes.text()` can still reject after an ok response (mid-body
+  // connection reset, malformed chunked transfer). An unguarded reject here
+  // would sink the whole source's `Promise.all` and discard EVERY skill from
+  // that registry source, not just the one bad file. Honour the contract.
+  let text: string;
+  try {
+    text = await readResponseTextWithLimit(mdRes, resolveSkillManifestMaxBytes());
+  } catch {
+    return undefined;
+  }
   const fm = parseSkillFrontmatter(text);
   const name = fm.name?.trim() || buildGitHubSkillName(file.path);
   const relativeId = stripSkillMarkdownSuffix(file.path);
@@ -1175,7 +1361,10 @@ async function listGitHubSkillFiles(
           return [];
         }
 
-        const payload = (await res.json()) as GitHubCodeSearchResponse;
+        const payload = await readResponseJsonWithLimit<GitHubCodeSearchResponse>(
+          res,
+          resolveGithubListingMaxBytes(),
+        );
         return (payload.items ?? []).flatMap((item) => {
           if (!source.repo || !isGitHubSkillPathWithinBounds(item.path, source.repo)) {
             return [];
@@ -1225,7 +1414,10 @@ async function listGitHubSkillFiles(
       continue;
     }
 
-    const payload = (await res.json()) as GitHubDirEntry | GitHubDirEntry[];
+    const payload = await readResponseJsonWithLimit<GitHubDirEntry | GitHubDirEntry[]>(
+      res,
+      resolveGithubListingMaxBytes(),
+    );
     const entries = Array.isArray(payload) ? payload : [payload];
     for (const entry of entries) {
       if (entry.type === 'file' && isSkillMarkdownFileName(entry.name) && entry.download_url) {
@@ -1341,6 +1533,7 @@ export async function fetchGitHubSkills(
           fetchedAt: Date.now(),
           items: isQueryScoped ? visibleItems : builtItems,
         });
+        pruneGitHubSourceCache();
         return visibleItems;
       } catch {
         if (cached && isGitHubCacheUsableOnError(cached)) {
@@ -1458,7 +1651,10 @@ async function fetchClaudeMarketplace(marketplace: ClaudeMarketplaceSource): Pro
       if (cached && isGitHubCacheUsableOnError(cached)) return cached.items;
       return [];
     }
-    const data = (await res.json()) as ClaudeMarketplaceJson;
+    const data = await readResponseJsonWithLimit<ClaudeMarketplaceJson>(
+      res,
+      resolveGithubListingMaxBytes(),
+    );
     const plugins = data.plugins ?? [];
     const entries: SkillEntry[] = [];
     for (const plugin of plugins) {
@@ -1526,7 +1722,11 @@ export async function skillsRoutes(app: FastifyInstance): Promise<void> {
         [user.sub],
       );
       step.succeed(undefined, { count: rows.length });
-      return reply.send({ skills: rows.map(rowToInstalledSkill) });
+      const skills = rows.flatMap((row) => {
+        const skill = tryRowToInstalledSkill(row);
+        return skill ? [skill] : [];
+      });
+      return reply.send({ skills });
     },
   );
 
@@ -1536,12 +1736,17 @@ export async function skillsRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step } = startRequestWorkflow(request, 'skills.install');
       const user = request.user as JwtPayload;
-      const body = request.body as { skillId?: string; sourceId?: string; manifestUrl?: string };
-
-      if (!body.skillId) {
-        step.fail('missing skillId');
-        return reply.status(400).send({ error: 'skillId is required' });
+      const bodyResult = installSkillBodySchema.safeParse(request.body);
+      if (!bodyResult.success) {
+        step.fail('invalid install body');
+        return reply
+          .status(400)
+          .send({
+            error: SKILLS_ERROR_MESSAGES.installBodyInvalid,
+            issues: bodyResult.error.issues,
+          });
       }
+      const body = bodyResult.data;
 
       const isGitHubSource =
         body.sourceId?.startsWith('github:') || body.skillId.startsWith('github:');
@@ -1562,7 +1767,10 @@ export async function skillsRoutes(app: FastifyInstance): Promise<void> {
           const skills = await fetchClaudeMarketplaceSkills('').catch((): SkillEntry[] => []);
           const found = skills.find((s) => s.id === skillId);
           if (!found) {
-            throw new Error(`Plugin not found in Claude marketplace: ${skillId}`);
+            step.fail('claude marketplace skill not found');
+            return reply
+              .status(404)
+              .send({ error: SKILLS_ERROR_MESSAGES.marketplaceSkillNotFound });
           }
           const pluginName = skillId.split('/').slice(1).join('/');
           const manifest = {
@@ -1605,7 +1813,7 @@ export async function skillsRoutes(app: FastifyInstance): Promise<void> {
           try {
             const mdRes = await fetchWithTimeout(rawUrl, {});
             if (mdRes.ok) {
-              skillContent = await mdRes.text();
+              skillContent = await readResponseTextWithLimit(mdRes, resolveSkillManifestMaxBytes());
               fm = parseSkillFrontmatter(skillContent);
             }
           } catch {
@@ -1663,9 +1871,11 @@ export async function skillsRoutes(app: FastifyInstance): Promise<void> {
           }),
         );
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        step.fail(message);
-        return reply.status(422).send({ error: message });
+        const rawMessage = err instanceof Error ? err.message : String(err);
+        const errorMessage =
+          rawMessage.trim().length > 0 ? rawMessage : SKILLS_ERROR_MESSAGES.skillInstallFailed;
+        step.fail(errorMessage);
+        return reply.status(422).send({ error: errorMessage });
       }
     },
   );
@@ -1685,7 +1895,9 @@ export async function skillsRoutes(app: FastifyInstance): Promise<void> {
 
       if (!existing) {
         step.fail('not found');
-        return reply.status(404).send({ error: `Skill not installed: ${skillId}` });
+        return reply.status(404).send({
+          error: `${SKILLS_ERROR_MESSAGES.skillNotInstalled}（${skillId}）`,
+        });
       }
 
       // Wrap the row removal + cascade cleanup in a single transaction so
@@ -1717,34 +1929,53 @@ export async function skillsRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  const installedSkillToggleHandler = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): Promise<FastifyReply> => {
+    const { step } = startRequestWorkflow(request, 'skills.toggle');
+    const user = request.user as JwtPayload;
+    const { skillId } = request.params as { skillId: string };
+    const bodyResult = installedSkillToggleBodySchema.safeParse(request.body ?? {});
+    if (!bodyResult.success) {
+      step.fail('invalid toggle body');
+      return reply.status(400).send({
+        error: SKILLS_ERROR_MESSAGES.installedSkillToggleBodyInvalid,
+        issues: bodyResult.error.issues,
+      });
+    }
+
+    const existing = sqliteGet<InstalledSkillRow>(
+      'SELECT * FROM installed_skills WHERE skill_id = ? AND user_id = ?',
+      [skillId, user.sub],
+    );
+
+    if (!existing) {
+      step.fail('not found');
+      return reply.status(404).send({
+        error: `${SKILLS_ERROR_MESSAGES.skillNotInstalled}（${skillId}）`,
+      });
+    }
+
+    const enabled = bodyResult.data.enabled ?? existing.enabled === 1;
+    sqliteRun(
+      'UPDATE installed_skills SET enabled = ?, updated_at = ? WHERE skill_id = ? AND user_id = ?',
+      [enabled ? 1 : 0, Date.now(), skillId, user.sub],
+    );
+
+    step.succeed(undefined, { skillId, enabled });
+    return reply.send({ ...rowToInstalledSkill(existing), enabled });
+  };
+
   app.patch(
     '/skills/installed/:skillId',
     { onRequest: [requireAuth] },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const { step } = startRequestWorkflow(request, 'skills.toggle');
-      const user = request.user as JwtPayload;
-      const { skillId } = request.params as { skillId: string };
-      const body = request.body as { enabled?: boolean };
-
-      const existing = sqliteGet<InstalledSkillRow>(
-        'SELECT * FROM installed_skills WHERE skill_id = ? AND user_id = ?',
-        [skillId, user.sub],
-      );
-
-      if (!existing) {
-        step.fail('not found');
-        return reply.status(404).send({ error: `Skill not installed: ${skillId}` });
-      }
-
-      const enabled = body.enabled ?? existing.enabled === 1;
-      sqliteRun(
-        'UPDATE installed_skills SET enabled = ?, updated_at = ? WHERE skill_id = ? AND user_id = ?',
-        [enabled ? 1 : 0, Date.now(), skillId, user.sub],
-      );
-
-      step.succeed(undefined, { skillId, enabled });
-      return reply.send({ ...rowToInstalledSkill(existing), enabled });
-    },
+    installedSkillToggleHandler,
+  );
+  app.patch(
+    '/skills/installed/:skillId/enable',
+    { onRequest: [requireAuth] },
+    installedSkillToggleHandler,
   );
 
   app.get(
@@ -1872,26 +2103,20 @@ export async function skillsRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step, child } = startRequestWorkflow(request, 'skills.registry-source.upsert');
       const user = request.user as JwtPayload;
-      const body = request.body as {
-        id?: string;
-        name: string;
-        url: string;
-        type?: string;
-        trust?: string;
-        priority?: number;
-      };
-
-      if (!body.name || !body.url) {
-        step.fail('name and url are required');
-        return reply.status(400).send({ error: 'name and url are required' });
+      const bodyResult = registrySourceUpsertBodySchema.safeParse(request.body);
+      if (!bodyResult.success) {
+        step.fail('invalid registry source body');
+        return reply.status(400).send({
+          error: SKILLS_ERROR_MESSAGES.registrySourceBodyInvalid,
+          issues: bodyResult.error.issues,
+        });
       }
+      const body = bodyResult.data;
 
       const id = body.id ?? `src-${Date.now()}`;
       if (isReadonlySourceId(id)) {
         step.fail('built-in registry source id is reserved');
-        return reply
-          .status(409)
-          .send({ error: 'Registry source id is reserved by a built-in source' });
+        return reply.status(409).send({ error: SKILLS_ERROR_MESSAGES.registrySourceIdReserved });
       }
 
       const upsertStep = child('upsert', undefined, { sourceId: id });
@@ -1921,9 +2146,7 @@ export async function skillsRoutes(app: FastifyInstance): Promise<void> {
       if (!created) {
         reloadStep.fail('created source could not be reloaded');
         step.fail('created source could not be reloaded');
-        return reply
-          .status(500)
-          .send({ error: 'Registry source created but could not be reloaded' });
+        return reply.status(500).send({ error: SKILLS_ERROR_MESSAGES.registrySourceReloadFailed });
       }
       reloadStep.succeed();
 
@@ -1965,7 +2188,18 @@ export async function skillsRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
       if (isReadonlySourceId(sourceId)) {
         step.fail('built-in registry source cannot be removed');
-        return reply.status(403).send({ error: 'Built-in registry source cannot be removed' });
+        return reply
+          .status(403)
+          .send({ error: SKILLS_ERROR_MESSAGES.registrySourceBuiltinDeleteForbidden });
+      }
+
+      const existing = sqliteGet<RegistrySourceRow>(
+        'SELECT * FROM registry_sources WHERE id = ? AND user_id = ?',
+        [sourceId, user.sub],
+      );
+      if (!existing) {
+        step.fail('registry source not found');
+        return reply.status(404).send({ error: SKILLS_ERROR_MESSAGES.registrySourceNotFound });
       }
       sqliteRun('DELETE FROM registry_source_skill_cache WHERE source_id = ? AND user_id = ?', [
         sourceId,
@@ -1991,16 +2225,22 @@ export async function skillsRoutes(app: FastifyInstance): Promise<void> {
         },
       );
       const user = request.user as JwtPayload;
-      const body = request.body as { enabled?: boolean };
+      const bodyResult = registrySourceToggleBodySchema.safeParse(request.body);
 
       if (isReadonlySourceId(sourceId)) {
         step.fail('built-in registry source cannot be toggled');
-        return reply.status(403).send({ error: 'Built-in registry source cannot be toggled' });
+        return reply
+          .status(403)
+          .send({ error: SKILLS_ERROR_MESSAGES.registrySourceBuiltinToggleForbidden });
       }
-      if (typeof body.enabled !== 'boolean') {
-        step.fail('enabled is required');
-        return reply.status(400).send({ error: 'enabled is required' });
+      if (!bodyResult.success) {
+        step.fail('invalid toggle body');
+        return reply.status(400).send({
+          error: SKILLS_ERROR_MESSAGES.registrySourceToggleBodyInvalid,
+          issues: bodyResult.error.issues,
+        });
       }
+      const body = bodyResult.data;
 
       const updateStep = child('update', undefined, { enabled: body.enabled });
       sqliteRun('UPDATE registry_sources SET enabled = ? WHERE id = ? AND user_id = ?', [
@@ -2043,7 +2283,7 @@ export async function skillsRoutes(app: FastifyInstance): Promise<void> {
       if (!updated) {
         queryStep.fail('registry source not found');
         step.fail('registry source not found');
-        return reply.status(404).send({ error: 'Registry source not found' });
+        return reply.status(404).send({ error: SKILLS_ERROR_MESSAGES.registrySourceNotFound });
       }
       queryStep.succeed(undefined, { enabled: updated.enabled === 1 });
 
@@ -2081,13 +2321,15 @@ export async function skillsRoutes(app: FastifyInstance): Promise<void> {
            WHERE user_id = ? AND skill_id = ? LIMIT 1`,
         [user.sub, skillId],
       );
-      if (cachedRows.length > 0 && cachedRows[0]) {
-        const entry = parseCachedSkillEntry(cachedRows[0]);
+      const cachedEntry =
+        cachedRows.length > 0 && cachedRows[0] ? tryParseCachedSkillEntry(cachedRows[0]) : null;
+      if (cachedEntry) {
+        const entry = cachedEntry;
         if (entry.manifestUrl) {
           try {
             const mdRes = await fetchWithTimeout(entry.manifestUrl, {});
             if (mdRes.ok) {
-              const text = await mdRes.text();
+              const text = await readResponseTextWithLimit(mdRes, resolveSkillManifestMaxBytes());
               const fm = parseSkillFrontmatter(text);
               step.succeed(undefined, { source: 'cache+fetch' });
               return reply.send({
@@ -2142,7 +2384,7 @@ export async function skillsRoutes(app: FastifyInstance): Promise<void> {
         try {
           const mdRes = await fetchWithTimeout(rawUrl, {});
           if (mdRes.ok) {
-            const text = await mdRes.text();
+            const text = await readResponseTextWithLimit(mdRes, resolveSkillManifestMaxBytes());
             const fm = parseSkillFrontmatter(text);
             step.succeed(undefined, { source: 'github' });
             return reply.send({
@@ -2168,7 +2410,9 @@ export async function skillsRoutes(app: FastifyInstance): Promise<void> {
       }
 
       step.fail('not found');
-      return reply.status(404).send({ error: `Skill not found: ${skillId}` });
+      return reply
+        .status(404)
+        .send({ error: `${SKILLS_ERROR_MESSAGES.skillNotFound}（${skillId}）` });
     },
   );
 }

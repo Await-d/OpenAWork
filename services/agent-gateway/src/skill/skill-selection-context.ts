@@ -45,13 +45,17 @@ export function getEffectiveSkillsForSession(sessionId: string): EffectiveSkill[
     [sessionId],
   );
   if (!row) return null;
-  const workspacePath = extractSessionWorkingDirectory(
-    parseSessionMetadataJson(row.metadata_json ?? '{}'),
-  );
+  const metadata = parseSessionMetadataJson(row.metadata_json ?? '{}');
+  const workspacePath = extractSessionWorkingDirectory(metadata);
+  const requested = metadata['requestedSkills'];
+  const requestedSkillIds = Array.isArray(requested)
+    ? requested.filter((v): v is string => typeof v === 'string' && v.length > 0)
+    : [];
   return resolveEffectiveSkills({
     userId: row.user_id,
     workspacePath,
     sessionId,
+    ...(requestedSkillIds.length > 0 ? { requestedSkillIds } : {}),
   });
 }
 
@@ -64,12 +68,18 @@ export function getEffectiveSkillsFromSessionContext(input: {
   sessionId: string;
   metadataJson: string | null | undefined;
 }): EffectiveSkill[] {
+  const metadata = input.metadataJson ? parseSessionMetadataJson(input.metadataJson) : {};
   const workspacePath = input.metadataJson
-    ? extractSessionWorkingDirectory(parseSessionMetadataJson(input.metadataJson))
+    ? extractSessionWorkingDirectory(metadata)
     : null;
+  const requested = metadata['requestedSkills'];
+  const requestedSkillIds = Array.isArray(requested)
+    ? requested.filter((v): v is string => typeof v === 'string' && v.length > 0)
+    : [];
   return resolveEffectiveSkills({
     userId: input.userId,
     workspacePath,
     sessionId: input.sessionId,
+    ...(requestedSkillIds.length > 0 ? { requestedSkillIds } : {}),
   });
 }

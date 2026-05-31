@@ -1,6 +1,7 @@
 import { parse as parseYaml } from 'yaml';
 import type { SkillManifest, SkillPermission } from '@openAwork/skill-types';
 import type { InstallOptions, InstalledSkillRecord, SkillEntry } from './types.js';
+import { fetchWithTimeout, readResponseTextWithLimit } from './http.js';
 
 export interface PermissionGrantResult {
   granted: SkillPermission[];
@@ -96,12 +97,12 @@ export class SkillInstaller {
       throw new Error(`Skill '${entry.id}' does not provide manifest or manifestUrl`);
     }
 
-    const response = await fetch(entry.manifestUrl, { method: 'GET' });
+    const response = await fetchWithTimeout(entry.manifestUrl, { method: 'GET' });
     if (!response.ok) {
       throw new Error(`Failed to fetch manifest for skill '${entry.id}', HTTP ${response.status}`);
     }
 
-    const rawManifest = await response.text();
+    const rawManifest = await readResponseTextWithLimit(response);
     return this.parseManifest(rawManifest);
   }
 
@@ -199,17 +200,17 @@ export class SkillInstaller {
   }
 
   private async defaultLocalFileReader(path: string): Promise<string> {
-    const directResponse = await fetch(path, { method: 'GET' }).catch(() => undefined);
+    const directResponse = await fetchWithTimeout(path, { method: 'GET' }).catch(() => undefined);
     if (directResponse?.ok) {
-      return directResponse.text();
+      return readResponseTextWithLimit(directResponse);
     }
 
     const isAbsolutePath = path.startsWith('/');
     if (isAbsolutePath) {
       const fileUrl = `file://${path}`;
-      const fileResponse = await fetch(fileUrl, { method: 'GET' }).catch(() => undefined);
+      const fileResponse = await fetchWithTimeout(fileUrl, { method: 'GET' }).catch(() => undefined);
       if (fileResponse?.ok) {
-        return fileResponse.text();
+        return readResponseTextWithLimit(fileResponse);
       }
     }
 

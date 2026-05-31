@@ -972,7 +972,7 @@ export function DetailPanel({
                                 style={{
                                   ...ACTION_BUTTON_STYLE,
                                   borderColor: hasPreviewConflicts
-                                    ? 'color-mix(in oklch, var(--warning) 38%, var(--border-default)'
+                                    ? 'color-mix(in oklch, var(--warning) 38%, var(--border-default))'
                                     : 'var(--border-default)',
                                   color: hasPreviewConflicts
                                     ? 'var(--warning)'

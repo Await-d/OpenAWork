@@ -55,6 +55,49 @@ interface GatewayClient {
   stopStream: () => Promise<boolean>;
 }
 
+export const STREAM_CLIENT_ERROR_MESSAGES = {
+  attachInvalidPayload: '实时流数据解析失败。',
+  sseInvalidPayload: 'SSE 数据解析失败。',
+  wsInvalidPayload: 'WebSocket 数据解析失败。',
+} as const;
+
+export function formatGatewayStreamErrorMessage(code: string, message?: string): string {
+  if (message && message.trim().length > 0) {
+    return message;
+  }
+
+  switch (code) {
+    case 'REQUEST_REPLAY_FAILED':
+      return '请求重放失败。';
+    case 'SESSION_ALREADY_RUNNING':
+      return '当前会话已有请求正在运行。';
+    case 'MODEL_ERROR':
+      return '模型响应失败，请稍后重试。';
+    case 'STREAM_ERROR':
+      return '流式响应处理中断，请稍后重试。';
+    case 'V2_UPSTREAM_ERROR':
+      return '上游模型服务暂时不可用，请稍后重试。';
+    case 'WS_STREAM_ERROR':
+      return 'WebSocket 流式响应处理中断，请稍后重试。';
+    case 'SSE_STREAM_ERROR':
+      return 'SSE 流式响应处理中断，请稍后重试。';
+    case 'ATTACH_STREAM_DISCONNECTED':
+      return '实时流连接已断开。';
+    case 'ATTACH_STREAM_INVALID_PAYLOAD':
+      return STREAM_CLIENT_ERROR_MESSAGES.attachInvalidPayload;
+    case 'SSE_INVALID_PAYLOAD':
+      return STREAM_CLIENT_ERROR_MESSAGES.sseInvalidPayload;
+    case 'WS_INVALID_PAYLOAD':
+      return STREAM_CLIENT_ERROR_MESSAGES.wsInvalidPayload;
+    case 'SSE_ERROR':
+      return 'SSE 连接异常。';
+    case 'WS_ERROR':
+      return 'WebSocket 连接异常。';
+    default:
+      return code;
+  }
+}
+
 interface ActiveStreamSnapshot {
   clientRequestId: string;
   lastSeq: number;
@@ -115,6 +158,36 @@ interface AttachActiveStreamSessionOptions {
   token: string;
 }
 
+/**
+ * §0.153: client-side WS liveness probe for the live chat stream.
+ *
+ * The chat WS (`stream()` below) reconnects via SSE fallback on `onclose` /
+ * `onerror`, but a HALF-OPEN socket (server vanished with no FIN — laptop
+ * sleep, NAT/idle drop, network partition) never fires either, so the browser
+ * holds the socket OPEN for the OS TCP timeout (minutes, sometimes never) and
+ * the chat spinner hangs. The gateway answers an app-level `{type:'ping'}`
+ * with `pong` (§0.153 route branch), so the client pings on an interval and,
+ * once the server has gone silent past a tolerance window, closes the socket
+ * — which triggers the existing (idempotent, clientRequestId-deduped) SSE
+ * fallback. Mirrors mobile §0.147 / team-events §0.150.
+ */
+const CHAT_WS_CLIENT_PING_INTERVAL_MS = 15_000;
+const CHAT_WS_CLIENT_LIVENESS_TIMEOUT_MS = 40_000;
+
+/**
+ * Pure decision for one chat-WS liveness tick. `ping` keeps the socket primed;
+ * `reconnect` means the server has gone silent past the tolerance window, so
+ * the caller must tear the socket down and let the SSE fallback take over.
+ * Exported for unit testing.
+ */
+export function resolveChatWsLivenessAction(input: {
+  msSinceLastServerActivity: number;
+  livenessTimeoutMs?: number;
+}): 'ping' | 'reconnect' {
+  const timeout = input.livenessTimeoutMs ?? CHAT_WS_CLIENT_LIVENESS_TIMEOUT_MS;
+  return input.msSinceLastServerActivity > timeout ? 'reconnect' : 'ping';
+}
+
 function classifyAttachStreamError(input: {
   opened: boolean;
   stopRequested: boolean;
@@ -143,6 +216,20 @@ function createGatewayEventSource(url: string): EventSource {
   }
 
   return new EventSource(url);
+}
+
+export function safeParseGatewayEventData<T>(input: {
+  rawData: string;
+  onError: (code: string, message: string) => void;
+  invalidCode: string;
+  invalidMessage: string;
+}): T | null {
+  try {
+    return JSON.parse(input.rawData) as T;
+  } catch {
+    input.onError(input.invalidCode, input.invalidMessage);
+    return null;
+  }
 }
 
 export function connectAttachEventSource(
@@ -237,7 +324,19 @@ export function connectAttachEventSource(
     };
 
     eventSource.onmessage = (event) => {
-      const parsed = JSON.parse(event.data) as RunEventEnvelope | StreamChunk | RunEvent;
+      const parsed = safeParseGatewayEventData<RunEventEnvelope | StreamChunk | RunEvent>({
+        rawData: event.data,
+        invalidCode: 'ATTACH_STREAM_INVALID_PAYLOAD',
+        invalidMessage: STREAM_CLIENT_ERROR_MESSAGES.attachInvalidPayload,
+        onError: (code, message) => {
+          settled = true;
+          cleanup(false, eventSource);
+          callbacks.onError(code, message);
+        },
+      });
+      if (!parsed) {
+        return;
+      }
       if (isRunEventEnvelope(parsed)) {
         const cursorSeq = parsed.payload.cursor?.seq ?? parsed.seq;
         const currentActiveRequest = getCurrentActiveRequest();
@@ -645,8 +744,18 @@ export function useGatewayClient(token: string | null): GatewayClient {
 
       let settled = false;
       let fallbackStarted = false;
+      // §0.153: chat-WS half-open liveness probe state (scoped to this stream).
+      let livenessTimer: ReturnType<typeof setInterval> | null = null;
+      let lastServerActivityAt = 0;
+      const stopLivenessProbe = () => {
+        if (livenessTimer) {
+          clearInterval(livenessTimer);
+          livenessTimer = null;
+        }
+      };
 
       const cleanup = () => {
+        stopLivenessProbe();
         wsRef.current?.close();
         sseRef.current?.close();
         wsRef.current = null;
@@ -740,7 +849,21 @@ export function useGatewayClient(token: string | null): GatewayClient {
         );
         sseRef.current = es;
         es.onmessage = (event) => {
-          const chunk = JSON.parse(event.data as string) as StreamChunk | RunEvent;
+          const chunk = safeParseGatewayEventData<StreamChunk | RunEvent>({
+            rawData: event.data as string,
+            invalidCode: 'SSE_INVALID_PAYLOAD',
+            invalidMessage: STREAM_CLIENT_ERROR_MESSAGES.sseInvalidPayload,
+            onError: (code, message) => {
+              if (!settled && streamGenerationRef.current === streamGeneration) {
+                settled = true;
+                cleanup();
+                callbacks.onError(code, message);
+              }
+            },
+          });
+          if (!chunk) {
+            return;
+          }
           handleChunk(chunk);
         };
         es.onerror = () => {
@@ -762,7 +885,7 @@ export function useGatewayClient(token: string | null): GatewayClient {
               callbacks.onDone('cancelled');
               return;
             }
-            callbacks.onError('SSE_ERROR', 'SSE connection error');
+            callbacks.onError('SSE_ERROR', 'SSE 连接异常。');
           }
         };
       };
@@ -788,10 +911,72 @@ export function useGatewayClient(token: string | null): GatewayClient {
               yoloMode,
             }),
           );
+          // §0.153: arm the half-open liveness probe. The server answers our
+          // `{type:'ping'}` with `pong` and emits chunks during a live turn;
+          // if NOTHING arrives within the tolerance window the socket is
+          // presumed half-open (server vanished without a FIN) and we close it
+          // — which triggers the existing onclose → startSse() fallback. The
+          // SSE re-send is idempotent: handleStreamRequest dedupes by
+          // clientRequestId (awaits the in-flight run + replays), so a healthy
+          // backgrounded run is re-attached rather than duplicated.
+          lastServerActivityAt = Date.now();
+          stopLivenessProbe();
+          livenessTimer = setInterval(() => {
+            if (settled || streamGenerationRef.current !== streamGeneration) {
+              stopLivenessProbe();
+              return;
+            }
+            if (ws.readyState !== WebSocket.OPEN) return;
+            const action = resolveChatWsLivenessAction({
+              msSinceLastServerActivity: Date.now() - lastServerActivityAt,
+            });
+            if (action === 'reconnect') {
+              // Server silent past tolerance → presume half-open. Closing runs
+              // the onclose handler, which falls back to SSE (idempotent).
+              stopLivenessProbe();
+              try {
+                ws.close();
+              } catch {
+                /* already closing/closed */
+              }
+              return;
+            }
+            try {
+              ws.send(JSON.stringify({ type: 'ping' }));
+            } catch {
+              stopLivenessProbe();
+              try {
+                ws.close();
+              } catch {
+                /* noop */
+              }
+            }
+          }, CHAT_WS_CLIENT_PING_INTERVAL_MS);
         };
 
         ws.onmessage = (event) => {
-          const chunk = JSON.parse(event.data as string) as StreamChunk | RunEvent;
+          // Any frame proves the server is alive — refresh the watchdog.
+          lastServerActivityAt = Date.now();
+          const chunk = safeParseGatewayEventData<StreamChunk | RunEvent>({
+            rawData: event.data as string,
+            invalidCode: 'WS_INVALID_PAYLOAD',
+            invalidMessage: STREAM_CLIENT_ERROR_MESSAGES.wsInvalidPayload,
+            onError: (code, message) => {
+              if (!settled && streamGenerationRef.current === streamGeneration) {
+                settled = true;
+                cleanup();
+                callbacks.onError(code, message);
+              }
+            },
+          });
+          if (!chunk) {
+            return;
+          }
+          // §0.153: swallow the liveness `pong` (it already refreshed activity
+          // above) so it is never forwarded to consumers as a stream event.
+          if ((chunk as { type?: unknown }).type === 'pong') {
+            return;
+          }
           handleChunk(chunk);
         };
 

@@ -29,7 +29,38 @@ interface SessionRow {
 }
 
 const ALLOWLIST_CACHE_TTL_MS = 30_000;
+/**
+ * Hard ceiling on the per-user allowlist cache. Entries key on userId and the
+ * TTL (`expiresAt`) was only ever checked on *read* — expired entries were
+ * never deleted, so the map grew one entry per user who ever hit a workspace
+ * endpoint and never shrank. We sweep expired entries opportunistically and
+ * cap the total, evicting soonest-to-expire first.
+ */
+const ALLOWLIST_CACHE_MAX_ENTRIES = 5_000;
 const allowlistCache = new Map<string, { roots: string[]; expiresAt: number }>();
+
+/**
+ * Bound `allowlistCache`. Called after each insert: drop already-expired
+ * entries (a stale entry is rebuilt from DB on next read anyway), then if still
+ * over the cap evict soonest-to-expire first until back at the ceiling.
+ */
+function pruneAllowlistCache(): void {
+  const now = Date.now();
+  for (const [userId, entry] of allowlistCache) {
+    if (entry.expiresAt <= now) {
+      allowlistCache.delete(userId);
+    }
+  }
+  if (allowlistCache.size <= ALLOWLIST_CACHE_MAX_ENTRIES) {
+    return;
+  }
+  const byExpiry = [...allowlistCache.entries()].sort((a, b) => a[1].expiresAt - b[1].expiresAt);
+  const excess = allowlistCache.size - ALLOWLIST_CACHE_MAX_ENTRIES;
+  for (let i = 0; i < excess; i += 1) {
+    const victim = byExpiry[i];
+    if (victim) allowlistCache.delete(victim[0]);
+  }
+}
 
 /**
  * Read all distinct `workingDirectory` values referenced by the
@@ -65,6 +96,7 @@ export function getUserWorkspaceAllowlist(userId: string): string[] {
   if (cached && cached.expiresAt > now) return cached.roots;
   const roots = fetchUserWorkspaceRootsFromDb(userId);
   allowlistCache.set(userId, { roots, expiresAt: now + ALLOWLIST_CACHE_TTL_MS });
+  pruneAllowlistCache();
   return roots;
 }
 
@@ -91,3 +123,15 @@ export function invalidateUserWorkspaceAllowlist(userId: string): void {
 export function __resetUserWorkspaceAllowlistCacheForTest(): void {
   allowlistCache.clear();
 }
+
+/** Test-only seams for the retention guard (cap / expiry verifiable in-memory). */
+export function __seedAllowlistCacheForTest(userId: string, expiresAtMs: number): void {
+  allowlistCache.set(userId, { roots: [], expiresAt: expiresAtMs });
+}
+export function __getAllowlistCacheSizeForTest(): number {
+  return allowlistCache.size;
+}
+export function __pruneAllowlistCacheForTest(): void {
+  pruneAllowlistCache();
+}
+export const __ALLOWLIST_CACHE_MAX_ENTRIES_FOR_TEST = ALLOWLIST_CACHE_MAX_ENTRIES;

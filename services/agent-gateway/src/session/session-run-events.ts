@@ -4,6 +4,7 @@ import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import { buildNotificationFromRunEvent } from './notification-store.js';
 import { appendSessionMessageV2 as appendSessionMessage } from '../message/message-v2-adapter.js';
 import { appendSessionEvent, translateRunEventToSessionEvent } from './session-entry-store.js';
+import { isSqliteMalformedError } from '../infra/sqlite-error-utils.js';
 
 type RunEventHandler = (event: RunEvent, meta?: PublishRunEventMeta) => void;
 
@@ -27,6 +28,123 @@ export interface PublishRunEventMeta {
   seq?: number;
   toolCallId?: string;
   observability?: ToolCallObservabilityAnnotation;
+}
+
+/**
+ * Per-session retention for the durable run-event replay log.
+ *
+ * `session_run_events` stores one row per emitted RunEvent — including every
+ * `text_delta`, so a single streamed turn writes hundreds/thousands of rows.
+ * Only *failed* runs clear their rows (clearRetryableFailedRequestArtifacts);
+ * every successful run's deltas stay forever. Over a long-lived session that
+ * is a monotonically growing, replay-critical table (the §0.36/§0.40/§0.42
+ * retention family covers the other only-grows tables; this was the last one
+ * on the hot streaming path without a bound).
+ *
+ * Rows are grouped into all-or-nothing replay scopes keyed by
+ * `(session_id, client_request_id)`: the fast replay path
+ * (replayPersistedAssistantResponse) reads an entire scope and replays it
+ * verbatim, and when a scope is absent it transparently falls back to
+ * reconstructing from `session_messages`. So pruning *whole older scopes*
+ * only downgrades those turns from fast-replay to message-reconstruction —
+ * no conversation data is lost — while truncating a scope's head would
+ * corrupt replay. We therefore keep the N most-recently-active scopes per
+ * session (ordered by each scope's max row id) and delete older complete
+ * scopes wholesale. The in-flight run is always the newest scope, so it is
+ * never touched as long as the cap is >= 1. NULL-`client_request_id` rows
+ * (legacy / unscoped) are never pruned.
+ */
+const DEFAULT_SESSION_RUN_EVENT_MAX_SCOPES_PER_SESSION = 50;
+export const SESSION_RUN_EVENT_PRUNE_CHECK_INTERVAL = 200;
+let sessionRunEventPruneCheckInterval = SESSION_RUN_EVENT_PRUNE_CHECK_INTERVAL;
+
+let sessionRunEventRetentionOverride: number | null = null;
+let sessionRunEventInsertsSincePrune = 0;
+let sessionRunEventStoreDisabled = false;
+
+function resolveSessionRunEventRetention(): number {
+  if (sessionRunEventRetentionOverride !== null) {
+    return sessionRunEventRetentionOverride;
+  }
+  const raw = globalThis.process?.env['OPENAWORK_SESSION_RUN_EVENT_MAX_SCOPES_PER_SESSION'];
+  if (raw === undefined || raw === null || raw.trim() === '') {
+    return DEFAULT_SESSION_RUN_EVENT_MAX_SCOPES_PER_SESSION;
+  }
+  const parsed = Number(raw);
+  // Non-positive / NaN means "retention disabled", matching the env
+  // dead-switch semantics of the sibling retention stores.
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 0;
+  }
+  return Math.floor(parsed);
+}
+
+function pruneSessionRunEventScopes(sessionId: string, maxScopes: number): void {
+  // Keep the `maxScopes` scopes whose latest row id is highest (most recently
+  // active, which includes any in-flight run), delete every older scope's
+  // rows wholesale. Scope = distinct non-null client_request_id.
+  sqliteRun(
+    `DELETE FROM session_run_events
+      WHERE session_id = ?
+        AND client_request_id IS NOT NULL
+        AND client_request_id NOT IN (
+          SELECT client_request_id FROM (
+            SELECT client_request_id, MAX(id) AS last_id
+              FROM session_run_events
+             WHERE session_id = ? AND client_request_id IS NOT NULL
+             GROUP BY client_request_id
+             ORDER BY last_id DESC
+             LIMIT ?
+          )
+        )`,
+    [sessionId, sessionId, maxScopes],
+  );
+}
+
+function maybePruneSessionRunEvents(sessionId: string): void {
+  if (sessionRunEventStoreDisabled) {
+    return;
+  }
+  const limit = resolveSessionRunEventRetention();
+  if (limit <= 0) {
+    // Retention disabled: reset the counter so re-enabling later doesn't
+    // trigger one giant catch-up prune.
+    sessionRunEventInsertsSincePrune = 0;
+    return;
+  }
+  sessionRunEventInsertsSincePrune += 1;
+  if (sessionRunEventInsertsSincePrune < sessionRunEventPruneCheckInterval) {
+    return;
+  }
+  sessionRunEventInsertsSincePrune = 0;
+  try {
+    pruneSessionRunEventScopes(sessionId, limit);
+  } catch (error) {
+    // A prune failure must never break run-event persistence or the live
+    // stream. On DB corruption disable the prune path entirely, consistent
+    // with the sibling retention stores.
+    if (isSqliteMalformedError(error)) {
+      sessionRunEventStoreDisabled = true;
+      return;
+    }
+    console.warn(
+      `[session-run-events] retention prune failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+/** Test-only: override the per-session scope cap (null clears the override). */
+export function __setSessionRunEventRetentionForTesting(
+  limit: number | null,
+  checkInterval?: number,
+): void {
+  sessionRunEventRetentionOverride = limit;
+  sessionRunEventPruneCheckInterval =
+    typeof checkInterval === 'number' && checkInterval > 0
+      ? Math.floor(checkInterval)
+      : SESSION_RUN_EVENT_PRUNE_CHECK_INTERVAL;
+  sessionRunEventInsertsSincePrune = 0;
+  sessionRunEventStoreDisabled = false;
 }
 
 const PERSISTED_RUN_EVENT = Symbol('persistedRunEvent');
@@ -119,6 +237,9 @@ function persistRunEventRow(
     }
   }
   markPersisted(event);
+  // Bound the per-session replay log so a long-lived session's successful
+  // runs don't accumulate delta rows without limit (see retention block).
+  maybePruneSessionRunEvents(sessionId);
   return { seq };
 }
 
@@ -215,9 +336,18 @@ export function publishSessionRunEvent(
     meta?.seq !== undefined || persisted.seq === null
       ? meta
       : { ...(meta ?? {}), seq: persisted.seq };
-  handlers.forEach((handler) => {
-    handler(event, broadcastMeta);
-  });
+  // Snapshot the subscriber set before dispatch. A handler may unsubscribe
+  // itself (attach's terminal-event cleanup runs synchronously) or trigger a
+  // new subscription mid-dispatch; iterating the live Set would otherwise
+  // skip survivors or leak this event to a subscriber that joined this tick.
+  for (const handler of [...handlers]) {
+    notifyRunEventHandler({
+      event,
+      handler,
+      meta: broadcastMeta,
+      sessionId,
+    });
+  }
 }
 
 export function broadcastPersistedSessionRunEvent(
@@ -227,17 +357,27 @@ export function broadcastPersistedSessionRunEvent(
 ): void {
   const handlers = sessionHandlers.get(sessionId);
   if (!handlers) return;
-  handlers.forEach((handler) => {
-    try {
-      handler(event, meta);
-    } catch (error) {
-      console.error('session run event handler failed', {
-        error: error instanceof Error ? error.message : String(error),
-        eventType: event.type,
-        sessionId,
-      });
-    }
-  });
+  // Snapshot before dispatch — see publishSessionRunEvent for rationale.
+  for (const handler of [...handlers]) {
+    notifyRunEventHandler({ event, handler, meta, sessionId });
+  }
+}
+
+function notifyRunEventHandler(input: {
+  event: RunEvent;
+  handler: RunEventHandler;
+  meta?: PublishRunEventMeta;
+  sessionId: string;
+}): void {
+  try {
+    input.handler(input.event, input.meta);
+  } catch (error) {
+    console.error('session run event handler failed', {
+      error: error instanceof Error ? error.message : String(error),
+      eventType: input.event.type,
+      sessionId: input.sessionId,
+    });
+  }
 }
 
 export function persistSessionRunEventForRequest(

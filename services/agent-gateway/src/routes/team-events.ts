@@ -9,6 +9,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { JwtPayload } from '../infra/auth.js';
 import { recordLatency } from '../handoff/bus/latency-monitor.js';
 import { subscribeToTeamEvents } from '../handoff/bus/team-events-bus.js';
+import { recordTeamRuntimeIncident } from '../team/team-runtime-diagnostics-store.js';
 
 const TEAM_EVENTS_HEARTBEAT_INTERVAL_MS = 10_000;
 const TEAM_EVENTS_IDLE_TIMEOUT_MS = 45_000;
@@ -33,22 +34,30 @@ export async function teamEventsRoutes(app: FastifyInstance): Promise<void> {
         } catch (_verifyErr) {
           void _verifyErr;
           safeSend(socket, { type: 'error', code: 'UNAUTHORIZED' });
-          socket.close(1008);
+          safeClose(socket, 1008, 'UNAUTHORIZED');
           return;
         }
       } else {
         safeSend(socket, { type: 'error', code: 'UNAUTHORIZED' });
-        socket.close(1008);
+        safeClose(socket, 1008, 'UNAUTHORIZED');
         return;
       }
 
       const userId = user.sub;
       if (!safeSend(socket, { type: 'connected', userId })) {
-        try {
-          socket.close(1011, 'TEAM_EVENTS_CONNECT_SEND_FAILED');
-        } catch {
-          // socket 已处于关闭态，无需进一步处理。
-        }
+        recordTeamRuntimeIncident({
+          category: 'team_events_connection',
+          code: 'team-events:CONNECT_SEND_FAILED',
+          context: {
+            closeCode: 1011,
+            userId,
+          },
+          message: 'TEAM_EVENTS_CONNECT_SEND_FAILED',
+          severity: 'error',
+          timestamp: Date.now(),
+          userId,
+        });
+        safeClose(socket, 1011, 'TEAM_EVENTS_CONNECT_SEND_FAILED');
         return;
       }
 
@@ -63,7 +72,7 @@ export async function teamEventsRoutes(app: FastifyInstance): Promise<void> {
       const unsubscribe = subscribeToTeamEvents((event) => {
         if (event.userId !== userId) return;
         if (event.type === 'session.substate.changed') {
-          recordLatency('substate_push', Math.max(0, Date.now() - event.timestamp));
+          recordLatency('substate_push', Math.max(0, Date.now() - event.timestamp), userId);
         }
         if (!safeSend(socket, event)) {
           closeSocket(1011, 'TEAM_EVENTS_SEND_FAILED', 'SEND_FAILED');
@@ -85,14 +94,24 @@ export async function teamEventsRoutes(app: FastifyInstance): Promise<void> {
       const closeSocket = (code: number, reason: string, errorCode?: string) => {
         if (closed) return;
         if (errorCode) {
+          recordTeamRuntimeIncident({
+            category: 'team_events_connection',
+            code: `team-events:${errorCode}`,
+            context: {
+              closeCode: code,
+              userId,
+            },
+            message: reason,
+            severity: errorCode === 'IDLE_TIMEOUT' ? 'warning' : 'error',
+            timestamp: Date.now(),
+            userId,
+          });
+        }
+        if (errorCode) {
           safeSend(socket, { type: 'error', code: errorCode });
         }
         cleanup();
-        try {
-          socket.close(code, reason);
-        } catch {
-          // 底层连接已断开；cleanup 已经执行，不再重复处理。
-        }
+        safeClose(socket, code, reason);
       };
 
       heartbeat = setInterval(() => {
@@ -149,5 +168,13 @@ function safeSend(socket: WebSocket, payload: unknown): boolean {
   } catch (_sendErr) {
     void _sendErr;
     return false;
+  }
+}
+
+function safeClose(socket: WebSocket, code: number, reason: string): void {
+  try {
+    socket.close(code, reason);
+  } catch (_closeErr) {
+    void _closeErr;
   }
 }

@@ -7,18 +7,10 @@ import type {
   SearchOptions,
   SkillEntry,
 } from './types.js';
-
-const REGISTRY_FETCH_TIMEOUT_MS = 8000;
-
-async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REGISTRY_FETCH_TIMEOUT_MS);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timeout);
-  }
-}
+import {
+  fetchWithTimeout,
+  readResponseJsonWithLimit,
+} from './http.js';
 
 export interface SkillRegistryClient {
   search(options?: SearchOptions): Promise<SkillEntry[]>;
@@ -230,7 +222,9 @@ export class SkillRegistryClientImpl implements SkillRegistryClient {
       throw new Error(`Search failed for source '${source.id}', HTTP ${response.status}`);
     }
 
-    const body = (await response.json()) as { items?: SkillEntry[] } | SkillEntry[];
+    const body = await readResponseJsonWithLimit<{ items?: SkillEntry[] } | SkillEntry[]>(
+      response,
+    );
     const items = Array.isArray(body) ? body : (body.items ?? []);
     return items.map((item) => ({ ...item, sourceId: item.sourceId || source.id }));
   }
@@ -248,7 +242,7 @@ export class SkillRegistryClientImpl implements SkillRegistryClient {
       return undefined;
     }
 
-    const entry = (await response.json()) as SkillEntry;
+    const entry = await readResponseJsonWithLimit<SkillEntry>(response);
     return {
       ...entry,
       sourceId: entry.sourceId || source.id,

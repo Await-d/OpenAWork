@@ -12,63 +12,59 @@
  * TeamPageV2 主体。
  */
 
-import { useMemo, type ReactNode } from 'react';
+import { type ReactNode } from 'react';
 import type { OfficeSceneState } from './office/OfficeScene.js';
 import type { AgentTeamsSidebarTeam } from '../data/team-runtime-types.js';
-import type { HandoffEntry } from '../../../../stores/team/team-events.js';
+import type { HandoffEntry, HandoffEvent } from '../../../../stores/team/team-events.js';
 import { OfficeThreeCanvas } from './office/OfficeThreeCanvas.js';
 import { OverviewTab } from './overview/OverviewTab.js';
 import { MessagesMergedTab } from './conversation/MessagesMergedTab.js';
-import { TeamsTab } from './governance/TeamsTab.js';
 import { TeamArtifactSection } from './tasks/TeamArtifactSection.js';
 import { ReviewMergedTab } from './tasks/ReviewMergedTab.js';
-import { SessionTreeView } from './tasks/SessionTreeView.js';
 import { TeamRuntimeSettingsPanel } from './governance/team-runtime-settings-panel.js';
 import { TabPlaceholder } from './TabPlaceholder.js';
 import { TabContainer } from './TabContainer.js';
 import { LayeredConversationView } from './conversation/LayeredConversationView.js';
 import { TimingView } from './metrics/TimingView.js';
 import { HealthView } from './overview/HealthView.js';
-import { TopologyView } from './overview/TopologyView.js';
+import { WorkspaceKnowledgeGraphView } from './overview/WorkspaceKnowledgeGraphView.js';
 import { AuditView } from './governance/AuditView.js';
 import { SharesView } from './governance/SharesView.js';
 import { TemplatesTab } from './governance/TemplatesTab.js';
-import { DispatchTab } from './tasks/DispatchTab.js';
-import { ClarificationsPanel } from './tasks/ClarificationsPanel.js';
-import { FailureFlowIndicator } from '../shell/controls/FailureFlowIndicator.js';
-import { useReviewDisposition } from '../hooks/use-review-disposition.js';
-import { useSessionHandoffs } from '../hooks/use-session-handoffs.js';
 import { UsageView } from './metrics/UsageView.js';
-import { ToolCallsView } from './metrics/ToolCallsView.js';
+import { TeamInitSummaryPanel } from './overview/TeamInitSummaryPanel.js';
+import type { TeamRuntimeHandoffContextInput } from './team-runtime-navigation.js';
 
 export type MiddleTabKey =
   | 'office'
   | 'dashboard'
-  | 'topology'
+  | 'graph'
   | 'health'
   | 'conversation'
   | 'layered'
   | 'messages'
-  | 'tasks'
-  | 'dispatch'
   | 'artifacts'
   | 'review'
   | 'timing'
   | 'usage'
-  | 'tools'
-  | 'members'
   | 'templates'
   | 'shares'
   | 'audit'
-  | 'settings';
+  | 'settings'
+  | 'init';
 
 export interface MiddleTabRenderArgs {
   middleTab: MiddleTabKey;
   selectedTeamId: string;
   selectedTeam: AgentTeamsSidebarTeam | null;
+  focusHandoffId?: string | null;
   officeSceneState: OfficeSceneState;
   onSelectTeam: (id: string) => void;
   onOpenFullscreen: () => void;
+  onOpenClarifications: () => void;
+  onOpenHandoffContext: (input: TeamRuntimeHandoffContextInput) => void;
+  onOpenBlockingTarget: (event: HandoffEvent) => void;
+  onClearFocusedHandoff: () => void;
   onSelectLayerSession: () => void;
   onCancelHandoff: (handoffId: string) => void;
   onNewTemplate?: () => void;
@@ -85,9 +81,14 @@ export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
     middleTab,
     selectedTeamId,
     selectedTeam,
+    focusHandoffId,
     officeSceneState,
     onSelectTeam,
     onOpenFullscreen,
+    onOpenClarifications,
+    onOpenHandoffContext,
+    onOpenBlockingTarget,
+    onClearFocusedHandoff,
     onSelectLayerSession,
     onCancelHandoff,
     onNewTemplate,
@@ -119,7 +120,7 @@ export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
               padding: '6px 10px',
               borderRadius: 8,
               border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
-              background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base)',
+              background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base))',
               color: 'var(--fg-strong)',
               fontSize: 11,
               fontWeight: 700,
@@ -140,53 +141,72 @@ export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
     case 'dashboard':
       return <OverviewTab selectedTeam={selectedTeam} />;
 
-    case 'topology':
-      return <TopologyView />;
+    case 'graph':
+      return (
+        <WorkspaceKnowledgeGraphView
+          selectedSessionId={selectedTeamId || null}
+          teamWorkspaceId={teamWorkspaceId}
+          onSelectSession={onSelectTeam}
+        />
+      );
 
     case 'health':
-      return <HealthView onCancelHandoff={onCancelHandoff} />;
+      return (
+        <HealthView
+          onCancelHandoff={onCancelHandoff}
+          onOpenHandoffContext={onOpenHandoffContext}
+        />
+      );
 
     // ─── B. 通讯 ────────────────────────────────────────────────────
     case 'layered':
       return <LayeredConversationView onSelectSessionDrawer={onSelectLayerSession} />;
 
     case 'messages':
-      return <MessagesMergedTab selectedTeam={selectedTeam} />;
-
-    // ─── C. 任务 / 产物 ─────────────────────────────────────────────
-    case 'tasks':
       return (
-        <TabContainer title="任务流" subtitle="层级会话树 + 当前可取消的 handoff，按状态实时联动。">
-          <TaskFailureBanner selectedTeamId={selectedTeamId} />
-          <ClarificationsPanel filterSessionId={selectedTeamId || null} />
-          <SessionTreeView onSelectSession={onSelectLayerSession} />
-          <HandoffCancelInline handoffs={handoffs} onCancel={onCancelHandoff} />
-        </TabContainer>
+        <MessagesMergedTab
+          onOpenBlockingTarget={onOpenBlockingTarget}
+          onOpenClarifications={onOpenClarifications}
+          selectedTeam={selectedTeam}
+        />
       );
 
-    case 'dispatch':
-      return <DispatchTab selectedTeamId={selectedTeamId} onCancelHandoff={onCancelHandoff} />;
-
+    // ─── C. 任务 / 产物 ─────────────────────────────────────────────
+    // 「任务与产物」单一视图：内含会话树 + 澄清 + 任务看板 + 派发包 + 产物链。
     case 'artifacts':
-      return <TeamArtifactSection />;
+      return (
+        <TeamArtifactSection
+          focusHandoffId={focusHandoffId}
+          onClearFocus={onClearFocusedHandoff}
+          selectedTeamId={selectedTeamId}
+          handoffs={handoffs}
+          onCancelHandoff={onCancelHandoff}
+        />
+      );
 
     case 'review':
-      return <ReviewMergedTab selectedTeam={selectedTeam} selectedTeamId={selectedTeamId} />;
+      return (
+        <ReviewMergedTab
+          focusHandoffId={focusHandoffId}
+          onClearFocus={onClearFocusedHandoff}
+          selectedTeam={selectedTeam}
+          selectedTeamId={selectedTeamId}
+        />
+      );
 
     // ─── D. 度量 ────────────────────────────────────────────────────
     case 'timing':
       return <TimingView />;
 
     case 'usage':
-      return <UsageView />;
-
-    case 'tools':
-      return <ToolCallsView />;
+      return (
+        <UsageView
+          selectedSessionId={selectedTeamId || null}
+          selectedSessionTitle={selectedTeam?.title ?? null}
+        />
+      );
 
     // ─── E. 配置 / 治理 ─────────────────────────────────────────────
-    case 'members':
-      return <TeamsTab />;
-
     case 'templates':
       return <TemplatesTab onNewTemplate={onNewTemplate ?? (() => {})} />;
 
@@ -195,6 +215,16 @@ export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
 
     case 'audit':
       return <AuditView />;
+
+    case 'init':
+      return (
+        <TabContainer
+          title="初始化"
+          subtitle="团队对当前会话项目的前置认知：结构 / 记忆 / 架构理解 / 各层工具绑定"
+        >
+          <TeamInitSummaryPanel sessionId={selectedTeamId || null} variant="full" />
+        </TabContainer>
+      );
 
     case 'settings':
       if (!gatewayUrl) {
@@ -231,128 +261,4 @@ export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
       return _exhaustive;
     }
   }
-}
-
-/**
- * 「任务流」tab 顶部的失败分流横幅。
- *
- * 把 useReviewDisposition + FailureFlowIndicator 组合成一个独立组件，
- * 让 renderMiddleTabContent 不需要在 switch case 中调用 hook。
- */
-function TaskFailureBanner({ selectedTeamId }: { selectedTeamId: string }) {
-  const sessionId = selectedTeamId || null;
-  const disposition = useReviewDisposition(sessionId);
-  const { handoffs } = useSessionHandoffs(sessionId);
-  const pm2Source = useMemo(() => {
-    const pm2Records = handoffs
-      .filter((record) => record.fromRoleLayer === 'pm2')
-      .sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
-    return pm2Records[0]?.fromSessionId ?? null;
-  }, [handoffs]);
-
-  if (!disposition.action) return null;
-  return (
-    <FailureFlowIndicator
-      action={disposition.action}
-      reason={disposition.reason}
-      escalationRound={disposition.escalationRound}
-      pm2HandoffId={disposition.pm2HandoffId}
-      pm2SourceSessionId={pm2Source}
-    />
-  );
-}
-
-/**
- * 嵌入版的「运行中 handoff 取消列表」。原本只在右侧面板里有一份；
- * 在 session-tree tab 中也复用，避免用户在两处来回切换。
- */
-function HandoffCancelInline({
-  handoffs,
-  onCancel,
-}: {
-  handoffs: Map<string, HandoffEntry>;
-  onCancel: (handoffId: string) => void;
-}) {
-  const cancellable = useMemo(() => {
-    const result: HandoffEntry[] = [];
-    for (const entry of handoffs.values()) {
-      if (entry.state === 'running' || entry.state === 'pending' || entry.state === 'claimed') {
-        result.push(entry);
-      }
-    }
-    return result;
-  }, [handoffs]);
-
-  if (cancellable.length === 0) return null;
-
-  return (
-    <div style={{ display: 'grid', gap: 6 }}>
-      <span
-        style={{
-          fontSize: 10,
-          fontWeight: 700,
-          color: 'var(--fg-muted)',
-          textTransform: 'uppercase',
-          letterSpacing: '0.06em',
-        }}
-      >
-        运行中任务
-      </span>
-      {cancellable.map((entry) => (
-        <div
-          key={entry.id}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '6px 10px',
-            borderRadius: 8,
-            border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
-            background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
-            fontSize: 12,
-          }}
-        >
-          <span
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: 999,
-              background: entry.state === 'running' ? 'var(--success)' : 'var(--warning)',
-              flexShrink: 0,
-            }}
-          />
-          <span
-            style={{
-              flex: 1,
-              minWidth: 0,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              color: 'var(--fg-default)',
-            }}
-          >
-            {entry.fromRoleLayer} → {entry.toRoleLayer}
-          </span>
-          <button
-            type="button"
-            onClick={() => onCancel(entry.id)}
-            style={{
-              padding: '2px 8px',
-              borderRadius: 6,
-              border: '1px solid color-mix(in srgb, var(--danger) 40%, transparent)',
-              background: 'color-mix(in srgb, var(--danger) 8%, transparent)',
-              color: 'var(--danger)',
-              fontSize: 10,
-              fontWeight: 700,
-              cursor: 'pointer',
-              flexShrink: 0,
-            }}
-            aria-label={`取消任务 ${entry.id}`}
-          >
-            取消
-          </button>
-        </div>
-      ))}
-    </div>
-  );
 }

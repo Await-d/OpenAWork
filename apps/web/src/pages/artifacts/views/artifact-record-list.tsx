@@ -105,7 +105,7 @@ export function ArtifactRecordList({
                   padding: '10px 11px',
                   borderRadius: tokens.radius.md,
                   border: selected
-                    ? '1px solid color-mix(in oklch, var(--accent) 40%, var(--border-default)'
+                    ? '1px solid color-mix(in oklch, var(--accent) 40%, var(--border-default))'
                     : `1px solid ${tokens.color.borderSubtle}`,
                   background: selected
                     ? 'color-mix(in oklch, var(--accent) 14%, var(--bg-overlay) 86%)'

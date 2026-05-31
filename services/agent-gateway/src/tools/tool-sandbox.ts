@@ -1120,6 +1120,24 @@ function readTaskRequestedSkills(metadata: Record<string, unknown>): string[] | 
   return skills.length > 0 ? skills : undefined;
 }
 
+/**
+ * 读取某 session 的模板初始 MCP 白名单（metadata.requestedMcpServers）。
+ * 用于 mcp_list_tools 包装工具路径的按需过滤（flat 模式下该包装通常隐藏，
+ * 但 flat 关闭时仍需尊重白名单）。
+ */
+function readSessionRequestedMcpServers(sessionId: string): string[] {
+  const row = sqliteGet<{ metadata_json: string }>(
+    'SELECT metadata_json FROM sessions WHERE id = ? LIMIT 1',
+    [sessionId],
+  );
+  if (!row) return [];
+  const metadata = parseSessionMetadataJson(row.metadata_json ?? '{}');
+  const candidate = metadata['requestedMcpServers'];
+  return Array.isArray(candidate)
+    ? candidate.filter((v): v is string => typeof v === 'string' && v.length > 0)
+    : [];
+}
+
 function readTaskCategory(metadata: Record<string, unknown>): string | undefined {
   return typeof metadata.taskCategory === 'string' ? metadata.taskCategory : undefined;
 }
@@ -1795,7 +1813,11 @@ async function executeGatewayManagedToolImpl(
 
     if (request.toolName === 'mcp_list_tools') {
       const { serverId } = parseMcpListToolsRawInput(rawInput);
-      const output = await listMcpToolsForSession(sessionId, { serverId });
+      const allowedServerIds = readSessionRequestedMcpServers(sessionId);
+      const output = await listMcpToolsForSession(sessionId, {
+        ...(serverId ? { serverId } : {}),
+        ...(allowedServerIds.length > 0 ? { allowedServerIds } : {}),
+      });
       return {
         toolCallId: request.toolCallId,
         toolName: request.toolName,
@@ -2715,12 +2737,40 @@ async function executeGatewayManagedToolImpl(
               }
             },
           };
-          const subResult = await sandbox.execute(
-            subRequest,
-            signal,
-            sessionId,
-            subExecutionContext,
-          );
+          // Per-sub-call resilience: `sandbox.execute` is a large recursive
+          // dispatcher and not every branch normalizes a failure into
+          // `{ isError: true }` — some throw (validation, provider, fs, mcp).
+          // This runs inside `Promise.all(...)`, so a single throwing sub-tool
+          // would reject the whole batch and discard every sibling's result,
+          // defeating the batch tool's purpose. Catch per sub-call and degrade
+          // to an error result so the rest of the batch still completes.
+          let subResult: ToolCallResult;
+          try {
+            subResult = await sandbox.execute(subRequest, signal, sessionId, subExecutionContext);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            console.warn(
+              `[batch] 子工具 ${tool}（#${index}）执行抛错，已降级为错误结果：${message}`,
+            );
+            const failProgress: BatchSubToolProgress = {
+              index,
+              tool,
+              status: 'error',
+              output: `Batch sub-tool "${tool}" threw: ${message}`,
+              isError: true,
+              durationMs: Date.now() - subStartAt,
+            };
+            subToolStates[index] = failProgress;
+            if (onProgress) {
+              const completedCount = subToolStates.filter((s) => s.status !== 'running').length;
+              onProgress([...subToolStates], completedCount, totalCount);
+            }
+            return {
+              tool,
+              isError: true,
+              output: `Batch sub-tool "${tool}" threw: ${message}`,
+            };
+          }
           if (!pendingRequestId && subResult.pendingPermissionRequestId) {
             pendingRequestId = subResult.pendingPermissionRequestId;
           }

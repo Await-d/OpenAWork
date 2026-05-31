@@ -1,3 +1,12 @@
+import {
+  extractJsonErrorMessage,
+  HttpError,
+  isGenericFetchErrorMessage,
+  readJsonErrorData,
+  type JsonErrorData,
+  fetchWithTimeout,
+} from '../gateway/http.js';
+
 export interface NotificationRecord {
   body: string;
   createdAt: string;
@@ -43,6 +52,72 @@ function authHeader(token: string): HeadersInit {
   return { Authorization: `Bearer ${token}` };
 }
 
+function buildNotificationsActionErrorMessage(
+  actionLabel: string,
+  status: number,
+  data: JsonErrorData | undefined,
+): string {
+  const extracted = extractJsonErrorMessage(data);
+  if (extracted) {
+    return extracted;
+  }
+  if (status === 401 || status === 403) {
+    return `认证失效或当前账号无权${actionLabel}。`;
+  }
+  if (status === 404) {
+    return `目标通知资源不存在，无法${actionLabel}。`;
+  }
+  if (status === 409) {
+    return `当前状态不允许${actionLabel}。`;
+  }
+  return `${actionLabel}失败（HTTP ${status}）。`;
+}
+
+function isGenericNotificationsNetworkErrorMessage(message: string): boolean {
+  return isGenericFetchErrorMessage(message);
+}
+
+function normalizeNotificationsError(actionLabel: string, error: unknown): Error {
+  if (error instanceof HttpError) {
+    const extracted = extractJsonErrorMessage((error.data ?? undefined) as JsonErrorData | undefined);
+    if (extracted) {
+      return new HttpError(extracted, error.status, error.data);
+    }
+    return error;
+  }
+  if (error instanceof Error) {
+    const message = error.message.trim();
+    if (message.length > 0 && !isGenericNotificationsNetworkErrorMessage(message)) {
+      return error;
+    }
+  }
+  return new Error(`网络异常，${actionLabel}失败。`);
+}
+
+async function performNotificationsRequest<T>(input: {
+  actionLabel: string;
+  parseJson?: boolean;
+  request: () => Promise<Response>;
+}): Promise<T> {
+  try {
+    const response = await input.request();
+    if (!response.ok) {
+      const data = await readJsonErrorData<JsonErrorData>(response);
+      throw new HttpError(
+        buildNotificationsActionErrorMessage(input.actionLabel, response.status, data),
+        response.status,
+        data,
+      );
+    }
+    if (input.parseJson === false || response.status === 204) {
+      return undefined as T;
+    }
+    return (await response.json()) as T;
+  } catch (error) {
+    throw normalizeNotificationsError(input.actionLabel, error);
+  }
+}
+
 export function createNotificationsClient(baseUrl: string): NotificationsClient {
   return {
     async list(token, options) {
@@ -54,35 +129,39 @@ export function createNotificationsClient(baseUrl: string): NotificationsClient 
         params.set('limit', String(options.limit));
       }
       const suffix = params.toString();
-      const response = await fetch(`${baseUrl}/notifications${suffix ? `?${suffix}` : ''}`, {
-        headers: authHeader(token),
-        signal: options?.signal,
+      const data = await performNotificationsRequest<{ notifications?: NotificationRecord[] }>({
+        actionLabel: '读取通知列表',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/notifications${suffix ? `?${suffix}` : ''}`, {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
       });
-      if (!response.ok) {
-        throw new Error(`Failed to list notifications: ${response.status}`);
-      }
-      const data = (await response.json()) as { notifications?: NotificationRecord[] };
       return data.notifications ?? [];
     },
 
     async markAllRead(token) {
-      const response = await fetch(`${baseUrl}/notifications/read-all`, {
-        method: 'POST',
-        headers: authHeader(token),
+      await performNotificationsRequest({
+        actionLabel: '标记全部通知为已读',
+        parseJson: false,
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/notifications/read-all`, {
+            method: 'POST',
+            headers: authHeader(token),
+          }),
       });
-      if (!response.ok && response.status !== 204) {
-        throw new Error(`Failed to mark all notifications as read: ${response.status}`);
-      }
     },
 
     async markRead(token, notificationId) {
-      const response = await fetch(`${baseUrl}/notifications/${notificationId}/read`, {
-        method: 'POST',
-        headers: authHeader(token),
+      await performNotificationsRequest({
+        actionLabel: '标记通知为已读',
+        parseJson: false,
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/notifications/${notificationId}/read`, {
+            method: 'POST',
+            headers: authHeader(token),
+          }),
       });
-      if (!response.ok && response.status !== 204) {
-        throw new Error(`Failed to mark notification as read: ${response.status}`);
-      }
     },
 
     async listPreferences(token, options) {
@@ -91,30 +170,31 @@ export function createNotificationsClient(baseUrl: string): NotificationsClient 
         params.set('channel', options.channel);
       }
       const suffix = params.toString();
-      const response = await fetch(
-        `${baseUrl}/notifications/preferences${suffix ? `?${suffix}` : ''}`,
-        {
-          headers: authHeader(token),
-          signal: options?.signal,
-        },
-      );
-      if (!response.ok) {
-        throw new Error(`Failed to list notification preferences: ${response.status}`);
-      }
-      const data = (await response.json()) as { preferences?: NotificationPreferenceRecord[] };
+      const data = await performNotificationsRequest<{
+        preferences?: NotificationPreferenceRecord[];
+      }>({
+        actionLabel: '读取通知偏好',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/notifications/preferences${suffix ? `?${suffix}` : ''}`, {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
+      });
       return data.preferences ?? [];
     },
 
     async updatePreferences(token, input) {
-      const response = await fetch(`${baseUrl}/notifications/preferences`, {
-        method: 'PUT',
-        headers: { ...authHeader(token), 'Content-Type': 'application/json' },
-        body: JSON.stringify(input),
+      const data = await performNotificationsRequest<{
+        preferences?: NotificationPreferenceRecord[];
+      }>({
+        actionLabel: '保存通知偏好',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/notifications/preferences`, {
+            method: 'PUT',
+            headers: { ...authHeader(token), 'Content-Type': 'application/json' },
+            body: JSON.stringify(input),
+          }),
       });
-      if (!response.ok) {
-        throw new Error(`Failed to update notification preferences: ${response.status}`);
-      }
-      const data = (await response.json()) as { preferences?: NotificationPreferenceRecord[] };
       return data.preferences ?? [];
     },
   };

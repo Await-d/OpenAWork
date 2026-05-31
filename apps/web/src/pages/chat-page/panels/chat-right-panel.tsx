@@ -856,14 +856,14 @@ function renderToolsPanel(
               borderRadius: 999,
               border:
                 toolFilter === f
-                  ? '1px solid color-mix(in oklch, var(--accent) 26%, var(--border-default)'
+                  ? '1px solid color-mix(in oklch, var(--accent) 26%, var(--border-default))'
                   : '1px solid var(--border-subtle)',
               fontSize: 10,
               fontWeight: 600,
               cursor: 'pointer',
               background:
                 toolFilter === f
-                  ? 'color-mix(in oklch, var(--accent) 14%, var(--bg-overlay)'
+                  ? 'color-mix(in oklch, var(--accent) 14%, var(--bg-overlay))'
                   : 'var(--bg-overlay)',
               color: toolFilter === f ? 'var(--accent)' : 'var(--fg-muted)',
             }}

@@ -15,6 +15,7 @@
     { "path": "../../packages/shared/tsconfig.typecheck.json" },
     { "path": "../../packages/skill-registry/tsconfig.typecheck.json" },
     { "path": "../../packages/skills/tsconfig.typecheck.json" },
-    { "path": "../../packages/skill-types/tsconfig.typecheck.json" }
+    { "path": "../../packages/skill-types/tsconfig.typecheck.json" },
+    { "path": "../../packages/telemetry/tsconfig.typecheck.json" }
   ]
 }

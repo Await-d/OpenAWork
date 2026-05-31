@@ -1,0 +1,262 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createWorkspaceClient, type FileTreeNode } from '@openAwork/web-client';
+import {
+  computeExponentialRetryDelay,
+  formatRecoverableLoadError,
+} from '../../../hooks/recoverable-read-model.js';
+import { useRecoverableRetryController } from '../../../hooks/use-recoverable-retry.js';
+
+const TEAM_SIDEBAR_FILE_TREE_RETRY_BASE_MS = 2_000;
+const TEAM_SIDEBAR_FILE_TREE_RETRY_MAX_MS = 30_000;
+
+export function computeTeamSidebarFileTreeRetryDelay(attempt: number): number {
+  return computeExponentialRetryDelay({
+    attempt,
+    baseMs: TEAM_SIDEBAR_FILE_TREE_RETRY_BASE_MS,
+    maxMs: TEAM_SIDEBAR_FILE_TREE_RETRY_MAX_MS,
+  });
+}
+
+export function formatTeamSidebarFileTreeLoadError(input: {
+  hasCachedTree: boolean;
+  nextRetryAtMs?: number | null;
+  result: { errorMessage?: string; retryable: boolean };
+}): string {
+  return formatRecoverableLoadError({
+    baseMessage: input.result.errorMessage ?? '加载文件树失败。',
+    hasRetainedData: input.hasCachedTree,
+    nextRetryAtMs: input.nextRetryAtMs,
+    retainedDataLabel: '文件树',
+    retryable: input.result.retryable,
+  });
+}
+
+function injectChildren(
+  nodes: FileTreeNode[],
+  parentPath: string,
+  children: FileTreeNode[],
+): FileTreeNode[] {
+  return nodes.map((node) => {
+    if (node.path === parentPath && node.type === 'directory') {
+      return { ...node, children };
+    }
+    if (node.children) {
+      return { ...node, children: injectChildren(node.children, parentPath, children) };
+    }
+    return node;
+  });
+}
+
+interface UseTeamSidebarFileTreeStateOptions {
+  active: boolean;
+  gatewayUrl: string;
+  token: string | null;
+  workspacePath?: string | null;
+}
+
+interface UseTeamSidebarFileTreeStateResult {
+  expandedDirs: Set<string>;
+  handleRefresh: () => void;
+  handleToggleDir: (path: string) => void;
+  treeError: string | null;
+  treeLoading: boolean;
+  treeNodes: FileTreeNode[];
+}
+
+export function useTeamSidebarFileTreeState(
+  options: UseTeamSidebarFileTreeStateOptions,
+): UseTeamSidebarFileTreeStateResult {
+  const workspaceClient = useMemo(() => createWorkspaceClient(options.gatewayUrl), [options.gatewayUrl]);
+  const [treeNodes, setTreeNodes] = useState<FileTreeNode[]>([]);
+  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
+  const [treeLoading, setTreeLoading] = useState(false);
+  const [treeError, setTreeError] = useState<string | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
+  const treeNodesRef = useRef<FileTreeNode[]>([]);
+  const currentRootRef = useRef<string | null>(null);
+  const { clearRetry, resetRetry, scheduleRetry } = useRecoverableRetryController();
+
+  useEffect(() => {
+    treeNodesRef.current = treeNodes;
+  }, [treeNodes]);
+
+  const handleRefresh = useCallback(() => {
+    resetRetry();
+    setRefreshTick((current) => current + 1);
+  }, [resetRetry]);
+
+  useEffect(() => {
+    let cancelled = false;
+    clearRetry();
+
+    if (!options.active || !options.workspacePath || !options.token) {
+      currentRootRef.current = null;
+      resetRetry();
+      setTreeNodes([]);
+      setExpandedDirs(new Set());
+      setTreeLoading(false);
+      setTreeError(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const rootChanged = currentRootRef.current !== options.workspacePath;
+    currentRootRef.current = options.workspacePath;
+    if (rootChanged) {
+      setExpandedDirs(new Set());
+      setTreeNodes([]);
+    }
+
+    const hasCachedTree = treeNodesRef.current.length > 0;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      resetRetry();
+      setTreeLoading(false);
+      setTreeError(
+        formatTeamSidebarFileTreeLoadError({
+          hasCachedTree,
+          result: {
+            errorMessage: '当前网络离线，文件树暂时不可用。',
+            retryable: true,
+          },
+        }),
+      );
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setTreeLoading(!hasCachedTree);
+    setTreeError(null);
+
+    void workspaceClient
+      .fetchTreeResult(options.token, options.workspacePath, { depth: 1 })
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+        if (!result.ok) {
+          const nextRetryAtMs = scheduleRetry({
+            computeDelay: computeTeamSidebarFileTreeRetryDelay,
+            onRetry: () => {
+              setRefreshTick((current) => current + 1);
+            },
+            retryable: result.retryable,
+          });
+          setTreeLoading(false);
+          setTreeError(
+            formatTeamSidebarFileTreeLoadError({
+              hasCachedTree,
+              nextRetryAtMs,
+              result,
+            }),
+          );
+          return;
+        }
+
+        resetRetry();
+        setTreeNodes(result.nodes);
+        setTreeLoading(false);
+        setTreeError(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    clearRetry,
+    options.active,
+    options.token,
+    options.workspacePath,
+    refreshTick,
+    resetRetry,
+    scheduleRetry,
+    workspaceClient,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      clearRetry();
+    };
+  }, [clearRetry]);
+
+  useEffect(() => {
+    if (!options.active || !options.workspacePath || typeof window === 'undefined') {
+      return;
+    }
+    const handleOnline = () => {
+      handleRefresh();
+    };
+    const handleOffline = () => {
+      resetRetry();
+      setTreeLoading(false);
+      setTreeError(
+        formatTeamSidebarFileTreeLoadError({
+          hasCachedTree: treeNodesRef.current.length > 0,
+          result: {
+            errorMessage: '当前网络离线，文件树暂时不可用。',
+            retryable: true,
+          },
+        }),
+      );
+    };
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [handleRefresh, options.active, options.workspacePath, resetRetry]);
+
+  const handleToggleDir = useCallback(
+    (path: string) => {
+      setExpandedDirs((prev) => {
+        const next = new Set(prev);
+        if (next.has(path)) {
+          next.delete(path);
+          return next;
+        }
+        next.add(path);
+        return next;
+      });
+      if (!options.token) {
+        return;
+      }
+      setTreeError(null);
+      void workspaceClient
+        .fetchTreeResult(options.token, path, { depth: 1 })
+        .then((result) => {
+          if (!result.ok) {
+            const nextRetryAtMs = scheduleRetry({
+              computeDelay: computeTeamSidebarFileTreeRetryDelay,
+              onRetry: () => {
+                setRefreshTick((current) => current + 1);
+              },
+              retryable: result.retryable,
+            });
+            setTreeError(
+              formatTeamSidebarFileTreeLoadError({
+                hasCachedTree: treeNodesRef.current.length > 0,
+                nextRetryAtMs,
+                result,
+              }),
+            );
+            return;
+          }
+          resetRetry();
+          setTreeNodes((current) => injectChildren(current, path, result.nodes));
+          setTreeError(null);
+        });
+    },
+    [options.token, resetRetry, scheduleRetry, workspaceClient],
+  );
+
+  return {
+    expandedDirs,
+    handleRefresh,
+    handleToggleDir,
+    treeError,
+    treeLoading,
+    treeNodes,
+  };
+}

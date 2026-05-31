@@ -54,32 +54,54 @@ export function listCapabilitiesForUser(
   // 拿到的是"用户配置 + 内置 MCP"合并结果，避免漏掉内置 MCP 的展示。
 
   const installedSkills = (() => {
+    let manifests: string[];
     try {
-      const manifests = JSON.parse(installedRow?.value ?? '[]') as string[];
-      return manifests
-        .map((manifestJson) => {
-          const manifest = JSON.parse(manifestJson) as {
-            id: string;
-            displayName?: string;
-            name?: string;
-            description?: string;
-            capabilities?: string[];
-          };
-          return manifest;
-        })
-        .filter((manifest) => enabledInstalledIds.has(manifest.id))
-        .map<CapabilityDescriptor>((manifest) => ({
-          id: manifest.id,
-          kind: 'skill',
-          label: manifest.displayName ?? manifest.name ?? manifest.id,
-          description: manifest.description ?? '已安装技能',
-          source: 'installed',
-          callable: false,
-          tags: manifest.capabilities ?? [],
-        }));
+      const parsedGroup = JSON.parse(installedRow?.value ?? '[]') as unknown;
+      manifests = Array.isArray(parsedGroup)
+        ? parsedGroup.filter((entry): entry is string => typeof entry === 'string')
+        : [];
     } catch {
+      // The outer value comes from SQLite `json_group_array` (always valid),
+      // but stay defensive — a parse failure here just means "no installed
+      // skills to show" rather than a thrown route.
       return [] as CapabilityDescriptor[];
     }
+    // Per-manifest tolerance (§0.114 class): each `manifest_json` is persisted
+    // via JSON.stringify, but a crash mid-write / disk error / hand-edited DB
+    // can leave one row corrupt. Parsing inside the shared `.map` (or the outer
+    // try) used to drop the user's ENTIRE installed-skill capability view on a
+    // single bad row; skip the bad row individually instead.
+    return manifests
+      .flatMap((manifestJson) => {
+        try {
+          return [
+            JSON.parse(manifestJson) as {
+              id: string;
+              displayName?: string;
+              name?: string;
+              description?: string;
+              capabilities?: string[];
+            },
+          ];
+        } catch (err) {
+          console.warn(
+            `[capabilities] installed_skills manifest_json 解析失败，已跳过：${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+          return [];
+        }
+      })
+      .filter((manifest) => enabledInstalledIds.has(manifest.id))
+      .map<CapabilityDescriptor>((manifest) => ({
+        id: manifest.id,
+        kind: 'skill',
+        label: manifest.displayName ?? manifest.name ?? manifest.id,
+        description: manifest.description ?? '已安装技能',
+        source: 'installed',
+        callable: false,
+        tags: manifest.capabilities ?? [],
+      }));
   })();
 
   const builtinSkills = BUILTIN_SKILLS.map<CapabilityDescriptor>(({ manifest }) => ({

@@ -17,16 +17,38 @@ import type { HandoffTaskRunner } from './watcher.js';
 import { createHandoff, type HandoffRecord } from '../store/handoff-store.js';
 import { publishHandoffEvent } from '../bus/team-events-bus.js';
 import { getTeamConstitution } from '../../team/team-constitution-store.js';
-import { getTeamWorkspaceDefaultRoster } from '../../team/team-default-roster-store.js';
+import {
+  getTeamWorkspaceDefaultRoster,
+  resolveSessionMemberSlots,
+} from '../../team/team-default-roster-store.js';
 import { sqliteGet, sqliteRun } from '../../infra/db.js';
 import { resolveAuxiliaryLlmConfig } from '../../provider/auxiliary-llm-config.js';
+import {
+  buildTeamRosterManifest,
+  resolveMemberModelForSessionLayer,
+} from '../bus/resolve-member-model.js';
 import { buildDispatchPackages, parseAllTasks } from '../capability/dispatch-package.js';
 import { setSubstate, SUBSTATES_D } from '../store/substate-store.js';
 import { resolveSessionWorkspacePath } from '../../session/session-workspace-resolution.js';
 import { assertCanWriteArtifactPhase } from '../capability/layer-capabilities.js';
+import { recordTeamRuntimeIncident } from '../../team/team-runtime-diagnostics-store.js';
 
 const MIN_EXECUTOR_PARALLEL = 2;
 const DEFAULT_MAX_EXECUTOR_PARALLEL = 8;
+// D50 全局并发上限：单次 d 层派发最多创建多少个子 handoff（= 子 session）。
+// tasks.md 由上游 LLM（PM1）生成，恶意 / 失控的计划可能列出成百上千条任务行；
+// 无上限地按任务数 fan-out 子 handoff 会耗尽 PID / FD / DB 行 / LLM 预算。
+// 经 OPENAWORK_TEAM_MAX_DISPATCH_PACKAGES 可调，<=0 / 非法值视为关闭上限。
+const DEFAULT_MAX_DISPATCH_PACKAGES = 50;
+function resolveMaxDispatchPackages(): number {
+  const raw = globalThis.process?.env?.['OPENAWORK_TEAM_MAX_DISPATCH_PACKAGES'];
+  if (raw === undefined || raw === null || raw.trim() === '') {
+    return DEFAULT_MAX_DISPATCH_PACKAGES;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Math.floor(parsed);
+}
 
 type ArchitectureIssueSeverity = 'warning' | 'blocking';
 type ArchitectureIssueSource = 'builtin' | 'architecture-md';
@@ -153,10 +175,20 @@ export function createPm2Runner(): HandoffTaskRunner {
         const planContent = planRow?.content ?? '';
 
         if (planContent.length > 0) {
-          const llmConfig = await resolveAuxiliaryLlmConfig(input.handoff.userId);
+          const pm2MemberModel = resolveMemberModelForSessionLayer({
+            sessionId: input.toSessionId,
+            layer: 'pm2',
+          });
+          const llmConfig = await resolveAuxiliaryLlmConfig(input.handoff.userId, pm2MemberModel);
           if (llmConfig) {
             const { requestWorkflowLlmCompletion } = await import('../../routes/workflow-llm.js');
+            // 动态注入「团队编制清单」：让 PM2 管控/派发判断也感知当前实时花名册。
+            const rosterManifest = buildTeamRosterManifest({
+              fromSessionId: input.toSessionId,
+              currentLayer: 'pm2',
+            });
             const callLlm = async (system: string, user: string): Promise<string> => {
+              const systemWithRoster = rosterManifest ? `${system}\n\n${rosterManifest}` : system;
               return requestWorkflowLlmCompletion({
                 apiBaseUrl: llmConfig.apiBaseUrl,
                 apiKey: llmConfig.apiKey,
@@ -165,7 +197,7 @@ export function createPm2Runner(): HandoffTaskRunner {
                 ...(llmConfig.upstreamProtocol
                   ? { upstreamProtocol: llmConfig.upstreamProtocol }
                   : {}),
-                prompt: `${system}\n\n---\n\n${user}`,
+                prompt: `${systemWithRoster}\n\n---\n\n${user}`,
                 temperature: 0.1,
               });
             };
@@ -245,6 +277,22 @@ export function createPm2Runner(): HandoffTaskRunner {
           );
         }
         if (!architectureReviewResult.passed) {
+          recordTeamRuntimeIncident({
+            category: 'architecture_review',
+            code: 'architecture-review-blocked',
+            context: {
+              blockingCount: architectureReviewResult.blockingCount,
+              warningCount: architectureReviewResult.warningCount,
+              sessionId: input.toSessionId,
+            },
+            message: architectureReviewResult.issues
+              .filter((issue) => issue.severity === 'blocking')
+              .map((issue) => issue.message)
+              .join('；'),
+            severity: 'error',
+            timestamp: Date.now(),
+            userId: input.handoff.userId,
+          });
           writeArchitectureReviewResult(input.handoff.id, {
             architectureReview: architectureReviewResult,
             architectureReviewArtifactId,
@@ -285,12 +333,17 @@ export function createPm2Runner(): HandoffTaskRunner {
 
     // 6. 构建 dispatch_packages
     const context = `来自 PM1 的任务清单，共 ${tasks.length} 个任务。`;
-    const assignedMemberRoster = teamWorkspaceId
-      ? getTeamWorkspaceDefaultRoster({
-          userId: input.handoff.userId,
-          teamWorkspaceId,
-        })?.memberSlots
-      : undefined;
+    // 派发打分优先用「会话实际运行的花名册」（teamDefinition 快照，含用户在模板/会话
+    // 里设的 routingKeywords / dispatchPriority），仅在会话无快照时回退 workspace 默认。
+    const assignedMemberRoster =
+      resolveSessionMemberSlots(input.toSessionId) ??
+      (teamWorkspaceId
+        ? getTeamWorkspaceDefaultRoster({
+            userId: input.handoff.userId,
+            teamWorkspaceId,
+          })?.memberSlots
+        : undefined);
+    const maxDispatchPackages = resolveMaxDispatchPackages();
     const packages = buildDispatchPackages({
       tasks,
       artifactRefs: {
@@ -299,8 +352,29 @@ export function createPm2Runner(): HandoffTaskRunner {
         tasksId: tasksArtifactId,
       },
       context,
+      ...(maxDispatchPackages > 0 ? { maxPackages: maxDispatchPackages } : {}),
       ...(assignedMemberRoster ? { assignedMemberRoster } : {}),
     });
+
+    // D50 全局并发上限：当解析出的任务数超过派发上限时，buildDispatchPackages
+    // 只保留前 maxDispatchPackages 个（按文档顺序，保留依赖前缀）。这里把截断
+    // 作为一条 runtime incident 留痕，便于运维发现「计划过大被截断」。
+    if (maxDispatchPackages > 0 && tasks.length > packages.length) {
+      recordTeamRuntimeIncident({
+        category: 'handoff_failure',
+        code: 'pm2-dispatch-packages-capped',
+        context: {
+          handoffId: input.handoff.id,
+          parsedTaskCount: tasks.length,
+          dispatchedCount: packages.length,
+          cap: maxDispatchPackages,
+        },
+        message: `tasks.md 解析出 ${tasks.length} 个任务，超过派发上限 ${maxDispatchPackages}，仅派发前 ${packages.length} 个`,
+        severity: 'warning',
+        timestamp: Date.now(),
+        userId: input.handoff.userId,
+      });
+    }
 
     // 6. D46 动态编制：确保 executor 并行数 ≥ MIN_EXECUTOR_PARALLEL
     const parallelExecutors = packages.filter(

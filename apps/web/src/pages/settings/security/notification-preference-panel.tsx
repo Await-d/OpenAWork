@@ -15,8 +15,8 @@ const QUIET_BUTTON: React.CSSProperties = {
 
 const ERROR_CARD: React.CSSProperties = {
   borderRadius: 10,
-  border: '1px solid color-mix(in srgb, var(--danger) 42%, var(--border-default)',
-  background: 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay)',
+  border: '1px solid color-mix(in srgb, var(--danger) 42%, var(--border-default))',
+  background: 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay))',
   padding: '12px 14px',
   display: 'flex',
   flexDirection: 'column',
@@ -127,10 +127,10 @@ export function NotificationPreferencePanel() {
                 gap: 10,
                 borderRadius: 14,
                 border: enabled
-                  ? '1px solid color-mix(in srgb, var(--accent) 45%, var(--border-default)'
+                  ? '1px solid color-mix(in srgb, var(--accent) 45%, var(--border-default))'
                   : '1px solid var(--border-default)',
                 background: enabled
-                  ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay)'
+                  ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))'
                   : 'var(--bg-overlay)',
                 padding: '14px 16px',
                 minHeight: 148,

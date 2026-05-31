@@ -1,6 +1,5 @@
 import { useNavigate, useParams } from 'react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createTeamClient } from '@openAwork/web-client';
 // 团队页专属样式（含 team-* hover 工具类）— V1 fallback 也加载
 import './runtime/styles/team-runtime.css';
 import type { AgentTeamsSidebarTeam, AgentTeamsTabKey } from './runtime/data/team-runtime-types.js';
@@ -231,33 +230,27 @@ function TeamPageLayout({
 
   const handleSubmitDraft = useCallback(
     async (draft: TeamSessionCreationDraft) => {
-      if (!accessToken || !gatewayUrl || !activeWorkspaceId) {
-        throw new Error('未登录，无法创建团队会话');
+      if (!activeWorkspaceId) {
+        throw new Error('当前登录状态或团队工作区无效，无法创建团队会话。');
       }
 
-      const client = createTeamClient(gatewayUrl);
-      const session = await client.createSession(accessToken, activeWorkspaceId, {
-        title: draft.title.trim() || undefined,
-        source: draft.source,
-        optionalAgentIds: draft.optionalAgentIds,
-        defaultProvider: draft.defaultProvider,
+      const created = await data.createSession({
+        ...draft,
+        teamWorkspaceId: activeWorkspaceId,
       });
+
+      if (!created) {
+        throw new Error('创建团队会话失败，请稍后重试。');
+      }
 
       onRefreshWorkspaces();
       onRefreshSnapshot();
-      setPendingCreatedSessionId(session.id);
-      setSelectedTeamId(session.id);
-      data.selectTeam(session.id);
     },
     [
-      accessToken,
       activeWorkspaceId,
       data,
-      gatewayUrl,
       onRefreshSnapshot,
       onRefreshWorkspaces,
-      setPendingCreatedSessionId,
-      setSelectedTeamId,
     ],
   );
 
@@ -273,7 +266,7 @@ function TeamPageLayout({
         />
         {hasActivePm1Handoff ? (
           <div style={{ padding: '0 20px 16px' }}>
-            <TeamArtifactSection />
+            <TeamArtifactSection selectedTeamId={selectedTeamId} />
           </div>
         ) : null}
         {activeTab === 'tasks' && !hasActivePm1Handoff ? (
@@ -295,10 +288,14 @@ function TeamPageLayout({
   );
 
   return (
-    <div className="page-root" style={{ background: SHELL_BACKGROUND, minHeight: '100dvh' }}>
+    <div className="page-root" style={{ background: SHELL_BACKGROUND, height: '100%' }}>
       <div
         style={{
-          minHeight: '100dvh',
+          // 用 100% 而非 100dvh：页面被 Layout 外壳包裹（含 ~10px 内边距 +
+          // overflow:hidden），100dvh 会比实际可用高度高出内边距，导致底部
+          // 状态栏被裁掉。height:100% 让网格精确填满可用区域。
+          height: '100%',
+          minHeight: 0,
           fontFamily:
             'Inter, "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", sans-serif',
           display: 'grid',
@@ -318,10 +315,11 @@ function TeamPageLayout({
 
         <div
           style={{
-            minHeight: '100dvh',
+            height: '100%',
+            minHeight: 0,
             display: 'grid',
             gridTemplateRows: 'auto auto 1fr 30px',
-            overflow: 'auto',
+            overflow: 'hidden',
           }}
         >
           <TopTeamHeader

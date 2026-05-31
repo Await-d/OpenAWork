@@ -137,19 +137,19 @@ describe('buildSelectionExport / parseImportedSelection', () => {
   it('rejects malformed payloads with a precise reason', () => {
     expect(parseImportedSelection('not-json{')).toMatchObject({
       ok: false,
-      error: expect.stringContaining('JSON parse'),
+      error: expect.stringContaining('JSON 解析失败'),
     });
     expect(parseImportedSelection('"a string"')).toMatchObject({
       ok: false,
-      error: 'expected a JSON object at the top level',
+      error: '导入内容的顶层必须是 JSON 对象。',
     });
     expect(parseImportedSelection(JSON.stringify({ version: 99, items: [] }))).toMatchObject({
       ok: false,
-      error: expect.stringContaining('unsupported version'),
+      error: expect.stringContaining('不支持的导入版本'),
     });
     expect(parseImportedSelection(JSON.stringify({ version: 1 }))).toMatchObject({
       ok: false,
-      error: 'missing "items" array',
+      error: '导入内容缺少 "items" 数组。',
     });
     expect(
       parseImportedSelection(
@@ -157,7 +157,7 @@ describe('buildSelectionExport / parseImportedSelection', () => {
       ),
     ).toMatchObject({
       ok: false,
-      error: 'items[*].enabled must be a boolean',
+      error: 'items[*].enabled 必须是布尔值。',
     });
   });
 });

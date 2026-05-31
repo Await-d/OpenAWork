@@ -22,7 +22,10 @@ import {
   type TeamRoleLayer,
 } from '../../../../../stores/team/team-events.js';
 import { TeamConversationView } from '../../../conversation/TeamConversationView.js';
+import { CrossLayerConversationView } from './CrossLayerConversationView.js';
 import { TabContainer } from '../TabContainer.js';
+import { EmptyState, SegmentedToggle } from '../../shared/content-kit/index.js';
+import { RolePromptPreviewPanel } from '../../shared/RolePromptPreviewPanel.js';
 
 const LAYER_LABELS: Record<TeamRoleLayer, string> = {
   user: '用户',
@@ -30,10 +33,19 @@ const LAYER_LABELS: Record<TeamRoleLayer, string> = {
   pm1: 'PM1 · 规划',
   pm2: 'PM2 · 管控',
   executor: '执行',
+  tester: '测试',
   reviewer: '评审',
 };
 
-const LAYER_ORDER: TeamRoleLayer[] = ['user', 'reception', 'pm1', 'pm2', 'executor', 'reviewer'];
+const LAYER_ORDER: TeamRoleLayer[] = [
+  'user',
+  'reception',
+  'pm1',
+  'pm2',
+  'executor',
+  'tester',
+  'reviewer',
+];
 
 const STATE_COLORS: Record<string, string> = {
   idle: 'var(--fg-muted)',
@@ -58,7 +70,7 @@ const HEADER_STYLE: CSSProperties = {
   padding: '6px 10px',
   borderRadius: 10,
   border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
   flexShrink: 0,
 };
 
@@ -109,21 +121,8 @@ const SESSION_PANE_STYLE: CSSProperties = {
   flexDirection: 'column',
   borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base))',
   overflow: 'hidden',
-};
-
-const EMPTY_STYLE: CSSProperties = {
-  flex: 1,
-  display: 'grid',
-  placeItems: 'center',
-  padding: 24,
-  borderRadius: 12,
-  border: '1px dashed color-mix(in srgb, var(--border-default) 60%, transparent)',
-  color: 'var(--fg-muted)',
-  fontSize: 12,
-  textAlign: 'center',
-  gap: 6,
 };
 
 export interface LayeredConversationViewProps {
@@ -136,6 +135,8 @@ export function LayeredConversationView({ onSelectSessionDrawer }: LayeredConver
   const handoffs = useHandoffStore((s) => s.handoffs);
   const [activeLayer, setActiveLayer] = useState<TeamRoleLayer | 'all'>('all');
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [layoutMode, setLayoutMode] = useState<'split' | 'thread'>('split');
+  const [promptPreviewLayer, setPromptPreviewLayer] = useState<TeamRoleLayer | null>(null);
 
   // 按 layer 分组节点
   const nodesByLayer = useMemo(() => {
@@ -189,13 +190,11 @@ export function LayeredConversationView({ onSelectSessionDrawer }: LayeredConver
         subtitle="按 reception → pm1 → pm2 → executor → reviewer 的层级展开 handoff。"
       >
         <div style={CONTAINER_STYLE}>
-          <div style={EMPTY_STYLE}>
-            <span style={{ fontSize: 26 }} aria-hidden>
-              🪜
-            </span>
-            <strong style={{ color: 'var(--fg-default)' }}>暂无层级对话数据</strong>
-            <span>当团队启动后，每层的会话和 handoff 会出现在这里。</span>
-          </div>
+          <EmptyState
+            emoji="🪜"
+            title="暂无层级对话数据"
+            description="当团队启动后，每层的会话和 handoff 会出现在这里。"
+          />
         </div>
       </TabContainer>
     );
@@ -213,6 +212,36 @@ export function LayeredConversationView({ onSelectSessionDrawer }: LayeredConver
             {totalNodes} 个 session · {totalHandoffs} 个 handoff
           </span>
           <div style={{ flex: 1 }} />
+          <SegmentedToggle<'split' | 'thread'>
+            ariaLabel="布局模式"
+            size="sm"
+            value={layoutMode}
+            onChange={setLayoutMode}
+            options={[
+              { value: 'split', label: '双栏', icon: '🗂️' },
+              { value: 'thread', label: '线程', icon: '🧵' },
+            ]}
+          />
+          {activeLayer !== 'all' ? (
+            <button
+              type="button"
+              onClick={() => setPromptPreviewLayer(activeLayer)}
+              title={`查看 ${LAYER_LABELS[activeLayer]} 层的角色提示词`}
+              style={{
+                padding: '4px 10px',
+                borderRadius: 6,
+                border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
+                background: 'color-mix(in srgb, var(--accent) 10%, transparent)',
+                color: 'var(--accent)',
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              🧬 角色提示词
+            </button>
+          ) : null}
           {onSelectSessionDrawer ? (
             <button
               type="button"
@@ -253,44 +282,46 @@ export function LayeredConversationView({ onSelectSessionDrawer }: LayeredConver
           })}
         </div>
 
-        <div style={SPLIT_STYLE}>
-          <div style={TIMELINE_PANEL_STYLE}>
-            {visibleHandoffs.length === 0 ? (
-              <div style={EMPTY_STYLE}>
-                <span style={{ fontSize: 22 }} aria-hidden>
-                  📭
-                </span>
-                <span>当前层级暂无 handoff。</span>
-              </div>
-            ) : (
-              visibleHandoffs.map((entry) => (
-                <HandoffRow
-                  key={entry.id}
-                  entry={entry}
-                  selected={Boolean(entry.sessionId && selectedSessionId === entry.sessionId)}
-                  onSelect={() => handleSelectHandoff(entry)}
-                />
-              ))
-            )}
+        {layoutMode === 'thread' ? (
+          <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+            <CrossLayerConversationView />
           </div>
+        ) : (
+          <div style={SPLIT_STYLE}>
+            <div style={TIMELINE_PANEL_STYLE}>
+              {visibleHandoffs.length === 0 ? (
+                <EmptyState emoji="📭" title="当前层级暂无 handoff" compact style={{ flex: 1 }} />
+              ) : (
+                visibleHandoffs.map((entry) => (
+                  <HandoffRow
+                    key={entry.id}
+                    entry={entry}
+                    selected={Boolean(entry.sessionId && selectedSessionId === entry.sessionId)}
+                    onSelect={() => handleSelectHandoff(entry)}
+                  />
+                ))
+              )}
+            </div>
 
-          <div style={SESSION_PANE_STYLE}>
-            {selectedSessionId ? (
-              <TeamConversationView sessionId={selectedSessionId} />
-            ) : (
-              <div style={EMPTY_STYLE}>
-                <span style={{ fontSize: 26 }} aria-hidden>
-                  💬
-                </span>
-                <strong style={{ color: 'var(--fg-default)' }}>
-                  选择左侧 handoff 查看会话内容
-                </strong>
-                <span>右侧将以 chat 视图渲染对应 session 的执行流。</span>
-              </div>
-            )}
+            <div style={SESSION_PANE_STYLE}>
+              {selectedSessionId ? (
+                <TeamConversationView sessionId={selectedSessionId} />
+              ) : (
+                <EmptyState
+                  emoji="💬"
+                  title="选择左侧 handoff 查看会话内容"
+                  description="右侧将以 chat 视图渲染对应 session 的执行流。"
+                  style={{ flex: 1 }}
+                />
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
+      <RolePromptPreviewPanel
+        layer={promptPreviewLayer}
+        onClose={() => setPromptPreviewLayer(null)}
+      />
     </TabContainer>
   );
 }
@@ -313,7 +344,7 @@ function LayerTabBtn({
       style={{
         ...TAB_BTN_STYLE,
         background: active
-          ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay)'
+          ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay))'
           : 'transparent',
         borderColor: active ? 'color-mix(in srgb, var(--accent) 40%, transparent)' : 'transparent',
         color: active ? 'var(--fg-strong)' : 'var(--fg-muted)',
@@ -355,8 +386,8 @@ function HandoffRow({
           ? '1px solid color-mix(in srgb, var(--accent) 60%, transparent)'
           : '1px solid color-mix(in srgb, var(--border-default) 45%, transparent)',
         background: selected
-          ? 'color-mix(in srgb, var(--accent) 12%, var(--bg-overlay)'
-          : 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
+          ? 'color-mix(in srgb, var(--accent) 12%, var(--bg-overlay))'
+          : 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
         fontSize: 12,
         cursor: clickable ? 'pointer' : 'default',
         opacity: clickable ? 1 : 0.55,

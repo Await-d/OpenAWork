@@ -69,10 +69,37 @@ export interface TeamInstructionStackResult {
 const SOFT_TOKEN_LIMIT = 24_000;
 const TOKEN_PER_CHAR = 0.25; // 简单估算：1 token ≈ 4 char
 
+// Byte ceiling for the workspace files injected into every team prompt
+// (architecture.md / .agentdocs/project-memory.md / .agentdocs/lessons-learned.md).
+// `workspaceRoot` is user-controlled, so a pathological multi-MB file would
+// balloon both gateway memory and every upstream request — the same hot-path
+// hazard §0.127 closed for stream.ts::buildWorkspaceContext. We `stat` first and
+// skip the file BEFORE buffering it. Shares the OPENAWORK_CONTEXT_FILE_MAX_BYTES
+// knob with that reader so operators tune one value; <=0 disables the guard.
+const DEFAULT_TEAM_INSTRUCTION_FILE_MAX_BYTES = 1024 * 1024;
+function resolveTeamInstructionFileMaxBytes(): number {
+  const raw = globalThis.process?.env?.['OPENAWORK_CONTEXT_FILE_MAX_BYTES'];
+  if (raw === undefined || raw === null || raw.trim() === '') {
+    return DEFAULT_TEAM_INSTRUCTION_FILE_MAX_BYTES;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Math.floor(parsed);
+}
+
 async function readFileSafe(filePath: string): Promise<string | null> {
   try {
     const stat = await fs.stat(filePath);
     if (!stat.isFile()) return null;
+    const maxBytes = resolveTeamInstructionFileMaxBytes();
+    if (maxBytes > 0 && stat.size > maxBytes) {
+      // Skip oversize files before reading them into memory; the rest of the
+      // instruction stack is still assembled (graceful degradation).
+      console.warn(
+        `[team-instruction-stack] 跳过超限的指令栈文件（${stat.size} 字节 > ${maxBytes}）：${filePath}`,
+      );
+      return null;
+    }
     const content = await fs.readFile(filePath, 'utf8');
     const trimmed = content.trim();
     return trimmed.length > 0 ? trimmed : null;

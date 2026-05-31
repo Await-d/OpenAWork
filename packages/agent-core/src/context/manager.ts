@@ -1,5 +1,9 @@
 import fs from 'fs/promises';
 import type { ContextItem, ContextManager } from './types.js';
+import { readResponseTextTruncated, resolveAddUrlMaxResponseBytes } from './http-body-limit.js';
+
+/** Cap on fetching remote URL context so a hung endpoint can't block addUrl forever. */
+const ADD_URL_FETCH_TIMEOUT_MS = 15_000;
 
 function generateId(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -35,8 +39,16 @@ export class ContextManagerImpl implements ContextManager {
   }
 
   async addUrl(url: string): Promise<ContextItem> {
-    const response = await fetch(url);
-    const text = await response.text();
+    // Bound the request: a stalled server would otherwise leave addUrl
+    // pending indefinitely. Also reject non-2xx so we don't ingest an
+    // error page's HTML as if it were the requested context.
+    const response = await fetch(url, { signal: AbortSignal.timeout(ADD_URL_FETCH_TIMEOUT_MS) });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch URL context (${response.status}): ${url}`);
+    }
+    // Bound memory: only the first 5000 chars are kept, so stream and stop
+    // once the byte cap is crossed instead of buffering the whole body.
+    const text = await readResponseTextTruncated(response, resolveAddUrlMaxResponseBytes());
     const content = text.slice(0, 5000);
     const tokenEstimate = content.length / 4;
     return this.addItem({

@@ -44,6 +44,88 @@ const DEFAULT_NOTIFICATION_PREFERENCES: ReadonlyArray<
   eventType,
 }));
 
+/**
+ * notifications 是用户级只增表：每条 permission_asked / question_asked / task_update
+ * 运行事件都会落一行，已读项也从不删除，只有 session / user 被删时才随 CASCADE 清理。
+ * 长期运行的网关会让活跃用户的通知行无界膨胀，拖慢 /notifications 列表查询并吃满磁盘。
+ * 这里按「每用户保留最近 N 条」做有界裁剪，与 team_audit_logs / request_workflow_logs 同源。
+ *
+ * 裁剪摊销执行：不是每次 INSERT 都跑一次 DELETE（写放大翻倍），而是每累计
+ * NOTIFICATION_PRUNE_CHECK_INTERVAL 次插入才触发一次。因此实际行数最多比上限多出一个
+ * 检查间隔，属于可接受的过冲。裁剪失败只告警，绝不影响通知写入本身。
+ */
+const DEFAULT_NOTIFICATION_MAX_ROWS_PER_USER = 1000;
+export const NOTIFICATION_PRUNE_CHECK_INTERVAL = 50;
+
+let notificationRetentionOverride: number | null = null;
+const notificationInsertsSincePruneByUser = new Map<string, number>();
+
+function resolveNotificationRetention(): number {
+  if (notificationRetentionOverride !== null) {
+    return notificationRetentionOverride;
+  }
+  const raw = globalThis.process?.env['OPENAWORK_NOTIFICATION_MAX_ROWS_PER_USER'];
+  if (raw === undefined || raw === null || raw.trim() === '') {
+    return DEFAULT_NOTIFICATION_MAX_ROWS_PER_USER;
+  }
+  const parsed = Number(raw);
+  // 非正数 / NaN 视为「关闭裁剪」，与其它 env 死线开关（传非正数禁用）保持一致语义。
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 0;
+  }
+  return Math.floor(parsed);
+}
+
+function pruneNotifications(userId: string, limit: number): void {
+  // 用隐式 rowid 而非 created_at 排序：created_at 是 datetime('now') 秒级精度，同秒内多条
+  // 会并列；id 是确定性字符串主键、非单调。rowid 随插入单调递增，能稳定区分「最近 N 条」。
+  sqliteRun(
+    `DELETE FROM notifications
+      WHERE user_id = ?
+        AND rowid NOT IN (
+          SELECT rowid FROM notifications
+           WHERE user_id = ?
+           ORDER BY rowid DESC
+           LIMIT ?
+        )`,
+    [userId, userId, limit],
+  );
+}
+
+function maybePruneNotifications(userId: string): void {
+  const limit = resolveNotificationRetention();
+  if (limit <= 0) {
+    // 裁剪关闭：不累计计数，避免重新开启后立刻触发一次大裁剪。
+    notificationInsertsSincePruneByUser.delete(userId);
+    return;
+  }
+  const pending = (notificationInsertsSincePruneByUser.get(userId) ?? 0) + 1;
+  if (pending < NOTIFICATION_PRUNE_CHECK_INTERVAL) {
+    notificationInsertsSincePruneByUser.set(userId, pending);
+    return;
+  }
+  notificationInsertsSincePruneByUser.set(userId, 0);
+  try {
+    pruneNotifications(userId, limit);
+  } catch (error) {
+    console.warn(
+      `[notification-store] 裁剪 notifications 失败（user=${userId}）：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
+/** 测试用：覆盖每用户保留上限（传 null 恢复 env / 默认值）。 */
+export function __setNotificationRetentionForTesting(limit: number | null): void {
+  notificationRetentionOverride = limit;
+}
+
+/** 测试用：清空摊销计数状态。 */
+export function __resetNotificationPruneStateForTesting(): void {
+  notificationInsertsSincePruneByUser.clear();
+}
+
 export function createNotification(input: {
   body: string;
   eventType: string;
@@ -57,6 +139,7 @@ export function createNotification(input: {
      VALUES (?, ?, ?, ?, ?, ?, 'unread', datetime('now'))`,
     [input.id, input.userId, input.sessionId ?? null, input.eventType, input.title, input.body],
   );
+  maybePruneNotifications(input.userId);
 }
 
 export function listNotifications(input: {

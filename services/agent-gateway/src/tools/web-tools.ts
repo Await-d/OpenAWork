@@ -1,8 +1,31 @@
 import type { ToolDefinition } from '@openAwork/agent-core';
 import TurndownService from 'turndown';
 import { z } from 'zod';
+import {
+  readResponseTextWithLimit,
+  resolveHttpBodyLimitBytes,
+} from '../infra/http-body-limit.js';
 
 const MAX_WEBFETCH_TIMEOUT_SECONDS = 120;
+
+/**
+ * Hard ceiling on the response body `webfetch` will buffer into memory.
+ *
+ * `webfetch` targets an arbitrary user/agent-supplied URL; `response.text()`
+ * buffers the WHOLE body before any downstream truncation. The wall-clock
+ * timeout does not bound memory — a fast server can stream gigabytes within the
+ * deadline — so a large response would OOM the gateway. The shared
+ * `readResponseTextWithLimit` enforces a hard byte ceiling. Override via
+ * `OPENAWORK_WEBFETCH_MAX_RESPONSE_BYTES`; <=0 disables the guard.
+ */
+const DEFAULT_WEBFETCH_MAX_RESPONSE_BYTES = 25 * 1024 * 1024;
+
+function resolveWebfetchMaxResponseBytes(): number {
+  return resolveHttpBodyLimitBytes(
+    'OPENAWORK_WEBFETCH_MAX_RESPONSE_BYTES',
+    DEFAULT_WEBFETCH_MAX_RESPONSE_BYTES,
+  );
+}
 
 const webfetchInputSchema = z.object({
   url: z.string().url(),
@@ -108,12 +131,16 @@ export const webfetchTool: ToolDefinition<typeof webfetchInputSchema, typeof web
 
       try {
         const response = await fetch(normalizedUrl, { signal: requestSignal });
-        const body = await response.text();
         const contentType = response.headers.get('content-type') ?? 'text/plain';
 
         if (!response.ok) {
+          // Drop the (unused) error body so the socket is released promptly.
+          await response.body?.cancel().catch(() => undefined);
           throw new Error(`webfetch request failed with status ${response.status}`);
         }
+
+        // Size-capped read: never buffer an unbounded body into memory.
+        const body = await readResponseTextWithLimit(response, resolveWebfetchMaxResponseBytes());
 
         return {
           url: normalizedUrl,

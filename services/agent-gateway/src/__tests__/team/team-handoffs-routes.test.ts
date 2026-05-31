@@ -48,11 +48,34 @@ function seedUser(id: string, email: string): void {
   ]);
 }
 
-function seedSession(sessionId: string, userId: string): void {
+function seedSession(
+  sessionId: string,
+  userId: string,
+  input?: {
+    paused?: boolean;
+    pausedAt?: string | null;
+    pausedByUserId?: string | null;
+    pauseReason?: string | null;
+    roleLayer?: string | null;
+    teamParentSessionId?: string | null;
+  },
+): void {
   dbModule.sqliteRun(
-    `INSERT OR IGNORE INTO sessions (id, user_id, title, metadata_json)
-     VALUES (?, ?, 'demo', '{}')`,
-    [sessionId, userId],
+    `INSERT OR IGNORE INTO sessions (
+       id, user_id, title, metadata_json, role_layer, team_parent_session_id,
+       paused, paused_at, paused_by_user_id, pause_reason
+     )
+     VALUES (?, ?, 'demo', '{}', ?, ?, ?, ?, ?, ?)`,
+    [
+      sessionId,
+      userId,
+      input?.roleLayer ?? null,
+      input?.teamParentSessionId ?? null,
+      input?.paused ? 1 : 0,
+      input?.pausedAt ?? null,
+      input?.pausedByUserId ?? null,
+      input?.pauseReason ?? null,
+    ],
   );
 }
 
@@ -73,9 +96,11 @@ beforeEach(() => {
   teamEventsBus.__clearTeamEventsBusForTesting();
   dbModule.sqliteRun('DELETE FROM team_audit_logs', []);
   dbModule.sqliteRun('DELETE FROM session_inbound_messages', []);
+  dbModule.sqliteRun('DELETE FROM handoff_records', []);
+  dbModule.sqliteRun('DELETE FROM sessions', []);
   dbModule.sqliteRun('DELETE FROM users', []);
   seedUser(USER_ID, 'rt@example.com');
-  seedSession(FROM_SESSION_ID, USER_ID);
+  seedSession(FROM_SESSION_ID, USER_ID, { roleLayer: 'reception' });
   seedSession(TO_SESSION_ID, USER_ID);
 });
 
@@ -118,6 +143,10 @@ describe('POST /team/sessions', () => {
         payload: { roleLayer: 'pm1', teamParentSessionId: 'nope' },
       });
       expect(res.statusCode).toBe(404);
+      expect(res.json()).toMatchObject({
+        code: 'team_parent_session_not_found',
+        error: '目标团队父会话不存在。',
+      });
     } finally {
       await app.close();
     }
@@ -176,6 +205,10 @@ describe('POST /team/handoffs', () => {
         },
       });
       expect(res.statusCode).toBe(404);
+      expect(res.json()).toMatchObject({
+        code: 'team_handoff_source_session_not_found',
+        error: '源团队会话不存在。',
+      });
     } finally {
       await app.close();
     }
@@ -213,6 +246,10 @@ describe('GET /team/handoffs/:handoffId', () => {
         headers: { authorization: bearer(app) },
       });
       expect(res.statusCode).toBe(404);
+      expect(res.json()).toMatchObject({
+        code: 'team_handoff_not_found',
+        error: '目标 handoff 不存在。',
+      });
     } finally {
       await app.close();
     }
@@ -268,6 +305,24 @@ describe('GET /team/sessions/:sessionId/handoffs', () => {
       await app.close();
     }
   });
+
+  it('session 不存在时返回结构化 404', async () => {
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/team/sessions/nope/handoffs',
+        headers: { authorization: bearer(app) },
+      });
+      expect(res.statusCode).toBe(404);
+      expect(res.json()).toMatchObject({
+        code: 'team_session_not_found',
+        error: '目标团队会话不存在。',
+      });
+    } finally {
+      await app.close();
+    }
+  });
 });
 
 describe('POST /team/handoffs/:handoffId/cancel', () => {
@@ -316,7 +371,11 @@ describe('POST /team/handoffs/:handoffId/cancel', () => {
         headers: { authorization: bearer(app) },
       });
       expect(res.statusCode).toBe(409);
-      expect((res.json() as { error: string }).error).toBe('cannot-cancel');
+      expect(res.json()).toMatchObject({
+        code: 'team_handoff_cannot_cancel',
+        error: '当前状态不允许取消该 handoff。',
+        state: 'completed',
+      });
     } finally {
       await app.close();
     }
@@ -416,7 +475,8 @@ describe('POST /team/handoffs/:handoffId/pause', () => {
 
       expect(res.statusCode).toBe(409);
       expect(res.json()).toMatchObject({
-        error: 'cannot-pause',
+        code: 'team_handoff_cannot_pause',
+        error: '当前状态不允许暂停该 handoff。',
         state: 'pending',
         paused: true,
       });
@@ -518,11 +578,541 @@ describe('POST /team/handoffs/:handoffId/resume', () => {
 
       expect(res.statusCode).toBe(409);
       expect(res.json()).toMatchObject({
-        error: 'cannot-resume',
+        code: 'team_handoff_cannot_resume',
+        error: '当前状态不允许恢复该 handoff。',
         state: 'pending',
         paused: false,
       });
     } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('POST /team/handoffs/:handoffId/review-actions/:action', () => {
+  it('非法 review action 返回 400', async () => {
+    const app = await buildApp();
+    try {
+      const created = store.createHandoff({
+        userId: USER_ID,
+        fromSessionId: FROM_SESSION_ID,
+        fromRoleLayer: 'pm1',
+        toRoleLayer: 'pm2',
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/team/handoffs/${created.id}/review-actions/not-allowed`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(res.statusCode).toBe(400);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('redispatch 会把 failed 的 pm2 handoff 退回 pending 并递增 retryCount', async () => {
+    const app = await buildApp();
+    try {
+      const PM1_SESSION_ID = 's-review-pm1';
+      seedSession(PM1_SESSION_ID, USER_ID, {
+        roleLayer: 'pm1',
+        teamParentSessionId: FROM_SESSION_ID,
+      });
+      const PM2_SESSION_ID = 's-review-pm2';
+      seedSession(PM2_SESSION_ID, USER_ID, {
+        roleLayer: 'pm2',
+        teamParentSessionId: PM1_SESSION_ID,
+      });
+
+      const created = store.createHandoff({
+        userId: USER_ID,
+        fromSessionId: PM1_SESSION_ID,
+        fromRoleLayer: 'pm1',
+        toRoleLayer: 'pm2',
+      });
+      store.claimHandoff({ handoffId: created.id, claimToken: 'tok-review-redispatch' });
+      store.startHandoff({
+        handoffId: created.id,
+        claimToken: 'tok-review-redispatch',
+        toSessionId: PM2_SESSION_ID,
+      });
+      dbModule.sqliteRun(
+        `UPDATE handoff_records
+            SET state = 'failed', failure_reason = '已重试 2 轮仍未通过，需要用户介入', retry_count = 2
+          WHERE id = ?`,
+        [created.id],
+      );
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/team/handoffs/${created.id}/review-actions/redispatch`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({
+        action: 'redispatch',
+        handoffId: created.id,
+        handoffs: [
+          expect.objectContaining({
+            id: created.id,
+            retryCount: 3,
+            state: 'pending',
+            toSessionId: null,
+          }),
+        ],
+      });
+
+      const after = store.getHandoff({ userId: USER_ID, handoffId: created.id });
+      expect(after).toMatchObject({
+        state: 'pending',
+        failureReason: null,
+        retryCount: 3,
+        toSessionId: null,
+      });
+      expect((after?.payload as Record<string, unknown>)['reviewDispositionHandledAt']).toBeUndefined();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('return-to-c 会基于原 reception→pm1 payload 创建一条新的 pm1 handoff', async () => {
+    const app = await buildApp();
+    try {
+      const PM1_SESSION_ID = 's-review-pm1-return';
+      seedSession(PM1_SESSION_ID, USER_ID, {
+        roleLayer: 'pm1',
+        teamParentSessionId: FROM_SESSION_ID,
+      });
+      const PM2_SESSION_ID = 's-review-pm2-return';
+      seedSession(PM2_SESSION_ID, USER_ID, {
+        roleLayer: 'pm2',
+        teamParentSessionId: PM1_SESSION_ID,
+      });
+
+      const upstream = store.createHandoff({
+        userId: USER_ID,
+        fromSessionId: FROM_SESSION_ID,
+        fromRoleLayer: 'reception',
+        toRoleLayer: 'pm1',
+        payload: {
+          sourceIntent: '原始需求',
+          rewrittenIntent: '改写需求',
+          teamWorkspaceId: 'tw-demo',
+        },
+      });
+      dbModule.sqliteRun(
+        `UPDATE handoff_records
+            SET to_session_id = ?, state = 'completed'
+          WHERE id = ?`,
+        [PM1_SESSION_ID, upstream.id],
+      );
+
+      const created = store.createHandoff({
+        userId: USER_ID,
+        fromSessionId: PM1_SESSION_ID,
+        fromRoleLayer: 'pm1',
+        toRoleLayer: 'pm2',
+      });
+      store.claimHandoff({ handoffId: created.id, claimToken: 'tok-review-return' });
+      store.startHandoff({
+        handoffId: created.id,
+        claimToken: 'tok-review-return',
+        toSessionId: PM2_SESSION_ID,
+      });
+      dbModule.sqliteRun(
+        `UPDATE handoff_records
+            SET state = 'failed', failure_reason = 'Spec Review 未通过：遗漏验收场景'
+          WHERE id = ?`,
+        [created.id],
+      );
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/team/handoffs/${created.id}/review-actions/return-to-c`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const data = res.json() as {
+        createdHandoffId: string;
+        handoffs: Array<{ id: string; toRoleLayer: string; fromSessionId: string; state: string }>;
+      };
+      expect(typeof data.createdHandoffId).toBe('string');
+      expect(data.handoffs).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: created.id,
+            toRoleLayer: 'pm2',
+            state: 'failed',
+          }),
+          expect.objectContaining({
+            id: data.createdHandoffId,
+            fromSessionId: FROM_SESSION_ID,
+            toRoleLayer: 'pm1',
+            state: 'pending',
+          }),
+        ]),
+      );
+
+      const replay = store.getHandoff({ userId: USER_ID, handoffId: data.createdHandoffId });
+      expect(replay).toMatchObject({
+        fromSessionId: FROM_SESSION_ID,
+        fromRoleLayer: 'reception',
+        toRoleLayer: 'pm1',
+        state: 'pending',
+      });
+      expect(replay?.payload).toMatchObject({
+        sourceIntent: '原始需求',
+        rewrittenIntent: '改写需求',
+        teamWorkspaceId: 'tw-demo',
+      });
+
+      const handledPm2 = store.getHandoff({ userId: USER_ID, handoffId: created.id });
+      expect(handledPm2?.payload).toMatchObject({
+        reviewDisposition: expect.objectContaining({
+          action: 'return-to-c',
+          status: 'handled',
+        }),
+        reviewDispositionHandledAction: 'return-to-c',
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('escalate-to-user 会返回已标记 handled 的 pm2 handoff preview', async () => {
+    const app = await buildApp();
+    try {
+      const PM1_SESSION_ID = 's-review-pm1-escalate';
+      seedSession(PM1_SESSION_ID, USER_ID, {
+        roleLayer: 'pm1',
+        teamParentSessionId: FROM_SESSION_ID,
+      });
+      const PM2_SESSION_ID = 's-review-pm2-escalate';
+      seedSession(PM2_SESSION_ID, USER_ID, {
+        roleLayer: 'pm2',
+        teamParentSessionId: PM1_SESSION_ID,
+      });
+
+      const created = store.createHandoff({
+        userId: USER_ID,
+        fromSessionId: PM1_SESSION_ID,
+        fromRoleLayer: 'pm1',
+        toRoleLayer: 'pm2',
+      });
+      store.claimHandoff({ handoffId: created.id, claimToken: 'tok-review-escalate' });
+      store.startHandoff({
+        handoffId: created.id,
+        claimToken: 'tok-review-escalate',
+        toSessionId: PM2_SESSION_ID,
+      });
+      dbModule.sqliteRun(
+        `UPDATE handoff_records
+            SET state = 'failed', failure_reason = '已重试 3 轮仍未通过，需要用户介入'
+          WHERE id = ?`,
+        [created.id],
+      );
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/team/handoffs/${created.id}/review-actions/escalate-to-user`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({
+        action: 'escalate-to-user',
+        handoffId: created.id,
+        handoffs: [
+          expect.objectContaining({
+            id: created.id,
+            state: 'failed',
+            toSessionId: PM2_SESSION_ID,
+          }),
+        ],
+      });
+
+      const handledPm2 = store.getHandoff({ userId: USER_ID, handoffId: created.id });
+      expect(handledPm2?.payload).toMatchObject({
+        reviewDisposition: expect.objectContaining({
+          action: 'escalate-to-user',
+          status: 'handled',
+        }),
+        reviewDispositionHandledAction: 'escalate-to-user',
+      });
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('POST /team/sessions/:sessionId/pause-all', () => {
+  it('会暂停子树 handoff，写入子 session 暂停元数据并发出汇总事件', async () => {
+    const app = await buildApp();
+    const events: TeamEventsBusModule.TeamEventEnvelope[] = [];
+    const unsubscribe = teamEventsBus.subscribeToTeamEvents((event) => {
+      events.push(event);
+    });
+    try {
+      const PM1_SESSION_ID = 's-pm1-rt';
+      seedSession(PM1_SESSION_ID, USER_ID, {
+        roleLayer: 'pm1',
+        teamParentSessionId: FROM_SESSION_ID,
+      });
+
+      const handoffRunning = store.createHandoff({
+        userId: USER_ID,
+        fromSessionId: FROM_SESSION_ID,
+        fromRoleLayer: 'reception',
+        toRoleLayer: 'pm1',
+      });
+      store.claimHandoff({ handoffId: handoffRunning.id, claimToken: 'tok-bulk-pause-running' });
+      store.startHandoff({
+        handoffId: handoffRunning.id,
+        claimToken: 'tok-bulk-pause-running',
+        toSessionId: PM1_SESSION_ID,
+      });
+
+      const handoffPending = store.createHandoff({
+        userId: USER_ID,
+        fromSessionId: PM1_SESSION_ID,
+        fromRoleLayer: 'pm1',
+        toRoleLayer: 'pm2',
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/team/sessions/${FROM_SESSION_ID}/pause-all`,
+        headers: { authorization: bearer(app) },
+        payload: { reason: 'network-degraded' },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({
+        pausedHandoffCount: 2,
+        pausedSessionCount: 1,
+        sessionId: FROM_SESSION_ID,
+      });
+
+      const rootRow = dbModule.sqliteGet<{ paused: number; paused_at: string | null }>(
+        `SELECT paused, paused_at FROM sessions WHERE id = ?`,
+        [FROM_SESSION_ID],
+      );
+      const childRow = dbModule.sqliteGet<{
+        paused: number;
+        paused_at: string | null;
+        paused_by_user_id: string | null;
+        pause_reason: string | null;
+      }>(
+        `SELECT paused, paused_at, paused_by_user_id, pause_reason
+           FROM sessions
+          WHERE id = ?`,
+        [PM1_SESSION_ID],
+      );
+      expect(rootRow).toMatchObject({
+        paused: 0,
+        paused_at: null,
+      });
+      expect(childRow).toMatchObject({
+        paused: 1,
+        paused_by_user_id: USER_ID,
+        pause_reason: 'network-degraded',
+      });
+      expect(typeof childRow?.paused_at).toBe('string');
+
+      const pausedHandoffs = dbModule.sqliteAll<{ id: string; paused: number }>(
+        `SELECT id, paused
+           FROM handoff_records
+          WHERE id IN (?, ?)
+          ORDER BY id ASC`,
+        [handoffPending.id, handoffRunning.id],
+      );
+      expect(pausedHandoffs).toEqual(
+        expect.arrayContaining([
+          { id: handoffPending.id, paused: 1 },
+          { id: handoffRunning.id, paused: 1 },
+        ]),
+      );
+
+      const inbound = dbModule.sqliteGet<{ message_type: string; payload_json: string }>(
+        `SELECT message_type, payload_json
+           FROM session_inbound_messages
+          WHERE to_session_id = ?
+          ORDER BY created_at DESC
+          LIMIT 1`,
+        [PM1_SESSION_ID],
+      );
+      expect(inbound?.message_type).toBe('pause_signal');
+      expect(JSON.parse(inbound?.payload_json ?? '{}')).toMatchObject({
+        action: 'pause',
+        handoffId: handoffRunning.id,
+        reason: 'network-degraded',
+      });
+
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'scheduler.all-paused',
+          sessionId: FROM_SESSION_ID,
+          userId: USER_ID,
+        }),
+      );
+
+      const audit = dbModule.sqliteGet<{ action: string; entity_type: string; summary: string }>(
+        `SELECT action, entity_type, summary
+           FROM team_audit_logs
+          ORDER BY created_at DESC, id DESC
+          LIMIT 1`,
+        [],
+      );
+      expect(audit).toMatchObject({
+        action: 'handoff_control',
+        entity_type: 'session',
+      });
+      expect(audit?.summary).toContain('team pause-all');
+    } finally {
+      unsubscribe();
+      await app.close();
+    }
+  });
+});
+
+describe('POST /team/sessions/:sessionId/resume-all', () => {
+  it('会恢复子树 handoff，清除暂停元数据并返回 staleSessionCount', async () => {
+    const app = await buildApp();
+    const events: TeamEventsBusModule.TeamEventEnvelope[] = [];
+    const unsubscribe = teamEventsBus.subscribeToTeamEvents((event) => {
+      events.push(event);
+    });
+    try {
+      const PM1_SESSION_ID = 's-pm1-resume-rt';
+      seedSession(PM1_SESSION_ID, USER_ID, {
+        roleLayer: 'pm1',
+        teamParentSessionId: FROM_SESSION_ID,
+        paused: true,
+        pausedAt: '2000-01-01 00:00:00',
+        pausedByUserId: USER_ID,
+        pauseReason: 'network-degraded',
+      });
+
+      const handoffRunning = store.createHandoff({
+        userId: USER_ID,
+        fromSessionId: FROM_SESSION_ID,
+        fromRoleLayer: 'reception',
+        toRoleLayer: 'pm1',
+      });
+      store.claimHandoff({ handoffId: handoffRunning.id, claimToken: 'tok-bulk-resume-running' });
+      store.startHandoff({
+        handoffId: handoffRunning.id,
+        claimToken: 'tok-bulk-resume-running',
+        toSessionId: PM1_SESSION_ID,
+      });
+      expect(
+        store.pauseHandoff({
+          userId: USER_ID,
+          handoffId: handoffRunning.id,
+          reason: 'network-degraded',
+        }),
+      ).toBe(true);
+
+      const handoffPending = store.createHandoff({
+        userId: USER_ID,
+        fromSessionId: PM1_SESSION_ID,
+        fromRoleLayer: 'pm1',
+        toRoleLayer: 'pm2',
+      });
+      expect(
+        store.pauseHandoff({
+          userId: USER_ID,
+          handoffId: handoffPending.id,
+          reason: 'network-degraded',
+        }),
+      ).toBe(true);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/team/sessions/${FROM_SESSION_ID}/resume-all`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({
+        resumedHandoffCount: 2,
+        resumedSessionCount: 1,
+        sessionId: FROM_SESSION_ID,
+        staleSessionCount: 1,
+      });
+
+      const childRow = dbModule.sqliteGet<{
+        paused: number;
+        paused_at: string | null;
+        paused_by_user_id: string | null;
+        pause_reason: string | null;
+      }>(
+        `SELECT paused, paused_at, paused_by_user_id, pause_reason
+           FROM sessions
+          WHERE id = ?`,
+        [PM1_SESSION_ID],
+      );
+      expect(childRow).toMatchObject({
+        paused: 0,
+        paused_at: null,
+        paused_by_user_id: null,
+        pause_reason: null,
+      });
+
+      const resumedHandoffs = dbModule.sqliteAll<{ id: string; paused: number }>(
+        `SELECT id, paused
+           FROM handoff_records
+          WHERE id IN (?, ?)
+          ORDER BY id ASC`,
+        [handoffPending.id, handoffRunning.id],
+      );
+      expect(resumedHandoffs).toEqual(
+        expect.arrayContaining([
+          { id: handoffPending.id, paused: 0 },
+          { id: handoffRunning.id, paused: 0 },
+        ]),
+      );
+
+      const inbound = dbModule.sqliteGet<{ message_type: string; payload_json: string }>(
+        `SELECT message_type, payload_json
+           FROM session_inbound_messages
+          WHERE to_session_id = ?
+          ORDER BY created_at DESC
+          LIMIT 1`,
+        [PM1_SESSION_ID],
+      );
+      expect(inbound?.message_type).toBe('resume_signal');
+      expect(JSON.parse(inbound?.payload_json ?? '{}')).toMatchObject({
+        action: 'resume',
+        handoffId: handoffRunning.id,
+      });
+
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'scheduler.all-resumed',
+          sessionId: FROM_SESSION_ID,
+          userId: USER_ID,
+        }),
+      );
+
+      const audit = dbModule.sqliteGet<{ action: string; entity_type: string; summary: string }>(
+        `SELECT action, entity_type, summary
+           FROM team_audit_logs
+          ORDER BY created_at DESC, id DESC
+          LIMIT 1`,
+        [],
+      );
+      expect(audit).toMatchObject({
+        action: 'handoff_control',
+        entity_type: 'session',
+      });
+      expect(audit?.summary).toContain('team resume-all');
+    } finally {
+      unsubscribe();
       await app.close();
     }
   });

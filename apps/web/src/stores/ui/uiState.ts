@@ -154,9 +154,43 @@ export interface UIStateStore {
   sessionListPathFilterFeatureEnabled: boolean;
   setSessionListPathFilterFeatureEnabled: (v: boolean) => void;
 
+  /**
+   * `/sessions` 页左侧列表栏宽度(像素)。可拖拽调整,持久化。范围 [260, 520]。
+   */
+  sessionsListPaneWidth: number;
+  setSessionsListPaneWidth: (width: number) => void;
+
+  /**
+   * `/sessions` 页折叠的工作区分组 key 集合(`getWorkspaceGroupKey` 输出)。
+   * 默认全部展开;用户折叠后会持久化,刷新后保持。
+   */
+  sessionsCollapsedWorkspaceGroups: string[];
+  toggleSessionsCollapsedWorkspaceGroup: (groupKey: string) => void;
+  setSessionsCollapsedWorkspaceGroups: (groupKeys: string[]) => void;
+
+  /**
+   * `/sessions` 页用于隔离展示「个人对话」与「团队对话」两类来源:
+   *   - `scopeFilter` 控制顶部 scope tab 当前选择(`all` / `personal` / `team`)。
+   *   - `collapsedScopes` 记录用户主动折叠掉的 scope 标题区(`personal` / `team`)。
+   * 仅 UI 状态,持久化保留用户选择。
+   */
+  sessionsScopeFilter: 'all' | 'personal' | 'team';
+  setSessionsScopeFilter: (scope: 'all' | 'personal' | 'team') => void;
+  sessionsCollapsedScopes: Array<'personal' | 'team'>;
+  toggleSessionsCollapsedScope: (scope: 'personal' | 'team') => void;
+
   // Editor mode
   editorMode: boolean;
   setEditorMode: (v: boolean) => void;
+
+  /**
+   * 编辑器/浏览器工作区是否占据整个内容区域(全屏模式)。
+   * 与 `editorMode` 配合:`editorMode` 决定编辑器面板是否可见(分屏),
+   * `editorFullScreen` 进一步让该面板铺满整个内容区、收起对话列与右侧面板。
+   * 全局持久化,刷新后保持用户上次的视图选择。
+   */
+  editorFullScreen: boolean;
+  setEditorFullScreen: (v: boolean) => void;
 
   splitPos: number;
   setSplitPos: (v: number) => void;
@@ -235,6 +269,26 @@ function normalizeChatPath(path: string | null): string | null {
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
 }
+
+const SESSIONS_LIST_PANE_MIN_WIDTH = 260;
+const SESSIONS_LIST_PANE_MAX_WIDTH = 520;
+const SESSIONS_LIST_PANE_DEFAULT_WIDTH = 320;
+
+export function clampSessionsListPaneWidth(width: number): number {
+  if (!Number.isFinite(width)) {
+    return SESSIONS_LIST_PANE_DEFAULT_WIDTH;
+  }
+  return Math.min(
+    SESSIONS_LIST_PANE_MAX_WIDTH,
+    Math.max(SESSIONS_LIST_PANE_MIN_WIDTH, Math.round(width)),
+  );
+}
+
+export const SESSIONS_LIST_PANE_WIDTH_BOUNDS = {
+  min: SESSIONS_LIST_PANE_MIN_WIDTH,
+  max: SESSIONS_LIST_PANE_MAX_WIDTH,
+  default: SESSIONS_LIST_PANE_DEFAULT_WIDTH,
+} as const;
 
 export const useUIStateStore = create<UIStateStore>()(
   persist(
@@ -376,9 +430,38 @@ export const useUIStateStore = create<UIStateStore>()(
       setSessionListPathFilterFeatureEnabled: (v) =>
         set({ sessionListPathFilterFeatureEnabled: v }),
 
+      // /sessions 页面布局
+      sessionsListPaneWidth: 320,
+      setSessionsListPaneWidth: (width) =>
+        set({ sessionsListPaneWidth: clampSessionsListPaneWidth(width) }),
+      sessionsCollapsedWorkspaceGroups: [],
+      toggleSessionsCollapsedWorkspaceGroup: (groupKey) =>
+        set((s) => {
+          const set_ = new Set(s.sessionsCollapsedWorkspaceGroups);
+          if (set_.has(groupKey)) set_.delete(groupKey);
+          else set_.add(groupKey);
+          return { sessionsCollapsedWorkspaceGroups: Array.from(set_) };
+        }),
+      setSessionsCollapsedWorkspaceGroups: (groupKeys) =>
+        set({ sessionsCollapsedWorkspaceGroups: Array.from(new Set(groupKeys)) }),
+
+      sessionsScopeFilter: 'all',
+      setSessionsScopeFilter: (scope) => set({ sessionsScopeFilter: scope }),
+      sessionsCollapsedScopes: [],
+      toggleSessionsCollapsedScope: (scope) =>
+        set((s) => {
+          const set_ = new Set(s.sessionsCollapsedScopes);
+          if (set_.has(scope)) set_.delete(scope);
+          else set_.add(scope);
+          return { sessionsCollapsedScopes: Array.from(set_) as Array<'personal' | 'team'> };
+        }),
+
       // Editor
       editorMode: false,
       setEditorMode: (v) => set({ editorMode: v }),
+
+      editorFullScreen: false,
+      setEditorFullScreen: (v) => set({ editorFullScreen: v }),
 
       splitPos: 50,
       setSplitPos: (v) => set({ splitPos: v }),
@@ -480,7 +563,7 @@ export const useUIStateStore = create<UIStateStore>()(
     }),
     {
       name: 'openAwork-ui-state',
-      version: 12,
+      version: 14,
       // Throttle storage writes to avoid JSON.stringify+setItem on
       // every fast UI mutation (tab clicks, expand/collapse). See
       // throttledStorage definition above.
@@ -559,6 +642,19 @@ export const useUIStateStore = create<UIStateStore>()(
           nextState.quickTerminalActiveIdByWorkspace = {};
         }
 
+        // v13:`/sessions` 页面新增可拖拽列表宽度与可折叠工作区分组的持久化字段。
+        if (version < 13) {
+          nextState.sessionsListPaneWidth = SESSIONS_LIST_PANE_WIDTH_BOUNDS.default;
+          nextState.sessionsCollapsedWorkspaceGroups = [];
+          nextState.sessionsScopeFilter = 'all';
+          nextState.sessionsCollapsedScopes = [];
+        }
+
+        // v14:编辑器/浏览器工作区全屏模式开关。默认关闭(保持原有分屏行为)。
+        if (version < 14) {
+          nextState.editorFullScreen = false;
+        }
+
         if (!isStringArray(nextState.savedWorkspacePaths)) {
           nextState.savedWorkspacePaths = [];
         }
@@ -577,6 +673,32 @@ export const useUIStateStore = create<UIStateStore>()(
 
         if (nextState.navRailExpanded !== null && typeof nextState.navRailExpanded !== 'boolean') {
           nextState.navRailExpanded = null;
+        }
+
+        nextState.sessionsListPaneWidth = clampSessionsListPaneWidth(
+          typeof nextState.sessionsListPaneWidth === 'number'
+            ? nextState.sessionsListPaneWidth
+            : SESSIONS_LIST_PANE_WIDTH_BOUNDS.default,
+        );
+
+        if (!isStringArray(nextState.sessionsCollapsedWorkspaceGroups)) {
+          nextState.sessionsCollapsedWorkspaceGroups = [];
+        }
+
+        if (
+          nextState.sessionsScopeFilter !== 'all' &&
+          nextState.sessionsScopeFilter !== 'personal' &&
+          nextState.sessionsScopeFilter !== 'team'
+        ) {
+          nextState.sessionsScopeFilter = 'all';
+        }
+
+        if (!isStringArray(nextState.sessionsCollapsedScopes)) {
+          nextState.sessionsCollapsedScopes = [];
+        } else {
+          nextState.sessionsCollapsedScopes = (
+            nextState.sessionsCollapsedScopes as string[]
+          ).filter((scope) => scope === 'personal' || scope === 'team');
         }
 
         return nextState;

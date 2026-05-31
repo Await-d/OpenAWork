@@ -245,8 +245,8 @@ export function TopTeamHeader({
                 borderRadius: 999,
                 border: 'none',
                 background: isPaused
-                  ? 'linear-gradient(135deg, color-mix(in oklch, var(--success) 22%, var(--bg-base) 0%, color-mix(in oklch, var(--success) 8%, var(--bg-base) 100%)'
-                  : 'linear-gradient(135deg, color-mix(in oklch, var(--danger) 22%, var(--bg-base) 0%, color-mix(in oklch, var(--danger) 8%, var(--bg-base) 100%)',
+                  ? 'linear-gradient(135deg, color-mix(in oklch, var(--success) 22%, var(--bg-base)) 0%, color-mix(in oklch, var(--success) 8%, var(--bg-base)) 100%)'
+                  : 'linear-gradient(135deg, color-mix(in oklch, var(--danger) 22%, var(--bg-base)) 0%, color-mix(in oklch, var(--danger) 8%, var(--bg-base)) 100%)',
                 color: isPaused ? 'var(--success)' : 'var(--danger)',
                 fontSize: 12,
                 fontWeight: 800,

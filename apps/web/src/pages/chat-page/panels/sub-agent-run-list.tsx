@@ -25,39 +25,39 @@ function formatTimeoutSourceLabel(timeoutSource: SessionTask['timeoutSource']): 
 function getStatusStyle(status: SubAgentDisplayStatus): React.CSSProperties {
   if (status === 'running') {
     return {
-      background: 'color-mix(in oklch, var(--accent) 18%, var(--bg-overlay)',
-      border: '1px solid color-mix(in oklch, var(--accent) 42%, var(--border-default)',
+      background: 'color-mix(in oklch, var(--accent) 18%, var(--bg-overlay))',
+      border: '1px solid color-mix(in oklch, var(--accent) 42%, var(--border-default))',
       color: 'var(--accent)',
     };
   }
 
   if (status === 'paused') {
     return {
-      background: 'color-mix(in srgb, var(--warning) 10%, var(--bg-overlay)',
-      border: '1px solid color-mix(in srgb, var(--warning) 30%, var(--border-default)',
+      background: 'color-mix(in srgb, var(--warning) 10%, var(--bg-overlay))',
+      border: '1px solid color-mix(in srgb, var(--warning) 30%, var(--border-default))',
       color: 'var(--warning)',
     };
   }
 
   if (status === 'completed') {
     return {
-      background: 'color-mix(in srgb, var(--success) 12%, var(--bg-overlay)',
-      border: '1px solid color-mix(in srgb, var(--success) 35%, var(--border-default)',
+      background: 'color-mix(in srgb, var(--success) 12%, var(--bg-overlay))',
+      border: '1px solid color-mix(in srgb, var(--success) 35%, var(--border-default))',
       color: 'var(--success)',
     };
   }
 
   if (status === 'failed' || status === 'cancelled') {
     return {
-      background: 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay)',
-      border: '1px solid color-mix(in srgb, var(--danger) 30%, var(--border-default)',
+      background: 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay))',
+      border: '1px solid color-mix(in srgb, var(--danger) 30%, var(--border-default))',
       color: 'var(--danger)',
     };
   }
 
   return {
-    background: 'color-mix(in srgb, var(--warning) 10%, var(--bg-overlay)',
-    border: '1px solid color-mix(in srgb, var(--warning) 30%, var(--border-default)',
+    background: 'color-mix(in srgb, var(--warning) 10%, var(--bg-overlay))',
+    border: '1px solid color-mix(in srgb, var(--warning) 30%, var(--border-default))',
     color: 'var(--warning)',
   };
 }
@@ -243,7 +243,7 @@ function SubAgentItemCard({
         padding: '6px 7px',
         borderRadius: 8,
         border: selected
-          ? '1px solid color-mix(in oklch, var(--accent) 50%, var(--border-subtle)'
+          ? '1px solid color-mix(in oklch, var(--accent) 50%, var(--border-subtle))'
           : '1px solid transparent',
         background: selected
           ? 'color-mix(in oklch, var(--bg-overlay) 84%, var(--accent) 16%)'
@@ -452,8 +452,8 @@ export function SubAgentRunList({
                 gap: 3,
                 padding: '0 5px',
                 borderRadius: 999,
-                border: '1px solid color-mix(in oklch, var(--accent) 36%, var(--border-subtle)',
-                background: 'color-mix(in oklch, var(--accent) 14%, var(--bg-overlay)',
+                border: '1px solid color-mix(in oklch, var(--accent) 36%, var(--border-subtle))',
+                background: 'color-mix(in oklch, var(--accent) 14%, var(--bg-overlay))',
                 fontSize: 8,
                 fontWeight: 700,
                 color: 'var(--accent)',

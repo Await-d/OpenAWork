@@ -78,6 +78,10 @@ function createDatabase(dbPath: string): GatewayDatabase {
   if (dbDir) mkdirSync(dbDir, { recursive: true });
   const database = new DatabaseSync(dbPath);
   database.exec('PRAGMA journal_mode=WAL');
+  // Serialised WAL writers otherwise throw SQLITE_BUSY the moment two writes
+  // overlap; wait up to 5s for the lock so concurrent requests retry instead
+  // of failing the operation outright.
+  database.exec('PRAGMA busy_timeout=5000');
   database.exec('PRAGMA foreign_keys=ON');
   return database;
 }
@@ -1078,6 +1082,22 @@ export async function migrate(): Promise<void> {
       applied_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS team_runtime_alert_controls (
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      alert_code TEXT NOT NULL,
+      state TEXT NOT NULL,
+      note TEXT,
+      suppressed_until_ms INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (user_id, alert_code)
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_team_runtime_alert_controls_user_updated ON team_runtime_alert_controls(user_id, updated_at DESC)',
+  );
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_team_force_apply_events_user ON team_force_apply_events(user_id, applied_at DESC)',
   );
@@ -1096,6 +1116,11 @@ export async function migrate(): Promise<void> {
   // L1.8 D18：结构深度 + 执行深度（用于前端 session 树可视化 + 深度限制）
   ensureColumn('sessions', 'structural_depth', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn('sessions', 'execution_depth', 'INTEGER NOT NULL DEFAULT 0');
+  // D42：团队级 pause/resume 元数据。与 state_status 分离，避免覆盖交互等待中的 paused 语义。
+  ensureColumn('sessions', 'paused', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('sessions', 'paused_at', 'TEXT DEFAULT NULL');
+  ensureColumn('sessions', 'paused_by_user_id', 'TEXT DEFAULT NULL');
+  ensureColumn('sessions', 'pause_reason', 'TEXT DEFAULT NULL');
   // last_heartbeat：T-04/T-06 崩溃恢复用；ISO 'YYYY-MM-DD HH:MM:SS' UTC
   ensureColumn('sessions', 'last_heartbeat', 'TEXT DEFAULT NULL');
   db.exec(
@@ -1107,6 +1132,7 @@ export async function migrate(): Promise<void> {
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_sessions_role_layer ON sessions(role_layer) WHERE role_layer IS NOT NULL',
   );
+  db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_paused ON sessions(paused) WHERE paused = 1');
 
   // T-02: handoff_records —— b→c→d→e/f/g 派发协议的核心表
   // 状态机：pending → claimed → running → (completed | failed | cancelled)

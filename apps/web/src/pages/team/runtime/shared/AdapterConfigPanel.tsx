@@ -12,7 +12,7 @@ const PANEL_STYLE: CSSProperties = {
   padding: 16,
   borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 86%, var(--bg-base)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 86%, var(--bg-base))',
 };
 
 const ROW_STYLE: CSSProperties = {
@@ -60,7 +60,7 @@ export function AdapterConfigPanel({
               padding: '4px 8px',
               borderRadius: 6,
               border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-              background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
+              background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
               color: 'var(--fg-strong)',
               fontSize: 12,
             }}

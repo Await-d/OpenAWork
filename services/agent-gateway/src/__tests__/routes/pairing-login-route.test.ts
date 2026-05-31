@@ -24,6 +24,10 @@ describe('pairing login route', () => {
 
     const qrResponse = await app.inject({ method: 'GET', url: '/pairing/qr' });
     expect(qrResponse.statusCode).toBe(401);
+    expect(JSON.parse(qrResponse.body)).toMatchObject({
+      error: '当前账号无权生成配对二维码。',
+      code: 'pairing_qr_forbidden',
+    });
 
     await app.close();
   });
@@ -105,5 +109,25 @@ describe('pairing login route', () => {
     } else {
       process.env['OPENAWORK_DESKTOP_AUTH_TOKEN'] = previousToken;
     }
+  });
+
+  it('returns structured invalid token error on /pairing/login', async () => {
+    const app = Fastify();
+    await app.register(authPlugin);
+    await app.register(pairingRoutes);
+
+    const loginResponse = await app.inject({
+      method: 'POST',
+      url: '/pairing/login',
+      payload: { token: 'invalid-token', deviceName: 'Mobile', platform: 'android' },
+    });
+
+    expect(loginResponse.statusCode).toBe(401);
+    expect(JSON.parse(loginResponse.body)).toMatchObject({
+      error: '配对令牌无效或已过期。',
+      code: 'invalid_pairing_token',
+    });
+
+    await app.close();
   });
 });

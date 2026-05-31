@@ -10,8 +10,40 @@ export interface FileTreeNode {
   children?: FileTreeNode[];
 }
 
+interface SessionWorkingDirectoryState {
+  path: string | null;
+  sessionId: string | null;
+}
+
+function parseSessionWorkingDirectory(
+  session: Session & {
+    metadata?: { workingDirectory?: string | null };
+  },
+): string | null {
+  if (typeof session.metadata_json === 'string') {
+    try {
+      const parsed = JSON.parse(session.metadata_json) as {
+        workingDirectory?: string | null;
+      };
+      return typeof parsed.workingDirectory === 'string'
+        ? parsed.workingDirectory.trim() || null
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  return typeof session.metadata?.workingDirectory === 'string'
+    ? session.metadata.workingDirectory.trim() || null
+    : null;
+}
+
 export function useWorkspace(sessionId: string | null) {
-  const [workingDirectory, setWorkingDirectory] = useState<string | null>(null);
+  const [workingDirectoryState, setWorkingDirectoryState] =
+    useState<SessionWorkingDirectoryState>({
+      path: null,
+      sessionId: null,
+    });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
@@ -20,21 +52,29 @@ export function useWorkspace(sessionId: string | null) {
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
   const activeSessionWorkspace = useUIStateStore((s) => s.activeSessionWorkspace);
   const setActiveSessionWorkspace = useUIStateStore((s) => s.setActiveSessionWorkspace);
+  const sessionsClient = useMemo(() => createSessionsClient(gatewayUrl), [gatewayUrl]);
   // Workspace client is recreated on `gatewayUrl` change so that the local ↔
   // remote gateway toggle in Settings flips the call site without a reload.
   const workspaceClient = useMemo(() => createWorkspaceClient(gatewayUrl), [gatewayUrl]);
 
   const hasActiveSessionWorkspace =
     sessionId !== null && activeSessionWorkspace?.sessionId === sessionId;
+  const retainedWorkingDirectory =
+    sessionId !== null && workingDirectoryState.sessionId === sessionId
+      ? workingDirectoryState.path
+      : null;
 
   const resolvedWorkingDirectory = hasActiveSessionWorkspace
     ? activeSessionWorkspace.path
-    : workingDirectory;
+    : retainedWorkingDirectory;
 
   useEffect(() => {
     if (!sessionId) {
       requestIdRef.current += 1;
-      setWorkingDirectory(null);
+      setWorkingDirectoryState({
+        path: null,
+        sessionId: null,
+      });
       setLoading(false);
       setError(null);
       return;
@@ -47,71 +87,53 @@ export function useWorkspace(sessionId: string | null) {
         ? (useUIStateStore.getState().activeSessionWorkspace?.version ?? 0)
         : 0;
 
-    setWorkingDirectory(null);
-    setError(null);
     setLoading(true);
-    createSessionsClient(gatewayUrl)
-      .get(accessToken ?? '', sessionId)
-      .then(
-        (
-          session: Session & {
-            metadata_json?: string;
-            metadata?: { workingDirectory?: string | null };
-          },
-        ) => {
-          let wd: string | null = null;
-          if (typeof session?.metadata_json === 'string') {
-            try {
-              const parsed = JSON.parse(session.metadata_json) as {
-                workingDirectory?: string | null;
-              };
-              wd = parsed?.workingDirectory ?? null;
-            } catch {
-              wd = null;
-            }
-          } else {
-            wd = session?.metadata?.workingDirectory ?? null;
-          }
-
-          const normalizedWorkingDirectory = typeof wd === 'string' ? wd.trim() || null : null;
-          if (requestIdRef.current !== requestId) {
-            return;
-          }
-
-          const currentSessionWorkspace = useUIStateStore.getState().activeSessionWorkspace;
-          if (
-            currentSessionWorkspace?.sessionId === sessionId &&
-            currentSessionWorkspace.version > startingVersion
-          ) {
-            return;
-          }
-
-          setWorkingDirectory(normalizedWorkingDirectory);
-          setActiveSessionWorkspace(sessionId, normalizedWorkingDirectory);
-          setError(null);
-        },
-      )
-      .catch((err: unknown) => {
+    void sessionsClient
+      .getResult(accessToken ?? '', sessionId)
+      .then((result) => {
         if (requestIdRef.current !== requestId) {
           return;
         }
-        setError(err instanceof Error ? err.message : String(err));
+
+        if (!result.ok || !result.session) {
+          setError(result.errorMessage ?? '加载会话失败');
+          return;
+        }
+
+        const normalizedWorkingDirectory = parseSessionWorkingDirectory(result.session);
+        const currentSessionWorkspace = useUIStateStore.getState().activeSessionWorkspace;
+        if (
+          currentSessionWorkspace?.sessionId === sessionId &&
+          currentSessionWorkspace.version > startingVersion
+        ) {
+          return;
+        }
+
+        setWorkingDirectoryState({
+          path: normalizedWorkingDirectory,
+          sessionId,
+        });
+        setActiveSessionWorkspace(sessionId, normalizedWorkingDirectory);
+        setError(null);
       })
       .finally(() => {
         if (requestIdRef.current === requestId) {
           setLoading(false);
         }
       });
-  }, [sessionId, accessToken, gatewayUrl, setActiveSessionWorkspace]);
+  }, [sessionId, accessToken, sessionsClient, setActiveSessionWorkspace]);
 
   const setWorkspace = useCallback(
     async (path: string): Promise<void> => {
-      if (!sessionId) throw new Error('No active session');
+      if (!sessionId) throw new Error('当前没有激活的会话，无法绑定工作区。');
       const normalizedPath = path.trim();
       setLoading(true);
       try {
         await workspaceClient.setSessionWorkspace(accessToken ?? '', sessionId, normalizedPath);
-        setWorkingDirectory(normalizedPath || null);
+        setWorkingDirectoryState({
+          path: normalizedPath || null,
+          sessionId,
+        });
         setActiveSessionWorkspace(sessionId, normalizedPath || null);
         setError(null);
       } catch (err: unknown) {
@@ -126,11 +148,14 @@ export function useWorkspace(sessionId: string | null) {
   );
 
   const clearWorkspace = useCallback(async (): Promise<void> => {
-    if (!sessionId) throw new Error('No active session');
+    if (!sessionId) throw new Error('当前没有激活的会话，无法清空工作区。');
     setLoading(true);
     try {
       await workspaceClient.setSessionWorkspace(accessToken ?? '', sessionId, null);
-      setWorkingDirectory(null);
+      setWorkingDirectoryState({
+        path: null,
+        sessionId,
+      });
       setActiveSessionWorkspace(sessionId, null);
       setError(null);
     } catch (err: unknown) {
@@ -149,35 +174,51 @@ export function useWorkspace(sessionId: string | null) {
   );
 
   const fetchWorkspaceRoots = useCallback(async (): Promise<string[]> => {
-    const roots = await workspaceClient.listRoots(accessToken ?? '');
-    if (roots.length === 0) {
-      throw new Error('fetchWorkspaceRoots failed: no workspace roots');
+    const result = await workspaceClient.listRootsResult(accessToken ?? '');
+    if (!result.ok) {
+      throw new Error(result.errorMessage ?? '读取工作区根目录失败。');
     }
-    return roots;
+    if (result.roots.length === 0) {
+      throw new Error('当前账号下没有可用工作区根目录。');
+    }
+    return result.roots;
   }, [accessToken, workspaceClient]);
 
   const fetchRootPath = useCallback(async (): Promise<string> => {
     const roots = await fetchWorkspaceRoots();
     const root = roots[0];
     if (!root) {
-      throw new Error('fetchRootPath failed: no workspace roots');
+      throw new Error('当前账号下没有可用工作区根目录。');
     }
 
     return root;
   }, [fetchWorkspaceRoots]);
 
   const fetchTree = useCallback(
-    async (path: string, depth = 2): Promise<FileTreeNode[]> =>
-      workspaceClient.fetchTree(accessToken ?? '', path, { depth }),
+    async (path: string, depth = 2): Promise<FileTreeNode[]> => {
+      const result = await workspaceClient.fetchTreeResult(accessToken ?? '', path, { depth });
+      if (!result.ok) {
+        throw new Error(result.errorMessage ?? '读取文件树失败。');
+      }
+      return result.nodes;
+    },
     [accessToken, workspaceClient],
   );
 
   const fetchFile = useCallback(
     async (path: string): Promise<{ content: string; truncated: boolean }> => {
-      const data = await workspaceClient.readFile(accessToken ?? '', path);
-      return { content: data.content, truncated: data.truncated ?? false };
+      const result = await workspaceClient.readFileResult(accessToken ?? '', path, {
+        workspaceRoot: resolvedWorkingDirectory ?? undefined,
+      });
+      if (!result.ok || !result.file) {
+        throw new Error(result.errorMessage ?? '读取文件失败。');
+      }
+      return {
+        content: result.file.content,
+        truncated: result.file.truncated ?? false,
+      };
     },
-    [accessToken, workspaceClient],
+    [accessToken, resolvedWorkingDirectory, workspaceClient],
   );
 
   const searchFiles = useCallback(

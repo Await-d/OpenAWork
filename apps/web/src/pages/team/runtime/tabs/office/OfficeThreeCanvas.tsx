@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import type { AgentTeamsOfficeAgent } from '../../data/team-runtime-types.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
+import { useOfficeLayerBinding } from '../../hooks/use-office-layer-binding.js';
 import type { OfficeSceneState } from './OfficeScene.js';
 
 // ── World units (meters) ─────────────────────────────────────────────
@@ -1450,8 +1451,10 @@ export function OfficeThreeCanvas({
   const slideIdxRef = useRef(0);
   const slideTimerRef = useRef(0);
   const hoveredIdRef = useRef<string | null>(null);
-  const { canManageRuntime, officeAgents, metricCards, topSummary, footerStats, activityStats } =
+  const { canManageRuntime, officeAgents: rawOfficeAgents, metricCards, topSummary, footerStats, activityStats } =
     useTeamRuntimeReferenceViewData();
+  // Wave 5：叠加真实 layer/handoff 状态，让 3D agent 的工作/讨论/休息跟随实际运行态。
+  const officeAgents = useOfficeLayerBinding(rawOfficeAgents);
   const officeAgentsRef = useRef<AgentTeamsOfficeAgent[]>([]);
   const metricCardsRef = useRef(metricCards);
   const topSummaryRef = useRef(topSummary);
@@ -2224,10 +2227,10 @@ export function OfficeThreeCanvas({
                       ? '1px solid color-mix(in oklch, var(--success) 50%, transparent)'
                       : '1px solid color-mix(in oklch, var(--warning) 50%, transparent)',
                   background: isSessionPaused
-                    ? 'color-mix(in oklch, var(--bg-overlay) 88%, var(--bg-base)'
+                    ? 'color-mix(in oklch, var(--bg-overlay) 88%, var(--bg-base))'
                     : isPaused
-                      ? 'color-mix(in oklch, var(--success) 15%, var(--bg-base)'
-                      : 'color-mix(in oklch, var(--warning) 15%, var(--bg-base)',
+                      ? 'color-mix(in oklch, var(--success) 15%, var(--bg-base))'
+                      : 'color-mix(in oklch, var(--warning) 15%, var(--bg-base))',
                   color: isSessionPaused
                     ? 'var(--fg-muted)'
                     : isPaused

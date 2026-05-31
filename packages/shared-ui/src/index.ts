@@ -58,7 +58,20 @@ export {
   getSupportedReasoningEffortsForModel,
 } from './models/model-reasoning-support.js';
 export type { SupportedReasoningEffort } from './models/model-reasoning-support.js';
-export { buildFilteredModelGroups } from './models/model-picker-search.js';
+
+export {
+  hydrateProviderCatalogUi,
+  getProviderUiList,
+  lookupProviderEntry,
+  resolveProviderVisual,
+  inferProviderLabelFromModelId,
+} from './models/provider-catalog-ui.js';
+export type {
+  ProviderCatalogUiEntry,
+  ProviderUpstreamVariantUi,
+  ResolvedProviderVisual,
+} from './models/provider-catalog-ui.js';
+export { buildFilteredModelGroups, compareModelsByName } from './models/model-picker-search.js';
 export type {
   ModelPickerGroup,
   ModelPickerModel,
@@ -81,6 +94,7 @@ export type {
   ModelManagerProps,
   AIProviderItem,
   AIModelConfigItem,
+  ProviderModelTestResult,
 } from './models/ModelManager.js';
 export { OAuthButton } from './misc/OAuthButton.js';
 export type { OAuthButtonProps } from './misc/OAuthButton.js';

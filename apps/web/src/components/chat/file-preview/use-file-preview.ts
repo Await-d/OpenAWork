@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createWorkspaceClient } from '@openAwork/web-client';
 import { useAuthStore } from '../../../stores/auth/auth.js';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
@@ -72,7 +72,7 @@ function useActiveWorkspaceRoot(): string | null {
 export type FilePreviewState =
   | { status: 'loading' }
   | { status: 'ready'; snippet: FileSnippet }
-  | { status: 'error'; error: string };
+  | { status: 'error'; error: string; staleSnippet?: FileSnippet };
 
 /**
  * React hook that fetches `path` and slices a snippet centred on
@@ -89,6 +89,9 @@ export function useFilePreview(path: string, line: number | null): FilePreviewSt
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
   const workspaceRoot = useActiveWorkspaceRoot();
   const [state, setState] = useState<FilePreviewState>({ status: 'loading' });
+  const [retryTick, setRetryTick] = useState(0);
+  const lastSuccessfulSnippetsRef = useRef<Map<string, FileSnippet>>(new Map());
+  const currentResolvedPathRef = useRef<string>(path);
 
   useEffect(() => {
     let cancelled = false;
@@ -101,6 +104,7 @@ export function useFilePreview(path: string, line: number | null): FilePreviewSt
 
     void (async () => {
       try {
+        currentResolvedPathRef.current = path;
         // Mirror the click-to-open flow: bare filenames need a search
         // resolution against the active workspace root before
         // `/workspace/file` is willing to read them.
@@ -117,26 +121,51 @@ export function useFilePreview(path: string, line: number | null): FilePreviewSt
         const previewKind = getFilePreviewKind(resolvedPath);
         if (isBinaryPreviewKind(previewKind)) {
           if (cancelled) return;
-          setState({ status: 'error', error: '该文件为二进制内容,无法以文本方式预览' });
+          setState({
+            status: 'error',
+            error: '该文件为二进制内容,无法以文本方式预览',
+            staleSnippet: lastSuccessfulSnippetsRef.current.get(resolvedPath),
+          });
           return;
         }
         const content = await fetchFileContent(gatewayUrl, token, resolvedPath, workspaceRoot);
         if (cancelled) return;
+        const snippet = extractSnippet(content, line);
+        lastSuccessfulSnippetsRef.current.set(resolvedPath, snippet);
         setState({
           status: 'ready',
-          snippet: extractSnippet(content, line),
+          snippet,
         });
       } catch (err) {
         if (cancelled) return;
         const message = err instanceof Error ? err.message : '加载失败';
-        setState({ status: 'error', error: message });
+        setState({
+          status: 'error',
+          error: message,
+          staleSnippet: lastSuccessfulSnippetsRef.current.get(currentResolvedPathRef.current),
+        });
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [path, line, token, gatewayUrl, workspaceRoot]);
+  }, [path, line, token, gatewayUrl, workspaceRoot, retryTick]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const handleOnline = () => {
+      if (state.status === 'error') {
+        setRetryTick((current) => current + 1);
+      }
+    };
+    window.addEventListener('online', handleOnline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+    };
+  }, [state.status]);
 
   return state;
 }

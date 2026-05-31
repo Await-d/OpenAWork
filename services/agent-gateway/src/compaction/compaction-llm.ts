@@ -45,6 +45,16 @@ const PTL_ERROR_PATTERNS = [
   'input is too long',
 ];
 
+/**
+ * Wall-clock timeout for a single compaction summary call. The AI SDK
+ * `generateText` honours `abortSignal` but has no built-in deadline;
+ * the request-scoped signal passed by callers only fires when the
+ * client disconnects, not when an upstream socket connects-but-hangs.
+ * Compaction runs on context pressure (often mid-turn), so a hung
+ * summary call would stall the session indefinitely.
+ */
+const COMPACTION_LLM_TIMEOUT_MS = 120_000;
+
 function isPtlError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const message = error.message.toLowerCase();
@@ -75,27 +85,48 @@ async function callCompactionLlmOnce(input: CompactionLlmInput): Promise<Compact
   ];
   const messages = unifiedConversationToModelMessages(conversation);
 
-  const result = await runUpstreamGenerate({
-    providerType: input.route.providerType ?? 'openai',
-    // Forward the resolved upstream protocol so providers configured for
-    // `anthropic_messages` / `responses` actually hit their native API
-    // surface instead of silently degrading to OpenAI Chat Completions.
-    ...(input.route.upstreamProtocol ? { upstreamProtocol: input.route.upstreamProtocol } : {}),
-    ...(input.route.apiKey ? { apiKey: input.route.apiKey } : {}),
-    ...(input.route.apiBaseUrl ? { baseURL: input.route.apiBaseUrl } : {}),
-    ...(input.route.requestOverrides.headers &&
-    Object.keys(input.route.requestOverrides.headers).length > 0
-      ? { headers: input.route.requestOverrides.headers }
-      : {}),
-    model: input.route.model,
-    ...(input.sessionId ? { sessionId: input.sessionId } : {}),
-    system: COMPACTION_SYSTEM_PROMPT,
-    messages,
-    maxOutputTokens: input.route.maxTokens,
-    temperature: 0,
-    requestOverrides: input.route.requestOverrides,
-    ...(input.signal ? { signal: input.signal } : {}),
-  });
+  const timeoutController = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    timeoutController.abort();
+  }, COMPACTION_LLM_TIMEOUT_MS);
+  timer.unref?.();
+  const signal: AbortSignal = input.signal
+    ? AbortSignal.any([timeoutController.signal, input.signal])
+    : timeoutController.signal;
+
+  let result: Awaited<ReturnType<typeof runUpstreamGenerate>>;
+  try {
+    result = await runUpstreamGenerate({
+      providerType: input.route.providerType ?? 'openai',
+      // Forward the resolved upstream protocol so providers configured for
+      // `anthropic_messages` / `responses` actually hit their native API
+      // surface instead of silently degrading to OpenAI Chat Completions.
+      ...(input.route.upstreamProtocol ? { upstreamProtocol: input.route.upstreamProtocol } : {}),
+      ...(input.route.apiKey ? { apiKey: input.route.apiKey } : {}),
+      ...(input.route.apiBaseUrl ? { baseURL: input.route.apiBaseUrl } : {}),
+      ...(input.route.requestOverrides.headers &&
+      Object.keys(input.route.requestOverrides.headers).length > 0
+        ? { headers: input.route.requestOverrides.headers }
+        : {}),
+      model: input.route.model,
+      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+      system: COMPACTION_SYSTEM_PROMPT,
+      messages,
+      maxOutputTokens: input.route.maxTokens,
+      temperature: 0,
+      requestOverrides: input.route.requestOverrides,
+      signal,
+    });
+  } catch (err) {
+    if (timedOut) {
+      throw new Error(`compaction LLM timeout (${COMPACTION_LLM_TIMEOUT_MS}ms)`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 
   const summary = result.text.trim();
   if (!summary) {

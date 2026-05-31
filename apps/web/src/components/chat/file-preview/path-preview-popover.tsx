@@ -93,7 +93,27 @@ export function PathPreviewPopover({
       <div className="chat-path-preview-body">
         {state.status === 'loading' && <div className="chat-path-preview-status">加载中…</div>}
         {state.status === 'error' && (
-          <div className="chat-path-preview-status chat-path-preview-error">{state.error}</div>
+          <>
+            {state.staleSnippet && (
+              <pre className="chat-path-preview-code chat-path-preview-stale">
+                {state.staleSnippet.lines.map((ln, idx) => {
+                  const lineNo = state.staleSnippet!.startLine + idx;
+                  const isHighlight = lineNo === state.staleSnippet!.highlightLine;
+                  return (
+                    <div
+                      key={lineNo}
+                      className="chat-path-preview-row"
+                      data-highlight={isHighlight ? 'true' : undefined}
+                    >
+                      <span className="chat-path-preview-lineno">{lineNo}</span>
+                      <span className="chat-path-preview-text">{ln.length === 0 ? '\u00A0' : ln}</span>
+                    </div>
+                  );
+                })}
+              </pre>
+            )}
+            <div className="chat-path-preview-status chat-path-preview-error">{state.error}</div>
+          </>
         )}
         {state.status === 'ready' && (
           <pre className="chat-path-preview-code">

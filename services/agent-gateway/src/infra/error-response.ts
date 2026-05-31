@@ -52,11 +52,11 @@ export class ApiError extends Error {
     return new ApiError(404, 'NotFound', message);
   }
 
-  static unauthorized(message = 'Unauthorized') {
+  static unauthorized(message = '未授权或登录已失效。') {
     return new ApiError(401, 'Unauthorized', message);
   }
 
-  static internal(message = 'Internal server error') {
+  static internal(message = '服务器内部错误。') {
     return new ApiError(500, 'InternalError', message);
   }
 }

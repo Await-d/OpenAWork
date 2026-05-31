@@ -1,4 +1,5 @@
 import type { ModelPriceEntry } from '@openAwork/shared-ui';
+import { inferProviderLabelFromModelId } from '@openAwork/shared-ui';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -15,31 +16,13 @@ function readFiniteNumber(record: Record<string, unknown>, key: string): number 
 }
 
 function inferProviderLabel(modelId: string): string {
+  // 由 catalog 的 modelIdPrefixes 反推，新增平台无需改这里。
+  const fromCatalog = inferProviderLabelFromModelId(modelId);
+  if (fromCatalog) {
+    return fromCatalog;
+  }
+  // 非内置平台(用户自配的第三方模型)的补充识别。
   const normalizedId = modelId.toLowerCase();
-
-  if (normalizedId.startsWith('claude')) {
-    return 'Anthropic';
-  }
-  if (
-    normalizedId.startsWith('gpt') ||
-    normalizedId.startsWith('o1') ||
-    normalizedId.startsWith('o3') ||
-    normalizedId.startsWith('o4')
-  ) {
-    return 'OpenAI';
-  }
-  if (normalizedId.startsWith('deepseek')) {
-    return 'DeepSeek';
-  }
-  if (normalizedId.startsWith('qwen')) {
-    return 'Qwen';
-  }
-  if (normalizedId.startsWith('gemini')) {
-    return 'Google';
-  }
-  if (normalizedId.startsWith('moonshot') || normalizedId.startsWith('kimi')) {
-    return 'Moonshot';
-  }
   if (normalizedId.startsWith('grok')) {
     return 'xAI';
   }
@@ -49,7 +32,6 @@ function inferProviderLabel(modelId: string): string {
   if (normalizedId.startsWith('mistral')) {
     return 'Mistral';
   }
-
   return 'Custom';
 }
 

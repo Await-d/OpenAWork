@@ -10,6 +10,11 @@ export class SQLiteSessionStore implements SessionStore {
   constructor(dbPath: string) {
     this.db = new Database(dbPath);
     this.db.pragma('journal_mode = WAL');
+    // Wait up to 5s for a competing writer to release its lock instead of
+    // throwing SQLITE_BUSY immediately. WAL allows concurrent readers but
+    // still serialises writers; without this a burst of concurrent session
+    // writes surfaces as hard errors to callers.
+    this.db.pragma('busy_timeout = 5000');
     this.db.pragma('foreign_keys = ON');
     this.migrate();
   }
@@ -147,9 +152,50 @@ interface SessionRow {
   metadata_json: string;
 }
 
+/**
+ * Parse a JSON DB column without letting a single corrupt row throw.
+ *
+ * `messages_json` / `metadata_json` are persisted via `JSON.stringify`, but a
+ * crash mid-write, a disk error, or a hand-edited DB can leave a column that
+ * is not valid JSON (or not the expected shape). In `list()` a single such row
+ * would otherwise abort `rows.map(rowToSession)` and make EVERY session
+ * unreadable — the same fail-the-whole-subsystem class fixed for the artifacts
+ * index. Degrade the bad column to a fallback and warn instead, so the session
+ * entry stays visible and the rest of the list still loads.
+ */
+function parseJsonColumn<T>(raw: string, fallback: T, context: string): T {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    console.warn(
+      `[sqlite-session-store] ${context} 列 JSON 解析失败，降级为默认值：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return fallback;
+  }
+  if (Array.isArray(fallback)) {
+    if (!Array.isArray(parsed)) {
+      console.warn(`[sqlite-session-store] ${context} 列不是数组，降级为默认值。`);
+      return fallback;
+    }
+    return parsed as T;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    console.warn(`[sqlite-session-store] ${context} 列不是对象，降级为默认值。`);
+    return fallback;
+  }
+  return parsed as T;
+}
+
 function rowToSession(row: SessionRow): ConversationSession {
-  const messages = JSON.parse(row.messages_json) as Message[];
-  const metadata = JSON.parse(row.metadata_json) as Record<string, unknown>;
+  const messages = parseJsonColumn<Message[]>(row.messages_json, [], `session ${row.id} messages`);
+  const metadata = parseJsonColumn<Record<string, unknown>>(
+    row.metadata_json,
+    {},
+    `session ${row.id} metadata`,
+  );
   return {
     id: row.id,
     createdAt: row.created_at,

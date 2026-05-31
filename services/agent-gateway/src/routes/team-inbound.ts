@@ -5,7 +5,6 @@ import { requireAuth } from '../infra/auth.js';
 import { sqliteGet } from '../infra/db.js';
 import { parseBody } from '../infra/parse-request.js';
 import { LayerCapabilityViolationError } from '../handoff/capability/layer-capabilities.js';
-import { publishTeamEvent } from '../handoff/bus/team-events-bus.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { logTeamAudit, type TeamAuditAction } from '../team/team-audit-store.js';
 
@@ -28,22 +27,34 @@ const inboundSubmitSchema = z.object({
   expiresAt: z.number().int().positive().optional(),
 });
 
-const INBOUND_EVENT_PREVIEW_MAX_LENGTH = 160;
+const dismissClarificationSchema = z.object({
+  answeredAt: z.number().int().positive().optional(),
+});
 
-function buildInboundTextPreview(
-  messageType: string,
-  payload: Record<string, unknown> | undefined,
-): string | null {
-  if (messageType !== 'user_input' && messageType !== 'clarification_answer') {
-    return null;
-  }
-  const text = typeof payload?.['text'] === 'string' ? payload['text'].trim() : '';
-  if (text.length === 0) {
-    return null;
-  }
-  return text.length > INBOUND_EVENT_PREVIEW_MAX_LENGTH
-    ? `${text.slice(0, INBOUND_EVENT_PREVIEW_MAX_LENGTH)}...`
-    : text;
+type TeamInboundRouteErrorCode =
+  | 'team_session_not_found'
+  | 'team_clarification_not_found'
+  | 'team_inbound_capability_violation'
+  | 'team_inbound_submit_failed'
+  | 'team_clarification_dismiss_failed';
+
+const TEAM_INBOUND_ROUTE_ERROR_MESSAGES: Record<TeamInboundRouteErrorCode, string> = {
+  team_session_not_found: '目标团队会话不存在。',
+  team_clarification_not_found: '目标澄清问题不存在。',
+  team_inbound_capability_violation: '当前层级不允许接收该消息。',
+  team_inbound_submit_failed: '提交团队反向消息失败。',
+  team_clarification_dismiss_failed: '忽略澄清问题失败。',
+};
+
+function teamInboundRouteErrorPayload(
+  code: TeamInboundRouteErrorCode,
+  extra?: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    code,
+    error: TEAM_INBOUND_ROUTE_ERROR_MESSAGES[code],
+    ...(extra ?? {}),
+  };
 }
 
 export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
@@ -79,7 +90,7 @@ export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
       if (!session) {
         sessionStep.fail('session not found');
         step.fail('session not found');
-        return reply.status(404).send({ error: 'Session not found' });
+        return reply.status(404).send(teamInboundRouteErrorPayload('team_session_not_found'));
       }
       sessionStep.succeed();
 
@@ -103,29 +114,36 @@ export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
           clientIdempotencyKey: body.clientIdempotencyKey ?? null,
           ...(expiresAtIso ? { expiresAt: expiresAtIso } : {}),
         });
+
+        if (body.messageType === 'clarification_answer') {
+          const questionId =
+            typeof body.payload?.['questionId'] === 'string' ? body.payload['questionId'] : null;
+          const answer = typeof body.payload?.['answer'] === 'string' ? body.payload['answer'] : null;
+          const answeredAt =
+            typeof body.payload?.['answeredAt'] === 'number' ? body.payload['answeredAt'] : Date.now();
+          if (questionId && answer) {
+            try {
+              const {
+                resolveClarificationEscalationRequest,
+              } = await import('../handoff/store/inbound-store.js');
+              resolveClarificationEscalationRequest({
+                answer,
+                answeredAt,
+                questionId,
+                status: 'answered',
+                userId: user.sub,
+              });
+            } catch (err) {
+              console.warn(
+                `[team.session.inbound] resolve clarification(answered) failed: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            }
+          }
+        }
         submitStep.succeed(undefined, {
           messageId: result.record.id,
           reused: result.reused,
         });
-
-        if (!result.reused) {
-          const textPreview = buildInboundTextPreview(body.messageType, body.payload);
-          publishTeamEvent({
-            type: 'session.inbound.submitted',
-            sessionId,
-            layer: result.record.fromRoleLayer,
-            timestamp: Date.now(),
-            payload: {
-              messageId: result.record.id,
-              toSessionId: result.record.toSessionId,
-              messageType: result.record.messageType,
-              fromRoleLayer: result.record.fromRoleLayer,
-              reused: false,
-              ...(textPreview ? { textPreview } : {}),
-            },
-            userId: user.sub,
-          });
-        }
 
         const isEscapeHatch =
           body.messageType === 'cancel_signal' ||
@@ -204,6 +222,12 @@ export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
             }
           }
 
+          // 注意：不再在此处提前把 teamInit 标记为 skipped。
+          // 周全性补强（§auto-init）：是否需要自动初始化由 orchestrateReceptionInput
+          // 在 orchestrate 路径内部决定——只有判定为真任务时才先自动跑完初始化，
+          // 闲聊 / 问候（direct/clarify）不触发，避免无谓等待。初始化产物会在
+          // 编排内部从最新 teamInit 重新构建 context 注入，无需在这里拼。
+
           void (async () => {
             try {
               const { orchestrateReceptionInput } =
@@ -231,7 +255,7 @@ export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
           const { recordLatency } = await import('../handoff/bus/latency-monitor.js');
           const requestStartMs = (request as unknown as { startTime?: number }).startTime;
           if (typeof requestStartMs === 'number') {
-            recordLatency('a_to_b_ack', Date.now() - requestStartMs);
+            recordLatency('a_to_b_ack', Date.now() - requestStartMs, user.sub);
           }
         } catch (err) {
           void err;
@@ -246,9 +270,69 @@ export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
         submitStep.fail(reason);
         step.fail(reason);
         if (err instanceof LayerCapabilityViolationError) {
-          return reply.status(400).send({ error: reason });
+          return reply.status(400).send(
+            teamInboundRouteErrorPayload('team_inbound_capability_violation', {
+              detail: reason,
+            }),
+          );
         }
-        return reply.status(500).send({ error: reason });
+        request.log.error({ err }, '[team.session.inbound] submit failed');
+        return reply.status(500).send(teamInboundRouteErrorPayload('team_inbound_submit_failed'));
+      }
+    },
+  );
+
+  app.post(
+    '/team/sessions/:sessionId/clarifications/:questionId/dismiss',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'team.session.clarification.dismiss');
+      const user = request.user as JwtPayload;
+      const { sessionId, questionId } = request.params as { questionId: string; sessionId: string };
+
+      const sessionStep = child('resolve-session');
+      const session = sqliteGet<{ id: string; user_id: string }>(
+        `SELECT id, user_id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1`,
+        [sessionId, user.sub],
+      );
+      if (!session) {
+        sessionStep.fail('session not found');
+        step.fail('session not found');
+        return reply.status(404).send(teamInboundRouteErrorPayload('team_session_not_found'));
+      }
+      sessionStep.succeed();
+
+      const parseStep = child('parse-body');
+      const body = parseBody(dismissClarificationSchema, request.body ?? {});
+      parseStep.succeed();
+
+      const dismissStep = child('dismiss-clarification');
+      try {
+        const { resolveClarificationEscalationRequest } = await import('../handoff/store/inbound-store.js');
+        const resolved = resolveClarificationEscalationRequest({
+          answeredAt: body.answeredAt ?? Date.now(),
+          questionId,
+          status: 'dismissed',
+          userId: user.sub,
+        });
+        if (!resolved) {
+          dismissStep.fail('clarification not found');
+          step.fail('clarification not found');
+          return reply
+            .status(404)
+            .send(teamInboundRouteErrorPayload('team_clarification_not_found'));
+        }
+        dismissStep.succeed(undefined, { messageId: resolved.id });
+        step.succeed(undefined, { questionId, sessionId });
+        return reply.status(200).send({ ok: true });
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : 'dismiss clarification failed';
+        dismissStep.fail(reason);
+        step.fail(reason);
+        request.log.error({ err }, '[team.session.clarification.dismiss] failed');
+        return reply
+          .status(500)
+          .send(teamInboundRouteErrorPayload('team_clarification_dismiss_failed'));
       }
     },
   );

@@ -2,6 +2,7 @@ import { parse as parseYaml } from 'yaml';
 import type { SkillManifest } from '@openAwork/skill-types';
 import type { InstallOptions, InstalledSkillRecord, SkillEntry } from '../types.js';
 import { SkillInstaller } from '../installer.js';
+import { readResponseTextWithLimit } from '../http.js';
 
 export interface WatchHandle {
   stop: () => void;
@@ -94,9 +95,10 @@ export class LocalInstaller {
     const fileUrl = `file://${manifestPath}`;
     const response = await this.fetchFn(fileUrl);
     if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined);
       throw new Error(`Cannot read skill.yaml at: ${manifestPath}`);
     }
-    const raw = await response.text();
+    const raw = await readResponseTextWithLimit(response);
     const parsed = parseYaml(raw);
     if (typeof parsed !== 'object' || parsed === null) {
       throw new Error(`Invalid skill.yaml at: ${manifestPath}`);

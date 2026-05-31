@@ -11,28 +11,21 @@ import {
   describeReasoningEffort,
   getSupportedReasoningEffortsForModel,
 } from './model-reasoning-support.js';
+import {
+  resolveProviderVisual,
+  lookupProviderEntry,
+  getProviderUiList,
+} from './provider-catalog-ui.js';
+import type { ProviderUpstreamVariantUi } from './provider-catalog-ui.js';
 import { ModelManager } from './ModelManager.js';
+import type { ProviderModelTestResult } from './ModelManager.js';
 import type { SupportedReasoningEffort } from './model-reasoning-support.js';
-import { buildFilteredModelGroups } from './model-picker-search.js';
-
-const PROVIDER_LOGO_URL: Record<string, string> = {
-  anthropic: '/logo-anthropic.svg',
-  claude: '/logo-claude.svg',
-  openai: '/logo-openai.svg',
-  gemini: '/logo-gemini.svg',
-  googlegemini: '/logo-gemini.svg',
-  ollama: '/logo-ollama.svg',
-  openrouter: '/logo-openrouter.svg',
-  deepseek: '/logo-deepseek.svg',
-  moonshot: '/logo-moonshot.svg',
-  qwen: '/logo-qwen.svg',
-  mistralai: '/logo-mistralai.svg',
-  mistral: '/logo-mistralai.svg',
-};
+import { buildFilteredModelGroups, compareModelsByName } from './model-picker-search.js';
 
 function ProviderLogo({ type, size = 28 }: { type: string; size?: number }) {
-  const key = type.toLowerCase();
-  const url = PROVIDER_LOGO_URL[key];
+  const visual = resolveProviderVisual({ providerType: type });
+  const url = visual.logoUrl;
+  const glyph = visual.fallbackGlyph ?? type.slice(0, 2);
   return (
     <div
       style={{
@@ -51,7 +44,7 @@ function ProviderLogo({ type, size = 28 }: { type: string; size?: number }) {
       {url ? (
         <img
           src={url}
-          alt={key}
+          alt={type}
           width={Math.round(size * 0.72)}
           height={Math.round(size * 0.72)}
           style={{ objectFit: 'contain', filter: 'var(--provider-logo-filter, none)' }}
@@ -68,7 +61,7 @@ function ProviderLogo({ type, size = 28 }: { type: string; size?: number }) {
             textTransform: 'uppercase',
           }}
         >
-          {key.slice(0, 2)}
+          {glyph}
         </span>
       )}
     </div>
@@ -163,6 +156,15 @@ export interface ProviderSettingsProps {
   onAddModel?: (providerId: string, model: AIModelConfigRef) => void;
   onRemoveModel?: (providerId: string, modelId: string) => void;
   onUpdateModel?: (providerId: string, modelId: string, updates: Partial<AIModelConfigRef>) => void;
+  /** 连通性自检回调：对指定 provider+模型发起最小化上游调用并返回结果。 */
+  onTestModel?: (providerId: string, modelId: string) => Promise<ProviderModelTestResult>;
+  /** 手动从 models.dev 同步内置模型目录（透传给每个 provider 的 ModelManager）。 */
+  onSyncCatalog?: () => Promise<{
+    ok: boolean;
+    providerCount?: number;
+    modelCount?: number;
+    message?: string;
+  }>;
   style?: CSSProperties;
 }
 
@@ -251,6 +253,21 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
     setForm((prev) => ({ ...prev, [field]: value }));
   }
 
+  // 当前所选平台类型在 catalog 里的条目(用于上游变体快捷填充与显示名)。
+  const catalogEntry = useMemo(() => lookupProviderEntry(form.type), [form.type]);
+  const upstreamVariants = catalogEntry?.upstreams ?? [];
+
+  /** 选择一个上游变体：自动填好 baseUrl + 协议，避免手填错端点(如 MiMo 双上游)。 */
+  function applyUpstreamVariant(variant: ProviderUpstreamVariantUi) {
+    setForm((prev) => ({
+      ...prev,
+      baseUrl: variant.baseUrl,
+      upstreamProtocol: variant.protocol,
+    }));
+  }
+
+  const catalogOptions = useMemo(() => getProviderUiList(), []);
+
   const formWrap: CSSProperties = {
     background: 'var(--bg-raised)',
     border: '1px solid var(--accent)',
@@ -293,16 +310,86 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
           <label htmlFor="pf-type" style={labelStyle}>
             类型
           </label>
-          <input
-            id="pf-type"
-            style={{ ...inputStyle, opacity: isNew ? 1 : 0.6 }}
-            value={form.type}
-            onChange={(e) => set('type', e.target.value)}
-            placeholder="openai / anthropic …"
-            disabled={!isNew}
-          />
+          {isNew ? (
+            // 新增时从 catalog 选择平台类型(也允许自定义)，选后自动带出默认名/上游。
+            <select
+              id="pf-type"
+              style={inputStyle}
+              value={form.type}
+              onChange={(e) => {
+                const nextType = e.target.value;
+                const entry = lookupProviderEntry(nextType);
+                const defaultUpstream =
+                  entry?.upstreams?.find((u) => u.isDefault) ?? entry?.upstreams?.[0];
+                setForm((prev) => ({
+                  ...prev,
+                  type: nextType,
+                  // 名称未改过时带出平台默认显示名，便于多实例区分时再手动改。
+                  name:
+                    prev.name.trim().length === 0 || prev.name === prev.type
+                      ? (entry?.displayName ?? nextType)
+                      : prev.name,
+                  ...(defaultUpstream
+                    ? {
+                        baseUrl: defaultUpstream.baseUrl,
+                        upstreamProtocol: defaultUpstream.protocol,
+                      }
+                    : {}),
+                }));
+              }}
+            >
+              {catalogOptions.map((entry) => (
+                <option key={entry.type} value={entry.type}>
+                  {entry.displayName}
+                </option>
+              ))}
+              <option value="custom">自定义 (custom)</option>
+            </select>
+          ) : (
+            <input
+              id="pf-type"
+              style={{ ...inputStyle, opacity: 0.6 }}
+              value={form.type}
+              placeholder="openai / anthropic …"
+              disabled
+            />
+          )}
         </div>
       </div>
+      {upstreamVariants.length > 1 ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span style={labelStyle}>上游入口（该平台提供多个，选择后自动填充地址与协议）</span>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {upstreamVariants.map((variant) => {
+              const active =
+                form.baseUrl === variant.baseUrl &&
+                (form.upstreamProtocol ?? undefined) === (variant.protocol ?? undefined);
+              return (
+                <button
+                  key={`${variant.label}-${variant.baseUrl}`}
+                  type="button"
+                  onClick={() => applyUpstreamVariant(variant)}
+                  style={{
+                    border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+                    borderRadius: 999,
+                    padding: '0.3rem 0.7rem',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    color: active ? 'var(--accent)' : 'var(--fg-default)',
+                    background: active
+                      ? 'var(--accent-muted, rgba(99, 102, 241, 0.12))'
+                      : 'var(--bg-overlay)',
+                  }}
+                  title={variant.baseUrl}
+                >
+                  {variant.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
       <div style={row}>
         <div style={col}>
           <label htmlFor="pf-apikey" style={labelStyle}>
@@ -422,6 +509,8 @@ export function ProviderSettings({
   onAddModel,
   onRemoveModel,
   onUpdateModel,
+  onTestModel,
+  onSyncCatalog,
   style,
 }: ProviderSettingsProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -597,7 +686,9 @@ export function ProviderSettings({
     const searchGroups = showingSearchResults
       ? buildFilteredModelGroups(visibleProvider ? [visibleProvider] : [], search)
       : [];
-    const visibleModels = showingSearchResults ? [] : (visibleProvider?.defaultModels ?? []);
+    const visibleModels = showingSearchResults
+      ? []
+      : [...(visibleProvider?.defaultModels ?? [])].sort(compareModelsByName);
     const contextLabel = formatContextWindow(selectedModel?.contextWindow);
     const thinkingMode: keyof ThinkingDefaultsRef | null = mode === 'image' ? null : mode;
 
@@ -1454,6 +1545,8 @@ export function ProviderSettings({
                         onAddModel={onAddModel}
                         onRemoveModel={onRemoveModel}
                         onUpdateModel={onUpdateModel}
+                        {...(onTestModel ? { onTestModel } : {})}
+                        {...(onSyncCatalog ? { onSyncCatalog } : {})}
                       />
                     </div>
                   </div>

@@ -5,7 +5,15 @@
  * - GET `/usage/breakdown` → `{ monthlyCostUsd, breakdown }`，本月费用按模型拆分。
  */
 
-import { authHeader, expectJson } from '../gateway/http.js';
+import {
+  authHeader,
+  extractJsonErrorMessage,
+  HttpError,
+  isGenericFetchErrorMessage,
+  readJsonErrorData,
+  type JsonErrorData,
+  fetchWithTimeout,
+} from '../gateway/http.js';
 
 export interface UsageMonthlyRecord {
   month: string;
@@ -37,22 +45,86 @@ export interface UsageClient {
   getBreakdown(token: string, options?: { signal?: AbortSignal }): Promise<UsageBreakdownResponse>;
 }
 
+function buildUsageActionErrorMessage(
+  actionLabel: string,
+  status: number,
+  data: JsonErrorData | undefined,
+): string {
+  const extracted = extractJsonErrorMessage(data);
+  if (extracted) {
+    return extracted;
+  }
+  if (status === 401 || status === 403) {
+    return `认证失效或当前账号无权${actionLabel}。`;
+  }
+  if (status === 404) {
+    return `目标用量资源不存在，无法${actionLabel}。`;
+  }
+  if (status === 409) {
+    return `当前状态不允许${actionLabel}。`;
+  }
+  return `${actionLabel}失败（HTTP ${status}）。`;
+}
+
+function normalizeUsageError(actionLabel: string, error: unknown): Error {
+  if (error instanceof HttpError) {
+    const extracted = extractJsonErrorMessage((error.data ?? undefined) as JsonErrorData | undefined);
+    if (extracted) {
+      return new HttpError(extracted, error.status, error.data);
+    }
+    return error;
+  }
+  if (error instanceof Error) {
+    const message = error.message.trim();
+    if (message.length > 0 && !isGenericFetchErrorMessage(message)) {
+      return error;
+    }
+  }
+  return new Error(`网络异常，${actionLabel}失败。`);
+}
+
+async function performUsageRequest<T>(input: {
+  actionLabel: string;
+  request: () => Promise<Response>;
+}): Promise<T> {
+  try {
+    const response = await input.request();
+    if (!response.ok) {
+      const data = await readJsonErrorData<JsonErrorData>(response);
+      throw new HttpError(
+        buildUsageActionErrorMessage(input.actionLabel, response.status, data),
+        response.status,
+        data,
+      );
+    }
+    return (await response.json()) as T;
+  } catch (error) {
+    throw normalizeUsageError(input.actionLabel, error);
+  }
+}
+
 export function createUsageClient(baseUrl: string): UsageClient {
   return {
     async getRecords(token, options) {
-      const response = await fetch(`${baseUrl}/usage/records`, {
-        headers: authHeader(token),
-        signal: options?.signal,
+      return performUsageRequest<UsageRecordsResponse>({
+        actionLabel: '读取用量记录',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/usage/records`, {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
       });
-      return expectJson<UsageRecordsResponse>(response, 'getUsageRecords');
     },
 
     async getBreakdown(token, options) {
-      const response = await fetch(`${baseUrl}/usage/breakdown`, {
-        headers: authHeader(token),
-        signal: options?.signal,
+      return performUsageRequest<UsageBreakdownResponse>({
+        actionLabel: '读取用量拆分',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/usage/breakdown`, {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
       });
-      return expectJson<UsageBreakdownResponse>(response, 'getUsageBreakdown');
     },
   };
 }

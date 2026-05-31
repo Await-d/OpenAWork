@@ -47,6 +47,7 @@ const MOBILE_CALLBACK_PREFIX = 'myapp://mcp/oauth/callback';
 export class DesktopLocalhostCallbackHandler implements OAuthCallbackHandler {
   private server: http.Server | null = null;
   private port = 0;
+  private timeoutTimer: ReturnType<typeof setTimeout> | null = null;
 
   async openAuthUrl(url: string): Promise<void> {
     const { exec } = await import('child_process');
@@ -82,7 +83,7 @@ export class DesktopLocalhostCallbackHandler implements OAuthCallbackHandler {
       this.server.listen(0, '127.0.0.1', () => {
         this.port = (this.server!.address() as AddressInfo).port;
       });
-      setTimeout(() => {
+      this.timeoutTimer = setTimeout(() => {
         this.dispose();
         reject(new Error('OAuth callback timed out'));
       }, timeoutMs);
@@ -94,6 +95,10 @@ export class DesktopLocalhostCallbackHandler implements OAuthCallbackHandler {
   }
 
   dispose(): void {
+    if (this.timeoutTimer) {
+      clearTimeout(this.timeoutTimer);
+      this.timeoutTimer = null;
+    }
     if (this.server) {
       this.server.close();
       this.server = null;
@@ -104,6 +109,7 @@ export class DesktopLocalhostCallbackHandler implements OAuthCallbackHandler {
 export class MobileDeepLinkCallbackHandler implements OAuthCallbackHandler {
   private resolvers = new Map<string, (code: string) => void>();
   private rejecters = new Map<string, (err: Error) => void>();
+  private timers = new Map<string, ReturnType<typeof setTimeout>>();
 
   async openAuthUrl(url: string): Promise<void> {
     throw new Error(
@@ -115,11 +121,13 @@ export class MobileDeepLinkCallbackHandler implements OAuthCallbackHandler {
     return new Promise((resolve, reject) => {
       this.resolvers.set(expectedState, resolve);
       this.rejecters.set(expectedState, reject);
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         this.rejecters.get(expectedState)?.(new Error('OAuth deep link timed out'));
+        this.clearState(expectedState);
         this.resolvers.delete(expectedState);
         this.rejecters.delete(expectedState);
       }, timeoutMs);
+      this.timers.set(expectedState, timer);
     });
   }
 
@@ -137,11 +145,24 @@ export class MobileDeepLinkCallbackHandler implements OAuthCallbackHandler {
     } else {
       this.resolvers.get(state)?.(code);
     }
+    this.clearState(state);
     this.resolvers.delete(state);
     this.rejecters.delete(state);
   }
 
+  private clearState(state: string): void {
+    const timer = this.timers.get(state);
+    if (timer) {
+      clearTimeout(timer);
+      this.timers.delete(state);
+    }
+  }
+
   dispose(): void {
+    for (const timer of this.timers.values()) {
+      clearTimeout(timer);
+    }
+    this.timers.clear();
     this.resolvers.clear();
     this.rejecters.clear();
   }

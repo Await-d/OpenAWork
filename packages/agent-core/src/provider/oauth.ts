@@ -1,5 +1,12 @@
 import type { OAuthConfig } from './types.js';
 
+/**
+ * Cap on OAuth token endpoint round-trips (exchange / refresh / revoke).
+ * Without it a hung authorization server would leave the provider auth
+ * flow pending indefinitely.
+ */
+const OAUTH_HTTP_TIMEOUT_MS = 15_000;
+
 export interface OAuthTokens {
   accessToken: string;
   refreshToken?: string;
@@ -213,6 +220,7 @@ export class OAuthFlowManagerImpl implements OAuthFlowManager {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams(body).toString(),
+        signal: AbortSignal.timeout(OAUTH_HTTP_TIMEOUT_MS),
       });
 
       if (!response.ok) {
@@ -258,6 +266,7 @@ export class OAuthFlowManagerImpl implements OAuthFlowManager {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams(body).toString(),
+      signal: AbortSignal.timeout(OAUTH_HTTP_TIMEOUT_MS),
     });
 
     if (!response.ok) {

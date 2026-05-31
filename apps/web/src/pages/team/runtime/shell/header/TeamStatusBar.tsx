@@ -75,6 +75,7 @@ const LAYER_COLORS: Record<TeamRoleLayer, string> = {
   pm1: 'var(--chart-5)',
   pm2: 'var(--chart-5)',
   executor: 'var(--success)',
+  tester: 'var(--aux)',
   reviewer: 'var(--warning)',
 };
 

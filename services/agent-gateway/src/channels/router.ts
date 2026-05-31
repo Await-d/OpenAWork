@@ -10,6 +10,7 @@ import { listSessionMessagesV2 } from '../message/message-v2-adapter.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
 import { runSessionInBackground } from '../routes/stream-runtime.js';
 import { AutoReplyPipeline } from './auto-reply.js';
+import { createPartialTextQueue } from './partial-text-queue.js';
 import { resolveSendableChannel } from './channel-access.js';
 import { CHANNEL_DESCRIPTORS } from './descriptors.js';
 import { createDingTalkService } from './dingtalk.js';
@@ -164,19 +165,17 @@ const autoReply = new AutoReplyPipeline({
     });
     const clientRequestId = randomUUID();
     let partialText = '';
-    let partialUpdateQueue = Promise.resolve();
-
-    const pushPartialText = (text: string): void => {
-      if (!onPartialText || text.trim().length === 0) {
-        return;
-      }
-
-      partialUpdateQueue = partialUpdateQueue
-        .catch(() => undefined)
-        .then(async () => {
-          await onPartialText(text);
+    // 部分更新是装饰性的流式中间态，失败绝不能回退一次已成功完成的运行。
+    // 串行队列内部已吞掉单次失败，flush() 恒 resolve。详见 partial-text-queue.ts。
+    const partialUpdates = createPartialTextQueue({
+      onPartialText,
+      onError: (err) => {
+        console.warn('[channels] 部分流式更新发送失败（忽略，不影响最终回复）', {
+          pluginId,
+          error: err instanceof Error ? err.message : String(err),
         });
-    };
+      },
+    });
 
     const result = await runSessionInBackground({
       sessionId,
@@ -192,11 +191,11 @@ const autoReply = new AutoReplyPipeline({
         }
 
         partialText += chunk.delta;
-        pushPartialText(partialText);
+        partialUpdates.push(partialText);
       },
     });
 
-    await partialUpdateQueue;
+    await partialUpdates.flush();
 
     const latestAssistantMessage = listSessionMessagesV2({
       sessionId,

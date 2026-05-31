@@ -13,7 +13,7 @@ import { ApiError } from './error-response.js';
 export function parseBody<T extends ZodType>(schema: T, body: unknown): ZodInfer<T> {
   const result = schema.safeParse(body);
   if (!result.success) {
-    throw ApiError.badRequest('Invalid request body', {
+    throw ApiError.badRequest('请求体参数无效。', {
       kind: 'Body',
       issues: result.error.issues,
     });
@@ -27,7 +27,7 @@ export function parseBody<T extends ZodType>(schema: T, body: unknown): ZodInfer
 export function parseQuery<T extends ZodType>(schema: T, query: unknown): ZodInfer<T> {
   const result = schema.safeParse(query);
   if (!result.success) {
-    throw ApiError.badRequest('Invalid query parameters', {
+    throw ApiError.badRequest('查询参数无效。', {
       kind: 'Query',
       issues: result.error.issues,
     });
@@ -41,7 +41,7 @@ export function parseQuery<T extends ZodType>(schema: T, query: unknown): ZodInf
 export function parseParams<T extends ZodType>(schema: T, params: unknown): ZodInfer<T> {
   const result = schema.safeParse(params);
   if (!result.success) {
-    throw ApiError.badRequest('Invalid path parameters', {
+    throw ApiError.badRequest('路径参数无效。', {
       kind: 'Params',
       issues: result.error.issues,
     });

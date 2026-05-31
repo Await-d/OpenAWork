@@ -90,6 +90,24 @@ describe('buildProviderOptions', () => {
     expect(options).toBeUndefined();
   });
 
+  it('emits mimo.body.thinking enabled for mimo models', () => {
+    const options = buildProviderOptions({
+      thinking: { ...baseThinking, providerType: 'mimo', enabled: true },
+      model: 'mimo-v2.5-pro',
+    });
+    const oc = options?.['mimo'] as { body?: Record<string, unknown> } | undefined;
+    expect(oc?.body).toEqual({ thinking: { type: 'enabled' } });
+  });
+
+  it('emits mimo.body.thinking disabled when thinking is turned off', () => {
+    const options = buildProviderOptions({
+      thinking: { ...baseThinking, providerType: 'mimo', enabled: false },
+      model: 'mimo-v2.5',
+    });
+    const oc = options?.['mimo'] as { body?: Record<string, unknown> } | undefined;
+    expect(oc?.body).toEqual({ thinking: { type: 'disabled' } });
+  });
+
   it('returns undefined for unrecognised providerType', () => {
     const options = buildProviderOptions({
       thinking: { ...baseThinking, providerType: 'unknown-vendor' },

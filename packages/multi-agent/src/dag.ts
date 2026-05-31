@@ -39,8 +39,25 @@ export class DAGRunner {
 
   emit(dagId: string, event: DAGEvent): void {
     const handlers = this.eventHandlers.get(dagId);
-    if (handlers) {
-      for (const h of handlers) h(event);
+    if (!handlers) {
+      return;
+    }
+    // Per-subscriber fault isolation: a throwing handler (e.g. a closed
+    // SSE/WS socket whose write rejects, or a buggy listener) must not abort
+    // delivery to the remaining subscribers nor bubble back into the
+    // orchestration loop that called `emit` (several emits — notably the
+    // terminal `dag_completed` — run inside `executeDAG`). Snapshot the set so
+    // a handler that unsubscribes itself mid-dispatch can't shift iteration.
+    for (const h of [...handlers]) {
+      try {
+        h(event);
+      } catch (err) {
+        console.warn(
+          `[multi-agent] DAG event handler threw, isolating: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
     }
   }
 
@@ -69,6 +86,72 @@ export class DAGRunner {
       if (!depsSatisfied) return false;
       return this.isSequentiallyReleased(dag, incomingEdges);
     });
+  }
+
+  /**
+   * Resolve pending nodes that can never become ready to a terminal state.
+   *
+   * The executor awaits every dispatched batch (`Promise.allSettled`), so at
+   * the point this is called no node is mid-flight. Any pending node whose
+   * incoming-edge sources are all terminal (completed / failed / skipped) yet
+   * still isn't ready is permanently blocked — without resolving it the
+   * executor's "no ready nodes but not all done" branch would spin forever.
+   *
+   * Classification:
+   * - blocked by a `failed` (or missing) upstream → mark `failed`, so the
+   *   failure propagates down the dependency chain and the DAG ends `failed`.
+   * - blocked only because a conditional branch wasn't taken (all upstreams
+   *   succeeded) → mark `skipped`, so a not-taken branch doesn't fail the DAG.
+   *
+   * Runs to a fixpoint so a freshly-failed node cascades to its descendants
+   * within a single call. Returns true if any node changed.
+   */
+  resolveStuckNodes(dagId: string): boolean {
+    const dag = this.dags.get(dagId);
+    if (!dag) return false;
+
+    let changedAny = false;
+    let changedThisPass = true;
+    while (changedThisPass) {
+      changedThisPass = false;
+      const readyIds = new Set(this.getReadyNodes(dagId).map((node) => node.id));
+      for (const node of dag.nodes) {
+        if (node.status !== 'pending') continue;
+        if (readyIds.has(node.id)) continue;
+
+        const incomingEdges = dag.edges.filter((edge) => edge.target === node.id);
+        const allSourcesTerminal = incomingEdges.every((edge) => {
+          const source = dag.nodes.find((candidate) => candidate.id === edge.source);
+          return (
+            !source ||
+            source.status === 'completed' ||
+            source.status === 'failed' ||
+            source.status === 'skipped'
+          );
+        });
+        // A non-terminal upstream may still unblock this node; leave it pending.
+        if (!allSourcesTerminal) continue;
+
+        const failedUpstream = incomingEdges.some((edge) => {
+          const source = dag.nodes.find((candidate) => candidate.id === edge.source);
+          return !source || source.status === 'failed';
+        });
+        const nextStatus: DAGNodeStatus = failedUpstream ? 'failed' : 'skipped';
+        this.updateNodeStatus(dagId, node.id, nextStatus);
+        if (nextStatus === 'failed') {
+          this.emit(dagId, {
+            type: 'node_failed',
+            nodeId: node.id,
+            error: 'Upstream dependency failed; node could not run',
+            timestamp: Date.now(),
+            ...toRuntimeRoleMetadata(node),
+          });
+        }
+        changedThisPass = true;
+        changedAny = true;
+      }
+    }
+    return changedAny;
   }
 
   async executeWithRetry(

@@ -632,7 +632,7 @@ export function DevtoolsTabContent({
               style={{
                 borderRadius: 999,
                 padding: '3px 8px',
-                background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base)',
+                background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base))',
                 border: '1px solid var(--border-default)',
                 fontSize: 11,
                 color: item.color,
@@ -646,7 +646,7 @@ export function DevtoolsTabContent({
             style={{
               borderRadius: 999,
               padding: '3px 8px',
-              background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base)',
+              background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base))',
               border: '1px solid var(--border-default)',
               fontSize: 11,
               color: 'var(--fg-default)',
@@ -659,7 +659,7 @@ export function DevtoolsTabContent({
             style={{
               borderRadius: 999,
               padding: '3px 8px',
-              background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base)',
+              background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base))',
               border: '1px solid var(--border-default)',
               fontSize: 11,
               color: workerErrors > 0 ? 'var(--danger)' : 'var(--fg-default)',

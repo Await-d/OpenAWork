@@ -15,6 +15,7 @@ import {
   createSshClient,
   createUsageClient,
 } from '@openAwork/web-client';
+import type { SSHDialogEntry } from '@openAwork/web-client';
 import {
   buildDevEventsFromLogs,
   createInitialDevtoolsSourceStates,
@@ -46,7 +47,9 @@ import type {
   SSHConnectionEntry,
   FileTreeNode,
   ArtifactItem,
+  ProviderCatalogUiEntry,
 } from '@openAwork/shared-ui';
+import { hydrateProviderCatalogUi } from '@openAwork/shared-ui';
 import { ConnectionTabContent } from './connection/connection-tab-content.js';
 import { ChannelsTabContent } from './channels/channels-tab-content.js';
 import { DevtoolsTabContent } from './devtools/devtools-tab-content.js';
@@ -55,6 +58,7 @@ import {
   isTauri,
   normalizeActiveSelectionProviders,
   parseStructuredPayload,
+  resolveSshDialogRestore,
   SETTINGS_LAYOUT_MAX_WIDTH,
   SETTINGS_TAB_CONTENT_GAP,
   SETTINGS_TAB_NAV_WIDTH,
@@ -309,6 +313,11 @@ export default function SettingsPage({ onCheckDesktopUpdates }: SettingsPageProp
   const [sshNodes, setSshNodes] = useState<FileTreeNode[]>([]);
   const [sshPreview, setSshPreview] = useState<(ArtifactItem & { content?: string }) | null>(null);
   const [activeSSHConnectionId, setActiveSSHConnectionId] = useState<string | null>(null);
+  const [sshDialogs, setSshDialogs] = useState<SSHDialogEntry[]>([]);
+  // 「最近 SSH 对话」是否已从网关拉取完成（成功或降级为空都算就绪）。恢复
+  // effect 必须等这个标志为 true 再决策，否则 dialogs 还没到达就会被 fallback
+  // 抢先锁死 restoredRef，导致永远恢复不到上次的对话。
+  const [sshDialogsReady, setSshDialogsReady] = useState(false);
   const devLogsRef = useRef<SettingsDevLogRecord[]>(devLogs);
   const workersRef = useRef<WorkerEntry[]>(workers);
   const diagnosticsRef = useRef<SettingsDiagnosticRecord[]>(diagnostics);
@@ -563,10 +572,21 @@ export default function SettingsPage({ onCheckDesktopUpdates }: SettingsPageProp
     });
 
     try {
-      const nextConnections = (await createSshClient(gatewayUrl).list(
+      const sshClient = createSshClient(gatewayUrl);
+      const nextConnections = (await sshClient.list(
         token,
       )) as unknown as SSHConnectionEntry[];
       setSshConnections(nextConnections);
+      // 同步拉取「最近 SSH 对话」用于恢复面板;旧网关未注册该端点时静默降级为空列表。
+      void sshClient
+        .listDialogs(token)
+        .then((dialogs) => setSshDialogs(dialogs))
+        .catch((error: unknown) => {
+          // 旧网关无该端点时降级为空列表，但仍要置位就绪标志，否则恢复
+          // effect 会一直等待、永远走不到 fallback。
+          logger.warn('failed to load ssh dialogs', error);
+        })
+        .finally(() => setSshDialogsReady(true));
       updateDevtoolsSourceState('sshConnections', {
         status: nextConnections.length > 0 ? 'healthy' : 'empty',
         detail:
@@ -631,6 +651,18 @@ export default function SettingsPage({ onCheckDesktopUpdates }: SettingsPageProp
       gatewayUrl,
     );
     const githubClient = createGitHubClient(gatewayUrl);
+
+    // 用网关 catalog(单一事实来源)刷新前端 UI 注册表，使新增平台的 logo/名称/
+    // 上游变体无需改前端即可显示。失败时静默回退到内置静态兜底。
+    void settingsClient
+      .getProviderCatalog(token)
+      .then((data) => {
+        const entries = (data as { catalog?: ProviderCatalogUiEntry[] }).catalog;
+        if (entries) {
+          hydrateProviderCatalogUi(entries);
+        }
+      })
+      .catch(() => undefined);
 
     void settingsClient
       .getProviders(token)
@@ -1045,14 +1077,32 @@ export default function SettingsPage({ onCheckDesktopUpdates }: SettingsPageProp
   function handleAddProvider(data?: ProviderEditData) {
     if (!data) return;
     setProviders((prev) => {
-      const existingTemplate =
-        data.type === 'custom' ? undefined : prev.find((provider) => provider.type === data.type);
+      const takenIds = new Set(prev.map((provider) => provider.id));
+      // 稳定且不重排的 id：会话以 providerId 作为外键，删除中间实例不能让其它
+      // 实例的 id 漂移，因此用 UUID 后缀而非基于当前列表的序号。
+      const makeStableId = (base: string): string => {
+        if (!takenIds.has(base)) return base;
+        const uuid =
+          typeof globalThis.crypto?.randomUUID === 'function'
+            ? globalThis.crypto.randomUUID().slice(0, 8)
+            : Math.random().toString(36).slice(2, 10);
+        let candidate = `${base}-${uuid}`;
+        while (takenIds.has(candidate)) {
+          candidate = `${base}-${Math.random().toString(36).slice(2, 10)}`;
+        }
+        return candidate;
+      };
+
+      const isBuiltin = BUILTIN_PROVIDER_TYPE_SET.has(data.type) && data.type !== 'custom';
+      const existingTemplate = isBuiltin
+        ? prev.find((provider) => provider.type === data.type)
+        : undefined;
+      const baseId = isBuiltin ? data.type : 'custom';
+
       const nextProvider: AIProviderRef = existingTemplate
         ? {
             ...existingTemplate,
-            id: prev.some((provider) => provider.id === existingTemplate.id)
-              ? `${existingTemplate.id}-${Date.now()}`
-              : existingTemplate.id,
+            id: makeStableId(existingTemplate.id),
             name: data.name.trim() || existingTemplate.name,
             enabled: data.enabled,
             apiKey: data.apiKey.trim() || undefined,
@@ -1060,11 +1110,8 @@ export default function SettingsPage({ onCheckDesktopUpdates }: SettingsPageProp
             upstreamProtocol: data.upstreamProtocol,
           }
         : {
-            id:
-              BUILTIN_PROVIDER_TYPE_SET.has(data.type) && data.type !== 'custom'
-                ? data.type
-                : `${BUILTIN_PROVIDER_TYPE_SET.has(data.type) ? data.type : 'custom'}-${Date.now()}`,
-            type: BUILTIN_PROVIDER_TYPE_SET.has(data.type) ? data.type : 'custom',
+            id: makeStableId(baseId),
+            type: isBuiltin ? data.type : 'custom',
             name: data.name.trim() || data.type,
             enabled: data.enabled,
             apiKey: data.apiKey.trim() || undefined,
@@ -1123,6 +1170,104 @@ export default function SettingsPage({ onCheckDesktopUpdates }: SettingsPageProp
       return next;
     });
   }
+
+  // 连通性自检：用「当前内存里的 provider 配置」(含尚未保存的编辑)对指定模型
+  // 发起一次最小化上游调用，返回结构化结果给 ModelManager 的检测按钮显示。
+  const handleTestModel = React.useCallback(
+    async (
+      providerId: string,
+      modelId: string,
+    ): Promise<{
+      ok: boolean;
+      status: 'ok' | 'auth_error' | 'rate_limited' | 'timeout' | 'not_found' | 'error';
+      message: string;
+      latencyMs?: number;
+    }> => {
+      if (!token) {
+        return { ok: false, status: 'error', message: '未登录，无法发起检测。' };
+      }
+      const provider = providersRef.current.find((item) => item.id === providerId);
+      if (!provider) {
+        return { ok: false, status: 'error', message: '未找到该 provider，请先保存配置。' };
+      }
+      try {
+        const result = (await createSettingsClient(gatewayUrl).testProvider(token, {
+          modelId,
+          // 传内联 provider，测「尚未保存」的表单值；带上 createdAt/updatedAt 占位
+          // 以满足网关 schema(后端会重新规整)。
+          provider: {
+            ...provider,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+        })) as {
+          ok?: boolean;
+          status?: 'ok' | 'auth_error' | 'rate_limited' | 'timeout' | 'not_found' | 'error';
+          message?: string;
+          latencyMs?: number;
+        };
+        return {
+          ok: result.ok === true,
+          status: result.status ?? (result.ok ? 'ok' : 'error'),
+          message: result.message ?? (result.ok ? '连接正常' : '检测失败'),
+          ...(typeof result.latencyMs === 'number' ? { latencyMs: result.latencyMs } : {}),
+        };
+      } catch (error: unknown) {
+        return {
+          ok: false,
+          status: 'error',
+          message: error instanceof Error ? error.message : '检测请求失败',
+        };
+      }
+    },
+    [token, gatewayUrl],
+  );
+
+  // 手动同步内置模型目录：触发网关从 models.dev 重新拉取，成功后重新加载 provider
+  // 列表，使新模型 / 更新后的上下文与价格即时反映到表格里。
+  const handleSyncCatalog = React.useCallback(async (): Promise<{
+    ok: boolean;
+    providerCount?: number;
+    modelCount?: number;
+    message?: string;
+  }> => {
+    if (!token) {
+      return { ok: false, message: '未登录，无法同步模型目录。' };
+    }
+    const settingsClient = createSettingsClient(gatewayUrl);
+    try {
+      const result = await settingsClient.syncModelsCatalog(token);
+      if (!result.ok) {
+        return { ok: false, message: result.message ?? '同步失败' };
+      }
+      // 同步成功后拉取最新 provider 列表（网关已对 catalog 缓存做了失效）。
+      // 仅刷新模型清单，不动用户尚未保存的默认选择草稿。
+      try {
+        const data = (await settingsClient.getProviders(token)) as {
+          providers: AIProviderRef[] | null;
+        };
+        if (data.providers) {
+          providersRef.current = data.providers;
+          setProviders(data.providers);
+        }
+      } catch (reloadError) {
+        logger.error('failed to reload providers after catalog sync', reloadError);
+      }
+      return {
+        ok: true,
+        ...(typeof result.providerCount === 'number'
+          ? { providerCount: result.providerCount }
+          : {}),
+        ...(typeof result.modelCount === 'number' ? { modelCount: result.modelCount } : {}),
+      };
+    } catch (error: unknown) {
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : '同步请求失败',
+      };
+    }
+  }, [token, gatewayUrl]);
+
   function handleToggleProvider(id: string) {
     setProviders((prev) => {
       const next = prev.map((provider) =>
@@ -1213,40 +1358,75 @@ export default function SettingsPage({ onCheckDesktopUpdates }: SettingsPageProp
   const loadSshFiles = React.useCallback(
     async (connectionId: string, path: string) => {
       if (!token) return;
-      const sshClient = createSshClient(gatewayUrl);
-      const entries = await sshClient.listFiles(token, connectionId, path);
-      const nodes: FileTreeNode[] = entries.map((entry) => ({
-        path: entry.path,
-        name: entry.name,
-        type: entry.kind,
-      }));
-      setSshNodes(nodes);
-      setSshCurrentPath(path);
-      const firstFile = nodes.find((node) => node.type === 'file');
-      if (firstFile) {
-        const previewPayload = await sshClient.readFile(token, connectionId, firstFile.path);
-        setSshPreview({
-          id: previewPayload.path,
-          name: previewPayload.path.split('/').pop() ?? previewPayload.path,
-          type: 'text',
-          createdAt: Date.now(),
-          sessionId: connectionId,
-          content: previewPayload.content,
-        });
-      } else {
+      // listFiles 在连接尚未握手成功时会抛 `SSH client not connected`，
+      // 例如重启后 auto-reconnect 还没跑完就点开对话。这里兜底成清空面板 +
+      // 记录日志，避免 unhandled rejection，让 UI 停在「已选中、未加载」态。
+      try {
+        const sshClient = createSshClient(gatewayUrl);
+        const entries = await sshClient.listFiles(token, connectionId, path);
+        const nodes: FileTreeNode[] = entries.map((entry) => ({
+          path: entry.path,
+          name: entry.name,
+          type: entry.kind,
+        }));
+        setSshNodes(nodes);
+        setSshCurrentPath(path);
+        const firstFile = nodes.find((node) => node.type === 'file');
+        if (firstFile) {
+          const previewPayload = await sshClient.readFile(token, connectionId, firstFile.path);
+          setSshPreview({
+            id: previewPayload.path,
+            name: previewPayload.path.split('/').pop() ?? previewPayload.path,
+            type: 'text',
+            createdAt: Date.now(),
+            sessionId: connectionId,
+            content: previewPayload.content,
+          });
+        } else {
+          setSshPreview(null);
+        }
+      } catch (error: unknown) {
+        setSshNodes([]);
         setSshPreview(null);
+        setSshCurrentPath(path);
+        logger.warn('failed to load ssh files', error);
       }
     },
     [gatewayUrl, token],
   );
 
+  // 重启后恢复「上一次打开的 SSH 对话」：
+  // 1. 优先选最近活跃的对话（sshDialogs 已按 pinned/lastOpenedAt 排好），让用户
+  //    感觉面板从未关过；连接已删除的历史对话会被纯函数跳过；
+  // 2. 没有可用对话时退化为「第一个 connected 的连接」；
+  // 3. 都没有就保持空白，避免误把某个意料之外的连接拉到前台。
+  // 注意：boot 时的 auto-reconnect 是 fire-and-forget，对话往往在握手完成前就
+  // 回灌，所以只对「已 connected」的连接拉文件；未就绪的连接仅高亮选中，等用户
+  // 手动点连接或 auto-reconnect 完成后再浏览。决策逻辑抽成纯函数便于单测，并
+  // 等 `sshDialogsReady` 置位后再跑，避免对话尚未到达就被 fallback 抢先锁定。
+  const sshDialogRestoredRef = useRef(false);
   useEffect(() => {
+    if (sshDialogRestoredRef.current) return;
     if (activeSSHConnectionId) return;
-    const firstConnected = sshConnections.find((connection) => connection.status === 'connected');
-    if (!firstConnected) return;
-    setActiveSSHConnectionId(firstConnected.id);
-    void loadSshFiles(firstConnected.id, '/');
-  }, [activeSSHConnectionId, loadSshFiles, sshConnections]);
+    if (!token) return;
+    if (!sshDialogsReady) return;
+    if (sshConnections.length === 0) return;
+
+    sshDialogRestoredRef.current = true;
+    const decision = resolveSshDialogRestore(sshDialogs, sshConnections);
+    if (!decision) return;
+    setActiveSSHConnectionId(decision.connectionId);
+    if (decision.shouldLoadFiles) {
+      void loadSshFiles(decision.connectionId, decision.cwd);
+    }
+  }, [
+    activeSSHConnectionId,
+    loadSshFiles,
+    sshConnections,
+    sshDialogs,
+    sshDialogsReady,
+    token,
+  ]);
 
   const addSshConnection = React.useCallback(
     (entry: Omit<SSHConnectionEntry, 'id' | 'status'>) => {
@@ -1536,6 +1716,8 @@ export default function SettingsPage({ onCheckDesktopUpdates }: SettingsPageProp
                     handleToggleProvider={handleToggleProvider}
                     handleEditProvider={handleEditProvider}
                     handleAddProvider={handleAddProvider}
+                    onTestModel={handleTestModel}
+                    onSyncCatalog={handleSyncCatalog}
                     mcpServers={mcpServers}
                     setMcpServers={setMcpServers}
                     mcpStatuses={mcpStatuses}
@@ -1624,6 +1806,17 @@ export default function SettingsPage({ onCheckDesktopUpdates }: SettingsPageProp
                     sshNodes={sshNodes}
                     sshCurrentPath={sshCurrentPath}
                     sshPreview={sshPreview}
+                    sshDialogs={sshDialogs}
+                    activeSshConnectionId={activeSSHConnectionId}
+                    onSelectSshDialog={(connectionId, cwd) => {
+                      setActiveSSHConnectionId(connectionId);
+                      // 仅对已连接的连接拉文件；未就绪的对话只高亮，避免
+                      // loadSshFiles 内部因 `SSH client not connected` 兜底清空。
+                      const target = sshConnections.find((c) => c.id === connectionId);
+                      if (target?.status === 'connected') {
+                        void loadSshFiles(connectionId, cwd || '/');
+                      }
+                    }}
                     onAddSshConnection={addSshConnection}
                     onConnectSsh={connectSsh}
                     onDisconnectSsh={disconnectSsh}

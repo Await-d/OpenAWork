@@ -1,6 +1,13 @@
 import type { OAuthClientRegistration, OAuthServerMetadata, OAuthTokenResponse } from './types.js';
 import type { PKCEChallenge } from './pkce.js';
 
+/**
+ * Cap on MCP OAuth client HTTP round-trips (metadata discovery, dynamic
+ * registration, token exchange/refresh). A hung authorization server
+ * would otherwise leave the MCP auth flow pending indefinitely.
+ */
+const OAUTH_CLIENT_HTTP_TIMEOUT_MS = 15_000;
+
 export interface OAuthClientOptions {
   serverMetadataUrl: string;
   redirectUri: string;
@@ -50,7 +57,9 @@ export class OAuthClientImpl implements OAuthClient {
   public constructor(private readonly options: OAuthClientOptions) {}
 
   public async discoverMetadata(): Promise<OAuthServerMetadata> {
-    const response = await fetch(this.options.serverMetadataUrl);
+    const response = await fetch(this.options.serverMetadataUrl, {
+      signal: AbortSignal.timeout(OAUTH_CLIENT_HTTP_TIMEOUT_MS),
+    });
     if (!response.ok) {
       const body = await response.text().catch(() => '');
       throw new Error(`OAuth metadata discovery failed (${response.status}): ${body}`);
@@ -94,6 +103,7 @@ export class OAuthClientImpl implements OAuthClient {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(OAUTH_CLIENT_HTTP_TIMEOUT_MS),
     });
 
     if (!response.ok) {
@@ -208,6 +218,7 @@ export class OAuthClientImpl implements OAuthClient {
       method: 'POST',
       headers,
       body: new URLSearchParams(body).toString(),
+      signal: AbortSignal.timeout(OAUTH_CLIENT_HTTP_TIMEOUT_MS),
     });
 
     if (!response.ok) {

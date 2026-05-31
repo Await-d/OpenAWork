@@ -25,6 +25,7 @@ import type {
   StreamThinkingEndChunk,
 } from '@openAwork/shared';
 import type { PendingPermissionRequest, PendingQuestionRequest } from '@openAwork/web-client';
+import { formatGatewayStreamErrorMessage } from '../../../hooks/gateway/useGatewayClient.js';
 import {
   createPendingPermissionRequestSnapshot,
   dedupePendingPermissionRequests,
@@ -498,7 +499,12 @@ export function useConversationStream(
 
       // ─── error ────────────────────────────────────────────────────
       if (event.type === 'error') {
-        setters.setStreamError(event.message ?? event.code ?? 'stream error');
+        setters.setStreamError(
+          formatGatewayStreamErrorMessage(
+            typeof event.code === 'string' ? event.code : 'STREAM_ERROR',
+            event.message,
+          ),
+        );
         configRef.current.onStreamError?.(event.code, event.message);
         return;
       }

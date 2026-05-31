@@ -13,12 +13,45 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
-import { useTeamConversationState } from './use-team-conversation-state.js';
+import {
+  computeTeamConversationProvidersRetryDelay,
+  computeTeamConversationRecoveryRetryDelay,
+  formatTeamConversationProvidersLoadError,
+  formatTeamConversationRecoveryLoadError,
+  useTeamConversationState,
+} from './use-team-conversation-state.js';
 
 const SESSION_ID = 'session-test-001';
 const TOKEN = 'tok-fake';
 const GATEWAY = 'https://gw.test';
 const EMAIL = 'qa@example.com';
+
+class MockWebSocket {
+  static instances: MockWebSocket[] = [];
+  static readonly CLOSED = 3;
+  static readonly OPEN = 1;
+
+  onclose: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onopen: (() => void) | null = null;
+  readyState = MockWebSocket.OPEN;
+  sentPayloads: string[] = [];
+  url: string;
+
+  constructor(url: string) {
+    this.url = url;
+    MockWebSocket.instances.push(this);
+  }
+
+  send(payload: string) {
+    this.sentPayloads.push(payload);
+  }
+
+  close() {
+    this.readyState = MockWebSocket.CLOSED;
+  }
+}
 
 interface RecoveryFixture {
   pendingPermissions?: unknown[];
@@ -71,14 +104,73 @@ function stubRecovery(payload: RecoveryFixture | { error: true }) {
   );
 }
 
+async function flushAsyncWork(rounds = 8): Promise<void> {
+  for (let index = 0; index < rounds; index += 1) {
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+}
+
+function setNavigatorOnline(value: boolean): void {
+  Object.defineProperty(window.navigator, 'onLine', {
+    configurable: true,
+    value,
+  });
+}
+
 beforeEach(() => {
   // 默认每个测试都先 stub 一次空 fetch，避免漏 stub 导致请求泄漏
   stubRecovery({});
+  setNavigatorOnline(true);
+  MockWebSocket.instances.length = 0;
 });
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  vi.useRealTimers();
+  setNavigatorOnline(true);
+});
+
+describe('team conversation recovery helpers', () => {
+  it('computeTeamConversationRecoveryRetryDelay 按指数退避增长并封顶', () => {
+    expect(computeTeamConversationRecoveryRetryDelay(0)).toBe(2000);
+    expect(computeTeamConversationRecoveryRetryDelay(1)).toBe(4000);
+    expect(computeTeamConversationRecoveryRetryDelay(2)).toBe(8000);
+    expect(computeTeamConversationRecoveryRetryDelay(10)).toBe(30000);
+  });
+
+  it('formatTeamConversationRecoveryLoadError 会提示保留旧快照', () => {
+    const message = formatTeamConversationRecoveryLoadError({
+      hasCachedSnapshot: true,
+      nextRetryAtMs: new Date('2026-05-26T12:00:00.000Z').getTime(),
+      result: {
+        errorMessage: 'recovery unavailable',
+        retryable: true,
+      },
+    });
+
+    expect(message).toContain('recovery unavailable');
+    expect(message).toContain('自动重试');
+    expect(message).toContain('最近一次成功会话快照');
+  });
+
+  it('provider retry helpers 会提示保留旧列表', () => {
+    expect(computeTeamConversationProvidersRetryDelay(0)).toBe(2000);
+    expect(computeTeamConversationProvidersRetryDelay(10)).toBe(30000);
+    const message = formatTeamConversationProvidersLoadError({
+      hasCachedProviders: true,
+      nextRetryAtMs: new Date('2026-05-26T12:30:00.000Z').getTime(),
+      result: {
+        errorMessage: 'providers unavailable',
+        retryable: true,
+      },
+    });
+    expect(message).toContain('providers unavailable');
+    expect(message).toContain('最近一次成功Provider 列表');
+  });
 });
 
 describe('useTeamConversationState — 空闲态', () => {
@@ -195,6 +287,152 @@ describe('useTeamConversationState — 加载快照', () => {
     expect(result.current.isSessionSnapshotReady).toBe(false);
     expect(result.current.sessionStateStatus).toBeNull();
   });
+
+  it('已有快照后再次失败时保留旧消息，并在自动重试后恢复', async () => {
+    vi.useFakeTimers();
+    let requestCount = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        requestCount += 1;
+        if (requestCount === 2) {
+          return new Response(JSON.stringify({ error: 'recovery unavailable' }), {
+            status: 503,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        const messageId = requestCount >= 3 ? 'm-recovered' : 'm-initial';
+        return new Response(
+          JSON.stringify({
+            recovery: {
+              pendingPermissions: [],
+              pendingQuestions: [],
+              session: {
+                id: SESSION_ID,
+                state_status: 'running',
+                messages: [
+                  {
+                    id: messageId,
+                    role: 'assistant',
+                    content: messageId,
+                    createdAtMs: 1700000000000,
+                  },
+                ],
+              },
+              todoLanes: { lanes: [] },
+              tasks: [],
+              children: [],
+              ratings: [],
+              activeStream: null,
+            },
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      }),
+    );
+
+    const { result } = renderHook(() =>
+      useTeamConversationState({
+        sessionId: SESSION_ID,
+        currentUserEmail: EMAIL,
+        gatewayUrl: GATEWAY,
+        token: TOKEN,
+      }),
+    );
+
+    await flushAsyncWork();
+    expect(result.current.isSessionSnapshotReady).toBe(true);
+    expect(result.current.messages[0]?.id).toBe('m-initial');
+
+    await act(async () => {
+      await result.current.reload();
+    });
+
+    expect(result.current.messages[0]?.id).toBe('m-initial');
+    expect(result.current.snapshotError).toContain('recovery unavailable');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    await flushAsyncWork();
+    expect(result.current.messages[0]?.id).toBe('m-recovered');
+    expect(result.current.snapshotError).toBeNull();
+  });
+
+  it('离线时立即报错并保留旧快照，恢复联网后自动补拉', async () => {
+    let requestCount = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        requestCount += 1;
+        const messageId = requestCount >= 2 ? 'm-online-again' : 'm-online';
+        return new Response(
+          JSON.stringify({
+            recovery: {
+              pendingPermissions: [],
+              pendingQuestions: [],
+              session: {
+                id: SESSION_ID,
+                state_status: 'running',
+                messages: [
+                  {
+                    id: messageId,
+                    role: 'assistant',
+                    content: messageId,
+                    createdAtMs: 1700000000000,
+                  },
+                ],
+              },
+              todoLanes: { lanes: [] },
+              tasks: [],
+              children: [],
+              ratings: [],
+              activeStream: null,
+            },
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      }),
+    );
+
+    const { result } = renderHook(() =>
+      useTeamConversationState({
+        sessionId: SESSION_ID,
+        currentUserEmail: EMAIL,
+        gatewayUrl: GATEWAY,
+        token: TOKEN,
+        enableWriters: true,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(result.current.messages[0]?.id).toBe('m-online');
+    });
+
+    setNavigatorOnline(false);
+    act(() => {
+      window.dispatchEvent(new Event('offline'));
+    });
+
+    expect(result.current.messages[0]?.id).toBe('m-online');
+    expect(result.current.snapshotError).toContain('当前网络离线，团队会话快照暂时不可用。');
+
+    setNavigatorOnline(true);
+    act(() => {
+      window.dispatchEvent(new Event('online'));
+    });
+
+    await waitFor(() => {
+      expect(result.current.messages[0]?.id).toBe('m-online-again');
+    });
+    expect(result.current.snapshotError).toBeNull();
+  });
 });
 
 describe('useTeamConversationState — composer setter 暴露', () => {
@@ -258,6 +496,104 @@ describe('useTeamConversationState — composer setter 暴露', () => {
     expect(state['thinkingEnabled']).toBeUndefined();
     expect(state['reasoningEffort']).toBeUndefined();
     expect(state['manualAgentId']).toBeUndefined();
+  });
+
+  it('loadProviders 失败时保留旧 provider 列表，并在自动重试后恢复', async () => {
+    vi.useFakeTimers();
+    let recoveryCount = 0;
+    let providersCount = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.startsWith(`${GATEWAY}/sessions/${SESSION_ID}/recovery`)) {
+          recoveryCount += 1;
+          return new Response(
+            JSON.stringify({
+              recovery: {
+                pendingPermissions: [],
+                pendingQuestions: [],
+                session: {
+                  id: SESSION_ID,
+                  state_status: 'idle',
+                  messages: [],
+                },
+                todoLanes: { lanes: [] },
+                tasks: [],
+                children: [],
+                ratings: [],
+                activeStream: null,
+              },
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          );
+        }
+        if (url.startsWith(`${GATEWAY}/settings/providers`)) {
+          providersCount += 1;
+          if (providersCount === 2) {
+            return new Response(JSON.stringify({ error: 'providers unavailable' }), {
+              status: 503,
+              headers: { 'content-type': 'application/json' },
+            });
+          }
+          return new Response(
+            JSON.stringify({
+              activeSelection: {
+                chat: {
+                  providerId: 'openai',
+                  modelId: providersCount >= 3 ? 'gpt-4.1' : 'gpt-4o',
+                },
+              },
+              providers: [
+                {
+                  id: 'openai',
+                  name: 'OpenAI',
+                  type: 'cloud',
+                  enabled: true,
+                  defaultModels: [
+                    {
+                      id: providersCount >= 3 ? 'gpt-4.1' : 'gpt-4o',
+                      label: providersCount >= 3 ? 'GPT-4.1' : 'GPT-4o',
+                      enabled: true,
+                    },
+                  ],
+                },
+              ],
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          );
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+
+    const { result } = renderHook(() =>
+      useTeamConversationState({
+        sessionId: SESSION_ID,
+        currentUserEmail: EMAIL,
+        gatewayUrl: GATEWAY,
+        token: TOKEN,
+        enableWriters: true,
+      }),
+    );
+
+    await flushAsyncWork();
+    expect(result.current.providers[0]?.defaultModels[0]?.id).toBe('gpt-4o');
+
+    await act(async () => {
+      await result.current.loadProviders();
+    });
+
+    expect(result.current.providers[0]?.defaultModels[0]?.id).toBe('gpt-4o');
+    expect(result.current.providersError).toContain('providers unavailable');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    await flushAsyncWork();
+
+    expect(result.current.providers[0]?.defaultModels[0]?.id).toBe('gpt-4.1');
+    expect(result.current.providersError).toBeNull();
   });
 });
 
@@ -444,7 +780,7 @@ describe('useTeamConversationState — submitInbound (v0.2)', () => {
     );
 
     await expect(result.current.submitInbound('user_input', { text: 'hi' })).rejects.toThrow(
-      /sessionId is null/,
+      '当前团队会话不存在，无法提交团队消息。',
     );
   });
 
@@ -459,7 +795,23 @@ describe('useTeamConversationState — submitInbound (v0.2)', () => {
     );
 
     await expect(result.current.submitInbound('user_input', { text: 'hi' })).rejects.toThrow(
-      /token is missing/,
+      '未登录，无法提交团队消息。',
+    );
+  });
+
+  it('enableWriters=false 时 startStream 抛中文只读错误', async () => {
+    const { result } = renderHook(() =>
+      useTeamConversationState({
+        sessionId: SESSION_ID,
+        currentUserEmail: EMAIL,
+        gatewayUrl: GATEWAY,
+        token: TOKEN,
+        enableWriters: false,
+      }),
+    );
+
+    await expect(result.current.startStream('hello')).rejects.toThrow(
+      '当前会话为只读模式，无法发送消息。',
     );
   });
 
@@ -668,6 +1020,6 @@ describe('useTeamConversationState — submitInbound (v0.2)', () => {
 
     await expect(
       result.current.submitInbound('user_input', { text: 'should fail' }),
-    ).rejects.toThrow(/Failed to submit inbound message: 404/);
+    ).rejects.toThrow('目标团队会话不存在，无法提交团队反向消息。');
   });
 });

@@ -1,6 +1,7 @@
 import type { CSSProperties, ChangeEvent, KeyboardEvent, ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { tokens, color } from '../tokens.js';
+import { compareModelsByName } from './model-picker-search.js';
 
 export interface AIModelConfigItem {
   id: string;
@@ -25,6 +26,13 @@ export interface AIProviderItem {
   defaultModels: AIModelConfigItem[];
 }
 
+export interface ProviderModelTestResult {
+  ok: boolean;
+  status: 'ok' | 'auth_error' | 'rate_limited' | 'timeout' | 'not_found' | 'error';
+  message: string;
+  latencyMs?: number;
+}
+
 export interface ModelManagerProps {
   provider: AIProviderItem;
   onToggleModel?: (providerId: string, modelId: string) => void;
@@ -35,6 +43,22 @@ export interface ModelManagerProps {
     modelId: string,
     updates: Partial<AIModelConfigItem>,
   ) => void;
+  /**
+   * 连通性自检：对指定模型发起一次最小化上游调用，返回结构化结果。
+   * 由消费方注入(走 web-client 的 `settings.testProvider`)。
+   */
+  onTestModel?: (providerId: string, modelId: string) => Promise<ProviderModelTestResult>;
+  /**
+   * 手动从 models.dev 同步内置模型目录。返回结构化结果用于按钮状态展示。
+   * 由消费方注入（走 web-client 的 `settings.syncModelsCatalog`）。同步成功后
+   * 通常还会触发一次 provider 列表重载，使新模型即时出现在表格里。
+   */
+  onSyncCatalog?: () => Promise<{
+    ok: boolean;
+    providerCount?: number;
+    modelCount?: number;
+    message?: string;
+  }>;
   style?: CSSProperties;
 }
 
@@ -308,10 +332,69 @@ export function ModelManager({
   onAddModel,
   onRemoveModel,
   onUpdateModel,
+  onTestModel,
+  onSyncCatalog,
   style,
 }: ModelManagerProps) {
   const [newLabel, setNewLabel] = useState('');
   const [newId, setNewId] = useState('');
+  // 每个模型独立的自检状态：testing(进行中) / 结果(成功或失败原因)。
+  const [testing, setTesting] = useState<Record<string, boolean>>({});
+  const [testResults, setTestResults] = useState<Record<string, ProviderModelTestResult>>({});
+  // 模型目录同步状态：进行中 / 结果提示（成功统计或失败原因）。
+  const [syncing, setSyncing] = useState(false);
+  const [syncNotice, setSyncNotice] = useState<{ ok: boolean; message: string } | null>(null);
+
+  async function handleSyncCatalog() {
+    if (!onSyncCatalog || syncing) return;
+    setSyncing(true);
+    setSyncNotice(null);
+    try {
+      const result = await onSyncCatalog();
+      setSyncNotice(
+        result.ok
+          ? {
+              ok: true,
+              message: `已同步 ${result.providerCount ?? 0} 个提供商 · ${
+                result.modelCount ?? 0
+              } 个模型`,
+            }
+          : { ok: false, message: result.message ?? '同步失败' },
+      );
+    } catch (error) {
+      setSyncNotice({
+        ok: false,
+        message: error instanceof Error ? error.message : '同步请求失败',
+      });
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  async function handleTestModel(modelId: string) {
+    if (!onTestModel) return;
+    setTesting((prev) => ({ ...prev, [modelId]: true }));
+    setTestResults((prev) => {
+      const next = { ...prev };
+      delete next[modelId];
+      return next;
+    });
+    try {
+      const result = await onTestModel(provider.id, modelId);
+      setTestResults((prev) => ({ ...prev, [modelId]: result }));
+    } catch (error) {
+      setTestResults((prev) => ({
+        ...prev,
+        [modelId]: {
+          ok: false,
+          status: 'error',
+          message: error instanceof Error ? error.message : '自检请求失败',
+        },
+      }));
+    } finally {
+      setTesting((prev) => ({ ...prev, [modelId]: false }));
+    }
+  }
 
   function handleAddModel() {
     const trimmedId = newId.trim();
@@ -353,9 +436,56 @@ export function ModelManager({
           borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         }}
       >
-        <h2 style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--fg-default)' }}>
-          {provider.name} — 模型
-        </h2>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            flexWrap: 'wrap',
+          }}
+        >
+          <h2 style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--fg-default)' }}>
+            {provider.name} — 模型
+          </h2>
+          {onSyncCatalog ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              {syncNotice ? (
+                <span
+                  style={{
+                    fontSize: 10,
+                    lineHeight: 1.4,
+                    color: syncNotice.ok ? 'var(--success)' : 'var(--danger)',
+                  }}
+                  title={syncNotice.message}
+                >
+                  {syncNotice.ok ? '✓ ' : '✕ '}
+                  {syncNotice.message}
+                </span>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => void handleSyncCatalog()}
+                disabled={syncing}
+                title="从 models.dev 重新拉取内置模型目录（上下文长度、价格、能力等）并刷新列表"
+                style={{
+                  background: 'transparent',
+                  border: '1px solid var(--accent)',
+                  borderRadius: 6,
+                  color: 'var(--accent)',
+                  padding: '0.25rem 0.75rem',
+                  fontSize: 12,
+                  fontWeight: 500,
+                  cursor: syncing ? 'not-allowed' : 'pointer',
+                  opacity: syncing ? 0.6 : 1,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {syncing ? '同步中…' : '同步模型目录'}
+              </button>
+            </div>
+          ) : null}
+        </div>
         <div
           style={{
             marginTop: tokens.spacing.sm,
@@ -395,189 +525,257 @@ export function ModelManager({
           暂无模型配置。
         </div>
       ) : (
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', minWidth: 940, borderCollapse: 'collapse' }}>
-            <thead>
-              <tr
-                style={{
-                  borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-                }}
-              >
-                {[
-                  '模型',
-                  '上下文',
-                  '输出',
-                  '输入 $/M',
-                  '输出 $/M',
-                  '自动压缩',
-                  '4K',
-                  '已启用',
-                  '',
-                ].map((h) => (
-                  <th
-                    key={h}
+        (() => {
+          // 表格行按模型名称统一降序展示（与聊天选择器 / 设置下拉一致）。
+          const sortedModels = [...provider.defaultModels].sort(compareModelsByName);
+          return (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', minWidth: 940, borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr
                     style={{
-                      ...mutedStyle,
-                      fontWeight: 500,
-                      textAlign: 'left',
-                      fontSize: 12,
+                      borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
                     }}
                   >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {provider.defaultModels.map((model, idx) => (
-                <tr
-                  key={model.id}
-                  style={{
-                    borderBottom:
-                      idx < provider.defaultModels.length - 1
-                        ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))'
-                        : 'none',
-                    opacity: model.enabled ? 1 : 0.5,
-                  }}
-                >
-                  <td style={cellStyle}>
-                    <div style={{ fontWeight: 500 }}>{model.label}</div>
-                    <div style={{ fontSize: 11, color: 'var(--fg-muted)', marginTop: 1 }}>
-                      {model.id}
-                    </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
-                      {model.supportsImageGeneration ? <CapabilityDot label="生图" /> : null}
-                      {model.supportsImageGeneration && model.supportsImageGeneration4K === true ? (
-                        <CapabilityDot label="4K" />
-                      ) : null}
-                      {model.supportsTools ? <CapabilityDot label="工具" /> : null}
-                      {model.supportsVision ? <CapabilityDot label="视觉" /> : null}
-                      {model.supportsThinking ? <CapabilityDot label="思考" /> : null}
-                    </div>
-                  </td>
-                  <td style={mutedStyle}>{formatContext(model.contextWindow)}</td>
-                  <td style={mutedStyle}>{formatContext(model.maxOutputTokens)}</td>
-                  <td style={mutedStyle}>{formatPrice(model.inputPricePerMillion)}</td>
-                  <td style={mutedStyle}>{formatPrice(model.outputPricePerMillion)}</td>
-                  <td style={cellStyle}>
-                    {(() => {
-                      const summary = buildAutoCompactSummary(model);
-                      const warning = getAutoCompactWarning(model);
-
-                      return (
-                        <>
-                          <div
-                            style={{
-                              display: 'flex',
-                              gap: 8,
-                              flexWrap: 'wrap',
-                              alignItems: 'flex-end',
-                            }}
-                          >
-                            <ModelRatioInput
-                              ariaLabel={`${model.label} 自动压缩阈值`}
-                              fallbackLabel="阈值"
-                              value={model.autoCompactThresholdRatio}
-                              onCommit={
-                                onUpdateModel
-                                  ? (nextValue) => {
-                                      onUpdateModel(provider.id, model.id, {
-                                        autoCompactThresholdRatio: nextValue,
-                                      });
-                                    }
-                                  : undefined
-                              }
-                            />
-                            <ModelRatioInput
-                              ariaLabel={`${model.label} 压缩目标比例`}
-                              fallbackLabel="目标"
-                              value={model.autoCompactTargetRatio}
-                              onCommit={
-                                onUpdateModel
-                                  ? (nextValue) => {
-                                      onUpdateModel(provider.id, model.id, {
-                                        autoCompactTargetRatio: nextValue,
-                                      });
-                                    }
-                                  : undefined
-                              }
-                            />
-                          </div>
-                          <div
-                            style={{
-                              marginTop: 6,
-                              fontSize: 10,
-                              color: 'var(--fg-muted)',
-                              lineHeight: 1.45,
-                            }}
-                          >
-                            当前：阈值 {formatRatio(model.autoCompactThresholdRatio, '默认 95%')} ·
-                            目标 {formatRatio(model.autoCompactTargetRatio, '默认 60%')}
-                          </div>
-                          <InlineNotice tone="info">{summary}</InlineNotice>
-                          {warning ? (
-                            <InlineNotice tone="warning">{`提醒：${warning}`}</InlineNotice>
-                          ) : null}
-                        </>
-                      );
-                    })()}
-                  </td>
-                  <td style={cellStyle}>
-                    {model.supportsImageGeneration ? (
-                      <label
+                    {[
+                      '模型',
+                      '上下文',
+                      '输出',
+                      '输入 $/M',
+                      '输出 $/M',
+                      '自动压缩',
+                      '4K',
+                      '已启用',
+                      '检测',
+                      '',
+                    ].map((h) => (
+                      <th
+                        key={h}
                         style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 6,
-                          fontSize: 11,
-                          color: 'var(--fg-muted)',
-                          cursor: onUpdateModel ? 'pointer' : 'default',
+                          ...mutedStyle,
+                          fontWeight: 500,
+                          textAlign: 'left',
+                          fontSize: 12,
                         }}
                       >
-                        <input
-                          type="checkbox"
-                          checked={model.supportsImageGeneration4K === true}
-                          disabled={!onUpdateModel}
-                          onChange={(event) =>
-                            onUpdateModel?.(provider.id, model.id, {
-                              supportsImageGeneration4K: event.target.checked,
-                            })
-                          }
-                        />
-                        <span>支持 4K</span>
-                      </label>
-                    ) : null}
-                  </td>
-                  <td style={cellStyle}>
-                    <Toggle
-                      enabled={model.enabled}
-                      onToggle={() => onToggleModel?.(provider.id, model.id)}
-                    />
-                  </td>
-                  <td style={cellStyle}>
-                    <button
-                      type="button"
-                      onClick={() => onRemoveModel?.(provider.id, model.id)}
-                      disabled={!onRemoveModel}
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedModels.map((model, idx) => (
+                    <tr
+                      key={model.id}
                       style={{
-                        background: 'transparent',
-                        border: '1px solid var(--fg-subtle)',
-                        borderRadius: 6,
-                        color: color.danger,
-                        padding: '0.2rem 0.5rem',
-                        fontSize: 12,
-                        cursor: onRemoveModel ? 'pointer' : 'not-allowed',
-                        opacity: onRemoveModel ? 1 : 0.5,
+                        borderBottom:
+                          idx < sortedModels.length - 1
+                            ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))'
+                            : 'none',
+                        opacity: model.enabled ? 1 : 0.5,
                       }}
                     >
-                      移除
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                      <td style={cellStyle}>
+                        <div style={{ fontWeight: 500 }}>{model.label}</div>
+                        <div style={{ fontSize: 11, color: 'var(--fg-muted)', marginTop: 1 }}>
+                          {model.id}
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
+                          {model.supportsImageGeneration ? <CapabilityDot label="生图" /> : null}
+                          {model.supportsImageGeneration &&
+                          model.supportsImageGeneration4K === true ? (
+                            <CapabilityDot label="4K" />
+                          ) : null}
+                          {model.supportsTools ? <CapabilityDot label="工具" /> : null}
+                          {model.supportsVision ? <CapabilityDot label="视觉" /> : null}
+                          {model.supportsThinking ? <CapabilityDot label="思考" /> : null}
+                        </div>
+                      </td>
+                      <td style={mutedStyle}>{formatContext(model.contextWindow)}</td>
+                      <td style={mutedStyle}>{formatContext(model.maxOutputTokens)}</td>
+                      <td style={mutedStyle}>{formatPrice(model.inputPricePerMillion)}</td>
+                      <td style={mutedStyle}>{formatPrice(model.outputPricePerMillion)}</td>
+                      <td style={cellStyle}>
+                        {(() => {
+                          const summary = buildAutoCompactSummary(model);
+                          const warning = getAutoCompactWarning(model);
+
+                          return (
+                            <>
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  gap: 8,
+                                  flexWrap: 'wrap',
+                                  alignItems: 'flex-end',
+                                }}
+                              >
+                                <ModelRatioInput
+                                  ariaLabel={`${model.label} 自动压缩阈值`}
+                                  fallbackLabel="阈值"
+                                  value={model.autoCompactThresholdRatio}
+                                  onCommit={
+                                    onUpdateModel
+                                      ? (nextValue) => {
+                                          onUpdateModel(provider.id, model.id, {
+                                            autoCompactThresholdRatio: nextValue,
+                                          });
+                                        }
+                                      : undefined
+                                  }
+                                />
+                                <ModelRatioInput
+                                  ariaLabel={`${model.label} 压缩目标比例`}
+                                  fallbackLabel="目标"
+                                  value={model.autoCompactTargetRatio}
+                                  onCommit={
+                                    onUpdateModel
+                                      ? (nextValue) => {
+                                          onUpdateModel(provider.id, model.id, {
+                                            autoCompactTargetRatio: nextValue,
+                                          });
+                                        }
+                                      : undefined
+                                  }
+                                />
+                              </div>
+                              <div
+                                style={{
+                                  marginTop: 6,
+                                  fontSize: 10,
+                                  color: 'var(--fg-muted)',
+                                  lineHeight: 1.45,
+                                }}
+                              >
+                                当前：阈值{' '}
+                                {formatRatio(model.autoCompactThresholdRatio, '默认 95%')} · 目标{' '}
+                                {formatRatio(model.autoCompactTargetRatio, '默认 60%')}
+                              </div>
+                              <InlineNotice tone="info">{summary}</InlineNotice>
+                              {warning ? (
+                                <InlineNotice tone="warning">{`提醒：${warning}`}</InlineNotice>
+                              ) : null}
+                            </>
+                          );
+                        })()}
+                      </td>
+                      <td style={cellStyle}>
+                        {model.supportsImageGeneration ? (
+                          <label
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              fontSize: 11,
+                              color: 'var(--fg-muted)',
+                              cursor: onUpdateModel ? 'pointer' : 'default',
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={model.supportsImageGeneration4K === true}
+                              disabled={!onUpdateModel}
+                              onChange={(event) =>
+                                onUpdateModel?.(provider.id, model.id, {
+                                  supportsImageGeneration4K: event.target.checked,
+                                })
+                              }
+                            />
+                            <span>支持 4K</span>
+                          </label>
+                        ) : null}
+                      </td>
+                      <td style={cellStyle}>
+                        <Toggle
+                          enabled={model.enabled}
+                          onToggle={() => onToggleModel?.(provider.id, model.id)}
+                        />
+                      </td>
+                      <td style={cellStyle}>
+                        {(() => {
+                          const isTesting = testing[model.id] === true;
+                          const result = testResults[model.id];
+                          const statusColor = result
+                            ? result.ok
+                              ? 'var(--success)'
+                              : result.status === 'rate_limited'
+                                ? 'var(--warning)'
+                                : 'var(--danger)'
+                            : 'var(--fg-muted)';
+                          return (
+                            <div
+                              style={{
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: 4,
+                                minWidth: 132,
+                              }}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => void handleTestModel(model.id)}
+                                disabled={!onTestModel || isTesting}
+                                title="对该模型发起一次最小化上游调用，检查是否配置正确且可用"
+                                style={{
+                                  background: 'transparent',
+                                  border: '1px solid var(--accent)',
+                                  borderRadius: 6,
+                                  color: 'var(--accent)',
+                                  padding: '0.2rem 0.6rem',
+                                  fontSize: 12,
+                                  cursor: !onTestModel || isTesting ? 'not-allowed' : 'pointer',
+                                  opacity: !onTestModel || isTesting ? 0.6 : 1,
+                                  fontWeight: 500,
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                {isTesting ? '检测中…' : '检测连接'}
+                              </button>
+                              {result ? (
+                                <span
+                                  style={{
+                                    fontSize: 10,
+                                    lineHeight: 1.4,
+                                    color: statusColor,
+                                  }}
+                                  title={result.message}
+                                >
+                                  {result.ok ? '✓ ' : '✕ '}
+                                  {result.message.length > 28
+                                    ? `${result.message.slice(0, 28)}…`
+                                    : result.message}
+                                </span>
+                              ) : null}
+                            </div>
+                          );
+                        })()}
+                      </td>
+                      <td style={cellStyle}>
+                        <button
+                          type="button"
+                          onClick={() => onRemoveModel?.(provider.id, model.id)}
+                          disabled={!onRemoveModel}
+                          style={{
+                            background: 'transparent',
+                            border: '1px solid var(--fg-subtle)',
+                            borderRadius: 6,
+                            color: color.danger,
+                            padding: '0.2rem 0.5rem',
+                            fontSize: 12,
+                            cursor: onRemoveModel ? 'pointer' : 'not-allowed',
+                            opacity: onRemoveModel ? 1 : 0.5,
+                          }}
+                        >
+                          移除
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        })()
       )}
 
       <div

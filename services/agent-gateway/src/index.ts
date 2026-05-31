@@ -15,9 +15,12 @@ import { ensureDefaultWorkflowTemplatesForAllUsers } from './runtime/default-wor
 import { backgroundScheduler } from './runtime/background-scheduler.js';
 import { refreshRegistryCaches } from './routes/skills.js';
 import { checkInstalledSkillUpdates } from './skill/skill-update-checker.js';
-import { createHash, randomUUID } from 'crypto';
+import { randomUUID } from 'crypto';
+import { hashPassword } from './infra/password-hash.js';
 import requestWorkflowPlugin, { startRequestWorkflow } from './runtime/request-workflow.js';
 import { startParentProcessWatch } from './infra/parent-watch.js';
+import { installProcessSafetyHandlers } from './infra/process-safety.js';
+import { resolveWsMaxPayloadBytes } from './infra/ws-payload-limit.js';
 
 const ADMIN_EMAIL = globalThis.process?.env['ADMIN_EMAIL'] ?? 'admin@openAwork.local';
 const ADMIN_PASSWORD = globalThis.process?.env['ADMIN_PASSWORD'] ?? 'admin123456';
@@ -26,7 +29,7 @@ async function seedDefaultAdmin(): Promise<void> {
   const existing = sqliteGet('SELECT id FROM users WHERE email = ? LIMIT 1', [ADMIN_EMAIL]);
   if (existing) return;
   const id = randomUUID();
-  const password_hash = createHash('sha256').update(ADMIN_PASSWORD).digest('hex');
+  const password_hash = hashPassword(ADMIN_PASSWORD);
   sqliteRun('INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)', [
     id,
     ADMIN_EMAIL,
@@ -49,6 +52,7 @@ import { usageRoutes } from './routes/usage.js';
 import { agentsRoutes } from './routes/agents.js';
 import { teamRoutes } from './routes/team.js';
 import { teamInboundRoutes } from './routes/team-inbound.js';
+import { teamInitRoutes } from './routes/team-init.js';
 import { teamPhaseARoutes } from './routes/team-phase-a.js';
 import { teamEventsRoutes } from './routes/team-events.js';
 import { teamHandoffsRoutes } from './routes/team-handoffs.js';
@@ -68,6 +72,7 @@ import { toolsRoutes } from './routes/tools.js';
 import { artifactsRoutes } from './routes/artifacts.js';
 import { reconcileAllSessionRuntimes } from './session/session-runtime-reconciler.js';
 import { reconcileStaleRunningTerminalsAtBoot } from './session/session-terminal-registry.js';
+import { SshService, setSshService } from './ssh/ssh-service.js';
 import qrcodeTerminal from 'qrcode-terminal';
 import { pairingManager, pairingRoutes } from './routes/pairing.js';
 import { memoriesRoutes } from './routes/memories.js';
@@ -79,11 +84,18 @@ import { mcpEventsRoutes } from './routes/mcp-events.js';
 import { mcpOAuthRoutes } from './routes/mcp-oauth.js';
 import { snapshotTreeRoutes } from './routes/snapshot-tree-routes.js';
 import { ensurePluginsLoaded } from './runtime/plugin-host.js';
+import { shutdownTeamRuntimeTelemetry } from './team/team-runtime-telemetry.js';
 
 // 方案 5：加载所有内置 provider 插件
 import './provider/plugins/index.js';
 
 const app = Fastify({ logger: true, disableRequestLogging: true });
+
+// Last-resort process-level error handlers. Installed before any route or
+// background work so a stray unhandled rejection / uncaught exception from a
+// fire-and-forget path logs loudly instead of terminating the whole gateway
+// (and every connected session). See infra/process-safety.ts.
+installProcessSafetyHandlers({ logger: app.log });
 
 const port = Number(globalThis.process?.env['GATEWAY_PORT'] ?? 3000);
 const host = globalThis.process?.env['GATEWAY_HOST'] ?? '0.0.0.0';
@@ -93,7 +105,10 @@ await app.register(compress, {
   threshold: 1024,
   encodings: ['gzip', 'deflate'],
 });
-await app.register(websocket);
+// Cap inbound WS frame size (ws defaults to 100 MiB) so authenticated
+// clients can't push oversized frames into the per-frame JSON parsers on
+// /sessions/:id/stream, /team/events, /lsp/events. See ws-payload-limit.ts.
+await app.register(websocket, { options: { maxPayload: resolveWsMaxPayloadBytes() } });
 
 // 方案 4：自动 OpenAPI 文档（/docs 路径）
 await registerOpenApi(app);
@@ -112,6 +127,7 @@ await app.register(usageRoutes);
 await app.register(agentsRoutes);
 await app.register(teamRoutes);
 await app.register(teamInboundRoutes);
+await app.register(teamInitRoutes);
 await app.register(teamPhaseARoutes);
 await app.register(teamEventsRoutes);
 await app.register(teamHandoffsRoutes);
@@ -191,17 +207,42 @@ app.addHook('onClose', async () => {
   } catch (err) {
     app.log.error({ err }, 'channelManager.stopAll failed');
   }
-  await lspManager.shutdown();
+  // §0.155: isolate this branch like every sibling. `lspManager.shutdown()`
+  // is allSettled-based today (so it should not reject), but it was the ONE
+  // unwrapped await sitting AHEAD of the WAL-critical `closeDb()` — if it ever
+  // rejected (a future LSPManager change, a throwing `this.clients` getter)
+  // the DB handle would never close and the next boot would hit EBUSY / a
+  // stale WAL. Match the hook's stated "each branch isolated" invariant.
+  try {
+    await lspManager.shutdown();
+  } catch (err) {
+    app.log.error({ err }, 'lspManager.shutdown failed');
+  }
   try {
     await skillMcpPool.disconnectAll();
   } catch (err) {
     app.log.error({ err }, 'skillMcpPool.disconnectAll failed');
   }
+  try {
+    await shutdownTeamRuntimeTelemetry();
+  } catch (err) {
+    app.log.error({ err }, 'shutdownTeamRuntimeTelemetry failed');
+  }
   // Invalidate the cached v2-runtime drizzle handle BEFORE closing the
   // legacy connection — once `closeDb()` runs the handle would be a
-  // dangling reference to a closed `node:sqlite` connection.
-  shutdownV2Runtime();
-  await closeDb();
+  // dangling reference to a closed `node:sqlite` connection. Isolated so a
+  // throw here can never skip the `closeDb()` that releases the SQLite handle
+  // (WAL checkpoint) — leaking it breaks the next hot-restart with EBUSY.
+  try {
+    shutdownV2Runtime();
+  } catch (err) {
+    app.log.error({ err }, 'shutdownV2Runtime failed');
+  }
+  try {
+    await closeDb();
+  } catch (err) {
+    app.log.error({ err }, 'closeDb failed');
+  }
 });
 
 const bootLogger = new WorkflowLogger();
@@ -241,8 +282,16 @@ try {
   bootLogger.succeed(step);
 
   step = bootLogger.start('gateway.seed-default-skills');
-  ensureDefaultInstalledSkillsForAllUsers();
-  bootLogger.succeed(step);
+  try {
+    ensureDefaultInstalledSkillsForAllUsers();
+    bootLogger.succeed(step);
+  } catch (error) {
+    // Seeding default installed skills must never abort gateway boot. Per-user
+    // failures are already isolated inside the helper; this guards an
+    // outer-scope throw (e.g. the initial user-list query). Log and continue.
+    const message = error instanceof Error ? error.message : String(error);
+    bootLogger.fail(step, message);
+  }
 
   step = bootLogger.start('gateway.sync-system-skills');
   try {
@@ -318,8 +367,17 @@ try {
   }
 
   step = bootLogger.start('gateway.seed-default-workflow-templates');
-  ensureDefaultWorkflowTemplatesForAllUsers();
-  bootLogger.succeed(step);
+  try {
+    ensureDefaultWorkflowTemplatesForAllUsers();
+    bootLogger.succeed(step);
+  } catch (error) {
+    // Seeding default templates must never abort gateway boot — a failure here
+    // would lock out every user. Per-user failures are already isolated inside
+    // the helper; this guards an outer-scope throw (e.g. the initial user-list
+    // query). Log and continue booting.
+    const message = error instanceof Error ? error.message : String(error);
+    bootLogger.fail(step, message);
+  }
 
   // PR-D-Plugin: load operator-configured plugins listed in
   // OPENAWORK_PLUGINS. Idempotent + failure-tolerant — a broken
@@ -354,6 +412,27 @@ try {
   try {
     const staleCount = reconcileStaleRunningTerminalsAtBoot();
     bootLogger.succeed(step, undefined, { staleCount });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    bootLogger.fail(step, message);
+  }
+
+  // Persist + restore SSH connections / bindings / dialogs across restarts.
+  // The service owns the in-memory ssh2 manager AND the SQLite-backed
+  // metadata, so the panel can render the user's most-recent SSH dialog
+  // immediately after boot instead of starting from a blank window.
+  step = bootLogger.start('gateway.reconcile-ssh');
+  try {
+    const sshService = new SshService({
+      logger: {
+        info: (...args) => app.log.info(...(args as [object, string?])),
+        warn: (...args) => app.log.warn(...(args as [object, string?])),
+        error: (...args) => app.log.error(...(args as [object, string?])),
+      },
+    });
+    setSshService(sshService);
+    await sshService.reconcileOnBoot();
+    bootLogger.succeed(step);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     bootLogger.fail(step, message);

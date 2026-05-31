@@ -21,7 +21,7 @@ export function registerErrorHandler(app: FastifyInstance): void {
       return reply.status(400).send({
         name: 'BadRequest',
         data: {
-          message: error.message,
+          message: '请求参数无效。',
           kind: 'Body',
         },
       });
@@ -31,7 +31,10 @@ export function registerErrorHandler(app: FastifyInstance): void {
     if ('statusCode' in error && typeof error.statusCode === 'number' && error.statusCode < 500) {
       return reply.status(error.statusCode).send({
         name: error.statusCode === 404 ? 'NotFound' : 'BadRequest',
-        data: { message: error.message },
+        data: {
+          message:
+            error.statusCode === 404 ? '请求的接口不存在。' : '请求参数无效。',
+        },
       });
     }
 
@@ -39,7 +42,7 @@ export function registerErrorHandler(app: FastifyInstance): void {
     request.log.error(error);
     return reply.status(500).send({
       name: 'InternalError',
-      data: { message: 'Internal server error' },
+      data: { message: '服务器内部错误。' },
     });
   });
 }

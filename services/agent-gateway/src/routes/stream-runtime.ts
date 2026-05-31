@@ -89,7 +89,7 @@ async function continueFromApprovedToolResult(input: {
 }): Promise<{ pendingInteraction: boolean; statusCode: number }> {
   const sessionContext = loadSessionContext(input.sessionId, input.userId);
   if (!sessionContext) {
-    throw new Error('Session not found');
+    throw new Error('目标会话不存在。');
   }
 
   const requestData = resolveStreamRequestUpstreamRetry({
@@ -198,11 +198,21 @@ async function continueFromApprovedToolResult(input: {
       userId: input.userId,
     });
     const runtimeThreadHeartbeat = setInterval(() => {
-      touchSessionRuntimeThread({
-        clientRequestId: input.payload.clientRequestId,
-        sessionId: input.sessionId,
-        userId: input.userId,
-      });
+      // Heartbeat is a best-effort liveness ping. A transient SQLite error
+      // here must not throw out of the timer callback as an uncaught
+      // exception — the next tick simply retries.
+      try {
+        touchSessionRuntimeThread({
+          clientRequestId: input.payload.clientRequestId,
+          sessionId: input.sessionId,
+          userId: input.userId,
+        });
+      } catch (err) {
+        console.warn(
+          '[stream-runtime] runtime-thread heartbeat failed',
+          err instanceof Error ? err.message : String(err),
+        );
+      }
     }, SESSION_RUNTIME_THREAD_HEARTBEAT_MS);
 
     if (
@@ -621,7 +631,7 @@ export async function runSessionInBackground(input: {
 }): Promise<HandleStreamResult> {
   const sessionContext = loadSessionContext(input.sessionId, input.userId);
   if (!sessionContext) {
-    throw new Error(`Session not found: ${input.sessionId}`);
+    throw new Error(`目标会话不存在：${input.sessionId}`);
   }
 
   const user = loadSessionUser(input.sessionId, input.userId);

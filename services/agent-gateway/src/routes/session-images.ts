@@ -181,7 +181,7 @@ export async function sessionImagesRoutes(app: FastifyInstance): Promise<void> {
       const { sessionId } = request.params;
       const owned = await ensureSessionOwned(sessionId, user.sub);
       if (!owned) {
-        return reply.status(404).send({ error: 'Session not found' });
+        return reply.status(404).send({ error: '目标会话不存在。' });
       }
 
       const parsed = parseBody(imageGenerationRequestSchema, request.body);

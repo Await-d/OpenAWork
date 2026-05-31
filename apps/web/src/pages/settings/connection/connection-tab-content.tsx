@@ -43,6 +43,23 @@ interface ConnectionTabContentProps {
   handleToggleProvider: (id: string) => void;
   handleEditProvider: (id: string, data: ProviderEditData) => void;
   handleAddProvider: (data: ProviderEditData) => void;
+  /** 连通性自检：对指定 provider+模型发起最小化上游调用，返回结构化结果。 */
+  onTestModel?: (
+    providerId: string,
+    modelId: string,
+  ) => Promise<{
+    ok: boolean;
+    status: 'ok' | 'auth_error' | 'rate_limited' | 'timeout' | 'not_found' | 'error';
+    message: string;
+    latencyMs?: number;
+  }>;
+  /** 手动从 models.dev 同步内置模型目录，返回 provider/model 统计。 */
+  onSyncCatalog?: () => Promise<{
+    ok: boolean;
+    providerCount?: number;
+    modelCount?: number;
+    message?: string;
+  }>;
   mcpServers: MCPServerEntry[];
   setMcpServers: React.Dispatch<React.SetStateAction<MCPServerEntry[]>>;
   mcpStatuses: MCPServerStatus[];
@@ -95,6 +112,8 @@ export function ConnectionTabContent({
   handleToggleProvider,
   handleEditProvider,
   handleAddProvider,
+  onTestModel,
+  onSyncCatalog,
   mcpServers,
   setMcpServers,
   mcpStatuses,
@@ -281,6 +300,8 @@ export function ConnectionTabContent({
             onAddModel={handleAddModel}
             onRemoveModel={handleRemoveModel}
             onUpdateModel={handleUpdateModel}
+            {...(onTestModel ? { onTestModel } : {})}
+            {...(onSyncCatalog ? { onSyncCatalog } : {})}
           />
         </div>
       </div>

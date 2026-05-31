@@ -26,6 +26,67 @@ const catalogCache = new Map<string, CatalogEntry>();
 /** Cache TTL — rebuild if older than 30s (covers background model-dev refresh) */
 const CACHE_TTL_MS = 30_000;
 
+/**
+ * Hard ceiling on `catalogCache` entries. The cache keys on `userId` and the
+ * 30s TTL only gates *reuse* on read — it never deletes a stale entry. Each
+ * entry holds a full `ProviderManagerImpl` (the model catalog synced from
+ * models.dev), so on a multi-user install the map would grow one heavyweight
+ * entry per user who ever issued a request and never shrink. We sweep expired
+ * entries opportunistically and cap the total, evicting oldest-first.
+ */
+const CATALOG_CACHE_MAX_ENTRIES = 1_000;
+
+/**
+ * Drop entries older than the TTL (already unusable — `getCatalog` would
+ * rebuild them anyway), then if still over the cap evict oldest-first by
+ * `builtAt`. Called after each insert so the map stays bounded by the number
+ * of users active within one TTL window rather than the all-time user count.
+ */
+function pruneCatalogCache(): void {
+  const now = Date.now();
+  for (const [userId, entry] of catalogCache) {
+    if (now - entry.builtAt >= CACHE_TTL_MS) {
+      catalogCache.delete(userId);
+    }
+  }
+  if (catalogCache.size <= CATALOG_CACHE_MAX_ENTRIES) {
+    return;
+  }
+  const byAge = [...catalogCache.entries()].sort((a, b) => a[1].builtAt - b[1].builtAt);
+  const excess = catalogCache.size - CATALOG_CACHE_MAX_ENTRIES;
+  for (let i = 0; i < excess; i += 1) {
+    const victim = byAge[i];
+    if (victim) catalogCache.delete(victim[0]);
+  }
+}
+
+/**
+ * Parse a stored `user_settings` JSON value without letting one corrupt row
+ * throw. These columns are persisted via JSON.stringify, but a crash
+ * mid-write, a disk error, or a hand-edited DB can leave a non-JSON value. An
+ * unguarded `JSON.parse` here used to throw straight out of `loadRawSettings`
+ * → `getCatalog`, which sits on the main chat stream path (stream.ts →
+ * getFastProvider / getProviderForSelection) — so a single corrupt provider
+ * row hard-failed every chat turn for that user. Degrade a corrupt value to
+ * `null` (identical to the no-row path: `getCatalog` then builds a default
+ * `ProviderManagerImpl`) + warn. (§0.94 / §0.115 single-point-failure class.)
+ */
+function parseStoredSettingValue(value: string | undefined, key: string): unknown {
+  if (!value) {
+    return null;
+  }
+  try {
+    return JSON.parse(value) as unknown;
+  } catch (err) {
+    console.warn(
+      `[provider-catalog] user_settings '${key}' JSON 解析失败，按未配置处理：${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return null;
+  }
+}
+
 function loadRawSettings(userId: string) {
   const providerRow = sqliteGet<UserSettingRow>(
     `SELECT value FROM user_settings WHERE user_id = ? AND key = 'providers'`,
@@ -36,8 +97,8 @@ function loadRawSettings(userId: string) {
     [userId],
   );
   return {
-    rawProviders: providerRow?.value ? (JSON.parse(providerRow.value) as unknown) : null,
-    rawSelection: selectionRow?.value ? (JSON.parse(selectionRow.value) as unknown) : null,
+    rawProviders: parseStoredSettingValue(providerRow?.value, 'providers'),
+    rawSelection: parseStoredSettingValue(selectionRow?.value, 'active_selection'),
   };
 }
 
@@ -71,6 +132,7 @@ export async function getCatalog(userId: string): Promise<CatalogEntry> {
     builtAt: Date.now(),
   };
   catalogCache.set(userId, entry);
+  pruneCatalogCache();
   return entry;
 }
 
@@ -87,6 +149,27 @@ export function invalidateCatalog(userId: string): void {
 export function invalidateAllCatalogs(): void {
   catalogCache.clear();
 }
+
+/**
+ * Test-only seams for the catalog cache retention guard. Kept minimal so the
+ * cap / expiry logic is verifiable without building a real ProviderManager.
+ */
+export function __seedCatalogCacheForTest(userId: string, builtAtMs: number): void {
+  catalogCache.set(userId, {
+    manager: undefined as never,
+    providers: [],
+    activeSelection: {} as never,
+    builtAt: builtAtMs,
+  });
+}
+export function __getCatalogCacheSizeForTest(): number {
+  return catalogCache.size;
+}
+export function __pruneCatalogCacheForTest(): void {
+  pruneCatalogCache();
+}
+export const __CATALOG_CACHE_MAX_ENTRIES_FOR_TEST = CATALOG_CACHE_MAX_ENTRIES;
+export const __CATALOG_CACHE_TTL_MS_FOR_TEST = CACHE_TTL_MS;
 
 /**
  * 获取 chat provider 配置（热路径，用缓存）

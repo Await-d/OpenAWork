@@ -17,11 +17,6 @@ export const REQUIRED_CORE_ROLES: RequiredCoreRole[] = [
 export interface TeamSessionCreationSource {
   kind: TeamSourceKind;
   templateId?: string;
-  /**
-   * 内置 workflow 包标识（不会传给后端 saved-template 路径，仅用于前端
-   * 高亮当前选中的 workflow。形如 'workflow:quick-ask'。
-   */
-  workflowKey?: string;
 }
 
 export interface TeamSessionCreationDraft {

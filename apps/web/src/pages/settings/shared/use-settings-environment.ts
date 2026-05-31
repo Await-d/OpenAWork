@@ -123,7 +123,7 @@ export function useSettingsEnvironment(
   const refreshLocalDesktopAuth = React.useCallback(
     async (gatewayUrl: string) => {
       if (!(await waitForGatewayHealth(gatewayUrl))) {
-        throw new Error('Gateway 健康检查失败，请确认地址可访问');
+        throw new Error('网关健康检查失败，请确认地址可访问。');
       }
 
       const tokenPair = await authenticateDesktopGateway(gatewayUrl);
@@ -140,10 +140,10 @@ export function useSettingsEnvironment(
   const refreshRemoteDesktopAuth = React.useCallback(
     async (gatewayUrl: string) => {
       if (!remoteAdminEmail || !remoteAdminPassword) {
-        throw new Error('请填写远程网关管理员邮箱和密码');
+        throw new Error('请填写远程网关管理员邮箱和密码。');
       }
       if (!(await waitForGatewayHealth(gatewayUrl))) {
-        throw new Error('Gateway 健康检查失败，请确认地址可访问');
+        throw new Error('网关健康检查失败，请确认地址可访问。');
       }
 
       const tokenPair = await login(gatewayUrl, remoteAdminEmail, remoteAdminPassword);
@@ -213,7 +213,7 @@ export function useSettingsEnvironment(
       if (input.webAccessEnabled) {
         const nextGatewayUrl = normalizeGatewayUrl(urlInput);
         if (!nextGatewayUrl || isLocalGatewayUrl(nextGatewayUrl)) {
-          throw new Error('请先在上方填写远程网关地址，再切换到远程网关');
+          throw new Error('请先在上方填写远程网关地址，再切换到远程网关。');
         }
 
         await tauriInvoke('stop_gateway');

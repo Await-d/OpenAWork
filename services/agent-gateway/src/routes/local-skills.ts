@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { z } from 'zod';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
 import { sqliteAll, sqliteRun } from '../infra/db.js';
@@ -12,6 +13,18 @@ interface InstalledSkillIdRow {
 interface LocalInstallBody {
   dirPath?: string;
 }
+
+const LOCAL_SKILLS_ERROR_MESSAGES = {
+  discoverFailed: '发现本地技能失败。',
+  installBodyInvalid: '本地技能目录参数无效。',
+  installFailed: '安装本地技能失败。',
+  manifestMissing: '指定目录下未找到 skill.yaml。',
+  pathOutsideWorkspaceRoots: '本地技能目录必须位于已配置的工作区范围内。',
+} as const;
+
+const localInstallSchema = z.object({
+  dirPath: z.string().trim().min(1),
+});
 
 export function extractLocalInstallDirPath(body: unknown): string | null {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
@@ -58,7 +71,7 @@ export async function localSkillsRoutes(app: FastifyInstance): Promise<void> {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         step.fail(message);
-        return reply.status(500).send({ error: message });
+        return reply.status(500).send({ error: LOCAL_SKILLS_ERROR_MESSAGES.discoverFailed });
       }
     },
   );
@@ -69,12 +82,15 @@ export async function localSkillsRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step } = startRequestWorkflow(request, 'skills.local.install');
       const user = request.user as JwtPayload;
-      const dirPath = extractLocalInstallDirPath(request.body);
-
-      if (!dirPath) {
-        step.fail('missing dirPath');
-        return reply.status(400).send({ error: 'dirPath is required' });
+      const bodyResult = localInstallSchema.safeParse(request.body);
+      if (!bodyResult.success) {
+        step.fail('invalid install body');
+        return reply.status(400).send({
+          error: LOCAL_SKILLS_ERROR_MESSAGES.installBodyInvalid,
+          issues: bodyResult.error.issues,
+        });
       }
+      const dirPath = bodyResult.data.dirPath;
 
       try {
         const record = await installLocalSkillFromDir(dirPath);
@@ -111,15 +127,19 @@ export async function localSkillsRoutes(app: FastifyInstance): Promise<void> {
           }),
         );
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        step.fail(message);
-        const statusCode =
-          message.includes('required') ||
-          message.includes('not found') ||
-          message.includes('workspace roots')
-            ? 400
-            : 422;
-        return reply.status(statusCode).send({ error: message });
+        const rawMessage = error instanceof Error ? error.message : String(error);
+        step.fail(rawMessage);
+        if (rawMessage.includes('configured workspace roots')) {
+          return reply
+            .status(400)
+            .send({ error: LOCAL_SKILLS_ERROR_MESSAGES.pathOutsideWorkspaceRoots });
+        }
+        if (rawMessage.includes('skill.yaml not found')) {
+          return reply.status(400).send({ error: LOCAL_SKILLS_ERROR_MESSAGES.manifestMissing });
+        }
+        const message =
+          rawMessage.trim().length > 0 ? rawMessage : LOCAL_SKILLS_ERROR_MESSAGES.installFailed;
+        return reply.status(422).send({ error: message });
       }
     },
   );

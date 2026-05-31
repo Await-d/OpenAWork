@@ -1,3 +1,4 @@
+import { getProviderUiList } from '@openAwork/shared-ui';
 import type {
   AgentTeamsTabDefinition,
   AgentTeamsTimelineEventType,
@@ -14,16 +15,35 @@ export const agentTeamsTabs: AgentTeamsTabDefinition[] = [
   { id: 'teams', label: '团队', icon: 'teams' },
 ];
 
-export const agentTeamsNewTemplateProviders: TeamTemplateProviderOption[] = [
-  { value: 'anthropic', label: 'Anthropic', modelId: 'claude-sonnet-4-6', variant: 'high' },
-  { value: 'openai', label: 'OpenAI', modelId: 'gpt-5.4', variant: 'high' },
-  { value: 'gemini', label: 'Gemini', modelId: 'gemini-3.1-pro', variant: 'high' },
-  { value: 'deepseek', label: 'DeepSeek', modelId: 'deepseek-r2', variant: 'high' },
-  { value: 'ollama', label: 'Ollama' },
-  { value: 'openrouter', label: 'OpenRouter' },
-  { value: 'qwen', label: 'Qwen', modelId: 'qwen3-coder', variant: 'medium' },
-  { value: 'moonshot', label: 'Moonshot', modelId: 'kimi-k2.5', variant: 'medium' },
-];
+/**
+ * 各平台的「推荐默认模型/力度」覆盖表。平台清单本身由 catalog 派生(新增平台
+ * 自动出现在团队模板下拉里)，这里只补充各平台的推荐默认 modelId / variant。
+ */
+const TEAM_TEMPLATE_PROVIDER_DEFAULTS: Record<string, { modelId?: string; variant?: string }> = {
+  anthropic: { modelId: 'claude-sonnet-4-6', variant: 'high' },
+  openai: { modelId: 'gpt-5.4', variant: 'high' },
+  gemini: { modelId: 'gemini-3.1-pro', variant: 'high' },
+  deepseek: { modelId: 'deepseek-r2', variant: 'high' },
+  qwen: { modelId: 'qwen3-coder', variant: 'medium' },
+  moonshot: { modelId: 'kimi-k2.5', variant: 'medium' },
+  mimo: { modelId: 'mimo-v2.5-pro', variant: 'high' },
+};
+
+/**
+ * 团队模板的平台选项：从 catalog(单一事实来源)派生，叠加推荐默认模型覆盖。
+ * 新增平台只需在后端 catalog 注册，这里会自动出现，无需改本文件。
+ */
+export const agentTeamsNewTemplateProviders: TeamTemplateProviderOption[] = getProviderUiList().map(
+  (entry) => {
+    const defaults = TEAM_TEMPLATE_PROVIDER_DEFAULTS[entry.type];
+    return {
+      value: entry.type,
+      label: entry.displayName,
+      ...(defaults?.modelId ? { modelId: defaults.modelId } : {}),
+      ...(defaults?.variant ? { variant: defaults.variant } : {}),
+    };
+  },
+);
 
 export const AGENT_TEAMS_EVENT_CONFIG: Record<
   AgentTeamsTimelineEventType,

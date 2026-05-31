@@ -168,4 +168,33 @@ describe('generateImageWithOpenAi', () => {
     expect(form.has('image')).toBe(false);
     expect(form.get('prompt')).toBe('把图改成极简风格');
   });
+
+  it('bounds an oversized upstream response body instead of buffering it (§0.126)', async () => {
+    // `apiBaseUrl` is a user-configured provider endpoint; a misbehaving relay
+    // could stream unbounded bytes. With a tiny cap the read must reject with
+    // the shared "response body too large" guard rather than buffer the body.
+    process.env['OPENAWORK_IMAGE_RESPONSE_MAX_BYTES'] = '64';
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response('x'.repeat(100_000), { status: 200 }),
+    );
+
+    try {
+      await expect(
+        generateImageWithOpenAi({
+          apiBaseUrl: 'https://relay.example.com/v1',
+          apiKey: 'sk-openai',
+          background: 'auto',
+          model: 'gpt-image-2',
+          outputFormat: 'png',
+          prompt: '画一张海报',
+          providerType: 'openai',
+          quality: 'high',
+          requestOverrides: {},
+          size: '1024x1024',
+        }),
+      ).rejects.toThrow(/response body too large/);
+    } finally {
+      delete process.env['OPENAWORK_IMAGE_RESPONSE_MAX_BYTES'];
+    }
+  });
 });

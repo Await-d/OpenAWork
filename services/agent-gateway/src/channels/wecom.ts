@@ -6,6 +6,7 @@ import type {
   ChannelGroup,
   ChannelServiceFactory,
 } from './types.js';
+import { channelFetch } from './channel-http.js';
 
 export class WeComChannelService implements MessagingChannelService {
   readonly pluginId: string;
@@ -50,7 +51,7 @@ export class WeComChannelService implements MessagingChannelService {
   }
 
   private async sendViaWebhook(content: string): Promise<{ messageId: string }> {
-    const response = await fetch(this.webhookUrl, {
+    const response = await channelFetch(this.webhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ msgtype: 'text', text: { content } }),
@@ -64,7 +65,7 @@ export class WeComChannelService implements MessagingChannelService {
 
   private async sendViaApi(chatId: string, content: string): Promise<{ messageId: string }> {
     const token = await this.getAccessToken();
-    const response = await fetch(
+    const response = await channelFetch(
       `https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token=${token}`,
       {
         method: 'POST',
@@ -89,7 +90,7 @@ export class WeComChannelService implements MessagingChannelService {
   }
 
   private async getAccessToken(): Promise<string> {
-    const response = await fetch(
+    const response = await channelFetch(
       `https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=${this.corpId}&corpsecret=${this.corpSecret}`,
     );
     const data = (await response.json()) as {

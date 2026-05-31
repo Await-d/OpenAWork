@@ -258,7 +258,7 @@ export function BaseSessionRow({
         outline: 'none',
         position: 'relative',
         background: active
-          ? 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay)'
+          ? 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay))'
           : hovered
             ? 'color-mix(in srgb, var(--fg-muted) 5%, transparent)'
             : 'transparent',

@@ -66,7 +66,10 @@ import WorkspacePickerModal from '../../components/common/modal/WorkspacePickerM
 import { useCommandRegistry } from '../../hooks/command/useCommandRegistry.js';
 import { useComposerWorkspaceCatalog } from '../../hooks/chat/useComposerWorkspaceCatalog.js';
 import { useFileEditor } from '../../hooks/editor/useFileEditor.js';
-import { useGatewayClient } from '../../hooks/gateway/useGatewayClient.js';
+import {
+  formatGatewayStreamErrorMessage,
+  useGatewayClient,
+} from '../../hooks/gateway/useGatewayClient.js';
 import { usePrefersReducedMotion } from '../../hooks/ui/usePrefersReducedMotion.js';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { useUIStateStore } from '../../stores/ui/uiState.js';
@@ -511,6 +514,8 @@ export default function ChatPage() {
     // 编辑器模式 / 分屏 / 保存
     editorMode,
     setEditorMode,
+    editorFullScreen,
+    setEditorFullScreen,
     splitPos,
     setSplitPos,
     splitDragging,
@@ -2802,8 +2807,9 @@ export default function ChatPage() {
           return;
         }
         const finishedAt = Date.now();
-        const errorContent = message ? `[错误: ${code}] ${message}` : `[错误: ${code}]`;
-        logger.error('stream error', message ? `${code}: ${message}` : code);
+        const resolvedMessage = formatGatewayStreamErrorMessage(code, message);
+        const errorContent = `[错误: ${code}] ${resolvedMessage}`;
+        logger.error('stream error', `${code}: ${resolvedMessage}`);
         const errorMsgId = makeOrderedMessageId();
         const finalized = finalizeStreamMessage({
           accumulatedSegments: [],
@@ -2828,7 +2834,7 @@ export default function ChatPage() {
         firstTokenLatencyAttached = finalized.firstTokenLatencyAttached;
         setSessionStateStatus('idle');
         resetStreamState();
-        setStreamError(message ? `${code}: ${message}` : code);
+        setStreamError(resolvedMessage);
         requestSessionListRefresh();
       },
       model: activeModelId || 'default',
@@ -3739,8 +3745,9 @@ export default function ChatPage() {
             return;
           }
           const finishedAt = Date.now();
-          const errorContent = message ? `[错误: ${code}] ${message}` : `[错误: ${code}]`;
-          logger.error('attach stream error', message ? `${code}: ${message}` : code);
+          const resolvedMessage = formatGatewayStreamErrorMessage(code, message);
+          const errorContent = `[错误: ${code}] ${resolvedMessage}`;
+          logger.error('attach stream error', `${code}: ${resolvedMessage}`);
           const attachErrorMsgId =
             currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId();
           const finalized = finalizeStreamMessage({
@@ -3766,7 +3773,7 @@ export default function ChatPage() {
           firstTokenLatencyAttached = finalized.firstTokenLatencyAttached;
           setSessionStateStatus('idle');
           resetStreamState();
-          setStreamError(message ? `${code}: ${message}` : code);
+          setStreamError(resolvedMessage);
           window.setTimeout(() => {
             void loadCurrentSessionSnapshot(sid, {
               expectedSessionViewEpoch: attachSessionViewEpoch,
@@ -4009,7 +4016,29 @@ export default function ChatPage() {
         description: '切换分屏代码编辑器',
         category: '视图',
         icon: '💻',
-        onExecute: () => setEditorMode(!editorMode),
+        onExecute: () =>
+          setEditorMode(
+            (() => {
+              const next = !editorMode;
+              if (!next) setEditorFullScreen(false);
+              return next;
+            })(),
+          ),
+      },
+      {
+        id: 'toggle-editor-fullscreen',
+        label: editorFullScreen ? '退出编辑器全屏' : '全屏编辑器/浏览器',
+        description: '让编辑器与浏览器工作区占据整个内容区',
+        category: '视图',
+        icon: '🖥',
+        onExecute: () => {
+          if (editorFullScreen) {
+            setEditorFullScreen(false);
+            return;
+          }
+          setEditorMode(true);
+          setEditorFullScreen(true);
+        },
       },
       {
         id: 'open-browser-preview',
@@ -4079,6 +4108,7 @@ export default function ChatPage() {
       messages,
       multiSelect,
       editorMode,
+      editorFullScreen,
       rightOpen,
       yoloMode,
       currentSessionId,
@@ -4088,6 +4118,7 @@ export default function ChatPage() {
       navigate,
       navigateToHome,
       setEditorMode,
+      setEditorFullScreen,
       setRightOpen,
       setRightTab,
       handleToggleYolo,
@@ -4304,15 +4335,23 @@ export default function ChatPage() {
         }
       >
         <div
+          aria-hidden={editorMode && editorFullScreen}
           style={{
             display: 'flex',
             flexDirection: 'column',
             flex: editorMode ? '0 0 auto' : 1,
-            width: editorMode ? 'calc(var(--split-pos) - 2.5px)' : '100%',
+            width:
+              editorMode && editorFullScreen
+                ? 0
+                : editorMode
+                  ? 'calc(var(--split-pos) - 2.5px)'
+                  : '100%',
             minWidth: 0,
             minHeight: 0,
             overflow: 'hidden',
-            transition: splitDragging.current ? 'none' : 'width 240ms ease',
+            opacity: editorMode && editorFullScreen ? 0 : 1,
+            pointerEvents: editorMode && editorFullScreen ? 'none' : undefined,
+            transition: splitDragging.current ? 'none' : 'width 240ms ease, opacity 180ms ease',
             position: 'relative',
           }}
         >
@@ -4351,10 +4390,25 @@ export default function ChatPage() {
                     onToggleYolo={handleToggleYolo}
                     editorMode={editorMode}
                     onToggleEditorMode={() =>
-                      startSessionSwitchTransition(() => setEditorMode(!editorMode))
+                      startSessionSwitchTransition(() => {
+                        const next = !editorMode;
+                        setEditorMode(next);
+                        if (!next) setEditorFullScreen(false);
+                      })
                     }
                     rightOpen={rightOpen}
                     onToggleRightOpen={() => setRightOpen((o) => !o)}
+                    editorFullScreen={editorFullScreen}
+                    onToggleEditorFullScreen={() =>
+                      startSessionSwitchTransition(() => {
+                        if (editorFullScreen) {
+                          setEditorFullScreen(false);
+                          return;
+                        }
+                        setEditorMode(true);
+                        setEditorFullScreen(true);
+                      })
+                    }
                     terminalsChip={
                       currentSessionId ? (
                         <SessionTerminalsChip
@@ -4415,7 +4469,7 @@ export default function ChatPage() {
                       // 内同步发生,触发 [Violation] 'click' handler
                       // took ~190ms。视觉切换走 React concurrent 调度。
                       startSessionSwitchTransition(() => {
-                        if (editorMode && editorPaneTab === 'code') {
+                        if (editorMode && editorPaneTab === 'code' && !editorFullScreen) {
                           setEditorMode(false);
                           return;
                         }
@@ -4425,7 +4479,7 @@ export default function ChatPage() {
                     }}
                     onActivateBrowserTab={() => {
                       startSessionSwitchTransition(() => {
-                        if (editorMode && editorPaneTab === 'browser') {
+                        if (editorMode && editorPaneTab === 'browser' && !editorFullScreen) {
                           setEditorMode(false);
                           return;
                         }
@@ -4743,11 +4797,22 @@ export default function ChatPage() {
           workspacePath={effectiveWorkingDirectory}
           activeTab={editorPaneTab}
           onTabChange={setEditorPaneTab}
+          fullScreen={editorFullScreen}
+          onToggleFullScreen={() =>
+            startSessionSwitchTransition(() => {
+              if (editorFullScreen) {
+                setEditorFullScreen(false);
+                return;
+              }
+              setEditorMode(true);
+              setEditorFullScreen(true);
+            })
+          }
         />
       </div>
 
       <ChatRightPanel
-        rightOpen={rightOpen}
+        rightOpen={rightOpen && !(editorMode && editorFullScreen)}
         rightTab={rightTab}
         setRightTab={setRightTab}
         selectedChildSessionId={selectedChildSessionId}

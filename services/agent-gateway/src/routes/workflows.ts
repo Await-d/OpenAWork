@@ -1,7 +1,12 @@
 import { randomUUID } from 'crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { FIXED_TEAM_CORE_ROLE_ORDER } from '@openAwork/shared';
+import {
+  DEFAULT_FIXED_TEAM_MEMBER_SLOTS,
+  FIXED_TEAM_CORE_ROLE_ORDER,
+  TEAM_RUNTIME_LAYER_ORDER,
+} from '@openAwork/shared';
+import type { TeamMemberSpecialty } from '@openAwork/shared';
 import type { JwtPayload } from '../infra/auth.js';
 import { parseBody } from '../infra/parse-request.js';
 import { requireAuth } from '../infra/auth.js';
@@ -10,13 +15,51 @@ import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { buildFixedTeamTemplateDefaultBindings } from '../team/team-template-metadata.js';
 import * as agentCore from '@openAwork/agent-core';
 import { resolveAuxiliaryLlmConfig } from '../provider/auxiliary-llm-config.js';
+import type { ResolvedAuxiliaryLlmConfig } from '../provider/auxiliary-llm-config.js';
 import { requestWorkflowLlmCompletion } from './workflow-llm.js';
+import { assignTeamModels, pickAnalysisModels } from '../team/team-model-assignment.js';
 
 type AgentCoreWithExtras = typeof agentCore & {
   PromptOptimizerImpl?: typeof agentCore.PromptOptimizerImpl;
   TranslationWorkflowImpl?: typeof agentCore.TranslationWorkflowImpl;
 };
 const { PromptOptimizerImpl, TranslationWorkflowImpl } = agentCore as AgentCoreWithExtras;
+
+const TEAM_MEMBER_SPECIALTY_VALUES = Array.from(
+  new Set<TeamMemberSpecialty>([
+    ...DEFAULT_FIXED_TEAM_MEMBER_SLOTS.map((slot) => slot.specialty),
+    'custom',
+  ]),
+) as [TeamMemberSpecialty, ...TeamMemberSpecialty[]];
+
+const teamTemplateMemberSlotSchema = z.object({
+  id: z.string().min(1).max(120),
+  layer: z.enum(TEAM_RUNTIME_LAYER_ORDER),
+  specialty: z.enum(TEAM_MEMBER_SPECIALTY_VALUES),
+  displayName: z.string().min(1).max(200),
+  personaKey: z.string().min(1).max(160),
+  toolsets: z.array(z.string().min(1).max(80)).max(20),
+  required: z.boolean(),
+  // 可选 per-member 模型绑定（智能分配模型功能；老数据无此字段，向后兼容）。
+  providerId: z.string().min(1).max(200).optional(),
+  modelId: z.string().min(1).max(200).optional(),
+  variant: z.string().min(1).max(80).optional(),
+  // 自定义角色字段（specialty === 'custom'）。
+  custom: z.boolean().optional(),
+  systemPrompt: z.string().max(8000).optional(),
+  // 模板初始能力绑定（skills / mcp）。
+  skillIds: z.array(z.string().min(1).max(160)).max(50).optional(),
+  mcpServerIds: z.array(z.string().min(1).max(160)).max(50).optional(),
+  // 路由关键词（上游派发动态识别成员擅长领域；自定义角色尤其需要）。
+  routingKeywords: z.array(z.string().min(1).max(160)).max(50).optional(),
+  // 派发优先级（同分排序权重）。
+  dispatchPriority: z.enum(['high', 'normal', 'low']).optional(),
+});
+
+const teamTemplateModelRefSchema = z.object({
+  providerId: z.string().min(1).max(200),
+  modelId: z.string().min(1).max(200),
+});
 
 const translateSchema = z.object({
   tasks: z
@@ -37,6 +80,37 @@ const optimizePromptSchema = z.object({
   context: z.string().optional(),
   targetAudience: z.string().optional(),
   candidateCount: z.number().int().min(1).max(5).optional(),
+});
+
+/** 「一键智能分配模型」请求体：候选池 + 各层画像 + 策略。 */
+const assignTeamModelsSchema = z.object({
+  strategy: z.enum(['quality', 'cost', 'balanced', 'single']),
+  pool: z
+    .array(
+      z.object({
+        providerId: z.string().min(1).max(200),
+        providerName: z.string().max(200).optional(),
+        modelId: z.string().min(1).max(200),
+        label: z.string().max(200).optional(),
+        contextWindow: z.number().int().nonnegative().optional(),
+        supportsTools: z.boolean().optional(),
+        supportsThinking: z.boolean().optional(),
+        supportsVision: z.boolean().optional(),
+        inputPricePerMillion: z.number().nonnegative().optional(),
+        outputPricePerMillion: z.number().nonnegative().optional(),
+      }),
+    )
+    .min(1)
+    .max(80),
+  layers: z
+    .array(
+      z.object({
+        layer: z.enum(TEAM_RUNTIME_LAYER_ORDER),
+        memberLabels: z.array(z.string().min(1).max(200)).max(20).default([]),
+      }),
+    )
+    .min(1)
+    .max(TEAM_RUNTIME_LAYER_ORDER.length),
 });
 
 const roleBindingSchema = z.object({
@@ -61,10 +135,18 @@ const createTemplateSchema = z.object({
             })
             .optional(),
           defaultProvider: z.string().nullable().optional(),
+          memberSlots: z.array(teamTemplateMemberSlotSchema).max(40).optional(),
+          modelPool: z.array(teamTemplateModelRefSchema).max(60).optional(),
+          modelAssignStrategy: z.enum(['quality', 'cost', 'balanced', 'single']).optional(),
           optionalAgentIds: z.array(z.string().min(1)).optional(),
           requiredRoles: z
             .array(z.enum(['leader', 'planner', 'researcher', 'executor', 'reviewer']))
             .optional(),
+          templateScale: z.enum(['small', 'medium', 'large', 'full']).nullable().optional(),
+          templateFocus: z.string().max(200).nullable().optional(),
+          recommendedFor: z.string().max(200).nullable().optional(),
+          recommendedDefault: z.boolean().nullable().optional(),
+          templatePriority: z.number().nullable().optional(),
         })
         .optional(),
     })
@@ -88,6 +170,52 @@ interface TemplateRow {
   updated_at: string;
 }
 
+const WORKFLOW_ROUTE_ERROR_MESSAGES = {
+  templateNotFound: '目标工作流模板不存在。',
+} as const;
+
+interface WorkflowTemplateView {
+  id: string;
+  name: string;
+  description: string | null;
+  category: string;
+  metadata: Record<string, unknown>;
+  nodes: unknown[];
+  edges: unknown[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Corrupt-row tolerance (§0.89-§0.91 class): `metadata_json` / `nodes_json` /
+// `edges_json` are persisted via `JSON.stringify`, but a crash mid-write, a
+// disk error, or a hand-edited DB can leave a column that is not valid JSON.
+// The list route does `rows.map(...)`, so a SINGLE corrupt template row used
+// to throw and 500 the WHOLE `/workflows/templates` list — i.e. every template
+// became unreadable. This variant returns `null` + warn so the list path can
+// skip the bad row and the rest still loads.
+function tryTemplateRowToView(row: TemplateRow): WorkflowTemplateView | null {
+  try {
+    return {
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      category: row.category,
+      metadata: JSON.parse(row.metadata_json || '{}') as Record<string, unknown>,
+      nodes: JSON.parse(row.nodes_json) as unknown[],
+      edges: JSON.parse(row.edges_json) as unknown[],
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  } catch (error) {
+    console.warn(
+      `[workflows] 模板 ${row.id} JSON 解析失败，已跳过：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return null;
+  }
+}
+
 export async function workflowRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     '/workflows/templates',
@@ -107,27 +235,16 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
       queryStep.succeed(undefined, { templates: rows.length });
 
       const parseStep = child('parse-json');
-      try {
-        const templates = rows.map((row) => ({
-          id: row.id,
-          name: row.name,
-          description: row.description,
-          category: row.category,
-          metadata: JSON.parse(row.metadata_json || '{}') as Record<string, unknown>,
-          nodes: JSON.parse(row.nodes_json) as unknown[],
-          edges: JSON.parse(row.edges_json) as unknown[],
-          createdAt: row.created_at,
-          updatedAt: row.updated_at,
-        }));
-        parseStep.succeed(undefined, { templates: templates.length });
-        step.succeed(undefined, { templates: templates.length });
-        return reply.send(templates);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'invalid template JSON';
-        parseStep.fail(message);
-        step.fail(message);
-        throw error;
-      }
+      // Skip any corrupt row instead of failing the whole list: one bad
+      // template must not make every template unreadable (§0.89-§0.91 class).
+      const templates = rows.flatMap((row) => {
+        const view = tryTemplateRowToView(row);
+        return view ? [view] : [];
+      });
+      const skipped = rows.length - templates.length;
+      parseStep.succeed(undefined, { templates: templates.length, skipped });
+      step.succeed(undefined, { templates: templates.length, skipped });
+      return reply.send(templates);
     },
   );
 
@@ -273,6 +390,79 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  app.post(
+    '/workflows/assign-team-models',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'workflow.team.assign-models');
+      const body = parseBody(assignTeamModelsSchema, request.body);
+
+      const user = request.user as JwtPayload;
+      // 多 provider 容错：候选池里每个 provider 取最强模型作为「分析候选」，
+      // 按能力从高到低逐个尝试其凭证调上游；若某 provider 报错（如 Invalid JSON
+      // response / 鉴权 / 模型不存在），自动换下一个。全部失败再回退 fast/active。
+      const analysisModels = pickAnalysisModels(body.pool);
+      const candidateConfigs: ResolvedAuxiliaryLlmConfig[] = [];
+      for (const m of analysisModels) {
+        const cfg = await resolveAuxiliaryLlmConfig(user.sub, m);
+        if (cfg && !candidateConfigs.some((c) => c.apiBaseUrl === cfg.apiBaseUrl && c.model === cfg.model)) {
+          candidateConfigs.push(cfg);
+        }
+      }
+      // 兜底：池里没解析出任何可用凭证时，退回纯 fast/active 选择。
+      if (candidateConfigs.length === 0) {
+        const fallbackCfg = await resolveAuxiliaryLlmConfig(user.sub);
+        if (fallbackCfg) candidateConfigs.push(fallbackCfg);
+      }
+      if (candidateConfigs.length === 0) {
+        step.fail('no llm config');
+        return reply.status(503).send({
+          error:
+            '智能分配模型未找到可用模型：请在 设置 → 提供商 中启用一个「快速 / 内联」或「会话」模型并填写 API Key，或在网关环境变量中设置 AI_API_BASE_URL 与 AI_API_KEY 后重启网关。',
+        });
+      }
+
+      try {
+        const callers = candidateConfigs.map(
+          (cfg) => (prompt: string) =>
+            requestWorkflowLlmCompletion({
+              apiBaseUrl: cfg.apiBaseUrl,
+              apiKey: cfg.apiKey,
+              model: cfg.model,
+              ...(cfg.providerType ? { providerType: cfg.providerType } : {}),
+              ...(cfg.upstreamProtocol ? { upstreamProtocol: cfg.upstreamProtocol } : {}),
+              prompt,
+              // 低温度让结构化 JSON 输出更稳定。
+              temperature: 0.2,
+              // 池大 / 层多 + 推理模型会额外产出思考 token，给足输出预算避免 JSON 被截断。
+              maxOutputTokens: 4096,
+            }),
+        );
+        const result = await assignTeamModels(
+          {
+            strategy: body.strategy,
+            pool: body.pool,
+            layers: body.layers,
+          },
+          callers,
+        );
+        step.succeed(undefined, {
+          assignments: result.assignments.length,
+          source: result.source,
+          candidates: candidateConfigs.length,
+          ...(result.fallbackReasonCode ? { fallbackReason: result.fallbackReasonCode } : {}),
+          ...(result.fallbackMessage ? { fallbackMessage: result.fallbackMessage } : {}),
+          ...(result.llmRawSnippet ? { llmRawSnippet: result.llmRawSnippet } : {}),
+        });
+        return reply.send(result);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        step.fail(message);
+        return reply.status(500).send({ error: `智能分配模型失败：${message}` });
+      }
+    },
+  );
+
   app.patch(
     '/workflows/templates/:id',
     { onRequest: [requireAuth] },
@@ -290,7 +480,7 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
       if (!existing) {
         lookupStep.fail('template not found');
         step.fail('template not found');
-        return reply.status(404).send({ error: 'Template not found' });
+        return reply.status(404).send({ error: WORKFLOW_ROUTE_ERROR_MESSAGES.templateNotFound });
       }
       lookupStep.succeed();
 
@@ -311,6 +501,11 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
                   })
                   .optional(),
                 defaultProvider: z.string().nullable().optional(),
+                memberSlots: z.array(teamTemplateMemberSlotSchema).max(40).optional(),
+                modelPool: z.array(teamTemplateModelRefSchema).max(60).optional(),
+                modelAssignStrategy: z
+                  .enum(['quality', 'cost', 'balanced', 'single'])
+                  .optional(),
                 optionalAgentIds: z.array(z.string().min(1)).optional(),
                 requiredRoles: z
                   .array(z.enum(['leader', 'planner', 'researcher', 'executor', 'reviewer']))
@@ -413,7 +608,7 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
       if (!row) {
         lookupStep.fail('template not found');
         step.fail('template not found');
-        return reply.status(404).send({ error: 'Template not found' });
+        return reply.status(404).send({ error: WORKFLOW_ROUTE_ERROR_MESSAGES.templateNotFound });
       }
       lookupStep.succeed();
 

@@ -24,7 +24,7 @@ const HEADER_STYLE: CSSProperties = {
   gap: 8,
   padding: '8px 16px',
   borderBottom: '1px solid color-mix(in srgb, var(--border-default) 20%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 3%, var(--bg-overlay)',
+  background: 'color-mix(in srgb, var(--accent) 3%, var(--bg-overlay))',
   flexShrink: 0,
   flexWrap: 'wrap',
   minHeight: 36,

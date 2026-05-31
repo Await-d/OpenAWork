@@ -3,6 +3,10 @@ import type { SkillManifest } from '@openAwork/skill-types';
 import { BUILTIN_SKILLS } from '@openAwork/skills';
 import { z } from 'zod';
 import { sqliteAll, sqliteGet } from '../infra/db.js';
+import {
+  readResponseTextWithLimit,
+  resolveHttpBodyLimitBytes,
+} from '../infra/http-body-limit.js';
 import type { EffectiveSkill } from './skill-selection.js';
 
 const skillInputSchema = z
@@ -98,8 +102,27 @@ export function renderSkillReferenceFilesBlock(manifest: SkillManifestLike): str
   ];
 }
 
-function parseManifest(raw: string): SkillManifestLike {
-  return JSON.parse(raw) as SkillManifestLike;
+/**
+ * Parse an installed skill's `manifest_json` for the `findInstalledSkill`
+ * scan below. That loop walks EVERY enabled installed skill (ordered by
+ * recency) to resolve a skill by name; an unguarded `JSON.parse` on a single
+ * corrupt `manifest_json` row (crash mid-write, disk error, hand-edited DB)
+ * used to throw the whole loop — and since it is recency-ordered, one bad
+ * manifest made the `skill` tool unable to resolve ANY skill, not just the
+ * corrupt one. Return null + warn so the scan skips the bad row and the rest
+ * still resolve. (§0.94 single-point-failure-isolation class.)
+ */
+function tryParseManifest(raw: string): SkillManifestLike | null {
+  try {
+    return JSON.parse(raw) as SkillManifestLike;
+  } catch (err) {
+    console.warn(
+      `[skill-tools] installed_skills manifest_json 解析失败，已跳过：${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return null;
+  }
 }
 
 function matchesRequestedSkill(
@@ -155,13 +178,38 @@ function findBuiltinSkillContent(name: string): string | null {
   return buildBuiltinSkillContent(entry.manifest);
 }
 
-async function fetchSkillText(manifestUrl: string): Promise<string> {
-  const response = await fetch(manifestUrl);
+/**
+ * Remote skill content lives at an arbitrary `manifestUrl`. Without a
+ * timeout a hung endpoint would block the `skill` tool until the agent
+ * run's own 30s tool budget elapses (and on some transports never abort
+ * the socket). Bound the request explicitly so a slow CDN surfaces as a
+ * clean error the model can recover from.
+ */
+const SKILL_CONTENT_FETCH_TIMEOUT_MS = 15_000;
+// Remote SKILL.md content is arbitrary registry/CDN-supplied; cap the bytes
+// read into memory so a huge/hostile response can't OOM the gateway (§0.86,
+// same memory-bound invariant as webfetch §0.85). <=0 disables the cap.
+const DEFAULT_SKILL_CONTENT_MAX_BYTES = 5 * 1024 * 1024;
+
+export async function fetchSkillText(manifestUrl: string): Promise<string> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), SKILL_CONTENT_FETCH_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(manifestUrl, { signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
   if (!response.ok) {
+    // Release the unused body socket promptly before surfacing the error.
+    await response.body?.cancel().catch(() => undefined);
     throw new Error(`Failed to fetch skill content: HTTP ${response.status}`);
   }
 
-  return response.text();
+  return readResponseTextWithLimit(
+    response,
+    resolveHttpBodyLimitBytes('OPENAWORK_SKILL_CONTENT_MAX_BYTES', DEFAULT_SKILL_CONTENT_MAX_BYTES),
+  );
 }
 
 function findInstalledSkill(
@@ -178,7 +226,8 @@ function findInstalledSkill(
   );
 
   for (const row of rows) {
-    const manifest = parseManifest(row.manifest_json);
+    const manifest = tryParseManifest(row.manifest_json);
+    if (!manifest) continue;
     if (matchesRequestedSkill(name, manifest, row.skill_id)) {
       return {
         skillId: row.skill_id,
@@ -207,7 +256,19 @@ function findCachedSkillEntry(
     return null;
   }
 
-  return JSON.parse(row.entry_json) as SkillEntryLike;
+  // Tolerant parse: a corrupt cache row must degrade to "no cache hit" (the
+  // caller then falls back to builtin / manifest content) rather than throw
+  // out of the `skill` tool's execute path.
+  try {
+    return JSON.parse(row.entry_json) as SkillEntryLike;
+  } catch (err) {
+    console.warn(
+      `[skill-tools] registry_source_skill_cache entry_json 解析失败，已忽略缓存：${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return null;
+  }
 }
 
 export interface CreateSkillToolOptions {

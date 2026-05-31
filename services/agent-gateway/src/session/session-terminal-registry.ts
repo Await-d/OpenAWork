@@ -600,17 +600,32 @@ export function reconcileStaleRunningTerminalsAtBoot(): number {
   const rows = sqliteAll<{ terminal_id: string }>(
     `SELECT terminal_id FROM session_terminals WHERE status = 'running'`,
   );
+  let staleCount = 0;
   for (const row of rows) {
-    sqliteRun(
-      `UPDATE session_terminals
-         SET status = 'stale',
-             ended_at_ms = COALESCE(ended_at_ms, ?),
-             last_activity_ms = ?
-       WHERE terminal_id = ?`,
-      [now, now, row.terminal_id],
-    );
+    // Per-row resilience: one row's UPDATE throwing (DB lock / disk error)
+    // must not abort the rest of the sweep — that would leave the remaining
+    // ghost terminals stuck showing `running` in the UI after a restart. This
+    // runs at boot, so isolate per row + warn, and return the ACTUAL number of
+    // rows flipped to `stale` rather than the planned row count. (§0.104 class.)
+    try {
+      sqliteRun(
+        `UPDATE session_terminals
+           SET status = 'stale',
+               ended_at_ms = COALESCE(ended_at_ms, ?),
+               last_activity_ms = ?
+         WHERE terminal_id = ?`,
+        [now, now, row.terminal_id],
+      );
+      staleCount += 1;
+    } catch (error) {
+      console.warn(
+        `[session-terminals] boot 期标记陈旧终端失败，已跳过：${row.terminal_id}：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
-  return rows.length;
+  return staleCount;
 }
 
 export function deleteTerminalRecord(input: { terminalId: string; userId: string }): {

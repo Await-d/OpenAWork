@@ -25,7 +25,7 @@ const WIZARD_STYLE: CSSProperties = {
   padding: 16,
   borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 86%, var(--bg-base)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 86%, var(--bg-base))',
 };
 
 const STEP_BAR_STYLE: CSSProperties = {
@@ -94,9 +94,9 @@ export function ArtifactChainWizard({
               style={{
                 ...STEP_BUTTON_STYLE,
                 background: isActive
-                  ? 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay)'
+                  ? 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay))'
                   : isPast
-                    ? 'color-mix(in srgb, var(--success) 8%, var(--bg-overlay)'
+                    ? 'color-mix(in srgb, var(--success) 8%, var(--bg-overlay))'
                     : 'transparent',
                 borderColor: isActive
                   ? 'color-mix(in srgb, var(--accent) 40%, transparent)'
@@ -134,7 +134,7 @@ export function ArtifactChainWizard({
                   padding: '8px 12px',
                   borderRadius: 8,
                   border: '1px solid color-mix(in srgb, var(--danger) 30%, transparent)',
-                  background: 'color-mix(in srgb, var(--danger) 6%, var(--bg-overlay)',
+                  background: 'color-mix(in srgb, var(--danger) 6%, var(--bg-overlay))',
                   fontSize: 12,
                 }}
               >
@@ -161,8 +161,8 @@ export function ArtifactChainWizard({
                     border: `1px solid ${w.status === 'conflict' ? 'color-mix(in srgb, var(--danger) 40%, transparent)' : 'color-mix(in srgb, var(--warning) 40%, transparent)'}`,
                     background:
                       w.status === 'conflict'
-                        ? 'color-mix(in srgb, var(--danger) 6%, var(--bg-overlay)'
-                        : 'color-mix(in srgb, var(--warning) 6%, var(--bg-overlay)',
+                        ? 'color-mix(in srgb, var(--danger) 6%, var(--bg-overlay))'
+                        : 'color-mix(in srgb, var(--warning) 6%, var(--bg-overlay))',
                   }}
                 >
                   {w.status === 'conflict' ? '❌' : '⚠️'} {w.clause}：{w.note}

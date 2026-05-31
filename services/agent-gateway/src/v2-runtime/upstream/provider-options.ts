@@ -22,6 +22,11 @@
  *   - gemini      → providerOptions.gemini.body.google.thinking_config
  *   - qwen        → providerOptions.qwen.body.enable_thinking
  *   - moonshot    → providerOptions.moonshot.body.thinking
+ *   - mimo        → providerOptions.mimo.body.thinking
+ *
+ * 注：自 catalog 化后，这些分支由 `resolveThinkingStyle(providerType)` 派生的
+ * 「风格」驱动(见 `agent-core/provider/catalog.ts`)，新增平台复用已有风格时
+ * 不必在本文件新增分支。
  *
  * NOT covered yet:
  *   - OpenAI Responses API `previous_response_id` continuation
@@ -30,6 +35,7 @@
  */
 
 import type { JSONValue, SharedV2ProviderOptions } from '@ai-sdk/provider';
+import { resolveThinkingStyle, catalogModelSupportsThinking } from '@openAwork/agent-core';
 
 export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
@@ -265,15 +271,6 @@ function supportsOpenRouterReasoning(model: string): boolean {
   return model.includes('gpt') || model.includes('claude') || model.includes('gemini-3');
 }
 
-function isMoonshotThinkingModel(model: string): boolean {
-  return (
-    model.includes('kimi-k2.5') ||
-    model.includes('kimi-k2-thinking') ||
-    model.includes('kimi-k2p5') ||
-    model.includes('kimi-k2-5')
-  );
-}
-
 const SLUG_OVERRIDES: Record<string, string> = {
   amazon: 'bedrock',
 };
@@ -433,9 +430,12 @@ export function buildProviderOptions(input: {
     model: input.model,
   });
 
-  switch (thinking.providerType) {
-    case 'anthropic':
-    case 'claude': {
+  // 由 catalog 把 providerType 映射到 thinking「风格」，新增平台复用已有风格时
+  // 无需在此新增 case——只在 catalog 里声明 thinkingStyle 即可。
+  const style = resolveThinkingStyle(thinking.providerType);
+
+  switch (style) {
+    case 'anthropic_budget': {
       const anthropic: Record<string, JSONValue> = {
         // We always send reasoning back to upstream so multi-turn
         // tool flows preserve thinking continuity (matches the
@@ -453,7 +453,7 @@ export function buildProviderOptions(input: {
       return providerOptions(modelInfo, anthropic);
     }
 
-    case 'openai': {
+    case 'openai_effort': {
       // Chat-completions path only. The Responses API (`reasoning:
       // { effort, summary }`) needs `@ai-sdk/openai`, which is not
       // wired in yet — see PROGRESS.md.
@@ -468,7 +468,7 @@ export function buildProviderOptions(input: {
       });
     }
 
-    case 'openrouter': {
+    case 'openrouter_reasoning': {
       if (!supportsOpenRouterReasoning(model)) {
         return undefined;
       }
@@ -482,7 +482,7 @@ export function buildProviderOptions(input: {
       });
     }
 
-    case 'deepseek': {
+    case 'deepseek_thinking': {
       if (!thinking.enabled) {
         return undefined;
       }
@@ -496,7 +496,7 @@ export function buildProviderOptions(input: {
       });
     }
 
-    case 'gemini': {
+    case 'gemini_thinking': {
       if (!thinking.enabled) {
         if (model.includes('gemini-3')) {
           // gemini-3 only accepts thinking_level (string), not numeric
@@ -539,14 +539,17 @@ export function buildProviderOptions(input: {
       });
     }
 
-    case 'qwen': {
+    case 'qwen_enable_thinking': {
       return providerOptions(modelInfo, {
         body: { enable_thinking: thinking.enabled },
       });
     }
 
-    case 'moonshot': {
-      if (!isMoonshotThinkingModel(model)) {
+    case 'body_thinking_type': {
+      // body.thinking = { type: 'enabled' | 'disabled' } —— Moonshot / 小米 MiMo
+      // 等使用这种 chat-completions body 字段。部分平台仅特定模型支持(如
+      // Moonshot 仅 kimi-k2.5 系列)，由 catalog 的 thinkingModelMatcher 决定。
+      if (!catalogModelSupportsThinking(thinking.providerType, model)) {
         return undefined;
       }
       return providerOptions(modelInfo, {
@@ -554,6 +557,7 @@ export function buildProviderOptions(input: {
       });
     }
 
+    case 'none':
     default:
       return undefined;
   }

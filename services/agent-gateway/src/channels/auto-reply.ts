@@ -44,6 +44,23 @@ export class AutoReplyPipeline {
   }
 
   async handle(event: ChannelEvent): Promise<void> {
+    // `handle` is invoked fire-and-forget (`void autoReply.handle(event)`)
+    // from the channel notify hook. Any rejection that escapes here becomes
+    // an unhandled promise rejection, so the entire body is wrapped to
+    // guarantee the pipeline absorbs and logs faults instead of crashing the
+    // process.
+    try {
+      await this.handleInternal(event);
+    } catch (err) {
+      const pluginId = event.type === 'message' ? event.pluginId : 'unknown';
+      console.error('[auto-reply] unhandled channel event failure', {
+        pluginId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  private async handleInternal(event: ChannelEvent): Promise<void> {
     if (event.type !== 'message') return;
 
     const { pluginId, message } = event;
@@ -85,7 +102,12 @@ export class AutoReplyPipeline {
         });
         await handle.finish(response);
       } catch (err) {
-        await handle.finish(`Error: ${err instanceof Error ? err.message : String(err)}`);
+        // The recovery `finish` reuses the same (possibly broken) upstream
+        // connection, so it can itself throw — guard it so the failure is
+        // logged rather than re-thrown into `handle`'s wrapper.
+        await this.safeSend(pluginId, () =>
+          handle.finish(`Error: ${err instanceof Error ? err.message : String(err)}`),
+        );
       }
     } else {
       try {
@@ -97,11 +119,30 @@ export class AutoReplyPipeline {
         });
         await service.sendMessage(message.chatId, response);
       } catch (err) {
-        await service.sendMessage(
-          message.chatId,
-          `Error: ${err instanceof Error ? err.message : String(err)}`,
+        await this.safeSend(pluginId, () =>
+          service.sendMessage(
+            message.chatId,
+            `Error: ${err instanceof Error ? err.message : String(err)}`,
+          ),
         );
       }
+    }
+  }
+
+  /**
+   * Run an error-notification send without letting its own transport
+   * failure escape. The catch path already lost the primary response; a
+   * second failure (e.g. the channel API is still unreachable) must not
+   * turn into an unhandled rejection.
+   */
+  private async safeSend(pluginId: string, send: () => Promise<unknown>): Promise<void> {
+    try {
+      await send();
+    } catch (err) {
+      console.error('[auto-reply] failed to deliver error notice to channel', {
+        pluginId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 }

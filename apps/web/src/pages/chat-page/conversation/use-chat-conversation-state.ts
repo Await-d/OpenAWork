@@ -64,7 +64,10 @@ import {
   type ChatSettingsProvider,
 } from '../../../utils/chat/chat-session-defaults.js';
 import { useTeamNotificationStore } from '../../../stores/team/team-events.js';
-import { useGatewayClient } from '../../../hooks/gateway/useGatewayClient.js';
+import {
+  formatGatewayStreamErrorMessage,
+  useGatewayClient,
+} from '../../../hooks/gateway/useGatewayClient.js';
 import { usePrefersReducedMotion } from '../../../hooks/ui/usePrefersReducedMotion.js';
 import { useScrollManager } from '../../../components/conversation-runtime/scroll/use-scroll-manager.js';
 import { useStreamReveal } from '../../../components/conversation-runtime/reveal/use-stream-reveal.js';
@@ -530,10 +533,10 @@ export function useChatConversationState(
   const submitInbound = useCallback<SessionConversationState['submitInbound']>(
     async (messageType, payload, opts) => {
       if (!sessionId) {
-        throw new Error('submitInbound: sessionId is null');
+        throw new Error('当前会话不存在，无法提交团队消息。');
       }
       if (!token) {
-        throw new Error('submitInbound: token is missing');
+        throw new Error('未登录，无法提交团队消息。');
       }
       const inboundClient = createTeamInboundClient(gatewayUrl);
       return inboundClient.submit(token, sessionId, {
@@ -604,10 +607,10 @@ export function useChatConversationState(
   const startStream: SessionConversationState['startStream'] = useCallback(
     async (text, opts) => {
       if (!enableWriters) {
-        throw new Error('useSessionConversationState: enableWriters is false');
+        throw new Error('当前会话为只读模式，无法发送消息。');
       }
       if (!sessionId || !token) {
-        throw new Error('startStream: missing sessionId or token');
+        throw new Error('当前会话或登录状态无效，无法开始对话。');
       }
       if (streamingRef.current) {
         // already streaming; reject silently
@@ -676,7 +679,7 @@ export function useChatConversationState(
           streamingRef.current = false;
           setStreaming(false);
           setStoppingStream(false);
-          setStreamError(message ?? code);
+          setStreamError(formatGatewayStreamErrorMessage(code, message));
         },
       });
     },
@@ -725,10 +728,10 @@ export function useChatConversationState(
   const replyPermission: SessionConversationState['replyPermission'] = useCallback(
     async (requestId, decision, feedback) => {
       if (!enableWriters) {
-        throw new Error('replyPermission: enableWriters is false');
+        throw new Error('当前会话为只读模式，无法处理权限请求。');
       }
       if (!sessionId || !token) {
-        throw new Error('replyPermission: missing sessionId or token');
+        throw new Error('当前会话或登录状态无效，无法处理权限请求。');
       }
       await createPermissionsClient(gatewayUrl).reply(token, sessionId, {
         requestId,
@@ -745,10 +748,10 @@ export function useChatConversationState(
   const replyQuestion: SessionConversationState['replyQuestion'] = useCallback(
     async (requestId, status, answers) => {
       if (!enableWriters) {
-        throw new Error('replyQuestion: enableWriters is false');
+        throw new Error('当前会话为只读模式，无法处理提问请求。');
       }
       if (!sessionId || !token) {
-        throw new Error('replyQuestion: missing sessionId or token');
+        throw new Error('当前会话或登录状态无效，无法处理提问请求。');
       }
       await createQuestionsClient(gatewayUrl).reply(token, sessionId, {
         requestId,

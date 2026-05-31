@@ -600,6 +600,11 @@ async fn authenticate_desktop_gateway(
 
     let response = reqwest::Client::new()
         .post(format!("http://127.0.0.1:{port}/auth/desktop-default"))
+        // §0.151: bound a connects-but-hangs sidecar — reqwest has NO default
+        // timeout, so without this a wedged gateway leaves this await pending
+        // forever (desktop login / settings panel freezes). Generous 30s (vs the
+        // 2s liveness pings) to never falsely trip on server-side argon2 hashing.
+        .timeout(Duration::from_secs(30))
         .header("X-OpenAWork-Desktop-Auth", desktop_auth_token)
         .json(&serde_json::json!({
             "deviceName": "OpenAWork Desktop",
@@ -641,6 +646,11 @@ async fn admin_password_status(
 
     let response = reqwest::Client::new()
         .get(format!("http://127.0.0.1:{port}/auth/admin-password-status"))
+        // §0.151: bound a connects-but-hangs sidecar — reqwest has NO default
+        // timeout, so without this a wedged gateway leaves this await pending
+        // forever (desktop login / settings panel freezes). Generous 30s (vs the
+        // 2s liveness pings) to never falsely trip on server-side argon2 hashing.
+        .timeout(Duration::from_secs(30))
         .header("X-OpenAWork-Desktop-Auth", desktop_auth_token)
         .send()
         .await
@@ -671,6 +681,11 @@ async fn admin_set_password(
 
     let response = reqwest::Client::new()
         .post(format!("http://127.0.0.1:{port}/auth/admin-set-password"))
+        // §0.151: bound a connects-but-hangs sidecar — reqwest has NO default
+        // timeout, so without this a wedged gateway leaves this await pending
+        // forever (desktop login / settings panel freezes). Generous 30s (vs the
+        // 2s liveness pings) to never falsely trip on server-side argon2 hashing.
+        .timeout(Duration::from_secs(30))
         .header("X-OpenAWork-Desktop-Auth", desktop_auth_token)
         .json(&serde_json::json!({ "newPassword": new_password }))
         .send()

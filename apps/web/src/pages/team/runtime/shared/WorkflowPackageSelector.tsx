@@ -17,7 +17,7 @@ const CARD_STYLE: CSSProperties = {
   padding: 12,
   borderRadius: 10,
   border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base))',
   cursor: 'pointer',
   transition: 'border-color 150ms ease, background 150ms ease',
 };
@@ -66,7 +66,7 @@ export function WorkflowPackageSelector({
                 ? 'color-mix(in srgb, var(--accent) 60%, transparent)'
                 : 'color-mix(in srgb, var(--border-default) 72%, transparent)',
               background: isSelected
-                ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay)'
+                ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))'
                 : CARD_STYLE.background,
             }}
             onClick={() => onSelect(pkg.id)}
@@ -99,7 +99,7 @@ export function WorkflowPackageSelector({
                       color: 'var(--fg-muted)',
                       padding: '1px 4px',
                       borderRadius: 3,
-                      background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
+                      background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
                     }}
                   >
                     {tag}

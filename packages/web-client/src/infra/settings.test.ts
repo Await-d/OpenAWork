@@ -1,0 +1,136 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { createSettingsClient } from './settings.js';
+
+const originalFetch = globalThis.fetch;
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+  vi.restoreAllMocks();
+});
+
+describe('createSettingsClient.getProvidersResult', () => {
+  it('成功时返回 providers 载荷', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({ providers: [{ id: 'openai' }] }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createSettingsClient('http://localhost:3000');
+    const result = await client.getProvidersResult('token-1', { enabledOnly: true });
+
+    expect(result).toMatchObject({
+      ok: true,
+      retryable: false,
+      providers: { providers: [{ id: 'openai' }] },
+    });
+  });
+
+  it('HTTP 错误时返回结构化失败信息', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: false,
+        status: 503,
+        json: async () => ({ error: 'providers unavailable' }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createSettingsClient('http://localhost:3000');
+    const result = await client.getProvidersResult('token-1');
+
+    expect(result).toMatchObject({
+      ok: false,
+      retryable: true,
+      errorMessage: 'providers unavailable',
+      status: 503,
+    });
+  });
+
+  it('getProvidersResult 会读取 ApiErrorResponse.data.message', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: false,
+        status: 400,
+        json: async () => ({
+          name: 'BadRequest',
+          data: { message: '请求体参数无效。', kind: 'Body' },
+        }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createSettingsClient('http://localhost:3000');
+    const result = await client.getProvidersResult('token-1');
+
+    expect(result).toMatchObject({
+      ok: false,
+      retryable: false,
+      errorMessage: '请求体参数无效。',
+      status: 400,
+    });
+  });
+});
+
+describe('createSettingsClient mutation error handling', () => {
+  it('putProviders 会保留后端 error 文案', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: false,
+        status: 409,
+        json: async () => ({ error: 'provider config conflict' }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createSettingsClient('http://localhost:3000');
+
+    await expect(
+      client.putProviders('token-1', {
+        providers: [],
+      }),
+    ).rejects.toThrow('provider config conflict');
+  });
+
+  it('retryMcpServer 网络异常时会转换成中文网络错误', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error('Failed to fetch');
+    }) as typeof fetch;
+
+    const client = createSettingsClient('http://localhost:3000');
+
+    await expect(client.retryMcpServer('token-1', 'mcp-1')).rejects.toThrow(
+      '网络异常，重试 MCP 服务连接失败。',
+    );
+  });
+
+  it('putWebsearch 在 403 时会给出权限文案', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: false,
+        status: 403,
+        json: async () => ({}),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createSettingsClient('http://localhost:3000');
+
+    await expect(
+      client.putWebsearch('token-1', {
+        providers: [],
+        rolloutMode: 'sequential',
+      }),
+    ).rejects.toThrow('认证失效或当前账号无权保存 Websearch 策略。');
+  });
+
+  it('clearDiagnostics 在网络异常时会转换成中文网络错误', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error('Failed to fetch');
+    }) as typeof fetch;
+
+    const client = createSettingsClient('http://localhost:3000');
+
+    await expect(client.clearDiagnostics('token-1')).rejects.toThrow(
+      '网络异常，清空诊断信息失败。',
+    );
+  });
+});

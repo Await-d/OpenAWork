@@ -351,7 +351,7 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
 
   const handleOptimizePrompt = useCallback(
     async (text: string): Promise<PromptOptimizerResult> => {
-      if (!token) throw new Error('未登录');
+      if (!token) throw new Error('未登录，无法优化提示词。');
       const client = createWorkflowsClient(gatewayUrl);
       return client.optimizePrompt(token, {
         originalPrompt: text,

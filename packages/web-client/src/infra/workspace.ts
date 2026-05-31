@@ -12,7 +12,17 @@
  * 所有方法返回原始负载，错误统一抛 `HttpError`，由调用方决定文案。
  */
 
-import { authHeader, expectJson, HttpError, jsonAuthHeaders, withQuery } from '../gateway/http.js';
+import {
+  authHeader,
+  extractJsonErrorMessage,
+  HttpError,
+  isGenericFetchErrorMessage,
+  jsonAuthHeaders,
+  readJsonErrorData,
+  type JsonErrorData,
+  withQuery,
+  fetchWithTimeout,
+} from '../gateway/http.js';
 
 export interface FileTreeNode {
   path: string;
@@ -65,15 +75,56 @@ export interface SessionWorkspaceUpdateResponse {
   workingDirectory?: string | null;
 }
 
+export interface WorkspaceRootsLoadResult {
+  errorMessage?: string;
+  ok: boolean;
+  retryable: boolean;
+  roots: string[];
+  status?: number;
+}
+
+export interface WorkspaceTreeLoadResult {
+  errorMessage?: string;
+  nodes: FileTreeNode[];
+  ok: boolean;
+  retryable: boolean;
+  status?: number;
+}
+
+export interface WorkspaceReviewStatusLoadResult {
+  changes: WorkspaceReviewChange[];
+  errorMessage?: string;
+  ok: boolean;
+  retryable: boolean;
+  status?: number;
+}
+
+export interface WorkspaceFileLoadResult {
+  errorMessage?: string;
+  file?: WorkspaceFileContent;
+  ok: boolean;
+  retryable: boolean;
+  status?: number;
+}
+
 export interface WorkspaceClient {
   /** GET `/workspace/root`，返回所有工作区根目录的 `roots` 数组（旧版本只回 `root` 字段也兼容）。 */
   listRoots(token: string, options?: { signal?: AbortSignal }): Promise<string[]>;
+  listRootsResult(
+    token: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<WorkspaceRootsLoadResult>;
   /** GET `/workspace/tree?path=&depth=`，返回展开 `depth` 层的目录树。 */
   fetchTree(
     token: string,
     path: string,
     options?: { depth?: number; signal?: AbortSignal },
   ): Promise<FileTreeNode[]>;
+  fetchTreeResult(
+    token: string,
+    path: string,
+    options?: { depth?: number; signal?: AbortSignal },
+  ): Promise<WorkspaceTreeLoadResult>;
   /**
    * GET `/workspace/file?path=&workspaceRoot=`,读取单个文件内容（含 `truncated` 标志）。
    *
@@ -86,6 +137,11 @@ export interface WorkspaceClient {
     path: string,
     options?: { signal?: AbortSignal; workspaceRoot?: string },
   ): Promise<WorkspaceFileContent>;
+  readFileResult(
+    token: string,
+    path: string,
+    options?: { signal?: AbortSignal; workspaceRoot?: string },
+  ): Promise<WorkspaceFileLoadResult>;
   /**
    * GET `/workspace/file/binary?path=&workspaceRoot=`,读取文件原始字节。
    *
@@ -133,6 +189,11 @@ export interface WorkspaceClient {
     path: string,
     options?: { signal?: AbortSignal },
   ): Promise<WorkspaceReviewChange[]>;
+  reviewStatusResult(
+    token: string,
+    path: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<WorkspaceReviewStatusLoadResult>;
   /** GET `/workspace/review/diff?path=&filePath=`，返回单文件 diff 文本。 */
   reviewDiff(
     token: string,
@@ -173,15 +234,159 @@ function buildPathParams(
   return params;
 }
 
+function isRetryableWorkspaceStatus(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+function buildWorkspaceRootsErrorMessage(
+  status: number,
+  data: JsonErrorData | undefined,
+): string {
+  const extracted = extractJsonErrorMessage(data);
+  if (extracted) {
+    return extracted;
+  }
+  if (status === 401 || status === 403) {
+    return '认证失效或当前账号无权读取工作区根目录。';
+  }
+  return `加载工作区根目录失败（HTTP ${status}）。`;
+}
+
+function buildWorkspaceTreeErrorMessage(
+  status: number,
+  data: JsonErrorData | undefined,
+): string {
+  const extracted = extractJsonErrorMessage(data);
+  if (extracted) {
+    return extracted;
+  }
+  if (status === 401 || status === 403) {
+    return '认证失效或当前账号无权读取文件树。';
+  }
+  if (status === 404) {
+    return '目标目录不存在或当前工作区已失效。';
+  }
+  return `加载文件树失败（HTTP ${status}）。`;
+}
+
+function buildWorkspaceReviewStatusErrorMessage(
+  status: number,
+  data: JsonErrorData | undefined,
+): string {
+  const extracted = extractJsonErrorMessage(data);
+  if (extracted) {
+    return extracted;
+  }
+  if (status === 401 || status === 403) {
+    return '认证失效或当前账号无权读取工作区改动状态。';
+  }
+  return `加载工作区改动状态失败（HTTP ${status}）。`;
+}
+
+function buildWorkspaceFileErrorMessage(
+  status: number,
+  data: JsonErrorData | undefined,
+): string {
+  const extracted = extractJsonErrorMessage(data);
+  if (extracted) {
+    return extracted;
+  }
+  if (status === 401 || status === 403) {
+    return '认证失效或当前账号无权读取文件内容。';
+  }
+  if (status === 404) {
+    return '目标文件不存在。';
+  }
+  return `加载文件内容失败（HTTP ${status}）。`;
+}
+
+function buildWorkspaceActionErrorMessage(
+  actionLabel: string,
+  status: number,
+  data: JsonErrorData | undefined,
+): string {
+  const extracted = extractJsonErrorMessage(data);
+  if (extracted) {
+    return extracted;
+  }
+  if (status === 401 || status === 403) {
+    return `认证失效或当前账号无权${actionLabel}。`;
+  }
+  if (status === 404) {
+    return `目标工作区资源不存在，无法${actionLabel}。`;
+  }
+  if (status === 409) {
+    return `当前状态不允许${actionLabel}。`;
+  }
+  return `${actionLabel}失败（HTTP ${status}）。`;
+}
+
+function isGenericWorkspaceNetworkErrorMessage(message: string): boolean {
+  return isGenericFetchErrorMessage(message);
+}
+
+function normalizeWorkspaceActionError(actionLabel: string, error: unknown): Error {
+  if (error instanceof HttpError) {
+    const extracted = extractJsonErrorMessage((error.data ?? undefined) as JsonErrorData | undefined);
+    if (extracted) {
+      return new HttpError(extracted, error.status, error.data);
+    }
+    return error;
+  }
+  if (error instanceof Error) {
+    const message = error.message.trim();
+    if (message.length > 0 && !isGenericWorkspaceNetworkErrorMessage(message)) {
+      return error;
+    }
+  }
+  return new Error(`网络异常，${actionLabel}失败。`);
+}
+
+async function performWorkspaceJsonRequest<T>(input: {
+  actionLabel: string;
+  parseJson?: boolean;
+  request: () => Promise<Response>;
+}): Promise<T> {
+  try {
+    const response = await input.request();
+    if (!response.ok) {
+      const data = await readJsonErrorData<JsonErrorData>(response);
+      throw new HttpError(
+        buildWorkspaceActionErrorMessage(input.actionLabel, response.status, data),
+        response.status,
+        data,
+      );
+    }
+    if (input.parseJson === false || response.status === 204) {
+      return undefined as T;
+    }
+    return (await response.json()) as T;
+  } catch (error) {
+    throw normalizeWorkspaceActionError(input.actionLabel, error);
+  }
+}
+
 export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
-  return {
-    async listRoots(token, options) {
-      const response = await fetch(`${baseUrl}/workspace/root`, {
+  const listRootsResult = async (
+    token: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<WorkspaceRootsLoadResult> => {
+    try {
+      const response = await fetchWithTimeout(`${baseUrl}/workspace/root`, {
         headers: authHeader(token),
         signal: options?.signal,
       });
       if (!response.ok) {
-        throw new HttpError(`Failed to list workspace roots: ${response.status}`, response.status);
+        return {
+          ok: false,
+          retryable: isRetryableWorkspaceStatus(response.status),
+          errorMessage: buildWorkspaceRootsErrorMessage(
+            response.status,
+            await readJsonErrorData<JsonErrorData>(response),
+          ),
+          status: response.status,
+          roots: [],
+        };
       }
       const data = (await response.json()) as WorkspaceRootsResponse;
       const roots = Array.isArray(data.roots)
@@ -189,99 +394,260 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
         : typeof data.root === 'string' && data.root.length > 0
           ? [data.root]
           : [];
-      return roots;
-    },
+      return {
+        ok: true,
+        retryable: false,
+        roots,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        retryable: true,
+        errorMessage: normalizeWorkspaceActionError('加载工作区根目录', error).message,
+        roots: [],
+      };
+    }
+  };
 
-    async fetchTree(token, path, options) {
-      const params = buildPathParams(path, { depth: options?.depth ?? 1 });
-      const response = await fetch(withQuery(`${baseUrl}/workspace/tree`, params), {
+  const fetchTreeResult = async (
+    token: string,
+    path: string,
+    options?: { depth?: number; signal?: AbortSignal },
+  ): Promise<WorkspaceTreeLoadResult> => {
+    const params = buildPathParams(path, { depth: options?.depth ?? 1 });
+    try {
+      const response = await fetchWithTimeout(withQuery(`${baseUrl}/workspace/tree`, params), {
         headers: authHeader(token),
         signal: options?.signal,
       });
       if (!response.ok) {
-        throw new HttpError(`Failed to fetch workspace tree: ${response.status}`, response.status);
+        return {
+          ok: false,
+          retryable: isRetryableWorkspaceStatus(response.status),
+          errorMessage: buildWorkspaceTreeErrorMessage(
+            response.status,
+            await readJsonErrorData<JsonErrorData>(response),
+          ),
+          status: response.status,
+          nodes: [],
+        };
       }
       const data = (await response.json()) as { nodes?: FileTreeNode[] } | FileTreeNode[];
-      if (Array.isArray(data)) {
-        return data;
-      }
-      return data.nodes ?? [];
-    },
+      return {
+        ok: true,
+        retryable: false,
+        nodes: Array.isArray(data) ? data : (data.nodes ?? []),
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        retryable: true,
+        errorMessage: normalizeWorkspaceActionError('加载文件树', error).message,
+        nodes: [],
+      };
+    }
+  };
 
-    async readFile(token, path, options) {
-      const params = buildPathParams(path);
-      if (options?.workspaceRoot) {
-        params.set('workspaceRoot', options.workspaceRoot);
-      }
-      const response = await fetch(withQuery(`${baseUrl}/workspace/file`, params), {
+  const reviewStatusResult = async (
+    token: string,
+    path: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<WorkspaceReviewStatusLoadResult> => {
+    const params = buildPathParams(path);
+    try {
+      const response = await fetchWithTimeout(withQuery(`${baseUrl}/workspace/review/status`, params), {
         headers: authHeader(token),
         signal: options?.signal,
       });
-      return expectJson<WorkspaceFileContent>(response, 'readFile');
+      if (!response.ok) {
+        return {
+          ok: false,
+          retryable: isRetryableWorkspaceStatus(response.status),
+          errorMessage: buildWorkspaceReviewStatusErrorMessage(
+            response.status,
+            await readJsonErrorData<JsonErrorData>(response),
+          ),
+          status: response.status,
+          changes: [],
+        };
+      }
+      const data = (await response.json()) as WorkspaceReviewStatusResponse;
+      return {
+        ok: true,
+        retryable: false,
+        changes: data.changes ?? [],
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        retryable: true,
+        errorMessage: normalizeWorkspaceActionError('加载工作区改动状态', error).message,
+        changes: [],
+      };
+    }
+  };
+
+  const readFileResult = async (
+    token: string,
+    path: string,
+    options?: { signal?: AbortSignal; workspaceRoot?: string },
+  ): Promise<WorkspaceFileLoadResult> => {
+    const params = buildPathParams(path);
+    if (options?.workspaceRoot) {
+      params.set('workspaceRoot', options.workspaceRoot);
+    }
+    try {
+      const response = await fetchWithTimeout(withQuery(`${baseUrl}/workspace/file`, params), {
+        headers: authHeader(token),
+        signal: options?.signal,
+      });
+      if (!response.ok) {
+        return {
+          ok: false,
+          retryable: isRetryableWorkspaceStatus(response.status),
+          errorMessage: buildWorkspaceFileErrorMessage(
+            response.status,
+            await readJsonErrorData<JsonErrorData>(response),
+          ),
+          status: response.status,
+        };
+      }
+      return {
+        ok: true,
+        retryable: false,
+        file: (await response.json()) as WorkspaceFileContent,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        retryable: true,
+        errorMessage: normalizeWorkspaceActionError('加载文件内容', error).message,
+      };
+    }
+  };
+
+  return {
+    async listRoots(token, options) {
+      const result = await listRootsResult(token, options);
+      if (!result.ok) {
+        throw new HttpError(
+          result.errorMessage ?? '加载工作区根目录失败',
+          result.status ?? 500,
+        );
+      }
+      return result.roots;
     },
+
+    listRootsResult,
+
+    async fetchTree(token, path, options) {
+      const result = await fetchTreeResult(token, path, options);
+      if (!result.ok) {
+        throw new HttpError(result.errorMessage ?? '加载文件树失败', result.status ?? 500);
+      }
+      return result.nodes;
+    },
+
+    fetchTreeResult,
+
+    async readFile(token, path, options) {
+      const result = await readFileResult(token, path, options);
+      if (!result.ok || !result.file) {
+        throw new HttpError(result.errorMessage ?? '加载文件内容失败', result.status ?? 500);
+      }
+      return result.file;
+    },
+
+    readFileResult,
 
     async readFileBinary(token, path, options) {
       const params = buildPathParams(path);
       if (options?.workspaceRoot) {
         params.set('workspaceRoot', options.workspaceRoot);
       }
-      const response = await fetch(withQuery(`${baseUrl}/workspace/file/binary`, params), {
-        headers: authHeader(token),
-        signal: options?.signal,
-      });
-      if (!response.ok) {
-        throw new HttpError(`Failed to read binary: ${response.status}`, response.status);
+      try {
+        const response = await fetchWithTimeout(withQuery(`${baseUrl}/workspace/file/binary`, params), {
+          headers: authHeader(token),
+          signal: options?.signal,
+        });
+        if (!response.ok) {
+          const data = await readJsonErrorData<JsonErrorData>(response);
+          throw new HttpError(
+            buildWorkspaceActionErrorMessage('读取二进制文件', response.status, data),
+            response.status,
+            data,
+          );
+        }
+        const buffer = await response.arrayBuffer();
+        const contentType = response.headers.get('content-type') ?? 'application/octet-stream';
+        return { buffer, contentType };
+      } catch (error) {
+        throw normalizeWorkspaceActionError('读取二进制文件', error);
       }
-      const buffer = await response.arrayBuffer();
-      const contentType = response.headers.get('content-type') ?? 'application/octet-stream';
-      return { buffer, contentType };
     },
 
     async writeFile(token, path, content) {
-      const response = await fetch(`${baseUrl}/workspace/file`, {
-        method: 'PUT',
-        headers: jsonAuthHeaders(token),
-        body: JSON.stringify({ path, content }),
+      await performWorkspaceJsonRequest({
+        actionLabel: '写入工作区文件',
+        parseJson: false,
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/workspace/file`, {
+            method: 'PUT',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify({ path, content }),
+          }),
       });
-      if (!response.ok) {
-        throw new HttpError(`Failed to write workspace file: ${response.status}`, response.status);
-      }
     },
 
     async createFile(token, path, content = '') {
-      const response = await fetch(`${baseUrl}/workspace/file`, {
-        method: 'POST',
-        headers: jsonAuthHeaders(token),
-        body: JSON.stringify({ path, content }),
+      await performWorkspaceJsonRequest({
+        actionLabel: '创建工作区文件',
+        parseJson: false,
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/workspace/file`, {
+            method: 'POST',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify({ path, content }),
+          }),
       });
-      if (!response.ok) {
-        throw new HttpError(`Failed to create workspace file: ${response.status}`, response.status);
-      }
     },
 
     async createDirectory(token, path) {
-      const response = await fetch(`${baseUrl}/workspace/directory`, {
-        method: 'POST',
-        headers: jsonAuthHeaders(token),
-        body: JSON.stringify({ path }),
+      await performWorkspaceJsonRequest({
+        actionLabel: '创建工作区目录',
+        parseJson: false,
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/workspace/directory`, {
+            method: 'POST',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify({ path }),
+          }),
       });
-      if (!response.ok) {
-        throw new HttpError(
-          `Failed to create workspace directory: ${response.status}`,
-          response.status,
-        );
-      }
     },
 
     async validatePath(token, path) {
       const params = buildPathParams(path);
-      const response = await fetch(withQuery(`${baseUrl}/workspace/validate`, params), {
-        headers: authHeader(token),
-      });
-      if (!response.ok) {
-        return { valid: false, error: `Validation request failed: ${response.status}` };
+      try {
+        const response = await fetchWithTimeout(withQuery(`${baseUrl}/workspace/validate`, params), {
+          headers: authHeader(token),
+        });
+        if (!response.ok) {
+          return {
+            valid: false,
+            error: buildWorkspaceActionErrorMessage(
+              '校验工作区路径',
+              response.status,
+              await readJsonErrorData<JsonErrorData>(response),
+            ),
+          };
+        }
+        return (await response.json()) as WorkspaceValidateResult;
+      } catch (error) {
+        return {
+          valid: false,
+          error: normalizeWorkspaceActionError('校验工作区路径', error).message,
+        };
       }
-      return (await response.json()) as WorkspaceValidateResult;
     },
 
     async search(token, query, rootPath, options) {
@@ -291,14 +657,14 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
       if (options?.maxResults !== undefined) {
         params.set('maxResults', String(options.maxResults));
       }
-      const response = await fetch(withQuery(`${baseUrl}/workspace/search`, params), {
-        headers: authHeader(token),
-        signal: options?.signal,
+      const data = await performWorkspaceJsonRequest<{ results?: WorkspaceSearchHit[] }>({
+        actionLabel: '搜索工作区内容',
+        request: () =>
+          fetchWithTimeout(withQuery(`${baseUrl}/workspace/search`, params), {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
       });
-      if (!response.ok) {
-        throw new HttpError(`Failed to search workspace: ${response.status}`, response.status);
-      }
-      const data = (await response.json()) as { results?: WorkspaceSearchHit[] };
       return data.results ?? [];
     },
 
@@ -309,95 +675,92 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
       if (options?.maxResults !== undefined) {
         params.set('maxResults', String(options.maxResults));
       }
-      const response = await fetch(withQuery(`${baseUrl}/workspace/find-by-name`, params), {
-        headers: authHeader(token),
-        signal: options?.signal,
+      const data = await performWorkspaceJsonRequest<{ results?: Array<{ path: string }> }>({
+        actionLabel: '按文件名查找工作区文件',
+        request: () =>
+          fetchWithTimeout(withQuery(`${baseUrl}/workspace/find-by-name`, params), {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
       });
-      if (!response.ok) {
-        throw new HttpError(`Failed to find file by name: ${response.status}`, response.status);
-      }
-      const data = (await response.json()) as { results?: Array<{ path: string }> };
       return data.results ?? [];
     },
 
     async reviewStatus(token, path, options) {
-      const params = buildPathParams(path);
-      const response = await fetch(withQuery(`${baseUrl}/workspace/review/status`, params), {
-        headers: authHeader(token),
-        signal: options?.signal,
-      });
-      if (!response.ok) {
-        throw new HttpError(`Failed to load review status: ${response.status}`, response.status);
+      const result = await reviewStatusResult(token, path, options);
+      if (!result.ok) {
+        throw new HttpError(
+          result.errorMessage ?? '加载工作区改动状态失败',
+          result.status ?? 500,
+        );
       }
-      const data = (await response.json()) as WorkspaceReviewStatusResponse;
-      return data.changes ?? [];
+      return result.changes;
     },
+
+    reviewStatusResult,
 
     async reviewDiff(token, path, filePath, options) {
       const params = buildPathParams(path, { filePath });
-      const response = await fetch(withQuery(`${baseUrl}/workspace/review/diff`, params), {
-        headers: authHeader(token),
-        signal: options?.signal,
+      const data = await performWorkspaceJsonRequest<WorkspaceReviewDiffResponse>({
+        actionLabel: '读取工作区审阅 diff',
+        request: () =>
+          fetchWithTimeout(withQuery(`${baseUrl}/workspace/review/diff`, params), {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
       });
-      if (!response.ok) {
-        throw new HttpError(`Failed to load review diff: ${response.status}`, response.status);
-      }
-      const data = (await response.json()) as WorkspaceReviewDiffResponse;
       return data.diff ?? '';
     },
 
     async reviewRevert(token, path, filePath) {
-      const response = await fetch(`${baseUrl}/workspace/review/revert`, {
-        method: 'POST',
-        headers: jsonAuthHeaders(token),
-        body: JSON.stringify({ path, filePath }),
+      await performWorkspaceJsonRequest({
+        actionLabel: '回退工作区文件改动',
+        parseJson: false,
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/workspace/review/revert`, {
+            method: 'POST',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify({ path, filePath }),
+          }),
       });
-      if (!response.ok) {
-        throw new HttpError(`Failed to revert workspace file: ${response.status}`, response.status);
-      }
     },
 
     async deleteEntry(token, path) {
       const params = buildPathParams(path);
-      const response = await fetch(`${baseUrl}/workspace/entry?${params}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
+      await performWorkspaceJsonRequest({
+        actionLabel: '删除工作区条目',
+        parseJson: false,
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/workspace/entry?${params}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${token}` },
+          }),
       });
-      if (!response.ok) {
-        const data = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new HttpError(data?.error ?? `Failed to delete: ${response.status}`, response.status);
-      }
     },
 
     async renameEntry(token, oldPath, newPath) {
-      const response = await fetch(`${baseUrl}/workspace/rename`, {
-        method: 'POST',
-        headers: jsonAuthHeaders(token),
-        body: JSON.stringify({ oldPath, newPath }),
+      await performWorkspaceJsonRequest({
+        actionLabel: '重命名工作区条目',
+        parseJson: false,
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/workspace/rename`, {
+            method: 'POST',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify({ oldPath, newPath }),
+          }),
       });
-      if (!response.ok) {
-        const data = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new HttpError(data?.error ?? `Failed to rename: ${response.status}`, response.status);
-      }
     },
 
     async setSessionWorkspace(token, sessionId, workingDirectory) {
-      const response = await fetch(`${baseUrl}/sessions/${sessionId}/workspace`, {
-        method: 'PATCH',
-        headers: jsonAuthHeaders(token),
-        body: JSON.stringify({ workingDirectory }),
+      return performWorkspaceJsonRequest<SessionWorkspaceUpdateResponse>({
+        actionLabel: '设置会话工作区',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/sessions/${sessionId}/workspace`, {
+            method: 'PATCH',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify({ workingDirectory }),
+          }),
       });
-      const data = (await response.json().catch(() => null)) as
-        | (SessionWorkspaceUpdateResponse & { error?: string })
-        | null;
-      if (!response.ok) {
-        throw new HttpError(
-          data?.error ?? `Failed to set session workspace: ${response.status}`,
-          response.status,
-          data ?? undefined,
-        );
-      }
-      return data ?? {};
     },
   };
 }

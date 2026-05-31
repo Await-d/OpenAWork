@@ -14,6 +14,36 @@ import {
 } from '../agent/agent-catalog.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 
+const AGENT_ROUTE_ERROR_MESSAGES = {
+  agentExists: '目标 Agent 已存在。',
+  agentNotFound: '目标 Agent 不存在。',
+  builtinDeleteForbidden: '内置 Agent 不允许删除。',
+  builtinUpdateRestricted: '内置 Agent 仅允许修改模型配置。',
+  updatePayloadRequired: '至少需要提供一个可更新字段。',
+} as const;
+
+function mapAgentCatalogError(error: unknown): { error: string; statusCode: number } {
+  const message = error instanceof Error ? error.message : String(error);
+
+  if (message.includes('already exists')) {
+    return { statusCode: 409, error: AGENT_ROUTE_ERROR_MESSAGES.agentExists };
+  }
+  if (message.includes('cannot be removed')) {
+    return { statusCode: 409, error: AGENT_ROUTE_ERROR_MESSAGES.builtinDeleteForbidden };
+  }
+  if (message.includes('only allow model configuration updates')) {
+    return { statusCode: 400, error: AGENT_ROUTE_ERROR_MESSAGES.builtinUpdateRestricted };
+  }
+  if (message.includes('not found')) {
+    return { statusCode: 404, error: AGENT_ROUTE_ERROR_MESSAGES.agentNotFound };
+  }
+
+  return {
+    statusCode: 400,
+    error: message.trim().length > 0 ? message : '请求参数无效。',
+  };
+}
+
 const canonicalRoleSchema = z
   .object({
     coreRole: z.enum(['general', 'researcher', 'planner', 'executor', 'reviewer']),
@@ -63,7 +93,9 @@ const updateManagedAgentSchema = z
     note: z.string().trim().max(400).optional(),
     enabled: z.boolean().optional(),
   })
-  .refine((value) => Object.keys(value).length > 0, { message: 'At least one field is required' });
+  .refine((value) => Object.keys(value).length > 0, {
+    message: AGENT_ROUTE_ERROR_MESSAGES.updatePayloadRequired,
+  });
 
 const paramsSchema = z.object({ agentId: z.string().trim().min(1).max(120) });
 
@@ -86,10 +118,9 @@ export async function agentsRoutes(app: FastifyInstance): Promise<void> {
       step.succeed(undefined, { agentId: agent.id });
       return reply.status(201).send({ agent });
     } catch (error) {
+      const mapped = mapAgentCatalogError(error);
       step.fail(error instanceof Error ? error.message : 'create failed');
-      return reply
-        .status(409)
-        .send({ error: error instanceof Error ? error.message : 'Create failed' });
+      return reply.status(mapped.statusCode).send({ error: mapped.error });
     }
   });
 
@@ -108,14 +139,10 @@ export async function agentsRoutes(app: FastifyInstance): Promise<void> {
       step.succeed(undefined, { agentId: agent.id });
       return reply.send({ agent });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Update failed';
+      const message = error instanceof Error ? error.message : 'update failed';
+      const mapped = mapAgentCatalogError(error);
       step.fail(message);
-      const statusCode =
-        message.includes('only allow model configuration updates') ||
-        message.includes('systemPrompt is required')
-          ? 400
-          : 404;
-      return reply.status(statusCode).send({ error: message });
+      return reply.status(mapped.statusCode).send({ error: mapped.error });
     }
   });
 
@@ -129,10 +156,10 @@ export async function agentsRoutes(app: FastifyInstance): Promise<void> {
       step.succeed(undefined, { agentId: params.agentId });
       return reply.status(204).send();
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Delete failed';
+      const message = error instanceof Error ? error.message : 'delete failed';
+      const mapped = mapAgentCatalogError(error);
       step.fail(message);
-      const statusCode = message.includes('cannot be removed') ? 409 : 404;
-      return reply.status(statusCode).send({ error: message });
+      return reply.status(mapped.statusCode).send({ error: mapped.error });
     }
   });
 
@@ -146,9 +173,10 @@ export async function agentsRoutes(app: FastifyInstance): Promise<void> {
       step.succeed(undefined, { agentId: agent.id });
       return reply.send({ agent });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Reset failed';
+      const message = error instanceof Error ? error.message : 'reset failed';
+      const mapped = mapAgentCatalogError(error);
       step.fail(message);
-      return reply.status(404).send({ error: message });
+      return reply.status(mapped.statusCode).send({ error: mapped.error });
     }
   });
 

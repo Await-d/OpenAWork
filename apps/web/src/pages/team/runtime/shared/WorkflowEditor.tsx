@@ -5,7 +5,8 @@
  * Phase E MVP：JSON 编辑器 + 预览 + 选择器下拉。
  */
 
-import { useCallback, useEffect, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { createTeamWorkflowsClient, type TeamWorkflow, type TeamWorkflowWithDbId } from '@openAwork/web-client';
 import { useAuthStore } from '../../../../stores/auth/auth.js';
 
 const PANEL_STYLE: CSSProperties = {
@@ -14,7 +15,7 @@ const PANEL_STYLE: CSSProperties = {
   padding: 16,
   borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 86%, var(--bg-base)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 86%, var(--bg-base))',
 };
 
 const BUTTON_PRIMARY: CSSProperties = {
@@ -25,21 +26,12 @@ const BUTTON_PRIMARY: CSSProperties = {
   padding: '0 14px',
   borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay)',
+  background: 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay))',
   color: 'var(--fg-strong)',
   cursor: 'pointer',
   fontSize: 12,
   fontWeight: 700,
 };
-
-interface WorkflowSummary {
-  id: string;
-  name: string;
-  description: string;
-  source: string;
-  tags: string[];
-  steps: Array<{ id: string; roleLayer: string; label: string }>;
-}
 
 // ─── T-07: Workflow 包选择器 ────────────────────────────────────────────────
 
@@ -50,23 +42,15 @@ export interface WorkflowSelectorProps {
 
 export function WorkflowSelector({ onSelect, selectedId }: WorkflowSelectorProps) {
   const { accessToken, gatewayUrl } = useAuthStore();
-  const [workflows, setWorkflows] = useState<WorkflowSummary[]>([]);
+  const [workflows, setWorkflows] = useState<TeamWorkflowWithDbId[]>([]);
   const [loading, setLoading] = useState(false);
+  const client = useMemo(() => createTeamWorkflowsClient(gatewayUrl), [gatewayUrl]);
 
   const loadWorkflows = useCallback(async () => {
     if (!accessToken || !gatewayUrl) return;
     setLoading(true);
     try {
-      const { createTeamPhaseAClient } = await import('@openAwork/web-client');
-      // 使用通用 fetch 通过 web-client 的 authHeader
-      const { authHeader } = await import('@openAwork/web-client');
-      const res = await fetch(`${gatewayUrl}/team/workflows`, {
-        headers: authHeader(accessToken),
-      });
-      if (res.ok) {
-        const data = (await res.json()) as { workflows: WorkflowSummary[] };
-        setWorkflows(data.workflows);
-      }
+      setWorkflows(await client.list(accessToken));
     } catch (_err) {
       console.warn(
         '[WorkflowSelector] 加载失败:',
@@ -75,7 +59,7 @@ export function WorkflowSelector({ onSelect, selectedId }: WorkflowSelectorProps
     } finally {
       setLoading(false);
     }
-  }, [accessToken, gatewayUrl]);
+  }, [accessToken, client, gatewayUrl]);
 
   useEffect(() => {
     void loadWorkflows();
@@ -117,8 +101,8 @@ export function WorkflowSelector({ onSelect, selectedId }: WorkflowSelectorProps
                     ? '1px solid color-mix(in srgb, var(--accent) 50%, transparent)'
                     : '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
                   background: isSelected
-                    ? 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay)'
-                    : 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
+                    ? 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay))'
+                    : 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
                   cursor: 'pointer',
                   textAlign: 'left',
                 }}
@@ -136,7 +120,7 @@ export function WorkflowSelector({ onSelect, selectedId }: WorkflowSelectorProps
                         fontSize: 10,
                         padding: '1px 5px',
                         borderRadius: 3,
-                        background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
+                        background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
                         border:
                           '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
                       }}
@@ -165,22 +149,15 @@ export function WorkflowEditor({ workflowId }: WorkflowEditorProps) {
   const [json, setJson] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const client = useMemo(() => createTeamWorkflowsClient(gatewayUrl), [gatewayUrl]);
 
   useEffect(() => {
     if (!workflowId || !accessToken || !gatewayUrl) return;
     void (async () => {
       try {
-        const { authHeader } = await import('@openAwork/web-client');
-        const res = await fetch(`${gatewayUrl}/team/workflows`, {
-          headers: authHeader(accessToken),
-        });
-        if (res.ok) {
-          const data = (await res.json()) as {
-            workflows: Array<{ id: string } & Record<string, unknown>>;
-          };
-          const found = data.workflows.find((w) => w.id === workflowId);
-          if (found) setJson(JSON.stringify(found, null, 2));
-        }
+        const workflows = await client.list(accessToken);
+        const found = workflows.find((workflow) => workflow.id === workflowId);
+        if (found) setJson(JSON.stringify(found, null, 2));
       } catch (_err) {
         console.warn(
           '[WorkflowEditor] 加载失败:',
@@ -188,25 +165,15 @@ export function WorkflowEditor({ workflowId }: WorkflowEditorProps) {
         );
       }
     })();
-  }, [workflowId, accessToken, gatewayUrl]);
+  }, [accessToken, client, gatewayUrl, workflowId]);
 
   const handleSave = async () => {
     if (!accessToken || !gatewayUrl) return;
     setError(null);
     setSaved(false);
     try {
-      const workflow = JSON.parse(json) as unknown;
-      const { jsonAuthHeaders } = await import('@openAwork/web-client');
-      const res = await fetch(`${gatewayUrl}/team/workflows`, {
-        method: 'POST',
-        headers: jsonAuthHeaders(accessToken),
-        body: JSON.stringify({ workflow }),
-      });
-      if (!res.ok) {
-        const data = (await res.json()) as { error?: string; issues?: unknown };
-        setError(data.error ?? '保存失败');
-        return;
-      }
+      const workflow = JSON.parse(json) as TeamWorkflow;
+      await client.create(accessToken, workflow);
       setSaved(true);
     } catch (_err) {
       setError(_err instanceof Error ? _err.message : '保存失败');
@@ -241,7 +208,7 @@ export function WorkflowEditor({ workflowId }: WorkflowEditorProps) {
           padding: 10,
           borderRadius: 8,
           border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-          background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
+          background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
           fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)',
           fontSize: 11,
           lineHeight: 1.5,
@@ -297,7 +264,7 @@ export function AdapterConfigPanel() {
               padding: '8px 12px',
               borderRadius: 8,
               border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
-              background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
+              background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
             }}
           >
             <strong style={{ fontSize: 12, minWidth: 80 }}>{layer}</strong>

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { basename, extname } from 'node:path';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import type { RequestOverrides } from '@openAwork/agent-core';
@@ -18,6 +18,61 @@ import {
   type ReferenceModelEntry,
 } from '../task/task-model-reference-snapshot.js';
 import { selectDelegatedModelForUser } from '../task/task-model-selection.js';
+
+/**
+ * Wall-clock timeout for the multimodal `look_at` upstream call. The
+ * tool runs through the gateway-managed sandbox path (see
+ * `tool-sandbox.ts`), which bypasses the ToolRegistry's own
+ * timeout/abort wrapper, and `runUpstreamGenerate` (AI SDK
+ * `generateText`) has no built-in deadline. Without this an upstream
+ * socket that connects but never responds would leave the look_at
+ * call pending forever.
+ */
+const LOOK_AT_LLM_TIMEOUT_MS = 120_000;
+
+/**
+ * Upper bound on a `look_at` source file. Every file branch reads the WHOLE
+ * file into memory before any truncation — images are `readFile(..,'base64')`
+ * (≈1.33× inflation), text is fully read then sliced to 16k chars, PDFs are
+ * fully buffered for parsing. Without a ceiling a multi-GB workspace file (the
+ * path is user-supplied) would OOM the gateway. We `stat` first and reject
+ * oversized files before reading a single byte. Override via
+ * `OPENAWORK_LOOK_AT_MAX_FILE_BYTES`; <=0 disables the guard.
+ */
+const DEFAULT_LOOK_AT_MAX_FILE_BYTES = 64 * 1024 * 1024;
+
+function resolveLookAtMaxFileBytes(): number {
+  const raw = globalThis.process?.env['OPENAWORK_LOOK_AT_MAX_FILE_BYTES'];
+  if (raw === undefined || raw === null || raw.trim() === '') {
+    return DEFAULT_LOOK_AT_MAX_FILE_BYTES;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Math.floor(parsed);
+}
+
+/**
+ * Reject a file that exceeds the size ceiling BEFORE it is read into memory.
+ * `stat` is cheap and avoids the OOM that a full `readFile` of a huge file
+ * would cause. A stat failure (missing / unreadable) is left to the
+ * subsequent read to surface a precise error.
+ */
+async function assertLookAtFileWithinLimit(filePath: string): Promise<void> {
+  const max = resolveLookAtMaxFileBytes();
+  if (max <= 0) return;
+  let size: number;
+  try {
+    size = (await stat(filePath)).size;
+  } catch {
+    // Defer to the read for a precise ENOENT/EACCES error.
+    return;
+  }
+  if (size > max) {
+    throw new Error(
+      `look_at file too large: ${size} bytes exceeds limit ${max} bytes`,
+    );
+  }
+}
 
 interface UserSettingRow {
   value: string;
@@ -217,21 +272,40 @@ async function requestLookAtText(input: {
         : []),
   ];
 
-  const result = await runUpstreamGenerate({
-    providerType: input.providerType ?? 'openai',
-    ...(input.upstreamProtocol ? { upstreamProtocol: input.upstreamProtocol } : {}),
-    ...(input.apiKey ? { apiKey: input.apiKey } : {}),
-    ...(input.apiBaseUrl ? { baseURL: input.apiBaseUrl } : {}),
-    ...(input.requestOverrides.headers && Object.keys(input.requestOverrides.headers).length > 0
-      ? { headers: input.requestOverrides.headers }
-      : {}),
-    model: input.model,
-    ...(input.systemPrompt ? { system: input.systemPrompt } : {}),
-    messages: [{ role: 'user', content: userContent }],
-    maxOutputTokens: 2048,
-    temperature: 0.2,
-    requestOverrides: input.requestOverrides,
-  });
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, LOOK_AT_LLM_TIMEOUT_MS);
+  timer.unref?.();
+
+  let result: Awaited<ReturnType<typeof runUpstreamGenerate>>;
+  try {
+    result = await runUpstreamGenerate({
+      providerType: input.providerType ?? 'openai',
+      ...(input.upstreamProtocol ? { upstreamProtocol: input.upstreamProtocol } : {}),
+      ...(input.apiKey ? { apiKey: input.apiKey } : {}),
+      ...(input.apiBaseUrl ? { baseURL: input.apiBaseUrl } : {}),
+      ...(input.requestOverrides.headers && Object.keys(input.requestOverrides.headers).length > 0
+        ? { headers: input.requestOverrides.headers }
+        : {}),
+      model: input.model,
+      ...(input.systemPrompt ? { system: input.systemPrompt } : {}),
+      messages: [{ role: 'user', content: userContent }],
+      maxOutputTokens: 2048,
+      temperature: 0.2,
+      requestOverrides: input.requestOverrides,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (timedOut) {
+      throw new Error(`look_at LLM timeout (${LOOK_AT_LLM_TIMEOUT_MS}ms)`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 
   const text = result.text.trim();
   if (!text) {
@@ -265,6 +339,11 @@ export async function runLookAtTool(input: {
   const filePath = input.filePath ? validateWorkspacePath(input.filePath) : undefined;
   if (input.filePath && !filePath) {
     throw new Error('Forbidden file_path');
+  }
+  // Size guard before any read: every file branch buffers the whole file, so
+  // reject oversized files up front to avoid OOM on a user-supplied path.
+  if (filePath) {
+    await assertLookAtFileWithinLimit(filePath);
   }
   const agentPrompt = listManagedAgentsForUser(input.userId).find(
     (agent) => agent.id === 'multimodal-looker',

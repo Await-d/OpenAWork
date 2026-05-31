@@ -12,6 +12,7 @@ import {
   type PermissionRiskLevel,
 } from '../permission/permission-contract.js';
 import type { JwtPayload } from '../infra/auth.js';
+import { appendPermissionDecisionLog } from '../session/permission-decision-log-store.js';
 import { requireAuth } from '../infra/auth.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import { createPermissionRepliedEvent } from '../session/session-permission-events.js';
@@ -131,13 +132,31 @@ function canOperateSharedSession(permission: 'view' | 'comment' | 'operate'): bo
   return permission === 'operate';
 }
 
+// Corrupt-row tolerance (§0.89-§0.92 class): `questions_json` is persisted
+// via `JSON.stringify`, but a crash mid-write, a disk error, or a hand-edited
+// DB can leave a column that is not valid JSON. The pending-questions list does
+// `.map(mapQuestionRequestRow)`, so a SINGLE corrupt row used to throw and 500
+// the WHOLE shared-session pending-questions list — making every pending
+// question unviewable. Return `null` + warn so the list path can skip the bad
+// row, mirroring the sibling `mapPermissionRequestRow`.
 function mapQuestionRequestRow(row: QuestionRequestRow) {
+  let questions: QuestionToolInput['questions'];
+  try {
+    questions = JSON.parse(row.questions_json) as QuestionToolInput['questions'];
+  } catch (error) {
+    console.warn(
+      `[shared-session] 提问请求 ${row.id} questions_json 解析失败，已跳过：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return null;
+  }
   return {
     requestId: row.id,
     sessionId: row.session_id,
     toolName: row.tool_name,
     title: row.title,
-    questions: JSON.parse(row.questions_json) as QuestionToolInput['questions'],
+    questions,
     status: row.status,
     createdAt: row.created_at,
   };
@@ -255,8 +274,13 @@ function listSharedPendingQuestionRequests(input: { sessionId: string }) {
      WHERE session_id = ? AND status = 'pending'
      ORDER BY created_at ASC`,
     [input.sessionId],
-  ).map(mapQuestionRequestRow);
+  ).flatMap((row) => {
+    const mapped = mapQuestionRequestRow(row);
+    return mapped ? [mapped] : [];
+  });
 }
+
+type SharedSessionRecipientAccess = NonNullable<ReturnType<typeof getSharedSessionForRecipient>>;
 
 function buildSessionFileChangesSummary(input: { sessionId: string; userId: string }) {
   return buildSessionFileChangesProjection({
@@ -290,6 +314,109 @@ async function reconcileSessionRuntimeForResponse(
   return {
     ...session,
     state_status: reconciliation.status,
+  };
+}
+
+async function buildSharedSessionDetailResponse(input: {
+  sharedAccess: SharedSessionRecipientAccess;
+  sessionId: string;
+}): Promise<{
+  comments: ReturnType<typeof listSharedSessionComments>;
+  pendingPermissions: ReturnType<typeof listSharedPendingPermissionRequests>;
+  pendingQuestions: ReturnType<typeof listSharedPendingQuestionRequests>;
+  presence: ReturnType<typeof listSharedSessionPresence>;
+  share: {
+    createdAt: string;
+    permission: SharedSessionRecipientAccess['permission'];
+    sessionId: string;
+    shareCreatedAt: string;
+    shareUpdatedAt: string;
+    sharedByEmail: string;
+    stateStatus: string;
+    title: string | null;
+    updatedAt: string;
+    workspacePath: string | null;
+  };
+  session: ReturnType<typeof toPublicSessionResponse> & {
+    fileChangesSummary: ReturnType<typeof buildSessionFileChangesSummary>;
+  };
+}> {
+  const sessionRow: SessionRow = {
+    id: input.sharedAccess.session.id,
+    user_id: input.sharedAccess.ownerUserId,
+    messages_json: input.sharedAccess.messagesJson,
+    state_status: input.sharedAccess.session.stateStatus,
+    metadata_json: input.sharedAccess.session.metadataJson,
+    title: input.sharedAccess.session.title,
+    created_at: input.sharedAccess.session.createdAt,
+    updated_at: input.sharedAccess.session.updatedAt,
+  };
+  const reconciledSession = await reconcileSessionRuntimeForResponse(
+    sessionRow,
+    input.sharedAccess.ownerUserId,
+  );
+  const sessionMessages = mergeRuntimeSafeSessionMessages({
+    legacyMessages: listSessionMessagesV2({
+      sessionId: input.sessionId,
+      userId: input.sharedAccess.ownerUserId,
+    }),
+    runtimeMessages: listRuntimeSafeSessionMessagesV2({
+      sessionId: input.sessionId,
+      userId: input.sharedAccess.ownerUserId,
+    }),
+  });
+
+  const session = toPublicSessionResponse(
+    {
+      ...reconciledSession,
+      metadata_json: sanitizeSessionMetadataJson(reconciledSession.metadata_json),
+    },
+    filterVisibleSessionMessages(sessionMessages),
+    listSessionTodos(input.sessionId),
+    listSessionRunEvents(input.sessionId),
+  );
+  if (canOperateSharedSession(input.sharedAccess.permission)) {
+    const nowMs = Date.now();
+    expirePendingPermissionRequests({ nowMs, sessionId: input.sessionId });
+    expirePendingQuestionRequests({ nowMs, sessionId: input.sessionId });
+  }
+  const pendingPermissions = canOperateSharedSession(input.sharedAccess.permission)
+    ? listSharedPendingPermissionRequests({ sessionId: input.sessionId })
+    : [];
+  const pendingQuestions = canOperateSharedSession(input.sharedAccess.permission)
+    ? listSharedPendingQuestionRequests({ sessionId: input.sessionId })
+    : [];
+
+  return {
+    share: {
+      sessionId: input.sharedAccess.session.id,
+      title: input.sharedAccess.session.title,
+      stateStatus: reconciledSession.state_status,
+      workspacePath: input.sharedAccess.session.workspacePath,
+      sharedByEmail: input.sharedAccess.sharedByEmail,
+      permission: input.sharedAccess.permission,
+      createdAt: input.sharedAccess.session.createdAt,
+      updatedAt: input.sharedAccess.session.updatedAt,
+      shareCreatedAt: input.sharedAccess.shareCreatedAt,
+      shareUpdatedAt: input.sharedAccess.shareUpdatedAt,
+    },
+    comments: listSharedSessionComments({
+      ownerUserId: input.sharedAccess.ownerUserId,
+      sessionId: input.sessionId,
+    }),
+    presence: listSharedSessionPresence({
+      ownerUserId: input.sharedAccess.ownerUserId,
+      sessionId: input.sessionId,
+    }),
+    pendingPermissions,
+    pendingQuestions,
+    session: {
+      ...session,
+      fileChangesSummary: buildSessionFileChangesSummary({
+        sessionId: input.sessionId,
+        userId: input.sharedAccess.ownerUserId,
+      }),
+    },
   };
 }
 
@@ -340,87 +467,15 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
       const sharedAccess = getSharedSessionForRecipient({ email: user.email, sessionId });
       if (!sharedAccess) {
         step.fail('not found');
-        return reply.status(404).send({ error: 'Shared session not found' });
+        return reply.status(404).send({ error: '目标共享会话不存在。' });
       }
-
-      const sessionRow: SessionRow = {
-        id: sharedAccess.session.id,
-        user_id: sharedAccess.ownerUserId,
-        messages_json: sharedAccess.messagesJson,
-        state_status: sharedAccess.session.stateStatus,
-        metadata_json: sharedAccess.session.metadataJson,
-        title: sharedAccess.session.title,
-        created_at: sharedAccess.session.createdAt,
-        updated_at: sharedAccess.session.updatedAt,
-      };
-      const reconciledSession = await reconcileSessionRuntimeForResponse(
-        sessionRow,
-        sharedAccess.ownerUserId,
-      );
-      const sessionMessages = mergeRuntimeSafeSessionMessages({
-        legacyMessages: listSessionMessagesV2({
-          sessionId,
-          userId: sharedAccess.ownerUserId,
-        }),
-        runtimeMessages: listRuntimeSafeSessionMessagesV2({
-          sessionId,
-          userId: sharedAccess.ownerUserId,
-        }),
+      const detail = await buildSharedSessionDetailResponse({
+        sharedAccess,
+        sessionId,
       });
-
-      const session = toPublicSessionResponse(
-        {
-          ...reconciledSession,
-          metadata_json: sanitizeSessionMetadataJson(reconciledSession.metadata_json),
-        },
-        filterVisibleSessionMessages(sessionMessages),
-        listSessionTodos(sessionId),
-        listSessionRunEvents(sessionId),
-      );
-      if (canOperateSharedSession(sharedAccess.permission)) {
-        const nowMs = Date.now();
-        expirePendingPermissionRequests({ nowMs, sessionId });
-        expirePendingQuestionRequests({ nowMs, sessionId });
-      }
-      const pendingPermissions = canOperateSharedSession(sharedAccess.permission)
-        ? listSharedPendingPermissionRequests({ sessionId })
-        : [];
-      const pendingQuestions = canOperateSharedSession(sharedAccess.permission)
-        ? listSharedPendingQuestionRequests({ sessionId })
-        : [];
 
       step.succeed(undefined, { permission: sharedAccess.permission, sessionId });
-      return reply.send({
-        share: {
-          sessionId: sharedAccess.session.id,
-          title: sharedAccess.session.title,
-          stateStatus: reconciledSession.state_status,
-          workspacePath: sharedAccess.session.workspacePath,
-          sharedByEmail: sharedAccess.sharedByEmail,
-          permission: sharedAccess.permission,
-          createdAt: sharedAccess.session.createdAt,
-          updatedAt: sharedAccess.session.updatedAt,
-          shareCreatedAt: sharedAccess.shareCreatedAt,
-          shareUpdatedAt: sharedAccess.shareUpdatedAt,
-        },
-        comments: listSharedSessionComments({
-          ownerUserId: sharedAccess.ownerUserId,
-          sessionId,
-        }),
-        presence: listSharedSessionPresence({
-          ownerUserId: sharedAccess.ownerUserId,
-          sessionId,
-        }),
-        pendingPermissions,
-        pendingQuestions,
-        session: {
-          ...session,
-          fileChangesSummary: buildSessionFileChangesSummary({
-            sessionId,
-            userId: sharedAccess.ownerUserId,
-          }),
-        },
-      });
+      return reply.send(detail);
     },
   );
 
@@ -438,12 +493,12 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
       const sharedAccess = getSharedSessionForRecipient({ email: user.email, sessionId });
       if (!sharedAccess) {
         step.fail('not found');
-        return reply.status(404).send({ error: 'Shared session not found' });
+        return reply.status(404).send({ error: '目标共享会话不存在。' });
       }
 
       if (!canWriteSharedComment(sharedAccess.permission)) {
         step.fail('forbidden');
-        return reply.status(403).send({ error: 'Forbidden' });
+        return reply.status(403).send({ error: '当前共享权限不足，无法执行该操作。' });
       }
 
       const comment = createSharedSessionComment({
@@ -464,7 +519,13 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
         userId: sharedAccess.ownerUserId,
       });
       step.succeed(undefined, { commentId: comment.id });
-      return reply.status(201).send({ comment });
+      return reply.status(201).send({
+        comment,
+        detail: await buildSharedSessionDetailResponse({
+          sharedAccess,
+          sessionId,
+        }),
+      });
     },
   );
 
@@ -481,7 +542,7 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
       const sharedAccess = getSharedSessionForRecipient({ email: user.email, sessionId });
       if (!sharedAccess) {
         step.fail('not found');
-        return reply.status(404).send({ error: 'Shared session not found' });
+        return reply.status(404).send({ error: '目标共享会话不存在。' });
       }
 
       const presence = touchSharedSessionPresence({
@@ -510,11 +571,11 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
       const sharedAccess = getSharedSessionForRecipient({ email: user.email, sessionId });
       if (!sharedAccess) {
         step.fail('not found');
-        return reply.status(404).send({ error: 'Shared session not found' });
+        return reply.status(404).send({ error: '目标共享会话不存在。' });
       }
       if (!canOperateSharedSession(sharedAccess.permission)) {
         step.fail('forbidden');
-        return reply.status(403).send({ error: 'Forbidden' });
+        return reply.status(403).send({ error: '当前共享权限不足，无法执行该操作。' });
       }
 
       const permissionRequest = sqliteGet<PermissionRequestRow>(
@@ -526,11 +587,11 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
       );
       if (!permissionRequest) {
         step.fail('permission request not found');
-        return reply.status(404).send({ error: 'Permission request not found' });
+        return reply.status(404).send({ error: '目标权限请求不存在。' });
       }
       if (permissionRequest.status !== 'pending') {
         step.fail('permission request already resolved');
-        return reply.status(409).send({ error: 'Permission request already resolved' });
+        return reply.status(409).send({ error: '权限请求已处理，无法重复提交。' });
       }
 
       sqliteRun(
@@ -544,18 +605,13 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
           sessionId,
         ],
       );
-      sqliteRun(
-        `INSERT INTO permission_decision_logs
-         (request_id, session_id, tool_name, scope, decision, workspace_root, created_at)
-         VALUES (?, ?, ?, ?, ?, NULL, datetime('now'))`,
-        [
-          body.requestId,
-          sessionId,
-          permissionRequest.tool_name,
-          permissionRequest.scope,
-          body.decision,
-        ],
-      );
+      appendPermissionDecisionLog({
+        requestId: body.requestId,
+        sessionId,
+        toolName: permissionRequest.tool_name,
+        scope: permissionRequest.scope,
+        decision: body.decision,
+      });
 
       const permissionCategory = resolvePermissionCategory(permissionRequest.tool_name);
       const alwaysPatterns =
@@ -661,7 +717,13 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
       });
 
       step.succeed(undefined, { requestId: body.requestId, decision: body.decision });
-      return reply.send({ ok: true });
+      return reply.send({
+        ok: true,
+        detail: await buildSharedSessionDetailResponse({
+          sharedAccess,
+          sessionId,
+        }),
+      });
     },
   );
 
@@ -679,11 +741,11 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
       const sharedAccess = getSharedSessionForRecipient({ email: user.email, sessionId });
       if (!sharedAccess) {
         step.fail('not found');
-        return reply.status(404).send({ error: 'Shared session not found' });
+        return reply.status(404).send({ error: '目标共享会话不存在。' });
       }
       if (!canOperateSharedSession(sharedAccess.permission)) {
         step.fail('forbidden');
-        return reply.status(403).send({ error: 'Forbidden' });
+        return reply.status(403).send({ error: '当前共享权限不足，无法执行该操作。' });
       }
 
       const questionRequest = sqliteGet<QuestionRequestRow>(
@@ -695,11 +757,11 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
       );
       if (!questionRequest) {
         step.fail('question request not found');
-        return reply.status(404).send({ error: 'Question request not found' });
+        return reply.status(404).send({ error: '目标提问请求不存在。' });
       }
       if (questionRequest.status !== 'pending') {
         step.fail('question request already resolved');
-        return reply.status(409).send({ error: 'Question request already resolved' });
+        return reply.status(409).send({ error: '提问请求已处理，无法重复提交。' });
       }
 
       sqliteRun(
@@ -778,7 +840,13 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
       });
 
       step.succeed(undefined, { requestId: body.requestId, status: body.status });
-      return reply.send({ ok: true });
+      return reply.send({
+        ok: true,
+        detail: await buildSharedSessionDetailResponse({
+          sharedAccess,
+          sessionId,
+        }),
+      });
     },
   );
 }

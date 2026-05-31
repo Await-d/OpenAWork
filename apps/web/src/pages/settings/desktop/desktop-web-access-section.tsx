@@ -193,7 +193,7 @@ export function DesktopWebAccessSection({
       await startDesktopGateway(targetPort, mode);
       const url = localGatewayUrl(targetPort);
       if (!(await waitForGatewayHealth(url))) {
-        throw new Error('本地网关健康检查失败，请检查端口是否被占用');
+        throw new Error('本地网关健康检查失败，请检查端口是否被占用。');
       }
       const tokens = await authenticateDesktopGateway(url);
       setAuth(tokens.accessToken, DESKTOP_DEFAULT_EMAIL, tokens.refreshToken, tokens.expiresIn);
@@ -868,7 +868,7 @@ function ExposeOption({
         cursor: disabled ? 'not-allowed' : 'pointer',
         borderColor: active ? 'var(--accent)' : 'var(--border-subtle)',
         background: active
-          ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay)'
+          ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))'
           : ROW_STYLE.background,
         textAlign: 'left',
         opacity: disabled ? 0.6 : 1,

@@ -13,20 +13,23 @@
  * 的所有同级组件都是 inline style，保持一致性）。
  */
 
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   createTeamPhaseAClient,
   HttpError,
-  type AgentPersonaRecord,
-  type ConstitutionRecord,
-  type ConstitutionTemplate,
   type ForceApplyState,
-  type InstructionStackPreview,
   type SoulRoleLayer,
 } from '@openAwork/web-client';
 import { AdapterConfigPanel } from '../../shared/WorkflowEditor.js';
 import { NewTeamTemplateModal } from '../../shell/modals/NewTeamTemplateModal.js';
 import { TeamDefaultRosterSection } from './team-default-roster-section.js';
+import {
+  useRecoverableConstitutionRead,
+  useRecoverableForceApplyStateRead,
+  useInstructionStackPreviewRead,
+  useRecoverablePersonaRead,
+  useRecoverableUserMemoryRead,
+} from './use-team-phase-a-settings-read-model.js';
 
 const ROLE_LAYER_ORDER: readonly SoulRoleLayer[] = [
   'reception',
@@ -50,7 +53,7 @@ const PANEL_INSET_STYLE: CSSProperties = {
   padding: 12,
   borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base))',
 };
 
 const SECTION_HEADER_STYLE: CSSProperties = {
@@ -66,7 +69,7 @@ const TEXTAREA_STYLE: CSSProperties = {
   padding: 10,
   borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
   color: 'var(--fg-strong)',
   fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)',
   fontSize: 12,
@@ -82,7 +85,7 @@ const PRIMARY_BUTTON_STYLE: CSSProperties = {
   padding: '0 14px',
   borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay)',
+  background: 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay))',
   color: 'var(--fg-strong)',
   cursor: 'pointer',
   fontSize: 12,
@@ -97,7 +100,7 @@ const SECONDARY_BUTTON_STYLE: CSSProperties = {
   padding: '0 12px',
   borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
   color: 'var(--fg-default)',
   cursor: 'pointer',
   fontSize: 12,
@@ -219,34 +222,30 @@ function ForceApplySection({
   token: string;
   client: ReturnType<typeof createTeamPhaseAClient>;
 }) {
-  const [state, setState] = useState<ForceApplyState | null>(null);
+  const {
+    applyState,
+    error: loadError,
+    loading: loadLoading,
+    refresh,
+    state,
+  } = useRecoverableForceApplyStateRead({
+    client,
+    token,
+  });
   const [feedback, setFeedback] = useState<SaveFeedback>({ kind: 'idle' });
   const [confirmOpen, setConfirmOpen] = useState(false);
-
-  const refresh = useCallback(async () => {
-    try {
-      const next = await client.getForceApplyState(token);
-      setState(next);
-    } catch {
-      setState(null);
-    }
-  }, [client, token]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
 
   const handleConfirm = async () => {
     setConfirmOpen(false);
     setFeedback({ kind: 'saving' });
     try {
       const result = await client.forceApply(token);
-      setState(result.state);
+      applyState(result.state);
       setFeedback({ kind: 'success', message: 'ForceApply 已记录，下一轮 LLM 调用会重新拼装。' });
     } catch (err) {
       if (err instanceof HttpError && err.status === 429) {
         const payload = err.data as { state?: ForceApplyState } | null;
-        if (payload?.state) setState(payload.state);
+        if (payload?.state) applyState(payload.state);
         setFeedback({
           kind: 'error',
           message: '24 小时内 ForceApply 已用满 5 次，请稍后再试。',
@@ -276,6 +275,10 @@ function ForceApplySection({
         编辑宪法 / 记忆 / SOUL 后通常不需要 ForceApply——下一次新对话会自动读取。
         但如果当前正在进行的会话已经命中了旧 prompt 缓存，点这里可以让缓存破裂、强制重新拼装。
       </span>
+      {loadLoading && !state ? (
+        <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>ForceApply 状态加载中…</span>
+      ) : null}
+      {loadError ? <span style={ERROR_STYLE}>{loadError}</span> : null}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <button
           type="button"
@@ -285,7 +288,7 @@ function ForceApplySection({
         >
           触发 ForceApply
         </button>
-        <button type="button" style={SECONDARY_BUTTON_STYLE} onClick={() => void refresh()}>
+        <button type="button" style={SECONDARY_BUTTON_STYLE} onClick={() => refresh()}>
           刷新状态
         </button>
         {state?.lastAppliedAt ? (
@@ -301,7 +304,7 @@ function ForceApplySection({
           aria-label="ForceApply 确认对话框"
           style={{
             ...PANEL_INSET_STYLE,
-            background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay)',
+            background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
           }}
         >
           <strong style={{ fontSize: 12 }}>确认触发 ForceApply？</strong>
@@ -340,37 +343,45 @@ function ConstitutionSection({
   client: ReturnType<typeof createTeamPhaseAClient>;
   teamWorkspaceId: string;
 }) {
-  const [record, setRecord] = useState<ConstitutionRecord | null>(null);
+  const {
+    applyConstitution,
+    constitution: record,
+    error: loadError,
+    loading: loadLoading,
+    templates,
+  } = useRecoverableConstitutionRead({
+    client,
+    teamWorkspaceId,
+    token,
+  });
   const [draft, setDraft] = useState('');
-  const [templates, setTemplates] = useState<ConstitutionTemplate[]>([]);
   const [feedback, setFeedback] = useState<SaveFeedback>({ kind: 'idle' });
   const [showPreview, setShowPreview] = useState(false);
+  const draftRef = useRef('');
+  const lastHydratedBodyRef = useRef('');
+  const lastHydratedVersionRef = useRef<number | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
+    draftRef.current = draft;
+  }, [draft]);
+
+  useEffect(() => {
     setFeedback({ kind: 'idle' });
-    void (async () => {
-      try {
-        const [current, allTemplates] = await Promise.all([
-          client.getConstitution(token, teamWorkspaceId),
-          client.listConstitutionTemplates(token),
-        ]);
-        if (cancelled) return;
-        setRecord(current);
-        setDraft(current.body);
-        setTemplates(allTemplates);
-      } catch (err) {
-        if (cancelled) return;
-        setFeedback({
-          kind: 'error',
-          message: err instanceof Error ? err.message : '加载团队宪法失败',
-        });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [client, token, teamWorkspaceId]);
+  }, [teamWorkspaceId]);
+
+  useEffect(() => {
+    if (!record) {
+      return;
+    }
+    const shouldHydrate =
+      lastHydratedVersionRef.current === null || draftRef.current === lastHydratedBodyRef.current;
+    if (shouldHydrate) {
+      setDraft(record.body);
+      draftRef.current = record.body;
+    }
+    lastHydratedBodyRef.current = record.body;
+    lastHydratedVersionRef.current = record.version;
+  }, [record]);
 
   const handleApplyTemplate = (templateId: string) => {
     const template = templates.find((t) => t.id === templateId);
@@ -386,8 +397,11 @@ function ConstitutionSection({
         body: draft,
         expectedVersion: record.version,
       });
-      setRecord(next);
+      applyConstitution(next);
       setDraft(next.body);
+      draftRef.current = next.body;
+      lastHydratedBodyRef.current = next.body;
+      lastHydratedVersionRef.current = next.version;
       setFeedback({ kind: 'success', message: `已保存 v${next.version}` });
     } catch (err) {
       if (err instanceof HttpError && err.status === 409) {
@@ -435,6 +449,10 @@ function ConstitutionSection({
       <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
         长期约束的明文锚点。会被注入到每个 session 的 system prompt（7 层栈第 3 层）。
       </span>
+      {loadLoading && !record ? (
+        <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>团队宪法加载中…</span>
+      ) : null}
+      {loadError ? <span style={ERROR_STYLE}>{loadError}</span> : null}
 
       {templates.length > 0 ? (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -509,34 +527,43 @@ function UserMemorySection({
   token: string;
   client: ReturnType<typeof createTeamPhaseAClient>;
 }) {
+  const { applyMemory, error: loadError, loading: loadLoading, memory } = useRecoverableUserMemoryRead({
+    client,
+    token,
+  });
   const [draft, setDraft] = useState('');
   const [feedback, setFeedback] = useState<SaveFeedback>({ kind: 'idle' });
+  const draftRef = useRef('');
+  const lastHydratedBodyRef = useRef('');
 
   useEffect(() => {
-    let cancelled = false;
+    draftRef.current = draft;
+  }, [draft]);
+
+  useEffect(() => {
     setFeedback({ kind: 'idle' });
-    void (async () => {
-      try {
-        const current = await client.getUserMemory(token);
-        if (cancelled) return;
-        setDraft(current.body);
-      } catch (err) {
-        if (cancelled) return;
-        setFeedback({
-          kind: 'error',
-          message: err instanceof Error ? err.message : '加载 user_memory 失败',
-        });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [client, token]);
+  }, [token]);
+
+  useEffect(() => {
+    if (!memory) {
+      return;
+    }
+    const shouldHydrate =
+      lastHydratedBodyRef.current.length === 0 || draftRef.current === lastHydratedBodyRef.current;
+    if (shouldHydrate) {
+      setDraft(memory.body);
+      draftRef.current = memory.body;
+    }
+    lastHydratedBodyRef.current = memory.body;
+  }, [memory]);
 
   const handleSave = async () => {
     setFeedback({ kind: 'saving' });
     try {
-      await client.putUserMemory(token, draft);
+      const next = await client.putUserMemory(token, draft);
+      applyMemory(next);
+      lastHydratedBodyRef.current = next.body;
+      draftRef.current = next.body;
       setFeedback({ kind: 'success', message: '已保存' });
     } catch (err) {
       if (err instanceof HttpError && err.status === 400) {
@@ -560,6 +587,10 @@ function UserMemorySection({
       <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
         只属于当前用户，跨工作区一致。会被注入到每个 session 的 system prompt（7 层栈第 6 层）。
       </span>
+      {loadLoading && !memory ? (
+        <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>个人长期记忆加载中…</span>
+      ) : null}
+      {loadError ? <span style={ERROR_STYLE}>{loadError}</span> : null}
       <textarea
         aria-label="user_memory 编辑器"
         style={{ ...TEXTAREA_STYLE, minHeight: 140 }}
@@ -593,41 +624,61 @@ function PersonasSection({
   client: ReturnType<typeof createTeamPhaseAClient>;
 }) {
   const [activeLayer, setActiveLayer] = useState<SoulRoleLayer>('reception');
+  const { applyPersonaResponse, error: loadError, loading: loadLoading, personaResponse, refresh } =
+    useRecoverablePersonaRead({
+      client,
+      roleLayer: activeLayer,
+      token,
+    });
   const [draft, setDraft] = useState('');
-  const [, setRecord] = useState<AgentPersonaRecord | null>(null);
   const [isDefault, setIsDefault] = useState<boolean>(true);
   const [feedback, setFeedback] = useState<SaveFeedback>({ kind: 'idle' });
-  const [loadVersion, setLoadVersion] = useState(0);
+  const draftRef = useRef('');
+  const lastHydratedSoulRef = useRef('');
+  const lastHydratedLayerRef = useRef<SoulRoleLayer | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
+    draftRef.current = draft;
+  }, [draft]);
+
+  useEffect(() => {
     setFeedback({ kind: 'idle' });
-    void (async () => {
-      try {
-        const data = await client.getPersona(token, activeLayer);
-        if (cancelled) return;
-        setRecord(data.persona);
-        setIsDefault(data.effective.isDefault);
-        setDraft(data.effective.soulMd);
-      } catch (err) {
-        if (cancelled) return;
-        setFeedback({
-          kind: 'error',
-          message: err instanceof Error ? err.message : '加载 SOUL 失败',
-        });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [client, token, activeLayer, loadVersion]);
+  }, [activeLayer]);
+
+  useEffect(() => {
+    if (!personaResponse) {
+      return;
+    }
+    const shouldHydrate =
+      lastHydratedLayerRef.current !== activeLayer ||
+      draftRef.current === lastHydratedSoulRef.current;
+    if (shouldHydrate) {
+      setDraft(personaResponse.effective.soulMd);
+      draftRef.current = personaResponse.effective.soulMd;
+    }
+    setIsDefault(personaResponse.effective.isDefault);
+    lastHydratedSoulRef.current = personaResponse.effective.soulMd;
+    lastHydratedLayerRef.current = activeLayer;
+  }, [activeLayer, personaResponse]);
 
   const handleSave = async () => {
     setFeedback({ kind: 'saving' });
     try {
       const persona = await client.putPersona(token, activeLayer, { soulMd: draft });
-      setRecord(persona);
+      applyPersonaResponse({
+        effective: {
+          isDefault: false,
+          soulMd: persona.soulMd,
+        },
+        key: persona.key,
+        persona,
+        roleLayer: activeLayer,
+      });
       setIsDefault(false);
+      setDraft(persona.soulMd);
+      draftRef.current = persona.soulMd;
+      lastHydratedSoulRef.current = persona.soulMd;
+      lastHydratedLayerRef.current = activeLayer;
       setFeedback({ kind: 'success', message: '已保存' });
     } catch (err) {
       if (err instanceof HttpError && err.status === 400) {
@@ -652,6 +703,10 @@ function PersonasSection({
         每层 SOUL 是该角色 agent 的人格定义（5 维度 frontmatter + Markdown 正文）。
         默认值由系统提供，自定义后会覆盖默认值。
       </span>
+      {loadLoading && !personaResponse ? (
+        <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>角色 SOUL 加载中…</span>
+      ) : null}
+      {loadError ? <span style={ERROR_STYLE}>{loadError}</span> : null}
 
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         {ROLE_LAYER_ORDER.map((layer) => {
@@ -663,7 +718,7 @@ function PersonasSection({
               style={{
                 ...SECONDARY_BUTTON_STYLE,
                 background: active
-                  ? 'color-mix(in srgb, var(--accent) 18%, var(--bg-overlay)'
+                  ? 'color-mix(in srgb, var(--accent) 18%, var(--bg-overlay))'
                   : SECONDARY_BUTTON_STYLE.background,
                 borderColor: active
                   ? 'color-mix(in srgb, var(--accent) 50%, transparent)'
@@ -703,7 +758,7 @@ function PersonasSection({
         <button
           type="button"
           style={SECONDARY_BUTTON_STYLE}
-          onClick={() => setLoadVersion((v) => v + 1)}
+          onClick={() => refresh()}
         >
           重置为默认
         </button>
@@ -726,25 +781,10 @@ function InstructionStackPreviewSection({
   teamWorkspaceId: string | null;
 }) {
   const [previewLayer, setPreviewLayer] = useState<SoulRoleLayer>('executor');
-  const [preview, setPreview] = useState<InstructionStackPreview | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const handlePreview = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await client.previewInstructionStack(token, {
-        teamWorkspaceId: teamWorkspaceId ?? undefined,
-        roleLayer: previewLayer,
-      });
-      setPreview(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '预览失败');
-    } finally {
-      setBusy(false);
-    }
-  };
+  const { busy, error, preview, previewInstructionStack } = useInstructionStackPreviewRead({
+    client,
+    token,
+  });
 
   return (
     <div style={PANEL_INSET_STYLE}>
@@ -763,7 +803,7 @@ function InstructionStackPreviewSection({
               ...SECONDARY_BUTTON_STYLE,
               background:
                 layer === previewLayer
-                  ? 'color-mix(in srgb, var(--accent) 18%, var(--bg-overlay)'
+                  ? 'color-mix(in srgb, var(--accent) 18%, var(--bg-overlay))'
                   : SECONDARY_BUTTON_STYLE.background,
             }}
             onClick={() => setPreviewLayer(layer)}
@@ -775,7 +815,12 @@ function InstructionStackPreviewSection({
           type="button"
           style={PRIMARY_BUTTON_STYLE}
           disabled={busy}
-          onClick={() => void handlePreview()}
+          onClick={() =>
+            previewInstructionStack({
+              teamWorkspaceId: teamWorkspaceId ?? undefined,
+              roleLayer: previewLayer,
+            })
+          }
         >
           {busy ? '生成中…' : '生成预览'}
         </button>
@@ -854,7 +899,7 @@ export function MemoryWriteBadge({ field, threat, reason, sample }: MemoryWriteB
       style={{
         ...PANEL_INSET_STYLE,
         borderColor: 'color-mix(in srgb, var(--danger) 60%, transparent)',
-        background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay)',
+        background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay))',
       }}
     >
       <strong style={{ fontSize: 12 }}>记忆写入被安全扫描拒绝</strong>

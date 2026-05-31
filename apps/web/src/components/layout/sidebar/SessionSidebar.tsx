@@ -7,6 +7,7 @@ import { useAuthStore } from '../../../stores/auth/auth.js';
 import { useSessions } from '../../../hooks/workspace/useSessions.js';
 import SessionContextMenu from './SessionContextMenu.js';
 import FileTreeContextMenu from '../file-tree/FileTreeContextMenu.js';
+import { useSessionSidebarFileTreeState } from './use-session-sidebar-file-tree-state.js';
 import {
   copyTextToClipboard,
   getFileTreeRelativePath,
@@ -153,31 +154,14 @@ export function SessionSidebar({
     workspacePath: string | null;
   } | null>(null);
 
-  const [fileTree, setFileTree] = useState<FileTreeNode[]>([]);
-  const [fileTreeLoading, setFileTreeLoading] = useState(false);
-  const [fileTreeError, setFileTreeError] = useState<string | null>(null);
   const [fileTreeFilter, setFileTreeFilter] = useState('');
   const [fileTreeContextMenu, setFileTreeContextMenu] = useState<FileTreeContextMenuState | null>(
     null,
   );
   const hasSelectedWorkspace = fileTreeRootPath !== null;
-  const fileTreeRequestIdRef = useRef(0);
-  const latestFileTreeRootPathRef = useRef(fileTreeRootPath);
   const lastPointerPositionRef = useRef<{ x: number; y: number } | null>(null);
   const deletingWorkspaceGroupKeysRef = useRef<Set<string>>(new Set());
   const workspaceDeletionSubmitLockRef = useRef(false);
-
-  const nextFileTreeRequest = useCallback(() => {
-    const requestId = fileTreeRequestIdRef.current + 1;
-    fileTreeRequestIdRef.current = requestId;
-    return requestId;
-  }, []);
-
-  const isActiveFileTreeRequest = useCallback(
-    (requestId: number, rootPath: string | null) =>
-      fileTreeRequestIdRef.current === requestId && latestFileTreeRootPathRef.current === rootPath,
-    [],
-  );
 
   const restoreHoveredSessionFromPointer = useCallback(() => {
     const pointer = lastPointerPositionRef.current;
@@ -201,173 +185,29 @@ export function SessionSidebar({
     setHoveredSessionId(hoveredSessionItem?.dataset.sessionId ?? null);
   }, [setHoveredSessionId]);
 
-  const patchTreeChildren = useCallback(
-    (nodes: FileTreeNode[], targetPath: string, children: FileTreeNode[]): FileTreeNode[] =>
-      nodes.map((n) =>
-        n.path === targetPath
-          ? { ...n, children }
-          : {
-              ...n,
-              children: n.children
-                ? patchTreeChildren(n.children, targetPath, children)
-                : n.children,
-            },
-      ),
-    [],
-  );
-
-  const findNode = useCallback((nodes: FileTreeNode[], targetPath: string): FileTreeNode | null => {
-    for (const node of nodes) {
-      if (node.path === targetPath) return node;
-      if (node.children) {
-        const found = findNode(node.children, targetPath);
-        if (found) return found;
-      }
-    }
-    return null;
-  }, []);
-
-  const ensureRootPath = useCallback(async (): Promise<string> => {
-    if (!fileTreeRootPath) {
-      throw new Error('请先选择工作区');
-    }
-
-    return fileTreeRootPath;
-  }, [fileTreeRootPath]);
-
-  const collectLoadedExpandedDirectories = useCallback(
-    (nodes: FileTreeNode[]): string[] => {
-      const expandedDirectorySet = new Set(expandedDirsArr);
-      const directoryPaths: string[] = [];
-
-      const visit = (entries: FileTreeNode[]) => {
-        for (const entry of entries) {
-          if (entry.type !== 'directory') {
-            continue;
-          }
-
-          if (expandedDirectorySet.has(entry.path) && entry.children) {
-            directoryPaths.push(entry.path);
-            visit(entry.children);
-          }
-        }
-      };
-
-      visit(nodes);
-      return directoryPaths;
-    },
-    [expandedDirsArr],
-  );
-
-  const collectNestedLoadedExpandedDirectories = useCallback(
-    (directoryPath: string): string[] => {
-      const targetNode = findNode(fileTree, directoryPath);
-      if (!targetNode) {
-        return [];
-      }
-
-      return collectLoadedExpandedDirectories([targetNode]).filter(
-        (path) => path !== directoryPath,
-      );
-    },
-    [collectLoadedExpandedDirectories, fileTree, findNode],
-  );
-
-  const loadFileTree = useCallback(
-    async (preserveExpandedDirectories: boolean): Promise<boolean> => {
-      if (!fileTreeRootPath) {
-        setFileTree([]);
-        setFileTreeError(null);
-        return false;
-      }
-
-      const requestId = nextFileTreeRequest();
-      const requestedRootPath = fileTreeRootPath;
-
-      setFileTreeLoading(true);
-      setFileTreeError(null);
-
-      try {
-        const rootNodes = await fetchTree(requestedRootPath, 1);
-
-        if (!isActiveFileTreeRequest(requestId, requestedRootPath)) {
-          return false;
-        }
-
-        if (!preserveExpandedDirectories || fileTree.length === 0) {
-          setFileTree(rootNodes);
-          return true;
-        }
-
-        let nextTree = rootNodes;
-        let failedRefreshCount = 0;
-
-        for (const directoryPath of collectLoadedExpandedDirectories(fileTree)) {
-          try {
-            const children = await fetchTree(directoryPath, 1);
-
-            if (!isActiveFileTreeRequest(requestId, requestedRootPath)) {
-              return false;
-            }
-
-            nextTree = patchTreeChildren(nextTree, directoryPath, children);
-          } catch (error) {
-            failedRefreshCount += 1;
-            console.warn('刷新已展开目录失败', directoryPath, error);
-          }
-        }
-
-        if (!isActiveFileTreeRequest(requestId, requestedRootPath)) {
-          return false;
-        }
-
-        setFileTree(nextTree);
-        if (failedRefreshCount > 0) {
-          setFileTreeError(`已有 ${failedRefreshCount} 个已展开目录未能刷新完成`);
-        }
-
-        return true;
-      } catch (error) {
-        setFileTreeError(error instanceof Error ? error.message : '读取文件树失败');
-        if (!preserveExpandedDirectories) {
-          setFileTree([]);
-        }
-        return false;
-      } finally {
-        if (isActiveFileTreeRequest(requestId, requestedRootPath)) {
-          setFileTreeLoading(false);
-        }
-      }
-    },
-    [
-      collectLoadedExpandedDirectories,
-      fetchTree,
-      fileTree,
-      fileTreeRootPath,
-      isActiveFileTreeRequest,
-      nextFileTreeRequest,
-      patchTreeChildren,
-    ],
-  );
+  const {
+    applyCreatedEntry,
+    applyDeletedEntry,
+    applyRenamedEntry,
+    ensureRootPath,
+    fileTree,
+    fileTreeError,
+    fileTreeLoading,
+    handleRefreshFileTree,
+    handleToggleDirWithLoad,
+    refreshDirectory,
+    setFileTreeError,
+  } = useSessionSidebarFileTreeState({
+    active: sidebarTab === 'files',
+    expandedDirsArr,
+    fetchTree,
+    fileTreeRootPath,
+    setExpandedDirs,
+  });
 
   useEffect(() => {
-    latestFileTreeRootPathRef.current = fileTreeRootPath;
-    fileTreeRequestIdRef.current += 1;
-    setFileTree([]);
-    setFileTreeError(null);
     setFileTreeContextMenu(null);
-    setExpandedDirsArr([]);
-
-    if (!fileTreeRootPath) {
-      setFileTreeLoading(false);
-    }
-  }, [fileTreeRootPath, setExpandedDirsArr]);
-
-  useEffect(() => {
-    if (sidebarTab === 'files' && fileTreeRootPath && fileTree.length === 0) {
-      void loadFileTree(false);
-    }
-  }, [fileTree.length, fileTreeRootPath, loadFileTree, sidebarTab]);
+  }, [fileTreeRootPath]);
 
   useEffect(() => {
     if (!hoveredSessionId) {
@@ -465,82 +305,15 @@ export function SessionSidebar({
     [quickDeleteSession, removeSavedWorkspacePath],
   );
 
-  const refreshDirectory = useCallback(
+  const refreshDirectoryWithVersion = useCallback(
     async (directoryPath: string): Promise<boolean> => {
-      if (!fileTreeRootPath) {
-        setFileTree([]);
-        setFileTreeError('请先选择工作区');
-        return false;
-      }
-
-      const rootPath = await ensureRootPath();
-      const requestId = nextFileTreeRequest();
-      const requestedRootPath = fileTreeRootPath;
-
-      if (directoryPath === rootPath || fileTree.length === 0) {
-        const refreshed = await loadFileTree(true);
-        if (refreshed) {
-          bumpWorkspaceTreeVersion();
-        }
-        return refreshed;
-      }
-
-      setFileTreeLoading(true);
-      setFileTreeError(null);
-      try {
-        let nextChildren = await fetchTree(directoryPath, 1);
-
-        if (!isActiveFileTreeRequest(requestId, requestedRootPath)) {
-          return false;
-        }
-
-        let failedRefreshCount = 0;
-
-        for (const nestedDirectoryPath of collectNestedLoadedExpandedDirectories(directoryPath)) {
-          try {
-            const nestedChildren = await fetchTree(nestedDirectoryPath, 1);
-
-            if (!isActiveFileTreeRequest(requestId, requestedRootPath)) {
-              return false;
-            }
-
-            nextChildren = patchTreeChildren(nextChildren, nestedDirectoryPath, nestedChildren);
-          } catch {
-            failedRefreshCount += 1;
-          }
-        }
-
-        if (!isActiveFileTreeRequest(requestId, requestedRootPath)) {
-          return false;
-        }
-
-        setFileTree((prev) => patchTreeChildren(prev, directoryPath, nextChildren));
-        if (failedRefreshCount > 0) {
-          setFileTreeError(`已有 ${failedRefreshCount} 个已展开子目录未能刷新完成`);
-        }
+      const refreshed = await refreshDirectory(directoryPath);
+      if (refreshed) {
         bumpWorkspaceTreeVersion();
-        return true;
-      } catch (error) {
-        setFileTreeError(error instanceof Error ? error.message : '刷新目录失败');
-        return false;
-      } finally {
-        if (isActiveFileTreeRequest(requestId, requestedRootPath)) {
-          setFileTreeLoading(false);
-        }
       }
+      return refreshed;
     },
-    [
-      bumpWorkspaceTreeVersion,
-      collectNestedLoadedExpandedDirectories,
-      ensureRootPath,
-      fetchTree,
-      fileTree.length,
-      fileTreeRootPath,
-      isActiveFileTreeRequest,
-      loadFileTree,
-      nextFileTreeRequest,
-      patchTreeChildren,
-    ],
+    [bumpWorkspaceTreeVersion, refreshDirectory],
   );
 
   const createWorkspaceFile = useCallback(
@@ -596,8 +369,17 @@ export function SessionSidebar({
         } else {
           await createWorkspaceDirectory(nextPath);
         }
+        applyCreatedEntry({
+          directoryPath,
+          entry: {
+            path: nextPath,
+            name: entryName,
+            type: entryType === 'file' ? 'file' : 'directory',
+            ...(entryType === 'directory' ? { children: [] } : {}),
+          },
+        });
 
-        const refreshed = await refreshDirectory(directoryPath);
+        const refreshed = await refreshDirectoryWithVersion(directoryPath);
         if (!refreshed) {
           bumpWorkspaceTreeVersion();
           setFileTreeError(
@@ -614,37 +396,26 @@ export function SessionSidebar({
     },
     [
       bumpWorkspaceTreeVersion,
+      applyCreatedEntry,
       createWorkspaceDirectory,
       createWorkspaceFile,
       onOpenFile,
-      refreshDirectory,
+      refreshDirectoryWithVersion,
     ],
   );
 
   const handleCreateRootEntry = useCallback(
     (entryType: 'file' | 'directory') => {
       void (async () => {
-        try {
-          const rootPath = await ensureRootPath();
-          await handleCreateEntry(entryType, rootPath, '工作区根目录');
-        } catch (error) {
-          setFileTreeError(error instanceof Error ? error.message : '读取根目录失败');
+        const rootPath = await ensureRootPath();
+        if (!rootPath) {
+          return;
         }
+        await handleCreateEntry(entryType, rootPath, '工作区根目录');
       })();
     },
     [ensureRootPath, handleCreateEntry],
   );
-
-  const handleRefreshFileTree = useCallback(() => {
-    void (async () => {
-      try {
-        const rootPath = await ensureRootPath();
-        await refreshDirectory(rootPath);
-      } catch (error) {
-        setFileTreeError(error instanceof Error ? error.message : '刷新文件树失败');
-      }
-    })();
-  }, [ensureRootPath, refreshDirectory]);
 
   const handleCopyFileTreePath = useCallback((path: string, label: string) => {
     void copyTextToClipboard(path)
@@ -683,20 +454,19 @@ export function SessionSidebar({
       const y = event.clientY;
 
       void (async () => {
-        try {
-          const rootPath = await ensureRootPath();
-          setFileTreeContextMenu({
-            path: rootPath,
-            name: '工作区根目录',
-            type: 'directory',
-            targetType: 'root',
-            directoryPath: rootPath,
-            x,
-            y,
-          });
-        } catch (error) {
-          setFileTreeError(error instanceof Error ? error.message : '无法打开根目录菜单');
+        const rootPath = await ensureRootPath();
+        if (!rootPath) {
+          return;
         }
+        setFileTreeContextMenu({
+          path: rootPath,
+          name: '工作区根目录',
+          type: 'directory',
+          targetType: 'root',
+          directoryPath: rootPath,
+          x,
+          y,
+        });
       })();
     },
     [ensureRootPath],
@@ -706,63 +476,14 @@ export function SessionSidebar({
     setFileTreeContextMenu({ ...target, targetType: target.type });
   }, []);
 
-  const handleToggleDirWithLoad = useCallback(
-    async (path: string) => {
-      const currentRootPath = fileTreeRootPath;
-      const requestId = nextFileTreeRequest();
-
-      setExpandedDirs((prev) => {
-        const next = new Set(prev);
-        if (next.has(path)) next.delete(path);
-        else next.add(path);
-        return next;
-      });
-      const node = findNode(fileTree, path);
-      if (node && (!node.children || node.children.length === 0)) {
-        try {
-          setFileTreeError(null);
-          const children = await fetchTree(path, 1);
-
-          if (!isActiveFileTreeRequest(requestId, currentRootPath)) {
-            return;
-          }
-
-          setFileTree((prev) => patchTreeChildren(prev, path, children));
-        } catch (error) {
-          if (!isActiveFileTreeRequest(requestId, currentRootPath)) {
-            return;
-          }
-
-          setFileTreeError(error instanceof Error ? error.message : '读取目录失败');
-          setExpandedDirs((prev) => {
-            const next = new Set(prev);
-            next.delete(path);
-            return next;
-          });
-        }
-      }
-    },
-    [
-      fileTree,
-      fileTreeRootPath,
-      fetchTree,
-      findNode,
-      isActiveFileTreeRequest,
-      nextFileTreeRequest,
-      patchTreeChildren,
-      setExpandedDirs,
-    ],
-  );
-
   const handleSidebarTabChange = useCallback(
-    async (tab: 'sessions' | 'files') => {
+    (tab: 'sessions' | 'files') => {
       setSidebarTab(tab);
       if (tab === 'files' && !fileTreeRootPath) {
-        setFileTree([]);
         setFileTreeError(null);
       }
     },
-    [fileTreeRootPath, setSidebarTab],
+    [fileTreeRootPath, setFileTreeError, setSidebarTab],
   );
 
   const { sessionId } = { sessionId: window.location.pathname.split('/chat/')[1]?.split('/')[0] };
@@ -1526,7 +1247,7 @@ export function SessionSidebar({
               void handleCreateEntry('directory', fileTreeContextMenu.directoryPath, label);
             }}
             onRefresh={() => {
-              void refreshDirectory(fileTreeContextMenu.directoryPath);
+              void refreshDirectoryWithVersion(fileTreeContextMenu.directoryPath);
             }}
             onDelete={
               fileTreeContextMenu.targetType !== 'root'
@@ -1543,9 +1264,10 @@ export function SessionSidebar({
                       try {
                         if (!accessToken) return;
                         await workspaceClient.deleteEntry(accessToken, targetPath);
+                        applyDeletedEntry(targetPath);
                         toast(`已删除: ${targetName}`, 'success');
                         // Refresh the parent directory
-                        void refreshDirectory(fileTreeContextMenu.directoryPath);
+                        void refreshDirectoryWithVersion(fileTreeContextMenu.directoryPath);
                         bumpWorkspaceTreeVersion();
                       } catch (err) {
                         const msg = err instanceof Error ? err.message : '删除失败';
@@ -1575,8 +1297,13 @@ export function SessionSidebar({
                           newName.trim(),
                         );
                         await workspaceClient.renameEntry(accessToken, targetPath, newPath);
+                        applyRenamedEntry({
+                          oldPath: targetPath,
+                          newPath,
+                          newName: newName.trim(),
+                        });
                         toast(`已重命名为: ${newName.trim()}`, 'success');
-                        void refreshDirectory(fileTreeContextMenu.directoryPath);
+                        void refreshDirectoryWithVersion(fileTreeContextMenu.directoryPath);
                         bumpWorkspaceTreeVersion();
                       } catch (err) {
                         const msg = err instanceof Error ? err.message : '重命名失败';

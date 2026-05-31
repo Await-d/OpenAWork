@@ -43,9 +43,20 @@ export type StreamOptions = {
   yoloMode?: boolean;
 };
 
+/**
+ * Upper bound on payloads buffered while the socket is not yet OPEN. The
+ * buffer keeps sends fired during CONNECTING from being lost, but if the
+ * gateway is unreachable the socket never opens and a chatty caller (rapid
+ * retries, automated resends) would otherwise grow this array without limit
+ * — an unbounded client-side memory leak. When the cap is exceeded we drop
+ * the oldest queued payload (FIFO eviction): the most recent send intent is
+ * the one worth keeping, and the stale head was already superseded.
+ */
+const MAX_PENDING_PAYLOADS = 64;
+
 export class MobileGatewayClient {
   private ws: WebSocket | null = null;
-  private pendingPayload: string | null = null;
+  private pendingPayloads: string[] = [];
   private gatewayUrl: string;
   private token: string;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -53,6 +64,14 @@ export class MobileGatewayClient {
   private maxReconnectAttempts = 5;
   private handlers: StreamHandlers | null = null;
   private currentSessionId: string | null = null;
+  /**
+   * True once a terminal chunk (`done` / `error`, including the synthetic
+   * close error below) has been delivered for the CURRENT turn. Reset when a
+   * new turn starts (`connect` / `send`). Guards `onclose` so a socket that
+   * dies without a terminal chunk still surfaces exactly one terminal event
+   * instead of leaving the chat UI spinner hanging forever.
+   */
+  private terminalDispatched = false;
 
   constructor(gatewayUrl: string, token: string) {
     this.gatewayUrl = gatewayUrl;
@@ -62,6 +81,7 @@ export class MobileGatewayClient {
   connect(sessionId: string, handlers: StreamHandlers): void {
     this.currentSessionId = sessionId;
     this.handlers = handlers;
+    this.terminalDispatched = false;
     this.openConnection(sessionId);
   }
 
@@ -81,85 +101,133 @@ export class MobileGatewayClient {
 
     this.ws.onopen = () => {
       this.reconnectAttempts = 0;
-      if (this.pendingPayload) {
-        this.ws?.send(this.pendingPayload);
-        this.pendingPayload = null;
+      // Flush every payload queued while CONNECTING; a single-slot buffer
+      // would drop all but the last when sends fire back-to-back.
+      if (this.pendingPayloads.length > 0) {
+        const queued = this.pendingPayloads;
+        this.pendingPayloads = [];
+        for (const payload of queued) {
+          this.ws?.send(payload);
+        }
       }
       this.handlers?.onConnected?.();
     };
 
     this.ws.onmessage = (ev) => {
-      const chunk = JSON.parse(ev.data as string) as RunEvent;
       if (!this.handlers) return;
-      if (chunk.type === 'text_delta') {
-        this.handlers.onDelta(extractRuntimeTextDelta(chunk.delta));
-      } else if (chunk.type === 'thinking_delta') {
-        this.handlers.onThinkingDelta?.(extractRuntimeThinkingDelta(chunk.delta));
-      } else if (chunk.type === 'done') {
-        this.handlers.onDone(chunk.stopReason);
-      } else if (chunk.type === 'error') {
-        this.handlers.onError(chunk.code, chunk.message);
-      } else if (chunk.type === 'tool_call_delta') {
-        this.handlers.onActivity?.({
-          kind: 'tool_start',
-          id: chunk.toolCallId,
-          name: chunk.toolName,
-        });
-      } else if (chunk.type === 'tool_result') {
-        this.handlers.onActivity?.({
-          kind: 'tool_result',
-          id: chunk.toolCallId,
-          name: chunk.toolName,
-          isError: chunk.isError,
-          reason: chunk.reason,
-          output:
-            typeof chunk.output === 'string'
-              ? chunk.reason === 'timeout'
-                ? `原因：超时 · ${chunk.output}`
-                : chunk.output
-              : chunk.reason === 'timeout'
-                ? '原因：超时'
-                : undefined,
-        });
-      } else if (chunk.type === 'task_update') {
-        this.handlers.onActivity?.({
-          kind: 'task_update',
-          id: chunk.taskId,
-          name: chunk.assignedAgent ? `@${chunk.assignedAgent} · ${chunk.label}` : chunk.label,
-          status:
-            chunk.status === 'done'
-              ? 'done'
-              : chunk.status === 'failed' || chunk.status === 'cancelled'
-                ? 'error'
-                : 'running',
-          assignedAgent: chunk.assignedAgent,
-          reason: chunk.reason,
-          sessionId: chunk.sessionId,
-          output:
-            chunk.errorMessage ??
-            chunk.result ??
-            (chunk.reason === 'timeout' ? '子任务执行超时。' : undefined) ??
-            (chunk.status === 'cancelled' ? '子任务已取消。' : undefined),
-        });
+      let chunk: RunEvent;
+      try {
+        chunk = JSON.parse(ev.data as string) as RunEvent;
+      } catch {
+        // A malformed frame must not throw out of the WS event loop and
+        // tear the socket down; surface it as a structured error instead.
+        this.handlers.onError('WS_INVALID_PAYLOAD', 'WebSocket 数据解析失败。');
+        return;
+      }
+      try {
+        this.dispatchChunk(chunk);
+      } catch {
+        // A consumer handler (React state setter on an unmounted screen,
+        // etc.) throwing must not break the connection.
+        this.handlers.onError('WS_HANDLER_ERROR', '消息处理回调异常。');
       }
     };
 
     this.ws.onclose = (ev) => {
-      if (!ev.wasClean && this.reconnectAttempts < this.maxReconnectAttempts) {
+      // Reconnect only for an unclean drop while we still have budget AND a
+      // live session to resume into (a manual disconnect() nulls
+      // currentSessionId, so a late close never resurrects the socket).
+      const willReconnect =
+        !ev.wasClean &&
+        this.reconnectAttempts < this.maxReconnectAttempts &&
+        this.currentSessionId !== null;
+      if (willReconnect) {
         const delay = Math.min(1000 * 2 ** this.reconnectAttempts, 30000);
         this.reconnectAttempts++;
         this.reconnectTimer = setTimeout(() => {
           if (this.currentSessionId) this.openConnection(this.currentSessionId);
         }, delay);
+        return;
+      }
+      // No further reconnect: a server-initiated clean close mid-turn (1001
+      // going-away) or an exhausted reconnect budget would otherwise leave
+      // the consumer stranded on a non-terminal state (mobile never
+      // re-attaches to the in-flight run). Surface exactly one synthetic
+      // terminal error so the chat UI can settle. Skipped when a terminal
+      // chunk / WS_ERROR already fired, or after a manual disconnect (which
+      // nulls handlers).
+      if (this.handlers && !this.terminalDispatched) {
+        this.terminalDispatched = true;
+        this.handlers.onError('WS_CLOSED', 'WebSocket 连接已关闭。');
       }
     };
 
     this.ws.onerror = () => {
+      this.terminalDispatched = true;
       this.handlers?.onError('WS_ERROR', 'WebSocket connection error');
     };
   }
 
+  private dispatchChunk(chunk: RunEvent): void {
+    if (!this.handlers) return;
+    if (chunk.type === 'text_delta') {
+      this.handlers.onDelta(extractRuntimeTextDelta(chunk.delta));
+    } else if (chunk.type === 'thinking_delta') {
+      this.handlers.onThinkingDelta?.(extractRuntimeThinkingDelta(chunk.delta));
+    } else if (chunk.type === 'done') {
+      this.terminalDispatched = true;
+      this.handlers.onDone(chunk.stopReason);
+    } else if (chunk.type === 'error') {
+      this.terminalDispatched = true;
+      this.handlers.onError(chunk.code, chunk.message);
+    } else if (chunk.type === 'tool_call_delta') {
+      this.handlers.onActivity?.({
+        kind: 'tool_start',
+        id: chunk.toolCallId,
+        name: chunk.toolName,
+      });
+    } else if (chunk.type === 'tool_result') {
+      this.handlers.onActivity?.({
+        kind: 'tool_result',
+        id: chunk.toolCallId,
+        name: chunk.toolName,
+        isError: chunk.isError,
+        reason: chunk.reason,
+        output:
+          typeof chunk.output === 'string'
+            ? chunk.reason === 'timeout'
+              ? `原因：超时 · ${chunk.output}`
+              : chunk.output
+            : chunk.reason === 'timeout'
+              ? '原因：超时'
+              : undefined,
+      });
+    } else if (chunk.type === 'task_update') {
+      this.handlers.onActivity?.({
+        kind: 'task_update',
+        id: chunk.taskId,
+        name: chunk.assignedAgent ? `@${chunk.assignedAgent} · ${chunk.label}` : chunk.label,
+        status:
+          chunk.status === 'done'
+            ? 'done'
+            : chunk.status === 'failed' || chunk.status === 'cancelled'
+              ? 'error'
+              : 'running',
+        assignedAgent: chunk.assignedAgent,
+        reason: chunk.reason,
+        sessionId: chunk.sessionId,
+        output:
+          chunk.errorMessage ??
+          chunk.result ??
+          (chunk.reason === 'timeout' ? '子任务执行超时。' : undefined) ??
+          (chunk.status === 'cancelled' ? '子任务已取消。' : undefined),
+      });
+    }
+  }
+
   send(message: string, options: StreamOptions = {}): void {
+    // A send begins a new turn; allow onclose to surface a terminal event again.
+    this.terminalDispatched = false;
     const agentId = options.agentId?.trim() || undefined;
     const dialogueMode = options.dialogueMode;
     const payload = JSON.stringify({
@@ -172,17 +240,17 @@ export class MobileGatewayClient {
       ...(options.yoloMode !== undefined ? { yoloMode: options.yoloMode } : {}),
     });
 
-    if (!this.ws) {
-      this.pendingPayload = payload;
-      return;
-    }
-
-    if (this.ws.readyState === WebSocket.OPEN) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(payload);
       return;
     }
 
-    this.pendingPayload = payload;
+    this.pendingPayloads.push(payload);
+    // Evict oldest entries if the socket stayed un-OPEN long enough to
+    // overflow the buffer (gateway unreachable / never connected).
+    while (this.pendingPayloads.length > MAX_PENDING_PAYLOADS) {
+      this.pendingPayloads.shift();
+    }
   }
 
   disconnect(): void {
@@ -191,6 +259,7 @@ export class MobileGatewayClient {
     this.ws = null;
     this.handlers = null;
     this.currentSessionId = null;
+    this.pendingPayloads = [];
   }
 
   get isConnected(): boolean {

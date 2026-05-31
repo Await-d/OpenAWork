@@ -29,6 +29,7 @@ import {
   resumeRejectedPermissionRequest,
 } from './stream-runtime.js';
 import { persistWorkspacePermanentPermission } from '../workspace/workspace-safety.js';
+import { appendPermissionDecisionLog } from '../session/permission-decision-log-store.js';
 import { resolvePermissionCategory } from '@openAwork/agent-core';
 
 const createPermissionRequestSchema = z.object({
@@ -115,7 +116,7 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
 
       if (!ownsSession(sessionId, user.sub)) {
         step.fail('session not found');
-        return reply.status(404).send({ error: 'Session not found' });
+        return reply.status(404).send({ error: '目标会话不存在。' });
       }
 
       const requests = sqliteAll<PermissionRequestRow>(
@@ -146,7 +147,7 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
       const body = parseBody(createPermissionRequestSchema, request.body);
 
       if (!ownsSession(sessionId, user.sub)) {
-        throw ApiError.notFound('Session not found');
+        throw ApiError.notFound('目标会话不存在。');
       }
 
       const requestId = randomUUID();
@@ -224,7 +225,7 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
       const body = parseBody(replyPermissionSchema, request.body);
 
       if (!ownsSession(sessionId, user.sub)) {
-        throw ApiError.notFound('Session not found');
+        throw ApiError.notFound('目标会话不存在。');
       }
 
       const permissionRequest = sqliteGet<PermissionRequestRow>(
@@ -235,11 +236,11 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
         [body.requestId, sessionId],
       );
       if (!permissionRequest) {
-        throw ApiError.notFound('Permission request not found');
+        throw ApiError.notFound('目标权限请求不存在。');
       }
       if (permissionRequest.status !== 'pending') {
         step.fail('permission request already resolved');
-        return reply.status(409).send({ error: 'Permission request already resolved' });
+        return reply.status(409).send({ error: '权限请求已处理，无法重复提交。' });
       }
 
       sqliteRun(
@@ -254,18 +255,13 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
         ],
       );
 
-      sqliteRun(
-        `INSERT INTO permission_decision_logs
-         (request_id, session_id, tool_name, scope, decision, workspace_root, created_at)
-         VALUES (?, ?, ?, ?, ?, NULL, datetime('now'))`,
-        [
-          body.requestId,
-          sessionId,
-          permissionRequest.tool_name,
-          permissionRequest.scope,
-          body.decision,
-        ],
-      );
+      appendPermissionDecisionLog({
+        requestId: body.requestId,
+        sessionId,
+        toolName: permissionRequest.tool_name,
+        scope: permissionRequest.scope,
+        decision: body.decision,
+      });
 
       if (body.decision === 'permanent') {
         // Use always patterns (from opencode ctx.ask always) for broad approval.
@@ -295,7 +291,7 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
               { err: error, requestId: body.requestId, sessionId },
               'failed to persist permanent permission',
             );
-            throw ApiError.internal('Failed to persist permanent permission');
+            throw ApiError.internal('保存永久权限规则失败。');
           }
         }
       } else if (body.decision === 'session') {

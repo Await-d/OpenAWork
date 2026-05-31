@@ -42,8 +42,10 @@ import { copyExportToClipboard } from '../../../components/chat/message/message-
 import { PromptTemplatePanel } from '../../../components/chat/misc/prompt-template-panel.js';
 import { TeamConversationLayout } from './TeamConversationLayout.js';
 import { TeamSubstateProgressBar } from './extras/TeamSubstateProgressBar.js';
+import { TeamRunStateBanner } from './extras/TeamRunStateBanner.js';
 import { TeamSessionEmptyState } from './extras/TeamSessionEmptyState.js';
 import { TeamSessionHeader } from './extras/TeamSessionHeader.js';
+import { TeamInitModal } from './extras/TeamInitModal.js';
 import { useTeamConversationState } from './use-team-conversation-state.js';
 import { resolveTeamSubmitStrategy } from './submit/team-submit-router.js';
 
@@ -184,13 +186,17 @@ export function TeamConversationView({
     composerEnabled,
   );
 
-  // 默认 topBar：进度条。外层可传 topBar 覆盖。
-  // 优化：reception 层 idle 状态下不显示进度条（没有有用信息），减少垂直空间占用。
+  // 默认 topBar：
+  //   - reception 层：显示「团队整体运行状态」横幅（TeamRunStateBanner，自聚合
+  //     handoff/连接/活动信号；无任何 handoff 时自渲染为 null）。它解决了
+  //     「提交需求后看不出团队是在跑/卡住/异常停」的可观测性缺口。reception 会话
+  //     自身常回 idle，原来的 substate 进度条对 reception 没意义，故不再用它。
+  //   - 其它层（pm1/pm2/executor/reviewer）：保留 substate 进度条（对单层有意义）。
   const effectiveTopBar =
     topBar ??
-    (state.roleLayer === 'reception' &&
-    (!state.substate || state.substate === 'idle' || state.substate === 'chatting') &&
-    state.sessionStateStatus !== 'running' ? null : (
+    (state.roleLayer === 'reception' ? (
+      <TeamRunStateBanner receptionStateStatus={state.sessionStateStatus} />
+    ) : (
       <TeamSubstateProgressBar
         roleLayer={state.roleLayer}
         substate={state.substate}
@@ -424,6 +430,9 @@ export function TeamConversationView({
 
   return (
     <>
+      {state.roleLayer === 'reception' ? (
+        <TeamInitModal sessionId={sessionId} sessionMetadata={state.sessionMetadata} />
+      ) : null}
       <PromptTemplatePanel
         isOpen={showTemplatePanel}
         onClose={() => setShowTemplatePanel(false)}
@@ -499,8 +508,12 @@ export function TeamConversationView({
           }
           streaming={state.streaming}
           stoppingStream={state.stoppingStream}
-          streamError={state.streamError}
-          onDismissStreamError={() => state.setStreamError(null)}
+          streamError={state.streamError ?? state.snapshotError ?? state.providersError}
+          onDismissStreamError={() => {
+            state.setStreamError(null);
+            state.setSnapshotError(null);
+            state.setProvidersError(null);
+          }}
           checkpointCount={0}
           pendingQuestionsCount={state.pendingQuestions.length}
           stopCapability={canStopCurrentSessionStream ? 'best_effort' : 'none'}

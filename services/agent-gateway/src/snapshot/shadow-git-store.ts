@@ -111,6 +111,21 @@ async function withLock<T>(gitDir: string, fn: () => Promise<T>): Promise<T> {
 
 // ─── git 调用辅助 ────────────────────────────────────────────────────────
 
+/**
+ * Wall-clock ceiling for a single git invocation. A shadow-git command can
+ * hang indefinitely on `index.lock` contention, a stuck hook, a credential /
+ * editor prompt, or a stalled network filesystem; without a deadline the
+ * returned promise never settles and the snapshot capture/restore that awaits
+ * it wedges forever (holding its workspace lock). On timeout we kill the child
+ * and surface a normal failure result so callers degrade gracefully.
+ */
+const DEFAULT_GIT_TIMEOUT_MS = 30_000;
+
+// Git executable, overridable in tests so the timeout / failure paths can be
+// exercised deterministically against a stand-in (e.g. a script that sleeps)
+// without depending on a real hung git process.
+let gitBinary = 'git';
+
 interface GitInvocationResult {
   exitCode: number;
   stdout: string;
@@ -123,29 +138,47 @@ interface GitInvocationInput {
   stdin?: string;
   /** 限制 stdout 大小（字节），默认 16MB */
   maxBuffer?: number;
+  /** 单次 git 调用墙钟超时（毫秒），默认 30s；<=0 表示不限制 */
+  timeoutMs?: number;
 }
 
 async function runGit(input: GitInvocationInput): Promise<GitInvocationResult> {
   const maxBuffer = input.maxBuffer ?? 16 * 1024 * 1024;
+  const timeoutMs = input.timeoutMs ?? DEFAULT_GIT_TIMEOUT_MS;
 
   // execFile (promisified) does not handle stdin via `input`, so when we need
   // to write to stdin we fall back to `spawn` and accumulate buffers manually.
   if (input.stdin !== undefined) {
-    return runGitWithStdin({ ...input, maxBuffer });
+    return runGitWithStdin({ ...input, maxBuffer, timeoutMs });
   }
 
   try {
-    const result = await execFileAsync('git', input.args, {
+    const result = await execFileAsync(gitBinary, input.args, {
       cwd: input.cwd,
       maxBuffer,
+      // execFile SIGKILLs the child once the deadline elapses; the rejection
+      // is handled below like any other git failure. <=0 disables the limit.
+      ...(timeoutMs > 0 ? { timeout: timeoutMs, killSignal: 'SIGKILL' as const } : {}),
     });
     return { exitCode: 0, stdout: result.stdout.toString(), stderr: result.stderr.toString() };
   } catch (error) {
     const err = error as NodeJS.ErrnoException & {
       code?: string | number;
+      killed?: boolean;
+      signal?: string;
       stdout?: string | Buffer;
       stderr?: string | Buffer;
     };
+    // A timeout kill surfaces as killed/SIGKILL with no numeric exit code;
+    // label it explicitly so callers see a clear reason rather than an empty
+    // stderr.
+    if (err.killed === true && typeof err.code !== 'number') {
+      return {
+        exitCode: 1,
+        stdout: err.stdout ? err.stdout.toString() : '',
+        stderr: `git timed out after ${timeoutMs}ms`,
+      };
+    }
     return {
       exitCode: typeof err.code === 'number' ? err.code : 1,
       stdout: err.stdout ? err.stdout.toString() : '',
@@ -155,22 +188,35 @@ async function runGit(input: GitInvocationInput): Promise<GitInvocationResult> {
 }
 
 function runGitWithStdin(
-  input: GitInvocationInput & { maxBuffer: number },
+  input: GitInvocationInput & { maxBuffer: number; timeoutMs: number },
 ): Promise<GitInvocationResult> {
   return new Promise((resolve) => {
-    const child = spawn('git', input.args, { cwd: input.cwd });
+    const child = spawn(gitBinary, input.args, { cwd: input.cwd });
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
     let stdoutSize = 0;
     let stderrSize = 0;
     let killed = false;
 
+    // Wall-clock guard: a git child that connects to nothing but never exits
+    // (index.lock contention, a hung hook, a credential/editor prompt waiting
+    // on a tty we never provide) would otherwise leave this promise pending
+    // forever and wedge the snapshot pipeline. SIGKILL on the deadline and
+    // surface a normal failure result so callers degrade gracefully.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
     const fail = (message: string) => {
       if (killed) return;
       killed = true;
+      if (timer) clearTimeout(timer);
       child.kill('SIGKILL');
       resolve({ exitCode: 1, stdout: '', stderr: message });
     };
+
+    if (input.timeoutMs > 0) {
+      timer = setTimeout(() => fail(`git timed out after ${input.timeoutMs}ms`), input.timeoutMs);
+      timer.unref?.();
+    }
 
     child.stdout.on('data', (chunk: Buffer) => {
       stdoutSize += chunk.length;
@@ -191,6 +237,7 @@ function runGitWithStdin(
     child.on('error', (err) => fail(err.message));
     child.on('close', (code) => {
       if (killed) return;
+      if (timer) clearTimeout(timer);
       resolve({
         exitCode: typeof code === 'number' ? code : 1,
         stdout: Buffer.concat(stdoutChunks).toString('utf8'),
@@ -651,6 +698,18 @@ export function __resetShadowGitStoreForTests(): void {
   cachedStore = null;
   initializedGitDirs.clear();
   locksByGitDir.clear();
+}
+
+/** 测试用：替换 git 可执行文件路径（null 恢复默认 'git'）。 */
+export function __setGitBinaryForTests(binary: string | null): void {
+  gitBinary = binary ?? 'git';
+}
+
+/** 测试用：直接调用底层 git 执行器，用于验证超时 / maxBuffer 等护栏。 */
+export async function __runGitForTests(
+  input: { args: string[]; cwd: string; stdin?: string; maxBuffer?: number; timeoutMs?: number },
+): Promise<GitInvocationResult> {
+  return runGit(input);
 }
 
 // ─── 辅助函数 ───────────────────────────────────────────────────────────

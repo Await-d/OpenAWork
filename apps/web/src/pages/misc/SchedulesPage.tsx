@@ -40,12 +40,28 @@ export default function SchedulesPage() {
     <div className="page-root">
       <div className="page-header">
         <span className="page-title">定时任务</span>
+        <span className="page-subtitle">管理自动化定时规则与计划任务</span>
         <div style={{ flex: 1 }} />
         <button
           type="button"
           onClick={() => logger.info('Add schedule triggered')}
           className="btn-accent"
         >
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            style={{ marginRight: 4 }}
+          >
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
           添加任务
         </button>
       </div>
@@ -57,43 +73,76 @@ export default function SchedulesPage() {
             padding: '20px 24px',
             display: 'flex',
             flexDirection: 'column',
-            gap: 16,
+            gap: 20,
           }}
         >
           <div>
             <span className="section-label">定时规则</span>
             <div className="content-card" style={sharedUiThemeVars}>
-              <CronManager
-                jobs={jobs}
-                onEnable={(id) => {
-                  if (!token) return;
-                  void cronClient
-                    .setEnabled(token, id, true)
-                    .then(() =>
-                      setJobs((prev) =>
-                        prev.map((j) => (j.id === id ? { ...j, status: 'enabled' } : j)),
-                      ),
-                    );
-                }}
-                onDisable={(id) => {
-                  if (!token) return;
-                  void cronClient
-                    .setEnabled(token, id, false)
-                    .then(() =>
-                      setJobs((prev) =>
-                        prev.map((j) => (j.id === id ? { ...j, status: 'disabled' } : j)),
-                      ),
-                    );
-                }}
-                onDelete={(id) => {
-                  if (!token) return;
-                  void cronClient
-                    .remove(token, id)
-                    .then(() => setJobs((prev) => prev.filter((j) => j.id !== id)));
-                }}
-                onRunNow={(id) => logger.info('Run job now', id)}
-                onAdd={() => logger.info('Add job triggered')}
-              />
+              {jobs.length === 0 ? (
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '28px 16px',
+                    color: 'var(--fg-muted)',
+                    textAlign: 'center',
+                  }}
+                >
+                  <svg
+                    width="28"
+                    height="28"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                    style={{ opacity: 0.5 }}
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                  </svg>
+                  <span style={{ fontSize: 12, lineHeight: 1.5 }}>
+                    暂无定时规则，点击上方「添加任务」创建第一个。
+                  </span>
+                </div>
+              ) : (
+                <CronManager
+                  jobs={jobs}
+                  onEnable={(id) => {
+                    if (!token) return;
+                    void cronClient
+                      .setEnabled(token, id, true)
+                      .then(() =>
+                        setJobs((prev) =>
+                          prev.map((j) => (j.id === id ? { ...j, status: 'enabled' } : j)),
+                        ),
+                      );
+                  }}
+                  onDisable={(id) => {
+                    if (!token) return;
+                    void cronClient
+                      .setEnabled(token, id, false)
+                      .then(() =>
+                        setJobs((prev) =>
+                          prev.map((j) => (j.id === id ? { ...j, status: 'disabled' } : j)),
+                        ),
+                      );
+                  }}
+                  onDelete={(id) => {
+                    if (!token) return;
+                    void cronClient
+                      .remove(token, id)
+                      .then(() => setJobs((prev) => prev.filter((j) => j.id !== id)));
+                  }}
+                  onRunNow={(id) => logger.info('Run job now', id)}
+                  onAdd={() => logger.info('Add job triggered')}
+                />
+              )}
             </div>
           </div>
           <div>

@@ -11,6 +11,7 @@ export type ProviderType =
   | 'openrouter'
   | 'qwen'
   | 'moonshot'
+  | 'mimo'
   | 'custom';
 
 export interface ThinkingConfig {

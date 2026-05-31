@@ -233,7 +233,7 @@ const MODAL_STYLE: CSSProperties = {
 
 const STEPPER_PANE_STYLE: CSSProperties = {
   background:
-    'linear-gradient(170deg, color-mix(in srgb, var(--accent) 18%, var(--bg-overlay) 0%, color-mix(in srgb, var(--accent) 6%, var(--bg-overlay) 100%)',
+    'linear-gradient(170deg, color-mix(in srgb, var(--accent) 18%, var(--bg-overlay)) 0%, color-mix(in srgb, var(--accent) 6%, var(--bg-overlay)) 100%)',
   padding: '22px 18px',
   display: 'flex',
   flexDirection: 'column',
@@ -372,7 +372,7 @@ const INPUT_STYLE: CSSProperties = {
   padding: '9px 12px',
   borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base))',
   color: 'var(--fg-strong)',
   fontSize: 13,
   fontFamily: 'inherit',
@@ -384,7 +384,7 @@ const SOURCE_TAB_BAR_STYLE: CSSProperties = {
   gap: 8,
   padding: 4,
   borderRadius: 10,
-  background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base))',
 };
 
 const SOURCE_TAB_BTN_BASE_STYLE: CSSProperties = {
@@ -426,7 +426,7 @@ const CARD_BASE_STYLE: CSSProperties = {
 const CARD_SELECTED_STYLE: CSSProperties = {
   ...CARD_BASE_STYLE,
   borderColor: 'var(--accent)',
-  background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay)',
+  background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
   boxShadow: '0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent)',
 };
 
@@ -464,7 +464,7 @@ const ROLE_CARD_STYLE: CSSProperties = {
   padding: '12px 14px',
   borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 6%, var(--bg-overlay)',
+  background: 'color-mix(in srgb, var(--accent) 6%, var(--bg-overlay))',
 };
 
 const ROLE_AVATAR_STYLE: CSSProperties = {
@@ -497,7 +497,7 @@ const AGENT_CHIP_BASE_STYLE: CSSProperties = {
 const AGENT_CHIP_SELECTED_STYLE: CSSProperties = {
   ...AGENT_CHIP_BASE_STYLE,
   borderColor: 'var(--accent)',
-  background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-overlay)',
+  background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-overlay))',
   color: 'var(--accent)',
 };
 
@@ -722,6 +722,7 @@ export function NewTeamSessionModal({
     teamWorkspaceId,
   });
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // 来源 tab：根据当前 source 推断（workflow 已移除，仅保留 blank / template）
   const [sourceTab, setSourceTab] = useState<SourceTab>(
@@ -761,6 +762,7 @@ export function NewTeamSessionModal({
 
   const handleSubmit = async () => {
     if (!creation.canSubmit || submitting) return;
+    setSubmitError(null);
     setSubmitting(true);
     try {
       // 提交前若标题为空，自动填入默认标题（不阻塞用户）
@@ -773,6 +775,8 @@ export function NewTeamSessionModal({
       };
       await onSubmitDraft(finalDraft);
       onClose();
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : '创建团队会话失败。');
     } finally {
       setSubmitting(false);
     }
@@ -1098,9 +1102,8 @@ export function NewTeamSessionModal({
                           </div>
                           {group.items.map((template) => {
                             const selected =
-                              (creation.draft.source.kind === 'saved-template' &&
-                                creation.draft.source.templateId === template.id) ||
-                              creation.draft.source.workflowKey === template.id;
+                              creation.draft.source.kind === 'saved-template' &&
+                              creation.draft.source.templateId === template.id;
                             return (
                               <button
                                 key={template.id}
@@ -1409,7 +1412,7 @@ export function NewTeamSessionModal({
                                 padding: '12px 14px',
                                 borderRadius: 12,
                                 background:
-                                  'color-mix(in srgb, var(--accent) 6%, var(--bg-overlay)',
+                                  'color-mix(in srgb, var(--accent) 6%, var(--bg-overlay))',
                                 border:
                                   '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
                               }}
@@ -1918,6 +1921,22 @@ export function NewTeamSessionModal({
                 }}
               >
                 {roleBindings.error}
+              </div>
+            ) : null}
+
+            {submitError ? (
+              <div
+                role="alert"
+                style={{
+                  fontSize: 12,
+                  color: 'var(--error)',
+                  background: 'color-mix(in srgb, var(--error) 10%, transparent)',
+                  padding: '8px 10px',
+                  borderRadius: 6,
+                  border: '1px solid color-mix(in srgb, var(--error) 30%, transparent)',
+                }}
+              >
+                {submitError}
               </div>
             ) : null}
           </div>

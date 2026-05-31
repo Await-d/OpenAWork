@@ -525,9 +525,14 @@ function spawnAndCollect(
       if (!child.pid) return;
       try {
         if (process.platform === 'win32') {
-          spawn('taskkill', ['/pid', String(child.pid), '/f', '/t'], {
+          const killer = spawn('taskkill', ['/pid', String(child.pid), '/f', '/t'], {
             stdio: 'ignore',
             windowsHide: true,
+          });
+          // taskkill's async 'error' event (missing binary / PATH) would
+          // otherwise surface as an unhandled exception and crash the gateway.
+          killer.on('error', () => {
+            /* best-effort kill */
           });
         } else {
           process.kill(-child.pid, signal);

@@ -5,6 +5,7 @@ import type { AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
 import { useAuthStore } from '../../../../../stores/auth/auth.js';
 import WorkspacePickerModal from '../../../../../components/common/modal/WorkspacePickerModal.js';
+import { buildWorkspacePickerDataSource } from '../../../../../components/common/modal/workspace-picker-data-source.js';
 import {
   PlusIcon,
   TemplateIcon,
@@ -229,22 +230,14 @@ export function SessionSidebar({
   const [showWorkspacePicker, setShowWorkspacePicker] = useState(false);
   const accessToken = useAuthStore((s) => s.accessToken);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
-
-  const fetchTree = useCallback(
-    async (path: string, depth = 1) => {
-      if (!accessToken || !gatewayUrl) return [];
-      return createWorkspaceClient(gatewayUrl).fetchTree(accessToken, path, { depth }) as Promise<
-        import('../../../../../components/common/modal/WorkspacePickerModal.js').FileTreeNode[]
-      >;
-    },
+  const workspacePickerDataSource = useMemo(
+    () =>
+      buildWorkspacePickerDataSource({
+        client: createWorkspaceClient(gatewayUrl),
+        token: accessToken,
+      }),
     [accessToken, gatewayUrl],
   );
-
-  const fetchRootPath = useCallback(async (): Promise<string> => {
-    if (!accessToken || !gatewayUrl) return '/';
-    const roots = await createWorkspaceClient(gatewayUrl).listRoots(accessToken);
-    return roots[0] ?? '/';
-  }, [accessToken, gatewayUrl]);
 
   const handleCreateWorkspace = useCallback(
     async (path: string) => {
@@ -315,7 +308,8 @@ export function SessionSidebar({
     <>
       <aside
         style={{
-          height: '100dvh',
+          height: '100%',
+          minHeight: 0,
           display: 'flex',
           flexDirection: 'column',
           borderRight: '1px solid var(--border-subtle)',
@@ -549,6 +543,7 @@ export function SessionSidebar({
               flex: 1,
               minHeight: 0,
               overflowY: 'auto',
+              overflowX: 'hidden',
             }}
           >
             {/* Section header */}
@@ -774,6 +769,7 @@ export function SessionSidebar({
               flexShrink: 0,
               maxHeight: '40%',
               overflowY: 'auto',
+              overflowX: 'hidden',
             }}
           >
             {/* Section header */}
@@ -999,7 +995,7 @@ export function SessionSidebar({
             justifyContent: 'space-between',
             alignItems: 'center',
             flexShrink: 0,
-            background: 'color-mix(in oklch, var(--bg-base) 95%, var(--bg-overlay)',
+            background: 'color-mix(in oklch, var(--bg-base) 95%, var(--bg-overlay))',
           }}
         >
           <span style={{ fontSize: 9, color: 'var(--fg-muted)' }}>
@@ -1036,8 +1032,8 @@ export function SessionSidebar({
         onSelect={async (path) => {
           await handleCreateWorkspace(path);
         }}
-        fetchTree={fetchTree}
-        fetchRootPath={fetchRootPath}
+        fetchTree={workspacePickerDataSource.fetchTree}
+        fetchRootPath={workspacePickerDataSource.fetchRootPath}
       />
     </>
   );

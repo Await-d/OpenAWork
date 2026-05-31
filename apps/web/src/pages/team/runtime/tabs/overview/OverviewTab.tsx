@@ -9,6 +9,7 @@ import { PANEL_STYLE, TREND_META } from '../../shared/team-runtime-shared.js';
 import { Icon, ChevronDownIcon } from '../../shared/TeamIcons.js';
 import type { IconKey } from '../../shared/TeamIcons.js';
 import { TabContainer } from '../TabContainer.js';
+import { MetricGrid, MiniBar } from '../../shared/content-kit/index.js';
 
 export function OverviewTab({
   selectedTeam = null,
@@ -79,7 +80,7 @@ export function OverviewTab({
               padding: '10px 12px',
               borderRadius: 12,
               background:
-                'linear-gradient(135deg, color-mix(in oklch, var(--accent) 8%, var(--bg-overlay) 0%, var(--bg-base)',
+                'linear-gradient(135deg, color-mix(in oklch, var(--accent) 8%, var(--bg-overlay)) 0%, var(--bg-base) 100%)',
               border: '1px solid color-mix(in srgb, var(--accent) 24%, transparent)',
             }}
           >
@@ -161,13 +162,7 @@ export function OverviewTab({
         ) : null}
 
         {/* Overview metric cards */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-            gap: 12,
-          }}
-        >
+        <MetricGrid minColumnWidth={180} fill="auto-fit" gap={12}>
           {overviewCards.map((card) => {
             const trend = TREND_META[card.trend ?? 'stable'];
             const isExpanded = expandedCardIds.has(card.id);
@@ -313,7 +308,7 @@ export function OverviewTab({
               </div>
             );
           })}
-        </div>
+        </MetricGrid>
 
         {/* Two-column layout: activity distribution + timeline */}
         <div
@@ -344,59 +339,16 @@ export function OverviewTab({
                 const pct = Math.round((count / totalActivityCount) * 100);
                 const isFiltered = timelineFilter.has(type as AgentTeamsTimelineEventType);
                 return (
-                  <button
+                  <MiniBar
                     key={type}
-                    type="button"
+                    label={config.label}
+                    percent={pct}
+                    color={config.color}
+                    valueText={`${count} 次 (${pct}%)`}
+                    leading={<Icon name={config.icon as IconKey} size={10} color={config.color} />}
+                    dimmed={!(isFiltered || timelineFilter.size === 0)}
                     onClick={() => toggleFilter(type as AgentTeamsTimelineEventType)}
-                    style={{
-                      display: 'grid',
-                      gap: 4,
-                      cursor: 'pointer',
-                      opacity: isFiltered || timelineFilter.size === 0 ? 1 : 0.5,
-                      transition: 'opacity 0.15s',
-                      background: 'none',
-                      border: 'none',
-                      padding: 0,
-                      textAlign: 'left',
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                      }}
-                    >
-                      <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
-                        <Icon name={config.icon as IconKey} size={10} color={config.color} />
-                        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-default)' }}>
-                          {config.label}
-                        </span>
-                      </div>
-                      <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
-                        {count} 次 ({pct}%)
-                      </span>
-                    </div>
-                    <div
-                      style={{
-                        height: 5,
-                        borderRadius: 999,
-                        background: 'var(--border-subtle)',
-                        overflow: 'hidden',
-                      }}
-                    >
-                      <div
-                        style={{
-                          height: '100%',
-                          width: `${pct}%`,
-                          borderRadius: 999,
-                          background: config.color,
-                          transition: 'width 0.3s ease',
-                          boxShadow: `0 0 6px ${config.color}44`,
-                        }}
-                      />
-                    </div>
-                  </button>
+                  />
                 );
               })}
             {timelineFilter.size > 0 && (
@@ -542,7 +494,7 @@ export function OverviewTab({
                       padding: '8px 10px',
                       borderRadius: 8,
                       background: isExpanded
-                        ? 'color-mix(in oklch, var(--accent) 4%, var(--bg-overlay)'
+                        ? 'color-mix(in oklch, var(--accent) 4%, var(--bg-overlay))'
                         : 'var(--bg-overlay)',
                       alignItems: 'flex-start',
                       cursor: 'pointer',

@@ -12,6 +12,7 @@
  * 用户在两者之间频繁切换，分开占用两个子 tab 槽位虚高了对话主 tab 的复杂度。
  */
 
+import type { HandoffEvent } from '../../../../../stores/team/team-events.js';
 import { useState, type CSSProperties } from 'react';
 import type { AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
 import { useTeamNotificationStore } from '../../../../../stores/team/team-events.js';
@@ -35,7 +36,9 @@ const SEGMENT_BTN_STYLE: CSSProperties = {
   alignItems: 'center',
   gap: 4,
   padding: '4px 12px',
-  border: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: 'color-mix(in srgb, var(--border-default) 40%, transparent)',
   background: 'transparent',
   color: 'var(--fg-muted)',
   fontSize: 11,
@@ -69,10 +72,16 @@ const BADGE_STYLE: CSSProperties = {
 };
 
 export interface MessagesMergedTabProps {
+  onOpenBlockingTarget?: (event: HandoffEvent) => void;
+  onOpenClarifications?: () => void;
   selectedTeam: AgentTeamsSidebarTeam | null;
 }
 
-export function MessagesMergedTab({ selectedTeam }: MessagesMergedTabProps) {
+export function MessagesMergedTab({
+  onOpenBlockingTarget,
+  onOpenClarifications,
+  selectedTeam,
+}: MessagesMergedTabProps) {
   const unreadCount = useTeamNotificationStore((s) => s.unreadCount);
   const [segment, setSegment] = useState<MessagesSegment>('bus');
 
@@ -121,7 +130,14 @@ export function MessagesMergedTab({ selectedTeam }: MessagesMergedTabProps) {
           padding: '12px 14px 16px',
         }}
       >
-        {segment === 'bus' ? <MessagesTab selectedTeam={selectedTeam} /> : <MentionsView />}
+        {segment === 'bus' ? (
+          <MessagesTab selectedTeam={selectedTeam} />
+        ) : (
+          <MentionsView
+            onOpenBlockingTarget={onOpenBlockingTarget}
+            onOpenClarifications={onOpenClarifications}
+          />
+        )}
       </div>
     </div>
   );

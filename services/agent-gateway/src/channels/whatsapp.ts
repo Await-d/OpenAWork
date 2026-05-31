@@ -6,6 +6,7 @@ import type {
   ChannelGroup,
   ChannelServiceFactory,
 } from './types.js';
+import { channelFetch } from './channel-http.js';
 
 export class WhatsAppChannelService implements MessagingChannelService {
   readonly pluginId: string;
@@ -25,6 +26,26 @@ export class WhatsAppChannelService implements MessagingChannelService {
     this.notify = notify;
   }
 
+  /**
+   * Dispatch a channel event without letting a throwing subscriber break the
+   * webhook batch loop. `handleWebhookEvent` fans every message in a single
+   * WhatsApp webhook payload (entry[] → changes[] → messages[]) out via
+   * `notify`; a synchronous throw from one dispatch (router lookup / filter)
+   * would otherwise skip every remaining message in the same payload. Mirrors
+   * the Telegram channel's `safeNotify` invariant.
+   */
+  private safeNotify(event: ChannelEvent): void {
+    try {
+      this.notify(event);
+    } catch (err) {
+      console.warn(
+        `[whatsapp] channel notify handler threw: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
   async start(): Promise<void> {
     if (!this.phoneNumberId || !this.accessToken) {
       throw new Error('WhatsApp channel requires phoneNumberId and accessToken');
@@ -41,7 +62,7 @@ export class WhatsAppChannelService implements MessagingChannelService {
   }
 
   async sendMessage(chatId: string, content: string): Promise<{ messageId: string }> {
-    const response = await fetch(
+    const response = await channelFetch(
       `https://graph.facebook.com/v19.0/${this.phoneNumberId}/messages`,
       {
         method: 'POST',
@@ -112,7 +133,7 @@ export class WhatsAppChannelService implements MessagingChannelService {
             timestamp: Number(message.timestamp) * 1000,
             raw: message,
           };
-          this.notify({ type: 'message', pluginId: this.pluginId, message: channelMessage });
+          this.safeNotify({ type: 'message', pluginId: this.pluginId, message: channelMessage });
         }
       }
     }

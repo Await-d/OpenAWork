@@ -96,10 +96,11 @@ const ROW: React.CSSProperties = {
   gridTemplateColumns: '1fr auto auto',
   gap: 12,
   alignItems: 'center',
-  padding: '10px 12px',
+  padding: '12px 14px',
   borderRadius: 10,
   border: '1px solid var(--border-subtle)',
-  background: 'var(--surface-2, var(--bg-overlay)',
+  background: 'var(--bg-overlay)',
+  transition: 'border-color 100ms ease, background 100ms ease',
 };
 
 const PILL: React.CSSProperties = {
@@ -352,47 +353,33 @@ export default function SkillSelectionPage(): React.ReactElement {
   }, [rows]);
 
   return (
-    <div style={{ maxWidth: 980, margin: '0 auto', padding: 24 }}>
-      <header style={{ marginBottom: 16 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 6 }}>Skill 工作区选择集</h1>
-        <p style={{ color: 'var(--fg-muted)', fontSize: 13, lineHeight: 1.6 }}>
-          为指定的 chat 工作区选择启用哪些 skill。Pinned 的 skill 会在新会话首轮自动注入到 system
-          prompt；BUILTIN 始终可用，不受过滤。留空 workspacePath 会写入「全局默认」选择集。
-        </p>
-      </header>
+    <div className="page-root" style={{ overflowY: 'auto' }}>
+      <div className="page-header">
+        <span className="page-title">Skill 工作区选择集</span>
+        <span className="page-subtitle">
+          为指定的 chat 工作区选择启用哪些 skill
+        </span>
+      </div>
+      <div className="page-content">
+      <div style={{ maxWidth: 980, margin: '0 auto', padding: '20px 24px' }}>
 
       <section style={{ ...PANEL, marginBottom: 16 }}>
         <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-default)' }}>
           Workspace 路径（绝对路径，留空 = 全局默认）
         </label>
-        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+        <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
           <input
             value={workspacePath}
             onChange={(e) => setWorkspacePath(e.target.value)}
             placeholder="/home/alice/projects/alpha"
-            style={{
-              flex: 1,
-              padding: '8px 10px',
-              fontSize: 13,
-              borderRadius: 8,
-              border: '1px solid var(--border-subtle)',
-              background: 'var(--bg-overlay)',
-              color: 'var(--fg-strong)',
-            }}
+            className="form-input"
+            style={{ flex: 1, minWidth: 200 }}
           />
           <button
             type="button"
             onClick={() => void refresh()}
             disabled={loading}
-            style={{
-              padding: '8px 14px',
-              borderRadius: 8,
-              border: '1px solid var(--border-subtle)',
-              background: 'var(--bg-overlay)',
-              color: 'var(--fg-strong)',
-              fontSize: 13,
-              cursor: loading ? 'wait' : 'pointer',
-            }}
+            className="btn-secondary"
           >
             {loading ? '加载中…' : '刷新'}
           </button>
@@ -400,15 +387,7 @@ export default function SkillSelectionPage(): React.ReactElement {
             type="button"
             onClick={exportSelection}
             disabled={loading || rows.length === 0}
-            style={{
-              padding: '8px 14px',
-              borderRadius: 8,
-              border: '1px solid var(--border-subtle)',
-              background: 'var(--bg-overlay)',
-              color: 'var(--fg-strong)',
-              fontSize: 13,
-              cursor: loading || rows.length === 0 ? 'not-allowed' : 'pointer',
-            }}
+            className="btn-secondary"
           >
             导出
           </button>
@@ -416,15 +395,7 @@ export default function SkillSelectionPage(): React.ReactElement {
             type="button"
             onClick={() => fileInputRef.current?.click()}
             disabled={loading}
-            style={{
-              padding: '8px 14px',
-              borderRadius: 8,
-              border: '1px solid var(--border-subtle)',
-              background: 'var(--bg-overlay)',
-              color: 'var(--fg-strong)',
-              fontSize: 13,
-              cursor: loading ? 'wait' : 'pointer',
-            }}
+            className="btn-secondary"
           >
             导入
           </button>
@@ -440,12 +411,14 @@ export default function SkillSelectionPage(): React.ReactElement {
             onClick={() => setRecommendOpen(true)}
             disabled={loading}
             style={{
-              padding: '8px 14px',
+              padding: '0 14px',
+              height: 32,
               borderRadius: 8,
               border: '1px solid var(--accent)',
-              background: 'transparent',
+              background: 'var(--accent-subtle)',
               color: 'var(--accent)',
               fontSize: 13,
+              fontWeight: 500,
               cursor: loading ? 'wait' : 'pointer',
             }}
           >
@@ -455,21 +428,14 @@ export default function SkillSelectionPage(): React.ReactElement {
             type="button"
             onClick={() => void save()}
             disabled={saving || loading}
-            style={{
-              padding: '8px 14px',
-              borderRadius: 8,
-              border: 'none',
-              background: 'var(--accent)',
-              color: 'var(--fg-on-accent)',
-              fontSize: 13,
-              cursor: saving || loading ? 'wait' : 'pointer',
-            }}
+            className="btn-accent"
+            style={{ height: 32, padding: '0 14px', fontSize: 13 }}
           >
             {saving ? '保存中…' : '保存'}
           </button>
         </div>
         {error ? (
-          <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 8 }}>{error}</div>
+          <div style={{ color: 'var(--complement)', fontSize: 12, marginTop: 8 }}>{error}</div>
         ) : null}
         {hint ? (
           <div style={{ color: 'var(--accent)', fontSize: 12, marginTop: 8 }}>{hint}</div>
@@ -517,6 +483,8 @@ export default function SkillSelectionPage(): React.ReactElement {
           await refresh();
         }}
       />
+      </div>
+      </div>
     </div>
   );
 }

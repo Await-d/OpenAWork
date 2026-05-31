@@ -18,6 +18,51 @@ export class HttpError<T = unknown> extends Error {
   }
 }
 
+export interface JsonErrorData {
+  code?: string;
+  data?: {
+    message?: string;
+  };
+  error?: string;
+  message?: string;
+  name?: string;
+}
+
+export function extractJsonErrorMessage(data: JsonErrorData | undefined): string | null {
+  if (typeof data?.error === 'string' && data.error.length > 0) {
+    return data.error;
+  }
+  if (typeof data?.message === 'string' && data.message.length > 0) {
+    return data.message;
+  }
+  if (typeof data?.data?.message === 'string' && data.data.message.length > 0) {
+    return data.data.message;
+  }
+  return null;
+}
+
+export function isGenericFetchErrorMessage(message: string): boolean {
+  // Abort-style messages: `fetchWithTimeout` aborts the request on its
+  // wall-clock deadline, which surfaces as an `AbortError` whose message varies
+  // by runtime ('The operation was aborted', 'This operation was aborted',
+  // 'The user aborted a request.', 'signal is aborted without reason', or a
+  // bare 'aborted'). Treat any of these as a generic network failure so the
+  // ~30 resource clients collapse a timeout to their friendly localized
+  // message instead of leaking the raw abort string to the UI. This path only
+  // sees thrown transport errors — real backend failures arrive as structured
+  // `HttpError`s and never reach here — so substring matching is safe.
+  if (/\babort/i.test(message)) {
+    return true;
+  }
+  return (
+    message === 'Failed to fetch' ||
+    message === 'Load failed' ||
+    message === 'fetch failed' ||
+    message === 'Network request failed' ||
+    message === 'NetworkError when attempting to fetch resource.'
+  );
+}
+
 export function authHeader(token: string): { Authorization: string } {
   return { Authorization: `Bearer ${token}` };
 }
@@ -89,4 +134,49 @@ export async function expectOk(response: Response, label: string): Promise<void>
     response.status,
     await readJsonErrorData(response),
   );
+}
+
+/** Default wall-clock ceiling for gateway reads (ms). */
+export const DEFAULT_FETCH_TIMEOUT_MS = 20_000;
+
+/**
+ * `fetch` with a wall-clock ceiling. The browser `fetch` has no built-in
+ * timeout: a server that accepts the connection but never responds (half-open
+ * socket, stalled proxy, overloaded gateway) leaves the promise pending
+ * forever. For the team read models this is especially harmful — the polling
+ * hooks (`use-team-workspace-snapshot-state`, runtime snapshot) only schedule a
+ * retry when the request *settles*, so a hung request wedges the UI in
+ * `loading` indefinitely with no recovery. This aborts after `timeoutMs` and
+ * rejects with an `AbortError`, which the result readers already map to a
+ * `{ ok: false, retryable: true }` outcome — so a timeout flows straight into
+ * the existing exponential-backoff retry. A caller-supplied `signal` is merged:
+ * whichever fires first wins. `timeoutMs <= 0` disables the ceiling.
+ */
+export async function fetchWithTimeout(
+  input: string | URL,
+  init?: RequestInit & { timeoutMs?: number },
+): Promise<Response> {
+  const timeoutMs = init?.timeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS;
+  if (!(timeoutMs > 0) || typeof AbortController === 'undefined') {
+    return fetch(input, init);
+  }
+  const controller = new AbortController();
+  const callerSignal = init?.signal ?? undefined;
+  const onAbort = (): void => controller.abort();
+  if (callerSignal) {
+    if (callerSignal.aborted) {
+      controller.abort();
+    } else {
+      callerSignal.addEventListener('abort', onAbort, { once: true });
+    }
+  }
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+    if (callerSignal) {
+      callerSignal.removeEventListener('abort', onAbort);
+    }
+  }
 }

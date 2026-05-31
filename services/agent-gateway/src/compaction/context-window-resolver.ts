@@ -262,6 +262,38 @@ function cacheKey(userId: string, modelId: string): string {
 }
 
 /**
+ * `effectiveContextWindowCache`'s TTL is only checked on *read*
+ * (`resolveEffectiveContextWindow` deletes the single entry it happens to read
+ * when expired). An entry recorded via `recordDiscoveredContextWindow` but
+ * never read again is never reclaimed, so the map grows one entry per
+ * (user × model) ever seen — the same read-only-TTL leak shape closed for the
+ * sibling caches. We sweep expired entries and cap the total after each insert,
+ * evicting oldest-by-`discoveredAt` first so the map is bounded by the number
+ * of (user, model) pairs active within one TTL window.
+ */
+const EFFECTIVE_CONTEXT_WINDOW_CACHE_MAX_ENTRIES = 5_000;
+
+function pruneEffectiveContextWindowCache(): void {
+  const now = Date.now();
+  for (const [key, entry] of effectiveContextWindowCache) {
+    if (now - entry.discoveredAt >= CACHE_TTL_MS) {
+      effectiveContextWindowCache.delete(key);
+    }
+  }
+  if (effectiveContextWindowCache.size <= EFFECTIVE_CONTEXT_WINDOW_CACHE_MAX_ENTRIES) {
+    return;
+  }
+  const byAge = [...effectiveContextWindowCache.entries()].sort(
+    (a, b) => a[1].discoveredAt - b[1].discoveredAt,
+  );
+  const excess = effectiveContextWindowCache.size - EFFECTIVE_CONTEXT_WINDOW_CACHE_MAX_ENTRIES;
+  for (let i = 0; i < excess; i += 1) {
+    const victim = byAge[i];
+    if (victim) effectiveContextWindowCache.delete(victim[0]);
+  }
+}
+
+/**
  * Record a discovered effective context window from a provider error.
  * Only caches if the discovered limit is lower than the preset.
  */
@@ -280,6 +312,9 @@ export function recordDiscoveredContextWindow(
     maxTokens: discoveredMaxTokens,
     discoveredAt: Date.now(),
   });
+  // Bound the cache after each insert so an entry that is never read again is
+  // still reclaimed (the read path only expires entries it happens to touch).
+  pruneEffectiveContextWindowCache();
 }
 
 /**
@@ -357,6 +392,31 @@ export function clearDiscoveredContextWindow(userId: string, modelId: string): v
 export function clearAllDiscoveredContextWindows(): void {
   effectiveContextWindowCache.clear();
 }
+
+/**
+ * Test-only seams for the cache retention guard. Kept minimal so the
+ * sweep / cap logic is verifiable without driving real provider errors.
+ */
+export function __seedEffectiveContextWindowForTest(
+  userId: string,
+  modelId: string,
+  discoveredMaxTokens: number,
+  discoveredAtMs: number,
+): void {
+  effectiveContextWindowCache.set(cacheKey(userId, modelId), {
+    maxTokens: discoveredMaxTokens,
+    discoveredAt: discoveredAtMs,
+  });
+}
+export function __getEffectiveContextWindowCacheSizeForTest(): number {
+  return effectiveContextWindowCache.size;
+}
+export function __pruneEffectiveContextWindowCacheForTest(): void {
+  pruneEffectiveContextWindowCache();
+}
+export const __EFFECTIVE_CONTEXT_WINDOW_CACHE_MAX_ENTRIES_FOR_TEST =
+  EFFECTIVE_CONTEXT_WINDOW_CACHE_MAX_ENTRIES;
+export const __EFFECTIVE_CONTEXT_WINDOW_CACHE_TTL_MS_FOR_TEST = CACHE_TTL_MS;
 
 // ─── Aggressive Tool Output Truncation (Phase 2 Recovery) ────────────────────
 

@@ -21,6 +21,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { sqliteAll, sqliteGet } from '../../infra/db.js';
 import {
   claimHandoff,
   failHandoff,
@@ -29,10 +30,28 @@ import {
   startHandoff,
   type HandoffRecord,
 } from '../store/handoff-store.js';
-import { findStaleHeartbeatCutoffIso, HEARTBEAT_STALE_AFTER_MS } from '../bus/heartbeat.js';
+import {
+  findStaleHeartbeatCutoffIso,
+  HEARTBEAT_STALE_AFTER_MS,
+  touchSessionHeartbeat,
+} from '../bus/heartbeat.js';
 import { getBackgroundTaskScheduler, type BackgroundTaskScheduler } from './scheduler.js';
 import { publishHandoffEvent } from '../bus/team-events-bus.js';
+import { recordTeamRuntimeIncident } from '../../team/team-runtime-diagnostics-store.js';
 import { createTeamSession } from '../bus/team-session-create.js';
+import {
+  buildTeamRosterManifest,
+  mergeDelegatedSystemPromptIntoMetadata,
+  mergeMemberCapabilitiesIntoMetadata,
+  mergeMemberModelIntoMetadata,
+  mergeTeamRosterManifestIntoMetadata,
+  resolveMemberCapabilities,
+  resolveMemberModelForHandoff,
+  resolveMemberSystemPrompt,
+} from '../bus/resolve-member-model.js';
+import {
+  reconcilePm2QualityReview,
+} from './pm2-quality-review-reconciler.js';
 
 const DEFAULT_WATCHER_INTERVAL_MS = 100;
 const DEFAULT_RECOVERY_INTERVAL_MS = 5_000;
@@ -98,13 +117,24 @@ export class HandoffWatcher {
     if (this.running) return;
     this.running = true;
     this.timer = setInterval(() => {
-      void this.tickOnce();
+      // Isolate the background loop: a rejecting tick (e.g. transient SQLite
+      // error) must not become an unhandled rejection that crashes the
+      // gateway. Direct callers (tests / manual triggers) still observe the
+      // rejection normally.
+      this.tickOnce().catch((err: unknown) => {
+        console.error('[watcher] tickOnce failed', err instanceof Error ? err.message : String(err));
+      });
     }, this.options.watcherIntervalMs);
     // unref 让 watcher 不阻挡进程退出（生产 gateway 进程退出时不需要 watcher 强制 keep-alive）
     this.timer.unref?.();
 
     this.recoveryTimer = setInterval(() => {
-      void this.recoveryTick();
+      this.recoveryTick().catch((err: unknown) => {
+        console.error(
+          '[watcher] recoveryTick failed',
+          err instanceof Error ? err.message : String(err),
+        );
+      });
     }, this.options.recoveryIntervalMs);
     this.recoveryTimer.unref?.();
   }
@@ -143,46 +173,116 @@ export class HandoffWatcher {
       let claimed = 0;
       let skipped = 0;
       for (const record of pending) {
-        const claimToken = randomUUID();
-        const claimedRecord = claimHandoff({
-          handoffId: record.id,
-          claimToken,
-        });
-        if (!claimedRecord) {
+        // Per-record resilience: each iteration claims a handoff then runs
+        // member-model / persona / capability resolution + child-session
+        // creation, any of which can throw (corrupt payload, JSON parse,
+        // SQLite error). Without a per-record guard, ONE poison handoff would
+        // abort the entire dispatch sweep — starving every other pending
+        // handoff in the queue and orphaning this just-claimed record until
+        // the recovery tick reclaims it. Isolate per record: skip the bad one
+        // (the recovery tick re-pends any handoff left mid-claim) and let the
+        // rest of the sweep proceed.
+        try {
+          const claimToken = randomUUID();
+          const claimedRecord = claimHandoff({
+            handoffId: record.id,
+            claimToken,
+          });
+          if (!claimedRecord) {
+            skipped += 1;
+            continue;
+          }
+          publishHandoffEvent({ type: 'handoff.claimed', record: claimedRecord });
+
+          // 创建子 session
+          // Phase 2：把该层成员在模板里绑定的模型（若有）注入子 session metadata，
+          // 让 resolveStreamModelRoute 按 metadata.modelId/providerId 路由到指定模型。
+          const memberModel = resolveMemberModelForHandoff({
+            fromSessionId: record.fromSessionId,
+            toRoleLayer: record.toRoleLayer,
+            payload: record.payload,
+          });
+          // 自定义角色：把其人物提示词作为 delegatedSystemPrompt 注入，运行时用它当系统人设。
+          const memberPersona = resolveMemberSystemPrompt({
+            fromSessionId: record.fromSessionId,
+            payload: record.payload,
+          });
+          let childMetadataJson = mergeMemberModelIntoMetadata(undefined, memberModel);
+          childMetadataJson = mergeDelegatedSystemPromptIntoMetadata(
+            childMetadataJson,
+            memberPersona?.systemPrompt,
+          );
+          // 模板初始能力绑定（skills / mcp）注入子 session metadata。
+          const memberCaps = resolveMemberCapabilities({
+            fromSessionId: record.fromSessionId,
+            toRoleLayer: record.toRoleLayer,
+            payload: record.payload,
+          });
+          childMetadataJson = mergeMemberCapabilitiesIntoMetadata(childMetadataJson, memberCaps);
+          // 动态注入「团队编制清单」：把当前实时花名册（含自定义角色）按层渲染，
+          // 让子 session 的成员感知上下游有谁、各自擅长什么 —— 上下关联处的动态提示词。
+          const assignedPersonaKey =
+            record.payload &&
+            typeof record.payload === 'object' &&
+            !Array.isArray(record.payload) &&
+            typeof (record.payload as Record<string, unknown>)['assignedMember'] === 'object'
+              ? (
+                  (record.payload as Record<string, unknown>)['assignedMember'] as Record<
+                    string,
+                    unknown
+                  >
+                )['personaKey']
+              : undefined;
+          const rosterManifest = buildTeamRosterManifest({
+            fromSessionId: record.fromSessionId,
+            currentLayer: record.toRoleLayer,
+            ...(typeof assignedPersonaKey === 'string'
+              ? { currentPersonaKey: assignedPersonaKey }
+              : {}),
+          });
+          childMetadataJson = mergeTeamRosterManifestIntoMetadata(childMetadataJson, rosterManifest);
+          const { sessionId: toSessionId } = createTeamSession({
+            userId: record.userId,
+            roleLayer: record.toRoleLayer,
+            teamParentSessionId: record.fromSessionId,
+            handoffState: 'running',
+            ...(childMetadataJson ? { metadataJson: childMetadataJson } : {}),
+          });
+
+          const startOk = startHandoff({
+            handoffId: record.id,
+            claimToken,
+            toSessionId,
+          });
+          if (!startOk) {
+            // 极少数情况：start 失败（比如刚被 cancel）；直接跳过
+            skipped += 1;
+            continue;
+          }
+          const startedRecord = { ...claimedRecord, toSessionId, state: 'running' as const };
+          publishHandoffEvent({ type: 'handoff.started', record: startedRecord });
+          claimed += 1;
+
+          // 排队执行体（scheduler 会异步跑）
+          this.scheduleHandoffTask({
+            handoff: startedRecord,
+            toSessionId,
+            claimToken,
+          });
+        } catch (err) {
+          // One handoff failing to dispatch must not abort the sweep. The
+          // recovery tick re-pends any handoff left in `claimed`/`running`
+          // past its heartbeat, so a record that threw after being claimed is
+          // retried later rather than silently lost.
           skipped += 1;
-          continue;
+          console.error(
+            `[watcher] 派发 handoff ${record.id} 失败，跳过该条继续本轮扫描：${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
         }
-        publishHandoffEvent({ type: 'handoff.claimed', record: claimedRecord });
-
-        // 创建子 session
-        const { sessionId: toSessionId } = createTeamSession({
-          userId: record.userId,
-          roleLayer: record.toRoleLayer,
-          teamParentSessionId: record.fromSessionId,
-          handoffState: 'running',
-        });
-
-        const startOk = startHandoff({
-          handoffId: record.id,
-          claimToken,
-          toSessionId,
-        });
-        if (!startOk) {
-          // 极少数情况：start 失败（比如刚被 cancel）；直接跳过
-          skipped += 1;
-          continue;
-        }
-        const startedRecord = { ...claimedRecord, toSessionId, state: 'running' as const };
-        publishHandoffEvent({ type: 'handoff.started', record: startedRecord });
-        claimed += 1;
-
-        // 排队执行体（scheduler 会异步跑）
-        this.scheduleHandoffTask({
-          handoff: startedRecord,
-          toSessionId,
-          claimToken,
-        });
       }
+      await this.reconcilePendingPm2QualityReviews();
       return { claimed, skipped };
     } finally {
       this.tickInFlight = false;
@@ -208,35 +308,68 @@ export class HandoffWatcher {
     if (reclaimedIds.length > 0 || failedIds.length > 0) {
       const { getHandoffById } = await import('../store/handoff-store.js');
       const { setSubstate } = await import('../store/substate-store.js');
+      // Per-id resilience: the reclaim/fail STATE is already committed
+      // atomically by reclaimAbandonedHandoffs above; these loops only emit
+      // events / incidents. A throw on one id (e.g. getHandoffById SQLite
+      // error) must not skip emission for the remaining ids, so isolate each.
       for (const id of reclaimedIds) {
-        const record = getHandoffById(id);
-        if (record) {
-          publishHandoffEvent({ type: 'handoff.reclaimed', record });
+        try {
+          const record = getHandoffById(id);
+          if (record) {
+            publishHandoffEvent({ type: 'handoff.reclaimed', record });
+          }
+        } catch (err) {
+          console.error(
+            `[watcher] recovery 发布 reclaimed 事件失败（${id}），跳过继续：${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
         }
       }
       for (const id of failedIds) {
-        const record = getHandoffById(id);
-        if (record) {
-          // 同步把 to_session 的 substate 推到 'failed'，让前端进度条立刻反映终态
-          if (record.toSessionId) {
-            try {
-              setSubstate({
-                sessionId: record.toSessionId,
-                substate: 'failed',
-                userId: record.userId,
-                roleLayer: record.toRoleLayer,
-              });
-            } catch (e) {
-              console.warn(
-                `[watcher] recovery setSubstate('failed') 失败：${e instanceof Error ? e.message : String(e)}`,
-              );
+        try {
+          const record = getHandoffById(id);
+          if (record) {
+            recordTeamRuntimeIncident({
+              category: 'handoff_failure',
+              code: 'handoff-recovery-failed',
+              context: {
+                handoffId: record.id,
+                retryCount: record.retryCount,
+                toRoleLayer: record.toRoleLayer,
+              },
+              message: record.failureReason ?? 'heartbeat-timeout',
+              severity: 'error',
+              timestamp: Date.now(),
+              userId: record.userId,
+            });
+            // 同步把 to_session 的 substate 推到 'failed'，让前端进度条立刻反映终态
+            if (record.toSessionId) {
+              try {
+                setSubstate({
+                  sessionId: record.toSessionId,
+                  substate: 'failed',
+                  userId: record.userId,
+                  roleLayer: record.toRoleLayer,
+                });
+              } catch (e) {
+                console.warn(
+                  `[watcher] recovery setSubstate('failed') 失败：${e instanceof Error ? e.message : String(e)}`,
+                );
+              }
             }
+            publishHandoffEvent({
+              type: 'handoff.failed',
+              record,
+              payload: { reason: record.failureReason ?? 'heartbeat-timeout' },
+            });
           }
-          publishHandoffEvent({
-            type: 'handoff.failed',
-            record,
-            payload: { reason: record.failureReason ?? 'heartbeat-timeout' },
-          });
+        } catch (err) {
+          console.error(
+            `[watcher] recovery 处理 failed handoff ${id} 失败，跳过继续：${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
         }
       }
     }
@@ -244,6 +377,54 @@ export class HandoffWatcher {
   }
 
   // ─── Internal ────────────────────────────────────────────────────────────
+
+  private async reconcilePendingPm2QualityReviews(): Promise<void> {
+    const candidates = sqliteAll<{ id: string; user_id: string; to_session_id: string | null }>(
+      `SELECT id, user_id, to_session_id
+         FROM handoff_records
+        WHERE state = 'running' AND to_role_layer = 'pm2'`,
+    ).map((row) => ({
+      handoffId: row.id,
+      userId: row.user_id,
+      toSessionId: row.to_session_id,
+    }));
+    for (const candidate of candidates) {
+      // §0.148: a pm2 handoff stays `running` while its e/f/g children work,
+      // but the pm2 runner's own `run` has already returned — so nothing else
+      // refreshes the pm2 session heartbeat. Only the streaming path writes
+      // heartbeats; pm2 uses non-streaming LLM calls. Without this touch the
+      // crash-recovery reclaim (which treats a stale / NULL last_heartbeat as
+      // abandoned) re-pends a perfectly healthy pm2 that is merely awaiting its
+      // children — duplicating the whole d→e/f/g dispatch. A genuine
+      // watcher/process crash stops these ticks, so the heartbeat then goes
+      // stale and recovery correctly reclaims on restart.
+      if (candidate.toSessionId) {
+        try {
+          touchSessionHeartbeat(candidate.toSessionId);
+        } catch {
+          /* best-effort liveness ping */
+        }
+      }
+      // Per-candidate resilience: reconcilePm2QualityReview can reject (its
+      // own catch handler does SQLite + audit work that may throw). This loop
+      // runs at the tail of tickOnce, so one poison pm2 review used to abort
+      // the whole sweep — starving every other pending quality review AND
+      // rejecting the entire tick. Isolate per candidate so the rest of the
+      // pending pm2 reviews still reconcile this tick.
+      try {
+        await reconcilePm2QualityReview({
+          pm2HandoffId: candidate.handoffId,
+          userId: candidate.userId,
+        });
+      } catch (err) {
+        console.error(
+          `[watcher] pm2 质量评审 ${candidate.handoffId} 协调失败，跳过该条继续本轮：${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+  }
 
   private scheduleHandoffTask(input: {
     handoff: HandoffRecord;
@@ -259,6 +440,33 @@ export class HandoffWatcher {
         userId: input.handoff.userId,
       },
       run: async (signal) => {
+        // §0.148: keep the to_session heartbeat fresh for the entire in-process
+        // run. Only the streaming executor/reviewer path (stream-model-round)
+        // writes heartbeats; pm1 (artifact chain) and pm2 use non-streaming LLM
+        // calls, so their freshly-created child sessions stay last_heartbeat=NULL
+        // — which the crash-recovery reclaim query treats as IMMEDIATELY stale.
+        // With the 5s recovery tick that re-pends a healthy, still-running pm1
+        // within seconds (duplicate child session + duplicate LLM spend). Stamp
+        // once up front, then pump at staleMs/3 so a live run never trips the
+        // stale cutoff, while a real crash stops the pump (interval dies with the
+        // process) and recovery still fires after the full stale window.
+        touchSessionHeartbeat(input.toSessionId);
+        const heartbeatPumpMs = Math.max(
+          1_000,
+          Math.floor(this.options.heartbeatStaleAfterMs / 3),
+        );
+        const heartbeatPump = setInterval(() => {
+          try {
+            touchSessionHeartbeat(input.toSessionId);
+          } catch {
+            /* best-effort liveness ping */
+          }
+        }, heartbeatPumpMs);
+        // Don't let the liveness pump keep the process alive on its own; it is
+        // always cleared in `finally` when the run settles, but unref-ing keeps
+        // it consistent with the watcher's other timers.
+        heartbeatPump.unref?.();
+        heartbeatPump.unref?.();
         try {
           await this.options.taskRunner({
             handoff: input.handoff,
@@ -273,10 +481,13 @@ export class HandoffWatcher {
           // 调一次 complete 让前端能看到终态。runner 自己 complete 过则
           // completeHandoff 第二次会因状态不再是 running 而返回 false，无副作用。
           const { completeHandoff } = await import('../store/handoff-store.js');
-          const didComplete = completeHandoff({
-            handoffId: input.handoff.id,
-            claimToken: input.claimToken,
-          });
+          const didComplete =
+            input.handoff.toRoleLayer === 'pm2'
+              ? false
+              : completeHandoff({
+                  handoffId: input.handoff.id,
+                  claimToken: input.claimToken,
+                });
           if (didComplete) {
             publishHandoffEvent({
               type: 'handoff.completed',
@@ -344,6 +555,18 @@ export class HandoffWatcher {
               });
               publishHandoffEvent({ type: 'handoff.created', record: nextHandoff });
             } catch (err) {
+              recordTeamRuntimeIncident({
+                category: 'handoff_failure',
+                code: 'handoff-auto-chain-pm1-pm2-failed',
+                context: {
+                  fromSessionId: input.toSessionId,
+                  handoffId: input.handoff.id,
+                },
+                message: err instanceof Error ? err.message : String(err),
+                severity: 'warning',
+                timestamp: Date.now(),
+                userId: input.handoff.userId,
+              });
               console.warn(
                 `[watcher] auto-chain pm1→pm2 failed: ${err instanceof Error ? err.message : String(err)}`,
               );
@@ -359,28 +582,11 @@ export class HandoffWatcher {
             input.handoff.toRoleLayer === 'reviewer'
           ) {
             try {
-              const { sqliteAll, sqliteGet } = await import('../../infra/db.js');
-              const { appendSessionMessageV2 } =
-                await import('../../message/message-v2-adapter.js');
-              const { setSubstate } = await import('../store/substate-store.js');
-              const { resolveAuxiliaryLlmConfig } =
-                await import('../../provider/auxiliary-llm-config.js');
-              const {
-                runReviewAggregation,
-                checkAllChildrenCompleted,
-                determineFailureDisposition,
-              } = await import('../workflow/review-aggregator.js');
-              const { getTeamConstitution } = await import('../../team/team-constitution-store.js');
-
               // 找到 pm2 session（即当前 handoff 的 from_session_id）
               const pm2SessionId = input.handoff.fromSessionId;
 
               // 找到 pm2 handoff（to_session_id = pm2SessionId）
-              const pm2HandoffRow = sqliteGet<{
-                id: string;
-                payload_json: string;
-                user_id: string;
-              }>(
+              const pm2HandoffRow = sqliteGet<{ id: string }>(
                 `SELECT id, payload_json, user_id FROM handoff_records
                  WHERE to_session_id = ? AND to_role_layer = 'pm2'
                  ORDER BY created_at DESC LIMIT 1`,
@@ -390,264 +596,23 @@ export class HandoffWatcher {
                 // 找不到 pm2 handoff，跳过 review
                 return;
               }
-
-              const { allDone, children } = checkAllChildrenCompleted(pm2HandoffRow.id);
-              if (!allDone) {
-                // 还有子 handoff 未完成，等下一个完成时再检查
-                return;
-              }
-
-              // 所有子 handoff 都完成了 → 触发 d.4 review
-              setSubstate({
-                sessionId: pm2SessionId,
-                substate: 'reviewing',
+              await reconcilePm2QualityReview({
+                pm2HandoffId: pm2HandoffRow.id,
                 userId: input.handoff.userId,
-                roleLayer: 'pm2',
               });
-
-              // 读取 spec 内容（从 pm2 handoff payload 中的 resultJson.specArtifactId）
-              let specContent = '';
-              let constitutionBody = '';
-              try {
-                const pm2Payload = JSON.parse(pm2HandoffRow.payload_json || '{}') as Record<
-                  string,
-                  unknown
-                >;
-                const resultJson = pm2Payload['resultJson'] as Record<string, unknown> | null;
-                const specArtifactId = resultJson?.['specArtifactId'] as string | null;
-                const teamWorkspaceId = (pm2Payload['teamWorkspaceId'] as string) ?? null;
-
-                if (specArtifactId) {
-                  const specRow = sqliteGet<{ content: string }>(
-                    `SELECT content FROM artifacts WHERE id = ?`,
-                    [specArtifactId],
-                  );
-                  specContent = specRow?.content ?? '';
-                }
-
-                if (teamWorkspaceId) {
-                  const constitution = getTeamConstitution({
-                    userId: input.handoff.userId,
-                    teamWorkspaceId,
-                  });
-                  constitutionBody = constitution?.body ?? '';
-                }
-              } catch {
-                // 读取失败不阻断 review
-              }
-
-              // 尝试获取 LLM 配置来跑完整 review
-              const llmConfig = await resolveAuxiliaryLlmConfig(input.handoff.userId);
-              if (llmConfig) {
-                const { requestWorkflowLlmCompletion } =
-                  await import('../../routes/workflow-llm.js');
-                const callLlm = async (system: string, user: string): Promise<string> => {
-                  return requestWorkflowLlmCompletion({
-                    apiBaseUrl: llmConfig.apiBaseUrl,
-                    apiKey: llmConfig.apiKey,
-                    model: llmConfig.model,
-                    ...(llmConfig.providerType ? { providerType: llmConfig.providerType } : {}),
-                    ...(llmConfig.upstreamProtocol
-                      ? { upstreamProtocol: llmConfig.upstreamProtocol }
-                      : {}),
-                    prompt: `${system}\n\n---\n\n${user}`,
-                    temperature: 0.1,
-                  });
-                };
-
-                const report = await runReviewAggregation({
-                  userId: input.handoff.userId,
-                  pm2HandoffId: pm2HandoffRow.id,
-                  pm2SessionId,
-                  childHandoffs: children,
-                  specContent,
-                  constitutionBody,
-                  callLlm,
-                });
-
-                // 写 review report 到 pm2 session 消息流
-                appendSessionMessageV2({
-                  sessionId: pm2SessionId,
-                  userId: input.handoff.userId,
-                  role: 'assistant',
-                  content: [{ type: 'text', text: report.reportMarkdown }],
-                });
-
-                if (report.overallVerdict === 'pass') {
-                  // 评审通过 → pm2 完成
-                  setSubstate({
-                    sessionId: pm2SessionId,
-                    substate: 'completed',
-                    userId: input.handoff.userId,
-                    roleLayer: 'pm2',
-                  });
-                } else {
-                  // 评审未通过 → 失败分流
-                  const escalationRound = (() => {
-                    const row = sqliteGet<{ retry_count: number }>(
-                      `SELECT retry_count FROM handoff_records WHERE id = ?`,
-                      [pm2HandoffRow.id],
-                    );
-                    return row?.retry_count ?? 0;
-                  })();
-
-                  const disposition = determineFailureDisposition({
-                    report,
-                    escalationRound,
-                  });
-
-                  if (disposition.action === 'redispatch') {
-                    // 实现型失败 → 重新派发给 e/f/g
-                    setSubstate({
-                      sessionId: pm2SessionId,
-                      substate: 'dispatching',
-                      userId: input.handoff.userId,
-                      roleLayer: 'pm2',
-                    });
-                    appendSessionMessageV2({
-                      sessionId: pm2SessionId,
-                      userId: input.handoff.userId,
-                      role: 'assistant',
-                      content: [
-                        {
-                          type: 'text',
-                          text: `⚠️ 实现型失败，准备重新派发。原因：${disposition.reason}`,
-                        },
-                      ],
-                    });
-                    // 注：实际重新派发需要重新调 pm2-runner 的 dispatch 逻辑。
-                    // 当前通过 retry_count+1 + 退回 pending 让 watcher 重新 claim 来实现。
-                    const { sqliteRun: dbRun } = await import('../../infra/db.js');
-                    dbRun(
-                      `UPDATE handoff_records
-                         SET state = 'pending', claim_token = NULL, claimed_at = NULL,
-                             started_at = NULL, retry_count = retry_count + 1,
-                             updated_at = datetime('now')
-                       WHERE id = ? AND state = 'running'`,
-                      [pm2HandoffRow.id],
-                    );
-                  } else if (disposition.action === 'return-to-c') {
-                    // 规划型失败 → 退回 c 层
-                    setSubstate({
-                      sessionId: pm2SessionId,
-                      substate: 'escalating',
-                      userId: input.handoff.userId,
-                      roleLayer: 'pm2',
-                    });
-                    appendSessionMessageV2({
-                      sessionId: pm2SessionId,
-                      userId: input.handoff.userId,
-                      role: 'assistant',
-                      content: [
-                        {
-                          type: 'text',
-                          text: `⚠️ 规划型失败，退回 PM1 重新规划。原因：${disposition.reason}`,
-                        },
-                      ],
-                    });
-                    // 通知 reception 层（通过 inbound escalation_request）
-                    const { submitInboundMessage } = await import('../store/inbound-store.js');
-                    // 找到 reception session（pm2 的上游链路）
-                    const receptionSession = sqliteGet<{ from_session_id: string }>(
-                      `SELECT from_session_id FROM handoff_records
-                       WHERE to_role_layer = 'pm1' AND to_session_id = (
-                         SELECT from_session_id FROM handoff_records WHERE id = ?
-                       ) LIMIT 1`,
-                      [pm2HandoffRow.id],
-                    );
-                    if (receptionSession) {
-                      submitInboundMessage({
-                        userId: input.handoff.userId,
-                        toSessionId: receptionSession.from_session_id,
-                        fromRoleLayer: 'pm2',
-                        messageType: 'escalation_request',
-                        payload: {
-                          reason: disposition.reason,
-                          source: 'quality-review',
-                          pm2HandoffId: pm2HandoffRow.id,
-                        },
-                      });
-                    }
-                    setSubstate({
-                      sessionId: pm2SessionId,
-                      substate: 'failed',
-                      userId: input.handoff.userId,
-                      roleLayer: 'pm2',
-                    });
-                  } else {
-                    // escalate-to-user → 标记失败，通知用户
-                    setSubstate({
-                      sessionId: pm2SessionId,
-                      substate: 'failed',
-                      userId: input.handoff.userId,
-                      roleLayer: 'pm2',
-                    });
-                    appendSessionMessageV2({
-                      sessionId: pm2SessionId,
-                      userId: input.handoff.userId,
-                      role: 'assistant',
-                      content: [
-                        {
-                          type: 'text',
-                          text: `🔴 多次重试仍未通过评审，需要用户介入。原因：${disposition.reason}`,
-                        },
-                      ],
-                    });
-                    // 通知 reception
-                    const { submitInboundMessage } = await import('../store/inbound-store.js');
-                    const receptionSession = sqliteGet<{ from_session_id: string }>(
-                      `SELECT from_session_id FROM handoff_records
-                       WHERE to_role_layer = 'pm1' AND to_session_id = (
-                         SELECT from_session_id FROM handoff_records WHERE id = ?
-                       ) LIMIT 1`,
-                      [pm2HandoffRow.id],
-                    );
-                    if (receptionSession) {
-                      submitInboundMessage({
-                        userId: input.handoff.userId,
-                        toSessionId: receptionSession.from_session_id,
-                        fromRoleLayer: 'pm2',
-                        messageType: 'escalation_request',
-                        payload: {
-                          reason: disposition.reason,
-                          source: 'quality-review-escalation',
-                          pm2HandoffId: pm2HandoffRow.id,
-                          escalationRound,
-                        },
-                      });
-                    }
-                  }
-                }
-              } else {
-                // 没有 LLM 配置 → 降级为简单统计 summary（与之前行为一致）
-                const siblings = sqliteAll<{ state: string }>(
-                  `SELECT state FROM handoff_records
-                   WHERE from_session_id = ? AND to_role_layer IN ('executor', 'reviewer')`,
-                  [pm2SessionId],
-                );
-                const completed = siblings.filter((s) => s.state === 'completed').length;
-                const failed = siblings.filter((s) => s.state === 'failed').length;
-                const summary = [
-                  `## 质量评审总结（d.4 降级模式）`,
-                  '',
-                  `所有执行层任务已完成（无 LLM 配置，跳过 spec/quality review）：`,
-                  `- ✅ 成功：${completed}`,
-                  `- ❌ 失败：${failed}`,
-                ].join('\n');
-                appendSessionMessageV2({
-                  sessionId: pm2SessionId,
-                  userId: input.handoff.userId,
-                  role: 'assistant',
-                  content: [{ type: 'text', text: summary }],
-                });
-                setSubstate({
-                  sessionId: pm2SessionId,
-                  substate: failed > 0 ? 'failed' : 'completed',
-                  userId: input.handoff.userId,
-                  roleLayer: 'pm2',
-                });
-              }
             } catch (err) {
+              recordTeamRuntimeIncident({
+                category: 'handoff_failure',
+                code: 'handoff-quality-review-failed',
+                context: {
+                  handoffId: input.handoff.id,
+                  toSessionId: input.handoff.fromSessionId,
+                },
+                message: err instanceof Error ? err.message : String(err),
+                severity: 'warning',
+                timestamp: Date.now(),
+                userId: input.handoff.userId,
+              });
               console.warn(
                 `[watcher] d.4 quality review failed: ${err instanceof Error ? err.message : String(err)}`,
               );
@@ -662,6 +627,19 @@ export class HandoffWatcher {
             reason,
           });
           if (didFail) {
+            recordTeamRuntimeIncident({
+              category: 'handoff_failure',
+              code: 'handoff-runner-failed',
+              context: {
+                handoffId: input.handoff.id,
+                toRoleLayer: input.handoff.toRoleLayer,
+                toSessionId: input.toSessionId,
+              },
+              message: reason,
+              severity: 'error',
+              timestamp: Date.now(),
+              userId: input.handoff.userId,
+            });
             // 同步把 to_session 的 substate 推到 'failed'，让前端进度条立刻反映终态
             // （避免界面停留在 drafting_plan / dispatching 等中间态）
             try {
@@ -689,6 +667,8 @@ export class HandoffWatcher {
             });
           }
           throw err;
+        } finally {
+          clearInterval(heartbeatPump);
         }
       },
     });

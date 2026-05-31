@@ -4,10 +4,13 @@
 
 import {
   authHeader,
-  expectJson,
+  extractJsonErrorMessage,
   HttpError,
+  isGenericFetchErrorMessage,
   jsonAuthHeaders,
   readJsonErrorData,
+  type JsonErrorData,
+  fetchWithTimeout,
 } from '../gateway/http.js';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -77,67 +80,124 @@ export interface PromptSnippetsClient {
   deleteSnippet(token: string, snippetId: string): Promise<void>;
 }
 
+function buildPromptSnippetsActionErrorMessage(
+  actionLabel: string,
+  status: number,
+  data: JsonErrorData | undefined,
+): string {
+  const extracted = extractJsonErrorMessage(data);
+  if (extracted) {
+    return extracted;
+  }
+  if (status === 401 || status === 403) {
+    return `认证失效或当前账号无权${actionLabel}。`;
+  }
+  if (status === 404) {
+    return `目标提示词资源不存在，无法${actionLabel}。`;
+  }
+  if (status === 409) {
+    return `当前状态不允许${actionLabel}。`;
+  }
+  return `${actionLabel}失败（HTTP ${status}）。`;
+}
+
+function isGenericPromptSnippetsNetworkErrorMessage(message: string): boolean {
+  return isGenericFetchErrorMessage(message);
+}
+
+function normalizePromptSnippetsError(actionLabel: string, error: unknown): Error {
+  if (error instanceof HttpError) {
+    const extracted = extractJsonErrorMessage((error.data ?? undefined) as JsonErrorData | undefined);
+    if (extracted) {
+      return new HttpError(extracted, error.status, error.data);
+    }
+    return error;
+  }
+  if (error instanceof Error) {
+    const message = error.message.trim();
+    if (message.length > 0 && !isGenericPromptSnippetsNetworkErrorMessage(message)) {
+      return error;
+    }
+  }
+  return new Error(`网络异常，${actionLabel}失败。`);
+}
+
+async function performPromptSnippetsRequest<T>(input: {
+  actionLabel: string;
+  parseJson?: boolean;
+  request: () => Promise<Response>;
+}): Promise<T> {
+  try {
+    const response = await input.request();
+    if (!response.ok) {
+      const data = await readJsonErrorData<JsonErrorData>(response);
+      throw new HttpError(
+        buildPromptSnippetsActionErrorMessage(input.actionLabel, response.status, data),
+        response.status,
+        data,
+      );
+    }
+    if (input.parseJson === false || response.status === 204) {
+      return undefined as T;
+    }
+    return (await response.json()) as T;
+  } catch (error) {
+    throw normalizePromptSnippetsError(input.actionLabel, error);
+  }
+}
+
 // ─── Factory ────────────────────────────────────────────────────────────────
 
 export function createPromptSnippetsClient(baseUrl: string): PromptSnippetsClient {
   return {
     async listGroups(token, options) {
-      const response = await fetch(`${baseUrl}/prompt-snippets/groups`, {
-        headers: authHeader(token),
-        signal: options?.signal,
+      const data = await performPromptSnippetsRequest<{ groups: PromptSnippetGroup[] }>({
+        actionLabel: '读取提示词分组',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/prompt-snippets/groups`, {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
       });
-      const data = await expectJson<{ groups: PromptSnippetGroup[] }>(
-        response,
-        'prompt-snippets.groups.list',
-      );
       return data.groups;
     },
 
     async createGroup(token, input) {
-      const response = await fetch(`${baseUrl}/prompt-snippets/groups`, {
-        method: 'POST',
-        headers: jsonAuthHeaders(token),
-        body: JSON.stringify(input),
+      const data = await performPromptSnippetsRequest<{ group: PromptSnippetGroup }>({
+        actionLabel: '创建提示词分组',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/prompt-snippets/groups`, {
+            method: 'POST',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify(input),
+          }),
       });
-      const data = await expectJson<{ group: PromptSnippetGroup }>(
-        response,
-        'prompt-snippets.groups.create',
-      );
       return data.group;
     },
 
     async updateGroup(token, groupId, input) {
-      const response = await fetch(
-        `${baseUrl}/prompt-snippets/groups/${encodeURIComponent(groupId)}`,
-        {
-          method: 'PUT',
-          headers: jsonAuthHeaders(token),
-          body: JSON.stringify(input),
-        },
-      );
-      const data = await expectJson<{ group: PromptSnippetGroup }>(
-        response,
-        'prompt-snippets.groups.update',
-      );
+      const data = await performPromptSnippetsRequest<{ group: PromptSnippetGroup }>({
+        actionLabel: '更新提示词分组',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/prompt-snippets/groups/${encodeURIComponent(groupId)}`, {
+            method: 'PUT',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify(input),
+          }),
+      });
       return data.group;
     },
 
     async deleteGroup(token, groupId) {
-      const response = await fetch(
-        `${baseUrl}/prompt-snippets/groups/${encodeURIComponent(groupId)}`,
-        {
-          method: 'DELETE',
-          headers: authHeader(token),
-        },
-      );
-      if (!response.ok) {
-        const data = await readJsonErrorData<{ error?: string }>(response);
-        throw new HttpError(
-          data?.error ?? `prompt-snippets.groups.delete failed: ${response.status}`,
-          response.status,
-          data,
-        );
-      }
+      await performPromptSnippetsRequest({
+        actionLabel: '删除提示词分组',
+        parseJson: false,
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/prompt-snippets/groups/${encodeURIComponent(groupId)}`, {
+            method: 'DELETE',
+            headers: authHeader(token),
+          }),
+      });
     },
 
     async listSnippets(token, options) {
@@ -146,50 +206,53 @@ export function createPromptSnippetsClient(baseUrl: string): PromptSnippetsClien
         params.set('groupId', options.groupId);
       }
       const suffix = params.toString();
-      const response = await fetch(`${baseUrl}/prompt-snippets${suffix ? `?${suffix}` : ''}`, {
-        headers: authHeader(token),
-        signal: options?.signal,
+      const data = await performPromptSnippetsRequest<{ snippets: PromptSnippet[] }>({
+        actionLabel: '读取提示词条目',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/prompt-snippets${suffix ? `?${suffix}` : ''}`, {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
       });
-      const data = await expectJson<{ snippets: PromptSnippet[] }>(
-        response,
-        'prompt-snippets.list',
-      );
       return data.snippets;
     },
 
     async createSnippet(token, input) {
-      const response = await fetch(`${baseUrl}/prompt-snippets`, {
-        method: 'POST',
-        headers: jsonAuthHeaders(token),
-        body: JSON.stringify(input),
+      const data = await performPromptSnippetsRequest<{ snippet: PromptSnippet }>({
+        actionLabel: '创建提示词条目',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/prompt-snippets`, {
+            method: 'POST',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify(input),
+          }),
       });
-      const data = await expectJson<{ snippet: PromptSnippet }>(response, 'prompt-snippets.create');
       return data.snippet;
     },
 
     async updateSnippet(token, snippetId, input) {
-      const response = await fetch(`${baseUrl}/prompt-snippets/${encodeURIComponent(snippetId)}`, {
-        method: 'PUT',
-        headers: jsonAuthHeaders(token),
-        body: JSON.stringify(input),
+      const data = await performPromptSnippetsRequest<{ snippet: PromptSnippet }>({
+        actionLabel: '更新提示词条目',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/prompt-snippets/${encodeURIComponent(snippetId)}`, {
+            method: 'PUT',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify(input),
+          }),
       });
-      const data = await expectJson<{ snippet: PromptSnippet }>(response, 'prompt-snippets.update');
       return data.snippet;
     },
 
     async deleteSnippet(token, snippetId) {
-      const response = await fetch(`${baseUrl}/prompt-snippets/${encodeURIComponent(snippetId)}`, {
-        method: 'DELETE',
-        headers: authHeader(token),
+      await performPromptSnippetsRequest({
+        actionLabel: '删除提示词条目',
+        parseJson: false,
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/prompt-snippets/${encodeURIComponent(snippetId)}`, {
+            method: 'DELETE',
+            headers: authHeader(token),
+          }),
       });
-      if (!response.ok) {
-        const data = await readJsonErrorData<{ error?: string }>(response);
-        throw new HttpError(
-          data?.error ?? `prompt-snippets.delete failed: ${response.status}`,
-          response.status,
-          data,
-        );
-      }
     },
   };
 }

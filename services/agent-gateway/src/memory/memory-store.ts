@@ -15,6 +15,7 @@ import {
   deduplicateMemories,
 } from '@openAwork/agent-core';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
+import { isSqliteMalformedError } from '../infra/sqlite-error-utils.js';
 import { scanMemoryWriteContent } from './memory-security-scanner.js';
 
 interface MemoryRow {
@@ -243,6 +244,94 @@ export function hasExtractionLog(
   return row !== undefined;
 }
 
+/**
+ * Retention for `memory_extraction_logs`. This table is a pure dedup /
+ * idempotency log: one row per (user, session, clientRequestId) extraction
+ * turn, read ONLY by the point-query `hasExtractionLog` and removed only by the
+ * session-delete CASCADE. A `clientRequestId` is a one-time id for a single
+ * streaming run, so a row older than a generous window can never be re-queried
+ * (the run that owns it has long since completed), and `upsertExtractedMemories`
+ * dedupes at the memory level regardless — the log is an optimization, not a
+ * correctness guarantee. So old rows are safe to drop, bounding what is
+ * otherwise an only-grows table on a long-lived account. Amortized: prune every
+ * N inserts so write amplification is negligible.
+ */
+const DEFAULT_MEMORY_EXTRACTION_LOG_MAX_AGE_HOURS = 24 * 30;
+export const MEMORY_EXTRACTION_LOG_PRUNE_CHECK_INTERVAL = 100;
+
+let extractionLogRetentionHoursOverride: number | null = null;
+let extractionLogPruneCheckInterval = MEMORY_EXTRACTION_LOG_PRUNE_CHECK_INTERVAL;
+let extractionLogInsertsSincePrune = 0;
+let extractionLogPruneDisabled = false;
+
+function resolveExtractionLogMaxAgeHours(): number {
+  if (extractionLogRetentionHoursOverride !== null) {
+    return extractionLogRetentionHoursOverride;
+  }
+  const raw = globalThis.process?.env['OPENAWORK_MEMORY_EXTRACTION_LOG_MAX_AGE_HOURS'];
+  if (raw === undefined || raw === null || raw.trim() === '') {
+    return DEFAULT_MEMORY_EXTRACTION_LOG_MAX_AGE_HOURS;
+  }
+  const parsed = Number(raw);
+  // Non-positive / NaN disables retention, matching the sibling stores' env
+  // dead-switch semantics.
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 0;
+  }
+  return Math.floor(parsed);
+}
+
+function pruneExtractionLogs(maxAgeHours: number): void {
+  sqliteRun(
+    `DELETE FROM memory_extraction_logs WHERE created_at < datetime('now', ?)`,
+    [`-${maxAgeHours} hours`],
+  );
+}
+
+function maybePruneExtractionLogs(): void {
+  if (extractionLogPruneDisabled) {
+    return;
+  }
+  const maxAgeHours = resolveExtractionLogMaxAgeHours();
+  if (maxAgeHours <= 0) {
+    // Retention disabled: reset the counter so re-enabling later doesn't
+    // trigger one giant catch-up prune.
+    extractionLogInsertsSincePrune = 0;
+    return;
+  }
+  extractionLogInsertsSincePrune += 1;
+  if (extractionLogInsertsSincePrune < extractionLogPruneCheckInterval) {
+    return;
+  }
+  extractionLogInsertsSincePrune = 0;
+  try {
+    pruneExtractionLogs(maxAgeHours);
+  } catch (error) {
+    // A prune failure must never break extraction-log persistence or the
+    // memory-extraction flow. Disable the prune path on DB corruption,
+    // consistent with the sibling retention stores.
+    if (isSqliteMalformedError(error)) {
+      extractionLogPruneDisabled = true;
+      return;
+    }
+    // Otherwise swallow — retention is best-effort.
+  }
+}
+
+/** Test-only: override the extraction-log retention window (null clears it). */
+export function __setMemoryExtractionLogRetentionForTesting(
+  maxAgeHours: number | null,
+  checkInterval?: number,
+): void {
+  extractionLogRetentionHoursOverride = maxAgeHours;
+  extractionLogPruneCheckInterval =
+    typeof checkInterval === 'number' && checkInterval > 0
+      ? Math.floor(checkInterval)
+      : MEMORY_EXTRACTION_LOG_PRUNE_CHECK_INTERVAL;
+  extractionLogInsertsSincePrune = 0;
+  extractionLogPruneDisabled = false;
+}
+
 export function insertExtractionLog(
   userId: string,
   sessionId: string,
@@ -254,6 +343,9 @@ export function insertExtractionLog(
      VALUES (?, ?, ?, ?)`,
     [userId, sessionId, clientRequestId, extractedCount],
   );
+  // Opportunistic retention: bound this only-grows dedup log on a long-lived
+  // account. Old rows can never be re-queried (one-time clientRequestId).
+  maybePruneExtractionLogs();
 }
 
 export function upsertExtractedMemories(
@@ -279,27 +371,54 @@ export function upsertExtractedMemories(
   const existing = listMemories(userId, { enabled: true, limit: 1000 });
   const result = deduplicateMemories(safeCandidates, existing);
 
+  // Per-candidate resilience: each createMemory / updateMemory is an
+  // unguarded SQLite write. Without isolation one row throwing (DB lock /
+  // disk error / constraint) would abort the remaining candidates AND — since
+  // the counts below were derived from the PLANNED arrays — report writes that
+  // never happened. Isolate per candidate, count only actual successes, and
+  // warn on failures so a single bad row neither starves the rest nor inflates
+  // the result. (§0.94/§0.103 single-point-failure-isolation class.)
+  let created = 0;
   for (const candidate of result.toCreate) {
-    createMemory(userId, {
-      type: candidate.type,
-      key: candidate.key,
-      value: candidate.value,
-      source: 'auto_extracted',
-      confidence: candidate.confidence,
-      priority: 30,
-      workspaceRoot,
-    });
+    try {
+      createMemory(userId, {
+        type: candidate.type,
+        key: candidate.key,
+        value: candidate.value,
+        source: 'auto_extracted',
+        confidence: candidate.confidence,
+        priority: 30,
+        workspaceRoot,
+      });
+      created += 1;
+    } catch (err) {
+      console.warn(
+        `[memory-store] 自动抽取记忆写入失败，已跳过该条：${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
   }
 
+  let updated = 0;
   for (const { existingId, candidate } of result.toUpdate) {
-    updateMemory(userId, existingId, {
-      value: candidate.value,
-    });
+    try {
+      updateMemory(userId, existingId, {
+        value: candidate.value,
+      });
+      updated += 1;
+    } catch (err) {
+      console.warn(
+        `[memory-store] 自动抽取记忆更新失败，已跳过该条：${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
   }
 
   return {
-    created: result.toCreate.length,
-    updated: result.toUpdate.length,
+    created,
+    updated,
     duplicates: result.duplicates.length,
     blocked,
   };

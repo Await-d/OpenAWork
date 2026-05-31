@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import type {
   RunArtifact,
@@ -84,10 +84,33 @@ export class ArtifactManagerImpl implements ArtifactManager {
     if (!this.indexFilePath || !existsSync(this.indexFilePath)) {
       return;
     }
-    const raw = readFileSync(this.indexFilePath, 'utf-8');
-    const artifacts = JSON.parse(raw) as RunArtifact[];
+    // A corrupt index (half-written on crash, disk error, hand-edited)
+    // must not blow up the constructor and take the whole artifacts
+    // subsystem down. Degrade to an empty store and warn instead.
+    let artifacts: unknown;
+    try {
+      const raw = readFileSync(this.indexFilePath, 'utf-8');
+      artifacts = JSON.parse(raw);
+    } catch (error) {
+      console.warn(
+        `[artifacts] 无法读取或解析索引文件，已忽略：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return;
+    }
+    if (!Array.isArray(artifacts)) {
+      console.warn('[artifacts] 索引文件格式非法（期望数组），已忽略。');
+      return;
+    }
     for (const artifact of artifacts) {
-      this.store.set(artifact.id, artifact);
+      if (
+        artifact &&
+        typeof artifact === 'object' &&
+        typeof (artifact as RunArtifact).id === 'string'
+      ) {
+        this.store.set((artifact as RunArtifact).id, artifact as RunArtifact);
+      }
     }
   }
 
@@ -95,7 +118,64 @@ export class ArtifactManagerImpl implements ArtifactManager {
     if (!this.indexFilePath) {
       return;
     }
-    writeFileSync(this.indexFilePath, JSON.stringify([...this.store.values()], null, 2), 'utf-8');
+    // Atomic write: serialise to a temp file then rename, so a crash
+    // mid-write can never leave a half-written (unparseable) index that
+    // would then be silently dropped on next load.
+    const payload = JSON.stringify([...this.store.values()], null, 2);
+    const tempPath = `${this.indexFilePath}.tmp.${process.pid}.${Date.now()}`;
+    try {
+      writeFileSync(tempPath, payload, 'utf-8');
+      renameSync(tempPath, this.indexFilePath);
+    } catch (error) {
+      try {
+        if (existsSync(tempPath)) unlinkSync(tempPath);
+      } catch {
+        // best-effort cleanup
+      }
+      throw error;
+    }
+  }
+}
+
+/**
+ * Wall-clock ceiling for a single file-browser search subprocess. grep/find
+ * over a huge or network-mounted tree can run unbounded; without a deadline
+ * the returned promise never settles and the caller awaiting it hangs forever.
+ */
+const FILE_BROWSER_SEARCH_TIMEOUT_MS = 15_000;
+
+/**
+ * Run a search command via execFile (argv array, no shell) and return stdout.
+ * Using execFile instead of a shell string means `query`/`pattern`/path args
+ * can never be interpreted as shell metacharacters ($(...), backticks, quotes
+ * — a command-injection vector under the previous `exec` + JSON.stringify
+ * form). grep exits 1 on "no match" and find may exit non-zero on partial
+ * errors; the old shell form swallowed those via `2>/dev/null || true`, so we
+ * mirror that by returning whatever stdout was captured rather than throwing.
+ */
+async function runFileBrowserSearch(
+  file: string,
+  args: string[],
+  maxBuffer: number,
+): Promise<string> {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const execFileAsync = promisify(execFile) as (
+    file: string,
+    args: string[],
+    opts?: { maxBuffer?: number; timeout?: number },
+  ) => Promise<{ stdout: string }>;
+  try {
+    const { stdout } = await execFileAsync(file, args, {
+      maxBuffer,
+      timeout: FILE_BROWSER_SEARCH_TIMEOUT_MS,
+    });
+    return stdout;
+  } catch (error) {
+    const stdout = (error as { stdout?: string | Buffer })?.stdout;
+    if (typeof stdout === 'string') return stdout;
+    if (stdout) return stdout.toString();
+    return '';
   }
 }
 
@@ -118,17 +198,19 @@ export class FileBrowserAPIImpl implements FileBrowserAPI {
   }
 
   async searchText(query: string, options?: { maxResults?: number }): Promise<FileSearchResult[]> {
-    const { exec } = await import('node:child_process');
-    const { promisify } = await import('node:util');
-    const execAsync = promisify(exec) as (
-      cmd: string,
-      opts?: { maxBuffer?: number },
-    ) => Promise<{ stdout: string }>;
     const maxResults = options?.maxResults ?? 100;
-    const cmd = `grep -rn --color=never -F ${JSON.stringify(query)} . 2>/dev/null | head -${maxResults} || true`;
-    const { stdout } = await execAsync(cmd, { maxBuffer: 4 * 1024 * 1024 });
+    // execFile (argv array, no shell) so `query` can never be interpreted as
+    // shell metacharacters — the previous `exec` form interpolated query via
+    // JSON.stringify, which does NOT escape shell syntax ($(...), backticks).
+    // The `| head -N` cap is applied in JS here instead of a shell pipe.
+    const stdout = await runFileBrowserSearch(
+      'grep',
+      ['-rn', '--color=never', '-F', query, '.'],
+      4 * 1024 * 1024,
+    );
     const results: FileSearchResult[] = [];
     for (const raw of stdout.split('\n')) {
+      if (results.length >= maxResults) break;
       const m =
         raw.match(/^([^:]+):([0-9]+):([0-9]+)?:?(.*)$/) ?? raw.match(/^([^:]+):([0-9]+):(.*)$/);
       if (!m) continue;
@@ -142,14 +224,11 @@ export class FileBrowserAPIImpl implements FileBrowserAPI {
   }
 
   async searchFiles(pattern: string): Promise<string[]> {
-    const { exec } = await import('node:child_process');
-    const { promisify } = await import('node:util');
-    const execAsync = promisify(exec) as (
-      cmd: string,
-      opts?: { maxBuffer?: number },
-    ) => Promise<{ stdout: string }>;
-    const cmd = `find . -type f -name ${JSON.stringify(pattern)} 2>/dev/null || true`;
-    const { stdout } = await execAsync(cmd, { maxBuffer: 2 * 1024 * 1024 });
+    const stdout = await runFileBrowserSearch(
+      'find',
+      ['.', '-type', 'f', '-name', pattern],
+      2 * 1024 * 1024,
+    );
     return stdout
       .split('\n')
       .map((l) => l.trim())

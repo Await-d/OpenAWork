@@ -52,7 +52,7 @@ const CARD_STYLE: CSSProperties = {
   borderRadius: 16,
   border: '1px dashed color-mix(in srgb, var(--accent) 36%, transparent)',
   background:
-    'linear-gradient(135deg, color-mix(in srgb, var(--accent) 5%, var(--bg-overlay) 0%, var(--bg-base)',
+    'linear-gradient(135deg, color-mix(in srgb, var(--accent) 5%, var(--bg-overlay)) 0%, var(--bg-base) 100%)',
 };
 
 const STATUS_META: Record<TabPlaceholderStatus, { label: string; color: string; bg: string }> = {
@@ -159,7 +159,7 @@ export function TabPlaceholder({
             style={{
               padding: '8px 12px',
               borderRadius: 8,
-              background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base)',
+              background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base))',
               border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
               fontSize: 11,
               color: 'var(--fg-muted)',

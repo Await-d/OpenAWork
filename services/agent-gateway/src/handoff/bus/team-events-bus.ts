@@ -23,6 +23,7 @@
  */
 
 import type { HandoffRecord } from '../store/handoff-store.js';
+import { recordTeamRuntimeIncident } from '../../team/team-runtime-diagnostics-store.js';
 
 export type TeamEventType =
   | 'handoff.created'
@@ -35,6 +36,7 @@ export type TeamEventType =
   | 'session.heartbeat'
   | 'session.substate.changed'
   | 'session.inbound.submitted'
+  | 'session.init.changed'
   | 'scheduler.task-paused'
   | 'scheduler.task-resumed'
   | 'scheduler.all-paused'
@@ -61,14 +63,39 @@ export interface TeamEventEnvelope {
 
 export type TeamEventListener = (event: TeamEventEnvelope) => void;
 
+export interface TeamEventsBusStats {
+  listenerCount: number;
+  listenerErrorCount: number;
+  publishedByType: Partial<Record<TeamEventType, number>>;
+  publishedCount: number;
+}
+
 class TeamEventsBus {
   private listeners = new Set<TeamEventListener>();
+  private listenerErrorCount = 0;
+  private publishedByType: Partial<Record<TeamEventType, number>> = {};
+  private publishedCount = 0;
 
   publish(event: TeamEventEnvelope): void {
+    this.publishedCount += 1;
+    this.publishedByType[event.type] = (this.publishedByType[event.type] ?? 0) + 1;
     for (const listener of this.listeners) {
       try {
         listener(event);
       } catch (err) {
+        this.listenerErrorCount += 1;
+        recordTeamRuntimeIncident({
+          category: 'team_events_listener',
+          code: 'team-events-listener-threw',
+          context: {
+            eventType: event.type,
+            listenerCount: this.listeners.size,
+          },
+          message: err instanceof Error ? err.message : String(err),
+          severity: 'warning',
+          timestamp: Date.now(),
+          userId: event.userId,
+        });
         console.warn(
           `[team-events] listener threw: ${err instanceof Error ? err.message : String(err)}`,
         );
@@ -83,11 +110,23 @@ class TeamEventsBus {
     };
   }
 
+  stats(): TeamEventsBusStats {
+    return {
+      listenerCount: this.listeners.size,
+      listenerErrorCount: this.listenerErrorCount,
+      publishedByType: { ...this.publishedByType },
+      publishedCount: this.publishedCount,
+    };
+  }
+
   /**
    * 仅供测试 / 重启时清理用。运行时不要主动调用。
    */
   __clearForTesting(): void {
     this.listeners.clear();
+    this.listenerErrorCount = 0;
+    this.publishedByType = {};
+    this.publishedCount = 0;
   }
 }
 
@@ -99,6 +138,10 @@ export function publishTeamEvent(event: TeamEventEnvelope): void {
 
 export function subscribeToTeamEvents(listener: TeamEventListener): () => void {
   return bus.subscribe(listener);
+}
+
+export function getTeamEventsBusStats(): TeamEventsBusStats {
+  return bus.stats();
 }
 
 export function __clearTeamEventsBusForTesting(): void {

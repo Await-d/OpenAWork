@@ -1,5 +1,6 @@
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { OpenFile } from '../../../hooks/editor/useFileEditor.js';
+import type { editor as MonacoEditorNs } from 'monaco-editor';
+import type { OpenFile, RevealTarget } from '../../../hooks/editor/useFileEditor.js';
 import { isBinaryPreviewKind } from '../../../utils/file/file-preview.js';
 import { getFilePreviewKind } from '../../../utils/file/file-preview.js';
 import { ContextMenu, type ContextMenuItem } from '../../common/display/ContextMenu.js';
@@ -71,6 +72,8 @@ export function FileEditorPanel({
   onChange,
   onSave,
   onReorder,
+  revealTarget,
+  onRevealConsumed,
 }: {
   files: OpenFile[];
   activeFile: OpenFile | null;
@@ -84,8 +87,84 @@ export function FileEditorPanel({
   onChange: (path: string, content: string) => void;
   onSave: (path: string) => void;
   onReorder?: (fromIndex: number, toIndex: number) => void;
+  /**
+   * Pending request to scroll/select a line range in the active file.
+   * Threaded down from `useFileEditor` when a caller opens a file with a
+   * line (e.g. clicking a windowed `read` tool result). Consumed once the
+   * editor mounts and the matching file is active.
+   */
+  revealTarget?: RevealTarget | null;
+  /** Called after a `revealTarget` has been applied so it can be cleared. */
+  onRevealConsumed?: () => void;
 }) {
   const [panelMode, setPanelMode] = useState<'code' | 'preview'>('code');
+
+  // Monaco instance for the active file, captured on mount. Used to scroll
+  // to a `revealTarget` line once the file is open. Reset whenever the file
+  // path / mount key changes so a stale editor isn't driven.
+  const editorRef = useRef<MonacoEditorNs.IStandaloneCodeEditor | null>(null);
+
+  // Apply a reveal target (1-based line, optional end line) to the live
+  // Monaco editor: select the range, scroll it to center, and focus so the
+  // cursor is where the user expects. No-op when the editor isn't mounted
+  // yet — the mount effect re-checks the pending target on attach.
+  const applyReveal = useCallback(
+    (target: RevealTarget) => {
+      const ed = editorRef.current;
+      if (!ed) return false;
+      const model = ed.getModel();
+      const maxLine = model ? model.getLineCount() : target.line;
+      const startLine = Math.min(Math.max(1, target.line), Math.max(1, maxLine));
+      const endLine = Math.min(Math.max(startLine, target.endLine ?? startLine), Math.max(1, maxLine));
+      const endColumn = model ? model.getLineMaxColumn(endLine) : 1;
+      ed.revealLinesInCenterIfOutsideViewport(startLine, endLine);
+      ed.setSelection({
+        startLineNumber: startLine,
+        startColumn: 1,
+        endLineNumber: endLine,
+        endColumn,
+      });
+      ed.setPosition({ lineNumber: startLine, column: 1 });
+      ed.focus();
+      return true;
+    },
+    [],
+  );
+
+  // Re-apply whenever a new reveal target arrives for the file that's
+  // currently active. Runs after Monaco's value has been set for the file.
+  // We retry on a microtask + a short timeout because @monaco-editor/react
+  // sets the model value asynchronously after mount, so the very first
+  // reveal can land before the content (and line count) exist.
+  useEffect(() => {
+    if (!revealTarget) return;
+    if (!activeFile || activeFile.path !== revealTarget.path) return;
+    if (panelMode !== 'code') {
+      // The line view only exists in the code editor; flip to it so the
+      // reveal has somewhere to land.
+      setPanelMode('code');
+    }
+    let cancelled = false;
+    const tryApply = (attemptsLeft: number) => {
+      if (cancelled) return;
+      if (applyReveal(revealTarget)) {
+        onRevealConsumed?.();
+        return;
+      }
+      if (attemptsLeft <= 0) {
+        // Give up but still clear so we don't loop forever.
+        onRevealConsumed?.();
+        return;
+      }
+      setTimeout(() => tryApply(attemptsLeft - 1), 60);
+    };
+    // First attempt next frame (editor likely mounted), then retry a few times.
+    const raf = requestAnimationFrame(() => tryApply(8));
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+    };
+  }, [revealTarget, activeFile, panelMode, applyReveal, onRevealConsumed]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -137,6 +216,15 @@ export function FileEditorPanel({
       return;
     }
 
+    // A pending line reveal for this file needs the code editor to land in
+    // (the preview pane has no line gutter / scroll target). Force code mode
+    // so e.g. clicking a windowed `read` result on a markdown file still
+    // jumps to the right line instead of opening the rendered preview.
+    if (revealTarget && revealTarget.path === currentPath) {
+      setPanelMode('code');
+      return;
+    }
+
     const remembered = activePreviewKind ? readPanelModeFor(currentPath) : null;
     if (remembered) {
       setPanelMode(remembered);
@@ -152,7 +240,7 @@ export function FileEditorPanel({
     } else {
       setPanelMode('code');
     }
-  }, [activeFile?.path, activePreviewKind, panelMode]);
+  }, [activeFile?.path, activePreviewKind, panelMode, revealTarget]);
 
   // Persist the user's manual mode choice for the current file.
   // We only persist when the file has a preview kind (otherwise the
@@ -521,6 +609,17 @@ export function FileEditorPanel({
                       language={activeFile.language}
                       value={activeFile.content}
                       theme={theme === 'light' ? 'vs' : 'vs-dark'}
+                      onMount={(editor) => {
+                        editorRef.current = editor;
+                        // If a reveal was queued before the editor mounted
+                        // (the common case for a fresh open), apply it now
+                        // that the instance exists.
+                        if (revealTarget && revealTarget.path === activeFile.path) {
+                          requestAnimationFrame(() => {
+                            if (applyReveal(revealTarget)) onRevealConsumed?.();
+                          });
+                        }
+                      }}
                       onChange={(val) => {
                         if (val !== undefined) onChange(activeFile.path, val);
                       }}

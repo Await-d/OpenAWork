@@ -184,4 +184,32 @@ describe('resolveAuxiliaryLlmConfig', () => {
     expect(cfg?.providerType).toBe('anthropic');
     expect(cfg?.upstreamProtocol).toBe('anthropic_messages');
   });
+
+  it('falls back to env vars when a stored setting row is corrupt JSON (does not throw)', async () => {
+    // §0.115: a corrupt `providers` / `active_selection` value must degrade to
+    // "unset" — NOT throw out of the resolver and short-circuit the env-var
+    // fallback. Otherwise a user with valid AI_API_* env creds still can't run
+    // any team handoff just because a stored setting row got corrupted.
+    mocks.sqliteGet.mockReturnValue({ value: '{not valid json' });
+    mocks.getFastProviderConfig.mockResolvedValue(null);
+    mocks.getActiveChatProviderConfig.mockResolvedValue(null);
+    process.env['AI_API_BASE_URL'] = 'https://env.example.com/v1';
+    process.env['AI_API_KEY'] = 'env-key';
+    process.env['AI_DEFAULT_MODEL'] = 'env-model';
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    let cfg: Awaited<ReturnType<typeof resolveAuxiliaryLlmConfig>> | undefined;
+    try {
+      // Must not throw despite both setting rows holding corrupt JSON.
+      cfg = await resolveAuxiliaryLlmConfig('user-1');
+    } finally {
+      warn.mockRestore();
+    }
+
+    expect(cfg).toEqual({
+      apiBaseUrl: 'https://env.example.com/v1',
+      apiKey: 'env-key',
+      model: 'env-model',
+    });
+  });
 });

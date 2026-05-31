@@ -52,6 +52,12 @@ export interface ResolveEffectiveSkillsInput {
   workspacePath: string | null;
   /** Session id when we want to apply per-session overrides. */
   sessionId: string | null;
+  /**
+   * 模板初始绑定的 skill id 列表（来自 session metadata.requestedSkills）。
+   * 作为「会话级强制启用」叠加：只要该 skill 已安装且未被用户硬禁用，就并入
+   * effective 集合。用于「团队模板给成员预绑定 skill」在该成员运行时生效。
+   */
+  requestedSkillIds?: string[];
 }
 
 /**
@@ -287,6 +293,25 @@ export function resolveEffectiveSkills(input: ResolveEffectiveSkillsInput): Effe
         override.pinned === null || override.pinned === undefined
           ? (existing?.pinned ?? false)
           : override.pinned === 1,
+      origin: 'session-override',
+      reason: existing?.reason,
+      manifest: existing?.manifest ?? parseManifest(installedRow.manifest_json),
+    });
+  }
+
+  // 模板初始绑定（metadata.requestedSkills）：作为会话级强制启用叠加。
+  // 仅对已安装且未被用户硬禁用的非内置 skill 生效；不覆盖已有的显式启用项。
+  const requestedSkillIds = input.requestedSkillIds ?? [];
+  for (const skillId of requestedSkillIds) {
+    if (builtinIds.has(skillId)) continue; // builtins 始终可用，无需叠加
+    const installedRow = installed.get(skillId);
+    if (!installedRow || installedRow.enabled !== 1) continue;
+    const existing = resolved.get(skillId);
+    if (existing && existing.enabled) continue; // 已启用则保持
+    resolved.set(skillId, {
+      skillId,
+      enabled: true,
+      pinned: existing?.pinned ?? false,
       origin: 'session-override',
       reason: existing?.reason,
       manifest: existing?.manifest ?? parseManifest(installedRow.manifest_json),

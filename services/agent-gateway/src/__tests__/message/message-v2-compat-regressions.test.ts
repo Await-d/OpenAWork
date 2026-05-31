@@ -261,11 +261,18 @@ describe('message-v2 compatibility regressions', () => {
     expect(streamRouteSource).toMatch(
       /buildErrorContent\('STREAM_ERROR', String\(err\)\)[\s\S]*?replaceExisting: true/,
     );
+    // The error message argument was refactored behind
+    // `buildUserFacingStreamErrorMessage(...)`; the invariant guarded here is
+    // that both upstream-error and generic stream-error writes still go
+    // through `buildErrorContent` and set `replaceExisting: true` (idempotent
+    // re-write of the same request-scoped assistant message). Match any
+    // single message identifier so a future rename does not silently drop
+    // the idempotency assertion.
     expect(streamModelRoundSource).toMatch(
-      /buildErrorContent\('V2_UPSTREAM_ERROR', classification\.message \?\? message\)[\s\S]*?replaceExisting: true/,
+      /buildErrorContent\('V2_UPSTREAM_ERROR', \w+\)[\s\S]*?replaceExisting: true/,
     );
     expect(streamModelRoundSource).toMatch(
-      /buildErrorContent\('STREAM_ERROR', message\)[\s\S]*?replaceExisting: true/,
+      /buildErrorContent\('STREAM_ERROR', \w+\)[\s\S]*?replaceExisting: true/,
     );
   });
 

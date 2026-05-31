@@ -3,8 +3,14 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import * as crypto from 'node:crypto';
 
+/** Cap on a single telemetry batch upload so a hung endpoint can't stall flush. */
+const TELEMETRY_SEND_TIMEOUT_MS = 10_000;
+
 export type TelemetryEventName =
   | 'app_start'
+  | 'team_runtime_alert_transition'
+  | 'team_runtime_health'
+  | 'team_runtime_incident'
   | 'session_created'
   | 'tool_call'
   | 'skill_installed'
@@ -59,6 +65,17 @@ export class TelemetryManager {
   private readonly endpoint: string;
   private queue: TelemetryEvent[] = [];
   private timer: NodeJS.Timeout | null = null;
+  // Single-flight guard for `flush()`. Without this, a slow telemetry
+  // endpoint (network blip, regional outage, ECONNRESET retried by the
+  // socket layer) lets a second `setInterval` tick fire before the previous
+  // flush finishes; both calls then `splice(0, queue.length)` from the
+  // *same* queue. The race is destructive: the second splicer gets an
+  // empty array and uploads nothing, while the first splicer's events are
+  // already detached from the queue and will be dropped if its in-flight
+  // send eventually fails. By sharing one promise per in-flight flush we
+  // keep concurrent callers (timer ticks, manual `flush()`, `shutdown()`)
+  // observing the same outcome without overlapping the splice/send pair.
+  private pendingFlush: Promise<void> | null = null;
 
   constructor(config: TelemetryConfig = {}) {
     this.optedOut = isOptedOut(config);
@@ -93,16 +110,38 @@ export class TelemetryManager {
   }
 
   async flush(): Promise<void> {
-    if (this.optedOut || this.queue.length === 0) return;
+    if (this.optedOut) return;
+
+    // If a flush is already in flight, return that promise so concurrent
+    // callers share the outcome rather than racing a second splice/send
+    // pair against it. Timer ticks intentionally drop overlapping flushes
+    // (no requeue) — the next tick will re-fire naturally once the in-flight
+    // send resolves, and the queue contract is "best effort, drop on failure"
+    // (see the existing failure-path test).
+    if (this.pendingFlush) {
+      return this.pendingFlush;
+    }
+
+    if (this.queue.length === 0) return;
 
     const batch = this.queue.splice(0, this.queue.length);
-    await this.send(batch);
+    this.pendingFlush = this.send(batch).finally(() => {
+      this.pendingFlush = null;
+    });
+    return this.pendingFlush;
   }
 
   async shutdown(): Promise<void> {
     if (this.timer !== null) {
       clearInterval(this.timer);
       this.timer = null;
+    }
+    // First await any in-flight flush so we don't race the timer-driven
+    // send. Then call `flush()` again to drain anything that was tracked
+    // *during* the in-flight send (those events landed back in `queue`
+    // after we splice'd, so the second call picks them up).
+    if (this.pendingFlush) {
+      await this.pendingFlush;
     }
     await this.flush();
   }
@@ -121,6 +160,10 @@ export class TelemetryManager {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ events }),
+        // Without a timeout a hung telemetry endpoint leaves this fetch
+        // pending forever: pending sockets accumulate across flush ticks
+        // and `shutdown()` (which awaits flush) would block graceful exit.
+        signal: AbortSignal.timeout(TELEMETRY_SEND_TIMEOUT_MS),
       });
     } catch {
       // network errors are silently ignored to avoid disrupting the app

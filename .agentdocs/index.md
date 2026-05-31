@@ -1,6 +1,7 @@
 # .agentdocs 索引
 
 ## Active Workflows
+- [260530-team-page-内容区功能加强方案](workflow/260530-team-page-内容区功能加强方案.md) — ✅ 全部完成 2026-05-31：content-kit 视觉地基 + 当前会话统计/各层级消耗(byLayer + 单层下钻) + 文件内联预览 + 跨层对话线程 + 知识图谱(SVG) + 3D 与真实 layer-handoff 联动；后端 team_usage/team_tool_call emission 复查确认全链路已通；typecheck/build/团队 27 suites 171 tests 全通过
 - [260523-chat-page-split-b-e](workflow/260523-chat-page-split-b-e.md) — ChatPage 域 B 流式收尾 + 域 E 状态/测试/文档同步
 - [260516-team-page-重构调整方案](workflow/260516-team-page-重构调整方案.md) — TeamPage 重构：从"左侧 Sidebar + Tab 工作台"改为"对话中心 + 右侧可收起面板 + 顶部固定状态栏"；15 项任务 / 5 Wave / feature flag 保护
 - [260509-skill-workspace-selection-spec](workflow/260509-skill-workspace-selection-spec.md) — 让用户在 chat 工作区维度可控地选择启用哪些 skill（workspace 默认 + session 覆盖），支持 AI 一键根据项目特征推荐勾选集；BUILTIN 始终可用、不参与过滤；pinned 仅首轮注入 system prompt

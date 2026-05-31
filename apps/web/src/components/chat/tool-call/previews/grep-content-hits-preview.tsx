@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { computeCommonPathPrefix, PathPrefixBadge, StyledPath } from '../shared/path-display.js';
+import { useFileEditorContext } from '../../../../App.js';
 
 /* ── GrepContentHitsPreview (grep --content) ── */
 
@@ -36,6 +37,8 @@ export function extractGrepContentHitsFromOutput(output: unknown): GrepContentHi
  * `<pre>$path:$line: $text</pre>` flat dump with a scannable per-file list.
  */
 export function GrepContentHitsPreview({ hits }: { hits: GrepContentHit[] }) {
+  const fileEditorRef = useFileEditorContext();
+  const canOpen = fileEditorRef?.current != null;
   const grouped = useMemo(() => {
     const map = new Map<string, GrepContentHit[]>();
     for (const h of hits) {
@@ -62,12 +65,29 @@ export function GrepContentHitsPreview({ hits }: { hits: GrepContentHit[] }) {
             <div className="grep-hits-path">
               <StyledPath path={path} prefix={commonPrefix} />
             </div>
-            {items.map((h) => (
-              <div key={`${path}:${h.line}`} className="grep-hits-row">
-                <span className="grep-hits-line">{h.line}</span>
-                <span className="grep-hits-text">{h.text}</span>
-              </div>
-            ))}
+            {items.map((h) =>
+              canOpen ? (
+                <button
+                  type="button"
+                  key={`${path}:${h.line}`}
+                  className="grep-hits-row grep-hits-row-clickable"
+                  title={`打开 ${path}:${h.line}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    const open = fileEditorRef?.current;
+                    if (open) open(path, { line: h.line });
+                  }}
+                >
+                  <span className="grep-hits-line">{h.line}</span>
+                  <span className="grep-hits-text">{h.text}</span>
+                </button>
+              ) : (
+                <div key={`${path}:${h.line}`} className="grep-hits-row">
+                  <span className="grep-hits-line">{h.line}</span>
+                  <span className="grep-hits-text">{h.text}</span>
+                </div>
+              ),
+            )}
           </div>
         ))}
       </div>

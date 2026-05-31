@@ -31,7 +31,7 @@ export interface TeamSessionEmptyStateProps {
   isLoading?: boolean;
   /**
    * 已解析的 sessions.metadata_json（来自 useSessionConversationState）。
-   * reception 会话从这里读 `teamDefinition` 渲染团队组成。
+   * reception 会话从这里读 `teamDefinition` 渲染团队组成，读 `teamInit` 渲染初始化清单。
    */
   sessionMetadata?: Record<string, unknown> | null;
   /**
@@ -220,11 +220,12 @@ const RECEPTION_CARD_STYLE: CSSProperties = {
   display: 'grid',
   gap: 14,
   margin: '24px auto',
-  padding: '20px 22px',
-  maxWidth: 560,
+  padding: '22px 26px',
+  width: '100%',
+  maxWidth: 820,
   borderRadius: 16,
   border: '1px solid color-mix(in srgb, var(--accent) 28%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 5%, var(--bg-overlay)',
+  background: 'color-mix(in srgb, var(--accent) 5%, var(--bg-overlay))',
 };
 
 const CARD_HEADER_STYLE: CSSProperties = {
@@ -364,6 +365,52 @@ function colorForRole(role: string): string {
   }
 }
 
+/** canonical role key → 中文名（核心角色卡片用）。 */
+const ROLE_LABELS: Record<string, string> = {
+  leader: '团队负责人',
+  planner: '规划师',
+  researcher: '研究员',
+  executor: '执行者',
+  reviewer: '评审员',
+  general: '通用助手',
+};
+
+function roleLabel(role: string): string {
+  return ROLE_LABELS[role] ?? role;
+}
+
+/** member slot specialty → 中文名（默认固定团队的胶囊用）。 */
+const SPECIALTY_LABELS: Record<string, string> = {
+  // pm1 / pm2
+  'broad-planning': '宏观规划',
+  'task-planning': '任务规划',
+  'tech-lead': '技术负责',
+  dispatch: '调度派发',
+  release: '发布管理',
+  // executor
+  frontend: '前端',
+  backend: '后端',
+  data: '数据',
+  workflow: '工作流',
+  integration: '集成',
+  qa: '测试验证',
+  docs: '文档',
+  devops: 'DevOps',
+  platform: '平台',
+  // reviewer
+  'code-review': '代码评审',
+  security: '安全',
+  sre: 'SRE / 运维',
+  observability: '可观测性',
+  quality: '质量',
+  // 通用兜底
+  general: '通用',
+};
+
+function specialtyLabel(specialty: string): string {
+  return SPECIALTY_LABELS[specialty] ?? specialty;
+}
+
 function describeOptionalGroup(canonicalRole: string | null): string {
   switch (canonicalRole) {
     case 'leader':
@@ -381,6 +428,32 @@ function describeOptionalGroup(canonicalRole: string | null): string {
     default:
       return '未分层';
   }
+}
+
+/**
+ * 把额外成员按 canonicalRole 分组，组内保留原顺序。返回的组顺序遵循 leader → planner →
+ * researcher → executor → reviewer → general → 未分层，便于稳定展示。
+ */
+function groupOptionalMembers(
+  members: ParsedTeamDefinition['optionalMembers'],
+): Array<{ label: string; members: ParsedTeamDefinition['optionalMembers'] }> {
+  const order = ['leader', 'planner', 'researcher', 'executor', 'reviewer', 'general'];
+  const byKey = new Map<string, ParsedTeamDefinition['optionalMembers']>();
+  for (const member of members) {
+    const key = member.canonicalRole ?? '__unknown__';
+    const list = byKey.get(key);
+    if (list) list.push(member);
+    else byKey.set(key, [member]);
+  }
+  const sortedKeys = Array.from(byKey.keys()).sort((a, b) => {
+    const ia = order.indexOf(a);
+    const ib = order.indexOf(b);
+    return (ia === -1 ? order.length : ia) - (ib === -1 ? order.length : ib);
+  });
+  return sortedKeys.map((key) => ({
+    label: describeOptionalGroup(key === '__unknown__' ? null : key),
+    members: byKey.get(key) ?? [],
+  }));
 }
 
 // ─── 主组件 ──────────────────────────────────────────────────────────────
@@ -444,6 +517,9 @@ function ReceptionStarterCard({
         </span>
       </div>
 
+      {/* 初始化清单已改为进入会话时自动弹出的 TeamInitModal（挂在 TeamConversationView
+          根部），此处不再内联渲染，避免与弹窗重复 + 两份独立状态分歧。 */}
+
       <div>
         <div style={SECTION_LABEL_STYLE}>来源</div>
         <span style={CARD_SUBTITLE_STYLE}>
@@ -462,16 +538,29 @@ function ReceptionStarterCard({
                   aria-hidden
                   style={{ ...ROLE_DOT_STYLE, background: colorForRole(binding.role) }}
                 />
-                <span style={{ fontWeight: 700, color: 'var(--fg-strong)' }}>{binding.role}</span>
                 <span
                   style={{
-                    color: 'var(--fg-muted)',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    minWidth: 0,
+                    lineHeight: 1.35,
                   }}
                 >
-                  {binding.agentLabel}
+                  <span style={{ fontWeight: 700, color: 'var(--fg-strong)' }}>
+                    {roleLabel(binding.role)}
+                  </span>
+                  <span
+                    style={{
+                      color: 'var(--fg-muted)',
+                      fontSize: 11,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                    title={`${binding.role} · ${binding.agentLabel}`}
+                  >
+                    {binding.agentLabel}
+                  </span>
                 </span>
               </div>
             ))}
@@ -481,7 +570,35 @@ function ReceptionStarterCard({
 
       {teamDef.memberSlots.length > 0 ? (
         <div>
-          <div style={SECTION_LABEL_STYLE}>默认固定团队（{teamDef.memberSlots.length}）</div>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
+              marginBottom: 6,
+            }}
+          >
+            <div style={{ ...SECTION_LABEL_STYLE, marginBottom: 0 }}>
+              默认固定团队（{teamDef.memberSlots.length}）
+            </div>
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 10,
+                fontSize: 10,
+                color: 'var(--fg-muted)',
+              }}
+            >
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                <span style={{ color: 'var(--accent)' }}>●</span> 必选
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                <span>○</span> 可选
+              </span>
+            </span>
+          </div>
           <div style={MEMBER_LAYER_GRID_STYLE}>
             {TEAM_RUNTIME_LAYER_ORDER.map((layer) => {
               const slots = teamDef.memberSlots.filter((slot) => slot.layer === layer);
@@ -514,7 +631,9 @@ function ReceptionStarterCard({
                         <span style={{ fontWeight: 700, color: 'var(--fg-strong)' }}>
                           {slot.displayName}
                         </span>
-                        <span style={{ color: 'var(--fg-muted)' }}>{slot.specialty}</span>
+                        <span style={{ color: 'var(--fg-muted)' }}>
+                          {specialtyLabel(slot.specialty)}
+                        </span>
                         {slot.agentLabel ? (
                           <span style={{ color: 'var(--fg-default)' }}>· {slot.agentLabel}</span>
                         ) : null}
@@ -531,16 +650,38 @@ function ReceptionStarterCard({
       {teamDef.optionalMembers.length > 0 ? (
         <div>
           <div style={SECTION_LABEL_STYLE}>额外成员（{teamDef.optionalMembers.length}）</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {teamDef.optionalMembers.map((member, idx) => (
-              <span key={`${member.agentLabel}-${idx}`} style={OPTIONAL_CHIP_STYLE}>
-                <span style={{ color: 'var(--fg-muted)' }}>
-                  {describeOptionalGroup(member.canonicalRole)}
+          <div style={{ display: 'grid', gap: 8 }}>
+            {groupOptionalMembers(teamDef.optionalMembers).map((group) => (
+              <div
+                key={group.label}
+                style={{
+                  display: 'flex',
+                  alignItems: 'baseline',
+                  gap: 8,
+                  flexWrap: 'wrap',
+                }}
+              >
+                <span
+                  style={{
+                    flexShrink: 0,
+                    minWidth: 56,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: 'var(--fg-muted)',
+                  }}
+                >
+                  {group.label}
                 </span>
-                <span style={{ color: 'var(--fg-strong)', fontWeight: 600 }}>
-                  {member.agentLabel}
-                </span>
-              </span>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {group.members.map((member, idx) => (
+                    <span key={`${member.agentLabel}-${idx}`} style={OPTIONAL_CHIP_STYLE}>
+                      <span style={{ color: 'var(--fg-strong)', fontWeight: 600 }}>
+                        {member.agentLabel}
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         </div>

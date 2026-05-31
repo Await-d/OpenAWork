@@ -72,7 +72,7 @@ export function TabRow({
                   ? '1px solid color-mix(in oklch, var(--accent) 40%, transparent)'
                   : '1px solid transparent',
                 background: active
-                  ? 'color-mix(in oklch, var(--accent) 10%, var(--bg-overlay)'
+                  ? 'color-mix(in oklch, var(--accent) 10%, var(--bg-overlay))'
                   : 'transparent',
                 color: active ? 'var(--fg-strong)' : 'var(--fg-muted)',
                 fontWeight: active ? 700 : 500,

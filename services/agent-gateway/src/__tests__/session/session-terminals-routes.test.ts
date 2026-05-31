@@ -96,6 +96,9 @@ describe('GET /sessions/:sessionId/terminals', () => {
       url: `/sessions/${SESSION_ID}/terminals`,
     });
     expect(res.statusCode).toBe(401);
+    expect(res.json()).toMatchObject({
+      error: '未授权或登录已失效。',
+    });
     await app.close();
   });
 
@@ -261,6 +264,10 @@ describe('DELETE /sessions/:sessionId/terminals/:terminalId', () => {
       headers: { authorization: bearer(app) },
     });
     expect(res.statusCode).toBe(409);
+    expect(res.json()).toMatchObject({
+      error: 'terminal_running',
+      message: '终端仍在运行，请先终止后再删除记录。',
+    });
     await app.close();
   });
 
@@ -286,6 +293,33 @@ describe('DELETE /sessions/:sessionId/terminals/:terminalId', () => {
     });
     expect(res.statusCode).toBe(200);
     expect(registry.getTerminal(record.terminalId, USER_ID)).toBeNull();
+    await app.close();
+  });
+
+  it('stdin 写入到一次性终端时返回中文 message，同时保留错误码', async () => {
+    const record = registry.registerTerminal({
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      toolName: 'bash',
+      kind: 'foreground',
+      command: 'echo once',
+      cwd: '/tmp',
+    });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: `/sessions/${SESSION_ID}/terminals/${record.terminalId}/stdin`,
+      headers: {
+        authorization: bearer(app),
+        'content-type': 'application/json',
+      },
+      payload: { data: 'ls\n' },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toMatchObject({
+      error: 'terminal_not_persistent',
+      message: '该终端是 agent 的一次性命令，不支持继续输入。',
+    });
     await app.close();
   });
 });

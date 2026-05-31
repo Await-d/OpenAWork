@@ -41,6 +41,11 @@ import { getUserMemory, updateUserMemory } from '../team/team-user-memory-store.
 import { getForceApplyState, recordForceApply } from '../team/team-force-apply-store.js';
 import { buildTeamInstructionStack } from '../team/team-instruction-stack.js';
 import {
+  buildLayerCapabilitySummaries,
+  buildLayerCapabilitySummary,
+} from '../team/team-layer-capability-summary.js';
+import type { HandoffRoleLayer } from '../handoff/store/handoff-store.js';
+import {
   CONSTITUTION_TEMPLATES,
   DEFAULT_SOULS,
   SOUL_ROLE_LAYER_ORDER,
@@ -81,6 +86,14 @@ interface SessionWorkspaceRow {
   metadata_json: string;
 }
 
+const TEAM_PHASE_A_ERROR_MESSAGES = {
+  constitutionVersionConflict: '团队宪法版本已变化，请刷新后重试。',
+  invalidRoleLayer: '角色层级无效。',
+  memoryWriteBlocked: '安全扫描阻止了此次写入。',
+  rateLimited: 'ForceApply 触发过于频繁，请稍后重试。',
+  workspaceNotFound: '目标工作区不存在。',
+} as const;
+
 function failOnSecurity(
   reply: FastifyReply,
   result: MemoryWriteScanResult,
@@ -88,6 +101,7 @@ function failOnSecurity(
 ): FastifyReply {
   return reply.status(400).send({
     error: 'memory-write-blocked',
+    message: TEAM_PHASE_A_ERROR_MESSAGES.memoryWriteBlocked,
     field,
     threat: result.threat,
     reason: result.reason,
@@ -109,7 +123,7 @@ export async function teamPhaseARoutes(app: FastifyInstance): Promise<void> {
       const record = getTeamConstitution({ userId: user.sub, teamWorkspaceId });
       if (!record) {
         step.fail('workspace not found');
-        return reply.status(404).send({ error: 'Workspace not found' });
+        return reply.status(404).send({ error: TEAM_PHASE_A_ERROR_MESSAGES.workspaceNotFound });
       }
       step.succeed(undefined, { teamWorkspaceId, version: record.version });
       return reply.send(record);
@@ -148,10 +162,11 @@ export async function teamPhaseARoutes(app: FastifyInstance): Promise<void> {
         updateStep.fail(result.reason);
         step.fail(result.reason);
         if (result.reason === 'not-found') {
-          return reply.status(404).send({ error: 'Workspace not found' });
+          return reply.status(404).send({ error: TEAM_PHASE_A_ERROR_MESSAGES.workspaceNotFound });
         }
         return reply.status(409).send({
           error: 'version-conflict',
+          message: TEAM_PHASE_A_ERROR_MESSAGES.constitutionVersionConflict,
           currentVersion: result.currentVersion ?? null,
         });
       }
@@ -202,7 +217,8 @@ export async function teamPhaseARoutes(app: FastifyInstance): Promise<void> {
       if (!isSoulRoleLayer(roleLayer)) {
         step.fail('invalid role layer');
         return reply.status(400).send({
-          error: 'invalid-role-layer',
+          code: 'invalid-role-layer',
+          error: TEAM_PHASE_A_ERROR_MESSAGES.invalidRoleLayer,
           allowed: Array.from(VALID_SOUL_ROLE_LAYERS),
         });
       }
@@ -248,7 +264,8 @@ export async function teamPhaseARoutes(app: FastifyInstance): Promise<void> {
       if (!isSoulRoleLayer(roleLayer)) {
         step.fail('invalid role layer');
         return reply.status(400).send({
-          error: 'invalid-role-layer',
+          code: 'invalid-role-layer',
+          error: TEAM_PHASE_A_ERROR_MESSAGES.invalidRoleLayer,
           allowed: Array.from(VALID_SOUL_ROLE_LAYERS),
         });
       }
@@ -282,6 +299,34 @@ export async function teamPhaseARoutes(app: FastifyInstance): Promise<void> {
     { onRequest: [requireAuth] },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       return reply.send({ souls: DEFAULT_SOULS });
+    },
+  );
+
+  // ─── Layer Capabilities（每层工具/产物/指令能力摘要，只读）──────────────
+
+  app.get(
+    '/team/layer-capabilities',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'team.layer-capabilities.list');
+      const query = request.query as { layer?: string };
+
+      if (query.layer) {
+        const summary = buildLayerCapabilitySummary(query.layer as HandoffRoleLayer);
+        if (!summary) {
+          step.fail('invalid or unsupported layer');
+          return reply.status(404).send({
+            code: 'layer-not-supported',
+            error: `层级 ${query.layer} 不绑定独立角色能力（仅 reception / pm1 / pm2 / executor / reviewer）。`,
+          });
+        }
+        step.succeed();
+        return reply.send({ layers: [summary] });
+      }
+
+      const layers = buildLayerCapabilitySummaries();
+      step.succeed(undefined, { count: layers.length });
+      return reply.send({ layers });
     },
   );
 
@@ -347,6 +392,7 @@ export async function teamPhaseARoutes(app: FastifyInstance): Promise<void> {
         step.fail(result.reason);
         return reply.status(429).send({
           error: 'rate-limited',
+          message: TEAM_PHASE_A_ERROR_MESSAGES.rateLimited,
           state: result.state,
           retryHintHours: 24,
         });

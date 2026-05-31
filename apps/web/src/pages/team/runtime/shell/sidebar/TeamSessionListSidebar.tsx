@@ -36,6 +36,7 @@ import type {
 import type { TeamSessionCreationDraft } from '../../data/team-session-creation.types.js';
 import { NewTeamSessionModal } from '../modals/NewTeamSessionModal.js';
 import { SessionCard } from './SessionCard.js';
+import { TeamRunStatePill } from '../../shared/TeamRunStatePill.js';
 
 type TimeBucket = '今天' | '昨天' | '更早';
 function getTimeGroup(timestamp: string | undefined): TimeBucket {
@@ -60,8 +61,9 @@ function compareByUpdatedAtDesc(a: { updatedAt?: string }, b: { updatedAt?: stri
 const CONTAINER_STYLE: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
+  flex: 1,
   minHeight: 0,
-  background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
   overflow: 'hidden',
 };
 
@@ -77,7 +79,8 @@ const HEADER_STYLE: CSSProperties = {
 const SCROLL_STYLE: CSSProperties = {
   flex: 1,
   minHeight: 0,
-  overflow: 'auto',
+  overflowY: 'auto',
+  overflowX: 'hidden',
   padding: '8px 0',
 };
 
@@ -124,7 +127,7 @@ const ITEM_STYLE: CSSProperties = {
 
 const ITEM_ACTIVE_STYLE: CSSProperties = {
   ...ITEM_STYLE,
-  background: 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay)',
+  background: 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay))',
   borderColor: 'color-mix(in srgb, var(--accent) 40%, transparent)',
   boxShadow: '0 1px 3px color-mix(in srgb, var(--accent) 20%, transparent)',
   color: 'var(--fg-strong)',
@@ -218,7 +221,7 @@ const SEARCH_INPUT_STYLE: CSSProperties = {
   padding: '6px 10px',
   borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-base) 60%, var(--bg-overlay)',
+  background: 'color-mix(in srgb, var(--bg-base) 60%, var(--bg-overlay))',
   color: 'var(--fg-strong)',
   fontSize: 12,
   outline: 'none',
@@ -232,7 +235,7 @@ const CREATE_BTN_STYLE: CSSProperties = {
   padding: '6px 12px',
   borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay)',
+  background: 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay))',
   color: 'var(--accent)',
   fontSize: 11,
   fontWeight: 700,
@@ -304,7 +307,7 @@ const WORKSPACE_SELECT_STYLE: CSSProperties = {
   padding: '7px 10px',
   borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-base) 60%, var(--bg-overlay)',
+  background: 'color-mix(in srgb, var(--bg-base) 60%, var(--bg-overlay))',
   color: 'var(--fg-strong)',
   fontSize: 12,
   outline: 'none',
@@ -572,7 +575,7 @@ export function TeamSessionListSidebar({
                       ? '2px solid color-mix(in srgb, var(--accent) 60%, transparent)'
                       : '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
                     background: active
-                      ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay)'
+                      ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay))'
                       : 'transparent',
                     cursor: 'pointer',
                     display: 'grid',
@@ -620,6 +623,7 @@ export function TeamSessionListSidebar({
             >
               会话
             </strong>
+            <TeamRunStatePill compact />
             {(() => {
               const total = workspaceGroups.reduce((acc, g) => acc + g.sessions.length, 0);
               const running = workspaceGroups.reduce(
@@ -855,7 +859,7 @@ export function TeamSessionListSidebar({
                 borderRadius: 12,
                 display: 'grid',
                 placeItems: 'center',
-                background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay)',
+                background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
                 fontSize: 24,
               }}
             >

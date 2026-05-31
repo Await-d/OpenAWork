@@ -28,6 +28,10 @@ const mocks = vi.hoisted(() => ({
   capturedReadFiles: [] as string[],
   restoreCalls: [] as Array<{ files: string[]; deleteMissing: boolean }>,
   captureSequence: ['after-restore-hash'] as string[],
+  // Per-path fs.readFile error override (path-substring → errno code). Lets a
+  // single file throw a non-ENOENT error (EACCES/EISDIR) to exercise the
+  // per-file resilience of the snapshot preview/restore batch reads.
+  readFileErrorByPath: new Map<string, string>(),
 }));
 
 vi.mock('../../infra/db.js', () => ({
@@ -77,7 +81,15 @@ vi.mock('../../tools/file-diff-format.js', () => ({
 vi.mock('node:fs', () => ({
   promises: {
     readFile: async (path: string) => {
-      // Simulate workspace files: return empty for all paths (no file exists)
+      // A specific file can be marked unreadable with a non-ENOENT errno to
+      // exercise per-file resilience; otherwise simulate "file absent" (ENOENT).
+      for (const [needle, code] of mocks.readFileErrorByPath) {
+        if (path.includes(needle)) {
+          const err = new Error(`${code}: ${path}`) as NodeJS.ErrnoException;
+          err.code = code;
+          throw err;
+        }
+      }
       const err = new Error(
         `ENOENT: no such file or directory, open '${path}'`,
       ) as NodeJS.ErrnoException;
@@ -215,6 +227,7 @@ beforeEach(() => {
   mocks.capturedReadFiles = [];
   mocks.restoreCalls = [];
   mocks.captureSequence = ['after-restore-hash'];
+  mocks.readFileErrorByPath = new Map();
 
   mocks.sqliteGet.mockReset();
   mocks.sqliteGet.mockImplementation((sql: string, params: unknown[] = []) => {
@@ -324,6 +337,35 @@ describe('snapshot-tree routes', () => {
     expect(mocks.restoreCalls).toEqual([]);
   });
 
+  it('POST /sessions/:id/restore/to-tree (preview) 跳过读取失败的单个文件而不是整列 500', async () => {
+    // One workspace file unreadable with a non-ENOENT errno (e.g. EACCES /
+    // EISDIR) must not reject the whole preview batch — the bad file degrades
+    // to "absent" and the rest of the preview still loads.
+    const tree = makeTree({ treeHash: 'hash-eacces' });
+    mocks.loadedTrees.push(tree);
+    mocks.loadedFileEntries.set(tree.id, [
+      { filePath: 'ok.ts', status: 'modified' },
+      { filePath: 'locked.ts', status: 'modified' },
+    ]);
+    mocks.readFileErrorByPath.set('locked.ts', 'EACCES');
+
+    const app = await createApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: `/sessions/${SESSION_ID}/restore/to-tree`,
+      payload: { treeHash: 'hash-eacces', mode: 'preview' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.mode).toBe('preview');
+    expect(body.files).toHaveLength(2);
+    const locked = body.files.find((f: { filePath: string }) => f.filePath === 'locked.ts');
+    // Unreadable current file is treated as absent (empty content).
+    expect(locked.currentExists).toBe(false);
+    expect(mocks.restoreCalls).toEqual([]);
+  });
+
   it('POST /sessions/:id/restore/to-tree (apply) calls restoreSelective and captures audit tree', async () => {
     const tree = makeTree({ treeHash: 'hash-apply' });
     mocks.loadedTrees.push(tree);
@@ -356,7 +398,10 @@ describe('snapshot-tree routes', () => {
     });
 
     expect(response.statusCode).toBe(503);
-    expect(response.json()).toMatchObject({ error: 'shadow_git_unavailable' });
+    expect(response.json()).toMatchObject({
+      error: '当前会话未启用 shadow git，无法执行快照树恢复。',
+      code: 'shadow_git_unavailable',
+    });
   });
 
   it('returns 400 when workspaceRoot is not configured', async () => {
@@ -382,7 +427,10 @@ describe('snapshot-tree routes', () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toMatchObject({ error: 'workspace_root_unavailable' });
+    expect(response.json()).toMatchObject({
+      error: '当前会话未绑定可用工作区，无法执行快照恢复。',
+      code: 'workspace_root_unavailable',
+    });
   });
 
   it('returns 404 when session not found', async () => {
@@ -473,7 +521,11 @@ describe('snapshot-tree routes', () => {
     });
 
     expect(response.statusCode).toBe(404);
-    expect(response.json()).toMatchObject({ error: 'tree_not_found', treeHash: 'hash-missing' });
+    expect(response.json()).toMatchObject({
+      error: '目标快照树不存在。',
+      code: 'tree_not_found',
+      treeHash: 'hash-missing',
+    });
   });
 
   it('POST /sessions/:id/restore/cherry-pick returns empty when revert set has no files', async () => {
@@ -496,7 +548,11 @@ describe('snapshot-tree routes', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({ files: [], changed: 0 });
+    expect(response.json()).toMatchObject({
+      files: [],
+      changed: 0,
+      message: '当前回退集合未命中任何文件，无需恢复。',
+    });
   });
 
   // ── at-time tests ──────────────────────────────────────────────────
@@ -514,7 +570,10 @@ describe('snapshot-tree routes', () => {
 
     // With our mock, getSnapshotTreeAtOrBefore returns null → 404
     expect(response.statusCode).toBe(404);
-    expect(response.json()).toMatchObject({ error: 'no_snapshot_at_time' });
+    expect(response.json()).toMatchObject({
+      error: '指定时间点之前没有可用快照。',
+      code: 'no_snapshot_at_time',
+    });
   });
 
   // ── from-session tests ─────────────────────────────────────────────
@@ -574,7 +633,10 @@ describe('snapshot-tree routes', () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toMatchObject({ error: 'workspace_mismatch' });
+    expect(response.json()).toMatchObject({
+      error: '源会话与目标会话的工作区不一致，无法跨会话恢复。',
+      code: 'workspace_mismatch',
+    });
   });
 
   it('POST /sessions/:id/restore/from-session (preview) works for same-workspace sessions', async () => {

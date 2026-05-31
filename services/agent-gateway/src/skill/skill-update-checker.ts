@@ -20,10 +20,14 @@
  */
 
 import { sqliteAll, sqliteRun } from '../infra/db.js';
+import { readResponseTextWithLimit } from '../infra/http-body-limit.js';
 
 const SKILL_UPDATE_CHECK_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 const SKILL_UPDATE_FETCH_TIMEOUT_MS = 8 * 1000;
 const SKILL_UPDATE_FETCH_CONCURRENCY = 4;
+// A SKILL.md is small; cap the read so a hostile/misconfigured raw URL that
+// streams a huge body can't OOM the background checker (§0.86).
+const SKILL_UPDATE_MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 
 interface InstalledRow {
   skill_id: string;
@@ -59,8 +63,11 @@ async function fetchTextWithTimeout(url: string): Promise<string | null> {
   const timer = setTimeout(() => controller.abort(), SKILL_UPDATE_FETCH_TIMEOUT_MS);
   try {
     const res = await fetch(url, { signal: controller.signal });
-    if (!res.ok) return null;
-    return await res.text();
+    if (!res.ok) {
+      await res.body?.cancel().catch(() => undefined);
+      return null;
+    }
+    return await readResponseTextWithLimit(res, SKILL_UPDATE_MAX_RESPONSE_BYTES);
   } catch {
     return null;
   } finally {
@@ -215,29 +222,45 @@ export async function checkInstalledSkillUpdates(): Promise<SkillUpdateCheckSumm
   await pMapConcurrent(
     candidates,
     async (row) => {
-      const result = await checkOneRow(row);
-      if (!result) return;
-      summary.fetched += 1;
-      if (result.error) summary.errors += 1;
+      // Per-row resilience: pMapConcurrent runs `results[i] = await worker(...)`
+      // with no per-item guard, so a single row throwing (e.g. the sqliteRun
+      // UPDATE hitting a DB lock / disk error, or an unexpected throw in
+      // checkOneRow) would reject the whole `Promise.all(runners)` and abort
+      // the entire update sweep — starving every remaining skill. Isolate per
+      // row: count it as an error and continue so the rest of the batch still
+      // refreshes. (§0.94/§0.102 single-point-failure-isolation class.)
+      try {
+        const result = await checkOneRow(row);
+        if (!result) return;
+        summary.fetched += 1;
+        if (result.error) summary.errors += 1;
 
-      if (result.latestVersion) {
-        let local: string | undefined;
-        try {
-          local = (JSON.parse(row.manifest_json) as ManifestLike).version;
-        } catch {
-          local = undefined;
+        if (result.latestVersion) {
+          let local: string | undefined;
+          try {
+            local = (JSON.parse(row.manifest_json) as ManifestLike).version;
+          } catch {
+            local = undefined;
+          }
+          if (local && local !== result.latestVersion) {
+            summary.updatesFound += 1;
+          }
         }
-        if (local && local !== result.latestVersion) {
-          summary.updatesFound += 1;
-        }
+
+        sqliteRun(
+          `UPDATE installed_skills
+              SET latest_version_check_json = ?
+            WHERE skill_id = ? AND user_id = ?`,
+          [JSON.stringify(result), row.skill_id, row.user_id],
+        );
+      } catch (err) {
+        summary.errors += 1;
+        console.warn(
+          `[skill-update-checker] 跳过技能 ${row.skill_id}（用户 ${row.user_id}）版本检查失败：${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
       }
-
-      sqliteRun(
-        `UPDATE installed_skills
-            SET latest_version_check_json = ?
-          WHERE skill_id = ? AND user_id = ?`,
-        [JSON.stringify(result), row.skill_id, row.user_id],
-      );
     },
     SKILL_UPDATE_FETCH_CONCURRENCY,
   );

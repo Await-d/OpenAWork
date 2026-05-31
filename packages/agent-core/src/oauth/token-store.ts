@@ -23,6 +23,15 @@ function toTokenKey(skillId: string, serverId: string): string {
 
 export class InMemoryTokenStore implements TokenStore {
   private readonly tokens = new Map<string, StoredToken>();
+  /**
+   * In-flight refreshes keyed by token key. A refresh consumes the current
+   * refresh token; many OAuth servers rotate it (RFC 6749 §10.4), so two
+   * concurrent `autoRefresh` calls racing on the same expired token would
+   * have the second request reuse an already-rotated (now invalid) refresh
+   * token and fail, breaking the connection. Sharing one promise per key
+   * collapses concurrent refreshes into a single round-trip.
+   */
+  private readonly inflightRefreshes = new Map<string, Promise<StoredToken | null>>();
 
   public save(token: StoredToken): void {
     this.tokens.set(toTokenKey(token.skillId, token.serverId), token);
@@ -73,21 +82,34 @@ export class InMemoryTokenStore implements TokenStore {
     if (!current.refreshToken) {
       return null;
     }
+    const refreshToken = current.refreshToken;
 
-    const refreshed = await client.refreshToken(metadata, registration, current.refreshToken);
-    const next: StoredToken = {
-      skillId,
-      serverId,
-      accessToken: refreshed.access_token,
-      refreshToken: refreshed.refresh_token ?? current.refreshToken,
-      expiresAt:
-        typeof refreshed.expires_in === 'number'
-          ? Date.now() + refreshed.expires_in * 1000
-          : undefined,
-      scope: refreshed.scope ?? current.scope,
-    };
+    // Coalesce concurrent refreshes for the same key onto one round-trip.
+    const existing = this.inflightRefreshes.get(key);
+    if (existing) {
+      return existing;
+    }
 
-    this.save(next);
-    return next;
+    const refreshPromise = (async (): Promise<StoredToken | null> => {
+      const refreshed = await client.refreshToken(metadata, registration, refreshToken);
+      const next: StoredToken = {
+        skillId,
+        serverId,
+        accessToken: refreshed.access_token,
+        refreshToken: refreshed.refresh_token ?? refreshToken,
+        expiresAt:
+          typeof refreshed.expires_in === 'number'
+            ? Date.now() + refreshed.expires_in * 1000
+            : undefined,
+        scope: refreshed.scope ?? current.scope,
+      };
+      this.save(next);
+      return next;
+    })().finally(() => {
+      this.inflightRefreshes.delete(key);
+    });
+
+    this.inflightRefreshes.set(key, refreshPromise);
+    return refreshPromise;
   }
 }

@@ -2,6 +2,8 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 import type {
   SharedSessionSummaryRecord,
   TeamAuditLogRecord,
+  TeamRuntimeAlertControlRecord,
+  TeamRuntimeDiagnostics,
   TeamMemberRecord,
   TeamMessageRecord,
   TeamSessionShareRecord,
@@ -117,6 +119,23 @@ export interface TeamRuntimeReferenceViewData {
   sharedSessions: SharedSessionSummaryRecord[];
   /** 当前工作区成员列表。 */
   members: TeamMemberRecord[];
+  /** Team runtime 健康诊断。 */
+  diagnostics: TeamRuntimeDiagnostics | undefined;
+  acknowledgeRuntimeAlert: (
+    alertCode: TeamRuntimeAlertControlRecord['alertCode'],
+    note?: string,
+  ) => Promise<boolean>;
+  clearRuntimeAlertControl: (alertCode: TeamRuntimeAlertControlRecord['alertCode']) => Promise<boolean>;
+  suppressRuntimeAlert: (
+    alertCode: TeamRuntimeAlertControlRecord['alertCode'],
+    input?: { minutes?: number; note?: string },
+  ) => Promise<boolean>;
+  runRuntimeAlertRemediation: (
+    alertCode: TeamRuntimeAlertControlRecord['alertCode'],
+    options?: { force?: boolean; handoffId?: string },
+  ) => Promise<boolean>;
+  reconcileStaleDecisions: () => Promise<boolean>;
+  reconcileStaleRuntimeThreads: () => Promise<boolean>;
   createTask: (input: TaskDraftInput) => Promise<boolean>;
   moveTask: (taskId: string, direction: 'left' | 'right') => Promise<boolean>;
   replyReview: (cardId: string, status: AgentTeamsReviewCard['status']) => Promise<boolean>;
@@ -290,7 +309,26 @@ const EMPTY_VIEW_DATA: TeamRuntimeReferenceViewData = {
   sessionShares: [],
   sharedSessions: [],
   members: [],
+  diagnostics: undefined,
   async createTask() {
+    return false;
+  },
+  async acknowledgeRuntimeAlert() {
+    return false;
+  },
+  async clearRuntimeAlertControl() {
+    return false;
+  },
+  async suppressRuntimeAlert() {
+    return false;
+  },
+  async runRuntimeAlertRemediation() {
+    return false;
+  },
+  async reconcileStaleDecisions() {
+    return false;
+  },
+  async reconcileStaleRuntimeThreads() {
     return false;
   },
   async moveTask() {
@@ -689,6 +727,158 @@ export function useResolvedTeamRuntimeReferenceData(
       });
     },
     [collaboration.createTask, collaboration.members],
+  );
+
+  const acknowledgeRuntimeAlert = useCallback(
+    async (alertCode: TeamRuntimeAlertControlRecord['alertCode'], note?: string) => {
+      if (!accessToken) {
+        return false;
+      }
+      setSessionActionBusy(true);
+      try {
+        const result = await teamClient.acknowledgeRuntimeAlert(
+          accessToken,
+          alertCode,
+          {
+            ...(note ? { note } : {}),
+            ...(options.teamWorkspaceId ? { teamWorkspaceId: options.teamWorkspaceId } : {}),
+          },
+        );
+        const refreshed = await collaboration.refresh();
+        if (!refreshed && result.runtime?.diagnostics) {
+          collaboration.applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);
+        }
+        return true;
+      } catch {
+        return false;
+      } finally {
+        setSessionActionBusy(false);
+      }
+    },
+    [accessToken, collaboration, teamClient],
+  );
+
+  const clearRuntimeAlertControl = useCallback(
+    async (alertCode: TeamRuntimeAlertControlRecord['alertCode']) => {
+      if (!accessToken) {
+        return false;
+      }
+      setSessionActionBusy(true);
+      try {
+        const result = await teamClient.clearRuntimeAlertControl(accessToken, alertCode, {
+          ...(options.teamWorkspaceId ? { teamWorkspaceId: options.teamWorkspaceId } : {}),
+        });
+        const refreshed = await collaboration.refresh();
+        if (!refreshed && result.runtime?.diagnostics) {
+          collaboration.applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);
+        }
+        return true;
+      } catch {
+        return false;
+      } finally {
+        setSessionActionBusy(false);
+      }
+    },
+    [accessToken, collaboration, teamClient],
+  );
+
+  const suppressRuntimeAlert = useCallback(
+    async (
+      alertCode: TeamRuntimeAlertControlRecord['alertCode'],
+      input?: { minutes?: number; note?: string },
+    ) => {
+      if (!accessToken) {
+        return false;
+      }
+      setSessionActionBusy(true);
+      try {
+        const result = await teamClient.suppressRuntimeAlert(accessToken, alertCode, {
+          ...input,
+          ...(options.teamWorkspaceId ? { teamWorkspaceId: options.teamWorkspaceId } : {}),
+        });
+        const refreshed = await collaboration.refresh();
+        if (!refreshed && result.runtime?.diagnostics) {
+          collaboration.applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);
+        }
+        return true;
+      } catch {
+        return false;
+      } finally {
+        setSessionActionBusy(false);
+      }
+    },
+    [accessToken, collaboration, teamClient],
+  );
+
+  const reconcileStaleRuntimeThreads = useCallback(async () => {
+    if (!accessToken) {
+      return false;
+    }
+    setSessionActionBusy(true);
+    try {
+      const result = await teamClient.reconcileStaleRuntimeThreads(accessToken, {
+        ...(options.teamWorkspaceId ? { teamWorkspaceId: options.teamWorkspaceId } : {}),
+      });
+      const refreshed = await collaboration.refresh();
+      if (!refreshed && result.runtime?.diagnostics) {
+        collaboration.applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);
+      }
+      return true;
+    } catch {
+      return false;
+    } finally {
+      setSessionActionBusy(false);
+    }
+  }, [accessToken, collaboration, options.teamWorkspaceId, teamClient]);
+
+  const reconcileStaleDecisions = useCallback(async () => {
+    if (!accessToken) {
+      return false;
+    }
+    setSessionActionBusy(true);
+    try {
+      const result = await teamClient.reconcileStaleDecisions(accessToken, {
+        ...(options.teamWorkspaceId ? { teamWorkspaceId: options.teamWorkspaceId } : {}),
+      });
+      const refreshed = await collaboration.refresh();
+      if (!refreshed && result.runtime?.diagnostics) {
+        collaboration.applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);
+      }
+      return true;
+    } catch {
+      return false;
+    } finally {
+      setSessionActionBusy(false);
+    }
+  }, [accessToken, collaboration, options.teamWorkspaceId, teamClient]);
+
+  const runRuntimeAlertRemediation = useCallback(
+    async (
+      alertCode: TeamRuntimeAlertControlRecord['alertCode'],
+      remediationOptions?: { force?: boolean; handoffId?: string },
+    ) => {
+      if (!accessToken) {
+        return false;
+      }
+      setSessionActionBusy(true);
+      try {
+        const result = await teamClient.runRuntimeAlertRemediation(accessToken, alertCode, {
+          ...(remediationOptions?.force ? { force: remediationOptions.force } : {}),
+          ...(remediationOptions?.handoffId ? { handoffId: remediationOptions.handoffId } : {}),
+          ...(options.teamWorkspaceId ? { teamWorkspaceId: options.teamWorkspaceId } : {}),
+        });
+        const refreshed = await collaboration.refresh();
+        if (!refreshed && result.runtime?.diagnostics) {
+          collaboration.applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);
+        }
+        return true;
+      } catch {
+        return false;
+      } finally {
+        setSessionActionBusy(false);
+      }
+    },
+    [accessToken, collaboration, options.teamWorkspaceId, teamClient],
   );
 
   const moveTask = useCallback(
@@ -1646,6 +1836,13 @@ export function useResolvedTeamRuntimeReferenceData(
       sessionShares: collaboration.sessionShares,
       sharedSessions: collaboration.sharedSessions,
       members: collaboration.members,
+      diagnostics: collaboration.diagnostics,
+      acknowledgeRuntimeAlert,
+      clearRuntimeAlertControl,
+      suppressRuntimeAlert,
+      runRuntimeAlertRemediation,
+      reconcileStaleDecisions,
+      reconcileStaleRuntimeThreads,
     } satisfies TeamRuntimeReferenceViewData;
   }, [
     hasAuth,
@@ -1681,6 +1878,12 @@ export function useResolvedTeamRuntimeReferenceData(
     renameWorkspace,
     deleteWorkspace,
     createTask,
+    acknowledgeRuntimeAlert,
+    clearRuntimeAlertControl,
+    suppressRuntimeAlert,
+    runRuntimeAlertRemediation,
+    reconcileStaleDecisions,
+    reconcileStaleRuntimeThreads,
     moveTask,
     replyReview,
     selectTeam,
@@ -1707,6 +1910,7 @@ export function useResolvedTeamRuntimeReferenceData(
     taskLanes,
     timelineEvents,
     options.workspaces,
+    collaboration.diagnostics,
   ]);
 
   const resolvedValue = liveValue ?? EMPTY_VIEW_DATA;

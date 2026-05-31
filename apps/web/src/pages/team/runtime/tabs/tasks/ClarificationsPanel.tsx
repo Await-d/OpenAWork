@@ -32,7 +32,7 @@ const PANEL_STYLE: CSSProperties = {
   padding: '14px 16px',
   borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--warning) 36%, transparent)',
-  background: 'color-mix(in srgb, var(--warning) 6%, var(--bg-overlay)',
+  background: 'color-mix(in srgb, var(--warning) 6%, var(--bg-overlay))',
 };
 
 const HEADER_STYLE: CSSProperties = {
@@ -128,7 +128,7 @@ const ANSWERED_LIST_STYLE: CSSProperties = {
   gap: 6,
   padding: '8px 12px',
   borderRadius: 8,
-  background: 'color-mix(in srgb, var(--success) 5%, var(--bg-overlay)',
+  background: 'color-mix(in srgb, var(--success) 5%, var(--bg-overlay))',
   border: '1px solid color-mix(in srgb, var(--success) 30%, transparent)',
 };
 
@@ -193,6 +193,22 @@ export function ClarificationsPanel({
     }
   };
 
+  const handleDismiss = async (item: ClarificationItem) => {
+    if (!gatewayUrl || !accessToken || !item.fromSessionId) {
+      console.warn('[ClarificationsPanel] missing gateway / token / fromSessionId');
+      onError?.(new Error('未登录或缺少 PM1 session'), item);
+      return;
+    }
+    const client = createTeamInboundClient(gatewayUrl);
+    try {
+      await client.dismissClarification(accessToken, item.fromSessionId, item.id);
+      dismiss(item.id);
+    } catch (err) {
+      console.error('[ClarificationsPanel] clarification dismiss failed', err);
+      onError?.(err, item);
+    }
+  };
+
   return (
     <div style={PANEL_STYLE}>
       <div style={HEADER_STYLE}>
@@ -214,7 +230,7 @@ export function ClarificationsPanel({
           key={item.id}
           item={item}
           onSubmit={(answer) => handleAnswer(item, answer)}
-          onDismiss={() => dismiss(item.id)}
+          onDismiss={() => void handleDismiss(item)}
         />
       ))}
 

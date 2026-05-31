@@ -143,6 +143,12 @@ import {
   NOTEPAD_DIRECTIVE,
 } from '../session/sisyphus-junior-notepad.js';
 import { runModelRound } from './stream-model-round.js';
+
+export const STREAM_ERROR_MESSAGES = {
+  inputImageMissingSource: 'input_image 必须提供 artifactId、fileId 或 imageUrl 其中之一。',
+  requestReplayFailed: '请求重放失败。',
+  sessionAlreadyRunning: '当前会话已有请求正在运行。',
+} as const;
 import { dispatchChatMessage } from '../runtime/plugin-host.js';
 import {
   clearSessionRuntimeThread,
@@ -271,6 +277,50 @@ export async function buildWorkspaceContext(metadataJson: string): Promise<strin
 // Project rule file collection (oh-my-opencode rulesInjector pattern)
 // ---------------------------------------------------------------------------
 
+// Per-file ceiling for workspace context-injection reads (rule files,
+// AGENTS.md, README.md). These run on EVERY turn inside buildWorkspaceContext
+// and their content is concatenated verbatim into the system prompt, so a
+// pathological multi-MB rule/README/AGENTS file would balloon both gateway
+// memory and every upstream request. `look_at` (stat guard) and the workspace
+// search (MAX_SEARCH_FILE_BYTES) already bound their reads; this closes the
+// last unbounded workspace-file read on the hot path. Override via
+// OPENAWORK_CONTEXT_FILE_MAX_BYTES; <=0 disables the guard.
+const DEFAULT_CONTEXT_FILE_MAX_BYTES = 1024 * 1024;
+function resolveContextFileMaxBytes(): number {
+  const raw = globalThis.process?.env?.['OPENAWORK_CONTEXT_FILE_MAX_BYTES'];
+  if (raw === undefined || raw === null || raw.trim() === '') {
+    return DEFAULT_CONTEXT_FILE_MAX_BYTES;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Math.floor(parsed);
+}
+
+/**
+ * Read a workspace context file as UTF-8, but `stat` first and skip (return
+ * null) any file larger than the cap BEFORE buffering it into memory. A stat
+ * failure (missing / unreadable) also yields null so the caller degrades
+ * gracefully. Returns null for an empty/whitespace-only body too.
+ */
+async function readContextFileWithinLimit(filePath: string): Promise<string | null> {
+  const maxBytes = resolveContextFileMaxBytes();
+  try {
+    if (maxBytes > 0) {
+      const stat = await fsp.stat(filePath);
+      if (stat.size > maxBytes) {
+        console.warn(
+          `[stream] 跳过超限的工作区上下文文件（${stat.size} 字节 > ${maxBytes}）：${filePath}`,
+        );
+        return null;
+      }
+    }
+    const content = await fsp.readFile(filePath, 'utf-8');
+    return content || null;
+  } catch {
+    return null;
+  }
+}
+
 const RULE_EXTENSIONS = ['.md', '.mdc'];
 const PROJECT_RULE_SUBDIRS: [string, string][] = [
   ['.cursor', 'rules'],
@@ -343,7 +393,8 @@ async function collectRuleFilesRecursive(
       const relativePath = relative(workspaceRoot, fullPath);
       if (seen.has(relativePath)) continue;
       seen.add(relativePath);
-      const content = await fsp.readFile(fullPath, 'utf-8');
+      const content = await readContextFileWithinLimit(fullPath);
+      if (content === null) continue;
       // Strip frontmatter (YAML between --- delimiters)
       const stripped = content.replace(/^---\n[\s\S]*?\n---\n?/, '').trim();
       if (stripped.length > 0) {
@@ -393,12 +444,8 @@ async function readRootReadme(workspaceRoot: string): Promise<string | null> {
 // ---------------------------------------------------------------------------
 
 async function readFileIfExists(filePath: string): Promise<string | null> {
-  try {
-    const content = await fsp.readFile(filePath, 'utf-8');
-    return content.trim() || null;
-  } catch {
-    return null;
-  }
+  const content = await readContextFileWithinLimit(filePath);
+  return content?.trim() || null;
 }
 
 export function isWebSearchEnabled(metadataJson: string): boolean {
@@ -438,7 +485,7 @@ const inputImagePartSchema = z
     if (!value.artifactId && !value.fileId && !value.imageUrl) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'input_image part must include artifactId, fileId, or imageUrl',
+        message: STREAM_ERROR_MESSAGES.inputImageMissingSource,
         path: ['artifactId'],
       });
     }
@@ -1828,10 +1875,14 @@ export async function handleStreamRequest(input: {
       category: 'route',
       sourceName: 'REPLAY_FAILED',
       requestId: requestData.clientRequestId,
-      output: { message: 'Request replay failed', code: 'REQUEST_REPLAY_FAILED' },
+      output: { message: STREAM_ERROR_MESSAGES.requestReplayFailed, code: 'REQUEST_REPLAY_FAILED' },
     });
     input.writeChunk(
-      createStreamErrorChunk('REQUEST_REPLAY_FAILED', 'Request replay failed', runId),
+      createStreamErrorChunk(
+        'REQUEST_REPLAY_FAILED',
+        STREAM_ERROR_MESSAGES.requestReplayFailed,
+        runId,
+      ),
     );
     return { statusCode: 409 };
   }
@@ -1850,14 +1901,14 @@ export async function handleStreamRequest(input: {
       sourceName: 'SESSION_CONFLICT',
       requestId: requestData.clientRequestId,
       output: {
-        message: 'Another request is already running for this session.',
+        message: STREAM_ERROR_MESSAGES.sessionAlreadyRunning,
         code: 'SESSION_ALREADY_RUNNING',
       },
     });
     input.writeChunk(
       createStreamErrorChunk(
         'SESSION_ALREADY_RUNNING',
-        'Another request is already running for this session.',
+        STREAM_ERROR_MESSAGES.sessionAlreadyRunning,
         runId,
       ),
     );
@@ -1908,11 +1959,20 @@ export async function handleStreamRequest(input: {
       userId: input.user.sub,
     });
     const runtimeThreadHeartbeat = setInterval(() => {
-      touchSessionRuntimeThread({
-        clientRequestId: requestData.clientRequestId,
-        sessionId: input.sessionId,
-        userId: input.user.sub,
-      });
+      // Best-effort liveness ping; isolate transient SQLite errors so they
+      // don't escape the timer callback as an uncaught exception.
+      try {
+        touchSessionRuntimeThread({
+          clientRequestId: requestData.clientRequestId,
+          sessionId: input.sessionId,
+          userId: input.user.sub,
+        });
+      } catch (err) {
+        console.warn(
+          '[stream] runtime-thread heartbeat failed',
+          err instanceof Error ? err.message : String(err),
+        );
+      }
     }, SESSION_RUNTIME_THREAD_HEARTBEAT_MS);
     const unsubscribeSessionEvents = subscribeSessionRunEvents(input.sessionId, (event) => {
       // Skip events this stream's emitChunk already wrote — those reach the
@@ -2086,7 +2146,17 @@ export async function handleStreamRequest(input: {
       const flatModeOn = !isFlatMcpToolsDisabled();
       if (flatModeOn) {
         try {
-          const catalogs = await listMcpToolsForSession(input.sessionId);
+          // 模板初始 MCP 绑定：会话 metadata 里的 requestedMcpServers 作为白名单。
+          const mcpMeta = parseSessionMetadataJson(input.sessionContext.metadataJson);
+          const allowedMcp = Array.isArray(mcpMeta['requestedMcpServers'])
+            ? (mcpMeta['requestedMcpServers'] as unknown[]).filter(
+                (v): v is string => typeof v === 'string' && v.length > 0,
+              )
+            : [];
+          const catalogs = await listMcpToolsForSession(
+            input.sessionId,
+            allowedMcp.length > 0 ? { allowedServerIds: allowedMcp } : undefined,
+          );
           const built = buildFlatMcpToolDefinitions(catalogs);
           flatMcpDefs = built.definitions;
         } catch (err) {
@@ -2130,24 +2200,42 @@ export async function handleStreamRequest(input: {
       // 这是构思 §2B.7 "不在一个 agent 里塞所有工具" 的代码级落地。
       const sessionRoleLayer = input.sessionContext.roleLayer ?? null;
       let layerFilteredTools = filteredTools;
-      if (
-        sessionRoleLayer &&
-        ['reception', 'pm1', 'pm2', 'executor', 'reviewer'].includes(sessionRoleLayer)
-      ) {
+      const isTeamLayer =
+        sessionRoleLayer !== null &&
+        ['reception', 'pm1', 'pm2', 'executor', 'reviewer'].includes(sessionRoleLayer);
+      // Fail-closed 安全基线：团队层一旦进入门控，出错时退回「只读」最小集而非放行全部。
+      const READ_ONLY_FALLBACK = ['read'] as const;
+      if (isTeamLayer) {
         try {
           const { LAYER_CAPABILITIES } =
             await import('../handoff/capability/layer-capabilities.js');
           const { getInstructionsForLayer, toToolDefinition } =
             await import('../handoff/capability/builtin-instructions.js');
-          const { filterToolsByAllowedSets } =
+          const { filterToolsByAllowedSets, extractToolsetsFromMetadata } =
             await import('../handoff/capability/toolset-gate.js');
           const layer = sessionRoleLayer as 'reception' | 'pm1' | 'pm2' | 'executor' | 'reviewer';
           const caps = LAYER_CAPABILITIES[layer];
-          // 1. 通用工具 toolset 过滤
-          if (caps.allowedToolsetCategories.length > 0) {
+          // 1. 通用工具 toolset 过滤：层级白名单 ∩ 成员自定义 toolsets（若有）。
+          //    成员在模板里勾选的 toolsets 写入了 metadata.toolsets；与层级白名单取交集，
+          //    既不突破层级安全边界，又能让「该成员只用读」这类更严限制生效。
+          const memberToolsets = extractToolsetsFromMetadata(input.sessionContext.metadataJson);
+          let allowedSets = caps.allowedToolsetCategories as string[];
+          if (memberToolsets && memberToolsets.length > 0 && !memberToolsets.includes('all')) {
+            const layerSet = new Set(allowedSets);
+            const intersect = memberToolsets.filter((t) => layerSet.has(t));
+            // 交集为空时退回层级白名单，避免成员误配置把工具全砍光导致跑不动。
+            if (intersect.length > 0) allowedSets = intersect;
+          }
+          if (allowedSets.length > 0) {
             layerFilteredTools = filterToolsByAllowedSets(
               filteredTools,
-              caps.allowedToolsetCategories as never[],
+              allowedSets as never[],
+            );
+          } else {
+            // fail-closed：层白名单异常为空时退回只读最小集，而不是「不过滤」放行全部。
+            layerFilteredTools = filterToolsByAllowedSets(
+              filteredTools,
+              [...READ_ONLY_FALLBACK] as never[],
             );
           }
           // 2. 内置指令注入（每层专属 LLM-facing 函数工具）
@@ -2157,9 +2245,34 @@ export async function handleStreamRequest(input: {
             layerFilteredTools = [...layerFilteredTools, ...instructionDefs];
           }
         } catch (err) {
+          // Fail-closed：门控自身出错（如模块加载失败）时绝不放行完整工具集 ——
+          // 退回只读最小集，宁可少跑也不越权。
           console.warn(
-            `[stream] layer-aware tool filter failed for ${sessionRoleLayer}: ${err instanceof Error ? err.message : String(err)}`,
+            `[stream] layer-aware tool filter failed for ${sessionRoleLayer}（已 fail-closed 退回只读）：${err instanceof Error ? err.message : String(err)}`,
           );
+          try {
+            const { filterToolsByAllowedSets } = await import(
+              '../handoff/capability/toolset-gate.js'
+            );
+            layerFilteredTools = filterToolsByAllowedSets(
+              filteredTools,
+              [...READ_ONLY_FALLBACK] as never[],
+            );
+          } catch {
+            // 连 toolset-gate 都加载不了：手动收敛到最保守集合（仅基础工具 + read 名）。
+            const SAFE_NAMES = new Set([
+              'read',
+              'glob',
+              'grep',
+              'read_tool_output',
+              'look_at',
+              'repo_overview',
+              'AskUserQuestion',
+              'todo_read',
+              'todo_write',
+            ]);
+            layerFilteredTools = filteredTools.filter((tool) => SAFE_NAMES.has(tool.function.name));
+          }
         }
       }
 
@@ -2197,7 +2310,20 @@ export async function handleStreamRequest(input: {
         teamWorkspaceId: teamWorkspaceIdForStack,
         roleLayer: roleLayerForStack,
       });
-      const teamInstructionStack = teamInstructionStackResult.stableBlock;
+      let teamInstructionStack = teamInstructionStackResult.stableBlock;
+      // 动态注入「团队编制清单」：watcher 在派发子 session 时把当前实时花名册
+      // （含自定义角色 + 各自路由关键词）写入 metadata.teamRosterManifest。这里把它
+      // 作为指令栈的附加段拼进 system prompt，让成员动态感知上下游编制，而非写死。
+      const teamRosterManifest =
+        typeof sessionMeta['teamRosterManifest'] === 'string'
+          ? sessionMeta['teamRosterManifest'].trim()
+          : '';
+      if (teamRosterManifest.length > 0) {
+        const manifestBlock = `<team-instruction layer="roster-manifest">\n${teamRosterManifest}\n</team-instruction>`;
+        teamInstructionStack = teamInstructionStack
+          ? `${teamInstructionStack}\n\n${manifestBlock}`
+          : manifestBlock;
+      }
       const compactionSettingsRow = sqliteGet<{ value: string }>(
         `SELECT value FROM user_settings WHERE user_id = ? AND key = ?`,
         [input.user.sub, COMPACTION_SETTINGS_KEY],

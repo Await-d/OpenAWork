@@ -131,6 +131,20 @@ export function getMessageTypeMeta(type: TeamMessageRecord['type']) {
 
 export function getAuditActionMeta(action: TeamAuditLogRecord['action']) {
   switch (action) {
+    case 'runtime_incident':
+      return { label: '运行异常', style: pillStyle('var(--complement)', 'rgba(244, 63, 94, 0.16)') };
+    case 'runtime_alert_control':
+      return { label: '告警控制', style: pillStyle('var(--warning)', 'rgba(245, 158, 11, 0.18)') };
+    case 'runtime_remediation':
+      return { label: '运行修复', style: pillStyle('var(--aux)', 'rgba(59, 130, 246, 0.16)') };
+    case 'handoff_control':
+      return { label: '派发控制', style: pillStyle('var(--chart-5)', 'rgba(139, 92, 246, 0.18)') };
+    case 'escape_hatch_used':
+      return { label: '逃生舱', style: pillStyle('var(--warning)', 'rgba(245, 158, 11, 0.18)') };
+    case 'route_decision':
+      return { label: '路由决策', style: pillStyle('var(--aux)', 'rgba(59, 130, 246, 0.16)') };
+    case 'task_created':
+      return { label: '任务创建', style: pillStyle('var(--success)', 'rgba(34, 197, 94, 0.18)') };
     case 'shared_comment_created':
       return {
         label: '共享评论',
@@ -747,6 +761,9 @@ interface TeamSharedSessionsPanelProps {
   sharedCommentBusy: boolean;
   sharedOperateBusy: boolean;
   sharedOperateError: string | null;
+  sharedPresenceError: string | null;
+  sharedPresenceLastSyncedAt: number | null;
+  sharedPresenceNextRetryAt: number | null;
   sharedSessionLoading: boolean;
   sharedSessions: SharedSessionSummaryRecord[];
   onSelectSession: (sessionId: string) => void;
@@ -763,6 +780,9 @@ export function TeamSharedSessionsPanel({
   sharedCommentBusy,
   sharedOperateBusy,
   sharedOperateError,
+  sharedPresenceError,
+  sharedPresenceLastSyncedAt,
+  sharedPresenceNextRetryAt,
   sharedSessionLoading,
   sharedSessions,
   onSelectSession,
@@ -875,6 +895,22 @@ export function TeamSharedSessionsPanel({
             className="content-card"
             style={{ display: 'grid', gap: 12, padding: 16, minHeight: 320 }}
           >
+            {sharedOperateError ? (
+              <div
+                className="content-card"
+                style={{
+                  display: 'grid',
+                  gap: 4,
+                  padding: 12,
+                  borderColor: 'color-mix(in srgb, var(--danger) 42%, var(--border-default))',
+                  background: 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay))',
+                  color: 'var(--danger)',
+                }}
+              >
+                <strong style={{ fontSize: 12 }}>共享会话状态暂未刷新</strong>
+                <span style={{ fontSize: 12, lineHeight: 1.6 }}>{sharedOperateError}</span>
+              </div>
+            ) : null}
             {sharedSessionLoading ? (
               <div style={{ color: 'var(--fg-muted)' }}>共享会话预览加载中…</div>
             ) : !selectedSessionDetail ? (
@@ -910,6 +946,21 @@ export function TeamSharedSessionsPanel({
                         : `${sharedPresence.length} 人最近查看`}
                     </span>
                   </div>
+                  {sharedPresenceError ? (
+                    <span style={{ fontSize: 11, color: 'var(--danger)' }}>
+                      在线状态暂未刷新
+                      {sharedPresenceLastSyncedAt
+                        ? ` · 上次同步 ${new Date(sharedPresenceLastSyncedAt).toLocaleString('zh-CN')}`
+                        : ''}
+                      {sharedPresenceNextRetryAt
+                        ? ` · 下次重试 ${new Date(sharedPresenceNextRetryAt).toLocaleTimeString('zh-CN')}`
+                        : ''}
+                    </span>
+                  ) : sharedPresenceLastSyncedAt ? (
+                    <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+                      上次同步：{new Date(sharedPresenceLastSyncedAt).toLocaleString('zh-CN')}
+                    </span>
+                  ) : null}
                   {sharedPresence.length === 0 ? (
                     <div style={{ color: 'var(--fg-muted)' }}>
                       还没有查看轨迹。有人打开这条共享会话后，这里会显示最近查看者。

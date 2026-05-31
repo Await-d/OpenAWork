@@ -461,7 +461,7 @@ export async function skillRecommendRoutes(app: FastifyInstance): Promise<void> 
       );
       if (!row) {
         step.fail('not found');
-        return reply.status(404).send({ error: 'Recommendation not found' });
+        return reply.status(404).send({ error: '目标推荐记录不存在。' });
       }
       const parsed = parseBody(applyOverridesSchema, request.body);
 
@@ -491,7 +491,7 @@ export async function skillRecommendRoutes(app: FastifyInstance): Promise<void> 
       if (illegalBuiltinOverride) {
         step.fail('attempted to apply BUILTIN override');
         return reply.status(400).send({
-          error: `BUILTIN skill '${illegalBuiltinOverride[0]}' cannot be managed via selection`,
+          error: `内置技能 '${illegalBuiltinOverride[0]}' 不允许通过选择接口管理。`,
         });
       }
       // Merge overrides over the LLM payload. Overrides may add entries that

@@ -56,6 +56,29 @@ export class SSHSessionBindingRegistry {
     return this.bindings.has(sessionId);
   }
 
+  /**
+   * Enumerate every (sessionId, connectionId) pair currently held in
+   * memory. Used by the gateway boot reconciler to project persisted
+   * bindings into the in-memory registry, and by tests inspecting state.
+   */
+  entries(): SSHBoundSession[] {
+    return [...this.bindings.entries()].map(([sessionId, sshConnectionId]) => ({
+      sessionId,
+      sshConnectionId,
+    }));
+  }
+
+  /**
+   * Drop every binding pointing at a given connection. Called when a
+   * connection is deleted so the in-memory registry can't hand out a
+   * stale proxy after the underlying ssh client is gone.
+   */
+  unbindByConnection(connectionId: string): void {
+    for (const [sessionId, value] of this.bindings) {
+      if (value === connectionId) this.bindings.delete(sessionId);
+    }
+  }
+
   resolveProxy(sessionId: string, sshManager: SSHConnectionManager): SSHToolProxy | undefined {
     const connectionId = this.bindings.get(sessionId);
     if (!connectionId) return undefined;

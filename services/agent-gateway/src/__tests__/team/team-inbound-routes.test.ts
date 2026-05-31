@@ -57,6 +57,14 @@ function seedReceptionSession(sessionId: string, userId: string): void {
   );
 }
 
+function seedPm1Session(sessionId: string, userId: string): void {
+  dbModule.sqliteRun(
+    `INSERT OR IGNORE INTO sessions (id, user_id, title, metadata_json, role_layer, state_status)
+     VALUES (?, ?, 'PM1', ?, 'pm1', 'running')`,
+    [sessionId, userId, JSON.stringify({ teamWorkspaceId: TEAM_WORKSPACE_ID })],
+  );
+}
+
 function countRows(tableName: string): number {
   const row = dbModule.sqliteGet<{ c: number }>(`SELECT COUNT(*) AS c FROM ${tableName}`, []);
   return row?.c ?? 0;
@@ -121,6 +129,10 @@ describe('POST /team/sessions/:sessionId/inbound-messages', () => {
       });
 
       expect(res.statusCode).toBe(404);
+      expect(res.json()).toMatchObject({
+        code: 'team_session_not_found',
+        error: '目标团队会话不存在。',
+      });
       expect(countRows('session_inbound_messages')).toBe(0);
     } finally {
       await app.close();
@@ -283,6 +295,134 @@ describe('POST /team/sessions/:sessionId/inbound-messages', () => {
         entity_type: 'session_inbound_message',
       });
       expect(audit?.summary).toContain('cancel_signal');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('clarification_answer 会回写 needs_clarification 的持久化状态', async () => {
+    const PM1_SESSION_ID = 's-team-inbound-pm1';
+    seedPm1Session(PM1_SESSION_ID, USER_ID);
+    dbModule.sqliteRun(
+      `INSERT INTO session_inbound_messages
+        (id, user_id, to_session_id, from_role_layer, message_type, payload_json, state)
+       VALUES ('clarify-escalation', ?, ?, 'pm1', 'escalation_request', ?, 'pending')`,
+      [
+        USER_ID,
+        SESSION_ID,
+        JSON.stringify({
+          fromLayer: 'pm1',
+          fromSessionId: PM1_SESSION_ID,
+          reason: 'needs_clarification',
+          escalationRound: 0,
+          context: '需要确认认证方式',
+          suggestedActions: [{ label: '回答', action: 'answer' }],
+          questions: [{ id: 'clarify-q-1', question: '认证方式？', context: '登录模块' }],
+        }),
+      ],
+    );
+
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/team/sessions/${PM1_SESSION_ID}/inbound-messages`,
+        headers: { authorization: bearer(app) },
+        payload: {
+          messageType: 'clarification_answer',
+          payload: {
+            questionId: 'clarify-q-1',
+            answer: 'OAuth',
+            answeredBy: 'user',
+            answeredAt: 1700000000000,
+          },
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+      const escalation = dbModule.sqliteGet<{ payload_json: string; state: string }>(
+        `SELECT payload_json, state FROM session_inbound_messages WHERE id = 'clarify-escalation' LIMIT 1`,
+        [],
+      );
+      expect(escalation?.state).toBe('consumed');
+      expect(JSON.parse(escalation?.payload_json ?? '{}').questions[0]).toMatchObject({
+        id: 'clarify-q-1',
+        answer: 'OAuth',
+        answeredAt: 1700000000000,
+        status: 'answered',
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('dismiss clarification 路由会持久化 skipped 状态', async () => {
+    const PM1_SESSION_ID = 's-team-inbound-pm1-dismiss';
+    seedPm1Session(PM1_SESSION_ID, USER_ID);
+    dbModule.sqliteRun(
+      `INSERT INTO session_inbound_messages
+        (id, user_id, to_session_id, from_role_layer, message_type, payload_json, state)
+       VALUES ('clarify-dismiss', ?, ?, 'pm1', 'escalation_request', ?, 'pending')`,
+      [
+        USER_ID,
+        SESSION_ID,
+        JSON.stringify({
+          fromLayer: 'pm1',
+          fromSessionId: PM1_SESSION_ID,
+          reason: 'needs_clarification',
+          escalationRound: 0,
+          context: '需要确认部署方式',
+          suggestedActions: [{ label: '回答', action: 'answer' }],
+          questions: [{ id: 'clarify-q-dismiss', question: '部署方式？', context: '运维模块' }],
+        }),
+      ],
+    );
+
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/team/sessions/${PM1_SESSION_ID}/clarifications/clarify-q-dismiss/dismiss`,
+        headers: { authorization: bearer(app) },
+        payload: { answeredAt: 1700000001111 },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ ok: true });
+
+      const escalation = dbModule.sqliteGet<{ payload_json: string; state: string }>(
+        `SELECT payload_json, state FROM session_inbound_messages WHERE id = 'clarify-dismiss' LIMIT 1`,
+        [],
+      );
+      expect(escalation?.state).toBe('consumed');
+      expect(JSON.parse(escalation?.payload_json ?? '{}').questions[0]).toMatchObject({
+        id: 'clarify-q-dismiss',
+        answeredAt: 1700000001111,
+        status: 'dismissed',
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('dismiss clarification 在问题不存在时返回结构化 404', async () => {
+    const PM1_SESSION_ID = 's-team-inbound-dismiss-missing';
+    seedPm1Session(PM1_SESSION_ID, USER_ID);
+
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/team/sessions/${PM1_SESSION_ID}/clarifications/missing-question/dismiss`,
+        headers: { authorization: bearer(app) },
+        payload: { answeredAt: 1700000002222 },
+      });
+
+      expect(res.statusCode).toBe(404);
+      expect(res.json()).toMatchObject({
+        code: 'team_clarification_not_found',
+        error: '目标澄清问题不存在。',
+      });
     } finally {
       await app.close();
     }

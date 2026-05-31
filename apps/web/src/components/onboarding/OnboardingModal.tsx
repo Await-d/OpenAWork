@@ -218,14 +218,14 @@ function DesktopGatewayOnboarding({ onComplete }: Props) {
     try {
       await startDesktopGateway(port);
       if (!(await waitForGatewayHealth(url))) {
-        throw new Error('本地网关已启动，但健康检查暂未通过');
+        throw new Error('本地网关已启动，但健康检查暂未通过。');
       }
 
       setLocalStatus('ok');
       await completeLocalDesktopOnboarding(url, port);
     } catch (eventualError: unknown) {
       setLocalStatus('fail');
-      setError(eventualError instanceof Error ? eventualError.message : '无法启动本地网关');
+      setError(eventualError instanceof Error ? eventualError.message : '无法启动本地网关。');
     }
   }
 
@@ -250,19 +250,19 @@ function DesktopGatewayOnboarding({ onComplete }: Props) {
 
     if (!url) {
       setRemoteStatus('fail');
-      setError('请先填写远程网关地址');
+      setError('请先填写远程网关地址。');
       return;
     }
     if (!remoteEmail || !remotePassword) {
       setRemoteStatus('fail');
-      setError('请填写远程网关管理员邮箱和密码');
+      setError('请填写远程网关管理员邮箱和密码。');
       return;
     }
 
     setRemoteStatus('testing');
     try {
       if (!(await waitForGatewayHealth(url))) {
-        throw new Error('远程网关健康检查失败，请确认地址可访问');
+        throw new Error('远程网关健康检查失败，请确认地址可访问。');
       }
 
       const tokenPair = await login(url, remoteEmail, remotePassword);
@@ -270,7 +270,7 @@ function DesktopGatewayOnboarding({ onComplete }: Props) {
       completeDesktopOnboarding(url, 'remote', port, tokenPair, remoteEmail);
     } catch (eventualError: unknown) {
       setRemoteStatus('fail');
-      setError(eventualError instanceof Error ? eventualError.message : '无法连接远程网关');
+      setError(eventualError instanceof Error ? eventualError.message : '无法连接远程网关。');
     }
   }
 
@@ -512,14 +512,14 @@ function BrowserOnboardingModal({ onComplete }: Props) {
     try {
       await startDesktopGateway(port);
       if (!(await waitForGatewayHealth(url))) {
-        throw new Error('本地服务端已启动，但健康检查暂未通过');
+        throw new Error('本地服务端已启动，但健康检查暂未通过。');
       }
 
       setLocalStatus('ok');
       setStep('login');
     } catch (error: unknown) {
       setLocalStatus('fail');
-      setLocalError(error instanceof Error ? error.message : '无法启动本地服务端');
+      setLocalError(error instanceof Error ? error.message : '无法启动本地服务端。');
     }
   }
 

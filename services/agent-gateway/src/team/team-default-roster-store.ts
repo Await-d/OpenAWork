@@ -25,9 +25,20 @@ export interface TeamWorkspaceDefaultRosterRecord {
 }
 
 const VALID_LAYERS = new Set<TeamRuntimeLayer>(TEAM_RUNTIME_LAYER_ORDER);
-const VALID_SPECIALTIES = new Set<TeamMemberSpecialty>(
-  DEFAULT_FIXED_TEAM_MEMBER_SLOTS.map((slot) => slot.specialty),
-);
+const VALID_SPECIALTIES = new Set<TeamMemberSpecialty>([
+  ...DEFAULT_FIXED_TEAM_MEMBER_SLOTS.map((slot) => slot.specialty),
+  'custom',
+]);
+
+/**
+ * 花名册成员数硬上限（与路由层 z.array(...).max(40) 对齐）。
+ *
+ * 这是 DB → 运行时的最后一道防线：route schema 已经把写入路径限制在 40，但旧数据 /
+ * 手改 DB / 迁移异常可能留下超大数组。运行时会把 roster 渲染进「团队编制清单」注入
+ * 每个 pm1/pm2/executor/reviewer 的 system prompt，无界数组会撑爆 prompt + 成本。
+ * 这里在解析 / 归一化时统一截断到上限，保证注入侧永远有界。
+ */
+const MAX_ROSTER_MEMBER_SLOTS = 40;
 
 export function cloneDefaultTeamRoster(): FixedTeamMemberSlot[] {
   return DEFAULT_FIXED_TEAM_MEMBER_SLOTS.map((slot) => ({
@@ -56,6 +67,18 @@ function normalizeToolsets(value: unknown): string[] | null {
   return toolsets.length === value.length ? toolsets : null;
 }
 
+/** 归一化一个 id 字符串数组（skills / mcp）：丢弃非字符串 / 超长项，去重。 */
+function normalizeIdList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (isBoundedString(item, 160)) {
+      seen.add(item.trim());
+    }
+  }
+  return Array.from(seen).slice(0, 50);
+}
+
 function normalizeMemberSlot(entry: unknown): FixedTeamMemberSlot | null {
   if (!entry || typeof entry !== 'object') return null;
   const rec = entry as Record<string, unknown>;
@@ -79,6 +102,26 @@ function normalizeMemberSlot(entry: unknown): FixedTeamMemberSlot | null {
     return null;
   }
 
+  // Phase 2：保留可选的成员模型绑定（modelId / providerId / variant），
+  // 否则会在快照归一化时被丢弃，运行时就拿不到「每层/每成员模型」。
+  const modelId = rec['modelId'];
+  const providerId = rec['providerId'];
+  const variant = rec['variant'];
+  // 自定义角色字段：custom 标记 + systemPrompt 人物设定提示词。
+  const custom = rec['custom'] === true;
+  const systemPrompt = rec['systemPrompt'];
+  // 模板初始能力绑定：skills / mcp id 列表。
+  const skillIds = normalizeIdList(rec['skillIds']);
+  const mcpServerIds = normalizeIdList(rec['mcpServerIds']);
+  // 路由关键词：让上游派发动态识别该成员（尤其自定义角色）的专长。
+  const routingKeywords = normalizeIdList(rec['routingKeywords']);
+  // 派发优先级：同分排序权重。
+  const dispatchPriorityRaw = rec['dispatchPriority'];
+  const dispatchPriority =
+    dispatchPriorityRaw === 'high' || dispatchPriorityRaw === 'low' || dispatchPriorityRaw === 'normal'
+      ? dispatchPriorityRaw
+      : undefined;
+
   return {
     id: id.trim(),
     layer,
@@ -87,6 +130,15 @@ function normalizeMemberSlot(entry: unknown): FixedTeamMemberSlot | null {
     personaKey: personaKey.trim(),
     toolsets,
     required,
+    ...(isBoundedString(modelId, 200) ? { modelId: modelId.trim() } : {}),
+    ...(isBoundedString(providerId, 200) ? { providerId: providerId.trim() } : {}),
+    ...(isBoundedString(variant, 80) ? { variant: variant.trim() } : {}),
+    ...(custom ? { custom: true } : {}),
+    ...(isBoundedString(systemPrompt, 8000) ? { systemPrompt: systemPrompt.trim() } : {}),
+    ...(skillIds.length > 0 ? { skillIds } : {}),
+    ...(mcpServerIds.length > 0 ? { mcpServerIds } : {}),
+    ...(routingKeywords.length > 0 ? { routingKeywords } : {}),
+    ...(dispatchPriority ? { dispatchPriority } : {}),
   };
 }
 
@@ -94,6 +146,7 @@ export function normalizeTeamWorkspaceDefaultRoster(
   memberSlots: FixedTeamMemberSlot[],
 ): FixedTeamMemberSlot[] {
   const normalized = memberSlots
+    .slice(0, MAX_ROSTER_MEMBER_SLOTS)
     .map((slot) => normalizeMemberSlot(slot))
     .filter((slot): slot is FixedTeamMemberSlot => slot !== null);
   return normalized.length > 0 ? normalized : cloneDefaultTeamRoster();
@@ -111,6 +164,7 @@ export function parseTeamWorkspaceDefaultRosterJson(json: string | null): FixedT
     }
 
     const memberSlots = raw
+      .slice(0, MAX_ROSTER_MEMBER_SLOTS)
       .map((entry) => normalizeMemberSlot(entry))
       .filter((slot): slot is FixedTeamMemberSlot => slot !== null);
     return memberSlots.length > 0 ? memberSlots : cloneDefaultTeamRoster();
@@ -165,4 +219,56 @@ export function updateTeamWorkspaceDefaultRoster(input: {
     userId: input.userId,
     teamWorkspaceId: input.teamWorkspaceId,
   });
+}
+
+interface SessionRosterRow {
+  metadata_json: string | null;
+  team_parent_session_id: string | null;
+}
+
+/**
+ * 读取某 session「实际运行的花名册」—— 即根 session 快照里的
+ * teamDefinition.memberSlots（向上回溯 team_parent_session_id 到根）。
+ *
+ * 为什么需要它：派发打分（pm2-runner → resolveAssignedMember）原本只读 workspace
+ * 级 default_team_roster_json，但一个 session 的真实 roster 是创建时冻结进
+ * teamDefinition.memberSlots 的快照（可能来自模板、或晚于 workspace 默认被改过）。
+ * 两者可能漂移 —— 用户在模板/会话里给成员设的 routingKeywords / dispatchPriority
+ * 若只存在于会话快照，就不会进入派发打分。本函数让派发能优先读「会话实际 roster」。
+ *
+ * 找不到 / 为空时返回 undefined（调用方回退到 workspace 默认 roster）。
+ */
+export function resolveSessionMemberSlots(sessionId: string): FixedTeamMemberSlot[] | undefined {
+  let currentId: string | null = sessionId;
+  let guard = 0;
+  let snapshot: unknown[] | null = null;
+  while (currentId && guard < 16) {
+    const row: SessionRosterRow | undefined = sqliteGet<SessionRosterRow>(
+      `SELECT metadata_json, team_parent_session_id FROM sessions WHERE id = ? LIMIT 1`,
+      [currentId],
+    );
+    if (!row) break;
+    try {
+      const parsed = JSON.parse(row.metadata_json ?? '{}') as Record<string, unknown>;
+      const teamDefinition = parsed['teamDefinition'];
+      if (teamDefinition && typeof teamDefinition === 'object') {
+        const slots = (teamDefinition as Record<string, unknown>)['memberSlots'];
+        if (Array.isArray(slots) && slots.length > 0) {
+          snapshot = slots;
+          break;
+        }
+      }
+    } catch {
+      // ignore malformed metadata, keep walking up
+    }
+    if (!row.team_parent_session_id) break;
+    currentId = row.team_parent_session_id;
+    guard += 1;
+  }
+  if (!snapshot) return undefined;
+  const normalized = snapshot
+    .slice(0, MAX_ROSTER_MEMBER_SLOTS)
+    .map((entry) => normalizeMemberSlot(entry))
+    .filter((slot): slot is FixedTeamMemberSlot => slot !== null);
+  return normalized.length > 0 ? normalized : undefined;
 }

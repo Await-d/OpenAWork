@@ -82,6 +82,40 @@ const restoreFromSessionSchema = z.object({
   deleteMissing: z.boolean().optional().default(false),
 });
 
+type SnapshotTreeRouteErrorCode =
+  | 'session_not_found'
+  | 'tree_not_found'
+  | 'workspace_root_unavailable'
+  | 'shadow_git_unavailable'
+  | 'restore_failed'
+  | 'no_snapshot_at_time'
+  | 'source_session_not_found'
+  | 'source_tree_not_found'
+  | 'workspace_mismatch';
+
+const SNAPSHOT_TREE_ROUTE_ERROR_MESSAGES: Record<SnapshotTreeRouteErrorCode, string> = {
+  session_not_found: '目标会话不存在。',
+  tree_not_found: '目标快照树不存在。',
+  workspace_root_unavailable: '当前会话未绑定可用工作区，无法执行快照恢复。',
+  shadow_git_unavailable: '当前会话未启用 shadow git，无法执行快照树恢复。',
+  restore_failed: '执行快照恢复失败。',
+  no_snapshot_at_time: '指定时间点之前没有可用快照。',
+  source_session_not_found: '源会话不存在。',
+  source_tree_not_found: '源会话中的快照树不存在。',
+  workspace_mismatch: '源会话与目标会话的工作区不一致，无法跨会话恢复。',
+};
+
+function snapshotTreeRouteErrorPayload(
+  code: SnapshotTreeRouteErrorCode,
+  extra?: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    error: SNAPSHOT_TREE_ROUTE_ERROR_MESSAGES[code],
+    code,
+    ...(extra ?? {}),
+  };
+}
+
 // ─── 工具：解析 session 与 workspace ────────────────────────────────────
 
 interface SessionRow {
@@ -117,10 +151,22 @@ async function readWorkspaceFile(
   try {
     return { content: await fsp.readFile(safeAbsolute, 'utf8'), exists: true };
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') {
       return { content: '', exists: false };
     }
-    throw error;
+    // Per-file resilience: these reads feed snapshot preview diffs and the
+    // restore audit log, and run inside `Promise.all(targetFiles.map(...))`.
+    // A single unreadable file (EACCES / EISDIR / EIO / ELOOP) used to reject
+    // the whole batch — failing the entire multi-file preview, or 500ing an
+    // ALREADY-APPLIED restore during after-state reads. The actual git restore
+    // (`restoreSelective`) does not depend on these reads, so degrade an
+    // unreadable file to "absent" (same shape as ENOENT) + warn instead of
+    // throwing, so one bad file can't blank or fail the whole operation.
+    console.warn(
+      `[snapshot-tree] 工作区文件读取失败（${code ?? 'unknown'}），按缺失处理：${relativePath}`,
+    );
+    return { content: '', exists: false };
   }
 }
 
@@ -140,7 +186,7 @@ export async function snapshotTreeRoutes(app: FastifyInstance): Promise<void> {
       const session = loadSessionRow(params.sessionId, userId);
       if (!session) {
         step.fail(undefined, { reason: 'session_not_found' });
-        return reply.status(404).send({ error: 'session_not_found' });
+        return reply.status(404).send(snapshotTreeRouteErrorPayload('session_not_found'));
       }
 
       const requestQueryRaw =
@@ -190,7 +236,7 @@ export async function snapshotTreeRoutes(app: FastifyInstance): Promise<void> {
       const session = loadSessionRow(params.sessionId, userId);
       if (!session) {
         step.fail(undefined, { reason: 'session_not_found' });
-        return reply.status(404).send({ error: 'session_not_found' });
+        return reply.status(404).send(snapshotTreeRouteErrorPayload('session_not_found'));
       }
 
       const tree = getSnapshotTreeByHash({
@@ -199,7 +245,7 @@ export async function snapshotTreeRoutes(app: FastifyInstance): Promise<void> {
       });
       if (!tree || tree.userId !== userId) {
         step.fail(undefined, { reason: 'tree_not_found' });
-        return reply.status(404).send({ error: 'tree_not_found' });
+        return reply.status(404).send(snapshotTreeRouteErrorPayload('tree_not_found'));
       }
 
       const fileEntries = listSnapshotFileEntries(tree.id);
@@ -249,13 +295,15 @@ export async function snapshotTreeRoutes(app: FastifyInstance): Promise<void> {
       const session = loadSessionRow(params.sessionId, userId);
       if (!session) {
         step.fail(undefined, { reason: 'session_not_found' });
-        return reply.status(404).send({ error: 'session_not_found' });
+        return reply.status(404).send(snapshotTreeRouteErrorPayload('session_not_found'));
       }
 
       const workspaceRoot = resolveWorkspaceRoot(session.metadata_json);
       if (!workspaceRoot) {
         step.fail(undefined, { reason: 'workspace_root_unavailable' });
-        return reply.status(400).send({ error: 'workspace_root_unavailable' });
+        return reply
+          .status(400)
+          .send(snapshotTreeRouteErrorPayload('workspace_root_unavailable'));
       }
 
       const tree = getSnapshotTreeByHash({
@@ -264,14 +312,14 @@ export async function snapshotTreeRoutes(app: FastifyInstance): Promise<void> {
       });
       if (!tree || tree.userId !== userId) {
         step.fail(undefined, { reason: 'tree_not_found' });
-        return reply.status(404).send({ error: 'tree_not_found' });
+        return reply.status(404).send(snapshotTreeRouteErrorPayload('tree_not_found'));
       }
 
       const engine = getSnapshotEngine();
       if (!(await engine.isShadowGitEnabled())) {
         step.fail(undefined, { reason: 'shadow_git_unavailable' });
         return reply.status(503).send({
-          error: 'shadow_git_unavailable',
+          ...snapshotTreeRouteErrorPayload('shadow_git_unavailable'),
           message:
             'This session was not captured with shadow-git, restore-to-tree is not available. Use /restore/apply instead.',
         });
@@ -348,7 +396,11 @@ export async function snapshotTreeRoutes(app: FastifyInstance): Promise<void> {
           error: error instanceof Error ? error.message : String(error),
         });
         step.fail(undefined, { reason: 'restore_failed' });
-        return reply.status(500).send({ error: 'restore_failed' });
+        return reply.status(500).send(
+          snapshotTreeRouteErrorPayload('restore_failed', {
+            detail: error instanceof Error ? error.message : String(error),
+          }),
+        );
       }
 
       // Read after-state and compute real diffs for the audit row
@@ -416,19 +468,21 @@ export async function snapshotTreeRoutes(app: FastifyInstance): Promise<void> {
       const session = loadSessionRow(params.sessionId, userId);
       if (!session) {
         step.fail(undefined, { reason: 'session_not_found' });
-        return reply.status(404).send({ error: 'session_not_found' });
+        return reply.status(404).send(snapshotTreeRouteErrorPayload('session_not_found'));
       }
 
       const workspaceRoot = resolveWorkspaceRoot(session.metadata_json);
       if (!workspaceRoot) {
         step.fail(undefined, { reason: 'workspace_root_unavailable' });
-        return reply.status(400).send({ error: 'workspace_root_unavailable' });
+        return reply
+          .status(400)
+          .send(snapshotTreeRouteErrorPayload('workspace_root_unavailable'));
       }
 
       const engine = getSnapshotEngine();
       if (!(await engine.isShadowGitEnabled())) {
         step.fail(undefined, { reason: 'shadow_git_unavailable' });
-        return reply.status(503).send({ error: 'shadow_git_unavailable' });
+        return reply.status(503).send(snapshotTreeRouteErrorPayload('shadow_git_unavailable'));
       }
 
       // Validate all referenced trees exist and belong to this user/session
@@ -437,7 +491,9 @@ export async function snapshotTreeRoutes(app: FastifyInstance): Promise<void> {
         const tree = getSnapshotTreeByHash({ sessionId: params.sessionId, treeHash: hash });
         if (!tree || tree.userId !== userId) {
           step.fail(undefined, { reason: 'tree_not_found', treeHash: hash });
-          return reply.status(404).send({ error: 'tree_not_found', treeHash: hash });
+          return reply
+            .status(404)
+            .send(snapshotTreeRouteErrorPayload('tree_not_found', { treeHash: hash }));
         }
       }
 
@@ -456,7 +512,7 @@ export async function snapshotTreeRoutes(app: FastifyInstance): Promise<void> {
           mode: body.mode,
           files: [],
           changed: 0,
-          message: 'No files affected by the revert set.',
+          message: '当前回退集合未命中任何文件，无需恢复。',
         });
       }
 
@@ -566,7 +622,11 @@ export async function snapshotTreeRoutes(app: FastifyInstance): Promise<void> {
           error: error instanceof Error ? error.message : String(error),
         });
         step.fail(undefined, { reason: 'restore_failed' });
-        return reply.status(500).send({ error: 'restore_failed' });
+        return reply.status(500).send(
+          snapshotTreeRouteErrorPayload('restore_failed', {
+            detail: error instanceof Error ? error.message : String(error),
+          }),
+        );
       }
 
       // Compute audit diffs
@@ -627,7 +687,7 @@ export async function snapshotTreeRoutes(app: FastifyInstance): Promise<void> {
       const session = loadSessionRow(params.sessionId, userId);
       if (!session) {
         step.fail(undefined, { reason: 'session_not_found' });
-        return reply.status(404).send({ error: 'session_not_found' });
+        return reply.status(404).send(snapshotTreeRouteErrorPayload('session_not_found'));
       }
 
       const tree = getSnapshotTreeAtOrBefore({
@@ -638,7 +698,7 @@ export async function snapshotTreeRoutes(app: FastifyInstance): Promise<void> {
       if (!tree) {
         step.fail(undefined, { reason: 'no_snapshot_at_time' });
         return reply.status(404).send({
-          error: 'no_snapshot_at_time',
+          ...snapshotTreeRouteErrorPayload('no_snapshot_at_time'),
           message: `No snapshot found at or before ${body.timestamp}`,
         });
       }
@@ -680,14 +740,16 @@ export async function snapshotTreeRoutes(app: FastifyInstance): Promise<void> {
       const session = loadSessionRow(params.sessionId, userId);
       if (!session) {
         step.fail(undefined, { reason: 'session_not_found' });
-        return reply.status(404).send({ error: 'session_not_found' });
+        return reply.status(404).send(snapshotTreeRouteErrorPayload('session_not_found'));
       }
 
       // Validate source session (must belong to same user)
       const sourceSession = loadSessionRow(body.sourceSessionId, userId);
       if (!sourceSession) {
         step.fail(undefined, { reason: 'source_session_not_found' });
-        return reply.status(404).send({ error: 'source_session_not_found' });
+        return reply
+          .status(404)
+          .send(snapshotTreeRouteErrorPayload('source_session_not_found'));
       }
 
       // Validate the tree exists in the source session
@@ -697,13 +759,15 @@ export async function snapshotTreeRoutes(app: FastifyInstance): Promise<void> {
       });
       if (!sourceTree || sourceTree.userId !== userId) {
         step.fail(undefined, { reason: 'source_tree_not_found' });
-        return reply.status(404).send({ error: 'source_tree_not_found' });
+        return reply.status(404).send(snapshotTreeRouteErrorPayload('source_tree_not_found'));
       }
 
       const workspaceRoot = resolveWorkspaceRoot(session.metadata_json);
       if (!workspaceRoot) {
         step.fail(undefined, { reason: 'workspace_root_unavailable' });
-        return reply.status(400).send({ error: 'workspace_root_unavailable' });
+        return reply
+          .status(400)
+          .send(snapshotTreeRouteErrorPayload('workspace_root_unavailable'));
       }
 
       // Verify source workspace matches target workspace (shadow git is per-workspace)
@@ -711,7 +775,7 @@ export async function snapshotTreeRoutes(app: FastifyInstance): Promise<void> {
       if (sourceWorkspaceRoot !== workspaceRoot) {
         step.fail(undefined, { reason: 'workspace_mismatch' });
         return reply.status(400).send({
-          error: 'workspace_mismatch',
+          ...snapshotTreeRouteErrorPayload('workspace_mismatch'),
           message:
             'Source and target sessions must share the same workspace root for cross-session restore.',
         });
@@ -720,7 +784,7 @@ export async function snapshotTreeRoutes(app: FastifyInstance): Promise<void> {
       const engine = getSnapshotEngine();
       if (!(await engine.isShadowGitEnabled())) {
         step.fail(undefined, { reason: 'shadow_git_unavailable' });
-        return reply.status(503).send({ error: 'shadow_git_unavailable' });
+        return reply.status(503).send(snapshotTreeRouteErrorPayload('shadow_git_unavailable'));
       }
 
       const targetFiles =
@@ -793,7 +857,11 @@ export async function snapshotTreeRoutes(app: FastifyInstance): Promise<void> {
           error: error instanceof Error ? error.message : String(error),
         });
         step.fail(undefined, { reason: 'restore_failed' });
-        return reply.status(500).send({ error: 'restore_failed' });
+        return reply.status(500).send(
+          snapshotTreeRouteErrorPayload('restore_failed', {
+            detail: error instanceof Error ? error.message : String(error),
+          }),
+        );
       }
 
       const afterStates = await Promise.all(

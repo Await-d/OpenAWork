@@ -1,8 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  createTeamWorkflowsClient,
   createWorkflowsClient,
-  type TeamWorkflowWithDbId,
   type UpdateWorkflowTemplateInput,
   type WorkflowEdgeRecord,
   type WorkflowNodeRecord,
@@ -11,6 +9,12 @@ import {
   type WorkflowTemplateScale,
 } from '@openAwork/web-client';
 import { useAuthStore } from '../../../../stores/auth/auth.js';
+import { useTeamEventsConnectionStore } from '../../../../stores/team/team-events.js';
+import {
+  computeExponentialRetryDelay,
+  formatRecoverableLoadError,
+} from '../../hooks/recoverable-read-model.js';
+import { useRecoverableRetryController } from '../../hooks/use-recoverable-retry.js';
 import { agentTeamsNewTemplateProviders } from '../data/team-runtime-ui-config.js';
 import type {
   AgentTeamsSidebarSection,
@@ -23,14 +27,35 @@ interface CreateTeamWorkflowTemplateInput {
     string,
     { agentId: string; providerId?: string; modelId?: string; variant?: string }
   >;
+  description?: string;
+  /**
+   * 模板花名册（按层分组的 visible member slots）。如果提供，则会写入
+   * metadata.teamTemplate.memberSlots，作为新建 session 的默认 roster。
+   * 不提供时使用 DEFAULT_FIXED_TEAM_MEMBER_SLOTS 的默认花名册。
+   */
+  memberSlots?: import('@openAwork/web-client').WorkflowTeamTemplateMetadata['memberSlots'];
+  /** 候选模型池（智能分配模型功能）。 */
+  modelPool?: import('@openAwork/web-client').WorkflowTeamTemplateModelRef[];
+  /** 智能分配策略。 */
+  modelAssignStrategy?: import('@openAwork/web-client').WorkflowTeamTemplateModelStrategy;
   name: string;
   optionalAgentIds?: string[];
   provider: string;
+  /** 额外 metadata 字段（focus / scale / recommendedFor / recommendedDefault）。 */
+  templateExtra?: {
+    templateScale?: import('@openAwork/web-client').WorkflowTemplateScale | null;
+    templateFocus?: string | null;
+    recommendedFor?: string | null;
+    recommendedDefault?: boolean | null;
+  };
 }
 
 const REQUIRED_TEMPLATE_ROLES: Array<
   'leader' | 'planner' | 'researcher' | 'executor' | 'reviewer'
 > = ['leader', 'planner', 'researcher', 'executor', 'reviewer'];
+
+const TEAM_WORKFLOW_TEMPLATES_RETRY_BASE_MS = 2_000;
+const TEAM_WORKFLOW_TEMPLATES_RETRY_MAX_MS = 30_000;
 
 function mapCanonicalRoleToTemplateLabel(
   role: 'leader' | 'planner' | 'researcher' | 'executor' | 'reviewer',
@@ -56,13 +81,26 @@ function buildTeamTemplateMetadata(
     string,
     { agentId: string; providerId?: string; modelId?: string; variant?: string }
   >,
+  memberSlots?: import('@openAwork/web-client').WorkflowTeamTemplateMetadata['memberSlots'],
+  extras?: {
+    templateScale?: import('@openAwork/web-client').WorkflowTemplateScale | null;
+    templateFocus?: string | null;
+    recommendedFor?: string | null;
+    recommendedDefault?: boolean | null;
+  },
+  modelPool?: import('@openAwork/web-client').WorkflowTeamTemplateModelRef[],
+  modelAssignStrategy?: import('@openAwork/web-client').WorkflowTeamTemplateModelStrategy,
 ): WorkflowTemplateMetadata {
   return {
     teamTemplate: {
       ...(defaultBindings ? { defaultBindings } : {}),
       defaultProvider: provider,
+      ...(memberSlots && memberSlots.length > 0 ? { memberSlots } : {}),
+      ...(modelPool && modelPool.length > 0 ? { modelPool } : {}),
+      ...(modelAssignStrategy ? { modelAssignStrategy } : {}),
       optionalAgentIds,
       requiredRoles: REQUIRED_TEMPLATE_ROLES,
+      ...(extras ?? {}),
     },
   };
 }
@@ -85,6 +123,28 @@ function buildTemplateDescription(
   return `默认 Provider：${providerLabel}，包含 ${roleLabels.join('、')} 等 ${roleLabels.length} 个角色。`;
 }
 
+export function computeTeamWorkflowTemplatesRetryDelay(attempt: number): number {
+  return computeExponentialRetryDelay({
+    attempt,
+    baseMs: TEAM_WORKFLOW_TEMPLATES_RETRY_BASE_MS,
+    maxMs: TEAM_WORKFLOW_TEMPLATES_RETRY_MAX_MS,
+  });
+}
+
+export function formatTeamWorkflowTemplatesLoadError(input: {
+  hasCachedData: boolean;
+  nextRetryAtMs?: number | null;
+  result: { errorMessage?: string; retryable: boolean };
+}): string {
+  return formatRecoverableLoadError({
+    baseMessage: input.result.errorMessage ?? '加载团队模板失败。',
+    hasRetainedData: input.hasCachedData,
+    nextRetryAtMs: input.nextRetryAtMs,
+    retainedDataLabel: '模板数据',
+    retryable: input.result.retryable,
+  });
+}
+
 const TEMPLATE_SCALE_LABELS: Record<WorkflowTemplateScale, string> = {
   full: '完整',
   large: '大型',
@@ -99,7 +159,6 @@ const BUILTIN_AGENT_LABELS: Record<string, string> = {
 };
 
 const TEMPLATE_GROUPS = {
-  workflows: { id: 'team-workflows', title: '团队工作流', priority: 0 },
   recommended: { id: 'recommended-templates', title: '推荐模板', priority: 1 },
   system: { id: 'system-default-templates', title: '系统默认模板', priority: 2 },
   user: { id: 'user-templates', title: '我的模板', priority: 3 },
@@ -181,63 +240,6 @@ function toTemplateCard(template: WorkflowTemplateRecord): AgentTeamsWorkflowTem
     groupPriority: group.priority,
     groupTitle: group.title,
     metaLine: buildTemplateMetaLine(template),
-  };
-}
-
-/**
- * 把后端 GET /team/workflows 返回的 workflow 包转换成前端模板卡片，
- * 让 NewTeamSessionModal 的同一个模板选择器同时显示「内置 workflow」+
- * 「自定义模板」两组。
- *
- * 转换约定：
- *   - id 直接使用 workflow._dbId（自定义） 或 'workflow:' + workflow.id（内置）；
- *     这样选中后 NewTeamSessionModal 调 createTeamWorkspaceSession 时，
- *     templateId 一律可以走 saved-template 路径（内置包同样持久化在
- *     workflow_templates 表，由后端在 BUILTIN_WORKFLOWS 兜底）。
- *   - 'team-playbook' category 与现有模板一致，复用 metadata.teamTemplate
- *     字段表达 default provider / optionalAgentIds / requiredRoles。
- *   - 自定义 workflow 没有 _dbId 时仍可作为预览使用（templateId 留空，
- *     NewTeamSessionModal 会显示「无法创建」灰态，引导用户先保存）。
- */
-function toWorkflowCard(workflow: TeamWorkflowWithDbId): AgentTeamsWorkflowTemplateCard {
-  const group = TEMPLATE_GROUPS.workflows;
-  const id = workflow._dbId ?? `workflow:${workflow.id}`;
-  const stepLabels = workflow.steps.slice(0, 5).map((step) => step.label);
-  const metaLine = `共 ${workflow.steps.length} 步：${stepLabels.join(' → ')}${
-    workflow.steps.length > stepLabels.length ? ' …' : ''
-  }`;
-  const badges: AgentTeamsSidebarTemplateBadge[] = [];
-  if (workflow.source === 'builtin') {
-    badges.push({ label: '内置', tone: 'accent' });
-  } else if (workflow.source === 'forked') {
-    badges.push({ label: 'Fork', tone: 'warning' });
-  } else {
-    badges.push({ label: '自定义', tone: 'success' });
-  }
-  badges.push({ label: `v${workflow.version}`, tone: 'default' });
-
-  return {
-    id,
-    name: workflow.name,
-    category: 'team-playbook',
-    description: workflow.description,
-    metadata: {
-      teamTemplate: {
-        defaultProvider: '',
-        optionalAgentIds: [],
-        requiredRoles: [],
-        templateFocus: workflow.tags.join(' · '),
-      },
-    },
-    nodes: [],
-    edges: [],
-    createdAt: '',
-    updatedAt: '',
-    badges,
-    groupId: group.id,
-    groupPriority: group.priority,
-    groupTitle: group.title,
-    metaLine,
   };
 }
 
@@ -370,40 +372,144 @@ export function useTeamWorkflowTemplates() {
   const accessToken = useAuthStore((state) => state.accessToken);
   const gatewayUrl = useAuthStore((state) => state.gatewayUrl);
   const client = useMemo(() => createWorkflowsClient(gatewayUrl), [gatewayUrl]);
-  const workflowsClient = useMemo(() => createTeamWorkflowsClient(gatewayUrl), [gatewayUrl]);
   const [templates, setTemplates] = useState<WorkflowTemplateRecord[]>([]);
-  const [workflows, setWorkflows] = useState<TeamWorkflowWithDbId[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
+  const templatesRef = useRef<WorkflowTemplateRecord[]>([]);
+  const teamEventsRecoveredAt = useTeamEventsConnectionStore((state) => state.lastRecoveredAt);
+  const {
+    clearRetry,
+    resetRetry,
+    scheduleRetry,
+  } = useRecoverableRetryController();
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(() => {
+    setRefreshTick((current) => current + 1);
+  }, []);
+
+  useEffect(() => {
+    templatesRef.current = templates;
+  }, [templates]);
+
+  useEffect(() => {
+    let cancelled = false;
+    clearRetry();
+
     if (!accessToken) {
+      resetRetry();
       setTemplates([]);
-      setWorkflows([]);
       setLoading(false);
+      setError(null);
       return;
     }
 
-    setLoading(true);
-    setError(null);
-    try {
-      const [nextTemplates, nextWorkflows] = await Promise.all([
-        client.listTemplates(accessToken),
-        workflowsClient.list(accessToken),
-      ]);
-      setTemplates(nextTemplates.filter((template) => template.category === 'team-playbook'));
-      setWorkflows(nextWorkflows);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '加载团队模板失败');
-    } finally {
+    const hasCachedData = templatesRef.current.length > 0;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      resetRetry();
       setLoading(false);
+      setError(
+        formatTeamWorkflowTemplatesLoadError({
+          hasCachedData,
+          result: {
+            errorMessage: '当前网络离线，团队模板暂时不可用。',
+            retryable: true,
+          },
+        }),
+      );
+      return;
     }
-  }, [accessToken, client, workflowsClient]);
+
+    setLoading(!hasCachedData);
+    setError(null);
+
+    void client.listTemplatesResult(accessToken).then((templatesResult) => {
+      if (cancelled) {
+        return;
+      }
+
+      if (templatesResult.ok) {
+        setTemplates(
+          templatesResult.templates.filter((template) => template.category === 'team-playbook'),
+        );
+      } else {
+        const nextRetryAtMs = scheduleRetry({
+          computeDelay: computeTeamWorkflowTemplatesRetryDelay,
+          onRetry: refresh,
+          retryable: templatesResult.retryable,
+        });
+        setLoading(false);
+        setError(
+          formatTeamWorkflowTemplatesLoadError({
+            hasCachedData: templatesRef.current.length > 0,
+            nextRetryAtMs,
+            result: templatesResult,
+          }),
+        );
+        return;
+      }
+
+      resetRetry();
+      setLoading(false);
+      setError(null);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    accessToken,
+    clearRetry,
+    client,
+    refresh,
+    refreshTick,
+    resetRetry,
+    scheduleRetry,
+  ]);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    return () => {
+      clearRetry();
+    };
+  }, [clearRetry]);
+
+  useEffect(() => {
+    if (!accessToken || typeof window === 'undefined') {
+      return;
+    }
+    const handleOnline = () => {
+      resetRetry();
+      refresh();
+    };
+    const handleOffline = () => {
+      resetRetry();
+      setLoading(false);
+      setError(
+        formatTeamWorkflowTemplatesLoadError({
+          hasCachedData: templatesRef.current.length > 0,
+          result: {
+            errorMessage: '当前网络离线，团队模板暂时不可用。',
+            retryable: true,
+          },
+        }),
+      );
+    };
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [accessToken, refresh, resetRetry]);
+
+  useEffect(() => {
+    if (!accessToken || !teamEventsRecoveredAt) {
+      return;
+    }
+    resetRetry();
+    refresh();
+  }, [accessToken, refresh, resetRetry, teamEventsRecoveredAt]);
 
   const createTemplate = useCallback(
     async (input: CreateTeamWorkflowTemplateInput) => {
@@ -423,12 +529,18 @@ export function useTeamWorkflowTemplates() {
       try {
         const created = await client.createTemplate(accessToken, {
           category: 'team-playbook',
-          description: buildTemplateDescription(input.name, providerLabel, roleLabels),
+          description:
+            input.description?.trim() ||
+            buildTemplateDescription(input.name, providerLabel, roleLabels),
           edges: buildTemplateEdges(roleLabels),
           metadata: buildTeamTemplateMetadata(
             input.provider,
             input.optionalAgentIds,
             input.defaultBindings,
+            input.memberSlots,
+            input.templateExtra,
+            input.modelPool,
+            input.modelAssignStrategy,
           ),
           name: input.name,
           nodes: buildTemplateNodes(roleLabels, providerLabel),
@@ -510,14 +622,8 @@ export function useTeamWorkflowTemplates() {
   );
 
   const templateCards = useMemo(() => {
-    const baseCards = [...templates]
-      .sort(sortTemplates)
-      .map((template) => toTemplateCard(template));
-    const workflowCards: AgentTeamsWorkflowTemplateCard[] = workflows.map((workflow) =>
-      toWorkflowCard(workflow),
-    );
-    return [...workflowCards, ...baseCards];
-  }, [templates, workflows]);
+    return [...templates].sort(sortTemplates).map((template) => toTemplateCard(template));
+  }, [templates]);
   const sections = useMemo(() => mapTemplatesToSections(templates), [templates]);
 
   return {

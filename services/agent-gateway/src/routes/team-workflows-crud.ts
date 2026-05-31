@@ -26,6 +26,24 @@ const updateWorkflowSchema = z.object({
   workflow: teamWorkflowSchema,
 });
 
+type TeamWorkflowRouteErrorCode = 'team_workflow_invalid' | 'team_workflow_not_found';
+
+const TEAM_WORKFLOW_ROUTE_ERROR_MESSAGES: Record<TeamWorkflowRouteErrorCode, string> = {
+  team_workflow_invalid: '团队工作流配置无效。',
+  team_workflow_not_found: '目标团队工作流不存在。',
+};
+
+function teamWorkflowRouteErrorPayload(
+  code: TeamWorkflowRouteErrorCode,
+  extra?: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    code,
+    error: TEAM_WORKFLOW_ROUTE_ERROR_MESSAGES[code],
+    ...(extra ?? {}),
+  };
+}
+
 export async function teamWorkflowsCrudRoutes(app: FastifyInstance): Promise<void> {
   // 列出所有可用 workflow（内置 + 自定义）
   app.get(
@@ -78,7 +96,9 @@ export async function teamWorkflowsCrudRoutes(app: FastifyInstance): Promise<voi
       const validation = validateWorkflowConsistency(body.workflow);
       if (!validation.valid) {
         step.fail('invalid workflow');
-        return reply.status(400).send({ error: 'Invalid workflow', issues: validation.errors });
+        return reply
+          .status(400)
+          .send(teamWorkflowRouteErrorPayload('team_workflow_invalid', { issues: validation.errors }));
       }
 
       const id = randomUUID();
@@ -109,7 +129,7 @@ export async function teamWorkflowsCrudRoutes(app: FastifyInstance): Promise<voi
       );
       if (!existing) {
         step.fail('not found');
-        return reply.status(404).send({ error: 'Workflow not found' });
+        return reply.status(404).send(teamWorkflowRouteErrorPayload('team_workflow_not_found'));
       }
 
       const parseStep = child('parse-body');
@@ -119,7 +139,9 @@ export async function teamWorkflowsCrudRoutes(app: FastifyInstance): Promise<voi
       const validation = validateWorkflowConsistency(body.workflow);
       if (!validation.valid) {
         step.fail('invalid workflow');
-        return reply.status(400).send({ error: 'Invalid workflow', issues: validation.errors });
+        return reply
+          .status(400)
+          .send(teamWorkflowRouteErrorPayload('team_workflow_invalid', { issues: validation.errors }));
       }
 
       const metadataJson = JSON.stringify({ teamWorkflow: body.workflow });
@@ -149,7 +171,7 @@ export async function teamWorkflowsCrudRoutes(app: FastifyInstance): Promise<voi
       );
       if (!existing) {
         step.fail('not found');
-        return reply.status(404).send({ error: 'Workflow not found' });
+        return reply.status(404).send(teamWorkflowRouteErrorPayload('team_workflow_not_found'));
       }
 
       sqliteRun(`DELETE FROM workflow_templates WHERE id = ? AND user_id = ?`, [

@@ -51,6 +51,52 @@ interface PersistentEntry {
 const persistentByTerminalId = new Map<string, PersistentEntry>();
 const MAX_BYTES = 256 * 1024; // keep last 256KB so a long session doesn't OOM
 
+/**
+ * Per-session cap on concurrently-live persistent terminals. Each spawn holds
+ * a real child process plus two OS pipes and an in-memory buffer; without a
+ * ceiling a buggy frontend retry loop (or a malicious client) hammering
+ * `POST /sessions/:id/terminals` could spawn shells without bound and exhaust
+ * the host's PIDs / file descriptors. The default is generous for legitimate
+ * multi-pane use; tune via `OPENAWORK_MAX_PERSISTENT_TERMINALS_PER_SESSION`
+ * (<=0 disables the cap).
+ */
+const DEFAULT_MAX_PERSISTENT_TERMINALS_PER_SESSION = 20;
+
+/** Raised by {@link spawnPersistentTerminal} when the per-session cap is hit. */
+export class PersistentTerminalLimitError extends Error {
+  readonly limit: number;
+  readonly sessionId: string;
+  constructor(sessionId: string, limit: number) {
+    super(
+      `session ${sessionId} already has the maximum of ${limit} live terminals; ` +
+        'close an existing terminal before opening another',
+    );
+    this.name = 'PersistentTerminalLimitError';
+    this.limit = limit;
+    this.sessionId = sessionId;
+  }
+}
+
+function resolveMaxPersistentTerminalsPerSession(): number {
+  const raw = process.env['OPENAWORK_MAX_PERSISTENT_TERMINALS_PER_SESSION'];
+  if (raw === undefined || raw === null || raw.trim() === '') {
+    return DEFAULT_MAX_PERSISTENT_TERMINALS_PER_SESSION;
+  }
+  const parsed = Number(raw);
+  // Non-positive / NaN means "cap disabled", matching sibling dead-switch envs.
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Math.floor(parsed);
+}
+
+/** Count live (not-yet-closed) persistent terminals for a session. */
+function countLivePersistentTerminals(sessionId: string): number {
+  let count = 0;
+  for (const entry of persistentByTerminalId.values()) {
+    if (entry.sessionId === sessionId && !entry.closed) count += 1;
+  }
+  return count;
+}
+
 function getShell(): { shell: string; args: string[] } {
   if (process.platform === 'win32') {
     return { shell: 'powershell.exe', args: ['-NoLogo', '-NoProfile'] };
@@ -88,6 +134,15 @@ export interface SpawnPersistentTerminalResult {
 export function spawnPersistentTerminal(
   input: SpawnPersistentTerminalInput,
 ): SpawnPersistentTerminalResult {
+  // Enforce the per-session concurrency cap before spawning so a runaway
+  // caller can't exhaust host processes / file descriptors. Checked against
+  // the live in-memory entries (exited/killed terminals are removed from the
+  // map), so closed terminals never count against the budget.
+  const maxPerSession = resolveMaxPersistentTerminalsPerSession();
+  if (maxPerSession > 0 && countLivePersistentTerminals(input.sessionId) >= maxPerSession) {
+    throw new PersistentTerminalLimitError(input.sessionId, maxPerSession);
+  }
+
   const { shell, args } = getShell();
   let child: ChildProcess;
   try {
@@ -264,9 +319,14 @@ export function closePersistentTerminal(terminalId: string): ClosePersistentTerm
   }
   try {
     if (process.platform === 'win32') {
-      spawn('taskkill', ['/pid', String(entry.child.pid), '/f', '/t'], {
+      const killer = spawn('taskkill', ['/pid', String(entry.child.pid), '/f', '/t'], {
         stdio: 'ignore',
         windowsHide: true,
+      });
+      // taskkill may be missing / unresolved on PATH; its async 'error'
+      // event would otherwise crash the process as an unhandled exception.
+      killer.on('error', () => {
+        /* best-effort kill — nothing more we can do here */
       });
     } else if (entry.child.pid) {
       process.kill(-entry.child.pid, 'SIGTERM');

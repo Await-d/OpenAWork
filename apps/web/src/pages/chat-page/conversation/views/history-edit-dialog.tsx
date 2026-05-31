@@ -129,7 +129,7 @@ export default function HistoryEditDialog({
           borderRadius: 18,
           border: dragging ? '2px dashed var(--accent)' : '1px solid var(--border-default)',
           background: dragging
-            ? 'color-mix(in oklch, var(--accent) 6%, var(--bg-overlay)'
+            ? 'color-mix(in oklch, var(--accent) 6%, var(--bg-overlay))'
             : 'var(--bg-overlay)',
           boxShadow: 'var(--shadow-xl)',
           padding: '20px 20px 18px',
@@ -178,7 +178,7 @@ export default function HistoryEditDialog({
           <div
             style={{
               borderRadius: 12,
-              border: '1px solid color-mix(in oklch, var(--warning) 35%, var(--border-default)',
+              border: '1px solid color-mix(in oklch, var(--warning) 35%, var(--border-default))',
               background: 'color-mix(in oklch, var(--warning) 12%, transparent)',
               padding: '10px 12px',
               fontSize: 12,

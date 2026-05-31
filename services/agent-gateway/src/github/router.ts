@@ -25,6 +25,32 @@ declare module 'fastify' {
 
 const GITHUB_TRIGGERS_SETTINGS_KEY = 'github_triggers';
 
+/**
+ * §0.154: wall-clock deadline for GitHub REST (Octokit) calls.
+ *
+ * `@octokit/rest` v22 is built on native `fetch` and ships NO default request
+ * timeout, so a connects-but-hangs GitHub API (or a wedged proxy / TLS stall)
+ * would leave any `octokit.*` await pending forever. The write-back path runs
+ * inside the fire-and-forget `runSessionInBackground().then(...)`, so such a
+ * hang silently strands the write-back closure (and leaks it) with no error and
+ * no recovery. v22 dropped the old `request.timeout` option in favour of a
+ * custom `request.fetch`, so we bound every call by merging an
+ * `AbortSignal.timeout` with whatever signal Octokit itself passes (whichever
+ * fires first wins). Same connects-but-hangs family as §0.149 / §0.151.
+ */
+export const GITHUB_API_TIMEOUT_MS = 30_000;
+
+export function createGitHubTimeoutFetch(timeoutMs: number): typeof fetch {
+  return (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    const callerSignal = init?.signal ?? undefined;
+    const signal = callerSignal
+      ? AbortSignal.any([callerSignal, timeoutSignal])
+      : timeoutSignal;
+    return fetch(input, { ...init, signal });
+  };
+}
+
 interface UserSettingRow {
   user_id?: string;
   value: string;
@@ -83,6 +109,7 @@ async function performWriteBack(input: {
   const appOctokit = new Octokit({
     authStrategy: createAppAuth,
     auth: { appId: input.appId, privateKey: input.privateKeyPem },
+    request: { fetch: createGitHubTimeoutFetch(GITHUB_API_TIMEOUT_MS) },
   });
 
   const { data: installation } = await appOctokit.apps.getRepoInstallation({ owner, repo });
@@ -93,6 +120,7 @@ async function performWriteBack(input: {
       privateKey: input.privateKeyPem,
       installationId: installation.id,
     },
+    request: { fetch: createGitHubTimeoutFetch(GITHUB_API_TIMEOUT_MS) },
   });
 
   const output = new GitHubActionOutput(installationOctokit);

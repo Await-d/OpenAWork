@@ -41,6 +41,7 @@ export interface UpstreamRetryClassification {
     | 'overloaded'
     | 'free_usage_exhausted'
     | 'transient_5xx'
+    | 'network'
     | 'context_overflow'
     | 'unknown';
 }
@@ -92,6 +93,8 @@ interface ClassifyInput {
   responseBody?: string;
   responseHeaders?: Record<string, string | undefined>;
   isRetryable?: boolean;
+  /** Node/undici transport error code (e.g. `ECONNRESET`, `UND_ERR_SOCKET`). */
+  errorCode?: string;
 }
 
 function readResponseHeaders(error: unknown): Record<string, string | undefined> | undefined {
@@ -121,6 +124,98 @@ function readClassifyInput(error: unknown): ClassifyInput {
     responseBody: typeof data['responseBody'] === 'string' ? data['responseBody'] : undefined,
     responseHeaders: readResponseHeaders(error),
     isRetryable: typeof data['isRetryable'] === 'boolean' ? data['isRetryable'] : undefined,
+    errorCode: readErrorCode(error),
+  };
+}
+
+/**
+ * Known transport-level error codes from Node's `net`/`dns` layers and
+ * undici's fetch stack. These indicate the upstream connection failed
+ * or dropped — not an application-level rejection — so the request can
+ * safely be retried.
+ */
+const NETWORK_ERROR_CODES = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ECONNABORTED',
+  'ETIMEDOUT',
+  'EPIPE',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'ENETDOWN',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_BODY_TIMEOUT',
+  'UND_ERR_SOCKET',
+]);
+
+/**
+ * Pull a transport error code off the error or its `cause` chain.
+ * undici wraps the original `code` under `error.cause.code` (e.g.
+ * `TypeError: fetch failed` → `cause.code = 'ECONNRESET'`), so we walk
+ * a couple of levels rather than only reading the top-level `code`.
+ */
+function readErrorCode(error: unknown): string | undefined {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4 && current && typeof current === 'object'; depth += 1) {
+    const code = (current as Record<string, unknown>)['code'];
+    if (typeof code === 'string' && code.length > 0) {
+      return code;
+    }
+    current = (current as Record<string, unknown>)['cause'];
+  }
+  return undefined;
+}
+
+/**
+ * Unambiguous transport failure detected via Node/undici error code.
+ * Safe to check first because a real `ECONNRESET` / `ETIMEDOUT` can
+ * never also be an application-level rate-limit or overload.
+ */
+function hasNetworkErrorCode(info: ClassifyInput): boolean {
+  return info.errorCode !== undefined && NETWORK_ERROR_CODES.has(info.errorCode);
+}
+
+/**
+ * Fallback message-based detection for when undici drops the original
+ * `code` during error wrapping (e.g. `TypeError: fetch failed`,
+ * `terminated`, `socket hang up`). Checked only after rate-limit /
+ * overload phrasing so broad words like "timeout" don't steal a more
+ * specific category.
+ */
+function hasNetworkErrorMessage(info: ClassifyInput): boolean {
+  const lower = (info.message ?? '').toLowerCase();
+  if (lower.length === 0) {
+    return false;
+  }
+  return (
+    lower.includes('fetch failed') ||
+    lower.includes('socket hang up') ||
+    lower.includes('network error') ||
+    lower.includes('connection error') ||
+    lower.includes('connection reset') ||
+    lower.includes('connection refused') ||
+    lower.includes('connection closed') ||
+    lower.includes('econnreset') ||
+    lower.includes('etimedout') ||
+    lower.includes('client network socket disconnected') ||
+    lower.includes('terminated') ||
+    lower.includes('request timed out') ||
+    lower.includes('timed out') ||
+    lower.includes('timeout')
+  );
+}
+
+function buildNetworkClassification(
+  info: ClassifyInput,
+): UpstreamRetryClassification {
+  return {
+    retryable: true,
+    category: 'network',
+    message: 'Network connection error, retrying',
+    retryAfterMs: computeRetryDelayMs(1, info.responseHeaders),
   };
 }
 
@@ -135,6 +230,13 @@ function readClassifyInput(error: unknown): ClassifyInput {
 export function classifyUpstreamError(error: unknown): UpstreamRetryClassification {
   const info = readClassifyInput(error);
   const status = info.statusCode;
+
+  // Transport-level connection failures detected via error code take
+  // precedence: a real socket/DNS/timeout failure is unambiguous and
+  // always retryable, and the upstream never attached an HTTP status.
+  if (status === undefined && hasNetworkErrorCode(info)) {
+    return buildNetworkClassification(info);
+  }
 
   // 5xx are always transient regardless of SDK isRetryable flag.
   if (status !== undefined && status >= 500) {
@@ -241,6 +343,14 @@ export function classifyUpstreamError(error: unknown): UpstreamRetryClassificati
     } catch {
       /* fall through */
     }
+  }
+
+  // Fallback: undici frequently rethrows transport failures as
+  // `TypeError: fetch failed` with the original `code` buried (or lost)
+  // on the cause chain. Checked after rate-limit / overload phrasing so
+  // those keep their more specific category.
+  if (hasNetworkErrorMessage(info)) {
+    return buildNetworkClassification(info);
   }
 
   return {

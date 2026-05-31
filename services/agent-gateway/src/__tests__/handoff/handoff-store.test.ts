@@ -194,6 +194,62 @@ describe('startHandoff / completeHandoff / failHandoff', () => {
     expect(final?.state).toBe('failed');
     expect(final?.failureReason).toBe('boom');
   });
+
+  it('internal running helpers 支持 completed / failed / retry 回退', () => {
+    const completed = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'pm2',
+      toRoleLayer: 'executor',
+    });
+    store.claimHandoff({ handoffId: completed.id, claimToken: 'tok-complete-running' });
+    store.startHandoff({
+      handoffId: completed.id,
+      claimToken: 'tok-complete-running',
+      toSessionId: TO_SESSION_ID,
+    });
+    expect(store.completeRunningHandoffById(completed.id)).toBe(true);
+    expect(store.getHandoff({ userId: USER_ID, handoffId: completed.id })?.state).toBe('completed');
+
+    const failed = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'pm2',
+      toRoleLayer: 'executor',
+    });
+    store.claimHandoff({ handoffId: failed.id, claimToken: 'tok-fail-running' });
+    store.startHandoff({
+      handoffId: failed.id,
+      claimToken: 'tok-fail-running',
+      toSessionId: TO_SESSION_ID,
+    });
+    expect(store.failRunningHandoffById({ handoffId: failed.id, reason: 'review-fail' })).toBe(
+      true,
+    );
+    expect(store.getHandoff({ userId: USER_ID, handoffId: failed.id })).toMatchObject({
+      state: 'failed',
+      failureReason: 'review-fail',
+    });
+
+    const retried = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'pm2',
+      toRoleLayer: 'executor',
+    });
+    store.claimHandoff({ handoffId: retried.id, claimToken: 'tok-retry-running' });
+    store.startHandoff({
+      handoffId: retried.id,
+      claimToken: 'tok-retry-running',
+      toSessionId: TO_SESSION_ID,
+    });
+    expect(store.retryRunningHandoffById(retried.id)).toBe(true);
+    expect(store.getHandoff({ userId: USER_ID, handoffId: retried.id })).toMatchObject({
+      state: 'pending',
+      failureReason: null,
+      toSessionId: null,
+    });
+  });
 });
 
 describe('cancelHandoff', () => {
@@ -378,6 +434,192 @@ describe('pauseHandoff / resumeHandoff', () => {
       expect(store.pauseHandoff({ userId: USER_ID, handoffId: handoff.id })).toBe(false);
       expect(store.resumeHandoff({ userId: USER_ID, handoffId: handoff.id })).toBe(false);
     }
+  });
+});
+
+describe('retryFailedHandoff', () => {
+  it('普通 failed handoff 可重试回 pending，并清空失败/运行态字段', () => {
+    const created = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'pm2',
+      toRoleLayer: 'executor',
+    });
+    store.claimHandoff({ handoffId: created.id, claimToken: 'tok-retry' });
+    store.startHandoff({
+      handoffId: created.id,
+      claimToken: 'tok-retry',
+      toSessionId: TO_SESSION_ID,
+    });
+    store.failHandoff({ handoffId: created.id, claimToken: 'tok-retry', reason: 'runner-fail' });
+
+    expect(store.retryFailedHandoff({ userId: USER_ID, handoffId: created.id })).toBe(true);
+    expect(store.getHandoff({ userId: USER_ID, handoffId: created.id })).toMatchObject({
+      state: 'pending',
+      failureReason: null,
+      toSessionId: null,
+    });
+  });
+
+  it('重试时会清理 reviewDispositionHandled 标记，避免旧处理态污染新失败', () => {
+    const created = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'pm1',
+      toRoleLayer: 'pm2',
+      payload: {
+        reviewDispositionHandledAction: 'return-to-c',
+        reviewDispositionHandledAt: Date.now(),
+        sourceIntent: '需求',
+      },
+    });
+    dbModule.sqliteRun(
+      `UPDATE handoff_records
+          SET state = 'failed', failure_reason = 'runner-fail'
+        WHERE id = ?`,
+      [created.id],
+    );
+
+    expect(store.retryFailedHandoff({ userId: USER_ID, handoffId: created.id })).toBe(true);
+    expect(store.getHandoff({ userId: USER_ID, handoffId: created.id })?.payload).toMatchObject({
+      sourceIntent: '需求',
+    });
+    expect(
+      (store.getHandoff({ userId: USER_ID, handoffId: created.id })?.payload as Record<string, unknown>)[
+        'reviewDispositionHandledAt'
+      ],
+    ).toBeUndefined();
+  });
+
+  it('架构评审/宪法硬门禁/spec review/用户介入失败不能直接 retry', () => {
+    const architectureBlocked = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'pm1',
+      toRoleLayer: 'pm2',
+    });
+    dbModule.sqliteRun(
+      `UPDATE handoff_records
+          SET state = 'failed', failure_reason = 'Architecture Review 未通过：foo'
+        WHERE id = ?`,
+      [architectureBlocked.id],
+    );
+
+    const constitutionBlocked = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'pm1',
+      toRoleLayer: 'pm2',
+    });
+    dbModule.sqliteRun(
+      `UPDATE handoff_records
+          SET state = 'failed', failure_reason = 'Constitution Check 硬门禁未通过：bar'
+        WHERE id = ?`,
+      [constitutionBlocked.id],
+    );
+
+    expect(store.retryFailedHandoff({ userId: USER_ID, handoffId: architectureBlocked.id })).toBe(
+      false,
+    );
+    expect(store.retryFailedHandoff({ userId: USER_ID, handoffId: constitutionBlocked.id })).toBe(
+      false,
+    );
+
+    const specReviewBlocked = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'pm2',
+      toRoleLayer: 'executor',
+    });
+    dbModule.sqliteRun(
+      `UPDATE handoff_records
+          SET state = 'failed', failure_reason = 'Spec Review 未通过：遗漏验收场景'
+        WHERE id = ?`,
+      [specReviewBlocked.id],
+    );
+
+    const escalatedToUser = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'pm2',
+      toRoleLayer: 'executor',
+    });
+    dbModule.sqliteRun(
+      `UPDATE handoff_records
+          SET state = 'failed', failure_reason = '已重试 2 轮仍未通过，需要用户介入'
+        WHERE id = ?`,
+      [escalatedToUser.id],
+    );
+
+    const degradedSummaryFailed = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'pm2',
+      toRoleLayer: 'executor',
+    });
+    dbModule.sqliteRun(
+      `UPDATE handoff_records
+          SET state = 'failed', failure_reason = 'quality-review-degraded-summary-failed:mock'
+        WHERE id = ?`,
+      [degradedSummaryFailed.id],
+    );
+
+    expect(store.retryFailedHandoff({ userId: USER_ID, handoffId: specReviewBlocked.id })).toBe(
+      false,
+    );
+    expect(store.retryFailedHandoff({ userId: USER_ID, handoffId: escalatedToUser.id })).toBe(
+      false,
+    );
+    expect(
+      store.retryFailedHandoff({ userId: USER_ID, handoffId: degradedSummaryFailed.id }),
+    ).toBe(false);
+  });
+
+  it('PM2 failed handoff 会优先按结构化 reviewDisposition 判断是否可 retry', () => {
+    const redispatch = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'pm1',
+      toRoleLayer: 'pm2',
+      payload: {
+        reviewDisposition: {
+          action: 'redispatch',
+          reason: 'Quality Review 未通过：测试覆盖不足',
+          status: 'pending',
+          updatedAtMs: Date.now(),
+        },
+      },
+    });
+    dbModule.sqliteRun(
+      `UPDATE handoff_records
+          SET state = 'failed', failure_reason = 'runner-fail'
+        WHERE id = ?`,
+      [redispatch.id],
+    );
+
+    const returnToC = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'pm1',
+      toRoleLayer: 'pm2',
+      payload: {
+        reviewDisposition: {
+          action: 'return-to-c',
+          reason: 'Spec Review 未通过：遗漏验收场景',
+          status: 'pending',
+          updatedAtMs: Date.now(),
+        },
+      },
+    });
+    dbModule.sqliteRun(
+      `UPDATE handoff_records
+          SET state = 'failed', failure_reason = 'runner-fail'
+        WHERE id = ?`,
+      [returnToC.id],
+    );
+
+    expect(store.retryFailedHandoff({ userId: USER_ID, handoffId: redispatch.id })).toBe(true);
+    expect(store.retryFailedHandoff({ userId: USER_ID, handoffId: returnToC.id })).toBe(false);
   });
 });
 

@@ -9,6 +9,7 @@ import { requestSessionListRefresh } from '../../../utils/session/session-list-e
 import { applyChatRightPanelEvent, type ChatRightPanelState } from '../state/chat-stream-state.js';
 
 import type { RightPanelTabId } from '../panels/right-panel-tabs.js';
+import type { OpenFileOptions } from '../../../hooks/editor/useFileEditor.js';
 type CapabilityKind = 'agent' | 'mcp' | 'skill' | 'tool';
 
 export interface ChatUiActionsDeps {
@@ -29,9 +30,11 @@ export interface ChatUiActionsDeps {
   setRightTab: (value: RightPanelTabId | ((prev: RightPanelTabId) => RightPanelTabId)) => void;
   fileEditor: {
     saveFile: (path: string) => Promise<void>;
-    openFile: (path: string) => Promise<void>;
+    openFile: (path: string, options?: OpenFileOptions) => Promise<void>;
   };
-  openFileRef: React.MutableRefObject<((path: string) => void) | null>;
+  openFileRef: React.MutableRefObject<
+    ((path: string, options?: OpenFileOptions) => void) | null
+  >;
   setEditorMode: (value: boolean) => void;
   /**
    * Force the editor pane onto the code tab when a file is opened
@@ -209,14 +212,14 @@ export function useChatUiActions(deps: ChatUiActionsDeps): ChatUiActionsReturn {
   );
 
   useEffect(() => {
-    openFileRef.current = (path: string) => {
+    openFileRef.current = (path: string, options?: OpenFileOptions) => {
       // Always force the editor pane open on the code tab so a click
       // from chat / tool-call / hover popover lands in a visible
       // panel, even if the pane was previously on the browser tab
       // or fully collapsed.
       setEditorMode(true);
       setEditorPaneTab('code');
-      void fileEditor.openFile(path);
+      void fileEditor.openFile(path, options);
     };
     return () => {
       openFileRef.current = null;

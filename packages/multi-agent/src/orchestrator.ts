@@ -112,7 +112,19 @@ export class MultiAgentOrchestratorImpl implements MultiAgentOrchestrator {
           (n) => n.status === 'completed' || n.status === 'skipped' || n.status === 'failed',
         );
         if (allDone) break;
-        await new Promise((r) => setTimeout(r, 50));
+        // No ready nodes and not all terminal: either work is genuinely
+        // in-flight (it isn't — every batch is awaited below) or some pending
+        // nodes are permanently blocked by a failed/not-taken upstream.
+        // Resolve those to a terminal state so failure propagates instead of
+        // spinning here forever. If nothing could be resolved, the DAG is
+        // truly deadlocked (e.g. a cycle) — fail it rather than hang.
+        const progressed = this.runner.resolveStuckNodes(dagId);
+        if (!progressed) {
+          dag.status = 'failed';
+          dag.completedAt = Date.now();
+          this.runner.emit(dagId, { type: 'dag_completed', result: dag, timestamp: Date.now() });
+          return;
+        }
         continue;
       }
 
@@ -182,6 +194,23 @@ export class MultiAgentOrchestratorImpl implements MultiAgentOrchestrator {
   async cancelDAG(dagId: string): Promise<void> {
     this.pausedDags.delete(dagId);
     this.cancelledDags.add(dagId);
+    // Unblock any interactive approval gate still awaiting input for this
+    // DAG. A node parked at `waitForApproval` with no `autoResolveMs` never
+    // settles on its own, so `executeDAG`'s `Promise.allSettled` would never
+    // return and the top-of-loop `cancelledDags` check is unreachable — the
+    // DAG would hang forever despite being "cancelled". Resolving the pending
+    // approval(s) with `Cancel` lets the in-flight batch settle so the loop
+    // observes the cancellation and transitions to `failed`.
+    const dag = this.runner.get(dagId);
+    if (dag) {
+      for (const node of dag.nodes) {
+        const resolver = this.pendingApprovals.get(node.id);
+        if (resolver) {
+          this.pendingApprovals.delete(node.id);
+          resolver('Cancel');
+        }
+      }
+    }
   }
 
   async getDAGStatus(dagId: string): Promise<AgentDAG> {

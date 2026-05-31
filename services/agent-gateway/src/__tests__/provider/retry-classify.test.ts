@@ -80,6 +80,42 @@ describe('classifyUpstreamError', () => {
     expect(result.category).toBe('unknown');
     expect(result.retryable).toBe(false);
   });
+
+  it('classifies ECONNRESET transport code as retryable network error', () => {
+    const result = classifyUpstreamError({ message: 'read ECONNRESET', code: 'ECONNRESET' });
+    expect(result.category).toBe('network');
+    expect(result.retryable).toBe(true);
+    expect(result.retryAfterMs).toBeGreaterThanOrEqual(RETRY_INITIAL_DELAY_MS);
+  });
+
+  it('unwraps undici fetch-failed cause chain to a network error', () => {
+    const result = classifyUpstreamError(
+      Object.assign(new TypeError('fetch failed'), {
+        cause: Object.assign(new Error('connect ETIMEDOUT'), { code: 'UND_ERR_CONNECT_TIMEOUT' }),
+      }),
+    );
+    expect(result.category).toBe('network');
+    expect(result.retryable).toBe(true);
+  });
+
+  it('classifies "socket hang up" message as a network error when no code survives', () => {
+    const result = classifyUpstreamError({ message: 'socket hang up' });
+    expect(result.category).toBe('network');
+    expect(result.retryable).toBe(true);
+  });
+
+  it('keeps rate_limit precedence over the generic timeout network fallback', () => {
+    const result = classifyUpstreamError({ message: 'Rate limit exceeded, please wait' });
+    expect(result.category).toBe('rate_limit');
+  });
+
+  it('keeps transient_5xx precedence even when the body mentions a timeout', () => {
+    const result = classifyUpstreamError({
+      message: 'gateway timeout',
+      data: { statusCode: 504 },
+    });
+    expect(result.category).toBe('transient_5xx');
+  });
 });
 
 describe('computeRetryDelayMs', () => {

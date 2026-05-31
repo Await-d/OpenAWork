@@ -52,6 +52,15 @@ export type ModelsDevData = Record<string, ModelsDevProvider>;
 
 let _cache: ModelsDevData | null = null;
 let _timer: ReturnType<typeof setInterval> | null = null;
+// Single-flight guard for the network fetch + cache publish. Without it,
+// every concurrent caller hits the network independently: N users booting
+// at once each fire their own cold-start `get()` -> `fetchData()` (a
+// thundering herd against models.dev), and an interval-driven `refresh()`
+// can overlap a still-pending slow refresh. Both race each other's `_cache`
+// assignment and `writeLocalCache` file write. Sharing one in-flight promise
+// collapses concurrent callers onto a single request; the slot is released
+// in `finally` so a failed fetch never wedges future refreshes.
+let _inFlightFetch: Promise<ModelsDevData> | null = null;
 
 async function readLocalCache(): Promise<ModelsDevData | null> {
   try {
@@ -83,14 +92,43 @@ async function fetchData(): Promise<ModelsDevData> {
   return (await res.json()) as ModelsDevData;
 }
 
+async function fetchAndCache(): Promise<ModelsDevData> {
+  // Reuse the in-flight request if one is already running so concurrent
+  // callers don't each open a separate socket to models.dev.
+  if (_inFlightFetch) return _inFlightFetch;
+  _inFlightFetch = (async () => {
+    try {
+      const data = await fetchData();
+      _cache = data;
+      await writeLocalCache(data);
+      return data;
+    } finally {
+      // Release the slot whether the fetch resolved or rejected, otherwise
+      // a single failed refresh would permanently block every later one.
+      _inFlightFetch = null;
+    }
+  })();
+  return _inFlightFetch;
+}
+
 export async function refresh(): Promise<void> {
   try {
-    const data = await fetchData();
-    _cache = data;
-    await writeLocalCache(data);
+    await fetchAndCache();
   } catch (err) {
     console.warn('[models-dev] refresh failed', err);
   }
+}
+
+/**
+ * Force a fresh fetch from models.dev and publish it to the cache, **rethrowing**
+ * on failure. `refresh()` deliberately swallows errors (it backs an unattended
+ * hourly timer where a transient network blip should be ignored). A user-driven
+ * "sync now" action needs the opposite: surface the failure so the caller can
+ * tell the user it didn't work, instead of silently reporting success off a
+ * stale cache left by an earlier successful fetch.
+ */
+export async function refreshOrThrow(): Promise<ModelsDevData> {
+  return fetchAndCache();
 }
 
 export async function get(): Promise<ModelsDevData> {
@@ -101,9 +139,7 @@ export async function get(): Promise<ModelsDevData> {
     return _cache;
   }
   try {
-    const data = await fetchData();
-    _cache = data;
-    await writeLocalCache(data);
+    return await fetchAndCache();
   } catch {
     _cache = {} as ModelsDevData;
   }

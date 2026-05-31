@@ -127,6 +127,23 @@ export const SUBSTATE_E_LABEL: Record<SubstateE, string> = {
 // ─── 通用辅助 ─────────────────────────────────────────────────────────
 
 /**
+ * 跨层级合并的 substate → 中文标签表。用于不便确定 roleLayer 的场景（如推送通知条
+ * 只拿到一个 substate 字符串）。三层有重叠 key（idle/completed/failed/cancelled），
+ * 合并时语义一致，后写覆盖不影响结果。
+ */
+export const SUBSTATE_LABEL_ANY: Record<string, string> = {
+  ...SUBSTATE_C_LABEL,
+  ...SUBSTATE_D_LABEL,
+  ...SUBSTATE_E_LABEL,
+};
+
+/** 取任意 substate 的中文标签，未知值回退原文。 */
+export function substateLabelAny(substate: string | null | undefined): string | null {
+  if (!substate) return null;
+  return SUBSTATE_LABEL_ANY[substate] ?? substate;
+}
+
+/**
  * 根据 roleLayer 选择对应的 substate 顺序与标签表。
  * roleLayer 来自 sessions.role_layer 字段（Phase B 已落地）。
  */

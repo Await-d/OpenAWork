@@ -128,3 +128,80 @@ export function InstalledSkillsManager(props: InstalledSkillsManagerProps): Reac
     </table>
   );
 }
+
+// ─── provider-catalog-ui mock ───────────────────────────────────────────────
+// 真实实现见 packages/shared-ui/src/models/provider-catalog-ui.ts。
+// 测试环境只需提供同名导出与最小行为，避免消费方（如 team-runtime-ui-config）
+// 在模块加载期因缺失导出而抛 "is not a function"。
+
+export interface ProviderUpstreamVariantUi {
+  label: string;
+  baseUrl: string;
+  protocol?: 'chat_completions' | 'responses' | 'anthropic_messages';
+  isDefault?: boolean;
+}
+
+export interface ProviderCatalogUiEntry {
+  type: string;
+  displayName: string;
+  logoUrl?: string;
+  fallbackGlyph?: string;
+  aliases?: string[];
+  modelIdPrefixes?: string[];
+  upstreams?: ProviderUpstreamVariantUi[];
+  apiKeyEnv?: string;
+}
+
+export interface ResolvedProviderVisual {
+  type?: string;
+  displayName: string;
+  logoUrl?: string;
+  fallbackGlyph?: string;
+}
+
+const MOCK_PROVIDER_ENTRIES: ProviderCatalogUiEntry[] = [
+  { type: 'anthropic', displayName: 'Anthropic' },
+  { type: 'openai', displayName: 'OpenAI' },
+  { type: 'gemini', displayName: 'Google Gemini' },
+  { type: 'deepseek', displayName: 'DeepSeek' },
+  { type: 'qwen', displayName: 'Qwen' },
+  { type: 'moonshot', displayName: 'Moonshot (Kimi)' },
+  { type: 'mimo', displayName: 'Xiaomi MiMo' },
+];
+
+export function hydrateProviderCatalogUi(_entries: ProviderCatalogUiEntry[]): void {
+  // no-op in tests
+}
+
+export function getProviderUiList(): ProviderCatalogUiEntry[] {
+  return MOCK_PROVIDER_ENTRIES;
+}
+
+export function lookupProviderEntry(
+  ...candidates: Array<string | null | undefined>
+): ProviderCatalogUiEntry | undefined {
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const key = candidate.trim().toLowerCase();
+    const found = MOCK_PROVIDER_ENTRIES.find((entry) => entry.type === key);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+export function resolveProviderVisual(input: {
+  providerType?: string | null;
+  providerId?: string | null;
+  providerName?: string | null;
+}): ResolvedProviderVisual {
+  const entry = lookupProviderEntry(input.providerType, input.providerId, input.providerName);
+  if (entry) {
+    return { type: entry.type, displayName: input.providerName?.trim() || entry.displayName };
+  }
+  const raw = (input.providerName || input.providerType || input.providerId || '').trim();
+  return { displayName: raw || '助手' };
+}
+
+export function inferProviderLabelFromModelId(_modelId: string): string | undefined {
+  return undefined;
+}

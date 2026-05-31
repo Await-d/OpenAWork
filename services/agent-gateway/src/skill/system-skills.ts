@@ -365,10 +365,23 @@ export async function syncSystemSkillsForAllUsers(): Promise<{
   let removed = 0;
 
   for (const user of users) {
-    const result = await syncSystemSkillsForUser(user.id, { discoveredOverride: discovered });
-    added += result.added;
-    updated += result.updated;
-    removed += result.removed;
+    // Per-user resilience: syncSystemSkillsForUser issues DELETE / INSERT /
+    // UPDATE writes that can throw (DB lock, disk error, constraint). This loop
+    // runs at boot AND on the background scheduler, so one user's failure must
+    // not starve system-skill sync for every subsequent user. Isolate per user
+    // + warn, and keep the aggregate counts honest. (§0.102 class.)
+    try {
+      const result = await syncSystemSkillsForUser(user.id, { discoveredOverride: discovered });
+      added += result.added;
+      updated += result.updated;
+      removed += result.removed;
+    } catch (error) {
+      console.warn(
+        `[system-skills] 为用户 ${user.id} 同步系统技能失败，已跳过：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   return {

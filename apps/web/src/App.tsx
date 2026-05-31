@@ -1,7 +1,9 @@
 import { Suspense, useState, useEffect, createContext, useContext, useRef } from 'react';
 import type { ComponentType, LazyExoticComponent, MutableRefObject } from 'react';
+import type { OpenFileOptions } from './hooks/editor/useFileEditor.js';
 
-export type OpenFileFn = (path: string) => void;
+export type { OpenFileOptions };
+export type OpenFileFn = (path: string, options?: OpenFileOptions) => void;
 export const FileEditorContext = createContext<MutableRefObject<OpenFileFn | null>>({
   current: null,
 } as MutableRefObject<OpenFileFn | null>);
@@ -13,6 +15,7 @@ import { UnlockOverlay } from './components/common/modal/UnlockOverlay.js';
 import { tauriInvoke } from './pages/settings/shared/settings-page-helpers.js';
 import { useAuthStore } from './stores/auth/auth.js';
 import LoginPage from './pages/misc/LoginPage.js';
+import NotFoundPage from './pages/misc/NotFoundPage.js';
 import Layout from './components/Layout.js';
 import OnboardingModal from './components/onboarding/OnboardingModal.js';
 import PageTransitionLoader from './components/common/feedback/PageTransitionLoader.js';
@@ -531,7 +534,7 @@ export default function App() {
                 <Layout
                   theme={theme}
                   onToggleTheme={toggleTheme}
-                  onOpenFile={(path) => openFileRef.current?.(path)}
+                  onOpenFile={(path, options) => openFileRef.current?.(path, options)}
                 />
               </FileEditorContext>
             </ProtectedRoute>
@@ -691,6 +694,7 @@ export default function App() {
             }
           />
         </Route>
+        <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </>
   );

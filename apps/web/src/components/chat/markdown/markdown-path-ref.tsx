@@ -16,8 +16,8 @@ const HOVER_CLOSE_DELAY_MS = 120;
  * path reference (`apps/web/src/foo.ts:30`) was detected. Clicking
  * dispatches through the existing `FileEditorContext`, which
  * `App.tsx` wires to `useFileEditor.openFile`. The optional `line`
- * is currently ignored by `openFile` but is included in the rendered
- * label so users keep the visual locator.
+ * is forwarded so the editor scrolls to and selects that line; when
+ * absent the file opens at the top.
  *
  * On hover (after a short delay) a portal popover fetches the file
  * content via the gateway's `/workspace/file` endpoint and shows a
@@ -43,8 +43,10 @@ export function MarkdownPathRef({
   const handleClick = useCallback(() => {
     const openFile = fileEditorRef.current;
     if (!openFile) return;
-    openFile(path);
-  }, [fileEditorRef, path]);
+    // Forward the parsed line (e.g. `foo.ts:30`) so the editor lands on it
+    // instead of always snapping to line 1.
+    openFile(path, line != null ? { line } : undefined);
+  }, [fileEditorRef, path, line]);
 
   const clearOpenTimer = useCallback(() => {
     if (openTimerRef.current) {

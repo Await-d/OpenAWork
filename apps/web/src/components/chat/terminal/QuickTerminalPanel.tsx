@@ -351,7 +351,7 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
                     padding: '2px 4px 2px 8px',
                     borderRadius: 4,
                     background: isActive
-                      ? 'color-mix(in srgb, var(--success) 14%, var(--bg-overlay)'
+                      ? 'color-mix(in srgb, var(--success) 14%, var(--bg-overlay))'
                       : 'transparent',
                     border: isActive
                       ? '1px solid color-mix(in srgb, var(--success) 50%, transparent)'

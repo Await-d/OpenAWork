@@ -110,12 +110,12 @@ export default function LoginPage({ theme, onToggleTheme }: LoginPageProps = {})
     try {
       await startDesktopGateway(port);
       if (!(await waitForGatewayHealth(localUrl))) {
-        throw new Error('本地服务端已启动，但健康检查暂未通过');
+        throw new Error('本地服务端已启动，但健康检查暂未通过。');
       }
       setLocalStatus('ok');
     } catch (err: unknown) {
       setLocalStatus('fail');
-      setServerError(err instanceof Error ? err.message : '无法启动本地服务端');
+      setServerError(err instanceof Error ? err.message : '无法启动本地服务端。');
     }
   }
 
@@ -126,7 +126,7 @@ export default function LoginPage({ theme, onToggleTheme }: LoginPageProps = {})
 
     if (!remoteUrl) {
       setRemoteStatus('fail');
-      setServerError('请先填写远程服务端地址');
+      setServerError('请先填写远程服务端地址。');
       return;
     }
 

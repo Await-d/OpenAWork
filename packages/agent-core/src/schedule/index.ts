@@ -64,6 +64,13 @@ export class ScheduleManagerImpl implements ScheduleManager {
   private onceTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private cronTimer: ReturnType<typeof setInterval> | null = null;
   private running = false;
+  // Per-task in-flight set. `runTask(id)` is fire-and-forget from interval /
+  // once / cron timers; without this guard a handler that takes longer than
+  // its interval would stack overlapping invocations on every tick and
+  // amplify load on the very thing that is already slow. Mirrors the
+  // concurrency-slot pattern from `services/agent-gateway/src/cron/scheduler.ts`
+  // and the `tickInFlight` guard in `handoff/runner/watcher.ts`.
+  private inFlightTasks = new Set<string>();
 
   add(task: Omit<ScheduledTask, 'id' | 'createdAt' | 'lastRunAt' | 'nextRunAt'>): ScheduledTask {
     const created: ScheduledTask = {
@@ -82,6 +89,9 @@ export class ScheduleManagerImpl implements ScheduleManager {
   remove(taskId: string): void {
     this.clearTaskTimers(taskId);
     this.tasks.delete(taskId);
+    // Drop the reentrancy slot: even if a handler is still in flight, the
+    // task object is gone, so finalize() will be a no-op for the missing id.
+    this.inFlightTasks.delete(taskId);
   }
 
   enable(taskId: string): void {
@@ -137,6 +147,10 @@ export class ScheduleManagerImpl implements ScheduleManager {
       clearInterval(this.cronTimer);
       this.cronTimer = null;
     }
+    // Clear reentrancy slots: if stop() is called while a handler is mid-flight,
+    // the in-flight Set entry would otherwise survive into the next start()
+    // cycle and cause the very first tick to be falsely skipped.
+    this.inFlightTasks.clear();
   }
 
   private scheduleTask(taskId: string): void {
@@ -223,8 +237,29 @@ export class ScheduleManagerImpl implements ScheduleManager {
       return;
     }
 
+    // Reentrancy guard: if the previous fire of this task is still running,
+    // skip this tick. Without this, a handler that runs longer than its
+    // interval would stack: tick fires runTask, timer fires again, runTask
+    // queued, handler still pending, queue grows linearly with every tick
+    // until the event loop is saturated. We intentionally drop the
+    // overlapping tick rather than queueing it — the next interval will
+    // re-fire naturally once the slow run finishes.
+    if (this.inFlightTasks.has(taskId)) {
+      return;
+    }
+    this.inFlightTasks.add(taskId);
+
     try {
       await task.handler();
+    } catch (error) {
+      // runTask is invoked fire-and-forget (`void this.runTask(...)`) from
+      // interval / once / cron timers. A rejecting handler would otherwise
+      // become an unhandled promise rejection and could crash the host.
+      // Swallow + log so the schedule keeps running.
+      console.error('[schedule] task handler failed', {
+        taskId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     } finally {
       task.lastRunAt = Date.now();
       if (task.kind === 'interval') {
@@ -237,6 +272,10 @@ export class ScheduleManagerImpl implements ScheduleManager {
         task.enabled = false;
         this.clearTaskTimers(task.id);
       }
+      // Release reentrancy slot last — must happen even if the handler threw
+      // and the catch already swallowed it, otherwise the task would be
+      // permanently wedged "in flight" and never fire again.
+      this.inFlightTasks.delete(taskId);
     }
   }
 

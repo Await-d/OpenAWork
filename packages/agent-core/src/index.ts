@@ -188,11 +188,32 @@ export {
   getAllBuiltinPresets,
   getBuiltinProviderPreset,
 } from './provider/presets.js';
+export {
+  PROVIDER_CATALOG,
+  getCatalogEntry,
+  getDefaultUpstream,
+  resolveThinkingStyle,
+  catalogModelSupportsThinking,
+  inferProviderTypeFromHostname,
+  normalizeProviderAlias,
+  inferProviderLabelFromModelId,
+  getProviderDisplayName,
+  getProviderCatalogUi,
+} from './provider/catalog.js';
+export type {
+  ProviderCatalogEntry,
+  ProviderUpstreamVariant,
+  ProviderUiMeta,
+  ProviderThinkingStyle,
+  ProviderCatalogUiEntry,
+  CatalogUpstreamProtocol,
+} from './provider/catalog.js';
 export { ProviderManagerImpl } from './provider/manager.js';
 export {
   get as getModelsDevData,
   getSync as getModelsDevDataSync,
   refresh as refreshModelsDevData,
+  refreshOrThrow as refreshModelsDevDataOrThrow,
   startPeriodicRefresh as startModelsDevRefresh,
   stopPeriodicRefresh as stopModelsDevRefresh,
 } from './provider/models-dev.js';

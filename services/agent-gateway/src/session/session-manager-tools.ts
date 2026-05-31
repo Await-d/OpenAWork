@@ -257,10 +257,25 @@ export async function runSessionListTool(
   }
 
   const rows = await Promise.all(
+    // Per-session resilience: one session whose runtime reconciliation (DB
+    // writes + finalizeChildTaskRun) or message read throws must not reject
+    // the WHOLE `session_list` tool and blank the agent's entire listing.
+    // Fall back to the cheap persisted `state_status` column for that row,
+    // mirroring the batch `reconcileAllSessionRuntimes` which collects
+    // `failedSessionIds` instead of aborting.
     limited.map(async (session) => {
-      const messageCount = listSessionMessagesV2({ sessionId: session.id, userId }).length;
-      const runtime = await loadSessionRuntimeStatus({ sessionId: session.id, userId });
-      return `| ${session.id} | ${messageCount} | ${formatDate(session.created_at)} | ${formatDate(session.updated_at)} | ${runtime.status ?? session.state_status} | ${truncateText(session.title ?? '')} |`;
+      try {
+        const messageCount = listSessionMessagesV2({ sessionId: session.id, userId }).length;
+        const runtime = await loadSessionRuntimeStatus({ sessionId: session.id, userId });
+        return `| ${session.id} | ${messageCount} | ${formatDate(session.created_at)} | ${formatDate(session.updated_at)} | ${runtime.status ?? session.state_status} | ${truncateText(session.title ?? '')} |`;
+      } catch (error) {
+        console.warn(
+          `[session-manager] session_list 行 ${session.id} 运行时状态读取失败，降级为持久状态：${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        return `| ${session.id} | ? | ${formatDate(session.created_at)} | ${formatDate(session.updated_at)} | ${session.state_status} | ${truncateText(session.title ?? '')} |`;
+      }
     }),
   );
 

@@ -138,11 +138,11 @@ async function invokeTauri<T>(name: string, args?: Record<string, unknown>): Pro
   }
 
   if (runtime.isTauri) {
-    throw new Error('Tauri IPC is not available yet');
+    throw new Error('Tauri IPC 尚未就绪。');
   }
 
   {
-    throw new Error('Not running in Tauri');
+    throw new Error('当前不在 Tauri 桌面环境中运行。');
   }
 }
 
@@ -181,11 +181,11 @@ export async function listLanAddresses(): Promise<string[]> {
 export async function authenticateDesktopGateway(gatewayUrl: string): Promise<TokenPair> {
   const url = normalizeGatewayUrl(gatewayUrl);
   if (!url) {
-    throw new Error('请先选择 Gateway 地址');
+    throw new Error('请先选择网关地址。');
   }
 
   if (!isLocalGatewayUrl(url)) {
-    throw new Error('桌面默认身份仅适用于本地网关');
+    throw new Error('桌面默认身份仅适用于本地网关。');
   }
 
   const runtime = window as Window & TauriRuntime;
@@ -199,8 +199,8 @@ export async function authenticateDesktopGateway(gatewayUrl: string): Promise<To
   }
 
   if (runtime.isTauri) {
-    throw new Error('Tauri IPC is not available yet');
+    throw new Error('Tauri IPC 尚未就绪。');
   }
 
-  throw new Error('Not running in Tauri');
+  throw new Error('当前不在 Tauri 桌面环境中运行。');
 }

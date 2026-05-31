@@ -52,6 +52,15 @@ export const DEFAULT_EXTRACTOR_CONFIG: SessionMemoryExtractorConfig = {
   maxOutputTokens: 4_096,
 };
 
+/**
+ * Wall-clock timeout for the session-memory extraction upstream call.
+ * Extraction runs fire-and-forget after a stream completes and the
+ * caller passes no abort signal, so without this an upstream socket
+ * that connects but never responds would leak a pending request (and
+ * its in-flight conversation buffer) for the lifetime of the process.
+ */
+const SESSION_MEMORY_LLM_TIMEOUT_MS = 120_000;
+
 // ─── Template ────────────────────────────────────────────────────────────────
 
 const SESSION_MEMORY_TEMPLATE = `# Session Memory
@@ -229,23 +238,43 @@ export async function extractSessionMemory(input: {
 
     // Call LLM
     const modelMessages = unifiedConversationToModelMessages(conversationMessages);
-    const result = await runUpstreamGenerate({
-      providerType: input.route.providerType ?? 'openai',
-      ...(input.route.upstreamProtocol ? { upstreamProtocol: input.route.upstreamProtocol } : {}),
-      ...(input.route.apiKey ? { apiKey: input.route.apiKey } : {}),
-      ...(input.route.apiBaseUrl ? { baseURL: input.route.apiBaseUrl } : {}),
-      ...(input.route.requestOverrides.headers &&
-      Object.keys(input.route.requestOverrides.headers).length > 0
-        ? { headers: input.route.requestOverrides.headers }
-        : {}),
-      model: input.route.model,
-      system: SESSION_MEMORY_SYSTEM_PROMPT,
-      messages: modelMessages,
-      maxOutputTokens: config.maxOutputTokens,
-      temperature: 0,
-      requestOverrides: input.route.requestOverrides,
-      ...(input.signal ? { signal: input.signal } : {}),
-    });
+    const timeoutController = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      timeoutController.abort();
+    }, SESSION_MEMORY_LLM_TIMEOUT_MS);
+    timer.unref?.();
+    const signal: AbortSignal = input.signal
+      ? AbortSignal.any([timeoutController.signal, input.signal])
+      : timeoutController.signal;
+    let result: Awaited<ReturnType<typeof runUpstreamGenerate>>;
+    try {
+      result = await runUpstreamGenerate({
+        providerType: input.route.providerType ?? 'openai',
+        ...(input.route.upstreamProtocol ? { upstreamProtocol: input.route.upstreamProtocol } : {}),
+        ...(input.route.apiKey ? { apiKey: input.route.apiKey } : {}),
+        ...(input.route.apiBaseUrl ? { baseURL: input.route.apiBaseUrl } : {}),
+        ...(input.route.requestOverrides.headers &&
+        Object.keys(input.route.requestOverrides.headers).length > 0
+          ? { headers: input.route.requestOverrides.headers }
+          : {}),
+        model: input.route.model,
+        system: SESSION_MEMORY_SYSTEM_PROMPT,
+        messages: modelMessages,
+        maxOutputTokens: config.maxOutputTokens,
+        temperature: 0,
+        requestOverrides: input.route.requestOverrides,
+        signal,
+      });
+    } catch (err) {
+      if (timedOut) {
+        throw new Error(`session memory LLM timeout (${SESSION_MEMORY_LLM_TIMEOUT_MS}ms)`);
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
 
     const updatedMemory = result.text.trim();
     if (!updatedMemory) {

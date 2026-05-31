@@ -1,5 +1,5 @@
 import type { AIProvider, ActiveSelection, ProviderType } from '@openAwork/agent-core';
-import { ProviderManagerImpl } from '@openAwork/agent-core';
+import { ProviderManagerImpl, PROVIDER_CATALOG } from '@openAwork/agent-core';
 import {
   DEFAULT_IMAGE_GENERATION_SIZE,
   normalizeImageGenerationSize,
@@ -10,17 +10,17 @@ import {
 } from '@openAwork/shared';
 import { z } from 'zod';
 
-const PROVIDER_TYPE_VALUES = [
-  'anthropic',
-  'openai',
-  'deepseek',
-  'gemini',
-  'ollama',
-  'openrouter',
-  'qwen',
-  'moonshot',
+// 由 catalog 派生内置平台类型 + 'custom'，新增平台无需改这里。
+const PROVIDER_TYPE_SET: ReadonlySet<ProviderType> = new Set<ProviderType>([
+  ...PROVIDER_CATALOG.map((entry) => entry.type),
   'custom',
-] as const satisfies readonly ProviderType[];
+]);
+
+const providerTypeSchema = z.custom<ProviderType>(
+  (value): value is ProviderType =>
+    typeof value === 'string' && PROVIDER_TYPE_SET.has(value as ProviderType),
+  { message: 'Unknown provider type' },
+);
 
 const thinkingConfigSchema = z.object({
   enabled: z.boolean(),
@@ -136,7 +136,7 @@ export const aiModelConfigSchema = z.object({
 export const aiProviderSchema = z
   .object({
     id: z.string().min(1),
-    type: z.enum(PROVIDER_TYPE_VALUES),
+    type: providerTypeSchema,
     name: z.string().min(1),
     enabled: z.boolean(),
     baseUrl: z.string().default(''),
@@ -185,17 +185,47 @@ export const providerSettingsQuerySchema = z.object({
     .transform((value) => value === true || value === 'true'),
 });
 
+/**
+ * 连通性自检请求体：支持两种来源——
+ *   - `provider`(内联完整 provider 配置)：测「尚未保存」的设置页表单值；
+ *   - `providerId`(已保存 provider 的 id)：测库里已有配置。
+ * 二者必须提供其一，且都需要 `modelId` 指定要测哪个模型。
+ */
+export const providerConnectivityTestBodySchema = z
+  .object({
+    modelId: z.string().min(1),
+    provider: aiProviderSchema.optional(),
+    providerId: z.string().min(1).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (!value.provider && !value.providerId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Either `provider` or `providerId` is required.',
+      });
+    }
+  });
+
+/**
+ * 把单个内联 provider 规整为运行时 `AIProvider`(补 createdAt/updatedAt、
+ * 清洗 apiKeyEnv)，供连通性自检直接使用。
+ */
+export const normalizeSingleProviderForTest = (
+  provider: z.infer<typeof aiProviderSchema>,
+): AIProvider => {
+  const [normalized] = normalizeProviders([provider]);
+  return normalized as AIProvider;
+};
+
 type ProviderInput = z.infer<typeof aiProviderSchema>;
 
-const ALLOWED_API_KEY_ENV_BY_TYPE: Partial<Record<ProviderType, string>> = {
-  anthropic: 'ANTHROPIC_API_KEY',
-  openai: 'OPENAI_API_KEY',
-  deepseek: 'DEEPSEEK_API_KEY',
-  gemini: 'GEMINI_API_KEY',
-  openrouter: 'OPENROUTER_API_KEY',
-  qwen: 'QWEN_API_KEY',
-  moonshot: 'MOONSHOT_API_KEY',
-};
+// 由 catalog 的 apiKeyEnv 派生，新增平台无需改这里。
+const ALLOWED_API_KEY_ENV_BY_TYPE: Partial<Record<ProviderType, string>> = Object.fromEntries(
+  PROVIDER_CATALOG.filter((entry) => entry.apiKeyEnv).map((entry) => [
+    entry.type,
+    entry.apiKeyEnv as string,
+  ]),
+) as Partial<Record<ProviderType, string>>;
 
 const sanitizeProviderApiKeyEnv = (provider: ProviderInput): string | undefined => {
   const allowedEnv = ALLOWED_API_KEY_ENV_BY_TYPE[provider.type];

@@ -5,6 +5,12 @@ import type {
   StreamPermissionAskedChunk,
 } from '@openAwork/shared';
 import { HttpError } from './sessions.js';
+import {
+  extractJsonErrorMessage,
+  isGenericFetchErrorMessage,
+  type JsonErrorData,
+  fetchWithTimeout,
+} from '../gateway/http.js';
 
 export type {
   PendingPermissionRequest,
@@ -33,9 +39,70 @@ function authHeader(token: string): { Authorization: string } {
   return { Authorization: `Bearer ${token}` };
 }
 
-async function readJsonErrorData<T>(response: Response): Promise<T | undefined> {
-  const data = (await response.json().catch(() => null)) as T | null;
-  return data ?? undefined;
+function buildPermissionsActionErrorMessage(
+  actionLabel: string,
+  status: number,
+  data: JsonErrorData | undefined,
+): string {
+  const extracted = extractJsonErrorMessage(data);
+  if (extracted) {
+    return extracted;
+  }
+  if (status === 401 || status === 403) {
+    return `认证失效或当前账号无权${actionLabel}。`;
+  }
+  if (status === 404) {
+    return `目标权限请求资源不存在，无法${actionLabel}。`;
+  }
+  if (status === 409) {
+    return `当前状态不允许${actionLabel}。`;
+  }
+  return `${actionLabel}失败（HTTP ${status}）。`;
+}
+
+function isGenericPermissionsNetworkErrorMessage(message: string): boolean {
+  return isGenericFetchErrorMessage(message);
+}
+
+function normalizePermissionsError(actionLabel: string, error: unknown): Error {
+  if (error instanceof HttpError) {
+    const extracted = extractJsonErrorMessage((error.data ?? undefined) as JsonErrorData | undefined);
+    if (extracted) {
+      return new HttpError(extracted, error.status, error.data);
+    }
+    return error;
+  }
+  if (error instanceof Error) {
+    const message = error.message.trim();
+    if (message.length > 0 && !isGenericPermissionsNetworkErrorMessage(message)) {
+      return error;
+    }
+  }
+  return new Error(`网络异常，${actionLabel}失败。`);
+}
+
+async function performPermissionsRequest<T>(input: {
+  actionLabel: string;
+  parseJson?: boolean;
+  request: () => Promise<Response>;
+}): Promise<T> {
+  try {
+    const res = await input.request();
+    if (!res.ok) {
+      const data = (await res.json().catch(() => null)) as JsonErrorData | null;
+      throw new HttpError(
+        buildPermissionsActionErrorMessage(input.actionLabel, res.status, data ?? undefined),
+        res.status,
+        data ?? undefined,
+      );
+    }
+    if (input.parseJson === false || res.status === 204) {
+      return undefined as T;
+    }
+    return (await res.json()) as T;
+  } catch (error) {
+    throw normalizePermissionsError(input.actionLabel, error);
+  }
 }
 
 export function isPendingPermissionRequest(value: unknown): value is PendingPermissionRequest {
@@ -122,42 +189,41 @@ export function createPendingPermissionRequestSnapshot(
 export function createPermissionsClient(gatewayUrl: string): PermissionsClient {
   return {
     async listPending(token, sessionId, options) {
-      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/permissions/pending`, {
-        headers: authHeader(token),
-        signal: options?.signal,
+      const data = await performPermissionsRequest<{ requests?: PendingPermissionRequest[] }>({
+        actionLabel: '读取待处理权限请求',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}/permissions/pending`, {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
       });
-      if (!res.ok) {
-        const data = await readJsonErrorData<{ error?: string }>(res);
-        throw new HttpError(`Failed to list pending permissions: ${res.status}`, res.status, data);
-      }
-      const data = (await res.json()) as { requests?: PendingPermissionRequest[] };
       return data.requests ?? [];
     },
 
     async createRequest(token, sessionId, payload) {
-      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/permissions/requests`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeader(token) },
-        body: JSON.stringify(payload),
+      const data = await performPermissionsRequest<{ request: PendingPermissionRequest }>({
+        actionLabel: '创建权限请求',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}/permissions/requests`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeader(token) },
+            body: JSON.stringify(payload),
+          }),
       });
-      if (!res.ok) {
-        const data = await readJsonErrorData<{ error?: string }>(res);
-        throw new HttpError(`Failed to create permission request: ${res.status}`, res.status, data);
-      }
-      const data = (await res.json()) as { request: PendingPermissionRequest };
       return data.request;
     },
 
     async reply(token, sessionId, payload) {
-      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/permissions/reply`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeader(token) },
-        body: JSON.stringify(payload),
+      await performPermissionsRequest({
+        actionLabel: '回复权限请求',
+        parseJson: false,
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}/permissions/reply`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeader(token) },
+            body: JSON.stringify(payload),
+          }),
       });
-      if (!res.ok) {
-        const data = await readJsonErrorData<{ error?: string }>(res);
-        throw new HttpError(`Failed to reply permission request: ${res.status}`, res.status, data);
-      }
     },
   };
 }

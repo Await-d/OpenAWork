@@ -1,6 +1,23 @@
 import type { FileDiffContent, ToolCallObservabilityAnnotation } from './message-schema.js';
 
 export type {
+  TeamInitPhase,
+  TeamInitProjectKind,
+  TeamInitStepKey,
+  TeamInitStepStatus,
+  TeamInitStep,
+  TeamInitLayerBinding,
+  TeamInitBindings,
+  TeamInitState,
+} from './team-init.js';
+export {
+  TEAM_INIT_STATE_VERSION,
+  TEAM_INIT_STEP_ORDER,
+  isTeamInitFinished,
+  deriveTeamInitPhase,
+} from './team-init.js';
+
+export type {
   AssistantReasoningBlockTiming,
   AssistantTracePart,
   AssistantTracePayload,
@@ -117,7 +134,13 @@ export type TeamMemberSpecialty =
   | 'security'
   | 'sre'
   | 'observability'
-  | 'quality';
+  | 'quality'
+  /**
+   * 用户自定义角色。与上面的预置 specialty 不同，custom 成员的「身份」由
+   * displayName + personaKey + systemPrompt 表达，可在任意层新增多个
+   * （personaKey 区分），运行时按其 systemPrompt 注入人物设定。
+   */
+  | 'custom';
 
 export interface FixedTeamMemberSlot {
   id: string;
@@ -127,6 +150,46 @@ export interface FixedTeamMemberSlot {
   personaKey: string;
   toolsets: string[];
   required: boolean;
+  /**
+   * 该成员运行时使用的模型绑定（可选，向后兼容）。
+   * 未指定时运行时回退到层默认 → 模板 defaultProvider → 用户全局 active 选择。
+   * 与「智能分配模型」功能配合：模板可一键按层填充，用户再逐槽微调。
+   */
+  providerId?: string;
+  modelId?: string;
+  variant?: string;
+  /**
+   * 自定义角色专属字段（specialty === 'custom' 时有意义）：
+   *   - custom: 标记这是用户自定义成员（UI / 运行时据此走自定义路径）
+   *   - systemPrompt: 该角色的人物设定提示词（可由 AI 优化），运行时注入
+   */
+  custom?: boolean;
+  systemPrompt?: string;
+  /**
+   * 模板初始绑定的能力（可选，向后兼容）：
+   *   - skillIds: 该成员默认启用的 skill id 列表（运行时注入 metadata.requestedSkills）
+   *   - mcpServerIds: 该成员默认可用的 MCP server id 列表
+   * 仅列出用户已安装/启用的项；运行时仍按实际安装情况二次过滤。
+   */
+  skillIds?: string[];
+  mcpServerIds?: string[];
+  /**
+   * 路由关键词（可选）：该成员「擅长处理什么」的关键词 / 领域词。
+   *
+   * 用于让上游派发（PM2 resolveAssignedMember）**动态识别**该成员的专长 ——
+   * 尤其是自定义角色（specialty='custom' 本身不在预置关键词表里）。任务文本
+   * 命中这里任一关键词时，该成员在同层候选中获得更高匹配分，从而被优先派发。
+   * 预置角色一般无需填（已由 specialty 关键词表覆盖），自定义角色强烈建议填。
+   */
+  routingKeywords?: string[];
+  /**
+   * 派发优先级（可选）：同层多个候选打分相同时的排序权重。
+   *   - high：优先派发
+   *   - normal（默认）：常规
+   *   - low：兜底，其他都不合适时才用
+   * 仅影响「分数相同」时的次序，不会突破关键词 / specialty 的强匹配。
+   */
+  dispatchPriority?: 'high' | 'normal' | 'low';
 }
 
 export const DEFAULT_FIXED_TEAM_MEMBER_SLOTS: FixedTeamMemberSlot[] = [

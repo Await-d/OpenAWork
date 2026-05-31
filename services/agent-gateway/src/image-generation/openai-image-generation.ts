@@ -5,8 +5,27 @@ import {
   type ImageGenerationOutputFormat,
   type ImageGenerationQuality,
 } from '@openAwork/shared';
+import {
+  readResponseJsonWithLimit,
+  readResponseTextWithLimit,
+  resolveHttpBodyLimitBytes,
+} from '../infra/http-body-limit.js';
 
 export type ImageGenerationSize = string;
+
+// Memory bound for an upstream image-generation/edit response. `apiBaseUrl`
+// is a user-configured provider endpoint, so a misbehaving / hostile relay
+// could stream unbounded bytes and OOM the gateway — the wall-clock-only
+// caller signal does NOT bound memory (§0.124/§0.125 class). Image payloads
+// are base64 (legitimately several MB at 4K), so the default is generous but
+// still finite; override via OPENAWORK_IMAGE_RESPONSE_MAX_BYTES, 0 disables.
+const DEFAULT_IMAGE_RESPONSE_MAX_BYTES = 64 * 1024 * 1024;
+function resolveImageResponseMaxBytes(): number {
+  return resolveHttpBodyLimitBytes(
+    'OPENAWORK_IMAGE_RESPONSE_MAX_BYTES',
+    DEFAULT_IMAGE_RESPONSE_MAX_BYTES,
+  );
+}
 
 interface OpenAiImageGenerationInput {
   apiBaseUrl: string;
@@ -241,7 +260,10 @@ export async function generateImageWithOpenAi(
   }
 
   if (!response.ok) {
-    const upstreamBody = await response.text().catch(() => 'Unknown error');
+    const upstreamBody = await readResponseTextWithLimit(
+      response,
+      resolveImageResponseMaxBytes(),
+    ).catch(() => 'Unknown error');
     throw new OpenAiImageGenerationError(
       mapUpstreamImageGenerationMessage(response.status, upstreamBody, input.size),
       {
@@ -251,9 +273,9 @@ export async function generateImageWithOpenAi(
     );
   }
 
-  const payload = (await response.json()) as {
+  const payload = await readResponseJsonWithLimit<{
     data?: Array<{ b64_json?: string; revised_prompt?: string }>;
-  };
+  }>(response, resolveImageResponseMaxBytes());
   const item = payload.data?.[0];
   if (!item?.b64_json) {
     throw new OpenAiImageGenerationError('图片生成未返回可用的图像数据。', {
@@ -315,7 +337,10 @@ export async function editImageWithOpenAi(
   }
 
   if (!response.ok) {
-    const upstreamBody = await response.text().catch(() => 'Unknown error');
+    const upstreamBody = await readResponseTextWithLimit(
+      response,
+      resolveImageResponseMaxBytes(),
+    ).catch(() => 'Unknown error');
     throw new OpenAiImageGenerationError(
       mapUpstreamImageGenerationMessage(response.status, upstreamBody, input.size),
       {
@@ -325,9 +350,9 @@ export async function editImageWithOpenAi(
     );
   }
 
-  const payload = (await response.json()) as {
+  const payload = await readResponseJsonWithLimit<{
     data?: Array<{ b64_json?: string; revised_prompt?: string }>;
-  };
+  }>(response, resolveImageResponseMaxBytes());
   const item = payload.data?.[0];
   if (!item?.b64_json) {
     throw new OpenAiImageGenerationError('图片编辑未返回可用的图像数据。', {

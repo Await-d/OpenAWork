@@ -12,7 +12,7 @@ const DIALOG_STYLE: CSSProperties = {
   padding: 16,
   borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
   boxShadow: 'var(--shadow-md)',
 };
 
@@ -24,7 +24,7 @@ const BUTTON_PRIMARY: CSSProperties = {
   padding: '0 14px',
   borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay)',
+  background: 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay))',
   color: 'var(--fg-strong)',
   cursor: 'pointer',
   fontSize: 12,
@@ -34,14 +34,14 @@ const BUTTON_PRIMARY: CSSProperties = {
 const BUTTON_DANGER: CSSProperties = {
   ...BUTTON_PRIMARY,
   border: '1px solid color-mix(in srgb, var(--danger) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--danger) 12%, var(--bg-overlay)',
+  background: 'color-mix(in srgb, var(--danger) 12%, var(--bg-overlay))',
   color: 'var(--danger)',
 };
 
 const BUTTON_SECONDARY: CSSProperties = {
   ...BUTTON_PRIMARY,
   border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
   color: 'var(--fg-default)',
 };
 

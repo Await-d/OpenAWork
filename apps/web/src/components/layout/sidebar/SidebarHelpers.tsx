@@ -1,4 +1,8 @@
-import React, { useState as useLocalState, useEffect as useLocalEffect } from 'react';
+import React, {
+  useState as useLocalState,
+  useEffect as useLocalEffect,
+  useRef as useLocalRef,
+} from 'react';
 import { createWorkspaceClient } from '@openAwork/web-client';
 import type { FileTreeNode } from '../../common/modal/WorkspacePickerModal.js';
 import { FileIcon, FolderIcon } from '../../file-editor/preview/FileIcon.js';
@@ -31,20 +35,79 @@ export function WorkspaceGitBadge({
   accessToken: string;
 }) {
   const [changes, setChanges] = useLocalState<number | null>(null);
+  const [error, setError] = useLocalState<string | null>(null);
+  const [retryTick, setRetryTick] = useLocalState(0);
+  const latestResultRef = useLocalRef<{ changes: number | null; error: string | null }>({
+    changes: null,
+    error: null,
+  });
+
+  useLocalEffect(() => {
+    latestResultRef.current = { changes, error };
+  }, [changes, error]);
+
   useLocalEffect(() => {
     let cancelled = false;
     void createWorkspaceClient(gatewayUrl)
-      .reviewStatus(accessToken, workspacePath)
-      .then((items) => {
-        if (!cancelled) setChanges(items.length);
+      .reviewStatusResult(accessToken, workspacePath)
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+        if (!result.ok) {
+          setError(result.errorMessage ?? '无法读取改动状态');
+          return;
+        }
+        setChanges(result.changes.length);
+        setError(null);
       })
-      .catch(() => {
-        if (!cancelled) setChanges(null);
+      .catch((reason) => {
+        if (!cancelled) {
+          setError(reason instanceof Error ? reason.message : '无法读取改动状态');
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [workspacePath, gatewayUrl, accessToken]);
+  }, [workspacePath, gatewayUrl, accessToken, retryTick]);
+
+  useLocalEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const handleOnline = () => {
+      if (latestResultRef.current.error) {
+        setRetryTick((value) => value + 1);
+      }
+    };
+    window.addEventListener('online', handleOnline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+    };
+  }, []);
+
+  if (error) {
+    return (
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 3,
+          fontSize: 9,
+          fontWeight: 700,
+          background: 'color-mix(in oklab, var(--danger) 8%, transparent)',
+          color: 'var(--danger)',
+          border: '1px solid color-mix(in oklab, var(--danger) 24%, var(--border-default) 76%)',
+          borderRadius: 4,
+          padding: '1px 5px 1px 4px',
+          flexShrink: 0,
+        }}
+        title={changes !== null ? `${error} · ${changes} 处未提交改动` : error}
+      >
+        {changes !== null && changes > 0 ? `! ${changes}` : '!'}
+      </span>
+    );
+  }
 
   if (changes === null || changes === 0) return null;
   return (
@@ -279,10 +342,10 @@ export function FileTreeView({
                   padding: `2px 8px 2px ${8 + depth * INDENT_PX}px`,
                   borderRadius: 5,
                   border: isActive
-                    ? '1px solid color-mix(in oklch, var(--accent) 30%, var(--border-default)'
+                    ? '1px solid color-mix(in oklch, var(--accent) 30%, var(--border-default))'
                     : '1px solid transparent',
                   background: isActive
-                    ? 'color-mix(in oklch, var(--accent) 12%, var(--bg-overlay)'
+                    ? 'color-mix(in oklch, var(--accent) 12%, var(--bg-overlay))'
                     : isHighlighted
                       ? 'color-mix(in oklch, var(--accent) 10%, transparent)'
                       : 'transparent',

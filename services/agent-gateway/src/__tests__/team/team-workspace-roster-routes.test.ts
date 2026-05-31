@@ -61,7 +61,8 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
-  dbModule.sqliteRun('DELETE FROM users', []);
+  // 注意：不再 `DELETE FROM users`——共享内存 DB 下该删除会连带清掉并行兄弟
+  // 测试文件种入的用户行，导致它们的 requireAuth 校验偶发 401。改为幂等 seed。
   seedUser(USER_ID);
 });
 

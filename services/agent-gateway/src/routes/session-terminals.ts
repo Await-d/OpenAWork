@@ -27,6 +27,7 @@ import {
   writeStdinToTerminal,
 } from '../session/persistent-terminals.js';
 import { subscribeSessionRunEvents } from '../session/session-run-events.js';
+import { createSseClientChannel } from './sse-client-channel.js';
 import {
   deleteTerminalRecord,
   getTerminal,
@@ -37,6 +38,48 @@ import {
 
 interface SessionOwnerRow {
   user_id: string;
+}
+
+type SessionTerminalErrorCode =
+  | 'unauthorized'
+  | 'session_not_found'
+  | 'terminal_not_found'
+  | 'terminal_running'
+  | 'spawn_failed'
+  | 'terminal_not_persistent'
+  | 'invalid_body';
+
+const SESSION_TERMINAL_ERROR_MESSAGES: Record<
+  Exclude<SessionTerminalErrorCode, 'spawn_failed'>,
+  string
+> = {
+  invalid_body: '请求体参数无效。',
+  session_not_found: '目标会话不存在。',
+  terminal_not_found: '目标终端不存在。',
+  terminal_not_persistent: '该终端是 agent 的一次性命令，不支持继续输入。',
+  terminal_running: '终端仍在运行，请先终止后再删除记录。',
+  unauthorized: '未授权或登录已失效。',
+};
+
+function terminalErrorPayload(code: Exclude<SessionTerminalErrorCode, 'spawn_failed'>): {
+  error: Exclude<SessionTerminalErrorCode, 'spawn_failed'>;
+  message: string;
+};
+function terminalErrorPayload(
+  code: 'spawn_failed',
+  message: string,
+): { error: 'spawn_failed'; message: string };
+function terminalErrorPayload(code: SessionTerminalErrorCode, message?: string) {
+  if (code === 'spawn_failed') {
+    return {
+      error: code,
+      message: message && message.trim().length > 0 ? message : '创建终端失败。',
+    };
+  }
+  return {
+    error: code,
+    message: SESSION_TERMINAL_ERROR_MESSAGES[code],
+  };
 }
 
 function ensureSessionOwnedByUser(sessionId: string, userId: string): boolean {
@@ -76,10 +119,10 @@ export async function sessionTerminalsRoutes(app: FastifyInstance): Promise<void
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const user = request.user as JwtPayload | undefined;
-      if (!user?.sub) return reply.code(401).send({ error: 'unauthorized' });
+      if (!user?.sub) return reply.code(401).send(terminalErrorPayload('unauthorized'));
       const { sessionId } = request.params as { sessionId: string };
       if (!ensureSessionOwnedByUser(sessionId, user.sub)) {
-        return reply.code(404).send({ error: 'session_not_found' });
+        return reply.code(404).send(terminalErrorPayload('session_not_found'));
       }
       const query = request.query as { status?: string; limit?: string };
       const includeClosed = query.status !== 'running';
@@ -100,17 +143,17 @@ export async function sessionTerminalsRoutes(app: FastifyInstance): Promise<void
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const user = request.user as JwtPayload | undefined;
-      if (!user?.sub) return reply.code(401).send({ error: 'unauthorized' });
+      if (!user?.sub) return reply.code(401).send(terminalErrorPayload('unauthorized'));
       const { sessionId, terminalId } = request.params as {
         sessionId: string;
         terminalId: string;
       };
       if (!ensureSessionOwnedByUser(sessionId, user.sub)) {
-        return reply.code(404).send({ error: 'session_not_found' });
+        return reply.code(404).send(terminalErrorPayload('session_not_found'));
       }
       const record = getTerminal(terminalId, user.sub);
       if (!record || record.sessionId !== sessionId) {
-        return reply.code(404).send({ error: 'terminal_not_found' });
+        return reply.code(404).send(terminalErrorPayload('terminal_not_found'));
       }
       return reply.send({ terminal: toPublicTerminal(record) });
     },
@@ -121,17 +164,17 @@ export async function sessionTerminalsRoutes(app: FastifyInstance): Promise<void
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const user = request.user as JwtPayload | undefined;
-      if (!user?.sub) return reply.code(401).send({ error: 'unauthorized' });
+      if (!user?.sub) return reply.code(401).send(terminalErrorPayload('unauthorized'));
       const { sessionId, terminalId } = request.params as {
         sessionId: string;
         terminalId: string;
       };
       if (!ensureSessionOwnedByUser(sessionId, user.sub)) {
-        return reply.code(404).send({ error: 'session_not_found' });
+        return reply.code(404).send(terminalErrorPayload('session_not_found'));
       }
       const record = getTerminal(terminalId, user.sub);
       if (!record || record.sessionId !== sessionId) {
-        return reply.code(404).send({ error: 'terminal_not_found' });
+        return reply.code(404).send(terminalErrorPayload('terminal_not_found'));
       }
       const result = killTerminal({ terminalId, userId: user.sub });
       // Re-read so the response reflects whatever final status the
@@ -149,24 +192,21 @@ export async function sessionTerminalsRoutes(app: FastifyInstance): Promise<void
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const user = request.user as JwtPayload | undefined;
-      if (!user?.sub) return reply.code(401).send({ error: 'unauthorized' });
+      if (!user?.sub) return reply.code(401).send(terminalErrorPayload('unauthorized'));
       const { sessionId, terminalId } = request.params as {
         sessionId: string;
         terminalId: string;
       };
       if (!ensureSessionOwnedByUser(sessionId, user.sub)) {
-        return reply.code(404).send({ error: 'session_not_found' });
+        return reply.code(404).send(terminalErrorPayload('session_not_found'));
       }
       const record = getTerminal(terminalId, user.sub);
       if (!record || record.sessionId !== sessionId) {
-        return reply.code(404).send({ error: 'terminal_not_found' });
+        return reply.code(404).send(terminalErrorPayload('terminal_not_found'));
       }
       const result = deleteTerminalRecord({ terminalId, userId: user.sub });
       if (result.refusedRunning) {
-        return reply.code(409).send({
-          error: 'terminal_running',
-          message: 'Kill the terminal before deleting the record.',
-        });
+        return reply.code(409).send(terminalErrorPayload('terminal_running'));
       }
       return reply.send({ deleted: result.deleted });
     },
@@ -183,17 +223,17 @@ export async function sessionTerminalsRoutes(app: FastifyInstance): Promise<void
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const user = request.user as JwtPayload | undefined;
-      if (!user?.sub) return reply.code(401).send({ error: 'unauthorized' });
+      if (!user?.sub) return reply.code(401).send(terminalErrorPayload('unauthorized'));
       const { sessionId, terminalId } = request.params as {
         sessionId: string;
         terminalId: string;
       };
       if (!ensureSessionOwnedByUser(sessionId, user.sub)) {
-        return reply.code(404).send({ error: 'session_not_found' });
+        return reply.code(404).send(terminalErrorPayload('session_not_found'));
       }
       const record = getTerminal(terminalId, user.sub);
       if (!record || record.sessionId !== sessionId) {
-        return reply.code(404).send({ error: 'terminal_not_found' });
+        return reply.code(404).send(terminalErrorPayload('terminal_not_found'));
       }
       const body = (request.body ?? {}) as { name?: string | null };
       const name = typeof body.name === 'string' ? body.name : null;
@@ -217,10 +257,10 @@ export async function sessionTerminalsRoutes(app: FastifyInstance): Promise<void
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const user = request.user as JwtPayload | undefined;
-      if (!user?.sub) return reply.code(401).send({ error: 'unauthorized' });
+      if (!user?.sub) return reply.code(401).send(terminalErrorPayload('unauthorized'));
       const { sessionId } = request.params as { sessionId: string };
       if (!ensureSessionOwnedByUser(sessionId, user.sub)) {
-        return reply.code(404).send({ error: 'session_not_found' });
+        return reply.code(404).send(terminalErrorPayload('session_not_found'));
       }
       const body = (request.body ?? {}) as {
         cwd?: string;
@@ -240,10 +280,14 @@ export async function sessionTerminalsRoutes(app: FastifyInstance): Promise<void
         });
         return reply.send({ terminal: toPublicTerminal(result.terminal) });
       } catch (error) {
-        return reply.code(500).send({
-          error: 'spawn_failed',
-          message: error instanceof Error ? error.message : String(error),
-        });
+        return reply
+          .code(500)
+          .send(
+            terminalErrorPayload(
+              'spawn_failed',
+              error instanceof Error ? error.message : String(error),
+            ),
+          );
       }
     },
   );
@@ -259,27 +303,24 @@ export async function sessionTerminalsRoutes(app: FastifyInstance): Promise<void
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const user = request.user as JwtPayload | undefined;
-      if (!user?.sub) return reply.code(401).send({ error: 'unauthorized' });
+      if (!user?.sub) return reply.code(401).send(terminalErrorPayload('unauthorized'));
       const { sessionId, terminalId } = request.params as {
         sessionId: string;
         terminalId: string;
       };
       if (!ensureSessionOwnedByUser(sessionId, user.sub)) {
-        return reply.code(404).send({ error: 'session_not_found' });
+        return reply.code(404).send(terminalErrorPayload('session_not_found'));
       }
       const record = getTerminal(terminalId, user.sub);
       if (!record || record.sessionId !== sessionId) {
-        return reply.code(404).send({ error: 'terminal_not_found' });
+        return reply.code(404).send(terminalErrorPayload('terminal_not_found'));
       }
       if (!isPersistentTerminal(terminalId)) {
-        return reply.code(409).send({
-          error: 'terminal_not_persistent',
-          message: '该终端是 agent 的一次性命令，不支持继续输入。',
-        });
+        return reply.code(409).send(terminalErrorPayload('terminal_not_persistent'));
       }
       const body = (request.body ?? {}) as { data?: string };
       if (typeof body.data !== 'string') {
-        return reply.code(400).send({ error: 'invalid_body' });
+        return reply.code(400).send(terminalErrorPayload('invalid_body'));
       }
       const result = writeStdinToTerminal(terminalId, body.data);
       if (!result.ok) return reply.code(409).send(result);
@@ -297,17 +338,17 @@ export async function sessionTerminalsRoutes(app: FastifyInstance): Promise<void
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const user = request.user as JwtPayload | undefined;
-      if (!user?.sub) return reply.code(401).send({ error: 'unauthorized' });
+      if (!user?.sub) return reply.code(401).send(terminalErrorPayload('unauthorized'));
       const { sessionId, terminalId } = request.params as {
         sessionId: string;
         terminalId: string;
       };
       if (!ensureSessionOwnedByUser(sessionId, user.sub)) {
-        return reply.code(404).send({ error: 'session_not_found' });
+        return reply.code(404).send(terminalErrorPayload('session_not_found'));
       }
       const record = getTerminal(terminalId, user.sub);
       if (!record || record.sessionId !== sessionId) {
-        return reply.code(404).send({ error: 'terminal_not_found' });
+        return reply.code(404).send(terminalErrorPayload('terminal_not_found'));
       }
       const body = (request.body ?? {}) as { cols?: number; rows?: number };
       const cols = Number.isFinite(body.cols) ? Math.max(1, Math.floor(body.cols ?? 80)) : 80;
@@ -328,17 +369,17 @@ export async function sessionTerminalsRoutes(app: FastifyInstance): Promise<void
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const user = request.user as JwtPayload | undefined;
-      if (!user?.sub) return reply.code(401).send({ error: 'unauthorized' });
+      if (!user?.sub) return reply.code(401).send(terminalErrorPayload('unauthorized'));
       const { sessionId, terminalId } = request.params as {
         sessionId: string;
         terminalId: string;
       };
       if (!ensureSessionOwnedByUser(sessionId, user.sub)) {
-        return reply.code(404).send({ error: 'session_not_found' });
+        return reply.code(404).send(terminalErrorPayload('session_not_found'));
       }
       const record = getTerminal(terminalId, user.sub);
       if (!record || record.sessionId !== sessionId) {
-        return reply.code(404).send({ error: 'terminal_not_found' });
+        return reply.code(404).send(terminalErrorPayload('terminal_not_found'));
       }
       if (isPersistentTerminal(terminalId)) {
         closePersistentTerminal(terminalId);
@@ -364,18 +405,18 @@ export async function sessionTerminalsRoutes(app: FastifyInstance): Promise<void
       try {
         user = request.server.jwt.verify<JwtPayload>(sseToken ?? '');
       } catch {
-        return reply.code(401).send({ error: 'unauthorized' });
+        return reply.code(401).send(terminalErrorPayload('unauthorized'));
       }
       const { sessionId, terminalId } = request.params as {
         sessionId: string;
         terminalId: string;
       };
       if (!ensureSessionOwnedByUser(sessionId, user.sub)) {
-        return reply.code(404).send({ error: 'session_not_found' });
+        return reply.code(404).send(terminalErrorPayload('session_not_found'));
       }
       const record = getTerminal(terminalId, user.sub);
       if (!record || record.sessionId !== sessionId) {
-        return reply.code(404).send({ error: 'terminal_not_found' });
+        return reply.code(404).send(terminalErrorPayload('terminal_not_found'));
       }
 
       const requestOrigin = request.headers['origin'] ?? '*';
@@ -390,63 +431,55 @@ export async function sessionTerminalsRoutes(app: FastifyInstance): Promise<void
       });
       reply.raw.write('retry: 1000\n\n');
 
-      let clientClosed = false;
-      const safeWrite = (eventName: string, data: unknown): void => {
-        if (clientClosed) return;
-        try {
-          reply.raw.write(`event: ${eventName}\n`);
-          reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
-        } catch {
-          clientClosed = true;
-        }
-      };
-
-      // Initial snapshot so xterm has output to render immediately.
-      safeWrite('snapshot', {
-        terminalId: record.terminalId,
-        outputTail: record.outputTail,
-        outputBytesTotal: record.outputBytesTotal,
-        status: record.status,
-      });
-
-      const unsubscribe = subscribeSessionRunEvents(sessionId, (event) => {
-        if (event.type === 'terminal_output' && event.terminalId === terminalId) {
-          safeWrite('output', event);
-          return;
-        }
-        if (event.type === 'terminal_exited' && event.terminalId === terminalId) {
-          safeWrite('exited', event);
-          return;
-        }
-      });
-
-      const heartbeat = setInterval(() => {
-        if (clientClosed) return;
-        try {
-          reply.raw.write(': keepalive\n\n');
-        } catch {
-          clientClosed = true;
-        }
-      }, 25_000);
-
       return new Promise<void>((resolve) => {
-        const finish = (): void => {
-          clientClosed = true;
-          clearInterval(heartbeat);
-          try {
-            unsubscribe();
-          } catch {
-            /* ignore */
-          }
-          request.raw.off('close', finish);
-          try {
-            reply.raw.end();
-          } catch {
-            /* ignore */
-          }
-          resolve();
+        // The channel collapses three independent teardown triggers — TCP
+        // 'close', a failed SSE write (half-open / broken pipe that may never
+        // emit 'close'), and explicit close — into one idempotent teardown. A
+        // failed write tears the run-event subscription + heartbeat down
+        // immediately instead of merely flagging closed, so a half-open socket
+        // can't leak a module-level listener and a zombie heartbeat for the
+        // process lifetime. Mirrors `/mcp/events`.
+        const channel = createSseClientChannel({
+          rawWrite: (chunk) => reply.raw.write(chunk),
+          rawEnd: () => reply.raw.end(),
+        });
+
+        const onClose = (): void => {
+          channel.close();
         };
-        request.raw.on('close', finish);
+        channel.addTeardown(() => request.raw.off('close', onClose));
+        channel.addTeardown(resolve);
+
+        const safeWrite = (eventName: string, data: unknown): void => {
+          channel.write(`event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`);
+        };
+
+        // Initial snapshot so xterm has output to render immediately.
+        safeWrite('snapshot', {
+          terminalId: record.terminalId,
+          outputTail: record.outputTail,
+          outputBytesTotal: record.outputBytesTotal,
+          status: record.status,
+        });
+
+        const unsubscribe = subscribeSessionRunEvents(sessionId, (event) => {
+          if (event.type === 'terminal_output' && event.terminalId === terminalId) {
+            safeWrite('output', event);
+            return;
+          }
+          if (event.type === 'terminal_exited' && event.terminalId === terminalId) {
+            safeWrite('exited', event);
+            return;
+          }
+        });
+        channel.addTeardown(unsubscribe);
+
+        const heartbeat = setInterval(() => {
+          channel.write(': keepalive\n\n');
+        }, 25_000);
+        channel.addTeardown(() => clearInterval(heartbeat));
+
+        request.raw.on('close', onClose);
       });
     },
   );

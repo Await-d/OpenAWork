@@ -104,14 +104,27 @@ export async function findPrometheusPlans(directory: string): Promise<string[]> 
     const entries = await fsp.readdir(plansDir);
     const mdFiles = entries.filter((f) => f.endsWith('.md'));
 
-    // Sort by modification time, newest first
-    const withStats = await Promise.all(
-      mdFiles.map(async (f) => {
-        const fullPath = join(plansDir, f);
-        const stat = await fsp.stat(fullPath);
-        return { path: fullPath, mtimeMs: stat.mtimeMs };
-      }),
-    );
+    // Sort by modification time, newest first. Per-file resilience: a plan
+    // file can vanish between `readdir` and `stat` (TOCTOU — concurrent
+    // `/plan` edit, git checkout, manual cleanup) or be momentarily
+    // unreadable. An unguarded `stat` inside `Promise.all` would reject the
+    // WHOLE batch, the outer catch would swallow it as `[]`, and the Sisyphus
+    // orchestrator's start-work flow would then wrongly conclude "no plans"
+    // (and may create a duplicate). Isolate each stat: drop the bad file,
+    // keep the rest.
+    const withStats = (
+      await Promise.all(
+        mdFiles.map(async (f) => {
+          const fullPath = join(plansDir, f);
+          try {
+            const stat = await fsp.stat(fullPath);
+            return { path: fullPath, mtimeMs: stat.mtimeMs };
+          } catch {
+            return null;
+          }
+        }),
+      )
+    ).filter((entry): entry is { path: string; mtimeMs: number } => entry !== null);
 
     withStats.sort((a, b) => b.mtimeMs - a.mtimeMs);
     return withStats.map((s) => s.path);

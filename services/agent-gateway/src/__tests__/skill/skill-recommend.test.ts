@@ -390,6 +390,9 @@ describe('POST /skills/recommend/:id/apply', () => {
         },
       });
       expect(applied.statusCode).toBe(400);
+      expect(applied.json()).toMatchObject({
+        error: "内置技能 'com.openAwork.builtin.git-master' 不允许通过选择接口管理。",
+      });
       // Confirm nothing was written despite the rejection.
       const rows = dbModule.sqliteAll<{ skill_id: string }>(
         'SELECT skill_id FROM chat_workspace_skill_selections WHERE user_id = ?',

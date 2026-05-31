@@ -67,7 +67,7 @@ export function getFileTreeRelativePath(
 
 function copyWithHiddenTextArea(text: string): void {
   if (typeof document === 'undefined' || !document.body) {
-    throw new Error('当前环境不支持复制');
+    throw new Error('当前环境不支持复制操作。');
   }
 
   const textarea = document.createElement('textarea');
@@ -85,7 +85,7 @@ function copyWithHiddenTextArea(text: string): void {
   try {
     const copied = document.execCommand('copy');
     if (!copied) {
-      throw new Error('浏览器未允许复制');
+      throw new Error('浏览器未允许当前复制操作。');
     }
   } finally {
     document.body.removeChild(textarea);

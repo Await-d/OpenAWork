@@ -18,7 +18,7 @@ const TREE_CONTAINER_STYLE: CSSProperties = {
   padding: 12,
   borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base))',
 };
 
 const TREE_DEPTH_INDENT = 14;
@@ -44,6 +44,7 @@ const LAYER_LABELS: Record<TeamRoleLayer, string> = {
   pm1: 'PM1',
   pm2: 'PM2',
   executor: '执行',
+  tester: '测试',
   reviewer: '评审',
 };
 
@@ -66,7 +67,15 @@ export function SessionTreeView({ onSelectSession }: SessionTreeViewProps) {
 
   const orderedNodes = useMemo<OrderedLayerNode[]>(() => {
     const arr = Array.from(nodes.values());
-    const layerOrder: TeamRoleLayer[] = ['reception', 'pm1', 'pm2', 'executor', 'reviewer', 'user'];
+    const layerOrder: TeamRoleLayer[] = [
+      'reception',
+      'pm1',
+      'pm2',
+      'executor',
+      'tester',
+      'reviewer',
+      'user',
+    ];
     const byParent = new Map<string | null, LayerNode[]>();
     for (const node of arr) {
       const siblings = byParent.get(node.parentSessionId) ?? [];

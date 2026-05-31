@@ -8,6 +8,8 @@ import { ensureDefaultInstalledSkills } from '../skill/default-skills.js';
 import { ensureDefaultWorkflowTemplates } from '../runtime/default-workflow-templates.js';
 import { syncSystemSkillsForUser } from '../skill/system-skills.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
+import { LoginRateLimiter, buildLoginRateLimitKey } from './login-rate-limiter.js';
+import { hashPassword, verifyPassword } from './password-hash.js';
 
 const JWT_SECRET = globalThis.process?.env['JWT_SECRET'] ?? 'change-me-in-production-min-32-chars';
 const JWT_EXPIRES_IN = globalThis.process?.env['JWT_EXPIRES_IN'] ?? '15m';
@@ -18,6 +20,10 @@ const ADMIN_EMAIL = globalThis.process?.env['ADMIN_EMAIL'] ?? 'admin@openAwork.l
 // 这条密码会变成局域网攻击面。前端会在 toggle on 之前强制改密。
 const DEFAULT_ADMIN_PASSWORD = globalThis.process?.env['ADMIN_PASSWORD'] ?? 'admin123456';
 const DESKTOP_AUTH_HEADER = 'x-openawork-desktop-auth';
+
+// Brute-force throttle for credential login. Shared module instance so the
+// counter survives across requests within the process. See login-rate-limiter.ts.
+const loginRateLimiter = new LoginRateLimiter();
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -77,6 +83,23 @@ export function hasValidDesktopAuthToken(request: FastifyRequest): boolean {
   return timingSafeEqual(providedBuffer, expectedBuffer);
 }
 
+/**
+ * Delete every already-expired `refresh_tokens` row. Rows are only otherwise
+ * removed on rotation / logout / password-change, and the refresh lookup
+ * filters expired rows with `expires_at > datetime('now')` WITHOUT deleting
+ * them — so a user who closes the browser without logging out leaves a dead
+ * row that lingers for the table's lifetime (one per such session, growing
+ * unbounded). Token issuance is low-frequency, so we prune opportunistically
+ * on each issue/rotate. Best-effort: a prune failure must never block login.
+ */
+export function pruneExpiredRefreshTokens(): void {
+  try {
+    sqliteRun("DELETE FROM refresh_tokens WHERE expires_at <= datetime('now')");
+  } catch {
+    // Best-effort cleanup — never break token issuance on a prune failure.
+  }
+}
+
 export function issueTokenPair(
   app: FastifyInstance,
   user: { id: string; email: string },
@@ -93,6 +116,9 @@ export function issueTokenPair(
     [randomUUID(), user.id, tokenHash, expiresAt],
   );
 
+  // Opportunistic cleanup of expired rows on this low-frequency write path.
+  pruneExpiredRefreshTokens();
+
   redis.setex(`session:${user.id}:active`, 900, '1');
   return { accessToken, refreshToken, expiresIn: JWT_EXPIRES_IN };
 }
@@ -108,10 +134,23 @@ async function authPlugin(app: FastifyInstance): Promise<void> {
     const body = loginSchema.safeParse(request.body);
     if (!body.success) {
       step.fail('invalid input');
-      return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
+      return reply.status(400).send({ error: '请求参数无效。', issues: body.error.issues });
     }
 
     const { email, password } = body.data;
+
+    // Brute-force throttle: reject early once a key (email+ip) has accumulated
+    // too many recent failures, so an attacker can't hammer credentials.
+    const rateLimitKey = buildLoginRateLimitKey(email, request.ip);
+    const limit = loginRateLimiter.check(rateLimitKey);
+    if (!limit.allowed) {
+      step.fail('rate limited');
+      return reply
+        .status(429)
+        .header('retry-after', String(limit.retryAfterSeconds))
+        .send({ error: '登录尝试过于频繁，请稍后再试。', retryAfterSeconds: limit.retryAfterSeconds });
+    }
+
     const lookupStep = child('lookup-user');
     const user = sqliteGet<{ id: string; email: string; password_hash: string }>(
       'SELECT id, email, password_hash FROM users WHERE email = ? LIMIT 1',
@@ -119,17 +158,36 @@ async function authPlugin(app: FastifyInstance): Promise<void> {
     );
 
     if (!user) {
+      loginRateLimiter.recordFailure(rateLimitKey);
       lookupStep.fail('invalid credentials');
       step.fail('invalid credentials');
-      return reply.status(401).send({ error: 'Invalid credentials' });
+      return reply.status(401).send({ error: '邮箱或密码错误。' });
     }
     lookupStep.succeed(undefined, { userId: user.id });
 
-    const inputHash = createHash('sha256').update(password).digest('hex');
-    if (inputHash !== user.password_hash) {
+    const verification = verifyPassword(password, user.password_hash);
+    if (!verification.valid) {
+      loginRateLimiter.recordFailure(rateLimitKey);
       step.fail('invalid credentials');
-      return reply.status(401).send({ error: 'Invalid credentials' });
+      return reply.status(401).send({ error: '邮箱或密码错误。' });
     }
+
+    // Transparent upgrade: a legacy unsalted-SHA256 hash that just verified is
+    // re-hashed with the current scheme on this successful login, so stored
+    // credentials migrate to scrypt without forcing a reset.
+    if (verification.needsUpgrade) {
+      try {
+        sqliteRun('UPDATE users SET password_hash = ? WHERE id = ?', [
+          hashPassword(password),
+          user.id,
+        ]);
+      } catch {
+        // Best-effort migration: never block a valid login on the re-hash write.
+      }
+    }
+
+    // Successful login clears the failure counter for this key.
+    loginRateLimiter.recordSuccess(rateLimitKey);
 
     const issueTokenStep = child('issue-tokens', undefined, { userId: user.id });
     const tokenPair = issueTokenPair(app, user);
@@ -141,12 +199,12 @@ async function authPlugin(app: FastifyInstance): Promise<void> {
 
   app.post('/auth/desktop-default', async (request: FastifyRequest, reply: FastifyReply) => {
     if (!hasValidDesktopAuthToken(request)) {
-      return reply.status(403).send({ error: 'Desktop default login is not enabled' });
+      return reply.status(403).send({ error: '当前未启用桌面默认登录。' });
     }
 
     const body = desktopDefaultLoginSchema.safeParse(request.body ?? {});
     if (!body.success) {
-      return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
+      return reply.status(400).send({ error: '请求参数无效。', issues: body.error.issues });
     }
 
     const user = sqliteGet<{ id: string; email: string }>(
@@ -154,7 +212,7 @@ async function authPlugin(app: FastifyInstance): Promise<void> {
       [ADMIN_EMAIL],
     );
     if (!user) {
-      return reply.status(404).send({ error: 'Default admin user not found' });
+      return reply.status(404).send({ error: '默认管理员账号不存在。' });
     }
 
     return reply.send(issueTokenPair(app, user));
@@ -168,7 +226,7 @@ async function authPlugin(app: FastifyInstance): Promise<void> {
    */
   app.get('/auth/admin-password-status', async (request: FastifyRequest, reply: FastifyReply) => {
     if (!hasValidDesktopAuthToken(request)) {
-      return reply.status(403).send({ error: 'desktop_auth_required' });
+      return reply.status(403).send({ error: '需要桌面端鉴权。' });
     }
     const user = sqliteGet<{ password_hash: string }>(
       'SELECT password_hash FROM users WHERE email = ? LIMIT 1',
@@ -177,10 +235,9 @@ async function authPlugin(app: FastifyInstance): Promise<void> {
     if (!user) {
       return reply.send({ exists: false, isDefault: false, email: ADMIN_EMAIL });
     }
-    const defaultHash = createHash('sha256').update(DEFAULT_ADMIN_PASSWORD).digest('hex');
     return reply.send({
       exists: true,
-      isDefault: user.password_hash === defaultHash,
+      isDefault: verifyPassword(DEFAULT_ADMIN_PASSWORD, user.password_hash).valid,
       email: ADMIN_EMAIL,
     });
   });
@@ -191,19 +248,19 @@ async function authPlugin(app: FastifyInstance): Promise<void> {
    */
   app.post('/auth/admin-set-password', async (request: FastifyRequest, reply: FastifyReply) => {
     if (!hasValidDesktopAuthToken(request)) {
-      return reply.status(403).send({ error: 'desktop_auth_required' });
+      return reply.status(403).send({ error: '需要桌面端鉴权。' });
     }
     const body = z.object({ newPassword: z.string().min(8).max(128) }).safeParse(request.body);
     if (!body.success) {
-      return reply.status(400).send({ error: 'invalid_input', issues: body.error.issues });
+      return reply.status(400).send({ error: '请求参数无效。', issues: body.error.issues });
     }
     const user = sqliteGet<{ id: string }>('SELECT id FROM users WHERE email = ? LIMIT 1', [
       ADMIN_EMAIL,
     ]);
     if (!user) {
-      return reply.status(404).send({ error: 'admin_not_found' });
+      return reply.status(404).send({ error: '管理员账号不存在。' });
     }
-    const newHash = createHash('sha256').update(body.data.newPassword).digest('hex');
+    const newHash = hashPassword(body.data.newPassword);
     sqliteRun('UPDATE users SET password_hash = ? WHERE id = ?', [newHash, user.id]);
     sqliteRun('DELETE FROM refresh_tokens WHERE user_id = ?', [user.id]);
     redis.del(`session:${user.id}:active`);
@@ -223,7 +280,7 @@ async function authPlugin(app: FastifyInstance): Promise<void> {
    */
   app.post('/__internal/shutdown', async (request: FastifyRequest, reply: FastifyReply) => {
     if (!hasValidDesktopAuthToken(request)) {
-      return reply.status(403).send({ error: 'desktop_auth_required' });
+      return reply.status(403).send({ error: '需要桌面端鉴权。' });
     }
     void reply.code(202).send({ status: 'shutting_down' });
     // 给 reply 一点时间 flush；再把 Fastify 主动关了以便 linger 中的 socket 能收到 FIN。
@@ -285,6 +342,9 @@ async function authPlugin(app: FastifyInstance): Promise<void> {
       [randomUUID(), user.id, newHash, expiresAt],
     );
 
+    // Opportunistic cleanup of expired rows on this low-frequency write path.
+    pruneExpiredRefreshTokens();
+
     rotateTokenStep.succeed();
     step.succeed(undefined, { userId: user.id });
 
@@ -309,7 +369,7 @@ async function authPlugin(app: FastifyInstance): Promise<void> {
     const body = loginSchema.safeParse(request.body);
     if (!body.success) {
       step.fail('invalid input');
-      return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
+      return reply.status(400).send({ error: '请求参数无效。', issues: body.error.issues });
     }
 
     const { email, password } = body.data;
@@ -318,12 +378,12 @@ async function authPlugin(app: FastifyInstance): Promise<void> {
     if (existing) {
       existingUserStep.fail('email already registered');
       step.fail('email already registered');
-      return reply.status(409).send({ error: 'Email already registered' });
+      return reply.status(409).send({ error: '该邮箱已注册。' });
     }
     existingUserStep.succeed();
 
     const id = randomUUID();
-    const passwordHash = createHash('sha256').update(password).digest('hex');
+    const passwordHash = hashPassword(password);
     const createUserStep = child('insert-user', undefined, { userId: id });
     sqliteRun('INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)', [
       id,
@@ -347,12 +407,45 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply):
   const { step } = startRequestWorkflow(request, 'auth.verify');
   try {
     await request.jwtVerify();
-    step.succeed();
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unauthorized';
+    const message = error instanceof Error ? error.message : '未授权或登录已失效。';
     step.fail(message);
-    reply.status(401).send({ error: 'Unauthorized' });
+    reply.status(401).send({ error: '未授权或登录已失效。' });
+    return;
   }
+
+  // 令牌签名有效，但其 sub 可能已不存在于 users 表（DB 重置 / 用户被删 /
+  // admin 重新播种生成了新 UUID 后旧令牌仍在用）。此时若放行，后续任何带
+  // `user_id REFERENCES users(id)` 外键的写入（team_workspaces / sessions /
+  // tasks …）都会以不透明的 `FOREIGN KEY constraint failed` 500 收场。
+  // 在认证层提前拦截：孤儿令牌直接返回 401，提示前端重新登录。
+  const payload = request.user as JwtPayload | undefined;
+  const userId = payload?.sub;
+  if (!userId) {
+    step.fail('token missing subject');
+    reply.status(401).send({ error: '未授权或登录已失效。' });
+    return;
+  }
+  try {
+    const userRow = sqliteGet<{ id: string }>('SELECT id FROM users WHERE id = ? LIMIT 1', [
+      userId,
+    ]);
+    if (!userRow) {
+      step.fail('user no longer exists');
+      reply.status(401).send({
+        error: '登录账号已失效，请重新登录。',
+        code: 'auth_user_not_found',
+      });
+      return;
+    }
+  } catch (error) {
+    // DB 查询本身失败（极少见）——不要把它误判成「用户不存在」而锁死所有请求，
+    // 放行让下游按既有逻辑处理，避免一次 DB 抖动导致全站 401。
+    step.fail(error instanceof Error ? error.message : 'user lookup failed');
+    return;
+  }
+
+  step.succeed(undefined, { userId });
 }
 
 export default fp(authPlugin, { name: 'auth' });

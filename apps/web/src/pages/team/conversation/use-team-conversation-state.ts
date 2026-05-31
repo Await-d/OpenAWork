@@ -58,16 +58,28 @@ import type { ChatBackendUsageSnapshot } from '../../../components/conversation-
 import type { StreamingThinkingBlock } from '../../../components/conversation-runtime/stream/streaming-thinking.js';
 import {
   loadSavedChatSessionDefaults,
+  loadSavedChatSessionDefaultsResult,
   type ChatSettingsProvider,
 } from '../../../utils/chat/chat-session-defaults.js';
-import { useTeamNotificationStore } from '../../../stores/team/team-events.js';
-import { useGatewayClient } from '../../../hooks/gateway/useGatewayClient.js';
+import {
+  useTeamEventsConnectionStore,
+  useTeamNotificationStore,
+} from '../../../stores/team/team-events.js';
+import {
+  formatGatewayStreamErrorMessage,
+  useGatewayClient,
+} from '../../../hooks/gateway/useGatewayClient.js';
 import { usePrefersReducedMotion } from '../../../hooks/ui/usePrefersReducedMotion.js';
 import { useScrollManager } from '../../../components/conversation-runtime/scroll/use-scroll-manager.js';
 import { useStreamReveal } from '../../../components/conversation-runtime/reveal/use-stream-reveal.js';
 import { useConversationStream } from '../../../components/conversation-runtime/stream/use-conversation-stream.js';
 import { makeOrderedMessageId } from '../../../components/conversation-runtime/messages/ordered-id.js';
 import { estimateTokenCount } from '../../../components/conversation-runtime/messages/support.js';
+import {
+  computeExponentialRetryDelay,
+  formatRecoverableLoadError,
+} from '../hooks/recoverable-read-model.js';
+import { useRecoverableRetryController } from '../hooks/use-recoverable-retry.js';
 
 // ─── Hook 输入 ────────────────────────────────────────────────────────────
 
@@ -121,6 +133,10 @@ export interface TeamConversationState {
   reportedStreamUsage: ChatBackendUsageSnapshot | null;
   streamError: string | null;
   setStreamError: React.Dispatch<React.SetStateAction<string | null>>;
+  snapshotError: string | null;
+  setSnapshotError: React.Dispatch<React.SetStateAction<string | null>>;
+  providersError: string | null;
+  setProvidersError: React.Dispatch<React.SetStateAction<string | null>>;
 
   // ─── composer ────────────────────────────────────────────────────
   input: string;
@@ -248,6 +264,55 @@ export interface TeamConversationState {
   scrollToBottom: (behavior?: ScrollBehavior, align?: 'center' | 'latest-edge') => void;
 }
 
+const TEAM_CONVERSATION_RECOVERY_RETRY_BASE_MS = 2_000;
+const TEAM_CONVERSATION_RECOVERY_RETRY_MAX_MS = 30_000;
+const TEAM_CONVERSATION_PROVIDERS_RETRY_BASE_MS = 2_000;
+const TEAM_CONVERSATION_PROVIDERS_RETRY_MAX_MS = 30_000;
+
+export function computeTeamConversationRecoveryRetryDelay(attempt: number): number {
+  return computeExponentialRetryDelay({
+    attempt,
+    baseMs: TEAM_CONVERSATION_RECOVERY_RETRY_BASE_MS,
+    maxMs: TEAM_CONVERSATION_RECOVERY_RETRY_MAX_MS,
+  });
+}
+
+export function formatTeamConversationRecoveryLoadError(input: {
+  hasCachedSnapshot: boolean;
+  nextRetryAtMs?: number | null;
+  result: { errorMessage?: string; retryable: boolean };
+}): string {
+  return formatRecoverableLoadError({
+    baseMessage: input.result.errorMessage ?? '加载团队会话快照失败。',
+    hasRetainedData: input.hasCachedSnapshot,
+    nextRetryAtMs: input.nextRetryAtMs,
+    retainedDataLabel: '会话快照',
+    retryable: input.result.retryable,
+  });
+}
+
+export function computeTeamConversationProvidersRetryDelay(attempt: number): number {
+  return computeExponentialRetryDelay({
+    attempt,
+    baseMs: TEAM_CONVERSATION_PROVIDERS_RETRY_BASE_MS,
+    maxMs: TEAM_CONVERSATION_PROVIDERS_RETRY_MAX_MS,
+  });
+}
+
+export function formatTeamConversationProvidersLoadError(input: {
+  hasCachedProviders: boolean;
+  nextRetryAtMs?: number | null;
+  result: { errorMessage?: string; retryable: boolean };
+}): string {
+  return formatRecoverableLoadError({
+    baseMessage: input.result.errorMessage ?? '加载 Provider 列表失败。',
+    hasRetainedData: input.hasCachedProviders,
+    nextRetryAtMs: input.nextRetryAtMs,
+    retainedDataLabel: 'Provider 列表',
+    retryable: input.result.retryable,
+  });
+}
+
 // ─── 主 hook 实现 ─────────────────────────────────────────────────────────
 
 /**
@@ -297,6 +362,8 @@ export function useTeamConversationState(
     null,
   );
   const [streamError, setStreamError] = useState<string | null>(null);
+  const [snapshotError, setSnapshotError] = useState<string | null>(null);
+  const [providersError, setProvidersError] = useState<string | null>(null);
   const [activeStreamStartedAt, setActiveStreamStartedAt] = useState<number | null>(null);
   const [activeStreamFirstTokenLatencyMs, setActiveStreamFirstTokenLatencyMs] = useState<
     number | null
@@ -333,6 +400,16 @@ export function useTeamConversationState(
   // 形如 { teamDefinition?: {...}, teamWorkspaceId?: string, workingDirectory?: string, ... }
   // 解析失败 / 缺失时为 null。
   const [sessionMetadata, setSessionMetadata] = useState<Record<string, unknown> | null>(null);
+  const hasRecoverySnapshotRef = useRef(false);
+  const reloadPromiseRef = useRef<Promise<void> | null>(null);
+  const providersRef = useRef<ChatSettingsProvider[]>([]);
+  const teamEventsRecoveredAt = useTeamEventsConnectionStore((state) => state.lastRecoveredAt);
+  const { clearRetry, resetRetry, scheduleRetry } = useRecoverableRetryController();
+  const {
+    clearRetry: clearProvidersRetry,
+    resetRetry: resetProvidersRetry,
+    scheduleRetry: scheduleProvidersRetry,
+  } = useRecoverableRetryController();
 
   // ─── 派生 ────────────────────────────────────────────────────────
   const remoteSessionBusyState = useMemo<'running' | 'paused' | null>(() => {
@@ -344,6 +421,10 @@ export function useTeamConversationState(
   const visibleStreaming = useMemo(() => {
     return streaming || streamingSegments.length > 0 || streamBuffer.length > 0;
   }, [streaming, streamingSegments.length, streamBuffer.length]);
+
+  useEffect(() => {
+    providersRef.current = providers;
+  }, [providers]);
 
   // ─── stream reveal + scroll manager ───────────────────────────────
   const { streamingRef, stoppingStreamRef, currentAssistantStreamMessageIdRef, resetStreamState } =
@@ -386,22 +467,72 @@ export function useTeamConversationState(
 
   // ─── 加载会话快照 ────────────────────────────────────────────────
   const reload = useCallback(async (): Promise<void> => {
-    if (!sessionId || !token || !enabled) {
-      setMessages([]);
-      setSessionStateStatus(null);
-      setIsSessionSnapshotReady(false);
-      setPendingPermissions([]);
-      setPendingQuestions([]);
-      setRoleLayer(null);
-      setSubstate(null);
-      setSessionMetadata(null);
-      return;
+    if (reloadPromiseRef.current) {
+      return reloadPromiseRef.current;
     }
 
-    setIsSessionLoading(true);
-    try {
+    const reloadPromise = (async () => {
+      clearRetry();
+
+      if (!sessionId || !token || !enabled) {
+        hasRecoverySnapshotRef.current = false;
+        resetRetry();
+        setMessages([]);
+        setSessionStateStatus(null);
+        setIsSessionSnapshotReady(false);
+        setPendingPermissions([]);
+        setPendingQuestions([]);
+        setRoleLayer(null);
+        setSubstate(null);
+        setSessionMetadata(null);
+        setSnapshotError(null);
+        setIsSessionLoading(false);
+        return;
+      }
+
+      const hasCachedSnapshot = hasRecoverySnapshotRef.current;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        resetRetry();
+        setIsSessionLoading(false);
+        setSnapshotError(
+          formatTeamConversationRecoveryLoadError({
+            hasCachedSnapshot,
+            result: {
+              errorMessage: '当前网络离线，团队会话快照暂时不可用。',
+              retryable: true,
+            },
+          }),
+        );
+        return;
+      }
+
+      setIsSessionLoading(!hasCachedSnapshot);
+      setSnapshotError(null);
       const sessionsClient = createSessionsClient(gatewayUrl);
-      const recovery = await sessionsClient.getRecovery(token, sessionId);
+      const result = await sessionsClient.getRecoveryResult(token, sessionId);
+      if (!result.ok || !result.recovery) {
+        const nextRetryAtMs = scheduleRetry({
+          computeDelay: computeTeamConversationRecoveryRetryDelay,
+          onRetry: () => {
+            void reload();
+          },
+          retryable: result.retryable,
+        });
+        if (!hasCachedSnapshot) {
+          setIsSessionSnapshotReady(false);
+        }
+        setIsSessionLoading(false);
+        setSnapshotError(
+          formatTeamConversationRecoveryLoadError({
+            hasCachedSnapshot,
+            nextRetryAtMs,
+            result,
+          }),
+        );
+        return;
+      }
+
+      const recovery = result.recovery;
 
       const normalized = normalizeChatMessages(recovery.session?.messages ?? []);
       setMessages(normalized);
@@ -444,18 +575,69 @@ export function useTeamConversationState(
       // pending permissions / questions（来自 recovery，避免再发请求）
       setPendingPermissions(recovery.pendingPermissions ?? []);
       setPendingQuestions(recovery.pendingQuestions ?? []);
-    } catch {
-      // 加载失败时保持空白；外层 chrome 可显示错误
-      setIsSessionSnapshotReady(false);
-    } finally {
+      hasRecoverySnapshotRef.current = true;
+      resetRetry();
+      setSnapshotError(null);
       setIsSessionLoading(false);
+    })();
+
+    reloadPromiseRef.current = reloadPromise;
+    try {
+      await reloadPromise;
+    } finally {
+      if (reloadPromiseRef.current === reloadPromise) {
+        reloadPromiseRef.current = null;
+      }
     }
-  }, [sessionId, gatewayUrl, token, enabled]);
+  }, [clearRetry, enabled, gatewayUrl, resetRetry, scheduleRetry, sessionId, token]);
 
   // ─── 当 sessionId 变化时自动 reload ─────────────────────────────
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  useEffect(() => {
+    return () => {
+      clearRetry();
+    };
+  }, [clearRetry]);
+
+  useEffect(() => {
+    if (!sessionId || !enabled || typeof window === 'undefined') {
+      return undefined;
+    }
+    const handleOnline = () => {
+      resetRetry();
+      void reload();
+    };
+    const handleOffline = () => {
+      resetRetry();
+      setIsSessionLoading(false);
+      setSnapshotError(
+        formatTeamConversationRecoveryLoadError({
+          hasCachedSnapshot: hasRecoverySnapshotRef.current,
+          result: {
+            errorMessage: '当前网络离线，团队会话快照暂时不可用。',
+            retryable: true,
+          },
+        }),
+      );
+    };
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [enabled, reload, resetRetry, sessionId]);
+
+  useEffect(() => {
+    if (!sessionId || !enabled || !teamEventsRecoveredAt) {
+      return;
+    }
+    resetRetry();
+    void reload();
+  }, [enabled, reload, resetRetry, sessionId, teamEventsRecoveredAt]);
 
   // ─── 订阅 team events：reception orchestrator 异步落 ack 消息后，
   //     通过 'session.inbound.submitted' / 'session.substate.changed'
@@ -473,6 +655,7 @@ export function useTeamConversationState(
       if (
         last.type === 'session.inbound.submitted' ||
         last.type === 'session.substate.changed' ||
+        last.type === 'session.init.changed' ||
         last.type === 'handoff.completed' ||
         last.type === 'handoff.failed' ||
         last.type === 'handoff.started'
@@ -510,10 +693,10 @@ export function useTeamConversationState(
   const submitInbound = useCallback<TeamConversationState['submitInbound']>(
     async (messageType, payload, opts) => {
       if (!sessionId) {
-        throw new Error('submitInbound: sessionId is null');
+        throw new Error('当前团队会话不存在，无法提交团队消息。');
       }
       if (!token) {
-        throw new Error('submitInbound: token is missing');
+        throw new Error('未登录，无法提交团队消息。');
       }
       const inboundClient = createTeamInboundClient(gatewayUrl);
       return inboundClient.submit(token, sessionId, {
@@ -584,10 +767,10 @@ export function useTeamConversationState(
   const startStream: TeamConversationState['startStream'] = useCallback(
     async (text, opts) => {
       if (!enableWriters) {
-        throw new Error('useSessionConversationState: enableWriters is false');
+        throw new Error('当前会话为只读模式，无法发送消息。');
       }
       if (!sessionId || !token) {
-        throw new Error('startStream: missing sessionId or token');
+        throw new Error('当前团队会话或登录状态无效，无法开始对话。');
       }
       if (streamingRef.current) {
         // already streaming; reject silently
@@ -654,7 +837,7 @@ export function useTeamConversationState(
           streamingRef.current = false;
           setStreaming(false);
           setStoppingStream(false);
-          setStreamError(message ?? code);
+          setStreamError(formatGatewayStreamErrorMessage(code, message));
         },
       });
     },
@@ -698,10 +881,10 @@ export function useTeamConversationState(
   const replyPermission: TeamConversationState['replyPermission'] = useCallback(
     async (requestId, decision, feedback) => {
       if (!enableWriters) {
-        throw new Error('replyPermission: enableWriters is false');
+        throw new Error('当前会话为只读模式，无法处理权限请求。');
       }
       if (!sessionId || !token) {
-        throw new Error('replyPermission: missing sessionId or token');
+        throw new Error('当前团队会话或登录状态无效，无法处理权限请求。');
       }
       await createPermissionsClient(gatewayUrl).reply(token, sessionId, {
         requestId,
@@ -718,10 +901,10 @@ export function useTeamConversationState(
   const replyQuestion: TeamConversationState['replyQuestion'] = useCallback(
     async (requestId, status, answers) => {
       if (!enableWriters) {
-        throw new Error('replyQuestion: enableWriters is false');
+        throw new Error('当前会话为只读模式，无法处理提问请求。');
       }
       if (!sessionId || !token) {
-        throw new Error('replyQuestion: missing sessionId or token');
+        throw new Error('当前团队会话或登录状态无效，无法处理提问请求。');
       }
       await createQuestionsClient(gatewayUrl).reply(token, sessionId, {
         requestId,
@@ -735,23 +918,61 @@ export function useTeamConversationState(
 
   const loadProviders: TeamConversationState['loadProviders'] = useCallback(async () => {
     if (!token) return;
-    try {
-      const result = await loadSavedChatSessionDefaults(gatewayUrl, token);
-      setProviders(result.providers);
-      // 注意：team 端只接受用户已显式选择的 provider/model，不写 chat-only
-      // 偏好（thinkingEnabled / reasoningEffort 等）。这些偏好由 chat 端
-      // 各自管理，不在 team 数据流中体现。
-      if (!activeProviderId && result.defaults.providerId) {
-        setActiveProviderId(result.defaults.providerId);
-      }
-      if (!activeModelId && result.defaults.modelId) {
-        setActiveModelId(result.defaults.modelId);
-      }
-    } catch {
-      // best-effort; surface no error
+    clearProvidersRetry();
+    const hasCachedProviders = providersRef.current.length > 0;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      setProvidersError(
+        formatTeamConversationProvidersLoadError({
+          hasCachedProviders,
+          result: {
+            errorMessage: '当前网络离线，Provider 列表暂时不可用。',
+            retryable: true,
+          },
+        }),
+      );
+      return;
+    }
+    const result = await loadSavedChatSessionDefaultsResult(gatewayUrl, token);
+    if (!result.ok || !result.data) {
+      const nextRetryAtMs = scheduleProvidersRetry({
+        computeDelay: computeTeamConversationProvidersRetryDelay,
+        onRetry: () => {
+          void loadProviders();
+        },
+        retryable: result.retryable,
+      });
+      setProvidersError(
+        formatTeamConversationProvidersLoadError({
+          hasCachedProviders,
+          nextRetryAtMs,
+          result,
+        }),
+      );
+      return;
+    }
+
+    resetProvidersRetry();
+    setProviders(result.data.providers);
+    setProvidersError(null);
+    // 注意：team 端只接受用户已显式选择的 provider/model，不写 chat-only
+    // 偏好（thinkingEnabled / reasoningEffort 等）。这些偏好由 chat 端
+    // 各自管理，不在 team 数据流中体现。
+    if (!activeProviderId && result.data.defaults.providerId) {
+      setActiveProviderId(result.data.defaults.providerId);
+    }
+    if (!activeModelId && result.data.defaults.modelId) {
+      setActiveModelId(result.data.defaults.modelId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gatewayUrl, token]);
+  }, [
+    activeModelId,
+    activeProviderId,
+    clearProvidersRetry,
+    gatewayUrl,
+    resetProvidersRetry,
+    scheduleProvidersRetry,
+    token,
+  ]);
 
   // ─── auto-load providers on mount when writers enabled ────────────
   const providersLoadedRef = useRef(false);
@@ -761,6 +982,27 @@ export function useTeamConversationState(
     providersLoadedRef.current = true;
     void loadProviders();
   }, [enableWriters, token, loadProviders]);
+
+  useEffect(() => {
+    return () => {
+      clearProvidersRetry();
+    };
+  }, [clearProvidersRetry]);
+
+  useEffect(() => {
+    if (!enableWriters || typeof window === 'undefined') {
+      return;
+    }
+    const handleOnline = () => {
+      if (providersLoadedRef.current) {
+        void loadProviders();
+      }
+    };
+    window.addEventListener('online', handleOnline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+    };
+  }, [enableWriters, loadProviders]);
 
   return {
     messages,
@@ -774,6 +1016,10 @@ export function useTeamConversationState(
     reportedStreamUsage,
     streamError,
     setStreamError,
+    snapshotError,
+    setSnapshotError,
+    providersError,
+    setProvidersError,
 
     input,
     setInput,

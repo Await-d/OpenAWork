@@ -79,6 +79,18 @@ export function ensureDefaultInstalledSkills(userId: string): void {
 export function ensureDefaultInstalledSkillsForAllUsers(): void {
   const users = sqliteAll<UserRow>('SELECT id FROM users');
   for (const user of users) {
-    ensureDefaultInstalledSkills(user.id);
+    // Per-user resilience: one user's seed write throwing (constraint error,
+    // corrupt existing row, disk error) must not skip default-skill seeding for
+    // every subsequent user. This runs at gateway boot, so an unguarded throw
+    // here would also abort startup. Isolate per user + warn. (§0.102 class.)
+    try {
+      ensureDefaultInstalledSkills(user.id);
+    } catch (error) {
+      console.warn(
+        `[default-skills] 为用户 ${user.id} 播种默认技能失败，已跳过：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 }

@@ -1,260 +1,488 @@
-/**
- * 260515-team-phase-c · 前端集成
- *
- * 把 ArtifactChainWizard + SessionTreeView 组合成一个可嵌入 team runtime
- * 主内容区的 section。由 team-runtime-shell 在 tasks tab 或 overview tab 中渲染。
- *
- * 数据来源：
- *   - 产物内容：GET /team/artifacts?phase=...&sessionId=...
- *   - Session 树：useLayerStore（来自 team-events WS）
- *   - Handoff 状态：useHandoffStore
- */
-
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { useAuthStore } from '../../../../../stores/auth/auth.js';
-import { useHandoffStore, useLayerStore } from '../../../../../stores/team/team-events.js';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import {
+  type HandoffRecord,
+} from '@openAwork/web-client';
+import {
+  useClarificationStore,
+  useLayerStore,
+  type HandoffEntry,
+} from '../../../../../stores/team/team-events.js';
+import { useReviewDisposition } from '../../hooks/use-review-disposition.js';
+import { useSessionHandoffs } from '../../hooks/use-session-handoffs.js';
+import { FailureFlowIndicator } from '../../shell/controls/FailureFlowIndicator.js';
+import { TabContainer, TabSection } from '../TabContainer.js';
+import { TabPlaceholder } from '../TabPlaceholder.js';
 import { ArtifactChainWizard } from './ArtifactChainWizard.js';
+import { ClarificationsPanel } from './ClarificationsPanel.js';
 import { DispatchPackageView } from './DispatchPackageView.js';
 import { ReviewReportView } from './ReviewReportView.js';
-import {
-  FailureFlowIndicator,
-  type FailureAction,
-} from '../../shell/controls/FailureFlowIndicator.js';
 import { SessionTreeView } from './SessionTreeView.js';
+import { RunningHandoffCancelList } from './RunningHandoffCancelList.js';
+import { useTeamArtifactData } from './use-team-artifact-data.js';
+import {
+  extractReviewReport,
+  parseDispatchPackage,
+  resolveTeamArtifactContext,
+} from './team-artifact-context.js';
 
-const SECTION_STYLE: CSSProperties = {
+const CONTEXT_CARD_STYLE: CSSProperties = {
   display: 'grid',
-  gap: 16,
+  gap: 8,
+  padding: '10px 12px',
+  borderRadius: 12,
+  border: '1px solid color-mix(in srgb, var(--accent) 45%, transparent)',
+  background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
+};
+
+const CONTEXT_META_ROW_STYLE: CSSProperties = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 8,
+};
+
+const CONTEXT_BADGE_STYLE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 4,
+  padding: '2px 8px',
+  borderRadius: 999,
+  background: 'color-mix(in srgb, var(--bg-overlay) 84%, var(--bg-base))',
+  color: 'var(--fg-default)',
+  fontSize: 10,
+  fontWeight: 700,
+};
+
+const ACTION_BTN_STYLE: CSSProperties = {
+  padding: '4px 10px',
+  borderRadius: 6,
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+  background: 'transparent',
+  color: 'var(--fg-default)',
+  fontSize: 11,
+  fontWeight: 600,
+  cursor: 'pointer',
+};
+
+const PRIMARY_ACTION_BTN_STYLE: CSSProperties = {
+  ...ACTION_BTN_STYLE,
+  borderColor: 'color-mix(in srgb, var(--accent) 40%, transparent)',
+  background: 'color-mix(in srgb, var(--accent) 10%, transparent)',
+  color: 'var(--accent)',
+};
+
+const ERROR_BANNER_STYLE: CSSProperties = {
+  padding: '8px 12px',
+  borderRadius: 8,
+  border: '1px solid color-mix(in srgb, var(--danger) 32%, transparent)',
+  background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay))',
+  color: 'var(--danger)',
+  fontSize: 12,
 };
 
 type WizardStep = 'spec_draft' | 'clarifying' | 'plan_ready' | 'tasks_ready';
 
-interface ArtifactData {
-  id: string;
-  content: string;
-  phase: string | null;
+interface TeamArtifactSectionProps {
+  focusHandoffId?: string | null;
+  onClearFocus?: () => void;
+  selectedTeamId: string;
+  /** 全量 handoff（用于运行中任务取消列表）。 */
+  handoffs?: Map<string, HandoffEntry>;
+  onCancelHandoff?: (handoffId: string) => void;
 }
 
-export function TeamArtifactSection() {
-  const { accessToken, gatewayUrl } = useAuthStore();
-  const handoffs = useHandoffStore((s) => s.handoffs);
-  const nodes = useLayerStore((s) => s.nodes);
+function buildWizardStep(input: {
+  hasPlan: boolean;
+  hasSpec: boolean;
+  hasTasks: boolean;
+  pendingClarificationCount: number;
+}): WizardStep {
+  if (input.hasTasks) {
+    return 'tasks_ready';
+  }
+  if (input.hasPlan) {
+    return 'plan_ready';
+  }
+  if (input.hasSpec && input.pendingClarificationCount > 0) {
+    return 'clarifying';
+  }
+  return 'spec_draft';
+}
 
-  const [wizardStep, setWizardStep] = useState<WizardStep>('spec_draft');
-  const [specContent, setSpecContent] = useState<string | null>(null);
-  const [planContent, setPlanContent] = useState<string | null>(null);
-  const [tasksContent, setTasksContent] = useState<string | null>(null);
-  const [clarifications, setClarifications] = useState<Array<{ id: string; question: string }>>([]);
-  const [constitutionWarnings, setConstitutionWarnings] = useState<
-    Array<{ clause: string; status: string; note: string }>
-  >([]);
+function mergeHandoffRecords(groups: HandoffRecord[][]): HandoffRecord[] {
+  const records = new Map<string, HandoffRecord>();
+  for (const group of groups) {
+    for (const record of group) {
+      records.set(record.id, record);
+    }
+  }
+  return Array.from(records.values());
+}
 
-  // Phase D: dispatch packages + review report + failure state
-  const [dispatchPackages, setDispatchPackages] = useState<
-    Array<{
-      goal: string;
-      role: string;
-      toolsets: string[];
-      taskMarkers: { taskId: string; parallel: boolean; story?: string; priority: string };
-      dependsOn: string[];
-    }>
-  >([]);
-  const [reviewReport, setReviewReport] = useState<{
-    reportMarkdown: string | null;
-    overallVerdict: 'pass' | 'implementation-failure' | 'planning-failure' | null;
-    specReviewPassed: boolean | null;
-    qualityReviewPassed: boolean | null;
-  }>({
-    reportMarkdown: null,
-    overallVerdict: null,
-    specReviewPassed: null,
-    qualityReviewPassed: null,
-  });
-  const [failureState, setFailureState] = useState<{
-    action: FailureAction | null;
-    reason: string | null;
-    escalationRound: number;
-  }>({ action: null, reason: null, escalationRound: 0 });
+export function TeamArtifactSection({
+  focusHandoffId = null,
+  onClearFocus,
+  selectedTeamId,
+  handoffs,
+  onCancelHandoff,
+}: TeamArtifactSectionProps) {
+  const nodes = useLayerStore((state) => state.nodes);
+  const clarificationItems = useClarificationStore((state) => state.items);
+  const selectedSessionRoleLayer = selectedTeamId
+    ? nodes.get(selectedTeamId)?.roleLayer ?? null
+    : null;
+  const selectedSessionHandoffs = useSessionHandoffs(selectedTeamId || null);
 
-  // 从最近的 pm2 handoff 提取 dispatch packages + review
-  const latestPm2Handoff = useMemo(
+  const initialContext = useMemo(
     () =>
-      Array.from(handoffs.values())
-        .filter((h) => h.toRoleLayer === 'pm2')
-        .sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null,
-    [handoffs],
+      resolveTeamArtifactContext({
+        focusHandoffId,
+        handoffs: selectedSessionHandoffs.handoffs,
+        selectedSessionId: selectedTeamId || null,
+        selectedSessionRoleLayer,
+      }),
+    [focusHandoffId, selectedSessionHandoffs.handoffs, selectedSessionRoleLayer, selectedTeamId],
   );
 
-  // 从最近的 pm1 handoff 的 result_json 中提取 artifact ids
-  const latestPm1Handoff = Array.from(handoffs.values())
-    .filter((h) => h.toRoleLayer === 'pm1' && h.state === 'completed')
-    .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+  const pm2DetailSessionId =
+    initialContext.pm2ArtifactSessionId && initialContext.pm2ArtifactSessionId !== selectedTeamId
+      ? initialContext.pm2ArtifactSessionId
+      : null;
+  const pm2SessionHandoffs = useSessionHandoffs(pm2DetailSessionId);
 
-  const fetchArtifacts = useCallback(async () => {
-    if (!accessToken || !gatewayUrl) return;
+  const combinedHandoffs = useMemo(
+    () => mergeHandoffRecords([selectedSessionHandoffs.handoffs, pm2SessionHandoffs.handoffs]),
+    [pm2SessionHandoffs.handoffs, selectedSessionHandoffs.handoffs],
+  );
 
-    const { createTeamPhaseAClient } = await import('@openAwork/web-client');
-    const client = createTeamPhaseAClient(gatewayUrl);
+  const artifactContext = useMemo(
+    () =>
+      resolveTeamArtifactContext({
+        focusHandoffId,
+        handoffs: combinedHandoffs,
+        selectedSessionId: selectedTeamId || null,
+        selectedSessionRoleLayer,
+      }),
+    [combinedHandoffs, focusHandoffId, selectedSessionRoleLayer, selectedTeamId],
+  );
 
-    try {
-      const specs = await client.listTeamArtifacts(accessToken, { phase: 'spec' });
-      if (specs[0]) setSpecContent(specs[0].content);
-    } catch (_err) {
-      console.warn(
-        '[TeamArtifactSection] spec 加载失败:',
-        _err instanceof Error ? _err.message : String(_err),
-      );
-    }
-
-    try {
-      const plans = await client.listTeamArtifacts(accessToken, { phase: 'plan' });
-      if (plans[0]) setPlanContent(plans[0].content);
-    } catch (_err) {
-      console.warn(
-        '[TeamArtifactSection] plan 加载失败:',
-        _err instanceof Error ? _err.message : String(_err),
-      );
-    }
-
-    try {
-      const tasks = await client.listTeamArtifacts(accessToken, { phase: 'tasks' });
-      if (tasks[0]) setTasksContent(tasks[0].content);
-    } catch (_err) {
-      console.warn(
-        '[TeamArtifactSection] tasks 加载失败:',
-        _err instanceof Error ? _err.message : String(_err),
-      );
-    }
-  }, [accessToken, gatewayUrl]);
+  const [wizardStep, setWizardStep] = useState<WizardStep>('spec_draft');
+  const {
+    artifactError,
+    artifactLoading,
+    planArtifact,
+    refreshArtifacts,
+    reviewArtifact,
+    specArtifact,
+    tasksArtifact,
+  } = useTeamArtifactData({
+    pm1ArtifactSessionId: artifactContext.pm1ArtifactSessionId,
+    pm2ArtifactSessionId: artifactContext.pm2ArtifactSessionId,
+  });
 
   useEffect(() => {
-    void fetchArtifacts();
-  }, [fetchArtifacts, latestPm1Handoff?.id]);
+    const nextStep = buildWizardStep({
+      hasPlan: Boolean(planArtifact?.content),
+      hasSpec: Boolean(specArtifact?.content),
+      hasTasks: Boolean(tasksArtifact?.content),
+      pendingClarificationCount: clarificationItems.filter(
+        (item) =>
+          item.status === 'pending' && item.sessionId === artifactContext.pm1ArtifactSessionId,
+      ).length,
+    });
+    setWizardStep(nextStep);
+  }, [
+    artifactContext.pm1ArtifactSessionId,
+    clarificationItems,
+    planArtifact?.content,
+    specArtifact?.content,
+    tasksArtifact?.content,
+  ]);
 
-  // Phase D: 从 PM2 handoff 的 payload 中提取 dispatch packages
-  useEffect(() => {
-    if (!latestPm2Handoff) return;
-    // PM2 handoff 完成后，其 result 中有 dispatchedHandoffIds
-    // 每个子 handoff 的 payload 就是一个 dispatch_package
-    const pm2Children = Array.from(handoffs.values()).filter(
-      (h) => h.fromRoleLayer === 'pm2' && (h.state === 'running' || h.state === 'completed'),
-    );
-    if (pm2Children.length > 0) {
-      // 从 handoff store 中无法直接拿到 payload（store 只存 state/id/roleLayer）
-      // 但我们可以通过 REST 获取——这里用简化逻辑：如果有 pm2 子 handoff 就展示占位
-      setDispatchPackages(
-        pm2Children.map((h) => ({
-          goal: `任务 ${h.id.slice(0, 8)}`,
-          role: h.toRoleLayer === 'reviewer' ? 'reviewer' : 'executor',
-          toolsets: ['read', 'write', 'shell'],
-          taskMarkers: {
-            taskId: h.id.slice(0, 8),
-            parallel: false,
-            priority: 'medium',
-          },
-          dependsOn: [],
+  const runtimeLoading = selectedSessionHandoffs.loading || pm2SessionHandoffs.loading;
+  const runtimeError = selectedSessionHandoffs.error ?? pm2SessionHandoffs.error;
+  const disposition = useReviewDisposition(selectedTeamId || null, focusHandoffId);
+
+  const pendingClarifications = useMemo(
+    () =>
+      clarificationItems
+        .filter(
+          (item) =>
+            item.status === 'pending' && item.sessionId === artifactContext.pm1ArtifactSessionId,
+        )
+        .map((item) => ({
+          id: item.id,
+          question: item.question,
         })),
-      );
-    }
-  }, [handoffs, latestPm2Handoff]);
+    [artifactContext.pm1ArtifactSessionId, clarificationItems],
+  );
 
-  // Phase D: 从 review artifact 中提取 report
-  useEffect(() => {
-    if (!accessToken || !gatewayUrl) return;
-    if (!latestPm2Handoff || latestPm2Handoff.state !== 'completed') return;
-    void (async () => {
-      try {
-        const { createTeamPhaseAClient } = await import('@openAwork/web-client');
-        const client = createTeamPhaseAClient(gatewayUrl);
-        const reviews = await client.listTeamArtifacts(accessToken, { phase: 'review' });
-        if (reviews[0]) {
-          setReviewReport({
-            reportMarkdown: reviews[0].content,
-            overallVerdict: 'pass', // 简化：从 content 中解析
-            specReviewPassed: true,
-            qualityReviewPassed: true,
-          });
+  const dispatchPackages = useMemo(() => {
+    if (!artifactContext.pm2ArtifactSessionId) {
+      return [];
+    }
+    return combinedHandoffs
+      .filter(
+        (record) =>
+          record.fromSessionId === artifactContext.pm2ArtifactSessionId &&
+          (record.toRoleLayer === 'executor' ||
+            record.toRoleLayer === 'tester' ||
+            record.toRoleLayer === 'reviewer'),
+      )
+      .sort((left, right) => {
+        if (left.id === focusHandoffId) {
+          return -1;
         }
-      } catch (_err) {
-        console.warn(
-          '[TeamArtifactSection] review 加载失败:',
-          _err instanceof Error ? _err.message : String(_err),
+        if (right.id === focusHandoffId) {
+          return 1;
+        }
+        return (right.completedAt ?? right.updatedAt).localeCompare(
+          left.completedAt ?? left.updatedAt,
         );
-      }
-    })();
-  }, [accessToken, gatewayUrl, latestPm2Handoff]);
+      })
+      .map((record) => {
+        const dispatch = parseDispatchPackage(record);
+        if (!dispatch) {
+          return null;
+        }
+        return {
+          handoff: record,
+          dispatch,
+        };
+      })
+      .filter(
+        (
+          entry,
+        ): entry is {
+          handoff: HandoffRecord;
+          dispatch: NonNullable<ReturnType<typeof parseDispatchPackage>>;
+        } => entry !== null,
+      );
+  }, [artifactContext.pm2ArtifactSessionId, combinedHandoffs, focusHandoffId]);
 
-  // Phase D: 失败状态从 handoff store 中推导
-  useEffect(() => {
-    const failedPm2 = Array.from(handoffs.values()).find(
-      (h) => h.toRoleLayer === 'pm2' && h.state === 'failed',
+  const reviewReportFromHandoffs = useMemo(
+    () => extractReviewReport(combinedHandoffs, focusHandoffId),
+    [combinedHandoffs, focusHandoffId],
+  );
+  const reviewReport = useMemo(
+    () =>
+      reviewReportFromHandoffs.markdown
+        ? reviewReportFromHandoffs
+        : {
+            markdown: reviewArtifact?.content ?? null,
+            overallVerdict: reviewReportFromHandoffs.overallVerdict,
+            specReviewPassed: reviewReportFromHandoffs.specReviewPassed,
+            qualityReviewPassed: reviewReportFromHandoffs.qualityReviewPassed,
+          },
+    [reviewArtifact?.content, reviewReportFromHandoffs],
+  );
+
+  const hasAnyContent =
+    Boolean(specArtifact?.content) ||
+    Boolean(planArtifact?.content) ||
+    Boolean(tasksArtifact?.content) ||
+    dispatchPackages.length > 0 ||
+    Boolean(reviewReport.markdown) ||
+    pendingClarifications.length > 0 ||
+    nodes.size > 0;
+
+  if (!selectedTeamId) {
+    return (
+      <TabContainer title="任务与产物" subtitle="按当前会话和 handoff 上下文查看任务、派发与 PM1 / PM2 的产物。">
+        <TabPlaceholder
+          emoji="🧱"
+          title="未选择会话"
+          subtitle="左侧选中一个团队会话后，这里会自动拼接 spec / plan / tasks / review 和 dispatch 上下文。"
+          status="data-pending"
+          dataSource="GET /team/artifacts + GET /team/sessions/:sessionId/handoffs"
+        />
+      </TabContainer>
     );
-    if (failedPm2) {
-      // 简化推导：有 failed pm2 handoff 就展示失败指示器
-      setFailureState({
-        action: 'redispatch',
-        reason: '执行层任务失败，等待重派',
-        escalationRound: 0,
-      });
-    } else {
-      setFailureState({ action: null, reason: null, escalationRound: 0 });
-    }
-  }, [handoffs]);
-
-  // 根据产物可用性自动推进 wizard step
-  useEffect(() => {
-    if (tasksContent) {
-      setWizardStep('tasks_ready');
-    } else if (planContent) {
-      setWizardStep('plan_ready');
-    } else if (specContent && clarifications.length > 0) {
-      setWizardStep('clarifying');
-    } else if (specContent) {
-      setWizardStep('plan_ready');
-    }
-  }, [specContent, planContent, tasksContent, clarifications.length]);
-
-  const hasAnyContent = specContent || planContent || tasksContent || nodes.size > 0;
-
-  if (!hasAnyContent) {
-    return null;
   }
 
   return (
-    <div style={SECTION_STYLE}>
-      {nodes.size > 0 ? <SessionTreeView /> : null}
-
-      <ArtifactChainWizard
-        specContent={specContent}
-        planContent={planContent}
-        tasksContent={tasksContent}
-        clarifications={clarifications}
-        constitutionWarnings={constitutionWarnings}
-        currentStep={wizardStep}
-        onStepChange={setWizardStep}
-      />
-
-      {/* Phase D: dispatch packages 可视化 */}
-      {dispatchPackages.length > 0 ? <DispatchPackageView packages={dispatchPackages} /> : null}
-
-      {/* Phase D: review report 展示 */}
-      {reviewReport.reportMarkdown ? (
-        <ReviewReportView
-          reportMarkdown={reviewReport.reportMarkdown}
-          overallVerdict={reviewReport.overallVerdict}
-          specReviewPassed={reviewReport.specReviewPassed}
-          qualityReviewPassed={reviewReport.qualityReviewPassed}
-        />
+    <TabContainer
+      title="任务与产物"
+      subtitle="会话树 / 待澄清 / 任务派发 / 产物链一体化：优先绑定当前会话与聚焦 handoff。"
+      actions={
+        <button
+          type="button"
+          onClick={() => {
+            selectedSessionHandoffs.refresh();
+            pm2SessionHandoffs.refresh();
+            refreshArtifacts();
+          }}
+          style={ACTION_BTN_STYLE}
+        >
+          {runtimeLoading || artifactLoading ? '加载中…' : '刷新'}
+        </button>
+      }
+    >
+      {focusHandoffId && artifactContext.focusHandoff ? (
+        <section style={CONTEXT_CARD_STYLE}>
+          <strong style={{ color: 'var(--accent)', fontSize: 13 }}>
+            已定位到 Handoff #{focusHandoffId.slice(0, 8)}
+          </strong>
+          <span style={{ color: 'var(--fg-strong)', fontSize: 12, fontWeight: 700 }}>
+            {artifactContext.focusHandoff.fromRoleLayer} → {artifactContext.focusHandoff.toRoleLayer} ·{' '}
+            {artifactContext.focusHandoff.state}
+          </span>
+          <div style={CONTEXT_META_ROW_STYLE}>
+            {artifactContext.pm1ArtifactSessionId ? (
+              <span style={CONTEXT_BADGE_STYLE}>
+                PM1 会话 #{artifactContext.pm1ArtifactSessionId.slice(0, 8)}
+              </span>
+            ) : null}
+            {artifactContext.pm2ArtifactSessionId ? (
+              <span style={CONTEXT_BADGE_STYLE}>
+                PM2 会话 #{artifactContext.pm2ArtifactSessionId.slice(0, 8)}
+              </span>
+            ) : null}
+            {artifactContext.pm2Handoff ? (
+              <span style={CONTEXT_BADGE_STYLE}>
+                PM2 Handoff #{artifactContext.pm2Handoff.id.slice(0, 8)}
+              </span>
+            ) : null}
+          </div>
+          {artifactContext.focusHandoff.failureReason ? (
+            <span style={{ color: 'var(--fg-muted)', fontSize: 11, lineHeight: 1.5 }}>
+              {artifactContext.focusHandoff.failureReason}
+            </span>
+          ) : null}
+          {onClearFocus ? (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button type="button" onClick={onClearFocus} style={ACTION_BTN_STYLE}>
+                清除定位
+              </button>
+            </div>
+          ) : null}
+        </section>
       ) : null}
 
-      {/* Phase D: 失败状态流转 */}
-      {failureState.action ? (
+      {runtimeError ? <div style={ERROR_BANNER_STYLE}>handoff 上下文加载失败：{runtimeError}</div> : null}
+      {artifactError ? <div style={ERROR_BANNER_STYLE}>{artifactError}</div> : null}
+
+      {disposition.action ? (
         <FailureFlowIndicator
-          action={failureState.action}
-          reason={failureState.reason}
-          escalationRound={failureState.escalationRound}
+          action={disposition.action}
+          reason={disposition.reason}
+          escalationRound={disposition.escalationRound}
+          pm2HandoffId={disposition.pm2HandoffId}
+          onActionComplete={(result) => {
+            selectedSessionHandoffs.applyPreview(result.handoffs);
+            pm2SessionHandoffs.applyPreview(result.handoffs);
+            selectedSessionHandoffs.refresh();
+            pm2SessionHandoffs.refresh();
+            refreshArtifacts();
+          }}
         />
       ) : null}
-    </div>
+
+      {nodes.size > 0 ? (
+        <TabSection title="会话树" hint="帮助确认当前产物链所处的层级上下文。">
+          <SessionTreeView />
+        </TabSection>
+      ) : null}
+
+      {selectedTeamId ? (
+        <TabSection title="待澄清" hint="PM1 解析 spec 时产生的澄清问题。">
+          <ClarificationsPanel filterSessionId={selectedTeamId} />
+        </TabSection>
+      ) : null}
+
+      {handoffs && onCancelHandoff ? (
+        <RunningHandoffCancelList
+          focusHandoffId={focusHandoffId}
+          handoffs={handoffs}
+          onCancel={onCancelHandoff}
+          {...(onClearFocus ? { onClearFocus } : {})}
+        />
+      ) : null}
+
+      {hasAnyContent ? (
+        <>
+          <TabSection
+            title="PM1 规划链"
+            hint={
+              artifactContext.pm1ArtifactSessionId
+                ? `会话 #${artifactContext.pm1ArtifactSessionId.slice(0, 8)}`
+                : '等待 PM1 会话建立'
+            }
+          >
+            <ArtifactChainWizard
+              specContent={specArtifact?.content ?? null}
+              planContent={planArtifact?.content ?? null}
+              tasksContent={tasksArtifact?.content ?? null}
+              clarifications={pendingClarifications}
+              constitutionWarnings={[]}
+              currentStep={wizardStep}
+              onStepChange={setWizardStep}
+            />
+          </TabSection>
+
+          <TabSection
+            title="PM2 派发包"
+            hint={
+              artifactContext.pm2ArtifactSessionId
+                ? `会话 #${artifactContext.pm2ArtifactSessionId.slice(0, 8)}`
+                : '等待 PM2 接手'
+            }
+          >
+            <DispatchPackageView
+              packages={dispatchPackages.map(({ dispatch, handoff }) => ({
+                goal: dispatch.goal ?? `任务 ${handoff.id.slice(0, 8)}`,
+                role: dispatch.role ?? handoff.toRoleLayer,
+                toolsets: dispatch.toolsets ?? [],
+                taskMarkers: {
+                  taskId: dispatch.taskMarkers?.taskId ?? handoff.id.slice(0, 8),
+                  parallel: dispatch.taskMarkers?.parallel ?? false,
+                  story: dispatch.taskMarkers?.story,
+                  priority: dispatch.taskMarkers?.priority ?? 'medium',
+                },
+                dependsOn: dispatch.dependsOn ?? [],
+              }))}
+            />
+          </TabSection>
+
+          <TabSection
+            title="评审报告"
+            hint={
+              artifactContext.pm2ArtifactSessionId
+                ? `会话 #${artifactContext.pm2ArtifactSessionId.slice(0, 8)}`
+                : '等待 PM2 评审完成'
+            }
+          >
+            <ReviewReportView
+              reportMarkdown={reviewReport.markdown}
+              overallVerdict={reviewReport.overallVerdict}
+              specReviewPassed={reviewReport.specReviewPassed}
+              qualityReviewPassed={reviewReport.qualityReviewPassed}
+            />
+          </TabSection>
+        </>
+      ) : (
+        <TabPlaceholder
+          emoji="🪵"
+          title="当前上下文尚未生成可读产物"
+          subtitle="这通常表示 handoff 还在早期阶段，或当前聚焦手柄尚未进入 PM1 / PM2 的产物生成节点。"
+          status="data-pending"
+          dataSource="team.artifacts + session handoffs"
+          extra={
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  selectedSessionHandoffs.refresh();
+                  pm2SessionHandoffs.refresh();
+                  refreshArtifacts();
+                }}
+                style={PRIMARY_ACTION_BTN_STYLE}
+              >
+                重新拉取上下文
+              </button>
+            </div>
+          }
+        />
+      )}
+    </TabContainer>
   );
 }

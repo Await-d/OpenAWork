@@ -1,16 +1,18 @@
 /**
  * 260517-team-page-v2 · 主 tab 配置
  *
- * 把 TeamPageV2 中间区的「5 主 tab + 子 segmented」结构数据和样式集中到这里，
+ * 把 TeamPageV2 中间区的「5 主 tab + 子 segmented」结构数据集中到这里，
  * 让页面文件聚焦于交互编排，避免 1500 行限制压力。
  *
  * 与 MiddleTabRouter 的关系：
  *   - 这里只声明子 tab 的 leaf key 与展示属性。
  *   - MiddleTabRouter 负责按 leaf key 渲染对应内容。
  *   - 两者通过 MiddleTabKey 联合类型在编译期保证一致。
+ *
+ * 视觉样式（主/子 tab 胶囊）由 `shell/header/TeamTabBar.tsx` 统一持有，
+ * 本文件只保留结构数据。
  */
 
-import type { CSSProperties } from 'react';
 import type { MiddleTabKey } from './MiddleTabRouter.js';
 
 export type PrimaryTabKey = 'overview' | 'conversation' | 'tasks' | 'metrics' | 'governance';
@@ -35,7 +37,7 @@ export const PRIMARY_TABS: ReadonlyArray<PrimaryTabDef> = [
     icon: '📊',
     children: [
       { key: 'dashboard', label: '仪表盘', icon: '📊' },
-      { key: 'topology', label: '拓扑', icon: '🕸️' },
+      { key: 'graph', label: '关系图谱', icon: '🕸️' },
       { key: 'health', label: '健康度', icon: '🩺' },
     ],
   },
@@ -54,9 +56,7 @@ export const PRIMARY_TABS: ReadonlyArray<PrimaryTabDef> = [
     label: '任务',
     icon: '📋',
     children: [
-      { key: 'tasks', label: '任务流', icon: '📋' },
-      { key: 'dispatch', label: '派发包', icon: '📦' },
-      { key: 'artifacts', label: '产物', icon: '🧱' },
+      { key: 'artifacts', label: '任务与产物', icon: '🧱' },
       { key: 'review', label: '评审', icon: '✅' },
     ],
   },
@@ -65,9 +65,8 @@ export const PRIMARY_TABS: ReadonlyArray<PrimaryTabDef> = [
     label: '度量',
     icon: '⏱️',
     children: [
-      { key: 'timing', label: '耗时', icon: '⏱️' },
       { key: 'usage', label: '用量', icon: '🔋' },
-      { key: 'tools', label: '工具调用', icon: '🛠️' },
+      { key: 'timing', label: '耗时', icon: '⏱️' },
     ],
   },
   {
@@ -75,7 +74,7 @@ export const PRIMARY_TABS: ReadonlyArray<PrimaryTabDef> = [
     label: '治理',
     icon: '⚙️',
     children: [
-      { key: 'members', label: '成员', icon: '👥' },
+      { key: 'init', label: '初始化', icon: '🧭' },
       { key: 'templates', label: '模板', icon: '📐' },
       { key: 'shares', label: '共享', icon: '🤝' },
       { key: 'audit', label: '审计', icon: '📜' },
@@ -108,115 +107,3 @@ export function getDefaultLeafFor(primaryKey: PrimaryTabKey): MiddleTabKey {
   return first.key;
 }
 
-// ─── 主 tab 栏（顶部，强调） ─────────────────────────────────────
-export const PRIMARY_TAB_BAR_STYLE: CSSProperties = {
-  display: 'flex',
-  alignItems: 'stretch',
-  gap: 2,
-  paddingInline: 10,
-  paddingTop: 0,
-  borderBottom: '1px solid color-mix(in srgb, var(--border-default) 45%, transparent)',
-  flexShrink: 0,
-  background: 'var(--bg-overlay)',
-  overflowX: 'auto',
-  overflowY: 'hidden',
-  scrollbarWidth: 'thin',
-  height: 34,
-};
-
-export const PRIMARY_TAB_BTN_STYLE: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 5,
-  padding: '0 12px',
-  border: 'none',
-  borderBottom: '2px solid transparent',
-  background: 'transparent',
-  color: 'var(--fg-muted)',
-  fontSize: 12,
-  fontWeight: 600,
-  cursor: 'pointer',
-  flexShrink: 0,
-  whiteSpace: 'nowrap',
-  letterSpacing: '0.005em',
-  transition: 'color 120ms ease, border-color 120ms ease',
-  marginBottom: -1,
-};
-
-export const PRIMARY_TAB_BTN_ACTIVE_STYLE: CSSProperties = {
-  ...PRIMARY_TAB_BTN_STYLE,
-  // 与基础样式保持同一种写法（shorthand），避免在 active 切换时 React 报
-  // “Removing a style property during rerender (borderBottomColor) when a
-  // conflicting property is set (borderBottom)” 的警告。
-  borderBottom: '2px solid var(--accent)',
-  color: 'var(--fg-strong)',
-  fontWeight: 700,
-};
-
-// ─── 子 tab 栏（segmented，轻量） ─────────────────────────────────
-export const SUB_TAB_BAR_STYLE: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 4,
-  paddingInline: 12,
-  paddingBlock: 4,
-  borderBottom: '1px solid color-mix(in srgb, var(--border-default) 25%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base)',
-  flexShrink: 0,
-  overflowX: 'auto',
-  overflowY: 'hidden',
-  scrollbarWidth: 'thin',
-  minHeight: 28,
-};
-
-export const SUB_TAB_BTN_STYLE: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 4,
-  padding: '4px 10px',
-  border: '1px solid transparent',
-  background: 'transparent',
-  color: 'var(--fg-muted)',
-  fontSize: 11,
-  fontWeight: 600,
-  cursor: 'pointer',
-  borderRadius: 6,
-  flexShrink: 0,
-  whiteSpace: 'nowrap',
-  transition: 'background 120ms ease, color 120ms ease',
-};
-
-export const SUB_TAB_BTN_ACTIVE_STYLE: CSSProperties = {
-  ...SUB_TAB_BTN_STYLE,
-  background: 'color-mix(in srgb, var(--accent) 16%, transparent)',
-  color: 'var(--accent)',
-  fontWeight: 700,
-};
-
-// ─── 3D 办公独立按钮 ─────────────────────────────────────────────
-export const OFFICE_TOGGLE_STYLE: CSSProperties = {
-  marginLeft: 'auto',
-  marginInline: '4px 8px',
-  alignSelf: 'center',
-  padding: '5px 12px',
-  border: '1px solid color-mix(in srgb, var(--border-default) 55%, transparent)',
-  borderRadius: 6,
-  background: 'transparent',
-  color: 'var(--fg-default)',
-  fontSize: 12,
-  fontWeight: 600,
-  cursor: 'pointer',
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 4,
-  flexShrink: 0,
-};
-
-export const OFFICE_TOGGLE_ACTIVE_STYLE: CSSProperties = {
-  ...OFFICE_TOGGLE_STYLE,
-  background: 'color-mix(in srgb, var(--accent) 14%, transparent)',
-  // 与基础同样使用 border shorthand，避免 React 在切换 active 状态时
-  // 因为 borderColor 与 border 混用而报警告。
-  border: '1px solid color-mix(in srgb, var(--accent) 50%, transparent)',
-  color: 'var(--accent)',
-};

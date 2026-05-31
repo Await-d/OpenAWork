@@ -1,19 +1,55 @@
-import { spawn, execSync } from 'child_process';
-import { promises as fs } from 'fs';
-import { join, dirname, basename } from 'path';
+import { spawn } from 'child_process';
+import { promises as fs, accessSync, constants as fsConstants, statSync } from 'fs';
+import { join, dirname, basename, delimiter } from 'path';
 import { createRequire } from 'module';
 import type { LSPServerHandle, LSPServerInfo, RootFunction } from './types.js';
 
-function whichSync(bin: string): string | undefined {
+function isExecutableFile(candidate: string, isWindows: boolean): boolean {
   try {
-    const result = execSync(`which ${bin} 2>/dev/null || where ${bin} 2>/dev/null`, {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
-    return result.length > 0 ? result.split('\n')[0]?.trim() : undefined;
+    if (!statSync(candidate).isFile()) return false;
+    // On Windows a PATHEXT match is treated as executable; on POSIX require the
+    // executable bit via access(X_OK) to mirror `which` semantics.
+    if (!isWindows) accessSync(candidate, fsConstants.X_OK);
+    return true;
   } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolve an executable's absolute path by scanning PATH directly, with NO
+ * subprocess. The previous form ran `execSync('which … || where …')` on the
+ * LSP spawn path: it had no timeout, so a hung `which`/`where` (stalled network
+ * mount, pathological PATH) blocked the entire Node event loop indefinitely,
+ * and it interpolated `bin` into a shell string. A pure-Node scan removes the
+ * event-loop block, the shell, and the injection surface at once.
+ */
+export function whichSync(bin: string): string | undefined {
+  const isWindows = process.platform === 'win32';
+  const exts = isWindows
+    ? (process.env['PATHEXT'] ?? '.EXE;.CMD;.BAT;.COM').split(';').filter(Boolean)
+    : [''];
+
+  // A name that already contains a path separator is resolved directly rather
+  // than scanned against PATH (mirrors `which`/`where`).
+  if (bin.includes('/') || (isWindows && bin.includes('\\'))) {
+    for (const ext of exts) {
+      const candidate = isWindows ? `${bin}${ext}` : bin;
+      if (isExecutableFile(candidate, isWindows)) return candidate;
+    }
     return undefined;
   }
+
+  const pathEnv = process.env['PATH'] ?? process.env['Path'] ?? '';
+  if (!pathEnv) return undefined;
+  for (const dir of pathEnv.split(delimiter)) {
+    if (!dir) continue;
+    for (const ext of exts) {
+      const candidate = join(dir, isWindows ? `${bin}${ext}` : bin);
+      if (isExecutableFile(candidate, isWindows)) return candidate;
+    }
+  }
+  return undefined;
 }
 
 export const NearestRoot =

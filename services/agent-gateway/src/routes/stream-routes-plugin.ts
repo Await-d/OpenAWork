@@ -30,6 +30,16 @@ import {
   stopAnyInFlightStreamRequestForSession,
   stopInFlightStreamRequest,
 } from './stream-cancellation.js';
+import { installWsHeartbeat } from './ws-heartbeat.js';
+
+export const STREAM_PLUGIN_ERROR_MESSAGES = {
+  invalidJson: '请求数据不是合法 JSON。',
+  invalidRequest: '请求参数无效。',
+  requestedStreamInactive: '请求的流已不再处于活动状态。',
+  sseClientDisconnected: '客户端在流式传输过程中断开 SSE 连接。',
+  wsStreamError: 'WebSocket 流式响应处理中断，请稍后重试。',
+  sseStreamError: 'SSE 流式响应处理中断，请稍后重试。',
+} as const;
 
 const streamAttachQuerySchema = z.object({
   afterSeq: z.coerce.number().int().min(0).default(0),
@@ -63,11 +73,13 @@ function parseSseCursorFromLastEventId(
 function writeSseRunEnvelope(
   reply: FastifyReply,
   envelope: ReturnType<typeof buildRunEventEnvelope>,
-): void {
+): boolean {
   const requestId = envelope.payload.cursor?.clientRequestId ?? envelope.payload.clientRequestId;
   const lastEventId = requestId ? `${requestId}:${envelope.seq}` : String(envelope.seq);
-  reply.raw.write(`id: ${lastEventId}\n`);
-  reply.raw.write(`data: ${JSON.stringify(envelope)}\n\n`);
+  return (
+    safeWriteReplyRaw(reply, `id: ${lastEventId}\n`) &&
+    safeWriteReplyRaw(reply, `data: ${JSON.stringify(envelope)}\n\n`)
+  );
 }
 
 function buildAttachRunEnvelope(input: { clientRequestId: string; event: RunEvent; seq: number }) {
@@ -94,7 +106,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
       const body = stopStreamSchema.safeParse(request.body);
       if (!body.success) {
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
+        return reply.status(400).send({ error: '请求参数无效。', issues: body.error.issues });
       }
 
       const sessionId = (request.params as { id: string }).id;
@@ -103,7 +115,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
         [sessionId, user.sub],
       );
       if (!sessionRow) {
-        return reply.status(404).send({ error: 'Session not found' });
+        return reply.status(404).send({ error: '目标会话不存在。' });
       }
 
       const stopped = await stopInFlightStreamRequest({
@@ -129,7 +141,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
         [sessionId, user.sub],
       );
       if (!sessionRow) {
-        return reply.status(404).send({ error: 'Session not found' });
+        return reply.status(404).send({ error: '目标会话不存在。' });
       }
 
       const activeThread = getFreshSessionRuntimeThread({ sessionId, userId: user.sub });
@@ -163,7 +175,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
         [sessionId, user.sub],
       );
       if (!sessionRow) {
-        return reply.status(404).send({ error: 'Session not found' });
+        return reply.status(404).send({ error: '目标会话不存在。' });
       }
 
       const stopped = await stopAnyInFlightStreamRequestForSession({
@@ -206,20 +218,24 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
           connectionLogger.fail(authStep, 'unauthorized');
           connectionLogger.fail(connectionStep, 'unauthorized');
           connectionLogger.flush(connectionContext, 401);
-          socket.send(
-            JSON.stringify({ type: 'error', code: 'UNAUTHORIZED', message: 'Unauthorized' }),
-          );
-          socket.close(1008);
+          safeSendWs(socket, {
+            type: 'error',
+            code: 'UNAUTHORIZED',
+            message: '未授权或登录已失效。',
+          });
+          safeCloseWs(socket, 1008);
           return;
         }
       } else {
         connectionLogger.fail(authStep, 'unauthorized');
         connectionLogger.fail(connectionStep, 'unauthorized');
         connectionLogger.flush(connectionContext, 401);
-        socket.send(
-          JSON.stringify({ type: 'error', code: 'UNAUTHORIZED', message: 'Unauthorized' }),
-        );
-        socket.close(1008);
+        safeSendWs(socket, {
+          type: 'error',
+          code: 'UNAUTHORIZED',
+          message: '未授权或登录已失效。',
+        });
+        safeCloseWs(socket, 1008);
         return;
       }
       connectionLogger.succeed(authStep);
@@ -239,14 +255,12 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
         connectionLogger.fail(sessionStep, 'session not found');
         connectionLogger.fail(connectionStep, 'session not found');
         connectionLogger.flush(connectionContext, 404);
-        socket.send(
-          JSON.stringify({
-            type: 'error',
-            code: 'SESSION_NOT_FOUND',
-            message: 'Session not found',
-          }),
-        );
-        socket.close(1008);
+        safeSendWs(socket, {
+          type: 'error',
+          code: 'SESSION_NOT_FOUND',
+          message: '目标会话不存在。',
+        });
+        safeCloseWs(socket, 1008);
         return;
       }
       connectionLogger.succeed(sessionStep);
@@ -258,7 +272,14 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       // executions — they continue running in the background so all events
       // are persisted. The client can reconnect via the attach endpoint.
       let socketClosed = false;
+      // Liveness probe: a half-open WS (peer vanished without a FIN — sleep,
+      // NAT timeout, network partition) never fires 'close', so without this
+      // the socket + its run-event subscription would linger for the process
+      // lifetime. The probe terminates a peer that stops answering pongs,
+      // which then triggers the normal 'close' teardown below.
+      const stopHeartbeat = installWsHeartbeat(socket as unknown as Parameters<typeof installWsHeartbeat>[0]);
       socket.on('close', () => {
+        stopHeartbeat();
         if (socketClosed) return;
         socketClosed = true;
         console.log(
@@ -289,10 +310,37 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
             wl.fail(stepParse, 'invalid JSON');
             wl.fail(stepRoute, 'invalid JSON');
             wl.flush(ctx, 400);
-            socket.send(
-              JSON.stringify(createStreamErrorChunk('INVALID_JSON', 'Invalid JSON', requestRunId)),
+            safeSendWs(
+              socket,
+              createStreamErrorChunk(
+                'INVALID_JSON',
+                STREAM_PLUGIN_ERROR_MESSAGES.invalidJson,
+                requestRunId,
+              ),
             );
             return;
+          }
+
+          // §0.153: application-level liveness ping. The client stream probe
+          // sends `{type:'ping'}` on an interval to detect a half-open socket
+          // (server vanished without a FIN — sleep / NAT / partition); answer
+          // with `pong` so a healthy-but-quiet turn (a long tool run emitting
+          // no chunks) keeps the client's watchdog primed and is NOT torn down.
+          // Handled before `streamRequestSchema.safeParse` so a ping is never
+          // misclassified as an INVALID_REQUEST. A stray `pong` is ignored.
+          if (parsed && typeof parsed === 'object') {
+            const ctrl = (parsed as { type?: unknown }).type;
+            if (ctrl === 'ping') {
+              wl.succeed(stepParse);
+              wl.succeed(stepRoute, undefined, { control: 'ping' });
+              safeSendWs(socket, { type: 'pong', timestamp: Date.now() });
+              return;
+            }
+            if (ctrl === 'pong') {
+              wl.succeed(stepParse);
+              wl.succeed(stepRoute, undefined, { control: 'pong' });
+              return;
+            }
           }
 
           const body = streamRequestSchema.safeParse(parsed);
@@ -300,12 +348,14 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
             wl.fail(stepParse, 'invalid request schema');
             wl.fail(stepRoute, 'invalid request schema');
             wl.flush(ctx, 400);
-            socket.send(
-              JSON.stringify({
-                ...createStreamErrorChunk('INVALID_REQUEST', 'Invalid request', requestRunId),
-                issues: body.error.issues,
-              }),
-            );
+            safeSendWs(socket, {
+              ...createStreamErrorChunk(
+                'INVALID_REQUEST',
+                STREAM_PLUGIN_ERROR_MESSAGES.invalidRequest,
+                requestRunId,
+              ),
+              issues: body.error.issues,
+            });
             return;
           }
           wl.succeed(stepParse);
@@ -319,13 +369,11 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
             wl.fail(stepSession, 'session not found');
             wl.fail(stepRoute, 'session not found');
             wl.flush(ctx, 404);
-            socket.send(
-              JSON.stringify({
-                type: 'error',
-                code: 'SESSION_NOT_FOUND',
-                message: 'Session not found',
-              }),
-            );
+            safeSendWs(socket, {
+              type: 'error',
+              code: 'SESSION_NOT_FOUND',
+              message: '目标会话不存在。',
+            });
             return;
           }
           wl.succeed(stepSession);
@@ -338,9 +386,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
           // started closing so we don't throw and bring down the message handler.
           const safeWriteChunk = (chunk: RunEvent) => {
             if (socketClosed || socket.readyState !== 1) return;
-            try {
-              socket.send(JSON.stringify(chunk));
-            } catch {
+            if (!safeSendWs(socket, chunk)) {
               // Mark socket as gone so subsequent writes are skipped.
               socketClosed = true;
             }
@@ -387,8 +433,19 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
               category: 'route',
               sourceName: 'WS_STREAM_ERROR',
               requestId: body.data.clientRequestId,
-              output: { message, code: 'WS_STREAM_ERROR' },
+              output: {
+                message: STREAM_PLUGIN_ERROR_MESSAGES.wsStreamError,
+                code: 'WS_STREAM_ERROR',
+                technicalDetail: message,
+              },
             });
+            safeWriteChunk(
+              createStreamErrorChunk(
+                'WS_STREAM_ERROR',
+                STREAM_PLUGIN_ERROR_MESSAGES.wsStreamError,
+                requestRunId,
+              ),
+            );
             wl.flush(ctx, 500);
           }
         })();
@@ -415,7 +472,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       wl.fail(authStep, 'unauthorized');
       wl.fail(routeStep, 'unauthorized');
       wl.flush(ctx, 401);
-      return reply.status(401).send({ error: 'Unauthorized' });
+      return reply.status(401).send({ error: '未授权或登录已失效。' });
     }
     wl.succeed(authStep);
     const { id: sessionId } = request.params as { id: string };
@@ -426,7 +483,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       wl.fail(parseStep, 'invalid query');
       wl.fail(routeStep, 'invalid query');
       wl.flush(ctx, 400);
-      return reply.status(400).send({ error: 'Invalid query', issues: query.error.issues });
+      return reply.status(400).send({ error: '查询参数无效。', issues: query.error.issues });
     }
     wl.succeed(parseStep);
 
@@ -438,7 +495,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       wl.fail(stepSession, 'session not found');
       wl.fail(routeStep, 'session not found');
       wl.flush(ctx, 404);
-      return reply.status(404).send({ error: 'Session not found' });
+      return reply.status(404).send({ error: '目标会话不存在。' });
     }
     wl.succeed(stepSession);
 
@@ -459,7 +516,10 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
           category: 'route',
           sourceName: 'SSE_CLIENT_DISCONNECTED',
           requestId: query.data.clientRequestId,
-          output: { code: 'SSE_CLIENT_DISCONNECTED', message: 'client closed SSE mid-stream' },
+          output: {
+            code: 'SSE_CLIENT_DISCONNECTED',
+            message: STREAM_PLUGIN_ERROR_MESSAGES.sseClientDisconnected,
+          },
         });
       }
     };
@@ -481,18 +541,14 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
     // connection during long thinking phases where no chunks are emitted.
     const heartbeat = setInterval(() => {
       if (clientClosed) return;
-      try {
-        reply.raw.write(': keepalive\n\n');
-      } catch {
-        // socket already half-closed; cleanup will run from the close handler.
+      if (!safeWriteReplyRaw(reply, ': keepalive\n\n')) {
+        onClientClose();
       }
     }, 10_000);
 
     const safeWriteChunk = (chunk: RunEvent) => {
       if (clientClosed) return;
-      try {
-        reply.raw.write(`data: ${JSON.stringify(chunk)}\n\n`);
-      } catch {
+      if (!safeWriteReplyRaw(reply, `data: ${JSON.stringify(chunk)}\n\n`)) {
         // Mark client as gone so subsequent writes are skipped.
         onClientClose();
       }
@@ -539,18 +595,24 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
         category: 'route',
         sourceName: 'SSE_STREAM_ERROR',
         requestId: query.data.clientRequestId,
-        output: { message, code: 'SSE_STREAM_ERROR' },
+        output: {
+          message: STREAM_PLUGIN_ERROR_MESSAGES.sseStreamError,
+          code: 'SSE_STREAM_ERROR',
+          technicalDetail: message,
+        },
       });
+      safeWriteChunk(
+        createStreamErrorChunk(
+          'SSE_STREAM_ERROR',
+          STREAM_PLUGIN_ERROR_MESSAGES.sseStreamError,
+          randomUUID(),
+        ),
+      );
       wl.flush(ctx, 500);
-      throw error;
     } finally {
       clearInterval(heartbeat);
       request.raw.off('close', onClientClose);
-      try {
-        reply.raw.end();
-      } catch {
-        // socket already closed by client; nothing to do.
-      }
+      safeEndReplyRaw(reply);
     }
   });
 
@@ -573,7 +635,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       wl.fail(authStep, 'unauthorized');
       wl.fail(routeStep, 'unauthorized');
       wl.flush(ctx, 401);
-      return reply.status(401).send({ error: 'Unauthorized' });
+      return reply.status(401).send({ error: '未授权或登录已失效。' });
     }
     wl.succeed(authStep);
 
@@ -586,7 +648,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       wl.fail(parseStep, 'invalid query');
       wl.fail(routeStep, 'invalid query');
       wl.flush(ctx, 400);
-      return reply.status(400).send({ error: 'Invalid query', issues: query.error.issues });
+      return reply.status(400).send({ error: '查询参数无效。', issues: query.error.issues });
     }
     wl.succeed(parseStep);
 
@@ -601,7 +663,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       wl.fail(sessionStep, 'session not found');
       wl.fail(routeStep, 'session not found');
       wl.flush(ctx, 404);
-      return reply.status(404).send({ error: 'Session not found' });
+      return reply.status(404).send({ error: '目标会话不存在。' });
     }
     wl.succeed(sessionStep);
 
@@ -627,7 +689,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       wl.flush(ctx, 409);
       return reply.status(409).send({
         activeClientRequestId: currentActiveThread?.clientRequestId ?? null,
-        error: 'Requested stream is no longer active',
+        error: STREAM_PLUGIN_ERROR_MESSAGES.requestedStreamInactive,
       });
     }
 
@@ -647,7 +709,10 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       'Access-Control-Allow-Credentials': 'true',
       Vary: 'Origin',
     });
-    reply.raw.write('retry: 1000\n\n');
+    if (!safeWriteReplyRaw(reply, 'retry: 1000\n\n')) {
+      safeEndReplyRaw(reply);
+      return;
+    }
 
     if (!isRequestedRequestActive) {
       const replayEvents = listSessionRunEventsByRequestAfterSeq({
@@ -656,7 +721,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
         afterSeq,
       });
       for (const replayEvent of replayEvents) {
-        writeSseRunEnvelope(
+        const delivered = writeSseRunEnvelope(
           reply,
           buildAttachRunEnvelope({
             clientRequestId: query.data.clientRequestId,
@@ -664,6 +729,10 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
             seq: replayEvent.seq,
           }),
         );
+        if (!delivered) {
+          safeEndReplyRaw(reply);
+          return;
+        }
       }
 
       wl.succeed(routeStep, undefined, {
@@ -673,7 +742,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
         sessionId,
       });
       wl.flush(ctx, 200);
-      reply.raw.end();
+      safeEndReplyRaw(reply);
       return;
     }
 
@@ -690,8 +759,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
         if (settled || seq <= lastSeq) {
           return;
         }
-        lastSeq = seq;
-        writeSseRunEnvelope(
+        const delivered = writeSseRunEnvelope(
           reply,
           buildAttachRunEnvelope({
             clientRequestId: query.data.clientRequestId,
@@ -699,25 +767,36 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
             seq,
           }),
         );
+        if (!delivered) {
+          cleanup();
+          return;
+        }
+        lastSeq = seq;
         if (deriveRunEventBookend(event)?.terminal === true) {
           cleanup();
         }
       };
 
-      const heartbeat = setInterval(() => {
-        reply.raw.write(': keepalive\n\n');
-      }, 10_000);
+      let heartbeat: NodeJS.Timeout | null = null;
       const cleanup = () => {
         if (settled) {
           return;
         }
         settled = true;
-        clearInterval(heartbeat);
+        if (heartbeat) {
+          clearInterval(heartbeat);
+          heartbeat = null;
+        }
         unsubscribe();
         request.raw.off('close', cleanup);
-        reply.raw.end();
+        safeEndReplyRaw(reply);
         resolve();
       };
+      heartbeat = setInterval(() => {
+        if (!safeWriteReplyRaw(reply, ': keepalive\n\n')) {
+          cleanup();
+        }
+      }, 10_000);
       unsubscribe = subscribeSessionRunEvents(sessionId, (event, meta?: PublishRunEventMeta) => {
         if (meta?.clientRequestId !== query.data.clientRequestId || typeof meta.seq !== 'number') {
           return;
@@ -763,4 +842,40 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       }
     });
   });
+}
+
+function safeSendWs(socket: WebSocket, payload: unknown): boolean {
+  try {
+    socket.send(JSON.stringify(payload));
+    return true;
+  } catch (_sendErr) {
+    void _sendErr;
+    return false;
+  }
+}
+
+function safeCloseWs(socket: WebSocket, code: number, reason?: string): void {
+  try {
+    socket.close(code, reason);
+  } catch (_closeErr) {
+    void _closeErr;
+  }
+}
+
+function safeWriteReplyRaw(reply: FastifyReply, payload: string): boolean {
+  try {
+    reply.raw.write(payload);
+    return true;
+  } catch (_writeErr) {
+    void _writeErr;
+    return false;
+  }
+}
+
+function safeEndReplyRaw(reply: FastifyReply): void {
+  try {
+    reply.raw.end();
+  } catch (_endErr) {
+    void _endErr;
+  }
 }

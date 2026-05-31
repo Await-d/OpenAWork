@@ -225,28 +225,21 @@
   transition:
     background 150ms ease,
     color 150ms ease,
-    border-color 150ms ease;
+    border-color 150ms ease,
+    box-shadow 150ms ease;
 }
 .team-tab-pill:hover:not([data-active='true']):not(:disabled) {
   background: var(--bg-hover);
   color: var(--fg-default);
 }
-
-/* primary tab（横条，文字色变化即可） */
-.team-primary-tab {
-  transition:
-    color 120ms ease,
-    border-color 120ms ease;
-}
-.team-primary-tab:hover:not([data-active='true']):not(:disabled) {
-  color: var(--fg-default);
-}
-/* 防止全局 button hover 灰色背景渗透到 tab 按钮上（hover 与 active 都不要） */
-.team-v2-root button.team-primary-tab:hover:not(:disabled),
-.team-v2-root button.team-primary-tab:active:not(:disabled),
-.team-v2-root button.team-primary-tab[data-active='true']:hover {
-  background: transparent;
+/* 防止全局 .team-v2-root button hover/active 的灰底 + scale 渗透到胶囊 tab 上，
+   避免与本组件自带的 active 阴影/背景打架（active 态保持自身样式不缩放）。 */
+.team-v2-root button.team-tab-pill:active:not(:disabled),
+.team-v2-root button.team-tab-pill[data-active='true']:hover {
   transform: none;
+}
+.team-v2-root button.team-tab-pill[data-active='true']:hover {
+  background: var(--bg-overlay);
 }
 
 /* sub tab（segmented，accent-soft 风） */
@@ -563,4 +556,34 @@
   border-color: var(--accent);
   box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 12%, transparent);
   outline: none;
+}
+
+/* 角色提示词预览浮层：遮罩淡入 + 面板从右滑入 */
+@keyframes role-prompt-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes role-prompt-slide-in {
+  from {
+    opacity: 0.6;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  @keyframes role-prompt-slide-in {
+    from {
+      transform: none;
+    }
+    to {
+      transform: none;
+    }
+  }
 }

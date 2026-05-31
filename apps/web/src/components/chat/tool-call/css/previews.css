@@ -518,6 +518,25 @@
   word-break: break-all;
 }
 
+/* Clickable path in the read-tool card: opens the file in the editor pane
+   positioned on the line window this read returned. */
+.file-content-path-clickable {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  text-align: left;
+  transition: color 100ms ease;
+}
+
+.file-content-path-clickable:hover,
+.file-content-path-clickable:focus-visible {
+  color: var(--accent);
+  text-decoration: underline;
+  outline: none;
+}
+
 .file-content-range {
   color: var(--fg-muted);
   font-size: 10px;
@@ -573,6 +592,27 @@
   text-align: right;
   white-space: pre;
   opacity: 0.7;
+}
+
+/* Clickable gutter line numbers: jump straight to that line in the editor. */
+.file-content-line-num-clickable {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  cursor: pointer;
+  transition:
+    color 100ms ease,
+    opacity 100ms ease;
+}
+
+.file-content-line-num-clickable:hover,
+.file-content-line-num-clickable:focus-visible {
+  color: var(--accent);
+  opacity: 1;
+  text-decoration: underline;
+  outline: none;
 }
 
 .file-content-line-text {
@@ -639,6 +679,27 @@
 
 .grep-hits-row:hover {
   background: color-mix(in oklch, var(--surface-3) 35%, transparent);
+}
+
+/* Button variant of a hit row: resets the native button chrome but keeps
+   the grid layout so clickable + passive rows render identically. */
+.grep-hits-row-clickable {
+  border: none;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.grep-hits-row-clickable:hover .grep-hits-text,
+.grep-hits-row-clickable:focus-visible .grep-hits-text {
+  color: var(--accent);
+}
+
+.grep-hits-row-clickable:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 35%, transparent);
 }
 
 .grep-hits-line {

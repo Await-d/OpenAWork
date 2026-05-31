@@ -14,8 +14,8 @@ function getSessionRunStateMeta(status: Extract<SessionStateStatus, 'running' | 
       badge: '等待处理',
       description: '当前会话已暂停，处理权限或问题后会继续同步最新结果。',
       dotColor: 'var(--warning)',
-      panelBackground: 'color-mix(in srgb, var(--warning) 8%, var(--bg-overlay)',
-      panelBorder: '1px solid color-mix(in srgb, var(--warning) 26%, var(--border-default)',
+      panelBackground: 'color-mix(in srgb, var(--warning) 8%, var(--bg-overlay))',
+      panelBorder: '1px solid color-mix(in srgb, var(--warning) 26%, var(--border-default))',
     };
   }
 
@@ -24,7 +24,7 @@ function getSessionRunStateMeta(status: Extract<SessionStateStatus, 'running' | 
     description: '你切回当前会话后，页面会继续自动同步最新消息和状态。',
     dotColor: 'var(--accent)',
     panelBackground: 'color-mix(in oklch, var(--bg-overlay) 86%, var(--accent) 14%)',
-    panelBorder: '1px solid color-mix(in oklch, var(--accent) 30%, var(--border-default)',
+    panelBorder: '1px solid color-mix(in oklch, var(--accent) 30%, var(--border-default))',
   };
 }
 
@@ -64,7 +64,7 @@ function getStopCapabilityTone(capability: StopCapability): {
   if (capability === 'best_effort') {
     return {
       background: 'color-mix(in srgb, var(--warning) 12%, transparent)',
-      border: '1px solid color-mix(in srgb, var(--warning) 28%, var(--border-default)',
+      border: '1px solid color-mix(in srgb, var(--warning) 28%, var(--border-default))',
       color: 'var(--warning)',
     };
   }
@@ -72,7 +72,7 @@ function getStopCapabilityTone(capability: StopCapability): {
   if (capability === 'precise') {
     return {
       background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
-      border: '1px solid color-mix(in oklch, var(--accent) 22%, var(--border-default)',
+      border: '1px solid color-mix(in oklch, var(--accent) 22%, var(--border-default))',
       color: 'var(--accent)',
     };
   }
@@ -240,8 +240,8 @@ export function SessionRunStateBar({
             }
             border={
               status === 'paused'
-                ? '1px solid color-mix(in srgb, var(--warning) 28%, var(--border-default)'
-                : '1px solid color-mix(in oklch, var(--accent) 22%, var(--border-default)'
+                ? '1px solid color-mix(in srgb, var(--warning) 28%, var(--border-default))'
+                : '1px solid color-mix(in oklch, var(--accent) 22%, var(--border-default))'
             }
             color={status === 'paused' ? 'var(--warning)' : 'var(--accent)'}
             label={meta.badge}

@@ -46,7 +46,7 @@ const FULLSCREEN_CLOSE_STYLE: CSSProperties = {
   height: 40,
   borderRadius: 10,
   border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base))',
   color: 'var(--fg-strong)',
   fontSize: 18,
   fontWeight: 700,

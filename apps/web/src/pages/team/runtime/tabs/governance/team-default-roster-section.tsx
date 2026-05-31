@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createTeamClient, type TeamMemberSlotInput } from '@openAwork/web-client';
 import {
   DEFAULT_FIXED_TEAM_MEMBER_SLOTS,
@@ -6,6 +6,7 @@ import {
   TEAM_RUNTIME_LAYER_ORDER,
 } from '@openAwork/shared';
 import type { TeamMemberSpecialty, TeamRuntimeLayer } from '@openAwork/shared';
+import { useTeamDefaultRosterState } from './use-team-default-roster-state.js';
 
 interface TeamDefaultRosterSectionProps {
   gatewayUrl: string;
@@ -40,6 +41,7 @@ const SPECIALTY_LABELS: Record<TeamMemberSpecialty, string> = {
   sre: 'SRE / 运维',
   observability: '可观测性',
   quality: '质量',
+  custom: '自定义角色',
 };
 
 const DEFAULT_SPECIALTY_BY_LAYER: Record<TeamRuntimeLayer, TeamMemberSpecialty> = {
@@ -193,43 +195,50 @@ export function TeamDefaultRosterSection({
   token,
   teamWorkspaceId,
 }: TeamDefaultRosterSectionProps) {
+  const {
+    applyWorkspace,
+    error: loadError,
+    loading,
+    refresh,
+    workspace,
+  } = useTeamDefaultRosterState({
+    gatewayUrl,
+    teamWorkspaceId,
+    token,
+  });
   const client = useMemo(() => createTeamClient(gatewayUrl), [gatewayUrl]);
   const [workspaceName, setWorkspaceName] = useState('');
   const [draftRoster, setDraftRoster] = useState<TeamMemberSlotInput[]>(() => cloneDefaultRoster());
   const [baseline, setBaseline] = useState(serializeRoster(cloneDefaultRoster()));
-  const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<SaveFeedback>({ kind: 'idle' });
-  const [reloadTick, setReloadTick] = useState(0);
+  const lastHydratedWorkspaceKeyRef = useRef<string | null>(null);
+
+  const dirty = serializeRoster(draftRoster) !== baseline;
 
   useEffect(() => {
-    if (!teamWorkspaceId) return;
-    let cancelled = false;
-    setLoading(true);
-    setFeedback({ kind: 'idle' });
-    void (async () => {
-      try {
-        const workspace = await client.getWorkspace(token, teamWorkspaceId);
-        if (cancelled) return;
-        const nextRoster = workspace.defaultTeamRoster.length
-          ? workspace.defaultTeamRoster
-          : cloneDefaultRoster();
-        setWorkspaceName(workspace.name);
-        setDraftRoster(cloneRoster(nextRoster));
-        setBaseline(serializeRoster(nextRoster));
-      } catch (err) {
-        if (cancelled) return;
-        setFeedback({
-          kind: 'error',
-          message: err instanceof Error ? err.message : '加载默认固定团队失败',
-        });
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [client, reloadTick, teamWorkspaceId, token]);
+    if (!workspace) {
+      return;
+    }
+    const nextRoster = workspace.defaultTeamRoster.length
+      ? workspace.defaultTeamRoster
+      : cloneDefaultRoster();
+    const nextBaseline = serializeRoster(nextRoster);
+    const nextWorkspaceKey = `${workspace.id}:${workspace.updatedAt}`;
+    const previousWorkspaceKey = lastHydratedWorkspaceKeyRef.current;
+    const workspaceChanged =
+      previousWorkspaceKey === null || !previousWorkspaceKey.startsWith(`${workspace.id}:`);
+    if (workspaceChanged || !dirty) {
+      setWorkspaceName(workspace.name);
+      setDraftRoster(cloneRoster(nextRoster));
+      setBaseline(nextBaseline);
+      lastHydratedWorkspaceKeyRef.current = nextWorkspaceKey;
+      setFeedback({ kind: 'idle' });
+      return;
+    }
+    setWorkspaceName(workspace.name);
+    setBaseline(nextBaseline);
+    lastHydratedWorkspaceKeyRef.current = nextWorkspaceKey;
+  }, [dirty, workspace]);
 
   const groupedRoster = useMemo(() => {
     const map = new Map<TeamRuntimeLayer, TeamMemberSlotInput[]>();
@@ -241,8 +250,6 @@ export function TeamDefaultRosterSection({
     }
     return map;
   }, [draftRoster]);
-
-  const dirty = serializeRoster(draftRoster) !== baseline;
 
   const updateSlot = (slotId: string, patch: Partial<TeamMemberSlotInput>) => {
     setDraftRoster((current) =>
@@ -273,9 +280,11 @@ export function TeamDefaultRosterSection({
       const nextRoster = next.defaultTeamRoster.length
         ? next.defaultTeamRoster
         : cloneDefaultRoster();
+      applyWorkspace(next);
       setWorkspaceName(next.name);
       setDraftRoster(cloneRoster(nextRoster));
       setBaseline(serializeRoster(nextRoster));
+      lastHydratedWorkspaceKeyRef.current = `${next.id}:${next.updatedAt}`;
       setFeedback({ kind: 'success', message: `已保存 ${nextRoster.length} 个默认成员` });
       onSaved?.();
     } catch (err) {
@@ -311,7 +320,7 @@ export function TeamDefaultRosterSection({
           <button
             type="button"
             style={SECONDARY_BUTTON_STYLE}
-            onClick={() => setReloadTick((n) => n + 1)}
+            onClick={() => refresh()}
           >
             刷新
           </button>
@@ -344,6 +353,9 @@ export function TeamDefaultRosterSection({
 
       {loading ? (
         <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>正在加载默认固定团队…</span>
+      ) : null}
+      {loadError ? (
+        <span style={{ fontSize: 12, color: 'var(--danger)' }}>{loadError}</span>
       ) : null}
 
       <div style={{ display: 'grid', gap: 10 }}>

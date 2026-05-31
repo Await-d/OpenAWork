@@ -16,21 +16,22 @@
  * 切换器从内部组件抽到这里集中渲染，避免和 chat 体验产生差异。
  */
 
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
-import { createWorkspaceClient } from '@openAwork/web-client';
 import { useAuthStore } from '../../../../../stores/auth/auth.js';
 import {
   FileTreeView,
   type FileTreeContextTarget,
 } from '../../../../../components/layout/sidebar/SidebarHelpers.js';
 import FileTreeContextMenu from '../../../../../components/layout/file-tree/FileTreeContextMenu.js';
-import type { FileTreeNode } from '../../../../../components/common/modal/WorkspacePickerModal.js';
 import { getFileTreeRelativePath } from '../../../../../components/layout/file-tree/file-tree-actions.js';
 import {
   TeamSessionListSidebar,
   type TeamSessionListSidebarProps,
 } from './TeamSessionListSidebar.js';
+import { useTeamSidebarFileTreeState } from './use-team-sidebar-file-tree-state.js';
+import { useTeamFilePreview } from './use-team-file-preview.js';
+import { TeamFilePreviewPanel } from './TeamFilePreviewPanel.js';
 
 type SidebarTab = 'sessions' | 'files';
 
@@ -137,7 +138,8 @@ const SEARCH_INPUT_STYLE: CSSProperties = {
 const FILE_TREE_CONTAINER_STYLE: CSSProperties = {
   flex: 1,
   minHeight: 0,
-  overflow: 'auto',
+  overflowY: 'auto',
+  overflowX: 'hidden',
   padding: '8px 0',
 };
 
@@ -169,66 +171,41 @@ export function TeamSidebarWithFileTree({
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
   const token = useAuthStore((s) => s.accessToken);
 
-  // File tree state
-  const [treeNodes, setTreeNodes] = useState<FileTreeNode[]>([]);
-  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
-  const [treeLoading, setTreeLoading] = useState(false);
-
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
     target: FileTreeContextTarget;
   } | null>(null);
+  const {
+    expandedDirs,
+    handleRefresh,
+    handleToggleDir,
+    treeError,
+    treeLoading,
+    treeNodes,
+  } = useTeamSidebarFileTreeState({
+    active: activeTab === 'files',
+    gatewayUrl,
+    token,
+    workspacePath,
+  });
 
-  const workspaceClient = useMemo(() => createWorkspaceClient(gatewayUrl), [gatewayUrl]);
+  // F5：单击文件树节点 → 内联预览（轻量，不进编辑器 tab）。
+  const filePreview = useTeamFilePreview(workspacePath);
 
-  // Load root tree when switching to files tab
-  useEffect(() => {
-    if (activeTab !== 'files' || !workspacePath || !token) {
-      return;
-    }
-    let cancelled = false;
-    setTreeLoading(true);
-    workspaceClient
-      .fetchTree(token, workspacePath, { depth: 1 })
-      .then((nodes) => {
-        if (!cancelled) setTreeNodes(nodes as FileTreeNode[]);
-      })
-      .catch(() => {
-        if (!cancelled) setTreeNodes([]);
-      })
-      .finally(() => {
-        if (!cancelled) setTreeLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeTab, workspacePath, token, workspaceClient]);
-
-  const handleToggleDir = useCallback(
+  const handlePreviewFile = useCallback(
     (path: string) => {
-      setExpandedDirs((prev) => {
-        const next = new Set(prev);
-        if (next.has(path)) {
-          next.delete(path);
-        } else {
-          next.add(path);
-          if (token) {
-            void workspaceClient
-              .fetchTree(token, path, { depth: 1 })
-              .then((children) => {
-                setTreeNodes((prevNodes) =>
-                  injectChildren(prevNodes, path, children as FileTreeNode[]),
-                );
-              })
-              .catch(() => {});
-          }
-        }
-        return next;
-      });
+      // 当父级提供了完整编辑器入口（onOpenFile）时，单击直接在铺满内容区的
+      // 编辑器中打开 —— 这是用户期望的「点击文件 = 打开真正的编辑器」体验。
+      // 仅在没有编辑器入口时，才回退到轻量内联预览浮层。
+      if (onOpenFile) {
+        onOpenFile(path);
+        return;
+      }
+      filePreview.preview(path);
     },
-    [token, workspaceClient],
+    [filePreview, onOpenFile],
   );
 
   const handleNodeContextMenu = useCallback((target: FileTreeContextTarget) => {
@@ -263,16 +240,10 @@ export function TeamSidebarWithFileTree({
     setContextMenu(null);
   }, [contextMenu, workspacePath]);
 
-  const handleRefresh = useCallback(() => {
+  const handleRefreshTree = useCallback(() => {
     setContextMenu(null);
-    if (!token || !workspacePath) return;
-    setTreeLoading(true);
-    void workspaceClient
-      .fetchTree(token, workspacePath, { depth: 1 })
-      .then((nodes) => setTreeNodes(nodes as FileTreeNode[]))
-      .catch(() => setTreeNodes([]))
-      .finally(() => setTreeLoading(false));
-  }, [token, workspacePath, workspaceClient]);
+    handleRefresh();
+  }, [handleRefresh]);
 
   const handleNewSessionClick = useCallback(() => {
     if (!teamWorkspaceId) {
@@ -424,6 +395,22 @@ export function TeamSidebarWithFileTree({
         />
       ) : (
         <div style={FILE_TREE_CONTAINER_STYLE}>
+          {treeError ? (
+            <div
+              style={{
+                margin: '0 12px 8px',
+                padding: '8px 10px',
+                borderRadius: 8,
+                border: '1px solid color-mix(in srgb, var(--danger) 32%, transparent)',
+                background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay))',
+                color: 'var(--danger)',
+                fontSize: 11,
+                lineHeight: 1.5,
+              }}
+            >
+              {treeError}
+            </div>
+          ) : null}
           {treeLoading ? (
             <div style={{ padding: '16px', color: 'var(--fg-muted)', fontSize: 11 }}>
               加载文件目录…
@@ -438,7 +425,7 @@ export function TeamSidebarWithFileTree({
                 nodes={treeNodes}
                 expandedDirs={expandedDirs}
                 onToggleDir={handleToggleDir}
-                onOpenFile={onOpenFile}
+                onOpenFile={handlePreviewFile}
                 onNodeContextMenu={handleNodeContextMenu}
               />
               {contextMenu &&
@@ -463,7 +450,7 @@ export function TeamSidebarWithFileTree({
                     onCreateSession={() => setContextMenu(null)}
                     onCreateFile={() => setContextMenu(null)}
                     onCreateFolder={() => setContextMenu(null)}
-                    onRefresh={handleRefresh}
+                    onRefresh={handleRefreshTree}
                   />,
                   document.body,
                 )}
@@ -471,24 +458,22 @@ export function TeamSidebarWithFileTree({
           )}
         </div>
       )}
+
+      <TeamFilePreviewPanel
+        path={filePreview.path}
+        content={filePreview.content}
+        loading={filePreview.loading}
+        error={filePreview.error}
+        onClose={filePreview.close}
+        {...(onOpenFile
+          ? {
+              onOpenInEditor: (p: string) => {
+                onOpenFile(p);
+                filePreview.close();
+              },
+            }
+          : {})}
+      />
     </div>
   );
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function injectChildren(
-  nodes: FileTreeNode[],
-  parentPath: string,
-  children: FileTreeNode[],
-): FileTreeNode[] {
-  return nodes.map((node) => {
-    if (node.path === parentPath && node.type === 'directory') {
-      return { ...node, children };
-    }
-    if (node.children) {
-      return { ...node, children: injectChildren(node.children, parentPath, children) };
-    }
-    return node;
-  });
 }

@@ -17,6 +17,7 @@ interface SessionStateRow {
 }
 
 const DECIDING_INTERACTION_TIMEOUT_SQL = "datetime('now', '-10 minutes')";
+export const DECIDING_INTERACTION_TIMEOUT_MS = 10 * 60 * 1000;
 
 export interface SessionRuntimeReconciliationResult {
   previousStatus: PersistedSessionStateStatus | null;

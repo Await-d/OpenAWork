@@ -3,6 +3,7 @@ import type {
   AIProviderRef,
   ImageGenerationDefaultsRef,
 } from '@openAwork/shared-ui';
+import { getProviderUiList } from '@openAwork/shared-ui';
 import { DEFAULT_IMAGE_GENERATION_SIZE, normalizeImageGenerationSize } from '@openAwork/shared';
 import type {
   ReasoningEffortRef,
@@ -65,15 +66,9 @@ export const DEFAULT_IMAGE_GENERATION_DEFAULTS: ImageGenerationDefaultsRef = {
   background: 'auto',
 };
 
-export const BUILTIN_PROVIDER_TYPE_SET = new Set([
-  'anthropic',
-  'openai',
-  'deepseek',
-  'gemini',
-  'ollama',
-  'openrouter',
-  'qwen',
-  'moonshot',
+// 由 catalog 派生内置平台类型集合 + 'custom'，新增平台自动包含，无需改这里。
+export const BUILTIN_PROVIDER_TYPE_SET = new Set<string>([
+  ...getProviderUiList().map((entry) => entry.type),
   'custom',
 ]);
 
@@ -229,10 +224,10 @@ export async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>
   }
 
   if (runtime.isTauri) {
-    throw new Error('Tauri IPC is not available yet');
+    throw new Error('Tauri IPC 尚未就绪。');
   }
 
-  throw new Error('Not running in Tauri');
+  throw new Error('当前不在 Tauri 桌面环境中运行。');
 }
 
 export const isTauri =
@@ -260,3 +255,59 @@ export const isTauri =
       }
     ).isTauri,
   );
+
+// ─── SSH 面板恢复 ───────────────────────────────────────────────────────────
+
+/** `resolveSshDialogRestore` 需要的最小连接形状（避免耦合完整的 SSHConnectionEntry）。 */
+export interface SshRestoreConnection {
+  id: string;
+  status: string;
+}
+
+/** `resolveSshDialogRestore` 需要的最小对话形状。 */
+export interface SshRestoreDialog {
+  connectionId: string;
+  cwd: string;
+}
+
+export interface SshRestoreDecision {
+  connectionId: string;
+  /** 命中对话的 cwd；fallback 时为 '/'. */
+  cwd: string;
+  /** 仅当目标连接已 connected 时为 true——未就绪的连接只高亮、不拉文件。 */
+  shouldLoadFiles: boolean;
+}
+
+/**
+ * 纯函数：根据「最近 SSH 对话」列表与当前连接列表，算出重启后应恢复到哪个连接。
+ *
+ * `dialogs` 约定已按 `pinned DESC, lastOpenedAt DESC` 排好（与网关 `/ssh/dialogs`
+ * 一致），因此这里直接取第一个「连接仍存在」的对话即可；连接已被删除的历史
+ * 对话会被跳过，避免把面板恢复到一个不存在的连接上。
+ *
+ * 1. 命中对话：选该连接，`shouldLoadFiles` 取决于连接是否已 connected；
+ * 2. 无可用对话：退化为第一个 connected 的连接（cwd 归 '/'）；
+ * 3. 都没有：返回 null，面板保持空白。
+ */
+export function resolveSshDialogRestore(
+  dialogs: readonly SshRestoreDialog[],
+  connections: readonly SshRestoreConnection[],
+): SshRestoreDecision | null {
+  const findConnection = (id: string) => connections.find((connection) => connection.id === id);
+
+  const dialog = dialogs.find((entry) => findConnection(entry.connectionId) !== undefined);
+  if (dialog) {
+    return {
+      connectionId: dialog.connectionId,
+      cwd: dialog.cwd || '/',
+      shouldLoadFiles: findConnection(dialog.connectionId)?.status === 'connected',
+    };
+  }
+
+  const firstConnected = connections.find((connection) => connection.status === 'connected');
+  if (firstConnected) {
+    return { connectionId: firstConnected.id, cwd: '/', shouldLoadFiles: true };
+  }
+
+  return null;
+}

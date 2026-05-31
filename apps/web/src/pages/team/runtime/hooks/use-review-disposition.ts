@@ -15,7 +15,11 @@
  */
 
 import { useMemo } from 'react';
-import type { HandoffRecord } from '@openAwork/web-client';
+import {
+  getEffectiveReviewDisposition,
+  isHandledReviewDispositionPayload,
+  type HandoffRecord,
+} from '@openAwork/web-client';
 import { useSessionHandoffs } from './use-session-handoffs.js';
 
 export type FailureAction = 'redispatch' | 'return-to-c' | 'escalate-to-user';
@@ -34,33 +38,37 @@ export interface ReviewDisposition {
   error: string | null;
 }
 
-interface DispositionPayload {
-  failure_disposition?: {
-    action?: FailureAction;
-    reason?: string;
-  };
-  escalation_round?: number;
+function isEligiblePm2DispositionRecord(record: HandoffRecord): boolean {
+  return (
+    record.toRoleLayer === 'pm2' &&
+    (record.state === 'completed' || record.state === 'failed') &&
+    !isHandledReviewDispositionPayload(record.payload)
+  );
 }
 
-function isPayloadObject(value: unknown): value is DispositionPayload {
-  return typeof value === 'object' && value !== null;
-}
-
-function pickLatestPm2Handoff(records: HandoffRecord[]): HandoffRecord | null {
-  // 选 from_role_layer = 'pm2' 的最近 handoff（无论成功或失败），
-  // 用 updatedAt 比较；同时要求 state ∈ {completed, failed} 才有 disposition 信息。
+function pickPm2Handoff(records: HandoffRecord[], focusHandoffId?: string | null): HandoffRecord | null {
+  if (focusHandoffId) {
+    const focused = records.find((record) => record.id === focusHandoffId);
+    if (focused && isEligiblePm2DispositionRecord(focused)) {
+      return focused;
+    }
+  }
+  // 真正的 PM2 handoff 本体是 toRoleLayer='pm2'。
+  // 这里只选终态，避免把仍在 dispatch / review 中的 handoff 当成失败分流来源。
   const candidates = records
-    .filter((record) => record.fromRoleLayer === 'pm2')
-    .filter((record) => record.state === 'completed' || record.state === 'failed')
+    .filter(isEligiblePm2DispositionRecord)
     .sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
   return candidates[0] ?? null;
 }
 
-export function useReviewDisposition(sessionId: string | null): ReviewDisposition {
+export function useReviewDisposition(
+  sessionId: string | null,
+  focusHandoffId?: string | null,
+): ReviewDisposition {
   const { handoffs, loading, error } = useSessionHandoffs(sessionId);
 
   return useMemo(() => {
-    const pm2 = pickLatestPm2Handoff(handoffs);
+    const pm2 = pickPm2Handoff(handoffs, focusHandoffId);
     if (!pm2) {
       return {
         action: null,
@@ -73,17 +81,20 @@ export function useReviewDisposition(sessionId: string | null): ReviewDispositio
       };
     }
 
-    const payload = pm2.payload;
-    const failureDisposition = isPayloadObject(payload)
-      ? (payload.failure_disposition ?? null)
-      : null;
-    const escalationRound = isPayloadObject(payload)
-      ? typeof payload.escalation_round === 'number'
-        ? payload.escalation_round
-        : pm2.retryCount
-      : pm2.retryCount;
-
-    if (!failureDisposition || !failureDisposition.action) {
+    const escalationRound = pm2.retryCount;
+    const effectiveDisposition = getEffectiveReviewDisposition(pm2);
+    if (effectiveDisposition && effectiveDisposition.status !== 'handled') {
+      return {
+        action: effectiveDisposition.action,
+        reason: effectiveDisposition.reason,
+        escalationRound,
+        pm2HandoffId: pm2.id,
+        pm2HandoffState: pm2.state,
+        loading,
+        error,
+      };
+    }
+    if (!effectiveDisposition || !effectiveDisposition.action) {
       return {
         action: null,
         reason: null,
@@ -96,13 +107,13 @@ export function useReviewDisposition(sessionId: string | null): ReviewDispositio
     }
 
     return {
-      action: failureDisposition.action,
-      reason: failureDisposition.reason ?? null,
+      action: effectiveDisposition.action,
+      reason: effectiveDisposition.reason ?? null,
       escalationRound,
       pm2HandoffId: pm2.id,
       pm2HandoffState: pm2.state,
       loading,
       error,
     };
-  }, [handoffs, loading, error]);
+  }, [focusHandoffId, handoffs, loading, error]);
 }

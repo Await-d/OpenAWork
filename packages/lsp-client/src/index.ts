@@ -1,5 +1,5 @@
 import { execSync } from 'child_process';
-import { findServerForFile, findServersForFile, ALL_SERVERS } from './server.js';
+import { findServerForFile, findServersForFile, ALL_SERVERS, whichSync } from './server.js';
 import { createLSPClient } from './client.js';
 import type {
   LSPServerInfo,
@@ -21,16 +21,9 @@ const SEVERITY_MAP: Record<number, DiagnosticSummary['severity']> = {
 function isBinaryInstalled(binary: string | string[] | undefined): boolean {
   if (!binary) return false;
   const binaries = Array.isArray(binary) ? binary : [binary];
-  return binaries.some((bin) => {
-    try {
-      execSync(`which ${bin} 2>/dev/null || where ${bin} 2>/dev/null`, {
-        stdio: 'ignore',
-      });
-      return true;
-    } catch {
-      return false;
-    }
-  });
+  // Resolve via the pure-Node PATH scan (whichSync) rather than a `which`/`where`
+  // subprocess: no event-loop-blocking unbounded child, no shell, no injection.
+  return binaries.some((bin) => whichSync(bin) !== undefined);
 }
 
 export class LSPManager {
@@ -101,7 +94,7 @@ export class LSPManager {
           server: handle,
           root,
           onDiagnostics: (p, d) => {
-            for (const h of this.diagnosticHandlers) h(p, d);
+            this.dispatchDiagnostics(p, d);
           },
         });
         this.clients.push(client);
@@ -257,6 +250,25 @@ export class LSPManager {
       const idx = this.diagnosticHandlers.indexOf(handler);
       if (idx !== -1) this.diagnosticHandlers.splice(idx, 1);
     };
+  }
+
+  /**
+   * Fan a diagnostics push out to every subscriber while isolating
+   * faults: a throwing handler (e.g. a closed SSE/WS socket whose
+   * write rejects) must not abort delivery to the remaining
+   * subscribers, nor bubble back into the LSP client's notification
+   * loop and poison the connection. We snapshot the handler list so a
+   * handler that unsubscribes itself mid-dispatch doesn't shift the
+   * iterator.
+   */
+  private dispatchDiagnostics(path: string, diagnostics: Diagnostic[]): void {
+    for (const handler of [...this.diagnosticHandlers]) {
+      try {
+        handler(path, diagnostics);
+      } catch (err) {
+        console.warn('[lsp] diagnostics handler threw, isolating:', err);
+      }
+    }
   }
 
   async shutdown(): Promise<void> {

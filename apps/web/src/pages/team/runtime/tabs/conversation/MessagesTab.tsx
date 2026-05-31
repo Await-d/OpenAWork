@@ -535,7 +535,7 @@ export function MessagesTab({
                     display: 'grid',
                     gap: 3,
                     borderLeft: '3px solid var(--accent)',
-                    background: 'color-mix(in oklch, var(--accent) 4%, var(--bg-overlay)',
+                    background: 'color-mix(in oklch, var(--accent) 4%, var(--bg-overlay))',
                   }}
                 >
                   <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>

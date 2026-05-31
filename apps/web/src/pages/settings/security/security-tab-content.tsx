@@ -98,8 +98,8 @@ export function SecurityTabContent({
             style={{
               ...UV,
               borderRadius: 10,
-              border: '1px solid color-mix(in srgb, var(--danger) 42%, var(--border-default)',
-              background: 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay)',
+              border: '1px solid color-mix(in srgb, var(--danger) 42%, var(--border-default))',
+              background: 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay))',
               padding: '12px 14px',
               display: 'flex',
               flexDirection: 'column',

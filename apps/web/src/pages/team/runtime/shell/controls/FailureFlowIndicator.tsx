@@ -7,16 +7,16 @@
  *   - escalate-to-user → 多轮重试仍失败，升级给用户决策
  *
  * Phase D-T11：除了「展示」，还提供三个用户主动动作：
- *   - 重派：通过 inbound 通道发 `progress_report` 触发 PM2 重新拆包派发
- *   - 退回：通过 inbound 通道发 `escalation_request`（reason=review_failed_threshold）
- *   - 升级：直接接受 disposition，把当前会话标为「需要人工介入」
- *
- * 三个动作均经由 createTeamInboundClient.submit 写入 PM2 的 inbound 通道，
- * 后端在下一次 poll 时消费，避免前端绕过 handoff 协议直接写 sessions。
+ *   - 重派：把失败的 PM2 handoff 重新置回 pending，重新派发 d→e/f/g
+ *   - 退回：基于原 reception→pm1 payload 重新创建一条 PM1 handoff
+ *   - 升级：记录“用户接管”的显式确认
  */
 
 import { useState, type CSSProperties } from 'react';
-import { createTeamInboundClient } from '@openAwork/web-client';
+import {
+  createTeamHandoffsClient,
+  type HandoffReviewActionResult,
+} from '@openAwork/web-client';
 import { useAuthStore } from '../../../../../stores/auth/auth.js';
 
 const INDICATOR_STYLE: CSSProperties = {
@@ -26,7 +26,7 @@ const INDICATOR_STYLE: CSSProperties = {
   padding: '14px 16px',
   borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base))',
 };
 
 const HEADER_ROW_STYLE: CSSProperties = {
@@ -125,15 +125,13 @@ export interface FailureFlowIndicatorProps {
   action: FailureAction | null;
   reason: string | null;
   escalationRound: number;
-  /** 当前 PM2 handoff id（用于 inbound 写回 target session）。 */
+  /** 当前 PM2 handoff id。 */
   pm2HandoffId?: string | null;
-  /** 当前 PM2 from_session_id（inbound 通道发送目标 session）。可选；缺省时按钮 disabled。 */
-  pm2SourceSessionId?: string | null;
   /**
-   * 当用户动作完成后回调（成功时 success=true；失败时 success=false 并附 error）。
-   * 父组件可用此触发 useSessionHandoffs.refresh()。
+   * 当用户动作成功后回调。
+   * 父组件可用返回的 handoff preview 先局部更新，再触发 refresh。
    */
-  onActionComplete?: (action: FailureAction, success: boolean, error?: unknown) => void;
+  onActionComplete?: (result: HandoffReviewActionResult) => void;
 }
 
 export function FailureFlowIndicator({
@@ -141,55 +139,35 @@ export function FailureFlowIndicator({
   reason,
   escalationRound,
   pm2HandoffId,
-  pm2SourceSessionId,
   onActionComplete,
 }: FailureFlowIndicatorProps) {
   const { gatewayUrl, accessToken } = useAuthStore();
   const [busyAction, setBusyAction] = useState<FailureAction | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   if (!action) return null;
   const meta = ACTION_META[action];
-  const canActionate =
-    Boolean(gatewayUrl && accessToken && pm2SourceSessionId) && busyAction === null;
+  const canActionate = Boolean(gatewayUrl && accessToken && pm2HandoffId) && busyAction === null;
 
-  const dispatchInbound = async (
-    nextAction: FailureAction,
-    overrideReason: string,
-  ): Promise<void> => {
-    if (!gatewayUrl || !accessToken || !pm2SourceSessionId) {
-      console.warn('[FailureFlowIndicator] missing gateway/token/session');
-      onActionComplete?.(nextAction, false, new Error('未登录或缺少 PM2 来源会话'));
+  const runReviewAction = async (nextAction: FailureAction): Promise<void> => {
+    if (!gatewayUrl || !accessToken || !pm2HandoffId) {
+      setActionError('未登录或缺少 PM2 handoff，无法执行该评审动作。');
       return;
     }
-    const client = createTeamInboundClient(gatewayUrl);
+    const client = createTeamHandoffsClient(gatewayUrl);
     setBusyAction(nextAction);
+    setActionError(null);
     try {
-      // 复用 escalation_request 通道把用户的"重派/退回/升级"决定写回 PM2
-      await client.submit(accessToken, pm2SourceSessionId, {
-        messageType: 'escalation_request',
-        payload: {
-          fromLayer: 'pm2',
-          fromSessionId: pm2SourceSessionId,
-          reason: 'review_failed_threshold',
-          escalationRound,
-          context: overrideReason,
-          suggestedActions: [
-            {
-              label: ACTION_META[nextAction].label,
-              action:
-                nextAction === 'return-to-c'
-                  ? 'edit_original_request'
-                  : nextAction === 'escalate-to-user'
-                    ? 'edit_constitution'
-                    : 'answer',
-            },
-          ],
-        },
-      });
-      onActionComplete?.(nextAction, true);
+      const result = await client.runReviewAction(accessToken, pm2HandoffId, nextAction);
+      if (!result.ok) {
+        setActionError(result.errorMessage ?? '评审动作执行失败。');
+        return;
+      }
+      setActionError(null);
+      onActionComplete?.(result);
     } catch (err) {
-      console.error('[FailureFlowIndicator] inbound submit failed', err);
-      onActionComplete?.(nextAction, false, err);
+      console.error('[FailureFlowIndicator] review action failed', err);
+      setActionError(err instanceof Error ? err.message : '评审动作执行失败。');
     } finally {
       setBusyAction(null);
     }
@@ -227,7 +205,7 @@ export function FailureFlowIndicator({
       <div style={ACTIONS_ROW_STYLE}>
         <button
           type="button"
-          onClick={() => void dispatchInbound('redispatch', '用户确认实现型失败，重新派发')}
+          onClick={() => void runReviewAction('redispatch')}
           disabled={!canActionate || action === 'escalate-to-user'}
           style={{
             ...(action === 'redispatch' ? PRIMARY_BTN_STYLE : SECONDARY_BTN_STYLE),
@@ -240,7 +218,7 @@ export function FailureFlowIndicator({
         </button>
         <button
           type="button"
-          onClick={() => void dispatchInbound('return-to-c', '用户确认规划型失败，退回 PM1')}
+          onClick={() => void runReviewAction('return-to-c')}
           disabled={!canActionate || action === 'escalate-to-user'}
           style={{
             ...(action === 'return-to-c' ? PRIMARY_BTN_STYLE : SECONDARY_BTN_STYLE),
@@ -253,7 +231,7 @@ export function FailureFlowIndicator({
         </button>
         <button
           type="button"
-          onClick={() => void dispatchInbound('escalate-to-user', '用户主动确认升级')}
+          onClick={() => void runReviewAction('escalate-to-user')}
           disabled={!canActionate}
           style={{
             ...DANGER_BTN_STYLE,
@@ -265,6 +243,11 @@ export function FailureFlowIndicator({
           {busyAction === 'escalate-to-user' ? '提交中…' : '我来处理'}
         </button>
       </div>
+      {actionError ? (
+        <span style={{ fontSize: 11, color: 'var(--danger)', lineHeight: 1.55 }}>
+          {actionError}
+        </span>
+      ) : null}
     </div>
   );
 }

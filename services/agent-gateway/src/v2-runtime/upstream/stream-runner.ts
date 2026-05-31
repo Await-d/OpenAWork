@@ -72,6 +72,18 @@ export interface RunUpstreamStreamInput {
   sessionId?: string;
   /** Abort signal forwarded to the AI SDK. */
   signal?: AbortSignal;
+  /**
+   * Idle (inter-chunk) wall-clock timeout in milliseconds. The AI SDK
+   * `streamText` only honours `abortSignal`; it has no notion of a
+   * stalled stream. When an upstream connects, emits a first chunk,
+   * then stops producing data without closing the socket, the
+   * `for await (fullStream)` loop would otherwise block forever. The
+   * runner arms a watchdog that aborts the upstream and surfaces a
+   * stable `STREAM_STALL` error if no chunk arrives within this window.
+   * Each received chunk resets the timer. Pass `0` (or a non-finite
+   * value) to disable. Defaults to `DEFAULT_STREAM_IDLE_TIMEOUT_MS`.
+   */
+  idleTimeoutMs?: number;
   /** Optional system prompt. */
   system?: string;
   /** Temperature / max tokens / top-p — pass-through to streamText. */
@@ -303,6 +315,97 @@ interface RunnerState {
  * existing `writeChunk(...)` consumer in `runModelRound` without further
  * adaptation.
  */
+/**
+ * Default idle (inter-chunk) timeout for streaming upstream calls.
+ * Generous enough to absorb slow first tokens and long reasoning gaps
+ * on large models, while still bounding a hung-but-open upstream
+ * socket so the agent turn cannot wedge indefinitely.
+ */
+export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 120_000;
+
+/**
+ * Wrap an async iterable with an inter-chunk (idle) deadline. If no value
+ * arrives within `idleTimeoutMs`, `onStall` is invoked (used to abort the
+ * upstream and release the hung socket), the source iterator is closed via
+ * `return()`, and iteration ends gracefully so the caller can surface a
+ * stable error. Each yielded value resets the timer. A non-finite or
+ * non-positive timeout disables the watchdog (passes the source through).
+ *
+ * Exported for isolated unit testing — the production caller
+ * (`runUpstreamStream`) wraps the AI SDK `fullStream` with it.
+ */
+/**
+ * Close a source async-iterator without letting its `return()` escape or hang.
+ * The idle watchdog calls this AFTER aborting the upstream, at which point the
+ * AI SDK iterator's `return()` (or the abandoned pending `next()`) may reject
+ * with the abort error or never settle. We race the close against a short
+ * deadline and swallow any rejection so the watchdog always ends gracefully.
+ */
+const ITERATOR_CLOSE_TIMEOUT_MS = 5_000;
+async function closeIteratorSafely<T>(iterator: AsyncIterator<T>): Promise<void> {
+  if (typeof iterator.return !== 'function') {
+    return;
+  }
+  try {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const deadline = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, ITERATOR_CLOSE_TIMEOUT_MS);
+      timer.unref?.();
+    });
+    try {
+      await Promise.race([
+        Promise.resolve(iterator.return(undefined)).then(() => undefined),
+        deadline,
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  } catch {
+    // `return()` rejected (commonly the upstream abort error) — already handled
+    // by surfacing STREAM_STALL downstream; nothing to do here.
+  }
+}
+
+export async function* withStreamIdleWatchdog<T>(
+  source: AsyncIterable<T>,
+  options: { idleTimeoutMs: number; onStall: () => void },
+): AsyncGenerator<T> {
+  const { idleTimeoutMs, onStall } = options;
+  if (!Number.isFinite(idleTimeoutMs) || idleTimeoutMs <= 0) {
+    yield* source;
+    return;
+  }
+  const iterator = source[Symbol.asyncIterator]();
+  while (true) {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const idlePromise = new Promise<'__idle__'>((resolve) => {
+      timer = setTimeout(() => resolve('__idle__'), idleTimeoutMs);
+      timer.unref?.();
+    });
+    let res: IteratorResult<T> | '__idle__';
+    try {
+      res = await Promise.race([iterator.next(), idlePromise]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+    if (res === '__idle__') {
+      onStall();
+      // Close the source iterator defensively: after `onStall` aborts the
+      // upstream, the AI SDK iterator's `return()` (or the abandoned pending
+      // `next()`) can REJECT with the abort error, or — for a misbehaving
+      // adapter — never settle. An unguarded `await` here would either throw
+      // the rejection out of this generator (escaping the `for await` in
+      // `runUpstreamStream`, bypassing the stable STREAM_STALL chunk + `return
+      // result`) or re-hang the very turn the watchdog exists to bound. Swallow
+      // the rejection and cap the close with its own short deadline.
+      await closeIteratorSafely(iterator);
+      return;
+    }
+    if (res.done) return;
+    yield res.value;
+  }
+}
+
 export async function* runUpstreamStream(
   input: RunUpstreamStreamInput,
 ): AsyncGenerator<RunUpstreamStreamEvent, StreamTextResult<ToolSet, never> | undefined, void> {
@@ -430,6 +533,10 @@ export async function* runUpstreamStream(
     }
   }
 
+  // Idle (inter-chunk) watchdog: combine the caller signal with an
+  // internal controller so a stalled-but-open upstream socket can be
+  // aborted even when the client never disconnects.
+  const idleController = new AbortController();
   type StreamTextModelParam = Parameters<typeof streamText>[0]['model'];
   const result = streamText({
     model: input.model as unknown as StreamTextModelParam,
@@ -467,7 +574,9 @@ export async function* runUpstreamStream(
       ? { presencePenalty }
       : {}),
     ...(typeof input.maxRetries === 'number' ? { maxRetries: input.maxRetries } : {}),
-    abortSignal: input.signal,
+    abortSignal: input.signal
+      ? AbortSignal.any([input.signal, idleController.signal])
+      : idleController.signal,
   }) as unknown as StreamTextResult<ToolSet, never>;
 
   const meta = (extra: Record<string, unknown>) => ({
@@ -477,7 +586,16 @@ export async function* runUpstreamStream(
     ...extra,
   });
 
-  for await (const part of result.fullStream) {
+  const idleTimeoutMs = input.idleTimeoutMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS;
+  const stallState = { stalled: false };
+
+  for await (const part of withStreamIdleWatchdog(result.fullStream, {
+    idleTimeoutMs,
+    onStall: () => {
+      stallState.stalled = true;
+      idleController.abort();
+    },
+  })) {
     switch (part.type) {
       case 'text-delta':
         yield {
@@ -777,6 +895,17 @@ export async function* runUpstreamStream(
         // the runner reaches feature parity.
         break;
     }
+  }
+
+  if (stallState.stalled) {
+    const stallChunk = {
+      type: 'error' as const,
+      code: 'STREAM_STALL',
+      status: 504,
+      message: `upstream stream stalled (no data for ${idleTimeoutMs}ms)`,
+      ...meta({}),
+    } as StreamErrorChunk;
+    yield stallChunk;
   }
 
   return result;

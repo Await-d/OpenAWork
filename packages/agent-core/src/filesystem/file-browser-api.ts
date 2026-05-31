@@ -46,12 +46,48 @@ export interface FileBrowserAPI {
   status(): Promise<FileChange[]>;
 }
 
-type ExecFn = (cmd: string, opts?: { maxBuffer?: number }) => Promise<{ stdout: string }>;
+/**
+ * Wall-clock ceiling for a single search subprocess. grep/find over a huge or
+ * network-mounted tree can run unbounded; without a deadline the returned
+ * promise never settles and the caller awaiting a search hangs forever.
+ */
+const SEARCH_TIMEOUT_MS = 15_000;
 
-async function getExec(): Promise<ExecFn> {
-  const { exec } = await import('node:child_process');
+type ExecFileFn = (
+  file: string,
+  args: string[],
+  opts?: { maxBuffer?: number; timeout?: number },
+) => Promise<{ stdout: string }>;
+
+async function getExecFile(): Promise<ExecFileFn> {
+  const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');
-  return promisify(exec) as unknown as ExecFn;
+  return promisify(execFile) as unknown as ExecFileFn;
+}
+
+/**
+ * Run a search command via execFile (no shell, so query/path/pattern can never
+ * be interpreted as shell metacharacters) and return stdout. grep exits 1 when
+ * there are no matches and find/git may exit non-zero on partial errors; the
+ * original shell form swallowed those with `2>/dev/null || true`, so we mirror
+ * that by returning whatever stdout was captured instead of throwing.
+ */
+async function runSearch(file: string, args: string[], maxBuffer: number): Promise<string> {
+  const execFileAsync = await getExecFile();
+  try {
+    const { stdout } = await execFileAsync(file, args, {
+      maxBuffer,
+      timeout: SEARCH_TIMEOUT_MS,
+    });
+    return stdout;
+  } catch (error) {
+    // Non-zero exit (grep "no match", find permission warnings) carries the
+    // partial stdout on the error object; surface it rather than failing.
+    const stdout = (error as { stdout?: string | Buffer })?.stdout;
+    if (typeof stdout === 'string') return stdout;
+    if (stdout) return stdout.toString();
+    return '';
+  }
 }
 
 export class FileBrowserAPIImpl implements FileBrowserAPI {
@@ -60,11 +96,11 @@ export class FileBrowserAPIImpl implements FileBrowserAPI {
     rootPath: string,
     options?: TextSearchOptions,
   ): Promise<TextSearchResult[]> {
-    const execAsync = await getExec();
-    const caseFlag = options?.caseSensitive ? '' : '-i';
-    const includeFlag = options?.filePattern ? `--include='${options.filePattern}'` : '';
-    const cmd = `grep -rn ${caseFlag} ${includeFlag} --color=never -F ${JSON.stringify(query)} ${JSON.stringify(rootPath)} 2>/dev/null || true`;
-    const { stdout } = await execAsync(cmd, { maxBuffer: 4 * 1024 * 1024 });
+    const args = ['-rn', '--color=never'];
+    if (!options?.caseSensitive) args.push('-i');
+    if (options?.filePattern) args.push(`--include=${options.filePattern}`);
+    args.push('-F', query, rootPath);
+    const stdout = await runSearch('grep', args, 4 * 1024 * 1024);
     const results: TextSearchResult[] = [];
     for (const raw of stdout.split('\n')) {
       const m = raw.match(/^([^:]+):([0-9]+):(.*)$/);
@@ -84,9 +120,11 @@ export class FileBrowserAPIImpl implements FileBrowserAPI {
   }
 
   async searchFiles(namePattern: string, rootPath: string): Promise<string[]> {
-    const execAsync = await getExec();
-    const cmd = `find ${JSON.stringify(rootPath)} -type f -name ${JSON.stringify(namePattern)} 2>/dev/null || true`;
-    const { stdout } = await execAsync(cmd, { maxBuffer: 2 * 1024 * 1024 });
+    const stdout = await runSearch(
+      'find',
+      [rootPath, '-type', 'f', '-name', namePattern],
+      2 * 1024 * 1024,
+    );
     return stdout
       .split('\n')
       .map((l) => l.trim())
@@ -94,13 +132,15 @@ export class FileBrowserAPIImpl implements FileBrowserAPI {
   }
 
   async searchSymbols(query: string, rootPath: string): Promise<SymbolSearchResult[]> {
-    const execAsync = await getExec();
     const kinds = ['class', 'interface', 'function', 'const', 'type'];
     const results: SymbolSearchResult[] = [];
     for (const kind of kinds) {
       const pattern = `${kind} ${query}`;
-      const cmd = `grep -rn --color=never -F ${JSON.stringify(pattern)} ${JSON.stringify(rootPath)} 2>/dev/null || true`;
-      const { stdout } = await execAsync(cmd, { maxBuffer: 2 * 1024 * 1024 });
+      const stdout = await runSearch(
+        'grep',
+        ['-rn', '--color=never', '-F', pattern, rootPath],
+        2 * 1024 * 1024,
+      );
       for (const raw of stdout.split('\n')) {
         const m = raw.match(/^([^:]+):([0-9]+):/);
         if (!m) continue;
@@ -120,10 +160,7 @@ export class FileBrowserAPIImpl implements FileBrowserAPI {
 
   async status(): Promise<FileChange[]> {
     try {
-      const execAsync = await getExec();
-      const { stdout } = await execAsync('git status --porcelain -u 2>/dev/null || true', {
-        maxBuffer: 1024 * 1024,
-      });
+      const stdout = await runSearch('git', ['status', '--porcelain', '-u'], 1024 * 1024);
       const changes: FileChange[] = [];
       for (const line of stdout.split('\n')) {
         if (!line.trim()) continue;

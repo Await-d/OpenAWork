@@ -1,0 +1,137 @@
+import Fastify, { type FastifyInstance } from 'fastify';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import type * as AuthModule from '../../infra/auth.js';
+import type * as DbModule from '../../infra/db.js';
+import { registerErrorHandler } from '../../infra/error-handler.js';
+import type * as StreamRoutesPluginModule from '../../routes/stream-routes-plugin.js';
+import type * as StreamRoutesModule from '../../routes/stream.js';
+
+process.env['DATABASE_URL'] = ':memory:';
+process.env['JWT_SECRET'] = 'stream-routes-test-secret-1234567890';
+process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
+
+let authPlugin: typeof AuthModule.default;
+let dbModule: typeof DbModule;
+let streamRequestSchema: typeof StreamRoutesModule.streamRequestSchema;
+let streamRoutes: typeof StreamRoutesPluginModule.streamRoutes;
+let STREAM_ERROR_MESSAGES: typeof StreamRoutesModule.STREAM_ERROR_MESSAGES;
+let STREAM_PLUGIN_ERROR_MESSAGES: typeof StreamRoutesPluginModule.STREAM_PLUGIN_ERROR_MESSAGES;
+let createStreamErrorChunk: typeof StreamRoutesModule.createStreamErrorChunk;
+
+const SESSION_ID = 'sess-stream-routes';
+const USER_ID = 'u-stream-routes';
+
+async function buildApp(): Promise<FastifyInstance> {
+  const app = Fastify();
+  registerErrorHandler(app);
+  await app.register(authPlugin);
+  await app.register(streamRoutes);
+  await app.ready();
+  return app;
+}
+
+function bearer(app: FastifyInstance): string {
+  return app.jwt.sign({ sub: USER_ID, email: 'stream@example.com' });
+}
+
+function seedUser(id: string): void {
+  dbModule.sqliteRun("INSERT OR IGNORE INTO users (id, email, password_hash) VALUES (?, ?, 'x')", [
+    id,
+    `${id}@example.com`,
+  ]);
+}
+
+function seedSession(sessionId: string): void {
+  dbModule.sqliteRun(
+    `INSERT INTO sessions (id, user_id, title, metadata_json, state_status)
+     VALUES (?, ?, 'stream session', '{}', 'idle')`,
+    [sessionId, USER_ID],
+  );
+}
+
+beforeAll(async () => {
+  dbModule = await import('../../infra/db.js');
+  await dbModule.connectDb();
+  await dbModule.migrate();
+  authPlugin = (await import('../../infra/auth.js')).default;
+  const streamModule = await import('../../routes/stream.js');
+  streamRequestSchema = streamModule.streamRequestSchema;
+  STREAM_ERROR_MESSAGES = streamModule.STREAM_ERROR_MESSAGES;
+  createStreamErrorChunk = streamModule.createStreamErrorChunk;
+  const pluginModule = await import('../../routes/stream-routes-plugin.js');
+  streamRoutes = pluginModule.streamRoutes;
+  STREAM_PLUGIN_ERROR_MESSAGES = pluginModule.STREAM_PLUGIN_ERROR_MESSAGES;
+});
+
+beforeEach(() => {
+  dbModule.sqliteRun('DELETE FROM sessions', []);
+  dbModule.sqliteRun('DELETE FROM users', []);
+  seedUser(USER_ID);
+  seedSession(SESSION_ID);
+});
+
+afterAll(async () => {
+  await dbModule.closeDb();
+});
+
+describe('stream error contracts', () => {
+  it('streamRequestSchema 对缺少来源的 input_image 返回中文 issue', () => {
+    const result = streamRequestSchema.safeParse({
+      clientRequestId: 'req-1',
+      inputParts: [{ type: 'input_image' }],
+      message: 'hello',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error?.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: STREAM_ERROR_MESSAGES.inputImageMissingSource,
+        }),
+      ]),
+    );
+  });
+
+  it('createStreamErrorChunk 保留中文 replay message', () => {
+    const chunk = createStreamErrorChunk(
+      'REQUEST_REPLAY_FAILED',
+      STREAM_ERROR_MESSAGES.requestReplayFailed,
+      'run-1',
+    );
+
+    expect(chunk).toMatchObject({
+      type: 'error',
+      code: 'REQUEST_REPLAY_FAILED',
+      message: '请求重放失败。',
+      runId: 'run-1',
+    });
+  });
+
+  it('导出 WS/SSE 运行中断中文错误常量', () => {
+    expect(STREAM_PLUGIN_ERROR_MESSAGES.wsStreamError).toBe(
+      'WebSocket 流式响应处理中断，请稍后重试。',
+    );
+    expect(STREAM_PLUGIN_ERROR_MESSAGES.sseStreamError).toBe('SSE 流式响应处理中断，请稍后重试。');
+  });
+
+  it('GET /sessions/:id/stream/attach 在请求流已失活时返回中文 409', async () => {
+    const app = await buildApp();
+    try {
+      const token = bearer(app);
+      const response = await app.inject({
+        method: 'GET',
+        url:
+          `/sessions/${SESSION_ID}/stream/attach?clientRequestId=req-missing` +
+          `&afterSeq=0&token=${encodeURIComponent(token)}`,
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toMatchObject({
+        activeClientRequestId: null,
+        error: STREAM_PLUGIN_ERROR_MESSAGES.requestedStreamInactive,
+      });
+    } finally {
+      await app.close();
+    }
+  });
+});

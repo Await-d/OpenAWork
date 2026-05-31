@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { MCPToolDef, MCPToolResult } from '@openAwork/mcp-client';
 import type { MCPServerRef } from '@openAwork/skill-types';
 import { sqliteGet } from '../infra/db.js';
-import { mergeBuiltinAndConfiguredMcps } from './builtin-mcps.js';
+import { BUILTIN_MCP_IDS, mergeBuiltinAndConfiguredMcps } from './builtin-mcps.js';
 import { mcpConnectionPool } from '../skill/skill-mcp-connection-pool.js';
 import {
   clearCatalogSnapshot,
@@ -320,13 +320,21 @@ export function getMcpPoolKey(server: ConfiguredMCPServer): string {
 
 export async function listMcpToolsForSession(
   sessionId: string,
-  filter?: { serverId?: string },
+  filter?: { serverId?: string; allowedServerIds?: string[] },
 ): Promise<MCPServerToolCatalog[]> {
   const userId = getUserIdForSession(sessionId);
   const configuredServers = getConfiguredMcpServersForSession(sessionId);
-  const selectedServers = filter?.serverId
+  let selectedServers = filter?.serverId
     ? configuredServers.filter((server) => server.id === filter.serverId)
     : configuredServers;
+  // 模板初始绑定：当 session 指定了 MCP 白名单（requestedMcpServers）时，
+  // 只暴露白名单内的 server（内置 MCP 不受限，始终可用）。
+  if (filter?.allowedServerIds && filter.allowedServerIds.length > 0) {
+    const allow = new Set(filter.allowedServerIds);
+    selectedServers = selectedServers.filter(
+      (server) => allow.has(server.id) || (BUILTIN_MCP_IDS as readonly string[]).includes(server.id),
+    );
+  }
 
   return Promise.all(
     selectedServers.map(async (server): Promise<MCPServerToolCatalog> => {

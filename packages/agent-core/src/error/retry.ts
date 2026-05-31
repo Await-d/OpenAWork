@@ -66,7 +66,14 @@ export async function withRetry<T>(
         throw new RetryAbortedError();
       }
 
-      if (attempt === opts.maxAttempts || !opts.isRetryable(error)) {
+      // Non-retryable errors must surface as-is: wrapping them in
+      // RetryExhaustedError would hide the real cause and falsely claim the
+      // retry budget was spent (it wasn't — we gave up on the first failure).
+      if (!opts.isRetryable(error)) {
+        throw error;
+      }
+
+      if (attempt === opts.maxAttempts) {
         break;
       }
 

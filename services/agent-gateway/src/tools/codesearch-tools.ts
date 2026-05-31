@@ -1,7 +1,23 @@
 import type { ToolDefinition } from '@openAwork/agent-core';
 import { z } from 'zod';
+import {
+  readResponseTextWithLimit,
+  resolveHttpBodyLimitBytes,
+} from '../infra/http-body-limit.js';
 
 const EXA_MCP_URL = 'https://mcp.exa.ai/mcp';
+
+// Memory bound for the Exa code-search response. The 30s tool timeout caps
+// wall-clock but NOT memory — a fast or oversized SSE stream could buffer
+// unboundedly and OOM the gateway. Cap the read like webfetch / skill content
+// (§0.85/§0.86); override via OPENAWORK_CODESEARCH_MAX_BYTES, 0 disables.
+const DEFAULT_CODESEARCH_MAX_BYTES = 8 * 1024 * 1024;
+function resolveCodesearchMaxResponseBytes(): number {
+  return resolveHttpBodyLimitBytes(
+    'OPENAWORK_CODESEARCH_MAX_BYTES',
+    DEFAULT_CODESEARCH_MAX_BYTES,
+  );
+}
 
 interface ExaCodeSearchResponse {
   result?: {
@@ -56,10 +72,14 @@ export const codesearchToolDefinition: ToolDefinition<typeof codeSearchInputSche
     });
 
     if (!response.ok) {
-      throw new Error(`Code search error (${response.status}): ${await response.text()}`);
+      const errBody = await readResponseTextWithLimit(
+        response,
+        resolveCodesearchMaxResponseBytes(),
+      ).catch(() => '');
+      throw new Error(`Code search error (${response.status}): ${errBody}`);
     }
 
-    const raw = await response.text();
+    const raw = await readResponseTextWithLimit(response, resolveCodesearchMaxResponseBytes());
     const line = raw
       .split('\n')
       .find((entry) => entry.startsWith('data: ') && entry.includes('"content"'));

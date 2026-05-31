@@ -5,22 +5,9 @@
  * the shared types in `@openAwork/shared`.
  */
 
-import type { SessionTerminalSummary } from '@openAwork/shared';
-
-export type SessionTerminalView = SessionTerminalSummary;
-
-async function parseJsonResponse<T>(response: Response): Promise<T> {
-  if (!response.ok) {
-    let body: string;
-    try {
-      body = await response.text();
-    } catch {
-      body = '';
-    }
-    throw new Error(`HTTP ${response.status}${body ? `: ${body.slice(0, 200)}` : ''}`);
-  }
-  return (await response.json()) as T;
-}
+import { createSessionTerminalsClient } from '@openAwork/web-client';
+import type { SessionTerminalView } from '@openAwork/web-client';
+export type { SessionTerminalView } from '@openAwork/web-client';
 
 export interface ListSessionTerminalsParams {
   gatewayUrl: string;
@@ -35,14 +22,11 @@ export interface ListSessionTerminalsParams {
 export async function listSessionTerminals(
   params: ListSessionTerminalsParams,
 ): Promise<{ terminals: SessionTerminalView[] }> {
-  const url = new URL(`${params.gatewayUrl}/sessions/${params.sessionId}/terminals`);
-  if (params.status) url.searchParams.set('status', params.status);
-  if (params.limit !== undefined) url.searchParams.set('limit', String(params.limit));
-  const headers: Record<string, string> = { Authorization: `Bearer ${params.token}` };
-  const init: RequestInit = { headers };
-  if (params.signal) init.signal = params.signal;
-  const response = await fetch(url.toString(), init);
-  return parseJsonResponse(response);
+  return createSessionTerminalsClient(params.gatewayUrl).list(params.token, params.sessionId, {
+    status: params.status,
+    limit: params.limit,
+    signal: params.signal,
+  });
 }
 
 export interface KillSessionTerminalParams {
@@ -57,14 +41,12 @@ export async function killSessionTerminal(params: KillSessionTerminalParams): Pr
   result: { found: boolean; alreadyClosed: boolean; killed: boolean };
   terminal: SessionTerminalView | null;
 }> {
-  const headers: Record<string, string> = { Authorization: `Bearer ${params.token}` };
-  const init: RequestInit = { method: 'POST', headers };
-  if (params.signal) init.signal = params.signal;
-  const response = await fetch(
-    `${params.gatewayUrl}/sessions/${params.sessionId}/terminals/${params.terminalId}/kill`,
-    init,
+  return createSessionTerminalsClient(params.gatewayUrl).kill(
+    params.token,
+    params.sessionId,
+    params.terminalId,
+    { signal: params.signal },
   );
-  return parseJsonResponse(response);
 }
 
 export interface DeleteSessionTerminalParams extends KillSessionTerminalParams {}
@@ -72,14 +54,12 @@ export interface DeleteSessionTerminalParams extends KillSessionTerminalParams {
 export async function deleteSessionTerminal(
   params: DeleteSessionTerminalParams,
 ): Promise<{ deleted: boolean }> {
-  const headers: Record<string, string> = { Authorization: `Bearer ${params.token}` };
-  const init: RequestInit = { method: 'DELETE', headers };
-  if (params.signal) init.signal = params.signal;
-  const response = await fetch(
-    `${params.gatewayUrl}/sessions/${params.sessionId}/terminals/${params.terminalId}`,
-    init,
+  return createSessionTerminalsClient(params.gatewayUrl).remove(
+    params.token,
+    params.sessionId,
+    params.terminalId,
+    { signal: params.signal },
   );
-  return parseJsonResponse(response);
 }
 
 export interface RenameSessionTerminalParams {
@@ -94,21 +74,15 @@ export interface RenameSessionTerminalParams {
 export async function renameSessionTerminal(
   params: RenameSessionTerminalParams,
 ): Promise<{ renamed: boolean; terminal: SessionTerminalView | null }> {
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${params.token}`,
-    'Content-Type': 'application/json',
-  };
-  const init: RequestInit = {
-    method: 'PATCH',
-    headers,
-    body: JSON.stringify({ name: params.name }),
-  };
-  if (params.signal) init.signal = params.signal;
-  const response = await fetch(
-    `${params.gatewayUrl}/sessions/${params.sessionId}/terminals/${params.terminalId}`,
-    init,
+  return createSessionTerminalsClient(params.gatewayUrl).rename(
+    params.token,
+    params.sessionId,
+    params.terminalId,
+    {
+      name: params.name,
+      signal: params.signal,
+    },
   );
-  return parseJsonResponse(response);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -134,22 +108,12 @@ export interface CreateSessionTerminalParams {
 export async function createSessionTerminal(
   params: CreateSessionTerminalParams,
 ): Promise<{ terminal: SessionTerminalView }> {
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${params.token}`,
-    'Content-Type': 'application/json',
-  };
-  const init: RequestInit = {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      ...(params.cwd ? { cwd: params.cwd } : {}),
-      ...(params.initialCommand ? { initialCommand: params.initialCommand } : {}),
-      ...(params.description ? { description: params.description } : {}),
-    }),
-  };
-  if (params.signal) init.signal = params.signal;
-  const response = await fetch(`${params.gatewayUrl}/sessions/${params.sessionId}/terminals`, init);
-  return parseJsonResponse(response);
+  return createSessionTerminalsClient(params.gatewayUrl).create(params.token, params.sessionId, {
+    cwd: params.cwd,
+    initialCommand: params.initialCommand,
+    description: params.description,
+    signal: params.signal,
+  });
 }
 
 export interface WriteTerminalStdinParams {
@@ -164,21 +128,15 @@ export interface WriteTerminalStdinParams {
 export async function writeTerminalStdin(
   params: WriteTerminalStdinParams,
 ): Promise<{ ok: boolean; error?: string }> {
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${params.token}`,
-    'Content-Type': 'application/json',
-  };
-  const init: RequestInit = {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ data: params.data }),
-  };
-  if (params.signal) init.signal = params.signal;
-  const response = await fetch(
-    `${params.gatewayUrl}/sessions/${params.sessionId}/terminals/${params.terminalId}/stdin`,
-    init,
+  return createSessionTerminalsClient(params.gatewayUrl).writeStdin(
+    params.token,
+    params.sessionId,
+    params.terminalId,
+    {
+      data: params.data,
+      signal: params.signal,
+    },
   );
-  return parseJsonResponse(response);
 }
 
 export interface ResizeTerminalParams {
@@ -192,21 +150,16 @@ export interface ResizeTerminalParams {
 }
 
 export async function resizeTerminal(params: ResizeTerminalParams): Promise<{ ok: boolean }> {
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${params.token}`,
-    'Content-Type': 'application/json',
-  };
-  const init: RequestInit = {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ cols: params.cols, rows: params.rows }),
-  };
-  if (params.signal) init.signal = params.signal;
-  const response = await fetch(
-    `${params.gatewayUrl}/sessions/${params.sessionId}/terminals/${params.terminalId}/resize`,
-    init,
+  return createSessionTerminalsClient(params.gatewayUrl).resize(
+    params.token,
+    params.sessionId,
+    params.terminalId,
+    {
+      cols: params.cols,
+      rows: params.rows,
+      signal: params.signal,
+    },
   );
-  return parseJsonResponse(response);
 }
 
 export interface CloseTerminalParams {
@@ -218,14 +171,12 @@ export interface CloseTerminalParams {
 }
 
 export async function closeTerminal(params: CloseTerminalParams): Promise<{ ok: boolean }> {
-  const headers: Record<string, string> = { Authorization: `Bearer ${params.token}` };
-  const init: RequestInit = { method: 'POST', headers };
-  if (params.signal) init.signal = params.signal;
-  const response = await fetch(
-    `${params.gatewayUrl}/sessions/${params.sessionId}/terminals/${params.terminalId}/close`,
-    init,
+  return createSessionTerminalsClient(params.gatewayUrl).close(
+    params.token,
+    params.sessionId,
+    params.terminalId,
+    { signal: params.signal },
   );
-  return parseJsonResponse(response);
 }
 
 export interface OpenTerminalStreamParams {

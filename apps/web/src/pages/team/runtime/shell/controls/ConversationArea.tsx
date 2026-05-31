@@ -28,6 +28,7 @@ import {
   type HandoffEvent,
 } from '../../../../../stores/team/team-events.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
+import { substateLabelAny } from '../../data/substates.js';
 import { SuggestionBar } from './SuggestionBar.js';
 import { TeamConversationView } from '../../../conversation/TeamConversationView.js';
 
@@ -42,6 +43,49 @@ interface PushMessage {
   kind: PushMessageKind;
   timestamp: string;
   title: string;
+  /** 同类事件被合并的条数（≥2 时在标题后显示「×N」）。 */
+  count: number;
+}
+
+/** team-event 类型 → 中文标签（推送通知条用，避免直接暴露 `xxx.changed` 原始串）。 */
+const EVENT_TYPE_LABEL: Record<string, string> = {
+  'handoff.created': '已创建交接',
+  'handoff.claimed': '已认领',
+  'handoff.started': '开始执行',
+  'handoff.completed': '已完成',
+  'handoff.failed': '执行失败',
+  'handoff.cancelled': '已取消',
+  'handoff.reclaimed': '重新认领',
+  'session.heartbeat': '心跳',
+  'session.substate.changed': '阶段更新',
+  'session.inbound.submitted': '收到新输入',
+  'session.init.changed': '初始化进度',
+  'scheduler.task-paused': '任务已暂停',
+  'scheduler.task-resumed': '任务已恢复',
+  'scheduler.all-paused': '全部暂停',
+  'scheduler.all-resumed': '全部恢复',
+  'artifact.needs-clarification': '需要澄清',
+  'artifact.constitution-conflict': '宪法冲突',
+};
+
+/** 角色层 → 中文短标签（与 TeamRunStateBanner.LAYER_LABEL 对齐）。 */
+const PUSH_LAYER_LABEL: Record<string, string> = {
+  user: '用户',
+  reception: '接待',
+  pm1: '规划',
+  pm2: '管控',
+  executor: '执行',
+  tester: '测试',
+  reviewer: '评审',
+};
+
+function eventTypeLabel(type: string): string {
+  return EVENT_TYPE_LABEL[type] ?? type;
+}
+
+function layerLabel(layer: string | undefined): string | null {
+  if (!layer) return null;
+  return PUSH_LAYER_LABEL[layer] ?? layer;
 }
 
 const CONTAINER_STYLE: TeamConversationStyle = {
@@ -82,16 +126,20 @@ const CONTAINER_STYLE: TeamConversationStyle = {
 };
 
 const STATE_PANEL_STYLE: CSSProperties = {
-  display: 'grid',
-  placeItems: 'center',
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'center',
   gap: 'var(--team-space-4)',
-  flex: 1,
-  minHeight: 'var(--team-state-min-height)',
-  padding: 'var(--team-space-8)',
+  width: '100%',
+  maxWidth: 520,
+  margin: '0 auto',
+  // 内容自然高度即可，不再用 flex:1 撑满整个对话区导致内容漂浮在大片空白里。
+  padding: 'var(--team-space-6) var(--team-space-5)',
   textAlign: 'center',
   borderRadius: 'var(--team-radius-xl)',
   border: '1px dashed color-mix(in srgb, var(--border-default) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base))',
 };
 
 const SPINNER_STYLE: CSSProperties = {
@@ -113,9 +161,15 @@ const PUSH_STRIP_STYLE: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   gap: 6,
-  padding: '8px 16px',
-  borderTop: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base)',
+  // 与接待卡片（RECEPTION_CARD_STYLE maxWidth 560，居中）对齐：限制宽度 + 居中，
+  // 避免推送条全宽铺满而接待卡片居中导致的左右错位。
+  width: '100%',
+  maxWidth: 560,
+  margin: '8px auto 4px',
+  padding: '10px 16px',
+  borderRadius: 12,
+  border: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base))',
   flexShrink: 0,
   maxHeight: 240,
   overflowY: 'auto',
@@ -164,10 +218,7 @@ export function ConversationArea({
 }: ConversationAreaProps) {
   const { error, loading } = useTeamRuntimeReferenceViewData();
   const events = useTeamNotificationStore((s) => s.events);
-  const pushMessages = useMemo<PushMessage[]>(
-    () => events.slice(-3).map(mapEventToPushMessage),
-    [events],
-  );
+  const pushMessages = useMemo<PushMessage[]>(() => coalesceEventsToPush(events), [events]);
   const handleSuggestion = onSelectSuggestion ?? onSubmitMessage;
 
   // ─── Path 1: 外部注入消息内容（如 conversation tab 选中具体子 session）───
@@ -212,10 +263,12 @@ export function ConversationArea({
           flex: 1,
           minHeight: 0,
           overflow: 'auto',
-          padding: '16px 20px',
+          padding: 'clamp(16px, 4vh, 48px) 20px',
           display: 'flex',
           flexDirection: 'column',
-          gap: 10,
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 12,
         }}
       >
         {loading ? <LoadingState /> : null}
@@ -249,7 +302,7 @@ function EmptyState({
 }) {
   return (
     <div style={STATE_PANEL_STYLE}>
-      <div style={{ display: 'grid', gap: 'var(--team-space-3)' }}>
+      <div style={{ display: 'grid', gap: 'var(--team-space-2)' }}>
         <strong style={{ fontSize: 'var(--team-font-lg)', color: 'var(--fg-strong)' }}>
           🤖 欢迎使用 AI 开发团队
         </strong>
@@ -279,7 +332,7 @@ function EmptyState({
               padding: '0 var(--team-space-3)',
               borderRadius: 'var(--team-radius-pill)',
               border: '1px solid color-mix(in srgb, var(--accent) 34%, transparent)',
-              background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay)',
+              background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
               color: 'var(--fg-strong)',
               fontSize: 'var(--team-font-xs)',
               fontWeight: 700,
@@ -308,7 +361,7 @@ function ErrorState({
       style={{
         ...STATE_PANEL_STYLE,
         borderColor: 'color-mix(in srgb, var(--danger) 40%, transparent)',
-        background: 'color-mix(in srgb, var(--danger) 7%, var(--bg-overlay)',
+        background: 'color-mix(in srgb, var(--danger) 7%, var(--bg-overlay))',
       }}
       role="alert"
     >
@@ -329,7 +382,7 @@ function ErrorState({
           padding: '0 var(--team-space-4)',
           borderRadius: 'var(--team-radius-pill)',
           border: '1px solid color-mix(in srgb, var(--danger) 44%, transparent)',
-          background: 'color-mix(in srgb, var(--danger) 12%, var(--bg-overlay)',
+          background: 'color-mix(in srgb, var(--danger) 12%, var(--bg-overlay))',
           color: 'var(--fg-strong)',
           fontSize: 'var(--team-font-xs)',
           fontWeight: 800,
@@ -376,7 +429,7 @@ function PushMessageCard({ message }: { message: PushMessage }) {
           borderRadius: 8,
           border: '1px solid color-mix(in srgb, var(--success) 24%, transparent)',
           borderLeft: '3px solid var(--success)',
-          background: 'color-mix(in srgb, var(--success) 5%, var(--bg-overlay)',
+          background: 'color-mix(in srgb, var(--success) 5%, var(--bg-overlay))',
           color: 'var(--fg-default)',
           fontSize: 11,
         }}
@@ -384,6 +437,11 @@ function PushMessageCard({ message }: { message: PushMessage }) {
         <span aria-hidden="true">{meta.icon}</span>
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {message.body}
+          {message.count > 1 ? (
+            <span style={{ marginLeft: 6, color: 'var(--fg-muted)', fontWeight: 700 }}>
+              ×{message.count}
+            </span>
+          ) : null}
         </span>
         <time style={{ fontSize: 10, color: 'var(--fg-muted)' }}>{message.timestamp}</time>
       </article>
@@ -406,6 +464,22 @@ function PushMessageCard({ message }: { message: PushMessage }) {
         <strong style={{ color: 'var(--fg-strong)', fontSize: 12 }}>
           {meta.icon} {message.title}
         </strong>
+        {message.count > 1 ? (
+          <span
+            style={{
+              padding: '0 6px',
+              borderRadius: 999,
+              background: `color-mix(in srgb, ${meta.color} 18%, transparent)`,
+              color: 'var(--fg-default)',
+              fontSize: 10,
+              fontWeight: 800,
+              fontVariantNumeric: 'tabular-nums',
+            }}
+            title={`同类事件 ${message.count} 次`}
+          >
+            ×{message.count}
+          </span>
+        ) : null}
         <time style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--fg-muted)' }}>
           {message.timestamp}
         </time>
@@ -440,23 +514,65 @@ function PushMessageCard({ message }: { message: PushMessage }) {
   );
 }
 
+/**
+ * 把原始 team-event 列表折叠成「人话」推送条目：
+ *   1. 把语义重复的相邻事件合并（同 type + layer + body），用 ×N 计数，避免出现
+ *      多条几乎一样的 `session.substate.changed` 堆叠在一起的视觉噪声。
+ *   2. 事件类型映射为中文标签；substate.changed 进一步展开为具体阶段（如「草拟规格」）。
+ *   3. 最终只保留最近 3 组。
+ *
+ * 注意：先合并再截断，保证「最近 3 组不同事件」而不是「最近 3 条原始事件」，
+ * 信息密度更高。
+ */
+function coalesceEventsToPush(events: HandoffEvent[]): PushMessage[] {
+  const groups: PushMessage[] = [];
+  for (let i = 0; i < events.length; i++) {
+    const message = mapEventToPushMessage(events[i]!, i);
+    const last = groups[groups.length - 1];
+    // 合并键：类型 + 层级 + body 完全一致视为同一类，仅累加计数并刷新时间戳。
+    if (last && last.title === message.title && last.body === message.body) {
+      last.count += 1;
+      last.timestamp = message.timestamp;
+      continue;
+    }
+    groups.push(message);
+  }
+  return groups.slice(-3);
+}
+
 function mapEventToPushMessage(event: HandoffEvent, index: number): PushMessage {
   const kind: PushMessageKind = event.type.includes('failed')
     ? 'blocking'
     : event.type.includes('completed')
       ? 'silent'
       : 'informational';
-  const taskLabel = event.taskId ? `任务 ${event.taskId.slice(0, 8)}` : '团队任务';
-  const layerLabel = event.layer ? `层级 ${event.layer}` : '团队运行';
+
+  const layer = layerLabel(event.layer);
+  // substate.changed 携带具体阶段，展开成「接待层 · 草拟规格」这种可读文案；
+  // 其它事件用「层级 · 事件中文名」。
+  const substate =
+    event.type === 'session.substate.changed'
+      ? substateLabelAny(
+          typeof event.payload?.['substate'] === 'string'
+            ? (event.payload['substate'] as string)
+            : null,
+        )
+      : null;
+
+  const headline = substate ?? eventTypeLabel(event.type);
+  const body = [layer, headline].filter(Boolean).join(' · ');
+
   return {
-    body: `${layerLabel} · ${taskLabel} · ${event.type}`,
+    body,
+    // 合并后同组只保留首条 id；为避免 key 冲突带上 index。
     id: `event-${event.type}-${event.timestamp}-${index}`,
     kind,
+    count: 1,
     timestamp: new Date(event.timestamp).toLocaleTimeString('zh-CN', {
       hour: '2-digit',
       minute: '2-digit',
     }),
-    title: kind === 'blocking' ? '需要你确认' : kind === 'silent' ? '静默同步' : '进度更新',
+    title: kind === 'blocking' ? '需要你确认' : kind === 'silent' ? '已完成' : '进度更新',
   };
 }
 

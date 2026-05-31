@@ -63,20 +63,16 @@ import { NewTeamWorkspaceModal } from '../runtime/shell/modals/NewTeamWorkspaceM
 import { ConfirmDeleteWorkspaceModal } from '../runtime/shell/modals/ConfirmDeleteWorkspaceModal.js';
 import { renderMiddleTabContent, type MiddleTabKey } from '../runtime/tabs/MiddleTabRouter.js';
 import {
-  PRIMARY_TABS,
+  extractTeamRuntimeHandoffContextFromEvent,
+  type TeamRuntimeHandoffContextInput,
+} from '../runtime/tabs/team-runtime-navigation.js';
+import {
   LEAF_TO_PRIMARY,
   MIDDLE_TAB_KEYS,
   getDefaultLeafFor,
-  PRIMARY_TAB_BAR_STYLE,
-  PRIMARY_TAB_BTN_STYLE,
-  PRIMARY_TAB_BTN_ACTIVE_STYLE,
-  SUB_TAB_BAR_STYLE,
-  SUB_TAB_BTN_STYLE,
-  SUB_TAB_BTN_ACTIVE_STYLE,
-  OFFICE_TOGGLE_STYLE,
-  OFFICE_TOGGLE_ACTIVE_STYLE,
   type PrimaryTabKey,
 } from '../runtime/tabs/team-page-v2-tabs.js';
+import { TeamTabBar } from '../runtime/shell/header/TeamTabBar.js';
 import {
   useBreakpoint,
   useTeamPageMode,
@@ -89,12 +85,16 @@ import {
   useHandoffStore,
   useTeamNotificationStore,
   useClarificationStore,
+  type HandoffEntry,
+  type HandoffEvent,
+  type TeamRoleLayer,
 } from '../../../stores/team/team-events.js';
 import { OfficeThreeCanvas } from '../runtime/tabs/office/OfficeThreeCanvas.js';
 import { useOfficeSceneState } from '../runtime/tabs/office/OfficeScene.js';
 import type { TeamSessionCreationDraft } from '../runtime/data/team-session-creation.types.js';
 import { createTeamHandoffsClient, type TeamWorkspaceSummary } from '@openAwork/web-client';
-import { useFileEditorContext } from '../../../App.js';
+import { useFileEditor } from '../../../hooks/editor/useFileEditor.js';
+import { WorkspaceEditorOverlay } from '../../../components/file-editor/WorkspaceEditorOverlay.js';
 
 // ───── 尺寸常量 ─────
 
@@ -166,7 +166,7 @@ const PAUSED_RIBBON_STYLE: CSSProperties = {
   alignItems: 'center',
   gap: 10,
   padding: '6px 14px',
-  background: 'color-mix(in srgb, var(--warning) 14%, var(--bg-overlay)',
+  background: 'color-mix(in srgb, var(--warning) 14%, var(--bg-overlay))',
   borderBottom: '1px solid color-mix(in srgb, var(--warning) 35%, transparent)',
   fontSize: 12,
   color: 'var(--warning)',
@@ -191,6 +191,59 @@ const LEFT_AREA_STYLE: CSSProperties = {
   background: 'var(--bg-base)',
   // 与左侧会话栏的视觉分隔
   borderLeft: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
+};
+
+const FOCUS_BANNER_STYLE: CSSProperties = {
+  display: 'grid',
+  gap: 8,
+  padding: '10px 12px',
+  borderTop: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
+  borderBottom: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
+  background: 'color-mix(in srgb, var(--accent) 6%, var(--bg-overlay))',
+};
+
+const FOCUS_BANNER_ROW_STYLE: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  flexWrap: 'wrap',
+};
+
+const FOCUS_BANNER_ACTION_STYLE: CSSProperties = {
+  padding: '4px 10px',
+  borderRadius: 8,
+  border: '1px solid color-mix(in srgb, var(--border-default) 55%, transparent)',
+  background: 'transparent',
+  color: 'var(--fg-default)',
+  fontSize: 11,
+  fontWeight: 700,
+  cursor: 'pointer',
+};
+
+const FOCUS_BANNER_PRIMARY_ACTION_STYLE: CSSProperties = {
+  ...FOCUS_BANNER_ACTION_STYLE,
+  borderColor: 'color-mix(in srgb, var(--accent) 45%, transparent)',
+  background: 'color-mix(in srgb, var(--accent) 14%, transparent)',
+  color: 'var(--accent)',
+};
+
+const FOCUS_LAYER_LABELS: Record<TeamRoleLayer, string> = {
+  user: '用户',
+  reception: '接待',
+  pm1: 'PM1',
+  pm2: 'PM2',
+  executor: '执行',
+  tester: '测试',
+  reviewer: '评审',
+};
+
+const FOCUS_STATE_LABELS: Record<HandoffEntry['state'], string> = {
+  pending: '等待中',
+  claimed: '已认领',
+  running: '运行中',
+  completed: '已完成',
+  failed: '失败',
+  cancelled: '已取消',
 };
 
 // ───── 入口组件 ─────
@@ -233,6 +286,7 @@ export default function TeamPageV2() {
   });
   const [selectedWorkspacePath, setSelectedWorkspacePath] = useState<string | null>(null);
   const [showOfficeFullscreen, setShowOfficeFullscreen] = useState(false);
+  const [focusedHandoffId, setFocusedHandoffId] = useState<string | null>(null);
   const [middleTab, setMiddleTab] = useState<MiddleTabKey>(() => {
     if (typeof window === 'undefined') return 'conversation';
     const saved = window.localStorage.getItem('teamV2.middleTab');
@@ -262,6 +316,7 @@ export default function TeamPageV2() {
   const breakpoint = useBreakpoint();
   const handoffs = useHandoffStore((s) => s.handoffs);
   const unreadCount = useTeamNotificationStore((s) => s.unreadCount);
+  const notificationEvents = useTeamNotificationStore((s) => s.events);
   const clarificationPending = useClarificationStore((s) => s.pendingCount);
   const officeSceneState = useOfficeSceneState();
 
@@ -321,11 +376,24 @@ export default function TeamPageV2() {
     });
   };
 
-  const handleSelectTeam = (teamId: string) => {
-    userSelectedTeamRef.current = true;
-    setSelectedTeamId(teamId);
-    data.selectTeam(teamId);
-  };
+  const selectTeamInternal = useCallback(
+    (teamId: string, options?: { preserveFocus?: boolean }) => {
+      userSelectedTeamRef.current = true;
+      if (!options?.preserveFocus) {
+        setFocusedHandoffId(null);
+      }
+      setSelectedTeamId(teamId);
+      data.selectTeam(teamId);
+    },
+    [data],
+  );
+
+  const handleSelectTeam = useCallback(
+    (teamId: string) => {
+      selectTeamInternal(teamId);
+    },
+    [selectTeamInternal],
+  );
 
   const handleSubmitMessage = useCallback(
     async (text: string) => {
@@ -383,6 +451,29 @@ export default function TeamPageV2() {
     }
   }, []);
 
+  const handleOpenHandoffContext = useCallback(
+    ({ handoffId, preferredTab, sessionId }: TeamRuntimeHandoffContextInput) => {
+      setFocusedHandoffId(handoffId ?? null);
+      if (
+        sessionId &&
+        data.workspaceGroups.some((group) =>
+          group.sessions.some((session) => session.id === sessionId),
+        )
+      ) {
+        selectTeamInternal(sessionId, { preserveFocus: true });
+      }
+      handleMiddleTabChange(preferredTab);
+    },
+    [data.workspaceGroups, handleMiddleTabChange, selectTeamInternal],
+  );
+
+  const handleOpenBlockingTarget = useCallback(
+    (event: HandoffEvent) => {
+      handleOpenHandoffContext(extractTeamRuntimeHandoffContextFromEvent(event));
+    },
+    [handleOpenHandoffContext],
+  );
+
   /**
    * 当前激活的主 tab：从叶子 key 反向查表得到。
    * 'office' 不属于任何主 tab（沉浸视图），此时 activePrimary 为 null，
@@ -415,7 +506,7 @@ export default function TeamPageV2() {
           console.error(
             '[TeamPageV2] cancel handoff failed:',
             handoffId,
-            result.state ? `state=${result.state}` : 'unknown',
+            result.errorMessage ?? (result.state ? `state=${result.state}` : 'unknown'),
           );
         }
       });
@@ -427,16 +518,43 @@ export default function TeamPageV2() {
     setShowOfficeFullscreen(true);
   }, []);
 
-  // 文件目录点击：通过全局 FileEditorContext 打开文件到嵌入的 ChatPage 编辑器
-  const openFileRef = useFileEditorContext();
+  // 文件目录点击 → 在全屏编辑器浮层中打开真正的编辑器(复用 chat 同款
+  // EditorBrowserWorkspace)。team 页没有内置分屏编辑器,因此自己持有一份
+  // useFileEditor 状态 + 一个铺满内容区的浮层,而不是依赖只有 ChatPage 才会
+  // 填充的全局 FileEditorContext(在 /team 路由下那个 ref 永远是 null,导致
+  // 之前点击文件「打开到编辑器」毫无反应)。
+  const editorWorkspacePath = workspaceState.activeWorkspace?.defaultWorkingRoot ?? null;
+  const fileEditor = useFileEditor(editorWorkspacePath);
+  const [editorOverlayOpen, setEditorOverlayOpen] = useState(false);
+  const [savingFile, setSavingFile] = useState(false);
   const handleOpenFile = useCallback(
     (path: string) => {
-      if (openFileRef.current) {
-        openFileRef.current(path);
+      setEditorOverlayOpen(true);
+      void fileEditor.openFile(path);
+    },
+    [fileEditor],
+  );
+  const handleSaveFile = useCallback(
+    async (path: string) => {
+      setSavingFile(true);
+      try {
+        await fileEditor.saveFile(path);
+      } finally {
+        setSavingFile(false);
       }
     },
-    [openFileRef],
+    [fileEditor],
   );
+
+  // 编辑器浮层打开时按 ESC 关闭。
+  useEffect(() => {
+    if (!editorOverlayOpen) return;
+    const handleEsc = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setEditorOverlayOpen(false);
+    };
+    document.addEventListener('keydown', handleEsc);
+    return () => document.removeEventListener('keydown', handleEsc);
+  }, [editorOverlayOpen]);
 
   useEffect(() => {
     if (!showOfficeFullscreen) return;
@@ -469,8 +587,35 @@ export default function TeamPageV2() {
     const activeHandoffs = Array.from(handoffs.values()).filter(
       (h) => h.state === 'pending' || h.state === 'claimed' || h.state === 'running',
     ).length;
-    return { runningSessions, activeHandoffs };
-  }, [data.workspaceGroups, handoffs]);
+    const blockingNotifications = notificationEvents.filter(
+      (event) =>
+        event.type === 'waiting_confirmation' ||
+        event.type === 'blocking' ||
+        Boolean(event.payload['blocking']),
+    ).length;
+    return {
+      runningSessions,
+      activeHandoffs,
+      blockingNotifications,
+    };
+  }, [data.workspaceGroups, handoffs, notificationEvents]);
+
+  const focusedHandoffEntry = useMemo(
+    () => (focusedHandoffId ? handoffs.get(focusedHandoffId) ?? null : null),
+    [focusedHandoffId, handoffs],
+  );
+
+  const focusSuggestedTab = useMemo<MiddleTabKey | null>(() => {
+    if (!focusedHandoffEntry) return null;
+    if (focusedHandoffEntry.toRoleLayer === 'pm2') return 'review';
+    if (
+      focusedHandoffEntry.toRoleLayer === 'executor' ||
+      focusedHandoffEntry.toRoleLayer === 'reviewer'
+    ) {
+      return 'artifacts';
+    }
+    return 'health';
+  }, [focusedHandoffEntry]);
 
   return (
     <TeamRuntimeReferenceDataProvider value={data}>
@@ -502,6 +647,8 @@ export default function TeamPageV2() {
             <TeamHeaderMetrics
               metrics={data.metricCards}
               activeHandoffCount={headerMetrics.activeHandoffs}
+              blockingNotificationCount={headerMetrics.blockingNotifications}
+              clarificationPendingCount={clarificationPending}
               runningSessionCount={headerMetrics.runningSessions}
             />
           ) : null}
@@ -587,238 +734,74 @@ export default function TeamPageV2() {
               receptionSessionId={data.defaultReceptionSessionId}
               receptionComposerEnabled={true}
               topBar={
-                <div style={{ display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
-                  {/* 主 tab 行：5 个主分类 + 右侧 3D 办公独立切换 */}
-                  <div style={PRIMARY_TAB_BAR_STYLE} role="tablist" aria-label="中间区主分类切换">
-                    {PRIMARY_TABS.map((primary) => {
-                      const active = activePrimary === primary.key;
-                      return (
-                        <button
-                          key={primary.key}
-                          type="button"
-                          role="tab"
-                          aria-selected={active}
-                          aria-controls={`primary-panel-${primary.key}`}
-                          onClick={() => handlePrimaryTabChange(primary.key)}
-                          className="team-primary-tab"
-                          data-active={active || undefined}
-                          style={active ? PRIMARY_TAB_BTN_ACTIVE_STYLE : PRIMARY_TAB_BTN_STYLE}
-                        >
-                          <span aria-hidden>{primary.icon}</span>
-                          <span>{primary.label}</span>
-                          {primary.key === 'conversation' && unreadCount > 0 ? (
-                            <span
-                              aria-label={`待回复 ${unreadCount} 条`}
-                              style={{
-                                marginLeft: 4,
-                                padding: '0 6px',
-                                minWidth: 18,
-                                height: 18,
-                                borderRadius: 999,
-                                background: 'var(--danger)',
-                                color: 'var(--fg-on-accent)',
-                                fontSize: 10,
-                                fontWeight: 700,
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                fontVariantNumeric: 'tabular-nums',
-                              }}
-                            >
-                              {unreadCount > 99 ? '99+' : unreadCount}
-                            </span>
-                          ) : null}
-                          {primary.key === 'tasks' && clarificationPending > 0 ? (
-                            <span
-                              aria-label={`待澄清 ${clarificationPending} 条`}
-                              style={{
-                                marginLeft: 4,
-                                padding: '0 6px',
-                                minWidth: 18,
-                                height: 18,
-                                borderRadius: 999,
-                                background: 'var(--warning)',
-                                color: 'var(--fg-on-accent)',
-                                fontSize: 10,
-                                fontWeight: 700,
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                fontVariantNumeric: 'tabular-nums',
-                              }}
-                            >
-                              {clarificationPending > 99 ? '99+' : clarificationPending}
-                            </span>
-                          ) : null}
-                        </button>
-                      );
-                    })}
-
-                    {/* 对话主 tab 下的内嵌视图切换：层级 / 消息 / 待回复
-                        被合并到主 tab 行右侧（替代原本的子 tab 行），让用户
-                        在不打断接待对话的情况下快速切换次要视图。 */}
-                    {activePrimary === 'conversation' ? (
-                      <div
-                        style={{
-                          marginLeft: 'auto',
-                          display: 'inline-flex',
-                          gap: 2,
-                          alignSelf: 'center',
-                          paddingRight: 4,
-                        }}
-                      >
-                        {[
-                          { key: 'layered', label: '层级', icon: '🪜' },
-                          { key: 'messages', label: '消息', icon: '✉️' },
-                        ].map((view) => {
-                          const viewActive = middleTab === view.key;
-                          return (
-                            <button
-                              key={view.key}
-                              type="button"
-                              onClick={() => handleMiddleTabChange(view.key as MiddleTabKey)}
-                              className="team-sub-tab"
-                              data-active={viewActive || undefined}
-                              title={`切到${view.label}视图`}
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: 4,
-                                padding: '4px 10px',
-                                border: '1px solid transparent',
-                                background: viewActive
-                                  ? 'color-mix(in srgb, var(--accent) 14%, transparent)'
-                                  : 'transparent',
-                                color: viewActive ? 'var(--accent)' : 'var(--fg-muted)',
-                                fontSize: 11,
-                                fontWeight: viewActive ? 700 : 600,
-                                cursor: 'pointer',
-                                borderRadius: 6,
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              <span aria-hidden>{view.icon}</span>
-                              <span>{view.label}</span>
-                            </button>
-                          );
-                        })}
-                        {middleTab === 'conversation' ||
-                        middleTab === 'layered' ||
-                        middleTab === 'messages' ? (
+                <>
+                  <TeamTabBar
+                    activePrimary={activePrimary}
+                    middleTab={middleTab}
+                    onPrimaryChange={handlePrimaryTabChange}
+                    onMiddleChange={handleMiddleTabChange}
+                    unreadCount={unreadCount}
+                    clarificationPending={clarificationPending}
+                    showOffice={showOffice}
+                    officeActive={middleTab === 'office'}
+                    onOfficeClick={() => {
+                      if (middleTab === 'office') {
+                        handleOpenFullscreen();
+                      } else {
+                        handleMiddleTabChange('office');
+                      }
+                    }}
+                  />
+                  {focusedHandoffId ? (
+                    <div style={FOCUS_BANNER_STYLE} aria-live="polite">
+                      <div style={FOCUS_BANNER_ROW_STYLE}>
+                        <strong style={{ color: 'var(--accent)', fontSize: 12 }}>
+                          当前聚焦 Handoff #{focusedHandoffId.slice(0, 8)}
+                        </strong>
+                        {focusedHandoffEntry ? (
+                          <span style={{ color: 'var(--fg-default)', fontSize: 12, fontWeight: 600 }}>
+                            {FOCUS_LAYER_LABELS[focusedHandoffEntry.fromRoleLayer]} →{' '}
+                            {FOCUS_LAYER_LABELS[focusedHandoffEntry.toRoleLayer]} ·{' '}
+                            {FOCUS_STATE_LABELS[focusedHandoffEntry.state]}
+                          </span>
+                        ) : (
+                          <span style={{ color: 'var(--fg-muted)', fontSize: 12 }}>
+                            当前视图正在定位相关上下文。
+                          </span>
+                        )}
+                      </div>
+                      <div style={FOCUS_BANNER_ROW_STYLE}>
+                        {focusSuggestedTab ? (
                           <button
                             type="button"
-                            onClick={() => handleMiddleTabChange('conversation')}
-                            className="team-sub-tab"
-                            data-active={middleTab === 'conversation' || undefined}
-                            title="回到接待对话"
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 4,
-                              padding: '4px 10px',
-                              border: '1px solid transparent',
-                              background:
-                                middleTab === 'conversation'
-                                  ? 'color-mix(in srgb, var(--accent) 14%, transparent)'
-                                  : 'transparent',
-                              color:
-                                middleTab === 'conversation' ? 'var(--accent)' : 'var(--fg-muted)',
-                              fontSize: 11,
-                              fontWeight: middleTab === 'conversation' ? 700 : 600,
-                              cursor: 'pointer',
-                              borderRadius: 6,
-                              whiteSpace: 'nowrap',
-                            }}
+                            onClick={() => handleMiddleTabChange(focusSuggestedTab)}
+                            style={FOCUS_BANNER_PRIMARY_ACTION_STYLE}
                           >
-                            <span aria-hidden>💬</span>
-                            <span>对话</span>
+                            {focusSuggestedTab === 'review'
+                              ? '回到评审上下文'
+                              : focusSuggestedTab === 'artifacts'
+                                ? '回到任务与产物'
+                                : '查看健康度'}
                           </button>
                         ) : null}
+                        <button
+                          type="button"
+                          onClick={() => handleMiddleTabChange('health')}
+                          style={FOCUS_BANNER_ACTION_STYLE}
+                        >
+                          查看健康度
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setFocusedHandoffId(null)}
+                          style={FOCUS_BANNER_ACTION_STYLE}
+                        >
+                          清除定位
+                        </button>
                       </div>
-                    ) : null}
-
-                    {/* 3D 办公：独立按钮，从主分类中抽出 */}
-                    {showOffice ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (middleTab === 'office') {
-                            handleOpenFullscreen();
-                          } else {
-                            handleMiddleTabChange('office');
-                          }
-                        }}
-                        aria-pressed={middleTab === 'office'}
-                        title={
-                          middleTab === 'office' ? '全屏 3D 办公（ESC 关闭）' : '切到 3D 办公视图'
-                        }
-                        style={
-                          middleTab === 'office' ? OFFICE_TOGGLE_ACTIVE_STYLE : OFFICE_TOGGLE_STYLE
-                        }
-                      >
-                        <span aria-hidden>🏢</span>
-                        <span>3D 办公</span>
-                        {middleTab === 'office' ? (
-                          <span aria-hidden style={{ fontSize: 10 }}>
-                            ⛶
-                          </span>
-                        ) : null}
-                      </button>
-                    ) : null}
-                  </div>
-
-                  {/* 子 tab 行（segmented）：仅当处于某个主 tab 时显示。
-                      对话主 tab 默认进入接待对话，不展示子 tab 以最大化对话视野；
-                      用户需要看「层级 / 消息 / 待回复」时通过 LayerConversationDrawer
-                      或主动选别的 leaf 时再显示。 */}
-                  {activePrimary && activePrimary !== 'conversation' ? (
-                    <div style={SUB_TAB_BAR_STYLE} role="tablist" aria-label="子视图切换">
-                      {(PRIMARY_TABS.find((tab) => tab.key === activePrimary)?.children ?? []).map(
-                        (sub) => {
-                          const active = middleTab === sub.key;
-                          return (
-                            <button
-                              key={sub.key}
-                              type="button"
-                              role="tab"
-                              aria-selected={active}
-                              aria-controls={`middle-panel-${sub.key}`}
-                              onClick={() => handleMiddleTabChange(sub.key)}
-                              className="team-sub-tab"
-                              data-active={active || undefined}
-                              style={active ? SUB_TAB_BTN_ACTIVE_STYLE : SUB_TAB_BTN_STYLE}
-                            >
-                              <span aria-hidden>{sub.icon}</span>
-                              <span>{sub.label}</span>
-                              {sub.key === 'messages' && unreadCount > 0 ? (
-                                <span
-                                  aria-label={`待回复 ${unreadCount} 条`}
-                                  style={{
-                                    marginLeft: 2,
-                                    padding: '0 5px',
-                                    minWidth: 16,
-                                    height: 16,
-                                    borderRadius: 999,
-                                    background: 'var(--danger)',
-                                    color: 'var(--fg-on-accent)',
-                                    fontSize: 9,
-                                    fontWeight: 700,
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    fontVariantNumeric: 'tabular-nums',
-                                  }}
-                                >
-                                  {unreadCount > 99 ? '99+' : unreadCount}
-                                </span>
-                              ) : null}
-                            </button>
-                          );
-                        },
-                      )}
                     </div>
                   ) : null}
-                </div>
+                </>
               }
               messagesOverride={
                 middleTab === 'conversation' ? (
@@ -853,9 +836,14 @@ export default function TeamPageV2() {
                       middleTab,
                       selectedTeamId,
                       selectedTeam,
+                      focusHandoffId: focusedHandoffId,
                       officeSceneState,
                       onSelectTeam: handleSelectTeam,
                       onOpenFullscreen: handleOpenFullscreen,
+                      onOpenClarifications: () => handleMiddleTabChange('artifacts'),
+                      onOpenHandoffContext: handleOpenHandoffContext,
+                      onOpenBlockingTarget: handleOpenBlockingTarget,
+                      onClearFocusedHandoff: () => setFocusedHandoffId(null),
                       onSelectLayerSession: handleSelectLayerSession,
                       onCancelHandoff: handleCancelHandoff,
                       handoffs,
@@ -1003,6 +991,15 @@ export default function TeamPageV2() {
             </div>
           </div>
         ) : null}
+
+        <WorkspaceEditorOverlay
+          open={editorOverlayOpen}
+          onClose={() => setEditorOverlayOpen(false)}
+          workspacePath={editorWorkspacePath}
+          fileEditor={fileEditor}
+          saving={savingFile}
+          onSave={handleSaveFile}
+        />
       </div>
     </TeamRuntimeReferenceDataProvider>
   );
@@ -1020,7 +1017,7 @@ function IdleHint() {
         margin: '16px 0',
         borderRadius: 14,
         border: '1px dashed color-mix(in srgb, var(--accent) 40%, transparent)',
-        background: 'color-mix(in srgb, var(--accent) 4%, var(--bg-overlay)',
+        background: 'color-mix(in srgb, var(--accent) 4%, var(--bg-overlay))',
       }}
     >
       <div style={{ display: 'grid', gap: 4 }}>
@@ -1046,7 +1043,7 @@ function IdleHint() {
               style={{
                 padding: '3px 10px',
                 borderRadius: 999,
-                background: 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay)',
+                background: 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay))',
                 border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
                 fontSize: 11,
                 fontWeight: 600,

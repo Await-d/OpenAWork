@@ -2,6 +2,7 @@ import React from 'react';
 import {
   describeReasoningEffort,
   getSupportedReasoningEffortsForModel,
+  resolveProviderVisual,
 } from '@openAwork/shared-ui';
 import type { ReasoningEffort } from '../../conversation-runtime/messages/support.js';
 import { buildFilteredModelGroups, type ModelPickerProvider } from './model-picker-search.js';
@@ -402,152 +403,176 @@ export function ModelPicker({
               <span>试试提供商名、模型别名（如 sonnet / 4o / qwen）或模型 ID</span>
             </div>
           )}
-          {groups.map(({ provider, models }) => (
-            <div key={provider.id}>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 5,
-                  padding: '5px 12px 3px',
-                  borderTop: '1px solid var(--border-subtle)',
-                }}
-              >
+          {groups.map(({ provider, models }) => {
+            const providerVisual = resolveProviderVisual({
+              providerType: provider.type,
+              providerId: provider.id,
+              providerName: provider.name,
+            });
+            return (
+              <div key={provider.id}>
                 <div
                   style={{
-                    width: 15,
-                    height: 15,
-                    borderRadius: 4,
-                    background: 'var(--bg-overlay)',
-                    border: '1px solid var(--border-subtle)',
-                    overflow: 'hidden',
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'center',
+                    gap: 5,
+                    padding: '5px 12px 3px',
+                    borderTop: '1px solid var(--border-subtle)',
                   }}
                 >
-                  <img
-                    src={`/logo-${provider.type}.svg`}
-                    alt={provider.name}
-                    width={11}
-                    height={11}
-                    style={{ objectFit: 'contain', filter: 'var(--provider-logo-filter, none)' }}
-                    onError={(e) => {
-                      (e.currentTarget as HTMLImageElement).style.display = 'none';
-                    }}
-                  />
-                </div>
-                <span
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    color: 'var(--fg-muted)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.06em',
-                  }}
-                >
-                  {provider.name}
-                </span>
-              </div>
-              {models.map((model) => {
-                const isActive = provider.id === activeProviderId && model.id === activeModelId;
-                const optionKey = `${provider.id}:${model.id}`;
-                const contextLabel = formatContextWindow(model.contextWindow);
-                return (
-                  <button
-                    role="option"
-                    aria-selected={isActive}
-                    className="chat-model-picker-option"
-                    tabIndex={isActive || optionKey === firstVisibleModelKey ? 0 : -1}
-                    key={model.id}
-                    type="button"
-                    onKeyDown={handleOptionKeyDown}
-                    onClick={() => {
-                      void onSelect(provider.id, model.id);
-                      onClose();
-                    }}
+                  <div
                     style={{
+                      width: 15,
+                      height: 15,
+                      borderRadius: 4,
+                      background: 'var(--bg-overlay)',
+                      border: '1px solid var(--border-subtle)',
+                      overflow: 'hidden',
                       display: 'flex',
-                      alignItems: 'flex-start',
-                      gap: 8,
-                      width: '100%',
-                      padding: '9px 12px',
-                      border: 'none',
-                      background: isActive ? 'var(--accent-muted)' : 'transparent',
-                      color: isActive ? 'var(--accent)' : 'var(--fg-strong)',
-                      fontSize: 12.5,
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      borderRadius: 8,
-                      margin: '0 6px 1px',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 9,
+                      fontWeight: 700,
+                      color: 'var(--fg-muted)',
                     }}
                   >
-                    <span
+                    {providerVisual.logoUrl ? (
+                      <img
+                        src={providerVisual.logoUrl}
+                        alt={provider.name}
+                        width={11}
+                        height={11}
+                        style={{
+                          objectFit: 'contain',
+                          filter: 'var(--provider-logo-filter, none)',
+                        }}
+                        onError={(e) => {
+                          (e.currentTarget as HTMLImageElement).style.display = 'none';
+                        }}
+                      />
+                    ) : (
+                      <span>{providerVisual.fallbackGlyph ?? provider.type.slice(0, 2)}</span>
+                    )}
+                  </div>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: 'var(--fg-muted)',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.06em',
+                    }}
+                  >
+                    {provider.name}
+                  </span>
+                </div>
+                {models.map((model) => {
+                  const isActive = provider.id === activeProviderId && model.id === activeModelId;
+                  const optionKey = `${provider.id}:${model.id}`;
+                  const contextLabel = formatContextWindow(model.contextWindow);
+                  return (
+                    <button
+                      role="option"
+                      aria-selected={isActive}
+                      className="chat-model-picker-option"
+                      tabIndex={isActive || optionKey === firstVisibleModelKey ? 0 : -1}
+                      key={model.id}
+                      type="button"
+                      onKeyDown={handleOptionKeyDown}
+                      onClick={() => {
+                        void onSelect(provider.id, model.id);
+                        onClose();
+                      }}
                       style={{
-                        width: 18,
                         display: 'flex',
-                        justifyContent: 'center',
-                        paddingTop: 2,
-                        color: isActive ? 'var(--accent)' : 'var(--fg-muted)',
-                        flexShrink: 0,
+                        alignItems: 'flex-start',
+                        gap: 8,
+                        width: '100%',
+                        padding: '9px 12px',
+                        border: 'none',
+                        background: isActive ? 'var(--accent-muted)' : 'transparent',
+                        color: isActive ? 'var(--accent)' : 'var(--fg-strong)',
+                        fontSize: 12.5,
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        borderRadius: 8,
+                        margin: '0 6px 1px',
                       }}
                     >
-                      {isActive ? (
-                        <svg
-                          width="9"
-                          height="9"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="3"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          aria-hidden="true"
-                        >
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                      ) : (
-                        <svg
-                          width="9"
-                          height="9"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          aria-hidden="true"
-                        >
-                          <circle cx="12" cy="12" r="8" />
-                        </svg>
-                      )}
-                    </span>
-                    <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
                       <span
                         style={{
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                          fontWeight: 600,
-                          fontSize: 12.5,
+                          width: 18,
+                          display: 'flex',
+                          justifyContent: 'center',
+                          paddingTop: 2,
+                          color: isActive ? 'var(--accent)' : 'var(--fg-muted)',
+                          flexShrink: 0,
                         }}
                       >
-                        {model.name}
+                        {isActive ? (
+                          <svg
+                            width="9"
+                            height="9"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="3"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden="true"
+                          >
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                        ) : (
+                          <svg
+                            width="9"
+                            height="9"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden="true"
+                          >
+                            <circle cx="12" cy="12" r="8" />
+                          </svg>
+                        )}
                       </span>
                       <span
-                        style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}
+                        style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}
                       >
-                        {model.supportsVision && <CapabilityTag label="视觉" tone="emerald" />}
-                        {model.supportsTools && <CapabilityTag label="工具" tone="accent" />}
-                        {model.supportsThinking && <CapabilityTag label="思考" tone="violet" />}
-                        {contextLabel && <CapabilityTag label={contextLabel} />}
+                        <span
+                          style={{
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            fontWeight: 600,
+                            fontSize: 12.5,
+                          }}
+                        >
+                          {model.name}
+                        </span>
+                        <span
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            flexWrap: 'wrap',
+                          }}
+                        >
+                          {model.supportsVision && <CapabilityTag label="视觉" tone="emerald" />}
+                          {model.supportsTools && <CapabilityTag label="工具" tone="accent" />}
+                          {model.supportsThinking && <CapabilityTag label="思考" tone="violet" />}
+                          {contextLabel && <CapabilityTag label={contextLabel} />}
+                        </span>
                       </span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          ))}
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

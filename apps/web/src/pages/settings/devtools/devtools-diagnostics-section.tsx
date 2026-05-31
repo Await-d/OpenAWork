@@ -49,7 +49,7 @@ interface DiagnosticFileSummary {
 const PANEL_SURFACE_STYLE: React.CSSProperties = {
   borderRadius: 10,
   border: '1px solid var(--border-default)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
   padding: '10px 12px',
   display: 'flex',
   flexDirection: 'column',
@@ -61,7 +61,7 @@ const META_BADGE_STYLE: React.CSSProperties = {
   borderRadius: 999,
   padding: '5px 10px',
   border: '1px solid var(--border-default)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
   fontSize: 11,
   color: 'var(--fg-default)',
   fontWeight: 700,
@@ -172,7 +172,7 @@ export function DevtoolsDiagnosticsSection({
                 borderRadius: 999,
                 padding: '5px 10px',
                 border: '1px solid var(--border-default)',
-                background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base)',
+                background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
                 fontSize: 11,
                 color: 'var(--fg-muted)',
                 fontFamily: 'monospace',
@@ -191,9 +191,9 @@ export function DevtoolsDiagnosticsSection({
               }}
               style={{
                 borderRadius: 8,
-                border: '1px solid color-mix(in srgb, var(--danger) 40%, var(--border-default)',
+                border: '1px solid color-mix(in srgb, var(--danger) 40%, var(--border-default))',
                 padding: '6px 12px',
-                background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay)',
+                background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay))',
                 color: 'var(--danger)',
                 fontSize: 12,
                 fontWeight: 700,
@@ -326,12 +326,12 @@ export function DevtoolsDiagnosticsSection({
                     color: filteredDiagnostics.length > 0 ? 'var(--danger)' : 'var(--fg-default)',
                     borderColor:
                       filteredDiagnostics.length > 0
-                        ? 'color-mix(in srgb, var(--danger) 30%, var(--border-default)'
+                        ? 'color-mix(in srgb, var(--danger) 30%, var(--border-default))'
                         : 'var(--border-default)',
                     background:
                       filteredDiagnostics.length > 0
-                        ? 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay)'
-                        : 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base)',
+                        ? 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay))'
+                        : 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
                   }}
                 >
                   可见错误 {filteredDiagnostics.length}
@@ -390,9 +390,9 @@ export function DevtoolsDiagnosticsSection({
                       }}
                       style={{
                         borderRadius: 6,
-                        border: `1px solid ${isActive ? 'color-mix(in srgb, var(--danger) 50%, var(--border-default)' : 'color-mix(in srgb, var(--danger) 20%, var(--border-default)'}`,
+                        border: `1px solid ${isActive ? 'color-mix(in srgb, var(--danger) 50%, var(--border-default))' : 'color-mix(in srgb, var(--danger) 20%, var(--border-default))'}`,
                         background: isActive
-                          ? 'color-mix(in srgb, var(--danger) 12%, var(--bg-overlay)'
+                          ? 'color-mix(in srgb, var(--danger) 12%, var(--bg-overlay))'
                           : 'var(--bg-overlay)',
                         color: 'var(--fg-strong)',
                         padding: '8px 10px',
@@ -504,10 +504,10 @@ export function DevtoolsDiagnosticsSection({
                       onClick={() => onSelectDiagnostic(key)}
                       style={{
                         borderRadius: 14,
-                        border: `1px solid ${isActive ? 'color-mix(in srgb, var(--danger) 42%, var(--border-default)' : 'var(--border-default)'}`,
+                        border: `1px solid ${isActive ? 'color-mix(in srgb, var(--danger) 42%, var(--border-default))' : 'var(--border-default)'}`,
                         background: isActive
-                          ? 'linear-gradient(135deg, color-mix(in srgb, var(--danger) 11%, var(--bg-overlay), color-mix(in srgb, var(--bg-overlay) 96%, var(--bg-base)))'
-                          : 'color-mix(in srgb, var(--bg-overlay) 96%, var(--bg-base)',
+                          ? 'linear-gradient(135deg, color-mix(in srgb, var(--danger) 11%, var(--bg-overlay)), color-mix(in srgb, var(--bg-overlay) 96%, var(--bg-base)))'
+                          : 'color-mix(in srgb, var(--bg-overlay) 96%, var(--bg-base))',
                         color: 'var(--fg-strong)',
                         padding: '12px 14px',
                         display: 'flex',
@@ -634,7 +634,7 @@ export function DevtoolsDiagnosticsSection({
                           borderRadius: 999,
                           border: '1px solid var(--border-default)',
                           padding: '6px 10px',
-                          background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base)',
+                          background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base))',
                           color: log.level === 'error' ? 'var(--danger)' : 'var(--fg-strong)',
                           fontSize: 11,
                           cursor: 'pointer',
@@ -653,7 +653,7 @@ export function DevtoolsDiagnosticsSection({
                     padding: '12px 14px',
                     fontSize: 12,
                     color: 'var(--fg-muted)',
-                    background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base)',
+                    background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
                   }}
                 >
                   这条错误暂时没有匹配到关联日志，可以直接复制输入和输出 payload 继续排查。
@@ -705,8 +705,8 @@ export function DevtoolsDiagnosticsSection({
         <div
           style={{
             borderRadius: 12,
-            border: '1px solid color-mix(in srgb, var(--warning) 30%, var(--border-default)',
-            background: 'color-mix(in srgb, var(--warning) 8%, var(--bg-overlay)',
+            border: '1px solid color-mix(in srgb, var(--warning) 30%, var(--border-default))',
+            background: 'color-mix(in srgb, var(--warning) 8%, var(--bg-overlay))',
             padding: '16px 18px',
             display: 'flex',
             alignItems: 'center',
@@ -729,7 +729,7 @@ export function DevtoolsDiagnosticsSection({
             onClick={() => onSetDiagnosticQuery('')}
             style={{
               borderRadius: 10,
-              border: '1px solid color-mix(in srgb, var(--warning) 40%, var(--border-default)',
+              border: '1px solid color-mix(in srgb, var(--warning) 40%, var(--border-default))',
               padding: '8px 14px',
               background: 'var(--bg-overlay)',
               color: 'var(--fg-strong)',

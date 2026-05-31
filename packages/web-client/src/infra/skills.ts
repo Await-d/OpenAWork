@@ -11,11 +11,14 @@
 
 import {
   authHeader,
-  expectJson,
+  extractJsonErrorMessage,
   HttpError,
+  isGenericFetchErrorMessage,
   jsonAuthHeaders,
   readJsonErrorData,
+  type JsonErrorData,
   withQuery,
+  fetchWithTimeout,
 } from '../gateway/http.js';
 
 export interface SkillsClient {
@@ -67,9 +70,66 @@ export interface SkillsClient {
   applyRecommendation(token: string, recommendationId: string, payload?: unknown): Promise<unknown>;
 }
 
-async function readSkillError(response: Response, fallback: string): Promise<HttpError> {
-  const data = await readJsonErrorData<{ error?: string }>(response);
-  return new HttpError(data?.error ?? fallback, response.status, data);
+function buildSkillsActionErrorMessage(
+  actionLabel: string,
+  status: number,
+  data: JsonErrorData | undefined,
+): string {
+  const extracted = extractJsonErrorMessage(data);
+  if (extracted) {
+    return extracted;
+  }
+  if (status === 401 || status === 403) {
+    return `认证失效或当前账号无权${actionLabel}。`;
+  }
+  if (status === 404) {
+    return `目标技能资源不存在，无法${actionLabel}。`;
+  }
+  if (status === 409) {
+    return `当前状态不允许${actionLabel}。`;
+  }
+  return `${actionLabel}失败（HTTP ${status}）。`;
+}
+
+function normalizeSkillsError(actionLabel: string, error: unknown): Error {
+  if (error instanceof HttpError) {
+    const extracted = extractJsonErrorMessage((error.data ?? undefined) as JsonErrorData | undefined);
+    if (extracted) {
+      return new HttpError(extracted, error.status, error.data);
+    }
+    return error;
+  }
+  if (error instanceof Error) {
+    const message = error.message.trim();
+    if (message.length > 0 && !isGenericFetchErrorMessage(message)) {
+      return error;
+    }
+  }
+  return new Error(`网络异常，${actionLabel}失败。`);
+}
+
+async function performSkillsRequest<T>(input: {
+  actionLabel: string;
+  parseJson?: boolean;
+  request: () => Promise<Response>;
+}): Promise<T> {
+  try {
+    const response = await input.request();
+    if (!response.ok) {
+      const data = await readJsonErrorData<JsonErrorData>(response);
+      throw new HttpError(
+        buildSkillsActionErrorMessage(input.actionLabel, response.status, data),
+        response.status,
+        data,
+      );
+    }
+    if (input.parseJson === false || response.status === 204) {
+      return undefined as T;
+    }
+    return (await response.json()) as T;
+  } catch (error) {
+    throw normalizeSkillsError(input.actionLabel, error);
+  }
 }
 
 export function createSkillsClient(baseUrl: string): SkillsClient {
@@ -80,99 +140,118 @@ export function createSkillsClient(baseUrl: string): SkillsClient {
       if (options?.category) params.set('category', options.category);
       if (options?.limit !== undefined) params.set('limit', String(options.limit));
       if (options?.offset !== undefined) params.set('offset', String(options.offset));
-      const response = await fetch(withQuery(`${baseUrl}/skills/search`, params), {
-        headers: authHeader(token),
-        signal: options?.signal,
+      return performSkillsRequest<unknown>({
+        actionLabel: '搜索技能',
+        request: () =>
+          fetchWithTimeout(withQuery(`${baseUrl}/skills/search`, params), {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
       });
-      if (!response.ok) {
-        throw await readSkillError(response, `skills.search failed: ${response.status}`);
-      }
-      return response.json();
     },
 
     async getDetail(token, skillId, options) {
-      const response = await fetch(`${baseUrl}/skills/${encodeURIComponent(skillId)}`, {
-        headers: authHeader(token),
-        signal: options?.signal,
+      return performSkillsRequest<unknown>({
+        actionLabel: '读取技能详情',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/skills/${encodeURIComponent(skillId)}`, {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
       });
-      return expectJson<unknown>(response, 'skills.getDetail');
     },
 
     async listInstalled(token, options) {
-      const response = await fetch(`${baseUrl}/skills/installed`, {
-        headers: authHeader(token),
-        signal: options?.signal,
+      return performSkillsRequest<unknown>({
+        actionLabel: '读取已安装技能',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/skills/installed`, {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
       });
-      return expectJson<unknown>(response, 'skills.listInstalled');
     },
 
     async install(token, input) {
-      const response = await fetch(`${baseUrl}/skills/install`, {
-        method: 'POST',
-        headers: jsonAuthHeaders(token),
-        body: JSON.stringify(input),
+      await performSkillsRequest({
+        actionLabel: '安装技能',
+        parseJson: false,
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/skills/install`, {
+            timeoutMs: 120_000,
+            method: 'POST',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify(input),
+          }),
       });
-      if (!response.ok) {
-        throw await readSkillError(response, `Install failed: ${response.status}`);
-      }
     },
 
     async uninstall(token, skillId) {
-      const response = await fetch(`${baseUrl}/skills/installed/${encodeURIComponent(skillId)}`, {
-        method: 'DELETE',
-        headers: authHeader(token),
+      await performSkillsRequest({
+        actionLabel: '卸载技能',
+        parseJson: false,
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/skills/installed/${encodeURIComponent(skillId)}`, {
+            timeoutMs: 120_000,
+            method: 'DELETE',
+            headers: authHeader(token),
+          }),
       });
-      if (!response.ok) {
-        throw await readSkillError(response, `Uninstall failed: ${response.status}`);
-      }
     },
 
     async setEnabled(token, skillId, enabled) {
-      const response = await fetch(
-        `${baseUrl}/skills/installed/${encodeURIComponent(skillId)}/enable`,
-        {
-          method: 'PATCH',
-          headers: jsonAuthHeaders(token),
-          body: JSON.stringify({ enabled }),
-        },
-      );
-      if (!response.ok) {
-        throw await readSkillError(response, `Toggle failed: ${response.status}`);
-      }
+      await performSkillsRequest({
+        actionLabel: enabled ? '启用技能' : '停用技能',
+        parseJson: false,
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/skills/installed/${encodeURIComponent(skillId)}/enable`, {
+            timeoutMs: 120_000,
+            method: 'PATCH',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify({ enabled }),
+          }),
+      });
     },
 
     async discoverLocal(token, options) {
-      const response = await fetch(`${baseUrl}/skills/local/discover`, {
-        headers: authHeader(token),
-        signal: options?.signal,
+      return performSkillsRequest<unknown>({
+        actionLabel: '发现本地技能',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/skills/local/discover`, {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
       });
-      return expectJson<unknown>(response, 'skills.discoverLocal');
     },
 
     async installLocal(token, dirPath) {
-      const response = await fetch(`${baseUrl}/skills/local/install`, {
-        method: 'POST',
-        headers: jsonAuthHeaders(token),
-        body: JSON.stringify({ dirPath }),
+      await performSkillsRequest({
+        actionLabel: '安装本地技能',
+        parseJson: false,
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/skills/local/install`, {
+            timeoutMs: 120_000,
+            method: 'POST',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify({ dirPath }),
+          }),
       });
-      if (!response.ok) {
-        throw await readSkillError(response, `Install failed: ${response.status}`);
-      }
     },
 
     async resyncSystem(token) {
-      const response = await fetch(`${baseUrl}/skills/system/resync`, {
-        method: 'POST',
-        headers: authHeader(token),
+      return performSkillsRequest<unknown>({
+        actionLabel: '同步系统技能',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/skills/system/resync`, {
+            timeoutMs: 120_000,
+            method: 'POST',
+            headers: authHeader(token),
+          }),
       });
-      if (!response.ok) {
-        throw await readSkillError(response, `Resync failed: ${response.status}`);
-      }
-      return response.json();
     },
 
     async listRegistrySources(token, options) {
-      const response = await fetch(`${baseUrl}/skills/registry-sources`, {
+      const response = await fetchWithTimeout(`${baseUrl}/skills/registry-sources`, {
         headers: authHeader(token),
         signal: options?.signal,
       });
@@ -183,40 +262,55 @@ export function createSkillsClient(baseUrl: string): SkillsClient {
     },
 
     async syncRegistrySources(token, sourceIds) {
-      const response = await fetch(`${baseUrl}/skills/registry-sources/sync`, {
-        method: 'POST',
-        headers: jsonAuthHeaders(token),
-        body: JSON.stringify(sourceIds && sourceIds.length > 0 ? { sourceIds } : {}),
+      await performSkillsRequest({
+        actionLabel: '同步技能注册源',
+        parseJson: false,
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/skills/registry-sources/sync`, {
+            timeoutMs: 120_000,
+            method: 'POST',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify(sourceIds && sourceIds.length > 0 ? { sourceIds } : {}),
+          }),
       });
-      if (!response.ok) {
-        throw await readSkillError(response, `Sync failed: ${response.status}`);
-      }
     },
 
     async addRegistrySource(token, input) {
-      await fetch(`${baseUrl}/skills/registry-sources`, {
-        method: 'POST',
-        headers: jsonAuthHeaders(token),
-        body: JSON.stringify(input),
+      await performSkillsRequest({
+        actionLabel: '添加技能注册源',
+        parseJson: false,
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/skills/registry-sources`, {
+            method: 'POST',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify(input),
+          }),
       });
     },
 
     async removeRegistrySource(token, id) {
-      await fetch(`${baseUrl}/skills/registry-sources/${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-        headers: authHeader(token),
+      await performSkillsRequest({
+        actionLabel: '删除技能注册源',
+        parseJson: false,
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/skills/registry-sources/${encodeURIComponent(id)}`, {
+            method: 'DELETE',
+            headers: authHeader(token),
+          }),
       });
     },
 
     async setRegistrySourceEnabled(token, id, enabled) {
-      const response = await fetch(`${baseUrl}/skills/registry-sources/${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        headers: jsonAuthHeaders(token),
-        body: JSON.stringify({ enabled }),
+      await performSkillsRequest({
+        actionLabel: enabled ? '启用技能注册源' : '停用技能注册源',
+        parseJson: false,
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/skills/registry-sources/${encodeURIComponent(id)}`, {
+            method: 'PATCH',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify({ enabled }),
+          }),
       });
-      if (!response.ok) {
-        throw await readSkillError(response, `Toggle failed: ${response.status}`);
-      }
     },
 
     async getSelection(token, options) {
@@ -227,62 +321,77 @@ export function createSkillsClient(baseUrl: string): SkillsClient {
       if (options?.sessionId && options.sessionId.trim().length > 0) {
         params.set('sessionId', options.sessionId.trim());
       }
-      const response = await fetch(withQuery(`${baseUrl}/skills/selection`, params), {
-        headers: authHeader(token),
-        signal: options?.signal,
+      return performSkillsRequest<unknown>({
+        actionLabel: '读取技能选择集',
+        request: () =>
+          fetchWithTimeout(withQuery(`${baseUrl}/skills/selection`, params), {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
       });
-      return expectJson<unknown>(response, 'skills.getSelection');
     },
 
     async putSelection(token, input) {
-      const response = await fetch(`${baseUrl}/skills/selection`, {
-        method: 'PUT',
-        headers: jsonAuthHeaders(token),
-        body: JSON.stringify(input),
+      return performSkillsRequest<unknown>({
+        actionLabel: '保存技能选择集',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/skills/selection`, {
+            method: 'PUT',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify(input),
+          }),
       });
-      if (!response.ok) {
-        throw await readSkillError(response, `Save selection failed: ${response.status}`);
-      }
-      return response.json();
     },
 
     async getSessionSelection(token, sessionId, options) {
-      const response = await fetch(
-        `${baseUrl}/skills/selection/session/${encodeURIComponent(sessionId)}`,
-        { headers: authHeader(token), signal: options?.signal },
-      );
-      return expectJson<unknown>(response, 'skills.getSessionSelection');
+      return performSkillsRequest<unknown>({
+        actionLabel: '读取会话技能覆盖',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/skills/selection/session/${encodeURIComponent(sessionId)}`, {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
+      });
     },
 
     async patchSessionSelection(token, sessionId, payload) {
-      const response = await fetch(
-        `${baseUrl}/skills/selection/session/${encodeURIComponent(sessionId)}`,
-        {
-          method: 'PATCH',
-          headers: jsonAuthHeaders(token),
-          body: JSON.stringify(payload),
-        },
-      );
-      return expectJson<unknown>(response, 'skills.patchSessionSelection');
+      return performSkillsRequest<unknown>({
+        actionLabel: '保存会话技能覆盖',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/skills/selection/session/${encodeURIComponent(sessionId)}`, {
+            method: 'PATCH',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify(payload),
+          }),
+      });
     },
 
     async removeSessionSelection(token, sessionId) {
-      const response = await fetch(
+      const response = await fetchWithTimeout(
         `${baseUrl}/skills/selection/session/${encodeURIComponent(sessionId)}`,
         { method: 'DELETE', headers: authHeader(token) },
       );
       if (!response.ok && response.status !== 404) {
-        throw await readSkillError(response, `Delete session selection failed: ${response.status}`);
+        const data = await readJsonErrorData<JsonErrorData>(response);
+        throw new HttpError(
+          buildSkillsActionErrorMessage('删除会话技能覆盖', response.status, data),
+          response.status,
+          data,
+        );
       }
     },
 
     async recommend(token, payload) {
-      const response = await fetch(`${baseUrl}/skills/recommend`, {
-        method: 'POST',
-        headers: jsonAuthHeaders(token),
-        body: JSON.stringify(payload),
+      return performSkillsRequest<unknown>({
+        actionLabel: '生成技能推荐',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/skills/recommend`, {
+            timeoutMs: 120_000,
+            method: 'POST',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify(payload),
+          }),
       });
-      return expectJson<unknown>(response, 'skills.recommend');
     },
 
     async getLatestRecommendation(token, options) {
@@ -290,23 +399,27 @@ export function createSkillsClient(baseUrl: string): SkillsClient {
       if (options?.workspacePath && options.workspacePath.trim().length > 0) {
         params.set('workspacePath', options.workspacePath.trim());
       }
-      const response = await fetch(withQuery(`${baseUrl}/skills/recommend/latest`, params), {
-        headers: authHeader(token),
-        signal: options?.signal,
+      return performSkillsRequest<unknown>({
+        actionLabel: '读取最新技能推荐',
+        request: () =>
+          fetchWithTimeout(withQuery(`${baseUrl}/skills/recommend/latest`, params), {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
       });
-      return expectJson<unknown>(response, 'skills.getLatestRecommendation');
     },
 
     async applyRecommendation(token, recommendationId, payload) {
-      const response = await fetch(
-        `${baseUrl}/skills/recommend/${encodeURIComponent(recommendationId)}/apply`,
-        {
-          method: 'POST',
-          headers: jsonAuthHeaders(token),
-          body: payload !== undefined ? JSON.stringify(payload) : undefined,
-        },
-      );
-      return expectJson<unknown>(response, 'skills.applyRecommendation');
+      return performSkillsRequest<unknown>({
+        actionLabel: '应用技能推荐',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/skills/recommend/${encodeURIComponent(recommendationId)}/apply`, {
+            timeoutMs: 120_000,
+            method: 'POST',
+            headers: jsonAuthHeaders(token),
+            body: payload !== undefined ? JSON.stringify(payload) : undefined,
+          }),
+      });
     },
   };
 }

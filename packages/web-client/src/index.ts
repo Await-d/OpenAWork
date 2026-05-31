@@ -21,9 +21,9 @@ export type {
   NotificationsClient,
 } from './infra/notifications.js';
 export { createCapabilitiesClient } from './session/capabilities.js';
-export type { CapabilitiesClient } from './session/capabilities.js';
+export type { CapabilitiesClient, CapabilitiesListResult } from './session/capabilities.js';
 export { createAgentsClient } from './session/agents.js';
-export type { AgentsClient } from './session/agents.js';
+export type { AgentsClient, AgentsListResult } from './session/agents.js';
 export { createTeamClient } from './team/team.js';
 export type {
   CreateTeamSessionInput,
@@ -41,8 +41,21 @@ export type {
   TeamMemberSlotInput,
   TeamMessageRecord,
   TeamRuntimeReadModel,
+  TeamRuntimeLoadResult,
+  TeamRuntimeDiagnostics,
+  TeamRuntimeAlertControlActionResult,
+  TeamRuntimeAlertControlRecord,
+  TeamRuntimeReconcileStaleThreadsResult,
+  TeamRuntimePauseAllResult,
+  TeamRuntimeResumeAllResult,
   TeamRuntimeTaskGroupRecord,
   TeamRuntimeSessionRecord,
+  SharedSessionDetailLoadResult,
+  SharedSessionPresenceLoadResult,
+  TeamWorkspaceDetailLoadResult,
+  TeamWorkspaceListLoadResult,
+  TeamWorkspaceSnapshotLoadResult,
+  TeamInitActionResult,
   TeamSessionShareRecord,
   TeamTaskRecord,
   TeamWorkspaceDetail,
@@ -56,20 +69,33 @@ export { createTeamPhaseAClient } from './team/team-phase-a.js';
 export type {
   AgentPersonaRecord,
   ConstitutionRecord,
+  ConstitutionLoadResult,
   ConstitutionTemplate,
+  ConstitutionTemplatesLoadResult,
   DefaultSoul,
+  ForceApplyStateLoadResult,
   ForceApplyState,
+  InstructionStackPreviewLoadResult,
   InstructionStackPreview,
+  LayerCapabilitySummary,
+  LayerToolsetCategory,
+  LayerCapabilitiesLoadResult,
+  PersonaLoadResult,
   MemoryWriteBlocked,
   PersonaResponse,
   RateLimited,
   SoulRoleLayer,
+  TeamArtifactsListResult,
   TeamPhaseAClient,
+  UserMemoryLoadResult,
   UserMemoryRecord,
   VersionConflict,
 } from './team/team-phase-a.js';
 export { createWorkflowsClient } from './infra/workflows.js';
 export type {
+  AssignTeamModelCandidate,
+  AssignTeamModelsInput,
+  AssignTeamModelsResult,
   CreateWorkflowTemplateInput,
   OptimizePromptInput,
   PromptCandidate,
@@ -79,10 +105,14 @@ export type {
   UpdateWorkflowTemplateInput,
   WorkflowTemplateMetadata,
   WorkflowTeamTemplateMetadata,
+  WorkflowTeamTemplateModelRef,
+  WorkflowTeamTemplateModelStrategy,
+  WorkflowTeamTemplateRoleBinding,
   WorkflowTemplateRequiredRole,
   WorkflowTemplateScale,
   WorkflowEdgeRecord,
   WorkflowNodeRecord,
+  WorkflowTemplateListResult,
   WorkflowTemplateRecord,
   WorkflowsClient,
 } from './infra/workflows.js';
@@ -126,7 +156,9 @@ export type {
   SessionImportResult,
   SessionMessageRatingRecord,
   SessionMessageRatingValue,
+  SessionLoadResult,
   SessionRecoveryReadModel,
+  SessionRecoveryLoadResult,
   SessionStatusReadModel,
   SessionRestoreApplyInput,
   SessionRestoreApplyResult,
@@ -145,6 +177,8 @@ export type {
   SessionSnapshotRestorePreviewResult,
   SessionSnapshotScopeKind,
   SharedSessionCommentRecord,
+  SharedSessionCommentActionResult,
+  SharedSessionDetailActionResult,
   SharedSessionDetailRecord,
   SharedSessionPermission,
   SharedSessionPresenceRecord,
@@ -166,11 +200,14 @@ export type {
   FileTreeNode,
   WorkspaceClient,
   WorkspaceFileContent,
+  WorkspaceRootsLoadResult,
   WorkspaceReviewChange,
   WorkspaceReviewDiffResponse,
+  WorkspaceReviewStatusLoadResult,
   WorkspaceReviewStatusResponse,
   WorkspaceRootsResponse,
   WorkspaceSearchHit,
+  WorkspaceTreeLoadResult,
   WorkspaceValidateResult,
   SessionWorkspaceUpdateResponse,
 } from './infra/workspace.js';
@@ -200,10 +237,14 @@ export type {
 export { createSshClient } from './infra/ssh.js';
 export type {
   CreateSSHConnectionInput,
+  SSHBindingEntry,
+  SSHDialogEntry,
   SSHClient,
   SSHConnectionEntry,
   SSHFileEntry,
   SSHFilePreview,
+  UpdateSSHConnectionInput,
+  UpsertSSHDialogInput,
 } from './infra/ssh.js';
 
 export { createGitHubClient } from './infra/github.js';
@@ -263,12 +304,26 @@ export type {
   UserInputPayload,
 } from './team/team-inbound.js';
 
-export { createTeamHandoffsClient } from './team/team-handoffs.js';
+export {
+  createTeamHandoffsClient,
+  getEffectiveReviewDisposition,
+  getStructuredReviewDisposition,
+  inferReviewDispositionFromFailureReason,
+  isHandledReviewDispositionPayload,
+} from './team/team-handoffs.js';
 export type {
   HandoffCancelResult,
+  HandoffControlResult,
   HandoffRecord,
+  HandoffPauseResult,
+  HandoffReviewDisposition,
+  HandoffReviewDispositionStatus,
+  HandoffReviewAction,
+  HandoffReviewActionResult,
   HandoffRoleLayer,
+  HandoffResumeResult,
   HandoffState,
+  TeamHandoffListBySessionResult,
   TeamHandoffsClient,
 } from './team/team-handoffs.js';
 
@@ -276,6 +331,7 @@ export { createTeamWorkflowsClient } from './team/team-workflows.js';
 export type {
   CreateTeamWorkflowResponse,
   TeamWorkflow,
+  TeamWorkflowsListResult,
   TeamWorkflowsClient,
   TeamWorkflowWithDbId,
   UpdateTeamWorkflowResponse,
@@ -286,7 +342,7 @@ export type {
 } from './team/team-workflows.js';
 
 export { createSettingsClient } from './infra/settings.js';
-export type { SettingsClient } from './infra/settings.js';
+export type { SettingsClient, SettingsProvidersLoadResult } from './infra/settings.js';
 
 export { createSkillsClient } from './infra/skills.js';
 export type { SkillsClient } from './infra/skills.js';

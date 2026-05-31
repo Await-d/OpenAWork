@@ -19,6 +19,7 @@ import { randomUUID } from 'node:crypto';
 import { sqliteAll, sqliteGet, sqliteRun } from '../../infra/db.js';
 import { type HandoffRecord } from '../store/handoff-store.js';
 import { publishTeamEvent } from '../bus/team-events-bus.js';
+import { deriveQualityReviewDisposition } from '../../team/team-failure-policy.js';
 
 export interface ReviewInput {
   userId: string;
@@ -131,26 +132,16 @@ export function determineFailureDisposition(input: {
   report: ReviewReport;
   escalationRound: number;
 }): FailureDisposition {
-  // escalation_round ≥ 2 → 升级用户
-  if (input.escalationRound >= 2) {
-    return {
-      action: 'escalate-to-user',
-      reason: `已重试 ${input.escalationRound} 轮仍未通过，需要用户介入`,
-    };
-  }
-
-  // 规划型失败：spec review 未通过（需求理解错误）
-  if (!input.report.specReviewPassed) {
-    return {
-      action: 'return-to-c',
-      reason: `Spec Review 未通过：${input.report.specIssues.join('；')}`,
-    };
-  }
-
-  // 实现型失败：quality review 未通过（代码 bug / 宪法违反）
+  const disposition = deriveQualityReviewDisposition({
+    escalationRound: input.escalationRound,
+    qualityIssues: input.report.qualityIssues,
+    qualityReviewPassed: input.report.qualityReviewPassed,
+    specIssues: input.report.specIssues,
+    specReviewPassed: input.report.specReviewPassed,
+  });
   return {
-    action: 'redispatch',
-    reason: `Quality Review 未通过：${input.report.qualityIssues.join('；')}`,
+    action: disposition.action,
+    reason: disposition.reason,
   };
 }
 
@@ -238,6 +229,32 @@ export async function runReviewAggregation(input: ReviewInput): Promise<ReviewRe
 }
 
 /**
+ * Parse a child handoff's `payload_json` without letting one corrupt row
+ * throw the whole `children.map(...)` below. `checkAllChildrenCompleted` is
+ * called on every watcher tick by `pm2-quality-review-reconciler`; an
+ * unguarded `JSON.parse` on a single corrupt child payload (crash mid-write,
+ * disk error, hand-edited DB) used to throw the entire mapping, which — even
+ * with the per-candidate guard in `reconcilePendingPm2QualityReviews`
+ * (§0.101) — left that pm2's review unable to ever aggregate (every reconcile
+ * re-threw on the same row). Degrade the bad payload to null + warn instead.
+ */
+function parseChildPayloadJson(json: string | null | undefined): unknown {
+  if (!json) {
+    return null;
+  }
+  try {
+    return JSON.parse(json);
+  } catch (err) {
+    console.warn(
+      `[review-aggregator] 子 handoff payload_json 解析失败，降级为 null：${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return null;
+  }
+}
+
+/**
  * 检查某个 d 层 handoff 的所有子 handoff 是否都到达终态。
  * 由 watcher 周期性调用。
  */
@@ -299,7 +316,7 @@ export function checkAllChildrenCompleted(pm2HandoffId: string): {
     fromRoleLayer: c.from_role_layer as HandoffRecord['fromRoleLayer'],
     toRoleLayer: c.to_role_layer as HandoffRecord['toRoleLayer'],
     toSessionId: c.to_session_id,
-    payload: JSON.parse(c.payload_json || '{}') as unknown,
+    payload: parseChildPayloadJson(c.payload_json),
     state: c.state as HandoffRecord['state'],
     claimToken: c.claim_token,
     claimedAt: c.claimed_at,

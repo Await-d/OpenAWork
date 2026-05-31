@@ -19,6 +19,10 @@ export interface TeamHeaderMetricsProps {
   metrics: AgentTeamsMetricCard[];
   /** 当前活跃的 handoff 数（来自 useHandoffStore）。 */
   activeHandoffCount?: number;
+  /** 当前阻塞升级/待处理通知数。 */
+  blockingNotificationCount?: number;
+  /** 当前待澄清数量。 */
+  clarificationPendingCount?: number;
   /** 当前运行中的 session 数。 */
   runningSessionCount?: number;
 }
@@ -97,6 +101,20 @@ const HANDOFF_BADGE_STYLE: CSSProperties = {
   background: 'color-mix(in srgb, var(--accent) 14%, transparent)',
   color: 'var(--accent)',
   border: '1px solid color-mix(in srgb, var(--accent) 35%, transparent)',
+};
+
+const BLOCKING_BADGE_STYLE: CSSProperties = {
+  ...ACTIVITY_BADGE_BASE,
+  background: 'color-mix(in srgb, var(--danger) 14%, transparent)',
+  color: 'var(--danger)',
+  border: '1px solid color-mix(in srgb, var(--danger) 35%, transparent)',
+};
+
+const CLARIFICATION_BADGE_STYLE: CSSProperties = {
+  ...ACTIVITY_BADGE_BASE,
+  background: 'color-mix(in srgb, var(--warning) 14%, transparent)',
+  color: 'var(--warning)',
+  border: '1px solid color-mix(in srgb, var(--warning) 35%, transparent)',
 };
 
 const ICON_STYLE: CSSProperties = {
@@ -205,6 +223,8 @@ function MetricIcon({ kind }: { kind: string }) {
 export function TeamHeaderMetrics({
   metrics,
   activeHandoffCount,
+  blockingNotificationCount,
+  clarificationPendingCount,
   runningSessionCount,
 }: TeamHeaderMetricsProps) {
   return (
@@ -222,6 +242,39 @@ export function TeamHeaderMetrics({
           <MetricIcon kind="handoff" />
           <span style={{ fontVariantNumeric: 'tabular-nums' }}>{activeHandoffCount}</span>
           <span style={{ fontWeight: 500, opacity: 0.85 }}>派发</span>
+        </span>
+      ) : null}
+      {typeof blockingNotificationCount === 'number' && blockingNotificationCount > 0 ? (
+        <span
+          style={BLOCKING_BADGE_STYLE}
+          title={`${blockingNotificationCount} 条阻塞升级或待处理通知需要优先查看`}
+        >
+          <span
+            aria-hidden="true"
+            style={{
+              ...ICON_STYLE,
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: 'currentColor',
+              boxShadow: '0 0 0 3px color-mix(in srgb, currentColor 18%, transparent)',
+              display: 'inline-block',
+            }}
+          />
+          <span style={{ fontVariantNumeric: 'tabular-nums' }}>{blockingNotificationCount}</span>
+          <span style={{ fontWeight: 500, opacity: 0.85 }}>阻塞</span>
+        </span>
+      ) : null}
+      {typeof clarificationPendingCount === 'number' && clarificationPendingCount > 0 ? (
+        <span
+          style={CLARIFICATION_BADGE_STYLE}
+          title={`${clarificationPendingCount} 条待澄清问题需要用户回答`}
+        >
+          <span aria-hidden="true" style={{ ...ICON_STYLE, fontSize: 11 }}>
+            ?
+          </span>
+          <span style={{ fontVariantNumeric: 'tabular-nums' }}>{clarificationPendingCount}</span>
+          <span style={{ fontWeight: 500, opacity: 0.85 }}>澄清</span>
         </span>
       ) : null}
 

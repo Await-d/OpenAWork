@@ -23,6 +23,7 @@
 import { useCallback, useMemo, useState, type CSSProperties } from 'react';
 import { createWorkspaceClient } from '@openAwork/web-client';
 import WorkspacePickerModal from '../../../../../components/common/modal/WorkspacePickerModal.js';
+import { buildWorkspacePickerDataSource } from '../../../../../components/common/modal/workspace-picker-data-source.js';
 import { useAuthStore } from '../../../../../stores/auth/auth.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
 import { XIcon } from '../../shared/TeamIcons.js';
@@ -60,7 +61,7 @@ const MODAL_STYLE: CSSProperties = {
 
 const HERO_PANE_STYLE: CSSProperties = {
   background:
-    'linear-gradient(160deg, color-mix(in srgb, var(--accent) 90%, var(--bg-overlay) 0%, color-mix(in srgb, var(--accent) 55%, var(--bg-overlay) 100%)',
+    'linear-gradient(160deg, color-mix(in srgb, var(--accent) 90%, var(--bg-overlay)) 0%, color-mix(in srgb, var(--accent) 55%, var(--bg-overlay)) 100%)',
   color: 'var(--fg-on-accent)',
   padding: 24,
   display: 'flex',
@@ -186,7 +187,7 @@ const INPUT_STYLE: CSSProperties = {
   padding: '9px 12px',
   borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base))',
   color: 'var(--fg-strong)',
   fontSize: 13,
   fontFamily: 'inherit',
@@ -297,6 +298,14 @@ export function NewTeamWorkspaceModal({ onClose, onCreated }: NewTeamWorkspaceMo
   const accessToken = useAuthStore((s) => s.accessToken);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
   const workspaceClient = useMemo(() => createWorkspaceClient(gatewayUrl), [gatewayUrl]);
+  const workspacePickerDataSource = useMemo(
+    () =>
+      buildWorkspacePickerDataSource({
+        client: workspaceClient,
+        token: accessToken,
+      }),
+    [accessToken, workspaceClient],
+  );
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -322,35 +331,6 @@ export function NewTeamWorkspaceModal({ onClose, onCreated }: NewTeamWorkspaceMo
     }
     return null;
   }, [existingNames, trimmedName]);
-
-  // ─── workspace picker fetch 适配 ──
-  const fetchWorkspaceRoots = useCallback(async (): Promise<string[]> => {
-    const roots = await workspaceClient.listRoots(accessToken ?? '');
-    if (roots.length === 0) {
-      throw new Error('fetchWorkspaceRoots failed: no workspace roots');
-    }
-    return roots;
-  }, [accessToken, workspaceClient]);
-
-  const fetchRootPath = useCallback(async (): Promise<string> => {
-    const roots = await fetchWorkspaceRoots();
-    const root = roots[0];
-    if (!root) {
-      throw new Error('fetchRootPath failed: no workspace roots');
-    }
-    return root;
-  }, [fetchWorkspaceRoots]);
-
-  const fetchTree = useCallback(
-    async (path: string, depth = 2) =>
-      workspaceClient.fetchTree(accessToken ?? '', path, { depth }),
-    [accessToken, workspaceClient],
-  );
-
-  const validatePath = useCallback(
-    async (path: string) => workspaceClient.validatePath(accessToken ?? '', path),
-    [accessToken, workspaceClient],
-  );
 
   const canSubmit = trimmedName.length > 0 && !nameError && !submitting;
 
@@ -650,10 +630,10 @@ export function NewTeamWorkspaceModal({ onClose, onCreated }: NewTeamWorkspaceMo
           }
           setShowPicker(false);
         }}
-        fetchRootPath={fetchRootPath}
-        fetchWorkspaceRoots={fetchWorkspaceRoots}
-        fetchTree={fetchTree}
-        validatePath={validatePath}
+        fetchRootPath={workspacePickerDataSource.fetchRootPath}
+        fetchWorkspaceRoots={workspacePickerDataSource.fetchWorkspaceRoots}
+        fetchTree={workspacePickerDataSource.fetchTree}
+        validatePath={workspacePickerDataSource.validatePath}
         initialPath={defaultWorkingRoot || undefined}
       />
     </>

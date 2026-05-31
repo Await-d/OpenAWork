@@ -110,7 +110,7 @@ export async function skillSelectionRoutes(app: FastifyInstance): Promise<void> 
         step.fail('workspace path out of root');
         return reply
           .status(400)
-          .send({ error: 'workspacePath must be within a configured workspace root' });
+          .send({ error: 'workspacePath 必须位于已配置的工作区根目录内。' });
       }
 
       const sessionId = query.sessionId ?? null;
@@ -121,7 +121,7 @@ export async function skillSelectionRoutes(app: FastifyInstance): Promise<void> 
         );
         if (!session || session.user_id !== user.sub) {
           step.fail('session not found or not owned');
-          return reply.status(404).send({ error: 'Session not found' });
+          return reply.status(404).send({ error: '目标会话不存在。' });
         }
       }
 
@@ -190,7 +190,7 @@ export async function skillSelectionRoutes(app: FastifyInstance): Promise<void> 
         step.fail('workspace path out of root');
         return reply
           .status(400)
-          .send({ error: 'workspacePath must be within a configured workspace root' });
+          .send({ error: 'workspacePath 必须位于已配置的工作区根目录内。' });
       }
 
       // Defend the BUILTIN hard-invariant: caller may not write a BUILTIN id
@@ -199,7 +199,7 @@ export async function skillSelectionRoutes(app: FastifyInstance): Promise<void> 
       if (illegalBuiltin) {
         step.fail('attempted to write BUILTIN skill');
         return reply.status(400).send({
-          error: `BUILTIN skill '${illegalBuiltin.skillId}' cannot be managed via selection`,
+          error: `内置技能 '${illegalBuiltin.skillId}' 不允许通过选择接口管理。`,
         });
       }
 
@@ -272,7 +272,7 @@ export async function skillSelectionRoutes(app: FastifyInstance): Promise<void> 
       );
       if (!session || session.user_id !== user.sub) {
         step.fail('session not found or not owned');
-        return reply.status(404).send({ error: 'Session not found' });
+        return reply.status(404).send({ error: '目标会话不存在。' });
       }
 
       const parsed = parseBody(patchSessionOverrideSchema, request.body);
@@ -281,7 +281,7 @@ export async function skillSelectionRoutes(app: FastifyInstance): Promise<void> 
       if (illegalBuiltin) {
         step.fail('attempted to write BUILTIN skill');
         return reply.status(400).send({
-          error: `BUILTIN skill '${illegalBuiltin.skillId}' cannot be overridden per session`,
+          error: `内置技能 '${illegalBuiltin.skillId}' 不允许在会话级覆盖。`,
         });
       }
 
@@ -341,7 +341,7 @@ export async function skillSelectionRoutes(app: FastifyInstance): Promise<void> 
       );
       if (!session || session.user_id !== user.sub) {
         step.fail('session not found or not owned');
-        return reply.status(404).send({ error: 'Session not found' });
+        return reply.status(404).send({ error: '目标会话不存在。' });
       }
 
       sqliteRun('DELETE FROM chat_session_skill_overrides WHERE session_id = ?', [sessionId]);

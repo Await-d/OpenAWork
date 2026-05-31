@@ -129,7 +129,7 @@ export function UnlockOverlay({ onUnlocked }: { onUnlocked: () => void }) {
             width: 56,
             height: 56,
             borderRadius: '50%',
-            background: 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay)',
+            background: 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay))',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',

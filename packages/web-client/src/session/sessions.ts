@@ -9,6 +9,7 @@ import type {
 } from '@openAwork/shared';
 import type { PendingPermissionRequest, PermissionDecision } from './permissions.js';
 import type { PendingQuestionRequest } from './questions.js';
+import { fetchWithTimeout } from '../gateway/http.js';
 
 export type SessionSnapshotScopeKind = 'request' | 'backup' | 'scope' | 'unknown';
 
@@ -311,6 +312,16 @@ export interface SharedSessionDetailRecord {
   session: Session;
 }
 
+export interface SharedSessionCommentActionResult {
+  comment: SharedSessionCommentRecord;
+  detail?: SharedSessionDetailRecord;
+}
+
+export interface SharedSessionDetailActionResult {
+  detail?: SharedSessionDetailRecord;
+  ok: true;
+}
+
 export interface SessionImportInput {
   exportedAt?: string;
   id?: string;
@@ -360,6 +371,22 @@ export interface SessionRecoveryReadModel {
   todoLanes: SessionTodoLanes;
   totalMessageCount?: number;
   totalTurnCount?: number | null;
+}
+
+export interface SessionRecoveryLoadResult {
+  errorMessage?: string;
+  ok: boolean;
+  recovery?: SessionRecoveryReadModel;
+  retryable: boolean;
+  status?: number;
+}
+
+export interface SessionLoadResult {
+  errorMessage?: string;
+  ok: boolean;
+  retryable: boolean;
+  session?: Session;
+  status?: number;
 }
 
 export interface SessionStatusReadModel {
@@ -435,6 +462,11 @@ export interface SessionsClient {
     token: string,
     opts?: { title?: string; metadata?: Record<string, unknown> },
   ): Promise<Session>;
+  getResult(
+    token: string,
+    sessionId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<SessionLoadResult>;
   get(token: string, sessionId: string): Promise<Session>;
   getSharedWithMe(
     token: string,
@@ -445,23 +477,28 @@ export interface SessionsClient {
     token: string,
     sessionId: string,
     input: { content: string },
-  ): Promise<SharedSessionCommentRecord>;
+  ): Promise<SharedSessionCommentActionResult>;
   touchSharedPresence(token: string, sessionId: string): Promise<SharedSessionPresenceRecord[]>;
   replySharedSessionPermission(
     token: string,
     sessionId: string,
     input: SharedSessionPermissionReplyInput,
-  ): Promise<void>;
+  ): Promise<SharedSessionDetailActionResult>;
   replySharedQuestion(
     token: string,
     sessionId: string,
     input: { answers?: string[][]; requestId: string; status: 'answered' | 'dismissed' },
-  ): Promise<void>;
+  ): Promise<SharedSessionDetailActionResult>;
   getRecovery(
     token: string,
     sessionId: string,
     options?: { messageLimit?: number; signal?: AbortSignal; since?: number },
   ): Promise<SessionRecoveryReadModel>;
+  getRecoveryResult(
+    token: string,
+    sessionId: string,
+    options?: { messageLimit?: number; signal?: AbortSignal; since?: number },
+  ): Promise<SessionRecoveryLoadResult>;
   getStatus(
     token: string,
     sessionId: string,
@@ -604,30 +641,165 @@ async function readJsonErrorData<T>(response: Response): Promise<T | undefined> 
   return data ?? undefined;
 }
 
+interface SessionErrorData {
+  data?: {
+    message?: string;
+  };
+  error?: string;
+  message?: string;
+  name?: string;
+}
+
+function extractSessionErrorMessage(data: SessionErrorData | undefined): string | null {
+  if (typeof data?.error === 'string' && data.error.length > 0) {
+    return data.error;
+  }
+  if (typeof data?.message === 'string' && data.message.length > 0) {
+    return data.message;
+  }
+  if (typeof data?.data?.message === 'string' && data.data.message.length > 0) {
+    return data.data.message;
+  }
+  return null;
+}
+
+function isRetryableSessionRecoveryStatus(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+function isRetryableSessionStatus(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+function buildSessionErrorMessage(
+  status: number,
+  data: SessionErrorData | undefined,
+): string {
+  const extracted = extractSessionErrorMessage(data);
+  if (extracted) {
+    return extracted;
+  }
+  if (status === 401 || status === 403) {
+    return '认证失效或当前账号无权读取该会话。';
+  }
+  if (status === 404) {
+    return '目标会话不存在。';
+  }
+  return `加载会话失败（HTTP ${status}）。`;
+}
+
+function buildSessionRecoveryErrorMessage(
+  status: number,
+  data: SessionErrorData | undefined,
+): string {
+  const extracted = extractSessionErrorMessage(data);
+  if (extracted) {
+    return extracted;
+  }
+  if (status === 401 || status === 403) {
+    return '认证失效或当前账号无权读取会话快照。';
+  }
+  if (status === 404) {
+    return '目标会话不存在，无法读取会话快照。';
+  }
+  return `加载会话快照失败（HTTP ${status}）。`;
+}
+
+function buildSessionActionErrorMessage(
+  actionLabel: string,
+  status: number,
+  data: SessionErrorData | undefined,
+): string {
+  const extracted = extractSessionErrorMessage(data);
+  if (extracted) {
+    return extracted;
+  }
+  if (status === 401 || status === 403) {
+    return `认证失效或当前账号无权${actionLabel}。`;
+  }
+  if (status === 404) {
+    return `目标会话资源不存在，无法${actionLabel}。`;
+  }
+  if (status === 409) {
+    return `当前状态不允许${actionLabel}。`;
+  }
+  return `${actionLabel}失败（HTTP ${status}）。`;
+}
+
+function isGenericSessionNetworkErrorMessage(message: string): boolean {
+  return (
+    message === 'Failed to fetch' ||
+    message === 'Load failed' ||
+    message === 'fetch failed' ||
+    message === 'Network request failed' ||
+    message === 'NetworkError when attempting to fetch resource.'
+  );
+}
+
+function normalizeSessionActionError(actionLabel: string, error: unknown): Error {
+  if (error instanceof HttpError) {
+    const extracted = extractSessionErrorMessage((error.data ?? undefined) as SessionErrorData | undefined);
+    if (extracted) {
+      return new HttpError(extracted, error.status, error.data);
+    }
+    return error;
+  }
+  if (error instanceof Error) {
+    const message = error.message.trim();
+    if (message.length > 0 && !isGenericSessionNetworkErrorMessage(message)) {
+      return error;
+    }
+  }
+  return new Error(`网络异常，${actionLabel}失败。`);
+}
+
+async function performSessionRequest<T, TError extends { error?: string } = { error?: string }>(
+  input: {
+    actionLabel: string;
+    parseJson?: boolean;
+    request: () => Promise<Response>;
+  },
+): Promise<T> {
+  try {
+    const res = await input.request();
+    if (!res.ok) {
+      const data = await readJsonErrorData<TError>(res);
+      throw new HttpError(
+        buildSessionActionErrorMessage(input.actionLabel, res.status, data as SessionErrorData | undefined),
+        res.status,
+        data,
+      );
+    }
+    if (input.parseJson === false || res.status === 204) {
+      return undefined as T;
+    }
+    return (await res.json()) as T;
+  } catch (error) {
+    throw normalizeSessionActionError(input.actionLabel, error);
+  }
+}
+
 export async function replySharedSessionPermissionRequest(input: {
   gatewayUrl: string;
   payload: SharedSessionPermissionReplyInput;
   sessionId: string;
   token: string;
-}): Promise<void> {
-  const res = await fetch(
-    `${input.gatewayUrl}/sessions/shared-with-me/${input.sessionId}/permissions/reply`,
-    {
-      method: 'POST',
-      headers: {
-        ...authHeader(input.token),
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(input.payload),
-    },
-  );
-  if (!res.ok) {
-    throw new HttpError(
-      `Failed to reply shared permission: ${res.status}`,
-      res.status,
-      await readJsonErrorData(res),
-    );
-  }
+}): Promise<SharedSessionDetailActionResult> {
+  return performSessionRequest<SharedSessionDetailActionResult>({
+    actionLabel: '回复共享权限请求',
+    request: () =>
+      fetchWithTimeout(
+        `${input.gatewayUrl}/sessions/shared-with-me/${input.sessionId}/permissions/reply`,
+        {
+          method: 'POST',
+          headers: {
+            ...authHeader(input.token),
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(input.payload),
+        },
+      ),
+  });
 }
 
 function appendBooleanQuery(
@@ -642,6 +814,89 @@ function appendBooleanQuery(
 }
 
 export function createSessionsClient(gatewayUrl: string): SessionsClient {
+  const getResult = async (
+    token: string,
+    sessionId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<SessionLoadResult> => {
+    try {
+      const res = await fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}`, {
+        headers: authHeader(token),
+        signal: options?.signal,
+      });
+      if (!res.ok) {
+        return {
+          ok: false,
+          retryable: isRetryableSessionStatus(res.status),
+          errorMessage: buildSessionErrorMessage(
+            res.status,
+            await readJsonErrorData<SessionErrorData>(res),
+          ),
+          status: res.status,
+        };
+      }
+      const data = (await res.json()) as { session: Session };
+      return {
+        ok: true,
+        retryable: false,
+        session: data.session,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        retryable: true,
+        errorMessage: normalizeSessionActionError('加载会话', error).message,
+      };
+    }
+  };
+
+  const getRecoveryResult = async (
+    token: string,
+    sessionId: string,
+    options?: { messageLimit?: number; signal?: AbortSignal; since?: number },
+  ): Promise<SessionRecoveryLoadResult> => {
+    const params = new URLSearchParams();
+    if (typeof options?.messageLimit === 'number') {
+      params.set('messageLimit', String(options.messageLimit));
+    }
+    if (typeof options?.since === 'number') {
+      params.set('since', String(options.since));
+    }
+    const qs = params.toString();
+    try {
+      const res = await fetchWithTimeout(
+        `${gatewayUrl}/sessions/${sessionId}/recovery${qs ? `?${qs}` : ''}`,
+        {
+          headers: authHeader(token),
+          signal: options?.signal,
+        },
+      );
+      if (!res.ok) {
+        return {
+          ok: false,
+          retryable: isRetryableSessionRecoveryStatus(res.status),
+          errorMessage: buildSessionRecoveryErrorMessage(
+            res.status,
+            await readJsonErrorData<SessionErrorData>(res),
+          ),
+          status: res.status,
+        };
+      }
+      const data = (await res.json()) as { recovery: SessionRecoveryReadModel };
+      return {
+        ok: true,
+        retryable: false,
+        recovery: data.recovery,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        retryable: true,
+        errorMessage: normalizeSessionActionError('加载会话快照', error).message,
+      };
+    }
+  };
+
   return {
     async list(token, options) {
       const params = new URLSearchParams();
@@ -652,11 +907,13 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
           params.set('includeDescendants', '0');
         }
       }
-      const res = await fetch(`${gatewayUrl}/sessions?${params.toString()}`, {
-        headers: authHeader(token),
+      const data = await performSessionRequest<{ sessions?: Session[] }>({
+        actionLabel: '读取会话列表',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions?${params.toString()}`, {
+            headers: authHeader(token),
+          }),
       });
-      if (!res.ok) throw new HttpError(`Failed to list sessions: ${res.status}`, res.status);
-      const data = (await res.json()) as { sessions?: Session[] };
       return data.sessions ?? [];
     },
 
@@ -669,97 +926,80 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
         params.set('offset', String(options.offset));
       }
       const suffix = params.toString();
-      const res = await fetch(
-        `${gatewayUrl}/sessions/shared-with-me${suffix ? `?${suffix}` : ''}`,
-        {
-          headers: authHeader(token),
-          signal: options?.signal,
-        },
-      );
-      if (!res.ok) {
-        throw new HttpError(
-          `Failed to list shared sessions: ${res.status}`,
-          res.status,
-          await readJsonErrorData(res),
-        );
-      }
-      const data = (await res.json()) as { sessions?: SharedSessionSummaryRecord[] };
+      const data = await performSessionRequest<{ sessions?: SharedSessionSummaryRecord[] }>({
+        actionLabel: '读取共享会话列表',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/shared-with-me${suffix ? `?${suffix}` : ''}`, {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
+      });
       return data.sessions ?? [];
     },
 
     async create(token, opts = {}) {
-      const res = await fetch(`${gatewayUrl}/sessions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeader(token) },
-        body: JSON.stringify(opts),
+      const data = await performSessionRequest<{ session?: Session; sessionId?: string }>({
+        actionLabel: '创建会话',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeader(token) },
+            body: JSON.stringify(opts),
+          }),
       });
-      if (!res.ok) throw new HttpError(`Failed to create session: ${res.status}`, res.status);
-      const data = (await res.json()) as { session?: Session; sessionId?: string };
       return data.session ?? { id: data.sessionId ?? '' };
     },
 
+    getResult,
+
     async get(token, sessionId) {
-      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}`, {
-        headers: authHeader(token),
-      });
-      if (!res.ok) throw new HttpError(`Failed to get session: ${res.status}`, res.status);
-      const data = (await res.json()) as { session: Session };
-      return data.session;
+      const result = await getResult(token, sessionId);
+      if (!result.ok || !result.session) {
+        throw new HttpError(result.errorMessage ?? '加载会话失败', result.status ?? 500);
+      }
+      return result.session;
     },
 
     async getSharedWithMe(token, sessionId, options) {
-      const res = await fetch(`${gatewayUrl}/sessions/shared-with-me/${sessionId}`, {
-        headers: authHeader(token),
-        signal: options?.signal,
+      return performSessionRequest<SharedSessionDetailRecord>({
+        actionLabel: '读取共享会话详情',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/shared-with-me/${sessionId}`, {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
       });
-      if (!res.ok) {
-        throw new HttpError(
-          `Failed to get shared session: ${res.status}`,
-          res.status,
-          await readJsonErrorData(res),
-        );
-      }
-      return (await res.json()) as SharedSessionDetailRecord;
     },
 
     async createSharedComment(token, sessionId, input) {
-      const res = await fetch(`${gatewayUrl}/sessions/shared-with-me/${sessionId}/comments`, {
-        method: 'POST',
-        headers: {
-          ...authHeader(token),
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(input),
+      return performSessionRequest<SharedSessionCommentActionResult>({
+        actionLabel: '发送共享评论',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/shared-with-me/${sessionId}/comments`, {
+            method: 'POST',
+            headers: {
+              ...authHeader(token),
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(input),
+          }),
       });
-      if (!res.ok) {
-        throw new HttpError(
-          `Failed to create shared comment: ${res.status}`,
-          res.status,
-          await readJsonErrorData(res),
-        );
-      }
-      const data = (await res.json()) as { comment: SharedSessionCommentRecord };
-      return data.comment;
     },
 
     async touchSharedPresence(token, sessionId) {
-      const res = await fetch(`${gatewayUrl}/sessions/shared-with-me/${sessionId}/presence`, {
-        method: 'POST',
-        headers: authHeader(token),
+      const data = await performSessionRequest<{ presence?: SharedSessionPresenceRecord[] }>({
+        actionLabel: '刷新共享会话在线状态',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/shared-with-me/${sessionId}/presence`, {
+            method: 'POST',
+            headers: authHeader(token),
+          }),
       });
-      if (!res.ok) {
-        throw new HttpError(
-          `Failed to update shared presence: ${res.status}`,
-          res.status,
-          await readJsonErrorData(res),
-        );
-      }
-      const data = (await res.json()) as { presence?: SharedSessionPresenceRecord[] };
       return data.presence ?? [];
     },
 
     async replySharedSessionPermission(token, sessionId, input) {
-      await replySharedSessionPermissionRequest({
+      return replySharedSessionPermissionRequest({
         gatewayUrl,
         payload: input,
         sessionId,
@@ -768,55 +1008,42 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
     },
 
     async replySharedQuestion(token, sessionId, input) {
-      const res = await fetch(
-        `${gatewayUrl}/sessions/shared-with-me/${sessionId}/questions/reply`,
-        {
-          method: 'POST',
-          headers: {
-            ...authHeader(token),
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(input),
-        },
-      );
-      if (!res.ok) {
-        throw new HttpError(
-          `Failed to reply shared question: ${res.status}`,
-          res.status,
-          await readJsonErrorData(res),
-        );
-      }
+      return performSessionRequest<SharedSessionDetailActionResult>({
+        actionLabel: '回复共享提问',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/shared-with-me/${sessionId}/questions/reply`, {
+            method: 'POST',
+            headers: {
+              ...authHeader(token),
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(input),
+          }),
+      });
     },
 
     async getRecovery(token, sessionId, options) {
-      const params = new URLSearchParams();
-      if (typeof options?.messageLimit === 'number') {
-        params.set('messageLimit', String(options.messageLimit));
+      const result = await getRecoveryResult(token, sessionId, options);
+      if (!result.ok || !result.recovery) {
+        throw new HttpError(
+          result.errorMessage ?? '加载会话快照失败',
+          result.status ?? 500,
+        );
       }
-      if (typeof options?.since === 'number') {
-        params.set('since', String(options.since));
-      }
-      const qs = params.toString();
-      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/recovery${qs ? `?${qs}` : ''}`, {
-        headers: authHeader(token),
-        signal: options?.signal,
-      });
-      if (!res.ok) {
-        throw new HttpError(`Failed to get session recovery: ${res.status}`, res.status);
-      }
-      const data = (await res.json()) as { recovery: SessionRecoveryReadModel };
-      return data.recovery;
+      return result.recovery;
     },
 
+    getRecoveryResult,
+
     async getStatus(token, sessionId, options) {
-      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/status`, {
-        headers: authHeader(token),
-        signal: options?.signal,
+      const data = await performSessionRequest<{ status: SessionStatusReadModel }>({
+        actionLabel: '读取会话状态',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}/status`, {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
       });
-      if (!res.ok) {
-        throw new HttpError(`Failed to get session status: ${res.status}`, res.status);
-      }
-      const data = (await res.json()) as { status: SessionStatusReadModel };
       return data.status;
     },
 
@@ -825,94 +1052,80 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
       if (typeof options?.limit === 'number') {
         params.set('limit', String(options.limit));
       }
-      const res = await fetch(`${gatewayUrl}/sessions/search?${params.toString()}`, {
-        headers: authHeader(token),
-        signal: options?.signal,
+      const data = await performSessionRequest<{ results?: SessionSearchResult[] }>({
+        actionLabel: '搜索会话',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/search?${params.toString()}`, {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
       });
-      if (!res.ok) {
-        throw new HttpError(
-          `Failed to search sessions: ${res.status}`,
-          res.status,
-          await readJsonErrorData(res),
-        );
-      }
-      const data = (await res.json()) as { results?: SessionSearchResult[] };
       return data.results ?? [];
     },
 
     async listMessageRatings(token, sessionId, options) {
-      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/message-ratings`, {
-        headers: authHeader(token),
-        signal: options?.signal,
+      const data = await performSessionRequest<{ ratings?: SessionMessageRatingRecord[] }>({
+        actionLabel: '读取消息评分',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}/message-ratings`, {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
       });
-      if (!res.ok) {
-        throw new HttpError(
-          `Failed to load message ratings: ${res.status}`,
-          res.status,
-          await readJsonErrorData(res),
-        );
-      }
-      const data = (await res.json()) as { ratings?: SessionMessageRatingRecord[] };
       return data.ratings ?? [];
     },
 
     async setMessageRating(token, sessionId, messageId, input) {
-      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/messages/${messageId}/rating`, {
-        method: 'PUT',
-        headers: {
-          ...authHeader(token),
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(input),
+      const data = await performSessionRequest<{ rating?: SessionMessageRatingRecord }>({
+        actionLabel: '保存消息评分',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}/messages/${messageId}/rating`, {
+            method: 'PUT',
+            headers: {
+              ...authHeader(token),
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(input),
+          }),
       });
-      if (!res.ok) {
-        throw new HttpError(
-          `Failed to save message rating: ${res.status}`,
-          res.status,
-          await readJsonErrorData(res),
-        );
-      }
-      const data = (await res.json()) as { rating?: SessionMessageRatingRecord };
       if (!data.rating) {
-        throw new Error('Missing rating payload');
+        throw new Error('评分响应缺少 rating 数据。');
       }
       return data.rating;
     },
 
     async deleteMessageRating(token, sessionId, messageId) {
-      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/messages/${messageId}/rating`, {
-        method: 'DELETE',
-        headers: authHeader(token),
+      await performSessionRequest({
+        actionLabel: '删除消息评分',
+        parseJson: false,
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}/messages/${messageId}/rating`, {
+            method: 'DELETE',
+            headers: authHeader(token),
+          }),
       });
-      if (!res.ok && res.status !== 204) {
-        throw new HttpError(
-          `Failed to delete message rating: ${res.status}`,
-          res.status,
-          await readJsonErrorData(res),
-        );
-      }
     },
 
     async getActiveStream(token, sessionId) {
-      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/stream/active`, {
-        headers: authHeader(token),
+      const data = await performSessionRequest<{ active?: SessionActiveStream | null }>({
+        actionLabel: '读取活跃流状态',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}/stream/active`, {
+            headers: authHeader(token),
+          }),
       });
-      if (!res.ok) {
-        throw new HttpError(`Failed to get active stream: ${res.status}`, res.status);
-      }
-      const data = (await res.json()) as { active?: SessionActiveStream | null };
       return data.active ?? null;
     },
 
     async getFileChangesReadModel(token, sessionId, options) {
-      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/file-changes/read-model`, {
-        headers: authHeader(token),
-        signal: options?.signal,
+      const data = await performSessionRequest<{ readModel: SessionTurnDiffReadModel }>({
+        actionLabel: '读取文件变更读模型',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}/file-changes/read-model`, {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
       });
-      if (!res.ok) {
-        throw new HttpError(`Failed to get file changes read model: ${res.status}`, res.status);
-      }
-      const data = (await res.json()) as { readModel: SessionTurnDiffReadModel };
       return data.readModel;
     },
 
@@ -920,18 +1133,14 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
       const params = new URLSearchParams();
       appendBooleanQuery(params, 'includeText', options?.includeText);
       const query = params.size > 0 ? `?${params.toString()}` : '';
-      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/file-changes${query}`, {
-        headers: authHeader(token),
-        signal: options?.signal,
+      const data = await performSessionRequest<{ fileChanges: SessionFileChangesProjection }>({
+        actionLabel: '读取会话文件变更',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}/file-changes${query}`, {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
       });
-      if (!res.ok) {
-        throw new HttpError(
-          `Failed to get session file changes: ${res.status}`,
-          res.status,
-          await readJsonErrorData(res),
-        );
-      }
-      const data = (await res.json()) as { fileChanges: SessionFileChangesProjection };
       return data.fileChanges;
     },
 
@@ -939,39 +1148,34 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
       const params = new URLSearchParams();
       appendBooleanQuery(params, 'includeText', options?.includeText);
       const query = params.size > 0 ? `?${params.toString()}` : '';
-      const res = await fetch(
-        `${gatewayUrl}/sessions/${sessionId}/requests/${encodeURIComponent(clientRequestId)}/file-changes${query}`,
-        {
-          headers: authHeader(token),
-          signal: options?.signal,
-        },
-      );
-      if (!res.ok) {
-        throw new HttpError(
-          `Failed to get request file changes: ${res.status}`,
-          res.status,
-          await readJsonErrorData(res),
-        );
-      }
-      return (await res.json()) as {
+      return (await performSessionRequest<{
+        clientRequestId: string;
+        fileChanges: SessionFileChangesProjection;
+      }>({
+        actionLabel: '读取请求级文件变更',
+        request: () =>
+          fetchWithTimeout(
+            `${gatewayUrl}/sessions/${sessionId}/requests/${encodeURIComponent(clientRequestId)}/file-changes${query}`,
+            {
+              headers: authHeader(token),
+              signal: options?.signal,
+            },
+          ),
+      })) as {
         clientRequestId: string;
         fileChanges: SessionFileChangesProjection;
       };
     },
 
     async listSnapshots(token, sessionId, options) {
-      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/snapshots`, {
-        headers: authHeader(token),
-        signal: options?.signal,
+      const data = await performSessionRequest<{ snapshots: SessionSnapshot[] }>({
+        actionLabel: '读取会话快照列表',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}/snapshots`, {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
       });
-      if (!res.ok) {
-        throw new HttpError(
-          `Failed to list snapshots: ${res.status}`,
-          res.status,
-          await readJsonErrorData(res),
-        );
-      }
-      const data = (await res.json()) as { snapshots: SessionSnapshot[] };
       return data.snapshots;
     },
 
@@ -979,121 +1183,102 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
       const params = new URLSearchParams();
       appendBooleanQuery(params, 'includeText', options?.includeText);
       const query = params.size > 0 ? `?${params.toString()}` : '';
-      const res = await fetch(
-        `${gatewayUrl}/sessions/${sessionId}/snapshots/${encodeURIComponent(snapshotRef)}${query}`,
-        {
-          headers: authHeader(token),
-          signal: options?.signal,
-        },
-      );
-      if (!res.ok) {
-        throw new HttpError(
-          `Failed to get snapshot: ${res.status}`,
-          res.status,
-          await readJsonErrorData(res),
-        );
-      }
-      const data = (await res.json()) as { snapshot: SessionSnapshot };
+      const data = await performSessionRequest<{ snapshot: SessionSnapshot }>({
+        actionLabel: '读取会话快照',
+        request: () =>
+          fetchWithTimeout(
+            `${gatewayUrl}/sessions/${sessionId}/snapshots/${encodeURIComponent(snapshotRef)}${query}`,
+            {
+              headers: authHeader(token),
+              signal: options?.signal,
+            },
+          ),
+      });
       return data.snapshot;
     },
 
     async compareSnapshots(token, sessionId, options) {
       const params = new URLSearchParams({ from: options.from, to: options.to });
       appendBooleanQuery(params, 'includeText', options.includeText);
-      const res = await fetch(
-        `${gatewayUrl}/sessions/${sessionId}/snapshots/compare?${params.toString()}`,
-        {
-          headers: authHeader(token),
-          signal: options.signal,
-        },
-      );
-      if (!res.ok) {
-        throw new HttpError(
-          `Failed to compare snapshots: ${res.status}`,
-          res.status,
-          await readJsonErrorData(res),
-        );
-      }
-      return (await res.json()) as SessionSnapshotComparisonResult;
+      return performSessionRequest<SessionSnapshotComparisonResult>({
+        actionLabel: '比较会话快照',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}/snapshots/compare?${params.toString()}`, {
+            headers: authHeader(token),
+            signal: options.signal,
+          }),
+      });
     },
 
     async previewRestore(token, sessionId, data) {
-      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/restore/preview`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeader(token) },
-        body: JSON.stringify(data),
+      return performSessionRequest<SessionRestorePreviewResult>({
+        actionLabel: '预览会话恢复',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}/restore/preview`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeader(token) },
+            body: JSON.stringify(data),
+          }),
       });
-      if (!res.ok) {
-        throw new HttpError(
-          `Failed to preview restore: ${res.status}`,
-          res.status,
-          await readJsonErrorData(res),
-        );
-      }
-      return (await res.json()) as SessionRestorePreviewResult;
     },
 
     async applyRestore(token, sessionId, data) {
-      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/restore/apply`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeader(token) },
-        body: JSON.stringify(data),
+      return performSessionRequest<SessionRestoreApplyResult>({
+        actionLabel: '应用会话恢复',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}/restore/apply`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeader(token) },
+            body: JSON.stringify(data),
+          }),
       });
-      if (!res.ok) {
-        throw new HttpError(
-          `Failed to apply restore: ${res.status}`,
-          res.status,
-          await readJsonErrorData(res),
-        );
-      }
-      return (await res.json()) as SessionRestoreApplyResult;
     },
 
     async getChildren(token, sessionId, options) {
-      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/children`, {
-        headers: authHeader(token),
-        signal: options?.signal,
+      const data = await performSessionRequest<{ sessions?: Session[] }>({
+        actionLabel: '读取子会话列表',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}/children`, {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
       });
-      if (!res.ok) {
-        throw new HttpError(`Failed to get child sessions: ${res.status}`, res.status);
-      }
-      const data = (await res.json()) as { sessions?: Session[] };
       return data.sessions ?? [];
     },
 
     async getTasks(token, sessionId, options) {
-      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/tasks`, {
-        headers: authHeader(token),
-        signal: options?.signal,
+      const data = await performSessionRequest<{ tasks?: SessionTask[] }>({
+        actionLabel: '读取会话任务',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}/tasks`, {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
       });
-      if (!res.ok) {
-        throw new HttpError(`Failed to get session tasks: ${res.status}`, res.status);
-      }
-      const data = (await res.json()) as { tasks?: SessionTask[] };
       return data.tasks ?? [];
     },
 
     async getTodos(token, sessionId, options) {
-      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/todos`, {
-        headers: authHeader(token),
-        signal: options?.signal,
+      const data = await performSessionRequest<{ todos?: SessionTodo[] }>({
+        actionLabel: '读取会话待办',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}/todos`, {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
       });
-      if (!res.ok) {
-        throw new HttpError(`Failed to get session todos: ${res.status}`, res.status);
-      }
-      const data = (await res.json()) as { todos?: SessionTodo[] };
       return data.todos ?? [];
     },
 
     async getTodoLanes(token, sessionId, options) {
-      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/todo-lanes`, {
-        headers: authHeader(token),
-        signal: options?.signal,
+      const data = await performSessionRequest<Partial<SessionTodoLanes>>({
+        actionLabel: '读取会话待办泳道',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}/todo-lanes`, {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
       });
-      if (!res.ok) {
-        throw new HttpError(`Failed to get session todo lanes: ${res.status}`, res.status);
-      }
-      const data = (await res.json()) as Partial<SessionTodoLanes>;
       return {
         main: data.main ?? [],
         temp: data.temp ?? [],
@@ -1101,19 +1286,17 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
     },
 
     async delete(token, sessionId) {
-      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}`, {
-        method: 'DELETE',
-        headers: authHeader(token),
+      const data = await performSessionRequest<
+        Partial<DeleteSessionResult>,
+        DeleteSessionErrorData
+      >({
+        actionLabel: '删除会话',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}`, {
+            method: 'DELETE',
+            headers: authHeader(token),
+          }),
       });
-      if (!res.ok) {
-        const errorData = (await res.json().catch(() => null)) as DeleteSessionErrorData | null;
-        throw new HttpError<DeleteSessionErrorData>(
-          `Failed to delete session: ${res.status}`,
-          res.status,
-          errorData ?? undefined,
-        );
-      }
-      const data = (await res.json().catch(() => null)) as Partial<DeleteSessionResult> | null;
       return {
         deletedSessionIds: Array.isArray(data?.deletedSessionIds)
           ? data.deletedSessionIds.filter(
@@ -1125,113 +1308,117 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
     },
 
     async rename(token, sessionId, title) {
-      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', ...authHeader(token) },
-        body: JSON.stringify({ title }),
+      await performSessionRequest({
+        actionLabel: '重命名会话',
+        parseJson: false,
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', ...authHeader(token) },
+            body: JSON.stringify({ title }),
+          }),
       });
-      if (!res.ok) throw new HttpError(`Failed to rename session: ${res.status}`, res.status);
     },
 
     async updateMetadata(token, sessionId, metadata) {
-      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', ...authHeader(token) },
-        body: JSON.stringify({ metadata }),
+      await performSessionRequest({
+        actionLabel: '更新会话元数据',
+        parseJson: false,
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', ...authHeader(token) },
+            body: JSON.stringify({ metadata }),
+          }),
       });
-      if (!res.ok) {
-        throw new HttpError(`Failed to update session metadata: ${res.status}`, res.status);
-      }
     },
 
     async truncateMessages(token, sessionId, messageId, options = {}) {
-      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/messages/truncate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeader(token) },
-        body: JSON.stringify({
-          messageId,
-          inclusive: options.inclusive ?? true,
-          ...(options.messageText !== undefined ? { messageText: options.messageText } : {}),
-        }),
+      const data = await performSessionRequest<{ messages?: Message[] }>({
+        actionLabel: '截断会话消息',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}/messages/truncate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeader(token) },
+            body: JSON.stringify({
+              messageId,
+              inclusive: options.inclusive ?? true,
+              ...(options.messageText !== undefined ? { messageText: options.messageText } : {}),
+            }),
+          }),
       });
-      if (!res.ok) {
-        throw new HttpError(`Failed to truncate session messages: ${res.status}`, res.status);
-      }
-      const data = (await res.json()) as { messages?: Message[] };
       return data.messages ?? [];
     },
 
     async stopStream(token, sessionId, clientRequestId) {
-      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/stream/stop`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeader(token) },
-        body: JSON.stringify({ clientRequestId }),
+      const data = await performSessionRequest<{ stopped?: boolean }>({
+        actionLabel: '停止流式输出',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}/stream/stop`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeader(token) },
+            body: JSON.stringify({ clientRequestId }),
+          }),
       });
-      if (!res.ok) {
-        throw new HttpError(`Failed to stop stream: ${res.status}`, res.status);
-      }
-      const data = (await res.json()) as { stopped?: boolean };
       return data.stopped === true;
     },
 
     async stopActiveStream(token, sessionId) {
-      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/stream/stop-active`, {
-        method: 'POST',
-        headers: authHeader(token),
+      const data = await performSessionRequest<{ stopped?: boolean }>({
+        actionLabel: '停止当前活跃流',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}/stream/stop-active`, {
+            method: 'POST',
+            headers: authHeader(token),
+          }),
       });
-      if (!res.ok) {
-        throw new HttpError(`Failed to stop active stream: ${res.status}`, res.status);
-      }
-      const data = (await res.json()) as { stopped?: boolean };
       return data.stopped === true;
     },
 
     async cancelTask(token, sessionId, taskId) {
-      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/tasks/${taskId}/cancel`, {
-        method: 'POST',
-        headers: authHeader(token),
+      const data = await performSessionRequest<{ cancelled?: boolean; stopped?: boolean }>({
+        actionLabel: '取消会话任务',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}/tasks/${taskId}/cancel`, {
+            method: 'POST',
+            headers: authHeader(token),
+          }),
       });
-      if (!res.ok) {
-        throw new HttpError(`Failed to cancel task: ${res.status}`, res.status);
-      }
-      const data = (await res.json()) as { cancelled?: boolean; stopped?: boolean };
       return { cancelled: data.cancelled === true, stopped: data.stopped === true };
     },
 
     async importSession(token, data) {
-      const res = await fetch(`${gatewayUrl}/sessions/import`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeader(token) },
-        body: JSON.stringify(data),
+      return performSessionRequest<SessionImportResult>({
+        actionLabel: '导入会话',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/import`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeader(token) },
+            body: JSON.stringify(data),
+          }),
       });
-      if (!res.ok) throw new HttpError(`Failed to import session: ${res.status}`, res.status);
-      return res.json() as Promise<SessionImportResult>;
     },
 
     async warpWorkspace(token, sessionId, input) {
-      const res = await fetch(`${gatewayUrl}/sessions/${encodeURIComponent(sessionId)}/workspace`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', ...authHeader(token) },
-        body: JSON.stringify({
-          workingDirectory: input.workingDirectory,
-          ...(input.force ? { force: true } : {}),
-        }),
-      });
-      if (!res.ok) {
-        // Surface the body when the gateway returns a structured
-        // error (the immutable-workspace 409 carries an `error`
-        // field the UI can show verbatim) so callers can
-        // distinguish "user needs to confirm warp" from generic
-        // network failures.
-        let payload: unknown;
-        try {
-          payload = await res.json();
-        } catch {
-          payload = undefined;
-        }
-        throw new HttpError(`Failed to warp workspace: ${res.status}`, res.status, payload);
-      }
-      return res.json() as Promise<{
+      return performSessionRequest<
+        {
+          ok: true;
+          workingDirectory: string | null;
+          warped?: boolean;
+        },
+        { error?: string }
+      >({
+        actionLabel: '切换会话工作区',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/${encodeURIComponent(sessionId)}/workspace`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', ...authHeader(token) },
+            body: JSON.stringify({
+              workingDirectory: input.workingDirectory,
+              ...(input.force ? { force: true } : {}),
+            }),
+          }),
+      }) as Promise<{
         ok: true;
         workingDirectory: string | null;
         warped?: boolean;

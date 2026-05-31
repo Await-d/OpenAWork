@@ -124,6 +124,14 @@ export function createGroup(
   };
 }
 
+export function hasPromptSnippetGroup(userId: string, groupId: string): boolean {
+  const existing = db
+    .prepare('SELECT id FROM prompt_snippet_groups WHERE id = ? AND user_id = ?')
+    .get(groupId, userId) as { id: string } | undefined;
+
+  return Boolean(existing?.id);
+}
+
 export function updateGroup(
   userId: string,
   groupId: string,

@@ -76,6 +76,30 @@ const listeners = new Set<ToolCatalogChangeListener>();
 const oauthRedirectListeners = new Set<OAuthRedirectListener>();
 let poolListenerInstalled = false;
 
+/**
+ * Hard ceiling on `cache` entries. The catalog keys on
+ * `(userId, mcpPoolKey)` where `mcpPoolKey` embeds a config fingerprint, so
+ * editing an MCP server's config rotates the key and orphans the old entry;
+ * idle cleanup and the pool's disconnect paths also drop connections without
+ * clearing the catalog. None of those evict the snapshot, so over a long-lived
+ * process the map grows with (users x servers x config edits). There is no
+ * staleness window defined for snapshots, so we bound purely by count, evicting
+ * the oldest by `capturedAt` first.
+ */
+const CATALOG_SNAPSHOT_MAX_ENTRIES = 2_000;
+
+function pruneCatalogSnapshots(): void {
+  if (cache.size <= CATALOG_SNAPSHOT_MAX_ENTRIES) {
+    return;
+  }
+  const byAge = [...cache.entries()].sort((a, b) => a[1].capturedAt - b[1].capturedAt);
+  const excess = cache.size - CATALOG_SNAPSHOT_MAX_ENTRIES;
+  for (let i = 0; i < excess; i += 1) {
+    const victim = byAge[i];
+    if (victim) cache.delete(victim[0]);
+  }
+}
+
 function getCacheKey(userId: string, mcpPoolKey: string): string {
   return `${userId}::${mcpPoolKey}`;
 }
@@ -98,6 +122,7 @@ export function setCatalogSnapshot(
     tools,
     capturedAt: Date.now(),
   });
+  pruneCatalogSnapshots();
   publishChange({ userId, mcpPoolKey, serverId, tools });
 }
 
@@ -112,6 +137,25 @@ export function clearCatalogSnapshot(userId: string, mcpPoolKey: string): void {
 export function clearAllCatalogSnapshots(): void {
   cache.clear();
 }
+
+/**
+ * Test-only seams for the catalog size-cap retention guard. Minimal so the cap
+ * logic is verifiable without a real pool / MCP server.
+ */
+export function __seedCatalogSnapshotForTest(
+  userId: string,
+  mcpPoolKey: string,
+  capturedAtMs: number,
+): void {
+  cache.set(getCacheKey(userId, mcpPoolKey), { tools: [], capturedAt: capturedAtMs });
+}
+export function __getCatalogSnapshotCountForTest(): number {
+  return cache.size;
+}
+export function __pruneCatalogSnapshotsForTest(): void {
+  pruneCatalogSnapshots();
+}
+export const __CATALOG_SNAPSHOT_MAX_ENTRIES_FOR_TEST = CATALOG_SNAPSHOT_MAX_ENTRIES;
 
 /**
  * Subscribe to catalog changes. Returns an unregister thunk.

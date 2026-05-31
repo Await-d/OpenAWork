@@ -86,6 +86,15 @@ export type GitRunner = (args: string[], options?: GitRunOptions) => Promise<Git
 export const DEFAULT_GIT_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
+ * Grace period between SIGTERM and the escalated SIGKILL when a git
+ * invocation overruns its deadline or is aborted. SIGTERM is only a
+ * request — a git child blocked in a stuck network pack negotiation can
+ * ignore it — so we force-kill after this window to guarantee the timeout /
+ * abort is enforced. Mirrors bash-tools' SIGKILL_GRACE_MS.
+ */
+const SIGKILL_GRACE_MS = 3_000;
+
+/**
  * Default git runner. Spawns `git` with the given args, captures
  * stdout/stderr, and resolves with `{ exitCode, stdout, stderr }`.
  * Forwarded `signal` triggers a SIGTERM on the subprocess.
@@ -114,29 +123,50 @@ export const defaultGitRunner: GitRunner = (args, options = {}) =>
       stderr += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
     });
 
+    // SIGTERM is only a request; a git child stuck in a network pack
+    // negotiation (or one that doesn't forward the signal to its
+    // `git-remote-https` helper) can ignore it and keep this promise pending
+    // past the deadline. Escalate to SIGKILL after a short grace period so the
+    // timeout / abort is always enforced.
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    const forceKillAfterGrace = () => {
+      if (killTimer) return;
+      killTimer = setTimeout(() => {
+        child.kill('SIGKILL');
+      }, SIGKILL_GRACE_MS);
+      killTimer.unref?.();
+    };
+
     const timeout = setTimeout(() => {
       child.kill('SIGTERM');
+      forceKillAfterGrace();
     }, timeoutMs);
 
     const onAbort = () => {
       child.kill('SIGTERM');
+      forceKillAfterGrace();
     };
     if (options.signal) {
       if (options.signal.aborted) {
         child.kill('SIGTERM');
+        forceKillAfterGrace();
       } else {
         options.signal.addEventListener('abort', onAbort, { once: true });
       }
     }
 
-    child.on('error', (error) => {
+    const cleanup = () => {
       clearTimeout(timeout);
+      if (killTimer) clearTimeout(killTimer);
       options.signal?.removeEventListener('abort', onAbort);
+    };
+
+    child.on('error', (error) => {
+      cleanup();
       reject(error);
     });
     child.on('close', (code) => {
-      clearTimeout(timeout);
-      options.signal?.removeEventListener('abort', onAbort);
+      cleanup();
       resolve({ exitCode: typeof code === 'number' ? code : -1, stdout, stderr });
     });
   });

@@ -82,7 +82,7 @@ const META_BOX_STYLE: CSSProperties = {
   padding: 12,
   borderRadius: 10,
   border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base))',
   fontSize: 12,
 };
 
@@ -133,7 +133,7 @@ const INPUT_STYLE: CSSProperties = {
   padding: '8px 10px',
   borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base))',
   color: 'var(--fg-strong)',
   fontSize: 13,
   fontFamily: 'inherit',

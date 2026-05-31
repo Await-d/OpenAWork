@@ -115,12 +115,23 @@ export function scheduleLoopExecution(config: LoopExecutionConfig): void {
       return;
     }
 
-    void runLoopExecution({ ...config, loop }).finally(() => {
-      const current = activeLoopExecutions.get(config.sessionId);
-      if (current?.taskId === config.taskId) {
-        activeLoopExecutions.delete(config.sessionId);
-      }
-    });
+    void runLoopExecution({ ...config, loop })
+      .catch((error) => {
+        // Last-resort backstop: runLoopExecution already guards itself, so
+        // this should never fire — but a stray rejection from this
+        // fire-and-forget launch must never become an unhandled rejection.
+        console.warn(
+          `[command-loop] 循环执行未捕获异常：${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      })
+      .finally(() => {
+        const current = activeLoopExecutions.get(config.sessionId);
+        if (current?.taskId === config.taskId) {
+          activeLoopExecutions.delete(config.sessionId);
+        }
+      });
   }, 0);
 }
 
@@ -139,12 +150,71 @@ export function stopActiveLoopExecution(sessionId: string): void {
   cancelledBeforeStart.add(sessionId);
 }
 
+/**
+ * Best-effort delete of a loop-state file. `clearPersistedLoopState` runs in
+ * the middle of loop finalization (right before the session metadata is
+ * rewritten to clear the active-loop marker). An unguarded `unlinkSync` throw
+ * here (EACCES / EBUSY / EPERM on a stale state file) used to abort the rest of
+ * finalization — leaving the session stuck showing a running loop. State-file
+ * cleanup is purely advisory (a stale file is re-detected / overwritten on the
+ * next run), so swallow + warn instead of letting it bubble.
+ */
+function safeUnlinkLoopStateFile(filePath: string): void {
+  try {
+    if (existsSync(filePath)) {
+      unlinkSync(filePath);
+    }
+  } catch (error) {
+    console.warn(
+      `[command-loop] 清理循环状态文件失败，已跳过：${filePath}：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
+/**
+ * 降级清理：当循环收尾（finalizeLoopExecution）抛错时，会话不能停留在
+ * 「正在运行循环」的元数据标记上（否则前端会永远显示一个跑不完的循环）。
+ * 这里尽最大努力清掉持久化循环状态与 session 上的 active-loop 标记，
+ * 自身全程吞错——它是兜底路径，绝不能再抛出造成二次未捕获异常。
+ */
+function safeClearActiveLoopState(config: LoopExecutionConfig): void {
+  try {
+    clearPersistedLoopState(config.workspaceRoot, config.sessionId);
+  } catch (error) {
+    console.warn(
+      `[command-loop] 降级清理持久化循环状态失败，已跳过：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  try {
+    const session = readSessionRecord(config.sessionId, config.userId);
+    if (!session) return;
+    const activeLoop = readActiveLoopState(session.metadata_json);
+    if (activeLoop?.taskId === config.taskId) {
+      sqliteRun(
+        "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+        [
+          JSON.stringify(clearActiveLoopMetadata(session.metadata_json)),
+          config.sessionId,
+          config.userId,
+        ],
+      );
+    }
+  } catch (error) {
+    console.warn(
+      `[command-loop] 降级清理 active-loop 元数据失败，已跳过：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
 export function clearPersistedLoopState(workspaceRoot: string, sessionId?: string): void {
   if (sessionId) {
-    const sessionFilePath = getLoopStateFilePath(workspaceRoot, sessionId);
-    if (existsSync(sessionFilePath)) {
-      unlinkSync(sessionFilePath);
-    }
+    safeUnlinkLoopStateFile(getLoopStateFilePath(workspaceRoot, sessionId));
   }
 
   clearLegacyLoopStateFiles(workspaceRoot, sessionId);
@@ -164,13 +234,13 @@ function clearLegacyLoopStateFiles(workspaceRoot: string, sessionId?: string): v
     }
 
     if (!sessionId) {
-      unlinkSync(legacyFilePath);
+      safeUnlinkLoopStateFile(legacyFilePath);
       continue;
     }
 
     const legacyState = readPersistedLoopStateFromFile(legacyFilePath);
     if (!legacyState || !legacyState.session_id || legacyState.session_id === sessionId) {
-      unlinkSync(legacyFilePath);
+      safeUnlinkLoopStateFile(legacyFilePath);
     }
   }
 }
@@ -291,6 +361,31 @@ function markUlwVerificationPendingMetadata(
   };
 }
 
+/**
+ * Wall-clock ceiling for the `git rev-parse --show-toplevel` worktree probe.
+ * Kept short because this runs inline during loop-execution setup; a hung git
+ * (lock contention, stalled network mount) must not wedge that path.
+ */
+const WORKTREE_PROBE_TIMEOUT_MS = 10_000;
+
+// Indirection so tests can substitute a stand-in binary + short deadline to
+// exercise the wall-clock timeout deterministically without a real hung git.
+let worktreeProbeGitBinary = 'git';
+let worktreeProbeTimeoutMs = WORKTREE_PROBE_TIMEOUT_MS;
+
+/**
+ * Test-only: override the worktree-probe git binary and/or timeout.
+ * Passing `null` restores the defaults ('git', WORKTREE_PROBE_TIMEOUT_MS).
+ */
+export function __setWorktreeProbeGitForTests(
+  binary: string | null,
+  timeoutMs?: number,
+): void {
+  worktreeProbeGitBinary = binary ?? 'git';
+  worktreeProbeTimeoutMs =
+    typeof timeoutMs === 'number' && timeoutMs > 0 ? timeoutMs : WORKTREE_PROBE_TIMEOUT_MS;
+}
+
 export async function resolveRequestedWorktree(
   value: string | boolean | undefined,
 ): Promise<RequestedWorktree> {
@@ -315,8 +410,15 @@ export async function resolveRequestedWorktree(
       };
     }
 
-    const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], {
+    const { stdout } = await execFileAsync(worktreeProbeGitBinary, ['rev-parse', '--show-toplevel'], {
       cwd: requestedPath,
+      // Bound the call: a git invocation can hang on index.lock contention or
+      // a stalled network filesystem. Without a deadline this worktree probe
+      // would leave the loop-execution setup pending forever. On timeout the
+      // rejection falls into the catch below and degrades to the "needs init"
+      // note rather than hanging.
+      timeout: worktreeProbeTimeoutMs,
+      maxBuffer: 1024 * 1024,
     });
     const worktreePath = stdout.trim();
     if (!worktreePath) {
@@ -350,17 +452,45 @@ function readMetadataObject(metadataJson: string): Record<string, unknown> {
 async function runLoopExecution(
   config: LoopExecutionConfig & { loop: RalphLoopImpl },
 ): Promise<void> {
-  const result = await config.loop.run(
-    async (iteration, previousOutput) =>
-      executeLoopIteration({ ...config, iteration, previousOutput }),
-    {
-      doneKeyword: buildPromiseTag(config.completionPromise),
-      iterationDelayMs: config.maxIterations > 1 ? 60 : 0,
-      maxIterations: config.maxIterations,
-    },
-  );
+  let result: Awaited<ReturnType<RalphLoopImpl['run']>>;
+  try {
+    result = await config.loop.run(
+      async (iteration, previousOutput) =>
+        executeLoopIteration({ ...config, iteration, previousOutput }),
+      {
+        doneKeyword: buildPromiseTag(config.completionPromise),
+        iterationDelayMs: config.maxIterations > 1 ? 60 : 0,
+        maxIterations: config.maxIterations,
+      },
+    );
+  } catch (error) {
+    // RalphLoopImpl.run catches its own iteration errors and never rejects;
+    // this guard exists so a future regression there can't escape this
+    // fire-and-forget path as an unhandled rejection. Degrade gracefully so
+    // the session is not left wedged showing a running loop.
+    console.warn(
+      `[command-loop] 循环执行异常，已执行降级清理：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    safeClearActiveLoopState(config);
+    return;
+  }
 
-  await finalizeLoopExecution(config, result);
+  try {
+    await finalizeLoopExecution(config, result);
+  } catch (error) {
+    // finalizeLoopExecution does filesystem + SQLite writes with no internal
+    // guard; a throw here would otherwise reject this fire-and-forget promise
+    // (unhandled rejection) AND leave the session's active-loop marker set,
+    // so the UI shows a loop that never finishes. Log + best-effort de-wedge.
+    console.warn(
+      `[command-loop] 循环收尾失败，已执行降级清理：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    safeClearActiveLoopState(config);
+  }
 }
 
 async function executeLoopIteration(

@@ -167,12 +167,12 @@ export async function commandsRoutes(app: FastifyInstance): Promise<void> {
       );
 
       if (!session) {
-        throw ApiError.notFound('Session not found');
+        throw ApiError.notFound('目标会话不存在。');
       }
 
       const command = buildCommandDescriptors().find((item) => item.id === body.commandId);
       if (!command || command.execution !== 'server') {
-        throw ApiError.badRequest('Unsupported command');
+        throw ApiError.badRequest('不支持的命令。');
       }
 
       const storedMessages = listSessionMessagesV2({
@@ -234,7 +234,7 @@ export async function commandsRoutes(app: FastifyInstance): Promise<void> {
           result = await executeHandoffCommand(cmdParams);
           break;
         default:
-          throw ApiError.badRequest('Unsupported command action');
+          throw ApiError.badRequest('不支持的命令动作。');
       }
 
       step.succeed(undefined, { commandId: command.id });

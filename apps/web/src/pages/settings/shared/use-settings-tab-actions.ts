@@ -27,7 +27,7 @@ export function useSettingsTabActions({
   const handleSaveGitHubTrigger = useCallback(
     async (config: { events: string[]; repoFullNameOwnerSlashRepo: string }) => {
       if (!token) {
-        throw new Error('未登录');
+        throw new Error('未登录，无法保存 GitHub 触发器。');
       }
       await createGitHubClient(gatewayUrl).createTrigger(token, config);
       setGithubTriggers((prev) => [

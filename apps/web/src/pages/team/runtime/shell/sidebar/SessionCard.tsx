@@ -15,7 +15,7 @@
  * Hover：副行右侧切换为操作按钮（删除）。
  */
 
-import React, { type CSSProperties, type MouseEvent, useMemo } from 'react';
+import React, { type CSSProperties, type MouseEvent, useEffect, useMemo, useState } from 'react';
 import type { AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
 import {
   BaseSessionRow,
@@ -50,6 +50,23 @@ const STATUS_COLOR: Record<AgentTeamsSidebarTeam['status'], string> = {
   completed: 'var(--fg-muted)',
   failed: 'var(--danger)',
 };
+
+/**
+ * 每会话级「疑似停滞」判定阈值：会话仍处于 running，但其 updatedAt 距今超过此时间
+ * 没有任何写入（消息 / 状态变化），视为可能卡住。与整体 run-state 的 90s 对齐，
+ * 卡片层放宽到 120s 以减少误报（单会话写入本就更稀疏）。
+ */
+const SESSION_STALL_THRESHOLD_MS = 120_000;
+
+function isSessionStalled(
+  status: AgentTeamsSidebarTeam['status'],
+  updatedAt: string | undefined,
+): boolean {
+  if (status !== 'running' || !updatedAt) return false;
+  const ts = new Date(updatedAt).getTime();
+  if (Number.isNaN(ts)) return false;
+  return Date.now() - ts > SESSION_STALL_THRESHOLD_MS;
+}
 
 const ICON_BOX_STYLE: CSSProperties = {
   position: 'relative',
@@ -215,8 +232,22 @@ export function SessionCard({
   onHoverChange,
   onDelete,
 }: SessionCardProps) {
-  const dot = STATUS_COLOR[session.status];
-  const label = STATUS_LABEL[session.status];
+  const stalled = isSessionStalled(session.status, session.updatedAt);
+  // running 会话需要让视图随时间推进自动翻转为「疑似停滞」，即使没有新的快照到达。
+  // 仅在 running 时挂 30s 心跳（idle/completed 卡片不空转计时器），且当判定已翻转为
+  // stalled 后停止 tick——因为状态已稳定，无需继续重算。
+  const [, setStallTick] = useState(0);
+  useEffect(() => {
+    if (session.status !== 'running' || stalled) return;
+    const timer = setInterval(() => setStallTick((v) => v + 1), 30_000);
+    return () => clearInterval(timer);
+  }, [session.status, stalled, session.updatedAt]);
+  // 停滞态：仍是 running 但长时间无写入。用 warning 色 + 「疑似停滞」覆盖默认运行态展示，
+  // 让用户在列表里就能区分「在跑」与「卡住」。
+  const dot = stalled ? 'var(--warning)' : STATUS_COLOR[session.status];
+  const label = stalled ? '疑似停滞' : STATUS_LABEL[session.status];
+  // 是否显示「运行中脉冲」动画：仅真正 running 且未停滞时。
+  const isLiveRunning = session.status === 'running' && !stalled;
 
   const taskTotal = session.taskTotal ?? 0;
   const taskCompleted = session.taskCompleted ?? 0;
@@ -297,8 +328,8 @@ export function SessionCard({
           borderRadius: '50%',
           background: dot,
           border: '2px solid var(--bg-overlay)',
-          boxShadow: session.status === 'running' ? `0 0 5px ${dot}` : undefined,
-          animation: session.status === 'running' ? 'pulse 1.5s ease-in-out infinite' : undefined,
+          boxShadow: isLiveRunning ? `0 0 5px ${dot}` : undefined,
+          animation: isLiveRunning ? 'pulse 1.5s ease-in-out infinite' : undefined,
         }}
       />
     </span>
@@ -324,7 +355,7 @@ export function SessionCard({
           color: dot,
         }}
       >
-        {session.status === 'running' ? (
+        {isLiveRunning ? (
           <span
             aria-hidden
             style={{

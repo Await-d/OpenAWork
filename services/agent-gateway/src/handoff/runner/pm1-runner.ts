@@ -13,6 +13,10 @@ import type { HandoffTaskRunner } from './watcher.js';
 import { runArtifactChain } from './artifact-chain.js';
 import { resolveAuxiliaryLlmConfig } from '../../provider/auxiliary-llm-config.js';
 import {
+  buildTeamRosterManifest,
+  resolveMemberModelForSessionLayer,
+} from '../bus/resolve-member-model.js';
+import {
   buildTaskProfilePromptFragment,
   inferTaskProfile,
   taskProfileSchema,
@@ -158,23 +162,36 @@ async function runPm1(input: Parameters<HandoffTaskRunner>[0]): Promise<void> {
   const teamWorkspaceId =
     typeof payload?.['teamWorkspaceId'] === 'string' ? payload['teamWorkspaceId'] : null;
 
-  const llmConfig = await resolveAuxiliaryLlmConfig(input.handoff.userId);
+  const pm1MemberModel = resolveMemberModelForSessionLayer({
+    sessionId: input.toSessionId,
+    layer: 'pm1',
+  });
+  const llmConfig = await resolveAuxiliaryLlmConfig(input.handoff.userId, pm1MemberModel);
   if (!llmConfig) {
     throw new Error('PM1 artifact chain: 无可用 LLM 配置（auxiliary-llm-config 未设置）');
   }
 
   const { requestWorkflowLlmCompletion } = await import('../../routes/workflow-llm.js');
+  // 动态注入「团队编制清单」：PM1 规划时也让它感知当前实时花名册（含自定义角色），
+  // 据此把任务拆给真实存在的角色。reception/pm1/pm2 走辅助 LLM 路径，这里手动前置。
+  const rosterManifest = buildTeamRosterManifest({
+    fromSessionId: input.toSessionId,
+    currentLayer: 'pm1',
+  });
   const callLlm = async (systemPrompt: string, userMessage: string): Promise<string> => {
     if (input.signal.aborted) {
       throw new Error('aborted');
     }
+    const systemWithRoster = rosterManifest
+      ? `${systemPrompt}\n\n${rosterManifest}`
+      : systemPrompt;
     return requestWorkflowLlmCompletion({
       apiBaseUrl: llmConfig.apiBaseUrl,
       apiKey: llmConfig.apiKey,
       model: llmConfig.model,
       ...(llmConfig.providerType ? { providerType: llmConfig.providerType } : {}),
       ...(llmConfig.upstreamProtocol ? { upstreamProtocol: llmConfig.upstreamProtocol } : {}),
-      prompt: `${systemPrompt}\n\n---\n\n${userMessage}`,
+      prompt: `${systemWithRoster}\n\n---\n\n${userMessage}`,
       temperature: 0.3,
     });
   };

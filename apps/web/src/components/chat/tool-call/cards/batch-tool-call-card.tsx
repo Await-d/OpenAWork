@@ -26,8 +26,16 @@ export interface BatchSubResultLike {
 
 export type BatchSubVisualState = 'running' | 'completed' | 'failed' | 'skipped';
 
-export function batchSubVisualState(result: BatchSubResultLike | undefined): BatchSubVisualState {
-  if (!result) return 'running';
+export function batchSubVisualState(
+  result: BatchSubResultLike | undefined,
+  parentTerminalState?: 'completed' | 'failed',
+): BatchSubVisualState {
+  // No per-sub result data: this happens after a refresh when the batch
+  // output was persisted as a truncated string we couldn't parse back into
+  // `{ results: [...] }`. Fall back to the parent batch's terminal state so
+  // the sub-row doesn't show a perpetual spinner for an already-finished
+  // batch. Only default to `running` when the parent itself is still running.
+  if (!result) return parentTerminalState ?? 'running';
   if (result.status === 'skipped') return 'skipped';
   if (result.status === 'error' || result.isError === true) return 'failed';
   if (result.status === 'completed') return 'completed';
@@ -66,6 +74,28 @@ export function batchSubInputSummary(tool: string, input: Record<string, unknown
     return summarizeMcpCallInput(input) || '';
   }
   return buildGenericInputSummary(input) || '';
+}
+
+/**
+ * Parse a persisted batch `output` string back into its structured object.
+ *
+ * The storage layer serializes large tool outputs to a JSON string (and may
+ * append a truncation notice when the output exceeds the size cap). When the
+ * string is a clean, complete JSON object we can recover the full
+ * `{ results: [...] }` shape. When it was truncated mid-string, `JSON.parse`
+ * throws — we return `null` so the caller falls back to the empty-results
+ * path (the sub-rows still render from the declared `tool_calls` list, just
+ * without per-row output/status, which is the best we can do for a
+ * truncated payload).
+ */
+export function parseBatchOutputString(output: string): unknown {
+  const trimmed = output.trim();
+  if (trimmed.length === 0) return null;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -109,6 +139,7 @@ function BatchSubCallRow({
   output,
   result,
   kind,
+  parentTerminalState,
   renderToolCallDisplay,
 }: {
   tool: string;
@@ -116,10 +147,11 @@ function BatchSubCallRow({
   output?: unknown;
   result: BatchSubResultLike | undefined;
   kind?: ToolCallCardProps['kind'];
+  parentTerminalState?: 'completed' | 'failed';
   renderToolCallDisplay: RenderToolCallDisplay;
 }) {
   const [open, setOpen] = useState(false);
-  const visualState = batchSubVisualState(result);
+  const visualState = batchSubVisualState(result, parentTerminalState);
   const summary = useMemo(() => batchSubInputSummary(tool, input), [tool, input]);
   const childStatus: ToolCallCardProps['status'] =
     visualState === 'running' ? 'running' : 'completed';
@@ -251,8 +283,21 @@ export function BatchToolCallCard({
     ) {
       return (progress as { subTools: BatchSubResultLike[] }).subTools;
     }
-    if (output && typeof output === 'object' && !Array.isArray(output)) {
-      const results = (output as Record<string, unknown>).results;
+    // After a refresh `output` is whatever the gateway persisted. Live runs
+    // hand us the structured `{ results: [...] }` object directly, but the
+    // storage layer (`normalizeToolResultOutputForStorage`) serializes the
+    // output to a JSON *string* whenever it exceeds the size cap — which is
+    // common for batch calls that bundle several bash diffs / long stdout.
+    // Parse the string back into an object so the sub-call rows recover
+    // their completed/failed status instead of defaulting to a perpetual
+    // "running" spinner.
+    const normalizedOutput = typeof output === 'string' ? parseBatchOutputString(output) : output;
+    if (
+      normalizedOutput &&
+      typeof normalizedOutput === 'object' &&
+      !Array.isArray(normalizedOutput)
+    ) {
+      const results = (normalizedOutput as Record<string, unknown>).results;
       if (Array.isArray(results)) {
         return results.map((r, idx) => {
           const rec = (r ?? {}) as Record<string, unknown>;
@@ -311,8 +356,18 @@ export function BatchToolCallCard({
     (r) => r.status === 'completed' || r.status === 'error' || r.status === 'skipped',
   ).length;
   const totalCount = Math.max(toolCalls.length, subResults.length);
-  const allDone = totalCount > 0 && completedCount >= totalCount;
   const errorCount = subResults.filter((r) => r.status === 'error' || r.isError === true).length;
+
+  // The parent batch tool's own terminal state. When the batch tool result
+  // is itself completed/failed (e.g. after a refresh) but we have no per-sub
+  // results to count — typically because the persisted output was a
+  // truncated JSON string we couldn't parse — treat the whole batch as done
+  // so the header + sub-rows show a terminal state instead of a permanent
+  // "进行中…" spinner.
+  const parentTerminalState: 'completed' | 'failed' | undefined =
+    visualState === 'completed' ? 'completed' : visualState === 'failed' ? 'failed' : undefined;
+  const allDone =
+    parentTerminalState !== undefined || (totalCount > 0 && completedCount >= totalCount);
 
   // Aggregate run-time across completed sub-calls (parallel batch -> max,
   // but max ≈ wall-clock; sum is misleading). Show wall-clock = max.
@@ -320,6 +375,16 @@ export function BatchToolCallCard({
     (acc, r) => (typeof r.durationMs === 'number' && r.durationMs > acc ? r.durationMs : acc),
     0,
   );
+
+  // Progress label numerator: when we have parsed sub-results use the real
+  // completed count; otherwise (truncated output) fall back to "all done"
+  // once the parent batch itself reached a terminal state.
+  const progressCompleted =
+    completedCount > 0 || subResults.length > 0
+      ? completedCount
+      : parentTerminalState !== undefined
+        ? totalCount
+        : 0;
 
   return (
     <div className="tool-call-batch" data-tool-status={visualState}>
@@ -331,7 +396,7 @@ export function BatchToolCallCard({
           {totalCount === 0
             ? '准备中…'
             : allDone
-              ? `${completedCount}/${totalCount} 完成`
+              ? `${progressCompleted}/${totalCount} 完成`
               : `${completedCount}/${totalCount} 进行中…`}
         </span>
         {allDone && errorCount > 0 && (
@@ -351,6 +416,7 @@ export function BatchToolCallCard({
               output={sub.output}
               result={sub.result}
               kind={kind}
+              parentTerminalState={parentTerminalState}
               renderToolCallDisplay={renderToolCallDisplay}
             />
           ))}

@@ -22,6 +22,16 @@ interface GitHubTriggerConfig {
   autoApproveWithoutUserConfirmation: boolean;
 }
 
+export interface WorkspaceSshDialog {
+  id: string;
+  connectionId: string;
+  cwd: string;
+  lastFilePath: string | null;
+  lastOpenedAt: number;
+  title?: string | null;
+  pinned?: boolean;
+}
+
 interface WorkspaceTabContentProps {
   filePatterns: string[];
   setFilePatterns: React.Dispatch<React.SetStateAction<string[]>>;
@@ -32,6 +42,13 @@ interface WorkspaceTabContentProps {
   sshNodes: FileTreeNode[];
   sshCurrentPath: string;
   sshPreview: (ArtifactItem & { content?: string }) | null;
+  /**
+   * 最近 N 个 SSH 对话（按 lastOpenedAt 降序）。重启后由 `/ssh/dialogs`
+   * 端点回灌；未启用持久化的旧 gateway 会下发空数组，UI 会自动隐藏。
+   */
+  sshDialogs: WorkspaceSshDialog[];
+  activeSshConnectionId: string | null;
+  onSelectSshDialog: (connectionId: string, cwd: string) => void;
   onAddSshConnection: (entry: Omit<SSHConnectionEntry, 'id' | 'status'>) => void;
   onConnectSsh: (id: string) => void;
   onDisconnectSsh: (id: string) => void;
@@ -52,14 +69,14 @@ interface WorkspaceTabContentProps {
 const CARD: React.CSSProperties = {
   borderRadius: 8,
   border: '1px solid var(--border-default)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
   padding: '8px 10px',
 };
 
 const DASHED_CARD: React.CSSProperties = {
   borderRadius: 8,
   border: '1px dashed var(--border-default)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 94%, var(--bg-base)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 94%, var(--bg-base))',
   padding: '8px 10px',
 };
 
@@ -134,7 +151,7 @@ const DANGER_BTN: React.CSSProperties = {
 const FIELD_INPUT: React.CSSProperties = {
   borderRadius: 6,
   border: '1px solid var(--border-default)',
-  background: 'color-mix(in srgb, var(--bg-base) 70%, var(--bg-overlay)',
+  background: 'color-mix(in srgb, var(--bg-base) 70%, var(--bg-overlay))',
   color: 'var(--fg-strong)',
   fontSize: 10,
   padding: '5px 8px',
@@ -275,6 +292,9 @@ export function WorkspaceTabContent({
   sshNodes,
   sshCurrentPath,
   sshPreview,
+  sshDialogs,
+  activeSshConnectionId,
+  onSelectSshDialog,
   onAddSshConnection,
   onConnectSsh,
   onDisconnectSsh,
@@ -408,7 +428,7 @@ export function WorkspaceTabContent({
                   gap: 3,
                   padding: '1px 6px',
                   borderRadius: 4,
-                  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
+                  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
                   border: '1px solid var(--border-default)',
                   fontFamily: 'monospace',
                   fontSize: 10,
@@ -669,7 +689,7 @@ export function WorkspaceTabContent({
                       gap: 4,
                       padding: '6px 8px',
                       borderRadius: 7,
-                      background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
+                      background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
                       border: '1px solid var(--border-default)',
                     }}
                   >
@@ -707,7 +727,7 @@ export function WorkspaceTabContent({
                   padding: '10px 12px',
                   borderRadius: 8,
                   border: '1px dashed var(--border-default)',
-                  background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base)',
+                  background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base))',
                 }}
               >
                 <input
@@ -825,7 +845,7 @@ export function WorkspaceTabContent({
                   margin: '6px 0 0',
                   padding: '8px 10px',
                   borderRadius: 7,
-                  background: 'color-mix(in srgb, var(--bg-base) 80%, var(--bg-overlay)',
+                  background: 'color-mix(in srgb, var(--bg-base) 80%, var(--bg-overlay))',
                   border: '1px solid var(--border-default)',
                   fontSize: 10,
                   color: 'var(--fg-default)',
@@ -962,6 +982,60 @@ export function WorkspaceTabContent({
           </button>
         </div>
 
+        {sshDialogs.length > 0 && (
+          <div
+            style={{
+              display: 'flex',
+              gap: 6,
+              flexWrap: 'wrap',
+              marginBottom: 8,
+              padding: '6px 8px',
+              borderRadius: 8,
+              border: '1px dashed var(--border-default)',
+              background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base))',
+            }}
+          >
+            <span style={{ fontSize: 10, color: 'var(--fg-muted)', alignSelf: 'center' }}>
+              最近 SSH 对话
+            </span>
+            {sshDialogs.slice(0, 8).map((dialog) => {
+              const conn = sshConnections.find((c) => c.id === dialog.connectionId);
+              const label = conn?.name || conn?.host || dialog.connectionId.slice(0, 6);
+              const isActive = activeSshConnectionId === dialog.connectionId;
+              const tooltip = `${label}\n${dialog.cwd || '/'}${dialog.lastFilePath ? `\n${dialog.lastFilePath}` : ''}`;
+              return (
+                <button
+                  key={dialog.id}
+                  type="button"
+                  title={tooltip}
+                  onClick={() => onSelectSshDialog?.(dialog.connectionId, dialog.cwd || '/')}
+                  style={{
+                    fontSize: 11,
+                    padding: '3px 8px',
+                    borderRadius: 999,
+                    border: isActive
+                      ? '1px solid var(--accent)'
+                      : '1px solid var(--border-default)',
+                    color: isActive ? 'var(--accent)' : 'var(--fg-default)',
+                    background: isActive
+                      ? 'color-mix(in srgb, var(--accent) 12%, transparent)'
+                      : 'transparent',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                >
+                  {dialog.pinned ? '📌' : '🖥'} {label}
+                  <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
+                    {(dialog.cwd || '/').replace(/\/$/, '') || '/'}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {sshConnections.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 8 }}>
             {sshConnections.map((conn) => (
@@ -974,7 +1048,7 @@ export function WorkspaceTabContent({
                   padding: '6px 8px',
                   borderRadius: 7,
                   border: '1px solid var(--border-default)',
-                  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
+                  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
                 }}
               >
                 <span
@@ -1040,7 +1114,7 @@ export function WorkspaceTabContent({
               padding: 10,
               borderRadius: 7,
               border: '1px dashed var(--border-default)',
-              background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base)',
+              background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base))',
               marginBottom: 8,
             }}
           >

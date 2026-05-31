@@ -89,7 +89,7 @@ export function setSubstate(input: SetSubstateInput): void {
   const now = Date.now();
   const previousAt = lastSubstateChangeAtBySession.get(input.sessionId);
   if (typeof previousAt === 'number' && now > previousAt) {
-    recordLatency('progress_interval', now - previousAt);
+    recordLatency('progress_interval', now - previousAt, input.userId);
   }
   lastSubstateChangeAtBySession.set(input.sessionId, now);
 
@@ -114,6 +114,16 @@ export function setSubstate(input: SetSubstateInput): void {
       payload: { substate: input.substate },
     });
   }
+}
+
+/**
+ * 清理某会话的 substate 进度计时状态。`lastSubstateChangeAtBySession` 按
+ * sessionId 累积（每个出现过的会话留一条，用于 progress_interval 延迟采样），
+ * 但从不主动清理——会话删除后其条目会永久滞留，属于按高基数维度（sessionId）
+ * 单调增长的内存泄漏。会话删除时调用此函数回收对应条目。
+ */
+export function clearSubstateTrackingForSession(sessionId: string): void {
+  lastSubstateChangeAtBySession.delete(sessionId);
 }
 
 /**

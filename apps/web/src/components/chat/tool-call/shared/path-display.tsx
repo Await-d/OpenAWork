@@ -106,6 +106,7 @@ export function StyledPath({
   prefix,
   className,
   interactive = true,
+  line,
 }: {
   path: string;
   prefix?: string;
@@ -116,6 +117,12 @@ export function StyledPath({
    * already-clickable card (e.g. row-level button).
    */
   interactive?: boolean;
+  /**
+   * Optional 1-based line to jump to when the path is clicked. Forwarded
+   * to `openFile` so search/grep results land on the matched line instead
+   * of the top of the file.
+   */
+  line?: number;
 }): ReactElement {
   const fileEditorRef = useFileEditorContext();
   const relative = prefix ? stripPathPrefix(path, prefix) : path;
@@ -162,7 +169,7 @@ export function StyledPath({
       onClick={(event) => {
         event.stopPropagation();
         const open = fileEditorRef?.current;
-        if (open) open(path);
+        if (open) open(path, line != null ? { line } : undefined);
       }}
     >
       {inner}

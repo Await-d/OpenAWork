@@ -80,14 +80,14 @@ export default function WorkflowsPage() {
             </div>
             {feedback ? (
               <div
-                className="content-card"
                 style={{
-                  padding: 12,
-                  borderColor:
-                    feedback.tone === 'success'
-                      ? 'rgba(34, 197, 94, 0.35)'
-                      : 'rgba(244, 63, 94, 0.35)',
-                  color: feedback.tone === 'success' ? 'var(--success)' : 'var(--danger-muted)',
+                  padding: '10px 14px',
+                  borderRadius: 10,
+                  border: `1px solid ${feedback.tone === 'success' ? 'var(--success-border, rgba(34, 197, 94, 0.35))' : 'var(--complement-border)'}`,
+                  background: feedback.tone === 'success' ? 'var(--success-muted, rgba(34, 197, 94, 0.08))' : 'var(--complement-muted)',
+                  color: feedback.tone === 'success' ? 'var(--success, #22c55e)' : 'var(--complement)',
+                  fontSize: 12,
+                  fontWeight: 500,
                 }}
               >
                 {feedback.message}
@@ -95,11 +95,14 @@ export default function WorkflowsPage() {
             ) : null}
             {error ? (
               <div
-                className="content-card"
                 style={{
-                  padding: 12,
-                  borderColor: 'rgba(244, 63, 94, 0.35)',
-                  color: 'var(--danger-muted)',
+                  padding: '10px 14px',
+                  borderRadius: 10,
+                  border: '1px solid var(--complement-border)',
+                  background: 'var(--complement-muted)',
+                  color: 'var(--complement)',
+                  fontSize: 12,
+                  fontWeight: 500,
                 }}
               >
                 {error}
@@ -135,6 +138,7 @@ export default function WorkflowsPage() {
                 {selectedTemplate ? (
                   <button
                     type="button"
+                    className="btn-danger-sm"
                     onClick={() => void removeSelectedTemplate()}
                     disabled={busy}
                   >
@@ -178,13 +182,13 @@ export default function WorkflowsPage() {
                     {selectedTemplate ? (
                       <Link
                         to={`/team?workflowTemplateId=${encodeURIComponent(selectedTemplate.id)}&workflowTemplateName=${encodeURIComponent(selectedTemplate.name)}&workflowTemplateDescription=${encodeURIComponent(selectedTemplate.description ?? '')}&workflowTemplateNodeCount=${selectedTemplate.nodes.length}`}
-                        className="primary-button"
-                        style={{ textDecoration: 'none' }}
+                        className="btn-accent"
+                        style={{ textDecoration: 'none', height: 32, padding: '0 14px', fontSize: 12 }}
                       >
                         在 Team 中发起
                       </Link>
                     ) : null}
-                    <button type="button" onClick={addNode} disabled={busy}>
+                    <button type="button" className="btn-secondary" onClick={addNode} disabled={busy}>
                       添加节点
                     </button>
                   </div>
@@ -213,6 +217,7 @@ export default function WorkflowsPage() {
                       value={selectedNode.label}
                       onChange={(event) => updateSelectedNode({ label: event.target.value })}
                       placeholder="节点标题"
+                      className="form-input"
                     />
                     <select
                       value={selectedNode.type}
@@ -221,6 +226,7 @@ export default function WorkflowsPage() {
                           type: event.target.value as typeof selectedNode.type,
                         })
                       }
+                      className="form-input"
                     >
                       <option value="start">start</option>
                       <option value="prompt">prompt</option>
@@ -231,7 +237,36 @@ export default function WorkflowsPage() {
                     </select>
                   </div>
                 ) : (
-                  <div style={{ color: 'var(--fg-muted)' }}>先在画布里选择一个节点。</div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: 10,
+                      padding: '24px 16px',
+                      color: 'var(--fg-muted)',
+                      textAlign: 'center',
+                    }}
+                  >
+                    <svg
+                      width="28"
+                      height="28"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                      style={{ opacity: 0.5 }}
+                    >
+                      <circle cx="12" cy="12" r="10" />
+                      <path d="M8 12h8M12 8v8" />
+                    </svg>
+                    <span style={{ fontSize: 12 }}>
+                      先在画布里选择一个节点，即可在此编辑属性。
+                    </span>
+                  </div>
                 )}
               </div>
             </div>

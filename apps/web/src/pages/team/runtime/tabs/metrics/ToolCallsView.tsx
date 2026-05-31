@@ -13,6 +13,7 @@ import {
   type ToolCallStats,
 } from '../../../../../stores/team/team-usage.js';
 import { TabContainer } from '../TabContainer.js';
+import { EmptyState, CK_SECTION_LABEL_STYLE, CK_BORDER, CK_SURFACE } from '../../shared/content-kit/index.js';
 
 const CONTAINER_STYLE: CSSProperties = {
   display: 'flex',
@@ -20,33 +21,15 @@ const CONTAINER_STYLE: CSSProperties = {
   gap: 10,
 };
 
-const SECTION_TITLE_STYLE: CSSProperties = {
-  fontSize: 11,
-  fontWeight: 700,
-  color: 'var(--fg-muted)',
-  textTransform: 'uppercase',
-  letterSpacing: '0.06em',
-};
+const SECTION_TITLE_STYLE = CK_SECTION_LABEL_STYLE;
 
 const ROW_STYLE: CSSProperties = {
   display: 'grid',
   gap: 6,
   padding: '10px 12px',
   borderRadius: 10,
-  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
-};
-
-const EMPTY_STYLE: CSSProperties = {
-  display: 'grid',
-  placeItems: 'center',
-  padding: 32,
-  borderRadius: 12,
-  border: '1px dashed color-mix(in srgb, var(--border-default) 60%, transparent)',
-  color: 'var(--fg-muted)',
-  fontSize: 13,
-  gap: 6,
-  textAlign: 'center',
+  border: `1px solid ${CK_BORDER}`,
+  background: CK_SURFACE,
 };
 
 function formatMs(ms: number): string {
@@ -93,18 +76,18 @@ export function ToolCallsView() {
         subtitle="按 tool / agent 拆分调用次数、错误率与 P95 耗时。"
       >
         <div style={CONTAINER_STYLE}>
-          <div style={EMPTY_STYLE}>
-            <span style={{ fontSize: 26 }} aria-hidden>
-              🛠️
-            </span>
-            <strong style={{ color: 'var(--fg-default)' }}>暂无工具调用数据</strong>
-            <span style={{ maxWidth: 420 }}>
-              工具调用从 chat 流的 tool-call 事件聚合而来。
-              <br />
-              等待 team-events 推送 <code>team_tool_call</code> 事件，
-              <code>useTeamToolCallStore.applyToolCallEvent</code> 会自动累计。
-            </span>
-          </div>
+          <EmptyState
+            emoji="🛠️"
+            title="暂无工具调用数据"
+            description={
+              <>
+                工具调用从 chat 流的 tool-call 事件聚合而来。
+                <br />
+                等待 team-events 推送 <code>team_tool_call</code> 事件，
+                <code>useTeamToolCallStore.applyToolCallEvent</code> 会自动累计。
+              </>
+            }
+          />
         </div>
       </TabContainer>
     );

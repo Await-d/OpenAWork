@@ -1,10 +1,12 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
+import { getProviderCatalogUi } from '@openAwork/agent-core';
 import { parseBody, parseQuery } from '../infra/parse-request.js';
 import { loadAppVersion } from '../app/app-version.js';
 import { resolveAuxiliaryLlmConfig } from '../provider/auxiliary-llm-config.js';
-import { invalidateCatalog } from '../provider/provider-catalog.js';
+import { invalidateCatalog, invalidateAllCatalogs } from '../provider/provider-catalog.js';
+import { refreshModelsDevDataOrThrow } from '@openAwork/agent-core';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import {
   COMPACTION_SETTINGS_KEY,
@@ -16,8 +18,10 @@ import {
   filterEnabledProviderConfig,
   imageGenerationDefaultsSchema,
   materializeProviderConfig,
+  normalizeSingleProviderForTest,
   parseStoredDefaultThinking,
   parseStoredImageGenerationDefaults,
+  providerConnectivityTestBodySchema,
   providerSettingsBodySchema,
   providerSettingsQuerySchema,
 } from '../provider/provider-config.js';
@@ -52,6 +56,7 @@ import {
   writeWorkspacePermissionConfig,
   PERMISSION_CATEGORIES,
 } from '@openAwork/agent-core';
+import type { AIProvider } from '@openAwork/agent-core';
 import { WORKSPACE_ROOT } from '../infra/db.js';
 import { z } from 'zod';
 
@@ -382,7 +387,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       const serverId = (params.id ?? '').trim();
       if (!serverId) {
         step.fail('serverId required');
-        return reply.code(400).send({ error: 'serverId required' });
+        return reply.code(400).send({ error: '缺少 MCP 服务标识。' });
       }
 
       try {
@@ -413,7 +418,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         // throwing because the id genuinely doesn't exist in either
         // the user's settings or the builtin list. 404 is the
         // honest answer.
-        return reply.code(404).send({ error: msg });
+        return reply.code(404).send({ error: '目标 MCP 服务不存在。' });
       }
     },
   );
@@ -627,6 +632,16 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
   );
 
   app.get(
+    '/settings/providers/catalog',
+    { onRequest: [requireAuth] },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      // 平台「单一事实来源」的 UI 投影：logo / 显示名 / 回退字形 / 上游变体 /
+      // 别名。前端据此渲染选择器与设置页，新增平台无需改前端映射表。
+      return reply.send({ catalog: getProviderCatalogUi() });
+    },
+  );
+
+  app.get(
     '/settings/providers',
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
@@ -765,6 +780,121 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         defaultThinking,
         imageGenerationDefaults,
       });
+    },
+  );
+
+  app.post(
+    '/settings/providers/test',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'settings.providers.test');
+      const user = request.user as JwtPayload;
+
+      const parseStep = child('parse-body');
+      const parsed = parseBody(providerConnectivityTestBodySchema, request.body);
+      parseStep.succeed();
+
+      // 解析待测 provider：优先用请求体里内联的 provider(测「尚未保存」的表单值)，
+      // 否则按 providerId 从已保存配置里取。
+      const resolveStep = child('resolve-provider');
+      let provider: AIProvider | undefined;
+      if (parsed.provider) {
+        const normalized = normalizeSingleProviderForTest(parsed.provider);
+        provider = normalized;
+      } else if (parsed.providerId) {
+        const providerRow = sqliteGet<UserSettingRow>(
+          `SELECT value FROM user_settings WHERE user_id = ? AND key = 'providers'`,
+          [user.sub],
+        );
+        const selectionRow = sqliteGet<UserSettingRow>(
+          `SELECT value FROM user_settings WHERE user_id = ? AND key = 'active_selection'`,
+          [user.sub],
+        );
+        const { providers } = await materializeProviderConfig(
+          parseStoredJson(providerRow?.value),
+          parseStoredJson(selectionRow?.value),
+        );
+        provider = providers.find((item) => item.id === parsed.providerId);
+      }
+
+      if (!provider) {
+        resolveStep.fail('provider not found');
+        step.fail('provider not found');
+        return reply.status(404).send({
+          ok: false,
+          status: 'error',
+          message: '未找到待测的 provider，请先保存配置或提供完整的 provider 信息。',
+        });
+      }
+
+      const model = provider.defaultModels.find((item) => item.id === parsed.modelId);
+      if (!model) {
+        resolveStep.fail('model not found');
+        step.fail('model not found');
+        return reply.status(404).send({
+          ok: false,
+          status: 'error',
+          message: `provider「${provider.name}」下未找到模型「${parsed.modelId}」。`,
+        });
+      }
+      resolveStep.succeed(undefined, { providerId: provider.id, modelId: parsed.modelId });
+
+      const probeStep = child('probe');
+      const { testProviderConnectivity } =
+        await import('../provider/provider-connectivity-test.js');
+      const result = await testProviderConnectivity({
+        provider,
+        modelId: parsed.modelId,
+      });
+      if (result.ok) {
+        probeStep.succeed(undefined, { latencyMs: result.latencyMs ?? 0 });
+        step.succeed(undefined, { status: result.status });
+      } else {
+        probeStep.fail(result.status);
+        step.fail(result.status);
+      }
+
+      // 业务层失败仍以 200 返回结构化结果，让前端按钮统一按 `ok` 字段渲染状态，
+      // 而不是把「配置错误」当成 HTTP 传输错误处理。
+      return reply.send(result);
+    },
+  );
+
+  // 手动同步内置模型目录：强制从 models.dev 重新拉取一次（绕过每小时定时刷新），
+  // 成功后让所有用户的 provider catalog 缓存失效，下次请求即重建出最新模型清单。
+  app.post(
+    '/settings/providers/sync',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'settings.providers.sync');
+
+      const fetchStep = child('refresh-models-dev');
+      let data: Awaited<ReturnType<typeof refreshModelsDevDataOrThrow>>;
+      try {
+        // 用「会抛错」的刷新变体：这样网络失败能被真实反馈给用户，而不是被
+        // 后台定时刷新那套「静默吞错」逻辑掩盖、误报成功。
+        data = await refreshModelsDevDataOrThrow();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        fetchStep.fail(message);
+        step.fail('models.dev unavailable');
+        return reply.status(502).send({
+          ok: false,
+          message: `无法从 models.dev 拉取模型目录：${message}`,
+        });
+      }
+      const providerCount = Object.keys(data).length;
+      const modelCount = Object.values(data).reduce(
+        (sum, provider) => sum + Object.keys(provider.models ?? {}).length,
+        0,
+      );
+      fetchStep.succeed(undefined, { providers: providerCount, models: modelCount });
+
+      // models.dev 是全局数据源，刷新后所有用户的 catalog 都过期了，全部失效。
+      invalidateAllCatalogs();
+
+      step.succeed(undefined, { providers: providerCount, models: modelCount });
+      return reply.send({ ok: true, providerCount, modelCount });
     },
   );
 
@@ -1228,7 +1358,14 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         `SELECT value FROM user_settings WHERE user_id = ? AND key = 'file_patterns'`,
         [user.sub],
       );
-      const patterns = row ? (JSON.parse(row.value) as string[]) : [];
+      // Tolerant parse: a corrupt `file_patterns` row (crash mid-write, disk
+      // error, hand-edited DB) must degrade to an empty list rather than 500
+      // the route. Every sibling reader in this file already guards its parse;
+      // this was the lone unguarded one. (§0.115/§0.116 user_settings class.)
+      const parsedPatterns = parseStoredJson(row?.value);
+      const patterns = Array.isArray(parsedPatterns)
+        ? parsedPatterns.filter((value): value is string => typeof value === 'string')
+        : [];
       step.succeed(undefined, { count: patterns.length });
       return reply.send({ patterns });
     },
@@ -1328,7 +1465,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       const llmConfig = await resolveAuxiliaryLlmConfig(user.sub);
       if (!llmConfig) {
         step.fail('no llm config');
-        return reply.status(503).send({ error: 'Companion chat LLM is not configured' });
+        return reply.status(503).send({ error: 'Companion 陪跑聊天模型尚未配置。' });
       }
 
       const { loadCompanionSettingsForUser } = await import('../workspace/companion-settings.js');
@@ -1402,7 +1539,7 @@ ${contextBlock}
       } catch (_error: unknown) {
         chatStep.fail('llm error');
         step.fail('llm error');
-        return reply.status(500).send({ error: 'Companion chat failed' });
+        return reply.status(500).send({ error: 'Companion 陪跑聊天失败。' });
       }
     },
   );

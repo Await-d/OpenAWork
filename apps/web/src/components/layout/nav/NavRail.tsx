@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router';
+import { createHealthClient } from '@openAwork/web-client';
 import { railGroups, railLabelCn, railIcon, type RailItem } from './RailIcon.js';
 import { preloadRouteModuleByPath } from '../../../routes/preloadable-route-modules.js';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
@@ -72,22 +73,16 @@ function useGatewayStatus(gatewayUrl: string): GatewayStatus {
     }
     let cancelled = false;
     let intervalId: number | null = null;
+    const client = createHealthClient(gatewayUrl);
 
     const probe = async () => {
-      const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), 4000);
       try {
-        const response = await fetch(`${gatewayUrl}/health`, {
-          method: 'GET',
-          signal: controller.signal,
-        });
+        const healthy = await client.check({ timeoutMs: 4000 });
         if (cancelled) return;
-        setStatus(response.ok ? 'online' : 'warning');
+        setStatus(healthy ? 'online' : 'offline');
       } catch {
         if (cancelled) return;
         setStatus('offline');
-      } finally {
-        window.clearTimeout(timeout);
       }
     };
 

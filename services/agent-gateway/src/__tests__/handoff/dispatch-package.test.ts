@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_FIXED_TEAM_MEMBER_SLOTS } from '@openAwork/shared';
+import { DEFAULT_FIXED_TEAM_MEMBER_SLOTS, type FixedTeamMemberSlot } from '@openAwork/shared';
 import {
   buildDispatchPackages,
   buildTaskProfilePromptFragment,
@@ -129,6 +129,43 @@ describe('buildDispatchPackages', () => {
     expect(packages[0]!.assignedMember?.id).toBe('executor-frontend');
     expect(packages[0]!.assignedMember?.specialty).toBe('frontend');
   });
+
+  it('maxPackages 上限会截断任务、只派发文档顺序的前 N 个（防 fan-out 失控）', () => {
+    const tasks = Array.from({ length: 10 }, (_, i) => ({
+      taskId: `T${String(i + 1).padStart(3, '0')}`,
+      parallel: true,
+      story: null,
+      explicitProfile: { kind: 'build' as const, surface: 'backend' as const },
+      title: `任务 ${i + 1}`,
+      priority: 'medium' as const,
+    }));
+
+    const capped = buildDispatchPackages({
+      tasks,
+      artifactRefs: { tasksId: 'tasks-1' },
+      context: '大量任务',
+      maxPackages: 3,
+    });
+    expect(capped).toHaveLength(3);
+    expect(capped.map((p) => p.taskMarkers.taskId)).toEqual(['T001', 'T002', 'T003']);
+
+    // maxPackages <= 0 视为关闭上限：全部派发。
+    const uncapped = buildDispatchPackages({
+      tasks,
+      artifactRefs: { tasksId: 'tasks-1' },
+      context: '大量任务',
+      maxPackages: 0,
+    });
+    expect(uncapped).toHaveLength(10);
+
+    // 不传 maxPackages 时也不截断。
+    const noCap = buildDispatchPackages({
+      tasks,
+      artifactRefs: { tasksId: 'tasks-1' },
+      context: '大量任务',
+    });
+    expect(noCap).toHaveLength(10);
+  });
 });
 
 describe('resolveAssignedMember', () => {
@@ -166,6 +203,99 @@ describe('resolveAssignedMember', () => {
 
     expect(member?.layer).toBe('reviewer');
     expect(['qa', 'quality']).toContain(member?.specialty);
+  });
+
+  it('自定义角色的 routingKeywords 命中任务时被动态优先派发', () => {
+    const customPerf: FixedTeamMemberSlot = {
+      id: 'executor-custom-perf',
+      layer: 'executor',
+      specialty: 'custom',
+      displayName: '性能优化专家',
+      personaKey: 'executor:custom:perf',
+      toolsets: ['read', 'write', 'shell', 'lsp', 'test'],
+      required: false,
+      custom: true,
+      systemPrompt: '你是性能优化专家。',
+      routingKeywords: ['性能', '渲染瓶颈', 'profiling'],
+    };
+    const roster: FixedTeamMemberSlot[] = [...DEFAULT_FIXED_TEAM_MEMBER_SLOTS, customPerf];
+
+    // 任务命中自定义角色关键词「性能 / 渲染瓶颈」→ 应优先派给它，而非默认前端/后端。
+    const hit = resolveAssignedMember({
+      goal: '排查首页渲染瓶颈并做性能优化',
+      profile: { kind: 'build', surface: 'ui' },
+      role: 'executor',
+      roster,
+    });
+    expect(hit?.personaKey).toBe('executor:custom:perf');
+
+    // 不命中关键词的普通任务不应被该自定义角色截胡（仍走预置 specialty 匹配）。
+    const miss = resolveAssignedMember({
+      goal: '实现后端登录接口',
+      profile: { kind: 'build', surface: 'backend' },
+      role: 'executor',
+      roster,
+    });
+    expect(miss?.specialty).toBe('backend');
+  });
+
+  it('同分时 dispatchPriority=high 的成员优先', () => {
+    const lowFe: FixedTeamMemberSlot = {
+      id: 'executor-custom-fe-low',
+      layer: 'executor',
+      specialty: 'custom',
+      displayName: '前端 A（低优先）',
+      personaKey: 'executor:custom:fe-low',
+      toolsets: ['read', 'write'],
+      required: false,
+      custom: true,
+      routingKeywords: ['表单'],
+      dispatchPriority: 'low',
+    };
+    const highFe: FixedTeamMemberSlot = {
+      id: 'executor-custom-fe-high',
+      layer: 'executor',
+      specialty: 'custom',
+      displayName: '前端 B（高优先）',
+      personaKey: 'executor:custom:fe-high',
+      toolsets: ['read', 'write'],
+      required: false,
+      custom: true,
+      routingKeywords: ['表单'],
+      dispatchPriority: 'high',
+    };
+    // 两者关键词命中数相同（同分）→ 应选 dispatchPriority=high 的。
+    const member = resolveAssignedMember({
+      goal: '实现一个表单',
+      profile: { kind: 'build', surface: 'ui' },
+      role: 'executor',
+      roster: [lowFe, highFe],
+    });
+    expect(member?.personaKey).toBe('executor:custom:fe-high');
+  });
+
+  it('过短的路由关键词（<2 字符）被忽略，不会截胡所有任务', () => {
+    const greedy: FixedTeamMemberSlot = {
+      id: 'executor-custom-greedy',
+      layer: 'executor',
+      specialty: 'custom',
+      displayName: '贪婪角色',
+      personaKey: 'executor:custom:greedy',
+      toolsets: ['read', 'write'],
+      required: false,
+      custom: true,
+      routingKeywords: ['a', '的', 'e'], // 全是单字符，应被忽略
+    };
+    const roster: FixedTeamMemberSlot[] = [...DEFAULT_FIXED_TEAM_MEMBER_SLOTS, greedy];
+    // 一个后端任务：贪婪角色的单字符关键词不应让它击败后端专长成员。
+    const member = resolveAssignedMember({
+      goal: '实现后端登录接口',
+      profile: { kind: 'build', surface: 'backend' },
+      role: 'executor',
+      roster,
+    });
+    expect(member?.specialty).toBe('backend');
+    expect(member?.personaKey).not.toBe('executor:custom:greedy');
   });
 });
 

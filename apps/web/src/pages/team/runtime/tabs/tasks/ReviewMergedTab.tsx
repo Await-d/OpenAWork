@@ -18,7 +18,10 @@
  */
 
 import { useMemo, useState, type CSSProperties } from 'react';
-import type { HandoffRecord } from '@openAwork/web-client';
+import {
+  getEffectiveReviewDisposition,
+  type HandoffRecord,
+} from '@openAwork/web-client';
 import type { AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
 import { ReviewReportView } from './ReviewReportView.js';
 import { ReviewTab } from './ReviewTab.js';
@@ -70,16 +73,55 @@ const SEGMENT_BTN_ACTIVE_STYLE: CSSProperties = {
 };
 
 export interface ReviewMergedTabProps {
+  focusHandoffId?: string | null;
+  onClearFocus?: () => void;
   selectedTeam: AgentTeamsSidebarTeam | null;
   /** 当前选中的 team session id；为空时显示空态。 */
   selectedTeamId: string;
 }
 
+const FOCUS_CARD_STYLE: CSSProperties = {
+  display: 'grid',
+  gap: 6,
+  padding: '10px 12px',
+  borderRadius: 12,
+  border: '1px solid color-mix(in srgb, var(--accent) 45%, transparent)',
+  background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
+};
+
+const FOCUS_ACTIONS_ROW_STYLE: CSSProperties = {
+  display: 'flex',
+  gap: 8,
+  flexWrap: 'wrap',
+};
+
+const FOCUS_CLEAR_BTN_STYLE: CSSProperties = {
+  padding: '4px 10px',
+  borderRadius: 6,
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+  background: 'transparent',
+  color: 'var(--fg-default)',
+  fontSize: 11,
+  fontWeight: 600,
+  cursor: 'pointer',
+  justifySelf: 'start',
+};
+
+const FOCUS_PRIMARY_BTN_STYLE: CSSProperties = {
+  ...FOCUS_CLEAR_BTN_STYLE,
+  background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
+  borderColor: 'color-mix(in srgb, var(--accent) 40%, transparent)',
+  color: 'var(--accent)',
+};
+
 function isPayloadObject(value: unknown): value is ReviewReportPayload {
   return typeof value === 'object' && value !== null;
 }
 
-function extractLatestReviewReport(records: HandoffRecord[]): {
+function extractReviewReport(
+  records: HandoffRecord[],
+  focusHandoffId?: string | null,
+): {
   markdown: string | null;
   overallVerdict: 'pass' | 'implementation-failure' | 'planning-failure' | null;
   specReviewPassed: boolean | null;
@@ -89,7 +131,14 @@ function extractLatestReviewReport(records: HandoffRecord[]): {
     .filter((record) => record.fromRoleLayer === 'pm2' && record.state === 'completed')
     .sort((a, b) => (b.completedAt ?? b.updatedAt).localeCompare(a.completedAt ?? a.updatedAt));
 
-  for (const record of candidates) {
+  const orderedCandidates = focusHandoffId
+    ? [
+        ...candidates.filter((record) => record.id === focusHandoffId),
+        ...candidates.filter((record) => record.id !== focusHandoffId),
+      ]
+    : candidates;
+
+  for (const record of orderedCandidates) {
     if (!isPayloadObject(record.payload)) continue;
     const reviewReport = record.payload.review_report;
     if (!reviewReport) continue;
@@ -108,20 +157,36 @@ function extractLatestReviewReport(records: HandoffRecord[]): {
   };
 }
 
-export function ReviewMergedTab({ selectedTeam, selectedTeamId }: ReviewMergedTabProps) {
+export function ReviewMergedTab({
+  focusHandoffId = null,
+  onClearFocus,
+  selectedTeam,
+  selectedTeamId,
+}: ReviewMergedTabProps) {
   const [segment, setSegment] = useState<ReviewSegment>('report');
-  const { handoffs, loading, error } = useSessionHandoffs(selectedTeamId || null);
-  const disposition = useReviewDisposition(selectedTeamId || null);
+  const { applyPreview, handoffs, loading, error, refresh } = useSessionHandoffs(
+    selectedTeamId || null,
+  );
+  const disposition = useReviewDisposition(selectedTeamId || null, focusHandoffId);
 
-  const review = useMemo(() => extractLatestReviewReport(handoffs), [handoffs]);
-
-  // 派生：尝试从 handoffs 中找出 PM2 的来源 session id 用作 inbound target
-  const pm2SourceSessionId = useMemo(() => {
-    const pm2Records = handoffs
-      .filter((record) => record.fromRoleLayer === 'pm2')
-      .sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
-    return pm2Records[0]?.fromSessionId ?? null;
-  }, [handoffs]);
+  const review = useMemo(
+    () => extractReviewReport(handoffs, focusHandoffId),
+    [focusHandoffId, handoffs],
+  );
+  const focusedHandoff = useMemo(
+    () => (focusHandoffId ? handoffs.find((record) => record.id === focusHandoffId) ?? null : null),
+    [focusHandoffId, handoffs],
+  );
+  const focusedDisposition = useMemo(
+    () => (focusedHandoff ? getEffectiveReviewDisposition(focusedHandoff) : null),
+    [focusedHandoff],
+  );
+  const focusedDispositionOwnedByCurrent = Boolean(
+    focusedHandoff &&
+      focusedDisposition &&
+      disposition.pm2HandoffId &&
+      focusedHandoff.id === disposition.pm2HandoffId,
+  );
 
   return (
     <div
@@ -183,13 +248,68 @@ export function ReviewMergedTab({ selectedTeam, selectedTeamId }: ReviewMergedTa
           gap: 16,
         }}
       >
-        {disposition.action ? (
+        {focusedHandoff ? (
+          <div style={FOCUS_CARD_STYLE}>
+            <strong style={{ color: 'var(--accent)', fontSize: 13 }}>
+              已定位到 Handoff #{focusedHandoff.id.slice(0, 8)}
+            </strong>
+            <span style={{ color: 'var(--fg-strong)', fontSize: 12, fontWeight: 700 }}>
+              {focusedHandoff.fromRoleLayer} → {focusedHandoff.toRoleLayer} · {focusedHandoff.state}
+            </span>
+            {focusedDisposition?.reason ? (
+              <span style={{ color: 'var(--fg-muted)', fontSize: 11, lineHeight: 1.5 }}>
+                {focusedDisposition.reason}
+              </span>
+            ) : focusedHandoff.failureReason ? (
+              <span style={{ color: 'var(--fg-muted)', fontSize: 11, lineHeight: 1.5 }}>
+                {focusedHandoff.failureReason}
+              </span>
+            ) : null}
+            <div style={FOCUS_ACTIONS_ROW_STYLE}>
+              <button
+                type="button"
+                onClick={() => setSegment('report')}
+                style={segment === 'report' ? FOCUS_PRIMARY_BTN_STYLE : FOCUS_CLEAR_BTN_STYLE}
+              >
+                查看报告
+              </button>
+              <button
+                type="button"
+                onClick={() => setSegment('queue')}
+                style={segment === 'queue' ? FOCUS_PRIMARY_BTN_STYLE : FOCUS_CLEAR_BTN_STYLE}
+              >
+                查看待办
+              </button>
+              {onClearFocus ? (
+                <button type="button" onClick={onClearFocus} style={FOCUS_CLEAR_BTN_STYLE}>
+                  清除定位
+                </button>
+              ) : null}
+            </div>
+            {focusedDispositionOwnedByCurrent ? (
+              <FailureFlowIndicator
+                action={disposition.action}
+                reason={disposition.reason}
+                escalationRound={disposition.escalationRound}
+                pm2HandoffId={disposition.pm2HandoffId}
+                onActionComplete={(result) => {
+                  applyPreview(result.handoffs);
+                  refresh();
+                }}
+              />
+            ) : null}
+          </div>
+        ) : null}
+        {disposition.action && !focusedDispositionOwnedByCurrent ? (
           <FailureFlowIndicator
             action={disposition.action}
             reason={disposition.reason}
             escalationRound={disposition.escalationRound}
             pm2HandoffId={disposition.pm2HandoffId}
-            pm2SourceSessionId={pm2SourceSessionId}
+            onActionComplete={(result) => {
+              applyPreview(result.handoffs);
+              refresh();
+            }}
           />
         ) : null}
         {segment === 'report' ? (

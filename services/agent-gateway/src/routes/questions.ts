@@ -72,6 +72,37 @@ export function expirePendingQuestionRequests(input: {
   return requests.length;
 }
 
+// Corrupt-row tolerance (§0.89 class): `questions_json` is persisted via
+// `JSON.stringify`, but a crash mid-write / disk error / hand-edited DB can
+// leave it invalid. The pending-questions list does `rows.map(...)`, so a
+// single corrupt row used to throw and 500 the WHOLE pending-question list for
+// that session — blanking every pending question, not just the bad one. Return
+// `null` + warn so the list path skips the bad row, mirroring the sibling
+// `mapRecoveryQuestionRequestRow` (sessions.ts) / `mapQuestionRequestRow`
+// (session-shared-read-routes.ts).
+function mapPendingQuestionRequestRow(row: QuestionRequestRow) {
+  let questions: QuestionToolInput['questions'];
+  try {
+    questions = JSON.parse(row.questions_json) as QuestionToolInput['questions'];
+  } catch (error) {
+    console.warn(
+      `[questions] 提问请求 ${row.id} questions_json 解析失败，已跳过：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return null;
+  }
+  return {
+    requestId: row.id,
+    sessionId: row.session_id,
+    toolName: row.tool_name,
+    title: row.title,
+    questions,
+    status: row.status,
+    createdAt: row.created_at,
+  };
+}
+
 export async function questionsRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     '/sessions/:sessionId/questions/pending',
@@ -85,7 +116,7 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
 
       if (!ownsSession(sessionId, user.sub)) {
         step.fail('session not found');
-        return reply.status(404).send({ error: 'Session not found' });
+        return reply.status(404).send({ error: '目标会话不存在。' });
       }
 
       const requests = sqliteAll<QuestionRequestRow>(
@@ -94,15 +125,9 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
          WHERE session_id = ? AND status = 'pending'
          ORDER BY created_at ASC`,
         [sessionId],
-      ).map((row) => ({
-        requestId: row.id,
-        sessionId: row.session_id,
-        toolName: row.tool_name,
-        title: row.title,
-        questions: JSON.parse(row.questions_json) as QuestionToolInput['questions'],
-        status: row.status,
-        createdAt: row.created_at,
-      }));
+      )
+        .map(mapPendingQuestionRequestRow)
+        .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
 
       step.succeed(undefined, { count: requests.length });
       return reply.send({ requests });
@@ -121,7 +146,7 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
       const body = parseBody(replyQuestionSchema, request.body);
 
       if (!ownsSession(sessionId, user.sub)) {
-        throw ApiError.notFound('Session not found');
+        throw ApiError.notFound('目标会话不存在。');
       }
 
       const questionRequest = sqliteGet<QuestionRequestRow>(
@@ -132,11 +157,11 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
         [body.requestId, sessionId],
       );
       if (!questionRequest) {
-        throw ApiError.notFound('Question request not found');
+        throw ApiError.notFound('目标提问请求不存在。');
       }
       if (questionRequest.status !== 'pending') {
         step.fail('question request already resolved');
-        return reply.status(409).send({ error: 'Question request already resolved' });
+        return reply.status(409).send({ error: '提问请求已处理，无法重复提交。' });
       }
 
       sqliteRun(

@@ -20,6 +20,14 @@ import {
   type TeamRoleLayer,
 } from '../../../../../stores/team/team-events.js';
 import { TabContainer } from '../TabContainer.js';
+import {
+  StatCard,
+  MetricGrid,
+  EmptyState,
+  CK_SECTION_LABEL_STYLE,
+  CK_BORDER,
+  CK_SURFACE,
+} from '../../shared/content-kit/index.js';
 
 const LAYER_LABELS: Record<TeamRoleLayer, string> = {
   user: '用户',
@@ -27,10 +35,11 @@ const LAYER_LABELS: Record<TeamRoleLayer, string> = {
   pm1: 'PM1',
   pm2: 'PM2',
   executor: '执行',
+  tester: '测试',
   reviewer: '评审',
 };
 
-const LAYER_ORDER: TeamRoleLayer[] = ['reception', 'pm1', 'pm2', 'executor', 'reviewer'];
+const LAYER_ORDER: TeamRoleLayer[] = ['reception', 'pm1', 'pm2', 'executor', 'tester', 'reviewer'];
 
 const STATE_COLORS: Record<HandoffState | 'idle', string> = {
   idle: 'var(--fg-muted)',
@@ -53,27 +62,15 @@ const SECTION_STYLE: CSSProperties = {
   gap: 8,
 };
 
-const SECTION_TITLE_STYLE: CSSProperties = {
-  fontSize: 11,
-  fontWeight: 700,
-  color: 'var(--fg-muted)',
-  textTransform: 'uppercase',
-  letterSpacing: '0.06em',
-};
-
-const STAT_GRID_STYLE: CSSProperties = {
-  display: 'grid',
-  gap: 8,
-  gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
-};
+const SECTION_TITLE_STYLE = CK_SECTION_LABEL_STYLE;
 
 const STAT_CARD_STYLE: CSSProperties = {
   display: 'grid',
   gap: 4,
   padding: '10px 12px',
   borderRadius: 10,
-  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
+  border: `1px solid ${CK_BORDER}`,
+  background: CK_SURFACE,
 };
 
 function formatMs(ms: number): string {
@@ -170,23 +167,11 @@ export function TimingView() {
     return (
       <TabContainer title="耗时分析" subtitle="按 handoff 维度统计执行耗时与 P50 / P95 分布。">
         <div style={CONTAINER_STYLE}>
-          <div
-            style={{
-              display: 'grid',
-              placeItems: 'center',
-              padding: 32,
-              borderRadius: 12,
-              border: '1px dashed color-mix(in srgb, var(--border-default) 60%, transparent)',
-              color: 'var(--fg-muted)',
-              fontSize: 13,
-              gap: 6,
-            }}
-          >
-            <span style={{ fontSize: 26 }} aria-hidden>
-              ⏱️
-            </span>
-            <span>暂无 handoff 记录。团队启动后耗时数据会出现在这里。</span>
-          </div>
+          <EmptyState
+            emoji="⏱️"
+            title="暂无 handoff 记录"
+            description="团队启动后耗时数据会出现在这里。"
+          />
         </div>
       </TabContainer>
     );
@@ -198,25 +183,25 @@ export function TimingView() {
         {/* 概览 */}
         <div style={SECTION_STYLE}>
           <span style={SECTION_TITLE_STYLE}>概览</span>
-          <div style={STAT_GRID_STYLE}>
+          <MetricGrid>
             <StatCard label="Handoff 总数" value={String(totalCount)} />
-            <StatCard label="运行中" value={String(running.length)} accent="success" />
+            <StatCard label="运行中" value={String(running.length)} tone="success" />
             <StatCard
               label="成功率"
               value={successRate !== null ? `${successRate}%` : '—'}
-              accent={successRate !== null && successRate < 80 ? 'warning' : 'default'}
+              tone={successRate !== null && successRate < 80 ? 'warning' : 'default'}
             />
             <StatCard
               label="样本（已结束）"
               value={String(completed.length === 30 ? '≥ 30' : completed.length)}
             />
-          </div>
+          </MetricGrid>
         </div>
 
         {/* 各层级 P50/P95 */}
         <div style={SECTION_STYLE}>
           <span style={SECTION_TITLE_STYLE}>各层级耗时</span>
-          <div style={STAT_GRID_STYLE}>
+          <MetricGrid>
             {layerStats.map((stat) => (
               <div key={stat.layer} style={STAT_CARD_STYLE}>
                 <span
@@ -236,7 +221,7 @@ export function TimingView() {
                 </div>
               </div>
             ))}
-          </div>
+          </MetricGrid>
         </div>
 
         {/* 运行中（实时） */}
@@ -269,31 +254,6 @@ function isTerminal(state: HandoffState): boolean {
   return state === 'completed' || state === 'failed' || state === 'cancelled';
 }
 
-function StatCard({
-  label,
-  value,
-  accent = 'default',
-}: {
-  label: string;
-  value: string;
-  accent?: 'default' | 'success' | 'warning' | 'danger';
-}) {
-  const valueColor =
-    accent === 'success'
-      ? 'var(--success)'
-      : accent === 'warning'
-        ? 'var(--warning)'
-        : accent === 'danger'
-          ? 'var(--danger)'
-          : 'var(--fg-strong)';
-  return (
-    <div style={STAT_CARD_STYLE}>
-      <span style={{ fontSize: 18, fontWeight: 800, color: valueColor }}>{value}</span>
-      <span style={{ fontSize: 10, color: 'var(--fg-muted)', fontWeight: 600 }}>{label}</span>
-    </div>
-  );
-}
-
 function KV({ k, v }: { k: string; v: string }) {
   return (
     <span>
@@ -314,7 +274,7 @@ function RunningRow({ entry, dur }: { entry: HandoffEntry; dur: number }) {
         padding: '6px 10px',
         borderRadius: 8,
         border: '1px solid color-mix(in srgb, var(--border-default) 45%, transparent)',
-        background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
+        background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
         fontSize: 12,
       }}
     >

@@ -41,31 +41,31 @@ function formatTaskStatus(status: string | undefined): string {
 function getTaskStatusStyle(status: string | undefined): React.CSSProperties {
   if (status === 'running') {
     return {
-      background: 'color-mix(in oklch, var(--accent) 16%, var(--bg-overlay)',
-      border: '1px solid color-mix(in oklch, var(--accent) 40%, var(--border-subtle)',
+      background: 'color-mix(in oklch, var(--accent) 16%, var(--bg-overlay))',
+      border: '1px solid color-mix(in oklch, var(--accent) 40%, var(--border-subtle))',
       color: 'var(--accent)',
     };
   }
 
   if (status === 'completed') {
     return {
-      background: 'color-mix(in srgb, var(--success) 12%, var(--bg-overlay)',
-      border: '1px solid color-mix(in srgb, var(--success) 34%, var(--border-subtle)',
+      background: 'color-mix(in srgb, var(--success) 12%, var(--bg-overlay))',
+      border: '1px solid color-mix(in srgb, var(--success) 34%, var(--border-subtle))',
       color: 'var(--success)',
     };
   }
 
   if (status === 'failed' || status === 'cancelled') {
     return {
-      background: 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay)',
-      border: '1px solid color-mix(in srgb, var(--danger) 30%, var(--border-subtle)',
+      background: 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay))',
+      border: '1px solid color-mix(in srgb, var(--danger) 30%, var(--border-subtle))',
       color: 'var(--danger)',
     };
   }
 
   return {
-    background: 'color-mix(in srgb, var(--warning) 10%, var(--bg-overlay)',
-    border: '1px solid color-mix(in srgb, var(--warning) 28%, var(--border-subtle)',
+    background: 'color-mix(in srgb, var(--warning) 10%, var(--bg-overlay))',
+    border: '1px solid color-mix(in srgb, var(--warning) 28%, var(--border-subtle))',
     color: 'var(--warning)',
   };
 }
@@ -957,7 +957,7 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
               maxWidth: 'calc(100% - 28px)',
               borderRadius: 999,
               border: hasPendingFollowContent
-                ? '1px solid color-mix(in oklch, var(--accent) 55%, var(--border-default)'
+                ? '1px solid color-mix(in oklch, var(--accent) 55%, var(--border-default))'
                 : '1px solid var(--border-default)',
               background: hasPendingFollowContent
                 ? 'color-mix(in oklch, var(--bg-overlay) 82%, var(--accent) 18%)'

@@ -16,7 +16,8 @@
       "@openAwork/shared": ["../../packages/shared/src/index.ts"],
       "@openAwork/skill-registry": ["../../packages/skill-registry/src/index.ts"],
       "@openAwork/skills": ["../../packages/skills/src/index.ts"],
-      "@openAwork/skill-types": ["../../packages/skill-types/src/index.ts"]
+      "@openAwork/skill-types": ["../../packages/skill-types/src/index.ts"],
+      "@openAwork/telemetry": ["../../packages/telemetry/src/index.ts"]
     }
   },
   "references": [
@@ -31,7 +32,8 @@
     { "path": "../../packages/shared" },
     { "path": "../../packages/skill-registry" },
     { "path": "../../packages/skills" },
-    { "path": "../../packages/skill-types" }
+    { "path": "../../packages/skill-types" },
+    { "path": "../../packages/telemetry" }
   ],
   "include": ["src"]
 }

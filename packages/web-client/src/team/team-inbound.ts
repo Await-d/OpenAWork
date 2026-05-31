@@ -10,10 +10,18 @@
  * - 请求体 `messageType`、`payload`、`clientIdempotencyKey`、`expiresAt`
  * - 响应体 `messageId`、`createdAt`
  *
- * **错误处理**：失败抛 `HttpError`（与其他 client 一致）。
+ * **错误处理**：失败抛 `HttpError`（与其他 client 一致），保留后端 `error` 文案。
  */
 
-import { HttpError, jsonAuthHeaders, expectJson } from '../gateway/http.js';
+import {
+  fetchWithTimeout,
+  extractJsonErrorMessage,
+  HttpError,
+  isGenericFetchErrorMessage,
+  jsonAuthHeaders,
+  readJsonErrorData,
+  type JsonErrorData,
+} from '../gateway/http.js';
 
 // ─── L1.3 spec §1.3.2 载荷类型（前端 inbound-types.ts 同步）───────────────
 
@@ -114,26 +122,98 @@ export interface TeamInboundClient {
     sessionId: string,
     request: InboundSubmitRequest<T>,
   ): Promise<InboundSubmitResponse>;
+  dismissClarification(token: string, sessionId: string, questionId: string): Promise<{ ok: true }>;
+}
+
+function buildTeamInboundActionErrorMessage(
+  actionLabel: string,
+  status: number,
+  data: JsonErrorData | undefined,
+): string {
+  const extracted = extractJsonErrorMessage(data);
+  if (extracted) {
+    return extracted;
+  }
+  if (status === 401 || status === 403) {
+    return `认证失效或当前账号无权${actionLabel}。`;
+  }
+  if (status === 404) {
+    return `目标团队会话不存在，无法${actionLabel}。`;
+  }
+  if (status === 409) {
+    return `当前状态不允许${actionLabel}。`;
+  }
+  return `${actionLabel}失败（HTTP ${status}）。`;
+}
+
+function isGenericTeamInboundNetworkErrorMessage(message: string): boolean {
+  return isGenericFetchErrorMessage(message);
+}
+
+function normalizeTeamInboundError(actionLabel: string, error: unknown): Error {
+  if (error instanceof HttpError) {
+    const extracted = extractJsonErrorMessage((error.data ?? undefined) as JsonErrorData | undefined);
+    if (extracted) {
+      return new HttpError(extracted, error.status, error.data);
+    }
+    return error;
+  }
+  if (error instanceof Error) {
+    const message = error.message.trim();
+    if (message.length > 0 && !isGenericTeamInboundNetworkErrorMessage(message)) {
+      return error;
+    }
+  }
+  return new Error(`网络异常，${actionLabel}失败。`);
+}
+
+async function performTeamInboundRequest<T>(input: {
+  actionLabel: string;
+  request: () => Promise<Response>;
+}): Promise<T> {
+  try {
+    const response = await input.request();
+    if (!response.ok) {
+      const data = await readJsonErrorData<JsonErrorData>(response);
+      throw new HttpError(
+        buildTeamInboundActionErrorMessage(input.actionLabel, response.status, data),
+        response.status,
+        data,
+      );
+    }
+    return (await response.json()) as T;
+  } catch (error) {
+    throw normalizeTeamInboundError(input.actionLabel, error);
+  }
 }
 
 export function createTeamInboundClient(baseUrl: string): TeamInboundClient {
   return {
     async submit(token, sessionId, request) {
-      const response = await fetch(
-        `${baseUrl}/team/sessions/${encodeURIComponent(sessionId)}/inbound-messages`,
-        {
-          method: 'POST',
-          headers: jsonAuthHeaders(token),
-          body: JSON.stringify(request),
-        },
-      );
-      if (!response.ok) {
-        throw new HttpError(
-          `Failed to submit inbound message: ${response.status}`,
-          response.status,
-        );
-      }
-      return expectJson<InboundSubmitResponse>(response, 'submitInbound');
+      return performTeamInboundRequest<InboundSubmitResponse>({
+        actionLabel: '提交团队反向消息',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/team/sessions/${encodeURIComponent(sessionId)}/inbound-messages`, {
+            method: 'POST',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify(request),
+          }),
+      });
+    },
+
+    async dismissClarification(token, sessionId, questionId) {
+      return performTeamInboundRequest<{ ok: true }>({
+        actionLabel: '忽略澄清问题',
+        request: () =>
+          fetchWithTimeout(
+            `${baseUrl}/team/sessions/${encodeURIComponent(sessionId)}/clarifications/${encodeURIComponent(questionId)}/dismiss`,
+            {
+              method: 'POST',
+              headers: jsonAuthHeaders(token),
+              body: JSON.stringify({ answeredAt: Date.now() }),
+            },
+          ),
+      });
     },
   };
 }

@@ -886,6 +886,7 @@ export const agentTeamsNewTemplateProviders = [
   { value: 'openrouter', label: 'OpenRouter' },
   { value: 'qwen', label: 'Qwen', modelId: 'qwen3-coder', variant: 'medium' },
   { value: 'moonshot', label: 'Moonshot', modelId: 'kimi-k2.5', variant: 'medium' },
+  { value: 'mimo', label: 'Xiaomi MiMo', modelId: 'mimo-v2.5-pro', variant: 'high' },
 ];
 
 export type AgentTeamsTimelineEventType =

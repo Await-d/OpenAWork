@@ -16,35 +16,35 @@ function getSourceTone(status: DevtoolsSourceState['status']): SourceTone {
   switch (status) {
     case 'healthy':
       return {
-        background: 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay)',
-        border: 'color-mix(in srgb, var(--accent) 35%, var(--border-default)',
+        background: 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay))',
+        border: 'color-mix(in srgb, var(--accent) 35%, var(--border-default))',
         text: 'var(--accent)',
         badgeBackground: 'color-mix(in srgb, var(--accent) 18%, transparent)',
       };
     case 'error':
       return {
-        background: 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay)',
-        border: 'color-mix(in srgb, var(--danger) 42%, var(--border-default)',
+        background: 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay))',
+        border: 'color-mix(in srgb, var(--danger) 42%, var(--border-default))',
         text: 'var(--danger)',
         badgeBackground: 'color-mix(in srgb, var(--danger) 16%, transparent)',
       };
     case 'empty':
       return {
-        background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base)',
+        background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
         border: 'var(--border-default)',
         text: 'var(--fg-default)',
         badgeBackground: 'color-mix(in srgb, var(--fg-muted) 18%, transparent)',
       };
     case 'unavailable':
       return {
-        background: 'color-mix(in srgb, var(--warning) 10%, var(--bg-overlay)',
-        border: 'color-mix(in srgb, var(--warning) 30%, var(--border-default)',
+        background: 'color-mix(in srgb, var(--warning) 10%, var(--bg-overlay))',
+        border: 'color-mix(in srgb, var(--warning) 30%, var(--border-default))',
         text: 'var(--warning)',
         badgeBackground: 'color-mix(in srgb, var(--warning) 16%, transparent)',
       };
     default:
       return {
-        background: 'color-mix(in srgb, var(--bg-overlay) 85%, var(--bg-base)',
+        background: 'color-mix(in srgb, var(--bg-overlay) 85%, var(--bg-base))',
         border: 'var(--border-default)',
         text: 'var(--fg-default)',
         badgeBackground: 'color-mix(in srgb, var(--fg-muted) 18%, transparent)',
@@ -84,8 +84,8 @@ export function InlineFailureNotice({ title, message }: { title: string; message
   return (
     <div
       style={{
-        border: '1px solid color-mix(in srgb, var(--danger) 42%, var(--border-default)',
-        background: 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay)',
+        border: '1px solid color-mix(in srgb, var(--danger) 42%, var(--border-default))',
+        background: 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay))',
         borderRadius: 8,
         padding: '8px 10px',
         display: 'flex',
@@ -172,7 +172,7 @@ export function SourceOverviewCard({
                 border: '1px solid var(--border-default)',
                 borderRadius: 6,
                 padding: '2px 7px',
-                background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base)',
+                background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base))',
                 color: 'var(--fg-strong)',
                 fontSize: 10,
                 cursor: source.status === 'loading' ? 'not-allowed' : 'pointer',
@@ -300,7 +300,7 @@ export function DiagnosticDetailsPanel({
           padding: '10px 12px',
           color: 'var(--fg-muted)',
           fontSize: 11,
-          background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base)',
+          background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
         }}
       >
         选择一条诊断记录后，这里会显示完整报错上下文。
@@ -312,8 +312,8 @@ export function DiagnosticDetailsPanel({
     <div
       style={{
         borderRadius: 10,
-        border: '1px solid color-mix(in srgb, var(--danger) 30%, var(--border-default)',
-        background: 'color-mix(in srgb, var(--danger) 7%, var(--bg-overlay)',
+        border: '1px solid color-mix(in srgb, var(--danger) 30%, var(--border-default))',
+        background: 'color-mix(in srgb, var(--danger) 7%, var(--bg-overlay))',
         padding: '10px 12px',
         display: 'flex',
         flexDirection: 'column',
@@ -373,7 +373,7 @@ export function DiagnosticDetailsPanel({
             style={{
               borderRadius: 8,
               border: '1px solid var(--border-default)',
-              background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base)',
+              background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
               padding: '8px 10px',
               display: 'flex',
               flexDirection: 'column',
@@ -489,7 +489,7 @@ export function LogDetailsPanel({ log }: { log: SettingsDevLogRecord | null }) {
           padding: '10px 12px',
           color: 'var(--fg-muted)',
           fontSize: 11,
-          background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base)',
+          background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
         }}
       >
         选择一条日志后，这里会显示结构化执行详情。
@@ -501,11 +501,11 @@ export function LogDetailsPanel({ log }: { log: SettingsDevLogRecord | null }) {
     <div
       style={{
         borderRadius: 10,
-        border: `1px solid ${log.level === 'error' ? 'color-mix(in srgb, var(--danger) 30%, var(--border-default)' : 'var(--border-default)'}`,
+        border: `1px solid ${log.level === 'error' ? 'color-mix(in srgb, var(--danger) 30%, var(--border-default))' : 'var(--border-default)'}`,
         background:
           log.level === 'error'
-            ? 'color-mix(in srgb, var(--danger) 7%, var(--bg-overlay)'
-            : 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base)',
+            ? 'color-mix(in srgb, var(--danger) 7%, var(--bg-overlay))'
+            : 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
         padding: '10px 12px',
         display: 'flex',
         flexDirection: 'column',
@@ -566,7 +566,7 @@ export function LogDetailsPanel({ log }: { log: SettingsDevLogRecord | null }) {
             style={{
               borderRadius: 8,
               border: '1px solid var(--border-default)',
-              background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base)',
+              background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
               padding: '8px 10px',
               display: 'flex',
               flexDirection: 'column',
@@ -648,7 +648,7 @@ export function WorkerDetailsPanel({ worker }: { worker: WorkerEntry | null }) {
           padding: '10px 12px',
           color: 'var(--fg-muted)',
           fontSize: 11,
-          background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base)',
+          background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
         }}
       >
         选择一个 Worker 后，这里会显示状态详情与复制上下文。
@@ -660,11 +660,11 @@ export function WorkerDetailsPanel({ worker }: { worker: WorkerEntry | null }) {
     <div
       style={{
         borderRadius: 10,
-        border: `1px solid ${worker.status === 'error' ? 'color-mix(in srgb, var(--danger) 30%, var(--border-default)' : 'var(--border-default)'}`,
+        border: `1px solid ${worker.status === 'error' ? 'color-mix(in srgb, var(--danger) 30%, var(--border-default))' : 'var(--border-default)'}`,
         background:
           worker.status === 'error'
-            ? 'color-mix(in srgb, var(--danger) 7%, var(--bg-overlay)'
-            : 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base)',
+            ? 'color-mix(in srgb, var(--danger) 7%, var(--bg-overlay))'
+            : 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
         padding: '10px 12px',
         display: 'flex',
         flexDirection: 'column',
@@ -712,7 +712,7 @@ export function WorkerDetailsPanel({ worker }: { worker: WorkerEntry | null }) {
         style={{
           borderRadius: 8,
           border: '1px solid var(--border-default)',
-          background: 'color-mix(in srgb, var(--bg-overlay) 94%, var(--bg-base)',
+          background: 'color-mix(in srgb, var(--bg-overlay) 94%, var(--bg-base))',
           padding: '8px 10px',
           fontSize: 11,
           color: 'var(--fg-default)',

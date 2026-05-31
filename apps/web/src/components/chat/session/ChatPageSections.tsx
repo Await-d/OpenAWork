@@ -1259,7 +1259,7 @@ export function WelcomeScreen({
             height: 42,
             borderRadius: 13,
             background:
-              'linear-gradient(135deg, var(--accent), color-mix(in oklch, var(--accent) 65%, var(--chart-5))))',
+              'linear-gradient(135deg, var(--accent), color-mix(in oklch, var(--accent) 65%, var(--chart-5)))',
             marginBottom: 10,
             boxShadow: '0 4px 24px color-mix(in srgb, var(--accent) 28%, transparent)',
             animation: 'ws-float 3s ease-in-out infinite',
@@ -1829,7 +1829,7 @@ function CompanionInlineBlock({ content }: { content: string }) {
         padding: '8px 12px',
         borderRadius: 10,
         border: '1px solid color-mix(in oklch, var(--accent) 20%, transparent)',
-        background: 'color-mix(in oklch, var(--accent) 6%, var(--bg-overlay)',
+        background: 'color-mix(in oklch, var(--accent) 6%, var(--bg-overlay))',
         fontSize: 12,
         lineHeight: 1.5,
         color: 'color-mix(in oklch, var(--accent) 82%, var(--fg-on-accent) 18%)',

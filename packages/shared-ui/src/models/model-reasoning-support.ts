@@ -71,6 +71,13 @@ export function canConfigureThinkingForModel(
     return modelId === 'kimi-k2.5';
   }
 
+  if (providerType === 'mimo') {
+    // 小米 MiMo V2.5 系列与 V2 Flash 均支持 enabled/disabled 思维链开关，
+    // 后端 provider-options.ts 的 mimo 分支会把 effort 映射为
+    // `thinking: { type: 'enabled' }` 下发。
+    return true;
+  }
+
   // Anthropic / Claude：只要 catalog 已经把 `supportsThinking` 标为 true（Claude 3.7+ /
   // 4.x / Opus 4.x 等带 extended thinking 的模型），就一律放开「思考等级」UI。
   // 后端 `provider-options.ts` 的 anthropic 分支会把 effort 映射到 `thinking.budgetTokens`

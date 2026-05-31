@@ -25,6 +25,8 @@ export interface TeamUsageEvent {
   agentId?: string;
   /** session 维度，用于按 session 聚合。 */
   sessionId?: string;
+  /** 角色层级，用于按 layer 聚合（reception/pm1/pm2/executor/tester/reviewer）。 */
+  layer?: string;
   /** provider 名称，如 'anthropic'/'openai'。 */
   provider?: string;
   /** model 名称。 */
@@ -56,6 +58,8 @@ interface TeamUsageState {
   byAgent: Map<string, UsageBucket>;
   /** 按 session 聚合。 */
   bySession: Map<string, UsageBucket>;
+  /** 按 layer（角色层级）聚合。 */
+  byLayer: Map<string, UsageBucket>;
   /** 全量 events（最近 200 条），用于按时间窗口聚合。 */
   recent: TeamUsageEvent[];
   total: UsageBucket;
@@ -93,6 +97,7 @@ export const useTeamUsageStore = create<TeamUsageState>((set) => ({
   byProvider: new Map(),
   byAgent: new Map(),
   bySession: new Map(),
+  byLayer: new Map(),
   recent: [],
   total: emptyBucket(),
   applyUsageEvent: (event) =>
@@ -100,6 +105,7 @@ export const useTeamUsageStore = create<TeamUsageState>((set) => ({
       const byProvider = new Map(state.byProvider);
       const byAgent = new Map(state.byAgent);
       const bySession = new Map(state.bySession);
+      const byLayer = new Map(state.byLayer);
 
       if (event.provider) {
         byProvider.set(
@@ -116,12 +122,16 @@ export const useTeamUsageStore = create<TeamUsageState>((set) => ({
           addToBucket(bySession.get(event.sessionId) ?? emptyBucket(), event),
         );
       }
+      if (event.layer) {
+        byLayer.set(event.layer, addToBucket(byLayer.get(event.layer) ?? emptyBucket(), event));
+      }
 
       const nextRecent = [...state.recent, event].slice(-RECENT_LIMIT);
       return {
         byProvider,
         byAgent,
         bySession,
+        byLayer,
         recent: nextRecent,
         total: addToBucket(state.total, event),
       };
@@ -131,6 +141,7 @@ export const useTeamUsageStore = create<TeamUsageState>((set) => ({
       byProvider: new Map(),
       byAgent: new Map(),
       bySession: new Map(),
+      byLayer: new Map(),
       recent: [],
       total: emptyBucket(),
     }),

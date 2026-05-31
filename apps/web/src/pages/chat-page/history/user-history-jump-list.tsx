@@ -253,7 +253,7 @@ function UserHistoryItemCard({
         padding: '5px 7px',
         borderRadius: 8,
         border: selected
-          ? '1px solid color-mix(in oklch, var(--accent) 50%, var(--border-subtle)'
+          ? '1px solid color-mix(in oklch, var(--accent) 50%, var(--border-subtle))'
           : '1px solid transparent',
         background: selected
           ? 'color-mix(in oklch, var(--bg-overlay) 84%, var(--accent) 16%)'
@@ -279,7 +279,7 @@ function UserHistoryItemCard({
             borderRadius: 999,
             border: '1px solid var(--border-subtle)',
             background: selected
-              ? 'color-mix(in oklch, var(--accent) 22%, var(--bg-overlay)'
+              ? 'color-mix(in oklch, var(--accent) 22%, var(--bg-overlay))'
               : 'var(--bg-overlay)',
             color: selected ? 'var(--accent)' : 'var(--fg-muted)',
             fontSize: 8.5,

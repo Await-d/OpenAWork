@@ -170,7 +170,7 @@ describe('session images routes', () => {
     });
 
     expect(response.statusCode).toBe(404);
-    expect(JSON.parse(response.body)).toEqual({ error: 'Session not found' });
+    expect(JSON.parse(response.body)).toEqual({ error: '目标会话不存在。' });
 
     await app.close();
   });

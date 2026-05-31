@@ -6,6 +6,7 @@ import type {
   ChannelInstance,
   ChannelEvent,
 } from './types.js';
+import { channelFetch } from './channel-http.js';
 
 interface FeishuConfig {
   appId: string;
@@ -22,11 +23,33 @@ interface FeishuTokenResponse {
 
 interface FeishuMessageResponse {
   code: number;
-  data: { message_id: string };
+  msg?: string;
+  data?: { message_id?: string };
 }
 
 interface FeishuCardUpdateResponse {
   code: number;
+}
+
+/**
+ * Validate a Feishu IM send response. Feishu returns HTTP 200 even on
+ * application errors (token expired, rate limited, etc.) with a non-zero
+ * `code` and (often) a missing `data`. Reading `data.message_id` blindly
+ * would throw an opaque "cannot read properties of undefined" and mask the
+ * real failure. Surface a clear, actionable error instead.
+ */
+function parseFeishuMessageId(resp: Response, body: FeishuMessageResponse): string {
+  if (!resp.ok) {
+    throw new Error(`Feishu send failed: HTTP ${resp.status}`);
+  }
+  if (body.code !== 0) {
+    throw new Error(`Feishu send failed: code ${body.code}${body.msg ? ` (${body.msg})` : ''}`);
+  }
+  const messageId = body.data?.message_id;
+  if (!messageId) {
+    throw new Error('Feishu send succeeded but returned no message_id');
+  }
+  return messageId;
 }
 
 const FEISHU_API = 'https://open.feishu.cn/open-apis';
@@ -77,7 +100,7 @@ export class FeishuChannelService implements MessagingChannelService {
 
   async sendMessage(chatId: string, content: string): Promise<{ messageId: string }> {
     const token = await this.getToken();
-    const resp = await fetch(`${FEISHU_API}/im/v1/messages?receive_id_type=chat_id`, {
+    const resp = await channelFetch(`${FEISHU_API}/im/v1/messages?receive_id_type=chat_id`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -87,12 +110,12 @@ export class FeishuChannelService implements MessagingChannelService {
       }),
     });
     const data = (await resp.json()) as FeishuMessageResponse;
-    return { messageId: data.data.message_id };
+    return { messageId: parseFeishuMessageId(resp, data) };
   }
 
   async replyMessage(messageId: string, content: string): Promise<{ messageId: string }> {
     const token = await this.getToken();
-    const resp = await fetch(`${FEISHU_API}/im/v1/messages/${messageId}/reply`, {
+    const resp = await channelFetch(`${FEISHU_API}/im/v1/messages/${messageId}/reply`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -101,7 +124,7 @@ export class FeishuChannelService implements MessagingChannelService {
       }),
     });
     const data = (await resp.json()) as FeishuMessageResponse;
-    return { messageId: data.data.message_id };
+    return { messageId: parseFeishuMessageId(resp, data) };
   }
 
   async sendStreamingMessage(
@@ -110,7 +133,7 @@ export class FeishuChannelService implements MessagingChannelService {
     _replyToMessageId?: string,
   ): Promise<ChannelStreamingHandle> {
     const token = await this.getToken();
-    const resp = await fetch(`${FEISHU_API}/im/v1/messages?receive_id_type=chat_id`, {
+    const resp = await channelFetch(`${FEISHU_API}/im/v1/messages?receive_id_type=chat_id`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -120,11 +143,11 @@ export class FeishuChannelService implements MessagingChannelService {
       }),
     });
     const data = (await resp.json()) as FeishuMessageResponse;
-    const messageId = data.data.message_id;
+    const messageId = parseFeishuMessageId(resp, data);
 
     const updateCard = async (content: string): Promise<void> => {
       const t = await this.getToken();
-      const r = await fetch(`${FEISHU_API}/im/v1/messages/${messageId}`, {
+      const r = await channelFetch(`${FEISHU_API}/im/v1/messages/${messageId}`, {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -146,13 +169,13 @@ export class FeishuChannelService implements MessagingChannelService {
 
   async getGroupMessages(chatId: string, count = 20): Promise<ChannelMessage[]> {
     const token = await this.getToken();
-    const resp = await fetch(
+    const resp = await channelFetch(
       `${FEISHU_API}/im/v1/messages?container_id_type=chat&container_id=${chatId}&page_size=${count}`,
       { headers: { Authorization: `Bearer ${token}` } },
     );
     const data = (await resp.json()) as {
-      data: {
-        items: Array<{
+      data?: {
+        items?: Array<{
           message_id: string;
           sender: { id: string; name?: string };
           body: { content: string };
@@ -160,26 +183,29 @@ export class FeishuChannelService implements MessagingChannelService {
         }>;
       };
     };
-    return (data.data.items ?? []).map((item) => ({
+    // Feishu returns HTTP 200 with no `data` on error envelopes; and an
+    // individual item may omit sender/body. Read everything defensively so a
+    // malformed payload yields a (possibly partial) list rather than throwing.
+    return (data.data?.items ?? []).map((item) => ({
       id: item.message_id,
-      senderId: item.sender.id,
-      senderName: item.sender.name ?? item.sender.id,
+      senderId: item.sender?.id ?? 'unknown',
+      senderName: item.sender?.name ?? item.sender?.id ?? 'unknown',
       chatId,
-      content: item.body.content,
-      timestamp: Number(item.create_time),
+      content: item.body?.content ?? '',
+      timestamp: Number(item.create_time) || Date.now(),
       raw: item,
     }));
   }
 
   async listGroups(): Promise<ChannelGroup[]> {
     const token = await this.getToken();
-    const resp = await fetch(`${FEISHU_API}/im/v1/chats`, {
+    const resp = await channelFetch(`${FEISHU_API}/im/v1/chats`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     const data = (await resp.json()) as {
-      data: { items: Array<{ chat_id: string; name: string; member_count?: number }> };
+      data?: { items?: Array<{ chat_id: string; name: string; member_count?: number }> };
     };
-    return (data.data.items ?? []).map((g) => ({
+    return (data.data?.items ?? []).map((g) => ({
       id: g.chat_id,
       name: g.name,
       memberCount: g.member_count,
@@ -193,7 +219,7 @@ export class FeishuChannelService implements MessagingChannelService {
   }
 
   private async refreshToken(): Promise<void> {
-    const resp = await fetch(`${FEISHU_API}/auth/v3/tenant_access_token/internal`, {
+    const resp = await channelFetch(`${FEISHU_API}/auth/v3/tenant_access_token/internal`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ app_id: this.config.appId, app_secret: this.config.appSecret }),

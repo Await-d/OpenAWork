@@ -114,22 +114,23 @@ export function useTeamSessionCreation(options: UseTeamSessionCreationOptions) {
       }
     }
 
-    // 内置 workflow 包没有 DB 记录（id 形如 'workflow:quick-ask'），后端
-    // saved-template 路径会 404；这种情况下回落到 blank kind，但仍然把
-    // template 中携带的默认绑定 / optionalAgentIds 应用到 draft，
-    // 并把 workflowKey 写入 source 以让 UI 高亮已选中的 workflow。
-    const isBuiltinWorkflow = template.id.startsWith('workflow:');
-    const nextSource = isBuiltinWorkflow
-      ? { kind: 'blank' as const, workflowKey: template.id }
-      : {
-          kind: 'saved-template' as const,
-          templateId: template.id,
-        };
+    const nextSource = {
+      kind: 'saved-template' as const,
+      templateId: template.id,
+    };
 
     setDraft((current) => ({
       ...current,
       defaultProvider: teamTemplate?.defaultProvider ?? current.defaultProvider,
-      memberSlots: current.memberSlots,
+      // 模板自带 memberSlots（见 L1.2A 决策）则采用模板花名册作为默认成员，
+      // 否则保留当前 draft 的 memberSlots（不让模板覆盖用户已经手动调整过的成员）。
+      memberSlots:
+        Array.isArray(teamTemplate?.memberSlots) && teamTemplate.memberSlots.length > 0
+          ? teamTemplate.memberSlots.map((slot) => ({
+              ...slot,
+              toolsets: [...slot.toolsets],
+            }))
+          : current.memberSlots,
       optionalAgentIds: [...(teamTemplate?.optionalAgentIds ?? [])],
       requiredRoleBindings,
       source: nextSource,

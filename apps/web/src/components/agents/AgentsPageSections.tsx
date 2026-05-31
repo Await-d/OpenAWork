@@ -804,7 +804,7 @@ function AgentForm({
           borderRadius: 18,
           border: '1px solid color-mix(in oklab, var(--accent) 24%, var(--border-subtle) 76%)',
           background:
-            'linear-gradient(180deg, color-mix(in oklab, var(--accent-muted) 32%, var(--bg-overlay) 68%), var(--bg-overlay)',
+            'linear-gradient(180deg, color-mix(in oklab, var(--accent-muted) 32%, var(--bg-overlay) 68%), var(--bg-overlay))',
           padding: 14,
           display: 'grid',
           gap: 12,

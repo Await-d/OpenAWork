@@ -20,6 +20,33 @@ const TOKEN = 'tok-fake';
 const GATEWAY = 'https://gw.test';
 const EMAIL = 'qa@example.com';
 
+class MockWebSocket {
+  static instances: MockWebSocket[] = [];
+  static readonly CLOSED = 3;
+  static readonly OPEN = 1;
+
+  onclose: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onopen: (() => void) | null = null;
+  readyState = MockWebSocket.OPEN;
+  sentPayloads: string[] = [];
+  url: string;
+
+  constructor(url: string) {
+    this.url = url;
+    MockWebSocket.instances.push(this);
+  }
+
+  send(payload: string) {
+    this.sentPayloads.push(payload);
+  }
+
+  close() {
+    this.readyState = MockWebSocket.CLOSED;
+  }
+}
+
 interface RecoveryFixture {
   pendingPermissions?: unknown[];
   pendingQuestions?: unknown[];
@@ -74,10 +101,12 @@ function stubRecovery(payload: RecoveryFixture | { error: true }) {
 beforeEach(() => {
   // 默认每个测试都先 stub 一次空 fetch，避免漏 stub 导致请求泄漏
   stubRecovery({});
+  MockWebSocket.instances.length = 0;
 });
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
@@ -281,6 +310,7 @@ describe('useChatConversationState — 派生状态', () => {
         currentUserEmail: EMAIL,
         gatewayUrl: GATEWAY,
         token: TOKEN,
+        enableWriters: true,
       }),
     );
 
@@ -303,6 +333,7 @@ describe('useChatConversationState — 派生状态', () => {
         currentUserEmail: EMAIL,
         gatewayUrl: GATEWAY,
         token: TOKEN,
+        enableWriters: true,
       }),
     );
 
@@ -326,6 +357,7 @@ describe('useChatConversationState — submitInbound (v0.2)', () => {
         currentUserEmail: EMAIL,
         gatewayUrl: GATEWAY,
         token: TOKEN,
+        enableWriters: true,
       }),
     );
 
@@ -439,7 +471,7 @@ describe('useChatConversationState — submitInbound (v0.2)', () => {
     );
 
     await expect(result.current.submitInbound('user_input', { text: 'hi' })).rejects.toThrow(
-      /sessionId is null/,
+      '当前会话不存在，无法提交团队消息。',
     );
   });
 
@@ -454,7 +486,23 @@ describe('useChatConversationState — submitInbound (v0.2)', () => {
     );
 
     await expect(result.current.submitInbound('user_input', { text: 'hi' })).rejects.toThrow(
-      /token is missing/,
+      '未登录，无法提交团队消息。',
+    );
+  });
+
+  it('enableWriters=false 时 startStream 抛中文只读错误', async () => {
+    const { result } = renderHook(() =>
+      useChatConversationState({
+        sessionId: SESSION_ID,
+        currentUserEmail: EMAIL,
+        gatewayUrl: GATEWAY,
+        token: TOKEN,
+        enableWriters: false,
+      }),
+    );
+
+    await expect(result.current.startStream('hello')).rejects.toThrow(
+      '当前会话为只读模式，无法发送消息。',
     );
   });
 
@@ -663,6 +711,6 @@ describe('useChatConversationState — submitInbound (v0.2)', () => {
 
     await expect(
       result.current.submitInbound('user_input', { text: 'should fail' }),
-    ).rejects.toThrow(/Failed to submit inbound message: 404/);
+    ).rejects.toThrow('目标团队会话不存在，无法提交团队反向消息。');
   });
 });

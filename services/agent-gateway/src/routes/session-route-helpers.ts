@@ -81,6 +81,16 @@ function slimOutputValue(output: unknown): unknown {
     return output.map((item) => slimOutputValue(item));
   }
   const obj = output as Record<string, unknown>;
+  const isBatchShape = Array.isArray(obj['results']);
+  // Bash-style structured output (`{ command, cwd, exitCode, stdout, stderr,
+  // diffs }`). The frontend `resolveBashTerminalView` reads these fields to
+  // render the terminal card; collapsing the object into a truncated JSON
+  // string would drop the exit-code badge / structured stdout/stderr panes.
+  const isBashShape =
+    typeof obj['command'] === 'string' ||
+    typeof obj['exitCode'] === 'number' ||
+    typeof obj['stdout'] === 'string' ||
+    typeof obj['stderr'] === 'string';
   const slimmed: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(obj)) {
     if (key === 'diffs' && Array.isArray(value)) {
@@ -97,6 +107,17 @@ function slimOutputValue(output: unknown): unknown {
     } else {
       slimmed[key] = value;
     }
+  }
+  // Batch (`{ results: [...] }`) and bash (`{ command, exitCode, ... }`)
+  // outputs MUST keep their object shape so the frontend cards can recover
+  // per-sub status / terminal panes. The generic total-size guard below
+  // collapses an over-cap object into a truncated JSON *string*, which
+  // destroys that structure (batch sub-rows then spin forever; bash cards
+  // lose their exit-code + stdout/stderr panes after a refresh). Long leaf
+  // strings and diffs are already truncated above, so the payload stays
+  // bounded without the string fallback.
+  if (isBatchShape || isBashShape) {
+    return slimmed;
   }
   const serialized = JSON.stringify(slimmed);
   if (serialized.length > SLIM_OUTPUT_TOTAL_MAX) {
@@ -140,6 +161,10 @@ interface SessionResponseLike {
   title: string | null;
   created_at: string;
   updated_at: string;
+  /** 团队会话语义层级（reception/pm1/pm2/executor/reviewer）。chat 会话为 null/缺失。 */
+  role_layer?: string | null;
+  /** 团队会话子状态机位置（L1.3）。 */
+  substate?: string | null;
 }
 
 export interface PublicSessionResponse extends SessionResponseLike {
@@ -164,6 +189,10 @@ export function toPublicSessionResponse(
     title: session.title,
     created_at: session.created_at,
     updated_at: session.updated_at,
+    // 团队会话语义字段：透传给前端（reception 空态卡片 / 初始化清单依赖
+    // role_layer === 'reception' 才渲染）。chat 会话缺失时为 null。
+    ...(session.role_layer !== undefined ? { role_layer: session.role_layer } : {}),
+    ...(session.substate !== undefined ? { substate: session.substate } : {}),
     messages,
     runEvents,
     todos,
@@ -174,12 +203,12 @@ export function validateImportedMessagesPayload(
   messages: unknown[],
 ): { ok: true; serializedMessages: string } | { error: string; ok: false } {
   if (messages.length > MAX_IMPORTED_MESSAGES) {
-    return { ok: false, error: `Import exceeds ${MAX_IMPORTED_MESSAGES} messages` };
+    return { ok: false, error: `导入消息数量超过上限（最多 ${MAX_IMPORTED_MESSAGES} 条）` };
   }
 
   const serializedMessages = JSON.stringify(messages);
   if (Buffer.byteLength(serializedMessages, 'utf8') > MAX_IMPORTED_MESSAGES_BYTES) {
-    return { ok: false, error: `Import exceeds ${MAX_IMPORTED_MESSAGES_BYTES} bytes` };
+    return { ok: false, error: `导入内容大小超过上限（最多 ${MAX_IMPORTED_MESSAGES_BYTES} 字节）` };
   }
 
   return { ok: true, serializedMessages };

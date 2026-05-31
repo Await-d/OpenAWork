@@ -58,6 +58,9 @@ import { filterSessionsByPath } from '../session/session-path-filter.js';
 import { listSessionTodoLanes, listSessionTodos } from '../tools/todo-tools.js';
 import { terminateChildSession } from '../tools/tool-sandbox.js';
 import { clearPendingTaskParentAutoResumesForSession } from '../task/task-parent-auto-resume.js';
+import { resetDoomLoopHistory } from '../session/doom-loop-detector.js';
+import { clearExternalAccessTracking } from '../workspace/external-directory-guard.js';
+import { clearSubstateTrackingForSession } from '../handoff/store/substate-store.js';
 import {
   getLatestSessionRunEventSeqByRequest,
   listSessionRunEvents,
@@ -116,6 +119,23 @@ export interface SessionRow {
   title: string | null;
   created_at: string;
   updated_at: string;
+  /**
+   * Team layering parent link. This is a real `sessions` COLUMN (set by
+   * `createTeamSession`), deliberately distinct from `metadata.parentSessionId`
+   * (the subagent message-tree link). Optional here because most SELECTs in
+   * this file don't project it; the session-delete path explicitly does so the
+   * deletion tree can follow team children (pm1/pm2/executor/reviewer).
+   */
+  team_parent_session_id?: string | null;
+  /**
+   * Team layering semantics (reception/pm1/pm2/executor/reviewer). Real column,
+   * projected by the recovery / single-session SELECTs so the team page can
+   * render the reception empty-state card + init checklist (which gate on
+   * role_layer === 'reception'). Most other SELECTs omit it → optional.
+   */
+  role_layer?: string | null;
+  /** Team L1.3 substate machine position. Real column, optionally projected. */
+  substate?: string | null;
 }
 
 interface RecoveryPermissionRequestRow {
@@ -212,7 +232,7 @@ const restorePreviewSchema = z
     if ((value.backupId ? 1 : 0) + (value.snapshotRef ? 1 : 0) !== 1) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'Provide exactly one of backupId or snapshotRef',
+        message: '必须且只能提供 backupId 或 snapshotRef 其中之一。',
         path: ['backupId'],
       });
     }
@@ -240,7 +260,7 @@ const restoreApplySchema = z
     if ((value.backupId ? 1 : 0) + (value.snapshotRef ? 1 : 0) !== 1) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'Provide exactly one of backupId or snapshotRef',
+        message: '必须且只能提供 backupId 或 snapshotRef 其中之一。',
         path: ['backupId'],
       });
     }
@@ -419,6 +439,14 @@ function resolveRestoreTargetPath(input: {
 async function readWorkspaceContentForPreview(input: {
   filePath: string;
   workspaceRoot: string;
+  // When true, a non-ENOENT read error (EACCES / EISDIR / EIO / ELOOP) degrades
+  // to "absent" + warn instead of throwing. Set ONLY on the read-only
+  // validate/preview path so one unreadable file can't reject the whole
+  // `Promise.all(snapshot.files.map(...))` and 500 the entire preview (§0.95
+  // class). The restore-APPLY path must leave this false (default): there the
+  // read feeds the before-write backup, so silently treating an
+  // unreadable-but-existing file as absent would overwrite it without a backup.
+  tolerateUnreadable?: boolean;
 }): Promise<{
   content: string;
   exists: boolean;
@@ -437,7 +465,14 @@ async function readWorkspaceContentForPreview(input: {
       safePath,
     };
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') {
+      return { validPath: true, exists: false, content: '', safePath };
+    }
+    if (input.tolerateUnreadable) {
+      console.warn(
+        `[sessions] 恢复预览读取工作区文件失败（${code ?? 'unknown'}），按缺失处理：${input.filePath}`,
+      );
       return { validPath: true, exists: false, content: '', safePath };
     }
     throw error;
@@ -461,10 +496,14 @@ async function buildBackupRestorePreviewState(input: {
   backupContent: string | null;
   includeText: boolean;
   workspaceRoot: string;
+  // Read-only validate/preview routes set this so one unreadable file degrades
+  // instead of 500ing the whole preview; the apply route leaves it false.
+  tolerateUnreadable?: boolean;
 }) {
   const current = await readWorkspaceContentForPreview({
     filePath: input.backup.filePath,
     workspaceRoot: input.workspaceRoot,
+    ...(input.tolerateUnreadable ? { tolerateUnreadable: true } : {}),
   });
   const diff = buildFileDiff({
     file: input.backup.filePath,
@@ -500,12 +539,16 @@ async function buildSnapshotRestorePreviewState(input: {
   includeText: boolean;
   snapshot: Exclude<ReturnType<typeof getSessionSnapshotByRef>, null>;
   workspaceRoot: string;
+  // Read-only validate/preview routes set this so one unreadable file degrades
+  // instead of 500ing the whole preview; the apply route leaves it false.
+  tolerateUnreadable?: boolean;
 }) {
   const previews: RestorePreviewFile[] = await Promise.all(
     input.snapshot.files.map(async (file) => {
       const current = await readWorkspaceContentForPreview({
         filePath: file.file,
         workspaceRoot: input.workspaceRoot,
+        ...(input.tolerateUnreadable ? { tolerateUnreadable: true } : {}),
       });
       const diff = buildFileDiff({
         file: file.file,
@@ -691,15 +734,26 @@ function buildSessionDeletionRows(sessions: SessionRow[], rootSessionId: string)
   const rowsById = new Map(sessions.map((session) => [session.id, session]));
   const childrenByParent = new Map<string, string[]>();
 
-  for (const session of sessions) {
-    const parentSessionId = parseParentSessionId(session.metadata_json);
-    if (!parentSessionId) {
-      continue;
+  const linkChild = (parentSessionId: string | null | undefined, childId: string): void => {
+    if (!parentSessionId || parentSessionId === childId) {
+      return;
     }
-
     const existingChildren = childrenByParent.get(parentSessionId) ?? [];
-    existingChildren.push(session.id);
+    existingChildren.push(childId);
     childrenByParent.set(parentSessionId, existingChildren);
+  };
+
+  for (const session of sessions) {
+    // Two distinct parent links must BOTH be followed or the tree leaks rows:
+    //   1. metadata.parentSessionId — subagent / message-tree children.
+    //   2. team_parent_session_id (a real column) — team-layer children
+    //      (pm1/pm2/executor/reviewer) created by `createTeamSession`, which
+    //      never writes metadata.parentSessionId. There is NO FK CASCADE on
+    //      this column, so without following it here, deleting a reception root
+    //      deletes only the root row and orphans every team descendant (plus
+    //      their CASCADE-linked message_v2 / handoff_records / inbound rows).
+    linkChild(parseParentSessionId(session.metadata_json), session.id);
+    linkChild(session.team_parent_session_id ?? null, session.id);
   }
 
   const queue: Array<{ depth: number; sessionId: string }> = [
@@ -770,6 +824,12 @@ async function deleteSessionTree(input: {
         userId: input.userId,
       });
       clearPendingTaskParentAutoResumesForSession({ sessionId: session.id, userId: input.userId });
+      // Purge per-session in-memory state that keys on sessionId. These maps
+      // never evict on their own, so without this a deleted session leaks one
+      // entry per map for the process lifetime (unbounded over many sessions).
+      clearSubstateTrackingForSession(session.id);
+      clearExternalAccessTracking(session.id);
+      resetDoomLoopHistory(session.id);
 
       try {
         sqliteRun('DELETE FROM sessions WHERE id = ? AND user_id = ?', [session.id, input.userId]);
@@ -926,21 +986,51 @@ const childSessionQuerySchema = z.object({
 
 const taskManager = new AgentTaskManagerImpl();
 const taskStore = new AgentTaskStoreImpl();
-const SESSION_WORKSPACE_IMMUTABLE_ERROR = 'Session workspace cannot be moved after binding';
-const SESSION_PARENT_IMMUTABLE_ERROR = 'Session parent cannot be changed after binding';
+const SESSION_ROUTE_ERROR_MESSAGES = {
+  backupNotFound: '目标备份不存在。',
+  deleteBlocked: '仅当相关会话全部处于空闲状态时才能删除。',
+  messageNotFound: '目标消息不存在。',
+  metadataInvalid: '会话元数据无效。',
+  parentNotFound: '目标父会话不存在。',
+  restoreBlocked: '当前工作区状态不满足恢复条件，暂不能应用恢复。',
+  selfParent: '会话不能将自己设为父会话。',
+  snapshotNotFound: '目标快照不存在。',
+  taskNotCancellable: '当前任务状态不支持取消。',
+  taskNotFound: '目标任务不存在。',
+  workspaceForbidden: '工作区路径不在允许范围内。',
+} as const;
+const SESSION_WORKSPACE_IMMUTABLE_ERROR = '当前会话已绑定工作区，不能直接修改。';
+const SESSION_PARENT_IMMUTABLE_ERROR = '当前会话已绑定父会话，不能直接修改。';
 
 async function reconcileSessionRuntimeForResponse(
   session: SessionRow,
   userId: string,
 ): Promise<SessionRow> {
-  const reconciliation = await reconcileSessionRuntime({ sessionId: session.id, userId });
+  // Per-session resilience: reconcileSessionRuntime does DB writes plus
+  // finalizeChildTaskRun and can throw. This runs inside
+  // `Promise.all(sessions.map(...))` for the main `/sessions` list and 7 other
+  // routes, so one session's reconciliation failure used to reject the whole
+  // batch and 500 the entire listing. Degrade to the already-loaded row (its
+  // persisted state_status) + warn instead, mirroring the batch
+  // `reconcileAllSessionRuntimes` which collects failures rather than aborting.
+  let reconciliation: Awaited<ReturnType<typeof reconcileSessionRuntime>>;
+  try {
+    reconciliation = await reconcileSessionRuntime({ sessionId: session.id, userId });
+  } catch (error) {
+    console.warn(
+      `[sessions] 会话 ${session.id} 运行时协调失败，沿用持久状态：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return session;
+  }
 
   if (!reconciliation.status) {
     return session;
   }
 
   const refreshedSession = sqliteGet<SessionRow>(
-    'SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+    'SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at, role_layer, substate FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
     [session.id, userId],
   );
   if (refreshedSession) {
@@ -981,13 +1071,29 @@ function mapRecoveryPermissionRequestRow(row: RecoveryPermissionRequestRow) {
   };
 }
 
+// Corrupt-row tolerance (§0.89-§0.93 class): `questions_json` is persisted via
+// `JSON.stringify`, but a crash mid-write / disk error / hand-edited DB can
+// leave it invalid. This is used via `.map(...)` in the recovery listing, so a
+// single corrupt row used to throw and 500 the whole pending-question recovery
+// list. Return `null` + warn so the caller can skip the bad row.
 function mapRecoveryQuestionRequestRow(row: RecoveryQuestionRequestRow) {
+  let questions: unknown;
+  try {
+    questions = JSON.parse(row.questions_json) as unknown;
+  } catch (error) {
+    console.warn(
+      `[sessions] 恢复提问请求 ${row.id} questions_json 解析失败，已跳过：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return null;
+  }
   return {
     requestId: row.id,
     sessionId: row.session_id,
     toolName: row.tool_name,
     title: row.title,
-    questions: JSON.parse(row.questions_json) as unknown,
+    questions,
     status: row.status,
     createdAt: row.created_at,
   };
@@ -1020,7 +1126,10 @@ function listRecoveryQuestionRequests(sessionIds: string[]) {
      WHERE session_id IN (${placeholders}) AND status = 'pending'
      ORDER BY created_at ASC`,
     sessionIds,
-  ).map(mapRecoveryQuestionRequestRow);
+  ).flatMap((row) => {
+    const mapped = mapRecoveryQuestionRequestRow(row);
+    return mapped ? [mapped] : [];
+  });
 }
 
 async function buildSessionStatusReadModel(input: { session: SessionRow; userId: string }) {
@@ -1282,7 +1391,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       const { metadata, workingDirectory } = body;
       const metadataPatch = validateSessionMetadataPatch(metadata);
       if (!metadataPatch.success) {
-        throw ApiError.badRequest('Invalid metadata', {
+        throw ApiError.badRequest(SESSION_ROUTE_ERROR_MESSAGES.metadataInvalid, {
           kind: 'Body',
           issues: metadataPatch.error.issues,
         });
@@ -1296,7 +1405,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         const pathStep = child('path-safety');
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
-        return reply.status(403).send({ error: 'Forbidden' });
+        return reply.status(403).send({ error: SESSION_ROUTE_ERROR_MESSAGES.workspaceForbidden });
       }
       const requestedParentSessionId = extractParentSessionIdFromMetadata(
         normalizedMetadata.metadata,
@@ -1443,7 +1552,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       });
 
       if (!hasSessionMessage({ messageId, sessionId, userId: user.sub })) {
-        throw ApiError.notFound('Message not found');
+        throw ApiError.notFound(SESSION_ROUTE_ERROR_MESSAGES.messageNotFound);
       }
 
       const record = upsertSessionMessageRating({
@@ -1485,12 +1594,12 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       const { step } = startRequestWorkflow(request, 'session.get', undefined, { sessionId });
 
       const session = sqliteGet<SessionRow>(
-        'SELECT id, messages_json, state_status, metadata_json, title, created_at, updated_at FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+        'SELECT id, messages_json, state_status, metadata_json, title, created_at, updated_at, role_layer, substate FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
         [sessionId, user.sub],
       );
 
       if (!session) {
-        throw ApiError.notFound('Session not found');
+        throw ApiError.notFound('目标会话不存在。');
       }
       const reconciledSession = await reconcileSessionRuntimeForResponse(session, user.sub);
       step.succeed();
@@ -1540,7 +1649,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       );
 
       if (!session) {
-        throw ApiError.notFound('Session not found');
+        throw ApiError.notFound('目标会话不存在。');
       }
 
       const status = await buildSessionStatusReadModel({ session, userId: user.sub });
@@ -1567,12 +1676,12 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       });
 
       const session = sqliteGet<SessionRow>(
-        'SELECT id, messages_json, state_status, metadata_json, title, created_at, updated_at FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+        'SELECT id, messages_json, state_status, metadata_json, title, created_at, updated_at, role_layer, substate FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
         [sessionId, user.sub],
       );
 
       if (!session) {
-        throw ApiError.notFound('Session not found');
+        throw ApiError.notFound('目标会话不存在。');
       }
 
       const query = request.query as Record<string, string | undefined>;
@@ -1618,7 +1727,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         [sessionId, user.sub],
       );
       if (!session) {
-        throw ApiError.notFound('Session not found');
+        throw ApiError.notFound('目标会话不存在。');
       }
 
       const readModel = buildSessionTurnDiffReadModel({
@@ -1653,7 +1762,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         [sessionId, user.sub],
       );
       if (!session) {
-        throw ApiError.notFound('Session not found');
+        throw ApiError.notFound('目标会话不存在。');
       }
 
       const fileDiffs = query.includeText
@@ -1707,7 +1816,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         [sessionId, user.sub],
       );
       if (!session) {
-        throw ApiError.notFound('Session not found');
+        throw ApiError.notFound('目标会话不存在。');
       }
 
       const fileDiffs = query.includeText
@@ -1750,7 +1859,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         [sessionId, user.sub],
       );
       if (!session) {
-        throw ApiError.notFound('Session not found');
+        throw ApiError.notFound('目标会话不存在。');
       }
 
       const snapshots = listSessionSnapshots({ sessionId, userId: user.sub }).map((snapshot) =>
@@ -1780,7 +1889,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         [sessionId, user.sub],
       );
       if (!session) {
-        throw ApiError.notFound('Session not found');
+        throw ApiError.notFound('目标会话不存在。');
       }
 
       const fromSnapshot = getSessionSnapshotByRef({
@@ -1794,7 +1903,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         snapshotRef: query.to,
       });
       if (!fromSnapshot || !toSnapshot) {
-        throw ApiError.notFound('Snapshot not found');
+        throw ApiError.notFound(SESSION_ROUTE_ERROR_MESSAGES.snapshotNotFound);
       }
 
       const comparison = compareSessionSnapshots({ from: fromSnapshot, to: toSnapshot }).map(
@@ -1842,12 +1951,12 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         [sessionId, user.sub],
       );
       if (!session) {
-        throw ApiError.notFound('Session not found');
+        throw ApiError.notFound('目标会话不存在。');
       }
 
       const snapshot = getSessionSnapshotByRef({ sessionId, userId: user.sub, snapshotRef });
       if (!snapshot) {
-        throw ApiError.notFound('Snapshot not found');
+        throw ApiError.notFound(SESSION_ROUTE_ERROR_MESSAGES.snapshotNotFound);
       }
 
       step.succeed(undefined, { fileCount: snapshot.files.length, snapshotRef });
@@ -1873,7 +1982,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         [sessionId, user.sub],
       );
       if (!session) {
-        throw ApiError.notFound('Session not found');
+        throw ApiError.notFound('目标会话不存在。');
       }
       const workspaceRoot =
         extractSessionWorkingDirectory(parseSessionMetadataJson(session.metadata_json)) ??
@@ -1887,7 +1996,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         });
         if (!backup) {
           step.fail('backup not found');
-          throw ApiError.notFound('Backup not found');
+          throw ApiError.notFound(SESSION_ROUTE_ERROR_MESSAGES.backupNotFound);
         }
 
         const backupContent = await readSessionFileBackupContent({
@@ -1900,6 +2009,9 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
           backupContent,
           includeText: body.includeText,
           workspaceRoot,
+          // Read-only preview: tolerate unreadable current files (degrade to
+          // absent) so one bad file can't 500 the whole preview (§0.95 class).
+          tolerateUnreadable: true,
         });
         step.succeed(undefined, {
           mode: 'backup',
@@ -1928,13 +2040,16 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         snapshotRef: body.snapshotRef!,
       });
       if (!snapshot) {
-        throw ApiError.notFound('Snapshot not found');
+        throw ApiError.notFound(SESSION_ROUTE_ERROR_MESSAGES.snapshotNotFound);
       }
 
       const previewState = await buildSnapshotRestorePreviewState({
         snapshot,
         includeText: body.includeText,
         workspaceRoot,
+        // Read-only preview: tolerate unreadable current files (degrade to
+        // absent) so one bad file can't 500 the whole preview (§0.95 class).
+        tolerateUnreadable: true,
       });
       step.succeed(undefined, {
         mode: 'snapshot',
@@ -1971,7 +2086,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         [sessionId, user.sub],
       );
       if (!session) {
-        throw ApiError.notFound('Session not found');
+        throw ApiError.notFound('目标会话不存在。');
       }
       const workspaceRoot =
         extractSessionWorkingDirectory(parseSessionMetadataJson(session.metadata_json)) ??
@@ -1985,7 +2100,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         });
         if (!backup) {
           step.fail('backup not found');
-          throw ApiError.notFound('Backup not found');
+          throw ApiError.notFound(SESSION_ROUTE_ERROR_MESSAGES.backupNotFound);
         }
         const backupContent = await readSessionFileBackupContent({
           backupId: body.backupId,
@@ -2004,7 +2119,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         if (!previewState.canRestore || (hasConflicts && !body.forceConflicts)) {
           step.fail('restore blocked', { mode: 'backup', hasConflicts });
           return reply.status(409).send({
-            error: 'Restore apply blocked by current workspace state',
+            error: SESSION_ROUTE_ERROR_MESSAGES.restoreBlocked,
             validateOnly: true,
             mode: 'backup',
             target: toPublicBackup({ backup }),
@@ -2052,7 +2167,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         snapshotRef: body.snapshotRef!,
       });
       if (!snapshot) {
-        throw ApiError.notFound('Snapshot not found');
+        throw ApiError.notFound(SESSION_ROUTE_ERROR_MESSAGES.snapshotNotFound);
       }
       const previewState = await buildSnapshotRestorePreviewState({
         snapshot,
@@ -2064,7 +2179,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       if (!previewState.canRestore || (hasConflicts && !body.forceConflicts)) {
         step.fail('restore blocked', { mode: 'snapshot', hasConflicts });
         return reply.status(409).send({
-          error: 'Restore apply blocked by current workspace state',
+          error: SESSION_ROUTE_ERROR_MESSAGES.restoreBlocked,
           validateOnly: true,
           mode: 'snapshot',
           target: toPublicSnapshot({ includeText: body.includeText, snapshot }),
@@ -2115,7 +2230,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         [sessionId, user.sub],
       );
       if (!session) {
-        throw ApiError.notFound('Session not found');
+        throw ApiError.notFound('目标会话不存在。');
       }
 
       const todos = listSessionTodos(sessionId);
@@ -2139,7 +2254,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         [sessionId, user.sub],
       );
       if (!session) {
-        throw ApiError.notFound('Session not found');
+        throw ApiError.notFound('目标会话不存在。');
       }
 
       const todoLanes = listSessionTodoLanes(sessionId);
@@ -2173,7 +2288,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         [sessionId, user.sub],
       );
       if (!session) {
-        throw ApiError.notFound('Session not found');
+        throw ApiError.notFound('目标会话不存在。');
       }
 
       const messages = truncateSessionMessagesAfter({
@@ -2201,11 +2316,11 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         [sessionId, user.sub],
       );
       if (!session) {
-        throw ApiError.notFound('Session not found');
+        throw ApiError.notFound('目标会话不存在。');
       }
 
       const sessions = sqliteAll<SessionRow>(
-        'SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at FROM sessions WHERE user_id = ? ORDER BY updated_at DESC',
+        'SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at, team_parent_session_id FROM sessions WHERE user_id = ? ORDER BY updated_at DESC',
         [user.sub],
       );
       const sessionsToDelete = buildSessionDeletionRows(sessions, sessionId);
@@ -2227,7 +2342,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         });
         return reply.status(409).send({
           blockReason: blockingSession.reason,
-          error: 'Session can only be deleted when every related session is idle',
+          error: SESSION_ROUTE_ERROR_MESSAGES.deleteBlocked,
           sessionId: blockingSession.session.id,
           state_status: blockingSession.session.state_status,
         });
@@ -2264,7 +2379,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         [sessionId, user.sub],
       );
       if (!session) {
-        throw ApiError.notFound('Session not found');
+        throw ApiError.notFound('目标会话不存在。');
       }
 
       let nextMetadataJson: string | null = null;
@@ -2272,9 +2387,10 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         const metadataPatch = validateSessionMetadataPatch(body.metadata);
         if (!metadataPatch.success) {
           step.fail('invalid metadata');
-          return reply
-            .status(400)
-            .send({ error: 'Invalid metadata', issues: metadataPatch.error.issues });
+          return reply.status(400).send({
+            error: SESSION_ROUTE_ERROR_MESSAGES.metadataInvalid,
+            issues: metadataPatch.error.issues,
+          });
         }
         const currentMetadata = parseSessionMetadataJson(session.metadata_json);
         const requestedWorkingDirectory = getRequestedWorkingDirectory(metadataPatch.data);
@@ -2285,7 +2401,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
           const pathStep = child('path-safety');
           pathStep.fail('forbidden path');
           step.fail('forbidden path');
-          return reply.status(403).send({ error: 'Forbidden' });
+          return reply.status(403).send({ error: SESSION_ROUTE_ERROR_MESSAGES.workspaceForbidden });
         }
         const currentParentSessionId = extractParentSessionIdFromMetadata(currentMetadata);
         const requestedParentSessionId =
@@ -2312,7 +2428,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
           const pathStep = child('path-safety');
           pathStep.fail('forbidden path');
           step.fail('forbidden path');
-          return reply.status(403).send({ error: 'Forbidden' });
+          return reply.status(403).send({ error: SESSION_ROUTE_ERROR_MESSAGES.workspaceForbidden });
         }
 
         nextMetadataJson = JSON.stringify(normalizedMetadata.metadata);
@@ -2379,7 +2495,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         [sessionId, user.sub],
       );
       if (!session) {
-        throw ApiError.notFound('Session not found');
+        throw ApiError.notFound('目标会话不存在。');
       }
 
       const metadata = parseSessionMetadataJson(session.metadata_json);
@@ -2399,7 +2515,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
           const pathStep = child('path-safety');
           pathStep.fail('forbidden path');
           step.fail('forbidden path');
-          return reply.status(403).send({ error: 'Forbidden' });
+          return reply.status(403).send({ error: SESSION_ROUTE_ERROR_MESSAGES.workspaceForbidden });
         }
 
         if (!isForcedWarp && isSessionWorkspaceRebindingAttempt(metadata, safeWorkingDirectory)) {
@@ -2469,7 +2585,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       );
 
       if (!parent) {
-        throw ApiError.notFound('Session not found');
+        throw ApiError.notFound('目标会话不存在。');
       }
 
       const sessions = sqliteAll<SessionRow>(
@@ -2525,7 +2641,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       );
 
       if (!session) {
-        throw ApiError.notFound('Session not found');
+        throw ApiError.notFound('目标会话不存在。');
       }
 
       const sessions = sqliteAll<SessionRow>(
@@ -2574,7 +2690,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         [sessionId, user.sub],
       );
       if (!session) {
-        throw ApiError.notFound('Session not found');
+        throw ApiError.notFound('目标会话不存在。');
       }
 
       const sessions = sqliteAll<SessionRow>(
@@ -2590,7 +2706,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       });
       if (!taskEntry) {
         step.fail('task not found');
-        return reply.status(404).send({ error: 'Task not found' });
+        return reply.status(404).send({ error: SESSION_ROUTE_ERROR_MESSAGES.taskNotFound });
       }
 
       if (
@@ -2599,7 +2715,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         taskEntry.task.status === 'cancelled'
       ) {
         step.fail('task not cancellable');
-        return reply.status(409).send({ error: 'Task is not cancellable' });
+        return reply.status(409).send({ error: SESSION_ROUTE_ERROR_MESSAGES.taskNotCancellable });
       }
 
       const childSessionId = taskEntry.task.sessionId;
@@ -2702,7 +2818,7 @@ export function validateParentSessionBinding(input: {
       ok: false,
       statusCode: 400,
       reason: 'invalid parent',
-      error: 'Session cannot be its own parent',
+      error: SESSION_ROUTE_ERROR_MESSAGES.selfParent,
     };
   }
 
@@ -2724,7 +2840,7 @@ export function validateParentSessionBinding(input: {
       ok: false,
       statusCode: 404,
       reason: 'parent not found',
-      error: 'Parent session not found',
+      error: SESSION_ROUTE_ERROR_MESSAGES.parentNotFound,
     };
   }
 

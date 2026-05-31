@@ -61,7 +61,7 @@ export default function UsagePage() {
     <div className="page-root">
       <div className="page-header">
         <span className="page-title">用量与费用</span>
-        <span className="page-subtitle">{loading ? '加载中…' : '本月用量'}</span>
+        <span className="page-subtitle">{loading ? '加载中…' : '本月用量概览'}</span>
       </div>
       <div className="page-content">
         <div
@@ -71,44 +71,67 @@ export default function UsagePage() {
             padding: '20px 24px',
             display: 'flex',
             flexDirection: 'column',
-            gap: 16,
+            gap: 20,
           }}
         >
-          <div>
-            <span className="section-label">月度用量</span>
-            <div className="content-card" style={sharedUiThemeVars}>
-              <UsageDashboard records={records} budgetUsd={budgetUsd} />
-            </div>
-          </div>
-          <div>
-            <span className="section-label">费用详情</span>
-            <div className="content-card" style={sharedUiThemeVars}>
-              <CostOverview monthlyCostUsd={monthlyCostUsd} breakdown={breakdown} />
-            </div>
-          </div>
-          <div>
-            <span className="section-label">模型单价</span>
-            <div
-              className="content-card"
-              style={{
-                ...sharedUiThemeVars,
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-                gap: 12,
-              }}
-            >
-              {modelPrices.map((m) => (
-                <div key={m.modelName} style={sharedUiThemeVars}>
-                  <ModelCostDisplay
-                    modelName={m.modelName}
-                    inputPer1m={m.inputPer1m}
-                    outputPer1m={m.outputPer1m}
-                    cachedPer1m={m.cachedPer1m}
-                  />
+          {loading ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+              {[0, 1, 2].map((i) => (
+                <div key={i}>
+                  <div className="omo-skel" style={{ height: 12, width: 80, marginBottom: 10, borderRadius: 4 }} />
+                  <div
+                    className="content-card"
+                    style={{ padding: '24px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}
+                  >
+                    <div className="omo-skel" style={{ height: 14, width: '60%', borderRadius: 4 }} />
+                    <div className="omo-skel" style={{ height: 10, width: '40%', borderRadius: 4 }} />
+                    <div className="omo-skel" style={{ height: 32, width: '100%', borderRadius: 6 }} />
+                  </div>
                 </div>
               ))}
             </div>
-          </div>
+          ) : (
+            <>
+              <div>
+                <span className="section-label">月度用量</span>
+                <div className="content-card" style={sharedUiThemeVars}>
+                  <UsageDashboard records={records} budgetUsd={budgetUsd} />
+                </div>
+              </div>
+              <div>
+                <span className="section-label">费用详情</span>
+                <div className="content-card" style={sharedUiThemeVars}>
+                  <CostOverview monthlyCostUsd={monthlyCostUsd} breakdown={breakdown} />
+                </div>
+              </div>
+              <div>
+                <span className="section-label">模型单价</span>
+                <div
+                  className="content-card"
+                  style={{
+                    ...sharedUiThemeVars,
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                    gap: 12,
+                  }}
+                >
+                  {modelPrices.length === 0 && (
+                    <span style={{ color: 'var(--fg-muted)', fontSize: 12 }}>暂无模型价格数据</span>
+                  )}
+                  {modelPrices.map((m) => (
+                    <div key={m.modelName} style={sharedUiThemeVars}>
+                      <ModelCostDisplay
+                        modelName={m.modelName}
+                        inputPer1m={m.inputPer1m}
+                        outputPer1m={m.outputPer1m}
+                        cachedPer1m={m.cachedPer1m}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

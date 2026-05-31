@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import NavRail from './layout/nav/NavRail.js';
 import WorkspacePickerModal from './common/modal/WorkspacePickerModal.js';
+import { buildWorkspacePickerDataSource } from './common/modal/workspace-picker-data-source.js';
 import { CachedRouteOutlet } from './common/routing/CachedRouteOutlet.js';
 import QuestionPromptCard from './common/display/QuestionPromptCard.js';
 import { useUIStateStore } from '../stores/ui/uiState.js';
@@ -8,10 +9,9 @@ import { useNavigate, useLocation } from 'react-router';
 import { useAuthStore } from '../stores/auth/auth.js';
 import { CommandPalette, PermissionConfirmDialog } from '@openAwork/shared-ui';
 import type { CommandItem, PermissionItem } from '@openAwork/shared-ui';
-import type { FileTreeNode } from './common/modal/WorkspacePickerModal.js';
 import { useCommandRegistry } from '../hooks/command/useCommandRegistry.js';
 import { preloadRouteModuleByPath } from '../routes/preloadable-route-modules.js';
-import { createQuestionsClient, createSessionsClient } from '@openAwork/web-client';
+import { createQuestionsClient, createSessionsClient, createWorkspaceClient } from '@openAwork/web-client';
 import type { PendingQuestionRequest, SessionSearchResult } from '@openAwork/web-client';
 import {
   requestCurrentSessionRefresh,
@@ -78,7 +78,7 @@ function resolveQuestionReplyError(error: unknown): {
 interface LayoutProps {
   theme?: 'dark' | 'light';
   onToggleTheme?: () => void;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, options?: { line?: number; endLine?: number }) => void;
 }
 
 export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: LayoutProps = {}) {
@@ -90,60 +90,12 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
   const [isNarrowViewport, setIsNarrowViewport] = useState(() =>
     typeof window !== 'undefined' ? window.innerWidth <= 960 : false,
   );
-
-  const fetchWorkspaceRoots = useCallback(async (): Promise<string[]> => {
-    const res = await fetch(`${gatewayUrl}/workspace/root`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    if (!res.ok) throw new Error('fetchRootPath failed');
-    const data = (await res.json()) as { root?: string; roots?: string[] };
-    const roots = Array.isArray(data.roots)
-      ? data.roots.filter((root) => typeof root === 'string' && root.length > 0)
-      : typeof data.root === 'string' && data.root.length > 0
-        ? [data.root]
-        : [];
-
-    if (roots.length === 0) {
-      throw new Error('fetchRootPath failed');
-    }
-
-    return roots;
-  }, [accessToken, gatewayUrl]);
-
-  const fetchRootPath = useCallback(async (): Promise<string> => {
-    const roots = await fetchWorkspaceRoots();
-    const root = roots[0];
-    if (!root) {
-      throw new Error('fetchRootPath failed');
-    }
-
-    return root;
-  }, [fetchWorkspaceRoots]);
-
-  const fetchTree = useCallback(
-    async (path: string, depth = 1) => {
-      const res = await fetch(
-        `${gatewayUrl}/workspace/tree?path=${encodeURIComponent(path)}&depth=${depth}`,
-        { headers: { Authorization: `Bearer ${accessToken}` } },
-      );
-      if (!res.ok) throw new Error('fetchTree failed');
-      const data = await res.json();
-      return (data?.nodes ?? data) as FileTreeNode[];
-    },
-    [accessToken, gatewayUrl],
-  );
-
-  const validatePath = useCallback(
-    async (path: string): Promise<{ valid: boolean; error?: string; path?: string }> => {
-      const res = await fetch(`${gatewayUrl}/workspace/validate?path=${encodeURIComponent(path)}`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      if (!res.ok) {
-        return { valid: false, error: `Validation request failed: ${res.status}` };
-      }
-
-      return res.json();
-    },
+  const workspacePickerDataSource = useMemo(
+    () =>
+      buildWorkspacePickerDataSource({
+        client: createWorkspaceClient(gatewayUrl),
+        token: accessToken,
+      }),
     [accessToken, gatewayUrl],
   );
 
@@ -617,10 +569,10 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
         isOpen={showWorkspacePicker}
         onClose={() => setShowWorkspacePicker(false)}
         onSelect={handleSelectWorkspace}
-        fetchRootPath={fetchRootPath}
-        fetchWorkspaceRoots={fetchWorkspaceRoots}
-        fetchTree={fetchTree}
-        validatePath={validatePath}
+        fetchRootPath={workspacePickerDataSource.fetchRootPath}
+        fetchWorkspaceRoots={workspacePickerDataSource.fetchWorkspaceRoots}
+        fetchTree={workspacePickerDataSource.fetchTree}
+        validatePath={workspacePickerDataSource.validatePath}
         initialPath={uiState.fileTreeRootPath ?? selectedWorkspacePath ?? undefined}
       />
       <div

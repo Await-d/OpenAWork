@@ -17,6 +17,12 @@ interface ChatTopBarProps {
   rightOpen: boolean;
   onToggleRightOpen: () => void;
   /**
+   * 编辑器/浏览器工作区是否处于全屏(占据整个内容区)模式。
+   */
+  editorFullScreen?: boolean;
+  /** 切换编辑器全屏模式。提供时在编辑器按钮旁渲染一个全屏切换按钮。 */
+  onToggleEditorFullScreen?: () => void;
+  /**
    * Editor pane 当前激活的 tab(用于 code/browser 按钮的 active 视觉状态)。
    * 不传时 fallback 到只看 editorMode。
    */
@@ -83,6 +89,8 @@ export function ChatTopBar({
   onToggleEditorMode,
   rightOpen,
   onToggleRightOpen,
+  editorFullScreen = false,
+  onToggleEditorFullScreen,
   editorPaneTab,
   onActivateCodeTab,
   onActivateBrowserTab,
@@ -168,7 +176,7 @@ export function ChatTopBar({
               alignItems: 'center',
               justifyContent: 'center',
               border: sidebarOpen
-                ? '1px solid color-mix(in oklch, var(--accent) 30%, var(--border-default)'
+                ? '1px solid color-mix(in oklch, var(--accent) 30%, var(--border-default))'
                 : '1px solid var(--border-subtle)',
               borderRadius: 6,
               background: sidebarOpen
@@ -340,11 +348,11 @@ export function ChatTopBar({
               borderRadius: 5,
               border: 'none',
               background: yoloMode
-                ? 'color-mix(in srgb, var(--warning) 22%, var(--bg-overlay)'
+                ? 'color-mix(in srgb, var(--warning) 22%, var(--bg-overlay))'
                 : 'transparent',
               color: yoloMode ? 'var(--warning)' : 'var(--fg-muted)',
               boxShadow: yoloMode
-                ? 'inset 0 0 0 1px color-mix(in srgb, var(--warning) 50%, var(--border-default)'
+                ? 'inset 0 0 0 1px color-mix(in srgb, var(--warning) 50%, var(--border-default))'
                 : 'none',
               fontSize: 10,
               fontWeight: 600,
@@ -454,6 +462,64 @@ export function ChatTopBar({
               <line x1="2" y1="12" x2="22" y2="12" />
               <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
             </svg>
+          </button>
+        )}
+        {onToggleEditorFullScreen && (
+          <button
+            type="button"
+            onClick={onToggleEditorFullScreen}
+            aria-pressed={editorFullScreen}
+            title={
+              editorFullScreen
+                ? '退出全屏 · 恢复分屏对话'
+                : '全屏编辑器/浏览器 · 占据整个内容区'
+            }
+            className={`icon-btn${editorFullScreen ? ' active' : ''}`}
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 6,
+              border: 'none',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            {editorFullScreen ? (
+              <svg
+                aria-hidden="true"
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="4 14 10 14 10 20" />
+                <polyline points="20 10 14 10 14 4" />
+                <line x1="14" y1="10" x2="21" y2="3" />
+                <line x1="3" y1="21" x2="10" y2="14" />
+              </svg>
+            ) : (
+              <svg
+                aria-hidden="true"
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="15 3 21 3 21 9" />
+                <polyline points="9 21 3 21 3 15" />
+                <line x1="21" y1="3" x2="14" y2="10" />
+                <line x1="3" y1="21" x2="10" y2="14" />
+              </svg>
+            )}
           </button>
         )}
         {hideRightPanelToggle ? null : (

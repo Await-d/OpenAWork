@@ -66,6 +66,12 @@ export interface ChatUiState extends ChatSidebarLayout {
   editorMode: boolean;
   setEditorMode: (v: boolean) => void;
   /**
+   * 编辑器/浏览器工作区是否铺满整个内容区(全屏)。开启时 ChatPage 会收起
+   * 对话列与右侧面板,让 {@link EditorBrowserWorkspace} 独占内容区。全局持久化。
+   */
+  editorFullScreen: boolean;
+  setEditorFullScreen: (v: boolean) => void;
+  /**
    * 拖动结束后的最终 split 百分比（20–80）。setter 会同步写入 localStorage，
    * 但不触发 React 重渲染——拖动期间通过 CSS 变量直接驱动样式，避免重渲染抖动。
    */
@@ -166,6 +172,8 @@ export function useChatUiState(options: UseChatUiStateOptions): ChatUiState {
   // ── 编辑器模式 / 分屏 / 保存 ────────────────────────────────────────────
   const editorMode = useUIStateStore((s) => s.editorMode);
   const setEditorMode = useUIStateStore((s) => s.setEditorMode);
+  const editorFullScreen = useUIStateStore((s) => s.editorFullScreen);
+  const setEditorFullScreen = useUIStateStore((s) => s.setEditorFullScreen);
   // splitPos 故意绕开 zustand UI state：见 split-pos-storage.ts 的注释。
   const [splitPos] = useState(() => readSplitPos());
   const setSplitPos = writeSplitPos;
@@ -244,6 +252,8 @@ export function useChatUiState(options: UseChatUiStateOptions): ChatUiState {
 
     editorMode,
     setEditorMode,
+    editorFullScreen,
+    setEditorFullScreen,
     splitPos,
     setSplitPos,
     splitDragging,

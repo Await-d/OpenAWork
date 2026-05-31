@@ -91,6 +91,14 @@ export interface RunUpstreamGenerateInput {
   thinking?: ThinkingConfig;
   /** Abort signal forwarded to the AI SDK. */
   signal?: AbortSignal;
+  /**
+   * Optional wall-clock timeout (ms) for this single generate call, combined
+   * with `signal` via `AbortSignal.any`. Defaults to
+   * `DEFAULT_UPSTREAM_GENERATE_TIMEOUT_MS` (env-overridable); pass `<=0` to
+   * disable the intrinsic backstop. Callers that already supply their own,
+   * tighter deadline can leave this unset — whichever signal fires first wins.
+   */
+  timeoutMs?: number;
 }
 
 export interface RunUpstreamGenerateResult {
@@ -112,6 +120,29 @@ export interface RunUpstreamGenerateResult {
 function shouldOmit(upstreamKeys: string[] | undefined, ...candidates: string[]): boolean {
   if (!upstreamKeys || upstreamKeys.length === 0) return false;
   return candidates.some((k) => upstreamKeys.includes(k));
+}
+
+/**
+ * Intrinsic wall-clock backstop for a single non-streaming upstream call. The
+ * AI SDK `generateText` honours `abortSignal` but has NO built-in deadline, and
+ * a caller's request-scoped signal only fires on client disconnect — not when
+ * an upstream socket connects-but-hangs. The streaming sibling
+ * `runUpstreamStream` already bounds that with an idle watchdog; this gives the
+ * non-streaming path an equivalent floor so a forgetful / future caller cannot
+ * leave a half-open upstream call pending forever. Generous by default so it
+ * never pre-empts the tighter per-caller deadlines (compaction 120s, title 15s,
+ * connectivity 20s, ...) — `AbortSignal.any` means whichever fires first wins.
+ * Override via `OPENAWORK_UPSTREAM_GENERATE_TIMEOUT_MS`; `<=0` disables.
+ */
+const DEFAULT_UPSTREAM_GENERATE_TIMEOUT_MS = 180_000;
+function resolveUpstreamGenerateTimeoutMs(): number {
+  const raw = globalThis.process?.env?.['OPENAWORK_UPSTREAM_GENERATE_TIMEOUT_MS'];
+  if (raw === undefined || raw === null || raw.trim() === '') {
+    return DEFAULT_UPSTREAM_GENERATE_TIMEOUT_MS;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Math.floor(parsed);
 }
 
 /**
@@ -169,31 +200,60 @@ export async function runUpstreamGenerate(
   // the casting strategy in `./stream-runner.ts`.
   type GenerateTextModelParam = Parameters<typeof generateText>[0]['model'];
 
-  const result = await generateText({
-    model: model as unknown as GenerateTextModelParam,
-    messages: decoratedMessages,
-    ...(input.system ? { system: input.system } : {}),
-    ...(providerOptions ? { providerOptions } : {}),
-    ...(typeof input.temperature === 'number' && !shouldOmit(omit, 'temperature')
-      ? { temperature: input.temperature }
-      : {}),
-    ...(typeof input.maxOutputTokens === 'number' &&
-    !shouldOmit(omit, 'max_tokens', 'max_output_tokens', 'maxOutputTokens')
-      ? { maxOutputTokens: input.maxOutputTokens }
-      : {}),
-    ...(typeof input.topP === 'number' && !shouldOmit(omit, 'top_p', 'topP')
-      ? { topP: input.topP }
-      : {}),
-    ...(typeof input.frequencyPenalty === 'number' &&
-    !shouldOmit(omit, 'frequency_penalty', 'frequencyPenalty')
-      ? { frequencyPenalty: input.frequencyPenalty }
-      : {}),
-    ...(typeof input.presencePenalty === 'number' &&
-    !shouldOmit(omit, 'presence_penalty', 'presencePenalty')
-      ? { presencePenalty: input.presencePenalty }
-      : {}),
-    ...(input.signal ? { abortSignal: input.signal } : {}),
-  });
+  // Intrinsic wall-clock backstop (combined with any caller signal). See
+  // DEFAULT_UPSTREAM_GENERATE_TIMEOUT_MS — bounds a connects-but-hangs upstream
+  // even when the caller forgot to supply its own deadline.
+  const timeoutMs = input.timeoutMs ?? resolveUpstreamGenerateTimeoutMs();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
+  let effectiveSignal: AbortSignal | undefined = input.signal;
+  if (timeoutMs > 0) {
+    const timeoutController = new AbortController();
+    timer = setTimeout(() => {
+      timedOut = true;
+      timeoutController.abort();
+    }, timeoutMs);
+    timer.unref?.();
+    effectiveSignal = input.signal
+      ? AbortSignal.any([timeoutController.signal, input.signal])
+      : timeoutController.signal;
+  }
+
+  let result: GenerateTextResult<ToolSet, never>;
+  try {
+    result = await generateText({
+      model: model as unknown as GenerateTextModelParam,
+      messages: decoratedMessages,
+      ...(input.system ? { system: input.system } : {}),
+      ...(providerOptions ? { providerOptions } : {}),
+      ...(typeof input.temperature === 'number' && !shouldOmit(omit, 'temperature')
+        ? { temperature: input.temperature }
+        : {}),
+      ...(typeof input.maxOutputTokens === 'number' &&
+      !shouldOmit(omit, 'max_tokens', 'max_output_tokens', 'maxOutputTokens')
+        ? { maxOutputTokens: input.maxOutputTokens }
+        : {}),
+      ...(typeof input.topP === 'number' && !shouldOmit(omit, 'top_p', 'topP')
+        ? { topP: input.topP }
+        : {}),
+      ...(typeof input.frequencyPenalty === 'number' &&
+      !shouldOmit(omit, 'frequency_penalty', 'frequencyPenalty')
+        ? { frequencyPenalty: input.frequencyPenalty }
+        : {}),
+      ...(typeof input.presencePenalty === 'number' &&
+      !shouldOmit(omit, 'presence_penalty', 'presencePenalty')
+        ? { presencePenalty: input.presencePenalty }
+        : {}),
+      ...(effectiveSignal ? { abortSignal: effectiveSignal } : {}),
+    });
+  } catch (err) {
+    if (timedOut) {
+      throw new Error(`upstream generate timeout (${timeoutMs}ms)`);
+    }
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 
   return {
     text: result.text,

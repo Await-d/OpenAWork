@@ -7,6 +7,14 @@
  */
 
 import type { FileChangeGuaranteeLevel, FileChangeSourceKind } from '@openAwork/shared';
+import {
+  extractJsonErrorMessage,
+  HttpError,
+  isGenericFetchErrorMessage,
+  readJsonErrorData,
+  type JsonErrorData,
+  fetchWithTimeout,
+} from '../gateway/http.js';
 
 // ─── 类型 ──────────────────────────────────────────────────────────────
 
@@ -158,6 +166,68 @@ function authHeader(token: string): { Authorization: string } {
   return { Authorization: `Bearer ${token}` };
 }
 
+function buildSnapshotTreesActionErrorMessage(
+  actionLabel: string,
+  status: number,
+  data: JsonErrorData | undefined,
+): string {
+  const extracted = extractJsonErrorMessage(data);
+  if (extracted) {
+    return extracted;
+  }
+  if (status === 401 || status === 403) {
+    return `认证失效或当前账号无权${actionLabel}。`;
+  }
+  if (status === 404) {
+    return `目标快照树资源不存在，无法${actionLabel}。`;
+  }
+  if (status === 409) {
+    return `当前状态不允许${actionLabel}。`;
+  }
+  return `${actionLabel}失败（HTTP ${status}）。`;
+}
+
+function isGenericSnapshotTreesNetworkErrorMessage(message: string): boolean {
+  return isGenericFetchErrorMessage(message);
+}
+
+function normalizeSnapshotTreesError(actionLabel: string, error: unknown): Error {
+  if (error instanceof HttpError) {
+    const extracted = extractJsonErrorMessage((error.data ?? undefined) as JsonErrorData | undefined);
+    if (extracted) {
+      return new HttpError(extracted, error.status, error.data);
+    }
+    return error;
+  }
+  if (error instanceof Error) {
+    const message = error.message.trim();
+    if (message.length > 0 && !isGenericSnapshotTreesNetworkErrorMessage(message)) {
+      return error;
+    }
+  }
+  return new Error(`网络异常，${actionLabel}失败。`);
+}
+
+async function performSnapshotTreesRequest<T>(input: {
+  actionLabel: string;
+  request: () => Promise<Response>;
+}): Promise<T> {
+  try {
+    const res = await input.request();
+    if (!res.ok) {
+      const data = await readJsonErrorData<JsonErrorData>(res);
+      throw new HttpError(
+        buildSnapshotTreesActionErrorMessage(input.actionLabel, res.status, data),
+        res.status,
+        data,
+      );
+    }
+    return (await res.json()) as T;
+  } catch (error) {
+    throw normalizeSnapshotTreesError(input.actionLabel, error);
+  }
+}
+
 export function createSnapshotTreesClient(gatewayUrl: string): SnapshotTreesClient {
   return {
     async list(token, sessionId, options) {
@@ -167,60 +237,70 @@ export function createSnapshotTreesClient(gatewayUrl: string): SnapshotTreesClie
       }
       const qs = params.toString();
       const url = `${gatewayUrl}/sessions/${sessionId}/snapshot-trees${qs ? `?${qs}` : ''}`;
-      const res = await fetch(url, { headers: authHeader(token) });
-      if (!res.ok) throw new Error(`snapshot-trees list failed: ${res.status}`);
-      return (await res.json()) as { trees: SnapshotTreeEntry[] };
+      return performSnapshotTreesRequest<{ trees: SnapshotTreeEntry[] }>({
+        actionLabel: '读取快照树列表',
+        request: () => fetchWithTimeout(url, { headers: authHeader(token) }),
+      });
     },
 
     async detail(token, sessionId, treeHash) {
       const url = `${gatewayUrl}/sessions/${sessionId}/snapshot-trees/${treeHash}`;
-      const res = await fetch(url, { headers: authHeader(token) });
-      if (!res.ok) throw new Error(`snapshot-trees detail failed: ${res.status}`);
-      return (await res.json()) as SnapshotTreeDetail;
+      return performSnapshotTreesRequest<SnapshotTreeDetail>({
+        actionLabel: '读取快照树详情',
+        request: () => fetchWithTimeout(url, { headers: authHeader(token) }),
+      });
     },
 
     async restoreToTree(token, sessionId, input) {
       const url = `${gatewayUrl}/sessions/${sessionId}/restore/to-tree`;
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { ...authHeader(token), 'Content-Type': 'application/json' },
-        body: JSON.stringify(input),
+      return performSnapshotTreesRequest<RestoreResult>({
+        actionLabel: '恢复到指定快照树',
+        request: () =>
+          fetchWithTimeout(url, {
+            method: 'POST',
+            headers: { ...authHeader(token), 'Content-Type': 'application/json' },
+            body: JSON.stringify(input),
+          }),
       });
-      if (!res.ok) throw new Error(`restore/to-tree failed: ${res.status}`);
-      return (await res.json()) as RestoreResult;
     },
 
     async cherryPick(token, sessionId, input) {
       const url = `${gatewayUrl}/sessions/${sessionId}/restore/cherry-pick`;
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { ...authHeader(token), 'Content-Type': 'application/json' },
-        body: JSON.stringify(input),
+      return performSnapshotTreesRequest<RestoreResult>({
+        actionLabel: 'Cherry-pick 恢复快照树',
+        request: () =>
+          fetchWithTimeout(url, {
+            method: 'POST',
+            headers: { ...authHeader(token), 'Content-Type': 'application/json' },
+            body: JSON.stringify(input),
+          }),
       });
-      if (!res.ok) throw new Error(`restore/cherry-pick failed: ${res.status}`);
-      return (await res.json()) as RestoreResult;
     },
 
     async restoreAtTime(token, sessionId, input) {
       const url = `${gatewayUrl}/sessions/${sessionId}/restore/at-time`;
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { ...authHeader(token), 'Content-Type': 'application/json' },
-        body: JSON.stringify(input),
+      return performSnapshotTreesRequest<RestoreResult>({
+        actionLabel: '按时间点恢复快照树',
+        request: () =>
+          fetchWithTimeout(url, {
+            method: 'POST',
+            headers: { ...authHeader(token), 'Content-Type': 'application/json' },
+            body: JSON.stringify(input),
+          }),
       });
-      if (!res.ok) throw new Error(`restore/at-time failed: ${res.status}`);
-      return (await res.json()) as RestoreResult;
     },
 
     async restoreFromSession(token, sessionId, input) {
       const url = `${gatewayUrl}/sessions/${sessionId}/restore/from-session`;
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { ...authHeader(token), 'Content-Type': 'application/json' },
-        body: JSON.stringify(input),
+      return performSnapshotTreesRequest<RestoreResult>({
+        actionLabel: '从其他会话恢复快照树',
+        request: () =>
+          fetchWithTimeout(url, {
+            method: 'POST',
+            headers: { ...authHeader(token), 'Content-Type': 'application/json' },
+            body: JSON.stringify(input),
+          }),
       });
-      if (!res.ok) throw new Error(`restore/from-session failed: ${res.status}`);
-      return (await res.json()) as RestoreResult;
     },
   };
 }

@@ -231,7 +231,7 @@ const primaryButtonStyle = (disabled: boolean, active: boolean): CSSProperties =
   border: '1px solid var(--accent)',
   background: disabled
     ? active
-      ? 'color-mix(in srgb, var(--accent) 22%, var(--surface-3)'
+      ? 'color-mix(in srgb, var(--accent) 22%, var(--surface-3))'
       : 'var(--surface-3)'
     : 'var(--accent)',
   color: disabled ? 'var(--fg-muted)' : 'var(--fg-on-accent)',

@@ -24,8 +24,8 @@ import {
   type ToolStateCompleted,
   type ToolStateError,
   type AssistantErrorObject,
-  messageInfoFromRow,
-  partFromRow,
+  tryMessageInfoFromRow,
+  tryPartFromRow,
   type PageResult,
   type MessageCursor,
 } from './message-v2-schema.js';
@@ -41,6 +41,28 @@ import { makeSessionEventId } from '../session/session-event.js';
 // the events emitted below into INSERT/UPDATE/DELETE on message_v2/part_v2.
 // Without this the unified SyncEvent write path would silently no-op.
 import './message-v2-projectors.js';
+
+// ─── Corrupt-row-tolerant row mappers ───
+// Map DB rows to the read model while skipping any row whose `data` column is
+// corrupt JSON, so a single bad row can't throw and make an entire page /
+// session of messages unreadable. See `try*FromRow` in message-v2-schema.ts.
+function mapMessageInfoRows(rows: MessageV2Row[]): MessageInfo[] {
+  const out: MessageInfo[] = [];
+  for (const row of rows) {
+    const info = tryMessageInfoFromRow(row);
+    if (info) out.push(info);
+  }
+  return out;
+}
+
+function mapPartRows(rows: PartV2Row[]): MessagePart[] {
+  const out: MessagePart[] = [];
+  for (const row of rows) {
+    const part = tryPartFromRow(row);
+    if (part) out.push(part);
+  }
+  return out;
+}
 
 // ─── Message CRUD ───
 
@@ -91,7 +113,7 @@ export function getMessage(input: {
     input.messageId,
     input.sessionId,
   ]);
-  return row ? messageInfoFromRow(row) : undefined;
+  return row ? (tryMessageInfoFromRow(row) ?? undefined) : undefined;
 }
 
 export function listMessages(input: {
@@ -113,7 +135,7 @@ export function listMessages(input: {
           `SELECT * FROM message_v2 WHERE session_id = ? AND user_id = ? ORDER BY time_created ASC, id ASC ${limitClause}`,
           [input.sessionId, input.userId],
         );
-  return rows.map((row) => messageInfoFromRow(row));
+  return mapMessageInfoRows(rows);
 }
 
 /**
@@ -149,7 +171,7 @@ export function listMessagesByTurnLimit(input: {
      ORDER BY time_created ASC, id ASC`,
     [input.sessionId, input.userId, boundary.time_created],
   );
-  return rows.map((row) => messageInfoFromRow(row));
+  return mapMessageInfoRows(rows);
 }
 
 export function countMessages(input: { sessionId: string; userId: string }): number {
@@ -229,7 +251,7 @@ export function getPart(input: {
     'SELECT * FROM part_v2 WHERE id = ? AND message_id = ? AND session_id = ?',
     [input.partId, input.messageId, input.sessionId],
   );
-  return row ? partFromRow(row) : undefined;
+  return row ? (tryPartFromRow(row) ?? undefined) : undefined;
 }
 
 export function listPartsForMessage(input: {
@@ -240,7 +262,7 @@ export function listPartsForMessage(input: {
     'SELECT * FROM part_v2 WHERE message_id = ? AND session_id = ? ORDER BY id ASC',
     [input.messageId, input.sessionId],
   );
-  return rows.map((row) => partFromRow(row));
+  return mapPartRows(rows);
 }
 
 export function listPartsForSession(input: {
@@ -257,7 +279,7 @@ export function listPartsForSession(input: {
           'SELECT * FROM part_v2 WHERE session_id = ? ORDER BY time_created ASC, id ASC',
           [input.sessionId],
         );
-  return rows.map((row) => partFromRow(row));
+  return mapPartRows(rows);
 }
 
 // ─── Incremental Part Delta ───
@@ -318,8 +340,10 @@ function attachPartsToMessages(sessionId: string, messages: MessageInfo[]): Mess
 
   const partsByMessage = new Map<string, MessagePart[]>();
   for (const row of partRows) {
+    const part = tryPartFromRow(row);
+    if (!part) continue;
     const existing = partsByMessage.get(row.message_id) ?? [];
-    existing.push(partFromRow(row));
+    existing.push(part);
     partsByMessage.set(row.message_id, existing);
   }
 
@@ -341,8 +365,8 @@ export function findToolPartByCallID(input: {
     [input.sessionId, `%"callID":"${input.callID}"%`],
   );
   for (const row of rows) {
-    const part = partFromRow(row);
-    if (part.type === 'tool' && part.callID === input.callID) {
+    const part = tryPartFromRow(row);
+    if (part && part.type === 'tool' && part.callID === input.callID) {
       return part;
     }
   }
@@ -528,7 +552,7 @@ export function pageMessagesWithParts(input: {
     return { items: [], more: false };
   }
 
-  const messages = slice.map((row) => messageInfoFromRow(row));
+  const messages = mapMessageInfoRows(slice);
   const messageIds = messages.map((m) => m.id);
   const placeholders = messageIds.map(() => '?').join(',');
   const partRows = sqliteAll<PartV2Row>(
@@ -538,8 +562,10 @@ export function pageMessagesWithParts(input: {
 
   const partsByMessage = new Map<string, MessagePart[]>();
   for (const row of partRows) {
+    const part = tryPartFromRow(row);
+    if (!part) continue;
     const existing = partsByMessage.get(row.message_id) ?? [];
-    existing.push(partFromRow(row));
+    existing.push(part);
     partsByMessage.set(row.message_id, existing);
   }
 
@@ -595,7 +621,7 @@ export function partsForMessage(messageId: MessageID): MessagePart[] {
   const rows = sqliteAll<PartV2Row>('SELECT * FROM part_v2 WHERE message_id = ? ORDER BY id ASC', [
     messageId,
   ]);
-  return rows.map((row) => partFromRow(row));
+  return mapPartRows(rows);
 }
 
 // ─── Get single message with parts (opencode pattern) ───
@@ -609,8 +635,10 @@ export function getMessageWithParts(input: {
     input.sessionID,
   ]);
   if (!row) return null;
+  const info = tryMessageInfoFromRow(row);
+  if (!info) return null;
   return {
-    info: messageInfoFromRow(row),
+    info,
     parts: partsForMessage(input.messageID),
   };
 }

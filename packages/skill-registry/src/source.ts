@@ -1,4 +1,5 @@
 import type { RegistryInfo, RegistrySource } from './types.js';
+import { fetchWithTimeout, readResponseJsonWithLimit } from './http.js';
 
 export const OFFICIAL_REGISTRY_SOURCE: RegistrySource = {
   id: 'official',
@@ -71,7 +72,7 @@ export class RegistrySourceManager {
     }
 
     const infoUrl = `${source.url.replace(/\/$/, '')}/registry-info.json`;
-    const response = await fetch(infoUrl, {
+    const response = await fetchWithTimeout(infoUrl, {
       method: 'GET',
       headers: this.buildHeaders(source),
     });
@@ -80,7 +81,7 @@ export class RegistrySourceManager {
       throw new Error(`Failed to verify source '${id}', HTTP ${response.status}`);
     }
 
-    const registryInfo = (await response.json()) as RegistryInfo;
+    const registryInfo = await readResponseJsonWithLimit<RegistryInfo>(response);
     if (!registryInfo.id || !registryInfo.name || !registryInfo.apiVersion) {
       throw new Error(`Registry source '${id}' returned invalid registry-info.json`);
     }

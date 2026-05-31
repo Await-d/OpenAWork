@@ -81,7 +81,7 @@ export function DevtoolsToolbarSection({
           style={{
             borderRadius: 8,
             border: '1px solid var(--border-default)',
-            background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base)',
+            background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
             padding: '7px 10px',
             color: 'var(--fg-strong)',
             cursor: 'pointer',
@@ -103,13 +103,13 @@ export function DevtoolsToolbarSection({
             borderRadius: 8,
             border:
               counts.diagnostics > 0
-                ? '1px solid color-mix(in srgb, var(--danger) 40%, var(--border-default)'
+                ? '1px solid color-mix(in srgb, var(--danger) 40%, var(--border-default))'
                 : '1px solid var(--border-default)',
             borderLeft:
               counts.diagnostics > 0
                 ? '3px solid var(--danger)'
                 : '1px solid var(--border-default)',
-            background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base)',
+            background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
             padding: '7px 10px',
             color: 'var(--fg-strong)',
             cursor: 'pointer',
@@ -128,7 +128,7 @@ export function DevtoolsToolbarSection({
           style={{
             borderRadius: 8,
             border: '1px solid var(--border-default)',
-            background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base)',
+            background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
             padding: '7px 10px',
             color: 'var(--fg-strong)',
             cursor: 'pointer',
@@ -147,7 +147,7 @@ export function DevtoolsToolbarSection({
           style={{
             borderRadius: 8,
             border: '1px solid var(--border-default)',
-            background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base)',
+            background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
             padding: '7px 10px',
             color: 'var(--fg-strong)',
             cursor: 'pointer',
@@ -165,7 +165,7 @@ export function DevtoolsToolbarSection({
           style={{
             borderRadius: 8,
             border: '1px solid var(--border-default)',
-            background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base)',
+            background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
             padding: '7px 10px',
             color: 'var(--fg-strong)',
             cursor: 'pointer',
@@ -210,10 +210,10 @@ export function DevtoolsToolbarSection({
           onClick={onToggleAutoRefresh}
           style={{
             borderRadius: 8,
-            border: `1px solid ${autoRefreshEnabled ? 'color-mix(in srgb, var(--accent) 30%, var(--border-default)' : 'var(--border-default)'}`,
+            border: `1px solid ${autoRefreshEnabled ? 'color-mix(in srgb, var(--accent) 30%, var(--border-default))' : 'var(--border-default)'}`,
             padding: '5px 8px',
             background: autoRefreshEnabled
-              ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay)'
+              ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))'
               : 'var(--bg-overlay)',
             color: autoRefreshEnabled ? 'var(--accent)' : 'var(--fg-muted)',
             fontSize: 10,
@@ -253,7 +253,7 @@ export function DevtoolsToolbarSection({
           onClick={onExportMarkdownBundle}
           style={{
             borderRadius: 8,
-            border: '1px solid color-mix(in srgb, var(--accent) 28%, var(--border-default)',
+            border: '1px solid color-mix(in srgb, var(--accent) 28%, var(--border-default))',
             padding: '5px 8px',
             background: 'var(--bg-overlay)',
             color: 'var(--fg-strong)',

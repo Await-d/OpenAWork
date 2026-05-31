@@ -401,3 +401,59 @@ export function partToRowData(part: MessagePart): string {
   const { id: _, sessionID: __, messageID: ___, ...data } = part;
   return JSON.stringify(data);
 }
+
+// ─── Corrupt-row tolerance (read side) ───
+// `data` is persisted via `JSON.stringify`, but a crash mid-write, a disk
+// error, or a hand-edited DB can leave a column that is not valid JSON. The
+// read model is the live source of truth for the chat UI, and most callers do
+// `rows.map(...)`, so a single corrupt row would otherwise throw and make an
+// entire page / session of messages unreadable. These `try*` variants return
+// `null` + warn instead; list callers skip the bad row, single-row getters
+// degrade to `undefined`. Same fail-the-whole-read class hardened for the
+// agent-core SQLite session store and the artifacts index.
+
+export function tryMessageInfoFromRow(row: MessageV2Row): MessageInfo | null {
+  try {
+    return messageInfoFromRow(row);
+  } catch (error) {
+    console.warn(
+      `[message-v2] message ${row.id} data 列 JSON 解析失败，已跳过：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return null;
+  }
+}
+
+export function tryPartFromRow(row: PartV2Row): MessagePart | null {
+  try {
+    return partFromRow(row);
+  } catch (error) {
+    console.warn(
+      `[message-v2] part ${row.id} data 列 JSON 解析失败，已跳过：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return null;
+  }
+}
+
+/** Map message rows to domain objects, skipping (and warning on) corrupt rows. */
+export function mapMessageInfoRows(rows: MessageV2Row[]): MessageInfo[] {
+  const out: MessageInfo[] = [];
+  for (const row of rows) {
+    const info = tryMessageInfoFromRow(row);
+    if (info !== null) out.push(info);
+  }
+  return out;
+}
+
+/** Map part rows to domain objects, skipping (and warning on) corrupt rows. */
+export function mapPartRows(rows: PartV2Row[]): MessagePart[] {
+  const out: MessagePart[] = [];
+  for (const row of rows) {
+    const part = tryPartFromRow(row);
+    if (part !== null) out.push(part);
+  }
+  return out;
+}

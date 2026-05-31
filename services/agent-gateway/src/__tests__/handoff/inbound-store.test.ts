@@ -11,12 +11,14 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type * as DbModule from '../../infra/db.js';
 import type * as InboundStoreModule from '../../handoff/store/inbound-store.js';
+import type * as TeamEventsBusModule from '../../handoff/bus/team-events-bus.js';
 
 process.env['DATABASE_URL'] = ':memory:';
 process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
 
 let dbModule: typeof DbModule;
 let store: typeof InboundStoreModule;
+let teamEventsBus: typeof TeamEventsBusModule;
 
 const USER_ID = 'u-inbound';
 const SESSION_ID = 's-inbound';
@@ -42,9 +44,11 @@ beforeAll(async () => {
   dbModule = await import('../../infra/db.js');
   await dbModule.migrate();
   store = await import('../../handoff/store/inbound-store.js');
+  teamEventsBus = await import('../../handoff/bus/team-events-bus.js');
 });
 
 beforeEach(() => {
+  teamEventsBus.__clearTeamEventsBusForTesting();
   dbModule.sqliteRun('DELETE FROM session_inbound_messages', []);
   dbModule.sqliteRun('DELETE FROM users', []);
   seedUser(USER_ID, 'inbound@example.com');
@@ -102,6 +106,48 @@ describe('submitInboundMessage', () => {
       payload: { reason: 'user-cancelled' },
     });
     expect(r.record.expiresAt).toBeNull();
+  });
+
+  it('内部层 submitInbound 也会发布 session.inbound.submitted 实时事件', () => {
+    dbModule.sqliteRun(`UPDATE sessions SET role_layer = 'reception' WHERE id = ?`, [SESSION_ID]);
+    const events: TeamEventsBusModule.TeamEventEnvelope[] = [];
+    const unsubscribe = teamEventsBus.subscribeToTeamEvents((event) => {
+      events.push(event);
+    });
+    try {
+      store.submitInboundMessage({
+        userId: USER_ID,
+        toSessionId: SESSION_ID,
+        fromRoleLayer: 'pm2',
+        messageType: 'escalation_request',
+        payload: {
+          fromLayer: 'pm2',
+          fromSessionId: 'pm2-session',
+          pm2HandoffId: 'handoff-pm2-review',
+          reason: 'review_failed_threshold',
+          context: '评审连续失败，等待用户决策',
+        },
+      });
+
+      expect(events).toEqual([
+        expect.objectContaining({
+          type: 'session.inbound.submitted',
+          sessionId: SESSION_ID,
+          layer: 'pm2',
+          userId: USER_ID,
+          payload: expect.objectContaining({
+            blocking: true,
+            fromSessionId: 'pm2-session',
+            handoffId: 'handoff-pm2-review',
+            messageType: 'escalation_request',
+            reason: 'review_failed_threshold',
+            summary: '评审连续失败，等待用户决策',
+          }),
+        }),
+      ]);
+    } finally {
+      unsubscribe();
+    }
   });
 });
 
@@ -236,5 +282,65 @@ describe('listPendingInboundMessages', () => {
     const list = store.listPendingInboundMessages(SESSION_ID);
     expect(list).toHaveLength(2);
     expect(list.every((m) => m.state === 'pending')).toBe(true);
+  });
+});
+
+describe('resolveClarificationEscalationRequest', () => {
+  it('回答单条澄清会更新 escalation_request payload，并在全部解决后转 consumed', () => {
+    dbModule.sqliteRun(
+      `INSERT INTO session_inbound_messages
+        (id, user_id, to_session_id, from_role_layer, message_type, payload_json, state)
+       VALUES ('clarify-inbound-store', ?, ?, 'pm1', 'escalation_request', ?, 'pending')`,
+      [
+        USER_ID,
+        SESSION_ID,
+        JSON.stringify({
+          fromLayer: 'pm1',
+          fromSessionId: 'pm1-session',
+          reason: 'needs_clarification',
+          escalationRound: 0,
+          context: '需要补充信息',
+          suggestedActions: [{ label: '回答', action: 'answer' }],
+          questions: [
+            { id: 'q-1', question: '认证方式？', context: '登录模块' },
+            { id: 'q-2', question: '部署方式？', context: '运维模块' },
+          ],
+        }),
+      ],
+    );
+
+    const first = store.resolveClarificationEscalationRequest({
+      answer: 'OAuth',
+      answeredAt: 123,
+      questionId: 'q-1',
+      status: 'answered',
+      userId: USER_ID,
+    });
+    expect(first?.state).toBe('pending');
+    expect((first?.payload as { questions: Array<Record<string, unknown>> }).questions[0]).toMatchObject({
+      id: 'q-1',
+      answer: 'OAuth',
+      answeredAt: 123,
+      status: 'answered',
+    });
+
+    const second = store.resolveClarificationEscalationRequest({
+      answeredAt: 456,
+      questionId: 'q-2',
+      status: 'dismissed',
+      userId: USER_ID,
+    });
+    expect(second?.state).toBe('consumed');
+    expect((second?.payload as { questions: Array<Record<string, unknown>> }).questions[1]).toMatchObject({
+      id: 'q-2',
+      answeredAt: 456,
+      status: 'dismissed',
+    });
+
+    const row = dbModule.sqliteGet<{ state: string }>(
+      `SELECT state FROM session_inbound_messages WHERE id = ? LIMIT 1`,
+      ['clarify-inbound-store'],
+    );
+    expect(row?.state).toBe('consumed');
   });
 });

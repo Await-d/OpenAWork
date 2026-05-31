@@ -401,12 +401,12 @@ export default function AgentsPage() {
             <section
               style={{
                 borderRadius: 18,
-                border: '1px solid rgba(248, 113, 113, 0.45)',
-                background: 'rgba(127, 29, 29, 0.12)',
+                border: '1px solid var(--complement-border)',
+                background: 'var(--complement-muted)',
                 padding: '14px 16px',
               }}
             >
-              <div style={{ color: 'var(--danger)', fontSize: 13 }}>{error}</div>
+              <div style={{ color: 'var(--complement)', fontSize: 13 }}>{error}</div>
             </section>
           )}
 

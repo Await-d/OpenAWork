@@ -6,6 +6,7 @@ import type {
   ChannelInstance,
   ChannelEvent,
 } from './types.js';
+import { channelFetch } from './channel-http.js';
 
 interface DingTalkConfig {
   webhookUrl: string;
@@ -91,7 +92,7 @@ export class DingTalkChannelService implements MessagingChannelService {
   async listGroups(): Promise<ChannelGroup[]> {
     if (!this.config.appKey) return [];
     const token = await this.getToken();
-    const resp = await fetch(`${DINGTALK_NEW_API}/chat/privatechats`, {
+    const resp = await channelFetch(`${DINGTALK_NEW_API}/chat/privatechats`, {
       headers: { 'x-acs-dingtalk-access-token': token },
     });
     const data = (await resp.json()) as {
@@ -113,7 +114,7 @@ export class DingTalkChannelService implements MessagingChannelService {
       const sign = signWebhook(this.config.secret, timestamp);
       url += `&timestamp=${timestamp}&sign=${sign}`;
     }
-    const resp = await fetch(url, {
+    const resp = await channelFetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ msgtype: 'text', text: { content } }),
@@ -127,7 +128,7 @@ export class DingTalkChannelService implements MessagingChannelService {
 
   private async sendViaRobotApi(chatId: string, content: string): Promise<{ messageId: string }> {
     const token = await this.getToken();
-    const resp = await fetch(`${DINGTALK_NEW_API}/robot/oToMessages/batchSend`, {
+    const resp = await channelFetch(`${DINGTALK_NEW_API}/robot/oToMessages/batchSend`, {
       method: 'POST',
       headers: {
         'x-acs-dingtalk-access-token': token,
@@ -151,7 +152,7 @@ export class DingTalkChannelService implements MessagingChannelService {
   }
 
   private async refreshToken(): Promise<void> {
-    const resp = await fetch(
+    const resp = await channelFetch(
       `${DINGTALK_API}/gettoken?appkey=${this.config.appKey}&appsecret=${this.config.appSecret}`,
     );
     const data = (await resp.json()) as DingTalkTokenResponse;

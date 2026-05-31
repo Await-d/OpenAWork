@@ -331,3 +331,59 @@ describe('resolveEffectiveSkills', () => {
     expect(match?.pinned).toBe(false);
   });
 });
+
+describe('resolveEffectiveSkills · requestedSkillIds (模板初始绑定)', () => {
+  it('force-enables an installed skill via requestedSkillIds even without workspace selection', () => {
+    seedInstalled(customSkillManifest);
+    seedWorkspaceSelection(WORKSPACE_A, [
+      // 显式配置了 workspace，但没把 custom 选进来。
+      { skillId: 'com.example.another', enabled: 1 },
+    ]);
+    seedInstalled(anotherManifest);
+
+    const effective = selection.resolveEffectiveSkills({
+      userId: USER_ID,
+      workspacePath: WORKSPACE_A,
+      sessionId: SESSION_ID,
+      requestedSkillIds: ['com.example.custom'],
+    });
+
+    const custom = effective.find((e) => e.skillId === 'com.example.custom');
+    expect(custom).toBeDefined();
+    expect(custom?.enabled).toBe(true);
+    expect(custom?.origin).toBe('session-override');
+  });
+
+  it('ignores requestedSkillIds for a skill that is not installed / disabled', () => {
+    seedInstalled(disabledManifest, 0);
+
+    const effective = selection.resolveEffectiveSkills({
+      userId: USER_ID,
+      workspacePath: WORKSPACE_A,
+      sessionId: SESSION_ID,
+      requestedSkillIds: ['com.example.disabled', 'com.example.ghost'],
+    });
+
+    expect(effective.some((e) => e.skillId === 'com.example.disabled')).toBe(false);
+    expect(effective.some((e) => e.skillId === 'com.example.ghost')).toBe(false);
+  });
+
+  it('does not duplicate a skill already enabled by workspace selection', () => {
+    seedInstalled(customSkillManifest);
+    seedWorkspaceSelection(WORKSPACE_A, [
+      { skillId: 'com.example.custom', enabled: 1, pinned: 1, reason: 'primary' },
+    ]);
+
+    const effective = selection.resolveEffectiveSkills({
+      userId: USER_ID,
+      workspacePath: WORKSPACE_A,
+      sessionId: SESSION_ID,
+      requestedSkillIds: ['com.example.custom'],
+    });
+
+    const matches = effective.filter((e) => e.skillId === 'com.example.custom');
+    expect(matches).toHaveLength(1);
+    // 保留 workspace 选择的 pinned 状态，不被覆盖。
+    expect(matches[0]?.pinned).toBe(true);
+  });
+});

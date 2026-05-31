@@ -3,6 +3,7 @@ import { parse as parseYaml } from 'yaml';
 import type { SkillManifest } from '@openAwork/skill-types';
 import type { InstallOptions, InstalledSkillRecord, SkillEntry } from '../types.js';
 import { SkillInstaller } from '../installer.js';
+import { readResponseArrayBufferWithLimit, readResponseTextWithLimit } from '../http.js';
 
 export interface GitHubInstallerOptions {
   installer?: SkillInstaller;
@@ -109,8 +110,9 @@ export class GitHubInstaller {
       );
     }
 
-    const arrayBuffer = await response.arrayBuffer();
-    const uint8 = new Uint8Array(arrayBuffer);
+    // Bounded read: a hostile/huge zipball (or zip-bomb compressed payload) must
+    // not be fully buffered before decompression (§0.87).
+    const uint8 = await readResponseArrayBufferWithLimit(response);
     const files = unzipSync(uint8);
 
     // GitHub zipball entries are under a root directory like "owner-repo-sha/"
@@ -156,8 +158,11 @@ export class GitHubInstaller {
   private async readLocalFile(path: string): Promise<string> {
     const fileUrl = `file://${path}`;
     const response = await this.fetchFn(fileUrl);
-    if (!response.ok) throw new Error(`Cannot read file: ${path}`);
-    return response.text();
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new Error(`Cannot read file: ${path}`);
+    }
+    return readResponseTextWithLimit(response);
   }
 
   private async stubExec(

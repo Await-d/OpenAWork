@@ -67,6 +67,8 @@ interface WorkerRuntime {
   info: WorkerInfo;
   process: ChildProcess;
   sandbox?: SandboxConfig;
+  /** Wall-clock kill timer armed when `sandbox.timeoutMs > 0` (see launch). */
+  timeoutTimer?: ReturnType<typeof setTimeout>;
 }
 
 function generateId(): string {
@@ -105,6 +107,10 @@ export class WorkerManagerImpl implements WorkerManager {
       if (!runtime) {
         return;
       }
+      if (runtime.timeoutTimer) {
+        clearTimeout(runtime.timeoutTimer);
+        runtime.timeoutTimer = undefined;
+      }
       runtime.info.status = 'stopped';
       runtime.info.pid = undefined;
     });
@@ -114,10 +120,41 @@ export class WorkerManagerImpl implements WorkerManager {
       if (!runtime) {
         return;
       }
+      if (runtime.timeoutTimer) {
+        clearTimeout(runtime.timeoutTimer);
+        runtime.timeoutTimer = undefined;
+      }
       runtime.info.status = 'error';
     });
 
-    this.workers.set(id, { info, process: child, sandbox });
+    const runtime: WorkerRuntime = { info, process: child, sandbox };
+    this.workers.set(id, runtime);
+
+    // Enforce the sandbox wall-clock deadline. `SandboxConfig.timeoutMs` was
+    // previously stored but never acted on, so a sandboxed worker could run
+    // forever — defeating the whole point of a bounded sandbox. Arm a timer
+    // that kills the child and marks it stopped once the deadline elapses;
+    // `unref()` keeps it from holding the host process open, and the exit /
+    // stop paths clear it so it never fires against a reused id.
+    if (sandbox && Number.isFinite(sandbox.timeoutMs) && sandbox.timeoutMs > 0) {
+      const timer = setTimeout(() => {
+        const current = this.workers.get(id);
+        if (!current || current.info.status !== 'running') {
+          return;
+        }
+        current.timeoutTimer = undefined;
+        try {
+          current.process.kill();
+        } catch {
+          // Child may have already exited between the check and the kill.
+        }
+        current.info.status = 'stopped';
+        current.info.pid = undefined;
+      }, sandbox.timeoutMs);
+      (timer as { unref?: () => void }).unref?.();
+      runtime.timeoutTimer = timer;
+    }
+
     return { ...info };
   }
 
@@ -133,6 +170,10 @@ export class WorkerManagerImpl implements WorkerManager {
     const runtime = this.workers.get(workerId);
     if (!runtime) {
       return;
+    }
+    if (runtime.timeoutTimer) {
+      clearTimeout(runtime.timeoutTimer);
+      runtime.timeoutTimer = undefined;
     }
     if (runtime.info.status === 'running') {
       runtime.process.kill();

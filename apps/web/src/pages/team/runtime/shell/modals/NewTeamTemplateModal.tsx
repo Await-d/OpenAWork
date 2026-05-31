@@ -239,7 +239,7 @@ export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
                         padding: '10px 12px',
                         borderRadius: 10,
                         border: '1px solid color-mix(in oklch, var(--success) 40%, transparent)',
-                        background: 'color-mix(in oklch, var(--success) 8%, var(--bg-base)',
+                        background: 'color-mix(in oklch, var(--success) 8%, var(--bg-base))',
                       }}
                     >
                       <div
@@ -275,7 +275,7 @@ export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
                                   ? '1px solid color-mix(in oklch, var(--success) 60%, transparent)'
                                   : '1px solid var(--border-subtle)',
                                 background: active
-                                  ? 'color-mix(in oklch, var(--success) 10%, var(--bg-base)'
+                                  ? 'color-mix(in oklch, var(--success) 10%, var(--bg-base))'
                                   : 'var(--bg-surface)',
                                 color: active ? 'var(--success)' : 'var(--fg-muted)',
                                 fontSize: 10,
@@ -353,7 +353,7 @@ export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
                                         ? '1px solid color-mix(in oklch, var(--accent) 60%, transparent)'
                                         : '1px solid var(--border-subtle)',
                                       background: active
-                                        ? 'color-mix(in oklch, var(--accent) 10%, var(--bg-base)'
+                                        ? 'color-mix(in oklch, var(--accent) 10%, var(--bg-base))'
                                         : 'var(--bg-surface)',
                                       color: active ? 'var(--accent)' : 'var(--fg-muted)',
                                       fontSize: 9,
@@ -408,7 +408,7 @@ export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
                           ? '1px solid color-mix(in oklch, var(--success) 60%, transparent)'
                           : '1px solid var(--border-subtle)',
                         background: active
-                          ? 'color-mix(in oklch, var(--success) 10%, var(--bg-base)'
+                          ? 'color-mix(in oklch, var(--success) 10%, var(--bg-base))'
                           : 'var(--bg-surface)',
                         color: active ? 'var(--success)' : 'var(--fg-muted)',
                         fontSize: 11,
@@ -466,7 +466,7 @@ export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
                   padding: '6px 16px',
                   borderRadius: 8,
                   border: '1px solid color-mix(in oklch, var(--success) 48%, transparent)',
-                  background: 'color-mix(in oklch, var(--success) 12%, var(--bg-base)',
+                  background: 'color-mix(in oklch, var(--success) 12%, var(--bg-base))',
                   color: 'var(--success)',
                   fontSize: 12,
                   fontWeight: 700,

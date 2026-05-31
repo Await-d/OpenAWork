@@ -1182,6 +1182,99 @@ textarea {
 .btn-accent:hover {
   background: var(--accent-hover);
 }
+
+/* ── 通用按钮变体 ── */
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--bg-overlay);
+  color: var(--fg-default);
+  border: 1px solid var(--border-default);
+  cursor: pointer;
+  transition:
+    background var(--dur-micro, 100ms) ease,
+    border-color var(--dur-micro, 100ms) ease,
+    transform var(--dur-micro, 100ms) ease;
+}
+.btn-secondary:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-emphasis);
+}
+.btn-secondary:active {
+  transform: translateY(1px);
+}
+.btn-secondary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-danger-sm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 500;
+  background: var(--complement-muted, rgba(240, 107, 126, 0.14));
+  color: var(--complement, var(--danger));
+  border: 1px solid var(--complement-border, rgba(240, 107, 126, 0.3));
+  cursor: pointer;
+  transition:
+    background var(--dur-micro, 100ms) ease,
+    border-color var(--dur-micro, 100ms) ease;
+}
+.btn-danger-sm:hover {
+  background: color-mix(in oklch, var(--complement, var(--danger)) 20%, transparent);
+  border-color: color-mix(in oklch, var(--complement, var(--danger)) 45%, transparent);
+}
+.btn-danger-sm:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── 通用表单输入 ── */
+.form-input {
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-overlay);
+  color: var(--fg-strong);
+  font-size: 13px;
+  outline: none;
+  transition:
+    border-color var(--dur-micro, 100ms) ease,
+    box-shadow var(--dur-micro, 100ms) ease;
+}
+.form-input::placeholder {
+  color: var(--fg-subtle);
+}
+.form-input:hover {
+  border-color: var(--border-emphasis);
+}
+.form-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-subtle, rgba(92, 212, 192, 0.07));
+}
+.form-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+select.form-input {
+  appearance: none;
+  padding-right: 32px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237b8a9e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
 .icon-btn.active {
   background: var(--accent-muted) !important;
   color: var(--accent) !important;
@@ -2930,6 +3023,9 @@ body.theme-transitioning *::after {
     linear-gradient(#fff 0 0) content-box,
     linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
   mask-composite: exclude;
   pointer-events: none;
   animation: aurora-rotate 8s linear infinite;
@@ -2954,7 +3050,7 @@ body.theme-transitioning *::after {
 :root.light .composer-shell,
 :root.light .chat-composer,
 :root.light [data-composer] {
-  background: linear-gradient(180deg, var(--bg-raised), var(--bg-overlay) !important);
+  background: linear-gradient(180deg, var(--bg-raised), var(--bg-overlay)) !important;
   backdrop-filter: none;
   border: 1px solid var(--border-default);
   border-radius: 12px;

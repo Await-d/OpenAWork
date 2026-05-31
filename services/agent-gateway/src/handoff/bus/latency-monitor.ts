@@ -16,6 +16,8 @@
  * 后续可接入 telemetry 系统（Prometheus / OpenTelemetry）。
  */
 
+import { recordTeamRuntimeIncident } from '../../team/team-runtime-diagnostics-store.js';
+
 export type LatencyType =
   | 'a_to_b_direct' // 用户输入 → b 直答回复
   | 'a_to_b_ack' // 用户输入 → "已开始处理"确认
@@ -56,7 +58,7 @@ function getWindow(type: LatencyType): LatencyWindow {
 
 // ─── Public API ─────────────────────────────────────────────────────────────
 
-export function recordLatency(type: LatencyType, durationMs: number): void {
+export function recordLatency(type: LatencyType, durationMs: number, userId?: string | null): void {
   const w = getWindow(type);
   w.samples.push(durationMs);
   if (w.samples.length > WINDOW_SIZE) {
@@ -67,6 +69,19 @@ export function recordLatency(type: LatencyType, durationMs: number): void {
   // 检查是否违反约束
   const threshold = THRESHOLDS[type];
   if (durationMs > threshold.p95Ms) {
+    recordTeamRuntimeIncident({
+      category: 'latency_violation',
+      code: `latency:${type}`,
+      context: {
+        durationMs,
+        thresholdMs: threshold.p95Ms,
+        type,
+      },
+      message: `${threshold.label} 延迟 ${durationMs}ms 超过阈值 ${threshold.p95Ms}ms`,
+      severity: 'warning',
+      timestamp: Date.now(),
+      userId: userId ?? null,
+    });
     console.warn(
       `[latency-monitor] ⚠️ ${threshold.label} 延迟 ${durationMs}ms 超过 p95 阈值 ${threshold.p95Ms}ms`,
     );

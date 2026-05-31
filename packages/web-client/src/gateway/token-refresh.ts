@@ -34,7 +34,7 @@ export async function withTokenRefresh<T>(
   const token = store.getAccessToken();
   if (!token) {
     store.clearAuth();
-    throw new HttpError('No access token', 401);
+    throw new HttpError('当前未登录或访问令牌已失效。', 401);
   }
   try {
     return await fn(token);
@@ -46,7 +46,7 @@ export async function withTokenRefresh<T>(
       });
     }
     const newToken = await refreshPromise;
-    if (!newToken) throw new HttpError('Session expired', 401);
+    if (!newToken) throw new HttpError('登录态已过期，请重新登录。', 401);
     return await fn(newToken);
   }
 }

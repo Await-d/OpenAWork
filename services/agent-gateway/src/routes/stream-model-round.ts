@@ -85,6 +85,10 @@ type UpstreamErrorDescriptor = {
   retryAfterMs?: number;
 };
 
+const STREAM_RUNTIME_ERROR_MESSAGES = {
+  genericStreamError: '流式响应处理中断，请稍后重试。',
+} as const;
+
 type WorkflowStepHandle = ReturnType<WorkflowLogger['start']>;
 
 interface StreamAccumulationState {
@@ -663,6 +667,25 @@ function buildOrderedAssistantContent(
 
 function buildErrorContent(code: string, message: string): MessageContent[] {
   return [{ type: 'text', text: `[错误: ${code}] ${message}`.trim() }];
+}
+
+export function buildUserFacingStreamErrorMessage(input: {
+  classificationMessage?: string;
+  fallbackMessage: string;
+}): string {
+  const message = input.classificationMessage?.trim();
+  if (message && message.length > 0) {
+    switch (message) {
+      case 'Provider is overloaded':
+        return '模型服务当前负载过高，请稍后重试。';
+      case 'Rate Limited':
+      case 'Too Many Requests':
+        return '请求过于频繁，请稍后重试。';
+      default:
+        return message;
+    }
+  }
+  return STREAM_RUNTIME_ERROR_MESSAGES.genericStreamError;
 }
 
 function isToolUseStopReason(reason: StreamStopReason): boolean {
@@ -1348,18 +1371,20 @@ export async function runModelRound(input: {
         isError: true,
       });
       markFailedRequestScopeMessages();
+      const userFacingMessage = buildUserFacingStreamErrorMessage({
+        classificationMessage: classification.message,
+        fallbackMessage: message,
+      });
       appendSessionMessageV2({
         sessionId: input.sessionId,
         userId: input.userId,
         role: 'assistant',
-        content: buildErrorContent('V2_UPSTREAM_ERROR', classification.message ?? message),
+        content: buildErrorContent('V2_UPSTREAM_ERROR', userFacingMessage),
         clientRequestId: input.clientRequestId,
         status: 'error',
         replaceExisting: true,
       });
-      input.writeChunk(
-        createStreamErrorChunk('V2_UPSTREAM_ERROR', classification.message ?? message, input.runId),
-      );
+      input.writeChunk(createStreamErrorChunk('V2_UPSTREAM_ERROR', userFacingMessage, input.runId));
       input.wl.flush(input.ctx, 502);
       emitStepEnded('error');
       return {
@@ -1467,16 +1492,20 @@ export async function runModelRound(input: {
       output: { message, code: 'STREAM_ERROR' },
     });
     markFailedRequestScopeMessages();
+    const userFacingMessage = buildUserFacingStreamErrorMessage({
+      classificationMessage: classification.message,
+      fallbackMessage: message,
+    });
     appendSessionMessageV2({
       sessionId: input.sessionId,
       userId: input.userId,
       role: 'assistant',
-      content: buildErrorContent('STREAM_ERROR', message),
+      content: buildErrorContent('STREAM_ERROR', userFacingMessage),
       clientRequestId: input.clientRequestId,
       status: 'error',
       replaceExisting: true,
     });
-    input.writeChunk(createStreamErrorChunk('STREAM_ERROR', message, input.runId));
+    input.writeChunk(createStreamErrorChunk('STREAM_ERROR', userFacingMessage, input.runId));
     input.wl.flush(input.ctx, 500);
     emitStepEnded('error');
     return {

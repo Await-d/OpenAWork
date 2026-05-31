@@ -6,6 +6,7 @@ import type {
   ChannelGroup,
   ChannelServiceFactory,
 } from './types.js';
+import { channelFetch } from './channel-http.js';
 
 export class QQChannelService implements MessagingChannelService {
   readonly pluginId: string;
@@ -25,6 +26,24 @@ export class QQChannelService implements MessagingChannelService {
     this.notify = notify;
   }
 
+  /**
+   * Dispatch a channel event without letting a throwing subscriber bubble back
+   * into the webhook handler. Mirrors the Telegram channel's `safeNotify`
+   * invariant: a fault in the router/auto-reply hook must not propagate into
+   * the QQ webhook delivery path.
+   */
+  private safeNotify(event: ChannelEvent): void {
+    try {
+      this.notify(event);
+    } catch (err) {
+      console.warn(
+        `[qq] channel notify handler threw: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
   async start(): Promise<void> {
     if (!this.appId || !this.clientSecret) {
       throw new Error('QQ channel requires appId and clientSecret');
@@ -41,7 +60,7 @@ export class QQChannelService implements MessagingChannelService {
   }
 
   private async getAccessToken(): Promise<string> {
-    const response = await fetch('https://bots.qq.com/app/getAppAccessToken', {
+    const response = await channelFetch('https://bots.qq.com/app/getAppAccessToken', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ appId: this.appId, clientSecret: this.clientSecret }),
@@ -61,7 +80,7 @@ export class QQChannelService implements MessagingChannelService {
   async sendMessage(chatId: string, content: string): Promise<{ messageId: string }> {
     const token = await this.getAccessToken();
     const [channelId, msgId] = chatId.split(':');
-    const response = await fetch(`https://api.sgroup.qq.com/channels/${channelId}/messages`, {
+    const response = await channelFetch(`https://api.sgroup.qq.com/channels/${channelId}/messages`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -111,7 +130,7 @@ export class QQChannelService implements MessagingChannelService {
       timestamp: msg.timestamp ? Date.parse(msg.timestamp) : Date.now(),
       raw: payload,
     };
-    this.notify({ type: 'message', pluginId: this.pluginId, message: channelMessage });
+    this.safeNotify({ type: 'message', pluginId: this.pluginId, message: channelMessage });
   }
 
   async getGroupMessages(_chatId: string, _count?: number): Promise<ChannelMessage[]> {

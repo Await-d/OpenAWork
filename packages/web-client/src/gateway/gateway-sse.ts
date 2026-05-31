@@ -1,3 +1,4 @@
+import { dispatchStreamEvent } from './gateway-ws.js';
 import type { GatewayStreamEvent, SendMessageOptions, StreamEventHandler } from './gateway-ws.js';
 
 export class GatewaySSEClient {
@@ -33,8 +34,20 @@ export class GatewaySSEClient {
     );
 
     this.es.onmessage = (ev) => {
-      const chunk = JSON.parse(ev.data as string) as GatewayStreamEvent;
-      for (const h of this.handlers) h(chunk);
+      let chunk: GatewayStreamEvent;
+      try {
+        chunk = JSON.parse(ev.data as string) as GatewayStreamEvent;
+      } catch {
+        const errChunk: GatewayStreamEvent = {
+          type: 'error',
+          code: 'SSE_INVALID_PAYLOAD',
+          message: 'SSE 数据解析失败。',
+        };
+        dispatchStreamEvent(this.handlers, errChunk);
+        this.es?.close();
+        return;
+      }
+      dispatchStreamEvent(this.handlers, chunk);
       if (chunk.type === 'done' || chunk.type === 'error') this.es?.close();
     };
 
@@ -42,9 +55,9 @@ export class GatewaySSEClient {
       const errChunk: GatewayStreamEvent = {
         type: 'error',
         code: 'SSE_ERROR',
-        message: 'SSE connection error',
+        message: 'SSE 连接异常。',
       };
-      for (const h of this.handlers) h(errChunk);
+      dispatchStreamEvent(this.handlers, errChunk);
       this.es?.close();
     };
   }

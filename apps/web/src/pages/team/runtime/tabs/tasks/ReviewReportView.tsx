@@ -8,20 +8,25 @@ import { type CSSProperties } from 'react';
 import { ArtifactPreview } from './ArtifactPreview.js';
 
 const VERDICT_STYLES: Record<string, CSSProperties> = {
+  unknown: {
+    color: 'var(--aux)',
+    border: '1px solid color-mix(in srgb, var(--aux) 40%, transparent)',
+    background: 'color-mix(in srgb, var(--aux) 8%, var(--bg-overlay))',
+  },
   pass: {
     color: 'var(--success)',
     border: '1px solid color-mix(in srgb, var(--success) 40%, transparent)',
-    background: 'color-mix(in srgb, var(--success) 8%, var(--bg-overlay)',
+    background: 'color-mix(in srgb, var(--success) 8%, var(--bg-overlay))',
   },
   'implementation-failure': {
     color: 'var(--danger)',
     border: '1px solid color-mix(in srgb, var(--danger) 40%, transparent)',
-    background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay)',
+    background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay))',
   },
   'planning-failure': {
     color: 'var(--warning)',
     border: '1px solid color-mix(in srgb, var(--warning) 40%, transparent)',
-    background: 'color-mix(in srgb, var(--warning) 8%, var(--bg-overlay)',
+    background: 'color-mix(in srgb, var(--warning) 8%, var(--bg-overlay))',
   },
 };
 
@@ -46,13 +51,20 @@ export function ReviewReportView({
     );
   }
 
-  const verdictStyle = overallVerdict ? (VERDICT_STYLES[overallVerdict] ?? {}) : {};
+  const verdictStyle =
+    overallVerdict !== null ? (VERDICT_STYLES[overallVerdict] ?? {}) : VERDICT_STYLES.unknown;
   const verdictLabel =
-    overallVerdict === 'pass'
+    overallVerdict === null
+      ? '📝 已生成'
+      : overallVerdict === 'pass'
       ? '✅ 通过'
       : overallVerdict === 'implementation-failure'
         ? '❌ 实现型失败'
         : '❌ 规划型失败';
+  const specLabel =
+    specReviewPassed === null ? '—' : specReviewPassed ? '✅' : '❌';
+  const qualityLabel =
+    qualityReviewPassed === null ? '—' : qualityReviewPassed ? '✅' : '❌';
 
   return (
     <div style={{ display: 'grid', gap: 12 }}>
@@ -68,7 +80,7 @@ export function ReviewReportView({
       >
         <strong style={{ fontSize: 13 }}>{verdictLabel}</strong>
         <span style={{ fontSize: 11 }}>
-          Spec: {specReviewPassed ? '✅' : '❌'} · Quality: {qualityReviewPassed ? '✅' : '❌'}
+          Spec: {specLabel} · Quality: {qualityLabel}
         </span>
       </div>
 

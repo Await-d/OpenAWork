@@ -173,7 +173,7 @@ export const LAYER_CAPABILITIES: Readonly<Record<HandoffRoleLayer, LayerCapabili
       'cancelled',
     ],
     canWriteArtifactPhases: ['dispatch', 'review_report'],
-    allowedToolsetCategories: ['read', 'write', 'shell'],
+    allowedToolsetCategories: ['read', 'write', 'shell', 'lsp', 'review'],
     allowedBuiltinInstructions: [
       'dispatch_package',
       'constitution_check',
@@ -192,7 +192,7 @@ export const LAYER_CAPABILITIES: Readonly<Record<HandoffRoleLayer, LayerCapabili
     allowedInboundTypes: ['cancel_signal', 'pause_signal', 'resume_signal'],
     allowedSubstates: ['idle', 'implementing', 'completed', 'failed', 'cancelled'],
     canWriteArtifactPhases: ['implementation', 'patch'],
-    allowedToolsetCategories: ['read', 'write', 'shell', 'lsp', 'test'],
+    allowedToolsetCategories: ['read', 'write', 'shell', 'lsp', 'test', 'web'],
     allowedBuiltinInstructions: [
       'report_progress',
       'submit_patch',
@@ -209,7 +209,7 @@ export const LAYER_CAPABILITIES: Readonly<Record<HandoffRoleLayer, LayerCapabili
     allowedInboundTypes: ['cancel_signal', 'pause_signal', 'resume_signal'],
     allowedSubstates: ['idle', 'reviewing', 'completed', 'failed', 'cancelled'],
     canWriteArtifactPhases: ['review_report'],
-    allowedToolsetCategories: ['read', 'lsp', 'review'],
+    allowedToolsetCategories: ['read', 'lsp', 'review', 'shell', 'test'],
     allowedBuiltinInstructions: [
       'report_progress',
       'submit_review',

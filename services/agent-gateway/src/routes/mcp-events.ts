@@ -33,6 +33,7 @@ import {
   type OAuthRedirectEvent,
   type ToolCatalogChangeEvent,
 } from '../mcp/mcp-tool-catalog.js';
+import { createSseClientChannel } from './sse-client-channel.js';
 
 const HEARTBEAT_INTERVAL_MS = 25_000;
 
@@ -45,7 +46,7 @@ export async function mcpEventsRoutes(app: FastifyInstance): Promise<void> {
     try {
       user = request.server.jwt.verify<JwtPayload>(sseToken ?? '');
     } catch {
-      return reply.status(401).send({ error: 'Unauthorized' });
+      return reply.status(401).send({ error: '未授权或登录已失效。' });
     }
 
     const requestOrigin = request.headers['origin'] ?? '*';
@@ -60,80 +61,66 @@ export async function mcpEventsRoutes(app: FastifyInstance): Promise<void> {
     });
     reply.raw.write('retry: 1000\n\n');
 
-    let clientClosed = false;
-    const onClientClose = (): void => {
-      clientClosed = true;
-    };
-    request.raw.on('close', onClientClose);
-
-    const safeWrite = (eventName: string, data: unknown): void => {
-      if (clientClosed) return;
-      try {
-        reply.raw.write(`event: ${eventName}\n`);
-        reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
-      } catch {
-        // Socket already half-closed — flag and let cleanup run.
-        clientClosed = true;
-      }
-    };
-
-    // Filter the user-level catalog stream to this subscriber's userId
-    // so users never observe each other's MCP changes (defence-in-depth
-    // even though the endpoint is JWT-gated).
-    const unsubscribeCatalog = subscribeToolCatalogChanges((event: ToolCatalogChangeEvent) => {
-      if (event.userId !== user.sub) return;
-      safeWrite('mcp.tools.changed', {
-        serverId: event.serverId,
-        mcpPoolKey: event.mcpPoolKey,
-        toolCount: event.tools.length,
-        // Tool names are cheap; full schemas are not. Send names for UI
-        // diff display, let clients re-fetch full catalogs via the
-        // existing REST endpoint when they need parameter shapes.
-        toolNames: event.tools.map((t) => t.name),
-      });
-    });
-
-    // PR-D-OAuth: forward `mcp.auth.required` events to the same
-    // subscriber. The frontend listens for this event and pops the
-    // authorization URL in a new tab; once the user completes the
-    // upstream consent flow, the OAuth provider's `saveTokens`
-    // persists the tokens and the next pool operation reconnects
-    // transparently.
-    const unsubscribeOAuth = subscribeOAuthRedirects((event: OAuthRedirectEvent) => {
-      if (event.userId !== user.sub) return;
-      safeWrite('mcp.auth.required', {
-        mcpId: event.mcpId,
-        authorizationUrl: event.authorizationUrl,
-      });
-    });
-
-    const unsubscribe = (): void => {
-      unsubscribeCatalog();
-      unsubscribeOAuth();
-    };
-
-    const heartbeat = setInterval(() => {
-      if (clientClosed) return;
-      try {
-        reply.raw.write(': keepalive\n\n');
-      } catch {
-        clientClosed = true;
-      }
-    }, HEARTBEAT_INTERVAL_MS);
-
     return new Promise<void>((resolve) => {
-      const finish = (): void => {
-        clearInterval(heartbeat);
-        unsubscribe();
-        request.raw.off('close', finish);
-        try {
-          reply.raw.end();
-        } catch {
-          // already closed
-        }
-        resolve();
+      // The channel collapses three independent teardown triggers — TCP 'close',
+      // a failed SSE write (half-open / broken pipe that may never emit 'close'),
+      // and explicit close — into one idempotent teardown. A failed write tears
+      // the subscriptions + heartbeat down immediately instead of merely flagging
+      // closed, so a half-open socket can't leak module-level listeners and a
+      // zombie heartbeat for the process lifetime.
+      const channel = createSseClientChannel({
+        rawWrite: (chunk) => reply.raw.write(chunk),
+        rawEnd: () => reply.raw.end(),
+      });
+
+      const onClose = (): void => {
+        channel.close();
       };
-      request.raw.on('close', finish);
+      channel.addTeardown(() => request.raw.off('close', onClose));
+      channel.addTeardown(resolve);
+
+      const safeWrite = (eventName: string, data: unknown): void => {
+        channel.write(`event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`);
+      };
+
+      // Filter the user-level catalog stream to this subscriber's userId
+      // so users never observe each other's MCP changes (defence-in-depth
+      // even though the endpoint is JWT-gated).
+      const unsubscribeCatalog = subscribeToolCatalogChanges((event: ToolCatalogChangeEvent) => {
+        if (event.userId !== user.sub) return;
+        safeWrite('mcp.tools.changed', {
+          serverId: event.serverId,
+          mcpPoolKey: event.mcpPoolKey,
+          toolCount: event.tools.length,
+          // Tool names are cheap; full schemas are not. Send names for UI
+          // diff display, let clients re-fetch full catalogs via the
+          // existing REST endpoint when they need parameter shapes.
+          toolNames: event.tools.map((t) => t.name),
+        });
+      });
+      channel.addTeardown(unsubscribeCatalog);
+
+      // PR-D-OAuth: forward `mcp.auth.required` events to the same
+      // subscriber. The frontend listens for this event and pops the
+      // authorization URL in a new tab; once the user completes the
+      // upstream consent flow, the OAuth provider's `saveTokens`
+      // persists the tokens and the next pool operation reconnects
+      // transparently.
+      const unsubscribeOAuth = subscribeOAuthRedirects((event: OAuthRedirectEvent) => {
+        if (event.userId !== user.sub) return;
+        safeWrite('mcp.auth.required', {
+          mcpId: event.mcpId,
+          authorizationUrl: event.authorizationUrl,
+        });
+      });
+      channel.addTeardown(unsubscribeOAuth);
+
+      const heartbeat = setInterval(() => {
+        channel.write(': keepalive\n\n');
+      }, HEARTBEAT_INTERVAL_MS);
+      channel.addTeardown(() => clearInterval(heartbeat));
+
+      request.raw.on('close', onClose);
     });
   });
 }

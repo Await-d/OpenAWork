@@ -20,7 +20,14 @@ import { useTeamUsageStore, useTeamToolCallStore } from './team-usage.js';
 
 export type HandoffState = 'pending' | 'claimed' | 'running' | 'completed' | 'failed' | 'cancelled';
 
-export type TeamRoleLayer = 'user' | 'reception' | 'pm1' | 'pm2' | 'executor' | 'reviewer';
+export type TeamRoleLayer =
+  | 'user'
+  | 'reception'
+  | 'pm1'
+  | 'pm2'
+  | 'executor'
+  | 'tester'
+  | 'reviewer';
 
 export interface HandoffEvent {
   type: string;
@@ -41,6 +48,8 @@ export interface HandoffEntry {
   startedAt?: number;
   /** 进入终态（completed/failed/cancelled）的时间戳（毫秒）。 */
   endedAt?: number;
+  /** 该 handoff 的请求载荷摘要（来自事件 payload 的意图/下一步文案，可选）。 */
+  summary?: string;
   updatedAt: number;
 }
 
@@ -52,12 +61,56 @@ export interface LayerNode {
   title?: string;
 }
 
+export type TeamEventsConnectionState =
+  | 'idle'
+  | 'connecting'
+  | 'connected'
+  | 'offline'
+  | 'reconnecting'
+  | 'stopped';
+
+interface TeamRuntimeSnapshotHandoffRecord {
+  claimedAt?: string | null;
+  completedAt?: string | null;
+  fromRoleLayer: string;
+  fromSessionId: string;
+  id: string;
+  startedAt?: string | null;
+  state: string;
+  toRoleLayer: string;
+  toSessionId: string | null;
+  updatedAt: string;
+}
+
+interface TeamRuntimeSnapshotSessionRecord {
+  id: string;
+  parentSessionId: string | null;
+  roleLayer: string | null;
+  stateStatus: string;
+  title: string | null;
+}
+
 // ─── Handoff Store ──────────────────────────────────────────────────────────
 
 interface HandoffStoreState {
   handoffs: Map<string, HandoffEntry>;
   applyEvent: (event: HandoffEvent) => void;
   clear: () => void;
+  replaceAll: (entries: HandoffEntry[]) => void;
+}
+
+/**
+ * 从 handoff 事件 payload 中尽力提取一段"请求载荷摘要"用于跨层对话线程展示。
+ * 优先级：rewrittenIntent > sourceIntent > recommendedNextStep > summary。
+ */
+function extractHandoffSummary(payload: Record<string, unknown>): string | undefined {
+  for (const key of ['rewrittenIntent', 'sourceIntent', 'recommendedNextStep', 'summary']) {
+    const value = payload[key];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return undefined;
 }
 
 export const useHandoffStore = create<HandoffStoreState>((set) => ({
@@ -84,6 +137,9 @@ export const useHandoffStore = create<HandoffStoreState>((set) => ({
         (newState === 'completed' || newState === 'failed' || newState === 'cancelled') &&
         existing.endedAt === undefined;
 
+      // 请求载荷摘要：从事件 payload 尽力提取（首次出现即固定，不被后续覆盖）。
+      const incomingSummary = extractHandoffSummary(event.payload);
+
       next.set(event.taskId!, {
         ...existing,
         state: newState,
@@ -91,10 +147,15 @@ export const useHandoffStore = create<HandoffStoreState>((set) => ({
         updatedAt: event.timestamp,
         ...(isStartingNow ? { startedAt: event.timestamp } : {}),
         ...(isEndingNow ? { endedAt: event.timestamp } : {}),
+        ...(existing.summary === undefined && incomingSummary ? { summary: incomingSummary } : {}),
       });
       return { handoffs: next };
     });
   },
+  replaceAll: (entries) =>
+    set(() => ({
+      handoffs: new Map(entries.map((entry) => [entry.id, entry])),
+    })),
   clear: () => set({ handoffs: new Map() }),
 }));
 
@@ -105,6 +166,7 @@ interface LayerStoreState {
   addNode: (node: LayerNode) => void;
   updateNodeState: (sessionId: string, state: HandoffState | 'idle') => void;
   clear: () => void;
+  replaceAll: (nodes: LayerNode[]) => void;
 }
 
 export const useLayerStore = create<LayerStoreState>((set) => ({
@@ -124,6 +186,10 @@ export const useLayerStore = create<LayerStoreState>((set) => ({
       }
       return { nodes: next };
     }),
+  replaceAll: (nodes) =>
+    set(() => ({
+      nodes: new Map(nodes.map((node) => [node.sessionId, node])),
+    })),
   clear: () => set({ nodes: new Map() }),
 }));
 
@@ -131,22 +197,152 @@ export const useLayerStore = create<LayerStoreState>((set) => ({
 
 interface TeamNotificationStoreState {
   events: HandoffEvent[];
+  mergeRuntime: (events: HandoffEvent[]) => void;
+  markEventRead: (eventKey: string) => void;
+  markEventUnread: (eventKey: string) => void;
+  readEventKeys: Set<string>;
   unreadCount: number;
   push: (event: HandoffEvent) => void;
   markAllRead: () => void;
   clear: () => void;
 }
 
+export function getTeamNotificationEventKey(event: HandoffEvent): string {
+  const payloadMessageId =
+    typeof event.payload['messageId'] === 'string' ? event.payload['messageId'] : '';
+  return [
+    event.type,
+    payloadMessageId,
+    event.taskId ?? '',
+    event.sessionId ?? '',
+    String(event.timestamp),
+    typeof event.payload['summary'] === 'string' ? event.payload['summary'] : '',
+  ].join('|');
+}
+
+function appendNotificationEvents(
+  state: Pick<TeamNotificationStoreState, 'events' | 'readEventKeys' | 'unreadCount'>,
+  incoming: HandoffEvent[],
+): Pick<TeamNotificationStoreState, 'events' | 'readEventKeys' | 'unreadCount'> {
+  const seen = new Set(state.events.map(getTeamNotificationEventKey));
+  const additions = incoming.filter((event) => {
+    const key = getTeamNotificationEventKey(event);
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+  if (additions.length === 0) {
+    return state;
+  }
+  const unreadDelta = additions.filter(
+    (event) => !state.readEventKeys.has(getTeamNotificationEventKey(event)),
+  ).length;
+  const merged = [...state.events, ...additions]
+    .sort((left, right) => left.timestamp - right.timestamp)
+    .slice(-100);
+  // Bound `readEventKeys` to the keys still present after the 100-event slice.
+  // Otherwise, on a long-lived team page, keys for events that scrolled out of
+  // the window accumulate forever (the Set never shrinks) — an unbounded
+  // frontend memory leak in the same family as the backend dedupe-map sweeps.
+  // Recomputing `unreadCount` from the surviving buffer (events whose key is
+  // not in the pruned read set) matches `markEventRead`'s own definition and
+  // also fixes the latent count drift when an unread event is evicted.
+  const survivingKeys = new Set(merged.map(getTeamNotificationEventKey));
+  // Prune read-keys whose event scrolled out of the buffer. Gate on membership,
+  // not relative size: stale keys can exist even when `readEventKeys` is smaller
+  // than the surviving-event count (e.g. 60 read keys vs 100 fresh unread events),
+  // so a size-based guard would silently skip the prune and leak.
+  let prunedReadEventKeys = state.readEventKeys;
+  if (state.readEventKeys.size > 0) {
+    let changed = false;
+    const next = new Set<string>();
+    for (const key of state.readEventKeys) {
+      if (survivingKeys.has(key)) {
+        next.add(key);
+      } else {
+        changed = true;
+      }
+    }
+    if (changed) {
+      prunedReadEventKeys = next;
+    }
+  }
+  const unreadCount = merged.reduce(
+    (count, event) => count + (prunedReadEventKeys.has(getTeamNotificationEventKey(event)) ? 0 : 1),
+    0,
+  );
+  return {
+    events: merged,
+    readEventKeys: prunedReadEventKeys,
+    unreadCount,
+  };
+}
+
 export const useTeamNotificationStore = create<TeamNotificationStoreState>((set) => ({
   events: [],
+  mergeRuntime: (events) =>
+    set((state) => {
+      if (events.length === 0) {
+        return state;
+      }
+      const next = appendNotificationEvents(state, events);
+      return {
+        events: next.events,
+        readEventKeys: next.readEventKeys,
+        unreadCount: next.unreadCount,
+      };
+    }),
+  markEventRead: (eventKey) =>
+    set((state) => {
+      if (state.readEventKeys.has(eventKey)) {
+        return state;
+      }
+      const readEventKeys = new Set(state.readEventKeys);
+      readEventKeys.add(eventKey);
+      const unreadCount = state.events.reduce(
+        (count, event) => count + (readEventKeys.has(getTeamNotificationEventKey(event)) ? 0 : 1),
+        0,
+      );
+      return {
+        readEventKeys,
+        unreadCount,
+      };
+    }),
+  markEventUnread: (eventKey) =>
+    set((state) => {
+      if (!state.readEventKeys.has(eventKey)) {
+        return state;
+      }
+      const readEventKeys = new Set(state.readEventKeys);
+      readEventKeys.delete(eventKey);
+      const unreadCount = state.events.reduce(
+        (count, event) => count + (readEventKeys.has(getTeamNotificationEventKey(event)) ? 0 : 1),
+        0,
+      );
+      return {
+        readEventKeys,
+        unreadCount,
+      };
+    }),
+  readEventKeys: new Set<string>(),
   unreadCount: 0,
   push: (event) =>
+    set((state) => {
+      const next = appendNotificationEvents(state, [event]);
+      return {
+        events: next.events,
+        readEventKeys: next.readEventKeys,
+        unreadCount: next.unreadCount,
+      };
+    }),
+  markAllRead: () =>
     set((state) => ({
-      events: [...state.events.slice(-99), event],
-      unreadCount: state.unreadCount + 1,
+      readEventKeys: new Set(state.events.map(getTeamNotificationEventKey)),
+      unreadCount: 0,
     })),
-  markAllRead: () => set({ unreadCount: 0 }),
-  clear: () => set({ events: [], unreadCount: 0 }),
+  clear: () => set({ events: [], readEventKeys: new Set<string>(), unreadCount: 0 }),
 }));
 
 // ─── Clarification Store ────────────────────────────────────────────────────
@@ -185,6 +381,7 @@ interface ClarificationStoreState {
   markAnswered: (id: string, answer: string) => void;
   dismiss: (id: string) => void;
   clear: () => void;
+  replaceFromRuntime: (items: ClarificationItem[]) => void;
 }
 
 export const useClarificationStore = create<ClarificationStoreState>((set) => ({
@@ -242,7 +439,64 @@ export const useClarificationStore = create<ClarificationStoreState>((set) => ({
         pendingCount: items.filter((i) => i.status === 'pending').length,
       };
     }),
+  replaceFromRuntime: (items) =>
+    set((state) => {
+      const runtimeById = new Map(items.map((item) => [item.id, item]));
+      const merged = [...items];
+      for (const existing of state.items) {
+        const runtimeItem = runtimeById.get(existing.id);
+        if (!runtimeItem) {
+          if (existing.status === 'answered' || existing.status === 'dismissed') {
+            merged.push(existing);
+          }
+          continue;
+        }
+        if (
+          (existing.status === 'answered' || existing.status === 'dismissed') &&
+          runtimeItem.status === 'pending'
+        ) {
+          const index = merged.findIndex((item) => item.id === existing.id);
+          if (index >= 0) {
+            merged[index] = existing;
+          }
+        }
+      }
+      return {
+        items: merged,
+        pendingCount: merged.filter((item) => item.status === 'pending').length,
+      };
+    }),
   clear: () => set({ items: [], pendingCount: 0 }),
+}));
+
+// ─── Connection Store ──────────────────────────────────────────────────────
+
+interface TeamEventsConnectionStoreState {
+  lastCloseCode: number | null;
+  lastError: string | null;
+  lastOpenAt: number | null;
+  lastProtocolErrorCode: string | null;
+  lastRecoveredAt: number | null;
+  nextRetryAt: number | null;
+  reconnectAttempt: number;
+  setSnapshot: (input: Partial<Omit<TeamEventsConnectionStoreState, 'setSnapshot'>>) => void;
+  state: TeamEventsConnectionState;
+}
+
+export const useTeamEventsConnectionStore = create<TeamEventsConnectionStoreState>((set) => ({
+  lastCloseCode: null,
+  lastError: null,
+  lastOpenAt: null,
+  lastProtocolErrorCode: null,
+  lastRecoveredAt: null,
+  nextRetryAt: null,
+  reconnectAttempt: 0,
+  setSnapshot: (input) =>
+    set((state) => ({
+      ...state,
+      ...input,
+    })),
+  state: 'idle',
 }));
 
 // ─── Event Dispatcher ───────────────────────────────────────────────────────
@@ -299,9 +553,16 @@ export function dispatchTeamEvent(event: HandoffEvent): void {
   const teamEventKind = event.payload?.['__teamEventKind'] as string | undefined;
   if (teamEventKind === 'team_usage') {
     const { applyUsageEvent } = useTeamUsageStore.getState();
+    const usageSessionId = (event.payload['sessionId'] as string) ?? event.sessionId ?? undefined;
+    // layer 归属：优先用事件显式 layer，否则由 session→roleLayer 映射推导。
+    const explicitLayer = (event.payload['layer'] as string) ?? event.layer ?? undefined;
+    const derivedLayer =
+      explicitLayer ??
+      (usageSessionId ? useLayerStore.getState().nodes.get(usageSessionId)?.roleLayer : undefined);
     applyUsageEvent({
       agentId: (event.payload['agentId'] as string) ?? undefined,
-      sessionId: (event.payload['sessionId'] as string) ?? undefined,
+      sessionId: usageSessionId,
+      ...(derivedLayer ? { layer: derivedLayer } : {}),
       provider: (event.payload['provider'] as string) ?? undefined,
       model: (event.payload['model'] as string) ?? undefined,
       inputTokens: (event.payload['inputTokens'] as number) ?? 0,
@@ -326,22 +587,313 @@ export function dispatchTeamEvent(event: HandoffEvent): void {
   // 不需要额外 store——但如果后续需要更细粒度的 per-round timing，可以在这里加。
 }
 
+function parseTimestampMs(value: string | null | undefined): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function normalizeTeamRoleLayer(value: string | null | undefined): TeamRoleLayer {
+  switch (value) {
+    case 'user':
+    case 'reception':
+    case 'pm1':
+    case 'pm2':
+    case 'executor':
+    case 'tester':
+    case 'reviewer':
+      return value;
+    default:
+      return 'reception';
+  }
+}
+
+function normalizeLayerNodeState(value: string | null | undefined): HandoffState | 'idle' {
+  switch (value) {
+    case 'pending':
+    case 'claimed':
+    case 'running':
+    case 'completed':
+    case 'failed':
+    case 'cancelled':
+      return value;
+    default:
+      return 'idle';
+  }
+}
+
+export function hydrateTeamRuntimeStores(input: {
+  handoffs: TeamRuntimeSnapshotHandoffRecord[];
+  sessions: TeamRuntimeSnapshotSessionRecord[];
+}): void {
+  useHandoffStore.getState().replaceAll(
+    input.handoffs.map((record) => {
+      const updatedAt = parseTimestampMs(record.updatedAt) ?? Date.now();
+      return {
+        ...(parseTimestampMs(record.completedAt)
+          ? { endedAt: parseTimestampMs(record.completedAt) }
+          : normalizeLayerNodeState(record.state) !== 'running' &&
+              normalizeLayerNodeState(record.state) !== 'claimed' &&
+              normalizeLayerNodeState(record.state) !== 'pending'
+            ? { endedAt: updatedAt }
+            : {}),
+        id: record.id,
+        fromRoleLayer: normalizeTeamRoleLayer(record.fromRoleLayer),
+        sessionId: record.toSessionId ?? record.fromSessionId,
+        startedAt: parseTimestampMs(record.startedAt) ?? parseTimestampMs(record.claimedAt),
+        state: normalizeLayerNodeState(record.state) as HandoffState,
+        toRoleLayer: normalizeTeamRoleLayer(record.toRoleLayer),
+        updatedAt,
+      };
+    }),
+  );
+
+  useLayerStore.getState().replaceAll(
+    input.sessions.map((session) => ({
+      parentSessionId: session.parentSessionId,
+      roleLayer: normalizeTeamRoleLayer(session.roleLayer),
+      sessionId: session.id,
+      state: normalizeLayerNodeState(session.stateStatus),
+      ...(session.title ? { title: session.title } : {}),
+    })),
+  );
+}
+
+export function hydrateClarificationStore(
+  items: Array<{
+    answer?: string;
+    answeredAt?: number;
+    context: string;
+    createdAt: number;
+    fromSessionId: string;
+    id: string;
+    question: string;
+    sessionId: string;
+    status: ClarificationStatus;
+  }>,
+): void {
+  useClarificationStore.getState().replaceFromRuntime(
+    items.map((item) => ({
+      ...item,
+      ...(item.answer ? { answer: item.answer } : {}),
+      ...(typeof item.answeredAt === 'number' ? { answeredAt: item.answeredAt } : {}),
+    })),
+  );
+}
+
+export function hydrateNotificationStore(
+  events: Array<{
+    layer?: string;
+    payload: Record<string, unknown>;
+    sessionId?: string;
+    taskId?: string;
+    timestamp: number;
+    type: string;
+  }>,
+): void {
+  useTeamNotificationStore.getState().mergeRuntime(
+    events.map((event) => ({
+      payload: event.payload,
+      timestamp: event.timestamp,
+      type: event.type,
+      ...(event.layer ? { layer: normalizeTeamRoleLayer(event.layer) } : {}),
+      ...(event.sessionId ? { sessionId: event.sessionId } : {}),
+      ...(event.taskId ? { taskId: event.taskId } : {}),
+    })),
+  );
+}
+
 // ─── WS Connection Hook ─────────────────────────────────────────────────────
 
 let wsInstance: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let manualDisconnect = false;
+let lastProtocolErrorCode: string | null = null;
+// §0.150 client-side liveness watchdog state. The gateway pings at the
+// PROTOCOL level (browsers auto-answer those and never surface them to JS)
+// and idle-closes after 45s, but a half-open socket (server crash / network
+// partition with no TCP FIN) leaves the browser socket OPEN indefinitely:
+// `onmessage`/`onclose` never fire, reconnect never triggers, and the team
+// UI silently freezes on stale state while still showing "connected". This
+// app-level probe sends `{type:'ping'}` (which the gateway answers with
+// `pong`) and tears the socket down once the server has gone silent past a
+// tolerance window, handing recovery to the normal onclose backoff path.
+let livenessTimer: ReturnType<typeof setInterval> | null = null;
+let lastServerActivityAt = 0;
+
+const TEAM_EVENTS_RECONNECT_BASE_MS = 2_000;
+const TEAM_EVENTS_RECONNECT_MAX_MS = 30_000;
+
+/** Client-side application ping cadence (keeps the half-open detector primed
+ * and also refreshes the gateway's own 45s idle timer). */
+const TEAM_EVENTS_CLIENT_PING_INTERVAL_MS = 15_000;
+/** Tolerance window: if NOTHING (team event, the initial `connected`, or a
+ * `pong`) arrives from the server within this span, the socket is presumed
+ * half-open and torn down. Must exceed 2 ping intervals so a single dropped
+ * pong doesn't cause a spurious reconnect, yet stay well under the OS TCP
+ * timeout (minutes) that the browser would otherwise wait on. */
+const TEAM_EVENTS_CLIENT_LIVENESS_TIMEOUT_MS = 40_000;
+
+/**
+ * Pure decision for one liveness-probe tick. `ping` keeps the connection
+ * primed; `reconnect` means the server has gone silent past the tolerance
+ * window, so the caller must tear the socket down and let onclose reconnect.
+ */
+export function resolveTeamEventsLivenessAction(input: {
+  msSinceLastServerActivity: number;
+  livenessTimeoutMs?: number;
+}): 'ping' | 'reconnect' {
+  const timeout = input.livenessTimeoutMs ?? TEAM_EVENTS_CLIENT_LIVENESS_TIMEOUT_MS;
+  return input.msSinceLastServerActivity > timeout ? 'reconnect' : 'ping';
+}
+
+function stopTeamEventsLivenessProbe(): void {
+  if (livenessTimer) {
+    clearInterval(livenessTimer);
+    livenessTimer = null;
+  }
+}
+
+function startTeamEventsLivenessProbe(ws: WebSocket): void {
+  stopTeamEventsLivenessProbe();
+  livenessTimer = setInterval(() => {
+    if (ws.readyState !== WebSocket.OPEN) return;
+    const action = resolveTeamEventsLivenessAction({
+      msSinceLastServerActivity: Date.now() - lastServerActivityAt,
+    });
+    if (action === 'reconnect') {
+      // Server silent past tolerance → presume half-open. Closing triggers
+      // the onclose handler, which runs the normal backoff-reconnect path.
+      stopTeamEventsLivenessProbe();
+      try {
+        ws.close();
+      } catch {
+        /* already closing/closed */
+      }
+      return;
+    }
+    try {
+      ws.send(JSON.stringify({ type: 'ping' }));
+    } catch {
+      // send threw (socket died between the readyState check and here) →
+      // tear down so onclose can reconnect.
+      stopTeamEventsLivenessProbe();
+      try {
+        ws.close();
+      } catch {
+        /* noop */
+      }
+    }
+  }, TEAM_EVENTS_CLIENT_PING_INTERVAL_MS);
+}
+
+export function computeTeamEventsReconnectDelay(attempt: number): number {
+  const safeAttempt = Math.max(0, attempt);
+  return Math.min(TEAM_EVENTS_RECONNECT_BASE_MS * 2 ** safeAttempt, TEAM_EVENTS_RECONNECT_MAX_MS);
+}
+
+export function resolveTeamEventsCloseStrategy(input: {
+  closeCode: number;
+  lastErrorCode?: string | null;
+  manualDisconnect: boolean;
+  online: boolean;
+}): {
+  lastError: string | null;
+  shouldReconnect: boolean;
+  state: TeamEventsConnectionState;
+} {
+  if (input.manualDisconnect) {
+    return {
+      lastError: null,
+      shouldReconnect: false,
+      state: 'stopped',
+    };
+  }
+
+  if (input.lastErrorCode === 'UNAUTHORIZED' || input.closeCode === 1008) {
+    return {
+      lastError: 'team-events 认证失效，请重新登录后再连接。',
+      shouldReconnect: false,
+      state: 'stopped',
+    };
+  }
+
+  if (!input.online) {
+    return {
+      lastError: '当前网络离线，等待网络恢复。',
+      shouldReconnect: true,
+      state: 'offline',
+    };
+  }
+
+  return {
+    lastError: input.closeCode === 1001 ? 'team-events 空闲超时，准备自动重连。' : null,
+    shouldReconnect: true,
+    state: 'reconnecting',
+  };
+}
 
 export function connectTeamEvents(gatewayUrl: string, token: string): void {
   if (wsInstance && wsInstance.readyState <= WebSocket.OPEN) {
     return;
   }
+  manualDisconnect = false;
+  const setConnection = useTeamEventsConnectionStore.getState().setSnapshot;
+  const isOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
+  if (isOffline) {
+    setConnection({
+      lastError: '当前网络离线，等待恢复后重连。',
+      nextRetryAt: null,
+      state: 'offline',
+    });
+    return;
+  }
+  const currentAttempt = useTeamEventsConnectionStore.getState().reconnectAttempt;
+  setConnection({
+    lastError: null,
+    nextRetryAt: null,
+    state: currentAttempt > 0 ? 'reconnecting' : 'connecting',
+  });
   const wsUrl =
     gatewayUrl.replace(/^http/, 'ws') + `/team-events?token=${encodeURIComponent(token)}`;
   const ws = new WebSocket(wsUrl);
 
+  ws.onopen = () => {
+    lastProtocolErrorCode = null;
+    const openedAt = Date.now();
+    lastServerActivityAt = openedAt;
+    startTeamEventsLivenessProbe(ws);
+    useTeamEventsConnectionStore.getState().setSnapshot({
+      lastCloseCode: null,
+      lastError: null,
+      lastOpenAt: openedAt,
+      lastProtocolErrorCode: null,
+      lastRecoveredAt: currentAttempt > 0 ? openedAt : null,
+      nextRetryAt: null,
+      reconnectAttempt: 0,
+      state: 'connected',
+    });
+  };
+
   ws.onmessage = (msg) => {
+    // Any frame (team event, the initial `connected`, or a `pong` answer to
+    // our liveness ping) proves the server is alive — refresh the watchdog.
+    lastServerActivityAt = Date.now();
     try {
       const event = JSON.parse(msg.data as string) as HandoffEvent;
+      if ((event as { type?: string; code?: string; message?: string }).type === 'error') {
+        lastProtocolErrorCode = (event as { code?: string }).code ?? null;
+        useTeamEventsConnectionStore.getState().setSnapshot({
+          lastProtocolErrorCode: lastProtocolErrorCode,
+          lastError:
+            (event as { message?: string }).message ??
+            (event as { code?: string }).code ??
+            'team-events error',
+        });
+        return;
+      }
       if (event.type && event.type !== 'connected' && event.type !== 'pong') {
         dispatchTeamEvent(event);
       }
@@ -351,25 +903,85 @@ export function connectTeamEvents(gatewayUrl: string, token: string): void {
     }
   };
 
-  ws.onclose = () => {
+  ws.onclose = (event) => {
     wsInstance = null;
-    // 自动重连（5s 后）
+    stopTeamEventsLivenessProbe();
+    const strategy = resolveTeamEventsCloseStrategy({
+      closeCode: event.code,
+      lastErrorCode: lastProtocolErrorCode,
+      manualDisconnect,
+      online: typeof navigator === 'undefined' ? true : navigator.onLine !== false,
+    });
+    lastProtocolErrorCode = null;
+    if (!strategy.shouldReconnect) {
+      useTeamEventsConnectionStore.getState().setSnapshot({
+        lastCloseCode: event.code,
+        lastError: strategy.lastError,
+        lastProtocolErrorCode: lastProtocolErrorCode,
+        lastRecoveredAt: null,
+        nextRetryAt: null,
+        reconnectAttempt: 0,
+        state: strategy.state,
+      });
+      return;
+    }
+    const attempt = useTeamEventsConnectionStore.getState().reconnectAttempt + 1;
+    const delay = computeTeamEventsReconnectDelay(attempt - 1);
+    const nextRetryAt = Date.now() + delay;
+    useTeamEventsConnectionStore.getState().setSnapshot({
+      lastCloseCode: event.code,
+      ...(strategy.lastError ? { lastError: strategy.lastError } : {}),
+      lastProtocolErrorCode: lastProtocolErrorCode,
+      lastRecoveredAt: null,
+      nextRetryAt,
+      reconnectAttempt: attempt,
+      state: strategy.state,
+    });
     if (!reconnectTimer) {
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
         connectTeamEvents(gatewayUrl, token);
-      }, 5000);
+      }, delay);
     }
   };
 
   ws.onerror = () => {
+    useTeamEventsConnectionStore.getState().setSnapshot({
+      lastError: 'team-events 连接异常，准备重连。',
+    });
     ws.close();
   };
+
+  const handleOnline = () => {
+    if (manualDisconnect) return;
+    if (!wsInstance || wsInstance.readyState > WebSocket.OPEN) {
+      connectTeamEvents(gatewayUrl, token);
+    }
+  };
+  const handleOffline = () => {
+    useTeamEventsConnectionStore.getState().setSnapshot({
+      lastError: '当前网络离线，等待网络恢复。',
+      lastRecoveredAt: null,
+      state: 'offline',
+    });
+  };
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    ws.addEventListener('close', () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    });
+  }
 
   wsInstance = ws;
 }
 
 export function disconnectTeamEvents(): void {
+  manualDisconnect = true;
+  lastProtocolErrorCode = null;
+  stopTeamEventsLivenessProbe();
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
@@ -378,4 +990,12 @@ export function disconnectTeamEvents(): void {
     wsInstance.close();
     wsInstance = null;
   }
+  useTeamEventsConnectionStore.getState().setSnapshot({
+    lastCloseCode: null,
+    lastProtocolErrorCode: null,
+    lastRecoveredAt: null,
+    nextRetryAt: null,
+    reconnectAttempt: 0,
+    state: 'stopped',
+  });
 }

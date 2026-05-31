@@ -12,7 +12,7 @@ export function createWebArtifactPlatformAdapter(): ArtifactPlatformAdapter {
         window.open(path, '_blank', 'noopener,noreferrer');
         return;
       }
-      throw new Error('Web artifact adapter cannot open local file paths directly');
+      throw new Error('当前 Web 环境不支持直接打开本地文件路径。');
     },
     async shareArtifact(artifact: RunArtifact): Promise<string> {
       const shareTarget = artifact.path ?? artifact.id;

@@ -168,33 +168,33 @@ export function parseImportedSelection(raw: string): ParsedImportResult | Parsed
   } catch (err) {
     return {
       ok: false,
-      error: err instanceof Error ? `JSON parse failed: ${err.message}` : 'JSON parse failed',
+      error: err instanceof Error ? `JSON 解析失败：${err.message}` : 'JSON 解析失败。',
     };
   }
   if (!parsed || typeof parsed !== 'object') {
-    return { ok: false, error: 'expected a JSON object at the top level' };
+    return { ok: false, error: '导入内容的顶层必须是 JSON 对象。' };
   }
   const obj = parsed as Record<string, unknown>;
   if (obj['version'] !== 1) {
-    return { ok: false, error: `unsupported version: ${String(obj['version'])}` };
+    return { ok: false, error: `不支持的导入版本：${String(obj['version'])}` };
   }
   if (!Array.isArray(obj['items'])) {
-    return { ok: false, error: 'missing "items" array' };
+    return { ok: false, error: '导入内容缺少 "items" 数组。' };
   }
   const items: ExportableSelectionItem[] = [];
   for (const entry of obj['items']) {
     if (!entry || typeof entry !== 'object') {
-      return { ok: false, error: 'items[*] must be objects' };
+      return { ok: false, error: 'items[*] 必须是对象。' };
     }
     const row = entry as Record<string, unknown>;
     if (typeof row['skillId'] !== 'string' || row['skillId'].length === 0) {
-      return { ok: false, error: 'items[*].skillId must be a non-empty string' };
+      return { ok: false, error: 'items[*].skillId 必须是非空字符串。' };
     }
     if (typeof row['enabled'] !== 'boolean') {
-      return { ok: false, error: 'items[*].enabled must be a boolean' };
+      return { ok: false, error: 'items[*].enabled 必须是布尔值。' };
     }
     if (typeof row['pinned'] !== 'boolean') {
-      return { ok: false, error: 'items[*].pinned must be a boolean' };
+      return { ok: false, error: 'items[*].pinned 必须是布尔值。' };
     }
     items.push({
       skillId: row['skillId'],

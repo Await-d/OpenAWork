@@ -204,48 +204,100 @@ export async function downloadUpdate(
 }
 
 /**
+ * Inter-chunk stall deadline for a proxied download. A download is legitimately
+ * long-running, so a fixed total timeout would be wrong; instead we bound the
+ * gap BETWEEN progress events. `downloadUpdateViaProxy` previously did a bare
+ * `fetch` + `reader.read()` loop with no deadline at all (unlike every other
+ * call in this module / `github-proxy`, which all use an AbortController). A
+ * proxy that accepts the connection but never sends headers, or stalls
+ * mid-stream, would leave the await pending forever — the updater progress bar
+ * freezes with no error and no recovery. We abort the fetch (which rejects the
+ * in-flight `reader.read()`) when no bytes arrive within this window.
+ */
+const DOWNLOAD_STALL_TIMEOUT_MS = 60_000;
+
+/**
  * Download update file through a proxy (used when native download is unavailable).
  * Returns the downloaded bytes as an ArrayBuffer.
  */
 export async function downloadUpdateViaProxy(
   downloadUrl: string,
   onProgress: (progress: DownloadProgress) => void,
+  stallTimeoutMs: number = DOWNLOAD_STALL_TIMEOUT_MS,
 ): Promise<ArrayBuffer> {
-  const res = await fetch(downloadUrl, { redirect: 'follow' });
-  if (!res.ok) {
-    throw new UpdateError('network', `代理下载失败: HTTP ${res.status}`);
-  }
+  // Stall watchdog: aborting the controller both fails a hung initial fetch
+  // (connected, no headers) and rejects an in-flight `reader.read()` that has
+  // gone quiet mid-stream. Re-armed on every byte of progress so a slow but
+  // live download is never cut off.
+  const controller = new AbortController();
+  let stalled = false;
+  let stallTimer: ReturnType<typeof setTimeout> | undefined;
+  const armStallTimer = () => {
+    if (stallTimeoutMs <= 0) return;
+    if (stallTimer) clearTimeout(stallTimer);
+    stallTimer = setTimeout(() => {
+      stalled = true;
+      controller.abort();
+    }, stallTimeoutMs);
+  };
 
-  const contentLength = res.headers.get('content-length');
-  const total = contentLength ? parseInt(contentLength, 10) : null;
-  const reader = res.body?.getReader();
-  if (!reader) {
-    throw new UpdateError('network', '无法读取下载流');
-  }
+  try {
+    armStallTimer();
+    const res = await fetch(downloadUrl, { redirect: 'follow', signal: controller.signal });
+    if (!res.ok) {
+      throw new UpdateError('network', `代理下载失败: HTTP ${res.status}`);
+    }
 
-  const chunks: Uint8Array[] = [];
-  let downloaded = 0;
+    const contentLength = res.headers.get('content-length');
+    const total = contentLength ? parseInt(contentLength, 10) : null;
+    const reader = res.body?.getReader();
+    if (!reader) {
+      throw new UpdateError('network', '无法读取下载流');
+    }
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    downloaded += value.byteLength;
-    onProgress({
-      downloaded,
-      total,
-      percent: total ? clampPercent(Math.round((downloaded / total) * 100)) : 0,
-    });
-  }
+    const chunks: Uint8Array[] = [];
+    let downloaded = 0;
 
-  // Merge chunks into a single ArrayBuffer
-  const merged = new Uint8Array(downloaded);
-  let offset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.byteLength;
+    while (true) {
+      let result: ReadableStreamReadResult<Uint8Array>;
+      try {
+        result = await reader.read();
+      } catch (err) {
+        if (stalled) {
+          throw new UpdateError('network', `下载停滞超过 ${stallTimeoutMs}ms，网络可能已中断。`);
+        }
+        throw err;
+      }
+      if (result.done) break;
+      const value = result.value;
+      if (!value) continue;
+      chunks.push(value);
+      downloaded += value.byteLength;
+      // Progress arrived → reset the stall deadline.
+      armStallTimer();
+      onProgress({
+        downloaded,
+        total,
+        percent: total ? clampPercent(Math.round((downloaded / total) * 100)) : 0,
+      });
+    }
+
+    // Merge chunks into a single ArrayBuffer
+    const merged = new Uint8Array(downloaded);
+    let offset = 0;
+    for (const chunk of chunks) {
+      merged.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return merged.buffer;
+  } catch (err) {
+    if (stalled) {
+      throw new UpdateError('network', `下载停滞超过 ${stallTimeoutMs}ms，网络可能已中断。`);
+    }
+    throw err;
+  } finally {
+    if (stallTimer) clearTimeout(stallTimer);
   }
-  return merged.buffer;
 }
 
 export async function installUpdate(update: Update): Promise<void> {

@@ -17,9 +17,31 @@ export {
 } from './presets.js';
 
 export {
+  PROVIDER_CATALOG,
+  getCatalogEntry,
+  getDefaultUpstream,
+  resolveThinkingStyle,
+  catalogModelSupportsThinking,
+  inferProviderTypeFromHostname,
+  normalizeProviderAlias,
+  inferProviderLabelFromModelId,
+  getProviderDisplayName,
+  getProviderCatalogUi,
+} from './catalog.js';
+export type {
+  ProviderCatalogEntry,
+  ProviderUpstreamVariant,
+  ProviderUiMeta,
+  ProviderThinkingStyle,
+  ProviderCatalogUiEntry,
+  CatalogUpstreamProtocol,
+} from './catalog.js';
+
+export {
   get as getModelsDevData,
   getSync as getModelsDevDataSync,
   refresh as refreshModelsDevData,
+  refreshOrThrow as refreshModelsDevDataOrThrow,
   startPeriodicRefresh as startModelsDevRefresh,
   stopPeriodicRefresh as stopModelsDevRefresh,
 } from './models-dev.js';

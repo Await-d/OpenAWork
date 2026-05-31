@@ -13,14 +13,28 @@ import { getLanguageId } from './language.js';
 const DIAGNOSTICS_DEBOUNCE_MS = 150;
 const INITIALIZE_TIMEOUT_MS = 45_000;
 const DIAGNOSTICS_TIMEOUT_MS = 3_000;
+// Per-request wall-clock ceiling. A language server that connects but
+// never answers a request (deadlocked indexer, hung child process) would
+// otherwise leave the `sendRequest` promise pending forever — the tool
+// call that awaits it (hover/definition/references/...) hangs, and on the
+// editor side every cursor move can stack another never-settling request.
+// Racing each request against this deadline converts the hang into the
+// same fallback the existing `.catch()` already returns.
+export const REQUEST_TIMEOUT_MS = 10_000;
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`Timeout after ${ms}ms`)), ms),
-    ),
-  ]);
+export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  // Clear the timer on settle so wrapping high-frequency requests (hover on
+  // every cursor move) doesn't accumulate thousands of live timers waiting
+  // out their full `ms`. `unref` keeps a pending timer from holding the
+  // process open during shutdown.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Timeout after ${ms}ms`)), ms);
+    timer.unref?.();
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
 }
 
 /** SymbolKind values 1–26 per LSP 3.17 spec. */
@@ -71,6 +85,26 @@ export async function createLSPClient(input: {
   root: string;
   onDiagnostics?: (path: string, diagnostics: Diagnostic[]) => void;
 }): Promise<LSPClientInfo> {
+  const child = input.server.process;
+
+  // A spawned child emits an asynchronous `error` event when it fails to
+  // start (ENOENT/EACCES) or dies unexpectedly. Without a listener Node
+  // rethrows it as an uncaught exception that can crash the whole gateway.
+  // Attach a swallowing listener so a broken language server degrades to a
+  // dead connection instead of taking the process down. The pool's
+  // operation-retry / broken-set logic handles recovery.
+  child.on('error', () => {
+    // Intentionally swallowed: stream readers below surface the failure to
+    // callers, and LSPManager marks the server broken on the rejected init.
+  });
+
+  // If spawn already failed, stdio pipes may be missing — fail fast with a
+  // clear error the caller (getOrSpawnClient) catches, rather than letting
+  // createMessageConnection throw an opaque error on a null stream.
+  if (!child.stdout || !child.stdin) {
+    throw new Error(`LSP server ${input.serverID} has no stdio pipes (spawn likely failed)`);
+  }
+
   const connection: MessageConnection = createMessageConnection(
     new StreamMessageReader(input.server.process.stdout),
     new StreamMessageWriter(input.server.process.stdin),
@@ -119,6 +153,12 @@ export async function createLSPClient(input: {
     INITIALIZE_TIMEOUT_MS,
   );
   await connection.sendNotification('initialized', {});
+
+  // Timeout-wrapped request helper. Each LSP request is raced against
+  // REQUEST_TIMEOUT_MS so a hung server surfaces as a rejection that the
+  // per-method `.catch()` fallbacks already handle (null / []).
+  const request = <T>(method: string, params: unknown): Promise<T> =>
+    withTimeout<T>(connection.sendRequest(method, params), REQUEST_TIMEOUT_MS);
 
   return {
     serverID: input.serverID,
@@ -172,103 +212,81 @@ export async function createLSPClient(input: {
     },
 
     async hover({ file, line, character }) {
-      return connection
-        .sendRequest('textDocument/hover', {
-          textDocument: { uri: pathToFileURL(file).href },
-          position: { line, character },
-        })
-        .catch(() => null);
+      return request('textDocument/hover', {
+        textDocument: { uri: pathToFileURL(file).href },
+        position: { line, character },
+      }).catch(() => null);
     },
 
     async definition({ file, line, character }) {
-      const result = await connection
-        .sendRequest('textDocument/definition', {
-          textDocument: { uri: pathToFileURL(file).href },
-          position: { line, character },
-        })
-        .catch(() => []);
+      const result = await request('textDocument/definition', {
+        textDocument: { uri: pathToFileURL(file).href },
+        position: { line, character },
+      }).catch(() => []);
       return Array.isArray(result) ? result : result ? [result] : [];
     },
 
     async implementation({ file, line, character }) {
-      const result = await connection
-        .sendRequest('textDocument/implementation', {
-          textDocument: { uri: pathToFileURL(file).href },
-          position: { line, character },
-        })
-        .catch(() => []);
+      const result = await request('textDocument/implementation', {
+        textDocument: { uri: pathToFileURL(file).href },
+        position: { line, character },
+      }).catch(() => []);
       return Array.isArray(result) ? result : result ? [result] : [];
     },
 
     async references({ file, line, character, includeDeclaration = true }) {
-      const result = await connection
-        .sendRequest('textDocument/references', {
-          textDocument: { uri: pathToFileURL(file).href },
-          position: { line, character },
-          context: { includeDeclaration },
-        })
-        .catch(() => []);
+      const result = await request('textDocument/references', {
+        textDocument: { uri: pathToFileURL(file).href },
+        position: { line, character },
+        context: { includeDeclaration },
+      }).catch(() => []);
       return Array.isArray(result) ? result : [];
     },
 
     async documentSymbols({ file }) {
-      const result = await connection
-        .sendRequest('textDocument/documentSymbol', {
-          textDocument: { uri: pathToFileURL(file).href },
-        })
-        .catch(() => []);
+      const result = await request('textDocument/documentSymbol', {
+        textDocument: { uri: pathToFileURL(file).href },
+      }).catch(() => []);
       return Array.isArray(result) ? result : result ? [result] : [];
     },
 
     async workspaceSymbols({ query }) {
-      const result = await connection
-        .sendRequest('workspace/symbol', {
-          query,
-        })
-        .catch(() => []);
+      const result = await request('workspace/symbol', {
+        query,
+      }).catch(() => []);
       return Array.isArray(result) ? result : result ? [result] : [];
     },
 
     async prepareRename({ file, line, character }) {
-      return connection
-        .sendRequest('textDocument/prepareRename', {
-          textDocument: { uri: pathToFileURL(file).href },
-          position: { line, character },
-        })
-        .catch(() => null);
+      return request('textDocument/prepareRename', {
+        textDocument: { uri: pathToFileURL(file).href },
+        position: { line, character },
+      }).catch(() => null);
     },
 
     async rename({ file, line, character, newName }) {
-      return connection
-        .sendRequest('textDocument/rename', {
-          textDocument: { uri: pathToFileURL(file).href },
-          position: { line, character },
-          newName,
-        })
-        .catch(() => null);
+      return request('textDocument/rename', {
+        textDocument: { uri: pathToFileURL(file).href },
+        position: { line, character },
+        newName,
+      }).catch(() => null);
     },
 
     async prepareCallHierarchy({ file, line, character }) {
-      const result = await connection
-        .sendRequest('textDocument/prepareCallHierarchy', {
-          textDocument: { uri: pathToFileURL(file).href },
-          position: { line, character },
-        })
-        .catch(() => []);
+      const result = await request('textDocument/prepareCallHierarchy', {
+        textDocument: { uri: pathToFileURL(file).href },
+        position: { line, character },
+      }).catch(() => []);
       return Array.isArray(result) ? result : result ? [result] : [];
     },
 
     async incomingCalls({ item }) {
-      const result = await connection
-        .sendRequest('callHierarchy/incomingCalls', { item })
-        .catch(() => []);
+      const result = await request('callHierarchy/incomingCalls', { item }).catch(() => []);
       return Array.isArray(result) ? result : [];
     },
 
     async outgoingCalls({ item }) {
-      const result = await connection
-        .sendRequest('callHierarchy/outgoingCalls', { item })
-        .catch(() => []);
+      const result = await request('callHierarchy/outgoingCalls', { item }).catch(() => []);
       return Array.isArray(result) ? result : [];
     },
 

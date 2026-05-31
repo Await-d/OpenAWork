@@ -28,11 +28,14 @@ import {
   loadSavedChatSessionDefaults,
 } from '../../utils/chat/chat-session-defaults.js';
 import WorkspacePickerModal from '../../components/common/modal/WorkspacePickerModal.js';
+import { buildWorkspacePickerDataSource } from '../../components/common/modal/workspace-picker-data-source.js';
 import WorkspaceGroupMenu from '../../components/layout/workspace/WorkspaceGroupMenu.js';
 import { WorkspaceDeleteConfirmDialog } from '../../components/layout/workspace/WorkspaceDeleteConfirmDialog.js';
 import { preloadRouteModuleByPath } from '../../routes/preloadable-route-modules.js';
 import { DetailPanel } from './views/detail-panel.js';
-import { SessionCard, SESSION_CARD_ACTION_BUTTON_STYLE } from './views/session-card.js';
+import { WorkspaceGroupSection } from './views/workspace-group-section.js';
+import { SessionsListResizeHandle } from './views/sessions-list-resize-handle.js';
+import { useTeamSessionIds } from './state/use-team-session-ids.js';
 import type { SessionRow } from './state/session-page-types.js';
 
 function resolveDeletedSessionIds(
@@ -86,6 +89,14 @@ export default function SessionsPage() {
   }, []);
   const token = useAuthStore((s) => s.accessToken);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
+  const workspacePickerDataSource = useMemo(
+    () =>
+      buildWorkspacePickerDataSource({
+        client: createWorkspaceClient(gatewayUrl),
+        token,
+      }),
+    [gatewayUrl, token],
+  );
   const tokenStore: TokenStore = useMemo(
     () => ({
       getAccessToken: () => useAuthStore.getState().accessToken,
@@ -102,6 +113,20 @@ export default function SessionsPage() {
   const addSavedWorkspacePath = useUIStateStore((s) => s.addSavedWorkspacePath);
   const mergeSavedWorkspacePaths = useUIStateStore((s) => s.mergeSavedWorkspacePaths);
   const removeSavedWorkspacePath = useUIStateStore((s) => s.removeSavedWorkspacePath);
+  const persistedListPaneWidth = useUIStateStore((s) => s.sessionsListPaneWidth);
+  const setSessionsListPaneWidth = useUIStateStore((s) => s.setSessionsListPaneWidth);
+  const collapsedWorkspaceGroupKeys = useUIStateStore((s) => s.sessionsCollapsedWorkspaceGroups);
+  const toggleSessionsCollapsedWorkspaceGroup = useUIStateStore(
+    (s) => s.toggleSessionsCollapsedWorkspaceGroup,
+  );
+  const collapsedWorkspaceGroupKeySet = useMemo(
+    () => new Set(collapsedWorkspaceGroupKeys),
+    [collapsedWorkspaceGroupKeys],
+  );
+  const [listPaneWidth, setListPaneWidth] = useState(persistedListPaneWidth);
+  useEffect(() => {
+    setListPaneWidth(persistedListPaneWidth);
+  }, [persistedListPaneWidth]);
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -246,38 +271,6 @@ export default function SessionsPage() {
       void navigate(`/chat/${session.id}`);
     }
   }
-
-  const fetchWorkspaceRoots = useCallback(async (): Promise<string[]> => {
-    const roots = await createWorkspaceClient(gatewayUrl).listRoots(token ?? '');
-    if (roots.length === 0) {
-      throw new Error('fetchRootPath failed');
-    }
-    return roots;
-  }, [token, gatewayUrl]);
-
-  const fetchRootPath = useCallback(async (): Promise<string> => {
-    const roots = await fetchWorkspaceRoots();
-    const root = roots[0];
-    if (!root) {
-      throw new Error('fetchRootPath failed');
-    }
-
-    return root;
-  }, [fetchWorkspaceRoots]);
-
-  const fetchTree = useCallback(
-    async (path: string, depth = 1) =>
-      createWorkspaceClient(gatewayUrl).fetchTree(token ?? '', path, { depth }) as Promise<
-        import('../../components/common/modal/WorkspacePickerModal.js').FileTreeNode[]
-      >,
-    [token, gatewayUrl],
-  );
-
-  const validatePath = useCallback(
-    async (path: string): Promise<{ valid: boolean; error?: string; path?: string }> =>
-      createWorkspaceClient(gatewayUrl).validatePath(token ?? '', path),
-    [gatewayUrl, token],
-  );
 
   const deleteSession = useCallback(
     async (id: string, options?: { suppressToast?: boolean }): Promise<boolean> => {
@@ -463,9 +456,38 @@ export default function SessionsPage() {
 
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const normalizedSearchQuery = deferredSearchQuery.toLowerCase();
-  const allWorkspaceCollections = useMemo(
-    () => buildWorkspaceSessionCollections(sessions, savedWorkspacePaths),
-    [savedWorkspacePaths, sessions],
+
+  const teamRuntime = useTeamSessionIds();
+  const teamSessionIds = teamRuntime.teamSessionIds;
+  const scopeFilter = useUIStateStore((s) => s.sessionsScopeFilter);
+  const setScopeFilter = useUIStateStore((s) => s.setSessionsScopeFilter);
+  const collapsedScopes = useUIStateStore((s) => s.sessionsCollapsedScopes);
+  const toggleCollapsedScope = useUIStateStore((s) => s.toggleSessionsCollapsedScope);
+  const collapsedScopeSet = useMemo(
+    () => new Set(collapsedScopes),
+    [collapsedScopes],
+  );
+
+  const partitionedSessions = useMemo(() => {
+    const personal: SessionRow[] = [];
+    const team: SessionRow[] = [];
+    for (const session of sessions) {
+      if (teamSessionIds.has(session.id)) {
+        team.push(session);
+      } else {
+        personal.push(session);
+      }
+    }
+    return { personal, team };
+  }, [sessions, teamSessionIds]);
+
+  const personalCollections = useMemo(
+    () => buildWorkspaceSessionCollections(partitionedSessions.personal, savedWorkspacePaths),
+    [partitionedSessions.personal, savedWorkspacePaths],
+  );
+  const teamCollections = useMemo(
+    () => buildWorkspaceSessionCollections(partitionedSessions.team, savedWorkspacePaths),
+    [partitionedSessions.team, savedWorkspacePaths],
   );
 
   const filtered = useMemo(
@@ -479,16 +501,69 @@ export default function SessionsPage() {
     () => new Set(filtered.map((session) => session.id)),
     [filtered],
   );
-  const groupedSessions = useMemo(
-    () =>
-      allWorkspaceCollections.groups.map((group) => ({
+
+  const buildScopeView = useCallback(
+    (
+      kind: 'personal' | 'team',
+      collections: typeof personalCollections,
+    ) => ({
+      kind,
+      groups: collections.groups.map((group) => ({
         ...group,
         sessions: group.sessions.filter((session) => filteredSessionIds.has(session.id)),
       })),
-    [allWorkspaceCollections.groups, filteredSessionIds],
+      sessionCountByWorkspace: collections.sessionCountByWorkspace,
+      sessionIdsByGroupKey: collections.sessionIdsByGroupKey,
+      totalSessionCount: collections.groups.reduce(
+        (sum, group) => sum + group.sessions.length,
+        0,
+      ),
+    }),
+    [filteredSessionIds],
   );
-  const sessionCountByWorkspace = allWorkspaceCollections.sessionCountByWorkspace;
-  const workspaceSessionIdsByGroupKey = allWorkspaceCollections.sessionIdsByGroupKey;
+
+  const personalScopeView = useMemo(
+    () => buildScopeView('personal', personalCollections),
+    [buildScopeView, personalCollections],
+  );
+  const teamScopeView = useMemo(
+    () => buildScopeView('team', teamCollections),
+    [buildScopeView, teamCollections],
+  );
+
+  const visibleScopeViews = useMemo(() => {
+    if (scopeFilter === 'personal') return [personalScopeView];
+    if (scopeFilter === 'team') return [teamScopeView];
+    // `all`: show personal first, then team. Hide a scope entirely when it
+    // has no sessions at all so we don't render an empty header for users
+    // who only use one of the two flows.
+    return [
+      ...(personalScopeView.totalSessionCount > 0 ? [personalScopeView] : []),
+      ...(teamScopeView.totalSessionCount > 0 ? [teamScopeView] : []),
+    ];
+  }, [personalScopeView, scopeFilter, teamScopeView]);
+
+  const visibleFilteredCount = useMemo(
+    () =>
+      visibleScopeViews.reduce(
+        (sum, view) =>
+          sum +
+          view.groups.reduce((groupSum, group) => groupSum + group.sessions.length, 0),
+        0,
+      ),
+    [visibleScopeViews],
+  );
+
+  const totalCountInScope = useMemo(() => {
+    if (scopeFilter === 'personal') return personalScopeView.totalSessionCount;
+    if (scopeFilter === 'team') return teamScopeView.totalSessionCount;
+    return sessions.length;
+  }, [
+    personalScopeView.totalSessionCount,
+    scopeFilter,
+    sessions.length,
+    teamScopeView.totalSessionCount,
+  ]);
 
   const selected = useMemo(
     () => sessions.find((session) => session.id === selectedId) ?? null,
@@ -553,10 +628,59 @@ export default function SessionsPage() {
     setRenamingId(null);
   }, []);
 
+  const handleListPaneWidthChange = useCallback((width: number) => {
+    setListPaneWidth(width);
+  }, []);
+  const handleListPaneWidthCommit = useCallback(
+    (width: number) => {
+      setListPaneWidth(width);
+      setSessionsListPaneWidth(width);
+    },
+    [setSessionsListPaneWidth],
+  );
+
+  const handleRequestWorkspaceContextMenu = useCallback(
+    (args: {
+      groupKey: string;
+      workspaceLabel: string;
+      workspacePath: string | null;
+      sessionCount: number;
+      x: number;
+      y: number;
+    }) => {
+      setWorkspaceContextMenu(args);
+    },
+    [],
+  );
+
+  const handleCreateInWorkspace = useCallback(
+    (workspacePath: string | null) => {
+      void createSession(workspacePath);
+    },
+    // createSession is stable enough within a render closure; including it
+    // would force this callback to re-create whenever sessions change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [token, gatewayUrl, navigate],
+  );
+
+  // Team-scope groups intentionally don't expose the per-workspace "新建"
+  // button, since team sessions need to be started from the team page where
+  // the user picks a workflow / member roster. We pass a no-op so the
+  // shared section component can keep its prop contract.
+  const noopCreateInWorkspace = useCallback((_workspacePath: string | null) => {
+    /* team sessions are created from the team page */
+  }, []);
+
+  const isFiltering = searchQuery.trim().length > 0;
+  const hasNoSearchMatches =
+    !loading && isFiltering && visibleFilteredCount === 0 && totalCountInScope > 0;
+  const hasNoSessionsInScope = !loading && totalCountInScope === 0;
+
   return (
     <div className="page-root">
       <TopBar
-        count={sessions.length}
+        totalCount={totalCountInScope}
+        visibleCount={visibleFilteredCount}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         onImport={() => {
@@ -583,205 +707,125 @@ export default function SessionsPage() {
           setShowWorkspacePicker(false);
           await createSession(path);
         }}
-        fetchRootPath={fetchRootPath}
-        fetchWorkspaceRoots={fetchWorkspaceRoots}
-        fetchTree={fetchTree}
-        validatePath={validatePath}
+        fetchRootPath={workspacePickerDataSource.fetchRootPath}
+        fetchWorkspaceRoots={workspacePickerDataSource.fetchWorkspaceRoots}
+        fetchTree={workspacePickerDataSource.fetchTree}
+        validatePath={workspacePickerDataSource.validatePath}
         initialPath={pendingWorkspacePath ?? undefined}
       />
       <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         <div
           style={{
-            width: 320,
+            position: 'relative',
+            width: listPaneWidth,
             flexShrink: 0,
             borderRight: '1px solid var(--border-default)',
             display: 'flex',
             flexDirection: 'column',
-            overflowY: 'auto',
             background: 'var(--bg-base)',
           }}
         >
-          <ul
+          <ScopeFilterTabs
+            scopeFilter={scopeFilter}
+            onScopeChange={setScopeFilter}
+            personalCount={personalScopeView.totalSessionCount}
+            teamCount={teamScopeView.totalSessionCount}
+            teamReady={teamRuntime.ready}
+            teamFailed={teamRuntime.failed}
+          />
+          <div
             style={{
-              padding: '0.625rem',
+              flex: 1,
+              minHeight: 0,
+              overflowY: 'auto',
+              padding: '0.5rem 0.625rem 0.875rem',
               display: 'flex',
               flexDirection: 'column',
-              gap: 3,
-              margin: 0,
+              gap: 10,
             }}
           >
             {loading ? (
-              [0, 1, 2, 3, 4].map((i) => <SkeletonCard key={`skel-${i}`} />)
-            ) : groupedSessions.length === 0 ? (
-              <EmptyList onNew={() => void createSession()} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {[0, 1, 2, 3, 4].map((i) => (
+                  <SkeletonCard key={`skel-${i}`} />
+                ))}
+              </div>
+            ) : hasNoSessionsInScope ? (
+              <EmptyList
+                scope={scopeFilter}
+                onNew={() => void createSession()}
+                onShowAll={
+                  scopeFilter === 'all' ? undefined : () => setScopeFilter('all')
+                }
+              />
+            ) : hasNoSearchMatches ? (
+              <NoSearchMatches
+                searchQuery={searchQuery}
+                onClearSearch={() => setSearchQuery('')}
+              />
             ) : (
-              groupedSessions.map((group) => {
-                const actualSessionCount =
-                  sessionCountByWorkspace.get(getWorkspaceGroupKey(group.workspacePath)) ?? 0;
-
+              visibleScopeViews.map((scopeView) => {
+                const scopeCollapsed = collapsedScopeSet.has(scopeView.kind);
+                const showScopeHeader =
+                  scopeFilter === 'all' && visibleScopeViews.length > 1;
                 return (
-                  <div
-                    key={group.workspacePath ?? '__unbound__'}
-                    style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
+                  <SessionScopeSection
+                    key={scopeView.kind}
+                    kind={scopeView.kind}
+                    showHeader={showScopeHeader}
+                    collapsed={showScopeHeader && scopeCollapsed}
+                    onToggleCollapsed={() => toggleCollapsedScope(scopeView.kind)}
+                    sessionCount={scopeView.totalSessionCount}
                   >
-                    <div
-                      style={{
-                        padding: '8px 2px 4px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 8,
-                      }}
-                    >
-                      <button
-                        type="button"
-                        onContextMenu={(event) => {
-                          if (!group.workspacePath && actualSessionCount === 0) {
-                            return;
+                    {scopeView.groups.map((group) => {
+                      const groupKey = getWorkspaceGroupKey(group.workspacePath);
+                      const actualSessionCount =
+                        scopeView.sessionCountByWorkspace.get(groupKey) ?? 0;
+                      return (
+                        <WorkspaceGroupSection
+                          key={`${scopeView.kind}::${group.workspacePath ?? '__unbound__'}`}
+                          groupKey={groupKey}
+                          workspaceLabel={group.workspaceLabel}
+                          workspacePath={group.workspacePath}
+                          sessions={group.sessions}
+                          actualSessionCount={actualSessionCount}
+                          collapsed={collapsedWorkspaceGroupKeySet.has(groupKey)}
+                          selectedId={selectedId}
+                          hoveredId={hoveredId}
+                          renamingId={renamingId}
+                          renameValue={renameValue}
+                          deletingSessionIds={deletingSessionIds}
+                          showCreateButton={scopeView.kind === 'personal'}
+                          onToggleCollapsed={toggleSessionsCollapsedWorkspaceGroup}
+                          onCreateInWorkspace={
+                            scopeView.kind === 'personal'
+                              ? handleCreateInWorkspace
+                              : noopCreateInWorkspace
                           }
-
-                          event.preventDefault();
-                          setWorkspaceContextMenu({
-                            groupKey: getWorkspaceGroupKey(group.workspacePath),
-                            sessionCount: actualSessionCount,
-                            workspaceLabel: group.workspaceLabel,
-                            workspacePath: group.workspacePath,
-                            x: event.clientX,
-                            y: event.clientY,
-                          });
-                        }}
-                        onKeyDown={(event) => {
-                          if (!group.workspacePath && actualSessionCount === 0) {
-                            return;
-                          }
-
-                          if (
-                            event.key !== 'ContextMenu' &&
-                            !(event.shiftKey && event.key === 'F10')
-                          ) {
-                            return;
-                          }
-
-                          event.preventDefault();
-                          const rect = event.currentTarget.getBoundingClientRect();
-                          setWorkspaceContextMenu({
-                            groupKey: getWorkspaceGroupKey(group.workspacePath),
-                            sessionCount: actualSessionCount,
-                            workspaceLabel: group.workspaceLabel,
-                            workspacePath: group.workspacePath,
-                            x: rect.left + 24,
-                            y: rect.bottom,
-                          });
-                        }}
-                        title={
-                          group.workspacePath || actualSessionCount > 0
-                            ? `右键管理工作区 ${group.workspaceLabel}`
-                            : undefined
-                        }
-                        style={{
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: 2,
-                          minWidth: 0,
-                          flex: 1,
-                          padding: 0,
-                          border: 'none',
-                          background: 'transparent',
-                          cursor: group.workspacePath ? 'context-menu' : 'default',
-                          textAlign: 'left',
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: 2,
-                            minWidth: 0,
-                            flex: 1,
-                          }}
-                        >
-                          <span
-                            style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-default)' }}
-                          >
-                            {group.workspaceLabel}
-                          </span>
-                          <span
-                            style={{
-                              fontSize: 11,
-                              color: 'var(--fg-muted)',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                            }}
-                            title={group.workspacePath ?? '未绑定工作区'}
-                          >
-                            {group.workspacePath ?? '未绑定工作区'}
-                          </span>
-                        </div>
-                      </button>
-                      {group.workspacePath && (
-                        <button
-                          type="button"
-                          onClick={() => void createSession(group.workspacePath)}
-                          title={`在 ${group.workspaceLabel} 中新建会话`}
-                          style={{
-                            flexShrink: 0,
-                            background: 'transparent',
-                            border: '1px solid var(--border-default)',
-                            borderRadius: 6,
-                            padding: '2px 8px',
-                            fontSize: 11,
-                            color: 'var(--fg-muted)',
-                            cursor: 'pointer',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          + 新建
-                        </button>
-                      )}
-                    </div>
-                    {group.sessions.map((s) => (
-                      <SessionCard
-                        key={s.id}
-                        s={s}
-                        isSelected={selectedId === s.id}
-                        isHovered={hoveredId === s.id}
-                        isDeleting={deletingSessionIds.has(s.id)}
-                        isRenaming={renamingId === s.id}
-                        renameValue={renameValue}
-                        smallBtn={SESSION_CARD_ACTION_BUTTON_STYLE}
-                        onHoverEnter={handleSessionHoverEnter}
-                        onHoverMove={handleSessionHoverMove}
-                        onHoverLeave={handleSessionHoverLeave}
-                        onSelect={handleSessionSelect}
-                        onRenameChange={setRenameValue}
-                        onRenameCommit={handleSessionRenameCommit}
-                        onRenameCancel={handleSessionRenameCancel}
-                        onStartRename={handleSessionStartRename}
-                        onExport={handleSessionExport}
-                        onDelete={handleSessionDelete}
-                      />
-                    ))}
-                    {group.sessions.length === 0 && (
-                      <div
-                        style={{
-                          padding: '8px 10px 8px 8px',
-                          borderRadius: 6,
-                          color: 'var(--fg-muted)',
-                          fontSize: 11,
-                          lineHeight: 1.5,
-                        }}
-                      >
-                        {actualSessionCount === 0
-                          ? '暂无会话，可在此工作区中新建一个会话。'
-                          : '当前筛选条件下暂无匹配会话。'}
-                      </div>
-                    )}
-                  </div>
+                          onRequestContextMenu={handleRequestWorkspaceContextMenu}
+                          onSessionHoverEnter={handleSessionHoverEnter}
+                          onSessionHoverMove={handleSessionHoverMove}
+                          onSessionHoverLeave={handleSessionHoverLeave}
+                          onSessionSelect={handleSessionSelect}
+                          onSessionRenameChange={setRenameValue}
+                          onSessionRenameCommit={handleSessionRenameCommit}
+                          onSessionRenameCancel={handleSessionRenameCancel}
+                          onSessionStartRename={handleSessionStartRename}
+                          onSessionExport={handleSessionExport}
+                          onSessionDelete={handleSessionDelete}
+                        />
+                      );
+                    })}
+                  </SessionScopeSection>
                 );
               })
             )}
-          </ul>
+          </div>
+          <SessionsListResizeHandle
+            width={listPaneWidth}
+            onWidthChange={handleListPaneWidthChange}
+            onWidthCommit={handleListPaneWidthCommit}
+          />
         </div>
         {selected ? (
           <DetailPanel
@@ -819,9 +863,14 @@ export default function SessionsPage() {
             onNewSession={() => void createSession(workspaceContextMenu.workspacePath)}
             onToggleCollapse={() => undefined}
             onDelete={() => {
+              const groupKey = workspaceContextMenu.groupKey;
               setPendingWorkspaceDeletion({
-                groupKey: workspaceContextMenu.groupKey,
-                sessionIds: workspaceSessionIdsByGroupKey.get(workspaceContextMenu.groupKey) ?? [],
+                groupKey,
+                // Bulk delete from `/sessions` only operates on personal
+                // sessions; team-workspace sessions are managed from the
+                // team page's own workspace tooling.
+                sessionIds:
+                  personalScopeView.sessionIdsByGroupKey.get(groupKey) ?? [],
                 workspaceLabel: workspaceContextMenu.workspaceLabel,
                 workspacePath: workspaceContextMenu.workspacePath,
               });
@@ -876,20 +925,24 @@ export default function SessionsPage() {
 }
 
 function TopBar({
-  count,
+  totalCount,
+  visibleCount,
   searchQuery,
   onSearchChange,
   onImport,
   onNew,
   onNewWithWorkspace,
 }: {
-  count: number;
+  totalCount: number;
+  visibleCount: number;
   searchQuery: string;
   onSearchChange: (v: string) => void;
   onImport: () => void;
   onNew: () => void;
   onNewWithWorkspace: () => void;
 }) {
+  const isFiltering = searchQuery.trim().length > 0;
+  const countLabel = isFiltering ? `${visibleCount} / ${totalCount}` : `${totalCount}`;
   return (
     <div
       style={{
@@ -904,7 +957,7 @@ function TopBar({
     >
       <h2
         style={{
-          fontSize: 12,
+          fontSize: 13,
           fontWeight: 700,
           color: 'var(--fg-strong)',
           margin: 0,
@@ -917,49 +970,42 @@ function TopBar({
         style={{
           fontSize: 11,
           fontWeight: 600,
-          background: 'var(--accent-muted)',
-          color: 'var(--accent)',
+          background: isFiltering ? 'var(--accent-muted)' : 'var(--bg-overlay)',
+          color: isFiltering ? 'var(--accent)' : 'var(--fg-muted)',
+          border: isFiltering ? 'none' : '1px solid var(--border-subtle)',
           borderRadius: 99,
-          padding: '1px 7px',
+          padding: '2px 9px',
           flexShrink: 0,
+          minWidth: 20,
+          textAlign: 'center',
+          fontVariantNumeric: 'tabular-nums',
+          transition: 'background 120ms ease, color 120ms ease',
         }}
+        title={isFiltering ? `匹配 ${visibleCount} / 共 ${totalCount} 个会话` : `共 ${totalCount} 个会话`}
       >
-        {count}
+        {countLabel}
       </span>
       <input
         type="text"
         placeholder="搜索会话…"
         value={searchQuery}
         onChange={(e) => onSearchChange(e.target.value)}
+        className="form-input"
         style={{
           flex: 1,
-          background: 'var(--bg-overlay)',
-          border: '1px solid var(--border-subtle)',
-          borderRadius: 7,
-          padding: '5px 10px',
-          fontSize: 12,
-          color: 'var(--fg-strong)',
-          outline: 'none',
+          height: 30,
           minWidth: 0,
         }}
       />
       <button
         type="button"
         onClick={onImport}
-        style={{
-          background: 'var(--bg-overlay)',
-          color: 'var(--fg-default)',
-          border: '1px solid var(--border-default)',
-          borderRadius: 7,
-          padding: '5px 12px',
-          fontSize: 12,
-          cursor: 'pointer',
-          flexShrink: 0,
-        }}
+        className="btn-secondary"
+        style={{ flexShrink: 0 }}
       >
         导入
       </button>
-      <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+      <div style={{ display: 'flex', gap: 0, flexShrink: 0 }}>
         <button
           type="button"
           onClick={onNew}
@@ -968,10 +1014,12 @@ function TopBar({
             color: 'var(--fg-on-accent)',
             border: 'none',
             borderRadius: '7px 0 0 7px',
-            padding: '5px 14px',
+            padding: '0 14px',
+            height: 32,
             fontSize: 12,
             fontWeight: 600,
             cursor: 'pointer',
+            transition: 'background 100ms ease',
           }}
         >
           + 新建会话
@@ -986,11 +1034,13 @@ function TopBar({
             border: 'none',
             borderLeft: '1px solid oklch(from var(--accent) calc(l - 0.1) c h)',
             borderRadius: '0 7px 7px 0',
-            padding: '5px 8px',
+            padding: '0 8px',
+            height: 32,
             fontSize: 12,
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
+            transition: 'background 100ms ease',
           }}
         >
           <svg
@@ -1012,48 +1062,102 @@ function TopBar({
   );
 }
 
-function EmptyList({ onNew }: { onNew: () => void }) {
+function EmptyList({
+  onNew,
+  scope = 'all',
+  onShowAll,
+}: {
+  onNew: () => void;
+  scope?: 'all' | 'personal' | 'team';
+  onShowAll?: () => void;
+}) {
+  const isTeamScope = scope === 'team';
+  const headline =
+    scope === 'team'
+      ? '还没有团队会话'
+      : scope === 'personal'
+        ? '还没有个人对话'
+        : '还没有会话';
+  const hint = isTeamScope
+    ? '团队对话从「团队」页面发起,完成后会出现在这里。'
+    : '创建一个新会话开始与 Agent 对话';
   return (
     <div
       style={{
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        gap: 12,
-        padding: '3rem 1rem',
+        gap: 14,
+        padding: '3.5rem 1.5rem',
         color: 'var(--fg-muted)',
         textAlign: 'center',
       }}
     >
-      <svg
-        width="36"
-        height="36"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        aria-hidden="true"
-      >
-        <rect x="3" y="3" width="18" height="18" rx="3" />
-        <path d="M8 10h8M8 14h5" strokeLinecap="round" />
-      </svg>
-      <span style={{ fontSize: 12, fontWeight: 500 }}>还没有会话</span>
-      <button
-        type="button"
-        onClick={onNew}
+      <div
         style={{
-          background: 'var(--accent)',
-          color: 'var(--fg-on-accent)',
-          border: 'none',
-          borderRadius: 7,
-          padding: '6px 16px',
-          fontSize: 12,
-          fontWeight: 600,
-          cursor: 'pointer',
+          width: 56,
+          height: 56,
+          borderRadius: 14,
+          background: 'var(--accent-subtle, rgba(92, 212, 192, 0.07))',
+          border: '1px dashed var(--border-emphasis)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
         }}
       >
-        新建会话
-      </button>
+        <svg
+          width="24"
+          height="24"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+          style={{ opacity: 0.6 }}
+        >
+          {isTeamScope ? (
+            <>
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+            </>
+          ) : (
+            <>
+              <rect x="3" y="3" width="18" height="18" rx="3" />
+              <path d="M8 10h8M8 14h5" />
+            </>
+          )}
+        </svg>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-default)' }}>
+          {headline}
+        </span>
+        <span style={{ fontSize: 12, lineHeight: 1.5 }}>{hint}</span>
+      </div>
+      {!isTeamScope && (
+        <button
+          type="button"
+          onClick={onNew}
+          className="btn-accent"
+          style={{ height: 32, padding: '0 16px', fontSize: 12 }}
+        >
+          新建会话
+        </button>
+      )}
+      {onShowAll && (
+        <button
+          type="button"
+          onClick={onShowAll}
+          className="btn-secondary"
+          style={{ height: 28, padding: '0 12px', fontSize: 11 }}
+        >
+          查看全部会话
+        </button>
+      )}
     </div>
   );
 }
@@ -1070,31 +1174,345 @@ function EmptyDetail() {
         gap: 16,
         color: 'var(--fg-muted)',
         background: 'var(--bg-overlay)',
+        padding: 32,
       }}
     >
-      <svg
-        width="56"
-        height="56"
-        viewBox="0 0 56 56"
-        fill="none"
-        role="img"
-        aria-label="无选中会话"
+      <div
+        style={{
+          width: 72,
+          height: 72,
+          borderRadius: 18,
+          background: 'var(--accent-subtle, rgba(92, 212, 192, 0.07))',
+          border: '1px dashed var(--border-emphasis)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
       >
-        <title>无选中会话</title>
-        <rect x="4" y="8" width="34" height="26" rx="6" stroke="currentColor" strokeWidth="2" />
-        <path d="M4 30l6 8v-8" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
-        <rect x="18" y="22" width="34" height="26" rx="6" stroke="currentColor" strokeWidth="2" />
-        <path d="M52 44l-6 8v-8" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
-        <circle cx="16" cy="21" r="2" fill="currentColor" />
-        <circle cx="24" cy="21" r="2" fill="currentColor" />
-        <circle cx="32" cy="21" r="2" fill="currentColor" />
-      </svg>
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-default)', marginBottom: 6 }}>
+        <svg
+          width="32"
+          height="32"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+          style={{ opacity: 0.6 }}
+        >
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+          <path d="M8 9h8" />
+          <path d="M8 13h5" />
+        </svg>
+      </div>
+      <div style={{ textAlign: 'center', maxWidth: 240 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-default)', marginBottom: 6 }}>
           选择一个会话
         </div>
-        <div style={{ fontSize: 12 }}>在左侧点击会话以查看详情和操作</div>
+        <div style={{ fontSize: 12, lineHeight: 1.5 }}>
+          在左侧点击会话以查看详情、管理快照或继续对话
+        </div>
       </div>
     </div>
+  );
+}
+
+function NoSearchMatches({
+  searchQuery,
+  onClearSearch,
+}: {
+  searchQuery: string;
+  onClearSearch: () => void;
+}) {
+  return (
+    <div
+      role="status"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: 12,
+        padding: '2.5rem 1rem',
+        color: 'var(--fg-muted)',
+        textAlign: 'center',
+      }}
+    >
+      <div
+        style={{
+          width: 44,
+          height: 44,
+          borderRadius: 12,
+          background: 'var(--accent-subtle, rgba(92, 212, 192, 0.07))',
+          border: '1px dashed var(--border-emphasis)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <svg
+          width="20"
+          height="20"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+          style={{ opacity: 0.7 }}
+        >
+          <circle cx="11" cy="11" r="7" />
+          <path d="m20 20-3.5-3.5" />
+        </svg>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-default)' }}>
+          没有匹配的会话
+        </span>
+        <span
+          style={{
+            fontSize: 11,
+            lineHeight: 1.5,
+            wordBreak: 'break-word',
+            maxWidth: 240,
+          }}
+        >
+          搜索 “{searchQuery}” 未匹配到任何会话,可清除搜索后再试。
+        </span>
+      </div>
+      <button
+        type="button"
+        onClick={onClearSearch}
+        className="btn-secondary"
+        style={{ height: 28, padding: '0 12px', fontSize: 11 }}
+      >
+        清除搜索
+      </button>
+    </div>
+  );
+}
+
+
+const SCOPE_TAB_BAR_STYLE: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 4,
+  padding: '6px 8px',
+  borderBottom: '1px solid var(--border-subtle)',
+  background: 'var(--bg-base)',
+  flexShrink: 0,
+};
+
+const SCOPE_TAB_BUTTON_STYLE: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 5,
+  padding: '4px 10px',
+  fontSize: 11,
+  fontWeight: 600,
+  border: '1px solid transparent',
+  borderRadius: 6,
+  background: 'transparent',
+  color: 'var(--fg-muted)',
+  cursor: 'pointer',
+};
+
+const SCOPE_TAB_BUTTON_ACTIVE_STYLE: React.CSSProperties = {
+  ...SCOPE_TAB_BUTTON_STYLE,
+  background: 'var(--accent-muted)',
+  color: 'var(--accent)',
+};
+
+function ScopeFilterTabs({
+  scopeFilter,
+  onScopeChange,
+  personalCount,
+  teamCount,
+  teamReady,
+  teamFailed,
+}: {
+  scopeFilter: 'all' | 'personal' | 'team';
+  onScopeChange: (scope: 'all' | 'personal' | 'team') => void;
+  personalCount: number;
+  teamCount: number;
+  teamReady: boolean;
+  teamFailed: boolean;
+}) {
+  // Hide the team tab entirely when the team runtime fetch failed (user
+  // doesn't have team access) and we observed zero team sessions. Loading
+  // state still shows it so the layout doesn't shift after data arrives.
+  const showTeamTab = !teamReady || teamFailed === false || teamCount > 0;
+
+  return (
+    <div role="tablist" aria-label="会话来源" style={SCOPE_TAB_BAR_STYLE}>
+      <ScopeTabButton
+        label="全部"
+        active={scopeFilter === 'all'}
+        count={personalCount + teamCount}
+        onClick={() => onScopeChange('all')}
+      />
+      <ScopeTabButton
+        label="个人"
+        active={scopeFilter === 'personal'}
+        count={personalCount}
+        onClick={() => onScopeChange('personal')}
+      />
+      {showTeamTab && (
+        <ScopeTabButton
+          label="团队"
+          active={scopeFilter === 'team'}
+          count={teamCount}
+          onClick={() => onScopeChange('team')}
+          loading={!teamReady}
+        />
+      )}
+    </div>
+  );
+}
+
+function ScopeTabButton({
+  label,
+  active,
+  count,
+  onClick,
+  loading = false,
+}: {
+  label: string;
+  active: boolean;
+  count: number;
+  onClick: () => void;
+  loading?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      style={active ? SCOPE_TAB_BUTTON_ACTIVE_STYLE : SCOPE_TAB_BUTTON_STYLE}
+    >
+      <span>{label}</span>
+      <span
+        aria-hidden="true"
+        style={{
+          fontSize: 10,
+          fontWeight: 600,
+          padding: '1px 6px',
+          borderRadius: 99,
+          background: active ? 'var(--accent)' : 'var(--bg-overlay)',
+          color: active ? 'var(--fg-on-accent)' : 'var(--fg-muted)',
+          minWidth: 18,
+          textAlign: 'center',
+          fontVariantNumeric: 'tabular-nums',
+        }}
+      >
+        {loading ? '…' : count}
+      </span>
+    </button>
+  );
+}
+
+function SessionScopeSection({
+  kind,
+  showHeader,
+  collapsed,
+  onToggleCollapsed,
+  sessionCount,
+  children,
+}: {
+  kind: 'personal' | 'team';
+  showHeader: boolean;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+  sessionCount: number;
+  children: React.ReactNode;
+}) {
+  if (!showHeader) {
+    return <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>{children}</div>;
+  }
+
+  const headerLabel = kind === 'team' ? '团队对话' : '个人对话';
+  const headerHint = kind === 'team' ? '由团队发起的会话' : '你直接发起的会话';
+
+  return (
+    <section
+      aria-label={headerLabel}
+      style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
+    >
+      <button
+        type="button"
+        onClick={onToggleCollapsed}
+        aria-expanded={!collapsed}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '6px 8px',
+          margin: '0 -2px',
+          borderRadius: 6,
+          border: 'none',
+          background: 'transparent',
+          color: 'inherit',
+          cursor: 'pointer',
+          textAlign: 'left',
+        }}
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+          style={{
+            width: 12,
+            height: 12,
+            flexShrink: 0,
+            color: 'var(--fg-muted)',
+            transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
+            transition: 'transform 140ms ease',
+          }}
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 700,
+            color: 'var(--fg-default)',
+            letterSpacing: '0.02em',
+            textTransform: 'uppercase',
+          }}
+        >
+          {headerLabel}
+        </span>
+        <span
+          aria-hidden="true"
+          style={{ fontSize: 10, color: 'var(--fg-muted)', fontWeight: 500 }}
+        >
+          {headerHint}
+        </span>
+        <span
+          style={{
+            marginLeft: 'auto',
+            fontSize: 10,
+            fontWeight: 600,
+            padding: '1px 7px',
+            borderRadius: 99,
+            border: '1px solid var(--border-subtle)',
+            background: 'var(--bg-overlay)',
+            color: 'var(--fg-muted)',
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          {sessionCount}
+        </span>
+      </button>
+      {!collapsed && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>{children}</div>
+      )}
+    </section>
   );
 }

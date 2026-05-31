@@ -912,7 +912,7 @@ export function BuiltInBrowser({
             alignItems: 'center',
             justifyContent: 'center',
             border: isCurrentBookmarked
-              ? '1px solid color-mix(in oklch, var(--warning) 40%, var(--border-default)'
+              ? '1px solid color-mix(in oklch, var(--warning) 40%, var(--border-default))'
               : '1px solid var(--border-subtle)',
             borderRadius: 6,
             background: isCurrentBookmarked
@@ -987,8 +987,8 @@ export function BuiltInBrowser({
             height: 26,
             padding: '0 10px',
             borderRadius: 6,
-            border: '1px solid color-mix(in oklch, var(--accent) 30%, var(--border-default)',
-            background: 'color-mix(in oklch, var(--accent) 14%, var(--bg-overlay)',
+            border: '1px solid color-mix(in oklch, var(--accent) 30%, var(--border-default))',
+            background: 'color-mix(in oklch, var(--accent) 14%, var(--bg-overlay))',
             color: 'var(--accent)',
             fontSize: 11,
             fontWeight: 600,
@@ -1170,7 +1170,7 @@ export function BuiltInBrowser({
                   padding: '6px 10px',
                   borderRadius: 6,
                   background: 'color-mix(in oklch, var(--bg-overlay) 95%, var(--warning) 5%)',
-                  border: '1px solid color-mix(in oklch, var(--warning) 30%, var(--border-default)',
+                  border: '1px solid color-mix(in oklch, var(--warning) 30%, var(--border-default))',
                   fontSize: 10,
                   color: 'var(--fg-default)',
                   pointerEvents: 'none',

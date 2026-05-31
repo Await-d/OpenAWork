@@ -50,7 +50,7 @@ export function GenerateImageRunningPlaceholder({
           borderRadius: 12,
           border: '1px dashed var(--border-subtle)',
           background:
-            'linear-gradient(135deg, color-mix(in oklch, var(--accent) 6%, var(--bg-overlay) 0%, var(--bg-overlay) 60%, color-mix(in oklch, var(--accent) 4%, var(--bg-overlay) 100%)',
+            'linear-gradient(135deg, color-mix(in oklch, var(--accent) 6%, var(--bg-overlay)) 0%, var(--bg-overlay) 60%, color-mix(in oklch, var(--accent) 4%, var(--bg-overlay)) 100%)',
           position: 'relative',
           overflow: 'hidden',
           display: 'flex',

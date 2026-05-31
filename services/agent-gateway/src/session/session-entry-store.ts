@@ -10,6 +10,7 @@
 
 import type { RunEvent, StreamChunk } from '@openAwork/shared';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
+import { isSqliteMalformedError } from '../infra/sqlite-error-utils.js';
 import {
   type SessionEvent,
   type SessionEventID,
@@ -53,6 +54,117 @@ function nextSeq(sessionId: string): number {
     [sessionId],
   );
   return (row?.max_seq ?? 0) + 1;
+}
+
+// ─── Retention ───
+//
+// `session_entry` is written one row per stream-time delta
+// (`text.delta` / `reasoning.delta` / `tool.input.delta` via
+// `persistStreamChunkAsSessionEvents`) plus post-stream tool/compaction
+// events — the same per-token volume as `session_run_events`, and unlike
+// that table it is NOT cleared on failed runs. Cascade-delete only fires
+// when the parent session is deleted, so a long-lived user who never
+// deletes sessions grows this table without bound. We bound it the same
+// way as §0.54: keep the most recent N request scopes per session and
+// drop older completed scopes wholesale.
+//
+// Safety: rows are grouped by `(session_id, client_request_id)`. Replay
+// (`replaySessionEntries`) aggregates a whole session, so dropping an
+// older scope's rows entirely removes that turn's fine-grained event
+// trail but never corrupts a partially-kept scope. Keeping the highest
+// `MAX(seq)` scopes preserves the most recent / in-flight runs. NULL
+// (legacy / unscoped) rows are never pruned.
+const DEFAULT_SESSION_ENTRY_MAX_SCOPES_PER_SESSION = 50;
+export const SESSION_ENTRY_PRUNE_CHECK_INTERVAL = 200;
+
+let sessionEntryRetentionOverride: number | null = null;
+let sessionEntryPruneCheckInterval = SESSION_ENTRY_PRUNE_CHECK_INTERVAL;
+let sessionEntryInsertsSincePrune = 0;
+let sessionEntryStoreDisabled = false;
+
+function resolveSessionEntryRetention(): number {
+  if (sessionEntryRetentionOverride !== null) {
+    return sessionEntryRetentionOverride;
+  }
+  const raw = globalThis.process?.env['OPENAWORK_SESSION_ENTRY_MAX_SCOPES_PER_SESSION'];
+  if (raw === undefined || raw === null || raw.trim() === '') {
+    return DEFAULT_SESSION_ENTRY_MAX_SCOPES_PER_SESSION;
+  }
+  const parsed = Number(raw);
+  // Non-positive / NaN means "retention disabled", matching the env
+  // dead-switch semantics of the sibling retention stores.
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 0;
+  }
+  return Math.floor(parsed);
+}
+
+function pruneSessionEntryScopes(sessionId: string, maxScopes: number): void {
+  // Keep the `maxScopes` scopes whose latest seq is highest (most recently
+  // active, which includes any in-flight run); delete every older scope's
+  // rows wholesale. Scope = distinct non-null client_request_id.
+  sqliteRun(
+    `DELETE FROM session_entry
+      WHERE session_id = ?
+        AND client_request_id IS NOT NULL
+        AND client_request_id NOT IN (
+          SELECT client_request_id FROM (
+            SELECT client_request_id, MAX(seq) AS last_seq
+              FROM session_entry
+             WHERE session_id = ? AND client_request_id IS NOT NULL
+             GROUP BY client_request_id
+             ORDER BY last_seq DESC
+             LIMIT ?
+          )
+        )`,
+    [sessionId, sessionId, maxScopes],
+  );
+}
+
+function maybePruneSessionEntries(sessionId: string): void {
+  if (sessionEntryStoreDisabled) {
+    return;
+  }
+  const limit = resolveSessionEntryRetention();
+  if (limit <= 0) {
+    // Retention disabled: reset the counter so re-enabling later doesn't
+    // trigger one giant catch-up prune.
+    sessionEntryInsertsSincePrune = 0;
+    return;
+  }
+  sessionEntryInsertsSincePrune += 1;
+  if (sessionEntryInsertsSincePrune < sessionEntryPruneCheckInterval) {
+    return;
+  }
+  sessionEntryInsertsSincePrune = 0;
+  try {
+    pruneSessionEntryScopes(sessionId, limit);
+  } catch (error) {
+    // A prune failure must never break event persistence or the live
+    // stream. On DB corruption disable the prune path entirely, consistent
+    // with the sibling retention stores.
+    if (isSqliteMalformedError(error)) {
+      sessionEntryStoreDisabled = true;
+      return;
+    }
+    console.warn(
+      `[session-entry] retention prune failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+/** Test-only: override the per-session scope cap (null clears the override). */
+export function __setSessionEntryRetentionForTesting(
+  limit: number | null,
+  checkInterval?: number,
+): void {
+  sessionEntryRetentionOverride = limit;
+  sessionEntryPruneCheckInterval =
+    typeof checkInterval === 'number' && checkInterval > 0
+      ? Math.floor(checkInterval)
+      : SESSION_ENTRY_PRUNE_CHECK_INTERVAL;
+  sessionEntryInsertsSincePrune = 0;
+  sessionEntryStoreDisabled = false;
 }
 
 /**
@@ -146,6 +258,8 @@ export function appendSessionEvent(input: AppendSessionEventInput): SessionEvent
     }
     throw err;
   }
+
+  maybePruneSessionEntries(input.sessionId);
 
   return event;
 }

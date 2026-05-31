@@ -13,6 +13,31 @@ export interface OpenFile {
   language: string;
 }
 
+export interface OpenFileOptions {
+  /** 1-based line to scroll to / position the cursor on after the file opens. */
+  line?: number;
+  /**
+   * Optional 1-based end line. When set together with `line`, the editor
+   * selects (and reveals) the `[line, endLine]` range — used by the `read`
+   * tool so clicking a windowed read lands on the lines that were read
+   * instead of always snapping to line 1.
+   */
+  endLine?: number;
+}
+
+/**
+ * A request to scroll the editor to a particular line once the target file
+ * is active and Monaco has mounted. `nonce` lets repeated clicks on the same
+ * file/line re-trigger the reveal (a plain `{path,line}` object would be
+ * referentially equal and the reveal effect would skip).
+ */
+export interface RevealTarget {
+  path: string;
+  line: number;
+  endLine?: number;
+  nonce: number;
+}
+
 function getLanguage(path: string): string {
   const ext = path.split('.').pop()?.toLowerCase() ?? '';
   const map: Record<string, string> = {
@@ -79,6 +104,10 @@ export function useFileEditor(workspacePath?: string | null) {
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
   const [loading, setLoading] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Pending scroll target. Set when a caller passes a line to openFile;
+  // consumed by the editor pane once the file is active + Monaco mounted.
+  const [revealTarget, setRevealTarget] = useState<RevealTarget | null>(null);
+  const revealNonceRef = useRef(0);
 
   // 当 workspace 切换时清掉内存中的 openFiles,后续 reload effect 会按新 workspace
   // 的 persistedPaths 加载文件。
@@ -115,7 +144,21 @@ export function useFileEditor(workspacePath?: string | null) {
   );
 
   const openFile = useCallback(
-    async (path: string) => {
+    async (path: string, options?: OpenFileOptions) => {
+      // Build a RevealTarget for the resolved path when the caller asked to
+      // jump to a specific line. The nonce makes repeated clicks on the same
+      // file+line re-fire the reveal effect downstream.
+      const queueReveal = (resolved: string) => {
+        if (options?.line == null) return;
+        revealNonceRef.current += 1;
+        setRevealTarget({
+          path: resolved,
+          line: options.line,
+          ...(options.endLine != null ? { endLine: options.endLine } : {}),
+          nonce: revealNonceRef.current,
+        });
+      };
+
       // Resolve a possibly-incomplete path (bare filename like
       // `create_quotation.py` from inline-code in chat) to a full
       // workspace path before opening. The same resolver is shared
@@ -124,6 +167,7 @@ export function useFileEditor(workspacePath?: string | null) {
       const existing = openFiles.find((f) => f.path === path);
       if (existing) {
         setActiveFilePath(path);
+        queueReveal(path);
         return;
       }
       const resolvedPath = await resolveBareFilename({
@@ -136,6 +180,7 @@ export function useFileEditor(workspacePath?: string | null) {
       const existingResolved = openFiles.find((f) => f.path === resolvedPath);
       if (existingResolved) {
         setActiveFilePath(resolvedPath);
+        queueReveal(resolvedPath);
         return;
       }
       // Binary files: don't readFile, the gateway's utf-8 decode would
@@ -174,6 +219,7 @@ export function useFileEditor(workspacePath?: string | null) {
         };
         setOpenFiles((prev) => [...prev, file]);
         setActiveFilePath(resolvedPath);
+        queueReveal(resolvedPath);
       } catch (err) {
         setSaveError(err instanceof Error ? err.message : '打开文件失败');
       } finally {
@@ -297,6 +343,12 @@ export function useFileEditor(workspacePath?: string | null) {
     [openFiles],
   );
 
+  // Clear the pending reveal once the editor has consumed it, so the same
+  // target doesn't re-fire on unrelated re-renders.
+  const clearRevealTarget = useCallback(() => {
+    setRevealTarget(null);
+  }, []);
+
   return {
     openFiles,
     activeFile,
@@ -310,5 +362,7 @@ export function useFileEditor(workspacePath?: string | null) {
     reorderFiles,
     setActiveFilePath,
     isDirty,
+    revealTarget,
+    clearRevealTarget,
   };
 }

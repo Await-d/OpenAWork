@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FolderIcon } from '../../file-editor/preview/FileIcon.js';
 
 export interface FileTreeNode {
@@ -72,6 +72,63 @@ export default function WorkspacePickerModal({
   const [pathInput, setPathInput] = useState('');
   const [confirming, setConfirming] = useState(false);
   const [browsing, setBrowsing] = useState(false);
+  const lastActionRef = useRef<{ kind: 'initialize' } | { kind: 'open'; path: string } | null>(
+    null,
+  );
+
+  const openDirectory = useCallback(
+    async (path: string) => {
+      setBrowsing(true);
+      setError(null);
+      try {
+        const nodes = fetchTree ? await fetchTree(path, 1) : [];
+        setCurrentPath(path);
+        setPathInput(path);
+        setDirectories(nodes.filter((node) => node.type === 'directory'));
+        lastActionRef.current = { kind: 'open', path };
+      } catch (err) {
+        setError(err instanceof Error ? err.message : '无法读取文件夹');
+      } finally {
+        setBrowsing(false);
+      }
+    },
+    [fetchTree],
+  );
+
+  const initialize = useCallback(async () => {
+    setBrowsing(true);
+    setError(null);
+    try {
+      const roots = fetchWorkspaceRoots
+        ? await fetchWorkspaceRoots()
+        : fetchRootPath
+          ? [await fetchRootPath()]
+          : ['/'];
+      const normalizedRoots = roots.filter((root) => root.trim().length > 0);
+      const fallbackRoot = normalizedRoots[0] ?? '/';
+      const resolvedRoots = normalizedRoots.length > 0 ? normalizedRoots : [fallbackRoot];
+      const startPath =
+        initialPath && findContainingRoot(initialPath, resolvedRoots) ? initialPath : fallbackRoot;
+      const nodes = fetchTree ? await fetchTree(startPath, 1) : [];
+      setAvailableRoots(resolvedRoots);
+      setCurrentPath(startPath);
+      setPathInput(startPath);
+      setDirectories(nodes.filter((node) => node.type === 'directory'));
+      lastActionRef.current = { kind: 'initialize' };
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '无法读取工作区目录');
+    } finally {
+      setBrowsing(false);
+    }
+  }, [fetchRootPath, fetchTree, fetchWorkspaceRoots, initialPath]);
+
+  const retryLastAction = useCallback(async () => {
+    if (lastActionRef.current?.kind === 'open') {
+      await openDirectory(lastActionRef.current.path);
+      return;
+    }
+    await initialize();
+  }, [initialize, openDirectory]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -85,43 +142,8 @@ export default function WorkspacePickerModal({
       return;
     }
 
-    let cancelled = false;
-    const initialize = async () => {
-      setBrowsing(true);
-      setError(null);
-      try {
-        const roots = fetchWorkspaceRoots
-          ? await fetchWorkspaceRoots()
-          : fetchRootPath
-            ? [await fetchRootPath()]
-            : ['/'];
-        const normalizedRoots = roots.filter((root) => root.trim().length > 0);
-        const fallbackRoot = normalizedRoots[0] ?? '/';
-        const resolvedRoots = normalizedRoots.length > 0 ? normalizedRoots : [fallbackRoot];
-        const startPath =
-          initialPath && findContainingRoot(initialPath, resolvedRoots)
-            ? initialPath
-            : fallbackRoot;
-        const nodes = fetchTree ? await fetchTree(startPath, 1) : [];
-        if (cancelled) return;
-        setAvailableRoots(resolvedRoots);
-        setCurrentPath(startPath);
-        setPathInput(startPath);
-        setDirectories(nodes.filter((node) => node.type === 'directory'));
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : '无法读取工作区目录');
-        }
-      } finally {
-        if (!cancelled) setBrowsing(false);
-      }
-    };
-
     void initialize();
-    return () => {
-      cancelled = true;
-    };
-  }, [fetchRootPath, fetchTree, fetchWorkspaceRoots, initialPath, isOpen]);
+  }, [initialize, isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -131,6 +153,17 @@ export default function WorkspacePickerModal({
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [isOpen, onClose]);
+
+  useEffect(() => {
+    if (!isOpen || typeof window === 'undefined') return;
+    const handleOnline = () => {
+      if (error) {
+        void retryLastAction();
+      }
+    };
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, [error, isOpen, retryLastAction]);
 
   const busy = loading || confirming || browsing;
 
@@ -152,21 +185,6 @@ export default function WorkspacePickerModal({
   }, [currentPath]);
 
   if (!isOpen) return null;
-
-  async function openDirectory(path: string) {
-    setBrowsing(true);
-    setError(null);
-    try {
-      const nodes = fetchTree ? await fetchTree(path, 1) : [];
-      setCurrentPath(path);
-      setPathInput(path);
-      setDirectories(nodes.filter((node) => node.type === 'directory'));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '无法读取文件夹');
-    } finally {
-      setBrowsing(false);
-    }
-  }
 
   async function handleGoUp() {
     if (!currentPath) return;
@@ -428,6 +446,26 @@ export default function WorkspacePickerModal({
               }}
             >
               打开路径
+            </button>
+            <button
+              type="button"
+              onClick={() => void retryLastAction()}
+              disabled={busy}
+              style={{
+                height: 38,
+                padding: '0 14px',
+                borderRadius: 10,
+                border: '1px solid var(--border-default)',
+                background: 'transparent',
+                color: 'var(--fg-default)',
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: busy ? 'not-allowed' : 'pointer',
+                opacity: busy ? 0.5 : 1,
+                flexShrink: 0,
+              }}
+            >
+              重试
             </button>
           </div>
         </div>

@@ -57,7 +57,7 @@ async function runTransaction<T>(
 ): Promise<T> {
   const database = await openDatabase();
   if (!database) {
-    throw new Error('当前环境不支持附件恢复存储');
+    throw new Error('当前环境不支持附件恢复存储。');
   }
 
   return new Promise<T>((resolve, reject) => {
@@ -141,7 +141,7 @@ export async function persistQueuedComposerFiles(args: {
         files.map((file, index) => {
           const attachmentItem = attachmentItems[index];
           if (!attachmentItem) {
-            throw new Error('附件元数据与文件数量不一致');
+            throw new Error('附件元数据与文件数量不一致。');
           }
 
           return requestToPromise(

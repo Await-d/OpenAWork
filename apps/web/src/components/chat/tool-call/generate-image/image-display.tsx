@@ -38,7 +38,7 @@ export function GenerateImageDisplay({
           border: '1px solid var(--border-subtle)',
           boxShadow: '0 2px 8px color-mix(in oklch, var(--fg-strong) 6%, transparent)',
           background:
-            'repeating-conic-gradient(color-mix(in oklch, var(--bg-base) 94%, var(--fg-muted) 0% 25%, transparent 0% 50%) 50% / 16px 16px',
+            'repeating-conic-gradient(color-mix(in oklch, var(--bg-base) 94%, var(--fg-muted)) 0% 25%, transparent 0% 50%) 50% / 16px 16px',
           lineHeight: 0,
           cursor: 'pointer',
         }}

@@ -131,4 +131,37 @@ describe('LayeredConversationView — 双栏交互', () => {
     expect(screen.queryByTestId('team-session-view-mock')).toBeNull();
     expect(screen.getByText('选择左侧 handoff 查看会话内容')).toBeTruthy();
   });
+
+  it('切到「线程」模式后渲染跨层线程视图', () => {
+    seedLayerNodes([
+      {
+        sessionId: 'sess-pm1-004',
+        roleLayer: 'pm1',
+        parentSessionId: null,
+        state: 'running',
+      },
+    ]);
+    seedHandoff({
+      id: 'handoff-004',
+      state: 'running',
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+      sessionId: 'sess-pm1-004',
+      updatedAt: Date.now(),
+    });
+
+    render(<LayeredConversationView />);
+
+    // 默认双栏：右栏欢迎面板
+    expect(screen.getByText('选择左侧 handoff 查看会话内容')).toBeTruthy();
+
+    fireEvent.click(screen.getByText('线程'));
+
+    // 线程模式下双栏欢迎面板消失，改由跨层线程视图接管
+    expect(screen.queryByText('选择左侧 handoff 查看会话内容')).toBeNull();
+
+    // 切回双栏
+    fireEvent.click(screen.getByText('双栏'));
+    expect(screen.getByText('选择左侧 handoff 查看会话内容')).toBeTruthy();
+  });
 });

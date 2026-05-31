@@ -1,55 +1,5 @@
 import React from 'react';
-
-const PROVIDER_LOGO_URL: Record<string, string> = {
-  anthropic: '/logo-anthropic.svg',
-  claude: '/logo-claude.svg',
-  openai: '/logo-openai.svg',
-  gemini: '/logo-gemini.svg',
-  googlegemini: '/logo-gemini.svg',
-  ollama: '/logo-ollama.svg',
-  openrouter: '/logo-openrouter.svg',
-  deepseek: '/logo-deepseek.svg',
-  moonshot: '/logo-moonshot.svg',
-  qwen: '/logo-qwen.svg',
-  mistralai: '/logo-mistralai.svg',
-  mistral: '/logo-mistralai.svg',
-};
-
-const PROVIDER_DISPLAY_NAME: Record<string, string> = {
-  anthropic: 'Anthropic',
-  claude: 'Claude',
-  openai: 'OpenAI',
-  gemini: 'Gemini',
-  googlegemini: 'Gemini',
-  ollama: 'Ollama',
-  openrouter: 'OpenRouter',
-  deepseek: 'DeepSeek',
-  moonshot: 'Moonshot',
-  qwen: 'Qwen',
-  mistralai: 'Mistral AI',
-  mistral: 'Mistral',
-};
-
-const PROVIDER_LOGOS_FALLBACK: Record<string, React.ReactNode> = {
-  openai: '◎',
-  anthropic: '◌',
-  claude: '◌',
-  gemini: '✦',
-  googlegemini: '✦',
-  deepseek: '◇',
-  openrouter: '↗',
-  moonshot: '☾',
-  ollama: '◒',
-  qwen: 'Q',
-  mistral: 'M',
-  mistralai: 'M',
-};
-
-const KNOWN_PROVIDER_KEYS = new Set<string>([
-  ...Object.keys(PROVIDER_LOGO_URL),
-  ...Object.keys(PROVIDER_DISPLAY_NAME),
-  ...Object.keys(PROVIDER_LOGOS_FALLBACK),
-]);
+import { resolveProviderVisual } from '@openAwork/shared-ui';
 
 interface ProviderIdentityInput {
   providerId?: string | null;
@@ -83,49 +33,11 @@ function resolveFallbackAccent(providerId: string): string {
 }
 
 function formatProviderDisplayName(value: string): string {
-  const normalized = value.trim().toLowerCase();
-  const knownDisplayName = PROVIDER_DISPLAY_NAME[normalized];
-  if (knownDisplayName) {
-    return knownDisplayName;
-  }
-
   return value
     .split(/[-_]/)
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ');
-}
-
-function resolveKnownProviderKey(
-  value?: string | null,
-  options?: { allowTokenFallback?: boolean },
-): string | undefined {
-  const normalized = normalizeProviderKey(value ?? '');
-  if (!normalized) {
-    return undefined;
-  }
-
-  if (KNOWN_PROVIDER_KEYS.has(normalized)) {
-    return normalized;
-  }
-
-  const compact = normalized.replace(/[^a-z0-9]/g, '');
-  if (compact && KNOWN_PROVIDER_KEYS.has(compact)) {
-    return compact;
-  }
-
-  if (options?.allowTokenFallback === false) {
-    return undefined;
-  }
-
-  const tokens = normalized.split(/[^a-z0-9]+/).filter(Boolean);
-  for (const token of tokens) {
-    if (KNOWN_PROVIDER_KEYS.has(token)) {
-      return token;
-    }
-  }
-
-  return undefined;
 }
 
 export function normalizeProviderLabel(value: string): string {
@@ -144,29 +56,26 @@ export function resolveProviderIdentity({
   const normalizedId = normalizeProviderKey(providerId ?? '');
   const normalizedType = normalizeProviderKey(providerType ?? '');
   const trimmedName = providerName?.trim() ?? '';
-  const visualKey =
-    (resolveKnownProviderKey(providerType) ??
-      resolveKnownProviderKey(providerId) ??
-      resolveKnownProviderKey(providerName, { allowTokenFallback: false }) ??
-      normalizedType) ||
-    normalizedId;
+
+  // 统一走 catalog 的视觉解析(单一事实来源)，新增平台无需改本文件。
+  const visual = resolveProviderVisual({ providerType, providerId, providerName });
+  const visualKey = visual.type ?? normalizedType ?? normalizedId;
   const displayName =
     trimmedName ||
+    visual.displayName ||
     (normalizedType
       ? formatProviderDisplayName(normalizedType)
-      : visualKey
-        ? formatProviderDisplayName(visualKey)
-        : normalizedId
-          ? formatProviderDisplayName(normalizedId)
-          : '助手');
+      : normalizedId
+        ? formatProviderDisplayName(normalizedId)
+        : '助手');
   const accentKey =
     normalizedId || normalizedType || normalizeProviderKey(displayName) || 'assistant';
 
   return {
     accentKey,
     displayName,
-    fallbackGlyph: PROVIDER_LOGOS_FALLBACK[visualKey],
-    logoUrl: PROVIDER_LOGO_URL[visualKey],
+    fallbackGlyph: visual.fallbackGlyph,
+    logoUrl: visual.logoUrl,
     normalizedId,
     normalizedType,
     visualKey,

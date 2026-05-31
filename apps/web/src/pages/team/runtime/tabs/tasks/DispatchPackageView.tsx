@@ -12,7 +12,7 @@ const CARD_STYLE: CSSProperties = {
   padding: 12,
   borderRadius: 10,
   border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base))',
 };
 
 const BADGE_STYLE: CSSProperties = {
@@ -120,7 +120,7 @@ export function DispatchPackageView({ packages }: DispatchPackageViewProps) {
                     color: 'var(--fg-muted)',
                     padding: '1px 4px',
                     borderRadius: 3,
-                    background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)',
+                    background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
                   }}
                 >
                   {t}

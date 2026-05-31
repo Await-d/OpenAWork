@@ -1,6 +1,41 @@
 import { createReadStream, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+// Network robustness: every gateway call must have a wall-clock deadline so a
+// hung / half-open gateway connection cannot wedge the `opkg` CLI forever. JSON
+// control calls (install / remove) use a short deadline; `push` uploads a skill
+// archive so it gets a longer one. Overridable via env for slow links / large
+// packages.
+function resolveTimeoutMs(envKey: string, fallbackMs: number): number {
+  const raw = globalThis.process?.env?.[envKey];
+  if (raw === undefined || raw.trim() === '') return fallbackMs;
+  const parsed = Number(raw);
+  // Non-positive / NaN disables the deadline (caller opted out explicitly).
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Math.floor(parsed);
+}
+
+const OPKG_REQUEST_TIMEOUT_MS = resolveTimeoutMs('OPKG_REQUEST_TIMEOUT_MS', 30_000);
+const OPKG_PUSH_TIMEOUT_MS = resolveTimeoutMs('OPKG_PUSH_TIMEOUT_MS', 120_000);
+
+/**
+ * Build an AbortSignal that fires after `timeoutMs`, or `undefined` when the
+ * deadline is disabled (timeoutMs <= 0). Kept tiny so both call sites share the
+ * same opt-out semantics.
+ */
+function timeoutSignal(timeoutMs: number): AbortSignal | undefined {
+  return timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
+}
+
+function describeFetchError(error: unknown, action: string): never {
+  // AbortSignal.timeout rejects with a TimeoutError DOMException; surface a
+  // clear, actionable message instead of a bare "The operation was aborted".
+  if (error && typeof error === 'object' && (error as { name?: unknown }).name === 'TimeoutError') {
+    throw new Error(`opkg ${action} timed out (no response from gateway in time)`);
+  }
+  throw error;
+}
+
 export interface OpkgGatewayOptions {
   gatewayBaseUrl: string;
   authToken: string;
@@ -36,7 +71,17 @@ async function gatewayFetch<T>(
   };
   if (contentType) headers['Content-Type'] = contentType;
 
-  const res = await fetch(`${baseUrl}${path}`, { method, headers, body });
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}${path}`, {
+      method,
+      headers,
+      body,
+      signal: timeoutSignal(OPKG_REQUEST_TIMEOUT_MS),
+    });
+  } catch (error) {
+    describeFetchError(error, `${method} ${path}`);
+  }
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`opkg gateway error ${res.status}: ${text}`);
@@ -83,11 +128,17 @@ export async function pushSkill(opts: OpkgGatewayOptions, localPath: string): Pr
   }
   form.set('skill', createReadStream(absPath) as unknown as Blob, absPath.split('/').pop());
 
-  const res = await fetch(`${opts.gatewayBaseUrl}/skills/push`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${opts.authToken}` },
-    body: form as unknown as BodyInit,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${opts.gatewayBaseUrl}/skills/push`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${opts.authToken}` },
+      body: form as unknown as BodyInit,
+      signal: timeoutSignal(OPKG_PUSH_TIMEOUT_MS),
+    });
+  } catch (error) {
+    describeFetchError(error, 'push');
+  }
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`opkg push error ${res.status}: ${text}`);

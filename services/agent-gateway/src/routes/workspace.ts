@@ -49,11 +49,11 @@ function checkUserWorkspaceAccess(
   }
   const user = request.user as JwtPayload | undefined;
   if (!user?.sub) {
-    reply.status(401).send({ error: 'unauthorized' });
+    reply.status(401).send({ error: '未授权或登录已失效。' });
     return false;
   }
   if (!isPathInUserAllowlist(user.sub, safePath)) {
-    reply.status(403).send({ error: 'Path not in user workspace allowlist' });
+    reply.status(403).send({ error: WORKSPACE_ERROR_MESSAGES.userWorkspaceForbidden });
     return false;
   }
   return true;
@@ -65,6 +65,28 @@ interface FileTreeNode {
   type: 'file' | 'directory';
   children?: FileTreeNode[];
 }
+
+const WORKSPACE_ERROR_MESSAGES = {
+  forbiddenPath: '工作区路径不在允许范围内。',
+  forbiddenWorkspaceRoot: '指定的工作区根目录不在允许范围内。',
+  pathOutsideWorkspace: '目标路径超出当前工作区范围。',
+  forbiddenByIgnoreRules: '目标路径已被工作区忽略规则拦截。',
+  userWorkspaceForbidden: '当前账号无权访问该工作区路径。',
+  pathNotDirectory: '目标路径不是文件夹。',
+  pathDoesNotExist: '目标路径不存在。',
+  fileNotFound: '目标文件不存在。',
+  pathNotFile: '目标路径不是文件。',
+  fileTooLargeForPreview: '文件体积超过预览限制，暂不支持预览。',
+  fileWriteFailed: '写入文件失败。',
+  parentDirectoryInvalid: '父目录无效。',
+  parentDirectoryNotFound: '父目录不存在。',
+  fileAlreadyExists: '目标文件已存在。',
+  targetPathIsDirectory: '目标路径是文件夹，无法创建文件。',
+  createFileFailed: '创建文件失败。',
+  directoryAlreadyExists: '目标文件夹已存在。',
+  createDirectoryFailed: '创建文件夹失败。',
+  invalidReviewFilePath: '目标文件路径无效。',
+} as const;
 
 const IGNORED = new Set(['node_modules', '.git', 'dist', '.next', '__pycache__', '.DS_Store']);
 const MAX_ENTRIES = 500;
@@ -155,14 +177,22 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       if (!safePath) {
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
-        return reply.status(403).send({ valid: false, path: parsed.path, error: 'Forbidden' });
+        return reply.status(403).send({
+          valid: false,
+          path: parsed.path,
+          error: WORKSPACE_ERROR_MESSAGES.forbiddenPath,
+        });
       }
       pathStep.succeed();
       if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
       await ensureIgnoreRulesLoadedForPath(safePath);
       if (defaultIgnoreManager.shouldIgnore(safePath)) {
         step.fail('ignored path');
-        return reply.status(403).send({ error: 'Forbidden by agentignore rules' });
+        return reply.status(403).send({
+          valid: false,
+          path: safePath,
+          error: WORKSPACE_ERROR_MESSAGES.forbiddenByIgnoreRules,
+        });
       }
       await ensureIgnoreRulesLoadedForPath(safePath);
 
@@ -172,7 +202,11 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         if (!stat.isDirectory()) {
           statStep.fail('not a directory');
           step.succeed(undefined, { valid: false });
-          return reply.send({ valid: false, path: safePath, error: 'Not a directory' });
+          return reply.send({
+            valid: false,
+            path: safePath,
+            error: WORKSPACE_ERROR_MESSAGES.pathNotDirectory,
+          });
         }
         statStep.succeed(undefined, { isDirectory: true });
         step.succeed(undefined, { valid: true });
@@ -180,7 +214,11 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       } catch {
         statStep.fail('path does not exist');
         step.succeed(undefined, { valid: false });
-        return reply.send({ valid: false, path: safePath, error: 'Path does not exist' });
+        return reply.send({
+          valid: false,
+          path: safePath,
+          error: WORKSPACE_ERROR_MESSAGES.pathDoesNotExist,
+        });
       }
     },
   );
@@ -204,14 +242,20 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       if (!safePath) {
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
-        return reply.status(403).send({ nodes: [] });
+        return reply.status(403).send({
+          nodes: [],
+          error: WORKSPACE_ERROR_MESSAGES.forbiddenPath,
+        });
       }
       pathStep.succeed();
       if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
       await ensureIgnoreRulesLoadedForPath(safePath);
       if (defaultIgnoreManager.shouldIgnore(safePath)) {
         step.fail('ignored path');
-        return reply.status(403).send({ error: 'Forbidden by agentignore rules' });
+        return reply.status(403).send({
+          nodes: [],
+          error: WORKSPACE_ERROR_MESSAGES.forbiddenByIgnoreRules,
+        });
       }
       await ensureIgnoreRulesLoadedForPath(safePath);
 
@@ -221,13 +265,19 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         if (!stat.isDirectory()) {
           statStep.fail('not a directory');
           step.fail('not a directory');
-          return reply.status(400).send({ nodes: [] });
+          return reply.status(400).send({
+            nodes: [],
+            error: WORKSPACE_ERROR_MESSAGES.pathNotDirectory,
+          });
         }
         statStep.succeed(undefined, { isDirectory: true });
       } catch {
         statStep.fail('path not found');
         step.fail('path not found');
-        return reply.status(404).send({ nodes: [] });
+        return reply.status(404).send({
+          nodes: [],
+          error: WORKSPACE_ERROR_MESSAGES.pathDoesNotExist,
+        });
       }
 
       const readStep = child('read-tree', undefined, {
@@ -272,7 +322,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       if (!safePath) {
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
-        return reply.status(403).send({ error: 'Forbidden' });
+        return reply.status(403).send({ error: WORKSPACE_ERROR_MESSAGES.forbiddenPath });
       }
       // Caller-supplied root narrows the safe set to that one root.
       // We resolve + validate the root the same way so a malformed /
@@ -283,12 +333,12 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         if (!safeRoot) {
           pathStep.fail('forbidden workspace root');
           step.fail('forbidden workspace root');
-          return reply.status(403).send({ error: 'Forbidden workspace root' });
+          return reply.status(403).send({ error: WORKSPACE_ERROR_MESSAGES.forbiddenWorkspaceRoot });
         }
         if (!isPathWithinRoot(safePath, safeRoot)) {
           pathStep.fail('path outside workspace root');
           step.fail('path outside workspace root');
-          return reply.status(403).send({ error: 'Path outside requested workspace' });
+          return reply.status(403).send({ error: WORKSPACE_ERROR_MESSAGES.pathOutsideWorkspace });
         }
       }
       pathStep.succeed();
@@ -296,7 +346,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       await ensureIgnoreRulesLoadedForPath(safePath);
       if (defaultIgnoreManager.shouldIgnore(safePath)) {
         step.fail('ignored path');
-        return reply.status(403).send({ error: 'Forbidden by agentignore rules' });
+        return reply.status(403).send({ error: WORKSPACE_ERROR_MESSAGES.forbiddenByIgnoreRules });
       }
 
       const statStep = child('stat');
@@ -306,13 +356,13 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       } catch {
         statStep.fail('file not found');
         step.fail('file not found');
-        return reply.status(404).send({ error: 'File not found' });
+        return reply.status(404).send({ error: WORKSPACE_ERROR_MESSAGES.fileNotFound });
       }
 
       if (!stat.isFile()) {
         statStep.fail('not a file');
         step.fail('not a file');
-        return reply.status(400).send({ error: 'Not a file' });
+        return reply.status(400).send({ error: WORKSPACE_ERROR_MESSAGES.pathNotFile });
       }
       statStep.succeed(undefined, { size: stat.size });
 
@@ -358,20 +408,20 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       const safePath = validateWorkspacePath(parsed.path);
       if (!safePath) {
         step.fail('forbidden path');
-        return reply.status(403).send({ error: 'Forbidden' });
+        return reply.status(403).send({ error: WORKSPACE_ERROR_MESSAGES.forbiddenPath });
       }
       if (parsed.workspaceRoot !== undefined) {
         const safeRoot = validateWorkspacePath(parsed.workspaceRoot);
         if (!safeRoot || !isPathWithinRoot(safePath, safeRoot)) {
           step.fail('path outside workspace root');
-          return reply.status(403).send({ error: 'Path outside requested workspace' });
+          return reply.status(403).send({ error: WORKSPACE_ERROR_MESSAGES.pathOutsideWorkspace });
         }
       }
       if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
       await ensureIgnoreRulesLoadedForPath(safePath);
       if (defaultIgnoreManager.shouldIgnore(safePath)) {
         step.fail('ignored path');
-        return reply.status(403).send({ error: 'Forbidden by agentignore rules' });
+        return reply.status(403).send({ error: WORKSPACE_ERROR_MESSAGES.forbiddenByIgnoreRules });
       }
 
       let stat: Stats;
@@ -379,15 +429,15 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         stat = await fsp.stat(safePath);
       } catch {
         step.fail('file not found');
-        return reply.status(404).send({ error: 'File not found' });
+        return reply.status(404).send({ error: WORKSPACE_ERROR_MESSAGES.fileNotFound });
       }
       if (!stat.isFile()) {
         step.fail('not a file');
-        return reply.status(400).send({ error: 'Not a file' });
+        return reply.status(400).send({ error: WORKSPACE_ERROR_MESSAGES.pathNotFile });
       }
       if (stat.size > MAX_FILE_BYTES) {
         step.fail('file too large');
-        return reply.status(413).send({ error: 'File too large for preview' });
+        return reply.status(413).send({ error: WORKSPACE_ERROR_MESSAGES.fileTooLargeForPreview });
       }
 
       const ext = (safePath.split('.').pop() ?? '').toLowerCase();
@@ -439,7 +489,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       if (!safePath) {
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
-        return reply.status(403).send({ error: 'Forbidden' });
+        return reply.status(403).send({ error: WORKSPACE_ERROR_MESSAGES.forbiddenPath });
       }
       await ensureIgnoreRulesLoadedForPath(safePath);
       pathStep.succeed();
@@ -454,7 +504,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       } catch (err) {
         writeStep.fail(String(err));
         step.fail(String(err));
-        return reply.status(500).send({ error: 'Write failed' });
+        return reply.status(500).send({ error: WORKSPACE_ERROR_MESSAGES.fileWriteFailed });
       }
     },
   );
@@ -475,7 +525,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       if (!safePath) {
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
-        return reply.status(403).send({ error: 'Forbidden' });
+        return reply.status(403).send({ error: WORKSPACE_ERROR_MESSAGES.forbiddenPath });
       }
       pathStep.succeed();
       if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
@@ -487,13 +537,13 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         if (!parentStat.isDirectory()) {
           parentStep.fail('parent is not a directory');
           step.fail('parent is not a directory');
-          return reply.status(400).send({ error: 'Parent directory is invalid' });
+          return reply.status(400).send({ error: WORKSPACE_ERROR_MESSAGES.parentDirectoryInvalid });
         }
         parentStep.succeed();
       } catch {
         parentStep.fail('parent directory not found');
         step.fail('parent directory not found');
-        return reply.status(404).send({ error: 'Parent directory not found' });
+        return reply.status(404).send({ error: WORKSPACE_ERROR_MESSAGES.parentDirectoryNotFound });
       }
 
       const writeStep = child('create-file');
@@ -513,19 +563,21 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
           if (code === 'EEXIST') {
             writeStep.fail('file already exists');
             step.fail('file already exists');
-            return reply.status(409).send({ error: 'File already exists' });
+            return reply.status(409).send({ error: WORKSPACE_ERROR_MESSAGES.fileAlreadyExists });
           }
 
           if (code === 'EISDIR') {
             writeStep.fail('path is a directory');
             step.fail('path is a directory');
-            return reply.status(400).send({ error: 'Target path is a directory' });
+            return reply
+              .status(400)
+              .send({ error: WORKSPACE_ERROR_MESSAGES.targetPathIsDirectory });
           }
         }
 
         writeStep.fail(String(error));
         step.fail(String(error));
-        return reply.status(500).send({ error: 'Create file failed' });
+        return reply.status(500).send({ error: WORKSPACE_ERROR_MESSAGES.createFileFailed });
       }
     },
   );
@@ -546,7 +598,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       if (!safePath) {
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
-        return reply.status(403).send({ error: 'Forbidden' });
+        return reply.status(403).send({ error: WORKSPACE_ERROR_MESSAGES.forbiddenPath });
       }
       pathStep.succeed();
       if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
@@ -563,19 +615,23 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
           if (code === 'EEXIST') {
             mkdirStep.fail('directory already exists');
             step.fail('directory already exists');
-            return reply.status(409).send({ error: 'Directory already exists' });
+            return reply
+              .status(409)
+              .send({ error: WORKSPACE_ERROR_MESSAGES.directoryAlreadyExists });
           }
 
           if (code === 'ENOENT') {
             mkdirStep.fail('parent directory not found');
             step.fail('parent directory not found');
-            return reply.status(404).send({ error: 'Parent directory not found' });
+            return reply
+              .status(404)
+              .send({ error: WORKSPACE_ERROR_MESSAGES.parentDirectoryNotFound });
           }
         }
 
         mkdirStep.fail(String(error));
         step.fail(String(error));
-        return reply.status(500).send({ error: 'Create directory failed' });
+        return reply.status(500).send({ error: WORKSPACE_ERROR_MESSAGES.createDirectoryFailed });
       }
     },
   );
@@ -593,7 +649,10 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       if (!safePath) {
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
-        return reply.status(403).send({ changes: [] });
+        return reply.status(403).send({
+          changes: [],
+          error: WORKSPACE_ERROR_MESSAGES.forbiddenPath,
+        });
       }
       pathStep.succeed();
       if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
@@ -619,18 +678,27 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       if (!safePath) {
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
-        return reply.status(403).send({ diff: '' });
+        return reply.status(403).send({
+          diff: '',
+          error: WORKSPACE_ERROR_MESSAGES.forbiddenPath,
+        });
       }
 
       const relativeFilePath = validateWorkspaceRelativePath(safePath, parsed.filePath);
       if (!relativeFilePath) {
         pathStep.fail('invalid filePath');
         step.fail('invalid filePath');
-        return reply.status(400).send({ diff: '' });
+        return reply.status(400).send({
+          diff: '',
+          error: WORKSPACE_ERROR_MESSAGES.invalidReviewFilePath,
+        });
       }
       if (defaultIgnoreManager.shouldIgnore(join(safePath, relativeFilePath))) {
         step.fail('ignored path');
-        return reply.status(403).send({ diff: '', error: 'Forbidden by agentignore rules' });
+        return reply.status(403).send({
+          diff: '',
+          error: WORKSPACE_ERROR_MESSAGES.forbiddenByIgnoreRules,
+        });
       }
       pathStep.succeed();
       if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
@@ -656,7 +724,10 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       if (!safePath) {
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
-        return reply.status(403).send({ ok: false });
+        return reply.status(403).send({
+          ok: false,
+          error: WORKSPACE_ERROR_MESSAGES.forbiddenPath,
+        });
       }
       await ensureIgnoreRulesLoadedForPath(safePath);
 
@@ -664,11 +735,17 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       if (!relativeFilePath) {
         pathStep.fail('invalid filePath');
         step.fail('invalid filePath');
-        return reply.status(400).send({ ok: false });
+        return reply.status(400).send({
+          ok: false,
+          error: WORKSPACE_ERROR_MESSAGES.invalidReviewFilePath,
+        });
       }
       if (defaultIgnoreManager.shouldIgnore(join(safePath, relativeFilePath))) {
         step.fail('ignored path');
-        return reply.status(403).send({ ok: false, error: 'Forbidden by agentignore rules' });
+        return reply.status(403).send({
+          ok: false,
+          error: WORKSPACE_ERROR_MESSAGES.forbiddenByIgnoreRules,
+        });
       }
       pathStep.succeed();
       if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
@@ -704,7 +781,10 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       const safePath = validateWorkspacePath(parsed.path);
       if (!safePath) {
         step.fail('forbidden path');
-        return reply.status(403).send({ results: [] });
+        return reply.status(403).send({
+          results: [],
+          error: WORKSPACE_ERROR_MESSAGES.forbiddenPath,
+        });
       }
       if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
       await ensureIgnoreRulesLoadedForPath(safePath);
@@ -761,7 +841,10 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       if (!safePath) {
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
-        return reply.status(403).send({ results: [] });
+        return reply.status(403).send({
+          results: [],
+          error: WORKSPACE_ERROR_MESSAGES.forbiddenPath,
+        });
       }
       pathStep.succeed();
       if (!checkUserWorkspaceAccess(request, reply, safePath)) return;

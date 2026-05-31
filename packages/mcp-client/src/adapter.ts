@@ -11,6 +11,159 @@ import type {
   MCPConnectionStatus,
   JSONSchema,
 } from '@openAwork/skill-types';
+import { MCPTimeoutError } from './error-handler.js';
+
+/**
+ * Hard ceiling on a single MCP transport handshake. The SDK's
+ * `client.connect()` performs the `initialize` round-trip but has no
+ * built-in timeout: a stdio subprocess that spawns yet never answers
+ * `initialize`, or an HTTP/SSE endpoint whose socket hangs, would leave
+ * `connect()` pending forever. Because the gateway's connection pool
+ * dedupes concurrent connects behind one pending promise, a single hung
+ * handshake stalls every caller for that (user, server). Racing the
+ * handshake against this timeout converts the hang into a recoverable
+ * `MCPTimeoutError`.
+ */
+const MCP_CONNECT_TIMEOUT_MS = 30_000;
+
+/**
+ * Race a transport handshake against {@link MCP_CONNECT_TIMEOUT_MS}. On
+ * timeout the half-open client is closed (best-effort) so we don't leak
+ * a subprocess / socket, then an `MCPTimeoutError` is thrown.
+ */
+export async function connectWithTimeout(
+  serverId: string,
+  client: SDKClient,
+  transport: unknown,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      reject(new MCPTimeoutError(serverId, MCP_CONNECT_TIMEOUT_MS));
+    }, MCP_CONNECT_TIMEOUT_MS);
+  });
+
+  try {
+    await Promise.race([client.connect(transport), timeout]);
+  } catch (err) {
+    if (timedOut) {
+      // Tear down the half-open transport so a slow-but-eventual
+      // handshake can't resurrect a connection we already abandoned.
+      await client.close().catch(() => undefined);
+    }
+    throw err;
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
+/**
+ * Hard ceilings on a single MCP cursor-paginated listing
+ * (`listTools` / `listResources` / `listPrompts`). The MCP wire
+ * contract lets the server keep returning a non-empty `nextCursor`
+ * indefinitely, and the SDK does not enforce any termination. A
+ * buggy or hostile upstream that always echoes the same cursor — or
+ * walks a runaway cursor space — would otherwise spin the gateway in
+ * an infinite `do { ... } while (cursor)` loop while the accumulator
+ * grows unboundedly, starving the event loop and exhausting heap.
+ *
+ * Both ceilings are intentionally generous: real-world MCP servers
+ * return tens of items in a handful of pages. Either limit hitting is
+ * a strong signal of a misbehaving server, so we surface it as a
+ * recoverable error rather than truncating silently.
+ */
+export const MCP_PAGINATION_MAX_PAGES = 1000;
+export const MCP_PAGINATION_MAX_ITEMS = 50_000;
+
+export class MCPPaginationError extends Error {
+  readonly serverId: string;
+  readonly operation: string;
+  readonly reason: 'max_pages' | 'max_items' | 'cursor_loop';
+
+  constructor(
+    serverId: string,
+    operation: string,
+    reason: 'max_pages' | 'max_items' | 'cursor_loop',
+    detail: string,
+  ) {
+    super(`MCP server '${serverId}' ${operation} pagination aborted (${reason}): ${detail}`);
+    this.name = 'MCPPaginationError';
+    this.serverId = serverId;
+    this.operation = operation;
+    this.reason = reason;
+  }
+}
+
+/**
+ * Walk a cursor-paginated MCP listing with three independent
+ * termination guards:
+ *
+ * 1. Page count must stay below {@link MCP_PAGINATION_MAX_PAGES}.
+ * 2. Accumulated item count must stay below
+ *    {@link MCP_PAGINATION_MAX_ITEMS}.
+ * 3. Cursors must not repeat. A server that returns the same
+ *    `nextCursor` (including the empty initial cursor after the
+ *    first page) is in a loop, not making progress.
+ *
+ * Hitting any guard throws {@link MCPPaginationError}. The caller is
+ * expected to surface it the same way it surfaces other adapter
+ * errors — agent-gateway's `mcp-tool-catalog.ts` already wraps list
+ * calls in try/catch and the resulting error becomes a connection
+ * health signal.
+ */
+export async function collectPaginated<TPage, TItem>(
+  serverId: string,
+  operation: string,
+  fetchPage: (cursor?: string) => Promise<TPage>,
+  pickItems: (page: TPage) => readonly TItem[],
+  pickNextCursor: (page: TPage) => string | undefined,
+): Promise<TItem[]> {
+  const all: TItem[] = [];
+  const seenCursors = new Set<string | undefined>();
+  let cursor: string | undefined;
+  let page = 0;
+
+  do {
+    if (page >= MCP_PAGINATION_MAX_PAGES) {
+      throw new MCPPaginationError(
+        serverId,
+        operation,
+        'max_pages',
+        `exceeded ${MCP_PAGINATION_MAX_PAGES} pages`,
+      );
+    }
+    if (seenCursors.has(cursor)) {
+      throw new MCPPaginationError(
+        serverId,
+        operation,
+        'cursor_loop',
+        `cursor ${cursor === undefined ? '<initial>' : JSON.stringify(cursor)} repeated`,
+      );
+    }
+    seenCursors.add(cursor);
+
+    const result = await fetchPage(cursor);
+    const items = pickItems(result);
+    if (all.length + items.length > MCP_PAGINATION_MAX_ITEMS) {
+      throw new MCPPaginationError(
+        serverId,
+        operation,
+        'max_items',
+        `exceeded ${MCP_PAGINATION_MAX_ITEMS} items`,
+      );
+    }
+    for (const item of items) all.push(item);
+
+    cursor = pickNextCursor(result);
+    page += 1;
+  } while (cursor);
+
+  return all;
+}
 
 interface MCPClientEntry {
   client: unknown;
@@ -195,7 +348,9 @@ export class MCPClientAdapterImpl implements MCPClientAdapter {
       if (!server.command) {
         throw new Error(`MCP stdio server ${server.id} is missing command`);
       }
-      await client.connect(
+      await connectWithTimeout(
+        server.id,
+        client as unknown as SDKClient,
         new sdk.StdioClientTransport({
           command: server.command,
           args: server.args ?? [],
@@ -212,9 +367,24 @@ export class MCPClientAdapterImpl implements MCPClientAdapter {
         : undefined;
 
       try {
-        await client.connect(new sdk.StreamableHTTPClientTransport(baseUrl, transportOpts));
-      } catch {
-        await client.connect(new sdk.SSEClientTransport(baseUrl, transportOpts));
+        await connectWithTimeout(
+          server.id,
+          client as unknown as SDKClient,
+          new sdk.StreamableHTTPClientTransport(baseUrl, transportOpts),
+        );
+      } catch (streamableErr) {
+        // A connect timeout is a hard transport failure — don't silently
+        // fall through to SSE and risk a second 30s hang. Only the
+        // "this server doesn't speak Streamable HTTP" case should retry
+        // via the legacy SSE transport.
+        if (streamableErr instanceof MCPTimeoutError) {
+          throw streamableErr;
+        }
+        await connectWithTimeout(
+          server.id,
+          client as unknown as SDKClient,
+          new sdk.SSEClientTransport(baseUrl, transportOpts),
+        );
       }
     }
 
@@ -233,20 +403,27 @@ export class MCPClientAdapterImpl implements MCPClientAdapter {
   async listTools(serverId: string): Promise<MCPToolDef[]> {
     const client = this.getClient(serverId);
     const entry = this.entries.get(serverId)!;
+    // Collect raw tools first so the pagination ceiling reflects the
+    // upstream's true page sizes, then drop disabled entries — a server
+    // that floods us with thousands of tools should still trip the
+    // pagination guard even if all of them happen to be locally
+    // disabled.
+    const raw = await collectPaginated(
+      serverId,
+      'listTools',
+      (cursor) => client.listTools({ cursor }),
+      (page) => page.tools,
+      (page) => page.nextCursor,
+    );
     const all: MCPToolDef[] = [];
-    let cursor: string | undefined;
-    do {
-      const { tools, nextCursor } = await client.listTools({ cursor });
-      for (const t of tools) {
-        if (entry.disabledTools.has(t.name)) continue;
-        all.push({
-          name: t.name,
-          description: t.description ?? '',
-          inputSchema: t.inputSchema as JSONSchema,
-        });
-      }
-      cursor = nextCursor;
-    } while (cursor);
+    for (const t of raw) {
+      if (entry.disabledTools.has(t.name)) continue;
+      all.push({
+        name: t.name,
+        description: t.description ?? '',
+        inputSchema: t.inputSchema as JSONSchema,
+      });
+    }
     return all;
   }
 
@@ -255,14 +432,14 @@ export class MCPClientAdapterImpl implements MCPClientAdapter {
     if (typeof client.listResources !== 'function') {
       throw new Error(`MCP server ${serverId} does not support listResources`);
     }
-    const all: MCPResourceDef[] = [];
-    let cursor: string | undefined;
-    do {
-      const result = await client.listResources({ cursor });
-      all.push(...(result.resources ?? []));
-      cursor = result.nextCursor;
-    } while (cursor);
-    return all;
+    const listResources = client.listResources.bind(client);
+    return collectPaginated(
+      serverId,
+      'listResources',
+      (cursor) => listResources({ cursor }),
+      (page) => page.resources ?? [],
+      (page) => page.nextCursor,
+    );
   }
 
   async readResource(serverId: string, uri: string): Promise<MCPResourceReadResult> {
@@ -278,14 +455,14 @@ export class MCPClientAdapterImpl implements MCPClientAdapter {
     if (typeof client.listPrompts !== 'function') {
       throw new Error(`MCP server ${serverId} does not support listPrompts`);
     }
-    const all: MCPPromptDef[] = [];
-    let cursor: string | undefined;
-    do {
-      const result = await client.listPrompts({ cursor });
-      all.push(...(result.prompts ?? []));
-      cursor = result.nextCursor;
-    } while (cursor);
-    return all;
+    const listPrompts = client.listPrompts.bind(client);
+    return collectPaginated(
+      serverId,
+      'listPrompts',
+      (cursor) => listPrompts({ cursor }),
+      (page) => page.prompts ?? [],
+      (page) => page.nextCursor,
+    );
   }
 
   async getPrompt(

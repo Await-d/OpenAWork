@@ -75,7 +75,7 @@ E        事后小项：token usage 透传             ✅
   尾 2 条非系统消息打 `cache_control: ephemeral`
 - `provider-options.ts`：thinking / reasoning effort 映射到对应供应商
   的 AI SDK `providerOptions` 字段（anthropic.thinking、
-  openai-compatible.reasoningEffort、qwen/moonshot/gemini 的 body 字段）
+  openai-compatible.reasoningEffort、qwen/moonshot/mimo/gemini 的 body 字段）
 - `provider.ts` 内置 `anthropic-beta` 头自动组装（含
   `prompt-caching-scope`、`interleaved-thinking`、
   `fine-grained-tool-streaming`，并读取 `ANTHROPIC_BETAS` 环境变量）

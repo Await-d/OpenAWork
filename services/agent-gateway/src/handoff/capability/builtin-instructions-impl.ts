@@ -261,6 +261,7 @@ registerInstruction({
       payload: {
         fromLayer: 'pm1',
         fromSessionId: ctx.sessionId,
+        ...(ctx.handoffId ? { handoffId: ctx.handoffId } : {}),
         reason: 'needs_clarification',
         questions: args.questions,
       },
@@ -386,6 +387,7 @@ registerInstruction({
       payload: {
         fromLayer: 'pm2',
         fromSessionId: ctx.sessionId,
+        ...(ctx.handoffId ? { handoffId: ctx.handoffId } : {}),
         pm1SessionId: args.fromSessionId,
         reason: args.reason,
         context: args.context ?? '',
@@ -454,6 +456,7 @@ function makeReportProgress(ownerLayer: 'executor' | 'reviewer'): void {
         payload: {
           fromLayer: ownerLayer,
           fromSessionId: ctx.sessionId,
+          ...(ctx.handoffId ? { handoffId: ctx.handoffId } : {}),
           progressText: args.progressText,
           ...(args.percent !== undefined ? { percent: args.percent } : {}),
         },

@@ -77,7 +77,7 @@ export function UpstreamRetrySection({
               style={{
                 ...OPTION_BUTTON,
                 background: selected
-                  ? 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay)'
+                  ? 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay))'
                   : OPTION_BUTTON.background,
                 borderColor: selected ? 'var(--accent)' : 'var(--border-default)',
                 color: selected ? 'var(--accent)' : OPTION_BUTTON.color,

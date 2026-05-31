@@ -69,6 +69,12 @@ const revertArtifactSchema = z.object({
   createdByNote: z.string().trim().max(500).nullable().optional(),
 });
 
+const ARTIFACT_ROUTE_ERROR_MESSAGES = {
+  artifactNotFound: '目标产物不存在。',
+  artifactOrVersionNotFound: '目标产物或版本不存在。',
+  sessionNotFound: '目标会话不存在。',
+} as const;
+
 function normalizeCreatedBy(actor: ArtifactVersionActor | undefined): ArtifactVersionActor {
   return actor ?? 'user';
 }
@@ -144,7 +150,7 @@ export async function artifactsRoutes(app: FastifyInstance): Promise<void> {
       const { sessionId } = request.params;
       const owned = await ensureSessionOwned(sessionId, user.sub);
       if (!owned) {
-        return reply.status(404).send({ error: 'Session not found' });
+        return reply.status(404).send({ error: ARTIFACT_ROUTE_ERROR_MESSAGES.sessionNotFound });
       }
       const artifacts = await artifactManager.list(sessionId);
       const contentArtifacts = listArtifactsBySession(user.sub, sessionId);
@@ -158,7 +164,7 @@ export async function artifactsRoutes(app: FastifyInstance): Promise<void> {
 
     const owned = await ensureSessionOwned(parsed.sessionId, user.sub);
     if (!owned) {
-      return reply.status(404).send({ error: 'Session not found' });
+      return reply.status(404).send({ error: ARTIFACT_ROUTE_ERROR_MESSAGES.sessionNotFound });
     }
 
     const artifact = createArtifact(user.sub, {
@@ -182,7 +188,7 @@ export async function artifactsRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
       const artifact = getArtifactById(user.sub, request.params.artifactId);
       if (!artifact) {
-        return reply.status(404).send({ error: 'Artifact not found' });
+        return reply.status(404).send({ error: ARTIFACT_ROUTE_ERROR_MESSAGES.artifactNotFound });
       }
       return reply.send({ artifact });
     },
@@ -195,7 +201,7 @@ export async function artifactsRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
       const artifact = getArtifactById(user.sub, request.params.artifactId);
       if (!artifact) {
-        return reply.status(404).send({ error: 'Artifact not found' });
+        return reply.status(404).send({ error: ARTIFACT_ROUTE_ERROR_MESSAGES.artifactNotFound });
       }
       const versions = listArtifactVersions(user.sub, request.params.artifactId);
       return reply.send({ artifact, versions });
@@ -220,7 +226,7 @@ export async function artifactsRoutes(app: FastifyInstance): Promise<void> {
         createdByNote: parsed.createdByNote ?? null,
       });
       if (!artifact) {
-        return reply.status(404).send({ error: 'Artifact not found' });
+        return reply.status(404).send({ error: ARTIFACT_ROUTE_ERROR_MESSAGES.artifactNotFound });
       }
       return reply.send({ artifact });
     },
@@ -239,7 +245,9 @@ export async function artifactsRoutes(app: FastifyInstance): Promise<void> {
         createdByNote: parsed.createdByNote ?? null,
       });
       if (!artifact) {
-        return reply.status(404).send({ error: 'Artifact or version not found' });
+        return reply
+          .status(404)
+          .send({ error: ARTIFACT_ROUTE_ERROR_MESSAGES.artifactOrVersionNotFound });
       }
       return reply.send({ artifact });
     },
@@ -253,7 +261,7 @@ export async function artifactsRoutes(app: FastifyInstance): Promise<void> {
       const { sessionId } = request.params;
       const owned = await ensureSessionOwned(sessionId, user.sub);
       if (!owned) {
-        return reply.status(404).send({ error: 'Session not found' });
+        return reply.status(404).send({ error: ARTIFACT_ROUTE_ERROR_MESSAGES.sessionNotFound });
       }
 
       const parsed = parseBody(uploadSchema, request.body);

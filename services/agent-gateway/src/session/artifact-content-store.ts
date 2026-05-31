@@ -61,12 +61,43 @@ export interface RevertArtifactInput {
   createdByNote?: string | null;
 }
 
+// Corrupt-row tolerance (§0.89/§0.114 class): `metadata_json` / `diff_json` are
+// persisted via `JSON.stringify`, but a crash mid-write, a disk error, or a
+// hand-edited DB can leave a column that is not valid JSON. `rowToArtifactRecord`
+// / `rowToArtifactVersionRecord` are used via `rows.map(...)` in the artifact +
+// version-history listings, so a single corrupt row used to throw and 500 the
+// WHOLE listing (every artifact / version became unreadable). Degrade a corrupt
+// metadata to `{}` and a corrupt diff to `[]` + warn so the bad row stays
+// listable (just without its annotations) and the rest still loads.
 function parseMetadata(metadataJson: string): ArtifactMetadata {
-  return JSON.parse(metadataJson) as ArtifactMetadata;
+  try {
+    const parsed = JSON.parse(metadataJson) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as ArtifactMetadata;
+    }
+    return {};
+  } catch (err) {
+    console.warn(
+      `[artifacts] metadata_json 解析失败，降级为空元数据：${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return {};
+  }
 }
 
 function parseDiff(diffJson: string): ArtifactLineChange[] {
-  return JSON.parse(diffJson) as ArtifactLineChange[];
+  try {
+    const parsed = JSON.parse(diffJson) as unknown;
+    return Array.isArray(parsed) ? (parsed as ArtifactLineChange[]) : [];
+  } catch (err) {
+    console.warn(
+      `[artifacts] diff_json 解析失败，降级为空 diff：${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return [];
+  }
 }
 
 function rowToArtifactRecord(row: ArtifactRow): ArtifactRecord {

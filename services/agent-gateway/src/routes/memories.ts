@@ -31,6 +31,41 @@ interface SessionSelectionRow {
   metadata_json: string;
 }
 
+type MemoriesRouteErrorCode =
+  | 'memory_not_found'
+  | 'memory_write_blocked'
+  | 'memory_extract_session_not_found';
+
+const MEMORIES_ROUTE_ERROR_MESSAGES: Record<MemoriesRouteErrorCode, string> = {
+  memory_not_found: '目标记忆不存在。',
+  memory_write_blocked: '记忆内容未通过安全校验。',
+  memory_extract_session_not_found: '没有可用于抽取记忆的会话。',
+};
+
+function memoriesRouteErrorPayload(
+  code: MemoriesRouteErrorCode,
+  extra?: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    code,
+    error: MEMORIES_ROUTE_ERROR_MESSAGES[code],
+    ...(extra ?? {}),
+  };
+}
+
+function readWorkspaceRootFromSessionMetadata(metadataJson: string | null | undefined): string | null {
+  if (!metadataJson) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(metadataJson) as Record<string, unknown>;
+    return typeof parsed['workingDirectory'] === 'string' ? parsed['workingDirectory'] : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function memoriesRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     '/memories',
@@ -63,14 +98,17 @@ export async function memoriesRoutes(app: FastifyInstance): Promise<void> {
       ] as const) {
         const scan = scanMemoryWriteContent(content);
         if (!scan.ok) {
-          step.fail('memory-write-blocked');
-          return reply.status(400).send({
-            error: 'memory-write-blocked',
-            field,
-            threat: scan.threat,
-            reason: scan.reason,
-            sample: scan.sample,
-          });
+          step.fail('memory_write_blocked');
+          return reply
+            .status(400)
+            .send(
+              memoriesRouteErrorPayload('memory_write_blocked', {
+                field,
+                threat: scan.threat,
+                reason: scan.reason,
+                sample: scan.sample,
+              }),
+            );
         }
       }
 
@@ -103,8 +141,8 @@ export async function memoriesRoutes(app: FastifyInstance): Promise<void> {
 
       const memory = getMemoryById(user.sub, memoryId);
       if (!memory) {
-        step.fail('not found');
-        return reply.status(404).send({ error: 'Memory not found' });
+        step.fail('memory_not_found');
+        return reply.status(404).send(memoriesRouteErrorPayload('memory_not_found'));
       }
 
       step.succeed(undefined, { memoryId });
@@ -130,21 +168,24 @@ export async function memoriesRoutes(app: FastifyInstance): Promise<void> {
         if (typeof content !== 'string') continue;
         const scan = scanMemoryWriteContent(content);
         if (!scan.ok) {
-          step.fail('memory-write-blocked');
-          return reply.status(400).send({
-            error: 'memory-write-blocked',
-            field,
-            threat: scan.threat,
-            reason: scan.reason,
-            sample: scan.sample,
-          });
+          step.fail('memory_write_blocked');
+          return reply
+            .status(400)
+            .send(
+              memoriesRouteErrorPayload('memory_write_blocked', {
+                field,
+                threat: scan.threat,
+                reason: scan.reason,
+                sample: scan.sample,
+              }),
+            );
         }
       }
 
       const memory = updateMemory(user.sub, memoryId, parsed);
       if (!memory) {
-        step.fail('not found');
-        return reply.status(404).send({ error: 'Memory not found' });
+        step.fail('memory_not_found');
+        return reply.status(404).send(memoriesRouteErrorPayload('memory_not_found'));
       }
 
       step.succeed(undefined, { memoryId });
@@ -162,8 +203,8 @@ export async function memoriesRoutes(app: FastifyInstance): Promise<void> {
 
       const deleted = deleteMemory(user.sub, memoryId);
       if (!deleted) {
-        step.fail('not found');
-        return reply.status(404).send({ error: 'Memory not found' });
+        step.fail('memory_not_found');
+        return reply.status(404).send(memoriesRouteErrorPayload('memory_not_found'));
       }
 
       step.succeed(undefined, { memoryId });
@@ -200,8 +241,10 @@ export async function memoriesRoutes(app: FastifyInstance): Promise<void> {
             );
 
         if (!session) {
-          step.fail('session not found');
-          return reply.status(404).send({ error: 'No session available for extraction' });
+          step.fail('memory_extract_session_not_found');
+          return reply
+            .status(404)
+            .send(memoriesRouteErrorPayload('memory_extract_session_not_found'));
         }
 
         extractionText = buildMemoryExtractionTextForSession({
@@ -212,12 +255,8 @@ export async function memoriesRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const candidates = extractMemoriesFromText(extractionText);
-      const workspaceRoot = session?.metadata_json
-        ? ((JSON.parse(session.metadata_json) as Record<string, unknown>)['workingDirectory'] ??
-          null)
-        : null;
-      const workspaceRootStr = typeof workspaceRoot === 'string' ? workspaceRoot : null;
-      const result = upsertExtractedMemories(user.sub, candidates, workspaceRootStr);
+      const workspaceRoot = readWorkspaceRootFromSessionMetadata(session?.metadata_json);
+      const result = upsertExtractedMemories(user.sub, candidates, workspaceRoot);
       step.succeed(undefined, { ...result, candidates: candidates.length });
       return reply.send({
         candidates: candidates.length,

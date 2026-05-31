@@ -42,7 +42,7 @@ const STATUS_META: Record<
     rowBorder: '1px solid color-mix(in oklch, var(--accent) 16%, var(--border-default) 84%)',
     rowBackground: 'color-mix(in oklch, var(--accent) 5%, var(--bg-overlay) 95%)',
     tone: {
-      border: '1px solid color-mix(in srgb, var(--chart-7) 38%, var(--border-default)',
+      border: '1px solid color-mix(in srgb, var(--chart-7) 38%, var(--border-default))',
       color: 'var(--chart-7)',
       background: 'color-mix(in srgb, var(--chart-7) 10%, transparent)',
     },
@@ -53,7 +53,7 @@ const STATUS_META: Record<
     rowBorder: '1px solid var(--border-subtle)',
     rowBackground: 'var(--bg-overlay)',
     tone: {
-      border: '1px solid color-mix(in srgb, var(--success) 40%, var(--border-default)',
+      border: '1px solid color-mix(in srgb, var(--success) 40%, var(--border-default))',
       color: 'var(--success)',
       background: 'color-mix(in srgb, var(--success) 10%, transparent)',
     },
@@ -64,7 +64,7 @@ const STATUS_META: Record<
     rowBorder: '1px solid var(--border-subtle)',
     rowBackground: 'var(--bg-overlay)',
     tone: {
-      border: '1px solid color-mix(in srgb, var(--warning) 45%, var(--border-default)',
+      border: '1px solid color-mix(in srgb, var(--warning) 45%, var(--border-default))',
       color: 'var(--warning)',
       background: 'color-mix(in srgb, var(--warning) 10%, transparent)',
     },
@@ -81,7 +81,7 @@ const PRIORITY_META: Record<
   high: {
     label: '高优先级',
     tone: {
-      border: '1px solid color-mix(in srgb, var(--danger) 40%, var(--border-default)',
+      border: '1px solid color-mix(in srgb, var(--danger) 40%, var(--border-default))',
       color: 'color-mix(in oklch, var(--danger) 88%, white 12%)',
       background: 'color-mix(in oklch, var(--danger) 10%, transparent)',
     },

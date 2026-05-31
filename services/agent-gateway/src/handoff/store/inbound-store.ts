@@ -20,6 +20,7 @@ import { randomUUID } from 'node:crypto';
 import { sqliteAll, sqliteGet, sqliteRun } from '../../infra/db.js';
 import type { HandoffRoleLayer } from './handoff-store.js';
 import { assertCanReceiveInbound } from '../capability/layer-capabilities.js';
+import { publishTeamEvent } from '../bus/team-events-bus.js';
 
 export type InboundMessageType =
   | 'cancel_signal'
@@ -62,6 +63,23 @@ export interface InboundMessageRecord {
   expiresAt: string | null;
 }
 
+export type ClarificationResolutionStatus = 'answered' | 'dismissed';
+
+interface ClarificationPayloadQuestion {
+  answer?: string;
+  answeredAt?: number;
+  context?: string;
+  id?: string;
+  question?: string;
+  status?: ClarificationResolutionStatus | 'pending';
+}
+
+interface ClarificationEscalationPayload {
+  fromSessionId?: string;
+  questions?: ClarificationPayloadQuestion[];
+  reason?: string;
+}
+
 function parsePayload(json: string): unknown {
   try {
     return JSON.parse(json);
@@ -86,6 +104,71 @@ function mapRow(row: InboundMessageRow): InboundMessageRecord {
     consumedByLoopIteration: row.consumed_by_loop_iteration,
     expiresAt: row.expires_at,
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function buildInboundEventPayload(record: InboundMessageRecord): Record<string, unknown> {
+  const payload = isRecord(record.payload) ? record.payload : {};
+  const eventPayload: Record<string, unknown> = {
+    messageId: record.id,
+    toSessionId: record.toSessionId,
+    messageType: record.messageType,
+    fromRoleLayer: record.fromRoleLayer,
+    reused: false,
+    ...(typeof payload['fromSessionId'] === 'string' ? { fromSessionId: payload['fromSessionId'] } : {}),
+    ...(typeof payload['handoffId'] === 'string' ? { handoffId: payload['handoffId'] } : {}),
+    ...(typeof payload['pm2HandoffId'] === 'string' ? { handoffId: payload['pm2HandoffId'] } : {}),
+  };
+
+  if (record.messageType === 'user_input') {
+    const text = typeof payload['text'] === 'string' ? payload['text'].trim() : '';
+    if (text.length > 0) {
+      eventPayload['textPreview'] = text.length > 160 ? `${text.slice(0, 160)}...` : text;
+      eventPayload['summary'] = text;
+    }
+    return eventPayload;
+  }
+
+  if (record.messageType === 'clarification_answer') {
+    const answer = typeof payload['answer'] === 'string' ? payload['answer'].trim() : '';
+    if (answer.length > 0) {
+      eventPayload['textPreview'] = answer.length > 160 ? `${answer.slice(0, 160)}...` : answer;
+      eventPayload['summary'] = `已回答澄清：${answer}`;
+    }
+    return eventPayload;
+  }
+
+  if (record.messageType === 'progress_report') {
+    if (typeof payload['progressText'] === 'string' && payload['progressText'].trim().length > 0) {
+      eventPayload['summary'] = payload['progressText'].trim();
+    }
+    if (typeof payload['percent'] === 'number') {
+      eventPayload['percent'] = payload['percent'];
+    }
+    eventPayload['blocking'] = false;
+    return eventPayload;
+  }
+
+  if (record.messageType === 'escalation_request') {
+    const reason = typeof payload['reason'] === 'string' ? payload['reason'] : null;
+    const context = typeof payload['context'] === 'string' ? payload['context'].trim() : '';
+    if (reason) {
+      eventPayload['reason'] = reason;
+    }
+    if (context.length > 0) {
+      eventPayload['summary'] = context;
+    }
+    eventPayload['blocking'] = reason !== 'needs_clarification';
+    return eventPayload;
+  }
+
+  if (typeof payload['reason'] === 'string') {
+    eventPayload['summary'] = payload['reason'];
+  }
+  return eventPayload;
 }
 
 // ─── Submit ─────────────────────────────────────────────────────────────────
@@ -116,6 +199,94 @@ function defaultExpiresAt(messageType: InboundMessageType): string | null {
   if (ttl == null) return null; // 永不过期
   const expires = new Date(Date.now() + ttl * 60 * 60 * 1000);
   return expires.toISOString().replace('T', ' ').replace('Z', '').slice(0, 19);
+}
+
+/**
+ * 终态行（consumed / expired）保留窗口。`session_inbound_messages` 的行经状态机
+ * 走 pending → consumed/expired，但生产代码从不 DELETE 终态行（仅 session 删除时
+ * CASCADE）。一个长期运行、反向消息频繁的 team session 会让终态行无界堆积。所有
+ * 类型 TTL <=24h，且 `resolveClarificationEscalationRequest` 只读未过期行，因此删除
+ * 「创建时间早于一个远大于最大 TTL 的窗口」的终态行不会破坏任何读路径。pending 行
+ * 永不在此删除（仍可被消费）。摊销执行：每累计 N 次插入才扫一次，写放大可忽略。
+ */
+const DEFAULT_SESSION_INBOUND_TERMINAL_MAX_AGE_HOURS = 24 * 7;
+export const SESSION_INBOUND_PRUNE_CHECK_INTERVAL = 100;
+
+let inboundRetentionHoursOverride: number | null = null;
+let inboundPruneCheckInterval = SESSION_INBOUND_PRUNE_CHECK_INTERVAL;
+let inboundInsertsSincePrune = 0;
+
+function resolveInboundTerminalMaxAgeHours(): number {
+  if (inboundRetentionHoursOverride !== null) {
+    return inboundRetentionHoursOverride;
+  }
+  const raw = globalThis.process?.env['OPENAWORK_SESSION_INBOUND_TERMINAL_MAX_AGE_HOURS'];
+  if (raw === undefined || raw === null || raw.trim() === '') {
+    return DEFAULT_SESSION_INBOUND_TERMINAL_MAX_AGE_HOURS;
+  }
+  const parsed = Number(raw);
+  // 非正数 / NaN 视为「关闭裁剪」，与 sibling 保留存储的 env 死线开关语义一致。
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 0;
+  }
+  return Math.floor(parsed);
+}
+
+function pruneTerminalInboundMessages(maxAgeHours: number): void {
+  // 先把「已过 expires_at 但仍是 pending」的行全局标记为 expired。过期→expired 的
+  // 转移此前只发生在 consumePendingInboundMessage / listPendingInboundMessages 这两条
+  // **按 session** 的惰性路径上。一个被放弃的 session（handoff 失败/取消后再无人轮询
+  // 或列举）留下的过期 pending 行因此永远停在 pending，既不会被读到、也不满足下方
+  // 终态行 DELETE 的 `state IN ('consumed','expired')` 条件——于是无界泄漏直到 session
+  // 删除 CASCADE。这里在裁剪前做一次**全局**（不限 session）过期转移，让这些孤儿行
+  // 进入 expired 终态、从而能被保留窗口回收。永不过期的类型（cancel/pause/resume，
+  // expires_at IS NULL）不受影响。
+  sqliteRun(
+    `UPDATE session_inbound_messages
+        SET state = 'expired'
+      WHERE state = 'pending'
+        AND expires_at IS NOT NULL
+        AND expires_at < datetime('now')`,
+  );
+  // 只删终态行（consumed / expired）且 created_at 早于保留窗口；未过期的 pending 从不删除。
+  sqliteRun(
+    `DELETE FROM session_inbound_messages
+      WHERE state IN ('consumed', 'expired')
+        AND created_at < datetime('now', ?)`,
+    [`-${maxAgeHours} hours`],
+  );
+}
+
+function maybePruneInboundMessages(): void {
+  const maxAgeHours = resolveInboundTerminalMaxAgeHours();
+  if (maxAgeHours <= 0) {
+    // 裁剪关闭：重置计数，避免重新开启后立刻触发一次大裁剪。
+    inboundInsertsSincePrune = 0;
+    return;
+  }
+  inboundInsertsSincePrune += 1;
+  if (inboundInsertsSincePrune < inboundPruneCheckInterval) {
+    return;
+  }
+  inboundInsertsSincePrune = 0;
+  try {
+    pruneTerminalInboundMessages(maxAgeHours);
+  } catch {
+    // 裁剪失败只吞：保留是 best-effort，绝不影响反向消息写入或消费主流程。
+  }
+}
+
+/** 测试用：覆盖终态行保留窗口小时数（传 null 恢复 env / 默认）。 */
+export function __setSessionInboundRetentionForTesting(
+  maxAgeHours: number | null,
+  checkInterval?: number,
+): void {
+  inboundRetentionHoursOverride = maxAgeHours;
+  inboundPruneCheckInterval =
+    typeof checkInterval === 'number' && checkInterval > 0
+      ? Math.floor(checkInterval)
+      : SESSION_INBOUND_PRUNE_CHECK_INTERVAL;
+  inboundInsertsSincePrune = 0;
 }
 
 export interface SubmitInboundResult {
@@ -193,7 +364,19 @@ export function submitInboundMessage(input: SubmitInboundInput): SubmitInboundRe
   if (!row) {
     throw new Error('Failed to read back inbound message after insert');
   }
-  return { record: mapRow(row), reused: false };
+  const record = mapRow(row);
+  publishTeamEvent({
+    type: 'session.inbound.submitted',
+    sessionId: record.toSessionId,
+    layer: record.fromRoleLayer,
+    timestamp: Date.now(),
+    payload: buildInboundEventPayload(record),
+    userId: record.userId,
+  });
+  // Opportunistic retention: drop old terminal-state rows so this table stays
+  // bounded on a long-lived session with frequent inbound traffic.
+  maybePruneInboundMessages();
+  return { record, reused: false };
 }
 
 // ─── Consume ────────────────────────────────────────────────────────────────
@@ -297,6 +480,88 @@ export function hasPendingCancelSignal(toSessionId: string): boolean {
     [toSessionId],
   );
   return row != null;
+}
+
+export function resolveClarificationEscalationRequest(input: {
+  answer?: string;
+  answeredAt?: number;
+  questionId: string;
+  status: ClarificationResolutionStatus;
+  userId: string;
+}): InboundMessageRecord | null {
+  const rows = sqliteAll<InboundMessageRow>(
+    `SELECT * FROM session_inbound_messages
+     WHERE user_id = ?
+       AND message_type = 'escalation_request'
+       AND state IN ('pending', 'consumed')
+       AND (expires_at IS NULL OR expires_at >= datetime('now'))
+     ORDER BY created_at DESC`,
+    [input.userId],
+  );
+
+  for (const row of rows) {
+    const payload = parsePayload(row.payload_json);
+    if (!isRecord(payload)) {
+      continue;
+    }
+    const typedPayload = payload as ClarificationEscalationPayload;
+    if (typedPayload.reason !== 'needs_clarification' || !Array.isArray(typedPayload.questions)) {
+      continue;
+    }
+
+    let found = false;
+    const nextQuestions = typedPayload.questions.map((question) => {
+      if (!question || typeof question !== 'object') {
+        return question;
+      }
+      const typedQuestion = question as ClarificationPayloadQuestion;
+      if (typedQuestion.id !== input.questionId) {
+        return typedQuestion;
+      }
+      found = true;
+      return {
+        ...typedQuestion,
+        ...(input.status === 'answered' && typeof input.answer === 'string'
+          ? { answer: input.answer }
+          : {}),
+        ...(typeof input.answeredAt === 'number' ? { answeredAt: input.answeredAt } : {}),
+        status: input.status,
+      };
+    });
+
+    if (!found) {
+      continue;
+    }
+
+    const allResolved = nextQuestions.every((question) => {
+      if (!question || typeof question !== 'object') {
+        return false;
+      }
+      const status = (question as ClarificationPayloadQuestion).status;
+      return status === 'answered' || status === 'dismissed';
+    });
+
+    const nextPayload = {
+      ...typedPayload,
+      questions: nextQuestions,
+    };
+    sqliteRun(
+      `UPDATE session_inbound_messages
+         SET payload_json = ?,
+             state = ?,
+             consumed_at = CASE WHEN ? = 1 THEN datetime('now') ELSE consumed_at END
+       WHERE id = ?`,
+      [JSON.stringify(nextPayload), allResolved ? 'consumed' : 'pending', allResolved ? 1 : 0, row.id],
+    );
+
+    const updated = sqliteGet<InboundMessageRow>(
+      `SELECT * FROM session_inbound_messages WHERE id = ? LIMIT 1`,
+      [row.id],
+    );
+    return updated ? mapRow(updated) : mapRow(row);
+  }
+
+  return null;
 }
 
 // ─── Test helpers ───────────────────────────────────────────────────────────

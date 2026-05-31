@@ -1,4 +1,5 @@
 import { sqliteGet } from '../infra/db.js';
+import { normalizeProviderAlias } from '@openAwork/agent-core';
 import type { ReferenceModelEntry } from './task-model-reference-snapshot.js';
 
 interface UserSettingRow {
@@ -24,15 +25,8 @@ export interface DelegatedModelSelection {
 }
 
 function normalizeProviderHint(value: string): string {
-  switch (value.trim().toLowerCase()) {
-    case 'google':
-      return 'gemini';
-    case 'moonshotai':
-    case 'moonshotai-cn':
-      return 'moonshot';
-    default:
-      return value.trim().toLowerCase();
-  }
+  // 由 catalog 的别名表归一(如 google→gemini, moonshotai→moonshot, xiaomi→mimo)。
+  return normalizeProviderAlias(value);
 }
 
 function providerMatchesHints(provider: StoredProvider, hints: string[]): boolean {

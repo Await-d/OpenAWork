@@ -324,7 +324,7 @@ export function TasksTab({ selectedTeam = null }: { selectedTeam?: AgentTeamsSid
                   gap: 8,
                   alignItems: 'center',
                   padding: '10px 12px',
-                  background: `linear-gradient(135deg, color-mix(in oklch, ${laneColor} 8%, var(--bg-overlay), var(--bg-overlay))`,
+                  background: `linear-gradient(135deg, color-mix(in oklch, ${laneColor} 8%, var(--bg-overlay)), var(--bg-overlay))`,
                   borderBottom: '1px solid var(--border-subtle)',
                 }}
               >

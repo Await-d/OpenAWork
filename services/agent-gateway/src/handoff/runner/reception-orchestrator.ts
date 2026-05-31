@@ -19,6 +19,7 @@
 import { sqliteAll, sqliteRun as dbSqliteRun } from '../../infra/db.js';
 import { randomUUID } from 'node:crypto';
 import { resolveAuxiliaryLlmConfig } from '../../provider/auxiliary-llm-config.js';
+import { resolveMemberModelForSessionLayer } from '../bus/resolve-member-model.js';
 import { createHandoff } from '../store/handoff-store.js';
 import { publishHandoffEvent, publishTeamEvent } from '../bus/team-events-bus.js';
 import { recordLatency } from '../bus/latency-monitor.js';
@@ -81,6 +82,12 @@ export interface OrchestrateReceptionInput {
   persistAckMessage?: boolean;
   /** 客户端幂等 key（已被 inbound 端点用过；这里用作消息去重提示） */
   clientIdempotencyKey?: string | null;
+  /**
+   * 任务派发前是否自动跑完未完成的初始化步骤（了解项目 / 提取记忆 / 绑定工具）。
+   * 默认 true（周全性：用户直接提任务时也先让团队了解项目）。仅在 orchestrate
+   * 路径（真任务）生效；direct / clarify（闲聊问候）不触发，避免无谓等待。
+   */
+  autoRunInit?: boolean;
 }
 
 export interface OrchestrateReceptionResult {
@@ -135,6 +142,23 @@ export function persistReceptionUserMessage(input: {
 }
 
 /**
+ * In-process guard against concurrent reception→pm1 orchestration for the SAME
+ * reception session. `hasActiveHandoffFor` (a DB read) and the eventual
+ * `createHandoff` are separated by up to two LLM round-trips (the router, up to
+ * 3s, plus the interaction-agent rewrite, up to 60s). Two `user_input` submits
+ * that arrive without a shared `clientIdempotencyKey` (rapid double-send, two
+ * tabs) both fire this fire-and-forget orchestrate, both pass the
+ * active-handoff check (neither has created a handoff yet), and both
+ * `createHandoff(reception→pm1)` — spawning two parallel pm1 chains, exactly
+ * what the active-handoff guard is meant to prevent. A status read can't close
+ * that window because the two reads interleave before either write. An
+ * in-flight Set keyed by (userId, receptionSessionId) makes the second caller a
+ * deterministic no-op (mirrors `inFlightPm2QualityReviews`). Cleared in
+ * `finally`, so a crash releases the key instead of wedging the session.
+ */
+const inFlightReceptionOrchestrations = new Set<string>();
+
+/**
  * 主入口：自动把 reception 的 user_input 转换为 handoff(reception → pm1)。
  *
  * 失败时不抛错（会通过 result.reason 返回），让调用方决定是否要把错误透给客户端。
@@ -166,7 +190,33 @@ export async function orchestrateReceptionInput(
     return { triggered: false, reason: 'handoff-active' };
   }
 
-  const llmConfig = await resolveAuxiliaryLlmConfig(input.userId);
+  // §0.145 concurrent-orchestration guard: a second submit that lands while the
+  // first is still inside its router / rewrite LLM calls must NOT create a
+  // second reception→pm1 handoff. Treat it like an already-active handoff.
+  const inFlightKey = `${input.userId}::${input.receptionSessionId}`;
+  if (inFlightReceptionOrchestrations.has(inFlightKey)) {
+    if (persistAck) {
+      writeAck(input.userId, input.receptionSessionId, FALLBACK_ACK_HANDOFF_ACTIVE);
+    }
+    return { triggered: false, reason: 'orchestration-in-flight' };
+  }
+  inFlightReceptionOrchestrations.add(inFlightKey);
+  try {
+    return await runReceptionOrchestrationBody(input, persistAck);
+  } finally {
+    inFlightReceptionOrchestrations.delete(inFlightKey);
+  }
+}
+
+async function runReceptionOrchestrationBody(
+  input: OrchestrateReceptionInput,
+  persistAck: boolean,
+): Promise<OrchestrateReceptionResult> {
+  const receptionMemberModel = resolveMemberModelForSessionLayer({
+    sessionId: input.receptionSessionId,
+    layer: 'reception',
+  });
+  const llmConfig = await resolveAuxiliaryLlmConfig(input.userId, receptionMemberModel);
   if (!llmConfig) {
     if (persistAck) {
       writeAck(input.userId, input.receptionSessionId, FALLBACK_ACK_NO_LLM);
@@ -226,7 +276,7 @@ export async function orchestrateReceptionInput(
         writeAck(input.userId, input.receptionSessionId, '直接回答时出错，请重试。');
       }
     } finally {
-      recordLatency('a_to_b_direct', Date.now() - directStartedAt);
+      recordLatency('a_to_b_direct', Date.now() - directStartedAt, input.userId);
     }
     setSubstate({
       sessionId: input.receptionSessionId,
@@ -251,6 +301,55 @@ export async function orchestrateReceptionInput(
 
   // ─── 路径 C：orchestrate → 走 c→d→e/f/g 链路 ──────────────────────────
 
+  // 自动初始化前置（周全性补强）：用户直接提了真任务但初始化还没做完时，
+  // 先把未完成的初始化步骤自动跑完（了解项目 / 提取记忆 / 绑定工具），再派发任务。
+  // best-effort：失败不阻塞任务。完成后用最新产物覆盖 context，让 pm1 拿到项目理解。
+  let effectiveContext = input.context ?? null;
+  if (input.autoRunInit !== false) {
+    try {
+      const { ensureTeamInitBeforeTask, buildInitContextFromState } = await import(
+        '../../team/init/team-init-autorun.js'
+      );
+      const { loadTeamInitSessionContext } = await import('../../team/init/team-init-store.js');
+
+      // 预检：若有未完成、且存在待执行（proposed）步骤，先回一句「正在了解项目」让
+      // 用户安心（自动初始化含 LLM 架构理解，可能耗时）。仅在确实要跑时写，避免噪音。
+      const preCtx = loadTeamInitSessionContext(input.receptionSessionId, input.userId);
+      const willRunInit =
+        preCtx?.teamInit != null &&
+        preCtx.teamInit.phase !== 'completed' &&
+        preCtx.teamInit.phase !== 'skipped' &&
+        preCtx.teamInit.steps.some((s) => s.status === 'proposed');
+      if (willRunInit && persistAck) {
+        writeAck(
+          input.userId,
+          input.receptionSessionId,
+          '收到，我先快速了解一下你的项目（读取结构 / 记忆、按需绑定工具），随后立刻开始处理你的需求…',
+        );
+      }
+
+      const initResult = await ensureTeamInitBeforeTask({
+        sessionId: input.receptionSessionId,
+        userId: input.userId,
+      });
+      if (initResult.ran) {
+        const freshContext = buildInitContextFromState(initResult.state);
+        if (freshContext) {
+          effectiveContext = freshContext;
+        }
+        if (initResult.failedSteps.length > 0) {
+          console.warn(
+            `[reception-orchestrator] auto-init 部分步骤失败（${initResult.failedSteps.join(', ')}），继续派发任务`,
+          );
+        }
+      }
+    } catch (err) {
+      console.warn(
+        `[reception-orchestrator] auto-init 失败，跳过初始化继续派发：${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   setSubstate({
     sessionId: input.receptionSessionId,
     substate: SUBSTATES_RECEPTION.ROUTING,
@@ -261,7 +360,7 @@ export async function orchestrateReceptionInput(
   let rewritten = '';
   try {
     const { requestWorkflowLlmCompletion } = await import('../../routes/workflow-llm.js');
-    const contextBlock = input.context ? `\n\n当前工作区上下文摘要：\n${input.context}` : '';
+    const contextBlock = effectiveContext ? `\n\n当前工作区上下文摘要：\n${effectiveContext}` : '';
     rewritten = await requestWorkflowLlmCompletion({
       apiBaseUrl: llmConfig.apiBaseUrl,
       apiKey: llmConfig.apiKey,

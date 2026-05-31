@@ -11,27 +11,100 @@ import {
   type TeamAuditLogRecord,
   type TeamMemberRecord,
   type TeamMessageRecord,
+  type TeamRuntimeLoadResult,
   type TeamRuntimeReadModel,
   type TeamSessionShareRecord,
   type TeamTaskRecord,
   type UpdateTeamTaskInput,
 } from '@openAwork/web-client';
 import { useAuthStore } from '../../../stores/auth/auth.js';
+import {
+  hydrateClarificationStore,
+  hydrateNotificationStore,
+  hydrateTeamRuntimeStores,
+  useTeamNotificationStore,
+  useTeamEventsConnectionStore,
+} from '../../../stores/team/team-events.js';
+import {
+  appendSharedSessionCommentPreview,
+  applySharedSessionPermissionReplyPreview,
+  applySharedSessionQuestionReplyPreview,
+} from './shared-session-local-detail.js';
+import {
+  computeExponentialRetryDelay,
+  formatRecoverableLoadError,
+} from './recoverable-read-model.js';
+import { useRecoverableRetryController } from './use-recoverable-retry.js';
 
-const EMPTY_TEAM_RUNTIME_READ_MODEL: TeamRuntimeReadModel = {
-  auditLogs: [],
-  members: [],
-  messages: [],
-  runtimeTaskGroups: [],
-  sessionShares: [],
-  sharedSessions: [],
-  sessions: [],
-  tasks: [],
-};
+const TEAM_RUNTIME_SNAPSHOT_RETRY_BASE_MS = 2_000;
+const TEAM_RUNTIME_SNAPSHOT_RETRY_MAX_MS = 30_000;
+const SHARED_SESSION_DETAIL_RETRY_BASE_MS = 2_000;
+const SHARED_SESSION_DETAIL_RETRY_MAX_MS = 15_000;
+const SHARED_SESSION_PRESENCE_RETRY_BASE_MS = 5_000;
+const SHARED_SESSION_PRESENCE_RETRY_MAX_MS = 30_000;
 
 export interface TeamActionFeedback {
   message: string;
   tone: 'error' | 'success';
+}
+
+export function computeTeamRuntimeSnapshotRetryDelay(attempt: number): number {
+  return computeExponentialRetryDelay({
+    attempt,
+    baseMs: TEAM_RUNTIME_SNAPSHOT_RETRY_BASE_MS,
+    maxMs: TEAM_RUNTIME_SNAPSHOT_RETRY_MAX_MS,
+  });
+}
+
+export function formatTeamRuntimeLoadError(input: {
+  hasCachedSnapshot: boolean;
+  nextRetryAtMs?: number | null;
+  result: Pick<TeamRuntimeLoadResult, 'errorMessage' | 'retryable'>;
+}): string {
+  return formatRecoverableLoadError({
+    baseMessage: input.result.errorMessage ?? '加载团队运行时快照失败。',
+    hasRetainedData: input.hasCachedSnapshot,
+    nextRetryAtMs: input.nextRetryAtMs,
+    retainedDataLabel: '快照',
+    retryable: input.result.retryable,
+  });
+}
+
+export function computeSharedSessionDetailRetryDelay(attempt: number): number {
+  return computeExponentialRetryDelay({
+    attempt,
+    baseMs: SHARED_SESSION_DETAIL_RETRY_BASE_MS,
+    maxMs: SHARED_SESSION_DETAIL_RETRY_MAX_MS,
+  });
+}
+
+export function formatSharedSessionDetailLoadError(input: {
+  hasCachedDetail: boolean;
+  nextRetryAtMs?: number | null;
+  result: { errorMessage?: string; retryable: boolean };
+}): string {
+  return formatRecoverableLoadError({
+    baseMessage: input.result.errorMessage ?? '加载共享会话详情失败。',
+    hasRetainedData: input.hasCachedDetail,
+    nextRetryAtMs: input.nextRetryAtMs,
+    retainedDataLabel: '详情',
+    retryable: input.result.retryable,
+  });
+}
+
+export function computeSharedSessionPresenceRetryDelay(attempt: number): number {
+  return computeExponentialRetryDelay({
+    attempt,
+    baseMs: SHARED_SESSION_PRESENCE_RETRY_BASE_MS,
+    maxMs: SHARED_SESSION_PRESENCE_RETRY_MAX_MS,
+  });
+}
+
+export function formatSharedSessionPresenceLoadError(input: {
+  errorMessage?: string | null;
+  retryable: boolean;
+}): string {
+  return input.errorMessage?.trim() || '共享会话在线状态暂时无法刷新。';
 }
 
 function sortMembers(members: TeamMemberRecord[]): TeamMemberRecord[] {
@@ -106,6 +179,7 @@ export function useTeamCollaboration(
   const accessToken = useAuthStore((state) => state.accessToken);
   const gatewayUrl = useAuthStore((state) => state.gatewayUrl);
   const [auditLogs, setAuditLogs] = useState<TeamAuditLogRecord[]>([]);
+  const [diagnostics, setDiagnostics] = useState<TeamRuntimeReadModel['diagnostics']>(undefined);
   const [members, setMembers] = useState<TeamMemberRecord[]>([]);
   const [tasks, setTasks] = useState<TeamTaskRecord[]>([]);
   const [messages, setMessages] = useState<TeamMessageRecord[]>([]);
@@ -116,6 +190,7 @@ export function useTeamCollaboration(
       id: string;
       metadataJson: string;
       parentSessionId: string | null;
+      roleLayer: string | null;
       stateStatus: string;
       title: string | null;
       updatedAt: string;
@@ -132,19 +207,52 @@ export function useTeamCollaboration(
   const [runtimeTasksLoading, setRuntimeTasksLoading] = useState(false);
   const [sharedCommentBusy, setSharedCommentBusy] = useState(false);
   const [sharedOperateBusy, setSharedOperateBusy] = useState(false);
-  const [sharedOperateError, setSharedOperateError] = useState<string | null>(null);
+  const [sharedActionError, setSharedActionError] = useState<string | null>(null);
+  const [sharedDetailError, setSharedDetailError] = useState<string | null>(null);
+  const [sharedPresenceError, setSharedPresenceError] = useState<string | null>(null);
+  const [sharedPresenceLastSyncedAt, setSharedPresenceLastSyncedAt] = useState<number | null>(null);
   const [sharedSessionLoading, setSharedSessionLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<TeamActionFeedback | null>(null);
   const selectedSharedSessionIdRef = useRef<string | null>(null);
+  const selectedSharedSessionRef = useRef<SharedSessionDetailRecord | null>(null);
+  const snapshotLoadedRef = useRef(false);
+  const refreshPromiseRef = useRef<Promise<boolean> | null>(null);
+  const {
+    clearRetry: clearRuntimeSnapshotRetry,
+    resetRetry: resetRuntimeSnapshotRetry,
+    scheduleRetry: scheduleRuntimeSnapshotRetry,
+  } = useRecoverableRetryController();
+  const {
+    clearRetry: clearSharedDetailRetry,
+    resetRetry: resetSharedDetailRetry,
+    scheduleRetry: scheduleSharedDetailRetry,
+  } = useRecoverableRetryController();
+  const [sharedDetailReloadTick, setSharedDetailReloadTick] = useState(0);
+  const [sharedPresenceReloadTick, setSharedPresenceReloadTick] = useState(0);
+  const {
+    clearRetry: clearSharedPresenceRetry,
+    resetRetry: resetSharedPresenceRetry,
+    scheduleRetry: scheduleSharedPresenceRetry,
+    nextRetryAtMs: sharedPresenceNextRetryAt,
+  } = useRecoverableRetryController();
+  const teamEventsRecoveredAt = useTeamEventsConnectionStore((state) => state.lastRecoveredAt);
 
   const client = useMemo(() => createTeamClient(gatewayUrl), [gatewayUrl]);
+  const selectedSharedSessionKey = selectedSharedSession?.share.sessionId ?? null;
+  const triggerSharedPresenceReload = useCallback(() => {
+    setSharedPresenceReloadTick((tick) => tick + 1);
+  }, []);
 
   useEffect(() => {
     selectedSharedSessionIdRef.current = selectedSharedSessionId;
   }, [selectedSharedSessionId]);
+
+  useEffect(() => {
+    selectedSharedSessionRef.current = selectedSharedSession;
+  }, [selectedSharedSession]);
 
   const commitSelectedSharedSessionIfCurrent = useCallback(
     (sessionId: string, detail: SharedSessionDetailRecord | null) => {
@@ -156,77 +264,250 @@ export function useTeamCollaboration(
     [],
   );
 
+  const patchSelectedSharedSessionIfCurrent = useCallback(
+    (
+      sessionId: string,
+      updater: (current: SharedSessionDetailRecord | null) => SharedSessionDetailRecord | null,
+    ) => {
+      if (selectedSharedSessionIdRef.current !== sessionId) {
+        return;
+      }
+      setSelectedSharedSession((current) => updater(current));
+    },
+    [],
+  );
+
   const loadSelectedSharedSessionDetail = useCallback(
     async (sessionId: string) => {
       if (!accessToken) {
-        return null;
+        return { ok: false, retryable: false, errorMessage: '未登录，无法读取共享会话详情。' };
       }
-      return client.getSharedSessionDetail(accessToken, sessionId);
+      return client.getSharedSessionDetailResult(accessToken, sessionId);
     },
     [accessToken, client],
   );
 
-  const loadSnapshot = useCallback(async (): Promise<TeamRuntimeReadModel> => {
-    if (!accessToken || !enabled) {
-      return EMPTY_TEAM_RUNTIME_READ_MODEL;
-    }
-
-    const runtime = await client.getRuntime(
-      accessToken,
-      teamWorkspaceId ? { teamWorkspaceId } : undefined,
-    );
-
+  const normalizeSnapshot = useCallback((runtime: TeamRuntimeReadModel): TeamRuntimeReadModel => {
     return {
       auditLogs: sortAuditLogs(runtime.auditLogs),
+      clarifications: runtime.clarifications,
+      diagnostics: runtime.diagnostics,
+      handoffs: runtime.handoffs,
       members: sortMembers(runtime.members),
       messages: sortMessages(runtime.messages),
+      notifications: runtime.notifications,
       runtimeTaskGroups: runtime.runtimeTaskGroups,
       sessionShares: sortSessionShares(runtime.sessionShares),
       sharedSessions: sortSharedSessions(runtime.sharedSessions),
       sessions: runtime.sessions,
       tasks: sortTasks(runtime.tasks),
     };
-  }, [accessToken, client, enabled, teamWorkspaceId]);
+  }, []);
+
+  const applySnapshot = useCallback((runtime: TeamRuntimeReadModel) => {
+    const snapshot = normalizeSnapshot(runtime);
+    setAuditLogs(snapshot.auditLogs);
+    setDiagnostics(snapshot.diagnostics);
+    setMembers(snapshot.members);
+    setTasks(snapshot.tasks);
+    setMessages(snapshot.messages);
+    setRuntimeTaskGroups(snapshot.runtimeTaskGroups);
+    setSessionShares(snapshot.sessionShares);
+    setSharedSessions(snapshot.sharedSessions);
+    setSessions(snapshot.sessions);
+    hydrateNotificationStore(snapshot.notifications);
+    hydrateClarificationStore(snapshot.clarifications);
+    hydrateTeamRuntimeStores({
+      handoffs: snapshot.handoffs,
+      sessions: snapshot.sessions,
+    });
+    snapshotLoadedRef.current = true;
+  }, [normalizeSnapshot]);
 
   const refresh = useCallback(async () => {
-    if (!accessToken || !enabled) {
-      setAuditLogs([]);
-      setMembers([]);
-      setTasks([]);
-      setMessages([]);
-      setRuntimeTaskGroups([]);
-      setSessionShares([]);
-      setSharedSessions([]);
-      setSessions([]);
-      setSelectedSharedSessionId(null);
-      setSelectedSharedSession(null);
-      setRuntimeTasks([]);
+    if (refreshPromiseRef.current) {
+      return refreshPromiseRef.current;
+    }
+
+    const refreshPromise = (async () => {
+      clearRuntimeSnapshotRetry();
+
+      if (!accessToken || !enabled) {
+        snapshotLoadedRef.current = false;
+        resetRuntimeSnapshotRetry();
+        setAuditLogs([]);
+        setDiagnostics(undefined);
+        setMembers([]);
+        setTasks([]);
+        setMessages([]);
+        setRuntimeTaskGroups([]);
+        setSessionShares([]);
+        setSharedSessions([]);
+        setSessions([]);
+        setSelectedSharedSessionId(null);
+        setSelectedSharedSession(null);
+        setRuntimeTasks([]);
+        useTeamNotificationStore.getState().clear();
+        hydrateClarificationStore([]);
+        hydrateTeamRuntimeStores({ handoffs: [], sessions: [] });
+        setLoading(false);
+        setError(null);
+        return true;
+      }
+
+      const hasCachedSnapshot = snapshotLoadedRef.current;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        resetRuntimeSnapshotRetry();
+        setLoading(false);
+        setError(
+          formatTeamRuntimeLoadError({
+            hasCachedSnapshot,
+            result: {
+              errorMessage: '当前网络离线，团队运行时快照暂时不可用。',
+              retryable: true,
+            },
+          }),
+        );
+        return false;
+      }
+
+      setLoading(!hasCachedSnapshot);
+      setError(null);
+      const result = await client.getRuntimeResult(
+        accessToken,
+        teamWorkspaceId ? { teamWorkspaceId } : undefined,
+      );
+
+      if (result.ok && result.runtime) {
+        resetRuntimeSnapshotRetry();
+        applySnapshot(result.runtime);
+        setLoading(false);
+        setError(null);
+        return true;
+      }
+
+      const nextRetryAtMs = scheduleRuntimeSnapshotRetry({
+        computeDelay: computeTeamRuntimeSnapshotRetryDelay,
+        onRetry: () => {
+          void refresh();
+        },
+        retryable: result.retryable,
+      });
       setLoading(false);
+      setError(
+        formatTeamRuntimeLoadError({
+          hasCachedSnapshot,
+          nextRetryAtMs,
+          result,
+        }),
+      );
+      return false;
+    })();
+
+    refreshPromiseRef.current = refreshPromise;
+    try {
+      return await refreshPromise;
+    } finally {
+      if (refreshPromiseRef.current === refreshPromise) {
+        refreshPromiseRef.current = null;
+      }
+    }
+  }, [
+    accessToken,
+    applySnapshot,
+    client,
+    enabled,
+    clearRuntimeSnapshotRetry,
+    resetRuntimeSnapshotRetry,
+    scheduleRuntimeSnapshotRetry,
+    teamWorkspaceId,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      clearRuntimeSnapshotRetry();
+    };
+  }, [clearRuntimeSnapshotRetry]);
+
+  useEffect(() => {
+    if (!enabled || typeof window === 'undefined') {
       return;
     }
 
-    setLoading(true);
-    setError(null);
-    try {
-      const snapshot = await loadSnapshot();
-      setAuditLogs(snapshot.auditLogs);
-      setMembers(snapshot.members);
-      setTasks(snapshot.tasks);
-      setMessages(snapshot.messages);
-      setRuntimeTaskGroups(snapshot.runtimeTaskGroups);
-      setSessionShares(snapshot.sessionShares);
-      setSharedSessions(snapshot.sharedSessions);
-      setSessions(snapshot.sessions);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '加载团队协作数据失败');
-    } finally {
+    const handleOnline = () => {
+      resetRuntimeSnapshotRetry();
+      resetSharedDetailRetry();
+      resetSharedPresenceRetry();
+      setSharedDetailReloadTick((tick) => tick + 1);
+      triggerSharedPresenceReload();
+      void refresh();
+    };
+    const handleOffline = () => {
       setLoading(false);
-    }
-  }, [accessToken, enabled, loadSnapshot]);
+      setError(
+        formatTeamRuntimeLoadError({
+          hasCachedSnapshot: snapshotLoadedRef.current,
+          result: {
+            errorMessage: '当前网络离线，团队运行时快照暂时不可用。',
+            retryable: true,
+          },
+        }),
+      );
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [
+    enabled,
+    refresh,
+    resetRuntimeSnapshotRetry,
+    resetSharedDetailRetry,
+    resetSharedPresenceRetry,
+    triggerSharedPresenceReload,
+  ]);
+
+  const refreshAndResolveFeedback = useCallback(
+    async (successMessage: string) => {
+      const refreshed = await refresh();
+      setFeedback({
+        message: refreshed
+          ? successMessage
+          : `${successMessage}，但最新运行时快照暂未刷新，系统会自动重试。`,
+        tone: 'success',
+      });
+      return true;
+    },
+    [refresh],
+  );
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (!teamEventsRecoveredAt || !accessToken || !enabled) {
+      return;
+    }
+    resetRuntimeSnapshotRetry();
+    resetSharedDetailRetry();
+    resetSharedPresenceRetry();
+    setSharedDetailReloadTick((tick) => tick + 1);
+    triggerSharedPresenceReload();
+    void refresh();
+  }, [
+    accessToken,
+    enabled,
+    refresh,
+    resetRuntimeSnapshotRetry,
+    resetSharedDetailRetry,
+    resetSharedPresenceRetry,
+    teamEventsRecoveredAt,
+    triggerSharedPresenceReload,
+  ]);
 
   const runMutation = useCallback(
     async (action: () => Promise<void>, successMessage: string) => {
@@ -235,17 +516,7 @@ export function useTeamCollaboration(
       setFeedback(null);
       try {
         await action();
-        const snapshot = await loadSnapshot();
-        setAuditLogs(snapshot.auditLogs);
-        setMembers(snapshot.members);
-        setTasks(snapshot.tasks);
-        setMessages(snapshot.messages);
-        setRuntimeTaskGroups(snapshot.runtimeTaskGroups);
-        setSessionShares(snapshot.sessionShares);
-        setSharedSessions(snapshot.sharedSessions);
-        setSessions(snapshot.sessions);
-        setFeedback({ message: successMessage, tone: 'success' });
-        return true;
+        return await refreshAndResolveFeedback(successMessage);
       } catch (reason) {
         const message = reason instanceof Error ? reason.message : '团队协作操作失败';
         setError(message);
@@ -255,7 +526,7 @@ export function useTeamCollaboration(
         setBusy(false);
       }
     },
-    [loadSnapshot],
+    [refreshAndResolveFeedback],
   );
 
   useEffect(() => {
@@ -277,44 +548,85 @@ export function useTeamCollaboration(
 
   useEffect(() => {
     if (!accessToken || !selectedSharedSessionId) {
+      resetSharedDetailRetry();
+      resetSharedPresenceRetry();
       setSelectedSharedSession(null);
       setSharedSessionLoading(false);
-      setSharedOperateError(null);
+      setSharedActionError(null);
+      setSharedDetailError(null);
+      setSharedPresenceError(null);
+      setSharedPresenceLastSyncedAt(null);
       setRuntimeTasks([]);
       setRuntimeTasksLoading(false);
       return;
     }
 
     let cancelled = false;
-    setSelectedSharedSession(null);
-    setSharedSessionLoading(true);
+    clearSharedDetailRetry();
+    clearSharedPresenceRetry();
+    setSelectedSharedSession((current) =>
+      current && current.share.sessionId === selectedSharedSessionId ? current : null,
+    );
+    const hasCachedDetail = Boolean(
+      selectedSharedSessionRef.current &&
+        selectedSharedSessionRef.current.share.sessionId === selectedSharedSessionId,
+    );
+    if (!hasCachedDetail) {
+      setSharedPresenceError(null);
+      setSharedPresenceLastSyncedAt(null);
+    }
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      setSharedSessionLoading(false);
+      setSharedDetailError(
+        formatSharedSessionDetailLoadError({
+          hasCachedDetail,
+          result: {
+            errorMessage: '当前网络离线，共享会话详情暂时不可用。',
+            retryable: true,
+          },
+        }),
+      );
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setSharedSessionLoading(!hasCachedDetail);
+    setSharedDetailError(null);
     loadSelectedSharedSessionDetail(selectedSharedSessionId)
-      .then(async (detail) => {
-        if (!detail) {
+      .then(async (result) => {
+        if (!result.ok || !result.detail) {
+          const nextRetryAtMs = scheduleSharedDetailRetry({
+            computeDelay: computeSharedSessionDetailRetryDelay,
+            onRetry: () => {
+              setSharedDetailReloadTick((tick) => tick + 1);
+            },
+            retryable: result.retryable,
+          });
+          if (!cancelled) {
+            setSharedDetailError(
+              formatSharedSessionDetailLoadError({
+                hasCachedDetail,
+                nextRetryAtMs,
+                result,
+              }),
+            );
+            setSharedSessionLoading(false);
+          }
           return;
         }
 
-        let nextDetail = detail;
-        try {
-          const presence = await client.touchSharedSessionPresence(
-            accessToken,
-            selectedSharedSessionId,
-          );
-          nextDetail = { ...detail, presence };
-        } catch (_error) {
-          nextDetail = detail;
-        }
-
+        resetSharedDetailRetry();
         if (!cancelled) {
-          commitSelectedSharedSessionIfCurrent(selectedSharedSessionId, nextDetail);
-          setSharedOperateError(null);
+          commitSelectedSharedSessionIfCurrent(selectedSharedSessionId, result.detail);
+          setSharedDetailError(null);
+          triggerSharedPresenceReload();
         }
       })
       .catch((reason) => {
         if (!cancelled) {
           const message = reason instanceof Error ? reason.message : '加载共享会话失败';
-          setError(message);
-          commitSelectedSharedSessionIfCurrent(selectedSharedSessionId, null);
+          setSharedDetailError(message);
         }
       })
       .finally(() => {
@@ -331,7 +643,14 @@ export function useTeamCollaboration(
     commitSelectedSharedSessionIfCurrent,
     loadSelectedSharedSessionDetail,
     selectedSharedSessionId,
+    sharedDetailReloadTick,
+    clearSharedPresenceRetry,
     client,
+    clearSharedDetailRetry,
+    resetSharedDetailRetry,
+    resetSharedPresenceRetry,
+    scheduleSharedDetailRetry,
+    triggerSharedPresenceReload,
   ]);
 
   useEffect(() => {
@@ -359,26 +678,51 @@ export function useTeamCollaboration(
   }, [accessToken, selectedSharedSessionId, runtimeTaskGroups]);
 
   useEffect(() => {
-    if (!accessToken || !selectedSharedSessionId) {
+    if (!accessToken || !selectedSharedSessionKey) {
+      resetSharedPresenceRetry();
       return;
     }
 
     let cancelled = false;
     const syncPresence = async () => {
-      try {
-        const presence = await client.touchSharedSessionPresence(
-          accessToken,
-          selectedSharedSessionId,
-        );
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
         if (!cancelled) {
-          setSelectedSharedSession((current) =>
-            current && current.share.sessionId === selectedSharedSessionId
-              ? { ...current, presence }
-              : current,
-          );
+          setSharedPresenceError('共享会话在线状态暂时无法刷新。');
+          resetSharedPresenceRetry();
         }
-      } catch (_error) {
         return;
+      }
+      const result = await client.touchSharedSessionPresenceResult(
+        accessToken,
+        selectedSharedSessionKey,
+      );
+      if (!result.ok || !result.presence) {
+        if (!cancelled) {
+          setSharedPresenceError(
+            formatSharedSessionPresenceLoadError({
+              errorMessage: result.errorMessage,
+              retryable: result.retryable,
+            }),
+          );
+          scheduleSharedPresenceRetry({
+            computeDelay: computeSharedSessionPresenceRetryDelay,
+            onRetry: () => {
+              void syncPresence();
+            },
+            retryable: result.retryable,
+          });
+        }
+        return;
+      }
+      if (!cancelled) {
+        resetSharedPresenceRetry();
+        setSharedPresenceError(null);
+        setSharedPresenceLastSyncedAt(Date.now());
+        setSelectedSharedSession((current) =>
+          current && current.share.sessionId === selectedSharedSessionKey
+            ? { ...current, presence: result.presence ?? [] }
+            : current,
+        );
       }
     };
 
@@ -389,9 +733,18 @@ export function useTeamCollaboration(
 
     return () => {
       cancelled = true;
+      clearSharedPresenceRetry();
       window.clearInterval(intervalId);
     };
-  }, [accessToken, selectedSharedSessionId, client]);
+  }, [
+    accessToken,
+    clearSharedPresenceRetry,
+    client,
+    resetSharedPresenceRetry,
+    scheduleSharedPresenceRetry,
+    selectedSharedSessionKey,
+    sharedPresenceReloadTick,
+  ]);
 
   const createSharedSessionComment = useCallback(
     async (sessionId: string, input: { content: string }) => {
@@ -400,20 +753,20 @@ export function useTeamCollaboration(
       }
 
       setSharedCommentBusy(true);
-      setError(null);
+      setSharedActionError(null);
       setFeedback(null);
       try {
-        await client.createSharedSessionComment(accessToken, sessionId, input);
-        const refreshedDetail = await loadSelectedSharedSessionDetail(sessionId);
-        commitSelectedSharedSessionIfCurrent(sessionId, refreshedDetail);
-        const snapshot = await loadSnapshot();
-        setAuditLogs(snapshot.auditLogs);
-        setSharedSessions(snapshot.sharedSessions);
-        setFeedback({ message: '已发送共享评论', tone: 'success' });
-        return true;
+        const result = await client.createSharedSessionComment(accessToken, sessionId, input);
+        patchSelectedSharedSessionIfCurrent(sessionId, (current) =>
+          appendSharedSessionCommentPreview(current, { comment: result.comment, sessionId }),
+        );
+        if (result.detail) {
+          commitSelectedSharedSessionIfCurrent(sessionId, result.detail);
+        }
+        return await refreshAndResolveFeedback('已发送共享评论');
       } catch (reason) {
         const message = reason instanceof Error ? reason.message : '发送共享评论失败';
-        setError(message);
+        setSharedActionError(message);
         setFeedback({ message, tone: 'error' });
         return false;
       } finally {
@@ -423,9 +776,9 @@ export function useTeamCollaboration(
     [
       accessToken,
       commitSelectedSharedSessionIfCurrent,
-      loadSelectedSharedSessionDetail,
-      loadSnapshot,
       client,
+      patchSelectedSharedSessionIfCurrent,
+      refreshAndResolveFeedback,
     ],
   );
 
@@ -443,20 +796,23 @@ export function useTeamCollaboration(
       }
 
       setSharedOperateBusy(true);
-      setSharedOperateError(null);
+      setSharedActionError(null);
       setFeedback(null);
       try {
-        await client.replySharedSessionPermission(accessToken, sessionId, input);
-        const refreshedDetail = await loadSelectedSharedSessionDetail(sessionId);
-        commitSelectedSharedSessionIfCurrent(sessionId, refreshedDetail);
-        const snapshot = await loadSnapshot();
-        setAuditLogs(snapshot.auditLogs);
-        setSharedSessions(snapshot.sharedSessions);
-        setFeedback({ message: '已处理共享权限请求', tone: 'success' });
-        return true;
+        const result = await client.replySharedSessionPermission(accessToken, sessionId, input);
+        patchSelectedSharedSessionIfCurrent(sessionId, (current) =>
+          applySharedSessionPermissionReplyPreview(current, {
+            requestId: input.requestId,
+            sessionId,
+          }),
+        );
+        if (result.detail) {
+          commitSelectedSharedSessionIfCurrent(sessionId, result.detail);
+        }
+        return await refreshAndResolveFeedback('已处理共享权限请求');
       } catch (reason) {
         const message = reason instanceof Error ? reason.message : '处理共享权限请求失败';
-        setSharedOperateError(message);
+        setSharedActionError(message);
         setFeedback({ message, tone: 'error' });
         return false;
       } finally {
@@ -466,9 +822,9 @@ export function useTeamCollaboration(
     [
       accessToken,
       commitSelectedSharedSessionIfCurrent,
-      loadSelectedSharedSessionDetail,
-      loadSnapshot,
       client,
+      patchSelectedSharedSessionIfCurrent,
+      refreshAndResolveFeedback,
     ],
   );
 
@@ -482,20 +838,23 @@ export function useTeamCollaboration(
       }
 
       setSharedOperateBusy(true);
-      setSharedOperateError(null);
+      setSharedActionError(null);
       setFeedback(null);
       try {
-        await client.replySharedSessionQuestion(accessToken, sessionId, input);
-        const refreshedDetail = await loadSelectedSharedSessionDetail(sessionId);
-        commitSelectedSharedSessionIfCurrent(sessionId, refreshedDetail);
-        const snapshot = await loadSnapshot();
-        setAuditLogs(snapshot.auditLogs);
-        setSharedSessions(snapshot.sharedSessions);
-        setFeedback({ message: '已处理共享提问', tone: 'success' });
-        return true;
+        const result = await client.replySharedSessionQuestion(accessToken, sessionId, input);
+        patchSelectedSharedSessionIfCurrent(sessionId, (current) =>
+          applySharedSessionQuestionReplyPreview(current, {
+            requestId: input.requestId,
+            sessionId,
+          }),
+        );
+        if (result.detail) {
+          commitSelectedSharedSessionIfCurrent(sessionId, result.detail);
+        }
+        return await refreshAndResolveFeedback('已处理共享提问');
       } catch (reason) {
         const message = reason instanceof Error ? reason.message : '处理共享提问失败';
-        setSharedOperateError(message);
+        setSharedActionError(message);
         setFeedback({ message, tone: 'error' });
         return false;
       } finally {
@@ -505,9 +864,9 @@ export function useTeamCollaboration(
     [
       accessToken,
       commitSelectedSharedSessionIfCurrent,
-      loadSelectedSharedSessionDetail,
-      loadSnapshot,
       client,
+      patchSelectedSharedSessionIfCurrent,
+      refreshAndResolveFeedback,
     ],
   );
 
@@ -625,7 +984,17 @@ export function useTeamCollaboration(
     [accessToken, client, runMutation],
   );
 
+  const applyRuntimeDiagnosticsPreview = useCallback(
+    (diagnosticsPreview: TeamRuntimeReadModel['diagnostics']) => {
+      setDiagnostics(diagnosticsPreview);
+    },
+    [],
+  );
+
+  const sharedOperateError = sharedActionError ?? sharedDetailError;
+
   return {
+    applyRuntimeDiagnosticsPreview,
     auditLogs,
     busy,
     createMember,
@@ -635,6 +1004,7 @@ export function useTeamCollaboration(
     createTask,
     deleteSession,
     deleteSessionShare,
+    diagnostics,
     error,
     feedback,
     loading,
@@ -653,6 +1023,9 @@ export function useTeamCollaboration(
     sharedCommentBusy,
     sharedOperateBusy,
     sharedOperateError,
+    sharedPresenceError,
+    sharedPresenceLastSyncedAt,
+    sharedPresenceNextRetryAt,
     sharedSessionLoading,
     sharedSessions,
     sessions,

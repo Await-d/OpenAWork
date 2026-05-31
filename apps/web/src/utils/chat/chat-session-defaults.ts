@@ -1,4 +1,4 @@
-import { createSettingsClient } from '@openAwork/web-client';
+import { createSettingsClient, type SettingsProvidersLoadResult } from '@openAwork/web-client';
 import { DEFAULT_IMAGE_GENERATION_SIZE, normalizeImageGenerationSize } from '@openAwork/shared';
 import type { ReasoningEffort } from '../../components/conversation-runtime/messages/support.js';
 
@@ -70,43 +70,82 @@ export async function loadSavedChatSessionDefaults(
   imageDefaults: SavedChatImageDefaults;
   providers: ChatSettingsProvider[];
 }> {
-  const data = (await createSettingsClient(gatewayUrl).getProviders(token, {
+  const result = await loadSavedChatSessionDefaultsResult(gatewayUrl, token);
+  if (result.ok === false) {
+    throw new Error(result.errorMessage ?? '加载 Provider 列表失败');
+  }
+  return result.data;
+}
+
+export async function loadSavedChatSessionDefaultsResult(
+  gatewayUrl: string,
+  token: string,
+): Promise<
+  | {
+      data: {
+        defaults: SavedChatDefaults;
+        imageDefaults: SavedChatImageDefaults;
+        providers: ChatSettingsProvider[];
+      };
+      ok: true;
+      retryable: false;
+    }
+  | {
+      errorMessage?: string;
+      ok: false;
+      retryable: boolean;
+      status?: number;
+    }
+> {
+  const result = (await createSettingsClient(gatewayUrl).getProvidersResult(token, {
     enabledOnly: true,
-  })) as SettingsProvidersResponse;
+  })) as SettingsProvidersLoadResult;
+  if (!result.ok || !result.providers) {
+    return {
+      ok: false,
+      retryable: result.retryable,
+      errorMessage: result.errorMessage,
+      ...(typeof result.status === 'number' ? { status: result.status } : {}),
+    };
+  }
+  const data = result.providers as SettingsProvidersResponse;
   const providers = (data.providers ?? [])
     .filter((provider) => provider.enabled)
     .map((provider) => ({
       ...provider,
       defaultModels: (provider.defaultModels ?? []).filter((model) => model.enabled),
     }));
-
   return {
-    defaults: {
-      providerId: data.activeSelection?.chat?.providerId?.trim() ?? '',
-      modelId: data.activeSelection?.chat?.modelId?.trim() ?? '',
-      thinkingEnabled: data.defaultThinking?.chat?.enabled === true,
-      reasoningEffort: normalizeReasoningEffort(data.defaultThinking?.chat?.effort),
+    ok: true,
+    retryable: false,
+    data: {
+      defaults: {
+        providerId: data.activeSelection?.chat?.providerId?.trim() ?? '',
+        modelId: data.activeSelection?.chat?.modelId?.trim() ?? '',
+        thinkingEnabled: data.defaultThinking?.chat?.enabled === true,
+        reasoningEffort: normalizeReasoningEffort(data.defaultThinking?.chat?.effort),
+      },
+      imageDefaults: {
+        providerId: data.activeSelection?.image?.providerId?.trim() ?? '',
+        modelId: data.activeSelection?.image?.modelId?.trim() ?? '',
+        size: normalizeImageGenerationSize(
+          data.imageGenerationDefaults?.size,
+          DEFAULT_IMAGE_GENERATION_SIZE,
+        ),
+        quality:
+          data.imageGenerationDefaults?.quality === 'low' ||
+          data.imageGenerationDefaults?.quality === 'high'
+            ? data.imageGenerationDefaults.quality
+            : 'medium',
+        outputFormat:
+          data.imageGenerationDefaults?.outputFormat === 'jpeg' ||
+          data.imageGenerationDefaults?.outputFormat === 'webp'
+            ? data.imageGenerationDefaults.outputFormat
+            : 'png',
+        background: data.imageGenerationDefaults?.background === 'opaque' ? 'opaque' : 'auto',
+      },
+      providers,
     },
-    imageDefaults: {
-      providerId: data.activeSelection?.image?.providerId?.trim() ?? '',
-      modelId: data.activeSelection?.image?.modelId?.trim() ?? '',
-      size: normalizeImageGenerationSize(
-        data.imageGenerationDefaults?.size,
-        DEFAULT_IMAGE_GENERATION_SIZE,
-      ),
-      quality:
-        data.imageGenerationDefaults?.quality === 'low' ||
-        data.imageGenerationDefaults?.quality === 'high'
-          ? data.imageGenerationDefaults.quality
-          : 'medium',
-      outputFormat:
-        data.imageGenerationDefaults?.outputFormat === 'jpeg' ||
-        data.imageGenerationDefaults?.outputFormat === 'webp'
-          ? data.imageGenerationDefaults.outputFormat
-          : 'png',
-      background: data.imageGenerationDefaults?.background === 'opaque' ? 'opaque' : 'auto',
-    },
-    providers,
   };
 }
 

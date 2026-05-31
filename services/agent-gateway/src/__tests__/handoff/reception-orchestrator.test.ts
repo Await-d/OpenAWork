@@ -99,4 +99,42 @@ describe('orchestrateReceptionInput', () => {
     // 如果 session 不存在或 LLM 不可用，会 catch 并返回
     expect(result.triggered).toBe(false);
   }, 10_000);
+
+  it('并发编排同一 reception 会话时只创建一条 handoff（in-flight 守卫，防并行 pm1 链路）', async () => {
+    // 无 LLM 配置：body 在 await resolveAuxiliaryLlmConfig 后立刻返回 no-llm-config。
+    // 第一次调用同步取得 in-flight 守卫后在该 await 处让出事件循环；第二次调用同步
+    // 跑到守卫检查时发现已被占用，确定性地返回 orchestration-in-flight——不会越过
+    // active-handoff 的 TOCTOU 窗口再创建第二条 reception→pm1 handoff。
+    delete process.env['OPENAI_API_KEY'];
+    delete process.env['OPENAI_API_BASE_URL'];
+    delete process.env['ANTHROPIC_API_KEY'];
+    delete process.env['LLM_API_KEY'];
+    delete process.env['LLM_API_BASE_URL'];
+    delete process.env['AUXILIARY_LLM_API_KEY'];
+    delete process.env['AUXILIARY_LLM_API_BASE_URL'];
+
+    const [first, second] = await Promise.all([
+      orchestrator.orchestrateReceptionInput({
+        userId: USER_ID,
+        receptionSessionId: SESSION_ID,
+        userIntent: '帮我重构这个后端模块',
+        persistMessages: false,
+      }),
+      orchestrator.orchestrateReceptionInput({
+        userId: USER_ID,
+        receptionSessionId: SESSION_ID,
+        userIntent: '帮我重构这个后端模块',
+        persistMessages: false,
+      }),
+    ]);
+
+    const inFlightRejections = [first, second].filter(
+      (r) => r.reason === 'orchestration-in-flight',
+    );
+    // 恰好一个被 in-flight 守卫挡下（另一个进入 body，因无 LLM 配置返回 no-llm-config）。
+    expect(inFlightRejections).toHaveLength(1);
+    // 两者都没真正创建 handoff（无 LLM 配置），但关键不变量是：第二个被守卫确定性挡下，
+    // 绝不会与第一个并行越过 active-handoff 检查去 createHandoff。
+    expect([first, second].some((r) => r.triggered)).toBe(false);
+  }, 10_000);
 });

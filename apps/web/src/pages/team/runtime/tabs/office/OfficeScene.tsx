@@ -177,7 +177,7 @@ export function OfficeSidebar({
             style={{
               padding: '10px 12px',
               borderRadius: 10,
-              background: 'color-mix(in oklch, var(--bg-overlay) 94%, var(--bg-base)',
+              background: 'color-mix(in oklch, var(--bg-overlay) 94%, var(--bg-base))',
               border: '1px solid var(--border-default)',
               boxShadow: 'var(--shadow-sm)',
               display: 'grid',
@@ -243,10 +243,10 @@ export function OfficeSidebar({
                         ? '1px solid color-mix(in oklch, var(--success) 40%, transparent)'
                         : '1px solid color-mix(in oklch, var(--warning) 40%, transparent)',
                     background: isSessionPaused
-                      ? 'color-mix(in oklch, var(--bg-overlay) 88%, var(--bg-base)'
+                      ? 'color-mix(in oklch, var(--bg-overlay) 88%, var(--bg-base))'
                       : agentPaused.has(selectedAgent.id)
-                        ? 'color-mix(in oklch, var(--success) 10%, var(--bg-base)'
-                        : 'color-mix(in oklch, var(--warning) 10%, var(--bg-base)',
+                        ? 'color-mix(in oklch, var(--success) 10%, var(--bg-base))'
+                        : 'color-mix(in oklch, var(--warning) 10%, var(--bg-base))',
                     color: isSessionPaused
                       ? 'var(--fg-muted)'
                       : agentPaused.has(selectedAgent.id)
