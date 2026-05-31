@@ -25,9 +25,41 @@ import {
   normalizeTeamWorkspaceDefaultRoster,
   parseTeamWorkspaceDefaultRosterJson,
 } from '../team/team-default-roster-store.js';
+import { getAllLatencyStats } from '../handoff/bus/latency-monitor.js';
+import { getTeamEventsBusStats } from '../handoff/bus/team-events-bus.js';
 import { mergeRuntimeTaskGroups } from '../team/team-runtime-task-groups.js';
 import { listSharedSessionsForRecipient } from '../session/session-shared-access.js';
-import { listTeamAuditLogs } from '../team/team-audit-store.js';
+import { listTeamAuditLogs, logTeamAudit } from '../team/team-audit-store.js';
+import {
+  SESSION_RUNTIME_THREAD_HEARTBEAT_MS,
+  SESSION_RUNTIME_THREAD_STALE_AFTER_MS,
+} from '../session/session-runtime-thread-store.js';
+import {
+  getTeamRuntimeIncidentSummary,
+  listTeamRuntimeIncidents,
+} from '../team/team-runtime-diagnostics-store.js';
+import {
+  listActiveTeamRuntimeAlerts,
+  reconcileTeamRuntimeAlerts,
+} from '../team/team-runtime-alert-store.js';
+import {
+  consumeExpiredSuppressedAlertControls,
+  clearTeamRuntimeAlertControl,
+  listTeamRuntimeAlertControls,
+  upsertTeamRuntimeAlertControl,
+} from '../team/team-runtime-alert-control-store.js';
+import {
+  getTeamRuntimeRemediationSummary,
+  isTeamRuntimeRemediationCode,
+  runTeamRuntimeRemediation,
+  type TeamRuntimeRemediationCode,
+} from '../team/team-runtime-remediation-policy.js';
+import { listPm2HandoffsPendingQualityReview } from '../handoff/runner/pm2-quality-review-reconciler.js';
+import { deriveTeamRuntimeAlerts, deriveTeamRuntimeHealth } from '../team/team-failure-policy.js';
+import {
+  isTeamRuntimeTelemetryEnabled,
+  trackTeamRuntimeHealth,
+} from '../team/team-runtime-telemetry.js';
 import {
   buildMergedSessionTaskProjection,
   extractParentSessionIdFromMetadata,
@@ -37,10 +69,18 @@ import {
 } from './sessions.js';
 import { validateImportedMessagesPayload } from './session-route-helpers.js';
 import { createTeamSession } from '../handoff/bus/team-session-create.js';
+import {
+  getEffectiveReviewDispositionFromPayloadJson,
+  isHandledReviewFailurePayloadJson,
+  isRecoverableFailedHandoff,
+} from '../handoff/store/handoff-store.js';
 import { teamCrudRoutes } from './team-crud.js';
 
 const TEAM_MEMBER_SPECIALTY_VALUES = Array.from(
-  new Set(DEFAULT_FIXED_TEAM_MEMBER_SLOTS.map((slot) => slot.specialty)),
+  new Set<TeamMemberSpecialty>([
+    ...DEFAULT_FIXED_TEAM_MEMBER_SLOTS.map((slot) => slot.specialty),
+    'custom',
+  ]),
 ) as [TeamMemberSpecialty, ...TeamMemberSpecialty[]];
 
 const teamMemberSlotSchema = z.object({
@@ -51,6 +91,20 @@ const teamMemberSlotSchema = z.object({
   personaKey: z.string().min(1).max(160),
   toolsets: z.array(z.string().min(1).max(80)).max(20),
   required: z.boolean(),
+  // 可选 per-member 模型绑定（智能分配模型功能；老数据无此字段，向后兼容）。
+  providerId: z.string().min(1).max(200).optional(),
+  modelId: z.string().min(1).max(200).optional(),
+  variant: z.string().min(1).max(80).optional(),
+  // 自定义角色字段（specialty === 'custom'）。
+  custom: z.boolean().optional(),
+  systemPrompt: z.string().max(8000).optional(),
+  // 模板初始能力绑定（skills / mcp）。
+  skillIds: z.array(z.string().min(1).max(160)).max(50).optional(),
+  mcpServerIds: z.array(z.string().min(1).max(160)).max(50).optional(),
+  // 路由关键词（上游派发动态识别成员擅长领域；自定义角色尤其需要）。
+  routingKeywords: z.array(z.string().min(1).max(160)).max(50).optional(),
+  // 派发优先级（同分排序权重）。
+  dispatchPriority: z.enum(['high', 'normal', 'low']).optional(),
 });
 
 const createWorkspaceSchema = z.object({
@@ -58,7 +112,7 @@ const createWorkspaceSchema = z.object({
   description: z.string().nullable().optional(),
   visibility: z.enum(['open', 'closed', 'private']).default('private'),
   defaultWorkingRoot: z.string().min(1).nullable().optional(),
-  defaultTeamRoster: z.array(teamMemberSlotSchema).optional(),
+  defaultTeamRoster: z.array(teamMemberSlotSchema).max(40).optional(),
 });
 
 const updateWorkspaceSchema = z
@@ -67,7 +121,7 @@ const updateWorkspaceSchema = z
     description: z.string().nullable().optional(),
     visibility: z.enum(['open', 'closed', 'private']).optional(),
     defaultWorkingRoot: z.string().min(1).nullable().optional(),
-    defaultTeamRoster: z.array(teamMemberSlotSchema).optional(),
+    defaultTeamRoster: z.array(teamMemberSlotSchema).max(40).optional(),
   })
   .refine(
     (input) =>
@@ -77,13 +131,13 @@ const updateWorkspaceSchema = z
       input.defaultWorkingRoot !== undefined ||
       input.defaultTeamRoster !== undefined,
     {
-      message: 'At least one field is required',
+      message: '至少需要提供一个可更新字段。',
     },
   );
 
 const createThreadSchema = z.object({
   metadata: z.record(z.unknown()).optional().default({}),
-  memberSlots: z.array(teamMemberSlotSchema).optional(),
+  memberSlots: z.array(teamMemberSlotSchema).max(40).optional(),
   title: z.string().min(1).max(200).optional(),
 });
 
@@ -96,7 +150,7 @@ const createTeamSessionSchema = z
         templateId: z.string().min(1).optional(),
       })
       .optional(),
-    memberSlots: z.array(teamMemberSlotSchema).optional(),
+    memberSlots: z.array(teamMemberSlotSchema).max(40).optional(),
     optionalAgentIds: z.array(z.string().min(1)).default([]),
     defaultProvider: z.string().nullable().optional(),
   })
@@ -104,7 +158,7 @@ const createTeamSessionSchema = z
     if (input.source && input.source.kind !== 'blank' && !input.source.templateId) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'templateId is required when source kind is not blank',
+        message: '当 source.kind 不是 blank 时，必须提供 templateId。',
         path: ['source', 'templateId'],
       });
     }
@@ -117,8 +171,133 @@ const importWorkspaceSessionSchema = z.object({
 });
 
 const teamRuntimeQuerySchema = z.object({
+  handoffId: z.string().min(1).optional(),
   teamWorkspaceId: z.string().min(1).optional(),
 });
+
+const booleanQueryParamSchema = z.preprocess((value) => {
+  if (typeof value !== 'string') {
+    return value;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true' || normalized === '1') {
+    return true;
+  }
+  if (normalized === 'false' || normalized === '0') {
+    return false;
+  }
+  return value;
+}, z.boolean().optional());
+
+const teamRuntimeRemediationQuerySchema = teamRuntimeQuerySchema.extend({
+  force: booleanQueryParamSchema,
+});
+
+const TEAM_RUNTIME_ALERT_CODE_VALUES = [
+  'architecture-review-blocked',
+  'handoff-failure',
+  'latency-violation',
+  'pending-decisions',
+  'quality-review-pending',
+  'quality-review-escalate-to-user',
+  'quality-review-redispatch',
+  'quality-review-return-to-c',
+  'stale-decisions',
+  'stale-runtime-threads',
+  'team-events-connection',
+  'telemetry-disabled',
+] as const;
+
+const teamRuntimeAlertCodeSchema = z.enum(TEAM_RUNTIME_ALERT_CODE_VALUES);
+
+const acknowledgeAlertSchema = z.object({
+  note: z.string().trim().min(1).max(500).optional(),
+});
+
+const suppressAlertSchema = z.object({
+  minutes: z
+    .preprocess(
+      (value) => {
+        if (typeof value === 'string' && value.trim().length > 0) {
+          return Number(value);
+        }
+        return value;
+      },
+      z
+        .number()
+        .int()
+        .min(1)
+        .max(24 * 60)
+        .optional(),
+    )
+    .default(60),
+  note: z.string().trim().min(1).max(500).optional(),
+});
+
+type TeamRouteErrorCode =
+  | 'team_workspace_not_found'
+  | 'team_template_not_found'
+  | 'team_template_metadata_invalid'
+  | 'team_session_metadata_invalid'
+  | 'team_workspace_path_forbidden'
+  | 'team_required_agent_not_found'
+  | 'team_optional_agent_not_found'
+  | 'team_optional_agent_duplicates_required'
+  | 'team_import_payload_too_large'
+  | 'team_runtime_alert_no_remediation'
+  | 'team_runtime_alert_not_active'
+  | 'team_runtime_alert_control_not_found'
+  | 'team_parent_session_not_found'
+  | 'team_parent_session_immutable'
+  | 'team_parent_session_invalid';
+
+const TEAM_ROUTE_ERROR_MESSAGES: Record<TeamRouteErrorCode, string> = {
+  team_workspace_not_found: '目标团队工作区不存在。',
+  team_template_not_found: '目标模板不存在。',
+  team_template_metadata_invalid: '模板元数据不是合法的 JSON。',
+  team_session_metadata_invalid: '会话元数据无效。',
+  team_workspace_path_forbidden: '当前工作区路径不允许访问。',
+  team_required_agent_not_found: '必需团队代理不存在或未启用。',
+  team_optional_agent_not_found: '可选团队代理不存在或未启用。',
+  team_optional_agent_duplicates_required: '可选团队代理与必需绑定重复。',
+  team_import_payload_too_large: '导入内容超出允许范围。',
+  team_runtime_alert_no_remediation: '该告警不支持自动修复。',
+  team_runtime_alert_not_active: '目标告警当前未激活。',
+  team_runtime_alert_control_not_found: '目标告警控制记录不存在。',
+  team_parent_session_not_found: '父会话不存在。',
+  team_parent_session_immutable: '父会话绑定后不可修改。',
+  team_parent_session_invalid: '父会话绑定无效。',
+};
+
+function teamRouteErrorPayload(
+  code: TeamRouteErrorCode,
+  extra?: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    code,
+    error: TEAM_ROUTE_ERROR_MESSAGES[code],
+    ...(extra ?? {}),
+  };
+}
+
+function mapTeamParentBindingError(error: {
+  error: string;
+  reason: string;
+  statusCode: number;
+}): Record<string, unknown> {
+  if (error.reason === 'parent not found') {
+    return teamRouteErrorPayload('team_parent_session_not_found');
+  }
+  if (error.reason === 'parent immutable') {
+    return teamRouteErrorPayload('team_parent_session_immutable');
+  }
+  if (error.reason === 'invalid parent') {
+    return teamRouteErrorPayload('team_parent_session_invalid');
+  }
+  return {
+    error: error.error,
+  };
+}
 
 interface SessionShareRow {
   created_at: string;
@@ -179,6 +358,42 @@ interface TeamRuntimeTaskGroupRecord {
   tasks: Awaited<ReturnType<typeof buildMergedSessionTaskProjection>>['tasks'];
   updatedAt: number;
   workspacePath: string | null;
+}
+
+interface RuntimeHandoffRow {
+  claimed_at: string | null;
+  claim_token: string | null;
+  completed_at: string | null;
+  created_at: string;
+  failure_reason: string | null;
+  from_role_layer: string;
+  from_session_id: string;
+  id: string;
+  payload_json: string;
+  retry_count: number;
+  started_at: string | null;
+  state: string;
+  to_role_layer: string;
+  to_session_id: string | null;
+  updated_at: string;
+  user_id: string;
+}
+
+interface RuntimeClarificationRow {
+  created_at: string;
+  id: string;
+  payload_json: string;
+  state: string;
+  to_session_id: string;
+  user_id: string;
+}
+
+interface RuntimeNotificationRow {
+  created_at: string;
+  id: string;
+  payload_json: string;
+  to_session_id: string;
+  user_id: string;
 }
 
 interface WorkflowTemplateLookupRow {
@@ -280,11 +495,11 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
   }): SessionRow[] => {
     const query =
       typeof input.teamWorkspaceId === 'string' && input.teamWorkspaceId.length > 0
-        ? `SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at, team_parent_session_id
+        ? `SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at, team_parent_session_id, role_layer
            FROM sessions
            WHERE user_id = ? AND ${SESSION_TEAM_WORKSPACE_ID_SQL} = ?
            ORDER BY updated_at DESC`
-        : `SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at, team_parent_session_id
+        : `SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at, team_parent_session_id, role_layer
            FROM sessions
            WHERE user_id = ? AND ${SESSION_TEAM_WORKSPACE_ID_SQL} IS NOT NULL
            ORDER BY updated_at DESC`;
@@ -382,6 +597,10 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       id: row.id,
       metadataJson: row.metadata_json,
       parentSessionId: teamParentSessionId ?? metadataParentSessionId,
+      roleLayer:
+        typeof rawRow['role_layer'] === 'string' && rawRow['role_layer']
+          ? rawRow['role_layer']
+          : null,
       stateStatus: row.state_status ?? 'idle',
       title: row.title ?? null,
       updatedAt: row.updated_at,
@@ -391,6 +610,249 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         userId,
       }),
     };
+  };
+
+  const listRuntimeHandoffs = (input: { sessionIds: string[]; userId: string }) => {
+    if (input.sessionIds.length === 0) {
+      return [];
+    }
+
+    const placeholders = input.sessionIds.map(() => '?').join(', ');
+    const rows = sqliteAll<RuntimeHandoffRow>(
+      `SELECT
+         id,
+         user_id,
+         from_session_id,
+         from_role_layer,
+         to_role_layer,
+         to_session_id,
+         payload_json,
+         state,
+         claim_token,
+         claimed_at,
+         started_at,
+         completed_at,
+         failure_reason,
+         retry_count,
+         created_at,
+         updated_at
+       FROM handoff_records
+      WHERE user_id = ?
+        AND (from_session_id IN (${placeholders}) OR to_session_id IN (${placeholders}))
+      ORDER BY updated_at DESC, created_at DESC
+        LIMIT 200`,
+      [input.userId, ...input.sessionIds, ...input.sessionIds],
+    );
+
+    return rows.map((row) => ({
+      claimToken: row.claim_token,
+      claimedAt: row.claimed_at,
+      completedAt: row.completed_at,
+      createdAt: row.created_at,
+      failureReason: row.failure_reason,
+      fromRoleLayer: row.from_role_layer,
+      fromSessionId: row.from_session_id,
+      id: row.id,
+      payload: (() => {
+        try {
+          return JSON.parse(row.payload_json) as unknown;
+        } catch {
+          return null;
+        }
+      })(),
+      retryCount: row.retry_count,
+      startedAt: row.started_at,
+      state: row.state,
+      toRoleLayer: row.to_role_layer,
+      toSessionId: row.to_session_id,
+      updatedAt: row.updated_at,
+      userId: row.user_id,
+    }));
+  };
+
+  const listRuntimeClarifications = (input: { sessionIds: string[]; userId: string }) => {
+    if (input.sessionIds.length === 0) {
+      return [];
+    }
+
+    const placeholders = input.sessionIds.map(() => '?').join(', ');
+    const rows = sqliteAll<RuntimeClarificationRow>(
+      `SELECT id, user_id, to_session_id, payload_json, state, created_at
+         FROM session_inbound_messages
+        WHERE user_id = ?
+          AND message_type = 'escalation_request'
+          AND state IN ('pending', 'consumed')
+          AND (expires_at IS NULL OR expires_at >= datetime('now'))
+          AND to_session_id IN (${placeholders})
+        ORDER BY created_at DESC
+        LIMIT 200`,
+      [input.userId, ...input.sessionIds],
+    );
+
+    const clarifications: Array<{
+      answer?: string;
+      answeredAt?: number;
+      context: string;
+      createdAt: number;
+      fromSessionId: string;
+      id: string;
+      question: string;
+      sessionId: string;
+      status: 'answered' | 'dismissed' | 'pending';
+    }> = [];
+
+    for (const row of rows) {
+      let payload: Record<string, unknown> | null = null;
+      try {
+        const parsed = JSON.parse(row.payload_json) as unknown;
+        payload =
+          typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+            ? (parsed as Record<string, unknown>)
+            : null;
+      } catch {
+        payload = null;
+      }
+      if (!payload || payload['reason'] !== 'needs_clarification') {
+        continue;
+      }
+      const fromSessionId =
+        typeof payload['fromSessionId'] === 'string' ? payload['fromSessionId'] : row.to_session_id;
+      if (!input.sessionIds.includes(fromSessionId)) {
+        continue;
+      }
+      const questions = Array.isArray(payload['questions']) ? payload['questions'] : [];
+      for (const question of questions) {
+        if (typeof question !== 'object' || question === null || Array.isArray(question)) {
+          continue;
+        }
+        const record = question as Record<string, unknown>;
+        if (typeof record['id'] !== 'string' || typeof record['question'] !== 'string') {
+          continue;
+        }
+        const status =
+          record['status'] === 'answered' || record['status'] === 'dismissed'
+            ? record['status']
+            : 'pending';
+        clarifications.push({
+          ...(typeof record['answer'] === 'string' ? { answer: record['answer'] } : {}),
+          ...(typeof record['answeredAt'] === 'number' ? { answeredAt: record['answeredAt'] } : {}),
+          context: typeof record['context'] === 'string' ? record['context'] : '',
+          createdAt: Date.parse(row.created_at) || Date.now(),
+          fromSessionId,
+          id: record['id'],
+          question: record['question'],
+          sessionId: fromSessionId,
+          status,
+        });
+      }
+    }
+
+    return clarifications;
+  };
+
+  const listRuntimeNotifications = (input: { sessionIds: string[]; userId: string }) => {
+    if (input.sessionIds.length === 0) {
+      return [];
+    }
+
+    const placeholders = input.sessionIds.map(() => '?').join(', ');
+    const rows = sqliteAll<RuntimeNotificationRow>(
+      `SELECT id, user_id, to_session_id, payload_json, created_at
+         FROM session_inbound_messages
+        WHERE user_id = ?
+          AND message_type IN ('escalation_request', 'progress_report')
+          AND state IN ('pending', 'consumed')
+          AND (expires_at IS NULL OR expires_at >= datetime('now'))
+          AND to_session_id IN (${placeholders})
+        ORDER BY created_at DESC
+        LIMIT 50`,
+      [input.userId, ...input.sessionIds],
+    );
+
+    const notifications: Array<{
+      layer?: string;
+      payload: Record<string, unknown>;
+      sessionId?: string;
+      taskId?: string;
+      timestamp: number;
+      type: string;
+    }> = [];
+
+    for (const row of rows) {
+      let payload: Record<string, unknown> | null = null;
+      try {
+        const parsed = JSON.parse(row.payload_json) as unknown;
+        payload =
+          typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+            ? (parsed as Record<string, unknown>)
+            : null;
+      } catch {
+        payload = null;
+      }
+      if (!payload) {
+        continue;
+      }
+
+      const fromSessionId =
+        typeof payload['fromSessionId'] === 'string' ? payload['fromSessionId'] : row.to_session_id;
+      if (!input.sessionIds.includes(fromSessionId)) {
+        continue;
+      }
+
+      if (payload['reason'] === 'needs_clarification') {
+        continue;
+      }
+
+      if (typeof payload['progressText'] === 'string') {
+        notifications.push({
+          layer: typeof payload['fromLayer'] === 'string' ? payload['fromLayer'] : undefined,
+          payload: {
+            blocking: false,
+            messageId: row.id,
+            ...(typeof payload['fromSessionId'] === 'string'
+              ? { fromSessionId: payload['fromSessionId'] }
+              : {}),
+            ...(typeof payload['handoffId'] === 'string'
+              ? { handoffId: payload['handoffId'] }
+              : typeof payload['pm2HandoffId'] === 'string'
+                ? { handoffId: payload['pm2HandoffId'] }
+                : {}),
+            summary: payload['progressText'],
+            ...(typeof payload['percent'] === 'number' ? { percent: payload['percent'] } : {}),
+          },
+          sessionId: fromSessionId,
+          taskId: row.id,
+          timestamp: Date.parse(row.created_at) || Date.now(),
+          type: 'progress_report',
+        });
+        continue;
+      }
+
+      notifications.push({
+        layer: typeof payload['fromLayer'] === 'string' ? payload['fromLayer'] : undefined,
+        payload: {
+          blocking: true,
+          messageId: row.id,
+          ...(typeof payload['fromSessionId'] === 'string'
+            ? { fromSessionId: payload['fromSessionId'] }
+            : {}),
+          ...(typeof payload['handoffId'] === 'string'
+            ? { handoffId: payload['handoffId'] }
+            : typeof payload['pm2HandoffId'] === 'string'
+              ? { handoffId: payload['pm2HandoffId'] }
+              : {}),
+          summary:
+            typeof payload['context'] === 'string' ? payload['context'] : '需要用户处理的升级通知',
+          ...(typeof payload['reason'] === 'string' ? { reason: payload['reason'] } : {}),
+        },
+        sessionId: fromSessionId,
+        taskId: row.id,
+        timestamp: Date.parse(row.created_at) || Date.now(),
+        type: 'escalation_request',
+      });
+    }
+
+    return notifications.reverse();
   };
 
   const buildWorkspaceRuntimeTaskGroups = async (input: {
@@ -407,21 +869,593 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           });
           const includedSessionIds = new Set(input.sessionRows.map((sessionRow) => sessionRow.id));
 
-          const { tasks, updatedAt } = await buildMergedSessionTaskProjection({
-            includedSessionIds,
-            sessions: input.sessionRows,
-            sessionId: row.id,
-          });
+          // Per-session resilience: buildMergedSessionTaskProjection loads task
+          // graphs from disk and can throw on hard I/O. This runs inside
+          // Promise.all over every workspace session, so one failing session
+          // must not reject the whole team runtime dashboard. Degrade the bad
+          // session to an empty task group + warn instead.
+          try {
+            const { tasks, updatedAt } = await buildMergedSessionTaskProjection({
+              includedSessionIds,
+              sessions: input.sessionRows,
+              sessionId: row.id,
+            });
 
-          return {
-            sessionIds: [row.id],
-            tasks: tasks.filter((task) => task.status !== 'cancelled'),
-            updatedAt,
-            workspacePath,
-          };
+            return {
+              sessionIds: [row.id],
+              tasks: tasks.filter((task) => task.status !== 'cancelled'),
+              updatedAt,
+              workspacePath,
+            };
+          } catch (error) {
+            console.warn(
+              `[team] 会话 ${row.id} 任务投影构建失败，降级为空任务组：${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+            return { sessionIds: [row.id], tasks: [], updatedAt: 0, workspacePath };
+          }
         }),
       ),
     );
+  };
+
+  const countRowsForSessionIds = (input: {
+    extraWhere?: string;
+    sessionIds: string[];
+    table: 'permission_requests' | 'question_requests' | 'session_runtime_threads';
+  }): number => {
+    if (input.sessionIds.length === 0) {
+      return 0;
+    }
+    const placeholders = input.sessionIds.map(() => '?').join(', ');
+    const row = sqliteGet<{ count: number }>(
+      `SELECT COUNT(1) AS count
+         FROM ${input.table}
+        WHERE session_id IN (${placeholders})${input.extraWhere ? ` AND ${input.extraWhere}` : ''}`,
+      input.sessionIds,
+    );
+    return row?.count ?? 0;
+  };
+
+  const countAffectedInteractionSessions = (sessionIds: string[]): number => {
+    if (sessionIds.length === 0) {
+      return 0;
+    }
+    const placeholders = sessionIds.map(() => '?').join(', ');
+    const row = sqliteGet<{ count: number }>(
+      `SELECT COUNT(DISTINCT session_id) AS count
+         FROM (
+           SELECT session_id
+             FROM permission_requests
+            WHERE session_id IN (${placeholders}) AND status IN ('pending', 'deciding')
+           UNION ALL
+           SELECT session_id
+             FROM question_requests
+            WHERE session_id IN (${placeholders}) AND status IN ('pending', 'deciding')
+         ) interactions`,
+      [...sessionIds, ...sessionIds],
+    );
+    return row?.count ?? 0;
+  };
+
+  const countStaleDecidingSessions = (sessionIds: string[]): number => {
+    if (sessionIds.length === 0) {
+      return 0;
+    }
+    const placeholders = sessionIds.map(() => '?').join(', ');
+    const row = sqliteGet<{ count: number }>(
+      `SELECT COUNT(DISTINCT session_id) AS count
+         FROM (
+           SELECT session_id
+             FROM permission_requests
+            WHERE session_id IN (${placeholders}) AND status = 'deciding' AND updated_at < datetime('now', '-10 minutes')
+           UNION ALL
+           SELECT session_id
+             FROM question_requests
+            WHERE session_id IN (${placeholders}) AND status = 'deciding' AND updated_at < datetime('now', '-10 minutes')
+         ) interactions`,
+      [...sessionIds, ...sessionIds],
+    );
+    return row?.count ?? 0;
+  };
+
+  const countFailedHandoffsForSessionIds = (sessionIds: string[]): number => {
+    if (sessionIds.length === 0) {
+      return 0;
+    }
+    const placeholders = sessionIds.map(() => '?').join(', ');
+    const rows = sqliteAll<{ payload_json: string | null; to_role_layer: string }>(
+      `SELECT payload_json, to_role_layer
+         FROM handoff_records
+        WHERE state = 'failed'
+          AND (from_session_id IN (${placeholders}) OR to_session_id IN (${placeholders}))`,
+      [...sessionIds, ...sessionIds],
+    );
+    return rows.filter(
+      (row) =>
+        !(row.to_role_layer === 'pm2' && isHandledReviewFailurePayloadJson(row.payload_json)),
+    ).length;
+  };
+
+  const countRecoverableFailedHandoffsForSessionIds = (
+    sessionIds: string[],
+    userId: string,
+  ): number => {
+    if (sessionIds.length === 0) {
+      return 0;
+    }
+    const placeholders = sessionIds.map(() => '?').join(', ');
+    const rows = sqliteAll<{
+      failure_reason: string | null;
+      payload_json: string | null;
+      to_role_layer: string;
+    }>(
+      `SELECT failure_reason, payload_json, to_role_layer
+         FROM handoff_records
+        WHERE user_id = ?
+          AND state = 'failed'
+          AND (from_session_id IN (${placeholders}) OR to_session_id IN (${placeholders}))`,
+      [userId, ...sessionIds, ...sessionIds],
+    );
+    return rows.filter(
+      (row) =>
+        !(row.to_role_layer === 'pm2' && isHandledReviewFailurePayloadJson(row.payload_json)) &&
+        isRecoverableFailedHandoff({
+          failureReason: row.failure_reason,
+          payloadJson: row.payload_json,
+          toRoleLayer: row.to_role_layer,
+        }),
+    ).length;
+  };
+
+  const countArchitectureReviewBlockedForSessionIds = (sessionIds: string[]): number => {
+    if (sessionIds.length === 0) {
+      return 0;
+    }
+    const placeholders = sessionIds.map(() => '?').join(', ');
+    const row = sqliteGet<{ count: number }>(
+      `SELECT COUNT(1) AS count
+         FROM handoff_records
+        WHERE state = 'failed'
+          AND json_extract(
+            CASE WHEN json_valid(result_json) THEN result_json ELSE '{}' END,
+            '$.architectureReview.passed'
+          ) = 0
+          AND (from_session_id IN (${placeholders}) OR to_session_id IN (${placeholders}))`,
+      [...sessionIds, ...sessionIds],
+    );
+    return row?.count ?? 0;
+  };
+
+  const countUnhandledPm2ReviewFailuresForSessionIds = (input: {
+    matchReviewDispositionAction: 'return-to-c' | 'escalate-to-user';
+    sessionIds: string[];
+    userId: string;
+  }): number => {
+    if (input.sessionIds.length === 0) {
+      return 0;
+    }
+    const placeholders = input.sessionIds.map(() => '?').join(', ');
+    const rows = sqliteAll<{
+      failure_reason: string | null;
+      payload_json: string | null;
+    }>(
+      `SELECT failure_reason, payload_json
+         FROM handoff_records
+        WHERE user_id = ?
+          AND state = 'failed'
+          AND to_role_layer = 'pm2'
+          AND (from_session_id IN (${placeholders}) OR to_session_id IN (${placeholders}))`,
+      [input.userId, ...input.sessionIds, ...input.sessionIds],
+    );
+    return rows.filter((row) => {
+      if (isHandledReviewFailurePayloadJson(row.payload_json)) {
+        return false;
+      }
+      const reviewDisposition = getEffectiveReviewDispositionFromPayloadJson(
+        row.payload_json,
+        row.failure_reason,
+      );
+      return reviewDisposition?.action === input.matchReviewDispositionAction;
+    }).length;
+  };
+
+  const applyAlertControls = (input: {
+    alerts: Array<{
+      code: (typeof TEAM_RUNTIME_ALERT_CODE_VALUES)[number];
+      firstDetectedAt: number;
+      lastDetectedAt: number;
+      message: string;
+      note?: string | null;
+      occurrenceCount: number;
+      remediable?: boolean;
+      resolvedAt: number | null;
+      severity: 'critical' | 'warning' | 'info';
+      status: 'ongoing' | 'open' | 'reopened' | 'resolved';
+      suggestedAction: string;
+      suppressedUntilMs?: number | null;
+      controlUpdatedAt?: string;
+    }>;
+    userId: string;
+  }) => {
+    const nowMs = Date.now();
+    const expiredSuppressedCodes = new Set(
+      consumeExpiredSuppressedAlertControls({
+        userId: input.userId,
+        alertCodes: input.alerts.map((alert) => alert.code),
+        nowMs,
+      }),
+    );
+    const controls = new Map(
+      listTeamRuntimeAlertControls({
+        userId: input.userId,
+        alertCodes: input.alerts.map((alert) => alert.code),
+        nowMs,
+      }).map((control) => [control.alertCode, control]),
+    );
+
+    return input.alerts.map((alert) => {
+      if (expiredSuppressedCodes.has(alert.code)) {
+        return {
+          ...alert,
+          note: null,
+          suppressedUntilMs: null,
+          controlUpdatedAt: undefined,
+          status: 'reopened' as const,
+        };
+      }
+      const control = controls.get(alert.code);
+      if (!control) {
+        return alert;
+      }
+      if (
+        control.state === 'suppressed' &&
+        control.suppressedUntilMs &&
+        control.suppressedUntilMs > nowMs
+      ) {
+        return {
+          ...alert,
+          note: control.note,
+          suppressedUntilMs: control.suppressedUntilMs,
+          controlUpdatedAt: control.updatedAt,
+          status: 'suppressed' as const,
+        };
+      }
+      if (control.state === 'acknowledged') {
+        return {
+          ...alert,
+          note: control.note,
+          suppressedUntilMs: null,
+          controlUpdatedAt: control.updatedAt,
+          status: 'acknowledged' as const,
+        };
+      }
+      return alert;
+    });
+  };
+
+  const logRuntimeAlertControl = (input: {
+    action: 'acknowledge' | 'clear' | 'suppress';
+    actorEmail: string;
+    actorUserId: string;
+    alertCode: string;
+    detail: Record<string, unknown>;
+    userId: string;
+  }) => {
+    logTeamAudit({
+      action: 'runtime_alert_control',
+      actorEmail: input.actorEmail,
+      actorUserId: input.actorUserId,
+      detail: JSON.stringify(input.detail),
+      entityId: input.alertCode,
+      entityType: 'runtime_alert',
+      summary: `runtime alert ${input.action}: ${input.alertCode}`,
+      userId: input.userId,
+    });
+  };
+
+  const executeRuntimeRemediation = async (input: {
+    actorEmail: string;
+    actorUserId: string;
+    code: TeamRuntimeRemediationCode;
+    force?: boolean;
+    handoffId?: string;
+    teamWorkspaceId?: string;
+    workflowName: string;
+  }) => {
+    const sessionRows = listTeamRuntimeSessionRows({
+      userId: input.actorUserId,
+      teamWorkspaceId: input.teamWorkspaceId,
+    });
+    const sessionIds = sessionRows.map((row) => row.id);
+    const result = await runTeamRuntimeRemediation({
+      code: input.code,
+      ...(input.force ? { force: input.force } : {}),
+      ...(input.handoffId ? { handoffId: input.handoffId } : {}),
+      sessionIds,
+      userId: input.actorUserId,
+    });
+
+    logTeamAudit({
+      action: 'runtime_remediation',
+      actorEmail: input.actorEmail,
+      actorUserId: input.actorUserId,
+      detail: JSON.stringify({
+        failedSessionIds: result.failedSessionIds,
+        force: input.force ?? false,
+        handoffId: input.handoffId ?? null,
+        pausedCount: result.pausedCount,
+        resetCount: result.resetCount,
+        staleCandidateCount: result.staleCandidateCount,
+        teamWorkspaceId: input.teamWorkspaceId ?? null,
+      }),
+      entityId: input.code,
+      entityType: 'runtime_alert',
+      summary: getTeamRuntimeRemediationSummary(input.code, result.staleCandidateCount),
+      userId: input.actorUserId,
+    });
+
+    return {
+      ...result,
+      runtime: buildRuntimePreview({
+        sessionIds,
+        teamWorkspaceId: input.teamWorkspaceId,
+        userId: input.actorUserId,
+      }),
+    };
+  };
+
+  const buildRuntimeDiagnostics = (input: { sessionIds: string[]; userId: string }) => {
+    const staleBeforeMs = Date.now() - SESSION_RUNTIME_THREAD_STALE_AFTER_MS;
+    const recentCutoffMs = Date.now() - 10 * 60 * 1000;
+    const recentIncidentSummary = getTeamRuntimeIncidentSummary({
+      sinceMs: recentCutoffMs,
+      userId: input.userId,
+    });
+    const recentIncidents = listTeamRuntimeIncidents({ limit: 100, userId: input.userId }).filter(
+      (incident) => incident.timestamp >= recentCutoffMs,
+    );
+    const handledPm2ReviewCache = new Map<string, boolean>();
+    const isHandledPm2ReviewIncident = (handoffId: string): boolean => {
+      const cached = handledPm2ReviewCache.get(handoffId);
+      if (cached !== undefined) {
+        return cached;
+      }
+      const row = sqliteGet<{ payload_json: string | null; to_role_layer: string }>(
+        `SELECT payload_json, to_role_layer FROM handoff_records WHERE id = ? LIMIT 1`,
+        [handoffId],
+      );
+      const handled = Boolean(
+        row?.to_role_layer === 'pm2' && isHandledReviewFailurePayloadJson(row.payload_json),
+      );
+      handledPm2ReviewCache.set(handoffId, handled);
+      return handled;
+    };
+    const countRecentIncidentCode = (code: string): number =>
+      recentIncidents.filter((incident) => {
+        if (incident.code !== code) {
+          return false;
+        }
+        const handoffId = incident.context['handoffId'];
+        if (typeof handoffId !== 'string' || handoffId.length === 0) {
+          return true;
+        }
+        if (
+          code === 'handoff-quality-review-return-to-c' ||
+          code === 'handoff-quality-review-escalate-to-user'
+        ) {
+          return !isHandledPm2ReviewIncident(handoffId);
+        }
+        return true;
+      }).length;
+    const pendingPermissionCount = countRowsForSessionIds({
+      sessionIds: input.sessionIds,
+      table: 'permission_requests',
+      extraWhere: "status = 'pending'",
+    });
+    const decidingPermissionCount = countRowsForSessionIds({
+      sessionIds: input.sessionIds,
+      table: 'permission_requests',
+      extraWhere: "status = 'deciding'",
+    });
+    const staleDecidingPermissionCount = countRowsForSessionIds({
+      sessionIds: input.sessionIds,
+      table: 'permission_requests',
+      extraWhere: "status = 'deciding' AND updated_at < datetime('now', '-10 minutes')",
+    });
+    const pendingQuestionCount = countRowsForSessionIds({
+      sessionIds: input.sessionIds,
+      table: 'question_requests',
+      extraWhere: "status = 'pending'",
+    });
+    const decidingQuestionCount = countRowsForSessionIds({
+      sessionIds: input.sessionIds,
+      table: 'question_requests',
+      extraWhere: "status = 'deciding'",
+    });
+    const staleDecidingQuestionCount = countRowsForSessionIds({
+      sessionIds: input.sessionIds,
+      table: 'question_requests',
+      extraWhere: "status = 'deciding' AND updated_at < datetime('now', '-10 minutes')",
+    });
+    const totalRuntimeThreadCount = countRowsForSessionIds({
+      sessionIds: input.sessionIds,
+      table: 'session_runtime_threads',
+    });
+    const activeRuntimeThreadCount = countRowsForSessionIds({
+      sessionIds: input.sessionIds,
+      table: 'session_runtime_threads',
+      extraWhere: `heartbeat_at_ms >= ${staleBeforeMs}`,
+    });
+    const staleRuntimeThreadCount = countRowsForSessionIds({
+      sessionIds: input.sessionIds,
+      table: 'session_runtime_threads',
+      extraWhere: `heartbeat_at_ms < ${staleBeforeMs}`,
+    });
+    const incidentSummary = getTeamRuntimeIncidentSummary({ userId: input.userId });
+    const latency = getAllLatencyStats();
+    const latencyViolationCount =
+      latency.a_to_b_ack.violationCount +
+      latency.a_to_b_direct.violationCount +
+      latency.progress_interval.violationCount +
+      latency.substate_push.violationCount;
+    const currentFailedHandoffCount = countFailedHandoffsForSessionIds(input.sessionIds);
+    const recoverableFailedHandoffCount = countRecoverableFailedHandoffsForSessionIds(
+      input.sessionIds,
+      input.userId,
+    );
+    const architectureReviewBlockedCount = countArchitectureReviewBlockedForSessionIds(
+      input.sessionIds,
+    );
+    const telemetryEnabled = isTeamRuntimeTelemetryEnabled();
+    const qualityReviewPendingRows = listPm2HandoffsPendingQualityReview({
+      sessionIds: input.sessionIds,
+      userId: input.userId,
+    });
+    const qualityReviewPendingCount = qualityReviewPendingRows.length;
+    const qualityReviewRetryableErrorCount = qualityReviewPendingRows.filter(
+      (row) => typeof row.lastError === 'string' && row.lastError.length > 0,
+    ).length;
+    const qualityReviewRedispatchCount = countRecentIncidentCode(
+      'handoff-quality-review-redispatch',
+    );
+    const qualityReviewReturnToCCount = countUnhandledPm2ReviewFailuresForSessionIds({
+      matchReviewDispositionAction: 'return-to-c',
+      sessionIds: input.sessionIds,
+      userId: input.userId,
+    });
+    const qualityReviewEscalateToUserCount = countUnhandledPm2ReviewFailuresForSessionIds({
+      matchReviewDispositionAction: 'escalate-to-user',
+      sessionIds: input.sessionIds,
+      userId: input.userId,
+    });
+    const health = deriveTeamRuntimeHealth({
+      architectureReviewBlockedCount,
+      currentFailedHandoffCount,
+      recoverableFailedHandoffCount,
+      decidingInteractionCount: decidingPermissionCount + decidingQuestionCount,
+      latencyViolationCount,
+      pendingInteractionCount: pendingPermissionCount + pendingQuestionCount,
+      qualityReviewPendingCount,
+      qualityReviewRetryableErrorCount,
+      qualityReviewEscalateToUserCount,
+      qualityReviewRedispatchCount,
+      qualityReviewReturnToCCount,
+      recentTeamEventsConnectionCount: recentIncidentSummary.team_events_connection,
+      recentTeamEventsListenerCount: recentIncidentSummary.team_events_listener,
+      staleDecidingInteractionCount: staleDecidingPermissionCount + staleDecidingQuestionCount,
+      staleRuntimeThreadCount,
+    });
+    const alerts = deriveTeamRuntimeAlerts({
+      architectureReviewBlockedCount,
+      currentFailedHandoffCount,
+      recoverableFailedHandoffCount,
+      health,
+      latencyViolationCount,
+      pendingInteractionCount: pendingPermissionCount + pendingQuestionCount,
+      qualityReviewPendingCount,
+      qualityReviewRetryableErrorCount,
+      qualityReviewEscalateToUserCount,
+      qualityReviewRedispatchCount,
+      qualityReviewReturnToCCount,
+      recentTeamEventsConnectionCount: recentIncidentSummary.team_events_connection,
+      staleDecidingInteractionCount: staleDecidingPermissionCount + staleDecidingQuestionCount,
+      staleRuntimeThreadCount,
+      telemetryEnabled,
+    });
+
+    trackTeamRuntimeHealth({
+      activeRuntimeThreadCount,
+      health,
+      incidentSummary: {
+        architecture_review: architectureReviewBlockedCount,
+        handoff_failure: currentFailedHandoffCount,
+        latency_violation: latencyViolationCount,
+        team_events_connection: recentIncidentSummary.team_events_connection,
+        team_events_listener: recentIncidentSummary.team_events_listener,
+      },
+      pendingInteractionCount: pendingPermissionCount + pendingQuestionCount,
+      staleRuntimeThreadCount,
+      userId: input.userId,
+    });
+    const alertLifecycle = reconcileTeamRuntimeAlerts({
+      alerts,
+      capturedAtMs: Date.now(),
+      userId: input.userId,
+    });
+    const activeAlerts = applyAlertControls({
+      alerts: alertLifecycle.activeAlerts,
+      userId: input.userId,
+    });
+
+    return {
+      capturedAt: new Date().toISOString(),
+      activeAlerts,
+      incidents: listTeamRuntimeIncidents({ limit: 20, userId: input.userId }),
+      incidentSummary,
+      health,
+      alerts,
+      qualityReview: {
+        escalateToUserCount: qualityReviewEscalateToUserCount,
+        pendingCount: qualityReviewPendingCount,
+        pendingHandoffs: qualityReviewPendingRows.map((row) => ({
+          handoffId: row.handoffId,
+          lastError: row.lastError,
+          lastAttemptAtMs: row.lastAttemptAtMs,
+          nextAttemptAtMs: row.nextAttemptAtMs,
+          readyNow: row.readyNow,
+          sessionId: row.sessionId,
+        })),
+        redispatchCount: qualityReviewRedispatchCount,
+        retryableErrorCount: qualityReviewRetryableErrorCount,
+        returnToCCount: qualityReviewReturnToCCount,
+      },
+      recentResolvedAlerts: alertLifecycle.recentResolvedAlerts,
+      telemetry: {
+        enabled: telemetryEnabled,
+      },
+      latency,
+      pendingInteractions: {
+        affectedSessionCount: countAffectedInteractionSessions(input.sessionIds),
+        decidingPermissionCount,
+        decidingQuestionCount,
+        pendingPermissionCount,
+        pendingQuestionCount,
+        staleDecidingPermissionCount,
+        staleDecidingQuestionCount,
+        staleDecidingSessionCount: countStaleDecidingSessions(input.sessionIds),
+      },
+      runtimeThreads: {
+        activeCount: activeRuntimeThreadCount,
+        heartbeatIntervalMs: SESSION_RUNTIME_THREAD_HEARTBEAT_MS,
+        staleAfterMs: SESSION_RUNTIME_THREAD_STALE_AFTER_MS,
+        staleCount: staleRuntimeThreadCount,
+        totalCount: totalRuntimeThreadCount,
+      },
+      teamEvents: getTeamEventsBusStats(),
+    };
+  };
+
+  const buildRuntimePreview = (input: {
+    sessionIds?: string[];
+    teamWorkspaceId?: string;
+    userId: string;
+  }) => {
+    const sessionIds =
+      input.sessionIds ??
+      listTeamRuntimeSessionRows({
+        userId: input.userId,
+        teamWorkspaceId: input.teamWorkspaceId,
+      }).map((row) => row.id);
+    return {
+      diagnostics: buildRuntimeDiagnostics({
+        sessionIds,
+        userId: input.userId,
+      }),
+      sessionCount: sessionIds.length,
+      teamWorkspaceId: input.teamWorkspaceId ?? null,
+    };
   };
 
   app.get(
@@ -436,7 +1470,8 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         `SELECT id, user_id, name, description, visibility, default_working_root, default_team_roster_json, created_at, updated_at
          FROM team_workspaces
          WHERE user_id = ?
-         ORDER BY updated_at DESC, created_at DESC`,
+         ORDER BY updated_at DESC, created_at DESC
+        LIMIT 200`,
         [user.sub],
       );
       rowsStep.succeed(undefined, { count: rows.length });
@@ -467,7 +1502,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       if (!row) {
         queryStep.fail('workspace not found');
         step.fail('workspace not found');
-        return reply.status(404).send({ error: 'Workspace not found' });
+        return reply.status(404).send(teamRouteErrorPayload('team_workspace_not_found'));
       }
       queryStep.succeed();
       step.succeed(undefined, { teamWorkspaceId });
@@ -558,7 +1593,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       );
       if (!existing) {
         step.fail('workspace not found');
-        return reply.status(404).send({ error: 'Workspace not found' });
+        return reply.status(404).send(teamRouteErrorPayload('team_workspace_not_found'));
       }
 
       const updates: string[] = [];
@@ -598,9 +1633,13 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
          LIMIT 1`,
         [user.sub, teamWorkspaceId],
       );
+      if (!updated) {
+        step.fail('workspace not found after update');
+        return reply.status(404).send(teamRouteErrorPayload('team_workspace_not_found'));
+      }
       step.succeed(undefined, { teamWorkspaceId });
 
-      return reply.send(updated ? mapWorkspaceRow(updated) : { error: 'Workspace not found' });
+      return reply.send(mapWorkspaceRow(updated));
     },
   );
 
@@ -620,7 +1659,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       );
       if (!existing) {
         step.fail('workspace not found');
-        return reply.status(404).send({ error: 'Workspace not found' });
+        return reply.status(404).send(teamRouteErrorPayload('team_workspace_not_found'));
       }
 
       // 仅删除 team_workspaces 行；session 数据保留（仍然按 metadata_json
@@ -654,7 +1693,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       if (!workspace) {
         workspaceStep.fail('workspace not found');
         step.fail('workspace not found');
-        return reply.status(404).send({ error: 'Workspace not found' });
+        return reply.status(404).send(teamRouteErrorPayload('team_workspace_not_found'));
       }
       workspaceStep.succeed();
 
@@ -675,7 +1714,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         if (!templateRow) {
           templateStep.fail('template not found');
           step.fail('template not found');
-          return reply.status(404).send({ error: 'Template not found' });
+          return reply.status(404).send(teamRouteErrorPayload('team_template_not_found'));
         }
 
         let parsedMetadata: unknown;
@@ -684,7 +1723,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         } catch {
           templateStep.fail('template metadata invalid');
           step.fail('template metadata invalid');
-          return reply.status(400).send({ error: 'Template metadata is invalid JSON' });
+          return reply.status(400).send(teamRouteErrorPayload('team_template_metadata_invalid'));
         }
 
         const teamTemplate = parseBody(
@@ -732,7 +1771,12 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       if (invalidRequiredAgent) {
         agentsStep.fail('invalid required agent');
         step.fail('invalid required agent');
-        return reply.status(400).send({ error: `Unknown agent: ${invalidRequiredAgent.agentId}` });
+        return reply.status(400).send(
+          teamRouteErrorPayload('team_required_agent_not_found', {
+            agentId: invalidRequiredAgent.agentId,
+            role: invalidRequiredAgent.role,
+          }),
+        );
       }
 
       const requiredAgentIds = new Set(requiredRoleBindings.map((binding) => binding.agentId));
@@ -747,7 +1791,11 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       if (invalidOptionalAgent) {
         agentsStep.fail('invalid optional agent');
         step.fail('invalid optional agent');
-        return reply.status(400).send({ error: `Unknown optional agent: ${invalidOptionalAgent}` });
+        return reply.status(400).send(
+          teamRouteErrorPayload('team_optional_agent_not_found', {
+            agentId: invalidOptionalAgent,
+          }),
+        );
       }
       const overlappingOptionalAgent = optionalAgentIds.find((agentId) =>
         requiredAgentIds.has(agentId),
@@ -755,9 +1803,11 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       if (overlappingOptionalAgent) {
         agentsStep.fail('duplicate optional agent');
         step.fail('duplicate optional agent');
-        return reply.status(400).send({
-          error: `Optional agent duplicates required binding: ${overlappingOptionalAgent}`,
-        });
+        return reply.status(400).send(
+          teamRouteErrorPayload('team_optional_agent_duplicates_required', {
+            agentId: overlappingOptionalAgent,
+          }),
+        );
       }
       agentsStep.succeed(undefined, {
         optional: optionalAgentIds.length,
@@ -841,15 +1891,17 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       });
       if (!metadataPatch.success) {
         step.fail('invalid metadata');
-        return reply
-          .status(400)
-          .send({ error: 'Invalid metadata', issues: metadataPatch.error.issues });
+        return reply.status(400).send(
+          teamRouteErrorPayload('team_session_metadata_invalid', {
+            issues: metadataPatch.error.issues,
+          }),
+        );
       }
 
       const normalizedMetadata = normalizeIncomingSessionMetadata(metadataPatch.data);
       if (normalizedMetadata.workingDirectory === null) {
         step.fail('forbidden path');
-        return reply.status(403).send({ error: 'Forbidden' });
+        return reply.status(403).send(teamRouteErrorPayload('team_workspace_path_forbidden'));
       }
 
       normalizedMetadata.metadata = {
@@ -875,7 +1927,30 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       });
       if (!parentValidation.ok) {
         step.fail(parentValidation.reason);
-        return reply.status(parentValidation.statusCode).send({ error: parentValidation.error });
+        return reply
+          .status(parentValidation.statusCode)
+          .send(mapTeamParentBindingError(parentValidation));
+      }
+
+      // 团队会话创建后进入「初始化阶段」：算出待办清单（纯读、零副作用）写入
+      // metadata.teamInit，由前端逐项确认后再执行（team-init-runner）。失败不阻塞
+      // 会话创建——降级为无初始化清单。
+      try {
+        const { planTeamInit } = await import('../team/init/team-init-planner.js');
+        const teamInit = await planTeamInit({
+          workingRoot: workspace.default_working_root ?? null,
+          teamWorkspaceId,
+          userId: user.sub,
+        });
+        normalizedMetadata.metadata = {
+          ...normalizedMetadata.metadata,
+          teamInit,
+        };
+      } catch (err) {
+        request.log.warn(
+          { err },
+          '[team.session.create] planTeamInit failed; session created without init plan',
+        );
       }
 
       // L1.3 §1.3 + L1.8：通过 b 层创建的 session 必须打上 reception 语义
@@ -941,7 +2016,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       if (!workspace) {
         workspaceStep.fail('workspace not found');
         step.fail('workspace not found');
-        return reply.status(404).send({ error: 'Workspace not found' });
+        return reply.status(404).send(teamRouteErrorPayload('team_workspace_not_found'));
       }
       workspaceStep.succeed();
 
@@ -952,15 +2027,17 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       });
       if (!metadataPatch.success) {
         step.fail('invalid metadata');
-        return reply
-          .status(400)
-          .send({ error: 'Invalid metadata', issues: metadataPatch.error.issues });
+        return reply.status(400).send(
+          teamRouteErrorPayload('team_session_metadata_invalid', {
+            issues: metadataPatch.error.issues,
+          }),
+        );
       }
 
       const normalizedMetadata = normalizeIncomingSessionMetadata(metadataPatch.data);
       if (normalizedMetadata.workingDirectory === null) {
         step.fail('forbidden path');
-        return reply.status(403).send({ error: 'Forbidden' });
+        return reply.status(403).send(teamRouteErrorPayload('team_workspace_path_forbidden'));
       }
 
       const legacyRosterSource = normalizeTeamWorkspaceDefaultRoster(
@@ -989,7 +2066,9 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       });
       if (!parentValidation.ok) {
         step.fail(parentValidation.reason);
-        return reply.status(parentValidation.statusCode).send({ error: parentValidation.error });
+        return reply
+          .status(parentValidation.statusCode)
+          .send(mapTeamParentBindingError(parentValidation));
       }
 
       // 与 /sessions 路径产出语义一致的 reception session
@@ -1043,7 +2122,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       if (!workspace) {
         workspaceStep.fail('workspace not found');
         step.fail('workspace not found');
-        return reply.status(404).send({ error: 'Workspace not found' });
+        return reply.status(404).send(teamRouteErrorPayload('team_workspace_not_found'));
       }
       workspaceStep.succeed();
 
@@ -1055,7 +2134,11 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       const validation = validateImportedMessagesPayload(normalizedMessages);
       if (!validation.ok) {
         step.fail('import too large');
-        return reply.status(413).send({ error: validation.error });
+        return reply
+          .status(413)
+          .send(
+            teamRouteErrorPayload('team_import_payload_too_large', { detail: validation.error }),
+          );
       }
 
       const sessionId = randomUUID();
@@ -1105,7 +2188,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       if (!workspace) {
         workspaceStep.fail('workspace not found');
         step.fail('workspace not found');
-        return reply.status(404).send({ error: 'Workspace not found' });
+        return reply.status(404).send(teamRouteErrorPayload('team_workspace_not_found'));
       }
       workspaceStep.succeed();
 
@@ -1181,7 +2264,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         if (!workspace) {
           workspaceStep.fail('workspace not found');
           step.fail('workspace not found');
-          return reply.status(404).send({ error: 'Workspace not found' });
+          return reply.status(404).send(teamRouteErrorPayload('team_workspace_not_found'));
         }
         workspaceStep.succeed(undefined, { teamWorkspaceId: workspace.id });
       }
@@ -1199,7 +2282,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           [user.sub],
         ),
         sqliteAll<TaskRow>(
-          `SELECT id, title, assignee_id, status, priority, result, created_at, updated_at FROM team_tasks WHERE user_id = ? ORDER BY created_at DESC`,
+          `SELECT id, title, assignee_id, status, priority, result, created_at, updated_at FROM team_tasks WHERE user_id = ? ORDER BY created_at DESC LIMIT 500`,
           [user.sub],
         ),
         sqliteAll<MessageRow>(
@@ -1253,18 +2336,35 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
             includedSessionIds.add(sharedSession.session.id);
           }
 
-          const { tasks, updatedAt } = await buildMergedSessionTaskProjection({
-            includedSessionIds,
-            sessions: sessionRows,
-            sessionId: sharedSession.session.id,
-          });
+          // Per-session resilience (same as buildWorkspaceRuntimeTaskGroups):
+          // one shared session's task-graph load throwing must not reject the
+          // whole dashboard Promise.all. Degrade to an empty task group + warn.
+          try {
+            const { tasks, updatedAt } = await buildMergedSessionTaskProjection({
+              includedSessionIds,
+              sessions: sessionRows,
+              sessionId: sharedSession.session.id,
+            });
 
-          return {
-            sessionIds: [sharedSession.session.id],
-            tasks: tasks.filter((task) => task.status !== 'cancelled'),
-            updatedAt,
-            workspacePath,
-          };
+            return {
+              sessionIds: [sharedSession.session.id],
+              tasks: tasks.filter((task) => task.status !== 'cancelled'),
+              updatedAt,
+              workspacePath,
+            };
+          } catch (error) {
+            console.warn(
+              `[team] 共享会话 ${sharedSession.session.id} 任务投影构建失败，降级为空任务组：${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+            return {
+              sessionIds: [sharedSession.session.id],
+              tasks: [],
+              updatedAt: 0,
+              workspacePath,
+            };
+          }
         }),
       );
 
@@ -1294,8 +2394,35 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       const runtimeTaskGroups = mergeRuntimeTaskGroups(await runtimeTaskGroupsPromise);
       runtimeTaskGroupsStep.succeed(undefined, { count: runtimeTaskGroups.length });
 
+      const handoffsStep = child('handoffs');
+      const handoffs = listRuntimeHandoffs({
+        sessionIds: sessionRows.map((row) => row.id),
+        userId: user.sub,
+      });
+      handoffsStep.succeed(undefined, { count: handoffs.length });
+
+      const clarificationsStep = child('clarifications');
+      const clarifications = listRuntimeClarifications({
+        sessionIds: sessionRows.map((row) => row.id),
+        userId: user.sub,
+      });
+      clarificationsStep.succeed(undefined, { count: clarifications.length });
+
+      const notificationsStep = child('notifications');
+      const notifications = listRuntimeNotifications({
+        sessionIds: sessionRows.map((row) => row.id),
+        userId: user.sub,
+      });
+      notificationsStep.succeed(undefined, { count: notifications.length });
+
       const response = {
         auditLogs,
+        clarifications,
+        diagnostics: buildRuntimeDiagnostics({
+          sessionIds: sessionRows.map((row) => row.id),
+          userId: user.sub,
+        }),
+        handoffs,
         members: memberRows.map((row) => ({
           id: row.id,
           name: row.name,
@@ -1318,6 +2445,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
               : 'update',
           timestamp: Date.parse(row.created_at) || Date.now(),
         })),
+        notifications,
         sessionShares: shareRows.map((row) => mapSessionShareRow(user.sub, row)),
         sessions: sessionRows.map((row) => mapRuntimeSessionRow(user.sub, row)),
         sharedSessions,
@@ -1343,6 +2471,318 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       });
 
       return reply.send(response);
+    },
+  );
+
+  app.post(
+    '/team/runtime/remediations/reconcile-stale-threads',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(
+        request,
+        'team.runtime.remediation.reconcile-stale-threads',
+      );
+      const user = request.user as JwtPayload;
+
+      const queryStep = child('parse-query');
+      const query = parseQuery(teamRuntimeRemediationQuerySchema, request.query);
+      queryStep.succeed(undefined, query.teamWorkspaceId ? query : undefined);
+
+      const candidateStep = child('collect-candidates');
+      const result = await executeRuntimeRemediation({
+        actorEmail: user.email,
+        actorUserId: user.sub,
+        code: 'stale-runtime-threads',
+        teamWorkspaceId: query.teamWorkspaceId,
+        workflowName: 'team.runtime.remediation.reconcile-stale-threads',
+      });
+      candidateStep.succeed(undefined, { count: result.staleCandidateCount });
+
+      step.succeed(undefined, {
+        failedCount: result.failedSessionIds.length,
+        pausedCount: result.pausedCount,
+        resetCount: result.resetCount,
+        staleCandidateCount: result.staleCandidateCount,
+      });
+      return reply.send(result);
+    },
+  );
+
+  app.post(
+    '/team/runtime/remediations/release-stale-decisions',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(
+        request,
+        'team.runtime.remediation.release-stale-decisions',
+      );
+      const user = request.user as JwtPayload;
+
+      const queryStep = child('parse-query');
+      const query = parseQuery(teamRuntimeRemediationQuerySchema, request.query);
+      queryStep.succeed(undefined, query.teamWorkspaceId ? query : undefined);
+
+      const candidateStep = child('collect-candidates');
+      const result = await executeRuntimeRemediation({
+        actorEmail: user.email,
+        actorUserId: user.sub,
+        code: 'stale-decisions',
+        teamWorkspaceId: query.teamWorkspaceId,
+        workflowName: 'team.runtime.remediation.release-stale-decisions',
+      });
+      candidateStep.succeed(undefined, { count: result.staleCandidateCount });
+
+      step.succeed(undefined, {
+        failedCount: result.failedSessionIds.length,
+        pausedCount: result.pausedCount,
+        resetCount: result.resetCount,
+        staleCandidateCount: result.staleCandidateCount,
+      });
+      return reply.send(result);
+    },
+  );
+
+  app.post(
+    '/team/runtime/alerts/:alertCode/remediate',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'team.runtime.alert.remediate');
+      const user = request.user as JwtPayload;
+      const alertCode = teamRuntimeAlertCodeSchema.parse(
+        (request.params as { alertCode: string }).alertCode,
+      );
+      if (!isTeamRuntimeRemediationCode(alertCode)) {
+        step.fail('alert has no remediation');
+        return reply.status(409).send(teamRouteErrorPayload('team_runtime_alert_no_remediation'));
+      }
+
+      const queryStep = child('parse-query');
+      const query = parseQuery(teamRuntimeRemediationQuerySchema, request.query);
+      queryStep.succeed(undefined, query.teamWorkspaceId ? query : undefined);
+
+      const activeAlert = listActiveTeamRuntimeAlerts(user.sub).find(
+        (alert) => alert.code === alertCode,
+      );
+      if (!activeAlert) {
+        step.fail('alert not active');
+        return reply.status(404).send(teamRouteErrorPayload('team_runtime_alert_not_active'));
+      }
+
+      const candidateStep = child('collect-candidates');
+      const result = await executeRuntimeRemediation({
+        actorEmail: user.email,
+        actorUserId: user.sub,
+        code: alertCode,
+        ...(query.force ? { force: query.force } : {}),
+        ...(query.handoffId ? { handoffId: query.handoffId } : {}),
+        teamWorkspaceId: query.teamWorkspaceId,
+        workflowName: 'team.runtime.alert.remediate',
+      });
+      candidateStep.succeed(undefined, { count: result.staleCandidateCount });
+
+      step.succeed(undefined, {
+        alertCode,
+        failedCount: result.failedSessionIds.length,
+        staleCandidateCount: result.staleCandidateCount,
+      });
+      return reply.send(result);
+    },
+  );
+
+  app.post(
+    '/team/runtime/alerts/:alertCode/acknowledge',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'team.runtime.alert.acknowledge');
+      const user = request.user as JwtPayload;
+      const alertCode = teamRuntimeAlertCodeSchema.parse(
+        (request.params as { alertCode: string }).alertCode,
+      );
+      const queryStep = child('parse-query');
+      const query = parseQuery(teamRuntimeQuerySchema, request.query);
+      queryStep.succeed(undefined, query.teamWorkspaceId ? query : undefined);
+      const parseStep = child('parse-body');
+      const body = parseBody(acknowledgeAlertSchema, request.body ?? {});
+      parseStep.succeed();
+
+      if (query.teamWorkspaceId) {
+        const workspaceStep = child('workspace');
+        const workspace = getTeamWorkspaceForUser(user.sub, query.teamWorkspaceId);
+        if (!workspace) {
+          workspaceStep.fail('workspace not found');
+          step.fail('workspace not found');
+          return reply.status(404).send(teamRouteErrorPayload('team_workspace_not_found'));
+        }
+        workspaceStep.succeed(undefined, { teamWorkspaceId: workspace.id });
+      }
+
+      const active = listActiveTeamRuntimeAlerts(user.sub).find(
+        (alert) => alert.code === alertCode,
+      );
+      if (!active) {
+        step.fail('alert not active');
+        return reply.status(404).send(teamRouteErrorPayload('team_runtime_alert_not_active'));
+      }
+
+      const control = upsertTeamRuntimeAlertControl({
+        alertCode,
+        note: body.note ?? null,
+        state: 'acknowledged',
+        userId: user.sub,
+      });
+      logRuntimeAlertControl({
+        action: 'acknowledge',
+        actorEmail: user.email,
+        actorUserId: user.sub,
+        alertCode,
+        detail: {
+          note: body.note ?? null,
+          state: control.state,
+        },
+        userId: user.sub,
+      });
+      step.succeed(undefined, { alertCode });
+      return reply.send({
+        control: {
+          alertCode: control.alertCode,
+          note: control.note,
+          state: control.state,
+          suppressedUntilMs: control.suppressedUntilMs,
+          updatedAt: control.updatedAt,
+        },
+        runtime: buildRuntimePreview({
+          teamWorkspaceId: query.teamWorkspaceId,
+          userId: user.sub,
+        }),
+      });
+    },
+  );
+
+  app.post(
+    '/team/runtime/alerts/:alertCode/suppress',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'team.runtime.alert.suppress');
+      const user = request.user as JwtPayload;
+      const alertCode = teamRuntimeAlertCodeSchema.parse(
+        (request.params as { alertCode: string }).alertCode,
+      );
+      const queryStep = child('parse-query');
+      const query = parseQuery(teamRuntimeQuerySchema, request.query);
+      queryStep.succeed(undefined, query.teamWorkspaceId ? query : undefined);
+      const parseStep = child('parse-body');
+      const body = parseBody(suppressAlertSchema, request.body ?? {});
+      parseStep.succeed();
+
+      if (query.teamWorkspaceId) {
+        const workspaceStep = child('workspace');
+        const workspace = getTeamWorkspaceForUser(user.sub, query.teamWorkspaceId);
+        if (!workspace) {
+          workspaceStep.fail('workspace not found');
+          step.fail('workspace not found');
+          return reply.status(404).send(teamRouteErrorPayload('team_workspace_not_found'));
+        }
+        workspaceStep.succeed(undefined, { teamWorkspaceId: workspace.id });
+      }
+
+      const active = listActiveTeamRuntimeAlerts(user.sub).find(
+        (alert) => alert.code === alertCode,
+      );
+      if (!active) {
+        step.fail('alert not active');
+        return reply.status(404).send(teamRouteErrorPayload('team_runtime_alert_not_active'));
+      }
+
+      const suppressedUntilMs = Date.now() + body.minutes * 60 * 1000;
+      const control = upsertTeamRuntimeAlertControl({
+        alertCode,
+        note: body.note ?? null,
+        state: 'suppressed',
+        suppressedUntilMs,
+        userId: user.sub,
+      });
+      logRuntimeAlertControl({
+        action: 'suppress',
+        actorEmail: user.email,
+        actorUserId: user.sub,
+        alertCode,
+        detail: {
+          minutes: body.minutes,
+          note: body.note ?? null,
+          suppressedUntilMs,
+        },
+        userId: user.sub,
+      });
+      step.succeed(undefined, { alertCode, suppressedUntilMs });
+      return reply.send({
+        control: {
+          alertCode: control.alertCode,
+          note: control.note,
+          state: control.state,
+          suppressedUntilMs: control.suppressedUntilMs,
+          updatedAt: control.updatedAt,
+        },
+        runtime: buildRuntimePreview({
+          teamWorkspaceId: query.teamWorkspaceId,
+          userId: user.sub,
+        }),
+      });
+    },
+  );
+
+  app.post(
+    '/team/runtime/alerts/:alertCode/clear',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'team.runtime.alert.clear');
+      const user = request.user as JwtPayload;
+      const alertCode = teamRuntimeAlertCodeSchema.parse(
+        (request.params as { alertCode: string }).alertCode,
+      );
+      const queryStep = child('parse-query');
+      const query = parseQuery(teamRuntimeQuerySchema, request.query);
+      queryStep.succeed(undefined, query.teamWorkspaceId ? query : undefined);
+
+      if (query.teamWorkspaceId) {
+        const workspaceStep = child('workspace');
+        const workspace = getTeamWorkspaceForUser(user.sub, query.teamWorkspaceId);
+        if (!workspace) {
+          workspaceStep.fail('workspace not found');
+          step.fail('workspace not found');
+          return reply.status(404).send(teamRouteErrorPayload('team_workspace_not_found'));
+        }
+        workspaceStep.succeed(undefined, { teamWorkspaceId: workspace.id });
+      }
+
+      const cleared = clearTeamRuntimeAlertControl({
+        alertCode,
+        userId: user.sub,
+      });
+      if (!cleared) {
+        step.fail('control not found');
+        return reply
+          .status(404)
+          .send(teamRouteErrorPayload('team_runtime_alert_control_not_found'));
+      }
+
+      logRuntimeAlertControl({
+        action: 'clear',
+        actorEmail: user.email,
+        actorUserId: user.sub,
+        alertCode,
+        detail: {
+          cleared: true,
+        },
+        userId: user.sub,
+      });
+      step.succeed(undefined, { alertCode });
+      return reply.send({
+        cleared: true,
+        runtime: buildRuntimePreview({
+          teamWorkspaceId: query.teamWorkspaceId,
+          userId: user.sub,
+        }),
+      });
     },
   );
 

@@ -8,6 +8,7 @@ import { parseBody, parseQuery } from '../infra/parse-request.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { resolveSessionWorkspacePath } from '../session/session-workspace-resolution.js';
 import { listTeamAuditLogs, logTeamAudit, type TeamAuditAction } from '../team/team-audit-store.js';
+import { appendTeamMessage } from '../team/team-message-store.js';
 
 const createMemberSchema = z.object({
   name: z.string().min(1),
@@ -152,6 +153,34 @@ const getSessionShareForUser = (userId: string, shareId: string): SessionShareRo
     [shareId, userId],
   );
 
+type TeamCrudRouteErrorCode =
+  | 'team_member_already_exists'
+  | 'team_task_not_found'
+  | 'team_session_not_found'
+  | 'team_member_not_found'
+  | 'team_session_share_already_exists'
+  | 'team_session_share_not_found';
+
+const TEAM_CRUD_ROUTE_ERROR_MESSAGES: Record<TeamCrudRouteErrorCode, string> = {
+  team_member_already_exists: '该邮箱对应的团队成员已存在。',
+  team_task_not_found: '目标团队任务不存在。',
+  team_session_not_found: '目标会话不存在。',
+  team_member_not_found: '目标团队成员不存在。',
+  team_session_share_already_exists: '该会话共享记录已存在。',
+  team_session_share_not_found: '目标会话共享记录不存在。',
+};
+
+function teamCrudRouteErrorPayload(
+  code: TeamCrudRouteErrorCode,
+  extra?: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    code,
+    error: TEAM_CRUD_ROUTE_ERROR_MESSAGES[code],
+    ...(extra ?? {}),
+  };
+}
+
 export async function teamCrudRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     '/team/members',
@@ -202,7 +231,7 @@ export async function teamCrudRoutes(app: FastifyInstance): Promise<void> {
       if (existing) {
         existingStep.fail('member already exists');
         step.fail('member already exists');
-        return reply.status(409).send({ error: 'Member with this email already exists' });
+        return reply.status(409).send(teamCrudRouteErrorPayload('team_member_already_exists'));
       }
       existingStep.succeed();
 
@@ -230,7 +259,7 @@ export async function teamCrudRoutes(app: FastifyInstance): Promise<void> {
 
       const queryStep = child('query');
       const rows = sqliteAll<TaskRow>(
-        `SELECT id, title, assignee_id, status, priority, result, created_at, updated_at FROM team_tasks WHERE user_id = ? ORDER BY created_at DESC`,
+        `SELECT id, title, assignee_id, status, priority, result, created_at, updated_at FROM team_tasks WHERE user_id = ? ORDER BY created_at DESC LIMIT 500`,
         [user.sub],
       );
       queryStep.succeed(undefined, { count: rows.length });
@@ -305,7 +334,7 @@ export async function teamCrudRoutes(app: FastifyInstance): Promise<void> {
       if (!existing) {
         lookupStep.fail('task not found');
         step.fail('task not found');
-        return reply.status(404).send({ error: 'Task not found' });
+        return reply.status(404).send(teamCrudRouteErrorPayload('team_task_not_found'));
       }
       lookupStep.succeed();
 
@@ -376,10 +405,13 @@ export async function teamCrudRoutes(app: FastifyInstance): Promise<void> {
 
       const id = randomUUID();
       const insertStep = child('insert', undefined, { messageId: id, type: body.type });
-      sqliteRun(
-        `INSERT INTO team_messages (id, user_id, sender_id, content, type) VALUES (?, ?, ?, ?, ?)`,
-        [id, user.sub, body.senderId ?? null, body.content, body.type],
-      );
+      appendTeamMessage({
+        id,
+        userId: user.sub,
+        senderId: body.senderId ?? null,
+        content: body.content,
+        type: body.type,
+      });
       insertStep.succeed();
 
       step.succeed(undefined, { messageId: id, type: body.type });
@@ -446,7 +478,7 @@ export async function teamCrudRoutes(app: FastifyInstance): Promise<void> {
       if (!session) {
         sessionStep.fail('session not found');
         step.fail('session not found');
-        return reply.status(404).send({ error: 'Session not found' });
+        return reply.status(404).send(teamCrudRouteErrorPayload('team_session_not_found'));
       }
       sessionStep.succeed();
 
@@ -458,7 +490,7 @@ export async function teamCrudRoutes(app: FastifyInstance): Promise<void> {
       if (!member) {
         memberStep.fail('member not found');
         step.fail('member not found');
-        return reply.status(404).send({ error: 'Member not found' });
+        return reply.status(404).send(teamCrudRouteErrorPayload('team_member_not_found'));
       }
       memberStep.succeed();
 
@@ -470,7 +502,9 @@ export async function teamCrudRoutes(app: FastifyInstance): Promise<void> {
       if (existing) {
         existingStep.fail('share already exists');
         step.fail('share already exists');
-        return reply.status(409).send({ error: 'Share already exists' });
+        return reply
+          .status(409)
+          .send(teamCrudRouteErrorPayload('team_session_share_already_exists'));
       }
       existingStep.succeed();
 
@@ -548,7 +582,7 @@ export async function teamCrudRoutes(app: FastifyInstance): Promise<void> {
       if (!existing) {
         lookupStep.fail('share not found');
         step.fail('share not found');
-        return reply.status(404).send({ error: 'Session share not found' });
+        return reply.status(404).send(teamCrudRouteErrorPayload('team_session_share_not_found'));
       }
       lookupStep.succeed(undefined, { currentPermission: existing.permission });
 

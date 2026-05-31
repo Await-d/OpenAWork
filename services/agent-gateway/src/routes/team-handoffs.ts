@@ -19,14 +19,18 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
-import { sqliteAll } from '../infra/db.js';
+import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import {
   cancelHandoff,
   createHandoff,
   getHandoff,
+  getReviewDispositionFromPayload,
+  isHandledReviewFailurePayload,
   listHandoffsBySession,
+  mergeReviewDispositionIntoPayload,
   pauseHandoff,
+  retryRunningHandoffById,
   resumeHandoff,
   type HandoffRecord,
   type HandoffRoleLayer,
@@ -38,8 +42,9 @@ import {
 } from '../handoff/bus/team-session-create.js';
 import { submitInboundMessage } from '../handoff/store/inbound-store.js';
 import { setSubstate } from '../handoff/store/substate-store.js';
-import { parseBody } from '../infra/parse-request.js';
+import { parseBody, parseParams } from '../infra/parse-request.js';
 import { logTeamAudit } from '../team/team-audit-store.js';
+import { pauseTeamRuntimeTree, resumeTeamRuntimeTree } from '../team/team-runtime-control-store.js';
 
 const TEAM_ROLE_LAYERS = ['user', 'reception', 'pm1', 'pm2', 'executor', 'reviewer'] as const;
 
@@ -60,6 +65,50 @@ const createHandoffSchema = z.object({
 const pauseHandoffSchema = z.object({
   reason: z.string().trim().min(1).max(500).optional(),
 });
+
+const reviewActionSchema = z.enum(['redispatch', 'return-to-c', 'escalate-to-user']);
+const reviewActionParamsSchema = z.object({
+  action: reviewActionSchema,
+  handoffId: z.string().min(1).max(200),
+});
+
+type TeamHandoffRouteErrorCode =
+  | 'team_parent_session_not_found'
+  | 'team_handoff_source_session_not_found'
+  | 'team_handoff_not_found'
+  | 'team_session_not_found'
+  | 'team_handoff_review_requires_pm2'
+  | 'team_handoff_cannot_redispatch'
+  | 'team_handoff_cannot_return_to_pm1'
+  | 'team_handoff_cannot_cancel'
+  | 'team_handoff_cannot_pause'
+  | 'team_handoff_cannot_resume'
+  | 'team_handoff_invalid_limit';
+
+const TEAM_HANDOFF_ROUTE_ERROR_MESSAGES: Record<TeamHandoffRouteErrorCode, string> = {
+  team_parent_session_not_found: '目标团队父会话不存在。',
+  team_handoff_source_session_not_found: '源团队会话不存在。',
+  team_handoff_not_found: '目标 handoff 不存在。',
+  team_session_not_found: '目标团队会话不存在。',
+  team_handoff_review_requires_pm2: '只有 PM2 handoff 支持该评审动作。',
+  team_handoff_cannot_redispatch: '当前 handoff 无法重派，可能已被其他流程接管。',
+  team_handoff_cannot_return_to_pm1: '当前 handoff 无法退回 PM1，可能缺少可回放的上游规划。',
+  team_handoff_cannot_cancel: '当前状态不允许取消该 handoff。',
+  team_handoff_cannot_pause: '当前状态不允许暂停该 handoff。',
+  team_handoff_cannot_resume: '当前状态不允许恢复该 handoff。',
+  team_handoff_invalid_limit: '请求参数 limit 非法（应为 1..500 的正整数）。',
+};
+
+function teamHandoffRouteErrorPayload(
+  code: TeamHandoffRouteErrorCode,
+  extra?: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    code,
+    error: TEAM_HANDOFF_ROUTE_ERROR_MESSAGES[code],
+    ...(extra ?? {}),
+  };
+}
 
 type HandoffControlAction = 'cancel' | 'pause' | 'resume';
 type HandoffControlSignal = 'cancel_signal' | 'pause_signal' | 'resume_signal';
@@ -148,6 +197,68 @@ function publishSchedulerControlEvent(input: {
   });
 }
 
+function publishSchedulerAllControlEvent(input: {
+  handoffIds: string[];
+  reason?: string | null;
+  rootRoleLayer?: string | null;
+  sessionIds: string[];
+  staleSessionCount?: number;
+  type: 'scheduler.all-paused' | 'scheduler.all-resumed';
+  userId: string;
+  rootSessionId: string;
+}): void {
+  publishTeamEvent({
+    type: input.type,
+    sessionId: input.rootSessionId,
+    layer: input.rootRoleLayer ?? 'system',
+    timestamp: Date.now(),
+    userId: input.userId,
+    payload: {
+      handoffIds: input.handoffIds,
+      rootSessionId: input.rootSessionId,
+      sessionIds: input.sessionIds,
+      reason: input.reason ?? null,
+      staleSessionCount: input.staleSessionCount ?? 0,
+    },
+  });
+}
+
+function logSessionTreeControl(input: {
+  action: 'pause-all' | 'resume-all';
+  actorEmail?: string;
+  actorUserId: string;
+  handoffIds: string[];
+  reason?: string | null;
+  rootSessionId: string;
+  sessionIds: string[];
+  staleSessionCount?: number;
+  userId: string;
+}): void {
+  try {
+    logTeamAudit({
+      action: 'handoff_control',
+      actorEmail: input.actorEmail,
+      actorUserId: input.actorUserId,
+      detail: JSON.stringify({
+        action: input.action,
+        rootSessionId: input.rootSessionId,
+        sessionIds: input.sessionIds,
+        handoffIds: input.handoffIds,
+        reason: input.reason ?? null,
+        staleSessionCount: input.staleSessionCount ?? 0,
+      }),
+      entityId: input.rootSessionId,
+      entityType: 'session',
+      summary: `team ${input.action}: ${input.rootSessionId.slice(0, 8)} sessions=${input.sessionIds.length} handoffs=${input.handoffIds.length}`,
+      userId: input.userId,
+    });
+  } catch (err) {
+    console.warn(
+      `[team-handoffs] audit(${input.action}) 失败：${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
 export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
   // ─── Team Sessions ──────────────────────────────────────────────────────
 
@@ -172,7 +283,9 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
         if (!ok) {
           validateStep.fail('parent not found');
           step.fail('parent not found');
-          return reply.status(404).send({ error: 'team parent session not found' });
+          return reply
+            .status(404)
+            .send(teamHandoffRouteErrorPayload('team_parent_session_not_found'));
         }
         validateStep.succeed();
       }
@@ -217,7 +330,9 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
       if (!ok) {
         validateStep.fail('from session not found');
         step.fail('from session not found');
-        return reply.status(404).send({ error: 'fromSessionId not found' });
+        return reply
+          .status(404)
+          .send(teamHandoffRouteErrorPayload('team_handoff_source_session_not_found'));
       }
       validateStep.succeed();
 
@@ -246,7 +361,7 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
       const record = getHandoff({ userId: user.sub, handoffId });
       if (!record) {
         step.fail('not found');
-        return reply.status(404).send({ error: 'Handoff not found' });
+        return reply.status(404).send(teamHandoffRouteErrorPayload('team_handoff_not_found'));
       }
       step.succeed(undefined, { handoffId, state: record.state });
       return reply.send({ handoff: record });
@@ -261,9 +376,154 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
       const sessionId = (request.params as { sessionId: string }).sessionId;
 
-      const records = listHandoffsBySession({ userId: user.sub, sessionId });
-      step.succeed(undefined, { sessionId, count: records.length });
-      return reply.send({ handoffs: records });
+      if (!validateTeamParentSession({ userId: user.sub, teamParentSessionId: sessionId })) {
+        step.fail('session not found');
+        return reply.status(404).send(teamHandoffRouteErrorPayload('team_session_not_found'));
+      }
+
+      // §0.159: 默认上限 200，避免长寿团队会话(数千 handoff)在单次请求里
+      // 把整张 SQLite 行集 + JSON 序列化吞进网关内存。客户端可显式 ?limit=N 在 1..500 区间内调整。
+      const rawLimit = (request.query as { limit?: string } | undefined)?.limit;
+      let limit = 200;
+      if (typeof rawLimit === 'string' && rawLimit.length > 0) {
+        const parsed = Number.parseInt(rawLimit, 10);
+        if (!Number.isFinite(parsed) || parsed < 1 || parsed > 500) {
+          step.fail('invalid limit');
+          return reply.status(400).send(teamHandoffRouteErrorPayload('team_handoff_invalid_limit'));
+        }
+        limit = parsed;
+      }
+      const records = listHandoffsBySession({ userId: user.sub, sessionId, limit });
+      step.succeed(undefined, { sessionId, count: records.length, limit });
+      return reply.send({ handoffs: records, limit });
+    },
+  );
+
+  app.post(
+    '/team/handoffs/:handoffId/review-actions/:action',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'team.handoffs.review-action');
+      const user = request.user as JwtPayload;
+      const params = parseParams(reviewActionParamsSchema, request.params);
+      const { action, handoffId } = params;
+
+      const record = getHandoff({ userId: user.sub, handoffId });
+      if (!record) {
+        step.fail('not found');
+        return reply.status(404).send(teamHandoffRouteErrorPayload('team_handoff_not_found'));
+      }
+      if (record.toRoleLayer !== 'pm2') {
+        step.fail('not pm2 handoff');
+        return reply
+          .status(409)
+          .send(teamHandoffRouteErrorPayload('team_handoff_review_requires_pm2'));
+      }
+
+      if (action === 'redispatch') {
+        const didRetry =
+          record.state === 'running'
+            ? retryRunningHandoffById(record.id)
+            : forceRetryFailedPm2Handoff({ handoffId: record.id, userId: user.sub });
+        if (!didRetry) {
+          step.fail('cannot redispatch');
+          return reply
+            .status(409)
+            .send(teamHandoffRouteErrorPayload('team_handoff_cannot_redispatch'));
+        }
+        const updated = getHandoff({ userId: user.sub, handoffId });
+        if (updated) {
+          publishHandoffEvent({ type: 'handoff.reclaimed', record: updated });
+        }
+        logHandoffControl({
+          action: 'resume',
+          actorEmail: user.email,
+          actorUserId: user.sub,
+          reason: 'manual-review-redispatch',
+          record,
+        });
+        step.succeed(undefined, { action, handoffId });
+        return reply.send({
+          action,
+          handoffId,
+          handoffs: updated ? [updated] : [],
+        });
+      }
+
+      if (action === 'return-to-c') {
+        const replay = replayPm1FromPm2Failure({ handoffId: record.id, userId: user.sub });
+        if (!replay) {
+          step.fail('cannot return to c');
+          return reply
+            .status(409)
+            .send(teamHandoffRouteErrorPayload('team_handoff_cannot_return_to_pm1'));
+        }
+        markReviewDispositionHandled({
+          action,
+          handoffId: record.id,
+          userId: user.sub,
+        });
+        publishHandoffEvent({ type: 'handoff.created', record: replay });
+        const updated = getHandoff({ userId: user.sub, handoffId });
+        if (updated) {
+          publishHandoffEvent({
+            type: 'handoff.failed',
+            record: updated,
+            payload: { reason: updated.failureReason },
+          });
+        }
+        await appendPm2SystemMessage({
+          sessionId: record.toSessionId,
+          userId: user.sub,
+          text: '↩️ 已根据用户决定重新派发 PM1，请基于更新后的规划继续推进。',
+        });
+        logHandoffControl({
+          action: 'resume',
+          actorEmail: user.email,
+          actorUserId: user.sub,
+          reason: 'manual-review-return-to-c',
+          record,
+        });
+        step.succeed(undefined, { action, createdHandoffId: replay.id, handoffId });
+        return reply.send({
+          action,
+          createdHandoffId: replay.id,
+          handoffId,
+          handoffs: [updated, replay].filter((entry) => entry !== undefined),
+        });
+      }
+
+      markReviewDispositionHandled({
+        action,
+        handoffId: record.id,
+        userId: user.sub,
+      });
+      const updated = getHandoff({ userId: user.sub, handoffId });
+      if (updated) {
+        publishHandoffEvent({
+          type: 'handoff.failed',
+          record: updated,
+          payload: { reason: updated.failureReason },
+        });
+      }
+      await appendPm2SystemMessage({
+        sessionId: record.toSessionId,
+        userId: user.sub,
+        text: '🧑 用户已确认接管当前评审失败，请按新的指令或补充约束继续处理。',
+      });
+      logHandoffControl({
+        action: 'resume',
+        actorEmail: user.email,
+        actorUserId: user.sub,
+        reason: 'manual-review-escalate-to-user',
+        record,
+      });
+      step.succeed(undefined, { action, handoffId });
+      return reply.send({
+        action,
+        handoffId,
+        handoffs: updated ? [updated] : [],
+      });
     },
   );
 
@@ -278,15 +538,16 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
       const before = getHandoff({ userId: user.sub, handoffId });
       if (!before) {
         step.fail('not found');
-        return reply.status(404).send({ error: 'Handoff not found' });
+        return reply.status(404).send(teamHandoffRouteErrorPayload('team_handoff_not_found'));
       }
       const ok = cancelHandoff({ userId: user.sub, handoffId });
       if (!ok) {
         step.fail(`cannot cancel from state ${before.state}`);
-        return reply.status(409).send({
-          error: 'cannot-cancel',
-          state: before.state,
-        });
+        return reply.status(409).send(
+          teamHandoffRouteErrorPayload('team_handoff_cannot_cancel', {
+            state: before.state,
+          }),
+        );
       }
       const after = getHandoff({ userId: user.sub, handoffId });
       if (after) {
@@ -340,7 +601,7 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
       const before = getHandoff({ userId: user.sub, handoffId });
       if (!before) {
         step.fail('not found');
-        return reply.status(404).send({ error: 'Handoff not found' });
+        return reply.status(404).send(teamHandoffRouteErrorPayload('team_handoff_not_found'));
       }
 
       const ok = pauseHandoff({
@@ -350,11 +611,12 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
       });
       if (!ok) {
         step.fail(`cannot pause from state ${before.state}`);
-        return reply.status(409).send({
-          error: 'cannot-pause',
-          state: before.state,
-          paused: before.paused,
-        });
+        return reply.status(409).send(
+          teamHandoffRouteErrorPayload('team_handoff_cannot_pause', {
+            state: before.state,
+            paused: before.paused,
+          }),
+        );
       }
 
       const after = getHandoff({ userId: user.sub, handoffId });
@@ -395,17 +657,18 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
       const before = getHandoff({ userId: user.sub, handoffId });
       if (!before) {
         step.fail('not found');
-        return reply.status(404).send({ error: 'Handoff not found' });
+        return reply.status(404).send(teamHandoffRouteErrorPayload('team_handoff_not_found'));
       }
 
       const ok = resumeHandoff({ userId: user.sub, handoffId });
       if (!ok) {
         step.fail(`cannot resume from state ${before.state}`);
-        return reply.status(409).send({
-          error: 'cannot-resume',
-          state: before.state,
-          paused: before.paused,
-        });
+        return reply.status(409).send(
+          teamHandoffRouteErrorPayload('team_handoff_cannot_resume', {
+            state: before.state,
+            paused: before.paused,
+          }),
+        );
       }
 
       const after = getHandoff({ userId: user.sub, handoffId });
@@ -429,6 +692,177 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
 
       step.succeed(undefined, { handoffId, paused: false });
       return reply.send({ handoff: after });
+    },
+  );
+
+  app.post(
+    '/team/sessions/:sessionId/pause-all',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'team.sessions.pause-all');
+      const user = request.user as JwtPayload;
+      const sessionId = (request.params as { sessionId: string }).sessionId;
+
+      const parseStep = child('parse-body');
+      const body = parseBody(pauseHandoffSchema, request.body ?? {});
+      parseStep.succeed();
+
+      const result = pauseTeamRuntimeTree({
+        reason: body.reason ?? null,
+        rootSessionId: sessionId,
+        userId: user.sub,
+      });
+      if (!result) {
+        step.fail('root session not found');
+        return reply.status(404).send(teamHandoffRouteErrorPayload('team_session_not_found'));
+      }
+
+      for (const handoffId of result.pausedHandoffIds) {
+        // Per-handoff resilience: the tree state was already committed
+        // atomically by pauseTeamRuntimeTree above; this loop only fans out
+        // control signals + scheduler events. A throw on one handoff (e.g.
+        // getHandoff SQLite error) must not abort the loop and skip the
+        // aggregate all-paused event + audit log + HTTP reply below — that
+        // would 500 a pause that already took effect and leave the UI without
+        // the terminal notification. Isolate per handoff + warn.
+        try {
+          const after = getHandoff({ userId: user.sub, handoffId });
+          if (!after) {
+            continue;
+          }
+          injectControlSignal({
+            action: 'pause',
+            messageType: 'pause_signal',
+            reason: body.reason ?? null,
+            record: after,
+          });
+          publishSchedulerControlEvent({
+            type: 'scheduler.task-paused',
+            reason: body.reason ?? null,
+            record: after,
+          });
+        } catch (err) {
+          console.warn(
+            `[team-handoffs] pause-all 派发 handoff ${handoffId} 控制信号失败，跳过继续：${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      }
+
+      publishSchedulerAllControlEvent({
+        handoffIds: result.pausedHandoffIds,
+        reason: body.reason ?? null,
+        rootRoleLayer: result.rootRoleLayer,
+        rootSessionId: result.rootSessionId,
+        sessionIds: result.pausedSessionIds,
+        type: 'scheduler.all-paused',
+        userId: user.sub,
+      });
+      logSessionTreeControl({
+        action: 'pause-all',
+        actorEmail: user.email,
+        actorUserId: user.sub,
+        handoffIds: result.pausedHandoffIds,
+        reason: body.reason ?? null,
+        rootSessionId: result.rootSessionId,
+        sessionIds: result.pausedSessionIds,
+        userId: user.sub,
+      });
+
+      step.succeed(undefined, {
+        pausedHandoffCount: result.pausedHandoffIds.length,
+        pausedSessionCount: result.pausedSessionIds.length,
+        sessionId,
+      });
+      return reply.send({
+        handoffIds: result.pausedHandoffIds,
+        pausedHandoffCount: result.pausedHandoffIds.length,
+        pausedSessionCount: result.pausedSessionIds.length,
+        sessionIds: result.pausedSessionIds,
+        sessionId: result.rootSessionId,
+      });
+    },
+  );
+
+  app.post(
+    '/team/sessions/:sessionId/resume-all',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'team.sessions.resume-all');
+      const user = request.user as JwtPayload;
+      const sessionId = (request.params as { sessionId: string }).sessionId;
+
+      const result = resumeTeamRuntimeTree({
+        rootSessionId: sessionId,
+        userId: user.sub,
+      });
+      if (!result) {
+        step.fail('root session not found');
+        return reply.status(404).send(teamHandoffRouteErrorPayload('team_session_not_found'));
+      }
+
+      for (const handoffId of result.resumedHandoffIds) {
+        // Per-handoff resilience: see pause-all above. The resume tree state is
+        // already committed; one handoff's control-signal fan-out throwing must
+        // not abort the aggregate all-resumed event + audit + reply.
+        try {
+          const after = getHandoff({ userId: user.sub, handoffId });
+          if (!after) {
+            continue;
+          }
+          injectControlSignal({
+            action: 'resume',
+            messageType: 'resume_signal',
+            record: after,
+          });
+          publishSchedulerControlEvent({
+            type: 'scheduler.task-resumed',
+            record: after,
+          });
+        } catch (err) {
+          console.warn(
+            `[team-handoffs] resume-all 派发 handoff ${handoffId} 控制信号失败，跳过继续：${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      }
+
+      publishSchedulerAllControlEvent({
+        handoffIds: result.resumedHandoffIds,
+        rootRoleLayer: result.rootRoleLayer,
+        rootSessionId: result.rootSessionId,
+        sessionIds: result.resumedSessionIds,
+        staleSessionCount: result.staleSessionCount,
+        type: 'scheduler.all-resumed',
+        userId: user.sub,
+      });
+      logSessionTreeControl({
+        action: 'resume-all',
+        actorEmail: user.email,
+        actorUserId: user.sub,
+        handoffIds: result.resumedHandoffIds,
+        rootSessionId: result.rootSessionId,
+        sessionIds: result.resumedSessionIds,
+        staleSessionCount: result.staleSessionCount,
+        userId: user.sub,
+      });
+
+      step.succeed(undefined, {
+        resumedHandoffCount: result.resumedHandoffIds.length,
+        resumedSessionCount: result.resumedSessionIds.length,
+        sessionId,
+        staleSessionCount: result.staleSessionCount,
+      });
+      return reply.send({
+        resumedHandoffCount: result.resumedHandoffIds.length,
+        resumedSessionCount: result.resumedSessionIds.length,
+        sessionId: result.rootSessionId,
+        sessionIds: result.resumedSessionIds,
+        staleSessionCount: result.staleSessionCount,
+        handoffIds: result.resumedHandoffIds,
+      });
     },
   );
 
@@ -500,5 +934,168 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
       step.succeed(undefined, { count: artifacts.length });
       return reply.send({ artifacts });
     },
+  );
+}
+
+async function appendPm2SystemMessage(input: {
+  sessionId: string | null;
+  text: string;
+  userId: string;
+}): Promise<void> {
+  if (!input.sessionId) {
+    return;
+  }
+  try {
+    const { appendSessionMessageV2 } = await import('../message/message-v2-adapter.js');
+    appendSessionMessageV2({
+      sessionId: input.sessionId,
+      userId: input.userId,
+      role: 'assistant',
+      content: [{ type: 'text', text: input.text }],
+    });
+  } catch (err) {
+    console.warn(
+      `[team-handoffs] append pm2 system message failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
+function forceRetryFailedPm2Handoff(input: { handoffId: string; userId: string }): boolean {
+  const row = sqliteGet<{ payload_json: string; state: string; to_role_layer: string }>(
+    `SELECT state, to_role_layer, payload_json FROM handoff_records WHERE id = ? AND user_id = ? LIMIT 1`,
+    [input.handoffId, input.userId],
+  );
+  if (!row || row.state !== 'failed' || row.to_role_layer !== 'pm2') {
+    return false;
+  }
+  const payload = (() => {
+    try {
+      const parsed = JSON.parse(row.payload_json) as unknown;
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        const record = { ...(parsed as Record<string, unknown>) };
+        delete record['reviewDispositionHandledAction'];
+        delete record['reviewDispositionHandledAt'];
+        return record;
+      }
+    } catch {
+      // ignore malformed payload and fall back to empty object
+    }
+    return {};
+  })();
+  sqliteRun(
+    `UPDATE handoff_records
+       SET state = 'pending',
+           failure_reason = NULL,
+           claim_token = NULL,
+           claimed_at = NULL,
+           started_at = NULL,
+           completed_at = NULL,
+           to_session_id = NULL,
+           payload_json = ?,
+           retry_count = retry_count + 1,
+           updated_at = datetime('now')
+     WHERE id = ? AND user_id = ? AND state = 'failed'`,
+    [JSON.stringify(payload), input.handoffId, input.userId],
+  );
+  return true;
+}
+
+function replayPm1FromPm2Failure(input: {
+  handoffId: string;
+  userId: string;
+}): HandoffRecord | null {
+  const pm2Row = sqliteGet<{
+    from_session_id: string;
+  }>(
+    `SELECT from_session_id
+       FROM handoff_records
+      WHERE id = ? AND user_id = ? AND to_role_layer = 'pm2'
+      LIMIT 1`,
+    [input.handoffId, input.userId],
+  );
+  if (!pm2Row) {
+    return null;
+  }
+
+  const upstream = sqliteGet<{
+    from_role_layer: string;
+    from_session_id: string;
+    payload_json: string;
+  }>(
+    `SELECT from_role_layer, from_session_id, payload_json
+       FROM handoff_records
+      WHERE user_id = ?
+        AND to_role_layer = 'pm1'
+        AND to_session_id = ?
+      ORDER BY created_at DESC
+      LIMIT 1`,
+    [input.userId, pm2Row.from_session_id],
+  );
+  if (!upstream) {
+    return null;
+  }
+
+  const payload = (() => {
+    try {
+      return JSON.parse(upstream.payload_json) as unknown;
+    } catch {
+      return {};
+    }
+  })();
+
+  return createHandoff({
+    userId: input.userId,
+    fromSessionId: upstream.from_session_id,
+    fromRoleLayer: upstream.from_role_layer as HandoffRoleLayer,
+    toRoleLayer: 'pm1',
+    payload,
+  });
+}
+
+function markReviewDispositionHandled(input: {
+  action: 'return-to-c' | 'escalate-to-user';
+  handoffId: string;
+  userId: string;
+}): void {
+  const row = sqliteGet<{ payload_json: string }>(
+    `SELECT payload_json FROM handoff_records WHERE id = ? AND user_id = ? LIMIT 1`,
+    [input.handoffId, input.userId],
+  );
+  const payload = (() => {
+    try {
+      const parsed = row?.payload_json ? JSON.parse(row.payload_json) : {};
+      return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : {};
+    } catch {
+      return {};
+    }
+  })();
+  if (isHandledReviewFailurePayload(payload)) {
+    return;
+  }
+  sqliteRun(
+    `UPDATE handoff_records
+        SET payload_json = ?,
+            updated_at = datetime('now')
+      WHERE id = ? AND user_id = ?`,
+    [
+      JSON.stringify({
+        ...mergeReviewDispositionIntoPayload(payload, {
+          action:
+            getReviewDispositionFromPayload(payload)?.action ??
+            (input.action === 'return-to-c' ? 'return-to-c' : 'escalate-to-user'),
+          reason:
+            getReviewDispositionFromPayload(payload)?.reason ??
+            (input.action === 'return-to-c' ? '用户确认退回 PM1 重规划' : '用户确认自行接管'),
+          status: 'handled',
+          updatedAtMs: Date.now(),
+        }),
+        reviewDispositionHandledAction: input.action,
+        reviewDispositionHandledAt: Date.now(),
+      }),
+      input.handoffId,
+      input.userId,
+    ],
   );
 }
