@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   computeTeamEventsReconnectDelay,
+  dispatchTeamEvent,
   resolveTeamEventsLivenessAction,
   getTeamNotificationEventKey,
   hydrateClarificationStore,
@@ -12,12 +13,14 @@ import {
   useLayerStore,
   useTeamNotificationStore,
 } from './team-events.js';
+import { useTeamUsageStore } from './team-usage.js';
 
 beforeEach(() => {
   useHandoffStore.getState().clear();
   useLayerStore.getState().clear();
   useClarificationStore.getState().clear();
   useTeamNotificationStore.getState().clear();
+  useTeamUsageStore.getState().clear();
 });
 
 describe('computeTeamEventsReconnectDelay', () => {
@@ -478,3 +481,58 @@ describe('useHandoffStore · 事件单调性守卫 (#9)', () => {
   });
 });
 
+describe('dispatchTeamEvent · 度量遥测事件不污染通知 / handoff store', () => {
+  it('team_usage 事件只进 usage store，不进 notification / handoff store', () => {
+    dispatchTeamEvent({
+      // 后端复用 session.substate.changed 作为遥测信封类型
+      type: 'session.substate.changed',
+      sessionId: 'sess-telemetry',
+      timestamp: 10,
+      payload: {
+        __teamEventKind: 'team_usage',
+        sessionId: 'sess-telemetry',
+        layer: 'pm1',
+        provider: 'anthropic',
+        inputTokens: 120,
+        outputTokens: 30,
+        costUsd: 0.05,
+      },
+    });
+
+    // 不进"待回复"通知列表（否则会被大量阶段更新刷屏 + 触发 reload 风暴）
+    expect(useTeamNotificationStore.getState().events).toHaveLength(0);
+    expect(useTeamNotificationStore.getState().unreadCount).toBe(0);
+    // 不进 handoff store
+    expect(useHandoffStore.getState().handoffs.size).toBe(0);
+    // 进 usage store
+    expect(useTeamUsageStore.getState().byLayer.get('pm1')?.inputTokens).toBe(120);
+    expect(useTeamUsageStore.getState().total.count).toBe(1);
+  });
+
+  it('team_tool_call / team_timing 同样不进通知列表', () => {
+    dispatchTeamEvent({
+      type: 'session.substate.changed',
+      sessionId: 'sess-t2',
+      timestamp: 11,
+      payload: { __teamEventKind: 'team_tool_call', sessionId: 'sess-t2', toolName: 'read' },
+    });
+    dispatchTeamEvent({
+      type: 'session.substate.changed',
+      sessionId: 'sess-t2',
+      timestamp: 12,
+      payload: { __teamEventKind: 'team_timing', sessionId: 'sess-t2', totalMs: 1500 },
+    });
+    expect(useTeamNotificationStore.getState().events).toHaveLength(0);
+  });
+
+  it('真正的 session.substate.changed（无 __teamEventKind）仍进通知列表', () => {
+    dispatchTeamEvent({
+      type: 'session.substate.changed',
+      sessionId: 'sess-real',
+      timestamp: 13,
+      payload: { substate: 'drafting_spec' },
+    });
+    expect(useTeamNotificationStore.getState().events).toHaveLength(1);
+    expect(useTeamNotificationStore.getState().events[0]?.type).toBe('session.substate.changed');
+  });
+});
