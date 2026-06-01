@@ -321,6 +321,30 @@ async function cascadeCancelDownstream(input: {
       publishHandoffEvent({ type: 'handoff.cancelled', record });
     }
   }
+
+  // 审计：记录级联取消的范围（根 session、波及 session 数、取消 handoff 数），
+  // 便于事后排查「取消了什么」。best-effort，不阻塞。
+  try {
+    logTeamAudit({
+      action: 'handoff_control',
+      actorUserId: input.userId,
+      detail: JSON.stringify({
+        action: 'cascade-cancel',
+        rootSessionId: input.rootSessionId,
+        excludeHandoffId: input.excludeHandoffId ?? null,
+        treeSessionCount: result.treeSessionIds.length,
+        cascadeCancelledHandoffIds: result.cancelledHandoffIds,
+      }),
+      entityId: input.rootSessionId,
+      entityType: 'session',
+      summary: `cascade cancel: root=${input.rootSessionId.slice(0, 8)} sessions=${result.treeSessionIds.length} handoffs=${result.cancelledHandoffIds.length}`,
+      userId: input.userId,
+    });
+  } catch (err) {
+    console.warn(
+      `[team-handoffs] cascade 审计日志写入失败（不阻塞）：${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 }
 
 export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {

@@ -209,6 +209,32 @@ registerInstruction({
       });
     }
 
+    // 审计：取消是跨层的重要写操作，记录到 team_audit_logs 以便回溯（谁、取消了
+    // 哪个 handoff、级联了多少、为什么）。失败不阻塞主流程。
+    try {
+      sqliteRun(
+        `INSERT INTO team_audit_logs (user_id, action, entity_type, entity_id, summary, detail, created_at)
+         VALUES (?, 'handoff_control', 'handoff', ?, ?, ?, datetime('now'))`,
+        [
+          ctx.userId,
+          args.handoffId,
+          `cancel_downstream: ${args.handoffId.slice(0, 8)} 及下游 ${cancelledCount} 个`,
+          JSON.stringify({
+            action: 'cancel',
+            handoffId: args.handoffId,
+            cascadeCancelledCount: cancelledCount,
+            reason: args.reason,
+            requestedBy: 'reception',
+            callerSessionId: ctx.sessionId,
+          }),
+        ],
+      );
+    } catch (err) {
+      console.warn(
+        `[cancel_downstream] 审计日志写入失败（不阻塞）：${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
     return {
       ok: true,
       message: `已取消 handoff ${args.handoffId.slice(0, 8)} 及其下游子任务（共 ${cancelledCount} 个）。`,
