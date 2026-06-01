@@ -2310,6 +2310,33 @@ export async function handleStreamRequest(input: {
               'cancelled by inbound control signal —',
               control.reason,
             );
+            // 结构化留痕：跨层「带内」取消是重要的运行事件，记录到 runtime incident
+            // （进而摊销写入 team_audit_logs），便于事后回溯「为什么这一层被中止」。
+            // best-effort：记录失败绝不阻塞取消本身。
+            try {
+              const { recordTeamRuntimeIncident } = await import(
+                '../team/team-runtime-diagnostics-store.js'
+              );
+              recordTeamRuntimeIncident({
+                category: 'handoff_failure',
+                code: 'stream-cancelled-by-inbound-signal',
+                context: {
+                  sessionId: input.sessionId,
+                  roleLayer: input.sessionContext.roleLayer ?? null,
+                  round,
+                  reason: control.reason,
+                },
+                message: `团队层 stream 被带内控制信号中止：${control.reason}`,
+                severity: control.reason === 'pause-timeout-exceeded' ? 'error' : 'warning',
+                timestamp: Date.now(),
+                userId: input.user.sub,
+              });
+            } catch (recordErr) {
+              console.warn(
+                '[STREAM_TEAM_CONTROL] record incident failed (non-blocking):',
+                recordErr instanceof Error ? recordErr.message : String(recordErr),
+              );
+            }
             abortController.abort();
             throw createAbortError();
           }

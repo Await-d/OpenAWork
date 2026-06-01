@@ -519,8 +519,25 @@ export function dispatchTeamEvent(event: HandoffEvent): void {
   const { push } = useTeamNotificationStore.getState();
   const { push: pushClarifications } = useClarificationStore.getState();
 
-  applyEvent(event);
-  push(event);
+  // 后端 stream-team-events.ts 通过 __teamEventKind 标记区分事件类型。
+  const teamEventKind = event.payload?.['__teamEventKind'] as string | undefined;
+
+  // 指标遥测事件（team_usage / team_tool_call / team_timing）复用了
+  // `type: 'session.substate.changed'` 作为信封类型，但它们是纯度量数据，
+  // 只应路由到 usage / tool-call store。绝不能进 handoff / notification store：
+  //   - 进 notification → "待回复"列表被大量"阶段更新"噪声刷屏（即截图里看到的
+  //     重复 session.substate.changed 行），且每条都触发会话 reload 风暴。
+  //   - 进 handoff store → applyEvent 因无 taskId 直接 return，本就无副作用，
+  //     但显式短路更清晰。
+  const isTelemetryEvent =
+    teamEventKind === 'team_usage' ||
+    teamEventKind === 'team_tool_call' ||
+    teamEventKind === 'team_timing';
+
+  if (!isTelemetryEvent) {
+    applyEvent(event);
+    push(event);
+  }
 
   // 单独分发 [NEEDS CLARIFICATION]
   if (event.type === 'artifact.needs-clarification') {
@@ -560,9 +577,8 @@ export function dispatchTeamEvent(event: HandoffEvent): void {
   }
 
   // ─── Team tabs data: usage / tool_call / timing 事件路由 ─────────────
-  // 后端 stream-team-events.ts 通过 __teamEventKind 标记区分事件类型，
-  // 这里按 kind 分发到对应 zustand store。
-  const teamEventKind = event.payload?.['__teamEventKind'] as string | undefined;
+  // 按 kind 分发到对应 zustand store（telemetry 事件已在上方从 notification /
+  // handoff store 中排除，这里只做度量聚合）。
   if (teamEventKind === 'team_usage') {
     const { applyUsageEvent } = useTeamUsageStore.getState();
     const usageSessionId = (event.payload['sessionId'] as string) ?? event.sessionId ?? undefined;
