@@ -85,6 +85,19 @@ describe('useTeamRunState', () => {
     expect(result.current.completedCount).toBe(2);
   });
 
+  it('全部取消 → 无活跃任务，cancelledCount 反映取消数', () => {
+    setConnection('connected');
+    setHandoffs([
+      entry({ id: 'a', state: 'cancelled', updatedAt: Date.now() }),
+      entry({ id: 'b', state: 'cancelled', updatedAt: Date.now() }),
+    ]);
+    const { result } = renderHook(() => useTeamRunState());
+    expect(result.current.activeCount).toBe(0);
+    expect(result.current.cancelledCount).toBe(2);
+    // 无 active、无 failed-only、有 total → completed 态（横幅会附「N 个已取消」）。
+    expect(result.current.phase).toBe('completed');
+  });
+
   it('WS 断开 → disconnected（优先于其它）', () => {
     setConnection('offline');
     setHandoffs([entry({ id: 'a', state: 'running', updatedAt: Date.now() })]);

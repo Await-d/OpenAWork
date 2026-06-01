@@ -33,6 +33,8 @@ export interface TeamRunState {
   failedCount: number;
   /** 已完成 handoff 数。 */
   completedCount: number;
+  /** 已取消 handoff 数。 */
+  cancelledCount: number;
   /** handoff 总数。 */
   totalCount: number;
   /** 最近一次活动距今的毫秒数（无活动为 null）。 */
@@ -68,6 +70,7 @@ export function useTeamRunState(): TeamRunState {
     const activeEntries = entries.filter((h) => ACTIVE_STATES.has(h.state));
     const failedCount = entries.filter((h) => h.state === 'failed').length;
     const completedCount = entries.filter((h) => h.state === 'completed').length;
+    const cancelledCount = entries.filter((h) => h.state === 'cancelled').length;
 
     // 最近活动时间：取所有 handoff updatedAt 与最近事件 timestamp 的最大值。
     const handoffLatest = entries.reduce(
@@ -103,6 +106,7 @@ export function useTeamRunState(): TeamRunState {
       activeCount: activeEntries.length,
       failedCount,
       completedCount,
+      cancelledCount,
       totalCount,
       lastActivityAgoMs,
       activeLayer,

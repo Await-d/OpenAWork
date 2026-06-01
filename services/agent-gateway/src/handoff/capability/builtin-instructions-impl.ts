@@ -210,25 +210,26 @@ registerInstruction({
     }
 
     // 审计：取消是跨层的重要写操作，记录到 team_audit_logs 以便回溯（谁、取消了
-    // 哪个 handoff、级联了多少、为什么）。失败不阻塞主流程。
+    // 哪个 handoff、级联了多少、为什么）。走规范的 logTeamAudit（含保留裁剪 +
+    // actor 字段），不直接拼 SQL，避免列漂移与表无界膨胀。失败不阻塞主流程。
     try {
-      sqliteRun(
-        `INSERT INTO team_audit_logs (user_id, action, entity_type, entity_id, summary, detail, created_at)
-         VALUES (?, 'handoff_control', 'handoff', ?, ?, ?, datetime('now'))`,
-        [
-          ctx.userId,
-          args.handoffId,
-          `cancel_downstream: ${args.handoffId.slice(0, 8)} 及下游 ${cancelledCount} 个`,
-          JSON.stringify({
-            action: 'cancel',
-            handoffId: args.handoffId,
-            cascadeCancelledCount: cancelledCount,
-            reason: args.reason,
-            requestedBy: 'reception',
-            callerSessionId: ctx.sessionId,
-          }),
-        ],
-      );
+      const { logTeamAudit } = await import('../../team/team-audit-store.js');
+      logTeamAudit({
+        action: 'handoff_control',
+        actorUserId: ctx.userId,
+        entityType: 'handoff',
+        entityId: args.handoffId,
+        summary: `cancel_downstream: ${args.handoffId.slice(0, 8)} 及下游 ${cancelledCount} 个`,
+        detail: JSON.stringify({
+          action: 'cancel',
+          handoffId: args.handoffId,
+          cascadeCancelledCount: cancelledCount,
+          reason: args.reason,
+          requestedBy: 'reception',
+          callerSessionId: ctx.sessionId,
+        }),
+        userId: ctx.userId,
+      });
     } catch (err) {
       console.warn(
         `[cancel_downstream] 审计日志写入失败（不阻塞）：${err instanceof Error ? err.message : String(err)}`,

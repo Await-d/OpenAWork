@@ -196,31 +196,32 @@ export function SessionStatsPanel({ sessionId, sessionTitle }: SessionStatsPanel
             label="LLM 调用"
             value={hasUsage ? String(stats.usageCalls) : '—'}
             icon="play"
-            note={hasUsage ? '本会话及子树' : '等待 team_usage 接入'}
+            note={hasUsage ? '本会话及子树' : '暂无用量记录'}
           />
           <StatCard
             label="输入 token"
             value={hasUsage ? formatTokens(stats.inputTokens) : '—'}
-            note={hasUsage ? undefined : '等待 team_usage 接入'}
+            note={hasUsage ? undefined : '暂无用量记录'}
           />
           <StatCard
             label="输出 token"
             value={hasUsage ? formatTokens(stats.outputTokens) : '—'}
-            note={hasUsage ? undefined : '等待 team_usage 接入'}
+            note={hasUsage ? undefined : '暂无用量记录'}
           />
           <StatCard
             label="估算成本"
             value={hasUsage ? formatCost(stats.costUsd) : '—'}
             tone={hasUsage ? 'accent' : 'default'}
-            note={hasUsage ? undefined : '等待 team_usage 接入'}
+            note={hasUsage ? undefined : '暂无用量记录'}
           />
         </MetricGrid>
       </SectionPanel>
 
       {!hasUsage ? (
         <span style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
-          token / 费用来自 agent-gateway 的 <code>team_usage</code> 事件。当前未接入时显示 “—”，
-          后端开始推送后会自动按本会话及其子层级聚合。
+          token / 费用来自 agent-gateway 的 <code>team_usage</code> 用量记录（已持久化）。
+          本会话还没有产生 LLM 调用时显示 “—”，团队执行后会按本会话及其子层级自动聚合，
+          刷新 / 重连后依然保留。
         </span>
       ) : null}
     </div>

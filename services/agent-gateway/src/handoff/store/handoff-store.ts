@@ -863,11 +863,14 @@ export function reclaimAbandonedHandoffs(input: {
          WHERE id = ? AND state IN ('claimed','running')`,
         [stuckRow.id],
       );
-      const after = sqliteGet<{ state: string }>(
-        `SELECT state FROM handoff_records WHERE id = ? LIMIT 1`,
+      const after = sqliteGet<{ state: string; failure_reason: string | null }>(
+        `SELECT state, failure_reason FROM handoff_records WHERE id = ? LIMIT 1`,
         [stuckRow.id],
       );
-      if (after?.state === 'failed') {
+      // 只在「确实是本次 UPDATE 把它转成 doom-loop failed」时计入 failedIds。
+      // 若它已被其它路径（heartbeat-timeout / runner failHandoff）标成别的 failed
+      // 原因，则不重复认领、不重复发 handoff.failed 事件。
+      if (after?.state === 'failed' && after.failure_reason === 'doom-loop-wallclock-timeout') {
         failedIds.push(stuckRow.id);
       }
     }

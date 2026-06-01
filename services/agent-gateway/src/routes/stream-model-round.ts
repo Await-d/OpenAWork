@@ -89,6 +89,32 @@ const STREAM_RUNTIME_ERROR_MESSAGES = {
   genericStreamError: '流式响应处理中断，请稍后重试。',
 } as const;
 
+/**
+ * 粗略 token 估算（~4 字符/token）。仅在 provider 流式响应不回 usage（token 全 0）时
+ * 作为团队度量 / 月度用量统计的兜底，保证「用了却归零」不再发生；有真实 usage 时不启用。
+ *
+ * 导出仅为单测；运行时只在本模块内 onFinish 处调用。
+ */
+export function estimateTokensFromText(text: string | null | undefined): number {
+  if (!text) return 0;
+  return Math.ceil(text.length / 4);
+}
+
+/** 估算一组发往模型的消息的输入 token 数（按整体 JSON 序列化长度近似）。导出仅为单测。 */
+export function estimateModelMessagesTokens(messages: readonly unknown[]): number {
+  if (!Array.isArray(messages) || messages.length === 0) return 0;
+  let chars = 0;
+  for (const message of messages) {
+    try {
+      const content = (message as { content?: unknown })?.content;
+      chars += typeof content === 'string' ? content.length : JSON.stringify(content ?? '').length;
+    } catch {
+      // 序列化失败（极少）跳过该条，不阻塞估算。
+    }
+  }
+  return Math.ceil(chars / 4);
+}
+
 type WorkflowStepHandle = ReturnType<WorkflowLogger['start']>;
 
 interface StreamAccumulationState {
@@ -1280,8 +1306,20 @@ export async function runModelRound(input: {
           const cacheReadTokens =
             usage.inputTokenDetails?.cacheReadTokens ?? usage.cachedInputTokens ?? 0;
           const cacheWriteTokens = usage.inputTokenDetails?.cacheWriteTokens ?? 0;
-          const rawInputTokens = usage.inputTokens ?? 0;
-          const rawOutputTokens = usage.outputTokens ?? 0;
+          let rawInputTokens = usage.inputTokens ?? 0;
+          let rawOutputTokens = usage.outputTokens ?? 0;
+          // 兜底：部分 provider 流式响应不回 usage（token 全 0）。为了让团队度量
+          // 面板与月度用量统计不至于「用了却归零」，按 ~4 字符/token 的粗略口径，
+          // 从本轮入参消息 / 已累积的助手文本估算。仅在 provider 完全没给时启用，
+          // 有真实 usage 时绝不覆盖。
+          if (rawInputTokens === 0 && rawOutputTokens === 0) {
+            const estimatedInput = estimateModelMessagesTokens(modelMessages);
+            const estimatedOutput = estimateTokensFromText(state.assistantText);
+            if (estimatedInput > 0 || estimatedOutput > 0) {
+              rawInputTokens = estimatedInput;
+              rawOutputTokens = estimatedOutput;
+            }
+          }
           const nextUsage: StreamUsageSummary = {
             inputTokens: Math.max(0, rawInputTokens - cacheReadTokens - cacheWriteTokens),
             outputTokens: Math.max(0, rawOutputTokens - reasoningTokens),

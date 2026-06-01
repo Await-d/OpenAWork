@@ -119,7 +119,7 @@ export function TeamRunStateBanner({ receptionStateStatus }: TeamRunStateBannerP
     case 'completed':
       detail = `共 ${run.completedCount}/${run.totalCount} 个任务完成${
         run.failedCount > 0 ? `，${run.failedCount} 个失败` : ''
-      }`;
+      }${run.cancelledCount > 0 ? `，${run.cancelledCount} 个已取消` : ''}`;
       break;
     case 'disconnected':
       detail = '与团队的实时连接已断开，当前状态可能不是最新，正在尝试重连…';

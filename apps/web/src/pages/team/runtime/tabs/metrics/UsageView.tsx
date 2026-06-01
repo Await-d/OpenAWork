@@ -179,10 +179,11 @@ function UsageMetricsPanel({ selectedSessionId, selectedSessionTitle }: UsageVie
             title="暂无用量数据"
             description={
               <>
-                用量数据来自 agent-gateway 的 stream usage 事件。
+                用量数据来自 agent-gateway 的 <code>team_usage</code> 用量记录（已持久化，
+                覆盖 stream 与非流式 workflow 两条 LLM 调用路径）。
                 <br />
-                等待后端通过 team-events 推送 <code>team_usage</code> 事件， 前端{' '}
-                <code>useTeamUsageStore.applyUsageEvent</code> 会自动累计。
+                团队执行产生 LLM 调用后会自动按 provider / agent / session / layer 聚合，
+                刷新 / 重连后依然保留。
               </>
             }
           />
