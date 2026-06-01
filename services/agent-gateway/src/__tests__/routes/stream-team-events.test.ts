@@ -14,6 +14,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import type * as DbModule from '../../infra/db.js';
 import type * as EventsModule from '../../routes/stream-team-events.js';
 import type * as RecordsModule from '../../team/team-usage-records-store.js';
+import type * as BusActual from '../../handoff/bus/team-events-bus.js';
 
 process.env['DATABASE_URL'] = ':memory:';
 
@@ -25,7 +26,7 @@ const USER_ID = 'u-stream-team-events';
 
 const publishSpy = vi.fn();
 vi.mock('../../handoff/bus/team-events-bus.js', async (orig) => {
-  type BusModule = typeof import('../../handoff/bus/team-events-bus.js');
+  type BusModule = typeof BusActual;
   const actual = await (orig() as Promise<BusModule>);
   return {
     ...actual,
@@ -45,10 +46,10 @@ beforeAll(async () => {
 beforeEach(() => {
   dbModule.sqliteRun('DELETE FROM team_usage_records', []);
   dbModule.sqliteRun('DELETE FROM users', []);
-  dbModule.sqliteRun(
-    "INSERT OR IGNORE INTO users (id, email, password_hash) VALUES (?, ?, 'x')",
-    [USER_ID, `${USER_ID}@example.com`],
-  );
+  dbModule.sqliteRun("INSERT OR IGNORE INTO users (id, email, password_hash) VALUES (?, ?, 'x')", [
+    USER_ID,
+    `${USER_ID}@example.com`,
+  ]);
   publishSpy.mockReset();
 });
 
@@ -144,8 +145,8 @@ describe('stream-team-events · roleLayer 守卫 + 持久化', () => {
       outputTokens: 0,
     });
     expect(publishSpy).not.toHaveBeenCalled();
-    expect(records.listTeamUsageRecords({ userId: USER_ID, sessionIds: ['s-x', 's-y'] })).toHaveLength(
-      0,
-    );
+    expect(
+      records.listTeamUsageRecords({ userId: USER_ID, sessionIds: ['s-x', 's-y'] }),
+    ).toHaveLength(0);
   });
 });

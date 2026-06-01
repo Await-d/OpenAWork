@@ -498,6 +498,8 @@ export function useChatConversationState(
         last.type === 'session.substate.changed' ||
         last.type === 'handoff.completed' ||
         last.type === 'handoff.failed' ||
+        last.type === 'handoff.cancelled' ||
+        last.type === 'handoff.reclaimed' ||
         last.type === 'handoff.started'
       ) {
         void reload();

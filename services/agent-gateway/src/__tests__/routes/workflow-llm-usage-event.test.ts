@@ -134,7 +134,7 @@ describe('requestWorkflowLlmCompletion · team_usage 事件', () => {
     expect(mocks.publishTeamEvent).not.toHaveBeenCalled();
   });
 
-  it('零 token 调用不发事件（避免噪声）', async () => {
+  it('prompt 与响应都为空时不发事件（避免噪声）', async () => {
     mocks.runUpstreamGenerate.mockResolvedValue({
       text: '',
       inputTokens: 0,
@@ -145,8 +145,34 @@ describe('requestWorkflowLlmCompletion · team_usage 事件', () => {
 
     await requestWorkflowLlmCompletion({
       ...BASE_INPUT,
+      prompt: '',
       usageContext: { userId: 'u-1', sessionId: 's-1', layer: 'pm2' },
     });
     expect(mocks.publishTeamEvent).not.toHaveBeenCalled();
+  });
+
+  it('provider 不回 usage（token=0）时按文本长度估算，仍发出事件', async () => {
+    // 响应有文本但 usage 缺失（常见于 OpenAI 兼容中转 / 自建 provider）。
+    mocks.runUpstreamGenerate.mockResolvedValue({
+      text: 'x'.repeat(40), // ~10 tokens
+      inputTokens: 0,
+      outputTokens: 0,
+      finishReason: 'stop',
+      raw: {},
+    });
+
+    await requestWorkflowLlmCompletion({
+      ...BASE_INPUT,
+      prompt: 'y'.repeat(80), // ~20 tokens
+      usageContext: { userId: 'u-1', sessionId: 's-1', layer: 'pm1' },
+    });
+
+    expect(mocks.publishTeamEvent).toHaveBeenCalledTimes(1);
+    const envelope = mocks.publishTeamEvent.mock.calls[0]?.[0] as {
+      payload?: Record<string, unknown>;
+    };
+    // 估算口径 ~4 字符/token：input=80/4=20，output=40/4=10。
+    expect(envelope.payload?.['inputTokens']).toBe(20);
+    expect(envelope.payload?.['outputTokens']).toBe(10);
   });
 });

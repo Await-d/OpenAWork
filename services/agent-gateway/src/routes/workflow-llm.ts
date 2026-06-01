@@ -25,6 +25,16 @@ import { runUpstreamGenerate } from '../v2-runtime/upstream/index.js';
 const WORKFLOW_MAX_OUTPUT_TOKENS = 2048;
 
 /**
+ * 粗略 token 估算（~4 字符/token，与 compaction 的 estimateMessageTokens 同口径）。
+ * 仅在 provider 不回 usage 时作为团队用量统计的兜底，保证度量面板有近似值可看，
+ * 而不是因为缺 usage 就一直显示空。空串返回 0。
+ */
+function estimateTokensFromText(text: string | null | undefined): number {
+  if (!text) return 0;
+  return Math.ceil(text.length / 4);
+}
+
+/**
  * Default wall-clock timeout for non-streaming workflow / team LLM
  * calls. The AI SDK `generateText` honours `abortSignal` but has no
  * built-in wall-clock deadline, so without this a hung upstream socket
@@ -174,11 +184,19 @@ export async function requestWorkflowLlmCompletion(
     if (usageContext?.layer) {
       try {
         const { publishTeamWorkflowUsageEvent } = await import('./stream-team-events.js');
+        // 兜底：部分 OpenAI 兼容中转 / 自建 provider 在非流式响应里不回 usage，
+        // 此时 result.inputTokens/outputTokens 为 0，会导致这层用量「永远统计不到」。
+        // 用 ~4 字符/token 的粗略口径从 prompt / 响应文本估算，保证度量面板看得到
+        // 近似真实用量（标注为估算），而不是一片空白。
+        const inputTokens =
+          result.inputTokens > 0 ? result.inputTokens : estimateTokensFromText(input.prompt);
+        const outputTokens =
+          result.outputTokens > 0 ? result.outputTokens : estimateTokensFromText(result.text);
         const costUsd =
           typeof usageContext.inputPricePerMillion === 'number' &&
           typeof usageContext.outputPricePerMillion === 'number'
-            ? (result.inputTokens * usageContext.inputPricePerMillion +
-                result.outputTokens * usageContext.outputPricePerMillion) /
+            ? (inputTokens * usageContext.inputPricePerMillion +
+                outputTokens * usageContext.outputPricePerMillion) /
               1_000_000
             : undefined;
         publishTeamWorkflowUsageEvent({
@@ -188,8 +206,8 @@ export async function requestWorkflowLlmCompletion(
           agentId: usageContext.agentId ?? null,
           provider: providerType,
           model: input.model,
-          inputTokens: result.inputTokens,
-          outputTokens: result.outputTokens,
+          inputTokens,
+          outputTokens,
           ...(costUsd !== undefined ? { costUsd } : {}),
         });
       } catch (err) {

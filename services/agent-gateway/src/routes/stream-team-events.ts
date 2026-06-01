@@ -120,22 +120,29 @@ export function publishTeamWorkflowUsageEvent(input: TeamWorkflowUsageEventInput
   if (!input.layer) return;
   // 没有任何 token 的调用（例如纯缓存命中或异常返回）不发，避免噪声。
   if (input.inputTokens <= 0 && input.outputTokens <= 0) return;
-  // 与 stream 路径一致地落库，让 reception / pm1 / pm2 的用量也能跨刷新 / 重连存活
-  // （persistTeamUsageRecord 内部对全 0 token 行有自己的护栏）。
-  persistTeamUsageRecord({
-    userId: input.userId,
-    sessionId: input.sessionId,
-    layer: input.layer,
-    agentId: input.agentId ?? null,
-    provider: input.provider ?? null,
-    model: input.model ?? null,
-    inputTokens: input.inputTokens,
-    outputTokens: input.outputTokens,
-    reasoningTokens: input.reasoningTokens ?? 0,
-    cacheReadTokens: input.cacheReadTokens ?? 0,
-    cacheWriteTokens: input.cacheWriteTokens ?? 0,
-    costUsd: input.costUsd ?? 0,
-  });
+  // 与 stream 路径一致地落库，让 reception / pm1 / pm2 的用量也能跨刷新 / 重连存活。
+  // 落库失败（如极端 DB 错误）不应吞掉实时事件——分开 try/catch，保证「至少实时
+  // 面板能看到」与「尽量落库」互不拖累。
+  try {
+    persistTeamUsageRecord({
+      userId: input.userId,
+      sessionId: input.sessionId,
+      layer: input.layer,
+      agentId: input.agentId ?? null,
+      provider: input.provider ?? null,
+      model: input.model ?? null,
+      inputTokens: input.inputTokens,
+      outputTokens: input.outputTokens,
+      reasoningTokens: input.reasoningTokens ?? 0,
+      cacheReadTokens: input.cacheReadTokens ?? 0,
+      cacheWriteTokens: input.cacheWriteTokens ?? 0,
+      costUsd: input.costUsd ?? 0,
+    });
+  } catch (err) {
+    console.warn(
+      `[stream-team-events] persist workflow usage 失败：${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
   publishTeamEvent({
     type: 'session.substate.changed',
     sessionId: input.sessionId,

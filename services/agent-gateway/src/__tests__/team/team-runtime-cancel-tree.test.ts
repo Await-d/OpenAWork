@@ -10,14 +10,12 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type * as DbModule from '../../infra/db.js';
-import type * as HandoffStoreModule from '../../handoff/store/handoff-store.js';
 import type * as ControlStoreModule from '../../team/team-runtime-control-store.js';
 
 process.env['DATABASE_URL'] = ':memory:';
 process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
 
 let dbModule: typeof DbModule;
-let store: typeof HandoffStoreModule;
 let control: typeof ControlStoreModule;
 
 const USER_ID = 'u-cancel-tree';
@@ -62,7 +60,6 @@ function seedHandoff(input: {
 beforeAll(async () => {
   dbModule = await import('../../infra/db.js');
   await dbModule.migrate();
-  store = await import('../../handoff/store/handoff-store.js');
   control = await import('../../team/team-runtime-control-store.js');
 });
 

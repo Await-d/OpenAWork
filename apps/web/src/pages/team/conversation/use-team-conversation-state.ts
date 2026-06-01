@@ -660,6 +660,8 @@ export function useTeamConversationState(
         last.type === 'session.init.changed' ||
         last.type === 'handoff.completed' ||
         last.type === 'handoff.failed' ||
+        last.type === 'handoff.cancelled' ||
+        last.type === 'handoff.reclaimed' ||
         last.type === 'handoff.started'
       ) {
         void reload();
