@@ -783,6 +783,14 @@ export interface ReclaimResult {
 export function reclaimAbandonedHandoffs(input: {
   staleHeartbeatBeforeIso: string;
   maxRetry: number;
+  /**
+   * #8 Doom-loop 防御：一些 handoff（典型如执行层陷入"工具失败→重试→再失败"
+   * 死循环）会持续刷新心跳但永远跑不完。此时按心跳判定永远不会触发 reclaim。
+   * 给一个**绝对墙钟超时**：handoff 进入 running/claimed 后超过此 ISO 时刻仍
+   * 未结束的，即使心跳新鲜也直接 force-fail，避免无限占用资源 + 卡前端进度。
+   * 不传则关闭此守卫（保持向后兼容）。
+   */
+  runningStartedBeforeIso?: string | undefined;
 }): ReclaimResult {
   // 通过 to_session_id JOIN sessions.last_heartbeat 判断是否过期。
   // 超过 maxRetry 的 handoff 直接 fail 而不是无限重试。
@@ -827,5 +835,43 @@ export function reclaimAbandonedHandoffs(input: {
       reclaimedIds.push(row.id);
     }
   }
+
+  // #8 doom-loop 强制失败：心跳还在但 started_at 已超过墙钟阈值的 handoff 直接 fail。
+  // 不重试（这是已知的"持续在错却假装活着"模式，重试只会复制问题）。失败的去重：
+  // 已经被前一段标 failed 的不重复处理。
+  if (input.runningStartedBeforeIso) {
+    const stuckRows = sqliteAll<{ id: string }>(
+      `SELECT id FROM handoff_records
+        WHERE state IN ('claimed','running')
+          AND started_at IS NOT NULL
+          AND started_at < ?`,
+      [input.runningStartedBeforeIso],
+    );
+    for (const stuckRow of stuckRows) {
+      if (failedIds.includes(stuckRow.id) || reclaimedIds.includes(stuckRow.id)) {
+        continue;
+      }
+      // 用 WHERE state IN ('claimed','running') 保证幂等：若另一进程刚好把它
+      // 标成终态，这条 UPDATE 是 no-op；之后的 verify 读会确认实际状态再决定
+      // 是否计入 failedIds。
+      sqliteRun(
+        `UPDATE handoff_records
+           SET state = 'failed',
+               failure_reason = 'doom-loop-wallclock-timeout',
+               completed_at = datetime('now'),
+               updated_at = datetime('now')
+         WHERE id = ? AND state IN ('claimed','running')`,
+        [stuckRow.id],
+      );
+      const after = sqliteGet<{ state: string }>(
+        `SELECT state FROM handoff_records WHERE id = ? LIMIT 1`,
+        [stuckRow.id],
+      );
+      if (after?.state === 'failed') {
+        failedIds.push(stuckRow.id);
+      }
+    }
+  }
+
   return { reclaimedIds, failedIds };
 }

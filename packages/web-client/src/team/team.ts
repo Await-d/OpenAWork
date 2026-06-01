@@ -218,6 +218,30 @@ export interface TeamRuntimeNotificationRecord {
   type: string;
 }
 
+/**
+ * 团队执行用量聚合记录（持久化）。按 (session, layer, provider, model) 聚合，
+ * 让"度量"tab 在刷新 / 重连后仍能还原历史 token / 费用 / 工具调用，不再只依赖
+ * 实时 WS 事件窗口。
+ */
+export interface TeamUsageRecord {
+  sessionId: string;
+  layer: string | null;
+  agentId: string | null;
+  provider: string | null;
+  model: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  costUsd: number;
+  callCount: number;
+  totalDurationMs: number;
+  toolCallCount: number;
+  toolErrorCount: number;
+  updatedAt: string;
+}
+
 export interface TeamRuntimePauseAllResult {
   handoffIds: string[];
   pausedHandoffCount: number;
@@ -436,6 +460,8 @@ export interface TeamRuntimeReadModel {
   sessions: TeamRuntimeSessionRecord[];
   sharedSessions: SharedSessionSummaryRecord[];
   tasks: TeamTaskRecord[];
+  /** 持久化的团队执行用量聚合（可选，旧后端可能不返回）。 */
+  usageRecords?: TeamUsageRecord[];
 }
 
 export interface TeamRuntimeLoadResult {

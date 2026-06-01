@@ -192,15 +192,21 @@ function renderStepResultSummary(step: TeamInitStep): string | null {
           : ''
       }`;
     case 'read-project-level1':
-      return `目录 ${r['directoryCount'] ?? 0} 个 · 文件 ${r['fileCount'] ?? 0} 个`;
+      return `目录 ${r['directoryCount'] ?? 0} 个 · 文件 ${r['fileCount'] ?? 0} 个${
+        typeof r['projectType'] === 'string' && r['projectType']
+          ? ` · ${r['projectType'] as string}`
+          : ''
+      }${r['usedLlm'] ? ' · 已用 AI 解读' : ''}`;
     case 'extract-project-memory':
-      return `读取记忆来源 ${r['foundCount'] ?? 0} 个`;
+      return `读取记忆来源 ${r['foundCount'] ?? 0} 个${r['usedLlm'] ? ' · 已用 AI 提炼' : ''}`;
     case 'understand-architecture':
       return r['usedLlm'] ? '已用 AI 生成架构摘要' : '已生成架构摘要（启发式）';
     case 'bind-tools-per-layer':
-      return `绑定 skill ${r['skillCount'] ?? 0} · MCP ${r['mcpCount'] ?? 0}`;
+      return `绑定 skill ${r['skillCount'] ?? 0} · MCP ${r['mcpCount'] ?? 0}${
+        r['usedLlm'] ? ' · AI 按项目挑选' : ''
+      }`;
     case 'scaffold-memory':
-      return '已准备初始项目记忆骨架';
+      return r['usedLlm'] ? '已用 AI 生成初始项目记忆骨架' : '已准备初始项目记忆骨架';
     default:
       return null;
   }
@@ -216,7 +222,8 @@ function stepHasPreview(step: TeamInitStep): boolean {
     case 'read-project-level1':
       return (
         ((r['directories'] as string[]) ?? []).length > 0 ||
-        ((r['files'] as string[]) ?? []).length > 0
+        ((r['files'] as string[]) ?? []).length > 0 ||
+        (typeof r['interpretation'] === 'string' && (r['interpretation'] as string).length > 0)
       );
     case 'extract-project-memory':
       return ((r['excerpts'] as unknown[]) ?? []).length > 0;
@@ -284,8 +291,40 @@ function renderStepPreview(step: TeamInitStep): ReactNode {
     case 'read-project-level1': {
       const dirs = (r['directories'] as string[]) ?? [];
       const files = (r['files'] as string[]) ?? [];
+      const interpretation = (r['interpretation'] as string) ?? '';
+      const techStack = (r['techStack'] as string[]) ?? [];
+      const keyDirectories = (r['keyDirectories'] as Array<{ name: string; role: string }>) ?? [];
       return (
         <div>
+          {interpretation ? (
+            <>
+              <PreviewSectionLabel>AI 解读</PreviewSectionLabel>
+              <div style={{ color: 'var(--fg-strong)' }}>
+                <MarkdownMessageContent content={interpretation} />
+              </div>
+            </>
+          ) : null}
+          {techStack.length > 0 ? (
+            <>
+              <PreviewSectionLabel>技术栈</PreviewSectionLabel>
+              <ChipRow items={techStack} emptyLabel="（未识别）" />
+            </>
+          ) : null}
+          {keyDirectories.length > 0 ? (
+            <>
+              <PreviewSectionLabel>关键目录职责</PreviewSectionLabel>
+              <div style={{ display: 'grid', gap: 3 }}>
+                {keyDirectories.map((kd) => (
+                  <div key={kd.name} style={{ fontSize: 11 }}>
+                    <span style={{ color: 'var(--accent)', fontWeight: 700 }}>{kd.name}</span>
+                    {kd.role ? (
+                      <span style={{ color: 'var(--fg-muted)' }}> — {kd.role}</span>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : null}
           <PreviewSectionLabel>目录（{dirs.length}）</PreviewSectionLabel>
           <ChipRow items={dirs.map((d) => `${d}/`)} emptyLabel="（无）" />
           <PreviewSectionLabel>文件（{files.length}）</PreviewSectionLabel>
@@ -295,11 +334,20 @@ function renderStepPreview(step: TeamInitStep): ReactNode {
     }
     case 'extract-project-memory': {
       const excerpts = (r['excerpts'] as Array<{ label: string; excerpt: string }>) ?? [];
+      const digest = (r['digest'] as string) ?? '';
       if (excerpts.length === 0) {
         return <div style={{ color: 'var(--fg-muted)' }}>未发现项目记忆文件。</div>;
       }
       return (
         <div style={{ display: 'grid', gap: 8 }}>
+          {digest ? (
+            <div>
+              <PreviewSectionLabel>AI 提炼要点</PreviewSectionLabel>
+              <div style={{ color: 'var(--fg-strong)' }}>
+                <MarkdownMessageContent content={digest} />
+              </div>
+            </div>
+          ) : null}
           {excerpts.map((ex) => (
             <div key={ex.label}>
               <PreviewSectionLabel>{ex.label}</PreviewSectionLabel>

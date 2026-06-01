@@ -245,8 +245,35 @@ export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
               });
             } catch (err) {
               console.warn(
+                // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
                 `[team.session.inbound] orchestrate (async) failed: ${err instanceof Error ? err.message : String(err)}`,
               );
+              // 🔴#3 端到端健壮性：编排是 fire-and-forget（不阻塞 inbound 入库），
+              // 但若它抛出**意料之外**的异常（orchestrateReceptionInput 正常会用
+              // result.reason 兜底而不抛），用户会停留在"我发了消息但团队毫无回应"
+              // 的静默态。这里补一条 best-effort 的 assistant 反馈消息，让用户知道
+              // 需要重试，而不是无限等待。
+              try {
+                const { appendSessionMessageV2 } =
+                  await import('../message/message-v2-adapter.js');
+                appendSessionMessageV2({
+                  sessionId,
+                  userId: user.sub,
+                  role: 'assistant',
+                  content: [
+                    {
+                      type: 'text',
+                      text: '抱歉，团队在处理你的请求时出现了意外错误，任务未能启动。请稍后重试。',
+                    },
+                  ],
+                  clientRequestId: null,
+                });
+              } catch (ackErr) {
+                console.warn(
+                  // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
+                  `[team.session.inbound] orchestrate failure ack write failed: ${ackErr instanceof Error ? ackErr.message : String(ackErr)}`,
+                );
+              }
             }
           })();
         }

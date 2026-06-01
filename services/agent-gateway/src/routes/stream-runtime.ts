@@ -65,6 +65,11 @@ import {
 import { buildTeamInstructionStack } from '../team/team-instruction-stack.js';
 import { mapAgentToTeamRoleLayer } from '../team/team-role-layer-mapping.js';
 import {
+  applyTeamLayerToolGate,
+  appendTeamDynamicInstructionBlocks,
+  isTeamRoleLayer,
+} from '../handoff/capability/apply-team-layer-tools.js';
+import {
   clearSessionRuntimeThread,
   SESSION_RUNTIME_THREAD_HEARTBEAT_MS,
   touchSessionRuntimeThread,
@@ -146,14 +151,55 @@ async function continueFromApprovedToolResult(input: {
     sessionContext.metadataJson,
   );
   const sessionMeta = parseSessionMetadataJson(sessionContext.metadataJson);
+  // 团队层（pm1/pm2/executor/reviewer 后台执行经此路径）：与 stream.ts 一致地
+  //   1) 注入按会话绑定的 flat MCP 工具，2) 施加 toolset 门控 + 内置指令注入。
+  //   早期本路径漏了这步，导致干活层拿不到 submit_artifact/submit_patch 等指令 + MCP。
+  const roleLayerForTools = mapAgentToTeamRoleLayer(route.effectiveAgentId ?? null);
+  let toolsForSession = filteredTools;
+  if (isTeamRoleLayer(roleLayerForTools)) {
+    // flat MCP（按 requestedMcpServers 白名单动态注入）
+    try {
+      const { isFlatMcpToolsDisabled } = await import('../mcp/mcp-tool-naming.js');
+      if (!isFlatMcpToolsDisabled()) {
+        const { listMcpToolsForSession } = await import('../mcp/mcp-runtime.js');
+        const { buildFlatMcpToolDefinitions } = await import('../mcp/mcp-flat-tool-defs.js');
+        const allowedMcp = Array.isArray(sessionMeta['requestedMcpServers'])
+          ? (sessionMeta['requestedMcpServers'] as unknown[]).filter(
+              (v): v is string => typeof v === 'string' && v.length > 0,
+            )
+          : [];
+        // team 最小授权（同 stream.ts）：此分支恒为 team 层，未显式绑定 MCP 时传空
+        // 白名单（defined []）只暴露内置 MCP，不继承用户私有 MCP。
+        const catalogs = await listMcpToolsForSession(input.sessionId, {
+          allowedServerIds: allowedMcp,
+        });
+        const flat = buildFlatMcpToolDefinitions(catalogs).definitions;
+        if (flat.length > 0) {
+          const base = toolsForSession.filter(
+            (t) => t.function.name !== 'mcp_list_tools' && t.function.name !== 'mcp_call',
+          );
+          toolsForSession = [...base, ...flat];
+        }
+      }
+    } catch (err) {
+      console.warn(
+        `[stream-runtime] flat MCP 注入失败（忽略，不阻塞）：${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    toolsForSession = await applyTeamLayerToolGate({
+      roleLayer: roleLayerForTools,
+      metadataJson: sessionContext.metadataJson,
+      filteredTools: toolsForSession,
+    });
+  }
   const shouldDeferToolLoading =
     route.deferToolLoading === true || sessionMeta['deferToolLoading'] === true;
   const enabledTools = shouldDeferToolLoading
-    ? filteredTools.map((tool) => ({
+    ? toolsForSession.map((tool) => ({
         ...tool,
         function: { ...tool.function, deferLoading: true },
       }))
-    : filteredTools;
+    : toolsForSession;
   const enabledToolNames = new Set(enabledTools.map((tool) => tool.function.name));
   const turnFileDiffs = new Map<string, FileDiffContent>();
   const abortController = new AbortController();
@@ -172,7 +218,15 @@ async function continueFromApprovedToolResult(input: {
     teamWorkspaceId: teamWorkspaceIdForStack,
     roleLayer: roleLayerForStack,
   });
-  const teamInstructionStack = teamInstructionStackResult.stableBlock;
+  const teamInstructionStack = appendTeamDynamicInstructionBlocks({
+    stableBlock: teamInstructionStackResult.stableBlock,
+    roleLayer: roleLayerForStack,
+    teamRosterManifest:
+      typeof sessionMeta['teamRosterManifest'] === 'string'
+        ? sessionMeta['teamRosterManifest']
+        : null,
+    enabledToolNames,
+  });
 
   const wl = new WorkflowLogger();
   const ctx = createRequestContext(

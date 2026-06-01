@@ -27,8 +27,8 @@
 > - **Phase D 实施记录**：`.agentdocs/workflow/done/260516-team-phase-d-实施方案.md`（已完成）
 >
 > 创建时间：2026-05-16（v1.0 → v1.1 复查修订）
-> 当前状态：**v1.2 已完成后端闭环（2026-05-24）**
-> 实施时机：**Phase F 增量改造已落地**；剩余工作仅限更大范围运行验证与 UI/运维观察。
+> 当前状态：**v1.3 后端闭环 + 前端展示链路 + verification 全部追平（2026-06-01 复核）**
+> 实施时机：**已落地并验证**。`artifact-chain.ts` 的 `waitForClarificationAnswers` 是真实阻塞等待循环；前端 substate 进度/实时 handoff/运行态聚合已上线；`verify-task-tool-no-permission.ts` 2026-06-01 实跑通过（不再阻塞）。剩余仅 UI/运维长期观察。
 
 ---
 
@@ -56,7 +56,7 @@ L1.3 后端闭环已完成，v1.1 中列出的 4 项增量改造均已落地：
 - ✅ L1.3 聚焦回归：`team-inbound-routes`、`team-workspace-roster-routes`、`team-handoffs-routes`、`inbound-store`、`handoff-store`、`team-session-create`、`artifact-chain`、`team-b-c-integration`、`team-events-bus` 共 80 个用例通过。
 - ✅ `pnpm --filter @openAwork/agent-gateway build` 通过。
 - ✅ `pnpm typecheck` 通过。
-- ⚠️ `pnpm --filter @openAwork/agent-gateway test` 的 verification 阶段仍被 `verify-task-tool-no-permission.ts` 阻塞：`delegated child task should still complete automatically without approval`。该失败位于 task 工具默认免审批验证链，与 L1.3 Team/handoff 改动文件无交集，需独立排查。
+- ✅ **`verify-task-tool-no-permission.ts` 已不再阻塞（2026-06-01 复核）**：standalone 与完整 `pnpm run test:task-tool` 链均通过（`verify-task-tool-no-permission: ok`，EXIT=0）。原"阻塞"为彼时测试隔离 flaky（共享 `:memory:` DB + vitest 并行串扰），现已不复现；该 verification 与 L1.3 Team/handoff 改动文件本就无交集。
 
 ---
 

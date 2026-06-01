@@ -76,6 +76,25 @@ export interface WorkflowLlmRequestConfig {
    * either source can abort the upstream request.
    */
   signal?: AbortSignal;
+  /**
+   * 团队用量统计上下文。提供时，本次调用拿到 usage 后会发一条 `team_usage`
+   * 事件给团队度量面板（按层聚合 token / 费用 / 调用次数）。
+   *
+   * 不提供时（chat 端 prompt-optimizer / translator 等非团队场景）行为不变，
+   * 不发任何事件。这样团队的 reception / pm1 / pm2 链路也能被正确统计——
+   * 此前它们走非流式 workflow caller，usage 被直接丢弃。
+   */
+  usageContext?: {
+    userId: string;
+    sessionId: string;
+    /** 角色层级（reception/pm1/pm2/...）。空则不发事件。 */
+    layer: string | null | undefined;
+    agentId?: string | null;
+    /** 每百万输入 token 单价（USD），用于估算成本；缺省则成本记 0。 */
+    inputPricePerMillion?: number;
+    /** 每百万输出 token 单价（USD）。 */
+    outputPricePerMillion?: number;
+  };
 }
 
 function inferWorkflowProviderType(
@@ -148,6 +167,37 @@ export async function requestWorkflowLlmCompletion(
           : WORKFLOW_MAX_OUTPUT_TOKENS,
       signal,
     });
+
+    // 团队用量统计：把这次非流式调用的 usage 发给团队度量面板（按层聚合）。
+    // best-effort——发布失败不影响主返回。
+    const usageContext = input.usageContext;
+    if (usageContext?.layer) {
+      try {
+        const { publishTeamWorkflowUsageEvent } = await import('./stream-team-events.js');
+        const costUsd =
+          typeof usageContext.inputPricePerMillion === 'number' &&
+          typeof usageContext.outputPricePerMillion === 'number'
+            ? (result.inputTokens * usageContext.inputPricePerMillion +
+                result.outputTokens * usageContext.outputPricePerMillion) /
+              1_000_000
+            : undefined;
+        publishTeamWorkflowUsageEvent({
+          userId: usageContext.userId,
+          sessionId: usageContext.sessionId,
+          layer: usageContext.layer,
+          agentId: usageContext.agentId ?? null,
+          provider: providerType,
+          model: input.model,
+          inputTokens: result.inputTokens,
+          outputTokens: result.outputTokens,
+          ...(costUsd !== undefined ? { costUsd } : {}),
+        });
+      } catch (err) {
+        console.warn(
+          `[workflow-llm] publish team_usage 失败：${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
 
     return result.text;
   } catch (err) {

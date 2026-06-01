@@ -39,10 +39,15 @@ const INTERACTION_AGENT_PROMPT_TEMPLATE = (
 4. 给出推荐的下一步动作
 5. 用中文输出
 
+【收敛而非回问】
+- 默认替用户补全合理的默认假设，让团队能直接开工，不要把可自行判断的细节留成开放问题。
+- 对能从常识 / 行业惯例 / 项目上下文推断的点（技术选型、命名、范围边界等），直接在改写结果里写明「假设：……」，不要作为待澄清项抛回。
+- 只有当核心目标本身缺失或自相矛盾、无任何合理默认值时，才在改写结果里点出唯一一个真正需要用户确认的关键点。
+
 用户意图：${intent}${contextBlock}
 
 请按以下格式输出：
-【改写结果】<改写后的结构化意图>
+【改写结果】<改写后的结构化意图，含已采用的关键假设>
 【推荐角色】<planner/researcher/executor/reviewer>
 【下一步】<推荐的下一步动作>`;
 
@@ -238,6 +243,17 @@ async function runReceptionOrchestrationBody(
         ...(llmConfig.upstreamProtocol ? { upstreamProtocol: llmConfig.upstreamProtocol } : {}),
         prompt,
         temperature: 0.1,
+        usageContext: {
+          userId: input.userId,
+          sessionId: input.receptionSessionId,
+          layer: 'reception',
+          ...(typeof llmConfig.inputPricePerMillion === 'number'
+            ? { inputPricePerMillion: llmConfig.inputPricePerMillion }
+            : {}),
+          ...(typeof llmConfig.outputPricePerMillion === 'number'
+            ? { outputPricePerMillion: llmConfig.outputPricePerMillion }
+            : {}),
+        },
       });
     });
   }
@@ -368,6 +384,17 @@ async function runReceptionOrchestrationBody(
       ...(llmConfig.upstreamProtocol ? { upstreamProtocol: llmConfig.upstreamProtocol } : {}),
       prompt: INTERACTION_AGENT_PROMPT_TEMPLATE(input.userIntent, contextBlock),
       temperature: 0.3,
+      usageContext: {
+        userId: input.userId,
+        sessionId: input.receptionSessionId,
+        layer: 'reception',
+        ...(typeof llmConfig.inputPricePerMillion === 'number'
+          ? { inputPricePerMillion: llmConfig.inputPricePerMillion }
+          : {}),
+        ...(typeof llmConfig.outputPricePerMillion === 'number'
+          ? { outputPricePerMillion: llmConfig.outputPricePerMillion }
+          : {}),
+      },
     });
   } catch (err) {
     console.warn(

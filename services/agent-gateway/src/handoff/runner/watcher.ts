@@ -55,6 +55,12 @@ const DEFAULT_WATCHER_INTERVAL_MS = 100;
 const DEFAULT_RECOVERY_INTERVAL_MS = 5_000;
 const DEFAULT_HEARTBEAT_STALE_MS = HEARTBEAT_STALE_AFTER_MS;
 const DEFAULT_MAX_RETRY = 3;
+/**
+ * #8 doom-loop wall-clock cutoff：handoff 进入 running/claimed 后超过这个时长
+ * 仍未结束的，即使心跳新鲜也强制 failed。30 分钟基本覆盖人类可耐心等待的极限，
+ * 又远高于实际任务上限（reception/pm1/pm2 < 1min，executor 一般 < 10min）。
+ */
+const DEFAULT_RUNNING_TOO_LONG_MS = 30 * 60 * 1000;
 
 /**
  * 单条 handoff 的"真正执行体"类型。
@@ -84,6 +90,12 @@ export interface HandoffWatcherOptions {
   heartbeatStaleAfterMs?: number;
   /** 最大重试次数，默认 3（达到后改 fail 而不是无限重试） */
   maxRetry?: number;
+  /**
+   * #8 Doom-loop 墙钟超时：handoff 进入 running/claimed 后超过此时长仍未结束
+   * 的，即使心跳还在更新也强制 failed（针对"工具死循环 / 推理失控"等持续
+   * 假装活着的场景）。默认 30 分钟。0 或负数关闭此守卫。
+   */
+  runningTooLongMs?: number;
   /** 自定义任务执行体（测试 / T-09/T-10 注入） */
   taskRunner?: HandoffTaskRunner;
   /** 注入 scheduler（测试用） */
@@ -106,6 +118,7 @@ export class HandoffWatcher {
       recoveryIntervalMs: options.recoveryIntervalMs ?? DEFAULT_RECOVERY_INTERVAL_MS,
       heartbeatStaleAfterMs: options.heartbeatStaleAfterMs ?? DEFAULT_HEARTBEAT_STALE_MS,
       maxRetry: options.maxRetry ?? DEFAULT_MAX_RETRY,
+      runningTooLongMs: options.runningTooLongMs ?? DEFAULT_RUNNING_TOO_LONG_MS,
       taskRunner: options.taskRunner ?? defaultStubRunner,
       scheduler: options.scheduler ?? getBackgroundTaskScheduler(),
     };
@@ -303,9 +316,18 @@ export class HandoffWatcher {
    */
   async recoveryTick(): Promise<{ recovered: number; failed: number }> {
     const cutoff = findStaleHeartbeatCutoffIso(this.options.heartbeatStaleAfterMs);
+    // #8 doom-loop 墙钟阈值：started_at 早于此截止值的 running/claimed handoff
+    // 即使心跳还在也强制 failed。复用 findStaleHeartbeatCutoffIso 的格式
+    // ('YYYY-MM-DD HH:MM:SS' UTC) 与 SQLite datetime('now') 写入格式一致，
+    // 让字符串比较产生正确时间序。runningTooLongMs<=0 时关闭此守卫。
+    const runningStartedBeforeIso =
+      this.options.runningTooLongMs > 0
+        ? findStaleHeartbeatCutoffIso(this.options.runningTooLongMs)
+        : undefined;
     const { reclaimedIds, failedIds } = reclaimAbandonedHandoffs({
       staleHeartbeatBeforeIso: cutoff,
       maxRetry: this.options.maxRetry,
+      runningStartedBeforeIso,
     });
 
     // 对每条处理过的 handoff 拉取最新记录并发事件
@@ -377,6 +399,65 @@ export class HandoffWatcher {
         }
       }
     }
+    // ─── Stale session state_status recovery ────────────────────────────────
+    // 进程崩溃（OOM/SIGKILL）后 session 可能永久卡在 state_status='running'：
+    // 正常路径的 catch/finally 来不及执行，runtime_thread 行的 heartbeat 停止
+    // 更新但行本身还在。前端 2.5s polling 会持续空转，用户看到"正在运行"但
+    // 永远没有新内容。这里检测：state_status='running' 且 runtime_thread 心跳
+    // 已过期（或行不存在），则重置为 idle。只处理 team session（有 role_layer）
+    // 避免误伤 chat 端正常的长时间 stream。
+    try {
+      const { SESSION_RUNTIME_THREAD_STALE_AFTER_MS } =
+        await import('../../session/session-runtime-thread-store.js');
+      const { setPersistedSessionStateStatus } =
+        await import('../../routes/stream.js');
+      const staleThreadCutoffMs = Date.now() - SESSION_RUNTIME_THREAD_STALE_AFTER_MS;
+      const stuckSessions = sqliteAll<{ id: string; user_id: string }>(
+        `SELECT s.id, s.user_id
+           FROM sessions s
+          WHERE s.state_status = 'running'
+            AND s.role_layer IS NOT NULL
+            AND NOT EXISTS (
+              SELECT 1 FROM session_runtime_threads t
+               WHERE t.session_id = s.id
+                 AND t.heartbeat_at_ms > ?
+            )`,
+        [staleThreadCutoffMs],
+      );
+      for (const stuck of stuckSessions) {
+        try {
+          setPersistedSessionStateStatus({
+            sessionId: stuck.id,
+            status: 'idle',
+            userId: stuck.user_id,
+          });
+        } catch (e) {
+          console.warn(
+            `[watcher] stale session reset failed (${stuck.id}): ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+      }
+    } catch (err) {
+      // Best-effort: 不阻塞 recoveryTick 主流程
+      console.warn(
+        `[watcher] stale session sweep failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    // ─── Reception awaiting_downstream 死锁兜底 ──────────────────────────────
+    // reception 派发后置 substate='awaiting_downstream'，正常由下游进度/完成事件
+    // 驱动 UI。但若整条下游链全部终止（completed/failed/cancelled）却没有任何
+    // 进度回流，reception 会永久停在 awaiting_downstream → 用户界面死锁。这里兜底：
+    // 检测「reception 处于 awaiting_downstream 且其下游子树已无任何存活 handoff」，
+    // 重置 substate 并写一条 assistant 反馈，避免无限等待。
+    try {
+      await this.reconcileStuckReceptionSessions();
+    } catch (err) {
+      console.warn(
+        `[watcher] reception awaiting_downstream sweep failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
     return { recovered: reclaimedIds.length, failed: failedIds.length };
   }
 
@@ -423,6 +504,137 @@ export class HandoffWatcher {
       } catch (err) {
         console.error(
           `[watcher] pm2 质量评审 ${candidate.handoffId} 协调失败，跳过该条继续本轮：${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Reception awaiting_downstream 死锁兜底扫描。
+   *
+   * 找出所有 substate='awaiting_downstream' 的 reception session，检查其下游子树
+   * （沿 team_parent_session_id 递归）是否还有任何**存活**（非终止）的 handoff：
+   *   - 还有存活 handoff → 下游仍在跑，跳过（正常）。
+   *   - 无任何存活 handoff（全 completed/failed/cancelled，或压根没派生出 handoff）
+   *     → 下游链已彻底结束却没驱动 reception 复位 → 死锁。重置 substate 为 idle，
+   *     并写一条 assistant 消息告知用户最终结果（若有失败/取消则提示可重试）。
+   *
+   * 每条 reception 独立 try/catch，单条出错不影响其余。
+   */
+  private async reconcileStuckReceptionSessions(): Promise<void> {
+    // 年龄护栏：只处理已在 awaiting_downstream 停留超过 heartbeatStaleAfterMs 的
+    // reception。pm1→pm2 等自动链切换之间存在「上游已 completed、下游尚未创建」的
+    // 微秒级窗口；若不加年龄护栏，恰好命中该窗口会误判死锁、把正常推进中的 reception
+    // 提前复位。用 substate_updated_at 早于截止时刻来过滤掉这种瞬态。
+    const cutoffIso = findStaleHeartbeatCutoffIso(this.options.heartbeatStaleAfterMs);
+    const stuck = sqliteAll<{ id: string; user_id: string }>(
+      `SELECT id, user_id
+         FROM sessions
+        WHERE role_layer = 'reception'
+          AND substate = 'awaiting_downstream'
+          AND (substate_updated_at IS NULL OR substate_updated_at < ?)`,
+      [cutoffIso],
+    );
+    if (stuck.length === 0) return;
+
+    const { setSubstate } = await import('../store/substate-store.js');
+
+    for (const reception of stuck) {
+      try {
+        // 子树里（不含 reception 自身）所有存活 handoff 计数。reception 自己不会有
+        // to/from 之外的 handoff；这里用 session 树覆盖 pm1/pm2/executor/reviewer。
+        const liveRow = sqliteGet<{ c: number }>(
+          `WITH RECURSIVE session_tree(id) AS (
+             SELECT id FROM sessions WHERE id = ? AND user_id = ?
+             UNION ALL
+             SELECT child.id FROM sessions child
+               JOIN session_tree tree ON child.team_parent_session_id = tree.id
+              WHERE child.user_id = ?
+           )
+           SELECT COUNT(*) AS c
+             FROM handoff_records h
+            WHERE h.user_id = ?
+              AND h.state NOT IN ('completed', 'failed', 'cancelled')
+              AND (
+                h.from_session_id IN (SELECT id FROM session_tree)
+                OR h.to_session_id IN (SELECT id FROM session_tree)
+              )`,
+          [reception.id, reception.user_id, reception.user_id, reception.user_id],
+        );
+        const liveCount = liveRow?.c ?? 0;
+        if (liveCount > 0) {
+          // 下游仍在跑，正常等待。
+          continue;
+        }
+
+        // 子树是否产生过 handoff（用于区分「从未派发」与「派发后全终止」）。
+        const terminalRow = sqliteGet<{ total: number; failedOrCancelled: number }>(
+          `WITH RECURSIVE session_tree(id) AS (
+             SELECT id FROM sessions WHERE id = ? AND user_id = ?
+             UNION ALL
+             SELECT child.id FROM sessions child
+               JOIN session_tree tree ON child.team_parent_session_id = tree.id
+              WHERE child.user_id = ?
+           )
+           SELECT
+             COUNT(*) AS total,
+             SUM(CASE WHEN h.state IN ('failed', 'cancelled') THEN 1 ELSE 0 END) AS failedOrCancelled
+           FROM handoff_records h
+          WHERE h.user_id = ?
+            AND (
+              h.from_session_id IN (SELECT id FROM session_tree)
+              OR h.to_session_id IN (SELECT id FROM session_tree)
+            )`,
+          [reception.id, reception.user_id, reception.user_id, reception.user_id],
+        );
+        const total = terminalRow?.total ?? 0;
+        const failedOrCancelled = terminalRow?.failedOrCancelled ?? 0;
+
+        // 重置 reception substate，解除前端死锁。
+        setSubstate({
+          sessionId: reception.id,
+          substate: 'idle',
+          userId: reception.user_id,
+          roleLayer: 'reception',
+        });
+
+        // 写一条用户可见反馈（只在「派发过但全部终止」且含失败/取消时提示重试，
+        // 避免对正常完成的任务也刷无谓提示）。
+        if (total > 0 && failedOrCancelled > 0) {
+          try {
+            const { appendSessionMessageV2 } = await import('../../message/message-v2-adapter.js');
+            appendSessionMessageV2({
+              sessionId: reception.id,
+              userId: reception.user_id,
+              role: 'assistant',
+              content: [
+                {
+                  type: 'text',
+                  text: '团队的下游任务已全部结束，但其中有失败或被取消的环节，任务未能正常完成。你可以查看详情后重试或调整需求。',
+                },
+              ],
+              clientRequestId: null,
+            });
+          } catch (ackErr) {
+            console.warn(
+              `[watcher] reception 死锁兜底反馈写入失败（${reception.id}）：${ackErr instanceof Error ? ackErr.message : String(ackErr)}`,
+            );
+          }
+          recordTeamRuntimeIncident({
+            category: 'handoff_failure',
+            code: 'reception-awaiting-downstream-deadlock',
+            context: { receptionSessionId: reception.id, totalHandoffs: total, failedOrCancelled },
+            message: 'reception 停在 awaiting_downstream 但下游链已全部终止',
+            severity: 'warning',
+            timestamp: Date.now(),
+            userId: reception.user_id,
+          });
+        }
+      } catch (err) {
+        console.warn(
+          `[watcher] reception ${reception.id} awaiting_downstream 兜底失败，跳过：${
             err instanceof Error ? err.message : String(err)
           }`,
         );
@@ -547,6 +759,11 @@ export class HandoffWatcher {
                 fromSessionId: input.toSessionId,
                 fromRoleLayer: 'pm1',
                 toRoleLayer: 'pm2',
+                // 幂等键：以 pm1 handoff id 派生。auto-chain 可能因双 tick / 进程重启
+                // 后的重放被触发多次；没有幂等键时每次都会新建一条 pm1→pm2，导致 pm2
+                // 重复接管 + 重复 d→e/f/g 派发 + 重复 LLM 花费。createHandoff 命中已存在
+                // 的 idempotencyKey 会直接返回原记录（不再 INSERT），天然去重。
+                idempotencyKey: `auto-chain:pm1-pm2:${input.handoff.id}`,
                 payload: {
                   resultJson,
                   teamWorkspaceId,
@@ -571,6 +788,31 @@ export class HandoffWatcher {
               console.warn(
                 `[watcher] auto-chain pm1→pm2 failed: ${err instanceof Error ? err.message : String(err)}`,
               );
+              // #10 reception→pm1 自动链断裂的用户侧反馈：当 pm1 层完成但
+              // pm1→pm2 链式派发失败时，pm1 的产物（spec/plan/tasks）已落库，
+              // 但 pm2 不会接管 → 用户在 reception 里看到 pm1 完成却无后续动作。
+              // 写一条 assistant 消息到 reception session（input.handoff.fromSessionId
+              // 即 reception session id）让用户明确知道链路断了，可以手动重试或调整。
+              try {
+                const { appendSessionMessageV2 } =
+                  await import('../../message/message-v2-adapter.js');
+                appendSessionMessageV2({
+                  sessionId: input.handoff.fromSessionId,
+                  userId: input.handoff.userId,
+                  role: 'assistant',
+                  content: [
+                    {
+                      type: 'text',
+                      text: '团队规划已完成，但向开发管控层（pm2）的自动派发失败。spec/plan/tasks 已生成，请稍后重试或手动调整。',
+                    },
+                  ],
+                  clientRequestId: null,
+                });
+              } catch (ackErr) {
+                console.warn(
+                  `[watcher] auto-chain failure ack write failed: ${ackErr instanceof Error ? ackErr.message : String(ackErr)}`,
+                );
+              }
             }
           }
 

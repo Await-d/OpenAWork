@@ -47,6 +47,7 @@ import { TemplateModelConfigModal } from './templates/TemplateModelConfigModal.j
 import { CustomRoleModal, type CustomRoleDraft } from './templates/CustomRoleModal.js';
 import { useModelCatalog } from './templates/use-model-catalog.js';
 import { useCapabilityCatalog } from './templates/use-capability-catalog.js';
+import { useTemplatePreferences } from './templates/use-template-preferences.js';
 import {
   clearAllModels,
   countAssignedModels,
@@ -111,6 +112,7 @@ export default function TeamTemplatesPage() {
   } = useModelCatalog();
 
   const { skills: skillOptions, mcpServers: mcpOptions } = useCapabilityCatalog();
+  const templatePrefs = useTemplatePreferences();
 
   const accessToken = useAuthStore((s) => s.accessToken);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
@@ -178,6 +180,13 @@ export default function TeamTemplatesPage() {
       setSelectedId(templates[0]!.id);
     }
   }, [creating, selectedId, templates]);
+
+  // 列表加载完成后清理偏好里已不存在的模板 id（删除后避免脏数据残留）。
+  const prunePrefs = templatePrefs.prune;
+  useEffect(() => {
+    if (templateLoading || templates.length === 0) return;
+    prunePrefs(new Set(templates.map((t) => t.id)));
+  }, [templateLoading, templates, prunePrefs]);
 
   // Auto-clear feedback
   useEffect(() => {
@@ -500,12 +509,13 @@ export default function TeamTemplatesPage() {
     if (!guardSwitch()) return;
     const ok = await duplicateTemplate(selectedTemplate);
     if (ok) {
+      templatePrefs.recordUsage(selectedTemplate.id); // 复制是「采用该模板」的强信号
       setSelectedId(null); // newest copy lands at index 0
       setFeedback({ kind: 'success', message: '已复制为我的模板，可直接编辑' });
     } else {
       setFeedback({ kind: 'error', message: '复制失败' });
     }
-  }, [duplicateTemplate, guardSwitch, selectedTemplate]);
+  }, [duplicateTemplate, guardSwitch, selectedTemplate, templatePrefs]);
 
   const handleDelete = useCallback(async () => {
     if (!confirmDeleteId) return;
@@ -747,6 +757,10 @@ export default function TeamTemplatesPage() {
           }}
           onCreate={handleStartCreate}
           canCreate={canCreateTemplate}
+          isFavorite={templatePrefs.isFavorite}
+          onToggleFavorite={templatePrefs.toggleFavorite}
+          usage={templatePrefs.prefs.usage}
+          recentIds={templatePrefs.prefs.recent}
         />
 
         {/* Workspace */}

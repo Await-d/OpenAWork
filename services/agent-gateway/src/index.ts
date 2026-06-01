@@ -21,6 +21,7 @@ import requestWorkflowPlugin, { startRequestWorkflow } from './runtime/request-w
 import { startParentProcessWatch } from './infra/parent-watch.js';
 import { installProcessSafetyHandlers } from './infra/process-safety.js';
 import { resolveWsMaxPayloadBytes } from './infra/ws-payload-limit.js';
+import { GATEWAY_MAX_PARAM_LENGTH } from './infra/router-options.js';
 
 const ADMIN_EMAIL = globalThis.process?.env['ADMIN_EMAIL'] ?? 'admin@openAwork.local';
 const ADMIN_PASSWORD = globalThis.process?.env['ADMIN_PASSWORD'] ?? 'admin123456';
@@ -89,7 +90,14 @@ import { shutdownTeamRuntimeTelemetry } from './team/team-runtime-telemetry.js';
 // 方案 5：加载所有内置 provider 插件
 import './provider/plugins/index.js';
 
-const app = Fastify({ logger: true, disableRequestLogging: true });
+const app = Fastify({
+  logger: true,
+  disableRequestLogging: true,
+  // Raise the per-path-parameter length cap above the find-my-way default of
+  // 100 so routes keyed by long composite ids (e.g. notification ids) match
+  // instead of silently 404ing. See infra/router-options.ts for the rationale.
+  routerOptions: { maxParamLength: GATEWAY_MAX_PARAM_LENGTH },
+});
 
 // Last-resort process-level error handlers. Installed before any route or
 // background work so a stray unhandled rejection / uncaught exception from a

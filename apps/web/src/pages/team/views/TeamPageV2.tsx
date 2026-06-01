@@ -58,7 +58,6 @@ import { LayerConversationDrawer } from '../runtime/shell/session-view/LayerConv
 import { TeamSessionListSidebar } from '../runtime/shell/sidebar/TeamSessionListSidebar.js';
 import { TeamSidebarWithFileTree } from '../runtime/shell/sidebar/TeamSidebarWithFileTree.js';
 import { WorkspaceSwitcher } from '../runtime/shell/header/WorkspaceSwitcher.js';
-import { TeamHeaderMetrics } from '../runtime/shell/header/TeamHeaderMetrics.js';
 import { NewTeamWorkspaceModal } from '../runtime/shell/modals/NewTeamWorkspaceModal.js';
 import { ConfirmDeleteWorkspaceModal } from '../runtime/shell/modals/ConfirmDeleteWorkspaceModal.js';
 import { renderMiddleTabContent, type MiddleTabKey } from '../runtime/tabs/MiddleTabRouter.js';
@@ -119,33 +118,12 @@ const SIDEBAR_COLLAPSED_WIDTH = 52;
 
 // ───── 样式 ─────
 
-const HEADER_STYLE: CSSProperties = {
-  // 仅扩展 .page-header 的默认样式（间距、布局），保留默认 height/padding/background/border
-  gap: 12,
-};
-
-const TITLE_GROUP_STYLE: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 6,
-  minWidth: 0,
-  flexShrink: 1,
-  maxWidth: '40%',
-};
-
-const STATUS_SLOT_STYLE: CSSProperties = {
-  flex: 1,
-  minWidth: 0,
-  display: 'flex',
-  justifyContent: 'flex-end',
-  overflow: 'hidden',
-};
-
-const STATUS_TRIGGER_STYLE: CSSProperties = {
+const SUPERBAR_STATUS_TRIGGER_STYLE: CSSProperties = {
   display: 'flex',
   minWidth: 0,
   flex: 1,
   cursor: 'pointer',
+  overflow: 'hidden',
 };
 
 const OFFICE_EXPAND_BUTTON_STYLE: CSSProperties = {
@@ -316,7 +294,6 @@ export default function TeamPageV2() {
   const breakpoint = useBreakpoint();
   const handoffs = useHandoffStore((s) => s.handoffs);
   const unreadCount = useTeamNotificationStore((s) => s.unreadCount);
-  const notificationEvents = useTeamNotificationStore((s) => s.events);
   const clarificationPending = useClarificationStore((s) => s.pendingCount);
   const officeSceneState = useOfficeSceneState();
 
@@ -382,6 +359,9 @@ export default function TeamPageV2() {
       if (!options?.preserveFocus) {
         setFocusedHandoffId(null);
       }
+      // 点击会话 → 切回对话视图：关掉占据内容区的文件编辑器浮层，
+      // 让选中的会话对话流重新可见（与「点文件 = 预览」互为切换）。
+      setEditorOverlayOpen(false);
       setSelectedTeamId(teamId);
       data.selectTeam(teamId);
     },
@@ -580,26 +560,6 @@ export default function TeamPageV2() {
     gridTemplateColumns,
   };
 
-  // ─── header 指标统计 ────────────────────────────────────────────
-  const headerMetrics = useMemo(() => {
-    const allSessions = data.workspaceGroups.flatMap((group) => group.sessions);
-    const runningSessions = allSessions.filter((s) => s.status === 'running').length;
-    const activeHandoffs = Array.from(handoffs.values()).filter(
-      (h) => h.state === 'pending' || h.state === 'claimed' || h.state === 'running',
-    ).length;
-    const blockingNotifications = notificationEvents.filter(
-      (event) =>
-        event.type === 'waiting_confirmation' ||
-        event.type === 'blocking' ||
-        Boolean(event.payload['blocking']),
-    ).length;
-    return {
-      runningSessions,
-      activeHandoffs,
-      blockingNotifications,
-    };
-  }, [data.workspaceGroups, handoffs, notificationEvents]);
-
   const focusedHandoffEntry = useMemo(
     () => (focusedHandoffId ? (handoffs.get(focusedHandoffId) ?? null) : null),
     [focusedHandoffId, handoffs],
@@ -626,56 +586,10 @@ export default function TeamPageV2() {
         data-breakpoint={breakpoint}
         style={{ position: 'relative' }}
       >
-        {/* ───── 顶部页头（使用项目标准 .page-header 高度 + 自定义背景） ───── */}
-        <header className="page-header" style={HEADER_STYLE}>
-          <div style={TITLE_GROUP_STYLE}>
-            <strong style={{ fontSize: 14, whiteSpace: 'nowrap' }}>团队</strong>
-            <span style={{ color: 'var(--fg-muted)', fontSize: 12 }}>·</span>
-            <WorkspaceSwitcher
-              workspaces={workspaceState.workspaces}
-              activeWorkspaceId={workspaceState.activeWorkspace?.id ?? null}
-              loading={workspaceState.loading}
-              onSelect={(id) => navigate(`/team/${id}`)}
-              onCreateNew={() => setShowNewWorkspaceModal(true)}
-              onRename={data.renameWorkspace}
-              onRequestDelete={(ws) => setDeleteWorkspaceTarget(ws)}
-            />
-          </div>
-
-          {/* 中部：工作区指标卡片 */}
-          {!isMobile ? (
-            <TeamHeaderMetrics
-              metrics={data.metricCards}
-              activeHandoffCount={headerMetrics.activeHandoffs}
-              blockingNotificationCount={headerMetrics.blockingNotifications}
-              clarificationPendingCount={clarificationPending}
-              runningSessionCount={headerMetrics.runningSessions}
-            />
-          ) : null}
-
-          <div style={STATUS_SLOT_STYLE}>
-            <div
-              className="team-v2-control team-v2-control--transparent"
-              style={STATUS_TRIGGER_STYLE}
-              onClick={handleStatusBarClick}
-              role="button"
-              tabIndex={0}
-              aria-label="展开层级对话抽屉"
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  setDrawerVisible(true);
-                }
-              }}
-            >
-              <TeamStatusBar
-                paused={mode === 'paused'}
-                onPauseAll={() => setTeamPagePaused(true)}
-                onResumeAll={() => setTeamPagePaused(false)}
-              />
-            </div>
-          </div>
-        </header>
+        {/* ───── 顶部页头已合并进单条超级栏（方案 G）─────
+            原 .page-header（团队·工作区切换 / 指标卡 / 状态栏+暂停）整体下沉到
+            ConversationArea topBar 的 TeamTabBar(variant="single") 的
+            leadingSlot / centerSlot / trailingSlot，省掉一整条横栏。 */}
 
         {/* ───── 暂停态浮条（精简）───── */}
         {mode === 'paused' ? (
@@ -726,7 +640,7 @@ export default function TeamPageV2() {
           ) : null}
 
           {/* 中：对话区（紧凑流程栏已并入「概览 / 拓扑」子 tab） */}
-          <section style={LEFT_AREA_STYLE}>
+          <section style={{ ...LEFT_AREA_STYLE, position: 'relative' }}>
             <ConversationArea
               onSubmitMessage={handleSubmitMessage}
               onSelectSuggestion={handleSubmitMessage}
@@ -736,6 +650,7 @@ export default function TeamPageV2() {
               topBar={
                 <>
                   <TeamTabBar
+                    variant="single"
                     activePrimary={activePrimary}
                     middleTab={middleTab}
                     onPrimaryChange={handlePrimaryTabChange}
@@ -751,6 +666,45 @@ export default function TeamPageV2() {
                         handleMiddleTabChange('office');
                       }
                     }}
+                    leadingSlot={
+                      <>
+                        <strong style={{ fontSize: 13, whiteSpace: 'nowrap' }}>团队</strong>
+                        <span style={{ color: 'var(--fg-muted)', fontSize: 12 }}>·</span>
+                        <WorkspaceSwitcher
+                          workspaces={workspaceState.workspaces}
+                          activeWorkspaceId={workspaceState.activeWorkspace?.id ?? null}
+                          loading={workspaceState.loading}
+                          onSelect={(id) => navigate(`/team/${id}`)}
+                          onCreateNew={() => setShowNewWorkspaceModal(true)}
+                          onRename={data.renameWorkspace}
+                          onRequestDelete={(ws) => setDeleteWorkspaceTarget(ws)}
+                        />
+                      </>
+                    }
+                    centerSlot={
+                      !isMobile ? (
+                        <div
+                          className="team-v2-control team-v2-control--transparent"
+                          style={SUPERBAR_STATUS_TRIGGER_STYLE}
+                          onClick={handleStatusBarClick}
+                          role="button"
+                          tabIndex={0}
+                          aria-label="展开层级对话抽屉"
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              setDrawerVisible(true);
+                            }
+                          }}
+                        >
+                          <TeamStatusBar
+                            paused={mode === 'paused'}
+                            onPauseAll={() => setTeamPagePaused(true)}
+                            onResumeAll={() => setTeamPagePaused(false)}
+                          />
+                        </div>
+                      ) : null
+                    }
                   />
                   {focusedHandoffId ? (
                     <div style={FOCUS_BANNER_STYLE} aria-live="polite">
@@ -878,6 +832,15 @@ export default function TeamPageV2() {
                 )
               }
             />
+
+            <WorkspaceEditorOverlay
+              open={editorOverlayOpen}
+              onClose={() => setEditorOverlayOpen(false)}
+              workspacePath={editorWorkspacePath}
+              fileEditor={fileEditor}
+              saving={savingFile}
+              onSave={handleSaveFile}
+            />
           </section>
         </main>
 
@@ -993,15 +956,6 @@ export default function TeamPageV2() {
             </div>
           </div>
         ) : null}
-
-        <WorkspaceEditorOverlay
-          open={editorOverlayOpen}
-          onClose={() => setEditorOverlayOpen(false)}
-          workspacePath={editorWorkspacePath}
-          fileEditor={fileEditor}
-          saving={savingFile}
-          onSave={handleSaveFile}
-        />
       </div>
     </TeamRuntimeReferenceDataProvider>
   );

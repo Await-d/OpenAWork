@@ -31,6 +31,7 @@ import {
   type TeamSessionCreationStep,
 } from '../../data/team-session-creation.types.js';
 import { CheckIcon, ChevronRightIcon, XIcon } from '../../shared/TeamIcons.js';
+import { recordTemplateUsage } from '../../../views/templates/template-preferences.js';
 
 interface NewTeamSessionModalProps {
   onClose: () => void;
@@ -774,6 +775,10 @@ export function NewTeamSessionModal({
         title: creation.draft.title.trim() || generateDefaultSessionTitle(),
       };
       await onSubmitDraft(finalDraft);
+      // 据模板新建会话成功后，记录一次模板使用（最近 + 次数），供模板页统计展示。
+      if (finalDraft.source.kind === 'saved-template' && finalDraft.source.templateId) {
+        recordTemplateUsage(finalDraft.source.templateId);
+      }
       onClose();
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : '创建团队会话失败。');

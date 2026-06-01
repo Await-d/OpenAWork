@@ -30,6 +30,7 @@ import { getTeamEventsBusStats } from '../handoff/bus/team-events-bus.js';
 import { mergeRuntimeTaskGroups } from '../team/team-runtime-task-groups.js';
 import { listSharedSessionsForRecipient } from '../session/session-shared-access.js';
 import { listTeamAuditLogs, logTeamAudit } from '../team/team-audit-store.js';
+import { listTeamUsageRecords } from '../team/team-usage-records-store.js';
 import {
   SESSION_RUNTIME_THREAD_HEARTBEAT_MS,
   SESSION_RUNTIME_THREAD_STALE_AFTER_MS,
@@ -2415,6 +2416,13 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       });
       notificationsStep.succeed(undefined, { count: notifications.length });
 
+      const usageRecordsStep = child('usage-records');
+      const usageRecords = listTeamUsageRecords({
+        sessionIds: sessionRows.map((row) => row.id),
+        userId: user.sub,
+      });
+      usageRecordsStep.succeed(undefined, { count: usageRecords.length });
+
       const response = {
         auditLogs,
         clarifications,
@@ -2450,6 +2458,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         sessions: sessionRows.map((row) => mapRuntimeSessionRow(user.sub, row)),
         sharedSessions,
         runtimeTaskGroups,
+        usageRecords,
         tasks: taskRows.map((row) => ({
           id: row.id,
           title: row.title,

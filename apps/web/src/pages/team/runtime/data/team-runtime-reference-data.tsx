@@ -40,6 +40,7 @@ import {
 import { useTeamRuntimeProjection } from '../hooks/use-team-runtime-projection.js';
 import { useTeamRuntimeRoleBindings } from '../hooks/use-team-runtime-role-bindings.js';
 import { useTeamWorkflowTemplates } from '../hooks/use-team-workflow-templates.js';
+import { useHandoffStore } from '../../../../stores/team/team-events.js';
 import type { TeamSessionCreationDraft } from './team-session-creation.types.js';
 
 interface TaskDraftInput {
@@ -544,6 +545,11 @@ export function useResolvedTeamRuntimeReferenceData(
   const [sessionActionBusy, setSessionActionBusy] = useState(false);
   // 新建 session 后立刻记住 id，让 defaultReceptionSessionId 能在 refresh 完成前就指向它
   const [createdSessionId, setCreatedSessionId] = useState<string | null>(null);
+
+  // 真实执行流的 handoff（reception→pm1→pm2→executor…）。概览的"团队活动"指标
+  // 必须基于它 + runtimeTasks + sessions，而不是 V1 的 team_messages/team_tasks
+  // 手动协作表——后者在团队自动执行时根本不写入，导致概览长期显示 0（用了却统计不到）。
+  const handoffsMap = useHandoffStore((state) => state.handoffs);
 
   const projection = useTeamRuntimeProjection({
     auditLogs: collaboration.auditLogs,
@@ -1656,6 +1662,63 @@ export function useResolvedTeamRuntimeReferenceData(
     (collaboration.selectedSharedSession?.pendingPermissions.length ?? 0) +
     (collaboration.selectedSharedSession?.pendingQuestions.length ?? 0);
 
+  // 真实执行活动聚合：来自 handoff（层间交接）+ runtimeTasks（各层 session 任务）+
+  // sessions（运行状态）。这是团队"自动跑起来"后唯一真正变化的数据源；V1 的
+  // team_messages/team_tasks 只有用户手动操作才写，团队执行时恒为空，所以概览
+  // 不能再依赖它们来判断"团队是否在干活"。
+  const runtimeActivity = useMemo(() => {
+    const handoffs = Array.from(handoffsMap.values());
+    const activeHandoffs = handoffs.filter(
+      (h) => h.state === 'running' || h.state === 'claimed' || h.state === 'pending',
+    ).length;
+    const completedHandoffs = handoffs.filter((h) => h.state === 'completed').length;
+    const failedHandoffs = handoffs.filter(
+      (h) => h.state === 'failed' || h.state === 'cancelled',
+    ).length;
+
+    const runtimeTasks = collaboration.runtimeTasks;
+    const runningTasks = runtimeTasks.filter((t) => t.status === 'running').length;
+    const completedTasks = runtimeTasks.filter((t) => t.status === 'completed').length;
+    const failedTasks = runtimeTasks.filter((t) => t.status === 'failed').length;
+
+    const sessions = collaboration.sessions;
+    const runningSessions = sessions.filter((s) => s.stateStatus === 'running').length;
+    // 参与执行的角色层（去重）：从 handoff 的 to/from 层 + 有 roleLayer 的 session 收集。
+    const activeLayers = new Set<string>();
+    for (const h of handoffs) {
+      if (h.toRoleLayer) activeLayers.add(h.toRoleLayer);
+      if (h.fromRoleLayer) activeLayers.add(h.fromRoleLayer);
+    }
+    for (const s of sessions) {
+      if (s.roleLayer) activeLayers.add(s.roleLayer);
+    }
+
+    // 运行时长起点：最早的 handoff/任务开始时间（毫秒）。
+    const startCandidates: number[] = [];
+    for (const h of handoffs) {
+      const started = h.startedAt ?? h.updatedAt;
+      if (Number.isFinite(started)) startCandidates.push(started);
+    }
+    for (const t of runtimeTasks) {
+      if (t.startedAt != null && Number.isFinite(t.startedAt)) startCandidates.push(t.startedAt);
+    }
+
+    return {
+      handoffTotal: handoffs.length,
+      activeHandoffs,
+      completedHandoffs,
+      failedHandoffs,
+      runtimeTaskTotal: runtimeTasks.length,
+      runningTasks,
+      completedTasks,
+      failedTasks,
+      runningSessions,
+      sessionTotal: sessions.length,
+      activeLayerCount: activeLayers.size,
+      startCandidates,
+    };
+  }, [handoffsMap, collaboration.runtimeTasks, collaboration.sessions]);
+
   const overviewCards = useMemo((): AgentTeamsOverviewCard[] => {
     const runtimeStartCandidates = [
       ...collaboration.messages.map((message) => message.timestamp),
@@ -1665,44 +1728,63 @@ export function useResolvedTeamRuntimeReferenceData(
         .filter((value): value is string => Boolean(value))
         .map((value) => new Date(value).getTime()),
       ...collaboration.sharedSessions.map((session) => new Date(session.shareCreatedAt).getTime()),
+      // 把真实执行流的开始时间（handoff / runtimeTask）也纳入，否则团队自动跑起来
+      // 但用户没手动发消息/建任务时，运行时长恒为 0。
+      ...runtimeActivity.startCandidates,
     ].filter((value) => Number.isFinite(value));
+
+    // 任务数优先用真实执行任务（runtimeTasks），回退到手动 team_tasks。
+    const effectiveTaskTotal =
+      runtimeActivity.runtimeTaskTotal > 0
+        ? runtimeActivity.runtimeTaskTotal
+        : collaboration.tasks.length || collaboration.runtimeTaskRecords.length;
+
+    // 活跃角色：手动 team_members（V1）+ 真实执行中参与的角色层取较大值，
+    // 让团队自动执行时也能反映"有几层在干活"。
+    const workingMembers = collaboration.members.filter(
+      (member) => member.status === 'working',
+    ).length;
+    const effectiveActiveRoles = Math.max(
+      collaboration.members.length,
+      runtimeActivity.activeLayerCount,
+    );
 
     return [
       {
         icon: 'members',
         id: 'overview-active-members',
         label: '活跃角色',
-        note: `工作中 ${collaboration.members.filter((member) => member.status === 'working').length} · 总成员 ${collaboration.members.length}`,
-        trend: collaboration.members.some((member) => member.status === 'working')
-          ? 'up'
-          : 'stable',
-        value: String(collaboration.members.length),
+        note: `执行中层级 ${runtimeActivity.activeLayerCount} · 工作中成员 ${workingMembers} · 总成员 ${collaboration.members.length}`,
+        trend:
+          runtimeActivity.activeLayerCount > 0 || workingMembers > 0 ? 'up' : 'stable',
+        value: String(effectiveActiveRoles),
       },
       {
         icon: 'tasks',
         id: 'overview-tasks',
         label: '办公室任务',
-        note: `待办 ${taskLanes[0]?.cards.length ?? 0} · 进行中 ${taskLanes[1]?.cards.length ?? 0} · 待评审 ${taskLanes[2]?.cards.length ?? 0}`,
-        trend: (taskLanes[1]?.cards.length ?? 0) > 0 ? 'up' : 'stable',
-        value: String(collaboration.tasks.length || collaboration.runtimeTaskRecords.length),
+        note: `进行中 ${runtimeActivity.runningTasks} · 已完成 ${runtimeActivity.completedTasks} · 失败 ${runtimeActivity.failedTasks}`,
+        trend: runtimeActivity.runningTasks > 0 ? 'up' : 'stable',
+        value: String(effectiveTaskTotal),
       },
       {
         icon: 'overview',
         id: 'overview-shared-runs',
-        label: '共享运行',
-        note: selectedSharedSummary
-          ? `${formatWorkspaceLabel(selectedSharedSummary.workspacePath)} · ${getSharedSessionStateLabel(selectedSharedSummary.stateStatus)}`
-          : '当前暂无选中的共享运行',
-        trend: collaboration.sharedSessions.length > 0 ? 'up' : 'stable',
-        value: String(collaboration.sharedSessions.length),
+        label: '运行会话',
+        note: `运行中 ${runtimeActivity.runningSessions} · 共享 ${collaboration.sharedSessions.length} · 总计 ${runtimeActivity.sessionTotal}`,
+        trend:
+          runtimeActivity.runningSessions > 0 || collaboration.sharedSessions.length > 0
+            ? 'up'
+            : 'stable',
+        value: String(runtimeActivity.sessionTotal || collaboration.sharedSessions.length),
       },
       {
         icon: 'sync',
-        id: 'overview-messages',
-        label: 'TeamBus 消息',
-        note: `同步 ${collaboration.messages.filter((item) => item.type === 'update').length} · 提问 ${collaboration.messages.filter((item) => item.type === 'question').length}`,
-        trend: collaboration.messages.length > 0 ? 'up' : 'stable',
-        value: String(collaboration.messages.length),
+        id: 'overview-handoffs',
+        label: '团队交接',
+        note: `进行中 ${runtimeActivity.activeHandoffs} · 已完成 ${runtimeActivity.completedHandoffs} · 失败 ${runtimeActivity.failedHandoffs}`,
+        trend: runtimeActivity.activeHandoffs > 0 ? 'up' : 'stable',
+        value: String(runtimeActivity.handoffTotal),
       },
       {
         icon: 'review',
@@ -1718,7 +1800,9 @@ export function useResolvedTeamRuntimeReferenceData(
         label: '运行时长',
         note: selectedSharedSummary
           ? `当前会话：${selectedSharedSummary.title ?? selectedSharedSummary.sessionId}`
-          : '等待接入新的团队运行',
+          : runtimeActivity.handoffTotal > 0
+            ? `${runtimeActivity.activeHandoffs} 个交接进行中`
+            : '等待接入新的团队运行',
         trend: 'stable',
         value: formatRuntimeDuration(runtimeStartCandidates),
       },
@@ -1731,7 +1815,7 @@ export function useResolvedTeamRuntimeReferenceData(
     collaboration.messages,
     collaboration.auditLogs,
     collaboration.selectedSharedSession,
-    taskLanes,
+    runtimeActivity,
     selectedSharedSummary,
     pendingReviewCount,
   ]);
@@ -1747,11 +1831,15 @@ export function useResolvedTeamRuntimeReferenceData(
     const onlineCount =
       activeViewerCount ||
       collaboration.members.filter((member) => member.status === 'working').length;
-    const failedTaskCount = collaboration.tasks.filter((task) => task.status === 'failed').length;
+    // 运行/等待/异常计数：优先用真实执行任务(runtimeActivity)，团队自动跑起来时
+    // V1 的 collaboration.tasks 恒为 0，回退到它只是为了手动建任务的兼容场景。
+    const failedTaskCount =
+      runtimeActivity.failedTasks ||
+      collaboration.tasks.filter((task) => task.status === 'failed').length;
     const pendingTaskCount = collaboration.tasks.filter((task) => task.status === 'pending').length;
-    const runningTaskCount = collaboration.tasks.filter(
-      (task) => task.status === 'in_progress',
-    ).length;
+    const runningTaskCount =
+      runtimeActivity.runningTasks ||
+      collaboration.tasks.filter((task) => task.status === 'in_progress').length;
 
     return {
       activeMode: 'live',
@@ -1905,6 +1993,7 @@ export function useResolvedTeamRuntimeReferenceData(
     reviewCards,
     roleChips,
     runningTeams,
+    runtimeActivity,
     taskLanes,
     timelineEvents,
     options.workspaces,

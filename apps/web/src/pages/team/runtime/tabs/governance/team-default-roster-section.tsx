@@ -7,6 +7,7 @@ import {
 } from '@openAwork/shared';
 import type { TeamMemberSpecialty, TeamRuntimeLayer } from '@openAwork/shared';
 import { useTeamDefaultRosterState } from './use-team-default-roster-state.js';
+import { useTeamWorkflowTemplates } from '../../hooks/use-team-workflow-templates.js';
 
 interface TeamDefaultRosterSectionProps {
   gatewayUrl: string;
@@ -207,6 +208,9 @@ export function TeamDefaultRosterSection({
     token,
   });
   const client = useMemo(() => createTeamClient(gatewayUrl), [gatewayUrl]);
+  const { createTemplate } = useTeamWorkflowTemplates();
+  /** 「存为模板」进行中标记。 */
+  const [savingTemplate, setSavingTemplate] = useState(false);
   const [workspaceName, setWorkspaceName] = useState('');
   const [draftRoster, setDraftRoster] = useState<TeamMemberSlotInput[]>(() => cloneDefaultRoster());
   const [baseline, setBaseline] = useState(serializeRoster(cloneDefaultRoster()));
@@ -295,6 +299,39 @@ export function TeamDefaultRosterSection({
     }
   };
 
+  const handleSaveAsTemplate = async () => {
+    const rosterToSave = draftRoster.length > 0 ? draftRoster : cloneDefaultRoster();
+    const defaultName = `${workspaceName || '团队'} 模板`;
+    const name =
+      typeof window !== 'undefined'
+        ? window.prompt('把当前固定团队 roster 存为可复用模板，请输入模板名称：', defaultName)
+        : defaultName;
+    if (name === null) return; // 用户取消
+    const trimmed = name.trim() || defaultName;
+    setSavingTemplate(true);
+    setFeedback({ kind: 'saving', message: '正在存为模板…' });
+    try {
+      const ok = await createTemplate({
+        name: trimmed,
+        provider: '',
+        optionalAgentIds: [],
+        memberSlots: rosterToSave,
+      });
+      setFeedback(
+        ok
+          ? { kind: 'success', message: `已存为模板「${trimmed}」，可在团队模板页编辑复用` }
+          : { kind: 'error', message: '存为模板失败' },
+      );
+    } catch (err) {
+      setFeedback({
+        kind: 'error',
+        message: err instanceof Error ? err.message : '存为模板失败',
+      });
+    } finally {
+      setSavingTemplate(false);
+    }
+  };
+
   if (!teamWorkspaceId) {
     return (
       <div style={PANEL_STYLE}>
@@ -330,6 +367,15 @@ export function TeamDefaultRosterSection({
             }}
           >
             恢复系统默认
+          </button>
+          <button
+            type="button"
+            style={SECONDARY_BUTTON_STYLE}
+            onClick={() => void handleSaveAsTemplate()}
+            disabled={savingTemplate}
+            title="把当前固定团队 roster 沉淀为可复用的团队模板"
+          >
+            {savingTemplate ? '存为模板…' : '⤴ 存为模板'}
           </button>
           <button
             type="button"

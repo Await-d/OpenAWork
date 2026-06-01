@@ -1,4 +1,4 @@
-# Team 架构追溯性验证报告（v1.0）
+# Team 架构追溯性验证报告（v2.0）
 
 > 用途：基于 v1.1 复查后的疑点，逐项审计 L1 决策与现有代码的真实差距。本文档是**实施验证报告**，不是设计文档。
 >
@@ -10,11 +10,76 @@
 > - Phase B 实施记录：`.agentdocs/workflow/done/260515-team-phase-b-实施方案.md`
 >
 > 创建时间：2026-05-16
-> 当前状态：**审计完成 ✅**
+> 当前状态：**审计完成 ✅；v2.0 已按 2026-06-01 真实代码回写（见下方 §0 复核）**
 
 ---
 
-## TL;DR：8 项审计结果
+## 0. v2.0 复核（2026-06-01，以真实代码为准）⭐
+
+> 本节优先级高于下方 v1.0 各章节。v1.0（2026-05-16）的部分"未完成/部分实施"结论已**被代码推进追平**，下方旧章节保留作演进留痕。
+>
+> 复核方式：直接读 `services/agent-gateway/src/` 与 `apps/web/src/pages/team/` 真实源码 + git 历史（HEAD `f0335d6`）+ 实跑验证脚本，交叉核对。
+
+### 0.1 三项旧"缺口"已追平
+
+| 旧结论（v1.0）                                   | 2026-06-01 真实状态                                                                                                                                                                                  |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| L1.3 流式 handoff ❌ 未实施                      | ✅ **已实施闭环**。`artifact-chain.ts` 的 `waitForClarificationAnswers` 是真实阻塞等待循环（轮询 inbound / 30 分钟超时回退 / cancel 立即退出 / pause→resume 状态机）；spec→clarify→plan→tasks 全程 `setSubstate`。原"行 22 不等待回复"注释已不复存在。 |
+| L1.4 跨层禁止直连 ⚠️ feature flag 灰度，老路径仍在 | ✅ **老路径已退役**。`isHandoffModeEnabled` / `OPENAWORK_TEAM_HANDOFF_MODE` / `team-leader` / `interaction-agent` 在真实 `src/` 下**零匹配**；`feature-flags.ts` 仅存在于历史备份路径。routes 已模块化为 `team-crud.ts` / `team-handoffs.ts` / `team-inbound.ts` / `team-events.ts`。 |
+| L1.6 延迟约束 ❌ 未实施                          | ✅ **已实施**。`handoff/bus/latency-monitor.ts` 四指标采样点全部接入（`a_to_b_direct` / `a_to_b_ack` / `substate_push` / `progress_interval`），超阈值写 incident 并接 telemetry。 |
+
+### 0.2 L1.8 字段已补齐
+
+`sessions` 表的 `substate` / `substate_updated_at` / `paused` 系列字段已落库（`infra/db.ts` ensureColumn）；`substate-store.ts` 原子写入并广播事件。`structural_depth` / `execution_depth` 与 D18 对齐推进。
+
+### 0.3 L1.4 静态护栏已补（2026-06-01 新增）⭐
+
+v1.0 指出"L1.4 缺少 lint 规则"。现已落地自定义 ESLint 规则 **`team-architecture/no-cross-layer-runner-import`**（`scripts/eslint-rules/no-cross-layer-runner-import.mjs`）：
+
+- 编码五层拓扑，禁止 `handoff/runner/` 下任一层 runner 跨层直接 import 另一层 runner（**同时覆盖静态 import 与动态 `import()`** —— 后者正是分发器使用、最易被复制扩散的绕过点）。
+- 受控编排器白名单：`watcher`（守护进程分发）/ `pm1-runner`（`createPhaseCAwareRunner` 分发器）/ `scheduler`（纯调度）。
+- 同层组合放行：`pm1-runner` ↔ `artifact-chain`、`reception-orchestrator` ↔ `reception-router`。
+- 配套 RuleTester 自测 `no-cross-layer-runner-import.test.mjs`（10 例 valid/invalid），接入 `pnpm run lint:rules`。
+- 现状代码零违规（不变量本就成立），规则用于**锁死回归**。
+
+### 0.4 前端展示链路已完成
+
+v1.0 关注的"L1.8 展示链路"已由 `260530-team-page-内容区功能加强方案.md`（状态：全部完成）落地：substate 进度（`substates.ts` 的 `computeSubstateProgress` + `selectSubstateMeta`）、`use-session-handoffs.ts` 实时拉取 + WS 事件、`use-team-run-state.ts` 运行态聚合（working/stalled/failed）、知识图谱、跨层对话线程、3D 联动、分层用量、角色提示词预览面板，team 前端 30+ suites / 200 tests。
+
+### 0.5 `verify-task-tool-no-permission` 不再是阻塞项
+
+L1.3 收口记录曾称该 verification 阻塞完整 gateway 测试。2026-06-01 实跑确认：**standalone 与完整 `test:task-tool` 链均通过**（`verify-task-tool-no-permission: ok`，EXIT=0）。原阻塞为彼时测试隔离 flaky（共享 `:memory:` DB + vitest 并行串扰），现已不复现。
+
+### 0.6 v2.0 仍待办（非关键路径）
+
+- 🟡 L4 运营调参（~8 项）：推送优先级 / 记忆字符上限 / 各层风格基调，需上线后看真实数据，属有意延后。
+- 🟡 知识图谱后端持久化：当前前端派生图模型，图数据库后端为明确"后续评估"（N3 非目标）。
+
+---
+
+## TL;DR：8 项审计结果（v1.0 原表；状态列已按 v2.0 追平）
+
+| 决策                         | 审计结果（v2.0 更新）                              | 备注                                                        |
+| ---------------------------- | ------------------------------------------------- | ----------------------------------------------------------- |
+| L1.1 五层架构                | ✅ **完整实施**                                   | 无差距                                                      |
+| L1.2 d/b 拆分原则            | ✅ **意外符合**                                   | 实际比 L1 更简洁（dispatch 拆分用纯代码不用 LLM）           |
+| L1.3 流式 handoff            | ✅ **已实施闭环**（v2.0 追平）                    | `artifact-chain.ts` 阻塞等待循环 + substate 全程写入        |
+| L1.4 跨层禁止直连            | ✅ **老路径已退役 + 静态护栏已补**（v2.0 追平）   | 老路径零匹配；新增 `no-cross-layer-runner-import` lint 规则 |
+| L1.5 项目记忆双存储          | ✅ **完整实施且优于设计**                         | 7 层注入栈 + cache breaker 实现完善                         |
+| L1.6 延迟约束                | ✅ **已实施**（v2.0 追平）                        | `latency-monitor.ts` 四指标 + incident + telemetry          |
+| L1.7 Handoff 存储位置        | ✅ **完整实施**                                   | claim_token 防双 claim 是教科书级实现                       |
+| L1.8 Session 状态机          | ✅ **字段已补齐**（v2.0 追平）                    | substate / paused 系列已落库                                |
+| L1.9 BackgroundTaskScheduler | ✅ **9 方法完整实施**                             | 接口比文档简化（去掉了 priority/scheduledAt 等扩展字段）    |
+
+**核心结论（v2.0 更新）**：
+
+1. **不需要"重新设计"**：现有实施质量很高，9 项 L1 决策均已落地或更优。
+2. **v1.0 列出的三项缺口（L1.3 / L1.6 / L1.8）已全部追平**，L1.4 老路径退役 + 静态 lint 护栏已补。
+3. **剩余仅 L4 运营调参与知识图谱后端持久化**，均为有意延后、非关键路径。
+
+---
+
+## TL;DR：8 项审计结果（v1.0 历史原表，保留留痕）
 
 | 决策                         | 审计结果                                          | 与 L1.1 假设的差距                                          |
 | ---------------------------- | ------------------------------------------------- | ----------------------------------------------------------- |

@@ -230,3 +230,65 @@ describe('moveCustomSlotToLayer', () => {
     expect(moved.find((s) => s.id === preset.id)?.layer).toBe(preset.layer);
   });
 });
+
+describe('moveCustomSlotToLayer', () => {
+  it('把自定义角色移到另一层：layer / id / personaKey 同步更新', () => {
+    const roster = addCustomSlot(cloneDefaultRoster(), 'executor', {
+      displayName: '性能专家',
+      systemPrompt: '你是性能专家',
+      toolsets: ['read', 'write', 'shell'],
+    });
+    const custom = roster.find((s) => s.specialty === 'custom')!;
+    const moved = moveCustomSlotToLayer(roster, custom.id, 'reviewer');
+    const movedSlot = moved.find((s) => s.specialty === 'custom')!;
+    expect(movedSlot.layer).toBe('reviewer');
+    expect(movedSlot.id.startsWith('reviewer-custom-')).toBe(true);
+    expect(movedSlot.personaKey.startsWith('reviewer:custom:')).toBe(true);
+  });
+
+  it('移层时裁掉超出新层天花板的工具', () => {
+    // executor 允许 write/shell；reception 天花板只有 read/web → write/shell 被裁。
+    const roster = addCustomSlot(cloneDefaultRoster(), 'executor', {
+      displayName: 'X',
+      systemPrompt: 'x',
+      toolsets: ['read', 'write', 'shell'],
+    });
+    const custom = roster.find((s) => s.specialty === 'custom')!;
+    const moved = moveCustomSlotToLayer(roster, custom.id, 'reception');
+    const movedSlot = moved.find((s) => s.specialty === 'custom')!;
+    expect(movedSlot.toolsets).not.toContain('write');
+    expect(movedSlot.toolsets).not.toContain('shell');
+    expect(movedSlot.toolsets).toContain('read');
+  });
+
+  it('保留人物提示词等自定义字段', () => {
+    const roster = addCustomSlot(cloneDefaultRoster(), 'executor', {
+      displayName: '专家',
+      systemPrompt: '保留我',
+      toolsets: ['read'],
+    });
+    const custom = roster.find((s) => s.specialty === 'custom')!;
+    const moved = moveCustomSlotToLayer(roster, custom.id, 'pm1');
+    const movedSlot = moved.find((s) => s.specialty === 'custom')!;
+    expect(movedSlot.systemPrompt).toBe('保留我');
+    expect(movedSlot.displayName).toBe('专家');
+  });
+
+  it('目标层与原层相同时原样返回', () => {
+    const roster = addCustomSlot(cloneDefaultRoster(), 'executor', {
+      displayName: 'X',
+      systemPrompt: 'x',
+      toolsets: ['read'],
+    });
+    const custom = roster.find((s) => s.specialty === 'custom')!;
+    const moved = moveCustomSlotToLayer(roster, custom.id, 'executor');
+    expect(moved.find((s) => s.specialty === 'custom')!.id).toBe(custom.id);
+  });
+
+  it('不影响预置（非 custom）成员', () => {
+    const roster = cloneDefaultRoster();
+    const presetExec = roster.find((s) => s.layer === 'executor' && s.specialty !== 'custom')!;
+    const moved = moveCustomSlotToLayer(roster, presetExec.id, 'reviewer');
+    expect(moved.find((s) => s.id === presetExec.id)!.layer).toBe('executor');
+  });
+});

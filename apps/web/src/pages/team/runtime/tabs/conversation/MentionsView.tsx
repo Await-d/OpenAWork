@@ -21,6 +21,11 @@ import {
   resolveTeamRuntimeTabFromBlockingReason,
   type TeamRuntimeHandoffContextTab,
 } from '../team-runtime-navigation.js';
+import {
+  formatTeamEventSummary,
+  teamEventLayerLabel,
+  teamEventTypeLabel,
+} from '../../data/team-event-labels.js';
 
 const CONTAINER_STYLE: CSSProperties = {
   flex: 1,
@@ -131,12 +136,7 @@ function isBlocking(event: HandoffEvent): boolean {
 }
 
 function summarize(event: HandoffEvent): string {
-  const summary =
-    (event.payload['summary'] as string | undefined) ??
-    (event.payload['message'] as string | undefined) ??
-    (event.payload['detail'] as string | undefined);
-  if (summary) return summary;
-  return event.type.replaceAll('_', ' ');
+  return formatTeamEventSummary(event);
 }
 
 export interface MentionsViewProps {
@@ -333,9 +333,9 @@ export function MentionsView({ onOpenBlockingTarget, onOpenClarifications }: Men
                   </span>
                 ) : null}
                 <span style={{ fontWeight: 700, color: 'var(--fg-default)' }}>
-                  {item.event.type}
+                  {teamEventTypeLabel(item.event.type)}
                 </span>
-                {item.event.layer ? <span>· {item.event.layer}</span> : null}
+                {item.event.layer ? <span>· {teamEventLayerLabel(item.event.layer)}</span> : null}
                 <span style={{ flex: 1 }} />
                 <span style={{ fontVariantNumeric: 'tabular-nums' }}>
                   {new Date(item.event.timestamp).toLocaleTimeString()}

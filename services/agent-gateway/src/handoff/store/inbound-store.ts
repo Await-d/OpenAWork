@@ -484,6 +484,68 @@ export function hasPendingCancelSignal(toSessionId: string): boolean {
   return row != null;
 }
 
+/** 控制信号类型（cancel/pause/resume）——只影响执行生命周期，不携带业务数据。 */
+export type InboundControlSignalType = 'cancel_signal' | 'pause_signal' | 'resume_signal';
+
+/**
+ * 消费一条 session 当前 pending 的**控制信号**（仅 cancel/pause/resume）。
+ *
+ * 与 {@link consumePendingInboundMessage} 的区别：本函数**只**消费三类控制信号，
+ * 绝不碰 clarification_answer / user_input / escalation_request / progress_report
+ * —— 那些是业务消息，由各自的路径（artifact-chain 澄清循环、reception 编排、
+ * 前端通知面板）消费。流式执行层（executor/reviewer/pm2）在每个 LLM round 之间
+ * 调本函数来响应用户的取消/暂停，而不会误吞业务消息。
+ *
+ * 优先级：cancel > pause > resume；同级按 created_at 升序。命中即标记 consumed（幂等）。
+ *
+ * @returns 命中的控制信号；无则返回 null。
+ */
+export function consumePendingControlSignal(input: {
+  toSessionId: string;
+  loopIteration?: number;
+}): InboundMessageRecord | null {
+  // 先把过期但仍 pending 的标为 expired（与 consumePendingInboundMessage 一致）。
+  sqliteRun(
+    `UPDATE session_inbound_messages
+       SET state = 'expired'
+     WHERE state = 'pending'
+       AND expires_at IS NOT NULL
+       AND expires_at < datetime('now')`,
+  );
+
+  const row = sqliteGet<InboundMessageRow>(
+    `SELECT * FROM session_inbound_messages
+     WHERE to_session_id = ? AND state = 'pending'
+       AND message_type IN ('cancel_signal', 'pause_signal', 'resume_signal')
+     ORDER BY
+       CASE message_type
+         WHEN 'cancel_signal' THEN 0
+         WHEN 'pause_signal' THEN 1
+         WHEN 'resume_signal' THEN 1
+         ELSE 9
+       END,
+       created_at ASC
+     LIMIT 1`,
+    [input.toSessionId],
+  );
+  if (!row) return null;
+
+  sqliteRun(
+    `UPDATE session_inbound_messages
+       SET state = 'consumed',
+           consumed_at = datetime('now'),
+           consumed_by_loop_iteration = ?
+     WHERE id = ? AND state = 'pending'`,
+    [input.loopIteration ?? null, row.id],
+  );
+
+  const after = sqliteGet<InboundMessageRow>(
+    `SELECT * FROM session_inbound_messages WHERE id = ? LIMIT 1`,
+    [row.id],
+  );
+  return after ? mapRow(after) : mapRow(row);
+}
+
 export function resolveClarificationEscalationRequest(input: {
   answer?: string;
   answeredAt?: number;
@@ -516,7 +578,7 @@ export function resolveClarificationEscalationRequest(input: {
       if (!question || typeof question !== 'object') {
         return question;
       }
-      const typedQuestion = question as ClarificationPayloadQuestion;
+      const typedQuestion = question;
       if (typedQuestion.id !== input.questionId) {
         return typedQuestion;
       }
@@ -539,7 +601,7 @@ export function resolveClarificationEscalationRequest(input: {
       if (!question || typeof question !== 'object') {
         return false;
       }
-      const status = (question as ClarificationPayloadQuestion).status;
+      const status = question.status;
       return status === 'answered' || status === 'dismissed';
     });
 

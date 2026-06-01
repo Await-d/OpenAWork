@@ -162,6 +162,11 @@ export interface TeamPhaseAClient {
     roleLayer: SoulRoleLayer,
     input: { soulMd: string; key?: string },
   ): Promise<AgentPersonaRecord>;
+  /**
+   * 把某层 persona 重置为「当前最新内置默认 SOUL」（覆盖用户自定义）。
+   * 返回重置后的完整 PersonaResponse（含 effective.soulMd）。
+   */
+  resetPersona(token: string, roleLayer: SoulRoleLayer, key?: string): Promise<PersonaResponse>;
   listDefaultSouls(token: string): Promise<DefaultSoul[]>;
 
   getUserMemoryResult(token: string): Promise<UserMemoryLoadResult>;
@@ -847,6 +852,23 @@ export function createTeamPhaseAClient(baseUrl: string): TeamPhaseAClient {
           }),
       });
       return data.persona;
+    },
+
+    async resetPersona(token, roleLayer, key = 'default') {
+      const params = new URLSearchParams();
+      appendQueryParam(params, 'key', key);
+      const url = withQuery(
+        `${baseUrl}/team/personas/${encodeURIComponent(roleLayer)}/reset`,
+        params,
+      );
+      return performTeamPhaseARequest<PersonaResponse>({
+        actionLabel: '恢复角色 SOUL 默认',
+        request: () =>
+          fetchWithTimeout(url, {
+            method: 'POST',
+            headers: authHeader(token),
+          }),
+      });
     },
 
     async listDefaultSouls(token) {

@@ -263,6 +263,68 @@ describe('hasPendingCancelSignal', () => {
   });
 });
 
+describe('consumePendingControlSignal', () => {
+  it('只消费控制信号，cancel 优先于 pause/resume', () => {
+    store.submitInboundMessage({
+      userId: USER_ID,
+      toSessionId: SESSION_ID,
+      fromRoleLayer: 'system',
+      messageType: 'pause_signal',
+      payload: {},
+    });
+    store.submitInboundMessage({
+      userId: USER_ID,
+      toSessionId: SESSION_ID,
+      fromRoleLayer: 'system',
+      messageType: 'cancel_signal',
+      payload: { reason: 'stop' },
+    });
+    const first = store.consumePendingControlSignal({ toSessionId: SESSION_ID, loopIteration: 0 });
+    expect(first?.messageType).toBe('cancel_signal');
+    const second = store.consumePendingControlSignal({ toSessionId: SESSION_ID, loopIteration: 1 });
+    expect(second?.messageType).toBe('pause_signal');
+    const third = store.consumePendingControlSignal({ toSessionId: SESSION_ID, loopIteration: 2 });
+    expect(third).toBeNull();
+  });
+
+  it('绝不消费业务消息（user_input / clarification_answer）', () => {
+    store.submitInboundMessage({
+      userId: USER_ID,
+      toSessionId: SESSION_ID,
+      fromRoleLayer: 'reception',
+      messageType: 'user_input',
+      payload: { text: 'hi' },
+    });
+    store.submitInboundMessage({
+      userId: USER_ID,
+      toSessionId: SESSION_ID,
+      fromRoleLayer: 'reception',
+      messageType: 'clarification_answer',
+      payload: { questionId: 'q1', answer: 'a' },
+    });
+
+    // 没有任何控制信号 → 返回 null，且业务消息仍 pending（未被吞）。
+    expect(store.consumePendingControlSignal({ toSessionId: SESSION_ID })).toBeNull();
+    const stillPending = store.listPendingInboundMessages(SESSION_ID);
+    expect(stillPending).toHaveLength(2);
+    expect(stillPending.every((m) => m.state === 'pending')).toBe(true);
+  });
+
+  it('消费后幂等：同一信号不会被返回两次', () => {
+    store.submitInboundMessage({
+      userId: USER_ID,
+      toSessionId: SESSION_ID,
+      fromRoleLayer: 'system',
+      messageType: 'cancel_signal',
+      payload: { reason: 'x' },
+    });
+    expect(store.consumePendingControlSignal({ toSessionId: SESSION_ID })?.messageType).toBe(
+      'cancel_signal',
+    );
+    expect(store.consumePendingControlSignal({ toSessionId: SESSION_ID })).toBeNull();
+  });
+});
+
 describe('listPendingInboundMessages', () => {
   it('返回当前 pending（按 created_at 升序）', () => {
     store.submitInboundMessage({

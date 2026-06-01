@@ -207,3 +207,45 @@ describe('createTeamPhaseAClient mutation error handling', () => {
     }
   });
 });
+
+describe('createTeamPhaseAClient.resetPersona', () => {
+  it('POST /team/personas/:layer/reset 并返回 PersonaResponse', async () => {
+    const fetchMock = vi.fn(async (_url: string | URL, _init?: RequestInit) => {
+      return {
+        ok: true,
+        json: async () => ({
+          roleLayer: 'pm1',
+          key: 'default',
+          persona: { id: 'p1', roleLayer: 'pm1', key: 'default', soulMd: '# 默认' },
+          effective: { soulMd: '# 默认', isDefault: false },
+        }),
+      } as unknown as Response;
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const client = createTeamPhaseAClient('http://localhost:3000');
+    const result = await client.resetPersona('token-1', 'pm1');
+
+    expect(result).toMatchObject({
+      roleLayer: 'pm1',
+      effective: { soulMd: '# 默认', isDefault: false },
+    });
+    const calledUrl = String(fetchMock.mock.calls[0]?.[0] ?? '');
+    expect(calledUrl).toContain('/team/personas/pm1/reset');
+    expect(calledUrl).toContain('key=default');
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.method).toBe('POST');
+  });
+
+  it('HTTP 错误时抛出 HttpError', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: false,
+        status: 400,
+        json: async () => ({ error: 'invalid-role-layer' }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createTeamPhaseAClient('http://localhost:3000');
+    await expect(client.resetPersona('token-1', 'pm1')).rejects.toBeInstanceOf(HttpError);
+  });
+});

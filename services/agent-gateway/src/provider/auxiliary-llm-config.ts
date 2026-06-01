@@ -75,6 +75,12 @@ export interface ResolvedAuxiliaryLlmConfig {
   providerType?: AIProvider['type'];
   /** Forwarded so per-provider Responses/anthropic_messages overrides apply. */
   upstreamProtocol?: AIProvider['upstreamProtocol'];
+  /**
+   * 该 model 的每百万 token 单价（USD），来自用户 provider 配置里的 model 条目。
+   * 提供给团队用量统计估算成本（reception/pm1/pm2 等非流式路径）。缺省时成本记 0。
+   */
+  inputPricePerMillion?: number;
+  outputPricePerMillion?: number;
 }
 
 /**
@@ -145,12 +151,22 @@ function resolveProviderCredentials(
   if (!apiBaseUrl) return null;
   const apiKey = pickProviderApiKey(provider);
   if (!apiKey) return null;
+  // 从 provider 的 model 列表里找该 model 的单价（用于成本估算）。找不到也无妨。
+  const modelEntry = Array.isArray(provider.defaultModels)
+    ? provider.defaultModels.find((m) => m.id === modelId)
+    : undefined;
   return {
     apiBaseUrl,
     apiKey,
     model: modelId,
     providerType: provider.type,
     ...(provider.upstreamProtocol ? { upstreamProtocol: provider.upstreamProtocol } : {}),
+    ...(typeof modelEntry?.inputPricePerMillion === 'number'
+      ? { inputPricePerMillion: modelEntry.inputPricePerMillion }
+      : {}),
+    ...(typeof modelEntry?.outputPricePerMillion === 'number'
+      ? { outputPricePerMillion: modelEntry.outputPricePerMillion }
+      : {}),
   };
 }
 

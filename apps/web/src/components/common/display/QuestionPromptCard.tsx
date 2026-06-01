@@ -1,5 +1,6 @@
-import type { CSSProperties } from 'react';
+import { useEffect, type CSSProperties } from 'react';
 import type { PendingQuestionRequest } from '@openAwork/web-client';
+import { OptionSelectIndicator } from './OptionSelectIndicator.js';
 
 interface QuestionPromptCardProps {
   answers: string[][];
@@ -23,16 +24,56 @@ export default function QuestionPromptCard({
   style,
 }: QuestionPromptCardProps) {
   const isSubmitting = pendingAction !== null;
+  const answeredCount = request.questions.filter(
+    (_, index) => (answers[index]?.length ?? 0) > 0,
+  ).length;
+  const totalQuestions = request.questions.length;
   const isSubmitDisabled =
     isSubmitting ||
     request.questions.some((question, index) => (answers[index]?.length ?? 0) === 0);
   const pendingLabel = pendingAction === 'dismissed' ? '正在处理跳过…' : '正在提交回答…';
 
+  // Enter 提交：与 InlineQuestionPanel / PermissionPrompt 的键盘语义一致。
+  // 仅在未提交、且所有问题都已回答（!isSubmitDisabled）时触发；焦点在任何
+  // 编辑控件里时不接管 Enter，避免劫持输入框自身的回车行为。
+  useEffect(() => {
+    if (typeof window === 'undefined' || isSubmitDisabled) {
+      return;
+    }
+    const handler = (event: KeyboardEvent) => {
+      if (event.key !== 'Enter' || event.defaultPrevented) return;
+      if (event.shiftKey || event.altKey || event.metaKey || event.ctrlKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        const isEditable =
+          tag === 'INPUT' ||
+          tag === 'TEXTAREA' ||
+          tag === 'SELECT' ||
+          target.isContentEditable === true;
+        if (isEditable) return;
+      }
+      event.preventDefault();
+      onSubmit();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [isSubmitDisabled, onSubmit]);
+
   return (
     <div style={{ ...containerStyle, ...style }} aria-busy={isSubmitting}>
       <div style={headerRowStyle}>
         <span style={labelStyle}>会话等待回答</span>
-        <span style={toolStyle}>{request.toolName}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {totalQuestions > 1 && (
+            <span style={progressStyle} title={`已回答 ${answeredCount} / ${totalQuestions} 题`}>
+              {answeredCount}/{totalQuestions}
+            </span>
+          )}
+          <span style={toolStyle} title={request.toolName}>
+            询问用户
+          </span>
+        </div>
       </div>
       <div style={titleStyle}>{request.title}</div>
 
@@ -54,7 +95,14 @@ export default function QuestionPromptCard({
           const multiple = question.multiple === true;
           return (
             <section key={`${request.requestId}:${questionIndex}`} style={questionBlockStyle}>
-              <div style={questionHeaderStyle}>{question.header}</div>
+              <div style={questionHeaderStyle}>
+                <span>{question.header}</span>
+                {multiple && (
+                  <span style={multiBadgeStyle} title="该问题可选择多个选项">
+                    可多选
+                  </span>
+                )}
+              </div>
               <div style={questionTextStyle}>{question.question}</div>
               <div style={optionGridStyle}>
                 {question.options.map((option) => {
@@ -67,8 +115,11 @@ export default function QuestionPromptCard({
                       onClick={() => onToggleOption(questionIndex, option.label, multiple)}
                       style={optionButtonStyle(selected, isSubmitting)}
                     >
-                      <span style={optionLabelStyle}>{option.label}</span>
-                      <span style={optionDescriptionStyle}>{option.description}</span>
+                      <OptionSelectIndicator selected={selected} multiple={multiple} />
+                      <span style={optionContentStyle}>
+                        <span style={optionLabelStyle}>{option.label}</span>
+                        <span style={optionDescriptionStyle}>{option.description}</span>
+                      </span>
                     </button>
                   );
                 })}
@@ -79,6 +130,11 @@ export default function QuestionPromptCard({
       </div>
 
       <div style={actionsStyle}>
+        {!isSubmitDisabled && (
+          <span style={kbdHintStyle}>
+            <kbd style={kbdStyle}>Enter</kbd> 提交
+          </span>
+        )}
         <button
           type="button"
           disabled={isSubmitting}
@@ -136,6 +192,18 @@ const toolStyle: CSSProperties = {
   color: 'var(--fg-muted)',
 };
 
+const progressStyle: CSSProperties = {
+  fontSize: 10,
+  fontWeight: 700,
+  fontVariantNumeric: 'tabular-nums',
+  color: 'var(--accent)',
+  background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
+  padding: '1px 7px',
+  borderRadius: 999,
+  whiteSpace: 'nowrap',
+};
+
 const titleStyle: CSSProperties = {
   fontSize: 13,
   fontWeight: 600,
@@ -149,11 +217,28 @@ const questionBlockStyle: CSSProperties = {
 };
 
 const questionHeaderStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
   fontSize: 11,
   fontWeight: 700,
   color: 'var(--fg-muted)',
   textTransform: 'uppercase',
   letterSpacing: '0.04em',
+};
+
+const multiBadgeStyle: CSSProperties = {
+  fontSize: 9,
+  fontWeight: 700,
+  letterSpacing: '0.02em',
+  textTransform: 'none',
+  color: 'var(--accent)',
+  background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--accent) 35%, transparent)',
+  borderRadius: 999,
+  padding: '1px 6px',
+  lineHeight: 1.5,
+  whiteSpace: 'nowrap',
 };
 
 const questionTextStyle: CSSProperties = {
@@ -170,9 +255,9 @@ const optionGridStyle: CSSProperties = {
 
 const optionButtonStyle = (selected: boolean, disabled: boolean): CSSProperties => ({
   display: 'flex',
-  flexDirection: 'column',
+  flexDirection: 'row',
   alignItems: 'flex-start',
-  gap: 4,
+  gap: 8,
   padding: '10px 12px',
   borderRadius: 10,
   border: `1px solid ${selected ? 'var(--accent)' : 'var(--border-subtle)'}`,
@@ -184,6 +269,13 @@ const optionButtonStyle = (selected: boolean, disabled: boolean): CSSProperties 
   transition: 'opacity 120ms ease, border-color 120ms ease, background 120ms ease',
 });
 
+const optionContentStyle: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 2,
+  minWidth: 0,
+};
+
 const optionLabelStyle: CSSProperties = {
   fontSize: 12,
   fontWeight: 600,
@@ -193,13 +285,39 @@ const optionDescriptionStyle: CSSProperties = {
   fontSize: 11,
   color: 'var(--fg-muted)',
   lineHeight: 1.5,
+  display: '-webkit-box',
+  WebkitLineClamp: 2,
+  WebkitBoxOrient: 'vertical',
+  overflow: 'hidden',
 };
 
 const actionsStyle: CSSProperties = {
   display: 'flex',
   justifyContent: 'flex-end',
+  alignItems: 'center',
   gap: 8,
   marginTop: 4,
+};
+
+const kbdHintStyle: CSSProperties = {
+  marginRight: 'auto',
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 4,
+  fontSize: 10,
+  color: 'var(--fg-muted)',
+  whiteSpace: 'nowrap',
+};
+
+const kbdStyle: CSSProperties = {
+  fontFamily: 'var(--font-mono, monospace)',
+  fontSize: 9,
+  lineHeight: 1,
+  padding: '2px 5px',
+  borderRadius: 4,
+  border: '1px solid var(--border-default)',
+  background: 'var(--bg-surface)',
+  color: 'var(--fg-default)',
 };
 
 const statusPanelStyle = (error: boolean): CSSProperties => ({
@@ -208,9 +326,13 @@ const statusPanelStyle = (error: boolean): CSSProperties => ({
   gap: 8,
   padding: '0.6rem 0.7rem',
   borderRadius: 10,
-  border: error ? '1px solid rgba(248,113,113,0.28)' : '1px solid rgba(99,102,241,0.22)',
-  background: error ? 'rgba(127, 29, 29, 0.22)' : 'rgba(99,102,241,0.1)',
-  color: error ? 'var(--danger-muted)' : 'var(--fg-strong)',
+  border: error
+    ? '1px solid color-mix(in srgb, var(--danger) 28%, transparent)'
+    : '1px solid color-mix(in srgb, var(--accent) 22%, transparent)',
+  background: error
+    ? 'color-mix(in srgb, var(--danger) 10%, transparent)'
+    : 'color-mix(in srgb, var(--accent) 8%, transparent)',
+  color: error ? 'var(--danger)' : 'var(--fg-strong)',
   fontSize: 11,
   lineHeight: 1.5,
 });

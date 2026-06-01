@@ -34,6 +34,15 @@ import type {
 } from '../../../components/chat/message/chat-message-group-list.js';
 import { groupChatRenderEntries } from '../../../components/conversation-runtime/messages/group-render-entries.js';
 import type { UnifiedComposerSubmitPayload } from '../../../components/chat/composer/UnifiedComposer.js';
+import type {
+  HistoryEditPromptInput,
+  RetryPromptInput,
+} from './TeamConversationLayout.js';
+import { normalizeChatMessages } from '../../../components/conversation-runtime/messages/support.js';
+import { prepareStandardChatSendInput } from '../../chat-page/conversation/composer/prepare-standard-chat-send-input.js';
+import { createSessionsClient } from '@openAwork/web-client';
+import type { ChatMessage } from '../../../components/conversation-runtime/messages/support.js';
+import type { InputImageContent } from '@openAwork/shared';
 import { useAuthStore } from '../../../stores/auth/auth.js';
 import { useChatKeyboardShortcuts } from '../../../hooks/chat/useChatKeyboardShortcuts.js';
 import { useComposerWorkspaceCatalog } from '../../../hooks/chat/useComposerWorkspaceCatalog.js';
@@ -45,6 +54,9 @@ import { TeamSubstateProgressBar } from './extras/TeamSubstateProgressBar.js';
 import { TeamRunStateBanner } from './extras/TeamRunStateBanner.js';
 import { TeamSessionEmptyState } from './extras/TeamSessionEmptyState.js';
 import { TeamSessionHeader } from './extras/TeamSessionHeader.js';
+import { TeamMessageRoleHeader } from './extras/TeamMessageRoleHeader.js';
+import { TeamUserJumpRail } from './extras/TeamUserJumpRail.js';
+import { TeamRoleTypingIndicator } from './extras/TeamRoleTypingIndicator.js';
 import { TeamInitModal } from './extras/TeamInitModal.js';
 import { useTeamConversationState } from './use-team-conversation-state.js';
 import { resolveTeamSubmitStrategy } from './submit/team-submit-router.js';
@@ -226,14 +238,21 @@ export function TeamConversationView({
   // 与 D26（b 直答 vs 走 c 路由）对齐——告诉用户"输入需求会被派发给团队"。
   const effectivePlaceholder = useMemo(() => {
     if (composerPlaceholder) return composerPlaceholder;
+    // 流式进行中：明确提示当前不可发送（与 handleComposerSubmit 的 busy 守卫呼应）。
+    if (state.streaming) {
+      return '团队正在回复中，可点击停止后再发送…';
+    }
     if (state.substate === 'clarifying') {
-      return '团队正在等你回答澄清问题，请直接输入答案…（Enter 发送）';
+      return '团队在等你回答澄清问题，直接输入答案后回车发送…';
     }
     if (state.roleLayer === 'reception') {
-      return '告诉接待层你想做什么，团队会按需展开规划/执行/评审…（Enter 发送，Shift+Enter 换行）';
+      return '告诉团队你想做什么，回车发送 · Shift+Enter 换行';
     }
-    return '输入消息与团队对话…（Enter 发送，Shift+Enter 换行）';
-  }, [composerPlaceholder, state.roleLayer, state.substate]);
+    if (state.roleLayer && state.roleLayer !== 'reception') {
+      return '与当前层对话，回车发送 · Shift+Enter 换行';
+    }
+    return '输入消息与团队对话，回车发送 · Shift+Enter 换行';
+  }, [composerPlaceholder, state.roleLayer, state.substate, state.streaming]);
 
   // ─── handlers ───────────────────────────────────────────────────────
   const noopAsync = useCallback(async () => {
@@ -244,36 +263,61 @@ export function TeamConversationView({
     // intentionally empty
   }, []);
 
-  // ─── 提交路由（D5 决策：按 roleLayer/substate 选 stream 或 inbound）──────
-  // - clarifying → inbound (clarification_answer)
-  // - 其它 → stream（让用户的输入直接驱动该 session 的 LLM 循环；reception
-  //   走 b 路由，其它 layer 是普通 chat 风格的 session）
-  // - inbound 端点 404 / 5xx → 自动 fallback 到 stream，让用户至少能看到回复
-  const handleComposerSubmit = useCallback(
-    async (payload: UnifiedComposerSubmitPayload) => {
-      if (!composerEnabled) return;
-      const text = payload.text.trim();
-      if (!text) return;
-
+  // ─── 统一文本派发（提交路由 D5 决策：按 roleLayer/substate 选 inbound / stream）──
+  // 抽成可复用单元，让「正常提交 / 编辑重发 / 重试 / 追加」都走同一条路由，避免
+  // 编辑重试在 clarifying 环节误绕过 inbound 通道。
+  //   - clarifying → inbound (clarification_answer)
+  //   - 其它 → stream（reception 走 b 路由，其它 layer 是普通 chat 风格 session）
+  //   - inbound 端点 404 / 5xx → 自动 fallback 到 stream
+  const dispatchTeamText = useCallback(
+    async (text: string, inputParts?: InputImageContent[]): Promise<boolean> => {
+      // 每次新的派发尝试先清除上一轮的错误提示，避免旧错误遮挡新内容。
+      state.setStreamError(null);
       const strategy = resolveTeamSubmitStrategy(state.roleLayer, state.substate);
-      state.setInput('');
 
       if (strategy.kind === 'inbound') {
-        // 当前只有 'clarification_answer' / 'user_input' 在 backend 端点已落地
-        // （`@openAwork/web-client` 的 InboundMessageType 联合）。router 暴露的
-        // 'spec_revision' / 'plan_approval' 是预留位，等后端落地时再放行。
-        if (
-          strategy.messageType === 'clarification_answer' ||
-          strategy.messageType === 'user_input'
-        ) {
+        if (strategy.messageType === 'clarification_answer') {
+          // #6 澄清答案路径：必须携带 questionId 才能让后端把对应的 escalation
+          // 标记 'answered'。inline-question UI 走的是另一条 onReplyInlineQuestion
+          // 路径（带 requestId），而 composer 派发到这里时拿不到 questionId。
+          // 早期实现直接 submit `{ answer: text }`——后端会落库 inbound 但
+          // **resolveClarificationEscalationRequest 因缺 questionId 静默 no-op**，
+          // c session 永远不会得知答案，substate 卡死。
+          //
+          // 复查后的修法：composer 派发时把这条改写成 `user_input`（语义同
+          // "给当前 session 追加一条用户输入"，c runner 会从消息流读到），
+          // 既不污染 session（被 c runner 主动消费而非 stream 注入），又
+          // 保证用户输入真的进入流程。如果 inbound 失败再交给下方 stream 兜底。
           try {
-            await state.submitInbound(strategy.messageType, { answer: text } as never);
+            await state.submitInbound('user_input', { text } as never);
             await state.reload();
-            return;
+            return true;
           } catch (err) {
-            // inbound 端点不可用 → fallback 到 stream，避免阻塞用户。
+            const message = err instanceof Error ? err.message : '提交输入失败';
             console.warn(
-              '[TeamConversationView] inbound submit failed, falling back to stream:',
+              '[TeamConversationView] clarifying inbound submit (as user_input) failed:',
+              message,
+            );
+            // 澄清环节失败仍不能错路由到 stream（c session 处于 LLM 循环中）：
+            // 报错让用户重试。
+            state.setStreamError(`输入提交失败，请重试：${message}`);
+            return false;
+          }
+        }
+
+        if (strategy.messageType === 'user_input') {
+          // user_input 走 inbound 失败时回退 stream 是安全的（同为"给当前 session
+          // 追加一条用户消息"语义），保留原有 fallback 行为。
+          // 注意：UserInputPayload 字段是 `text`（不是 `answer`），后端
+          // team-inbound.ts 读 body.payload['text']。早期实现误写成 `answer`
+          // 导致 inbound 路径吞输入；这里同时纠正字段名。
+          try {
+            await state.submitInbound(strategy.messageType, { text } as never);
+            await state.reload();
+            return true;
+          } catch (err) {
+            console.warn(
+              '[TeamConversationView] user_input inbound submit failed, falling back to stream:',
               err instanceof Error ? err.message : err,
             );
           }
@@ -285,28 +329,176 @@ export function TeamConversationView({
         }
       }
 
-      // handoff 路径目前由方案预留，没有触发条件；当出现时直接告警并 fallback。
       if (strategy.kind === 'handoff') {
         console.warn(
           '[TeamConversationView] handoff submit strategy not implemented; falling back to stream',
         );
       }
 
-      // stream 路径：复用 chat 端 SSE/WS 协议。
       try {
-        await state.startStream(text);
+        await state.startStream(text, inputParts ? { inputParts } : undefined);
+        return true;
       } catch (err) {
         const message = err instanceof Error ? err.message : 'stream 请求失败';
         state.setStreamError(message);
+        return false;
       }
     },
-    [composerEnabled, state],
+    [state],
+  );
+
+  const handleComposerSubmit = useCallback(
+    async (payload: UnifiedComposerSubmitPayload) => {
+      if (!composerEnabled) return;
+      const text = payload.text.trim();
+      // 纯附件（无文本）也允许发送：用一个占位描述让后端/LLM 知道用户发了图片。
+      // 早期实现 `if (!text) return` 会静默丢弃纯图片提交，用户无任何反馈。
+      const hasFiles = payload.files.length > 0;
+      if (!text && !hasFiles) return;
+
+      // 流式进行中直接挡掉，并保留输入框内容 + 给出明确提示，避免"清空输入框→
+      // startStream 静默 return→消息凭空消失"的旧行为（端到端健壮性 🔴#2）。
+      if (state.streaming) {
+        state.setStreamError('正在生成回复，请等待当前回复完成或点击停止后再发送。');
+        return;
+      }
+
+      // 先把 composer 附件（图片）上传并转成 inputParts，与 chat 的发送文件能力对齐。
+      // #7 附件上传失败不再静默降级为"只发文本"——那样用户以为图片发出去了，实际
+      // 团队根本没收到。改为：报错 + 保留输入框内容（不清空）让用户重试，由用户
+      // 决定是否去掉附件再发。
+      let inputParts: InputImageContent[] | undefined;
+      if (payload.files.length > 0 && gatewayUrl) {
+        try {
+          const prepared = await prepareStandardChatSendInput({
+            files: payload.files,
+            gatewayUrl,
+            sessionId,
+            text: text || '[用户发送了附件]',
+            token,
+          });
+          inputParts = prepared.requestInputParts;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : '附件上传失败';
+          console.warn('[TeamConversationView] attachment upload failed:', message);
+          state.setStreamError(
+            `附件上传失败，消息未发送（请重试或移除附件后重发）：${message}`,
+          );
+          return;
+        }
+      }
+
+      // 只有在派发被接受后才清空输入框；若被拒绝（如竞态下流式刚开始）则保留
+      // 文本，让用户可以重试，不会丢失已输入内容。
+      // 纯附件时用占位文本让 startStream 不因 empty text 而 bail out。
+      const effectiveText = text || (hasFiles ? '[用户发送了附件]' : '');
+      const accepted = await dispatchTeamText(effectiveText, inputParts);
+      if (accepted) {
+        state.setInput('');
+      }
+    },
+    [composerEnabled, state, gatewayUrl, sessionId, token, dispatchTeamText],
   );
 
   const handleStopStream = useCallback(async () => {
     if (!composerEnabled) return;
     await state.stopStream();
   }, [composerEnabled, state]);
+
+  // ─── 会话内容编辑 / 重试（对齐 chat）──────────────────────────────────
+  // team 之前把这些全接成 noop；这里补上真实实现：
+  //   - 编辑重发（user 消息）：截断到该消息之前 → 用新文本重新 startStream
+  //   - 重试（assistant 消息）：回溯到最近的 user 消息 → 截断 → 重发其文本
+  // 截断走 sessionsClient.truncateMessages（与 chat 同一后端端点）。
+  // team 暂不支持「新建会话重试 / 分支」（无分支会话概念），故 onRetryBranch /
+  // onCreateBranchFromHistoryEdit 回退为「在当前会话重发」。
+  const [historyEditPrompt, setHistoryEditPrompt] = useState<HistoryEditPromptInput | null>(null);
+  const [retryPrompt, setRetryPrompt] = useState<RetryPromptInput | null>(null);
+
+  const truncateAndResend = useCallback(
+    async (sourceMessageId: string, text: string, inputParts?: InputImageContent[]) => {
+      // 流式中不允许重试/编辑重发（与正常提交一致的 busy 保护）。
+      if (state.streaming) {
+        state.setStreamError('正在生成回复，请等待当前回复完成后再重试。');
+        return;
+      }
+      if (gatewayUrl && token) {
+        try {
+          const sessionsClient = createSessionsClient(gatewayUrl);
+          const remaining = await sessionsClient.truncateMessages(
+            token,
+            sessionId,
+            sourceMessageId,
+          );
+          state.setMessages(normalizeChatMessages(remaining));
+        } catch (err) {
+          console.warn(
+            '[TeamConversationView] truncate failed, resend without truncation:',
+            err instanceof Error ? err.message : err,
+          );
+        }
+      }
+      // 重发也走统一路由（与正常提交一致，避免在 clarifying 环节误绕过 inbound）。
+      await dispatchTeamText(text, inputParts);
+    },
+    [gatewayUrl, sessionId, state, token, dispatchTeamText],
+  );
+
+  const handleResendHistoryEdit = useCallback(
+    (text: string, editedInputParts?: unknown[]) => {
+      if (!historyEditPrompt) return;
+      void truncateAndResend(
+        historyEditPrompt.messageId,
+        text,
+        editedInputParts as InputImageContent[] | undefined,
+      );
+      setHistoryEditPrompt(null);
+    },
+    [historyEditPrompt, truncateAndResend],
+  );
+
+  const handleContinueHistoryEdit = useCallback(
+    (text: string) => {
+      // 「追加到末尾」：不截断，直接作为新一条发送（同样走统一路由）。
+      void dispatchTeamText(text);
+      setHistoryEditPrompt(null);
+    },
+    [dispatchTeamText],
+  );
+
+  const handleRetryCurrent = useCallback(() => {
+    if (!retryPrompt) return;
+    void truncateAndResend(
+      retryPrompt.messageId,
+      retryPrompt.text,
+      retryPrompt.inputParts as InputImageContent[] | undefined,
+    );
+    setRetryPrompt(null);
+  }, [retryPrompt, truncateAndResend]);
+
+  const handleComposerModelSelect = useCallback(
+    async (providerId: string, modelId: string) => {
+      state.setActiveProviderId(providerId);
+      state.setActiveModelId(modelId);
+    },
+    [state],
+  );
+
+  // 找某条消息对应的「重试源」：assistant 消息 → 向上回溯到最近 user 消息。
+  const findRetrySource = useCallback(
+    (messageId: string): { id: string; text: string; inputParts?: InputImageContent[] } | null => {
+      const idx = state.messages.findIndex((m) => m.id === messageId);
+      if (idx < 0) return null;
+      for (let i = idx; i >= 0; i--) {
+        const m = state.messages[i];
+        if (m && m.role === 'user') {
+          return { id: m.id, text: m.content };
+        }
+      }
+      return null;
+    },
+    [state.messages],
+  );
 
   // ─── 行内 question / permission 回复 ────────────────────────────────
   const [inlineQuestionAnswers, setInlineQuestionAnswers] = useState<string[][]>([]);
@@ -386,20 +578,104 @@ export function TeamConversationView({
 
   // ─── 派生 props ─────────────────────────────────────────────────────
   /**
-   * 把消息列表 group 成 ChatRenderGroup[]，让 TeamConversationLayout 内部的
-   * ChatMessageGroupList 能正常渲染（与 chat 端视觉一致）。
+   * 把消息列表 group 成 ChatRenderGroup[]，喂给 TeamConversationLayout 内部的
+   * ChatMessageGroupList 渲染（与 chat 端视觉一致）。
    *
-   * 这里不接 useChatRenderData——那个 hook 需要 25+ 字段（toolCallCards/
-   * buildMessageActions/handleCopyMessageGroup 等），是 chat 业务范畴。
-   * team 走最简路径：每条 message 直接渲染，不带 actions/usageDetails。
+   * 相比早期「最简路径」，现在补齐了与 chat 对齐的两类能力：
+   *   1. 每个 assistant 组首注入团队角色身份头（多级角色展示）。
+   *   2. 每条消息注入 hover actions：复制 / 编辑重试（user）/ 重试（assistant）。
+   *      仅在 composerEnabled（可交互）时注入编辑/重试，避免只读视图出现无效按钮。
    */
+  const buildEntryActions = useCallback(
+    (message: ChatMessage): ChatRenderEntry['actions'] => {
+      const actions: NonNullable<ChatRenderEntry['actions']> = [
+        {
+          id: 'copy',
+          label: '复制',
+          title: '复制此消息',
+          onClick: () => {
+            void copyExportToClipboard([message], 'text');
+          },
+        },
+      ];
+      if (composerEnabled) {
+        if (message.role === 'user') {
+          actions.push({
+            id: 'edit-retry',
+            label: '编辑重试',
+            title: '编辑这条消息并从此处重新发送',
+            onClick: () => {
+              const inputParts = Array.isArray(message.rawContent)
+                ? (message.rawContent.filter(
+                    (p) => (p as { type?: string }).type === 'input_image',
+                  ) as unknown[])
+                : undefined;
+              setRetryPrompt(null);
+              setHistoryEditPrompt({
+                messageId: message.id,
+                text: message.content,
+                ...(inputParts && inputParts.length > 0 ? { inputParts } : {}),
+              });
+            },
+          });
+        } else if (message.role === 'assistant') {
+          actions.push({
+            id: 'retry',
+            label: '重试',
+            title: '从最近一条用户消息重新生成',
+            onClick: () => {
+              const src = findRetrySource(message.id);
+              if (!src) return;
+              setHistoryEditPrompt(null);
+              setRetryPrompt({
+                messageId: src.id,
+                text: src.text,
+                ...(src.inputParts ? { inputParts: src.inputParts } : {}),
+              });
+            },
+          });
+        }
+      }
+      return actions;
+    },
+    [composerEnabled, findRetrySource],
+  );
+
   const groupedMessageEntries = useMemo<ChatRenderGroup[]>(() => {
     const entries: ChatRenderEntry[] = state.messages.map((message) => ({
       message,
       renderContent: (m) => renderChatMessageContentWithOptions(m),
+      actions: buildEntryActions(message),
     }));
-    return groupChatRenderEntries(entries);
-  }, [state.messages]);
+    const groups = groupChatRenderEntries(entries);
+
+    // team 多级角色展示：给每个「assistant 消息组」的首条注入角色身份头
+    // （彩色头像点 + 层级名 + 代号），让用户一眼看出是哪一层在说话，使 team 对话
+    // 在视觉上彻底区别于普通 chat。
+    //   - 覆盖全部已知层（含 reception 主对话——它本就是接待层在说话，标注准确且
+    //     让默认界面脱离纯 chat 观感）。
+    //   - roleLayer 缺失（null/未知）时不注入：拿不到层级信息，避免臆造身份。
+    //   - 只在组首注入，相邻同层消息不重复刷头；user 组不注入（那是用户自己）。
+    if (!state.roleLayer) {
+      return groups;
+    }
+    const layer = state.roleLayer;
+    return groups.map((group) => {
+      if (group.role !== 'assistant') return group;
+      const [firstEntry, ...rest] = group.entries;
+      if (!firstEntry) return group;
+      const wrappedFirst: ChatRenderEntry = {
+        ...firstEntry,
+        renderContent: (m) => (
+          <>
+            <TeamMessageRoleHeader roleLayer={layer} />
+            {firstEntry.renderContent(m)}
+          </>
+        ),
+      };
+      return { ...group, entries: [wrappedFirst, ...rest] };
+    });
+  }, [state.messages, state.roleLayer, buildEntryActions]);
 
   // Provider catalog for the model picker (composer header).
   const providerCatalog = useMemo(() => {
@@ -422,6 +698,12 @@ export function TeamConversationView({
     }
     return null;
   }, [state.messages]);
+
+  // 用户输入条数 —— 驱动右侧「用户输入快捷跳转」控件（<=1 条时控件自隐）。
+  const userMessageCount = useMemo(
+    () => state.messages.filter((m) => m.role === 'user').length,
+    [state.messages],
+  );
 
   // canStopCurrentSessionStream: true while the user is actively streaming
   // through THIS hook (gatewayClient runs internally) — gives the composer a
@@ -466,7 +748,29 @@ export function TeamConversationView({
               {beforeMessages}
             </>
           }
-          afterMessages={afterMessages}
+          afterMessagesInline={
+            <>
+              <TeamRoleTypingIndicator
+                roleLayer={state.roleLayer}
+                visible={
+                  (state.streaming && !state.visibleStreaming) ||
+                  (!state.visibleStreaming && state.remoteSessionBusyState === 'running')
+                }
+              />
+              {/* 推送条（团队反馈）等尾随内容也走 inline，紧贴对话流末尾，
+                  消息很少时不会孤零零悬浮在输入框上方与对话脱节。 */}
+              {afterMessages}
+            </>
+          }
+          rightFloatingSlot={
+            <TeamUserJumpRail
+              scrollRegionRef={state.scrollRegionRef}
+              userCount={userMessageCount}
+              onPrev={handleScrollToPrevUser}
+              onNext={handleScrollToNextUser}
+            />
+          }
+          anchorConversationToBottom
           composerDisabled={!composerEnabled}
           composerDisabledHint={composerDisabledHint}
           composerExtras={{
@@ -539,15 +843,15 @@ export function TeamConversationView({
           onToggleInlineQuestionOption={onToggleInlineQuestionOption}
           onChangeInlineQuestionCustomInput={onChangeInlineQuestionCustomInput}
           onReplyInlineQuestion={onReplyInlineQuestion}
-          historyEditPrompt={null}
-          onCloseHistoryEdit={noopVoid}
-          onResendHistoryEdit={noopVoid}
-          onContinueHistoryEdit={noopVoid}
-          onCreateBranchFromHistoryEdit={noopVoid}
-          retryPrompt={null}
-          onCloseRetry={noopVoid}
-          onRetryCurrent={noopVoid}
-          onRetryBranch={noopVoid}
+          historyEditPrompt={historyEditPrompt}
+          onCloseHistoryEdit={() => setHistoryEditPrompt(null)}
+          onResendHistoryEdit={handleResendHistoryEdit}
+          onContinueHistoryEdit={handleContinueHistoryEdit}
+          onCreateBranchFromHistoryEdit={handleResendHistoryEdit}
+          retryPrompt={retryPrompt}
+          onCloseRetry={() => setRetryPrompt(null)}
+          onRetryCurrent={handleRetryCurrent}
+          onRetryBranch={handleRetryCurrent}
           chatSearch={chatSearch}
           composerVariant="session"
           providers={state.providers}
@@ -569,6 +873,7 @@ export function TeamConversationView({
           textareaRef={state.textareaRef}
           onComposerSubmit={composerEnabled ? handleComposerSubmit : noopAsync}
           onStopComposer={composerEnabled ? handleStopStream : noopAsync}
+          onComposerModelSelect={handleComposerModelSelect}
           onToggleWebSearch={noopVoid}
           onThinkingEnabledChange={noopVoid}
           onReasoningEffortChange={noopVoid}

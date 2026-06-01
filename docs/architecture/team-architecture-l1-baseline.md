@@ -1,21 +1,21 @@
-# Team 架构 L1 基线决策（v1.2）
+# Team 架构 L1 基线决策（v1.3）
 
-> ⚠️ **复查发现的现状（2026-05-16）**：
+> ⚠️ **复查发现的现状（2026-05-16 → 2026-06-01 追平）**：
 >
 > 本文档初稿（v1.0）是基于 v3.10 讨论稿"还没实施"的假设写的，但**实际上 Phase A/B/C/D/E 均已完成实施**（见 `.agentdocs/workflow/done/260515-team-phase-{a,b,c}-实施方案.md` 和 `260516-team-phase-{d,e}-实施方案.md`）。
 >
-> **追溯性审计已完成**（见 `team-architecture-traceback-audit.md`），9 项 L1 决策的真实状态：
+> **追溯性审计已完成**（见 `team-architecture-traceback-audit.md` v2.0），9 项 L1 决策的真实状态（**2026-06-01 以真实代码复核**）：
 >
-> - ✅ **5 项已完整实施且符合假设**：L1.1 / L1.2（意外符合）/ L1.5 / L1.7 / L1.9
-> - ❌ **2 项未实施/待完善**：L1.6（延迟监控）/ L1.8 剩余字段或展示链路
-> - ✅ **L1.3 已完成后端闭环**：反向消息通道、substate、c 层等待澄清、handoff 幂等/暂停字段均已落地（2026-05-24 收口）
-> - ⚠️ **1 项部分实施**：L1.4（feature flag 灰度而非"完全废弃"，但实际方案更稳妥）
+> - ✅ **9 项全部已落地**：L1.1 / L1.2 / L1.3 / L1.4 / L1.5 / L1.6 / L1.7 / L1.8 / L1.9
+> - ✅ **L1.3 已完成后端闭环**：反向消息通道、substate、c 层等待澄清（`artifact-chain.ts` 的 `waitForClarificationAnswers` 阻塞循环）、handoff 幂等/暂停字段均已落地
+> - ✅ **L1.4 老路径已退役 + 静态护栏已补**：`isHandoffModeEnabled` / `OPENAWORK_TEAM_HANDOFF_MODE` / `team-leader` / `interaction-agent` 在真实 `src/` 下零匹配；新增自定义 ESLint 规则 `team-architecture/no-cross-layer-runner-import` 锁死回归（含动态 `import()`）。
+> - ✅ **L1.6 延迟监控已实施**：`handoff/bus/latency-monitor.ts` 四指标 + incident + telemetry。
+> - ✅ **L1.8 字段已补齐**：`sessions.substate` / `substate_updated_at` / `paused` 系列已落库。
 >
-> **真正需要做的事**（约 17-19 天工作量）：
+> **剩余待办（非关键路径）**：
 >
-> - ✅ P0：L1.3 流式 handoff 增量改造已完成后端闭环（详见 `team-architecture-l1-3-streaming-handoff-spec.md` v1.2）
-> - 🟡 P1：L1.8 补缺失字段/展示链路（0.5 天，可继续独立收口）
-> - 🟡 P2：L1.6 延迟监控（3-5 天）
+> - 🟡 L4 运营调参（~8 项）：需上线后看真实数据，属有意延后。
+> - 🟡 知识图谱后端持久化：当前前端派生图模型，图数据库后端为"后续评估"。
 >
 > ---
 
@@ -30,8 +30,8 @@
 > - 延后决策：`team-architecture-deferred-decisions.md`（L3/L4，实施/运营时拍板）
 > - **Phase A-E 实施记录**（已完成）：`.agentdocs/workflow/done/260515-team-phase-{a,b,c}-实施方案.md` 和 `260516-team-phase-{d,e}-实施方案.md`
 >
-> 创建时间：2026-05-16（v1.0 → v1.1 复查修订 + 追溯审计）
-> 当前状态：**v1.2，L1.3 后端闭环已收口；L1.6/L1.8 待继续**
+> 创建时间：2026-05-16（v1.0 → v1.1 复查修订 + 追溯审计 → v1.3 按真实代码追平）
+> 当前状态：**v1.3，9 项 L1 决策全部落地；仅剩 L4 运营调参与知识图谱后端持久化**
 
 ---
 
@@ -337,13 +337,13 @@ a → b → c → d → e/f/g 单向链式调用，**严格禁止**：
 | **#1 escalation 反向通道**         | 任意层 → b | 通过 `session_inbound_messages` (message_type='escalation_request')           | 只能传结构化 escalation 事件，不能传业务数据；必须经 audit log；必须在 handoff_records.escalation_round 留痕 |
 | **#2 进度上报通道**                | 任意层 → b | 通过 EventEmitter 推送 progress event                                         | 只能传 substate 变更 + 进度数字（如 "3/8 task 完成"）；不携带业务上下文                                      |
 | **#3 cancel/pause 信号广播**       | b → 任意层 | 通过 `session_inbound_messages` (message_type='cancel_signal'/'pause_signal') | 只能携带控制信号；由各层主动检查（pull 模式）；级联生效（父→子）                                             |
-| **#4 迁移期 feature flag**（新增） | 老路径     | `OPENAWORK_TEAM_HANDOFF_MODE` 环境变量；`isHandoffModeEnabled()` 控制         | **临时**机制；新功能不允许走老路径；只能修 bug 不能加功能；Phase F+ 评估彻底删除时机                         |
+| **#4 迁移期 feature flag**（新增） | 老路径     | `OPENAWORK_TEAM_HANDOFF_MODE` 环境变量；`isHandoffModeEnabled()` 控制         | **临时**机制；新功能不允许走老路径；只能修 bug 不能加功能；Phase F+ 评估彻底删除时机 ⟶ **2026-06-01 复核：老路径已退役，flag/老路由在真实 `src/` 下零匹配，escape hatch #4 已退场** |
 
 #### L1.4.3 实施约束
 
-- **类型层强制**：每个跨层调用点必须在代码中标注允许的 escape hatch 类型，由 lint 规则检查
-- **审计强制**：所有 escape hatch 调用必须写 audit log，标明 hatch_type
-- **演化机制**：发现新的需要反向通信的场景 → 扩展 escape hatch 类型（最多 5 个），不允许"绕过 L1.4"
+- **类型层强制**：跨层调用必须走受控通道；`handoff/runner/` 下任一层 runner **禁止跨层直接 import 另一层 runner**，由自定义 ESLint 规则 **`team-architecture/no-cross-layer-runner-import`** 静态强制（`scripts/eslint-rules/no-cross-layer-runner-import.mjs`，覆盖静态 `import` 与动态 `import()`；受控编排器 `watcher` / `pm1-runner` 分发器 / `scheduler` 白名单豁免；配套 RuleTester 自测，接入 `pnpm run lint:rules`）。✅ 已落地（2026-06-01）
+- **审计强制**：所有 escape hatch 调用必须写 audit log，标明 hatch_type（`reception-orchestrator.ts::logRouteDecision` 等已落地）
+- **演化机制**：发现新的需要反向通信的场景 → 扩展 escape hatch 类型（最多 5 个），不允许"绕过 L1.4"；新增白名单编排器需走架构 review
 
 #### L1.4.4 feature flag 退出策略（v1.1 新增）
 
@@ -612,34 +612,36 @@ L2/L3/L4 修改不需要这套流程，按各自规则处理。
 | L1.8 Session 状态机扩展      | D13 + D18 + D42  | ✅ **已实施**       | sessions 全部字段已加（team_parent_session_id / role_layer / handoff_state / substate / substate_updated_at / intent_state / structural_depth / execution_depth / last_heartbeat） |
 | L1.9 BackgroundTaskScheduler | D40              | ✅ **已实施**       | `InProcessScheduler` 9 方法全覆盖                                                                                                                                                  |
 
-### 5.2 真正需要团队 review 的项目（v1.1 修订聚焦）
+### 5.2 团队 review 项目（v1.3 复核：均已追平）
 
-由于很多决策已经实施，剩下需要做的是：
+> v1.1 列出的待办在 2026-06-01 复核中已全部完成。下方保留原清单并标注真实状态。
 
 **A. 验证已实施部分是否符合 L1 假设**（追溯性检查）
 
-- [ ] 检查现有 `team-leader dispatch` 是否完全废弃（D24 = L1.4 要求）
-- [ ] 检查现有 watcher 是否正确处理双 claim（claim_token 已存在但需测试覆盖）
-- [ ] 检查 BackgroundTaskScheduler 的 9 个方法是否完整实现
+- [x] 检查现有 `team-leader dispatch` 是否完全废弃（D24 = L1.4 要求）—— ✅ 已退役，`team-leader` / `interaction-agent` / `isHandoffModeEnabled` 在真实 `src/` 下零匹配
+- [x] 检查现有 watcher 是否正确处理双 claim（claim_token）—— ✅ `handoff-store.ts::claimHandoff` 原子 UPDATE + claim_token 回读双检，`handoff-store` 测试覆盖
+- [x] 检查 BackgroundTaskScheduler 的 9 个方法是否完整实现 —— ✅ `InProcessScheduler` 9 方法全覆盖
 
-**B. 4 项需要新增/改造**
+**B. 4 项需要新增/改造（均已完成）**
 
-- [ ] **L1.2 d/b 拆分原则**：现有 d 层是否一个 LLM 干所有事？需要看 Phase D 实施代码确认
-- [x] **L1.3 流式 handoff 增量改造**：后端闭环已完成，详细收口记录见 `team-architecture-l1-3-streaming-handoff-spec.md` §0.B
-- [ ] **L1.4 escape hatch 协议**：需要在代码中加入 audit log 标记和 lint 规则
-- [ ] **L1.6 延迟约束**：需要新增 telemetry 监控
+- [x] **L1.2 d/b 拆分原则**：d 层 `pm2-runner` 的 dispatch 拆分是纯代码、Constitution/architecture review 用结构化 LLM、escalation 用规则代码；b 层已拆 `reception-router`（规则+LLM 兜底）+ `reception-orchestrator`（编排）+ `scheduler`
+- [x] **L1.3 流式 handoff 增量改造**：后端闭环已完成（`artifact-chain.ts` 的 `waitForClarificationAnswers` 阻塞循环 + substate 全程写入），详见 `team-architecture-l1-3-streaming-handoff-spec.md` §0.B
+- [x] **L1.4 escape hatch 协议 + 静态护栏**：`team-events-bus.ts` escape hatch 事件 + `routes` audit log；**新增自定义 ESLint 规则 `team-architecture/no-cross-layer-runner-import`**（`scripts/eslint-rules/`，覆盖静态 + 动态 import，含 RuleTester 自测，接入 `pnpm run lint:rules`）
+- [x] **L1.6 延迟约束**：`handoff/bus/latency-monitor.ts` 四指标 + incident + telemetry
 
-**C. 已实施部分的潜在缺陷需要 follow-up**
+**C. 已实施部分的 follow-up（已处置）**
 
-- [ ] 字段命名不一致：本稿写的 `parent_session_id` 与现有 `team_parent_session_id` 不同 —— 决定后续以哪个为准
-- [ ] 时间戳类型不一致：本稿假设 INTEGER ms epoch，现有用 TEXT ISO datetime —— 后续新增字段保持现有类型
-- [ ] L1.8 缺失字段：`substate` / `structural_depth` / `execution_depth` 需要补加
+- [x] 字段命名不一致：已统一以现有 `team_parent_session_id` 等现有命名为准（见 L1.3 spec §0.A.5 对照表）
+- [x] 时间戳类型不一致：已确定新增字段保持现有 TEXT ISO datetime
+- [x] L1.8 缺失字段：`substate` / `substate_updated_at` / `paused` 系列已落库（`infra/db.ts` ensureColumn）
 
-### 5.3 下一步动作建议
+### 5.3 下一步动作（v1.3 复核：核心已完成）
 
-1. **追溯性 review**：找一名熟悉 Phase A-E 实施的工程师确认 5.2.A 三项
-2. **L1.2 落地评估**：看 Phase D 真实代码确认 d 层是否需要拆分（最坏情况：全部已是单 LLM 实现，需要重写）
-3. **L1.3 运行观察与独立 verification 排查**：L1.3 聚焦测试/构建/类型检查已通过；完整 gateway verification 当前被 `verify-task-tool-no-permission.ts` 独立阻塞
-4. **L1.4 lint 规则添加**：在 `services/agent-gateway/src/eslint-rules/` 加入"禁止跨层直连"规则
-5. **L1.6 telemetry 接入**：与现有埋点系统对齐，加入 4 个延迟指标
-6. **Phase A 决策文档校准**：v3.12 写的 Phase A 任务清单与实际 Phase A 实施有偏差（v3.12 写"5 天工作量+剥离 SOUL"，但真实 Phase A 已经引入 SOUL）—— 需要更新 `team-architecture-phase-a-decisions.md`
+1. ✅ **追溯性 review**：见 `team-architecture-traceback-audit.md` v2.0 §0。
+2. ✅ **L1.2 落地评估**：d 层无需重写，dispatch 拆分本就是纯代码（优于假设）。
+3. ✅ **L1.3 运行观察与 verification 排查**：`verify-task-tool-no-permission.ts` 2026-06-01 实跑通过（standalone + 完整 `test:task-tool` 链均 EXIT=0），原"阻塞"为已消失的测试隔离 flaky。
+4. ✅ **L1.4 lint 规则添加**：已落地 `scripts/eslint-rules/no-cross-layer-runner-import.mjs`（放在仓库根 `scripts/` 而非最初设想的 `services/agent-gateway/src/eslint-rules/`，便于 flat config 以 inline plugin 接入）。
+5. ✅ **L1.6 telemetry 接入**：`latency-monitor.ts` 四指标已接 telemetry 通道。
+6. ✅ **Phase A 决策文档校准**：见 `team-architecture-phase-a-decisions.md` v1.1 复盘归档（承认实际已引入 SOUL）。
+
+**剩余（非关键路径）**：L4 运营调参（~8 项，上线后数据驱动）；知识图谱后端持久化（前端派生图模型已可用，后端为后续评估）。

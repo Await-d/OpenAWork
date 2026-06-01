@@ -189,6 +189,31 @@ export function MessagesTab({
       >
         {/* Message list */}
         <div style={{ display: 'grid', gap: 6 }}>
+          {filteredCards.length === 0 ? (
+            <div
+              style={{
+                display: 'grid',
+                gap: 6,
+                justifyItems: 'center',
+                textAlign: 'center',
+                padding: '28px 16px',
+                borderRadius: 12,
+                border: '1px dashed color-mix(in srgb, var(--border-default) 60%, transparent)',
+                background: 'color-mix(in srgb, var(--bg-overlay) 40%, transparent)',
+                color: 'var(--fg-muted)',
+              }}
+            >
+              <span aria-hidden style={{ fontSize: 26 }}>
+                ✉️
+              </span>
+              <strong style={{ color: 'var(--fg-default)', fontSize: 13 }}>暂无团队消息</strong>
+              <span style={{ fontSize: 11, lineHeight: 1.6, maxWidth: 320 }}>
+                {typeFilter.size > 0
+                  ? '当前筛选条件下没有消息，换个类型或清除筛选试试。'
+                  : '团队成员之间的进度同步、提问、结果汇报会出现在这里。可在右侧广播面板主动给团队发条消息。'}
+              </span>
+            </div>
+          ) : null}
           {filteredCards.map((card) => {
             const meta = MSG_TYPE_META[card.type];
             const cardReplies = replies[card.id] ?? [];

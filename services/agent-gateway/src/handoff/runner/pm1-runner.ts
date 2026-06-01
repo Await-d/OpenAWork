@@ -55,8 +55,8 @@ export function createPhaseCAwareRunner(): HandoffTaskRunner {
 // 流程：
 //   1. 从 dispatch_package payload 构建 user message（任务描述）
 //   2. 调 runSessionInBackground（内部走完整 stream 管线）
-//   3. stream 完成后设置 substate='completed'
-//   4. 写入 handoff result_json
+//   3. 检查执行结果：抛异常或 stopReason==='error' → 抛出让 watcher failHandoff
+//   4. 成功才设置 substate='completed' 并写入 handoff result_json
 
 async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promise<void> {
   const payload = input.handoff.payload as Record<string, unknown> | null;
@@ -105,8 +105,15 @@ async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promi
   //   - 如果 LLM 返回 tool_use → 自动执行工具 → 继续对话
   //   - 所有消息自动写入 message_v2
   //   - 前端通过 /sessions/:id/stream/attach 能实时看到
+  // 既要捕获 runSessionInBackground 抛出的异常（基础设施失败），也要检查它
+  // 返回的 HandleStreamResult.stopReason —— provider 报错（如上游 5xx / 模型
+  // 内部错误）通常**不抛异常**，而是返回 `{ stopReason: 'error', statusCode,
+  // errorSummary }`。早期实现只 catch 异常并无脑标 completed，会把"流式失败"
+  // 误判为"执行成功"，让 handoff 卡成假完成、上层链路继续派发错误产物。
+  let streamResult: Awaited<ReturnType<typeof runSessionInBackground>> | null = null;
+  let streamThrew: unknown = null;
   try {
-    await runSessionInBackground({
+    streamResult = await runSessionInBackground({
       sessionId: input.toSessionId,
       userId: input.handoff.userId,
       requestData: {
@@ -115,14 +122,36 @@ async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promi
       },
     });
   } catch (err) {
-    // stream 失败不一定是致命的（可能是 tool 执行失败等），
-    // 消息可能已经部分写入了。记录错误但不阻塞 handoff 完成。
+    streamThrew = err;
     console.warn(
       `[${role}-runner] stream 执行异常：${err instanceof Error ? err.message : String(err)}`,
     );
   }
 
   if (input.signal.aborted) return;
+
+  // 失败判定：抛异常 或 返回 stopReason==='error'。两者都视为本层执行失败，
+  // 抛出让 watcher 统一走 failHandoff（含 incident 记录 + setSubstate('failed')
+  // + publish handoff.failed 事件），避免把失败标成 completed。
+  const streamFailed = streamThrew !== null || streamResult?.stopReason === 'error';
+  if (streamFailed) {
+    const reason =
+      streamThrew instanceof Error
+        ? streamThrew.message
+        : typeof streamThrew === 'string'
+          ? streamThrew
+          : (streamResult?.errorSummary ?? '模型流式执行返回错误（stopReason=error）');
+    throw new Error(`${role} 层执行失败：${reason}`);
+  }
+
+  // 取消判定：带内 cancel/pause 信号（team-stream-control gate）或用户在前端 stop
+  // 都会让 stream 以 stopReason==='cancelled' 收尾。绝不能把它当成功——否则会
+  // setSubstate('completed') + 让 watcher completeHandoff，把"被取消的任务"标成
+  // "已完成"，上层链路继续基于不完整产物推进。抛出让 watcher 走 failHandoff；
+  // 若 handoff 已是 cancelled 终态，failHandoff 是 no-op（幂等），不会破坏状态。
+  if (streamResult?.stopReason === 'cancelled') {
+    throw new Error(`${role} 层执行被取消（cancelled）`);
+  }
 
   // 设置完成 substate
   setSubstate({
@@ -191,6 +220,17 @@ async function runPm1(input: Parameters<HandoffTaskRunner>[0]): Promise<void> {
       ...(llmConfig.upstreamProtocol ? { upstreamProtocol: llmConfig.upstreamProtocol } : {}),
       prompt: `${systemWithRoster}\n\n---\n\n${userMessage}`,
       temperature: 0.3,
+      usageContext: {
+        userId: input.handoff.userId,
+        sessionId: input.toSessionId,
+        layer: 'pm1',
+        ...(typeof llmConfig.inputPricePerMillion === 'number'
+          ? { inputPricePerMillion: llmConfig.inputPricePerMillion }
+          : {}),
+        ...(typeof llmConfig.outputPricePerMillion === 'number'
+          ? { outputPricePerMillion: llmConfig.outputPricePerMillion }
+          : {}),
+      },
     });
   };
 

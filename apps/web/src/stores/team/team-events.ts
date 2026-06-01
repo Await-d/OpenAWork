@@ -126,6 +126,18 @@ export const useHandoffStore = create<HandoffStoreState>((set) => ({
         toRoleLayer: (event.payload['toRoleLayer'] as TeamRoleLayer) ?? 'executor',
         updatedAt: event.timestamp,
       };
+
+      // #9 事件单调性守卫：WS 投递不保证顺序，断连补发 / 网络抖动都可能让一条
+      // **较旧**的事件（timestamp 更小）在较新事件之后到达。若无脑覆盖，会把
+      // handoff 从 completed 回退成 running（甚至闪回 pending），让前端进度条
+      // 倒退、终态丢失。这里只接受 timestamp >= 已记录 updatedAt 的事件；旧事件
+      // 直接丢弃。注意 handoff 可合法地 running→pending（retry/recovery），但
+      // 那条 retry 事件带的是**更新**的时间戳，仍会被正常接受，不受影响。
+      const isExistingEntry = next.has(event.taskId!);
+      if (isExistingEntry && event.timestamp < existing.updatedAt) {
+        return state;
+      }
+
       const newState = (event.payload['state'] as HandoffState) ?? existing.state;
 
       // 派生 startedAt：第一次进入 running/claimed 时记录

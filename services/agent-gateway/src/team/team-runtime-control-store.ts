@@ -1,4 +1,4 @@
-import { pauseHandoff, resumeHandoff } from '../handoff/store/handoff-store.js';
+import { cancelHandoff, pauseHandoff, resumeHandoff } from '../handoff/store/handoff-store.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 
 interface TeamRuntimeControlScopeRow {
@@ -32,6 +32,10 @@ export interface ResumeTeamRuntimeTreeResult extends TeamRuntimeControlScope {
   resumedHandoffIds: string[];
   resumedSessionIds: string[];
   staleSessionCount: number;
+}
+
+export interface CancelTeamRuntimeTreeResult extends TeamRuntimeControlScope {
+  cancelledHandoffIds: string[];
 }
 
 export function resolveTeamRuntimeControlScope(input: {
@@ -180,6 +184,65 @@ export function resumeTeamRuntimeTree(input: {
     resumedSessionIds,
     staleSessionCount,
   };
+}
+
+/**
+ * 级联取消：把某个 session 子树下所有未终止的 handoff 全部 cancel。
+ *
+ * 背景（跨层健壮性补强）：单条 `cancelHandoff` 只翻自己那一行的状态，不级联到
+ * 它派生出的下游/孙子 handoff（如 pm2 取消时它派发的 executor/reviewer 仍在跑）。
+ * `cancel_downstream` 指令注释里说的「级联由 watcher 处理」此前并未实现。本函数
+ * 用与 pause/resume-all 相同的递归 session 树遍历，一次性取消整棵子树，避免
+ * 「取消了上游、下游还在烧 token」的悬挂执行。
+ *
+ * 注意：本函数只改 DB 状态（handoff.state='cancelled'）。真正中止正在跑的 LLM
+ * 流由调用方在拿到 cancelledHandoffIds / treeSessionIds 后，注入 cancel_signal
+ * （team-stream-control gate 会在下个 round 边界响应）+ stopAllInFlightStreamRequests。
+ */
+export function cancelTeamRuntimeTree(input: {
+  rootSessionId: string;
+  userId: string;
+}): CancelTeamRuntimeTreeResult | null {
+  const scope = resolveTeamRuntimeControlScope(input);
+  if (!scope) {
+    return null;
+  }
+
+  const handoffIds = listCancellableHandoffIds({
+    sessionIds: scope.treeSessionIds,
+    userId: input.userId,
+  });
+  const cancelledHandoffIds: string[] = [];
+  for (const handoffId of handoffIds) {
+    if (cancelHandoff({ userId: input.userId, handoffId })) {
+      cancelledHandoffIds.push(handoffId);
+    }
+  }
+
+  return {
+    ...scope,
+    cancelledHandoffIds,
+  };
+}
+
+function listCancellableHandoffIds(input: { sessionIds: string[]; userId: string }): string[] {
+  if (input.sessionIds.length === 0) {
+    return [];
+  }
+
+  const placeholders = input.sessionIds.map(() => '?').join(', ');
+  const rows = sqliteAll<TeamRuntimeControlHandoffRow>(
+    `SELECT id
+       FROM handoff_records
+      WHERE user_id = ?
+        AND state NOT IN ('completed', 'failed', 'cancelled')
+        AND (
+          from_session_id IN (${placeholders})
+          OR to_session_id IN (${placeholders})
+        )`,
+    [input.userId, ...input.sessionIds, ...input.sessionIds],
+  );
+  return rows.map((row) => row.id);
 }
 
 function listControllableHandoffIds(input: {

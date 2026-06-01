@@ -181,7 +181,15 @@ import {
   resetDoomLoopHistory,
 } from '../session/doom-loop-detector.js';
 import { buildTeamInstructionStack } from '../team/team-instruction-stack.js';
+import {
+  appendTeamDynamicInstructionBlocks,
+  applyTeamLayerToolGate,
+} from '../handoff/capability/apply-team-layer-tools.js';
 import { mapAgentToTeamRoleLayer } from '../team/team-role-layer-mapping.js';
+import {
+  checkTeamControlSignals,
+  isTeamControlledRoleLayer,
+} from '../handoff/runner/team-stream-control.js';
 import { toStreamStopReason } from './stream-types.js';
 import type { HandleStreamResult } from './stream-types.js';
 
@@ -2153,10 +2161,25 @@ export async function handleStreamRequest(input: {
                 (v): v is string => typeof v === 'string' && v.length > 0,
               )
             : [];
-          const catalogs = await listMcpToolsForSession(
-            input.sessionId,
-            allowedMcp.length > 0 ? { allowedServerIds: allowedMcp } : undefined,
-          );
+          // team 五层的最小授权：成员没有显式绑定 MCP（requestedMcpServers 为空）时，
+          // **不应**继承用户账号下的全部 MCP（那是 chat 个人会话的语义）。team 子会话只
+          // 能用「被明确派发/配置」的 MCP。这里对 team 层强制传一个 defined 白名单
+          // （即使为空），让 listMcpToolsForSession 走过滤分支——空白名单下只保留内置 MCP
+          // （websearch/grep_app 等，product 决策始终可用），不暴露用户私有 MCP。
+          // 非 team 会话（chat / roleLayer=null）保持原行为：无绑定 = 全部可用。
+          const isTeamSession =
+            input.sessionContext.roleLayer !== null &&
+            input.sessionContext.roleLayer !== undefined &&
+            ['reception', 'pm1', 'pm2', 'executor', 'reviewer'].includes(
+              input.sessionContext.roleLayer,
+            );
+          const mcpFilter =
+            allowedMcp.length > 0
+              ? { allowedServerIds: allowedMcp }
+              : isTeamSession
+                ? { allowedServerIds: [] as string[] }
+                : undefined;
+          const catalogs = await listMcpToolsForSession(input.sessionId, mcpFilter);
           const built = buildFlatMcpToolDefinitions(catalogs);
           flatMcpDefs = built.definitions;
         } catch (err) {
@@ -2193,82 +2216,17 @@ export async function handleStreamRequest(input: {
         input.sessionContext.metadataJson,
       );
 
-      // ─── L1.2.3 toolset-gate + 内置指令注入 ────────────────────────────
-      // 读取 session 的 role_layer，如果属于团队五层之一，则：
-      //   1. 用 toolset 白名单过滤通用工具（read/write/shell/lsp 等）
-      //   2. 注入该层专属内置指令（route_to_orchestrate / submit_artifact / ...）
-      // 这是构思 §2B.7 "不在一个 agent 里塞所有工具" 的代码级落地。
+      // ─── L1.2.3 toolset-gate + 内置指令注入（与 stream-runtime 共享同一实现）──────
+      // team 五层：① 用 toolset 白名单过滤通用工具 ② 注入该层专属内置指令
+      //   （route_to_orchestrate / submit_artifact / ...）③ MCP 扁平工具直通
+      //   ④ fail-closed 退回只读。逻辑收敛到 applyTeamLayerToolGate 单一来源，避免
+      //   交互（本文件）与后台执行（stream-runtime）两条入口行为漂移。
       const sessionRoleLayer = input.sessionContext.roleLayer ?? null;
-      let layerFilteredTools = filteredTools;
-      const isTeamLayer =
-        sessionRoleLayer !== null &&
-        ['reception', 'pm1', 'pm2', 'executor', 'reviewer'].includes(sessionRoleLayer);
-      // Fail-closed 安全基线：团队层一旦进入门控，出错时退回「只读」最小集而非放行全部。
-      const READ_ONLY_FALLBACK = ['read'] as const;
-      if (isTeamLayer) {
-        try {
-          const { LAYER_CAPABILITIES } =
-            await import('../handoff/capability/layer-capabilities.js');
-          const { getInstructionsForLayer, toToolDefinition } =
-            await import('../handoff/capability/builtin-instructions.js');
-          const { filterToolsByAllowedSets, extractToolsetsFromMetadata } =
-            await import('../handoff/capability/toolset-gate.js');
-          const layer = sessionRoleLayer as 'reception' | 'pm1' | 'pm2' | 'executor' | 'reviewer';
-          const caps = LAYER_CAPABILITIES[layer];
-          // 1. 通用工具 toolset 过滤：层级白名单 ∩ 成员自定义 toolsets（若有）。
-          //    成员在模板里勾选的 toolsets 写入了 metadata.toolsets；与层级白名单取交集，
-          //    既不突破层级安全边界，又能让「该成员只用读」这类更严限制生效。
-          const memberToolsets = extractToolsetsFromMetadata(input.sessionContext.metadataJson);
-          let allowedSets = caps.allowedToolsetCategories as string[];
-          if (memberToolsets && memberToolsets.length > 0 && !memberToolsets.includes('all')) {
-            const layerSet = new Set(allowedSets);
-            const intersect = memberToolsets.filter((t) => layerSet.has(t));
-            // 交集为空时退回层级白名单，避免成员误配置把工具全砍光导致跑不动。
-            if (intersect.length > 0) allowedSets = intersect;
-          }
-          if (allowedSets.length > 0) {
-            layerFilteredTools = filterToolsByAllowedSets(filteredTools, allowedSets as never[]);
-          } else {
-            // fail-closed：层白名单异常为空时退回只读最小集，而不是「不过滤」放行全部。
-            layerFilteredTools = filterToolsByAllowedSets(filteredTools, [
-              ...READ_ONLY_FALLBACK,
-            ] as never[]);
-          }
-          // 2. 内置指令注入（每层专属 LLM-facing 函数工具）
-          const layerInstructions = getInstructionsForLayer(layer);
-          if (layerInstructions.length > 0) {
-            const instructionDefs = layerInstructions.map((inst) => toToolDefinition(inst));
-            layerFilteredTools = [...layerFilteredTools, ...instructionDefs];
-          }
-        } catch (err) {
-          // Fail-closed：门控自身出错（如模块加载失败）时绝不放行完整工具集 ——
-          // 退回只读最小集，宁可少跑也不越权。
-          console.warn(
-            `[stream] layer-aware tool filter failed for ${sessionRoleLayer}（已 fail-closed 退回只读）：${err instanceof Error ? err.message : String(err)}`,
-          );
-          try {
-            const { filterToolsByAllowedSets } =
-              await import('../handoff/capability/toolset-gate.js');
-            layerFilteredTools = filterToolsByAllowedSets(filteredTools, [
-              ...READ_ONLY_FALLBACK,
-            ] as never[]);
-          } catch {
-            // 连 toolset-gate 都加载不了：手动收敛到最保守集合（仅基础工具 + read 名）。
-            const SAFE_NAMES = new Set([
-              'read',
-              'glob',
-              'grep',
-              'read_tool_output',
-              'look_at',
-              'repo_overview',
-              'AskUserQuestion',
-              'todo_read',
-              'todo_write',
-            ]);
-            layerFilteredTools = filteredTools.filter((tool) => SAFE_NAMES.has(tool.function.name));
-          }
-        }
-      }
+      const layerFilteredTools = await applyTeamLayerToolGate({
+        roleLayer: sessionRoleLayer,
+        metadataJson: input.sessionContext.metadataJson,
+        filteredTools,
+      });
 
       const shouldDeferToolLoading =
         route.deferToolLoading === true || sessionMeta['deferToolLoading'] === true;
@@ -2305,19 +2263,18 @@ export async function handleStreamRequest(input: {
         roleLayer: roleLayerForStack,
       });
       let teamInstructionStack = teamInstructionStackResult.stableBlock;
-      // 动态注入「团队编制清单」：watcher 在派发子 session 时把当前实时花名册
-      // （含自定义角色 + 各自路由关键词）写入 metadata.teamRosterManifest。这里把它
-      // 作为指令栈的附加段拼进 system prompt，让成员动态感知上下游编制，而非写死。
-      const teamRosterManifest =
-        typeof sessionMeta['teamRosterManifest'] === 'string'
-          ? sessionMeta['teamRosterManifest'].trim()
-          : '';
-      if (teamRosterManifest.length > 0) {
-        const manifestBlock = `<team-instruction layer="roster-manifest">\n${teamRosterManifest}\n</team-instruction>`;
-        teamInstructionStack = teamInstructionStack
-          ? `${teamInstructionStack}\n\n${manifestBlock}`
-          : manifestBlock;
-      }
+      // 动态注入「团队编制清单」+「当前可用工具清单」（与 stream-runtime 共享同一实现，
+      // 保证两条执行入口产出一致）：roster 让成员动态感知上下游编制；available-tools 用本轮
+      // 真正注入的 enabledToolNames 生成，避免 SOUL 写死与实际不符（漏用 MCP / 臆造工具名）。
+      teamInstructionStack = appendTeamDynamicInstructionBlocks({
+        stableBlock: teamInstructionStack,
+        roleLayer: sessionRoleLayer,
+        teamRosterManifest:
+          typeof sessionMeta['teamRosterManifest'] === 'string'
+            ? sessionMeta['teamRosterManifest']
+            : null,
+        enabledToolNames,
+      });
       const compactionSettingsRow = sqliteGet<{ value: string }>(
         `SELECT value FROM user_settings WHERE user_id = ? AND key = ?`,
         [input.user.sub, COMPACTION_SETTINGS_KEY],
@@ -2332,6 +2289,31 @@ export async function handleStreamRequest(input: {
 
       for (let round = 1; ; round += 1) {
         const roundStartedAt = Date.now();
+        // ─── 团队层「带内」取消/暂停响应（跨层反向控制信道）──────────────────
+        // executor / reviewer / pm2 / reception 都走这条统一 round 循环。每个
+        // round 之间检查 session_inbound_messages 里的 cancel/pause/resume：
+        //   - cancel → 抛 AbortError，复用既有 abort 通道（emit done(cancelled)
+        //     + 取消子流 + 置 substate=failed/cancelled）。
+        //   - pause → 阻塞到 resume / cancel / 墙钟超时。
+        // 普通 chat session（roleLayer 为空）零开销跳过。
+        if (isTeamControlledRoleLayer(input.sessionContext.roleLayer)) {
+          const control = await checkTeamControlSignals({
+            sessionId: input.sessionId,
+            roleLayer: input.sessionContext.roleLayer,
+            signal: abortController.signal,
+            round,
+          });
+          if (control.kind === 'cancelled') {
+            console.log(
+              '[STREAM_TEAM_CONTROL] session',
+              input.sessionId,
+              'cancelled by inbound control signal —',
+              control.reason,
+            );
+            abortController.abort();
+            throw createAbortError();
+          }
+        }
         // Dynamic context window: resolve the effective limit for this user+model,
         // which may be lower than the preset if a provider error previously revealed
         // a smaller actual limit (e.g. relay supports 200K but preset says 1M).

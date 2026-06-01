@@ -752,4 +752,103 @@ describe('reclaimAbandonedHandoffs（崩溃恢复）', () => {
     expect(re?.state).toBe('failed');
     expect(re?.failureReason).toContain('heartbeat-timeout');
   });
+
+  it('#8 doom-loop：心跳新鲜但 started_at 早于 runningStartedBeforeIso 的强制 failed', () => {
+    const created = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'pm2',
+      toRoleLayer: 'executor',
+    });
+    store.claimHandoff({ handoffId: created.id, claimToken: 'tok' });
+    store.startHandoff({
+      handoffId: created.id,
+      claimToken: 'tok',
+      toSessionId: TO_SESSION_ID,
+    });
+    // 心跳保持新鲜（datetime('now')），但人为把 started_at 推到很久以前。
+    dbModule.sqliteRun(
+      `UPDATE sessions SET last_heartbeat = datetime('now') WHERE id = ?`,
+      [TO_SESSION_ID],
+    );
+    dbModule.sqliteRun(
+      `UPDATE handoff_records SET started_at = '2000-01-01 00:00:00' WHERE id = ?`,
+      [created.id],
+    );
+
+    // staleHeartbeatBeforeIso 设很久以前 → 心跳判定不会触发；但 doom-loop 阈值
+    // 设为 2099 年以前 → started_at='2000-01-01' 必然命中。
+    const recovered = store.reclaimAbandonedHandoffs({
+      staleHeartbeatBeforeIso: '1900-01-01 00:00:00',
+      maxRetry: 3,
+      runningStartedBeforeIso: '2099-01-01 00:00:00',
+    });
+    expect(recovered.reclaimedIds).toHaveLength(0);
+    expect(recovered.failedIds).toEqual([created.id]);
+
+    const re = store.getHandoff({ userId: USER_ID, handoffId: created.id });
+    expect(re?.state).toBe('failed');
+    expect(re?.failureReason).toBe('doom-loop-wallclock-timeout');
+  });
+
+  it('#8 doom-loop：started_at 较新（在阈值内）则不被 force-fail', () => {
+    const created = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'pm2',
+      toRoleLayer: 'executor',
+    });
+    store.claimHandoff({ handoffId: created.id, claimToken: 'tok' });
+    store.startHandoff({
+      handoffId: created.id,
+      claimToken: 'tok',
+      toSessionId: TO_SESSION_ID,
+    });
+    dbModule.sqliteRun(
+      `UPDATE sessions SET last_heartbeat = datetime('now') WHERE id = ?`,
+      [TO_SESSION_ID],
+    );
+
+    const recovered = store.reclaimAbandonedHandoffs({
+      staleHeartbeatBeforeIso: '1900-01-01 00:00:00',
+      maxRetry: 3,
+      runningStartedBeforeIso: '1900-01-01 00:00:00',
+    });
+    expect(recovered.reclaimedIds).toHaveLength(0);
+    expect(recovered.failedIds).toHaveLength(0);
+
+    const re = store.getHandoff({ userId: USER_ID, handoffId: created.id });
+    expect(re?.state).toBe('running');
+  });
+
+  it('#8 doom-loop：runningStartedBeforeIso 不传则关闭守卫（向后兼容）', () => {
+    const created = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'pm2',
+      toRoleLayer: 'executor',
+    });
+    store.claimHandoff({ handoffId: created.id, claimToken: 'tok' });
+    store.startHandoff({
+      handoffId: created.id,
+      claimToken: 'tok',
+      toSessionId: TO_SESSION_ID,
+    });
+    dbModule.sqliteRun(
+      `UPDATE sessions SET last_heartbeat = datetime('now') WHERE id = ?`,
+      [TO_SESSION_ID],
+    );
+    dbModule.sqliteRun(
+      `UPDATE handoff_records SET started_at = '2000-01-01 00:00:00' WHERE id = ?`,
+      [created.id],
+    );
+
+    const recovered = store.reclaimAbandonedHandoffs({
+      staleHeartbeatBeforeIso: '1900-01-01 00:00:00',
+      maxRetry: 3,
+    });
+    expect(recovered.failedIds).toHaveLength(0);
+    const re = store.getHandoff({ userId: USER_ID, handoffId: created.id });
+    expect(re?.state).toBe('running');
+  });
 });

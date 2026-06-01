@@ -45,6 +45,8 @@ import { setSubstate } from '../handoff/store/substate-store.js';
 import { parseBody, parseParams } from '../infra/parse-request.js';
 import { logTeamAudit } from '../team/team-audit-store.js';
 import { pauseTeamRuntimeTree, resumeTeamRuntimeTree } from '../team/team-runtime-control-store.js';
+import { cancelTeamRuntimeTree } from '../team/team-runtime-control-store.js';
+import { stopAllInFlightStreamRequestsForSession } from './stream-cancellation.js';
 
 const TEAM_ROLE_LAYERS = ['user', 'reception', 'pm1', 'pm2', 'executor', 'reviewer'] as const;
 
@@ -256,6 +258,68 @@ function logSessionTreeControl(input: {
     console.warn(
       `[team-handoffs] audit(${input.action}) 失败：${err instanceof Error ? err.message : String(err)}`,
     );
+  }
+}
+
+/**
+ * 级联取消某个 session 子树下的所有未终止 handoff（跨层健壮性补强）。
+ *
+ * 单条 cancelHandoff 只翻自身状态；本函数沿 team_parent_session_id 递归取消整棵
+ * 下游子树，并对每个下游 session：
+ *   1. 注入 cancel_signal（team-stream-control gate 在下个 round 边界中止执行）。
+ *   2. stopAllInFlightStreamRequestsForSession 立即 abort 正在跑的 LLM 流。
+ *   3. setSubstate('cancelled') 让前端进度条立刻反映终态。
+ *
+ * 全程 best-effort：单个 session 的信号注入/停流失败不阻塞其余 session。
+ */
+async function cascadeCancelDownstream(input: {
+  rootSessionId: string;
+  userId: string;
+  excludeHandoffId?: string;
+}): Promise<void> {
+  const result = cancelTeamRuntimeTree({
+    rootSessionId: input.rootSessionId,
+    userId: input.userId,
+  });
+  if (!result) return;
+
+  // 对子树里每个 session 停流 + 置 substate。treeSessionIds 含 root 自身与所有后代。
+  for (const sessionId of result.treeSessionIds) {
+    try {
+      submitInboundMessage({
+        userId: input.userId,
+        toSessionId: sessionId,
+        fromRoleLayer: 'system',
+        messageType: 'cancel_signal',
+        payload: { reason: 'cascade-cancel', rootSessionId: input.rootSessionId },
+      });
+    } catch (err) {
+      console.warn(
+        `[team-handoffs] cascade cancel_signal 注入失败（${sessionId}）：${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    try {
+      await stopAllInFlightStreamRequestsForSession({ sessionId, userId: input.userId });
+    } catch (err) {
+      console.warn(
+        `[team-handoffs] cascade 停流失败（${sessionId}）：${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    try {
+      setSubstate({ sessionId, substate: 'cancelled', userId: input.userId });
+    } catch (err) {
+      console.warn(
+        `[team-handoffs] cascade setSubstate('cancelled') 失败（${sessionId}）：${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  for (const cancelledHandoffId of result.cancelledHandoffIds) {
+    if (cancelledHandoffId === input.excludeHandoffId) continue;
+    const record = getHandoff({ userId: input.userId, handoffId: cancelledHandoffId });
+    if (record) {
+      publishHandoffEvent({ type: 'handoff.cancelled', record });
+    }
   }
 }
 
@@ -580,6 +644,24 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
           record: after,
         });
         publishHandoffEvent({ type: 'handoff.cancelled', record: after });
+
+        // 级联取消：取消本 handoff 派生出的整棵下游子树（rooted at toSessionId），
+        // 否则取消上游后下游的 executor/reviewer 仍会继续跑、继续烧 token。对每个
+        // 被取消的下游 handoff 注入 cancel_signal（team-stream-control gate 会在
+        // 下个 round 边界中止），并 stop 其 in-flight 流让已在跑的 LLM 立即收尾。
+        if (after.toSessionId) {
+          try {
+            await cascadeCancelDownstream({
+              rootSessionId: after.toSessionId,
+              userId: user.sub,
+              excludeHandoffId: after.id,
+            });
+          } catch (e) {
+            console.warn(
+              `[team-handoffs] cancel 级联下游失败（不阻塞主流程）：${e instanceof Error ? e.message : String(e)}`,
+            );
+          }
+        }
       }
       step.succeed(undefined, { handoffId });
       return reply.send({ handoff: after });

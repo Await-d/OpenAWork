@@ -587,3 +587,133 @@
     }
   }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * LayerFlowView · 层级流程图动画
+ *
+ * 可视化「消息在 reception → pm1 → pm2 → executor → reviewer 各层之间传递」。
+ * 这些 keyframes 由 LayerFlowView.tsx 内联 animation 引用，集中声明在此避免
+ * 与其它全局 keyframe 同名冲突，并统一受 prefers-reduced-motion 收敛。
+ * ───────────────────────────────────────────────────────────────────────── */
+
+/* 连线上的流光：一段亮色沿连线从 from 层流向 to 层，表达「消息正在传递」。 */
+@keyframes team-flow-dash {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+
+/* 活跃节点的呼吸光环：running 层节点持续脉冲，强调「该层正在处理」。 */
+@keyframes team-flow-node-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--team-flow-glow, color-mix(in srgb, var(--success) 45%, transparent));
+  }
+  50% {
+    box-shadow: 0 0 0 7px color-mix(in srgb, var(--team-flow-glow-mid, var(--success)) 0%, transparent);
+  }
+}
+
+/* 新事件到达时节点的一次性高亮弹跳，提示「这一层刚收到消息」。 */
+@keyframes team-flow-node-arrive {
+  0% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.14);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* 边激活时的一次性发光脉冲（用于 handoff 状态切换）。 */
+@keyframes team-flow-edge-flash {
+  0% {
+    opacity: 0.35;
+  }
+  40% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.55;
+  }
+}
+
+/* 列表中新 handoff 行入场。 */
+@keyframes team-flow-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes team-flow-dash {
+    from {
+      background-position: 0 0;
+    }
+    to {
+      background-position: 0 0;
+    }
+  }
+  @keyframes team-flow-node-pulse {
+    0%,
+    100% {
+      box-shadow: none;
+    }
+  }
+  @keyframes team-flow-node-arrive {
+    0%,
+    100% {
+      transform: none;
+    }
+  }
+  @keyframes team-flow-edge-flash {
+    0%,
+    100% {
+      opacity: 0.7;
+    }
+  }
+  @keyframes team-flow-row-in {
+    from {
+      opacity: 1;
+      transform: none;
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+
+/* TeamRoleTypingIndicator · 三点跳动「正在思考」动画 */
+@keyframes team-typing-bounce {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  40% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes team-typing-bounce {
+    0%,
+    100% {
+      transform: none;
+      opacity: 0.7;
+    }
+  }
+}

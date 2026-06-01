@@ -16,6 +16,7 @@ import type {
 import {
   createArtifactsClient,
   createPendingPermissionRequestSnapshot,
+  createQuestionsClient,
   createSessionsClient,
   createWorkflowsClient,
   dedupePendingPermissionRequests,
@@ -207,6 +208,10 @@ import {
   buildTerminalTaskSyncMarker,
   resolveTaskToolRuntimeSnapshot,
 } from './conversation/render/task-tool-runtime.js';
+import {
+  mergePendingQuestion,
+  selectPendingQuestionForRequest,
+} from './conversation/render/select-pending-question.js';
 import { detectThinkKeyword } from '../../components/conversation-runtime/reveal/think-keyword-detector.js';
 import { useChatTodoController } from '../../components/conversation-runtime/views/todo-bar.js';
 import {
@@ -439,6 +444,35 @@ export default function ChatPage() {
     replyInlineQuestion,
     resolveInlinePermissionActions,
   } = pendingActions;
+
+  // When a `question_asked` event arrives mid-stream, the stream chunk only
+  // carries `requestId`/`toolName`/`title` — not the full `questions` array
+  // with selectable options that InlineQuestionPanel needs to render (and its
+  // submit button). Fetch the full pending question detail and merge it into
+  // `pendingQuestions` so the inline answer panel (incl. its 提交/确认 button)
+  // appears without waiting for a page reload / recovery snapshot.
+  const loadPendingQuestionForSession = useCallback(
+    async (targetSessionId: string, requestId: string) => {
+      if (!token || !targetSessionId) {
+        return;
+      }
+      try {
+        const pending = await createQuestionsClient(gatewayUrl).listPending(
+          token,
+          targetSessionId,
+        );
+        const match = selectPendingQuestionForRequest(pending, requestId);
+        if (!match) {
+          return;
+        }
+        setPendingQuestions((previous) => mergePendingQuestion(previous, match));
+      } catch {
+        // Non-fatal: the global Layout question prompt and recovery snapshot
+        // remain as fallbacks. Surfacing a toast here would be noisy mid-stream.
+      }
+    },
+    [gatewayUrl, token, setPendingQuestions],
+  );
 
   const [childSessions, setChildSessions] = useState<Session[]>([]);
   const [selectedChildSessionId, setSelectedChildSessionId] = useState<string | null>(null);
@@ -2537,12 +2571,16 @@ export default function ChatPage() {
                 ),
               );
             },
-            onQuestionAsked: () => {
+            onQuestionAsked: (questionEvent) => {
               setSessionStateStatus('paused');
               resetStreamState();
+              void loadPendingQuestionForSession(sid, questionEvent.requestId);
             },
             onQuestionReplied: (questionEvent) => {
               setSessionStateStatus(questionEvent.status === 'answered' ? 'running' : 'idle');
+              setPendingQuestions((previous) =>
+                previous.filter((q) => q.requestId !== questionEvent.requestId),
+              );
             },
             pausedForPermission,
             pausedForQuestion,
@@ -3534,12 +3572,16 @@ export default function ChatPage() {
                   ),
                 );
               },
-              onQuestionAsked: () => {
+              onQuestionAsked: (questionEvent) => {
                 setSessionStateStatus('paused');
                 resetStreamState();
+                void loadPendingQuestionForSession(sid, questionEvent.requestId);
               },
               onQuestionReplied: (questionEvent) => {
                 setSessionStateStatus(questionEvent.status === 'answered' ? 'running' : 'idle');
+                setPendingQuestions((previous) =>
+                  previous.filter((q) => q.requestId !== questionEvent.requestId),
+                );
               },
               pausedForPermission,
               pausedForQuestion,

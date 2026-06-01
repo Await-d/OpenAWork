@@ -86,3 +86,65 @@ describe('TeamTabBar', () => {
     expect(screen.queryByText('3D 办公')).toBeNull();
   });
 });
+
+describe('TeamTabBar · variant="single"（方案 G 单行超级栏）', () => {
+  function renderSingle(overrides: Partial<Parameters<typeof TeamTabBar>[0]> = {}) {
+    const onPrimaryChange = vi.fn();
+    const onMiddleChange = vi.fn();
+    const onOfficeClick = vi.fn();
+    render(
+      <div className="team-v2-root">
+        <TeamTabBar
+          variant="single"
+          activePrimary="overview"
+          middleTab="dashboard"
+          onPrimaryChange={onPrimaryChange}
+          onMiddleChange={onMiddleChange}
+          unreadCount={0}
+          clarificationPending={0}
+          showOffice
+          officeActive={false}
+          onOfficeClick={onOfficeClick}
+          leadingSlot={<span>工作区切换器</span>}
+          centerSlot={<span>状态栏</span>}
+          {...overrides}
+        />
+      </div>,
+    );
+    return { onPrimaryChange, onMiddleChange, onOfficeClick };
+  }
+
+  it('渲染 leadingSlot / centerSlot 与 5 个主 tab', () => {
+    renderSingle();
+    expect(screen.getByText('工作区切换器')).toBeTruthy();
+    expect(screen.getByText('状态栏')).toBeTruthy();
+    // 主 tab 以 role="tab" 渲染（排除隐藏测量行的同名文本）。
+    for (const label of ['概览', '对话', '任务', '度量', '治理']) {
+      expect(screen.getByRole('tab', { name: new RegExp(label) })).toBeTruthy();
+    }
+  });
+
+  it('子 tab 常驻第二行直接可见（无需点击主 tab）', () => {
+    renderSingle();
+    // overview 主 tab 激活 → 其子视图「仪表盘/关系图谱/健康度」常驻可见
+    expect(screen.getByRole('tab', { name: /关系图谱/ })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: /健康度/ })).toBeTruthy();
+  });
+
+  it('点击常驻子 tab 一键切换', () => {
+    const { onMiddleChange } = renderSingle();
+    fireEvent.click(screen.getByRole('tab', { name: /关系图谱/ }));
+    expect(onMiddleChange).toHaveBeenCalledWith('graph');
+  });
+
+  it('点击主 tab 直接切换（不再走两步下拉）', () => {
+    const { onPrimaryChange } = renderSingle();
+    fireEvent.click(screen.getByRole('tab', { name: /任务/ }));
+    expect(onPrimaryChange).toHaveBeenCalledWith('tasks');
+  });
+
+  it('office 视图下不显示子 tab 行', () => {
+    renderSingle({ officeActive: true });
+    expect(screen.queryByRole('tab', { name: /关系图谱/ })).toBeNull();
+  });
+});

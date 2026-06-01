@@ -2,6 +2,7 @@ import js from '@eslint/js';
 import tsPlugin from '@typescript-eslint/eslint-plugin';
 import tsParser from '@typescript-eslint/parser';
 import prettierConfig from 'eslint-config-prettier';
+import teamArchitecturePlugin from './scripts/eslint-rules/no-cross-layer-runner-import.mjs';
 
 export default [
   js.configs.recommended,
@@ -135,6 +136,19 @@ export default [
           ],
         },
       ],
+    },
+  },
+  // ─── 团队五层架构：跨层禁止直连静态护栏（L1.4） ──────────────────────
+  // 团队五层（a/b/c/d/e-g）的层间通信必须只走 handoff / inbound / substate /
+  // 事件总线受控通道，严禁某层 runner 直接 import 另一层的 runner 绕过协议。
+  // 详见 docs/architecture/team-architecture-l1-baseline.md §L1.4。
+  {
+    files: ['services/agent-gateway/src/handoff/runner/**/*.ts'],
+    plugins: {
+      'team-architecture': teamArchitecturePlugin,
+    },
+    rules: {
+      'team-architecture/no-cross-layer-runner-import': 'error',
     },
   },
   {

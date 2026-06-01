@@ -716,6 +716,38 @@ export async function migrate(): Promise<void> {
   ensureColumn('team_audit_logs', 'actor_user_id', 'TEXT');
   ensureColumn('team_audit_logs', 'actor_email', 'TEXT');
 
+  // team_usage_records · 团队执行的真实 token / 费用 / 工具调用持久化。
+  // 背景：stream-team-events 只把 usage/tool_call 作为实时 WS 事件推给前端 store，
+  // 不落库。导致刷新页面 / 重连 / 事件在打开页面前发完，"度量"tab 全部归零——
+  // 用户每次用都"统计不到"。这里按 (session_id, layer, provider, model) 聚合累加，
+  // 让 GET /team/runtime 能回灌历史用量，前端不再依赖实时事件窗口。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS team_usage_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      session_id TEXT NOT NULL,
+      layer TEXT,
+      agent_id TEXT,
+      provider TEXT,
+      model TEXT,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+      cost_usd REAL NOT NULL DEFAULT 0,
+      call_count INTEGER NOT NULL DEFAULT 0,
+      total_duration_ms INTEGER NOT NULL DEFAULT 0,
+      tool_call_count INTEGER NOT NULL DEFAULT 0,
+      tool_error_count INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(user_id, session_id, layer, provider, model)
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_team_usage_records_user_session ON team_usage_records(user_id, session_id)',
+  );
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS shared_session_comments (
       id TEXT PRIMARY KEY,
@@ -1073,6 +1105,11 @@ export async function migrate(): Promise<void> {
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_agent_personas_user_role ON agent_personas(user_id, role_layer)',
   );
+  // default_version：该 persona 作为「默认 SOUL 副本」落库时的默认版本号。
+  //   - 非 null：这是系统种入的默认副本，用户未自定义 → 默认升级时可安全刷新到新版。
+  //   - null：用户自定义过（或早于版本化机制落库的旧默认）→ 默认升级不覆盖。
+  // 见 team/team-personas-store.ts 的 ensureDefaultPersonasForUser 迁移逻辑。
+  ensureColumn('agent_personas', 'default_version', 'INTEGER');
 
   // T-09: ForceApply 事件表（24h ≤ 5 次限流 + cache-breaker tag）
   db.exec(`

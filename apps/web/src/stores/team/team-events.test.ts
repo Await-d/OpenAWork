@@ -392,3 +392,89 @@ describe('useHandoffStore · 请求载荷摘要', () => {
     expect(useHandoffStore.getState().handoffs.get('h-summary-2')?.summary).toBeUndefined();
   });
 });
+
+describe('useHandoffStore · 事件单调性守卫 (#9)', () => {
+  it('较旧 timestamp 的乱序事件不会让状态从 completed 回退', () => {
+    const taskId = 'h-mono-1';
+    // 正常推进到终态 completed（timestamp=300）
+    useHandoffStore.getState().applyEvent({
+      type: 'handoff.created',
+      taskId,
+      sessionId: 'sess-mono',
+      timestamp: 100,
+      payload: { fromRoleLayer: 'pm2', toRoleLayer: 'executor', state: 'pending' },
+    });
+    useHandoffStore.getState().applyEvent({
+      type: 'handoff.started',
+      taskId,
+      sessionId: 'sess-mono',
+      timestamp: 200,
+      payload: { state: 'running' },
+    });
+    useHandoffStore.getState().applyEvent({
+      type: 'handoff.completed',
+      taskId,
+      sessionId: 'sess-mono',
+      timestamp: 300,
+      payload: { state: 'completed' },
+    });
+    expect(useHandoffStore.getState().handoffs.get(taskId)?.state).toBe('completed');
+    expect(useHandoffStore.getState().handoffs.get(taskId)?.endedAt).toBe(300);
+
+    // 断连补发：一条**较旧**的 running 事件（timestamp=200）迟到。必须被丢弃，
+    // 不能把状态回退成 running、也不能清掉 endedAt。
+    useHandoffStore.getState().applyEvent({
+      type: 'handoff.started',
+      taskId,
+      sessionId: 'sess-mono',
+      timestamp: 200,
+      payload: { state: 'running' },
+    });
+    expect(useHandoffStore.getState().handoffs.get(taskId)?.state).toBe('completed');
+    expect(useHandoffStore.getState().handoffs.get(taskId)?.endedAt).toBe(300);
+    expect(useHandoffStore.getState().handoffs.get(taskId)?.updatedAt).toBe(300);
+  });
+
+  it('合法的 retry（running→pending，timestamp 更新）仍被接受', () => {
+    const taskId = 'h-mono-2';
+    useHandoffStore.getState().applyEvent({
+      type: 'handoff.started',
+      taskId,
+      sessionId: 'sess-retry',
+      timestamp: 100,
+      payload: { fromRoleLayer: 'pm2', toRoleLayer: 'executor', state: 'running' },
+    });
+    expect(useHandoffStore.getState().handoffs.get(taskId)?.state).toBe('running');
+
+    // recovery 把 running 退回 pending（retry）：带**更新**的 timestamp，应被接受。
+    useHandoffStore.getState().applyEvent({
+      type: 'handoff.requeued',
+      taskId,
+      sessionId: 'sess-retry',
+      timestamp: 500,
+      payload: { state: 'pending' },
+    });
+    expect(useHandoffStore.getState().handoffs.get(taskId)?.state).toBe('pending');
+    expect(useHandoffStore.getState().handoffs.get(taskId)?.updatedAt).toBe(500);
+  });
+
+  it('相同 timestamp 的事件仍被接受（>= 边界）', () => {
+    const taskId = 'h-mono-3';
+    useHandoffStore.getState().applyEvent({
+      type: 'handoff.started',
+      taskId,
+      sessionId: 'sess-eq',
+      timestamp: 100,
+      payload: { fromRoleLayer: 'pm2', toRoleLayer: 'executor', state: 'running' },
+    });
+    useHandoffStore.getState().applyEvent({
+      type: 'handoff.completed',
+      taskId,
+      sessionId: 'sess-eq',
+      timestamp: 100,
+      payload: { state: 'completed' },
+    });
+    expect(useHandoffStore.getState().handoffs.get(taskId)?.state).toBe('completed');
+  });
+});
+

@@ -25,6 +25,7 @@ import {
   useTeamNotificationStore,
   useTeamEventsConnectionStore,
 } from '../../../stores/team/team-events.js';
+import { hydrateTeamUsageStore } from '../../../stores/team/team-usage.js';
 import {
   appendSharedSessionCommentPreview,
   applySharedSessionPermissionReplyPreview,
@@ -301,6 +302,7 @@ export function useTeamCollaboration(
       sharedSessions: sortSharedSessions(runtime.sharedSessions),
       sessions: runtime.sessions,
       tasks: sortTasks(runtime.tasks),
+      ...(runtime.usageRecords ? { usageRecords: runtime.usageRecords } : {}),
     };
   }, []);
 
@@ -322,6 +324,8 @@ export function useTeamCollaboration(
         handoffs: snapshot.handoffs,
         sessions: snapshot.sessions,
       });
+      // 用持久化用量回灌内存 store，让"度量"tab 刷新后仍有历史 token / 费用 / 工具调用。
+      hydrateTeamUsageStore(snapshot.usageRecords ?? []);
       snapshotLoadedRef.current = true;
     },
     [normalizeSnapshot],
@@ -353,6 +357,7 @@ export function useTeamCollaboration(
         useTeamNotificationStore.getState().clear();
         hydrateClarificationStore([]);
         hydrateTeamRuntimeStores({ handoffs: [], sessions: [] });
+        hydrateTeamUsageStore([]);
         setLoading(false);
         setError(null);
         return true;

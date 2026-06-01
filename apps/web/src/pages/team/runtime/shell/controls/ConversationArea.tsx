@@ -29,6 +29,7 @@ import {
 } from '../../../../../stores/team/team-events.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
 import { substateLabelAny } from '../../data/substates.js';
+import { teamEventTypeLabel, teamEventLayerLabel } from '../../data/team-event-labels.js';
 import { SuggestionBar } from './SuggestionBar.js';
 import { TeamConversationView } from '../../../conversation/TeamConversationView.js';
 
@@ -47,45 +48,13 @@ interface PushMessage {
   count: number;
 }
 
-/** team-event 类型 → 中文标签（推送通知条用，避免直接暴露 `xxx.changed` 原始串）。 */
-const EVENT_TYPE_LABEL: Record<string, string> = {
-  'handoff.created': '已创建交接',
-  'handoff.claimed': '已认领',
-  'handoff.started': '开始执行',
-  'handoff.completed': '已完成',
-  'handoff.failed': '执行失败',
-  'handoff.cancelled': '已取消',
-  'handoff.reclaimed': '重新认领',
-  'session.heartbeat': '心跳',
-  'session.substate.changed': '阶段更新',
-  'session.inbound.submitted': '收到新输入',
-  'session.init.changed': '初始化进度',
-  'scheduler.task-paused': '任务已暂停',
-  'scheduler.task-resumed': '任务已恢复',
-  'scheduler.all-paused': '全部暂停',
-  'scheduler.all-resumed': '全部恢复',
-  'artifact.needs-clarification': '需要澄清',
-  'artifact.constitution-conflict': '宪法冲突',
-};
-
-/** 角色层 → 中文短标签（与 TeamRunStateBanner.LAYER_LABEL 对齐）。 */
-const PUSH_LAYER_LABEL: Record<string, string> = {
-  user: '用户',
-  reception: '接待',
-  pm1: '规划',
-  pm2: '管控',
-  executor: '执行',
-  tester: '测试',
-  reviewer: '评审',
-};
-
+/** 事件类型 / 角色层 → 中文标签：复用 team-event-labels 的统一映射，避免重复维护。 */
 function eventTypeLabel(type: string): string {
-  return EVENT_TYPE_LABEL[type] ?? type;
+  return teamEventTypeLabel(type);
 }
 
 function layerLabel(layer: string | undefined): string | null {
-  if (!layer) return null;
-  return PUSH_LAYER_LABEL[layer] ?? layer;
+  return teamEventLayerLabel(layer);
 }
 
 const CONTAINER_STYLE: TeamConversationStyle = {
@@ -161,18 +130,31 @@ const PUSH_STRIP_STYLE: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   gap: 6,
-  // 与接待卡片（RECEPTION_CARD_STYLE maxWidth 560，居中）对齐：限制宽度 + 居中，
-  // 避免推送条全宽铺满而接待卡片居中导致的左右错位。
+  // team 对话流已改为两边铺满（TeamConversationLayout.contentColumnStyle），推送条
+  // 出现在对话之后（afterMessagesInline），跟随对话流一起铺满。改为「轻容器」：
+  // 去掉外框 + 实心底色（避免和内部卡片双层描边的厚重盒子感），只用一条左侧
+  // 强调线 + 极淡底色把它和正式消息流区分开。
   width: '100%',
-  maxWidth: 560,
-  margin: '8px auto 4px',
-  padding: '10px 16px',
-  borderRadius: 12,
-  border: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base))',
+  margin: '4px 0 2px',
+  padding: '8px 12px 8px 14px',
+  borderRadius: 10,
+  borderLeft: '2px solid color-mix(in srgb, var(--accent) 38%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 38%, transparent)',
   flexShrink: 0,
   maxHeight: 240,
   overflowY: 'auto',
+};
+
+const PUSH_STRIP_HEADER_STYLE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+  fontSize: 10,
+  fontWeight: 700,
+  letterSpacing: '0.04em',
+  textTransform: 'uppercase',
+  color: 'var(--fg-muted)',
+  margin: '0 0 2px',
 };
 
 export interface ConversationAreaProps {
@@ -407,6 +389,13 @@ function PushMessageStrip({ messages }: { messages: PushMessage[] }) {
   if (messages.length === 0) return null;
   return (
     <div style={PUSH_STRIP_STYLE} aria-label="团队推送通知">
+      <div style={PUSH_STRIP_HEADER_STYLE}>
+        <span aria-hidden>📡</span>
+        <span>团队动态</span>
+        {messages.length > 1 ? (
+          <span style={{ color: 'var(--fg-subtle)', fontWeight: 600 }}>· {messages.length}</span>
+        ) : null}
+      </div>
       {messages.map((message) => (
         <PushMessageCard key={message.id} message={message} />
       ))}

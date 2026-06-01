@@ -64,6 +64,7 @@ interface TeamUsageState {
   recent: TeamUsageEvent[];
   total: UsageBucket;
   applyUsageEvent: (event: TeamUsageEvent) => void;
+  hydrateFromRecords: (records: TeamUsageRecordSeed[]) => void;
   clear: () => void;
 }
 
@@ -145,7 +146,74 @@ export const useTeamUsageStore = create<TeamUsageState>((set) => ({
       recent: [],
       total: emptyBucket(),
     }),
+  hydrateFromRecords: (records) =>
+    set(() => {
+      // 用持久化聚合"替换"内存聚合（权威快照语义）：每次 GET /team/runtime
+      // 回灌时重置为后端权威总量；实时 WS 事件在两次刷新之间叠加在其上，
+      // 下次刷新再被权威值覆盖，因此任何瞬时重复计数会自愈。
+      const byProvider = new Map<string, UsageBucket>();
+      const byAgent = new Map<string, UsageBucket>();
+      const bySession = new Map<string, UsageBucket>();
+      const byLayer = new Map<string, UsageBucket>();
+      let total = emptyBucket();
+
+      const accumulate = (map: Map<string, UsageBucket>, key: string, rec: TeamUsageRecordSeed) => {
+        const cur = map.get(key) ?? emptyBucket();
+        map.set(key, {
+          inputTokens: cur.inputTokens + rec.inputTokens,
+          outputTokens: cur.outputTokens + rec.outputTokens,
+          reasoningTokens: cur.reasoningTokens + rec.reasoningTokens,
+          cacheReadTokens: cur.cacheReadTokens + rec.cacheReadTokens,
+          cacheWriteTokens: cur.cacheWriteTokens + rec.cacheWriteTokens,
+          costUsd: cur.costUsd + rec.costUsd,
+          count: cur.count + rec.callCount,
+        });
+      };
+
+      for (const rec of records) {
+        if (rec.provider) accumulate(byProvider, rec.provider, rec);
+        if (rec.agentId) accumulate(byAgent, rec.agentId, rec);
+        if (rec.sessionId) accumulate(bySession, rec.sessionId, rec);
+        if (rec.layer) accumulate(byLayer, rec.layer, rec);
+        total = {
+          inputTokens: total.inputTokens + rec.inputTokens,
+          outputTokens: total.outputTokens + rec.outputTokens,
+          reasoningTokens: total.reasoningTokens + rec.reasoningTokens,
+          cacheReadTokens: total.cacheReadTokens + rec.cacheReadTokens,
+          cacheWriteTokens: total.cacheWriteTokens + rec.cacheWriteTokens,
+          costUsd: total.costUsd + rec.costUsd,
+          count: total.count + rec.callCount,
+        };
+      }
+
+      // recent 无法从聚合行还原（没有逐事件时间戳），置空让实时事件重新填充。
+      return { byProvider, byAgent, bySession, byLayer, recent: [], total };
+    }),
 }));
+
+/** hydrateFromRecords 接受的最小记录形状（与 web-client TeamUsageRecord 对齐）。 */
+export interface TeamUsageRecordSeed {
+  sessionId: string;
+  layer: string | null;
+  agentId: string | null;
+  provider: string | null;
+  model: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  costUsd: number;
+  callCount: number;
+  totalDurationMs: number;
+  toolCallCount: number;
+  toolErrorCount: number;
+}
+
+/** 用持久化的 team usage 聚合回灌内存 store（刷新/重连后还原历史用量）。 */
+export function hydrateTeamUsageStore(records: TeamUsageRecordSeed[]): void {
+  useTeamUsageStore.getState().hydrateFromRecords(records);
+}
 
 // ─── Tool Calls ─────────────────────────────────────────────────────────────
 

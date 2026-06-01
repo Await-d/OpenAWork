@@ -29,7 +29,11 @@ export const TOOLSET_TO_TOOL_NAMES: Record<ToolsetCategory, readonly string[]> =
   read: ['read', 'glob', 'grep', 'read_tool_output', 'look_at', 'repo_overview'],
   write: ['write', 'edit', 'multi_edit', 'apply_patch'],
   shell: ['bash', 'run_background_bash', 'interactive_bash'],
-  web: ['web_search'],
+  // 实际注册的联网工具规范名是 'websearch' / 'webfetch'（tools/tool-aliases.ts、
+  // tools/web-tools.ts），早期写成 'web_search' 与任何已注册工具都对不上，会被
+  // filterToolsByAllowedSets 静默过滤掉，导致 reception / executor 选了 web 也拿不到
+  // 联网能力。这里改用规范名。
+  web: ['websearch', 'webfetch'],
   lsp: [
     'lsp_goto_definition',
     'lsp_goto_implementation',
@@ -74,8 +78,27 @@ export function filterToolsByAllowedSets<T extends { function: { name: string } 
   const alwaysAllowed = new Set(['AskUserQuestion', 'todo_read', 'todo_write']);
 
   return tools.filter(
-    (tool) => allowedNames.has(tool.function.name) || alwaysAllowed.has(tool.function.name),
+    (tool) =>
+      allowedNames.has(tool.function.name) ||
+      alwaysAllowed.has(tool.function.name) ||
+      // 动态注入的 MCP 扁平工具（mcp__<server>__<tool>）不在静态类别表里，但它们已在上游
+      // 按会话 metadata.requestedMcpServers 白名单过滤过——是「该成员显式绑定授权」的工具，
+      // 不应再被层类别表二次拦截（否则 team 各层绑定了 MCP 也调不到）。放行。
+      isDynamicallyBoundTool(tool.function.name),
   );
+}
+
+/**
+ * 判断某工具是否为「动态绑定」工具——这类工具名不在 TOOLSET_TO_TOOL_NAMES 的静态类别表里，
+ * 但已在 stream 管道上游按会话级白名单（requestedMcpServers / requestedSkills）过滤授权过，
+ * 因此应绕过 toolset 类别门控直接放行：
+ *   - MCP 扁平工具：mcp__<server>__<tool>（前缀 MCP_FLAT_TOOL_PREFIX）。
+ *
+ * 注意：这不放宽安全边界——能到这一步的 MCP 工具一定是该会话 metadata 显式绑定的；
+ * 未绑定的 MCP server 在 listMcpToolsForSession 阶段就已被 allowedServerIds 挡掉。
+ */
+export function isDynamicallyBoundTool(toolName: string): boolean {
+  return toolName.startsWith('mcp__');
 }
 
 /**

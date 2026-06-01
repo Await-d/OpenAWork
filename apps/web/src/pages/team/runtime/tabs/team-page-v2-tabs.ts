@@ -47,7 +47,8 @@ export const PRIMARY_TABS: ReadonlyArray<PrimaryTabDef> = [
     icon: '💬',
     children: [
       { key: 'conversation', label: '当前对话', icon: '💬' },
-      { key: 'layered', label: '层级', icon: '🪜' },
+      { key: 'flow', label: '层级流动', icon: '🪜' },
+      { key: 'layered', label: '层级', icon: '🗂️' },
       { key: 'messages', label: '消息', icon: '✉️' },
     ],
   },

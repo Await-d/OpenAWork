@@ -62,8 +62,10 @@ import {
   type ChatSettingsProvider,
 } from '../../../utils/chat/chat-session-defaults.js';
 import {
+  useLayerStore,
   useTeamEventsConnectionStore,
   useTeamNotificationStore,
+  type TeamRoleLayer,
 } from '../../../stores/team/team-events.js';
 import {
   formatGatewayStreamErrorMessage,
@@ -689,7 +691,46 @@ export function useTeamConversationState(
     };
   }, [sessionId, enabled, sessionStateStatus, reload]);
 
-  // ─── inbound writer（v0.2 新增，L1.3 反向通道）──────────────────
+  // ─── 把"当前正在看的这个 session"注册到 layer store ────────────────
+  // 「层级流动 / 层级 / 消息」三个 tab 的数据源是 useLayerStore.nodes +
+  // useHandoffStore.handoffs，它们靠 /team/runtime 快照 + WS 事件填充。但一个
+  // 只做了直答、还没派发任何 handoff 的 reception 会话，快照里可能尚未把它当成
+  // 团队节点回灌（或时序上晚于本视图），导致这三个 tab 全空——用户会以为坏了。
+  // 这里在会话加载出 roleLayer 后，主动把它 upsert 进 layer store，保证「层级」
+  // 视图至少能看到当前这层的节点，handoff 链路一旦展开再由 WS/快照补全。
+  useEffect(() => {
+    if (!sessionId || !enabled || !roleLayer) return;
+    const parentSessionId =
+      typeof sessionMetadata?.['parentSessionId'] === 'string'
+        ? (sessionMetadata['parentSessionId'] as string)
+        : null;
+    const existing = useLayerStore.getState().nodes.get(sessionId);
+    // 已存在且核心字段一致就不重复写（避免无谓 set 触发渲染）。
+    if (
+      existing &&
+      existing.roleLayer === roleLayer &&
+      existing.parentSessionId === parentSessionId
+    ) {
+      return;
+    }
+    useLayerStore.getState().addNode({
+      sessionId,
+      // 运行时为字符串；LayerNode.roleLayer 是 TeamRoleLayer 联合。未知值在
+      // 渲染层会回退到中性身份，这里按已知层字符串传入即可。
+      roleLayer: roleLayer as TeamRoleLayer,
+      parentSessionId,
+      // 用远端运行状态映射节点状态；未知时给 idle（store 接受 'idle'）。
+      state:
+        sessionStateStatus === 'running'
+          ? 'running'
+          : sessionStateStatus === 'paused'
+            ? 'claimed'
+            : 'idle',
+      ...(typeof sessionMetadata?.['title'] === 'string'
+        ? { title: sessionMetadata['title'] as string }
+        : {}),
+    });
+  }, [sessionId, enabled, roleLayer, sessionMetadata, sessionStateStatus]);
   const submitInbound = useCallback<TeamConversationState['submitInbound']>(
     async (messageType, payload, opts) => {
       if (!sessionId) {
@@ -773,8 +814,10 @@ export function useTeamConversationState(
         throw new Error('当前团队会话或登录状态无效，无法开始对话。');
       }
       if (streamingRef.current) {
-        // already streaming; reject silently
-        return;
+        // 已在流式生成中：明确抛错而非静默 return。早期实现这里直接 return，
+        // 上层 handleComposerSubmit 已先清空输入框，导致这条消息被静默丢弃且
+        // 无任何反馈。改为抛错让调用方据此保留输入框内容并提示用户。
+        throw new Error('正在生成回复，请等待当前回复完成或点击停止后再发送。');
       }
 
       const trimmed = text.trim();

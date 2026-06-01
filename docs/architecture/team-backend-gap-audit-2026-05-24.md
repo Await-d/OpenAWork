@@ -10,6 +10,17 @@
 
 ---
 
+## 0′. 复核更新（2026-06-01，跨层直连静态护栏 + verification 复核）⭐
+
+> 本节优先级最高。承接 §0（2026-05-29），补充 2026-06-01 三件事的结论。
+
+1. **L1.4 跨层禁止直连 —— 静态护栏已补齐**。此前层间隔离仅靠代码注释 + 运行时 `assertCanWriteArtifactPhase` guard，缺静态兜底。现新增自定义 ESLint 规则 **`team-architecture/no-cross-layer-runner-import`**（`scripts/eslint-rules/no-cross-layer-runner-import.mjs`）：编码五层拓扑，禁止 `handoff/runner/` 下任一层 runner 跨层直接 import 另一层 runner，**同时覆盖静态 `import` 与动态 `import()`**（后者是分发器使用、最易扩散的绕过点）。受控编排器 `watcher` / `pm1-runner`（`createPhaseCAwareRunner` 分发器）/ `scheduler` 白名单豁免；同层组合（`pm1-runner`↔`artifact-chain`、`reception-orchestrator`↔`reception-router`）放行。配套 RuleTester 自测（10 例），接入 `pnpm run lint:rules`。现状代码零违规（不变量本就成立），规则用于**锁死回归**。
+2. **老路径确认退役**。`isHandoffModeEnabled` / `OPENAWORK_TEAM_HANDOFF_MODE` / `team-leader` / `interaction-agent` 在真实 `src/` 下零匹配；`feature-flags.ts` 仅存在于历史备份路径。L1.4 escape hatch #4（迁移期 feature flag）已退场。
+3. **`verify-task-tool-no-permission.ts` 不再阻塞**。L1.3 收口记录曾称其阻塞完整 gateway 测试。2026-06-01 实跑：standalone 与完整 `pnpm run test:task-tool` 链均通过（`verify-task-tool-no-permission: ok`，EXIT=0）。原阻塞为彼时测试隔离 flaky（共享 `:memory:` DB + vitest 并行串扰），已不复现。
+4. **顺带修复 4 个既有 lint 错误**（均在层间通信基础设施内）：`pm2-quality-review-reconciler.ts`（未使用的 `HandoffRecord` 导入 + 多余 `as string` 断言）、`inbound-store.ts`（2 处多余 `as ClarificationPayloadQuestion` 断言）。修复后 `handoff/` 目录 lint 全清，相关 170 个 handoff/inbound 测试全通过。
+
+---
+
 ## 0. 复核更新（2026-05-29，以代码与测试为准）
 
 > 本节为最新复核结论，**优先级高于下方 §1–§6 的旧判断**。下方旧章节保留作为演进留痕，不再代表当前状态。

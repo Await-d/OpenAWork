@@ -10,6 +10,7 @@
  */
 
 import { useMemo, type CSSProperties } from 'react';
+import { getRoleLayerIdentity } from '../../runtime/data/role-layer-identity.js';
 
 export interface TeamSessionHeaderProps {
   roleLayer?: string | null;
@@ -118,20 +119,13 @@ function substateLabel(substate: string | null | undefined): string {
 }
 
 function roleLayerLabel(roleLayer: string | null | undefined): { text: string; color: string } {
-  switch (roleLayer) {
-    case 'reception':
-      return { text: '接待层 (b)', color: 'var(--accent)' };
-    case 'pm1':
-      return { text: '规划层 (c)', color: 'var(--accent)' };
-    case 'pm2':
-      return { text: '主管层 (d)', color: 'var(--chart-5)' };
-    case 'executor':
-      return { text: '执行层 (e)', color: 'var(--success)' };
-    case 'reviewer':
-      return { text: '评审层 (g)', color: 'var(--warning)' };
-    default:
-      return { text: '团队会话', color: 'var(--fg-default)' };
-  }
+  // 统一走 role-layer-identity（唯一事实源），避免本组件再各写一份与对话身份头
+  // / substate 进度条 / 状态栏不一致的层级名 + 配色。代号用括号标注（如「执行层 (e)」）。
+  const id = getRoleLayerIdentity(roleLayer);
+  return {
+    text: id.code ? `${id.label} (${id.code})` : id.label,
+    color: id.color,
+  };
 }
 
 export function TeamSessionHeader({

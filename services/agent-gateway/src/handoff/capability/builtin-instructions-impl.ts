@@ -118,13 +118,14 @@ registerInstruction({
 });
 
 /**
- * cancel_downstream: b 层向某个下游 handoff 发送 cancel_signal。
- * 注意：取消的级联由 watcher 处理（已在 handoff-store 实现）。
+ * cancel_downstream: b 层取消某个下游 handoff（并级联取消其整棵下游子树）。
+ * 通过 cancelTeamRuntimeTree 取消子树所有未终止 handoff + 注入 cancel_signal，
+ * team-stream-control gate 会在下个 round 边界中止正在跑的 LLM 流。
  */
 registerInstruction({
   name: 'cancel_downstream',
   ownerLayer: 'reception',
-  description: '取消某个正在跑的下游任务。LLM 在用户明确要求取消时调用。',
+  description: '取消某个正在跑的下游任务（含其派生的所有子任务）。LLM 在用户明确要求取消时调用。',
   schema: z.object({
     handoffId: z.string().min(1).describe('要取消的 handoff id'),
     reason: z.string().min(1).max(500).describe('取消原因（写入 audit log）'),
@@ -149,14 +150,70 @@ registerInstruction({
         message: 'handoff 尚未 claim，没有目标 session。',
       };
     }
-    submitInboundMessage({
+
+    const { cancelHandoff } = await import('../store/handoff-store.js');
+    const { cancelTeamRuntimeTree } = await import('../../team/team-runtime-control-store.js');
+
+    // 1. 取消目标 handoff 本身（状态翻到 cancelled）。
+    cancelHandoff({ userId: ctx.userId, handoffId: args.handoffId });
+
+    // 2. 级联取消下游子树（rooted at 目标 handoff 的 to_session）的所有未终止 handoff。
+    let cancelledCount = 0;
+    const tree = cancelTeamRuntimeTree({
+      rootSessionId: handoff.to_session_id,
       userId: ctx.userId,
-      toSessionId: handoff.to_session_id,
-      fromRoleLayer: 'system',
-      messageType: 'cancel_signal',
-      payload: { reason: args.reason, handoffId: args.handoffId, requestedBy: 'reception' },
     });
-    return { ok: true, message: `已发送 cancel_signal 到 handoff ${args.handoffId.slice(0, 8)}。` };
+    if (tree) {
+      cancelledCount = tree.cancelledHandoffIds.length;
+      // 3. 给子树每个 session 注入 cancel_signal + 停流 + 置 substate。
+      const { stopAllInFlightStreamRequestsForSession } = await import(
+        '../../routes/stream-cancellation.js'
+      );
+      for (const sessionId of tree.treeSessionIds) {
+        try {
+          submitInboundMessage({
+            userId: ctx.userId,
+            toSessionId: sessionId,
+            fromRoleLayer: 'system',
+            messageType: 'cancel_signal',
+            payload: { reason: args.reason, handoffId: args.handoffId, requestedBy: 'reception' },
+          });
+        } catch (err) {
+          console.warn(
+            `[cancel_downstream] cancel_signal 注入失败（${sessionId}）：${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+        try {
+          await stopAllInFlightStreamRequestsForSession({ sessionId, userId: ctx.userId });
+        } catch (err) {
+          console.warn(
+            `[cancel_downstream] 停流失败（${sessionId}）：${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+        try {
+          setSubstate({ sessionId, substate: 'cancelled', userId: ctx.userId });
+        } catch (err) {
+          console.warn(
+            `[cancel_downstream] setSubstate('cancelled') 失败（${sessionId}）：${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+    } else {
+      // 子树解析失败（极少见）：至少给直接目标 session 发 cancel_signal 兜底。
+      submitInboundMessage({
+        userId: ctx.userId,
+        toSessionId: handoff.to_session_id,
+        fromRoleLayer: 'system',
+        messageType: 'cancel_signal',
+        payload: { reason: args.reason, handoffId: args.handoffId, requestedBy: 'reception' },
+      });
+    }
+
+    return {
+      ok: true,
+      message: `已取消 handoff ${args.handoffId.slice(0, 8)} 及其下游子任务（共 ${cancelledCount} 个）。`,
+      data: { cancelledCount },
+    };
   },
 });
 

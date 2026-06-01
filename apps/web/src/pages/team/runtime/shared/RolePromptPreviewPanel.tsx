@@ -306,25 +306,21 @@ export function RolePromptPreviewPanel({
       .finally(() => setSaving(false));
   };
 
-  // 重置为默认 SOUL：拉取该层的内置默认人格文本，覆盖当前用户的自定义 override。
+  // 重置为最新默认 SOUL：调用 resetPersona 端点，后端用当前内置默认覆盖该层的
+  // 自定义 override，并重新标记为「默认副本」——这样后续默认提示词迭代仍会自动下发。
   const [resetting, setResetting] = useState(false);
   const resetToDefault = () => {
     if (!phaseAClient || !accessToken || !soulLayer) return;
     if (typeof window !== 'undefined') {
-      const ok = window.confirm('确定要重置为系统默认 SOUL 吗？你对该层的自定义内容会被覆盖。');
+      const ok = window.confirm(
+        '确定要恢复为最新默认 SOUL 吗？你对该层的自定义内容会被覆盖，并跟随后续默认更新。',
+      );
       if (!ok) return;
     }
     setResetting(true);
     setSaveError(null);
     void phaseAClient
-      .listDefaultSouls(accessToken)
-      .then((souls) => {
-        const def = souls.find((s) => s.roleLayer === soulLayer);
-        if (!def || !def.soulMd) {
-          throw new Error('未找到该层的默认 SOUL');
-        }
-        return phaseAClient.putPersona(accessToken, soulLayer, { soulMd: def.soulMd });
-      })
+      .resetPersona(accessToken, soulLayer)
       .then(() => {
         setEditDraft(null);
         refresh();
@@ -391,9 +387,9 @@ export function RolePromptPreviewPanel({
               style={BTN_STYLE}
               onClick={resetToDefault}
               disabled={resetting}
-              title="放弃当前自定义，恢复为系统默认 SOUL"
+              title="放弃当前自定义，恢复为最新内置默认 SOUL（并跟随后续默认更新）"
             >
-              {resetting ? '重置中…' : '↺ 重置默认'}
+              {resetting ? '恢复中…' : '↺ 恢复为最新默认'}
             </button>
           ) : null}
           {supported && !isEditing ? (

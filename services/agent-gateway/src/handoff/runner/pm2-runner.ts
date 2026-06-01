@@ -199,6 +199,17 @@ export function createPm2Runner(): HandoffTaskRunner {
                   : {}),
                 prompt: `${systemWithRoster}\n\n---\n\n${user}`,
                 temperature: 0.1,
+                usageContext: {
+                  userId: input.handoff.userId,
+                  sessionId: input.toSessionId,
+                  layer: 'pm2',
+                  ...(typeof llmConfig.inputPricePerMillion === 'number'
+                    ? { inputPricePerMillion: llmConfig.inputPricePerMillion }
+                    : {}),
+                  ...(typeof llmConfig.outputPricePerMillion === 'number'
+                    ? { outputPricePerMillion: llmConfig.outputPricePerMillion }
+                    : {}),
+                },
               });
             };
 

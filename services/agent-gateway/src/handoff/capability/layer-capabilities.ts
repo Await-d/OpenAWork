@@ -42,7 +42,10 @@ export type InboundMessageType =
  *   - allowedInboundTypes: 该层作为 to_session 时，allowed message_type
  *   - allowedSubstates: 该层 setSubstate 可以写入的 substate 值
  *   - canWriteArtifactPhases: 该层 createArtifact 可以指定的 phase
- *   - allowedToolsetCategories: 该层在执行时可以看到的 toolset 类别
+ *   - allowedToolsetCategories: 该层在执行时可以看到的 toolset 类别（天花板）
+ *   - requiredToolsetCategories: 该层「必备」的 toolset 类别——成员配置不可砍掉，
+ *     即使成员 metadata.toolsets 与层白名单的交集不含这些，也会强制并入，
+ *     避免成员被错误配置砍光关键能力导致跑不动（如 reception 缺 read 没法读上下文）。
  *   - allowedBuiltinInstructions: 该层 LLM 可以 tool_call 的内置指令名
  */
 export interface LayerCapabilities {
@@ -52,6 +55,8 @@ export interface LayerCapabilities {
   allowedSubstates: ReadonlyArray<string>;
   canWriteArtifactPhases: ReadonlyArray<string>;
   allowedToolsetCategories: ReadonlyArray<string>;
+  /** 必备工具集（成员配置无法砍掉的底线，必须 ⊆ allowedToolsetCategories）。 */
+  requiredToolsetCategories: ReadonlyArray<string>;
   allowedBuiltinInstructions: ReadonlyArray<string>;
 }
 
@@ -76,6 +81,7 @@ export const LAYER_CAPABILITIES: Readonly<Record<HandoffRoleLayer, LayerCapabili
     allowedSubstates: [],
     canWriteArtifactPhases: [],
     allowedToolsetCategories: [],
+    requiredToolsetCategories: [],
     allowedBuiltinInstructions: [],
   },
 
@@ -103,6 +109,8 @@ export const LAYER_CAPABILITIES: Readonly<Record<HandoffRoleLayer, LayerCapabili
     ],
     canWriteArtifactPhases: [], // reception 不写 artifact
     allowedToolsetCategories: ['read', 'web'],
+    // reception 必须能读上下文（否则连用户的话都解析不了）。
+    requiredToolsetCategories: ['read'],
     allowedBuiltinInstructions: [
       'route_to_orchestrate',
       'reply_direct',
@@ -140,6 +148,8 @@ export const LAYER_CAPABILITIES: Readonly<Record<HandoffRoleLayer, LayerCapabili
     ],
     canWriteArtifactPhases: ['spec', 'plan', 'tasks'],
     allowedToolsetCategories: ['read', 'write'],
+    // pm1 必须能读+写：要把 spec/plan/tasks 写出来给下游消费。
+    requiredToolsetCategories: ['read', 'write'],
     allowedBuiltinInstructions: [
       'submit_artifact',
       'request_clarification',
@@ -174,6 +184,8 @@ export const LAYER_CAPABILITIES: Readonly<Record<HandoffRoleLayer, LayerCapabili
     ],
     canWriteArtifactPhases: ['dispatch', 'review_report'],
     allowedToolsetCategories: ['read', 'write', 'shell', 'lsp', 'review'],
+    // pm2 必须能读上下文（派发与审查的最低线）；写/执行/lsp/review 由成员配置决定。
+    requiredToolsetCategories: ['read'],
     allowedBuiltinInstructions: [
       'dispatch_package',
       'constitution_check',
@@ -193,6 +205,8 @@ export const LAYER_CAPABILITIES: Readonly<Record<HandoffRoleLayer, LayerCapabili
     allowedSubstates: ['idle', 'implementing', 'completed', 'failed', 'cancelled'],
     canWriteArtifactPhases: ['implementation', 'patch'],
     allowedToolsetCategories: ['read', 'write', 'shell', 'lsp', 'test', 'web'],
+    // executor 必须能读+写+执行 shell：交付代码/补丁的三大件，缺一不可。
+    requiredToolsetCategories: ['read', 'write', 'shell'],
     allowedBuiltinInstructions: [
       'report_progress',
       'submit_patch',
@@ -210,6 +224,8 @@ export const LAYER_CAPABILITIES: Readonly<Record<HandoffRoleLayer, LayerCapabili
     allowedSubstates: ['idle', 'reviewing', 'completed', 'failed', 'cancelled'],
     canWriteArtifactPhases: ['review_report'],
     allowedToolsetCategories: ['read', 'lsp', 'review', 'shell', 'test'],
+    // reviewer 必须能读：评审至少要能看代码。
+    requiredToolsetCategories: ['read'],
     allowedBuiltinInstructions: [
       'report_progress',
       'submit_review',
@@ -218,6 +234,25 @@ export const LAYER_CAPABILITIES: Readonly<Record<HandoffRoleLayer, LayerCapabili
     ],
   },
 };
+
+/**
+ * 所有层的内置指令名去重集合（单一来源，从 LAYER_CAPABILITIES 派生）。
+ *
+ * 用途：tool-sandbox 的 whitelist / clarify-mode 门控放行——这些内置指令
+ * （route_to_orchestrate / reply_direct / submit_artifact / dispatch_package ...）
+ * 是按层注入的 LLM-facing 工具，名字不在静态 TOOL_WHITELIST 里。它们的「能不能调」
+ * 由下游 invokeInstruction → assertInstructionOwnedByLayer 按层校验，所以前置门控
+ * 应当像对待 flat MCP 工具那样隐式放行，否则模型拿到工具却在门控处被
+ * 「is not allowed / is not enabled」拦下而无法工作。
+ */
+export const ALL_BUILTIN_INSTRUCTION_NAMES: ReadonlySet<string> = new Set(
+  Object.values(LAYER_CAPABILITIES).flatMap((caps) => [...caps.allowedBuiltinInstructions]),
+);
+
+/** 判断某工具名是否为任意层的内置指令（门控放行用）。 */
+export function isBuiltinInstructionName(toolName: string): boolean {
+  return ALL_BUILTIN_INSTRUCTION_NAMES.has(toolName);
+}
 
 // ─── Violation Error ────────────────────────────────────────────────────────
 
@@ -466,5 +501,23 @@ export function assertInstructionOwnedByLayer(input: {
       target: input.instructionName,
       detail,
     });
+  }
+}
+
+// ─── 编译期/启动期不变量校验 ─────────────────────────────────────────────────
+
+/**
+ * 不变量：每层的 requiredToolsetCategories 必须是 allowedToolsetCategories 的子集。
+ * 若违反就在模块加载时直接抛错（fail-fast），避免错误配置在运行时被悄悄忽略。
+ */
+for (const [layer, caps] of Object.entries(LAYER_CAPABILITIES)) {
+  const allowed = new Set(caps.allowedToolsetCategories);
+  for (const required of caps.requiredToolsetCategories) {
+    if (!allowed.has(required)) {
+      throw new Error(
+        `[layer-capabilities] ${layer} 层的 requiredToolsetCategories 包含 "${required}"，` +
+          `但它不在 allowedToolsetCategories 里——必备集必须是允许集的子集，否则会被层天花板砍掉。`,
+      );
+    }
   }
 }

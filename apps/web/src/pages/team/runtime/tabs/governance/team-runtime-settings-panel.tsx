@@ -706,6 +706,31 @@ function PersonasSection({
     }
   };
 
+  const handleReset = async () => {
+    if (typeof window !== 'undefined') {
+      const ok = window.confirm(
+        '确定要恢复为最新默认 SOUL 吗？你对该层的自定义内容会被覆盖，并跟随后续默认更新。',
+      );
+      if (!ok) return;
+    }
+    setFeedback({ kind: 'saving' });
+    try {
+      const result = await client.resetPersona(token, activeLayer);
+      applyPersonaResponse(result);
+      setIsDefault(result.effective.isDefault);
+      setDraft(result.effective.soulMd);
+      draftRef.current = result.effective.soulMd;
+      lastHydratedSoulRef.current = result.effective.soulMd;
+      lastHydratedLayerRef.current = activeLayer;
+      setFeedback({ kind: 'success', message: '已恢复为最新默认' });
+    } catch (err) {
+      setFeedback({
+        kind: 'error',
+        message: err instanceof Error ? err.message : '恢复默认失败',
+      });
+    }
+  };
+
   return (
     <div style={PANEL_INSET_STYLE}>
       <strong style={{ fontSize: 13 }}>角色 SOUL（5 层）</strong>

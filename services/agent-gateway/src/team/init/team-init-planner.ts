@@ -8,7 +8,8 @@
  * 写入新会话的 metadata。清单本身不执行任何带副作用的动作——除了 scan-shared-record
  * 这一步纯读、零副作用，planner 会就地把它标记为 done 并填入判定结果。
  *
- * 真正的执行（读记忆 / 理解架构 / 绑定工具）由 team-init-runner 在用户逐项确认后进行。
+ * 真正的执行（解读结构 / 提炼记忆 / 理解架构 / 绑定工具 / 生成骨架）由 team-init-runner
+ * 在用户逐项确认后进行，分析类步骤优先调用辅助 LLM（无配置时回落启发式）。
  */
 
 import { promises as fs } from 'node:fs';
@@ -158,24 +159,24 @@ export function buildTeamInitSteps(probe: ProjectEmptinessProbe): TeamInitStep[]
     completedAt: nowIso,
   });
 
-  // 2) 读取项目一级结构（仅非空项目）。
+  // 2) 读取项目一级结构（仅非空项目）—— 列结构 + AI 解读各目录职责。
   steps.push({
     key: 'read-project-level1',
     title: '了解项目一级结构',
-    description: '读取工作目录的顶层目录与文件，建立项目的初步轮廓。',
+    description: '读取工作目录的顶层目录与文件，由 AI 解读项目类型与各目录职责。',
     status: isExisting ? 'proposed' : 'not_applicable',
     requiresConfirm: true,
-    usesLlm: false,
+    usesLlm: true,
   });
 
-  // 3) 提取项目记忆（仅非空项目）。
+  // 3) 提取项目记忆（仅非空项目）—— 读记忆文件 + AI 提炼关键约束。
   steps.push({
     key: 'extract-project-memory',
     title: '提取项目记忆',
-    description: '读取 project-memory / lessons-learned / AGENTS 等记忆文件，提炼关键约束。',
+    description: '读取 project-memory / lessons-learned / AGENTS 等记忆文件，由 AI 提炼关键约束。',
     status: isExisting ? 'proposed' : 'not_applicable',
     requiresConfirm: true,
-    usesLlm: false,
+    usesLlm: true,
   });
 
   // 4) 理解项目架构（仅非空项目，可用 LLM）。
@@ -198,14 +199,14 @@ export function buildTeamInitSteps(probe: ProjectEmptinessProbe): TeamInitStep[]
     usesLlm: true,
   });
 
-  // 6) 空项目专属：生成初始项目记忆骨架（仅会话内摘要，不落盘）。
+  // 6) 空项目专属：生成初始项目记忆骨架（仅会话内摘要，不落盘）—— AI 按项目类型定制。
   steps.push({
     key: 'scaffold-memory',
     title: '搭建初始项目记忆',
-    description: '为空项目准备一份初始项目记忆骨架，作为后续协作的起点。',
+    description: '为空项目准备一份初始项目记忆骨架，由 AI 结合工作区线索定制，作为后续协作的起点。',
     status: isEmpty ? 'proposed' : 'not_applicable',
     requiresConfirm: true,
-    usesLlm: false,
+    usesLlm: true,
   });
 
   return steps;

@@ -14,10 +14,12 @@
  *     做 A/B 或场景化 SOUL；Phase A 默认只有一份 key='default'
  */
 
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import {
   DEFAULT_SOULS,
+  DEFAULT_SOUL_VERSION,
+  LEGACY_DEFAULT_SOUL_FINGERPRINTS,
   SOUL_ROLE_LAYER_ORDER,
   findDefaultSoul,
   type SoulRoleLayer,
@@ -29,6 +31,7 @@ interface PersonaRow {
   key: string;
   role_layer: string;
   soul_md: string;
+  default_version: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -38,6 +41,8 @@ export interface AgentPersonaRecord {
   roleLayer: SoulRoleLayer;
   key: string;
   soulMd: string;
+  /** 该 persona 作为默认副本落库时的默认版本号；null = 用户自定义 / 早于版本化。 */
+  defaultVersion: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -54,6 +59,7 @@ function mapPersonaRow(row: PersonaRow): AgentPersonaRecord {
     roleLayer: row.role_layer as SoulRoleLayer,
     key: row.key,
     soulMd: row.soul_md,
+    defaultVersion: row.default_version ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -67,7 +73,7 @@ export function listAgentPersonas(input: {
   roleLayer: SoulRoleLayer;
 }): AgentPersonaRecord[] {
   const rows = sqliteAll<PersonaRow>(
-    `SELECT id, user_id, key, role_layer, soul_md, created_at, updated_at
+    `SELECT id, user_id, key, role_layer, soul_md, default_version, created_at, updated_at
      FROM agent_personas
      WHERE user_id = ? AND role_layer = ?
      ORDER BY key ASC`,
@@ -85,7 +91,7 @@ export function getAgentPersona(input: {
   key: string;
 }): AgentPersonaRecord | undefined {
   const row = sqliteGet<PersonaRow>(
-    `SELECT id, user_id, key, role_layer, soul_md, created_at, updated_at
+    `SELECT id, user_id, key, role_layer, soul_md, default_version, created_at, updated_at
      FROM agent_personas
      WHERE user_id = ? AND role_layer = ? AND key = ?
      LIMIT 1`,
@@ -96,26 +102,33 @@ export function getAgentPersona(input: {
 
 /**
  * 写入或更新 persona。返回最终记录。
+ *
+ * defaultVersion 语义：
+ *   - 传入数字：把该 persona 标记为「系统默认副本 + 版本号」（仅 seed 默认时用）。
+ *   - 传入 null / 不传：标记为「用户自定义」（default_version 写 null）——这样默认
+ *     升级时不会覆盖用户的修改。用户在设置面板编辑 SOUL 走的就是这条（不传）。
  */
 export function upsertAgentPersona(input: {
   userId: string;
   roleLayer: SoulRoleLayer;
   key: string;
   soulMd: string;
+  defaultVersion?: number | null;
 }): AgentPersonaRecord {
+  const defaultVersion = input.defaultVersion ?? null;
   const existing = getAgentPersona(input);
   if (existing) {
     sqliteRun(
       `UPDATE agent_personas
-       SET soul_md = ?, updated_at = datetime('now')
+       SET soul_md = ?, default_version = ?, updated_at = datetime('now')
        WHERE user_id = ? AND role_layer = ? AND key = ?`,
-      [input.soulMd, input.userId, input.roleLayer, input.key],
+      [input.soulMd, defaultVersion, input.userId, input.roleLayer, input.key],
     );
   } else {
     sqliteRun(
-      `INSERT INTO agent_personas (id, user_id, role_layer, key, soul_md)
-       VALUES (?, ?, ?, ?, ?)`,
-      [randomUUID(), input.userId, input.roleLayer, input.key, input.soulMd],
+      `INSERT INTO agent_personas (id, user_id, role_layer, key, soul_md, default_version)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [randomUUID(), input.userId, input.roleLayer, input.key, input.soulMd, defaultVersion],
     );
   }
   const fresh = getAgentPersona(input);
@@ -153,8 +166,42 @@ export function resolveEffectiveSoul(input: {
 }
 
 /**
- * 一次性确保该用户的 5 层默认 SOUL 都已落库。
- * 用户首次进入 team 设置时调用，幂等。
+ * 把某层 persona 重置为「当前最新默认 SOUL」。
+ *
+ * 用于设置面板的「恢复为最新默认」入口：用户自定义过（或停留在旧版默认）后，
+ * 想一键回到当前内置默认文案。重置后该副本重新标记为 default_version=
+ * DEFAULT_SOUL_VERSION（即「未自定义的默认副本」），后续默认升级仍会自动下发。
+ *
+ * 返回重置后的记录；该层无内置默认（不应发生）时返回 undefined。
+ */
+export function resetAgentPersonaToDefault(input: {
+  userId: string;
+  roleLayer: SoulRoleLayer;
+  key?: string;
+}): AgentPersonaRecord | undefined {
+  const key = input.key ?? 'default';
+  const defaultSoul = findDefaultSoul(input.roleLayer);
+  if (!defaultSoul) return undefined;
+  return upsertAgentPersona({
+    userId: input.userId,
+    roleLayer: input.roleLayer,
+    key,
+    soulMd: defaultSoul.soulMd,
+    defaultVersion: DEFAULT_SOUL_VERSION,
+  });
+}
+
+/**
+ * 一次性确保该用户的 5 层默认 SOUL 都已落库，并把「未被用户自定义的默认副本」
+ * 自动升级到当前默认版本。幂等。
+ *
+ * 三种情形：
+ *   1. 不存在该层 persona → 种入当前默认（default_version=DEFAULT_SOUL_VERSION）。
+ *   2. 存在且 default_version 非空且 < 当前版本 → 它是旧版默认副本（用户没改过）
+ *      → 刷新到当前默认 + 升版。
+ *   3. 存在且 default_version 为 null → 可能是「用户自定义」也可能是「版本化机制
+ *      落库前的旧默认副本」。仅当其内容与某历史默认指纹完全一致（说明用户从未改过）
+ *      时，才采纳为默认副本并刷新；否则视为用户自定义，原样保留不动。
  */
 export function ensureDefaultPersonasForUser(userId: string): AgentPersonaRecord[] {
   const records: AgentPersonaRecord[] = [];
@@ -164,18 +211,56 @@ export function ensureDefaultPersonasForUser(userId: string): AgentPersonaRecord
       roleLayer: soul.roleLayer,
       key: soul.key,
     });
-    if (existing) {
-      records.push(existing);
+
+    // 情形 1：不存在 → 种入当前默认。
+    if (!existing) {
+      records.push(
+        upsertAgentPersona({
+          userId,
+          roleLayer: soul.roleLayer,
+          key: soul.key,
+          soulMd: soul.soulMd,
+          defaultVersion: DEFAULT_SOUL_VERSION,
+        }),
+      );
       continue;
     }
-    records.push(
-      upsertAgentPersona({
-        userId,
-        roleLayer: soul.roleLayer,
-        key: soul.key,
-        soulMd: soul.soulMd,
-      }),
-    );
+
+    // 情形 2：已是默认副本但版本过旧 → 刷新到当前默认。
+    if (existing.defaultVersion !== null && existing.defaultVersion < DEFAULT_SOUL_VERSION) {
+      records.push(
+        upsertAgentPersona({
+          userId,
+          roleLayer: soul.roleLayer,
+          key: soul.key,
+          soulMd: soul.soulMd,
+          defaultVersion: DEFAULT_SOUL_VERSION,
+        }),
+      );
+      continue;
+    }
+
+    // 情形 3：default_version 为 null —— 用历史指纹判断是否其实是「未改过的旧默认」。
+    if (existing.defaultVersion === null) {
+      const fingerprint = createHash('sha256').update(existing.soulMd).digest('hex');
+      const legacy = LEGACY_DEFAULT_SOUL_FINGERPRINTS[soul.roleLayer] ?? [];
+      if (legacy.includes(fingerprint)) {
+        // 内容与历史默认完全一致 → 用户没改过 → 采纳为默认副本并刷新到当前版本。
+        records.push(
+          upsertAgentPersona({
+            userId,
+            roleLayer: soul.roleLayer,
+            key: soul.key,
+            soulMd: soul.soulMd,
+            defaultVersion: DEFAULT_SOUL_VERSION,
+          }),
+        );
+        continue;
+      }
+      // 否则视为用户自定义，原样保留。
+    }
+
+    records.push(existing);
   }
   return records;
 }

@@ -13,6 +13,11 @@
  */
 
 import { publishTeamEvent } from '../handoff/bus/team-events-bus.js';
+import {
+  persistTeamTimingRecord,
+  persistTeamToolCallRecord,
+  persistTeamUsageRecord,
+} from '../team/team-usage-records-store.js';
 import type { SessionStreamContext } from './stream.js';
 
 function _parseTeamWorkspaceId(metadataJson: string): string | null {
@@ -45,6 +50,21 @@ export interface TeamUsageEventInput {
 
 export function publishTeamUsageEvent(input: TeamUsageEventInput): void {
   if (!input.sessionContext.roleLayer) return;
+  // 持久化（落库）——让刷新/重连后"度量"tab 仍能看到历史用量，不再只活在内存。
+  persistTeamUsageRecord({
+    userId: input.userId,
+    sessionId: input.sessionId,
+    layer: input.sessionContext.roleLayer,
+    agentId: input.agentId ?? null,
+    provider: input.provider ?? null,
+    model: input.model ?? null,
+    inputTokens: input.inputTokens,
+    outputTokens: input.outputTokens,
+    reasoningTokens: input.reasoningTokens ?? 0,
+    cacheReadTokens: input.cacheReadTokens ?? 0,
+    cacheWriteTokens: input.cacheWriteTokens ?? 0,
+    costUsd: input.costUsd ?? 0,
+  });
   publishTeamEvent({
     type: 'session.substate.changed', // 复用已有 event type 不行——需要新 type
     sessionId: input.sessionId,
@@ -68,6 +88,76 @@ export function publishTeamUsageEvent(input: TeamUsageEventInput): void {
   });
 }
 
+// ─── Workflow (non-stream) Usage Event ──────────────────────────────────────
+
+/**
+ * 轻量版用量事件发布器，给「非流式 workflow LLM」路径用
+ * （reception 路由/改写、PM1 spec/plan/tasks、PM2 constitution/dispatch/quality
+ * review 等都走 requestWorkflowLlmCompletion，而不经过 stream.ts）。
+ *
+ * 与 `publishTeamUsageEvent` 的区别：这些调用方手上没有完整 `SessionStreamContext`，
+ * 只知道自己属于哪一层（reception/pm1/pm2/...）。本函数只要 userId + sessionId + layer
+ * + usage 字段即可发出与 stream 路径同构的 `team_usage` 事件，让前端 useTeamUsageStore
+ * 一视同仁地聚合——不再漏统计这几层的 token / 费用 / 调用次数。
+ */
+export interface TeamWorkflowUsageEventInput {
+  userId: string;
+  sessionId: string;
+  /** 角色层级（reception/pm1/pm2/executor/reviewer 等）。空则不发。 */
+  layer: string | null | undefined;
+  agentId?: string | null;
+  provider?: string | null;
+  model?: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  costUsd?: number;
+}
+
+export function publishTeamWorkflowUsageEvent(input: TeamWorkflowUsageEventInput): void {
+  if (!input.layer) return;
+  // 没有任何 token 的调用（例如纯缓存命中或异常返回）不发，避免噪声。
+  if (input.inputTokens <= 0 && input.outputTokens <= 0) return;
+  // 与 stream 路径一致地落库，让 reception / pm1 / pm2 的用量也能跨刷新 / 重连存活
+  // （persistTeamUsageRecord 内部对全 0 token 行有自己的护栏）。
+  persistTeamUsageRecord({
+    userId: input.userId,
+    sessionId: input.sessionId,
+    layer: input.layer,
+    agentId: input.agentId ?? null,
+    provider: input.provider ?? null,
+    model: input.model ?? null,
+    inputTokens: input.inputTokens,
+    outputTokens: input.outputTokens,
+    reasoningTokens: input.reasoningTokens ?? 0,
+    cacheReadTokens: input.cacheReadTokens ?? 0,
+    cacheWriteTokens: input.cacheWriteTokens ?? 0,
+    costUsd: input.costUsd ?? 0,
+  });
+  publishTeamEvent({
+    type: 'session.substate.changed',
+    sessionId: input.sessionId,
+    layer: input.layer,
+    timestamp: Date.now(),
+    userId: input.userId,
+    payload: {
+      __teamEventKind: 'team_usage',
+      sessionId: input.sessionId,
+      agentId: input.agentId ?? null,
+      provider: input.provider ?? null,
+      model: input.model ?? null,
+      inputTokens: input.inputTokens,
+      outputTokens: input.outputTokens,
+      reasoningTokens: input.reasoningTokens ?? 0,
+      cacheReadTokens: input.cacheReadTokens ?? 0,
+      cacheWriteTokens: input.cacheWriteTokens ?? 0,
+      costUsd: input.costUsd ?? 0,
+    },
+  });
+}
+
 // ─── Tool Call Event ────────────────────────────────────────────────────────
 
 export interface TeamToolCallEventInput {
@@ -82,6 +172,13 @@ export interface TeamToolCallEventInput {
 
 export function publishTeamToolCallEvent(input: TeamToolCallEventInput): void {
   if (!input.sessionContext.roleLayer) return;
+  // 持久化工具调用计数（成功 / 失败），让刷新后仍能统计。
+  persistTeamToolCallRecord({
+    userId: input.userId,
+    sessionId: input.sessionId,
+    layer: input.sessionContext.roleLayer,
+    success: input.success,
+  });
   publishTeamEvent({
     type: 'session.substate.changed', // 同上
     sessionId: input.sessionId,
@@ -116,6 +213,16 @@ export interface TeamTimingEventInput {
 
 export function publishTeamTimingEvent(input: TeamTimingEventInput): void {
   if (!input.sessionContext.roleLayer) return;
+  // 持久化耗时：累加到同一聚合行的 total_duration_ms（不增加 call_count，
+  // 避免与 usage 端对同一轮重复计 LLM 调用次数）。
+  persistTeamTimingRecord({
+    userId: input.userId,
+    sessionId: input.sessionId,
+    layer: input.sessionContext.roleLayer,
+    provider: input.provider ?? null,
+    model: input.model ?? null,
+    durationMs: input.totalMs,
+  });
   publishTeamEvent({
     type: 'session.substate.changed', // 同上
     sessionId: input.sessionId,

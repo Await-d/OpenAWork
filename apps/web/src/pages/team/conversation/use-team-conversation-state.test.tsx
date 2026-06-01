@@ -1023,3 +1023,70 @@ describe('useTeamConversationState — submitInbound (v0.2)', () => {
     ).rejects.toThrow('目标团队会话不存在，无法提交团队反向消息。');
   });
 });
+
+describe('useTeamConversationState — startStream 并发保护 (🔴#2)', () => {
+  it('流式进行中再次 startStream 抛中文错误而非静默丢弃', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('/recovery')) {
+        return new Response(
+          JSON.stringify({
+            recovery: {
+              pendingPermissions: [],
+              pendingQuestions: [],
+              session: { id: SESSION_ID, state_status: 'idle', messages: [] },
+              todoLanes: { lanes: [] },
+              tasks: [],
+              children: [],
+              ratings: [],
+              activeStream: null,
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(null, { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    // gatewayClient.stream 会真正 new WebSocket(...)：用 MockWebSocket 顶替，
+    // 避免 jsdom 真实 WS 在异步回调里抛 "event argument must be an instance of
+    // Event" 的 unhandled error（污染整个 suite）。EventSource（SSE fallback）
+    // 同理用一个惰性桩顶替。
+    vi.stubGlobal('WebSocket', MockWebSocket as unknown as typeof WebSocket);
+    class InertEventSource {
+      close(): void {
+        /* noop */
+      }
+    }
+    vi.stubGlobal('EventSource', InertEventSource as unknown as typeof EventSource);
+
+    const { result } = renderHook(() =>
+      useTeamConversationState({
+        sessionId: SESSION_ID,
+        currentUserEmail: EMAIL,
+        gatewayUrl: GATEWAY,
+        token: TOKEN,
+        enableWriters: true,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(result.current.isSessionSnapshotReady).toBe(true);
+    });
+
+    // 第一次发送：进入流式态（streamingRef 同步置 true）。gatewayClient.stream
+    // 是 fire-and-forget，不会 await，所以调用返回后 streaming 已为 true。
+    await act(async () => {
+      await result.current.startStream('first message');
+    });
+
+    await waitFor(() => {
+      expect(result.current.streaming).toBe(true);
+    });
+
+    // 第二次发送：必须抛错（旧实现是静默 return，会让上层丢消息）。
+    await expect(result.current.startStream('second message')).rejects.toThrow(
+      /正在生成回复/,
+    );
+  });
+});
+

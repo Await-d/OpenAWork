@@ -329,7 +329,12 @@ export async function listMcpToolsForSession(
     : configuredServers;
   // 模板初始绑定：当 session 指定了 MCP 白名单（requestedMcpServers）时，
   // 只暴露白名单内的 server（内置 MCP 不受限，始终可用）。
-  if (filter?.allowedServerIds && filter.allowedServerIds.length > 0) {
+  //
+  // 注意区分两种「无白名单」语义：
+  //   - filter.allowedServerIds === undefined → 不做白名单过滤（chat 个人会话：用全部）。
+  //   - filter.allowedServerIds === []（defined 但空）→ 过滤到「仅内置 MCP」
+  //     （team 子会话没绑定任何 MCP 时的最小授权，不继承用户私有 MCP）。
+  if (filter?.allowedServerIds !== undefined) {
     const allow = new Set(filter.allowedServerIds);
     selectedServers = selectedServers.filter(
       (server) =>

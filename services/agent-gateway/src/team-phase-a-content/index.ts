@@ -12,6 +12,8 @@ export {
 
 export {
   DEFAULT_SOULS,
+  DEFAULT_SOUL_VERSION,
+  LEGACY_DEFAULT_SOUL_FINGERPRINTS,
   SOUL_ROLE_LAYER_ORDER,
   findDefaultSoul,
   type DefaultSoul,

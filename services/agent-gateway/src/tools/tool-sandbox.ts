@@ -80,6 +80,7 @@ import {
   lspSymbolsToolDefinition,
 } from './lsp-tools.js';
 import { parseFlatMcpToolName } from '../mcp/mcp-tool-naming.js';
+import { isBuiltinInstructionName } from '../handoff/capability/layer-capabilities.js';
 import { dispatchToolExecuteAfter, dispatchToolExecuteBefore } from '../runtime/plugin-host.js';
 import {
   callMcpToolForSession,
@@ -4103,6 +4104,9 @@ async function executeGatewayManagedToolImpl(
         sessionRow?.role_layer &&
         ['reception', 'pm1', 'pm2', 'executor', 'reviewer'].includes(sessionRow.role_layer)
       ) {
+        // 幂等确保内置指令已注册（同 stream.ts 注入侧的理由）：执行侧若 REGISTRY 为空，
+        // 即便工具被注入也会找不到 instruction 而无法执行。ESM 缓存保证重复 import 零成本。
+        await import('../handoff/capability/builtin-instructions-impl.js');
         const { getInstruction, invokeInstruction } =
           await import('../handoff/capability/builtin-instructions.js');
         const layer = sessionRow.role_layer as
@@ -5308,7 +5312,17 @@ export class ToolSandbox {
     // the server is configured and enabled for this user.
     const isFlatMcpTool = parseFlatMcpToolName(normalizedRequest.toolName) !== null;
 
-    if (!isFlatMcpTool && !this.whitelist.has(normalizedRequest.toolName)) {
+    // Builtin team instructions (route_to_orchestrate / reply_direct /
+    // submit_artifact / dispatch_package / ...) are injected per-layer by
+    // `apply-team-layer-tools.ts` and dispatched downstream via
+    // `invokeInstruction`, which enforces per-layer ownership
+    // (`assertInstructionOwnedByLayer`). Their names aren't in the static
+    // `TOOL_WHITELIST`, so — like flat MCP tools — treat them as implicitly
+    // allowed here; otherwise the model is handed the tool but the gate
+    // rejects the call with `is not allowed` before dispatch can run.
+    const isBuiltinInstruction = isBuiltinInstructionName(normalizedRequest.toolName);
+
+    if (!isFlatMcpTool && !isBuiltinInstruction && !this.whitelist.has(normalizedRequest.toolName)) {
       const result: ToolCallResult = {
         toolCallId: request.toolCallId,
         toolName: request.toolName,
@@ -5335,7 +5349,10 @@ export class ToolSandbox {
       metadata: sessionMetadata,
       presentedToolName: request.toolName,
     });
-    if (!isGatewayToolEnabledForSessionMetadata(normalizedRequest.toolName, sessionMetadata)) {
+    if (
+      !isBuiltinInstruction &&
+      !isGatewayToolEnabledForSessionMetadata(normalizedRequest.toolName, sessionMetadata)
+    ) {
       const result: ToolCallResult = {
         toolCallId: request.toolCallId,
         toolName: request.toolName,

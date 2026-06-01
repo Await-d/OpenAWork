@@ -101,10 +101,27 @@ const listDefaultSoulsMock = vi.fn(() =>
   ]),
 );
 
+const resetPersonaMock = vi.fn(() =>
+  Promise.resolve({
+    roleLayer: 'executor',
+    key: 'default',
+    persona: {
+      id: 'p1',
+      roleLayer: 'executor',
+      key: 'default',
+      soulMd: '# 默认执行 SOUL',
+      createdAt: '',
+      updatedAt: '',
+    },
+    effective: { soulMd: '# 默认执行 SOUL', isDefault: false },
+  }),
+);
+
 vi.mock('@openAwork/web-client', () => ({
   createTeamPhaseAClient: () => ({
     putPersona: putPersonaMock,
     listDefaultSouls: listDefaultSoulsMock,
+    resetPersona: resetPersonaMock,
   }),
 }));
 
@@ -206,12 +223,12 @@ describe('RolePromptPreviewPanel', () => {
     expect(screen.queryByText('✎ 编辑')).toBeNull();
   });
 
-  it('默认 SOUL（isDefault）不显示「重置默认」', () => {
+  it('默认 SOUL（isDefault）不显示「恢复为最新默认」', () => {
     render(<RolePromptPreviewPanel layer="executor" editable onClose={() => {}} />);
-    expect(screen.queryByText(/重置默认/)).toBeNull();
+    expect(screen.queryByText(/恢复为最新默认/)).toBeNull();
   });
 
-  it('自定义 SOUL（!isDefault）显示「重置默认」并调用 listDefaultSouls + putPersona', async () => {
+  it('自定义 SOUL（!isDefault）显示「恢复为最新默认」并调用 resetPersona', async () => {
     previewState.current = {
       ...previewState.current,
       persona: {
@@ -223,15 +240,12 @@ describe('RolePromptPreviewPanel', () => {
     };
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<RolePromptPreviewPanel layer="executor" editable onClose={() => {}} />);
-    const resetBtn = screen.getByText(/重置默认/);
+    const resetBtn = screen.getByText(/恢复为最新默认/);
     expect(resetBtn).toBeTruthy();
     fireEvent.click(resetBtn);
-    expect(listDefaultSoulsMock).toHaveBeenCalledWith('tok');
     await Promise.resolve();
     await Promise.resolve();
-    expect(putPersonaMock).toHaveBeenCalledWith('tok', 'executor', {
-      soulMd: '# 默认执行 SOUL',
-    });
+    expect(resetPersonaMock).toHaveBeenCalledWith('tok', 'executor');
     confirmSpy.mockRestore();
   });
 

@@ -25,6 +25,7 @@ import { TeamRuntimeSettingsPanel } from './governance/team-runtime-settings-pan
 import { TabPlaceholder } from './TabPlaceholder.js';
 import { TabContainer } from './TabContainer.js';
 import { LayeredConversationView } from './conversation/LayeredConversationView.js';
+import { LayerFlowView } from './conversation/LayerFlowView.js';
 import { TimingView } from './metrics/TimingView.js';
 import { HealthView } from './overview/HealthView.js';
 import { WorkspaceKnowledgeGraphView } from './overview/WorkspaceKnowledgeGraphView.js';
@@ -41,6 +42,7 @@ export type MiddleTabKey =
   | 'graph'
   | 'health'
   | 'conversation'
+  | 'flow'
   | 'layered'
   | 'messages'
   | 'artifacts'
@@ -156,6 +158,9 @@ export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
       );
 
     // ─── B. 通讯 ────────────────────────────────────────────────────
+    case 'flow':
+      return <LayerFlowView />;
+
     case 'layered':
       return <LayeredConversationView onSelectSessionDrawer={onSelectLayerSession} />;
 

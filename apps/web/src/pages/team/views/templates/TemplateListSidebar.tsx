@@ -5,7 +5,7 @@
  * 每张卡片展示：模板名 + scale + 重点 + 成员人数 + 五层进度色条
  */
 
-import type { CSSProperties } from 'react';
+import { useMemo, useState, type CSSProperties } from 'react';
 import { TEAM_RUNTIME_LAYER_ORDER, type FixedTeamMemberSlot } from '@openAwork/shared';
 import type { WorkflowTemplateMetadata, WorkflowTemplateRecord } from '@openAwork/web-client';
 import { TEAM_LAYER_META } from './template-architecture.js';
@@ -18,6 +18,11 @@ interface Props {
   onSelect: (templateId: string) => void;
   onCreate: () => void;
   canCreate: boolean;
+  /** 收藏 / 使用偏好（可选，未传时降级为无收藏/统计）。 */
+  isFavorite?: (templateId: string) => boolean;
+  onToggleFavorite?: (templateId: string) => void;
+  usage?: Record<string, number>;
+  recentIds?: Record<string, number>;
 }
 
 const SCALE_LABELS: Record<string, string> = {
@@ -50,6 +55,53 @@ function getGroup(template: WorkflowTemplateRecord): {
   return { id: 'user', label: '我的模板', priority: 2 };
 }
 
+type GroupFilter = 'all' | 'recommended' | 'system' | 'user';
+
+const GROUP_FILTER_OPTIONS: Array<{ value: GroupFilter; label: string }> = [
+  { value: 'all', label: '全部' },
+  { value: 'recommended', label: '推荐' },
+  { value: 'system', label: '系统' },
+  { value: 'user', label: '我的' },
+];
+
+/** 模板可被搜索匹配的文本：名称 + 描述 + 重点 + 适用场景 + 成员显示名。 */
+export function templateSearchHaystack(template: WorkflowTemplateRecord): string {
+  const team = (template.metadata as WorkflowTemplateMetadata | undefined)?.teamTemplate;
+  const memberNames = Array.isArray(team?.memberSlots)
+    ? team.memberSlots.map((s) => s.displayName).join(' ')
+    : '';
+  return [
+    template.name,
+    template.description ?? '',
+    team?.templateFocus ?? '',
+    team?.recommendedFor ?? '',
+    memberNames,
+  ]
+    .join(' ')
+    .toLowerCase();
+}
+
+/**
+ * 组内排序比较器：最近使用（时间倒序）→ 使用次数（多→少）→ 维持原相对次序。
+ *
+ * 让「最近用过 / 常用」的模板在各分组内自然上浮（使统计不再只是装饰）。
+ * 返回 0 时数组 sort 的稳定性保证保持原相对次序。
+ */
+export function compareByUsagePreference(
+  a: WorkflowTemplateRecord,
+  b: WorkflowTemplateRecord,
+  recentIds?: Record<string, number>,
+  usage?: Record<string, number>,
+): number {
+  const recentA = recentIds?.[a.id] ?? 0;
+  const recentB = recentIds?.[b.id] ?? 0;
+  if (recentA !== recentB) return recentB - recentA;
+  const usageA = usage?.[a.id] ?? 0;
+  const usageB = usage?.[b.id] ?? 0;
+  if (usageA !== usageB) return usageB - usageA;
+  return 0;
+}
+
 export function TemplateListSidebar({
   templates,
   selectedId,
@@ -57,14 +109,45 @@ export function TemplateListSidebar({
   onSelect,
   onCreate,
   canCreate,
+  isFavorite,
+  onToggleFavorite,
+  usage,
+  recentIds,
 }: Props) {
-  // Group + sort
+  const [search, setSearch] = useState('');
+  const [groupFilter, setGroupFilter] = useState<GroupFilter>('all');
+
+  // 先按搜索词 + 分组筛选，再分组排序。
+  const filteredTemplates = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return templates.filter((t) => {
+      if (groupFilter !== 'all' && getGroup(t).id !== groupFilter) return false;
+      if (needle && !templateSearchHaystack(t).includes(needle)) return false;
+      return true;
+    });
+  }, [templates, search, groupFilter]);
+
+  // 最近使用的前 3 个 id（按时间倒序），用于卡片上的「最近」标记。
+  const recentTopIds = useMemo(() => {
+    if (!recentIds) return new Set<string>();
+    return new Set(
+      Object.entries(recentIds)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([id]) => id),
+    );
+  }, [recentIds]);
+
+  // Group + sort（收藏单独提到最前的「收藏」组）。
   const grouped = new Map<
     string,
     { label: string; priority: number; items: WorkflowTemplateRecord[] }
   >();
-  for (const template of templates) {
-    const group = getGroup(template);
+  for (const template of filteredTemplates) {
+    const favored = isFavorite?.(template.id) ?? false;
+    const group = favored
+      ? { id: 'favorite', label: '★ 收藏', priority: -1 }
+      : getGroup(template);
     const existing = grouped.get(group.id);
     if (existing) {
       existing.items.push(template);
@@ -72,7 +155,13 @@ export function TemplateListSidebar({
       grouped.set(group.id, { label: group.label, priority: group.priority, items: [template] });
     }
   }
+  // 组内排序：最近使用（时间倒序）→ 使用次数（多→少）→ 保持原相对次序，
+  // 让「最近用过 / 常用」的模板在各分组内自然上浮（统计不再只是装饰）。
+  for (const group of grouped.values()) {
+    group.items.sort((a, b) => compareByUsagePreference(a, b, recentIds, usage));
+  }
   const sortedGroups = Array.from(grouped.values()).sort((a, b) => a.priority - b.priority);
+  const filtering = search.trim().length > 0 || groupFilter !== 'all';
 
   return (
     <div
@@ -87,6 +176,83 @@ export function TemplateListSidebar({
       }}
     >
       <div style={{ overflowY: 'auto', overflowX: 'hidden', padding: '8px 8px 16px' }}>
+        {/* Search + group filter (hidden during initial skeleton) */}
+        {!(loading && templates.length === 0) && templates.length > 0 && (
+          <div style={{ display: 'grid', gap: 6, marginBottom: 8 }}>
+            <div style={{ position: 'relative' }}>
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="搜索模板 / 成员…"
+                style={{
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  padding: '6px 26px 6px 9px',
+                  borderRadius: 8,
+                  border: '1px solid var(--border-subtle)',
+                  background: 'var(--bg-base)',
+                  color: 'var(--fg-strong)',
+                  fontSize: 11,
+                  outline: 'none',
+                }}
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  title="清除"
+                  style={{
+                    position: 'absolute',
+                    right: 6,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    appearance: 'none',
+                    border: 'none',
+                    background: 'transparent',
+                    color: 'var(--fg-muted)',
+                    cursor: 'pointer',
+                    fontSize: 12,
+                    lineHeight: 1,
+                    padding: 0,
+                  }}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 4 }}>
+              {GROUP_FILTER_OPTIONS.map((opt) => {
+                const active = groupFilter === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setGroupFilter(opt.value)}
+                    style={{
+                      flex: 1,
+                      appearance: 'none',
+                      border: active
+                        ? '1px solid color-mix(in oklch, var(--accent) 55%, transparent)'
+                        : '1px solid var(--border-subtle)',
+                      background: active
+                        ? 'color-mix(in oklch, var(--accent) 12%, transparent)'
+                        : 'transparent',
+                      color: active ? 'var(--accent)' : 'var(--fg-muted)',
+                      fontSize: 10,
+                      fontWeight: 700,
+                      padding: '4px 0',
+                      borderRadius: 7,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {loading && templates.length === 0 ? (
           <div style={{ display: 'grid', gap: 6, padding: '8px 0' }}>
             {[1, 2, 3].map((i) => (
@@ -103,6 +269,42 @@ export function TemplateListSidebar({
           </div>
         ) : templates.length === 0 ? (
           <EmptyState canCreate={canCreate} onCreate={onCreate} />
+        ) : sortedGroups.length === 0 ? (
+          <div
+            style={{
+              display: 'grid',
+              placeItems: 'center',
+              gap: 8,
+              padding: '32px 16px',
+              textAlign: 'center',
+            }}
+          >
+            <span style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.6 }}>
+              没有匹配的模板。
+            </span>
+            {filtering && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearch('');
+                  setGroupFilter('all');
+                }}
+                style={{
+                  appearance: 'none',
+                  border: '1px solid var(--border-subtle)',
+                  background: 'transparent',
+                  color: 'var(--accent)',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  padding: '4px 12px',
+                  borderRadius: 7,
+                  cursor: 'pointer',
+                }}
+              >
+                清除筛选
+              </button>
+            )}
+          </div>
         ) : (
           sortedGroups.map((group, gi) => (
             <div key={group.label} style={{ marginBottom: 12 }}>
@@ -125,6 +327,12 @@ export function TemplateListSidebar({
                     template={template}
                     selected={selectedId === template.id}
                     onClick={() => onSelect(template.id)}
+                    favorite={isFavorite?.(template.id) ?? false}
+                    onToggleFavorite={
+                      onToggleFavorite ? () => onToggleFavorite(template.id) : undefined
+                    }
+                    usageCount={usage?.[template.id] ?? 0}
+                    recent={recentTopIds.has(template.id)}
                   />
                 ))}
               </div>
@@ -166,10 +374,18 @@ function TemplateCard({
   template,
   selected,
   onClick,
+  favorite,
+  onToggleFavorite,
+  usageCount,
+  recent,
 }: {
   template: WorkflowTemplateRecord;
   selected: boolean;
   onClick: () => void;
+  favorite: boolean;
+  onToggleFavorite?: () => void;
+  usageCount: number;
+  recent: boolean;
 }) {
   const team = template.metadata?.teamTemplate;
   const slots = getMemberSlots(template);
@@ -182,6 +398,7 @@ function TemplateCard({
   const scale = team?.templateScale ? SCALE_LABELS[team.templateScale] : null;
 
   const cardStyle: CSSProperties = {
+    position: 'relative',
     appearance: 'none',
     width: '100%',
     boxSizing: 'border-box',
@@ -198,7 +415,19 @@ function TemplateCard({
   };
 
   return (
-    <button type="button" onClick={onClick} className="ui-hover-surface" style={cardStyle}>
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      className="ui-hover-surface"
+      style={cardStyle}
+    >
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6, minWidth: 0 }}>
         <span
           style={{
@@ -214,7 +443,58 @@ function TemplateCard({
         >
           {template.name}
         </span>
+        {recent && (
+          <span
+            title="最近使用过"
+            style={{
+              flexShrink: 0,
+              fontSize: 8,
+              fontWeight: 700,
+              color: 'var(--accent)',
+              padding: '1px 5px',
+              borderRadius: 999,
+              background: 'color-mix(in oklch, var(--accent) 12%, transparent)',
+            }}
+          >
+            最近
+          </span>
+        )}
+        {usageCount > 0 && (
+          <span
+            title={`已使用 ${usageCount} 次`}
+            style={{ fontSize: 9, color: 'var(--fg-muted)', flexShrink: 0 }}
+          >
+            ×{usageCount}
+          </span>
+        )}
         <span style={{ fontSize: 9, color: 'var(--fg-muted)', flexShrink: 0 }}>{total} 人</span>
+        {onToggleFavorite && (
+          <span
+            role="button"
+            tabIndex={0}
+            title={favorite ? '取消收藏' : '收藏（置顶）'}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleFavorite();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                e.stopPropagation();
+                onToggleFavorite();
+              }
+            }}
+            style={{
+              flexShrink: 0,
+              cursor: 'pointer',
+              fontSize: 12,
+              lineHeight: 1,
+              color: favorite ? 'var(--warning)' : 'var(--fg-subtle)',
+            }}
+          >
+            {favorite ? '★' : '☆'}
+          </span>
+        )}
       </div>
 
       {(focus || scale) && (
@@ -283,7 +563,7 @@ function TemplateCard({
           })}
         </div>
       )}
-    </button>
+    </div>
   );
 }
 

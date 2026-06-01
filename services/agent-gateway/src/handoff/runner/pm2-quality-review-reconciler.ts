@@ -9,7 +9,6 @@ import {
   getHandoffById,
   mergeReviewDispositionIntoPayload,
   retryRunningHandoffById,
-  type HandoffRecord,
 } from '../store/handoff-store.js';
 import { submitInboundMessage } from '../store/inbound-store.js';
 import { setSubstate } from '../store/substate-store.js';
@@ -213,7 +212,7 @@ export async function reconcilePm2QualityReview(input: {
       typeof payload?.['teamWorkspaceId'] === 'string' ? payload['teamWorkspaceId'] : null;
     const specArtifactId =
       resultJson && typeof resultJson['specArtifactId'] === 'string'
-        ? (resultJson['specArtifactId'] as string)
+        ? resultJson['specArtifactId']
         : null;
     const specContent = specArtifactId
       ? (sqliteGet<{ content: string }>(`SELECT content FROM artifacts WHERE id = ?`, [
@@ -236,6 +235,17 @@ export async function reconcilePm2QualityReview(input: {
           ...(llmConfig.upstreamProtocol ? { upstreamProtocol: llmConfig.upstreamProtocol } : {}),
           prompt: `${system}\n\n---\n\n${user}`,
           temperature: 0.1,
+          usageContext: {
+            userId: input.userId,
+            sessionId: pm2SessionId,
+            layer: 'pm2',
+            ...(typeof llmConfig.inputPricePerMillion === 'number'
+              ? { inputPricePerMillion: llmConfig.inputPricePerMillion }
+              : {}),
+            ...(typeof llmConfig.outputPricePerMillion === 'number'
+              ? { outputPricePerMillion: llmConfig.outputPricePerMillion }
+              : {}),
+          },
         });
       };
 

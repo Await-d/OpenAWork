@@ -288,6 +288,54 @@ describe('GET/PUT /team/personas/:roleLayer', () => {
       await app.close();
     }
   });
+
+  it('POST /team/personas/:layer/reset 把自定义覆盖回最新默认（isDefault=false 但内容=默认）', async () => {
+    const app = await buildApp();
+    try {
+      // 先自定义
+      await app.inject({
+        method: 'PUT',
+        url: '/team/personas/pm1',
+        headers: { authorization: bearer(app) },
+        payload: { soulMd: '# 我的自定义 PM1 SOUL' },
+      });
+      // 再恢复默认
+      const res = await app.inject({
+        method: 'POST',
+        url: '/team/personas/pm1/reset',
+        headers: { authorization: bearer(app) },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as {
+        roleLayer: string;
+        persona: { soulMd: string; defaultVersion: number | null } | null;
+        effective: { soulMd: string; isDefault: boolean };
+      };
+      expect(body.roleLayer).toBe('pm1');
+      // 内容恢复为内置默认（含 PM1 SOUL 标题），不再是自定义文本
+      expect(body.effective.soulMd).toContain('任务规划 PM1 SOUL');
+      expect(body.effective.soulMd).not.toContain('我的自定义 PM1 SOUL');
+      // 重新标记为默认副本（带版本号）→ 后续默认升级可自动下发
+      expect(body.persona?.defaultVersion).not.toBeNull();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('POST /team/personas/:layer/reset 非法层返回 400', async () => {
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/team/personas/not-a-role/reset',
+        headers: { authorization: bearer(app) },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toMatchObject({ code: 'invalid-role-layer' });
+    } finally {
+      await app.close();
+    }
+  });
 });
 
 describe('GET/PUT /team/user-memory', () => {

@@ -159,6 +159,44 @@ store/      ──→ runner/    ❌ 禁止（store 不依赖执行逻辑）
 
 ---
 
+## 跨层禁止直连（L1.4，ESLint 静态强制）⭐
+
+团队五层架构（a/b/c/d/e-g）的层间通信**必须只走受控通道**，严禁某层 runner 直接 import 另一层的 runner 绕过协议。
+
+**受控通道**（层间唯一合法路径）：
+
+| 通道                         | 用途                                  |
+| ---------------------------- | ------------------------------------- |
+| `store/handoff-store`        | createHandoff / complete / fail —— 派发协议 |
+| `store/inbound-store`        | submitInboundMessage —— 反向消息通道  |
+| `store/substate-store`       | setSubstate —— 子状态机               |
+| `bus/team-events-bus`        | publishHandoffEvent / publishTeamEvent —— 事件 |
+
+**runner ↔ 运行层映射**：
+
+| runner 文件                       | 层      |
+| --------------------------------- | ------- |
+| `reception-orchestrator` / `reception-router` | reception (b) |
+| `pm1-runner` / `artifact-chain`   | pm1 (c) |
+| `pm2-runner` / `pm2-quality-review-reconciler` | pm2 (d) |
+
+**禁止**：上述任一 runner 跨层直接 `import`（含静态 `import` 与动态 `await import()`）另一层的 runner。例如 `artifact-chain`（c）不得 import `pm2-runner`（d）。
+
+**受控编排器白名单**（允许跨层引用下游 runner，因其本身是分发/调度基础设施）：
+
+- `watcher.ts` —— 守护进程，claim handoff 后按 `toRoleLayer` 分发
+- `pm1-runner.ts` —— 承载 `createPhaseCAwareRunner` 分发器
+- `scheduler.ts` —— 纯任务调度，不感知层语义
+
+**同层组合允许**：`pm1-runner` ↔ `artifact-chain`、`reception-orchestrator` ↔ `reception-router`。
+
+**静态强制**：自定义 ESLint 规则 `team-architecture/no-cross-layer-runner-import`
+（`scripts/eslint-rules/no-cross-layer-runner-import.mjs`，配套 RuleTester 自测
+`no-cross-layer-runner-import.test.mjs`，由 `pnpm run lint:rules` 运行）。新增白名单
+编排器或新受控通道，必须走架构 review（见 `docs/architecture/team-architecture-l1-baseline.md` §L1.4）。
+
+---
+
 ## barrel 导出规则
 
 - `capability/index.ts` 是唯一的 barrel 文件，导出该子目录的公共 API

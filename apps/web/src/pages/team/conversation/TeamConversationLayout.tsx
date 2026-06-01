@@ -101,6 +101,9 @@ export interface HistoryEditPromptInput {
 /** 重试提示。 */
 export interface RetryPromptInput {
   text: string;
+  /** 重试源消息 id（用于截断重发）。 */
+  messageId: string;
+  inputParts?: unknown[];
 }
 
 /**
@@ -129,6 +132,26 @@ export interface TeamConversationLayoutProps {
   topBar?: ReactNode;
   beforeMessages?: ReactNode;
   afterMessages?: ReactNode;
+  /**
+   * 渲染在内容列**内部**（消息流之内，紧跟最后一条消息之后、随滚动一起流动）的
+   * 额外内容。与 `afterMessages`（渲染在滚动区**外**、固定悬浮在 composer 之上）
+   * 的关键区别：inline 内容跟随对话流，不会在消息很少时与对话脱节悬浮在底部。
+   * team 用它渲染「角色 typing 指示 + 推送条」，让"团队正在处理 / 团队反馈"
+   * 紧贴在最后一条消息下方，而不是孤零零地飘在输入框上方。
+   */
+  afterMessagesInline?: ReactNode;
+  /**
+   * 是否把对话整体贴底对齐（消息很少时）。开启后内容列顶部插入一个弹性 spacer
+   * 吃掉多余高度，让首条消息 + 尾随活动贴近 composer，消除"消息在最顶、中间一大
+   * 片空白"的割裂感；消息撑满后 spacer 塌缩为 0，回到正常滚动。team 默认开启，
+   * chat 走经典自顶向下布局不传此项。
+   */
+  anchorConversationToBottom?: boolean;
+  /**
+   * 悬浮在对话流容器（相对定位）内的额外内容，与「滚动到底部」按钮同层。
+   * team 用它渲染右侧「用户输入快捷跳转」控件。
+   */
+  rightFloatingSlot?: ReactNode;
 
   // ─── composer 能力开关 + disable ────────────────────────────────────
   composerDisabled?: boolean;
@@ -339,6 +362,16 @@ const SKELETON_BOTTOM_SPACER_STYLE: CSSProperties = {
 
 const EMPTY_BOTTOM_REF_STYLE: CSSProperties = { flexShrink: 0 };
 
+/**
+ * Bottom-anchor spacer：内容列顶部的弹性占位。消息很少时它撑开吃掉多余高度，
+ * 把对话 + 尾随活动（typing / 推送条）整体推到底部贴近 composer；消息撑满后
+ * 它自然塌缩为 0，回到正常自顶向下滚动。仅 team 在「贴底」模式下渲染。
+ */
+const BOTTOM_ANCHOR_SPACER_STYLE: CSSProperties = {
+  flex: '1 1 auto',
+  minHeight: 0,
+};
+
 const LOAD_EARLIER_BTN_STYLE: CSSProperties = {
   alignSelf: 'center',
   display: 'inline-flex',
@@ -390,6 +423,9 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
     topBar,
     beforeMessages,
     afterMessages,
+    afterMessagesInline,
+    anchorConversationToBottom,
+    rightFloatingSlot,
 
     composerDisabled,
     composerExtras,
@@ -535,8 +571,11 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
 
   const contentColumnStyle: CSSProperties = {
     width: '100%',
-    maxWidth: compact ? '100%' : editorMode ? 680 : 768,
-    margin: compact ? 0 : '0 auto',
+    // team 对话区两边铺满（与 chat 的窄体居中区别开）：非 compact/editor 模式下
+    // 不再限制 maxWidth=768 + margin auto，而是占满可用宽度。editorMode（分屏编辑）
+    // 仍保留较窄的 680 居中以给编辑器让位；compact（抽屉等受限嵌入）保持 100%。
+    maxWidth: editorMode ? 680 : '100%',
+    margin: editorMode ? '0 auto' : 0,
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'stretch',
@@ -590,6 +629,15 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
               data-testid="chat-content-column"
               style={contentColumnStyle}
             >
+              {/* 贴底锚点：仅在「有对话内容 + 非骨架 + 非欢迎页」时插入弹性
+                  spacer，消息少时把对话推到底部贴近 composer，消除顶部消息与
+                  底部 composer 之间的大段空白。 */}
+              {anchorConversationToBottom &&
+              !showSessionSwitchSkeleton &&
+              !(showWelcome && welcomeScreen) &&
+              (messages.length > 0 || visibleStreaming || remoteSessionBusyState) ? (
+                <div data-testid="team-bottom-anchor-spacer" style={BOTTOM_ANCHOR_SPACER_STYLE} />
+              ) : null}
               {showSessionSwitchSkeleton ? <ChatSessionSkeleton /> : null}
               {showWelcome && welcomeScreen ? (
                 <WelcomeScreen
@@ -651,6 +699,10 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
                   <div ref={bottomRef} style={EMPTY_BOTTOM_REF_STYLE} />
                 </>
               )}
+              {/* 内容列内部的尾随 slot：跟随对话流、随滚动一起流动。team 用它
+                  渲染「角色 typing 指示 + 推送条」，让它们紧贴最后一条消息下方，
+                  而不是固定悬浮在 composer 之上与对话脱节。 */}
+              {afterMessagesInline}
             </div>
           </div>
 
@@ -661,6 +713,7 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
               onScrollToBottom={() => onScrollToBottom('smooth', 'latest-edge')}
             />
           )}
+          {rightFloatingSlot}
         </div>
       </div>
 

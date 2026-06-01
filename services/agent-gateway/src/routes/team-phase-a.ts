@@ -33,6 +33,7 @@ import {
   getAgentPersona,
   isSoulRoleLayer,
   listAgentPersonas,
+  resetAgentPersonaToDefault,
   resolveEffectiveSoul,
   upsertAgentPersona,
   VALID_SOUL_ROLE_LAYERS,
@@ -291,6 +292,44 @@ export async function teamPhaseARoutes(app: FastifyInstance): Promise<void> {
       });
       step.succeed(undefined, { roleLayer, key: body.key });
       return reply.send({ persona });
+    },
+  );
+
+  app.post(
+    '/team/personas/:roleLayer/reset',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'team.personas.reset');
+      const user = request.user as JwtPayload;
+      const roleLayer = (request.params as { roleLayer: string }).roleLayer;
+
+      if (!isSoulRoleLayer(roleLayer)) {
+        step.fail('invalid role layer');
+        return reply.status(400).send({
+          code: 'invalid-role-layer',
+          error: TEAM_PHASE_A_ERROR_MESSAGES.invalidRoleLayer,
+          allowed: Array.from(VALID_SOUL_ROLE_LAYERS),
+        });
+      }
+
+      const query = parseQuery(personaQuerySchema, request.query);
+      const persona = resetAgentPersonaToDefault({
+        userId: user.sub,
+        roleLayer,
+        key: query.key,
+      });
+      const effective = resolveEffectiveSoul({ userId: user.sub, roleLayer, key: query.key });
+
+      step.succeed(undefined, { roleLayer, key: query.key });
+      return reply.send({
+        roleLayer,
+        key: query.key,
+        persona: persona ?? null,
+        effective: {
+          soulMd: effective.soulMd,
+          isDefault: effective.isDefault,
+        },
+      });
     },
   );
 
