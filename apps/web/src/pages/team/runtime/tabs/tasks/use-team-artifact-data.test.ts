@@ -254,4 +254,46 @@ describe('useTeamArtifactData', () => {
     expect(result.current.specArtifact?.id).toBe('spec-b');
     expect(result.current.artifactError).toBeNull();
   });
+
+  it('会优先选择指定的 review artifact，而不是会话下的最新一条', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = resolveRequestUrl(input);
+        const phaseKey = getPhaseKey(url);
+
+        if (phaseKey === `spec:${PM1_SESSION_ID}`) {
+          return jsonResponse({ artifacts: [] });
+        }
+        if (phaseKey === `plan:${PM1_SESSION_ID}`) {
+          return jsonResponse({ artifacts: [] });
+        }
+        if (phaseKey === `tasks:${PM1_SESSION_ID}`) {
+          return jsonResponse({ artifacts: [] });
+        }
+        if (phaseKey === `review:${PM2_SESSION_ID}`) {
+          return jsonResponse({
+            artifacts: [
+              createArtifact('review-latest', 'review', '最新评审正文'),
+              createArtifact('review-target', 'review', '目标评审正文'),
+            ],
+          });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+
+    const { result } = renderHook(() =>
+      useTeamArtifactData({
+        pm1ArtifactSessionId: PM1_SESSION_ID,
+        pm2ArtifactSessionId: PM2_SESSION_ID,
+        preferredReviewArtifactId: 'review-target',
+      }),
+    );
+
+    await flushAsyncWork();
+
+    expect(result.current.reviewArtifact?.id).toBe('review-target');
+    expect(result.current.reviewArtifact?.content).toBe('目标评审正文');
+  });
 });

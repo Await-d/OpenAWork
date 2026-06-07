@@ -13,29 +13,24 @@
  * Phase D 接入说明：
  *   - PM2 完成双重 review 后会把 review_report.md 写回 handoff_records.result_json
  *   - 前端通过 GET /team/sessions/:sessionId/handoffs 拉取所有 handoff
- *   - 找到 from_role_layer === 'pm2' 且 state === 'completed' 的最新一条
+ *   - 找到 to_role_layer === 'pm2' 且 state === 'completed' 的最新一条
  *   - 解析其 payload / result_json 获取 reviewReport / overallVerdict / sub-checks
  */
 
 import { useMemo, useState, type CSSProperties } from 'react';
 import { getEffectiveReviewDisposition, type HandoffRecord } from '@openAwork/web-client';
 import type { AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
+import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
+import { useLayerStore } from '../../../../../stores/team/team-events.js';
 import { ReviewReportView } from './ReviewReportView.js';
 import { ReviewTab } from './ReviewTab.js';
 import { useSessionHandoffs } from '../../hooks/use-session-handoffs.js';
 import { useReviewDisposition } from '../../hooks/use-review-disposition.js';
 import { FailureFlowIndicator } from '../../shell/controls/FailureFlowIndicator.js';
+import { extractReviewReport, resolveTeamArtifactContext } from './team-artifact-context.js';
+import { useTeamArtifactData } from './use-team-artifact-data.js';
 
 type ReviewSegment = 'report' | 'queue';
-
-interface ReviewReportPayload {
-  review_report?: {
-    markdown?: string;
-    overallVerdict?: 'pass' | 'implementation-failure' | 'planning-failure';
-    specReviewPassed?: boolean;
-    qualityReviewPassed?: boolean;
-  };
-}
 
 const SEGMENT_BAR_STYLE: CSSProperties = {
   display: 'flex',
@@ -52,7 +47,9 @@ const SEGMENT_BTN_STYLE: CSSProperties = {
   alignItems: 'center',
   gap: 4,
   padding: '4px 12px',
-  border: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: 'color-mix(in srgb, var(--border-default) 40%, transparent)',
   background: 'transparent',
   color: 'var(--fg-muted)',
   fontSize: 11,
@@ -95,7 +92,9 @@ const FOCUS_ACTIONS_ROW_STYLE: CSSProperties = {
 const FOCUS_CLEAR_BTN_STYLE: CSSProperties = {
   padding: '4px 10px',
   borderRadius: 6,
-  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: 'color-mix(in srgb, var(--border-default) 50%, transparent)',
   background: 'transparent',
   color: 'var(--fg-default)',
   fontSize: 11,
@@ -111,47 +110,14 @@ const FOCUS_PRIMARY_BTN_STYLE: CSSProperties = {
   color: 'var(--accent)',
 };
 
-function isPayloadObject(value: unknown): value is ReviewReportPayload {
-  return typeof value === 'object' && value !== null;
-}
-
-function extractReviewReport(
-  records: HandoffRecord[],
-  focusHandoffId?: string | null,
-): {
-  markdown: string | null;
-  overallVerdict: 'pass' | 'implementation-failure' | 'planning-failure' | null;
-  specReviewPassed: boolean | null;
-  qualityReviewPassed: boolean | null;
-} {
-  const candidates = records
-    .filter((record) => record.fromRoleLayer === 'pm2' && record.state === 'completed')
-    .sort((a, b) => (b.completedAt ?? b.updatedAt).localeCompare(a.completedAt ?? a.updatedAt));
-
-  const orderedCandidates = focusHandoffId
-    ? [
-        ...candidates.filter((record) => record.id === focusHandoffId),
-        ...candidates.filter((record) => record.id !== focusHandoffId),
-      ]
-    : candidates;
-
-  for (const record of orderedCandidates) {
-    if (!isPayloadObject(record.payload)) continue;
-    const reviewReport = record.payload.review_report;
-    if (!reviewReport) continue;
-    return {
-      markdown: reviewReport.markdown ?? null,
-      overallVerdict: reviewReport.overallVerdict ?? null,
-      specReviewPassed: reviewReport.specReviewPassed ?? null,
-      qualityReviewPassed: reviewReport.qualityReviewPassed ?? null,
-    };
+function mergeHandoffRecords(groups: HandoffRecord[][]): HandoffRecord[] {
+  const records = new Map<string, HandoffRecord>();
+  for (const group of groups) {
+    for (const record of group) {
+      records.set(record.id, record);
+    }
   }
-  return {
-    markdown: null,
-    overallVerdict: null,
-    specReviewPassed: null,
-    qualityReviewPassed: null,
-  };
+  return Array.from(records.values());
 }
 
 export function ReviewMergedTab({
@@ -161,19 +127,106 @@ export function ReviewMergedTab({
   selectedTeamId,
 }: ReviewMergedTabProps) {
   const [segment, setSegment] = useState<ReviewSegment>('report');
-  const { applyPreview, handoffs, loading, error, refresh } = useSessionHandoffs(
-    selectedTeamId || null,
-  );
-  const disposition = useReviewDisposition(selectedTeamId || null, focusHandoffId);
+  const [retryBusyHandoffId, setRetryBusyHandoffId] = useState<string | null>(null);
+  const nodes = useLayerStore((state) => state.nodes);
+  const { runRuntimeAlertRemediation } = useTeamRuntimeReferenceViewData();
+  const selectedSessionRoleLayer = selectedTeamId
+    ? (nodes.get(selectedTeamId)?.roleLayer ?? null)
+    : null;
+  const selectedSessionHandoffs = useSessionHandoffs(selectedTeamId || null);
 
-  const review = useMemo(
-    () => extractReviewReport(handoffs, focusHandoffId),
-    [focusHandoffId, handoffs],
+  const initialContext = useMemo(
+    () =>
+      resolveTeamArtifactContext({
+        focusHandoffId,
+        handoffs: selectedSessionHandoffs.handoffs,
+        selectedSessionId: selectedTeamId || null,
+        selectedSessionRoleLayer,
+      }),
+    [focusHandoffId, selectedSessionHandoffs.handoffs, selectedSessionRoleLayer, selectedTeamId],
   );
+
+  const pm1DetailSessionId =
+    initialContext.pm1ArtifactSessionId && initialContext.pm1ArtifactSessionId !== selectedTeamId
+      ? initialContext.pm1ArtifactSessionId
+      : null;
+  const pm1SessionHandoffs = useSessionHandoffs(pm1DetailSessionId);
+
+  const upstreamCombinedHandoffs = useMemo(
+    () => mergeHandoffRecords([selectedSessionHandoffs.handoffs, pm1SessionHandoffs.handoffs]),
+    [pm1SessionHandoffs.handoffs, selectedSessionHandoffs.handoffs],
+  );
+
+  const intermediateContext = useMemo(
+    () =>
+      resolveTeamArtifactContext({
+        focusHandoffId,
+        handoffs: upstreamCombinedHandoffs,
+        selectedSessionId: selectedTeamId || null,
+        selectedSessionRoleLayer,
+      }),
+    [focusHandoffId, selectedSessionRoleLayer, selectedTeamId, upstreamCombinedHandoffs],
+  );
+
+  const pm2DetailSessionId =
+    intermediateContext.pm2ArtifactSessionId &&
+    intermediateContext.pm2ArtifactSessionId !== selectedTeamId &&
+    intermediateContext.pm2ArtifactSessionId !== pm1DetailSessionId
+      ? intermediateContext.pm2ArtifactSessionId
+      : null;
+  const pm2SessionHandoffs = useSessionHandoffs(pm2DetailSessionId);
+
+  const combinedHandoffs = useMemo(
+    () =>
+      mergeHandoffRecords([
+        selectedSessionHandoffs.handoffs,
+        pm1SessionHandoffs.handoffs,
+        pm2SessionHandoffs.handoffs,
+      ]),
+    [pm1SessionHandoffs.handoffs, pm2SessionHandoffs.handoffs, selectedSessionHandoffs.handoffs],
+  );
+
+  const artifactContext = useMemo(
+    () =>
+      resolveTeamArtifactContext({
+        focusHandoffId,
+        handoffs: combinedHandoffs,
+        selectedSessionId: selectedTeamId || null,
+        selectedSessionRoleLayer,
+      }),
+    [combinedHandoffs, focusHandoffId, selectedSessionRoleLayer, selectedTeamId],
+  );
+
+  const reviewSessionId = artifactContext.pm2ArtifactSessionId ?? selectedTeamId;
+  const review = useMemo(
+    () => extractReviewReport(combinedHandoffs, focusHandoffId),
+    [combinedHandoffs, focusHandoffId],
+  );
+  const { artifactError, artifactLoading, refreshArtifacts, reviewArtifact } = useTeamArtifactData({
+    pm1ArtifactSessionId: null,
+    pm2ArtifactSessionId: artifactContext.pm2ArtifactSessionId,
+    preferredReviewArtifactId: review.reviewArtifactId,
+  });
+  const disposition = useReviewDisposition(reviewSessionId, focusHandoffId);
+  const reviewMarkdown = review.markdown ?? reviewArtifact?.content ?? null;
+  const loading =
+    selectedSessionHandoffs.loading ||
+    pm1SessionHandoffs.loading ||
+    pm2SessionHandoffs.loading ||
+    (artifactContext.pm2ArtifactSessionId ? artifactLoading : false);
+  const error =
+    reviewMarkdown == null
+      ? (selectedSessionHandoffs.error ??
+        pm1SessionHandoffs.error ??
+        pm2SessionHandoffs.error ??
+        artifactError)
+      : null;
   const focusedHandoff = useMemo(
     () =>
-      focusHandoffId ? (handoffs.find((record) => record.id === focusHandoffId) ?? null) : null,
-    [focusHandoffId, handoffs],
+      focusHandoffId
+        ? (combinedHandoffs.find((record) => record.id === focusHandoffId) ?? null)
+        : null,
+    [combinedHandoffs, focusHandoffId],
   );
   const focusedDisposition = useMemo(
     () => (focusedHandoff ? getEffectiveReviewDisposition(focusedHandoff) : null),
@@ -185,6 +238,17 @@ export function ReviewMergedTab({
     disposition.pm2HandoffId &&
     focusedHandoff.id === disposition.pm2HandoffId,
   );
+  const retryFocusedHandoff = async (handoffId: string) => {
+    setRetryBusyHandoffId(handoffId);
+    try {
+      await runRuntimeAlertRemediation('handoff-failure', {
+        handoffId,
+        ...(reviewSessionId ? { sessionId: reviewSessionId } : {}),
+      });
+    } finally {
+      setRetryBusyHandoffId(null);
+    }
+  };
 
   return (
     <div
@@ -283,6 +347,19 @@ export function ReviewMergedTab({
                   清除定位
                 </button>
               ) : null}
+              {focusedHandoff?.recoverableFailure ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void retryFocusedHandoff(focusedHandoff.id);
+                  }}
+                  style={FOCUS_PRIMARY_BTN_STYLE}
+                  disabled={retryBusyHandoffId === focusedHandoff.id}
+                  aria-label={`重试失败 handoff ${focusedHandoff.id}`}
+                >
+                  {retryBusyHandoffId === focusedHandoff.id ? '重试中…' : '重试失败 handoff'}
+                </button>
+              ) : null}
             </div>
             {focusedDispositionOwnedByCurrent ? (
               <FailureFlowIndicator
@@ -291,8 +368,13 @@ export function ReviewMergedTab({
                 escalationRound={disposition.escalationRound}
                 pm2HandoffId={disposition.pm2HandoffId}
                 onActionComplete={(result) => {
-                  applyPreview(result.handoffs);
-                  refresh();
+                  selectedSessionHandoffs.applyPreview(result.handoffs);
+                  pm1SessionHandoffs.applyPreview(result.handoffs);
+                  pm2SessionHandoffs.applyPreview(result.handoffs);
+                  selectedSessionHandoffs.refresh();
+                  pm1SessionHandoffs.refresh();
+                  pm2SessionHandoffs.refresh();
+                  refreshArtifacts();
                 }}
               />
             ) : null}
@@ -305,16 +387,21 @@ export function ReviewMergedTab({
             escalationRound={disposition.escalationRound}
             pm2HandoffId={disposition.pm2HandoffId}
             onActionComplete={(result) => {
-              applyPreview(result.handoffs);
-              refresh();
+              selectedSessionHandoffs.applyPreview(result.handoffs);
+              pm1SessionHandoffs.applyPreview(result.handoffs);
+              pm2SessionHandoffs.applyPreview(result.handoffs);
+              selectedSessionHandoffs.refresh();
+              pm1SessionHandoffs.refresh();
+              pm2SessionHandoffs.refresh();
+              refreshArtifacts();
             }}
           />
         ) : null}
         {segment === 'report' ? (
           <ReportSegment
-            loading={loading && !review.markdown}
+            loading={loading && !reviewMarkdown}
             error={error}
-            reportMarkdown={review.markdown}
+            reportMarkdown={reviewMarkdown}
             overallVerdict={review.overallVerdict}
             specReviewPassed={review.specReviewPassed}
             qualityReviewPassed={review.qualityReviewPassed}

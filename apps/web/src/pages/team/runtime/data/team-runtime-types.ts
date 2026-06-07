@@ -113,7 +113,10 @@ export interface AgentTeamsMessageCard {
   from: string;
   fromAccent: string;
   id: string;
-  route: 'broadcast' | 'unicast';
+  memberId?: string | null;
+  recipientMemberId?: string | null;
+  replyToMessageId?: string | null;
+  route: 'broadcast' | 'followup';
   summary: string;
   timestamp: string;
   to: string;
@@ -147,6 +150,7 @@ export interface AgentTeamsReviewCard {
 
 export interface AgentTeamsSidebarTeam {
   id: string;
+  isSharedSession?: boolean;
   lastMessage?: string;
   status: 'running' | 'paused' | 'completed' | 'failed';
   subtitle: string;

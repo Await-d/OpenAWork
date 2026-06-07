@@ -61,6 +61,7 @@ export async function runTeamRuntimeRemediation(input: {
   if (input.code === 'handoff-failure') {
     return runFailedHandoffRemediation({
       code: input.code,
+      handoffId: input.handoffId,
       sessionIds: input.sessionIds,
       userId: input.userId,
     });
@@ -109,6 +110,7 @@ export async function runTeamRuntimeRemediation(input: {
 
 async function runFailedHandoffRemediation(input: {
   code: 'handoff-failure';
+  handoffId?: string;
   sessionIds: string[];
   userId: string;
 }): Promise<TeamRuntimeRemediationResult> {
@@ -137,12 +139,14 @@ async function runFailedHandoffRemediation(input: {
         AND state = 'failed'
         AND (from_session_id IN (${input.sessionIds.map(() => '?').join(',')}) OR to_session_id IN (${input.sessionIds.map(() => '?').join(',')}))`,
     [input.userId, ...input.sessionIds, ...input.sessionIds],
-  ).filter((row) =>
-    isRecoverableFailedHandoff({
-      failureReason: row.failure_reason,
-      payloadJson: row.payload_json,
-      toRoleLayer: row.to_role_layer,
-    }),
+  ).filter(
+    (row) =>
+      (input.handoffId ? row.id === input.handoffId : true) &&
+      isRecoverableFailedHandoff({
+        failureReason: row.failure_reason,
+        payloadJson: row.payload_json,
+        toRoleLayer: row.to_role_layer,
+      }),
   );
 
   let retriedCount = 0;

@@ -214,7 +214,7 @@ export interface TeamConversationLayoutProps {
   checkpointCount: number;
   pendingQuestionsCount: number;
   stopCapability: 'none' | 'precise' | 'best_effort' | 'observe_only';
-  onOpenRecovery: () => void;
+  onOpenRecovery?: () => void;
 
   // ─── 滚动 ──────────────────────────────────────────────────────────
   scrollRegionRef: RefObject<HTMLDivElement | null>;
@@ -251,12 +251,12 @@ export interface TeamConversationLayoutProps {
   onCloseHistoryEdit: () => void;
   onResendHistoryEdit: (text: string, inputParts?: unknown[]) => void;
   onContinueHistoryEdit: (text: string, inputParts?: unknown[]) => void;
-  onCreateBranchFromHistoryEdit: (text: string, inputParts?: unknown[]) => void;
+  onCreateBranchFromHistoryEdit?: (text: string, inputParts?: unknown[]) => void;
 
   retryPrompt: RetryPromptInput | null;
   onCloseRetry: () => void;
   onRetryCurrent: () => void;
-  onRetryBranch: () => void;
+  onRetryBranch?: () => void;
 
   // ─── search overlay ────────────────────────────────────────────────
   chatSearch: ReturnType<typeof useChatSearch>;
@@ -400,8 +400,8 @@ function buildComposerFeatures(
     attachments: true, // 附件是基础能力，不通过 extras 控制
     voice: false,
     modelPicker: true,
-    modelSettings: true,
-    webSearch: true,
+    modelSettings: false,
+    webSearch: false,
     imageGen: ex.imageGeneration ?? false,
     promptOptimize: true,
     slashCommands: true,
@@ -601,9 +601,13 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
         onContinueCurrent={(text, editedInputParts) => {
           onContinueHistoryEdit(text, editedInputParts);
         }}
-        onCreateBranch={(text, editedInputParts) => {
-          onCreateBranchFromHistoryEdit(text, editedInputParts);
-        }}
+        {...(onCreateBranchFromHistoryEdit
+          ? {
+              onCreateBranch: (text: string, editedInputParts?: unknown[]) => {
+                onCreateBranchFromHistoryEdit(text, editedInputParts);
+              },
+            }
+          : {})}
       />
 
       <RetryModeDialog
@@ -611,7 +615,7 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
         messagePreview={retryPrompt?.text ?? ''}
         onClose={onCloseRetry}
         onRetryCurrent={onRetryCurrent}
-        onRetryBranch={onRetryBranch}
+        {...(onRetryBranch ? { onRetryBranch } : {})}
       />
 
       <div style={SPLIT_INNER_STYLE}>

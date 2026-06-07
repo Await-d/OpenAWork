@@ -12,6 +12,7 @@ import {
 
 interface UseTeamSessionCreationOptions {
   defaultMemberSlots?: FixedTeamMemberSlot[];
+  initialWorkingDirectory?: string | null;
   teamWorkspaceId: string;
 }
 
@@ -48,7 +49,11 @@ function hasBlockingErrors(
 
 export function useTeamSessionCreation(options: UseTeamSessionCreationOptions) {
   const [draft, setDraft] = useState<TeamSessionCreationDraft>(() =>
-    createBlankTeamSessionDraft(options.teamWorkspaceId, options.defaultMemberSlots),
+    createBlankTeamSessionDraft(
+      options.teamWorkspaceId,
+      options.defaultMemberSlots,
+      options.initialWorkingDirectory,
+    ),
   );
   const [step, setStep] = useState<TeamSessionCreationStep>('source');
 
@@ -65,6 +70,13 @@ export function useTeamSessionCreation(options: UseTeamSessionCreationOptions) {
           : [],
     }));
   }, [options.defaultMemberSlots]);
+
+  useEffect(() => {
+    setDraft((current) => ({
+      ...current,
+      workingDirectory: options.initialWorkingDirectory ?? null,
+    }));
+  }, [options.initialWorkingDirectory]);
 
   const fieldErrors = useMemo(() => buildFieldErrors(draft), [draft]);
   const currentStepIndex = STEP_ORDER.indexOf(step);
@@ -168,9 +180,15 @@ export function useTeamSessionCreation(options: UseTeamSessionCreationOptions) {
   }, []);
 
   const reset = useCallback(() => {
-    setDraft(createBlankTeamSessionDraft(options.teamWorkspaceId, options.defaultMemberSlots));
+    setDraft(
+      createBlankTeamSessionDraft(
+        options.teamWorkspaceId,
+        options.defaultMemberSlots,
+        options.initialWorkingDirectory,
+      ),
+    );
     setStep('source');
-  }, [options.defaultMemberSlots, options.teamWorkspaceId]);
+  }, [options.defaultMemberSlots, options.initialWorkingDirectory, options.teamWorkspaceId]);
 
   return {
     canAdvance,

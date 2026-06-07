@@ -32,9 +32,11 @@ export interface TeamToolCallPersistInput {
   userId: string;
   sessionId: string;
   layer?: string | null;
-  provider?: string | null;
-  model?: string | null;
+  agentId?: string | null;
+  toolName: string;
+  durationMs?: number;
   success: boolean;
+  errorType?: string | null;
 }
 
 export interface TeamUsageRecordRow {
@@ -73,6 +75,29 @@ interface UsageRowRaw {
   tool_call_count: number;
   tool_error_count: number;
   updated_at: string;
+}
+
+export interface TeamToolCallRecordRow {
+  sessionId: string;
+  layer: string | null;
+  agentId: string | null;
+  toolName: string;
+  invocations: number;
+  successes: number;
+  failures: number;
+  totalDurationMs: number;
+  durations: number[];
+  errorSamples: Array<{ errorType: string; count: number }>;
+}
+
+interface ToolCallRowRaw {
+  agent_id: string | null;
+  duration_ms: number;
+  error_type: string | null;
+  layer: string | null;
+  session_id: string;
+  success: number;
+  tool_name: string;
 }
 
 // SQLite 的 UNIQUE 约束里 NULL 不等于 NULL，会导致同一 (session, provider, model)
@@ -174,9 +199,14 @@ export function persistTeamTimingRecord(input: {
  */
 export function persistTeamToolCallRecord(input: TeamToolCallPersistInput): void {
   const layer = normalizeKey(input.layer);
-  const provider = normalizeKey(input.provider);
-  const model = normalizeKey(input.model);
   const errorDelta = input.success ? 0 : 1;
+  const toolName = input.toolName.trim();
+  if (toolName.length === 0) {
+    return;
+  }
+  const durationMs = Math.max(0, Math.trunc(input.durationMs ?? 0));
+  const errorType =
+    input.errorType && input.errorType.trim().length > 0 ? input.errorType.trim() : null;
 
   sqliteRun(
     `INSERT INTO team_usage_records (
@@ -187,7 +217,22 @@ export function persistTeamToolCallRecord(input: TeamToolCallPersistInput): void
        tool_call_count = team_usage_records.tool_call_count + 1,
        tool_error_count = team_usage_records.tool_error_count + excluded.tool_error_count,
        updated_at = datetime('now')`,
-    [input.userId, input.sessionId, layer, provider, model, errorDelta],
+    [input.userId, input.sessionId, layer, '', '', errorDelta],
+  );
+  sqliteRun(
+    `INSERT INTO team_tool_call_records (
+       user_id, session_id, layer, agent_id, tool_name, duration_ms, success, error_type
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      input.userId,
+      input.sessionId,
+      layer,
+      input.agentId ?? null,
+      toolName,
+      durationMs,
+      input.success ? 1 : 0,
+      errorType,
+    ],
   );
 }
 
@@ -225,5 +270,92 @@ export function listTeamUsageRecords(input: {
     toolCallCount: row.tool_call_count,
     toolErrorCount: row.tool_error_count,
     updatedAt: row.updated_at,
+  }));
+}
+
+function cloneErrorSamples(
+  samples: Map<string, number>,
+): Array<{ errorType: string; count: number }> {
+  return Array.from(samples.entries())
+    .map(([errorType, count]) => ({ errorType, count }))
+    .sort(
+      (left, right) => right.count - left.count || left.errorType.localeCompare(right.errorType),
+    );
+}
+
+/**
+ * 读取一组 session 的工具调用明细聚合（供 GET /team/runtime 恢复 tool / agent 排行）。
+ * 这里以事件表为准进行会话内聚合，避免把明细信息压扁到总量表后无法恢复。
+ */
+export function listTeamToolCallRecords(input: {
+  userId: string;
+  sessionIds: string[];
+}): TeamToolCallRecordRow[] {
+  if (input.sessionIds.length === 0) {
+    return [];
+  }
+  const placeholders = input.sessionIds.map(() => '?').join(', ');
+  const rows = sqliteAll<ToolCallRowRaw>(
+    `SELECT session_id, layer, agent_id, tool_name, duration_ms, success, error_type
+       FROM team_tool_call_records
+      WHERE user_id = ? AND session_id IN (${placeholders})
+      ORDER BY created_at ASC, id ASC`,
+    [input.userId, ...input.sessionIds],
+  );
+
+  const aggregates = new Map<
+    string,
+    TeamToolCallRecordRow & { errorCounts: Map<string, number> }
+  >();
+
+  for (const row of rows) {
+    const sessionId = row.session_id;
+    const layer = row.layer && row.layer.length > 0 ? row.layer : null;
+    const agentId = row.agent_id;
+    const toolName = row.tool_name;
+    const key = [sessionId, layer ?? '', agentId ?? '', toolName].join('\u0000');
+    const current =
+      aggregates.get(key) ??
+      ({
+        sessionId,
+        layer,
+        agentId,
+        toolName,
+        invocations: 0,
+        successes: 0,
+        failures: 0,
+        totalDurationMs: 0,
+        durations: [],
+        errorSamples: [],
+        errorCounts: new Map<string, number>(),
+      } satisfies TeamToolCallRecordRow & { errorCounts: Map<string, number> });
+
+    current.invocations += 1;
+    current.successes += row.success === 1 ? 1 : 0;
+    current.failures += row.success === 1 ? 0 : 1;
+    current.totalDurationMs += row.duration_ms;
+    if (row.duration_ms > 0) {
+      current.durations.push(row.duration_ms);
+      if (current.durations.length > 500) {
+        current.durations.shift();
+      }
+    }
+    if (row.success !== 1 && row.error_type) {
+      current.errorCounts.set(row.error_type, (current.errorCounts.get(row.error_type) ?? 0) + 1);
+    }
+    aggregates.set(key, current);
+  }
+
+  return Array.from(aggregates.values()).map((record) => ({
+    sessionId: record.sessionId,
+    layer: record.layer,
+    agentId: record.agentId,
+    toolName: record.toolName,
+    invocations: record.invocations,
+    successes: record.successes,
+    failures: record.failures,
+    totalDurationMs: record.totalDurationMs,
+    durations: [...record.durations].sort((left, right) => left - right),
+    errorSamples: cloneErrorSamples(record.errorCounts),
   }));
 }

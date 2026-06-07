@@ -275,9 +275,18 @@ export function findLatestAssistantMessage(
 ): string | null {
   const message = [...(detail?.session.messages ?? [])]
     .reverse()
-    .find((entry) => entry.role === 'assistant' && typeof entry.content === 'string');
+    .find((entry) => entry.role === 'assistant');
+  if (!message) {
+    return null;
+  }
 
-  return typeof message?.content === 'string' ? message.content : null;
+  const text = message.content
+    .flatMap((part) => (part.type === 'text' ? [part.text.trim()] : []))
+    .filter((part) => part.length > 0)
+    .join('\n')
+    .trim();
+
+  return text || null;
 }
 
 export function getSharedSessionStateLabel(stateStatus: string): string {

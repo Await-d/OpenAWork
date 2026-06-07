@@ -3,7 +3,7 @@
  *
  * 把原本两个独立子 tab（消息总线 + 待回复 / @我）合并到一个子 tab 内，
  * 用 segmented control 切换：
- *   - 消息总线：所有 P2P / 广播消息流（已实现回复 / 类型筛选 / 广播）
+ *   - 消息总线：所有广播 / 跟进消息流（已实现回复 / 类型筛选 / 广播）
  *   - 待回复：阻塞确认 + 通知队列（待办视图）
  *
  * 待回复条数从 useTeamNotificationStore.unreadCount 取，作为 segmented 角标。
@@ -16,8 +16,11 @@ import type { HandoffEvent } from '../../../../../stores/team/team-events.js';
 import { useState, type CSSProperties } from 'react';
 import type { AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
 import { useTeamNotificationStore } from '../../../../../stores/team/team-events.js';
+import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
+import { resolveMatchedSharedSessionDetail } from '../../data/team-runtime-shared-context.js';
 import { MessagesTab } from './MessagesTab.js';
 import { MentionsView } from './MentionsView.js';
+import { SharedSessionMentionsView } from './shared-session-mentions-view.js';
 
 type MessagesSegment = 'bus' | 'mentions';
 
@@ -83,7 +86,22 @@ export function MessagesMergedTab({
   selectedTeam,
 }: MessagesMergedTabProps) {
   const unreadCount = useTeamNotificationStore((s) => s.unreadCount);
+  const { activeSharedSession, selectedSharedSession } = useTeamRuntimeReferenceViewData();
   const [segment, setSegment] = useState<MessagesSegment>('bus');
+  const sharedSession =
+    selectedTeam?.isSharedSession === true
+      ? resolveMatchedSharedSessionDetail({
+          selectedTeamId: selectedTeam.id,
+          activeSharedSession,
+          selectedSharedSession,
+        })
+      : null;
+  const isSharedSessionSelected = selectedTeam?.isSharedSession === true;
+  const mentionsBadgeCount = isSharedSessionSelected
+    ? (sharedSession?.pendingPermissions.length ?? 0) +
+      (sharedSession?.pendingQuestions.length ?? 0)
+    : unreadCount;
+  const mentionsLabel = isSharedSessionSelected ? '协作待办' : '待回复';
 
   return (
     <div
@@ -113,10 +131,10 @@ export function MessagesMergedTab({
           style={segment === 'mentions' ? SEGMENT_BTN_ACTIVE_STYLE : SEGMENT_BTN_STYLE}
         >
           <span aria-hidden>🔔</span>
-          <span>待回复</span>
-          {unreadCount > 0 ? (
-            <span aria-label={`待回复 ${unreadCount} 条`} style={BADGE_STYLE}>
-              {unreadCount > 99 ? '99+' : unreadCount}
+          <span>{mentionsLabel}</span>
+          {mentionsBadgeCount > 0 ? (
+            <span aria-label={`${mentionsLabel} ${mentionsBadgeCount} 条`} style={BADGE_STYLE}>
+              {mentionsBadgeCount > 99 ? '99+' : mentionsBadgeCount}
             </span>
           ) : null}
         </button>
@@ -132,6 +150,8 @@ export function MessagesMergedTab({
       >
         {segment === 'bus' ? (
           <MessagesTab selectedTeam={selectedTeam} />
+        ) : isSharedSessionSelected && selectedTeam ? (
+          <SharedSessionMentionsView selectedTeam={selectedTeam} />
         ) : (
           <MentionsView
             onOpenBlockingTarget={onOpenBlockingTarget}

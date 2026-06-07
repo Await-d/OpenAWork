@@ -14,6 +14,127 @@
  * 这样即使本文件被其他页面误加载，也不会干扰非 team 内容。
  */
 
+/* ───── 页面壳层：背景、面板和移动抽屉 ───── */
+.team-v2-root {
+  position: relative;
+  isolation: isolate;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 7%, transparent) 0%, transparent 34%),
+    linear-gradient(90deg, color-mix(in srgb, var(--aux) 5%, transparent) 0%, transparent 42%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-base) 96%, transparent) 0%,
+      var(--bg-base) 100%
+    );
+}
+
+.team-v2-root::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--fg-strong) 3%, transparent) 0%,
+      transparent 16%
+    ),
+    linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in srgb, var(--accent) 4%, transparent) 50%,
+      transparent 100%
+    );
+  opacity: 0.9;
+}
+
+.team-v2-main-shell {
+  position: relative;
+  z-index: 1;
+}
+
+.team-v2-pane {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--border-default) 46%, transparent);
+  box-shadow: var(--shadow-md);
+  backdrop-filter: blur(16px);
+}
+
+.team-v2-pane::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--fg-strong) 10%, transparent) 50%,
+    transparent 100%
+  );
+  pointer-events: none;
+}
+
+.team-v2-pane--sidebar {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-overlay) 94%, var(--bg-base)) 0%,
+    color-mix(in srgb, var(--bg-base) 98%, transparent) 100%
+  );
+}
+
+.team-v2-pane--main {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base)) 0%,
+    color-mix(in srgb, var(--bg-base) 99%, transparent) 100%
+  );
+}
+
+.team-v2-mobile-sheet {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-overlay) 94%, var(--bg-base)) 0%,
+    color-mix(in srgb, var(--bg-base) 100%, transparent) 100%
+  );
+  border-left: 1px solid color-mix(in srgb, var(--border-default) 52%, transparent);
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(18px);
+}
+
+.team-v2-floating-trigger {
+  border: 1px solid color-mix(in srgb, var(--border-default) 58%, transparent);
+  box-shadow:
+    var(--shadow-md),
+    0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent);
+  backdrop-filter: blur(16px);
+}
+
+.team-v2-fullscreen-shell {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 8%, transparent) 0%, transparent 36%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base)) 0%,
+      var(--bg-base) 100%
+    );
+}
+
+.team-v2-root[data-breakpoint='mobile'] {
+  background: var(--bg-base);
+}
+
+.team-v2-root[data-breakpoint='mobile'] .team-v2-pane {
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
 /* ───── 通用控件态：hover / active / focus / disabled ───── */
 .team-v2-control {
   transition:
@@ -613,7 +734,8 @@
     box-shadow: 0 0 0 0 var(--team-flow-glow, color-mix(in srgb, var(--success) 45%, transparent));
   }
   50% {
-    box-shadow: 0 0 0 7px color-mix(in srgb, var(--team-flow-glow-mid, var(--success)) 0%, transparent);
+    box-shadow: 0 0 0 7px
+      color-mix(in srgb, var(--team-flow-glow-mid, var(--success)) 0%, transparent);
   }
 }
 

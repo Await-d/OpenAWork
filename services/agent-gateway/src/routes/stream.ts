@@ -1662,6 +1662,7 @@ export async function executeToolCalls(input: {
         userId: input.userId,
         sessionId: input.sessionId,
         sessionContext: input.sessionContext,
+        agentId: input.agentId ?? null,
         toolName: toolCall.toolName,
         durationMs: result.durationMs ?? 0,
         success: !result.isError,
@@ -2314,9 +2315,8 @@ export async function handleStreamRequest(input: {
             // （进而摊销写入 team_audit_logs），便于事后回溯「为什么这一层被中止」。
             // best-effort：记录失败绝不阻塞取消本身。
             try {
-              const { recordTeamRuntimeIncident } = await import(
-                '../team/team-runtime-diagnostics-store.js'
-              );
+              const { recordTeamRuntimeIncident } =
+                await import('../team/team-runtime-diagnostics-store.js');
               recordTeamRuntimeIncident({
                 category: 'handoff_failure',
                 code: 'stream-cancelled-by-inbound-signal',

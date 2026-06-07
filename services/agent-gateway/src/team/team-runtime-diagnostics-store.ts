@@ -200,6 +200,10 @@ function writeTeamRuntimeIncidentAudit(input: TeamRuntimeIncident): void {
     }),
     entityId,
     entityType: 'runtime_incident',
+    sessionId:
+      typeof input.context['sessionId'] === 'string' && input.context['sessionId'].length > 0
+        ? input.context['sessionId']
+        : null,
     summary,
     userId: input.userId,
   });

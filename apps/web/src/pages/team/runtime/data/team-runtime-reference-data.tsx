@@ -1,11 +1,24 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
 import type {
+  UpdateWorkflowTemplateInput,
+  WorkflowTemplateRecord,
+  SessionTask,
+  SharedSessionDetailRecord,
   SharedSessionSummaryRecord,
   TeamAuditLogRecord,
   TeamRuntimeAlertControlRecord,
   TeamRuntimeDiagnostics,
   TeamMemberRecord,
   TeamMessageRecord,
+  TeamRuntimeSessionRecord,
   TeamSessionShareRecord,
   TeamTaskRecord,
   TeamWorkspaceDetail,
@@ -37,6 +50,31 @@ import {
   type AgentTeamsTimelineEventType,
   type AgentTeamsWorkspaceGroup,
 } from './team-runtime-types.js';
+import {
+  collectRuntimeTasksForSession,
+  mapRuntimeTasksToTeamTaskRecords,
+  mapTaskToLaneId,
+  resolveTaskRecordsForView,
+  sortTeamTaskRecords,
+} from './team-runtime-task-lanes.js';
+import { collectSessionScope } from './team-runtime-session-scope.js';
+import { scopeTeamRuntimeOverviewData } from './team-runtime-overview-scope.js';
+import {
+  resolveActiveSharedSession,
+  resolveSelectedSharedSummary,
+} from './team-runtime-shared-context.js';
+import { resolveSelectedRuntimeScopeSessionId } from './team-runtime-selection-context.js';
+import {
+  buildFooterLead,
+  buildFooterStats,
+  buildMetricCards,
+} from './team-runtime-summary-metrics.js';
+import {
+  resolveTopSummaryAudience,
+  resolveTopSummaryDescription,
+  resolveTopSummaryStatus,
+  resolveTopSummaryTitle,
+} from './team-runtime-top-summary.js';
 import { useTeamRuntimeProjection } from '../hooks/use-team-runtime-projection.js';
 import { useTeamRuntimeRoleBindings } from '../hooks/use-team-runtime-role-bindings.js';
 import { useTeamWorkflowTemplates } from '../hooks/use-team-workflow-templates.js';
@@ -64,16 +102,32 @@ export interface TeamRuntimeReferenceViewData {
       string,
       { agentId: string; providerId?: string; modelId?: string; variant?: string }
     >;
+    description?: string;
     name: string;
     optionalAgentIds?: string[];
     provider: string;
+    templateExtra?: {
+      templateScale?: import('@openAwork/web-client').WorkflowTemplateScale | null;
+      templateFocus?: string | null;
+      recommendedFor?: string | null;
+      recommendedDefault?: boolean | null;
+    };
   }) => Promise<boolean>;
+  duplicateTemplate: (template: WorkflowTemplateRecord) => Promise<boolean>;
+  updateTemplate: (templateId: string, input: UpdateWorkflowTemplateInput) => Promise<boolean>;
+  removeTemplate: (templateId: string) => Promise<boolean>;
   createWorkspace: (input: {
     name: string;
     description?: string;
     defaultWorkingRoot?: string;
+  }) => Promise<string | null>;
+  createSessionShare: (input: {
+    memberId: string;
+    permission?: TeamSessionShareRecord['permission'];
+    sessionId: string;
   }) => Promise<boolean>;
   renameWorkspace: (workspaceId: string, name: string) => Promise<boolean>;
+  renameSession: (sessionId: string, title: string) => Promise<boolean>;
   deleteWorkspace: (workspaceId: string) => Promise<boolean>;
   defaultSelectedAgentId: string;
   defaultSelectedTeamId: string;
@@ -116,8 +170,17 @@ export interface TeamRuntimeReferenceViewData {
   auditLogs: TeamAuditLogRecord[];
   /** 当前工作区已共享出去的会话。 */
   sessionShares: TeamSessionShareRecord[];
-  /** 别人共享给我的会话摘要。 */
+  /** 当前运行时会话快照。 */
+  sessions: TeamRuntimeSessionRecord[];
+  /** 别人共享给我的会话摘要；优先暴露 workspace snapshot 中已同步的共享列表。 */
   sharedSessions: SharedSessionSummaryRecord[];
+  /** 当前选中的共享会话详情。 */
+  selectedSharedSession: SharedSessionDetailRecord | null;
+  /** 当前选中的 team 若本身是共享会话，则这里返回对应详情；否则为 null。 */
+  activeSharedSession: SharedSessionDetailRecord | null;
+  sharedSessionLoading: boolean;
+  /** 选中某条共享会话，驱动共享详情 / presence / 评论等区域切换。 */
+  setSelectedSharedSessionId: (sessionId: string | null) => void;
   /** 当前工作区成员列表。 */
   members: TeamMemberRecord[];
   /** Team runtime 健康诊断。 */
@@ -125,17 +188,19 @@ export interface TeamRuntimeReferenceViewData {
   acknowledgeRuntimeAlert: (
     alertCode: TeamRuntimeAlertControlRecord['alertCode'],
     note?: string,
+    options?: { sessionId?: string },
   ) => Promise<boolean>;
   clearRuntimeAlertControl: (
     alertCode: TeamRuntimeAlertControlRecord['alertCode'],
+    options?: { sessionId?: string },
   ) => Promise<boolean>;
   suppressRuntimeAlert: (
     alertCode: TeamRuntimeAlertControlRecord['alertCode'],
-    input?: { minutes?: number; note?: string },
+    input?: { minutes?: number; note?: string; sessionId?: string },
   ) => Promise<boolean>;
   runRuntimeAlertRemediation: (
     alertCode: TeamRuntimeAlertControlRecord['alertCode'],
-    options?: { force?: boolean; handoffId?: string },
+    options?: { force?: boolean; handoffId?: string; sessionId?: string },
   ) => Promise<boolean>;
   reconcileStaleDecisions: () => Promise<boolean>;
   reconcileStaleRuntimeThreads: () => Promise<boolean>;
@@ -143,10 +208,21 @@ export interface TeamRuntimeReferenceViewData {
   moveTask: (taskId: string, direction: 'left' | 'right') => Promise<boolean>;
   replyReview: (cardId: string, status: AgentTeamsReviewCard['status']) => Promise<boolean>;
   submitReviewComment: (cardId: string, content: string) => Promise<boolean>;
+  createSharedSessionComment: (content: string) => Promise<boolean>;
   selectTeam: (teamId: string) => void;
-  sendMessage: (input: { content: string; type?: TeamMessageRecord['type'] }) => Promise<boolean>;
+  sendMessage: (input: {
+    content: string;
+    recipientMemberId?: string | null;
+    replyToMessageId?: string | null;
+    type?: TeamMessageRecord['type'];
+  }) => Promise<boolean>;
   toggleSessionState: (sessionId: string, currentStatus: string) => Promise<boolean>;
   deleteSession: (sessionId: string) => Promise<boolean>;
+  updateSessionShare: (
+    shareId: string,
+    input: { permission: TeamSessionShareRecord['permission'] },
+  ) => Promise<boolean>;
+  deleteSessionShare: (shareId: string) => Promise<boolean>;
   templates: AgentTeamsWorkflowTemplateCard[];
 }
 
@@ -256,16 +332,32 @@ const EMPTY_VIEW_DATA: TeamRuntimeReferenceViewData = {
   canManageRuntime: false,
   canManageSessionEntries: false,
   conversationCards: [],
+  sessions: [],
   async createSession() {
     return false;
   },
   async createTemplate() {
     return false;
   },
+  async duplicateTemplate() {
+    return false;
+  },
+  async updateTemplate() {
+    return false;
+  },
+  async removeTemplate() {
+    return false;
+  },
   async createWorkspace() {
+    return null;
+  },
+  async createSessionShare() {
     return false;
   },
   async renameWorkspace() {
+    return false;
+  },
+  async renameSession() {
     return false;
   },
   async deleteWorkspace() {
@@ -311,6 +403,10 @@ const EMPTY_VIEW_DATA: TeamRuntimeReferenceViewData = {
   auditLogs: [],
   sessionShares: [],
   sharedSessions: [],
+  selectedSharedSession: null,
+  activeSharedSession: null,
+  sharedSessionLoading: false,
+  setSelectedSharedSessionId() {},
   members: [],
   diagnostics: undefined,
   async createTask() {
@@ -347,10 +443,19 @@ const EMPTY_VIEW_DATA: TeamRuntimeReferenceViewData = {
   async submitReviewComment() {
     return false;
   },
+  async createSharedSessionComment() {
+    return false;
+  },
   async toggleSessionState() {
     return false;
   },
   async deleteSession() {
+    return false;
+  },
+  async updateSessionShare() {
+    return false;
+  },
+  async deleteSessionShare() {
     return false;
   },
 };
@@ -419,12 +524,26 @@ function mapMemberStatusLabel(status: string | undefined): string {
   return '空闲';
 }
 
-function mapSidebarStatus(stateStatus: string | undefined): AgentTeamsSidebarTeam['status'] {
+function isRuntimeSessionPaused(stateStatus: string | undefined, paused?: boolean): boolean {
+  if (paused === true) {
+    return true;
+  }
+  return stateStatus === 'paused' || stateStatus === 'idle';
+}
+
+function isSharedSessionPaused(stateStatus: string | undefined): boolean {
+  return stateStatus === 'paused' || stateStatus === 'idle';
+}
+
+function mapSidebarStatus(
+  stateStatus: string | undefined,
+  paused?: boolean,
+): AgentTeamsSidebarTeam['status'] {
+  if (isRuntimeSessionPaused(stateStatus, paused)) {
+    return 'paused';
+  }
   if (stateStatus === 'running') {
     return 'running';
-  }
-  if (stateStatus === 'paused' || stateStatus === 'idle') {
-    return 'paused';
   }
   return 'completed';
 }
@@ -464,6 +583,9 @@ function mapTimelineEventTypeFromMessage(
 function mapTimelineEventTypeFromAudit(
   action: TeamAuditLogRecord['action'],
 ): AgentTeamsTimelineEventType {
+  if (action === 'capability_violation') {
+    return 'error';
+  }
   if (action === 'shared_comment_created') {
     return 'assistant_message';
   }
@@ -482,14 +604,19 @@ function mapTimelineEventTypeFromAudit(
   return 'tool_use';
 }
 
-function mapTaskToLaneId(status: TeamTaskRecord['status']): AgentTeamsTaskLane['id'] {
-  if (status === 'in_progress') {
-    return 'doing';
+function mapTimelineEventTypeFromRuntimeTask(
+  status: SessionTask['status'],
+): AgentTeamsTimelineEventType {
+  if (status === 'completed') {
+    return 'task_complete';
   }
-  if (status === 'completed' || status === 'failed') {
-    return 'review';
+  if (status === 'failed') {
+    return 'error';
   }
-  return 'todo';
+  if (status === 'running') {
+    return 'thinking';
+  }
+  return 'waiting_confirmation';
 }
 
 function buildTaskUpdateStatus(
@@ -538,31 +665,94 @@ export function useResolvedTeamRuntimeReferenceData(
   const gatewayUrl = useAuthStore((state) => state.gatewayUrl);
   const teamClient = useMemo(() => createTeamClient(gatewayUrl), [gatewayUrl]);
   const collaboration = useTeamCollaboration(options.teamWorkspaceId ?? undefined, {
+    autoSelectSharedSession: false,
     enabled: options.collaborationEnabled ?? true,
   });
   const roleBindings = useTeamRuntimeRoleBindings();
   const workflowTemplates = useTeamWorkflowTemplates();
   const [sessionActionBusy, setSessionActionBusy] = useState(false);
+  const [localFeedback, setLocalFeedback] = useState<TeamActionFeedback | null>(null);
   // 新建 session 后立刻记住 id，让 defaultReceptionSessionId 能在 refresh 完成前就指向它
   const [createdSessionId, setCreatedSessionId] = useState<string | null>(null);
+  const snapshotSharedSessions = activeWorkspaceSnapshot?.sharedSessions ?? [];
+  const snapshotSessions = activeWorkspaceSnapshot?.sessions ?? [];
+  const effectiveSessions = snapshotSessions.length > 0 ? snapshotSessions : collaboration.sessions;
+  const effectiveSharedSessions =
+    snapshotSharedSessions.length > 0 ? snapshotSharedSessions : collaboration.sharedSessions;
+
+  useEffect(() => {
+    if (!localFeedback || typeof window === 'undefined') {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setLocalFeedback(null);
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [localFeedback]);
 
   // 真实执行流的 handoff（reception→pm1→pm2→executor…）。概览的"团队活动"指标
   // 必须基于它 + runtimeTasks + sessions，而不是 V1 的 team_messages/team_tasks
   // 手动协作表——后者在团队自动执行时根本不写入，导致概览长期显示 0（用了却统计不到）。
   const handoffsMap = useHandoffStore((state) => state.handoffs);
 
+  const selectedSharedSummary = useMemo(
+    () =>
+      resolveSelectedSharedSummary({
+        selectedTeamId,
+        snapshotSharedSessions,
+        sharedSessions: collaboration.sharedSessions,
+        selectedSharedSessionShare: collaboration.selectedSharedSession?.share ?? null,
+        selectedSharedSessionId: collaboration.selectedSharedSessionId,
+      }),
+    [
+      selectedTeamId,
+      snapshotSharedSessions,
+      collaboration.sharedSessions,
+      collaboration.selectedSharedSession?.share,
+      collaboration.selectedSharedSessionId,
+    ],
+  );
+
+  const activeSharedSession = useMemo(
+    () =>
+      resolveActiveSharedSession({
+        selectedTeamId,
+        selectedSharedSession: collaboration.selectedSharedSession,
+      }),
+    [collaboration.selectedSharedSession, selectedTeamId],
+  );
+
+  const selectedRuntimeSession = useMemo(() => {
+    return (
+      (selectedTeamId != null
+        ? effectiveSessions.find((session) => session.id === selectedTeamId)
+        : null) ?? null
+    );
+  }, [effectiveSessions, selectedTeamId]);
+  const selectedRuntimeScopeSessionId = useMemo(
+    () =>
+      resolveSelectedRuntimeScopeSessionId({
+        selectedTeamId,
+        sessions: effectiveSessions,
+      }),
+    [effectiveSessions, selectedTeamId],
+  );
+
   const projection = useTeamRuntimeProjection({
+    autoSelectSharedSession: false,
     auditLogs: collaboration.auditLogs,
     interactionRewriteArtifact: null,
     members: collaboration.members,
     messages: collaboration.messages,
     onSelectSharedSession: collaboration.setSelectedSharedSessionId,
-    selectedSharedSession: collaboration.selectedSharedSession,
+    selectedSharedSession: activeSharedSession,
     selectedSharedSessionId: collaboration.selectedSharedSessionId,
     runtimeTaskGroups: collaboration.runtimeTaskGroups,
     sessionShares: collaboration.sessionShares,
-    sessions: collaboration.sessions,
-    sharedSessions: collaboration.sharedSessions,
+    sessions: effectiveSessions,
+    sharedSessions: effectiveSharedSessions,
     tasks: collaboration.tasks,
   });
 
@@ -570,24 +760,25 @@ export function useResolvedTeamRuntimeReferenceData(
 
   const selectTeam = useCallback(
     (teamId: string) => {
-      const isSharedSession = collaboration.sharedSessions.some(
+      const isSharedSession = effectiveSharedSessions.some(
         (session) => session.sessionId === teamId,
       );
-      const isSession = collaboration.sessions.some((session) => session.id === teamId);
+      const isSession = effectiveSessions.some((session) => session.id === teamId);
       if (!isSharedSession && !isSession) {
         return;
       }
       collaboration.setSelectedSharedSessionId(isSharedSession ? teamId : null);
     },
-    [
-      collaboration.setSelectedSharedSessionId,
-      collaboration.sharedSessions,
-      collaboration.sessions,
-    ],
+    [collaboration.setSelectedSharedSessionId, effectiveSessions, effectiveSharedSessions],
   );
 
   const sendMessage = useCallback(
-    async (input: { content: string; type?: TeamMessageRecord['type'] }) => {
+    async (input: {
+      content: string;
+      recipientMemberId?: string | null;
+      replyToMessageId?: string | null;
+      type?: TeamMessageRecord['type'];
+    }) => {
       const content = input.content.trim();
       if (!content) {
         return false;
@@ -595,6 +786,8 @@ export function useResolvedTeamRuntimeReferenceData(
 
       return collaboration.createMessage({
         content,
+        recipientMemberId: input.recipientMemberId ?? null,
+        replyToMessageId: input.replyToMessageId ?? null,
         senderId: collaboration.members[0]?.id,
         type: input.type ?? 'update',
       });
@@ -610,6 +803,10 @@ export function useResolvedTeamRuntimeReferenceData(
         options.workspaces?.[0] ??
         null;
       if (!accessToken || !targetWorkspace) {
+        setLocalFeedback({
+          message: '当前工作区不可用，无法创建团队会话',
+          tone: 'error',
+        });
         return false;
       }
 
@@ -622,6 +819,7 @@ export function useResolvedTeamRuntimeReferenceData(
         memberSlots: draft.memberSlots,
         optionalAgentIds: draft.optionalAgentIds,
         defaultProvider: draft.defaultProvider,
+        workingDirectory: draft.workingDirectory,
       };
       if (draft.source.kind === 'saved-template' && draft.source.templateId) {
         payload.source = {
@@ -634,15 +832,29 @@ export function useResolvedTeamRuntimeReferenceData(
       try {
         const session = await teamClient.createSession(accessToken, targetWorkspace.id, payload);
         if (!session.id) {
+          setLocalFeedback({
+            message: '创建团队会话失败，请稍后重试',
+            tone: 'error',
+          });
           return false;
         }
         // 立刻把新建的 session 注入到 collaboration.sessions 中，
         // 避免等 refresh 完成前 defaultReceptionSessionId 为空导致对话区空白。
         // refresh 完成后会用完整数据覆盖这条临时记录。
         setCreatedSessionId(session.id);
-        await collaboration.refresh();
+        const refreshed = await collaboration.refresh();
+        setLocalFeedback({
+          message: refreshed
+            ? '已创建团队会话'
+            : '已创建团队会话，但最新运行时快照暂未刷新，系统会自动重试。',
+          tone: 'success',
+        });
         return true;
-      } catch {
+      } catch (reason) {
+        setLocalFeedback({
+          message: reason instanceof Error ? reason.message : '创建团队会话失败',
+          tone: 'error',
+        });
         return false;
       } finally {
         setSessionActionBusy(false);
@@ -654,21 +866,35 @@ export function useResolvedTeamRuntimeReferenceData(
   const createWorkspace = useCallback(
     async (input: { name: string; description?: string; defaultWorkingRoot?: string }) => {
       if (!accessToken) {
-        return false;
+        setLocalFeedback({
+          message: '当前未连接到网关，无法创建工作区',
+          tone: 'error',
+        });
+        return null;
       }
 
       setSessionActionBusy(true);
       try {
-        await teamClient.createWorkspace(accessToken, {
+        const created = await teamClient.createWorkspace(accessToken, {
           name: input.name,
           description: input.description ?? null,
           defaultWorkingRoot: input.defaultWorkingRoot ?? null,
         });
-        await collaboration.refresh();
+        const refreshed = await collaboration.refresh();
         options.onWorkspacesChanged?.();
-        return true;
-      } catch {
-        return false;
+        setLocalFeedback({
+          message: refreshed
+            ? '已创建工作区'
+            : '已创建工作区，但最新运行时快照暂未刷新，系统会自动重试。',
+          tone: 'success',
+        });
+        return created.id;
+      } catch (reason) {
+        setLocalFeedback({
+          message: reason instanceof Error ? reason.message : '创建工作区失败',
+          tone: 'error',
+        });
+        return null;
       } finally {
         setSessionActionBusy(false);
       }
@@ -684,10 +910,20 @@ export function useResolvedTeamRuntimeReferenceData(
       setSessionActionBusy(true);
       try {
         await teamClient.updateWorkspace(accessToken, workspaceId, { name: name.trim() });
-        await collaboration.refresh();
+        const refreshed = await collaboration.refresh();
         options.onWorkspacesChanged?.();
+        setLocalFeedback({
+          message: refreshed
+            ? '已重命名工作区'
+            : '已重命名工作区，但最新运行时快照暂未刷新，系统会自动重试。',
+          tone: 'success',
+        });
         return true;
-      } catch {
+      } catch (reason) {
+        setLocalFeedback({
+          message: reason instanceof Error ? reason.message : '重命名工作区失败',
+          tone: 'error',
+        });
         return false;
       } finally {
         setSessionActionBusy(false);
@@ -699,15 +935,29 @@ export function useResolvedTeamRuntimeReferenceData(
   const deleteWorkspace = useCallback(
     async (workspaceId: string) => {
       if (!accessToken || !workspaceId) {
+        setLocalFeedback({
+          message: '当前工作区不可用，无法删除',
+          tone: 'error',
+        });
         return false;
       }
       setSessionActionBusy(true);
       try {
         await teamClient.deleteWorkspace(accessToken, workspaceId);
-        await collaboration.refresh();
+        const refreshed = await collaboration.refresh();
         options.onWorkspacesChanged?.();
+        setLocalFeedback({
+          message: refreshed
+            ? '已删除工作区'
+            : '已删除工作区，但最新运行时快照暂未刷新，系统会自动重试。',
+          tone: 'success',
+        });
         return true;
-      } catch {
+      } catch (reason) {
+        setLocalFeedback({
+          message: reason instanceof Error ? reason.message : '删除工作区失败',
+          tone: 'error',
+        });
         return false;
       } finally {
         setSessionActionBusy(false);
@@ -738,7 +988,11 @@ export function useResolvedTeamRuntimeReferenceData(
   );
 
   const acknowledgeRuntimeAlert = useCallback(
-    async (alertCode: TeamRuntimeAlertControlRecord['alertCode'], note?: string) => {
+    async (
+      alertCode: TeamRuntimeAlertControlRecord['alertCode'],
+      note?: string,
+      callOptions?: { sessionId?: string },
+    ) => {
       if (!accessToken) {
         return false;
       }
@@ -746,14 +1000,25 @@ export function useResolvedTeamRuntimeReferenceData(
       try {
         const result = await teamClient.acknowledgeRuntimeAlert(accessToken, alertCode, {
           ...(note ? { note } : {}),
+          ...(callOptions?.sessionId ? { sessionId: callOptions.sessionId } : {}),
           ...(options.teamWorkspaceId ? { teamWorkspaceId: options.teamWorkspaceId } : {}),
         });
         const refreshed = await collaboration.refresh();
         if (!refreshed && result.runtime?.diagnostics) {
           collaboration.applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);
         }
+        setLocalFeedback({
+          message: refreshed
+            ? '已确认当前告警'
+            : '已确认当前告警，但最新运行时快照暂未刷新，系统会自动重试。',
+          tone: 'success',
+        });
         return true;
-      } catch {
+      } catch (reason) {
+        setLocalFeedback({
+          message: reason instanceof Error ? reason.message : '确认告警失败',
+          tone: 'error',
+        });
         return false;
       } finally {
         setSessionActionBusy(false);
@@ -763,21 +1028,35 @@ export function useResolvedTeamRuntimeReferenceData(
   );
 
   const clearRuntimeAlertControl = useCallback(
-    async (alertCode: TeamRuntimeAlertControlRecord['alertCode']) => {
+    async (
+      alertCode: TeamRuntimeAlertControlRecord['alertCode'],
+      callOptions?: { sessionId?: string },
+    ) => {
       if (!accessToken) {
         return false;
       }
       setSessionActionBusy(true);
       try {
         const result = await teamClient.clearRuntimeAlertControl(accessToken, alertCode, {
+          ...(callOptions?.sessionId ? { sessionId: callOptions.sessionId } : {}),
           ...(options.teamWorkspaceId ? { teamWorkspaceId: options.teamWorkspaceId } : {}),
         });
         const refreshed = await collaboration.refresh();
         if (!refreshed && result.runtime?.diagnostics) {
           collaboration.applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);
         }
+        setLocalFeedback({
+          message: refreshed
+            ? '已清除告警控制'
+            : '已清除告警控制，但最新运行时快照暂未刷新，系统会自动重试。',
+          tone: 'success',
+        });
         return true;
-      } catch {
+      } catch (reason) {
+        setLocalFeedback({
+          message: reason instanceof Error ? reason.message : '清除告警控制失败',
+          tone: 'error',
+        });
         return false;
       } finally {
         setSessionActionBusy(false);
@@ -789,7 +1068,7 @@ export function useResolvedTeamRuntimeReferenceData(
   const suppressRuntimeAlert = useCallback(
     async (
       alertCode: TeamRuntimeAlertControlRecord['alertCode'],
-      input?: { minutes?: number; note?: string },
+      input?: { minutes?: number; note?: string; sessionId?: string },
     ) => {
       if (!accessToken) {
         return false;
@@ -804,8 +1083,18 @@ export function useResolvedTeamRuntimeReferenceData(
         if (!refreshed && result.runtime?.diagnostics) {
           collaboration.applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);
         }
+        setLocalFeedback({
+          message: refreshed
+            ? '已静音当前告警'
+            : '已静音当前告警，但最新运行时快照暂未刷新，系统会自动重试。',
+          tone: 'success',
+        });
         return true;
-      } catch {
+      } catch (reason) {
+        setLocalFeedback({
+          message: reason instanceof Error ? reason.message : '静音告警失败',
+          tone: 'error',
+        });
         return false;
       } finally {
         setSessionActionBusy(false);
@@ -827,8 +1116,18 @@ export function useResolvedTeamRuntimeReferenceData(
       if (!refreshed && result.runtime?.diagnostics) {
         collaboration.applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);
       }
+      setLocalFeedback({
+        message: refreshed
+          ? '已发起线程修复'
+          : '已发起线程修复，但最新运行时快照暂未刷新，系统会自动重试。',
+        tone: 'success',
+      });
       return true;
-    } catch {
+    } catch (reason) {
+      setLocalFeedback({
+        message: reason instanceof Error ? reason.message : '线程修复失败',
+        tone: 'error',
+      });
       return false;
     } finally {
       setSessionActionBusy(false);
@@ -848,8 +1147,18 @@ export function useResolvedTeamRuntimeReferenceData(
       if (!refreshed && result.runtime?.diagnostics) {
         collaboration.applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);
       }
+      setLocalFeedback({
+        message: refreshed
+          ? '已释放超时交互'
+          : '已释放超时交互，但最新运行时快照暂未刷新，系统会自动重试。',
+        tone: 'success',
+      });
       return true;
-    } catch {
+    } catch (reason) {
+      setLocalFeedback({
+        message: reason instanceof Error ? reason.message : '释放超时交互失败',
+        tone: 'error',
+      });
       return false;
     } finally {
       setSessionActionBusy(false);
@@ -859,7 +1168,7 @@ export function useResolvedTeamRuntimeReferenceData(
   const runRuntimeAlertRemediation = useCallback(
     async (
       alertCode: TeamRuntimeAlertControlRecord['alertCode'],
-      remediationOptions?: { force?: boolean; handoffId?: string },
+      remediationOptions?: { force?: boolean; handoffId?: string; sessionId?: string },
     ) => {
       if (!accessToken) {
         return false;
@@ -869,14 +1178,25 @@ export function useResolvedTeamRuntimeReferenceData(
         const result = await teamClient.runRuntimeAlertRemediation(accessToken, alertCode, {
           ...(remediationOptions?.force ? { force: remediationOptions.force } : {}),
           ...(remediationOptions?.handoffId ? { handoffId: remediationOptions.handoffId } : {}),
+          ...(remediationOptions?.sessionId ? { sessionId: remediationOptions.sessionId } : {}),
           ...(options.teamWorkspaceId ? { teamWorkspaceId: options.teamWorkspaceId } : {}),
         });
         const refreshed = await collaboration.refresh();
         if (!refreshed && result.runtime?.diagnostics) {
           collaboration.applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);
         }
+        setLocalFeedback({
+          message: refreshed
+            ? '已触发运行修复'
+            : '已触发运行修复，但最新运行时快照暂未刷新，系统会自动重试。',
+          tone: 'success',
+        });
         return true;
-      } catch {
+      } catch (reason) {
+        setLocalFeedback({
+          message: reason instanceof Error ? reason.message : '运行修复失败',
+          tone: 'error',
+        });
         return false;
       } finally {
         setSessionActionBusy(false);
@@ -904,12 +1224,12 @@ export function useResolvedTeamRuntimeReferenceData(
 
   const replyReview = useCallback(
     async (cardId: string, status: AgentTeamsReviewCard['status']) => {
-      const sessionId = collaboration.selectedSharedSession?.share.sessionId;
+      const sessionId = activeSharedSession?.share.sessionId;
       if (!sessionId || (status !== 'approved' && status !== 'rejected')) {
         return false;
       }
 
-      const permissionRequest = collaboration.selectedSharedSession?.pendingPermissions.find(
+      const permissionRequest = activeSharedSession?.pendingPermissions.find(
         (request) => `permission-${request.requestId}` === cardId,
       );
       if (permissionRequest) {
@@ -925,7 +1245,7 @@ export function useResolvedTeamRuntimeReferenceData(
         });
       }
 
-      const questionRequest = collaboration.selectedSharedSession?.pendingQuestions.find(
+      const questionRequest = activeSharedSession?.pendingQuestions.find(
         (request) => `question-${request.requestId}` === cardId,
       );
       if (questionRequest) {
@@ -939,15 +1259,15 @@ export function useResolvedTeamRuntimeReferenceData(
       return false;
     },
     [
+      activeSharedSession,
       collaboration.replySharedSessionPermission,
       collaboration.replySharedQuestion,
-      collaboration.selectedSharedSession,
     ],
   );
 
   const submitReviewComment = useCallback(
     async (cardId: string, content: string) => {
-      const sessionId = collaboration.selectedSharedSession?.share.sessionId;
+      const sessionId = activeSharedSession?.share.sessionId;
       const trimmed = content.trim();
       if (!sessionId || !trimmed) {
         return false;
@@ -956,7 +1276,21 @@ export function useResolvedTeamRuntimeReferenceData(
         content: `[${cardId}] ${trimmed}`,
       });
     },
-    [collaboration.createSharedSessionComment, collaboration.selectedSharedSession],
+    [activeSharedSession, collaboration.createSharedSessionComment],
+  );
+
+  const createSharedSessionComment = useCallback(
+    async (content: string) => {
+      const sessionId = activeSharedSession?.share.sessionId;
+      const trimmed = content.trim();
+      if (!sessionId || !trimmed) {
+        return false;
+      }
+      return collaboration.createSharedSessionComment(sessionId, {
+        content: trimmed,
+      });
+    },
+    [activeSharedSession, collaboration.createSharedSessionComment],
   );
 
   // --- Split memos: shared intermediates ---
@@ -999,64 +1333,47 @@ export function useResolvedTeamRuntimeReferenceData(
     [collaboration.members],
   );
 
-  const snapshotSharedSessions = activeWorkspaceSnapshot?.sharedSessions ?? [];
-  const snapshotSessions = activeWorkspaceSnapshot?.sessions ?? [];
+  const selectedSessionScope = useMemo(() => {
+    return selectedRuntimeScopeSessionId
+      ? collectSessionScope(selectedRuntimeScopeSessionId, effectiveSessions)
+      : null;
+  }, [effectiveSessions, selectedRuntimeScopeSessionId]);
 
-  const selectedSharedSummary = useMemo(() => {
-    return (
-      (selectedTeamId != null
-        ? snapshotSharedSessions.find((session) => session.sessionId === selectedTeamId)
-        : null) ??
-      (selectedTeamId != null
-        ? collaboration.sharedSessions.find((session) => session.sessionId === selectedTeamId)
-        : null) ??
-      collaboration.selectedSharedSession?.share ??
-      snapshotSharedSessions.find(
-        (session) => session.sessionId === collaboration.selectedSharedSessionId,
-      ) ??
-      collaboration.sharedSessions.find(
-        (session) => session.sessionId === collaboration.selectedSharedSessionId,
-      ) ??
-      snapshotSharedSessions[0] ??
-      collaboration.sharedSessions[0] ??
-      null
-    );
-  }, [
-    selectedTeamId,
-    snapshotSharedSessions,
-    collaboration.sharedSessions,
-    collaboration.selectedSharedSession?.share,
-    collaboration.selectedSharedSessionId,
-  ]);
-
-  const selectedRuntimeSession = useMemo(() => {
-    return (
-      (selectedTeamId != null
-        ? snapshotSessions.find((session) => session.id === selectedTeamId)
-        : null) ??
-      (selectedTeamId != null
-        ? collaboration.sessions.find((session) => session.id === selectedTeamId)
-        : null) ??
-      null
-    );
-  }, [selectedTeamId, snapshotSessions, collaboration.sessions]);
+  const scopedOverviewData = useMemo(
+    () =>
+      scopeTeamRuntimeOverviewData({
+        selectedSessionId: selectedRuntimeScopeSessionId,
+        handoffs: Array.from(handoffsMap.values()),
+        runtimeTasks: collaboration.runtimeTasks,
+        sessions: effectiveSessions,
+        messages: collaboration.messages,
+        auditLogs: collaboration.auditLogs,
+        sharedSessions: effectiveSharedSessions,
+      }),
+    [
+      collaboration.auditLogs,
+      collaboration.messages,
+      collaboration.runtimeTasks,
+      effectiveSharedSessions,
+      effectiveSessions,
+      handoffsMap,
+      selectedRuntimeScopeSessionId,
+    ],
+  );
 
   const isSelectedTeamPaused = useMemo(
     () =>
-      selectedSharedSummary?.stateStatus === 'paused' ||
-      selectedSharedSummary?.stateStatus === 'idle' ||
-      selectedRuntimeSession?.stateStatus === 'paused' ||
-      selectedRuntimeSession?.stateStatus === 'idle',
-    [selectedSharedSummary?.stateStatus, selectedRuntimeSession?.stateStatus],
+      isSharedSessionPaused(selectedSharedSummary?.stateStatus) ||
+      isRuntimeSessionPaused(selectedRuntimeSession?.stateStatus, selectedRuntimeSession?.paused),
+    [
+      selectedRuntimeSession?.paused,
+      selectedRuntimeSession?.stateStatus,
+      selectedSharedSummary?.stateStatus,
+    ],
   );
 
   // --- Split memos: workspace groups ---
   const workspaceGroups = useMemo(() => {
-    const effectiveSessions =
-      snapshotSessions.length > 0 ? snapshotSessions : collaboration.sessions;
-    const effectiveSharedSessions =
-      snapshotSharedSessions.length > 0 ? snapshotSharedSessions : collaboration.sharedSessions;
-
     if (effectiveSessions.length === 0 && effectiveSharedSessions.length === 0) {
       return [];
     }
@@ -1182,7 +1499,8 @@ export function useResolvedTeamRuntimeReferenceData(
       const wd = parseWorkingDirectory(session.metadataJson ?? '');
       current.sessions.push({
         id: session.id,
-        status: mapSidebarStatus(session.stateStatus),
+        isSharedSession: false,
+        status: mapSidebarStatus(session.stateStatus, session.paused),
         subtitle: getSharedSessionStateLabel(session.stateStatus),
         title: session.title ?? session.id,
         updatedAt: session.updatedAt,
@@ -1205,6 +1523,7 @@ export function useResolvedTeamRuntimeReferenceData(
       };
       current.sessions.push({
         id: sharedSession.sessionId,
+        isSharedSession: true,
         status: mapSidebarStatus(sharedSession.stateStatus),
         subtitle: getSharedSessionStateLabel(sharedSession.stateStatus),
         title: sharedSession.title ?? sharedSession.sessionId,
@@ -1223,13 +1542,7 @@ export function useResolvedTeamRuntimeReferenceData(
         left.title.localeCompare(right.title, 'zh-CN'),
       ),
     }));
-  }, [
-    collaboration.sessions,
-    collaboration.sharedSessions,
-    collaboration.runtimeTasks,
-    snapshotSessions,
-    snapshotSharedSessions,
-  ]);
+  }, [collaboration.runtimeTasks, effectiveSessions, effectiveSharedSessions]);
 
   const effectiveWorkspaceGroups = useMemo(() => {
     if (!activeWorkspace?.defaultWorkingRoot) {
@@ -1248,20 +1561,16 @@ export function useResolvedTeamRuntimeReferenceData(
       const history = allSidebarTeams.filter((team) => team.status !== 'running');
       const preferredWorkspacePath = activeWorkspace?.defaultWorkingRoot ?? null;
       const defaultId =
-        snapshotSessions.find(
+        effectiveSessions.find(
           (session) =>
             preferredWorkspacePath != null && session.workspacePath === preferredWorkspacePath,
         )?.id ??
-        collaboration.sessions.find(
-          (session) =>
-            preferredWorkspacePath != null && session.workspacePath === preferredWorkspacePath,
-        )?.id ??
-        collaboration.sharedSessions.find(
+        effectiveSharedSessions.find(
           (session) =>
             session.sessionId === collaboration.selectedSharedSessionId &&
             (preferredWorkspacePath == null || session.workspacePath === preferredWorkspacePath),
         )?.sessionId ??
-        collaboration.sharedSessions.find(
+        effectiveSharedSessions.find(
           (session) =>
             preferredWorkspacePath != null && session.workspacePath === preferredWorkspacePath,
         )?.sessionId ??
@@ -1278,14 +1587,12 @@ export function useResolvedTeamRuntimeReferenceData(
       // 这与"每个 workspace 有且仅有一个常驻 b session"的约定对齐；
       // 即使后端暂时没有 role_layer 字段，根 session = b session 这条
       // 启发式在当前 team runtime 协议下是稳定成立的。
-      const allSnapshotSessions =
-        snapshotSessions.length > 0 ? snapshotSessions : collaboration.sessions;
-      const inWorkspaceRoots = allSnapshotSessions.filter(
+      const inWorkspaceRoots = effectiveSessions.filter(
         (session) =>
           session.parentSessionId == null &&
           (preferredWorkspacePath == null || session.workspacePath === preferredWorkspacePath),
       );
-      const allRoots = allSnapshotSessions.filter((session) => session.parentSessionId == null);
+      const allRoots = effectiveSessions.filter((session) => session.parentSessionId == null);
       const receptionId =
         inWorkspaceRoots[0]?.id ?? allRoots[0]?.id ?? createdSessionId ?? defaultId;
 
@@ -1298,46 +1605,44 @@ export function useResolvedTeamRuntimeReferenceData(
     }, [
       effectiveWorkspaceGroups,
       activeWorkspace?.defaultWorkingRoot,
-      snapshotSessions,
-      collaboration.sessions,
-      collaboration.sharedSessions,
+      effectiveSessions,
+      effectiveSharedSessions,
       collaboration.selectedSharedSessionId,
       createdSessionId,
     ]);
 
   // --- Split memos: metric cards ---
-  const metricCards = useMemo(
-    (): AgentTeamsMetricCard[] => [
-      {
-        icon: 'members',
-        label: '成员',
-        value: String(collaboration.members.length),
-      },
-      {
-        icon: 'tasks',
-        label: '任务',
-        value: `${collaboration.tasks.filter((task) => task.status === 'completed').length}/${collaboration.tasks.length}`,
-      },
-      {
-        icon: 'conversation',
-        label: '汇报',
-        value: String(collaboration.messages.length),
-      },
+  // --- Split memos: task lanes ---
+  const runtimeTaskGroupsSource =
+    activeWorkspaceSnapshot?.runtimeTaskGroups.length != null &&
+    activeWorkspaceSnapshot.runtimeTaskGroups.length > 0
+      ? activeWorkspaceSnapshot.runtimeTaskGroups
+      : collaboration.runtimeTaskGroups;
+
+  const selectedRuntimeTaskRecords = useMemo(
+    () =>
+      resolveTaskRecordsForView({
+        selectedSessionId: selectedRuntimeScopeSessionId,
+        runtimeTaskGroups: runtimeTaskGroupsSource,
+        teamTasks: collaboration.tasks,
+        runtimeTaskRecords: collaboration.runtimeTaskRecords,
+      }),
+    [
+      collaboration.runtimeTaskRecords,
+      collaboration.tasks,
+      runtimeTaskGroupsSource,
+      selectedRuntimeScopeSessionId,
     ],
-    [collaboration.members.length, collaboration.tasks, collaboration.messages.length],
   );
 
-  // --- Split memos: task lanes ---
   const taskLanes = useMemo((): AgentTeamsTaskLane[] => {
-    const taskSource =
-      collaboration.tasks.length > 0 ? collaboration.tasks : collaboration.runtimeTaskRecords;
     const lanes: AgentTeamsTaskLane[] = [
       { id: 'todo', title: '待办', cards: [] },
       { id: 'doing', title: '进行中', cards: [] },
       { id: 'review', title: '待评审', cards: [] },
     ];
 
-    for (const task of taskSource) {
+    for (const task of selectedRuntimeTaskRecords) {
       const assigneeName = task.assigneeId
         ? (memberNameById.get(task.assigneeId) ?? '未分配')
         : '未分配';
@@ -1365,12 +1670,12 @@ export function useResolvedTeamRuntimeReferenceData(
         });
     }
     return lanes;
-  }, [collaboration.tasks, collaboration.runtimeTaskRecords, memberNameById, accentByMemberId]);
+  }, [selectedRuntimeTaskRecords, memberNameById, accentByMemberId]);
 
   // --- Split memos: conversation cards ---
   const conversationCards = useMemo((): AgentTeamsConversationCard[] => {
     const items = [
-      ...collaboration.messages.map((message) => {
+      ...scopedOverviewData.messages.map((message) => {
         const name = memberNameById.get(message.memberId) ?? '团队成员';
         const title =
           message.content.length > 20 ? `${message.content.slice(0, 20)}…` : message.content;
@@ -1386,7 +1691,7 @@ export function useResolvedTeamRuntimeReferenceData(
           type: mapConversationType(message.type),
         } satisfies AgentTeamsConversationCard;
       }),
-      ...collaboration.auditLogs.map((log, index) => {
+      ...scopedOverviewData.auditLogs.map((log, index) => {
         const accent =
           ROLE_SLOT_CONFIG[index % ROLE_SLOT_CONFIG.length]?.accent ?? ROLE_SLOT_CONFIG[0].accent;
         return {
@@ -1420,13 +1725,13 @@ export function useResolvedTeamRuntimeReferenceData(
             type: 'broadcast',
           },
         ];
-  }, [collaboration.messages, collaboration.auditLogs, memberNameById, accentByMemberId]);
+  }, [scopedOverviewData.messages, scopedOverviewData.auditLogs, memberNameById, accentByMemberId]);
 
   // --- Split memos: message cards ---
   const messageCards = useMemo(
     (): AgentTeamsMessageCard[] =>
-      collaboration.messages.length > 0
-        ? [...collaboration.messages]
+      scopedOverviewData.messages.length > 0
+        ? [...scopedOverviewData.messages]
             .sort((left, right) => right.timestamp - left.timestamp)
             .slice(0, 8)
             .map((message) => {
@@ -1437,14 +1742,33 @@ export function useResolvedTeamRuntimeReferenceData(
                 from,
                 fromAccent,
                 id: message.id,
-                route: message.type === 'question' ? 'unicast' : 'broadcast',
+                ...(message.memberId ? { memberId: message.memberId } : {}),
+                ...(message.recipientMemberId !== undefined
+                  ? { recipientMemberId: message.recipientMemberId }
+                  : {}),
+                ...(message.replyToMessageId !== undefined
+                  ? { replyToMessageId: message.replyToMessageId }
+                  : {}),
+                route:
+                  message.recipientMemberId != null || message.replyToMessageId != null
+                    ? 'followup'
+                    : 'broadcast',
                 summary: message.content,
                 timestamp: formatClock(message.timestamp),
-                to: message.type === 'question' ? '团队负责人' : '全体成员',
+                to:
+                  message.recipientMemberId != null
+                    ? (memberNameById.get(message.recipientMemberId) ?? '指定成员')
+                    : message.replyToMessageId != null
+                      ? '当前线程'
+                      : '全体成员',
                 toAccent:
-                  message.type === 'question'
-                    ? ROLE_SLOT_CONFIG[0].accent
-                    : ROLE_SLOT_CONFIG[2].accent,
+                  message.recipientMemberId != null
+                    ? (accentByMemberId.get(message.recipientMemberId) ??
+                      ROLE_SLOT_CONFIG[1]?.accent ??
+                      ROLE_SLOT_CONFIG[0].accent)
+                    : message.type === 'update'
+                      ? ROLE_SLOT_CONFIG[2].accent
+                      : (ROLE_SLOT_CONFIG[1]?.accent ?? ROLE_SLOT_CONFIG[0].accent),
                 type: mapMessageCardType(message.type),
               } satisfies AgentTeamsMessageCard;
             })
@@ -1461,17 +1785,17 @@ export function useResolvedTeamRuntimeReferenceData(
               type: 'update',
             },
           ],
-    [collaboration.messages, memberNameById, accentByMemberId],
+    [scopedOverviewData.messages, memberNameById, accentByMemberId],
   );
 
   // --- Split memos: review cards ---
   const reviewCards = useMemo((): AgentTeamsReviewCard[] => {
     const permissionCards =
-      collaboration.selectedSharedSession?.pendingPermissions.map(
+      activeSharedSession?.pendingPermissions.map(
         (request, index) =>
           ({
             actionable: true,
-            assignee: collaboration.selectedSharedSession?.share.sharedByEmail ?? '共享运行',
+            assignee: activeSharedSession?.share.sharedByEmail ?? '共享运行',
             assigneeAccent:
               ROLE_SLOT_CONFIG[index % ROLE_SLOT_CONFIG.length]?.accent ??
               ROLE_SLOT_CONFIG[0].accent,
@@ -1479,7 +1803,7 @@ export function useResolvedTeamRuntimeReferenceData(
             priority: request.riskLevel,
             requestId: request.requestId,
             reviewKind: 'permission',
-            sessionId: collaboration.selectedSharedSession?.share.sessionId,
+            sessionId: activeSharedSession?.share.sessionId,
             status:
               request.status === 'pending'
                 ? 'pending'
@@ -1493,11 +1817,11 @@ export function useResolvedTeamRuntimeReferenceData(
       ) ?? [];
 
     const questionCards =
-      collaboration.selectedSharedSession?.pendingQuestions.map(
+      activeSharedSession?.pendingQuestions.map(
         (request, index) =>
           ({
             actionable: true,
-            assignee: collaboration.selectedSharedSession?.share.sharedByEmail ?? '共享运行',
+            assignee: activeSharedSession?.share.sharedByEmail ?? '共享运行',
             assigneeAccent:
               ROLE_SLOT_CONFIG[(index + 1) % ROLE_SLOT_CONFIG.length]?.accent ??
               ROLE_SLOT_CONFIG[0].accent,
@@ -1505,7 +1829,7 @@ export function useResolvedTeamRuntimeReferenceData(
             priority: 'medium',
             requestId: request.requestId,
             reviewKind: 'question',
-            sessionId: collaboration.selectedSharedSession?.share.sessionId,
+            sessionId: activeSharedSession?.share.sessionId,
             status:
               request.status === 'pending'
                 ? 'pending'
@@ -1518,7 +1842,7 @@ export function useResolvedTeamRuntimeReferenceData(
           }) satisfies AgentTeamsReviewCard,
       ) ?? [];
 
-    const auditCards = collaboration.auditLogs.slice(0, 3).map(
+    const auditCards = scopedOverviewData.auditLogs.slice(0, 3).map(
       (log, index) =>
         ({
           actionable: false,
@@ -1552,12 +1876,49 @@ export function useResolvedTeamRuntimeReferenceData(
             type: 'design',
           } satisfies AgentTeamsReviewCard,
         ];
-  }, [collaboration.selectedSharedSession, collaboration.auditLogs]);
+  }, [activeSharedSession, scopedOverviewData.auditLogs]);
 
   // --- Split memos: timeline events ---
   const timelineEvents = useMemo((): AgentTeamsTimelineEvent[] => {
     const events = [
-      ...collaboration.messages.map(
+      ...scopedOverviewData.handoffs.map(
+        (handoff) =>
+          ({
+            agentAccent: ROLE_SLOT_CONFIG[0].accent,
+            agentId: handoff.id,
+            agentName: `${handoff.fromRoleLayer} → ${handoff.toRoleLayer}`,
+            detail:
+              handoff.summary ?? `${handoff.toRoleLayer} 层交接状态已更新为 ${handoff.state}。`,
+            id: `handoff-${handoff.id}`,
+            timestamp: new Date(handoff.updatedAt).toISOString(),
+            type:
+              handoff.state === 'completed'
+                ? 'turn_complete'
+                : handoff.state === 'failed' || handoff.state === 'cancelled'
+                  ? 'error'
+                  : handoff.state === 'running'
+                    ? 'thinking'
+                    : 'waiting_confirmation',
+          }) satisfies AgentTeamsTimelineEvent,
+      ),
+      ...scopedOverviewData.runtimeTasks.map(
+        (task) =>
+          ({
+            agentAccent:
+              task.assignedAgent && accentByMemberId.get(task.assignedAgent)
+                ? accentByMemberId.get(task.assignedAgent)!
+                : ROLE_SLOT_CONFIG[2].accent,
+            agentId: task.assignedAgent ?? task.id,
+            agentName: task.assignedAgent
+              ? (memberNameById.get(task.assignedAgent) ?? task.assignedAgent)
+              : '运行时任务',
+            detail: task.errorMessage ?? task.result ?? task.description ?? task.title,
+            id: `runtime-task-${task.id}`,
+            timestamp: new Date(task.updatedAt).toISOString(),
+            type: mapTimelineEventTypeFromRuntimeTask(task.status),
+          }) satisfies AgentTeamsTimelineEvent,
+      ),
+      ...scopedOverviewData.messages.map(
         (message) =>
           ({
             agentAccent: accentByMemberId.get(message.memberId) ?? ROLE_SLOT_CONFIG[0].accent,
@@ -1569,7 +1930,7 @@ export function useResolvedTeamRuntimeReferenceData(
             type: mapTimelineEventTypeFromMessage(message.type),
           }) satisfies AgentTeamsTimelineEvent,
       ),
-      ...collaboration.auditLogs.map(
+      ...scopedOverviewData.auditLogs.map(
         (log, index) =>
           ({
             agentAccent:
@@ -1590,7 +1951,7 @@ export function useResolvedTeamRuntimeReferenceData(
       .slice(0, 16);
 
     return events;
-  }, [collaboration.messages, collaboration.auditLogs, accentByMemberId, memberNameById]);
+  }, [accentByMemberId, memberNameById, scopedOverviewData]);
 
   const activityStats = useMemo(() => {
     const stats = timelineEvents.reduce<Record<string, number>>((acc, event) => {
@@ -1618,10 +1979,10 @@ export function useResolvedTeamRuntimeReferenceData(
         );
         const taskNote =
           index === 0
-            ? `待处理 ${collaboration.selectedSharedSession?.pendingPermissions.length ?? 0} 个审批`
+            ? `待处理 ${activeSharedSession?.pendingPermissions.length ?? 0} 个审批`
             : index === 1
               ? `推进 ${taskLanes[1]?.cards.length ?? 0} 个进行中任务`
-              : `待回答 ${collaboration.selectedSharedSession?.pendingQuestions.length ?? 0} 个问题`;
+              : `待回答 ${activeSharedSession?.pendingQuestions.length ?? 0} 个问题`;
 
         const extraNote =
           index === 2 && collaboration.tasks.filter((task) => task.status === 'failed').length > 0
@@ -1650,7 +2011,7 @@ export function useResolvedTeamRuntimeReferenceData(
     [
       roleChips,
       roleBindings.roleCards,
-      collaboration.selectedSharedSession,
+      activeSharedSession,
       collaboration.tasks,
       taskLanes,
       isSelectedTeamPaused,
@@ -1659,15 +2020,15 @@ export function useResolvedTeamRuntimeReferenceData(
 
   // --- Split memos: overview cards ---
   const pendingReviewCount =
-    (collaboration.selectedSharedSession?.pendingPermissions.length ?? 0) +
-    (collaboration.selectedSharedSession?.pendingQuestions.length ?? 0);
+    (activeSharedSession?.pendingPermissions.length ?? 0) +
+    (activeSharedSession?.pendingQuestions.length ?? 0);
 
   // 真实执行活动聚合：来自 handoff（层间交接）+ runtimeTasks（各层 session 任务）+
   // sessions（运行状态）。这是团队"自动跑起来"后唯一真正变化的数据源；V1 的
   // team_messages/team_tasks 只有用户手动操作才写，团队执行时恒为空，所以概览
   // 不能再依赖它们来判断"团队是否在干活"。
   const runtimeActivity = useMemo(() => {
-    const handoffs = Array.from(handoffsMap.values());
+    const handoffs = scopedOverviewData.handoffs;
     const activeHandoffs = handoffs.filter(
       (h) => h.state === 'running' || h.state === 'claimed' || h.state === 'pending',
     ).length;
@@ -1676,21 +2037,23 @@ export function useResolvedTeamRuntimeReferenceData(
       (h) => h.state === 'failed' || h.state === 'cancelled',
     ).length;
 
-    const runtimeTasks = collaboration.runtimeTasks;
+    const runtimeTasks = scopedOverviewData.runtimeTasks;
     const runningTasks = runtimeTasks.filter((t) => t.status === 'running').length;
     const completedTasks = runtimeTasks.filter((t) => t.status === 'completed').length;
     const failedTasks = runtimeTasks.filter((t) => t.status === 'failed').length;
 
-    const sessions = collaboration.sessions;
+    const sessions = scopedOverviewData.sessions;
     const runningSessions = sessions.filter((s) => s.stateStatus === 'running').length;
     // 参与执行的角色层（去重）：从 handoff 的 to/from 层 + 有 roleLayer 的 session 收集。
-    const activeLayers = new Set<string>();
+    // 注意这是"曾参与"的层（含已完成的 handoff），用于反映团队规模/活动广度，
+    // 不等于"此刻正在跑"的层。
+    const participatingLayers = new Set<string>();
     for (const h of handoffs) {
-      if (h.toRoleLayer) activeLayers.add(h.toRoleLayer);
-      if (h.fromRoleLayer) activeLayers.add(h.fromRoleLayer);
+      if (h.toRoleLayer) participatingLayers.add(h.toRoleLayer);
+      if (h.fromRoleLayer) participatingLayers.add(h.fromRoleLayer);
     }
     for (const s of sessions) {
-      if (s.roleLayer) activeLayers.add(s.roleLayer);
+      if (s.roleLayer) participatingLayers.add(s.roleLayer);
     }
 
     // 运行时长起点：最早的 handoff/任务开始时间（毫秒）。
@@ -1714,28 +2077,38 @@ export function useResolvedTeamRuntimeReferenceData(
       failedTasks,
       runningSessions,
       sessionTotal: sessions.length,
-      activeLayerCount: activeLayers.size,
+      participatingLayerCount: participatingLayers.size,
       startCandidates,
     };
-  }, [handoffsMap, collaboration.runtimeTasks, collaboration.sessions]);
+  }, [scopedOverviewData]);
+  const sharedActiveViewerCount = useMemo(
+    () => activeSharedSession?.presence.filter((entry) => entry.active).length ?? 0,
+    [activeSharedSession],
+  );
+  const sharedCommentCount = activeSharedSession?.comments.length ?? 0;
 
   const overviewCards = useMemo((): AgentTeamsOverviewCard[] => {
     const runtimeStartCandidates = [
-      ...collaboration.messages.map((message) => message.timestamp),
-      ...collaboration.auditLogs.map((log) => new Date(log.createdAt).getTime()),
-      ...collaboration.tasks
-        .map((task) => task.createdAt)
-        .filter((value): value is string => Boolean(value))
-        .map((value) => new Date(value).getTime()),
-      ...collaboration.sharedSessions.map((session) => new Date(session.shareCreatedAt).getTime()),
+      ...scopedOverviewData.messages.map((message) => message.timestamp),
+      ...scopedOverviewData.auditLogs.map((log) => new Date(log.createdAt).getTime()),
+      ...(selectedSessionScope
+        ? []
+        : collaboration.tasks
+            .map((task) => task.createdAt)
+            .filter((value): value is string => Boolean(value))
+            .map((value) => new Date(value).getTime())),
+      ...scopedOverviewData.sharedSessions.map((session) =>
+        new Date(session.shareCreatedAt).getTime(),
+      ),
       // 把真实执行流的开始时间（handoff / runtimeTask）也纳入，否则团队自动跑起来
       // 但用户没手动发消息/建任务时，运行时长恒为 0。
       ...runtimeActivity.startCandidates,
     ].filter((value) => Number.isFinite(value));
 
     // 任务数优先用真实执行任务（runtimeTasks），回退到手动 team_tasks。
-    const effectiveTaskTotal =
-      runtimeActivity.runtimeTaskTotal > 0
+    const effectiveTaskTotal = selectedSessionScope
+      ? runtimeActivity.runtimeTaskTotal || selectedRuntimeTaskRecords.length
+      : runtimeActivity.runtimeTaskTotal > 0
         ? runtimeActivity.runtimeTaskTotal
         : collaboration.tasks.length || collaboration.runtimeTaskRecords.length;
 
@@ -1745,8 +2118,8 @@ export function useResolvedTeamRuntimeReferenceData(
       (member) => member.status === 'working',
     ).length;
     const effectiveActiveRoles = Math.max(
-      collaboration.members.length,
-      runtimeActivity.activeLayerCount,
+      selectedSessionScope ? runtimeActivity.participatingLayerCount : collaboration.members.length,
+      runtimeActivity.participatingLayerCount,
     );
 
     return [
@@ -1754,9 +2127,16 @@ export function useResolvedTeamRuntimeReferenceData(
         icon: 'members',
         id: 'overview-active-members',
         label: '活跃角色',
-        note: `执行中层级 ${runtimeActivity.activeLayerCount} · 工作中成员 ${workingMembers} · 总成员 ${collaboration.members.length}`,
-        trend:
-          runtimeActivity.activeLayerCount > 0 || workingMembers > 0 ? 'up' : 'stable',
+        note: selectedSessionScope
+          ? `参与层级 ${runtimeActivity.participatingLayerCount} · 子树会话 ${runtimeActivity.sessionTotal} · 运行中 ${runtimeActivity.runningSessions}`
+          : `参与层级 ${runtimeActivity.participatingLayerCount} · 工作中成员 ${workingMembers} · 总成员 ${collaboration.members.length}`,
+        trend: selectedSessionScope
+          ? runtimeActivity.runningSessions > 0
+            ? 'up'
+            : 'stable'
+          : runtimeActivity.runningSessions > 0 || workingMembers > 0
+            ? 'up'
+            : 'stable',
         value: String(effectiveActiveRoles),
       },
       {
@@ -1771,12 +2151,21 @@ export function useResolvedTeamRuntimeReferenceData(
         icon: 'overview',
         id: 'overview-shared-runs',
         label: '运行会话',
-        note: `运行中 ${runtimeActivity.runningSessions} · 共享 ${collaboration.sharedSessions.length} · 总计 ${runtimeActivity.sessionTotal}`,
-        trend:
-          runtimeActivity.runningSessions > 0 || collaboration.sharedSessions.length > 0
+        note: selectedSessionScope
+          ? `运行中 ${runtimeActivity.runningSessions} · 子树会话 ${runtimeActivity.sessionTotal} · 当前范围`
+          : `运行中 ${runtimeActivity.runningSessions} · 共享 ${effectiveSharedSessions.length} · 总计 ${runtimeActivity.sessionTotal}`,
+        trend: selectedSessionScope
+          ? runtimeActivity.runningSessions > 0
+            ? 'up'
+            : 'stable'
+          : runtimeActivity.runningSessions > 0 || effectiveSharedSessions.length > 0
             ? 'up'
             : 'stable',
-        value: String(runtimeActivity.sessionTotal || collaboration.sharedSessions.length),
+        value: String(
+          selectedSessionScope
+            ? runtimeActivity.sessionTotal
+            : runtimeActivity.sessionTotal || effectiveSharedSessions.length,
+        ),
       },
       {
         icon: 'sync',
@@ -1790,7 +2179,7 @@ export function useResolvedTeamRuntimeReferenceData(
         icon: 'review',
         id: 'overview-review',
         label: '评审队列',
-        note: `权限 ${collaboration.selectedSharedSession?.pendingPermissions.length ?? 0} · 问题 ${collaboration.selectedSharedSession?.pendingQuestions.length ?? 0}`,
+        note: `权限 ${activeSharedSession?.pendingPermissions.length ?? 0} · 问题 ${activeSharedSession?.pendingQuestions.length ?? 0}`,
         trend: pendingReviewCount > 0 ? 'up' : 'stable',
         value: String(pendingReviewCount),
       },
@@ -1798,11 +2187,13 @@ export function useResolvedTeamRuntimeReferenceData(
         icon: 'timer',
         id: 'overview-runtime',
         label: '运行时长',
-        note: selectedSharedSummary
-          ? `当前会话：${selectedSharedSummary.title ?? selectedSharedSummary.sessionId}`
-          : runtimeActivity.handoffTotal > 0
-            ? `${runtimeActivity.activeHandoffs} 个交接进行中`
-            : '等待接入新的团队运行',
+        note: selectedSessionScope
+          ? `${runtimeActivity.activeHandoffs} 个交接进行中 · 当前会话子树`
+          : selectedSharedSummary
+            ? `当前会话：${selectedSharedSummary.title ?? selectedSharedSummary.sessionId}`
+            : runtimeActivity.handoffTotal > 0
+              ? `${runtimeActivity.activeHandoffs} 个交接进行中`
+              : '等待接入新的团队运行',
         trend: 'stable',
         value: formatRuntimeDuration(runtimeStartCandidates),
       },
@@ -1811,14 +2202,64 @@ export function useResolvedTeamRuntimeReferenceData(
     collaboration.members,
     collaboration.tasks,
     collaboration.runtimeTaskRecords,
-    collaboration.sharedSessions,
-    collaboration.messages,
-    collaboration.auditLogs,
-    collaboration.selectedSharedSession,
+    activeSharedSession,
+    selectedSessionScope,
+    scopedOverviewData,
     runtimeActivity,
     selectedSharedSummary,
     pendingReviewCount,
+    selectedRuntimeTaskRecords.length,
   ]);
+
+  const metricCards = useMemo(
+    (): AgentTeamsMetricCard[] =>
+      buildMetricCards({
+        scoped: Boolean(selectedSessionScope),
+        sharedSelected: Boolean(selectedSharedSummary),
+        membersCount: collaboration.members.length,
+        teamCompletedTaskCount: collaboration.tasks.filter((task) => task.status === 'completed')
+          .length,
+        teamTaskCount: collaboration.tasks.length,
+        teamMessageCount: collaboration.messages.length,
+        selectedSessionScopeSize: selectedSessionScope?.size ?? 0,
+        participatingLayerCount: runtimeActivity.participatingLayerCount,
+        runtimeTaskTotal:
+          runtimeActivity.runtimeTaskTotal > 0
+            ? runtimeActivity.runtimeTaskTotal
+            : selectedRuntimeTaskRecords.length,
+        completedRuntimeTasks: runtimeActivity.completedTasks,
+        failedRuntimeTasks: runtimeActivity.failedTasks,
+        runningRuntimeTasks: runtimeActivity.runningTasks,
+        pendingRuntimeTasks: selectedRuntimeTaskRecords.filter((task) => task.status === 'pending')
+          .length,
+        handoffTotal: runtimeActivity.handoffTotal,
+        sharedSessionCount: effectiveSharedSessions.length,
+        pendingReviewCount,
+        sharedCommentCount,
+        sharedViewerCount: sharedActiveViewerCount,
+        sharedRunning: selectedSharedSummary?.stateStatus === 'running',
+        sharedFailed: selectedSharedSummary?.stateStatus === 'failed',
+      }),
+    [
+      collaboration.members.length,
+      collaboration.messages.length,
+      effectiveSharedSessions.length,
+      collaboration.tasks,
+      pendingReviewCount,
+      runtimeActivity.completedTasks,
+      runtimeActivity.failedTasks,
+      runtimeActivity.handoffTotal,
+      runtimeActivity.participatingLayerCount,
+      runtimeActivity.runningTasks,
+      runtimeActivity.runtimeTaskTotal,
+      selectedRuntimeTaskRecords,
+      selectedSessionScope,
+      sharedActiveViewerCount,
+      sharedCommentCount,
+      selectedSharedSummary?.stateStatus,
+      snapshotSharedSessions.length,
+    ],
+  );
 
   // --- Final assembly memo ---
   const liveValue = useMemo<TeamRuntimeReferenceViewData | null>(() => {
@@ -1826,11 +2267,17 @@ export function useResolvedTeamRuntimeReferenceData(
       return null;
     }
 
-    const activeViewerCount =
-      collaboration.selectedSharedSession?.presence.filter((entry) => entry.active).length ?? 0;
-    const onlineCount =
-      activeViewerCount ||
-      collaboration.members.filter((member) => member.status === 'working').length;
+    const activeViewerCount = sharedActiveViewerCount;
+    const workspaceOnlineCount = collaboration.members.filter(
+      (member) => member.status === 'working',
+    ).length;
+    const topSummaryAudience = resolveTopSummaryAudience({
+      sharedSelected: Boolean(selectedSharedSummary),
+      sharedPresenceCount: activeSharedSession?.presence.length ?? 0,
+      sharedActiveViewerCount: activeViewerCount,
+      workspaceMemberCount: collaboration.members.length,
+      workspaceOnlineCount,
+    });
     // 运行/等待/异常计数：优先用真实执行任务(runtimeActivity)，团队自动跑起来时
     // V1 的 collaboration.tasks 恒为 0，回退到它只是为了手动建任务的兼容场景。
     const failedTaskCount =
@@ -1845,32 +2292,63 @@ export function useResolvedTeamRuntimeReferenceData(
       activeMode: 'live',
       activityStats,
       busy: collaboration.busy || sessionActionBusy,
-      canCreateSession: true,
+      canCreateSession: hasAuth && Boolean(activeWorkspace),
       canCreateTemplate: workflowTemplates.canCreateTemplate,
       canManageRuntime: hasAuth && Boolean(activeWorkspace),
       canManageSessionEntries: hasAuth && Boolean(activeWorkspace),
       conversationCards,
       createSession,
       createTemplate: workflowTemplates.createTemplate,
+      duplicateTemplate: workflowTemplates.duplicateTemplate,
       createWorkspace,
+      createSessionShare: collaboration.createSessionShare,
       renameWorkspace,
+      renameSession: collaboration.renameSession,
       deleteWorkspace,
       createTask,
       defaultSelectedAgentId: roleChips[0]?.id ?? 'leader',
       defaultSelectedTeamId,
       defaultReceptionSessionId,
       error: workspaceError ?? workspaceSnapshotError ?? collaboration.error,
-      feedback: collaboration.feedback,
-      footerLead: `活跃 ${projection.buddyProjection.activeAgentCount} / 共 ${collaboration.members.length}`,
-      footerStats: [
-        {
-          label: '总',
-          value: String(snapshotSharedSessions.length || collaboration.sharedSessions.length),
-        },
-        { label: '运行', value: String(runningTaskCount) },
-        { label: '等待', value: String(pendingTaskCount + pendingReviewCount) },
-        { label: '异常', value: String(failedTaskCount) },
-      ],
+      feedback: localFeedback ?? collaboration.feedback,
+      footerLead: buildFooterLead({
+        activeAgentCount: projection.buddyProjection.activeAgentCount,
+        totalMembers: collaboration.members.length,
+        scoped: Boolean(selectedSessionScope),
+        sharedSelected: Boolean(selectedSharedSummary),
+        sharedCommentCount,
+        sharedViewerCount: activeViewerCount,
+        participatingLayerCount: runtimeActivity.participatingLayerCount,
+        selectedSessionScopeSize: selectedSessionScope?.size ?? 0,
+      }),
+      footerStats: buildFooterStats({
+        scoped: Boolean(selectedSessionScope),
+        sharedSelected: Boolean(selectedSharedSummary),
+        membersCount: collaboration.members.length,
+        teamCompletedTaskCount: collaboration.tasks.filter((task) => task.status === 'completed')
+          .length,
+        teamTaskCount: collaboration.tasks.length,
+        teamMessageCount: collaboration.messages.length,
+        selectedSessionScopeSize: selectedSessionScope?.size ?? 0,
+        participatingLayerCount: runtimeActivity.participatingLayerCount,
+        runtimeTaskTotal:
+          runtimeActivity.runtimeTaskTotal > 0
+            ? runtimeActivity.runtimeTaskTotal
+            : selectedRuntimeTaskRecords.length,
+        completedRuntimeTasks: runtimeActivity.completedTasks,
+        failedRuntimeTasks: runtimeActivity.failedTasks,
+        runningRuntimeTasks: runningTaskCount,
+        pendingRuntimeTasks: selectedSessionScope
+          ? selectedRuntimeTaskRecords.filter((task) => task.status === 'pending').length
+          : pendingTaskCount,
+        handoffTotal: runtimeActivity.handoffTotal,
+        sharedSessionCount: effectiveSharedSessions.length,
+        pendingReviewCount,
+        sharedCommentCount,
+        sharedViewerCount: activeViewerCount,
+        sharedRunning: selectedSharedSummary?.stateStatus === 'running',
+        sharedFailed: selectedSharedSummary?.stateStatus === 'failed',
+      }),
       historyTeams,
       loading:
         collaboration.loading ||
@@ -1891,36 +2369,63 @@ export function useResolvedTeamRuntimeReferenceData(
       sendMessage,
       sidebarSections: workflowTemplates.sections,
       submitReviewComment,
+      createSharedSessionComment,
       toggleSessionState: collaboration.toggleSessionState,
       deleteSession: collaboration.deleteSession,
+      updateSessionShare: collaboration.updateSessionShare,
+      deleteSessionShare: collaboration.deleteSessionShare,
       templateCount: workflowTemplates.templateCount,
       templateError: workflowTemplates.error,
       templateLoading: workflowTemplates.loading,
       templates: workflowTemplates.templateCards,
+      updateTemplate: workflowTemplates.updateTemplate,
+      removeTemplate: workflowTemplates.removeTemplate,
       taskLanes,
       timelineEvents,
       topSummary: {
-        description:
-          activeWorkspace != null
-            ? `${activeWorkspace.name} · ${activeWorkspace.defaultWorkingRoot ?? '未绑定默认工作区'} · 已切换到 TeamWorkspaceSnapshot 主读链`
-            : selectedSharedSummary != null
-              ? `${formatWorkspaceLabel(selectedSharedSummary.workspacePath)} · ${projection.workspaceOverviewLines[0] ?? '已接入真实 Team Runtime 视图。'}`
-              : '当前已切换到真实 Team Runtime 数据源，等待第一条共享运行进入。',
-        memberCount: `${collaboration.members.length} 成员`,
-        onlineCount: `${onlineCount} 在线`,
-        status:
-          selectedSharedSummary?.stateStatus === 'paused'
-            ? '已暂停'
-            : collaboration.sessions.some((s) => s.stateStatus === 'idle')
-              ? '已暂停'
-              : '运行中',
-        title: activeWorkspace?.name ?? selectedSharedSummary?.title ?? '团队工作空间',
+        description: resolveTopSummaryDescription({
+          activeWorkspaceName: activeWorkspace?.name ?? null,
+          activeWorkspaceWorkingRoot: activeWorkspace?.defaultWorkingRoot ?? null,
+          selectedRuntimeSessionTitle: selectedRuntimeSession?.title ?? null,
+          selectedRuntimeSessionId: selectedRuntimeSession?.id ?? null,
+          selectedRuntimeSessionPaused: selectedRuntimeSession?.paused ?? null,
+          selectedRuntimeSessionStateStatus: selectedRuntimeSession?.stateStatus ?? null,
+          selectedSharedSessionTitle: selectedSharedSummary?.title ?? null,
+          selectedSharedSessionId: selectedSharedSummary?.sessionId ?? null,
+          selectedSharedSessionStateStatus: selectedSharedSummary?.stateStatus ?? null,
+          selectedSharedWorkspaceLabel: selectedSharedSummary
+            ? formatWorkspaceLabel(selectedSharedSummary.workspacePath)
+            : null,
+          workspaceOverviewLead: projection.workspaceOverviewLines[0] ?? null,
+        }),
+        memberCount: topSummaryAudience.memberCount,
+        onlineCount: topSummaryAudience.onlineCount,
+        status: resolveTopSummaryStatus({
+          hasPausedRuntimeSessions: effectiveSessions.some((session) =>
+            isRuntimeSessionPaused(session.stateStatus, session.paused),
+          ),
+          selectedRuntimeSessionPaused: selectedRuntimeSession?.paused ?? null,
+          selectedRuntimeSessionStateStatus: selectedRuntimeSession?.stateStatus ?? null,
+          selectedSharedSessionStateStatus: selectedSharedSummary?.stateStatus ?? null,
+        }),
+        title: resolveTopSummaryTitle({
+          activeWorkspaceName: activeWorkspace?.name ?? null,
+          selectedRuntimeSessionTitle: selectedRuntimeSession?.title ?? null,
+          selectedRuntimeSessionId: selectedRuntimeSession?.id ?? null,
+          selectedSharedSessionTitle: selectedSharedSummary?.title ?? null,
+          selectedSharedSessionId: selectedSharedSummary?.sessionId ?? null,
+        }),
       },
       workspaceGroups: effectiveWorkspaceGroups,
       workspaces: options.workspaces ?? [],
       auditLogs: collaboration.auditLogs,
+      sessions: effectiveSessions,
       sessionShares: collaboration.sessionShares,
-      sharedSessions: collaboration.sharedSessions,
+      sharedSessions: effectiveSharedSessions,
+      selectedSharedSession: collaboration.selectedSharedSession,
+      activeSharedSession,
+      sharedSessionLoading: collaboration.sharedSessionLoading,
+      setSelectedSharedSessionId: collaboration.setSelectedSharedSessionId,
       members: collaboration.members,
       diagnostics: collaboration.diagnostics,
       acknowledgeRuntimeAlert,
@@ -1932,19 +2437,24 @@ export function useResolvedTeamRuntimeReferenceData(
     } satisfies TeamRuntimeReferenceViewData;
   }, [
     hasAuth,
-    collaboration.selectedSharedSession,
+    activeSharedSession,
+    sharedActiveViewerCount,
+    sharedCommentCount,
     collaboration.members,
     collaboration.tasks,
     collaboration.busy,
     collaboration.error,
     collaboration.feedback,
+    localFeedback,
     collaboration.loading,
     collaboration.sharedSessions,
-    collaboration.sessions,
+    collaboration.sharedSessionLoading,
     collaboration.sharedOperateBusy,
     collaboration.sharedCommentBusy,
     collaboration.toggleSessionState,
     collaboration.deleteSession,
+    collaboration.updateSessionShare,
+    collaboration.deleteSessionShare,
     sessionActionBusy,
     activeWorkspace,
     workspaceError,
@@ -1954,14 +2464,19 @@ export function useResolvedTeamRuntimeReferenceData(
     roleBindings.loading,
     workflowTemplates.canCreateTemplate,
     workflowTemplates.createTemplate,
+    workflowTemplates.duplicateTemplate,
     workflowTemplates.error,
     workflowTemplates.loading,
     workflowTemplates.sections,
     workflowTemplates.templateCount,
     workflowTemplates.templateCards,
+    workflowTemplates.updateTemplate,
+    workflowTemplates.removeTemplate,
     createSession,
     createWorkspace,
+    collaboration.createSessionShare,
     renameWorkspace,
+    collaboration.renameSession,
     deleteWorkspace,
     createTask,
     acknowledgeRuntimeAlert,
@@ -1975,7 +2490,9 @@ export function useResolvedTeamRuntimeReferenceData(
     selectTeam,
     sendMessage,
     submitReviewComment,
+    createSharedSessionComment,
     selectedSharedSummary,
+    effectiveSessions,
     snapshotSharedSessions,
     projection.buddyProjection.activeAgentCount,
     projection.workspaceOverviewLines,
@@ -1998,6 +2515,8 @@ export function useResolvedTeamRuntimeReferenceData(
     timelineEvents,
     options.workspaces,
     collaboration.diagnostics,
+    collaboration.setSelectedSharedSessionId,
+    collaboration.selectedSharedSession,
   ]);
 
   const resolvedValue = liveValue ?? EMPTY_VIEW_DATA;

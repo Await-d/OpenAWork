@@ -172,6 +172,7 @@ export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
               }),
               entityId: result.record.id,
               entityType: 'session_inbound_message',
+              sessionId,
               summary: `Escape hatch ${hatchType}: ${body.messageType} → session ${sessionId.slice(0, 8)}`,
               userId: user.sub,
             });
@@ -245,7 +246,6 @@ export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
               });
             } catch (err) {
               console.warn(
-                // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
                 `[team.session.inbound] orchestrate (async) failed: ${err instanceof Error ? err.message : String(err)}`,
               );
               // 🔴#3 端到端健壮性：编排是 fire-and-forget（不阻塞 inbound 入库），
@@ -254,8 +254,7 @@ export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
               // 的静默态。这里补一条 best-effort 的 assistant 反馈消息，让用户知道
               // 需要重试，而不是无限等待。
               try {
-                const { appendSessionMessageV2 } =
-                  await import('../message/message-v2-adapter.js');
+                const { appendSessionMessageV2 } = await import('../message/message-v2-adapter.js');
                 appendSessionMessageV2({
                   sessionId,
                   userId: user.sub,
@@ -270,7 +269,6 @@ export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
                 });
               } catch (ackErr) {
                 console.warn(
-                  // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
                   `[team.session.inbound] orchestrate failure ack write failed: ${ackErr instanceof Error ? ackErr.message : String(ackErr)}`,
                 );
               }

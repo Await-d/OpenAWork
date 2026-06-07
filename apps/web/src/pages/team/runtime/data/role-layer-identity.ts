@@ -20,6 +20,8 @@
  * 本表覆盖两套的并集，未知值回退到「团队」中性身份。
  */
 
+import { REFERENCE_AGENT_ROLE_METADATA, type CoreRole } from '@openAwork/shared';
+
 export interface RoleLayerIdentity {
   /** 完整中文名，如「执行层」。 */
   label: string;
@@ -106,10 +108,70 @@ const IDENTITY_BY_LAYER: Record<string, RoleLayerIdentity> = {
   },
 };
 
+const ROLE_LAYER_BY_AGENT_ID: Record<string, keyof typeof IDENTITY_BY_LAYER> = {
+  'interaction-agent': 'reception',
+  interaction: 'reception',
+  reception: 'reception',
+  pm1: 'pm1',
+  pm2: 'pm2',
+  executor: 'executor',
+  reviewer: 'reviewer',
+  librarian: 'reception',
+  metis: 'reception',
+  oracle: 'reception',
+  analyst: 'reception',
+  architect: 'reception',
+  debugger: 'reception',
+  prometheus: 'pm1',
+  planner: 'pm1',
+  plan: 'pm1',
+  zeus: 'pm2',
+  'team-leader': 'pm2',
+  leader: 'pm2',
+  hephaestus: 'executor',
+  atlas: 'reviewer',
+  momus: 'reviewer',
+  critic: 'reviewer',
+};
+
+const CORE_ROLE_TO_LAYER: Partial<Record<CoreRole, keyof typeof IDENTITY_BY_LAYER>> = {
+  leader: 'pm2',
+  planner: 'pm1',
+  researcher: 'reception',
+  executor: 'executor',
+  reviewer: 'reviewer',
+};
+
+const ROLE_LAYER_BY_BUILTIN_AGENT = Object.entries(REFERENCE_AGENT_ROLE_METADATA).reduce<
+  Record<string, keyof typeof IDENTITY_BY_LAYER>
+>((acc, [agentId, metadata]) => {
+  const mappedLayer = CORE_ROLE_TO_LAYER[metadata.canonicalRole.coreRole];
+  if (!mappedLayer) {
+    return acc;
+  }
+
+  acc[agentId] = mappedLayer;
+  for (const alias of metadata.aliases ?? []) {
+    acc[alias] = mappedLayer;
+  }
+  return acc;
+}, {});
+
 /** 取某个 roleLayer 的展示身份；未知 / null 回退到中性「团队」身份。 */
 export function getRoleLayerIdentity(roleLayer: string | null | undefined): RoleLayerIdentity {
   if (!roleLayer) return FALLBACK_IDENTITY;
   return IDENTITY_BY_LAYER[roleLayer] ?? FALLBACK_IDENTITY;
+}
+
+/** 优先按 agentId 反解到团队层级身份；找不到时回退到中性身份。 */
+export function getRoleLayerIdentityFromAgentId(
+  agentId: string | null | undefined,
+): RoleLayerIdentity {
+  if (!agentId) return FALLBACK_IDENTITY;
+  const normalized = agentId.trim();
+  if (!normalized) return FALLBACK_IDENTITY;
+  const layer = ROLE_LAYER_BY_AGENT_ID[normalized] ?? ROLE_LAYER_BY_BUILTIN_AGENT[normalized];
+  return layer ? (IDENTITY_BY_LAYER[layer] ?? FALLBACK_IDENTITY) : FALLBACK_IDENTITY;
 }
 
 /** 「代号 · 短名」一行展示，如「e · 执行」；无代号时只返回短名。 */

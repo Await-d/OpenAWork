@@ -64,6 +64,50 @@ const ROLE_CHIP_STYLE: CSSProperties = {
   color: 'var(--fg-default)',
 };
 
+const ROLE_CHIP_TEXT_STYLE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'baseline',
+  gap: 4,
+  minWidth: 0,
+};
+
+const ROLE_AGENT_LABEL_STYLE: CSSProperties = {
+  color: 'var(--fg-muted)',
+  fontSize: 10,
+  maxWidth: 120,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+};
+
+const CONFIG_ROW_STYLE: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  flexWrap: 'wrap',
+  width: '100%',
+};
+
+const CONFIG_PILL_STYLE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 4,
+  padding: '2px 8px',
+  borderRadius: 999,
+  background: 'var(--bg-overlay)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
+  color: 'var(--fg-muted)',
+  fontSize: 10,
+  fontWeight: 600,
+};
+
+const SOURCE_PILL_STYLE: CSSProperties = {
+  ...CONFIG_PILL_STYLE,
+  color: 'var(--accent)',
+  borderColor: 'color-mix(in srgb, var(--accent) 32%, transparent)',
+  background: 'color-mix(in srgb, var(--accent) 8%, transparent)',
+};
+
 const HINT_STYLE: CSSProperties = {
   fontSize: 11,
   color: 'var(--fg-muted)',
@@ -128,6 +172,42 @@ function roleLayerLabel(roleLayer: string | null | undefined): { text: string; c
   };
 }
 
+const ROLE_LABELS: Record<string, string> = {
+  leader: '团队负责人',
+  planner: '规划师',
+  researcher: '研究员',
+  executor: '执行者',
+  reviewer: '评审员',
+  general: '通用助手',
+};
+
+function roleLabel(role: string): string {
+  return ROLE_LABELS[role] ?? role;
+}
+
+function buildActionHint(input: {
+  roleLayer?: string | null;
+  stateStatus?: string | null;
+  substate?: string | null;
+}): string | null {
+  if (input.stateStatus === 'paused') {
+    return '提示：恢复运行树后，本层会从当前状态继续。';
+  }
+  if (input.substate === 'clarifying') {
+    return '提示：先回答当前澄清，团队会在下一轮继续推进。';
+  }
+  if (input.substate === 'dispatching') {
+    return '提示：可切到“任务与产物”查看当前派发包。';
+  }
+  if (input.substate === 'completed') {
+    return '提示：本层已完成，可回看产物或评审结果。';
+  }
+  if (input.stateStatus === 'running' && input.roleLayer && input.roleLayer !== 'reception') {
+    return '提示：当前层正在执行，可继续补充上下文或查看任务细节。';
+  }
+  return null;
+}
+
 export function TeamSessionHeader({
   roleLayer,
   substate,
@@ -137,6 +217,10 @@ export function TeamSessionHeader({
   const layerInfo = roleLayerLabel(roleLayer);
   const statusText = substateLabel(substate);
   const teamDef = useMemo(() => parseTeamDef(sessionMetadata), [sessionMetadata]);
+  const actionHint = useMemo(
+    () => buildActionHint({ roleLayer, stateStatus, substate }),
+    [roleLayer, stateStatus, substate],
+  );
 
   return (
     <div style={HEADER_STYLE}>
@@ -181,17 +265,37 @@ export function TeamSessionHeader({
         {statusText ? <span style={HINT_STYLE}>{statusText}</span> : null}
       </div>
 
-      {/* 角色 chips（仅在有 teamDef 时显示，紧凑排列） */}
-      {teamDef && teamDef.roles.length > 0 ? (
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
-          {teamDef.roles.map((r) => (
-            <span key={r.role} style={ROLE_CHIP_STYLE}>
+      {teamDef || actionHint ? (
+        <div style={CONFIG_ROW_STYLE}>
+          {teamDef ? (
+            <span style={SOURCE_PILL_STYLE} title={teamDef.sourceLabel}>
+              来源 · {teamDef.sourceLabel}
+            </span>
+          ) : null}
+          {teamDef?.defaultProvider ? (
+            <span style={CONFIG_PILL_STYLE}>模型 · {teamDef.defaultProvider}</span>
+          ) : null}
+          {teamDef?.roles.map((role) => (
+            <span
+              key={role.role}
+              style={ROLE_CHIP_STYLE}
+              title={role.label ? `${roleLabel(role.role)} · ${role.label}` : roleLabel(role.role)}
+            >
               <span
-                style={{ width: 5, height: 5, borderRadius: 999, background: colorForRole(r.role) }}
+                style={{
+                  width: 5,
+                  height: 5,
+                  borderRadius: 999,
+                  background: colorForRole(role.role),
+                }}
               />
-              {r.role}
+              <span style={ROLE_CHIP_TEXT_STYLE}>
+                <span>{roleLabel(role.role)}</span>
+                {role.label ? <span style={ROLE_AGENT_LABEL_STYLE}>{role.label}</span> : null}
+              </span>
             </span>
           ))}
+          {actionHint ? <span style={HINT_STYLE}>{actionHint}</span> : null}
         </div>
       ) : null}
     </div>
@@ -202,6 +306,7 @@ export function TeamSessionHeader({
 
 interface ParsedTeamDef {
   sourceLabel: string;
+  defaultProvider: string | null;
   roles: Array<{ role: string; label: string }>;
 }
 
@@ -215,7 +320,18 @@ function parseTeamDef(metadata?: Record<string, unknown> | null): ParsedTeamDef 
   const kind = typeof sourceObj['kind'] === 'string' ? sourceObj['kind'] : 'blank';
   const templateName =
     typeof sourceObj['templateName'] === 'string' ? sourceObj['templateName'] : null;
-  const sourceLabel = kind === 'blank' ? '空白' : (templateName ?? '模板');
+  const sourceLabel =
+    kind === 'blank'
+      ? '空白会话'
+      : kind === 'builtin-template'
+        ? `内置模板${templateName ? ` · ${templateName}` : ''}`
+        : kind === 'saved-template'
+          ? `已保存模板${templateName ? ` · ${templateName}` : ''}`
+          : (templateName ?? '模板');
+  const defaultProvider =
+    typeof teamDef['defaultProvider'] === 'string' && teamDef['defaultProvider']
+      ? teamDef['defaultProvider']
+      : null;
 
   const required = Array.isArray(teamDef['requiredRoleBindings'])
     ? (teamDef['requiredRoleBindings'] as unknown[])
@@ -231,5 +347,5 @@ function parseTeamDef(metadata?: Record<string, unknown> | null): ParsedTeamDef 
     })
     .filter((x): x is { role: string; label: string } => x !== null);
 
-  return { sourceLabel, roles };
+  return { sourceLabel, defaultProvider, roles };
 }

@@ -3,18 +3,25 @@
  *
  * 「用量 & 费用」tab：从 useTeamUsageStore 读取按 provider/agent/session 的聚合值。
  *
- * 当前若 store 为空（事件还未接入），显示「等待数据接入」提示。
+ * 空态表示当前工作区还没有产生任何 LLM 调用，而不是数据链路未接入。
  */
 
 import { useMemo, useState, type CSSProperties } from 'react';
+import { useLayerStore, type LayerNode } from '../../../../../stores/team/team-events.js';
 import {
   useTeamUsageStore,
   type UsageBucket,
   type TeamUsageEvent,
 } from '../../../../../stores/team/team-usage.js';
+import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
+import {
+  resolveMatchedSharedSessionDetail,
+  resolveMatchedSharedSummary,
+} from '../../data/team-runtime-shared-context.js';
 import { TabContainer } from '../TabContainer.js';
 import { SessionStatsPanel } from './SessionStatsPanel.js';
 import { ToolCallsView } from './ToolCallsView.js';
+import { SharedSessionUsageView } from './shared-session-usage-view.js';
 import {
   StatCard,
   MetricGrid,
@@ -81,9 +88,69 @@ function formatGroupKey(group: GroupKey, key: string): string {
   return key;
 }
 
+function emptyUsageBucket(): UsageBucket {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    reasoningTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    costUsd: 0,
+    count: 0,
+  };
+}
+
+function mergeUsageBuckets(left: UsageBucket, right: UsageBucket): UsageBucket {
+  return {
+    inputTokens: left.inputTokens + right.inputTokens,
+    outputTokens: left.outputTokens + right.outputTokens,
+    reasoningTokens: left.reasoningTokens + right.reasoningTokens,
+    cacheReadTokens: left.cacheReadTokens + right.cacheReadTokens,
+    cacheWriteTokens: left.cacheWriteTokens + right.cacheWriteTokens,
+    costUsd: left.costUsd + right.costUsd,
+    count: left.count + right.count,
+  };
+}
+
+function collectSessionScope(nodes: Map<string, LayerNode>, rootSessionId: string): Set<string> {
+  const scope = new Set<string>([rootSessionId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const node of nodes.values()) {
+      if (!node.parentSessionId || scope.has(node.sessionId)) {
+        continue;
+      }
+      if (scope.has(node.parentSessionId)) {
+        scope.add(node.sessionId);
+        changed = true;
+      }
+    }
+  }
+  return scope;
+}
+
+function aggregateNestedUsageBuckets(
+  map: Map<string, Map<string, UsageBucket>>,
+  sessionScope: Set<string>,
+): Map<string, UsageBucket> {
+  const aggregated = new Map<string, UsageBucket>();
+  for (const sessionId of sessionScope) {
+    const inner = map.get(sessionId);
+    if (!inner) {
+      continue;
+    }
+    for (const [key, bucket] of inner.entries()) {
+      aggregated.set(key, mergeUsageBuckets(aggregated.get(key) ?? emptyUsageBucket(), bucket));
+    }
+  }
+  return aggregated;
+}
+
 export interface UsageViewProps {
   /** 当前选中的 session（用于顶部"当前会话统计"面板）。 */
   selectedSessionId?: string | null;
+  selectedSessionIsShared?: boolean;
   selectedSessionTitle?: string | null;
 }
 
@@ -95,6 +162,28 @@ type MetricsMode = 'usage' | 'tools';
  */
 export function UsageView(props: UsageViewProps = {}) {
   const [mode, setMode] = useState<MetricsMode>('usage');
+  const { activeSharedSession, selectedSharedSession, sharedSessionLoading, sharedSessions } =
+    useTeamRuntimeReferenceViewData();
+  const sharedSummary = useMemo(
+    () =>
+      resolveMatchedSharedSummary({
+        selectedTeamId: props.selectedSessionId ?? null,
+        activeSharedSession,
+        selectedSharedSession,
+        sharedSessions,
+      }),
+    [activeSharedSession, props.selectedSessionId, selectedSharedSession, sharedSessions],
+  );
+  const isSharedSelected = props.selectedSessionIsShared === true || sharedSummary !== null;
+  const sharedSession = useMemo(
+    () =>
+      resolveMatchedSharedSessionDetail({
+        selectedTeamId: props.selectedSessionId ?? null,
+        activeSharedSession,
+        selectedSharedSession,
+      }),
+    [activeSharedSession, props.selectedSessionId, selectedSharedSession],
+  );
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       <div
@@ -125,26 +214,96 @@ export function UsageView(props: UsageViewProps = {}) {
           flexDirection: 'column',
         }}
       >
-        {mode === 'usage' ? <UsageMetricsPanel {...props} /> : <ToolCallsView />}
+        {mode === 'usage' ? (
+          isSharedSelected && props.selectedSessionId ? (
+            <SharedSessionUsageView
+              mode="usage"
+              selectedSessionId={props.selectedSessionId}
+              selectedSessionTitle={props.selectedSessionTitle}
+              sharedSession={sharedSession}
+              sharedSessionLoading={sharedSessionLoading}
+              sharedSummary={sharedSummary}
+            />
+          ) : (
+            <UsageMetricsPanel {...props} />
+          )
+        ) : isSharedSelected && props.selectedSessionId ? (
+          <SharedSessionUsageView
+            mode="tools"
+            selectedSessionId={props.selectedSessionId}
+            selectedSessionTitle={props.selectedSessionTitle}
+            sharedSession={sharedSession}
+            sharedSessionLoading={sharedSessionLoading}
+            sharedSummary={sharedSummary}
+          />
+        ) : (
+          <ToolCallsView {...props} />
+        )}
       </div>
     </div>
   );
 }
 
 function UsageMetricsPanel({ selectedSessionId, selectedSessionTitle }: UsageViewProps = {}) {
+  const nodes = useLayerStore((s) => s.nodes);
   const total = useTeamUsageStore((s) => s.total);
   const byProvider = useTeamUsageStore((s) => s.byProvider);
   const byAgent = useTeamUsageStore((s) => s.byAgent);
   const bySession = useTeamUsageStore((s) => s.bySession);
   const byLayer = useTeamUsageStore((s) => s.byLayer);
+  const bySessionProvider = useTeamUsageStore((s) => s.bySessionProvider);
+  const bySessionAgent = useTeamUsageStore((s) => s.bySessionAgent);
+  const bySessionLayer = useTeamUsageStore((s) => s.bySessionLayer);
   const recent = useTeamUsageStore((s) => s.recent);
 
   const [group, setGroup] = useState<GroupKey>('provider');
   const [expandedLayer, setExpandedLayer] = useState<string | null>(null);
+  const sessionScope = useMemo(
+    () => (selectedSessionId ? collectSessionScope(nodes, selectedSessionId) : null),
+    [nodes, selectedSessionId],
+  );
+
+  const scopedTotal = useMemo(() => {
+    if (!sessionScope) {
+      return total;
+    }
+    let bucket = emptyUsageBucket();
+    for (const sessionId of sessionScope) {
+      const sessionBucket = bySession.get(sessionId);
+      if (!sessionBucket) {
+        continue;
+      }
+      bucket = mergeUsageBuckets(bucket, sessionBucket);
+    }
+    return bucket;
+  }, [bySession, sessionScope, total]);
+
+  const scopedRecent = useMemo(() => {
+    if (!sessionScope) {
+      return recent;
+    }
+    return recent.filter(
+      (event) =>
+        typeof event.sessionId === 'string' &&
+        event.sessionId.length > 0 &&
+        sessionScope.has(event.sessionId),
+    );
+  }, [recent, sessionScope]);
 
   const groupedRows = useMemo(() => {
-    const map =
-      group === 'provider'
+    const map = sessionScope
+      ? group === 'provider'
+        ? aggregateNestedUsageBuckets(bySessionProvider, sessionScope)
+        : group === 'agent'
+          ? aggregateNestedUsageBuckets(bySessionAgent, sessionScope)
+          : group === 'layer'
+            ? aggregateNestedUsageBuckets(bySessionLayer, sessionScope)
+            : new Map(
+                Array.from(bySession.entries()).filter(([sessionId]) =>
+                  sessionScope.has(sessionId),
+                ),
+              )
+      : group === 'provider'
         ? byProvider
         : group === 'agent'
           ? byAgent
@@ -159,15 +318,29 @@ function UsageMetricsPanel({ selectedSessionId, selectedSessionTitle }: UsageVie
           b.bucket.outputTokens -
           (a.bucket.inputTokens + a.bucket.outputTokens),
       );
-  }, [byAgent, byProvider, bySession, byLayer, group]);
+  }, [
+    byAgent,
+    byLayer,
+    byProvider,
+    bySession,
+    bySessionAgent,
+    bySessionLayer,
+    bySessionProvider,
+    group,
+    sessionScope,
+  ]);
 
-  const hasData = total.count > 0;
+  const hasData = scopedTotal.count > 0;
 
   if (!hasData) {
     return (
       <TabContainer
         title="用量 & 费用"
-        subtitle="按 provider / agent / session / layer 维度聚合 token 与成本。"
+        subtitle={
+          selectedSessionId
+            ? '按当前会话及其子树的 provider / agent / session / layer 维度聚合 token 与成本。'
+            : '按 provider / agent / session / layer 维度聚合 token 与成本。'
+        }
       >
         <div style={CONTAINER_STYLE}>
           <SessionStatsPanel
@@ -176,15 +349,24 @@ function UsageMetricsPanel({ selectedSessionId, selectedSessionTitle }: UsageVie
           />
           <EmptyState
             emoji="🔋"
-            title="暂无用量数据"
+            title={selectedSessionId ? '当前会话暂无用量数据' : '暂无用量数据'}
             description={
-              <>
-                用量数据来自 agent-gateway 的 <code>team_usage</code> 用量记录（已持久化，
-                覆盖 stream 与非流式 workflow 两条 LLM 调用路径）。
-                <br />
-                团队执行产生 LLM 调用后会自动按 provider / agent / session / layer 聚合，
-                刷新 / 重连后依然保留。
-              </>
+              selectedSessionId ? (
+                <>
+                  {selectedSessionTitle ?? `会话 ${selectedSessionId.slice(0, 8)}`} 及其子树尚未产生
+                  LLM 调用。
+                  <br />
+                  一旦有 team usage 记录写入，这里会自动按当前会话范围聚合展示。
+                </>
+              ) : (
+                <>
+                  用量数据来自 agent-gateway 的 <code>team_usage</code> 用量记录（已持久化， 覆盖
+                  stream 与非流式 workflow 两条 LLM 调用路径）。
+                  <br />
+                  团队执行产生 LLM 调用后会自动按 provider / agent / session / layer 聚合， 刷新 /
+                  重连后依然保留。
+                </>
+              )
             }
           />
         </div>
@@ -195,22 +377,40 @@ function UsageMetricsPanel({ selectedSessionId, selectedSessionTitle }: UsageVie
   return (
     <TabContainer
       title="用量 & 费用"
-      subtitle="按 provider / agent / session / layer 维度聚合 token 与成本。"
+      subtitle={
+        selectedSessionId
+          ? '按当前会话及其子树的 provider / agent / session / layer 维度聚合 token 与成本。'
+          : '按 provider / agent / session / layer 维度聚合 token 与成本。'
+      }
     >
       <div style={CONTAINER_STYLE}>
         <SessionStatsPanel
           sessionId={selectedSessionId ?? null}
           sessionTitle={selectedSessionTitle ?? null}
         />
+        {selectedSessionId ? (
+          <div
+            style={{
+              padding: '8px 12px',
+              borderRadius: 10,
+              border: '1px solid color-mix(in srgb, var(--accent) 28%, transparent)',
+              background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
+              color: 'var(--fg-default)',
+              fontSize: 12,
+            }}
+          >
+            当前统计范围：{selectedSessionTitle ?? `会话 ${selectedSessionId.slice(0, 8)}`} 及其子树
+          </div>
+        ) : null}
         <span style={SECTION_TITLE_STYLE}>总览</span>
         <MetricGrid>
-          <StatCard label="调用次数" value={String(total.count)} />
-          <StatCard label="输入 token" value={formatTokens(total.inputTokens)} />
-          <StatCard label="输出 token" value={formatTokens(total.outputTokens)} />
-          <StatCard label="缓存命中" value={formatTokens(total.cacheReadTokens)} />
-          <StatCard label="缓存写入" value={formatTokens(total.cacheWriteTokens)} />
-          <StatCard label="推理 token" value={formatTokens(total.reasoningTokens)} />
-          <StatCard label="估算成本" value={formatCost(total.costUsd)} tone="accent" />
+          <StatCard label="调用次数" value={String(scopedTotal.count)} />
+          <StatCard label="输入 token" value={formatTokens(scopedTotal.inputTokens)} />
+          <StatCard label="输出 token" value={formatTokens(scopedTotal.outputTokens)} />
+          <StatCard label="缓存命中" value={formatTokens(scopedTotal.cacheReadTokens)} />
+          <StatCard label="缓存写入" value={formatTokens(scopedTotal.cacheWriteTokens)} />
+          <StatCard label="推理 token" value={formatTokens(scopedTotal.reasoningTokens)} />
+          <StatCard label="估算成本" value={formatCost(scopedTotal.costUsd)} tone="accent" />
         </MetricGrid>
 
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -265,7 +465,7 @@ function UsageMetricsPanel({ selectedSessionId, selectedSessionTitle }: UsageVie
                       : {})}
                   />
                   {expanded ? (
-                    <LayerDrilldown calls={recent.filter((event) => event.layer === key)} />
+                    <LayerDrilldown calls={scopedRecent.filter((event) => event.layer === key)} />
                   ) : null}
                 </div>
               );
@@ -273,9 +473,9 @@ function UsageMetricsPanel({ selectedSessionId, selectedSessionTitle }: UsageVie
           )}
         </div>
 
-        <span style={SECTION_TITLE_STYLE}>最近 {recent.length} 条调用</span>
+        <span style={SECTION_TITLE_STYLE}>最近 {scopedRecent.length} 条调用</span>
         <div style={{ display: 'grid', gap: 4, fontSize: 11, color: 'var(--fg-default)' }}>
-          {recent
+          {scopedRecent
             .slice()
             .reverse()
             .slice(0, 20)

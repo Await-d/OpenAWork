@@ -13,7 +13,7 @@ import {
   useLayerStore,
   useTeamNotificationStore,
 } from './team-events.js';
-import { useTeamUsageStore } from './team-usage.js';
+import { useTeamToolCallStore, useTeamUsageStore } from './team-usage.js';
 
 beforeEach(() => {
   useHandoffStore.getState().clear();
@@ -21,6 +21,7 @@ beforeEach(() => {
   useClarificationStore.getState().clear();
   useTeamNotificationStore.getState().clear();
   useTeamUsageStore.getState().clear();
+  useTeamToolCallStore.getState().clear();
 });
 
 describe('computeTeamEventsReconnectDelay', () => {
@@ -123,9 +124,12 @@ describe('hydrateTeamRuntimeStores', () => {
         {
           claimedAt: '2026-05-25T10:00:00.000Z',
           completedAt: null,
+          failureReason: null,
           fromRoleLayer: 'pm2',
           fromSessionId: 'session-pm2',
           id: 'handoff-1',
+          recoverableFailure: true,
+          retryCount: 2,
           startedAt: '2026-05-25T10:00:05.000Z',
           state: 'running',
           toRoleLayer: 'executor',
@@ -153,10 +157,15 @@ describe('hydrateTeamRuntimeStores', () => {
 
     const handoff = useHandoffStore.getState().handoffs.get('handoff-1');
     expect(handoff).toMatchObject({
+      failureReason: null,
+      fromSessionId: 'session-pm2',
       id: 'handoff-1',
       fromRoleLayer: 'pm2',
+      recoverableFailure: true,
+      retryCount: 2,
       sessionId: 'session-executor',
       state: 'running',
+      toSessionId: 'session-executor',
       toRoleLayer: 'executor',
     });
     expect(handoff?.startedAt).toBe(Date.parse('2026-05-25T10:00:05.000Z'));
@@ -394,6 +403,52 @@ describe('useHandoffStore · 请求载荷摘要', () => {
     });
     expect(useHandoffStore.getState().handoffs.get('h-summary-2')?.summary).toBeUndefined();
   });
+
+  it('会保留事件里的真实 fromSessionId / toSessionId', () => {
+    useHandoffStore.getState().applyEvent({
+      type: 'handoff.started',
+      taskId: 'h-session-ids',
+      sessionId: 'pm2-session',
+      timestamp: 10,
+      payload: {
+        fromRoleLayer: 'pm1',
+        toRoleLayer: 'pm2',
+        fromSessionId: 'pm1-session',
+        toSessionId: 'pm2-session',
+        state: 'running',
+      },
+    });
+
+    expect(useHandoffStore.getState().handoffs.get('h-session-ids')).toMatchObject({
+      fromSessionId: 'pm1-session',
+      sessionId: 'pm2-session',
+      toSessionId: 'pm2-session',
+    });
+  });
+
+  it('会保留 handoff.failed 事件里的失败原因、重试轮次与可恢复标记', () => {
+    useHandoffStore.getState().applyEvent({
+      type: 'handoff.failed',
+      taskId: 'h-failure-meta',
+      sessionId: 'sess-failed',
+      timestamp: 20,
+      payload: {
+        fromRoleLayer: 'pm2',
+        toRoleLayer: 'executor',
+        state: 'failed',
+        reason: 'runner-fail',
+        retryCount: 3,
+        recoverableFailure: true,
+      },
+    });
+
+    expect(useHandoffStore.getState().handoffs.get('h-failure-meta')).toMatchObject({
+      failureReason: 'runner-fail',
+      recoverableFailure: true,
+      retryCount: 3,
+      state: 'failed',
+    });
+  });
 });
 
 describe('useHandoffStore · 事件单调性守卫 (#9)', () => {
@@ -510,11 +565,25 @@ describe('dispatchTeamEvent · 度量遥测事件不污染通知 / handoff store
   });
 
   it('team_tool_call / team_timing 同样不进通知列表', () => {
+    useLayerStore.getState().addNode({
+      sessionId: 'sess-t2',
+      roleLayer: 'pm2',
+      parentSessionId: null,
+      state: 'running',
+    });
     dispatchTeamEvent({
       type: 'session.substate.changed',
       sessionId: 'sess-t2',
       timestamp: 11,
-      payload: { __teamEventKind: 'team_tool_call', sessionId: 'sess-t2', toolName: 'read' },
+      payload: {
+        __teamEventKind: 'team_tool_call',
+        sessionId: 'sess-t2',
+        agentId: 'critic',
+        toolName: 'read',
+        durationMs: 40,
+        success: false,
+        errorMessage: 'denied',
+      },
     });
     dispatchTeamEvent({
       type: 'session.substate.changed',
@@ -523,6 +592,74 @@ describe('dispatchTeamEvent · 度量遥测事件不污染通知 / handoff store
       payload: { __teamEventKind: 'team_timing', sessionId: 'sess-t2', totalMs: 1500 },
     });
     expect(useTeamNotificationStore.getState().events).toHaveLength(0);
+    expect(useTeamToolCallStore.getState().bySession.get('sess-t2')).toEqual({
+      invocations: 1,
+      failures: 1,
+    });
+    expect(useTeamToolCallStore.getState().byLayer.get('pm2')).toEqual({
+      invocations: 1,
+      failures: 1,
+    });
+    expect(useTeamToolCallStore.getState().byAgent.get('critic')?.get('read')).toBe(1);
+    expect(useTeamToolCallStore.getState().bySessionTool.get('sess-t2')?.get('read')).toMatchObject(
+      {
+        invocations: 1,
+        failures: 1,
+        totalDurationMs: 40,
+      },
+    );
+  });
+
+  it('session 工具明细不会串入其他 session 的全局累计', () => {
+    useLayerStore.getState().addNode({
+      sessionId: 'sess-a',
+      roleLayer: 'pm1',
+      parentSessionId: null,
+      state: 'running',
+    });
+    useLayerStore.getState().addNode({
+      sessionId: 'sess-b',
+      roleLayer: 'pm2',
+      parentSessionId: null,
+      state: 'running',
+    });
+
+    dispatchTeamEvent({
+      type: 'session.substate.changed',
+      sessionId: 'sess-a',
+      timestamp: 1,
+      payload: {
+        __teamEventKind: 'team_tool_call',
+        sessionId: 'sess-a',
+        agentId: 'agent-a',
+        toolName: 'read',
+        durationMs: 15,
+        success: true,
+      },
+    });
+    dispatchTeamEvent({
+      type: 'session.substate.changed',
+      sessionId: 'sess-b',
+      timestamp: 2,
+      payload: {
+        __teamEventKind: 'team_tool_call',
+        sessionId: 'sess-b',
+        agentId: 'agent-b',
+        toolName: 'read',
+        durationMs: 25,
+        success: true,
+      },
+    });
+
+    expect(useTeamToolCallStore.getState().byTool.get('read')?.invocations).toBe(2);
+    expect(useTeamToolCallStore.getState().bySessionTool.get('sess-a')?.get('read')).toMatchObject({
+      invocations: 1,
+      totalDurationMs: 15,
+    });
+    expect(useTeamToolCallStore.getState().bySessionTool.get('sess-b')?.get('read')).toMatchObject({
+      invocations: 1,
+      totalDurationMs: 25,
+    });
   });
 
   it('真正的 session.substate.changed（无 __teamEventKind）仍进通知列表', () => {

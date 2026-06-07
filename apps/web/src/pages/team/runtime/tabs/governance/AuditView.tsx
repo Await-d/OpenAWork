@@ -10,8 +10,12 @@ import { useMemo, useState, type CSSProperties } from 'react';
 import type { TeamAuditLogRecord } from '@openAwork/web-client';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
 import { TabContainer } from '../TabContainer.js';
+import { collectSessionScope, isSessionInScope } from '../../data/team-runtime-session-scope.js';
 
 const ACTION_LABELS: Record<TeamAuditLogRecord['action'], string> = {
+  capability_violation: '能力越权',
+  constitution_check: '宪法检查',
+  quality_review: '质量评审',
   share_created: '创建共享',
   share_deleted: '删除共享',
   share_permission_updated: '权限变更',
@@ -28,6 +32,8 @@ const ACTION_LABELS: Record<TeamAuditLogRecord['action'], string> = {
 };
 
 const ENTITY_LABELS: Record<TeamAuditLogRecord['entityType'], string> = {
+  artifact: '产物',
+  layer: '层级',
   session_share: '会话共享',
   shared_session_comment: '共享评论',
   permission_request: '权限申请',
@@ -56,7 +62,9 @@ const FILTER_BAR_STYLE: CSSProperties = {
 const FILTER_BTN_STYLE: CSSProperties = {
   padding: '4px 10px',
   borderRadius: 6,
-  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: 'color-mix(in srgb, var(--border-default) 50%, transparent)',
   background: 'transparent',
   fontSize: 11,
   fontWeight: 600,
@@ -80,14 +88,39 @@ const ROW_STYLE: CSSProperties = {
   background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
 };
 
-export function AuditView() {
-  const { auditLogs } = useTeamRuntimeReferenceViewData();
+type AuditScopeMode = 'workspace' | 'session';
+
+export interface AuditViewProps {
+  selectedSessionId?: string | null;
+  selectedSessionTitle?: string | null;
+}
+
+export function AuditView({
+  selectedSessionId = null,
+  selectedSessionTitle = null,
+}: AuditViewProps = {}) {
+  const { auditLogs, sessions } = useTeamRuntimeReferenceViewData();
 
   const [entityFilter, setEntityFilter] = useState<TeamAuditLogRecord['entityType'] | 'all'>('all');
   const [actorFilter, setActorFilter] = useState<string>('');
+  const [scopeMode, setScopeMode] = useState<AuditScopeMode>('workspace');
+
+  const sessionScope = useMemo(
+    () => (selectedSessionId ? collectSessionScope(selectedSessionId, sessions) : null),
+    [selectedSessionId, sessions],
+  );
+
+  const scopedAuditLogs = useMemo(() => {
+    if (scopeMode !== 'session' || !sessionScope) {
+      return auditLogs;
+    }
+    return auditLogs.filter(
+      (log) => !log.sessionId || isSessionInScope(log.sessionId, sessionScope),
+    );
+  }, [auditLogs, scopeMode, sessionScope]);
 
   const filtered = useMemo(() => {
-    let list = auditLogs;
+    let list = scopedAuditLogs;
     if (entityFilter !== 'all') {
       list = list.filter((log) => log.entityType === entityFilter);
     }
@@ -100,7 +133,7 @@ export function AuditView() {
       );
     }
     return list.slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  }, [auditLogs, entityFilter, actorFilter]);
+  }, [scopedAuditLogs, entityFilter, actorFilter]);
 
   const exportCsv = () => {
     const header = 'createdAt,action,entityType,entityId,actor,summary\n';
@@ -127,7 +160,7 @@ export function AuditView() {
     URL.revokeObjectURL(url);
   };
 
-  if (auditLogs.length === 0) {
+  if (scopedAuditLogs.length === 0) {
     return (
       <TabContainer title="审计日志" subtitle="共享 / 评论 / 权限变更等敏感操作的完整轨迹。">
         <div style={CONTAINER_STYLE}>
@@ -158,13 +191,27 @@ export function AuditView() {
     <TabContainer title="审计日志" subtitle="共享 / 评论 / 权限变更等敏感操作的完整轨迹。">
       <div style={CONTAINER_STYLE}>
         <div style={FILTER_BAR_STYLE}>
+          {selectedSessionId ? (
+            <>
+              <FilterBtn
+                label="工作区全部"
+                active={scopeMode === 'workspace'}
+                onClick={() => setScopeMode('workspace')}
+              />
+              <FilterBtn
+                label={`当前会话子树 · ${selectedSessionTitle ?? selectedSessionId.slice(0, 8)}`}
+                active={scopeMode === 'session'}
+                onClick={() => setScopeMode('session')}
+              />
+            </>
+          ) : null}
           <FilterBtn
-            label={`全部 · ${auditLogs.length}`}
+            label={`全部 · ${scopedAuditLogs.length}`}
             active={entityFilter === 'all'}
             onClick={() => setEntityFilter('all')}
           />
           {(Object.keys(ENTITY_LABELS) as TeamAuditLogRecord['entityType'][]).map((entity) => {
-            const count = auditLogs.filter((log) => log.entityType === entity).length;
+            const count = scopedAuditLogs.filter((log) => log.entityType === entity).length;
             if (count === 0) return null;
             return (
               <FilterBtn
@@ -238,6 +285,11 @@ export function AuditView() {
                   >
                     {ENTITY_LABELS[log.entityType] ?? log.entityType}
                   </span>
+                  {scopeMode === 'session' && log.sessionId ? (
+                    <span style={{ color: 'var(--fg-muted)' }}>
+                      session {log.sessionId.slice(0, 8)}
+                    </span>
+                  ) : null}
                   {log.actorEmail ? (
                     <span style={{ color: 'var(--fg-muted)' }}>by {log.actorEmail}</span>
                   ) : null}

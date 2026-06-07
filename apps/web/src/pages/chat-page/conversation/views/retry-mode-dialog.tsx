@@ -4,7 +4,7 @@ interface RetryModeDialogProps {
   messagePreview: string;
   onClose: () => void;
   onRetryCurrent: () => void;
-  onRetryBranch: () => void;
+  onRetryBranch?: () => void;
   open: boolean;
 }
 
@@ -16,6 +16,8 @@ export default function RetryModeDialog({
   open,
 }: RetryModeDialogProps) {
   if (!open) return null;
+
+  const canRetryInNewSession = typeof onRetryBranch === 'function';
 
   return (
     <div
@@ -51,7 +53,9 @@ export default function RetryModeDialog({
             选择重试方式
           </div>
           <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.6, color: 'var(--fg-default)' }}>
-            你可以清空这轮回答后在当前会话重新生成，也可以从这里新建会话，避免影响现有历史。
+            {canRetryInNewSession
+              ? '你可以清空这轮回答后在当前会话重新生成，也可以从这里新建会话，避免影响现有历史。'
+              : '你可以清空这轮回答后在当前会话重新生成。'}
           </div>
         </div>
 
@@ -105,23 +109,25 @@ export default function RetryModeDialog({
           >
             清空本轮回答并重试
           </button>
-          <button
-            type="button"
-            onClick={onRetryBranch}
-            style={{
-              height: 34,
-              padding: '0 14px',
-              borderRadius: 10,
-              border: '1px solid var(--accent)',
-              background: 'var(--accent)',
-              color: 'var(--fg-on-accent)',
-              cursor: 'pointer',
-              fontSize: 12,
-              fontWeight: 700,
-            }}
-          >
-            新建会话重试
-          </button>
+          {onRetryBranch ? (
+            <button
+              type="button"
+              onClick={onRetryBranch}
+              style={{
+                height: 34,
+                padding: '0 14px',
+                borderRadius: 10,
+                border: '1px solid var(--accent)',
+                background: 'var(--accent)',
+                color: 'var(--fg-on-accent)',
+                cursor: 'pointer',
+                fontSize: 12,
+                fontWeight: 700,
+              }}
+            >
+              新建会话重试
+            </button>
+          ) : null}
         </div>
       </div>
     </div>

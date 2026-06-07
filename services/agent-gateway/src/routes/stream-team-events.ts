@@ -172,6 +172,7 @@ export interface TeamToolCallEventInput {
   sessionId: string;
   sessionContext: SessionStreamContext;
   toolName: string;
+  agentId?: string | null;
   durationMs: number;
   success: boolean;
   errorMessage?: string;
@@ -184,7 +185,11 @@ export function publishTeamToolCallEvent(input: TeamToolCallEventInput): void {
     userId: input.userId,
     sessionId: input.sessionId,
     layer: input.sessionContext.roleLayer,
+    agentId: input.agentId ?? null,
+    toolName: input.toolName,
+    durationMs: input.durationMs,
     success: input.success,
+    errorType: input.errorMessage ?? null,
   });
   publishTeamEvent({
     type: 'session.substate.changed', // 同上
@@ -195,6 +200,7 @@ export function publishTeamToolCallEvent(input: TeamToolCallEventInput): void {
     payload: {
       __teamEventKind: 'team_tool_call',
       sessionId: input.sessionId,
+      agentId: input.agentId ?? null,
       toolName: input.toolName,
       durationMs: input.durationMs,
       success: input.success,

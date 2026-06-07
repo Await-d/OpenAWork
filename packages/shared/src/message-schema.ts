@@ -150,6 +150,7 @@ export interface Message {
   role: MessageRole;
   content: MessageContent[];
   createdAt: number;
+  agentId?: string;
   clientRequestId?: string;
   durationMs?: number;
   firstTokenLatencyMs?: number;

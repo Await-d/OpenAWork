@@ -223,11 +223,12 @@ describe('createTeamClient runtime alert control actions', () => {
     const client = createTeamClient('http://localhost:3000');
     const result = await client.acknowledgeRuntimeAlert('token-1', 'latency-violation', {
       note: '已知问题',
+      sessionId: 'session-1',
       teamWorkspaceId: 'tw-1',
     });
 
     expect(calls).toEqual([
-      'http://localhost:3000/team/runtime/alerts/latency-violation/acknowledge?teamWorkspaceId=tw-1',
+      'http://localhost:3000/team/runtime/alerts/latency-violation/acknowledge?sessionId=session-1&teamWorkspaceId=tw-1',
     ]);
     expect(result.control?.state).toBe('acknowledged');
     expect(result.runtime?.teamWorkspaceId).toBe('tw-1');
@@ -303,6 +304,97 @@ describe('createTeamClient mutation error handling', () => {
         requestId: 'perm-1',
       }),
     ).rejects.toThrow('permission reply unavailable');
+  });
+});
+
+describe('createTeamClient team messages', () => {
+  it('listMessages 会返回 recipient/reply 字段', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => [
+          {
+            id: 'msg-followup',
+            memberId: 'member-executor',
+            recipientMemberId: 'member-pm1',
+            replyToMessageId: 'msg-parent',
+            content: '接口联调已完成',
+            type: 'result',
+            timestamp: 1_717_000_000_000,
+          },
+        ],
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createTeamClient('http://localhost:3000');
+    const messages = await client.listMessages('token-1');
+
+    expect(messages).toEqual([
+      {
+        id: 'msg-followup',
+        memberId: 'member-executor',
+        recipientMemberId: 'member-pm1',
+        replyToMessageId: 'msg-parent',
+        content: '接口联调已完成',
+        type: 'result',
+        timestamp: 1_717_000_000_000,
+      },
+    ]);
+  });
+
+  it('createMessage 会把 recipient/reply 字段写入请求体并透传返回值', async () => {
+    const calls: Array<{ body: string | null; method?: string; url: string }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({
+        url: typeof input === 'string' ? input : input.toString(),
+        method: init?.method,
+        body: typeof init?.body === 'string' ? init.body : null,
+      });
+      return {
+        ok: true,
+        json: async () => ({
+          id: 'msg-followup',
+          memberId: 'member-executor',
+          recipientMemberId: 'member-pm1',
+          replyToMessageId: 'msg-parent',
+          content: '结果已确认',
+          type: 'result',
+          timestamp: 1_717_000_000_000,
+        }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createTeamClient('http://localhost:3000');
+    const message = await client.createMessage('token-1', {
+      senderId: 'member-executor',
+      recipientMemberId: 'member-pm1',
+      replyToMessageId: 'msg-parent',
+      content: '结果已确认',
+      type: 'result',
+    });
+
+    expect(calls).toEqual([
+      {
+        url: 'http://localhost:3000/team/messages',
+        method: 'POST',
+        body: JSON.stringify({
+          senderId: 'member-executor',
+          recipientMemberId: 'member-pm1',
+          replyToMessageId: 'msg-parent',
+          content: '结果已确认',
+          type: 'result',
+        }),
+      },
+    ]);
+    expect(message).toEqual({
+      id: 'msg-followup',
+      memberId: 'member-executor',
+      recipientMemberId: 'member-pm1',
+      replyToMessageId: 'msg-parent',
+      content: '结果已确认',
+      type: 'result',
+      timestamp: 1_717_000_000_000,
+    });
   });
 });
 

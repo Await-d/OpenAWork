@@ -1,22 +1,43 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import type { AgentTeamsReviewCard, AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
 import { ChromeBadge } from '../../shell/team-runtime-shell-primitives.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
+import { resolveMatchedSharedSessionDetail } from '../../data/team-runtime-shared-context.js';
+import { getSharedSessionStateLabel } from '../../data/team-runtime-model.js';
 import {
   PANEL_STYLE,
   REVIEW_STATUS_META,
   REVIEW_TYPE_META,
   PRIORITY_META,
 } from '../../shared/team-runtime-shared.js';
-import { Icon, ChevronDownIcon, UndoIcon } from '../../shared/TeamIcons.js';
+import { Icon, ChevronDownIcon } from '../../shared/TeamIcons.js';
+import { EmptyState } from '../../shared/content-kit/index.js';
 
 export function ReviewTab({
   selectedTeam = null,
 }: {
   selectedTeam?: AgentTeamsSidebarTeam | null;
 }) {
-  const { replyReview, reviewBusy, reviewCards, submitReviewComment } =
-    useTeamRuntimeReferenceViewData();
+  const {
+    activeSharedSession,
+    canManageSessionEntries,
+    replyReview,
+    reviewBusy,
+    reviewCards,
+    selectedSharedSession,
+    sharedSessionLoading,
+    submitReviewComment,
+  } = useTeamRuntimeReferenceViewData();
+  const isSharedSelected = selectedTeam?.isSharedSession === true;
+  const sharedSession = isSharedSelected
+    ? resolveMatchedSharedSessionDetail({
+        selectedTeamId: selectedTeam.id,
+        activeSharedSession,
+        selectedSharedSession,
+      })
+    : (activeSharedSession ?? (selectedTeam ? null : selectedSharedSession));
+  const sharedReviewLoading =
+    (isSharedSelected || !selectedTeam) && sharedSessionLoading && !sharedSession;
   const [reviewStatuses, setReviewStatuses] = useState<
     Record<string, AgentTeamsReviewCard['status']>
   >(() => {
@@ -27,7 +48,6 @@ export function ReviewTab({
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [commentingId, setCommentingId] = useState<string | null>(null);
   const [commentInput, setCommentInput] = useState('');
-  const [comments, setComments] = useState<Record<string, string[]>>({});
 
   const updateStatus = useCallback((id: string, status: AgentTeamsReviewCard['status']) => {
     setReviewStatuses((prev) => ({ ...prev, [id]: status }));
@@ -44,21 +64,48 @@ export function ReviewTab({
 
   const handleAddComment = useCallback(
     (cardId: string) => {
+      if (!canManageSessionEntries) return;
       if (!commentInput.trim()) return;
       void submitReviewComment(cardId, commentInput.trim()).then((succeeded) => {
         if (!succeeded) {
           return;
         }
-        setComments((prev) => ({
-          ...prev,
-          [cardId]: [...(prev[cardId] ?? []), commentInput.trim()],
-        }));
         setCommentInput('');
         setCommentingId(null);
       });
     },
-    [commentInput, submitReviewComment],
+    [canManageSessionEntries, commentInput, submitReviewComment],
   );
+
+  const reviewSessionKey = sharedSession?.share.sessionId ?? selectedTeam?.id ?? null;
+  const commentContents = useMemo(
+    () => sharedSession?.comments.map((comment) => comment.content) ?? [],
+    [sharedSession],
+  );
+  const reviewHeaderContext = useMemo(() => {
+    if (sharedSession) {
+      return {
+        statusLabel: getSharedSessionStateLabel(sharedSession.share.stateStatus),
+        subtitle: sharedSession.share.sharedByEmail,
+        title: sharedSession.share.title ?? `共享会话 ${sharedSession.share.sessionId}`,
+      };
+    }
+    if (!selectedTeam) {
+      return null;
+    }
+    return {
+      statusLabel:
+        selectedTeam.status === 'running'
+          ? '运行中'
+          : selectedTeam.status === 'paused'
+            ? '已暂停'
+            : selectedTeam.status === 'failed'
+              ? '失败'
+              : '已完成',
+      subtitle: selectedTeam.subtitle,
+      title: selectedTeam.title,
+    };
+  }, [sharedSession, selectedTeam]);
 
   useEffect(() => {
     const nextStatuses: Record<string, AgentTeamsReviewCard['status']> = {};
@@ -72,12 +119,31 @@ export function ReviewTab({
     setExpandedIds(new Set());
     setCommentingId(null);
     setCommentInput('');
-    setComments({});
-  }, [selectedTeam?.id]);
+  }, [reviewSessionKey]);
 
   const pendingCount = Object.values(reviewStatuses).filter((s) => s === 'pending').length;
   const approvedCount = Object.values(reviewStatuses).filter((s) => s === 'approved').length;
   const rejectedCount = Object.values(reviewStatuses).filter((s) => s === 'rejected').length;
+
+  if (sharedReviewLoading) {
+    return (
+      <EmptyState
+        emoji="🧾"
+        title="正在同步共享评审队列"
+        description="共享会话详情加载完成后，这里会展示真实待办和评论上下文。"
+      />
+    );
+  }
+
+  if (isSharedSelected && !sharedSession) {
+    return (
+      <EmptyState
+        emoji="🧾"
+        title="共享评审详情暂不可用"
+        description="当前只拿到了共享会话选择状态，评审待办和评论上下文还未同步。"
+      />
+    );
+  }
 
   return (
     <div style={{ display: 'grid', gap: 10 }}>
@@ -96,9 +162,14 @@ export function ReviewTab({
         >
           {reviewCards.length}
         </span>
+        {!canManageSessionEntries ? (
+          <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
+            当前工作区不可写，无法评论或处理评审项。
+          </span>
+        ) : null}
       </div>
 
-      {selectedTeam ? (
+      {reviewHeaderContext ? (
         <div
           style={{
             display: 'flex',
@@ -118,20 +189,12 @@ export function ReviewTab({
               当前评审会话
             </span>
             <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--fg-strong)' }}>
-              {selectedTeam.title}
+              {reviewHeaderContext.title}
             </span>
           </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            <ChromeBadge>
-              {selectedTeam.status === 'running'
-                ? '运行中'
-                : selectedTeam.status === 'paused'
-                  ? '已暂停'
-                  : selectedTeam.status === 'failed'
-                    ? '失败'
-                    : '已完成'}
-            </ChromeBadge>
-            <ChromeBadge>{selectedTeam.subtitle}</ChromeBadge>
+            <ChromeBadge>{reviewHeaderContext.statusLabel}</ChromeBadge>
+            <ChromeBadge>{reviewHeaderContext.subtitle}</ChromeBadge>
           </div>
         </div>
       ) : null}
@@ -147,7 +210,9 @@ export function ReviewTab({
             const p = PRIORITY_META[card.priority];
             const isPending = currentStatus === 'pending';
             const isExpanded = expandedIds.has(card.id);
-            const cardComments = comments[card.id] ?? [];
+            const cardComments = commentContents.filter((content) =>
+              content.startsWith(`[${card.id}] `),
+            );
             const canReply = Boolean(card.actionable && card.requestId && card.sessionId);
             return (
               <div
@@ -267,7 +332,7 @@ export function ReviewTab({
                           borderLeft: '2px solid var(--accent)',
                         }}
                       >
-                        {c}
+                        {c.replace(`[${card.id}] `, '')}
                       </div>
                     ))}
                   </div>
@@ -294,6 +359,7 @@ export function ReviewTab({
                         }
                       }}
                       placeholder="添加评论..."
+                      disabled={!canManageSessionEntries}
                       className="team-input-focusable"
                       style={{
                         flex: 1,
@@ -309,15 +375,19 @@ export function ReviewTab({
                     <button
                       type="button"
                       onClick={() => handleAddComment(card.id)}
-                      disabled={reviewBusy || !commentInput.trim()}
+                      disabled={!canManageSessionEntries || reviewBusy || !commentInput.trim()}
                       style={{
                         padding: '5px 10px',
                         borderRadius: 6,
                         border: 'none',
                         background: 'var(--accent)',
                         color: 'var(--bg-base)',
-                        cursor: reviewBusy || !commentInput.trim() ? 'not-allowed' : 'pointer',
-                        opacity: reviewBusy || !commentInput.trim() ? 0.5 : 1,
+                        cursor:
+                          canManageSessionEntries && !reviewBusy && commentInput.trim()
+                            ? 'pointer'
+                            : 'not-allowed',
+                        opacity:
+                          canManageSessionEntries && !reviewBusy && commentInput.trim() ? 1 : 0.5,
                         fontSize: 10,
                         fontWeight: 700,
                         transition: 'opacity 0.15s',
@@ -349,8 +419,11 @@ export function ReviewTab({
                       <span style={{ flex: 1 }} />
                       <button
                         type="button"
-                        onClick={() => setCommentingId(commentingId === card.id ? null : card.id)}
-                        disabled={reviewBusy || !card.sessionId}
+                        onClick={() => {
+                          if (!canManageSessionEntries) return;
+                          setCommentingId(commentingId === card.id ? null : card.id);
+                        }}
+                        disabled={!canManageSessionEntries || reviewBusy || !card.sessionId}
                         className="team-btn-outline"
                         style={{
                           padding: '4px 8px',
@@ -360,11 +433,15 @@ export function ReviewTab({
                           color: 'var(--fg-muted)',
                           fontSize: 10,
                           fontWeight: 600,
-                          cursor: reviewBusy || !card.sessionId ? 'not-allowed' : 'pointer',
+                          cursor:
+                            canManageSessionEntries && !reviewBusy && card.sessionId
+                              ? 'pointer'
+                              : 'not-allowed',
                           display: 'inline-flex',
                           alignItems: 'center',
                           gap: 3,
-                          opacity: reviewBusy || !card.sessionId ? 0.5 : 1,
+                          opacity:
+                            canManageSessionEntries && !reviewBusy && card.sessionId ? 1 : 0.5,
                         }}
                       >
                         <Icon name="comment" size={9} color="var(--fg-muted)" /> 评论
@@ -372,11 +449,12 @@ export function ReviewTab({
                       <button
                         type="button"
                         onClick={() => {
+                          if (!canManageSessionEntries) return;
                           void replyReview(card.id, 'approved').then((succeeded) => {
                             if (succeeded) updateStatus(card.id, 'approved');
                           });
                         }}
-                        disabled={reviewBusy || !canReply}
+                        disabled={!canManageSessionEntries || reviewBusy || !canReply}
                         style={{
                           padding: '4px 10px',
                           borderRadius: 6,
@@ -385,11 +463,14 @@ export function ReviewTab({
                           color: 'var(--fg-on-accent)',
                           fontSize: 10,
                           fontWeight: 700,
-                          cursor: reviewBusy || !canReply ? 'not-allowed' : 'pointer',
+                          cursor:
+                            canManageSessionEntries && !reviewBusy && canReply
+                              ? 'pointer'
+                              : 'not-allowed',
                           display: 'inline-flex',
                           alignItems: 'center',
                           gap: 3,
-                          opacity: reviewBusy || !canReply ? 0.5 : 1,
+                          opacity: canManageSessionEntries && !reviewBusy && canReply ? 1 : 0.5,
                           transition: 'opacity 0.15s',
                         }}
                       >
@@ -398,11 +479,12 @@ export function ReviewTab({
                       <button
                         type="button"
                         onClick={() => {
+                          if (!canManageSessionEntries) return;
                           void replyReview(card.id, 'rejected').then((succeeded) => {
                             if (succeeded) updateStatus(card.id, 'rejected');
                           });
                         }}
-                        disabled={reviewBusy || !canReply}
+                        disabled={!canManageSessionEntries || reviewBusy || !canReply}
                         style={{
                           padding: '4px 10px',
                           borderRadius: 6,
@@ -411,40 +493,18 @@ export function ReviewTab({
                           color: 'var(--fg-on-accent)',
                           fontSize: 10,
                           fontWeight: 700,
-                          cursor: reviewBusy || !canReply ? 'not-allowed' : 'pointer',
+                          cursor:
+                            canManageSessionEntries && !reviewBusy && canReply
+                              ? 'pointer'
+                              : 'not-allowed',
                           display: 'inline-flex',
                           alignItems: 'center',
                           gap: 3,
-                          opacity: reviewBusy || !canReply ? 0.5 : 1,
+                          opacity: canManageSessionEntries && !reviewBusy && canReply ? 1 : 0.5,
                           transition: 'opacity 0.15s',
                         }}
                       >
                         <Icon name="x" size={9} color="var(--fg-on-accent)" /> 驳回
-                      </button>
-                    </>
-                  )}
-                  {!isPending && (
-                    <>
-                      <span style={{ flex: 1 }} />
-                      <button
-                        type="button"
-                        onClick={() => updateStatus(card.id, 'pending')}
-                        className="team-btn-outline"
-                        style={{
-                          padding: '4px 8px',
-                          borderRadius: 6,
-                          border: '1px solid var(--border-default)',
-                          background: 'transparent',
-                          color: 'var(--fg-muted)',
-                          fontSize: 10,
-                          fontWeight: 600,
-                          cursor: 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 3,
-                        }}
-                      >
-                        <UndoIcon size={9} color="var(--fg-muted)" /> 撤回
                       </button>
                     </>
                   )}

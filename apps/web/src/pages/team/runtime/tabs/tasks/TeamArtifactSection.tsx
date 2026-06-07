@@ -1,5 +1,22 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { type HandoffRecord } from '@openAwork/web-client';
+import type {
+  HandoffRecord,
+  PendingPermissionRequest,
+  SessionFileChangesSummary,
+  SharedSessionDetailRecord,
+  SharedSessionSummaryRecord,
+} from '@openAwork/web-client';
+import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
+import {
+  resolveMatchedSharedSessionDetail,
+  resolveMatchedSharedSummary,
+} from '../../data/team-runtime-shared-context.js';
+import {
+  findLatestAssistantMessage,
+  formatSnapshotScopeKind,
+  formatWorkspaceLabel,
+  getSharedSessionStateLabel,
+} from '../../data/team-runtime-model.js';
 import {
   useClarificationStore,
   useLayerStore,
@@ -12,11 +29,13 @@ import { TabContainer, TabSection } from '../TabContainer.js';
 import { TabPlaceholder } from '../TabPlaceholder.js';
 import { ArtifactChainWizard } from './ArtifactChainWizard.js';
 import { ClarificationsPanel } from './ClarificationsPanel.js';
+import { parseConstitutionCheck, readConstitutionWarnings } from './constitution-check.js';
 import { DispatchPackageView } from './DispatchPackageView.js';
 import { ReviewReportView } from './ReviewReportView.js';
 import { SessionTreeView } from './SessionTreeView.js';
 import { RunningHandoffCancelList } from './RunningHandoffCancelList.js';
 import { useTeamArtifactData } from './use-team-artifact-data.js';
+import { ArtifactPreview } from './ArtifactPreview.js';
 import {
   extractReviewReport,
   parseDispatchPackage,
@@ -77,6 +96,62 @@ const ERROR_BANNER_STYLE: CSSProperties = {
   fontSize: 12,
 };
 
+const SHARED_SUMMARY_GRID_STYLE: CSSProperties = {
+  display: 'grid',
+  gap: 10,
+  gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+};
+
+const SHARED_SUMMARY_CARD_STYLE: CSSProperties = {
+  display: 'grid',
+  gap: 4,
+  padding: '12px 14px',
+  borderRadius: 10,
+  border: '1px solid color-mix(in srgb, var(--border-default) 48%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base))',
+};
+
+const SHARED_EMPTY_NOTE_STYLE: CSSProperties = {
+  padding: '10px 12px',
+  borderRadius: 8,
+  border: '1px dashed color-mix(in srgb, var(--border-default) 54%, transparent)',
+  color: 'var(--fg-muted)',
+  fontSize: 12,
+  lineHeight: 1.6,
+};
+
+const SHARED_LIST_STYLE: CSSProperties = {
+  display: 'grid',
+  gap: 8,
+};
+
+const SHARED_LIST_ITEM_STYLE: CSSProperties = {
+  display: 'grid',
+  gap: 5,
+  padding: '10px 12px',
+  borderRadius: 8,
+  border: '1px solid color-mix(in srgb, var(--border-default) 45%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 72%, var(--bg-base))',
+};
+
+const SHARED_SOURCE_BADGES_STYLE: CSSProperties = {
+  display: 'flex',
+  gap: 6,
+  flexWrap: 'wrap',
+};
+
+const SHARED_SOURCE_BADGE_STYLE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  padding: '2px 8px',
+  borderRadius: 999,
+  fontSize: 10,
+  fontWeight: 700,
+  color: 'var(--fg-default)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 55%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+};
+
 type WizardStep = 'spec_draft' | 'clarifying' | 'plan_ready' | 'tasks_ready';
 
 interface TeamArtifactSectionProps {
@@ -116,6 +191,256 @@ function mergeHandoffRecords(groups: HandoffRecord[][]): HandoffRecord[] {
   return Array.from(records.values());
 }
 
+function formatShortTimestamp(value: string | undefined): string {
+  if (!value) {
+    return '未记录';
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return parsed.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function formatPermissionRiskLabel(riskLevel: PendingPermissionRequest['riskLevel']): string {
+  if (riskLevel === 'high') {
+    return '高风险';
+  }
+  if (riskLevel === 'medium') {
+    return '中风险';
+  }
+  return '低风险';
+}
+
+function SharedSessionArtifactView({
+  selectedTeamId,
+  sharedSession,
+  sharedSessionLoading,
+  sharedSummary,
+}: {
+  selectedTeamId: string;
+  sharedSession: SharedSessionDetailRecord | null;
+  sharedSessionLoading: boolean;
+  sharedSummary: SharedSessionSummaryRecord | null;
+}) {
+  const effectiveSummary = sharedSession?.share ?? sharedSummary;
+  const latestAssistantOutput = findLatestAssistantMessage(sharedSession);
+  const fileChangesSummary = sharedSession?.session.fileChangesSummary;
+  const pendingPermissions = sharedSession?.pendingPermissions ?? [];
+  const pendingQuestions = sharedSession?.pendingQuestions ?? [];
+  const sessionTitle =
+    effectiveSummary?.title?.trim() || effectiveSummary?.sessionId || selectedTeamId;
+
+  return (
+    <TabContainer
+      title="任务与产物"
+      subtitle="共享会话没有本地 PM1 / PM2 handoff 树，这里直接展示共享输出、协作待处理项和变更快照。"
+    >
+      <div data-testid="shared-artifact-view" style={{ display: 'grid', gap: 12 }}>
+        <TabSection title="共享上下文" hint="当前选中的是共享会话。">
+          <div style={SHARED_SUMMARY_GRID_STYLE}>
+            <div style={SHARED_SUMMARY_CARD_STYLE}>
+              <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>共享会话</span>
+              <strong style={{ fontSize: 14, color: 'var(--fg-strong)' }}>{sessionTitle}</strong>
+            </div>
+            <div style={SHARED_SUMMARY_CARD_STYLE}>
+              <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>状态</span>
+              <strong style={{ fontSize: 14, color: 'var(--fg-strong)' }}>
+                {effectiveSummary
+                  ? getSharedSessionStateLabel(effectiveSummary.stateStatus)
+                  : '待同步'}
+              </strong>
+            </div>
+            <div style={SHARED_SUMMARY_CARD_STYLE}>
+              <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>共享者</span>
+              <strong style={{ fontSize: 14, color: 'var(--fg-strong)' }}>
+                {effectiveSummary?.sharedByEmail ?? '待同步'}
+              </strong>
+            </div>
+            <div style={SHARED_SUMMARY_CARD_STYLE}>
+              <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>权限</span>
+              <strong style={{ fontSize: 14, color: 'var(--fg-strong)' }}>
+                {effectiveSummary?.permission === 'operate'
+                  ? '可操作'
+                  : effectiveSummary?.permission === 'comment'
+                    ? '评论'
+                    : effectiveSummary?.permission === 'view'
+                      ? '只读'
+                      : '待同步'}
+              </strong>
+            </div>
+            <div style={SHARED_SUMMARY_CARD_STYLE}>
+              <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>工作区</span>
+              <strong style={{ fontSize: 14, color: 'var(--fg-strong)' }}>
+                {formatWorkspaceLabel(effectiveSummary?.workspacePath)}
+              </strong>
+            </div>
+            <div style={SHARED_SUMMARY_CARD_STYLE}>
+              <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>协作态</span>
+              <strong style={{ fontSize: 14, color: 'var(--fg-strong)' }}>
+                评论 {sharedSession?.comments.length ?? 0} · 在线{' '}
+                {sharedSession?.presence.length ?? 0}
+              </strong>
+            </div>
+          </div>
+        </TabSection>
+
+        <TabSection
+          title="最新助手输出"
+          hint={
+            sharedSession
+              ? `消息 ${sharedSession.session.messages?.length ?? 0} 条`
+              : '等待共享详情同步'
+          }
+        >
+          {sharedSessionLoading ? (
+            <div style={SHARED_EMPTY_NOTE_STYLE}>正在同步共享会话详情…</div>
+          ) : latestAssistantOutput ? (
+            <div data-testid="shared-artifact-output">
+              <ArtifactPreview
+                title="共享输出摘要"
+                content={latestAssistantOutput}
+                phase="shared"
+              />
+            </div>
+          ) : (
+            <div style={SHARED_EMPTY_NOTE_STYLE}>
+              {sharedSession
+                ? '当前共享会话还没有可展示的助手文本输出。'
+                : '共享摘要已加载，但详细消息尚未同步到本地。'}
+            </div>
+          )}
+        </TabSection>
+
+        <TabSection title="协作待处理项" hint="这些请求会同步出现在评审和共享治理视图。">
+          <div
+            style={{
+              display: 'grid',
+              gap: 12,
+              gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+            }}
+          >
+            <section style={SHARED_LIST_STYLE}>
+              <strong style={{ fontSize: 12, color: 'var(--fg-strong)' }}>
+                待审批权限 {pendingPermissions.length}
+              </strong>
+              {pendingPermissions.length > 0 ? (
+                pendingPermissions.map((request) => (
+                  <div key={request.requestId} style={SHARED_LIST_ITEM_STYLE}>
+                    <strong style={{ fontSize: 12, color: 'var(--fg-strong)' }}>
+                      {request.previewAction ?? request.toolName}
+                    </strong>
+                    <span style={{ fontSize: 11, color: 'var(--fg-default)' }}>
+                      {request.scope} · {formatPermissionRiskLabel(request.riskLevel)}
+                    </span>
+                    <span style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.6 }}>
+                      {request.reason}
+                    </span>
+                    <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
+                      创建于 {formatShortTimestamp(request.createdAt)}
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <div style={SHARED_EMPTY_NOTE_STYLE}>当前没有待处理的权限申请。</div>
+              )}
+            </section>
+
+            <section style={SHARED_LIST_STYLE}>
+              <strong style={{ fontSize: 12, color: 'var(--fg-strong)' }}>
+                待回答问题 {pendingQuestions.length}
+              </strong>
+              {pendingQuestions.length > 0 ? (
+                pendingQuestions.map((request) => (
+                  <div key={request.requestId} style={SHARED_LIST_ITEM_STYLE}>
+                    <strong style={{ fontSize: 12, color: 'var(--fg-strong)' }}>
+                      {request.title}
+                    </strong>
+                    <span style={{ fontSize: 11, color: 'var(--fg-default)' }}>
+                      {request.toolName} · {request.questions.length} 个问题
+                    </span>
+                    <div style={{ display: 'grid', gap: 4 }}>
+                      {request.questions.map((question, index) => (
+                        <span
+                          key={`${request.requestId}-${index}`}
+                          style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.6 }}
+                        >
+                          {question.header}：{question.question}
+                        </span>
+                      ))}
+                    </div>
+                    <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
+                      创建于 {formatShortTimestamp(request.createdAt)}
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <div style={SHARED_EMPTY_NOTE_STYLE}>当前没有待回答的问题请求。</div>
+              )}
+            </section>
+          </div>
+        </TabSection>
+
+        <TabSection title="变更快照" hint="基于共享会话同步过来的文件变更摘要。">
+          {fileChangesSummary ? (
+            <div style={{ display: 'grid', gap: 10 }}>
+              <div style={SHARED_SUMMARY_GRID_STYLE}>
+                {buildSharedChangeMetricCards(fileChangesSummary).map((item) => (
+                  <div key={item.label} style={SHARED_SUMMARY_CARD_STYLE}>
+                    <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>{item.label}</span>
+                    <strong style={{ fontSize: 14, color: 'var(--fg-strong)' }}>
+                      {item.value}
+                    </strong>
+                    <span style={{ fontSize: 10, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
+                      {item.hint}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              {fileChangesSummary.sourceKinds.length > 0 ? (
+                <div style={SHARED_SOURCE_BADGES_STYLE}>
+                  {fileChangesSummary.sourceKinds.map((sourceKind) => (
+                    <span key={sourceKind} style={SHARED_SOURCE_BADGE_STYLE}>
+                      {sourceKind}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div style={SHARED_EMPTY_NOTE_STYLE}>当前共享会话还没有同步到文件变更快照。</div>
+          )}
+        </TabSection>
+      </div>
+    </TabContainer>
+  );
+}
+
+function buildSharedChangeMetricCards(fileChangesSummary: SessionFileChangesSummary) {
+  return [
+    {
+      label: '变更文件',
+      value: fileChangesSummary.totalFileDiffs,
+      hint: '本次共享运行累计同步的文件 diff 数量',
+    },
+    {
+      label: '快照数',
+      value: fileChangesSummary.snapshotCount,
+      hint: '当前共享运行已经保存的快照数量',
+    },
+    {
+      label: '最近快照',
+      value: formatShortTimestamp(fileChangesSummary.latestSnapshotAt),
+      hint: formatSnapshotScopeKind(fileChangesSummary.latestSnapshotScopeKind),
+    },
+  ];
+}
+
 export function TeamArtifactSection({
   focusHandoffId = null,
   onClearFocus,
@@ -125,10 +450,54 @@ export function TeamArtifactSection({
 }: TeamArtifactSectionProps) {
   const nodes = useLayerStore((state) => state.nodes);
   const clarificationItems = useClarificationStore((state) => state.items);
+  const {
+    activeSharedSession,
+    runRuntimeAlertRemediation,
+    selectedSharedSession,
+    sharedSessionLoading,
+    sharedSessions,
+    workspaceGroups = [],
+  } = useTeamRuntimeReferenceViewData();
+  const selectedTeamRecord = useMemo(
+    () =>
+      workspaceGroups
+        .flatMap((group) => group.sessions)
+        .find((session) => session.id === selectedTeamId) ?? null,
+    [selectedTeamId, workspaceGroups],
+  );
+  const isSharedSessionSelected = useMemo(
+    () =>
+      selectedTeamRecord?.isSharedSession === true ||
+      sharedSessions.some((session) => session.sessionId === selectedTeamId),
+    [selectedTeamRecord, selectedTeamId, sharedSessions],
+  );
+  const selectedSharedSummary = useMemo(
+    () =>
+      resolveMatchedSharedSummary({
+        selectedTeamId,
+        activeSharedSession,
+        selectedSharedSession,
+        sharedSessions,
+      }),
+    [activeSharedSession, selectedSharedSession, selectedTeamId, sharedSessions],
+  );
+  const matchedSharedSession = useMemo(
+    () =>
+      resolveMatchedSharedSessionDetail({
+        selectedTeamId,
+        activeSharedSession,
+        selectedSharedSession,
+      }),
+    [activeSharedSession, selectedSharedSession, selectedTeamId],
+  );
   const selectedSessionRoleLayer = selectedTeamId
-    ? (nodes.get(selectedTeamId)?.roleLayer ?? null)
+    ? isSharedSessionSelected
+      ? null
+      : (nodes.get(selectedTeamId)?.roleLayer ?? null)
     : null;
-  const selectedSessionHandoffs = useSessionHandoffs(selectedTeamId || null);
+  const selectedSessionHandoffs = useSessionHandoffs(
+    isSharedSessionSelected ? null : selectedTeamId || null,
+  );
 
   const initialContext = useMemo(
     () =>
@@ -141,15 +510,44 @@ export function TeamArtifactSection({
     [focusHandoffId, selectedSessionHandoffs.handoffs, selectedSessionRoleLayer, selectedTeamId],
   );
 
+  const pm1DetailSessionId =
+    initialContext.pm1ArtifactSessionId && initialContext.pm1ArtifactSessionId !== selectedTeamId
+      ? initialContext.pm1ArtifactSessionId
+      : null;
+  const pm1SessionHandoffs = useSessionHandoffs(pm1DetailSessionId);
+
+  const upstreamCombinedHandoffs = useMemo(
+    () => mergeHandoffRecords([selectedSessionHandoffs.handoffs, pm1SessionHandoffs.handoffs]),
+    [pm1SessionHandoffs.handoffs, selectedSessionHandoffs.handoffs],
+  );
+
+  const intermediateContext = useMemo(
+    () =>
+      resolveTeamArtifactContext({
+        focusHandoffId,
+        handoffs: upstreamCombinedHandoffs,
+        selectedSessionId: selectedTeamId || null,
+        selectedSessionRoleLayer,
+      }),
+    [focusHandoffId, selectedSessionRoleLayer, selectedTeamId, upstreamCombinedHandoffs],
+  );
+
   const pm2DetailSessionId =
-    initialContext.pm2ArtifactSessionId && initialContext.pm2ArtifactSessionId !== selectedTeamId
-      ? initialContext.pm2ArtifactSessionId
+    intermediateContext.pm2ArtifactSessionId &&
+    intermediateContext.pm2ArtifactSessionId !== selectedTeamId &&
+    intermediateContext.pm2ArtifactSessionId !== pm1DetailSessionId
+      ? intermediateContext.pm2ArtifactSessionId
       : null;
   const pm2SessionHandoffs = useSessionHandoffs(pm2DetailSessionId);
 
   const combinedHandoffs = useMemo(
-    () => mergeHandoffRecords([selectedSessionHandoffs.handoffs, pm2SessionHandoffs.handoffs]),
-    [pm2SessionHandoffs.handoffs, selectedSessionHandoffs.handoffs],
+    () =>
+      mergeHandoffRecords([
+        selectedSessionHandoffs.handoffs,
+        pm1SessionHandoffs.handoffs,
+        pm2SessionHandoffs.handoffs,
+      ]),
+    [pm1SessionHandoffs.handoffs, pm2SessionHandoffs.handoffs, selectedSessionHandoffs.handoffs],
   );
 
   const artifactContext = useMemo(
@@ -163,7 +561,13 @@ export function TeamArtifactSection({
     [combinedHandoffs, focusHandoffId, selectedSessionRoleLayer, selectedTeamId],
   );
 
+  const reviewSessionId = artifactContext.pm2ArtifactSessionId ?? selectedTeamId;
+
   const [wizardStep, setWizardStep] = useState<WizardStep>('spec_draft');
+  const reviewReportFromHandoffs = useMemo(
+    () => extractReviewReport(combinedHandoffs, focusHandoffId),
+    [combinedHandoffs, focusHandoffId],
+  );
   const {
     artifactError,
     artifactLoading,
@@ -173,8 +577,9 @@ export function TeamArtifactSection({
     specArtifact,
     tasksArtifact,
   } = useTeamArtifactData({
-    pm1ArtifactSessionId: artifactContext.pm1ArtifactSessionId,
-    pm2ArtifactSessionId: artifactContext.pm2ArtifactSessionId,
+    pm1ArtifactSessionId: isSharedSessionSelected ? null : artifactContext.pm1ArtifactSessionId,
+    pm2ArtifactSessionId: isSharedSessionSelected ? null : artifactContext.pm2ArtifactSessionId,
+    preferredReviewArtifactId: reviewReportFromHandoffs.reviewArtifactId,
   });
 
   useEffect(() => {
@@ -196,9 +601,15 @@ export function TeamArtifactSection({
     tasksArtifact?.content,
   ]);
 
-  const runtimeLoading = selectedSessionHandoffs.loading || pm2SessionHandoffs.loading;
-  const runtimeError = selectedSessionHandoffs.error ?? pm2SessionHandoffs.error;
-  const disposition = useReviewDisposition(selectedTeamId || null, focusHandoffId);
+  const runtimeLoading =
+    selectedSessionHandoffs.loading || pm1SessionHandoffs.loading || pm2SessionHandoffs.loading;
+  const runtimeError =
+    selectedSessionHandoffs.error ?? pm1SessionHandoffs.error ?? pm2SessionHandoffs.error;
+  const disposition = useReviewDisposition(
+    isSharedSessionSelected ? null : reviewSessionId,
+    focusHandoffId,
+  );
+  const [retryBusyHandoffId, setRetryBusyHandoffId] = useState<string | null>(null);
 
   const pendingClarifications = useMemo(
     () =>
@@ -213,6 +624,34 @@ export function TeamArtifactSection({
         })),
     [artifactContext.pm1ArtifactSessionId, clarificationItems],
   );
+  const retryFocusedHandoff = async (handoffId: string) => {
+    setRetryBusyHandoffId(handoffId);
+    try {
+      await runRuntimeAlertRemediation('handoff-failure', {
+        handoffId,
+        ...(reviewSessionId ? { sessionId: reviewSessionId } : {}),
+      });
+    } finally {
+      setRetryBusyHandoffId(null);
+    }
+  };
+  const constitutionWarnings = useMemo(() => {
+    const pm1ResultWarnings = combinedHandoffs
+      .filter((record) => record.toRoleLayer === 'pm1')
+      .sort((left, right) =>
+        (right.completedAt ?? right.updatedAt).localeCompare(left.completedAt ?? left.updatedAt),
+      )
+      .flatMap((record) => readConstitutionWarnings(record.resultJson))
+      .filter((warning) => warning.status !== 'pass');
+
+    if (pm1ResultWarnings.length > 0) {
+      return pm1ResultWarnings;
+    }
+
+    return planArtifact?.content
+      ? parseConstitutionCheck(planArtifact.content).filter((warning) => warning.status !== 'pass')
+      : [];
+  }, [combinedHandoffs, planArtifact?.content]);
 
   const dispatchPackages = useMemo(() => {
     if (!artifactContext.pm2ArtifactSessionId) {
@@ -257,10 +696,6 @@ export function TeamArtifactSection({
       );
   }, [artifactContext.pm2ArtifactSessionId, combinedHandoffs, focusHandoffId]);
 
-  const reviewReportFromHandoffs = useMemo(
-    () => extractReviewReport(combinedHandoffs, focusHandoffId),
-    [combinedHandoffs, focusHandoffId],
-  );
   const reviewReport = useMemo(
     () =>
       reviewReportFromHandoffs.markdown
@@ -300,6 +735,17 @@ export function TeamArtifactSection({
     );
   }
 
+  if (isSharedSessionSelected) {
+    return (
+      <SharedSessionArtifactView
+        selectedTeamId={selectedTeamId}
+        sharedSession={matchedSharedSession}
+        sharedSessionLoading={sharedSessionLoading}
+        sharedSummary={selectedSharedSummary}
+      />
+    );
+  }
+
   return (
     <TabContainer
       title="任务与产物"
@@ -309,6 +755,7 @@ export function TeamArtifactSection({
           type="button"
           onClick={() => {
             selectedSessionHandoffs.refresh();
+            pm1SessionHandoffs.refresh();
             pm2SessionHandoffs.refresh();
             refreshArtifacts();
           }}
@@ -349,11 +796,28 @@ export function TeamArtifactSection({
               {artifactContext.focusHandoff.failureReason}
             </span>
           ) : null}
-          {onClearFocus ? (
+          {onClearFocus || artifactContext.focusHandoff.recoverableFailure ? (
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button type="button" onClick={onClearFocus} style={ACTION_BTN_STYLE}>
-                清除定位
-              </button>
+              {onClearFocus ? (
+                <button type="button" onClick={onClearFocus} style={ACTION_BTN_STYLE}>
+                  清除定位
+                </button>
+              ) : null}
+              {artifactContext.focusHandoff.recoverableFailure ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void retryFocusedHandoff(artifactContext.focusHandoff!.id);
+                  }}
+                  style={PRIMARY_ACTION_BTN_STYLE}
+                  disabled={retryBusyHandoffId === artifactContext.focusHandoff.id}
+                  aria-label={`重试失败 handoff ${artifactContext.focusHandoff.id}`}
+                >
+                  {retryBusyHandoffId === artifactContext.focusHandoff.id
+                    ? '重试中…'
+                    : '重试失败 handoff'}
+                </button>
+              ) : null}
             </div>
           ) : null}
         </section>
@@ -372,8 +836,10 @@ export function TeamArtifactSection({
           pm2HandoffId={disposition.pm2HandoffId}
           onActionComplete={(result) => {
             selectedSessionHandoffs.applyPreview(result.handoffs);
+            pm1SessionHandoffs.applyPreview(result.handoffs);
             pm2SessionHandoffs.applyPreview(result.handoffs);
             selectedSessionHandoffs.refresh();
+            pm1SessionHandoffs.refresh();
             pm2SessionHandoffs.refresh();
             refreshArtifacts();
           }}
@@ -388,7 +854,9 @@ export function TeamArtifactSection({
 
       {selectedTeamId ? (
         <TabSection title="待澄清" hint="PM1 解析 spec 时产生的澄清问题。">
-          <ClarificationsPanel filterSessionId={selectedTeamId} />
+          <ClarificationsPanel
+            filterSessionId={artifactContext.pm1ArtifactSessionId ?? selectedTeamId}
+          />
         </TabSection>
       ) : null}
 
@@ -416,7 +884,7 @@ export function TeamArtifactSection({
               planContent={planArtifact?.content ?? null}
               tasksContent={tasksArtifact?.content ?? null}
               clarifications={pendingClarifications}
-              constitutionWarnings={[]}
+              constitutionWarnings={constitutionWarnings}
               currentStep={wizardStep}
               onStepChange={setWizardStep}
             />

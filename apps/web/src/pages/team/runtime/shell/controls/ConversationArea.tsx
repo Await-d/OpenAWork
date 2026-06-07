@@ -24,6 +24,7 @@
 
 import { useMemo, type CSSProperties, type ReactNode } from 'react';
 import {
+  useClarificationStore,
   useTeamNotificationStore,
   type HandoffEvent,
 } from '../../../../../stores/team/team-events.js';
@@ -200,7 +201,18 @@ export function ConversationArea({
 }: ConversationAreaProps) {
   const { error, loading } = useTeamRuntimeReferenceViewData();
   const events = useTeamNotificationStore((s) => s.events);
-  const pushMessages = useMemo<PushMessage[]>(() => coalesceEventsToPush(events), [events]);
+  const clarificationItems = useClarificationStore((s) => s.items);
+  const clarificationEvents = useMemo<HandoffEvent[]>(
+    () => buildClarificationPushEvents(clarificationItems, events),
+    [clarificationItems, events],
+  );
+  const pushMessages = useMemo<PushMessage[]>(
+    () =>
+      coalesceEventsToPush(
+        [...events, ...clarificationEvents].sort((left, right) => left.timestamp - right.timestamp),
+      ),
+    [clarificationEvents, events],
+  );
   const handleSuggestion = onSelectSuggestion ?? onSubmitMessage;
 
   // ─── Path 1: 外部注入消息内容（如 conversation tab 选中具体子 session）───
@@ -479,10 +491,11 @@ function PushMessageCard({ message }: { message: PushMessage }) {
       {message.actions ? (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
           {message.actions.map((action) => (
-            <button
+            <span
               key={action}
-              type="button"
               style={{
+                display: 'inline-flex',
+                alignItems: 'center',
                 minHeight: 24,
                 padding: '0 10px',
                 borderRadius: 999,
@@ -491,11 +504,10 @@ function PushMessageCard({ message }: { message: PushMessage }) {
                 color: 'var(--fg-strong)',
                 fontSize: 11,
                 fontWeight: 700,
-                cursor: 'pointer',
               }}
             >
               {action}
-            </button>
+            </span>
           ))}
         </div>
       ) : null}
@@ -529,12 +541,136 @@ function coalesceEventsToPush(events: HandoffEvent[]): PushMessage[] {
   return groups.slice(-3);
 }
 
+function buildClarificationPushEvents(
+  items: Array<{
+    context: string;
+    createdAt: number;
+    fromSessionId: string;
+    id: string;
+    question: string;
+    sessionId: string;
+    status: 'answered' | 'dismissed' | 'pending';
+  }>,
+  events: HandoffEvent[],
+): HandoffEvent[] {
+  const pending = items.filter((item) => item.status === 'pending');
+  if (pending.length === 0) {
+    return [];
+  }
+
+  const uncoveredBySession = new Map<string, typeof pending>();
+  for (const item of pending) {
+    const alreadyCovered = events.some((event) => {
+      if (event.type === 'artifact.needs-clarification' && event.sessionId === item.sessionId) {
+        return true;
+      }
+      if (event.payload['reason'] !== 'needs_clarification') {
+        return false;
+      }
+      const eventFromSessionId =
+        typeof event.payload['fromSessionId'] === 'string' ? event.payload['fromSessionId'] : null;
+      return eventFromSessionId === item.fromSessionId || event.sessionId === item.sessionId;
+    });
+    if (alreadyCovered) {
+      continue;
+    }
+    const group = uncoveredBySession.get(item.fromSessionId) ?? [];
+    group.push(item);
+    uncoveredBySession.set(item.fromSessionId, group);
+  }
+
+  return Array.from(uncoveredBySession.values()).map((group) => {
+    const latest = group.slice().sort((left, right) => right.createdAt - left.createdAt)[0]!;
+    const summary =
+      latest.context.trim().length > 0
+        ? latest.context.trim()
+        : `有 ${group.length} 个澄清问题等待回答`;
+
+    return {
+      type: 'session.inbound.submitted',
+      sessionId: latest.sessionId,
+      layer: 'pm1',
+      timestamp: latest.createdAt,
+      payload: {
+        blocking: false,
+        reason: 'needs_clarification',
+        fromSessionId: latest.fromSessionId,
+        summary,
+        questions: group.map((item) => ({
+          id: item.id,
+          question: item.question,
+          context: item.context,
+        })),
+        suggestedActions: [{ label: '回答澄清问题', action: 'answer' }],
+      },
+    };
+  });
+}
+
+function extractSuggestedActions(payload: Record<string, unknown>): string[] | undefined {
+  const suggestedActions = payload['suggestedActions'];
+  if (!Array.isArray(suggestedActions)) {
+    return undefined;
+  }
+
+  const labels = suggestedActions
+    .map((item) => {
+      if (typeof item === 'string') {
+        const trimmed = item.trim();
+        return trimmed.length > 0 ? trimmed : null;
+      }
+      if (typeof item === 'object' && item !== null) {
+        const label = item['label'];
+        if (typeof label === 'string' && label.trim().length > 0) {
+          return label.trim();
+        }
+      }
+      return null;
+    })
+    .filter((value): value is string => value !== null);
+
+  return labels.length > 0 ? labels : undefined;
+}
+
+function extractPushMessageBody(
+  event: HandoffEvent,
+  layer: string | null,
+  headline: string,
+): string {
+  const explicitSummary =
+    typeof event.payload['summary'] === 'string'
+      ? event.payload['summary'].trim()
+      : typeof event.payload['context'] === 'string'
+        ? event.payload['context'].trim()
+        : typeof event.payload['textPreview'] === 'string'
+          ? event.payload['textPreview'].trim()
+          : '';
+  if (explicitSummary.length > 0) {
+    return explicitSummary;
+  }
+
+  const questions = event.payload['questions'];
+  if (
+    event.type === 'session.inbound.submitted' &&
+    event.payload['reason'] === 'needs_clarification' &&
+    Array.isArray(questions) &&
+    questions.length > 0
+  ) {
+    return `有 ${questions.length} 个澄清问题等待回答`;
+  }
+
+  return [layer, headline].filter(Boolean).join(' · ');
+}
+
 function mapEventToPushMessage(event: HandoffEvent, index: number): PushMessage {
-  const kind: PushMessageKind = event.type.includes('failed')
-    ? 'blocking'
-    : event.type.includes('completed')
-      ? 'silent'
-      : 'informational';
+  const payloadBlocking =
+    typeof event.payload['blocking'] === 'boolean' ? event.payload['blocking'] : null;
+  const kind: PushMessageKind =
+    payloadBlocking === true || event.type.includes('failed')
+      ? 'blocking'
+      : event.type.includes('completed')
+        ? 'silent'
+        : 'informational';
 
   const layer = layerLabel(event.layer);
   // substate.changed 携带具体阶段，展开成「接待层 · 草拟规格」这种可读文案；
@@ -549,13 +685,15 @@ function mapEventToPushMessage(event: HandoffEvent, index: number): PushMessage 
       : null;
 
   const headline = substate ?? eventTypeLabel(event.type);
-  const body = [layer, headline].filter(Boolean).join(' · ');
+  const body = extractPushMessageBody(event, layer, headline);
+  const actions = extractSuggestedActions(event.payload);
 
   return {
     body,
     // 合并后同组只保留首条 id；为避免 key 冲突带上 index。
     id: `event-${event.type}-${event.timestamp}-${index}`,
     kind,
+    ...(actions ? { actions } : {}),
     count: 1,
     timestamp: new Date(event.timestamp).toLocaleTimeString('zh-CN', {
       hour: '2-digit',

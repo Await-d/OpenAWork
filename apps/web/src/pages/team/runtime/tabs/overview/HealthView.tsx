@@ -12,11 +12,20 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import {
   useHandoffStore,
+  useLayerStore,
   useTeamEventsConnectionStore,
   type HandoffEntry,
   type TeamRoleLayer,
 } from '../../../../../stores/team/team-events.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
+import {
+  collectSessionScope,
+  isHandoffInSessionScope,
+} from '../../data/team-runtime-session-scope.js';
+import {
+  resolveMatchedSharedSessionDetail,
+  resolveMatchedSharedSummary,
+} from '../../data/team-runtime-shared-context.js';
 import { TabContainer } from '../TabContainer.js';
 import type { TeamRuntimeDiagnostics } from '@openAwork/web-client';
 import type { TeamRuntimeHandoffContextInput } from '../team-runtime-navigation.js';
@@ -28,6 +37,7 @@ import {
   CK_BORDER,
   CK_SURFACE,
 } from '../../shared/content-kit/index.js';
+import { SharedSessionHealthView } from './SharedSessionHealthView.js';
 
 const STUCK_THRESHOLD_MS = 2 * 60 * 1000;
 
@@ -113,6 +123,9 @@ function describeAlertLifecycleStatus(
 export interface HealthViewProps {
   onCancelHandoff?: (handoffId: string) => void;
   onOpenHandoffContext?: (input: TeamRuntimeHandoffContextInput) => void;
+  selectedSessionId?: string | null;
+  selectedSessionIsShared?: boolean;
+  selectedSessionTitle?: string | null;
 }
 
 function resolvePreferredTabForLayer(layer: TeamRoleLayer): 'artifacts' | 'health' | 'review' {
@@ -142,18 +155,50 @@ function contextActionLabel(tab: 'artifacts' | 'health' | 'review'): string {
   return tab === 'review' ? '查看评审' : tab === 'artifacts' ? '查看任务与产物' : '查看健康详情';
 }
 
-export function HealthView({ onCancelHandoff, onOpenHandoffContext }: HealthViewProps) {
+export function HealthView({
+  onCancelHandoff,
+  onOpenHandoffContext,
+  selectedSessionId = null,
+  selectedSessionIsShared = false,
+  selectedSessionTitle = null,
+}: HealthViewProps) {
   const handoffs = useHandoffStore((s) => s.handoffs);
+  const nodes = useLayerStore((s) => s.nodes);
   const {
     acknowledgeRuntimeAlert,
+    activeSharedSession,
+    auditLogs,
     clearRuntimeAlertControl,
     diagnostics,
     runRuntimeAlertRemediation,
+    selectedSharedSession,
+    sharedSessionLoading,
+    sharedSessions,
     suppressRuntimeAlert,
   } = useTeamRuntimeReferenceViewData();
   const [now, setNow] = useState(() => Date.now());
   const teamEventsConnection = useTeamEventsConnectionStore();
   const [alertActionBusy, setAlertActionBusy] = useState<string | null>(null);
+  const selectedSharedSummary = useMemo(
+    () =>
+      resolveMatchedSharedSummary({
+        selectedTeamId: selectedSessionId,
+        activeSharedSession,
+        selectedSharedSession,
+        sharedSessions,
+      }),
+    [activeSharedSession, selectedSessionId, selectedSharedSession, sharedSessions],
+  );
+  const isSharedSessionSelected = selectedSessionIsShared || selectedSharedSummary !== null;
+  const sharedSession = useMemo(
+    () =>
+      resolveMatchedSharedSessionDetail({
+        selectedTeamId: selectedSessionId,
+        activeSharedSession,
+        selectedSharedSession,
+      }),
+    [activeSharedSession, selectedSessionId, selectedSharedSession],
+  );
 
   useEffect(() => {
     const t = window.setInterval(() => setNow(Date.now()), 5000);
@@ -161,38 +206,64 @@ export function HealthView({ onCancelHandoff, onOpenHandoffContext }: HealthView
   }, []);
 
   const allEntries = useMemo(() => Array.from(handoffs.values()), [handoffs]);
+  const sessionScope = useMemo(
+    () => (selectedSessionId ? collectSessionScope(selectedSessionId, nodes.values()) : null),
+    [nodes, selectedSessionId],
+  );
+  const scopedEntries = useMemo(
+    () =>
+      sessionScope
+        ? allEntries.filter((entry) => isHandoffInSessionScope(entry, sessionScope))
+        : allEntries,
+    [allEntries, sessionScope],
+  );
 
   const failed = useMemo(
     () =>
-      allEntries
+      scopedEntries
         .filter((e) => e.state === 'failed')
         .sort((a, b) => (b.endedAt ?? b.updatedAt) - (a.endedAt ?? a.updatedAt))
         .slice(0, 30),
-    [allEntries],
+    [scopedEntries],
   );
 
   const stuck = useMemo(
     () =>
-      allEntries
+      scopedEntries
         .filter((e) => {
           if (e.state !== 'pending' && e.state !== 'claimed') return false;
           const ref = e.startedAt ?? e.updatedAt;
           return now - ref > STUCK_THRESHOLD_MS;
         })
         .sort((a, b) => (a.startedAt ?? a.updatedAt) - (b.startedAt ?? b.updatedAt)),
-    [allEntries, now],
+    [now, scopedEntries],
   );
 
-  const running = useMemo(() => allEntries.filter((e) => e.state === 'running'), [allEntries]);
+  const running = useMemo(
+    () => scopedEntries.filter((e) => e.state === 'running'),
+    [scopedEntries],
+  );
+
+  const retryFailedHandoff = async (handoffId: string) => {
+    setAlertActionBusy(handoffId);
+    try {
+      await runRuntimeAlertRemediation('handoff-failure', {
+        handoffId,
+        ...(selectedSessionId ? { sessionId: selectedSessionId } : {}),
+      });
+    } finally {
+      setAlertActionBusy(null);
+    }
+  };
 
   // 失败率（最近 50 条）
   const recentTerminal = useMemo(
     () =>
-      allEntries
+      scopedEntries
         .filter((e) => e.state === 'completed' || e.state === 'failed' || e.state === 'cancelled')
         .sort((a, b) => (b.endedAt ?? b.updatedAt) - (a.endedAt ?? a.updatedAt))
         .slice(0, 50),
-    [allEntries],
+    [scopedEntries],
   );
   const failureRate = useMemo(() => {
     if (recentTerminal.length === 0) return null;
@@ -236,12 +307,49 @@ export function HealthView({ onCancelHandoff, onOpenHandoffContext }: HealthView
           : 'default';
   const overallHealthy = failed.length === 0 && stuck.length === 0 && backendHealth === 'healthy';
 
+  if (isSharedSessionSelected && selectedSessionId) {
+    return (
+      <TabContainer
+        title="健康度"
+        subtitle="共享会话展示协作健康与后端全局运行信号，不再沿用本地 runtime handoff 下钻。"
+      >
+        <SharedSessionHealthView
+          auditLogs={auditLogs}
+          diagnostics={diagnostics}
+          selectedSessionId={selectedSessionId}
+          selectedSessionTitle={selectedSessionTitle}
+          sharedSession={sharedSession}
+          sharedSessionLoading={sharedSessionLoading}
+          sharedSummary={selectedSharedSummary}
+        />
+      </TabContainer>
+    );
+  }
+
   return (
     <TabContainer
       title="健康度"
-      subtitle="优先展示后端真实健康态，再下钻到 handoff 失败与卡住任务。"
+      subtitle={
+        selectedSessionId
+          ? '后端健康保持全局视角；失败 handoff 与卡住任务按当前会话及子树下钻。'
+          : '优先展示后端真实健康态，再下钻到 handoff 失败与卡住任务。'
+      }
     >
       <div style={CONTAINER_STYLE}>
+        {selectedSessionId ? (
+          <div
+            style={{
+              padding: '8px 12px',
+              borderRadius: 10,
+              border: '1px solid color-mix(in srgb, var(--accent) 28%, transparent)',
+              background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
+              color: 'var(--fg-default)',
+              fontSize: 12,
+            }}
+          >
+            当前下钻范围：{selectedSessionTitle ?? `会话 ${selectedSessionId.slice(0, 8)}`} 及其子树
+          </div>
+        ) : null}
         {/* 概览 */}
         <div style={{ display: 'grid', gap: 8 }}>
           <span style={SECTION_TITLE_STYLE}>健康概览</span>
@@ -432,6 +540,7 @@ export function HealthView({ onCancelHandoff, onOpenHandoffContext }: HealthView
                             await runRuntimeAlertRemediation('quality-review-pending', {
                               force: true,
                               handoffId: pending.handoffId,
+                              ...(selectedSessionId ? { sessionId: selectedSessionId } : {}),
                             });
                           } finally {
                             setAlertActionBusy(null);
@@ -542,7 +651,9 @@ export function HealthView({ onCancelHandoff, onOpenHandoffContext }: HealthView
                             onClick={async () => {
                               setAlertActionBusy(alert.code);
                               try {
-                                await runRuntimeAlertRemediation(alert.code);
+                                await runRuntimeAlertRemediation(alert.code, {
+                                  ...(selectedSessionId ? { sessionId: selectedSessionId } : {}),
+                                });
                               } finally {
                                 setAlertActionBusy(null);
                               }
@@ -564,7 +675,11 @@ export function HealthView({ onCancelHandoff, onOpenHandoffContext }: HealthView
                           onClick={async () => {
                             setAlertActionBusy(alert.code);
                             try {
-                              await acknowledgeRuntimeAlert(alert.code, '已确认');
+                              await acknowledgeRuntimeAlert(
+                                alert.code,
+                                '已确认',
+                                selectedSessionId ? { sessionId: selectedSessionId } : undefined,
+                              );
                             } finally {
                               setAlertActionBusy(null);
                             }
@@ -582,6 +697,7 @@ export function HealthView({ onCancelHandoff, onOpenHandoffContext }: HealthView
                               await suppressRuntimeAlert(alert.code, {
                                 minutes: 60,
                                 note: '静音 1 小时',
+                                ...(selectedSessionId ? { sessionId: selectedSessionId } : {}),
                               });
                             } finally {
                               setAlertActionBusy(null);
@@ -600,7 +716,10 @@ export function HealthView({ onCancelHandoff, onOpenHandoffContext }: HealthView
                         onClick={async () => {
                           setAlertActionBusy(alert.code);
                           try {
-                            await clearRuntimeAlertControl(alert.code);
+                            await clearRuntimeAlertControl(
+                              alert.code,
+                              selectedSessionId ? { sessionId: selectedSessionId } : undefined,
+                            );
                           } finally {
                             setAlertActionBusy(null);
                           }
@@ -703,7 +822,13 @@ export function HealthView({ onCancelHandoff, onOpenHandoffContext }: HealthView
             ) : null}
             <div style={{ display: 'grid', gap: 6 }}>
               {failed.map((entry) => (
-                <FailedRow key={entry.id} entry={entry} onOpenContext={onOpenHandoffContext} />
+                <FailedRow
+                  key={entry.id}
+                  entry={entry}
+                  onOpenContext={onOpenHandoffContext}
+                  onRetry={entry.recoverableFailure ? retryFailedHandoff : undefined}
+                  retryBusy={alertActionBusy === entry.id}
+                />
               ))}
             </div>
           </div>
@@ -765,6 +890,8 @@ function alertActionButtonStyle(tone: 'danger' | 'default' | 'warning'): CSSProp
 function FailedRow({
   entry,
   onOpenContext,
+  onRetry,
+  retryBusy = false,
 }: {
   entry: HandoffEntry;
   onOpenContext?: (input: {
@@ -772,6 +899,8 @@ function FailedRow({
     preferredTab: 'artifacts' | 'health' | 'review';
     sessionId?: string | null;
   }) => void;
+  onRetry?: (handoffId: string) => void | Promise<void>;
+  retryBusy?: boolean;
 }) {
   const dateStr = new Date(entry.endedAt ?? entry.updatedAt).toLocaleString();
   const preferredTab = resolvePreferredTabForLayer(entry.toRoleLayer);
@@ -799,6 +928,20 @@ function FailedRow({
         {entry.id}
       </span>
       <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>{dateStr}</span>
+      {onRetry ? (
+        <button
+          type="button"
+          aria-label={`重试失败 handoff ${entry.id}`}
+          title="只重试这条可恢复失败的 handoff"
+          disabled={retryBusy}
+          onClick={() => {
+            void onRetry(entry.id);
+          }}
+          style={alertActionButtonStyle('warning')}
+        >
+          {retryBusy ? '重试中…' : '重试'}
+        </button>
+      ) : null}
       {onOpenContext ? (
         <button
           type="button"

@@ -36,6 +36,20 @@ import {
 const MSG_ID = 'msg-1';
 
 describe('normalizeChatMessages', () => {
+  it('保留恢复消息里的 agentId，供 team 对话按来源层级渲染身份', () => {
+    const messages = normalizeChatMessages([
+      {
+        id: 'assistant-agent-1',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'ok' }],
+        createdAt: 1,
+        agentId: 'prometheus',
+      },
+    ]);
+
+    expect(messages[0]?.agentId).toBe('prometheus');
+  });
+
   it('preserves assistant provider usage from recovered messages', () => {
     const messages = normalizeChatMessages([
       {

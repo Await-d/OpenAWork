@@ -43,11 +43,20 @@ export interface HandoffEntry {
   state: HandoffState;
   fromRoleLayer: TeamRoleLayer;
   toRoleLayer: TeamRoleLayer;
+  fromSessionId?: string;
+  toSessionId?: string | null;
+  paused?: boolean;
   sessionId?: string;
   /** 第一次进入 running/claimed 的时间戳（毫秒）。 */
   startedAt?: number;
   /** 进入终态（completed/failed/cancelled）的时间戳（毫秒）。 */
   endedAt?: number;
+  /** 失败原因（若已失败）。 */
+  failureReason?: string | null;
+  /** 当前重试轮次。 */
+  retryCount?: number;
+  /** 后端判定的可恢复失败标记。 */
+  recoverableFailure?: boolean;
   /** 该 handoff 的请求载荷摘要（来自事件 payload 的意图/下一步文案，可选）。 */
   summary?: string;
   updatedAt: number;
@@ -72,9 +81,13 @@ export type TeamEventsConnectionState =
 interface TeamRuntimeSnapshotHandoffRecord {
   claimedAt?: string | null;
   completedAt?: string | null;
+  failureReason?: string | null;
   fromRoleLayer: string;
   fromSessionId: string;
   id: string;
+  paused?: boolean;
+  recoverableFailure?: boolean;
+  retryCount?: number;
   startedAt?: string | null;
   state: string;
   toRoleLayer: string;
@@ -139,6 +152,33 @@ export const useHandoffStore = create<HandoffStoreState>((set) => ({
       }
 
       const newState = (event.payload['state'] as HandoffState) ?? existing.state;
+      const nextFromSessionId =
+        typeof event.payload['fromSessionId'] === 'string' &&
+        event.payload['fromSessionId'].length > 0
+          ? event.payload['fromSessionId']
+          : existing.fromSessionId;
+      const nextToSessionId =
+        typeof event.payload['toSessionId'] === 'string'
+          ? event.payload['toSessionId']
+          : event.payload['toSessionId'] === null
+            ? null
+            : event.sessionId && event.sessionId !== nextFromSessionId
+              ? event.sessionId
+              : existing.toSessionId;
+      const nextPaused =
+        typeof event.payload['paused'] === 'boolean' ? event.payload['paused'] : existing.paused;
+      const nextFailureReason =
+        typeof event.payload['reason'] === 'string'
+          ? event.payload['reason']
+          : existing.failureReason;
+      const nextRetryCount =
+        typeof event.payload['retryCount'] === 'number'
+          ? event.payload['retryCount']
+          : existing.retryCount;
+      const nextRecoverableFailure =
+        typeof event.payload['recoverableFailure'] === 'boolean'
+          ? event.payload['recoverableFailure']
+          : existing.recoverableFailure;
 
       // 派生 startedAt：第一次进入 running/claimed 时记录
       const isStartingNow =
@@ -154,11 +194,19 @@ export const useHandoffStore = create<HandoffStoreState>((set) => ({
 
       next.set(event.taskId!, {
         ...existing,
+        ...(nextFromSessionId ? { fromSessionId: nextFromSessionId } : {}),
+        ...(nextToSessionId !== undefined ? { toSessionId: nextToSessionId } : {}),
+        ...(nextPaused !== undefined ? { paused: nextPaused } : {}),
         state: newState,
-        sessionId: event.sessionId ?? existing.sessionId,
+        sessionId: nextToSessionId ?? event.sessionId ?? existing.sessionId,
         updatedAt: event.timestamp,
         ...(isStartingNow ? { startedAt: event.timestamp } : {}),
         ...(isEndingNow ? { endedAt: event.timestamp } : {}),
+        ...(nextFailureReason !== undefined ? { failureReason: nextFailureReason } : {}),
+        ...(nextRetryCount !== undefined ? { retryCount: nextRetryCount } : {}),
+        ...(nextRecoverableFailure !== undefined
+          ? { recoverableFailure: nextRecoverableFailure }
+          : {}),
         ...(existing.summary === undefined && incomingSummary ? { summary: incomingSummary } : {}),
       });
       return { handoffs: next };
@@ -603,7 +651,15 @@ export function dispatchTeamEvent(event: HandoffEvent): void {
     });
   } else if (teamEventKind === 'team_tool_call') {
     const { applyToolCallEvent } = useTeamToolCallStore.getState();
+    const toolSessionId = (event.payload['sessionId'] as string) ?? event.sessionId ?? undefined;
+    const explicitLayer = (event.payload['layer'] as string) ?? event.layer ?? undefined;
+    const derivedLayer =
+      explicitLayer ??
+      (toolSessionId ? useLayerStore.getState().nodes.get(toolSessionId)?.roleLayer : undefined);
     applyToolCallEvent({
+      agentId: (event.payload['agentId'] as string) ?? undefined,
+      ...(derivedLayer ? { layer: derivedLayer } : {}),
+      sessionId: toolSessionId,
       toolName: (event.payload['toolName'] as string) ?? 'unknown',
       durationMs: (event.payload['durationMs'] as number) ?? 0,
       success: (event.payload['success'] as boolean) ?? true,
@@ -667,12 +723,20 @@ export function hydrateTeamRuntimeStores(input: {
               normalizeLayerNodeState(record.state) !== 'pending'
             ? { endedAt: updatedAt }
             : {}),
+        fromSessionId: record.fromSessionId,
         id: record.id,
         fromRoleLayer: normalizeTeamRoleLayer(record.fromRoleLayer),
+        ...(typeof record.paused === 'boolean' ? { paused: record.paused } : {}),
         sessionId: record.toSessionId ?? record.fromSessionId,
         startedAt: parseTimestampMs(record.startedAt) ?? parseTimestampMs(record.claimedAt),
         state: normalizeLayerNodeState(record.state) as HandoffState,
+        toSessionId: record.toSessionId,
         toRoleLayer: normalizeTeamRoleLayer(record.toRoleLayer),
+        ...(record.failureReason !== undefined ? { failureReason: record.failureReason } : {}),
+        ...(typeof record.retryCount === 'number' ? { retryCount: record.retryCount } : {}),
+        ...(typeof record.recoverableFailure === 'boolean'
+          ? { recoverableFailure: record.recoverableFailure }
+          : {}),
         updatedAt,
       };
     }),

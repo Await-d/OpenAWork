@@ -17,7 +17,7 @@
  *     这里只渲染 UI，由父组件决定是否拦截
  */
 
-import { useActionState, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import { useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import {
   useClarificationStore,
   type ClarificationItem,
@@ -60,7 +60,7 @@ const CARD_STYLE: CSSProperties = {
   padding: '12px 14px',
   borderRadius: 10,
   border: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
-  background: 'var(--card-bg, var(--bg-overlay)',
+  background: 'var(--card-bg, var(--bg-overlay))',
 };
 
 const QUESTION_STYLE: CSSProperties = {
@@ -98,6 +98,12 @@ const ACTIONS_ROW_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   gap: 8,
+};
+
+const ERROR_TEXT_STYLE: CSSProperties = {
+  fontSize: 11,
+  color: 'var(--danger)',
+  lineHeight: 1.5,
 };
 
 const PRIMARY_BTN_STYLE: CSSProperties = {
@@ -169,11 +175,12 @@ export function ClarificationsPanel({
 
   if (filtered.length === 0) return null;
 
-  const handleAnswer = async (item: ClarificationItem, answer: string) => {
+  const handleAnswer = async (item: ClarificationItem, answer: string): Promise<string | null> => {
     if (!gatewayUrl || !accessToken || !item.fromSessionId) {
+      const error = new Error('未登录或缺少 PM1 session');
       console.warn('[ClarificationsPanel] missing gateway / token / fromSessionId');
-      onError?.(new Error('未登录或缺少 PM1 session'), item);
-      return;
+      onError?.(error, item);
+      return error.message;
     }
     const client = createTeamInboundClient(gatewayUrl);
     try {
@@ -187,25 +194,30 @@ export function ClarificationsPanel({
         },
       });
       markAnswered(item.id, answer);
+      return null;
     } catch (err) {
       console.error('[ClarificationsPanel] inbound submit failed', err);
       onError?.(err, item);
+      return err instanceof Error ? err.message : '提交回答失败，请稍后重试。';
     }
   };
 
-  const handleDismiss = async (item: ClarificationItem) => {
+  const handleDismiss = async (item: ClarificationItem): Promise<string | null> => {
     if (!gatewayUrl || !accessToken || !item.fromSessionId) {
+      const error = new Error('未登录或缺少 PM1 session');
       console.warn('[ClarificationsPanel] missing gateway / token / fromSessionId');
-      onError?.(new Error('未登录或缺少 PM1 session'), item);
-      return;
+      onError?.(error, item);
+      return error.message;
     }
     const client = createTeamInboundClient(gatewayUrl);
     try {
       await client.dismissClarification(accessToken, item.fromSessionId, item.id);
       dismiss(item.id);
+      return null;
     } catch (err) {
       console.error('[ClarificationsPanel] clarification dismiss failed', err);
       onError?.(err, item);
+      return err instanceof Error ? err.message : '忽略失败，请稍后重试。';
     }
   };
 
@@ -230,7 +242,7 @@ export function ClarificationsPanel({
           key={item.id}
           item={item}
           onSubmit={(answer) => handleAnswer(item, answer)}
-          onDismiss={() => void handleDismiss(item)}
+          onDismiss={() => handleDismiss(item)}
         />
       ))}
 
@@ -262,24 +274,53 @@ function PendingCard({
   onDismiss,
 }: {
   item: ClarificationItem;
-  onSubmit: (answer: string) => Promise<void> | void;
-  onDismiss: () => void;
+  onSubmit: (answer: string) => Promise<string | null> | string | null;
+  onDismiss: () => Promise<string | null> | string | null;
 }) {
-  // React 19 Actions：FormData 承载提交数据，同时保留受控 draft 仅用于按钮
-  // disabled 的 visual feedback（与项目其他禁用按钮 UX 保持一致）。
-  // pending 状态直接取 useActionState 第三个返回值，在同一组件内使用无需 useFormStatus。
   const [draft, setDraft] = useState('');
-  const [, submitAnswer, isPending] = useActionState<string, FormData>(async (_prev, formData) => {
-    const trimmed = String(formData.get('answer') ?? '').trim();
-    if (!trimmed) return '';
-    await onSubmit(trimmed);
-    return '';
-  }, '');
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [dismissing, setDismissing] = useState(false);
+  const isPending = submitting || dismissing;
 
   const canSubmit = !isPending && draft.trim().length > 0;
 
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmed = draft.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    setSubmitting(true);
+    setActionError(null);
+    try {
+      const errorMessage = await onSubmit(trimmed);
+      if (errorMessage) {
+        setActionError(errorMessage);
+        return;
+      }
+      setDraft('');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDismiss = async () => {
+    setDismissing(true);
+    setActionError(null);
+    try {
+      const errorMessage = await onDismiss();
+      if (errorMessage) {
+        setActionError(errorMessage);
+      }
+    } finally {
+      setDismissing(false);
+    }
+  };
+
   return (
-    <form style={CARD_STYLE} action={submitAnswer}>
+    <form style={CARD_STYLE} onSubmit={(event) => void handleSubmit(event)}>
       <span style={QUESTION_STYLE}>
         <span aria-hidden style={{ marginRight: 6 }}>
           ❓
@@ -296,6 +337,11 @@ function PendingCard({
         disabled={isPending}
         required
       />
+      {actionError ? (
+        <span role="alert" style={ERROR_TEXT_STYLE}>
+          {actionError}
+        </span>
+      ) : null}
       <div style={ACTIONS_ROW_STYLE}>
         <button
           type="submit"
@@ -310,7 +356,7 @@ function PendingCard({
         </button>
         <button
           type="button"
-          onClick={onDismiss}
+          onClick={() => void handleDismiss()}
           disabled={isPending}
           style={SECONDARY_BTN_STYLE}
           title="标记为不再询问（不会发送给 PM1）"

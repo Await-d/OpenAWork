@@ -3,23 +3,34 @@ import type { AgentTeamsSidebarTeam, AgentTeamsTaskCard } from '../../data/team-
 import { ChromeBadge } from '../../shell/team-runtime-shell-primitives.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
 import { PANEL_STYLE, PRIORITY_META } from '../../shared/team-runtime-shared.js';
-import { ChevronRightIcon, PlusIcon, TrashIcon } from '../../shared/TeamIcons.js';
+import { CheckIcon, ChevronRightIcon, PlusIcon } from '../../shared/TeamIcons.js';
 
 function TaskCard({
   card,
   expanded,
-  onDelete,
+  onAdvance,
+  canAdvance,
+  canMoveLeft,
+  canMoveRight,
+  advanceTitle,
   onMove,
   onToggleExpand,
 }: {
   card: AgentTeamsTaskCard;
   expanded: boolean;
-  onDelete: (id: string) => void;
+  onAdvance: (id: string) => void;
+  canAdvance: boolean;
+  canMoveLeft: boolean;
+  canMoveRight: boolean;
+  advanceTitle: string;
   onMove: (id: string, direction: 'left' | 'right') => void;
   onToggleExpand: () => void;
 }) {
   const priorityMeta = PRIORITY_META[card.priority];
   const movable = card.mutable !== false;
+  const leftEnabled = movable && canMoveLeft;
+  const rightEnabled = movable && canMoveRight;
+  const advanceEnabled = movable && canAdvance;
 
   return (
     <div
@@ -122,18 +133,19 @@ function TaskCard({
         <button
           type="button"
           onClick={() => onMove(card.id, 'left')}
-          title={movable ? '向左移动' : '当前卡片仅支持查看'}
-          disabled={!movable}
+          aria-label={`任务 ${card.title} 向左移动`}
+          title={leftEnabled ? '向左移动' : '当前卡片无法再向左移动'}
+          disabled={!leftEnabled}
           style={{
             background: 'none',
             border: 'none',
-            cursor: movable ? 'pointer' : 'not-allowed',
+            cursor: leftEnabled ? 'pointer' : 'not-allowed',
             padding: '1px 3px',
             color: 'var(--fg-muted)',
             fontSize: 9,
             display: 'inline-flex',
             alignItems: 'center',
-            opacity: movable ? 0.6 : 0.3,
+            opacity: leftEnabled ? 0.6 : 0.3,
           }}
         >
           ◀
@@ -141,37 +153,40 @@ function TaskCard({
         <button
           type="button"
           onClick={() => onMove(card.id, 'right')}
-          title={movable ? '向右移动' : '当前卡片仅支持查看'}
-          disabled={!movable}
+          aria-label={`任务 ${card.title} 向右移动`}
+          title={rightEnabled ? '向右移动' : '当前卡片无法再向右移动'}
+          disabled={!rightEnabled}
           style={{
             background: 'none',
             border: 'none',
-            cursor: movable ? 'pointer' : 'not-allowed',
+            cursor: rightEnabled ? 'pointer' : 'not-allowed',
             padding: '1px 3px',
             color: 'var(--fg-muted)',
             fontSize: 9,
             display: 'inline-flex',
             alignItems: 'center',
-            opacity: movable ? 0.6 : 0.3,
+            opacity: rightEnabled ? 0.6 : 0.3,
           }}
         >
           ▶
         </button>
         <button
           type="button"
-          onClick={() => onDelete(card.id)}
-          title="推进到下一状态"
+          onClick={() => onAdvance(card.id)}
+          aria-label={`任务 ${card.title} ${advanceTitle}`}
+          title={advanceTitle}
+          disabled={!advanceEnabled}
           style={{
             background: 'none',
             border: 'none',
-            cursor: 'pointer',
+            cursor: advanceEnabled ? 'pointer' : 'not-allowed',
             padding: '1px 3px',
             display: 'inline-flex',
             alignItems: 'center',
-            opacity: 0.5,
+            opacity: advanceEnabled ? 0.6 : 0.3,
           }}
         >
-          <TrashIcon size={10} color="var(--danger)" />
+          <CheckIcon size={10} color={advanceEnabled ? 'var(--success)' : 'var(--fg-muted)'} />
         </button>
       </div>
     </div>
@@ -179,7 +194,8 @@ function TaskCard({
 }
 
 export function TasksTab({ selectedTeam = null }: { selectedTeam?: AgentTeamsSidebarTeam | null }) {
-  const { busy, createTask, moveTask, taskLanes } = useTeamRuntimeReferenceViewData();
+  const { busy, canManageSessionEntries, createTask, moveTask, taskLanes } =
+    useTeamRuntimeReferenceViewData();
   const [addingLane, setAddingLane] = useState<string | null>(null);
   const [expandedTaskIds, setExpandedTaskIds] = useState<Set<string>>(new Set());
   const [newTitle, setNewTitle] = useState('');
@@ -204,6 +220,9 @@ export function TasksTab({ selectedTeam = null }: { selectedTeam?: AgentTeamsSid
 
   const handleAddTask = useCallback(
     (laneId: string) => {
+      if (!canManageSessionEntries) {
+        return;
+      }
       if (!newTitle.trim()) {
         return;
       }
@@ -218,21 +237,27 @@ export function TasksTab({ selectedTeam = null }: { selectedTeam?: AgentTeamsSid
         setAddingLane(null);
       });
     },
-    [createTask, newTitle],
+    [canManageSessionEntries, createTask, newTitle],
   );
 
   const handleMoveTask = useCallback(
     (taskId: string, direction: 'left' | 'right') => {
+      if (!canManageSessionEntries) {
+        return;
+      }
       void moveTask(taskId, direction);
     },
-    [moveTask],
+    [canManageSessionEntries, moveTask],
   );
 
-  const handleDeleteTask = useCallback(
+  const handleAdvanceTask = useCallback(
     (taskId: string) => {
+      if (!canManageSessionEntries) {
+        return;
+      }
       void moveTask(taskId, 'right');
     },
-    [moveTask],
+    [canManageSessionEntries, moveTask],
   );
 
   return (
@@ -252,6 +277,11 @@ export function TasksTab({ selectedTeam = null }: { selectedTeam?: AgentTeamsSid
         >
           {taskLanes.reduce((sum, l) => sum + l.cards.length, 0)}
         </span>
+        {!canManageSessionEntries ? (
+          <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
+            当前工作区不可写，无法新增或推进任务。
+          </span>
+        ) : null}
       </div>
 
       {selectedTeam ? (
@@ -362,16 +392,32 @@ export function TasksTab({ selectedTeam = null }: { selectedTeam?: AgentTeamsSid
 
               {/* Lane cards */}
               <div style={{ display: 'grid', gap: 5, padding: '8px 10px' }}>
-                {visibleCards.map((card) => (
-                  <TaskCard
-                    key={card.id}
-                    card={card}
-                    expanded={expandedTaskIds.has(card.id)}
-                    onDelete={handleDeleteTask}
-                    onMove={handleMoveTask}
-                    onToggleExpand={() => toggleExpandTask(card.id)}
-                  />
-                ))}
+                {visibleCards.map((card) =>
+                  (() => {
+                    const canMoveLeft = lane.id !== 'todo';
+                    const canMoveRight = lane.id !== 'review';
+                    const advanceTitle =
+                      lane.id === 'todo'
+                        ? '开始处理'
+                        : lane.id === 'doing'
+                          ? '标记完成'
+                          : '当前卡片已在最终列';
+                    return (
+                      <TaskCard
+                        key={card.id}
+                        card={card}
+                        expanded={expandedTaskIds.has(card.id)}
+                        onAdvance={handleAdvanceTask}
+                        canAdvance={canManageSessionEntries && lane.id !== 'review'}
+                        canMoveLeft={canManageSessionEntries && canMoveLeft}
+                        canMoveRight={canManageSessionEntries && canMoveRight}
+                        advanceTitle={advanceTitle}
+                        onMove={handleMoveTask}
+                        onToggleExpand={() => toggleExpandTask(card.id)}
+                      />
+                    );
+                  })(),
+                )}
               </div>
 
               {/* Add task */}
@@ -392,6 +438,7 @@ export function TasksTab({ selectedTeam = null }: { selectedTeam?: AgentTeamsSid
                       }}
                       placeholder="输入任务标题..."
                       autoFocus
+                      disabled={!canManageSessionEntries}
                       style={{
                         padding: '7px 10px',
                         borderRadius: 8,
@@ -445,7 +492,13 @@ export function TasksTab({ selectedTeam = null }: { selectedTeam?: AgentTeamsSid
                 ) : (
                   <button
                     type="button"
-                    onClick={() => setAddingLane(lane.id)}
+                    onClick={() => {
+                      if (!canManageSessionEntries) {
+                        return;
+                      }
+                      setAddingLane(lane.id);
+                    }}
+                    disabled={!canManageSessionEntries}
                     style={{
                       width: '100%',
                       minHeight: 28,
@@ -456,7 +509,8 @@ export function TasksTab({ selectedTeam = null }: { selectedTeam?: AgentTeamsSid
                       background: 'transparent',
                       fontSize: 11,
                       fontWeight: 500,
-                      cursor: 'pointer',
+                      cursor: canManageSessionEntries ? 'pointer' : 'not-allowed',
+                      opacity: canManageSessionEntries ? 1 : 0.5,
                     }}
                     className="team-dashed-add-accent"
                   >

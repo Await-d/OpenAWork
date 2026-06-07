@@ -115,6 +115,7 @@ export interface SessionRow {
   user_id: string;
   messages_json: string;
   state_status: string;
+  paused?: number | null;
   metadata_json: string;
   title: string | null;
   created_at: string;

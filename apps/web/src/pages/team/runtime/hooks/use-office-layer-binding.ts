@@ -9,7 +9,6 @@
  *     的 status 来源。状态变化后既有 waypoint 系统会自动让 agent 在
  *     work/discuss/rest 区之间走动——这就是"联动"。
  *   - 4 个角色槽位（leader/researcher/executor/critic）按索引近似映射到 5 层。
- *   - feature flag：localStorage['teamV2.office.liveBinding']='0' 可回退到原 mock。
  *
  * 纯映射逻辑抽成 `deriveOfficeStatusOverlay`，便于单测。
  */
@@ -84,21 +83,15 @@ export function deriveOfficeStatusOverlay(
   });
 }
 
-function isLiveBindingEnabled(): boolean {
-  if (typeof window === 'undefined') return true;
-  return window.localStorage.getItem('teamV2.office.liveBinding') !== '0';
-}
-
 /**
  * 消费 OfficeThreeCanvas 的 officeAgents，叠加真实 layer/handoff 状态。
- * flag 关闭或无活动时返回原数组。
+ * 无活动时返回原数组。
  */
 export function useOfficeLayerBinding(agents: AgentTeamsOfficeAgent[]): AgentTeamsOfficeAgent[] {
   const layerNodes = useLayerStore((s) => s.nodes);
   const handoffs = useHandoffStore((s) => s.handoffs);
 
   return useMemo(() => {
-    if (!isLiveBindingEnabled()) return agents;
     const activity = deriveLayerActivity({
       layerNodes: layerNodes.values(),
       handoffs: handoffs.values(),

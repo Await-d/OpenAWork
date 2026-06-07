@@ -31,7 +31,9 @@ export function parsePreferences(raw: string | null): TemplatePreferences {
     const favorites = Array.isArray(rec['favorites'])
       ? rec['favorites'].filter((x): x is string => typeof x === 'string')
       : [];
-    const recent = isStringNumberMap(rec['recent']) ? (rec['recent'] as Record<string, number>) : {};
+    const recent = isStringNumberMap(rec['recent'])
+      ? (rec['recent'] as Record<string, number>)
+      : {};
     const usage = isStringNumberMap(rec['usage']) ? (rec['usage'] as Record<string, number>) : {};
     return { favorites: dedupe(favorites), recent: { ...recent }, usage: { ...usage } };
   } catch {
@@ -49,7 +51,10 @@ function dedupe(list: string[]): string[] {
 }
 
 /** 切换收藏状态（已收藏→取消，未收藏→加入）。 */
-export function toggleFavorite(prefs: TemplatePreferences, templateId: string): TemplatePreferences {
+export function toggleFavorite(
+  prefs: TemplatePreferences,
+  templateId: string,
+): TemplatePreferences {
   const has = prefs.favorites.includes(templateId);
   return {
     ...prefs,

@@ -3,9 +3,8 @@
  *
  * 决定用户在 team session 中按下回车时，输入应该走哪条写入路径：
  *
- * - `stream`：开启普通 chat SSE/WS 流（reception/pm1/pm2/executor/reviewer
- *   等 chat 风格 session 都支持）。reception session 走这条让 b agent 直
- *   接对话，由 b runner 异步驱动后续 orchestration。
+ * - `stream`：开启普通 chat SSE/WS 流（pm1/pm2/executor/reviewer 等 chat 风格
+ *   session 都支持）。
  *
  * - `inbound`：通过 L1.3 反向通道
  *   `POST /team/sessions/:id/inbound-messages` 投递。当 substate 为
@@ -44,9 +43,10 @@ export type TeamSubmitStrategy =
 /**
  * 根据当前 session 的 roleLayer 与 substate 决定 composer 提交走哪条路径。
  *
- * 当前规则（与 D5 决策对齐）：
+ * 当前规则：
  * - `substate === 'clarifying'` → inbound:clarification_answer
- * - 其它（含 reception 普通对话 / pm1/pm2/executor/reviewer 普通对话） → stream
+ * - `roleLayer === 'reception'` → inbound:user_input
+ * - 其它（pm1/pm2/executor/reviewer 普通对话） → stream
  *
  * 暴露为 pure function 便于单测。
  */
@@ -59,10 +59,12 @@ export function resolveTeamSubmitStrategy(
     return { kind: 'inbound', messageType: 'clarification_answer' };
   }
 
-  // 其它路径（含 reception 与各执行层）走普通 chat stream。
-  // 注意：roleLayer 当前只参与 default placeholder 选择（在 view 层），
-  // 不参与 strategy 决策。保留参数是为了将来根据 layer 区分写路径。
-  void roleLayer;
+  // reception 根会话是团队入口：用户输入应先走 inbound user_input，由
+  // team-inbound → reception-orchestrator 决定是派发下游还是少量直答。
+  if (roleLayer === 'reception') {
+    return { kind: 'inbound', messageType: 'user_input' };
+  }
 
+  // 其它路径（pm1/pm2/executor/reviewer）走普通 chat stream。
   return { kind: 'stream' };
 }

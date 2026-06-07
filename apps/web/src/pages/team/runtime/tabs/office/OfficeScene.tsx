@@ -1,7 +1,7 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
 import { PANEL_STYLE } from '../../shared/team-runtime-shared.js';
-import { XIcon, PauseIcon, ResumeIcon } from '../../shared/TeamIcons.js';
+import { XIcon } from '../../shared/TeamIcons.js';
 
 /* ── Old 2D canvas components removed ── */
 
@@ -10,8 +10,6 @@ export interface OfficeSceneState {
   setZoom: React.Dispatch<React.SetStateAction<number>>;
   pan: { x: number; y: number };
   setPan: React.Dispatch<React.SetStateAction<{ x: number; y: number }>>;
-  agentPaused: Set<string>;
-  toggleAgentPause: (id: string) => void;
   stageFrame: { left: number; top: number; width: number; height: number };
   dragRef: React.MutableRefObject<{
     startX: number;
@@ -25,7 +23,6 @@ export interface OfficeSceneState {
 export function useOfficeSceneState(): OfficeSceneState {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [agentPaused, setAgentPaused] = useState<Set<string>>(new Set());
   const [stageFrame, setStageFrame] = useState({ left: 0, top: 0, width: 0, height: 0 });
   const dragRef = useRef<{
     startX: number;
@@ -34,15 +31,6 @@ export function useOfficeSceneState(): OfficeSceneState {
     panStartY: number;
   } | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
-
-  const toggleAgentPause = useCallback((id: string) => {
-    setAgentPaused((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
 
   useEffect(() => {
     const node = canvasRef.current;
@@ -86,8 +74,6 @@ export function useOfficeSceneState(): OfficeSceneState {
     setZoom,
     pan,
     setPan,
-    agentPaused,
-    toggleAgentPause,
     stageFrame,
     dragRef,
     canvasRef,
@@ -103,28 +89,22 @@ export function OfficeSidebar({
   onSelectAgent: (id: string) => void;
   state: OfficeSceneState;
 }) {
-  const { canManageRuntime, officeAgents, topSummary } = useTeamRuntimeReferenceViewData();
-  const { agentPaused, toggleAgentPause } = state;
+  const { officeAgents, topSummary } = useTeamRuntimeReferenceViewData();
 
   const selectedAgent = officeAgents.find((a) => a.id === selectedAgentId);
-  const pausedLikeCount = officeAgents.filter(
-    (agent) => agent.status === 'resting' || agentPaused.has(agent.id),
-  ).length;
-  const onlineCount = Math.max(0, officeAgents.length - pausedLikeCount);
+  const restingCount = officeAgents.filter((agent) => agent.status === 'resting').length;
+  const onlineCount = Math.max(0, officeAgents.length - restingCount);
   const isSessionPaused = topSummary.status === '已暂停';
-  const selectedAgentUsesLocalPause = selectedAgent ? agentPaused.has(selectedAgent.id) : false;
   const selectedAgentIsResting = selectedAgent?.status === 'resting';
   const selectedAgentStatusLabel = isSessionPaused
-    ? '休息中'
-    : selectedAgentUsesLocalPause
-      ? '已暂停'
-      : selectedAgentIsResting
-        ? '休息中'
-        : selectedAgent?.status === 'discussing'
-          ? '讨论中'
-          : '运行中';
+    ? '团队已暂停'
+    : selectedAgentIsResting
+      ? '休息中'
+      : selectedAgent?.status === 'discussing'
+        ? '讨论中'
+        : '运行中';
   const selectedAgentDotColor =
-    isSessionPaused || selectedAgentUsesLocalPause || selectedAgentIsResting
+    isSessionPaused || selectedAgentIsResting
       ? 'var(--warning)'
       : selectedAgent?.status === 'discussing'
         ? 'var(--accent)'
@@ -158,7 +138,7 @@ export function OfficeSidebar({
             </span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: 11, color: 'var(--fg-default)' }}>已暂停</span>
+            <span style={{ fontSize: 11, color: 'var(--fg-default)' }}>休息中</span>
             <span
               style={{
                 fontSize: 11,
@@ -167,7 +147,7 @@ export function OfficeSidebar({
                 fontVariantNumeric: 'tabular-nums',
               }}
             >
-              {pausedLikeCount}
+              {restingCount}
             </span>
           </div>
         </div>
@@ -210,10 +190,7 @@ export function OfficeSidebar({
                   height: 8,
                   borderRadius: '50%',
                   background: selectedAgentDotColor,
-                  boxShadow:
-                    selectedAgentUsesLocalPause || selectedAgentIsResting
-                      ? 'none'
-                      : `0 0 4px ${selectedAgentDotColor}`,
+                  boxShadow: selectedAgentIsResting ? 'none' : `0 0 4px ${selectedAgentDotColor}`,
                 }}
               />
               <span style={{ fontSize: 11, color: 'var(--fg-default)', fontWeight: 600 }}>
@@ -225,54 +202,9 @@ export function OfficeSidebar({
                 {selectedAgent.note}
               </span>
             )}
-            {canManageRuntime ? (
-              <div style={{ display: 'flex', gap: 6, padding: '2px 0' }}>
-                <button
-                  type="button"
-                  disabled={isSessionPaused}
-                  onClick={() => toggleAgentPause(selectedAgent.id)}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    padding: '3px 8px',
-                    borderRadius: 6,
-                    border: isSessionPaused
-                      ? '1px solid color-mix(in oklch, var(--border-default) 70%, transparent)'
-                      : agentPaused.has(selectedAgent.id)
-                        ? '1px solid color-mix(in oklch, var(--success) 40%, transparent)'
-                        : '1px solid color-mix(in oklch, var(--warning) 40%, transparent)',
-                    background: isSessionPaused
-                      ? 'color-mix(in oklch, var(--bg-overlay) 88%, var(--bg-base))'
-                      : agentPaused.has(selectedAgent.id)
-                        ? 'color-mix(in oklch, var(--success) 10%, var(--bg-base))'
-                        : 'color-mix(in oklch, var(--warning) 10%, var(--bg-base))',
-                    color: isSessionPaused
-                      ? 'var(--fg-muted)'
-                      : agentPaused.has(selectedAgent.id)
-                        ? 'var(--success)'
-                        : 'var(--warning)',
-                    fontSize: 10,
-                    fontWeight: 700,
-                    cursor: isSessionPaused ? 'not-allowed' : 'pointer',
-                    opacity: isSessionPaused ? 0.8 : 1,
-                  }}
-                >
-                  {isSessionPaused ? null : agentPaused.has(selectedAgent.id) ? (
-                    <ResumeIcon size={9} color="var(--success)" />
-                  ) : (
-                    <PauseIcon size={9} color="var(--warning)" />
-                  )}
-                  {isSessionPaused
-                    ? '会话已暂停'
-                    : agentPaused.has(selectedAgent.id)
-                      ? '恢复'
-                      : '暂停'}
-                </button>
-              </div>
-            ) : (
-              <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>运行状态由共享会话驱动</span>
-            )}
+            <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
+              运行状态由团队执行链路驱动，不支持在 3D 场景中本地暂停单个角色。
+            </span>
             <div
               style={{
                 display: 'flex',
@@ -325,7 +257,7 @@ export function OfficeSidebar({
               lineHeight: 1.5,
             }}
           >
-            点击左侧角色查看详情。当前运行状态由共享会话驱动。
+            点击场景中的角色查看详情。当前运行状态由团队执行链路驱动。
           </div>
         )}
       </div>

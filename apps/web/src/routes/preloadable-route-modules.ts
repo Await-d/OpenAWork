@@ -86,7 +86,7 @@ export const PRELOADABLE_ROUTE_MODULES = {
   ),
   team: createPreloadableRouteModule(
     'team',
-    () => import('../pages/team/views/TeamPageDispatcher.js'),
+    () => import('../pages/team/views/TeamPageV2.js'),
     '团队协作',
   ),
   templates: createPreloadableRouteModule(

@@ -50,6 +50,7 @@ export type {
   TeamRuntimeResumeAllResult,
   TeamRuntimeTaskGroupRecord,
   TeamRuntimeSessionRecord,
+  TeamToolCallRecord,
   TeamUsageRecord,
   SharedSessionDetailLoadResult,
   SharedSessionPresenceLoadResult,

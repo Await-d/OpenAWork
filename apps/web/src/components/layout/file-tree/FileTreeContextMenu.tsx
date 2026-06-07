@@ -195,8 +195,8 @@ export interface FileTreeContextMenuProps {
   onOpen: () => void;
   onCopyPath: () => void;
   onCopyRelativePath: () => void;
-  onReferenceInChat: () => void;
-  onCreateSession: () => void;
+  onReferenceInChat?: () => void;
+  onCreateSession?: () => void;
   onCreateFile: () => void;
   onCreateFolder: () => void;
   onRefresh: () => void;
@@ -394,19 +394,21 @@ export default function FileTreeContextMenu({
             onClose();
           }}
         />
-        <MenuItem
-          label={
-            targetType === 'directory' || targetType === 'root'
-              ? '引用目录到对话'
-              : '引用文件到对话'
-          }
-          icon={<MessageIcon />}
-          onClick={() => {
-            onReferenceInChat();
-            onClose();
-          }}
-        />
-        {(targetType === 'directory' || targetType === 'root') && (
+        {onReferenceInChat ? (
+          <MenuItem
+            label={
+              targetType === 'directory' || targetType === 'root'
+                ? '引用目录到对话'
+                : '引用文件到对话'
+            }
+            icon={<MessageIcon />}
+            onClick={() => {
+              onReferenceInChat();
+              onClose();
+            }}
+          />
+        ) : null}
+        {(targetType === 'directory' || targetType === 'root') && onCreateSession ? (
           <MenuItem
             label="以此目录新建会话"
             icon={<SparkSessionIcon />}
@@ -416,7 +418,7 @@ export default function FileTreeContextMenu({
               onClose();
             }}
           />
-        )}
+        ) : null}
         <div style={dividerStyle} />
         <MenuItem
           label={`在${baseLabel}中新建文件`}

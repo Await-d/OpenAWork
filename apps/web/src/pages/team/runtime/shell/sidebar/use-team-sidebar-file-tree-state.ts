@@ -47,6 +47,78 @@ function injectChildren(
   });
 }
 
+function sortTeamSidebarFileTreeNodes(nodes: FileTreeNode[]): FileTreeNode[] {
+  return [...nodes].sort((left, right) => {
+    if (left.type !== right.type) {
+      return left.type === 'directory' ? -1 : 1;
+    }
+    return left.name.localeCompare(right.name, 'zh-CN', { numeric: true });
+  });
+}
+
+function insertTeamSidebarFileTreeNode(
+  nodes: FileTreeNode[],
+  targetPath: string,
+  entry: FileTreeNode,
+): FileTreeNode[] {
+  return nodes.map((node) => {
+    if (node.path === targetPath && node.type === 'directory') {
+      return {
+        ...node,
+        children: sortTeamSidebarFileTreeNodes([...(node.children ?? []), entry]),
+      };
+    }
+    if (node.children) {
+      return {
+        ...node,
+        children: insertTeamSidebarFileTreeNode(node.children, targetPath, entry),
+      };
+    }
+    return node;
+  });
+}
+
+function removeTeamSidebarFileTreeNode(nodes: FileTreeNode[], targetPath: string): FileTreeNode[] {
+  return nodes
+    .filter((node) => node.path !== targetPath)
+    .map((node) =>
+      node.children
+        ? { ...node, children: removeTeamSidebarFileTreeNode(node.children, targetPath) }
+        : node,
+    );
+}
+
+function remapNodePath(node: FileTreeNode, oldPath: string, newPath: string): FileTreeNode {
+  const nextPath =
+    node.path === oldPath ? newPath : node.path.replace(`${oldPath}/`, `${newPath}/`);
+  return {
+    ...node,
+    path: nextPath,
+    children: node.children?.map((child) => remapNodePath(child, oldPath, newPath)),
+  };
+}
+
+function renameTeamSidebarFileTreeNode(
+  nodes: FileTreeNode[],
+  oldPath: string,
+  newPath: string,
+  newName: string,
+): FileTreeNode[] {
+  return nodes.map((node) => {
+    if (node.path === oldPath) {
+      const remapped = remapNodePath(node, oldPath, newPath);
+      return { ...remapped, name: newName };
+    }
+    if (node.children) {
+      return {
+        ...node,
+        children: renameTeamSidebarFileTreeNode(node.children, oldPath, newPath, newName),
+      };
+    }
+    return node;
+  });
+}
+
 interface UseTeamSidebarFileTreeStateOptions {
   active: boolean;
   gatewayUrl: string;
@@ -55,9 +127,13 @@ interface UseTeamSidebarFileTreeStateOptions {
 }
 
 interface UseTeamSidebarFileTreeStateResult {
+  applyCreatedEntry: (input: { directoryPath: string; entry: FileTreeNode }) => void;
+  applyDeletedEntry: (path: string) => void;
+  applyRenamedEntry: (input: { newName: string; newPath: string; oldPath: string }) => void;
   expandedDirs: Set<string>;
   handleRefresh: () => void;
   handleToggleDir: (path: string) => void;
+  refreshDirectory: (directoryPath: string) => Promise<boolean>;
   treeError: string | null;
   treeLoading: boolean;
   treeNodes: FileTreeNode[];
@@ -252,10 +328,74 @@ export function useTeamSidebarFileTreeState(
     [options.token, resetRetry, scheduleRetry, workspaceClient],
   );
 
+  const refreshDirectory = useCallback(
+    async (directoryPath: string): Promise<boolean> => {
+      if (!options.token || !options.workspacePath) {
+        return false;
+      }
+
+      const result = await workspaceClient.fetchTreeResult(options.token, directoryPath, {
+        depth: 1,
+      });
+      if (!result.ok) {
+        setTreeError(result.errorMessage ?? '刷新目录失败。');
+        return false;
+      }
+
+      if (directoryPath === options.workspacePath) {
+        setTreeNodes(result.nodes);
+      } else {
+        setTreeNodes((current) => injectChildren(current, directoryPath, result.nodes));
+      }
+      setTreeError(null);
+      return true;
+    },
+    [options.token, options.workspacePath, workspaceClient],
+  );
+
   return {
+    applyCreatedEntry: ({ directoryPath, entry }) => {
+      setTreeNodes((current) =>
+        directoryPath === options.workspacePath
+          ? sortTeamSidebarFileTreeNodes([...current, entry])
+          : insertTeamSidebarFileTreeNode(current, directoryPath, entry),
+      );
+    },
+    applyDeletedEntry: (path) => {
+      setTreeNodes((current) => removeTeamSidebarFileTreeNode(current, path));
+      setExpandedDirs((current) => {
+        const next = new Set<string>();
+        for (const entry of current) {
+          if (entry === path || entry.startsWith(`${path}/`)) {
+            continue;
+          }
+          next.add(entry);
+        }
+        return next;
+      });
+    },
+    applyRenamedEntry: ({ newName, newPath, oldPath }) => {
+      setTreeNodes((current) => renameTeamSidebarFileTreeNode(current, oldPath, newPath, newName));
+      setExpandedDirs((current) => {
+        const next = new Set<string>();
+        for (const entry of current) {
+          if (entry === oldPath) {
+            next.add(newPath);
+            continue;
+          }
+          if (entry.startsWith(`${oldPath}/`)) {
+            next.add(entry.replace(`${oldPath}/`, `${newPath}/`));
+            continue;
+          }
+          next.add(entry);
+        }
+        return next;
+      });
+    },
     expandedDirs,
     handleRefresh,
     handleToggleDir,
+    refreshDirectory,
     treeError,
     treeLoading,
     treeNodes,

@@ -198,10 +198,14 @@ export interface TeamConversationState {
   remoteSessionBusyState: 'running' | 'paused' | null;
   /** 当前流式渲染中是否有可见内容。 */
   visibleStreaming: boolean;
+  /** 仍未拉到前端的更早用户回合数。 */
+  hiddenMessageCount: number;
 
   // ─── 操作 ────────────────────────────────────────────────────────
   /** 重新加载当前 session 的快照（消息列表 + pending 状态）。 */
   reload: () => Promise<void>;
+  /** 拉取更早的团队对话回合。 */
+  loadEarlierMessages: () => Promise<void>;
 
   /**
    * 提交 inbound message 到当前 session（L1.3 反向通道）。
@@ -270,6 +274,8 @@ const TEAM_CONVERSATION_RECOVERY_RETRY_BASE_MS = 2_000;
 const TEAM_CONVERSATION_RECOVERY_RETRY_MAX_MS = 30_000;
 const TEAM_CONVERSATION_PROVIDERS_RETRY_BASE_MS = 2_000;
 const TEAM_CONVERSATION_PROVIDERS_RETRY_MAX_MS = 30_000;
+const TEAM_CONVERSATION_INITIAL_TURN_LIMIT = 10;
+const TEAM_CONVERSATION_LOAD_MORE_TURN_INCREMENT = 20;
 
 export function computeTeamConversationRecoveryRetryDelay(attempt: number): number {
   return computeExponentialRetryDelay({
@@ -398,11 +404,13 @@ export function useTeamConversationState(
   // L1.8 / L1.3 扩展字段（hook v0.2 新增）
   const [roleLayer, setRoleLayer] = useState<string | null>(null);
   const [substate, setSubstate] = useState<string | null>(null);
+  const [serverTotalTurnCount, setServerTotalTurnCount] = useState<number | null>(null);
   // 解析后的 sessions.metadata_json（不直接放原 JSON 字符串，避免消费方再次解析）。
   // 形如 { teamDefinition?: {...}, teamWorkspaceId?: string, workingDirectory?: string, ... }
   // 解析失败 / 缺失时为 null。
   const [sessionMetadata, setSessionMetadata] = useState<Record<string, unknown> | null>(null);
   const hasRecoverySnapshotRef = useRef(false);
+  const requestedTurnLimitRef = useRef(TEAM_CONVERSATION_INITIAL_TURN_LIMIT);
   const reloadPromiseRef = useRef<Promise<void> | null>(null);
   const providersRef = useRef<ChatSettingsProvider[]>([]);
   const teamEventsRecoveredAt = useTeamEventsConnectionStore((state) => state.lastRecoveredAt);
@@ -424,9 +432,22 @@ export function useTeamConversationState(
     return streaming || streamingSegments.length > 0 || streamBuffer.length > 0;
   }, [streaming, streamingSegments.length, streamBuffer.length]);
 
+  const hiddenMessageCount = useMemo(() => {
+    if (typeof serverTotalTurnCount !== 'number' || serverTotalTurnCount <= 0) {
+      return 0;
+    }
+    const loadedUserTurnCount = messages.filter((message) => message.role === 'user').length;
+    return Math.max(0, serverTotalTurnCount - loadedUserTurnCount);
+  }, [messages, serverTotalTurnCount]);
+
   useEffect(() => {
     providersRef.current = providers;
   }, [providers]);
+
+  useEffect(() => {
+    requestedTurnLimitRef.current = TEAM_CONVERSATION_INITIAL_TURN_LIMIT;
+    setServerTotalTurnCount(null);
+  }, [sessionId]);
 
   // ─── stream reveal + scroll manager ───────────────────────────────
   const { streamingRef, stoppingStreamRef, currentAssistantStreamMessageIdRef, resetStreamState } =
@@ -486,6 +507,7 @@ export function useTeamConversationState(
         setPendingQuestions([]);
         setRoleLayer(null);
         setSubstate(null);
+        setServerTotalTurnCount(null);
         setSessionMetadata(null);
         setSnapshotError(null);
         setIsSessionLoading(false);
@@ -511,7 +533,9 @@ export function useTeamConversationState(
       setIsSessionLoading(!hasCachedSnapshot);
       setSnapshotError(null);
       const sessionsClient = createSessionsClient(gatewayUrl);
-      const result = await sessionsClient.getRecoveryResult(token, sessionId);
+      const result = await sessionsClient.getRecoveryResult(token, sessionId, {
+        messageLimit: requestedTurnLimitRef.current,
+      });
       if (!result.ok || !result.recovery) {
         const nextRetryAtMs = scheduleRetry({
           computeDelay: computeTeamConversationRecoveryRetryDelay,
@@ -538,6 +562,9 @@ export function useTeamConversationState(
 
       const normalized = normalizeChatMessages(recovery.session?.messages ?? []);
       setMessages(normalized);
+      setServerTotalTurnCount(
+        typeof recovery.totalTurnCount === 'number' ? recovery.totalTurnCount : null,
+      );
 
       const stateStatus = (recovery.session?.state_status ?? null) as SessionStateStatus | null;
       setSessionStateStatus(stateStatus);
@@ -1049,6 +1076,11 @@ export function useTeamConversationState(
     };
   }, [enableWriters, loadProviders]);
 
+  const loadEarlierMessages = useCallback(async (): Promise<void> => {
+    requestedTurnLimitRef.current += TEAM_CONVERSATION_LOAD_MORE_TURN_INCREMENT;
+    await reload();
+  }, [reload]);
+
   return {
     messages,
     setMessages,
@@ -1097,8 +1129,10 @@ export function useTeamConversationState(
 
     remoteSessionBusyState,
     visibleStreaming,
+    hiddenMessageCount,
 
     reload,
+    loadEarlierMessages,
     submitInbound,
     startStream,
     stopStream,

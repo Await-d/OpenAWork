@@ -30,7 +30,7 @@ import { getTeamEventsBusStats } from '../handoff/bus/team-events-bus.js';
 import { mergeRuntimeTaskGroups } from '../team/team-runtime-task-groups.js';
 import { listSharedSessionsForRecipient } from '../session/session-shared-access.js';
 import { listTeamAuditLogs, logTeamAudit } from '../team/team-audit-store.js';
-import { listTeamUsageRecords } from '../team/team-usage-records-store.js';
+import { listTeamToolCallRecords, listTeamUsageRecords } from '../team/team-usage-records-store.js';
 import {
   SESSION_RUNTIME_THREAD_HEARTBEAT_MS,
   SESSION_RUNTIME_THREAD_STALE_AFTER_MS,
@@ -39,10 +39,7 @@ import {
   getTeamRuntimeIncidentSummary,
   listTeamRuntimeIncidents,
 } from '../team/team-runtime-diagnostics-store.js';
-import {
-  listActiveTeamRuntimeAlerts,
-  reconcileTeamRuntimeAlerts,
-} from '../team/team-runtime-alert-store.js';
+import { reconcileTeamRuntimeAlerts } from '../team/team-runtime-alert-store.js';
 import {
   consumeExpiredSuppressedAlertControls,
   clearTeamRuntimeAlertControl,
@@ -154,6 +151,7 @@ const createTeamSessionSchema = z
     memberSlots: z.array(teamMemberSlotSchema).max(40).optional(),
     optionalAgentIds: z.array(z.string().min(1)).default([]),
     defaultProvider: z.string().nullable().optional(),
+    workingDirectory: z.string().trim().min(1).nullable().optional(),
   })
   .superRefine((input, ctx) => {
     if (input.source && input.source.kind !== 'blank' && !input.source.templateId) {
@@ -173,6 +171,7 @@ const importWorkspaceSessionSchema = z.object({
 
 const teamRuntimeQuerySchema = z.object({
   handoffId: z.string().min(1).optional(),
+  sessionId: z.string().min(1).optional(),
   teamWorkspaceId: z.string().min(1).optional(),
 });
 
@@ -236,6 +235,7 @@ const suppressAlertSchema = z.object({
 });
 
 type TeamRouteErrorCode =
+  | 'team_session_not_found'
   | 'team_workspace_not_found'
   | 'team_template_not_found'
   | 'team_template_metadata_invalid'
@@ -253,6 +253,7 @@ type TeamRouteErrorCode =
   | 'team_parent_session_invalid';
 
 const TEAM_ROUTE_ERROR_MESSAGES: Record<TeamRouteErrorCode, string> = {
+  team_session_not_found: '目标团队会话不存在。',
   team_workspace_not_found: '目标团队工作区不存在。',
   team_template_not_found: '目标模板不存在。',
   team_template_metadata_invalid: '模板元数据不是合法的 JSON。',
@@ -349,6 +350,8 @@ interface TaskRow {
 interface MessageRow {
   id: string;
   sender_id: string | null;
+  recipient_member_id: string | null;
+  reply_to_message_id: string | null;
   content: string;
   type: string;
   created_at: string;
@@ -370,6 +373,10 @@ interface RuntimeHandoffRow {
   from_role_layer: string;
   from_session_id: string;
   id: string;
+  paused: number;
+  paused_at: string | null;
+  paused_by_user_id: string | null;
+  pause_reason: string | null;
   payload_json: string;
   retry_count: number;
   started_at: string | null;
@@ -496,11 +503,11 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
   }): SessionRow[] => {
     const query =
       typeof input.teamWorkspaceId === 'string' && input.teamWorkspaceId.length > 0
-        ? `SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at, team_parent_session_id, role_layer
+        ? `SELECT id, user_id, messages_json, state_status, paused, metadata_json, title, created_at, updated_at, team_parent_session_id, role_layer
            FROM sessions
            WHERE user_id = ? AND ${SESSION_TEAM_WORKSPACE_ID_SQL} = ?
            ORDER BY updated_at DESC`
-        : `SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at, team_parent_session_id, role_layer
+        : `SELECT id, user_id, messages_json, state_status, paused, metadata_json, title, created_at, updated_at, team_parent_session_id, role_layer
            FROM sessions
            WHERE user_id = ? AND ${SESSION_TEAM_WORKSPACE_ID_SQL} IS NOT NULL
            ORDER BY updated_at DESC`;
@@ -516,6 +523,70 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         ? metadata['teamWorkspaceId'] === input.teamWorkspaceId
         : metadata['teamWorkspaceId'] != null;
     });
+  };
+
+  const readRuntimeSessionParentSessionId = (row: SessionRow): string | null => {
+    const rawRow = row as unknown as Record<string, unknown>;
+    const teamParentSessionId =
+      typeof rawRow['team_parent_session_id'] === 'string' && rawRow['team_parent_session_id']
+        ? rawRow['team_parent_session_id']
+        : null;
+    const metadataParentSessionId =
+      typeof parseSessionMetadataJson(row.metadata_json)['parentSessionId'] === 'string'
+        ? (parseSessionMetadataJson(row.metadata_json)['parentSessionId'] as string) || null
+        : null;
+    return teamParentSessionId ?? metadataParentSessionId;
+  };
+
+  const collectRuntimeSessionScopeIds = (
+    rootSessionId: string,
+    sessionRows: SessionRow[],
+  ): string[] => {
+    const scope = new Set<string>([rootSessionId]);
+    let changed = true;
+
+    while (changed) {
+      changed = false;
+      for (const row of sessionRows) {
+        if (scope.has(row.id)) {
+          continue;
+        }
+        const parentSessionId = readRuntimeSessionParentSessionId(row);
+        if (parentSessionId && scope.has(parentSessionId)) {
+          scope.add(row.id);
+          changed = true;
+        }
+      }
+    }
+
+    return sessionRows.filter((row) => scope.has(row.id)).map((row) => row.id);
+  };
+
+  const resolveRuntimeSessionScope = (input: {
+    sessionId?: string;
+    teamWorkspaceId?: string;
+    userId: string;
+  }): { sessionIds: string[]; sessionRows: SessionRow[] } | null => {
+    const sessionRows = listTeamRuntimeSessionRows({
+      userId: input.userId,
+      teamWorkspaceId: input.teamWorkspaceId,
+    });
+
+    if (!input.sessionId) {
+      return {
+        sessionIds: sessionRows.map((row) => row.id),
+        sessionRows,
+      };
+    }
+
+    if (!sessionRows.some((row) => row.id === input.sessionId)) {
+      return null;
+    }
+
+    return {
+      sessionIds: collectRuntimeSessionScopeIds(input.sessionId, sessionRows),
+      sessionRows,
+    };
   };
 
   const listTeamSessionShareRows = (input: {
@@ -583,21 +654,13 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
   });
 
   const mapRuntimeSessionRow = (userId: string, row: SessionRow) => {
-    // team_parent_session_id 列不在 SessionRow 接口中（接口是通用的），
-    // 但 listTeamRuntimeSessionRows 的 SELECT 包含了它。用 unknown 中转读取。
     const rawRow = row as unknown as Record<string, unknown>;
-    const teamParentSessionId =
-      typeof rawRow['team_parent_session_id'] === 'string' && rawRow['team_parent_session_id']
-        ? rawRow['team_parent_session_id']
-        : null;
-    const metadataParentSessionId =
-      typeof parseSessionMetadataJson(row.metadata_json)['parentSessionId'] === 'string'
-        ? (parseSessionMetadataJson(row.metadata_json)['parentSessionId'] as string) || null
-        : null;
+    const paused = typeof rawRow['paused'] === 'number' ? rawRow['paused'] === 1 : false;
     return {
       id: row.id,
       metadataJson: row.metadata_json,
-      parentSessionId: teamParentSessionId ?? metadataParentSessionId,
+      parentSessionId: readRuntimeSessionParentSessionId(row),
+      paused,
       roleLayer:
         typeof rawRow['role_layer'] === 'string' && rawRow['role_layer']
           ? rawRow['role_layer']
@@ -628,6 +691,10 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
          to_role_layer,
          to_session_id,
          payload_json,
+         paused,
+         paused_at,
+         paused_by_user_id,
+         pause_reason,
          state,
          claim_token,
          claimed_at,
@@ -661,6 +728,18 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           return null;
         }
       })(),
+      paused: row.paused === 1,
+      pausedAt: row.paused_at,
+      pausedByUserId: row.paused_by_user_id,
+      pauseReason: row.pause_reason,
+      recoverableFailure:
+        row.state === 'failed'
+          ? isRecoverableFailedHandoff({
+              failureReason: row.failure_reason,
+              payloadJson: row.payload_json,
+              toRoleLayer: row.to_role_layer,
+            })
+          : undefined,
       retryCount: row.retry_count,
       startedAt: row.started_at,
       state: row.state,
@@ -845,6 +924,9 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           summary:
             typeof payload['context'] === 'string' ? payload['context'] : '需要用户处理的升级通知',
           ...(typeof payload['reason'] === 'string' ? { reason: payload['reason'] } : {}),
+          ...(Array.isArray(payload['suggestedActions'])
+            ? { suggestedActions: payload['suggestedActions'] }
+            : {}),
         },
         sessionId: fromSessionId,
         taskId: row.id,
@@ -1142,6 +1224,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
     actorUserId: string;
     alertCode: string;
     detail: Record<string, unknown>;
+    sessionId?: string | null;
     userId: string;
   }) => {
     logTeamAudit({
@@ -1151,6 +1234,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       detail: JSON.stringify(input.detail),
       entityId: input.alertCode,
       entityType: 'runtime_alert',
+      sessionId: input.sessionId ?? null,
       summary: `runtime alert ${input.action}: ${input.alertCode}`,
       userId: input.userId,
     });
@@ -1162,14 +1246,19 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
     code: TeamRuntimeRemediationCode;
     force?: boolean;
     handoffId?: string;
+    sessionId?: string;
     teamWorkspaceId?: string;
     workflowName: string;
   }) => {
-    const sessionRows = listTeamRuntimeSessionRows({
+    const scope = resolveRuntimeSessionScope({
       userId: input.actorUserId,
       teamWorkspaceId: input.teamWorkspaceId,
+      sessionId: input.sessionId,
     });
-    const sessionIds = sessionRows.map((row) => row.id);
+    if (!scope) {
+      throw new Error('team session not found');
+    }
+    const sessionIds = scope.sessionIds;
     const result = await runTeamRuntimeRemediation({
       code: input.code,
       ...(input.force ? { force: input.force } : {}),
@@ -1188,11 +1277,13 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         handoffId: input.handoffId ?? null,
         pausedCount: result.pausedCount,
         resetCount: result.resetCount,
+        sessionId: input.sessionId ?? null,
         staleCandidateCount: result.staleCandidateCount,
         teamWorkspaceId: input.teamWorkspaceId ?? null,
       }),
       entityId: input.code,
       entityType: 'runtime_alert',
+      sessionId: input.sessionId ?? sessionIds[0] ?? null,
       summary: getTeamRuntimeRemediationSummary(input.code, result.staleCandidateCount),
       userId: input.actorUserId,
     });
@@ -1457,6 +1548,23 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       sessionCount: sessionIds.length,
       teamWorkspaceId: input.teamWorkspaceId ?? null,
     };
+  };
+
+  const listCurrentActiveRuntimeAlertsForScope = (input: {
+    teamWorkspaceId?: string;
+    userId: string;
+  }) => {
+    const scope = resolveRuntimeSessionScope({
+      userId: input.userId,
+      teamWorkspaceId: input.teamWorkspaceId,
+    });
+    if (!scope) {
+      return [];
+    }
+    return buildRuntimeDiagnostics({
+      sessionIds: scope.sessionIds,
+      userId: input.userId,
+    }).activeAlerts;
   };
 
   app.get(
@@ -1888,7 +1996,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       const metadataPatch = validateSessionMetadataPatch({
         teamDefinition,
         teamWorkspaceId,
-        workingDirectory: workspace.default_working_root ?? undefined,
+        workingDirectory: body.workingDirectory ?? workspace.default_working_root ?? undefined,
       });
       if (!metadataPatch.success) {
         step.fail('invalid metadata');
@@ -2287,7 +2395,23 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           [user.sub],
         ),
         sqliteAll<MessageRow>(
-          `SELECT id, sender_id, content, type, created_at FROM team_messages WHERE user_id = ? ORDER BY created_at ASC LIMIT 100`,
+          `SELECT id, sender_id, recipient_member_id, reply_to_message_id, content, type, created_at
+             FROM (
+               SELECT
+                 rowid,
+                 id,
+                 sender_id,
+                 recipient_member_id,
+                 reply_to_message_id,
+                 content,
+                 type,
+                 created_at
+               FROM team_messages
+               WHERE user_id = ?
+               ORDER BY rowid DESC
+               LIMIT 100
+             )
+            ORDER BY rowid ASC`,
           [user.sub],
         ),
         listTeamRuntimeSessionRows({
@@ -2423,6 +2547,13 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       });
       usageRecordsStep.succeed(undefined, { count: usageRecords.length });
 
+      const toolCallRecordsStep = child('tool-call-records');
+      const toolCallRecords = listTeamToolCallRecords({
+        sessionIds: sessionRows.map((row) => row.id),
+        userId: user.sub,
+      });
+      toolCallRecordsStep.succeed(undefined, { count: toolCallRecords.length });
+
       const response = {
         auditLogs,
         clarifications,
@@ -2443,6 +2574,8 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         messages: messageRows.map((row) => ({
           id: row.id,
           memberId: row.sender_id ?? 'system',
+          recipientMemberId: row.recipient_member_id,
+          replyToMessageId: row.reply_to_message_id,
           content: row.content,
           type:
             row.type === 'update' ||
@@ -2458,6 +2591,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         sessions: sessionRows.map((row) => mapRuntimeSessionRow(user.sub, row)),
         sharedSessions,
         runtimeTaskGroups,
+        toolCallRecords,
         usageRecords,
         tasks: taskRows.map((row) => ({
           id: row.id,
@@ -2495,13 +2629,26 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
 
       const queryStep = child('parse-query');
       const query = parseQuery(teamRuntimeRemediationQuerySchema, request.query);
-      queryStep.succeed(undefined, query.teamWorkspaceId ? query : undefined);
+      queryStep.succeed(undefined, query.teamWorkspaceId || query.sessionId ? query : undefined);
+
+      if (
+        query.sessionId &&
+        !resolveRuntimeSessionScope({
+          userId: user.sub,
+          teamWorkspaceId: query.teamWorkspaceId,
+          sessionId: query.sessionId,
+        })
+      ) {
+        step.fail('session not found');
+        return reply.status(404).send(teamRouteErrorPayload('team_session_not_found'));
+      }
 
       const candidateStep = child('collect-candidates');
       const result = await executeRuntimeRemediation({
         actorEmail: user.email,
         actorUserId: user.sub,
         code: 'stale-runtime-threads',
+        sessionId: query.sessionId,
         teamWorkspaceId: query.teamWorkspaceId,
         workflowName: 'team.runtime.remediation.reconcile-stale-threads',
       });
@@ -2529,13 +2676,26 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
 
       const queryStep = child('parse-query');
       const query = parseQuery(teamRuntimeRemediationQuerySchema, request.query);
-      queryStep.succeed(undefined, query.teamWorkspaceId ? query : undefined);
+      queryStep.succeed(undefined, query.teamWorkspaceId || query.sessionId ? query : undefined);
+
+      if (
+        query.sessionId &&
+        !resolveRuntimeSessionScope({
+          userId: user.sub,
+          teamWorkspaceId: query.teamWorkspaceId,
+          sessionId: query.sessionId,
+        })
+      ) {
+        step.fail('session not found');
+        return reply.status(404).send(teamRouteErrorPayload('team_session_not_found'));
+      }
 
       const candidateStep = child('collect-candidates');
       const result = await executeRuntimeRemediation({
         actorEmail: user.email,
         actorUserId: user.sub,
         code: 'stale-decisions',
+        sessionId: query.sessionId,
         teamWorkspaceId: query.teamWorkspaceId,
         workflowName: 'team.runtime.remediation.release-stale-decisions',
       });
@@ -2567,11 +2727,24 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
 
       const queryStep = child('parse-query');
       const query = parseQuery(teamRuntimeRemediationQuerySchema, request.query);
-      queryStep.succeed(undefined, query.teamWorkspaceId ? query : undefined);
+      queryStep.succeed(undefined, query.teamWorkspaceId || query.sessionId ? query : undefined);
 
-      const activeAlert = listActiveTeamRuntimeAlerts(user.sub).find(
-        (alert) => alert.code === alertCode,
-      );
+      if (
+        query.sessionId &&
+        !resolveRuntimeSessionScope({
+          userId: user.sub,
+          teamWorkspaceId: query.teamWorkspaceId,
+          sessionId: query.sessionId,
+        })
+      ) {
+        step.fail('session not found');
+        return reply.status(404).send(teamRouteErrorPayload('team_session_not_found'));
+      }
+
+      const activeAlert = listCurrentActiveRuntimeAlertsForScope({
+        userId: user.sub,
+        teamWorkspaceId: query.teamWorkspaceId,
+      }).find((alert) => alert.code === alertCode);
       if (!activeAlert) {
         step.fail('alert not active');
         return reply.status(404).send(teamRouteErrorPayload('team_runtime_alert_not_active'));
@@ -2584,6 +2757,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         code: alertCode,
         ...(query.force ? { force: query.force } : {}),
         ...(query.handoffId ? { handoffId: query.handoffId } : {}),
+        ...(query.sessionId ? { sessionId: query.sessionId } : {}),
         teamWorkspaceId: query.teamWorkspaceId,
         workflowName: 'team.runtime.alert.remediate',
       });
@@ -2609,7 +2783,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       );
       const queryStep = child('parse-query');
       const query = parseQuery(teamRuntimeQuerySchema, request.query);
-      queryStep.succeed(undefined, query.teamWorkspaceId ? query : undefined);
+      queryStep.succeed(undefined, query.teamWorkspaceId || query.sessionId ? query : undefined);
       const parseStep = child('parse-body');
       const body = parseBody(acknowledgeAlertSchema, request.body ?? {});
       parseStep.succeed();
@@ -2625,9 +2799,20 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         workspaceStep.succeed(undefined, { teamWorkspaceId: workspace.id });
       }
 
-      const active = listActiveTeamRuntimeAlerts(user.sub).find(
-        (alert) => alert.code === alertCode,
-      );
+      const sessionScope = resolveRuntimeSessionScope({
+        userId: user.sub,
+        teamWorkspaceId: query.teamWorkspaceId,
+        sessionId: query.sessionId,
+      });
+      if (!sessionScope) {
+        step.fail('session not found');
+        return reply.status(404).send(teamRouteErrorPayload('team_session_not_found'));
+      }
+
+      const active = listCurrentActiveRuntimeAlertsForScope({
+        userId: user.sub,
+        teamWorkspaceId: query.teamWorkspaceId,
+      }).find((alert) => alert.code === alertCode);
       if (!active) {
         step.fail('alert not active');
         return reply.status(404).send(teamRouteErrorPayload('team_runtime_alert_not_active'));
@@ -2648,6 +2833,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           note: body.note ?? null,
           state: control.state,
         },
+        sessionId: query.sessionId ?? null,
         userId: user.sub,
       });
       step.succeed(undefined, { alertCode });
@@ -2660,6 +2846,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           updatedAt: control.updatedAt,
         },
         runtime: buildRuntimePreview({
+          sessionIds: sessionScope.sessionIds,
           teamWorkspaceId: query.teamWorkspaceId,
           userId: user.sub,
         }),
@@ -2678,7 +2865,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       );
       const queryStep = child('parse-query');
       const query = parseQuery(teamRuntimeQuerySchema, request.query);
-      queryStep.succeed(undefined, query.teamWorkspaceId ? query : undefined);
+      queryStep.succeed(undefined, query.teamWorkspaceId || query.sessionId ? query : undefined);
       const parseStep = child('parse-body');
       const body = parseBody(suppressAlertSchema, request.body ?? {});
       parseStep.succeed();
@@ -2694,9 +2881,20 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         workspaceStep.succeed(undefined, { teamWorkspaceId: workspace.id });
       }
 
-      const active = listActiveTeamRuntimeAlerts(user.sub).find(
-        (alert) => alert.code === alertCode,
-      );
+      const sessionScope = resolveRuntimeSessionScope({
+        userId: user.sub,
+        teamWorkspaceId: query.teamWorkspaceId,
+        sessionId: query.sessionId,
+      });
+      if (!sessionScope) {
+        step.fail('session not found');
+        return reply.status(404).send(teamRouteErrorPayload('team_session_not_found'));
+      }
+
+      const active = listCurrentActiveRuntimeAlertsForScope({
+        userId: user.sub,
+        teamWorkspaceId: query.teamWorkspaceId,
+      }).find((alert) => alert.code === alertCode);
       if (!active) {
         step.fail('alert not active');
         return reply.status(404).send(teamRouteErrorPayload('team_runtime_alert_not_active'));
@@ -2720,6 +2918,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           note: body.note ?? null,
           suppressedUntilMs,
         },
+        sessionId: query.sessionId ?? null,
         userId: user.sub,
       });
       step.succeed(undefined, { alertCode, suppressedUntilMs });
@@ -2732,6 +2931,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           updatedAt: control.updatedAt,
         },
         runtime: buildRuntimePreview({
+          sessionIds: sessionScope.sessionIds,
           teamWorkspaceId: query.teamWorkspaceId,
           userId: user.sub,
         }),
@@ -2750,7 +2950,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       );
       const queryStep = child('parse-query');
       const query = parseQuery(teamRuntimeQuerySchema, request.query);
-      queryStep.succeed(undefined, query.teamWorkspaceId ? query : undefined);
+      queryStep.succeed(undefined, query.teamWorkspaceId || query.sessionId ? query : undefined);
 
       if (query.teamWorkspaceId) {
         const workspaceStep = child('workspace');
@@ -2761,6 +2961,16 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           return reply.status(404).send(teamRouteErrorPayload('team_workspace_not_found'));
         }
         workspaceStep.succeed(undefined, { teamWorkspaceId: workspace.id });
+      }
+
+      const sessionScope = resolveRuntimeSessionScope({
+        userId: user.sub,
+        teamWorkspaceId: query.teamWorkspaceId,
+        sessionId: query.sessionId,
+      });
+      if (!sessionScope) {
+        step.fail('session not found');
+        return reply.status(404).send(teamRouteErrorPayload('team_session_not_found'));
       }
 
       const cleared = clearTeamRuntimeAlertControl({
@@ -2782,12 +2992,14 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         detail: {
           cleared: true,
         },
+        sessionId: query.sessionId ?? null,
         userId: user.sub,
       });
       step.succeed(undefined, { alertCode });
       return reply.send({
         cleared: true,
         runtime: buildRuntimePreview({
+          sessionIds: sessionScope.sessionIds,
           teamWorkspaceId: query.teamWorkspaceId,
           userId: user.sub,
         }),

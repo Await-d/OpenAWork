@@ -15,6 +15,7 @@ import {
   useTeamEventsConnectionStore,
   useTeamNotificationStore,
 } from '../../../stores/team/team-events.js';
+import { useTeamToolCallStore } from '../../../stores/team/team-usage.js';
 import {
   computeSharedSessionDetailRetryDelay,
   computeSharedSessionPresenceRetryDelay,
@@ -53,6 +54,7 @@ function resetTeamStores(): void {
   useLayerStore.getState().clear();
   useTeamNotificationStore.getState().clear();
   useClarificationStore.getState().clear();
+  useTeamToolCallStore.getState().clear();
   useTeamEventsConnectionStore.setState({
     lastCloseCode: null,
     lastError: null,
@@ -303,6 +305,111 @@ describe('formatSharedSessionDetailLoadError', () => {
 });
 
 describe('useTeamCollaboration', () => {
+  it('runtime 快照里的 sessions.paused 会保留到前端状态', async () => {
+    const runtime = createRuntimeFixture({
+      sessions: [
+        {
+          id: SESSION_ID,
+          metadataJson: '{}',
+          parentSessionId: null,
+          paused: true,
+          roleLayer: 'pm1',
+          stateStatus: 'running',
+          title: '暂停中的会话',
+          updatedAt: '2026-05-26T08:00:00.000Z',
+          workspacePath: '/workspace/demo',
+        },
+      ],
+    });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = resolveRequestUrl(input);
+        if (url === `${GATEWAY_URL}/team/runtime?teamWorkspaceId=${TEAM_WORKSPACE_ID}`) {
+          return jsonResponse(runtime);
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+
+    const { result } = renderHook(() => useTeamCollaboration(TEAM_WORKSPACE_ID));
+
+    await flushAsyncWork();
+
+    expect(result.current.sessions).toEqual([
+      expect.objectContaining({
+        id: SESSION_ID,
+        paused: true,
+        stateStatus: 'running',
+      }),
+    ]);
+  });
+
+  it('runtime 快照里的 toolCallRecords 会回灌到工具统计 store', async () => {
+    const runtime = createRuntimeFixture({
+      usageRecords: [
+        {
+          sessionId: SESSION_ID,
+          layer: 'pm1',
+          agentId: 'agent-reader',
+          provider: null,
+          model: null,
+          inputTokens: 0,
+          outputTokens: 0,
+          reasoningTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: 0,
+          callCount: 0,
+          totalDurationMs: 0,
+          toolCallCount: 2,
+          toolErrorCount: 1,
+          updatedAt: '2026-05-26T08:00:00.000Z',
+        },
+      ],
+      toolCallRecords: [
+        {
+          sessionId: SESSION_ID,
+          layer: 'pm1',
+          agentId: 'agent-reader',
+          toolName: 'read',
+          invocations: 2,
+          successes: 1,
+          failures: 1,
+          totalDurationMs: 210,
+          durations: [90, 120],
+          errorSamples: [{ errorType: 'timeout', count: 1 }],
+        },
+      ],
+    });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = resolveRequestUrl(input);
+        if (url === `${GATEWAY_URL}/team/runtime?teamWorkspaceId=${TEAM_WORKSPACE_ID}`) {
+          return jsonResponse(runtime);
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+
+    renderHook(() => useTeamCollaboration(TEAM_WORKSPACE_ID));
+
+    await flushAsyncWork();
+
+    const toolState = useTeamToolCallStore.getState();
+    expect(toolState.byTool.get('read')).toMatchObject({
+      invocations: 2,
+      failures: 1,
+      totalDurationMs: 210,
+      errorSamples: [{ errorType: 'timeout', count: 1 }],
+    });
+    expect(toolState.bySessionTool.get(SESSION_ID)?.get('read')?.durations).toEqual([90, 120]);
+    expect(toolState.byAgent.get('agent-reader')?.get('read')).toBe(2);
+  });
+
   it('runtime 刷新失败时保留旧快照并在定时器触发后自动恢复', async () => {
     vi.useFakeTimers();
     const firstRuntime = createRuntimeFixture({
@@ -510,5 +617,85 @@ describe('useTeamCollaboration', () => {
     expect(result.current.selectedSharedSession?.presence[0]?.viewerEmail).toBe(
       'viewer@example.com',
     );
+  });
+
+  it('关闭 autoSelectSharedSession 后不会默认选中第一条共享会话', async () => {
+    const runtime = createRuntimeFixture({
+      sharedSessions: [
+        {
+          sessionId: SESSION_ID,
+          title: '共享会话',
+          stateStatus: 'running',
+          workspacePath: '/workspace/demo',
+          sharedByEmail: 'owner@example.com',
+          permission: 'operate',
+          createdAt: '2026-05-26T08:00:00.000Z',
+          updatedAt: '2026-05-26T08:00:00.000Z',
+          shareCreatedAt: '2026-05-26T08:05:00.000Z',
+          shareUpdatedAt: '2026-05-26T08:05:00.000Z',
+        },
+      ],
+    });
+    let sharedDetailCallCount = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = resolveRequestUrl(input);
+        if (url === `${GATEWAY_URL}/team/runtime?teamWorkspaceId=${TEAM_WORKSPACE_ID}`) {
+          return jsonResponse(runtime);
+        }
+        if (url === `${GATEWAY_URL}/sessions/shared-with-me/${SESSION_ID}`) {
+          sharedDetailCallCount += 1;
+          return jsonResponse(createSharedDetailFixture());
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+
+    const { result } = renderHook(() =>
+      useTeamCollaboration(TEAM_WORKSPACE_ID, { autoSelectSharedSession: false }),
+    );
+
+    await flushAsyncWork();
+
+    expect(result.current.selectedSharedSessionId).toBeNull();
+    expect(result.current.selectedSharedSession).toBeNull();
+    expect(sharedDetailCallCount).toBe(0);
+  });
+
+  it('共享列表暂空时，保留显式选中的共享会话并继续拉取详情', async () => {
+    const runtime = createRuntimeFixture({
+      sharedSessions: [],
+    });
+    let sharedDetailCallCount = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = resolveRequestUrl(input);
+        if (url === `${GATEWAY_URL}/team/runtime?teamWorkspaceId=${TEAM_WORKSPACE_ID}`) {
+          return jsonResponse(runtime);
+        }
+        if (url === `${GATEWAY_URL}/sessions/shared-with-me/${SESSION_ID}`) {
+          sharedDetailCallCount += 1;
+          return jsonResponse(createSharedDetailFixture());
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+
+    const { result } = renderHook(() =>
+      useTeamCollaboration(TEAM_WORKSPACE_ID, { autoSelectSharedSession: false }),
+    );
+
+    await flushAsyncWork();
+
+    await act(async () => {
+      result.current.setSelectedSharedSessionId(SESSION_ID);
+    });
+    await flushAsyncWork();
+
+    expect(result.current.selectedSharedSessionId).toBe(SESSION_ID);
+    expect(result.current.selectedSharedSession?.share.sessionId).toBe(SESSION_ID);
+    expect(sharedDetailCallCount).toBe(1);
   });
 });

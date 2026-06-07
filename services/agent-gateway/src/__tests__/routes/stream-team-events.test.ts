@@ -44,6 +44,7 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  dbModule.sqliteRun('DELETE FROM team_tool_call_records', []);
   dbModule.sqliteRun('DELETE FROM team_usage_records', []);
   dbModule.sqliteRun('DELETE FROM users', []);
   dbModule.sqliteRun("INSERT OR IGNORE INTO users (id, email, password_hash) VALUES (?, ?, 'x')", [
@@ -108,6 +109,55 @@ describe('stream-team-events · roleLayer 守卫 + 持久化', () => {
     expect(records.listTeamUsageRecords({ userId: USER_ID, sessionIds: ['s-chat'] })).toHaveLength(
       0,
     );
+    expect(
+      records.listTeamToolCallRecords({ userId: USER_ID, sessionIds: ['s-chat'] }),
+    ).toHaveLength(0);
+  });
+
+  it('tool call 事件会把 toolName / agent / duration / error 明细落库', () => {
+    events.publishTeamToolCallEvent({
+      userId: USER_ID,
+      sessionId: 's-exec',
+      sessionContext: { metadataJson: '{}', roleLayer: 'executor' },
+      toolName: 'read',
+      agentId: 'agent-reader',
+      durationMs: 125,
+      success: false,
+      errorMessage: 'timeout',
+    });
+    events.publishTeamToolCallEvent({
+      userId: USER_ID,
+      sessionId: 's-exec',
+      sessionContext: { metadataJson: '{}', roleLayer: 'executor' },
+      toolName: 'read',
+      agentId: 'agent-reader',
+      durationMs: 60,
+      success: true,
+    });
+
+    const usageRows = records.listTeamUsageRecords({ userId: USER_ID, sessionIds: ['s-exec'] });
+    expect(usageRows[0]).toMatchObject({
+      sessionId: 's-exec',
+      layer: 'executor',
+      toolCallCount: 2,
+      toolErrorCount: 1,
+    });
+
+    const detailRows = records.listTeamToolCallRecords({ userId: USER_ID, sessionIds: ['s-exec'] });
+    expect(detailRows).toEqual([
+      expect.objectContaining({
+        sessionId: 's-exec',
+        layer: 'executor',
+        agentId: 'agent-reader',
+        toolName: 'read',
+        invocations: 2,
+        successes: 1,
+        failures: 1,
+        totalDurationMs: 185,
+        durations: [60, 125],
+        errorSamples: [{ errorType: 'timeout', count: 1 }],
+      }),
+    ]);
   });
 
   it('非流式 workflow 用量（reception/pm1/pm2）同样落库', () => {

@@ -437,8 +437,13 @@ describe('POST /team/handoffs/:handoffId/pause', () => {
         }),
       );
 
-      const audit = dbModule.sqliteGet<{ action: string; entity_type: string; summary: string }>(
-        `SELECT action, entity_type, summary
+      const audit = dbModule.sqliteGet<{
+        action: string;
+        entity_type: string;
+        summary: string;
+        session_id: string | null;
+      }>(
+        `SELECT action, entity_type, summary, session_id
            FROM team_audit_logs
           ORDER BY created_at DESC, id DESC
           LIMIT 1`,
@@ -447,6 +452,7 @@ describe('POST /team/handoffs/:handoffId/pause', () => {
       expect(audit).toMatchObject({
         action: 'handoff_control',
         entity_type: 'handoff',
+        session_id: TO_SESSION_ID,
       });
       expect(audit?.summary).toContain('handoff pause');
     } finally {
@@ -542,8 +548,13 @@ describe('POST /team/handoffs/:handoffId/resume', () => {
         }),
       );
 
-      const audit = dbModule.sqliteGet<{ action: string; entity_type: string; summary: string }>(
-        `SELECT action, entity_type, summary
+      const audit = dbModule.sqliteGet<{
+        action: string;
+        entity_type: string;
+        summary: string;
+        session_id: string | null;
+      }>(
+        `SELECT action, entity_type, summary, session_id
            FROM team_audit_logs
           ORDER BY created_at DESC, id DESC
           LIMIT 1`,
@@ -552,6 +563,7 @@ describe('POST /team/handoffs/:handoffId/resume', () => {
       expect(audit).toMatchObject({
         action: 'handoff_control',
         entity_type: 'handoff',
+        session_id: TO_SESSION_ID,
       });
       expect(audit?.summary).toContain('handoff resume');
     } finally {
@@ -962,8 +974,13 @@ describe('POST /team/sessions/:sessionId/pause-all', () => {
         }),
       );
 
-      const audit = dbModule.sqliteGet<{ action: string; entity_type: string; summary: string }>(
-        `SELECT action, entity_type, summary
+      const audit = dbModule.sqliteGet<{
+        action: string;
+        entity_type: string;
+        summary: string;
+        session_id: string | null;
+      }>(
+        `SELECT action, entity_type, summary, session_id
            FROM team_audit_logs
           ORDER BY created_at DESC, id DESC
           LIMIT 1`,
@@ -972,6 +989,7 @@ describe('POST /team/sessions/:sessionId/pause-all', () => {
       expect(audit).toMatchObject({
         action: 'handoff_control',
         entity_type: 'session',
+        session_id: FROM_SESSION_ID,
       });
       expect(audit?.summary).toContain('team pause-all');
     } finally {
@@ -1101,8 +1119,13 @@ describe('POST /team/sessions/:sessionId/resume-all', () => {
         }),
       );
 
-      const audit = dbModule.sqliteGet<{ action: string; entity_type: string; summary: string }>(
-        `SELECT action, entity_type, summary
+      const audit = dbModule.sqliteGet<{
+        action: string;
+        entity_type: string;
+        summary: string;
+        session_id: string | null;
+      }>(
+        `SELECT action, entity_type, summary, session_id
            FROM team_audit_logs
           ORDER BY created_at DESC, id DESC
           LIMIT 1`,
@@ -1111,6 +1134,7 @@ describe('POST /team/sessions/:sessionId/resume-all', () => {
       expect(audit).toMatchObject({
         action: 'handoff_control',
         entity_type: 'session',
+        session_id: FROM_SESSION_ID,
       });
       expect(audit?.summary).toContain('team resume-all');
     } finally {

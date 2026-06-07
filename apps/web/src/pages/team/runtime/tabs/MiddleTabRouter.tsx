@@ -19,8 +19,11 @@ import type { HandoffEntry, HandoffEvent } from '../../../../stores/team/team-ev
 import { OfficeThreeCanvas } from './office/OfficeThreeCanvas.js';
 import { OverviewTab } from './overview/OverviewTab.js';
 import { MessagesMergedTab } from './conversation/MessagesMergedTab.js';
+import { SharedSessionFlowView } from './conversation/shared-session-flow-view.js';
+import { SharedSessionLayeredView } from './conversation/shared-session-layered-view.js';
 import { TeamArtifactSection } from './tasks/TeamArtifactSection.js';
 import { ReviewMergedTab } from './tasks/ReviewMergedTab.js';
+import { ReviewTab } from './tasks/ReviewTab.js';
 import { TeamRuntimeSettingsPanel } from './governance/team-runtime-settings-panel.js';
 import { TabPlaceholder } from './TabPlaceholder.js';
 import { TabContainer } from './TabContainer.js';
@@ -34,6 +37,8 @@ import { SharesView } from './governance/SharesView.js';
 import { TemplatesTab } from './governance/TemplatesTab.js';
 import { UsageView } from './metrics/UsageView.js';
 import { TeamInitSummaryPanel } from './overview/TeamInitSummaryPanel.js';
+import { SharedSessionGraphView } from './overview/SharedSessionGraphView.js';
+import { SharedSessionInitView } from './overview/SharedSessionInitView.js';
 import type { TeamRuntimeHandoffContextInput } from './team-runtime-navigation.js';
 
 export type MiddleTabKey =
@@ -57,11 +62,13 @@ export type MiddleTabKey =
 
 export interface MiddleTabRenderArgs {
   middleTab: MiddleTabKey;
+  selectedAgentId: string;
   selectedTeamId: string;
   selectedTeam: AgentTeamsSidebarTeam | null;
   focusHandoffId?: string | null;
   officeSceneState: OfficeSceneState;
   onSelectTeam: (id: string) => void;
+  onSelectAgent: (id: string) => void;
   onOpenFullscreen: () => void;
   onOpenClarifications: () => void;
   onOpenHandoffContext: (input: TeamRuntimeHandoffContextInput) => void;
@@ -69,7 +76,7 @@ export interface MiddleTabRenderArgs {
   onClearFocusedHandoff: () => void;
   onSelectLayerSession: () => void;
   onCancelHandoff: (handoffId: string) => void;
-  onNewTemplate?: () => void;
+  onUseTemplate?: (templateId: string) => void;
   handoffs: Map<string, HandoffEntry>;
   gatewayUrl: string | null;
   accessToken: string | null;
@@ -81,11 +88,13 @@ export interface MiddleTabRenderArgs {
 export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
   const {
     middleTab,
+    selectedAgentId,
     selectedTeamId,
     selectedTeam,
     focusHandoffId,
     officeSceneState,
     onSelectTeam,
+    onSelectAgent,
     onOpenFullscreen,
     onOpenClarifications,
     onOpenHandoffContext,
@@ -93,7 +102,7 @@ export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
     onClearFocusedHandoff,
     onSelectLayerSession,
     onCancelHandoff,
-    onNewTemplate,
+    onUseTemplate,
     handoffs,
     gatewayUrl,
     accessToken,
@@ -101,13 +110,19 @@ export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
     teamWorkspaceId,
   } = args;
 
+  const runtimeSelectedSessionId =
+    selectedTeam && selectedTeam.isSharedSession ? null : selectedTeamId || null;
+  const runtimeSelectedSessionTitle =
+    runtimeSelectedSessionId && selectedTeam ? selectedTeam.title : null;
+  const selectedSharedSession = selectedTeam?.isSharedSession === true;
+
   switch (middleTab) {
     case 'office':
       return (
         <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
           <OfficeThreeCanvas
-            selectedAgentId={selectedTeamId}
-            onSelectAgent={onSelectTeam}
+            selectedAgentId={selectedAgentId}
+            onSelectAgent={onSelectAgent}
             state={officeSceneState}
           />
           <button
@@ -144,9 +159,19 @@ export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
       return <OverviewTab selectedTeam={selectedTeam} />;
 
     case 'graph':
+      if (selectedSharedSession && selectedTeam) {
+        return (
+          <TabContainer
+            title="知识图谱"
+            subtitle="共享会话展示共享来源、快照、输出和待处理项之间的关系。"
+          >
+            <SharedSessionGraphView selectedTeam={selectedTeam} />
+          </TabContainer>
+        );
+      }
       return (
         <WorkspaceKnowledgeGraphView
-          selectedSessionId={selectedTeamId || null}
+          selectedSessionId={runtimeSelectedSessionId}
           teamWorkspaceId={teamWorkspaceId}
           onSelectSession={onSelectTeam}
         />
@@ -154,14 +179,28 @@ export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
 
     case 'health':
       return (
-        <HealthView onCancelHandoff={onCancelHandoff} onOpenHandoffContext={onOpenHandoffContext} />
+        <HealthView
+          onCancelHandoff={onCancelHandoff}
+          onOpenHandoffContext={onOpenHandoffContext}
+          selectedSessionId={selectedSharedSession ? selectedTeamId : runtimeSelectedSessionId}
+          selectedSessionIsShared={selectedSharedSession}
+          selectedSessionTitle={
+            selectedSharedSession ? (selectedTeam?.title ?? null) : runtimeSelectedSessionTitle
+          }
+        />
       );
 
     // ─── B. 通讯 ────────────────────────────────────────────────────
     case 'flow':
+      if (selectedSharedSession && selectedTeam) {
+        return <SharedSessionFlowView selectedTeam={selectedTeam} />;
+      }
       return <LayerFlowView />;
 
     case 'layered':
+      if (selectedSharedSession && selectedTeam) {
+        return <SharedSessionLayeredView selectedTeam={selectedTeam} />;
+      }
       return <LayeredConversationView onSelectSessionDrawer={onSelectLayerSession} />;
 
     case 'messages':
@@ -187,44 +226,75 @@ export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
       );
 
     case 'review':
+      if (selectedSharedSession) {
+        return <ReviewTab selectedTeam={selectedTeam} />;
+      }
       return (
         <ReviewMergedTab
           focusHandoffId={focusHandoffId}
           onClearFocus={onClearFocusedHandoff}
           selectedTeam={selectedTeam}
-          selectedTeamId={selectedTeamId}
+          selectedTeamId={runtimeSelectedSessionId ?? ''}
         />
       );
 
     // ─── D. 度量 ────────────────────────────────────────────────────
     case 'timing':
-      return <TimingView />;
+      return (
+        <TimingView
+          selectedSessionId={selectedSharedSession ? selectedTeamId : runtimeSelectedSessionId}
+          selectedSessionIsShared={selectedSharedSession}
+          selectedSessionTitle={
+            selectedSharedSession ? (selectedTeam?.title ?? null) : runtimeSelectedSessionTitle
+          }
+        />
+      );
 
     case 'usage':
       return (
         <UsageView
-          selectedSessionId={selectedTeamId || null}
-          selectedSessionTitle={selectedTeam?.title ?? null}
+          selectedSessionId={selectedSharedSession ? selectedTeamId : runtimeSelectedSessionId}
+          selectedSessionIsShared={selectedSharedSession}
+          selectedSessionTitle={
+            selectedSharedSession ? (selectedTeam?.title ?? null) : runtimeSelectedSessionTitle
+          }
         />
       );
 
     // ─── E. 配置 / 治理 ─────────────────────────────────────────────
     case 'templates':
-      return <TemplatesTab onNewTemplate={onNewTemplate ?? (() => {})} />;
+      return <TemplatesTab onUseTemplate={onUseTemplate ?? (() => {})} />;
 
     case 'shares':
       return <SharesView />;
 
     case 'audit':
-      return <AuditView />;
+      return (
+        <AuditView
+          selectedSessionId={selectedSharedSession ? selectedTeamId : runtimeSelectedSessionId}
+          selectedSessionTitle={
+            selectedSharedSession ? (selectedTeam?.title ?? null) : runtimeSelectedSessionTitle
+          }
+        />
+      );
 
     case 'init':
+      if (selectedSharedSession && selectedTeam) {
+        return (
+          <TabContainer
+            title="初始化"
+            subtitle="共享会话没有本地 teamInit，展示共享接入摘要与当前已知上下文。"
+          >
+            <SharedSessionInitView selectedTeam={selectedTeam} />
+          </TabContainer>
+        );
+      }
       return (
         <TabContainer
           title="初始化"
           subtitle="团队对当前会话项目的前置认知：结构 / 记忆 / 架构理解 / 各层工具绑定"
         >
-          <TeamInitSummaryPanel sessionId={selectedTeamId || null} variant="full" />
+          <TeamInitSummaryPanel sessionId={runtimeSelectedSessionId} variant="full" />
         </TabContainer>
       );
 

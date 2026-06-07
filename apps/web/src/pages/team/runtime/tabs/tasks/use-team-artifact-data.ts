@@ -18,6 +18,7 @@ export interface ArtifactData {
 interface UseTeamArtifactDataOptions {
   pm1ArtifactSessionId: string | null;
   pm2ArtifactSessionId: string | null;
+  preferredReviewArtifactId?: string | null;
 }
 
 interface UseTeamArtifactDataResult {
@@ -57,8 +58,12 @@ export function formatTeamArtifactsLoadError(input: {
 
 function toArtifactData(
   artifacts: Array<{ id: string; content: string; phase: string | null; title: string }>,
+  preferredArtifactId?: string | null,
 ): ArtifactData | null {
-  const first = artifacts[0];
+  const first =
+    (preferredArtifactId
+      ? artifacts.find((artifact) => artifact.id === preferredArtifactId)
+      : undefined) ?? artifacts[0];
   return first
     ? {
         id: first.id,
@@ -72,6 +77,7 @@ function toArtifactData(
 async function loadLatestArtifactResult(input: {
   client: TeamPhaseAClient;
   phase: string;
+  preferredArtifactId?: string | null;
   sessionId: string;
   token: string;
 }) {
@@ -81,18 +87,20 @@ async function loadLatestArtifactResult(input: {
   });
   return {
     ...result,
-    artifact: result.ok ? toArtifactData(result.artifacts) : null,
+    artifact: result.ok ? toArtifactData(result.artifacts, input.preferredArtifactId) : null,
   };
 }
 
 async function loadLatestReviewArtifactResult(input: {
   client: TeamPhaseAClient;
+  preferredArtifactId?: string | null;
   sessionId: string;
   token: string;
 }) {
   const modern = await loadLatestArtifactResult({
     client: input.client,
     phase: 'review',
+    preferredArtifactId: input.preferredArtifactId,
     sessionId: input.sessionId,
     token: input.token,
   });
@@ -102,6 +110,7 @@ async function loadLatestReviewArtifactResult(input: {
   return loadLatestArtifactResult({
     client: input.client,
     phase: 'review_report',
+    preferredArtifactId: input.preferredArtifactId,
     sessionId: input.sessionId,
     token: input.token,
   });
@@ -252,6 +261,7 @@ export function useTeamArtifactData(
       options.pm2ArtifactSessionId
         ? loadLatestReviewArtifactResult({
             client,
+            preferredArtifactId: options.preferredReviewArtifactId ?? null,
             sessionId: options.pm2ArtifactSessionId,
             token: accessToken,
           })
@@ -329,6 +339,7 @@ export function useTeamArtifactData(
     gatewayUrl,
     options.pm1ArtifactSessionId,
     options.pm2ArtifactSessionId,
+    options.preferredReviewArtifactId,
     reloadTick,
     resetRetry,
     scheduleRetry,

@@ -29,6 +29,8 @@ import {
   type CSSProperties,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { toast } from '../../../../../components/common/feedback/ToastNotification.js';
+import { copyTextToClipboard } from '../../../../../components/layout/file-tree/file-tree-actions.js';
 import type {
   AgentTeamsSidebarTeam,
   AgentTeamsWorkspaceGroup,
@@ -297,6 +299,8 @@ const CONFIRM_DIALOG_STYLE: CSSProperties = {
 
 interface ContextMenuState {
   sessionId: string;
+  sessionIsShared: boolean;
+  sessionStatus: AgentTeamsSidebarTeam['status'];
   sessionTitle: string;
   x: number;
   y: number;
@@ -326,11 +330,17 @@ export interface TeamSessionListSidebarProps {
   workspaceGroups: AgentTeamsWorkspaceGroup[];
   selectedTeamId: string;
   onSelectTeam: (teamId: string) => void;
+  canManageSessionEntries?: boolean;
   workspaceLabel?: string;
   teamWorkspaceId?: string;
   defaultMemberSlots?: TeamSessionCreationDraft['memberSlots'];
-  onSubmitDraft?: (draft: TeamSessionCreationDraft) => void | Promise<void>;
+  onSubmitDraft?: (draft: TeamSessionCreationDraft) => boolean | void | Promise<boolean | void>;
   onDeleteSession?: (sessionId: string) => void;
+  onRenameSession?: (sessionId: string, title: string) => Promise<boolean> | boolean;
+  onToggleSessionState?: (
+    sessionId: string,
+    currentStatus: AgentTeamsSidebarTeam['status'],
+  ) => Promise<boolean> | boolean;
   selectedWorkspacePath?: string | null;
   onWorkspaceChange?: (workspacePath: string | null) => void;
   loading?: boolean;
@@ -348,6 +358,10 @@ export interface TeamSessionListSidebarProps {
   showNewSessionModal?: boolean;
   /** 关闭 NewTeamSessionModal 的回调（仅在 chromeless=true 时生效） */
   onCloseNewSessionModal?: () => void;
+  /** 预选模板 id（仅在受控弹窗显示时生效） */
+  initialTemplateId?: string | null;
+  /** 新会话初始工作目录（review / 创建时透传到 metadata.workingDirectory） */
+  initialWorkingDirectory?: string | null;
 }
 
 const SKELETON_ITEM_STYLE: CSSProperties = {
@@ -372,11 +386,14 @@ export function TeamSessionListSidebar({
   workspaceGroups,
   selectedTeamId,
   onSelectTeam,
+  canManageSessionEntries = true,
   workspaceLabel,
   teamWorkspaceId,
   defaultMemberSlots,
   onSubmitDraft,
   onDeleteSession,
+  onRenameSession,
+  onToggleSessionState,
   selectedWorkspacePath,
   onWorkspaceChange,
   loading = false,
@@ -384,16 +401,21 @@ export function TeamSessionListSidebar({
   controlledSearchQuery,
   showNewSessionModal: controlledShowModal,
   onCloseNewSessionModal,
+  initialTemplateId,
+  initialWorkingDirectory,
 }: TeamSessionListSidebarProps) {
   const [internalShowModal, setInternalShowModal] = useState(false);
-  const showNewSessionModal = chromeless ? !!controlledShowModal : internalShowModal;
+  const showNewSessionModal = controlledShowModal ?? internalShowModal;
   const setShowNewSessionModal = (value: boolean) => {
-    if (chromeless) {
-      if (!value) onCloseNewSessionModal?.();
-    } else {
-      setInternalShowModal(value);
+    if (controlledShowModal !== undefined) {
+      if (!value) {
+        onCloseNewSessionModal?.();
+      }
+      return;
     }
+    setInternalShowModal(value);
   };
+  const canOpenNewSessionModal = Boolean(canManageSessionEntries && teamWorkspaceId);
   const [internalSearchQuery, setInternalSearchQuery] = useState('');
   const searchQuery = chromeless ? (controlledSearchQuery ?? '') : internalSearchQuery;
   const setSearchQuery = chromeless ? () => {} : setInternalSearchQuery;
@@ -407,6 +429,8 @@ export function TeamSessionListSidebar({
       event.preventDefault();
       setContextMenu({
         sessionId: session.id,
+        sessionIsShared: session.isSharedSession === true,
+        sessionStatus: session.status,
         sessionTitle: session.title,
         x: event.clientX,
         y: event.clientY,
@@ -436,10 +460,109 @@ export function TeamSessionListSidebar({
   }, [contextMenu, closeContextMenu]);
 
   const handleDeleteClick = useCallback(() => {
-    if (!contextMenu) return;
+    if (!contextMenu || !canManageSessionEntries) return;
     setDeleteConfirm({ id: contextMenu.sessionId, title: contextMenu.sessionTitle });
     closeContextMenu();
-  }, [contextMenu, closeContextMenu]);
+  }, [canManageSessionEntries, contextMenu, closeContextMenu]);
+
+  const handleRenameClick = useCallback(async () => {
+    if (!contextMenu || !onRenameSession || !canManageSessionEntries) {
+      closeContextMenu();
+      return;
+    }
+    const nextTitle = window.prompt(
+      `重命名「${contextMenu.sessionTitle}」为：`,
+      contextMenu.sessionTitle,
+    );
+    if (nextTitle == null) {
+      closeContextMenu();
+      return;
+    }
+    const trimmed = nextTitle.trim();
+    closeContextMenu();
+    if (!trimmed || trimmed === contextMenu.sessionTitle) {
+      return;
+    }
+    await onRenameSession(contextMenu.sessionId, trimmed);
+  }, [canManageSessionEntries, closeContextMenu, contextMenu, onRenameSession]);
+
+  const handleToggleSessionStateClick = useCallback(async () => {
+    if (!contextMenu || !onToggleSessionState || !canManageSessionEntries) {
+      closeContextMenu();
+      return;
+    }
+    closeContextMenu();
+    await onToggleSessionState(contextMenu.sessionId, contextMenu.sessionStatus);
+  }, [canManageSessionEntries, closeContextMenu, contextMenu, onToggleSessionState]);
+
+  const menuActions = useMemo(() => {
+    if (!contextMenu) {
+      return [];
+    }
+
+    const actions: Array<{
+      key: string;
+      label: string;
+      onClick: () => void | Promise<void>;
+      tone?: 'danger';
+    }> = [];
+
+    if (canManageSessionEntries && onRenameSession && !contextMenu.sessionIsShared) {
+      actions.push({
+        key: 'rename',
+        label: '重命名',
+        onClick: handleRenameClick,
+      });
+    }
+
+    actions.push({
+      key: 'copy-id',
+      label: '📋 复制 ID',
+      onClick: () => {
+        void copyTextToClipboard(contextMenu.sessionId)
+          .then(() => {
+            toast('已复制会话 ID', 'success');
+          })
+          .catch((err: unknown) => {
+            toast(err instanceof Error ? err.message : '复制失败', 'error');
+          });
+        closeContextMenu();
+      },
+    });
+
+    if (
+      canManageSessionEntries &&
+      onToggleSessionState &&
+      !contextMenu.sessionIsShared &&
+      (contextMenu.sessionStatus === 'running' || contextMenu.sessionStatus === 'paused')
+    ) {
+      actions.push({
+        key: 'toggle-state',
+        label: contextMenu.sessionStatus === 'running' ? '⏸ 暂停会话' : '▶ 恢复会话',
+        onClick: handleToggleSessionStateClick,
+      });
+    }
+
+    if (canManageSessionEntries && !contextMenu.sessionIsShared) {
+      actions.push({
+        key: 'delete',
+        label: '🔴 删除会话',
+        onClick: handleDeleteClick,
+        tone: 'danger',
+      });
+    }
+
+    return actions;
+  }, [
+    closeContextMenu,
+    contextMenu,
+    handleDeleteClick,
+    handleRenameClick,
+    handleToggleSessionStateClick,
+    canManageSessionEntries,
+    onRenameSession,
+    onToggleSessionState,
+  ]);
 
   const menuItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [focusedMenuIndex, setFocusedMenuIndex] = useState(0);
@@ -669,8 +792,7 @@ export function TeamSessionListSidebar({
               <button
                 type="button"
                 onClick={() => {
-                  if (!teamWorkspaceId) {
-                    console.warn('[TeamSessionListSidebar] 请先选择工作空间');
+                  if (!canOpenNewSessionModal) {
                     return;
                   }
                   setShowNewSessionModal(true);
@@ -678,7 +800,14 @@ export function TeamSessionListSidebar({
                 className="team-cta-accent"
                 style={CREATE_BTN_STYLE}
                 aria-label="新建会话"
-                title={teamWorkspaceId ? '新建会话' : '请先选择工作空间'}
+                title={
+                  !canManageSessionEntries
+                    ? '当前工作区不可写'
+                    : teamWorkspaceId
+                      ? '新建会话'
+                      : '请先选择工作空间'
+                }
+                disabled={!canOpenNewSessionModal}
               >
                 <svg
                   aria-hidden="true"
@@ -930,87 +1059,34 @@ export function TeamSessionListSidebar({
               role="menu"
               aria-label="会话操作菜单"
               tabIndex={-1}
-              onKeyDown={(event) => handleMenuKeyDown(event, 5)}
+              onKeyDown={(event) => handleMenuKeyDown(event, menuActions.length)}
               style={{ ...CONTEXT_MENU_STYLE, left: contextMenu.x, top: contextMenu.y }}
             >
-              <button
-                type="button"
-                role="menuitem"
-                ref={(el) => {
-                  menuItemRefs.current[0] = el;
-                }}
-                className="team-menu-item"
-                style={CONTEXT_MENU_ITEM_STYLE}
-                onClick={() => {
-                  console.log('[TeamSessionListSidebar] rename:', contextMenu.sessionId);
-                  closeContextMenu();
-                }}
-              >
-                重命名
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                ref={(el) => {
-                  menuItemRefs.current[1] = el;
-                }}
-                className="team-menu-item"
-                style={CONTEXT_MENU_ITEM_STYLE}
-                onClick={() => {
-                  console.log('[TeamSessionListSidebar] pin:', contextMenu.sessionId);
-                  closeContextMenu();
-                }}
-              >
-                📌 置顶
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                ref={(el) => {
-                  menuItemRefs.current[2] = el;
-                }}
-                className="team-menu-item"
-                style={CONTEXT_MENU_ITEM_STYLE}
-                onClick={() => {
-                  if (typeof navigator !== 'undefined' && navigator.clipboard) {
-                    navigator.clipboard.writeText(contextMenu.sessionId).catch((err) => {
-                      console.warn('[TeamSessionListSidebar] clipboard failed:', err);
-                    });
-                  }
-                  closeContextMenu();
-                }}
-              >
-                📋 复制 ID
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                ref={(el) => {
-                  menuItemRefs.current[3] = el;
-                }}
-                className="team-menu-item"
-                style={CONTEXT_MENU_ITEM_STYLE}
-                onClick={() => {
-                  console.log('[TeamSessionListSidebar] pause:', contextMenu.sessionId);
-                  closeContextMenu();
-                }}
-              >
-                ⏸ 暂停任务
-              </button>
-              <div style={CONTEXT_MENU_SEPARATOR_STYLE} />
-              <button
-                type="button"
-                role="menuitem"
-                ref={(el) => {
-                  menuItemRefs.current[4] = el;
-                }}
-                className="team-menu-item"
-                data-tone="danger"
-                style={{ ...CONTEXT_MENU_ITEM_STYLE, color: 'var(--danger)' }}
-                onClick={handleDeleteClick}
-              >
-                🔴 删除会话
-              </button>
+              {menuActions.map((action, index) => (
+                <Fragment key={action.key}>
+                  {action.tone === 'danger' ? <div style={CONTEXT_MENU_SEPARATOR_STYLE} /> : null}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    ref={(el) => {
+                      menuItemRefs.current[index] = el;
+                    }}
+                    className="team-menu-item"
+                    data-tone={action.tone}
+                    style={
+                      action.tone === 'danger'
+                        ? { ...CONTEXT_MENU_ITEM_STYLE, color: 'var(--danger)' }
+                        : CONTEXT_MENU_ITEM_STYLE
+                    }
+                    onClick={() => {
+                      void action.onClick();
+                    }}
+                    disabled={action.key !== 'copy-id' && !canManageSessionEntries}
+                  >
+                    {action.label}
+                  </button>
+                </Fragment>
+              ))}
             </div>,
             document.body,
           )
@@ -1067,6 +1143,8 @@ export function TeamSessionListSidebar({
           workspaceLabel={workspaceLabel ?? '默认工作区'}
           teamWorkspaceId={teamWorkspaceId}
           defaultMemberSlots={defaultMemberSlots}
+          initialTemplateId={initialTemplateId}
+          initialWorkingDirectory={initialWorkingDirectory}
         />
       ) : null}
     </aside>

@@ -382,6 +382,12 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
         activeProviderId={activeProviderId}
         activeProviderName={activeProvider?.name}
         activeProviderType={activeProvider?.type}
+        showModelPickerButton={features.modelPicker}
+        showModelSettingsButton={features.modelSettings}
+        showWebSearchButton={features.webSearch}
+        showImageGenerationButton={features.imageGen}
+        showVoiceButton={features.voice}
+        showAttachmentButton={features.attachments}
         activeModelTooltip={activeModelTooltip}
         modelPickerRef={modelPickerBtnRef}
         modelSettingsRef={modelSettingsBtnRef}

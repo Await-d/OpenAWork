@@ -286,13 +286,16 @@ describe('POST /team/sessions/:sessionId/inbound-messages', () => {
       });
 
       expect(res.statusCode).toBe(201);
-      const audit = dbModule.sqliteGet<{ action: string; entity_type: string; summary: string }>(
-        `SELECT action, entity_type, summary FROM team_audit_logs LIMIT 1`,
-        [],
-      );
+      const audit = dbModule.sqliteGet<{
+        action: string;
+        entity_type: string;
+        summary: string;
+        session_id: string | null;
+      }>(`SELECT action, entity_type, summary, session_id FROM team_audit_logs LIMIT 1`, []);
       expect(audit).toMatchObject({
         action: 'escape_hatch_used',
         entity_type: 'session_inbound_message',
+        session_id: SESSION_ID,
       });
       expect(audit?.summary).toContain('cancel_signal');
     } finally {

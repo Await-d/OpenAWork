@@ -194,6 +194,7 @@ function v2ToV1Message(withParts: MessageWithParts): Message {
     role: info.role,
     createdAt: info.time.created,
     content,
+    ...('agent' in info && typeof info.agent === 'string' ? { agentId: info.agent } : {}),
     ...(info.clientRequestId ? { clientRequestId: info.clientRequestId } : {}),
     ...(typeof durationMs === 'number' && durationMs > 0 ? { durationMs } : {}),
     ...(typeof firstTokenLatencyMs === 'number' && firstTokenLatencyMs > 0
@@ -377,6 +378,7 @@ export function appendSessionMessageV2(input: {
   userId: string;
   role: MessageRole;
   content: MessageContent[];
+  agentId?: string | null;
   clientRequestId?: string | null;
   createdAt?: number;
   completedAt?: number;
@@ -437,6 +439,7 @@ export function appendSessionMessageV2(input: {
       : input.role === 'assistant'
         ? {
             ...baseInfo,
+            ...(input.agentId ? { agent: input.agentId } : {}),
             role: 'assistant',
             time: {
               created: timeCreated,
@@ -701,6 +704,7 @@ export function appendSessionMessageV2(input: {
     role: input.role,
     createdAt: timeCreated,
     content: input.content,
+    ...(input.agentId ? { agentId: input.agentId } : {}),
     ...(providerUsage ? { providerUsage } : {}),
   };
 }

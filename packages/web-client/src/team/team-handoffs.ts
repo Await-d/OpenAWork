@@ -42,6 +42,7 @@ export interface HandoffRecord {
   toRoleLayer: HandoffRoleLayer;
   toSessionId: string | null;
   payload: unknown;
+  resultJson?: unknown;
   state: HandoffState;
   claimToken: string | null;
   claimedAt: string | null;
@@ -54,6 +55,7 @@ export interface HandoffRecord {
   pausedAt?: string | null;
   pausedByUserId?: string | null;
   pauseReason?: string | null;
+  recoverableFailure?: boolean;
   createdAt: string;
   updatedAt: string;
 }

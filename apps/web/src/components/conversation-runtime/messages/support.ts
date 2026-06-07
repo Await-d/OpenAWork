@@ -1106,15 +1106,16 @@ function mapCopiedToolCardStatus(value: string | undefined): AssistantTraceToolC
     return undefined;
   }
 
-  if (normalized === '完成') return 'completed';
-  if (normalized === '失败') return 'failed';
+  if (normalized === '完成' || normalized === 'completed') return 'completed';
+  if (normalized === '失败' || normalized === 'failed') return 'failed';
   if (normalized === '恢复后失败') return 'failed';
-  if (normalized === '执行中') return 'running';
+  if (normalized === '执行中' || normalized === 'running') return 'running';
   if (
     normalized === '等待权限' ||
     normalized === '等待处理' ||
     normalized === '等待回答' ||
-    normalized === '等待确认'
+    normalized === '等待确认' ||
+    normalized === 'paused'
   )
     return 'paused';
   return undefined;
@@ -2019,6 +2020,7 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
           createdAt: createdAtValue,
           model,
           providerId,
+          agentId,
           durationMs,
           firstTokenLatencyMs,
           stopReason,
@@ -2162,6 +2164,7 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
           createdAt: createdAtValue,
           model,
           providerId,
+          agentId,
           durationMs,
           firstTokenLatencyMs,
           stopReason,
@@ -2321,6 +2324,7 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
         createdAt: createdAtValue,
         model,
         providerId,
+        agentId,
         durationMs,
         firstTokenLatencyMs,
         stopReason,

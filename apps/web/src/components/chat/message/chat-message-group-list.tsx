@@ -17,9 +17,19 @@ export interface ChatRenderAction {
   title?: string;
 }
 
+export interface ChatIdentityOverride {
+  color?: string;
+  displayName: string;
+  icon?: string;
+  initials?: string;
+}
+
 export interface ChatRenderEntry {
   actions?: ChatRenderAction[];
+  groupIdentityKey?: string;
+  identityOverride?: ChatIdentityOverride;
   message: ChatMessage;
+  presentationMode?: 'chat' | 'team';
   renderContent: (message: ChatMessage) => React.ReactNode;
   usageDetails?: ChatUsageDetails;
 }
@@ -421,6 +431,8 @@ const ChatGroupBlock = React.memo(function ChatGroupBlock({
             email={currentUserEmail}
             actions={entryIndex === 0 ? (group.actions ?? entry.actions) : entry.actions}
             groupedWithPrevious={entryIndex > 0}
+            identityOverride={entry.identityOverride}
+            presentationMode={entry.presentationMode ?? 'chat'}
             renderContent={entry.renderContent}
             sharedUiThemeVars={sharedUiThemeVars}
             usageDetails={entry.usageDetails}

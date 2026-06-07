@@ -18,7 +18,7 @@
  * - 与 NewTeamWorkspaceModal 风格统一（都是 hero/aside 结构）
  */
 
-import { useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
 import { useTeamRuntimeRoleBindings } from '../../hooks/use-team-runtime-role-bindings.js';
 import {
@@ -35,10 +35,12 @@ import { recordTemplateUsage } from '../../../views/templates/template-preferenc
 
 interface NewTeamSessionModalProps {
   onClose: () => void;
-  onSubmitDraft: (draft: TeamSessionCreationDraft) => void | Promise<void>;
+  onSubmitDraft: (draft: TeamSessionCreationDraft) => boolean | void | Promise<boolean | void>;
   workspaceLabel: string;
   teamWorkspaceId: string;
   defaultMemberSlots?: TeamSessionCreationDraft['memberSlots'];
+  initialTemplateId?: string | null;
+  initialWorkingDirectory?: string | null;
 }
 
 interface StepDescriptor {
@@ -715,11 +717,14 @@ export function NewTeamSessionModal({
   workspaceLabel,
   teamWorkspaceId,
   defaultMemberSlots,
+  initialTemplateId = null,
+  initialWorkingDirectory = null,
 }: NewTeamSessionModalProps) {
   const { templateLoading, templates } = useTeamRuntimeReferenceViewData();
   const roleBindings = useTeamRuntimeRoleBindings();
   const creation = useTeamSessionCreation({
     defaultMemberSlots,
+    initialWorkingDirectory,
     teamWorkspaceId,
   });
   const [submitting, setSubmitting] = useState(false);
@@ -729,6 +734,23 @@ export function NewTeamSessionModal({
   const [sourceTab, setSourceTab] = useState<SourceTab>(
     creation.draft.source.kind === 'saved-template' ? 'template' : 'blank',
   );
+  const appliedInitialTemplateRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!initialTemplateId || templateLoading || templates.length === 0) {
+      return;
+    }
+    if (appliedInitialTemplateRef.current === initialTemplateId) {
+      return;
+    }
+    const template = templates.find((item) => item.id === initialTemplateId);
+    if (!template) {
+      return;
+    }
+    creation.applyTemplate(template);
+    setSourceTab('template');
+    appliedInitialTemplateRef.current = initialTemplateId;
+  }, [creation, initialTemplateId, templateLoading, templates]);
 
   const groupedTemplates = useMemo(() => {
     const groups = new Map<string, { items: typeof templates; title: string; priority: number }>();
@@ -774,7 +796,11 @@ export function NewTeamSessionModal({
         ...creation.draft,
         title: creation.draft.title.trim() || generateDefaultSessionTitle(),
       };
-      await onSubmitDraft(finalDraft);
+      const result = await onSubmitDraft(finalDraft);
+      if (result === false) {
+        setSubmitError('创建团队会话失败，请检查工作区配置或稍后重试。');
+        return;
+      }
       // 据模板新建会话成功后，记录一次模板使用（最近 + 次数），供模板页统计展示。
       if (finalDraft.source.kind === 'saved-template' && finalDraft.source.templateId) {
         recordTemplateUsage(finalDraft.source.templateId);
@@ -1030,44 +1056,6 @@ export function NewTeamSessionModal({
 
                 {sourceTab === 'template' ? (
                   <div style={{ display: 'grid', gap: 12 }}>
-                    {/* 旧版兼容警告 */}
-                    <div
-                      role="note"
-                      style={{
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        gap: 8,
-                        padding: '10px 12px',
-                        borderRadius: 10,
-                        background: 'color-mix(in srgb, var(--warning) 10%, transparent)',
-                        border: '1px solid color-mix(in srgb, var(--warning) 30%, transparent)',
-                        fontSize: 11,
-                        color: 'var(--fg-default)',
-                        lineHeight: 1.6,
-                      }}
-                    >
-                      <svg
-                        aria-hidden="true"
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="var(--warning)"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        style={{ flexShrink: 0, marginTop: 1 }}
-                      >
-                        <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-                        <line x1="12" y1="9" x2="12" y2="13" />
-                        <line x1="12" y1="17" x2="12.01" y2="17" />
-                      </svg>
-                      <span>
-                        <strong style={{ color: 'var(--warning)' }}>实验性功能：</strong>
-                        已保存模板沿用旧版数据结构，与新版会话契约可能不完全兼容；新版的模板体系仍在设计中。建议优先选择「空白会话」开始。
-                      </span>
-                    </div>
-
                     {templateLoading ? (
                       <div
                         style={{
@@ -1151,6 +1139,15 @@ export function NewTeamSessionModal({
                                 ) : null}
                                 <div style={CARD_DESC_STYLE}>
                                   {template.description ?? '已保存的团队模板'}
+                                </div>
+                                <div
+                                  style={{
+                                    fontSize: 11,
+                                    color: 'var(--fg-muted)',
+                                    lineHeight: 1.5,
+                                  }}
+                                >
+                                  采用后会自动带入模板的默认花名册、额外增援成员与默认模型策略。
                                 </div>
                                 {template.metaLine ? (
                                   <div
@@ -1827,6 +1824,24 @@ export function NewTeamSessionModal({
                 <div style={REVIEW_ROW_STYLE}>
                   <span style={REVIEW_LABEL_STYLE}>工作区</span>
                   <span style={REVIEW_VALUE_STYLE}>{workspaceLabel}</span>
+                </div>
+                <div style={REVIEW_ROW_STYLE}>
+                  <span style={REVIEW_LABEL_STYLE}>工作目录</span>
+                  <span style={REVIEW_VALUE_STYLE}>
+                    {creation.draft.workingDirectory ? (
+                      <code
+                        style={{
+                          fontSize: 11,
+                          color: 'var(--fg-default)',
+                          fontFamily: 'ui-monospace, monospace',
+                        }}
+                      >
+                        {creation.draft.workingDirectory}
+                      </code>
+                    ) : (
+                      <span style={{ color: 'var(--fg-muted)' }}>使用工作区默认目录</span>
+                    )}
+                  </span>
                 </div>
                 <div style={REVIEW_ROW_STYLE}>
                   <span style={REVIEW_LABEL_STYLE}>核心角色</span>

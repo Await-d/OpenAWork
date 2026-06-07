@@ -33,16 +33,16 @@ const SCROLL_AREA_STYLE: CSSProperties = {
 const INNER_BASE: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  gap: 12,
+  gap: 14,
   width: '100%',
 };
 
 const HEADER_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'flex-end',
-  gap: 10,
+  gap: 12,
   flexWrap: 'wrap',
-  paddingBottom: 8,
+  paddingBottom: 10,
   borderBottom: '1px solid color-mix(in srgb, var(--border-default) 28%, transparent)',
 };
 
@@ -55,16 +55,16 @@ const HEADER_TEXT_GROUP_STYLE: CSSProperties = {
 };
 
 const TITLE_STYLE: CSSProperties = {
-  fontSize: 14,
+  fontSize: 15,
   fontWeight: 700,
   color: 'var(--fg-strong)',
   lineHeight: 1.25,
 };
 
 const SUBTITLE_STYLE: CSSProperties = {
-  fontSize: 11,
+  fontSize: 11.5,
   color: 'var(--fg-muted)',
-  lineHeight: 1.5,
+  lineHeight: 1.6,
 };
 
 const ACTIONS_STYLE: CSSProperties = {
@@ -107,7 +107,7 @@ export function TabContainer({
   const innerStyle: CSSProperties = {
     ...INNER_BASE,
     maxWidth: maxWidth === 'none' ? undefined : maxWidth,
-    padding: padded ? '12px 14px 16px' : 0,
+    padding: padded ? '16px 18px 22px' : 0,
   };
 
   const hasHeader = Boolean(title || subtitle || actions);
@@ -174,10 +174,10 @@ const SECTION_ACTIONS_STYLE: CSSProperties = {
 };
 
 const CARD_PADDING_STYLE: CSSProperties = {
-  padding: '10px 12px',
-  borderRadius: 8,
+  padding: '12px 14px',
+  borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--border-default) 30%, transparent)',
-  background: 'transparent',
+  background: 'color-mix(in srgb, var(--bg-overlay) 72%, transparent)',
 };
 
 export interface TabSectionProps {

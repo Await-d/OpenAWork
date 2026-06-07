@@ -91,6 +91,8 @@ export interface TeamMessageInput {
   id: string;
   userId: string;
   senderId?: string | null;
+  recipientMemberId?: string | null;
+  replyToMessageId?: string | null;
   content: string;
   type: string;
 }
@@ -101,8 +103,24 @@ export interface TeamMessageInput {
  */
 export function appendTeamMessage(input: TeamMessageInput): void {
   sqliteRun(
-    `INSERT INTO team_messages (id, user_id, sender_id, content, type) VALUES (?, ?, ?, ?, ?)`,
-    [input.id, input.userId, input.senderId ?? null, input.content, input.type],
+    `INSERT INTO team_messages (
+      id,
+      user_id,
+      sender_id,
+      recipient_member_id,
+      reply_to_message_id,
+      content,
+      type
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      input.id,
+      input.userId,
+      input.senderId ?? null,
+      input.recipientMemberId ?? null,
+      input.replyToMessageId ?? null,
+      input.content,
+      input.type,
+    ],
   );
   maybePrune(input.userId);
 }

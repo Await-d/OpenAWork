@@ -9,8 +9,8 @@
  *   2. LLM 兜底：规则无法判断时调轻量 LLM 做分类
  *
  * 路由结果：
- *   - 'direct'：简单问题，b.companion 直接回答（走 stream）
- *   - 'orchestrate'：复杂任务，走 c→d→e/f/g 链路（走 orchestration）
+ *   - 'direct'：极少数前台承接类消息（问候 / 致谢 / 简短状态确认），b 层直接答
+ *   - 'orchestrate'：默认路径，大多数问题 / 需求都走 c→d→e/f/g 链路
  *   - 'clarify'：意图不清，b.companion 追问用户
  *
  * 强制约束（L1.2.3）：
@@ -32,20 +32,28 @@ export interface RouteResult {
 
 // ─── 规则引擎（优先级高于 LLM） ─────────────────────────────────────────────
 
-/** 直答关键词：匹配到这些模式的输入直接由 companion 回答 */
+/**
+ * 直答关键词：仅保留真正适合前台当场承接的超轻量消息。
+ * 团队模式下，知识问答 / 技术解释 / 检索 / 对比 / “怎么做” 一律优先升级给下游层。
+ */
 const DIRECT_ANSWER_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /^(你好|hi|hello|hey|嗨|早上好|晚上好|下午好)/i, reason: '问候语' },
   { pattern: /^(谢谢|感谢|thanks|thank you)/i, reason: '感谢语' },
-  { pattern: /^(什么是|解释一下|告诉我|介绍|说说)/i, reason: '知识查询' },
-  { pattern: /^(怎么|如何|how to|how do)/i, reason: '操作指南查询' },
-  { pattern: /^(为什么|why|原因)/i, reason: '原因解释查询' },
-  { pattern: /^(对比|区别|difference|vs|比较)/i, reason: '对比分析查询' },
+  { pattern: /^(收到|好的|好嘞|ok|okay|明白了|在吗)[!！。?？\s]*$/i, reason: '简短确认' },
   { pattern: /^(那个|之前的|上次|刚才).*(怎么样|进度|状态)/i, reason: '进度查询' },
-  { pattern: /^(帮我查|查一下|搜索|找一下|look up)/i, reason: '信息检索' },
 ];
 
 /** 编排关键词：匹配到这些模式的输入走 c→d→e 链路 */
 const ORCHESTRATE_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
+  {
+    pattern:
+      /^(什么是|解释一下|告诉我|介绍|说说|怎么|如何|how to|how do|为什么|why|原因|对比|区别|difference|vs|比较|帮我查|查一下|搜索|找一下|look up|分析|评估)/i,
+    reason: '需要分析/检索/解释的提问',
+  },
+  {
+    pattern: /(吗|么|呢|？|\?)/i,
+    reason: '团队模式下的实质性提问默认升级处理',
+  },
   { pattern: /(实现|开发|编写|创建|构建|build|implement|create|develop)/i, reason: '开发任务' },
   { pattern: /(修复|fix|bug|修|解决.*问题|repair)/i, reason: '修复任务' },
   { pattern: /(重构|refactor|优化.*代码|改进.*架构)/i, reason: '重构任务' },
@@ -119,8 +127,8 @@ export function routeByRules(userIntent: string): RouteResult | null {
 const ROUTER_CLASSIFICATION_PROMPT = `你是一个意图路由分类器。根据用户输入判断应该走哪条路径。
 
 分类规则：
-- DIRECT：简单问题、知识查询、闲聊、状态查询——可以直接回答，不需要写代码或执行任务
-- ORCHESTRATE：需要实际动手的任务（写代码、修 bug、重构、部署、设计方案等）
+- DIRECT：只限问候、致谢、极简确认、简短进度确认。这类消息由接待层前台承接即可。
+- ORCHESTRATE：默认选项。凡是需要解释、分析、检索、对比、基于项目上下文判断、给方案、做技术决策、写代码、修 bug、重构、部署、设计方案等，都交给团队下游层处理
 - CLARIFY：意图不清楚，需要追问用户才能判断
 
 严格按以下格式输出一行：

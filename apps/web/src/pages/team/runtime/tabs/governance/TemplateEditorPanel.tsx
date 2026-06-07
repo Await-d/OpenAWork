@@ -1,11 +1,10 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { WorkflowTemplateScale } from '@openAwork/web-client';
 import { FIXED_TEAM_CORE_ROLE_BINDINGS, type TeamCoreRole } from '@openAwork/shared';
 import { useTeamRuntimeRoleBindings } from '../../hooks/use-team-runtime-role-bindings.js';
 import { agentTeamsNewTemplateProviders } from '../../data/team-runtime-ui-config.js';
 import {
   ROLE_COLOR_MAP,
-  BUILTIN_AGENT_LABELS,
   REQUIRED_TEMPLATE_ROLES,
   ROLE_LABELS,
   SCALE_OPTIONS,
@@ -54,9 +53,39 @@ function TemplateEditor({
     [roleBindings.roleCards],
   );
 
+  const availableOptionalAgents = useMemo(() => {
+    const requiredAgentIds = new Set(
+      fixedRoleCards
+        .map(
+          (roleCard) =>
+            roleCard.selectedAgent?.id ??
+            FIXED_TEAM_CORE_ROLE_BINDINGS[roleCard.role as TeamCoreRole],
+        )
+        .filter((value): value is string => Boolean(value)),
+    );
+    return roleBindings.agents.filter((agent) => agent.enabled && !requiredAgentIds.has(agent.id));
+  }, [fixedRoleCards, roleBindings.agents]);
+
   const hasValidName = state.name.trim().length > 0;
   const hasCompleteBindings = fixedRoleCards.length === REQUIRED_TEMPLATE_ROLES.length;
   const isValid = hasValidName && hasCompleteBindings;
+
+  useEffect(() => {
+    if (mode !== 'create') {
+      return;
+    }
+    if (Object.keys(state.roleBindings).length > 0) {
+      return;
+    }
+    if (Object.keys(initialState.roleBindings).length === 0) {
+      return;
+    }
+    setState((prev) => ({
+      ...prev,
+      roleBindings: initialState.roleBindings,
+      provider: prev.provider || initialState.provider,
+    }));
+  }, [initialState.provider, initialState.roleBindings, mode, state.roleBindings]);
 
   const update = <K extends keyof EditorState>(key: K, value: EditorState[K]) => {
     setState((prev) => ({ ...prev, [key]: value }));
@@ -64,7 +93,12 @@ function TemplateEditor({
 
   const updateRoleBinding = (role: string, field: keyof RoleBindingEdit, value: string) => {
     setState((prev) => {
-      const existing = prev.roleBindings[role] ?? { providerId: '', modelId: '', variant: '' };
+      const existing = prev.roleBindings[role] ?? {
+        agentId: '',
+        providerId: '',
+        modelId: '',
+        variant: '',
+      };
       const updated: RoleBindingEdit = { ...existing, [field]: value };
       return {
         ...prev,
@@ -286,6 +320,9 @@ function TemplateEditor({
               const roleLabel = ROLE_LABELS[roleCard.role] ?? roleCard.roleLabel;
               const color = ROLE_COLOR_MAP[roleLabel] ?? 'var(--accent)';
               const binding = state.roleBindings[roleCard.role] ?? {
+                agentId:
+                  roleCard.selectedAgent?.id ??
+                  FIXED_TEAM_CORE_ROLE_BINDINGS[roleCard.role as TeamCoreRole],
                 providerId: '',
                 modelId: '',
                 variant: '',
@@ -437,14 +474,17 @@ function TemplateEditor({
           <div style={{ display: 'grid', gap: 5 }}>
             <label style={fieldLabelStyle}>额外增援（可选）</label>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {Object.entries(BUILTIN_AGENT_LABELS).map(([agentId, label]) => (
+              {availableOptionalAgents.map((agent) => (
                 <button
-                  key={agentId}
+                  key={agent.id}
                   type="button"
-                  onClick={() => toggleAgent(agentId)}
-                  style={pillButtonStyle(state.optionalAgentIds.has(agentId), 'var(--warning)')}
+                  onClick={() => toggleAgent(agent.id)}
+                  style={pillButtonStyle(
+                    state.optionalAgentIds.has(agent.id),
+                    agent.color ?? 'var(--warning)',
+                  )}
                 >
-                  {label}
+                  {agent.label}
                 </button>
               ))}
             </div>
@@ -560,7 +600,7 @@ function editorStateToTemplateData(state: EditorState) {
   const defaultBindings: Record<string, RoleBindingEdit> = {};
   for (const role of REQUIRED_TEMPLATE_ROLES) {
     const binding = state.roleBindings[role];
-    if (binding && (binding.providerId || binding.modelId || binding.variant)) {
+    if (binding && (binding.agentId || binding.providerId || binding.modelId || binding.variant)) {
       defaultBindings[role] = binding;
     }
   }
@@ -603,6 +643,7 @@ function templateDataToEditorState(data: {
       const b = team.defaultBindings[role];
       if (b) {
         roleBindings[role] = {
+          agentId: b.agentId ?? '',
           providerId: b.providerId ?? '',
           modelId: b.modelId ?? '',
           variant: b.variant ?? '',
@@ -623,4 +664,24 @@ function templateDataToEditorState(data: {
   };
 }
 
-export { TemplateEditor, editorStateToTemplateData, templateDataToEditorState };
+function createEmptyTemplateEditorState(): EditorState {
+  return {
+    name: '',
+    description: '',
+    provider: agentTeamsNewTemplateProviders[0]?.value ?? '',
+    optionalAgentIds: new Set(),
+    scale: 'medium',
+    focus: '',
+    recommendedFor: '',
+    isRecommendedDefault: false,
+    roleBindings: {},
+  };
+}
+
+export type { EditorState };
+export {
+  TemplateEditor,
+  editorStateToTemplateData,
+  templateDataToEditorState,
+  createEmptyTemplateEditorState,
+};

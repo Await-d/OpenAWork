@@ -6,7 +6,7 @@ interface HistoryEditDialogProps {
   inputParts?: InputImageContent[];
   onClose: () => void;
   onContinueCurrent: (text: string, inputParts?: InputImageContent[]) => void;
-  onCreateBranch: (text: string, inputParts?: InputImageContent[]) => void;
+  onCreateBranch?: (text: string, inputParts?: InputImageContent[]) => void;
   onResendCurrent?: (text: string, inputParts?: InputImageContent[]) => void;
   open: boolean;
 }
@@ -98,6 +98,7 @@ export default function HistoryEditDialog({
   );
 
   const hasCodeMarkers = containsCodeMarkers(draft);
+  const canCreateBranch = typeof onCreateBranch === 'function';
 
   const effectiveInputParts = draftInputParts.length > 0 ? draftInputParts : undefined;
 
@@ -170,7 +171,9 @@ export default function HistoryEditDialog({
             编辑历史消息
           </div>
           <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.6, color: 'var(--fg-default)' }}>
-            这是历史消息。你可以编辑后重新发送（截断后续消息），在末尾追加，或从这里新建子会话。
+            {canCreateBranch
+              ? '这是历史消息。你可以编辑后重新发送（截断后续消息），在末尾追加，或从这里新建子会话。'
+              : '这是历史消息。你可以编辑后重新发送（截断后续消息），或把补充内容直接追加到当前会话末尾。'}
           </div>
         </div>
 
@@ -186,7 +189,9 @@ export default function HistoryEditDialog({
               color: 'var(--fg-strong)',
             }}
           >
-            检测到这条历史消息带有代码标识。为了避免后续上下文污染，建议从这里新建会话继续。
+            {canCreateBranch
+              ? '检测到这条历史消息带有代码标识。为了避免后续上下文污染，建议从这里新建会话继续。'
+              : '检测到这条历史消息带有代码标识。请确认是否需要先精简或改写内容，再继续在当前会话重发。'}
           </div>
         )}
 
@@ -313,13 +318,15 @@ export default function HistoryEditDialog({
           >
             追加到末尾
           </button>
-          <button
-            type="button"
-            onClick={() => onCreateBranch(draft, effectiveInputParts)}
-            style={secondaryButtonStyle}
-          >
-            从这里新建会话
-          </button>
+          {onCreateBranch ? (
+            <button
+              type="button"
+              onClick={() => onCreateBranch(draft, effectiveInputParts)}
+              style={secondaryButtonStyle}
+            >
+              从这里新建会话
+            </button>
+          ) : null}
           {onResendCurrent && (
             <button
               type="button"

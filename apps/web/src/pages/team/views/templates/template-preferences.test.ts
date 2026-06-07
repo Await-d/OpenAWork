@@ -41,17 +41,13 @@ describe('parsePreferences 容错', () => {
   });
 
   it('recent / usage 非数字 map 时降级为空', () => {
-    const result = parsePreferences(
-      JSON.stringify({ recent: { a: 'x' }, usage: { b: true } }),
-    );
+    const result = parsePreferences(JSON.stringify({ recent: { a: 'x' }, usage: { b: true } }));
     expect(result.recent).toEqual({});
     expect(result.usage).toEqual({});
   });
 
   it('保留合法 recent / usage', () => {
-    const result = parsePreferences(
-      JSON.stringify({ recent: { a: 100 }, usage: { a: 3 } }),
-    );
+    const result = parsePreferences(JSON.stringify({ recent: { a: 100 }, usage: { a: 3 } }));
     expect(result.recent).toEqual({ a: 100 });
     expect(result.usage).toEqual({ a: 3 });
   });

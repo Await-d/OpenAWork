@@ -409,8 +409,7 @@ export class HandoffWatcher {
     try {
       const { SESSION_RUNTIME_THREAD_STALE_AFTER_MS } =
         await import('../../session/session-runtime-thread-store.js');
-      const { setPersistedSessionStateStatus } =
-        await import('../../routes/stream.js');
+      const { setPersistedSessionStateStatus } = await import('../../routes/stream.js');
       const staleThreadCutoffMs = Date.now() - SESSION_RUNTIME_THREAD_STALE_AFTER_MS;
       const stuckSessions = sqliteAll<{ id: string; user_id: string }>(
         `SELECT s.id, s.user_id
@@ -609,6 +608,7 @@ export class HandoffWatcher {
               sessionId: reception.id,
               userId: reception.user_id,
               role: 'assistant',
+              agentId: 'interaction-agent',
               content: [
                 {
                   type: 'text',
@@ -800,6 +800,7 @@ export class HandoffWatcher {
                   sessionId: input.handoff.fromSessionId,
                   userId: input.handoff.userId,
                   role: 'assistant',
+                  agentId: 'prometheus',
                   content: [
                     {
                       type: 'text',

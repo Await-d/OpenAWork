@@ -18,6 +18,14 @@ function seedUser(id: string, email: string): void {
   ]);
 }
 
+function seedSession(id: string, userId: string): void {
+  dbModule.sqliteRun(
+    `INSERT OR IGNORE INTO sessions (id, user_id, title, state_status, messages_json, created_at, updated_at)
+     VALUES (?, ?, ?, 'idle', '[]', datetime('now'), datetime('now'))`,
+    [id, userId, id],
+  );
+}
+
 function countAuditRows(userId: string): number {
   const row = dbModule.sqliteGet<{ count: number }>(
     `SELECT COUNT(1) AS count FROM team_audit_logs WHERE user_id = ?`,
@@ -121,5 +129,20 @@ describe('team-audit-store 保留裁剪', () => {
     }
 
     expect(countAuditRows(USER_A)).toBe(total);
+  });
+
+  it('审计记录会保留可选 sessionId 归属字段', () => {
+    seedSession('session-123', USER_A);
+    auditStore.__insertTeamAuditLogForTesting({
+      action: 'route_decision',
+      entityId: 'entity-session',
+      entityType: 'session',
+      sessionId: 'session-123',
+      summary: 'decision with session scope',
+      userId: USER_A,
+    });
+
+    const latest = auditStore.listTeamAuditLogs({ userId: USER_A, limit: 1 })[0];
+    expect(latest?.sessionId).toBe('session-123');
   });
 });

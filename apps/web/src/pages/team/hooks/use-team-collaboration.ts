@@ -13,6 +13,7 @@ import {
   type TeamMessageRecord,
   type TeamRuntimeLoadResult,
   type TeamRuntimeReadModel,
+  type TeamRuntimeSessionRecord,
   type TeamSessionShareRecord,
   type TeamTaskRecord,
   type UpdateTeamTaskInput,
@@ -25,7 +26,11 @@ import {
   useTeamNotificationStore,
   useTeamEventsConnectionStore,
 } from '../../../stores/team/team-events.js';
-import { hydrateTeamUsageStore } from '../../../stores/team/team-usage.js';
+import {
+  hydrateTeamToolCallStore,
+  hydrateTeamUsageStore,
+  useTeamUsageStore,
+} from '../../../stores/team/team-usage.js';
 import {
   appendSharedSessionCommentPreview,
   applySharedSessionPermissionReplyPreview,
@@ -174,9 +179,10 @@ function sortSharedSessions(sessions: SharedSessionSummaryRecord[]): SharedSessi
 
 export function useTeamCollaboration(
   teamWorkspaceId?: string,
-  options: { enabled?: boolean } = {},
+  options: { enabled?: boolean; autoSelectSharedSession?: boolean } = {},
 ) {
   const enabled = options.enabled ?? true;
+  const autoSelectSharedSession = options.autoSelectSharedSession ?? true;
   const accessToken = useAuthStore((state) => state.accessToken);
   const gatewayUrl = useAuthStore((state) => state.gatewayUrl);
   const [auditLogs, setAuditLogs] = useState<TeamAuditLogRecord[]>([]);
@@ -186,18 +192,7 @@ export function useTeamCollaboration(
   const [messages, setMessages] = useState<TeamMessageRecord[]>([]);
   const [sessionShares, setSessionShares] = useState<TeamSessionShareRecord[]>([]);
   const [sharedSessions, setSharedSessions] = useState<SharedSessionSummaryRecord[]>([]);
-  const [sessions, setSessions] = useState<
-    Array<{
-      id: string;
-      metadataJson: string;
-      parentSessionId: string | null;
-      roleLayer: string | null;
-      stateStatus: string;
-      title: string | null;
-      updatedAt: string;
-      workspacePath: string | null;
-    }>
-  >([]);
+  const [sessions, setSessions] = useState<TeamRuntimeSessionRecord[]>([]);
   const [selectedSharedSessionId, setSelectedSharedSessionId] = useState<string | null>(null);
   const [selectedSharedSession, setSelectedSharedSession] =
     useState<SharedSessionDetailRecord | null>(null);
@@ -302,6 +297,7 @@ export function useTeamCollaboration(
       sharedSessions: sortSharedSessions(runtime.sharedSessions),
       sessions: runtime.sessions,
       tasks: sortTasks(runtime.tasks),
+      ...(runtime.toolCallRecords ? { toolCallRecords: runtime.toolCallRecords } : {}),
       ...(runtime.usageRecords ? { usageRecords: runtime.usageRecords } : {}),
     };
   }, []);
@@ -326,6 +322,7 @@ export function useTeamCollaboration(
       });
       // 用持久化用量回灌内存 store，让"度量"tab 刷新后仍有历史 token / 费用 / 工具调用。
       hydrateTeamUsageStore(snapshot.usageRecords ?? []);
+      hydrateTeamToolCallStore(snapshot.usageRecords ?? [], snapshot.toolCallRecords);
       snapshotLoadedRef.current = true;
     },
     [normalizeSnapshot],
@@ -357,7 +354,8 @@ export function useTeamCollaboration(
         useTeamNotificationStore.getState().clear();
         hydrateClarificationStore([]);
         hydrateTeamRuntimeStores({ handoffs: [], sessions: [] });
-        hydrateTeamUsageStore([]);
+        // 完整清空用量 store（含 recent 调用日志）——登出 / 无会话时归零。
+        useTeamUsageStore.getState().clear();
         setLoading(false);
         setError(null);
         return true;
@@ -539,7 +537,9 @@ export function useTeamCollaboration(
 
   useEffect(() => {
     if (sharedSessions.length === 0) {
-      setSelectedSharedSessionId(null);
+      if (selectedSharedSessionId) {
+        return;
+      }
       setSelectedSharedSession(null);
       return;
     }
@@ -551,8 +551,14 @@ export function useTeamCollaboration(
       return;
     }
 
+    if (!autoSelectSharedSession) {
+      setSelectedSharedSessionId(null);
+      setSelectedSharedSession(null);
+      return;
+    }
+
     setSelectedSharedSessionId(sharedSessions[0]?.sessionId ?? null);
-  }, [selectedSharedSessionId, sharedSessions]);
+  }, [autoSelectSharedSession, selectedSharedSessionId, sharedSessions]);
 
   useEffect(() => {
     if (!accessToken || !selectedSharedSessionId) {
@@ -980,6 +986,24 @@ export function useTeamCollaboration(
     [accessToken, client, runMutation],
   );
 
+  const renameSession = useCallback(
+    async (sessionId: string, title: string) => {
+      if (!accessToken) {
+        return false;
+      }
+      const trimmed = title.trim();
+      if (!trimmed) {
+        return false;
+      }
+      return runMutation(async () => {
+        await client.updateSessionState(accessToken, sessionId, {
+          title: trimmed,
+        });
+      }, '已重命名会话');
+    },
+    [accessToken, client, runMutation],
+  );
+
   const deleteSession = useCallback(
     async (sessionId: string) => {
       if (!accessToken) {
@@ -1039,6 +1063,7 @@ export function useTeamCollaboration(
     sessions,
     setSelectedSharedSessionId,
     tasks,
+    renameSession,
     toggleSessionState,
     updateSessionShare,
     updateTask,

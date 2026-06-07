@@ -86,6 +86,7 @@ export const pillButtonStyle = (active: boolean, color: string) => ({
 export type EditorMode = 'idle' | 'create' | 'edit';
 
 export interface RoleBindingEdit {
+  agentId: string;
   providerId: string;
   modelId: string;
   variant: string;

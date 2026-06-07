@@ -270,6 +270,125 @@ describe('invokeInstruction 合法路径', () => {
     expect(payload?.taskProfile?.kind).toBe('fix');
     expect(payload?.taskProfile?.surface).toBe('ui');
   });
+
+  it('reception 调 cancel_downstream → 取消下游 handoff + 写审计日志', async () => {
+    seedSession('reception');
+    // 构造一个 reception→pm1 的 running handoff，to_session 是一个 pm1 子会话。
+    dbModule.sqliteRun(
+      `INSERT OR REPLACE INTO sessions (id, user_id, title, metadata_json, role_layer, team_parent_session_id)
+       VALUES ('s-cd-pm1', ?, 'pm1', '{}', 'pm1', ?)`,
+      [USER_ID, SESSION_ID],
+    );
+    dbModule.sqliteRun(
+      `INSERT OR REPLACE INTO handoff_records
+         (id, user_id, from_session_id, from_role_layer, to_role_layer, to_session_id, payload_json, state, retry_count)
+       VALUES ('h-cd', ?, ?, 'reception', 'pm1', 's-cd-pm1', '{}', 'running', 0)`,
+      [USER_ID, SESSION_ID],
+    );
+
+    const result = await builtin.invokeInstruction({
+      ctx: { callerLayer: 'reception', sessionId: SESSION_ID, userId: USER_ID },
+      instructionName: 'cancel_downstream',
+      rawArgs: { handoffId: 'h-cd', reason: '用户要求取消' },
+    });
+    expect(result.ok).toBe(true);
+
+    // handoff 被取消
+    const handoffRow = dbModule.sqliteGet<{ state: string }>(
+      `SELECT state FROM handoff_records WHERE id = 'h-cd'`,
+    );
+    expect(handoffRow?.state).toBe('cancelled');
+
+    // 审计日志被写入（action=handoff_control, entity=handoff）
+    const auditRow = dbModule.sqliteGet<{
+      action: string;
+      entity_type: string;
+      detail: string;
+      session_id: string | null;
+    }>(
+      `SELECT action, entity_type, detail, session_id FROM team_audit_logs
+       WHERE entity_id = 'h-cd' ORDER BY id DESC LIMIT 1`,
+    );
+    expect(auditRow?.action).toBe('handoff_control');
+    expect(auditRow?.entity_type).toBe('handoff');
+    expect(auditRow?.session_id).toBe(SESSION_ID);
+    const detail = auditRow
+      ? (JSON.parse(auditRow.detail) as { action?: string; reason?: string })
+      : null;
+    expect(detail?.action).toBe('cancel');
+    expect(detail?.reason).toBe('用户要求取消');
+  });
+
+  it('pm2 调 constitution_check → 写入带 sessionId 的审计日志', async () => {
+    seedSession('pm2');
+    const result = await builtin.invokeInstruction({
+      ctx: { callerLayer: 'pm2', sessionId: SESSION_ID, userId: USER_ID },
+      instructionName: 'constitution_check',
+      rawArgs: {
+        pass: false,
+        violations: ['缺少回滚方案'],
+        planArtifactId: 'artifact-plan-1',
+      },
+    });
+    expect(result.ok).toBe(true);
+
+    const auditRow = dbModule.sqliteGet<{
+      action: string;
+      entity_type: string;
+      entity_id: string;
+      session_id: string | null;
+      detail: string | null;
+    }>(
+      `SELECT action, entity_type, entity_id, session_id, detail
+         FROM team_audit_logs
+        WHERE action = 'constitution_check'
+        ORDER BY id DESC
+        LIMIT 1`,
+    );
+    expect(auditRow).toMatchObject({
+      action: 'constitution_check',
+      entity_type: 'artifact',
+      entity_id: 'artifact-plan-1',
+      session_id: SESSION_ID,
+    });
+    expect(auditRow?.detail ?? '').toContain('缺少回滚方案');
+  });
+
+  it('pm2 调 quality_review → 写入带 sessionId 的审计日志', async () => {
+    seedSession('pm2');
+    const result = await builtin.invokeInstruction({
+      ctx: { callerLayer: 'pm2', sessionId: SESSION_ID, userId: USER_ID },
+      instructionName: 'quality_review',
+      rawArgs: {
+        passCount: 3,
+        failCount: 1,
+        summary: '还有 1 项用例未通过',
+        decision: 'request_retry',
+      },
+    });
+    expect(result.ok).toBe(true);
+
+    const auditRow = dbModule.sqliteGet<{
+      action: string;
+      entity_type: string;
+      entity_id: string;
+      session_id: string | null;
+      detail: string | null;
+    }>(
+      `SELECT action, entity_type, entity_id, session_id, detail
+         FROM team_audit_logs
+        WHERE action = 'quality_review'
+        ORDER BY id DESC
+        LIMIT 1`,
+    );
+    expect(auditRow).toMatchObject({
+      action: 'quality_review',
+      entity_type: 'session',
+      entity_id: SESSION_ID,
+      session_id: SESSION_ID,
+    });
+    expect(auditRow?.detail ?? '').toContain('request_retry');
+  });
 });
 
 describe('多层共享指令（mark_completed / mark_failed / report_progress）', () => {

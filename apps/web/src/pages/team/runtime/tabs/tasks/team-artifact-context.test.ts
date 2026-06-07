@@ -17,6 +17,7 @@ function createHandoffRecord(
     toRoleLayer: overrides.toRoleLayer ?? 'pm2',
     toSessionId: overrides.toSessionId ?? 'session-to',
     payload: overrides.payload ?? {},
+    ...(overrides.resultJson !== undefined ? { resultJson: overrides.resultJson } : {}),
     state: overrides.state ?? 'completed',
     claimToken: overrides.claimToken ?? null,
     claimedAt: overrides.claimedAt ?? null,
@@ -81,6 +82,35 @@ describe('resolveTeamArtifactContext', () => {
     expect(context.pm1ArtifactSessionId).toBe('session-pm1');
     expect(context.pm2ArtifactSessionId).toBeNull();
   });
+
+  it('当前选中 reviewer 子会话时，能够回溯到对应 PM2 会话', () => {
+    const pm2 = createHandoffRecord({
+      id: 'handoff-pm2',
+      fromSessionId: 'session-pm1',
+      toSessionId: 'session-pm2',
+      fromRoleLayer: 'pm1',
+      toRoleLayer: 'pm2',
+      updatedAt: '2026-05-25T09:00:00.000Z',
+    });
+    const reviewer = createHandoffRecord({
+      id: 'handoff-reviewer',
+      fromSessionId: 'session-pm2',
+      toSessionId: 'session-reviewer',
+      fromRoleLayer: 'pm2',
+      toRoleLayer: 'reviewer',
+      updatedAt: '2026-05-25T09:05:00.000Z',
+    });
+
+    const context = resolveTeamArtifactContext({
+      handoffs: [pm2, reviewer],
+      selectedSessionId: 'session-reviewer',
+      selectedSessionRoleLayer: 'reviewer',
+    });
+
+    expect(context.pm2Handoff?.id).toBe(pm2.id);
+    expect(context.pm1ArtifactSessionId).toBe('session-pm1');
+    expect(context.pm2ArtifactSessionId).toBe('session-pm2');
+  });
 });
 
 describe('parseDispatchPackage', () => {
@@ -143,5 +173,28 @@ describe('extractReviewReport', () => {
     expect(review.markdown).toBe('# focused');
     expect(review.overallVerdict).toBe('implementation-failure');
     expect(review.qualityReviewPassed).toBe(false);
+  });
+
+  it('当 payload 没有内联报告时，会从 resultJson 提取评审判定与产物引用', () => {
+    const resultOnly = createHandoffRecord({
+      id: 'handoff-result-only',
+      payload: {},
+      resultJson: {
+        reviewReportArtifactId: 'review-artifact-42',
+        overallVerdict: 'planning-failure',
+        specReviewPassed: false,
+        qualityReviewPassed: true,
+      },
+      updatedAt: '2026-05-25T10:00:00.000Z',
+      completedAt: '2026-05-25T10:00:00.000Z',
+    });
+
+    const review = extractReviewReport([resultOnly]);
+
+    expect(review.reviewArtifactId).toBe('review-artifact-42');
+    expect(review.markdown).toBeNull();
+    expect(review.overallVerdict).toBe('planning-failure');
+    expect(review.specReviewPassed).toBe(false);
+    expect(review.qualityReviewPassed).toBe(true);
   });
 });

@@ -203,7 +203,7 @@ export function FailureFlowIndicator({
         <button
           type="button"
           onClick={() => void runReviewAction('redispatch')}
-          disabled={!canActionate || action === 'escalate-to-user'}
+          disabled={!canActionate}
           style={{
             ...(action === 'redispatch' ? PRIMARY_BTN_STYLE : SECONDARY_BTN_STYLE),
             opacity: canActionate ? 1 : 0.55,
@@ -216,7 +216,7 @@ export function FailureFlowIndicator({
         <button
           type="button"
           onClick={() => void runReviewAction('return-to-c')}
-          disabled={!canActionate || action === 'escalate-to-user'}
+          disabled={!canActionate}
           style={{
             ...(action === 'return-to-c' ? PRIMARY_BTN_STYLE : SECONDARY_BTN_STYLE),
             opacity: canActionate ? 1 : 0.55,

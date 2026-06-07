@@ -140,6 +140,7 @@ function logHandoffControl(input: {
       }),
       entityId: input.record.id,
       entityType: 'handoff',
+      sessionId: input.record.toSessionId ?? input.record.fromSessionId,
       summary: `handoff ${input.action}: ${input.record.id.slice(0, 8)} ${input.record.fromRoleLayer}→${input.record.toRoleLayer}`,
       userId: input.record.userId,
     });
@@ -251,6 +252,7 @@ function logSessionTreeControl(input: {
       }),
       entityId: input.rootSessionId,
       entityType: 'session',
+      sessionId: input.rootSessionId,
       summary: `team ${input.action}: ${input.rootSessionId.slice(0, 8)} sessions=${input.sessionIds.length} handoffs=${input.handoffIds.length}`,
       userId: input.userId,
     });
@@ -337,6 +339,7 @@ async function cascadeCancelDownstream(input: {
       }),
       entityId: input.rootSessionId,
       entityType: 'session',
+      sessionId: input.rootSessionId,
       summary: `cascade cancel: root=${input.rootSessionId.slice(0, 8)} sessions=${result.treeSessionIds.length} handoffs=${result.cancelledHandoffIds.length}`,
       userId: input.userId,
     });
@@ -1057,6 +1060,7 @@ async function appendPm2SystemMessage(input: {
       sessionId: input.sessionId,
       userId: input.userId,
       role: 'assistant',
+      agentId: 'zeus',
       content: [{ type: 'text', text: input.text }],
     });
   } catch (err) {

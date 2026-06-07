@@ -690,11 +690,23 @@ export async function migrate(): Promise<void> {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       sender_id TEXT REFERENCES team_members(id) ON DELETE SET NULL,
+      recipient_member_id TEXT REFERENCES team_members(id) ON DELETE SET NULL,
+      reply_to_message_id TEXT REFERENCES team_messages(id) ON DELETE SET NULL,
       content TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
   ensureColumn('team_messages', 'type', "TEXT NOT NULL DEFAULT 'update'");
+  ensureColumn(
+    'team_messages',
+    'recipient_member_id',
+    'TEXT REFERENCES team_members(id) ON DELETE SET NULL',
+  );
+  ensureColumn(
+    'team_messages',
+    'reply_to_message_id',
+    'TEXT REFERENCES team_messages(id) ON DELETE SET NULL',
+  );
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS team_audit_logs (
@@ -715,6 +727,7 @@ export async function migrate(): Promise<void> {
   );
   ensureColumn('team_audit_logs', 'actor_user_id', 'TEXT');
   ensureColumn('team_audit_logs', 'actor_email', 'TEXT');
+  ensureColumn('team_audit_logs', 'session_id', 'TEXT REFERENCES sessions(id) ON DELETE SET NULL');
 
   // team_usage_records · 团队执行的真实 token / 费用 / 工具调用持久化。
   // 背景：stream-team-events 只把 usage/tool_call 作为实时 WS 事件推给前端 store，
@@ -746,6 +759,30 @@ export async function migrate(): Promise<void> {
   `);
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_team_usage_records_user_session ON team_usage_records(user_id, session_id)',
+  );
+
+  // team_tool_call_records · 工具调用明细事件持久化。
+  // team_usage_records 只保留总量，无法恢复 toolName / agent / 时延分位 / 错误类型
+  // 等细项排行；这里按事件逐条落库，再由 /team/runtime 聚合成前端所需快照。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS team_tool_call_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      session_id TEXT NOT NULL,
+      layer TEXT,
+      agent_id TEXT,
+      tool_name TEXT NOT NULL,
+      duration_ms INTEGER NOT NULL DEFAULT 0,
+      success INTEGER NOT NULL DEFAULT 1,
+      error_type TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_team_tool_call_records_user_session_created ON team_tool_call_records(user_id, session_id, created_at DESC)',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_team_tool_call_records_user_session_tool ON team_tool_call_records(user_id, session_id, tool_name)',
   );
 
   db.exec(`

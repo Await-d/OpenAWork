@@ -66,6 +66,7 @@ export interface CreateTeamSessionInput {
   memberSlots?: TeamMemberSlotInput[];
   optionalAgentIds?: string[];
   defaultProvider?: string | null;
+  workingDirectory?: string | null;
 }
 
 export type ImportTeamWorkspaceSessionInput = SessionImportInput;
@@ -94,6 +95,8 @@ export interface TeamTaskRecord {
 export interface TeamMessageRecord {
   id: string;
   memberId: string;
+  recipientMemberId?: string | null;
+  replyToMessageId?: string | null;
   content: string;
   type: 'update' | 'question' | 'result' | 'error';
   timestamp: number;
@@ -121,6 +124,8 @@ export interface UpdateTeamTaskInput {
 
 export interface CreateTeamMessageInput {
   senderId?: string;
+  recipientMemberId?: string | null;
+  replyToMessageId?: string | null;
   content: string;
   type?: 'update' | 'question' | 'result' | 'error';
 }
@@ -141,6 +146,9 @@ export interface TeamSessionShareRecord {
 export interface TeamAuditLogRecord {
   id: string;
   action:
+    | 'capability_violation'
+    | 'constitution_check'
+    | 'quality_review'
     | 'share_created'
     | 'share_deleted'
     | 'share_permission_updated'
@@ -157,6 +165,8 @@ export interface TeamAuditLogRecord {
   actorEmail: string | null;
   actorUserId: string | null;
   entityType:
+    | 'artifact'
+    | 'layer'
     | 'session_share'
     | 'shared_session_comment'
     | 'permission_request'
@@ -168,6 +178,7 @@ export interface TeamAuditLogRecord {
     | 'runtime_alert'
     | 'session';
   entityId: string;
+  sessionId: string | null;
   summary: string;
   detail: string | null;
   createdAt: string;
@@ -183,6 +194,7 @@ export interface TeamRuntimeSessionRecord {
   id: string;
   metadataJson: string;
   parentSessionId: string | null;
+  paused?: boolean;
   roleLayer: string | null;
   stateStatus: string;
   title: string | null;
@@ -240,6 +252,19 @@ export interface TeamUsageRecord {
   toolCallCount: number;
   toolErrorCount: number;
   updatedAt: string;
+}
+
+export interface TeamToolCallRecord {
+  sessionId: string;
+  layer: string | null;
+  agentId: string | null;
+  toolName: string;
+  invocations: number;
+  successes: number;
+  failures: number;
+  totalDurationMs: number;
+  durations: number[];
+  errorSamples: Array<{ errorType: string; count: number }>;
 }
 
 export interface TeamRuntimePauseAllResult {
@@ -460,6 +485,8 @@ export interface TeamRuntimeReadModel {
   sessions: TeamRuntimeSessionRecord[];
   sharedSessions: SharedSessionSummaryRecord[];
   tasks: TeamTaskRecord[];
+  /** 持久化的工具调用明细快照（可选，旧后端可能不返回）。 */
+  toolCallRecords?: TeamToolCallRecord[];
   /** 持久化的团队执行用量聚合（可选，旧后端可能不返回）。 */
   usageRecords?: TeamUsageRecord[];
 }
@@ -648,17 +675,17 @@ export interface TeamClient {
   acknowledgeRuntimeAlert(
     token: string,
     alertCode: TeamRuntimeAlertControlRecord['alertCode'],
-    input?: { note?: string; teamWorkspaceId?: string },
+    input?: { note?: string; sessionId?: string; teamWorkspaceId?: string },
   ): Promise<TeamRuntimeAlertControlActionResult>;
   suppressRuntimeAlert(
     token: string,
     alertCode: TeamRuntimeAlertControlRecord['alertCode'],
-    input?: { minutes?: number; note?: string; teamWorkspaceId?: string },
+    input?: { minutes?: number; note?: string; sessionId?: string; teamWorkspaceId?: string },
   ): Promise<TeamRuntimeAlertControlActionResult>;
   clearRuntimeAlertControl(
     token: string,
     alertCode: TeamRuntimeAlertControlRecord['alertCode'],
-    options?: { teamWorkspaceId?: string },
+    options?: { sessionId?: string; teamWorkspaceId?: string },
   ): Promise<TeamRuntimeAlertControlActionResult>;
   pauseAllRuntimeSessions(
     token: string,
@@ -677,7 +704,7 @@ export interface TeamClient {
   runRuntimeAlertRemediation(
     token: string,
     alertCode: TeamRuntimeAlertControlRecord['alertCode'],
-    options?: { force?: boolean; handoffId?: string; teamWorkspaceId?: string },
+    options?: { force?: boolean; handoffId?: string; sessionId?: string; teamWorkspaceId?: string },
   ): Promise<TeamRuntimeReconcileStaleThreadsResult>;
   listMembers(token: string): Promise<TeamMemberRecord[]>;
   createMember(token: string, input: CreateTeamMemberInput): Promise<TeamMemberRecord>;
@@ -701,7 +728,7 @@ export interface TeamClient {
   updateSessionState(
     token: string,
     sessionId: string,
-    input: { stateStatus: 'idle' | 'running' | 'paused'; title?: string },
+    input: { stateStatus?: 'idle' | 'running' | 'paused'; title?: string },
   ): Promise<void>;
   deleteSession(token: string, sessionId: string): Promise<string[]>;
 }
@@ -1460,9 +1487,12 @@ export function createTeamClient(baseUrl: string): TeamClient {
     async acknowledgeRuntimeAlert(
       token: string,
       alertCode: TeamRuntimeAlertControlRecord['alertCode'],
-      input?: { note?: string; teamWorkspaceId?: string },
+      input?: { note?: string; sessionId?: string; teamWorkspaceId?: string },
     ): Promise<TeamRuntimeAlertControlActionResult> {
       const params = new URLSearchParams();
+      if (input?.sessionId) {
+        params.set('sessionId', input.sessionId);
+      }
       if (input?.teamWorkspaceId) {
         params.set('teamWorkspaceId', input.teamWorkspaceId);
       }
@@ -1487,9 +1517,12 @@ export function createTeamClient(baseUrl: string): TeamClient {
     async suppressRuntimeAlert(
       token: string,
       alertCode: TeamRuntimeAlertControlRecord['alertCode'],
-      input?: { minutes?: number; note?: string; teamWorkspaceId?: string },
+      input?: { minutes?: number; note?: string; sessionId?: string; teamWorkspaceId?: string },
     ): Promise<TeamRuntimeAlertControlActionResult> {
       const params = new URLSearchParams();
+      if (input?.sessionId) {
+        params.set('sessionId', input.sessionId);
+      }
       if (input?.teamWorkspaceId) {
         params.set('teamWorkspaceId', input.teamWorkspaceId);
       }
@@ -1517,9 +1550,12 @@ export function createTeamClient(baseUrl: string): TeamClient {
     async clearRuntimeAlertControl(
       token: string,
       alertCode: TeamRuntimeAlertControlRecord['alertCode'],
-      options?: { teamWorkspaceId?: string },
+      options?: { sessionId?: string; teamWorkspaceId?: string },
     ): Promise<TeamRuntimeAlertControlActionResult> {
       const params = new URLSearchParams();
+      if (options?.sessionId) {
+        params.set('sessionId', options.sessionId);
+      }
       if (options?.teamWorkspaceId) {
         params.set('teamWorkspaceId', options.teamWorkspaceId);
       }
@@ -1617,7 +1653,12 @@ export function createTeamClient(baseUrl: string): TeamClient {
     async runRuntimeAlertRemediation(
       token: string,
       alertCode: TeamRuntimeAlertControlRecord['alertCode'],
-      options?: { force?: boolean; handoffId?: string; teamWorkspaceId?: string },
+      options?: {
+        force?: boolean;
+        handoffId?: string;
+        sessionId?: string;
+        teamWorkspaceId?: string;
+      },
     ): Promise<TeamRuntimeReconcileStaleThreadsResult> {
       const params = new URLSearchParams();
       if (options?.force) {
@@ -1625,6 +1666,9 @@ export function createTeamClient(baseUrl: string): TeamClient {
       }
       if (options?.handoffId) {
         params.set('handoffId', options.handoffId);
+      }
+      if (options?.sessionId) {
+        params.set('sessionId', options.sessionId);
       }
       if (options?.teamWorkspaceId) {
         params.set('teamWorkspaceId', options.teamWorkspaceId);
@@ -1814,7 +1858,7 @@ export function createTeamClient(baseUrl: string): TeamClient {
     async updateSessionState(
       token: string,
       sessionId: string,
-      input: { stateStatus: 'idle' | 'running' | 'paused'; title?: string },
+      input: { stateStatus?: 'idle' | 'running' | 'paused'; title?: string },
     ): Promise<void> {
       await performTeamRequest({
         actionLabel: '更新会话状态',
@@ -1827,7 +1871,7 @@ export function createTeamClient(baseUrl: string): TeamClient {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-              state_status: input.stateStatus,
+              ...(input.stateStatus != null ? { state_status: input.stateStatus } : {}),
               ...(input.title != null ? { title: input.title } : {}),
             }),
           }),

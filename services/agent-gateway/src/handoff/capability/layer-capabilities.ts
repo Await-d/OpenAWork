@@ -302,12 +302,22 @@ function logCapabilityViolation(input: {
 }): void {
   try {
     sqliteRun(
-      `INSERT INTO team_audit_logs (user_id, action, entity_type, entity_id, summary, detail, created_at)
-       VALUES (?, 'capability_violation', ?, ?, ?, ?, datetime('now'))`,
+      `INSERT INTO team_audit_logs (
+         user_id,
+         action,
+         entity_type,
+         entity_id,
+         session_id,
+         summary,
+         detail,
+         created_at
+       )
+       VALUES (?, 'capability_violation', ?, ?, ?, ?, ?, datetime('now'))`,
       [
         input.userId ?? 'system',
         input.sessionId ? 'session' : 'layer',
         input.sessionId ?? input.callerLayer,
+        input.sessionId ?? null,
         `${input.callerLayer} attempted ${input.kind}=${input.target}`,
         JSON.stringify({
           callerLayer: input.callerLayer,

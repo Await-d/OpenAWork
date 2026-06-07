@@ -28,11 +28,16 @@ beforeAll(async () => {
 beforeEach(() => {
   // 清掉 audit log 让每个测试独立
   dbModule.sqliteRun('DELETE FROM team_audit_logs', []);
+  dbModule.sqliteRun('DELETE FROM sessions', []);
   // 种一个用户给 audit log 写入用（FK 约束）
   dbModule.sqliteRun("INSERT OR IGNORE INTO users (id, email, password_hash) VALUES (?, ?, 'x')", [
     'u-test',
     'cap-test@example.com',
   ]);
+  dbModule.sqliteRun(
+    `INSERT OR IGNORE INTO sessions (id, user_id, title, metadata_json, state_status)
+     VALUES ('s-test', 'u-test', 'cap-session', '{}', 'idle')`,
+  );
 });
 
 afterAll(async () => {
@@ -115,13 +120,19 @@ describe('assertCanHandoffTo', () => {
     } catch {
       // expected
     }
-    const rows = dbModule.sqliteAll<{ action: string; entity_id: string; summary: string }>(
-      `SELECT action, entity_id, summary FROM team_audit_logs
+    const rows = dbModule.sqliteAll<{
+      action: string;
+      entity_id: string;
+      summary: string;
+      session_id: string | null;
+    }>(
+      `SELECT action, entity_id, summary, session_id FROM team_audit_logs
        WHERE action = 'capability_violation' AND entity_id = 's-test' ORDER BY created_at DESC LIMIT 1`,
     );
     expect(rows.length).toBe(1);
     expect(rows[0]!.summary).toContain('executor');
     expect(rows[0]!.summary).toContain('pm1');
+    expect(rows[0]!.session_id).toBe('s-test');
   });
 });
 

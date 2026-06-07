@@ -32,30 +32,60 @@ interface TemplateCard {
 /* ── Inline editable field ─────────────────────────────────────────────── */
 
 function InlineField({
+  editable = true,
   label,
   value,
   onSave,
   type = 'text',
   options,
 }: {
+  editable?: boolean;
   label: string;
   value: string;
-  onSave: (val: string) => void;
+  onSave: (val: string) => Promise<boolean> | boolean;
   type?: 'text' | 'select';
   options?: Array<{ value: string; label: string }>;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
-  const handleConfirm = () => {
-    if (draft !== value) onSave(draft);
-    setEditing(false);
+  const handleConfirm = async () => {
+    if (draft === value) {
+      setSaveError(null);
+      setEditing(false);
+      return;
+    }
+
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const ok = await onSave(draft);
+      if (!ok) {
+        setSaveError('保存失败，请重试。');
+        return;
+      }
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleCancel = () => {
     setDraft(value);
+    setSaveError(null);
     setEditing(false);
   };
+
+  if (!editable) {
+    return (
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <span style={fieldLabelStyle}>{label}</span>
+        <span style={{ fontSize: 11, color: 'var(--fg-default)' }}>{value || '—'}</span>
+      </div>
+    );
+  }
 
   if (editing) {
     return (
@@ -75,6 +105,7 @@ function InlineField({
                 fontSize: 11,
                 flex: 1,
               }}
+              disabled={saving}
             >
               {options.map((o) => (
                 <option key={o.value} value={o.value}>
@@ -88,7 +119,7 @@ function InlineField({
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') handleConfirm();
+                if (e.key === 'Enter') void handleConfirm();
                 if (e.key === 'Escape') handleCancel();
               }}
               style={{
@@ -101,12 +132,13 @@ function InlineField({
                 flex: 1,
                 outline: 'none',
               }}
+              disabled={saving}
               autoFocus
             />
           )}
           <button
             type="button"
-            onClick={handleConfirm}
+            onClick={() => void handleConfirm()}
             style={{
               appearance: 'none',
               border: 'none',
@@ -118,8 +150,9 @@ function InlineField({
               fontWeight: 700,
               cursor: 'pointer',
             }}
+            disabled={saving}
           >
-            ✓
+            {saving ? '…' : '✓'}
           </button>
           <button
             type="button"
@@ -134,10 +167,23 @@ function InlineField({
               fontSize: 9,
               cursor: 'pointer',
             }}
+            disabled={saving}
           >
             ✕
           </button>
         </div>
+        {saveError ? (
+          <span
+            role="alert"
+            style={{
+              fontSize: 10,
+              color: 'var(--danger)',
+              lineHeight: 1.5,
+            }}
+          >
+            {saveError}
+          </span>
+        ) : null}
       </div>
     );
   }
@@ -145,7 +191,11 @@ function InlineField({
   return (
     <div
       style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}
-      onClick={() => setEditing(true)}
+      onClick={() => {
+        setDraft(value);
+        setSaveError(null);
+        setEditing(true);
+      }}
       title="点击编辑"
     >
       <span style={fieldLabelStyle}>{label}</span>
@@ -158,6 +208,7 @@ function InlineField({
 /* ── Template detail view ──────────────────────────────────────────────── */
 
 function TemplateDetailView({
+  editable = true,
   template,
   rawTemplate,
   onEdit,
@@ -165,6 +216,7 @@ function TemplateDetailView({
   onDelete,
   onUpdate,
 }: {
+  editable?: boolean;
   template: TemplateCard;
   rawTemplate: WorkflowTemplateRecord;
   onEdit: () => void;
@@ -181,26 +233,27 @@ function TemplateDetailView({
   const handleFieldUpdate = useCallback(
     async (field: string, value: string) => {
       if (field === 'name') {
-        await onUpdate({ name: value });
+        return onUpdate({ name: value });
       } else if (field === 'description') {
-        await onUpdate({ description: value });
+        return onUpdate({ description: value });
       } else if (field === 'provider') {
-        await onUpdate({
+        return onUpdate({
           metadata: { teamTemplate: { defaultProvider: value || null } },
         });
       } else if (field === 'scale') {
-        await onUpdate({
+        return onUpdate({
           metadata: { teamTemplate: { templateScale: value as WorkflowTemplateScale } },
         });
       } else if (field === 'focus') {
-        await onUpdate({
+        return onUpdate({
           metadata: { teamTemplate: { templateFocus: value || null } },
         });
       } else if (field === 'recommendedFor') {
-        await onUpdate({
+        return onUpdate({
           metadata: { teamTemplate: { recommendedFor: value || null } },
         });
       }
+      return false;
     },
     [onUpdate],
   );
@@ -216,6 +269,7 @@ function TemplateDetailView({
           <button
             type="button"
             onClick={onDuplicate}
+            disabled={!editable}
             style={{
               padding: '4px 10px',
               borderRadius: 6,
@@ -224,10 +278,11 @@ function TemplateDetailView({
               color: 'var(--fg-default)',
               fontSize: 10,
               fontWeight: 600,
-              cursor: 'pointer',
+              cursor: editable ? 'pointer' : 'not-allowed',
               display: 'inline-flex',
               alignItems: 'center',
               gap: 3,
+              opacity: editable ? 1 : 0.5,
             }}
           >
             <CopyIcon size={9} color="currentColor" />
@@ -236,6 +291,7 @@ function TemplateDetailView({
           <button
             type="button"
             onClick={onDelete}
+            disabled={!editable}
             style={{
               padding: '4px 10px',
               borderRadius: 6,
@@ -244,10 +300,11 @@ function TemplateDetailView({
               color: 'var(--danger)',
               fontSize: 10,
               fontWeight: 600,
-              cursor: 'pointer',
+              cursor: editable ? 'pointer' : 'not-allowed',
               display: 'inline-flex',
               alignItems: 'center',
               gap: 3,
+              opacity: editable ? 1 : 0.5,
             }}
           >
             <TrashIcon size={9} color="currentColor" />
@@ -256,6 +313,7 @@ function TemplateDetailView({
           <button
             type="button"
             onClick={onEdit}
+            disabled={!editable}
             style={{
               padding: '4px 10px',
               borderRadius: 6,
@@ -264,10 +322,11 @@ function TemplateDetailView({
               color: 'var(--accent)',
               fontSize: 10,
               fontWeight: 700,
-              cursor: 'pointer',
+              cursor: editable ? 'pointer' : 'not-allowed',
               display: 'inline-flex',
               alignItems: 'center',
               gap: 3,
+              opacity: editable ? 1 : 0.5,
             }}
           >
             <EditIcon size={9} color="currentColor" />
@@ -278,19 +337,22 @@ function TemplateDetailView({
 
       {/* Inline editable fields */}
       <InlineField
+        editable={editable}
         label="名称"
         value={template.name}
-        onSave={(v) => void handleFieldUpdate('name', v)}
+        onSave={(v) => handleFieldUpdate('name', v)}
       />
       <InlineField
+        editable={editable}
         label="描述"
         value={template.description ?? ''}
-        onSave={(v) => void handleFieldUpdate('description', v)}
+        onSave={(v) => handleFieldUpdate('description', v)}
       />
       <InlineField
+        editable={editable}
         label="Provider"
         value={teamTemplate?.defaultProvider ?? ''}
-        onSave={(v) => void handleFieldUpdate('provider', v)}
+        onSave={(v) => handleFieldUpdate('provider', v)}
         type="select"
         options={[
           { value: '', label: '默认' },
@@ -301,9 +363,10 @@ function TemplateDetailView({
         ]}
       />
       <InlineField
+        editable={editable}
         label="规模"
         value={teamTemplate?.templateScale ?? ''}
-        onSave={(v) => void handleFieldUpdate('scale', v)}
+        onSave={(v) => handleFieldUpdate('scale', v)}
         type="select"
         options={[
           { value: '', label: '默认' },
@@ -311,14 +374,16 @@ function TemplateDetailView({
         ]}
       />
       <InlineField
+        editable={editable}
         label="重点"
         value={teamTemplate?.templateFocus ?? ''}
-        onSave={(v) => void handleFieldUpdate('focus', v)}
+        onSave={(v) => handleFieldUpdate('focus', v)}
       />
       <InlineField
+        editable={editable}
         label="适用"
         value={teamTemplate?.recommendedFor ?? ''}
-        onSave={(v) => void handleFieldUpdate('recommendedFor', v)}
+        onSave={(v) => handleFieldUpdate('recommendedFor', v)}
       />
 
       {/* Metadata badges */}

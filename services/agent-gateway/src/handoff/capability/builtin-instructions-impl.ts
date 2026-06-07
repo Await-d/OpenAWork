@@ -81,6 +81,7 @@ registerInstruction({
       sessionId: ctx.sessionId,
       userId: ctx.userId,
       role: 'assistant',
+      agentId: 'interaction-agent',
       content: [{ type: 'text', text: args.text }],
     });
     return {
@@ -111,6 +112,7 @@ registerInstruction({
       sessionId: ctx.sessionId,
       userId: ctx.userId,
       role: 'assistant',
+      agentId: 'interaction-agent',
       content: [{ type: 'text', text: `${args.question}${optionsBlock}` }],
     });
     return { ok: true, message: '已向用户追问。' };
@@ -166,9 +168,8 @@ registerInstruction({
     if (tree) {
       cancelledCount = tree.cancelledHandoffIds.length;
       // 3. 给子树每个 session 注入 cancel_signal + 停流 + 置 substate。
-      const { stopAllInFlightStreamRequestsForSession } = await import(
-        '../../routes/stream-cancellation.js'
-      );
+      const { stopAllInFlightStreamRequestsForSession } =
+        await import('../../routes/stream-cancellation.js');
       for (const sessionId of tree.treeSessionIds) {
         try {
           submitInboundMessage({
@@ -219,6 +220,7 @@ registerInstruction({
         actorUserId: ctx.userId,
         entityType: 'handoff',
         entityId: args.handoffId,
+        sessionId: ctx.sessionId,
         summary: `cancel_downstream: ${args.handoffId.slice(0, 8)} 及下游 ${cancelledCount} 个`,
         detail: JSON.stringify({
           action: 'cancel',
@@ -263,6 +265,7 @@ registerInstruction({
       sessionId: ctx.sessionId,
       userId: ctx.userId,
       role: 'assistant',
+      agentId: 'interaction-agent',
       content: [{ type: 'text', text: `${prefix}${args.text}` }],
     });
     return { ok: true, message: '已推送通知。' };
@@ -429,11 +432,21 @@ registerInstruction({
   handler: async (ctx, args): Promise<InstructionResult> => {
     const violations = args.violations ?? [];
     sqliteRun(
-      `INSERT INTO team_audit_logs (user_id, action, entity_type, entity_id, summary, detail, created_at)
-       VALUES (?, 'constitution_check', 'artifact', ?, ?, ?, datetime('now'))`,
+      `INSERT INTO team_audit_logs (
+         user_id,
+         action,
+         entity_type,
+         entity_id,
+         session_id,
+         summary,
+         detail,
+         created_at
+       )
+       VALUES (?, 'constitution_check', 'artifact', ?, ?, ?, ?, datetime('now'))`,
       [
         ctx.userId,
         args.planArtifactId,
+        ctx.sessionId,
         `Constitution Check: ${args.pass ? 'PASS' : 'FAIL'} (${violations.length} 违反)`,
         JSON.stringify({ pass: args.pass, violations, sessionId: ctx.sessionId }),
       ],
@@ -497,10 +510,20 @@ registerInstruction({
   }),
   handler: async (ctx, args): Promise<InstructionResult> => {
     sqliteRun(
-      `INSERT INTO team_audit_logs (user_id, action, entity_type, entity_id, summary, detail, created_at)
-       VALUES (?, 'quality_review', 'session', ?, ?, ?, datetime('now'))`,
+      `INSERT INTO team_audit_logs (
+         user_id,
+         action,
+         entity_type,
+         entity_id,
+         session_id,
+         summary,
+         detail,
+         created_at
+       )
+       VALUES (?, 'quality_review', 'session', ?, ?, ?, ?, datetime('now'))`,
       [
         ctx.userId,
+        ctx.sessionId,
         ctx.sessionId,
         `Quality review: ${args.decision} (${args.passCount} pass / ${args.failCount} fail)`,
         JSON.stringify(args),

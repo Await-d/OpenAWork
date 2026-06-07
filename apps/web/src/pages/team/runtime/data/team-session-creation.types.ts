@@ -27,6 +27,7 @@ export interface TeamSessionCreationDraft {
   source: TeamSessionCreationSource;
   teamWorkspaceId: string;
   title: string;
+  workingDirectory: string | null;
 }
 
 export interface TeamSessionCreationFieldErrors {
@@ -37,6 +38,7 @@ export interface TeamSessionCreationFieldErrors {
 export function createBlankTeamSessionDraft(
   teamWorkspaceId: string,
   memberSlots: FixedTeamMemberSlot[] = DEFAULT_FIXED_TEAM_MEMBER_SLOTS,
+  workingDirectory: string | null = null,
 ): TeamSessionCreationDraft {
   return {
     defaultProvider: null,
@@ -46,5 +48,6 @@ export function createBlankTeamSessionDraft(
     source: { kind: 'blank' },
     teamWorkspaceId,
     title: '',
+    workingDirectory,
   };
 }

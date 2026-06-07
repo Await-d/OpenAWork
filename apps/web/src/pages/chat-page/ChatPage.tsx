@@ -457,10 +457,7 @@ export default function ChatPage() {
         return;
       }
       try {
-        const pending = await createQuestionsClient(gatewayUrl).listPending(
-          token,
-          targetSessionId,
-        );
+        const pending = await createQuestionsClient(gatewayUrl).listPending(token, targetSessionId);
         const match = selectPendingQuestionForRequest(pending, requestId);
         if (!match) {
           return;

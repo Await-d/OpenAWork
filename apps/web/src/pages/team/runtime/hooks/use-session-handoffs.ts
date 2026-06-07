@@ -95,12 +95,19 @@ function mapHandoffRecordToEntry(record: HandoffRecord): HandoffEntry {
       : record.state !== 'running' && record.state !== 'claimed' && record.state !== 'pending'
         ? { endedAt: updatedAt }
         : {}),
+    fromSessionId: record.fromSessionId,
     fromRoleLayer: record.fromRoleLayer,
     id: record.id,
     sessionId: record.toSessionId ?? record.fromSessionId,
     startedAt: parseTimestampMs(record.startedAt) ?? parseTimestampMs(record.claimedAt),
     state: record.state,
+    toSessionId: record.toSessionId,
     toRoleLayer: record.toRoleLayer,
+    ...(record.failureReason !== undefined ? { failureReason: record.failureReason } : {}),
+    ...(record.retryCount !== undefined ? { retryCount: record.retryCount } : {}),
+    ...(record.recoverableFailure !== undefined
+      ? { recoverableFailure: record.recoverableFailure }
+      : {}),
     updatedAt,
   };
 }

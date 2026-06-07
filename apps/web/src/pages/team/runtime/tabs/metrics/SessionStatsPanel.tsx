@@ -6,12 +6,12 @@
  * 数据来源（全部为既有 store，无新后端依赖）：
  *   - useHandoffStore：该 session 关联的 handoff（运行时长、handoff 数、状态）
  *   - useLayerStore：session→roleLayer、子 session 关系（用于"含子树"聚合）
- *   - useTeamUsageStore.bySession：该 session 的 token / 费用（等待后端 team_usage 接入）
- *   - useTeamToolCallStore：工具调用（按 session 维度——store 暂未分 session，
- *     故工具调用数展示为"全局/等待 session 维度接入"，不假装是本 session 的）
+ *   - useTeamUsageStore.bySession：该 session 的 token / 费用
+ *   - useTeamToolCallStore.bySession：该 session 的工具调用总量 / 失败数
  *
- * 诚实标注：token/费用/工具调用依赖未接入的 team_usage / team_tool_call 事件。
- * 未接入时这些卡片显示 "—" 或 0，并通过 hint 说明数据来源。
+ * 诚实标注：
+ *   - token/费用/工具调用总量都可由 runtime 快照恢复
+ *   - 按工具名称的细项排行仍依赖实时 team_tool_call 事件累积
  */
 
 import { useMemo, type CSSProperties } from 'react';
@@ -21,7 +21,7 @@ import {
   type HandoffEntry,
   type TeamRoleLayer,
 } from '../../../../../stores/team/team-events.js';
-import { useTeamUsageStore } from '../../../../../stores/team/team-usage.js';
+import { useTeamToolCallStore, useTeamUsageStore } from '../../../../../stores/team/team-usage.js';
 import { StatCard, MetricGrid, EmptyState, SectionPanel } from '../../shared/content-kit/index.js';
 
 const LAYER_LABELS: Record<TeamRoleLayer, string> = {
@@ -78,6 +78,7 @@ export function SessionStatsPanel({ sessionId, sessionTitle }: SessionStatsPanel
   const handoffs = useHandoffStore((s) => s.handoffs);
   const nodes = useLayerStore((s) => s.nodes);
   const bySession = useTeamUsageStore((s) => s.bySession);
+  const toolCallsBySession = useTeamToolCallStore((s) => s.bySession);
 
   // 收集本 session + 其所有子孙 session 的 id（用于"含子树"聚合）。
   const sessionScope = useMemo(() => {
@@ -128,6 +129,8 @@ export function SessionStatsPanel({ sessionId, sessionTitle }: SessionStatsPanel
     let outputTokens = 0;
     let costUsd = 0;
     let usageCalls = 0;
+    let toolCallCount = 0;
+    let toolCallFailures = 0;
     for (const id of sessionScope) {
       const bucket = bySession.get(id);
       if (bucket) {
@@ -135,6 +138,11 @@ export function SessionStatsPanel({ sessionId, sessionTitle }: SessionStatsPanel
         outputTokens += bucket.outputTokens;
         costUsd += bucket.costUsd;
         usageCalls += bucket.count;
+      }
+      const toolBucket = toolCallsBySession.get(id);
+      if (toolBucket) {
+        toolCallCount += toolBucket.invocations;
+        toolCallFailures += toolBucket.failures;
       }
     }
 
@@ -149,10 +157,12 @@ export function SessionStatsPanel({ sessionId, sessionTitle }: SessionStatsPanel
       outputTokens,
       costUsd,
       usageCalls,
+      toolCallCount,
+      toolCallFailures,
       layer: node?.roleLayer ?? null,
       state: node?.state ?? null,
     };
-  }, [relatedHandoffs, sessionScope, bySession, nodes, sessionId]);
+  }, [relatedHandoffs, sessionScope, bySession, nodes, sessionId, toolCallsBySession]);
 
   if (!sessionId) {
     return (
@@ -199,6 +209,17 @@ export function SessionStatsPanel({ sessionId, sessionTitle }: SessionStatsPanel
             note={hasUsage ? '本会话及子树' : '暂无用量记录'}
           />
           <StatCard
+            label="工具调用"
+            value={String(stats.toolCallCount)}
+            icon="tool"
+            note={
+              stats.toolCallCount > 0
+                ? `失败 ${stats.toolCallFailures} · 本会话及子树`
+                : '尚无工具调用'
+            }
+            tone={stats.toolCallFailures > 0 ? 'warning' : 'default'}
+          />
+          <StatCard
             label="输入 token"
             value={hasUsage ? formatTokens(stats.inputTokens) : '—'}
             note={hasUsage ? undefined : '暂无用量记录'}
@@ -220,8 +241,8 @@ export function SessionStatsPanel({ sessionId, sessionTitle }: SessionStatsPanel
       {!hasUsage ? (
         <span style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
           token / 费用来自 agent-gateway 的 <code>team_usage</code> 用量记录（已持久化）。
-          本会话还没有产生 LLM 调用时显示 “—”，团队执行后会按本会话及其子层级自动聚合，
-          刷新 / 重连后依然保留。
+          本会话还没有产生 LLM 调用时显示 “—”，团队执行后会按本会话及其子层级自动聚合， 刷新 /
+          重连后依然保留。
         </span>
       ) : null}
     </div>

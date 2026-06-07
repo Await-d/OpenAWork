@@ -126,6 +126,10 @@ describe('submitInboundMessage', () => {
           pm2HandoffId: 'handoff-pm2-review',
           reason: 'review_failed_threshold',
           context: '评审连续失败，等待用户决策',
+          suggestedActions: [
+            { label: '修宪法', action: 'edit_constitution' },
+            { label: '改需求', action: 'edit_original_request' },
+          ],
         },
       });
 
@@ -142,6 +146,10 @@ describe('submitInboundMessage', () => {
             messageType: 'escalation_request',
             reason: 'review_failed_threshold',
             summary: '评审连续失败，等待用户决策',
+            suggestedActions: [
+              { label: '修宪法', action: 'edit_constitution' },
+              { label: '改需求', action: 'edit_original_request' },
+            ],
           }),
         }),
       ]);

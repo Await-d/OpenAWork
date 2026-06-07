@@ -15,6 +15,13 @@ interface ReviewReportPayload {
   };
 }
 
+interface ReviewResultPayload {
+  reviewReportArtifactId?: string;
+  overallVerdict?: 'pass' | 'implementation-failure' | 'planning-failure';
+  specReviewPassed?: boolean;
+  qualityReviewPassed?: boolean;
+}
+
 export interface DispatchPackagePayload {
   goal?: string;
   role?: string;
@@ -29,6 +36,7 @@ export interface DispatchPackagePayload {
 }
 
 export interface ArtifactReviewReport {
+  reviewArtifactId: string | null;
   markdown: string | null;
   overallVerdict: 'pass' | 'implementation-failure' | 'planning-failure' | null;
   specReviewPassed: boolean | null;
@@ -43,6 +51,10 @@ export interface ResolvedTeamArtifactContext {
 }
 
 function isPayloadObject(value: unknown): value is ReviewReportPayload {
+  return typeof value === 'object' && value !== null;
+}
+
+function isReviewResultPayload(value: unknown): value is ReviewResultPayload {
   return typeof value === 'object' && value !== null;
 }
 
@@ -63,6 +75,25 @@ function isDispatchTargetLayer(
 function findLatestPm2Handoff(records: HandoffRecord[], sessionId: string): HandoffRecord | null {
   const candidates = records
     .filter((record) => record.toRoleLayer === 'pm2' && record.toSessionId === sessionId)
+    .sort(compareHandoffRecency);
+  return candidates[0] ?? null;
+}
+
+function findSelectedDownstreamDispatch(
+  records: HandoffRecord[],
+  sessionId: string,
+  roleLayer: ArtifactRoleLayer,
+): HandoffRecord | null {
+  if (!roleLayer || !isDispatchTargetLayer(roleLayer)) {
+    return null;
+  }
+  const candidates = records
+    .filter(
+      (record) =>
+        record.fromRoleLayer === 'pm2' &&
+        record.toSessionId === sessionId &&
+        isDispatchTargetLayer(record.toRoleLayer),
+    )
     .sort(compareHandoffRecency);
   return candidates[0] ?? null;
 }
@@ -127,22 +158,35 @@ export function extractReviewReport(
     : candidates;
 
   for (const record of orderedCandidates) {
-    if (!isPayloadObject(record.payload)) {
-      continue;
+    if (isPayloadObject(record.payload)) {
+      const reviewReport = record.payload.review_report;
+      if (reviewReport) {
+        return {
+          reviewArtifactId: null,
+          markdown: reviewReport.markdown ?? null,
+          overallVerdict: reviewReport.overallVerdict ?? null,
+          specReviewPassed: reviewReport.specReviewPassed ?? null,
+          qualityReviewPassed: reviewReport.qualityReviewPassed ?? null,
+        };
+      }
     }
-    const reviewReport = record.payload.review_report;
-    if (!reviewReport) {
-      continue;
+
+    if (isReviewResultPayload(record.resultJson)) {
+      return {
+        reviewArtifactId:
+          typeof record.resultJson.reviewReportArtifactId === 'string'
+            ? record.resultJson.reviewReportArtifactId
+            : null,
+        markdown: null,
+        overallVerdict: record.resultJson.overallVerdict ?? null,
+        specReviewPassed: record.resultJson.specReviewPassed ?? null,
+        qualityReviewPassed: record.resultJson.qualityReviewPassed ?? null,
+      };
     }
-    return {
-      markdown: reviewReport.markdown ?? null,
-      overallVerdict: reviewReport.overallVerdict ?? null,
-      specReviewPassed: reviewReport.specReviewPassed ?? null,
-      qualityReviewPassed: reviewReport.qualityReviewPassed ?? null,
-    };
   }
 
   return {
+    reviewArtifactId: null,
     markdown: null,
     overallVerdict: null,
     specReviewPassed: null,
@@ -160,10 +204,30 @@ export function resolveTeamArtifactContext(input: {
     ? (input.handoffs.find((record) => record.id === input.focusHandoffId) ?? null)
     : null;
   const pm2Handoff = pickRelevantPm2Handoff(input.handoffs, focusHandoff);
+  const selectedDownstreamDispatch =
+    input.selectedSessionId && input.selectedSessionRoleLayer
+      ? findSelectedDownstreamDispatch(
+          input.handoffs,
+          input.selectedSessionId,
+          input.selectedSessionRoleLayer,
+        )
+      : null;
+  const selectedPm1Handoff =
+    input.selectedSessionId && input.selectedSessionRoleLayer === 'reception'
+      ? (input.handoffs
+          .filter(
+            (record) =>
+              record.fromSessionId === input.selectedSessionId &&
+              record.toRoleLayer === 'pm1' &&
+              record.toSessionId,
+          )
+          .sort(compareHandoffRecency)[0] ?? null)
+      : null;
 
   const pm1ArtifactSessionId =
     pm2Handoff?.fromSessionId ??
     (focusHandoff?.toRoleLayer === 'pm1' ? focusHandoff.toSessionId : null) ??
+    selectedPm1Handoff?.toSessionId ??
     (input.selectedSessionRoleLayer === 'pm1' ? input.selectedSessionId : null) ??
     null;
 
@@ -171,6 +235,7 @@ export function resolveTeamArtifactContext(input: {
     pm2Handoff?.toSessionId ??
     (focusHandoff?.toRoleLayer === 'pm2' ? focusHandoff.toSessionId : null) ??
     (focusHandoff?.fromRoleLayer === 'pm2' ? focusHandoff.fromSessionId : null) ??
+    selectedDownstreamDispatch?.fromSessionId ??
     (input.selectedSessionRoleLayer === 'pm2' ? input.selectedSessionId : null) ??
     null;
 

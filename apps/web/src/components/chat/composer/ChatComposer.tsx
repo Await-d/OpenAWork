@@ -23,6 +23,12 @@ import { PromptSnippetsTrigger } from '../prompt-snippets/PromptSnippetsTrigger.
 interface ChatComposerProps {
   variant: 'home' | 'session';
   editorMode?: boolean;
+  showModelPickerButton?: boolean;
+  showModelSettingsButton?: boolean;
+  showWebSearchButton?: boolean;
+  showImageGenerationButton?: boolean;
+  showVoiceButton?: boolean;
+  showAttachmentButton?: boolean;
   activeProviderId: string;
   activeProviderName?: string;
   activeProviderType?: string;
@@ -120,6 +126,12 @@ interface ChatComposerProps {
 export function ChatComposer({
   variant,
   editorMode = false,
+  showModelPickerButton = true,
+  showModelSettingsButton = true,
+  showWebSearchButton = true,
+  showImageGenerationButton = true,
+  showVoiceButton = true,
+  showAttachmentButton = true,
   activeProviderId,
   activeProviderName,
   activeProviderType,
@@ -1215,259 +1227,280 @@ export function ChatComposer({
                     scrollbarWidth: 'none',
                   }}
                 >
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'stretch',
-                      border: '1px solid var(--border-subtle)',
-                      borderRadius: 8,
-                      background: 'var(--bg-overlay)',
-                      overflow: 'hidden',
-                      flexShrink: 0,
-                      maxWidth: 56,
-                    }}
-                  >
-                    <button
-                      ref={modelPickerRef}
-                      type="button"
-                      onClick={onToggleModelPicker}
-                      title={activeModelTooltip ?? '当前使用模型'}
-                      aria-label="打开模型选择"
-                      aria-haspopup="dialog"
-                      aria-expanded={showModelPicker}
-                      aria-controls="chat-model-picker-dialog"
+                  {(showModelPickerButton || showModelSettingsButton) && (
+                    <div
                       style={{
                         display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        height: 26,
-                        width: 28,
-                        border: 'none',
-                        background: 'transparent',
-                        color: 'var(--fg-default)',
-                        cursor: 'pointer',
+                        alignItems: 'stretch',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: 8,
+                        background: 'var(--bg-overlay)',
+                        overflow: 'hidden',
                         flexShrink: 0,
-                        transition: 'height 220ms ease, color 150ms ease, background 150ms ease',
+                        maxWidth: showModelPickerButton && showModelSettingsButton ? 56 : 28,
                       }}
                     >
-                      {activeProviderId || activeProviderType ? (
-                        <ProviderMark
-                          providerId={activeProviderId}
-                          providerName={activeProviderName}
-                          providerType={activeProviderType}
-                          size={12}
-                        />
-                      ) : (
-                        <svg
-                          width="13"
-                          height="13"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          aria-hidden="true"
+                      {showModelPickerButton && (
+                        <button
+                          ref={modelPickerRef}
+                          type="button"
+                          onClick={onToggleModelPicker}
+                          title={activeModelTooltip ?? '当前使用模型'}
+                          aria-label="打开模型选择"
+                          aria-haspopup="dialog"
+                          aria-expanded={showModelPicker}
+                          aria-controls="chat-model-picker-dialog"
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            height: 26,
+                            width: 28,
+                            border: 'none',
+                            background: 'transparent',
+                            color: 'var(--fg-default)',
+                            cursor: 'pointer',
+                            flexShrink: 0,
+                            transition:
+                              'height 220ms ease, color 150ms ease, background 150ms ease',
+                          }}
                         >
-                          <path d="M12 3v18" />
-                          <path d="M3 12h18" />
-                        </svg>
+                          {activeProviderId || activeProviderType ? (
+                            <ProviderMark
+                              providerId={activeProviderId}
+                              providerName={activeProviderName}
+                              providerType={activeProviderType}
+                              size={12}
+                            />
+                          ) : (
+                            <svg
+                              width="13"
+                              height="13"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden="true"
+                            >
+                              <path d="M12 3v18" />
+                              <path d="M3 12h18" />
+                            </svg>
+                          )}
+                        </button>
                       )}
-                    </button>
+                      {showModelSettingsButton && (
+                        <button
+                          ref={modelSettingsRef}
+                          type="button"
+                          onClick={onToggleModelSettings}
+                          title={
+                            activeModelSupportsThinking ? '思考等级与模型设置' : '模型能力设置'
+                          }
+                          aria-label={
+                            activeModelSupportsThinking
+                              ? '打开模型设置与思考等级'
+                              : '打开模型能力设置'
+                          }
+                          aria-haspopup="dialog"
+                          aria-expanded={showModelSettings}
+                          aria-controls="chat-model-settings-dialog"
+                          style={{
+                            width: 26,
+                            height: 26,
+                            border: 'none',
+                            borderLeft: showModelPickerButton
+                              ? '1px solid var(--border-subtle)'
+                              : 'none',
+                            background: thinkingEnabled
+                              ? 'color-mix(in oklch, var(--accent) 10%, transparent)'
+                              : 'transparent',
+                            color: thinkingEnabled
+                              ? 'color-mix(in oklch, var(--accent) 80%, var(--fg-on-accent) 20%)'
+                              : 'var(--fg-muted)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: 'pointer',
+                            flexShrink: 0,
+                          }}
+                        >
+                          {activeModelSupportsThinking ? (
+                            <svg
+                              width="13"
+                              height="13"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden="true"
+                            >
+                              <path d="M9.5 9a2.5 2.5 0 1 1 5 0c0 1.6-1.5 2.2-2.2 2.8-.4.3-.6.7-.6 1.2" />
+                              <circle cx="12" cy="17" r=".8" fill="currentColor" stroke="none" />
+                              <path d="M12 2a8.5 8.5 0 0 0-5.7 14.8c.4.4.7.9.8 1.5l.2 1.1a1.4 1.4 0 0 0 1.4 1.1h6.6a1.4 1.4 0 0 0 1.4-1.1l.2-1.1c.1-.6.4-1.1.8-1.5A8.5 8.5 0 0 0 12 2Z" />
+                            </svg>
+                          ) : (
+                            <svg
+                              width="13"
+                              height="13"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden="true"
+                            >
+                              <circle cx="12" cy="12" r="3" />
+                              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.33 1V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-.33-1 1.65 1.65 0 0 0-1-.6 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 0-1-.33H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1-.33 1.65 1.65 0 0 0 .6-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .33-1V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 .33 1 1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.3.3.5.7.6 1 .1.4.1.7.1 1s0 .6-.1 1c-.1.4-.3.8-.6 1Z" />
+                            </svg>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {showWebSearchButton && (
                     <button
-                      ref={modelSettingsRef}
                       type="button"
-                      onClick={onToggleModelSettings}
-                      title={activeModelSupportsThinking ? '思考等级与模型设置' : '模型能力设置'}
-                      aria-label={
-                        activeModelSupportsThinking ? '打开模型设置与思考等级' : '打开模型能力设置'
-                      }
-                      aria-haspopup="dialog"
-                      aria-expanded={showModelSettings}
-                      aria-controls="chat-model-settings-dialog"
+                      onClick={onToggleWebSearch}
+                      disabled={streaming || imageGenerationBusy}
+                      title={webSearchEnabled ? '关闭联网搜索' : '开启联网搜索'}
+                      className={`icon-btn${webSearchEnabled ? ' active' : ''}`}
                       style={{
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: 8,
                         width: 26,
                         height: 26,
-                        border: 'none',
-                        borderLeft: '1px solid var(--border-subtle)',
-                        background: thinkingEnabled
-                          ? 'color-mix(in oklch, var(--accent) 10%, transparent)'
-                          : 'transparent',
-                        color: thinkingEnabled
-                          ? 'color-mix(in oklch, var(--accent) 80%, var(--fg-on-accent) 20%)'
-                          : 'var(--fg-muted)',
+                        flexShrink: 0,
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        cursor: 'pointer',
-                        flexShrink: 0,
+                        opacity: streaming || imageGenerationBusy ? 0.45 : 1,
+                        background: webSearchEnabled
+                          ? 'color-mix(in oklch, var(--info) 10%, transparent)'
+                          : 'var(--bg-overlay)',
+                        color: webSearchEnabled
+                          ? 'color-mix(in oklch, var(--info) 82%, var(--fg-on-accent) 18%)'
+                          : 'var(--fg-muted)',
+                        transition:
+                          'width 220ms ease, height 220ms ease, opacity 150ms ease, background 150ms ease, color 150ms ease',
                       }}
                     >
-                      {activeModelSupportsThinking ? (
-                        <svg
-                          width="13"
-                          height="13"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          aria-hidden="true"
-                        >
-                          <path d="M9.5 9a2.5 2.5 0 1 1 5 0c0 1.6-1.5 2.2-2.2 2.8-.4.3-.6.7-.6 1.2" />
-                          <circle cx="12" cy="17" r=".8" fill="currentColor" stroke="none" />
-                          <path d="M12 2a8.5 8.5 0 0 0-5.7 14.8c.4.4.7.9.8 1.5l.2 1.1a1.4 1.4 0 0 0 1.4 1.1h6.6a1.4 1.4 0 0 0 1.4-1.1l.2-1.1c.1-.6.4-1.1.8-1.5A8.5 8.5 0 0 0 12 2Z" />
-                        </svg>
-                      ) : (
-                        <svg
-                          width="13"
-                          height="13"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          aria-hidden="true"
-                        >
-                          <circle cx="12" cy="12" r="3" />
-                          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.33 1V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-.33-1 1.65 1.65 0 0 0-1-.6 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 0-1-.33H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1-.33 1.65 1.65 0 0 0 .6-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .33-1V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 .33 1 1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.3.3.5.7.6 1 .1.4.1.7.1 1s0 .6-.1 1c-.1.4-.3.8-.6 1Z" />
-                        </svg>
-                      )}
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <circle cx="12" cy="12" r="9" />
+                        <path d="M3 12h18" />
+                        <path d="M12 3a15.3 15.3 0 0 1 4 9 15.3 15.3 0 0 1-4 9 15.3 15.3 0 0 1-4-9 15.3 15.3 0 0 1 4-9Z" />
+                      </svg>
                     </button>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={onToggleWebSearch}
-                    disabled={streaming || imageGenerationBusy}
-                    title={webSearchEnabled ? '关闭联网搜索' : '开启联网搜索'}
-                    className={`icon-btn${webSearchEnabled ? ' active' : ''}`}
-                    style={{
-                      border: '1px solid var(--border-subtle)',
-                      borderRadius: 8,
-                      width: 26,
-                      height: 26,
-                      flexShrink: 0,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      opacity: streaming || imageGenerationBusy ? 0.45 : 1,
-                      background: webSearchEnabled
-                        ? 'color-mix(in oklch, var(--info) 10%, transparent)'
-                        : 'var(--bg-overlay)',
-                      color: webSearchEnabled
-                        ? 'color-mix(in oklch, var(--info) 82%, var(--fg-on-accent) 18%)'
-                        : 'var(--fg-muted)',
-                      transition:
-                        'width 220ms ease, height 220ms ease, opacity 150ms ease, background 150ms ease, color 150ms ease',
-                    }}
-                  >
-                    <svg
-                      width="13"
-                      height="13"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
+                  )}
+                  {showImageGenerationButton && (
+                    <ChatImageGenerationControls
+                      busy={imageGenerationBusy}
+                      disabled={streaming || imageGenerationBusy}
+                      hasConfiguredModel={hasConfiguredImageModel}
+                      imageDefaults={imageGenerationDefaults}
+                      imageMode={imageGenerationMode}
+                      imageModelLabel={imageModelLabel}
+                      imagePluginEnabled={imagePluginEnabled}
+                      onToggleImageMode={onToggleImageGenerationMode}
+                      onUpdateImageDefaults={onUpdateImageGenerationDefaults}
+                      variant="toggle"
+                    />
+                  )}
+                  {showVoiceButton && (
+                    <button
+                      type="button"
+                      onClick={onToggleVoice}
+                      disabled={streaming || imageGenerationBusy}
+                      title={showVoice ? '关闭语音输入' : '语音输入'}
+                      className={`icon-btn${showVoice ? ' active' : ''}`}
+                      style={{
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: 8,
+                        width: 26,
+                        height: 26,
+                        flexShrink: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        opacity: streaming || imageGenerationBusy ? 0.45 : 1,
+                        background: showVoice
+                          ? 'color-mix(in oklch, var(--accent) 10%, transparent)'
+                          : 'var(--bg-overlay)',
+                        color: showVoice
+                          ? 'color-mix(in oklch, var(--accent) 82%, var(--fg-on-accent) 18%)'
+                          : 'var(--fg-muted)',
+                        transition:
+                          'width 220ms ease, height 220ms ease, opacity 150ms ease, background 150ms ease, color 150ms ease',
+                      }}
                     >
-                      <circle cx="12" cy="12" r="9" />
-                      <path d="M3 12h18" />
-                      <path d="M12 3a15.3 15.3 0 0 1 4 9 15.3 15.3 0 0 1-4 9 15.3 15.3 0 0 1-4-9 15.3 15.3 0 0 1 4-9Z" />
-                    </svg>
-                  </button>
-                  <ChatImageGenerationControls
-                    busy={imageGenerationBusy}
-                    disabled={streaming || imageGenerationBusy}
-                    hasConfiguredModel={hasConfiguredImageModel}
-                    imageDefaults={imageGenerationDefaults}
-                    imageMode={imageGenerationMode}
-                    imageModelLabel={imageModelLabel}
-                    imagePluginEnabled={imagePluginEnabled}
-                    onToggleImageMode={onToggleImageGenerationMode}
-                    onUpdateImageDefaults={onUpdateImageGenerationDefaults}
-                    variant="toggle"
-                  />
-                  <button
-                    type="button"
-                    onClick={onToggleVoice}
-                    disabled={streaming || imageGenerationBusy}
-                    title={showVoice ? '关闭语音输入' : '语音输入'}
-                    className={`icon-btn${showVoice ? ' active' : ''}`}
-                    style={{
-                      border: '1px solid var(--border-subtle)',
-                      borderRadius: 8,
-                      width: 26,
-                      height: 26,
-                      flexShrink: 0,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      opacity: streaming || imageGenerationBusy ? 0.45 : 1,
-                      background: showVoice
-                        ? 'color-mix(in oklch, var(--accent) 10%, transparent)'
-                        : 'var(--bg-overlay)',
-                      color: showVoice
-                        ? 'color-mix(in oklch, var(--accent) 82%, var(--fg-on-accent) 18%)'
-                        : 'var(--fg-muted)',
-                      transition:
-                        'width 220ms ease, height 220ms ease, opacity 150ms ease, background 150ms ease, color 150ms ease',
-                    }}
-                  >
-                    <svg
-                      aria-hidden="true"
-                      width="13"
-                      height="13"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
+                      <svg
+                        aria-hidden="true"
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <rect x="9" y="2" width="6" height="12" rx="3" />
+                        <path d="M5 10a7 7 0 0 0 14 0" />
+                        <line x1="12" y1="19" x2="12" y2="22" />
+                        <line x1="8" y1="22" x2="16" y2="22" />
+                      </svg>
+                    </button>
+                  )}
+                  {showAttachmentButton && (
+                    <button
+                      type="button"
+                      onClick={onRequestFiles}
+                      disabled={streaming || imageGenerationBusy}
+                      title={imageGenerationMode ? '上传参考图' : '上传文件'}
+                      className="icon-btn"
+                      style={{
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: 8,
+                        width: 26,
+                        height: 26,
+                        flexShrink: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        opacity: streaming || imageGenerationBusy ? 0.45 : 1,
+                        background: 'var(--bg-overlay)',
+                        transition: 'width 220ms ease, height 220ms ease, opacity 150ms ease',
+                      }}
                     >
-                      <rect x="9" y="2" width="6" height="12" rx="3" />
-                      <path d="M5 10a7 7 0 0 0 14 0" />
-                      <line x1="12" y1="19" x2="12" y2="22" />
-                      <line x1="8" y1="22" x2="16" y2="22" />
-                    </svg>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={onRequestFiles}
-                    disabled={streaming || imageGenerationBusy}
-                    title={imageGenerationMode ? '上传参考图' : '上传文件'}
-                    className="icon-btn"
-                    style={{
-                      border: '1px solid var(--border-subtle)',
-                      borderRadius: 8,
-                      width: 26,
-                      height: 26,
-                      flexShrink: 0,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      opacity: streaming || imageGenerationBusy ? 0.45 : 1,
-                      background: 'var(--bg-overlay)',
-                      transition: 'width 220ms ease, height 220ms ease, opacity 150ms ease',
-                    }}
-                  >
-                    <svg
-                      aria-hidden="true"
-                      width="13"
-                      height="13"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66L9.41 17.41a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                    </svg>
-                  </button>
+                      <svg
+                        aria-hidden="true"
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66L9.41 17.41a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                      </svg>
+                    </button>
+                  )}
                   {gatewayUrl && onInsertAtCursor && (
                     <PromptSnippetsTrigger
                       gatewayUrl={gatewayUrl}

@@ -158,6 +158,34 @@ describe('message-v2 compatibility regressions', () => {
     });
   });
 
+  it('persists assistant agent identity on both emitted info and returned message', () => {
+    mocks.sqliteGet.mockReturnValue({ max_seq: null });
+
+    const message = appendSessionMessageV2({
+      sessionId: 'session-1',
+      userId: 'user-1',
+      role: 'assistant',
+      agentId: 'prometheus',
+      messageId: 'message-agent',
+      createdAt: 123,
+      content: [{ type: 'text', text: '由规划层输出' }],
+    });
+
+    expect((message as unknown as { agentId?: string }).agentId).toBe('prometheus');
+    const createdCall = mocks.emitEvent.mock.calls.find(
+      (call) =>
+        (call[0] as { definition?: { type?: string } }).definition?.type === 'message.created',
+    );
+    expect(createdCall?.[0]).toMatchObject({
+      data: {
+        info: {
+          role: 'assistant',
+          agent: 'prometheus',
+        },
+      },
+    });
+  });
+
   it('clears existing request-role mirrors before replaceExisting writes', () => {
     const clientRequestId = 'parent-req:tool:task-call-1';
     mocks.sqliteAll

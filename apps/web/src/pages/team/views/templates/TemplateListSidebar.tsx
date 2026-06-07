@@ -145,9 +145,7 @@ export function TemplateListSidebar({
   >();
   for (const template of filteredTemplates) {
     const favored = isFavorite?.(template.id) ?? false;
-    const group = favored
-      ? { id: 'favorite', label: '★ 收藏', priority: -1 }
-      : getGroup(template);
+    const group = favored ? { id: 'favorite', label: '★ 收藏', priority: -1 } : getGroup(template);
     const existing = grouped.get(group.id);
     if (existing) {
       existing.items.push(template);

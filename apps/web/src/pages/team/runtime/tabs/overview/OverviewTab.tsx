@@ -10,6 +10,7 @@ import { Icon, ChevronDownIcon } from '../../shared/TeamIcons.js';
 import type { IconKey } from '../../shared/TeamIcons.js';
 import { TabContainer } from '../TabContainer.js';
 import { MetricGrid, MiniBar } from '../../shared/content-kit/index.js';
+import { SharedSessionOverviewView } from './shared-session-overview-view.js';
 
 export function OverviewTab({
   selectedTeam = null,
@@ -17,6 +18,16 @@ export function OverviewTab({
   selectedTeam?: AgentTeamsSidebarTeam | null;
 }) {
   const { activityStats, overviewCards, timelineEvents } = useTeamRuntimeReferenceViewData();
+  if (selectedTeam?.isSharedSession) {
+    return (
+      <TabContainer
+        title="运行概览"
+        subtitle="共享会话展示共享输出、评论、权限/问题待办和共享协作时间线。"
+      >
+        <SharedSessionOverviewView selectedTeam={selectedTeam} />
+      </TabContainer>
+    );
+  }
   const [timelineFilter, setTimelineFilter] = useState<Set<AgentTeamsTimelineEventType>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedCardIds, setExpandedCardIds] = useState<Set<string>>(new Set());

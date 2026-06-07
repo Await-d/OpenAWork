@@ -315,6 +315,7 @@ export function createPm2Runner(): HandoffTaskRunner {
               sessionId: input.toSessionId,
               userId: input.handoff.userId,
               role: 'assistant',
+              agentId: 'zeus',
               content: [
                 {
                   type: 'text',

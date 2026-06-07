@@ -515,6 +515,7 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
         detail: `会话：${sharedAccess.session.title ?? sessionId}；工作区：${sharedAccess.session.workspacePath ?? '未绑定工作区'}；评论：${body.content}`,
         entityId: comment.id,
         entityType: 'shared_session_comment',
+        sessionId,
         summary: `${user.email} 在“${sharedAccess.session.title ?? sessionId}”中新增了一条共享评论`,
         userId: sharedAccess.ownerUserId,
       });
@@ -712,6 +713,7 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
         detail: `会话：${sharedAccess.session.title ?? sessionId}；工作区：${sharedAccess.session.workspacePath ?? '未绑定工作区'}；工具：${permissionRequest.tool_name}；范围：${permissionRequest.scope}；决策：${body.decision}`,
         entityId: body.requestId,
         entityType: 'permission_request',
+        sessionId,
         summary: `${user.email} 处理了“${sharedAccess.session.title ?? sessionId}”的权限请求（${body.decision}）`,
         userId: sharedAccess.ownerUserId,
       });
@@ -835,6 +837,7 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
         detail: `会话：${sharedAccess.session.title ?? sessionId}；工作区：${sharedAccess.session.workspacePath ?? '未绑定工作区'}；问题：${questionRequest.title}；结果：${body.status}`,
         entityId: body.requestId,
         entityType: 'question_request',
+        sessionId,
         summary: `${user.email} 处理了“${sharedAccess.session.title ?? sessionId}”的待回答问题（${body.status}）`,
         userId: sharedAccess.ownerUserId,
       });

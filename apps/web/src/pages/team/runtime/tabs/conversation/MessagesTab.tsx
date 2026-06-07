@@ -3,33 +3,62 @@ import type {
   AgentTeamsMessageCard,
   AgentTeamsSidebarTeam,
 } from '../../data/team-runtime-types.js';
+import { resolveMatchedSharedSessionDetail } from '../../data/team-runtime-shared-context.js';
 import { ChromeBadge } from '../../shell/team-runtime-shell-primitives.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
 import { PANEL_STYLE, MSG_TYPE_META } from '../../shared/team-runtime-shared.js';
 import { Icon, DirectIcon, SendIcon, XIcon } from '../../shared/TeamIcons.js';
 import MarkdownMessageContent from '../../../../../components/chat/markdown/markdown-message-content.js';
+import { SharedSessionMessagesView } from './shared-session-messages-view.js';
 
 export function MessagesTab({
   selectedTeam = null,
 }: {
   selectedTeam?: AgentTeamsSidebarTeam | null;
 }) {
-  const { busy, messageCards, sendMessage } = useTeamRuntimeReferenceViewData();
+  const {
+    activeSharedSession,
+    busy,
+    canManageSessionEntries,
+    createSharedSessionComment,
+    messageCards,
+    reviewBusy,
+    selectedSharedSession,
+    sendMessage,
+    sharedSessionLoading,
+  } = useTeamRuntimeReferenceViewData();
   const [typeFilter, setTypeFilter] = useState<Set<AgentTeamsMessageCard['type']>>(new Set());
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [replyInput, setReplyInput] = useState('');
-  const [replies, setReplies] = useState<Record<string, string[]>>({});
   const [broadcastInput, setBroadcastInput] = useState('');
-  const [broadcasts, setBroadcasts] = useState<string[]>([]);
+  const sharedSession =
+    selectedTeam?.isSharedSession === true
+      ? resolveMatchedSharedSessionDetail({
+          selectedTeamId: selectedTeam.id,
+          activeSharedSession,
+          selectedSharedSession,
+        })
+      : null;
 
   useEffect(() => {
     setTypeFilter(new Set());
     setReplyingTo(null);
     setReplyInput('');
-    setReplies({});
     setBroadcastInput('');
-    setBroadcasts([]);
   }, [selectedTeam?.id]);
+
+  if (selectedTeam?.isSharedSession) {
+    return (
+      <SharedSessionMessagesView
+        canManageSessionEntries={canManageSessionEntries}
+        createSharedSessionComment={createSharedSessionComment}
+        reviewBusy={reviewBusy}
+        selectedTeam={selectedTeam}
+        sharedSession={sharedSession}
+        sharedSessionLoading={sharedSessionLoading}
+      />
+    );
+  }
 
   const toggleTypeFilter = useCallback((type: AgentTeamsMessageCard['type']) => {
     setTypeFilter((prev) => {
@@ -46,27 +75,56 @@ export function MessagesTab({
     return result;
   }, [messageCards, typeFilter]);
 
-  const handleReply = useCallback(
-    (cardId: string) => {
-      if (!replyInput.trim()) return;
-      void sendMessage({ content: replyInput.trim(), type: 'result' }).then((succeeded) => {
-        if (!succeeded) return;
-        setReplies((prev) => ({ ...prev, [cardId]: [...(prev[cardId] ?? []), replyInput.trim()] }));
-        setReplyInput('');
-        setReplyingTo(null);
-      });
-    },
-    [replyInput, sendMessage],
+  const visibleCards = useMemo(
+    () => filteredCards.filter((card) => card.id !== 'empty-message'),
+    [filteredCards],
   );
 
+  const visibleMessageCount = visibleCards.length;
+
+  const recentBroadcastCards = useMemo(
+    () =>
+      messageCards
+        .filter((card) => card.route === 'broadcast' && card.id !== 'empty-message')
+        .slice(0, 4),
+    [messageCards],
+  );
+
+  const messageCardById = useMemo(
+    () => new Map(messageCards.map((card) => [card.id, card])),
+    [messageCards],
+  );
+
+  const handleReply = useCallback(() => {
+    if (!canManageSessionEntries) return;
+    const trimmed = replyInput.trim();
+    if (!trimmed) return;
+
+    const sourceCard = replyingTo ? messageCardById.get(replyingTo) : null;
+    const contextualContent = sourceCard
+      ? `【跟进 ${sourceCard.from} · ${sourceCard.timestamp}】${trimmed}`
+      : trimmed;
+
+    void sendMessage({
+      content: contextualContent,
+      recipientMemberId: sourceCard?.memberId ?? null,
+      replyToMessageId: sourceCard?.id ?? null,
+      type: 'result',
+    }).then((succeeded) => {
+      if (!succeeded) return;
+      setReplyInput('');
+      setReplyingTo(null);
+    });
+  }, [canManageSessionEntries, messageCardById, replyInput, replyingTo, sendMessage]);
+
   const handleBroadcast = useCallback(() => {
+    if (!canManageSessionEntries) return;
     if (!broadcastInput.trim()) return;
     void sendMessage({ content: broadcastInput.trim(), type: 'update' }).then((succeeded) => {
       if (!succeeded) return;
-      setBroadcasts((prev) => [...prev, broadcastInput.trim()]);
       setBroadcastInput('');
     });
-  }, [broadcastInput, sendMessage]);
+  }, [broadcastInput, canManageSessionEntries, sendMessage]);
 
   return (
     <div style={{ display: 'grid', gap: 10 }}>
@@ -83,9 +141,9 @@ export function MessagesTab({
             fontWeight: 700,
           }}
         >
-          P2P
+          团队流
         </span>
-        <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>{filteredCards.length} 条</span>
+        <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>{visibleMessageCount} 条</span>
         <span style={{ flex: 1 }} />
         {/* Type filters */}
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -189,7 +247,7 @@ export function MessagesTab({
       >
         {/* Message list */}
         <div style={{ display: 'grid', gap: 6 }}>
-          {filteredCards.length === 0 ? (
+          {visibleCards.length === 0 ? (
             <div
               style={{
                 display: 'grid',
@@ -210,13 +268,12 @@ export function MessagesTab({
               <span style={{ fontSize: 11, lineHeight: 1.6, maxWidth: 320 }}>
                 {typeFilter.size > 0
                   ? '当前筛选条件下没有消息，换个类型或清除筛选试试。'
-                  : '团队成员之间的进度同步、提问、结果汇报会出现在这里。可在右侧广播面板主动给团队发条消息。'}
+                  : '团队运行中的广播、提问、结果汇报与跟进消息会出现在这里。可在右侧广播面板主动给团队发条消息。'}
               </span>
             </div>
           ) : null}
-          {filteredCards.map((card) => {
+          {visibleCards.map((card) => {
             const meta = MSG_TYPE_META[card.type];
-            const cardReplies = replies[card.id] ?? [];
             return (
               <div
                 key={card.id}
@@ -303,7 +360,7 @@ export function MessagesTab({
                         fontWeight: 700,
                       }}
                     >
-                      {card.route === 'broadcast' ? '广播' : '单播'}
+                      {card.route === 'broadcast' ? '广播' : '跟进'}
                     </span>
                     <span
                       style={{
@@ -338,33 +395,6 @@ export function MessagesTab({
                   <MarkdownMessageContent content={card.summary} />
                 </div>
 
-                {cardReplies.length > 0 && (
-                  <div
-                    style={{
-                      display: 'grid',
-                      gap: 4,
-                      padding: '4px 0 0',
-                      borderTop: '1px solid var(--border-subtle)',
-                    }}
-                  >
-                    {cardReplies.map((r, i) => (
-                      <div
-                        key={i}
-                        style={{
-                          padding: '6px 10px',
-                          borderRadius: 6,
-                          background: 'color-mix(in oklch, var(--success) 8%, transparent)',
-                          fontSize: 11,
-                          color: 'var(--fg-default)',
-                          borderLeft: '2px solid var(--success)',
-                        }}
-                      >
-                        <MarkdownMessageContent content={r} />
-                      </div>
-                    ))}
-                  </div>
-                )}
-
                 {replyingTo === card.id ? (
                   <div
                     style={{
@@ -379,14 +409,16 @@ export function MessagesTab({
                       value={replyInput}
                       onChange={(e) => setReplyInput(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleReply(card.id);
+                        if (e.key === 'Enter') handleReply();
                         if (e.key === 'Escape') {
                           setReplyingTo(null);
                           setReplyInput('');
                         }
                       }}
-                      placeholder="回复..."
+                      aria-label={`跟进 ${card.from}`}
+                      placeholder="补充一条结果消息（会附带跟进上下文）..."
                       autoFocus
+                      disabled={!canManageSessionEntries}
                       className="team-input-focusable"
                       style={{
                         flex: 1,
@@ -399,18 +431,32 @@ export function MessagesTab({
                         outline: 'none',
                       }}
                     />
+                    <span
+                      style={{
+                        fontSize: 10,
+                        color: 'var(--fg-muted)',
+                        whiteSpace: 'nowrap',
+                        flexShrink: 0,
+                      }}
+                    >
+                      将附带来源上下文
+                    </span>
                     <button
                       type="button"
-                      onClick={() => handleReply(card.id)}
-                      disabled={busy || !replyInput.trim()}
+                      onClick={handleReply}
+                      disabled={!canManageSessionEntries || busy || !replyInput.trim()}
+                      aria-label={`发送关于 ${card.from} 的跟进消息`}
                       style={{
                         padding: '5px 10px',
                         borderRadius: 6,
                         border: 'none',
                         background: 'var(--accent)',
                         color: 'var(--bg-base)',
-                        cursor: replyInput.trim() && !busy ? 'pointer' : 'not-allowed',
-                        opacity: replyInput.trim() && !busy ? 1 : 0.5,
+                        cursor:
+                          canManageSessionEntries && replyInput.trim() && !busy
+                            ? 'pointer'
+                            : 'not-allowed',
+                        opacity: canManageSessionEntries && replyInput.trim() && !busy ? 1 : 0.5,
                         fontSize: 10,
                         fontWeight: 700,
                         display: 'inline-flex',
@@ -427,6 +473,7 @@ export function MessagesTab({
                         setReplyingTo(null);
                         setReplyInput('');
                       }}
+                      aria-label={`取消跟进 ${card.from}`}
                       style={{
                         background: 'none',
                         border: 'none',
@@ -441,7 +488,12 @@ export function MessagesTab({
                 ) : (
                   <button
                     type="button"
-                    onClick={() => setReplyingTo(card.id)}
+                    onClick={() => {
+                      if (!canManageSessionEntries) return;
+                      setReplyingTo(card.id);
+                    }}
+                    aria-label={`跟进 ${card.from}`}
+                    disabled={!canManageSessionEntries}
                     className="team-btn-outline"
                     style={{
                       background: 'none',
@@ -450,14 +502,15 @@ export function MessagesTab({
                       padding: '2px 8px',
                       color: 'var(--fg-muted)',
                       fontSize: 10,
-                      cursor: 'pointer',
+                      cursor: canManageSessionEntries ? 'pointer' : 'not-allowed',
                       display: 'inline-flex',
                       alignItems: 'center',
                       gap: 3,
                       justifySelf: 'start',
+                      opacity: canManageSessionEntries ? 1 : 0.5,
                     }}
                   >
-                    <SendIcon size={9} color="var(--fg-muted)" /> 回复
+                    <SendIcon size={9} color="var(--fg-muted)" /> 跟进
                   </button>
                 )}
               </div>
@@ -493,7 +546,9 @@ export function MessagesTab({
               onKeyDown={(e) => {
                 if (e.key === 'Enter') handleBroadcast();
               }}
+              aria-label="广播内容"
               placeholder="发送广播消息..."
+              disabled={!canManageSessionEntries}
               className="team-input-focusable"
               style={{
                 padding: '7px 10px',
@@ -508,15 +563,19 @@ export function MessagesTab({
             <button
               type="button"
               onClick={handleBroadcast}
-              disabled={busy || !broadcastInput.trim()}
+              disabled={!canManageSessionEntries || busy || !broadcastInput.trim()}
+              aria-label="发送广播"
               style={{
                 padding: '6px 10px',
                 borderRadius: 8,
                 border: 'none',
                 background: 'var(--accent)',
                 color: 'var(--bg-base)',
-                cursor: broadcastInput.trim() && !busy ? 'pointer' : 'not-allowed',
-                opacity: broadcastInput.trim() && !busy ? 1 : 0.5,
+                cursor:
+                  canManageSessionEntries && broadcastInput.trim() && !busy
+                    ? 'pointer'
+                    : 'not-allowed',
+                opacity: canManageSessionEntries && broadcastInput.trim() && !busy ? 1 : 0.5,
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: 4,
@@ -527,10 +586,15 @@ export function MessagesTab({
             >
               <SendIcon size={10} color="var(--bg-base)" /> {busy ? '发送中…' : '广播'}
             </button>
+            {!canManageSessionEntries ? (
+              <span style={{ fontSize: 10, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
+                当前工作区不可写，无法发送广播或跟进消息。
+              </span>
+            ) : null}
           </div>
 
-          {/* Sent broadcasts */}
-          {broadcasts.length > 0 && (
+          {/* Real broadcast feed */}
+          {recentBroadcastCards.length > 0 && (
             <div
               style={{
                 ...PANEL_STYLE,
@@ -549,11 +613,11 @@ export function MessagesTab({
                   letterSpacing: '0.06em',
                 }}
               >
-                已发送广播
+                最近广播
               </span>
-              {broadcasts.map((msg, i) => (
+              {recentBroadcastCards.map((card) => (
                 <div
-                  key={`bc-${i}`}
+                  key={card.id}
                   style={{
                     padding: '6px 10px',
                     borderRadius: 8,
@@ -576,10 +640,11 @@ export function MessagesTab({
                     >
                       广播
                     </span>
-                    <span style={{ fontSize: 8, color: 'var(--fg-muted)' }}>刚刚</span>
+                    <span style={{ fontSize: 8, color: 'var(--fg-muted)' }}>{card.timestamp}</span>
+                    <span style={{ fontSize: 8, color: 'var(--fg-subtle)' }}>{card.from}</span>
                   </div>
                   <span style={{ fontSize: 11, color: 'var(--fg-default)', lineHeight: 1.5 }}>
-                    <MarkdownMessageContent content={msg} />
+                    <MarkdownMessageContent content={card.summary} />
                   </span>
                 </div>
               ))}

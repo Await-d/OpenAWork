@@ -25,10 +25,19 @@ describe('resolveTeamSubmitStrategy (D5)', () => {
     });
   });
 
-  it('routes reception (non-clarifying) to stream — the b agent runs as a chat-style LLM loop', () => {
-    expect(resolveTeamSubmitStrategy('reception', null)).toEqual({ kind: 'stream' });
-    expect(resolveTeamSubmitStrategy('reception', 'idle')).toEqual({ kind: 'stream' });
-    expect(resolveTeamSubmitStrategy('reception', 'drafting_spec')).toEqual({ kind: 'stream' });
+  it('routes reception (non-clarifying) to inbound user_input', () => {
+    expect(resolveTeamSubmitStrategy('reception', null)).toEqual({
+      kind: 'inbound',
+      messageType: 'user_input',
+    });
+    expect(resolveTeamSubmitStrategy('reception', 'idle')).toEqual({
+      kind: 'inbound',
+      messageType: 'user_input',
+    });
+    expect(resolveTeamSubmitStrategy('reception', 'drafting_spec')).toEqual({
+      kind: 'inbound',
+      messageType: 'user_input',
+    });
   });
 
   it('routes pm1 / pm2 / executor / reviewer (non-clarifying) to stream', () => {

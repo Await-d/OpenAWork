@@ -55,7 +55,9 @@ export function teamEventTypeLabel(type: string): string {
 }
 
 /** 角色层 → 中文短标签；未知值回退原文。 */
-export function teamEventLayerLabel(layer: TeamRoleLayer | string | undefined | null): string | null {
+export function teamEventLayerLabel(
+  layer: TeamRoleLayer | string | undefined | null,
+): string | null {
   if (!layer) return null;
   return TEAM_EVENT_LAYER_LABEL[layer] ?? layer;
 }
@@ -82,9 +84,7 @@ export function formatTeamEventSummary(event: HandoffEvent): string {
 
   if (event.type === 'session.substate.changed') {
     const substate =
-      typeof event.payload['substate'] === 'string'
-        ? (event.payload['substate'] as string)
-        : null;
+      typeof event.payload['substate'] === 'string' ? (event.payload['substate'] as string) : null;
     const stageLabel = substateLabelAny(substate);
     if (stageLabel) {
       // 只回阶段名（如「草拟规格」）。调用方通常已经把事件类型标签（「阶段更新」）

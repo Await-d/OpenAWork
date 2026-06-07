@@ -48,6 +48,7 @@ interface HandoffRow {
   to_role_layer: string;
   to_session_id: string | null;
   payload_json: string;
+  result_json: string | null;
   state: string;
   claim_token: string | null;
   claimed_at: string | null;
@@ -72,6 +73,7 @@ export interface HandoffRecord {
   toRoleLayer: HandoffRoleLayer;
   toSessionId: string | null;
   payload: unknown;
+  resultJson?: unknown;
   state: HandoffState;
   claimToken: string | null;
   claimedAt: string | null;
@@ -132,6 +134,7 @@ function mapRow(row: HandoffRow): HandoffRecord {
     toRoleLayer: row.to_role_layer as HandoffRoleLayer,
     toSessionId: row.to_session_id,
     payload: parsePayload(row.payload_json),
+    resultJson: parsePayload(row.result_json),
     state: row.state as HandoffState,
     claimToken: row.claim_token,
     claimedAt: row.claimed_at,

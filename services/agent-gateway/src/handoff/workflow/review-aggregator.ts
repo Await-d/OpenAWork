@@ -288,6 +288,7 @@ export function checkAllChildrenCompleted(pm2HandoffId: string): {
     to_role_layer: string;
     to_session_id: string | null;
     payload_json: string;
+    result_json: string | null;
     state: string;
     claim_token: string | null;
     claimed_at: string | null;
@@ -317,6 +318,7 @@ export function checkAllChildrenCompleted(pm2HandoffId: string): {
     toRoleLayer: c.to_role_layer as HandoffRecord['toRoleLayer'],
     toSessionId: c.to_session_id,
     payload: parseChildPayloadJson(c.payload_json),
+    resultJson: parseChildPayloadJson(c.result_json),
     state: c.state as HandoffRecord['state'],
     claimToken: c.claim_token,
     claimedAt: c.claimed_at,

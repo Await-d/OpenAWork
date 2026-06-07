@@ -26,18 +26,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useChatSearch } from '../../../components/chat/search/chat-search-overlay.js';
-import { renderChatMessageContentWithOptions } from '../../../components/chat/session/ChatPageSections.js';
 import { LatestAssistantMessageContext } from '../../../components/chat/message/collapsible-assistant-content.js';
 import type {
+  ChatRenderAction,
   ChatRenderEntry,
   ChatRenderGroup,
 } from '../../../components/chat/message/chat-message-group-list.js';
-import { groupChatRenderEntries } from '../../../components/conversation-runtime/messages/group-render-entries.js';
 import type { UnifiedComposerSubmitPayload } from '../../../components/chat/composer/UnifiedComposer.js';
-import type {
-  HistoryEditPromptInput,
-  RetryPromptInput,
-} from './TeamConversationLayout.js';
+import type { HistoryEditPromptInput, RetryPromptInput } from './TeamConversationLayout.js';
 import { normalizeChatMessages } from '../../../components/conversation-runtime/messages/support.js';
 import { prepareStandardChatSendInput } from '../../chat-page/conversation/composer/prepare-standard-chat-send-input.js';
 import { createSessionsClient } from '@openAwork/web-client';
@@ -47,19 +43,27 @@ import { useAuthStore } from '../../../stores/auth/auth.js';
 import { useChatKeyboardShortcuts } from '../../../hooks/chat/useChatKeyboardShortcuts.js';
 import { useComposerWorkspaceCatalog } from '../../../hooks/chat/useComposerWorkspaceCatalog.js';
 import { useMessageMultiSelect } from '../../../components/chat/message/message-multi-select.js';
-import { copyExportToClipboard } from '../../../components/chat/message/message-export.js';
+import {
+  copyExportToClipboard,
+  downloadExport,
+  exportMessages,
+} from '../../../components/chat/message/message-export.js';
 import { PromptTemplatePanel } from '../../../components/chat/misc/prompt-template-panel.js';
 import { TeamConversationLayout } from './TeamConversationLayout.js';
 import { TeamSubstateProgressBar } from './extras/TeamSubstateProgressBar.js';
 import { TeamRunStateBanner } from './extras/TeamRunStateBanner.js';
 import { TeamSessionEmptyState } from './extras/TeamSessionEmptyState.js';
 import { TeamSessionHeader } from './extras/TeamSessionHeader.js';
-import { TeamMessageRoleHeader } from './extras/TeamMessageRoleHeader.js';
 import { TeamUserJumpRail } from './extras/TeamUserJumpRail.js';
 import { TeamRoleTypingIndicator } from './extras/TeamRoleTypingIndicator.js';
 import { TeamInitModal } from './extras/TeamInitModal.js';
 import { useTeamConversationState } from './use-team-conversation-state.js';
 import { resolveTeamSubmitStrategy } from './submit/team-submit-router.js';
+import { buildTeamGroupedMessageEntries } from './build-team-grouped-message-entries.js';
+import {
+  COMPOSER_REFERENCE_EVENT_NAME,
+  isComposerReferenceEvent,
+} from '../../../utils/chat/composer-reference-events.js';
 
 export interface TeamConversationViewProps {
   /** 要渲染的 team session id。 */
@@ -135,6 +139,11 @@ export function TeamConversationView({
 
   // Prompt template panel state.
   const [showTemplatePanel, setShowTemplatePanel] = useState(false);
+  const messagesRef = useRef(state.messages);
+
+  useEffect(() => {
+    messagesRef.current = state.messages;
+  }, [state.messages]);
 
   // Copy last assistant message helper.
   const handleCopyLastAssistant = useCallback(() => {
@@ -234,6 +243,95 @@ export function TeamConversationView({
     [state],
   );
 
+  const appendTextToComposer = useCallback(
+    (text: string) => {
+      state.setInput((previous) => {
+        const separator = previous.length > 0 && !previous.endsWith(' ') ? ' ' : '';
+        return `${previous}${separator}${text}`;
+      });
+      requestAnimationFrame(() => {
+        const textarea = state.textareaRef.current;
+        if (!textarea) return;
+        textarea.focus();
+        const caret = textarea.value.length;
+        try {
+          textarea.setSelectionRange(caret, caret);
+        } catch {
+          // 某些 textarea 可能不支持 setSelectionRange，忽略。
+        }
+      });
+    },
+    [state],
+  );
+
+  useEffect(() => {
+    if (!composerEnabled) {
+      return;
+    }
+
+    const handleComposerReference = (event: Event) => {
+      if (!isComposerReferenceEvent(event)) {
+        return;
+      }
+
+      appendTextToComposer(event.detail.text);
+    };
+
+    window.addEventListener(COMPOSER_REFERENCE_EVENT_NAME, handleComposerReference);
+    return () => {
+      window.removeEventListener(COMPOSER_REFERENCE_EVENT_NAME, handleComposerReference);
+    };
+  }, [appendTextToComposer, composerEnabled]);
+
+  useEffect(() => {
+    if (!composerEnabled || typeof window === 'undefined') {
+      return;
+    }
+
+    const handleOpenTemplates = () => setShowTemplatePanel(true);
+    const handleExportChat = () => {
+      const content = exportMessages(messagesRef.current, 'markdown');
+      downloadExport(content, `team-chat-export-${Date.now()}.md`, 'text/markdown');
+    };
+
+    window.addEventListener('openAwork:open-templates', handleOpenTemplates);
+    window.addEventListener('openAwork:export-chat', handleExportChat);
+    return () => {
+      window.removeEventListener('openAwork:open-templates', handleOpenTemplates);
+      window.removeEventListener('openAwork:export-chat', handleExportChat);
+    };
+  }, [composerEnabled]);
+
+  useEffect(() => {
+    if (!composerEnabled || typeof window === 'undefined') {
+      return;
+    }
+
+    const handleComposerInsert = (event: Event) => {
+      const detail = (event as CustomEvent<{ mode?: 'append' | 'replace'; text?: string }>).detail;
+      const insertText = detail?.text;
+      if (typeof insertText !== 'string' || insertText.length === 0) {
+        return;
+      }
+
+      state.setInput((previous) => {
+        if (detail?.mode === 'replace') {
+          return insertText;
+        }
+        if (previous.trim().length === 0) {
+          return insertText;
+        }
+        return `${previous.trimEnd()}\n${insertText}`;
+      });
+      requestAnimationFrame(() => state.textareaRef.current?.focus());
+    };
+
+    window.addEventListener('openawork:composer:insert', handleComposerInsert);
+    return () => {
+      window.removeEventListener('openawork:composer:insert', handleComposerInsert);
+    };
+  }, [composerEnabled, state]);
+
   // 默认 placeholder：根据 roleLayer + substate 给出更贴合团队语义的占位文案。
   // 与 D26（b 直答 vs 走 c 路由）对齐——告诉用户"输入需求会被派发给团队"。
   const effectivePlaceholder = useMemo(() => {
@@ -306,19 +404,25 @@ export function TeamConversationView({
         }
 
         if (strategy.messageType === 'user_input') {
-          // user_input 走 inbound 失败时回退 stream 是安全的（同为"给当前 session
-          // 追加一条用户消息"语义），保留原有 fallback 行为。
-          // 注意：UserInputPayload 字段是 `text`（不是 `answer`），后端
-          // team-inbound.ts 读 body.payload['text']。早期实现误写成 `answer`
-          // 导致 inbound 路径吞输入；这里同时纠正字段名。
+          // user_input 对 reception 根会话必须走 inbound：这是团队自动派发链的入口。
+          // 若这里失败再偷偷回退到 stream，会把请求重新送回接待层自己回答，等于绕过
+          // team-inbound → reception-orchestrator → pm1/... 整条分层链路。
+          // 因此 reception 失败时直接报错；只有非 reception 的 future user_input
+          // 场景才允许回退到 stream。
           try {
             await state.submitInbound(strategy.messageType, { text } as never);
             await state.reload();
             return true;
           } catch (err) {
+            const message = err instanceof Error ? err.message : '提交输入失败';
+            if (state.roleLayer === 'reception') {
+              console.warn('[TeamConversationView] reception inbound submit failed:', message);
+              state.setStreamError(`需求提交失败，请重试：${message}`);
+              return false;
+            }
             console.warn(
               '[TeamConversationView] user_input inbound submit failed, falling back to stream:',
-              err instanceof Error ? err.message : err,
+              message,
             );
           }
         } else {
@@ -381,9 +485,7 @@ export function TeamConversationView({
         } catch (err) {
           const message = err instanceof Error ? err.message : '附件上传失败';
           console.warn('[TeamConversationView] attachment upload failed:', message);
-          state.setStreamError(
-            `附件上传失败，消息未发送（请重试或移除附件后重发）：${message}`,
-          );
+          state.setStreamError(`附件上传失败，消息未发送（请重试或移除附件后重发）：${message}`);
           return;
         }
       }
@@ -410,8 +512,8 @@ export function TeamConversationView({
   //   - 编辑重发（user 消息）：截断到该消息之前 → 用新文本重新 startStream
   //   - 重试（assistant 消息）：回溯到最近的 user 消息 → 截断 → 重发其文本
   // 截断走 sessionsClient.truncateMessages（与 chat 同一后端端点）。
-  // team 暂不支持「新建会话重试 / 分支」（无分支会话概念），故 onRetryBranch /
-  // onCreateBranchFromHistoryEdit 回退为「在当前会话重发」。
+  // team 暂不支持「新建会话重试 / 分支」（无分支会话概念），因此不再向弹窗暴露
+  // 对应入口，只保留「当前会话重发 / 追加到末尾」两种真实可用动作。
   const [historyEditPrompt, setHistoryEditPrompt] = useState<HistoryEditPromptInput | null>(null);
   const [retryPrompt, setRetryPrompt] = useState<RetryPromptInput | null>(null);
 
@@ -587,8 +689,8 @@ export function TeamConversationView({
    *      仅在 composerEnabled（可交互）时注入编辑/重试，避免只读视图出现无效按钮。
    */
   const buildEntryActions = useCallback(
-    (message: ChatMessage): ChatRenderEntry['actions'] => {
-      const actions: NonNullable<ChatRenderEntry['actions']> = [
+    (message: ChatMessage): ChatRenderAction[] => {
+      const actions: ChatRenderAction[] = [
         {
           id: 'copy',
           label: '复制',
@@ -642,40 +744,22 @@ export function TeamConversationView({
   );
 
   const groupedMessageEntries = useMemo<ChatRenderGroup[]>(() => {
-    const entries: ChatRenderEntry[] = state.messages.map((message) => ({
-      message,
-      renderContent: (m) => renderChatMessageContentWithOptions(m),
-      actions: buildEntryActions(message),
-    }));
-    const groups = groupChatRenderEntries(entries);
-
-    // team 多级角色展示：给每个「assistant 消息组」的首条注入角色身份头
-    // （彩色头像点 + 层级名 + 代号），让用户一眼看出是哪一层在说话，使 team 对话
-    // 在视觉上彻底区别于普通 chat。
-    //   - 覆盖全部已知层（含 reception 主对话——它本就是接待层在说话，标注准确且
-    //     让默认界面脱离纯 chat 观感）。
-    //   - roleLayer 缺失（null/未知）时不注入：拿不到层级信息，避免臆造身份。
-    //   - 只在组首注入，相邻同层消息不重复刷头；user 组不注入（那是用户自己）。
-    if (!state.roleLayer) {
-      return groups;
-    }
-    const layer = state.roleLayer;
-    return groups.map((group) => {
-      if (group.role !== 'assistant') return group;
-      const [firstEntry, ...rest] = group.entries;
-      if (!firstEntry) return group;
-      const wrappedFirst: ChatRenderEntry = {
-        ...firstEntry,
-        renderContent: (m) => (
-          <>
-            <TeamMessageRoleHeader roleLayer={layer} />
-            {firstEntry.renderContent(m)}
-          </>
-        ),
-      };
-      return { ...group, entries: [wrappedFirst, ...rest] };
+    return buildTeamGroupedMessageEntries({
+      messages: state.messages,
+      roleLayer: state.roleLayer,
+      visibleStreaming: state.visibleStreaming,
+      streamBuffer: state.streamBuffer,
+      streamingSegments: state.streamingSegments,
+      buildEntryActions,
     });
-  }, [state.messages, state.roleLayer, buildEntryActions]);
+  }, [
+    state.messages,
+    state.roleLayer,
+    state.visibleStreaming,
+    state.streamBuffer,
+    state.streamingSegments,
+    buildEntryActions,
+  ]);
 
   // Provider catalog for the model picker (composer header).
   const providerCatalog = useMemo(() => {
@@ -792,7 +876,7 @@ export function TeamConversationView({
           messages={state.messages}
           groupedMessageEntries={groupedMessageEntries}
           visibleMessageCount={state.messages.length}
-          hiddenMessageCount={0}
+          hiddenMessageCount={state.hiddenMessageCount}
           visibleStreaming={state.visibleStreaming}
           showSessionSwitchSkeleton={state.isSessionLoading}
           remoteSessionBusyState={state.remoteSessionBusyState}
@@ -800,7 +884,9 @@ export function TeamConversationView({
           providerCatalog={providerCatalog}
           activeProviderId={state.activeProviderId}
           activeModelId={state.activeModelId}
-          onLoadEarlier={noopVoid}
+          onLoadEarlier={() => {
+            void state.loadEarlierMessages();
+          }}
           emptyContent={
             <TeamSessionEmptyState
               roleLayer={state.roleLayer}
@@ -821,7 +907,6 @@ export function TeamConversationView({
           checkpointCount={0}
           pendingQuestionsCount={state.pendingQuestions.length}
           stopCapability={canStopCurrentSessionStream ? 'best_effort' : 'none'}
-          onOpenRecovery={noopVoid}
           scrollRegionRef={state.scrollRegionRef}
           contentColumnRef={state.contentColumnRef}
           bottomRef={state.bottomRef}
@@ -847,11 +932,9 @@ export function TeamConversationView({
           onCloseHistoryEdit={() => setHistoryEditPrompt(null)}
           onResendHistoryEdit={handleResendHistoryEdit}
           onContinueHistoryEdit={handleContinueHistoryEdit}
-          onCreateBranchFromHistoryEdit={handleResendHistoryEdit}
           retryPrompt={retryPrompt}
           onCloseRetry={() => setRetryPrompt(null)}
           onRetryCurrent={handleRetryCurrent}
-          onRetryBranch={handleRetryCurrent}
           chatSearch={chatSearch}
           composerVariant="session"
           providers={state.providers}

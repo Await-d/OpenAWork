@@ -4,6 +4,14 @@ import type { AgentTeamsOfficeAgent } from '../../data/team-runtime-types.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
 import { useOfficeLayerBinding } from '../../hooks/use-office-layer-binding.js';
 import type { OfficeSceneState } from './OfficeScene.js';
+import { buildOffice } from './office-scene-builder.js';
+import {
+  createLabelTexture,
+  createMonitorTexture,
+  createProjectionScreenTexture,
+  makeCanvasTexture,
+  OFFICE_PROJECTION_PAGE_COUNT,
+} from './office-canvas-textures.js';
 
 // ── World units (meters) ─────────────────────────────────────────────
 const ROOM_W = 16;
@@ -168,7 +176,6 @@ interface BuddyState {
   glowRing: THREE.Mesh | null;
   glowPillar: THREE.Mesh | null;
   isSelected: boolean;
-  isPaused: boolean;
   isHovered: boolean;
   baseY: number;
   bobPhase: number;
@@ -182,234 +189,6 @@ interface BuddyState {
   walkWaypoints: { x: number; z: number; isSeat: boolean; faceAngle?: number }[];
   walkIdx: number;
   walkSpeed: number;
-}
-
-// ── Texture helpers ──────────────────────────────────────────────────
-function makeCanvasTexture(
-  w: number,
-  h: number,
-  draw: (ctx: CanvasRenderingContext2D) => void,
-): THREE.CanvasTexture {
-  const c = document.createElement('canvas');
-  c.width = w;
-  c.height = h;
-  const ctx = c.getContext('2d')!;
-  ctx.imageSmoothingEnabled = false;
-  draw(ctx);
-  const tex = new THREE.CanvasTexture(c);
-  tex.magFilter = THREE.NearestFilter;
-  tex.minFilter = THREE.NearestFilter;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
-// ── Wall texture (brick pattern) ──────────────────────────────────────
-function createWallTexture(): THREE.CanvasTexture {
-  const tw = 256,
-    th = 64;
-  return makeCanvasTexture(tw, th, (ctx) => {
-    ctx.fillStyle = '#5d3a1a';
-    ctx.fillRect(0, 0, tw, th);
-    for (let row = 0; row < th; row += 8) {
-      const off = (row / 8) % 2 === 0 ? 0 : 16;
-      for (let col = off; col < tw; col += 32) {
-        ctx.fillStyle = '#4a2e14';
-        ctx.fillRect(col, row, 1, 8);
-      }
-      ctx.fillStyle = '#3e2510';
-      ctx.fillRect(0, row, tw, 1);
-    }
-  });
-}
-
-// ── Floor texture (tile grid) ────────────────────────────────────────
-function createFloorTexture(): THREE.CanvasTexture {
-  const tw = 256,
-    th = 256;
-  return makeCanvasTexture(tw, th, (ctx) => {
-    ctx.fillStyle = '#c2a06e';
-    ctx.fillRect(0, 0, tw, th);
-    ctx.fillStyle = '#a88850';
-    for (let x = 0; x < tw; x += 16) ctx.fillRect(x, 0, 1, th);
-    for (let y = 0; y < th; y += 16) ctx.fillRect(0, y, tw, 1);
-  });
-}
-
-// ── Carpet texture ───────────────────────────────────────────────────
-function createCarpetTexture(): THREE.CanvasTexture {
-  const tw = 128,
-    th = 128;
-  return makeCanvasTexture(tw, th, (ctx) => {
-    ctx.fillStyle = '#8b4562';
-    ctx.fillRect(0, 0, tw, th);
-    ctx.fillStyle = '#6b3050';
-    for (let x = 0; x < tw; x += 8) ctx.fillRect(x, 0, 1, th);
-    for (let y = 0; y < th; y += 8) ctx.fillRect(0, y, tw, 1);
-    // Border pattern
-    ctx.fillStyle = '#a05070';
-    ctx.fillRect(0, 0, tw, 4);
-    ctx.fillRect(0, th - 4, tw, 4);
-    ctx.fillRect(0, 0, 4, th);
-    ctx.fillRect(tw - 4, 0, 4, th);
-  });
-}
-
-// ── Monitor screen texture ───────────────────────────────────────────
-function createMonitorTexture(data: {
-  topSummary: { title: string; memberCount: string; onlineCount: string; status: string };
-  metricCards: { icon: string; label: string; value: string }[];
-  footerStats: { label: string; value: string }[];
-  officeAgents: { id: string; label: string; status: string }[];
-  activityStats: Record<string, number>;
-  elapsed: number;
-}): THREE.CanvasTexture {
-  const { topSummary, metricCards, footerStats, officeAgents, activityStats, elapsed } = data;
-  const w = 384,
-    h = 192;
-  return makeCanvasTexture(w, h, (ctx) => {
-    // Background
-    ctx.fillStyle = '#0b1323';
-    ctx.fillRect(0, 0, w, h);
-
-    // Top bar
-    ctx.fillStyle = 'var(--aux)';
-    ctx.fillRect(0, 0, w, 3);
-
-    // Title line
-    const sl = topSummary.status === '已暂停' ? 'PAUSED' : 'ACTIVE';
-    const slColor = topSummary.status === '已暂停' ? 'var(--warning)' : 'var(--success)';
-    ctx.font = 'bold 16px ui-monospace, Menlo, monospace';
-    ctx.textBaseline = 'top';
-    ctx.fillStyle = 'var(--aux)';
-    const titleText =
-      topSummary.title.length > 18 ? topSummary.title.slice(0, 18) + '…' : topSummary.title;
-    ctx.fillText(`■ ${titleText}`, 10, 10);
-    ctx.fillStyle = slColor;
-    ctx.font = '12px ui-monospace, Menlo, monospace';
-    ctx.fillText(`● ${sl}`, 310, 12);
-
-    // Divider
-    ctx.fillStyle = '#1c2d44';
-    ctx.fillRect(0, 32, w, 1);
-
-    // ── Left panel: 核心指标 ────────────────────────────────────────
-    ctx.fillStyle = 'var(--aux)';
-    ctx.fillRect(10, 40, 4, 14);
-    ctx.font = 'bold 13px ui-monospace, Menlo, monospace';
-    ctx.fillStyle = '#8ab4ff';
-    ctx.fillText('核心指标', 20, 41);
-
-    // Metric cards (real data)
-    ctx.font = '11px ui-monospace, Menlo, monospace';
-    const metricY = 60;
-    for (let i = 0; i < metricCards.length && i < 3; i++) {
-      const mc = metricCards[i]!;
-      ctx.fillStyle = 'var(--fg-muted)';
-      ctx.fillText(`${mc.label}`, 20, metricY + i * 16);
-      ctx.fillStyle = 'var(--fg-default)';
-      ctx.font = 'bold 11px ui-monospace, Menlo, monospace';
-      ctx.fillText(`${mc.value}`, 70, metricY + i * 16);
-      ctx.font = '11px ui-monospace, Menlo, monospace';
-    }
-
-    // Footer stats (real data) as progress-style bars
-    const barY = metricY + metricCards.length * 16 + 4;
-    for (let i = 0; i < footerStats.length && i < 4; i++) {
-      const fs = footerStats[i]!;
-      const barColors = ['var(--aux)', 'var(--success)', 'var(--warning)', 'var(--danger)'];
-      const val = parseInt(fs.value, 10) || 0;
-      const maxVal = Math.max(val, 1);
-      const barW = Math.min(val * 8, 100);
-      ctx.fillStyle = '#0f1f36';
-      ctx.fillRect(20, barY + i * 14, 100, 8);
-      ctx.fillStyle = barColors[i % barColors.length]!;
-      ctx.fillRect(22, barY + i * 14 + 2, Math.max(2, barW), 4);
-      ctx.fillStyle = 'var(--fg-muted)';
-      ctx.font = '9px ui-monospace, Menlo, monospace';
-      ctx.fillText(`${fs.label} ${fs.value}`, 128, barY + i * 14 - 2);
-    }
-
-    // ── Right panel: Agent 状态 ─────────────────────────────────────
-    const rx = 210;
-    ctx.fillStyle = 'var(--success)';
-    ctx.fillRect(rx, 40, 4, 14);
-    ctx.font = 'bold 13px ui-monospace, Menlo, monospace';
-    ctx.fillStyle = 'var(--success)';
-    ctx.fillText('Agent 状态', rx + 10, 41);
-
-    // Agent status list (real data)
-    ctx.font = '10px ui-monospace, Menlo, monospace';
-    const statusColors: Record<string, string> = {
-      working: 'var(--aux)',
-      discussing: 'var(--warning)',
-      resting: 'var(--success)',
-    };
-    const statusLabels: Record<string, string> = { working: '💻', discussing: '💬', resting: '☕' };
-    for (let i = 0; i < officeAgents.length && i < 6; i++) {
-      const ag = officeAgents[i]!;
-      const ay = 60 + i * 14;
-      ctx.fillStyle = statusColors[ag.status] ?? 'var(--fg-muted)';
-      ctx.fillText(
-        `${statusLabels[ag.status] ?? '?'} ${ag.label.length > 10 ? ag.label.slice(0, 10) : ag.label}`,
-        rx + 10,
-        ay,
-      );
-      ctx.fillStyle = 'var(--fg-muted)';
-      ctx.fillText(ag.status, rx + 110, ay);
-    }
-
-    // ── Bottom divider ─────────────────────────────────────────────
-    ctx.fillStyle = '#1c2d44';
-    ctx.fillRect(0, 130, w, 1);
-
-    // ── Bottom: Activity stats ──────────────────────────────────────
-    ctx.font = '10px ui-monospace, Menlo, monospace';
-    const actEntries = Object.entries(activityStats).slice(0, 6);
-    const actLabels: Record<string, string> = {
-      session_start: '启动',
-      thinking: '思考',
-      read: '读文件',
-      write: '写文件',
-      tool_call: '工具',
-      task_complete: '完成',
-      assistant_message: '回复',
-      command_exec: '执行',
-      code_edit: '编辑',
-      review: '评审',
-    };
-    let ax = 10;
-    for (const [type, count] of actEntries) {
-      const label = actLabels[type] ?? type.slice(0, 4);
-      ctx.fillStyle = 'var(--aux)';
-      ctx.fillText(`${label}`, ax, 140);
-      ctx.fillStyle = 'var(--fg-default)';
-      ctx.fillText(`${count}`, ax + 36, 140);
-      ax += 62;
-      if (ax > 350) break;
-    }
-
-    // Mini sparkline (activity pulse)
-    ctx.strokeStyle = 'var(--aux)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    for (let i = 0; i < 20; i++) {
-      const sx = 20 + i * 8;
-      const sy = 175 - Math.sin(i * 0.5 + elapsed * 0.3) * 8;
-      if (i === 0) ctx.moveTo(sx, sy);
-      else ctx.lineTo(sx, sy);
-    }
-    ctx.stroke();
-
-    ctx.strokeStyle = 'var(--success)';
-    ctx.beginPath();
-    for (let i = 0; i < 20; i++) {
-      const sx = 200 + i * 8;
-      const sy = 175 - Math.cos(i * 0.4 + elapsed * 0.2) * 6;
-      if (i === 0) ctx.moveTo(sx, sy);
-      else ctx.lineTo(sx, sy);
-    }
-    ctx.stroke();
-  });
 }
 
 // ── Human figure colors (seeded from agent id) ────────────────────────
@@ -427,41 +206,6 @@ const HAIR_COLORS = [0x1a1a1a, 0x4a3728, 0x8b4513, 0xd4a76a, 0xc0392b, 0x2c3e50,
 function pickAgentColor(agentId: string, palette: number[]): number {
   const h = hashStr(agentId);
   return palette[h % palette.length]!;
-}
-
-// ── Label texture ────────────────────────────────────────────────────
-function createLabelTexture(
-  label: string,
-  isSelected: boolean,
-  isHovered: boolean,
-): THREE.CanvasTexture {
-  const cw = 10,
-    ch = 12;
-  const w = label.length * cw + 16;
-  const h = ch + 10;
-  return makeCanvasTexture(w, h, (ctx) => {
-    ctx.fillStyle = 'var(--bg-base)';
-    ctx.globalAlpha = 0.6;
-    ctx.fillRect(0, 0, w, h);
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = isHovered ? '#252540' : '#1a1c2c';
-    ctx.fillRect(2, 2, w - 4, h - 4);
-    if (isSelected) {
-      ctx.fillStyle = 'var(--aux)';
-      ctx.fillRect(0, 0, w, 2);
-      ctx.fillRect(0, h - 2, w, 2);
-      ctx.fillRect(0, 0, 2, h);
-      ctx.fillRect(w - 2, 0, 2, h);
-    } else if (isHovered) {
-      ctx.fillStyle = '#3a5cbf';
-      ctx.fillRect(0, 0, w, 1);
-      ctx.fillRect(0, h - 1, w, 1);
-    }
-    ctx.font = `${ch}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
-    ctx.textBaseline = 'top';
-    ctx.fillStyle = isHovered ? 'var(--aux)' : 'var(--fg-on-accent)';
-    ctx.fillText(label, 8, 5);
-  });
 }
 
 // ── Build a box mesh with color ──────────────────────────────────────
@@ -488,666 +232,13 @@ function makeBox(
   return mesh;
 }
 
-// ── Direction constants for furniture / agent facing ───────────────────
-// Convention: faceAngle describes where the PERSON faces (front direction).
-//   In Three.js, rotation.y = θ rotates the local -z axis toward world direction:
-//     local -z → world (-sin(θ), 0, -cos(θ))
-//   So:
-//     faceAngle = 0        → person faces -z (toward back wall)
-//     faceAngle = π        → person faces +z (toward front)
-//     faceAngle = -π/2     → person faces +x (toward right wall)
-//     faceAngle = π/2      → person faces -x (toward left wall)
-const FACE = {
-  NEG_Z: 0, // face -z (toward back wall)
-  POS_Z: Math.PI, // face +z (toward front / camera)
-  POS_X: -Math.PI / 2, // face +x (toward right wall)
-  NEG_X: Math.PI / 2, // face -x (toward left wall)
-} as const;
-
-// ── Reusable Chair component ──────────────────────────────────────────
-// Creates an office chair with clear facing semantics.
-//   faceAngle: direction the PERSON faces (see FACE constants).
-//   Backrest is automatically placed BEHIND the person.
-//   Returns the chair group (caller adds to scene if desired).
-function createChairGroup(faceAngle: number): THREE.Group {
-  const g = new THREE.Group();
-  // Seat
-  g.add(makeBox(0.4, 0.04, 0.4, COL.chair, 0, 0.45, 0, { roughness: 0.5, metalness: 0.3 }));
-  // Backrest at local +z (behind person after rotation)
-  g.add(makeBox(0.4, 0.4, 0.04, COL.chair, 0, 0.67, 0.18, { roughness: 0.5, metalness: 0.3 }));
-  // Legs
-  g.add(makeBox(0.04, 0.45, 0.04, COL.chairSeat, -0.16, 0.225, -0.16));
-  g.add(makeBox(0.04, 0.45, 0.04, COL.chairSeat, 0.16, 0.225, -0.16));
-  g.add(makeBox(0.04, 0.45, 0.04, COL.chairSeat, -0.16, 0.225, 0.16));
-  g.add(makeBox(0.04, 0.45, 0.04, COL.chairSeat, 0.16, 0.225, 0.16));
-  g.rotation.y = faceAngle;
-  return g;
-}
-
-// Place a chair at (x, z) facing faceAngle direction, directly into scene
-function addChair(scene: THREE.Scene, x: number, z: number, faceAngle: number) {
-  const g = createChairGroup(faceAngle);
-  g.position.set(x, 0, z);
-  scene.add(g);
-}
-
-// ── Reusable Workstation component ────────────────────────────────────
-// Creates a complete workstation: desk + monitor + keyboard + mouse + chair.
-//   faceAngle: direction the PERSON faces (toward the monitor).
-//   Monitor is placed IN FRONT of the person (faceAngle direction).
-//   Chair is placed BEHIND the desk (opposite of faceAngle).
-function addWorkstation(scene: THREE.Scene, x: number, z: number, faceAngle: number) {
-  const dskW = 1.3,
-    dskD = 0.65,
-    dskH = 0.05;
-  // Desk surface
-  scene.add(makeBox(dskW, dskH, dskD, COL.desk, x, 0.72, z, { roughness: 0.6 }));
-  scene.add(
-    makeBox(dskW - 0.08, 0.01, dskD - 0.08, COL.deskTop, x, 0.75, z, {
-      roughness: 0.4,
-      metalness: 0.2,
-    }),
-  );
-  // Desk legs
-  for (const lx of [-dskW / 2 + 0.08, dskW / 2 - 0.08]) {
-    for (const lz of [-dskD / 2 + 0.06, dskD / 2 - 0.06]) {
-      scene.add(makeBox(0.05, 0.72, 0.05, COL.desk, x + lx, 0.36, z + lz));
-    }
-  }
-
-  // Direction the person faces: (-sin(faceAngle), 0, -cos(faceAngle)) in world XZ
-  const fx = -Math.sin(faceAngle);
-  const fz = -Math.cos(faceAngle);
-  // Monitor is in front of person (in faceAngle direction from desk center)
-  const monX = x + fx * (dskD / 2 - 0.03);
-  const monZ = z + fz * (dskD / 2 - 0.03);
-  // Person/chair is behind the desk (opposite direction from monitor)
-  const chairX = x - fx * 0.55;
-  const chairZ = z - fz * 0.55;
-
-  // Monitor screen (glowing, faces the person = faces opposite of faceAngle)
-  const scrW = 0.46,
-    scrH = 0.28;
-  const scrGeo = new THREE.PlaneGeometry(scrW, scrH);
-  const scrTex = makeCanvasTexture(160, 100, (ctx) => {
-    ctx.fillStyle = '#0b1323';
-    ctx.fillRect(0, 0, 160, 100);
-    ctx.font = '5px ui-monospace, monospace';
-    const lineColors = [
-      'var(--aux)',
-      'var(--success)',
-      'var(--fg-muted)',
-      'var(--warning)',
-      'var(--aux)',
-      'var(--success)',
-    ];
-    for (let row = 0; row < 12; row++) {
-      const indent = row % 3 === 0 ? 8 : row % 3 === 1 ? 16 : 12;
-      const lineW = 30 + Math.floor(Math.random() * 80);
-      ctx.fillStyle = lineColors[row % lineColors.length]!;
-      ctx.fillRect(indent, 8 + row * 7, lineW, 4);
-    }
-    ctx.fillStyle = 'var(--aux)';
-    ctx.fillRect(60, 50, 1, 6);
-    ctx.fillStyle = '#1e2d40';
-    ctx.fillRect(0, 0, 160, 6);
-    ctx.fillStyle = 'var(--danger)';
-    ctx.fillRect(4, 2, 3, 3);
-    ctx.fillStyle = 'var(--warning)';
-    ctx.fillRect(10, 2, 3, 3);
-    ctx.fillStyle = 'var(--success)';
-    ctx.fillRect(16, 2, 3, 3);
-  });
-  const scrMat = new THREE.MeshStandardMaterial({
-    map: scrTex,
-    emissive: 0x112244,
-    emissiveIntensity: 0.5,
-    roughness: 0.3,
-    metalness: 0.5,
-  });
-  const screen = new THREE.Mesh(scrGeo, scrMat);
-  screen.position.set(monX, 0.96, monZ);
-  // Screen faces the person (faces opposite of faceAngle = faceAngle + π)
-  screen.rotation.y = faceAngle + Math.PI;
-  scene.add(screen);
-  // Monitor frame
-  scene.add(
-    makeBox(scrW + 0.04, scrH + 0.04, 0.02, COL.monitorFrame, monX, 0.96, monZ + fz * 0.005),
-  );
-  // Stand
-  scene.add(makeBox(0.04, 0.18, 0.04, COL.monitorFrame, monX, 0.82, monZ + fz * 0.01));
-  scene.add(makeBox(0.16, 0.02, 0.1, COL.monitorFrame, monX, 0.76, monZ + fz * 0.01));
-  // Keyboard + mouse (on person's side of desk, between person and monitor)
-  scene.add(
-    makeBox(0.26, 0.012, 0.09, 0x2a2a3a, x - fx * 0.15, 0.76, z - fz * 0.15, { roughness: 0.8 }),
-  );
-  scene.add(
-    makeBox(0.04, 0.012, 0.06, 0x2a2a3a, x - fx * 0.15 + 0.2, 0.76, z - fz * 0.15, {
-      roughness: 0.8,
-    }),
-  );
-  // Screen glow
-  const dl = new THREE.PointLight(0x5b8cff, 0.2, 1.5);
-  dl.position.set(x - fx * 0.3, 0.95, z - fz * 0.3);
-  scene.add(dl);
-  // Chair (person faces faceAngle)
-  addChair(scene, chairX, chairZ, faceAngle);
-}
-
-// ── Build office scene ───────────────────────────────────────────────
-function buildOffice(
-  scene: THREE.Scene,
-  monitorData: {
-    topSummary: { title: string; memberCount: string; onlineCount: string; status: string };
-    metricCards: { icon: string; label: string; value: string }[];
-    footerStats: { label: string; value: string }[];
-    officeAgents: { id: string; label: string; status: string }[];
-    activityStats: Record<string, number>;
-    elapsed: number;
-  },
-): { monitorMesh: THREE.Mesh; projScreen: THREE.Mesh } {
-  // ── Floor ────────────────────────────────────────────────────────
-  const floorTex = createFloorTexture();
-  floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
-  floorTex.repeat.set(4, 2);
-  const floorGeo = new THREE.PlaneGeometry(ROOM_W, ROOM_D);
-  const floorMat = new THREE.MeshStandardMaterial({
-    map: floorTex,
-    roughness: 0.9,
-    metalness: 0,
-  });
-  const floor = new THREE.Mesh(floorGeo, floorMat);
-  floor.rotation.x = -Math.PI / 2;
-  floor.position.set(0, 0, 0);
-  floor.receiveShadow = true;
-  scene.add(floor);
-
-  // ── Wall-floor AO gradient (dark strip along wall base) ───────────
-  function addAOStrip(w: number, d: number, x: number, z: number, rotY: number) {
-    const aoTex = makeCanvasTexture(64, 16, (ctx) => {
-      const grad = ctx.createLinearGradient(0, 0, 0, 16);
-      grad.addColorStop(0, 'rgba(0,0,0,0.35)');
-      grad.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, 64, 16);
-    });
-    aoTex.wrapS = THREE.RepeatWrapping;
-    aoTex.repeat.set(w / 2, 1);
-    const aoGeo = new THREE.PlaneGeometry(w, 0.4);
-    const aoMat = new THREE.MeshBasicMaterial({
-      map: aoTex,
-      transparent: true,
-      depthWrite: false,
-      opacity: 0.6,
-    });
-    const ao = new THREE.Mesh(aoGeo, aoMat);
-    ao.rotation.x = -Math.PI / 2;
-    ao.rotation.z = rotY;
-    ao.position.set(x, 0.003, z);
-    scene.add(ao);
-  }
-  addAOStrip(ROOM_W, 0.4, 0, -ROOM_D / 2 + 0.2, 0);
-  addAOStrip(ROOM_W, 0.4, 0, ROOM_D / 2 - 0.2, 0);
-  addAOStrip(ROOM_D, 0.4, -ROOM_W / 2 + 0.2, 0, Math.PI / 2);
-  addAOStrip(ROOM_D, 0.4, ROOM_W / 2 - 0.2, 0, Math.PI / 2);
-
-  // ── Back wall (z = -ROOM_D/2) ──────────────────────────────────────
-  const wallTex = createWallTexture();
-  wallTex.wrapS = THREE.RepeatWrapping;
-  wallTex.repeat.set(2, 1);
-  const wallGeo = new THREE.PlaneGeometry(ROOM_W, ROOM_H);
-  const wallMat = new THREE.MeshStandardMaterial({
-    map: wallTex,
-    roughness: 0.85,
-    metalness: 0,
-  });
-  const backWall = new THREE.Mesh(wallGeo, wallMat);
-  backWall.position.set(0, ROOM_H / 2, -ROOM_D / 2);
-  backWall.receiveShadow = true;
-  scene.add(backWall);
-
-  // ── Left wall ──────────────────────────────────────────────────────
-  const sideWallGeo = new THREE.PlaneGeometry(ROOM_D, ROOM_H);
-  const leftWall = new THREE.Mesh(sideWallGeo, wallMat.clone());
-  leftWall.rotation.y = Math.PI / 2;
-  leftWall.position.set(-ROOM_W / 2, ROOM_H / 2, 0);
-  leftWall.receiveShadow = true;
-  scene.add(leftWall);
-
-  // ── Right wall ─────────────────────────────────────────────────────
-  const rightWall = new THREE.Mesh(sideWallGeo, wallMat.clone());
-  rightWall.rotation.y = -Math.PI / 2;
-  rightWall.position.set(ROOM_W / 2, ROOM_H / 2, 0);
-  rightWall.receiveShadow = true;
-  scene.add(rightWall);
-
-  // ── Baseboards ─────────────────────────────────────────────────────
-  scene.add(makeBox(ROOM_W, 0.1, 0.05, COL.wallDark, 0, 0.05, -ROOM_D / 2 + 0.025));
-  scene.add(makeBox(0.05, 0.1, ROOM_D, COL.wallDark, -ROOM_W / 2 + 0.025, 0.05, 0));
-  scene.add(makeBox(0.05, 0.1, ROOM_D, COL.wallDark, ROOM_W / 2 - 0.025, 0.05, 0));
-
-  // ── Unified floor tile texture ────────────────────────────────────
-  const tileTex = makeCanvasTexture(128, 128, (ctx) => {
-    ctx.fillStyle = '#b8a88a';
-    ctx.fillRect(0, 0, 128, 128);
-    ctx.strokeStyle = '#a09070';
-    ctx.lineWidth = 1;
-    for (let i = 0; i < 128; i += 32) {
-      ctx.beginPath();
-      ctx.moveTo(i, 0);
-      ctx.lineTo(i, 128);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(0, i);
-      ctx.lineTo(128, i);
-      ctx.stroke();
-    }
-  });
-  tileTex.wrapS = THREE.RepeatWrapping;
-  tileTex.wrapT = THREE.RepeatWrapping;
-  tileTex.repeat.set(4, 2);
-  const tileFloorGeo = new THREE.PlaneGeometry(ROOM_W, ROOM_D);
-  const tileFloorMat = new THREE.MeshStandardMaterial({
-    map: tileTex,
-    roughness: 0.8,
-    metalness: 0.1,
-  });
-  const tileFloor = new THREE.Mesh(tileFloorGeo, tileFloorMat);
-  tileFloor.rotation.x = -Math.PI / 2;
-  tileFloor.position.set(0, 0.004, 0);
-  tileFloor.receiveShadow = true;
-  scene.add(tileFloor);
-
-  // ── Rest zone carpet overlay (bottom-left, 70% of original quarter) ──
-  const restW = (ROOM_W / 2) * 0.7;
-  const restD = (ROOM_D / 2) * 0.7;
-  const restCarpetTex = createCarpetTexture();
-  const restCarpetGeo = new THREE.PlaneGeometry(restW, restD);
-  const restCarpetMat = new THREE.MeshStandardMaterial({
-    map: restCarpetTex,
-    roughness: 0.95,
-    metalness: 0,
-  });
-  const restCarpet = new THREE.Mesh(restCarpetGeo, restCarpetMat);
-  restCarpet.rotation.x = -Math.PI / 2;
-  restCarpet.position.set(-ROOM_W / 2 + restW / 2, 0.005, ROOM_D / 2 - restD / 2);
-  restCarpet.receiveShadow = true;
-  scene.add(restCarpet);
-
-  // ── Floor Labels ──────────────────────────────────────────────────
-  function addFloorLabel(text: string, x: number, z: number, color: string) {
-    const cw = 8,
-      ch = 10;
-    const w = text.length * cw + 8;
-    const h = ch + 6;
-    const tex = makeCanvasTexture(w, h, (ctx) => {
-      ctx.font = `${ch}px ui-monospace, Menlo, monospace`;
-      ctx.textBaseline = 'top';
-      ctx.fillStyle = color;
-      ctx.fillText(text, 4, 3);
-    });
-    const geo = new THREE.PlaneGeometry(w * 0.01, h * 0.01);
-    const mat = new THREE.MeshBasicMaterial({
-      map: tex,
-      transparent: true,
-      depthWrite: false,
-    });
-    const m = new THREE.Mesh(geo, mat);
-    m.rotation.x = -Math.PI / 2;
-    m.position.set(x, 0.006, z);
-    scene.add(m);
-  }
-  addFloorLabel('☕ REST', -ROOM_W / 2 + restW / 2, ROOM_D / 2 - restD / 2, 'var(--success)');
-  // DISCUSS and WORK labels added after their zone definitions below
-
-  // ── Glass walls around rest area (bottom-left, x<0, z>0) ────────
-  const glassH = ROOM_H * 0.65;
-  const glassMat = new THREE.MeshStandardMaterial({
-    color: 0xaaccee,
-    transparent: true,
-    opacity: 0.2,
-    roughness: 0.05,
-    metalness: 0.8,
-    side: THREE.DoubleSide,
-  });
-  // Helper: add a glass panel with metal frame
-  function addGlassPanel(w: number, h: number, x: number, y: number, z: number, rotY: number) {
-    const geo = new THREE.PlaneGeometry(w, h);
-    const panel = new THREE.Mesh(geo, glassMat);
-    panel.position.set(x, y, z);
-    panel.rotation.y = rotY;
-    scene.add(panel);
-    // Frame: top beam
-    const isZ = Math.abs(rotY) < 0.1 || Math.abs(rotY - Math.PI) < 0.1;
-    if (isZ) {
-      scene.add(
-        makeBox(w, 0.04, 0.04, 0x8a8a9a, x, y + h / 2, z, { roughness: 0.3, metalness: 0.6 }),
-      );
-      scene.add(
-        makeBox(0.04, h, 0.04, 0x8a8a9a, x - w / 2, y, z, { roughness: 0.3, metalness: 0.6 }),
-      );
-      scene.add(
-        makeBox(0.04, h, 0.04, 0x8a8a9a, x + w / 2, y, z, { roughness: 0.3, metalness: 0.6 }),
-      );
-    } else {
-      scene.add(
-        makeBox(0.04, 0.04, w, 0x8a8a9a, x, y + h / 2, z, { roughness: 0.3, metalness: 0.6 }),
-      );
-      scene.add(
-        makeBox(0.04, h, 0.04, 0x8a8a9a, x, y, z - w / 2, { roughness: 0.3, metalness: 0.6 }),
-      );
-      scene.add(
-        makeBox(0.04, h, 0.04, 0x8a8a9a, x, y, z + w / 2, { roughness: 0.3, metalness: 0.6 }),
-      );
-    }
-  }
-  // Rest area boundaries: left=left wall, back=back wall; glass on: right (x=restRight), front (z=restFront)
-  const restRight = -ROOM_W / 2 + restW; // right edge of rest area
-  const restFront = ROOM_D / 2 - restD; // front edge of rest area
-  // Right glass wall (x=restRight, from z=restFront to z=ROOM_D/2)
-  addGlassPanel(restD, glassH, restRight, glassH / 2, restFront + restD / 2, Math.PI / 2);
-  // Front glass wall (z=restFront, from x=-ROOM_W/2 to x=restRight) with door gap
-  const doorGapW = 1.0;
-  const frontSegW = restW - doorGapW;
-  addGlassPanel(frontSegW, glassH, -ROOM_W / 2 + frontSegW / 2, glassH / 2, restFront, 0);
-  // Door frame pillars
-  scene.add(
-    makeBox(0.06, glassH + 0.04, 0.06, 0x8a8a9a, restRight, glassH / 2 + 0.02, restFront, {
-      roughness: 0.3,
-      metalness: 0.6,
-    }),
-  );
-  // Door top beam
-  scene.add(
-    makeBox(
-      doorGapW + 0.08,
-      0.06,
-      0.06,
-      0x8a8a9a,
-      restRight - doorGapW / 2,
-      glassH + 0.02,
-      restFront,
-      { roughness: 0.3, metalness: 0.6 },
-    ),
-  );
-
-  // ── Rest Zone: Sofa & Coffee Table (bottom-left, x<0, z>0) ────
-  const sofaX = -ROOM_W / 2 + 0.5,
-    sofaZ = ROOM_D / 2 - restD / 2;
-  // Sofa (against left wall, scaled for smaller rest area)
-  const sofaLen = restD * 0.7;
-  scene.add(makeBox(0.7, 0.3, sofaLen, 0x4a6a5a, sofaX, 0.25, sofaZ, { roughness: 0.8 }));
-  scene.add(makeBox(0.12, 0.45, sofaLen, 0x4a6a5a, sofaX - 0.35, 0.47, sofaZ, { roughness: 0.8 }));
-  scene.add(
-    makeBox(0.12, 0.35, 0.7, 0x4a6a5a, sofaX, 0.33, sofaZ - sofaLen / 2 + 0.35, { roughness: 0.8 }),
-  );
-  scene.add(
-    makeBox(0.12, 0.35, 0.7, 0x4a6a5a, sofaX, 0.33, sofaZ + sofaLen / 2 - 0.35, { roughness: 0.8 }),
-  );
-  // Coffee table
-  scene.add(makeBox(0.5, 0.05, 0.8, COL.desk, sofaX + 0.7, 0.4, sofaZ, { roughness: 0.5 }));
-  scene.add(makeBox(0.06, 0.38, 0.06, COL.desk, sofaX + 0.7 - 0.18, 0.19, sofaZ - 0.3));
-  scene.add(makeBox(0.06, 0.38, 0.06, COL.desk, sofaX + 0.7 - 0.18, 0.19, sofaZ + 0.3));
-  scene.add(makeBox(0.06, 0.38, 0.06, COL.desk, sofaX + 0.7 + 0.18, 0.19, sofaZ - 0.3));
-  scene.add(makeBox(0.06, 0.38, 0.06, COL.desk, sofaX + 0.7 + 0.18, 0.19, sofaZ + 0.3));
-
-  // ── Discussion Zone: Conference table (bottom, centered in freed space) ──
-  const tableW = 4.0,
-    tableH = 0.08,
-    tableD = 1.8;
-  const tableX = 2.0,
-    tableZ = 2.5;
-  scene.add(
-    makeBox(tableW, tableH, tableD, 0x6e5a3e, tableX, 0.75, tableZ, {
-      roughness: 0.4,
-      metalness: 0.15,
-    }),
-  );
-  // Table legs (metal)
-  for (const dx of [-tableW / 2 + 0.15, tableW / 2 - 0.15]) {
-    for (const dz of [-tableD / 2 + 0.12, tableD / 2 - 0.12]) {
-      scene.add(
-        makeBox(0.05, 0.75, 0.05, 0x8a8a9a, tableX + dx, 0.375, tableZ + dz, {
-          roughness: 0.3,
-          metalness: 0.6,
-        }),
-      );
-    }
-  }
-  // Projector on table (small device near center)
-  scene.add(
-    makeBox(0.25, 0.08, 0.2, 0x3a3a4a, tableX, 0.82, tableZ, { roughness: 0.3, metalness: 0.5 }),
-  );
-  // Projector lens (glowing dot)
-  const projLens = new THREE.Mesh(
-    new THREE.SphereGeometry(0.03, 8, 6),
-    new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x88aaff, emissiveIntensity: 1.5 }),
-  );
-  projLens.position.set(tableX + 0.1, 0.86, tableZ);
-  scene.add(projLens);
-  // Projector light beam (cone from projector to screen on right wall)
-  const projSpot = new THREE.SpotLight(0xaaccff, 3, 6, Math.PI / 8, 0.5, 1);
-  projSpot.position.set(tableX + 0.1, 0.88, tableZ);
-  projSpot.target.position.set(ROOM_W / 2 - 0.05, 1.9, tableZ);
-  scene.add(projSpot);
-  scene.add(projSpot.target);
-  // Light cone visual (volumetric beam)
-  const beamLen = ROOM_W / 2 - tableX - 0.1;
-  const beamGeo = new THREE.ConeGeometry(0.6, beamLen, 16, 1, true);
-  const beamMat = new THREE.MeshBasicMaterial({
-    color: 0xaaccff,
-    transparent: true,
-    opacity: 0.08,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-  });
-  const beam = new THREE.Mesh(beamGeo, beamMat);
-  beam.position.set(tableX + 0.1 + beamLen / 2, 1.38, tableZ);
-  beam.rotation.z = Math.PI / 2;
-  scene.add(beam);
-  // Projection screen on right wall (facing the table)
-  const screenW = 2.4,
-    screenH = 1.6;
-  const screenGeo = new THREE.PlaneGeometry(screenW, screenH);
-  const screenMat = new THREE.MeshStandardMaterial({
-    color: 0xf0f0f0,
-    emissive: 0x222233,
-    emissiveIntensity: 0.15,
-    roughness: 0.9,
-    metalness: 0,
-  });
-  const projScreen = new THREE.Mesh(screenGeo, screenMat);
-  projScreen.rotation.y = -Math.PI / 2;
-  projScreen.position.set(ROOM_W / 2 - 0.03, 1.9, tableZ);
-  scene.add(projScreen);
-  // Screen frame
-  scene.add(
-    makeBox(0.04, screenH + 0.08, screenW + 0.08, 0x5a5a6a, ROOM_W / 2 - 0.01, 1.9, tableZ, {
-      roughness: 0.4,
-      metalness: 0.3,
-    }),
-  );
-  // Store projection screen ref for animation
-  const projScreenRef = projScreen;
-
-  // Discussion chairs: leader sits at left end of table
-  // Left end (head of table): leader faces +x (toward table center)
-  addChair(scene, tableX - tableW / 2 - 0.6, tableZ, FACE.POS_X);
-  // Front side chairs (z < tableZ): person faces +z toward table
-  for (let i = -1.5; i <= 1.5; i++) {
-    addChair(scene, tableX + i * 1.0, tableZ - 1.2, FACE.POS_Z);
-  }
-  // Back side chairs (z > tableZ): person faces -z toward table
-  for (let i = -1.5; i <= 1.5; i++) {
-    addChair(scene, tableX + i * 1.0, tableZ + 1.2, FACE.NEG_Z);
-  }
-  addFloorLabel('💬 DISCUSS', tableX, tableZ - tableD / 2 - 0.3, 'var(--warning)');
-
-  // ── Work Zone: Realistic desk rows (z < 0) ──────────────────────
-  // Two rows of 6 workstations facing each other with a center aisle
-  const aisleZ = -2.2;
-  const rowOffset = 1.8;
-  const wsXs = [-6.5, -3.9, -1.3, 1.3, 3.9, 6.5];
-  // Row 1: near back wall, person faces -z (toward back wall, monitor against wall)
-  for (const wx of wsXs) {
-    addWorkstation(scene, wx, aisleZ - rowOffset, FACE.NEG_Z);
-  }
-  // Row 2: near center, person faces -z (toward back wall / monitor in front)
-  for (const wx of wsXs) {
-    addWorkstation(scene, wx, aisleZ + rowOffset, FACE.NEG_Z);
-  }
-  addFloorLabel('💻 WORK', 0, aisleZ + 0.5, 'var(--aux)');
-
-  // ── Large wall monitor (back wall) ──────────────────────────────
-  const monW = 3.6,
-    monH = 1.8;
-  const monGeo = new THREE.PlaneGeometry(monW, monH);
-  const monTex = createMonitorTexture(monitorData);
-  const monMat = new THREE.MeshStandardMaterial({
-    map: monTex,
-    emissive: 0x112244,
-    emissiveIntensity: 0.4,
-    roughness: 0.3,
-    metalness: 0.5,
-  });
-  const monitor = new THREE.Mesh(monGeo, monMat);
-  monitor.position.set(0, 1.9, -ROOM_D / 2 + 0.02);
-  scene.add(monitor);
-  // Frame
-  scene.add(makeBox(monW + 0.14, monH + 0.14, 0.08, COL.monitorFrame, 0, 1.9, -ROOM_D / 2 + 0.01));
-  // Monitor stand
-  scene.add(makeBox(0.08, 0.5, 0.08, COL.monitorFrame, 0, 0.5, -ROOM_D / 2 + 0.1));
-  scene.add(makeBox(0.6, 0.04, 0.3, COL.monitorFrame, 0, 0.25, -ROOM_D / 2 + 0.15));
-
-  // ── Whiteboard on right wall removed (replaced by projection screen) ──
-
-  // ── Windows ─────────────────────────────────────────────────────
-  function addWindow(x: number, y: number, w: number, h: number) {
-    const winGeo = new THREE.PlaneGeometry(w, h);
-    const winMat = new THREE.MeshStandardMaterial({
-      color: COL.window,
-      emissive: 0x3a6080,
-      emissiveIntensity: 0.4,
-      roughness: 0.1,
-      metalness: 0.8,
-      transparent: true,
-      opacity: 0.7,
-    });
-    const win = new THREE.Mesh(winGeo, winMat);
-    win.position.set(x, y, -ROOM_D / 2 + 0.015);
-    scene.add(win);
-    scene.add(makeBox(w + 0.08, 0.04, 0.04, COL.windowFrame, x, y + h / 2, -ROOM_D / 2 + 0.02));
-    scene.add(makeBox(w + 0.08, 0.04, 0.04, COL.windowFrame, x, y - h / 2, -ROOM_D / 2 + 0.02));
-    scene.add(makeBox(0.04, h + 0.08, 0.04, COL.windowFrame, x - w / 2, y, -ROOM_D / 2 + 0.02));
-    scene.add(makeBox(0.04, h + 0.08, 0.04, COL.windowFrame, x + w / 2, y, -ROOM_D / 2 + 0.02));
-    scene.add(makeBox(w, 0.03, 0.02, COL.windowFrame, x, y, -ROOM_D / 2 + 0.025));
-    scene.add(makeBox(0.03, h, 0.02, COL.windowFrame, x, y, -ROOM_D / 2 + 0.025));
-  }
-  addWindow(-5.5, 2.0, 1.2, 0.8);
-  addWindow(5.5, 2.0, 1.2, 0.8);
-
-  // ── Safety sign ─────────────────────────────────────────────────
-  const signGeo = new THREE.PlaneGeometry(0.6, 0.4);
-  const signMat = new THREE.MeshStandardMaterial({
-    color: COL.sign,
-    emissive: 0x806020,
-    emissiveIntensity: 0.15,
-    roughness: 0.6,
-  });
-  const signMesh = new THREE.Mesh(signGeo, signMat);
-  signMesh.position.set(3.5, 2.2, -ROOM_D / 2 + 0.015);
-  scene.add(signMesh);
-  scene.add(makeBox(0.64, 0.44, 0.03, COL.signBorder, 3.5, 2.2, -ROOM_D / 2 + 0.005));
-
-  // ── Plants ──────────────────────────────────────────────────────
-  function addPlant(x: number, z: number, scale = 1) {
-    const s = scale;
-    scene.add(makeBox(0.2 * s, 0.25 * s, 0.2 * s, COL.plantPot, x, 0.125 * s, z));
-    const foliage = new THREE.Mesh(
-      new THREE.SphereGeometry(0.25 * s, 8, 6),
-      new THREE.MeshStandardMaterial({ color: COL.plant, roughness: 0.9 }),
-    );
-    foliage.position.set(x, 0.45 * s, z);
-    foliage.castShadow = true;
-    scene.add(foliage);
-  }
-  addPlant(-7.2, -2.0);
-  addPlant(7.2, -2.0);
-  addPlant(-7.2, 3.8, 0.8);
-  addPlant(7.2, 3.8, 1.3);
-
-  // ── Bookshelf (rest zone, left wall) ────────────────────────────
-  const shelfX = -ROOM_W / 2 + 0.2,
-    shelfZ = restFront + 0.5;
-  scene.add(
-    makeBox(0.3, 1.2, 0.8, COL.shelf, shelfX, 0.6, shelfZ, { roughness: 0.5, metalness: 0.3 }),
-  );
-  for (const sy of [0.3, 0.6, 0.9]) {
-    scene.add(makeBox(0.32, 0.03, 0.82, COL.shelfBook, shelfX, sy, shelfZ));
-  }
-  // Books
-  const bookColors = [0xa4c4d8, 0xd8a4a4, 0xa4d8a4, 0xd8d8a4, 0xc4a4d8];
-  for (let i = 0; i < 5; i++) {
-    scene.add(
-      makeBox(0.08, 0.2, 0.15, bookColors[i]!, shelfX, 0.42 + i * 0.04, shelfZ - 0.25 + i * 0.12),
-    );
-  }
-
-  // ── Power bar (rest zone) ───────────────────────────────────────
-  scene.add(makeBox(0.15, 0.4, 0.1, COL.desk, 6.5, 0.2, 3.8));
-  const ledRed = new THREE.Mesh(
-    new THREE.SphereGeometry(0.02, 6, 4),
-    new THREE.MeshStandardMaterial({
-      color: COL.danger,
-      emissive: COL.danger,
-      emissiveIntensity: 2,
-    }),
-  );
-  ledRed.position.set(6.5, 0.12, 3.85);
-  scene.add(ledRed);
-  const ledBlue = new THREE.Mesh(
-    new THREE.SphereGeometry(0.02, 6, 4),
-    new THREE.MeshStandardMaterial({
-      color: COL.accent,
-      emissive: COL.accent,
-      emissiveIntensity: 2,
-    }),
-  );
-  ledBlue.position.set(6.5, 0.25, 3.85);
-  scene.add(ledBlue);
-
-  // ── Coffee cups on desks ────────────────────────────────────────
-  function addCoffeeCup(x: number, y: number, z: number) {
-    const cupGeo = new THREE.CylinderGeometry(0.03, 0.025, 0.06, 8);
-    const cupMat = new THREE.MeshStandardMaterial({ color: COL.coffee, roughness: 0.5 });
-    const cup = new THREE.Mesh(cupGeo, cupMat);
-    cup.position.set(x, y, z);
-    cup.castShadow = true;
-    scene.add(cup);
-    // Handle
-    const handleGeo = new THREE.TorusGeometry(0.02, 0.005, 6, 8, Math.PI);
-    const handleMat = new THREE.MeshStandardMaterial({ color: COL.coffeeHandle, roughness: 0.5 });
-    const handle = new THREE.Mesh(handleGeo, handleMat);
-    handle.position.set(x + 0.035, y, z);
-    handle.rotation.y = Math.PI / 2;
-    scene.add(handle);
-  }
-  addCoffeeCup(-4.5, 0.42, 3.2);
-  addCoffeeCup(6.5, 0.78, -3.0);
-  addCoffeeCup(4.0, 0.81, 2.0);
-  addCoffeeCup(3.0, 0.78, -ROOM_D / 2 + 0.6);
-
-  return { monitorMesh: monitor, projScreen: projScreenRef };
-}
-
 // ── Create buddy (3D human figure) ─────────────────────────────────────
 function createBuddy(
   agent: AgentTeamsOfficeAgent,
   isSelected: boolean,
-  isPaused: boolean,
 ): { group: THREE.Group; state: BuddyState } {
   const group = new THREE.Group();
-  const bodyColor = isPaused ? 0xf0883e : pickAgentColor(agent.id, BODY_COLORS);
+  const bodyColor = pickAgentColor(agent.id, BODY_COLORS);
   const skinColor = pickAgentColor(agent.id, SKIN_COLORS);
   const hairColor = pickAgentColor(agent.id, HAIR_COLORS);
 
@@ -1380,16 +471,6 @@ function createBuddy(
   // Agent model faces +z by default; faceAngle convention assumes facing -z, so offset by π
   group.rotation.y = facingAngle + Math.PI;
 
-  // Opacity for paused
-  if (isPaused) {
-    group.traverse((child) => {
-      if (child instanceof THREE.Mesh && child.material instanceof THREE.Material) {
-        child.material.transparent = true;
-        child.material.opacity = Math.min(child.material.opacity, 0.5);
-      }
-    });
-  }
-
   // Click target
   group.userData.agentId = agent.id;
 
@@ -1407,7 +488,6 @@ function createBuddy(
     glowRing,
     glowPillar,
     isSelected,
-    isPaused,
     isHovered: false,
     baseY: bodyGroup.position.y,
     bobPhase: Math.random() * Math.PI * 2,
@@ -1452,7 +532,6 @@ export function OfficeThreeCanvas({
   const slideTimerRef = useRef(0);
   const hoveredIdRef = useRef<string | null>(null);
   const {
-    canManageRuntime,
     officeAgents: rawOfficeAgents,
     metricCards,
     topSummary,
@@ -1738,57 +817,19 @@ export function OfficeThreeCanvas({
         // Change slide every ~4 seconds (240 frames at 60fps)
         if (slideTimerRef.current >= 240) {
           slideTimerRef.current = 0;
-          slideIdxRef.current = (slideIdxRef.current + 1) % 6;
+          slideIdxRef.current = (slideIdxRef.current + 1) % OFFICE_PROJECTION_PAGE_COUNT;
           const slideIdx = slideIdxRef.current;
-          const slideTex = makeCanvasTexture(320, 200, (ctx) => {
-            // Slide background
-            const bgColors = ['#1a2744', '#2a1a44', '#1a4427', '#443a1a', '#441a2a', '#1a3a44'];
-            ctx.fillStyle = bgColors[slideIdx]!;
-            ctx.fillRect(0, 0, 320, 200);
-            // Title bar
-            ctx.fillStyle = 'var(--aux)';
-            ctx.fillRect(0, 0, 320, 36);
-            ctx.fillStyle = 'var(--fg-on-accent)';
-            ctx.font = 'bold 16px ui-monospace, sans-serif';
-            const titles = [
-              'Q3 Roadmap',
-              'Sprint Review',
-              'Team Metrics',
-              'Risk Analysis',
-              'Action Items',
-              'Next Steps',
-            ];
-            ctx.fillText(titles[slideIdx]!, 16, 24);
-            // Content lines
-            ctx.font = '10px ui-monospace, monospace';
-            const contentColors = [
-              'var(--success)',
-              'var(--warning)',
-              'var(--fg-muted)',
-              'var(--aux)',
-              'var(--danger)',
-              'var(--success)',
-            ];
-            for (let row = 0; row < 8; row++) {
-              const lineW = 40 + Math.floor(Math.random() * 200);
-              ctx.fillStyle = contentColors[(slideIdx + row) % contentColors.length]!;
-              ctx.fillRect(16, 50 + row * 18, lineW, 8);
-            }
-            // Chart placeholder
-            ctx.fillStyle = '#3a4a6a';
-            ctx.fillRect(200, 50, 100, 80);
-            // Chart bars
-            const barColors = ['var(--aux)', 'var(--success)', 'var(--warning)'];
-            for (let b = 0; b < 3; b++) {
-              const bh = 20 + Math.floor(Math.random() * 50);
-              ctx.fillStyle = barColors[b]!;
-              ctx.fillRect(210 + b * 30, 130 - bh, 20, bh);
-            }
-            // Page indicator
-            ctx.fillStyle = 'var(--fg-muted)';
-            ctx.font = '8px ui-monospace, monospace';
-            ctx.fillText(`${slideIdx + 1} / 6`, 270, 190);
-          });
+          const slideTex = createProjectionScreenTexture(
+            {
+              topSummary: topSummaryRef.current,
+              metricCards: metricCardsRef.current,
+              footerStats: footerStatsRef.current,
+              officeAgents: officeAgentsRef.current,
+              activityStats: activityStatsRef.current,
+              elapsed,
+            },
+            slideIdx,
+          );
           (projScreen.material as THREE.MeshStandardMaterial).map = slideTex;
           (projScreen.material as THREE.MeshStandardMaterial).emissive.set(0x334455);
           (projScreen.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.3;
@@ -2069,11 +1110,7 @@ export function OfficeThreeCanvas({
     buddyStatesRef.current = [];
 
     for (const agent of officeAgents) {
-      const { group: buddyGrp, state: bs } = createBuddy(
-        agent,
-        agent.id === selectedAgentId,
-        state.agentPaused.has(agent.id),
-      );
+      const { group: buddyGrp, state: bs } = createBuddy(agent, agent.id === selectedAgentId);
       group.add(buddyGrp);
       buddyStatesRef.current.push(bs);
 
@@ -2113,23 +1150,19 @@ export function OfficeThreeCanvas({
         bs.rightLegPivot.rotation.x = 0;
       }
     }
-  }, [officeAgents, selectedAgentId, state.agentPaused, onSelectAgent]);
+  }, [officeAgents, selectedAgentId, onSelectAgent]);
 
-  const { agentPaused, toggleAgentPause } = state;
   const selectedAgent = officeAgentsRef.current.find((a) => a.id === selectedAgentId);
   const isSessionPaused = topSummary.status === '已暂停';
-  const isPaused = selectedAgent ? agentPaused.has(selectedAgent.id) : false;
   const selectedAgentStatusLabel = isSessionPaused
-    ? '休息中'
-    : isPaused
-      ? '已暂停'
-      : selectedAgent?.status === 'resting'
-        ? '休息中'
-        : selectedAgent?.status === 'discussing'
-          ? '讨论中'
-          : '运行中';
+    ? '团队已暂停'
+    : selectedAgent?.status === 'resting'
+      ? '休息中'
+      : selectedAgent?.status === 'discussing'
+        ? '讨论中'
+        : '运行中';
   const selectedAgentDotColor =
-    isSessionPaused || isPaused || selectedAgent?.status === 'resting'
+    isSessionPaused || selectedAgent?.status === 'resting'
       ? 'var(--warning)'
       : selectedAgent?.status === 'discussing'
         ? 'var(--accent)'
@@ -2173,7 +1206,7 @@ export function OfficeThreeCanvas({
               gap: 8,
               alignItems: 'center',
               background: 'rgba(26, 28, 44, 0.88)',
-              border: `1px solid ${isSessionPaused || isPaused ? 'rgba(239, 90, 90, 0.4)' : selectedAgent?.status === 'discussing' ? 'rgba(240, 136, 62, 0.4)' : 'rgba(63, 185, 80, 0.4)'}`,
+              border: `1px solid ${isSessionPaused || selectedAgent?.status === 'resting' ? 'rgba(239, 90, 90, 0.4)' : selectedAgent?.status === 'discussing' ? 'rgba(240, 136, 62, 0.4)' : 'rgba(63, 185, 80, 0.4)'}`,
               borderRadius: 14,
               padding: '14px 12px',
               backdropFilter: 'blur(10px)',
@@ -2208,51 +1241,16 @@ export function OfficeThreeCanvas({
                   borderRadius: '50%',
                   background: selectedAgentDotColor,
                   boxShadow:
-                    isSessionPaused || isPaused || selectedAgent?.status === 'resting'
+                    isSessionPaused || selectedAgent?.status === 'resting'
                       ? 'none'
                       : `0 0 4px ${selectedAgentDotColor}`,
                 }}
               />
               {selectedAgentStatusLabel}
             </span>
-            {canManageRuntime ? (
-              <button
-                type="button"
-                disabled={isSessionPaused}
-                onClick={() => toggleAgentPause(selectedAgent.id)}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 6,
-                  padding: '8px 14px',
-                  borderRadius: 10,
-                  border: isSessionPaused
-                    ? '1px solid color-mix(in oklch, var(--border-default) 70%, transparent)'
-                    : isPaused
-                      ? '1px solid color-mix(in oklch, var(--success) 50%, transparent)'
-                      : '1px solid color-mix(in oklch, var(--warning) 50%, transparent)',
-                  background: isSessionPaused
-                    ? 'color-mix(in oklch, var(--bg-overlay) 88%, var(--bg-base))'
-                    : isPaused
-                      ? 'color-mix(in oklch, var(--success) 15%, var(--bg-base))'
-                      : 'color-mix(in oklch, var(--warning) 15%, var(--bg-base))',
-                  color: isSessionPaused
-                    ? 'var(--fg-muted)'
-                    : isPaused
-                      ? 'var(--success)'
-                      : 'var(--warning)',
-                  fontSize: 14,
-                  fontWeight: 800,
-                  cursor: isSessionPaused ? 'not-allowed' : 'pointer',
-                  minWidth: 60,
-                  opacity: isSessionPaused ? 0.8 : 1,
-                }}
-                className={isSessionPaused ? undefined : 'team-glow-press'}
-              >
-                {isSessionPaused ? '会话已暂停' : isPaused ? '▶ 恢复' : '⏸ 暂停'}
-              </button>
-            ) : null}
+            <span style={{ fontSize: 10, color: 'var(--fg-muted)', textAlign: 'center' }}>
+              运行状态由团队执行链路驱动，不支持在 3D 场景中本地暂停单个角色。
+            </span>
           </div>
         )}
       </div>

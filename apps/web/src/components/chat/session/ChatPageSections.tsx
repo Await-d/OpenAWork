@@ -85,6 +85,8 @@ export function MessageRow({
   email,
   actions,
   groupedWithPrevious = false,
+  identityOverride,
+  presentationMode = 'chat',
   renderContent,
   sharedUiThemeVars,
   usageDetails,
@@ -102,6 +104,13 @@ export function MessageRow({
     title?: string;
   }>;
   groupedWithPrevious?: boolean;
+  identityOverride?: {
+    color?: string;
+    displayName: string;
+    icon?: string;
+    initials?: string;
+  };
+  presentationMode?: 'chat' | 'team';
   renderContent: (m: ChatMessage) => React.ReactNode;
   sharedUiThemeVars: React.CSSProperties;
   usageDetails?: ChatUsageDetails;
@@ -118,7 +127,9 @@ export function MessageRow({
     resolvedModelLabel || (!isUser ? resolvedProviderIdentity.displayName : '助手');
   const normalizedAssistantLabel = normalizeProviderKey(assistantModelLabel);
   const normalizedResolvedProvider = normalizeProviderKey(resolvedProviderIdentity.displayName);
-  const displayName = isUser ? email || '你' : assistantModelLabel;
+  const displayName = isUser
+    ? email || '你'
+    : identityOverride?.displayName?.trim() || assistantModelLabel;
   const timestamp = formatShortTime(message.createdAt);
   const tokenCount = message.tokenEstimate ?? estimateTokenCount(message.content);
   // During streaming, `message.durationMs` on the live virtual assistant
@@ -143,9 +154,14 @@ export function MessageRow({
   const statusLabel =
     message.status === 'streaming' ? '生成中' : message.status === 'error' ? '错误' : null;
   const showMeta =
-    !isUser && (tokenCount > 0 || durationLabel || toolLabel || stopReasonLabel || statusLabel);
+    !isUser &&
+    (presentationMode === 'team'
+      ? Boolean(toolLabel || statusLabel || stopReasonLabel || message.modifiedFilesSummary)
+      : tokenCount > 0 || durationLabel || toolLabel || stopReasonLabel || statusLabel);
   const avatarProviderId = resolvedProviderId || 'assistant';
-  const agentAccent = !isUser ? resolveAgentAccentColor(message.agentId) : undefined;
+  const agentAccent = !isUser
+    ? identityOverride?.color || resolveAgentAccentColor(message.agentId)
+    : undefined;
   const agentPillStyle: React.CSSProperties | undefined = agentAccent
     ? {
         borderColor: `color-mix(in oklch, ${agentAccent} 40%, var(--border-default) 60%)`,
@@ -159,7 +175,7 @@ export function MessageRow({
   }> = [];
 
   if (!isUser) {
-    if (usageDetails) {
+    if (presentationMode !== 'team' && usageDetails) {
       metaItems.push({ label: `请求 ${usageDetails.requestIndex}` });
       metaItems.push({
         label: `${formatCompactTokenCount(usageDetails.totalTokens)} tokens (${formatCompactTokenCount(usageDetails.inputTokens)}↓ ${formatCompactTokenCount(usageDetails.outputTokens)}↑)`,
@@ -180,10 +196,10 @@ export function MessageRow({
             ? `TPS ${usageDetails.tokensPerSecond.toFixed(1)}`
             : 'TPS --',
       });
-    } else if (tokenCount > 0) {
+    } else if (presentationMode !== 'team' && tokenCount > 0) {
       metaItems.push({ label: `~${tokenCount} tok` });
       if (durationLabel) metaItems.push({ label: durationLabel });
-    } else if (durationLabel) {
+    } else if (presentationMode !== 'team' && durationLabel) {
       metaItems.push({ label: durationLabel });
     }
 
@@ -231,6 +247,27 @@ export function MessageRow({
       >
         {isUser ? (
           <UserAvatar email={email} size={28} />
+        ) : identityOverride ? (
+          <div
+            aria-hidden
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: '50%',
+              display: 'grid',
+              placeItems: 'center',
+              fontSize: 14,
+              fontWeight: 800,
+              color: identityOverride.color ?? 'var(--fg-strong)',
+              background: `color-mix(in srgb, ${identityOverride.color ?? 'var(--accent)'} 16%, var(--bg-overlay))`,
+              border: `1px solid color-mix(in srgb, ${identityOverride.color ?? 'var(--accent)'} 34%, transparent)`,
+            }}
+            title={identityOverride.displayName}
+          >
+            {identityOverride.icon ??
+              identityOverride.initials ??
+              identityOverride.displayName.slice(0, 1)}
+          </div>
         ) : (
           <ProviderAvatar
             providerId={avatarProviderId}
@@ -250,7 +287,7 @@ export function MessageRow({
               >
                 {displayName}
               </div>
-              {providerLabel && (
+              {presentationMode !== 'team' && providerLabel && (
                 <span className="chat-message-provider-pill" style={agentPillStyle}>
                   {providerLabel}
                 </span>

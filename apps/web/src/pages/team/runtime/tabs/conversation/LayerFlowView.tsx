@@ -399,7 +399,10 @@ function FlowNode({
 }
 
 function FlowEdge({ edge, onSelect }: { edge: EdgeView; onSelect?: () => void }) {
-  const color = edge.state === 'idle' ? 'var(--border-default)' : (STATE_COLOR[edge.state] ?? 'var(--fg-muted)');
+  const color =
+    edge.state === 'idle'
+      ? 'var(--border-default)'
+      : (STATE_COLOR[edge.state] ?? 'var(--fg-muted)');
   const clickable = Boolean(onSelect);
 
   // 活跃边：流光动画（gradient + 背景位移）。静态边：实线。

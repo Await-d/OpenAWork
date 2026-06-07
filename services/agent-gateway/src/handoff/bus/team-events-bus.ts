@@ -23,6 +23,7 @@
  */
 
 import type { HandoffRecord } from '../store/handoff-store.js';
+import { isRecoverableFailedHandoff } from '../store/handoff-store.js';
 import { recordTeamRuntimeIncident } from '../../team/team-runtime-diagnostics-store.js';
 
 export type TeamEventType =
@@ -164,6 +165,14 @@ export function publishHandoffEvent(input: {
   record: HandoffRecord;
   payload?: Record<string, unknown>;
 }): void {
+  const recoverableFailure =
+    input.record.state === 'failed'
+      ? isRecoverableFailedHandoff({
+          failureReason: input.record.failureReason,
+          payload: input.record.payload,
+          toRoleLayer: input.record.toRoleLayer,
+        })
+      : undefined;
   publishTeamEvent({
     type: input.type,
     taskId: input.record.id,
@@ -177,6 +186,8 @@ export function publishHandoffEvent(input: {
       toSessionId: input.record.toSessionId,
       state: input.record.state,
       retryCount: input.record.retryCount,
+      ...(input.record.failureReason ? { reason: input.record.failureReason } : {}),
+      ...(recoverableFailure !== undefined ? { recoverableFailure } : {}),
       ...(input.payload ?? {}),
     },
     userId: input.record.userId,

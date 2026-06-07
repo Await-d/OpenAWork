@@ -26,6 +26,7 @@ import {
 import { groupSessionTreesByWorkspace } from '../../../../utils/session/session-grouping.js';
 
 interface TeamRuntimeProjectionInput {
+  autoSelectSharedSession?: boolean;
   auditLogs: TeamAuditLogRecord[];
   interactionRewriteArtifact: InteractionAgentRewriteArtifact | null;
   members: TeamMemberRecord[];
@@ -46,6 +47,7 @@ interface TeamRuntimeProjectionInput {
 }
 
 export function useTeamRuntimeProjection({
+  autoSelectSharedSession = true,
   auditLogs,
   interactionRewriteArtifact,
   members,
@@ -126,6 +128,10 @@ export function useTeamRuntimeProjection({
   }, [filteredSharedSessions, selectedSharedSession, selectedSharedSessionId]);
 
   useEffect(() => {
+    if (!autoSelectSharedSession) {
+      return;
+    }
+
     if (filteredSharedSessions.length === 0) {
       return;
     }
@@ -136,7 +142,12 @@ export function useTeamRuntimeProjection({
     if (!containsSelected) {
       onSelectSharedSession(filteredSharedSessions[0]!.sessionId);
     }
-  }, [filteredSharedSessions, onSelectSharedSession, selectedSharedSessionId]);
+  }, [
+    autoSelectSharedSession,
+    filteredSharedSessions,
+    onSelectSharedSession,
+    selectedSharedSessionId,
+  ]);
 
   const metrics = useMemo(
     () =>

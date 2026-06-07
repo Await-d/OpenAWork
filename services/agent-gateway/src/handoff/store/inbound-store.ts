@@ -163,6 +163,12 @@ function buildInboundEventPayload(record: InboundMessageRecord): Record<string, 
     if (context.length > 0) {
       eventPayload['summary'] = context;
     }
+    if (Array.isArray(payload['suggestedActions'])) {
+      eventPayload['suggestedActions'] = payload['suggestedActions'];
+    }
+    if (Array.isArray(payload['questions'])) {
+      eventPayload['questions'] = payload['questions'];
+    }
     eventPayload['blocking'] = reason !== 'needs_clarification';
     return eventPayload;
   }

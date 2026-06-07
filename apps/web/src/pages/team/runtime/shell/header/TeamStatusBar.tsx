@@ -11,7 +11,15 @@
  */
 
 import { useMemo, type CSSProperties } from 'react';
-import { useHandoffStore, type TeamRoleLayer } from '../../../../../stores/team/team-events.js';
+import {
+  useHandoffStore,
+  useLayerStore,
+  type TeamRoleLayer,
+} from '../../../../../stores/team/team-events.js';
+import {
+  computeTeamStatusBarStats,
+  filterHandoffsForStatusBar,
+} from './team-status-bar-helpers.js';
 
 const BAR_STYLE: CSSProperties = {
   display: 'flex',
@@ -83,6 +91,7 @@ export interface TeamStatusBarProps {
   onPauseAll?: () => void;
   onResumeAll?: () => void;
   paused?: boolean;
+  selectedSessionId?: string | null;
 }
 
 function formatDuration(ms: number): string {
@@ -102,54 +111,23 @@ function formatEstimatedMinutes(ms: number | null): string {
   return `~${minutes}min`;
 }
 
-export function TeamStatusBar({ onPauseAll, onResumeAll, paused }: TeamStatusBarProps) {
+export function TeamStatusBar({
+  onPauseAll,
+  onResumeAll,
+  paused,
+  selectedSessionId = null,
+}: TeamStatusBarProps) {
   const handoffs = useHandoffStore((s) => s.handoffs);
+  const nodes = useLayerStore((s) => s.nodes);
+  const scopedHandoffs = useMemo(
+    () => filterHandoffsForStatusBar(handoffs.values(), nodes.values(), selectedSessionId),
+    [handoffs, nodes, selectedSessionId],
+  );
 
-  const stats = useMemo(() => {
-    let pending = 0;
-    let running = 0;
-    let completed = 0;
-    let failed = 0;
-    let cancelled = 0;
-    let earliestStart: number | null = null;
-    const activeLayers = new Set<TeamRoleLayer>();
-
-    for (const h of handoffs.values()) {
-      if (h.state === 'pending') pending += 1;
-      else if (h.state === 'running' || h.state === 'claimed') {
-        running += 1;
-        activeLayers.add(h.toRoleLayer);
-        if (earliestStart === null || h.updatedAt < earliestStart) {
-          earliestStart = h.updatedAt;
-        }
-      } else if (h.state === 'completed') completed += 1;
-      else if (h.state === 'failed') failed += 1;
-      else if (h.state === 'cancelled') cancelled += 1;
-    }
-    const total = pending + running + completed + failed + cancelled;
-    const progress = total > 0 ? completed / total : 0;
-    const elapsedMs = earliestStart ? Date.now() - earliestStart : null;
-    const remaining = Math.max(total - completed, 0);
-    const averageTaskMs = completed > 0 && elapsedMs !== null ? elapsedMs / completed : null;
-    const estimatedRemainingMs =
-      remaining === 0 ? 0 : averageTaskMs !== null ? remaining * averageTaskMs : null;
-
-    return {
-      pending,
-      running,
-      completed,
-      failed,
-      cancelled,
-      total,
-      progress,
-      elapsedMs,
-      estimatedRemainingMs,
-      activeLayers: Array.from(activeLayers),
-    };
-  }, [handoffs]);
+  const stats = useMemo(() => computeTeamStatusBarStats(scopedHandoffs), [scopedHandoffs]);
 
   // 无 handoff 时最小化展示
-  if (handoffs.size === 0) {
+  if (scopedHandoffs.length === 0) {
     return (
       <div style={MINIMIZED_BAR_STYLE} role="status" aria-label="团队运行状态（待命中）">
         <span style={{ color: 'var(--fg-muted)', fontWeight: 400 }}>● AI 团队待命中</span>

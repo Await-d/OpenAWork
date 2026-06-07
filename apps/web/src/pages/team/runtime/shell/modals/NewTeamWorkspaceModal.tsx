@@ -346,16 +346,16 @@ export function NewTeamWorkspaceModal({ onClose, onCreated }: NewTeamWorkspaceMo
     setSubmitting(true);
     setError(null);
     try {
-      const ok = await data.createWorkspace({
+      const newWorkspaceId = await data.createWorkspace({
         name: trimmedName,
         ...(description.trim() ? { description: description.trim() } : {}),
         ...(defaultWorkingRoot.trim() ? { defaultWorkingRoot: defaultWorkingRoot.trim() } : {}),
       });
-      if (!ok) {
+      if (!newWorkspaceId) {
         setError('创建失败，请重试或检查权限');
         return;
       }
-      onCreated?.();
+      onCreated?.(newWorkspaceId);
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : '创建失败');

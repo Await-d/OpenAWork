@@ -65,6 +65,41 @@ function seedTeamSession(sessionId: string, userId: string): void {
   );
 }
 
+function seedTeamMember(memberId: string, userId: string, name: string, email: string): void {
+  dbModule.sqliteRun(
+    `INSERT INTO team_members (id, user_id, name, email, role, avatar_url, status)
+     VALUES (?, ?, ?, ?, 'member', NULL, 'idle')`,
+    [memberId, userId, name, email],
+  );
+}
+
+function seedTeamMessage(
+  messageId: string,
+  userId: string,
+  input: {
+    content: string;
+    recipientMemberId?: string | null;
+    replyToMessageId?: string | null;
+    senderId?: string | null;
+    type: string;
+  },
+): void {
+  dbModule.sqliteRun(
+    `INSERT INTO team_messages
+      (id, user_id, sender_id, recipient_member_id, reply_to_message_id, content, type)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      messageId,
+      userId,
+      input.senderId ?? null,
+      input.recipientMemberId ?? null,
+      input.replyToMessageId ?? null,
+      input.content,
+      input.type,
+    ],
+  );
+}
+
 beforeAll(async () => {
   dbModule = await import('../../infra/db.js');
   await dbModule.migrate();
@@ -87,6 +122,7 @@ beforeEach(() => {
   diagnosticsStore.__resetTeamRuntimeDiagnosticsForTesting();
   alertStore.__resetTeamRuntimeAlertStoreForTesting();
   telemetryModule.__resetTeamRuntimeTelemetryForTesting();
+  dbModule.sqliteRun('DELETE FROM team_tool_call_records', []);
   dbModule.sqliteRun('DELETE FROM question_requests', []);
   dbModule.sqliteRun('DELETE FROM permission_requests', []);
   dbModule.sqliteRun('DELETE FROM session_runtime_threads', []);
@@ -272,6 +308,176 @@ describe('GET /team/runtime', () => {
     }
   });
 
+  it('返回 messages 快照，并保留定向跟进字段供前端恢复上下文', async () => {
+    seedTeamMember('member-pm1', USER_ID, 'PM1', 'pm1@example.com');
+    seedTeamMember('member-executor', USER_ID, '执行代理', 'executor@example.com');
+    seedTeamMessage('msg-parent', USER_ID, {
+      senderId: 'member-pm1',
+      content: '同步设计稿调整',
+      type: 'update',
+    });
+    seedTeamMessage('msg-followup', USER_ID, {
+      senderId: 'member-executor',
+      recipientMemberId: 'member-pm1',
+      replyToMessageId: 'msg-parent',
+      content: '接口联调已完成',
+      type: 'result',
+    });
+
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/team/runtime',
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const data = res.json() as {
+        messages?: Array<{
+          content: string;
+          id: string;
+          memberId: string;
+          recipientMemberId?: string | null;
+          replyToMessageId?: string | null;
+          type: string;
+        }>;
+      };
+
+      expect(data.messages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: 'msg-parent',
+            memberId: 'member-pm1',
+            content: '同步设计稿调整',
+            type: 'update',
+          }),
+          expect.objectContaining({
+            id: 'msg-followup',
+            memberId: 'member-executor',
+            recipientMemberId: 'member-pm1',
+            replyToMessageId: 'msg-parent',
+            content: '接口联调已完成',
+            type: 'result',
+          }),
+        ]),
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('runtime 消息快照只返回最近 100 条，并保持时间正序', async () => {
+    for (let i = 0; i < 105; i += 1) {
+      seedTeamMessage(`msg-${String(i).padStart(3, '0')}`, USER_ID, {
+        content: `message-${i}`,
+        type: 'update',
+      });
+    }
+
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/team/runtime',
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const data = res.json() as {
+        messages?: Array<{ content: string; id: string }>;
+      };
+
+      expect(data.messages).toHaveLength(100);
+      expect(data.messages?.[0]).toMatchObject({
+        id: 'msg-005',
+        content: 'message-5',
+      });
+      expect(data.messages?.at(-1)).toMatchObject({
+        id: 'msg-104',
+        content: 'message-104',
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('返回 toolCallRecords 快照，供前端刷新后恢复工具明细排行', async () => {
+    dbModule.sqliteRun(
+      `INSERT INTO team_tool_call_records
+        (user_id, session_id, layer, agent_id, tool_name, duration_ms, success, error_type)
+       VALUES
+        (?, ?, 'pm1', 'agent-reader', 'read', 110, 0, 'timeout'),
+        (?, ?, 'pm1', 'agent-reader', 'read', 90, 1, NULL),
+        (?, ?, 'pm2', 'agent-writer', 'write', 45, 1, NULL)`,
+      [USER_ID, SESSION_ACTIVE_ID, USER_ID, SESSION_ACTIVE_ID, USER_ID, SESSION_STALE_ID],
+    );
+    dbModule.sqliteRun(
+      `INSERT INTO team_usage_records
+        (user_id, session_id, layer, provider, model, tool_call_count, tool_error_count, updated_at)
+       VALUES
+        (?, ?, 'pm1', '', '', 2, 1, datetime('now')),
+        (?, ?, 'pm2', '', '', 1, 0, datetime('now'))`,
+      [USER_ID, SESSION_ACTIVE_ID, USER_ID, SESSION_STALE_ID],
+    );
+
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/team/runtime',
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const data = res.json() as {
+        toolCallRecords?: Array<{
+          agentId: string | null;
+          durations: number[];
+          errorSamples: Array<{ count: number; errorType: string }>;
+          failures: number;
+          invocations: number;
+          layer: string | null;
+          sessionId: string;
+          successes: number;
+          toolName: string;
+          totalDurationMs: number;
+        }>;
+      };
+
+      expect(data.toolCallRecords).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            sessionId: SESSION_ACTIVE_ID,
+            layer: 'pm1',
+            agentId: 'agent-reader',
+            toolName: 'read',
+            invocations: 2,
+            successes: 1,
+            failures: 1,
+            totalDurationMs: 200,
+            durations: [90, 110],
+            errorSamples: [{ errorType: 'timeout', count: 1 }],
+          }),
+          expect.objectContaining({
+            sessionId: SESSION_STALE_ID,
+            layer: 'pm2',
+            agentId: 'agent-writer',
+            toolName: 'write',
+            invocations: 1,
+            successes: 1,
+            failures: 0,
+            totalDurationMs: 45,
+            durations: [45],
+            errorSamples: [],
+          }),
+        ]),
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
   it('返回 notifications 快照，供前端断线恢复升级与进度提示', async () => {
     dbModule.sqliteRun(`UPDATE sessions SET role_layer = 'reception' WHERE id = ?`, [
       SESSION_ACTIVE_ID,
@@ -291,6 +497,10 @@ describe('GET /team/runtime', () => {
           fromSessionId: SESSION_STALE_ID,
           reason: 'review_failed_threshold',
           context: '评审连续失败，等待用户决策',
+          suggestedActions: [
+            { label: '修宪法', action: 'edit_constitution' },
+            { label: '改需求', action: 'edit_original_request' },
+          ],
         }),
         USER_ID,
         SESSION_ACTIVE_ID,
@@ -330,6 +540,10 @@ describe('GET /team/runtime', () => {
             payload: expect.objectContaining({
               blocking: true,
               summary: '评审连续失败，等待用户决策',
+              suggestedActions: [
+                { label: '修宪法', action: 'edit_constitution' },
+                { label: '改需求', action: 'edit_original_request' },
+              ],
             }),
           }),
           expect.objectContaining({
@@ -355,6 +569,7 @@ describe('GET /team/runtime', () => {
       code: 'latency:a_to_b_direct',
       context: {
         durationMs: 3500,
+        sessionId: SESSION_ACTIVE_ID,
         thresholdMs: 3000,
         type: 'a_to_b_direct',
       },
@@ -368,6 +583,7 @@ describe('GET /team/runtime', () => {
       code: 'latency:a_to_b_direct',
       context: {
         durationMs: 3500,
+        sessionId: SESSION_ACTIVE_ID,
         thresholdMs: 3000,
         type: 'a_to_b_direct',
       },
@@ -398,6 +614,7 @@ describe('GET /team/runtime', () => {
           action: string;
           detail: string | null;
           entityType: string;
+          sessionId: string | null;
           summary: string;
         }>;
       };
@@ -405,6 +622,7 @@ describe('GET /team/runtime', () => {
       expect(data.auditLogs?.[0]).toMatchObject({
         action: 'runtime_incident',
         entityType: 'runtime_incident',
+        sessionId: SESSION_ACTIVE_ID,
         summary: 'runtime incident: latency:a_to_b_direct',
       });
       expect(data.auditLogs?.[0]?.detail ?? '').toContain('latency_violation');
@@ -1048,6 +1266,51 @@ describe('GET /team/runtime', () => {
     }
   });
 
+  it('alert 控制在带 sessionId 查询时，会按当前会话子树收缩 preview 并写入 session 归属', async () => {
+    latencyMonitor.recordLatency('a_to_b_direct', 3_500, USER_ID);
+
+    const app = await buildApp();
+    try {
+      const acknowledge = await app.inject({
+        method: 'POST',
+        url: `/team/runtime/alerts/latency-violation/acknowledge?sessionId=${encodeURIComponent(
+          SESSION_ACTIVE_ID,
+        )}`,
+        headers: { authorization: bearer(app) },
+        payload: { note: '当前会话范围确认' },
+      });
+      expect(acknowledge.statusCode).toBe(200);
+      expect(acknowledge.json()).toMatchObject({
+        control: {
+          alertCode: 'latency-violation',
+          state: 'acknowledged',
+        },
+        runtime: {
+          sessionCount: 1,
+        },
+      });
+
+      const auditRow = dbModule.sqliteGet<{
+        action: string;
+        entity_id: string;
+        session_id: string | null;
+      }>(
+        `SELECT action, entity_id, session_id
+           FROM team_audit_logs
+          WHERE action = 'runtime_alert_control'
+          ORDER BY id DESC
+          LIMIT 1`,
+      );
+      expect(auditRow).toMatchObject({
+        action: 'runtime_alert_control',
+        entity_id: 'latency-violation',
+        session_id: SESSION_ACTIVE_ID,
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   it('旧的 acknowledge/suppress 不会覆盖新的 reopened 生命周期', async () => {
     latencyMonitor.recordLatency('a_to_b_direct', 3_500, USER_ID);
 
@@ -1178,6 +1441,59 @@ describe('GET /team/runtime', () => {
           (alert) => alert.code === 'stale-runtime-threads',
         ),
       ).toBe(true);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('runtime remediation 在带 sessionId 查询时，会按当前会话子树收缩 preview 并写入 session 归属', async () => {
+    const nowMs = Date.now();
+    dbModule.sqliteRun(
+      `INSERT INTO session_runtime_threads
+        (session_id, user_id, client_request_id, started_at_ms, heartbeat_at_ms, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+      [
+        SESSION_ACTIVE_ID,
+        USER_ID,
+        'req-remediation-session-scope',
+        nowMs - SESSION_RUNTIME_THREAD_STALE_AFTER_MS - 30_000,
+        nowMs - SESSION_RUNTIME_THREAD_STALE_AFTER_MS - 1_000,
+      ],
+    );
+
+    const app = await buildApp();
+    try {
+      const remediation = await app.inject({
+        method: 'POST',
+        url: `/team/runtime/remediations/reconcile-stale-threads?sessionId=${encodeURIComponent(
+          SESSION_ACTIVE_ID,
+        )}`,
+        headers: { authorization: bearer(app) },
+      });
+      expect(remediation.statusCode).toBe(200);
+      expect(remediation.json()).toMatchObject({
+        staleCandidateCount: 1,
+        runtime: {
+          sessionCount: 1,
+        },
+      });
+
+      const auditRow = dbModule.sqliteGet<{
+        action: string;
+        entity_id: string;
+        session_id: string | null;
+      }>(
+        `SELECT action, entity_id, session_id
+           FROM team_audit_logs
+          WHERE action = 'runtime_remediation'
+          ORDER BY id DESC
+          LIMIT 1`,
+      );
+      expect(auditRow).toMatchObject({
+        action: 'runtime_remediation',
+        entity_id: 'stale-runtime-threads',
+        session_id: SESSION_ACTIVE_ID,
+      });
     } finally {
       await app.close();
     }
@@ -1449,6 +1765,80 @@ describe('GET /team/runtime', () => {
       expect(store.getHandoff({ userId: USER_ID, handoffId: escalated.id })).toMatchObject({
         state: 'failed',
         failureReason: '已重试 2 轮仍未通过，需要用户介入',
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('handoff-failure remediation 支持按 handoffId 只重试指定失败项', async () => {
+    const store = await import('../../handoff/store/handoff-store.js');
+    const target = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: SESSION_ACTIVE_ID,
+      fromRoleLayer: 'pm2',
+      toRoleLayer: 'executor',
+    });
+    store.claimHandoff({ handoffId: target.id, claimToken: 'tok-target' });
+    store.startHandoff({
+      handoffId: target.id,
+      claimToken: 'tok-target',
+      toSessionId: SESSION_STALE_ID,
+    });
+    store.failHandoff({
+      handoffId: target.id,
+      claimToken: 'tok-target',
+      reason: 'runner-fail',
+    });
+
+    const untouched = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: SESSION_ACTIVE_ID,
+      fromRoleLayer: 'pm2',
+      toRoleLayer: 'executor',
+    });
+    store.claimHandoff({ handoffId: untouched.id, claimToken: 'tok-untouched' });
+    store.startHandoff({
+      handoffId: untouched.id,
+      claimToken: 'tok-untouched',
+      toSessionId: SESSION_STALE_ID,
+    });
+    store.failHandoff({
+      handoffId: untouched.id,
+      claimToken: 'tok-untouched',
+      reason: 'runner-fail',
+    });
+
+    const app = await buildApp();
+    try {
+      const before = await app.inject({
+        method: 'GET',
+        url: '/team/runtime',
+        headers: { authorization: bearer(app) },
+      });
+      expect(before.statusCode).toBe(200);
+
+      const remediation = await app.inject({
+        method: 'POST',
+        url: `/team/runtime/alerts/handoff-failure/remediate?handoffId=${encodeURIComponent(
+          target.id,
+        )}`,
+        headers: { authorization: bearer(app) },
+      });
+      expect(remediation.statusCode).toBe(200);
+      expect(remediation.json()).toMatchObject({
+        code: 'handoff-failure',
+        resetCount: 1,
+        staleCandidateCount: 1,
+      });
+
+      expect(store.getHandoff({ userId: USER_ID, handoffId: target.id })).toMatchObject({
+        state: 'pending',
+        failureReason: null,
+      });
+      expect(store.getHandoff({ userId: USER_ID, handoffId: untouched.id })).toMatchObject({
+        state: 'failed',
+        failureReason: 'runner-fail',
       });
     } finally {
       await app.close();

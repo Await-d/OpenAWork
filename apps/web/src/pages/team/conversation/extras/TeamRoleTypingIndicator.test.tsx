@@ -12,9 +12,7 @@ afterEach(() => cleanup());
 
 describe('TeamRoleTypingIndicator', () => {
   it('visible=false 时不渲染', () => {
-    const { container } = render(
-      <TeamRoleTypingIndicator roleLayer="executor" visible={false} />,
-    );
+    const { container } = render(<TeamRoleTypingIndicator roleLayer="executor" visible={false} />);
     expect(container.firstChild).toBeNull();
   });
 

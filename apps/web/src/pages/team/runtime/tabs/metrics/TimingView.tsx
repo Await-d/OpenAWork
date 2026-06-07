@@ -15,10 +15,17 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import {
   useHandoffStore,
+  useLayerStore,
   type HandoffEntry,
   type HandoffState,
+  type LayerNode,
   type TeamRoleLayer,
 } from '../../../../../stores/team/team-events.js';
+import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
+import {
+  resolveMatchedSharedSessionDetail,
+  resolveMatchedSharedSummary,
+} from '../../data/team-runtime-shared-context.js';
 import { TabContainer } from '../TabContainer.js';
 import {
   StatCard,
@@ -28,6 +35,7 @@ import {
   CK_BORDER,
   CK_SURFACE,
 } from '../../shared/content-kit/index.js';
+import { SharedSessionTimingView } from './shared-session-timing-view.js';
 
 const LAYER_LABELS: Record<TeamRoleLayer, string> = {
   user: '用户',
@@ -97,9 +105,59 @@ function quantile(sorted: number[], q: number): number {
   return next !== undefined ? baseVal + rest * (next - baseVal) : baseVal;
 }
 
-export function TimingView() {
+function collectSessionScope(nodes: Map<string, LayerNode>, rootSessionId: string): Set<string> {
+  const scope = new Set<string>([rootSessionId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const node of nodes.values()) {
+      if (!node.parentSessionId || scope.has(node.sessionId)) {
+        continue;
+      }
+      if (scope.has(node.parentSessionId)) {
+        scope.add(node.sessionId);
+        changed = true;
+      }
+    }
+  }
+  return scope;
+}
+
+export interface TimingViewProps {
+  selectedSessionId?: string | null;
+  selectedSessionIsShared?: boolean;
+  selectedSessionTitle?: string | null;
+}
+
+export function TimingView({
+  selectedSessionId = null,
+  selectedSessionIsShared = false,
+  selectedSessionTitle = null,
+}: TimingViewProps = {}) {
   const handoffs = useHandoffStore((s) => s.handoffs);
+  const nodes = useLayerStore((s) => s.nodes);
+  const { activeSharedSession, selectedSharedSession, sharedSessionLoading, sharedSessions } =
+    useTeamRuntimeReferenceViewData();
   const [now, setNow] = useState(() => Date.now());
+  const sharedSummary = useMemo(
+    () =>
+      resolveMatchedSharedSummary({
+        selectedTeamId: selectedSessionId,
+        activeSharedSession,
+        selectedSharedSession,
+        sharedSessions,
+      }),
+    [activeSharedSession, selectedSessionId, selectedSharedSession, sharedSessions],
+  );
+  const sharedSession = useMemo(
+    () =>
+      resolveMatchedSharedSessionDetail({
+        selectedTeamId: selectedSessionId,
+        activeSharedSession,
+        selectedSharedSession,
+      }),
+    [activeSharedSession, selectedSessionId, selectedSharedSession],
+  );
 
   // 1s tick 用于刷新「正在运行」的耗时
   useEffect(() => {
@@ -107,11 +165,43 @@ export function TimingView() {
     return () => window.clearInterval(t);
   }, []);
 
+  if (selectedSessionIsShared || sharedSummary) {
+    return (
+      <TabContainer
+        title="耗时分析"
+        subtitle="共享会话展示共享协作节奏与关键同步时间线，不再沿用本地 runtime handoff 时序。"
+      >
+        <SharedSessionTimingView
+          selectedSessionTitle={selectedSessionTitle}
+          sharedSession={sharedSession}
+          sharedSessionLoading={sharedSessionLoading}
+          sharedSummary={sharedSummary}
+        />
+      </TabContainer>
+    );
+  }
+
   const allEntries = useMemo(() => Array.from(handoffs.values()), [handoffs]);
+  const sessionScope = useMemo(
+    () => (selectedSessionId ? collectSessionScope(nodes, selectedSessionId) : null),
+    [nodes, selectedSessionId],
+  );
+  const scopedEntries = useMemo(() => {
+    if (!sessionScope) {
+      return allEntries;
+    }
+    return allEntries.filter((entry) => {
+      const candidates = [entry.fromSessionId, entry.toSessionId, entry.sessionId];
+      return candidates.some(
+        (sessionId): sessionId is string =>
+          typeof sessionId === 'string' && sessionScope.has(sessionId),
+      );
+    });
+  }, [allEntries, sessionScope]);
 
   const layerStats = useMemo(() => {
     const map = new Map<TeamRoleLayer, number[]>();
-    for (const entry of allEntries) {
+    for (const entry of scopedEntries) {
       const start = entry.startedAt ?? entry.updatedAt;
       const end = entry.endedAt ?? (isTerminal(entry.state) ? entry.updatedAt : null);
       if (!start || !end || end < start) continue;
@@ -132,45 +222,56 @@ export function TimingView() {
         max: values.length > 0 ? values[values.length - 1]! : 0,
       };
     });
-  }, [allEntries]);
+  }, [scopedEntries]);
 
   const running = useMemo(
     () =>
-      allEntries
+      scopedEntries
         .filter((e) => e.state === 'running' || e.state === 'claimed' || e.state === 'pending')
         .sort((a, b) => (b.startedAt ?? b.updatedAt) - (a.startedAt ?? a.updatedAt)),
-    [allEntries],
+    [scopedEntries],
   );
 
   const completed = useMemo(
     () =>
-      allEntries
+      scopedEntries
         .filter((e) => isTerminal(e.state))
         .sort((a, b) => (b.endedAt ?? b.updatedAt) - (a.endedAt ?? a.updatedAt))
         .slice(0, 30),
-    [allEntries],
+    [scopedEntries],
   );
 
-  const totalCount = allEntries.length;
+  const totalCount = scopedEntries.length;
   const successRate = useMemo(() => {
     let success = 0;
     let failed = 0;
-    for (const e of allEntries) {
+    for (const e of scopedEntries) {
       if (e.state === 'completed') success++;
       else if (e.state === 'failed') failed++;
     }
     const total = success + failed;
     return total > 0 ? Math.round((success / total) * 100) : null;
-  }, [allEntries]);
+  }, [scopedEntries]);
 
   if (totalCount === 0) {
     return (
-      <TabContainer title="耗时分析" subtitle="按 handoff 维度统计执行耗时与 P50 / P95 分布。">
+      <TabContainer
+        title="耗时分析"
+        subtitle={
+          selectedSessionId
+            ? '按当前会话及其子树的 handoff 统计执行耗时与 P50 / P95 分布。'
+            : '按 handoff 维度统计执行耗时与 P50 / P95 分布。'
+        }
+      >
         <div style={CONTAINER_STYLE}>
           <EmptyState
             emoji="⏱️"
-            title="暂无 handoff 记录"
-            description="团队启动后耗时数据会出现在这里。"
+            title={selectedSessionId ? '当前会话暂无 handoff 记录' : '暂无 handoff 记录'}
+            description={
+              selectedSessionId
+                ? `${selectedSessionTitle ?? `会话 ${selectedSessionId.slice(0, 8)}`} 及其下游会话产生 handoff 后，这里会展示对应耗时。`
+                : '团队启动后耗时数据会出现在这里。'
+            }
           />
         </div>
       </TabContainer>
@@ -178,8 +279,29 @@ export function TimingView() {
   }
 
   return (
-    <TabContainer title="耗时分析" subtitle="按 handoff 维度统计执行耗时与 P50 / P95 分布。">
+    <TabContainer
+      title="耗时分析"
+      subtitle={
+        selectedSessionId
+          ? '按当前会话及其子树的 handoff 统计执行耗时与 P50 / P95 分布。'
+          : '按 handoff 维度统计执行耗时与 P50 / P95 分布。'
+      }
+    >
       <div style={CONTAINER_STYLE}>
+        {selectedSessionId ? (
+          <div
+            style={{
+              padding: '8px 12px',
+              borderRadius: 10,
+              border: '1px solid color-mix(in srgb, var(--accent) 28%, transparent)',
+              background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
+              color: 'var(--fg-default)',
+              fontSize: 12,
+            }}
+          >
+            当前统计范围：{selectedSessionTitle ?? `会话 ${selectedSessionId.slice(0, 8)}`} 及其子树
+          </div>
+        ) : null}
         {/* 概览 */}
         <div style={SECTION_STYLE}>
           <span style={SECTION_TITLE_STYLE}>概览</span>

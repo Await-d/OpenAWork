@@ -19,7 +19,14 @@
  *   - badge（待回复 / 待澄清）统一渲染。
  */
 
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { PRIMARY_TABS, type PrimaryTabKey, type SubTabDef } from '../../tabs/team-page-v2-tabs.js';
 import type { MiddleTabKey } from '../../tabs/MiddleTabRouter.js';
@@ -31,15 +38,20 @@ const BAR_ROOT_STYLE: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   flexShrink: 0,
-  background: 'var(--bg-overlay)',
+  background:
+    'linear-gradient(180deg, color-mix(in srgb, var(--bg-overlay) 96%, var(--bg-base)) 0%, color-mix(in srgb, var(--bg-overlay) 86%, var(--bg-base)) 100%)',
   borderBottom: '1px solid color-mix(in srgb, var(--border-default) 45%, transparent)',
+  boxShadow: 'inset 0 1px 0 color-mix(in srgb, var(--fg-strong) 4%, transparent)',
+  backdropFilter: 'blur(18px)',
 };
 
 const PRIMARY_ROW_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   gap: 8,
-  padding: '8px 10px 0',
+  rowGap: 8,
+  flexWrap: 'wrap',
+  padding: '10px 14px 4px',
   minWidth: 0,
 };
 
@@ -47,10 +59,11 @@ const PRIMARY_GROUP_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   gap: 2,
-  padding: 3,
-  borderRadius: 10,
-  background: 'color-mix(in srgb, var(--bg-base) 60%, transparent)',
-  border: '1px solid color-mix(in srgb, var(--border-default) 30%, transparent)',
+  padding: 4,
+  borderRadius: 12,
+  background: 'color-mix(in srgb, var(--bg-base) 74%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 34%, transparent)',
+  boxShadow: 'var(--shadow-sm)',
   overflowX: 'auto',
   scrollbarWidth: 'none',
   minWidth: 0,
@@ -80,8 +93,7 @@ const PRIMARY_PILL_ACTIVE_STYLE: CSSProperties = {
   background: 'var(--bg-overlay)',
   color: 'var(--fg-strong)',
   fontWeight: 700,
-  boxShadow:
-    '0 1px 3px rgba(0,0,0,0.12), 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent)',
+  boxShadow: 'var(--shadow-sm), 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent)',
 };
 
 // ─── 3D 办公动作按钮 ─────────────────────────────────────────────
@@ -127,8 +139,8 @@ const OFFICE_BTN_ACTIVE_INLINE_STYLE: CSSProperties = {
 const SUB_ROW_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 2,
-  padding: '6px 12px 8px',
+  gap: 4,
+  padding: '0 14px 12px',
   overflowX: 'auto',
   scrollbarWidth: 'none',
   minWidth: 0,
@@ -160,11 +172,23 @@ const SUB_PILL_ACTIVE_STYLE: CSSProperties = {
 
 // ─── 单行超级栏（variant='single'，方案 G）────────────────────────
 
-const SINGLE_ROW_STYLE: CSSProperties = {
+const SINGLE_CONTEXT_ROW_STYLE: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 12,
+  rowGap: 6,
+  flexWrap: 'wrap',
+  padding: '10px 14px 6px',
+  minWidth: 0,
+};
+
+const SINGLE_NAV_ROW_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   gap: 10,
-  padding: '7px 12px',
+  rowGap: 6,
+  padding: '0 14px 8px',
   minWidth: 0,
 };
 
@@ -172,14 +196,24 @@ const LEADING_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   gap: 6,
+  flex: '1 1 420px',
   minWidth: 0,
-  // 压缩优先级中等：窄屏时工作区切换器在状态栏之后让位（靠 WorkspaceSwitcher
-  // 自身的 maxWidth + ellipsis 截断），但比主 tab 组更早收缩。
-  flexShrink: 3,
+  minHeight: 38,
+};
+
+const CONTEXT_TRAILING_STYLE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'flex-end',
+  gap: 6,
+  flex: '1 1 320px',
+  minWidth: 0,
 };
 
 const SINGLE_PRIMARY_GROUP_STYLE: CSSProperties = {
   ...PRIMARY_GROUP_STYLE,
+  flex: '1 1 280px',
+  minWidth: 0,
   flexWrap: 'nowrap',
   overflowX: 'visible',
   position: 'relative',
@@ -195,6 +229,18 @@ const CENTER_SLOT_STYLE: CSSProperties = {
   flexShrink: 8,
   flexBasis: 'auto',
   overflow: 'hidden',
+  padding: '4px 6px 4px 8px',
+  borderRadius: 12,
+  border: '1px solid color-mix(in srgb, var(--border-default) 30%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-base) 70%, transparent)',
+  boxShadow: 'inset 0 1px 0 color-mix(in srgb, var(--fg-strong) 3%, transparent)',
+};
+
+const SINGLE_ACTIONS_STYLE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 8,
+  flexShrink: 0,
 };
 
 /** 隐藏的测量行：渲染全部主 tab 的自然宽度，供溢出计算用，不参与可视布局。 */
@@ -224,7 +270,7 @@ const DROPDOWN_STYLE: CSSProperties = {
   borderRadius: 10,
   background: 'var(--bg-overlay)',
   border: '1px solid var(--border-default)',
-  boxShadow: '0 12px 32px color-mix(in srgb, #000 32%, transparent)',
+  boxShadow: 'var(--shadow-lg)',
 };
 
 const DROPDOWN_ITEM_STYLE: CSSProperties = {
@@ -638,11 +684,20 @@ function SingleRowTabBar({
 
   return (
     <div ref={rootRef} style={BAR_ROOT_STYLE}>
-      {/* 第 ① 行：超级栏 = 工作区切换 + 主 tab（窄屏溢出「更多」）+ 状态 + 3D */}
-      <div style={SINGLE_ROW_STYLE}>
+      {/* 第 ① 行：上下文信息。工作区 / 当前会话与统计分开，避免导航行被挤压。 */}
+      <div style={SINGLE_CONTEXT_ROW_STYLE}>
         {leadingSlot ? <span style={LEADING_STYLE}>{leadingSlot}</span> : null}
+        {trailingSlot ? <span style={CONTEXT_TRAILING_STYLE}>{trailingSlot}</span> : null}
+      </div>
 
-        <div ref={groupRef} style={SINGLE_PRIMARY_GROUP_STYLE} role="tablist" aria-label="主分类切换">
+      {/* 第 ② 行：主 tab（窄屏溢出「更多」）+ 运行状态 + 3D。 */}
+      <div style={SINGLE_NAV_ROW_STYLE}>
+        <div
+          ref={groupRef}
+          style={SINGLE_PRIMARY_GROUP_STYLE}
+          role="tablist"
+          aria-label="主分类切换"
+        >
           {/* 隐藏测量行：始终渲染全部主 tab 以获取自然宽度 */}
           <div ref={ghostRef} style={GHOST_ROW_STYLE} aria-hidden>
             {PRIMARY_TABS.map((primary) => (
@@ -718,15 +773,7 @@ function SingleRowTabBar({
 
         {centerSlot ? <span style={CENTER_SLOT_STYLE}>{centerSlot}</span> : null}
 
-        <span
-          style={{
-            marginLeft: centerSlot ? 0 : 'auto',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 8,
-            flexShrink: 0,
-          }}
-        >
+        <span style={SINGLE_ACTIONS_STYLE}>
           <TeamRunStatePill />
           {showOffice ? (
             <button
@@ -744,11 +791,10 @@ function SingleRowTabBar({
               <span>3D</span>
             </button>
           ) : null}
-          {trailingSlot}
         </span>
       </div>
 
-      {/* 第 ② 行：当前主 tab 的子视图，常驻可见、一键直达（>1 个时才显示） */}
+      {/* 第 ③ 行：当前主 tab 的子视图，常驻可见、一键直达（>1 个时才显示）。 */}
       {subTabs.length > 1 ? (
         <div style={SUB_ROW_STYLE} role="tablist" aria-label="子视图切换">
           {subTabs.map((sub) => {

@@ -201,6 +201,7 @@ export function WorkspaceSwitcher({
 
   const activeWorkspace = workspaces.find((ws) => ws.id === activeWorkspaceId) ?? null;
   const displayName = activeWorkspace?.name ?? '未选择工作区';
+  const hasManagementActions = Boolean(onRename || onRequestDelete);
 
   // 点击外部关闭
   useEffect(() => {
@@ -293,8 +294,12 @@ export function WorkspaceSwitcher({
     [cancelRename, submitRename],
   );
 
-  // 只有一个工作区或没有时仍允许创建（如果传了 onCreateNew 才显示 dropdown）
-  if (workspaces.length <= 1 && !onCreateNew) {
+  // 只有一个工作区时，如果既不能新建、也没有重命名/删除入口，才退化成静态标签。
+  // 否则用户会在「只有一个工作区」场景下失去唯一工作区的治理入口。
+  if (
+    (workspaces.length === 0 && !onCreateNew) ||
+    (workspaces.length === 1 && !onCreateNew && !hasManagementActions)
+  ) {
     return (
       <span style={STATIC_LABEL_STYLE} title={displayName}>
         · {displayName}

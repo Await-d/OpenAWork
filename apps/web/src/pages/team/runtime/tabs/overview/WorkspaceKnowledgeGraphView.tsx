@@ -78,7 +78,11 @@ export function WorkspaceKnowledgeGraphView({
   const handoffs = useHandoffStore((s) => s.handoffs);
 
   // workspace 级产物（spec/plan/tasks/review，跨所有 session）。
-  const { artifacts: workspaceArtifacts } = useTeamWorkspaceArtifacts(teamWorkspaceId ?? null);
+  const {
+    artifacts: workspaceArtifacts,
+    error: workspaceArtifactsError,
+    loading: workspaceArtifactsLoading,
+  } = useTeamWorkspaceArtifacts(teamWorkspaceId ?? null);
 
   const graph = useMemo(() => {
     return buildKnowledgeGraph({
@@ -140,6 +144,32 @@ export function WorkspaceKnowledgeGraphView({
   const selectedSessionLayer: TeamRoleLayer | null = selectedSessionId
     ? (layerNodes.get(selectedSessionId)?.roleLayer ?? null)
     : null;
+
+  if (workspaceArtifactsLoading && graph.nodes.length === 0) {
+    return (
+      <TabContainer
+        title="知识图谱"
+        subtitle="工作区会话 / 产物 / handoff 的关系图，点击节点联动选中会话。"
+      >
+        <EmptyState
+          emoji="🕸️"
+          title="加载图谱中…"
+          description="正在拉取当前工作区的会话、handoff 与产物关系。"
+        />
+      </TabContainer>
+    );
+  }
+
+  if (workspaceArtifactsError && graph.nodes.length === 0) {
+    return (
+      <TabContainer
+        title="知识图谱"
+        subtitle="工作区会话 / 产物 / handoff 的关系图，点击节点联动选中会话。"
+      >
+        <EmptyState emoji="⚠️" title="图谱加载失败" description={workspaceArtifactsError} />
+      </TabContainer>
+    );
+  }
 
   if (graph.nodes.length === 0) {
     return (

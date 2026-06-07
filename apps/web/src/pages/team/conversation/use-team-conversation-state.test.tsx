@@ -67,6 +67,7 @@ interface RecoveryFixture {
   ratings?: unknown[];
   activeStream?: unknown;
   totalMessageCount?: number;
+  totalTurnCount?: number | null;
 }
 
 function stubRecovery(payload: RecoveryFixture | { error: true }) {
@@ -95,6 +96,7 @@ function stubRecovery(payload: RecoveryFixture | { error: true }) {
         ratings: fixture.ratings ?? [],
         activeStream: fixture.activeStream ?? null,
         totalMessageCount: fixture.totalMessageCount,
+        totalTurnCount: fixture.totalTurnCount ?? null,
       };
       return new Response(JSON.stringify({ recovery }), {
         status: 200,
@@ -432,6 +434,115 @@ describe('useTeamConversationState — 加载快照', () => {
       expect(result.current.messages[0]?.id).toBe('m-online-again');
     });
     expect(result.current.snapshotError).toBeNull();
+  });
+
+  it('recovery 返回 totalTurnCount 时会暴露 hiddenMessageCount', async () => {
+    stubRecovery({
+      session: {
+        id: SESSION_ID,
+        state_status: 'running',
+        messages: [
+          {
+            id: 'm-user-1',
+            role: 'user',
+            content: '第一轮',
+            createdAtMs: 1700000000000,
+          },
+          {
+            id: 'm-assistant-1',
+            role: 'assistant',
+            content: '收到',
+            createdAtMs: 1700000001000,
+          },
+        ],
+      },
+      totalTurnCount: 5,
+    });
+
+    const { result } = renderHook(() =>
+      useTeamConversationState({
+        sessionId: SESSION_ID,
+        currentUserEmail: EMAIL,
+        gatewayUrl: GATEWAY,
+        token: TOKEN,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(result.current.isSessionSnapshotReady).toBe(true);
+    });
+
+    expect(result.current.hiddenMessageCount).toBe(4);
+  });
+
+  it('loadEarlierMessages 会扩大 messageLimit 并降低 hiddenMessageCount', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      const parsed = new URL(url);
+      const messageLimit = Number(parsed.searchParams.get('messageLimit') ?? '0');
+      const userTurnCount = messageLimit >= 30 ? 4 : 1;
+      const messages = Array.from({ length: userTurnCount }).flatMap((_, index) => [
+        {
+          id: `u-${index + 1}`,
+          role: 'user',
+          content: `用户消息 ${index + 1}`,
+          createdAtMs: 1700000000000 + index * 2000,
+        },
+        {
+          id: `a-${index + 1}`,
+          role: 'assistant',
+          content: `助手回复 ${index + 1}`,
+          createdAtMs: 1700000001000 + index * 2000,
+        },
+      ]);
+      return new Response(
+        JSON.stringify({
+          recovery: {
+            pendingPermissions: [],
+            pendingQuestions: [],
+            session: {
+              id: SESSION_ID,
+              state_status: 'running',
+              messages,
+            },
+            todoLanes: { lanes: [] },
+            tasks: [],
+            children: [],
+            ratings: [],
+            activeStream: null,
+            totalTurnCount: 12,
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() =>
+      useTeamConversationState({
+        sessionId: SESSION_ID,
+        currentUserEmail: EMAIL,
+        gatewayUrl: GATEWAY,
+        token: TOKEN,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(result.current.isSessionSnapshotReady).toBe(true);
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toContain('messageLimit=10');
+    expect(result.current.hiddenMessageCount).toBe(11);
+
+    await act(async () => {
+      await result.current.loadEarlierMessages();
+    });
+
+    expect(fetchMock.mock.calls[1]?.[0]).toContain('messageLimit=30');
+    expect(result.current.hiddenMessageCount).toBe(8);
   });
 });
 
@@ -1084,9 +1195,6 @@ describe('useTeamConversationState — startStream 并发保护 (🔴#2)', () =>
     });
 
     // 第二次发送：必须抛错（旧实现是静默 return，会让上层丢消息）。
-    await expect(result.current.startStream('second message')).rejects.toThrow(
-      /正在生成回复/,
-    );
+    await expect(result.current.startStream('second message')).rejects.toThrow(/正在生成回复/);
   });
 });
-

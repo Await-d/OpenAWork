@@ -78,6 +78,30 @@ function artifactNodeId(artifactId: string): string {
   return `artifact:${artifactId}`;
 }
 
+function ensureSessionNode(
+  nodes: Map<string, GraphNode>,
+  input: {
+    layer: TeamRoleLayer | null;
+    sessionId: string;
+    state: string | null;
+  },
+): void {
+  const id = sessionNodeId(input.sessionId);
+  if (nodes.has(id)) {
+    return;
+  }
+  nodes.set(id, {
+    id,
+    kind: 'session',
+    label: input.layer
+      ? `${LAYER_LABELS[input.layer]} · ${input.sessionId.slice(0, 6)}`
+      : input.sessionId.slice(0, 6),
+    layer: input.layer,
+    state: input.state,
+    sessionId: input.sessionId,
+  });
+}
+
 export function buildKnowledgeGraph(input: {
   layerNodes: Iterable<LayerNode>;
   handoffs: Iterable<HandoffEntry>;
@@ -113,16 +137,11 @@ export function buildKnowledgeGraph(input: {
     const fromId = sessionNodeId(node.parentSessionId);
     const toId = sessionNodeId(node.sessionId);
     // 父节点可能尚未在 layerNodes 中（孤儿）——补一个占位 session 节点。
-    if (!nodes.has(fromId)) {
-      nodes.set(fromId, {
-        id: fromId,
-        kind: 'session',
-        label: node.parentSessionId.slice(0, 6),
-        layer: null,
-        state: null,
-        sessionId: node.parentSessionId,
-      });
-    }
+    ensureSessionNode(nodes, {
+      layer: null,
+      sessionId: node.parentSessionId,
+      state: null,
+    });
     if (nodes.has(toId)) {
       addEdge({
         id: `parent:${fromId}->${toId}`,
@@ -136,23 +155,21 @@ export function buildKnowledgeGraph(input: {
 
   // 2) handoff 边（from session → to session）
   for (const entry of input.handoffs) {
-    if (!entry.sessionId) continue;
-    // handoff 的 to 是 entry.sessionId；from 需要从 layer tree 的 parent 推断，
-    // 但 HandoffEntry 不直接带 fromSessionId，这里用 to-session 的 parent 作为近似。
-    const toId = sessionNodeId(entry.sessionId);
-    if (!nodes.has(toId)) continue;
-    const toNode = nodes.get(toId)!;
-    // 找一个 from 候选：layerNodes 中该 session 的 parent。
-    let fromSessionId: string | null = null;
-    for (const node of input.layerNodes) {
-      if (node.sessionId === entry.sessionId) {
-        fromSessionId = node.parentSessionId;
-        break;
-      }
-    }
-    if (!fromSessionId) continue;
-    const fromId = sessionNodeId(fromSessionId);
-    if (!nodes.has(fromId)) continue;
+    if (!entry.fromSessionId || !entry.toSessionId) continue;
+    ensureSessionNode(nodes, {
+      layer: entry.fromRoleLayer,
+      sessionId: entry.fromSessionId,
+      state: null,
+    });
+    ensureSessionNode(nodes, {
+      layer: entry.toRoleLayer,
+      sessionId: entry.toSessionId,
+      state: entry.state,
+    });
+    const fromId = sessionNodeId(entry.fromSessionId);
+    const toId = sessionNodeId(entry.toSessionId);
+    const toNode = nodes.get(toId);
+    if (!toNode) continue;
     addEdge({
       id: `handoff:${entry.id}`,
       from: fromId,

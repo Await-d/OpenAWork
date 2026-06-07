@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const creationDraft = {
   title: '团队会话',
@@ -14,12 +14,30 @@ const creationDraft = {
   optionalAgentIds: [] as string[],
   defaultProvider: null,
   memberSlots: [],
+  workingDirectory: null,
 };
+
+const applyTemplateMock = vi.fn();
 
 vi.mock('../../data/team-runtime-reference-data.js', () => ({
   useTeamRuntimeReferenceViewData: () => ({
     templateLoading: false,
-    templates: [],
+    templates: [
+      {
+        id: 'tpl-1',
+        name: '研究模板',
+        description: '默认研究团队模板',
+        category: 'team-playbook',
+        badges: [],
+        nodes: [],
+        edges: [],
+        metadata: {
+          teamTemplate: {
+            defaultProvider: 'anthropic',
+          },
+        },
+      },
+    ],
   }),
 }));
 
@@ -67,7 +85,7 @@ vi.mock('../../hooks/use-team-session-creation.js', () => ({
     prevStep: vi.fn(),
     nextStep: vi.fn(),
     setSource: vi.fn(),
-    applyTemplate: vi.fn(),
+    applyTemplate: applyTemplateMock,
     setTitle: vi.fn(),
     toggleOptionalAgent: vi.fn(),
   }),
@@ -86,8 +104,14 @@ vi.mock('../../../../../stores/auth/auth.js', () => ({
 
 import { NewTeamSessionModal } from './NewTeamSessionModal.js';
 
+beforeEach(() => {
+  cleanup();
+});
+
 afterEach(() => {
+  cleanup();
   vi.restoreAllMocks();
+  applyTemplateMock.mockReset();
 });
 
 describe('NewTeamSessionModal', () => {
@@ -107,6 +131,46 @@ describe('NewTeamSessionModal', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('alert').textContent).toContain('创建团队会话失败：网络异常。');
+    });
+  });
+
+  it('提交返回 false 时保留弹窗并显示通用错误信息', async () => {
+    render(
+      <NewTeamSessionModal
+        onClose={vi.fn()}
+        onSubmitDraft={vi.fn(async () => false)}
+        workspaceLabel="默认工作区"
+        teamWorkspaceId="tw-1"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /确认创建/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toContain(
+        '创建团队会话失败，请检查工作区配置或稍后重试。',
+      );
+    });
+  });
+
+  it('传入 initialTemplateId 时会自动套用对应模板', async () => {
+    render(
+      <NewTeamSessionModal
+        onClose={vi.fn()}
+        onSubmitDraft={vi.fn()}
+        workspaceLabel="默认工作区"
+        teamWorkspaceId="tw-1"
+        initialTemplateId="tpl-1"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(applyTemplateMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'tpl-1',
+          name: '研究模板',
+        }),
+      );
     });
   });
 });

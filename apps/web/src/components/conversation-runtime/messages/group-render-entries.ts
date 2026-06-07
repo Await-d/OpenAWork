@@ -2,7 +2,7 @@
  * 把 ChatRenderEntry[] 按相邻同 role 聚合成 ChatRenderGroup[]。
  *
  * 规则：
- * - 相邻两条消息 role 相同 → 合入同一 group
+ * - 相邻两条消息 role 相同，且 `groupIdentityKey` 相同 → 合入同一 group
  * - role 切换 → 起一个新 group
  * - 每个 group 用首条 entry 的 message.id 作为 key
  *
@@ -24,7 +24,9 @@ export function groupChatRenderEntries(entries: ChatRenderEntry[]): ChatRenderGr
   for (const entry of entries) {
     const lastGroup = groups[groups.length - 1];
     const lastEntry = lastGroup?.entries[lastGroup.entries.length - 1];
-    if (lastEntry && lastEntry.message.role === entry.message.role) {
+    const sameRole = lastEntry && lastEntry.message.role === entry.message.role;
+    const sameIdentity = (lastEntry?.groupIdentityKey ?? null) === (entry.groupIdentityKey ?? null);
+    if (sameRole && sameIdentity) {
       lastGroup.entries.push(entry);
       continue;
     }

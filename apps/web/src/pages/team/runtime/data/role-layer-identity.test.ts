@@ -3,7 +3,11 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { getRoleLayerIdentity, formatRoleLayerTag } from './role-layer-identity.js';
+import {
+  formatRoleLayerTag,
+  getRoleLayerIdentity,
+  getRoleLayerIdentityFromAgentId,
+} from './role-layer-identity.js';
 
 describe('getRoleLayerIdentity', () => {
   it('5 个权威层都映射到带代号的身份', () => {
@@ -28,6 +32,18 @@ describe('getRoleLayerIdentity', () => {
   it('user / tester 有独立身份', () => {
     expect(getRoleLayerIdentity('user').short).toBe('你');
     expect(getRoleLayerIdentity('tester').short).toBe('测试');
+  });
+
+  it('常见 team agentId 能反解到层级身份', () => {
+    expect(getRoleLayerIdentityFromAgentId('interaction-agent').short).toBe('接待');
+    expect(getRoleLayerIdentityFromAgentId('prometheus').short).toBe('规划');
+    expect(getRoleLayerIdentityFromAgentId('plan').short).toBe('规划');
+    expect(getRoleLayerIdentityFromAgentId('zeus').short).toBe('管控');
+    expect(getRoleLayerIdentityFromAgentId('hephaestus').short).toBe('执行');
+    expect(getRoleLayerIdentityFromAgentId('momus').short).toBe('评审');
+    expect(getRoleLayerIdentityFromAgentId('atlas').short).toBe('评审');
+    expect(getRoleLayerIdentityFromAgentId('librarian').short).toBe('接待');
+    expect(getRoleLayerIdentityFromAgentId('metis').short).toBe('接待');
   });
 
   it('null / undefined / 未知值回退到中性「团队」身份', () => {

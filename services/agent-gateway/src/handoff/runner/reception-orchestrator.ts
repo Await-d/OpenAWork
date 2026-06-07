@@ -522,6 +522,7 @@ function writeAck(userId: string, sessionId: string, text: string): void {
       sessionId,
       userId,
       role: 'assistant',
+      agentId: 'interaction-agent',
       content: [{ type: 'text', text }],
     });
   } catch (err) {
@@ -536,11 +537,22 @@ function writeAck(userId: string, sessionId: string, text: string): void {
 function logRouteDecision(userId: string, sessionId: string, route: RouteResult): void {
   try {
     dbSqliteRun(
-      `INSERT INTO team_audit_logs (id, user_id, action, entity_type, entity_id, summary, detail, created_at)
-       VALUES (?, ?, 'route_decision', 'session', ?, ?, ?, datetime('now'))`,
+      `INSERT INTO team_audit_logs (
+         id,
+         user_id,
+         action,
+         entity_type,
+         entity_id,
+         session_id,
+         summary,
+         detail,
+         created_at
+       )
+       VALUES (?, ?, 'route_decision', 'session', ?, ?, ?, ?, datetime('now'))`,
       [
         randomUUID(),
         userId,
+        sessionId,
         sessionId,
         `b.router: ${route.decision} (${route.decisionSource})`,
         JSON.stringify({

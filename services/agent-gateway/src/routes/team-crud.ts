@@ -32,6 +32,8 @@ const updateTaskSchema = z.object({
 
 const createMessageSchema = z.object({
   senderId: z.string().optional(),
+  recipientMemberId: z.string().nullable().optional(),
+  replyToMessageId: z.string().nullable().optional(),
   content: z.string().min(1),
   type: z.enum(['update', 'question', 'result', 'error']).default('update'),
 });
@@ -94,6 +96,8 @@ interface TaskRow {
 interface MessageRow {
   id: string;
   sender_id: string | null;
+  recipient_member_id: string | null;
+  reply_to_message_id: string | null;
   content: string;
   type: string;
   created_at: string;
@@ -158,6 +162,7 @@ type TeamCrudRouteErrorCode =
   | 'team_task_not_found'
   | 'team_session_not_found'
   | 'team_member_not_found'
+  | 'team_message_not_found'
   | 'team_session_share_already_exists'
   | 'team_session_share_not_found';
 
@@ -166,6 +171,7 @@ const TEAM_CRUD_ROUTE_ERROR_MESSAGES: Record<TeamCrudRouteErrorCode, string> = {
   team_task_not_found: '目标团队任务不存在。',
   team_session_not_found: '目标会话不存在。',
   team_member_not_found: '目标团队成员不存在。',
+  team_message_not_found: '目标团队消息不存在。',
   team_session_share_already_exists: '该会话共享记录已存在。',
   team_session_share_not_found: '目标会话共享记录不存在。',
 };
@@ -368,7 +374,23 @@ export async function teamCrudRoutes(app: FastifyInstance): Promise<void> {
 
       const queryStep = child('query');
       const rows = sqliteAll<MessageRow>(
-        `SELECT id, sender_id, content, type, created_at FROM team_messages WHERE user_id = ? ORDER BY created_at ASC LIMIT 100`,
+        `SELECT id, sender_id, recipient_member_id, reply_to_message_id, content, type, created_at
+           FROM (
+             SELECT
+               rowid,
+               id,
+               sender_id,
+               recipient_member_id,
+               reply_to_message_id,
+               content,
+               type,
+               created_at
+             FROM team_messages
+             WHERE user_id = ?
+             ORDER BY rowid DESC
+             LIMIT 100
+           )
+          ORDER BY rowid ASC`,
         [user.sub],
       );
       queryStep.succeed(undefined, { count: rows.length });
@@ -378,6 +400,8 @@ export async function teamCrudRoutes(app: FastifyInstance): Promise<void> {
         rows.map((row) => ({
           id: row.id,
           memberId: row.sender_id ?? 'system',
+          recipientMemberId: row.recipient_member_id,
+          replyToMessageId: row.reply_to_message_id,
           content: row.content,
           type:
             row.type === 'update' ||
@@ -403,12 +427,56 @@ export async function teamCrudRoutes(app: FastifyInstance): Promise<void> {
       const body = parseBody(createMessageSchema, request.body);
       parseStep.succeed();
 
+      if (body.senderId) {
+        const senderStep = child('validate-sender');
+        const sender = sqliteGet<{ id: string }>(
+          `SELECT id FROM team_members WHERE user_id = ? AND id = ? LIMIT 1`,
+          [user.sub, body.senderId],
+        );
+        if (!sender) {
+          senderStep.fail('sender not found');
+          step.fail('sender not found');
+          return reply.status(404).send(teamCrudRouteErrorPayload('team_member_not_found'));
+        }
+        senderStep.succeed(undefined, { senderId: body.senderId });
+      }
+
+      if (body.recipientMemberId) {
+        const recipientStep = child('validate-recipient');
+        const recipient = sqliteGet<{ id: string }>(
+          `SELECT id FROM team_members WHERE user_id = ? AND id = ? LIMIT 1`,
+          [user.sub, body.recipientMemberId],
+        );
+        if (!recipient) {
+          recipientStep.fail('recipient not found');
+          step.fail('recipient not found');
+          return reply.status(404).send(teamCrudRouteErrorPayload('team_member_not_found'));
+        }
+        recipientStep.succeed(undefined, { recipientMemberId: body.recipientMemberId });
+      }
+
+      if (body.replyToMessageId) {
+        const replyTargetStep = child('validate-reply-target');
+        const replyTarget = sqliteGet<{ id: string }>(
+          `SELECT id FROM team_messages WHERE user_id = ? AND id = ? LIMIT 1`,
+          [user.sub, body.replyToMessageId],
+        );
+        if (!replyTarget) {
+          replyTargetStep.fail('reply target not found');
+          step.fail('reply target not found');
+          return reply.status(404).send(teamCrudRouteErrorPayload('team_message_not_found'));
+        }
+        replyTargetStep.succeed(undefined, { replyToMessageId: body.replyToMessageId });
+      }
+
       const id = randomUUID();
       const insertStep = child('insert', undefined, { messageId: id, type: body.type });
       appendTeamMessage({
         id,
         userId: user.sub,
         senderId: body.senderId ?? null,
+        recipientMemberId: body.recipientMemberId ?? null,
+        replyToMessageId: body.replyToMessageId ?? null,
         content: body.content,
         type: body.type,
       });
@@ -418,6 +486,8 @@ export async function teamCrudRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(201).send({
         id,
         memberId: body.senderId ?? 'system',
+        recipientMemberId: body.recipientMemberId ?? null,
+        replyToMessageId: body.replyToMessageId ?? null,
         content: body.content,
         type: body.type,
         timestamp: Date.now(),
@@ -530,6 +600,7 @@ export async function teamCrudRoutes(app: FastifyInstance): Promise<void> {
         detail: `会话：${session.title ?? body.sessionId}；工作区：${sessionWorkspacePath ?? '未绑定工作区'}；成员：${member.name}；权限：${body.permission}`,
         entityId: shareId,
         entityType: 'session_share',
+        sessionId: body.sessionId,
         summary: `已将“${session.title ?? body.sessionId}”共享给 ${member.name}（${body.permission}）`,
         userId: user.sub,
       });
@@ -605,6 +676,7 @@ export async function teamCrudRoutes(app: FastifyInstance): Promise<void> {
           detail: `会话：${existing.label ?? existing.session_id}；工作区：${getWorkspacePathFromMetadataJson({ metadataJson: existing.session_metadata_json, sessionId: existing.session_id, userId: user.sub }) ?? '未绑定工作区'}；成员：${existing.member_name}；旧权限：${existing.permission}；新权限：${body.permission}`,
           entityId: shareId,
           entityType: 'session_share',
+          sessionId: existing.session_id,
           summary: `已将 ${existing.member_name} 对“${existing.label ?? existing.session_id}”的权限从 ${existing.permission} 调整为 ${body.permission}`,
           userId: user.sub,
         });
@@ -663,6 +735,7 @@ export async function teamCrudRoutes(app: FastifyInstance): Promise<void> {
           detail: `会话：${existing.label ?? existing.session_id}；工作区：${getWorkspacePathFromMetadataJson({ metadataJson: existing.session_metadata_json, sessionId: existing.session_id, userId: user.sub }) ?? '未绑定工作区'}；成员：${existing.member_name}；删除前权限：${existing.permission}`,
           entityId: shareId,
           entityType: 'session_share',
+          sessionId: existing.session_id,
           summary: `已取消 ${existing.member_name} 对“${existing.label ?? existing.session_id}”的共享权限`,
           userId: user.sub,
         });

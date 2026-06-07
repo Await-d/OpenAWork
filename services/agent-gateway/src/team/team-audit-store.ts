@@ -82,6 +82,9 @@ export function __resetTeamAuditPruneStateForTesting(): void {
 }
 
 export type TeamAuditAction =
+  | 'capability_violation'
+  | 'constitution_check'
+  | 'quality_review'
   | 'share_created'
   | 'share_deleted'
   | 'share_permission_updated'
@@ -97,6 +100,8 @@ export type TeamAuditAction =
   | 'route_decision';
 
 export type TeamAuditEntityType =
+  | 'artifact'
+  | 'layer'
   | 'session_share'
   | 'shared_session_comment'
   | 'permission_request'
@@ -117,6 +122,7 @@ interface TeamAuditLogRow {
   entity_id: string;
   entity_type: TeamAuditEntityType;
   id: number;
+  session_id: string | null;
   summary: string;
 }
 
@@ -129,6 +135,7 @@ export interface TeamAuditLogRecord {
   entityId: string;
   entityType: TeamAuditEntityType;
   id: string;
+  sessionId: string | null;
   summary: string;
 }
 
@@ -139,6 +146,7 @@ export function logTeamAudit(input: {
   detail?: string;
   entityId: string;
   entityType: TeamAuditEntityType;
+  sessionId?: string | null;
   summary: string;
   userId: string;
 }): void {
@@ -150,10 +158,11 @@ export function logTeamAudit(input: {
        action,
        entity_type,
        entity_id,
+       session_id,
        summary,
        detail,
        created_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
     [
       input.userId,
       input.actorUserId ?? null,
@@ -161,6 +170,7 @@ export function logTeamAudit(input: {
       input.action,
       input.entityType,
       input.entityId,
+      input.sessionId ?? null,
       input.summary,
       input.detail ?? null,
     ],
@@ -169,9 +179,30 @@ export function logTeamAudit(input: {
   maybePruneTeamAuditLogs(input.userId);
 }
 
+/** 测试用：直接落一条审计日志，便于验证 sessionId 归属字段。 */
+export function __insertTeamAuditLogForTesting(input: {
+  action: TeamAuditAction;
+  detail?: string;
+  entityId: string;
+  entityType: TeamAuditEntityType;
+  sessionId?: string | null;
+  summary: string;
+  userId: string;
+}): void {
+  logTeamAudit({
+    action: input.action,
+    detail: input.detail,
+    entityId: input.entityId,
+    entityType: input.entityType,
+    sessionId: input.sessionId ?? null,
+    summary: input.summary,
+    userId: input.userId,
+  });
+}
+
 export function listTeamAuditLogs(input: { limit: number; userId: string }): TeamAuditLogRecord[] {
   const rows = sqliteAll<TeamAuditLogRow>(
-    `SELECT id, actor_user_id, actor_email, action, entity_type, entity_id, summary, detail, created_at
+    `SELECT id, actor_user_id, actor_email, action, entity_type, entity_id, session_id, summary, detail, created_at
      FROM team_audit_logs
      WHERE user_id = ?
      ORDER BY created_at DESC, id DESC
@@ -186,6 +217,7 @@ export function listTeamAuditLogs(input: { limit: number; userId: string }): Tea
     actorUserId: row.actor_user_id,
     entityType: row.entity_type,
     entityId: row.entity_id,
+    sessionId: row.session_id,
     summary: row.summary,
     detail: row.detail,
     createdAt: row.created_at,

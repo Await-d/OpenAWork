@@ -1,0 +1,199 @@
+// @vitest-environment jsdom
+
+import React from 'react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { TeamSessionListSidebar } from './TeamSessionListSidebar.js';
+
+const copyTextToClipboardMock = vi.hoisted(() => vi.fn(async () => undefined));
+const toastMock = vi.hoisted(() => vi.fn());
+
+vi.mock('./SessionCard.js', () => ({
+  SessionCard: ({
+    session,
+    onContextMenu,
+    onSelect,
+  }: {
+    session: { id: string; title: string };
+    onContextMenu: (event: React.MouseEvent, session: { id: string; title: string }) => void;
+    onSelect: (sessionId: string) => void;
+  }) => (
+    <button
+      type="button"
+      aria-label={session.title}
+      onClick={() => onSelect(session.id)}
+      onContextMenu={(event) => onContextMenu(event, session)}
+    >
+      {session.title}
+    </button>
+  ),
+}));
+
+vi.mock('../../shared/TeamRunStatePill.js', () => ({
+  TeamRunStatePill: () => <div data-testid="team-run-state-pill" />,
+}));
+
+vi.mock('../../../../../components/common/feedback/ToastNotification.js', () => ({
+  toast: toastMock,
+}));
+
+vi.mock('../../../../../components/layout/file-tree/file-tree-actions.js', () => ({
+  copyTextToClipboard: copyTextToClipboardMock,
+}));
+
+vi.mock('../modals/NewTeamSessionModal.js', () => ({
+  NewTeamSessionModal: () => null,
+}));
+
+function createSession(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: 'session-1',
+    isSharedSession: false,
+    status: 'running' as const,
+    subtitle: '运行中',
+    title: '运行会话',
+    updatedAt: '2026-06-04T09:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function renderSidebar(props: Partial<React.ComponentProps<typeof TeamSessionListSidebar>> = {}) {
+  const workspaceGroups = [
+    {
+      sessions: [createSession()],
+      workspaceLabel: 'workspace/demo',
+      workspacePath: '/workspace/demo',
+    },
+  ];
+
+  return render(
+    <TeamSessionListSidebar
+      collapsed={false}
+      onToggleCollapsed={() => {}}
+      workspaceGroups={workspaceGroups}
+      selectedTeamId=""
+      onSelectTeam={() => {}}
+      {...props}
+    />,
+  );
+}
+
+beforeEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  copyTextToClipboardMock.mockReset().mockResolvedValue(undefined);
+  toastMock.mockReset();
+});
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+describe('TeamSessionListSidebar', () => {
+  it('运行中会话的右键菜单走真实重命名与暂停链路，且不再显示置顶假入口', async () => {
+    const onRenameSession = vi.fn(async () => true);
+    const onToggleSessionState = vi.fn(async () => true);
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('新的会话标题');
+
+    renderSidebar({
+      onRenameSession,
+      onToggleSessionState,
+    });
+
+    fireEvent.contextMenu(screen.getByRole('button', { name: '运行会话' }));
+
+    expect(screen.getByRole('menu', { name: '会话操作菜单' })).not.toBeNull();
+    expect(screen.getByRole('menuitem', { name: '重命名' })).not.toBeNull();
+    expect(screen.queryByRole('menuitem', { name: '📌 置顶' })).toBeNull();
+    expect(screen.getByRole('menuitem', { name: '⏸ 暂停会话' })).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('menuitem', { name: '重命名' }));
+
+    await waitFor(() => {
+      expect(onRenameSession).toHaveBeenCalledWith('session-1', '新的会话标题');
+    });
+    expect(promptSpy).toHaveBeenCalledWith('重命名「运行会话」为：', '运行会话');
+
+    fireEvent.contextMenu(screen.getByRole('button', { name: '运行会话' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '⏸ 暂停会话' }));
+
+    await waitFor(() => {
+      expect(onToggleSessionState).toHaveBeenCalledWith('session-1', 'running');
+    });
+  });
+
+  it('共享会话不暴露重命名、恢复和删除等危险入口', () => {
+    renderSidebar({
+      workspaceGroups: [
+        {
+          sessions: [
+            createSession({
+              id: 'shared-1',
+              isSharedSession: true,
+              status: 'paused',
+              subtitle: '已暂停',
+              title: '共享会话',
+            }),
+          ],
+          workspaceLabel: 'workspace/demo',
+          workspacePath: '/workspace/demo',
+        },
+      ],
+      onDeleteSession: vi.fn(),
+      onRenameSession: vi.fn(async () => true),
+      onToggleSessionState: vi.fn(async () => true),
+    });
+
+    fireEvent.contextMenu(screen.getByRole('button', { name: '共享会话' }));
+
+    expect(screen.getByRole('menuitem', { name: '📋 复制 ID' })).not.toBeNull();
+    expect(screen.queryByRole('menuitem', { name: '重命名' })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: '▶ 恢复会话' })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: '🔴 删除会话' })).toBeNull();
+  });
+
+  it('复制会话 ID 后会显示成功反馈', async () => {
+    renderSidebar();
+
+    fireEvent.contextMenu(screen.getByRole('button', { name: '运行会话' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '📋 复制 ID' }));
+
+    await waitFor(() => {
+      expect(copyTextToClipboardMock).toHaveBeenCalledWith('session-1');
+    });
+    expect(toastMock).toHaveBeenCalledWith('已复制会话 ID', 'success');
+  });
+
+  it('没有会话管理权限时禁用新建入口，且右键菜单不暴露重命名/暂停/删除动作', () => {
+    renderSidebar({
+      canManageSessionEntries: false,
+      onDeleteSession: vi.fn(),
+      onRenameSession: vi.fn(async () => true),
+      onToggleSessionState: vi.fn(async () => true),
+      onSubmitDraft: vi.fn(async () => true),
+      teamWorkspaceId: 'workspace-1',
+    });
+
+    expect(screen.getByRole('button', { name: '新建会话' }).hasAttribute('disabled')).toBe(true);
+
+    fireEvent.contextMenu(screen.getByRole('button', { name: '运行会话' }));
+
+    expect(screen.getByRole('menuitem', { name: '📋 复制 ID' })).not.toBeNull();
+    expect(screen.queryByRole('menuitem', { name: '重命名' })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: '⏸ 暂停会话' })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: '🔴 删除会话' })).toBeNull();
+  });
+
+  it('没有 teamWorkspaceId 时也会禁用新建入口，避免出现可点但无效的假入口', () => {
+    renderSidebar({
+      canManageSessionEntries: true,
+      onSubmitDraft: vi.fn(async () => true),
+      teamWorkspaceId: undefined,
+    });
+
+    const createButton = screen.getByRole('button', { name: '新建会话' });
+    expect(createButton.hasAttribute('disabled')).toBe(true);
+    expect(createButton.getAttribute('title')).toBe('请先选择工作空间');
+  });
+});
