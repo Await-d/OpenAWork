@@ -1,4 +1,5 @@
 import { startTransition, useCallback } from 'react';
+import type { UpstreamStreamSummary } from '@openAwork/shared';
 import type {
   Session,
   SessionActiveStream,
@@ -62,6 +63,7 @@ export interface SessionSnapshotLoaderSetters {
   ) => void;
   setSessionStateStatus: (value: SessionStateStatus | null) => void;
   setRecoveryActiveStream: (value: SessionActiveStream | null) => void;
+  setLatestUpstreamSummary: (value: UpstreamStreamSummary | null) => void;
   setRecoveredStreamSnapshot: (
     value:
       | RecoveredActiveAssistantStream
@@ -114,6 +116,7 @@ export function useSessionSnapshotLoader(
     setPendingQuestions,
     setSessionStateStatus,
     setRecoveryActiveStream,
+    setLatestUpstreamSummary,
     setRecoveredStreamSnapshot,
     setIsSessionSnapshotReady,
   } = setters;
@@ -163,6 +166,7 @@ export function useSessionSnapshotLoader(
         sessionStateStatus: nextSessionStateStatus,
       });
       if (next !== null) {
+        setLatestUpstreamSummary(next.upstreamSummary ?? null);
         setRecoveredStreamSnapshot(next);
         return;
       }
@@ -174,9 +178,12 @@ export function useSessionSnapshotLoader(
         activeStream !== null ||
         nextSessionStateStatus === 'running' ||
         nextSessionStateStatus === 'paused';
+      if (!sessionStillStreaming) {
+        setLatestUpstreamSummary(null);
+      }
       setRecoveredStreamSnapshot((previous) => (sessionStillStreaming ? previous : null));
     },
-    [setRecoveredStreamSnapshot],
+    [setLatestUpstreamSummary, setRecoveredStreamSnapshot],
   );
 
   const loadCurrentSessionSnapshot = useCallback(

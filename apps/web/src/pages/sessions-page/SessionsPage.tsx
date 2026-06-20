@@ -202,7 +202,11 @@ export default function SessionsPage() {
         if (loadSessionsRequestIdRef.current !== requestId) {
           return;
         }
-        const nextSessions = list as SessionRow[];
+        const nextSessions = (list as SessionRow[]).filter(
+          // 排除 team 层级角色派生的子会话（pm1/pm2/executor/reviewer 等），
+          // 只保留用户创建的根会话（包括 team 根会话和个人会话）。
+          (session) => !session.team_parent_session_id,
+        );
         mergeSavedWorkspacePaths(listWorkspacePathsFromSessions(nextSessions));
         setSessions(nextSessions);
       } catch {
@@ -679,7 +683,13 @@ export default function SessionsPage() {
             if (!token) return;
             createSessionsClient(gatewayUrl)
               .list(token)
-              .then((list) => setSessions(list as SessionRow[]))
+              .then((list) =>
+                setSessions(
+                  (list as SessionRow[]).filter(
+                    (session) => !session.team_parent_session_id,
+                  ),
+                ),
+              )
               .catch(() => null);
           }, 800);
         }}
@@ -700,6 +710,7 @@ export default function SessionsPage() {
         fetchRootPath={workspacePickerDataSource.fetchRootPath}
         fetchWorkspaceRoots={workspacePickerDataSource.fetchWorkspaceRoots}
         fetchTree={workspacePickerDataSource.fetchTree}
+        createDirectory={workspacePickerDataSource.createDirectory}
         validatePath={workspacePickerDataSource.validatePath}
         initialPath={pendingWorkspacePath ?? undefined}
       />

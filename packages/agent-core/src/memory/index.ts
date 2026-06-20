@@ -1,6 +1,7 @@
 export type {
   MemoryType,
   MemorySource,
+  MemoryRoleLayer,
   MemoryEntry,
   CreateMemoryInput,
   UpdateMemoryInput,
@@ -15,8 +16,11 @@ export type {
 export {
   MEMORY_TYPES,
   MEMORY_SOURCES,
+  MEMORY_ROLE_LAYERS,
   memoryTypeSchema,
   memorySourceSchema,
+  memoryRoleLayerSchema,
+  memoryRoleLayersSchema,
   createMemorySchema,
   updateMemorySchema,
   memoryListQuerySchema,

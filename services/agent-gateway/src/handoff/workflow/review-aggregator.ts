@@ -36,8 +36,24 @@ export interface ReviewReport {
   qualityReviewPassed: boolean;
   specIssues: string[];
   qualityIssues: string[];
-  overallVerdict: 'pass' | 'implementation-failure' | 'planning-failure';
+  overallVerdict:
+    | 'pass'
+    | 'implementation-failure'
+    | 'planning-failure'
+    | 'execution-protocol-failure';
   reportMarkdown: string;
+}
+
+interface ReviewReadinessResult {
+  passed: boolean;
+  issues: string[];
+  childResults: string;
+  /**
+   * 当存在 failed/cancelled 子任务时，ready 不会 pass，但 verdict 应该是
+   * `implementation-failure`（执行层任务本身失败）而非
+   * `execution-protocol-failure`（交付协议未完成）。
+   */
+  hasFailedChildren: boolean;
 }
 
 export type FailureDisposition =
@@ -108,10 +124,16 @@ ISSUE: [宪法违反描述]`;
 // ─── Report 生成 ────────────────────────────────────────────────────────────
 
 function generateReportMarkdown(report: Omit<ReviewReport, 'reportMarkdown'>): string {
+  const verdictLabel: Record<ReviewReport['overallVerdict'], string> = {
+    pass: '✅ 通过',
+    'planning-failure': '❌ 规划型失败',
+    'execution-protocol-failure': '❌ 执行协议失败',
+    'implementation-failure': '❌ 实现型失败',
+  };
   const lines: string[] = [
     '# Review Report',
     '',
-    `**总体判定**：${report.overallVerdict === 'pass' ? '✅ 通过' : report.overallVerdict === 'implementation-failure' ? '❌ 实现型失败' : '❌ 规划型失败'}`,
+    `**总体判定**：${verdictLabel[report.overallVerdict]}`,
     '',
     '## Spec Review',
     '',
@@ -134,6 +156,7 @@ export function determineFailureDisposition(input: {
 }): FailureDisposition {
   const disposition = deriveQualityReviewDisposition({
     escalationRound: input.escalationRound,
+    overallVerdict: input.report.overallVerdict,
     qualityIssues: input.report.qualityIssues,
     qualityReviewPassed: input.report.qualityReviewPassed,
     specIssues: input.report.specIssues,
@@ -148,16 +171,39 @@ export function determineFailureDisposition(input: {
 // ─── 主流程 ─────────────────────────────────────────────────────────────────
 
 export async function runReviewAggregation(input: ReviewInput): Promise<ReviewReport> {
-  // 收集所有子 handoff 的结果
-  const childResults = input.childHandoffs
-    .map((h) => {
-      const resultRow = sqliteGet<{ result_json: string | null }>(
-        `SELECT result_json FROM handoff_records WHERE id = ?`,
-        [h.id],
-      );
-      return `[${h.toRoleLayer}:${h.id}] ${resultRow?.result_json ?? '(无结果)'}`;
-    })
-    .join('\n\n');
+  const readiness = buildReviewReadiness(input.childHandoffs);
+  if (!readiness.passed) {
+    // 区分两种失败场景：
+    //   1. 子任务 state 为 failed/cancelled → implementation-failure（执行层任务本身失败）
+    //   2. 子任务 state 为 completed 但缺 result_json/payload → execution-protocol-failure（交付协议未完成）
+    const overallVerdict: ReviewReport['overallVerdict'] = readiness.hasFailedChildren
+      ? 'implementation-failure'
+      : 'execution-protocol-failure';
+
+    const reportData: Omit<ReviewReport, 'reportMarkdown'> = {
+      specReviewPassed: true,
+      qualityReviewPassed: false,
+      specIssues: [],
+      qualityIssues: [
+        ...readiness.issues,
+        readiness.hasFailedChildren
+          ? '存在子任务执行失败/取消，Quality Review 基于部分结果无法有效评审'
+          : '评审前置条件未满足，已阻止空跑 Quality Review',
+      ],
+      overallVerdict,
+    };
+    const reportMarkdown = generateReportMarkdown(reportData);
+    const report: ReviewReport = { ...reportData, reportMarkdown };
+    persistReviewReport({
+      pm2HandoffId: input.pm2HandoffId,
+      pm2SessionId: input.pm2SessionId,
+      report,
+      userId: input.userId,
+    });
+    return report;
+  }
+
+  const childResults = readiness.childResults;
 
   // 并行跑 spec review + quality review
   const [specResult, qualityResult] = await Promise.all([
@@ -189,43 +235,135 @@ export async function runReviewAggregation(input: ReviewInput): Promise<ReviewRe
   const reportMarkdown = generateReportMarkdown(reportData);
   const report: ReviewReport = { ...reportData, reportMarkdown };
 
-  // 写入 review_report artifact
+  persistReviewReport({
+    pm2HandoffId: input.pm2HandoffId,
+    pm2SessionId: input.pm2SessionId,
+    report,
+    userId: input.userId,
+  });
+
+  return report;
+}
+
+function persistReviewReport(input: {
+  pm2HandoffId: string;
+  pm2SessionId: string;
+  report: ReviewReport;
+  userId: string;
+}): void {
   const reportArtifactId = randomUUID();
   sqliteRun(
-    `INSERT INTO artifacts (id, session_id, user_id, type, title, content, version, phase)
+     `INSERT INTO artifacts (id, session_id, user_id, type, title, content, version, phase)
      VALUES (?, ?, ?, 'markdown', 'Review Report', ?, 1, 'review')`,
-    [reportArtifactId, input.pm2SessionId, input.userId, reportMarkdown],
+    [reportArtifactId, input.pm2SessionId, input.userId, input.report.reportMarkdown],
   );
 
-  // 写入 d 层 handoff 的 result_json
   sqliteRun(
     `UPDATE handoff_records SET result_json = ?, updated_at = datetime('now') WHERE id = ?`,
     [
       JSON.stringify({
         reviewReportArtifactId: reportArtifactId,
-        overallVerdict: report.overallVerdict,
-        specReviewPassed: report.specReviewPassed,
-        qualityReviewPassed: report.qualityReviewPassed,
+        overallVerdict: input.report.overallVerdict,
+        specReviewPassed: input.report.specReviewPassed,
+        qualityReviewPassed: input.report.qualityReviewPassed,
       }),
       input.pm2HandoffId,
     ],
   );
 
-  // 推送事件
   publishTeamEvent({
-    type: report.overallVerdict === 'pass' ? 'handoff.completed' : 'handoff.failed',
+    type: input.report.overallVerdict === 'pass' ? 'handoff.completed' : 'handoff.failed',
     taskId: input.pm2HandoffId,
     sessionId: input.pm2SessionId,
     layer: 'pm2',
     timestamp: Date.now(),
     payload: {
-      overallVerdict: report.overallVerdict,
+      overallVerdict: input.report.overallVerdict,
       reportArtifactId,
     },
     userId: input.userId,
   });
+}
 
-  return report;
+function buildReviewReadiness(childHandoffs: HandoffRecord[]): ReviewReadinessResult {
+  const issues: string[] = [];
+  let hasFailedChildren = false;
+  const childResults = childHandoffs
+    .map((h) => {
+      const payload = isRecord(h.payload) ? h.payload : null;
+      const goal = typeof payload?.['goal'] === 'string' ? payload['goal'].trim() : '';
+      const taskMarkers = isRecord(payload?.['taskMarkers']) ? payload['taskMarkers'] : null;
+      const taskId = typeof taskMarkers?.['taskId'] === 'string' ? taskMarkers['taskId'] : '';
+
+      // 区分子 handoff 的终态：
+      //   - failed / cancelled：执行层任务本身失败，不应要求 result_json，
+      //     直接生成 implementation-failure issue 并标记 hasFailedChildren。
+      //   - completed：正常完成，必须检查 result_json 是否存在。
+      //   - 其他非终态：理论上 checkAllChildrenCompleted 已过滤，但防御性处理。
+      if (h.state === 'failed' || h.state === 'cancelled') {
+        hasFailedChildren = true;
+        const failReason = h.failureReason
+          ? `（失败原因：${h.failureReason}）`
+          : h.state === 'cancelled'
+            ? '（任务被取消）'
+            : '';
+        issues.push(`${h.id} 子任务执行${h.state === 'cancelled' ? '被取消' : '失败'}${failReason}，无法参与质量评审`);
+
+        return [
+          `[${h.toRoleLayer}:${h.id}]`,
+          `任务：${goal || '未命名任务'}`,
+          `任务ID：${taskId || '缺失'}`,
+          `状态：${h.state}`,
+          `结果：(任务${h.state === 'cancelled' ? '被取消' : '失败'})`,
+        ].join('\n');
+      }
+
+      // completed 或其他非终态：检查交付物。
+      // 优先使用 HandoffRecord 上已解析的 resultJson（由 checkAllChildrenCompleted 填充），
+      // 避免冗余 DB 查询；兜底再查 DB 以兼容直接构造的入参。
+      const resultFromRecord = h.resultJson;
+      let resultJson = '';
+      if (resultFromRecord !== null && resultFromRecord !== undefined) {
+        resultJson = typeof resultFromRecord === 'string' ? resultFromRecord : JSON.stringify(resultFromRecord);
+      } else {
+        const resultRow = sqliteGet<{ result_json: string | null }>(
+          `SELECT result_json FROM handoff_records WHERE id = ?`,
+          [h.id],
+        );
+        resultJson = resultRow?.result_json?.trim() ?? '';
+      }
+
+      if (!goal) {
+        issues.push(`${h.id} 缺少任务标题，无法建立评审映射`);
+      }
+      if (!taskId) {
+        issues.push(`${h.id} 缺少 taskId，无法追踪任务来源`);
+      }
+      if (!resultJson) {
+        issues.push(
+          `${h.id} 缺少执行结果 artifact/summary，Quality Review 无法取证（执行层未完成交付协议）`,
+        );
+      }
+
+      return [
+        `[${h.toRoleLayer}:${h.id}]`,
+        `任务：${goal || '未命名任务'}`,
+        `任务ID：${taskId || '缺失'}`,
+        `结果：${resultJson || '(无结果)'}`,
+      ].join('\n');
+    })
+    .join('\n\n');
+
+  return {
+    passed: issues.length === 0,
+    issues,
+    childResults,
+    hasFailedChildren,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**
@@ -278,7 +416,11 @@ export function checkAllChildrenCompleted(pm2HandoffId: string): {
   }
 
   const childIds = resultData['dispatchedHandoffIds'] as string[] | undefined;
-  if (!childIds || childIds.length === 0) return { allDone: false, children: [] };
+  if (!childIds || childIds.length === 0) {
+    // 没有子任务需要等待——视为全部完成，让 quality review 能正常触发。
+    // 否则 PM2 会永远卡在 running 状态（无子任务 → allDone 永远 false → 死锁）。
+    return { allDone: true, children: [] };
+  }
 
   const children = sqliteAll<{
     id: string;

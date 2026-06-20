@@ -39,14 +39,16 @@ export interface SegmentedToggleProps<V extends string> {
 }
 
 const TRACK_STYLE: CSSProperties = {
-  display: 'inline-flex',
+  display: 'flex',
   alignItems: 'center',
   gap: 2,
   padding: 2,
   borderRadius: 999,
   border: `1px solid ${CK_BORDER_SUBTLE}`,
   background: 'color-mix(in srgb, var(--bg-base) 60%, transparent)',
-  flexShrink: 0,
+  flexWrap: 'wrap',
+  minWidth: 0,
+  maxWidth: '100%',
 };
 
 export function SegmentedToggle<V extends string>({

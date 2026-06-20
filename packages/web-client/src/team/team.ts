@@ -16,6 +16,8 @@ import type { TeamInitState, TeamInitStepKey } from '@openAwork/shared';
 import type { HandoffRecord } from './team-handoffs.js';
 import { HttpError, readJsonErrorData, fetchWithTimeout } from '../gateway/http.js';
 
+const TEAM_INIT_ACTION_TIMEOUT_MS = 120_000;
+
 export type TeamMemberSlotInput = FixedTeamMemberSlot;
 
 export type TeamWorkspaceVisibility = 'open' | 'closed' | 'private';
@@ -85,6 +87,8 @@ export interface TeamTaskRecord {
   id: string;
   title: string;
   assigneeId: string | null;
+  assignedAgent?: string;
+  taskThreadId?: string;
   status: 'pending' | 'in_progress' | 'completed' | 'failed';
   priority: 'low' | 'medium' | 'high';
   result: string | null;
@@ -94,6 +98,7 @@ export interface TeamTaskRecord {
 
 export interface TeamMessageRecord {
   id: string;
+  sessionId?: string | null;
   memberId: string;
   recipientMemberId?: string | null;
   replyToMessageId?: string | null;
@@ -123,6 +128,7 @@ export interface UpdateTeamTaskInput {
 }
 
 export interface CreateTeamMessageInput {
+  sessionId?: string | null;
   senderId?: string;
   recipientMemberId?: string | null;
   replyToMessageId?: string | null;
@@ -190,11 +196,19 @@ export interface CreateTeamSessionShareInput {
   permission?: 'view' | 'comment' | 'operate';
 }
 
+export interface TeamRuntimeRoleInstanceRecord {
+  rootSessionId: string;
+  roleLayer: string;
+  personaKey: string | null;
+  displayName: string | null;
+}
+
 export interface TeamRuntimeSessionRecord {
   id: string;
   metadataJson: string;
   parentSessionId: string | null;
   paused?: boolean;
+  roleInstance?: TeamRuntimeRoleInstanceRecord;
   roleLayer: string | null;
   stateStatus: string;
   title: string | null;
@@ -268,20 +282,69 @@ export interface TeamToolCallRecord {
 }
 
 export interface TeamRuntimePauseAllResult {
+  depthLimitReached: boolean;
   handoffIds: string[];
+  limitReached: boolean;
+  omittedSessionCount: number;
   pausedHandoffCount: number;
   pausedSessionCount: number;
+  sessionLimit: number;
+  sessionMaxDepth: number;
   sessionId: string;
   sessionIds: string[];
+  truncated: boolean;
 }
 
 export interface TeamRuntimeResumeAllResult {
+  depthLimitReached: boolean;
   handoffIds: string[];
+  limitReached: boolean;
+  omittedSessionCount: number;
   resumedHandoffCount: number;
   resumedSessionCount: number;
+  sessionLimit: number;
+  sessionMaxDepth: number;
   sessionId: string;
   sessionIds: string[];
   staleSessionCount: number;
+  truncated: boolean;
+  /** 被跳过的 session 数（终态，无需恢复） */
+  skippedSessionCount: number;
+  /** 因需用户交互被保持暂停的 session 数（如 clarifying） */
+  userBlockedSessionCount: number;
+  /** 需用户交互的 session id 列表 */
+  userBlockedSessionIds: string[];
+  /** 被跳过的 session id 列表 */
+  skippedSessionIds: string[];
+  /** 分层恢复详情 */
+  layerResumeDetails: TeamLayerResumeDetail[];
+  /** 一致性校验修复数量 */
+  consistencyFixCount: number;
+  /** 一致性校验修复详情 */
+  consistencyFixes: TeamConsistencyFix[];
+  /** 恢复模式：signal-only | background-rerun | full-rebuild */
+  resumeMode: string;
+  /** 后台续跑目标（如有） */
+  backgroundRerunTarget: { sessionId: string; roleLayer: string | null } | null;
+}
+
+export interface TeamLayerResumeDetail {
+  sessionId: string;
+  roleLayer: string | null;
+  substate: string | null;
+  action: 'resumed' | 'skipped_terminal' | 'skipped_user_blocked' | 'skipped_not_paused';
+}
+
+export interface TeamConsistencyFix {
+  type:
+    | 'orphan_session_cancelled'
+    | 'zombie_handoff_failed'
+    | 'duplicate_handoff_cancelled'
+    | 'stale_heartbeat_reclaimed'
+    | 'stuck_running_reset';
+  sessionId?: string;
+  handoffId?: string;
+  detail: string;
 }
 
 export interface TeamRuntimeLatencyStats {
@@ -470,6 +533,16 @@ export interface TeamWorkspaceSnapshot {
   sharedSessions: SharedSessionSummaryRecord[];
   sessionShares: TeamSessionShareRecord[];
   runtimeTaskGroups: TeamRuntimeTaskGroupRecord[];
+  auditLogs?: TeamAuditLogRecord[];
+  clarifications?: TeamRuntimeClarificationRecord[];
+  diagnostics?: TeamRuntimeDiagnostics;
+  handoffs?: HandoffRecord[];
+  members?: TeamMemberRecord[];
+  messages?: TeamMessageRecord[];
+  notifications?: TeamRuntimeNotificationRecord[];
+  tasks?: TeamTaskRecord[];
+  toolCallRecords?: TeamToolCallRecord[];
+  usageRecords?: TeamUsageRecord[];
 }
 
 export interface TeamRuntimeReadModel {
@@ -751,6 +824,7 @@ async function performTeamInitRequest(
     const response = await fetchWithTimeout(`${baseUrl}${pathSuffix}`, {
       method,
       headers: buildAuthHeaders(token),
+      ...(method === 'POST' ? { timeoutMs: TEAM_INIT_ACTION_TIMEOUT_MS } : {}),
     });
     let body: { teamInit?: TeamInitState | null; error?: string } | null = null;
     try {

@@ -7,7 +7,10 @@ import type {
   ContextItem,
   HistoricalPlan,
 } from '@openAwork/shared-ui';
+import type { UpstreamStreamSummary } from '@openAwork/shared';
+import { tryFormatJson } from '../../utils/format-json.js';
 import { Link } from 'react-router';
+import { copyTextToClipboard } from '../../../components/layout/file-tree/file-tree-actions.js';
 import type { DialogueMode } from '../mode/dialogue-mode.js';
 import type { ChatContextUsageSnapshot } from '../../../components/conversation-runtime/messages/context-usage.js';
 import type {
@@ -178,9 +181,149 @@ interface CompactionItem {
   occurredAt: number;
 }
 
+export interface UpstreamSummaryItem {
+  id: string;
+  occurredAt: number;
+  requestId?: string;
+  runId?: string;
+  summary: UpstreamStreamSummary;
+}
+
+type UpstreamSummaryFilter = 'all' | 'error' | 'stalled' | 'tool' | 'cancelled';
+
+export interface UpstreamSummaryRequestGroup {
+  key: string;
+  label: string;
+  items: UpstreamSummaryItem[];
+}
+
+export interface UpstreamSummaryGroupCounts {
+  errorCount: number;
+  stalledCount: number;
+  toolCount: number;
+}
+
+export function formatUpstreamSummaryStatusLabel(summary: UpstreamStreamSummary): string {
+  if (summary.stopReason === 'end_turn') return '正常结束';
+  if (summary.stopReason === 'tool_use') return '等待工具';
+  if (summary.stopReason === 'max_tokens') return '达到上限';
+  if (summary.stopReason === 'cancelled') return '已停止';
+  if (summary.stopReason === 'tool_permission') return '等待权限';
+  return '上游错误';
+}
+
+export function formatUpstreamSummaryMetricLine(summary: UpstreamStreamSummary): string {
+  const suffix = summary.stalled
+    ? ' · stalled'
+    : summary.sawError
+      ? ' · error'
+      : summary.sawDone
+        ? ' · done'
+        : '';
+  return `文本 ${summary.textDeltaCount} / 思考 ${summary.reasoningDeltaCount} / 工具 ${summary.toolCallDeltaCount}${suffix}`;
+}
+
+function matchesUpstreamSummaryFilter(
+  item: UpstreamSummaryItem,
+  filter: UpstreamSummaryFilter,
+): boolean {
+  if (filter === 'all') return true;
+  if (filter === 'error') return item.summary.sawError || item.summary.stopReason === 'error';
+  if (filter === 'stalled') return item.summary.stalled;
+  if (filter === 'tool') return item.summary.stopReason === 'tool_use' || item.summary.toolCallDeltaCount > 0;
+  return item.summary.stopReason === 'cancelled';
+}
+
+function matchesUpstreamSummaryQuery(item: UpstreamSummaryItem, query: string): boolean {
+  const keyword = query.trim().toLowerCase();
+  if (keyword.length === 0) return true;
+  return [
+    item.requestId,
+    item.runId,
+    formatUpstreamSummaryStatusLabel(item.summary),
+    formatUpstreamSummaryMetricLine(item.summary),
+  ].some((field) => String(field ?? '').toLowerCase().includes(keyword));
+}
+
+export function groupUpstreamSummariesByRequest(
+  items: UpstreamSummaryItem[],
+): UpstreamSummaryRequestGroup[] {
+  const groups = new Map<string, UpstreamSummaryRequestGroup>();
+  for (const item of items) {
+    const requestId = item.requestId?.trim();
+    const runId = item.runId?.trim();
+    const key = requestId ? `request:${requestId}` : runId ? `run:${runId}` : `orphan:${item.id}`;
+    const label = requestId
+      ? `请求 ${requestId}`
+      : runId
+        ? `运行 ${runId}`
+        : '未绑定请求';
+    const existing = groups.get(key);
+    if (existing) {
+      existing.items.push(item);
+      continue;
+    }
+    groups.set(key, { key, label, items: [item] });
+  }
+  return Array.from(groups.values());
+}
+
+export function findUpstreamSummaryGroupByKey(
+  items: UpstreamSummaryItem[],
+  key: string,
+): UpstreamSummaryRequestGroup | null {
+  return groupUpstreamSummariesByRequest(items).find((group) => group.key === key) ?? null;
+}
+
+export function summarizeUpstreamSummaryGroupCounts(
+  group: UpstreamSummaryRequestGroup,
+): UpstreamSummaryGroupCounts {
+  return group.items.reduce<UpstreamSummaryGroupCounts>(
+    (acc, item) => ({
+      errorCount:
+        acc.errorCount + (item.summary.sawError || item.summary.stopReason === 'error' ? 1 : 0),
+      stalledCount: acc.stalledCount + (item.summary.stalled ? 1 : 0),
+      toolCount:
+        acc.toolCount +
+        (item.summary.stopReason === 'tool_use' || item.summary.toolCallDeltaCount > 0 ? 1 : 0),
+    }),
+    { errorCount: 0, stalledCount: 0, toolCount: 0 },
+  );
+}
+
+export function formatUpstreamSummaryGroupHeadline(group: UpstreamSummaryRequestGroup): string {
+  const counts = summarizeUpstreamSummaryGroupCounts(group);
+  return `${group.items.length} 条 · 错误 ${counts.errorCount} / 卡住 ${counts.stalledCount} / 工具 ${counts.toolCount}`;
+}
+
+export function buildUpstreamSummaryGroupContextText(
+  group: UpstreamSummaryRequestGroup,
+  limit = 3,
+): string {
+  const recentItems = group.items.slice(0, Math.max(0, limit));
+  const lines = [group.label, formatUpstreamSummaryGroupHeadline(group)];
+
+  if (recentItems.length > 0) {
+    lines.push('最近诊断');
+    lines.push(
+      ...recentItems.map((item, index) => {
+        const timeLabel = new Date(item.occurredAt).toLocaleTimeString('zh-CN', {
+          hour12: false,
+        });
+        return `${index + 1}. ${formatUpstreamSummaryStatusLabel(item.summary)} · ${formatUpstreamSummaryMetricLine(item.summary)} · ${timeLabel}${item.runId ? ` · ${item.runId}` : ''}`;
+      }),
+    );
+  }
+
+  return lines.join('\n');
+}
+
 export function ChatHistoryTabContent(props: {
   childSessions: Session[];
   compactions: CompactionItem[];
+  upstreamSummaries: UpstreamSummaryItem[];
+  focusedUpstreamGroupKey?: string | null;
+  onSelectUpstreamGroup?: (groupKey: string | null) => void;
   pendingPermissions: PendingPermissionRequest[];
   resolveInlinePermissionActions?: (requestId: string) =>
     | {
@@ -211,6 +354,9 @@ export function ChatHistoryTabContent(props: {
   const {
     childSessions,
     compactions,
+    upstreamSummaries,
+    focusedUpstreamGroupKey = null,
+    onSelectUpstreamGroup,
     pendingPermissions,
     resolveInlinePermissionActions,
     planHistory,
@@ -224,9 +370,25 @@ export function ChatHistoryTabContent(props: {
   const hasChildSessions = childSessions.length > 0;
   const hasSessionTasks = sessionTasks.length > 0;
   const hasCompactions = compactions.length > 0;
+  const hasUpstreamSummaries = upstreamSummaries.length > 0;
   const hasPendingPermissions = pendingPermissions.length > 0;
   const hasMainTodos = mainTodos.length > 0;
   const hasTempTodos = tempTodos.length > 0;
+  const [upstreamFilter, setUpstreamFilter] = React.useState<UpstreamSummaryFilter>('all');
+  const [upstreamQuery, setUpstreamQuery] = React.useState('');
+  const [collapsedUpstreamGroups, setCollapsedUpstreamGroups] = React.useState<Record<string, boolean>>(
+    {},
+  );
+  const filteredUpstreamSummaries = upstreamSummaries.filter(
+    (item) =>
+      matchesUpstreamSummaryFilter(item, upstreamFilter) &&
+      matchesUpstreamSummaryQuery(item, upstreamQuery),
+  );
+  const groupedUpstreamSummaries = groupUpstreamSummariesByRequest(filteredUpstreamSummaries);
+  const handleCopyUpstreamGroupContext = (group: UpstreamSummaryRequestGroup) => {
+    const fullGroup = findUpstreamSummaryGroupByKey(upstreamSummaries, group.key) ?? group;
+    void copyTextToClipboard(buildUpstreamSummaryGroupContextText(fullGroup));
+  };
 
   return (
     <div style={{ ...sharedUiThemeVars, display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -569,7 +731,7 @@ export function ChatHistoryTabContent(props: {
           )}
         </div>
       )}
-      {(hasCompactions || hasPendingPermissions) && (
+      {(hasCompactions || hasUpstreamSummaries || hasPendingPermissions) && (
         <div style={PANEL_SECTION_STYLE}>
           {hasCompactions && (
             <>
@@ -588,13 +750,280 @@ export function ChatHistoryTabContent(props: {
                   <div
                     style={{ color: 'var(--fg-default)', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}
                   >
-                    {item.summary}
+                    {tryFormatJson(item.summary)}
                   </div>
                 </div>
               ))}
             </>
           )}
-          {hasCompactions && hasPendingPermissions && (
+          {hasCompactions && hasUpstreamSummaries && (
+            <div
+              style={{
+                margin: '6px 0',
+                borderTop: '1px solid color-mix(in oklch, var(--border-default) 60%, transparent)',
+              }}
+            />
+          )}
+          {hasUpstreamSummaries && (
+            <>
+              <div style={PANEL_SECTION_EYEBROW_STYLE}>流式诊断历史</div>
+              <input
+                type="search"
+                value={upstreamQuery}
+                onChange={(event) => setUpstreamQuery(event.target.value)}
+                placeholder="搜索 requestId / runId / 状态…"
+                style={{
+                  borderRadius: 8,
+                  border: '1px solid var(--border-default)',
+                  background: 'var(--bg-overlay)',
+                  color: 'var(--fg-strong)',
+                  fontSize: 11,
+                  padding: '6px 9px',
+                }}
+              />
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {(
+                  [
+                    ['all', '全部'],
+                    ['error', '错误'],
+                    ['stalled', '卡住'],
+                    ['tool', '工具'],
+                    ['cancelled', '停止'],
+                  ] as Array<[UpstreamSummaryFilter, string]>
+                ).map(([filter, label]) => {
+                  const active = upstreamFilter === filter;
+                  return (
+                    <button
+                      key={filter}
+                      type="button"
+                      onClick={() => setUpstreamFilter(filter)}
+                      style={{
+                        borderRadius: 999,
+                        border: active
+                          ? '1px solid color-mix(in oklch, var(--accent) 30%, var(--border-default))'
+                          : '1px solid var(--border-default)',
+                        background: active
+                          ? 'color-mix(in oklch, var(--accent) 10%, transparent)'
+                          : 'var(--bg-overlay)',
+                        color: active ? 'var(--accent)' : 'var(--fg-muted)',
+                        fontSize: 10,
+                        fontWeight: 600,
+                        padding: '2px 8px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+              {groupedUpstreamSummaries.map((group) => (
+                <div
+                  key={group.key}
+                  style={{
+                    borderRadius: 8,
+                    border:
+                      focusedUpstreamGroupKey === group.key
+                        ? '1px solid color-mix(in oklch, var(--accent) 34%, var(--border-default))'
+                        : '1px solid var(--border-default)',
+                    background: 'var(--bg-overlay)',
+                    padding: '7px 9px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 8,
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCollapsedUpstreamGroups((prev) => ({
+                          ...prev,
+                          [group.key]: !prev[group.key],
+                        }))
+                      }
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        border: 'none',
+                        background: 'transparent',
+                        color: 'var(--fg-strong)',
+                        padding: 0,
+                        cursor: 'pointer',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        textAlign: 'left',
+                      }}
+                    >
+                      <span style={{ color: 'var(--fg-muted)', fontSize: 10 }}>
+                        {collapsedUpstreamGroups[group.key] ? '▸' : '▾'}
+                      </span>
+                      <span>{group.label}</span>
+                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyUpstreamGroupContext(group)}
+                        aria-label={`复制${group.label}诊断上下文`}
+                        style={{
+                          fontSize: 10,
+                          color: 'var(--fg-muted)',
+                          borderRadius: 999,
+                          border: '1px solid var(--border-default)',
+                          padding: '1px 6px',
+                          background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        复制上下文
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onSelectUpstreamGroup?.(
+                            focusedUpstreamGroupKey === group.key ? null : group.key,
+                          )
+                        }
+                        style={{
+                          fontSize: 10,
+                          color:
+                            focusedUpstreamGroupKey === group.key
+                              ? 'var(--accent)'
+                              : 'var(--fg-muted)',
+                          borderRadius: 999,
+                          border:
+                            focusedUpstreamGroupKey === group.key
+                              ? '1px solid color-mix(in oklch, var(--accent) 34%, var(--border-default))'
+                              : '1px solid var(--border-default)',
+                          padding: '1px 6px',
+                          background:
+                            focusedUpstreamGroupKey === group.key
+                              ? 'color-mix(in oklch, var(--accent) 10%, transparent)'
+                              : 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {focusedUpstreamGroupKey === group.key ? '取消聚焦' : '聚焦'}
+                      </button>
+                      {(() => {
+                        const counts = summarizeUpstreamSummaryGroupCounts(group);
+                        return (
+                          <>
+                            {counts.errorCount > 0 && (
+                              <span
+                                style={{
+                                  fontSize: 10,
+                                  color: 'var(--danger)',
+                                  borderRadius: 999,
+                                  border:
+                                    '1px solid color-mix(in srgb, var(--danger) 30%, var(--border-default))',
+                                  padding: '1px 6px',
+                                  background: 'color-mix(in srgb, var(--danger) 10%, transparent)',
+                                }}
+                              >
+                                错误 {counts.errorCount}
+                              </span>
+                            )}
+                            {counts.stalledCount > 0 && (
+                              <span
+                                style={{
+                                  fontSize: 10,
+                                  color: 'var(--warning)',
+                                  borderRadius: 999,
+                                  border:
+                                    '1px solid color-mix(in srgb, var(--warning) 34%, var(--border-default))',
+                                  padding: '1px 6px',
+                                  background: 'color-mix(in srgb, var(--warning) 10%, transparent)',
+                                }}
+                              >
+                                卡住 {counts.stalledCount}
+                              </span>
+                            )}
+                            {counts.toolCount > 0 && (
+                              <span
+                                style={{
+                                  fontSize: 10,
+                                  color: 'var(--accent)',
+                                  borderRadius: 999,
+                                  border:
+                                    '1px solid color-mix(in oklch, var(--accent) 28%, var(--border-default))',
+                                  padding: '1px 6px',
+                                  background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
+                                }}
+                              >
+                                工具 {counts.toolCount}
+                              </span>
+                            )}
+                            <span
+                              style={{
+                                fontSize: 10,
+                                color: 'var(--fg-muted)',
+                                borderRadius: 999,
+                                border: '1px solid var(--border-default)',
+                                padding: '1px 6px',
+                                background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
+                              }}
+                            >
+                              {group.items.length} 条
+                            </span>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                  {!collapsedUpstreamGroups[group.key] &&
+                    group.items.map((item, index) => (
+                      <div
+                        key={item.id}
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 3,
+                          paddingTop: index > 0 ? 6 : 0,
+                          borderTop:
+                            index > 0
+                              ? '1px solid color-mix(in oklch, var(--border-default) 60%, transparent)'
+                              : 'none',
+                        }}
+                      >
+                        <div style={{ fontSize: 12, color: 'var(--fg-strong)', fontWeight: 600 }}>
+                          {formatUpstreamSummaryStatusLabel(item.summary)}
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--fg-default)' }}>
+                          {formatUpstreamSummaryMetricLine(item.summary)}
+                        </div>
+                        <div
+                          style={{ fontSize: 10, color: 'var(--fg-muted)', fontFamily: 'monospace' }}
+                        >
+                          {new Date(item.occurredAt).toLocaleTimeString('zh-CN', { hour12: false })}
+                          {item.runId ? ` · ${item.runId}` : ''}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              ))}
+              {filteredUpstreamSummaries.length === 0 && (
+                <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>当前筛选下没有匹配的流式诊断。</div>
+              )}
+            </>
+          )}
+          {hasUpstreamSummaries && hasPendingPermissions && (
+            <div
+              style={{
+                margin: '6px 0',
+                borderTop: '1px solid color-mix(in oklch, var(--border-default) 60%, transparent)',
+              }}
+            />
+          )}
+          {hasCompactions && !hasUpstreamSummaries && hasPendingPermissions && (
             <div
               style={{
                 margin: '6px 0',
@@ -828,6 +1257,8 @@ export function ChatOverviewTabContent(props: {
   artifactsWorkspaceHref: string | null;
   childSessions: Session[];
   compactions: CompactionItem[];
+  upstreamSummaries: UpstreamSummaryItem[];
+  focusedUpstreamGroupKey?: string | null;
   contextUsageSnapshot: ChatContextUsageSnapshot | null;
   contentArtifactCount: number;
   contentArtifactCountStatus: 'idle' | 'loading' | 'ready' | 'error';
@@ -850,6 +1281,8 @@ export function ChatOverviewTabContent(props: {
     artifactsWorkspaceHref,
     childSessions,
     compactions,
+    upstreamSummaries,
+    focusedUpstreamGroupKey = null,
     contextUsageSnapshot,
     contentArtifactCount,
     contentArtifactCountStatus,
@@ -874,6 +1307,12 @@ export function ChatOverviewTabContent(props: {
   const tempActiveCount = tempTodos.filter(
     (todo) => todo.status === 'pending' || todo.status === 'in_progress',
   ).length;
+  const focusedUpstreamGroup = focusedUpstreamGroupKey
+    ? groupUpstreamSummariesByRequest(upstreamSummaries).find(
+        (group) => group.key === focusedUpstreamGroupKey,
+      ) ?? null
+    : null;
+  const focusedUpstreamSummaries = focusedUpstreamGroup?.items ?? upstreamSummaries;
   const artifactCountLabel =
     contentArtifactCountStatus === 'loading'
       ? '同步中…'
@@ -940,6 +1379,17 @@ export function ChatOverviewTabContent(props: {
     },
     { label: 'YOLO', value: yoloMode ? '开启' : '关闭', highlight: yoloMode },
     { label: '最近压缩', value: compactions[0]?.summary ?? '无' },
+    {
+      label: '当前聚焦请求',
+      value: focusedUpstreamGroup?.label ?? '全部请求',
+      highlight: Boolean(focusedUpstreamGroup),
+    },
+    {
+      label: '最近流诊断',
+      value: focusedUpstreamSummaries[0]
+        ? formatUpstreamSummaryStatusLabel(focusedUpstreamSummaries[0].summary)
+        : '无',
+    },
   ];
 
   const statsGrid: Array<{ label: string; value: string; accent?: boolean }> = [
@@ -1094,6 +1544,99 @@ export function ChatOverviewTabContent(props: {
       </div>
 
       {sectionDivider}
+
+      {focusedUpstreamGroup && (
+        <>
+          <div
+            style={{
+              padding: '10px 4px 0',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+            }}
+          >
+            <div style={PANEL_SECTION_EYEBROW_STYLE}>当前聚焦请求</div>
+            <div
+              style={{
+                borderRadius: 8,
+                border: '1px solid color-mix(in oklch, var(--accent) 24%, var(--border-default))',
+                background: 'color-mix(in oklch, var(--accent) 8%, var(--bg-overlay))',
+                padding: '8px 10px',
+                display: 'flex',
+                alignItems: 'flex-start',
+                justifyContent: 'space-between',
+                gap: 8,
+              }}
+            >
+              <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)' }}>
+                  {focusedUpstreamGroup.label}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--fg-default)' }}>
+                  {formatUpstreamSummaryGroupHeadline(focusedUpstreamGroup)}
+                </div>
+                {focusedUpstreamSummaries[0] ? (
+                  <div style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
+                    最近状态 · {formatUpstreamSummaryStatusLabel(focusedUpstreamSummaries[0].summary)}
+                  </div>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  void copyTextToClipboard(buildUpstreamSummaryGroupContextText(focusedUpstreamGroup))
+                }
+                aria-label="复制当前聚焦请求诊断上下文"
+                style={{
+                  border: '1px solid color-mix(in oklch, var(--accent) 26%, var(--border-default))',
+                  background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
+                  color: 'var(--accent)',
+                  cursor: 'pointer',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  padding: '3px 8px',
+                  borderRadius: 999,
+                  flexShrink: 0,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                复制诊断上下文
+              </button>
+            </div>
+          </div>
+          {sectionDivider}
+        </>
+      )}
+
+      {focusedUpstreamSummaries.length > 0 && (
+        <>
+          <div style={{ padding: '10px 4px 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={PANEL_SECTION_EYEBROW_STYLE}>最近流式诊断</div>
+            {focusedUpstreamSummaries.slice(0, 3).map((item) => (
+              <div
+                key={item.id}
+                style={{
+                  borderRadius: 8,
+                  border: '1px solid var(--border-default)',
+                  background: 'var(--bg-overlay)',
+                  padding: '8px 10px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 3,
+                }}
+              >
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
+                  {formatUpstreamSummaryStatusLabel(item.summary)}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--fg-default)' }}>
+                  {formatUpstreamSummaryMetricLine(item.summary)}
+                </div>
+              </div>
+            ))}
+          </div>
+          {sectionDivider}
+        </>
+      )}
 
       {/* 活跃状态统计 */}
       <div

@@ -3,10 +3,12 @@ import type { Message } from '@openAwork/shared';
 import type { TeamAuditLogRecord } from '@openAwork/web-client';
 import type { AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
+import { formatTimelineDetail } from '../../data/team-runtime-reference-formatters.js';
 import {
   resolveMatchedSharedSessionDetail,
   resolveMatchedSharedSummary,
 } from '../../data/team-runtime-shared-context.js';
+import { tryFormatJson } from '../../../../../utils/format-json.js';
 import { EmptyState, MetricGrid, StatCard } from '../../shared/content-kit/index.js';
 import { TabContainer } from '../TabContainer.js';
 
@@ -144,7 +146,7 @@ export function SharedSessionFlowView({ selectedTeam }: { selectedTeam: AgentTea
       ...auditLogs
         .filter((log) => log.sessionId === selectedTeam.id)
         .map((log) => ({
-          detail: log.summary,
+          detail: formatTimelineDetail(log.summary, 200),
           id: `audit-${log.id}`,
           tag: '审计',
           timestampMs: parseIsoMs(log.createdAt) ?? 0,
@@ -219,7 +221,7 @@ export function SharedSessionFlowView({ selectedTeam }: { selectedTeam: AgentTea
                 </span>
                 <strong style={{ fontSize: 14, color: 'var(--fg-strong)' }}>{node.value}</strong>
                 <span style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
-                  {node.detail}
+                  {tryFormatJson(node.detail)}
                 </span>
               </div>
               {index < flowNodes.length - 1 ? <span style={FLOW_EDGE_STYLE}>→</span> : null}

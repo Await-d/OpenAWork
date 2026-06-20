@@ -77,7 +77,9 @@ const STEP_ROW_BASE: CSSProperties = {
   gap: 6,
   padding: '10px 12px',
   borderRadius: 10,
-  border: '1px solid color-mix(in srgb, var(--border-default) 45%, transparent)',
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: 'color-mix(in srgb, var(--border-default) 45%, transparent)',
   background: 'var(--bg-overlay)',
   transition: 'border-color 150ms ease, background 150ms ease',
 };
@@ -201,11 +203,27 @@ function renderStepResultSummary(step: TeamInitStep): string | null {
       return `读取记忆来源 ${r['foundCount'] ?? 0} 个${r['usedLlm'] ? ' · 已用 AI 提炼' : ''}`;
     case 'understand-architecture':
       return r['usedLlm'] ? '已用 AI 生成架构摘要' : '已生成架构摘要（启发式）';
-    case 'bind-tools-per-layer':
-      return `绑定 skill ${r['skillCount'] ?? 0} · MCP ${r['mcpCount'] ?? 0}${
-        r['usedLlm'] ? ' · AI 按项目挑选' : ''
-      }`;
+    case 'bind-tools-per-layer': {
+      if (r['mode'] === 'waiting-for-goal') {
+        return `等待首个目标后绑定工具 · 已发现可用 skill ${
+          r['availableSkillCount'] ?? 0
+        } · MCP ${r['availableMcpCount'] ?? 0}`;
+      }
+      const prefix = r['mode'] === 'goal-driven' ? '按首个目标绑定' : '绑定';
+      const suffix = r['usedLlm']
+        ? r['mode'] === 'goal-driven'
+          ? ' · AI 按目标挑选'
+          : ' · AI 按项目挑选'
+        : '';
+      return `${prefix} skill ${r['skillCount'] ?? 0} · MCP ${r['mcpCount'] ?? 0}${suffix}`;
+    }
     case 'scaffold-memory':
+      if (r['mode'] === 'waiting-for-goal') {
+        return '等待首个项目目标后生成项目记忆骨架';
+      }
+      if (r['mode'] === 'goal-driven') {
+        return r['usedLlm'] ? '已按首个目标生成项目记忆骨架' : '已按首个目标准备项目记忆骨架';
+      }
       return r['usedLlm'] ? '已用 AI 生成初始项目记忆骨架' : '已准备初始项目记忆骨架';
     default:
       return null;
@@ -375,7 +393,13 @@ function renderStepPreview(step: TeamInitStep): ReactNode {
         >) ?? {};
       const layers = Object.entries(perLayer);
       if (layers.length === 0) {
-        return <div style={{ color: 'var(--fg-muted)' }}>无可绑定的工具。</div>;
+        return (
+          <div style={{ color: 'var(--fg-muted)' }}>
+            {r['mode'] === 'waiting-for-goal'
+              ? '空项目尚无明确目标，暂不做项目化工具绑定。'
+              : '无可绑定的工具。'}
+          </div>
+        );
       }
       return (
         <div style={{ display: 'grid', gap: 10 }}>

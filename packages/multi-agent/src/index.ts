@@ -5,6 +5,7 @@ export type {
   DAGEdge,
   DAGEvent,
   DAGEventHandler,
+  DAGEventSubscription,
   DAGNodeStatus,
   DAGStatus,
   WorkflowMode,
@@ -15,6 +16,9 @@ export type {
   RootCauseAnalysis,
   FailureEscalationRecord,
   MultiAgentOrchestrator,
+  HallucinationCheckResult,
+  HallucinationIssue,
+  HallucinationIssueType,
 } from './types.js';
 
 export { DAGRunner } from './dag.js';
@@ -30,3 +34,11 @@ export type {
   TeamStore,
 } from './team.js';
 export { TeamStoreImpl } from './team.js';
+
+export type { DiagnosticAlert } from './hallucination-checker.js';
+export {
+  checkHallucination,
+  diagnoseNodeIssues,
+  isRetryBudgetExhausted,
+  getRemainingRetryBudget,
+} from './hallucination-checker.js';

@@ -120,7 +120,7 @@ export const lookAtToolDefinition: ToolDefinition<typeof lookAtInputSchema, z.Zo
 function inferMimeType(filePath: string | undefined, imageData: string | undefined): string {
   if (imageData) {
     const match = imageData.match(/^data:([^;]+);base64,/i);
-    return match?.[1] ?? 'image/png';
+    return normalizeImageMimeType(match?.[1] ?? 'image/png');
   }
   const ext = extname(filePath ?? '').toLowerCase();
   switch (ext) {
@@ -148,6 +148,10 @@ function inferMimeType(filePath: string | undefined, imageData: string | undefin
   }
 }
 
+function normalizeImageMimeType(mimeType: string): string {
+  return mimeType.toLowerCase() === 'image/jpg' ? 'image/jpeg' : mimeType;
+}
+
 function isImageMime(mimeType: string): boolean {
   return mimeType.startsWith('image/');
 }
@@ -155,6 +159,10 @@ function isImageMime(mimeType: string): boolean {
 function stripDataUrlPrefix(value: string): string {
   const index = value.indexOf('base64,');
   return index >= 0 ? value.slice(index + 'base64,'.length) : value;
+}
+
+function buildImageDataUrl(value: string, mimeType: string): string {
+  return `data:${mimeType};base64,${stripDataUrlPrefix(value)}`;
 }
 
 async function readFileAsText(filePath: string): Promise<string> {
@@ -369,9 +377,7 @@ export async function runLookAtTool(input: {
   let analysisText: string;
   if (input.imageData || (filePath && isImageMime(mimeType))) {
     const imageDataUrl = input.imageData
-      ? input.imageData.startsWith('data:')
-        ? input.imageData
-        : `data:${mimeType};base64,${stripDataUrlPrefix(input.imageData)}`
+      ? buildImageDataUrl(input.imageData, mimeType)
       : `data:${mimeType};base64,${(await readFile(filePath!, 'base64')).toString()}`;
     analysisText = await requestLookAtText({
       apiBaseUrl: routeConfig.route.apiBaseUrl,

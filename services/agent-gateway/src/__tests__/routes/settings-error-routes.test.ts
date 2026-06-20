@@ -9,6 +9,7 @@ import type * as SettingsRoutesModule from '../../routes/settings.js';
 const mocks = vi.hoisted(() => ({
   requestWorkflowLlmCompletion: vi.fn(),
   resolveAuxiliaryLlmConfig: vi.fn(),
+  resolveAuxiliaryLlmConfigCandidates: vi.fn(),
   retryMcpConnectionForUser: vi.fn(),
 }));
 
@@ -20,6 +21,7 @@ vi.mock('../../mcp/mcp-runtime.js', () => ({
 
 vi.mock('../../provider/auxiliary-llm-config.js', () => ({
   resolveAuxiliaryLlmConfig: mocks.resolveAuxiliaryLlmConfig,
+  resolveAuxiliaryLlmConfigCandidates: mocks.resolveAuxiliaryLlmConfigCandidates,
 }));
 
 vi.mock('../../routes/workflow-llm.js', () => ({
@@ -92,6 +94,7 @@ beforeEach(() => {
   dbModule.sqliteRun('DELETE FROM users', []);
   seedUser(USER_ID);
   mocks.resolveAuxiliaryLlmConfig.mockReset();
+  mocks.resolveAuxiliaryLlmConfigCandidates.mockReset();
   mocks.requestWorkflowLlmCompletion.mockReset();
   mocks.retryMcpConnectionForUser.mockReset();
 });

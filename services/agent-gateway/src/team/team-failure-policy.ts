@@ -1,5 +1,12 @@
 export interface QualityReviewDispositionInput {
   escalationRound: number;
+  /**
+   * 完整的评审判定结果，用于精确路由失败分流。
+   * - `execution-protocol-failure`：交付协议未完成（completed 但缺 result_json）
+   * - `implementation-failure`：执行层任务失败（failed/cancelled）或代码质量问题
+   * - `planning-failure`：规划层问题
+   */
+  overallVerdict?: 'pass' | 'implementation-failure' | 'planning-failure' | 'execution-protocol-failure';
   qualityIssues: string[];
   qualityReviewPassed: boolean;
   specIssues: string[];
@@ -29,15 +36,19 @@ export type QualityReviewDisposition =
 export function deriveQualityReviewDisposition(
   input: QualityReviewDispositionInput,
 ): QualityReviewDisposition {
-  if (input.escalationRound >= 2) {
+  // 1. 已重试 ≥ 4 轮 → 升级用户（无论失败类型）
+  // 前 3 轮可以 return-to-c / redispatch 自动修正，第 4 轮才真正升级用户。
+  // 给团队充分的自动修正机会，避免过早停止导致用户体验中断。
+  if (input.escalationRound >= 4) {
     return {
       action: 'escalate-to-user',
       code: 'quality-review-escalate-to-user',
-      reason: `已重试 ${input.escalationRound} 轮仍未通过，需要用户介入`,
+      reason: `已自动修正 ${input.escalationRound} 轮仍未通过，需要用户介入`,
       severity: 'error',
     };
   }
 
+  // 2. Spec Review 未通过 → 退回 PM1（规划型失败）
   if (!input.specReviewPassed) {
     return {
       action: 'return-to-c',
@@ -47,6 +58,19 @@ export function deriveQualityReviewDisposition(
     };
   }
 
+  // 3. execution-protocol-failure：交付协议未完成（completed 但缺 result_json）→
+  //    这不是代码质量问题，是执行层 runner 未正确写入产物。重派前应记录
+  //    更精确的 reason，便于排查。
+  if (input.overallVerdict === 'execution-protocol-failure') {
+    return {
+      action: 'redispatch',
+      code: 'quality-review-redispatch',
+      reason: `执行协议失败（交付物缺失）：${input.qualityIssues.join('；')}`,
+      severity: 'warning',
+    };
+  }
+
+  // 4. implementation-failure 或 quality review 未通过 → 重派（实现型失败）
   return {
     action: 'redispatch',
     code: 'quality-review-redispatch',

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import type { WorkflowTemplateRecord } from '@openAwork/web-client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
@@ -18,9 +19,11 @@ const creationDraft = {
 };
 
 const applyTemplateMock = vi.fn();
+const refreshTemplatesMock = vi.fn<() => Promise<WorkflowTemplateRecord[]>>(async () => []);
 
 vi.mock('../../data/team-runtime-reference-data.js', () => ({
   useTeamRuntimeReferenceViewData: () => ({
+    refreshTemplates: refreshTemplatesMock,
     templateLoading: false,
     templates: [
       {
@@ -112,9 +115,28 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   applyTemplateMock.mockReset();
+  refreshTemplatesMock.mockReset().mockResolvedValue([]);
 });
 
 describe('NewTeamSessionModal', () => {
+  it('通过 body portal 渲染，避免被侧栏容器定位影响', () => {
+    const host = document.createElement('section');
+    document.body.appendChild(host);
+
+    render(
+      <NewTeamSessionModal
+        onClose={vi.fn()}
+        onSubmitDraft={vi.fn()}
+        workspaceLabel="默认工作区"
+        teamWorkspaceId="tw-1"
+      />,
+      { container: host },
+    );
+
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
+  });
+
   it('提交失败时会在弹窗内展示错误信息', async () => {
     render(
       <NewTeamSessionModal
@@ -169,6 +191,58 @@ describe('NewTeamSessionModal', () => {
         expect.objectContaining({
           id: 'tpl-1',
           name: '研究模板',
+        }),
+      );
+    });
+  });
+
+  it('打开弹窗时会刷新团队模板，避免只使用缓存列表', async () => {
+    render(
+      <NewTeamSessionModal
+        onClose={vi.fn()}
+        onSubmitDraft={vi.fn()}
+        workspaceLabel="默认工作区"
+        teamWorkspaceId="tw-1"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(refreshTemplatesMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('预选模板会优先套用刷新请求返回的最新模板数据', async () => {
+    refreshTemplatesMock.mockResolvedValueOnce([
+      {
+        id: 'tpl-1',
+        name: '最新研究模板',
+        description: '刷新后的模板',
+        category: 'team-playbook',
+        nodes: [],
+        edges: [],
+        metadata: {
+          teamTemplate: {
+            defaultProvider: 'openai',
+          },
+        },
+      },
+    ]);
+
+    render(
+      <NewTeamSessionModal
+        onClose={vi.fn()}
+        onSubmitDraft={vi.fn()}
+        workspaceLabel="默认工作区"
+        teamWorkspaceId="tw-1"
+        initialTemplateId="tpl-1"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(applyTemplateMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'tpl-1',
+          name: '最新研究模板',
         }),
       );
     });

@@ -23,6 +23,7 @@ import type {
   RunEvent,
   StreamThinkingChunk,
   StreamThinkingEndChunk,
+  UpstreamStreamSummary,
 } from '@openAwork/shared';
 import type { PendingPermissionRequest, PendingQuestionRequest } from '@openAwork/web-client';
 import { formatGatewayStreamErrorMessage } from '../../../hooks/gateway/useGatewayClient.js';
@@ -95,6 +96,7 @@ export interface ConversationStreamSetters {
   setStreamError: React.Dispatch<React.SetStateAction<string | null>>;
   setActiveStreamStartedAt: React.Dispatch<React.SetStateAction<number | null>>;
   setActiveStreamFirstTokenLatencyMs: React.Dispatch<React.SetStateAction<number | null>>;
+  setLatestUpstreamSummary: React.Dispatch<React.SetStateAction<UpstreamStreamSummary | null>>;
   setSessionStateStatus: React.Dispatch<React.SetStateAction<SessionStateStatus | null>>;
   setPendingPermissions: React.Dispatch<React.SetStateAction<PendingPermissionRequest[]>>;
 }
@@ -118,6 +120,8 @@ export interface ConversationStreamConfig {
   onStreamDone?: (stopReason?: string, cancellation?: unknown, finalAgentId?: string) => void;
   /** Optional hook called when an error event arrives. */
   onStreamError?: (code: string, message?: string) => void;
+  /** Optional hook called when a terminal upstream summary arrives. */
+  onUpstreamSummary?: (summary: UpstreamStreamSummary) => void;
 }
 
 export interface ConversationStreamHandlers {
@@ -492,6 +496,10 @@ export function useConversationStream(
 
       // ─── done ─────────────────────────────────────────────────────
       if (event.type === 'done') {
+        if (event.upstreamSummary) {
+          setters.setLatestUpstreamSummary(event.upstreamSummary);
+          configRef.current.onUpstreamSummary?.(event.upstreamSummary);
+        }
         commitCurrentRound(Date.now());
         configRef.current.onStreamDone?.(event.stopReason, event.cancellation, event.agentId);
         return;
@@ -499,6 +507,10 @@ export function useConversationStream(
 
       // ─── error ────────────────────────────────────────────────────
       if (event.type === 'error') {
+        if (event.upstreamSummary) {
+          setters.setLatestUpstreamSummary(event.upstreamSummary);
+          configRef.current.onUpstreamSummary?.(event.upstreamSummary);
+        }
         setters.setStreamError(
           formatGatewayStreamErrorMessage(
             typeof event.code === 'string' ? event.code : 'STREAM_ERROR',

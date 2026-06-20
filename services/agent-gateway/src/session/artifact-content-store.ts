@@ -334,6 +334,19 @@ export function listArtifactVersions(userId: string, artifactId: string): Artifa
   return rows.map(rowToArtifactVersionRecord);
 }
 
+export function deleteArtifact(userId: string, artifactId: string): boolean {
+  const existing = getArtifactRowById(userId, artifactId);
+  if (!existing) {
+    return false;
+  }
+
+  withTransaction(() => {
+    sqliteRun('DELETE FROM artifact_versions WHERE artifact_id = ?', [artifactId]);
+    sqliteRun('DELETE FROM artifacts WHERE id = ? AND user_id = ?', [artifactId, userId]);
+  });
+  return true;
+}
+
 export function updateArtifact(
   userId: string,
   artifactId: string,

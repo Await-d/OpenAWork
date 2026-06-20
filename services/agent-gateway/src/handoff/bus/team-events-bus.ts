@@ -43,7 +43,9 @@ export type TeamEventType =
   | 'scheduler.all-paused'
   | 'scheduler.all-resumed'
   | 'artifact.needs-clarification'
-  | 'artifact.constitution-conflict';
+  | 'artifact.constitution-conflict'
+  | 'agent.hallucination-detected'
+  | 'agent.diagnostic-alert';
 
 export interface TeamEventEnvelope {
   type: TeamEventType;
@@ -151,6 +153,67 @@ export function __clearTeamEventsBusForTesting(): void {
 
 // ─── Convenience publishers (一处写错全员错) ────────────────────────────────
 
+/**
+ * 从 handoff record 的持久化 payload 中提取任务摘要。
+ *
+ * 不同创建路径存入的 key 不同：
+ *   - reception→pm1：rewrittenIntent / sourceIntent / recommendedNextStep
+ *   - pm2→executor/reviewer：goal（DispatchPackage 的任务目标字段）
+ *
+ * 统一提取为 summary 字段推送给前端，使任务清单能显示有区分度的标题。
+ */
+function extractSummaryFromRecordPayload(payload: unknown): string | undefined {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+    return undefined;
+  }
+  const record = payload as Record<string, unknown>;
+  for (const key of ['goal', 'rewrittenIntent', 'sourceIntent', 'recommendedNextStep', 'summary']) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      const trimmed = value.trim();
+      // 截断过长的摘要，避免 WS 事件 payload 膨胀
+      return trimmed.length > 200 ? trimmed.slice(0, 200) : trimmed;
+    }
+  }
+  return undefined;
+}
+
+function readBoundedString(value: unknown, maxLength: number): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  return trimmed.length > maxLength ? trimmed.slice(0, maxLength) : trimmed;
+}
+
+function readAssignedMemberEventPayload(payload: unknown): Record<string, string> | undefined {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+    return undefined;
+  }
+  const assignedMember = (payload as Record<string, unknown>)['assignedMember'];
+  if (
+    typeof assignedMember !== 'object' ||
+    assignedMember === null ||
+    Array.isArray(assignedMember)
+  ) {
+    return undefined;
+  }
+  const record = assignedMember as Record<string, unknown>;
+  const eventPayload: Record<string, string> = {};
+  const id = readBoundedString(record['id'], 120);
+  const displayName = readBoundedString(record['displayName'], 200);
+  const personaKey = readBoundedString(record['personaKey'], 160);
+  const specialty = readBoundedString(record['specialty'], 80);
+  if (id) eventPayload['id'] = id;
+  if (displayName) eventPayload['displayName'] = displayName;
+  if (personaKey) eventPayload['personaKey'] = personaKey;
+  if (specialty) eventPayload['specialty'] = specialty;
+  return Object.keys(eventPayload).length > 0 ? eventPayload : undefined;
+}
+
 export function publishHandoffEvent(input: {
   type: Extract<
     TeamEventType,
@@ -173,6 +236,13 @@ export function publishHandoffEvent(input: {
           toRoleLayer: input.record.toRoleLayer,
         })
       : undefined;
+  const assignedMember = readAssignedMemberEventPayload(input.record.payload);
+  // 从 handoff record 的持久化 payload 中提取任务摘要字段，推送给前端。
+  // record.payload 包含 reception-orchestrator 传入的 rewrittenIntent / sourceIntent，
+  // 或 PM2 DispatchPackage 的 goal —— 这些是任务清单标题的唯一来源。
+  // 如果不在每个事件中都带上，前端只能在 handoff.created 时获取到（且仅当 caller
+  // 额外传了 input.payload 时），后续 claimed/started/completed 事件全丢失。
+  const summaryFromPayload = extractSummaryFromRecordPayload(input.record.payload);
   publishTeamEvent({
     type: input.type,
     taskId: input.record.id,
@@ -188,8 +258,58 @@ export function publishHandoffEvent(input: {
       retryCount: input.record.retryCount,
       ...(input.record.failureReason ? { reason: input.record.failureReason } : {}),
       ...(recoverableFailure !== undefined ? { recoverableFailure } : {}),
+      ...(assignedMember ? { assignedMember } : {}),
+      ...(summaryFromPayload ? { summary: summaryFromPayload } : {}),
       ...(input.payload ?? {}),
     },
     userId: input.record.userId,
+  });
+}
+
+/**
+ * 发布幻觉检测事件（参考 hermes-agent v0.13.0）。
+ *
+ * 当 DAG 节点声称完成但系统检测到输出不真实时触发。
+ */
+export function publishHallucinationEvent(input: {
+  userId: string;
+  sessionId: string;
+  nodeId: string;
+  issues: Array<{ type: string; detail: string }>;
+}): void {
+  publishTeamEvent({
+    type: 'agent.hallucination-detected',
+    sessionId: input.sessionId,
+    timestamp: Date.now(),
+    payload: {
+      nodeId: input.nodeId,
+      issues: input.issues,
+    },
+    userId: input.userId,
+  });
+}
+
+/**
+ * 发布诊断告警事件（参考 hermes-agent v0.13.0 通用诊断引擎）。
+ *
+ * 当诊断引擎检测到任务异常模式（重复失败、超时模式等）时触发。
+ */
+export function publishDiagnosticAlertEvent(input: {
+  userId: string;
+  sessionId: string;
+  nodeId: string;
+  pattern: string;
+  detail: string;
+}): void {
+  publishTeamEvent({
+    type: 'agent.diagnostic-alert',
+    sessionId: input.sessionId,
+    timestamp: Date.now(),
+    payload: {
+      nodeId: input.nodeId,
+      pattern: input.pattern,
+      detail: input.detail,
+    },
+    userId: input.userId,
   });
 }

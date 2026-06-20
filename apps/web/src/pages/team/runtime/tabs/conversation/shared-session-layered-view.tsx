@@ -3,10 +3,12 @@ import type { Message } from '@openAwork/shared';
 import type { SharedSessionDetailRecord, TeamAuditLogRecord } from '@openAwork/web-client';
 import type { AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
+import { formatTimelineDetail } from '../../data/team-runtime-reference-formatters.js';
 import {
   resolveMatchedSharedSessionDetail,
   resolveMatchedSharedSummary,
 } from '../../data/team-runtime-shared-context.js';
+import { tryFormatJson, looksLikeJson } from '../../../../../utils/format-json.js';
 import MarkdownMessageContent from '../../../../../components/chat/markdown/markdown-message-content.js';
 import { EmptyState, SegmentedToggle } from '../../shared/content-kit/index.js';
 import { TabContainer } from '../TabContainer.js';
@@ -136,15 +138,15 @@ function buildTodoItems(input: {
     timestampMs: parseIsoMs(request.createdAt) ?? 0,
     title: `问题请求 · ${request.toolName}`,
   }));
-  const auditItems = input.auditLogs
-    .filter((log) => log.sessionId === input.selectedTeamId)
-    .map((log) => ({
-      detail: log.detail ?? log.summary,
-      id: `audit-${log.id}`,
-      summary: log.actorEmail ?? log.actorUserId ?? '系统',
-      timestampMs: parseIsoMs(log.createdAt) ?? 0,
-      title: log.summary,
-    }));
+    const auditItems = input.auditLogs
+      .filter((log) => log.sessionId === input.selectedTeamId)
+      .map((log) => ({
+        detail: formatTimelineDetail(log.detail ?? log.summary, 200),
+        id: `audit-${log.id}`,
+        summary: log.actorEmail ?? log.actorUserId ?? '系统',
+        timestampMs: parseIsoMs(log.createdAt) ?? 0,
+        title: formatTimelineDetail(log.summary, 80),
+      }));
 
   return [...permissionItems, ...questionItems, ...auditItems]
     .filter((item) => item.timestampMs > 0)
@@ -296,7 +298,7 @@ export function SharedSessionLayeredView({
                   <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--fg-strong)' }}>
                     {item.title}
                   </span>
-                  <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>{item.summary}</span>
+                  <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>{tryFormatJson(item.summary)}</span>
                   <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
                     {formatTimeMs(item.timestampMs)}
                   </span>
@@ -313,7 +315,7 @@ export function SharedSessionLayeredView({
                     {selectedItem.title}
                   </strong>
                   <span style={{ color: 'var(--fg-muted)', fontSize: 11 }}>
-                    {selectedItem.summary}
+                    {tryFormatJson(selectedItem.summary)}
                   </span>
                   <span style={{ color: 'var(--fg-muted)', fontSize: 11 }}>
                     {formatTimeMs(selectedItem.timestampMs)}
@@ -328,7 +330,26 @@ export function SharedSessionLayeredView({
                     minHeight: 120,
                   }}
                 >
-                  <MarkdownMessageContent content={selectedItem.detail ?? '暂无更多细节。'} />
+                  {looksLikeJson(selectedItem.detail ?? '') ? (
+                    <pre
+                      style={{
+                        margin: 0,
+                        padding: '8px 10px',
+                        borderRadius: 6,
+                        background: 'var(--bg-base)',
+                        border: '1px solid var(--border-subtle)',
+                        fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
+                        fontSize: 11,
+                        lineHeight: 1.6,
+                        whiteSpace: 'pre',
+                        overflowX: 'auto',
+                      }}
+                    >
+                      {tryFormatJson(selectedItem.detail ?? '暂无更多细节。')}
+                    </pre>
+                  ) : (
+                    <MarkdownMessageContent content={selectedItem.detail ?? '暂无更多细节。'} />
+                  )}
                 </div>
               </div>
             ) : (

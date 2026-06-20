@@ -1,6 +1,7 @@
 import type { ArtifactVersionRecord } from '@openAwork/artifacts';
 import { tokens } from '@openAwork/shared-ui';
 import { formatArtifactTimestamp } from '../workspace/artifact-workbench-utils.js';
+import { tryFormatJson } from '../../../utils/format-json.js';
 
 interface ArtifactVersionTimelineProps {
   currentVersion: number;
@@ -153,7 +154,7 @@ export function ArtifactVersionTimeline({
                       overflow: 'hidden',
                     }}
                   >
-                    {version.content.slice(0, 180)}
+                    {tryFormatJson(version.content.slice(0, 180))}
                     {version.content.length > 180 ? '…' : ''}
                   </pre>
                 </div>

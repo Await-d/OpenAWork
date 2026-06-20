@@ -31,11 +31,38 @@ export interface UploadedChatAttachment {
   type: AttachmentItem['type'];
 }
 
+export function inferMimeTypeFromFileName(fileName: string): string | undefined {
+  const lowerName = fileName.toLowerCase();
+  if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) {
+    return 'image/jpeg';
+  }
+  if (lowerName.endsWith('.png')) {
+    return 'image/png';
+  }
+  if (lowerName.endsWith('.webp')) {
+    return 'image/webp';
+  }
+  if (lowerName.endsWith('.gif')) {
+    return 'image/gif';
+  }
+  return undefined;
+}
+
+export function resolveFileMimeType(file: File): string | undefined {
+  const mimeType = file.type || inferMimeTypeFromFileName(file.name);
+  return mimeType?.toLowerCase() === 'image/jpg' ? 'image/jpeg' : mimeType;
+}
+
+export function isImageFile(file: File): boolean {
+  return Boolean(resolveFileMimeType(file)?.startsWith('image/'));
+}
+
 function inferAttachmentType(file: File): AttachmentItem['type'] {
-  if (file.type.startsWith('image/')) {
+  const mimeType = resolveFileMimeType(file);
+  if (mimeType?.startsWith('image/')) {
     return 'image';
   }
-  if (file.type.startsWith('audio/')) {
+  if (mimeType?.startsWith('audio/')) {
     return 'audio';
   }
   return 'file';
@@ -69,16 +96,17 @@ function toUploadedChatAttachment(
     artifact.metadata && typeof artifact.metadata['mimeType'] === 'string'
       ? artifact.metadata['mimeType']
       : undefined;
+  const mimeType = metadataMimeType ?? resolveFileMimeType(file);
 
   return {
     artifactId: artifact.id,
-    ...(file.type.startsWith('image/')
+    ...(mimeType?.startsWith('image/')
       ? {
-          dataUrl: `data:${metadataMimeType ?? file.type ?? 'image/png'};base64,${contentBase64}`,
+          dataUrl: `data:${mimeType};base64,${contentBase64}`,
         }
       : {}),
     fileName: artifact.name,
-    ...(metadataMimeType || file.type ? { mimeType: metadataMimeType ?? file.type } : {}),
+    ...(mimeType ? { mimeType } : {}),
     ...(artifact.preview ? { preview: artifact.preview } : {}),
     type: inferAttachmentType(file),
   };
@@ -139,7 +167,7 @@ export async function uploadChatAttachments({
           },
           body: JSON.stringify({
             name: file.name,
-            mimeType: file.type || undefined,
+            mimeType: resolveFileMimeType(file),
             sizeBytes: file.size,
             contentBase64,
           }),

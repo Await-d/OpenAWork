@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { migrate } from '../../infra/db.js';
 import {
   __resetTeamRuntimeAlertStoreForTesting,
   listActiveTeamRuntimeAlerts,
@@ -11,6 +12,10 @@ import {
 } from '../../team/team-runtime-telemetry.js';
 
 describe('team-runtime-alert-store', () => {
+  beforeAll(async () => {
+    await migrate();
+  });
+
   afterEach(() => {
     __resetTeamRuntimeAlertStoreForTesting();
     __resetTeamRuntimeTelemetryForTesting();

@@ -14,6 +14,7 @@ import {
 } from '../infra/storage-paths.js';
 import {
   createArtifact,
+  deleteArtifact,
   getArtifactById,
   listArtifactsBySession,
   listArtifactVersions,
@@ -229,6 +230,19 @@ export async function artifactsRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(404).send({ error: ARTIFACT_ROUTE_ERROR_MESSAGES.artifactNotFound });
       }
       return reply.send({ artifact });
+    },
+  );
+
+  app.delete<{ Params: { artifactId: string } }>(
+    '/artifacts/:artifactId',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const user = request.user as JwtPayload;
+      const deleted = deleteArtifact(user.sub, request.params.artifactId);
+      if (!deleted) {
+        return reply.status(404).send({ error: ARTIFACT_ROUTE_ERROR_MESSAGES.artifactNotFound });
+      }
+      return reply.status(204).send();
     },
   );
 

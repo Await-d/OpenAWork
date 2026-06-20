@@ -80,6 +80,39 @@ export interface FloatingPermissionPromptProps {
   onPendingChange?: (hasPending: boolean) => void;
 }
 
+interface FloatingPermissionSessionTarget {
+  route: string;
+  sessionTitle?: string;
+}
+
+function resolveSessionNavigationTarget(input: {
+  metadataJson?: string;
+  roleLayer?: string | null;
+  sessionId: string;
+  title?: string;
+}): FloatingPermissionSessionTarget {
+  if (typeof input.roleLayer === 'string' && input.roleLayer.trim().length > 0) {
+    try {
+      const parsed = input.metadataJson ? (JSON.parse(input.metadataJson) as Record<string, unknown>) : null;
+      const teamWorkspaceId =
+        typeof parsed?.['teamWorkspaceId'] === 'string' ? parsed['teamWorkspaceId'] : null;
+      if (teamWorkspaceId && teamWorkspaceId.trim().length > 0) {
+        return {
+          route: `/team/${teamWorkspaceId}?sessionId=${encodeURIComponent(input.sessionId)}`,
+          ...(input.title?.trim() ? { sessionTitle: input.title.trim() } : {}),
+        };
+      }
+    } catch {
+      // ignore malformed metadata and fall through to chat route
+    }
+  }
+
+  return {
+    route: `/chat/${input.sessionId}`,
+    ...(input.title?.trim() ? { sessionTitle: input.title.trim() } : {}),
+  };
+}
+
 export function FloatingPermissionPrompt({ onPendingChange }: FloatingPermissionPromptProps) {
   const accessToken = useAuthStore((s) => s.accessToken);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
@@ -92,6 +125,7 @@ export function FloatingPermissionPrompt({ onPendingChange }: FloatingPermission
   );
   const [replyPendingDecision, setReplyPendingDecision] = useState<PermissionDecision | null>(null);
   const [replyError, setReplyError] = useState<string | null>(null);
+  const [sessionTarget, setSessionTarget] = useState<FloatingPermissionSessionTarget | null>(null);
 
   const pendingPermissionRef = useRef<SessionPendingPermissionState | null>(null);
 
@@ -114,6 +148,7 @@ export function FloatingPermissionPrompt({ onPendingChange }: FloatingPermission
 
       pendingPermissionRef.current = next;
       setPendingPermission(next);
+      setSessionTarget(null);
 
       if (next === null || current?.requestId !== next.requestId) {
         setReplyPendingDecision(null);
@@ -125,15 +160,27 @@ export function FloatingPermissionPrompt({ onPendingChange }: FloatingPermission
         createSessionsClient(gatewayUrl)
           .get(accessToken, next.targetSessionId)
           .then((session) => {
-            const title = session?.title?.trim();
-            if (title) {
-              setPendingPermission((current) => {
-                if (current?.requestId !== next.requestId) return current;
-                const updated = { ...current, sessionTitle: title };
-                pendingPermissionRef.current = updated;
-                return updated;
-              });
+            const navigationTarget = resolveSessionNavigationTarget({
+              sessionId: next.targetSessionId,
+              title: session?.title,
+              roleLayer: session?.role_layer,
+              metadataJson: session?.metadata_json,
+            });
+            setSessionTarget((currentTarget) => {
+              if (pendingPermissionRef.current?.requestId !== next.requestId) {
+                return currentTarget;
+              }
+              return navigationTarget;
+            });
+            if (!navigationTarget.sessionTitle) {
+              return;
             }
+            setPendingPermission((current) => {
+              if (current?.requestId !== next.requestId) return current;
+              const updated = { ...current, sessionTitle: navigationTarget.sessionTitle };
+              pendingPermissionRef.current = updated;
+              return updated;
+            });
           })
           .catch(() => {});
       }
@@ -243,9 +290,9 @@ export function FloatingPermissionPrompt({ onPendingChange }: FloatingPermission
       }}
       sessionTitle={pendingPermission.sessionTitle}
       onNavigateToSession={
-        pendingPermission.targetSessionId
+        sessionTarget?.route
           ? () => {
-              navigate(`/chat/${pendingPermission.targetSessionId}`);
+              navigate(sessionTarget.route);
             }
           : undefined
       }

@@ -633,6 +633,7 @@ export function NewTeamWorkspaceModal({ onClose, onCreated }: NewTeamWorkspaceMo
         fetchRootPath={workspacePickerDataSource.fetchRootPath}
         fetchWorkspaceRoots={workspacePickerDataSource.fetchWorkspaceRoots}
         fetchTree={workspacePickerDataSource.fetchTree}
+        createDirectory={workspacePickerDataSource.createDirectory}
         validatePath={workspacePickerDataSource.validatePath}
         initialPath={defaultWorkingRoot || undefined}
       />

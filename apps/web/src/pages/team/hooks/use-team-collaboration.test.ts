@@ -480,6 +480,51 @@ describe('useTeamCollaboration', () => {
     expect(result.current.error).toBeNull();
   });
 
+  it('在线时会低频后台刷新 runtime 快照', async () => {
+    vi.useFakeTimers();
+    let runtimeCallCount = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = resolveRequestUrl(input);
+        if (url === `${GATEWAY_URL}/team/runtime?teamWorkspaceId=${TEAM_WORKSPACE_ID}`) {
+          runtimeCallCount += 1;
+          return jsonResponse(
+            createRuntimeFixture({
+              diagnostics: undefined,
+              members: [
+                {
+                  id: `member-${runtimeCallCount}`,
+                  name: `成员-${runtimeCallCount}`,
+                  email: `member-${runtimeCallCount}@example.com`,
+                  role: 'member',
+                  avatarUrl: null,
+                  status: 'working',
+                  createdAt: '2026-05-26T08:00:00.000Z',
+                },
+              ],
+            }),
+          );
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+
+    const { result } = renderHook(() => useTeamCollaboration(TEAM_WORKSPACE_ID));
+
+    await flushAsyncWork();
+    expect(runtimeCallCount).toBe(1);
+    expect(result.current.members.map((member) => member.name)).toEqual(['成员-1']);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_000);
+    });
+    await flushAsyncWork();
+
+    expect(runtimeCallCount).toBe(2);
+    expect(result.current.members.map((member) => member.name)).toEqual(['成员-2']);
+  });
+
   it('共享详情重拉失败时保留当前详情，并在自动重试后恢复', async () => {
     vi.useFakeTimers();
     const runtime = createRuntimeFixture({

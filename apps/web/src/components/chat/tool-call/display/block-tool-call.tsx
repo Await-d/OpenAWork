@@ -32,6 +32,7 @@ import { ToolOutputPreview } from '../io/tool-output-preview.js';
 
 export function BlockToolCall({
   approvalActions,
+  pendingPermissionRequestId,
   kind,
   toolName,
   input,
@@ -41,6 +42,7 @@ export function BlockToolCall({
   durationMs,
 }: {
   approvalActions?: ToolCallCardProps['approvalActions'];
+  pendingPermissionRequestId?: string;
   kind?: ToolCallCardProps['kind'];
   toolName: string;
   input: Record<string, unknown>;
@@ -319,7 +321,7 @@ export function BlockToolCall({
   // Collapsed summary (shown when not expanded)
   const collapsedSummary = useMemo(() => {
     if (isBashLike && output !== undefined) {
-      const outStr = typeof output === 'string' ? output : JSON.stringify(output);
+      const outStr = typeof output === 'string' ? output : (JSON.stringify(output, null, 2) ?? '');
       if (outStr) {
         const first = outStr
           .split('\n')
@@ -541,7 +543,10 @@ export function BlockToolCall({
           )}
         </div>
       )}
-      <ToolApprovalActions approvalActions={approvalActions} />
+      <ToolApprovalActions
+        approvalActions={approvalActions}
+        permissionRequestId={pendingPermissionRequestId}
+      />
     </div>
   );
 }

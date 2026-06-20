@@ -189,24 +189,31 @@ export async function getFastProvider(userId: string) {
   return { provider, modelId: model.id };
 }
 
+interface ProviderSelectionOptions {
+  fallbackToChat?: boolean;
+}
+
 /**
- * 获取指定 provider + model 的配置（带 fallback 到 chat provider）
+ * 获取指定 provider + model 的配置。默认沿用历史行为：找不到时 fallback 到 chat
+ * provider；调用方传 `fallbackToChat: false` 时用于会话级固定模型，找不到就返回 null。
  */
 export async function getProviderForSelection(
   userId: string,
   selection?: { providerId?: string; modelId?: string },
+  options: ProviderSelectionOptions = {},
 ): Promise<{ provider: AIProvider; modelId: string } | null> {
   const catalog = await getCatalog(userId);
+  const fallbackToChat = options.fallbackToChat !== false;
 
   if (!selection?.providerId || !selection.modelId) {
-    return getChatProvider(userId);
+    return fallbackToChat ? getChatProvider(userId) : null;
   }
 
   const provider = catalog.providers.find((p) => p.id === selection.providerId && p.enabled);
   const model = provider?.defaultModels.find((m) => m.id === selection.modelId && m.enabled);
 
   if (!provider || !model) {
-    return getChatProvider(userId);
+    return fallbackToChat ? getChatProvider(userId) : null;
   }
 
   return { provider, modelId: model.id };

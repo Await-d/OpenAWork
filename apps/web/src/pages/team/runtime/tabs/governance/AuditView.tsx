@@ -9,6 +9,7 @@
 import { useMemo, useState, type CSSProperties } from 'react';
 import type { TeamAuditLogRecord } from '@openAwork/web-client';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
+import { formatTimelineDetail } from '../../data/team-runtime-reference-formatters.js';
 import { TabContainer } from '../TabContainer.js';
 import { collectSessionScope, isSessionInScope } from '../../data/team-runtime-session-scope.js';
 
@@ -299,11 +300,11 @@ export function AuditView({
                   </span>
                 </div>
                 <span style={{ fontSize: 12, color: 'var(--fg-strong)', lineHeight: 1.5 }}>
-                  {log.summary}
+                  {formatTimelineDetail(log.summary, 120)}
                 </span>
                 {log.detail ? (
                   <span style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
-                    {log.detail}
+                    {formatTimelineDetail(log.detail, 200)}
                   </span>
                 ) : null}
               </div>

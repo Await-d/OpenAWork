@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { buildUserFacingStreamErrorMessage } from '../../routes/stream-model-round.js';
+import {
+  buildUpstreamStreamSummaryLog,
+  buildUserFacingStreamErrorMessage,
+} from '../../routes/stream-model-round.js';
 
 describe('buildUserFacingStreamErrorMessage', () => {
   it('优先使用上游分类后的用户态消息', () => {
@@ -32,5 +35,42 @@ describe('buildUserFacingStreamErrorMessage', () => {
         fallbackMessage: 'socket hang up',
       }),
     ).toBe('流式响应处理中断，请稍后重试。');
+  });
+});
+
+describe('buildUpstreamStreamSummaryLog', () => {
+  it('为取消场景输出统一的流摘要结构', () => {
+    expect(
+      buildUpstreamStreamSummaryLog({
+        model: 'gpt-test',
+        round: 2,
+        upstreamProtocol: 'responses',
+        stopReason: 'cancelled',
+        diagnostics: {
+          textDeltaCount: 3,
+          reasoningDeltaCount: 1,
+          toolCallDeltaCount: 0,
+          sawDone: false,
+          sawError: false,
+          stalled: false,
+        },
+      }),
+    ).toEqual({
+      input: {
+        model: 'gpt-test',
+        round: 2,
+        upstreamProtocol: 'responses',
+      },
+      output: {
+        stopReason: 'cancelled',
+        textDeltaCount: 3,
+        reasoningDeltaCount: 1,
+        toolCallDeltaCount: 0,
+        sawDone: false,
+        sawError: false,
+        stalled: false,
+      },
+      isError: false,
+    });
   });
 });

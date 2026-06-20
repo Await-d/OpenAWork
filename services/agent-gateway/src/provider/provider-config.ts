@@ -378,10 +378,13 @@ export const getProviderConfigForSelection = (
   rawProviders: unknown,
   rawActiveSelection: unknown,
   selectionOverride?: { providerId?: string; modelId?: string },
+  options: { fallbackToChat?: boolean } = {},
 ): Promise<{ provider: AIProvider; modelId: string } | null> =>
   createProviderManager(rawProviders, rawActiveSelection)
     .then((manager) => {
+      const fallbackToChat = options.fallbackToChat !== false;
       if (!selectionOverride?.providerId || !selectionOverride.modelId) {
+        if (!fallbackToChat) return null;
         const { provider, model } = manager.getChatProviderConfig();
         return { provider, modelId: model.id };
       }
@@ -394,6 +397,7 @@ export const getProviderConfigForSelection = (
         (item) => item.id === selectionOverride.modelId && item.enabled,
       );
       if (!provider || !model) {
+        if (!fallbackToChat) return null;
         const fallback = manager.getChatProviderConfig();
         return { provider: fallback.provider, modelId: fallback.model.id };
       }

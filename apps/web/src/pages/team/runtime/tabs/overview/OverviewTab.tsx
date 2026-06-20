@@ -5,11 +5,19 @@ import type {
   AgentTeamsTimelineEventType,
 } from '../../data/team-runtime-types.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
+import { formatTimelineDetail } from '../../data/team-runtime-reference-formatters.js';
 import { PANEL_STYLE, TREND_META } from '../../shared/team-runtime-shared.js';
 import { Icon, ChevronDownIcon } from '../../shared/TeamIcons.js';
 import type { IconKey } from '../../shared/TeamIcons.js';
 import { TabContainer } from '../TabContainer.js';
-import { MetricGrid, MiniBar } from '../../shared/content-kit/index.js';
+import {
+  CK_GAP_LG,
+  CK_PAD_LG,
+  CK_RADIUS_LG,
+  MetricGrid,
+  MiniBar,
+  SectionPanel,
+} from '../../shared/content-kit/index.js';
 import { SharedSessionOverviewView } from './shared-session-overview-view.js';
 
 export function OverviewTab({
@@ -79,7 +87,7 @@ export function OverviewTab({
 
   return (
     <TabContainer title="运行概览" subtitle="当前团队会话的关键指标 + 活动时间线，按选中会话联动。">
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: CK_GAP_LG }}>
         {selectedTeam ? (
           <div
             style={{
@@ -88,8 +96,8 @@ export function OverviewTab({
               alignItems: 'center',
               gap: 10,
               flexWrap: 'wrap',
-              padding: '10px 12px',
-              borderRadius: 12,
+              padding: CK_PAD_LG,
+              borderRadius: CK_RADIUS_LG,
               background:
                 'linear-gradient(135deg, color-mix(in oklch, var(--accent) 8%, var(--bg-overlay)) 0%, var(--bg-base) 100%)',
               border: '1px solid color-mix(in srgb, var(--accent) 24%, transparent)',
@@ -324,24 +332,14 @@ export function OverviewTab({
         {/* Two-column layout: activity distribution + timeline */}
         <div
           style={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(220px, 260px) minmax(0, 1fr)',
-            gap: 10,
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: CK_GAP_LG,
+            alignItems: 'flex-start',
           }}
         >
           {/* Activity distribution */}
-          <div
-            style={{
-              ...PANEL_STYLE,
-              padding: '10px 12px',
-              borderRadius: 10,
-              display: 'grid',
-              gap: 8,
-            }}
-          >
-            <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--fg-strong)' }}>
-              活动类型分布
-            </span>
+          <SectionPanel title="活动类型分布" style={{ flex: '0 1 260px' }}>
             {Object.entries(activityStats)
               .sort((a, b) => b[1] - a[1])
               .map(([type, count]) => {
@@ -374,48 +372,20 @@ export function OverviewTab({
                   color: 'var(--fg-muted)',
                   fontSize: 10,
                   cursor: 'pointer',
-                  justifySelf: 'start',
+                  alignSelf: 'start',
                 }}
               >
                 清除筛选
               </button>
             )}
-          </div>
+          </SectionPanel>
 
           {/* Timeline section */}
-          <div
-            style={{
-              ...PANEL_STYLE,
-              padding: '10px 12px',
-              borderRadius: 10,
-              display: 'grid',
-              gap: 8,
-            }}
+          <SectionPanel
+            title="活动时间线"
+            hint={`${filteredEvents.length} / ${timelineEvents.length} 事件`}
+            style={{ flex: '3 1 320px' }}
           >
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                gap: 12,
-                alignItems: 'center',
-              }}
-            >
-              <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--fg-strong)' }}>
-                活动时间线
-              </span>
-              <span
-                style={{
-                  fontSize: 10,
-                  color: 'var(--fg-muted)',
-                  padding: '1px 6px',
-                  borderRadius: 999,
-                  background: 'var(--bg-surface)',
-                }}
-              >
-                {filteredEvents.length} / {timelineEvents.length} 事件
-              </span>
-            </div>
-
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               <input
                 value={searchQuery}
@@ -578,7 +548,7 @@ export function OverviewTab({
                           lineHeight: 1.4,
                         }}
                       >
-                        {event.detail}
+                        {formatTimelineDetail(event.detail)}
                       </span>
                       {isExpanded && (
                         <div
@@ -596,6 +566,9 @@ export function OverviewTab({
                           <span style={{ fontSize: 9, color: 'var(--fg-muted)' }}>
                             主体: {event.agentName}
                           </span>
+                          <span style={{ fontSize: 10, color: 'var(--fg-default)', lineHeight: 1.5, wordBreak: 'break-word' }}>
+                            {formatTimelineDetail(event.detail, 300)}
+                          </span>
                         </div>
                       )}
                     </div>
@@ -603,7 +576,7 @@ export function OverviewTab({
                 );
               })}
             </div>
-          </div>
+          </SectionPanel>
         </div>
       </div>
     </TabContainer>

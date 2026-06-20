@@ -118,6 +118,13 @@ const teamInitStateSchema = z.object({
   }),
 });
 
+const teamRoleInstanceSchema = z.object({
+  rootSessionId: z.string().min(1).max(200),
+  roleLayer: z.enum(['user', ...TEAM_RUNTIME_LAYER_ORDER]),
+  personaKey: z.string().min(1).max(160).nullable().optional(),
+  displayName: z.string().min(1).max(200).nullable().optional(),
+});
+
 const sessionMetadataPatchSchema = z
   .object({
     agentId: z.string().min(1).max(120).optional(),
@@ -131,9 +138,11 @@ const sessionMetadataPatchSchema = z
     reasoningEffort: z.enum(['minimal', 'low', 'medium', 'high', 'xhigh']).optional(),
     teamDefinition: teamDefinitionSchema.optional(),
     teamInit: teamInitStateSchema.optional(),
+    teamRoleInstance: teamRoleInstanceSchema.optional(),
     teamWorkspaceId: z.string().min(1).max(200).optional(),
     thinkingEnabled: z.boolean().optional(),
     upstreamRetryMaxRetries: upstreamRetryMaxRetriesSchema.optional(),
+    variant: z.string().min(1).max(80).optional(),
     webSearchEnabled: z.boolean().optional(),
     workingDirectory: z.string().optional(),
     yoloMode: z.boolean().optional(),

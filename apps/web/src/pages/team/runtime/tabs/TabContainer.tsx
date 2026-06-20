@@ -35,6 +35,8 @@ const INNER_BASE: CSSProperties = {
   flexDirection: 'column',
   gap: 14,
   width: '100%',
+  flex: 1,
+  minHeight: 0,
 };
 
 const HEADER_STYLE: CSSProperties = {

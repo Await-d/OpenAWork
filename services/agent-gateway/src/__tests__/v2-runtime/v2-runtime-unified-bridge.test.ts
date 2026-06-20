@@ -38,6 +38,24 @@ describe('unifiedMessageToModelMessages', () => {
     ]);
   });
 
+  it('normalizes non-standard image/jpg media type for upstream image parts', () => {
+    const result = unifiedMessageToModelMessages({
+      role: 'user',
+      content: 'see jpg',
+      images: [{ imageUrl: 'data:image/jpg;base64,abc', mimeType: 'image/jpg' }],
+    });
+
+    expect(result).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'see jpg' },
+          { type: 'image', image: 'data:image/jpeg;base64,abc', mediaType: 'image/jpeg' },
+        ],
+      },
+    ]);
+  });
+
   it('falls back to bare content when images carry no usable url', () => {
     const result = unifiedMessageToModelMessages({
       role: 'user',

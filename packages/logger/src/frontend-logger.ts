@@ -1,4 +1,5 @@
 import type { LogLevel, LogEntry, LoggerOptions } from './types.js';
+import { redactLogText } from './redaction.js';
 
 const LEVEL_ORDER: Record<LogLevel, number> = {
   trace: 0,
@@ -40,18 +41,19 @@ export class FrontendLogger {
 
   private log(level: LogLevel, message: string, args: unknown[]): void {
     if (LEVEL_ORDER[level] < this.minLevel) return;
-    const entry: LogEntry = { level, message, timestamp: Date.now(), args };
+    const redactedMessage = redactLogText(message);
+    const entry: LogEntry = { level, message: redactedMessage, timestamp: Date.now(), args };
     this.buffer.push(entry);
     if (this.buffer.length > this.bufferSize) {
       this.buffer.shift();
     }
     const tag = `${this.prefix}${LEVEL_PREFIX[level]} [${timestamp()}]`;
     if (level === 'error') {
-      console.error(tag, message, ...args);
+      console.error(tag, redactedMessage, ...args);
     } else if (level === 'warn') {
-      console.warn(tag, message, ...args);
+      console.warn(tag, redactedMessage, ...args);
     } else {
-      console.log(tag, message, ...args);
+      console.log(tag, redactedMessage, ...args);
     }
   }
 

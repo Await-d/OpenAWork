@@ -55,8 +55,14 @@ describe('applyTeamLayerToolGate', () => {
     expect(names).toContain('mark_failed');
   });
 
-  it('executor 必备工具（read/write/bash）保留，越层工具被过滤', async () => {
-    const tools = [tool('read'), tool('write'), tool('bash'), tool('some_random')];
+  it('executor 必备工具（read/write/bash）保留，越层与直接问用户工具被过滤', async () => {
+    const tools = [
+      tool('read'),
+      tool('write'),
+      tool('bash'),
+      tool('AskUserQuestion'),
+      tool('some_random'),
+    ];
     const out = await applyTeamLayerToolGate({
       roleLayer: 'executor',
       metadataJson: META,
@@ -66,6 +72,7 @@ describe('applyTeamLayerToolGate', () => {
     expect(names).toContain('read');
     expect(names).toContain('write');
     expect(names).toContain('bash');
+    expect(names).not.toContain('AskUserQuestion');
     expect(names).not.toContain('some_random');
   });
 
@@ -88,6 +95,8 @@ describe('applyTeamLayerToolGate', () => {
     const names = out.map((t) => t.function.name);
     expect(names).toContain('reply_direct');
     expect(names).toContain('route_to_orchestrate');
+    expect(names).toContain('request_user_input');
+    expect(names).not.toContain('AskUserQuestion');
   });
 });
 

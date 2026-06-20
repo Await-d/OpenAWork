@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import React from 'react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TeamSessionListSidebar } from './TeamSessionListSidebar.js';
 
@@ -163,6 +163,64 @@ describe('TeamSessionListSidebar', () => {
       expect(copyTextToClipboardMock).toHaveBeenCalledWith('session-1');
     });
     expect(toastMock).toHaveBeenCalledWith('已复制会话 ID', 'success');
+  });
+
+  it('删除左侧根会话时展示完整下游层级影响范围', () => {
+    renderSidebar({
+      onDeleteSession: vi.fn(),
+      workspaceGroups: [
+        {
+          sessions: [
+            createSession({
+              id: 'root-session',
+              parentSessionId: null,
+              roleLayer: 'reception',
+              title: '根接待会话',
+            }),
+            createSession({
+              id: 'pm1-session',
+              parentSessionId: 'root-session',
+              roleLayer: 'pm1',
+              title: '规划层会话',
+            }),
+            createSession({
+              id: 'pm2-session',
+              parentSessionId: 'pm1-session',
+              roleLayer: 'pm2',
+              title: '管控层会话',
+            }),
+            createSession({
+              id: 'executor-session',
+              parentSessionId: 'pm2-session',
+              roleLayer: 'executor',
+              title: '执行层会话',
+            }),
+          ],
+          workspaceLabel: 'workspace/demo',
+          workspacePath: '/workspace/demo',
+        },
+      ],
+    });
+
+    fireEvent.contextMenu(screen.getByRole('button', { name: '根接待会话' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '🔴 删除会话' }));
+
+    expect(screen.getByRole('alertdialog', { name: '确认删除会话' })).not.toBeNull();
+    expect(screen.getByText('删除影响层级')).not.toBeNull();
+    expect(screen.getByText(/当前层级：接待层/)).not.toBeNull();
+    expect(screen.getByText(/将同时移除 3 个下游层级会话，共 4 个会话节点/)).not.toBeNull();
+
+    const impactList = screen.getByLabelText('将被删除的会话层级');
+    const rows = within(impactList).getAllByRole('listitem');
+    expect(rows).toHaveLength(4);
+    expect(rows[0]?.textContent).toContain('接待层');
+    expect(rows[0]?.textContent).toContain('根接待会话');
+    expect(rows[1]?.textContent).toContain('PM1 规划层');
+    expect(rows[1]?.textContent).toContain('规划层会话');
+    expect(rows[2]?.textContent).toContain('PM2 管控层');
+    expect(rows[2]?.textContent).toContain('管控层会话');
+    expect(rows[3]?.textContent).toContain('执行层');
+    expect(rows[3]?.textContent).toContain('执行层会话');
   });
 
   it('没有会话管理权限时禁用新建入口，且右键菜单不暴露重命名/暂停/删除动作', () => {

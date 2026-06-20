@@ -37,6 +37,11 @@ import type {
 } from '../../data/team-runtime-types.js';
 import type { TeamSessionCreationDraft } from '../../data/team-session-creation.types.js';
 import { NewTeamSessionModal } from '../modals/NewTeamSessionModal.js';
+import {
+  buildDeleteSessionImpactTree,
+  DeleteSessionImpactDialog,
+  type DeleteSessionConfirmTarget,
+} from './DeleteSessionImpactDialog.js';
 import { SessionCard } from './SessionCard.js';
 import { TeamRunStatePill } from '../../shared/TeamRunStatePill.js';
 
@@ -58,6 +63,10 @@ function compareByUpdatedAtDesc(a: { updatedAt?: string }, b: { updatedAt?: stri
   const at = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
   const bt = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
   return bt - at;
+}
+
+function ignoreSearchQueryUpdate(): void {
+  return undefined;
 }
 
 const CONTAINER_STYLE: CSSProperties = {
@@ -98,12 +107,12 @@ const GROUP_LABEL_STYLE: CSSProperties = {
 
 const TIME_BUCKET_LABEL_STYLE: CSSProperties = {
   display: 'block',
-  padding: '6px 14px 2px',
+  padding: '8px 14px 4px',
   fontSize: 10,
   fontWeight: 600,
   color: 'var(--fg-muted)',
-  letterSpacing: '0.04em',
-  opacity: 0.85,
+  letterSpacing: '0.06em',
+  opacity: 0.75,
 };
 
 const TIME_BUCKET_ORDER: TimeBucket[] = ['今天', '昨天', '更早'];
@@ -220,13 +229,14 @@ function statusLabel(status: AgentTeamsSidebarTeam['status']): string {
 
 const SEARCH_INPUT_STYLE: CSSProperties = {
   width: '100%',
-  padding: '6px 10px',
+  padding: '7px 10px',
   borderRadius: 8,
-  border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-base) 60%, var(--bg-overlay))',
+  border: '1px solid color-mix(in srgb, var(--border-subtle) 50%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-base) 55%, var(--bg-overlay))',
   color: 'var(--fg-strong)',
   fontSize: 12,
   outline: 'none',
+  transition: 'border-color 150ms ease, box-shadow 150ms ease',
 };
 
 const CREATE_BTN_STYLE: CSSProperties = {
@@ -273,28 +283,6 @@ const CONTEXT_MENU_SEPARATOR_STYLE: CSSProperties = {
   height: 1,
   margin: '4px 8px',
   background: 'color-mix(in srgb, var(--border-default) 50%, transparent)',
-};
-
-const CONFIRM_OVERLAY_STYLE: CSSProperties = {
-  position: 'fixed',
-  inset: 0,
-  zIndex: 9995,
-  display: 'grid',
-  placeItems: 'center',
-  background: 'rgba(0, 0, 0, 0.5)',
-  backdropFilter: 'blur(2px)',
-};
-
-const CONFIRM_DIALOG_STYLE: CSSProperties = {
-  position: 'relative',
-  width: 320,
-  padding: 20,
-  borderRadius: 14,
-  background: 'var(--bg-overlay)',
-  border: '1px solid var(--border-default)',
-  boxShadow: '0 16px 48px rgba(0, 0, 0, 0.35)',
-  display: 'grid',
-  gap: 14,
 };
 
 interface ContextMenuState {
@@ -418,11 +406,19 @@ export function TeamSessionListSidebar({
   const canOpenNewSessionModal = Boolean(canManageSessionEntries && teamWorkspaceId);
   const [internalSearchQuery, setInternalSearchQuery] = useState('');
   const searchQuery = chromeless ? (controlledSearchQuery ?? '') : internalSearchQuery;
-  const setSearchQuery = chromeless ? () => {} : setInternalSearchQuery;
+  const setSearchQuery = chromeless ? ignoreSearchQueryUpdate : setInternalSearchQuery;
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
-  const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; title: string } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<DeleteSessionConfirmTarget | null>(null);
   const [hoveredSessionId, setHoveredSessionId] = useState<string | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
+  const allSessions = useMemo(
+    () => workspaceGroups.flatMap((group) => group.sessions),
+    [workspaceGroups],
+  );
+  const deleteImpact = useMemo(
+    () => (deleteConfirm ? buildDeleteSessionImpactTree(deleteConfirm, allSessions) : null),
+    [allSessions, deleteConfirm],
+  );
 
   const handleContextMenu = useCallback(
     (event: React.MouseEvent, session: AgentTeamsSidebarTeam) => {
@@ -975,35 +971,62 @@ export function TeamSessionListSidebar({
               flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
-              padding: '40px 20px',
-              gap: 12,
+              padding: '44px 24px',
+              gap: 14,
               color: 'var(--fg-muted)',
               textAlign: 'center',
             }}
           >
             <div
               style={{
-                width: 48,
-                height: 48,
-                borderRadius: 12,
+                width: 52,
+                height: 52,
+                borderRadius: 14,
                 display: 'grid',
                 placeItems: 'center',
-                background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
-                fontSize: 24,
+                background:
+                  searchQuery.trim()
+                    ? 'color-mix(in srgb, var(--aux) 10%, transparent)'
+                    : 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
+                boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--border-subtle) 40%, transparent)',
+                fontSize: 22,
               }}
             >
-              {searchQuery.trim() ? '🔍' : '💬'}
+              {searchQuery.trim() ? (
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}>
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+              ) : (
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.45 }}>
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                </svg>
+              )}
             </div>
-            <div style={{ display: 'grid', gap: 4 }}>
-              <span style={{ fontSize: 13, color: 'var(--fg-default)', fontWeight: 600 }}>
+            <div style={{ display: 'grid', gap: 5 }}>
+              <span
+                style={{
+                  fontSize: 13,
+                  color: 'var(--fg-default)',
+                  fontWeight: 600,
+                  letterSpacing: '-0.01em',
+                }}
+              >
                 {searchQuery.trim() ? '没有匹配的会话' : '还没有会话'}
               </span>
-              <span style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
+              <span
+                style={{
+                  fontSize: 11.5,
+                  color: 'var(--fg-muted)',
+                  lineHeight: 1.6,
+                  maxWidth: 200,
+                }}
+              >
                 {searchQuery.trim()
-                  ? '试试其他关键词'
+                  ? '试试其他关键词或清空搜索条件'
                   : onSubmitDraft
-                    ? '点击右上角「+ 新建」开始'
-                    : '在中间区域输入需求即可创建'}
+                    ? '点击上方「+ 新建」按钮开始第一个团队任务'
+                    : '在右侧区域输入需求即可自动创建会话'}
               </span>
             </div>
           </div>
@@ -1092,49 +1115,16 @@ export function TeamSessionListSidebar({
           )
         : null}
 
-      {deleteConfirm ? (
-        <div style={CONFIRM_OVERLAY_STYLE}>
-          <div role="alertdialog" aria-label="确认删除会话" style={CONFIRM_DIALOG_STYLE}>
-            <strong style={{ fontSize: 14, color: 'var(--fg-strong)' }}>删除会话</strong>
-            <span style={{ fontSize: 12, color: 'var(--fg-default)', lineHeight: 1.6 }}>
-              确定要删除「{deleteConfirm.title}」吗？删除后不可恢复。
-            </span>
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button
-                type="button"
-                onClick={() => setDeleteConfirm(null)}
-                style={{
-                  padding: '6px 14px',
-                  borderRadius: 8,
-                  border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
-                  background: 'var(--bg-overlay)',
-                  color: 'var(--fg-default)',
-                  fontSize: 12,
-                  cursor: 'pointer',
-                }}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                onClick={handleDeleteConfirm}
-                style={{
-                  padding: '6px 14px',
-                  borderRadius: 8,
-                  border: 'none',
-                  background: 'var(--danger)',
-                  color: 'var(--fg-on-accent)',
-                  fontSize: 12,
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
-              >
-                确认删除
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      {deleteImpact
+        ? createPortal(
+            <DeleteSessionImpactDialog
+              impact={deleteImpact}
+              onCancel={() => setDeleteConfirm(null)}
+              onConfirm={handleDeleteConfirm}
+            />,
+            document.body,
+          )
+        : null}
 
       {showNewSessionModal && teamWorkspaceId && onSubmitDraft ? (
         <NewTeamSessionModal

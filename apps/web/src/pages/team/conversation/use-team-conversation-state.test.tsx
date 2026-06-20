@@ -13,6 +13,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
+import type { RunEvent } from '@openAwork/shared';
 import {
   computeTeamConversationProvidersRetryDelay,
   computeTeamConversationRecoveryRetryDelay,
@@ -20,6 +21,8 @@ import {
   formatTeamConversationRecoveryLoadError,
   useTeamConversationState,
 } from './use-team-conversation-state.js';
+import { useLayerStore } from '../../../stores/team/team-events.js';
+import * as sessionListEvents from '../../../utils/session/session-list-events.js';
 
 const SESSION_ID = 'session-test-001';
 const TOKEN = 'tok-fake';
@@ -58,7 +61,11 @@ interface RecoveryFixture {
   pendingQuestions?: unknown[];
   session?: {
     id: string;
+    metadata_json?: string;
+    role_layer?: string | null;
+    runEvents?: RunEvent[];
     state_status?: 'idle' | 'running' | 'paused';
+    substate?: string | null;
     messages?: unknown[];
   };
   todoLanes?: { lanes: unknown[] };
@@ -126,10 +133,12 @@ beforeEach(() => {
   stubRecovery({});
   setNavigatorOnline(true);
   MockWebSocket.instances.length = 0;
+  useLayerStore.getState().clear();
 });
 
 afterEach(() => {
   cleanup();
+  useLayerStore.getState().clear();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   vi.useRealTimers();
@@ -225,6 +234,10 @@ describe('useTeamConversationState — 空闲态', () => {
 
 describe('useTeamConversationState — 加载快照', () => {
   it('sessionId 存在时调用 getRecovery 并写入 state', async () => {
+    const publishSessionPendingPermissionSpy = vi.spyOn(
+      sessionListEvents,
+      'publishSessionPendingPermission',
+    );
     stubRecovery({
       session: {
         id: SESSION_ID,
@@ -243,9 +256,26 @@ describe('useTeamConversationState — 加载快照', () => {
             createdAtMs: 1700000001000,
           },
         ],
+        runEvents: [
+          {
+            type: 'text_delta',
+            delta: '正在分析任务',
+          },
+        ],
       },
-      pendingPermissions: [{ id: 'perm1' }],
-      pendingQuestions: [{ id: 'q1' }],
+      pendingPermissions: [
+        {
+          requestId: 'perm1',
+          sessionId: SESSION_ID,
+          toolName: 'bash',
+          scope: 'bash pwd',
+          reason: '读取当前目录',
+          riskLevel: 'low',
+          status: 'pending',
+          createdAt: '2026-06-15T00:00:00.000Z',
+        },
+      ],
+      pendingQuestions: [{ requestId: 'q1', status: 'pending', questions: [] }],
     });
 
     const { result } = renderHook(() =>
@@ -267,6 +297,278 @@ describe('useTeamConversationState — 加载快照', () => {
     expect(result.current.remoteSessionBusyState).toBe('running');
     expect(result.current.pendingPermissions).toHaveLength(1);
     expect(result.current.pendingQuestions).toHaveLength(1);
+    expect(result.current.runEvents).toHaveLength(1);
+    expect(publishSessionPendingPermissionSpy).toHaveBeenCalledWith(
+      SESSION_ID,
+      expect.objectContaining({
+        requestId: 'perm1',
+        targetSessionId: SESSION_ID,
+      }),
+    );
+  });
+
+  it('recovery.children 中的团队层级会进入 childSessions', async () => {
+    stubRecovery({
+      session: {
+        id: SESSION_ID,
+        state_status: 'idle',
+        messages: [],
+      },
+      children: [
+        {
+          id: 'child-pm1',
+          role_layer: 'pm1',
+          messages: [{ id: 'pm1-msg', role: 'assistant', content: 'PM1 详情' }],
+        },
+        {
+          id: 'child-executor',
+          role_layer: 'executor',
+          messages: [{ id: 'executor-msg', role: 'assistant', content: '执行详情' }],
+        },
+      ],
+    });
+
+    const { result } = renderHook(() =>
+      useTeamConversationState({
+        sessionId: SESSION_ID,
+        currentUserEmail: EMAIL,
+        gatewayUrl: GATEWAY,
+        token: TOKEN,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(result.current.isSessionSnapshotReady).toBe(true);
+    });
+
+    expect(result.current.childSessions.map((child) => child.role_layer)).toEqual([
+      'pm1',
+      'executor',
+    ]);
+    expect(result.current.childSessions[0]?.messages[0]?.content).toBe('PM1 详情');
+    expect(result.current.childSessions[1]?.messages[0]?.content).toBe('执行详情');
+  });
+
+  it('切换 sessionId 时清空旧消息并重新加载目标层会话', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('/sessions/root-session/recovery')) {
+        return new Response(
+          JSON.stringify({
+            recovery: {
+              pendingPermissions: [],
+              pendingQuestions: [],
+              session: {
+                id: 'root-session',
+                state_status: 'idle',
+                messages: [{ id: 'root-message', role: 'assistant', content: '主对话内容' }],
+              },
+              todoLanes: { lanes: [] },
+              tasks: [],
+              children: [],
+              ratings: [],
+              activeStream: null,
+              totalTurnCount: null,
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (url.includes('/sessions/pm1-session/recovery')) {
+        return new Response(
+          JSON.stringify({
+            recovery: {
+              pendingPermissions: [],
+              pendingQuestions: [],
+              session: {
+                id: 'pm1-session',
+                role_layer: 'pm1',
+                state_status: 'idle',
+                messages: [{ id: 'pm1-message', role: 'assistant', content: 'PM1 层内容' }],
+              },
+              todoLanes: { lanes: [] },
+              tasks: [],
+              children: [],
+              ratings: [],
+              activeStream: null,
+              totalTurnCount: null,
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result, rerender } = renderHook(
+      ({ sessionId }: { sessionId: string }) =>
+        useTeamConversationState({
+          sessionId,
+          currentUserEmail: EMAIL,
+          gatewayUrl: GATEWAY,
+          token: TOKEN,
+        }),
+      { initialProps: { sessionId: 'root-session' } },
+    );
+
+    await waitFor(() => {
+      expect(result.current.messages[0]?.id).toBe('root-message');
+    });
+
+    rerender({ sessionId: 'pm1-session' });
+
+    await waitFor(() => {
+      expect(result.current.messages).toEqual([]);
+    });
+    await waitFor(() => {
+      expect(result.current.messages[0]?.id).toBe('pm1-message');
+    });
+    expect(result.current.messages[0]?.content).toBe('PM1 层内容');
+  });
+
+  it('从 session metadata 恢复固定模型选择', async () => {
+    stubRecovery({
+      session: {
+        id: SESSION_ID,
+        state_status: 'idle',
+        messages: [],
+        metadata_json: JSON.stringify({
+          providerId: 'anthropic-fixed',
+          modelId: 'claude-fixed',
+        }),
+      },
+    });
+
+    const { result } = renderHook(() =>
+      useTeamConversationState({
+        sessionId: SESSION_ID,
+        currentUserEmail: EMAIL,
+        gatewayUrl: GATEWAY,
+        token: TOKEN,
+        defaults: {
+          activeProviderId: 'settings-provider',
+          activeModelId: 'settings-model',
+        },
+      }),
+    );
+
+    await waitFor(() => {
+      expect(result.current.isSessionSnapshotReady).toBe(true);
+    });
+
+    expect(result.current.activeProviderId).toBe('anthropic-fixed');
+    expect(result.current.activeModelId).toBe('claude-fixed');
+  });
+
+  it('直接打开角色子会话时会补写已有 layer 节点缺失的 rootSessionId', async () => {
+    useLayerStore.getState().addNode({
+      sessionId: SESSION_ID,
+      roleLayer: 'executor',
+      parentSessionId: 'session-pm2',
+      state: 'idle',
+      displayName: '前端开发者',
+      personaKey: 'executor:frontend',
+    });
+    stubRecovery({
+      session: {
+        id: SESSION_ID,
+        role_layer: 'executor',
+        state_status: 'idle',
+        messages: [],
+        metadata_json: JSON.stringify({
+          parentSessionId: 'session-pm2',
+          teamRoleInstance: {
+            rootSessionId: 'session-root',
+            roleLayer: 'executor',
+            personaKey: 'executor:frontend',
+            displayName: '前端开发者',
+          },
+        }),
+      },
+    });
+
+    renderHook(() =>
+      useTeamConversationState({
+        sessionId: SESSION_ID,
+        currentUserEmail: EMAIL,
+        gatewayUrl: GATEWAY,
+        token: TOKEN,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(useLayerStore.getState().nodes.get(SESSION_ID)?.rootSessionId).toBe('session-root');
+    });
+  });
+
+  it('recovery metadata 缺少 parentSessionId 时保留已有 team 父链', async () => {
+    useLayerStore.getState().addNode({
+      sessionId: SESSION_ID,
+      roleLayer: 'pm1',
+      parentSessionId: 'team-root-session',
+      state: 'idle',
+    });
+    stubRecovery({
+      session: {
+        id: SESSION_ID,
+        role_layer: 'pm1',
+        state_status: 'idle',
+        messages: [],
+        metadata_json: JSON.stringify({
+          teamRoleInstance: {
+            rootSessionId: 'team-root-session',
+            roleLayer: 'pm1',
+          },
+        }),
+      },
+    });
+
+    renderHook(() =>
+      useTeamConversationState({
+        sessionId: SESSION_ID,
+        currentUserEmail: EMAIL,
+        gatewayUrl: GATEWAY,
+        token: TOKEN,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(useLayerStore.getState().nodes.get(SESSION_ID)?.parentSessionId).toBe(
+        'team-root-session',
+      );
+    });
+  });
+
+  it('recovery.session 透传 team_parent_session_id 时可直接建立 team 父链', async () => {
+    stubRecovery({
+      session: {
+        id: SESSION_ID,
+        role_layer: 'pm2',
+        state_status: 'idle',
+        messages: [],
+        metadata_json: JSON.stringify({
+          teamRoleInstance: {
+            rootSessionId: 'team-root-session',
+            roleLayer: 'pm2',
+          },
+        }),
+        // 后端 recovery 新增显式字段，前端不应再只依赖 metadata.parentSessionId
+        ['team_parent_session_id' as never]: 'pm1-session',
+      } as unknown as RecoveryFixture['session'],
+    });
+
+    renderHook(() =>
+      useTeamConversationState({
+        sessionId: SESSION_ID,
+        currentUserEmail: EMAIL,
+        gatewayUrl: GATEWAY,
+        token: TOKEN,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(useLayerStore.getState().nodes.get(SESSION_ID)?.parentSessionId).toBe('pm1-session');
+    });
   });
 
   it('getRecovery 失败时降级为空白态', async () => {
@@ -569,8 +871,6 @@ describe('useTeamConversationState — composer setter 暴露', () => {
   });
 
   it('defaults 选项被 hook 使用作为初始值', () => {
-    // team hook 只接受 activeProviderId / activeModelId 作为 defaults，
-    // chat-only 字段（dialogueMode / yoloMode / thinkingEnabled / 等）已删除。
     const { result } = renderHook(() =>
       useTeamConversationState({
         sessionId: null,
@@ -580,16 +880,19 @@ describe('useTeamConversationState — composer setter 暴露', () => {
         defaults: {
           activeProviderId: 'openai',
           activeModelId: 'gpt-4o',
+          thinkingEnabled: true,
+          reasoningEffort: 'high',
         },
       }),
     );
 
     expect(result.current.activeProviderId).toBe('openai');
     expect(result.current.activeModelId).toBe('gpt-4o');
+    expect(result.current.thinkingEnabled).toBe(true);
+    expect(result.current.reasoningEffort).toBe('high');
   });
 
-  it('TeamConversationState 不暴露 chat-only setter（dialogueMode/yoloMode 等）', () => {
-    // 防止未来 chat 端加新字段时 team 也跟着膨胀的回归。
+  it('TeamConversationState 只暴露 team 需要的模型思考字段，不暴露其它 chat-only setter', () => {
     const { result } = renderHook(() =>
       useTeamConversationState({
         sessionId: null,
@@ -604,8 +907,10 @@ describe('useTeamConversationState — composer setter 暴露', () => {
     expect(state['yoloMode']).toBeUndefined();
     expect(state['setYoloMode']).toBeUndefined();
     expect(state['webSearchEnabled']).toBeUndefined();
-    expect(state['thinkingEnabled']).toBeUndefined();
-    expect(state['reasoningEffort']).toBeUndefined();
+    expect(state['thinkingEnabled']).toBe(false);
+    expect(state['setThinkingEnabled']).toBeTypeOf('function');
+    expect(state['reasoningEffort']).toBe('medium');
+    expect(state['setReasoningEffort']).toBeTypeOf('function');
     expect(state['manualAgentId']).toBeUndefined();
   });
 
@@ -926,6 +1231,67 @@ describe('useTeamConversationState — submitInbound (v0.2)', () => {
     );
   });
 
+  it('startStream 会为支持思考的 team 模型下发 thinkingEnabled 与 reasoningEffort', async () => {
+    vi.stubGlobal('WebSocket', MockWebSocket as unknown as typeof WebSocket);
+    class InertEventSource {
+      close(): void {
+        return undefined;
+      }
+    }
+    vi.stubGlobal('EventSource', InertEventSource as unknown as typeof EventSource);
+
+    const { result } = renderHook(() =>
+      useTeamConversationState({
+        sessionId: SESSION_ID,
+        currentUserEmail: EMAIL,
+        gatewayUrl: GATEWAY,
+        token: TOKEN,
+        enableWriters: true,
+        defaults: {
+          activeProviderId: 'openai',
+          activeModelId: 'gpt-5.4',
+          thinkingEnabled: true,
+          reasoningEffort: 'xhigh',
+        },
+      }),
+    );
+
+    act(() => {
+      result.current.setProviders([
+        {
+          id: 'openai',
+          name: 'OpenAI',
+          type: 'openai',
+          enabled: true,
+          defaultModels: [
+            {
+              id: 'gpt-5.4',
+              label: 'GPT-5.4',
+              enabled: true,
+              supportsThinking: true,
+            },
+          ],
+        },
+      ]);
+    });
+
+    await act(async () => {
+      await result.current.startStream('team reasoning');
+    });
+    MockWebSocket.instances[0]?.onopen?.();
+
+    const payload = JSON.parse(MockWebSocket.instances[0]?.sentPayloads[0] ?? '{}') as {
+      model?: string;
+      providerId?: string;
+      reasoningEffort?: string;
+      thinkingEnabled?: boolean;
+    };
+    expect(payload.model).toBe('gpt-5.4');
+    expect(payload.providerId).toBe('openai');
+    expect(payload.thinkingEnabled).toBe(true);
+    expect(payload.reasoningEffort).toBe('xhigh');
+  });
+
   it('成功提交 user_input 时 POST 到正确端点 + 返回 messageId', async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       // 第一个调用是 reload 的 getRecovery（GET）
@@ -982,6 +1348,76 @@ describe('useTeamConversationState — submitInbound (v0.2)', () => {
     // 验证 URL
     const inboundCall = fetchMock.mock.calls.find(([u]) => String(u).includes('/inbound-messages'));
     expect(inboundCall?.[0]).toBe(`${GATEWAY}/team/sessions/${SESSION_ID}/inbound-messages`);
+  });
+
+  it('回复子会话 pending question 时使用目标会话 ID', async () => {
+    const childSessionId = 'child-question-session';
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('/recovery')) {
+        return new Response(
+          JSON.stringify({
+            recovery: {
+              pendingPermissions: [],
+              pendingQuestions: [
+                {
+                  requestId: 'question-child-1',
+                  sessionId: childSessionId,
+                  title: '需要补充上下文',
+                  toolName: 'question',
+                  status: 'pending',
+                  questions: [],
+                  createdAt: '2026-06-16T11:00:00.000Z',
+                },
+              ],
+              session: { id: SESSION_ID, state_status: 'paused', messages: [] },
+              todoLanes: { lanes: [] },
+              tasks: [],
+              children: [],
+              ratings: [],
+              activeStream: null,
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (url.includes('/questions/reply')) {
+        expect(init?.method).toBe('POST');
+        const body = JSON.parse((init?.body as string) ?? '{}');
+        expect(body).toEqual({
+          answers: [['自己查看上下文任务']],
+          requestId: 'question-child-1',
+          status: 'answered',
+        });
+        return new Response(null, { status: 204 });
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() =>
+      useTeamConversationState({
+        sessionId: SESSION_ID,
+        currentUserEmail: EMAIL,
+        gatewayUrl: GATEWAY,
+        token: TOKEN,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(result.current.isSessionSnapshotReady).toBe(true);
+    });
+
+    await act(async () => {
+      await result.current.replyQuestion(
+        'question-child-1',
+        'answered',
+        [['自己查看上下文任务']],
+        { targetSessionId: childSessionId },
+      );
+    });
+
+    const replyCall = fetchMock.mock.calls.find(([url]) => String(url).includes('/questions/reply'));
+    expect(replyCall?.[0]).toBe(`${GATEWAY}/sessions/${childSessionId}/questions/reply`);
   });
 
   it('clarification_answer 载荷类型守卫', async () => {

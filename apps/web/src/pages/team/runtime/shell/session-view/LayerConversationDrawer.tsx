@@ -1,25 +1,10 @@
-/**
- * 260515-team-phase-b · T-15（v1.4 升级）
- *
- * 底部抽屉层级对话查看器。
- *
- * v1.4 升级要点：
- *   - 选中非 reviewer 层级时，内容区直接 `<TeamConversationView/>` 渲染对应 session
- *     的 chat 消息流，与 LayeredConversationView tab 双栏右侧保持一致
- *   - reviewer 层仍走 `<ReviewReportView/>`（review 视图独立 layout）
- *   - 收起时只露 36px 标题条，展开后内容区给 chat 渲染留出至少 320px 高度
- *
- * 设计：
- *   - 底部固定抽屉（可折叠），LayerTabBar 切换不同层级的 session
- *   - 单层级多个 session 时按时间倒序展示首个进入抽屉
- *
- * Phase B MVP 已升级到与 chat 渲染对齐；进一步丰富的 actions / 滚动恢复等
- * 由 SessionConversationView 内部统一负责。
- */
-
 import { useState, type CSSProperties } from 'react';
-import { useLayerStore, type TeamRoleLayer } from '../../../../../stores/team/team-events.js';
-import { ReviewReportView } from '../../tabs/tasks/ReviewReportView.js';
+import {
+  useLayerStore,
+  type LayerNode,
+  type TeamRoleLayer,
+} from '../../../../../stores/team/team-events.js';
+import { ReviewReportView, type ReviewVerdict } from '../../tabs/tasks/ReviewReportView.js';
 import { TeamConversationView } from '../../../conversation/TeamConversationView.js';
 
 const DRAWER_STYLE: CSSProperties = {
@@ -29,8 +14,8 @@ const DRAWER_STYLE: CSSProperties = {
   right: 0,
   zIndex: 100,
   borderTop: '1px solid color-mix(in srgb, var(--border-default) 82%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 96%, var(--bg-base))',
-  boxShadow: '0 -4px 24px rgba(0,0,0,0.08)',
+  background: 'var(--bg-overlay)',
+  boxShadow: '0 -2px 12px rgba(0,0,0,0.1)',
   transition: 'transform 200ms ease',
 };
 
@@ -38,8 +23,8 @@ const DRAWER_HEADER_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   gap: 12,
-  padding: '8px 16px',
-  cursor: 'pointer',
+  padding: '6px 12px',
+  height: 36,
   userSelect: 'none',
 };
 
@@ -47,19 +32,22 @@ const CLOSE_BUTTON_STYLE: CSSProperties = {
   marginLeft: 'auto',
   width: 24,
   height: 24,
-  borderRadius: 6,
-  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
+  borderRadius: 4,
+  border: 'none',
+  background: 'transparent',
   color: 'var(--fg-muted)',
-  fontSize: 14,
+  fontSize: 16,
   lineHeight: 1,
   cursor: 'pointer',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
 };
 
 const TAB_BAR_STYLE: CSSProperties = {
   display: 'flex',
-  gap: 4,
-  padding: '4px 16px',
+  gap: 2,
+  padding: '4px 12px',
   overflowX: 'auto',
   borderBottom: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
 };
@@ -68,9 +56,9 @@ const TAB_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   gap: 4,
-  padding: '4px 10px',
-  borderRadius: 6,
-  border: '1px solid transparent',
+  padding: '3px 8px',
+  borderRadius: 4,
+  border: 'none',
   background: 'transparent',
   fontSize: 11,
   fontWeight: 600,
@@ -90,7 +78,7 @@ const CONTENT_STYLE: CSSProperties = {
 };
 
 const REVIEW_CONTENT_STYLE: CSSProperties = {
-  padding: 16,
+  padding: 12,
   maxHeight: 280,
   overflowY: 'auto',
   fontSize: 12,
@@ -107,12 +95,17 @@ const LAYER_LABELS: Record<TeamRoleLayer, string> = {
   reviewer: '评审',
 };
 
+function getLayerNodeLabel(node: LayerNode): string {
+  const displayName = node.displayName?.trim();
+  return displayName && displayName.length > 0 ? displayName : LAYER_LABELS[node.roleLayer];
+}
+
 export interface LayerConversationDrawerProps {
   visible?: boolean;
   onClose?: () => void;
   reviewData?: {
     reportMarkdown: string | null;
-    overallVerdict: 'pass' | 'implementation-failure' | 'planning-failure' | null;
+    overallVerdict: ReviewVerdict;
     specReviewPassed: boolean | null;
     qualityReviewPassed: boolean | null;
   } | null;
@@ -140,33 +133,23 @@ export function LayerConversationDrawer({
         transform: collapsed ? 'translateY(calc(100% - 36px))' : 'translateY(0)',
       }}
     >
-      <div
-        style={DRAWER_HEADER_STYLE}
-        onClick={() => setCollapsed((v) => !v)}
-        role="button"
-        tabIndex={0}
-        aria-expanded={!collapsed}
-        aria-label="层级对话查看器"
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') setCollapsed((v) => !v);
-        }}
-      >
-        <span style={{ fontSize: 14, fontWeight: 800 }}>{collapsed ? '▲' : '▼'} 层级对话</span>
-        <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>{nodeList.length} 个 session</span>
-        {onClose ? (
-          <button
-            type="button"
-            style={CLOSE_BUTTON_STYLE}
-            aria-label="关闭层级对话抽屉"
-            title="关闭层级对话抽屉"
-            onClick={(event) => {
-              event.stopPropagation();
-              onClose();
-            }}
-          >
-            ×
-          </button>
-        ) : null}
+      <div style={DRAWER_HEADER_STYLE}>
+        <span
+          style={{ fontSize: 13, fontWeight: 700, cursor: 'pointer', flex: 1 }}
+          onClick={() => setCollapsed((v) => !v)}
+        >
+          {collapsed ? '▲' : '▼'} 层级对话
+        </span>
+        <span style={{ fontSize: 10, color: 'var(--fg-subtle)' }}>{nodeList.length}</span>
+        <button
+          type="button"
+          style={CLOSE_BUTTON_STYLE}
+          aria-label="关闭"
+          title="关闭"
+          onClick={() => onClose?.()}
+        >
+          ×
+        </button>
       </div>
 
       {!collapsed ? (
@@ -181,16 +164,13 @@ export function LayerConversationDrawer({
                   style={{
                     ...TAB_STYLE,
                     background: isActive
-                      ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay))'
-                      : 'transparent',
-                    borderColor: isActive
-                      ? 'color-mix(in srgb, var(--accent) 40%, transparent)'
+                      ? 'color-mix(in srgb, var(--accent) 10%, transparent)'
                       : 'transparent',
                     color: isActive ? 'var(--fg-strong)' : 'var(--fg-muted)',
                   }}
                   onClick={() => setActiveTab(node.sessionId)}
                 >
-                  {LAYER_LABELS[node.roleLayer]} · {node.state}
+                  {getLayerNodeLabel(node)} · {node.state}
                 </button>
               );
             })}
@@ -217,7 +197,11 @@ export function LayerConversationDrawer({
                   等待审查结果...
                 </div>
               ) : (
-                <TeamConversationView sessionId={selectedNode.sessionId} compact />
+                <TeamConversationView
+                  key={selectedNode.sessionId}
+                  sessionId={selectedNode.sessionId}
+                  compact
+                />
               )
             ) : (
               <div

@@ -113,6 +113,7 @@ export interface AgentTeamsMessageCard {
   from: string;
   fromAccent: string;
   id: string;
+  sessionId?: string | null;
   memberId?: string | null;
   recipientMemberId?: string | null;
   replyToMessageId?: string | null;
@@ -168,6 +169,10 @@ export interface AgentTeamsSidebarTeam {
   taskPending?: number;
   /** 子会话数（基于 parentSessionId 反向汇总）。 */
   childSessionCount?: number;
+  /** 父会话 ID（用于团队会话树与删除级联提示）。 */
+  parentSessionId?: string | null;
+  /** 团队角色层（reception / pm1 / pm2 / executor / reviewer）。 */
+  roleLayer?: string | null;
   /** 工作目录（从 metadataJson.workingDirectory 解析）。 */
   workingDirectory?: string;
   /** 是否为派生会话（有 parentSessionId）。 */

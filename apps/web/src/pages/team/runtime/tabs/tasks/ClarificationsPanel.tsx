@@ -24,6 +24,7 @@ import {
 } from '../../../../../stores/team/team-events.js';
 import { useAuthStore } from '../../../../../stores/auth/auth.js';
 import { createTeamInboundClient } from '@openAwork/web-client';
+import { tryFormatJson } from '../../../../../utils/format-json.js';
 
 const PANEL_STYLE: CSSProperties = {
   display: 'flex',
@@ -327,7 +328,7 @@ function PendingCard({
         </span>
         {item.question}
       </span>
-      {item.context ? <pre style={CONTEXT_STYLE}>{item.context}</pre> : null}
+      {item.context ? <pre style={CONTEXT_STYLE}>{tryFormatJson(item.context)}</pre> : null}
       <textarea
         name="answer"
         value={draft}

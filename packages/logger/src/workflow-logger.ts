@@ -1,4 +1,5 @@
 import type { WorkflowStep, RequestContext } from './types.js';
+import { redactLogText, redactLogFields } from './redaction.js';
 
 const STATUS_LABEL: Record<WorkflowStep['status'], string> = {
   success: '\x1b[32m[成功]\x1b[0m',
@@ -21,10 +22,11 @@ function formatTime(ts: number): string {
 }
 
 function formatFields(fields?: Record<string, string | number | boolean>): string {
-  if (!fields || Object.keys(fields).length === 0) return '';
+  const redacted = redactLogFields(fields);
+  if (!redacted || Object.keys(redacted).length === 0) return '';
   return (
     ' - ' +
-    Object.entries(fields)
+    Object.entries(redacted)
       .map(([k, v]) => `${k}=${String(v)}`)
       .join(', ')
   );
@@ -136,7 +138,7 @@ export class WorkflowLogger {
       const extraKeys = Object.keys(extra);
       extraKeys.forEach((k, i) => {
         const isLast = i === extraKeys.length - 1 && !ctx.ip && !ctx.userAgent;
-        lines.push(`${isLast ? '└' : '├'}── ${k}: ${extra[k]}`);
+        lines.push(`${isLast ? '└' : '├'}── ${k}: ${redactLogText(String(extra[k]))}`);
       });
     }
 

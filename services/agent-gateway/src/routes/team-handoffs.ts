@@ -44,11 +44,35 @@ import { submitInboundMessage } from '../handoff/store/inbound-store.js';
 import { setSubstate } from '../handoff/store/substate-store.js';
 import { parseBody, parseParams } from '../infra/parse-request.js';
 import { logTeamAudit } from '../team/team-audit-store.js';
-import { pauseTeamRuntimeTree, resumeTeamRuntimeTree } from '../team/team-runtime-control-store.js';
-import { cancelTeamRuntimeTree } from '../team/team-runtime-control-store.js';
-import { stopAllInFlightStreamRequestsForSession } from './stream-cancellation.js';
+import {
+  cancelTeamRuntimeTree,
+  pauseTeamRuntimeTree,
+  resumeTeamRuntimeTree,
+  type TeamRuntimeControlScope,
+} from '../team/team-runtime-control-store.js';
+import {
+  getAnyInFlightStreamRequestForSession,
+  stopAllInFlightStreamRequestsForSession,
+} from './stream-cancellation.js';
+import { buildTeamResumeBackgroundRequestData } from '../team/team-resume-context.js';
+import {
+  assessTeamResumeMode,
+  resolveBackgroundRerunTarget,
+} from '../team/team-resume-context.js';
+import { preResumeConsistencyCheck } from '../team/team-resume-consistency-check.js';
+import { runSessionInBackground } from './stream-runtime.js';
 
 const TEAM_ROLE_LAYERS = ['user', 'reception', 'pm1', 'pm2', 'executor', 'reviewer'] as const;
+
+type RuntimeScopeTruncationFields = Pick<
+  TeamRuntimeControlScope,
+  | 'depthLimitReached'
+  | 'limitReached'
+  | 'omittedSessionCount'
+  | 'sessionLimit'
+  | 'sessionMaxDepth'
+  | 'truncated'
+>;
 
 const createTeamSessionSchema = z.object({
   roleLayer: z.enum(TEAM_ROLE_LAYERS),
@@ -110,6 +134,48 @@ function teamHandoffRouteErrorPayload(
     error: TEAM_HANDOFF_ROUTE_ERROR_MESSAGES[code],
     ...(extra ?? {}),
   };
+}
+
+function runtimeScopeTruncationFields(
+  input: RuntimeScopeTruncationFields,
+): RuntimeScopeTruncationFields {
+  return {
+    depthLimitReached: input.depthLimitReached,
+    limitReached: input.limitReached,
+    omittedSessionCount: input.omittedSessionCount,
+    sessionLimit: input.sessionLimit,
+    sessionMaxDepth: input.sessionMaxDepth,
+    truncated: input.truncated,
+  };
+}
+
+function hasInFlightTeamRuntime(input: { sessionIds: string[]; userId: string }): boolean {
+  return input.sessionIds.some((sessionId) =>
+    getAnyInFlightStreamRequestForSession({ sessionId, userId: input.userId }),
+  );
+}
+
+function triggerTeamResumeBackgroundRun(input: {
+  rootSessionId: string;
+  sessionIds: string[];
+  userId: string;
+}): void {
+  if (input.sessionIds.length === 0 || hasInFlightTeamRuntime(input)) {
+    return;
+  }
+
+  void runSessionInBackground({
+    requestData: buildTeamResumeBackgroundRequestData({ rootSessionId: input.rootSessionId }),
+    sessionId: input.rootSessionId,
+    teamResumeRootSessionId: input.rootSessionId,
+    userId: input.userId,
+  }).catch((error: unknown) => {
+    console.warn(
+      `[team-handoffs] resume-all 后台恢复续跑失败（不阻塞 HTTP 回复）：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  });
 }
 
 type HandoffControlAction = 'cancel' | 'pause' | 'resume';
@@ -200,16 +266,18 @@ function publishSchedulerControlEvent(input: {
   });
 }
 
-function publishSchedulerAllControlEvent(input: {
-  handoffIds: string[];
-  reason?: string | null;
-  rootRoleLayer?: string | null;
-  sessionIds: string[];
-  staleSessionCount?: number;
-  type: 'scheduler.all-paused' | 'scheduler.all-resumed';
-  userId: string;
-  rootSessionId: string;
-}): void {
+function publishSchedulerAllControlEvent(
+  input: {
+    handoffIds: string[];
+    reason?: string | null;
+    rootRoleLayer?: string | null;
+    sessionIds: string[];
+    staleSessionCount?: number;
+    type: 'scheduler.all-paused' | 'scheduler.all-resumed';
+    userId: string;
+    rootSessionId: string;
+  } & RuntimeScopeTruncationFields,
+): void {
   publishTeamEvent({
     type: input.type,
     sessionId: input.rootSessionId,
@@ -222,21 +290,24 @@ function publishSchedulerAllControlEvent(input: {
       sessionIds: input.sessionIds,
       reason: input.reason ?? null,
       staleSessionCount: input.staleSessionCount ?? 0,
+      ...runtimeScopeTruncationFields(input),
     },
   });
 }
 
-function logSessionTreeControl(input: {
-  action: 'pause-all' | 'resume-all';
-  actorEmail?: string;
-  actorUserId: string;
-  handoffIds: string[];
-  reason?: string | null;
-  rootSessionId: string;
-  sessionIds: string[];
-  staleSessionCount?: number;
-  userId: string;
-}): void {
+function logSessionTreeControl(
+  input: {
+    action: 'pause-all' | 'resume-all';
+    actorEmail?: string;
+    actorUserId: string;
+    handoffIds: string[];
+    reason?: string | null;
+    rootSessionId: string;
+    sessionIds: string[];
+    staleSessionCount?: number;
+    userId: string;
+  } & RuntimeScopeTruncationFields,
+): void {
   try {
     logTeamAudit({
       action: 'handoff_control',
@@ -249,6 +320,7 @@ function logSessionTreeControl(input: {
         handoffIds: input.handoffIds,
         reason: input.reason ?? null,
         staleSessionCount: input.staleSessionCount ?? 0,
+        ...runtimeScopeTruncationFields(input),
       }),
       entityId: input.rootSessionId,
       entityType: 'session',
@@ -867,6 +939,7 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
         sessionIds: result.pausedSessionIds,
         type: 'scheduler.all-paused',
         userId: user.sub,
+        ...runtimeScopeTruncationFields(result),
       });
       logSessionTreeControl({
         action: 'pause-all',
@@ -877,12 +950,14 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
         rootSessionId: result.rootSessionId,
         sessionIds: result.pausedSessionIds,
         userId: user.sub,
+        ...runtimeScopeTruncationFields(result),
       });
 
       step.succeed(undefined, {
         pausedHandoffCount: result.pausedHandoffIds.length,
         pausedSessionCount: result.pausedSessionIds.length,
         sessionId,
+        ...runtimeScopeTruncationFields(result),
       });
       return reply.send({
         handoffIds: result.pausedHandoffIds,
@@ -890,6 +965,7 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
         pausedSessionCount: result.pausedSessionIds.length,
         sessionIds: result.pausedSessionIds,
         sessionId: result.rootSessionId,
+        ...runtimeScopeTruncationFields(result),
       });
     },
   );
@@ -902,6 +978,23 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
       const sessionId = (request.params as { sessionId: string }).sessionId;
 
+      // ── 阶段 1：恢复前一致性校验 ────────────────────────────────────
+      // 修复 orphan session、zombie handoff、duplicate handoff、stale heartbeat、stuck running
+      let consistencyReport: ReturnType<typeof preResumeConsistencyCheck> | null = null;
+      try {
+        consistencyReport = preResumeConsistencyCheck({
+          rootSessionId: sessionId,
+          userId: user.sub,
+        });
+      } catch (err) {
+        console.warn(
+          `[team-handoffs] resume-all 一致性校验失败（不阻塞恢复）：${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+
+      // ── 阶段 2：分层恢复（按 substate 决定恢复动作） ────────────────
       const result = resumeTeamRuntimeTree({
         rootSessionId: sessionId,
         userId: user.sub,
@@ -911,10 +1004,27 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(404).send(teamHandoffRouteErrorPayload('team_session_not_found'));
       }
 
-      for (const handoffId of result.resumedHandoffIds) {
-        // Per-handoff resilience: see pause-all above. The resume tree state is
-        // already committed; one handoff's control-signal fan-out throwing must
-        // not abort the aggregate all-resumed event + audit + reply.
+      // ── 阶段 3a：自底向上注入 resume_signal ──────────────────────────
+      // 按 role_layer 深度降序排列（executor/reviewer 先恢复，reception 最后）
+      const layerOrder: Record<string, number> = {
+        executor: 0,
+        reviewer: 1,
+        pm2: 2,
+        pm1: 3,
+        reception: 4,
+      };
+      const sortedHandoffIds = [...result.resumedHandoffIds].sort((a, b) => {
+        const ha = getHandoff({ userId: user.sub, handoffId: a });
+        const hb = getHandoff({ userId: user.sub, handoffId: b });
+        const layerA = ha?.toRoleLayer ?? 'unknown';
+        const layerB = hb?.toRoleLayer ?? 'unknown';
+        return (layerOrder[layerA] ?? 99) - (layerOrder[layerB] ?? 99);
+      });
+
+      for (const handoffId of sortedHandoffIds) {
+        // Per-handoff resilience: the resume tree state is already committed;
+        // one handoff's control-signal fan-out throwing must not abort the
+        // aggregate all-resumed event + audit + reply.
         try {
           const after = getHandoff({ userId: user.sub, handoffId });
           if (!after) {
@@ -938,6 +1048,8 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
         }
       }
 
+      // ── 阶段 3b：对用户阻塞态 session 的提示消息已在 resumeTeamRuntimeTree 中写入 ──
+
       publishSchedulerAllControlEvent({
         handoffIds: result.resumedHandoffIds,
         rootRoleLayer: result.rootRoleLayer,
@@ -946,6 +1058,7 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
         staleSessionCount: result.staleSessionCount,
         type: 'scheduler.all-resumed',
         userId: user.sub,
+        ...runtimeScopeTruncationFields(result),
       });
       logSessionTreeControl({
         action: 'resume-all',
@@ -956,13 +1069,96 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
         sessionIds: result.resumedSessionIds,
         staleSessionCount: result.staleSessionCount,
         userId: user.sub,
+        ...runtimeScopeTruncationFields(result),
       });
+
+      // ── 阶段 4：评估恢复模式 + 精准后台续跑 ──────────────────────────
+      // 不再只续跑根 session，而是根据恢复模式精准定位到需要续跑的层
+      let resumeMode: string = 'signal-only';
+      let backgroundRerunTarget: { sessionId: string; roleLayer: string | null } | null = null;
+
+      if (result.resumedHandoffIds.length > 0 || result.resumedSessionIds.length > 0) {
+        // 收集子树中各 session 的 role_layer 映射
+        const sessionRoleLayers = new Map<string, string | null>();
+        if (result.treeSessionIds.length > 0) {
+          try {
+            const roleRows = sqliteAll<{ id: string; role_layer: string | null }>(
+              `SELECT id, role_layer FROM sessions WHERE id IN (${result.treeSessionIds.map(() => '?').join(', ')}) AND user_id = ?`,
+              [...result.treeSessionIds, user.sub],
+            );
+            for (const row of roleRows) {
+              sessionRoleLayers.set(row.id, row.role_layer);
+            }
+          } catch {
+            // best-effort
+          }
+        }
+
+        // 收集有 in-flight 流的 session
+        const inFlightSessionIds = new Set<string>();
+        for (const sid of result.treeSessionIds) {
+          if (getAnyInFlightStreamRequestForSession({ sessionId: sid, userId: user.sub })) {
+            inFlightSessionIds.add(sid);
+          }
+        }
+
+        const assessment = assessTeamResumeMode({
+          rootSessionId: result.rootSessionId,
+          userId: user.sub,
+          consistencyFixCount: consistencyReport?.totalFixes ?? 0,
+          inFlightSessionIds,
+          nonTerminalPausedSessionIds: result.resumedSessionIds,
+        });
+
+        resumeMode = assessment.mode;
+
+        backgroundRerunTarget = resolveBackgroundRerunTarget({
+          assessment,
+          rootSessionId: result.rootSessionId,
+          sessionRoleLayers,
+        });
+
+        if (backgroundRerunTarget) {
+          // 精准续跑目标层，而非根 session
+          const hasInFlight = hasInFlightTeamRuntime({
+            sessionIds: [backgroundRerunTarget.sessionId],
+            userId: user.sub,
+          });
+          if (!hasInFlight) {
+            void runSessionInBackground({
+              requestData: buildTeamResumeBackgroundRequestData({
+                rootSessionId: result.rootSessionId,
+              }),
+              sessionId: backgroundRerunTarget.sessionId,
+              teamResumeRootSessionId: result.rootSessionId,
+              userId: user.sub,
+            }).catch((error: unknown) => {
+              console.warn(
+                `[team-handoffs] resume-all 精准后台续跑失败（${backgroundRerunTarget!.roleLayer}）：${
+                  error instanceof Error ? error.message : String(error)
+                }`,
+              );
+            });
+          }
+        } else if (result.resumedHandoffIds.length > 0 || result.resumedSessionIds.length > 0) {
+          // 兜底：如果精准续跑未定位到目标，但确实有恢复的 handoff/session，
+          // 回退到原来的全树续跑逻辑
+          triggerTeamResumeBackgroundRun({
+            rootSessionId: result.rootSessionId,
+            sessionIds: result.treeSessionIds,
+            userId: user.sub,
+          });
+        }
+      }
 
       step.succeed(undefined, {
         resumedHandoffCount: result.resumedHandoffIds.length,
         resumedSessionCount: result.resumedSessionIds.length,
         sessionId,
         staleSessionCount: result.staleSessionCount,
+        consistencyFixCount: consistencyReport?.totalFixes ?? 0,
+        resumeMode,
+        ...runtimeScopeTruncationFields(result),
       });
       return reply.send({
         resumedHandoffCount: result.resumedHandoffIds.length,
@@ -971,6 +1167,24 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
         sessionIds: result.resumedSessionIds,
         staleSessionCount: result.staleSessionCount,
         handoffIds: result.resumedHandoffIds,
+        // 新增字段：分层恢复信息
+        skippedSessionCount: result.skippedSessionIds.length,
+        userBlockedSessionCount: result.userBlockedSessionIds.length,
+        userBlockedSessionIds: result.userBlockedSessionIds,
+        skippedSessionIds: result.skippedSessionIds,
+        layerResumeDetails: result.layerResumeDetails,
+        // 新增字段：一致性校验报告
+        consistencyFixCount: consistencyReport?.totalFixes ?? 0,
+        consistencyFixes: consistencyReport?.fixes ?? [],
+        // 新增字段：恢复模式
+        resumeMode,
+        backgroundRerunTarget: backgroundRerunTarget
+          ? {
+              sessionId: backgroundRerunTarget.sessionId,
+              roleLayer: backgroundRerunTarget.roleLayer,
+            }
+          : null,
+        ...runtimeScopeTruncationFields(result),
       });
     },
   );

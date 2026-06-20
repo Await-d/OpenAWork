@@ -22,6 +22,7 @@ import { MessagesMergedTab } from './conversation/MessagesMergedTab.js';
 import { SharedSessionFlowView } from './conversation/shared-session-flow-view.js';
 import { SharedSessionLayeredView } from './conversation/shared-session-layered-view.js';
 import { TeamArtifactSection } from './tasks/TeamArtifactSection.js';
+import { TasksTab } from './tasks/TasksTab.js';
 import { ReviewMergedTab } from './tasks/ReviewMergedTab.js';
 import { ReviewTab } from './tasks/ReviewTab.js';
 import { TeamRuntimeSettingsPanel } from './governance/team-runtime-settings-panel.js';
@@ -41,6 +42,10 @@ import { SharedSessionGraphView } from './overview/SharedSessionGraphView.js';
 import { SharedSessionInitView } from './overview/SharedSessionInitView.js';
 import type { TeamRuntimeHandoffContextInput } from './team-runtime-navigation.js';
 
+function ignoreTemplateUse(): void {
+  return undefined;
+}
+
 export type MiddleTabKey =
   | 'office'
   | 'dashboard'
@@ -51,6 +56,7 @@ export type MiddleTabKey =
   | 'layered'
   | 'messages'
   | 'artifacts'
+  | 'taskboard'
   | 'review'
   | 'timing'
   | 'usage'
@@ -106,6 +112,7 @@ export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
     handoffs,
     gatewayUrl,
     accessToken,
+    activeWorkspaceName,
     onWorkspaceChanged,
     teamWorkspaceId,
   } = args;
@@ -119,7 +126,15 @@ export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
   switch (middleTab) {
     case 'office':
       return (
-        <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            position: 'relative',
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
           <OfficeThreeCanvas
             selectedAgentId={selectedAgentId}
             onSelectAgent={onSelectAgent}
@@ -171,9 +186,8 @@ export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
       }
       return (
         <WorkspaceKnowledgeGraphView
-          selectedSessionId={runtimeSelectedSessionId}
+          activeWorkspaceName={activeWorkspaceName}
           teamWorkspaceId={teamWorkspaceId}
-          onSelectSession={onSelectTeam}
         />
       );
 
@@ -195,13 +209,18 @@ export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
       if (selectedSharedSession && selectedTeam) {
         return <SharedSessionFlowView selectedTeam={selectedTeam} />;
       }
-      return <LayerFlowView />;
+      return <LayerFlowView selectedTeam={selectedTeam} />;
 
     case 'layered':
       if (selectedSharedSession && selectedTeam) {
         return <SharedSessionLayeredView selectedTeam={selectedTeam} />;
       }
-      return <LayeredConversationView onSelectSessionDrawer={onSelectLayerSession} />;
+      return (
+        <LayeredConversationView
+          onSelectSessionDrawer={onSelectLayerSession}
+          selectedTeam={selectedTeam}
+        />
+      );
 
     case 'messages':
       return (
@@ -224,6 +243,11 @@ export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
           onCancelHandoff={onCancelHandoff}
         />
       );
+
+    // ─── C-2. 任务看板 ─────────────────────────────────────────────
+    // 完整任务列表：待办 / 进行中 / 待评审三列看板，展示所有已完成与未完成任务。
+    case 'taskboard':
+      return <TasksTab selectedTeam={selectedTeam} />;
 
     case 'review':
       if (selectedSharedSession) {
@@ -263,7 +287,7 @@ export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
 
     // ─── E. 配置 / 治理 ─────────────────────────────────────────────
     case 'templates':
-      return <TemplatesTab onUseTemplate={onUseTemplate ?? (() => {})} />;
+      return <TemplatesTab onUseTemplate={onUseTemplate ?? ignoreTemplateUse} />;
 
     case 'shares':
       return <SharesView />;

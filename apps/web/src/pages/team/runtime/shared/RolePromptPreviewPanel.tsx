@@ -22,6 +22,7 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import MarkdownMessageContent from '../../../../components/chat/markdown/markdown-message-content.js';
+import { tryFormatJson } from '../../../../utils/format-json.js';
 import {
   createTeamPhaseAClient,
   type InstructionStackPreview,
@@ -968,7 +969,7 @@ function StackSegmentCard({ segment }: { segment: InstructionStackSegment }) {
             <pre
               style={{ ...CODE_BLOCK_STYLE, border: 'none', padding: 0, background: 'transparent' }}
             >
-              {segment.body}
+              {tryFormatJson(segment.body)}
             </pre>
           )}
         </div>

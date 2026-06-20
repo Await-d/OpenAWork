@@ -5,6 +5,7 @@ export type SessionTaskResponse = AgentTask & {
   depth: number;
   readySubtaskCount: number;
   subtaskCount: number;
+  taskThreadId?: string;
   terminalReason?: string;
   timeoutSource?: 'first_response';
   unmetDependencyCount: number;

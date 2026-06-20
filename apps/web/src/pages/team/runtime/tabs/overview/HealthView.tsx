@@ -82,6 +82,46 @@ const STUCK_ROW_STYLE: CSSProperties = {
   background: 'color-mix(in srgb, var(--warning) 8%, var(--bg-overlay))',
 };
 
+const CODE_BADGE_STYLE: CSSProperties = {
+  padding: '2px 8px',
+  borderRadius: 999,
+  border: '1px solid color-mix(in srgb, var(--aux) 30%, transparent)',
+  background: 'color-mix(in srgb, var(--aux) 10%, transparent)',
+  color: 'var(--aux)',
+  fontFamily: 'ui-monospace, SFMono-Regular, monospace',
+  fontSize: 10,
+  fontWeight: 700,
+};
+
+const CONTEXT_CHIP_STYLE: CSSProperties = {
+  maxWidth: '100%',
+  overflow: 'hidden',
+  padding: '2px 8px',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  borderRadius: 999,
+  border: '1px solid color-mix(in srgb, var(--border-default) 70%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, transparent)',
+  color: 'var(--fg-muted)',
+  fontFamily: 'ui-monospace, SFMono-Regular, monospace',
+  fontSize: 10,
+};
+
+const INCIDENT_CONTEXT_PRIORITY_KEYS = [
+  'handoffId',
+  'pm2HandoffId',
+  'sessionId',
+  'fromSessionId',
+  'toSessionId',
+  'childSessionId',
+  'roleLayer',
+  'fromRoleLayer',
+  'toRoleLayer',
+  'userId',
+];
+
+const REDACTED_TEXT = '[已隐藏]';
+
 function formatMs(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return '—';
   if (ms < 1000) return `${Math.round(ms)}ms`;
@@ -96,9 +136,58 @@ function formatMs(ms: number): string {
   return `${h}h ${m}m`;
 }
 
+function redactSensitiveText(text: string): string {
+  return text
+    .replace(/(authorization\s*:\s*bearer\s+)[^\s,;&}\]]+/gi, `$1${REDACTED_TEXT}`)
+    .replace(
+      /((?:api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|token|secret|password|passwd|pwd)["']?\s*[:=]\s*["']?)[^"',\s;&}\]]+/gi,
+      `$1${REDACTED_TEXT}`,
+    )
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, REDACTED_TEXT);
+}
+
 function formatAttemptTime(atMs: number | null): string {
   if (typeof atMs !== 'number' || !Number.isFinite(atMs)) return '—';
   return new Date(atMs).toLocaleTimeString();
+}
+
+function formatIncidentContextValue(
+  value: boolean | number | string | null | undefined,
+): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? redactSensitiveText(trimmed) : null;
+  }
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? String(value) : null;
+  }
+  return value ? 'true' : 'false';
+}
+
+function formatIncidentContext(
+  context: TeamRuntimeDiagnostics['incidents'][number]['context'],
+): string[] {
+  const labels: string[] = [];
+  const used = new Set<string>();
+  const append = (key: string) => {
+    const raw = context[key];
+    const value = formatIncidentContextValue(raw);
+    if (!value) return;
+    labels.push(`${key}: ${value}`);
+    used.add(key);
+  };
+
+  for (const key of INCIDENT_CONTEXT_PRIORITY_KEYS) {
+    append(key);
+  }
+  for (const key of Object.keys(context).sort()) {
+    if (!used.has(key)) {
+      append(key);
+    }
+  }
+
+  return labels.slice(0, 6);
 }
 
 function describeAlertLifecycleStatus(
@@ -769,21 +858,10 @@ export function HealthView({
               {diagnostics.incidents
                 .slice(0, 8)
                 .map((incident: TeamRuntimeDiagnostics['incidents'][number]) => (
-                  <div
+                  <RuntimeIncidentRow
                     key={`${incident.code}-${incident.timestamp}`}
-                    style={incident.severity === 'error' ? FAILED_ROW_STYLE : STUCK_ROW_STYLE}
-                  >
-                    <span aria-hidden style={{ fontSize: 14 }}>
-                      {incident.severity === 'error' ? '⚠️' : 'ℹ️'}
-                    </span>
-                    <span style={{ minWidth: 120, color: 'var(--fg-strong)', fontWeight: 700 }}>
-                      {incident.category}
-                    </span>
-                    <span style={{ flex: 1, color: 'var(--fg-default)' }}>{incident.message}</span>
-                    <span style={{ color: 'var(--fg-muted)', fontSize: 11 }}>
-                      {new Date(incident.timestamp).toLocaleTimeString()}
-                    </span>
-                  </div>
+                    incident={incident}
+                  />
                 ))}
             </div>
           </div>
@@ -904,29 +982,43 @@ function FailedRow({
 }) {
   const dateStr = new Date(entry.endedAt ?? entry.updatedAt).toLocaleString();
   const preferredTab = resolvePreferredTabForLayer(entry.toRoleLayer);
+  const failureReason = entry.failureReason?.trim();
+  const safeFailureReason = failureReason ? redactSensitiveText(failureReason) : null;
   return (
-    <div style={FAILED_ROW_STYLE}>
+    <div style={{ ...FAILED_ROW_STYLE, alignItems: 'flex-start' }}>
       <span aria-hidden style={{ fontSize: 14 }}>
         ⚠️
       </span>
       <span style={{ minWidth: 130, color: 'var(--fg-strong)', fontWeight: 700 }}>
         {LAYER_LABELS[entry.fromRoleLayer]} → {LAYER_LABELS[entry.toRoleLayer]}
       </span>
-      <span
-        style={{
-          flex: 1,
-          minWidth: 0,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-          color: 'var(--fg-muted)',
-          fontFamily: 'ui-monospace, SFMono-Regular, monospace',
-          fontSize: 10,
-        }}
-        title={entry.id}
-      >
-        {entry.id}
-      </span>
+      <div style={{ display: 'grid', gap: 4, flex: 1, minWidth: 0 }}>
+        <span
+          style={{
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            color: 'var(--fg-muted)',
+            fontFamily: 'ui-monospace, SFMono-Regular, monospace',
+            fontSize: 10,
+          }}
+          title={entry.id}
+        >
+          {entry.id}
+        </span>
+        {safeFailureReason ? (
+          <span
+            style={{
+              color: 'var(--danger)',
+              fontSize: 11,
+              lineHeight: 1.5,
+              overflowWrap: 'anywhere',
+            }}
+          >
+            失败原因：{safeFailureReason}
+          </span>
+        ) : null}
+      </div>
       <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>{dateStr}</span>
       {onRetry ? (
         <button
@@ -957,6 +1049,46 @@ function FailedRow({
           {contextActionLabel(preferredTab)}
         </button>
       ) : null}
+    </div>
+  );
+}
+
+function RuntimeIncidentRow({
+  incident,
+}: {
+  incident: TeamRuntimeDiagnostics['incidents'][number];
+}) {
+  const contextLabels = formatIncidentContext(incident.context);
+  const safeMessage = redactSensitiveText(incident.message);
+  return (
+    <div
+      style={{
+        ...(incident.severity === 'error' ? FAILED_ROW_STYLE : STUCK_ROW_STYLE),
+        alignItems: 'flex-start',
+      }}
+    >
+      <span aria-hidden style={{ fontSize: 14 }}>
+        {incident.severity === 'error' ? '⚠️' : 'ℹ️'}
+      </span>
+      <div style={{ display: 'grid', gap: 5, flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ color: 'var(--fg-strong)', fontWeight: 700 }}>{incident.category}</span>
+          <span style={CODE_BADGE_STYLE}>{incident.code}</span>
+          <span style={{ color: 'var(--fg-muted)', fontSize: 11 }}>
+            {new Date(incident.timestamp).toLocaleTimeString()}
+          </span>
+        </div>
+        <span style={{ color: 'var(--fg-default)', lineHeight: 1.5 }}>{safeMessage}</span>
+        {contextLabels.length > 0 ? (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {contextLabels.map((label) => (
+              <span key={label} title={label} style={CONTEXT_CHIP_STYLE}>
+                {label}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

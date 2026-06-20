@@ -18,6 +18,7 @@ process.env['AI_DEFAULT_MODEL'] = '';
 // 无 LLM：understand-architecture 走启发式兜底（不影响路由层断言）。
 vi.mock('../../provider/auxiliary-llm-config.js', () => ({
   resolveAuxiliaryLlmConfig: async () => null,
+  resolveAuxiliaryLlmConfigCandidates: async () => [],
 }));
 
 let dbModule: typeof DbModule;

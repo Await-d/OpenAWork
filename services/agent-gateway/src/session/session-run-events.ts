@@ -1,6 +1,6 @@
 import type { RunEvent, ToolCallObservabilityAnnotation } from '@openAwork/shared';
 import { buildAssistantEventMessageContent } from './assistant-event-message.js';
-import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
+import { sqliteAll, sqliteGet, sqliteRun, sqliteRunWithRowId } from '../infra/db.js';
 import { buildNotificationFromRunEvent } from './notification-store.js';
 import { appendSessionMessageV2 as appendSessionMessage } from '../message/message-v2-adapter.js';
 import { appendSessionEvent, translateRunEventToSessionEvent } from './session-entry-store.js';
@@ -26,6 +26,7 @@ interface SessionRunEventSeqRow {
 export interface PublishRunEventMeta {
   clientRequestId?: string;
   seq?: number;
+  rowId?: number;
   toolCallId?: string;
   observability?: ToolCallObservabilityAnnotation;
 }
@@ -178,7 +179,7 @@ function persistRunEventRow(
   sessionId: string,
   event: RunEvent,
   meta?: PublishRunEventMeta,
-): { seq: number | null } {
+): { seq: number | null; rowId: number | null } {
   const userId = getSessionOwnerUserId(sessionId);
   const occurredAt = event.occurredAt ?? Date.now();
   const runId = getRunEventRunId(event);
@@ -187,7 +188,7 @@ function persistRunEventRow(
     (typeof meta?.clientRequestId === 'string' && meta.clientRequestId.length > 0
       ? computeNextSeq(sessionId, meta.clientRequestId)
       : null);
-  sqliteRun(
+  const rowId = sqliteRunWithRowId(
     `INSERT INTO session_run_events
      (session_id, user_id, client_request_id, seq, event_type, event_id, run_id, occurred_at_ms, payload_json, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
@@ -240,7 +241,7 @@ function persistRunEventRow(
   // Bound the per-session replay log so a long-lived session's successful
   // runs don't accumulate delta rows without limit (see retention block).
   maybePruneSessionRunEvents(sessionId);
-  return { seq };
+  return { seq, rowId };
 }
 
 function mirrorDisplayableRunEventAsMessage(input: {
@@ -329,13 +330,14 @@ export function publishSessionRunEvent(
   const persisted = persistRunEventRow(sessionId, event, meta);
   const handlers = sessionHandlers.get(sessionId);
   if (!handlers) return;
-  // Forward the DB-assigned seq into the broadcast meta so subscribers
-  // (notably the /stream/attach endpoint) can filter and order live events
-  // even when the caller didn't provide a seq.
-  const broadcastMeta: PublishRunEventMeta | undefined =
-    meta?.seq !== undefined || persisted.seq === null
-      ? meta
-      : { ...(meta ?? {}), seq: persisted.seq };
+  // Forward the DB-assigned seq and rowId into the broadcast meta so subscribers
+  // (notably the /stream/attach and /stream/multi-attach endpoints) can filter
+  // and order live events even when the caller didn't provide a seq.
+  const broadcastMeta: PublishRunEventMeta = {
+    ...(meta ?? {}),
+    ...(persisted.seq !== null && meta?.seq === undefined ? { seq: persisted.seq } : {}),
+    ...(persisted.rowId !== null ? { rowId: persisted.rowId } : {}),
+  };
   // Snapshot the subscriber set before dispatch. A handler may unsubscribe
   // itself (attach's terminal-event cleanup runs synchronously) or trigger a
   // new subscription mid-dispatch; iterating the live Set would otherwise
@@ -384,7 +386,7 @@ export function persistSessionRunEventForRequest(
   sessionId: string,
   event: RunEvent,
   meta?: PublishRunEventMeta,
-): { seq: number | null } {
+): { seq: number | null; rowId: number | null } {
   return persistRunEventRow(sessionId, event, meta);
 }
 
@@ -395,6 +397,42 @@ export function listSessionRunEvents(sessionId: string): RunEvent[] {
   ).flatMap((row) => {
     try {
       return [JSON.parse(row.payload_json) as RunEvent];
+    } catch {
+      return [];
+    }
+  });
+}
+
+/**
+ * List recent session run events WITH their row id (as seq) and client_request_id.
+ * Used by the multi-attach endpoint to replay recent events before going live.
+ * Unlike listSessionRunEventsByRequestAfterSeq, this spans ALL clientRequestIds
+ * for the session, ordered by row id (which approximates chronological order).
+ */
+export function listRecentSessionRunEventsWithMeta(input: {
+  sessionId: string;
+  afterRowId: number;
+  limit: number;
+}): Array<{ event: RunEvent; seq: number; clientRequestId: string | null }> {
+  return sqliteAll<SessionRunEventRow & { id: number; client_request_id: string | null }>(
+    `SELECT payload_json, id, client_request_id
+     FROM session_run_events
+     WHERE session_id = ? AND id > ?
+     ORDER BY id ASC
+     LIMIT ?`,
+    [input.sessionId, input.afterRowId, input.limit],
+  ).flatMap((row) => {
+    if (typeof row.id !== 'number') {
+      return [];
+    }
+    try {
+      return [
+        {
+          event: JSON.parse(row.payload_json) as RunEvent,
+          seq: row.id,
+          clientRequestId: row.client_request_id,
+        },
+      ];
     } catch {
       return [];
     }

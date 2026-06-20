@@ -3222,6 +3222,10 @@ async function executeGatewayManagedToolImpl(
       if (typeof inheritedDialogueMode === 'string') {
         childSessionMetadata.dialogueMode = inheritedDialogueMode;
       }
+      // 继承 yoloMode：子代理 session 在后台运行，无法与用户交互审批。
+      if (parentSessionMetadata.yoloMode === true) {
+        childSessionMetadata.yoloMode = true;
+      }
       const inheritedUpstreamRetryMaxRetries =
         normalizeUpstreamRetryMaxRetries(childRequestData?.[UPSTREAM_RETRY_MAX_RETRIES_KEY]) ??
         normalizeUpstreamRetryMaxRetries(parentSessionMetadata[UPSTREAM_RETRY_MAX_RETRIES_KEY]);
@@ -5131,6 +5135,14 @@ function ensurePermissionForTool(
       kind: 'denied',
       reason: `工具 "${request.toolName}" 被权限规则禁止。`,
     };
+  }
+
+  // Team/子代理 session 自动批准修改类工具：
+  // 后台运行的 team 成员（executor/reviewer 等）无法与用户交互审批，
+  // 且父 session 已通过权限检查——子 session 继承信任链。
+  // 同样适用于 yoloMode 开启的 session（用户已显式授权免审批）。
+  if (isTaskCreatedSession || sessionMetadata['yoloMode'] === true) {
+    return { kind: 'not_needed' };
   }
 
   // 'ask' → build permission context for scope-specific evaluation.

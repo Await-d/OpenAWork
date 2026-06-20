@@ -11,19 +11,18 @@ describe('resolveTopSummaryStatus', () => {
     expect(
       resolveTopSummaryStatus({
         hasPausedRuntimeSessions: false,
-        selectedRuntimeSessionStateStatus: 'running',
-        selectedSharedSessionStateStatus: 'paused',
+        selectedRuntimeStatus: 'running',
+        selectedSharedStatus: 'paused',
       }),
     ).toBe('已暂停');
   });
 
-  it('普通 runtime 会话 paused 标记为真时优先返回已暂停', () => {
+  it('普通 runtime 会话显式暂停时优先返回已暂停', () => {
     expect(
       resolveTopSummaryStatus({
         hasPausedRuntimeSessions: false,
-        selectedRuntimeSessionPaused: true,
-        selectedRuntimeSessionStateStatus: 'running',
-        selectedSharedSessionStateStatus: null,
+        selectedRuntimeStatus: 'paused',
+        selectedSharedStatus: null,
       }),
     ).toBe('已暂停');
   });
@@ -32,9 +31,18 @@ describe('resolveTopSummaryStatus', () => {
     expect(
       resolveTopSummaryStatus({
         hasPausedRuntimeSessions: true,
-        selectedRuntimeSessionPaused: false,
-        selectedRuntimeSessionStateStatus: 'running',
-        selectedSharedSessionStateStatus: null,
+        selectedRuntimeStatus: 'running',
+        selectedSharedStatus: null,
+      }),
+    ).toBe('运行中');
+  });
+
+  it('当前会话 idle 时不再误报为已暂停', () => {
+    expect(
+      resolveTopSummaryStatus({
+        hasPausedRuntimeSessions: false,
+        selectedRuntimeStatus: 'idle',
+        selectedSharedStatus: null,
       }),
     ).toBe('运行中');
   });
@@ -43,8 +51,8 @@ describe('resolveTopSummaryStatus', () => {
     expect(
       resolveTopSummaryStatus({
         hasPausedRuntimeSessions: true,
-        selectedRuntimeSessionStateStatus: null,
-        selectedSharedSessionStateStatus: null,
+        selectedRuntimeStatus: null,
+        selectedSharedStatus: null,
       }),
     ).toBe('已暂停');
   });
@@ -131,7 +139,7 @@ describe('resolveTopSummaryDescription', () => {
         activeWorkspaceName: '工作区 A',
         activeWorkspaceWorkingRoot: '/workspace/a',
         selectedRuntimeSessionTitle: 'PM2 实施会话',
-        selectedRuntimeSessionStateStatus: 'running',
+        selectedRuntimeStatus: 'running',
       }),
     ).toBe('当前会话：PM2 实施会话 · 运行中');
   });
@@ -140,10 +148,19 @@ describe('resolveTopSummaryDescription', () => {
     expect(
       resolveTopSummaryDescription({
         selectedSharedSessionTitle: '共享会话 B',
-        selectedSharedSessionStateStatus: 'paused',
+        selectedSharedStatus: 'paused',
         selectedSharedWorkspaceLabel: '/workspace/shared',
       }),
     ).toBe('当前共享：共享会话 B · 已暂停 · /workspace/shared');
+  });
+
+  it('runtime 会话 idle 时显示已空闲，而不是已暂停', () => {
+    expect(
+      resolveTopSummaryDescription({
+        selectedRuntimeSessionTitle: 'Reception 会话',
+        selectedRuntimeStatus: 'idle',
+      }),
+    ).toBe('当前会话：Reception 会话 · 已空闲');
   });
 
   it('都没有时回退到工作区概览文案', () => {

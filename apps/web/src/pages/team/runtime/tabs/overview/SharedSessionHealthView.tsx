@@ -5,6 +5,7 @@ import type {
   TeamRuntimeDiagnostics,
 } from '@openAwork/web-client';
 import { getSharedSessionStateLabel } from '../../data/team-runtime-model.js';
+import { formatTimelineDetail } from '../../data/team-runtime-reference-formatters.js';
 import { EmptyState, MetricGrid, StatCard } from '../../shared/content-kit/index.js';
 
 const ACTION_LABELS: Record<string, string> = {
@@ -16,6 +17,24 @@ const ACTION_LABELS: Record<string, string> = {
   shared_question_replied: '问题回复',
   runtime_alert_control: '告警控制',
   runtime_remediation: '运行修复',
+  'resume-all': '恢复全部运行',
+  'pause-all': '暂停全部运行',
+  'stop-all': '停止全部运行',
+  'restart-all': '重启全部运行',
+  'cancel-all': '取消全部运行',
+  resume: '恢复运行',
+  pause: '暂停运行',
+  stop: '停止运行',
+  start: '开始运行',
+  restart: '重启运行',
+  cancel: '取消运行',
+  create: '创建',
+  update: '更新',
+  delete: '删除',
+  plan: '规划',
+  review: '评审',
+  execute: '执行',
+  run: '执行',
 };
 
 function formatTime(value: string | undefined): string {
@@ -209,10 +228,12 @@ export function SharedSessionHealthView({
                     {formatTime(log.createdAt)}
                   </span>
                 </div>
-                <strong style={{ color: 'var(--fg-strong)', fontSize: 12 }}>{log.summary}</strong>
+                <strong style={{ color: 'var(--fg-strong)', fontSize: 12 }}>
+                  {formatTimelineDetail(log.summary, 120)}
+                </strong>
                 {log.detail ? (
                   <span style={{ color: 'var(--fg-muted)', fontSize: 11, lineHeight: 1.6 }}>
-                    {log.detail}
+                    {formatTimelineDetail(log.detail, 200)}
                   </span>
                 ) : null}
               </div>

@@ -7,13 +7,11 @@ import {
   writeWorkspacePermissionConfig,
 } from '@openAwork/agent-core';
 import { WORKSPACE_ROOT, WORKSPACE_ROOTS, sqliteGet } from '../infra/db.js';
-import {
-  extractSessionWorkingDirectory,
-  parseSessionMetadataJson,
-} from '../session/session-workspace-metadata.js';
+import { resolveSessionWorkspacePath } from '../session/session-workspace-resolution.js';
 
 interface SessionMetadataRow {
   metadata_json: string;
+  user_id: string;
 }
 
 const ignoreLoadCache = new Map<string, Promise<void>>();
@@ -31,14 +29,20 @@ function resolveWorkspaceRootForPath(path: string | null | undefined): string {
 
 export function getSessionWorkspaceRoot(sessionId: string): string | null {
   const row = sqliteGet<SessionMetadataRow>(
-    'SELECT metadata_json FROM sessions WHERE id = ? LIMIT 1',
+    'SELECT metadata_json, user_id FROM sessions WHERE id = ? LIMIT 1',
     [sessionId],
   );
   if (!row) {
     return null;
   }
-  const metadata = parseSessionMetadataJson(row.metadata_json);
-  return resolveWorkspaceRootForPath(extractSessionWorkingDirectory(metadata));
+  // 递归解析 workingDirectory：子 session 可能没有直接设置，
+  // 需要通过 DB 列 team_parent_session_id 向上查找父 session 链。
+  const workingDirectory = resolveSessionWorkspacePath({
+    metadataJson: row.metadata_json,
+    sessionId,
+    userId: row.user_id,
+  });
+  return resolveWorkspaceRootForPath(workingDirectory);
 }
 
 export async function ensureIgnoreRulesLoadedForPath(path?: string | null): Promise<void> {

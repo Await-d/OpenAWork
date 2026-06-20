@@ -4,6 +4,9 @@ import type * as AuthModule from '../../infra/auth.js';
 import type * as CronRouterModule from '../../cron/router.js';
 import type * as RequestWorkflowModule from '../../runtime/request-workflow.js';
 
+process.env['DATABASE_URL'] = ':memory:';
+process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
+
 let authPlugin: typeof AuthModule.default;
 let cronRoutes: typeof CronRouterModule.cronRoutes;
 let cronScheduler: typeof CronRouterModule.cronScheduler;

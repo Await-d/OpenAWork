@@ -21,10 +21,10 @@ import {
   createRequestSnapshotRef,
 } from '../session/session-snapshot-store.js';
 import { appendSnapshotPart, appendPatchPart } from '../message/message-v2-adapter.js';
-import type { MessageID } from '../message/message-v2-schema.js';
+import type { MessageID, MessageWithParts } from '../message/message-v2-schema.js';
 import { upsertArtifactsFromAssistantMessage } from '../session/assistant-content-artifacts.js';
 import { touchSessionHeartbeat } from '../handoff/bus/heartbeat.js';
-import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
+import { resolveSessionWorkspacePath } from '../session/session-workspace-resolution.js';
 import { validateWorkspacePath } from '../workspace/workspace-paths.js';
 import { getSnapshotEngine } from '../snapshot/snapshot-engine.js';
 import {
@@ -66,6 +66,7 @@ import {
   wrapGatewayToolsForAiSdkDeclarationsOnly,
   type GatewayToolFunctionShape,
 } from '../v2-runtime/upstream/index.js';
+import { matchesRequestScope } from '../runtime/request-lineage.js';
 
 // `UpstreamErrorDescriptor` is preserved as a structural type so the
 // `RunResult.upstreamError` field stays stable for downstream recovery
@@ -85,9 +86,99 @@ type UpstreamErrorDescriptor = {
   retryAfterMs?: number;
 };
 
+export function filterMessagesByTeamTaskThread(
+  messages: Iterable<MessageWithParts>,
+  teamTaskThreadId?: string,
+): Iterable<MessageWithParts> {
+  if (!teamTaskThreadId) {
+    return messages;
+  }
+
+  return (function* filterByRequestScope() {
+    for (const message of messages) {
+      if (matchesRequestScope(teamTaskThreadId, message.info.clientRequestId)) {
+        yield message;
+      }
+    }
+  })();
+}
+
 const STREAM_RUNTIME_ERROR_MESSAGES = {
   genericStreamError: '流式响应处理中断，请稍后重试。',
 } as const;
+
+export interface UpstreamStreamDiagnosticsSummary {
+  textDeltaCount: number;
+  reasoningDeltaCount: number;
+  toolCallDeltaCount: number;
+  sawDone: boolean;
+  sawError: boolean;
+  stalled: boolean;
+}
+
+function createEmptyStreamDiagnosticsSummary(): UpstreamStreamDiagnosticsSummary {
+  return {
+    textDeltaCount: 0,
+    reasoningDeltaCount: 0,
+    toolCallDeltaCount: 0,
+    sawDone: false,
+    sawError: false,
+    stalled: false,
+  };
+}
+
+export function buildUpstreamStreamSummaryLog(input: {
+  model: string;
+  round: number;
+  upstreamProtocol: string;
+  stopReason: StreamStopReason;
+  diagnostics: UpstreamStreamDiagnosticsSummary;
+}): {
+  input: { model: string; round: number; upstreamProtocol: string };
+  output: {
+    stopReason: StreamStopReason;
+    textDeltaCount: number;
+    reasoningDeltaCount: number;
+    toolCallDeltaCount: number;
+    sawDone: boolean;
+    sawError: boolean;
+    stalled: boolean;
+  };
+  isError: boolean;
+} {
+  return {
+    input: {
+      model: input.model,
+      round: input.round,
+      upstreamProtocol: input.upstreamProtocol,
+    },
+    output: {
+      stopReason: input.stopReason,
+      textDeltaCount: input.diagnostics.textDeltaCount,
+      reasoningDeltaCount: input.diagnostics.reasoningDeltaCount,
+      toolCallDeltaCount: input.diagnostics.toolCallDeltaCount,
+      sawDone: input.diagnostics.sawDone,
+      sawError: input.diagnostics.sawError,
+      stalled: input.diagnostics.stalled,
+    },
+    isError: input.stopReason === 'error',
+  };
+}
+
+function toUpstreamStreamSummary(
+  stopReason: StreamStopReason,
+  diagnostics: UpstreamStreamDiagnosticsSummary,
+): import('@openAwork/shared').UpstreamStreamSummary {
+  return {
+    stopReason,
+    textDeltaCount: diagnostics.textDeltaCount,
+    reasoningDeltaCount: diagnostics.reasoningDeltaCount,
+    toolCallDeltaCount: diagnostics.toolCallDeltaCount,
+    sawDone: diagnostics.sawDone,
+    sawError: diagnostics.sawError,
+    stalled: diagnostics.stalled,
+  };
+}
 
 /**
  * 粗略 token 估算（~4 字符/token）。仅在 provider 流式响应不回 usage（token 全 0）时
@@ -768,9 +859,13 @@ async function captureSnapshotTreeBestEffort(input: {
   diffFiles: FileDiffContent[];
 }): Promise<void> {
   try {
-    const metadata = parseSessionMetadataJson(input.sessionContext.metadataJson);
-    const rawWorkspace =
-      typeof metadata['workingDirectory'] === 'string' ? metadata['workingDirectory'] : null;
+    // 递归解析 workingDirectory：子 session 可能没有直接设置，
+    // 需要通过 DB 列 team_parent_session_id 向上查找父 session 链。
+    const rawWorkspace = resolveSessionWorkspacePath({
+      metadataJson: input.sessionContext.metadataJson,
+      sessionId: input.sessionId,
+      userId: input.userId,
+    });
     if (!rawWorkspace) return;
 
     // Defense in depth: only capture when the workspace path passes the
@@ -856,6 +951,8 @@ export async function runModelRound(input: {
    * 由调用方在 round 起始前 await `buildTeamInstructionStack(...)` 取得。
    */
   teamInstructionStack?: string | null;
+  teamResumePrompt?: string | null;
+  teamStatusPrompt?: string | null;
   syntheticContinuationPrompt?: string;
   memoryBlock?: string | null;
   /** Agent ID for the current stream round (for per-agent color rendering). */
@@ -873,6 +970,7 @@ export async function runModelRound(input: {
   usageOccurredAt?: number;
 }> {
   const compactionAutoEnabled = input.compactionAutoEnabled ?? true;
+  let streamDiagnostics = createEmptyStreamDiagnosticsSummary();
   const shouldApplyThinkingConfig =
     input.requestData.thinkingEnabled !== undefined ||
     input.requestData.reasoningEffort !== undefined;
@@ -890,7 +988,10 @@ export async function runModelRound(input: {
   // short-circuit at the latest compaction marker / tailStartID without
   // ever materialising the full pre-compaction history in memory.
   const messagesV2 = filterCompacted(
-    streamMessagesWithParts({ sessionId: input.sessionId, userId: input.userId }),
+    filterMessagesByTeamTaskThread(
+      streamMessagesWithParts({ sessionId: input.sessionId, userId: input.userId }),
+      input.requestData.teamTaskThreadId,
+    ),
   );
   // Layer 1: MessageWithParts[] → UnifiedMessage[] (single conversion entry point).
   // Intentionally no `stripOldToolResults` here. The previous wall-clock-based
@@ -968,8 +1069,13 @@ export async function runModelRound(input: {
   });
 
   const memoryContent = input.memoryBlock ?? '<user-memory />\n当前会话无持久化记忆。';
-  const dynamicSystemTail = [dynamicSystemContent, memoryContent]
-    .filter((s) => s.length > 0)
+  const dynamicSystemTail = [
+    dynamicSystemContent,
+    input.teamResumePrompt ?? null,
+    input.teamStatusPrompt ?? null,
+    memoryContent,
+  ]
+    .filter((s): s is string => typeof s === 'string' && s.length > 0)
     .join('\n\n');
 
   // Compose final message list: system prompts + conversation + optional continuation
@@ -1021,6 +1127,8 @@ export async function runModelRound(input: {
       companionPromptActive: !!input.companionPrompt,
       memoryBlockInjected: !!input.memoryBlock,
       syntheticContinuationInjected: !!input.syntheticContinuationPrompt,
+      teamResumePromptInjected: !!input.teamResumePrompt,
+      teamStatusPromptInjected: !!input.teamStatusPrompt,
       thinkingConfigApplied: shouldApplyThinkingConfig,
       requestOverrideBodyKeys: Object.keys(input.route.requestOverrides.body ?? {}),
       omittedBodyKeys: input.route.requestOverrides.omitBodyKeys ?? [],
@@ -1145,6 +1253,7 @@ export async function runModelRound(input: {
       createdAt: stepStartedAt,
       completedAt: Date.now(),
       firstContentAt: state.firstContentAt,
+      ...(input.agentId ? { agentId: input.agentId } : {}),
       ...(usage ? { usage } : {}),
     });
     if (reason === 'end_turn') {
@@ -1268,7 +1377,6 @@ export async function runModelRound(input: {
     let doneEmitted = false;
     let v2Usage: StreamUsageSummary | undefined;
     let v2UsageOccurredAt: number | undefined;
-
     try {
       if (isTeamSession(input.sessionContext)) {
         touchSessionHeartbeat(input.sessionId);
@@ -1300,6 +1408,9 @@ export async function runModelRound(input: {
               },
             }
           : {}),
+        onDiagnostics: (info) => {
+          streamDiagnostics = info;
+        },
         onFinish: ({ usage }) => {
           const reasoningTokens =
             usage.outputTokenDetails?.reasoningTokens ?? usage.reasoningTokens ?? 0;
@@ -1334,7 +1445,7 @@ export async function runModelRound(input: {
       })) {
         input.eventSequence.value += 1;
         const meta = createRunEventMeta(input.runId, input.eventSequence);
-        const chunkWithMeta = { ...chunk, ...meta } as StreamChunk;
+        const chunkWithMeta = { ...chunk, requestId: input.clientRequestId, ...meta } as StreamChunk;
 
         if (chunkWithMeta.type === 'done') {
           doneEmitted = true;
@@ -1421,8 +1532,17 @@ export async function runModelRound(input: {
         clientRequestId: input.clientRequestId,
         status: 'error',
         replaceExisting: true,
+        ...(input.agentId ? { agentId: input.agentId } : {}),
       });
-      input.writeChunk(createStreamErrorChunk('V2_UPSTREAM_ERROR', userFacingMessage, input.runId));
+      input.writeChunk(
+        createStreamErrorChunk(
+          'V2_UPSTREAM_ERROR',
+          userFacingMessage,
+          input.runId,
+          toUpstreamStreamSummary('error', streamDiagnostics),
+          input.clientRequestId,
+        ),
+      );
       input.wl.flush(input.ctx, 502);
       emitStepEnded('error');
       return {
@@ -1452,6 +1572,8 @@ export async function runModelRound(input: {
       input.writeChunk({
         type: 'done',
         stopReason,
+        requestId: input.clientRequestId,
+        upstreamSummary: toUpstreamStreamSummary(stopReason, streamDiagnostics),
         ...createRunEventMeta(input.runId, input.eventSequence),
       } as RunEvent);
     }
@@ -1460,8 +1582,30 @@ export async function runModelRound(input: {
       input.wl.succeed(stepStream, undefined, {
         round: input.round,
         stopReason,
+        textDeltaCount: streamDiagnostics.textDeltaCount,
+        reasoningDeltaCount: streamDiagnostics.reasoningDeltaCount,
+        toolCallDeltaCount: streamDiagnostics.toolCallDeltaCount,
+        sawDone: streamDiagnostics.sawDone,
+        sawError: streamDiagnostics.sawError,
+        stalled: streamDiagnostics.stalled,
       });
     }
+    const streamSummaryLog = buildUpstreamStreamSummaryLog({
+      model: input.route.model,
+      round: input.round,
+      upstreamProtocol: input.route.upstreamProtocol,
+      stopReason,
+      diagnostics: streamDiagnostics,
+    });
+    writeAuditLog({
+      sessionId: input.sessionId,
+      category: 'stream',
+      sourceName: 'V2_UPSTREAM_STREAM_SUMMARY',
+      requestId: input.clientRequestId,
+      input: streamSummaryLog.input,
+      output: streamSummaryLog.output,
+      isError: streamSummaryLog.isError,
+    });
     finalizeAssistant(stopReason, v2Usage);
     emitStepEnded(stopReason, {
       input: v2Usage?.inputTokens ?? 0,
@@ -1499,7 +1643,25 @@ export async function runModelRound(input: {
       input.writeChunk({
         type: 'done',
         stopReason: 'cancelled',
+        requestId: input.clientRequestId,
+        upstreamSummary: toUpstreamStreamSummary('cancelled', streamDiagnostics),
         ...createRunEventMeta(input.runId, input.eventSequence),
+      });
+      const streamSummaryLog = buildUpstreamStreamSummaryLog({
+        model: input.route.model,
+        round: input.round,
+        upstreamProtocol: input.route.upstreamProtocol,
+        stopReason: 'cancelled',
+        diagnostics: streamDiagnostics,
+      });
+      writeAuditLog({
+        sessionId: input.sessionId,
+        category: 'stream',
+        sourceName: 'V2_UPSTREAM_STREAM_SUMMARY',
+        requestId: input.clientRequestId,
+        input: streamSummaryLog.input,
+        output: streamSummaryLog.output,
+        isError: streamSummaryLog.isError,
       });
       emitStepEnded('cancelled');
       return {
@@ -1534,6 +1696,22 @@ export async function runModelRound(input: {
       classificationMessage: classification.message,
       fallbackMessage: message,
     });
+    const streamSummaryLog = buildUpstreamStreamSummaryLog({
+      model: input.route.model,
+      round: input.round,
+      upstreamProtocol: input.route.upstreamProtocol,
+      stopReason: 'error',
+      diagnostics: streamDiagnostics,
+    });
+    writeAuditLog({
+      sessionId: input.sessionId,
+      category: 'stream',
+      sourceName: 'V2_UPSTREAM_STREAM_SUMMARY',
+      requestId: input.clientRequestId,
+      input: streamSummaryLog.input,
+      output: streamSummaryLog.output,
+      isError: streamSummaryLog.isError,
+    });
     appendSessionMessageV2({
       sessionId: input.sessionId,
       userId: input.userId,
@@ -1542,8 +1720,17 @@ export async function runModelRound(input: {
       clientRequestId: input.clientRequestId,
       status: 'error',
       replaceExisting: true,
+      ...(input.agentId ? { agentId: input.agentId } : {}),
     });
-    input.writeChunk(createStreamErrorChunk('STREAM_ERROR', userFacingMessage, input.runId));
+    input.writeChunk(
+      createStreamErrorChunk(
+        'STREAM_ERROR',
+        userFacingMessage,
+        input.runId,
+        toUpstreamStreamSummary('error', streamDiagnostics),
+        input.clientRequestId,
+      ),
+    );
     input.wl.flush(input.ctx, 500);
     emitStepEnded('error');
     return {

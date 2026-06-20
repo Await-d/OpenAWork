@@ -2,11 +2,10 @@
  * AI SDK stream runner — Phase 4 façade that turns Vercel AI SDK
  * `streamText` events into OpenAWork's `StreamChunk` taxonomy.
  *
- * The runner is intentionally minimal so it can act as a drop-in
- * replacement for the self-rolled SSE parser in
- * `routes/stream-model-round.ts` once the upstream switch is flipped.
- * Today it lives entirely under `v2-runtime/upstream/`; production
- * traffic still flows through the legacy parser.
+ * The runner is intentionally minimal: `routes/stream-model-round.ts`
+ * owns the outer multi-round agent loop, while this file is responsible
+ * only for translating AI SDK stream parts into OpenAWork's existing
+ * `StreamChunk` wire format.
  *
  * Why this layer exists:
  *   - opencode delegates protocol parsing to the AI SDK, gaining vendor
@@ -145,6 +144,20 @@ export interface RunUpstreamStreamInput {
         reasoningTokens?: number | undefined;
       };
     };
+  }) => void;
+  /**
+   * Optional observer for lightweight stream diagnostics. Called
+   * synchronously as chunks are translated so the outer runtime can
+   * distinguish "upstream streamed many deltas" from "upstream only
+   * delivered a terminal event / error".
+   */
+  onDiagnostics?: (info: {
+    textDeltaCount: number;
+    reasoningDeltaCount: number;
+    toolCallDeltaCount: number;
+    sawDone: boolean;
+    sawError: boolean;
+    stalled: boolean;
   }) => void;
 }
 
@@ -321,7 +334,7 @@ interface RunnerState {
  * on large models, while still bounding a hung-but-open upstream
  * socket so the agent turn cannot wedge indefinitely.
  */
-export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 120_000;
+export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 600_000;
 
 /**
  * Wrap an async iterable with an inter-chunk (idle) deadline. If no value
@@ -415,6 +428,24 @@ export async function* runUpstreamStream(
     thinkingActive: false,
     toolNamesById: new Map<string, string>(),
     doneEmitted: false,
+  };
+  const diagnostics = {
+    textDeltaCount: 0,
+    reasoningDeltaCount: 0,
+    toolCallDeltaCount: 0,
+    sawDone: false,
+    sawError: false,
+    stalled: false,
+  };
+  const emitDiagnostics = (): void => {
+    input.onDiagnostics?.({
+      textDeltaCount: diagnostics.textDeltaCount,
+      reasoningDeltaCount: diagnostics.reasoningDeltaCount,
+      toolCallDeltaCount: diagnostics.toolCallDeltaCount,
+      sawDone: diagnostics.sawDone,
+      sawError: diagnostics.sawError,
+      stalled: diagnostics.stalled,
+    });
   };
 
   // Synthesise AI SDK providerOptions for thinking / reasoning when
@@ -598,6 +629,8 @@ export async function* runUpstreamStream(
   })) {
     switch (part.type) {
       case 'text-delta':
+        diagnostics.textDeltaCount += 1;
+        emitDiagnostics();
         yield {
           type: 'text_delta',
           delta: part.text,
@@ -632,6 +665,8 @@ export async function* runUpstreamStream(
         break;
       }
       case 'reasoning-delta': {
+        diagnostics.reasoningDeltaCount += 1;
+        emitDiagnostics();
         const itemId = 'id' in part && typeof part.id === 'string' ? part.id : state.thinkingItemId;
         yield {
           type: 'thinking_delta',
@@ -690,6 +725,8 @@ export async function* runUpstreamStream(
           inputDelta: '',
           ...meta({}),
         };
+        diagnostics.toolCallDeltaCount += 1;
+        emitDiagnostics();
         break;
       }
       case 'tool-input-delta': {
@@ -710,6 +747,8 @@ export async function* runUpstreamStream(
           inputDelta: part.delta ?? '',
           ...meta({}),
         };
+        diagnostics.toolCallDeltaCount += 1;
+        emitDiagnostics();
         break;
       }
       case 'tool-input-end':
@@ -761,6 +800,8 @@ export async function* runUpstreamStream(
             inputDelta: '',
             ...meta({}),
           };
+          diagnostics.toolCallDeltaCount += 1;
+          emitDiagnostics();
           if (inputDelta.length > 0) {
             yield {
               type: 'tool_call_delta',
@@ -769,6 +810,8 @@ export async function* runUpstreamStream(
               inputDelta,
               ...meta({}),
             };
+            diagnostics.toolCallDeltaCount += 1;
+            emitDiagnostics();
           }
         }
         // If we *did* see a prior tool-input-start, the input has
@@ -791,6 +834,8 @@ export async function* runUpstreamStream(
             providerMetadata,
             ...meta({}),
           };
+          diagnostics.toolCallDeltaCount += 1;
+          emitDiagnostics();
         }
         break;
       }
@@ -812,6 +857,8 @@ export async function* runUpstreamStream(
           message,
           ...meta({}),
         };
+        diagnostics.sawError = true;
+        emitDiagnostics();
         yield errorChunk;
         break;
       }
@@ -822,6 +869,8 @@ export async function* runUpstreamStream(
           message: 'upstream stream aborted',
           ...meta({}),
         };
+        diagnostics.sawError = true;
+        emitDiagnostics();
         yield errorChunk;
         break;
       }
@@ -865,6 +914,8 @@ export async function* runUpstreamStream(
           ...meta({}),
         };
         state.doneEmitted = true;
+        diagnostics.sawDone = true;
+        emitDiagnostics();
         yield done;
         break;
       }
@@ -886,18 +937,22 @@ export async function* runUpstreamStream(
           message,
           ...meta({}),
         } as StreamErrorChunk;
+        diagnostics.sawError = true;
+        emitDiagnostics();
         yield errorChunk;
         break;
       }
       default:
-        // Unknown / vendor-specific events are passed silently; the
-        // legacy SSE pipeline will keep producing them in tandem until
-        // the runner reaches feature parity.
+        // Unknown / vendor-specific events are ignored deliberately.
+        // The caller only relies on the normalized StreamChunk surface.
         break;
     }
   }
 
   if (stallState.stalled) {
+    diagnostics.stalled = true;
+    diagnostics.sawError = true;
+    emitDiagnostics();
     const stallChunk = {
       type: 'error' as const,
       code: 'STREAM_STALL',

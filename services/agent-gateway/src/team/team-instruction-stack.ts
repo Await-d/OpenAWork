@@ -1,16 +1,18 @@
 /**
  * 260515-team-phase-a · T-06
  *
- * 7 层指令栈注入。
+ * 团队运行时指令栈注入。
  *
  * 拼接顺序（顶→底，对应 v3.11 §6.1 决策）：
  *   1. AGENTS.md          —— 仓库 / 工作区根目录
  *   2. architecture.md    —— 仓库 / 工作区根目录（如果存在）
  *   3. constitution_md    —— team_workspaces.constitution_md（DB）
+ * 3.5. quality-gates      —— 内联常量 QUALITY_GATES_MD（所有角色共享的质量门禁附录）
  *   4. project-memory.md  —— 仓库 .agentdocs/project-memory.md（D55：git 文件）
  *   5. lessons-learned.md —— 仓库 .agentdocs/lessons-learned.md（D55：git 文件）
  *   6. user_memory_md     —— users.user_memory_md（DB）
- *   7. SOUL               —— agent_personas.soul_md（DB，按 role_layer 选）
+ *   7. workspaceKnowledge —— memories（DB，按 teamWorkspaceId + roleLayer 选）
+ *   8. SOUL               —— agent_personas.soul_md（DB，按 role_layer 选）
  *
  * **去重说明**：层 1（AGENTS.md）已经由 `routes/stream.ts::buildWorkspaceContext`
  * 注入到 stable 段的 workspace ctx 中（含递归 directory_agents block + 若干别名
@@ -29,10 +31,15 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 
+import type { MemoryEntry } from '@openAwork/agent-core';
+import { redactText } from '@openAwork/agent-core';
 import { getTeamConstitution } from './team-constitution-store.js';
 import { getForceApplyCacheTag, getForceApplyState } from './team-force-apply-store.js';
 import { resolveEffectiveSoul } from './team-personas-store.js';
 import { getUserMemory } from './team-user-memory-store.js';
+import { listMemoriesForTeamWorkspaceKnowledge } from '../memory/memory-store.js';
+import { sqliteGet } from '../infra/db.js';
+import { QUALITY_GATES_MD } from '../team-phase-a-content/index.js';
 import type { SoulRoleLayer } from '../team-phase-a-content/index.js';
 
 export interface TeamInstructionStackInput {
@@ -48,7 +55,7 @@ export interface TeamInstructionStackInput {
 }
 
 export interface TeamInstructionStackResult {
-  /** 拼接后的完整 7 层注入文本（已带 cache-breaker tag） */
+  /** 拼接后的完整团队指令栈文本（已带 cache-breaker tag） */
   stableBlock: string;
   /** 估算 token 数（粗略：字符数 / 4） */
   estimatedTokens: number;
@@ -57,9 +64,11 @@ export interface TeamInstructionStackResult {
     agentsMd: boolean;
     architectureMd: boolean;
     constitution: boolean;
+    qualityGates: boolean;
     projectMemory: boolean;
     lessonsLearned: boolean;
     userMemory: boolean;
+    workspaceKnowledge: boolean;
     soul: boolean;
   };
   /** 当 estimatedTokens 超过软上限时为 true */
@@ -68,6 +77,11 @@ export interface TeamInstructionStackResult {
 
 const SOFT_TOKEN_LIMIT = 24_000;
 const TOKEN_PER_CHAR = 0.25; // 简单估算：1 token ≈ 4 char
+const WORKSPACE_KNOWLEDGE_LIMIT = 40;
+
+interface TeamWorkspaceRootRow {
+  default_working_root: string | null;
+}
 
 // Byte ceiling for the workspace files injected into every team prompt
 // (architecture.md / .agentdocs/project-memory.md / .agentdocs/lessons-learned.md).
@@ -103,9 +117,23 @@ async function readFileSafe(filePath: string): Promise<string | null> {
     const content = await fs.readFile(filePath, 'utf8');
     const trimmed = content.trim();
     return trimmed.length > 0 ? trimmed : null;
-  } catch {
+  } catch (error) {
+    if (!isFileNotFoundError(error)) {
+      console.warn(
+        `[team-instruction-stack] 读取指令栈文件失败：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
     return null;
   }
+}
+
+function isFileNotFoundError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error)) {
+    return false;
+  }
+  return (error as { code?: unknown }).code === 'ENOENT';
 }
 
 async function readWorkspaceFile(
@@ -122,7 +150,7 @@ function wrapLayer(label: string, body: string): string {
 }
 
 /**
- * 拼装 7 层指令栈。任意一层缺失时安静跳过，但会在 layers 标志位中记录。
+ * 拼装团队指令栈。任意一层缺失时安静跳过，但会在 layers 标志位中记录。
  */
 export async function buildTeamInstructionStack(
   input: TeamInstructionStackInput,
@@ -131,9 +159,11 @@ export async function buildTeamInstructionStack(
     agentsMd: false,
     architectureMd: false,
     constitution: false,
+    qualityGates: false,
     projectMemory: false,
     lessonsLearned: false,
     userMemory: false,
+    workspaceKnowledge: false,
     soul: false,
   };
 
@@ -165,6 +195,12 @@ export async function buildTeamInstructionStack(
     }
   }
 
+  // 3.5. quality-gates（内联常量，所有角色共享的质量门禁附录）
+  if (input.roleLayer) {
+    segments.push(wrapLayer('quality-gates', QUALITY_GATES_MD));
+    layers.qualityGates = true;
+  }
+
   // 4. project-memory.md（D55：git 文件）
   const projectMemory = await readWorkspaceFile(
     input.workspaceRoot,
@@ -192,6 +228,19 @@ export async function buildTeamInstructionStack(
     layers.userMemory = true;
   }
 
+  if (input.teamWorkspaceId && input.roleLayer) {
+    const workspaceKnowledge = buildWorkspaceKnowledgeLayer({
+      roleLayer: input.roleLayer,
+      teamWorkspaceId: input.teamWorkspaceId,
+      userId: input.userId,
+      workspaceRoot: input.workspaceRoot,
+    });
+    if (workspaceKnowledge) {
+      segments.push(wrapLayer(`workspace-knowledge:${input.roleLayer}`, workspaceKnowledge));
+      layers.workspaceKnowledge = true;
+    }
+  }
+
   // 7. SOUL（DB，按 role_layer 选）
   if (input.roleLayer) {
     const effective = resolveEffectiveSoul({
@@ -214,13 +263,13 @@ export async function buildTeamInstructionStack(
   const forceApplyTag = getForceApplyCacheTag(input.userId);
   segments.push(`<team-instruction layer="cache-breaker" tag="${forceApplyTag}" />`);
 
-  const stableBlock = segments.join('\n\n');
+  const stableBlock = redactText(segments.join('\n\n'));
   const estimatedTokens = Math.ceil(stableBlock.length * TOKEN_PER_CHAR);
   const oversize = estimatedTokens > SOFT_TOKEN_LIMIT;
 
   let finalBlock = stableBlock;
   if (oversize) {
-    finalBlock += `\n\n<team-instruction layer="oversize-warning">\n注意：当前 7 层指令栈估算约 ${estimatedTokens} tokens，已超过软上限 ${SOFT_TOKEN_LIMIT}。如果回答中明显遗漏某些约束，请向用户提示"上下文过大，建议精简 user_memory / project-memory"。\n</team-instruction>`;
+    finalBlock += `\n\n<team-instruction layer="oversize-warning">\n注意：当前团队指令栈估算约 ${estimatedTokens} tokens，已超过软上限 ${SOFT_TOKEN_LIMIT}。如果回答中明显遗漏某些约束，请向用户提示"上下文过大，建议精简 user_memory / project-memory / workspace knowledge"。\n</team-instruction>`;
   }
 
   return {
@@ -242,9 +291,11 @@ export function buildTeamInstructionStackSync(
     agentsMd: false,
     architectureMd: false,
     constitution: false,
+    qualityGates: false,
     projectMemory: false,
     lessonsLearned: false,
     userMemory: false,
+    workspaceKnowledge: false,
     soul: false,
   };
   const segments: string[] = [];
@@ -260,10 +311,29 @@ export function buildTeamInstructionStackSync(
     }
   }
 
+  // 3.5. quality-gates（内联常量，所有角色共享的质量门禁附录）
+  if (input.roleLayer) {
+    segments.push(wrapLayer('quality-gates', QUALITY_GATES_MD));
+    layers.qualityGates = true;
+  }
+
   const userMemory = getUserMemory(input.userId);
   if (userMemory && userMemory.body.trim().length > 0) {
     segments.push(wrapLayer('user-memory', userMemory.body.trim()));
     layers.userMemory = true;
+  }
+
+  if (input.teamWorkspaceId && input.roleLayer) {
+    const workspaceKnowledge = buildWorkspaceKnowledgeLayer({
+      roleLayer: input.roleLayer,
+      teamWorkspaceId: input.teamWorkspaceId,
+      userId: input.userId,
+      workspaceRoot: null,
+    });
+    if (workspaceKnowledge) {
+      segments.push(wrapLayer(`workspace-knowledge:${input.roleLayer}`, workspaceKnowledge));
+      layers.workspaceKnowledge = true;
+    }
   }
 
   if (input.roleLayer) {
@@ -287,7 +357,7 @@ export function buildTeamInstructionStackSync(
   segments.push(`<team-instruction layer="cache-breaker" tag="${forceApplyTag}" />`);
 
   return {
-    stableBlock: segments.join('\n\n'),
+    stableBlock: redactText(segments.join('\n\n')),
     layers,
   };
 }
@@ -296,3 +366,130 @@ export function buildTeamInstructionStackSync(
  * 暴露 ForceApply 状态供路由 / 前端展示。
  */
 export { getForceApplyState };
+
+function buildWorkspaceKnowledgeLayer(input: {
+  roleLayer: SoulRoleLayer;
+  teamWorkspaceId: string;
+  userId: string;
+  workspaceRoot: string | null;
+}): string | null {
+  const records = listWorkspaceKnowledgeRecords(input);
+  if (records.length === 0) {
+    return null;
+  }
+
+  const lines = records.map((memory) => {
+    const layerScope =
+      memory.roleLayers === null ? '全部层级' : `仅 ${memory.roleLayers.join(', ')}`;
+    return `- [${memory.type} / ${layerScope}] ${memory.key}: ${truncateKnowledgeValue(memory.value)}`;
+  });
+  return [
+    `以下是当前团队工作区知识库中允许 ${input.roleLayer} 层读取和使用的长期知识。`,
+    '这些内容来自工作区知识入库，不是当前会话消息关联。',
+    '',
+    ...lines,
+  ].join('\n');
+}
+
+function truncateKnowledgeValue(value: string): string {
+  const normalized = value.trim().replace(/\s+/g, ' ');
+  return normalized.length > 1000 ? `${normalized.slice(0, 1000)}...` : normalized;
+}
+
+function listWorkspaceKnowledgeRecords(input: {
+  roleLayer: SoulRoleLayer;
+  teamWorkspaceId: string;
+  userId: string;
+  workspaceRoot: string | null;
+}): MemoryEntry[] {
+  const workspaceRoots = collectWorkspaceKnowledgeRoots(input);
+  const queryRoots = workspaceRoots.length > 0 ? workspaceRoots : [null];
+  const recordsById = new Map<string, MemoryEntry>();
+
+  for (const workspaceRoot of queryRoots) {
+    const records = listMemoriesForTeamWorkspaceKnowledge(input.userId, {
+      enabled: true,
+      limit: WORKSPACE_KNOWLEDGE_LIMIT,
+      roleLayer: input.roleLayer,
+      teamWorkspaceId: input.teamWorkspaceId,
+      workspaceRoot,
+    });
+    for (const record of records) {
+      recordsById.set(record.id, record);
+    }
+  }
+
+  return [...recordsById.values()]
+    .sort(compareWorkspaceKnowledgeRecords)
+    .slice(0, WORKSPACE_KNOWLEDGE_LIMIT);
+}
+
+function collectWorkspaceKnowledgeRoots(input: {
+  teamWorkspaceId: string;
+  userId: string;
+  workspaceRoot: string | null;
+}): string[] {
+  const roots: string[] = [];
+  addUniqueRoot(roots, input.workspaceRoot);
+  addUniqueRoot(
+    roots,
+    resolveTeamWorkspaceDefaultRoot({
+      teamWorkspaceId: input.teamWorkspaceId,
+      userId: input.userId,
+    }),
+  );
+  return roots;
+}
+
+function resolveTeamWorkspaceDefaultRoot(input: {
+  teamWorkspaceId: string;
+  userId: string;
+}): string | null {
+  const row = sqliteGet<TeamWorkspaceRootRow>(
+    `SELECT default_working_root
+       FROM team_workspaces
+      WHERE id = ? AND user_id = ?
+      LIMIT 1`,
+    [input.teamWorkspaceId, input.userId],
+  );
+  return normalizeWorkspaceRoot(row?.default_working_root);
+}
+
+function addUniqueRoot(roots: string[], value: string | null): void {
+  const normalized = normalizeWorkspaceRoot(value);
+  if (normalized && !roots.includes(normalized)) {
+    roots.push(normalized);
+  }
+}
+
+function normalizeWorkspaceRoot(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function compareWorkspaceKnowledgeRecords(left: MemoryEntry, right: MemoryEntry): number {
+  const priorityDiff = right.priority - left.priority;
+  if (priorityDiff !== 0) {
+    return priorityDiff;
+  }
+  const confidenceDiff = right.confidence - left.confidence;
+  if (confidenceDiff !== 0) {
+    return confidenceDiff;
+  }
+  if (left.key < right.key) {
+    return -1;
+  }
+  if (left.key > right.key) {
+    return 1;
+  }
+  if (left.id < right.id) {
+    return -1;
+  }
+  if (left.id > right.id) {
+    return 1;
+  }
+  return 0;
+}

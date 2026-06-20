@@ -88,6 +88,30 @@ function inferImageFileExtension(mimeType: string): string {
   return 'png';
 }
 
+function inferImageMimeTypeFromName(fileName: string): string | null {
+  const lowerName = fileName.toLowerCase();
+  if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) {
+    return 'image/jpeg';
+  }
+  if (lowerName.endsWith('.png')) {
+    return 'image/png';
+  }
+  if (lowerName.endsWith('.webp')) {
+    return 'image/webp';
+  }
+  if (lowerName.endsWith('.gif')) {
+    return 'image/gif';
+  }
+  return null;
+}
+
+function resolveImageMimeType(fileName: string, mimeType: string | undefined): string | null {
+  if (mimeType?.startsWith('image/')) {
+    return mimeType === 'image/jpg' ? 'image/jpeg' : mimeType;
+  }
+  return inferImageMimeTypeFromName(fileName);
+}
+
 function parseStoredImageArtifactContent(
   content: string,
 ): { bytes: Buffer; mimeType: string } | null {
@@ -131,8 +155,8 @@ async function resolveInputArtifact(input: {
   const artifacts = await uploadedArtifactManager.list(input.sessionId);
   const artifact = artifacts.find((item) => item.id === input.artifactId);
   if (artifact?.path) {
-    const mimeType = artifact.mimeType ?? 'application/octet-stream';
-    if (!mimeType.startsWith('image/')) {
+    const mimeType = resolveImageMimeType(artifact.name, artifact.mimeType);
+    if (!mimeType) {
       return null;
     }
 
@@ -158,11 +182,13 @@ async function resolveInputArtifact(input: {
     typeof contentArtifact.metadata['mimeType'] === 'string'
       ? contentArtifact.metadata['mimeType']
       : parsedContent.mimeType;
-  const mimeType = storedMimeType.startsWith('image/') ? storedMimeType : parsedContent.mimeType;
   const storedFileName =
     typeof contentArtifact.metadata['fileName'] === 'string'
       ? contentArtifact.metadata['fileName']
       : undefined;
+  const mimeType =
+    resolveImageMimeType(storedFileName ?? contentArtifact.id, storedMimeType) ??
+    parsedContent.mimeType;
 
   return {
     artifact: { id: contentArtifact.id },

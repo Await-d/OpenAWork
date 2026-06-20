@@ -122,4 +122,21 @@ describe('artifact store corrupt-row resilience', () => {
     expect(corrupt?.diffFromPrevious).toEqual([]);
     expect(console.warn).toHaveBeenCalled();
   });
+
+  it('deleteArtifact: 删除产物时同步移除版本记录并按用户隔离', () => {
+    const artifact = store.createArtifact(USER_ID, {
+      sessionId: SESSION_ID,
+      title: 'delete-me',
+      content: 'v1',
+      type: 'markdown',
+    });
+    store.updateArtifact(USER_ID, artifact.id, { content: 'v2' });
+
+    expect(store.deleteArtifact('other-user', artifact.id)).toBe(false);
+    expect(store.listArtifactVersions(USER_ID, artifact.id).length).toBeGreaterThan(0);
+
+    expect(store.deleteArtifact(USER_ID, artifact.id)).toBe(true);
+    expect(store.getArtifactById(USER_ID, artifact.id)).toBeUndefined();
+    expect(store.listArtifactVersions(USER_ID, artifact.id)).toEqual([]);
+  });
 });

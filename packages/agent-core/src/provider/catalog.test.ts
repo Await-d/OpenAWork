@@ -49,6 +49,21 @@ describe('provider catalog (single source of truth)', () => {
     expect(resolveThinkingStyle('unknown-vendor')).toBe('none');
   });
 
+  it('OpenAI 内置模型包含可直接用于 fast 的 GPT-5.x reasoning 候选', () => {
+    const openai = getCatalogEntry('openai');
+    expect(openai).toBeDefined();
+    const expectedFastModels = ['gpt-5.5', 'gpt-5.4-mini', 'gpt-5.4-nano'];
+
+    for (const modelId of expectedFastModels) {
+      const model = openai?.defaultModels.find((item) => item.id === modelId);
+      expect(model).toBeDefined();
+      expect(model?.enabled).toBe(true);
+      expect(model?.supportsThinking).toBe(true);
+      expect(model?.supportsTools).toBe(true);
+      expect(model?.supportsVision).toBe(true);
+    }
+  });
+
   it('moonshot 仅 kimi-k2.5 系列支持下发 thinking；mimo 全系支持', () => {
     expect(catalogModelSupportsThinking('moonshot', 'kimi-k2.5')).toBe(true);
     expect(catalogModelSupportsThinking('moonshot', 'moonshot-v1-32k')).toBe(false);

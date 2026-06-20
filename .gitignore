@@ -19,6 +19,7 @@ apps/desktop/src-tauri/target/
 
 # Agent/AI tooling (not for version control)
 .sisyphus/
+.omo/
 .openawork.permissions.json
 **/.openawork.permissions.json
 .openawork.*.local.*
@@ -34,9 +35,11 @@ Thumbs.db
 
 # Editor
 .idea
+.vscode/
 *.suo
 *.user
 temp/
+bin/
 
 .serena/
 

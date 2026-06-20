@@ -1062,6 +1062,7 @@ export interface StreamToolCallChunk {
   toolCallId: string;
   toolName: string;
   inputDelta: string;
+  requestId?: string;
   eventId?: string;
   runId?: string;
   occurredAt?: number;
@@ -1114,6 +1115,7 @@ export interface StreamCancellationSummary {
 export interface StreamDoneChunk {
   type: 'done';
   stopReason: 'end_turn' | 'tool_use' | 'max_tokens' | 'error' | 'cancelled' | 'tool_permission';
+  requestId?: string;
   eventId?: string;
   runId?: string;
   /** Agent ID that generated this response round (for per-agent color rendering). */
@@ -1121,15 +1123,28 @@ export interface StreamDoneChunk {
   occurredAt?: number;
   /** Cascade summary; only present when `stopReason === 'cancelled'`. */
   cancellation?: StreamCancellationSummary;
+  upstreamSummary?: UpstreamStreamSummary;
+}
+
+export interface UpstreamStreamSummary {
+  stopReason: 'end_turn' | 'tool_use' | 'max_tokens' | 'error' | 'cancelled' | 'tool_permission';
+  textDeltaCount: number;
+  reasoningDeltaCount: number;
+  toolCallDeltaCount: number;
+  sawDone: boolean;
+  sawError: boolean;
+  stalled: boolean;
 }
 
 export interface StreamErrorChunk {
   type: 'error';
   code: string;
   message: string;
+  requestId?: string;
   eventId?: string;
   runId?: string;
   occurredAt?: number;
+  upstreamSummary?: UpstreamStreamSummary;
 }
 
 export interface StreamToolResultChunk {

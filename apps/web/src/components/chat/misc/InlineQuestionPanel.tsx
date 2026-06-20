@@ -77,7 +77,11 @@ export function InlineQuestionPanel({
 
   return (
     <div className="iqp-wrapper" style={{ maxWidth: editorMode ? 680 : 740 }}>
-      <div ref={containerRef} className="inline-question-panel">
+      <div
+        ref={containerRef}
+        className="inline-question-panel"
+        data-question-request-id={request.requestId}
+      >
         <style>{panelStyles}</style>
 
         <div className="iqp-header" onClick={() => setCollapsed((c) => !c)}>

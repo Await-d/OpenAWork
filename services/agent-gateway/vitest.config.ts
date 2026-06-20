@@ -48,6 +48,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    setupFiles: ['src/__tests__/setup/test-env.ts'],
     // 这些测试共享一个进程级 `:memory:` SQLite 单例（infra/db.ts）。许多文件在
     // beforeEach 里 `DELETE FROM users` 来重置自身状态——文件级并行时会互相清掉
     // 对方刚 seed 的用户行。在 requireAuth 开始校验 token.sub 存在性后，这种历史

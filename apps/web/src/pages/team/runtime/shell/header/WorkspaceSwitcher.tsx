@@ -86,10 +86,10 @@ const POPOVER_STYLE: CSSProperties = {
   overflowY: 'auto',
   background: 'var(--bg-overlay)',
   border: '1px solid var(--border-default)',
-  borderRadius: 10,
-  boxShadow: '0 12px 32px color-mix(in srgb, #000 22%, transparent)',
-  zIndex: 100,
-  padding: '6px 0',
+  borderRadius: 8,
+  boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
+  zIndex: 200,
+  padding: '4px 0',
 };
 
 const POPOVER_HEADER_STYLE: CSSProperties = {

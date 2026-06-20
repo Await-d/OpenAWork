@@ -1,14 +1,22 @@
 import React from 'react';
+import type { UpstreamStreamSummary } from '@openAwork/shared';
+import { formatChatUpstreamSummaryLabel } from './upstream-summary-label.js';
 
 export interface ChatStreamErrorBarProps {
   streamError: string | null;
+  latestUpstreamSummary?: UpstreamStreamSummary | null;
   onDismiss: () => void;
 }
 
-export function ChatStreamErrorBar({ streamError, onDismiss }: ChatStreamErrorBarProps) {
+export function ChatStreamErrorBar({
+  streamError,
+  latestUpstreamSummary,
+  onDismiss,
+}: ChatStreamErrorBarProps) {
   if (!streamError) {
     return null;
   }
+  const summaryLine = formatChatUpstreamSummaryLabel(latestUpstreamSummary);
 
   return (
     <div
@@ -62,6 +70,7 @@ export function ChatStreamErrorBar({ streamError, onDismiss }: ChatStreamErrorBa
           title={streamError}
         >
           {streamError}
+          {summaryLine ? ` · ${summaryLine}` : ''}
         </div>
         <button
           type="button"

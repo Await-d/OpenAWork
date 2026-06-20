@@ -15,6 +15,7 @@
 import { promises as fs } from 'node:fs';
 import {
   TEAM_INIT_STATE_VERSION,
+  deriveTeamInitPhase,
   type TeamInitState,
   type TeamInitStep,
   type TeamInitProjectKind,
@@ -41,6 +42,8 @@ const PROJECT_SIGNAL_ENTRIES = [
 
 /** 扫描目录时忽略的「噪声」条目——它们的存在不代表项目非空。 */
 const EMPTINESS_IGNORED_ENTRIES = new Set(['.DS_Store', '.gitkeep', 'Thumbs.db', '.shadow-git']);
+
+const MAX_GOAL_HINT_CHARS = 500;
 
 export interface ProjectEmptinessProbe {
   projectKind: TeamInitProjectKind;
@@ -127,15 +130,30 @@ function countWorkspaceSessions(teamWorkspaceId: string, userId: string): number
   }
 }
 
+function normalizeGoalHint(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  if (!normalized) return null;
+  return normalized.slice(0, MAX_GOAL_HINT_CHARS);
+}
+
+function deriveInitialPhase(steps: TeamInitStep[]): TeamInitState['phase'] {
+  return steps.some((step) => step.status === 'proposed') ? 'proposed' : deriveTeamInitPhase(steps);
+}
+
 /**
  * 根据探测结果构建初始化步骤清单。
  * - scan-shared-record：纯读，planner 已执行 → 直接标 done。
  * - 其余步骤按 projectKind 决定 proposed / not_applicable。
  */
-export function buildTeamInitSteps(probe: ProjectEmptinessProbe): TeamInitStep[] {
+export function buildTeamInitSteps(
+  probe: ProjectEmptinessProbe,
+  options?: { initialGoal?: string | null },
+): TeamInitStep[] {
   const nowIso = new Date().toISOString();
+  const initialGoal = normalizeGoalHint(options?.initialGoal);
   const isExisting = probe.projectKind === 'existing';
   const isEmpty = probe.projectKind === 'empty';
+  const canInitializeEmptyProject = isEmpty && initialGoal !== null;
 
   const steps: TeamInitStep[] = [];
 
@@ -192,21 +210,49 @@ export function buildTeamInitSteps(probe: ProjectEmptinessProbe): TeamInitStep[]
   // 5) 各层根据项目结构绑定工具（skill / mcp）—— 空/非空都需要。
   steps.push({
     key: 'bind-tools-per-layer',
-    title: '为各层绑定工具能力',
-    description: '依据项目类型为执行 / 规划等层级推荐并绑定合适的 skill 与 MCP。',
-    status: 'proposed',
-    requiresConfirm: true,
-    usesLlm: true,
+    title: canInitializeEmptyProject ? '按首个目标绑定工具能力' : '为各层绑定工具能力',
+    description: isExisting
+      ? '依据项目类型为执行 / 规划等层级推荐并绑定合适的 skill 与 MCP。'
+      : canInitializeEmptyProject
+        ? '结合用户首个项目目标，为执行 / 规划等层级推荐并绑定合适的 skill 与 MCP。'
+        : probe.projectKind === 'unknown'
+          ? '工作目录暂不可判定，先不做项目化工具绑定；收到有效工作区与明确需求后再处理。'
+          : '空项目尚无明确目标，先不做工具绑定；收到首个需求后再按目标自动绑定。',
+    status: isExisting || canInitializeEmptyProject ? 'proposed' : 'not_applicable',
+    requiresConfirm: isExisting || canInitializeEmptyProject,
+    usesLlm: isExisting || canInitializeEmptyProject,
+    ...(initialGoal
+      ? {
+          result: {
+            deferredFromProjectKind: probe.projectKind,
+            initialGoalPreview: initialGoal,
+          },
+        }
+      : {}),
   });
 
   // 6) 空项目专属：生成初始项目记忆骨架（仅会话内摘要，不落盘）—— AI 按项目类型定制。
   steps.push({
     key: 'scaffold-memory',
-    title: '搭建初始项目记忆',
-    description: '为空项目准备一份初始项目记忆骨架，由 AI 结合工作区线索定制，作为后续协作的起点。',
-    status: isEmpty ? 'proposed' : 'not_applicable',
-    requiresConfirm: true,
-    usesLlm: true,
+    title: canInitializeEmptyProject ? '根据首个目标搭建项目记忆' : '搭建初始项目记忆',
+    description: canInitializeEmptyProject
+      ? '为空项目准备一份围绕首个目标的项目记忆骨架，作为后续协作起点。'
+      : isEmpty
+        ? '空项目尚无明确目标，暂不生成项目记忆；收到首个需求后再按目标自动初始化。'
+        : probe.projectKind === 'unknown'
+          ? '工作目录暂不可判定，暂不生成项目记忆骨架。'
+          : '已有项目会优先提取现有项目记忆，不需要生成空项目骨架。',
+    status: canInitializeEmptyProject ? 'proposed' : 'not_applicable',
+    requiresConfirm: canInitializeEmptyProject,
+    usesLlm: canInitializeEmptyProject,
+    ...(initialGoal
+      ? {
+          result: {
+            deferredFromProjectKind: probe.projectKind,
+            initialGoalPreview: initialGoal,
+          },
+        }
+      : {}),
   });
 
   return steps;
@@ -219,12 +265,13 @@ export async function planTeamInit(input: {
   workingRoot: string | null;
   teamWorkspaceId: string;
   userId: string;
+  initialGoal?: string | null;
 }): Promise<TeamInitState> {
   const probe = await probeProjectEmptiness(input);
-  const steps = buildTeamInitSteps(probe);
+  const steps = buildTeamInitSteps(probe, { initialGoal: input.initialGoal });
   return {
     version: TEAM_INIT_STATE_VERSION,
-    phase: 'proposed',
+    phase: deriveInitialPhase(steps),
     projectKind: probe.projectKind,
     detectedAt: new Date().toISOString(),
     steps,

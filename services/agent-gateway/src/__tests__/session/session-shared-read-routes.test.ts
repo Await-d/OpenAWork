@@ -243,7 +243,7 @@ describe('shared session action routes', () => {
     }
   });
 
-  it('共享提问请求不存在时返回中文 404', async () => {
+  it('跳过不存在的共享提问请求时按幂等成功返回 detail 预览', async () => {
     const app = await buildApp();
     try {
       const res = await app.inject({
@@ -251,6 +251,32 @@ describe('shared session action routes', () => {
         url: `/sessions/shared-with-me/${SESSION_ID}/questions/reply`,
         headers: { authorization: bearer(app) },
         payload: { requestId: 'question-missing', status: 'dismissed', answers: [] },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({
+        ok: true,
+        idempotent: true,
+        detail: {
+          share: {
+            sessionId: SESSION_ID,
+          },
+          pendingQuestions: [],
+        },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('回答不存在的共享提问请求时仍返回中文 404', async () => {
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/sessions/shared-with-me/${SESSION_ID}/questions/reply`,
+        headers: { authorization: bearer(app) },
+        payload: { requestId: 'question-missing', status: 'answered', answers: [['ok']] },
       });
 
       expect(res.statusCode).toBe(404);

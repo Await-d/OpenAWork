@@ -25,7 +25,14 @@ import {
   type TeamRuntimeLayer,
   deriveTeamInitPhase,
 } from '@openAwork/shared';
+import type { MemoryEntry } from '@openAwork/agent-core';
 import { sqliteGet, sqliteRun } from '../../infra/db.js';
+import {
+  createMemory,
+  findEnabledMemoryByTypeAndKey,
+  updateMemory,
+} from '../../memory/memory-store.js';
+import { scanMemoryWriteContent } from '../../memory/memory-security-scanner.js';
 import { validateWorkspacePath } from '../../workspace/workspace-paths.js';
 import { resolveAuxiliaryLlmConfig } from '../../provider/auxiliary-llm-config.js';
 import {
@@ -46,6 +53,110 @@ export interface RunTeamInitStepResult {
 }
 
 const MAX_FILE_BYTES = 256 * 1024;
+const MAX_TASK_GOAL_CHARS = 1000;
+const TEAM_INIT_PROJECT_MEMORY_DIGEST_KEY = 'team-init:project-memory-digest';
+const TEAM_INIT_ARCHITECTURE_SUMMARY_KEY = 'team-init:architecture-summary';
+const TEAM_INIT_SCAFFOLD_MEMORY_KEY = 'team-init:scaffold-memory';
+
+function normalizeTaskGoal(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  if (!normalized) return null;
+  return normalized.slice(0, MAX_TASK_GOAL_CHARS);
+}
+
+function canUpdateScopedTeamInitKnowledge(input: {
+  existing: MemoryEntry;
+  teamWorkspaceId: string;
+  workspaceRoot: string | null;
+}): boolean {
+  if (input.existing.teamWorkspaceId === input.teamWorkspaceId) {
+    return true;
+  }
+  return (
+    input.existing.teamWorkspaceId === null &&
+    input.existing.workspaceRoot !== null &&
+    input.workspaceRoot !== null &&
+    input.existing.workspaceRoot === input.workspaceRoot
+  );
+}
+
+function syncTeamInitKnowledge(input: {
+  ctx: TeamInitSessionContext;
+  key: string;
+  value: string | null | undefined;
+  priority: number;
+  label: string;
+}): void {
+  const value = input.value?.trim();
+  if (!value) return;
+
+  const teamWorkspaceId = input.ctx.teamWorkspaceId?.trim();
+  if (!teamWorkspaceId) {
+    console.warn(`[team-init-runner] ${input.label} 入库跳过：缺少 teamWorkspaceId`);
+    return;
+  }
+
+  const workspaceRoot = input.ctx.workingDirectory
+    ? validateWorkspacePath(input.ctx.workingDirectory)
+    : null;
+
+  for (const [field, fieldValue] of [
+    ['key', input.key],
+    ['value', value],
+  ] as const) {
+    const scan = scanMemoryWriteContent(fieldValue);
+    if (!scan.ok) {
+      console.warn(
+        `[team-init-runner] ${input.label} 入库被安全扫描拦截：${field} ${scan.reason ?? 'blocked'}`,
+      );
+      return;
+    }
+  }
+
+  try {
+    const existing = findEnabledMemoryByTypeAndKey(input.ctx.userId, 'project_context', input.key);
+    if (
+      existing &&
+      !canUpdateScopedTeamInitKnowledge({ existing, teamWorkspaceId, workspaceRoot })
+    ) {
+      console.warn(
+        `[team-init-runner] ${input.label} 入库跳过：key 已被其它工作区占用（${input.key}）`,
+      );
+      return;
+    }
+
+    if (existing) {
+      updateMemory(input.ctx.userId, existing.id, {
+        confidence: 1,
+        priority: input.priority,
+        roleLayers: null,
+        source: 'auto_extracted',
+        teamWorkspaceId,
+        value,
+        workspaceRoot,
+      });
+      return;
+    }
+
+    createMemory(input.ctx.userId, {
+      confidence: 1,
+      key: input.key,
+      priority: input.priority,
+      roleLayers: null,
+      source: 'auto_extracted',
+      teamWorkspaceId,
+      type: 'project_context',
+      value,
+      workspaceRoot,
+    });
+  } catch (error) {
+    console.warn(
+      `[team-init-runner] ${input.label} 入库失败，初始化步骤继续：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
 
 async function readWorkspaceFileSafe(
   workingRoot: string,
@@ -684,17 +795,43 @@ async function execBindToolsPerLayer(ctx: TeamInitSessionContext): Promise<{
   const mcpServerIds = mcps.map((m) => m.id);
 
   const boundAt = new Date().toISOString();
+  const taskGoal = normalizeTaskGoal(ctx.taskGoal);
+
+  if (ctx.teamInit?.projectKind === 'empty' && !taskGoal) {
+    return {
+      result: {
+        mode: 'waiting-for-goal',
+        reason: 'empty-workspace-without-goal',
+        skillCount: 0,
+        mcpCount: 0,
+        availableSkillCount: skillIds.length,
+        availableMcpCount: mcpServerIds.length,
+        boundLayers: [],
+        usedLlm: false,
+        skillIds: [],
+        mcpServerIds: [],
+        perLayer: {},
+        note: '空项目尚无明确目标，暂不绑定工具能力。',
+      },
+      perLayer: {},
+    };
+  }
 
   // AI 选择：把项目上下文 + 可用工具清单交给模型，按层挑选 skillIds / mcpServerIds。
   const aiPerLayer = await selectToolBindingsWithAi(ctx, { skills, mcps, boundAt });
   const usedLlm = aiPerLayer !== null;
+  const mode =
+    ctx.teamInit?.projectKind === 'empty' && taskGoal ? 'goal-driven' : 'project-context';
 
   // 兜底：执行层拿全量工具；规划/管控层拿 MCP（便于查文档/检索）。
   const perLayer: Partial<Record<TeamRuntimeLayer, TeamInitLayerBinding>> = aiPerLayer ?? {
     executor: {
       skillIds,
       mcpServerIds,
-      rationale: '执行层负责实际产出，绑定全部可用 skill 与 MCP。',
+      rationale:
+        mode === 'goal-driven'
+          ? '空项目已收到首个目标，执行层先绑定可用 skill 与 MCP 以支持初始产出。'
+          : '执行层负责实际产出，绑定全部可用 skill 与 MCP。',
       boundAt,
     },
     pm1: {
@@ -724,12 +861,14 @@ async function execBindToolsPerLayer(ctx: TeamInitSessionContext): Promise<{
 
   return {
     result: {
+      mode,
       skillCount: allSkillIds.size,
       mcpCount: allMcpIds.size,
       boundLayers: Object.keys(perLayer),
       usedLlm,
       skillIds: Array.from(allSkillIds),
       mcpServerIds: Array.from(allMcpIds),
+      ...(taskGoal ? { taskGoalPreview: taskGoal.slice(0, 240) } : {}),
       // 预览用：每层绑定明细（前端展开渲染）。
       perLayer: Object.fromEntries(
         Object.entries(perLayer).map(([layer, binding]) => [
@@ -760,6 +899,7 @@ async function selectToolBindingsWithAi(
 
   const architectureSummary = ctx.teamInit?.bindings.architectureSummary ?? null;
   const memoryDigest = ctx.teamInit?.bindings.projectMemoryDigest ?? null;
+  const taskGoal = normalizeTaskGoal(ctx.taskGoal);
   const level1 = priorStepResult(ctx, 'read-project-level1');
   const projectType =
     level1 && typeof level1['projectType'] === 'string' ? level1['projectType'] : '';
@@ -774,6 +914,7 @@ async function selectToolBindingsWithAi(
     techStack.length > 0 ? `技术栈：${techStack.join(' / ')}` : '',
     architectureSummary ? `项目架构摘要：\n${architectureSummary}` : '',
     memoryDigest ? `项目记忆要点：\n${memoryDigest.slice(0, 1000)}` : '',
+    taskGoal ? `用户首个项目目标：\n${taskGoal}` : '',
     level1
       ? `项目一级结构：目录 ${JSON.stringify(level1['directories'] ?? [])}，文件 ${JSON.stringify(
           (level1['files'] as string[] | undefined)?.slice(0, 30) ?? [],
@@ -797,7 +938,9 @@ async function selectToolBindingsWithAi(
     '- pm1（规划层）：拆解需求、检索资料，通常只需 MCP；',
     '- pm2（管控层）：核对依赖与上下文，通常只需 MCP。',
     '请根据下面的项目上下文与可用工具池，为每一层挑选最合适的工具子集——',
-    '优先选与项目技术栈 / 架构高度相关的工具，宁缺毋滥，不要把不相关的 skill 也塞给执行层。',
+    taskGoal
+      ? '当前为空项目或早期项目时，优先根据用户首个目标挑选能帮助启动工作的工具；已有项目则优先结合技术栈 / 架构。'
+      : '优先选与项目技术栈 / 架构高度相关的工具，宁缺毋滥，不要把不相关的 skill 也塞给执行层。',
     '只能从给定的 id 中选择，不要编造 id。无合适项时给空数组。',
     'rationale 要结合项目特征说明为什么选这些工具。',
     '严格只输出如下 JSON（不要代码块标记以外的任何文字）：',
@@ -887,10 +1030,22 @@ function syncBindingsIntoMemberSlots(
 async function execScaffoldMemory(
   ctx: TeamInitSessionContext,
 ): Promise<{ result: Record<string, unknown> }> {
+  const taskGoal = normalizeTaskGoal(ctx.taskGoal);
+  if (!taskGoal && ctx.teamInit?.projectKind === 'empty') {
+    return {
+      result: {
+        mode: 'waiting-for-goal',
+        reason: 'empty-workspace-without-goal',
+        usedLlm: false,
+        note: '空项目尚无明确目标，暂不生成项目记忆骨架。',
+      },
+    };
+  }
+
   // 空项目：只在会话内记录骨架摘要，不落盘（保持可逆，低风险）。
   const fallbackScaffold = [
     '# 项目记忆（初始骨架）',
-    '- 目标：待用户在首条需求中明确',
+    `- 目标：${taskGoal ?? '待用户在首条需求中明确'}`,
     '- 技术栈：待定',
     '- 关键约束：待补充',
   ].join('\n');
@@ -914,11 +1069,12 @@ async function execScaffoldMemory(
   }
   const prompt = [
     '你正在为一个全新的（近乎空白的）项目搭建「初始项目记忆骨架」，作为团队后续协作的起点。',
+    taskGoal ? `用户首个项目目标：${taskGoal}` : '',
     dirHint ? `工作目录线索：${dirHint}` : '',
     seedHint,
     '请用中文输出一份简洁的 markdown 骨架，包含这些小节：项目目标、技术栈、关键约束、',
-    '初始里程碑。若上面有 README / 零星条目透露了线索，请据此给出更具体的占位提示；',
-    '否则给出 1-2 条引导用户在首条需求中补全的占位提示，不要凭空臆造具体技术选型。',
+    '初始里程碑。若已有用户目标，请围绕该目标生成骨架；若上面有 README / 零星条目透露了线索，请据此给出更具体的占位提示；',
+    '不要凭空臆造具体技术选型，无法确定的地方写成待确认项。',
     '只输出 markdown 正文，不要寒暄。',
   ]
     .filter(Boolean)
@@ -929,8 +1085,10 @@ async function execScaffoldMemory(
   });
   return {
     result: {
+      mode: taskGoal ? 'goal-driven' : 'workspace-seed',
       scaffold: scaffold ?? fallbackScaffold,
       usedLlm: scaffold !== null,
+      ...(taskGoal ? { taskGoalPreview: taskGoal.slice(0, 240) } : {}),
       note: '空项目记忆骨架（仅会话内，未落盘）',
     },
   };
@@ -969,6 +1127,7 @@ export async function runTeamInitStep(input: {
   sessionId: string;
   userId: string;
   stepKey: TeamInitStepKey;
+  taskGoal?: string | null;
 }): Promise<RunTeamInitStepResult> {
   const ctx = loadTeamInitSessionContext(input.sessionId, input.userId);
   if (!ctx?.teamInit) {
@@ -992,6 +1151,10 @@ export async function runTeamInitStep(input: {
     return { ok: false, reason: 'step-already-running', state: ctx.teamInit };
   }
   inFlightTeamInitSteps.add(inFlightKey);
+  const execCtx: TeamInitSessionContext = {
+    ...ctx,
+    taskGoal: normalizeTaskGoal(input.taskGoal),
+  };
 
   // 标记 running。
   updateTeamInitStep(input.sessionId, input.userId, input.stepKey, (s) => ({
@@ -1005,6 +1168,7 @@ export async function runTeamInitStep(input: {
     let result: Record<string, unknown> = {};
     let architectureSummary: string | null | undefined;
     let projectMemoryDigest: string | null | undefined;
+    let scaffoldMemory: string | null | undefined;
     let perLayer: Partial<Record<TeamRuntimeLayer, TeamInitLayerBinding>> | undefined;
 
     switch (input.stepKey) {
@@ -1025,13 +1189,15 @@ export async function runTeamInitStep(input: {
         break;
       }
       case 'bind-tools-per-layer': {
-        const out = await execBindToolsPerLayer(ctx);
+        const out = await execBindToolsPerLayer(execCtx);
         result = out.result;
         perLayer = out.perLayer;
         break;
       }
       case 'scaffold-memory': {
-        ({ result } = await execScaffoldMemory(ctx));
+        ({ result } = await execScaffoldMemory(execCtx));
+        const scaffold = result['scaffold'];
+        scaffoldMemory = typeof scaffold === 'string' ? scaffold : null;
         break;
       }
       case 'scan-shared-record': {
@@ -1068,6 +1234,33 @@ export async function runTeamInitStep(input: {
       phase: fresh.teamInit.phase === 'skipped' ? 'skipped' : deriveTeamInitPhase(nextSteps),
     };
     writeTeamInitState(input.sessionId, input.userId, nextState);
+    if (projectMemoryDigest !== undefined) {
+      syncTeamInitKnowledge({
+        ctx: execCtx,
+        key: TEAM_INIT_PROJECT_MEMORY_DIGEST_KEY,
+        value: projectMemoryDigest,
+        priority: 75,
+        label: '项目记忆摘要',
+      });
+    }
+    if (architectureSummary !== undefined) {
+      syncTeamInitKnowledge({
+        ctx: execCtx,
+        key: TEAM_INIT_ARCHITECTURE_SUMMARY_KEY,
+        value: architectureSummary,
+        priority: 80,
+        label: '架构摘要',
+      });
+    }
+    if (scaffoldMemory !== undefined) {
+      syncTeamInitKnowledge({
+        ctx: execCtx,
+        key: TEAM_INIT_SCAFFOLD_MEMORY_KEY,
+        value: scaffoldMemory,
+        priority: 60,
+        label: '项目记忆骨架',
+      });
+    }
     return { ok: true, state: nextState };
   } catch (err) {
     const reason = err instanceof Error ? err.message : 'run-step-failed';

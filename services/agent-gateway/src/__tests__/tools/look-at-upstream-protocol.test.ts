@@ -99,6 +99,7 @@ function createRoute(overrides?: Partial<ModelRouteConfig>): ModelRouteConfig {
 // 1×1 transparent PNG, base64 — small enough to keep the test cheap.
 const SAMPLE_IMAGE_DATA_URL =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+const SAMPLE_JPG_DATA_URL = 'data:image/jpg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2w==';
 
 describe('runLookAtTool — upstreamProtocol forwarding', () => {
   beforeEach(() => {
@@ -172,5 +173,42 @@ describe('runLookAtTool — upstreamProtocol forwarding', () => {
       | { upstreamProtocol?: string }
       | undefined;
     expect(callArgs?.upstreamProtocol).toBe('responses');
+  });
+
+  it('normalizes image/jpg data URLs to image/jpeg before the upstream call', async () => {
+    mocks.resolveModelRoute.mockReturnValue(
+      createRoute({
+        upstreamProtocol: 'responses',
+        providerType: 'openai',
+        model: 'gpt-4o',
+        apiBaseUrl: 'https://api.openai.com/v1',
+      }),
+    );
+    mocks.runUpstreamGenerate.mockResolvedValue({
+      text: 'ok',
+      inputTokens: 0,
+      outputTokens: 0,
+      finishReason: 'stop',
+    });
+
+    await runLookAtTool({
+      imageData: SAMPLE_JPG_DATA_URL,
+      goal: 'describe jpg',
+      parentSessionId: 'parent-session',
+      userId: 'user-1',
+    });
+
+    const callArgs = mocks.runUpstreamGenerate.mock.calls[0]?.[0] as
+      | { messages?: Array<{ content?: unknown }> }
+      | undefined;
+    const content = callArgs?.messages?.[0]?.content;
+    expect(Array.isArray(content)).toBe(true);
+    const imagePart = (content as Array<Record<string, unknown>>).find(
+      (part) => part['type'] === 'image',
+    );
+    expect(imagePart).toMatchObject({
+      image: 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2w==',
+      mediaType: 'image/jpeg',
+    });
   });
 });

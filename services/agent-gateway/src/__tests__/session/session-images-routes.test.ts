@@ -427,6 +427,59 @@ describe('session images routes', () => {
     await app.close();
   });
 
+  it('infers uploaded JPEG reference images from .jpg extension when stored MIME is generic', async () => {
+    mocks.listArtifactsMock.mockResolvedValue([
+      {
+        id: 'artifact-input-jpg-1',
+        sessionId: 'session-1',
+        type: 'document',
+        name: 'reference.jpg',
+        path: '/tmp/reference.jpg',
+        mimeType: 'application/octet-stream',
+        createdAt: Date.now(),
+      },
+    ]);
+    mocks.createArtifactMock.mockReturnValue({
+      id: 'artifact-image-edit-jpg-1',
+      sessionId: 'session-1',
+      userId: 'user-a',
+      type: 'image',
+      title: '把这张 JPG 改成海报风格',
+      content: 'data:image/png;base64,ZWRpdGVkLWltYWdlLWJpbmFyeQ==',
+      version: 1,
+      parentVersionId: null,
+      metadata: { modelId: 'gpt-image-2', sourceArtifactId: 'artifact-input-jpg-1' },
+      createdAt: '2026-04-22T00:00:00.000Z',
+      updatedAt: '2026-04-22T00:00:00.000Z',
+    });
+
+    const app = Fastify();
+    await app.register(sessionImagesRoutes);
+    await app.ready();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/sessions/session-1/images/generations',
+      payload: {
+        prompt: '把这张 JPG 改成海报风格',
+        inputArtifacts: [{ artifactId: 'artifact-input-jpg-1' }],
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(mocks.editImageWithOpenAiMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inputImage: expect.objectContaining({
+          fileName: 'reference.jpg',
+          mimeType: 'image/jpeg',
+          bytes: expect.any(Buffer),
+        }),
+      }),
+    );
+
+    await app.close();
+  });
+
   it('uses stored content image artifacts as edit inputs when upload records are absent', async () => {
     mocks.listArtifactsMock.mockResolvedValue([]);
     mocks.getArtifactByIdMock.mockReturnValue({

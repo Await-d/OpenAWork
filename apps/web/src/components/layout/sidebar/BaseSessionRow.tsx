@@ -4,6 +4,12 @@
  * 提供统一的行容器、标题行（图标 + 标题 + 时间）、副行（元信息 / hover 操作切换）、
  * 以及可选的扩展内容插槽。chat 和 team 两侧通过 props/children 注入各自的差异化内容。
  *
+ * 设计方向：
+ * - 通过背景色 + 边框 + 阴影区分 active/hover 态（无额外色条）
+ * - 微妙的浮起效果（hover 时 translateY + shadow）
+ * - 圆角 10px，柔和现代感
+ * - transition 使用 cubic-bezier 缓动，手感更有弹性
+ *
  * 视觉结构：
  *   ┌─────────────────────────────────────────────┐
  *   │ [icon slot]  title ···················· time │  ← headRow
@@ -42,11 +48,11 @@ const DENSITY: Record<BaseSessionRowDensity, DensityTokens> = {
   },
   // 宽松模式：team 端使用，给进度条 / agent 头像留出呼吸空间
   cozy: {
-    rowGap: 3,
-    rowPadding: '5px 8px',
-    rowMargin: '0 4px 1px',
-    headGap: 7,
-    metaMinHeight: 16,
+    rowGap: 4,
+    rowPadding: '7px 10px',
+    rowMargin: '0 5px 2px',
+    headGap: 8,
+    metaMinHeight: 18,
   },
 };
 
@@ -68,7 +74,7 @@ const TIME_STYLE: CSSProperties = {
   color: 'var(--fg-muted)',
   fontVariantNumeric: 'tabular-nums',
   whiteSpace: 'nowrap',
-  lineHeight: '16px',
+  lineHeight: '18px',
 };
 
 const META_ROW_BASE_STYLE: CSSProperties = {
@@ -251,18 +257,24 @@ export function BaseSessionRow({
         padding: tokens.rowPadding,
         margin: tokens.rowMargin,
         paddingLeft: `${parseInt(tokens.rowPadding.split(' ')[1] ?? '10', 10) + depth * 12}px`,
-        borderRadius: 8,
+        borderRadius: 10,
         border: '1px solid transparent',
         cursor: 'pointer',
-        transition: 'background 120ms ease, border-color 120ms ease',
+        transition: 'background 160ms cubic-bezier(0.4, 0, 0.2, 1), border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease',
         outline: 'none',
         position: 'relative',
         background: active
-          ? 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay))'
+          ? 'color-mix(in srgb, var(--accent) 12%, var(--bg-overlay))'
           : hovered
             ? 'color-mix(in srgb, var(--fg-muted) 5%, transparent)'
             : 'transparent',
-        borderColor: active ? 'color-mix(in srgb, var(--accent) 32%, transparent)' : 'transparent',
+        borderColor: active ? 'color-mix(in srgb, var(--accent) 28%, transparent)' : 'transparent',
+        boxShadow: active
+          ? '0 1px 6px color-mix(in srgb, var(--accent) 14%, transparent)'
+          : hovered
+            ? '0 2px 8px rgba(0,0,0,0.1)'
+            : 'none',
+        transform: hovered && !active ? 'translateY(-1px)' : 'translateY(0)',
       }}
       title={title}
       aria-current={active ? 'true' : undefined}

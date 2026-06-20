@@ -7,8 +7,17 @@ import {
   resolveMatchedSharedSessionDetail,
   resolveMatchedSharedSummary,
 } from '../../data/team-runtime-shared-context.js';
-import { EmptyState, MetricGrid, StatCard } from '../../shared/content-kit/index.js';
-import { PANEL_STYLE } from '../../shared/team-runtime-shared.js';
+import { formatTimelineDetail } from '../../data/team-runtime-reference-formatters.js';
+import { tryFormatJson } from '../../../../../utils/format-json.js';
+import {
+  CK_GAP_LG,
+  CK_PAD_LG,
+  CK_RADIUS_LG,
+  EmptyState,
+  MetricGrid,
+  SectionPanel,
+  StatCard,
+} from '../../shared/content-kit/index.js';
 
 const ACTION_LABELS: Record<string, string> = {
   share_created: '创建共享',
@@ -19,6 +28,24 @@ const ACTION_LABELS: Record<string, string> = {
   shared_question_replied: '问题回复',
   runtime_alert_control: '告警控制',
   runtime_remediation: '运行修复',
+  'resume-all': '恢复全部运行',
+  'pause-all': '暂停全部运行',
+  'stop-all': '停止全部运行',
+  'restart-all': '重启全部运行',
+  'cancel-all': '取消全部运行',
+  resume: '恢复运行',
+  pause: '暂停运行',
+  stop: '停止运行',
+  start: '开始运行',
+  restart: '重启运行',
+  cancel: '取消运行',
+  create: '创建',
+  update: '更新',
+  delete: '删除',
+  plan: '规划',
+  review: '评审',
+  execute: '执行',
+  run: '执行',
 };
 
 const TIMELINE_CARD_STYLE: CSSProperties = {
@@ -128,7 +155,7 @@ export function SharedSessionOverviewView({
       title: comment.authorEmail,
     }));
     const auditItems = sharedAuditLogs.map((log) => ({
-      detail: log.detail ?? log.summary,
+      detail: formatTimelineDetail(log.detail ?? log.summary, 200),
       id: `audit-${log.id}`,
       tag: ACTION_LABELS[log.action] ?? log.action,
       timestamp: Date.parse(log.createdAt),
@@ -164,7 +191,7 @@ export function SharedSessionOverviewView({
   const status = formatSharedStatus(selectedTeam.status);
 
   return (
-    <div data-testid="shared-overview-view" style={{ display: 'grid', gap: 10 }}>
+    <div data-testid="shared-overview-view" style={{ display: 'grid', gap: CK_GAP_LG }}>
       <div
         style={{
           display: 'flex',
@@ -172,8 +199,8 @@ export function SharedSessionOverviewView({
           alignItems: 'center',
           gap: 10,
           flexWrap: 'wrap',
-          padding: '10px 12px',
-          borderRadius: 12,
+          padding: CK_PAD_LG,
+          borderRadius: CK_RADIUS_LG,
           background:
             'linear-gradient(135deg, color-mix(in oklch, var(--accent) 8%, var(--bg-overlay)) 0%, var(--bg-base) 100%)',
           border: '1px solid color-mix(in srgb, var(--accent) 24%, transparent)',
@@ -286,39 +313,7 @@ export function SharedSessionOverviewView({
         />
       </MetricGrid>
 
-      <div
-        style={{
-          ...PANEL_STYLE,
-          padding: '10px 12px',
-          borderRadius: 10,
-          display: 'grid',
-          gap: 8,
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            gap: 12,
-            alignItems: 'center',
-          }}
-        >
-          <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--fg-strong)' }}>
-            共享活动时间线
-          </span>
-          <span
-            style={{
-              fontSize: 10,
-              color: 'var(--fg-muted)',
-              padding: '1px 6px',
-              borderRadius: 999,
-              background: 'var(--bg-surface)',
-            }}
-          >
-            {timelineItems.length} 事件
-          </span>
-        </div>
-
+      <SectionPanel title="共享活动时间线" hint={`${timelineItems.length} 事件`}>
         {timelineItems.length > 0 ? (
           <div
             style={{ display: 'grid', gap: 4, maxHeight: 420, overflow: 'auto', paddingRight: 4 }}
@@ -361,7 +356,7 @@ export function SharedSessionOverviewView({
                   </span>
                 </div>
                 <span style={{ fontSize: 11, color: 'var(--fg-default)', lineHeight: 1.5 }}>
-                  {item.detail}
+                  {tryFormatJson(item.detail)}
                 </span>
               </div>
             ))}
@@ -373,7 +368,7 @@ export function SharedSessionOverviewView({
             description="共享输出、评论或权限处理出现后，这里会形成共享时间线。"
           />
         )}
-      </div>
+      </SectionPanel>
     </div>
   );
 }

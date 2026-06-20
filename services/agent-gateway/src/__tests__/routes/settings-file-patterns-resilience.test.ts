@@ -24,6 +24,7 @@ vi.mock('../../mcp/mcp-runtime.js', () => ({
 
 vi.mock('../../provider/auxiliary-llm-config.js', () => ({
   resolveAuxiliaryLlmConfig: vi.fn(async () => null),
+  resolveAuxiliaryLlmConfigCandidates: vi.fn(async () => []),
 }));
 
 vi.mock('../../routes/workflow-llm.js', () => ({

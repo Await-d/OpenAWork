@@ -34,6 +34,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { InputImageContent, RunEvent } from '@openAwork/shared';
+import type { UpstreamStreamSummary } from '@openAwork/shared';
 import {
   createPermissionsClient,
   createQuestionsClient,
@@ -74,6 +75,26 @@ import { useStreamReveal } from '../../../components/conversation-runtime/reveal
 import { useConversationStream } from '../../../components/conversation-runtime/stream/use-conversation-stream.js';
 import { makeOrderedMessageId } from '../../../components/conversation-runtime/messages/ordered-id.js';
 import { estimateTokenCount } from '../../../components/conversation-runtime/messages/support.js';
+
+function extractLatestUpstreamSummaryFromRunEvents(
+  events: RunEvent[] | undefined,
+): UpstreamStreamSummary | null {
+  if (!Array.isArray(events) || events.length === 0) {
+    return null;
+  }
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (
+      event &&
+      (event.type === 'done' || event.type === 'error') &&
+      'upstreamSummary' in event &&
+      event.upstreamSummary
+    ) {
+      return event.upstreamSummary;
+    }
+  }
+  return null;
+}
 
 // ─── Hook 输入 ────────────────────────────────────────────────────────────
 
@@ -128,6 +149,7 @@ export interface SessionConversationState {
   reportedStreamUsage: ChatBackendUsageSnapshot | null;
   streamError: string | null;
   setStreamError: React.Dispatch<React.SetStateAction<string | null>>;
+  latestUpstreamSummary: UpstreamStreamSummary | null;
 
   // ─── composer ────────────────────────────────────────────────────
   input: string;
@@ -313,6 +335,7 @@ export function useChatConversationState(
     null,
   );
   const [streamError, setStreamError] = useState<string | null>(null);
+  const [latestUpstreamSummary, setLatestUpstreamSummary] = useState<UpstreamStreamSummary | null>(null);
   const [activeStreamStartedAt, setActiveStreamStartedAt] = useState<number | null>(null);
   const [activeStreamFirstTokenLatencyMs, setActiveStreamFirstTokenLatencyMs] = useState<
     number | null
@@ -428,6 +451,7 @@ export function useChatConversationState(
 
       const normalized = normalizeChatMessages(recovery.session?.messages ?? []);
       setMessages(normalized);
+      setLatestUpstreamSummary(extractLatestUpstreamSummaryFromRunEvents(recovery.session?.runEvents));
 
       const stateStatus = (recovery.session?.state_status ?? null) as SessionStateStatus | null;
       setSessionStateStatus(stateStatus);
@@ -578,6 +602,7 @@ export function useChatConversationState(
       setStreamError,
       setActiveStreamStartedAt,
       setActiveStreamFirstTokenLatencyMs,
+      setLatestUpstreamSummary,
       setSessionStateStatus,
       setPendingPermissions,
     },
@@ -809,6 +834,7 @@ export function useChatConversationState(
     reportedStreamUsage,
     streamError,
     setStreamError,
+    latestUpstreamSummary,
 
     input,
     setInput,

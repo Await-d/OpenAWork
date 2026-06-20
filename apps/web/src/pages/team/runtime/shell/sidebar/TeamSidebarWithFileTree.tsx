@@ -112,21 +112,22 @@ const TAB_BAR_STYLE: CSSProperties = {
 function tabButtonStyle(active: boolean): CSSProperties {
   return {
     flex: 1,
-    height: 28,
-    padding: '0 8px',
+    height: 30,
+    padding: '0 10px',
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 5,
-    borderRadius: 7,
-    border: active ? '1px solid var(--border-default)' : '1px solid transparent',
-    background: active ? 'var(--bg-overlay)' : 'transparent',
+    borderRadius: 8,
+    border: active ? '1px solid var(--border-subtle)' : '1px solid transparent',
+    background: active ? 'color-mix(in srgb, var(--fg-muted) 6%, transparent)' : 'transparent',
     color: active ? 'var(--fg-strong)' : 'var(--fg-muted)',
     fontSize: 12,
-    fontWeight: active ? 600 : 400,
+    fontWeight: active ? 600 : 450,
     cursor: 'pointer',
-    transition: 'background 150ms ease, color 150ms ease',
+    transition: 'background 160ms cubic-bezier(0.4, 0, 0.2, 1), color 160ms ease, border-color 160ms ease',
     whiteSpace: 'nowrap',
+    position: 'relative',
   };
 }
 
@@ -143,12 +144,13 @@ const SEARCH_INPUT_STYLE: CSSProperties = {
   width: '100%',
   background: 'var(--bg-overlay)',
   border: '1px solid var(--border-subtle)',
-  borderRadius: 6,
-  padding: '4px 8px',
-  fontSize: 11,
+  borderRadius: 7,
+  padding: '5px 9px',
+  fontSize: 11.5,
   color: 'var(--fg-strong)',
   outline: 'none',
   boxSizing: 'border-box',
+  transition: 'border-color 150ms ease, box-shadow 150ms ease',
 };
 
 const FILE_TREE_CONTAINER_STYLE: CSSProperties = {

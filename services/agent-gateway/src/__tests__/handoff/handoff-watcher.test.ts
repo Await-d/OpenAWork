@@ -18,6 +18,7 @@ import {
 
 vi.mock('../../provider/auxiliary-llm-config.js', () => ({
   resolveAuxiliaryLlmConfig: async () => null,
+  resolveAuxiliaryLlmConfigCandidates: async () => [],
 }));
 
 // Per-record dispatch resilience: make createTeamSession throw for ONE
@@ -34,6 +35,14 @@ vi.mock('../../handoff/bus/team-session-create.js', async (importOriginal) => {
         throw new Error('simulated child-session creation failure');
       }
       return actual.createTeamSession(input as Parameters<typeof actual.createTeamSession>[0]);
+    }),
+    findOrCreateTeamRoleSession: vi.fn((input: { teamParentSessionId?: string }) => {
+      if (input.teamParentSessionId === POISON_FROM_SESSION_ID) {
+        throw new Error('simulated child-session creation failure');
+      }
+      return actual.findOrCreateTeamRoleSession(
+        input as Parameters<typeof actual.findOrCreateTeamRoleSession>[0],
+      );
     }),
   };
 });
@@ -138,6 +147,118 @@ describe('HandoffWatcher.tickOnce', () => {
     }
     const result = await watcher.tickOnce();
     expect(result.claimed).toBe(3);
+  });
+
+  it('同一会话内相同 personaKey 的 handoff 复用同一个角色 session', async () => {
+    const watcher = new watcherModule.HandoffWatcher({
+      taskRunner: async () => {},
+      scheduler: new InProcessScheduler(),
+    });
+    const payload = {
+      goal: '实现前端交互',
+      assignedMember: {
+        id: 'executor-frontend',
+        displayName: '前端开发者',
+        personaKey: 'executor:frontend',
+        specialty: 'frontend',
+      },
+    };
+    const first = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'pm2',
+      toRoleLayer: 'executor',
+      payload,
+    });
+    const second = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'pm2',
+      toRoleLayer: 'executor',
+      payload,
+    });
+
+    const result = await watcher.tickOnce();
+    expect(result.claimed).toBe(2);
+
+    const afterFirst = store.getHandoff({ userId: USER_ID, handoffId: first.id });
+    const afterSecond = store.getHandoff({ userId: USER_ID, handoffId: second.id });
+    expect(afterFirst?.toSessionId).toBeTruthy();
+    expect(afterSecond?.toSessionId).toBe(afterFirst?.toSessionId);
+
+    const roleSessions = dbModule.sqliteAll<{ id: string; metadata_json: string; title: string }>(
+      `SELECT id, metadata_json, title
+         FROM sessions
+        WHERE user_id = ?
+          AND role_layer = 'executor'
+          AND json_extract(
+            CASE WHEN json_valid(metadata_json) THEN metadata_json ELSE '{}' END,
+            '$.teamRoleInstance.personaKey'
+          ) = 'executor:frontend'`,
+      [USER_ID],
+    );
+    expect(roleSessions).toHaveLength(1);
+    expect(roleSessions[0]?.id).toBe(afterFirst?.toSessionId);
+    expect(roleSessions[0]?.title).toBe('前端开发者');
+    expect(
+      JSON.parse(roleSessions[0]?.metadata_json ?? '{}') as Record<string, unknown>,
+    ).toMatchObject({
+      teamRoleInstance: {
+        rootSessionId: FROM_SESSION_ID,
+        roleLayer: 'executor',
+        personaKey: 'executor:frontend',
+        displayName: '前端开发者',
+      },
+    });
+  });
+
+  it('失败 handoff 重试后继续复用原角色 session', async () => {
+    const payload = {
+      goal: '修复前端缺陷',
+      assignedMember: {
+        id: 'executor-frontend',
+        displayName: '前端开发者',
+        personaKey: 'executor:frontend',
+        specialty: 'frontend',
+      },
+    };
+    const created = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'pm2',
+      toRoleLayer: 'executor',
+      payload,
+    });
+
+    const failingWatcher = new watcherModule.HandoffWatcher({
+      scheduler: new InProcessScheduler(),
+      taskRunner: async () => {
+        throw new Error('runner-fail');
+      },
+    });
+    await failingWatcher.tickOnce();
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    const failed = store.getHandoff({ userId: USER_ID, handoffId: created.id });
+    expect(failed?.state).toBe('failed');
+    expect(failed?.toSessionId).toBeTruthy();
+    const firstSessionId = failed?.toSessionId;
+
+    expect(store.retryFailedHandoff({ userId: USER_ID, handoffId: created.id })).toBe(true);
+    const retriedPending = store.getHandoff({ userId: USER_ID, handoffId: created.id });
+    expect(retriedPending?.state).toBe('pending');
+    expect(retriedPending?.toSessionId).toBeNull();
+
+    const retryWatcher = new watcherModule.HandoffWatcher({
+      scheduler: new InProcessScheduler(),
+      taskRunner: async () => {},
+    });
+    await retryWatcher.tickOnce();
+
+    const retriedRunning = store.getHandoff({ userId: USER_ID, handoffId: created.id });
+    expect(retriedRunning?.state).toBe('running');
+    expect(retriedRunning?.toSessionId).toBe(firstSessionId);
   });
 
   it('单条 handoff 派发抛错时不中断整轮扫描，其余照常 claim', async () => {

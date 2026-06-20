@@ -38,32 +38,25 @@ const BAR_ROOT_STYLE: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   flexShrink: 0,
-  background:
-    'linear-gradient(180deg, color-mix(in srgb, var(--bg-overlay) 96%, var(--bg-base)) 0%, color-mix(in srgb, var(--bg-overlay) 86%, var(--bg-base)) 100%)',
-  borderBottom: '1px solid color-mix(in srgb, var(--border-default) 45%, transparent)',
-  boxShadow: 'inset 0 1px 0 color-mix(in srgb, var(--fg-strong) 4%, transparent)',
-  backdropFilter: 'blur(18px)',
+  background: 'var(--bg-overlay)',
+  borderBottom: '1px solid color-mix(in srgb, var(--border-default) 30%, transparent)',
 };
 
 const PRIMARY_ROW_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 8,
-  rowGap: 8,
-  flexWrap: 'wrap',
-  padding: '10px 14px 4px',
+  gap: 6,
+  padding: '4px 10px',
   minWidth: 0,
 };
 
 const PRIMARY_GROUP_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  gap: 2,
-  padding: 4,
-  borderRadius: 12,
-  background: 'color-mix(in srgb, var(--bg-base) 74%, transparent)',
-  border: '1px solid color-mix(in srgb, var(--border-default) 34%, transparent)',
-  boxShadow: 'var(--shadow-sm)',
+  gap: 1,
+  padding: 1,
+  borderRadius: 6,
+  background: 'var(--bg-surface)',
   overflowX: 'auto',
   scrollbarWidth: 'none',
   minWidth: 0,
@@ -74,18 +67,18 @@ const PRIMARY_GROUP_STYLE: CSSProperties = {
 const PRIMARY_PILL_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  gap: 6,
-  padding: '6px 14px',
-  borderRadius: 8,
-  border: '1px solid transparent',
+  gap: 4,
+  padding: '4px 10px',
+  borderRadius: 5,
+  border: 'none',
   background: 'transparent',
   color: 'var(--fg-muted)',
-  fontSize: 12.5,
+  fontSize: 12,
   fontWeight: 600,
   cursor: 'pointer',
   whiteSpace: 'nowrap',
   flexShrink: 0,
-  transition: 'background 140ms ease, color 140ms ease, box-shadow 140ms ease',
+  transition: 'background 100ms ease, color 100ms ease',
 };
 
 const PRIMARY_PILL_ACTIVE_STYLE: CSSProperties = {
@@ -93,7 +86,6 @@ const PRIMARY_PILL_ACTIVE_STYLE: CSSProperties = {
   background: 'var(--bg-overlay)',
   color: 'var(--fg-strong)',
   fontWeight: 700,
-  boxShadow: 'var(--shadow-sm), 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent)',
 };
 
 // ─── 3D 办公动作按钮 ─────────────────────────────────────────────
@@ -101,25 +93,25 @@ const PRIMARY_PILL_ACTIVE_STYLE: CSSProperties = {
 const OFFICE_BTN_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  gap: 5,
-  padding: '6px 12px',
-  borderRadius: 8,
-  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+  gap: 4,
+  padding: '4px 8px',
+  borderRadius: 5,
+  border: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
   background: 'transparent',
   color: 'var(--fg-default)',
-  fontSize: 12,
+  fontSize: 11,
   fontWeight: 600,
   cursor: 'pointer',
   whiteSpace: 'nowrap',
   flexShrink: 0,
   marginLeft: 'auto',
-  transition: 'background 140ms ease, color 140ms ease, border-color 140ms ease',
+  transition: 'background 100ms ease, color 100ms ease',
 };
 
 const OFFICE_BTN_ACTIVE_STYLE: CSSProperties = {
   ...OFFICE_BTN_STYLE,
-  background: 'color-mix(in srgb, var(--accent) 14%, transparent)',
-  border: '1px solid color-mix(in srgb, var(--accent) 50%, transparent)',
+  background: 'color-mix(in srgb, var(--accent) 10%, transparent)',
+  borderColor: 'color-mix(in srgb, var(--accent) 40%, transparent)',
   color: 'var(--accent)',
 };
 
@@ -139,8 +131,8 @@ const OFFICE_BTN_ACTIVE_INLINE_STYLE: CSSProperties = {
 const SUB_ROW_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 4,
-  padding: '0 14px 12px',
+  gap: 2,
+  padding: '0 10px 4px',
   overflowX: 'auto',
   scrollbarWidth: 'none',
   minWidth: 0,
@@ -149,23 +141,23 @@ const SUB_ROW_STYLE: CSSProperties = {
 const SUB_PILL_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  gap: 5,
-  padding: '4px 12px',
-  borderRadius: 999,
-  border: '1px solid transparent',
+  gap: 4,
+  padding: '3px 8px',
+  borderRadius: 4,
+  border: 'none',
   background: 'transparent',
-  color: 'var(--fg-muted)',
-  fontSize: 11.5,
+  color: 'var(--fg-subtle)',
+  fontSize: 11,
   fontWeight: 600,
   cursor: 'pointer',
   whiteSpace: 'nowrap',
   flexShrink: 0,
-  transition: 'background 140ms ease, color 140ms ease',
+  transition: 'background 100ms ease, color 100ms ease',
 };
 
 const SUB_PILL_ACTIVE_STYLE: CSSProperties = {
   ...SUB_PILL_STYLE,
-  background: 'color-mix(in srgb, var(--accent) 16%, transparent)',
+  background: 'color-mix(in srgb, var(--accent) 10%, transparent)',
   color: 'var(--accent)',
   fontWeight: 700,
 };
@@ -176,19 +168,16 @@ const SINGLE_CONTEXT_ROW_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
-  gap: 12,
-  rowGap: 6,
-  flexWrap: 'wrap',
-  padding: '10px 14px 6px',
+  gap: 8,
+  padding: '4px 10px',
   minWidth: 0,
 };
 
 const SINGLE_NAV_ROW_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 10,
-  rowGap: 6,
-  padding: '0 14px 8px',
+  gap: 6,
+  padding: '0 10px 4px',
   minWidth: 0,
 };
 
@@ -198,7 +187,7 @@ const LEADING_STYLE: CSSProperties = {
   gap: 6,
   flex: '1 1 420px',
   minWidth: 0,
-  minHeight: 38,
+  minHeight: 28,
 };
 
 const CONTEXT_TRAILING_STYLE: CSSProperties = {
@@ -229,11 +218,9 @@ const CENTER_SLOT_STYLE: CSSProperties = {
   flexShrink: 8,
   flexBasis: 'auto',
   overflow: 'hidden',
-  padding: '4px 6px 4px 8px',
-  borderRadius: 12,
-  border: '1px solid color-mix(in srgb, var(--border-default) 30%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-base) 70%, transparent)',
-  boxShadow: 'inset 0 1px 0 color-mix(in srgb, var(--fg-strong) 3%, transparent)',
+  padding: '2px 4px',
+  borderRadius: 4,
+  background: 'var(--bg-surface)',
 };
 
 const SINGLE_ACTIONS_STYLE: CSSProperties = {

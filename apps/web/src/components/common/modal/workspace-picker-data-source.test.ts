@@ -49,6 +49,31 @@ describe('buildWorkspacePickerDataSource', () => {
     ]);
   });
 
+  it('createDirectory 会透传 token 和目标路径', async () => {
+    const createDirectory = vi.fn(async () => undefined);
+    const source = buildWorkspacePickerDataSource({
+      client: {
+        createDirectory,
+      } as never,
+      token: 'token-1',
+    });
+
+    await source.createDirectory('/workspace/demo/feature');
+
+    expect(createDirectory).toHaveBeenCalledWith('token-1', '/workspace/demo/feature');
+  });
+
+  it('未登录时 createDirectory 抛出中文错误', async () => {
+    const source = buildWorkspacePickerDataSource({
+      client: {} as never,
+      token: null,
+    });
+
+    await expect(source.createDirectory('/workspace/demo/feature')).rejects.toThrow(
+      '未登录，无法读取工作区目录。',
+    );
+  });
+
   it('未登录时 validatePath 返回 invalid 结果', async () => {
     const source = buildWorkspacePickerDataSource({
       client: {} as never,

@@ -5,7 +5,7 @@
  */
 
 import Fastify, { type FastifyInstance } from 'fastify';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as DbModule from '../../infra/db.js';
 import type * as AuthModule from '../../infra/auth.js';
 import type * as RequestWorkflowModule from '../../runtime/request-workflow.js';
@@ -15,6 +15,12 @@ import type * as TeamEventsBusModule from '../../handoff/bus/team-events-bus.js'
 
 process.env['DATABASE_URL'] = ':memory:';
 process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
+
+const runSessionInBackgroundMock = vi.hoisted(() => vi.fn());
+
+vi.mock('../../routes/stream-runtime.js', () => ({
+  runSessionInBackground: runSessionInBackgroundMock,
+}));
 
 let dbModule: typeof DbModule;
 let authPlugin: typeof AuthModule.default;
@@ -93,6 +99,8 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  runSessionInBackgroundMock.mockReset();
+  runSessionInBackgroundMock.mockResolvedValue({ statusCode: 200 });
   teamEventsBus.__clearTeamEventsBusForTesting();
   dbModule.sqliteRun('DELETE FROM team_audit_logs', []);
   dbModule.sqliteRun('DELETE FROM session_inbound_messages', []);
@@ -906,9 +914,15 @@ describe('POST /team/sessions/:sessionId/pause-all', () => {
 
       expect(res.statusCode).toBe(200);
       expect(res.json()).toMatchObject({
+        depthLimitReached: false,
+        limitReached: false,
+        omittedSessionCount: 0,
         pausedHandoffCount: 2,
         pausedSessionCount: 1,
+        sessionLimit: 200,
+        sessionMaxDepth: 16,
         sessionId: FROM_SESSION_ID,
+        truncated: false,
       });
 
       const rootRow = dbModule.sqliteGet<{ paused: number; paused_at: string | null }>(
@@ -968,6 +982,14 @@ describe('POST /team/sessions/:sessionId/pause-all', () => {
 
       expect(events).toContainEqual(
         expect.objectContaining({
+          payload: expect.objectContaining({
+            depthLimitReached: false,
+            limitReached: false,
+            omittedSessionCount: 0,
+            sessionLimit: 200,
+            sessionMaxDepth: 16,
+            truncated: false,
+          }),
           type: 'scheduler.all-paused',
           sessionId: FROM_SESSION_ID,
           userId: USER_ID,
@@ -976,11 +998,12 @@ describe('POST /team/sessions/:sessionId/pause-all', () => {
 
       const audit = dbModule.sqliteGet<{
         action: string;
+        detail: string | null;
         entity_type: string;
         summary: string;
         session_id: string | null;
       }>(
-        `SELECT action, entity_type, summary, session_id
+        `SELECT action, detail, entity_type, summary, session_id
            FROM team_audit_logs
           ORDER BY created_at DESC, id DESC
           LIMIT 1`,
@@ -992,8 +1015,49 @@ describe('POST /team/sessions/:sessionId/pause-all', () => {
         session_id: FROM_SESSION_ID,
       });
       expect(audit?.summary).toContain('team pause-all');
+      const auditDetail = JSON.parse(audit?.detail ?? '{}') as Record<string, unknown>;
+      expect(auditDetail).toMatchObject({
+        depthLimitReached: false,
+        limitReached: false,
+        omittedSessionCount: 0,
+        sessionLimit: 200,
+        sessionMaxDepth: 16,
+        truncated: false,
+      });
     } finally {
       unsubscribe();
+      await app.close();
+    }
+  });
+
+  it('会在暂停范围超过会话数量限制时显式返回截断状态', async () => {
+    const app = await buildApp();
+    try {
+      for (let index = 0; index < 201; index += 1) {
+        seedSession(`s-pause-limit-child-${String(index).padStart(3, '0')}`, USER_ID, {
+          roleLayer: 'executor',
+          teamParentSessionId: FROM_SESSION_ID,
+        });
+      }
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/team/sessions/${FROM_SESSION_ID}/pause-all`,
+        headers: { authorization: bearer(app) },
+        payload: { reason: 'large-tree' },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({
+        depthLimitReached: false,
+        limitReached: true,
+        omittedSessionCount: 1,
+        pausedSessionCount: 199,
+        sessionLimit: 200,
+        sessionMaxDepth: 16,
+        truncated: true,
+      });
+    } finally {
       await app.close();
     }
   });
@@ -1059,10 +1123,16 @@ describe('POST /team/sessions/:sessionId/resume-all', () => {
 
       expect(res.statusCode).toBe(200);
       expect(res.json()).toMatchObject({
+        depthLimitReached: false,
+        limitReached: false,
+        omittedSessionCount: 0,
         resumedHandoffCount: 2,
         resumedSessionCount: 1,
+        sessionLimit: 200,
+        sessionMaxDepth: 16,
         sessionId: FROM_SESSION_ID,
         staleSessionCount: 1,
+        truncated: false,
       });
 
       const childRow = dbModule.sqliteGet<{
@@ -1113,6 +1183,14 @@ describe('POST /team/sessions/:sessionId/resume-all', () => {
 
       expect(events).toContainEqual(
         expect.objectContaining({
+          payload: expect.objectContaining({
+            depthLimitReached: false,
+            limitReached: false,
+            omittedSessionCount: 0,
+            sessionLimit: 200,
+            sessionMaxDepth: 16,
+            truncated: false,
+          }),
           type: 'scheduler.all-resumed',
           sessionId: FROM_SESSION_ID,
           userId: USER_ID,
@@ -1121,11 +1199,12 @@ describe('POST /team/sessions/:sessionId/resume-all', () => {
 
       const audit = dbModule.sqliteGet<{
         action: string;
+        detail: string | null;
         entity_type: string;
         summary: string;
         session_id: string | null;
       }>(
-        `SELECT action, entity_type, summary, session_id
+        `SELECT action, detail, entity_type, summary, session_id
            FROM team_audit_logs
           ORDER BY created_at DESC, id DESC
           LIMIT 1`,
@@ -1137,6 +1216,34 @@ describe('POST /team/sessions/:sessionId/resume-all', () => {
         session_id: FROM_SESSION_ID,
       });
       expect(audit?.summary).toContain('team resume-all');
+      const auditDetail = JSON.parse(audit?.detail ?? '{}') as Record<string, unknown>;
+      expect(auditDetail).toMatchObject({
+        depthLimitReached: false,
+        limitReached: false,
+        omittedSessionCount: 0,
+        sessionLimit: 200,
+        sessionMaxDepth: 16,
+        truncated: false,
+      });
+      expect(runSessionInBackgroundMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: FROM_SESSION_ID,
+          teamResumeRootSessionId: FROM_SESSION_ID,
+          userId: USER_ID,
+          requestData: expect.objectContaining({
+            displayMessage: '恢复团队会话',
+            message: '恢复团队会话',
+          }),
+        }),
+      );
+      const backgroundRequest = runSessionInBackgroundMock.mock.calls.at(-1)?.[0] as
+        | { requestData?: Record<string, unknown> }
+        | undefined;
+      expect(String(backgroundRequest?.requestData?.['clientRequestId'])).toMatch(
+        /^team-resume:s-from-rt:/,
+      );
+      expect(String(backgroundRequest?.requestData?.['message'])).not.toContain('系统内部恢复');
+      expect(String(backgroundRequest?.requestData?.['message'])).not.toContain('handoff');
     } finally {
       unsubscribe();
       await app.close();

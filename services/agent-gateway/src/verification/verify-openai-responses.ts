@@ -664,11 +664,17 @@ async function verifyChatCompletionsToolEofScenario(input: VerificationContext):
   if (!hasChatToolResult(requests[1]!.body)) {
     throw new Error('expected chat eof second request to include tool role output');
   }
+  const usage = sumUsageEvents(events, 'chat eof tool scenario usage events');
+  if (usage.inputTokens < 3 || usage.outputTokens !== 2) {
+    throw new Error(
+      `chat eof tool scenario usage events expected input_tokens>=3 and output_tokens=2 but received input_tokens=${usage.inputTokens}, output_tokens=${usage.outputTokens}`,
+    );
+  }
   assertMonthlyUsageDelta({
     before: beforeUsage,
-    expectedCostUsd: calculateTokenCost(3, 2, 0.6, 3),
-    expectedInputTokens: 3,
-    expectedOutputTokens: 2,
+    expectedCostUsd: calculateTokenCost(usage.inputTokens, usage.outputTokens, 0.6, 3),
+    expectedInputTokens: usage.inputTokens,
+    expectedOutputTokens: usage.outputTokens,
     label: 'chat eof tool scenario usage persistence',
     userId: input.userId,
   });
@@ -1594,6 +1600,30 @@ function assertMonthlyUsageDelta(input: {
       `${input.label} expected cost_usd=${expectedCostTotal} but received ${after.costUsd}`,
     );
   }
+}
+
+function sumUsageEvents(
+  events: Array<Record<string, unknown>>,
+  label: string,
+): { inputTokens: number; outputTokens: number } {
+  const usageEvents = events.filter((event) => event['type'] === 'usage');
+  if (usageEvents.length === 0) {
+    throw new Error(`${label} was not observed in SSE output`);
+  }
+  return usageEvents.reduce<{ inputTokens: number; outputTokens: number }>(
+    (acc, event) => {
+      const inputTokens = event['inputTokens'];
+      const outputTokens = event['outputTokens'];
+      if (typeof inputTokens !== 'number' || typeof outputTokens !== 'number') {
+        throw new Error(`${label} contained a malformed usage event`);
+      }
+      return {
+        inputTokens: acc.inputTokens + inputTokens,
+        outputTokens: acc.outputTokens + outputTokens,
+      };
+    },
+    { inputTokens: 0, outputTokens: 0 },
+  );
 }
 
 function requestContainsText(body: Record<string, unknown>, text: string): boolean {

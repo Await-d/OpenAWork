@@ -12,6 +12,9 @@ import {
 } from '../../shared/team-runtime-shared.js';
 import { Icon, ChevronDownIcon } from '../../shared/TeamIcons.js';
 import { EmptyState } from '../../shared/content-kit/index.js';
+import { TabContainer } from '../TabContainer.js';
+import { useConverge } from '../../hooks/use-converge.js';
+import { tryFormatJson } from '../../../../../utils/format-json.js';
 
 export function ReviewTab({
   selectedTeam = null,
@@ -48,6 +51,8 @@ export function ReviewTab({
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [commentingId, setCommentingId] = useState<string | null>(null);
   const [commentInput, setCommentInput] = useState('');
+
+  const converge = useConverge();
 
   const updateStatus = useCallback((id: string, status: AgentTeamsReviewCard['status']) => {
     setReviewStatuses((prev) => ({ ...prev, [id]: status }));
@@ -146,7 +151,12 @@ export function ReviewTab({
   }
 
   return (
-    <div style={{ display: 'grid', gap: 10 }}>
+    <TabContainer
+      title="评审队列"
+      subtitle="查看待审、已通过、已驳回的评审卡片，支持评论、通过、驳回操作。"
+      scroll={false}
+    >
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1, minHeight: 0 }}>
       {/* Header */}
       <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
         <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--fg-strong)' }}>评审队列</span>
@@ -200,9 +210,9 @@ export function ReviewTab({
       ) : null}
 
       {/* Two-column layout: review cards + summary sidebar */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 220px', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 220px', gap: 12, flex: 1, minHeight: 0, overflow: 'hidden' }}>
         {/* Review cards */}
-        <div style={{ display: 'grid', gap: 6 }}>
+        <div style={{ display: 'grid', gap: 6, minHeight: 0, overflowY: 'auto', alignContent: 'start' }}>
           {reviewCards.map((card) => {
             const currentStatus = reviewStatuses[card.id] ?? card.status;
             const statusMeta = REVIEW_STATUS_META[currentStatus];
@@ -515,7 +525,7 @@ export function ReviewTab({
         </div>
 
         {/* Summary sidebar */}
-        <div style={{ display: 'grid', gap: 8, alignContent: 'start' }}>
+        <div style={{ display: 'grid', gap: 8, alignContent: 'start', minHeight: 0, overflowY: 'auto' }}>
           <div
             style={{
               ...PANEL_STYLE,
@@ -613,6 +623,176 @@ export function ReviewTab({
           </div>
         </div>
       </div>
+
+      {/* Converge — 一致性评估面板 */}
+      {reviewSessionKey && (
+        <div
+          style={{
+            ...PANEL_STYLE,
+            padding: '12px 14px',
+            borderRadius: 10,
+            display: 'grid',
+            gap: 8,
+          }}
+        >
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--fg-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              一致性评估
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                if (reviewSessionKey) void converge.runConverge(reviewSessionKey);
+              }}
+              disabled={converge.loading}
+              className="team-btn-outline"
+              style={{
+                padding: '4px 10px',
+                borderRadius: 6,
+                border: '1px solid var(--border-default)',
+                background: 'transparent',
+                color: 'var(--accent)',
+                fontSize: 10,
+                fontWeight: 700,
+                cursor: converge.loading ? 'not-allowed' : 'pointer',
+                opacity: converge.loading ? 0.5 : 1,
+              }}
+            >
+              {converge.loading ? '评估中…' : '执行评估'}
+            </button>
+          </div>
+
+          {converge.error && (
+            <div
+              style={{
+                padding: '6px 10px',
+                borderRadius: 6,
+                background: 'color-mix(in oklch, var(--danger) 8%, transparent)',
+                borderLeft: '2px solid var(--danger)',
+                fontSize: 11,
+                color: 'var(--fg-default)',
+              }}
+            >
+              {converge.error}
+            </div>
+          )}
+
+          {converge.result && (
+            <div style={{ display: 'grid', gap: 6 }}>
+              {converge.result.hasCriticalDeviations && (
+                <div
+                  style={{
+                    padding: '6px 10px',
+                    borderRadius: 6,
+                    background: 'color-mix(in oklch, var(--danger) 12%, transparent)',
+                    borderLeft: '2px solid var(--danger)',
+                    fontSize: 11,
+                    color: 'var(--danger)',
+                    fontWeight: 700,
+                  }}
+                >
+                  发现 Critical 偏差，请立即处理
+                </div>
+              )}
+              {converge.result.deviations.length === 0 ? (
+                <div
+                  style={{
+                    padding: '6px 10px',
+                    borderRadius: 6,
+                    background: 'color-mix(in oklch, var(--success) 8%, transparent)',
+                    borderLeft: '2px solid var(--success)',
+                    fontSize: 11,
+                    color: 'var(--success)',
+                  }}
+                >
+                  代码库与 spec/plan/tasks 一致，无偏差
+                </div>
+              ) : (
+                converge.result.deviations.map((d, i) => {
+                  const descFormatted = tryFormatJson(d.description);
+                  const actionFormatted = tryFormatJson(d.suggestedAction);
+                  const isDescJson = looksLikeJson(d.description);
+                  return (
+                  <div
+                    key={i}
+                    style={{
+                      padding: '6px 10px',
+                      borderRadius: 6,
+                      background:
+                        d.severity === 'warning'
+                          ? 'color-mix(in oklch, var(--warning) 8%, transparent)'
+                          : d.severity === 'critical'
+                            ? 'color-mix(in oklch, var(--danger) 8%, transparent)'
+                            : 'color-mix(in oklch, var(--accent) 6%, transparent)',
+                      borderLeft: `2px solid ${
+                        d.severity === 'warning'
+                          ? 'var(--warning)'
+                          : d.severity === 'critical'
+                            ? 'var(--danger)'
+                            : 'var(--accent)'
+                      }`,
+                      fontSize: 11,
+                      color: 'var(--fg-default)',
+                      display: 'grid',
+                      gap: 2,
+                    }}
+                  >
+                    <span style={{ fontWeight: 700 }}>
+                      {d.severity === 'warning' ? '⚡' : d.severity === 'critical' ? '⠠' : 'ℹ'}{' '}
+                      {d.type}
+                    </span>
+                    <span
+                      style={isDescJson ? {
+                        fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
+                        fontSize: 10.5,
+                        whiteSpace: 'pre',
+                        overflowX: 'auto',
+                        lineHeight: 1.5,
+                      } : undefined}
+                    >{descFormatted}</span>
+                    <span style={{ color: 'var(--fg-muted)', fontSize: 10 }}>
+                      建议: {actionFormatted}
+                    </span>
+                  </div>
+                  );
+                })
+              )}
+              {converge.result.report && (
+                <details style={{ marginTop: 4 }}>
+                  <summary
+                    style={{
+                      cursor: 'pointer',
+                      fontSize: 10,
+                      color: 'var(--fg-muted)',
+                      fontWeight: 600,
+                    }}
+                  >
+                    查看完整报告
+                  </summary>
+                  <pre
+                    style={{
+                      fontSize: 10,
+                      color: 'var(--fg-default)',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                      padding: '8px 10px',
+                      borderRadius: 6,
+                      background: 'var(--bg-overlay)',
+                      border: '1px solid var(--border-subtle)',
+                      margin: '4px 0 0',
+                      maxHeight: 200,
+                      overflowY: 'auto',
+                    }}
+                  >
+                    {tryFormatJson(converge.result.report)}
+                  </pre>
+                </details>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
+    </TabContainer>
   );
 }

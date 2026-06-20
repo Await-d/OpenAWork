@@ -24,6 +24,7 @@ import { parseBody, parseParams } from '../infra/parse-request.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { sqliteGet } from '../infra/db.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
+import { resolveSessionWorkspacePath } from '../session/session-workspace-resolution.js';
 import { validateWorkspacePath } from '../workspace/workspace-paths.js';
 import { buildFileDiff } from '../tools/file-diff-format.js';
 import { getSnapshotEngine } from '../snapshot/snapshot-engine.js';
@@ -132,12 +133,31 @@ function loadSessionRow(sessionId: string, userId: string): SessionRow | null {
   );
 }
 
-function resolveWorkspaceRoot(metadataJson: string): string | null {
+function resolveWorkspaceRoot(
+  metadataJson: string,
+  options?: { sessionId?: string; userId?: string },
+): string | null {
+  // 先尝试直接读取当前 session 的 workingDirectory
   const metadata = parseSessionMetadataJson(metadataJson);
   const value = metadata['workingDirectory'];
-  if (typeof value !== 'string' || value.length === 0) return null;
-  // Defense in depth: only accept paths within the gateway's allowlist.
-  return validateWorkspacePath(value);
+  if (typeof value === 'string' && value.length > 0) {
+    // Defense in depth: only accept paths within the gateway's allowlist.
+    return validateWorkspacePath(value);
+  }
+
+  // 当前 session 没有 workingDirectory 时，递归向上查找父 session 链
+  if (options?.sessionId && options?.userId) {
+    const resolved = resolveSessionWorkspacePath({
+      metadataJson,
+      sessionId: options.sessionId,
+      userId: options.userId,
+    });
+    if (resolved) {
+      return validateWorkspacePath(resolved);
+    }
+  }
+
+  return null;
 }
 
 async function readWorkspaceFile(
@@ -298,7 +318,10 @@ export async function snapshotTreeRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(404).send(snapshotTreeRouteErrorPayload('session_not_found'));
       }
 
-      const workspaceRoot = resolveWorkspaceRoot(session.metadata_json);
+      const workspaceRoot = resolveWorkspaceRoot(session.metadata_json, {
+        sessionId: params.sessionId,
+        userId,
+      });
       if (!workspaceRoot) {
         step.fail(undefined, { reason: 'workspace_root_unavailable' });
         return reply.status(400).send(snapshotTreeRouteErrorPayload('workspace_root_unavailable'));
@@ -469,7 +492,10 @@ export async function snapshotTreeRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(404).send(snapshotTreeRouteErrorPayload('session_not_found'));
       }
 
-      const workspaceRoot = resolveWorkspaceRoot(session.metadata_json);
+      const workspaceRoot = resolveWorkspaceRoot(session.metadata_json, {
+        sessionId: params.sessionId,
+        userId,
+      });
       if (!workspaceRoot) {
         step.fail(undefined, { reason: 'workspace_root_unavailable' });
         return reply.status(400).send(snapshotTreeRouteErrorPayload('workspace_root_unavailable'));
@@ -756,14 +782,20 @@ export async function snapshotTreeRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(404).send(snapshotTreeRouteErrorPayload('source_tree_not_found'));
       }
 
-      const workspaceRoot = resolveWorkspaceRoot(session.metadata_json);
+      const workspaceRoot = resolveWorkspaceRoot(session.metadata_json, {
+        sessionId: params.sessionId,
+        userId,
+      });
       if (!workspaceRoot) {
         step.fail(undefined, { reason: 'workspace_root_unavailable' });
         return reply.status(400).send(snapshotTreeRouteErrorPayload('workspace_root_unavailable'));
       }
 
       // Verify source workspace matches target workspace (shadow git is per-workspace)
-      const sourceWorkspaceRoot = resolveWorkspaceRoot(sourceSession.metadata_json);
+      const sourceWorkspaceRoot = resolveWorkspaceRoot(sourceSession.metadata_json, {
+        sessionId: body.sourceSessionId,
+        userId,
+      });
       if (sourceWorkspaceRoot !== workspaceRoot) {
         step.fail(undefined, { reason: 'workspace_mismatch' });
         return reply.status(400).send({

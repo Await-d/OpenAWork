@@ -42,4 +42,22 @@ describe('TeamAssistantReplyCard', () => {
     const details = summary.closest('details');
     expect(details?.hasAttribute('open')).toBe(false);
   });
+
+  it('消息无工具调用和推理时不渲染折叠区', () => {
+    const message: ChatMessage = {
+      id: 'team-assistant-2',
+      role: 'assistant',
+      content: '已完成分析，结论如下。',
+    };
+
+    render(
+      <TeamAssistantReplyCard
+        message={message}
+        processContent={<TeamAssistantProcessOutline message={message} />}
+      />,
+    );
+
+    expect(screen.getByText('结论')).toBeTruthy();
+    expect(screen.queryByText('处理过程（已折叠）')).toBeNull();
+  });
 });

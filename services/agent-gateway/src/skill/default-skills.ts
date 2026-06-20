@@ -65,12 +65,7 @@ export function ensureDefaultInstalledSkills(userId: string): void {
     sqliteRun(
       `INSERT INTO installed_skills (skill_id, user_id, source_id, manifest_json, granted_permissions_json, enabled, installed_at, updated_at)
        VALUES (?, ?, ?, ?, '[]', 1, ?, ?)
-       ON CONFLICT(skill_id, user_id) DO UPDATE SET
-         source_id = excluded.source_id,
-         manifest_json = excluded.manifest_json,
-         granted_permissions_json = excluded.granted_permissions_json,
-         enabled = excluded.enabled,
-         updated_at = excluded.updated_at`,
+       ON CONFLICT(skill_id, user_id) DO NOTHING`,
       [skill.manifest.id, userId, skill.sourceId, JSON.stringify(skill.manifest), now, now],
     );
   }

@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   sqliteGet: vi.fn(),
   getFastProviderConfig: vi.fn(),
   getActiveChatProviderConfig: vi.fn(),
+  getProviderConfigForSelection: vi.fn(),
 }));
 
 vi.mock('../../infra/db.js', () => ({
@@ -35,9 +36,13 @@ vi.mock('../../infra/db.js', () => ({
 vi.mock('../../provider/provider-config.js', () => ({
   getFastProviderConfig: mocks.getFastProviderConfig,
   getActiveChatProviderConfig: mocks.getActiveChatProviderConfig,
+  getProviderConfigForSelection: mocks.getProviderConfigForSelection,
 }));
 
-import { resolveAuxiliaryLlmConfig } from '../../provider/auxiliary-llm-config.js';
+import {
+  resolveAuxiliaryLlmConfig,
+  resolveAuxiliaryLlmConfigCandidates,
+} from '../../provider/auxiliary-llm-config.js';
 
 describe('resolveAuxiliaryLlmConfig', () => {
   const ORIGINAL_ENV = { ...process.env };
@@ -46,6 +51,7 @@ describe('resolveAuxiliaryLlmConfig', () => {
     mocks.sqliteGet.mockReset();
     mocks.getFastProviderConfig.mockReset();
     mocks.getActiveChatProviderConfig.mockReset();
+    mocks.getProviderConfigForSelection.mockReset();
     // Default to no env vars so each test opts in explicitly.
     delete process.env['AI_API_BASE_URL'];
     delete process.env['AI_API_KEY'];
@@ -80,6 +86,32 @@ describe('resolveAuxiliaryLlmConfig', () => {
       upstreamProtocol: 'anthropic_messages',
     });
     // Active-chat lookup must not run when fast already returned a hit.
+    expect(mocks.getActiveChatProviderConfig).not.toHaveBeenCalled();
+  });
+
+  it('forwards OpenAI fast provider through the Responses protocol', async () => {
+    mocks.sqliteGet.mockReturnValue(undefined);
+    mocks.getFastProviderConfig.mockResolvedValue({
+      provider: {
+        id: 'openai-fast',
+        type: 'openai',
+        name: 'OpenAI Fast',
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'sk-openai-fast',
+        upstreamProtocol: 'responses',
+      },
+      modelId: 'gpt-5.4-nano',
+    });
+
+    const cfg = await resolveAuxiliaryLlmConfig('user-1');
+
+    expect(cfg).toEqual({
+      apiBaseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-openai-fast',
+      model: 'gpt-5.4-nano',
+      providerType: 'openai',
+      upstreamProtocol: 'responses',
+    });
     expect(mocks.getActiveChatProviderConfig).not.toHaveBeenCalled();
   });
 
@@ -185,6 +217,52 @@ describe('resolveAuxiliaryLlmConfig', () => {
     expect(cfg?.upstreamProtocol).toBe('anthropic_messages');
   });
 
+  it('does not fallback to active chat or env when an explicit override is unavailable', async () => {
+    mocks.sqliteGet.mockReturnValue(undefined);
+    mocks.getProviderConfigForSelection.mockResolvedValue(null);
+    mocks.getFastProviderConfig.mockResolvedValue({
+      provider: {
+        id: 'fast',
+        type: 'openai',
+        name: 'Fast',
+        baseUrl: 'https://fast.example.com/v1',
+        apiKey: 'fast-key',
+      },
+      modelId: 'fast-model',
+    });
+    mocks.getActiveChatProviderConfig.mockResolvedValue({
+      provider: {
+        id: 'chat',
+        type: 'openai',
+        name: 'Chat',
+        baseUrl: 'https://chat.example.com/v1',
+        apiKey: 'chat-key',
+      },
+      modelId: 'chat-model',
+    });
+    process.env['AI_API_BASE_URL'] = 'https://env.example.com/v1';
+    process.env['AI_API_KEY'] = 'env-key';
+    process.env['AI_DEFAULT_MODEL'] = 'env-model';
+
+    const cfg = await resolveAuxiliaryLlmConfig('user-1', {
+      providerId: 'fixed-provider',
+      modelId: 'fixed-model',
+    });
+
+    expect(cfg).toBeNull();
+    expect(mocks.getProviderConfigForSelection).toHaveBeenCalledWith(
+      undefined,
+      undefined,
+      {
+        providerId: 'fixed-provider',
+        modelId: 'fixed-model',
+      },
+      { fallbackToChat: false },
+    );
+    expect(mocks.getFastProviderConfig).not.toHaveBeenCalled();
+    expect(mocks.getActiveChatProviderConfig).not.toHaveBeenCalled();
+  });
+
   it('falls back to env vars when a stored setting row is corrupt JSON (does not throw)', async () => {
     // §0.115: a corrupt `providers` / `active_selection` value must degrade to
     // "unset" — NOT throw out of the resolver and short-circuit the env-var
@@ -211,5 +289,74 @@ describe('resolveAuxiliaryLlmConfig', () => {
       apiKey: 'env-key',
       model: 'env-model',
     });
+  });
+
+  it('candidate resolver returns fast, active-chat, then env fallback in order', async () => {
+    mocks.sqliteGet.mockReturnValue(undefined);
+    mocks.getFastProviderConfig.mockResolvedValue({
+      provider: {
+        id: 'fast',
+        type: 'openai',
+        name: 'Fast',
+        baseUrl: 'https://fast.example.com/v1',
+        apiKey: 'fast-key',
+      },
+      modelId: 'fast-model',
+    });
+    mocks.getActiveChatProviderConfig.mockResolvedValue({
+      provider: {
+        id: 'chat',
+        type: 'anthropic',
+        name: 'Chat',
+        baseUrl: 'https://api.anthropic.com/v1',
+        apiKey: 'chat-key',
+        upstreamProtocol: 'anthropic_messages',
+      },
+      modelId: 'claude-model',
+    });
+    process.env['AI_API_BASE_URL'] = 'https://env.example.com/v1';
+    process.env['AI_API_KEY'] = 'env-key';
+    process.env['AI_DEFAULT_MODEL'] = 'env-model';
+
+    const configs = await resolveAuxiliaryLlmConfigCandidates('user-1');
+
+    expect(configs).toEqual([
+      {
+        apiBaseUrl: 'https://fast.example.com/v1',
+        apiKey: 'fast-key',
+        model: 'fast-model',
+        providerType: 'openai',
+      },
+      {
+        apiBaseUrl: 'https://api.anthropic.com/v1',
+        apiKey: 'chat-key',
+        model: 'claude-model',
+        providerType: 'anthropic',
+        upstreamProtocol: 'anthropic_messages',
+      },
+      {
+        apiBaseUrl: 'https://env.example.com/v1',
+        apiKey: 'env-key',
+        model: 'env-model',
+      },
+    ]);
+  });
+
+  it('candidate resolver de-duplicates fast and active-chat when they resolve to the same provider', async () => {
+    const provider = {
+      id: 'same',
+      type: 'openai',
+      name: 'Same',
+      baseUrl: 'https://same.example.com/v1',
+      apiKey: 'same-key',
+    };
+    mocks.sqliteGet.mockReturnValue(undefined);
+    mocks.getFastProviderConfig.mockResolvedValue({ provider, modelId: 'same-model' });
+    mocks.getActiveChatProviderConfig.mockResolvedValue({ provider, modelId: 'same-model' });
+
+    const configs = await resolveAuxiliaryLlmConfigCandidates('user-1');
+
+    expect(configs).toHaveLength(1);
+    expect(configs[0]?.apiBaseUrl).toBe('https://same.example.com/v1');
   });
 });

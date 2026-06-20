@@ -157,11 +157,37 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
         [body.requestId, sessionId],
       );
       if (!questionRequest) {
+        if (body.status === 'dismissed') {
+          publishSessionRunEvent(
+            sessionId,
+            createQuestionRepliedEvent({
+              requestId: body.requestId,
+              status: 'dismissed',
+            }),
+          );
+          step.succeed(undefined, {
+            idempotent: true,
+            requestId: body.requestId,
+            status: body.status,
+          });
+          return reply.send({ ok: true, idempotent: true });
+        }
         throw ApiError.notFound('目标提问请求不存在。');
       }
       if (questionRequest.status !== 'pending') {
-        step.fail('question request already resolved');
-        return reply.status(409).send({ error: '提问请求已处理，无法重复提交。' });
+        publishSessionRunEvent(
+          sessionId,
+          createQuestionRepliedEvent({
+            requestId: body.requestId,
+            status: questionRequest.status === 'answered' ? 'answered' : 'dismissed',
+          }),
+        );
+        step.succeed(undefined, {
+          alreadyResolved: true,
+          requestId: body.requestId,
+          status: questionRequest.status,
+        });
+        return reply.send({ ok: true, alreadyResolved: true });
       }
 
       sqliteRun(

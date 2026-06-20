@@ -115,6 +115,50 @@ describe('runUpstreamStream', () => {
     }
   });
 
+  it('reports stream diagnostics as translated chunks accumulate', async () => {
+    const model = buildMockModel([
+      { type: 'text-start', id: 't1' },
+      { type: 'text-delta', id: 't1', delta: 'Hello' },
+      { type: 'reasoning-start', id: 'r1' },
+      { type: 'reasoning-delta', id: 'r1', delta: 'plan' },
+      { type: 'tool-input-start', id: 'call-1', toolName: 'read' },
+      { type: 'tool-input-delta', id: 'call-1', toolName: 'read', delta: '{"path":"a.ts"}' },
+      {
+        type: 'finish',
+        finishReason: { unified: 'stop', raw: 'stop' },
+        usage: { inputTokens: { total: 1 }, outputTokens: { total: 2 } },
+      },
+    ]);
+    const snapshots: Array<{
+      textDeltaCount: number;
+      reasoningDeltaCount: number;
+      toolCallDeltaCount: number;
+      sawDone: boolean;
+      sawError: boolean;
+      stalled: boolean;
+    }> = [];
+
+    await collectChunks(
+      runUpstreamStream({
+        model,
+        messages: [{ role: 'user', content: 'hi' }],
+        onDiagnostics: (info) => {
+          snapshots.push(info);
+        },
+      }),
+    );
+
+    expect(snapshots.length).toBeGreaterThan(0);
+    expect(snapshots.at(-1)).toEqual({
+      textDeltaCount: 1,
+      reasoningDeltaCount: 1,
+      toolCallDeltaCount: 2,
+      sawDone: true,
+      sawError: false,
+      stalled: false,
+    });
+  });
+
   it('translates reasoning parts into thinking_start / thinking_delta / thinking_end', async () => {
     // AI SDK V2 `doStream` parts use the `delta` field; the fullStream
     // normaliser exposes that as `text` to consumers (matching how

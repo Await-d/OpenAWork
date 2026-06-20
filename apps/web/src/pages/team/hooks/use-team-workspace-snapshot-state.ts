@@ -1,7 +1,12 @@
 import { createTeamClient, type TeamWorkspaceSnapshot } from '@openAwork/web-client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuthStore } from '../../../stores/auth/auth.js';
-import { useTeamEventsConnectionStore } from '../../../stores/team/team-events.js';
+import {
+  hydrateClarificationStore,
+  hydrateNotificationStore,
+  hydrateTeamRuntimeStores,
+  useTeamEventsConnectionStore,
+} from '../../../stores/team/team-events.js';
 import {
   computeExponentialRetryDelay,
   formatRecoverableLoadError,
@@ -120,6 +125,33 @@ export function useTeamWorkspaceSnapshotState(
         return;
       }
       resetRetry();
+      hydrateTeamRuntimeStores({
+        handoffs: result.snapshot.handoffs ?? [],
+        sessions: result.snapshot.sessions,
+      });
+      hydrateClarificationStore(
+        (result.snapshot.clarifications ?? []).map((item) => ({
+          context: item.context,
+          createdAt: item.createdAt,
+          fromSessionId: item.fromSessionId,
+          id: item.id,
+          question: item.question,
+          sessionId: item.sessionId,
+          status: item.status,
+          ...(item.answer ? { answer: item.answer } : {}),
+          ...(typeof item.answeredAt === 'number' ? { answeredAt: item.answeredAt } : {}),
+        })),
+      );
+      hydrateNotificationStore(
+        (result.snapshot.notifications ?? []).map((item) => ({
+          payload: item.payload,
+          timestamp: item.timestamp,
+          type: item.type,
+          ...(item.layer ? { layer: item.layer } : {}),
+          ...(item.sessionId ? { sessionId: item.sessionId } : {}),
+          ...(item.taskId ? { taskId: item.taskId } : {}),
+        })),
+      );
       setSnapshot(result.snapshot);
       setLoading(false);
       setError(null);

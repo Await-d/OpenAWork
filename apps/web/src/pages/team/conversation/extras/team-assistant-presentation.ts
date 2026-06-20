@@ -10,6 +10,7 @@ import {
 } from '../../../../components/conversation-runtime/messages/support.js';
 import { extractFilePath } from '../../../../components/chat/tool-call/shared/input-paths.js';
 import { buildGenericInputSummary } from '../../../../components/chat/tool-call/shared/input-summary.js';
+import { tryFormatJson } from '../../../../utils/format-json.js';
 
 const READ_LIKE_TOOLS = new Set([
   'read',
@@ -65,9 +66,11 @@ export function buildTeamAssistantPresentation(message: ChatMessage): TeamAssist
     buildTraceFallbackSummary(toolCalls, reasoningBlocks) ??
     buildCopiedToolCardSummary(copiedToolCard) ??
     message.content;
-  const summaryText = normalizeSummaryText(
+  const rawSummaryText = normalizeSummaryText(
     traceText && traceText.length > 0 ? traceText : (plainTextSummary ?? fallbackSummary),
   );
+  // 如果最终文本是 JSON 字符串，格式化后返回，避免原始 JSON 被当纯文本渲染
+  const summaryText = tryFormatJson(rawSummaryText);
   const nextStep = extractNextStep(summaryText);
   const detailText = removeNextStep(summaryText);
   const toolSummaries = toolCalls.map((toolCall) => summarizeToolCall(toolCall));

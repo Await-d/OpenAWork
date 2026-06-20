@@ -16,6 +16,8 @@ export default function ArtifactsPage() {
     error,
     loadingArtifacts,
     loadingSessions,
+    deletingArtifactId,
+    removeArtifact,
     revertingVersionId,
     revertArtifact,
     saveArtifact,
@@ -140,9 +142,11 @@ export default function ArtifactsPage() {
             )}
             <ArtifactWorkbench
               artifact={selectedArtifact}
+              deleting={selectedArtifact ? deletingArtifactId === selectedArtifact.id : false}
               revertingVersionId={revertingVersionId}
               saving={saving}
               versions={versions}
+              onDelete={() => void removeArtifact()}
               onRevert={(versionId) => void revertArtifact(versionId)}
               onSave={(draft) => void saveArtifact(draft)}
             />

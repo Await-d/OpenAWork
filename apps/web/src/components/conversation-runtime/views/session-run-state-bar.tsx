@@ -1,4 +1,6 @@
 import type { SessionStateStatus } from '../session/session-runtime.js';
+import type { UpstreamStreamSummary } from '@openAwork/shared';
+import { formatChatUpstreamSummaryLabel } from './upstream-summary-label.js';
 
 type StopCapability = 'none' | 'precise' | 'best_effort' | 'observe_only';
 
@@ -118,6 +120,7 @@ function StatusBadge({
 
 export function SessionRunStateBar({
   checkpointCount = 0,
+  latestUpstreamSummary = null,
   onOpenRecovery,
   pendingPermissionsCount = 0,
   pendingQuestionsCount = 0,
@@ -125,6 +128,7 @@ export function SessionRunStateBar({
   stopCapability = 'observe_only',
 }: {
   checkpointCount?: number;
+  latestUpstreamSummary?: UpstreamStreamSummary | null;
   onOpenRecovery?: () => void;
   pendingPermissionsCount?: number;
   pendingQuestionsCount?: number;
@@ -139,6 +143,7 @@ export function SessionRunStateBar({
   if (checkpointCount > 0) counterParts.push(`检查点 ${checkpointCount}`);
   if (pendingPermissionsCount > 0) counterParts.push(`审批 ${pendingPermissionsCount}`);
   if (pendingQuestionsCount > 0) counterParts.push(`问题 ${pendingQuestionsCount}`);
+  const upstreamSummaryLabel = formatChatUpstreamSummaryLabel(latestUpstreamSummary);
 
   return (
     <div
@@ -209,6 +214,18 @@ export function SessionRunStateBar({
               }}
             >
               · {counterParts.join(' / ')}
+            </span>
+          )}
+          {upstreamSummaryLabel && (
+            <span
+              style={{
+                fontSize: 10,
+                color: 'var(--fg-muted)',
+                whiteSpace: 'nowrap',
+              }}
+              title={upstreamSummaryLabel}
+            >
+              · {upstreamSummaryLabel}
             </span>
           )}
         </div>

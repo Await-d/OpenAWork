@@ -15,6 +15,7 @@
  */
 
 import {
+  authHeader,
   fetchWithTimeout,
   extractJsonErrorMessage,
   isGenericFetchErrorMessage,
@@ -186,7 +187,15 @@ export function inferReviewDispositionFromFailureReason(
   if (!failureReason) {
     return null;
   }
-  if (failureReason.startsWith('Spec Review 未通过')) {
+
+  // 规划型失败 → 退回 PM1 重新生成 spec/plan/tasks
+  const returnToCPrefixes = [
+    'Spec Review 未通过',
+    'Planning Contract 未通过',
+    'Constitution Check 硬门禁未通过',
+    'Architecture Review 未通过',
+  ];
+  if (returnToCPrefixes.some((prefix) => failureReason.startsWith(prefix))) {
     return {
       action: 'return-to-c',
       reason: failureReason,
@@ -195,6 +204,7 @@ export function inferReviewDispositionFromFailureReason(
       updatedAtMs: 0,
     };
   }
+
   if (failureReason.includes('需要用户介入')) {
     return {
       action: 'escalate-to-user',
@@ -359,7 +369,7 @@ export function createTeamHandoffsClient(baseUrl: string): TeamHandoffsClient {
     try {
       const response = await fetchWithTimeout(
         `${trimmed}/team/sessions/${encodeURIComponent(sessionId)}/handoffs`,
-        { headers: jsonAuthHeaders(token) },
+        { headers: authHeader(token) },
       );
       if (!response.ok) {
         const data = await readJsonErrorData<JsonErrorData>(response);
@@ -394,7 +404,7 @@ export function createTeamHandoffsClient(baseUrl: string): TeamHandoffsClient {
         const response = await fetchWithTimeout(
           `${trimmed}/team/handoffs/${encodeURIComponent(handoffId)}`,
           {
-            headers: jsonAuthHeaders(token),
+            headers: authHeader(token),
           },
         );
         if (!response.ok) return null;
@@ -425,7 +435,7 @@ export function createTeamHandoffsClient(baseUrl: string): TeamHandoffsClient {
           `${trimmed}/team/handoffs/${encodeURIComponent(handoffId)}/cancel`,
           {
             method: 'POST',
-            headers: jsonAuthHeaders(token),
+            headers: authHeader(token),
           },
         );
         const data = await readJsonErrorData<
@@ -528,7 +538,7 @@ export function createTeamHandoffsClient(baseUrl: string): TeamHandoffsClient {
           `${trimmed}/team/handoffs/${encodeURIComponent(handoffId)}/resume`,
           {
             method: 'POST',
-            headers: jsonAuthHeaders(token),
+            headers: authHeader(token),
           },
         );
         const data = await readJsonErrorData<
@@ -582,7 +592,7 @@ export function createTeamHandoffsClient(baseUrl: string): TeamHandoffsClient {
           `${trimmed}/team/handoffs/${encodeURIComponent(handoffId)}/review-actions/${encodeURIComponent(action)}`,
           {
             method: 'POST',
-            headers: jsonAuthHeaders(token),
+            headers: authHeader(token),
           },
         );
         if (!response.ok) {

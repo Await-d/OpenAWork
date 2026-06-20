@@ -38,6 +38,14 @@ vi.mock('../../data/team-runtime-reference-data.js', () => ({
 }));
 
 import { TasksTab } from './TasksTab.js';
+import type { AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
+
+const SELECTED_TEAM: AgentTeamsSidebarTeam = {
+  id: 'session-1',
+  title: '测试会话',
+  subtitle: 'PM1',
+  status: 'running',
+};
 
 beforeEach(() => {
   cleanup();
@@ -52,7 +60,7 @@ afterEach(() => {
 
 describe('TasksTab', () => {
   it('推进按钮会把任务向右移动，而不是伪装成删除', async () => {
-    render(<TasksTab />);
+    render(<TasksTab selectedTeam={SELECTED_TEAM} />);
 
     fireEvent.click(screen.getByTitle('开始处理'));
 
@@ -66,7 +74,7 @@ describe('TasksTab', () => {
   it('没有写入权限时禁用新增和推进任务入口', () => {
     state.canManageSessionEntries = false;
 
-    render(<TasksTab />);
+    render(<TasksTab selectedTeam={SELECTED_TEAM} />);
 
     expect(screen.getByText('当前工作区不可写，无法新增或推进任务。')).toBeTruthy();
     expect(screen.getByTitle('开始处理').hasAttribute('disabled')).toBe(true);
@@ -81,5 +89,19 @@ describe('TasksTab', () => {
     expect(moveTaskMock).not.toHaveBeenCalled();
     expect(createTaskMock).not.toHaveBeenCalled();
     expect(screen.queryByPlaceholderText('输入任务标题...')).toBeNull();
+  });
+
+  it('未选择会话时展示空状态', () => {
+    render(<TasksTab />);
+
+    expect(screen.getByText('先选择一个团队会话')).toBeTruthy();
+  });
+
+  it('展示统计概览和进度条', () => {
+    render(<TasksTab selectedTeam={SELECTED_TEAM} />);
+
+    expect(screen.getByText('总任务')).toBeTruthy();
+    expect(screen.getByText('1')).toBeTruthy();
+    expect(screen.getByText(/进度/)).toBeTruthy();
   });
 });

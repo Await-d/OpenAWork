@@ -44,6 +44,7 @@ import { useRecoverableRetryController } from './use-recoverable-retry.js';
 
 const TEAM_RUNTIME_SNAPSHOT_RETRY_BASE_MS = 2_000;
 const TEAM_RUNTIME_SNAPSHOT_RETRY_MAX_MS = 30_000;
+const TEAM_RUNTIME_BACKGROUND_REFRESH_MS = 20_000;
 const SHARED_SESSION_DETAIL_RETRY_BASE_MS = 2_000;
 const SHARED_SESSION_DETAIL_RETRY_MAX_MS = 15_000;
 const SHARED_SESSION_PRESENCE_RETRY_BASE_MS = 5_000;
@@ -493,6 +494,23 @@ export function useTeamCollaboration(
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (!enabled || !accessToken || typeof window === 'undefined') {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        return;
+      }
+      void refresh();
+    }, TEAM_RUNTIME_BACKGROUND_REFRESH_MS);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [accessToken, enabled, refresh]);
 
   useEffect(() => {
     if (!teamEventsRecoveredAt || !accessToken || !enabled) {

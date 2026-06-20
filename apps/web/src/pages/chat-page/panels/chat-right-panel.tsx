@@ -17,9 +17,17 @@ import type {
   PlanTask,
 } from '@openAwork/shared-ui';
 import type { PendingPermissionRequest, Session, SessionTask } from '@openAwork/web-client';
+import type { UpstreamStreamSummary } from '@openAwork/shared';
+import { copyTextToClipboard } from '../../../components/layout/file-tree/file-tree-actions.js';
 import { TaskToolInline } from '../../../components/chat/tool-call/display/task-tool-inline.js';
 import SkillSettingsPanel from '../../../components/chat/misc/SkillSettingsPanel.js';
-import { ChatHistoryTabContent, ChatOverviewTabContent } from './right-panel-sections.js';
+import {
+  buildUpstreamSummaryGroupContextText,
+  ChatHistoryTabContent,
+  ChatOverviewTabContent,
+  groupUpstreamSummariesByRequest,
+  formatUpstreamSummaryGroupHeadline,
+} from './right-panel-sections.js';
 import { SnapshotTimelinePanel } from '../../../components/chat/snapshot/SnapshotTimelinePanel.js';
 import type { SessionTerminalView } from '../../../components/conversation-runtime/terminals/terminals-api.js';
 import { deleteSessionTerminal } from '../../../components/conversation-runtime/terminals/terminals-api.js';
@@ -32,6 +40,8 @@ import {
   renderRightPanelTabIcon,
 } from './right-panel-tabs.js';
 import type { RightPanelTabId } from './right-panel-tabs.js';
+import { FocusedRequestBanner } from './focused-request-banner.js';
+import { RequestScopeEffectNote } from './request-scope-effect-note.js';
 import type {
   ChatMessage,
   WorkspaceFileMentionItem,
@@ -87,6 +97,14 @@ interface CompactionItem {
   occurredAt: number;
 }
 
+interface UpstreamSummaryItem {
+  id: string;
+  occurredAt: number;
+  requestId?: string;
+  runId?: string;
+  summary: UpstreamStreamSummary;
+}
+
 type HierarchicalSessionTask = SessionTask & {
   completedSubtaskCount?: number;
   depth?: number;
@@ -99,6 +117,7 @@ interface ToolCallCardEntry {
   toolCallId: string;
   toolName: string;
   input: Record<string, unknown>;
+  requestId?: string;
   output?: unknown;
   isError: boolean;
   resumedAfterApproval?: boolean;
@@ -120,6 +139,7 @@ export interface ChatRightPanelProps {
   toolFilter: string;
   setToolFilter: (f: 'all' | 'lsp' | 'file' | 'network' | 'other') => void;
   compactions: CompactionItem[];
+  upstreamSummaries: UpstreamSummaryItem[];
   pendingPermissions: PendingPermissionRequest[];
   resolveInlinePermissionActions?: (requestId: string) =>
     | {
@@ -200,6 +220,7 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
     toolFilter,
     setToolFilter,
     compactions,
+    upstreamSummaries,
     pendingPermissions,
     resolveInlinePermissionActions,
     planTasks,
@@ -238,6 +259,32 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
     : 0;
   const rightPanelMaxWidth = rightOpen ? 'calc(100vw - 88px)' : 0;
   const activeRightTabMeta = RIGHT_PANEL_TAB_META[rightTab ?? 'overview'];
+  const [focusedUpstreamGroupKey, setFocusedUpstreamGroupKey] = useState<string | null>(null);
+  const focusedRequestId = focusedUpstreamGroupKey?.startsWith('request:')
+    ? focusedUpstreamGroupKey.slice('request:'.length)
+    : null;
+  const clearFocusedRequest = () => setFocusedUpstreamGroupKey(null);
+  const visibleAgentEvents = focusedRequestId
+    ? agentEvents.filter((event) => event.requestId === focusedRequestId)
+    : agentEvents;
+  const focusedUpstreamGroup = focusedRequestId
+    ? groupUpstreamSummariesByRequest(upstreamSummaries).find(
+        (candidate) => candidate.key === `request:${focusedRequestId}`,
+      ) ?? null
+    : null;
+  const focusedRequestToolCalls = focusedRequestId
+    ? toolCallCards.filter((toolCall) => toolCall.requestId === focusedRequestId)
+    : toolCallCards;
+  const focusedRequestSummary = focusedUpstreamGroup
+    ? formatUpstreamSummaryGroupHeadline(focusedUpstreamGroup)
+    : null;
+  const handleCopyFocusedRequestSummary = () => {
+    if (!focusedRequestId) return;
+    const summaryText = focusedUpstreamGroup
+      ? buildUpstreamSummaryGroupContextText(focusedUpstreamGroup)
+      : `请求 ${focusedRequestId}`;
+    void copyTextToClipboard(summaryText);
+  };
 
   return (
     <div
@@ -412,6 +459,14 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
                     {activeRightTabMeta.description}
                   </span>
                 </div>
+                {focusedRequestId && (
+                  <FocusedRequestBanner
+                    requestId={focusedRequestId}
+                    summary={focusedRequestSummary ?? undefined}
+                    onCopy={handleCopyFocusedRequestSummary}
+                    onClear={clearFocusedRequest}
+                  />
+                )}
                 <div
                   data-testid={`chat-right-panel-body-${rightTab}`}
                   style={{
@@ -432,6 +487,9 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
                       toolCallCards,
                       toolFilter,
                       setToolFilter,
+                      focusedRequestId,
+                      focusedRequestToolCalls.length,
+                      focusedRequestSummary,
                       openChildSessionInspector,
                       taskToolRuntimeLookup,
                       resolveTaskToolRuntimeSnapshot,
@@ -485,11 +543,21 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
                   )}
                   {rightTab === 'viz' && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      {focusedRequestId && (
+                        <RequestScopeEffectNote
+                          title="当前可视化已聚焦"
+                          requestId={focusedRequestId}
+                          visibleCount={visibleAgentEvents.length}
+                          totalCount={agentEvents.length}
+                          summary={focusedRequestSummary ?? undefined}
+                          description="下方事件时间线仅显示当前 request 的相关事件。"
+                        />
+                      )}
                       <div style={sharedUiThemeVars}>
                         <AgentDAGGraph nodes={dagNodes} edges={dagEdges} />
                       </div>
                       <div style={sharedUiThemeVars}>
-                        <AgentVizPanel events={agentEvents} />
+                        <AgentVizPanel events={visibleAgentEvents} title="Agent 活动" />
                       </div>
                     </div>
                   )}
@@ -497,6 +565,9 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
                     <ChatHistoryTabContent
                       childSessions={childSessions}
                       compactions={compactions}
+                      upstreamSummaries={upstreamSummaries}
+                      focusedUpstreamGroupKey={focusedUpstreamGroupKey}
+                      onSelectUpstreamGroup={setFocusedUpstreamGroupKey}
                       pendingPermissions={pendingPermissions}
                       resolveInlinePermissionActions={resolveInlinePermissionActions}
                       planHistory={planHistory}
@@ -514,6 +585,8 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
                       artifactsWorkspaceHref={artifactsWorkspaceHref}
                       childSessions={childSessions}
                       compactions={compactions}
+                      upstreamSummaries={upstreamSummaries}
+                      focusedUpstreamGroupKey={focusedUpstreamGroupKey}
                       contextUsageSnapshot={contextUsageSnapshot}
                       contentArtifactCount={contentArtifactCount}
                       contentArtifactCountStatus={contentArtifactCountStatus}
@@ -818,6 +891,9 @@ function renderToolsPanel(
   toolCallCards: ToolCallCardEntry[],
   toolFilter: string,
   setToolFilter: (f: 'all' | 'lsp' | 'file' | 'network' | 'other') => void,
+  focusedRequestId: string | null,
+  focusedToolCount: number,
+  focusedRequestSummary: string | null,
   openChildSessionInspector: (sessionId: string) => void,
   taskToolRuntimeLookup: TaskToolRuntimeLookup | undefined,
   resolveTaskToolRuntimeSnapshot: (
@@ -830,7 +906,9 @@ function renderToolsPanel(
   const lspPrefixes = ['lsp_', 'ast_grep'];
   const filePrefixes = ['read', 'write', 'edit', 'glob', 'multi_edit', 'workspace_'];
   const networkPrefixes = ['webfetch', 'websearch', 'google_search', 'playwright', 'mcp_'];
+  const isInFocusedScope = Boolean(focusedRequestId);
   const filtered = toolCallCards.filter((tc) => {
+    if (focusedRequestId && tc.requestId !== focusedRequestId) return false;
     if (toolFilter === 'all') return true;
     const n = tc.toolName.toLowerCase();
     if (toolFilter === 'lsp') return lspPrefixes.some((p) => n.startsWith(p));
@@ -842,8 +920,19 @@ function renderToolsPanel(
       !networkPrefixes.some((p) => n.startsWith(p))
     );
   });
+  const scopeVisibleCount = filtered.length;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {isInFocusedScope && (
+        <RequestScopeEffectNote
+          title="当前工具视图已聚焦"
+          requestId={focusedRequestId ?? 'unknown-request'}
+          visibleCount={scopeVisibleCount}
+          totalCount={focusedToolCount}
+          summary={focusedRequestSummary ?? '当前已限制到单个 request。'}
+          description="工具分类筛选只会在这个 request 的工具调用范围内继续细分。"
+        />
+      )}
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
         {(['all', 'lsp', 'file', 'network', 'other'] as const).map((f) => (
           <button

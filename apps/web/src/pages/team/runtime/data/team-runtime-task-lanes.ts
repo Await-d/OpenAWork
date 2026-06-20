@@ -42,6 +42,8 @@ export function mapRuntimeTasksToTeamTaskRecords(tasks: SessionTask[]): TeamTask
       id: task.id,
       title: task.title,
       assigneeId: null,
+      ...(task.assignedAgent ? { assignedAgent: task.assignedAgent } : {}),
+      ...(task.taskThreadId ? { taskThreadId: task.taskThreadId } : {}),
       status:
         task.status === 'running'
           ? 'in_progress'
@@ -60,17 +62,21 @@ export function mapRuntimeTasksToTeamTaskRecords(tasks: SessionTask[]): TeamTask
 export function collectRuntimeTasksForSession(
   runtimeTaskGroups: TeamRuntimeTaskGroupRecord[],
   sessionId: string | null,
+  sessionScope?: ReadonlySet<string> | null,
 ): SessionTask[] {
   if (!sessionId) {
     return [];
   }
 
+  const effectiveSessionScope = sessionScope ?? new Set([sessionId]);
   const deduped = new Map<string, SessionTask>();
   for (const group of runtimeTaskGroups) {
-    const groupContainsSession = group.sessionIds.includes(sessionId);
+    const groupContainsSession = group.sessionIds.some((groupSessionId) =>
+      effectiveSessionScope.has(groupSessionId),
+    );
     for (const task of group.tasks) {
       const taskMatchesSession =
-        task.sessionId != null ? task.sessionId === sessionId : groupContainsSession;
+        task.sessionId != null ? effectiveSessionScope.has(task.sessionId) : groupContainsSession;
       if (!taskMatchesSession) {
         continue;
       }
@@ -92,6 +98,7 @@ export function collectRuntimeTasksForSession(
 
 export function resolveTaskRecordsForView(input: {
   selectedSessionId: string | null;
+  selectedSessionScope?: ReadonlySet<string> | null;
   runtimeTaskGroups: TeamRuntimeTaskGroupRecord[];
   teamTasks: TeamTaskRecord[];
   runtimeTaskRecords: TeamTaskRecord[];
@@ -99,7 +106,11 @@ export function resolveTaskRecordsForView(input: {
   if (input.selectedSessionId) {
     return sortTeamTaskRecords(
       mapRuntimeTasksToTeamTaskRecords(
-        collectRuntimeTasksForSession(input.runtimeTaskGroups, input.selectedSessionId),
+        collectRuntimeTasksForSession(
+          input.runtimeTaskGroups,
+          input.selectedSessionId,
+          input.selectedSessionScope,
+        ),
       ),
     );
   }

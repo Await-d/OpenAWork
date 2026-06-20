@@ -134,9 +134,9 @@ const CLARIFY_MODE_ALLOWED_TOOLS: ReadonlySet<string> = new Set([
   'session_read',
   'session_search',
   'session_info',
-  // Todo read-only
-  'todoReadTool',
-  'subTodoReadTool',
+  // Todo read-only（实际工具名为 todoread/subtodoread，非 todo_read/subtodo_read）
+  'todoread',
+  'subtodoread',
   // Task read-only
   'task_list',
   'task_get',
@@ -206,6 +206,18 @@ export function isAgentToolEnabledForSessionMetadata(metadata: Record<string, un
 export function isQuestionToolEnabledForSessionMetadata(
   metadata: Record<string, unknown>,
 ): boolean {
+  // Team 成员 session 在后台运行，无法与用户交互——强制禁用 AskUserQuestion。
+  // 判定标准（满足任一即为 team session）：
+  //   1. metadata.teamWorkspaceId 存在（watcher 从父 session 继承）
+  //   2. metadata.teamRoleInstance 存在（team-session-create.ts 创建时必定写入）
+  // 即使 questionToolEnabled 被显式设为 true 也不放行。
+  if (
+    typeof metadata['teamWorkspaceId'] === 'string' ||
+    isRecord(metadata['teamRoleInstance'])
+  ) {
+    return false;
+  }
+
   const explicitQuestionToolEnabled = metadata['questionToolEnabled'];
   if (typeof explicitQuestionToolEnabled === 'boolean') {
     return explicitQuestionToolEnabled;

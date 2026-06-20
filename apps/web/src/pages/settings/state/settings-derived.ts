@@ -6,6 +6,18 @@ import type {
   SettingsDevLogRecord,
 } from './settings-types.js';
 
+type StreamStopReason = 'end_turn' | 'tool_use' | 'max_tokens' | 'error' | 'cancelled' | 'tool_permission';
+
+interface UpstreamStreamSummaryPayload {
+  stopReason?: StreamStopReason;
+  textDeltaCount?: number;
+  reasoningDeltaCount?: number;
+  toolCallDeltaCount?: number;
+  sawDone?: boolean;
+  sawError?: boolean;
+  stalled?: boolean;
+}
+
 export interface DiagnosticGroup {
   filePath: string;
   diagnostics: Diagnostic[];
@@ -120,7 +132,78 @@ export function extractPrimaryMessage(payload: unknown): string | null {
   return null;
 }
 
+function asUpstreamStreamSummaryPayload(payload: unknown): UpstreamStreamSummaryPayload | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
+  const record = payload as Record<string, unknown>;
+  const stopReason = record['stopReason'];
+  if (
+    stopReason !== 'end_turn' &&
+    stopReason !== 'tool_use' &&
+    stopReason !== 'max_tokens' &&
+    stopReason !== 'error' &&
+    stopReason !== 'cancelled' &&
+    stopReason !== 'tool_permission'
+  ) {
+    return null;
+  }
+  return {
+    stopReason,
+    textDeltaCount: typeof record['textDeltaCount'] === 'number' ? record['textDeltaCount'] : undefined,
+    reasoningDeltaCount:
+      typeof record['reasoningDeltaCount'] === 'number' ? record['reasoningDeltaCount'] : undefined,
+    toolCallDeltaCount:
+      typeof record['toolCallDeltaCount'] === 'number' ? record['toolCallDeltaCount'] : undefined,
+    sawDone: typeof record['sawDone'] === 'boolean' ? record['sawDone'] : undefined,
+    sawError: typeof record['sawError'] === 'boolean' ? record['sawError'] : undefined,
+    stalled: typeof record['stalled'] === 'boolean' ? record['stalled'] : undefined,
+  };
+}
+
+function translateStreamStopReason(reason: StreamStopReason): string {
+  switch (reason) {
+    case 'end_turn':
+      return '正常结束';
+    case 'tool_use':
+      return '等待工具';
+    case 'max_tokens':
+      return '达到输出上限';
+    case 'error':
+      return '上游错误';
+    case 'cancelled':
+      return '请求取消';
+    case 'tool_permission':
+      return '等待权限';
+  }
+}
+
+export function formatUpstreamStreamSummary(payload: unknown): string | null {
+  const summary = asUpstreamStreamSummaryPayload(payload);
+  if (!summary?.stopReason) {
+    return null;
+  }
+  const metrics = [
+    `文本 ${summary.textDeltaCount ?? 0}`,
+    `思考 ${summary.reasoningDeltaCount ?? 0}`,
+    `工具 ${summary.toolCallDeltaCount ?? 0}`,
+  ];
+  const flags: string[] = [];
+  if (summary.stalled) flags.push('stalled');
+  if (summary.sawError) flags.push('error');
+  else if (summary.sawDone) flags.push('done');
+  const flagText = flags.length > 0 ? ` · ${flags.join(' / ')}` : '';
+  return `上游流摘要：${translateStreamStopReason(summary.stopReason)} · ${metrics.join(' / ')}${flagText}`;
+}
+
 function buildDevLogLabel(log: SettingsDevLogRecord): string {
+  const streamSummary =
+    log.source === 'stream:V2_UPSTREAM_STREAM_SUMMARY'
+      ? formatUpstreamStreamSummary(log.output)
+      : null;
+  if (streamSummary) {
+    return streamSummary;
+  }
   const payloadSummary = extractPrimaryMessage(log.output) ?? extractPrimaryMessage(log.input);
   if (payloadSummary) {
     return payloadSummary;

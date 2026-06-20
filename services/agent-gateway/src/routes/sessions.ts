@@ -676,18 +676,66 @@ async function applyRestoreOperations(input: {
   return { clientRequestId: input.clientRequestId, diffs };
 }
 
+/**
+ * 构建 sessions 表的安全 SELECT 列列表。
+ *
+ * 旧数据库可能缺少 Team Phase B 新增的列（role_layer、team_parent_session_id、
+ * substate 等）。直接 SELECT 这些列会抛 "no such column" 异常，导致整个
+ * recovery API 返回 500。此函数在运行时检测列是否存在，只 SELECT 实际
+ * 存在的列，让旧数据库上的查询也能正常工作（缺失列的字段值为 undefined）。
+ *
+ * migrate() 的 ensureTeamSchemaSafe() 兜底块会补上这些列，但为了在
+ * migrate 尚未执行或部分失败的过渡期内保持可用性，这里仍做防御。
+ */
+function buildSafeSessionSelectColumns(): string {
+  const baseColumns = [
+    'id',
+    'user_id',
+    'messages_json',
+    'state_status',
+    'metadata_json',
+    'title',
+    'created_at',
+    'updated_at',
+  ];
+  const optionalColumns = [
+    'team_parent_session_id',
+    'role_layer',
+    'substate',
+    'handoff_state',
+    'structural_depth',
+    'execution_depth',
+    'paused',
+    'last_heartbeat',
+  ];
+  const existing = new Set(
+    (sqliteAll<{ name: string }>('PRAGMA table_info(sessions)').map((row) => row.name)),
+  );
+  const safeColumns = [...baseColumns];
+  for (const col of optionalColumns) {
+    if (existing.has(col)) {
+      safeColumns.push(col);
+    }
+  }
+  return safeColumns.join(', ');
+}
+
 function collectDescendantSessionIds(sessions: SessionRow[], rootSessionId: string): Set<string> {
   const childrenByParent = new Map<string, string[]>();
 
-  for (const session of sessions) {
-    const parentSessionId = parseParentSessionId(session.metadata_json);
-    if (!parentSessionId) {
-      continue;
+  const linkChild = (parentSessionId: string | null | undefined, childId: string): void => {
+    if (!parentSessionId || parentSessionId === childId) {
+      return;
     }
 
     const existingChildren = childrenByParent.get(parentSessionId) ?? [];
-    existingChildren.push(session.id);
+    existingChildren.push(childId);
     childrenByParent.set(parentSessionId, existingChildren);
+  };
+
+  for (const session of sessions) {
+    linkChild(parseParentSessionId(session.metadata_json), session.id);
+    linkChild(session.team_parent_session_id ?? null, session.id);
   }
 
   const includedSessionIds = new Set<string>([rootSessionId]);
@@ -718,17 +766,48 @@ function collectAncestorSessionIds(
 ): string[] {
   const collectedSessionIds: string[] = [];
   const visited = new Set<string>();
-  let currentSessionId: string | null = sessionId;
+  const queue = [sessionId];
 
-  while (currentSessionId && !visited.has(currentSessionId)) {
+  while (queue.length > 0) {
+    const currentSessionId = queue.shift();
+    if (!currentSessionId || visited.has(currentSessionId)) {
+      continue;
+    }
+
     collectedSessionIds.push(currentSessionId);
     visited.add(currentSessionId);
 
     const currentSession = sessionsById.get(currentSessionId);
-    currentSessionId = currentSession ? parseParentSessionId(currentSession.metadata_json) : null;
+    if (!currentSession) {
+      continue;
+    }
+
+    for (const parentSessionId of getSessionParentIds(currentSession)) {
+      if (!visited.has(parentSessionId)) {
+        queue.push(parentSessionId);
+      }
+    }
   }
 
   return collectedSessionIds;
+}
+
+function getSessionParentIds(session: SessionRow): string[] {
+  const parentIds = [
+    parseParentSessionId(session.metadata_json),
+    session.team_parent_session_id ?? null,
+  ];
+  return parentIds.filter(
+    (parentId, index): parentId is string =>
+      typeof parentId === 'string' &&
+      parentId.length > 0 &&
+      parentId !== session.id &&
+      parentIds.indexOf(parentId) === index,
+  );
+}
+
+function readRuntimeSessionParentSessionId(session: SessionRow): string | null {
+  return session.team_parent_session_id ?? parseParentSessionId(session.metadata_json);
 }
 
 function buildSessionDeletionRows(sessions: SessionRow[], rootSessionId: string): SessionRow[] {
@@ -893,10 +972,10 @@ export async function buildMergedSessionTaskProjection(input: {
   );
 
   const parentSessionIds = childSessionIds
-    .map((childSessionId) => {
+    .flatMap((childSessionId) => {
       const childRow = sessionsById.get(childSessionId);
 
-      return childRow ? parseParentSessionId(childRow.metadata_json) : null;
+      return childRow ? getSessionParentIds(childRow) : [];
     })
     .filter(
       (sessionId): sessionId is string => typeof sessionId === 'string' && sessionId.length > 0,
@@ -1031,7 +1110,7 @@ async function reconcileSessionRuntimeForResponse(
   }
 
   const refreshedSession = sqliteGet<SessionRow>(
-    'SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at, role_layer, substate FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+    `SELECT ${buildSafeSessionSelectColumns()} FROM sessions WHERE id = ? AND user_id = ? LIMIT 1`,
     [session.id, userId],
   );
   if (refreshedSession) {
@@ -1135,6 +1214,8 @@ function listRecoveryQuestionRequests(sessionIds: string[]) {
 
 async function buildSessionStatusReadModel(input: { session: SessionRow; userId: string }) {
   const sessionId = input.session.id;
+  const safeSessionCols = buildSafeSessionSelectColumns();
+  const hasTeamParentColumn = safeSessionCols.includes('team_parent_session_id');
 
   // Optimization 1: Only query descendant sessions instead of ALL user sessions.
   // Use a BFS approach: iteratively fetch sessions whose parent is in the known set.
@@ -1143,25 +1224,36 @@ async function buildSessionStatusReadModel(input: { session: SessionRow; userId:
   let frontier = [sessionId];
 
   while (frontier.length > 0) {
-    // Find sessions whose metadata_json contains a parentSessionId matching any frontier ID
     const candidates = sqliteAll<SessionRow>(
-      `SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at
+      `SELECT ${safeSessionCols}
        FROM sessions
        WHERE user_id = ?
          AND id NOT IN (${[...visitedIds].map(() => '?').join(', ')})
-         AND (${frontier.map(() => `metadata_json LIKE ?`).join(' OR ')})
+         AND (
+           ${frontier.map(() => `metadata_json LIKE ?`).join(' OR ')}
+           ${hasTeamParentColumn ? `OR team_parent_session_id IN (${frontier.map(() => '?').join(', ')})` : ''}
+         )
        LIMIT 200`,
-      [
-        input.userId,
-        ...visitedIds,
-        ...frontier.map((parentId) => `%"parentSessionId":"${parentId}"%`),
-      ],
+      hasTeamParentColumn
+        ? [
+            input.userId,
+            ...visitedIds,
+            ...frontier.map((parentId) => `%"parentSessionId":"${parentId}"%`),
+            ...frontier,
+          ]
+        : [
+            input.userId,
+            ...visitedIds,
+            ...frontier.map((parentId) => `%"parentSessionId":"${parentId}"%`),
+          ],
     );
 
     const nextFrontier: string[] = [];
     for (const candidate of candidates) {
-      const parentId = parseParentSessionId(candidate.metadata_json);
-      if (parentId && visitedIds.has(parentId) && !visitedIds.has(candidate.id)) {
+      const hasVisitedParent = getSessionParentIds(candidate).some((parentId) =>
+        visitedIds.has(parentId),
+      );
+      if (hasVisitedParent && !visitedIds.has(candidate.id)) {
         visitedIds.add(candidate.id);
         descendantRows.push(candidate);
         nextFrontier.push(candidate.id);
@@ -1234,7 +1326,7 @@ async function buildSessionRecoveryReadModel(input: {
   const reconciledSession = await reconcileSessionRuntimeForResponse(input.session, input.userId);
   const sessionId = input.session.id;
   const sessions = sqliteAll<SessionRow>(
-    'SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at FROM sessions WHERE user_id = ? ORDER BY updated_at DESC',
+    `SELECT ${buildSafeSessionSelectColumns()} FROM sessions WHERE user_id = ? ORDER BY updated_at DESC`,
     [input.userId],
   );
   const descendantSessionIds = [...collectDescendantSessionIds(sessions, sessionId)].filter(
@@ -1250,6 +1342,7 @@ async function buildSessionRecoveryReadModel(input: {
     toPublicSessionResponse(
       {
         ...session,
+        parentSessionId: readRuntimeSessionParentSessionId(session),
         metadata_json: sanitizeSessionMetadataJson(session.metadata_json),
       },
       filterVisibleSessionMessages(
@@ -1345,6 +1438,7 @@ async function buildSessionRecoveryReadModel(input: {
   const sessionResponse = toPublicSessionResponse(
     {
       ...reconciledSession,
+      parentSessionId: readRuntimeSessionParentSessionId(reconciledSession),
       metadata_json: sanitizeSessionMetadataJson(reconciledSession.metadata_json),
     },
     slimmedMessages,
@@ -1450,11 +1544,28 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
           // equality by explicitly passing "0" / "false".
           path: z.string().min(1).optional(),
           includeDescendants: z.coerce.boolean().optional().default(true),
+          // 当 excludeTeam=true 时，排除所有 team 会话（通过 role_layer 列
+          // 或 metadata_json 中的 teamWorkspaceId 标识）。chat 侧边栏使用此参数。
+          excludeTeam: z.coerce.boolean().optional().default(false),
         }),
         (request as FastifyRequest & { query: unknown }).query,
       );
 
-      const { limit, offset, path, includeDescendants } = query;
+      const { limit, offset, path, includeDescendants, excludeTeam } = query;
+
+      // team 会话通过三种标识之一识别：
+      //   1. role_layer 列有值（reception/pm1/pm2/executor/reviewer）
+      //   2. team_parent_session_id 列有值（team 子会话）
+      //   3. metadata_json 包含 teamWorkspaceId（team 根会话）
+      // 当 excludeTeam=true 时，在 SQL 层面完整过滤，避免 team 会话占用 limit 配额。
+      // 旧数据库可能缺少 role_layer / team_parent_session_id 列，此时退化为只用
+      // metadata_json 过滤（第三种标识），不会因列缺失而崩溃。
+      const safeSessionCols = buildSafeSessionSelectColumns();
+      const hasRoleLayerColumn = safeSessionCols.includes('role_layer');
+      const hasTeamParentColumn = safeSessionCols.includes('team_parent_session_id');
+      const teamFilter = excludeTeam
+        ? ` AND (${hasRoleLayerColumn ? 'role_layer IS NULL AND ' : ''}${hasTeamParentColumn ? 'team_parent_session_id IS NULL AND ' : ''}metadata_json NOT LIKE '%"teamWorkspaceId"%')`
+        : '';
 
       // When a path filter is requested we have to pull the full candidate
       // set first, filter, and only then apply pagination — otherwise the
@@ -1462,11 +1573,11 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       // to fall outside the top-20 most-recently-updated rows.
       const baseRows = path
         ? sqliteAll<SessionRow>(
-            'SELECT id, state_status, metadata_json, title, created_at, updated_at FROM sessions WHERE user_id = ? ORDER BY updated_at DESC',
+            `SELECT ${safeSessionCols} FROM sessions WHERE user_id = ?${teamFilter} ORDER BY updated_at DESC`,
             [user.sub],
           )
         : sqliteAll<SessionRow>(
-            'SELECT id, state_status, metadata_json, title, created_at, updated_at FROM sessions WHERE user_id = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?',
+            `SELECT ${safeSessionCols} FROM sessions WHERE user_id = ?${teamFilter} ORDER BY updated_at DESC LIMIT ? OFFSET ?`,
             [user.sub, limit, offset],
           );
 
@@ -1595,7 +1706,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       const { step } = startRequestWorkflow(request, 'session.get', undefined, { sessionId });
 
       const session = sqliteGet<SessionRow>(
-        'SELECT id, messages_json, state_status, metadata_json, title, created_at, updated_at, role_layer, substate FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+        `SELECT ${buildSafeSessionSelectColumns()} FROM sessions WHERE id = ? AND user_id = ? LIMIT 1`,
         [sessionId, user.sub],
       );
 
@@ -1645,7 +1756,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       });
 
       const session = sqliteGet<SessionRow>(
-        'SELECT id, messages_json, state_status, metadata_json, title, created_at, updated_at FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+        `SELECT ${buildSafeSessionSelectColumns()} FROM sessions WHERE id = ? AND user_id = ? LIMIT 1`,
         [sessionId, user.sub],
       );
 
@@ -1677,7 +1788,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       });
 
       const session = sqliteGet<SessionRow>(
-        'SELECT id, messages_json, state_status, metadata_json, title, created_at, updated_at, role_layer, substate FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+        `SELECT ${buildSafeSessionSelectColumns()} FROM sessions WHERE id = ? AND user_id = ? LIMIT 1`,
         [sessionId, user.sub],
       );
 
@@ -2321,7 +2432,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const sessions = sqliteAll<SessionRow>(
-        'SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at, team_parent_session_id FROM sessions WHERE user_id = ? ORDER BY updated_at DESC',
+        `SELECT ${buildSafeSessionSelectColumns()} FROM sessions WHERE user_id = ? ORDER BY updated_at DESC`,
         [user.sub],
       );
       const sessionsToDelete = buildSessionDeletionRows(sessions, sessionId);
@@ -2581,7 +2692,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       );
 
       const parent = sqliteGet<SessionRow>(
-        'SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+        `SELECT ${buildSafeSessionSelectColumns()} FROM sessions WHERE id = ? AND user_id = ? LIMIT 1`,
         [sessionId, user.sub],
       );
 
@@ -2590,7 +2701,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const sessions = sqliteAll<SessionRow>(
-        'SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at FROM sessions WHERE user_id = ? ORDER BY updated_at DESC',
+        `SELECT ${buildSafeSessionSelectColumns()} FROM sessions WHERE user_id = ? ORDER BY updated_at DESC`,
         [user.sub],
       );
 
@@ -2637,7 +2748,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       const { step } = startRequestWorkflow(request, 'session.tasks.get', undefined, { sessionId });
 
       const session = sqliteGet<SessionRow>(
-        'SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+        `SELECT ${buildSafeSessionSelectColumns()} FROM sessions WHERE id = ? AND user_id = ? LIMIT 1`,
         [sessionId, user.sub],
       );
 
@@ -2646,7 +2757,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const sessions = sqliteAll<SessionRow>(
-        'SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at FROM sessions WHERE user_id = ? ORDER BY updated_at DESC',
+        `SELECT ${buildSafeSessionSelectColumns()} FROM sessions WHERE user_id = ? ORDER BY updated_at DESC`,
         [user.sub],
       );
       const sessionsById = new Map(sessions.map((candidate) => [candidate.id, candidate]));
@@ -2687,7 +2798,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       });
 
       const session = sqliteGet<SessionRow>(
-        'SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+        `SELECT ${buildSafeSessionSelectColumns()} FROM sessions WHERE id = ? AND user_id = ? LIMIT 1`,
         [sessionId, user.sub],
       );
       if (!session) {
@@ -2695,7 +2806,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const sessions = sqliteAll<SessionRow>(
-        'SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at FROM sessions WHERE user_id = ? ORDER BY updated_at DESC',
+        `SELECT ${buildSafeSessionSelectColumns()} FROM sessions WHERE user_id = ? ORDER BY updated_at DESC`,
         [user.sub],
       );
       const includedSessionIds = collectDescendantSessionIds(sessions, sessionId);

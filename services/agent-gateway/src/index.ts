@@ -471,6 +471,25 @@ try {
   const handoffWatcherDisabled =
     globalThis.process?.env['OPENAWORK_DISABLE_HANDOFF_WATCHER'] === '1';
   if (!handoffWatcherDisabled) {
+    // Checkpoints v2 — Gateway 重启恢复：在 watcher 启动前，
+    // 把所有 claimed/running 状态的 handoff 回退到 pending，
+    // 避免 watcher 启动后这些 handoff 永远卡在中间态。
+    step = bootLogger.start('gateway.handoff-checkpoint-recovery');
+    try {
+      const { recoverInterruptedHandoffs, createStartupCheckpoint } = await import(
+        './handoff/store/checkpoint-recovery.js'
+      );
+      const recoveryResult = recoverInterruptedHandoffs();
+      createStartupCheckpoint(recoveryResult);
+      bootLogger.succeed(step, undefined, {
+        recovered: recoveryResult.recoveredCount,
+        failed: recoveryResult.failedCount,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      bootLogger.fail(step, message);
+    }
+
     step = bootLogger.start('gateway.start-handoff-watcher');
     try {
       const { startHandoffWatcher } = await import('./handoff/runner/watcher.js');

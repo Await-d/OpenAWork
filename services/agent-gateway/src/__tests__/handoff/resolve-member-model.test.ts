@@ -139,6 +139,20 @@ describe('resolveMemberModelForHandoff', () => {
     expect(resolved).toBeUndefined();
   });
 
+  it('falls back to the root session model snapshot when the matched slot has no model binding', () => {
+    seedSession(ROOT_SESSION_ID, null, {
+      ...ROSTER_SNAPSHOT,
+      modelId: 'root-model',
+      providerId: 'root-provider',
+    });
+    const resolved = resolver.resolveMemberModelForHandoff({
+      fromSessionId: PM2_SESSION_ID,
+      toRoleLayer: 'reviewer',
+      payload: { assignedMember: { personaKey: 'reviewer:code-review' } },
+    });
+    expect(resolved).toEqual({ modelId: 'root-model', providerId: 'root-provider' });
+  });
+
   it('returns undefined when there is no roster snapshot', () => {
     seedSession(PM2_SESSION_ID, null, {});
     const resolved = resolver.resolveMemberModelForHandoff({
@@ -173,6 +187,19 @@ describe('resolveMemberModelForSessionLayer', () => {
       layer: 'reviewer',
     });
     expect(resolved).toBeUndefined();
+  });
+
+  it('falls back to the root session model snapshot for an unbound layer', () => {
+    seedSession(ROOT_SESSION_ID, null, {
+      ...ROSTER_SNAPSHOT,
+      modelId: 'root-model',
+      providerId: 'root-provider',
+    });
+    const resolved = resolver.resolveMemberModelForSessionLayer({
+      sessionId: ROOT_SESSION_ID,
+      layer: 'reviewer',
+    });
+    expect(resolved).toEqual({ modelId: 'root-model', providerId: 'root-provider' });
   });
 });
 

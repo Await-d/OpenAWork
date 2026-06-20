@@ -32,6 +32,7 @@ export interface TeamInitSessionContext {
   workingDirectory: string | null;
   teamWorkspaceId: string | null;
   teamInit: TeamInitState | null;
+  taskGoal?: string | null;
 }
 
 /** 读取会话及其 teamInit 标记。会话不存在 / 跨用户时返回 null。 */
@@ -49,13 +50,9 @@ export function loadTeamInitSessionContext(
   const metadata = parseSessionMetadataJson(row.metadata_json ?? '{}');
   const teamInit = (metadata['teamInit'] as TeamInitState | undefined) ?? null;
   const workingDirectory =
-    typeof metadata['workingDirectory'] === 'string'
-      ? (metadata['workingDirectory'] as string)
-      : null;
+    typeof metadata['workingDirectory'] === 'string' ? metadata['workingDirectory'] : null;
   const teamWorkspaceId =
-    typeof metadata['teamWorkspaceId'] === 'string'
-      ? (metadata['teamWorkspaceId'] as string)
-      : null;
+    typeof metadata['teamWorkspaceId'] === 'string' ? metadata['teamWorkspaceId'] : null;
 
   return {
     sessionId: row.id,

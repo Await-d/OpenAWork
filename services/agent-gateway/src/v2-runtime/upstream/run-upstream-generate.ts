@@ -245,6 +245,10 @@ export async function runUpstreamGenerate(
         ? { presencePenalty: input.presencePenalty }
         : {}),
       ...(effectiveSignal ? { abortSignal: effectiveSignal } : {}),
+      // 团队层级调用（PM1/PM2）有自己的 callLlmWithRetry 做限流感知重试，
+      // AI SDK 默认 maxRetries=2 会在限流时快速重试加剧 429。
+      // 传 maxRetries: 0 让上层控制重试节奏。
+      maxRetries: 0,
     });
   } catch (err) {
     if (timedOut) {

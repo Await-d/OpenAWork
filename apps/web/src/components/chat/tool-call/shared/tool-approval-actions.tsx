@@ -7,15 +7,21 @@ import type { ToolCallCardProps } from '@openAwork/shared-ui';
  */
 export function ToolApprovalActions({
   approvalActions,
+  permissionRequestId,
 }: {
   approvalActions?: ToolCallCardProps['approvalActions'];
+  permissionRequestId?: string;
 }) {
   if (!approvalActions || approvalActions.items.length === 0) {
     return null;
   }
 
   return (
-    <div className="tool-call-approval-actions" data-tool-approval-actions="true">
+    <div
+      className="tool-call-approval-actions"
+      data-tool-approval-actions="true"
+      data-permission-request-id={permissionRequestId}
+    >
       {approvalActions.scopeLevels &&
         approvalActions.scopeLevels.length > 0 &&
         approvalActions.onSelectScopeLevel && (

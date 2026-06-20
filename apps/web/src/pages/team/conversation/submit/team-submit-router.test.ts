@@ -10,18 +10,18 @@ import { describe, expect, it } from 'vitest';
 import { resolveTeamSubmitStrategy } from './team-submit-router.js';
 
 describe('resolveTeamSubmitStrategy (D5)', () => {
-  it('routes clarifying substate to inbound clarification_answer regardless of layer', () => {
+  it('routes clarifying substate to inbound user_input regardless of layer', () => {
     expect(resolveTeamSubmitStrategy('reception', 'clarifying')).toEqual({
       kind: 'inbound',
-      messageType: 'clarification_answer',
+      messageType: 'user_input',
     });
     expect(resolveTeamSubmitStrategy('pm1', 'clarifying')).toEqual({
       kind: 'inbound',
-      messageType: 'clarification_answer',
+      messageType: 'user_input',
     });
     expect(resolveTeamSubmitStrategy(null, 'clarifying')).toEqual({
       kind: 'inbound',
-      messageType: 'clarification_answer',
+      messageType: 'user_input',
     });
   });
 

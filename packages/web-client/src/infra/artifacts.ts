@@ -7,6 +7,7 @@
  * - GET `/artifacts/:id` 获取产物详情（图片场景里包含 base64 内容）；
  * - GET `/artifacts/:id/versions` 列出版本；
  * - POST `/artifacts/:id/revert` 恢复指定版本；
+ * - DELETE `/artifacts/:id` 删除产物；
  * - GET `/image-workbench/artifacts` 跨会话的图片工作台聚合视图；
  * - POST `/sessions/:id/images/generations` 触发图片生成。
  *
@@ -107,6 +108,7 @@ export interface ArtifactsClient<
     artifactId: string,
     input: RevertArtifactInput,
   ): Promise<{ artifact: TArtifact }>;
+  remove(token: string, artifactId: string): Promise<void>;
   /**
    * GET `/image-workbench/artifacts?type=&limit=`：跨会话聚合视图。
    * 返回原始负载，由 `apps/web` 的页面型解析。
@@ -284,6 +286,18 @@ export function createArtifactsClient<
             method: 'POST',
             headers: jsonAuthHeaders(token),
             body: JSON.stringify(input),
+          }),
+      });
+    },
+
+    async remove(token, artifactId) {
+      await performArtifactsRequest({
+        actionLabel: '删除产物',
+        parseJson: false,
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/artifacts/${encodeURIComponent(artifactId)}`, {
+            method: 'DELETE',
+            headers: authHeader(token),
           }),
       });
     },

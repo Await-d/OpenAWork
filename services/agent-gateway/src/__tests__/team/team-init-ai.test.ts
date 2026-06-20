@@ -17,6 +17,14 @@ vi.mock('../../provider/auxiliary-llm-config.js', () => ({
     model: 'gpt-test',
     providerType: 'openai',
   }),
+  resolveAuxiliaryLlmConfigCandidates: async () => [
+    {
+      apiBaseUrl: 'https://example.test/v1',
+      apiKey: 'sk-test',
+      model: 'gpt-test',
+      providerType: 'openai',
+    },
+  ],
 }));
 
 // 按 prompt 内容返回不同的 canned 输出（结构化步骤回 JSON，文本步骤回正文）。
@@ -81,6 +89,16 @@ const USER_ID = 'u-team-init-ai';
 const TEAM_WORKSPACE_ID = 'tw-team-init-ai';
 let workspaceRoots: string[] = [];
 
+interface MemoryKnowledgeRow {
+  key: string;
+  value: string;
+  source: string;
+  priority: number;
+  workspace_root: string | null;
+  team_workspace_id: string | null;
+  role_layers_json: string | null;
+}
+
 function seedUser(): void {
   dbModule.sqliteRun("INSERT OR IGNORE INTO users (id, email, password_hash) VALUES (?, ?, 'x')", [
     USER_ID,
@@ -96,6 +114,16 @@ function seedSession(sessionId: string, metadata: Record<string, unknown>): void
   );
 }
 
+function getTeamInitKnowledge(key: string): MemoryKnowledgeRow | undefined {
+  return dbModule.sqliteGet<MemoryKnowledgeRow>(
+    `SELECT key, value, source, priority, workspace_root, team_workspace_id, role_layers_json
+       FROM memories
+      WHERE user_id = ? AND type = 'project_context' AND key = ? AND enabled = 1
+      LIMIT 1`,
+    [USER_ID, key],
+  );
+}
+
 beforeAll(async () => {
   dbModule = await import('../../infra/db.js');
   await dbModule.connectDb();
@@ -106,6 +134,7 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  dbModule.sqliteRun('DELETE FROM memories', []);
   dbModule.sqliteRun('DELETE FROM sessions', []);
   dbModule.sqliteRun('DELETE FROM users', []);
   seedUser();
@@ -119,11 +148,12 @@ afterAll(async () => {
   }
 });
 
-async function planAndSeed(sessionId: string, dir: string): Promise<void> {
+async function planAndSeed(sessionId: string, dir: string, initialGoal?: string): Promise<void> {
   const state = await planner.planTeamInit({
     workingRoot: dir,
     teamWorkspaceId: TEAM_WORKSPACE_ID,
     userId: USER_ID,
+    initialGoal,
   });
   seedSession(sessionId, {
     teamWorkspaceId: TEAM_WORKSPACE_ID,
@@ -166,6 +196,14 @@ describe('team-init AI 路径', () => {
     const step = result.state?.steps.find((s) => s.key === 'extract-project-memory');
     expect(step?.result?.['usedLlm']).toBe(true);
     expect(result.state?.bindings.projectMemoryDigest).toContain('AI 提炼');
+
+    const knowledge = getTeamInitKnowledge('team-init:project-memory-digest');
+    expect(knowledge?.value).toContain('AI 提炼');
+    expect(knowledge?.source).toBe('auto_extracted');
+    expect(knowledge?.priority).toBe(75);
+    expect(knowledge?.team_workspace_id).toBe(TEAM_WORKSPACE_ID);
+    expect(knowledge?.workspace_root).toBe(dir);
+    expect(knowledge?.role_layers_json).toBeNull();
   });
 
   it('understand-architecture 用 AI 生成摘要', async () => {
@@ -182,6 +220,14 @@ describe('team-init AI 路径', () => {
     const step = result.state?.steps.find((s) => s.key === 'understand-architecture');
     expect(step?.result?.['usedLlm']).toBe(true);
     expect(result.state?.bindings.architectureSummary).toContain('AI 架构摘要');
+
+    const knowledge = getTeamInitKnowledge('team-init:architecture-summary');
+    expect(knowledge?.value).toContain('AI 架构摘要');
+    expect(knowledge?.source).toBe('auto_extracted');
+    expect(knowledge?.priority).toBe(80);
+    expect(knowledge?.team_workspace_id).toBe(TEAM_WORKSPACE_ID);
+    expect(knowledge?.workspace_root).toBe(dir);
+    expect(knowledge?.role_layers_json).toBeNull();
   });
 
   it('bind-tools-per-layer 用 AI 按项目挑选工具', async () => {
@@ -204,16 +250,25 @@ describe('team-init AI 路径', () => {
   it('scaffold-memory 用 AI 生成定制骨架', async () => {
     const dir = join(workspaceRoots[0]!, 'ai-scaffold');
     mkdirSync(dir, { recursive: true });
-    await planAndSeed('s-ai-scaffold', dir);
+    await planAndSeed('s-ai-scaffold', dir, '创建一个团队任务看板');
 
     const result = await runner.runTeamInitStep({
       sessionId: 's-ai-scaffold',
       userId: USER_ID,
       stepKey: 'scaffold-memory',
+      taskGoal: '创建一个团队任务看板',
     });
     const step = result.state?.steps.find((s) => s.key === 'scaffold-memory');
     expect(step?.result?.['usedLlm']).toBe(true);
     expect(step?.result?.['scaffold']).toContain('AI 占位');
+
+    const knowledge = getTeamInitKnowledge('team-init:scaffold-memory');
+    expect(knowledge?.value).toContain('AI 占位');
+    expect(knowledge?.source).toBe('auto_extracted');
+    expect(knowledge?.priority).toBe(60);
+    expect(knowledge?.team_workspace_id).toBe(TEAM_WORKSPACE_ID);
+    expect(knowledge?.workspace_root).toBe(dir);
+    expect(knowledge?.role_layers_json).toBeNull();
   });
 
   it('AI 返回非法 id 时被过滤（不污染绑定）', async () => {

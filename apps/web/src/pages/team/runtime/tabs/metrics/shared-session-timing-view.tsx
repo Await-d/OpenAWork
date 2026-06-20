@@ -6,6 +6,7 @@ import type {
   SharedSessionSummaryRecord,
 } from '@openAwork/web-client';
 import { EmptyState, MetricGrid, StatCard } from '../../shared/content-kit/index.js';
+import { tryFormatJson } from '../../../../../utils/format-json.js';
 
 interface TimelineItem {
   detail?: string;
@@ -278,7 +279,7 @@ export function SharedSessionTimingView({
                 </div>
                 {item.detail ? (
                   <span style={{ color: 'var(--fg-muted)', fontSize: 11, lineHeight: 1.6 }}>
-                    {item.detail}
+                    {tryFormatJson(item.detail)}
                   </span>
                 ) : null}
               </div>

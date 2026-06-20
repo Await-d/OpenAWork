@@ -4,6 +4,7 @@ import type {
   StreamChunk,
   TaskTimeoutSource,
   ToolSearchStatus,
+  UpstreamStreamSummary,
 } from '@openAwork/shared';
 import { hasActivePendingPermissionRequest } from '../../../components/conversation-runtime/messages/support.js';
 import type {
@@ -37,6 +38,7 @@ export interface ChatToolCallEntry {
   toolName: string;
   inputText: string;
   input: Record<string, unknown>;
+  requestId?: string;
   output?: unknown;
   isError?: boolean;
   pendingPermissionRequestId?: string;
@@ -56,6 +58,13 @@ export interface ChatRightPanelState {
   dagNodes: DAGNodeInfo[];
   dagEdges: DAGEdgeInfo[];
   toolCalls: ChatToolCallEntry[];
+  upstreamSummaries: Array<{
+    id: string;
+    occurredAt: number;
+    requestId?: string;
+    runId?: string;
+    summary: UpstreamStreamSummary;
+  }>;
   compactions: Array<{
     id: string;
     summary: string;
@@ -90,6 +99,7 @@ export function createInitialChatRightPanelState(): ChatRightPanelState {
     dagNodes: [],
     dagEdges: [],
     toolCalls: [],
+    upstreamSummaries: [],
     compactions: [],
     currentGoal: '',
   };
@@ -104,6 +114,7 @@ export function startChatRightPanelRun(
     currentGoal: goal,
     planTasks: [],
     toolCalls: [],
+    upstreamSummaries: [],
     dagEdges: [],
     dagNodes: [
       {
@@ -114,6 +125,40 @@ export function startChatRightPanelRun(
       },
     ],
     agentEvents: [...state.agentEvents, createEvent('agent_started', '开始处理用户请求')],
+  };
+}
+
+function appendUpstreamSummaryEvent(
+  state: ChatRightPanelState,
+  event: Extract<RunEvent, { type: 'done' | 'error' }>,
+): ChatRightPanelState {
+  const summary = event.upstreamSummary;
+  if (!summary) {
+    return state;
+  }
+  const stopReasonPart = event.type === 'done' ? event.stopReason : 'error';
+  const id =
+    event.eventId ??
+    `${event.type}:${event.runId ?? 'no-run'}:${event.occurredAt ?? Date.now()}:${stopReasonPart}`;
+  const requestId =
+    typeof (event as { requestId?: unknown }).requestId === 'string'
+      ? ((event as { requestId?: string }).requestId ?? undefined)
+      : undefined;
+  if (state.upstreamSummaries.some((item) => item.id === id)) {
+    return state;
+  }
+  return {
+    ...state,
+    upstreamSummaries: [
+      {
+        id,
+        occurredAt: event.occurredAt ?? Date.now(),
+        ...(requestId ? { requestId } : {}),
+        ...(event.runId ? { runId: event.runId } : {}),
+        summary,
+      },
+      ...state.upstreamSummaries,
+    ].slice(0, 12),
   };
 }
 
@@ -136,6 +181,7 @@ export function getToolCallCards(state: ChatRightPanelState): ToolCallCardModel[
     toolCallId: toolCall.toolCallId,
     toolName: toolCall.toolName,
     input: toolCall.input,
+    ...(toolCall.requestId ? { requestId: toolCall.requestId } : {}),
     output: toolCall.output,
     isError: toolCall.isError === true || toolCall.status === 'failed',
     ...(toolCall.pendingPermissionRequestId
@@ -217,7 +263,7 @@ export function applyChatRightPanelChunk(
       return applyToolSearchEvent(state, chunk);
     case 'done':
       return finalizeRun(
-        state,
+        appendUpstreamSummaryEvent(state, chunk),
         chunk.stopReason === 'error'
           ? 'failed'
           : chunk.stopReason === 'tool_permission'
@@ -226,7 +272,7 @@ export function applyChatRightPanelChunk(
         undefined,
       );
     case 'error':
-      return finalizeRun(state, 'failed', chunk.message);
+      return finalizeRun(appendUpstreamSummaryEvent(state, chunk), 'failed', chunk.message);
   }
 
   return state;
@@ -269,9 +315,10 @@ export function applyChatRightPanelEvent(
       ...state,
       agentEvents: [
         ...state.agentEvents,
-        createEvent(
+        createRequestScopedEvent(
           'agent_thinking',
           `等待权限：${event.toolName}${event.previewAction ? ` · ${event.previewAction}` : ''}`,
+          event.requestId,
         ),
       ],
     };
@@ -287,7 +334,11 @@ export function applyChatRightPanelEvent(
       ...clearedState,
       agentEvents: [
         ...clearedState.agentEvents,
-        createEvent('agent_done', `权限已响应：${formatPermissionDecision(event.decision)}`),
+        createRequestScopedEvent(
+          'agent_done',
+          `权限已响应：${formatPermissionDecision(event.decision)}`,
+          event.requestId,
+        ),
       ],
     };
   }
@@ -297,7 +348,7 @@ export function applyChatRightPanelEvent(
       ...state,
       agentEvents: [
         ...state.agentEvents,
-        createEvent('agent_thinking', `等待回答：${event.title}`),
+        createRequestScopedEvent('agent_thinking', `等待回答：${event.title}`, event.requestId),
       ],
     };
   }
@@ -307,9 +358,10 @@ export function applyChatRightPanelEvent(
       ...state,
       agentEvents: [
         ...state.agentEvents,
-        createEvent(
+        createRequestScopedEvent(
           'agent_done',
           `问题已响应：${event.status === 'answered' ? '已回答' : '已忽略'}`,
+          event.requestId,
         ),
       ],
     };
@@ -470,6 +522,11 @@ function applyToolCallDelta(
     toolName: chunk.toolName,
     inputText: nextInputText,
     input: nextInput,
+    ...(typeof chunk.requestId === 'string'
+      ? { requestId: chunk.requestId }
+      : existingToolCall?.requestId
+        ? { requestId: existingToolCall.requestId }
+        : {}),
     status: 'running' as const,
   });
 
@@ -525,6 +582,7 @@ function applyToolProgressEvent(
     toolName: event.toolName,
     inputText: existing?.inputText ?? '',
     input: existing?.input ?? {},
+    ...(typeof event.clientRequestId === 'string' ? { requestId: event.clientRequestId } : {}),
     output: existing?.output,
     isError: existing?.isError,
     status: 'running',
@@ -558,6 +616,7 @@ function applyToolResultEvent(
     toolName: event.toolName,
     inputText: existing?.inputText ?? '',
     input: existing?.input ?? {},
+    ...(typeof event.clientRequestId === 'string' ? { requestId: event.clientRequestId } : {}),
     output: event.output,
     isError: isPendingPermission ? false : event.isError,
     pendingPermissionRequestId: event.pendingPermissionRequestId,
@@ -587,17 +646,17 @@ function applyToolResultEvent(
         : ('completed' as const),
   });
 
-  return {
-    ...state,
-    toolCalls,
-    planTasks,
-    dagNodes,
-    agentEvents: [
-      ...state.agentEvents,
-      createEvent(
-        isPendingPermission ? 'agent_thinking' : event.isError ? 'agent_error' : 'tool_done',
-        isPendingPermission
-          ? `等待权限：${event.toolName}`
+    return {
+      ...state,
+      toolCalls,
+      planTasks,
+      dagNodes,
+      agentEvents: [
+        ...state.agentEvents,
+        createRequestScopedEvent(
+          isPendingPermission ? 'agent_thinking' : event.isError ? 'agent_error' : 'tool_done',
+          isPendingPermission
+            ? `等待权限：${event.toolName}`
           : event.isError
             ? event.reason === 'timeout'
               ? `工具超时：${event.toolName}`
@@ -605,16 +664,17 @@ function applyToolResultEvent(
                 ? `审批后执行失败：${event.toolName}`
                 : `工具失败：${event.toolName}`
             : `工具完成：${event.toolName}`,
-        isPendingPermission || event.isError
-          ? event.reason === 'timeout'
-            ? `原因：超时 · ${stringifyToolOutput(event.output)}`
-            : resumedAfterApproval
-              ? `审批已通过并恢复执行。
+          event.clientRequestId,
+          isPendingPermission || event.isError
+            ? event.reason === 'timeout'
+              ? `原因：超时 · ${stringifyToolOutput(event.output)}`
+              : resumedAfterApproval
+                ? `审批已通过并恢复执行。
 ${stringifyToolOutput(event.output)}`
               : stringifyToolOutput(event.output)
-          : undefined,
-      ),
-    ],
+            : undefined,
+        ),
+      ],
   };
 }
 
@@ -707,6 +767,18 @@ function createEvent(type: AgentVizEvent['type'], label: string, error?: string)
     agentName: AGENT_NAME,
     label,
     ...(error ? { error } : {}),
+  };
+}
+
+function createRequestScopedEvent(
+  type: AgentVizEvent['type'],
+  label: string,
+  requestId?: string,
+  error?: string,
+): AgentVizEvent {
+  return {
+    ...createEvent(type, label, error),
+    ...(requestId ? { requestId } : {}),
   };
 }
 

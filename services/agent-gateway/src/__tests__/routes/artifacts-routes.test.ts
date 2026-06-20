@@ -46,11 +46,11 @@ function seedUser(id: string): void {
   ]);
 }
 
-function seedSession(sessionId: string): void {
+function seedSession(sessionId: string, userId = USER_ID): void {
   dbModule.sqliteRun(
     `INSERT INTO sessions (id, user_id, title, metadata_json, state_status)
      VALUES (?, ?, 'artifact session', '{}', 'idle')`,
-    [sessionId, USER_ID],
+    [sessionId, userId],
   );
 }
 
@@ -145,6 +145,73 @@ describe('artifacts routes error contracts', () => {
       expect(response.json()).toMatchObject({
         error: '目标产物或版本不存在。',
       });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('DELETE /artifacts/:artifactId 会删除当前用户产物并刷新列表为空', async () => {
+    const artifact = createArtifact(USER_ID, {
+      sessionId: SESSION_ID,
+      title: 'demo artifact',
+      content: 'hello world',
+      type: 'markdown',
+    });
+
+    const app = await buildApp();
+    try {
+      const deleteResponse = await app.inject({
+        method: 'DELETE',
+        url: `/artifacts/${artifact.id}`,
+        headers: { authorization: bearer(app) },
+      });
+      expect(deleteResponse.statusCode).toBe(204);
+
+      const listResponse = await app.inject({
+        method: 'GET',
+        url: `/sessions/${SESSION_ID}/artifacts`,
+        headers: { authorization: bearer(app) },
+      });
+      expect(listResponse.statusCode).toBe(200);
+      expect(listResponse.json()).toMatchObject({ contentArtifacts: [] });
+
+      const versionCount = dbModule.sqliteGet<{ count: number }>(
+        'SELECT COUNT(*) AS count FROM artifact_versions WHERE artifact_id = ?',
+        [artifact.id],
+      );
+      expect(versionCount?.count).toBe(0);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('DELETE /artifacts/:artifactId 不允许删除其它用户产物', async () => {
+    const otherUserId = 'u-artifacts-routes-other';
+    const otherSessionId = 'sess-artifacts-routes-other';
+    seedUser(otherUserId);
+    seedSession(otherSessionId, otherUserId);
+    const artifact = createArtifact(otherUserId, {
+      sessionId: otherSessionId,
+      title: 'other artifact',
+      content: 'secret',
+      type: 'markdown',
+    });
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'DELETE',
+        url: `/artifacts/${artifact.id}`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(404);
+      expect(response.json()).toMatchObject({ error: '目标产物不存在。' });
+      const stillExists = dbModule.sqliteGet<{ id: string }>(
+        'SELECT id FROM artifacts WHERE id = ? AND user_id = ?',
+        [artifact.id, otherUserId],
+      );
+      expect(stillExists?.id).toBe(artifact.id);
     } finally {
       await app.close();
     }

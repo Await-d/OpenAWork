@@ -675,21 +675,7 @@ export function ensureDefaultWorkflowTemplates(userId: string): void {
   for (const template of DEFAULT_WORKFLOW_TEMPLATE_SEEDS) {
     const existingId = existingBySeedKey.get(template.seedKey);
     if (existingId) {
-      sqliteRun(
-        `UPDATE workflow_templates
-         SET name = ?, description = ?, category = ?, metadata_json = ?, nodes_json = ?, edges_json = ?, updated_at = datetime('now')
-         WHERE id = ? AND user_id = ?`,
-        [
-          template.name,
-          template.description,
-          template.category,
-          JSON.stringify(template.metadata),
-          JSON.stringify(template.nodes),
-          JSON.stringify(template.edges),
-          existingId,
-          userId,
-        ],
-      );
+      // 已存在用户自定义的模板，不覆盖——保留用户的修改
       continue;
     }
 

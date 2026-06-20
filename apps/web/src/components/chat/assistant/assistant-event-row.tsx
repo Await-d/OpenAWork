@@ -1,4 +1,5 @@
 import type { AssistantEventPayload } from '../../conversation-runtime/messages/support.js';
+import { tryFormatJson, looksLikeJson } from '../../../utils/format-json.js';
 
 export function AssistantEventRow({ payload }: { payload: AssistantEventPayload }) {
   const kindLabel =
@@ -110,11 +111,20 @@ export function AssistantEventRow({ payload }: { payload: AssistantEventPayload 
               color: 'var(--fg-default)',
               fontSize: 12,
               lineHeight: 1.7,
-              whiteSpace: 'pre-wrap',
+              whiteSpace: looksLikeJson(payload.message) ? 'pre' : 'pre-wrap',
               wordBreak: 'break-word',
+              ...(looksLikeJson(payload.message)
+                ? {
+                    fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
+                    padding: '8px 10px',
+                    borderRadius: 6,
+                    background: 'var(--bg-base)',
+                    border: '1px solid var(--border-subtle)',
+                  }
+                : {}),
             }}
           >
-            {payload.message}
+            {tryFormatJson(payload.message)}
           </div>
         )}
       </div>

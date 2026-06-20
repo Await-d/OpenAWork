@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import type { TeamRuntimeDiagnostics } from '@openAwork/web-client';
 
 const mockHandoffs = new Map();
 const mockNodes = new Map();
@@ -9,6 +10,76 @@ function hasExactNormalizedText(expected: string) {
   const normalizedExpected = expected.replace(/\s+/g, '').trim();
   return (_content: string, element: Element | null) =>
     (element?.textContent ?? '').replace(/\s+/g, '').trim() === normalizedExpected;
+}
+
+function createDefaultLatencyStats(): TeamRuntimeDiagnostics['latency']['a_to_b_ack'] {
+  return {
+    avgMs: 0,
+    count: 0,
+    maxMs: 0,
+    minMs: 0,
+    p50Ms: 0,
+    p95Ms: 0,
+    p99Ms: 0,
+    thresholdMs: 0,
+    violationCount: 0,
+  };
+}
+
+function createDefaultDiagnostics(): TeamRuntimeDiagnostics {
+  return {
+    activeAlerts: [],
+    alerts: [],
+    capturedAt: '2026-06-04T16:00:00.000Z',
+    health: { status: 'healthy', reasons: [] },
+    incidentSummary: {
+      architecture_review: 0,
+      handoff_failure: 0,
+      latency_violation: 0,
+      team_events_connection: 0,
+      team_events_listener: 0,
+    },
+    incidents: [],
+    latency: {
+      a_to_b_ack: createDefaultLatencyStats(),
+      a_to_b_direct: createDefaultLatencyStats(),
+      progress_interval: createDefaultLatencyStats(),
+      substate_push: createDefaultLatencyStats(),
+    },
+    pendingInteractions: {
+      affectedSessionCount: 0,
+      decidingPermissionCount: 0,
+      decidingQuestionCount: 0,
+      pendingPermissionCount: 0,
+      pendingQuestionCount: 0,
+      staleDecidingPermissionCount: 0,
+      staleDecidingQuestionCount: 0,
+      staleDecidingSessionCount: 0,
+    },
+    qualityReview: {
+      pendingCount: 0,
+      redispatchCount: 0,
+      returnToCCount: 0,
+      escalateToUserCount: 0,
+      retryableErrorCount: 0,
+      pendingHandoffs: [],
+    },
+    recentResolvedAlerts: [],
+    runtimeThreads: {
+      activeCount: 0,
+      heartbeatIntervalMs: 30_000,
+      staleAfterMs: 120_000,
+      staleCount: 0,
+      totalCount: 0,
+    },
+    teamEvents: {
+      listenerCount: 0,
+      listenerErrorCount: 0,
+      publishedByType: {},
+      publishedCount: 0,
+    },
+    telemetry: { enabled: false },
+  };
 }
 
 const mockTeamEventsConnectionState = {
@@ -45,22 +116,7 @@ const mockRuntimeReferenceData = {
     createdAt: string;
   }>,
   clearRuntimeAlertControl: vi.fn(async () => true),
-  diagnostics: {
-    health: { status: 'healthy', reasons: [] },
-    runtimeThreads: { activeCount: 0, staleCount: 0 },
-    pendingInteractions: { affectedSessionCount: 0 },
-    incidents: [],
-    qualityReview: {
-      pendingCount: 0,
-      redispatchCount: 0,
-      returnToCCount: 0,
-      escalateToUserCount: 0,
-      retryableErrorCount: 0,
-      pendingHandoffs: [],
-    },
-    activeAlerts: [],
-    recentResolvedAlerts: [],
-  },
+  diagnostics: createDefaultDiagnostics(),
   runRuntimeAlertRemediation: vi.fn(async () => true),
   selectedSharedSession: null as null | {
     comments: Array<{ id: string }>;
@@ -104,6 +160,7 @@ beforeEach(() => {
   mockNodes.clear();
   mockRuntimeReferenceData.activeSharedSession = null;
   mockRuntimeReferenceData.auditLogs = [];
+  mockRuntimeReferenceData.diagnostics = createDefaultDiagnostics();
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-06-04T16:00:00.000Z'));
   mockRuntimeReferenceData.selectedSharedSession = null;
@@ -302,6 +359,69 @@ describe('HealthView', () => {
     expect(
       screen.queryByRole('button', { name: '重试失败 handoff failed-non-retryable' }),
     ).toBeNull();
+  });
+
+  it('失败 handoff 会直接展示后端失败原因', () => {
+    mockHandoffs.set('failed-with-reason', {
+      id: 'failed-with-reason',
+      fromRoleLayer: 'pm2',
+      toRoleLayer: 'executor',
+      fromSessionId: 'session-a',
+      toSessionId: 'session-b',
+      sessionId: 'session-b',
+      state: 'failed',
+      failureReason:
+        '[{"code":"invalid_type","path":["clientRequestId"],"message":"Required","apiKey":"sk-test-secret"}]',
+      recoverableFailure: true,
+      retryCount: 1,
+      endedAt: Date.parse('2026-06-04T15:57:00.000Z'),
+      updatedAt: Date.parse('2026-06-04T15:57:00.000Z'),
+    });
+
+    render(<HealthView />);
+
+    const reasonText = screen.getByText(/失败原因：/).textContent ?? '';
+    expect(screen.getByText('failed-with-reason')).toBeTruthy();
+    expect(reasonText).toContain('clientRequestId');
+    expect(reasonText).toContain('Required');
+    expect(reasonText).toContain('[已隐藏]');
+    expect(reasonText).not.toContain('sk-test-secret');
+  });
+
+  it('运行时事件会展示 code 与关键 context，便于定位阻塞来源', () => {
+    mockRuntimeReferenceData.diagnostics = {
+      ...createDefaultDiagnostics(),
+      incidents: [
+        {
+          category: 'handoff_failure',
+          code: 'handoff-runner-failed',
+          context: {
+            handoffId: 'handoff-blocked-1',
+            toRoleLayer: 'executor',
+            sessionId: 'session-executor',
+            errorMessage: 'clientRequestId Required',
+            apiKey: 'sk-context-secret',
+          },
+          message: 'executor 层执行失败：clientRequestId Required Authorization: Bearer token-secret',
+          severity: 'error',
+          timestamp: Date.parse('2026-06-04T15:59:30.000Z'),
+        },
+      ],
+    };
+
+    render(<HealthView />);
+
+    expect(screen.getByText('handoff-runner-failed')).toBeTruthy();
+    expect(
+      screen.getByText('executor 层执行失败：clientRequestId Required Authorization: Bearer [已隐藏]'),
+    ).toBeTruthy();
+    expect(screen.getByText('handoffId: handoff-blocked-1')).toBeTruthy();
+    expect(screen.getByText('toRoleLayer: executor')).toBeTruthy();
+    expect(screen.getByText('sessionId: session-executor')).toBeTruthy();
+    expect(screen.getByText('errorMessage: clientRequestId Required')).toBeTruthy();
+    expect(screen.getByText('apiKey: [已隐藏]')).toBeTruthy();
+    expect(screen.queryByText(/token-secret/)).toBeNull();
+    expect(screen.queryByText(/sk-context-secret/)).toBeNull();
   });
 
   it('选中共享会话时展示共享健康视图，而不是 runtime handoff 下钻', () => {

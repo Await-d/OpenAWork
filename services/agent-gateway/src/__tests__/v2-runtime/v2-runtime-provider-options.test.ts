@@ -4,6 +4,7 @@ import {
   buildBaseProviderOptions,
   buildPromptCacheModelInfo,
   buildProviderOptions,
+  mergeProviderOptions,
   providerOptions,
   type ProviderOptionsModelInfo,
   type ThinkingConfig,
@@ -55,6 +56,30 @@ describe('buildProviderOptions', () => {
       model: 'gpt-5',
     });
     expect(options?.['openai']).toMatchObject({ reasoningEffort: 'medium' });
+  });
+
+  it('keeps OpenAI Responses cache controls and fast reasoning effort together', () => {
+    const options = mergeProviderOptions(
+      buildBaseProviderOptions({
+        providerType: 'openai',
+        model: 'gpt-5.4-nano',
+        sessionId: 'fast-session',
+      }),
+      buildProviderOptions({
+        thinking: {
+          ...baseThinking,
+          providerType: 'openai',
+          effort: 'xhigh',
+        },
+        model: 'gpt-5.4-nano',
+      }),
+    );
+
+    expect(options?.['openai']).toMatchObject({
+      store: false,
+      promptCacheKey: 'fast-session',
+      reasoningEffort: 'xhigh',
+    });
   });
 
   it('emits qwen.body.enable_thinking for qwen', () => {

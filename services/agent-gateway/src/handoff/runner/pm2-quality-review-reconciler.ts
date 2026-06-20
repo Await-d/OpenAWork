@@ -1,6 +1,10 @@
 import { sqliteAll, sqliteGet, sqliteRun } from '../../infra/db.js';
-import { resolveAuxiliaryLlmConfig } from '../../provider/auxiliary-llm-config.js';
+import type { ResolvedAuxiliaryLlmConfig } from '../../provider/auxiliary-llm-config.js';
 import { appendSessionMessageV2 } from '../../message/message-v2-adapter.js';
+import {
+  buildAuxiliaryTeamInstructionPrefix,
+  prependAuxiliaryTeamInstructionPrefix,
+} from '../../team/team-auxiliary-instruction-stack.js';
 import { getTeamConstitution } from '../../team/team-constitution-store.js';
 import { recordTeamRuntimeIncident } from '../../team/team-runtime-diagnostics-store.js';
 import {
@@ -188,8 +192,16 @@ export async function reconcilePm2QualityReview(input: {
     }
 
     const nowMs = input.nowMs ?? Date.now();
+    // 即使没有 qualityReviewPending 标记（PM2 runner 可能在设置它之前就崩溃了），
+    // 也检查子任务是否全部完成。如果全部终态，直接触发 quality review，
+    // 避免 PM2 永远卡在 running 状态。
     if (!input.force && !shouldAttemptPm2QualityReview(row.result_json, nowMs)) {
-      return { status: 'noop' };
+      // 二次检查：子任务是否全部完成
+      const quickCheck = checkAllChildrenCompleted(row.id);
+      if (!quickCheck.allDone) {
+        return { status: 'noop' };
+      }
+      // 子任务全部完成但没有 qualityReviewPending 标记 → 降级触发
     }
 
     const { allDone, children } = checkAllChildrenCompleted(row.id);
@@ -223,30 +235,57 @@ export async function reconcilePm2QualityReview(input: {
       ? (getTeamConstitution({ teamWorkspaceId, userId: input.userId })?.body ?? '')
       : '';
 
-    const llmConfig = await resolveAuxiliaryLlmConfig(input.userId);
-    if (llmConfig) {
+    const llmConfigs = await resolveQualityReviewLlmConfigs(input.userId);
+    if (llmConfigs.length > 0) {
       const { requestWorkflowLlmCompletion } = await import('../../routes/workflow-llm.js');
+      const instructionPrefix = await buildAuxiliaryTeamInstructionPrefix({
+        userId: input.userId,
+        sessionId: pm2SessionId,
+        teamWorkspaceId,
+        roleLayer: 'pm2',
+      });
       const callLlm = async (system: string, user: string): Promise<string> => {
-        return requestWorkflowLlmCompletion({
-          apiBaseUrl: llmConfig.apiBaseUrl,
-          apiKey: llmConfig.apiKey,
-          model: llmConfig.model,
-          ...(llmConfig.providerType ? { providerType: llmConfig.providerType } : {}),
-          ...(llmConfig.upstreamProtocol ? { upstreamProtocol: llmConfig.upstreamProtocol } : {}),
-          prompt: `${system}\n\n---\n\n${user}`,
-          temperature: 0.1,
-          usageContext: {
-            userId: input.userId,
-            sessionId: pm2SessionId,
-            layer: 'pm2',
-            ...(typeof llmConfig.inputPricePerMillion === 'number'
-              ? { inputPricePerMillion: llmConfig.inputPricePerMillion }
-              : {}),
-            ...(typeof llmConfig.outputPricePerMillion === 'number'
-              ? { outputPricePerMillion: llmConfig.outputPricePerMillion }
-              : {}),
-          },
-        });
+        const candidateErrors: string[] = [];
+        let index = 0;
+        for (const llmConfig of llmConfigs) {
+          index += 1;
+          try {
+            return await requestWorkflowLlmCompletion({
+              apiBaseUrl: llmConfig.apiBaseUrl,
+              apiKey: llmConfig.apiKey,
+              model: llmConfig.model,
+              ...(llmConfig.providerType ? { providerType: llmConfig.providerType } : {}),
+              ...(llmConfig.upstreamProtocol
+                ? { upstreamProtocol: llmConfig.upstreamProtocol }
+                : {}),
+              prompt: `${prependAuxiliaryTeamInstructionPrefix({
+                instructionPrefix,
+                prompt: system,
+              })}\n\n---\n\n${user}`,
+              temperature: 0.1,
+              usageContext: {
+                userId: input.userId,
+                sessionId: pm2SessionId,
+                layer: 'pm2',
+                ...(typeof llmConfig.inputPricePerMillion === 'number'
+                  ? { inputPricePerMillion: llmConfig.inputPricePerMillion }
+                  : {}),
+                ...(typeof llmConfig.outputPricePerMillion === 'number'
+                  ? { outputPricePerMillion: llmConfig.outputPricePerMillion }
+                  : {}),
+              },
+            });
+          } catch (err) {
+            const reason = errorToMessage(err);
+            candidateErrors.push(`候选 ${index}: ${reason}`);
+            if (index < llmConfigs.length) {
+              console.warn(
+                `[pm2-quality-review] 辅助 LLM 候选 ${index} 调用失败，尝试下一个：${reason}`,
+              );
+            }
+          }
+        }
+        throw new Error(buildAllCandidatesFailedMessage(candidateErrors));
       };
 
       const report = await runReviewAggregation({
@@ -280,6 +319,44 @@ export async function reconcilePm2QualityReview(input: {
           userId: input.userId,
           roleLayer: 'pm2',
         });
+
+        // 向 reception session 回写最终完成消息，让用户在 reception 对话流中
+        // 看到团队任务已全部完成。链路：pm2.from_session_id → pm1 session →
+        // pm1 handoff.from_session_id → reception session。
+        try {
+          const pm1SessionId = sqliteGet<{ from_session_id: string }>(
+            `SELECT from_session_id FROM handoff_records WHERE id = ? LIMIT 1`,
+            [row.id],
+          )?.from_session_id;
+          if (pm1SessionId) {
+            const receptionSessionId = sqliteGet<{ from_session_id: string }>(
+              `SELECT from_session_id FROM handoff_records
+               WHERE to_role_layer = 'pm1' AND to_session_id = ?
+               ORDER BY created_at DESC LIMIT 1`,
+              [pm1SessionId],
+            )?.from_session_id;
+            if (receptionSessionId) {
+              appendSessionMessageV2({
+                sessionId: receptionSessionId,
+                userId: input.userId,
+                role: 'assistant',
+                agentId: 'interaction-agent',
+                content: [
+                  {
+                    type: 'text',
+                    text: '✅ 团队任务已全部完成！所有子任务均已通过质量评审。你可以查看各层级的对话记录和产出物。',
+                  },
+                ],
+                clientRequestId: `pm2:${row.id}:team-completed`,
+              });
+            }
+          }
+        } catch (receptionErr) {
+          console.warn(
+            `[pm2-quality-review] 向 reception 回写完成消息失败：${receptionErr instanceof Error ? receptionErr.message : String(receptionErr)}`,
+          );
+        }
+
         return { status: 'completed' };
       }
 
@@ -353,12 +430,34 @@ export async function reconcilePm2QualityReview(input: {
           userId: input.userId,
           roleLayer: 'pm2',
         });
+
+        // 构建质量反馈摘要：把评审报告中的具体问题整理成 PM1 能理解的反馈
+        const qualityFeedback = [
+          `## 质量评审反馈（第 ${row.retry_count ?? 0} 轮）`,
+          '',
+          `**退回原因**：${disposition.reason}`,
+          '',
+          `**Spec Review 问题**：`,
+          ...(report.specIssues.length > 0
+            ? report.specIssues.map((issue, idx) => `${idx + 1}. ${issue}`)
+            : ['- 无具体问题'])
+          ,
+          '',
+          `**Quality Review 问题**：`,
+          ...(report.qualityIssues.length > 0
+            ? report.qualityIssues.map((issue, idx) => `${idx + 1}. ${issue}`)
+            : ['- 无具体问题'])
+          ,
+          '',
+          `**PM1 需要根据以上反馈修正 spec/plan/tasks，重点解决评审中指出的问题。**`,
+        ].join('\n');
+
         safeAppendPm2Message({
           sessionId: pm2SessionId,
           userId: input.userId,
           role: 'assistant',
           content: [
-            { type: 'text', text: `⚠️ 规划型失败，退回 PM1 重新规划。原因：${disposition.reason}` },
+            { type: 'text', text: `⚠️ 规划型失败，自动退回 PM1 重新规划。\n\n${qualityFeedback}` },
           ],
         });
         submitEscalationToReception({
@@ -390,6 +489,82 @@ export async function reconcilePm2QualityReview(input: {
           userId: input.userId,
           roleLayer: 'pm2',
         });
+
+        // 自动创建新的 reception→PM1 handoff，带上质量反馈让 PM1 重新规划。
+        // 查找原始的 reception session 和 sourceIntent：
+        // PM2 handoff.from_session_id = PM1 session
+        // PM1 handoff.from_session_id = reception session
+        try {
+          const pm1SessionId = sqliteGet<{ from_session_id: string }>(
+            `SELECT from_session_id FROM handoff_records WHERE id = ? LIMIT 1`,
+            [row.id],
+          )?.from_session_id;
+          if (pm1SessionId) {
+            const receptionHandoff = sqliteGet<{ from_session_id: string; payload_json: string }>(
+              `SELECT from_session_id, payload_json FROM handoff_records
+                WHERE to_role_layer = 'pm1' AND to_session_id = ?
+                ORDER BY created_at DESC LIMIT 1`,
+              [pm1SessionId],
+            );
+            if (receptionHandoff?.from_session_id) {
+              const receptionSessionId = receptionHandoff.from_session_id;
+              const originalPayload = parseJsonObject(receptionHandoff.payload_json);
+              const sourceIntent =
+                typeof originalPayload?.['sourceIntent'] === 'string'
+                  ? originalPayload['sourceIntent']
+                  : '未提供意图';
+              const teamWorkspaceId =
+                typeof originalPayload?.['teamWorkspaceId'] === 'string'
+                  ? originalPayload['teamWorkspaceId']
+                  : null;
+
+              const { createHandoff } = await import('../store/handoff-store.js');
+              const newPm1Handoff = createHandoff({
+                userId: input.userId,
+                fromSessionId: receptionSessionId,
+                fromRoleLayer: 'reception',
+                toRoleLayer: 'pm1',
+                idempotencyKey: `quality-feedback:pm1-replan:${row.id}`,
+                payload: {
+                  sourceIntent,
+                  rewrittenIntent: `【质量评审退回重新规划】${sourceIntent}\n\n---\n\n${qualityFeedback}`,
+                  recommendedRole: 'planner',
+                  recommendedNextStep: '根据质量评审反馈修正 spec/plan/tasks，重点解决评审中指出的问题。',
+                  teamWorkspaceId,
+                  isQualityFeedback: true,
+                  qualityFeedback,
+                  previousPm2HandoffId: row.id,
+                  escalationRound: (row.retry_count ?? 0) + 1,
+                },
+              });
+              publishHandoffEvent({ type: 'handoff.created', record: newPm1Handoff });
+
+              // 向 reception session 写消息让用户知道团队在自动修正
+              try {
+                appendSessionMessageV2({
+                  sessionId: receptionSessionId,
+                  userId: input.userId,
+                  role: 'assistant',
+                  agentId: 'interaction-agent',
+                  content: [
+                    {
+                      type: 'text',
+                      text: `🔄 质量评审发现规划问题，已自动退回 PM1 重新规划（第 ${(row.retry_count ?? 0) + 1} 轮）。PM1 将根据评审反馈修正方案后重新提交。`,
+                    },
+                  ],
+                  clientRequestId: `pm2:${row.id}:auto-return-to-c`,
+                });
+              } catch {
+                /* best-effort */
+              }
+            }
+          }
+        } catch (replanErr) {
+          console.warn(
+            `[pm2-quality-review] 自动退回 PM1 重新规划失败：${replanErr instanceof Error ? replanErr.message : String(replanErr)}`,
+          );
+        }
+
         return { status: 'failed' };
       }
 
@@ -419,10 +594,55 @@ export async function reconcilePm2QualityReview(input: {
         content: [
           {
             type: 'text',
-            text: `🔴 多次重试仍未通过评审，需要用户介入。原因：${disposition.reason}`,
+            text: `🔴 多次自动修正仍未通过评审，需要用户介入。\n\n**退回原因**：${disposition.reason}\n\n**Spec Review 问题**：\n${report.specIssues.length > 0 ? report.specIssues.map((s, i) => `${i + 1}. ${s}`).join('\n') : '无'}\n\n**Quality Review 问题**：\n${report.qualityIssues.length > 0 ? report.qualityIssues.map((s, i) => `${i + 1}. ${s}`).join('\n') : '无'}`,
           },
         ],
       });
+      // 向 reception 写详细的问题反馈，让用户能看到具体的评审问题而非只看到"需要介入"
+      try {
+        const pm1SessionId = sqliteGet<{ from_session_id: string }>(
+          `SELECT from_session_id FROM handoff_records WHERE id = ? LIMIT 1`,
+          [row.id],
+        )?.from_session_id;
+        if (pm1SessionId) {
+          const receptionSessionId = sqliteGet<{ from_session_id: string }>(
+            `SELECT from_session_id FROM handoff_records
+             WHERE to_role_layer = 'pm1' AND to_session_id = ?
+             ORDER BY created_at DESC LIMIT 1`,
+            [pm1SessionId],
+          )?.from_session_id;
+          if (receptionSessionId) {
+            appendSessionMessageV2({
+              sessionId: receptionSessionId,
+              userId: input.userId,
+              role: 'assistant',
+              agentId: 'interaction-agent',
+              content: [
+                {
+                  type: 'text',
+                  text: [
+                    `🔴 团队已自动修正 ${row.retry_count ?? 0} 轮仍未通过质量评审，需要你的帮助。`,
+                    '',
+                    `**具体问题**：`,
+                    `**退回原因**：${disposition.reason}`,
+                    report.specIssues.length > 0
+                      ? `**Spec 问题**：\n${report.specIssues.map((s, i) => `${i + 1}. ${s}`).join('\n')}`
+                      : '',
+                    report.qualityIssues.length > 0
+                      ? `**质量问题**：\n${report.qualityIssues.map((s, i) => `${i + 1}. ${s}`).join('\n')}`
+                      : '',
+                    '',
+                    '你可以：调整需求描述后重新发起，或直接告诉团队如何修正这些问题。',
+                  ].filter(Boolean).join('\n'),
+                },
+              ],
+              clientRequestId: `pm2:${row.id}:escalate-to-user`,
+            });
+          }
+        }
+      } catch {
+        /* best-effort */
+      }
       submitEscalationToReception({
         payload: {
           escalationRound: row.retry_count ?? 0,
@@ -477,27 +697,47 @@ export async function reconcilePm2QualityReview(input: {
           updatedAtMs: nowMs,
         }),
       );
-      const didFailPm2 = failRunningHandoffById({
-        handoffId: row.id,
-        reason,
-      });
-      if (didFailPm2) {
-        const updatedPm2 = getHandoffById(row.id);
-        if (updatedPm2) {
-          publishHandoffEvent({
-            type: 'handoff.failed',
-            record: updatedPm2,
-            payload: { reason },
-          });
+      // 不直接 failed 停止，改为重试 PM2（让 executor 重新执行失败的任务）。
+      // 检查重试次数，超过上限才 failed。
+      const currentRetryCount = row.retry_count ?? 0;
+      if (currentRetryCount >= 4) {
+        const didFailPm2 = failRunningHandoffById({
+          handoffId: row.id,
+          reason,
+        });
+        if (didFailPm2) {
+          const updatedPm2 = getHandoffById(row.id);
+          if (updatedPm2) {
+            publishHandoffEvent({
+              type: 'handoff.failed',
+              record: updatedPm2,
+              payload: { reason },
+            });
+          }
         }
+        safeSetPm2Substate({
+          sessionId: pm2SessionId,
+          substate: 'failed',
+          userId: input.userId,
+          roleLayer: 'pm2',
+        });
+        return { status: 'failed' };
       }
+      // 重试 PM2
       safeSetPm2Substate({
         sessionId: pm2SessionId,
-        substate: 'failed',
+        substate: 'dispatching',
         userId: input.userId,
         roleLayer: 'pm2',
       });
-      return { status: 'failed' };
+      const didRetryPm2 = retryRunningHandoffById(row.id);
+      if (didRetryPm2) {
+        const updatedPm2 = getHandoffById(row.id);
+        if (updatedPm2) {
+          publishHandoffEvent({ type: 'handoff.reclaimed', record: updatedPm2 });
+        }
+      }
+      return { status: 'reclaimed' };
     }
 
     const didCompletePm2 = completeRunningHandoffById(row.id);
@@ -632,6 +872,31 @@ function parseJsonObject(value: string | null | undefined): Record<string, unkno
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+async function resolveQualityReviewLlmConfigs(
+  userId: string,
+): Promise<ResolvedAuxiliaryLlmConfig[]> {
+  const auxiliaryLlmConfig = await import('../../provider/auxiliary-llm-config.js');
+  if (typeof auxiliaryLlmConfig.resolveAuxiliaryLlmConfigCandidates === 'function') {
+    return auxiliaryLlmConfig.resolveAuxiliaryLlmConfigCandidates(userId);
+  }
+  const single = await auxiliaryLlmConfig.resolveAuxiliaryLlmConfig(userId);
+  return single ? [single] : [];
+}
+
+function errorToMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function buildAllCandidatesFailedMessage(candidateErrors: string[]): string {
+  if (candidateErrors.length === 0) {
+    return '辅助 LLM 候选为空';
+  }
+  if (candidateErrors.length === 1) {
+    return candidateErrors[0]?.replace(/^候选 1: /, '') ?? '辅助 LLM 调用失败';
+  }
+  return `所有辅助 LLM 候选均失败：${candidateErrors.join('；')}`;
 }
 
 function safeAppendPm2Message(input: Parameters<typeof appendSessionMessageV2>[0]): void {

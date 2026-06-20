@@ -2,6 +2,7 @@ import { Fragment } from 'react';
 import { ToolKindIcon, resolveToolCallCardDisplayData, tokens } from '@openAwork/shared-ui';
 import type { ToolCallCardProps } from '@openAwork/shared-ui';
 import type { TaskToolRuntimeSnapshot } from '../../../../pages/chat-page/conversation/render/task-tool-runtime.js';
+import { tryFormatJson } from '../../../../utils/format-json.js';
 
 interface TaskToolInlineProps {
   approvalActions?: ToolCallCardProps['approvalActions'];
@@ -92,7 +93,7 @@ function summarizeExtraOutput(value: unknown): string | null {
   }
 
   try {
-    const serialized = JSON.stringify(value);
+    const serialized = JSON.stringify(value, null, 2);
     return serialized.length > 0 ? serialized : null;
   } catch {
     return null;

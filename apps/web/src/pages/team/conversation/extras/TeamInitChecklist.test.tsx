@@ -121,4 +121,37 @@ describe('TeamInitChecklist', () => {
     );
     expect(container.querySelector('[aria-label="团队初始化清单"]')).toBeNull();
   });
+
+  it('空项目延迟初始化完成态不渲染待办清单', () => {
+    const { container } = render(
+      <TeamInitChecklist
+        sessionId="s-empty"
+        sessionMetadata={buildMetadata({
+          ...BASE_STATE,
+          phase: 'completed',
+          projectKind: 'empty',
+          steps: [
+            {
+              key: 'scan-shared-record',
+              title: '读取工作区共享项目记录',
+              description: '检查工作区与目录。',
+              status: 'done',
+              requiresConfirm: false,
+              usesLlm: false,
+              result: { isEmpty: true, topLevelEntryCount: 0 },
+            },
+            {
+              key: 'bind-tools-per-layer',
+              title: '为各层绑定工具能力',
+              description: '空项目尚无明确目标，先不做工具绑定。',
+              status: 'not_applicable',
+              requiresConfirm: false,
+              usesLlm: false,
+            },
+          ],
+        })}
+      />,
+    );
+    expect(container.querySelector('[aria-label="团队初始化清单"]')).toBeNull();
+  });
 });

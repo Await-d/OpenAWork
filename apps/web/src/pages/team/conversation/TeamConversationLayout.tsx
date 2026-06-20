@@ -16,7 +16,7 @@
  *    CompanionStage / ChatImageGenerationResultStrip / MultiSelectToolbar 等）
  *    通过 topBar / beforeMessages / afterMessages slot 注入，本组件不感知。
  * 2. **composer 能力开关**：通过 composerExtras 控制 imageGen / skillRec 等
- *    chat-only 能力的显隐；team 默认全关。
+ *    chat-only 能力的显隐；team 保留模型选择与模型设置这类共享能力。
  * 3. **composer disable**：通过 composerDisabled 让 team Phase 2a 期间
  *    composer 默认 disabled。
  * 4. **session 来源标识**：sessionSource 标识来自 chat 还是 team，仅用于
@@ -25,7 +25,6 @@
 
 import type { CSSProperties, ReactNode, RefObject } from 'react';
 import type { CommandDescriptor } from '@openAwork/shared';
-import type { AttachmentItem } from '@openAwork/shared-ui';
 import type { PendingPermissionRequest, PendingQuestionRequest } from '@openAwork/web-client';
 import { ChatMessageGroupList } from '../../../components/chat/message/chat-message-group-list.js';
 import type {
@@ -61,24 +60,18 @@ import { ChatStreamErrorBar } from '../../../components/conversation-runtime/vie
 // ChatTodoFloatingPanel 现在由 ChatTopBar 内部挂载（顶部右侧），本组件不再渲染浮层；
 // 仅保留与 todo 相关的最小 props（sessionTodos / rightOpen），用于消息列展示。
 import { SessionRunStateBar } from '../../../components/conversation-runtime/views/session-run-state-bar.js';
-import type {
-  SessionStateStatus,
-  SessionTodoItem,
-} from '../../../components/conversation-runtime/session/session-runtime.js';
+import type { SessionTodoItem } from '../../../components/conversation-runtime/session/session-runtime.js';
 import type {
   ChatMessage,
-  ComposerMenuState,
   ReasoningEffort,
-  WorkspaceFileMentionItem,
 } from '../../../components/conversation-runtime/messages/support.js';
-import type { ImageEditReferenceArtifact } from '../../chat-page/conversation/render/image-edit-reference-artifacts.js';
 
 // ─── Props 类型定义 ────────────────────────────────────────────────────────
 
 /** session 来源标识。仅用于埋点 / 调试，不参与业务分支。 */
 export type SessionConversationSource = 'chat' | 'team';
 
-/** chat-only composer 能力开关。team 应默认全关。 */
+/** chat-only composer 能力开关。team 只关闭 chat 专属能力，保留共享模型能力。 */
 export interface ConversationComposerExtras {
   imageGeneration?: boolean;
   skillRecommendation?: boolean;
@@ -400,7 +393,7 @@ function buildComposerFeatures(
     attachments: true, // 附件是基础能力，不通过 extras 控制
     voice: false,
     modelPicker: true,
-    modelSettings: false,
+    modelSettings: true,
     webSearch: false,
     imageGen: ex.imageGeneration ?? false,
     promptOptimize: true,
@@ -467,8 +460,8 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
     editorMode,
     compact,
 
-    sessionTodos,
-    rightOpen,
+    sessionTodos: _sessionTodos,
+    rightOpen: _rightOpen,
 
     activePendingQuestion,
     inlineQuestionAnswers,

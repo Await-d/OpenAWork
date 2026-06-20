@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
+import type { UpstreamStreamSummary } from '@openAwork/shared';
 import type { ChatBackendUsageSnapshot } from '../../../../components/conversation-runtime/stream/stream-usage.js';
 import type { RecoveredActiveAssistantStream } from '../../../../components/conversation-runtime/stream/stream-recovery.js';
 import type { SessionActiveStream } from '@openAwork/web-client';
@@ -36,6 +37,8 @@ export interface UseChatStreamingReturn {
   setActiveStreamFirstTokenLatencyMs: React.Dispatch<React.SetStateAction<number | null>>;
   streamError: string | null;
   setStreamError: React.Dispatch<React.SetStateAction<string | null>>;
+  latestUpstreamSummary: UpstreamStreamSummary | null;
+  setLatestUpstreamSummary: React.Dispatch<React.SetStateAction<UpstreamStreamSummary | null>>;
 
   streamingRef: React.MutableRefObject<boolean>;
   stoppingStreamRef: React.MutableRefObject<boolean>;
@@ -86,6 +89,7 @@ export function useChatStreaming(): UseChatStreamingReturn {
     number | null
   >(null);
   const [streamError, setStreamError] = useState<string | null>(null);
+  const [latestUpstreamSummary, setLatestUpstreamSummary] = useState<UpstreamStreamSummary | null>(null);
 
   const streamingRef = useRef(false);
   const stoppingStreamRef = useRef(false);
@@ -121,6 +125,7 @@ export function useChatStreaming(): UseChatStreamingReturn {
     setActiveStreamStartedAt(null);
     setActiveStreamFirstTokenLatencyMs(null);
     setStreamError(null);
+    setLatestUpstreamSummary(null);
     currentAssistantStreamMessageIdRef.current = null;
   }, []);
 
@@ -194,6 +199,8 @@ export function useChatStreaming(): UseChatStreamingReturn {
     setActiveStreamFirstTokenLatencyMs,
     streamError,
     setStreamError,
+    latestUpstreamSummary,
+    setLatestUpstreamSummary,
 
     streamingRef,
     stoppingStreamRef,

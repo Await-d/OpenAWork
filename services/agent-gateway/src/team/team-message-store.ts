@@ -90,6 +90,7 @@ function maybePrune(userId: string): void {
 export interface TeamMessageInput {
   id: string;
   userId: string;
+  sessionId?: string | null;
   senderId?: string | null;
   recipientMemberId?: string | null;
   replyToMessageId?: string | null;
@@ -106,15 +107,17 @@ export function appendTeamMessage(input: TeamMessageInput): void {
     `INSERT INTO team_messages (
       id,
       user_id,
+      session_id,
       sender_id,
       recipient_member_id,
       reply_to_message_id,
       content,
       type
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       input.id,
       input.userId,
+      input.sessionId ?? null,
       input.senderId ?? null,
       input.recipientMemberId ?? null,
       input.replyToMessageId ?? null,

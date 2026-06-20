@@ -264,7 +264,11 @@ export interface Session {
   title?: string;
   createdAt?: number;
   updatedAt?: number;
+  parentSessionId?: string | null;
+  team_parent_session_id?: string | null;
   state_status?: 'idle' | 'running' | 'paused';
+  role_layer?: string | null;
+  substate?: string | null;
   messages?: Message[];
   metadata_json?: string;
   runEvents?: RunEvent[];
@@ -409,6 +413,7 @@ export interface SessionTask {
   readySubtaskCount: number;
   sessionId?: string;
   assignedAgent?: string;
+  taskThreadId?: string;
   priority: 'low' | 'medium' | 'high';
   tags: string[];
   createdAt: number;
@@ -450,6 +455,12 @@ export interface SessionsListOptions {
    * also match. Defaults to `true` server-side.
    */
   includeDescendants?: boolean;
+  /**
+   * When `true`, excludes team sessions (identified by `role_layer` column
+   * or `teamWorkspaceId` in `metadata_json`) from the result set.
+   * Used by the chat sidebar to avoid showing team conversations.
+   */
+  excludeTeam?: boolean;
 }
 
 export interface SessionsClient {
@@ -910,6 +921,9 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
         if (options.includeDescendants === false) {
           params.set('includeDescendants', '0');
         }
+      }
+      if (options?.excludeTeam) {
+        params.set('excludeTeam', 'true');
       }
       const data = await performSessionRequest<{ sessions?: Session[] }>({
         actionLabel: '读取会话列表',
@@ -1429,4 +1443,120 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
       }>;
     },
   };
+}
+
+// ─── Multi-Attach SSE ─────────────────────────────────────────────────────
+
+/**
+ * Callbacks for the multi-attach SSE stream.
+ * Unlike the single attach, this does NOT require a clientRequestId — the
+ * server auto-discovers the session's active thread and streams all events.
+ */
+export interface MultiAttachCallbacks {
+  onEvent: (event: RunEvent, meta: { rowId: number; clientRequestId?: string }) => void;
+  onStatus: (status: {
+    type: 'multi-attach:status';
+    sessionId: string;
+    activeClientRequestId: string | null;
+  }) => void;
+  onNoActiveStream: (info: { type: 'multi-attach:no-active-stream'; sessionId: string }) => void;
+  onError: (code: string, message?: string) => void;
+  onDone: () => void;
+}
+
+/**
+ * Create an EventSource connection to the multi-attach SSE endpoint.
+ * Returns the EventSource and a cleanup function.
+ *
+ * The caller is responsible for closing the EventSource when done.
+ */
+export function createMultiAttachStream(input: {
+  gatewayUrl: string;
+  sessionId: string;
+  token: string;
+  afterSeq?: number;
+  callbacks: MultiAttachCallbacks;
+}): { eventSource: EventSource; close: () => void } {
+  const params = new URLSearchParams({
+    token: input.token,
+    afterSeq: String(input.afterSeq ?? 0),
+  });
+  const url = `${input.gatewayUrl}/sessions/${input.sessionId}/stream/multi-attach?${params.toString()}`;
+  const eventSource = new EventSource(url);
+  let settled = false;
+
+  const close = () => {
+    if (settled) return;
+    settled = true;
+    eventSource.close();
+  };
+
+  eventSource.onmessage = (event) => {
+    if (settled) return;
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(event.data) as Record<string, unknown>;
+    } catch {
+      input.callbacks.onError('MULTI_ATTACH_INVALID_PAYLOAD', '多路流数据解析失败。');
+      return;
+    }
+
+    const type = parsed['type'] as string | undefined;
+
+    // Control events
+    if (type === 'multi-attach:status') {
+      input.callbacks.onStatus({
+        type: 'multi-attach:status',
+        sessionId: (parsed['sessionId'] as string) ?? input.sessionId,
+        activeClientRequestId: (parsed['activeClientRequestId'] as string | null) ?? null,
+      });
+      return;
+    }
+    if (type === 'multi-attach:no-active-stream') {
+      input.callbacks.onNoActiveStream({
+        type: 'multi-attach:no-active-stream',
+        sessionId: (parsed['sessionId'] as string) ?? input.sessionId,
+      });
+      settled = true;
+      eventSource.close();
+      input.callbacks.onDone();
+      return;
+    }
+
+    // RunEventEnvelope: extract the RunEvent from payload.event
+    const payload = parsed['payload'];
+    if (payload && typeof payload === 'object' && 'event' in payload) {
+      const envelopePayload = payload as Record<string, unknown>;
+      const runEvent = envelopePayload['event'] as RunEvent;
+      const cursor = envelopePayload['cursor'] as { seq?: number; clientRequestId?: string } | undefined;
+      const rowId = cursor?.seq ?? (parsed['seq'] as number | undefined) ?? 0;
+      const clientRequestId = cursor?.clientRequestId;
+
+      // P1-1 fix: Do NOT close on terminal events (done/error). The session
+      // may start a new round. The connection stays open until the client
+      // explicitly closes it (when the session leaves 'running' state) or
+      // the server sends 'multi-attach:no-active-stream'.
+      input.callbacks.onEvent(runEvent, { rowId, clientRequestId });
+      return;
+    }
+
+    // Direct RunEvent (without envelope wrapper)
+    if (type && typeof type === 'string') {
+      const runEvent = parsed as unknown as RunEvent;
+      input.callbacks.onEvent(runEvent, { rowId: 0 });
+    }
+  };
+
+  eventSource.onerror = () => {
+    if (settled) return;
+    settled = true;
+    eventSource.close();
+    // Only call onError — do NOT also call onDone.
+    // The caller's onError handles reconnection; calling onDone too would
+    // cause double-reconnect timers (both onError and onDone schedule
+    // reconnects, leading to race conditions).
+    input.callbacks.onError('MULTI_ATTACH_DISCONNECTED', '多路流连接已断开。');
+  };
+
+  return { eventSource, close };
 }

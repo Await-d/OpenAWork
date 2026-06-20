@@ -5,6 +5,7 @@ import type * as AuthModule from '../../infra/auth.js';
 import type * as RequestWorkflowModule from '../../runtime/request-workflow.js';
 import type * as TeamRoutesModule from '../../routes/team.js';
 import type * as SessionsRoutesModule from '../../routes/sessions.js';
+import type * as HandoffStoreModule from '../../handoff/store/handoff-store.js';
 
 process.env['DATABASE_URL'] = ':memory:';
 process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
@@ -14,6 +15,7 @@ process.env['AI_DEFAULT_MODEL'] = '';
 
 vi.mock('../../provider/auxiliary-llm-config.js', () => ({
   resolveAuxiliaryLlmConfig: async () => null,
+  resolveAuxiliaryLlmConfigCandidates: async () => [],
 }));
 
 // Partial-mock ./sessions.js so buildMergedSessionTaskProjection throws for a
@@ -38,6 +40,7 @@ let dbModule: typeof DbModule;
 let authPlugin: typeof AuthModule.default;
 let requestWorkflowPlugin: typeof RequestWorkflowModule.default;
 let teamRoutes: typeof TeamRoutesModule.teamRoutes;
+let handoffStore: typeof HandoffStoreModule;
 
 const USER_ID = 'u-team-task-projection';
 const TEAM_WORKSPACE_ID = 'tw-task-projection';
@@ -85,9 +88,11 @@ beforeAll(async () => {
   authPlugin = (await import('../../infra/auth.js')).default;
   requestWorkflowPlugin = (await import('../../runtime/request-workflow.js')).default;
   teamRoutes = (await import('../../routes/team.js')).teamRoutes;
+  handoffStore = await import('../../handoff/store/handoff-store.js');
 });
 
 beforeEach(() => {
+  dbModule.sqliteRun('DELETE FROM handoff_records', []);
   dbModule.sqliteRun('DELETE FROM sessions', []);
   dbModule.sqliteRun('DELETE FROM team_workspaces', []);
   dbModule.sqliteRun('DELETE FROM users', []);
@@ -103,6 +108,21 @@ afterAll(async () => {
 
 describe('GET /team/workspaces/:id/runtime 任务投影行级韧性', () => {
   it('单个会话任务投影抛错时整张工作区运行时面板不 500', async () => {
+    const handoff = handoffStore.createHandoff({
+      userId: USER_ID,
+      fromSessionId: SESSION_OK_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+      payload: { sourceIntent: '历史层级对话回放' },
+    });
+    handoffStore.claimHandoff({ handoffId: handoff.id, claimToken: 'tok-workspace-runtime' });
+    handoffStore.startHandoff({
+      handoffId: handoff.id,
+      claimToken: 'tok-workspace-runtime',
+      toSessionId: POISON_SESSION_ID,
+    });
+    handoffStore.completeHandoff({ handoffId: handoff.id, claimToken: 'tok-workspace-runtime' });
+
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const app = await buildApp();
     try {
@@ -124,6 +144,17 @@ describe('GET /team/workspaces/:id/runtime 任务投影行级韧性', () => {
       // The dashboard degraded the poisoned session instead of rejecting: the
       // response carries runtimeTaskGroups and a warn was logged for the bad row.
       expect(Array.isArray(body.runtimeTaskGroups)).toBe(true);
+      expect(body.handoffs).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: handoff.id,
+            state: 'completed',
+            toSessionId: POISON_SESSION_ID,
+          }),
+        ]),
+      );
+      expect(Array.isArray(body.clarifications)).toBe(true);
+      expect(Array.isArray(body.notifications)).toBe(true);
       expect(warn).toHaveBeenCalled();
     } finally {
       await app.close();

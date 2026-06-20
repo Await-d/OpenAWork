@@ -99,6 +99,22 @@ function toResolvedModel(slot: RosterSlotLike | undefined): ResolvedMemberModel 
   };
 }
 
+function readRootSessionModel(
+  metadata: Record<string, unknown> | null,
+): ResolvedMemberModel | undefined {
+  if (!metadata) return undefined;
+  const modelId = typeof metadata['modelId'] === 'string' ? metadata['modelId'].trim() : '';
+  const providerId =
+    typeof metadata['providerId'] === 'string' ? metadata['providerId'].trim() : '';
+  if (modelId.length === 0 || providerId.length === 0) return undefined;
+  const variant = typeof metadata['variant'] === 'string' ? metadata['variant'].trim() : '';
+  return {
+    modelId,
+    providerId,
+    ...(variant.length > 0 ? { variant } : {}),
+  };
+}
+
 /**
  * 解析某次 handoff 目标层成员的模型绑定。
  *
@@ -131,7 +147,7 @@ export function resolveMemberModelForHandoff(input: {
   const byLayer = slots.find(
     (slot) => slot.layer === input.toRoleLayer && typeof slot.modelId === 'string',
   );
-  return toResolvedModel(byLayer);
+  return toResolvedModel(byLayer) ?? readRootSessionModel(metadata);
 }
 
 /**
@@ -438,5 +454,5 @@ export function resolveMemberModelForSessionLayer(input: {
   const byLayer = slots.find(
     (slot) => slot.layer === input.layer && typeof slot.modelId === 'string',
   );
-  return toResolvedModel(byLayer);
+  return toResolvedModel(byLayer) ?? readRootSessionModel(metadata);
 }

@@ -33,6 +33,7 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  dbModule.sqliteRun('DELETE FROM team_role_session_instances', []);
   dbModule.sqliteRun('DELETE FROM users', []);
   seedUser();
 });
@@ -105,5 +106,141 @@ describe('createTeamSession metadata defaults', () => {
       defaultModel: null,
       dialogueMode: 'coding',
     });
+  });
+});
+
+describe('findOrCreateTeamRoleSession', () => {
+  it('同一根会话、层级和 personaKey 会复用同一个角色 session', () => {
+    const root = teamSessionCreate.createTeamSession({
+      userId: USER_ID,
+      roleLayer: 'reception',
+    });
+
+    const first = teamSessionCreate.findOrCreateTeamRoleSession({
+      userId: USER_ID,
+      roleLayer: 'executor',
+      teamParentSessionId: root.sessionId,
+      personaKey: 'executor:frontend',
+      displayName: '前端开发者',
+      handoffState: 'running',
+    });
+    const second = teamSessionCreate.findOrCreateTeamRoleSession({
+      userId: USER_ID,
+      roleLayer: 'executor',
+      teamParentSessionId: root.sessionId,
+      personaKey: 'executor:frontend',
+      displayName: '前端开发者',
+      handoffState: 'running',
+    });
+
+    expect(second.sessionId).toBe(first.sessionId);
+    expect(readSessionMetadata(first.sessionId)).toMatchObject({
+      teamRoleInstance: {
+        rootSessionId: root.sessionId,
+        roleLayer: 'executor',
+        personaKey: 'executor:frontend',
+        displayName: '前端开发者',
+      },
+    });
+    expect(
+      dbModule.sqliteGet<{ count: number }>(
+        `SELECT COUNT(*) AS count
+           FROM team_role_session_instances
+          WHERE user_id = ?
+            AND root_session_id = ?
+            AND role_layer = 'executor'
+            AND persona_key = 'executor:frontend'
+            AND session_id = ?`,
+        [USER_ID, root.sessionId, first.sessionId],
+      ),
+    ).toMatchObject({ count: 1 });
+  });
+
+  it('旧 metadata 中已重复存在的角色 session 会收敛到单个数据库绑定', () => {
+    const root = teamSessionCreate.createTeamSession({
+      userId: USER_ID,
+      roleLayer: 'reception',
+    });
+    const firstLegacy = teamSessionCreate.createTeamSession({
+      userId: USER_ID,
+      roleLayer: 'executor',
+      teamParentSessionId: root.sessionId,
+      teamRoleInstance: {
+        rootSessionId: root.sessionId,
+        personaKey: 'executor:frontend',
+        displayName: '前端开发者',
+      },
+    });
+    const secondLegacy = teamSessionCreate.createTeamSession({
+      userId: USER_ID,
+      roleLayer: 'executor',
+      teamParentSessionId: root.sessionId,
+      teamRoleInstance: {
+        rootSessionId: root.sessionId,
+        personaKey: 'executor:frontend',
+        displayName: '前端开发者',
+      },
+    });
+
+    const resolved = teamSessionCreate.findOrCreateTeamRoleSession({
+      userId: USER_ID,
+      roleLayer: 'executor',
+      teamParentSessionId: root.sessionId,
+      personaKey: 'executor:frontend',
+      displayName: '前端开发者',
+    });
+    const resolvedAgain = teamSessionCreate.findOrCreateTeamRoleSession({
+      userId: USER_ID,
+      roleLayer: 'executor',
+      teamParentSessionId: root.sessionId,
+      personaKey: 'executor:frontend',
+      displayName: '前端开发者',
+    });
+
+    expect([firstLegacy.sessionId, secondLegacy.sessionId]).toContain(resolved.sessionId);
+    expect(resolvedAgain.sessionId).toBe(resolved.sessionId);
+    expect(
+      dbModule.sqliteGet<{ count: number }>(
+        `SELECT COUNT(*) AS count
+           FROM team_role_session_instances
+          WHERE user_id = ?
+            AND root_session_id = ?
+            AND role_layer = 'executor'
+            AND persona_key = 'executor:frontend'`,
+        [USER_ID, root.sessionId],
+      ),
+    ).toMatchObject({ count: 1 });
+    expect(() => {
+      dbModule.sqliteRun(
+        `INSERT INTO team_role_session_instances (
+           id, user_id, root_session_id, role_layer, persona_key, session_id
+         ) VALUES ('duplicate-binding', ?, ?, 'executor', 'executor:frontend', ?)`,
+        [USER_ID, root.sessionId, secondLegacy.sessionId],
+      );
+    }).toThrow();
+  });
+
+  it('同一层级的不同 personaKey 会创建不同角色 session', () => {
+    const root = teamSessionCreate.createTeamSession({
+      userId: USER_ID,
+      roleLayer: 'reception',
+    });
+
+    const frontend = teamSessionCreate.findOrCreateTeamRoleSession({
+      userId: USER_ID,
+      roleLayer: 'executor',
+      teamParentSessionId: root.sessionId,
+      personaKey: 'executor:frontend',
+      displayName: '前端开发者',
+    });
+    const backend = teamSessionCreate.findOrCreateTeamRoleSession({
+      userId: USER_ID,
+      roleLayer: 'executor',
+      teamParentSessionId: root.sessionId,
+      personaKey: 'executor:backend',
+      displayName: '后端开发者',
+    });
+
+    expect(backend.sessionId).not.toBe(frontend.sessionId);
   });
 });

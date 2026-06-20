@@ -16,69 +16,51 @@
  * - `docs/chat-conversation-reuse-plan.md` Phase 2c
  */
 
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { computeSubstateProgress, selectSubstateMeta } from '../../runtime/data/substates.js';
+import { getRoleLayerIdentity } from '../../runtime/data/role-layer-identity.js';
 
 export interface TeamSubstateProgressBarProps {
-  /** session 的 role_layer（来自 sessions 表）。null 时不渲染。 */
   roleLayer?: string | null;
-  /**
-   * session 的 substate 字段（来自 L1.3 改造 2，当前未落地）。
-   * 为 null/undefined 时回退到 state_status 显示。
-   */
   substate?: string | null;
-  /** session 的 state_status（fallback 数据源）。 */
   stateStatus?: 'idle' | 'running' | 'paused' | null;
-  /** 自定义 className（可选）。 */
   className?: string;
+  rightSlot?: ReactNode;
 }
 
 const CONTAINER_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 10,
-  padding: '5px 12px',
-  borderBottom: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base))',
-  fontSize: 12,
-  flexShrink: 0,
-};
-
-const LAYER_BADGE_STYLE: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 4,
-  padding: '2px 8px',
-  borderRadius: 999,
-  border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay))',
-  color: 'var(--fg-strong)',
+  gap: 8,
+  padding: '4px 10px',
+  borderBottom: '1px solid color-mix(in srgb, var(--border-default) 30%, transparent)',
+  background: 'var(--bg-overlay)',
   fontSize: 11,
-  fontWeight: 700,
   flexShrink: 0,
 };
 
 const PROGRESS_TRACK_STYLE: CSSProperties = {
   flex: 1,
-  height: 4,
+  height: 3,
   borderRadius: 999,
-  background: 'color-mix(in srgb, var(--border-default) 50%, transparent)',
+  background: 'color-mix(in srgb, var(--border-default) 40%, transparent)',
   overflow: 'hidden',
-  minWidth: 60,
+  minWidth: 40,
 };
 
 const STATE_LABEL_STYLE: CSSProperties = {
-  color: 'var(--fg-default)',
+  color: 'var(--fg-muted)',
   flexShrink: 0,
   fontVariantNumeric: 'tabular-nums',
+  fontSize: 10,
 };
 
-function progressFillStyle(percent: number, status: 'running' | 'paused' | 'idle'): CSSProperties {
+function progressFillStyle(percent: number, status: 'running' | 'paused' | 'idle', layerColor?: string): CSSProperties {
   const accentColor =
     status === 'paused'
       ? 'color-mix(in srgb, var(--warning) 60%, var(--bg-overlay))'
       : status === 'running'
-        ? 'var(--accent)'
+        ? (layerColor ?? 'var(--accent)')
         : 'color-mix(in srgb, var(--fg-muted) 30%, var(--bg-overlay))';
   return {
     width: `${percent}%`,
@@ -89,20 +71,24 @@ function progressFillStyle(percent: number, status: 'running' | 'paused' | 'idle
 }
 
 function roleLayerBadgeText(roleLayer: string): string {
-  switch (roleLayer) {
-    case 'reception':
-      return 'b · 接待';
-    case 'pm1':
-      return 'c · 任务规划';
-    case 'pm2':
-      return 'd · 开发管控';
-    case 'executor':
-      return 'e · 执行';
-    case 'reviewer':
-      return 'g · 评审';
-    default:
-      return roleLayer;
-  }
+  const id = getRoleLayerIdentity(roleLayer);
+  return id.code ? `${id.code} · ${id.short}` : id.short;
+}
+
+function roleLayerBadgeStyle(roleLayer: string): CSSProperties {
+  const id = getRoleLayerIdentity(roleLayer);
+  return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 3,
+    padding: '2px 6px',
+    borderRadius: 4,
+    background: `color-mix(in srgb, ${id.color} 10%, transparent)`,
+    color: id.color,
+    fontSize: 10,
+    fontWeight: 700,
+    flexShrink: 0,
+  };
 }
 
 /**
@@ -118,11 +104,14 @@ export function TeamSubstateProgressBar({
   substate,
   stateStatus,
   className,
+  rightSlot,
 }: TeamSubstateProgressBarProps) {
   if (!roleLayer) return null;
 
   const meta = selectSubstateMeta(roleLayer);
   const layerBadge = roleLayerBadgeText(roleLayer);
+  const badgeStyle = roleLayerBadgeStyle(roleLayer);
+  const layerIdentity = getRoleLayerIdentity(roleLayer);
 
   // 分支 1：有 substate（L1.3 改造 2 落地后会走这里）
   if (substate && meta) {
@@ -136,13 +125,14 @@ export function TeamSubstateProgressBar({
           : 'running';
     return (
       <div className={className} style={CONTAINER_STYLE} aria-label="会话进度">
-        <span style={LAYER_BADGE_STYLE}>{layerBadge}</span>
+        <span style={badgeStyle}>{layerBadge}</span>
         <div style={PROGRESS_TRACK_STYLE} role="progressbar" aria-valuenow={percent}>
-          <div style={progressFillStyle(percent, fillStatus)} />
+          <div style={progressFillStyle(percent, fillStatus, layerIdentity.color)} />
         </div>
         <span style={STATE_LABEL_STYLE}>
           {label} · {percent}%
         </span>
+        {rightSlot && <div style={{ flexShrink: 0, marginLeft: 'auto' }}>{rightSlot}</div>}
       </div>
     );
   }
@@ -154,16 +144,17 @@ export function TeamSubstateProgressBar({
       stateStatus === 'running' ? '运行中' : stateStatus === 'paused' ? '已暂停' : '空闲';
     return (
       <div className={className} style={CONTAINER_STYLE} aria-label="会话状态">
-        <span style={LAYER_BADGE_STYLE}>{layerBadge}</span>
+        <span style={badgeStyle}>{layerBadge}</span>
         <div
           style={PROGRESS_TRACK_STYLE}
           role="progressbar"
           aria-valuenow={fallbackPercent}
           aria-label="状态指示"
         >
-          <div style={progressFillStyle(fallbackPercent, stateStatus)} />
+          <div style={progressFillStyle(fallbackPercent, stateStatus, layerIdentity.color)} />
         </div>
         <span style={STATE_LABEL_STYLE}>{fallbackLabel}</span>
+        {rightSlot && <div style={{ flexShrink: 0, marginLeft: 'auto' }}>{rightSlot}</div>}
       </div>
     );
   }
@@ -171,8 +162,9 @@ export function TeamSubstateProgressBar({
   // 分支 3：什么都没有，渲染最简徽章
   return (
     <div className={className} style={CONTAINER_STYLE}>
-      <span style={LAYER_BADGE_STYLE}>{layerBadge}</span>
+      <span style={badgeStyle}>{layerBadge}</span>
       <span style={STATE_LABEL_STYLE}>—</span>
+      {rightSlot && <div style={{ flexShrink: 0, marginLeft: 'auto' }}>{rightSlot}</div>}
     </div>
   );
 }

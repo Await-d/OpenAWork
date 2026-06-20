@@ -358,6 +358,7 @@ describe('useInstructionStackPreviewRead', () => {
               projectMemory: true,
               lessonsLearned: false,
               userMemory: true,
+              workspaceKnowledge: false,
               soul: true,
             },
           });

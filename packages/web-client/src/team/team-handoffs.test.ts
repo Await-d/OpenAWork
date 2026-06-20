@@ -93,7 +93,11 @@ describe('createTeamHandoffsClient.listHandoffsBySessionResult', () => {
 
 describe('createTeamHandoffsClient.runReviewAction', () => {
   it('成功时返回 handoff preview', async () => {
-    globalThis.fetch = vi.fn(async () => {
+    let capturedInput: RequestInfo | URL | undefined;
+    let capturedInit: RequestInit | undefined;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      capturedInput = input;
+      capturedInit = init;
       return {
         ok: true,
         json: async () => ({
@@ -107,6 +111,15 @@ describe('createTeamHandoffsClient.runReviewAction', () => {
     const client = createTeamHandoffsClient('http://localhost:3000');
     const result = await client.runReviewAction('token-1', 'handoff-1', 'redispatch');
 
+    expect(capturedInput).toBe(
+      'http://localhost:3000/team/handoffs/handoff-1/review-actions/redispatch',
+    );
+    expect(capturedInit).toMatchObject({
+      method: 'POST',
+      headers: { Authorization: 'Bearer token-1' },
+    });
+    expect(capturedInit).not.toHaveProperty('body');
+    expect(capturedInit?.headers).not.toHaveProperty('Content-Type');
     expect(result).toMatchObject({
       action: 'redispatch',
       handoffId: 'handoff-1',

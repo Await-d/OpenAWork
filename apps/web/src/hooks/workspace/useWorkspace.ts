@@ -204,6 +204,13 @@ export function useWorkspace(sessionId: string | null) {
     [accessToken, workspaceClient],
   );
 
+  const createDirectory = useCallback(
+    async (path: string): Promise<void> => {
+      await workspaceClient.createDirectory(accessToken ?? '', path);
+    },
+    [accessToken, workspaceClient],
+  );
+
   const fetchFile = useCallback(
     async (path: string): Promise<{ content: string; truncated: boolean }> => {
       const result = await workspaceClient.readFileResult(accessToken ?? '', path, {
@@ -240,6 +247,7 @@ export function useWorkspace(sessionId: string | null) {
     fetchRootPath,
     fetchWorkspaceRoots,
     fetchTree,
+    createDirectory,
     fetchFile,
     searchFiles,
   };

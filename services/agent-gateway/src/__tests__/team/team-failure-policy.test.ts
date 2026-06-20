@@ -42,6 +42,7 @@ describe('deriveQualityReviewDisposition', () => {
     expect(
       deriveQualityReviewDisposition({
         escalationRound: 0,
+        overallVerdict: 'implementation-failure',
         qualityIssues: ['测试失败'],
         qualityReviewPassed: false,
         specIssues: [],
@@ -52,6 +53,32 @@ describe('deriveQualityReviewDisposition', () => {
       code: 'quality-review-redispatch',
       severity: 'warning',
     });
+  });
+
+  it('execution-protocol-failure 时重派且 reason 包含交付物缺失', () => {
+    const result = deriveQualityReviewDisposition({
+      escalationRound: 0,
+      overallVerdict: 'execution-protocol-failure',
+      qualityIssues: ['h-xxx 缺少执行结果 artifact/summary'],
+      qualityReviewPassed: false,
+      specIssues: [],
+      specReviewPassed: true,
+    });
+    expect(result.action).toBe('redispatch');
+    expect(result.reason).toContain('执行协议失败（交付物缺失）');
+  });
+
+  it('implementation-failure（子任务 failed/cancelled）时重派且 reason 为 Quality Review 未通过', () => {
+    const result = deriveQualityReviewDisposition({
+      escalationRound: 0,
+      overallVerdict: 'implementation-failure',
+      qualityIssues: ['h-xxx 子任务执行失败（失败原因：stream 被取消）'],
+      qualityReviewPassed: false,
+      specIssues: [],
+      specReviewPassed: true,
+    });
+    expect(result.action).toBe('redispatch');
+    expect(result.reason).toContain('Quality Review 未通过');
   });
 });
 

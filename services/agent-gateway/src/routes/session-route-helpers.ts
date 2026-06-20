@@ -161,6 +161,8 @@ interface SessionResponseLike {
   title: string | null;
   created_at: string;
   updated_at: string;
+  parentSessionId?: string | null;
+  team_parent_session_id?: string | null;
   /** 团队会话语义层级（reception/pm1/pm2/executor/reviewer）。chat 会话为 null/缺失。 */
   role_layer?: string | null;
   /** 团队会话子状态机位置（L1.3）。 */
@@ -189,6 +191,10 @@ export function toPublicSessionResponse(
     title: session.title,
     created_at: session.created_at,
     updated_at: session.updated_at,
+    ...(session.parentSessionId !== undefined ? { parentSessionId: session.parentSessionId } : {}),
+    ...(session.team_parent_session_id !== undefined
+      ? { team_parent_session_id: session.team_parent_session_id }
+      : {}),
     // 团队会话语义字段：透传给前端（reception 空态卡片 / 初始化清单依赖
     // role_layer === 'reception' 才渲染）。chat 会话缺失时为 null。
     ...(session.role_layer !== undefined ? { role_layer: session.role_layer } : {}),

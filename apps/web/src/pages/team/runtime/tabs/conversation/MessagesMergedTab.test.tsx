@@ -23,6 +23,7 @@ const runtimeReferenceState = vi.hoisted(() => ({
 const childState = vi.hoisted(() => ({
   mentions: 0,
   messages: 0,
+  messagesSelectedTeam: null as null | { id: string; title: string },
   sharedMentions: 0,
 }));
 
@@ -36,8 +37,9 @@ vi.mock('../../data/team-runtime-reference-data.js', () => ({
 }));
 
 vi.mock('./MessagesTab.js', () => ({
-  MessagesTab: () => {
+  MessagesTab: (props: { selectedTeam?: { id: string; title: string } | null }) => {
     childState.messages += 1;
+    childState.messagesSelectedTeam = props.selectedTeam ?? null;
     return <div data-testid="messages-bus-view" />;
   },
 }));
@@ -65,6 +67,7 @@ beforeEach(() => {
   runtimeReferenceState.selectedSharedSession = null;
   childState.mentions = 0;
   childState.messages = 0;
+  childState.messagesSelectedTeam = null;
   childState.sharedMentions = 0;
 });
 
@@ -73,6 +76,27 @@ afterEach(() => {
 });
 
 describe('MessagesMergedTab', () => {
+  it('消息总线会把当前 selectedTeam 继续透传给 MessagesTab 做会话级过滤', () => {
+    render(
+      <MessagesMergedTab
+        onOpenBlockingTarget={vi.fn()}
+        onOpenClarifications={vi.fn()}
+        selectedTeam={{
+          id: 'session-child',
+          status: 'running',
+          subtitle: 'PM1 · 运行中',
+          title: 'PM1 子会话',
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId('messages-bus-view')).toBeTruthy();
+    expect(childState.messagesSelectedTeam).toMatchObject({
+      id: 'session-child',
+      title: 'PM1 子会话',
+    });
+  });
+
   it('普通会话下第二个分段仍显示待回复，并渲染本地通知队列', async () => {
     render(
       <MessagesMergedTab

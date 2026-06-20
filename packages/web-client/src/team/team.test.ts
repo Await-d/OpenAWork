@@ -315,6 +315,7 @@ describe('createTeamClient team messages', () => {
         json: async () => [
           {
             id: 'msg-followup',
+            sessionId: 'session-1',
             memberId: 'member-executor',
             recipientMemberId: 'member-pm1',
             replyToMessageId: 'msg-parent',
@@ -332,6 +333,7 @@ describe('createTeamClient team messages', () => {
     expect(messages).toEqual([
       {
         id: 'msg-followup',
+        sessionId: 'session-1',
         memberId: 'member-executor',
         recipientMemberId: 'member-pm1',
         replyToMessageId: 'msg-parent',
@@ -354,6 +356,7 @@ describe('createTeamClient team messages', () => {
         ok: true,
         json: async () => ({
           id: 'msg-followup',
+          sessionId: 'session-1',
           memberId: 'member-executor',
           recipientMemberId: 'member-pm1',
           replyToMessageId: 'msg-parent',
@@ -366,6 +369,7 @@ describe('createTeamClient team messages', () => {
 
     const client = createTeamClient('http://localhost:3000');
     const message = await client.createMessage('token-1', {
+      sessionId: 'session-1',
       senderId: 'member-executor',
       recipientMemberId: 'member-pm1',
       replyToMessageId: 'msg-parent',
@@ -378,6 +382,7 @@ describe('createTeamClient team messages', () => {
         url: 'http://localhost:3000/team/messages',
         method: 'POST',
         body: JSON.stringify({
+          sessionId: 'session-1',
           senderId: 'member-executor',
           recipientMemberId: 'member-pm1',
           replyToMessageId: 'msg-parent',
@@ -388,6 +393,7 @@ describe('createTeamClient team messages', () => {
     ]);
     expect(message).toEqual({
       id: 'msg-followup',
+      sessionId: 'session-1',
       memberId: 'member-executor',
       recipientMemberId: 'member-pm1',
       replyToMessageId: 'msg-parent',
@@ -546,12 +552,14 @@ describe('createTeamClient 初始化（teamInit）方法', () => {
     expect(result.teamInit).toMatchObject({ phase: 'proposed', projectKind: 'existing' });
   });
 
-  it('confirmSessionInitStep POST 到 confirm 端点并返回最新 teamInit', async () => {
-    const calls: Array<{ url: string; method?: string }> = [];
+  it('confirmSessionInitStep POST 到 confirm 端点并使用长任务超时', async () => {
+    const calls: Array<{ url: string; method?: string; timeoutMs?: number }> = [];
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const extendedInit = init as (RequestInit & { timeoutMs?: number }) | undefined;
       calls.push({
         url: typeof input === 'string' ? input : input.toString(),
         method: init?.method,
+        timeoutMs: extendedInit?.timeoutMs,
       });
       return {
         ok: true,
@@ -570,6 +578,7 @@ describe('createTeamClient 初始化（teamInit）方法', () => {
       'http://localhost:3000/team/sessions/session-1/init/steps/read-project-level1/confirm',
     );
     expect(calls[0]?.method).toBe('POST');
+    expect(calls[0]?.timeoutMs).toBe(120_000);
     expect(result.ok).toBe(true);
     expect(result.teamInit).toMatchObject({ phase: 'in_progress' });
   });

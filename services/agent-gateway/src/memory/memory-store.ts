@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type {
   MemoryEntry,
   MemoryListFilter,
+  MemoryRoleLayer,
   MemoryStats,
   CreateMemoryInput,
   UpdateMemoryInput,
@@ -28,9 +29,346 @@ interface MemoryRow {
   confidence: number;
   priority: number;
   workspace_root: string | null;
+  team_workspace_id: string | null;
+  role_layers_json: string | null;
   enabled: number;
   created_at: string;
   updated_at: string;
+}
+
+const MEMORY_ROLE_LAYERS: ReadonlySet<MemoryRoleLayer> = new Set([
+  'reception',
+  'pm1',
+  'pm2',
+  'executor',
+  'reviewer',
+]);
+
+const WORKSPACE_KNOWLEDGE_ARCHITECTURE_SEARCH_TERMS = [
+  'architecture:',
+  'arch:',
+  'manual:architecture',
+  'manual:arch:',
+  'manual:arch-',
+  'manual:arch_',
+  ':architecture-',
+  ':architecture_',
+  ':架构',
+];
+
+const WORKSPACE_KNOWLEDGE_ARTIFACT_SEARCH_TERMS = [
+  'artifact:',
+  'manual:artifact',
+  ':artifact-',
+  ':artifact_',
+];
+
+type WorkspaceKnowledgeRoleLayerSearchKind = MemoryRoleLayer | 'all';
+
+function normalizeMemoryRoleLayers(
+  roleLayers: readonly MemoryRoleLayer[] | null | undefined,
+): MemoryRoleLayer[] | null {
+  if (!roleLayers || roleLayers.length === 0) {
+    return null;
+  }
+  const normalized: MemoryRoleLayer[] = [];
+  for (const layer of roleLayers) {
+    if (MEMORY_ROLE_LAYERS.has(layer) && !normalized.includes(layer)) {
+      normalized.push(layer);
+    }
+  }
+  return normalized.length > 0 ? normalized : null;
+}
+
+function parseMemoryRoleLayers(value: string | null): MemoryRoleLayer[] | null {
+  if (!value || value.trim().length === 0) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) {
+      return null;
+    }
+    const roleLayers = parsed.filter(
+      (item): item is MemoryRoleLayer =>
+        typeof item === 'string' && MEMORY_ROLE_LAYERS.has(item as MemoryRoleLayer),
+    );
+    return normalizeMemoryRoleLayers(roleLayers);
+  } catch (error) {
+    console.warn(
+      `[memory-store] role_layers_json 解析失败，已按全部层级处理：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return null;
+  }
+}
+
+function memoryRowReadableByRoleLayer(row: MemoryRow, roleLayer: MemoryRoleLayer): boolean {
+  const value = row.role_layers_json;
+  if (!value || value.trim().length === 0) {
+    return true;
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) {
+      return false;
+    }
+    return parsed.some((item) => item === roleLayer);
+  } catch (error) {
+    console.warn(
+      `[memory-store] role_layers_json 解析失败，已从 ${roleLayer} 层过滤结果排除：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return false;
+  }
+}
+
+function serializeMemoryRoleLayers(
+  roleLayers: readonly MemoryRoleLayer[] | null | undefined,
+): string | null {
+  const normalized = normalizeMemoryRoleLayers(roleLayers);
+  return normalized ? JSON.stringify(normalized) : null;
+}
+
+function buildWorkspaceKnowledgeSearchFilter(search: string | undefined): {
+  params: string[];
+  sql: string;
+} | null {
+  const trimmed = search?.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const normalized = trimmed.toLocaleLowerCase();
+  const terms = new Set<string>();
+  const persistentOnly =
+    normalized === '已入库' ||
+    normalized === 'persisted' ||
+    normalized === 'saved' ||
+    isWholeWorkspaceKnowledgeSearchTerm(normalized);
+  const semanticOnly = isWorkspaceKnowledgeSemanticOnlySearchTerm(normalized);
+  if (!persistentOnly && !semanticOnly) {
+    terms.add(trimmed);
+  }
+  addWorkspaceKnowledgeSearchAliases(terms, normalized);
+  const semanticTypes = workspaceKnowledgeSemanticSearchTypes(normalized);
+  const roleLayerSearchKind = workspaceKnowledgeRoleLayerSearchKind(normalized);
+  for (const semanticType of semanticTypes) {
+    terms.delete(semanticType);
+  }
+
+  const clauses: string[] = [];
+  const params: string[] = [];
+  if (semanticTypes.length > 0) {
+    const typeSql =
+      semanticTypes.length === 1
+        ? 'type = ?'
+        : `type IN (${semanticTypes.map(() => '?').join(', ')})`;
+    if (isWorkspaceKnowledgeMemoryLikeSearchTerm(normalized)) {
+      const keyExclusion = buildWorkspaceKnowledgeMemoryKeyExclusion();
+      clauses.push(`(${typeSql} AND ${keyExclusion.sql})`);
+      params.push(...semanticTypes, ...keyExclusion.params);
+    } else {
+      clauses.push(typeSql);
+      params.push(...semanticTypes);
+    }
+  }
+  if (roleLayerSearchKind === 'all') {
+    clauses.push("(role_layers_json IS NULL OR trim(role_layers_json) = '')");
+  } else if (roleLayerSearchKind) {
+    clauses.push('role_layers_json LIKE ?');
+    params.push(`%"${roleLayerSearchKind}"%`);
+  }
+  for (const term of terms) {
+    const pattern = `%${escapeSqlLikeTerm(term)}%`;
+    clauses.push(
+      "(key LIKE ? ESCAPE '\\' OR value LIKE ? ESCAPE '\\' OR type LIKE ? ESCAPE '\\' OR source LIKE ? ESCAPE '\\' OR role_layers_json LIKE ? ESCAPE '\\')",
+    );
+    params.push(pattern, pattern, pattern, pattern, pattern);
+  }
+  if (
+    roleLayerSearchKind !== 'all' &&
+    (normalized.includes('全部层级') ||
+      normalized.includes('全部可读') ||
+      normalized.includes('all layers'))
+  ) {
+    clauses.push("(role_layers_json IS NULL OR trim(role_layers_json) = '')");
+  }
+
+  return clauses.length > 0 ? { params, sql: `(${clauses.join(' OR ')})` } : null;
+}
+
+function escapeSqlLikeTerm(term: string): string {
+  return term.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+}
+
+function isWholeWorkspaceKnowledgeSearchTerm(normalized: string): boolean {
+  return (
+    normalized === '知识' ||
+    normalized === '工作区知识' ||
+    normalized === '知识库' ||
+    normalized === '知识资产' ||
+    normalized === '知识图谱' ||
+    normalized === '全部知识' ||
+    normalized === '全量知识' ||
+    normalized === '完整图谱' ||
+    normalized === 'workspace knowledge' ||
+    normalized === 'knowledge base' ||
+    normalized === 'knowledge graph' ||
+    normalized === 'all knowledge' ||
+    normalized === 'full graph'
+  );
+}
+
+function isWorkspaceKnowledgeSemanticOnlySearchTerm(normalized: string): boolean {
+  return (
+    normalized === '架构' ||
+    normalized === 'architecture' ||
+    normalized === 'arch' ||
+    normalized === '产物' ||
+    normalized === 'artifact' ||
+    normalized === '事实' ||
+    normalized === 'fact' ||
+    normalized === '规则' ||
+    normalized === '指令' ||
+    normalized === '团队宪法' ||
+    normalized === 'constitution' ||
+    normalized === 'instruction' ||
+    normalized === '记忆' ||
+    normalized === 'memory' ||
+    normalized === '工作区记忆' ||
+    normalized === '项目记忆' ||
+    normalized === 'project memory' ||
+    workspaceKnowledgeRoleLayerSearchKind(normalized) !== null
+  );
+}
+
+function isWorkspaceKnowledgeMemorySearchTerm(normalized: string): boolean {
+  return normalized === '记忆' || normalized === 'memory' || normalized === '工作区记忆';
+}
+
+function isWorkspaceKnowledgeProjectMemorySearchTerm(normalized: string): boolean {
+  return normalized === '项目记忆' || normalized === 'project memory';
+}
+
+function isWorkspaceKnowledgeMemoryLikeSearchTerm(normalized: string): boolean {
+  return (
+    isWorkspaceKnowledgeMemorySearchTerm(normalized) ||
+    isWorkspaceKnowledgeProjectMemorySearchTerm(normalized)
+  );
+}
+
+function buildWorkspaceKnowledgeMemoryKeyExclusion(): { params: string[]; sql: string } {
+  const terms = [
+    ...WORKSPACE_KNOWLEDGE_ARCHITECTURE_SEARCH_TERMS,
+    ...WORKSPACE_KNOWLEDGE_ARTIFACT_SEARCH_TERMS,
+  ];
+  return {
+    params: terms.map((term) => `%${escapeSqlLikeTerm(term)}%`),
+    sql: terms.map(() => "key NOT LIKE ? ESCAPE '\\'").join(' AND '),
+  };
+}
+
+function workspaceKnowledgeSemanticSearchTypes(normalized: string): MemoryEntry['type'][] {
+  switch (normalized) {
+    case '事实':
+    case 'fact':
+      return ['fact'];
+    case '规则':
+    case '指令':
+    case '团队宪法':
+    case 'constitution':
+    case 'instruction':
+      return ['instruction'];
+    case '记忆':
+    case 'memory':
+    case '工作区记忆':
+      return ['project_context', 'learned_pattern', 'preference', 'fact'];
+    case '项目记忆':
+    case 'project memory':
+      return ['project_context'];
+    default:
+      return [];
+  }
+}
+
+function workspaceKnowledgeRoleLayerSearchKind(
+  normalized: string,
+): WorkspaceKnowledgeRoleLayerSearchKind | null {
+  const search = normalized.trim().replace(/\s+/g, ' ');
+  switch (search) {
+    case '接待':
+    case '接待层':
+    case 'reception':
+    case 'reception layer':
+      return 'reception';
+    case 'pm1':
+    case 'pm 1':
+    case 'pm1层':
+    case 'pm1 layer':
+      return 'pm1';
+    case 'pm2':
+    case 'pm 2':
+    case 'pm2层':
+    case 'pm2 layer':
+      return 'pm2';
+    case '执行':
+    case '执行层':
+    case 'executor':
+    case 'executor layer':
+      return 'executor';
+    case '评审':
+    case '评审层':
+    case 'reviewer':
+    case 'reviewer layer':
+      return 'reviewer';
+    case '全部层级':
+    case '全部可读':
+    case '全部层级可读':
+    case '全层级':
+    case '全层级可读':
+    case 'all layer':
+    case 'all layers':
+      return 'all';
+    default:
+      return null;
+  }
+}
+
+function addWorkspaceKnowledgeSearchAliases(terms: Set<string>, normalized: string): void {
+  const aliases: Array<[string[], string | string[]]> = [
+    [['项目上下文', 'project context'], 'project_context'],
+    [['架构', 'architecture'], WORKSPACE_KNOWLEDGE_ARCHITECTURE_SEARCH_TERMS],
+    [['产物', 'artifact'], WORKSPACE_KNOWLEDGE_ARTIFACT_SEARCH_TERMS],
+    [['规则', '指令', '团队宪法', 'constitution', 'instruction'], 'instruction'],
+    [['经验', '沉淀', 'learned pattern'], 'learned_pattern'],
+    [['个人记忆', '用户记忆', '偏好', 'preference'], 'preference'],
+    [['事实', 'fact'], 'fact'],
+    [['手动', 'manual'], 'manual'],
+    [['自动', '抽取', 'auto extracted'], 'auto_extracted'],
+    [['api'], 'api'],
+  ];
+  for (const [labels, alias] of aliases) {
+    if (labels.some((label) => normalized.includes(label))) {
+      const aliasTerms = Array.isArray(alias) ? alias : [alias];
+      for (const aliasTerm of aliasTerms) {
+        terms.add(aliasTerm);
+      }
+    }
+  }
+  if (normalized === 'arch') {
+    for (const aliasTerm of WORKSPACE_KNOWLEDGE_ARCHITECTURE_SEARCH_TERMS) {
+      terms.add(aliasTerm);
+    }
+  }
+  if (isWorkspaceKnowledgeMemorySearchTerm(normalized)) {
+    terms.add('project_context');
+    terms.add('learned_pattern');
+    terms.add('preference');
+    terms.add('fact');
+  }
 }
 
 function rowToMemoryEntry(row: MemoryRow): MemoryEntry {
@@ -44,6 +382,8 @@ function rowToMemoryEntry(row: MemoryRow): MemoryEntry {
     confidence: row.confidence,
     priority: row.priority,
     workspaceRoot: row.workspace_root,
+    teamWorkspaceId: row.team_workspace_id,
+    roleLayers: parseMemoryRoleLayers(row.role_layers_json),
     enabled: row.enabled === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -53,9 +393,10 @@ function rowToMemoryEntry(row: MemoryRow): MemoryEntry {
 export function createMemory(userId: string, input: CreateMemoryInput): MemoryEntry {
   const id = randomUUID();
   const now = new Date().toISOString();
+  const roleLayers = normalizeMemoryRoleLayers(input.roleLayers);
   sqliteRun(
-    `INSERT INTO memories (id, user_id, type, key, value, source, confidence, priority, workspace_root, enabled, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+    `INSERT INTO memories (id, user_id, type, key, value, source, confidence, priority, workspace_root, team_workspace_id, role_layers_json, enabled, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
     [
       id,
       userId,
@@ -66,6 +407,8 @@ export function createMemory(userId: string, input: CreateMemoryInput): MemoryEn
       input.confidence ?? 1.0,
       input.priority ?? 50,
       input.workspaceRoot ?? null,
+      input.teamWorkspaceId ?? null,
+      serializeMemoryRoleLayers(roleLayers),
       now,
       now,
     ],
@@ -80,6 +423,8 @@ export function createMemory(userId: string, input: CreateMemoryInput): MemoryEn
     confidence: input.confidence ?? 1.0,
     priority: input.priority ?? 50,
     workspaceRoot: input.workspaceRoot ?? null,
+    teamWorkspaceId: input.teamWorkspaceId ?? null,
+    roleLayers,
     enabled: true,
     createdAt: now,
     updatedAt: now,
@@ -118,6 +463,18 @@ export function listMemories(userId: string, filter: MemoryListFilter): MemoryEn
       params.push(filter.workspaceRoot);
     }
   }
+  if (filter.teamWorkspaceId !== undefined) {
+    if (filter.teamWorkspaceId === null) {
+      conditions.push('team_workspace_id IS NULL');
+    } else {
+      conditions.push('team_workspace_id = ?');
+      params.push(filter.teamWorkspaceId);
+    }
+  }
+  if (filter.roleLayer !== undefined) {
+    conditions.push('(role_layers_json IS NULL OR role_layers_json LIKE ?)');
+    params.push(`%"${filter.roleLayer}"%`);
+  }
   if (filter.search !== undefined && filter.search.trim().length > 0) {
     conditions.push('(key LIKE ? OR value LIKE ?)');
     const searchPattern = `%${filter.search.trim()}%`;
@@ -128,10 +485,83 @@ export function listMemories(userId: string, filter: MemoryListFilter): MemoryEn
   const offset = filter.offset ?? 0;
 
   const rows = sqliteAll<MemoryRow>(
-    `SELECT * FROM memories WHERE ${conditions.join(' AND ')} ORDER BY priority DESC, confidence DESC, key ASC LIMIT ? OFFSET ?`,
+    `SELECT * FROM memories WHERE ${conditions.join(' AND ')} ORDER BY priority DESC, confidence DESC, key ASC, id ASC LIMIT ? OFFSET ?`,
     [...params, limit, offset],
   );
   return rows.map(rowToMemoryEntry);
+}
+
+export function listMemoriesForTeamWorkspaceKnowledge(
+  userId: string,
+  filter: MemoryListFilter & { teamWorkspaceId: string; workspaceRoot?: string | null },
+): MemoryEntry[] {
+  const conditions: string[] = ['user_id = ?'];
+  const params: Array<string | number | null> = [userId];
+
+  if (filter.type !== undefined) {
+    conditions.push('type = ?');
+    params.push(filter.type);
+  }
+  if (filter.source !== undefined) {
+    conditions.push('source = ?');
+    params.push(filter.source);
+  }
+  if (filter.enabled !== undefined) {
+    conditions.push('enabled = ?');
+    params.push(filter.enabled ? 1 : 0);
+  }
+
+  if (filter.workspaceRoot && filter.workspaceRoot.trim().length > 0) {
+    conditions.push(
+      '(team_workspace_id = ? OR (team_workspace_id IS NULL AND workspace_root = ?))',
+    );
+    params.push(filter.teamWorkspaceId, filter.workspaceRoot);
+  } else {
+    conditions.push('team_workspace_id = ?');
+    params.push(filter.teamWorkspaceId);
+  }
+
+  const searchFilter = buildWorkspaceKnowledgeSearchFilter(filter.search);
+  if (searchFilter) {
+    conditions.push(searchFilter.sql);
+    params.push(...searchFilter.params);
+  }
+
+  const limit = filter.limit ?? 100;
+  const offset = filter.offset ?? 0;
+  const roleLayer = filter.roleLayer;
+  if (roleLayer !== undefined) {
+    conditions.push(
+      "(role_layers_json IS NULL OR trim(role_layers_json) = '' OR role_layers_json LIKE ?)",
+    );
+    params.push(`%"${roleLayer}"%`);
+    const rows = sqliteAll<MemoryRow>(
+      `SELECT * FROM memories WHERE ${conditions.join(' AND ')} ORDER BY priority DESC, confidence DESC, key ASC, id ASC`,
+      params,
+    );
+    return rows
+      .filter((row) => memoryRowReadableByRoleLayer(row, roleLayer))
+      .slice(offset, offset + limit)
+      .map(rowToMemoryEntry);
+  }
+
+  const rows = sqliteAll<MemoryRow>(
+    `SELECT * FROM memories WHERE ${conditions.join(' AND ')} ORDER BY priority DESC, confidence DESC, key ASC, id ASC LIMIT ? OFFSET ?`,
+    [...params, limit, offset],
+  );
+  return rows.map(rowToMemoryEntry);
+}
+
+export function findEnabledMemoryByTypeAndKey(
+  userId: string,
+  type: MemoryEntry['type'],
+  key: string,
+): MemoryEntry | undefined {
+  const row = sqliteGet<MemoryRow>(
+    'SELECT * FROM memories WHERE user_id = ? AND type = ? AND key = ? AND enabled = 1 LIMIT 1',
+    [userId, type, key],
+  );
+  return row ? rowToMemoryEntry(row) : undefined;
 }
 
 export function updateMemory(
@@ -157,9 +587,29 @@ export function updateMemory(
     setClauses.push('value = ?');
     params.push(input.value);
   }
+  if (input.source !== undefined) {
+    setClauses.push('source = ?');
+    params.push(input.source);
+  }
+  if (input.confidence !== undefined) {
+    setClauses.push('confidence = ?');
+    params.push(input.confidence);
+  }
   if (input.priority !== undefined) {
     setClauses.push('priority = ?');
     params.push(input.priority);
+  }
+  if (input.workspaceRoot !== undefined) {
+    setClauses.push('workspace_root = ?');
+    params.push(input.workspaceRoot);
+  }
+  if (input.teamWorkspaceId !== undefined) {
+    setClauses.push('team_workspace_id = ?');
+    params.push(input.teamWorkspaceId);
+  }
+  if (input.roleLayers !== undefined) {
+    setClauses.push('role_layers_json = ?');
+    params.push(serializeMemoryRoleLayers(input.roleLayers));
   }
   if (input.enabled !== undefined) {
     setClauses.push('enabled = ?');
@@ -435,7 +885,12 @@ export function readMemorySettings(userId: string): MemorySettings {
 
   try {
     return parseMemorySettings(JSON.parse(row.value) as unknown);
-  } catch {
+  } catch (err) {
+    console.warn(
+      `[memory-store] 读取记忆设置失败，已回退默认设置：${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
     return { ...DEFAULT_MEMORY_SETTINGS };
   }
 }

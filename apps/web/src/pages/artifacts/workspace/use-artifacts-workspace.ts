@@ -30,6 +30,7 @@ export function useArtifactsWorkspace({
   token,
 }: UseArtifactsWorkspaceOptions) {
   const [error, setError] = useState<string | null>(null);
+  const [deletingArtifactId, setDeletingArtifactId] = useState<string | null>(null);
   const [loadingArtifacts, setLoadingArtifacts] = useState(false);
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [revertingVersionId, setRevertingVersionId] = useState<string | null>(null);
@@ -270,6 +271,36 @@ export function useArtifactsWorkspace({
     ],
   );
 
+  const removeArtifact = useCallback(async () => {
+    if (!token || !selectedArtifactId || !selectedSessionId) {
+      return;
+    }
+
+    const artifactId = selectedArtifactId;
+    const confirmed = window.confirm('确定要删除当前产物吗？删除后无法恢复。');
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingArtifactId(artifactId);
+    setError(null);
+    try {
+      await artifactsClient.remove(token, artifactId);
+      setSelectedArtifactId(null);
+      setSelectedArtifact(null);
+      setVersions([]);
+      await loadSessionArtifacts(selectedSessionId);
+      toast('已删除产物', 'success');
+    } catch (removeError) {
+      const message = removeError instanceof Error ? removeError.message : '删除产物失败';
+      setError(message);
+      toast(message, 'error');
+      await loadSessionArtifacts(selectedSessionId);
+    } finally {
+      setDeletingArtifactId(null);
+    }
+  }, [artifactsClient, loadSessionArtifacts, selectedArtifactId, selectedSessionId, token]);
+
   const selectedSession = useMemo(
     () => sessions.find((session) => session.id === selectedSessionId) ?? null,
     [selectedSessionId, sessions],
@@ -277,9 +308,11 @@ export function useArtifactsWorkspace({
 
   return {
     createArtifact,
+    deletingArtifactId,
     error,
     loadingArtifacts,
     loadingSessions,
+    removeArtifact,
     revertingVersionId,
     saveArtifact,
     saving,

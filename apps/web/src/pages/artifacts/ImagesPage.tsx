@@ -14,7 +14,10 @@ import {
   toImageEditReferenceArtifacts,
   type ImageEditReferenceArtifact,
 } from '../chat-page/conversation/render/image-edit-reference-artifacts.js';
-import { uploadChatAttachments } from '../../components/conversation-runtime/attachments/attachment-upload.js';
+import {
+  isImageFile,
+  uploadChatAttachments,
+} from '../../components/conversation-runtime/attachments/attachment-upload.js';
 import {
   loadSavedChatSessionDefaults,
   type ChatSettingsProvider,
@@ -311,7 +314,7 @@ export default function ImagesPage() {
 
   const handleFileChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] ?? null;
-    if (file && !file.type.startsWith('image/')) {
+    if (file && !isImageFile(file)) {
       setError('参考图必须是图片文件。');
       event.target.value = '';
       return;

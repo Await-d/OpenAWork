@@ -24,6 +24,7 @@ process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
 
 vi.mock('../../provider/auxiliary-llm-config.js', () => ({
   resolveAuxiliaryLlmConfig: async () => null,
+  resolveAuxiliaryLlmConfigCandidates: async () => [],
 }));
 
 // Make reconcilePm2QualityReview throw for one poison handoff, resolve for the

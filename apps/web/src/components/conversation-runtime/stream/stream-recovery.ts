@@ -1,4 +1,4 @@
-import type { ModifiedFilesSummaryContent, RunEvent } from '@openAwork/shared';
+import type { ModifiedFilesSummaryContent, RunEvent, UpstreamStreamSummary } from '@openAwork/shared';
 import type { SessionStateStatus } from '../session/session-runtime.js';
 import {
   readAssistantTracePayload,
@@ -20,6 +20,7 @@ export interface RecoveredActiveAssistantStream {
   thinkingBlocks: StreamingThinkingBlock[];
   toolCalls: AssistantTraceToolCall[];
   usage: ChatBackendUsageSnapshot | null;
+  upstreamSummary?: UpstreamStreamSummary;
 }
 
 interface RecoverActiveAssistantStreamInput {
@@ -161,6 +162,7 @@ export function recoverActiveAssistantStream(
   let text = '';
   let thinkingBlocks: StreamingThinkingBlock[] = [];
   let usage: ChatBackendUsageSnapshot | null = null;
+  let upstreamSummary: UpstreamStreamSummary | undefined;
   let startedAt: number | null = null;
   let hasRenderableContent = false;
   const activeToolCallIds = new Set<string>();
@@ -192,6 +194,11 @@ export function recoverActiveAssistantStream(
       continue;
     }
 
+    if ((event.type === 'done' || event.type === 'error') && event.upstreamSummary) {
+      upstreamSummary = event.upstreamSummary;
+      continue;
+    }
+
     if (event.type === 'tool_call_delta' || event.type === 'tool_result') {
       activeToolCallIds.add(event.toolCallId);
       hasRenderableContent = true;
@@ -219,5 +226,6 @@ export function recoverActiveAssistantStream(
     thinkingBlocks,
     toolCalls: recoveredAssistantAnchor?.toolCalls ?? [],
     usage,
+    ...(upstreamSummary ? { upstreamSummary } : {}),
   };
 }

@@ -148,6 +148,12 @@ describe('hydrateTeamRuntimeStores', () => {
         {
           id: 'session-executor',
           parentSessionId: 'session-pm2',
+          roleInstance: {
+            rootSessionId: 'session-root',
+            roleLayer: 'executor',
+            personaKey: 'executor:frontend',
+            displayName: '前端开发者',
+          },
           roleLayer: 'executor',
           stateStatus: 'idle',
           title: 'Executor Session',
@@ -179,10 +185,46 @@ describe('hydrateTeamRuntimeStores', () => {
     });
     expect(useLayerStore.getState().nodes.get('session-executor')).toMatchObject({
       parentSessionId: 'session-pm2',
+      rootSessionId: 'session-root',
       roleLayer: 'executor',
+      personaKey: 'executor:frontend',
+      displayName: '前端开发者',
       sessionId: 'session-executor',
       state: 'idle',
       title: 'Executor Session',
+    });
+  });
+});
+
+describe('dispatchTeamEvent · 角色实例展示', () => {
+  it('handoff.started 会把 assignedMember 写入 layer 节点', () => {
+    dispatchTeamEvent({
+      type: 'handoff.started',
+      taskId: 'handoff-role-instance',
+      sessionId: 'session-executor',
+      timestamp: 100,
+      payload: {
+        fromRoleLayer: 'pm2',
+        toRoleLayer: 'executor',
+        fromSessionId: 'session-pm2',
+        toSessionId: 'session-executor',
+        state: 'running',
+        assignedMember: {
+          id: 'executor-frontend',
+          displayName: '前端开发者',
+          personaKey: 'executor:frontend',
+          specialty: 'frontend',
+        },
+      },
+    });
+
+    expect(useLayerStore.getState().nodes.get('session-executor')).toMatchObject({
+      displayName: '前端开发者',
+      parentSessionId: 'session-pm2',
+      personaKey: 'executor:frontend',
+      roleLayer: 'executor',
+      sessionId: 'session-executor',
+      state: 'running',
     });
   });
 });

@@ -4,6 +4,7 @@ export interface WorkspacePickerDataSource {
   fetchRootPath: () => Promise<string>;
   fetchTree: (path: string, depth?: number) => Promise<FileTreeNode[]>;
   fetchWorkspaceRoots: () => Promise<string[]>;
+  createDirectory: (path: string) => Promise<void>;
   validatePath: (path: string) => Promise<WorkspaceValidateResult>;
 }
 
@@ -49,6 +50,9 @@ export function buildWorkspacePickerDataSource(input: {
         throw new Error(result.errorMessage ?? WORKSPACE_PICKER_TREE_LOAD_FAILED_MESSAGE);
       }
       return result.nodes;
+    },
+    createDirectory: async (path: string): Promise<void> => {
+      await input.client.createDirectory(requireToken(), path);
     },
     validatePath: async (path: string): Promise<WorkspaceValidateResult> => {
       if (!input.token) {

@@ -58,6 +58,11 @@ const STATE_ICONS: Record<string, string> = {
   cancelled: '⊘',
 };
 
+function getLayerNodeLabel(node: LayerNode): string {
+  const displayName = node.displayName?.trim();
+  return displayName && displayName.length > 0 ? displayName : LAYER_LABELS[node.roleLayer];
+}
+
 export interface SessionTreeViewProps {
   onSelectSession?: (sessionId: string) => void;
 }
@@ -145,9 +150,30 @@ export function SessionTreeView({ onSelectSession }: SessionTreeViewProps) {
           title={`Session: ${node.sessionId}`}
         >
           <span style={{ fontSize: 14 }}>{STATE_ICONS[node.state] ?? '?'}</span>
-          <span style={{ fontWeight: 700 }}>{LAYER_LABELS[node.roleLayer]}</span>
-          <span style={{ color: 'var(--fg-muted)', fontSize: 11 }}>
-            {node.sessionId.slice(0, 8)}…
+          <span
+            style={{
+              fontWeight: 700,
+              minWidth: 0,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {getLayerNodeLabel(node)}
+          </span>
+          <span
+            style={{
+              color: 'var(--fg-muted)',
+              fontSize: 11,
+              minWidth: 0,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {node.displayName
+              ? `${LAYER_LABELS[node.roleLayer]} · ${node.sessionId.slice(0, 8)}…`
+              : `${node.sessionId.slice(0, 8)}…`}
           </span>
           <span
             style={{

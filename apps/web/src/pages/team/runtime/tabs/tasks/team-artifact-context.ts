@@ -2,6 +2,13 @@ import type { HandoffRecord } from '@openAwork/web-client';
 
 type ArtifactRoleLayer = HandoffRecord['fromRoleLayer'] | null;
 
+/** 后端 ReviewReport.overallVerdict 的完整 union 类型 */
+export type ReviewOverallVerdict =
+  | 'pass'
+  | 'implementation-failure'
+  | 'planning-failure'
+  | 'execution-protocol-failure';
+
 interface DispatchPayload {
   dispatch_package?: DispatchPackagePayload;
 }
@@ -9,7 +16,7 @@ interface DispatchPayload {
 interface ReviewReportPayload {
   review_report?: {
     markdown?: string;
-    overallVerdict?: 'pass' | 'implementation-failure' | 'planning-failure';
+    overallVerdict?: ReviewOverallVerdict;
     specReviewPassed?: boolean;
     qualityReviewPassed?: boolean;
   };
@@ -17,7 +24,7 @@ interface ReviewReportPayload {
 
 interface ReviewResultPayload {
   reviewReportArtifactId?: string;
-  overallVerdict?: 'pass' | 'implementation-failure' | 'planning-failure';
+  overallVerdict?: ReviewOverallVerdict;
   specReviewPassed?: boolean;
   qualityReviewPassed?: boolean;
 }
@@ -38,7 +45,7 @@ export interface DispatchPackagePayload {
 export interface ArtifactReviewReport {
   reviewArtifactId: string | null;
   markdown: string | null;
-  overallVerdict: 'pass' | 'implementation-failure' | 'planning-failure' | null;
+  overallVerdict: ReviewOverallVerdict | null;
   specReviewPassed: boolean | null;
   qualityReviewPassed: boolean | null;
 }

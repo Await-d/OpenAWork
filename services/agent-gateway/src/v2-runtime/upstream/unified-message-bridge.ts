@@ -79,6 +79,18 @@ function safeJsonParse(raw: string | undefined): unknown {
   }
 }
 
+function normalizeImageMediaType(mediaType: string | undefined): string | undefined {
+  if (!mediaType) {
+    return undefined;
+  }
+
+  return mediaType.toLowerCase() === 'image/jpg' ? 'image/jpeg' : mediaType;
+}
+
+function normalizeImageUrlMediaType(imageUrl: string): string {
+  return imageUrl.replace(/^data:image\/jpg(;base64,)/i, 'data:image/jpeg$1');
+}
+
 function bridgeUser(message: UserMessageUnified): UserModelMessage[] {
   const images = message.images ?? [];
   if (images.length === 0) {
@@ -88,10 +100,11 @@ function bridgeUser(message: UserMessageUnified): UserModelMessage[] {
   const imageParts: ImagePart[] = [];
   for (const image of images) {
     if (typeof image.imageUrl === 'string' && image.imageUrl.length > 0) {
+      const mediaType = normalizeImageMediaType(image.mimeType);
       imageParts.push({
         type: 'image',
-        image: image.imageUrl,
-        ...(image.mimeType ? { mediaType: image.mimeType } : {}),
+        image: normalizeImageUrlMediaType(image.imageUrl),
+        ...(mediaType ? { mediaType } : {}),
       });
     }
   }

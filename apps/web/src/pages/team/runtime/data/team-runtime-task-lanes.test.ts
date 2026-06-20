@@ -15,6 +15,8 @@ function buildRuntimeTaskGroups(): TeamRuntimeTaskGroupRecord[] {
           completedSubtaskCount: 0,
           readySubtaskCount: 0,
           sessionId: 'session-a',
+          assignedAgent: '前端开发者',
+          taskThreadId: 'handoff:h-runtime-a-1',
           priority: 'high',
           tags: [],
           createdAt: 100,
@@ -80,7 +82,23 @@ describe('resolveTaskRecordsForView', () => {
     expect(records).toHaveLength(1);
     expect(records[0]?.id).toBe('runtime-a-1');
     expect(records[0]?.title).toBe('A 会话任务');
+    expect(records[0]?.assignedAgent).toBe('前端开发者');
+    expect(records[0]?.taskThreadId).toBe('handoff:h-runtime-a-1');
     expect(records[0]?.status).toBe('in_progress');
+  });
+
+  it('选中上层会话时按 session 子树返回 executor runtime task', () => {
+    const records = resolveTaskRecordsForView({
+      selectedSessionId: 'session-root',
+      selectedSessionScope: new Set(['session-root', 'session-b']),
+      runtimeTaskGroups: buildRuntimeTaskGroups(),
+      teamTasks: buildTeamTasks(),
+      runtimeTaskRecords: [],
+    });
+
+    expect(records).toHaveLength(1);
+    expect(records[0]?.id).toBe('runtime-b-1');
+    expect(records[0]?.title).toBe('B 会话任务');
   });
 
   it('选中会话但没有匹配 runtime task 时，不回落到工作区级 team task', () => {

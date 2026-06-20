@@ -26,6 +26,7 @@ import { ToolOutputPreview } from '../io/tool-output-preview.js';
 
 export function InlineToolCall({
   approvalActions,
+  pendingPermissionRequestId,
   kind,
   toolName,
   input,
@@ -34,6 +35,7 @@ export function InlineToolCall({
   isError,
 }: {
   approvalActions?: ToolCallCardProps['approvalActions'];
+  pendingPermissionRequestId?: string;
   kind?: ToolCallCardProps['kind'];
   toolName: string;
   input: Record<string, unknown>;
@@ -253,7 +255,10 @@ export function InlineToolCall({
           )}
         </div>
       )}
-      <ToolApprovalActions approvalActions={approvalActions} />
+      <ToolApprovalActions
+        approvalActions={approvalActions}
+        permissionRequestId={pendingPermissionRequestId}
+      />
     </div>
   );
 }

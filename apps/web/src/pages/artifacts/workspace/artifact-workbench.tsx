@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { ArtifactRecord, ArtifactVersionRecord } from '@openAwork/artifacts';
 import { tokens } from '@openAwork/shared-ui';
 import { toast } from '../../../components/common/feedback/ToastNotification.js';
+import { TrashIcon } from '../../team/runtime/shared/TeamIcons.js';
 import { ArtifactCodeEditor } from '../views/artifact-code-editor.js';
 import { ArtifactPreviewSurface } from '../views/artifact-preview-surface.js';
 import {
@@ -14,18 +15,22 @@ import { ArtifactVersionTimeline } from '../views/artifact-version-timeline.js';
 
 interface ArtifactWorkbenchProps {
   artifact: ArtifactRecord | null;
+  deleting: boolean;
   revertingVersionId: string | null;
   saving: boolean;
   versions: ArtifactVersionRecord[];
+  onDelete: () => void;
   onRevert: (versionId: string) => void;
   onSave: (draft: { content: string; title: string }) => void;
 }
 
 export function ArtifactWorkbench({
   artifact,
+  deleting,
   revertingVersionId,
   saving,
   versions,
+  onDelete,
   onRevert,
   onSave,
 }: ArtifactWorkbenchProps) {
@@ -194,6 +199,21 @@ export function ArtifactWorkbench({
               </button>
               <button
                 type="button"
+                disabled={deleting || saving}
+                onClick={onDelete}
+                title="删除产物"
+                aria-label="删除产物"
+                style={{
+                  ...dangerButtonStyle,
+                  opacity: deleting || saving ? 0.55 : 1,
+                  cursor: deleting || saving ? 'not-allowed' : 'pointer',
+                }}
+              >
+                <TrashIcon size={14} color="currentColor" />
+                {deleting ? '删除中…' : '删除'}
+              </button>
+              <button
+                type="button"
                 disabled={!dirty || saving}
                 onClick={() => onSave({ title: draftTitle, content: draftContent })}
                 style={{
@@ -319,4 +339,19 @@ const secondaryButtonStyle: React.CSSProperties = {
   fontSize: 12,
   fontWeight: 600,
   cursor: 'pointer',
+};
+
+const dangerButtonStyle: React.CSSProperties = {
+  height: 34,
+  padding: '0 12px',
+  borderRadius: tokens.radius.md,
+  border: '1px solid var(--complement-border)',
+  background: 'var(--complement-subtle)',
+  color: 'var(--complement)',
+  fontSize: 12,
+  fontWeight: 700,
+  cursor: 'pointer',
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: tokens.spacing.xs,
 };

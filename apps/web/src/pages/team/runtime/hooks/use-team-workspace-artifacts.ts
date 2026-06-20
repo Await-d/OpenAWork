@@ -2,10 +2,10 @@
  * 260531-team-page · Wave 4 增强 · useTeamWorkspaceArtifacts
  *
  * 拉取整个 team workspace 范围内的产物（spec/plan/tasks/review 等），用于知识图谱
- * 的 workspace 级产物节点（不局限于单个选中 session）。
+ * 的 workspace 级知识产物节点（不局限于某个运行阶段）。
  *
- * 后端 `/team/artifacts` 已支持仅按 teamWorkspaceId 查询，并在每条产物上返回
- * `sessionId`——因此能为图谱建立 session → artifact 的 produces 边。
+ * 后端 `/team/artifacts` 已支持仅按 teamWorkspaceId 查询，并返回
+ * `parentArtifactId`——因此能为图谱建立 artifact → artifact 的派生边。
  *
  * 设计：轻量只读 + 离线/未连接降级，不做激进重试（图谱是辅助视图）。
  */
@@ -16,10 +16,17 @@ import { useAuthStore } from '../../../../stores/auth/auth.js';
 import { useTeamEventsConnectionStore } from '../../../../stores/team/team-events.js';
 
 export interface WorkspaceArtifact {
+  content?: string;
+  createdAt?: string;
   id: string;
+  parentArtifactId?: string | null;
   sessionId: string;
   phase: string | null;
+  teamWorkspaceId?: string | null;
   title: string;
+  type?: string;
+  updatedAt?: string;
+  version?: number;
 }
 
 export interface UseTeamWorkspaceArtifactsResult {
@@ -38,6 +45,7 @@ export function useTeamWorkspaceArtifacts(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const reqIdRef = useRef(0);
+  const loadedWorkspaceIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const reqId = ++reqIdRef.current;
@@ -56,23 +64,38 @@ export function useTeamWorkspaceArtifacts(
         if (reqIdRef.current !== reqId) return;
         if (!result.ok) {
           setError(result.errorMessage ?? '加载工作区产物失败。');
-          setArtifacts([]);
+          if (loadedWorkspaceIdRef.current !== teamWorkspaceId) {
+            setArtifacts([]);
+          }
           setLoading(false);
           return;
         }
-        // 仅保留带 sessionId 的产物（图谱 produces 边需要它）。
         const next: WorkspaceArtifact[] = [];
         for (const a of result.artifacts) {
-          if (!a.sessionId) continue;
-          next.push({ id: a.id, sessionId: a.sessionId, phase: a.phase, title: a.title });
+          next.push({
+            ...(a.content ? { content: a.content } : {}),
+            ...(a.createdAt ? { createdAt: a.createdAt } : {}),
+            id: a.id,
+            ...(a.parentArtifactId !== undefined ? { parentArtifactId: a.parentArtifactId } : {}),
+            phase: a.phase,
+            sessionId: a.sessionId ?? '',
+            ...(a.teamWorkspaceId !== undefined ? { teamWorkspaceId: a.teamWorkspaceId } : {}),
+            title: a.title,
+            ...(a.type ? { type: a.type } : {}),
+            ...(a.updatedAt ? { updatedAt: a.updatedAt } : {}),
+            ...(typeof a.version === 'number' ? { version: a.version } : {}),
+          });
         }
         setArtifacts(next);
+        loadedWorkspaceIdRef.current = teamWorkspaceId;
         setLoading(false);
       })
       .catch((err: unknown) => {
         if (reqIdRef.current !== reqId) return;
         setError(err instanceof Error ? err.message : '加载工作区产物失败。');
-        setArtifacts([]);
+        if (loadedWorkspaceIdRef.current !== teamWorkspaceId) {
+          setArtifacts([]);
+        }
         setLoading(false);
       });
   }, [token, gatewayUrl, teamWorkspaceId, recoveredAt]);

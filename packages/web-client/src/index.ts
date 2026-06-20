@@ -48,6 +48,7 @@ export type {
   TeamRuntimeReconcileStaleThreadsResult,
   TeamRuntimePauseAllResult,
   TeamRuntimeResumeAllResult,
+  TeamRuntimeRoleInstanceRecord,
   TeamRuntimeTaskGroupRecord,
   TeamRuntimeSessionRecord,
   TeamToolCallRecord,
@@ -74,6 +75,8 @@ export type {
   ConstitutionLoadResult,
   ConstitutionTemplate,
   ConstitutionTemplatesLoadResult,
+  ConvergeDeviation,
+  ConvergeResult,
   DefaultSoul,
   ForceApplyStateLoadResult,
   ForceApplyState,
@@ -89,6 +92,13 @@ export type {
   SoulRoleLayer,
   TeamArtifactsListResult,
   TeamPhaseAClient,
+  TeamWorkspaceKnowledgeListResult,
+  TeamWorkspaceKnowledgeRecord,
+  TeamWorkspaceKnowledgeRoleLayer,
+  TeamWorkspaceKnowledgeSource,
+  TeamWorkspaceKnowledgeType,
+  UpsertTeamWorkspaceKnowledgeInput,
+  UpsertTeamWorkspaceKnowledgeResult,
   UserMemoryLoadResult,
   UserMemoryRecord,
   VersionConflict,
@@ -141,11 +151,12 @@ export type {
   PendingQuestionRequest,
   QuestionsClient,
 } from './session/questions.js';
-export { createSessionsClient } from './session/sessions.js';
+export { createSessionsClient, createMultiAttachStream } from './session/sessions.js';
 export type {
   DeleteSessionBlockReason,
   DeleteSessionErrorData,
   DeleteSessionResult,
+  MultiAttachCallbacks,
   Session,
   SessionActiveStream,
   SessionBackupRestorePreviewResult,
@@ -191,6 +202,7 @@ export type {
   SessionTurnDiffFileSummary,
   SessionTurnDiffReadModel,
   SessionsClient,
+  SessionsListOptions,
 } from './session/sessions.js';
 export { withTokenRefresh } from './gateway/token-refresh.js';
 export type { TokenStore } from './gateway/token-refresh.js';

@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance } from 'fastify';
+import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as DbModule from '../../infra/db.js';
 import type * as AuthModule from '../../infra/auth.js';
@@ -205,11 +206,105 @@ describe('POST /team/sessions/:sessionId/inbound-messages', () => {
         receptionSessionId: SESSION_ID,
         userIntent: '帮我实现 OAuth 登录',
         teamWorkspaceId: TEAM_WORKSPACE_ID,
-        clientIdempotencyKey: 'route-user-input-1',
+        streamClientRequestId: 'route-user-input-1',
         persistUserMessage: false,
       });
     } finally {
       unsubscribe();
+      await app.close();
+    }
+  });
+
+  it('未传 clientIdempotencyKey 时生成内部 clientRequestId 并传给编排', async () => {
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/team/sessions/${SESSION_ID}/inbound-messages`,
+        headers: { authorization: bearer(app) },
+        payload: {
+          messageType: 'user_input',
+          payload: { text: '没有显式幂等键' },
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+      const data = res.json() as { messageId: string };
+      const inbound = dbModule.sqliteGet<{ client_idempotency_key: string | null }>(
+        `SELECT client_idempotency_key FROM session_inbound_messages WHERE id = ? LIMIT 1`,
+        [data.messageId],
+      );
+      const generatedKey = inbound?.client_idempotency_key ?? '';
+      expect(generatedKey).toMatch(/^team-inbound:user_input:/);
+      expect(generatedKey.length).toBeLessThanOrEqual(128);
+      expect(orchestrateReceptionInputMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          persistUserMessage: false,
+          receptionSessionId: SESSION_ID,
+          streamClientRequestId: generatedKey,
+          userId: USER_ID,
+          userIntent: '没有显式幂等键',
+        }),
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('长 clientIdempotencyKey 原样用于入站幂等，stream 使用规范化 clientRequestId', async () => {
+    const app = await buildApp();
+    const longKey = 'x'.repeat(200);
+    const expectedStreamKey = `team-client:${createHash('sha256')
+      .update(longKey)
+      .digest('hex')
+      .slice(0, 48)}`;
+    try {
+      const first = await app.inject({
+        method: 'POST',
+        url: `/team/sessions/${SESSION_ID}/inbound-messages`,
+        headers: { authorization: bearer(app) },
+        payload: {
+          messageType: 'user_input',
+          payload: { text: '长幂等键输入' },
+          clientIdempotencyKey: longKey,
+        },
+      });
+      const second = await app.inject({
+        method: 'POST',
+        url: `/team/sessions/${SESSION_ID}/inbound-messages`,
+        headers: { authorization: bearer(app) },
+        payload: {
+          messageType: 'user_input',
+          payload: { text: '重复长幂等键输入' },
+          clientIdempotencyKey: longKey,
+        },
+      });
+
+      expect(first.statusCode).toBe(201);
+      expect(second.statusCode).toBe(200);
+      expect((second.json() as { messageId: string }).messageId).toBe(
+        (first.json() as { messageId: string }).messageId,
+      );
+      const inbound = dbModule.sqliteGet<{ client_idempotency_key: string | null }>(
+        `SELECT client_idempotency_key FROM session_inbound_messages LIMIT 1`,
+      );
+      expect(inbound?.client_idempotency_key).toBe(longKey);
+      const persistedMessage = dbModule.sqliteGet<{ data: string }>(
+        `SELECT data FROM message_v2 WHERE session_id = ? LIMIT 1`,
+        [SESSION_ID],
+      );
+      expect(persistedMessage?.data).toContain(expectedStreamKey);
+      expect(orchestrateReceptionInputMock).toHaveBeenCalledTimes(1);
+      expect(orchestrateReceptionInputMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          persistUserMessage: false,
+          receptionSessionId: SESSION_ID,
+          streamClientRequestId: expectedStreamKey,
+          userId: USER_ID,
+          userIntent: '长幂等键输入',
+        }),
+      );
+    } finally {
       await app.close();
     }
   });
@@ -286,6 +381,11 @@ describe('POST /team/sessions/:sessionId/inbound-messages', () => {
       });
 
       expect(res.statusCode).toBe(201);
+      const inbound = dbModule.sqliteGet<{ client_idempotency_key: string | null }>(
+        `SELECT client_idempotency_key FROM session_inbound_messages LIMIT 1`,
+        [],
+      );
+      expect(inbound?.client_idempotency_key).toBeNull();
       const audit = dbModule.sqliteGet<{
         action: string;
         entity_type: string;

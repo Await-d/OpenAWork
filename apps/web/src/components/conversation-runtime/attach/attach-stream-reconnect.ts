@@ -1,4 +1,5 @@
 import type { ModifiedFilesSummaryContent } from '@openAwork/shared';
+import type { UpstreamStreamSummary } from '@openAwork/shared';
 import type { SessionStateStatus } from '../../conversation-runtime/session/session-runtime.js';
 import type { RecoveredActiveAssistantStream } from '../../conversation-runtime/stream/stream-recovery.js';
 import type { ChatBackendUsageSnapshot } from '../../conversation-runtime/stream/stream-usage.js';
@@ -14,6 +15,7 @@ export interface InterruptedAttachStreamState {
   recoveredModifiedFilesSummary?: ModifiedFilesSummaryContent;
   requestStartedAt: number;
   toolCalls: AssistantTraceToolCall[];
+  latestUpstreamSummary?: UpstreamStreamSummary | null;
 }
 
 export interface InterruptedAttachStreamActions {
@@ -66,6 +68,7 @@ export function handleInterruptedAttachStream(input: InterruptedAttachStreamInpu
       thinkingBlocks: state.accumulatedThinkingBlocks,
       toolCalls: state.toolCalls,
       usage: state.accumulatedUsage,
+      ...(state.latestUpstreamSummary ? { upstreamSummary: state.latestUpstreamSummary } : {}),
     });
     actions.clearStreamingBuffers();
     actions.setStreaming(false);

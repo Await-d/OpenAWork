@@ -7,6 +7,7 @@ import {
 
 interface SessionWorkspaceRow {
   metadata_json: string;
+  team_parent_session_id: string | null;
 }
 
 export function resolveSessionWorkspacePath(input: {
@@ -28,15 +29,30 @@ function resolveSessionWorkspacePathRecursive(input: {
   sessionId: string;
   userId: string;
 }): string | null {
-  const directWorkspacePath = extractSessionWorkingDirectory(
-    parseSessionMetadataJson(input.metadataJson),
-  );
+  const parsedMetadata = parseSessionMetadataJson(input.metadataJson);
+
+  const directWorkspacePath = extractSessionWorkingDirectory(parsedMetadata);
   if (directWorkspacePath) {
     return directWorkspacePath;
   }
 
-  const parentSessionId = parseSessionMetadataJson(input.metadataJson)['parentSessionId'];
-  if (typeof parentSessionId !== 'string' || parentSessionId.length === 0) {
+  // 优先从 DB 列 team_parent_session_id 获取父 session（team session 创建时
+  // 父子关系写入 DB 列而非 metadata JSON）。回退到 metadata 中的 parentSessionId
+  // 字段（chat session 或旧数据可能使用此字段）。
+  const sessionRow = sqliteGet<SessionWorkspaceRow>(
+    'SELECT metadata_json, team_parent_session_id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+    [input.sessionId, input.userId],
+  );
+  const dbParentSessionId = sessionRow?.team_parent_session_id ?? null;
+  const metadataParentSessionId = parsedMetadata['parentSessionId'];
+  const parentSessionId =
+    typeof dbParentSessionId === 'string' && dbParentSessionId.length > 0
+      ? dbParentSessionId
+      : typeof metadataParentSessionId === 'string' && metadataParentSessionId.length > 0
+        ? metadataParentSessionId
+        : null;
+
+  if (!parentSessionId) {
     return null;
   }
 
@@ -45,7 +61,7 @@ function resolveSessionWorkspacePathRecursive(input: {
   }
 
   const parentSession = sqliteGet<SessionWorkspaceRow>(
-    'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+    'SELECT metadata_json, team_parent_session_id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
     [parentSessionId, input.userId],
   );
   if (!parentSession) {

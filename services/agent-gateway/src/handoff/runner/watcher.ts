@@ -21,7 +21,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { sqliteAll, sqliteGet } from '../../infra/db.js';
+import { sqliteAll, sqliteGet, sqliteRun } from '../../infra/db.js';
 import {
   claimHandoff,
   failHandoff,
@@ -36,9 +36,9 @@ import {
   touchSessionHeartbeat,
 } from '../bus/heartbeat.js';
 import { getBackgroundTaskScheduler, type BackgroundTaskScheduler } from './scheduler.js';
-import { publishHandoffEvent } from '../bus/team-events-bus.js';
+import { publishHandoffEvent, publishHallucinationEvent } from '../bus/team-events-bus.js';
 import { recordTeamRuntimeIncident } from '../../team/team-runtime-diagnostics-store.js';
-import { createTeamSession } from '../bus/team-session-create.js';
+import { findOrCreateTeamRoleSession } from '../bus/team-session-create.js';
 import {
   buildTeamRosterManifest,
   mergeDelegatedSystemPromptIntoMetadata,
@@ -61,6 +61,44 @@ const DEFAULT_MAX_RETRY = 3;
  * 又远高于实际任务上限（reception/pm1/pm2 < 1min，executor 一般 < 10min）。
  */
 const DEFAULT_RUNNING_TOO_LONG_MS = 30 * 60 * 1000;
+
+interface AssignedMemberSessionSummary {
+  id?: string;
+  personaKey?: string;
+  displayName?: string;
+}
+
+function readAssignedMemberSessionSummary(payload: unknown): AssignedMemberSessionSummary | null {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+    return null;
+  }
+  const assignedMember = (payload as Record<string, unknown>)['assignedMember'];
+  if (
+    typeof assignedMember !== 'object' ||
+    assignedMember === null ||
+    Array.isArray(assignedMember)
+  ) {
+    return null;
+  }
+  const record = assignedMember as Record<string, unknown>;
+  const id = typeof record['id'] === 'string' && record['id'].trim() ? record['id'].trim() : null;
+  const personaKey =
+    typeof record['personaKey'] === 'string' && record['personaKey'].trim()
+      ? record['personaKey'].trim()
+      : null;
+  const displayName =
+    typeof record['displayName'] === 'string' && record['displayName'].trim()
+      ? record['displayName'].trim()
+      : null;
+  if (!id && !personaKey && !displayName) {
+    return null;
+  }
+  return {
+    ...(id ? { id } : {}),
+    ...(personaKey ? { personaKey } : {}),
+    ...(displayName ? { displayName } : {}),
+  };
+}
 
 /**
  * 单条 handoff 的"真正执行体"类型。
@@ -221,7 +259,42 @@ export class HandoffWatcher {
             fromSessionId: record.fromSessionId,
             payload: record.payload,
           });
-          let childMetadataJson = mergeMemberModelIntoMetadata(undefined, memberModel);
+
+          // 从父 session 的 metadata 中继承 teamWorkspaceId，确保子 session 也能
+          // 被 /team/runtime 的 listTeamRuntimeSessionRows 查询到（该查询通过
+          // metadata.teamWorkspaceId 过滤）。没有这一步，PM1/PM2/executor/reviewer
+          // 的 session 不会出现在前端的会话列表中。
+          let childMetadataJson: string | undefined = undefined;
+          try {
+            const parentRow = sqliteGet<{ metadata_json: string }>(
+              'SELECT metadata_json FROM sessions WHERE id = ? LIMIT 1',
+              [record.fromSessionId],
+            );
+            if (parentRow?.metadata_json) {
+              const parentMeta = JSON.parse(parentRow.metadata_json) as Record<string, unknown>;
+              const inherited: Record<string, unknown> = {};
+              if (typeof parentMeta['teamWorkspaceId'] === 'string') {
+                inherited['teamWorkspaceId'] = parentMeta['teamWorkspaceId'];
+              }
+              if (typeof parentMeta['workingDirectory'] === 'string') {
+                inherited['workingDirectory'] = parentMeta['workingDirectory'];
+              }
+              // 继承 yoloMode：team 成员在后台运行，无法与用户交互审批。
+              // 父 session 开启了 yoloMode 时，子 session 也应继承免审批。
+              if (parentMeta['yoloMode'] === true) {
+                inherited['yoloMode'] = true;
+              }
+              if (Object.keys(inherited).length > 0) {
+                childMetadataJson = JSON.stringify(inherited);
+              }
+            }
+          } catch (err) {
+            console.warn(
+              `[watcher] 读取父 session metadata 失败：${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+
+          childMetadataJson = mergeMemberModelIntoMetadata(childMetadataJson, memberModel);
           childMetadataJson = mergeDelegatedSystemPromptIntoMetadata(
             childMetadataJson,
             memberPersona?.systemPrompt,
@@ -235,34 +308,23 @@ export class HandoffWatcher {
           childMetadataJson = mergeMemberCapabilitiesIntoMetadata(childMetadataJson, memberCaps);
           // 动态注入「团队编制清单」：把当前实时花名册（含自定义角色）按层渲染，
           // 让子 session 的成员感知上下游有谁、各自擅长什么 —— 上下关联处的动态提示词。
-          const assignedPersonaKey =
-            record.payload &&
-            typeof record.payload === 'object' &&
-            !Array.isArray(record.payload) &&
-            typeof (record.payload as Record<string, unknown>)['assignedMember'] === 'object'
-              ? (
-                  (record.payload as Record<string, unknown>)['assignedMember'] as Record<
-                    string,
-                    unknown
-                  >
-                )['personaKey']
-              : undefined;
+          const assignedMember = readAssignedMemberSessionSummary(record.payload);
           const rosterManifest = buildTeamRosterManifest({
             fromSessionId: record.fromSessionId,
             currentLayer: record.toRoleLayer,
-            ...(typeof assignedPersonaKey === 'string'
-              ? { currentPersonaKey: assignedPersonaKey }
-              : {}),
+            ...(assignedMember?.personaKey ? { currentPersonaKey: assignedMember.personaKey } : {}),
           });
           childMetadataJson = mergeTeamRosterManifestIntoMetadata(
             childMetadataJson,
             rosterManifest,
           );
-          const { sessionId: toSessionId } = createTeamSession({
+          const { sessionId: toSessionId } = findOrCreateTeamRoleSession({
             userId: record.userId,
             roleLayer: record.toRoleLayer,
             teamParentSessionId: record.fromSessionId,
             handoffState: 'running',
+            personaKey: assignedMember?.personaKey,
+            displayName: assignedMember?.displayName ?? assignedMember?.id,
             ...(childMetadataJson ? { metadataJson: childMetadataJson } : {}),
           });
 
@@ -523,11 +585,12 @@ export class HandoffWatcher {
    * 每条 reception 独立 try/catch，单条出错不影响其余。
    */
   private async reconcileStuckReceptionSessions(): Promise<void> {
-    // 年龄护栏：只处理已在 awaiting_downstream 停留超过 heartbeatStaleAfterMs 的
-    // reception。pm1→pm2 等自动链切换之间存在「上游已 completed、下游尚未创建」的
-    // 微秒级窗口；若不加年龄护栏，恰好命中该窗口会误判死锁、把正常推进中的 reception
-    // 提前复位。用 substate_updated_at 早于截止时刻来过滤掉这种瞬态。
-    const cutoffIso = findStaleHeartbeatCutoffIso(this.options.heartbeatStaleAfterMs);
+    // 年龄护栏：只处理已在 awaiting_downstream 停留超过 15 秒的 reception。
+    // pm1→pm2 等自动链切换之间存在「上游已 completed、下游尚未创建」的
+    // 微秒级窗口；15 秒已远超链切换延迟，但不会让用户在下游全部终止后等太久。
+    // 原为 60s（heartbeatStaleAfterMs），但实际体验中太长导致用户看到卡顿。
+    const RECEPTION_STUCK_CUTOFF_MS = 15_000;
+    const cutoffIso = findStaleHeartbeatCutoffIso(RECEPTION_STUCK_CUTOFF_MS);
     const stuck = sqliteAll<{ id: string; user_id: string }>(
       `SELECT id, user_id
          FROM sessions
@@ -598,6 +661,13 @@ export class HandoffWatcher {
           userId: reception.user_id,
           roleLayer: 'reception',
         });
+        sqliteRun(
+          `UPDATE sessions
+              SET state_status = 'idle',
+                  updated_at = datetime('now')
+            WHERE id = ? AND user_id = ?`,
+          [reception.id, reception.user_id],
+        );
 
         // 写一条用户可见反馈（只在「派发过但全部终止」且含失败/取消时提示重试，
         // 避免对正常完成的任务也刷无谓提示）。
@@ -702,6 +772,60 @@ export class HandoffWatcher {
                   claimToken: input.claimToken,
                 });
           if (didComplete) {
+            // 幻觉检测门禁 — handoff 完成后验证 agent 输出是否真实
+            //（参考 hermes-agent v0.13.0）
+            try {
+              const { listSessionMessagesV2 } = await import(
+                '../../message/message-v2-adapter.js'
+              );
+              const messages = listSessionMessagesV2({
+                sessionId: input.toSessionId,
+                userId: input.handoff.userId,
+              });
+              // 检查最后一条 assistant 消息是否为空或包含错误标志
+              const lastAssistant = [...messages]
+                .reverse()
+                .find((m) => m.role === 'assistant');
+              if (lastAssistant) {
+                const issues: Array<{ type: string; detail: string }> = [];
+                const content = lastAssistant.content;
+                const hasText = content.some(
+                  (c) => c.type === 'text' && c.text.trim().length > 0,
+                );
+                if (!hasText) {
+                  issues.push({
+                    type: 'empty_output',
+                    detail: 'handoff 标记完成但最后一条 assistant 消息无文本内容',
+                  });
+                }
+                // 检查是否包含错误标志但状态是 completed
+                const hasErrorFlag = content.some(
+                  (c) =>
+                    c.type === 'text' &&
+                    /^(error|failed|❌|⚠️.*fail)/i.test(c.text.trim()),
+                );
+                if (hasErrorFlag) {
+                  issues.push({
+                    type: 'output_mismatch',
+                    detail: 'handoff 标记完成但输出包含错误标志',
+                  });
+                }
+                if (issues.length > 0) {
+                  publishHallucinationEvent({
+                    userId: input.handoff.userId,
+                    sessionId: input.toSessionId,
+                    nodeId: input.handoff.id,
+                    issues,
+                  });
+                }
+              }
+            } catch (hallucinationErr) {
+              // 幻觉检测失败不影响 handoff 完成流程
+              console.warn(
+                `[watcher] 幻觉检测失败：${hallucinationErr instanceof Error ? hallucinationErr.message : String(hallucinationErr)}`,
+              );
+            }
+
             publishHandoffEvent({
               type: 'handoff.completed',
               record: {
@@ -710,6 +834,33 @@ export class HandoffWatcher {
                 state: 'completed' as const,
               },
             });
+
+            // 在 toSession 写入完成消息，确保各层级 session 有完整的对话记录。
+            // executor/reviewer 走 stream 管线已有 assistant 消息，但缺少明确的
+            // "任务完成"状态消息；pm1 的完成消息同样缺失。这里补上让前端 recovery
+            // 能拉取到完整的生命周期记录。
+            try {
+              const { appendSessionMessageV2 } =
+                await import('../../message/message-v2-adapter.js');
+              const layerLabel = input.handoff.toRoleLayer;
+              appendSessionMessageV2({
+                sessionId: input.toSessionId,
+                userId: input.handoff.userId,
+                role: 'assistant',
+                agentId: input.handoff.toRoleLayer,
+                content: [
+                  {
+                    type: 'text',
+                    text: `✅ ${layerLabel} 层任务已完成。`,
+                  },
+                ],
+                clientRequestId: `handoff:${input.handoff.id}:completed`,
+              });
+            } catch (msgErr) {
+              console.warn(
+                `[watcher] 写 handoff 完成消息失败：${msgErr instanceof Error ? msgErr.message : String(msgErr)}`,
+              );
+            }
           }
 
           // ─── 五层架构自动链式派发 ─────────────────────────────────────
@@ -772,6 +923,56 @@ export class HandoffWatcher {
                 },
               });
               publishHandoffEvent({ type: 'handoff.created', record: nextHandoff });
+
+              // 向 pm1 session 写入转交消息，让 pm1 的对话历史记录任务已转交 PM2。
+              try {
+                const { appendSessionMessageV2 } =
+                  await import('../../message/message-v2-adapter.js');
+                appendSessionMessageV2({
+                  sessionId: input.toSessionId,
+                  userId: input.handoff.userId,
+                  role: 'assistant',
+                  agentId: 'cassandra',
+                  content: [
+                    {
+                      type: 'text',
+                      text: '📋 spec/plan/tasks 已生成，已转交 PM2（开发管控层）进行架构审查和任务派发。',
+                    },
+                  ],
+                  clientRequestId: `handoff:${input.handoff.id}:auto-chain-pm2`,
+                });
+
+                // 如果 PM1 是质量反馈退回的重新规划，也向 reception session 写消息
+                // 让用户在接待层对话流中看到"已修正并重新提交"的反馈。
+                const isQualityFeedback = originalPayload?.['isQualityFeedback'] === true;
+                if (isQualityFeedback) {
+                  const receptionSessionId = sqliteGet<{ from_session_id: string }>(
+                    `SELECT from_session_id FROM handoff_records
+                     WHERE to_role_layer = 'pm1' AND to_session_id = ?
+                     ORDER BY created_at DESC LIMIT 1`,
+                    [input.toSessionId],
+                  )?.from_session_id;
+                  if (receptionSessionId) {
+                    appendSessionMessageV2({
+                      sessionId: receptionSessionId,
+                      userId: input.handoff.userId,
+                      role: 'assistant',
+                      agentId: 'interaction-agent',
+                      content: [
+                        {
+                          type: 'text',
+                          text: '✅ PM1 已根据质量评审反馈完成重新规划，修正后的 spec/plan/tasks 已提交给 PM2 管控层。PM2 将重新进行架构审查和任务派发。',
+                        },
+                      ],
+                      clientRequestId: `handoff:${input.handoff.id}:replan-submitted`,
+                    });
+                  }
+                }
+              } catch (msgErr) {
+                console.warn(
+                  `[watcher] 写 pm1→pm2 转交消息失败：${msgErr instanceof Error ? msgErr.message : String(msgErr)}`,
+                );
+              }
             } catch (err) {
               recordTeamRuntimeIncident({
                 category: 'handoff_failure',
@@ -825,6 +1026,30 @@ export class HandoffWatcher {
             input.handoff.toRoleLayer === 'executor' ||
             input.handoff.toRoleLayer === 'reviewer'
           ) {
+            // 向 pm2 session 写入子任务完成进度消息，让 pm2 的对话历史记录
+            // 每个 executor/reviewer 的完成情况。
+            try {
+              const { appendSessionMessageV2 } =
+                await import('../../message/message-v2-adapter.js');
+              appendSessionMessageV2({
+                sessionId: input.handoff.fromSessionId,
+                userId: input.handoff.userId,
+                role: 'assistant',
+                agentId: 'zeus',
+                content: [
+                  {
+                    type: 'text',
+                    text: `📦 ${input.handoff.toRoleLayer} 子任务已完成（handoff: ${input.handoff.id.slice(0, 8)}）。`,
+                  },
+                ],
+                clientRequestId: `handoff:${input.handoff.id}:executor-completed`,
+              });
+            } catch (msgErr) {
+              console.warn(
+                `[watcher] 写 executor/reviewer 完成进度到 pm2 失败：${msgErr instanceof Error ? msgErr.message : String(msgErr)}`,
+              );
+            }
+
             try {
               // 找到 pm2 session（即当前 handoff 的 from_session_id）
               const pm2SessionId = input.handoff.fromSessionId;
@@ -870,6 +1095,113 @@ export class HandoffWatcher {
             claimToken: input.claimToken,
             reason,
           });
+
+          // PM1 部分失败降级：如果 PM1 的 artifact-chain 在 spec/plan 生成后、
+          // tasks 生成前失败（LLM 网络错误、校验失败等），spec/plan 产物已经
+          // 落库但 handoff 被标 failed → auto-chain 不会触发 → PM2 永远不执行。
+          // 降级策略：检查 PM1 session 是否已有 spec/plan/tasks 产物，如果有
+          // 至少 spec+plan，就仍然创建 pm1→pm2 handoff 让 PM2 尝试接管。
+          if (didFail && input.handoff.toRoleLayer === 'pm1') {
+            try {
+              const { sqliteGet } = await import('../../infra/db.js');
+              const artifactRow = sqliteGet<{ c: number }>(
+                `SELECT COUNT(*) AS c FROM artifacts
+                  WHERE session_id = ? AND phase IN ('spec', 'plan', 'tasks')`,
+                [input.toSessionId],
+              );
+              const artifactCount = artifactRow?.c ?? 0;
+              // 降级条件放宽：只要有 spec 或 plan 产物就降级。
+              // 即使没有 tasks 产物，PM2 runner 也有从 plan 内容创建默认任务的降级逻辑。
+              const hasAnyArtifact = artifactCount >= 1;
+              if (hasAnyArtifact) {
+                const { createHandoff } = await import('../store/handoff-store.js');
+                const completedRow = sqliteGet<{ result_json: string | null }>(
+                  `SELECT result_json FROM handoff_records WHERE id = ? LIMIT 1`,
+                  [input.handoff.id],
+                );
+                let resultJson: Record<string, unknown> | null = null;
+                if (completedRow?.result_json) {
+                  try {
+                    resultJson = JSON.parse(completedRow.result_json) as Record<string, unknown>;
+                  } catch {
+                    /* ignore */
+                  }
+                }
+                // 如果 result_json 为空（PM1 在写 result_json 之前就失败了），
+                // 从 artifacts 表直接读 spec/plan/tasks artifact id
+                if (!resultJson) {
+                  const specRow = sqliteGet<{ id: string }>(
+                    `SELECT id FROM artifacts WHERE session_id = ? AND phase = 'spec' ORDER BY updated_at DESC LIMIT 1`,
+                    [input.toSessionId],
+                  );
+                  const planRow = sqliteGet<{ id: string }>(
+                    `SELECT id FROM artifacts WHERE session_id = ? AND phase = 'plan' ORDER BY updated_at DESC LIMIT 1`,
+                    [input.toSessionId],
+                  );
+                  const tasksRow = sqliteGet<{ id: string }>(
+                    `SELECT id FROM artifacts WHERE session_id = ? AND phase = 'tasks' ORDER BY updated_at DESC LIMIT 1`,
+                    [input.toSessionId],
+                  );
+                  resultJson = {
+                    ...(specRow?.id ? { specArtifactId: specRow.id } : {}),
+                    ...(planRow?.id ? { planArtifactId: planRow.id } : {}),
+                    ...(tasksRow?.id ? { tasksArtifactId: tasksRow.id } : {}),
+                    degraded: true,
+                    degradationReason: reason,
+                  };
+                }
+                const originalPayload = input.handoff.payload as Record<string, unknown> | null;
+                const teamWorkspaceId =
+                  typeof originalPayload?.['teamWorkspaceId'] === 'string'
+                    ? originalPayload['teamWorkspaceId']
+                    : null;
+                const nextHandoff = createHandoff({
+                  userId: input.handoff.userId,
+                  fromSessionId: input.toSessionId,
+                  fromRoleLayer: 'pm1',
+                  toRoleLayer: 'pm2',
+                  idempotencyKey: `auto-chain-degraded:pm1-pm2:${input.handoff.id}`,
+                  payload: {
+                    resultJson,
+                    teamWorkspaceId,
+                    sourceIntent: originalPayload?.['sourceIntent'] ?? null,
+                    rewrittenIntent: originalPayload?.['rewrittenIntent'] ?? null,
+                    degraded: true,
+                    degradationReason: reason,
+                  },
+                });
+                publishHandoffEvent({ type: 'handoff.created', record: nextHandoff });
+                console.warn(
+                  `[watcher] PM1 失败但已有 ${artifactCount} 个产物，降级创建 pm1→pm2 handoff ${nextHandoff.id}（原因：${reason}）`,
+                );
+                // 写一条消息让用户知道 PM1 部分失败但 PM2 会尝试接管
+                try {
+                  const { appendSessionMessageV2 } =
+                    await import('../../message/message-v2-adapter.js');
+                  appendSessionMessageV2({
+                    sessionId: input.toSessionId,
+                    userId: input.handoff.userId,
+                    role: 'assistant',
+                    agentId: 'pm1',
+                    content: [
+                      {
+                        type: 'text',
+                        text: `⚠️ PM1 规划过程中遇到错误（${reason}），但已有 spec/plan 产物。已降级将任务转交给 PM2 管控层尝试继续。`,
+                      },
+                    ],
+                    clientRequestId: `handoff:${input.handoff.id}:degraded-chain`,
+                  });
+                } catch {
+                  /* best-effort */
+                }
+              }
+            } catch (degradedErr) {
+              console.warn(
+                `[watcher] PM1 降级 auto-chain 失败：${degradedErr instanceof Error ? degradedErr.message : String(degradedErr)}`,
+              );
+            }
+          }
+
           if (didFail) {
             recordTeamRuntimeIncident({
               category: 'handoff_failure',
@@ -899,6 +1231,37 @@ export class HandoffWatcher {
                 `[watcher] setSubstate('failed') 失败：${e instanceof Error ? e.message : String(e)}`,
               );
             }
+
+            // executor/reviewer 失败后主动触发 PM2 quality review 检查：
+            // 子任务虽然失败了（不是 completed），但已进入终态，PM2 应该能感知到
+            // 并决定重试、改派或回退。不等 reconcilePendingPm2QualityReviews 被动扫描。
+            if (
+              input.handoff.toRoleLayer === 'executor' ||
+              input.handoff.toRoleLayer === 'reviewer'
+            ) {
+              try {
+                const pm2SessionId = input.handoff.fromSessionId;
+                const pm2HandoffRow = sqliteGet<{ id: string }>(
+                  `SELECT id FROM handoff_records
+                    WHERE to_session_id = ? AND to_role_layer = 'pm2'
+                      AND state = 'running'
+                    ORDER BY created_at DESC LIMIT 1`,
+                  [pm2SessionId],
+                );
+                if (pm2HandoffRow) {
+                  await reconcilePm2QualityReview({
+                    pm2HandoffId: pm2HandoffRow.id,
+                    userId: input.handoff.userId,
+                    force: true,
+                  });
+                }
+              } catch (reviewErr) {
+                console.warn(
+                  `[watcher] executor/reviewer 失败后触发 quality review 失败：${reviewErr instanceof Error ? reviewErr.message : String(reviewErr)}`,
+                );
+              }
+            }
+
             publishHandoffEvent({
               type: 'handoff.failed',
               record: {
@@ -909,6 +1272,34 @@ export class HandoffWatcher {
               },
               payload: { reason },
             });
+
+            // 在 toSession 写入失败消息，让前端 recovery 能拉取到失败原因，
+            // 而不是只能看到 substate=failed 却不知道为什么。
+            try {
+              const { appendSessionMessageV2 } =
+                await import('../../message/message-v2-adapter.js');
+              const isPm2 = input.handoff.toRoleLayer === 'pm2';
+              const retryHint = isPm2
+                ? '\n\n💡 请前往「任务 / 评审」tab 查看详情，可选择「重派 e/f/g」重新执行或「退回 PM1」重新规划。'
+                : '';
+              appendSessionMessageV2({
+                sessionId: input.toSessionId,
+                userId: input.handoff.userId,
+                role: 'assistant',
+                agentId: input.handoff.toRoleLayer,
+                content: [
+                  {
+                    type: 'text',
+                    text: `❌ ${input.handoff.toRoleLayer} 层任务执行失败：${reason}${retryHint}`,
+                  },
+                ],
+                clientRequestId: `handoff:${input.handoff.id}:failed`,
+              });
+            } catch (msgErr) {
+              console.warn(
+                `[watcher] 写 handoff 失败消息失败：${msgErr instanceof Error ? msgErr.message : String(msgErr)}`,
+              );
+            }
           }
           throw err;
         } finally {

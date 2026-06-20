@@ -3,8 +3,12 @@ import { useNavigate, useParams } from 'react-router';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { useUIStateStore } from '../../stores/ui/uiState.js';
 import { readPersistedActiveStreamSessionId } from '../gateway/useGatewayClient.js';
-import { createSessionsClient, withTokenRefresh, HttpError } from '@openAwork/web-client';
-import type { TokenStore } from '@openAwork/web-client';
+import {
+  createSessionsClient,
+  withTokenRefresh,
+  HttpError,
+} from '@openAwork/web-client';
+import type { TokenStore, SessionsListOptions } from '@openAwork/web-client';
 import { toast } from '../../components/common/feedback/ToastNotification.js';
 import { exportSession } from '../../utils/session/session-transfer.js';
 import {
@@ -34,6 +38,10 @@ export interface Session {
   title: string | null;
   updated_at: string;
   metadata_json?: string;
+  /** 团队会话的父会话 ID（team_parent_session_id 列），chat 会话为 null/缺失 */
+  team_parent_session_id?: string | null;
+  /** 团队会话语义层级（reception/pm1/pm2/executor/reviewer），chat 会话为 null/缺失 */
+  role_layer?: string | null;
 }
 
 function resolveDeletedSessionIds(
@@ -115,12 +123,14 @@ export function useSessions() {
         // toggle entirely so an admin can pin the legacy global
         // listing for the whole user without forcing them to clear
         // the per-tab toggle they may have already enabled.
-        const listOptions =
+        const listOptions: SessionsListOptions = { excludeTeam: true };
+        if (
           sessionListPathFilterFeatureEnabled &&
           sessionListPathFilterEnabled &&
           selectedWorkspacePath
-            ? { path: selectedWorkspacePath }
-            : undefined;
+        ) {
+          listOptions.path = selectedWorkspacePath;
+        }
         const listedSessions = (await createSessionsClient(gatewayUrl).list(
           token,
           listOptions,
@@ -155,7 +165,7 @@ export function useSessions() {
         }
 
         const nonTeamSessions = hydratedSessions.filter(
-          (session) => !hasTeamWorkspace(session.metadata_json),
+          (session) => !isTeamSession(session),
         );
         return applySessionRunStateOverrides(nonTeamSessions, runStateOverridesRef.current);
       });
@@ -431,7 +441,11 @@ export function useSessions() {
   );
 
   const groupedSessionTrees = useMemo(
-    () => filterSessionTreeGroupsByQuery(workspaceCollections.treeGroups, normalizedSessionSearch),
+    () =>
+      filterSessionTreeGroupsByQuery(
+        workspaceCollections.treeGroups,
+        normalizedSessionSearch,
+      ).filter((group) => group.sessions.length > 0),
     [normalizedSessionSearch, workspaceCollections.treeGroups],
   );
 
@@ -588,6 +602,10 @@ function normalizeSessionSummary(
     title: session.title ?? null,
     metadata_json: session.metadata_json,
     updated_at: updatedAt,
+    ...(session.team_parent_session_id != null
+      ? { team_parent_session_id: session.team_parent_session_id }
+      : {}),
+    ...(session.role_layer != null ? { role_layer: session.role_layer } : {}),
   };
 }
 
@@ -610,4 +628,23 @@ function applySessionRunStateOverrides(
   });
 
   return hasChanges ? nextSessions : sessions;
+}
+
+/**
+ * 判断一个会话是否属于 team 会话。
+ *
+ * Team 会话通过以下任一标识识别：
+ * 1. metadata_json 中包含 teamWorkspaceId 字段（reception 根会话）
+ * 2. team_parent_session_id 列有值（pm1/pm2/executor/reviewer 子会话）
+ * 3. role_layer 列有值（所有 team 层级会话）
+ *
+ * 仅检查 metadata_json 中的 teamWorkspaceId 是不够的——某些 team 子会话
+ * 通过 team_parent_session_id 列关联到 team，而非 metadata_json。
+ */
+function isTeamSession(session: Session): boolean {
+  return (
+    hasTeamWorkspace(session.metadata_json) ||
+    session.team_parent_session_id != null ||
+    session.role_layer != null
+  );
 }

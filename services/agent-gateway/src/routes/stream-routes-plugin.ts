@@ -19,6 +19,8 @@ import { buildRunEventEnvelope, deriveRunEventBookend } from '../session/run-eve
 import {
   getRunEventRunId,
   getLatestSessionRunEventSeqByRequest,
+  listRecentSessionRunEventsWithMeta,
+  listSessionRunEvents,
   listSessionRunEventsByRequest,
   listSessionRunEventsByRequestAfterSeq,
   subscribeSessionRunEvents,
@@ -44,6 +46,18 @@ export const STREAM_PLUGIN_ERROR_MESSAGES = {
 const streamAttachQuerySchema = z.object({
   afterSeq: z.coerce.number().int().min(0).default(0),
   clientRequestId: z.string().trim().min(1),
+  token: z.string().trim().min(1),
+});
+
+/**
+ * Multi-attach schema: does NOT require clientRequestId.
+ * Auto-discovers the session's active runtime thread and subscribes to ALL
+ * run events for that session, regardless of which clientRequestId produced them.
+ * Used by the team multi-session SSE manager to stream every running layer's
+ * output in real time.
+ */
+const streamMultiAttachQuerySchema = z.object({
+  afterSeq: z.coerce.number().int().min(0).default(0),
   token: z.string().trim().min(1),
 });
 
@@ -89,6 +103,34 @@ function buildAttachRunEnvelope(input: { clientRequestId: string; event: RunEven
     clientRequestId: input.clientRequestId,
     cursor: {
       clientRequestId: input.clientRequestId,
+      seq: input.seq,
+    },
+    event: input.event,
+    outputOffset: input.seq,
+    seq: input.seq,
+    timestamp: input.event.occurredAt ?? Date.now(),
+  });
+}
+
+/**
+ * Build an SSE envelope for multi-attach. Unlike buildAttachRunEnvelope, this
+ * does not require a known clientRequestId — it uses whatever meta is available
+ * from the event, or falls back to a synthetic id. The seq is the global
+ * per-session row id (not per-clientRequestId), which is what the multi-attach
+ * subscriber receives.
+ */
+function buildMultiAttachRunEnvelope(input: {
+  event: RunEvent;
+  seq: number;
+  clientRequestId?: string;
+}) {
+  const clientRequestId = input.clientRequestId ?? getRunEventRunId(input.event) ?? 'multi-attach';
+  return buildRunEventEnvelope({
+    aggregateId: getRunEventRunId(input.event) ?? clientRequestId,
+    aggregateType: 'run',
+    clientRequestId,
+    cursor: {
+      clientRequestId,
       seq: input.seq,
     },
     event: input.event,
@@ -844,6 +886,235 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       }
     });
   });
+
+  // ─── Multi-Attach SSE endpoint ─────────────────────────────────────
+  // Like /sessions/:id/stream/attach, but does NOT require clientRequestId.
+  // Auto-discovers the session's active runtime thread, replays recent events
+  // (all clientRequestIds), then subscribes to ALL live run events for this
+  // session. Used by the team multi-session SSE manager to stream every
+  // running layer's output in real time without knowing each layer's
+  // clientRequestId in advance.
+  app.get(
+    '/sessions/:id/stream/multi-attach',
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const wl = new WorkflowLogger();
+      const ctx = createRequestContext(
+        request.method,
+        request.url,
+        request.headers as Record<string, string | string[] | undefined>,
+        request.ip,
+      );
+      const routeStep = wl.start('stream.multi-attach.connect');
+      const authStep = wl.startChild(routeStep, 'stream.multi-attach.auth');
+      const rawQuery = request.query as Record<string, string>;
+      const multiAttachToken = rawQuery['token'];
+      let user: JwtPayload;
+      try {
+        user = request.server.jwt.verify<JwtPayload>(multiAttachToken ?? '');
+      } catch {
+        wl.fail(authStep, 'unauthorized');
+        wl.fail(routeStep, 'unauthorized');
+        wl.flush(ctx, 401);
+        return reply.status(401).send({ error: '未授权或登录已失效。' });
+      }
+      wl.succeed(authStep);
+
+      const { id: sessionId } = request.params as { id: string };
+      const parseStep = wl.startChild(
+        routeStep,
+        'stream.multi-attach.parse-query',
+        undefined,
+        { sessionId },
+      );
+      const query = streamMultiAttachQuerySchema.safeParse(request.query);
+      if (!query.success) {
+        wl.fail(parseStep, 'invalid query');
+        wl.fail(routeStep, 'invalid query');
+        wl.flush(ctx, 400);
+        return reply.status(400).send({ error: '查询参数无效。', issues: query.error.issues });
+      }
+      wl.succeed(parseStep);
+
+      const sessionStep = wl.startChild(
+        routeStep,
+        'stream.multi-attach.session-check',
+        undefined,
+        { sessionId },
+      );
+      const sessionRow = sqliteGet<{ id: string }>(
+        'SELECT id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+        [sessionId, user.sub],
+      );
+      if (!sessionRow) {
+        wl.fail(sessionStep, 'session not found');
+        wl.fail(routeStep, 'session not found');
+        wl.flush(ctx, 404);
+        return reply.status(404).send({ error: '目标会话不存在。' });
+      }
+      wl.succeed(sessionStep);
+
+      // Check if there's an active runtime thread (stream is live right now).
+      const currentActiveThread = getFreshSessionRuntimeThread({
+        sessionId,
+        userId: user.sub,
+      });
+
+      const attachOrigin = request.headers['origin'] ?? '*';
+      reply.raw.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+        'Access-Control-Allow-Origin': attachOrigin,
+        'Access-Control-Allow-Credentials': 'true',
+        Vary: 'Origin',
+      });
+      if (!safeWriteReplyRaw(reply, 'retry: 1000\n\n')) {
+        safeEndReplyRaw(reply);
+        return;
+      }
+
+      // Write the active stream metadata as the first event so the client
+      // knows whether the session is currently streaming.
+      if (!safeWriteReplyRaw(
+        reply,
+        `data: ${JSON.stringify({
+          type: 'multi-attach:status',
+          sessionId,
+          activeClientRequestId: currentActiveThread?.clientRequestId ?? null,
+        })}\n\n`,
+      )) {
+        safeEndReplyRaw(reply);
+        return;
+      }
+
+      await new Promise<void>((resolve) => {
+        let settled = false;
+        let lastRowId = query.data.afterSeq;
+        let replayCompleted = false;
+        const pendingLiveEvents: Array<{
+          event: RunEvent;
+          rowId: number;
+          clientRequestId?: string;
+        }> = [];
+        const noopUnsubscribe: () => void = () => undefined;
+        let unsubscribe: () => void = noopUnsubscribe;
+
+        const deliverEvent = (
+          event: RunEvent,
+          rowId: number,
+          clientRequestId?: string,
+        ) => {
+          if (settled || rowId <= lastRowId) {
+            return;
+          }
+          const delivered = safeWriteReplyRaw(
+            reply,
+            `id: ${rowId}\ndata: ${JSON.stringify(
+              buildMultiAttachRunEnvelope({ event, seq: rowId, clientRequestId }),
+            )}\n\n`,
+          );
+          if (!delivered) {
+            cleanup();
+            return;
+          }
+          lastRowId = rowId;
+          // P1-1/P1-2 fix: Do NOT close on terminal events. The session may
+          // start a new round (e.g. next handoff in a chain). Instead, keep
+          // the connection open and let the client decide when to disconnect.
+          // The client closes the EventSource when the session leaves 'running'.
+        };
+
+        let heartbeat: NodeJS.Timeout | null = null;
+        const cleanup = () => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          if (heartbeat) {
+            clearInterval(heartbeat);
+            heartbeat = null;
+          }
+          unsubscribe();
+          request.raw.off('close', cleanup);
+          safeEndReplyRaw(reply);
+          resolve();
+        };
+        heartbeat = setInterval(() => {
+          if (!safeWriteReplyRaw(reply, ': keepalive\n\n')) {
+            cleanup();
+          }
+        }, 10_000);
+
+        // Subscribe to ALL run events for this session (not filtered by
+        // clientRequestId). The meta carries the DB row id (globally monotonic
+        // per session) which we use as the SSE event id for deduplication.
+        unsubscribe = subscribeSessionRunEvents(sessionId, (event, meta?: PublishRunEventMeta) => {
+          const rowId = meta?.rowId;
+          if (typeof rowId !== 'number') {
+            return;
+          }
+
+          if (!replayCompleted) {
+            pendingLiveEvents.push({
+              event,
+              rowId,
+              clientRequestId: meta?.clientRequestId,
+            });
+            return;
+          }
+
+          deliverEvent(event, rowId, meta?.clientRequestId);
+        });
+
+        request.raw.on('close', cleanup);
+
+        // Replay recent events (up to 500 rows) from the DB.
+        // listRecentSessionRunEventsWithMeta returns rows ordered by id ASC,
+        // with the DB row id as `seq`.
+        const replayEvents = listRecentSessionRunEventsWithMeta({
+          sessionId,
+          afterRowId: query.data.afterSeq,
+          limit: 500,
+        });
+        for (const replayEvent of replayEvents) {
+          deliverEvent(
+            replayEvent.event,
+            replayEvent.seq,
+            replayEvent.clientRequestId ?? undefined,
+          );
+        }
+
+        replayCompleted = true;
+        // Sort pending live events by rowId for correct ordering.
+        pendingLiveEvents.sort((left, right) => left.rowId - right.rowId);
+        for (const pendingEvent of pendingLiveEvents) {
+          deliverEvent(pendingEvent.event, pendingEvent.rowId, pendingEvent.clientRequestId);
+        }
+
+        // If there's no active thread and no recent events, end the stream
+        // gracefully so the client can fall back to polling.
+        if (!settled && !currentActiveThread && replayEvents.length === 0) {
+          safeWriteReplyRaw(
+            reply,
+            `data: ${JSON.stringify({ type: 'multi-attach:no-active-stream', sessionId })}\n\n`,
+          );
+          cleanup();
+          return;
+        }
+
+        if (!settled) {
+          wl.succeed(routeStep, undefined, {
+            attached: true,
+            sessionId,
+            replayedCount: replayEvents.length,
+            hasActiveThread: Boolean(currentActiveThread),
+          });
+          wl.flush(ctx, 200);
+        }
+      });
+    },
+  );
 }
 
 function safeSendWs(socket: WebSocket, payload: unknown): boolean {

@@ -9,6 +9,7 @@ import type {
   AgentTeamsSidebarTeam,
 } from '../runtime/data/team-runtime-types.js';
 import { WorkspaceSwitcher } from '../runtime/shell/header/WorkspaceSwitcher.js';
+import { tryFormatJson, looksLikeJson } from '../../../utils/format-json.js';
 
 const FOCUS_BANNER_STYLE: CSSProperties = {
   display: 'grid',
@@ -290,20 +291,13 @@ export function TeamPageSuperbarLeading({
             {selectedTeam.subtitle}
           </span>
           {!compact ? (
-            <>
-              <span
-                data-testid="team-current-session-members"
-                style={CURRENT_SESSION_META_PILL_STYLE}
-              >
-                {memberCount}
-              </span>
-              <span
-                data-testid="team-current-session-online"
-                style={CURRENT_SESSION_META_PILL_STYLE}
-              >
-                {onlineCount}
-              </span>
-            </>
+            <span
+              data-testid="team-current-session-members"
+              style={CURRENT_SESSION_META_PILL_STYLE}
+              title={`${memberCount} · ${onlineCount}`}
+            >
+              {memberCount} · {onlineCount}
+            </span>
           ) : null}
         </span>
       ) : null}
@@ -517,10 +511,13 @@ export function TeamSharedConversationPanel({
                   fontSize: 12,
                   lineHeight: 1.65,
                   color: latestAssistantOutput ? 'var(--fg-default)' : 'var(--fg-muted)',
-                  whiteSpace: 'pre-wrap',
+                  whiteSpace: looksLikeJson(latestAssistantOutput ?? '') ? 'pre' : 'pre-wrap',
+                  fontFamily: looksLikeJson(latestAssistantOutput ?? '') ? 'ui-monospace, SFMono-Regular, monospace' : undefined,
                 }}
               >
-                {latestAssistantOutput ?? '当前共享会话还没有可展示的助手文本输出。'}
+                {latestAssistantOutput
+                  ? tryFormatJson(latestAssistantOutput)
+                  : '当前共享会话还没有可展示的助手文本输出。'}
               </div>
               <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
                 最近同步：{formatSharedDate(sharedSession.share.shareUpdatedAt)}

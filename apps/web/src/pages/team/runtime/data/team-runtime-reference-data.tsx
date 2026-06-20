@@ -7,56 +7,21 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import type {
-  UpdateWorkflowTemplateInput,
-  WorkflowTemplateRecord,
-  SessionTask,
-  SharedSessionDetailRecord,
-  SharedSessionSummaryRecord,
-  TeamAuditLogRecord,
-  TeamRuntimeAlertControlRecord,
-  TeamRuntimeDiagnostics,
-  TeamMemberRecord,
-  TeamMessageRecord,
-  TeamRuntimeSessionRecord,
-  TeamSessionShareRecord,
-  TeamTaskRecord,
-  TeamWorkspaceDetail,
-  TeamWorkspaceSnapshot,
-  TeamWorkspaceSummary,
-} from '@openAwork/web-client';
+import type { TeamRuntimeAlertControlRecord, TeamMessageRecord } from '@openAwork/web-client';
 import { createTeamClient } from '@openAwork/web-client';
 import { categorizeAlwaysPatterns } from '@openAwork/shared-ui';
-import type { CreateTeamSessionInput } from '@openAwork/web-client';
+import type { CreateTeamSessionInput, SessionTask } from '@openAwork/web-client';
 import { useAuthStore } from '../../../../stores/auth/auth.js';
 import { useTeamCollaboration } from '../../hooks/use-team-collaboration.js';
 import type { TeamActionFeedback } from '../../hooks/use-team-collaboration.js';
-import { getSharedSessionStateLabel } from './team-runtime-model.js';
-import { AGENT_TEAMS_EVENT_CONFIG } from './team-runtime-ui-config.js';
 import {
-  type AgentTeamsConversationCard,
-  type AgentTeamsFooterStat,
-  type AgentTeamsMessageCard,
   type AgentTeamsMetricCard,
-  type AgentTeamsOfficeAgent,
   type AgentTeamsOverviewCard,
   type AgentTeamsReviewCard,
   type AgentTeamsRoleChip,
-  type AgentTeamsSidebarSection,
-  type AgentTeamsSidebarTeam,
-  type AgentTeamsWorkflowTemplateCard,
   type AgentTeamsTaskLane,
-  type AgentTeamsTimelineEvent,
-  type AgentTeamsTimelineEventType,
-  type AgentTeamsWorkspaceGroup,
 } from './team-runtime-types.js';
-import {
-  collectRuntimeTasksForSession,
-  mapRuntimeTasksToTeamTaskRecords,
-  mapTaskToLaneId,
-  resolveTaskRecordsForView,
-  sortTeamTaskRecords,
-} from './team-runtime-task-lanes.js';
+import { collectRuntimeTasksForSession, mapTaskToLaneId, resolveTaskRecordsForView } from './team-runtime-task-lanes.js';
 import { collectSessionScope } from './team-runtime-session-scope.js';
 import { scopeTeamRuntimeOverviewData } from './team-runtime-overview-scope.js';
 import {
@@ -80,560 +45,34 @@ import { useTeamRuntimeRoleBindings } from '../hooks/use-team-runtime-role-bindi
 import { useTeamWorkflowTemplates } from '../hooks/use-team-workflow-templates.js';
 import { useHandoffStore } from '../../../../stores/team/team-events.js';
 import type { TeamSessionCreationDraft } from './team-session-creation.types.js';
-
-interface TaskDraftInput {
-  priority: TeamTaskRecord['priority'];
-  status: TeamTaskRecord['status'];
-  title: string;
-}
-
-export interface TeamRuntimeReferenceViewData {
-  activeMode: 'live' | 'mock';
-  activityStats: Record<string, number>;
-  busy: boolean;
-  canCreateSession: boolean;
-  canCreateTemplate: boolean;
-  canManageRuntime: boolean;
-  canManageSessionEntries: boolean;
-  conversationCards: AgentTeamsConversationCard[];
-  createSession: (draft: TeamSessionCreationDraft) => Promise<boolean>;
-  createTemplate: (input: {
-    defaultBindings?: Record<
-      string,
-      { agentId: string; providerId?: string; modelId?: string; variant?: string }
-    >;
-    description?: string;
-    name: string;
-    optionalAgentIds?: string[];
-    provider: string;
-    templateExtra?: {
-      templateScale?: import('@openAwork/web-client').WorkflowTemplateScale | null;
-      templateFocus?: string | null;
-      recommendedFor?: string | null;
-      recommendedDefault?: boolean | null;
-    };
-  }) => Promise<boolean>;
-  duplicateTemplate: (template: WorkflowTemplateRecord) => Promise<boolean>;
-  updateTemplate: (templateId: string, input: UpdateWorkflowTemplateInput) => Promise<boolean>;
-  removeTemplate: (templateId: string) => Promise<boolean>;
-  createWorkspace: (input: {
-    name: string;
-    description?: string;
-    defaultWorkingRoot?: string;
-  }) => Promise<string | null>;
-  createSessionShare: (input: {
-    memberId: string;
-    permission?: TeamSessionShareRecord['permission'];
-    sessionId: string;
-  }) => Promise<boolean>;
-  renameWorkspace: (workspaceId: string, name: string) => Promise<boolean>;
-  renameSession: (sessionId: string, title: string) => Promise<boolean>;
-  deleteWorkspace: (workspaceId: string) => Promise<boolean>;
-  defaultSelectedAgentId: string;
-  defaultSelectedTeamId: string;
-  /**
-   * 默认 reception/b session id（当前工作区中第一个无 parentSessionId 的根会话）。
-   * 用于 ConversationArea 在没有显式选中 session 时回落到此 session 的 chat 渲染。
-   * 若工作区暂无任何 session，则为空串。
-   */
-  defaultReceptionSessionId: string;
-  error: string | null;
-  feedback: TeamActionFeedback | null;
-  footerLead: string;
-  footerStats: AgentTeamsFooterStat[];
-  loading: boolean;
-  messageCards: AgentTeamsMessageCard[];
-  metricCards: AgentTeamsMetricCard[];
-  officeAgents: AgentTeamsOfficeAgent[];
-  overviewCards: AgentTeamsOverviewCard[];
-  reviewCards: AgentTeamsReviewCard[];
-  reviewBusy: boolean;
-  roleChips: AgentTeamsRoleChip[];
-  runningTeams: AgentTeamsSidebarTeam[];
-  sidebarSections: AgentTeamsSidebarSection[];
-  templateCount: number;
-  templateError: string | null;
-  templateLoading: boolean;
-  taskLanes: AgentTeamsTaskLane[];
-  timelineEvents: AgentTeamsTimelineEvent[];
-  topSummary: {
-    description: string;
-    memberCount: string;
-    onlineCount: string;
-    status: string;
-    title: string;
-  };
-  workspaceGroups: AgentTeamsWorkspaceGroup[];
-  workspaces: TeamWorkspaceSummary[];
-  historyTeams: AgentTeamsSidebarTeam[];
-  /** 协作审计日志（共享 / 评论 / 权限变更等）。 */
-  auditLogs: TeamAuditLogRecord[];
-  /** 当前工作区已共享出去的会话。 */
-  sessionShares: TeamSessionShareRecord[];
-  /** 当前运行时会话快照。 */
-  sessions: TeamRuntimeSessionRecord[];
-  /** 别人共享给我的会话摘要；优先暴露 workspace snapshot 中已同步的共享列表。 */
-  sharedSessions: SharedSessionSummaryRecord[];
-  /** 当前选中的共享会话详情。 */
-  selectedSharedSession: SharedSessionDetailRecord | null;
-  /** 当前选中的 team 若本身是共享会话，则这里返回对应详情；否则为 null。 */
-  activeSharedSession: SharedSessionDetailRecord | null;
-  sharedSessionLoading: boolean;
-  /** 选中某条共享会话，驱动共享详情 / presence / 评论等区域切换。 */
-  setSelectedSharedSessionId: (sessionId: string | null) => void;
-  /** 当前工作区成员列表。 */
-  members: TeamMemberRecord[];
-  /** Team runtime 健康诊断。 */
-  diagnostics: TeamRuntimeDiagnostics | undefined;
-  acknowledgeRuntimeAlert: (
-    alertCode: TeamRuntimeAlertControlRecord['alertCode'],
-    note?: string,
-    options?: { sessionId?: string },
-  ) => Promise<boolean>;
-  clearRuntimeAlertControl: (
-    alertCode: TeamRuntimeAlertControlRecord['alertCode'],
-    options?: { sessionId?: string },
-  ) => Promise<boolean>;
-  suppressRuntimeAlert: (
-    alertCode: TeamRuntimeAlertControlRecord['alertCode'],
-    input?: { minutes?: number; note?: string; sessionId?: string },
-  ) => Promise<boolean>;
-  runRuntimeAlertRemediation: (
-    alertCode: TeamRuntimeAlertControlRecord['alertCode'],
-    options?: { force?: boolean; handoffId?: string; sessionId?: string },
-  ) => Promise<boolean>;
-  reconcileStaleDecisions: () => Promise<boolean>;
-  reconcileStaleRuntimeThreads: () => Promise<boolean>;
-  createTask: (input: TaskDraftInput) => Promise<boolean>;
-  moveTask: (taskId: string, direction: 'left' | 'right') => Promise<boolean>;
-  replyReview: (cardId: string, status: AgentTeamsReviewCard['status']) => Promise<boolean>;
-  submitReviewComment: (cardId: string, content: string) => Promise<boolean>;
-  createSharedSessionComment: (content: string) => Promise<boolean>;
-  selectTeam: (teamId: string) => void;
-  sendMessage: (input: {
-    content: string;
-    recipientMemberId?: string | null;
-    replyToMessageId?: string | null;
-    type?: TeamMessageRecord['type'];
-  }) => Promise<boolean>;
-  toggleSessionState: (sessionId: string, currentStatus: string) => Promise<boolean>;
-  deleteSession: (sessionId: string) => Promise<boolean>;
-  updateSessionShare: (
-    shareId: string,
-    input: { permission: TeamSessionShareRecord['permission'] },
-  ) => Promise<boolean>;
-  deleteSessionShare: (shareId: string) => Promise<boolean>;
-  templates: AgentTeamsWorkflowTemplateCard[];
-}
-
-interface TeamRuntimeReferenceDataOptions {
-  activeWorkspace?: TeamWorkspaceDetail | null;
-  collaborationEnabled?: boolean;
-  teamWorkspaceId?: string | null;
-  activeWorkspaceSnapshot?: TeamWorkspaceSnapshot | null;
-  selectedTeamId?: string | null;
-  workspaceSnapshotError?: string | null;
-  workspaceSnapshotLoading?: boolean;
-  workspaceError?: string | null;
-  workspaceLoading?: boolean;
-  workspaces?: TeamWorkspaceSummary[];
-  onWorkspacesChanged?: () => void;
-}
+import { EMPTY_VIEW_DATA } from './team-runtime-reference-empty.js';
+import type {
+  TaskDraftInput,
+  TeamRuntimeReferenceDataOptions,
+  TeamRuntimeReferenceViewData,
+} from './team-runtime-reference-types.js';
+import { ROLE_SLOT_CONFIG } from './team-runtime-reference-config.js';
+import {
+  buildTaskUpdateStatus,
+  formatWorkspaceLabel,
+  mapMemberStatusLabel,
+} from './team-runtime-reference-formatters.js';
+import {
+  buildConversationCardsProjection,
+  buildMessageCardsProjection,
+  buildOfficeAgentsProjection,
+  buildOverviewCardsProjection,
+  buildReviewCardsProjection,
+  buildRuntimeActivityProjection,
+  buildTimelineProjection,
+  buildWorkspaceGroupsProjection,
+} from './team-runtime-reference-projections.js';
+import {
+  resolveSessionTreeTeamRuntimeStatus,
+  type TeamRuntimeSemanticStatus,
+} from './team-runtime-status.js';
 
 const TeamRuntimeReferenceDataContext = createContext<TeamRuntimeReferenceViewData | null>(null);
-
-const ROLE_SLOT_CONFIG = [
-  {
-    accent: 'var(--warning)',
-    badge: '团',
-    fallbackLabel: '团队负责人',
-    fallbackProvider: 'Planner',
-    id: 'leader',
-    leader: true,
-  },
-  {
-    accent: 'var(--accent)',
-    badge: '研',
-    fallbackLabel: '研究员A',
-    fallbackProvider: 'Researcher',
-    id: 'researcher-a',
-    leader: false,
-  },
-  {
-    accent: 'var(--complement)',
-    badge: '执',
-    fallbackLabel: '执行者',
-    fallbackProvider: 'Executor',
-    id: 'researcher-b',
-    leader: false,
-  },
-  {
-    accent: 'var(--danger)',
-    badge: '审',
-    fallbackLabel: '批评者',
-    fallbackProvider: 'Reviewer',
-    id: 'critic',
-    leader: false,
-  },
-] as const;
-
-const OFFICE_AGENT_POSITIONS = [
-  { x: 73, y: 59 },
-  { x: 80, y: 63 },
-  { x: 85, y: 66 },
-  { x: 76, y: 69 },
-] as const;
-
-function mapOfficeStatusFromRole(role: 'planner' | 'researcher' | 'executor' | 'reviewer') {
-  switch (role) {
-    case 'planner':
-      return 'discussing' as const;
-    case 'researcher':
-    case 'executor':
-      return 'working' as const;
-    case 'reviewer':
-      return 'resting' as const;
-  }
-}
-
-function resolveOfficeRole(
-  role: string | null | undefined,
-  index: number,
-): 'planner' | 'researcher' | 'executor' | 'reviewer' {
-  if (role === 'planner' || role === 'researcher' || role === 'executor' || role === 'reviewer') {
-    return role;
-  }
-
-  return index === 0
-    ? 'planner'
-    : index === 1
-      ? 'researcher'
-      : index === 2
-        ? 'executor'
-        : 'reviewer';
-}
-
-function buildEmptyActivityStats(): Record<string, number> {
-  const stats: Record<string, number> = {};
-
-  for (const type of Object.keys(AGENT_TEAMS_EVENT_CONFIG)) {
-    stats[type] = 0;
-  }
-
-  return stats;
-}
-
-const EMPTY_VIEW_DATA: TeamRuntimeReferenceViewData = {
-  activeMode: 'mock',
-  activityStats: buildEmptyActivityStats(),
-  busy: false,
-  canCreateSession: false,
-  canCreateTemplate: false,
-  canManageRuntime: false,
-  canManageSessionEntries: false,
-  conversationCards: [],
-  sessions: [],
-  async createSession() {
-    return false;
-  },
-  async createTemplate() {
-    return false;
-  },
-  async duplicateTemplate() {
-    return false;
-  },
-  async updateTemplate() {
-    return false;
-  },
-  async removeTemplate() {
-    return false;
-  },
-  async createWorkspace() {
-    return null;
-  },
-  async createSessionShare() {
-    return false;
-  },
-  async renameWorkspace() {
-    return false;
-  },
-  async renameSession() {
-    return false;
-  },
-  async deleteWorkspace() {
-    return false;
-  },
-  defaultSelectedAgentId: 'leader',
-  defaultSelectedTeamId: '',
-  defaultReceptionSessionId: '',
-  error: null,
-  feedback: null,
-  footerLead: '活跃 0 / 共 0',
-  footerStats: [],
-  loading: false,
-  messageCards: [],
-  metricCards: [],
-  officeAgents: [],
-  overviewCards: [],
-  reviewCards: [],
-  reviewBusy: false,
-  roleChips: [],
-  runningTeams: [],
-  sidebarSections: [],
-  templateCount: 0,
-  templateError: null,
-  templateLoading: false,
-  templates: [],
-  taskLanes: [
-    { id: 'todo', title: '待办', cards: [] },
-    { id: 'doing', title: '进行中', cards: [] },
-    { id: 'review', title: '待评审', cards: [] },
-  ],
-  timelineEvents: [],
-  topSummary: {
-    description: '当前还没有可展示的 Team Runtime 数据。',
-    memberCount: '0 成员',
-    onlineCount: '0 在线',
-    status: '等待接入',
-    title: '团队工作空间',
-  },
-  workspaceGroups: [],
-  workspaces: [],
-  historyTeams: [],
-  auditLogs: [],
-  sessionShares: [],
-  sharedSessions: [],
-  selectedSharedSession: null,
-  activeSharedSession: null,
-  sharedSessionLoading: false,
-  setSelectedSharedSessionId() {},
-  members: [],
-  diagnostics: undefined,
-  async createTask() {
-    return false;
-  },
-  async acknowledgeRuntimeAlert() {
-    return false;
-  },
-  async clearRuntimeAlertControl() {
-    return false;
-  },
-  async suppressRuntimeAlert() {
-    return false;
-  },
-  async runRuntimeAlertRemediation() {
-    return false;
-  },
-  async reconcileStaleDecisions() {
-    return false;
-  },
-  async reconcileStaleRuntimeThreads() {
-    return false;
-  },
-  async moveTask() {
-    return false;
-  },
-  async replyReview() {
-    return false;
-  },
-  selectTeam() {},
-  async sendMessage() {
-    return false;
-  },
-  async submitReviewComment() {
-    return false;
-  },
-  async createSharedSessionComment() {
-    return false;
-  },
-  async toggleSessionState() {
-    return false;
-  },
-  async deleteSession() {
-    return false;
-  },
-  async updateSessionShare() {
-    return false;
-  },
-  async deleteSessionShare() {
-    return false;
-  },
-};
-
-function formatWorkspaceLabel(workspacePath: string | null): string {
-  if (!workspacePath) {
-    return '未绑定工作区';
-  }
-
-  const segments = workspacePath.split('/').filter(Boolean);
-  return segments[segments.length - 1] ?? workspacePath;
-}
-
-function formatClock(value: number | string): string {
-  const date = typeof value === 'number' ? new Date(value) : new Date(value);
-  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-}
-
-function formatRelativeTime(value: string): string {
-  const delta = Date.now() - new Date(value).getTime();
-  if (Number.isNaN(delta) || delta < 0) {
-    return '刚刚';
-  }
-  const minutes = Math.floor(delta / 60_000);
-  if (minutes < 1) {
-    return '刚刚';
-  }
-  if (minutes < 60) {
-    return `${minutes} 分钟前`;
-  }
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) {
-    return `${hours} 小时前`;
-  }
-  const days = Math.floor(hours / 24);
-  return `${days} 天前`;
-}
-
-function formatRuntimeDuration(values: number[]): string {
-  if (values.length === 0) {
-    return '0m 00s';
-  }
-
-  const startedAt = Math.min(...values);
-  const delta = Math.max(0, Date.now() - startedAt);
-  const totalMinutes = Math.floor(delta / 60_000);
-  const seconds = Math.floor(delta / 1000) % 60;
-  if (totalMinutes >= 60) {
-    const hours = Math.floor(totalMinutes / 60);
-    const minutes = totalMinutes % 60;
-    return `${hours}h ${String(minutes).padStart(2, '0')}m`;
-  }
-  return `${totalMinutes}m ${String(seconds).padStart(2, '0')}s`;
-}
-
-function mapMemberStatusLabel(status: string | undefined): string {
-  if (status === 'working') {
-    return '工作中';
-  }
-  if (status === 'done') {
-    return '已完成';
-  }
-  if (status === 'error') {
-    return '异常';
-  }
-  return '空闲';
-}
-
-function isRuntimeSessionPaused(stateStatus: string | undefined, paused?: boolean): boolean {
-  if (paused === true) {
-    return true;
-  }
-  return stateStatus === 'paused' || stateStatus === 'idle';
-}
-
-function isSharedSessionPaused(stateStatus: string | undefined): boolean {
-  return stateStatus === 'paused' || stateStatus === 'idle';
-}
-
-function mapSidebarStatus(
-  stateStatus: string | undefined,
-  paused?: boolean,
-): AgentTeamsSidebarTeam['status'] {
-  if (isRuntimeSessionPaused(stateStatus, paused)) {
-    return 'paused';
-  }
-  if (stateStatus === 'running') {
-    return 'running';
-  }
-  return 'completed';
-}
-
-function mapMessageCardType(type: TeamMessageRecord['type']): AgentTeamsMessageCard['type'] {
-  return type;
-}
-
-function mapConversationType(type: TeamMessageRecord['type']): AgentTeamsConversationCard['type'] {
-  if (type === 'question') {
-    return 'question';
-  }
-  if (type === 'result') {
-    return 'result';
-  }
-  if (type === 'error') {
-    return 'direct';
-  }
-  return 'broadcast';
-}
-
-function mapTimelineEventTypeFromMessage(
-  type: TeamMessageRecord['type'],
-): AgentTeamsTimelineEventType {
-  if (type === 'question') {
-    return 'user_input';
-  }
-  if (type === 'error') {
-    return 'error';
-  }
-  if (type === 'result') {
-    return 'task_complete';
-  }
-  return 'assistant_message';
-}
-
-function mapTimelineEventTypeFromAudit(
-  action: TeamAuditLogRecord['action'],
-): AgentTeamsTimelineEventType {
-  if (action === 'capability_violation') {
-    return 'error';
-  }
-  if (action === 'shared_comment_created') {
-    return 'assistant_message';
-  }
-  if (action === 'shared_question_replied') {
-    return 'user_input';
-  }
-  if (action === 'shared_permission_replied') {
-    return 'waiting_confirmation';
-  }
-  if (action === 'share_created') {
-    return 'session_start';
-  }
-  if (action === 'share_deleted') {
-    return 'write';
-  }
-  return 'tool_use';
-}
-
-function mapTimelineEventTypeFromRuntimeTask(
-  status: SessionTask['status'],
-): AgentTeamsTimelineEventType {
-  if (status === 'completed') {
-    return 'task_complete';
-  }
-  if (status === 'failed') {
-    return 'error';
-  }
-  if (status === 'running') {
-    return 'thinking';
-  }
-  return 'waiting_confirmation';
-}
-
-function buildTaskUpdateStatus(
-  currentStatus: TeamTaskRecord['status'],
-  direction: 'left' | 'right',
-): 'pending' | 'in_progress' | 'done' | 'failed' | null {
-  if (currentStatus === 'pending') {
-    return direction === 'right' ? 'in_progress' : null;
-  }
-  if (currentStatus === 'in_progress') {
-    return direction === 'left' ? 'pending' : 'done';
-  }
-  if (currentStatus === 'completed' || currentStatus === 'failed') {
-    return direction === 'left' ? 'in_progress' : null;
-  }
-  return null;
-}
 
 export function TeamRuntimeReferenceDataProvider({
   children,
@@ -696,6 +135,7 @@ export function useResolvedTeamRuntimeReferenceData(
   // 必须基于它 + runtimeTasks + sessions，而不是 V1 的 team_messages/team_tasks
   // 手动协作表——后者在团队自动执行时根本不写入，导致概览长期显示 0（用了却统计不到）。
   const handoffsMap = useHandoffStore((state) => state.handoffs);
+  const handoffEntries = useMemo(() => Array.from(handoffsMap.values()), [handoffsMap]);
 
   const selectedSharedSummary = useMemo(
     () =>
@@ -777,6 +217,7 @@ export function useResolvedTeamRuntimeReferenceData(
       content: string;
       recipientMemberId?: string | null;
       replyToMessageId?: string | null;
+      sessionId?: string | null;
       type?: TeamMessageRecord['type'];
     }) => {
       const content = input.content.trim();
@@ -789,10 +230,11 @@ export function useResolvedTeamRuntimeReferenceData(
         recipientMemberId: input.recipientMemberId ?? null,
         replyToMessageId: input.replyToMessageId ?? null,
         senderId: collaboration.members[0]?.id,
+        sessionId: input.sessionId ?? selectedRuntimeScopeSessionId,
         type: input.type ?? 'update',
       });
     },
-    [collaboration.createMessage, collaboration.members],
+    [collaboration.createMessage, collaboration.members, selectedRuntimeScopeSessionId],
   );
 
   const createSession = useCallback(
@@ -836,7 +278,7 @@ export function useResolvedTeamRuntimeReferenceData(
             message: '创建团队会话失败，请稍后重试',
             tone: 'error',
           });
-          return false;
+          return null;
         }
         // 立刻把新建的 session 注入到 collaboration.sessions 中，
         // 避免等 refresh 完成前 defaultReceptionSessionId 为空导致对话区空白。
@@ -849,13 +291,13 @@ export function useResolvedTeamRuntimeReferenceData(
             : '已创建团队会话，但最新运行时快照暂未刷新，系统会自动重试。',
           tone: 'success',
         });
-        return true;
+        return session.id;
       } catch (reason) {
         setLocalFeedback({
           message: reason instanceof Error ? reason.message : '创建团队会话失败',
           tone: 'error',
         });
-        return false;
+        return null;
       } finally {
         setSessionActionBusy(false);
       }
@@ -1339,12 +781,51 @@ export function useResolvedTeamRuntimeReferenceData(
       : null;
   }, [effectiveSessions, selectedRuntimeScopeSessionId]);
 
+  // runtimeTaskGroupsSource 优先用 workspace snapshot（更即时），回退到 collaboration。
+  // 提前定义，供 scopedRuntimeTasksFromGroups 和 selectedRuntimeTaskRecords 共用。
+  const runtimeTaskGroupsSource =
+    activeWorkspaceSnapshot?.runtimeTaskGroups.length != null &&
+    activeWorkspaceSnapshot.runtimeTaskGroups.length > 0
+      ? activeWorkspaceSnapshot.runtimeTaskGroups
+      : collaboration.runtimeTaskGroups;
+
+  // 从 runtimeTaskGroups 按 session scope 提取全部相关任务。
+  // collaboration.runtimeTasks 只在共享会话选中时才有数据（依赖 selectedSharedSessionId），
+  // 选中运行时会话时为空——直接用它会导致 runtimeActivity 任务统计全为 0。
+  // 这里用 collectRuntimeTasksForSession 按 session scope 提取，覆盖两种场景。
+  // 使用 runtimeTaskGroupsSource 与 selectedRuntimeTaskRecords 保持同源。
+  const scopedRuntimeTasksFromGroups = useMemo(
+    () =>
+      collectRuntimeTasksForSession(
+        runtimeTaskGroupsSource,
+        selectedRuntimeScopeSessionId,
+        selectedSessionScope,
+      ),
+    [runtimeTaskGroupsSource, selectedRuntimeScopeSessionId, selectedSessionScope],
+  );
+
+  // 合并：优先用从 groups 按 scope 提取的任务（覆盖运行时会话场景），
+  // 再补充 collaboration.runtimeTasks（共享会话场景下已按 selectedSharedSessionId 提取）。
+  const effectiveRuntimeTasksForScope = useMemo(() => {
+    const deduped = new Map<string, SessionTask>();
+    for (const task of scopedRuntimeTasksFromGroups) {
+      deduped.set(task.id, task);
+    }
+    for (const task of collaboration.runtimeTasks) {
+      const existing = deduped.get(task.id);
+      if (!existing || task.updatedAt > existing.updatedAt) {
+        deduped.set(task.id, task);
+      }
+    }
+    return Array.from(deduped.values());
+  }, [collaboration.runtimeTasks, scopedRuntimeTasksFromGroups]);
+
   const scopedOverviewData = useMemo(
     () =>
       scopeTeamRuntimeOverviewData({
         selectedSessionId: selectedRuntimeScopeSessionId,
-        handoffs: Array.from(handoffsMap.values()),
-        runtimeTasks: collaboration.runtimeTasks,
+        handoffs: handoffEntries,
+        runtimeTasks: effectiveRuntimeTasksForScope,
         sessions: effectiveSessions,
         messages: collaboration.messages,
         auditLogs: collaboration.auditLogs,
@@ -1353,276 +834,139 @@ export function useResolvedTeamRuntimeReferenceData(
     [
       collaboration.auditLogs,
       collaboration.messages,
-      collaboration.runtimeTasks,
+      effectiveRuntimeTasksForScope,
       effectiveSharedSessions,
       effectiveSessions,
-      handoffsMap,
+      handoffEntries,
       selectedRuntimeScopeSessionId,
     ],
   );
 
-  const isSelectedTeamPaused = useMemo(
+  // 从 runtimeTaskGroups 展开全量任务列表（不按 session scope 过滤），
+  // 供 runtimeSessionStatuses / sharedSessionStatuses 计算每个 session 的状态。
+  // collaboration.runtimeTasks 只在共享会话选中时有数据，不能覆盖运行时会话场景。
+  const allRuntimeTasksFromGroups = useMemo(
+    () => {
+      const deduped = new Map<string, SessionTask>();
+      for (const group of runtimeTaskGroupsSource) {
+        for (const task of group.tasks) {
+          const existing = deduped.get(task.id);
+          if (!existing || task.updatedAt > existing.updatedAt) {
+            deduped.set(task.id, task);
+          }
+        }
+      }
+      return Array.from(deduped.values());
+    },
+    [runtimeTaskGroupsSource],
+  );
+
+  // 合并 groups 展开的任务和 collaboration.runtimeTasks，作为全量任务来源。
+  const effectiveAllRuntimeTasks = useMemo(() => {
+    const deduped = new Map<string, SessionTask>();
+    for (const task of allRuntimeTasksFromGroups) {
+      deduped.set(task.id, task);
+    }
+    for (const task of collaboration.runtimeTasks) {
+      const existing = deduped.get(task.id);
+      if (!existing || task.updatedAt > existing.updatedAt) {
+        deduped.set(task.id, task);
+      }
+    }
+    return Array.from(deduped.values());
+  }, [allRuntimeTasksFromGroups, collaboration.runtimeTasks]);
+
+  const runtimeSessionStatuses = useMemo(() => {
+    const statuses = new Map<string, TeamRuntimeSemanticStatus>();
+    for (const session of effectiveSessions) {
+      statuses.set(
+        session.id,
+        resolveSessionTreeTeamRuntimeStatus({
+          rootSessionId: session.id,
+          paused: session.paused ?? false,
+          stateStatus: session.stateStatus,
+          sessions: effectiveSessions,
+          handoffs: handoffEntries,
+          runtimeTasks: effectiveAllRuntimeTasks,
+        }),
+      );
+    }
+    return statuses;
+  }, [effectiveAllRuntimeTasks, effectiveSessions, handoffEntries]);
+
+  const sharedSessionStatuses = useMemo(() => {
+    const statuses = new Map<string, TeamRuntimeSemanticStatus>();
+    for (const sharedSession of effectiveSharedSessions) {
+      statuses.set(
+        sharedSession.sessionId,
+        resolveSessionTreeTeamRuntimeStatus({
+          rootSessionId: sharedSession.sessionId,
+          stateStatus: sharedSession.stateStatus,
+          sessions: effectiveSessions,
+          handoffs: handoffEntries,
+          runtimeTasks: effectiveAllRuntimeTasks,
+        }),
+      );
+    }
+    return statuses;
+  }, [effectiveAllRuntimeTasks, effectiveSharedSessions, effectiveSessions, handoffEntries]);
+
+  const selectedRuntimeStatus = useMemo(
     () =>
-      isSharedSessionPaused(selectedSharedSummary?.stateStatus) ||
-      isRuntimeSessionPaused(selectedRuntimeSession?.stateStatus, selectedRuntimeSession?.paused),
+      selectedRuntimeSession
+        ? (runtimeSessionStatuses.get(selectedRuntimeSession.id) ?? 'idle')
+        : null,
+    [runtimeSessionStatuses, selectedRuntimeSession],
+  );
+
+  const selectedSharedStatus = useMemo(
+    () =>
+      selectedSharedSummary
+        ? (sharedSessionStatuses.get(selectedSharedSummary.sessionId) ?? 'idle')
+        : null,
+    [selectedSharedSummary, sharedSessionStatuses],
+  );
+
+  const isSelectedTeamPaused =
+    selectedSharedStatus === 'paused' || selectedRuntimeStatus === 'paused';
+
+  const {
+    workspaceGroups: effectiveWorkspaceGroups,
+    runningTeams,
+    historyTeams,
+    defaultSelectedTeamId,
+    defaultReceptionSessionId,
+  } = useMemo(
+    () =>
+      buildWorkspaceGroupsProjection({
+        activeWorkspaceDefaultWorkingRoot: activeWorkspace?.defaultWorkingRoot ?? null,
+        createdSessionId,
+        effectiveSharedSessions,
+        effectiveSessions,
+        runtimeSessionStatuses,
+        sharedSessionStatuses,
+        runtimeTasks: effectiveAllRuntimeTasks,
+        selectedSharedSessionId: collaboration.selectedSharedSessionId,
+      }),
     [
-      selectedRuntimeSession?.paused,
-      selectedRuntimeSession?.stateStatus,
-      selectedSharedSummary?.stateStatus,
+      activeWorkspace?.defaultWorkingRoot,
+      effectiveAllRuntimeTasks,
+      collaboration.selectedSharedSessionId,
+      createdSessionId,
+      effectiveSessions,
+      effectiveSharedSessions,
+      runtimeSessionStatuses,
+      sharedSessionStatuses,
     ],
   );
 
-  // --- Split memos: workspace groups ---
-  const workspaceGroups = useMemo(() => {
-    if (effectiveSessions.length === 0 && effectiveSharedSessions.length === 0) {
-      return [];
-    }
-
-    // 预聚合：以 sessionId 为 key 的任务统计（runtimeTasks 含 SessionTask.sessionId 字段）
-    interface TaskAgg {
-      total: number;
-      running: number;
-      completed: number;
-      failed: number;
-      pending: number;
-      // 当前最早开始的 running 任务（用于显示「正在做：X」）
-      currentTaskTitle?: string;
-      currentTaskStartedAt?: number;
-      // 参与的 agent 集合
-      agents: Set<string>;
-      // 全部任务的最早 startedAt 和最晚 completedAt（用于耗时）
-      earliestStartedAt?: number;
-      latestCompletedAt?: number;
-    }
-    const taskStats = new Map<string, TaskAgg>();
-    for (const task of collaboration.runtimeTasks) {
-      const sid = task.sessionId;
-      if (!sid) continue;
-      const cur =
-        taskStats.get(sid) ??
-        ({
-          total: 0,
-          running: 0,
-          completed: 0,
-          failed: 0,
-          pending: 0,
-          agents: new Set<string>(),
-        } satisfies TaskAgg);
-      cur.total += 1;
-      if (task.status === 'running') {
-        cur.running += 1;
-        // 记录最早开始的 running 任务作为「正在做」展示
-        if (
-          task.startedAt != null &&
-          (cur.currentTaskStartedAt == null || task.startedAt < cur.currentTaskStartedAt)
-        ) {
-          cur.currentTaskStartedAt = task.startedAt;
-          cur.currentTaskTitle = task.title;
-        } else if (cur.currentTaskTitle == null) {
-          cur.currentTaskTitle = task.title;
-        }
-      } else if (task.status === 'completed') cur.completed += 1;
-      else if (task.status === 'failed') cur.failed += 1;
-      else if (task.status === 'pending') cur.pending += 1;
-
-      if (task.assignedAgent && task.assignedAgent.length > 0) {
-        cur.agents.add(task.assignedAgent);
-      }
-      if (task.startedAt != null) {
-        if (cur.earliestStartedAt == null || task.startedAt < cur.earliestStartedAt) {
-          cur.earliestStartedAt = task.startedAt;
-        }
-      }
-      if (task.completedAt != null) {
-        if (cur.latestCompletedAt == null || task.completedAt > cur.latestCompletedAt) {
-          cur.latestCompletedAt = task.completedAt;
-        }
-      }
-      taskStats.set(sid, cur);
-    }
-
-    const buildExtraFields = (sid: string) => {
-      const stats = taskStats.get(sid);
-      if (!stats) return {};
-      const out: Partial<AgentTeamsSidebarTeam> = {
-        taskTotal: stats.total,
-        taskRunning: stats.running,
-        taskCompleted: stats.completed,
-        taskFailed: stats.failed,
-        taskPending: stats.pending,
-      };
-      if (stats.currentTaskTitle) out.currentTaskTitle = stats.currentTaskTitle;
-      if (stats.agents.size > 0) {
-        out.agents = Array.from(stats.agents).sort();
-      }
-      // 计算耗时：仍在运行 → 从 earliestStartedAt 到现在；已结束 → 从 earliestStartedAt 到 latestCompletedAt
-      if (stats.earliestStartedAt != null) {
-        const endTs = stats.running > 0 ? Date.now() : (stats.latestCompletedAt ?? Date.now());
-        const ms = Math.max(0, endTs - stats.earliestStartedAt);
-        if (ms > 0) out.durationMs = ms;
-      }
-      return out;
-    };
-
-    // 反向汇总：parent → 子会话数
-    const childCount = new Map<string, number>();
-    for (const session of effectiveSessions) {
-      if (session.parentSessionId) {
-        childCount.set(session.parentSessionId, (childCount.get(session.parentSessionId) ?? 0) + 1);
-      }
-    }
-
-    // 解析 metadataJson 工具
-    const parseWorkingDirectory = (metadataJson: string): string | undefined => {
-      if (!metadataJson) return undefined;
-      try {
-        const meta = JSON.parse(metadataJson) as Record<string, unknown>;
-        const wd = meta['workingDirectory'];
-        return typeof wd === 'string' && wd.length > 0 ? wd : undefined;
-      } catch {
-        return undefined;
-      }
-    };
-
-    const groups = new Map<string, AgentTeamsWorkspaceGroup>();
-    const seenSessionIds = new Set<string>();
-
-    for (const session of effectiveSessions) {
-      if (seenSessionIds.has(session.id)) continue;
-      seenSessionIds.add(session.id);
-      const key = session.workspacePath ?? '__unbound__';
-      const current = groups.get(key) ?? {
-        workspaceLabel: formatWorkspaceLabel(session.workspacePath),
-        workspacePath: session.workspacePath,
-        sessions: [],
-      };
-      const wd = parseWorkingDirectory(session.metadataJson ?? '');
-      current.sessions.push({
-        id: session.id,
-        isSharedSession: false,
-        status: mapSidebarStatus(session.stateStatus, session.paused),
-        subtitle: getSharedSessionStateLabel(session.stateStatus),
-        title: session.title ?? session.id,
-        updatedAt: session.updatedAt,
-        ...buildExtraFields(session.id),
-        ...(childCount.has(session.id) ? { childSessionCount: childCount.get(session.id) } : {}),
-        ...(wd ? { workingDirectory: wd } : {}),
-        ...(session.parentSessionId ? { isDerived: true } : {}),
-      });
-      groups.set(key, current);
-    }
-
-    for (const sharedSession of effectiveSharedSessions) {
-      if (seenSessionIds.has(sharedSession.sessionId)) continue;
-      seenSessionIds.add(sharedSession.sessionId);
-      const key = sharedSession.workspacePath ?? '__unbound__';
-      const current = groups.get(key) ?? {
-        workspaceLabel: formatWorkspaceLabel(sharedSession.workspacePath),
-        workspacePath: sharedSession.workspacePath,
-        sessions: [],
-      };
-      current.sessions.push({
-        id: sharedSession.sessionId,
-        isSharedSession: true,
-        status: mapSidebarStatus(sharedSession.stateStatus),
-        subtitle: getSharedSessionStateLabel(sharedSession.stateStatus),
-        title: sharedSession.title ?? sharedSession.sessionId,
-        updatedAt: sharedSession.shareUpdatedAt,
-        ...buildExtraFields(sharedSession.sessionId),
-        ...(childCount.has(sharedSession.sessionId)
-          ? { childSessionCount: childCount.get(sharedSession.sessionId) }
-          : {}),
-      });
-      groups.set(key, current);
-    }
-
-    return Array.from(groups.values()).map((group) => ({
-      ...group,
-      sessions: [...group.sessions].sort((left, right) =>
-        left.title.localeCompare(right.title, 'zh-CN'),
-      ),
-    }));
-  }, [collaboration.runtimeTasks, effectiveSessions, effectiveSharedSessions]);
-
-  const effectiveWorkspaceGroups = useMemo(() => {
-    if (!activeWorkspace?.defaultWorkingRoot) {
-      return workspaceGroups;
-    }
-    const filteredGroups = workspaceGroups.filter(
-      (group) => group.workspacePath === activeWorkspace.defaultWorkingRoot,
-    );
-    return filteredGroups.length > 0 ? filteredGroups : workspaceGroups;
-  }, [activeWorkspace?.defaultWorkingRoot, workspaceGroups]);
-
-  const { runningTeams, historyTeams, defaultSelectedTeamId, defaultReceptionSessionId } =
-    useMemo(() => {
-      const allSidebarTeams = effectiveWorkspaceGroups.flatMap((group) => group.sessions);
-      const running = allSidebarTeams.filter((team) => team.status === 'running');
-      const history = allSidebarTeams.filter((team) => team.status !== 'running');
-      const preferredWorkspacePath = activeWorkspace?.defaultWorkingRoot ?? null;
-      const defaultId =
-        effectiveSessions.find(
-          (session) =>
-            preferredWorkspacePath != null && session.workspacePath === preferredWorkspacePath,
-        )?.id ??
-        effectiveSharedSessions.find(
-          (session) =>
-            session.sessionId === collaboration.selectedSharedSessionId &&
-            (preferredWorkspacePath == null || session.workspacePath === preferredWorkspacePath),
-        )?.sessionId ??
-        effectiveSharedSessions.find(
-          (session) =>
-            preferredWorkspacePath != null && session.workspacePath === preferredWorkspacePath,
-        )?.sessionId ??
-        collaboration.selectedSharedSessionId ??
-        running[0]?.id ??
-        history[0]?.id ??
-        '';
-
-      // defaultReceptionSessionId · Phase A
-      // 选取首个「根会话」作为 reception/b session：
-      //   1. 优先匹配当前 workspace 的 root sessions（parentSessionId == null）
-      //   2. 没匹配上时回退到任意 root session
-      //   3. 还是没有就回退到 defaultSelectedTeamId
-      // 这与"每个 workspace 有且仅有一个常驻 b session"的约定对齐；
-      // 即使后端暂时没有 role_layer 字段，根 session = b session 这条
-      // 启发式在当前 team runtime 协议下是稳定成立的。
-      const inWorkspaceRoots = effectiveSessions.filter(
-        (session) =>
-          session.parentSessionId == null &&
-          (preferredWorkspacePath == null || session.workspacePath === preferredWorkspacePath),
-      );
-      const allRoots = effectiveSessions.filter((session) => session.parentSessionId == null);
-      const receptionId =
-        inWorkspaceRoots[0]?.id ?? allRoots[0]?.id ?? createdSessionId ?? defaultId;
-
-      return {
-        runningTeams: running,
-        historyTeams: history,
-        defaultSelectedTeamId: defaultId,
-        defaultReceptionSessionId: receptionId,
-      };
-    }, [
-      effectiveWorkspaceGroups,
-      activeWorkspace?.defaultWorkingRoot,
-      effectiveSessions,
-      effectiveSharedSessions,
-      collaboration.selectedSharedSessionId,
-      createdSessionId,
-    ]);
-
   // --- Split memos: metric cards ---
   // --- Split memos: task lanes ---
-  const runtimeTaskGroupsSource =
-    activeWorkspaceSnapshot?.runtimeTaskGroups.length != null &&
-    activeWorkspaceSnapshot.runtimeTaskGroups.length > 0
-      ? activeWorkspaceSnapshot.runtimeTaskGroups
-      : collaboration.runtimeTaskGroups;
-
   const selectedRuntimeTaskRecords = useMemo(
     () =>
       resolveTaskRecordsForView({
         selectedSessionId: selectedRuntimeScopeSessionId,
+        selectedSessionScope,
         runtimeTaskGroups: runtimeTaskGroupsSource,
         teamTasks: collaboration.tasks,
         runtimeTaskRecords: collaboration.runtimeTaskRecords,
@@ -1631,6 +975,7 @@ export function useResolvedTeamRuntimeReferenceData(
       collaboration.runtimeTaskRecords,
       collaboration.tasks,
       runtimeTaskGroupsSource,
+      selectedSessionScope,
       selectedRuntimeScopeSessionId,
     ],
   );
@@ -1643,10 +988,13 @@ export function useResolvedTeamRuntimeReferenceData(
     ];
 
     for (const task of selectedRuntimeTaskRecords) {
-      const assigneeName = task.assigneeId
-        ? (memberNameById.get(task.assigneeId) ?? '未分配')
-        : '未分配';
+      const assigneeName = task.assignedAgent
+        ? (memberNameById.get(task.assignedAgent) ?? task.assignedAgent)
+        : task.assigneeId
+          ? (memberNameById.get(task.assigneeId) ?? '未分配')
+          : '未分配';
       const assigneeAccent =
+        (task.assignedAgent ? accentByMemberId.get(task.assignedAgent) : undefined) ??
         (task.assigneeId ? accentByMemberId.get(task.assigneeId) : undefined) ??
         ROLE_SLOT_CONFIG[1].accent;
       lanes
@@ -1673,414 +1021,89 @@ export function useResolvedTeamRuntimeReferenceData(
   }, [selectedRuntimeTaskRecords, memberNameById, accentByMemberId]);
 
   // --- Split memos: conversation cards ---
-  const conversationCards = useMemo((): AgentTeamsConversationCard[] => {
-    const items = [
-      ...scopedOverviewData.messages.map((message) => {
-        const name = memberNameById.get(message.memberId) ?? '团队成员';
-        const title =
-          message.content.length > 20 ? `${message.content.slice(0, 20)}…` : message.content;
-        return {
-          body: message.content,
-          agentId: message.memberId,
-          id: `message-${message.id}`,
-          meta: `${name} · 团队消息`,
-          role: name,
-          roleAccent: accentByMemberId.get(message.memberId) ?? ROLE_SLOT_CONFIG[0].accent,
-          timestamp: formatClock(message.timestamp),
-          title,
-          type: mapConversationType(message.type),
-        } satisfies AgentTeamsConversationCard;
+  const conversationCards = useMemo(
+    () =>
+      buildConversationCardsProjection({
+        auditLogs: scopedOverviewData.auditLogs,
+        accentByMemberId,
+        memberNameById,
+        messages: scopedOverviewData.messages,
       }),
-      ...scopedOverviewData.auditLogs.map((log, index) => {
-        const accent =
-          ROLE_SLOT_CONFIG[index % ROLE_SLOT_CONFIG.length]?.accent ?? ROLE_SLOT_CONFIG[0].accent;
-        return {
-          body: log.detail ?? log.summary,
-          agentId: log.actorUserId ?? undefined,
-          id: `audit-${log.id}`,
-          meta: `${log.actorEmail ?? '系统'} · 审计轨迹`,
-          role: log.actorEmail ?? '系统',
-          roleAccent: accent,
-          timestamp: formatClock(log.createdAt),
-          title: log.summary,
-          type: 'result' as const,
-        } satisfies AgentTeamsConversationCard;
-      }),
-    ]
-      .sort((left, right) => right.timestamp.localeCompare(left.timestamp, 'zh-CN'))
-      .slice(0, 6);
-
-    return items.length > 0
-      ? items
-      : [
-          {
-            body: '当前还没有团队消息，发送第一条同步消息后这里会展示真实协作轨迹。',
-            agentId: undefined,
-            id: 'empty-conversation',
-            meta: '实时协作 · 等待启动',
-            role: 'Team Runtime',
-            roleAccent: ROLE_SLOT_CONFIG[0].accent,
-            timestamp: '刚刚',
-            title: '等待第一条协作消息',
-            type: 'broadcast',
-          },
-        ];
-  }, [scopedOverviewData.messages, scopedOverviewData.auditLogs, memberNameById, accentByMemberId]);
-
-  // --- Split memos: message cards ---
-  const messageCards = useMemo(
-    (): AgentTeamsMessageCard[] =>
-      scopedOverviewData.messages.length > 0
-        ? [...scopedOverviewData.messages]
-            .sort((left, right) => right.timestamp - left.timestamp)
-            .slice(0, 8)
-            .map((message) => {
-              const from = memberNameById.get(message.memberId) ?? '团队成员';
-              const fromAccent =
-                accentByMemberId.get(message.memberId) ?? ROLE_SLOT_CONFIG[0].accent;
-              return {
-                from,
-                fromAccent,
-                id: message.id,
-                ...(message.memberId ? { memberId: message.memberId } : {}),
-                ...(message.recipientMemberId !== undefined
-                  ? { recipientMemberId: message.recipientMemberId }
-                  : {}),
-                ...(message.replyToMessageId !== undefined
-                  ? { replyToMessageId: message.replyToMessageId }
-                  : {}),
-                route:
-                  message.recipientMemberId != null || message.replyToMessageId != null
-                    ? 'followup'
-                    : 'broadcast',
-                summary: message.content,
-                timestamp: formatClock(message.timestamp),
-                to:
-                  message.recipientMemberId != null
-                    ? (memberNameById.get(message.recipientMemberId) ?? '指定成员')
-                    : message.replyToMessageId != null
-                      ? '当前线程'
-                      : '全体成员',
-                toAccent:
-                  message.recipientMemberId != null
-                    ? (accentByMemberId.get(message.recipientMemberId) ??
-                      ROLE_SLOT_CONFIG[1]?.accent ??
-                      ROLE_SLOT_CONFIG[0].accent)
-                    : message.type === 'update'
-                      ? ROLE_SLOT_CONFIG[2].accent
-                      : (ROLE_SLOT_CONFIG[1]?.accent ?? ROLE_SLOT_CONFIG[0].accent),
-                type: mapMessageCardType(message.type),
-              } satisfies AgentTeamsMessageCard;
-            })
-        : [
-            {
-              from: 'Team Runtime',
-              fromAccent: ROLE_SLOT_CONFIG[0].accent,
-              id: 'empty-message',
-              route: 'broadcast',
-              summary: '当前消息总线为空，发送广播后这里会开始显示真实消息。',
-              timestamp: '刚刚',
-              to: '全体成员',
-              toAccent: ROLE_SLOT_CONFIG[2]?.accent ?? ROLE_SLOT_CONFIG[0].accent,
-              type: 'update',
-            },
-          ],
-    [scopedOverviewData.messages, memberNameById, accentByMemberId],
+    [accentByMemberId, memberNameById, scopedOverviewData.auditLogs, scopedOverviewData.messages],
   );
 
-  // --- Split memos: review cards ---
-  const reviewCards = useMemo((): AgentTeamsReviewCard[] => {
-    const permissionCards =
-      activeSharedSession?.pendingPermissions.map(
-        (request, index) =>
-          ({
-            actionable: true,
-            assignee: activeSharedSession?.share.sharedByEmail ?? '共享运行',
-            assigneeAccent:
-              ROLE_SLOT_CONFIG[index % ROLE_SLOT_CONFIG.length]?.accent ??
-              ROLE_SLOT_CONFIG[0].accent,
-            id: `permission-${request.requestId}`,
-            priority: request.riskLevel,
-            requestId: request.requestId,
-            reviewKind: 'permission',
-            sessionId: activeSharedSession?.share.sessionId,
-            status:
-              request.status === 'pending'
-                ? 'pending'
-                : request.status === 'approved'
-                  ? 'approved'
-                  : 'rejected',
-            summary: `${request.reason} · 作用域 ${request.scope}`,
-            title: `权限审批 · ${request.toolName}`,
-            type: 'security',
-          }) satisfies AgentTeamsReviewCard,
-      ) ?? [];
+  const messageCards = useMemo(
+    () =>
+      buildMessageCardsProjection({
+        accentByMemberId,
+        memberNameById,
+        messages: scopedOverviewData.messages,
+      }),
+    [accentByMemberId, memberNameById, scopedOverviewData.messages],
+  );
 
-    const questionCards =
-      activeSharedSession?.pendingQuestions.map(
-        (request, index) =>
-          ({
-            actionable: true,
-            assignee: activeSharedSession?.share.sharedByEmail ?? '共享运行',
-            assigneeAccent:
-              ROLE_SLOT_CONFIG[(index + 1) % ROLE_SLOT_CONFIG.length]?.accent ??
-              ROLE_SLOT_CONFIG[0].accent,
-            id: `question-${request.requestId}`,
-            priority: 'medium',
-            requestId: request.requestId,
-            reviewKind: 'question',
-            sessionId: activeSharedSession?.share.sessionId,
-            status:
-              request.status === 'pending'
-                ? 'pending'
-                : request.status === 'answered'
-                  ? 'approved'
-                  : 'rejected',
-            summary: request.questions[0]?.question ?? request.title,
-            title: `待答复 · ${request.title}`,
-            type: 'content',
-          }) satisfies AgentTeamsReviewCard,
-      ) ?? [];
+  const reviewCards = useMemo(
+    () =>
+      buildReviewCardsProjection({
+        activeSharedSession,
+        auditLogs: scopedOverviewData.auditLogs,
+      }),
+    [activeSharedSession, scopedOverviewData.auditLogs],
+  );
 
-    const auditCards = scopedOverviewData.auditLogs.slice(0, 3).map(
-      (log, index) =>
-        ({
-          actionable: false,
-          assignee: log.actorEmail ?? '系统',
-          assigneeAccent:
-            ROLE_SLOT_CONFIG[(index + 2) % ROLE_SLOT_CONFIG.length]?.accent ??
-            ROLE_SLOT_CONFIG[0].accent,
-          id: `audit-${log.id}`,
-          priority: 'low',
-          reviewKind: 'audit',
-          status: 'approved',
-          summary: log.detail ?? log.summary,
-          title: log.summary,
-          type: 'code',
-        }) satisfies AgentTeamsReviewCard,
-    );
-
-    const cards = [...permissionCards, ...questionCards, ...auditCards].slice(0, 8);
-    return cards.length > 0
-      ? cards
-      : [
-          {
-            actionable: false,
-            assignee: 'Team Runtime',
-            assigneeAccent: ROLE_SLOT_CONFIG[0].accent,
-            id: 'review-empty',
-            priority: 'low',
-            status: 'approved',
-            summary: '当前共享运行没有待处理的权限请求或提问，最近审计轨迹也已归档。',
-            title: '暂无待审事项',
-            type: 'design',
-          } satisfies AgentTeamsReviewCard,
-        ];
-  }, [activeSharedSession, scopedOverviewData.auditLogs]);
-
-  // --- Split memos: timeline events ---
-  const timelineEvents = useMemo((): AgentTeamsTimelineEvent[] => {
-    const events = [
-      ...scopedOverviewData.handoffs.map(
-        (handoff) =>
-          ({
-            agentAccent: ROLE_SLOT_CONFIG[0].accent,
-            agentId: handoff.id,
-            agentName: `${handoff.fromRoleLayer} → ${handoff.toRoleLayer}`,
-            detail:
-              handoff.summary ?? `${handoff.toRoleLayer} 层交接状态已更新为 ${handoff.state}。`,
-            id: `handoff-${handoff.id}`,
-            timestamp: new Date(handoff.updatedAt).toISOString(),
-            type:
-              handoff.state === 'completed'
-                ? 'turn_complete'
-                : handoff.state === 'failed' || handoff.state === 'cancelled'
-                  ? 'error'
-                  : handoff.state === 'running'
-                    ? 'thinking'
-                    : 'waiting_confirmation',
-          }) satisfies AgentTeamsTimelineEvent,
-      ),
-      ...scopedOverviewData.runtimeTasks.map(
-        (task) =>
-          ({
-            agentAccent:
-              task.assignedAgent && accentByMemberId.get(task.assignedAgent)
-                ? accentByMemberId.get(task.assignedAgent)!
-                : ROLE_SLOT_CONFIG[2].accent,
-            agentId: task.assignedAgent ?? task.id,
-            agentName: task.assignedAgent
-              ? (memberNameById.get(task.assignedAgent) ?? task.assignedAgent)
-              : '运行时任务',
-            detail: task.errorMessage ?? task.result ?? task.description ?? task.title,
-            id: `runtime-task-${task.id}`,
-            timestamp: new Date(task.updatedAt).toISOString(),
-            type: mapTimelineEventTypeFromRuntimeTask(task.status),
-          }) satisfies AgentTeamsTimelineEvent,
-      ),
-      ...scopedOverviewData.messages.map(
-        (message) =>
-          ({
-            agentAccent: accentByMemberId.get(message.memberId) ?? ROLE_SLOT_CONFIG[0].accent,
-            agentId: message.memberId,
-            agentName: memberNameById.get(message.memberId) ?? '团队成员',
-            detail: message.content,
-            id: `message-${message.id}`,
-            timestamp: new Date(message.timestamp).toISOString(),
-            type: mapTimelineEventTypeFromMessage(message.type),
-          }) satisfies AgentTeamsTimelineEvent,
-      ),
-      ...scopedOverviewData.auditLogs.map(
-        (log, index) =>
-          ({
-            agentAccent:
-              ROLE_SLOT_CONFIG[index % ROLE_SLOT_CONFIG.length]?.accent ??
-              ROLE_SLOT_CONFIG[0].accent,
-            agentId: log.actorUserId ?? `audit-${index}`,
-            agentName: log.actorEmail ?? '系统',
-            detail: log.detail ?? log.summary,
-            id: `audit-${log.id}`,
-            timestamp: log.createdAt,
-            type: mapTimelineEventTypeFromAudit(log.action),
-          }) satisfies AgentTeamsTimelineEvent,
-      ),
-    ]
-      .sort(
-        (left, right) => new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime(),
-      )
-      .slice(0, 16);
-
-    return events;
-  }, [accentByMemberId, memberNameById, scopedOverviewData]);
-
-  const activityStats = useMemo(() => {
-    const stats = timelineEvents.reduce<Record<string, number>>((acc, event) => {
-      acc[event.type] = (acc[event.type] ?? 0) + 1;
-      return acc;
-    }, {});
-
-    for (const type of Object.keys(AGENT_TEAMS_EVENT_CONFIG)) {
-      stats[type] = stats[type] ?? 0;
-    }
-    return stats;
-  }, [timelineEvents]);
-
-  // --- Split memos: office agents ---
-  const officeAgents = useMemo(
-    (): AgentTeamsOfficeAgent[] =>
-      OFFICE_AGENT_POSITIONS.map((position, index) => {
-        const chip = roleChips[index]!;
-        const binding = roleBindings.roleCards[index] ?? null;
-        const boundRole = binding?.role ?? null;
-        const boundAgent = binding?.selectedAgent ?? null;
-        const effectiveRole = resolveOfficeRole(
-          boundAgent?.canonicalRole?.coreRole ?? boundRole,
-          index,
-        );
-        const taskNote =
-          index === 0
-            ? `待处理 ${activeSharedSession?.pendingPermissions.length ?? 0} 个审批`
-            : index === 1
-              ? `推进 ${taskLanes[1]?.cards.length ?? 0} 个进行中任务`
-              : `待回答 ${activeSharedSession?.pendingQuestions.length ?? 0} 个问题`;
-
-        const extraNote =
-          index === 2 && collaboration.tasks.filter((task) => task.status === 'failed').length > 0
-            ? `阻塞 ${collaboration.tasks.filter((task) => task.status === 'failed').length} 项`
-            : undefined;
-
-        const agentStatus = isSelectedTeamPaused
-          ? 'resting'
-          : mapOfficeStatusFromRole(effectiveRole);
-
-        return {
-          accent: chip.accent,
-          crown: effectiveRole === 'planner' || chip.leader,
-          extraNote,
-          id: boundAgent?.id ?? chip.id,
-          label:
-            effectiveRole === 'planner'
-              ? `[L] ${boundAgent?.label ?? chip.role}`
-              : (boundAgent?.label ?? chip.role),
-          note: taskNote,
-          status: agentStatus,
-          x: position.x,
-          y: position.y,
-        } satisfies AgentTeamsOfficeAgent;
+  const { activityStats, timelineEvents } = useMemo(
+    () =>
+      buildTimelineProjection({
+        accentByMemberId,
+        auditLogs: scopedOverviewData.auditLogs,
+        handoffs: scopedOverviewData.handoffs,
+        memberNameById,
+        messages: scopedOverviewData.messages,
+        runtimeTasks: scopedOverviewData.runtimeTasks,
       }),
     [
-      roleChips,
-      roleBindings.roleCards,
-      activeSharedSession,
-      collaboration.tasks,
-      taskLanes,
-      isSelectedTeamPaused,
+      accentByMemberId,
+      memberNameById,
+      scopedOverviewData.auditLogs,
+      scopedOverviewData.handoffs,
+      scopedOverviewData.messages,
+      scopedOverviewData.runtimeTasks,
     ],
   );
 
-  // --- Split memos: overview cards ---
+  const officeAgents = useMemo(
+    () =>
+      buildOfficeAgentsProjection({
+        activeSharedSession,
+        collaborationTasks: collaboration.tasks,
+        isSelectedTeamPaused,
+        roleBindings: roleBindings.roleCards,
+        roleChips,
+        taskLaneCount: taskLanes[1]?.cards.length ?? 0,
+      }),
+    [
+      activeSharedSession,
+      collaboration.tasks,
+      isSelectedTeamPaused,
+      roleBindings.roleCards,
+      roleChips,
+      taskLanes,
+    ],
+  );
+
   const pendingReviewCount =
     (activeSharedSession?.pendingPermissions.length ?? 0) +
     (activeSharedSession?.pendingQuestions.length ?? 0);
 
-  // 真实执行活动聚合：来自 handoff（层间交接）+ runtimeTasks（各层 session 任务）+
-  // sessions（运行状态）。这是团队"自动跑起来"后唯一真正变化的数据源；V1 的
-  // team_messages/team_tasks 只有用户手动操作才写，团队执行时恒为空，所以概览
-  // 不能再依赖它们来判断"团队是否在干活"。
-  const runtimeActivity = useMemo(() => {
-    const handoffs = scopedOverviewData.handoffs;
-    const activeHandoffs = handoffs.filter(
-      (h) => h.state === 'running' || h.state === 'claimed' || h.state === 'pending',
-    ).length;
-    const completedHandoffs = handoffs.filter((h) => h.state === 'completed').length;
-    const failedHandoffs = handoffs.filter(
-      (h) => h.state === 'failed' || h.state === 'cancelled',
-    ).length;
-
-    const runtimeTasks = scopedOverviewData.runtimeTasks;
-    const runningTasks = runtimeTasks.filter((t) => t.status === 'running').length;
-    const completedTasks = runtimeTasks.filter((t) => t.status === 'completed').length;
-    const failedTasks = runtimeTasks.filter((t) => t.status === 'failed').length;
-
-    const sessions = scopedOverviewData.sessions;
-    const runningSessions = sessions.filter((s) => s.stateStatus === 'running').length;
-    // 参与执行的角色层（去重）：从 handoff 的 to/from 层 + 有 roleLayer 的 session 收集。
-    // 注意这是"曾参与"的层（含已完成的 handoff），用于反映团队规模/活动广度，
-    // 不等于"此刻正在跑"的层。
-    const participatingLayers = new Set<string>();
-    for (const h of handoffs) {
-      if (h.toRoleLayer) participatingLayers.add(h.toRoleLayer);
-      if (h.fromRoleLayer) participatingLayers.add(h.fromRoleLayer);
-    }
-    for (const s of sessions) {
-      if (s.roleLayer) participatingLayers.add(s.roleLayer);
-    }
-
-    // 运行时长起点：最早的 handoff/任务开始时间（毫秒）。
-    const startCandidates: number[] = [];
-    for (const h of handoffs) {
-      const started = h.startedAt ?? h.updatedAt;
-      if (Number.isFinite(started)) startCandidates.push(started);
-    }
-    for (const t of runtimeTasks) {
-      if (t.startedAt != null && Number.isFinite(t.startedAt)) startCandidates.push(t.startedAt);
-    }
-
-    return {
-      handoffTotal: handoffs.length,
-      activeHandoffs,
-      completedHandoffs,
-      failedHandoffs,
-      runtimeTaskTotal: runtimeTasks.length,
-      runningTasks,
-      completedTasks,
-      failedTasks,
-      runningSessions,
-      sessionTotal: sessions.length,
-      participatingLayerCount: participatingLayers.size,
-      startCandidates,
-    };
-  }, [scopedOverviewData]);
+  const runtimeActivity = useMemo(
+    () =>
+      buildRuntimeActivityProjection({
+        handoffs: scopedOverviewData.handoffs,
+        runtimeTasks: scopedOverviewData.runtimeTasks,
+        sessions: scopedOverviewData.sessions,
+      }),
+    [scopedOverviewData.handoffs, scopedOverviewData.runtimeTasks, scopedOverviewData.sessions],
+  );
   const sharedActiveViewerCount = useMemo(
     () => activeSharedSession?.presence.filter((entry) => entry.active).length ?? 0,
     [activeSharedSession],
@@ -2088,126 +1111,36 @@ export function useResolvedTeamRuntimeReferenceData(
   const sharedCommentCount = activeSharedSession?.comments.length ?? 0;
 
   const overviewCards = useMemo((): AgentTeamsOverviewCard[] => {
-    const runtimeStartCandidates = [
-      ...scopedOverviewData.messages.map((message) => message.timestamp),
-      ...scopedOverviewData.auditLogs.map((log) => new Date(log.createdAt).getTime()),
-      ...(selectedSessionScope
-        ? []
-        : collaboration.tasks
-            .map((task) => task.createdAt)
-            .filter((value): value is string => Boolean(value))
-            .map((value) => new Date(value).getTime())),
-      ...scopedOverviewData.sharedSessions.map((session) =>
-        new Date(session.shareCreatedAt).getTime(),
-      ),
-      // 把真实执行流的开始时间（handoff / runtimeTask）也纳入，否则团队自动跑起来
-      // 但用户没手动发消息/建任务时，运行时长恒为 0。
-      ...runtimeActivity.startCandidates,
-    ].filter((value) => Number.isFinite(value));
-
-    // 任务数优先用真实执行任务（runtimeTasks），回退到手动 team_tasks。
-    const effectiveTaskTotal = selectedSessionScope
-      ? runtimeActivity.runtimeTaskTotal || selectedRuntimeTaskRecords.length
-      : runtimeActivity.runtimeTaskTotal > 0
-        ? runtimeActivity.runtimeTaskTotal
-        : collaboration.tasks.length || collaboration.runtimeTaskRecords.length;
-
-    // 活跃角色：手动 team_members（V1）+ 真实执行中参与的角色层取较大值，
-    // 让团队自动执行时也能反映"有几层在干活"。
     const workingMembers = collaboration.members.filter(
       (member) => member.status === 'working',
     ).length;
-    const effectiveActiveRoles = Math.max(
-      selectedSessionScope ? runtimeActivity.participatingLayerCount : collaboration.members.length,
-      runtimeActivity.participatingLayerCount,
-    );
-
-    return [
-      {
-        icon: 'members',
-        id: 'overview-active-members',
-        label: '活跃角色',
-        note: selectedSessionScope
-          ? `参与层级 ${runtimeActivity.participatingLayerCount} · 子树会话 ${runtimeActivity.sessionTotal} · 运行中 ${runtimeActivity.runningSessions}`
-          : `参与层级 ${runtimeActivity.participatingLayerCount} · 工作中成员 ${workingMembers} · 总成员 ${collaboration.members.length}`,
-        trend: selectedSessionScope
-          ? runtimeActivity.runningSessions > 0
-            ? 'up'
-            : 'stable'
-          : runtimeActivity.runningSessions > 0 || workingMembers > 0
-            ? 'up'
-            : 'stable',
-        value: String(effectiveActiveRoles),
-      },
-      {
-        icon: 'tasks',
-        id: 'overview-tasks',
-        label: '办公室任务',
-        note: `进行中 ${runtimeActivity.runningTasks} · 已完成 ${runtimeActivity.completedTasks} · 失败 ${runtimeActivity.failedTasks}`,
-        trend: runtimeActivity.runningTasks > 0 ? 'up' : 'stable',
-        value: String(effectiveTaskTotal),
-      },
-      {
-        icon: 'overview',
-        id: 'overview-shared-runs',
-        label: '运行会话',
-        note: selectedSessionScope
-          ? `运行中 ${runtimeActivity.runningSessions} · 子树会话 ${runtimeActivity.sessionTotal} · 当前范围`
-          : `运行中 ${runtimeActivity.runningSessions} · 共享 ${effectiveSharedSessions.length} · 总计 ${runtimeActivity.sessionTotal}`,
-        trend: selectedSessionScope
-          ? runtimeActivity.runningSessions > 0
-            ? 'up'
-            : 'stable'
-          : runtimeActivity.runningSessions > 0 || effectiveSharedSessions.length > 0
-            ? 'up'
-            : 'stable',
-        value: String(
-          selectedSessionScope
-            ? runtimeActivity.sessionTotal
-            : runtimeActivity.sessionTotal || effectiveSharedSessions.length,
-        ),
-      },
-      {
-        icon: 'sync',
-        id: 'overview-handoffs',
-        label: '团队交接',
-        note: `进行中 ${runtimeActivity.activeHandoffs} · 已完成 ${runtimeActivity.completedHandoffs} · 失败 ${runtimeActivity.failedHandoffs}`,
-        trend: runtimeActivity.activeHandoffs > 0 ? 'up' : 'stable',
-        value: String(runtimeActivity.handoffTotal),
-      },
-      {
-        icon: 'review',
-        id: 'overview-review',
-        label: '评审队列',
-        note: `权限 ${activeSharedSession?.pendingPermissions.length ?? 0} · 问题 ${activeSharedSession?.pendingQuestions.length ?? 0}`,
-        trend: pendingReviewCount > 0 ? 'up' : 'stable',
-        value: String(pendingReviewCount),
-      },
-      {
-        icon: 'timer',
-        id: 'overview-runtime',
-        label: '运行时长',
-        note: selectedSessionScope
-          ? `${runtimeActivity.activeHandoffs} 个交接进行中 · 当前会话子树`
-          : selectedSharedSummary
-            ? `当前会话：${selectedSharedSummary.title ?? selectedSharedSummary.sessionId}`
-            : runtimeActivity.handoffTotal > 0
-              ? `${runtimeActivity.activeHandoffs} 个交接进行中`
-              : '等待接入新的团队运行',
-        trend: 'stable',
-        value: formatRuntimeDuration(runtimeStartCandidates),
-      },
-    ];
+    return buildOverviewCardsProjection({
+      activeSharedSession,
+      collaborationMemberCount: collaboration.members.length,
+      collaborationTaskCount: collaboration.tasks.length,
+      collaborationTasks: collaboration.tasks,
+      collaborationWorkingMemberCount: workingMembers,
+      pendingReviewCount,
+      runtimeActivity,
+      scopedAuditLogs: scopedOverviewData.auditLogs,
+      scopedMessages: scopedOverviewData.messages,
+      scopedSharedSessions: scopedOverviewData.sharedSessions,
+      selectedRuntimeTaskRecordCount: selectedRuntimeTaskRecords.length,
+      selectedSharedSummaryLabel: selectedSharedSummary
+        ? (selectedSharedSummary.title ?? selectedSharedSummary.sessionId)
+        : null,
+      selectedSessionScope,
+    });
   }, [
     collaboration.members,
     collaboration.tasks,
-    collaboration.runtimeTaskRecords,
     activeSharedSession,
-    selectedSessionScope,
     scopedOverviewData,
     runtimeActivity,
-    selectedSharedSummary,
     pendingReviewCount,
+    selectedSessionScope,
+    selectedSharedSummary?.sessionId,
+    selectedSharedSummary?.title,
     selectedRuntimeTaskRecords.length,
   ]);
 
@@ -2220,7 +1153,9 @@ export function useResolvedTeamRuntimeReferenceData(
         teamCompletedTaskCount: collaboration.tasks.filter((task) => task.status === 'completed')
           .length,
         teamTaskCount: collaboration.tasks.length,
-        teamMessageCount: collaboration.messages.length,
+        teamMessageCount: selectedSessionScope
+          ? scopedOverviewData.messages.length
+          : collaboration.messages.length,
         selectedSessionScopeSize: selectedSessionScope?.size ?? 0,
         participatingLayerCount: runtimeActivity.participatingLayerCount,
         runtimeTaskTotal:
@@ -2252,6 +1187,7 @@ export function useResolvedTeamRuntimeReferenceData(
       runtimeActivity.participatingLayerCount,
       runtimeActivity.runningTasks,
       runtimeActivity.runtimeTaskTotal,
+      scopedOverviewData.messages,
       selectedRuntimeTaskRecords,
       selectedSessionScope,
       sharedActiveViewerCount,
@@ -2278,15 +1214,21 @@ export function useResolvedTeamRuntimeReferenceData(
       workspaceMemberCount: collaboration.members.length,
       workspaceOnlineCount,
     });
-    // 运行/等待/异常计数：优先用真实执行任务(runtimeActivity)，团队自动跑起来时
-    // V1 的 collaboration.tasks 恒为 0，回退到它只是为了手动建任务的兼容场景。
-    const failedTaskCount =
-      runtimeActivity.failedTasks ||
-      collaboration.tasks.filter((task) => task.status === 'failed').length;
-    const pendingTaskCount = collaboration.tasks.filter((task) => task.status === 'pending').length;
-    const runningTaskCount =
-      runtimeActivity.runningTasks ||
-      collaboration.tasks.filter((task) => task.status === 'in_progress').length;
+    // 运行/等待/异常计数：选中会话作用域时完全基于 scoped 数据，
+    // 不回退到全局 collaboration.tasks——否则切会话后仪表盘数字不联动。
+    // 仅在未选中会话（全局视图）时才用 V1 collaboration.tasks 做兼容回退。
+    const isScoped = Boolean(selectedSessionScope);
+    const failedTaskCount = isScoped
+      ? runtimeActivity.failedTasks
+      : (runtimeActivity.failedTasks ||
+          collaboration.tasks.filter((task) => task.status === 'failed').length);
+    const pendingTaskCount = isScoped
+      ? selectedRuntimeTaskRecords.filter((task) => task.status === 'pending').length
+      : collaboration.tasks.filter((task) => task.status === 'pending').length;
+    const runningTaskCount = isScoped
+      ? runtimeActivity.runningTasks
+      : (runtimeActivity.runningTasks ||
+          collaboration.tasks.filter((task) => task.status === 'in_progress').length);
 
     return {
       activeMode: 'live',
@@ -2322,13 +1264,15 @@ export function useResolvedTeamRuntimeReferenceData(
         selectedSessionScopeSize: selectedSessionScope?.size ?? 0,
       }),
       footerStats: buildFooterStats({
-        scoped: Boolean(selectedSessionScope),
+        scoped: isScoped,
         sharedSelected: Boolean(selectedSharedSummary),
         membersCount: collaboration.members.length,
         teamCompletedTaskCount: collaboration.tasks.filter((task) => task.status === 'completed')
           .length,
         teamTaskCount: collaboration.tasks.length,
-        teamMessageCount: collaboration.messages.length,
+        teamMessageCount: isScoped
+          ? scopedOverviewData.messages.length
+          : collaboration.messages.length,
         selectedSessionScopeSize: selectedSessionScope?.size ?? 0,
         participatingLayerCount: runtimeActivity.participatingLayerCount,
         runtimeTaskTotal:
@@ -2336,11 +1280,9 @@ export function useResolvedTeamRuntimeReferenceData(
             ? runtimeActivity.runtimeTaskTotal
             : selectedRuntimeTaskRecords.length,
         completedRuntimeTasks: runtimeActivity.completedTasks,
-        failedRuntimeTasks: runtimeActivity.failedTasks,
+        failedRuntimeTasks: failedTaskCount,
         runningRuntimeTasks: runningTaskCount,
-        pendingRuntimeTasks: selectedSessionScope
-          ? selectedRuntimeTaskRecords.filter((task) => task.status === 'pending').length
-          : pendingTaskCount,
+        pendingRuntimeTasks: pendingTaskCount,
         handoffTotal: runtimeActivity.handoffTotal,
         sharedSessionCount: effectiveSharedSessions.length,
         pendingReviewCount,
@@ -2377,6 +1319,7 @@ export function useResolvedTeamRuntimeReferenceData(
       templateCount: workflowTemplates.templateCount,
       templateError: workflowTemplates.error,
       templateLoading: workflowTemplates.loading,
+      refreshTemplates: workflowTemplates.refreshLatest,
       templates: workflowTemplates.templateCards,
       updateTemplate: workflowTemplates.updateTemplate,
       removeTemplate: workflowTemplates.removeTemplate,
@@ -2388,11 +1331,10 @@ export function useResolvedTeamRuntimeReferenceData(
           activeWorkspaceWorkingRoot: activeWorkspace?.defaultWorkingRoot ?? null,
           selectedRuntimeSessionTitle: selectedRuntimeSession?.title ?? null,
           selectedRuntimeSessionId: selectedRuntimeSession?.id ?? null,
-          selectedRuntimeSessionPaused: selectedRuntimeSession?.paused ?? null,
-          selectedRuntimeSessionStateStatus: selectedRuntimeSession?.stateStatus ?? null,
+          selectedRuntimeStatus,
           selectedSharedSessionTitle: selectedSharedSummary?.title ?? null,
           selectedSharedSessionId: selectedSharedSummary?.sessionId ?? null,
-          selectedSharedSessionStateStatus: selectedSharedSummary?.stateStatus ?? null,
+          selectedSharedStatus,
           selectedSharedWorkspaceLabel: selectedSharedSummary
             ? formatWorkspaceLabel(selectedSharedSummary.workspacePath)
             : null,
@@ -2401,12 +1343,11 @@ export function useResolvedTeamRuntimeReferenceData(
         memberCount: topSummaryAudience.memberCount,
         onlineCount: topSummaryAudience.onlineCount,
         status: resolveTopSummaryStatus({
-          hasPausedRuntimeSessions: effectiveSessions.some((session) =>
-            isRuntimeSessionPaused(session.stateStatus, session.paused),
+          hasPausedRuntimeSessions: Array.from(runtimeSessionStatuses.values()).some(
+            (status) => status === 'paused',
           ),
-          selectedRuntimeSessionPaused: selectedRuntimeSession?.paused ?? null,
-          selectedRuntimeSessionStateStatus: selectedRuntimeSession?.stateStatus ?? null,
-          selectedSharedSessionStateStatus: selectedSharedSummary?.stateStatus ?? null,
+          selectedRuntimeStatus,
+          selectedSharedStatus,
         }),
         title: resolveTopSummaryTitle({
           activeWorkspaceName: activeWorkspace?.name ?? null,
@@ -2472,6 +1413,7 @@ export function useResolvedTeamRuntimeReferenceData(
     workflowTemplates.templateCards,
     workflowTemplates.updateTemplate,
     workflowTemplates.removeTemplate,
+    workflowTemplates.refreshLatest,
     createSession,
     createWorkspace,
     collaboration.createSessionShare,
@@ -2491,6 +1433,8 @@ export function useResolvedTeamRuntimeReferenceData(
     sendMessage,
     submitReviewComment,
     createSharedSessionComment,
+    selectedRuntimeStatus,
+    selectedSharedStatus,
     selectedSharedSummary,
     effectiveSessions,
     snapshotSharedSessions,
@@ -2510,7 +1454,11 @@ export function useResolvedTeamRuntimeReferenceData(
     reviewCards,
     roleChips,
     runningTeams,
+    runtimeSessionStatuses,
     runtimeActivity,
+    scopedOverviewData,
+    selectedRuntimeTaskRecords,
+    selectedSessionScope,
     taskLanes,
     timelineEvents,
     options.workspaces,

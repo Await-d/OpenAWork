@@ -7,16 +7,15 @@
  *
  * **本 hook 是 `useChatConversationState` 的 team 独立版本**（260518 解耦
  * 方案 §6.4）：从 chat 复制为模板，再裁剪 chat-only 字段（dialogueMode /
- * yoloMode / webSearchEnabled / manualAgentId / thinkingEnabled /
- * reasoningEffort 等），加 team 专属字段（roleLayer / substate /
+ * yoloMode / webSearchEnabled / manualAgentId 等），加 team 专属字段（roleLayer / substate /
  * sessionMetadata 已在共享层；handoffsInline / layeredGroups 等后续 v2 加）。
  *
  * 与 chat 端的关键差异：
  * 1. **写入路径默认 enable**：team session 默认开启 composer，按
  *    `resolveTeamSubmitStrategy(roleLayer, substate)` 在 `inbound` 与
  *    `stream` 之间路由。
- * 2. **不传 chat 业务参数到 stream**：dialogue mode / yolo / web search /
- *    thinking / reasoning effort 等 chat-only 选项不参与 team stream
+ * 2. **只传 team 需要的模型参数到 stream**：dialogue mode / yolo / web search
+ *    不参与 team stream；provider/model 与 thinking/reasoning effort 会跟随
  *    请求；只传 provider/model（来自 session metadata）+ agentId（来自
  *    role 默认 agent）。
  * 3. **不读 localStorage 的 chat 默认值**：chat 端的
@@ -32,7 +31,7 @@
  * - `docs/team-architecture-l1-3-streaming-handoff-spec.md` §1.3
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { InputImageContent, RunEvent } from '@openAwork/shared';
+import type { InputImageContent, RunEvent, UpstreamStreamSummary } from '@openAwork/shared';
 import {
   createPermissionsClient,
   createQuestionsClient,
@@ -48,6 +47,7 @@ import {
 import type {
   ChatMessage,
   ChatMessagePart,
+  ReasoningEffort,
 } from '../../../components/conversation-runtime/messages/support.js';
 import { normalizeChatMessages } from '../../../components/conversation-runtime/messages/support.js';
 import type {
@@ -57,16 +57,18 @@ import type {
 import type { ChatBackendUsageSnapshot } from '../../../components/conversation-runtime/stream/stream-usage.js';
 import type { StreamingThinkingBlock } from '../../../components/conversation-runtime/stream/streaming-thinking.js';
 import {
-  loadSavedChatSessionDefaults,
   loadSavedChatSessionDefaultsResult,
   type ChatSettingsProvider,
 } from '../../../utils/chat/chat-session-defaults.js';
+import { publishSessionPendingPermission } from '../../../utils/session/session-list-events.js';
+import { toSessionPendingPermissionState } from '../../../utils/permission/pending-permission-state.js';
 import {
   useLayerStore,
   useTeamEventsConnectionStore,
   useTeamNotificationStore,
   type TeamRoleLayer,
 } from '../../../stores/team/team-events.js';
+import { useMultiAttachStore } from '../../../stores/team/multi-attach-store.js';
 import {
   formatGatewayStreamErrorMessage,
   useGatewayClient,
@@ -111,12 +113,13 @@ export interface UseTeamConversationStateOptions {
   effectiveAgentId?: string;
   /**
    * session 默认 provider/model 配置。team 端通常从 session metadata
-   * 注入；不复用 chat 端的 dialogueMode / yoloMode / webSearchEnabled 等
-   * 偏好（这些与 team 数据流无关）。
+   * 注入；不复用 chat 端的 dialogueMode / yoloMode / webSearchEnabled 等偏好。
    */
   defaults?: {
     activeProviderId?: string;
     activeModelId?: string;
+    thinkingEnabled?: boolean;
+    reasoningEffort?: ReasoningEffort;
   };
 }
 
@@ -146,15 +149,18 @@ export interface TeamConversationState {
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
 
   // ─── 模型 + 设置 ──────────────────────────────────────────────────
-  // team 端只暴露 provider / model；chat-only 偏好（dialogueMode / yoloMode /
-  // webSearchEnabled / manualAgentId / thinkingEnabled / reasoningEffort）
-  // 不参与 team 数据流，已从 hook 中移除（260518 解耦方案 §6.4）。
+  // team 端暴露 provider / model 与模型思考等级；dialogueMode / yoloMode /
+  // webSearchEnabled / manualAgentId 仍是 chat-only 偏好。
   providers: ChatSettingsProvider[];
   setProviders: React.Dispatch<React.SetStateAction<ChatSettingsProvider[]>>;
   activeProviderId: string;
   setActiveProviderId: React.Dispatch<React.SetStateAction<string>>;
   activeModelId: string;
   setActiveModelId: React.Dispatch<React.SetStateAction<string>>;
+  thinkingEnabled: boolean;
+  setThinkingEnabled: React.Dispatch<React.SetStateAction<boolean>>;
+  reasoningEffort: ReasoningEffort;
+  setReasoningEffort: React.Dispatch<React.SetStateAction<ReasoningEffort>>;
 
   // ─── 滚动 + 加载 ──────────────────────────────────────────────────
   scrollRegionRef: React.RefObject<HTMLDivElement | null>;
@@ -172,6 +178,7 @@ export interface TeamConversationState {
   setPendingPermissions: React.Dispatch<React.SetStateAction<PendingPermissionRequest[]>>;
   pendingQuestions: PendingQuestionRequest[];
   setPendingQuestions: React.Dispatch<React.SetStateAction<PendingQuestionRequest[]>>;
+  runEvents: RunEvent[];
 
   // ─── L1.8 / L1.3 扩展字段（来自 sessions 表，前端从 recovery 读取）──────
   /**
@@ -192,6 +199,15 @@ export interface TeamConversationState {
    * chat 端单会话此字段为 chat 自己的 metadata，与 team 无关。
    */
   sessionMetadata: Record<string, unknown> | null;
+
+  /** 子 session 列表（各层级的独立会话），用于双栏联动视图。 */
+  childSessions: Array<{
+    id: string;
+    role_layer?: string | null;
+    messages: ChatMessage[];
+    displayName?: string | null;
+    personaKey?: string | null;
+  }>;
 
   // ─── 派生 ────────────────────────────────────────────────────────
   /** 远端 session 的运行 / 暂停状态（基于 sessionStateStatus 计算）。 */
@@ -245,17 +261,32 @@ export interface TeamConversationState {
   ) => Promise<void>;
   /** 主动中止当前 stream（调 POST /sessions/:id/stream/stop）。 */
   stopStream: () => Promise<boolean>;
+  /**
+   * Attach 到当前 session 的后台活跃流（SSE `/sessions/:id/stream/attach`）。
+   *
+   * 用于 reception session 走 inbound 路径后，后端 fire-and-forget 启动
+   * `runSessionInBackground`，前端通过 attach 实时消费 `text_delta` 等流式事件，
+   * 从而在 team 对话中展示逐 token 的流式回复。
+   *
+   * 返回 true 表示成功 attach 到活跃流；false 表示当前无活跃流或 attach 失败。
+   */
+  attachToSessionStream: () => Promise<boolean>;
   /** 行内回复 pending permission（chat 端 InlineQuestionPanel 用）。 */
   replyPermission: (
     requestId: string,
     decision: PermissionDecision,
-    feedback?: string,
+    options?: {
+      alwaysOverride?: string[];
+      feedback?: string;
+      targetSessionId?: string;
+    },
   ) => Promise<void>;
   /** 行内回复 pending question。 */
   replyQuestion: (
     requestId: string,
     status: 'answered' | 'dismissed',
     answers?: string[][],
+    options?: { targetSessionId?: string },
   ) => Promise<void>;
   /**
    * 主动重新拉一次 providers / model 列表。第一次调用会 hydrate
@@ -360,6 +391,9 @@ export function useTeamConversationState(
 
   // ─── 消息 + 流式 ────────────────────────────────────────────────
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [childSessions, setChildSessions] = useState<
+    Array<{ id: string; role_layer?: string | null; messages: ChatMessage[] }>
+  >([]);
   const [streaming, setStreaming] = useState(false);
   const [stoppingStream, setStoppingStream] = useState(false);
   const [streamBuffer, setStreamBuffer] = useState('');
@@ -372,23 +406,25 @@ export function useTeamConversationState(
   const [streamError, setStreamError] = useState<string | null>(null);
   const [snapshotError, setSnapshotError] = useState<string | null>(null);
   const [providersError, setProvidersError] = useState<string | null>(null);
-  const [activeStreamStartedAt, setActiveStreamStartedAt] = useState<number | null>(null);
-  const [activeStreamFirstTokenLatencyMs, setActiveStreamFirstTokenLatencyMs] = useState<
-    number | null
-  >(null);
+  const [, setActiveStreamStartedAt] = useState<number | null>(null);
+  const [, setActiveStreamFirstTokenLatencyMs] = useState<number | null>(null);
+  const [, setLatestUpstreamSummary] = useState<UpstreamStreamSummary | null>(null);
 
   // ─── composer ─────────────────────────────────────────────────────
   const [input, setInput] = useState('');
 
   // ─── 模型 + 设置 ──────────────────────────────────────────────────
-  // team 端只保留 provider / model；chat-only 偏好（dialogueMode / yoloMode /
-  // webSearchEnabled / manualAgentId / thinkingEnabled / reasoningEffort）
-  // 不参与 team 数据流，已从 hook 中移除（260518 解耦方案 §6.4）。
+  // team 端保留 provider / model 与模型思考等级；dialogueMode / yoloMode /
+  // webSearchEnabled / manualAgentId 仍不参与 team 数据流。
   const [providers, setProviders] = useState<ChatSettingsProvider[]>([]);
   const [activeProviderId, setActiveProviderId] = useState<string>(
     defaults?.activeProviderId ?? '',
   );
   const [activeModelId, setActiveModelId] = useState<string>(defaults?.activeModelId ?? '');
+  const [thinkingEnabled, setThinkingEnabled] = useState(defaults?.thinkingEnabled ?? false);
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(
+    defaults?.reasoningEffort ?? 'medium',
+  );
 
   // ─── 滚动 ──────────────────────────────────────────────────────
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
@@ -401,6 +437,14 @@ export function useTeamConversationState(
   const [sessionTodos, _setSessionTodos] = useState<SessionTodoItem[]>([]);
   const [pendingPermissions, setPendingPermissions] = useState<PendingPermissionRequest[]>([]);
   const [pendingQuestions, setPendingQuestions] = useState<PendingQuestionRequest[]>([]);
+
+  // ─── 多路 SSE 状态 ──────────────────────────────────────────────
+  // multiAttachActive 必须在所有引用它的 effect（如轮询 effect）之前声明，
+  // 否则 const 暂时性死区会导致 ReferenceError。
+  // multiAttachActiveRef 是 ref 版本，供 callback 中同步读取。
+  const multiAttachActiveRef = useRef(false);
+  const [multiAttachActive, setMultiAttachActive] = useState(false);
+  const [runEvents, setRunEvents] = useState<RunEvent[]>([]);
   // L1.8 / L1.3 扩展字段（hook v0.2 新增）
   const [roleLayer, setRoleLayer] = useState<string | null>(null);
   const [substate, setSubstate] = useState<string | null>(null);
@@ -409,9 +453,15 @@ export function useTeamConversationState(
   // 形如 { teamDefinition?: {...}, teamWorkspaceId?: string, workingDirectory?: string, ... }
   // 解析失败 / 缺失时为 null。
   const [sessionMetadata, setSessionMetadata] = useState<Record<string, unknown> | null>(null);
+  const [resolvedParentSessionId, setResolvedParentSessionId] = useState<string | null>(null);
   const hasRecoverySnapshotRef = useRef(false);
   const requestedTurnLimitRef = useRef(TEAM_CONVERSATION_INITIAL_TURN_LIMIT);
-  const reloadPromiseRef = useRef<Promise<void> | null>(null);
+  const reloadPromiseRef = useRef<{ promise: Promise<void>; sessionId: string | null } | null>(
+    null,
+  );
+  const latestSessionIdRef = useRef<string | null>(sessionId);
+  const previousSessionIdRef = useRef<string | null>(sessionId);
+  latestSessionIdRef.current = sessionId;
   const providersRef = useRef<ChatSettingsProvider[]>([]);
   const teamEventsRecoveredAt = useTeamEventsConnectionStore((state) => state.lastRecoveredAt);
   const { clearRetry, resetRetry, scheduleRetry } = useRecoverableRetryController();
@@ -445,13 +495,21 @@ export function useTeamConversationState(
   }, [providers]);
 
   useEffect(() => {
+    if (!sessionId) {
+      return;
+    }
+    publishSessionPendingPermission(sessionId, toSessionPendingPermissionState(pendingPermissions));
+  }, [pendingPermissions, sessionId]);
+
+  useEffect(() => {
     requestedTurnLimitRef.current = TEAM_CONVERSATION_INITIAL_TURN_LIMIT;
     setServerTotalTurnCount(null);
   }, [sessionId]);
 
   // ─── stream reveal + scroll manager ───────────────────────────────
-  const { streamingRef, stoppingStreamRef, currentAssistantStreamMessageIdRef, resetStreamState } =
-    useStreamReveal(prefersReducedMotion, {
+  const { streamingRef, stoppingStreamRef, currentAssistantStreamMessageIdRef } = useStreamReveal(
+    prefersReducedMotion,
+    {
       setStreamBuffer,
       setStreamThinkingBuffer,
       setStreamThinkingBlocks,
@@ -465,7 +523,8 @@ export function useTeamConversationState(
       setStoppingStream,
       setActiveStreamStartedAt,
       setActiveStreamFirstTokenLatencyMs,
-    });
+    },
+  );
 
   const { handleScroll: scrollManagerHandleScroll, scrollToBottom } = useScrollManager(
     {
@@ -490,22 +549,25 @@ export function useTeamConversationState(
 
   // ─── 加载会话快照 ────────────────────────────────────────────────
   const reload = useCallback(async (): Promise<void> => {
-    if (reloadPromiseRef.current) {
-      return reloadPromiseRef.current;
+    if (reloadPromiseRef.current?.sessionId === sessionId) {
+      return reloadPromiseRef.current.promise;
     }
+    const reloadSessionId = sessionId;
 
     const reloadPromise = (async () => {
       clearRetry();
 
-      if (!sessionId || !token || !enabled) {
+      if (!reloadSessionId || !token || !enabled) {
         hasRecoverySnapshotRef.current = false;
         resetRetry();
         setMessages([]);
+        setChildSessions([]);
         setSessionStateStatus(null);
         setIsSessionSnapshotReady(false);
-        setPendingPermissions([]);
-        setPendingQuestions([]);
-        setRoleLayer(null);
+      setPendingPermissions([]);
+      setPendingQuestions([]);
+      setRunEvents([]);
+      setRoleLayer(null);
         setSubstate(null);
         setServerTotalTurnCount(null);
         setSessionMetadata(null);
@@ -533,9 +595,12 @@ export function useTeamConversationState(
       setIsSessionLoading(!hasCachedSnapshot);
       setSnapshotError(null);
       const sessionsClient = createSessionsClient(gatewayUrl);
-      const result = await sessionsClient.getRecoveryResult(token, sessionId, {
+      const result = await sessionsClient.getRecoveryResult(token, reloadSessionId, {
         messageLimit: requestedTurnLimitRef.current,
       });
+      if (reloadSessionId !== latestSessionIdRef.current) {
+        return;
+      }
       if (!result.ok || !result.recovery) {
         const nextRetryAtMs = scheduleRetry({
           computeDelay: computeTeamConversationRecoveryRetryDelay,
@@ -562,6 +627,40 @@ export function useTeamConversationState(
 
       const normalized = normalizeChatMessages(recovery.session?.messages ?? []);
       setMessages(normalized);
+
+      setChildSessions(
+        recovery.children.map((child) => {
+          // 从 child.metadata_json 中解析 teamRoleInstance 信息
+          let displayName: string | null = null;
+          let personaKey: string | null = null;
+          if (child.metadata_json) {
+            try {
+              const parsed = JSON.parse(child.metadata_json) as unknown;
+              if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                const metadata = parsed as Record<string, unknown>;
+                const roleInstance = metadata['teamRoleInstance'] as Record<string, unknown> | undefined;
+                if (roleInstance) {
+                  if (typeof roleInstance['displayName'] === 'string') {
+                    displayName = roleInstance['displayName'];
+                  }
+                  if (typeof roleInstance['personaKey'] === 'string') {
+                    personaKey = roleInstance['personaKey'];
+                  }
+                }
+              }
+            } catch {
+              // ignore parse errors
+            }
+          }
+          return {
+            id: child.id,
+            role_layer: typeof child.role_layer === 'string' ? child.role_layer : null,
+            messages: normalizeChatMessages(child.messages ?? []),
+            displayName,
+            personaKey,
+          };
+        }),
+      );
       setServerTotalTurnCount(
         typeof recovery.totalTurnCount === 'number' ? recovery.totalTurnCount : null,
       );
@@ -573,6 +672,12 @@ export function useTeamConversationState(
       // L1.8 / L1.3 字段：后端 sessions 表已扩展 role_layer（Phase B），
       // substate 待 L1.3 改造 2 落地。两者都用 unknown cast 读取，缺失时为 null。
       const sessionRow = recovery.session as unknown as Record<string, unknown> | undefined;
+      const recoveryParentSessionId =
+        typeof sessionRow?.['parentSessionId'] === 'string'
+          ? (sessionRow['parentSessionId'] as string)
+          : typeof sessionRow?.['team_parent_session_id'] === 'string'
+            ? (sessionRow['team_parent_session_id'] as string)
+            : null;
       const roleLayerValue =
         typeof sessionRow?.['role_layer'] === 'string'
           ? (sessionRow['role_layer'] as string)
@@ -591,36 +696,93 @@ export function useTeamConversationState(
       if (metadataJson) {
         try {
           const parsed = JSON.parse(metadataJson) as unknown;
-          setSessionMetadata(
-            parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null,
-          );
+          const parsedMetadata =
+            parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+          setSessionMetadata(parsedMetadata);
+          if (parsedMetadata) {
+            const metadataProviderId =
+              typeof parsedMetadata['providerId'] === 'string' ? parsedMetadata['providerId'] : '';
+            const metadataModelId =
+              typeof parsedMetadata['modelId'] === 'string' ? parsedMetadata['modelId'] : '';
+            if (metadataProviderId && metadataModelId) {
+              setActiveProviderId(metadataProviderId);
+              setActiveModelId(metadataModelId);
+            }
+            const metadataParentSessionId =
+              typeof parsedMetadata['parentSessionId'] === 'string'
+                ? (parsedMetadata['parentSessionId'] as string)
+                : null;
+            setResolvedParentSessionId(recoveryParentSessionId ?? metadataParentSessionId);
+          } else {
+            setResolvedParentSessionId(recoveryParentSessionId);
+          }
         } catch {
           setSessionMetadata(null);
+          setResolvedParentSessionId(recoveryParentSessionId);
         }
       } else {
         setSessionMetadata(null);
+        setResolvedParentSessionId(recoveryParentSessionId);
       }
 
       // pending permissions / questions（来自 recovery，避免再发请求）
       setPendingPermissions(recovery.pendingPermissions ?? []);
       setPendingQuestions(recovery.pendingQuestions ?? []);
+      setRunEvents(Array.isArray(recovery.session?.runEvents) ? recovery.session.runEvents : []);
       hasRecoverySnapshotRef.current = true;
       resetRetry();
       setSnapshotError(null);
       setIsSessionLoading(false);
     })();
 
-    reloadPromiseRef.current = reloadPromise;
+    reloadPromiseRef.current = { promise: reloadPromise, sessionId: reloadSessionId };
     try {
       await reloadPromise;
     } finally {
-      if (reloadPromiseRef.current === reloadPromise) {
+      if (reloadPromiseRef.current?.promise === reloadPromise) {
         reloadPromiseRef.current = null;
       }
     }
   }, [clearRetry, enabled, gatewayUrl, resetRetry, scheduleRetry, sessionId, token]);
 
   // ─── 当 sessionId 变化时自动 reload ─────────────────────────────
+  useEffect(() => {
+    if (previousSessionIdRef.current === sessionId) {
+      return;
+    }
+    previousSessionIdRef.current = sessionId;
+    hasRecoverySnapshotRef.current = false;
+    setMessages([]);
+    setChildSessions([]);
+    setSessionStateStatus(null);
+    setIsSessionSnapshotReady(false);
+    setPendingPermissions([]);
+    setPendingQuestions([]);
+    setRunEvents([]);
+    setRoleLayer(null);
+    setSubstate(null);
+    setServerTotalTurnCount(null);
+    setSessionMetadata(null);
+    setResolvedParentSessionId(null);
+    setSnapshotError(null);
+    // 重置流式状态：session 切换时旧 attach/stream 连接已由 useGatewayClient
+    // 内部 closeExistingTransports 关闭，这里同步清理本地 streaming 标记。
+    streamingRef.current = false;
+    setStreaming(false);
+    setStoppingStream(false);
+    setStreamBuffer('');
+    setStreamThinkingBuffer('');
+    setStreamThinkingBlocks([]);
+    setStreamingSegments([]);
+    setReportedStreamUsage(null);
+    setStreamError(null);
+    // 重置 composer 输入和滚动状态，防止上一个会话的草稿/滚动位置残留
+    setInput('');
+    setShowScrollToBottom(false);
+    setHasPendingFollowContent(false);
+    setIsSessionLoading(Boolean(sessionId && token && enabled));
+  }, [enabled, sessionId, token]);
+
   useEffect(() => {
     void reload();
   }, [reload]);
@@ -701,12 +863,16 @@ export function useTeamConversationState(
 
   // ─── 高频 polling：当 session 处于 running 状态时自动刷新 ──────────
   // e/f/g 层用 runSessionInBackground 跑 stream 时，消息实时写入 DB。
-  // 前端通过每 2s reload 一次来"准实时"看到新消息。
+  // 前端通过每 2.5s reload 一次来"准实时"看到新消息。
   // 当 session 回到 idle/completed 时停止 polling。
-  // Fix #5: 加 debounce，避免多个 running session 同时 poll 导致请求风暴。
+  // **多路 SSE 活跃时跳过轮询**：multi-attach store 的 SSE 连接已提供
+  // 逐 token 实时流式，无需再靠轮询拉消息。仅在 multi-attach 未连接时
+  // 回退到轮询。P0-2 fix: `multiAttachActive` 在依赖数组中，断开时自动重建轮询。
   useEffect(() => {
     if (!sessionId || !enabled) return undefined;
     if (sessionStateStatus !== 'running') return undefined;
+    // 如果多路 SSE 已连接，跳过轮询（effect 会在 multiAttachActive 变化时重新执行）
+    if (multiAttachActive) return undefined;
     // 使用 visibility check：只在 tab 可见时 poll
     let active = true;
     const interval = setInterval(() => {
@@ -718,7 +884,7 @@ export function useTeamConversationState(
       active = false;
       clearInterval(interval);
     };
-  }, [sessionId, enabled, sessionStateStatus, reload]);
+  }, [sessionId, enabled, sessionStateStatus, reload, multiAttachActive]);
 
   // ─── 把"当前正在看的这个 session"注册到 layer store ────────────────
   // 「层级流动 / 层级 / 消息」三个 tab 的数据源是 useLayerStore.nodes +
@@ -729,16 +895,44 @@ export function useTeamConversationState(
   // 视图至少能看到当前这层的节点，handoff 链路一旦展开再由 WS/快照补全。
   useEffect(() => {
     if (!sessionId || !enabled || !roleLayer) return;
-    const parentSessionId =
+    const existingNode = useLayerStore.getState().nodes.get(sessionId);
+    const metadataParentSessionId =
       typeof sessionMetadata?.['parentSessionId'] === 'string'
         ? (sessionMetadata['parentSessionId'] as string)
         : null;
-    const existing = useLayerStore.getState().nodes.get(sessionId);
+    const parentSessionId =
+      resolvedParentSessionId ?? metadataParentSessionId ?? existingNode?.parentSessionId ?? null;
+    const rawRoleInstance = sessionMetadata?.['teamRoleInstance'];
+    const roleInstance =
+      typeof rawRoleInstance === 'object' &&
+      rawRoleInstance !== null &&
+      !Array.isArray(rawRoleInstance)
+        ? (rawRoleInstance as Record<string, unknown>)
+        : null;
+    const rootSessionId =
+      typeof roleInstance?.['rootSessionId'] === 'string' &&
+      roleInstance['rootSessionId'].trim().length > 0
+        ? roleInstance['rootSessionId'].trim()
+        : null;
+    const personaKey =
+      typeof roleInstance?.['personaKey'] === 'string' &&
+      roleInstance['personaKey'].trim().length > 0
+        ? roleInstance['personaKey'].trim()
+        : null;
+    const displayName =
+      typeof roleInstance?.['displayName'] === 'string' &&
+      roleInstance['displayName'].trim().length > 0
+        ? roleInstance['displayName'].trim()
+        : null;
+    const existing = existingNode;
     // 已存在且核心字段一致就不重复写（避免无谓 set 触发渲染）。
     if (
       existing &&
       existing.roleLayer === roleLayer &&
-      existing.parentSessionId === parentSessionId
+      existing.parentSessionId === parentSessionId &&
+      (existing.rootSessionId ?? null) === rootSessionId &&
+      existing.displayName === displayName &&
+      existing.personaKey === personaKey
     ) {
       return;
     }
@@ -755,11 +949,14 @@ export function useTeamConversationState(
           : sessionStateStatus === 'paused'
             ? 'claimed'
             : 'idle',
+      ...(rootSessionId ? { rootSessionId } : {}),
+      ...(personaKey ? { personaKey } : {}),
+      ...(displayName ? { displayName } : {}),
       ...(typeof sessionMetadata?.['title'] === 'string'
         ? { title: sessionMetadata['title'] as string }
         : {}),
     });
-  }, [sessionId, enabled, roleLayer, sessionMetadata, sessionStateStatus]);
+  }, [sessionId, enabled, roleLayer, resolvedParentSessionId, sessionMetadata, sessionStateStatus]);
   const submitInbound = useCallback<TeamConversationState['submitInbound']>(
     async (messageType, payload, opts) => {
       if (!sessionId) {
@@ -806,6 +1003,7 @@ export function useTeamConversationState(
       setStreamError,
       setActiveStreamStartedAt,
       setActiveStreamFirstTokenLatencyMs,
+      setLatestUpstreamSummary,
       setSessionStateStatus,
       setPendingPermissions,
     },
@@ -834,6 +1032,8 @@ export function useTeamConversationState(
     },
   );
 
+  // multiAttachActiveRef 和 multiAttachActive 已在会话状态区域声明（使用前定义）。
+
   const startStream: TeamConversationState['startStream'] = useCallback(
     async (text, opts) => {
       if (!enableWriters) {
@@ -854,9 +1054,11 @@ export function useTeamConversationState(
 
       onChatOnlyEventRef.current = opts?.onChatOnlyEvent;
       requestProviderIdRef.current = activeProviderId || undefined;
-      const activeModelLabel = providers
+      const activeModel = providers
         .find((p) => p.id === activeProviderId)
-        ?.defaultModels.find((m) => m.id === activeModelId)?.label;
+        ?.defaultModels.find((m) => m.id === activeModelId);
+      const requestModelSupportsThinking = activeModel?.supportsThinking === true;
+      const activeModelLabel = activeModel?.label;
       requestModelLabelRef.current = activeModelLabel ?? activeModelId ?? undefined;
       requestAgentIdRef.current = opts?.agentId || effectiveAgentId || undefined;
       streamRequestStartedAtRef.current = Date.now();
@@ -875,6 +1077,10 @@ export function useTeamConversationState(
       // accumulate segments under it before the gateway emits any event.
       currentAssistantStreamMessageIdRef.current = makeOrderedMessageId();
       stream.resetRoundAccumulators();
+      // Disable multi-attach handling during user-initiated stream — the
+      // WS/SSE stream from startStream provides events directly.
+      multiAttachActiveRef.current = false;
+      setMultiAttachActive(false);
       setStreaming(true);
       streamingRef.current = true;
       setActiveStreamStartedAt(streamRequestStartedAtRef.current);
@@ -887,9 +1093,10 @@ export function useTeamConversationState(
         ...(opts?.inputParts ? { inputParts: opts.inputParts } : {}),
         model: activeModelId || 'default',
         providerId: activeProviderId || undefined,
-        // team 端不传 dialogueMode / thinkingEnabled / reasoningEffort /
-        // webSearchEnabled / yoloMode：这些是 chat-only 偏好，与 team 数据流
-        // 无关。后端对缺失字段使用默认值。
+        thinkingEnabled: requestModelSupportsThinking ? thinkingEnabled : false,
+        reasoningEffort: requestModelSupportsThinking ? reasoningEffort : undefined,
+        // team 端不传 dialogueMode / webSearchEnabled / yoloMode：这些是
+        // chat-only 偏好，与 team 数据流无关。
         onDelta: () => {
           // useConversationStream consumes `text_delta` via onEvent; this
           // legacy hook is unused but required by the StreamCallbacks shape.
@@ -903,6 +1110,24 @@ export function useTeamConversationState(
           setStreaming(false);
           setStoppingStream(false);
           setActiveStreamStartedAt(null);
+          // Re-enable multi-attach if it's still connected.
+          // We do this synchronously in onDone (rather than relying on
+          // checkAndRegister) to avoid a window where streamingRef is false
+          // but multiAttachActiveRef is also false, which could let multi-attach
+          // events leak into the old round's accumulator.
+          if (sessionId) {
+            const maStatus = useMultiAttachStore.getState().sessions.get(sessionId);
+            if (maStatus?.state === 'connected') {
+              multiAttachActiveRef.current = true;
+              setMultiAttachActive(true);
+              currentAssistantStreamMessageIdRef.current = makeOrderedMessageId();
+              stream.resetRoundAccumulators();
+              setStreaming(true);
+              streamingRef.current = true;
+              setActiveStreamStartedAt(Date.now());
+              setActiveStreamFirstTokenLatencyMs(null);
+            }
+          }
           // Trigger reload (also called inside the consumer's onStreamDone).
         },
         onError: (code, message) => {
@@ -910,6 +1135,20 @@ export function useTeamConversationState(
           setStreaming(false);
           setStoppingStream(false);
           setStreamError(formatGatewayStreamErrorMessage(code, message));
+          // Re-enable multi-attach on error too, if still connected.
+          if (sessionId) {
+            const maStatus = useMultiAttachStore.getState().sessions.get(sessionId);
+            if (maStatus?.state === 'connected') {
+              multiAttachActiveRef.current = true;
+              setMultiAttachActive(true);
+              currentAssistantStreamMessageIdRef.current = makeOrderedMessageId();
+              stream.resetRoundAccumulators();
+              setStreaming(true);
+              streamingRef.current = true;
+              setActiveStreamStartedAt(Date.now());
+              setActiveStreamFirstTokenLatencyMs(null);
+            }
+          }
         },
       });
     },
@@ -919,6 +1158,8 @@ export function useTeamConversationState(
       token,
       activeProviderId,
       activeModelId,
+      thinkingEnabled,
+      reasoningEffort,
       effectiveAgentId,
       providers,
       gatewayClient,
@@ -950,39 +1191,282 @@ export function useTeamConversationState(
     }
   }, [enableWriters, gatewayClient, streamingRef, stoppingStreamRef]);
 
-  const replyPermission: TeamConversationState['replyPermission'] = useCallback(
-    async (requestId, decision, feedback) => {
-      if (!enableWriters) {
-        throw new Error('当前会话为只读模式，无法处理权限请求。');
+  // ─── attach to background stream ────────────────────────────────
+  // reception session 走 inbound 路径后，后端通过 `runSessionInBackground`
+  // 启动 LLM stream（direct 路径）或派发到子 session（orchestrate 路径）。
+  // 对于 direct 路径，流式 token 通过 `publishSessionRunEvent` 发布到
+  // session 级别事件总线，前端可通过 `/sessions/:id/stream/attach` SSE
+  // 端点实时消费。本方法封装 attach 连接，将收到的 RunEvent 转发给
+  // `useConversationStream.handleEvent`，实现与 `startStream` 相同的
+  // 逐 token 流式渲染效果。
+  const attachAttemptedSessionRef = useRef<string | null>(null);
+  const attachRetryCountRef = useRef(0);
+  const ATTACH_MAX_RETRIES = 3;
+
+  const attachToSessionStream: TeamConversationState['attachToSessionStream'] =
+    useCallback(async () => {
+      if (!sessionId || !token) {
+        return false;
       }
+      // 已在流式中（startStream 路径）不需要 attach。
+      if (streamingRef.current) {
+        return false;
+      }
+      // 同一 session 只尝试一次 attach，避免循环重试。
+      // 但如果上次 attach 失败（attachAttemptedSessionRef 被重置为 null），
+      // 允许重试，最多 ATTACH_MAX_RETRIES 次。
+      if (attachAttemptedSessionRef.current === sessionId) {
+        return false;
+      }
+      if (attachRetryCountRef.current >= ATTACH_MAX_RETRIES) {
+        return false;
+      }
+      attachAttemptedSessionRef.current = sessionId;
+      attachRetryCountRef.current += 1;
+
+      // 预分配 assistant 流式消息 id，供 useConversationStream 累积 segments。
+      currentAssistantStreamMessageIdRef.current = makeOrderedMessageId();
+      streamRequestStartedAtRef.current = Date.now();
+      // attach 路径下 provider/model 未知（后端使用 session 默认配置），
+      // 仅设置 agentId 以便流式消息能显示正确的角色身份。
+      requestProviderIdRef.current = activeProviderId || undefined;
+      requestModelLabelRef.current = activeModelId || undefined;
+      requestAgentIdRef.current = effectiveAgentId || undefined;
+      stream.resetRoundAccumulators();
+      setStreaming(true);
+      streamingRef.current = true;
+      setActiveStreamStartedAt(streamRequestStartedAtRef.current);
+      setActiveStreamFirstTokenLatencyMs(null);
+      setSessionStateStatus('running');
+
+      const attached = await gatewayClient.attachToActiveStream(sessionId, {
+        onDelta: () => {
+          // useConversationStream consumes `text_delta` via onEvent; this
+          // legacy hook is unused but required by the StreamCallbacks shape.
+        },
+        onEvent: (event) => {
+          stream.handleEvent(event as RunEvent);
+        },
+        onDone: () => {
+          streamingRef.current = false;
+          setStreaming(false);
+          setStoppingStream(false);
+          setActiveStreamStartedAt(null);
+          // Re-enable multi-attach if it's still connected (same as startStream's onDone).
+          if (sessionId) {
+            const maStatus = useMultiAttachStore.getState().sessions.get(sessionId);
+            if (maStatus?.state === 'connected') {
+              multiAttachActiveRef.current = true;
+              setMultiAttachActive(true);
+              currentAssistantStreamMessageIdRef.current = makeOrderedMessageId();
+              stream.resetRoundAccumulators();
+              setStreaming(true);
+              streamingRef.current = true;
+              setActiveStreamStartedAt(Date.now());
+              setActiveStreamFirstTokenLatencyMs(null);
+            }
+          }
+          // reload 已由 useConversationStream 的 onStreamDone 回调触发，
+          // 这里不重复调用，避免冗余请求。
+        },
+        onError: (code, message) => {
+          streamingRef.current = false;
+          setStreaming(false);
+          setStoppingStream(false);
+          setActiveStreamStartedAt(null);
+          // Attach 失败不一定是错误——可能后端 direct 路径已完成或走了
+          // orchestrate 路径（无活跃流）。仅在非"无活跃流"错误时提示。
+          if (code !== 'NO_ACTIVE_STREAM' && code !== 'ATTACH_NO_ACTIVE_STREAM') {
+            setStreamError(formatGatewayStreamErrorMessage(code, message));
+          }
+          // Re-enable multi-attach on error too, if still connected.
+          if (sessionId) {
+            const maStatus = useMultiAttachStore.getState().sessions.get(sessionId);
+            if (maStatus?.state === 'connected') {
+              multiAttachActiveRef.current = true;
+              setMultiAttachActive(true);
+              currentAssistantStreamMessageIdRef.current = makeOrderedMessageId();
+              stream.resetRoundAccumulators();
+              setStreaming(true);
+              streamingRef.current = true;
+              setActiveStreamStartedAt(Date.now());
+              setActiveStreamFirstTokenLatencyMs(null);
+            }
+          }
+        },
+      });
+      // attach 成功：重置重试计数。
+      if (attached) {
+        attachRetryCountRef.current = 0;
+      }
+      // attach 未成功（无活跃流等）：回滚 streaming 状态，避免 UI 卡在
+      // "streaming" 模式。onError 回调已处理错误场景的清理。
+      // 不回滚 sessionStateStatus——后端可能在短时间内将状态从 running 切到
+      // 其它值，下一次 reload() 会同步真实状态。
+      if (!attached) {
+        streamingRef.current = false;
+        setStreaming(false);
+        setActiveStreamStartedAt(null);
+        // 重置 attach 标记：attach 失败可能是时序问题（后端流尚未注册），
+        // 允许自动 attach effect 在下一次 reload 检测到 running 时重试。
+        attachAttemptedSessionRef.current = null;
+        // 触发 reload 同步真实 session 状态，避免 attach 失败后状态不一致。
+        void reload();
+      }
+      return attached;
+    }, [
+      sessionId,
+      token,
+      gatewayClient,
+      stream,
+      streamingRef,
+      currentAssistantStreamMessageIdRef,
+      reload,
+      activeProviderId,
+      activeModelId,
+      effectiveAgentId,
+    ]);
+
+  // 当 sessionId 变化时重置 attach 尝试标记，允许新 session 重新 attach。
+  useEffect(() => {
+    if (attachAttemptedSessionRef.current !== null && attachAttemptedSessionRef.current !== sessionId) {
+      attachAttemptedSessionRef.current = null;
+      attachRetryCountRef.current = 0;
+    }
+  }, [sessionId]);
+
+  // 自动 attach：当 session 处于 running 状态、未在本地流式中、且尚未尝试过 attach 时，
+  // 自动发起 attach。覆盖 reception inbound 提交后后端启动后台流的场景。
+  // **多路 SSE 活跃时跳过**：multi-attach 已提供实时流式，不需要单路 attach。
+  useEffect(() => {
+    if (!sessionId || !enabled || !enableWriters) return;
+    if (sessionStateStatus !== 'running') return;
+    if (streamingRef.current) return;
+    if (attachAttemptedSessionRef.current === sessionId) return;
+    if (multiAttachActive) return; // 多路 SSE 已接管，跳过单路 attach
+    // 延迟 500ms 再尝试 attach——后端 runSessionInBackground 是 fire-and-forget，
+    // 需要一点时间让活跃流注册到 session_run_events 总线。
+    const timer = setTimeout(() => {
+      void attachToSessionStream();
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [sessionId, enabled, enableWriters, sessionStateStatus, attachToSessionStream, multiAttachActive]);
+
+  // ─── 多路 SSE 注册：把 stream.handleEvent 注册到 multi-attach store ──
+  // 当 useMultiSessionAttach 为此 session 建立了 SSE 连接时，收到的
+  // RunEvent 会通过 dispatchEvent 转发到这里注册的 handleEvent，实现
+  // 非聚焦 session 的逐 token 流式渲染。
+  // 只在 session 处于 running 状态、且没有本地 stream / 单路 attach 活跃时
+  // 注册——避免与 startStream / attachToSessionStream 产生重复事件。
+  useEffect(() => {
+    if (!sessionId || !enabled) return undefined;
+
+    // Check if multi-attach is connected for this session
+    const checkAndRegister = () => {
+      const status = useMultiAttachStore.getState().sessions.get(sessionId);
+      const isAttached = status?.state === 'connected';
+
+      if (isAttached && !streamingRef.current && !multiAttachActiveRef.current) {
+        // Multi-attach is active and we're not locally streaming — register
+        multiAttachActiveRef.current = true;
+        setMultiAttachActive(true);
+        // Pre-allocate assistant stream message id for accumulation
+        if (!currentAssistantStreamMessageIdRef.current) {
+          currentAssistantStreamMessageIdRef.current = makeOrderedMessageId();
+        }
+        stream.resetRoundAccumulators();
+        if (!streamingRef.current) {
+          setStreaming(true);
+          streamingRef.current = true;
+          setActiveStreamStartedAt(Date.now());
+          setActiveStreamFirstTokenLatencyMs(null);
+        }
+      } else if (!isAttached && multiAttachActiveRef.current) {
+        // Multi-attach disconnected — unregister
+        multiAttachActiveRef.current = false;
+        setMultiAttachActive(false);
+        if (streamingRef.current) {
+          streamingRef.current = false;
+          setStreaming(false);
+          setActiveStreamStartedAt(null);
+        }
+      }
+    };
+
+    checkAndRegister();
+
+    // Subscribe to multi-attach store changes
+    const unsubMultiAttach = useMultiAttachStore.subscribe(checkAndRegister);
+
+    // Register handleEvent callback
+    const handleMultiAttachEvent = (
+      event: RunEvent,
+      _meta: { rowId: number; clientRequestId?: string },
+    ) => {
+      // Skip if we're locally streaming via startStream (user-initiated)
+      // but NOT if we're streaming via multi-attach itself.
+      if (streamingRef.current && !multiAttachActiveRef.current) return;
+      stream.handleEvent(event);
+    };
+
+    const unregisterHandler = useMultiAttachStore.getState().registerHandler(
+      sessionId,
+      handleMultiAttachEvent,
+    );
+
+    return () => {
+      unsubMultiAttach();
+      unregisterHandler();
+      multiAttachActiveRef.current = false;
+      setMultiAttachActive(false);
+    };
+  }, [
+    sessionId,
+    enabled,
+    stream,
+    streamingRef,
+    currentAssistantStreamMessageIdRef,
+    setStreaming,
+    setActiveStreamStartedAt,
+    setActiveStreamFirstTokenLatencyMs,
+  ]);
+
+  const replyPermission: TeamConversationState['replyPermission'] = useCallback(
+    async (requestId, decision, options) => {
       if (!sessionId || !token) {
         throw new Error('当前团队会话或登录状态无效，无法处理权限请求。');
       }
-      await createPermissionsClient(gatewayUrl).reply(token, sessionId, {
-        requestId,
-        decision,
-        ...(feedback ? { feedback } : {}),
-      });
+      await createPermissionsClient(gatewayUrl).reply(
+        token,
+        options?.targetSessionId ?? sessionId,
+        {
+          requestId,
+          decision,
+          ...(options?.alwaysOverride ? { alwaysOverride: options.alwaysOverride } : {}),
+          ...(options?.feedback ? { feedback: options.feedback } : {}),
+        },
+      );
       // Optimistically remove from pending list; the permission_replied event
       // will also clear on receipt.
       setPendingPermissions((prev) => prev.filter((p) => p.requestId !== requestId));
     },
-    [enableWriters, sessionId, token, gatewayUrl],
+    [sessionId, token, gatewayUrl],
   );
 
   const replyQuestion: TeamConversationState['replyQuestion'] = useCallback(
-    async (requestId, status, answers) => {
-      if (!enableWriters) {
-        throw new Error('当前会话为只读模式，无法处理提问请求。');
-      }
+    async (requestId, status, answers, options) => {
       if (!sessionId || !token) {
         throw new Error('当前团队会话或登录状态无效，无法处理提问请求。');
       }
-      await createQuestionsClient(gatewayUrl).reply(token, sessionId, {
-        requestId,
-        status,
-        ...(answers ? { answers } : {}),
-      });
+      await createQuestionsClient(gatewayUrl).reply(
+        token,
+        options?.targetSessionId ?? sessionId,
+        {
+          requestId,
+          status,
+          ...(answers ? { answers } : {}),
+        },
+      );
       setPendingQuestions((prev) => prev.filter((q) => q.requestId !== requestId));
     },
     [enableWriters, sessionId, token, gatewayUrl],
@@ -1026,19 +1510,26 @@ export function useTeamConversationState(
     resetProvidersRetry();
     setProviders(result.data.providers);
     setProvidersError(null);
-    // 注意：team 端只接受用户已显式选择的 provider/model，不写 chat-only
-    // 偏好（thinkingEnabled / reasoningEffort 等）。这些偏好由 chat 端
-    // 各自管理，不在 team 数据流中体现。
+    // 注意：team 端只接受 provider/model 与模型思考默认值，不写 chat-only
+    // 偏好（dialogueMode / yoloMode / webSearchEnabled 等）。
     if (!activeProviderId && result.data.defaults.providerId) {
       setActiveProviderId(result.data.defaults.providerId);
     }
     if (!activeModelId && result.data.defaults.modelId) {
       setActiveModelId(result.data.defaults.modelId);
     }
+    if (defaults?.thinkingEnabled === undefined) {
+      setThinkingEnabled(result.data.defaults.thinkingEnabled);
+    }
+    if (defaults?.reasoningEffort === undefined) {
+      setReasoningEffort(result.data.defaults.reasoningEffort);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     activeModelId,
     activeProviderId,
+    defaults?.reasoningEffort,
+    defaults?.thinkingEnabled,
     clearProvidersRetry,
     gatewayUrl,
     resetProvidersRetry,
@@ -1108,6 +1599,10 @@ export function useTeamConversationState(
     setActiveProviderId,
     activeModelId,
     setActiveModelId,
+    thinkingEnabled,
+    setThinkingEnabled,
+    reasoningEffort,
+    setReasoningEffort,
 
     scrollRegionRef,
     contentColumnRef,
@@ -1123,9 +1618,11 @@ export function useTeamConversationState(
     setPendingPermissions,
     pendingQuestions,
     setPendingQuestions,
+    runEvents,
     roleLayer,
     substate,
     sessionMetadata,
+    childSessions,
 
     remoteSessionBusyState,
     visibleStreaming,
@@ -1136,6 +1633,7 @@ export function useTeamConversationState(
     submitInbound,
     startStream,
     stopStream,
+    attachToSessionStream,
     replyPermission,
     replyQuestion,
     loadProviders,

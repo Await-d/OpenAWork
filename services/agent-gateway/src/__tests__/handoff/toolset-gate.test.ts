@@ -2,7 +2,7 @@
  * Toolset 门控单测：层级权限控制的核心执行点。
  *
  * 覆盖：
- *   - filterToolsByAllowedSets：按类别过滤工具 + 始终放行的基础工具
+ *   - filterToolsByAllowedSets：按类别过滤工具 + 始终放行的内部待办工具
  *   - extractToolsetsFromMetadata：从 session metadata 解析白名单
  *   - 'all' 不过滤
  *   - 层级白名单 ∩ 成员 toolsets 的交集语义（模拟 stream.ts 的门控逻辑）
@@ -32,10 +32,9 @@ const ALL_TOOLS: Tool[] = [
   tool('webfetch'),
   tool('lsp_find_references'),
   tool('grep'),
-  // 基础工具（不受门控影响）
   tool('AskUserQuestion'),
-  tool('todo_read'),
-  tool('todo_write'),
+  tool('todoread'),
+  tool('todowrite'),
   // 动态绑定的 MCP 扁平工具（应放行）
   tool('mcp__github__create_issue'),
   tool('mcp__websearch__web_search_exa'),
@@ -48,14 +47,13 @@ function names(tools: Tool[]): string[] {
 }
 
 describe('filterToolsByAllowedSets', () => {
-  it('只放行白名单类别对应的工具 + 始终允许的基础工具', () => {
+  it('只放行白名单类别对应的工具 + 始终允许的内部待办工具', () => {
     const filtered = filterToolsByAllowedSets(ALL_TOOLS, ['read']);
     const n = names(filtered);
-    // read 类别含 read/grep；基础工具恒在；random/write/bash 被过滤。
     expect(n).toContain('read');
     expect(n).toContain('grep');
-    expect(n).toContain('AskUserQuestion');
-    expect(n).toContain('todo_read');
+    expect(n).not.toContain('AskUserQuestion');
+    expect(n).toContain('todoread');
     expect(n).not.toContain('write');
     expect(n).not.toContain('bash');
     expect(n).not.toContain('websearch');
@@ -81,6 +79,11 @@ describe('filterToolsByAllowedSets', () => {
   it("'all' 类别不做任何过滤", () => {
     const filtered = filterToolsByAllowedSets(ALL_TOOLS, ['all']);
     expect(filtered.length).toBe(ALL_TOOLS.length);
+  });
+
+  it('团队层普通白名单不会把执行层选择题直接暴露给用户', () => {
+    const filtered = filterToolsByAllowedSets(ALL_TOOLS, ['read', 'write', 'shell']);
+    expect(names(filtered)).not.toContain('AskUserQuestion');
   });
 
   it('多类别合并放行（read + write + shell）', () => {

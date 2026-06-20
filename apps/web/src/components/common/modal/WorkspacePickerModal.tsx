@@ -15,6 +15,7 @@ export interface WorkspacePickerModalProps {
   fetchRootPath?: () => Promise<string>;
   fetchWorkspaceRoots?: () => Promise<string[]>;
   fetchTree?: (path: string, depth?: number) => Promise<FileTreeNode[]>;
+  createDirectory?: (path: string) => Promise<void>;
   validatePath?: (path: string) => Promise<{ valid: boolean; error?: string; path?: string }>;
   loading?: boolean;
   initialPath?: string;
@@ -54,6 +55,42 @@ function getParentPath(path: string): string | null {
   return trimmedPath.slice(0, lastSlashIndex);
 }
 
+function joinDirectoryPath(parentPath: string, directoryName: string): string {
+  const trimmedParentPath = parentPath.trim();
+  const trimmedDirectoryName = directoryName.trim();
+  const separator =
+    trimmedParentPath.includes('\\') && !trimmedParentPath.includes('/') ? '\\' : '/';
+
+  if (!trimmedParentPath || trimmedParentPath === separator) {
+    return `${separator}${trimmedDirectoryName}`;
+  }
+
+  const parentWithoutTrailingSeparator = trimmedParentPath.replace(/[\\/]+$/, '');
+  if (!parentWithoutTrailingSeparator) {
+    return `${separator}${trimmedDirectoryName}`;
+  }
+
+  return `${parentWithoutTrailingSeparator}${separator}${trimmedDirectoryName}`;
+}
+
+function validateDirectoryName(name: string): string | null {
+  const trimmedName = name.trim();
+
+  if (!trimmedName) {
+    return '请输入文件夹名称';
+  }
+
+  if (trimmedName === '.' || trimmedName === '..') {
+    return '文件夹名称不能为 . 或 ..';
+  }
+
+  if (/[\\/]/.test(trimmedName)) {
+    return '文件夹名称不能包含路径分隔符';
+  }
+
+  return null;
+}
+
 export default function WorkspacePickerModal({
   isOpen,
   onClose,
@@ -61,6 +98,7 @@ export default function WorkspacePickerModal({
   fetchRootPath,
   fetchWorkspaceRoots,
   fetchTree,
+  createDirectory,
   validatePath,
   loading = false,
   initialPath,
@@ -72,6 +110,9 @@ export default function WorkspacePickerModal({
   const [pathInput, setPathInput] = useState('');
   const [confirming, setConfirming] = useState(false);
   const [browsing, setBrowsing] = useState(false);
+  const [creatingDirectory, setCreatingDirectory] = useState(false);
+  const [showCreateDirectoryForm, setShowCreateDirectoryForm] = useState(false);
+  const [newDirectoryName, setNewDirectoryName] = useState('');
   const lastActionRef = useRef<{ kind: 'initialize' } | { kind: 'open'; path: string } | null>(
     null,
   );
@@ -139,6 +180,9 @@ export default function WorkspacePickerModal({
       setPathInput('');
       setConfirming(false);
       setBrowsing(false);
+      setCreatingDirectory(false);
+      setShowCreateDirectoryForm(false);
+      setNewDirectoryName('');
       return;
     }
 
@@ -148,6 +192,7 @@ export default function WorkspacePickerModal({
   useEffect(() => {
     if (!isOpen) return;
     const handler = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', handler);
@@ -165,7 +210,7 @@ export default function WorkspacePickerModal({
     return () => window.removeEventListener('online', handleOnline);
   }, [error, isOpen, retryLastAction]);
 
-  const busy = loading || confirming || browsing;
+  const busy = loading || confirming || browsing || creatingDirectory;
 
   const currentRoot = useMemo(() => {
     if (availableRoots.length === 0) {
@@ -216,6 +261,41 @@ export default function WorkspacePickerModal({
     }
 
     await openDirectory(nextPath);
+  }
+
+  async function handleCreateDirectory() {
+    if (!createDirectory) {
+      return;
+    }
+
+    if (!currentPath) {
+      setError('请先打开一个目录，再新建文件夹');
+      return;
+    }
+
+    const validationError = validateDirectoryName(newDirectoryName);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    const nextPath = joinDirectoryPath(currentPath, newDirectoryName);
+    setError(null);
+    setCreatingDirectory(true);
+
+    try {
+      await createDirectory(nextPath);
+      const nodes = fetchTree ? await fetchTree(currentPath, 1) : [];
+      setDirectories(nodes.filter((node) => node.type === 'directory'));
+      setPathInput(currentPath);
+      setShowCreateDirectoryForm(false);
+      setNewDirectoryName('');
+      lastActionRef.current = { kind: 'open', path: currentPath };
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '创建文件夹失败');
+    } finally {
+      setCreatingDirectory(false);
+    }
   }
 
   async function handleSelectCurrent() {
@@ -296,6 +376,7 @@ export default function WorkspacePickerModal({
           <button
             type="button"
             onClick={onClose}
+            className="workspace-picker-action"
             disabled={busy}
             style={{
               background: 'none',
@@ -334,6 +415,7 @@ export default function WorkspacePickerModal({
             </span>
             <select
               aria-label="工作区根目录"
+              className="workspace-picker-select"
               disabled={busy}
               value={currentRoot ?? ''}
               onChange={(event) => {
@@ -343,7 +425,7 @@ export default function WorkspacePickerModal({
                 height: 36,
                 borderRadius: 10,
                 border: '1px solid var(--border-default)',
-                background: 'var(--surface-elevated, var(--bg-overlay)',
+                background: 'var(--surface-elevated, var(--bg-overlay))',
                 color: 'var(--fg-strong)',
                 padding: '0 12px',
                 outline: 'none',
@@ -367,7 +449,7 @@ export default function WorkspacePickerModal({
             padding: '12px 14px',
             borderRadius: 10,
             border: '1px solid var(--border-default)',
-            background: 'linear-gradient(135deg, var(--bg-surface), var(--bg-overlay)',
+            background: 'linear-gradient(135deg, var(--bg-surface), var(--bg-overlay))',
           }}
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -378,10 +460,11 @@ export default function WorkspacePickerModal({
               输入框同步显示当前目录，也可以直接编辑绝对路径后打开。
             </span>
           </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <input
               type="text"
               aria-label="工作区路径输入"
+              className="workspace-picker-input"
               value={pathInput}
               onChange={(event) => {
                 setPathInput(event.currentTarget.value);
@@ -396,7 +479,8 @@ export default function WorkspacePickerModal({
               disabled={busy}
               title={currentPath ?? pathInput}
               style={{
-                flex: 1,
+                flex: '1 1 260px',
+                minWidth: 0,
                 height: 38,
                 borderRadius: 10,
                 border: '1px solid var(--border-default)',
@@ -410,6 +494,7 @@ export default function WorkspacePickerModal({
             <button
               type="button"
               onClick={() => void handleGoUp()}
+              className="workspace-picker-action"
               disabled={!canGoUp || busy}
               style={{
                 height: 38,
@@ -430,6 +515,7 @@ export default function WorkspacePickerModal({
             <button
               type="button"
               onClick={() => void handleOpenPathInput()}
+              className="workspace-picker-action"
               disabled={busy || pathInput.trim().length === 0}
               style={{
                 height: 38,
@@ -450,6 +536,7 @@ export default function WorkspacePickerModal({
             <button
               type="button"
               onClick={() => void retryLastAction()}
+              className="workspace-picker-action"
               disabled={busy}
               style={{
                 height: 38,
@@ -481,9 +568,160 @@ export default function WorkspacePickerModal({
             border: '1px solid var(--border-default)',
             borderRadius: 10,
             padding: 10,
-            background: 'var(--bg-2, var(--bg-base)',
+            background: 'var(--bg-2, var(--bg-base))',
           }}
         >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 'var(--spacing-2)',
+              paddingBottom: 'var(--spacing-2)',
+              borderBottom: '1px solid var(--border-subtle)',
+            }}
+          >
+            <div style={{ display: 'grid', gap: 2, minWidth: 0 }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
+                当前目录
+              </span>
+              <span
+                title={currentPath ?? undefined}
+                style={{
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  fontSize: 11,
+                  color: 'var(--fg-muted)',
+                }}
+              >
+                {currentPath ?? '尚未打开目录'}
+              </span>
+            </div>
+            {createDirectory && (
+              <button
+                type="button"
+                onClick={() => {
+                  setError(null);
+                  setShowCreateDirectoryForm((value) => !value);
+                }}
+                className="workspace-picker-action"
+                disabled={!currentPath || busy}
+                style={{
+                  height: 32,
+                  padding: '0 var(--spacing-3)',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--border-default)',
+                  background: showCreateDirectoryForm
+                    ? 'var(--accent-subtle)'
+                    : 'var(--bg-overlay)',
+                  color: showCreateDirectoryForm ? 'var(--accent)' : 'var(--fg-strong)',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: !currentPath || busy ? 'not-allowed' : 'pointer',
+                  opacity: !currentPath || busy ? 0.5 : 1,
+                  flexShrink: 0,
+                }}
+              >
+                {showCreateDirectoryForm ? '收起' : '新建文件夹'}
+              </button>
+            )}
+          </div>
+
+          {createDirectory && showCreateDirectoryForm && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--spacing-2)',
+                flexWrap: 'wrap',
+                paddingBottom: 'var(--spacing-2)',
+                borderBottom: '1px solid var(--border-subtle)',
+              }}
+            >
+              <input
+                type="text"
+                aria-label="文件夹名称"
+                className="workspace-picker-input"
+                value={newDirectoryName}
+                onChange={(event) => {
+                  setNewDirectoryName(event.currentTarget.value);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    void handleCreateDirectory();
+                  }
+                  if (event.key === 'Escape') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setShowCreateDirectoryForm(false);
+                    setNewDirectoryName('');
+                  }
+                }}
+                placeholder="文件夹名称，例如：src"
+                disabled={busy}
+                style={{
+                  flex: '1 1 220px',
+                  minWidth: 0,
+                  height: 34,
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--border-default)',
+                  background: 'var(--bg-overlay)',
+                  color: 'var(--fg-strong)',
+                  padding: '0 var(--spacing-3)',
+                  outline: 'none',
+                  fontSize: 12,
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => void handleCreateDirectory()}
+                className="workspace-picker-action"
+                disabled={busy || newDirectoryName.trim().length === 0}
+                style={{
+                  height: 34,
+                  padding: '0 var(--spacing-4)',
+                  borderRadius: 'var(--radius-sm)',
+                  border: 'none',
+                  background: 'var(--accent)',
+                  color: 'var(--fg-on-accent)',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: busy || newDirectoryName.trim().length === 0 ? 'not-allowed' : 'pointer',
+                  opacity: busy || newDirectoryName.trim().length === 0 ? 0.5 : 1,
+                  flexShrink: 0,
+                }}
+              >
+                {creatingDirectory ? '创建中…' : '创建'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCreateDirectoryForm(false);
+                  setNewDirectoryName('');
+                }}
+                className="workspace-picker-action"
+                disabled={busy}
+                style={{
+                  height: 34,
+                  padding: '0 var(--spacing-3)',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--border-default)',
+                  background: 'transparent',
+                  color: 'var(--fg-muted)',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: busy ? 'not-allowed' : 'pointer',
+                  opacity: busy ? 0.5 : 1,
+                  flexShrink: 0,
+                }}
+              >
+                取消
+              </button>
+            </div>
+          )}
+
           {busy ? (
             <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>正在读取文件夹…</div>
           ) : directories.length === 0 ? (
@@ -552,6 +790,7 @@ export default function WorkspacePickerModal({
           <button
             type="button"
             onClick={onClose}
+            className="workspace-picker-action"
             disabled={busy}
             style={{
               height: 34,
@@ -570,6 +809,7 @@ export default function WorkspacePickerModal({
           <button
             type="button"
             onClick={() => void handleSelectCurrent()}
+            className="workspace-picker-action"
             disabled={busy || !currentPath}
             style={{
               height: 34,
@@ -604,7 +844,24 @@ export default function WorkspacePickerModal({
           </button>
         </div>
       </div>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .workspace-picker-action:focus-visible,
+        .workspace-picker-input:focus-visible,
+        .workspace-picker-select:focus-visible,
+        .workspace-picker-dir-btn:focus-visible {
+          outline: 2px solid var(--accent);
+          outline-offset: 2px;
+          box-shadow: 0 0 0 4px var(--accent-subtle);
+        }
+        .workspace-picker-action:not(:disabled):hover {
+          border-color: var(--border-emphasis);
+        }
+        .workspace-picker-dir-btn:not(:disabled):hover {
+          background: var(--accent-subtle);
+          border-color: var(--accent-border);
+        }
+      `}</style>
     </div>
   );
 }

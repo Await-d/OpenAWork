@@ -17,8 +17,13 @@
  *     自然处理）。
  */
 
-import { TEAM_INIT_STEP_ORDER, type TeamInitState, type TeamInitStepKey } from '@openAwork/shared';
-import { loadTeamInitSessionContext } from './team-init-store.js';
+import {
+  TEAM_INIT_STEP_ORDER,
+  deriveTeamInitPhase,
+  type TeamInitState,
+  type TeamInitStepKey,
+} from '@openAwork/shared';
+import { loadTeamInitSessionContext, writeTeamInitState } from './team-init-store.js';
 import { runTeamInitStep } from './team-init-runner.js';
 import { publishTeamEvent } from '../../handoff/bus/team-events-bus.js';
 
@@ -37,9 +42,69 @@ export interface EnsureTeamInitResult {
 
 // session 级 in-flight guard：避免自动 run 与用户手动点执行 / 重复请求并发跑同一会话。
 const inFlightAutoInit = new Set<string>();
+const MAX_TASK_GOAL_CHARS = 1000;
 
 function autoInitKey(userId: string, sessionId: string): string {
   return `${userId}::${sessionId}`;
+}
+
+function normalizeTaskGoal(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  if (!normalized) return null;
+  return normalized.slice(0, MAX_TASK_GOAL_CHARS);
+}
+
+function activateDeferredEmptyProjectInit(input: {
+  sessionId: string;
+  userId: string;
+  state: TeamInitState;
+  taskGoal: string | null;
+}): TeamInitState {
+  if (input.state.phase === 'skipped' || input.state.projectKind !== 'empty' || !input.taskGoal) {
+    return input.state;
+  }
+
+  let changed = false;
+  const goalPreview = input.taskGoal.slice(0, 240);
+  const nextSteps = input.state.steps.map((step) => {
+    if (step.key === 'bind-tools-per-layer' && step.status === 'not_applicable') {
+      changed = true;
+      return {
+        ...step,
+        title: '按首个目标绑定工具能力',
+        description: '已收到首个项目目标，自动为执行 / 规划等层级推荐并绑定合适的 skill 与 MCP。',
+        status: 'proposed' as const,
+        requiresConfirm: false,
+        usesLlm: true,
+        error: null,
+        result: { activatedBy: 'first-user-goal', taskGoalPreview: goalPreview },
+      };
+    }
+    if (step.key === 'scaffold-memory' && step.status === 'not_applicable') {
+      changed = true;
+      return {
+        ...step,
+        title: '根据首个目标搭建项目记忆',
+        description: '已收到首个项目目标，自动准备一份围绕该目标的项目记忆骨架。',
+        status: 'proposed' as const,
+        requiresConfirm: false,
+        usesLlm: true,
+        error: null,
+        result: { activatedBy: 'first-user-goal', taskGoalPreview: goalPreview },
+      };
+    }
+    return step;
+  });
+
+  if (!changed) return input.state;
+
+  const nextState: TeamInitState = {
+    ...input.state,
+    steps: nextSteps,
+    phase: deriveTeamInitPhase(nextSteps),
+  };
+  writeTeamInitState(input.sessionId, input.userId, nextState);
+  return nextState;
 }
 
 /**
@@ -50,20 +115,29 @@ function autoInitKey(userId: string, sessionId: string): string {
 export async function ensureTeamInitBeforeTask(input: {
   sessionId: string;
   userId: string;
+  taskGoal?: string | null;
 }): Promise<EnsureTeamInitResult> {
   const ctx = loadTeamInitSessionContext(input.sessionId, input.userId);
   if (!ctx?.teamInit) {
     return { ran: false, executedSteps: [], failedSteps: [], state: null, reason: 'no-plan' };
   }
 
+  const taskGoal = normalizeTaskGoal(input.taskGoal);
+  const initialState = activateDeferredEmptyProjectInit({
+    sessionId: input.sessionId,
+    userId: input.userId,
+    state: ctx.teamInit,
+    taskGoal,
+  });
+
   // 已结束（用户手动跑完 / 显式跳过）→ 不再自动跑，尊重用户选择。
-  if (ctx.teamInit.phase === 'completed' || ctx.teamInit.phase === 'skipped') {
+  if (initialState.phase === 'completed' || initialState.phase === 'skipped') {
     return {
       ran: false,
       executedSteps: [],
       failedSteps: [],
-      state: ctx.teamInit,
-      reason: ctx.teamInit.phase,
+      state: initialState,
+      reason: initialState.phase,
     };
   }
 
@@ -73,7 +147,7 @@ export async function ensureTeamInitBeforeTask(input: {
       ran: false,
       executedSteps: [],
       failedSteps: [],
-      state: ctx.teamInit,
+      state: initialState,
       reason: 'already-running',
     };
   }
@@ -81,7 +155,7 @@ export async function ensureTeamInitBeforeTask(input: {
 
   const executedSteps: TeamInitStepKey[] = [];
   const failedSteps: TeamInitStepKey[] = [];
-  let latestState: TeamInitState | null = ctx.teamInit;
+  let latestState: TeamInitState | null = initialState;
 
   try {
     // 按标准顺序执行所有 proposed 步骤。每轮都重新读最新状态，避免基于陈旧快照。
@@ -97,6 +171,7 @@ export async function ensureTeamInitBeforeTask(input: {
         sessionId: input.sessionId,
         userId: input.userId,
         stepKey,
+        taskGoal,
       });
       if (result.state) latestState = result.state;
       executedSteps.push(stepKey);

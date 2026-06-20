@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
@@ -46,6 +47,38 @@ const TEAM_INBOUND_ROUTE_ERROR_MESSAGES: Record<TeamInboundRouteErrorCode, strin
   team_clarification_dismiss_failed: '忽略澄清问题失败。',
 };
 
+function createInternalClientIdempotencyKey(input: {
+  messageType: string;
+}): string {
+  return `team-inbound:${input.messageType}:${randomUUID()}`;
+}
+
+function resolveInboundClientIdempotencyKey(input: {
+  clientIdempotencyKey?: string;
+  messageType: string;
+}): string | null {
+  if (input.clientIdempotencyKey) {
+    return input.clientIdempotencyKey;
+  }
+
+  if (input.messageType === 'user_input') {
+    return createInternalClientIdempotencyKey({
+      messageType: input.messageType,
+    });
+  }
+
+  return null;
+}
+
+function normalizeStreamClientRequestId(clientIdempotencyKey: string): string {
+  if (clientIdempotencyKey.length <= 128) {
+    return clientIdempotencyKey;
+  }
+
+  const digest = createHash('sha256').update(clientIdempotencyKey).digest('hex').slice(0, 48);
+  return `team-client:${digest}`;
+}
+
 function teamInboundRouteErrorPayload(
   code: TeamInboundRouteErrorCode,
   extra?: Record<string, unknown>,
@@ -80,6 +113,13 @@ export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
 
       const parseStep = child('parse-body');
       const body = parseBody(inboundSubmitSchema, request.body);
+      const inboundClientIdempotencyKey = resolveInboundClientIdempotencyKey({
+        clientIdempotencyKey: body.clientIdempotencyKey,
+        messageType: body.messageType,
+      });
+      const streamClientRequestId = inboundClientIdempotencyKey
+        ? normalizeStreamClientRequestId(inboundClientIdempotencyKey)
+        : null;
       parseStep.succeed();
 
       const sessionStep = child('resolve-session');
@@ -111,7 +151,7 @@ export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
           fromRoleLayer: session.role_layer === 'reception' ? 'user' : 'reception',
           messageType: body.messageType,
           payload: body.payload ?? {},
-          clientIdempotencyKey: body.clientIdempotencyKey ?? null,
+          clientIdempotencyKey: inboundClientIdempotencyKey,
           ...(expiresAtIso ? { expiresAt: expiresAtIso } : {}),
         });
 
@@ -194,7 +234,7 @@ export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
                 userId: user.sub,
                 role: 'user',
                 content: [{ type: 'text', text: userInputText }],
-                clientRequestId: body.clientIdempotencyKey ?? null,
+                clientRequestId: streamClientRequestId ?? null,
               });
             } catch (err) {
               console.warn(
@@ -240,7 +280,7 @@ export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
                 receptionSessionId: sessionId,
                 userIntent: userInputText,
                 teamWorkspaceId: teamWorkspaceIdFromMeta,
-                clientIdempotencyKey: body.clientIdempotencyKey ?? null,
+                streamClientRequestId,
                 // user 消息已在上面同步写过，避免重复写
                 persistUserMessage: false,
               });

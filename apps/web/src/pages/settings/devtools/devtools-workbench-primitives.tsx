@@ -4,6 +4,7 @@ import type {
   SettingsDiagnosticRecord,
   SettingsDevLogRecord,
 } from '../state/settings-types.js';
+import { formatUpstreamStreamSummary } from '../state/settings-derived.js';
 
 type SourceTone = {
   background: string;
@@ -497,6 +498,13 @@ export function LogDetailsPanel({ log }: { log: SettingsDevLogRecord | null }) {
     );
   }
 
+  const upstreamStreamSummary =
+    log.source === 'stream:V2_UPSTREAM_STREAM_SUMMARY' ? formatUpstreamStreamSummary(log.output) : null;
+  const summaryOutput =
+    log.output && typeof log.output === 'object' && !Array.isArray(log.output)
+      ? (log.output as Record<string, unknown>)
+      : null;
+
   return (
     <div
       style={{
@@ -557,6 +565,66 @@ export function LogDetailsPanel({ log }: { log: SettingsDevLogRecord | null }) {
           gap: 12,
         }}
       >
+        {upstreamStreamSummary && summaryOutput ? (
+          <div
+            style={{
+              gridColumn: '1 / -1',
+              borderRadius: 8,
+              border: '1px solid color-mix(in srgb, var(--accent) 22%, var(--border-default))',
+              background: 'color-mix(in srgb, var(--accent) 7%, var(--bg-overlay))',
+              padding: '10px 12px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+            }}
+          >
+            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--fg-muted)' }}>流式摘要</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
+              {upstreamStreamSummary}
+            </div>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
+                gap: 8,
+              }}
+            >
+              {[
+                { label: '文本增量', value: summaryOutput['textDeltaCount'] },
+                { label: '思考增量', value: summaryOutput['reasoningDeltaCount'] },
+                { label: '工具增量', value: summaryOutput['toolCallDeltaCount'] },
+                { label: '收到 done', value: summaryOutput['sawDone'] === true ? '是' : '否' },
+                { label: '收到 error', value: summaryOutput['sawError'] === true ? '是' : '否' },
+                { label: '发生 stall', value: summaryOutput['stalled'] === true ? '是' : '否' },
+              ].map((entry) => (
+                <div
+                  key={entry.label}
+                  style={{
+                    borderRadius: 6,
+                    border: '1px solid var(--border-default)',
+                    background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
+                    padding: '8px 10px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 4,
+                  }}
+                >
+                  <div style={{ fontSize: 10, color: 'var(--fg-muted)' }}>{entry.label}</div>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: 'var(--fg-strong)',
+                      fontVariantNumeric: 'tabular-nums',
+                    }}
+                  >
+                    {String(entry.value ?? '0')}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
         {[
           { label: '输入 payload', value: log.input },
           { label: '输出 payload', value: log.output },

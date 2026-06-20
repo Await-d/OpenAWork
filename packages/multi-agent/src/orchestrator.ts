@@ -4,6 +4,7 @@ import type {
   DAGNode,
   DAGEvent,
   DAGEventHandler,
+  DAGEventSubscription,
   WorkflowMode,
   MultiAgentOrchestrator,
 } from './types.js';
@@ -221,6 +222,10 @@ export class MultiAgentOrchestratorImpl implements MultiAgentOrchestrator {
 
   subscribeToEvents(dagId: string, handler: DAGEventHandler): () => void {
     return this.runner.subscribe(dagId, handler);
+  }
+
+  subscribeWithPriority(dagId: string, subscription: DAGEventSubscription): () => void {
+    return this.runner.subscribeWithPriority(dagId, subscription);
   }
 
   resumeDAG(dagId: string): void {

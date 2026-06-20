@@ -11,6 +11,7 @@ import {
   inferTaskProfile,
   parseTaskLine,
   resolveAssignedMember,
+  validateParsedTasks,
 } from '../../handoff/capability/dispatch-package.js';
 
 describe('parseTaskLine', () => {
@@ -65,7 +66,7 @@ describe('buildDispatchPackages', () => {
           parallel: false,
           story: 'US1',
           explicitProfile: null,
-          title: '修复前端登录页面样式问题',
+          title: '[apps/web/src/pages/login.tsx] 修复前端登录页面样式问题 - 页面样式恢复正常',
           priority: 'medium',
         },
         {
@@ -73,7 +74,7 @@ describe('buildDispatchPackages', () => {
           parallel: false,
           story: 'US1',
           explicitProfile: null,
-          title: '代码评审：检查后端鉴权实现',
+          title: '[services/agent-gateway/src/routes/auth.ts] 代码评审检查后端鉴权实现 - 输出审查结论',
           priority: 'medium',
         },
       ],
@@ -98,14 +99,19 @@ describe('buildDispatchPackages', () => {
     expect(explicitTask).not.toBeNull();
 
     const packages = buildDispatchPackages({
-      tasks: [explicitTask!],
+      tasks: [
+        {
+          ...explicitTask!,
+          title: '[docs/api/auth.md] 编写后端 API 使用说明 - 提供接入文档',
+        },
+      ],
       artifactRefs: { tasksId: 'tasks-1' },
       context: '后端 API 路由',
     });
 
     expect(packages[0]!.taskProfile).toEqual({ kind: 'docs', surface: 'cross-cutting' });
     expect(packages[0]!.role).toBe('executor');
-    expect(packages[0]!.goal).toBe('编写后端 API 使用说明');
+    expect(packages[0]!.goal).toBe('[docs/api/auth.md] 编写后端 API 使用说明 - 提供接入文档');
   });
 
   it('会按 workspace roster 给 dispatch package 分配具体成员', () => {
@@ -116,7 +122,7 @@ describe('buildDispatchPackages', () => {
           parallel: false,
           story: null,
           explicitProfile: { kind: 'build', surface: 'ui' },
-          title: '实现前端设置页面',
+          title: '[apps/web/src/pages/settings.tsx] 实现前端设置页面 - 可展示并编辑设置项',
           priority: 'medium',
         },
       ],
@@ -136,7 +142,7 @@ describe('buildDispatchPackages', () => {
       parallel: true,
       story: null,
       explicitProfile: { kind: 'build' as const, surface: 'backend' as const },
-      title: `任务 ${i + 1}`,
+      title: `[services/agent-gateway/src/modules/task-${i + 1}.ts] 实现任务 ${i + 1} - 交付对应能力`,
       priority: 'medium' as const,
     }));
 
@@ -165,6 +171,22 @@ describe('buildDispatchPackages', () => {
       context: '大量任务',
     });
     expect(noCap).toHaveLength(10);
+  });
+
+  it('会拒绝未命名或无路径的任务标题', () => {
+    const issues = validateParsedTasks([
+      {
+        taskId: 'T999',
+        parallel: false,
+        story: 'US1',
+        explicitProfile: null,
+        title: '未命名任务',
+        priority: 'medium',
+      },
+    ]);
+
+    expect(issues.length).toBeGreaterThan(0);
+    expect(issues.join('；')).toContain('未命名任务');
   });
 });
 

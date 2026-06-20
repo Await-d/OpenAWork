@@ -1,7 +1,7 @@
 /**
  * 260531-team-page · parse-instruction-stack
  *
- * 后端 `buildTeamInstructionStack` 把 7 层注入拼成形如：
+ * 后端 `buildTeamInstructionStack` 把团队运行时指令栈拼成形如：
  *
  *   <team-instruction layer="architecture-md">
  *   {正文}
@@ -30,6 +30,7 @@ export interface InstructionStackSegment {
     | 'project-memory'
     | 'lessons-learned'
     | 'user-memory'
+    | 'workspace-knowledge'
     | 'soul'
     | 'cache-breaker'
     | 'oversize-warning'
@@ -46,6 +47,7 @@ const SEGMENT_LABELS: Record<InstructionStackSegment['kind'], string> = {
   'project-memory': '项目记忆',
   'lessons-learned': '经验沉淀',
   'user-memory': '个人记忆',
+  'workspace-knowledge': '工作区知识',
   soul: '角色 SOUL',
   'cache-breaker': '缓存标记',
   'oversize-warning': '超限警告',
@@ -63,12 +65,14 @@ export function isMarkdownSegment(kind: InstructionStackSegment['kind']): boolea
     kind === 'project-memory' ||
     kind === 'lessons-learned' ||
     kind === 'user-memory' ||
+    kind === 'workspace-knowledge' ||
     kind === 'soul'
   );
 }
 
 function classifyLayer(layer: string): InstructionStackSegment['kind'] {
   if (layer.startsWith('soul')) return 'soul';
+  if (layer.startsWith('workspace-knowledge')) return 'workspace-knowledge';
   switch (layer) {
     case 'architecture-md':
       return 'architecture-md';

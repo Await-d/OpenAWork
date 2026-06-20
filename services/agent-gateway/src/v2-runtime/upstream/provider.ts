@@ -4,11 +4,12 @@
  * Vercel AI SDK provider instances that emit `LanguageModelV1`s suitable
  * for `streamText`.
  *
- * Phase 4 entry point: not wired into the runtime stream path yet — the
- * legacy `routes/stream-model-round.ts` still drives all production
- * traffic. The factory exists so Phase 4 / Phase 5 work can build new
- * stream runners against AI SDK without first having to re-implement
- * provider plumbing.
+ * Runtime status:
+ *   - The factory is now on the production chat path through
+ *     `routes/stream-model-round.ts` → `runUpstreamStream(...)`.
+ *   - `routes/stream-model-round.ts` still owns the outer agent loop
+ *     (tool dispatch, persistence, multi-round continuation); this file
+ *     only resolves the upstream AI SDK adapter and protocol surface.
  *
  * Coverage today:
  *   - `anthropic`            → @ai-sdk/anthropic

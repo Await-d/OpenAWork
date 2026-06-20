@@ -26,7 +26,7 @@ import { useReviewDisposition } from '../../hooks/use-review-disposition.js';
 import { useSessionHandoffs } from '../../hooks/use-session-handoffs.js';
 import { FailureFlowIndicator } from '../../shell/controls/FailureFlowIndicator.js';
 import { TabContainer, TabSection } from '../TabContainer.js';
-import { TabPlaceholder } from '../TabPlaceholder.js';
+import { EmptyState } from '../../shared/content-kit/EmptyState.js';
 import { ArtifactChainWizard } from './ArtifactChainWizard.js';
 import { ClarificationsPanel } from './ClarificationsPanel.js';
 import { parseConstitutionCheck, readConstitutionWarnings } from './constitution-check.js';
@@ -240,6 +240,7 @@ function SharedSessionArtifactView({
     <TabContainer
       title="任务与产物"
       subtitle="共享会话没有本地 PM1 / PM2 handoff 树，这里直接展示共享输出、协作待处理项和变更快照。"
+      scroll={false}
     >
       <div data-testid="shared-artifact-view" style={{ display: 'grid', gap: 12 }}>
         <TabSection title="共享上下文" hint="当前选中的是共享会话。">
@@ -720,16 +721,20 @@ export function TeamArtifactSection({
 
   if (!selectedTeamId) {
     return (
-      <TabContainer
-        title="任务与产物"
-        subtitle="按当前会话和 handoff 上下文查看任务、派发与 PM1 / PM2 的产物。"
-      >
-        <TabPlaceholder
+    <TabContainer
+      title="任务与产物"
+      subtitle="按当前会话和 handoff 上下文查看任务、派发与 PM1 / PM2 的产物。"
+      scroll={false}
+    >
+        <EmptyState
           emoji="🧱"
-          title="未选择会话"
-          subtitle="左侧选中一个团队会话后，这里会自动拼接 spec / plan / tasks / review 和 dispatch 上下文。"
-          status="data-pending"
-          dataSource="GET /team/artifacts + GET /team/sessions/:sessionId/handoffs"
+          title="先选择一个团队会话"
+          description="左侧选中会话后，这里会自动拼接 spec / plan / tasks / review 和 dispatch 上下文。"
+          action={
+            <span style={{ color: 'var(--fg-muted)', fontSize: 12 }}>
+              选中会话后可继续查看待澄清、派发包和评审报告。
+            </span>
+          }
         />
       </TabContainer>
     );
@@ -750,6 +755,7 @@ export function TeamArtifactSection({
     <TabContainer
       title="任务与产物"
       subtitle="会话树 / 待澄清 / 任务派发 / 产物链一体化：优先绑定当前会话与聚焦 handoff。"
+      scroll={false}
       actions={
         <button
           type="button"
@@ -765,6 +771,7 @@ export function TeamArtifactSection({
         </button>
       }
     >
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
       {focusHandoffId && artifactContext.focusHandoff ? (
         <section style={CONTEXT_CARD_STYLE}>
           <strong style={{ color: 'var(--accent)', fontSize: 13 }}>
@@ -931,14 +938,12 @@ export function TeamArtifactSection({
           </TabSection>
         </>
       ) : (
-        <TabPlaceholder
+        <EmptyState
           emoji="🪵"
-          title="当前上下文尚未生成可读产物"
-          subtitle="这通常表示 handoff 还在早期阶段，或当前聚焦手柄尚未进入 PM1 / PM2 的产物生成节点。"
-          status="data-pending"
-          dataSource="team.artifacts + session handoffs"
-          extra={
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          title="当前还没有可读产物"
+          description="这通常表示 handoff 仍在早期阶段，或当前聚焦节点还没进入 PM1 / PM2 的产物生成区。"
+          action={
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
               <button
                 type="button"
                 onClick={() => {
@@ -950,10 +955,22 @@ export function TeamArtifactSection({
               >
                 重新拉取上下文
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  selectedSessionHandoffs.refresh();
+                  pm1SessionHandoffs.refresh();
+                  pm2SessionHandoffs.refresh();
+                }}
+                style={ACTION_BTN_STYLE}
+              >
+                刷新 handoff 链
+              </button>
             </div>
           }
         />
       )}
+      </div>
     </TabContainer>
   );
 }

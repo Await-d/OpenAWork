@@ -67,6 +67,7 @@ import {
 } from './sessions.js';
 import { validateImportedMessagesPayload } from './session-route-helpers.js';
 import { createTeamSession } from '../handoff/bus/team-session-create.js';
+import { getChatProvider } from '../provider/provider-catalog.js';
 import {
   getEffectiveReviewDispositionFromPayloadJson,
   isHandledReviewFailurePayloadJson,
@@ -104,6 +105,47 @@ const teamMemberSlotSchema = z.object({
   // 派发优先级（同分排序权重）。
   dispatchPriority: z.enum(['high', 'normal', 'low']).optional(),
 });
+
+type TeamMemberSlotInput = z.infer<typeof teamMemberSlotSchema>;
+
+interface TeamSessionModelSnapshot {
+  modelId: string;
+  providerId: string;
+  variant?: string;
+}
+
+function resolveLayerModelSnapshot(
+  memberSlots: TeamMemberSlotInput[],
+  layer: TeamMemberSlotInput['layer'],
+): TeamSessionModelSnapshot | null {
+  const slot = memberSlots.find(
+    (item) =>
+      item.layer === layer &&
+      typeof item.providerId === 'string' &&
+      item.providerId.trim().length > 0 &&
+      typeof item.modelId === 'string' &&
+      item.modelId.trim().length > 0,
+  );
+  if (!slot?.providerId || !slot.modelId) return null;
+  return {
+    providerId: slot.providerId.trim(),
+    modelId: slot.modelId.trim(),
+    ...(slot.variant && slot.variant.trim().length > 0 ? { variant: slot.variant.trim() } : {}),
+  };
+}
+
+async function resolveReceptionModelSnapshot(input: {
+  memberSlots: TeamMemberSlotInput[];
+  userId: string;
+}): Promise<TeamSessionModelSnapshot | null> {
+  const explicitReceptionModel = resolveLayerModelSnapshot(input.memberSlots, 'reception');
+  if (explicitReceptionModel) return explicitReceptionModel;
+  const chatProvider = await getChatProvider(input.userId);
+  return {
+    providerId: chatProvider.provider.id,
+    modelId: chatProvider.modelId,
+  };
+}
 
 const createWorkspaceSchema = z.object({
   name: z.string().min(1),
@@ -349,6 +391,7 @@ interface TaskRow {
 
 interface MessageRow {
   id: string;
+  session_id: string | null;
   sender_id: string | null;
   recipient_member_id: string | null;
   reply_to_message_id: string | null;
@@ -357,11 +400,28 @@ interface MessageRow {
   created_at: string;
 }
 
+type TeamRuntimeTaskRecord = Awaited<
+  ReturnType<typeof buildMergedSessionTaskProjection>
+>['tasks'][number];
+
 interface TeamRuntimeTaskGroupRecord {
   sessionIds: string[];
-  tasks: Awaited<ReturnType<typeof buildMergedSessionTaskProjection>>['tasks'];
+  tasks: TeamRuntimeTaskRecord[];
   updatedAt: number;
   workspacePath: string | null;
+}
+
+interface RuntimeDispatchTaskHandoffRow {
+  completed_at: string | null;
+  created_at: string;
+  failure_reason: string | null;
+  from_session_id: string;
+  id: string;
+  payload_json: string;
+  started_at: string | null;
+  state: string;
+  to_session_id: string | null;
+  updated_at: string;
 }
 
 interface RuntimeHandoffRow {
@@ -501,27 +561,82 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
     teamWorkspaceId?: string;
     userId: string;
   }): SessionRow[] => {
-    const query =
-      typeof input.teamWorkspaceId === 'string' && input.teamWorkspaceId.length > 0
-        ? `SELECT id, user_id, messages_json, state_status, paused, metadata_json, title, created_at, updated_at, team_parent_session_id, role_layer
-           FROM sessions
-           WHERE user_id = ? AND ${SESSION_TEAM_WORKSPACE_ID_SQL} = ?
-           ORDER BY updated_at DESC`
-        : `SELECT id, user_id, messages_json, state_status, paused, metadata_json, title, created_at, updated_at, team_parent_session_id, role_layer
-           FROM sessions
-           WHERE user_id = ? AND ${SESSION_TEAM_WORKSPACE_ID_SQL} IS NOT NULL
-           ORDER BY updated_at DESC`;
+    // 查询所有属于该用户的 team session：
+    // 1. metadata_json 中包含 teamWorkspaceId 的 session（reception 根 session）
+    // 2. 有 role_layer 的 session（team 子 session —— pm1/pm2/executor/reviewer）
+    // 3. 有 team_parent_session_id 的 session（通过 team 父子链关联的 session）
+    // 第 2、3 条是兜底：旧数据中子 session 的 metadata 可能没有 teamWorkspaceId
+    // （watcher 修复前创建的），但只要它们有 role_layer 或 team_parent_session_id
+    // 就应该出现在 team runtime 列表中。
+    const baseColumns =
+      'id, user_id, messages_json, state_status, paused, metadata_json, title, created_at, updated_at, team_parent_session_id, role_layer';
+    const hasTeamWorkspaceFilter =
+      typeof input.teamWorkspaceId === 'string' && input.teamWorkspaceId.length > 0;
 
-    const params =
-      typeof input.teamWorkspaceId === 'string' && input.teamWorkspaceId.length > 0
-        ? [input.userId, input.teamWorkspaceId]
-        : [input.userId];
+    const query = hasTeamWorkspaceFilter
+      ? `SELECT ${baseColumns}
+         FROM sessions
+         WHERE user_id = ? AND (
+           ${SESSION_TEAM_WORKSPACE_ID_SQL} = ?
+           OR role_layer IS NOT NULL
+           OR team_parent_session_id IS NOT NULL
+         )
+         ORDER BY updated_at DESC`
+      : `SELECT ${baseColumns}
+         FROM sessions
+         WHERE user_id = ? AND (
+           ${SESSION_TEAM_WORKSPACE_ID_SQL} IS NOT NULL
+           OR role_layer IS NOT NULL
+           OR team_parent_session_id IS NOT NULL
+         )
+         ORDER BY updated_at DESC`;
 
-    return sqliteAll<SessionRow>(query, params).filter((row) => {
+    const params = hasTeamWorkspaceFilter ? [input.userId, input.teamWorkspaceId] : [input.userId];
+
+    const rows = sqliteAll<SessionRow>(query, params);
+
+    // 如果指定了 teamWorkspaceId，需要进一步过滤：
+    // - metadata 中有匹配的 teamWorkspaceId 的 session 直接保留
+    // - 没有 teamWorkspaceId 但有 role_layer/team_parent_session_id 的 session，
+    //   通过 team_parent_session_id 递归向上查找根 session 是否属于该 workspace
+    if (!hasTeamWorkspaceFilter) {
+      return rows;
+    }
+
+    // 构建所有 session 的 id → metadata.teamWorkspaceId 映射，用于递归查找
+    const workspaceIdBySessionId = new Map<string, string | null>();
+    const parentBySessionId = new Map<string, string | null>();
+    for (const row of rows) {
       const metadata = parseSessionMetadataJson(row.metadata_json);
-      return typeof input.teamWorkspaceId === 'string' && input.teamWorkspaceId.length > 0
-        ? metadata['teamWorkspaceId'] === input.teamWorkspaceId
-        : metadata['teamWorkspaceId'] != null;
+      const twId = typeof metadata['teamWorkspaceId'] === 'string' ? metadata['teamWorkspaceId'] : null;
+      workspaceIdBySessionId.set(row.id, twId);
+      const rawRow = row as unknown as Record<string, unknown>;
+      const teamParent = typeof rawRow['team_parent_session_id'] === 'string' ? rawRow['team_parent_session_id'] : null;
+      parentBySessionId.set(row.id, teamParent);
+    }
+
+    // 递归查找 session 的 teamWorkspaceId（向上遍历 parent 链）
+    const resolveWorkspaceId = (sessionId: string, visited: Set<string>): string | null => {
+      if (visited.has(sessionId)) return null;
+      visited.add(sessionId);
+      const direct = workspaceIdBySessionId.get(sessionId);
+      if (direct) return direct;
+      const parent = parentBySessionId.get(sessionId);
+      if (!parent) return null;
+      // parent 可能不在当前 rows 中（不在查询结果里），尝试从 map 查
+      return resolveWorkspaceId(parent, visited);
+    };
+
+    return rows.filter((row) => {
+      const metadata = parseSessionMetadataJson(row.metadata_json);
+      const directWorkspaceId = typeof metadata['teamWorkspaceId'] === 'string' ? metadata['teamWorkspaceId'] : null;
+      if (directWorkspaceId === input.teamWorkspaceId) return true;
+      // 没有直接的 teamWorkspaceId，通过 parent 链递归查找
+      if (!directWorkspaceId) {
+        const resolved = resolveWorkspaceId(row.id, new Set());
+        return resolved === input.teamWorkspaceId;
+      }
+      return false;
     });
   };
 
@@ -653,9 +768,50 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
     updatedAt: row.updated_at,
   });
 
+  const readRuntimeSessionRoleInstance = (metadataJson: string) => {
+    const metadata = parseSessionMetadataJson(metadataJson);
+    const rawRoleInstance = metadata['teamRoleInstance'];
+    if (
+      typeof rawRoleInstance !== 'object' ||
+      rawRoleInstance === null ||
+      Array.isArray(rawRoleInstance)
+    ) {
+      return null;
+    }
+    const roleInstance = rawRoleInstance as Record<string, unknown>;
+    const rootSessionId =
+      typeof roleInstance['rootSessionId'] === 'string' &&
+      roleInstance['rootSessionId'].trim().length > 0
+        ? roleInstance['rootSessionId'].trim()
+        : null;
+    const roleLayer =
+      typeof roleInstance['roleLayer'] === 'string' && roleInstance['roleLayer'].trim().length > 0
+        ? roleInstance['roleLayer'].trim()
+        : null;
+    if (!rootSessionId || !roleLayer) {
+      return null;
+    }
+    const personaKey =
+      typeof roleInstance['personaKey'] === 'string' && roleInstance['personaKey'].trim().length > 0
+        ? roleInstance['personaKey'].trim()
+        : null;
+    const displayName =
+      typeof roleInstance['displayName'] === 'string' &&
+      roleInstance['displayName'].trim().length > 0
+        ? roleInstance['displayName'].trim()
+        : null;
+    return {
+      rootSessionId,
+      roleLayer,
+      personaKey,
+      displayName,
+    };
+  };
+
   const mapRuntimeSessionRow = (userId: string, row: SessionRow) => {
     const rawRow = row as unknown as Record<string, unknown>;
     const paused = typeof rawRow['paused'] === 'number' ? rawRow['paused'] === 1 : false;
+    const roleInstance = readRuntimeSessionRoleInstance(row.metadata_json);
     return {
       id: row.id,
       metadataJson: row.metadata_json,
@@ -673,6 +829,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         sessionId: row.id,
         userId,
       }),
+      ...(roleInstance ? { roleInstance } : {}),
     };
   };
 
@@ -749,6 +906,240 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       userId: row.user_id,
     }));
   };
+
+  const parseRecordPayload = (payloadJson: string): Record<string, unknown> | null => {
+    try {
+      const parsed = JSON.parse(payloadJson) as unknown;
+      return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const readDispatchTaskPriority = (value: unknown): 'low' | 'medium' | 'high' => {
+    return value === 'low' || value === 'medium' || value === 'high' ? value : 'medium';
+  };
+
+  const mapDispatchHandoffStateToTaskStatus = (
+    state: string,
+  ): 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' => {
+    if (state === 'running') {
+      return 'running';
+    }
+    if (state === 'completed') {
+      return 'completed';
+    }
+    if (state === 'failed') {
+      return 'failed';
+    }
+    if (state === 'cancelled') {
+      return 'cancelled';
+    }
+    return 'pending';
+  };
+
+  const buildRuntimeDispatchTasksFromHandoffs = (input: {
+    sessionRows: SessionRow[];
+    userId: string;
+  }): TeamRuntimeTaskGroupRecord[] => {
+    if (input.sessionRows.length === 0) {
+      return [];
+    }
+
+    const sessionIds = input.sessionRows.map((row) => row.id);
+    const sessionIdSet = new Set(sessionIds);
+    const placeholders = sessionIds.map(() => '?').join(', ');
+    const rows = sqliteAll<RuntimeDispatchTaskHandoffRow>(
+      `SELECT
+         id,
+         from_session_id,
+         to_session_id,
+         payload_json,
+         state,
+         started_at,
+         completed_at,
+         failure_reason,
+         created_at,
+         updated_at
+       FROM handoff_records
+      WHERE user_id = ?
+        AND from_role_layer = 'pm2'
+        AND to_role_layer = 'executor'
+        AND (from_session_id IN (${placeholders}) OR to_session_id IN (${placeholders}))
+      ORDER BY updated_at ASC, created_at ASC`,
+      [input.userId, ...sessionIds, ...sessionIds],
+    );
+
+    const sessionById = new Map(input.sessionRows.map((row) => [row.id, row]));
+    const groupsByWorkspace = new Map<
+      string,
+      {
+        sessionIds: Set<string>;
+        tasksById: Map<string, TeamRuntimeTaskRecord>;
+        updatedAt: number;
+        workspacePath: string | null;
+      }
+    >();
+    const projectedTaskIdByLegacyTaskId = new Map<string, string>();
+
+    for (const row of rows) {
+      const payload = parseRecordPayload(row.payload_json);
+      if (!payload) {
+        continue;
+      }
+      const taskMarkers =
+        typeof payload['taskMarkers'] === 'object' &&
+        payload['taskMarkers'] !== null &&
+        !Array.isArray(payload['taskMarkers'])
+          ? (payload['taskMarkers'] as Record<string, unknown>)
+          : null;
+      const rawTaskId = taskMarkers?.['taskId'];
+      const taskMarkerId =
+        typeof rawTaskId === 'string' && rawTaskId.trim().length > 0 ? rawTaskId.trim() : row.id;
+      projectedTaskIdByLegacyTaskId.set(
+        `handoff:${row.from_session_id}:${taskMarkerId}`,
+        `handoff:${row.id}:${taskMarkerId}`,
+      );
+    }
+
+    for (const row of rows) {
+      const payload = parseRecordPayload(row.payload_json);
+      if (!payload) {
+        continue;
+      }
+
+      const taskMarkers =
+        typeof payload['taskMarkers'] === 'object' &&
+        payload['taskMarkers'] !== null &&
+        !Array.isArray(payload['taskMarkers'])
+          ? (payload['taskMarkers'] as Record<string, unknown>)
+          : null;
+      const rawTaskId = taskMarkers?.['taskId'];
+      const taskMarkerId =
+        typeof rawTaskId === 'string' && rawTaskId.trim().length > 0 ? rawTaskId.trim() : row.id;
+      const taskSessionId =
+        typeof row.to_session_id === 'string' && sessionIdSet.has(row.to_session_id)
+          ? row.to_session_id
+          : row.from_session_id;
+      const taskSessionRow = sessionById.get(taskSessionId) ?? sessionById.get(row.from_session_id);
+      const workspacePath = taskSessionRow
+        ? getWorkspacePathFromMetadataJson({
+            metadataJson: taskSessionRow.metadata_json,
+            sessionId: taskSessionRow.id,
+            userId: input.userId,
+          })
+        : null;
+      const workspaceKey = workspacePath ?? '__unbound_workspace__';
+      const group = groupsByWorkspace.get(workspaceKey) ?? {
+        sessionIds: new Set<string>(),
+        tasksById: new Map<string, TeamRuntimeTaskRecord>(),
+        updatedAt: 0,
+        workspacePath,
+      };
+      sessionIds.forEach((sessionId) => {
+        const sessionRow = sessionById.get(sessionId);
+        const sessionWorkspacePath = sessionRow
+          ? getWorkspacePathFromMetadataJson({
+              metadataJson: sessionRow.metadata_json,
+              sessionId: sessionRow.id,
+              userId: input.userId,
+            })
+          : null;
+        if ((sessionWorkspacePath ?? '__unbound_workspace__') === workspaceKey) {
+          group.sessionIds.add(sessionId);
+        }
+      });
+      const title =
+        typeof payload['goal'] === 'string' && payload['goal'].trim().length > 0
+          ? payload['goal'].trim()
+          : `执行任务 ${taskMarkerId}`;
+      const updatedAt = Date.parse(row.updated_at) || Date.parse(row.created_at) || Date.now();
+      const createdAt = Date.parse(row.created_at) || updatedAt;
+      const startedAt =
+        row.started_at && Date.parse(row.started_at) ? Date.parse(row.started_at) : undefined;
+      const completedAt =
+        row.completed_at && Date.parse(row.completed_at) ? Date.parse(row.completed_at) : undefined;
+      const dependsOn = Array.isArray(payload['dependsOn'])
+        ? payload['dependsOn'].filter(
+            (dependency): dependency is string =>
+              typeof dependency === 'string' && dependency.trim().length > 0,
+          )
+        : [];
+      const assignedMember =
+        typeof payload['assignedMember'] === 'object' &&
+        payload['assignedMember'] !== null &&
+        !Array.isArray(payload['assignedMember'])
+          ? (payload['assignedMember'] as Record<string, unknown>)
+          : null;
+      const assignedAgent =
+        typeof assignedMember?.['displayName'] === 'string'
+          ? assignedMember['displayName']
+          : typeof assignedMember?.['id'] === 'string'
+            ? assignedMember['id']
+            : undefined;
+      const tags = [
+        taskMarkerId,
+        typeof payload['role'] === 'string' ? payload['role'] : null,
+        typeof assignedMember?.['specialty'] === 'string' ? assignedMember['specialty'] : null,
+      ].filter((tag): tag is string => typeof tag === 'string' && tag.length > 0);
+      const taskThreadId = `handoff:${row.id}`;
+      const taskId = `${taskThreadId}:${taskMarkerId}`;
+      const nextTask: TeamRuntimeTaskRecord = {
+        id: taskId,
+        title,
+        status: mapDispatchHandoffStateToTaskStatus(row.state),
+        blockedBy: dependsOn.map((dependencyId) => {
+          const legacyDependencyId = `handoff:${row.from_session_id}:${dependencyId}`;
+          return projectedTaskIdByLegacyTaskId.get(legacyDependencyId) ?? legacyDependencyId;
+        }),
+        completedSubtaskCount: 0,
+        readySubtaskCount: 0,
+        sessionId: taskSessionId,
+        ...(assignedAgent ? { assignedAgent } : {}),
+        taskThreadId,
+        priority: readDispatchTaskPriority(taskMarkers?.['priority']),
+        tags,
+        createdAt,
+        updatedAt,
+        ...(startedAt ? { startedAt } : {}),
+        ...(completedAt ? { completedAt } : {}),
+        depth: 0,
+        subtaskCount: 0,
+        unmetDependencyCount: dependsOn.length,
+        ...(row.state === 'completed' ? { result: `handoff ${row.id} 已完成` } : {}),
+        ...(row.failure_reason ? { errorMessage: row.failure_reason } : {}),
+      };
+
+      const current = group.tasksById.get(taskId);
+      if (!current || nextTask.updatedAt > current.updatedAt) {
+        group.tasksById.set(taskId, nextTask);
+      }
+      group.updatedAt = Math.max(group.updatedAt, nextTask.updatedAt);
+      groupsByWorkspace.set(workspaceKey, group);
+    }
+
+    return Array.from(groupsByWorkspace.values()).map((group) => ({
+      sessionIds: [...group.sessionIds],
+      tasks: Array.from(group.tasksById.values()),
+      updatedAt: group.updatedAt,
+      workspacePath: group.workspacePath,
+    }));
+  };
+
+  const mergeRuntimeTaskGroupsWithDispatchTasks = (input: {
+    runtimeTaskGroups: TeamRuntimeTaskGroupRecord[];
+    sessionRows: SessionRow[];
+    userId: string;
+  }): TeamRuntimeTaskGroupRecord[] =>
+    mergeRuntimeTaskGroups([
+      ...input.runtimeTaskGroups,
+      ...buildRuntimeDispatchTasksFromHandoffs({
+        sessionRows: input.sessionRows,
+        userId: input.userId,
+      }),
+    ]);
 
   const listRuntimeClarifications = (input: { sessionIds: string[]; userId: string }) => {
     if (input.sessionIds.length === 0) {
@@ -1298,15 +1689,52 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
     };
   };
 
-  const buildRuntimeDiagnostics = (input: { sessionIds: string[]; userId: string }) => {
+  const buildRuntimeDiagnostics = (input: {
+    scopeMode?: 'session' | 'workspace';
+    sessionIds: string[];
+    userId: string;
+  }) => {
     const staleBeforeMs = Date.now() - SESSION_RUNTIME_THREAD_STALE_AFTER_MS;
     const recentCutoffMs = Date.now() - 10 * 60 * 1000;
-    const recentIncidentSummary = getTeamRuntimeIncidentSummary({
-      sinceMs: recentCutoffMs,
-      userId: input.userId,
-    });
+    const sessionIdSet = new Set(input.sessionIds);
+    const isIncidentInScope = (incident: {
+      context: Record<string, boolean | number | string | null>;
+    }): boolean => {
+      const candidateKeys = [
+        'sessionId',
+        'receptionSessionId',
+        'fromSessionId',
+        'toSessionId',
+        'childSessionId',
+      ] as const;
+      return candidateKeys.some((key) => {
+        const value = incident.context[key];
+        return typeof value === 'string' && sessionIdSet.has(value);
+      });
+    };
+    const shouldFilterIncidents = input.scopeMode === 'session';
     const recentIncidents = listTeamRuntimeIncidents({ limit: 100, userId: input.userId }).filter(
-      (incident) => incident.timestamp >= recentCutoffMs,
+      (incident) =>
+        incident.timestamp >= recentCutoffMs &&
+        (!shouldFilterIncidents || isIncidentInScope(incident)),
+    );
+    const recentIncidentSummary = recentIncidents.reduce<
+      Record<
+        'architecture_review' | 'handoff_failure' | 'latency_violation' | 'team_events_connection' | 'team_events_listener',
+        number
+      >
+    >(
+      (acc, incident) => {
+        acc[incident.category] += 1;
+        return acc;
+      },
+      {
+        architecture_review: 0,
+        handoff_failure: 0,
+        latency_violation: 0,
+        team_events_connection: 0,
+        team_events_listener: 0,
+      },
     );
     const handledPm2ReviewCache = new Map<string, boolean>();
     const isHandledPm2ReviewIncident = (handoffId: string): boolean => {
@@ -1385,7 +1813,26 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       table: 'session_runtime_threads',
       extraWhere: `heartbeat_at_ms < ${staleBeforeMs}`,
     });
-    const incidentSummary = getTeamRuntimeIncidentSummary({ userId: input.userId });
+    const incidentSummary = listTeamRuntimeIncidents({ limit: 400, userId: input.userId })
+      .filter((incident) => !shouldFilterIncidents || isIncidentInScope(incident))
+      .reduce<
+        Record<
+          'architecture_review' | 'handoff_failure' | 'latency_violation' | 'team_events_connection' | 'team_events_listener',
+          number
+        >
+      >(
+        (acc, incident) => {
+          acc[incident.category] += 1;
+          return acc;
+        },
+        {
+          architecture_review: 0,
+          handoff_failure: 0,
+          latency_violation: 0,
+          team_events_connection: 0,
+          team_events_listener: 0,
+        },
+      );
     const latency = getAllLatencyStats();
     const latencyViolationCount =
       latency.a_to_b_ack.violationCount +
@@ -1484,7 +1931,9 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
     return {
       capturedAt: new Date().toISOString(),
       activeAlerts,
-      incidents: listTeamRuntimeIncidents({ limit: 20, userId: input.userId }),
+      incidents: listTeamRuntimeIncidents({ limit: 100, userId: input.userId })
+        .filter((incident) => !shouldFilterIncidents || isIncidentInScope(incident))
+        .slice(0, 20),
       incidentSummary,
       health,
       alerts,
@@ -1542,6 +1991,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       }).map((row) => row.id);
     return {
       diagnostics: buildRuntimeDiagnostics({
+        scopeMode: input.sessionIds ? 'session' : 'workspace',
         sessionIds,
         userId: input.userId,
       }),
@@ -1562,6 +2012,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       return [];
     }
     return buildRuntimeDiagnostics({
+      scopeMode: 'workspace',
       sessionIds: scope.sessionIds,
       userId: input.userId,
     }).activeAlerts;
@@ -1993,7 +2444,13 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         version: 2,
       };
 
+      const receptionModelSnapshot = await resolveReceptionModelSnapshot({
+        memberSlots,
+        userId: user.sub,
+      });
+
       const metadataPatch = validateSessionMetadataPatch({
+        ...(receptionModelSnapshot ?? {}),
         teamDefinition,
         teamWorkspaceId,
         workingDirectory: body.workingDirectory ?? workspace.default_working_root ?? undefined,
@@ -2047,7 +2504,8 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       try {
         const { planTeamInit } = await import('../team/init/team-init-planner.js');
         const teamInit = await planTeamInit({
-          workingRoot: workspace.default_working_root ?? null,
+          workingRoot:
+            normalizedMetadata.workingDirectory ?? workspace.default_working_root ?? null,
           teamWorkspaceId,
           userId: user.sub,
         });
@@ -2164,6 +2622,16 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           source: { kind: 'blank' as const },
           version: 2,
         },
+      };
+
+      const legacyReceptionModelSnapshot = await resolveReceptionModelSnapshot({
+        memberSlots: legacyRosterSource,
+        userId: user.sub,
+      });
+
+      normalizedMetadata.metadata = {
+        ...normalizedMetadata.metadata,
+        ...(legacyReceptionModelSnapshot ?? {}),
       };
 
       const requestedParentSessionId = extractParentSessionIdFromMetadata(
@@ -2334,19 +2802,50 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       sharedSessionsStep.succeed(undefined, { count: sharedSessions.length });
 
       const runtimeTaskGroupsStep = child('runtime-task-groups');
-      const runtimeTaskGroups = await buildWorkspaceRuntimeTaskGroups({
+      const projectedRuntimeTaskGroups = await buildWorkspaceRuntimeTaskGroups({
+        sessionRows: scopedSessionRows,
+        userId: user.sub,
+      });
+      const runtimeTaskGroups = mergeRuntimeTaskGroupsWithDispatchTasks({
+        runtimeTaskGroups: projectedRuntimeTaskGroups,
         sessionRows: scopedSessionRows,
         userId: user.sub,
       });
       runtimeTaskGroupsStep.succeed(undefined, { count: runtimeTaskGroups.length });
 
+      const scopedSessionIdList = scopedSessionRows.map((row) => row.id);
+      const handoffsStep = child('handoffs');
+      const handoffs = listRuntimeHandoffs({
+        sessionIds: scopedSessionIdList,
+        userId: user.sub,
+      });
+      handoffsStep.succeed(undefined, { count: handoffs.length });
+
+      const clarificationsStep = child('clarifications');
+      const clarifications = listRuntimeClarifications({
+        sessionIds: scopedSessionIdList,
+        userId: user.sub,
+      });
+      clarificationsStep.succeed(undefined, { count: clarifications.length });
+
+      const notificationsStep = child('notifications');
+      const notifications = listRuntimeNotifications({
+        sessionIds: scopedSessionIdList,
+        userId: user.sub,
+      });
+      notificationsStep.succeed(undefined, { count: notifications.length });
+
       step.succeed(undefined, {
+        handoffCount: handoffs.length,
         sessionCount: scopedSessionRows.length,
         sharedSessionCount: sharedSessions.length,
         teamWorkspaceId,
       });
 
       return reply.send({
+        clarifications,
+        handoffs,
+        notifications,
         runtimeTaskGroups,
         sessionShares: shareRows.map((row) => mapSessionShareRow(user.sub, row)),
         sessions: scopedSessionRows.map((row) => mapRuntimeSessionRow(user.sub, row)),
@@ -2378,6 +2877,19 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         workspaceStep.succeed(undefined, { teamWorkspaceId: workspace.id });
       }
 
+      const sessionScope =
+        query.sessionId || query.teamWorkspaceId
+          ? resolveRuntimeSessionScope({
+              userId: user.sub,
+              teamWorkspaceId: query.teamWorkspaceId,
+              sessionId: query.sessionId,
+            })
+          : null;
+      if (query.sessionId && !sessionScope) {
+        step.fail('session not found in team runtime scope');
+        return reply.status(404).send(teamRouteErrorPayload('team_session_not_found'));
+      }
+
       // Run independent sync queries together, then overlap async task projection
       // with remaining sync work that doesn't depend on its result.
       const membersStep = child('members');
@@ -2395,11 +2907,12 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           [user.sub],
         ),
         sqliteAll<MessageRow>(
-          `SELECT id, sender_id, recipient_member_id, reply_to_message_id, content, type, created_at
+          `SELECT id, session_id, sender_id, recipient_member_id, reply_to_message_id, content, type, created_at
              FROM (
                SELECT
                  rowid,
                  id,
+                 session_id,
                  sender_id,
                  recipient_member_id,
                  reply_to_message_id,
@@ -2414,18 +2927,22 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
             ORDER BY rowid ASC`,
           [user.sub],
         ),
-        listTeamRuntimeSessionRows({
-          userId: user.sub,
-          teamWorkspaceId: query.teamWorkspaceId,
-        }),
+        sessionScope?.sessionRows ??
+          listTeamRuntimeSessionRows({
+            userId: user.sub,
+            teamWorkspaceId: query.teamWorkspaceId,
+          }),
       ];
 
       membersStep.succeed(undefined, { count: memberRows.length });
       tasksStep.succeed(undefined, { count: taskRows.length });
       messagesStep.succeed(undefined, { count: messageRows.length });
 
-      const teamSessionIds = new Set(sessionRows.map((row) => row.id));
-      sessionsStep.succeed(undefined, { count: sessionRows.length });
+      const scopedSessionRows = sessionScope
+        ? sessionRows.filter((row) => sessionScope.sessionIds.includes(row.id))
+        : sessionRows;
+      const teamSessionIds = new Set(scopedSessionRows.map((row) => row.id));
+      sessionsStep.succeed(undefined, { count: scopedSessionRows.length });
 
       const sharesStep = child('session-shares');
       const shareRows = listTeamSessionShareRows({
@@ -2448,7 +2965,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       const runtimeTaskGroupsPromise = Promise.all(
         sharedSessionAccessRecords.map(async (sharedSession) => {
           const workspacePath = sharedSession.session.workspacePath ?? null;
-          const relatedSessionRows = sessionRows.filter(
+          const relatedSessionRows = scopedSessionRows.filter(
             (row) =>
               getWorkspacePathFromMetadataJson({
                 metadataJson: row.metadata_json,
@@ -2467,7 +2984,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           try {
             const { tasks, updatedAt } = await buildMergedSessionTaskProjection({
               includedSessionIds,
-              sessions: sessionRows,
+              sessions: scopedSessionRows,
               sessionId: sharedSession.session.id,
             });
 
@@ -2516,40 +3033,44 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       // Await the async task projection — by now sync work is done, so this
       // only blocks for the remaining async duration.
       const runtimeTaskGroupsStep = child('runtime-task-groups');
-      const runtimeTaskGroups = mergeRuntimeTaskGroups(await runtimeTaskGroupsPromise);
+      const runtimeTaskGroups = mergeRuntimeTaskGroupsWithDispatchTasks({
+        runtimeTaskGroups: mergeRuntimeTaskGroups(await runtimeTaskGroupsPromise),
+        sessionRows: scopedSessionRows,
+        userId: user.sub,
+      });
       runtimeTaskGroupsStep.succeed(undefined, { count: runtimeTaskGroups.length });
 
       const handoffsStep = child('handoffs');
       const handoffs = listRuntimeHandoffs({
-        sessionIds: sessionRows.map((row) => row.id),
+        sessionIds: scopedSessionRows.map((row) => row.id),
         userId: user.sub,
       });
       handoffsStep.succeed(undefined, { count: handoffs.length });
 
       const clarificationsStep = child('clarifications');
       const clarifications = listRuntimeClarifications({
-        sessionIds: sessionRows.map((row) => row.id),
+        sessionIds: scopedSessionRows.map((row) => row.id),
         userId: user.sub,
       });
       clarificationsStep.succeed(undefined, { count: clarifications.length });
 
       const notificationsStep = child('notifications');
       const notifications = listRuntimeNotifications({
-        sessionIds: sessionRows.map((row) => row.id),
+        sessionIds: scopedSessionRows.map((row) => row.id),
         userId: user.sub,
       });
       notificationsStep.succeed(undefined, { count: notifications.length });
 
       const usageRecordsStep = child('usage-records');
       const usageRecords = listTeamUsageRecords({
-        sessionIds: sessionRows.map((row) => row.id),
+        sessionIds: scopedSessionRows.map((row) => row.id),
         userId: user.sub,
       });
       usageRecordsStep.succeed(undefined, { count: usageRecords.length });
 
       const toolCallRecordsStep = child('tool-call-records');
       const toolCallRecords = listTeamToolCallRecords({
-        sessionIds: sessionRows.map((row) => row.id),
+        sessionIds: scopedSessionRows.map((row) => row.id),
         userId: user.sub,
       });
       toolCallRecordsStep.succeed(undefined, { count: toolCallRecords.length });
@@ -2558,7 +3079,8 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         auditLogs,
         clarifications,
         diagnostics: buildRuntimeDiagnostics({
-          sessionIds: sessionRows.map((row) => row.id),
+          scopeMode: query.sessionId ? 'session' : 'workspace',
+          sessionIds: scopedSessionRows.map((row) => row.id),
           userId: user.sub,
         }),
         handoffs,
@@ -2573,6 +3095,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         })),
         messages: messageRows.map((row) => ({
           id: row.id,
+          sessionId: row.session_id,
           memberId: row.sender_id ?? 'system',
           recipientMemberId: row.recipient_member_id,
           replyToMessageId: row.reply_to_message_id,
@@ -2588,7 +3111,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         })),
         notifications,
         sessionShares: shareRows.map((row) => mapSessionShareRow(user.sub, row)),
-        sessions: sessionRows.map((row) => mapRuntimeSessionRow(user.sub, row)),
+        sessions: scopedSessionRows.map((row) => mapRuntimeSessionRow(user.sub, row)),
         sharedSessions,
         runtimeTaskGroups,
         toolCallRecords,

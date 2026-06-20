@@ -236,4 +236,49 @@ describe('useWorkspace', () => {
       '当前账号下没有可用工作区根目录。',
     );
   });
+
+  it('createDirectory 会调用工作区目录创建接口', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/sessions/session-1')) {
+        return new Response(
+          JSON.stringify({
+            session: {
+              id: SESSION_ID,
+              metadata_json: JSON.stringify({ workingDirectory: '/workspace/demo' }),
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (url.includes('/workspace/directory')) {
+        expect(init?.method).toBe('POST');
+        expect(init?.body).toBe(JSON.stringify({ path: '/workspace/demo/feature' }));
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useWorkspace(SESSION_ID));
+
+    await waitFor(() => {
+      expect(result.current.workingDirectory).toBe('/workspace/demo');
+    });
+
+    await act(async () => {
+      await result.current.createDirectory('/workspace/demo/feature');
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://gw-a.test/workspace/directory',
+      expect.objectContaining({
+        body: JSON.stringify({ path: '/workspace/demo/feature' }),
+        headers: expect.objectContaining({
+          Authorization: 'Bearer token-test',
+        }),
+        method: 'POST',
+      }),
+    );
+  });
 });

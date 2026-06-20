@@ -25,6 +25,7 @@
 
 import type { CSSProperties, ReactNode, RefObject } from 'react';
 import type { CommandDescriptor } from '@openAwork/shared';
+import type { UpstreamStreamSummary } from '@openAwork/shared';
 import type { AttachmentItem } from '@openAwork/shared-ui';
 import type { PendingPermissionRequest, PendingQuestionRequest } from '@openAwork/web-client';
 import { ChatMessageGroupList } from '../../../components/chat/message/chat-message-group-list.js';
@@ -188,6 +189,7 @@ export interface ChatConversationViewProps {
   streaming: boolean;
   stoppingStream: boolean;
   streamError: string | null;
+  latestUpstreamSummary: UpstreamStreamSummary | null;
   onDismissStreamError: () => void;
   /** SessionRunStateBar 字段。 */
   checkpointCount: number;
@@ -417,6 +419,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
     streaming,
     stoppingStream,
     streamError,
+    latestUpstreamSummary,
     onDismissStreamError,
     checkpointCount,
     pendingQuestionsCount,
@@ -681,11 +684,16 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
         </div>
       </div>
 
-      <ChatStreamErrorBar streamError={streamError} onDismiss={onDismissStreamError} />
+      <ChatStreamErrorBar
+        streamError={streamError}
+        latestUpstreamSummary={latestUpstreamSummary}
+        onDismiss={onDismissStreamError}
+      />
 
       {remoteSessionBusyState && (
         <SessionRunStateBar
           checkpointCount={checkpointCount}
+          latestUpstreamSummary={latestUpstreamSummary}
           onOpenRecovery={onOpenRecovery}
           pendingPermissionsCount={pendingPermissions.length}
           pendingQuestionsCount={pendingQuestionsCount}

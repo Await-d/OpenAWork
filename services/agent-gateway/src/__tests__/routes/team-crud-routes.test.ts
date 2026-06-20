@@ -68,17 +68,19 @@ function seedTeamMessage(
     content?: string;
     recipientMemberId?: string | null;
     replyToMessageId?: string | null;
+    sessionId?: string | null;
     senderId?: string | null;
     type?: string;
   } = {},
 ): void {
   dbModule.sqliteRun(
     `INSERT INTO team_messages
-      (id, user_id, sender_id, recipient_member_id, reply_to_message_id, content, type)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+	      (id, user_id, session_id, sender_id, recipient_member_id, reply_to_message_id, content, type)
+	     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       messageId,
       userId,
+      input.sessionId ?? null,
       input.senderId ?? null,
       input.recipientMemberId ?? null,
       input.replyToMessageId ?? null,
@@ -210,9 +212,11 @@ describe('team crud routes', () => {
   });
 
   it('POST /team/messages 会落库并在 GET /team/messages 中返回定向跟进字段', async () => {
+    seedSession('session-1', USER_ID);
     seedTeamMember('member-sender', USER_ID, 'sender@example.com');
     seedTeamMember('member-recipient', USER_ID, 'recipient@example.com');
     seedTeamMessage('msg-parent', USER_ID, {
+      sessionId: 'session-1',
       senderId: 'member-sender',
       content: '同步设计稿调整',
       type: 'update',
@@ -228,6 +232,7 @@ describe('team crud routes', () => {
           'content-type': 'application/json',
         },
         payload: {
+          sessionId: 'session-1',
           senderId: 'member-sender',
           recipientMemberId: 'member-recipient',
           replyToMessageId: 'msg-parent',
@@ -242,27 +247,31 @@ describe('team crud routes', () => {
         memberId: string;
         recipientMemberId: string | null;
         replyToMessageId: string | null;
+        sessionId: string | null;
         type: string;
       };
       expect(createdMessage).toMatchObject({
         memberId: 'member-sender',
         recipientMemberId: 'member-recipient',
         replyToMessageId: 'msg-parent',
+        sessionId: 'session-1',
         type: 'result',
       });
 
       const storedRow = dbModule.sqliteGet<{
         recipient_member_id: string | null;
         reply_to_message_id: string | null;
+        session_id: string | null;
         sender_id: string | null;
         type: string;
       }>(
-        `SELECT sender_id, recipient_member_id, reply_to_message_id, type
-           FROM team_messages
-          WHERE id = ?`,
+        `SELECT session_id, sender_id, recipient_member_id, reply_to_message_id, type
+	           FROM team_messages
+	          WHERE id = ?`,
         [createdMessage.id],
       );
       expect(storedRow).toMatchObject({
+        session_id: 'session-1',
         sender_id: 'member-sender',
         recipient_member_id: 'member-recipient',
         reply_to_message_id: 'msg-parent',
@@ -285,6 +294,7 @@ describe('team crud routes', () => {
             memberId: 'member-sender',
             recipientMemberId: 'member-recipient',
             replyToMessageId: 'msg-parent',
+            sessionId: 'session-1',
             content: '接口联调已完成',
             type: 'result',
           }),

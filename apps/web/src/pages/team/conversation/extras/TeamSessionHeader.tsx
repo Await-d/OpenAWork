@@ -22,13 +22,13 @@ export interface TeamSessionHeaderProps {
 const HEADER_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 8,
-  padding: '8px 16px',
+  gap: 6,
+  padding: '5px 10px',
   borderBottom: '1px solid color-mix(in srgb, var(--border-default) 20%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 3%, var(--bg-overlay))',
+  background: 'var(--bg-overlay)',
   flexShrink: 0,
   flexWrap: 'wrap',
-  minHeight: 36,
+  minHeight: 28,
 };
 
 const TOP_ROW_STYLE: CSSProperties = {
@@ -43,38 +43,36 @@ const TOP_ROW_STYLE: CSSProperties = {
 const BADGE_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  gap: 4,
-  padding: '2px 8px',
-  borderRadius: 999,
+  gap: 3,
+  padding: '1px 6px',
+  borderRadius: 4,
   fontSize: 10,
-  fontWeight: 700,
-  letterSpacing: '0.04em',
+  fontWeight: 600,
 };
 
 const ROLE_CHIP_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  gap: 4,
-  padding: '2px 8px',
-  borderRadius: 6,
+  gap: 3,
+  padding: '1px 6px',
+  borderRadius: 4,
   fontSize: 10,
   fontWeight: 600,
-  background: 'var(--bg-overlay)',
-  border: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
-  color: 'var(--fg-default)',
+  background: 'var(--bg-surface)',
+  color: 'var(--fg-muted)',
 };
 
 const ROLE_CHIP_TEXT_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'baseline',
-  gap: 4,
+  gap: 3,
   minWidth: 0,
 };
 
 const ROLE_AGENT_LABEL_STYLE: CSSProperties = {
-  color: 'var(--fg-muted)',
+  color: 'var(--fg-subtle)',
   fontSize: 10,
-  maxWidth: 120,
+  maxWidth: 100,
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
@@ -83,7 +81,7 @@ const ROLE_AGENT_LABEL_STYLE: CSSProperties = {
 const CONFIG_ROW_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 6,
+  gap: 4,
   flexWrap: 'wrap',
   width: '100%',
 };
@@ -91,27 +89,24 @@ const CONFIG_ROW_STYLE: CSSProperties = {
 const CONFIG_PILL_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  gap: 4,
-  padding: '2px 8px',
-  borderRadius: 999,
-  background: 'var(--bg-overlay)',
-  border: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
-  color: 'var(--fg-muted)',
+  gap: 3,
+  padding: '1px 6px',
+  borderRadius: 4,
+  background: 'var(--bg-surface)',
+  color: 'var(--fg-subtle)',
   fontSize: 10,
-  fontWeight: 600,
+  fontWeight: 500,
 };
 
 const SOURCE_PILL_STYLE: CSSProperties = {
   ...CONFIG_PILL_STYLE,
   color: 'var(--accent)',
-  borderColor: 'color-mix(in srgb, var(--accent) 32%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 8%, transparent)',
 };
 
 const HINT_STYLE: CSSProperties = {
   fontSize: 11,
   color: 'var(--fg-muted)',
-  lineHeight: 1.5,
+  lineHeight: 1.4,
 };
 
 function colorForRole(role: string): string {

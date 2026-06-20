@@ -11,8 +11,13 @@
  *   4. 当前任务 / 最新消息：单行截断，带 ▶ 或 💬 前缀  ← extra slot
  *   5. Agent 头像行：圆形 chip，最多 4 个，超出折叠为「+N」  ← extra slot
  *
- * 选中态：accent-muted 背景 + 标题加粗，无 box-shadow 干扰。
- * Hover：副行右侧切换为操作按钮（删除）。
+ * 设计方向：Refined Industrial — 精密工具感，克制但信息密度高。
+ * - 通过纯背景色 + 阴影区分选中/hover 态（无额外边框/色条）
+ * - 状态徽章采用柔和胶囊背景色 + 同色文字
+ * - 弹性缓动动画提升交互手感
+ *
+ * 选中态：accent 背景 + accent 边框 + 标题加粗。
+ * Hover：微妙浮起 + 轻阴影。
  */
 
 import React, { type CSSProperties, type MouseEvent, useEffect, useMemo, useState } from 'react';
@@ -46,9 +51,9 @@ const STATUS_LABEL: Record<AgentTeamsSidebarTeam['status'], string> = {
 
 const STATUS_COLOR: Record<AgentTeamsSidebarTeam['status'], string> = {
   running: 'var(--success)',
-  paused: 'var(--warning)',
+  paused: 'var(--contrast)',
   completed: 'var(--fg-muted)',
-  failed: 'var(--danger)',
+  failed: 'var(--complement)',
 };
 
 /**
@@ -74,30 +79,31 @@ const ICON_BOX_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  width: 20,
-  height: 20,
-  borderRadius: 5,
-  transition: 'background 120ms ease, color 120ms ease',
+  width: 24,
+  height: 24,
+  borderRadius: 7,
+  transition: 'background 160ms cubic-bezier(0.4, 0, 0.2, 1), color 160ms cubic-bezier(0.4, 0, 0.2, 1)',
 };
 
 const STATUS_BADGE_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  gap: 4,
-  padding: '1px 7px',
+  gap: 5,
+  padding: '1.5px 8px',
   borderRadius: 999,
   fontSize: 10,
-  fontWeight: 700,
-  letterSpacing: '0.02em',
+  fontWeight: 600,
+  letterSpacing: '0.03em',
   flexShrink: 0,
+  lineHeight: '1.6',
 };
 
 const PROGRESS_TRACK_STYLE: CSSProperties = {
   position: 'relative',
   width: '100%',
-  height: 2,
+  height: 3,
   borderRadius: 999,
-  background: 'color-mix(in srgb, var(--border-default) 40%, transparent)',
+  background: 'color-mix(in srgb, var(--border-default) 50%, transparent)',
   overflow: 'hidden',
 };
 
@@ -106,7 +112,7 @@ const PROGRESS_FILL_STYLE: CSSProperties = {
   inset: 0,
   borderRadius: 999,
   transformOrigin: 'left center',
-  transition: 'transform 240ms ease',
+  transition: 'transform 320ms cubic-bezier(0.4, 0, 0.2, 1)',
 };
 
 const TASK_LINE_STYLE: CSSProperties = {
@@ -115,7 +121,7 @@ const TASK_LINE_STYLE: CSSProperties = {
   gap: 6,
   fontSize: 11,
   color: 'var(--fg-default)',
-  lineHeight: 1.4,
+  lineHeight: 1.5,
   minWidth: 0,
 };
 
@@ -125,6 +131,18 @@ const TASK_TEXT_STYLE: CSSProperties = {
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
+};
+
+const SUBTITLE_STYLE: CSSProperties = {
+  fontSize: 10,
+  color: 'var(--fg-muted)',
+  lineHeight: '1.5',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  flexShrink: 0,
+  maxWidth: '70%',
+  opacity: 0.8,
 };
 
 const AGENTS_ROW_STYLE: CSSProperties = {
@@ -138,16 +156,17 @@ const AGENT_CHIP_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  width: 18,
-  height: 18,
+  width: 20,
+  height: 20,
   borderRadius: '50%',
   fontSize: 9,
   fontWeight: 700,
   color: 'var(--fg-on-accent)',
   letterSpacing: '0.01em',
   flexShrink: 0,
-  border: '1.5px solid var(--bg-overlay)',
-  marginLeft: -4,
+  border: '1.5px solid var(--bg-overlay, rgba(0,0,0,0.3))',
+  marginLeft: -3,
+  boxShadow: '0 1px 2px rgba(0,0,0,0.2)',
 };
 
 const AGENT_PALETTE = [
@@ -211,9 +230,13 @@ function Chip({
         alignItems: 'center',
         gap: 3,
         fontSize: 10,
-        color,
-        fontWeight: 700,
+        fontWeight: 500,
         flexShrink: 0,
+        padding: '1px 6px',
+        borderRadius: 999,
+        background: 'color-mix(in srgb, var(--border-subtle) 35%, transparent)',
+        color,
+        lineHeight: '1.5',
       }}
     >
       {children}
@@ -263,9 +286,11 @@ export function SessionCard({
   const currentTask = session.currentTaskTitle;
   const lastMessage = session.lastMessage;
   const showTaskLine = Boolean(currentTask) || Boolean(lastMessage);
+  const subtitle = session.subtitle;
 
   const ariaLabel =
     `会话：${session.title}，${label}` +
+    (subtitle ? `，${subtitle}` : '') +
     (taskTotal > 0 ? `，任务 ${taskCompleted}/${taskTotal}` : '') +
     (childCount > 0 ? `，${childCount} 个子会话` : '') +
     (isDerived ? '，派生自其他会话' : '') +
@@ -280,15 +305,15 @@ export function SessionCard({
       style={{
         ...ICON_BOX_STYLE,
         background: active
-          ? 'color-mix(in oklch, var(--accent) 18%, transparent)'
-          : 'color-mix(in oklch, var(--fg-muted) 10%, transparent)',
+          ? 'color-mix(in oklch, var(--accent) 22%, transparent)'
+          : 'color-mix(in oklch, var(--fg-muted) 12%, transparent)',
         color: active ? 'var(--accent)' : 'var(--fg-default)',
       }}
     >
       {isDerived ? (
         <svg
-          width="12"
-          height="12"
+          width="13"
+          height="13"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -301,12 +326,12 @@ export function SessionCard({
         </svg>
       ) : (
         <svg
-          width="12"
-          height="12"
+          width="13"
+          height="13"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
-          strokeWidth="2"
+          strokeWidth="1.85"
           strokeLinecap="round"
           strokeLinejoin="round"
         >
@@ -321,15 +346,17 @@ export function SessionCard({
         aria-hidden="true"
         style={{
           position: 'absolute',
-          right: -2,
-          bottom: -2,
-          width: 7,
-          height: 7,
+          right: -1.5,
+          bottom: -1.5,
+          width: 8,
+          height: 8,
           borderRadius: '50%',
           background: dot,
-          border: '2px solid var(--bg-overlay)',
-          boxShadow: isLiveRunning ? `0 0 5px ${dot}` : undefined,
-          animation: isLiveRunning ? 'pulse 1.5s ease-in-out infinite' : undefined,
+          border: '2px solid var(--bg-overlay, rgba(0,0,0,0.6))',
+          boxShadow: isLiveRunning
+            ? `0 0 5px ${dot}, 0 0 10px color-mix(in srgb, ${dot} 35%, transparent)`
+            : '0 1px 2px rgba(0,0,0,0.35)',
+          animation: isLiveRunning ? 'pulse 2s ease-in-out infinite' : undefined,
         }}
       />
     </span>
@@ -348,10 +375,11 @@ export function SessionCard({
         minHeight: 18,
       }}
     >
+      {/* 主状态徽章 — 柔和背景色 */}
       <span
         style={{
           ...STATUS_BADGE_STYLE,
-          background: `color-mix(in srgb, ${dot} 16%, transparent)`,
+          background: `color-mix(in srgb, ${dot} 8%, var(--bg-overlay))`,
           color: dot,
         }}
       >
@@ -407,7 +435,7 @@ export function SessionCard({
       ) : null}
 
       {taskFailed > 0 ? (
-        <Chip color="var(--danger)" title={`${taskFailed} 个任务失败`}>
+        <Chip color="var(--complement)" title={`${taskFailed} 个任务失败`}>
           <span aria-hidden style={{ fontWeight: 800, lineHeight: 1 }}>
             !
           </span>
@@ -443,6 +471,13 @@ export function SessionCard({
 
   const extraNode = (
     <>
+      {/* 副标题 */}
+      {subtitle ? (
+        <div style={SUBTITLE_STYLE} title={subtitle}>
+          {subtitle}
+        </div>
+      ) : null}
+
       {/* 进度条 */}
       {taskTotal > 0 ? (
         <div style={PROGRESS_TRACK_STYLE} aria-hidden>

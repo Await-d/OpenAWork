@@ -1,8 +1,7 @@
 /**
- * Phase 4 upstream barrel — surfaces the AI SDK provider factory and
- * the `streamText`-driven stream runner so future phases can wire them
- * up behind `OPENAWORK_RUNTIME_UPSTREAM=v2` without reaching into the
- * private files directly.
+ * v2 upstream barrel — central export surface for the production
+ * AI SDK-backed upstream stack used by `routes/stream-model-round.ts`
+ * and the adjacent non-streaming helpers.
  */
 
 export {

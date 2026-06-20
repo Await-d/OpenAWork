@@ -1,7 +1,7 @@
 /**
  * 260515-team-phase-a · Phase 4 内容入口
  *
- * 集中导出宪法预置模板（T-11）与默认五层 SOUL（T-12）。
+ * 集中导出宪法预置模板（T-11）、默认五层 SOUL（T-12）与团队质量门禁。
  */
 
 export {
@@ -19,3 +19,5 @@ export {
   type DefaultSoul,
   type SoulRoleLayer,
 } from './soul-defaults.js';
+
+export { QUALITY_GATES_MD } from './quality-gates.js';

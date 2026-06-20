@@ -123,6 +123,7 @@ const ROLE_LAYER_BY_AGENT_ID: Record<string, keyof typeof IDENTITY_BY_LAYER> = {
   architect: 'reception',
   debugger: 'reception',
   prometheus: 'pm1',
+  cassandra: 'pm1',
   planner: 'pm1',
   plan: 'pm1',
   zeus: 'pm2',

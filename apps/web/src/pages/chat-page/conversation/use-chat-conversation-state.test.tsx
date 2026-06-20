@@ -54,6 +54,7 @@ interface RecoveryFixture {
     id: string;
     state_status?: 'idle' | 'running' | 'paused';
     messages?: unknown[];
+    runEvents?: unknown[];
   };
   todoLanes?: { lanes: unknown[] };
   tasks?: unknown[];
@@ -161,6 +162,13 @@ describe('useChatConversationState — 空闲态', () => {
 describe('useChatConversationState — 加载快照', () => {
   it('sessionId 存在时调用 getRecovery 并写入 state', async () => {
     stubRecovery({
+      activeStream: {
+        clientRequestId: 'req-1',
+        heartbeatAtMs: 1700000001200,
+        lastSeq: 2,
+        sessionId: SESSION_ID,
+        startedAtMs: 1700000000500,
+      },
       session: {
         id: SESSION_ID,
         state_status: 'running',
@@ -176,6 +184,29 @@ describe('useChatConversationState — 加载快照', () => {
             role: 'assistant',
             content: 'hi back',
             createdAtMs: 1700000001000,
+          },
+        ],
+        runEvents: [
+          {
+            type: 'text_delta',
+            delta: 'hi',
+            runId: 'run-1',
+            occurredAt: 1700000001100,
+          },
+          {
+            type: 'done',
+            stopReason: 'end_turn',
+            runId: 'run-1',
+            occurredAt: 1700000001200,
+            upstreamSummary: {
+              stopReason: 'end_turn',
+              textDeltaCount: 3,
+              reasoningDeltaCount: 1,
+              toolCallDeltaCount: 0,
+              sawDone: true,
+              sawError: false,
+              stalled: false,
+            },
           },
         ],
       },
@@ -198,6 +229,15 @@ describe('useChatConversationState — 加载快照', () => {
 
     expect(result.current.messages.length).toBe(2);
     expect(result.current.messages[0]?.id).toBe('m1');
+    expect(result.current.latestUpstreamSummary).toEqual({
+      stopReason: 'end_turn',
+      textDeltaCount: 3,
+      reasoningDeltaCount: 1,
+      toolCallDeltaCount: 0,
+      sawDone: true,
+      sawError: false,
+      stalled: false,
+    });
     expect(result.current.sessionStateStatus).toBe('running');
     expect(result.current.remoteSessionBusyState).toBe('running');
     expect(result.current.pendingPermissions).toHaveLength(1);

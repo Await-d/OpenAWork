@@ -19,6 +19,7 @@ interface UseTeamArtifactDataOptions {
   pm1ArtifactSessionId: string | null;
   pm2ArtifactSessionId: string | null;
   preferredReviewArtifactId?: string | null;
+  preferredArtifactCreatedBeforeMs?: number | null;
 }
 
 interface UseTeamArtifactDataResult {
@@ -77,6 +78,7 @@ function toArtifactData(
 async function loadLatestArtifactResult(input: {
   client: TeamPhaseAClient;
   phase: string;
+  preferredArtifactCreatedBeforeMs?: number | null;
   preferredArtifactId?: string | null;
   sessionId: string;
   token: string;
@@ -87,12 +89,24 @@ async function loadLatestArtifactResult(input: {
   });
   return {
     ...result,
-    artifact: result.ok ? toArtifactData(result.artifacts, input.preferredArtifactId) : null,
+    artifact: result.ok
+      ? toArtifactData(
+          input.preferredArtifactCreatedBeforeMs != null
+            ? result.artifacts.filter((artifact) => {
+                const createdAtMs =
+                  typeof artifact.createdAt === 'string' ? Date.parse(artifact.createdAt) : NaN;
+                return Number.isNaN(createdAtMs) || createdAtMs <= input.preferredArtifactCreatedBeforeMs!;
+              })
+            : result.artifacts,
+          input.preferredArtifactId,
+        )
+      : null,
   };
 }
 
 async function loadLatestReviewArtifactResult(input: {
   client: TeamPhaseAClient;
+  preferredArtifactCreatedBeforeMs?: number | null;
   preferredArtifactId?: string | null;
   sessionId: string;
   token: string;
@@ -100,6 +114,7 @@ async function loadLatestReviewArtifactResult(input: {
   const modern = await loadLatestArtifactResult({
     client: input.client,
     phase: 'review',
+    preferredArtifactCreatedBeforeMs: input.preferredArtifactCreatedBeforeMs,
     preferredArtifactId: input.preferredArtifactId,
     sessionId: input.sessionId,
     token: input.token,
@@ -110,6 +125,7 @@ async function loadLatestReviewArtifactResult(input: {
   return loadLatestArtifactResult({
     client: input.client,
     phase: 'review_report',
+    preferredArtifactCreatedBeforeMs: input.preferredArtifactCreatedBeforeMs,
     preferredArtifactId: input.preferredArtifactId,
     sessionId: input.sessionId,
     token: input.token,
@@ -238,6 +254,7 @@ export function useTeamArtifactData(
         ? loadLatestArtifactResult({
             client,
             phase: 'spec',
+            preferredArtifactCreatedBeforeMs: options.preferredArtifactCreatedBeforeMs,
             sessionId: options.pm1ArtifactSessionId,
             token: accessToken,
           })
@@ -246,6 +263,7 @@ export function useTeamArtifactData(
         ? loadLatestArtifactResult({
             client,
             phase: 'plan',
+            preferredArtifactCreatedBeforeMs: options.preferredArtifactCreatedBeforeMs,
             sessionId: options.pm1ArtifactSessionId,
             token: accessToken,
           })
@@ -254,6 +272,7 @@ export function useTeamArtifactData(
         ? loadLatestArtifactResult({
             client,
             phase: 'tasks',
+            preferredArtifactCreatedBeforeMs: options.preferredArtifactCreatedBeforeMs,
             sessionId: options.pm1ArtifactSessionId,
             token: accessToken,
           })
@@ -261,6 +280,7 @@ export function useTeamArtifactData(
       options.pm2ArtifactSessionId
         ? loadLatestReviewArtifactResult({
             client,
+            preferredArtifactCreatedBeforeMs: options.preferredArtifactCreatedBeforeMs,
             preferredArtifactId: options.preferredReviewArtifactId ?? null,
             sessionId: options.pm2ArtifactSessionId,
             token: accessToken,
@@ -339,6 +359,7 @@ export function useTeamArtifactData(
     gatewayUrl,
     options.pm1ArtifactSessionId,
     options.pm2ArtifactSessionId,
+    options.preferredArtifactCreatedBeforeMs,
     options.preferredReviewArtifactId,
     reloadTick,
     resetRetry,

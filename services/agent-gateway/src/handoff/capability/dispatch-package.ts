@@ -551,6 +551,29 @@ export function parseAllTasks(tasksContent: string): Array<ReturnType<typeof par
   return tasks;
 }
 
+function isStructuredTaskTitle(title: string): boolean {
+  return /^\[[^\]\n]+\]\s+.+\s+-\s+.+$/.test(title.trim());
+}
+
+export function validateParsedTasks(tasks: Array<NonNullable<ReturnType<typeof parseTaskLine>>>): string[] {
+  const issues: string[] = [];
+  if (tasks.length === 0) {
+    issues.push('tasks.md 中未找到任何任务');
+    return issues;
+  }
+  for (const task of tasks) {
+    if (!isStructuredTaskTitle(task.title)) {
+      issues.push(
+        `${task.taskId} 任务标题不符合“[文件/模块路径] 动作 - 预期结果”格式：${task.title || '（空）'}`,
+      );
+    }
+    if (/^(未命名任务|待补充|todo|tbd|无标题|暂无)$/i.test(task.title.trim())) {
+      issues.push(`${task.taskId} 任务标题过于模糊：${task.title}`);
+    }
+  }
+  return issues;
+}
+
 /**
  * 根据解析出的任务列表，构建 dispatch_packages。
  *
@@ -577,6 +600,12 @@ export function buildDispatchPackages(input: {
    */
   maxPackages?: number;
 }): DispatchPackage[] {
+  const validationIssues = validateParsedTasks(input.tasks);
+  if (validationIssues.length > 0) {
+    // 不抛异常——返回空数组让 PM2 的空派发降级逻辑接管（退回 PM1 或创建综合任务）
+    console.warn(`[dispatch-package] tasks.md 校验问题：${validationIssues.join('；')}`);
+    return [];
+  }
   const packages: DispatchPackage[] = [];
   let lastNonParallelHandoffId: string | null = null;
 

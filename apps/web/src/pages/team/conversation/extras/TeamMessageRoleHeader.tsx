@@ -23,10 +23,10 @@ export interface TeamMessageRoleHeaderProps {
 const ROW_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  gap: 7,
-  marginBottom: 7,
-  padding: '2px 10px 2px 3px',
-  borderRadius: 999,
+  gap: 6,
+  marginBottom: 6,
+  padding: '3px 8px',
+  borderRadius: 6,
   fontSize: 11,
   fontWeight: 700,
   lineHeight: 1.4,
@@ -36,8 +36,8 @@ const ROW_STYLE: CSSProperties = {
 const DOT_STYLE: CSSProperties = {
   display: 'inline-grid',
   placeItems: 'center',
-  width: 19,
-  height: 19,
+  width: 18,
+  height: 18,
   borderRadius: '50%',
   fontSize: 10,
   fontWeight: 800,
@@ -65,8 +65,7 @@ export function TeamMessageRoleHeader({ roleLayer }: TeamMessageRoleHeaderProps)
       style={{
         ...ROW_STYLE,
         color: id.color,
-        background: `color-mix(in srgb, ${id.color} 12%, transparent)`,
-        border: `1px solid color-mix(in srgb, ${id.color} 30%, transparent)`,
+        background: `color-mix(in srgb, ${id.color} 8%, transparent)`,
       }}
       aria-label={`来自${id.label}`}
     >

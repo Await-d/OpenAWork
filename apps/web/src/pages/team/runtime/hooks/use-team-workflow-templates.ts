@@ -385,6 +385,39 @@ export function useTeamWorkflowTemplates() {
     setRefreshTick((current) => current + 1);
   }, []);
 
+  const refreshLatest = useCallback(async (): Promise<WorkflowTemplateRecord[]> => {
+    if (!accessToken) {
+      resetRetry();
+      setTemplates([]);
+      setLoading(false);
+      setError(null);
+      return [];
+    }
+
+    setLoading(true);
+    setError(null);
+    const templatesResult = await client.listTemplatesResult(accessToken);
+    if (templatesResult.ok) {
+      const teamTemplates = templatesResult.templates.filter(
+        (template) => template.category === 'team-playbook',
+      );
+      setTemplates(teamTemplates);
+      resetRetry();
+      setLoading(false);
+      setError(null);
+      return teamTemplates;
+    }
+
+    setLoading(false);
+    setError(
+      formatTeamWorkflowTemplatesLoadError({
+        hasCachedData: templatesRef.current.length > 0,
+        result: templatesResult,
+      }),
+    );
+    return templatesRef.current;
+  }, [accessToken, client, resetRetry]);
+
   useEffect(() => {
     templatesRef.current = templates;
   }, [templates]);
@@ -622,6 +655,7 @@ export function useTeamWorkflowTemplates() {
     error,
     loading,
     refresh,
+    refreshLatest,
     removeTemplate,
     sections,
     templateCards,

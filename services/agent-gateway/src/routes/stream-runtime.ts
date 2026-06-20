@@ -4,6 +4,7 @@ import type { HandleStreamResult } from './stream-types.js';
 import { WorkflowLogger, createRequestContext } from '@openAwork/logger';
 import { filterEnabledGatewayToolsForSession } from '../session/session-tool-visibility.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
+import { resolveSessionWorkspacePath } from '../session/session-workspace-resolution.js';
 import {
   appendSessionMessageV2 as appendSessionMessage,
   truncateSessionMessagesAfterV2 as truncateSessionMessagesAfter,
@@ -65,6 +66,14 @@ import {
 import { buildTeamInstructionStack } from '../team/team-instruction-stack.js';
 import { mapAgentToTeamRoleLayer } from '../team/team-role-layer-mapping.js';
 import {
+  buildTeamResumeSystemPrompt,
+  buildTeamUserFacingStatusPrompt,
+  clearInternalTeamResumeRequest,
+  getInternalTeamResumeRootSessionId,
+  rememberInternalTeamResumeRequest,
+  resolveTeamRootSessionId,
+} from '../team/team-resume-context.js';
+import {
   applyTeamLayerToolGate,
   appendTeamDynamicInstructionBlocks,
   isTeamRoleLayer,
@@ -120,7 +129,10 @@ async function continueFromApprovedToolResult(input: {
     requestData,
     userId: input.userId,
   });
-  const workspaceCtx = await buildWorkspaceContext(sessionContext.metadataJson);
+  const workspaceCtx = await buildWorkspaceContext(sessionContext.metadataJson, {
+    sessionId: input.sessionId,
+    userId: input.userId,
+  });
   const resumedUser = loadSessionUser(input.sessionId, input.userId);
   const companionPrompt = resumedUser
     ? buildCompanionPrompt(
@@ -154,7 +166,21 @@ async function continueFromApprovedToolResult(input: {
   // 团队层（pm1/pm2/executor/reviewer 后台执行经此路径）：与 stream.ts 一致地
   //   1) 注入按会话绑定的 flat MCP 工具，2) 施加 toolset 门控 + 内置指令注入。
   //   早期本路径漏了这步，导致干活层拿不到 submit_artifact/submit_patch 等指令 + MCP。
-  const roleLayerForTools = mapAgentToTeamRoleLayer(route.effectiveAgentId ?? null);
+  // roleLayer 解析优先级：effectiveAgentId → session metadata.roleLayer
+  // （后台执行的 team session 可能没有 effectiveAgentId，但 metadata 中有 roleLayer）
+  let roleLayerForTools = mapAgentToTeamRoleLayer(route.effectiveAgentId ?? null);
+  if (!roleLayerForTools) {
+    // 后台执行的 team session 可能没有 effectiveAgentId，
+    // 从 session metadata 的 teamRoleInstance.roleLayer 字段 fallback 获取
+    const roleInstance = sessionMeta['teamRoleInstance'];
+    const metaRoleLayer =
+      typeof roleInstance === 'object' && roleInstance !== null
+        ? (roleInstance as Record<string, unknown>)['roleLayer']
+        : null;
+    if (typeof metaRoleLayer === 'string' && isTeamRoleLayer(metaRoleLayer)) {
+      roleLayerForTools = metaRoleLayer;
+    }
+  }
   let toolsForSession = filteredTools;
   if (isTeamRoleLayer(roleLayerForTools)) {
     // flat MCP（按 requestedMcpServers 白名单动态注入）
@@ -209,9 +235,24 @@ async function continueFromApprovedToolResult(input: {
   // 260515-team-phase-a · T-06：构建 7 层团队指令栈（resume 路径）
   const teamWorkspaceIdForStack =
     typeof sessionMeta['teamWorkspaceId'] === 'string' ? sessionMeta['teamWorkspaceId'] : null;
-  const workingDirectoryForStack =
-    typeof sessionMeta['workingDirectory'] === 'string' ? sessionMeta['workingDirectory'] : null;
-  const roleLayerForStack = mapAgentToTeamRoleLayer(route.effectiveAgentId ?? null);
+  // 递归解析 workingDirectory：子 session 可能没有直接设置 workingDirectory，
+  // 需要通过 DB 列 team_parent_session_id 向上查找父 session 链。
+  const workingDirectoryForStack = resolveSessionWorkspacePath({
+    metadataJson: sessionContext.metadataJson,
+    sessionId: input.sessionId,
+    userId: input.userId,
+  });
+  let roleLayerForStack = mapAgentToTeamRoleLayer(route.effectiveAgentId ?? null);
+  if (!roleLayerForStack) {
+    const roleInstance = sessionMeta['teamRoleInstance'];
+    const metaRoleLayer =
+      typeof roleInstance === 'object' && roleInstance !== null
+        ? (roleInstance as Record<string, unknown>)['roleLayer']
+        : null;
+    if (typeof metaRoleLayer === 'string' && isTeamRoleLayer(metaRoleLayer)) {
+      roleLayerForStack = metaRoleLayer;
+    }
+  }
   const teamInstructionStackResult = await buildTeamInstructionStack({
     userId: input.userId,
     workspaceRoot: workingDirectoryForStack,
@@ -227,6 +268,30 @@ async function continueFromApprovedToolResult(input: {
         : null,
     enabledToolNames,
   });
+  const teamResumeRootSessionId = getInternalTeamResumeRootSessionId({
+    clientRequestId: requestData.clientRequestId,
+    sessionId: input.sessionId,
+    userId: input.userId,
+  });
+  const teamResumePrompt = teamResumeRootSessionId
+    ? await buildTeamResumeSystemPrompt({
+        rootSessionId: teamResumeRootSessionId,
+        userId: input.userId,
+      })
+    : null;
+  const teamStatusRootSessionId =
+    teamResumeRootSessionId ??
+    resolveTeamRootSessionId({
+      metadataJson: sessionContext.metadataJson,
+      sessionId: input.sessionId,
+      userId: input.userId,
+    });
+  const teamStatusPrompt = teamStatusRootSessionId
+    ? await buildTeamUserFacingStatusPrompt({
+        rootSessionId: teamStatusRootSessionId,
+        userId: input.userId,
+      })
+    : null;
 
   const wl = new WorkflowLogger();
   const ctx = createRequestContext(
@@ -401,6 +466,8 @@ async function continueFromApprovedToolResult(input: {
           companionPrompt,
           memoryBlock,
           teamInstructionStack,
+          teamResumePrompt,
+          teamStatusPrompt,
           writeChunk,
         });
 
@@ -544,7 +611,14 @@ async function continueFromApprovedToolResult(input: {
   });
 
   try {
-    return await execution;
+    const result = await execution;
+    if (!result.pendingInteraction) {
+      clearInternalTeamResumeRequest(input.payload.clientRequestId);
+    }
+    return result;
+  } catch (error) {
+    clearInternalTeamResumeRequest(input.payload.clientRequestId);
+    throw error;
   } finally {
     clearInFlightStreamRequest({
       clientRequestId: input.payload.clientRequestId,
@@ -605,6 +679,7 @@ export async function resumeApprovedPermissionRequest(input: {
       userId: input.userId,
     });
   } catch (error) {
+    clearInternalTeamResumeRequest(input.payload.clientRequestId);
     // V2: Transition ToolPart to error state on failure
     rejectToolPermission({
       sessionId: input.sessionId,
@@ -666,6 +741,7 @@ export async function resumeRejectedPermissionRequest(input: {
       userId: input.userId,
     });
   } catch (error) {
+    clearInternalTeamResumeRequest(input.payload.clientRequestId);
     await reconcileResumedTaskChildSession({
       childSessionId: input.sessionId,
       pendingInteraction: false,
@@ -680,6 +756,7 @@ export async function runSessionInBackground(input: {
   onStarted?: () => void;
   requestData: Record<string, unknown>;
   sessionId: string;
+  teamResumeRootSessionId?: string;
   userId: string;
   writeChunk?: (chunk: RunEvent) => void;
 }): Promise<HandleStreamResult> {
@@ -693,19 +770,39 @@ export async function runSessionInBackground(input: {
     throw new Error(`Session user not found: ${input.userId}`);
   }
 
-  return handleStreamRequest({
-    headers: {},
-    ip: 'internal',
-    method: 'INTERNAL',
-    path: `/sessions/${input.sessionId}/stream/background`,
-    requestData: streamRequestSchema.parse(input.requestData),
-    sessionContext,
-    sessionId: input.sessionId,
-    transport: 'SSE',
-    user,
-    writeChunk: input.writeChunk ?? (() => undefined),
-    onStarted: input.onStarted,
-  });
+  const requestData = streamRequestSchema.parse(input.requestData);
+  if (input.teamResumeRootSessionId) {
+    rememberInternalTeamResumeRequest({
+      clientRequestId: requestData.clientRequestId,
+      rootSessionId: input.teamResumeRootSessionId,
+      sessionId: input.sessionId,
+      userId: input.userId,
+    });
+  }
+
+  try {
+    const result = await handleStreamRequest({
+      headers: {},
+      ip: 'internal',
+      method: 'INTERNAL',
+      path: `/sessions/${input.sessionId}/stream/background`,
+      requestData,
+      sessionContext,
+      sessionId: input.sessionId,
+      teamResumeRootSessionId: input.teamResumeRootSessionId,
+      transport: 'SSE',
+      user,
+      writeChunk: input.writeChunk ?? (() => undefined),
+      onStarted: input.onStarted,
+    });
+    if (result.stopReason !== 'tool_permission') {
+      clearInternalTeamResumeRequest(requestData.clientRequestId);
+    }
+    return result;
+  } catch (error) {
+    clearInternalTeamResumeRequest(requestData.clientRequestId);
+    throw error;
+  }
 }
 
 export async function resumeAnsweredQuestionRequest(input: {

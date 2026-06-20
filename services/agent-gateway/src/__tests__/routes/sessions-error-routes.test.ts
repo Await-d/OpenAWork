@@ -363,6 +363,150 @@ describe('sessions route error contracts', () => {
     }
   });
 
+  it('GET /sessions/:sessionId/recovery 沿 team_parent_session_id 返回多层团队子会话', async () => {
+    dbModule.sqliteRun(
+      `INSERT INTO sessions (id, user_id, title, metadata_json, state_status, role_layer)
+       VALUES ('team-recovery-root', ?, 'reception', '{}', 'idle', 'reception')`,
+      [USER_ID],
+    );
+    dbModule.sqliteRun(
+      `INSERT INTO sessions (id, user_id, title, metadata_json, state_status, role_layer, team_parent_session_id)
+       VALUES ('team-recovery-pm1', ?, 'pm1', '{}', 'idle', 'pm1', 'team-recovery-root')`,
+      [USER_ID],
+    );
+    dbModule.sqliteRun(
+      `INSERT INTO sessions (id, user_id, title, metadata_json, state_status, role_layer, team_parent_session_id)
+       VALUES ('team-recovery-executor', ?, 'executor', '{}', 'idle', 'executor', 'team-recovery-pm1')`,
+      [USER_ID],
+    );
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/sessions/team-recovery-root/recovery',
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const children = response.json().recovery.children as Array<{
+        id: string;
+        role_layer?: string | null;
+      }>;
+      expect(children.map((child) => child.id)).toEqual(
+        expect.arrayContaining(['team-recovery-pm1', 'team-recovery-executor']),
+      );
+      expect(children.find((child) => child.id === 'team-recovery-pm1')?.role_layer).toBe('pm1');
+      expect(children.find((child) => child.id === 'team-recovery-executor')?.role_layer).toBe(
+        'executor',
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('GET /sessions/:sessionId/recovery 为 team 子会话显式透传 parentSessionId', async () => {
+    dbModule.sqliteRun(
+      `INSERT INTO sessions (id, user_id, title, metadata_json, state_status, role_layer)
+       VALUES ('team-recovery-parent', ?, 'reception', '{}', 'idle', 'reception')`,
+      [USER_ID],
+    );
+    dbModule.sqliteRun(
+      `INSERT INTO sessions (id, user_id, title, metadata_json, state_status, role_layer, team_parent_session_id)
+       VALUES ('team-recovery-child', ?, 'pm1', '{}', 'idle', 'pm1', 'team-recovery-parent')`,
+      [USER_ID],
+    );
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/sessions/team-recovery-child/recovery',
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const session = response.json().recovery.session as {
+        parentSessionId?: string | null;
+        team_parent_session_id?: string | null;
+      };
+      expect(session.parentSessionId).toBe('team-recovery-parent');
+      expect(session.team_parent_session_id).toBe('team-recovery-parent');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('GET /sessions/:sessionId/recovery 对不同 team 子会话返回各自消息', async () => {
+    const { appendSessionMessageV2 } = await import('../../message/message-v2-adapter.js');
+    dbModule.sqliteRun(
+      `INSERT INTO sessions (id, user_id, title, metadata_json, state_status, role_layer)
+       VALUES ('team-recovery-message-root', ?, 'reception', '{}', 'idle', 'reception')`,
+      [USER_ID],
+    );
+    dbModule.sqliteRun(
+      `INSERT INTO sessions (id, user_id, title, metadata_json, state_status, role_layer, team_parent_session_id)
+       VALUES ('team-recovery-message-pm1', ?, 'pm1', '{}', 'idle', 'pm1', 'team-recovery-message-root')`,
+      [USER_ID],
+    );
+    dbModule.sqliteRun(
+      `INSERT INTO sessions (id, user_id, title, metadata_json, state_status, role_layer, team_parent_session_id)
+       VALUES ('team-recovery-message-reviewer', ?, 'reviewer', '{}', 'idle', 'reviewer', 'team-recovery-message-root')`,
+      [USER_ID],
+    );
+    appendSessionMessageV2({
+      sessionId: 'team-recovery-message-pm1',
+      userId: USER_ID,
+      role: 'assistant',
+      content: [{ type: 'text', text: 'PM1 独立消息' }],
+      messageId: 'msg-pm1-independent',
+    });
+    appendSessionMessageV2({
+      sessionId: 'team-recovery-message-reviewer',
+      userId: USER_ID,
+      role: 'assistant',
+      content: [{ type: 'text', text: '评审独立消息' }],
+      messageId: 'msg-reviewer-independent',
+    });
+
+    const app = await buildApp();
+    try {
+      const pm1Response = await app.inject({
+        method: 'GET',
+        url: '/sessions/team-recovery-message-pm1/recovery',
+        headers: { authorization: bearer(app) },
+      });
+      const reviewerResponse = await app.inject({
+        method: 'GET',
+        url: '/sessions/team-recovery-message-reviewer/recovery',
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(pm1Response.statusCode).toBe(200);
+      expect(reviewerResponse.statusCode).toBe(200);
+
+      const pm1Messages = pm1Response.json().recovery.session.messages as Array<{
+        content: unknown;
+        id: string;
+      }>;
+      const reviewerMessages = reviewerResponse.json().recovery.session.messages as Array<{
+        content: unknown;
+        id: string;
+      }>;
+
+      expect(pm1Messages.map((message) => message.id)).toContain('msg-pm1-independent');
+      expect(JSON.stringify(pm1Messages.map((message) => message.content))).not.toContain(
+        '评审独立消息',
+      );
+      expect(reviewerMessages.map((message) => message.id)).toContain('msg-reviewer-independent');
+      expect(JSON.stringify(reviewerMessages.map((message) => message.content))).not.toContain(
+        'PM1 独立消息',
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
   it('PUT /sessions/:sessionId/messages/:messageId/rating 对不存在消息返回中文 404', async () => {
     seedSession();
     const app = await buildApp();

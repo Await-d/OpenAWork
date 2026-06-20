@@ -19,6 +19,7 @@ export interface AgentVizEvent {
   label: string;
   durationMs?: number;
   error?: string;
+  requestId?: string;
 }
 
 export interface AgentVizPanelProps {

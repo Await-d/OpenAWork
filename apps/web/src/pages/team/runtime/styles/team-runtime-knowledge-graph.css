@@ -1,0 +1,1150 @@
+/* ───── 工作区知识图谱：力导向画布 ───── */
+.workspace-knowledge-graph-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: var(--spacing-3);
+  align-items: stretch;
+  min-height: 0;
+}
+
+.workspace-knowledge-graph-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  min-height: 0;
+  min-width: 0;
+}
+
+.workspace-knowledge-graph-canvas-shell {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.workspace-knowledge-graph-canvas-frame {
+  position: relative;
+  height: clamp(420px, 60vh, 680px);
+  min-height: 420px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border-default) 38%, transparent);
+  border-radius: var(--radius-md);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-overlay) 82%, transparent) 0%,
+    color-mix(in srgb, var(--bg-base) 96%, transparent) 100%
+  );
+  isolation: isolate;
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 1px 0 color-mix(in srgb, var(--border-invisible) 72%, transparent);
+}
+
+.workspace-knowledge-graph-canvas-frame::before {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  content: '';
+  background-image:
+    linear-gradient(
+      color-mix(in srgb, var(--border-default) 12%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--border-default) 10%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 28px 28px;
+  opacity: 0.14;
+}
+
+.workspace-knowledge-graph-canvas-frame::after {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  content: '';
+  background:
+    radial-gradient(
+      circle at 50% 48%,
+      color-mix(in srgb, var(--accent) 5%, transparent) 0%,
+      transparent 52%
+    ),
+    radial-gradient(
+      circle at 50% 50%,
+      transparent 62%,
+      color-mix(in srgb, var(--bg-base) 36%, transparent) 100%
+    );
+}
+
+.workspace-knowledge-graph-canvas {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: inherit;
+  cursor: grab;
+  touch-action: none;
+}
+
+.workspace-knowledge-graph-canvas:active {
+  cursor: grabbing;
+}
+
+.workspace-knowledge-graph-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  padding: var(--spacing-2) var(--spacing-3);
+  border: 1px solid color-mix(in srgb, var(--border-default) 40%, transparent);
+  border-radius: var(--radius-md);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-overlay) 84%, transparent),
+    color-mix(in srgb, var(--bg-base) 92%, transparent)
+  );
+  box-shadow: var(--shadow-sm);
+  overflow: visible;
+}
+
+/* 工具栏行 */
+.workspace-knowledge-graph-toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  flex-wrap: wrap;
+}
+
+/* 搜索框区 */
+.workspace-knowledge-graph-toolbar-search {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.workspace-knowledge-graph-toolbar-search .workspace-knowledge-graph-search {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* 第一行右侧的 toggle 群组 */
+.workspace-knowledge-graph-toolbar-toggles {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  flex: 0 1 auto;
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* 第二行的字段容器 */
+.workspace-knowledge-graph-toolbar-field {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  flex: 0 1 auto;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+/* 层级字段：选项多，给予更多空间 */
+.workspace-knowledge-graph-toolbar-field:first-child {
+  flex: 1 1 320px;
+}
+
+.workspace-knowledge-graph-toolbar-field-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  color: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.workspace-knowledge-graph-toolbar-field-status {
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: none;
+}
+
+.workspace-knowledge-graph-toolbar-query {
+  color: var(--fg-subtle);
+  font-size: 10px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-knowledge-graph-legend {
+  display: flex;
+  align-self: flex-start;
+  flex-wrap: wrap;
+  gap: var(--spacing-1);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.workspace-knowledge-graph-legend-item {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  gap: var(--spacing-1);
+  padding: 0 var(--spacing-1);
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 54%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-base) 42%, transparent);
+}
+
+.workspace-knowledge-graph-legend-mark {
+  flex: 0 0 auto;
+  width: var(--spacing-3);
+  height: var(--spacing-3);
+  border-radius: var(--radius-pill);
+}
+
+.workspace-knowledge-graph-legend-mark.is-edge {
+  width: var(--spacing-5);
+  height: 0;
+  border-radius: 0;
+  border-top: 2px solid var(--border-default);
+}
+
+.workspace-knowledge-graph-legend-mark.is-architecture {
+  background: var(--aux);
+}
+
+.workspace-knowledge-graph-legend-mark.is-governance {
+  background: var(--warning);
+}
+
+.workspace-knowledge-graph-legend-mark.is-memory {
+  background: var(--accent);
+}
+
+.workspace-knowledge-graph-legend-mark.is-knowledge {
+  background: var(--contrast);
+}
+
+.workspace-knowledge-graph-legend-mark.is-contains {
+  border-top-color: var(--border-default);
+}
+
+.workspace-knowledge-graph-legend-mark.is-derives {
+  border-top-color: var(--accent);
+  border-top-style: dashed;
+}
+
+.workspace-knowledge-graph-legend-mark.is-persisted {
+  background: var(--success);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bg-base) 86%, transparent);
+}
+
+.workspace-knowledge-graph-search {
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 var(--spacing-3);
+  border: 1px solid color-mix(in srgb, var(--border-default) 55%, transparent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+  color: var(--fg-default);
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  font-size: 12px;
+  transition:
+    border-color var(--dur-micro) var(--ease-micro),
+    box-shadow var(--dur-micro) var(--ease-micro),
+    background var(--dur-micro) var(--ease-micro);
+}
+
+.workspace-knowledge-graph-search:hover {
+  border-color: color-mix(in srgb, var(--border-emphasis) 70%, transparent);
+}
+
+.workspace-knowledge-graph-search:focus-visible {
+  border-color: var(--accent-border);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
+/* ─── 统一按钮变体 ─────────────────────────────────────── */
+
+.workspace-knowledge-graph-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-1);
+  min-height: var(--spacing-8);
+  padding: var(--spacing-1) var(--spacing-3);
+  border: 1px solid color-mix(in srgb, var(--border-default) 46%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    box-shadow 120ms ease,
+    transform 100ms ease;
+}
+
+.workspace-knowledge-graph-action-btn.is-ghost {
+  background: transparent;
+  color: var(--fg-muted);
+  border-color: color-mix(in srgb, var(--border-default) 38%, transparent);
+}
+
+.workspace-knowledge-graph-action-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
+.workspace-knowledge-graph-action-btn.is-ghost:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bg-base) 54%, transparent);
+  border-color: color-mix(in srgb, var(--border-default) 60%, transparent);
+  color: var(--fg-default);
+  box-shadow: none;
+}
+
+.workspace-knowledge-graph-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.workspace-knowledge-graph-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  padding: 2px var(--spacing-2);
+  border: 1px solid color-mix(in srgb, var(--border-default) 38%, transparent);
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    color 120ms ease;
+}
+
+.workspace-knowledge-graph-toggle-btn.is-sm {
+  min-height: 22px;
+  padding: 1px var(--spacing-2);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.workspace-knowledge-graph-toggle-btn.is-active {
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+}
+
+.workspace-knowledge-graph-toggle-btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  color: var(--fg-default);
+}
+
+.workspace-knowledge-graph-toggle-btn.is-active:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+.workspace-knowledge-graph-toggle-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.workspace-knowledge-graph-toggle-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
+/* 内联组（toggle + SegmentedToggle 组合） */
+.workspace-knowledge-graph-toolbar-inline-group {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  flex-wrap: wrap;
+}
+
+.workspace-knowledge-graph-control-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--spacing-8);
+  min-height: var(--spacing-8);
+  padding: var(--spacing-1) var(--spacing-2);
+  border: 1px solid color-mix(in srgb, var(--border-default) 46%, transparent);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  transition:
+    border-color var(--dur-micro) var(--ease-micro),
+    box-shadow var(--dur-micro) var(--ease-micro),
+    background var(--dur-micro) var(--ease-micro),
+    color var(--dur-micro) var(--ease-micro),
+    transform var(--dur-micro) var(--ease-micro);
+}
+
+.workspace-knowledge-graph-toolbar .workspace-knowledge-graph-control-button {
+  min-width: calc(var(--spacing-8) + var(--spacing-2));
+  min-height: var(--spacing-8);
+  border-color: transparent;
+  border-radius: var(--radius-xs);
+}
+
+.workspace-knowledge-graph-canvas-overlay-top-left {
+  position: absolute;
+  top: var(--spacing-2);
+  left: var(--spacing-2);
+  z-index: 4;
+  pointer-events: auto;
+}
+
+.workspace-knowledge-graph-zoom-cluster {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid color-mix(in srgb, var(--border-default) 38%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-overlay) 84%, transparent);
+  backdrop-filter: blur(8px);
+  box-shadow: var(--shadow-sm);
+}
+
+.workspace-knowledge-graph-zoom-cluster .workspace-knowledge-graph-control-button {
+  min-width: 28px;
+  min-height: 28px;
+  border-color: transparent;
+  border-radius: var(--radius-xs);
+  background: transparent;
+}
+
+.workspace-knowledge-graph-zoom-cluster .workspace-knowledge-graph-control-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.workspace-knowledge-graph-zoom-display {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 42px;
+  padding: 0 var(--spacing-1);
+  color: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.workspace-knowledge-graph-control-button[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--accent) 46%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-overlay));
+  color: var(--accent);
+}
+
+.workspace-knowledge-graph-control-button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border-default));
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  color: var(--fg-default);
+}
+
+.workspace-knowledge-graph-control-button[aria-pressed='true']:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.workspace-knowledge-graph-control-button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.workspace-knowledge-graph-control-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
+.workspace-knowledge-graph-control-button:disabled {
+  border-color: color-mix(in srgb, var(--border-default) 46%, transparent);
+  background: transparent;
+  color: var(--fg-subtle);
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.workspace-knowledge-graph-status-strip {
+  display: block;
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.6;
+  word-break: keep-all;
+  white-space: normal;
+}
+
+.workspace-knowledge-graph-inline-alert {
+  display: block;
+  min-width: 0;
+  padding: var(--spacing-1) var(--spacing-2);
+  border: 1px solid color-mix(in srgb, var(--warning) 32%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+  color: var(--warning);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.workspace-knowledge-graph-access-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.workspace-knowledge-graph-access-layer button {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  border: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.workspace-knowledge-graph-access-layer button:focus-visible {
+  top: var(--spacing-3);
+  left: var(--spacing-3);
+  z-index: 4;
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: var(--spacing-1) var(--spacing-2);
+  clip: auto;
+  clip-path: none;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-overlay);
+  color: var(--accent);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+  font-size: 11px;
+  font-weight: 700;
+  pointer-events: auto;
+}
+
+.workspace-knowledge-graph-access-layer button:focus-visible::after {
+  content: attr(data-label);
+}
+
+.workspace-knowledge-graph-fallback {
+  position: absolute;
+  inset: var(--spacing-3);
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  justify-content: center;
+  padding: var(--spacing-4);
+  border: 1px solid color-mix(in srgb, var(--border-default) 48%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base));
+  color: var(--fg-default);
+  pointer-events: auto;
+}
+
+.workspace-knowledge-graph-fallback-title {
+  color: var(--fg-strong);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.workspace-knowledge-graph-fallback-description {
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.workspace-knowledge-graph-fallback-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-1);
+  max-height: 180px;
+  overflow: auto;
+  padding: var(--spacing-1);
+}
+
+.workspace-knowledge-graph-fallback-node {
+  min-height: 28px;
+  padding: var(--spacing-1) var(--spacing-2);
+  border: 1px solid color-mix(in srgb, var(--border-default) 52%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-base) 76%, transparent);
+  color: var(--fg-default);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.workspace-knowledge-graph-fallback-node:hover {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border-default));
+  color: var(--accent);
+}
+
+.workspace-knowledge-graph-fallback-node:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
+.workspace-knowledge-graph-inspector {
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  position: sticky;
+  top: var(--spacing-3);
+  min-width: 0;
+  min-height: 240px;
+  height: clamp(400px, 60vh, 660px);
+  max-height: calc(100vh - var(--spacing-12));
+  padding: var(--spacing-3);
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--border-default) 40%, transparent);
+  border-radius: var(--radius-md);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-overlay) 84%, transparent),
+    color-mix(in srgb, var(--bg-base) 94%, transparent)
+  );
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 1px 0 color-mix(in srgb, var(--border-invisible) 72%, transparent);
+}
+
+.workspace-knowledge-graph-inspector-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-6) var(--spacing-3);
+  text-align: center;
+}
+
+.workspace-knowledge-graph-inspector-icon {
+  font-size: 24px;
+  line-height: 1;
+  opacity: 0.4;
+}
+
+.workspace-knowledge-graph-inspector-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+  padding-bottom: var(--spacing-2);
+  border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 54%, transparent);
+}
+
+.workspace-knowledge-graph-inspector-kicker {
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.workspace-knowledge-graph-inspector-section-note {
+  display: block;
+}
+
+.workspace-knowledge-graph-inspector-title {
+  margin: 0;
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--fg-strong);
+  font-size: 14px;
+  font-weight: 800;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.workspace-knowledge-graph-inspector-description,
+.workspace-knowledge-graph-inspector-notice,
+.workspace-knowledge-graph-inspector-section-note {
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.workspace-knowledge-graph-inspector-notice.is-info {
+  padding: var(--spacing-1) var(--spacing-2);
+  border: 1px solid color-mix(in srgb, var(--aux) 28%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--aux) 8%, transparent);
+  color: var(--aux);
+  font-weight: 700;
+}
+
+.workspace-knowledge-graph-inspector-source {
+  display: block;
+  max-width: 100%;
+  min-height: 24px;
+  padding: var(--spacing-1) var(--spacing-2);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 70%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-base) 72%, transparent);
+  color: var(--fg-subtle);
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
+    monospace;
+  font-size: 10px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-knowledge-graph-inspector-badges,
+.workspace-knowledge-graph-inspector-button-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: var(--spacing-1);
+  min-width: 0;
+}
+
+.workspace-knowledge-graph-inspector-button-row .workspace-knowledge-graph-toggle-btn {
+  width: 100%;
+  min-height: 24px;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+}
+
+.workspace-knowledge-graph-inspector-depth-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-1);
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.workspace-knowledge-graph-inspector-depth-row .workspace-knowledge-graph-toggle-btn {
+  flex-shrink: 0;
+}
+
+.workspace-knowledge-graph-inspector-summary {
+  margin: 0;
+  padding: var(--spacing-2);
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 64%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-base) 42%, transparent);
+  color: var(--fg-default);
+  font-size: 12px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+/* SectionPanel 已自带边框和标题样式，此处仅保留间距微调 */
+.workspace-knowledge-graph-inspector .workspace-knowledge-graph-status-pill {
+  margin: 0;
+}
+
+.workspace-knowledge-graph-persist-button {
+  width: 100%;
+  min-height: 34px;
+  margin-top: auto;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-overlay));
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  transition:
+    border-color var(--dur-micro) var(--ease-micro),
+    box-shadow var(--dur-micro) var(--ease-micro),
+    background var(--dur-micro) var(--ease-micro),
+    color var(--dur-micro) var(--ease-micro),
+    transform var(--dur-micro) var(--ease-micro);
+}
+
+.workspace-knowledge-graph-persist-button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 56%, transparent);
+  background: color-mix(in srgb, var(--accent) 20%, var(--bg-overlay));
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
+.workspace-knowledge-graph-persist-button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.workspace-knowledge-graph-persist-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
+.workspace-knowledge-graph-persist-button:disabled {
+  border-color: color-mix(in srgb, var(--border-default) 46%, transparent);
+  background: color-mix(in srgb, var(--bg-overlay) 76%, transparent);
+  color: var(--fg-subtle);
+  cursor: not-allowed;
+}
+
+.workspace-knowledge-graph-inspector-message {
+  padding: var(--spacing-1) var(--spacing-2);
+  border: 1px solid color-mix(in srgb, var(--success) 28%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--success) 8%, transparent);
+  color: var(--success);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.workspace-knowledge-graph-inspector-message.is-error {
+  border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  color: var(--danger);
+}
+
+.workspace-knowledge-graph-focus-count {
+  position: absolute;
+  right: var(--spacing-3);
+  bottom: var(--spacing-3);
+  z-index: 3;
+  min-height: var(--spacing-6);
+  padding: var(--spacing-1) var(--spacing-2);
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
+  border-radius: var(--radius-pill);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 10%, var(--bg-overlay)),
+    color-mix(in srgb, var(--bg-overlay) 86%, transparent)
+  );
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent),
+    0 8px 24px -14px color-mix(in srgb, var(--accent) 34%, transparent);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.workspace-knowledge-graph-fixed-count {
+  position: absolute;
+  top: var(--spacing-3);
+  left: var(--spacing-3);
+  z-index: 3;
+  max-width: min(260px, calc(100% - var(--spacing-6)));
+  min-height: var(--spacing-6);
+  padding: var(--spacing-1) var(--spacing-2);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border-default) 46%, transparent);
+  border-radius: var(--radius-pill);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-overlay) 96%, transparent),
+    color-mix(in srgb, var(--bg-base) 72%, transparent)
+  );
+  box-shadow: 0 8px 24px -16px color-mix(in srgb, var(--bg-base) 72%, transparent);
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-knowledge-graph-node-hint {
+  position: absolute;
+  left: var(--spacing-3);
+  bottom: var(--spacing-3);
+  z-index: 3;
+  max-width: min(360px, calc(100% - var(--spacing-12) - var(--spacing-12)));
+  min-height: var(--spacing-6);
+  padding: var(--spacing-1) var(--spacing-2);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border-default) 46%, transparent);
+  border-radius: var(--radius-pill);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-overlay) 96%, transparent),
+    color-mix(in srgb, var(--bg-base) 72%, transparent)
+  );
+  box-shadow: 0 8px 28px -18px color-mix(in srgb, var(--bg-base) 76%, transparent);
+  color: var(--fg-default);
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-knowledge-graph-settings-panel {
+  position: absolute;
+  bottom: var(--spacing-2);
+  right: var(--spacing-2);
+  z-index: 5;
+  width: auto;
+  min-width: 92px;
+  max-width: min(280px, calc(100% - var(--spacing-4)));
+  border: 1px solid color-mix(in srgb, var(--border-default) 38%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base));
+  backdrop-filter: blur(8px);
+  color: var(--fg-default);
+  box-shadow: var(--shadow-sm);
+}
+
+.workspace-knowledge-graph-settings-panel summary {
+  min-height: 32px;
+  padding: var(--spacing-1) var(--spacing-2);
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+  list-style: none;
+}
+
+.workspace-knowledge-graph-settings-panel summary::-webkit-details-marker {
+  display: none;
+}
+
+.workspace-knowledge-graph-settings-panel summary::after {
+  float: right;
+  color: var(--fg-subtle);
+  content: '调整';
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.workspace-knowledge-graph-settings-panel[open] {
+  width: min(280px, calc(100% - var(--spacing-4)));
+  max-height: calc(100% - var(--spacing-4));
+  overflow: auto;
+  padding-bottom: var(--spacing-2);
+}
+
+.workspace-knowledge-graph-settings-panel[open] summary {
+  color: var(--fg-strong);
+}
+
+.workspace-knowledge-graph-settings-panel summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
+.workspace-knowledge-graph-force-controls {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--spacing-2);
+  width: 100%;
+  padding: 0 var(--spacing-2);
+}
+
+.workspace-knowledge-graph-force-range {
+  display: grid;
+  gap: var(--spacing-1);
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.workspace-knowledge-graph-force-range input {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.workspace-knowledge-graph-force-range input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
+.workspace-knowledge-graph-footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+  padding-top: var(--spacing-2);
+  border-top: 1px solid color-mix(in srgb, var(--border-subtle) 66%, transparent);
+}
+
+.workspace-knowledge-graph-footer .workspace-knowledge-graph-legend {
+  min-width: 0;
+  color: var(--fg-subtle);
+}
+
+.workspace-knowledge-graph-footer .workspace-knowledge-graph-legend-item {
+  min-height: 22px;
+  padding-inline: var(--spacing-1);
+  background: color-mix(in srgb, var(--bg-base) 34%, transparent);
+}
+
+.workspace-knowledge-graph-footer .workspace-knowledge-graph-status-strip {
+  min-width: 0;
+  padding: 0 var(--spacing-1);
+  text-align: left;
+  color: var(--fg-subtle);
+}
+
+@media (max-width: 980px) {
+  .workspace-knowledge-graph-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-knowledge-graph-canvas-shell {
+    min-height: 400px;
+  }
+
+  .workspace-knowledge-graph-inspector {
+    position: static;
+    height: auto;
+    max-height: none;
+  }
+
+  .workspace-knowledge-graph-force-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-knowledge-graph-toolbar-toggles {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 640px) {
+  .workspace-knowledge-graph-settings-panel {
+    position: static;
+    width: 100%;
+    margin-top: var(--spacing-2);
+  }
+
+  .workspace-knowledge-graph-toolbar {
+    padding: var(--spacing-2);
+  }
+
+  .workspace-knowledge-graph-settings-panel[open] {
+    width: 100%;
+    max-height: none;
+  }
+
+  .workspace-knowledge-graph-toolbar-search {
+    flex: 1 1 100%;
+  }
+
+  .workspace-knowledge-graph-toolbar-toggles {
+    flex: 1 1 100%;
+  }
+
+  .workspace-knowledge-graph-canvas-frame {
+    height: clamp(360px, 54vh, 480px);
+    min-height: 360px;
+  }
+
+  .workspace-knowledge-graph-canvas {
+    height: 100%;
+  }
+
+  .workspace-knowledge-graph-canvas-overlay-top-left {
+    top: var(--spacing-1);
+    left: var(--spacing-1);
+  }
+
+  .workspace-knowledge-graph-zoom-cluster {
+    padding: 1px;
+  }
+
+  .workspace-knowledge-graph-zoom-cluster .workspace-knowledge-graph-control-button {
+    min-width: 26px;
+    min-height: 26px;
+    font-size: 10px;
+  }
+
+  .workspace-knowledge-graph-zoom-display {
+    min-width: 36px;
+    font-size: 9px;
+  }
+
+  .workspace-knowledge-graph-focus-count {
+    top: var(--spacing-3);
+    bottom: auto;
+    max-width: calc(50% - var(--spacing-4));
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .workspace-knowledge-graph-fixed-count {
+    max-width: calc(50% - var(--spacing-4));
+  }
+
+  .workspace-knowledge-graph-node-hint {
+    right: var(--spacing-3);
+    max-width: calc(100% - var(--spacing-6));
+  }
+
+  .workspace-knowledge-graph-force-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-knowledge-graph-toolbar-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--spacing-2);
+  }
+
+  .workspace-knowledge-graph-toolbar-toggles,
+  .workspace-knowledge-graph-toolbar-field,
+  .workspace-knowledge-graph-toolbar-field:first-child {
+    flex: 1 1 auto;
+    justify-content: flex-start;
+  }
+
+  .workspace-knowledge-graph-toolbar-field > .workspace-knowledge-graph-toolbar-field-label {
+    flex: 0 0 auto;
+  }
+
+  .workspace-knowledge-graph-footer .workspace-knowledge-graph-status-strip {
+    text-align: left;
+  }
+}

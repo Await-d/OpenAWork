@@ -149,14 +149,96 @@ describe('runExecutionLayer 失败语义（🔴#1）', () => {
     const handoff = makeExecutorHandoff();
     const signal = new AbortController().signal;
 
+    const { appendSessionMessageV2 } = await import('../../message/message-v2-adapter.js');
+    appendSessionMessageV2({
+      sessionId: EXECUTOR_SESSION_ID,
+      userId: USER_ID,
+      role: 'assistant',
+      clientRequestId: `handoff:${handoff.id}`,
+      content: [{ type: 'text', text: '已完成登录接口实现，并补充 JWT 校验。' }],
+    });
+
     await runner({ handoff, toSessionId: EXECUTOR_SESSION_ID, signal });
 
+    expect(runSessionInBackgroundMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestData: expect.objectContaining({
+          clientRequestId: `handoff:${handoff.id}`,
+          message: expect.stringContaining('**任务**：实现登录接口'),
+          model: 'default',
+          teamTaskThreadId: `handoff:${handoff.id}`,
+        }),
+        sessionId: EXECUTOR_SESSION_ID,
+        userId: USER_ID,
+      }),
+    );
     expect(readSubstate(EXECUTOR_SESSION_ID)).toBe('completed');
     const row = dbModule.sqliteGet<{ result_json: string | null }>(
       `SELECT result_json FROM handoff_records WHERE id = ? LIMIT 1`,
       [handoff.id],
     );
     expect(row?.result_json).toBeTruthy();
-    expect(JSON.parse(row!.result_json!)).toMatchObject({ role: 'executor', protocol: 'stream' });
+    expect(JSON.parse(row!.result_json!)).toMatchObject({
+      role: 'executor',
+      protocol: 'stream',
+      summary: '已完成登录接口实现，并补充 JWT 校验。',
+    });
+  });
+
+  it('dispatch package 只提供 goal 字段时也会把真实任务标题传给执行层', async () => {
+    runSessionInBackgroundMock.mockResolvedValue({
+      stopReason: 'end_turn',
+      statusCode: 200,
+    });
+
+    const runner = pm1RunnerModule.createPhaseCAwareRunner();
+    const handoff = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: PM2_SESSION_ID,
+      fromRoleLayer: 'pm2',
+      toRoleLayer: 'executor',
+      payload: { goal: '修复 Team 页面任务概览', context: '需要引用真实任务树', taskProfile: {} },
+    });
+    const signal = new AbortController().signal;
+
+    const { appendSessionMessageV2 } = await import('../../message/message-v2-adapter.js');
+    appendSessionMessageV2({
+      sessionId: EXECUTOR_SESSION_ID,
+      userId: USER_ID,
+      role: 'assistant',
+      clientRequestId: `handoff:${handoff.id}`,
+      content: [{ type: 'text', text: '已修复 Team 页面任务概览。' }],
+    });
+
+    await runner({ handoff, toSessionId: EXECUTOR_SESSION_ID, signal });
+
+    expect(runSessionInBackgroundMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestData: expect.objectContaining({
+          message: expect.stringContaining('**任务**：修复 Team 页面任务概览'),
+        }),
+      }),
+    );
+  });
+
+  it('正常结束但没有 artifact 和 summary 时，不允许标 completed', async () => {
+    runSessionInBackgroundMock.mockResolvedValue({
+      stopReason: 'end_turn',
+      statusCode: 200,
+    });
+
+    const runner = pm1RunnerModule.createPhaseCAwareRunner();
+    const handoff = makeExecutorHandoff();
+
+    await expect(
+      runner({ handoff, toSessionId: EXECUTOR_SESSION_ID, signal: new AbortController().signal }),
+    ).rejects.toThrow(/未产出可评审结果/);
+
+    expect(readSubstate(EXECUTOR_SESSION_ID)).not.toBe('completed');
+    const row = dbModule.sqliteGet<{ result_json: string | null }>(
+      `SELECT result_json FROM handoff_records WHERE id = ? LIMIT 1`,
+      [handoff.id],
+    );
+    expect(row?.result_json ?? null).toBeNull();
   });
 });

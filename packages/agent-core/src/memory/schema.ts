@@ -9,9 +9,12 @@ export const MEMORY_TYPES = [
 ] as const;
 
 export const MEMORY_SOURCES = ['manual', 'auto_extracted', 'api'] as const;
+export const MEMORY_ROLE_LAYERS = ['reception', 'pm1', 'pm2', 'executor', 'reviewer'] as const;
 
 export const memoryTypeSchema = z.enum(MEMORY_TYPES);
 export const memorySourceSchema = z.enum(MEMORY_SOURCES);
+export const memoryRoleLayerSchema = z.enum(MEMORY_ROLE_LAYERS);
+export const memoryRoleLayersSchema = z.array(memoryRoleLayerSchema).max(5);
 
 export const createMemorySchema = z.object({
   type: memoryTypeSchema,
@@ -21,13 +24,20 @@ export const createMemorySchema = z.object({
   confidence: z.number().min(0).max(1).optional().default(1.0),
   priority: z.number().int().min(0).max(100).optional().default(50),
   workspaceRoot: z.string().trim().max(500).nullable().optional().default(null),
+  teamWorkspaceId: z.string().trim().max(200).nullable().optional().default(null),
+  roleLayers: memoryRoleLayersSchema.nullable().optional().default(null),
 });
 
 export const updateMemorySchema = z.object({
   type: memoryTypeSchema.optional(),
   key: z.string().trim().min(1).max(200).optional(),
   value: z.string().trim().min(1).max(4000).optional(),
+  source: memorySourceSchema.optional(),
+  confidence: z.number().min(0).max(1).optional(),
   priority: z.number().int().min(0).max(100).optional(),
+  workspaceRoot: z.string().trim().max(500).nullable().optional(),
+  teamWorkspaceId: z.string().trim().max(200).nullable().optional(),
+  roleLayers: memoryRoleLayersSchema.nullable().optional(),
   enabled: z.boolean().optional(),
 });
 
@@ -35,6 +45,8 @@ export const memoryListQuerySchema = z.object({
   type: memoryTypeSchema.optional(),
   source: memorySourceSchema.optional(),
   workspaceRoot: z.string().trim().max(500).nullable().optional(),
+  teamWorkspaceId: z.string().trim().max(200).nullable().optional(),
+  roleLayer: memoryRoleLayerSchema.optional(),
   enabled: z
     .preprocess((v) => {
       if (v === 'true') return true;

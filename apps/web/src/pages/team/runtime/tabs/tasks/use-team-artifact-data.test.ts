@@ -296,4 +296,52 @@ describe('useTeamArtifactData', () => {
     expect(result.current.reviewArtifact?.id).toBe('review-target');
     expect(result.current.reviewArtifact?.content).toBe('目标评审正文');
   });
+
+  it('传入 preferredArtifactCreatedBeforeMs 时，会回看指定时间点之前最近的产物', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = resolveRequestUrl(input);
+        const phaseKey = getPhaseKey(url);
+
+        if (phaseKey === `spec:${PM1_SESSION_ID}`) {
+          return jsonResponse({
+            artifacts: [
+              {
+                ...createArtifact('spec-new', 'spec', '新版本 spec'),
+                createdAt: '2026-06-17T11:40:00.000Z',
+              },
+              {
+                ...createArtifact('spec-old', 'spec', '旧版本 spec'),
+                createdAt: '2026-06-17T07:35:00.000Z',
+              },
+            ],
+          });
+        }
+        if (phaseKey === `plan:${PM1_SESSION_ID}`) {
+          return jsonResponse({ artifacts: [] });
+        }
+        if (phaseKey === `tasks:${PM1_SESSION_ID}`) {
+          return jsonResponse({ artifacts: [] });
+        }
+        if (phaseKey === `review:${PM2_SESSION_ID}`) {
+          return jsonResponse({ artifacts: [] });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+
+    const { result } = renderHook(() =>
+      useTeamArtifactData({
+        pm1ArtifactSessionId: PM1_SESSION_ID,
+        pm2ArtifactSessionId: PM2_SESSION_ID,
+        preferredArtifactCreatedBeforeMs: Date.parse('2026-06-17T08:00:00.000Z'),
+      }),
+    );
+
+    await flushAsyncWork();
+
+    expect(result.current.specArtifact?.id).toBe('spec-old');
+    expect(result.current.specArtifact?.content).toBe('旧版本 spec');
+  });
 });

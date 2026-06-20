@@ -110,6 +110,8 @@ export {
   type WebSearchRolloutMode,
 } from './tools/web-search.js';
 export * from './tools/hash-edit.js';
+export type { LintResult } from './tools/post-write-lint.js';
+export { lintFile, lintFiles, formatLintFeedback } from './tools/post-write-lint.js';
 
 export type {
   WorkspacePermissionAction,
@@ -380,6 +382,7 @@ export { MultimodalInputManagerImpl } from './multimodal/index.js';
 export type { ChunkOptions, FileChunk, FileChunker } from './multimodal/chunker.js';
 export { FileChunkerImpl } from './multimodal/chunker.js';
 
+export * from './security/index.js';
 export * from './hooks/keyword-detector.js';
 export * from './hooks/runtime-fallback.js';
 export * from './hooks/directory-agents-injector.js';
@@ -405,6 +408,7 @@ export {
 export type {
   MemoryType,
   MemorySource,
+  MemoryRoleLayer,
   MemoryEntry,
   CreateMemoryInput,
   UpdateMemoryInput,
@@ -419,8 +423,11 @@ export type {
 export {
   MEMORY_TYPES,
   MEMORY_SOURCES,
+  MEMORY_ROLE_LAYERS,
   memoryTypeSchema,
   memorySourceSchema,
+  memoryRoleLayerSchema,
+  memoryRoleLayersSchema,
   createMemorySchema,
   updateMemorySchema,
   memoryListQuerySchema,

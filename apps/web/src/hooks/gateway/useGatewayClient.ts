@@ -13,6 +13,7 @@ import type {
   StreamThinkingEndChunk,
   StreamThinkingStartChunk,
   StreamToolCallChunk,
+  UpstreamStreamSummary,
 } from '@openAwork/shared';
 
 interface StreamCallbacks {
@@ -31,6 +32,7 @@ interface StreamCallbacks {
     stopReason?: StreamDoneChunk['stopReason'] | 'cancelled',
     agentId?: string,
     cancellation?: StreamCancellationSummary,
+    upstreamSummary?: UpstreamStreamSummary,
   ) => void;
   onError: (code: string, message?: string) => void;
   onReconnectRequired?: (reason: 'attach_stream_disconnected') => void;
@@ -294,7 +296,7 @@ export function connectAttachEventSource(
           settled = true;
           cleanup(true, eventSource);
           callbacks.onEvent?.(chunk);
-          callbacks.onDone(chunk.stopReason, chunk.agentId, chunk.cancellation);
+          callbacks.onDone(chunk.stopReason, chunk.agentId, chunk.cancellation, chunk.upstreamSummary);
           return;
         case 'error':
           settled = true;
@@ -791,7 +793,12 @@ export function useGatewayClient(token: string | null): GatewayClient {
             settled = true;
             cleanup();
             callbacks.onEvent?.(chunk);
-            callbacks.onDone(chunk.stopReason, chunk.agentId, chunk.cancellation);
+            callbacks.onDone(
+              chunk.stopReason,
+              chunk.agentId,
+              chunk.cancellation,
+              chunk.upstreamSummary,
+            );
             return;
           case 'error':
             settled = true;

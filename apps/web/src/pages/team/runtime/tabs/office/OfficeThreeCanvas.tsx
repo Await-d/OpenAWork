@@ -18,6 +18,14 @@ const ROOM_W = 16;
 const ROOM_D = 9;
 const ROOM_H = 3.2;
 
+function ignoreNumericStateUpdate(): void {
+  return undefined;
+}
+
+function ignorePanStateUpdate(): void {
+  return undefined;
+}
+
 // ── Seat Registry: shared positions for all zones ─────────────────────
 // Used by both createBuddy (initial placement) and movement system (transitions)
 const REST_D = (ROOM_D / 2) * 0.7;
@@ -547,9 +555,9 @@ export function OfficeThreeCanvas({
   const activityStatsRef = useRef(activityStats);
   const zoomRef = useRef(1);
   const panRef = useRef({ x: 0, y: 0 });
-  const setZoomRef = useRef<React.Dispatch<React.SetStateAction<number>>>(() => {});
+  const setZoomRef = useRef<React.Dispatch<React.SetStateAction<number>>>(ignoreNumericStateUpdate);
   const setPanRef = useRef<React.Dispatch<React.SetStateAction<{ x: number; y: number }>>>(
-    () => {},
+    ignorePanStateUpdate,
   );
   const { zoom, setZoom, pan, setPan, dragRef } = state;
 

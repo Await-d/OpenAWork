@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest';
-import type { ChatMessage } from '../../../components/conversation-runtime/messages/support.js';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  createAssistantTraceContent,
+  type ChatMessage,
+} from '../../../components/conversation-runtime/messages/support.js';
 import { buildTeamGroupedMessageEntries } from './build-team-grouped-message-entries.js';
+import type { ResolveInlinePermissionActionsFn } from '../../../components/chat/session/ChatPageSections.js';
 
 describe('buildTeamGroupedMessageEntries', () => {
   it('在流式期间追加 team 风格的虚拟 assistant 消息，并按层级身份单独分组', () => {
@@ -56,5 +60,49 @@ describe('buildTeamGroupedMessageEntries', () => {
     expect(streamingEntry?.message.agentId).toBe('executor');
     expect(streamingEntry?.groupIdentityKey).toBe('executor');
     expect(streamingEntry?.identityOverride?.displayName).toBe('执行层');
+  });
+
+  it('恢复态 assistant trace 中存在待审批工具调用时，也会切回 chat 风格渲染', () => {
+    const renderMarker: ResolveInlinePermissionActionsFn = vi.fn(() => ({
+      items: [
+        {
+          id: 'once',
+          label: '允许一次',
+          onClick: () => undefined,
+        },
+      ],
+    }));
+    const groups = buildTeamGroupedMessageEntries({
+      messages: [
+        {
+          id: 'assistant-trace-permission',
+          role: 'assistant',
+          content: createAssistantTraceContent({
+            text: '需要你确认后继续执行。',
+            toolCalls: [
+              {
+                toolCallId: 'tool-1',
+                toolName: 'bash',
+                input: { command: 'pwd' },
+                pendingPermissionRequestId: 'perm-1',
+                status: 'paused',
+              },
+            ],
+          }),
+        },
+      ],
+      roleLayer: 'executor',
+      resolveInlinePermissionActions: renderMarker,
+      visibleStreaming: false,
+      streamBuffer: '',
+      streamingSegments: [],
+      buildEntryActions: () => [],
+    });
+
+    const assistantEntry = groups[0]?.entries[0];
+    expect(assistantEntry).toBeTruthy();
+    expect(assistantEntry?.presentationMode).toBe('team');
+    // renderContent 在 chat 风格路径下不应抛错，并会消费审批解析器。
+    expect(() => assistantEntry?.renderContent(assistantEntry.message)).not.toThrow();
   });
 });

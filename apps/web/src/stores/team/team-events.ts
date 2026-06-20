@@ -67,6 +67,9 @@ export interface LayerNode {
   roleLayer: TeamRoleLayer;
   parentSessionId: string | null;
   state: HandoffState | 'idle';
+  rootSessionId?: string;
+  personaKey?: string | null;
+  displayName?: string | null;
   title?: string;
 }
 
@@ -85,6 +88,8 @@ interface TeamRuntimeSnapshotHandoffRecord {
   fromRoleLayer: string;
   fromSessionId: string;
   id: string;
+  /** 后端快照返回的持久化 payload（含 rewrittenIntent/goal 等），用于提取 summary */
+  payload?: Record<string, unknown> | null;
   paused?: boolean;
   recoverableFailure?: boolean;
   retryCount?: number;
@@ -98,6 +103,12 @@ interface TeamRuntimeSnapshotHandoffRecord {
 interface TeamRuntimeSnapshotSessionRecord {
   id: string;
   parentSessionId: string | null;
+  roleInstance?: {
+    rootSessionId: string;
+    roleLayer: string;
+    personaKey: string | null;
+    displayName: string | null;
+  };
   roleLayer: string | null;
   stateStatus: string;
   title: string | null;
@@ -114,16 +125,51 @@ interface HandoffStoreState {
 
 /**
  * 从 handoff 事件 payload 中尽力提取一段"请求载荷摘要"用于跨层对话线程展示。
- * 优先级：rewrittenIntent > sourceIntent > recommendedNextStep > summary。
+ * 优先级：goal > rewrittenIntent > sourceIntent > recommendedNextStep > summary。
+ *
+ * 注意：PM2 创建子 handoff 时将 DispatchPackage（含 goal 字段）作为 payload 传入，
+ * 因此 goal 必须排在最前，否则所有 PM2→executor/reviewer 的任务都会回退到
+ * "层级名 · id短码"的无意义显示。
  */
 function extractHandoffSummary(payload: Record<string, unknown>): string | undefined {
-  for (const key of ['rewrittenIntent', 'sourceIntent', 'recommendedNextStep', 'summary']) {
+  for (const key of ['goal', 'rewrittenIntent', 'sourceIntent', 'recommendedNextStep', 'summary']) {
     const value = payload[key];
     if (typeof value === 'string' && value.trim().length > 0) {
       return value.trim();
     }
   }
   return undefined;
+}
+
+function extractAssignedMemberIdentity(
+  payload: Record<string, unknown>,
+): { id?: string; personaKey?: string; displayName?: string } | undefined {
+  const assignedMember = payload['assignedMember'];
+  if (
+    typeof assignedMember !== 'object' ||
+    assignedMember === null ||
+    Array.isArray(assignedMember)
+  ) {
+    return undefined;
+  }
+  const record = assignedMember as Record<string, unknown>;
+  const id = typeof record['id'] === 'string' && record['id'].trim() ? record['id'].trim() : null;
+  const personaKey =
+    typeof record['personaKey'] === 'string' && record['personaKey'].trim()
+      ? record['personaKey'].trim()
+      : null;
+  const displayName =
+    typeof record['displayName'] === 'string' && record['displayName'].trim()
+      ? record['displayName'].trim()
+      : null;
+  if (!id && !personaKey && !displayName) {
+    return undefined;
+  }
+  return {
+    ...(id ? { id } : {}),
+    ...(personaKey ? { personaKey } : {}),
+    ...(displayName ? { displayName } : {}),
+  };
 }
 
 export const useHandoffStore = create<HandoffStoreState>((set) => ({
@@ -234,7 +280,8 @@ export const useLayerStore = create<LayerStoreState>((set) => ({
   addNode: (node) =>
     set((state) => {
       const next = new Map(state.nodes);
-      next.set(node.sessionId, node);
+      const existing = next.get(node.sessionId);
+      next.set(node.sessionId, existing ? { ...existing, ...node } : node);
       return { nodes: next };
     }),
   updateNodeState: (sessionId, newState) =>
@@ -596,11 +643,16 @@ export function dispatchTeamEvent(event: HandoffEvent): void {
   if (event.type === 'handoff.started' && event.sessionId) {
     const toRoleLayer = (event.payload['toRoleLayer'] as TeamRoleLayer) ?? 'executor';
     const fromSessionId = (event.payload['fromSessionId'] as string) ?? null;
+    const assignedMember = extractAssignedMemberIdentity(event.payload);
     addNode({
       sessionId: event.sessionId,
       roleLayer: toRoleLayer,
       parentSessionId: fromSessionId,
       state: 'running',
+      ...(assignedMember?.personaKey ? { personaKey: assignedMember.personaKey } : {}),
+      ...(assignedMember?.displayName || assignedMember?.id
+        ? { displayName: assignedMember.displayName ?? assignedMember.id }
+        : {}),
     });
     // 确保 parent（from session）也在 tree 中（reception 节点可能还没加入）
     if (fromSessionId && !useLayerStore.getState().nodes.has(fromSessionId)) {
@@ -715,6 +767,10 @@ export function hydrateTeamRuntimeStores(input: {
   useHandoffStore.getState().replaceAll(
     input.handoffs.map((record) => {
       const updatedAt = parseTimestampMs(record.updatedAt) ?? Date.now();
+      // 从快照 payload 提取 summary，使刷新后任务清单仍能显示有意义的标题
+      const summaryFromSnapshot = record.payload
+        ? extractHandoffSummary(record.payload)
+        : undefined;
       return {
         ...(parseTimestampMs(record.completedAt)
           ? { endedAt: parseTimestampMs(record.completedAt) }
@@ -737,6 +793,7 @@ export function hydrateTeamRuntimeStores(input: {
         ...(typeof record.recoverableFailure === 'boolean'
           ? { recoverableFailure: record.recoverableFailure }
           : {}),
+        ...(summaryFromSnapshot ? { summary: summaryFromSnapshot } : {}),
         updatedAt,
       };
     }),
@@ -748,6 +805,13 @@ export function hydrateTeamRuntimeStores(input: {
       roleLayer: normalizeTeamRoleLayer(session.roleLayer),
       sessionId: session.id,
       state: normalizeLayerNodeState(session.stateStatus),
+      ...(session.roleInstance?.rootSessionId
+        ? { rootSessionId: session.roleInstance.rootSessionId }
+        : {}),
+      ...(session.roleInstance?.personaKey ? { personaKey: session.roleInstance.personaKey } : {}),
+      ...(session.roleInstance?.displayName
+        ? { displayName: session.roleInstance.displayName }
+        : {}),
       ...(session.title ? { title: session.title } : {}),
     })),
   );

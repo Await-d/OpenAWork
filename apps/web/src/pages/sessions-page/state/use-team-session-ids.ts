@@ -48,6 +48,12 @@ export function useTeamSessionIds(): UseTeamSessionIdsResult {
         }
         const ids = new Set<string>();
         for (const session of result.runtime.sessions) {
+          // 只收集用户创建的根团队会话,排除层级角色派生的子会话
+          // (parentSessionId 不为 null 的会话是角色层级的子会话,
+          //  不应在会话列表中独立展示)。
+          if (session.parentSessionId !== null) {
+            continue;
+          }
           ids.add(session.id);
         }
         setState({ ready: true, failed: false, teamSessionIds: ids });

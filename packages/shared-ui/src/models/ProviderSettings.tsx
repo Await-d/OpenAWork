@@ -547,6 +547,8 @@ export function ProviderSettings({
     mode: keyof ThinkingDefaultsRef,
     selectedProviderType: string | undefined,
     selectedModel?: AIModelConfigRef,
+    title = '默认思考',
+    description = '新会话会继承这里的默认值；若模型本身固定带思考，请求时会自动安全降级。',
   ) {
     if (!defaultThinking || !onSetThinkingMode) {
       return null;
@@ -584,9 +586,9 @@ export function ProviderSettings({
           }}
         >
           <div>
-            <div style={{ fontSize: 11, fontWeight: 600 }}>默认思考</div>
+            <div style={{ fontSize: 11, fontWeight: 600 }}>{title}</div>
             <div style={{ fontSize: 11, color: 'var(--fg-muted)', marginTop: 2 }}>
-              新会话会继承这里的默认值；若模型本身固定带思考，请求时会自动安全降级。
+              {description}
             </div>
           </div>
           {supportsThinking ? (
@@ -691,6 +693,11 @@ export function ProviderSettings({
       : [...(visibleProvider?.defaultModels ?? [])].sort(compareModelsByName);
     const contextLabel = formatContextWindow(selectedModel?.contextWindow);
     const thinkingMode: keyof ThinkingDefaultsRef | null = mode === 'image' ? null : mode;
+    const thinkingTitle = mode === 'fast' ? 'Fast 默认思考' : '默认思考';
+    const thinkingDescription =
+      mode === 'fast'
+        ? 'Fast 快速模型会用于标题、内联、辅助与子任务等轻量路径。'
+        : '新会话会继承这里的默认值；若模型本身固定带思考，请求时会自动安全降级。';
 
     const applySelection = (providerId: string, modelId: string) => {
       onChange(providerId, modelId);
@@ -1071,7 +1078,13 @@ export function ProviderSettings({
         </div>
 
         {thinkingMode
-          ? renderThinkingControls(thinkingMode, selectedProvider?.type, selectedModel)
+          ? renderThinkingControls(
+              thinkingMode,
+              selectedProvider?.type,
+              selectedModel,
+              thinkingTitle,
+              thinkingDescription,
+            )
           : null}
         {mode === 'image' ? renderImageDefaultsControls() : null}
       </div>
@@ -1372,7 +1385,7 @@ export function ProviderSettings({
         >
           {renderModelSelect('chat', '主对话', active.chat, onSetActiveChat)}
           {onSetActiveFast &&
-            renderModelSelect('fast', '快速 / 内联', active.fast, onSetActiveFast)}
+            renderModelSelect('fast', 'Fast 快速模型 / 内联', active.fast, onSetActiveFast)}
         </div>
         {onSetActiveImage && active.image ? (
           <div style={{ marginTop: 12 }}>

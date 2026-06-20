@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import { resolveFileMimeType } from '../../../../components/conversation-runtime/attachments/attachment-upload.js';
 import { sanitizeComposerPlainText } from '../../../../components/conversation-runtime/messages/support.js';
 import type { AttachmentItem } from '@openAwork/shared-ui';
 import type { QueuedComposerMessage } from './queued-composer-state.js';
@@ -65,16 +66,19 @@ export function useComposerQueue(opts: ComposerQueueOptions): ComposerQueueRetur
     (files: File[]) => {
       if (files.length === 0) return;
       setAttachedFiles((prev) => [...prev, ...files]);
-      const newItems: AttachmentItem[] = files.map((file) => ({
-        id: `${file.name}-${Date.now()}-${Math.random()}`,
-        name: file.name,
-        type: file.type.startsWith('image/')
-          ? 'image'
-          : file.type.startsWith('audio/')
-            ? 'audio'
-            : 'file',
-        sizeBytes: file.size,
-      }));
+      const newItems: AttachmentItem[] = files.map((file) => {
+        const mimeType = resolveFileMimeType(file);
+        return {
+          id: `${file.name}-${Date.now()}-${Math.random()}`,
+          name: file.name,
+          type: mimeType?.startsWith('image/')
+            ? 'image'
+            : mimeType?.startsWith('audio/')
+              ? 'audio'
+              : 'file',
+          sizeBytes: file.size,
+        };
+      });
       setAttachmentItems((prev) => [...prev, ...newItems]);
     },
     [setAttachedFiles, setAttachmentItems],

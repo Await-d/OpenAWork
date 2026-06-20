@@ -1,4 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as AuthModule from '../../infra/auth.js';
 import type * as DbModule from '../../infra/db.js';
@@ -14,6 +17,14 @@ process.env['AI_DEFAULT_MODEL'] = '';
 
 vi.mock('../../provider/auxiliary-llm-config.js', () => ({
   resolveAuxiliaryLlmConfig: async () => null,
+  resolveAuxiliaryLlmConfigCandidates: async () => [],
+}));
+
+vi.mock('../../provider/provider-catalog.js', () => ({
+  getChatProvider: vi.fn(async () => ({
+    provider: { id: 'snapshot-provider' },
+    modelId: 'snapshot-model',
+  })),
 }));
 
 let authPlugin: typeof AuthModule.default;
@@ -23,6 +34,7 @@ let teamRoutes: typeof TeamRoutesModule.teamRoutes;
 
 const USER_ID = 'u-team-main-route';
 const TEAM_WORKSPACE_ID = 'tw-team-main-route';
+const workspaceRoots: string[] = [];
 
 async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify();
@@ -75,6 +87,9 @@ beforeEach(() => {
 
 afterAll(async () => {
   await dbModule.closeDb();
+  for (const root of workspaceRoots) {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 describe('team main routes error contracts', () => {
@@ -184,6 +199,69 @@ describe('team main routes error contracts', () => {
         error: '可选团队代理不存在或未启用。',
         agentId: 'missing-agent',
       });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('POST /team/workspaces/:id/sessions 会固定写入创建时模型快照', async () => {
+    seedWorkspace(TEAM_WORKSPACE_ID, USER_ID);
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/team/workspaces/${TEAM_WORKSPACE_ID}/sessions`,
+        headers: {
+          authorization: bearer(app),
+          'content-type': 'application/json',
+        },
+        payload: {
+          source: { kind: 'blank' },
+        },
+      });
+
+      expect(response.statusCode).toBe(201);
+      const body = response.json() as { metadata_json: string };
+      const metadata = JSON.parse(body.metadata_json) as Record<string, unknown>;
+      expect(metadata['providerId']).toBe('snapshot-provider');
+      expect(metadata['modelId']).toBe('snapshot-model');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('POST /team/workspaces/:id/sessions 使用本次选择的工作目录生成初始化计划', async () => {
+    seedWorkspace(TEAM_WORKSPACE_ID, USER_ID);
+    const root = mkdtempSync(join(tmpdir(), 'openawork-team-main-route-'));
+    workspaceRoots.push(root);
+    const selectedDir = join(root, 'selected-existing-project');
+    mkdirSync(selectedDir, { recursive: true });
+    writeFileSync(join(selectedDir, 'package.json'), '{"name":"selected"}', 'utf8');
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/team/workspaces/${TEAM_WORKSPACE_ID}/sessions`,
+        headers: {
+          authorization: bearer(app),
+          'content-type': 'application/json',
+        },
+        payload: {
+          source: { kind: 'blank' },
+          workingDirectory: selectedDir,
+        },
+      });
+
+      expect(response.statusCode).toBe(201);
+      const body = response.json() as { metadata_json: string };
+      const metadata = JSON.parse(body.metadata_json) as {
+        teamInit?: { projectKind?: string; steps?: Array<{ key: string; status: string }> };
+      };
+      expect(metadata.teamInit?.projectKind).toBe('existing');
+      expect(
+        metadata.teamInit?.steps?.find((step) => step.key === 'read-project-level1')?.status,
+      ).toBe('proposed');
     } finally {
       await app.close();
     }

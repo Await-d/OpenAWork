@@ -120,6 +120,7 @@ describe('useTeamRolePromptPreview', () => {
             projectMemory: false,
             lessonsLearned: false,
             userMemory: false,
+            workspaceKnowledge: false,
             soul: true,
           },
         });

@@ -137,6 +137,193 @@ describe('createTeamPhaseAClient recoverable readers', () => {
   });
 });
 
+describe('createTeamPhaseAClient workspace knowledge', () => {
+  it('listWorkspaceKnowledgeResult 会透传查询参数并返回知识列表', async () => {
+    const fetchMock = vi.fn(async (_url: string | URL, _init?: RequestInit) => {
+      return {
+        ok: true,
+        json: async () => ({
+          knowledge: [
+            {
+              confidence: 1,
+              createdAt: '2026-06-08T00:00:00.000Z',
+              enabled: true,
+              id: 'memory-1',
+              key: 'artifact:spec-1',
+              priority: 70,
+              roleLayers: ['executor', 'reviewer'],
+              source: 'manual',
+              teamWorkspaceId: 'tw-1',
+              type: 'project_context',
+              updatedAt: '2026-06-08T00:00:00.000Z',
+              value: 'spec knowledge',
+              workspaceRoot: '/repo',
+            },
+          ],
+          persistedKnowledge: [
+            {
+              confidence: 1,
+              createdAt: '2026-06-08T00:00:00.000Z',
+              enabled: true,
+              id: 'memory-pm1',
+              key: 'artifact:spec-1',
+              priority: 70,
+              roleLayers: ['pm1'],
+              source: 'manual',
+              teamWorkspaceId: 'tw-1',
+              type: 'project_context',
+              updatedAt: '2026-06-08T00:00:00.000Z',
+              value: 'pm1 spec knowledge',
+              workspaceRoot: '/repo',
+            },
+          ],
+          persistedKnowledgeTruncated: true,
+          workspace: { id: 'tw-1', name: '产品工作区', workspaceRoot: '/repo' },
+        }),
+      } as unknown as Response;
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const client = createTeamPhaseAClient('http://localhost:3000');
+    const result = await client.listWorkspaceKnowledgeResult('token-1', 'tw-1', {
+      enabled: true,
+      roleLayer: 'executor',
+      search: 'spec',
+      type: 'project_context',
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      retryable: false,
+      knowledge: [{ id: 'memory-1', key: 'artifact:spec-1' }],
+      persistedKnowledge: [{ id: 'memory-pm1', roleLayers: ['pm1'] }],
+      persistedKnowledgeTruncated: true,
+      workspace: { id: 'tw-1', workspaceRoot: '/repo' },
+    });
+    const calledUrl = String(fetchMock.mock.calls[0]?.[0] ?? '');
+    expect(calledUrl).toContain('/team/workspaces/tw-1/knowledge');
+    expect(calledUrl).toContain('enabled=1');
+    expect(calledUrl).toContain('roleLayer=executor');
+    expect(calledUrl).toContain('search=spec');
+    expect(calledUrl).toContain('type=project_context');
+  });
+
+  it('listWorkspaceKnowledgeResult 兼容未返回 persistedKnowledge 的旧响应', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({
+          knowledge: [
+            {
+              confidence: 1,
+              createdAt: '2026-06-08T00:00:00.000Z',
+              enabled: true,
+              id: 'memory-1',
+              key: 'artifact:spec-1',
+              priority: 70,
+              roleLayers: ['executor'],
+              source: 'manual',
+              teamWorkspaceId: 'tw-1',
+              type: 'project_context',
+              updatedAt: '2026-06-08T00:00:00.000Z',
+              value: 'spec knowledge',
+              workspaceRoot: '/repo',
+            },
+          ],
+        }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createTeamPhaseAClient('http://localhost:3000');
+    const result = await client.listWorkspaceKnowledgeResult('token-1', 'tw-1');
+
+    expect(result).toMatchObject({
+      ok: true,
+      knowledge: [{ id: 'memory-1' }],
+      persistedKnowledge: [{ id: 'memory-1' }],
+      persistedKnowledgeTruncated: false,
+    });
+  });
+
+  it('upsertWorkspaceKnowledge 会 POST 到工作区知识入库端点', async () => {
+    const fetchMock = vi.fn(async (_url: string | URL, _init?: RequestInit) => {
+      return {
+        ok: true,
+        json: async () => ({
+          created: true,
+          knowledge: {
+            confidence: 1,
+            createdAt: '2026-06-08T00:00:00.000Z',
+            enabled: true,
+            id: 'memory-1',
+            key: 'artifact:spec-1',
+            priority: 70,
+            roleLayers: ['executor'],
+            source: 'manual',
+            teamWorkspaceId: 'tw-1',
+            type: 'project_context',
+            updatedAt: '2026-06-08T00:00:00.000Z',
+            value: 'spec knowledge',
+            workspaceRoot: '/repo',
+          },
+        }),
+      } as unknown as Response;
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const client = createTeamPhaseAClient('http://localhost:3000');
+    const result = await client.upsertWorkspaceKnowledge('token-1', 'tw-1', {
+      key: 'artifact:spec-1',
+      roleLayers: ['executor'],
+      type: 'project_context',
+      value: 'spec knowledge',
+    });
+
+    expect(result.created).toBe(true);
+    const calledUrl = String(fetchMock.mock.calls[0]?.[0] ?? '');
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect(calledUrl).toBe('http://localhost:3000/team/workspaces/tw-1/knowledge');
+    expect(init?.method).toBe('POST');
+    expect(init?.body).toBe(
+      JSON.stringify({
+        key: 'artifact:spec-1',
+        roleLayers: ['executor'],
+        type: 'project_context',
+        value: 'spec knowledge',
+      }),
+    );
+  });
+
+  it('upsertWorkspaceKnowledge 遇到 key 冲突时展示后端中文提示', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: false,
+        status: 409,
+        json: async () => ({
+          error: 'knowledge-key-conflict',
+          message: '该知识 key 已被其它工作区占用。',
+        }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createTeamPhaseAClient('http://localhost:3000');
+
+    try {
+      await client.upsertWorkspaceKnowledge('token-1', 'tw-1', {
+        key: 'artifact:spec-1',
+        type: 'project_context',
+        value: 'spec knowledge',
+      });
+      throw new Error('expected upsertWorkspaceKnowledge to throw');
+    } catch (error) {
+      expect(error).toBeInstanceOf(HttpError);
+      expect((error as HttpError<{ error?: string }>).status).toBe(409);
+      expect((error as HttpError<{ error?: string }>).data?.error).toBe('knowledge-key-conflict');
+      expect((error as Error).message).toBe('该知识 key 已被其它工作区占用。');
+    }
+  });
+});
+
 describe('createTeamPhaseAClient mutation error handling', () => {
   it('putConstitution 遇到 version conflict 时保留 HttpError 状态和 payload', async () => {
     globalThis.fetch = vi.fn(async () => {

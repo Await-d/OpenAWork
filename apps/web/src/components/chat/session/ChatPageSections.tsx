@@ -54,6 +54,7 @@ import {
   groupConsecutiveTools,
   ToolCallDisplay,
 } from '../tool-call/display/tool-call-inline.js';
+import { tryFormatJson, looksLikeJson } from '../../../utils/format-json.js';
 
 export const sharedUiThemeVars = {
   '--color-bg': 'var(--bg-base)',
@@ -164,9 +165,9 @@ export function MessageRow({
     : undefined;
   const agentPillStyle: React.CSSProperties | undefined = agentAccent
     ? {
-        borderColor: `color-mix(in oklch, ${agentAccent} 40%, var(--border-default) 60%)`,
-        background: `linear-gradient(135deg, color-mix(in oklch, ${agentAccent} 18%, var(--bg-overlay) 82%), var(--bg-overlay))`,
-        color: `color-mix(in oklch, ${agentAccent} 82%, var(--fg-on-accent) 18%)`,
+        borderColor: `color-mix(in oklch, ${agentAccent} 30%, var(--border-subtle) 70%)`,
+        background: `linear-gradient(135deg, color-mix(in oklch, ${agentAccent} 12%, var(--bg-overlay) 88%), var(--bg-overlay))`,
+        color: `color-mix(in oklch, ${agentAccent} 75%, var(--fg-default) 25%)`,
       }
     : undefined;
   const metaItems: Array<{
@@ -240,7 +241,7 @@ export function MessageRow({
         style={
           agentAccent
             ? {
-                boxShadow: `0 0 0 2px var(--bg-overlay), 0 0 0 3.5px ${agentAccent}`,
+                boxShadow: `0 0 0 2px var(--bg-overlay), 0 0 0 3px color-mix(in oklch, ${agentAccent} 70%, transparent)`,
               }
             : undefined
         }
@@ -256,11 +257,11 @@ export function MessageRow({
               borderRadius: '50%',
               display: 'grid',
               placeItems: 'center',
-              fontSize: 14,
-              fontWeight: 800,
+              fontSize: 13,
+              fontWeight: 700,
               color: identityOverride.color ?? 'var(--fg-strong)',
-              background: `color-mix(in srgb, ${identityOverride.color ?? 'var(--accent)'} 16%, var(--bg-overlay))`,
-              border: `1px solid color-mix(in srgb, ${identityOverride.color ?? 'var(--accent)'} 34%, transparent)`,
+              background: `color-mix(in srgb, ${identityOverride.color ?? 'var(--accent)'} 12%, var(--bg-overlay))`,
+              border: `1px solid color-mix(in srgb, ${identityOverride.color ?? 'var(--accent)'} 28%, transparent)`,
             }}
             title={identityOverride.displayName}
           >
@@ -313,14 +314,15 @@ export function MessageRow({
                       title={action.title}
                       style={{
                         height: 22,
-                        padding: '0 7px',
+                        padding: '0 8px',
                         borderRadius: 999,
                         border: '1px solid var(--border-subtle)',
                         background: 'var(--bg-overlay)',
                         color: 'var(--fg-default)',
                         fontSize: 10,
-                        fontWeight: 600,
+                        fontWeight: 500,
                         cursor: 'pointer',
+                        transition: 'background 120ms ease, border-color 120ms ease',
                       }}
                     >
                       {action.label}
@@ -1132,6 +1134,34 @@ function AssistantRichContentBody({
 
   if (!streaming && looksLikeAssistantErrorContent(content)) {
     return <AssistantErrorContent content={content} />;
+  }
+
+  // JSON 内容：格式化后用 <pre> 展示，避免原始 JSON 被 Markdown 渲染为不可读文本
+  if (!streaming && looksLikeJson(content)) {
+    const formatted = tryFormatJson(content);
+    if (formatted !== content) {
+      return (
+        <div className="assistant-rich-content-body">
+          <pre
+            style={{
+              margin: 0,
+              padding: '10px 12px',
+              borderRadius: 8,
+              background: 'var(--bg-base)',
+              border: '1px solid var(--border-subtle)',
+              fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
+              fontSize: 11.5,
+              lineHeight: 1.6,
+              color: 'var(--fg-default)',
+              whiteSpace: 'pre',
+              overflowX: 'auto',
+            }}
+          >
+            {formatted}
+          </pre>
+        </div>
+      );
+    }
   }
 
   if (streaming) {

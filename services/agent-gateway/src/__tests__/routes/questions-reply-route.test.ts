@@ -213,7 +213,7 @@ describe('questions reply route', () => {
     await app.close();
   });
 
-  it('does not update state when the question request is already resolved', async () => {
+  it('treats an already resolved question request as an idempotent success', async () => {
     mocks.sqliteGet
       .mockReturnValueOnce({ id: SESSION_ID, user_id: USER_ID })
       .mockReturnValueOnce(buildPendingQuestionRow({ status: 'answered' }));
@@ -225,7 +225,44 @@ describe('questions reply route', () => {
       payload: { requestId: REQUEST_ID, status: 'answered', answers: [['a']] },
     });
 
-    expect(response.statusCode).toBe(409);
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ ok: true, alreadyResolved: true });
+    expect(mocks.publishSessionRunEvent).toHaveBeenCalledWith(
+      SESSION_ID,
+      expect.objectContaining({
+        requestId: REQUEST_ID,
+        status: 'answered',
+        type: 'question_replied',
+      }),
+    );
+    expect(mocks.setPersistedSessionStateStatus).not.toHaveBeenCalled();
+    expect(mocks.resumeAnsweredQuestionRequest).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
+  it('treats dismissing a missing question request as an idempotent success', async () => {
+    mocks.sqliteGet
+      .mockReturnValueOnce({ id: SESSION_ID, user_id: USER_ID })
+      .mockReturnValueOnce(undefined);
+
+    const app = await createApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: `/sessions/${SESSION_ID}/questions/reply`,
+      payload: { requestId: REQUEST_ID, status: 'dismissed' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ ok: true, idempotent: true });
+    expect(mocks.publishSessionRunEvent).toHaveBeenCalledWith(
+      SESSION_ID,
+      expect.objectContaining({
+        requestId: REQUEST_ID,
+        status: 'dismissed',
+        type: 'question_replied',
+      }),
+    );
     expect(mocks.setPersistedSessionStateStatus).not.toHaveBeenCalled();
     expect(mocks.resumeAnsweredQuestionRequest).not.toHaveBeenCalled();
 

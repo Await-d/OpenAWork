@@ -26,7 +26,7 @@ import type { ToolsetCategory } from './dispatch-package.js';
  * executor 只能看到这两个类别下的工具。
  */
 export const TOOLSET_TO_TOOL_NAMES: Record<ToolsetCategory, readonly string[]> = {
-  read: ['read', 'glob', 'grep', 'read_tool_output', 'look_at', 'repo_overview'],
+  read: ['read', 'list', 'glob', 'grep', 'read_tool_output', 'look_at', 'repo_overview'],
   write: ['write', 'edit', 'multi_edit', 'apply_patch'],
   shell: ['bash', 'run_background_bash', 'interactive_bash'],
   // 实际注册的联网工具规范名是 'websearch' / 'webfetch'（tools/tool-aliases.ts、
@@ -48,9 +48,28 @@ export const TOOLSET_TO_TOOL_NAMES: Record<ToolsetCategory, readonly string[]> =
   test: [
     'bash', // 测试通过 bash 执行
   ],
-  review: ['read', 'grep', 'glob', 'lsp_goto_definition', 'lsp_find_references', 'lsp_diagnostics'],
+  review: ['read', 'list', 'grep', 'glob', 'lsp_goto_definition', 'lsp_find_references', 'lsp_diagnostics'],
   all: [], // 特殊值：不过滤
 };
+
+/**
+ * 始终放行的内部工具集合——无论 toolset 类别如何门控，这些工具对 team 成员始终可用。
+ * 注意：使用实际注册的工具名（todoread/todowrite），而非历史遗留的下划线命名。
+ */
+const ALWAYS_ALLOWED_INTERNAL_TOOLS = new Set([
+  'todoread',
+  'todowrite',
+  'subtodoread',
+  'subtodowrite',
+  'task_list',
+  'task_get',
+  'task_create',
+  'task_update',
+  'session_list',
+  'session_read',
+  'session_search',
+  'session_info',
+]);
 
 /**
  * 根据允许的 toolset 类别过滤工具列表。
@@ -74,13 +93,10 @@ export function filterToolsByAllowedSets<T extends { function: { name: string } 
     }
   }
 
-  // 始终允许的基础工具（不受门控影响）
-  const alwaysAllowed = new Set(['AskUserQuestion', 'todo_read', 'todo_write']);
-
   return tools.filter(
     (tool) =>
       allowedNames.has(tool.function.name) ||
-      alwaysAllowed.has(tool.function.name) ||
+      ALWAYS_ALLOWED_INTERNAL_TOOLS.has(tool.function.name) ||
       // 动态注入的 MCP 扁平工具（mcp__<server>__<tool>）不在静态类别表里，但它们已在上游
       // 按会话 metadata.requestedMcpServers 白名单过滤过——是「该成员显式绑定授权」的工具，
       // 不应再被层类别表二次拦截（否则 team 各层绑定了 MCP 也调不到）。放行。

@@ -24,6 +24,9 @@ const childState = vi.hoisted(() => ({
   reviewQueue: 0,
   sharedFlow: 0,
   sharedLayered: 0,
+  flow: null as null | { selectedTeam?: { id: string; title: string } | null },
+  layered: null as null | { selectedTeam?: { id: string; title: string } | null },
+  messages: null as null | { selectedTeam?: { id: string; title: string } | null },
   placeholderTitles: [] as string[],
 }));
 
@@ -135,7 +138,10 @@ vi.mock('./overview/OverviewTab.js', () => ({
   OverviewTab: () => <div data-testid="overview-view" />,
 }));
 vi.mock('./conversation/MessagesMergedTab.js', () => ({
-  MessagesMergedTab: () => <div data-testid="messages-view" />,
+  MessagesMergedTab: (props: { selectedTeam?: { id: string; title: string } | null }) => {
+    childState.messages = props;
+    return <div data-testid="messages-view" />;
+  },
 }));
 vi.mock('./governance/team-runtime-settings-panel.js', () => ({
   TeamRuntimeSettingsPanel: () => <div data-testid="settings-view" />,
@@ -152,10 +158,16 @@ vi.mock('./TabContainer.js', () => ({
   ),
 }));
 vi.mock('./conversation/LayeredConversationView.js', () => ({
-  LayeredConversationView: () => <div data-testid="layered-view" />,
+  LayeredConversationView: (props: { selectedTeam?: { id: string; title: string } | null }) => {
+    childState.layered = props;
+    return <div data-testid="layered-view" />;
+  },
 }));
 vi.mock('./conversation/LayerFlowView.js', () => ({
-  LayerFlowView: () => <div data-testid="flow-view" />,
+  LayerFlowView: (props: { selectedTeam?: { id: string; title: string } | null }) => {
+    childState.flow = props;
+    return <div data-testid="flow-view" />;
+  },
 }));
 vi.mock('./governance/SharesView.js', () => ({
   SharesView: () => <div data-testid="shares-view" />,
@@ -176,6 +188,9 @@ beforeEach(() => {
   childState.sharedInit = 0;
   childState.sharedFlow = 0;
   childState.sharedLayered = 0;
+  childState.flow = null;
+  childState.layered = null;
+  childState.messages = null;
   childState.artifacts = null;
   childState.review = null;
   childState.reviewQueue = 0;
@@ -279,10 +294,70 @@ describe('renderMiddleTabContent', () => {
     render(renderMiddleTabContent(buildArgs({ middleTab: 'flow' })));
     expect(screen.getByTestId('shared-flow-view')).toBeTruthy();
     expect(childState.sharedFlow).toBe(1);
+    expect(childState.flow).toBeNull();
 
     cleanup();
     render(renderMiddleTabContent(buildArgs({ middleTab: 'layered' })));
     expect(screen.getByTestId('shared-layered-view')).toBeTruthy();
     expect(childState.sharedLayered).toBe(1);
+    expect(childState.layered).toBeNull();
+  });
+
+  it('普通会话的 flow / layered / messages 会收到当前 selectedTeam，确保切换会话后按会话树收缩', () => {
+    const selectedTeam = {
+      id: 'session-runtime-1',
+      status: 'running' as const,
+      subtitle: 'PM1 · 运行中',
+      title: '运行会话 1',
+    };
+
+    render(
+      renderMiddleTabContent(
+        buildArgs({
+          middleTab: 'flow',
+          selectedTeamId: selectedTeam.id,
+          selectedTeam,
+        }),
+      ),
+    );
+    expect(screen.getByTestId('flow-view')).toBeTruthy();
+    expect(childState.flow?.selectedTeam).toMatchObject({
+      id: 'session-runtime-1',
+      title: '运行会话 1',
+    });
+    expect(childState.sharedFlow).toBe(0);
+
+    cleanup();
+    render(
+      renderMiddleTabContent(
+        buildArgs({
+          middleTab: 'layered',
+          selectedTeamId: selectedTeam.id,
+          selectedTeam,
+        }),
+      ),
+    );
+    expect(screen.getByTestId('layered-view')).toBeTruthy();
+    expect(childState.layered?.selectedTeam).toMatchObject({
+      id: 'session-runtime-1',
+      title: '运行会话 1',
+    });
+    expect(childState.sharedLayered).toBe(0);
+
+    cleanup();
+    render(
+      renderMiddleTabContent(
+        buildArgs({
+          middleTab: 'messages',
+          selectedTeamId: selectedTeam.id,
+          selectedTeam,
+        }),
+      ),
+    );
+    expect(screen.getByTestId('messages-view')).toBeTruthy();
+    expect(childState.messages?.selectedTeam).toMatchObject({
+      id: 'session-runtime-1',
+      title: '运行会话 1',
+    });
   });
 });

@@ -6,8 +6,6 @@ import {
   parseApprovedPermissionResumePayload,
   parsePermissionAlwaysJson,
   parsePermissionRequestClientRequestId,
-  permissionDecisionSchema,
-  permissionRiskLevelSchema,
   type PermissionDecision,
   type PermissionRequestStatus,
   type PermissionRiskLevel,
@@ -16,6 +14,7 @@ import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
 import { ApiError } from '../infra/error-response.js';
 import { parseBody } from '../infra/parse-request.js';
+import { clearInternalTeamResumeRequest } from '../team/team-resume-context.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import {
   createPermissionAskedEvent,
@@ -32,11 +31,14 @@ import { persistWorkspacePermanentPermission } from '../workspace/workspace-safe
 import { appendPermissionDecisionLog } from '../session/permission-decision-log-store.js';
 import { resolvePermissionCategory } from '@openAwork/agent-core';
 
+const permissionRouteRiskLevelSchema = z.enum(['low', 'medium', 'high']);
+const permissionRouteDecisionSchema = z.enum(['once', 'session', 'permanent', 'reject']);
+
 const createPermissionRequestSchema = z.object({
   toolName: z.string().min(1),
   scope: z.string().min(1),
   reason: z.string().min(1),
-  riskLevel: permissionRiskLevelSchema,
+  riskLevel: permissionRouteRiskLevelSchema,
   previewAction: z.string().optional(),
   clientRequestId: z.string().min(1).max(128).optional(),
   always: z.array(z.string().min(1)).optional(),
@@ -44,7 +46,7 @@ const createPermissionRequestSchema = z.object({
 
 const replyPermissionSchema = z.object({
   requestId: z.string().min(1),
-  decision: permissionDecisionSchema,
+  decision: permissionRouteDecisionSchema,
   feedback: z.string().max(2000).optional(),
   alwaysOverride: z.array(z.string().min(1)).optional(),
 });
@@ -346,6 +348,19 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
         }
       }
 
+      const requestClientRequestId = parsePermissionRequestClientRequestId(
+        permissionRequest.request_payload_json,
+      );
+      const resumePayload = parseApprovedPermissionResumePayload(
+        permissionRequest.request_payload_json,
+      );
+      // Continue-on-deny: when enabled, feed the rejection as a tool error and
+      // resume the LLM loop so it can try a different approach.
+      const continueOnDeny =
+        body.decision === 'reject' &&
+        resumePayload &&
+        process.env['OPENAWORK_CONTINUE_ON_DENY'] === 'true';
+
       // Cascade reject: when rejecting, also reject all other pending requests in the same session.
       // This mirrors opencode's behavior where rejecting one permission cascades to all pending.
       const cascadedRequestIds: string[] = [];
@@ -367,6 +382,13 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
           const pendingClientRequestId = parsePermissionRequestClientRequestId(
             pending.request_payload_json,
           );
+          const shouldKeepResumeRegistration =
+            continueOnDeny &&
+            pendingClientRequestId !== null &&
+            pendingClientRequestId === requestClientRequestId;
+          if (pendingClientRequestId && !shouldKeepResumeRegistration) {
+            clearInternalTeamResumeRequest(pendingClientRequestId);
+          }
           publishSessionRunEvent(
             sessionId,
             createPermissionRepliedEvent({ requestId: pending.id, decision: 'reject' }),
@@ -375,13 +397,6 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
           cascadedRequestIds.push(pending.id);
         }
       }
-
-      const requestClientRequestId = parsePermissionRequestClientRequestId(
-        permissionRequest.request_payload_json,
-      );
-      const resumePayload = parseApprovedPermissionResumePayload(
-        permissionRequest.request_payload_json,
-      );
       publishSessionRunEvent(
         sessionId,
         createPermissionRepliedEvent({
@@ -392,12 +407,9 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
         requestClientRequestId ? { clientRequestId: requestClientRequestId } : undefined,
       );
 
-      // Continue-on-deny: when enabled, feed the rejection as a tool error and
-      // resume the LLM loop so it can try a different approach.
-      const continueOnDeny =
-        body.decision === 'reject' &&
-        resumePayload &&
-        process.env['OPENAWORK_CONTINUE_ON_DENY'] === 'true';
+      if (body.decision === 'reject' && !continueOnDeny && requestClientRequestId) {
+        clearInternalTeamResumeRequest(requestClientRequestId);
+      }
 
       setPersistedSessionStateStatus({
         sessionId,

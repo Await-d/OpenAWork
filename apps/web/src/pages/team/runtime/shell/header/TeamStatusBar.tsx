@@ -24,9 +24,9 @@ import {
 const BAR_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 12,
-  padding: '4px 0',
-  fontSize: 12,
+  gap: 8,
+  padding: '2px 0',
+  fontSize: 11,
   fontWeight: 600,
   flexWrap: 'nowrap',
   minWidth: 0,
@@ -41,19 +41,18 @@ const MINIMIZED_BAR_STYLE: CSSProperties = {
 const LAYER_BADGE_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  gap: 4,
-  padding: '2px 8px',
-  borderRadius: 999,
+  gap: 3,
+  padding: '1px 5px',
+  borderRadius: 4,
   fontSize: 10,
   fontWeight: 700,
   textTransform: 'uppercase',
-  letterSpacing: '0.04em',
 };
 
 const PROGRESS_TRACK_STYLE: CSSProperties = {
   position: 'relative',
-  width: 100,
-  height: 4,
+  width: 60,
+  height: 3,
   borderRadius: 999,
   background: 'color-mix(in srgb, var(--border-default) 40%, transparent)',
   overflow: 'hidden',
@@ -66,12 +65,12 @@ const PROGRESS_FILL_STYLE: CSSProperties = {
   height: '100%',
   borderRadius: 999,
   background: 'var(--accent)',
-  transition: 'width 300ms ease',
+  transition: 'width 200ms ease',
 };
 
 const ESTIMATE_LABEL_STYLE: CSSProperties = {
-  fontSize: 11,
-  color: 'var(--fg-muted)',
+  fontSize: 10,
+  color: 'var(--fg-subtle)',
   fontWeight: 400,
   flexShrink: 0,
   whiteSpace: 'nowrap',

@@ -34,7 +34,6 @@ import {
   listSessionMessagesByRequestScope,
   listSessionMessagesV2,
 } from '../message/message-v2-adapter.js';
-import { resolveEffectiveContextWindow } from '../compaction/context-window-resolver.js';
 import {
   triggerProactiveCompaction,
   triggerOverflowCompaction,
@@ -48,7 +47,7 @@ import {
   YOLO_MODE_SYSTEM_PROMPT,
   detectThinkingLanguageHintFromText,
 } from './stream-system-prompts.js';
-import { KeywordDetectorImpl } from '@openAwork/agent-core';
+import { KeywordDetectorImpl, redactText } from '@openAwork/agent-core';
 import {
   deleteSessionRunEventsByRequest,
   hasPersistedRunEvent,
@@ -89,6 +88,7 @@ import { isEnabledToolName } from './tool-name-compat.js';
 import { sanitizeSessionMetadataJson } from '../session/session-workspace-metadata.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
 import { validateWorkspacePath } from '../workspace/workspace-paths.js';
+import { resolveSessionWorkspacePath } from '../session/session-workspace-resolution.js';
 import { filterEnabledGatewayToolsForSession } from '../session/session-tool-visibility.js';
 import { resolveCanonicalName } from '../claude-code/claude-code-tool-surface.js';
 import {
@@ -148,6 +148,7 @@ export const STREAM_ERROR_MESSAGES = {
   inputImageMissingSource: 'input_image 必须提供 artifactId、fileId 或 imageUrl 其中之一。',
   requestReplayFailed: '请求重放失败。',
   sessionAlreadyRunning: '当前会话已有请求正在运行。',
+  teamModelBindingUnavailable: '团队会话绑定的模型当前不可用，请在团队模板或会话中重新绑定模型。',
 } as const;
 import { dispatchChatMessage } from '../runtime/plugin-host.js';
 import {
@@ -187,6 +188,11 @@ import {
 } from '../handoff/capability/apply-team-layer-tools.js';
 import { mapAgentToTeamRoleLayer } from '../team/team-role-layer-mapping.js';
 import {
+  buildTeamResumeSystemPrompt,
+  buildTeamUserFacingStatusPrompt,
+  resolveTeamRootSessionId,
+} from '../team/team-resume-context.js';
+import {
   checkTeamControlSignals,
   isTeamControlledRoleLayer,
 } from '../handoff/runner/team-stream-control.js';
@@ -206,14 +212,28 @@ export function setPersistedSessionStateStatus(input: {
   );
 }
 
-export async function buildWorkspaceContext(metadataJson: string): Promise<string | null> {
+export async function buildWorkspaceContext(
+  metadataJson: string,
+  options?: { sessionId?: string; userId?: string },
+): Promise<string | null> {
   let wd: string | null = null;
   try {
     const meta = JSON.parse(metadataJson) as Record<string, unknown>;
     wd = typeof meta['workingDirectory'] === 'string' ? meta['workingDirectory'] : null;
   } catch {
-    return null;
+    // metadata 解析失败时仍尝试递归解析
   }
+
+  // 如果当前 session metadata 中没有 workingDirectory，但提供了 sessionId/userId，
+  // 则递归向上查找父 session 链上的 workingDirectory（team session 场景）。
+  if (!wd && options?.sessionId && options?.userId) {
+    wd = resolveSessionWorkspacePath({
+      metadataJson,
+      sessionId: options.sessionId,
+      userId: options.userId,
+    });
+  }
+
   if (!wd) return null;
 
   const safeWorkingDirectory = validateWorkspacePath(wd);
@@ -519,6 +539,7 @@ export const streamRequestSchema = modelRequestSchema.omit({ model: true }).exte
   model: z.string().min(1).max(200).optional(),
   providerId: z.string().min(1).max(200).optional(),
   clientRequestId: z.string().min(1).max(128),
+  teamTaskThreadId: z.string().trim().min(1).max(128).optional(),
   thinkingEnabled: z
     .preprocess((value) => {
       if (typeof value === 'boolean') return value;
@@ -677,6 +698,31 @@ interface StreamAgentSelection {
 
 type ResolvedStreamModelRoute = ModelRouteConfig & StreamAgentSelection;
 
+export class TeamModelBindingUnavailableError extends Error {
+  readonly code = 'TEAM_MODEL_BINDING_UNAVAILABLE';
+
+  constructor() {
+    super(STREAM_ERROR_MESSAGES.teamModelBindingUnavailable);
+    this.name = 'TeamModelBindingUnavailableError';
+  }
+}
+
+function isTeamRoleLayer(value: string | null | undefined): boolean {
+  return (
+    value === 'reception' ||
+    value === 'pm1' ||
+    value === 'pm2' ||
+    value === 'executor' ||
+    value === 'reviewer'
+  );
+}
+
+function hasTeamDefinition(metadataJson: string): boolean {
+  const metadata = parseSessionMetadataJson(metadataJson);
+  const teamDefinition = metadata['teamDefinition'];
+  return typeof teamDefinition === 'object' && teamDefinition !== null;
+}
+
 interface StreamAccumulationState {
   toolCalls: Map<string, { toolName: string; inputText: string }>;
 }
@@ -815,8 +861,40 @@ function buildMissingToolArgumentsMessage(toolName: string, workingDirectory?: s
     return `Tool "bash" was called without arguments. Retry with JSON like {"command":"pwd","workdir":"${examplePath}"}.`;
   }
 
+  if (toolName === 'write') {
+    return `Tool "write" was called without arguments. Retry with JSON like {"path":"${examplePath}/example.txt","content":"file content here"}.`;
+  }
+
+  if (toolName === 'edit') {
+    return `Tool "edit" was called without arguments. Retry with JSON like {"path":"${examplePath}/example.txt","old_string":"text to find","new_string":"replacement text"}.`;
+  }
+
+  if (toolName === 'submit_patch') {
+    return `Tool "submit_patch" was called without arguments. Retry with JSON like {"patch":"diff content","description":"patch description"}.`;
+  }
+
   return `Tool "${toolName}" was called without arguments. Retry with a non-empty JSON object that matches the tool schema.`;
 }
+
+/**
+ * 需要校验非空参数的关键工具集合。
+ * 这些工具如果被空参数调用（rawInput 为空对象或 normalizedInputText 为空），
+ * 会直接返回错误提示，避免发到 sandbox 层再失败浪费往返。
+ */
+const TOOLS_REQUIRING_NON_EMPTY_ARGS = new Set([
+  'list',
+  'bash',
+  'write',
+  'edit',
+  'multi_edit',
+  'apply_patch',
+  'submit_patch',
+  'task',
+  'task_create',
+  'todowrite',
+  'subtodowrite',
+  'mcp_call',
+]);
 
 function isMissingRequiredToolArguments(
   toolName: string,
@@ -827,7 +905,7 @@ function isMissingRequiredToolArguments(
     return true;
   }
 
-  if (toolName !== 'list' && toolName !== 'bash') {
+  if (!TOOLS_REQUIRING_NON_EMPTY_ARGS.has(toolName)) {
     return false;
   }
 
@@ -895,7 +973,7 @@ export function replayPersistedAssistantResponse(input: {
       };
 
       if (message.role === 'assistant' && content.type === 'text' && content.text.length > 0) {
-        input.writeChunk({ type: 'text_delta', delta: content.text, ...meta });
+        input.writeChunk({ type: 'text_delta', delta: redactText(content.text), ...meta });
         return;
       }
 
@@ -1201,6 +1279,7 @@ function resolveStreamInteractionModes(input: {
 export async function resolveStreamModelRoute(input: {
   metadataJson: string;
   requestData: StreamRequest;
+  roleLayer?: string | null;
   userId: string;
 }): Promise<ResolvedStreamModelRoute> {
   const sessionSelection = parseSessionProviderSelection(input.metadataJson);
@@ -1209,26 +1288,44 @@ export async function resolveStreamModelRoute(input: {
     userId: input.userId,
   });
   const requestedModelId = normalizeRequestedModelId(input.requestData.model);
+  const hasAuthoritativeTeamModel =
+    (isTeamRoleLayer(input.roleLayer) || hasTeamDefinition(input.metadataJson)) &&
+    Boolean(sessionSelection.providerId && sessionSelection.modelId);
   const resolvedRequestData: StreamRequest = {
     ...input.requestData,
     model:
-      requestedModelId ??
-      agentSelection.modelId ??
-      sessionSelection.modelId ??
-      input.requestData.model,
+      hasAuthoritativeTeamModel && sessionSelection.modelId
+        ? sessionSelection.modelId
+        : (requestedModelId ??
+          agentSelection.modelId ??
+          sessionSelection.modelId ??
+          input.requestData.model),
     providerId:
-      input.requestData.providerId ?? agentSelection.providerId ?? sessionSelection.providerId,
-    variant: input.requestData.variant ?? agentSelection.variant ?? sessionSelection.variant,
+      hasAuthoritativeTeamModel && sessionSelection.providerId
+        ? sessionSelection.providerId
+        : (input.requestData.providerId ??
+          agentSelection.providerId ??
+          sessionSelection.providerId),
+    variant:
+      hasAuthoritativeTeamModel && sessionSelection.variant
+        ? sessionSelection.variant
+        : (input.requestData.variant ?? agentSelection.variant ?? sessionSelection.variant),
     systemPrompt:
       sessionSelection.delegatedSystemPrompt ??
       input.requestData.systemPrompt ??
       agentSelection.systemPrompt ??
       sessionSelection.systemPrompt,
   };
-  const providerConfig = await getProviderForSelection(input.userId, {
-    providerId: resolvedRequestData.providerId,
-    modelId: resolvedRequestData.model,
-  });
+  const providerConfig = await getProviderForSelection(
+    input.userId,
+    {
+      providerId: resolvedRequestData.providerId,
+      modelId: resolvedRequestData.model,
+    },
+    {
+      fallbackToChat: !hasAuthoritativeTeamModel,
+    },
+  );
 
   if (providerConfig) {
     return {
@@ -1239,6 +1336,10 @@ export async function resolveStreamModelRoute(input: {
         resolvedRequestData,
       ),
     };
+  }
+
+  if (hasAuthoritativeTeamModel) {
+    throw new TeamModelBindingUnavailableError();
   }
 
   return {
@@ -1304,10 +1405,20 @@ export async function executeToolCalls(input: {
 }): Promise<{ hasPendingPermission: boolean }> {
   const sandbox = createDefaultSandbox([], { userId: input.userId });
   const sessionMetadata = parseSessionMetadataJson(input.sessionContext.metadataJson);
-  const workingDirectory =
+  // 递归解析 workingDirectory：team 子 session 可能没有直接设置，
+  // 需要通过父 session 链向上查找，确保工具拿到正确的工作区路径。
+  const directWorkingDirectory =
     typeof sessionMetadata['workingDirectory'] === 'string'
       ? sessionMetadata['workingDirectory']
       : undefined;
+  const resolvedWorkingDirectory = directWorkingDirectory
+    ?? resolveSessionWorkspacePath({
+      metadataJson: input.sessionContext.metadataJson,
+      sessionId: input.sessionId,
+      userId: input.userId,
+    })
+    ?? undefined;
+  const workingDirectory = resolvedWorkingDirectory;
 
   // Dynamic tool loading: scan workspace {tool,tools}/*.{js,ts} for custom tools
   const effectiveWorkspaceRoot = input.workspaceRoot ?? workingDirectory;
@@ -1714,6 +1825,7 @@ export async function handleStreamRequest(input: {
   requestData: StreamRequest;
   sessionContext: SessionStreamContext;
   sessionId: string;
+  teamResumeRootSessionId?: string;
   /**
    * Optional external abort signal. When the caller's transport (e.g. an SSE
    * connection) drops, aborting this signal will propagate to the internal
@@ -1738,12 +1850,16 @@ export async function handleStreamRequest(input: {
   if (!isTaskParentAutoResumeClientRequestId(requestData.clientRequestId)) {
     noteManualSessionInteraction({ sessionId: input.sessionId, userId: input.user.sub });
   }
+  const userVisibleMessage = input.teamResumeRootSessionId
+    ? (requestData.displayMessage ?? '恢复团队会话')
+    : requestData.message;
   const stepRoute = wl.start('stream.model-resolve');
   let route: ResolvedStreamModelRoute;
   try {
     route = await resolveStreamModelRoute({
       metadataJson: input.sessionContext.metadataJson,
       requestData,
+      roleLayer: input.sessionContext.roleLayer,
       userId: input.user.sub,
     });
     wl.succeed(stepRoute, undefined, {
@@ -1763,6 +1879,11 @@ export async function handleStreamRequest(input: {
       input: { agentId: requestData.agentId },
       output: { message, code: 'MODEL_RESOLVE' },
     });
+    if (error instanceof TeamModelBindingUnavailableError) {
+      input.writeChunk(createStreamErrorChunk(error.code, message, runId));
+      wl.flush(ctx, 409);
+      return { statusCode: 409 };
+    }
     wl.flush(ctx, 500);
     throw error;
   }
@@ -1785,19 +1906,22 @@ export async function handleStreamRequest(input: {
       messageID: requestData.clientRequestId,
     },
     {
-      message: { role: 'user', content: requestData.message },
+      message: { role: 'user', content: userVisibleMessage },
       parts: [],
     },
   );
 
-  const workspaceCtx = await buildWorkspaceContext(input.sessionContext.metadataJson);
+  const workspaceCtx = await buildWorkspaceContext(input.sessionContext.metadataJson, {
+    sessionId: input.sessionId,
+    userId: input.user.sub,
+  });
   const interactionModes = resolveStreamInteractionModes({
     metadataJson: input.sessionContext.metadataJson,
     requestData,
   });
   const companionPrompt = buildCompanionPrompt(
     loadCompanionSettingsForUser(input.user.sub, input.user.email, requestData.agentId),
-    requestData.message,
+    userVisibleMessage,
   );
   const capabilityContext = buildCapabilityContext(input.user.sub, input.sessionId);
   // Dynamic agent prompt (oh-my-opencode dynamic-agent-prompt-builder pattern):
@@ -1816,9 +1940,11 @@ export async function handleStreamRequest(input: {
   let startWorkContext: string | null = null;
   const sessionMeta = parseSessionMetadataJson(input.sessionContext.metadataJson);
   const workspaceRootForStartWork =
-    typeof sessionMeta['workingDirectory'] === 'string'
-      ? sessionMeta['workingDirectory']
-      : process.cwd();
+    resolveSessionWorkspacePath({
+      metadataJson: input.sessionContext.metadataJson,
+      sessionId: input.sessionId,
+      userId: input.user.sub,
+    }) ?? process.cwd();
   if (detectUltraworkKeyword(requestData.message)) {
     startWorkContext = await processStartWork(
       workspaceRootForStartWork,
@@ -2051,12 +2177,12 @@ export async function handleStreamRequest(input: {
 
       persistStreamUserMessage({
         content: buildStreamUserContent({
-          inputParts: requestData.inputParts,
-          message: requestData.message,
+          inputParts: input.teamResumeRootSessionId ? undefined : requestData.inputParts,
+          message: userVisibleMessage,
         }),
         clientRequestId: requestData.clientRequestId,
-        displayMessage: requestData.displayMessage,
-        message: requestData.message,
+        displayMessage: input.teamResumeRootSessionId ? undefined : requestData.displayMessage,
+        message: userVisibleMessage,
         sessionId: input.sessionId,
         userId: input.user.sub,
         route,
@@ -2250,10 +2376,13 @@ export async function handleStreamRequest(input: {
       // 复用前面 line 1728 已经解析过的 sessionMeta（避免重复 JSON.parse）。
       const teamWorkspaceIdForStack =
         typeof sessionMeta['teamWorkspaceId'] === 'string' ? sessionMeta['teamWorkspaceId'] : null;
-      const workingDirectoryForStack =
-        typeof sessionMeta['workingDirectory'] === 'string'
-          ? sessionMeta['workingDirectory']
-          : null;
+      // 递归解析 workingDirectory：子 session 可能没有直接设置，
+      // 需要通过 DB 列 team_parent_session_id 向上查找父 session 链。
+      const workingDirectoryForStack = resolveSessionWorkspacePath({
+        metadataJson: input.sessionContext.metadataJson,
+        sessionId: input.sessionId,
+        userId: input.user.sub,
+      });
       const roleLayerForStack = mapAgentToTeamRoleLayer(
         route.effectiveAgentId ?? requestData.agentId ?? null,
       );
@@ -2276,6 +2405,25 @@ export async function handleStreamRequest(input: {
             : null,
         enabledToolNames,
       });
+      const teamResumePrompt = input.teamResumeRootSessionId
+        ? await buildTeamResumeSystemPrompt({
+            rootSessionId: input.teamResumeRootSessionId,
+            userId: input.user.sub,
+          })
+        : null;
+      const teamStatusRootSessionId =
+        input.teamResumeRootSessionId ??
+        resolveTeamRootSessionId({
+          metadataJson: input.sessionContext.metadataJson,
+          sessionId: input.sessionId,
+          userId: input.user.sub,
+        });
+      const teamStatusPrompt = teamStatusRootSessionId
+        ? await buildTeamUserFacingStatusPrompt({
+            rootSessionId: teamStatusRootSessionId,
+            userId: input.user.sub,
+          })
+        : null;
       const compactionSettingsRow = sqliteGet<{ value: string }>(
         `SELECT value FROM user_settings WHERE user_id = ? AND key = ?`,
         [input.user.sub, COMPACTION_SETTINGS_KEY],
@@ -2341,14 +2489,6 @@ export async function handleStreamRequest(input: {
             throw createAbortError();
           }
         }
-        // Dynamic context window: resolve the effective limit for this user+model,
-        // which may be lower than the preset if a provider error previously revealed
-        // a smaller actual limit (e.g. relay supports 200K but preset says 1M).
-        const _effectiveContextWindow = resolveEffectiveContextWindow(
-          input.user.sub,
-          route.model,
-          route.contextWindow,
-        );
         // P0: Proactive compaction — compact before overflow if token usage is near threshold.
         if (round > 1 && lastRoundUsage) {
           const proactiveResult = await triggerProactiveCompaction({
@@ -2398,6 +2538,8 @@ export async function handleStreamRequest(input: {
           commandContext: commandContext?.instruction ?? null,
           pinnedSkillsPrompt,
           teamInstructionStack,
+          teamResumePrompt,
+          teamStatusPrompt,
           syntheticContinuationPrompt,
           memoryBlock,
           agentId: route.effectiveAgentId ?? requestData.agentId,
@@ -2639,9 +2781,12 @@ ${result.upstreamError.technicalDetail}`
           turnFileDiffs,
           userId: input.user.sub,
           writeChunk: emitChunk,
-          workspaceRoot: parseSessionMetadataJson(input.sessionContext.metadataJson)[
-            'workingDirectory'
-          ] as string | undefined,
+          workspaceRoot:
+            resolveSessionWorkspacePath({
+              metadataJson: input.sessionContext.metadataJson,
+              sessionId: input.sessionId,
+              userId: input.user.sub,
+            }) ?? undefined,
         });
 
         if (toolCallsResult.hasPendingPermission) {
@@ -2662,7 +2807,7 @@ ${result.upstreamError.technicalDetail}`
             userId: input.user.sub,
           });
           wl.flush(ctx, 200);
-          return { statusCode: 200 };
+          return { statusCode: 200, stopReason: 'tool_permission' as const };
         }
       }
     } finally {
@@ -2763,6 +2908,7 @@ ${result.upstreamError.technicalDetail}`
       clientRequestId: requestData.clientRequestId,
       status: 'error',
       replaceExisting: true,
+      ...(requestData.agentId ? { agentId: requestData.agentId } : {}),
     });
     emitChunk(createStreamErrorChunk('STREAM_ERROR', String(err), runId));
     wl.flush(ctx, 500);
@@ -2787,12 +2933,20 @@ ${result.upstreamError.technicalDetail}`
   }
 }
 
-export function createStreamErrorChunk(code: string, message: string, runId: string) {
+export function createStreamErrorChunk(
+  code: string,
+  message: string,
+  runId: string,
+  upstreamSummary?: import('@openAwork/shared').UpstreamStreamSummary,
+  requestId?: string,
+) {
   return {
     type: 'error' as const,
     code,
     message,
+    ...(requestId ? { requestId } : {}),
     runId,
+    ...(upstreamSummary ? { upstreamSummary } : {}),
     eventId: `${runId}:error:${randomUUID()}`,
     occurredAt: Date.now(),
   };

@@ -15,8 +15,8 @@
  * Coverage today (stay aligned with upstream-request.ts):
  *   - anthropic   → providerOptions.anthropic.thinking + sendReasoning
  *   - openai      → providerOptions.openai.reasoningEffort
- *                   (only for chat-completions; Responses API needs
- *                   `@ai-sdk/openai`, not yet installed.)
+ *                   (works for both OpenAI-compatible chat completions and
+ *                   @ai-sdk/openai Responses models.)
  *   - openrouter  → providerOptions.openrouter.body.reasoning
  *   - deepseek    → providerOptions.deepseek.body.thinking
  *   - gemini      → providerOptions.gemini.body.google.thinking_config
@@ -454,9 +454,6 @@ export function buildProviderOptions(input: {
     }
 
     case 'openai_effort': {
-      // Chat-completions path only. The Responses API (`reasoning:
-      // { effort, summary }`) needs `@ai-sdk/openai`, which is not
-      // wired in yet — see PROGRESS.md.
       if (!thinking.enabled) {
         return undefined;
       }

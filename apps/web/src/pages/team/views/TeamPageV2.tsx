@@ -591,16 +591,22 @@ export default function TeamPageV2() {
       // 路径，由 createSession 内部映射到 CreateTeamSessionInput。
       // 之前只传 teamWorkspaceId 会导致 source / defaultProvider / optional
       // agents 全部丢失（参见 docs/team-architecture-deferred-decisions.md）。
-      const created = await data.createSession(draft);
-      if (!created) {
+      const createdSessionId = await data.createSession(draft);
+      if (!createdSessionId) {
         return false;
       }
       setShowNewSessionModal(false);
       setInitialTemplateId(null);
       setInitialWorkingDirectory(null);
+      // 刷新 workspace snapshot，确保新会话立刻出现在 workspaceGroups 中。
+      // 否则 effectiveSessions（优先取 snapshot）还不包含新会话时，纠偏 effect
+      // 会把 selectedTeamId 切回 defaultSelectedTeamId，导致选中态丢失。
+      refreshWorkspaceSnapshot();
+      // 自动选中新创建的会话，让用户立刻看到新会话的对话视图
+      selectTeamInternal(createdSessionId);
       return true;
     },
-    [data],
+    [data, refreshWorkspaceSnapshot, selectTeamInternal],
   );
 
   const handleOpenNewSessionModal = useCallback(
@@ -1071,15 +1077,18 @@ export default function TeamPageV2() {
                     selectedTeamId &&
                     selectedTeamId !== conversationReceptionSessionId ? (
                     <TeamConversationView
+                      key={selectedTeamId}
                       sessionId={selectedTeamId}
                       composerEnabled={inboundComposerEnabled}
                     />
                   ) : undefined
                 ) : (
                   <div
+                    key={middleTab}
                     id={`middle-panel-${middleTab}`}
                     role="tabpanel"
                     aria-labelledby={`middle-tab-${middleTab}`}
+                    className="team-v2-panel-tab-content"
                     style={{
                       display: 'flex',
                       flexDirection: 'column',

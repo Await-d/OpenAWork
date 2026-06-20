@@ -4,7 +4,11 @@ import { act, cleanup, renderHook } from '@testing-library/react';
 import type { TeamWorkspaceSnapshot } from '@openAwork/web-client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAuthStore } from '../../../stores/auth/auth.js';
-import { useTeamEventsConnectionStore } from '../../../stores/team/team-events.js';
+import {
+  useHandoffStore,
+  useLayerStore,
+  useTeamEventsConnectionStore,
+} from '../../../stores/team/team-events.js';
 import {
   computeTeamWorkspaceSnapshotRetryDelay,
   formatTeamWorkspaceSnapshotLoadError,
@@ -90,12 +94,41 @@ function createWorkspaceSnapshot(
     sharedSessions: [],
     sessionShares: [],
     runtimeTaskGroups: [],
+    auditLogs: [],
+    clarifications: [],
+    handoffs: [
+      {
+        id: `handoff-${sessionId}`,
+        userId: 'user-1',
+        fromSessionId: 'session-root',
+        toSessionId: sessionId,
+        fromRoleLayer: 'reception',
+        toRoleLayer: 'pm1',
+        payload: {},
+        state: 'completed',
+        claimToken: null,
+        paused: false,
+        claimedAt: null,
+        completedAt: '2026-05-26T08:10:00.000Z',
+        failureReason: null,
+        retryCount: 0,
+        createdAt: '2026-05-26T08:00:00.000Z',
+        startedAt: '2026-05-26T08:01:00.000Z',
+        updatedAt: '2026-05-26T08:10:00.000Z',
+      },
+    ],
+    members: [],
+    messages: [],
+    notifications: [],
+    tasks: [],
   };
 }
 
 beforeEach(() => {
   localStorage.clear();
   resetTeamEventsConnectionStore();
+  useHandoffStore.getState().clear();
+  useLayerStore.getState().clear();
   setNavigatorOnline(true);
   useAuthStore.setState({
     accessToken: 'token-test',
@@ -115,6 +148,8 @@ afterEach(() => {
   vi.useRealTimers();
   localStorage.clear();
   resetTeamEventsConnectionStore();
+  useHandoffStore.getState().clear();
+  useLayerStore.getState().clear();
   setNavigatorOnline(true);
   useAuthStore.setState({
     accessToken: null,
@@ -226,5 +261,32 @@ describe('useTeamWorkspaceSnapshotState', () => {
 
     expect(result.current.snapshot?.sessions[0]?.id).toBe('session-b');
     expect(result.current.error).toBeNull();
+  });
+
+  it('成功加载快照后会同步历史层级会话和 handoff 到 team runtime stores', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = resolveRequestUrl(input);
+        if (url === `${GATEWAY_URL}/team/workspaces/${WORKSPACE_ID}/runtime`) {
+          return jsonResponse(createWorkspaceSnapshot('session-history'));
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+
+    renderHook(() => useTeamWorkspaceSnapshotState(WORKSPACE_ID));
+
+    await flushAsyncWork();
+
+    expect(useLayerStore.getState().nodes.get('session-history')).toMatchObject({
+      roleLayer: 'reception',
+      state: 'running',
+    });
+    expect(useHandoffStore.getState().handoffs.get('handoff-session-history')).toMatchObject({
+      sessionId: 'session-history',
+      state: 'completed',
+      toRoleLayer: 'pm1',
+    });
   });
 });

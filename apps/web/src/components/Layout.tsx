@@ -576,6 +576,7 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
         fetchRootPath={workspacePickerDataSource.fetchRootPath}
         fetchWorkspaceRoots={workspacePickerDataSource.fetchWorkspaceRoots}
         fetchTree={workspacePickerDataSource.fetchTree}
+        createDirectory={workspacePickerDataSource.createDirectory}
         validatePath={workspacePickerDataSource.validatePath}
         initialPath={uiState.fileTreeRootPath ?? selectedWorkspacePath ?? undefined}
       />

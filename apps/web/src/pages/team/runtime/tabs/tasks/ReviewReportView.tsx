@@ -28,11 +28,23 @@ const VERDICT_STYLES: Record<string, CSSProperties> = {
     border: '1px solid color-mix(in srgb, var(--warning) 40%, transparent)',
     background: 'color-mix(in srgb, var(--warning) 8%, var(--bg-overlay))',
   },
+  'execution-protocol-failure': {
+    color: 'var(--warning)',
+    border: '1px solid color-mix(in srgb, var(--warning) 40%, transparent)',
+    background: 'color-mix(in srgb, var(--warning) 8%, var(--bg-overlay))',
+  },
 };
+
+export type ReviewVerdict =
+  | 'pass'
+  | 'implementation-failure'
+  | 'planning-failure'
+  | 'execution-protocol-failure'
+  | null;
 
 export interface ReviewReportViewProps {
   reportMarkdown: string | null;
-  overallVerdict: 'pass' | 'implementation-failure' | 'planning-failure' | null;
+  overallVerdict: ReviewVerdict;
   specReviewPassed: boolean | null;
   qualityReviewPassed: boolean | null;
 }
@@ -52,7 +64,7 @@ export function ReviewReportView({
   }
 
   const verdictStyle =
-    overallVerdict !== null ? (VERDICT_STYLES[overallVerdict] ?? {}) : VERDICT_STYLES.unknown;
+    overallVerdict !== null ? (VERDICT_STYLES[overallVerdict] ?? VERDICT_STYLES.unknown) : VERDICT_STYLES.unknown;
   const verdictLabel =
     overallVerdict === null
       ? '📝 已生成'
@@ -60,7 +72,9 @@ export function ReviewReportView({
         ? '✅ 通过'
         : overallVerdict === 'implementation-failure'
           ? '❌ 实现型失败'
-          : '❌ 规划型失败';
+          : overallVerdict === 'execution-protocol-failure'
+            ? '❌ 执行协议失败'
+            : '❌ 规划型失败';
   const specLabel = specReviewPassed === null ? '—' : specReviewPassed ? '✅' : '❌';
   const qualityLabel = qualityReviewPassed === null ? '—' : qualityReviewPassed ? '✅' : '❌';
 

@@ -25,6 +25,7 @@ import {
 // 不让 executor 真去跑 stream（taskRunner 会调它）。
 vi.mock('../../provider/auxiliary-llm-config.js', () => ({
   resolveAuxiliaryLlmConfig: async () => null,
+  resolveAuxiliaryLlmConfigCandidates: async () => [],
 }));
 
 process.env['DATABASE_URL'] = ':memory:';

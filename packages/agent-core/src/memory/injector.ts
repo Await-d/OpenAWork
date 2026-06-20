@@ -11,9 +11,33 @@ function sortMemoriesForInjection(memories: MemoryEntry[]): MemoryEntry[] {
 
 function filterByWorkspace(memories: MemoryEntry[], workspaceRoot: string | null): MemoryEntry[] {
   if (workspaceRoot === null) {
-    return memories;
+    return memories.filter((m) => m.workspaceRoot === null);
   }
   return memories.filter((m) => m.workspaceRoot === null || m.workspaceRoot === workspaceRoot);
+}
+
+function filterByTeamWorkspace(
+  memories: MemoryEntry[],
+  teamWorkspaceId: string | null,
+): MemoryEntry[] {
+  return memories.filter((memory) => {
+    if (memory.teamWorkspaceId === null) {
+      return true;
+    }
+    return teamWorkspaceId !== null && memory.teamWorkspaceId === teamWorkspaceId;
+  });
+}
+
+function filterByRoleLayer(
+  memories: MemoryEntry[],
+  roleLayer: MemoryInjectionConfig['roleLayer'] | undefined,
+): MemoryEntry[] {
+  if (!roleLayer) {
+    return memories.filter((memory) => memory.roleLayers === null);
+  }
+  return memories.filter(
+    (memory) => memory.roleLayers === null || memory.roleLayers.includes(roleLayer),
+  );
 }
 
 function formatMemoryLine(entry: MemoryEntry): string {
@@ -28,9 +52,16 @@ export function buildMemoryInjectionBlock(
     return null;
   }
 
-  const eligible = filterByWorkspace(
-    memories.filter((m) => m.enabled && m.confidence >= config.minConfidence),
-    config.workspaceRoot,
+  const teamWorkspaceId = config.teamWorkspaceId ?? null;
+  const eligible = filterByRoleLayer(
+    filterByTeamWorkspace(
+      filterByWorkspace(
+        memories.filter((m) => m.enabled && m.confidence >= config.minConfidence),
+        config.workspaceRoot,
+      ),
+      teamWorkspaceId,
+    ),
+    config.roleLayer,
   );
 
   if (eligible.length === 0) {

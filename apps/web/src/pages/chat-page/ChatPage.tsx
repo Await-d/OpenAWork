@@ -4,6 +4,7 @@ import type {
   Message,
   RunEvent,
   StreamThinkingChunk,
+  UpstreamStreamSummary,
 } from '@openAwork/shared';
 import type { AttachmentItem } from '@openAwork/shared-ui';
 import type {
@@ -98,6 +99,7 @@ import { createAttachStreamReconnectWiring } from '../../components/conversation
 import {
   appendAttachmentSummary,
   buildUploadedAttachmentSummaryLine,
+  isImageFile,
   uploadChatAttachments,
 } from '../../components/conversation-runtime/attachments/attachment-upload.js';
 import { ChatEditorPane } from './panels/chat-editor-pane.js';
@@ -391,6 +393,8 @@ export default function ChatPage() {
     setActiveStreamStartedAt,
     activeStreamFirstTokenLatencyMs,
     setActiveStreamFirstTokenLatencyMs,
+    latestUpstreamSummary,
+    setLatestUpstreamSummary,
     streamingRef,
     stoppingStreamRef,
     currentAssistantStreamMessageIdRef,
@@ -1013,6 +1017,7 @@ export default function ChatPage() {
         setPendingQuestions,
         setSessionStateStatus,
         setRecoveryActiveStream,
+        setLatestUpstreamSummary,
         setRecoveredStreamSnapshot,
         setIsSessionSnapshotReady,
       },
@@ -1128,6 +1133,8 @@ export default function ChatPage() {
     ? activeStreamStartedAt
     : (recoveredStreamSnapshot?.startedAt ?? null);
   const visibleReportedStreamUsage = reportedStreamUsage ?? recoveredStreamSnapshot?.usage ?? null;
+  const visibleLatestUpstreamSummary =
+    latestUpstreamSummary ?? recoveredStreamSnapshot?.upstreamSummary ?? null;
   // Surfaces the wire-faithful ordered parts during an active stream so the
   // live render reflects gateway event order. During recovery (before the
   // live attach completes) the real segment list is still empty, so we
@@ -1341,6 +1348,7 @@ export default function ChatPage() {
             thinkingBlocks: streamThinkingBlocksRef.current,
             toolCalls: cachedToolCalls,
             usage: reportedStreamUsageRef.current,
+            ...(latestUpstreamSummary ? { upstreamSummary: latestUpstreamSummary } : {}),
           },
           rightPanelState: rightPanelStateRef.current,
         };
@@ -1353,7 +1361,9 @@ export default function ChatPage() {
       );
     }
 
-    navigateToSession();
+    if (chatView !== 'session') {
+      navigateToSession();
+    }
     cancelAttachRetry();
     attachAttemptedSessionRef.current = null;
     setRecoveryActiveStream(null);
@@ -2100,7 +2110,7 @@ export default function ChatPage() {
       }
 
       if (effectiveFiles.length > 0) {
-        const invalidAttachment = effectiveFiles.find((file) => !file.type.startsWith('image/'));
+        const invalidAttachment = effectiveFiles.find((file) => !isImageFile(file));
         if (invalidAttachment) {
           const message = '图片生成模式只支持图片作为参考图，请移除非图片附件后重试。';
           setStreamError(message);
@@ -2713,7 +2723,7 @@ export default function ChatPage() {
           }
         }
       },
-      onDone: (stopReason, streamAgentId, cancellation) => {
+      onDone: (stopReason, streamAgentId, cancellation, upstreamSummary) => {
         if (activeSessionRef.current !== sid) {
           requestSessionListRefresh();
           return;
@@ -2723,6 +2733,9 @@ export default function ChatPage() {
         if (pausedForQuestion) {
           requestSessionListRefresh();
           return;
+        }
+        if (upstreamSummary) {
+          setLatestUpstreamSummary(upstreamSummary);
         }
         const finishedAt = Date.now();
         const resolvedStopReason = stopReason ?? 'end_turn';
@@ -3223,6 +3236,7 @@ export default function ChatPage() {
           accumulatedUsage,
           attachStateInitialized,
           currentAssistantStreamMessageId: currentAssistantStreamMessageIdRef.current,
+          ...(visibleLatestUpstreamSummary ? { latestUpstreamSummary: visibleLatestUpstreamSummary } : {}),
           ...(recoveredModifiedFilesSummary ? { recoveredModifiedFilesSummary } : {}),
           requestStartedAt,
           toolCalls: buildAttachToolCalls(),
@@ -3710,7 +3724,7 @@ export default function ChatPage() {
             setRightTab('tools');
           }
         },
-        onDone: (stopReason, streamAgentId, cancellation) => {
+      onDone: (stopReason, streamAgentId, cancellation, upstreamSummary) => {
           if (!isCurrentSessionRequest(sid, attachSessionViewEpoch)) {
             requestSessionListRefresh();
             return;
@@ -3720,6 +3734,9 @@ export default function ChatPage() {
           if (pausedForQuestion) {
             requestSessionListRefresh();
             return;
+          }
+          if (upstreamSummary) {
+            setLatestUpstreamSummary(upstreamSummary);
           }
           ensureAttachStateInitialized();
           const finishedAt = Date.now();
@@ -4409,6 +4426,7 @@ export default function ChatPage() {
             fetchRootPath={workspace.fetchRootPath}
             fetchWorkspaceRoots={workspace.fetchWorkspaceRoots}
             fetchTree={workspace.fetchTree}
+            createDirectory={workspace.createDirectory}
             initialPath={effectiveWorkingDirectory ?? undefined}
             validatePath={workspace.validatePath}
             loading={workspace.loading}
@@ -4672,6 +4690,7 @@ export default function ChatPage() {
               streaming={streaming}
               stoppingStream={stoppingStream}
               streamError={streamError}
+              latestUpstreamSummary={visibleLatestUpstreamSummary}
               onDismissStreamError={() => setStreamError(null)}
               checkpointCount={compactions.length}
               pendingQuestionsCount={pendingQuestions.length}
@@ -4865,6 +4884,7 @@ export default function ChatPage() {
         toolFilter={toolFilter}
         setToolFilter={setToolFilter}
         compactions={compactions}
+        upstreamSummaries={rightPanelState.upstreamSummaries}
         pendingPermissions={pendingPermissions}
         resolveInlinePermissionActions={resolveInlinePermissionActions}
         planTasks={planTasks}

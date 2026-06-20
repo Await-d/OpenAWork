@@ -14,9 +14,8 @@
  * 改造而来，迁入到 `pages/team/conversation/`，并：
  * - 把 `useChatConversationState` 换成 `useTeamConversationState`
  * - 把 `resolveSubmitStrategy` 抽到 `submit/team-submit-router.ts`
- * - 把 chat-only 的 dialogueMode/yoloMode/webSearchEnabled/manualAgentId/
- *   thinkingEnabled/reasoningEffort 在喂给 layout 时硬编码为关闭/默认值
- *   （team hook 里这些字段已经被删除）
+ * - 把 chat-only 的 dialogueMode/yoloMode/webSearchEnabled/manualAgentId
+ *   留在 layout 适配层，team 自己管理 provider/model/thinking
  *
  * 关联文档：
  * - `.agentdocs/workflow/260518-team-conversation-decouple-plan.md` §6.4
@@ -24,19 +23,34 @@
  * - `docs/team-architecture-l1-3-streaming-handoff-spec.md` §1.3
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
+import { canConfigureThinkingForModel, categorizeAlwaysPatterns } from '@openAwork/shared-ui';
+import type { AlwaysScopeLevel } from '@openAwork/shared-ui';
 import { useChatSearch } from '../../../components/chat/search/chat-search-overlay.js';
 import { LatestAssistantMessageContext } from '../../../components/chat/message/collapsible-assistant-content.js';
 import type {
   ChatRenderAction,
-  ChatRenderEntry,
   ChatRenderGroup,
 } from '../../../components/chat/message/chat-message-group-list.js';
 import type { UnifiedComposerSubmitPayload } from '../../../components/chat/composer/UnifiedComposer.js';
 import type { HistoryEditPromptInput, RetryPromptInput } from './TeamConversationLayout.js';
-import { normalizeChatMessages } from '../../../components/conversation-runtime/messages/support.js';
+import {
+  applyPermissionDecisionToLocalAssistantMessages,
+  dismissPermissionEventMessage,
+  hasActivePendingPermissionRequest,
+  normalizeChatMessages,
+} from '../../../components/conversation-runtime/messages/support.js';
 import { prepareStandardChatSendInput } from '../../chat-page/conversation/composer/prepare-standard-chat-send-input.js';
 import { createSessionsClient } from '@openAwork/web-client';
+import type { PendingPermissionRequest, PermissionDecision } from '@openAwork/web-client';
 import type { ChatMessage } from '../../../components/conversation-runtime/messages/support.js';
 import type { InputImageContent } from '@openAwork/shared';
 import { useAuthStore } from '../../../stores/auth/auth.js';
@@ -49,6 +63,7 @@ import {
   exportMessages,
 } from '../../../components/chat/message/message-export.js';
 import { PromptTemplatePanel } from '../../../components/chat/misc/prompt-template-panel.js';
+import { toast } from '../../../components/common/feedback/ToastNotification.js';
 import { TeamConversationLayout } from './TeamConversationLayout.js';
 import { TeamSubstateProgressBar } from './extras/TeamSubstateProgressBar.js';
 import { TeamRunStateBanner } from './extras/TeamRunStateBanner.js';
@@ -57,6 +72,15 @@ import { TeamSessionHeader } from './extras/TeamSessionHeader.js';
 import { TeamUserJumpRail } from './extras/TeamUserJumpRail.js';
 import { TeamRoleTypingIndicator } from './extras/TeamRoleTypingIndicator.js';
 import { TeamInitModal } from './extras/TeamInitModal.js';
+import { TeamPendingInteractionChip } from './extras/TeamPendingInteractionChip.js';
+import { TeamRunEventsPreview } from './extras/TeamRunEventsPreview.js';
+import {
+  TeamViewModeToggle,
+  type ViewMode,
+  type MultiLayerViewMode,
+} from './extras/TeamViewModeToggle.js';
+import { type LayerMessages } from './extras/TeamMultiLayerPanel.js';
+import { TeamLayerChatPanel } from './extras/TeamLayerChatPanel.js';
 import { useTeamConversationState } from './use-team-conversation-state.js';
 import { resolveTeamSubmitStrategy } from './submit/team-submit-router.js';
 import { buildTeamGroupedMessageEntries } from './build-team-grouped-message-entries.js';
@@ -64,6 +88,11 @@ import {
   COMPOSER_REFERENCE_EVENT_NAME,
   isComposerReferenceEvent,
 } from '../../../utils/chat/composer-reference-events.js';
+import {
+  getPermissionReplyStatusCode,
+  getPermissionReplySuccessMessage,
+} from '../../../utils/permission/permission-reply.js';
+import { useTeamRuntimeReferenceViewData } from '../runtime/data/team-runtime-reference-data.js';
 
 export interface TeamConversationViewProps {
   /** 要渲染的 team session id。 */
@@ -96,6 +125,44 @@ export interface TeamConversationViewProps {
    * 用于 LayerConversationDrawer 等空间受限的嵌入场景。
    */
   compact?: boolean;
+  /** 外部希望普通多层历史面板优先展示的团队层级。 */
+  focusedLayer?: string | null;
+  /**
+   * 嵌入只读模式：禁用浮动交互元素（JumpRail、SessionHeader、RunEventsPreview、
+   * InitModal）、消息 hover actions，仅保留对话内容的滚动浏览。
+   * 用于 LayerFlowView 等需要纯净对话展示的嵌入场景。
+   */
+  readOnly?: boolean;
+  /**
+   * 单角色模式：只展示当前 session 自身的消息，不拉取/展示子 session
+   * 的消息，也不显示群聊汇总面板。用于「历史层级」等场景中用户选中
+   * 某个具体角色实例后只看该角色的对话，而非混合所有子角色。
+   */
+  soloMode?: boolean;
+}
+
+const TEAM_CONVERSATION_LAYER_ORDER = [
+  'reception',
+  'pm1',
+  'pm2',
+  'executor',
+  'tester',
+  'reviewer',
+] as const;
+
+function escapeCssAttributeValue(value: string): string {
+  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+    return CSS.escape(value);
+  }
+  return value.replace(/["\\]/g, '\\$&');
+}
+
+async function disabledComposerAsyncAction(): Promise<void> {
+  return Promise.resolve();
+}
+
+function disabledComposerAction(): void {
+  return undefined;
 }
 
 export function TeamConversationView({
@@ -107,10 +174,23 @@ export function TeamConversationView({
   composerDisabledHint = '该会话正在执行中，请通过 b 与团队对话',
   composerPlaceholder,
   compact = false,
+  focusedLayer = null,
+  readOnly = false,
+  soloMode = false,
+  onOpenLayerSession,
 }: TeamConversationViewProps) {
   const token = useAuthStore((s) => s.accessToken);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
   const currentUserEmail = useAuthStore((s) => s.email) ?? '';
+  const { diagnostics } = useTeamRuntimeReferenceViewData();
+
+  const [viewMode, setViewMode] = useState<ViewMode>('single');
+  const [multiLayerMode, setMultiLayerMode] = useState<MultiLayerViewMode>('tab');
+  const [selectedLayer, setSelectedLayer] = useState<string | null>(focusedLayer);
+  const [isNarrowLayout, setIsNarrowLayout] = useState(() =>
+    typeof window === 'undefined' ? false : window.innerWidth < 900,
+  );
+  const hasAutoOpenedMultiLayerRef = useRef(false);
 
   const state = useTeamConversationState({
     sessionId,
@@ -144,6 +224,24 @@ export function TeamConversationView({
   useEffect(() => {
     messagesRef.current = state.messages;
   }, [state.messages]);
+
+  // 会话切换时重置 UI 状态，防止上一个会话的视图模式 / 模板面板 / 多选 / 搜索
+  // 等交互态残留到新会话。虽然 key={sessionId} 已确保组件重新挂载，此 effect
+  // 作为防御性措施保留——以防 key 被移除或在嵌入式场景（无 key）下复用组件。
+  const previousSessionIdRef = useRef(sessionId);
+  useEffect(() => {
+    if (previousSessionIdRef.current === sessionId) {
+      return;
+    }
+    previousSessionIdRef.current = sessionId;
+    setViewMode('single');
+    setMultiLayerMode('tab');
+    setSelectedLayer(focusedLayer);
+    setShowTemplatePanel(false);
+    hasAutoOpenedMultiLayerRef.current = false;
+    multiSelect.disableMultiSelect();
+    chatSearch.close();
+  }, [sessionId, focusedLayer, multiSelect, chatSearch]);
 
   // Copy last assistant message helper.
   const handleCopyLastAssistant = useCallback(() => {
@@ -207,23 +305,112 @@ export function TeamConversationView({
     composerEnabled,
   );
 
+  const handleViewModeChange = useCallback(
+    (mode: ViewMode) => {
+      setViewMode(mode === 'dual' && isNarrowLayout ? 'single' : mode);
+    },
+    [isNarrowLayout],
+  );
+
+  const handleFocusPendingInteraction = useCallback(() => {
+    const firstPendingPermissionRequestId = state.pendingPermissions.find(
+      (permission) => permission.status === 'pending',
+    )?.requestId;
+    if (firstPendingPermissionRequestId && typeof document !== 'undefined') {
+      const targetApprovalBar = document.querySelector<HTMLElement>(
+        `[data-permission-request-id="${escapeCssAttributeValue(firstPendingPermissionRequestId)}"]`,
+      );
+      if (targetApprovalBar) {
+        targetApprovalBar.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
+    }
+
+    if (
+      state.pendingQuestions.some((question) => question.status === 'pending') &&
+      typeof document !== 'undefined'
+    ) {
+      const firstPendingQuestionRequestId = state.pendingQuestions.find(
+        (question) => question.status === 'pending',
+      )?.requestId;
+      const questionPanel = firstPendingQuestionRequestId
+        ? document.querySelector<HTMLElement>(
+            `[data-question-request-id="${escapeCssAttributeValue(firstPendingQuestionRequestId)}"]`,
+          )
+        : document.querySelector<HTMLElement>('.inline-question-panel');
+      if (questionPanel) {
+        questionPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
+    }
+
+    state.scrollToBottom('smooth', 'latest-edge');
+  }, [state]);
+
+  const activePendingPermissionCount = useMemo(
+    () => state.pendingPermissions.filter((permission) => permission.status === 'pending').length,
+    [state.pendingPermissions],
+  );
+  const activePendingQuestionCount = useMemo(
+    () => state.pendingQuestions.filter((question) => question.status === 'pending').length,
+    [state.pendingQuestions],
+  );
+
   // 默认 topBar：
   //   - reception 层：显示「团队整体运行状态」横幅（TeamRunStateBanner，自聚合
   //     handoff/连接/活动信号；无任何 handoff 时自渲染为 null）。它解决了
   //     「提交需求后看不出团队是在跑/卡住/异常停」的可观测性缺口。reception 会话
   //     自身常回 idle，原来的 substate 进度条对 reception 没意义，故不再用它。
   //   - 其它层（pm1/pm2/executor/reviewer）：保留 substate 进度条（对单层有意义）。
-  const effectiveTopBar =
-    topBar ??
-    (state.roleLayer === 'reception' ? (
-      <TeamRunStateBanner receptionStateStatus={state.sessionStateStatus} />
-    ) : (
-      <TeamSubstateProgressBar
-        roleLayer={state.roleLayer}
-        substate={state.substate}
-        stateStatus={state.sessionStateStatus}
-      />
-    ));
+  const effectiveTopBar = (
+    <>
+      {topBar ??
+        (state.roleLayer === 'reception' ? (
+          <TeamRunStateBanner
+            diagnostics={diagnostics}
+            receptionStateStatus={state.sessionStateStatus}
+            rightSlot={
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <TeamPendingInteractionChip
+                  pendingPermissionCount={activePendingPermissionCount}
+                  pendingQuestionCount={activePendingQuestionCount}
+                  onClick={handleFocusPendingInteraction}
+                />
+                <TeamViewModeToggle
+                  viewMode={viewMode}
+                  multiLayerMode={multiLayerMode}
+                  dualDisabled={isNarrowLayout}
+                  onViewModeChange={handleViewModeChange}
+                  onMultiLayerModeChange={setMultiLayerMode}
+                />
+              </div>
+            }
+          />
+        ) : (
+          <TeamSubstateProgressBar
+            roleLayer={state.roleLayer}
+            substate={state.substate}
+            stateStatus={state.sessionStateStatus}
+            rightSlot={
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <TeamPendingInteractionChip
+                  pendingPermissionCount={activePendingPermissionCount}
+                  pendingQuestionCount={activePendingQuestionCount}
+                  onClick={handleFocusPendingInteraction}
+                />
+                <TeamViewModeToggle
+                  viewMode={viewMode}
+                  multiLayerMode={multiLayerMode}
+                  dualDisabled={isNarrowLayout}
+                  onViewModeChange={handleViewModeChange}
+                  onMultiLayerModeChange={setMultiLayerMode}
+                />
+              </div>
+            }
+          />
+        ))}
+    </>
+  );
 
   // Starter chip 点击：把文本填入 composer（不发送），让用户编辑后再发出。
   const handleSelectStarter = useCallback(
@@ -352,21 +539,12 @@ export function TeamConversationView({
     return '输入消息与团队对话，回车发送 · Shift+Enter 换行';
   }, [composerPlaceholder, state.roleLayer, state.substate, state.streaming]);
 
-  // ─── handlers ───────────────────────────────────────────────────────
-  const noopAsync = useCallback(async () => {
-    // intentionally empty
-  }, []);
-
-  const noopVoid = useCallback(() => {
-    // intentionally empty
-  }, []);
-
   // ─── 统一文本派发（提交路由 D5 决策：按 roleLayer/substate 选 inbound / stream）──
   // 抽成可复用单元，让「正常提交 / 编辑重发 / 重试 / 追加」都走同一条路由，避免
   // 编辑重试在 clarifying 环节误绕过 inbound 通道。
-  //   - clarifying → inbound (clarification_answer)
-  //   - 其它 → stream（reception 走 b 路由，其它 layer 是普通 chat 风格 session）
-  //   - inbound 端点 404 / 5xx → 自动 fallback 到 stream
+  //   - clarifying → inbound:user_input（带 questionId 的 clarification_answer 由任务 tab 处理）
+  //   - reception → inbound:user_input（触发团队自动编排）
+  //   - 其它 → stream（普通 chat 风格 session）
   const dispatchTeamText = useCallback(
     async (text: string, inputParts?: InputImageContent[]): Promise<boolean> => {
       // 每次新的派发尝试先清除上一轮的错误提示，避免旧错误遮挡新内容。
@@ -374,50 +552,32 @@ export function TeamConversationView({
       const strategy = resolveTeamSubmitStrategy(state.roleLayer, state.substate);
 
       if (strategy.kind === 'inbound') {
-        if (strategy.messageType === 'clarification_answer') {
-          // #6 澄清答案路径：必须携带 questionId 才能让后端把对应的 escalation
-          // 标记 'answered'。inline-question UI 走的是另一条 onReplyInlineQuestion
-          // 路径（带 requestId），而 composer 派发到这里时拿不到 questionId。
-          // 早期实现直接 submit `{ answer: text }`——后端会落库 inbound 但
-          // **resolveClarificationEscalationRequest 因缺 questionId 静默 no-op**，
-          // c session 永远不会得知答案，substate 卡死。
-          //
-          // 复查后的修法：composer 派发时把这条改写成 `user_input`（语义同
-          // "给当前 session 追加一条用户输入"，c runner 会从消息流读到），
-          // 既不污染 session（被 c runner 主动消费而非 stream 注入），又
-          // 保证用户输入真的进入流程。如果 inbound 失败再交给下方 stream 兜底。
-          try {
-            await state.submitInbound('user_input', { text } as never);
-            await state.reload();
-            return true;
-          } catch (err) {
-            const message = err instanceof Error ? err.message : '提交输入失败';
-            console.warn(
-              '[TeamConversationView] clarifying inbound submit (as user_input) failed:',
-              message,
-            );
-            // 澄清环节失败仍不能错路由到 stream（c session 处于 LLM 循环中）：
-            // 报错让用户重试。
-            state.setStreamError(`输入提交失败，请重试：${message}`);
-            return false;
-          }
-        }
-
         if (strategy.messageType === 'user_input') {
           // user_input 对 reception 根会话必须走 inbound：这是团队自动派发链的入口。
           // 若这里失败再偷偷回退到 stream，会把请求重新送回接待层自己回答，等于绕过
           // team-inbound → reception-orchestrator → pm1/... 整条分层链路。
-          // 因此 reception 失败时直接报错；只有非 reception 的 future user_input
-          // 场景才允许回退到 stream。
+          // clarifying 下的普通 composer 同样不应回退到 stream，否则会绕过 c runner。
           try {
             await state.submitInbound(strategy.messageType, { text } as never);
             await state.reload();
+            // inbound 提交成功后，后端会 fire-and-forget 启动后台流
+            // （reception-orchestrator 的 direct 路径调用 runSessionInBackground）。
+            // 尝试 attach 到该后台流，以获取逐 token 的流式回复展示。
+            // attach 失败（如走了 orchestrate 路径无活跃流）不会影响流程，
+            // 前端仍会通过 team-events + 轮询刷新消息。
+            // 使用 await 而非 void：确保 streamingRef.current 在返回前被设置，
+            // 避免"快速双击回车→第二条消息绕过 streaming 守卫"的竞态。
+            await state.attachToSessionStream();
             return true;
           } catch (err) {
             const message = err instanceof Error ? err.message : '提交输入失败';
-            if (state.roleLayer === 'reception') {
-              console.warn('[TeamConversationView] reception inbound submit failed:', message);
-              state.setStreamError(`需求提交失败，请重试：${message}`);
+            if (state.roleLayer === 'reception' || state.substate === 'clarifying') {
+              console.warn('[TeamConversationView] team inbound submit failed:', message);
+              state.setStreamError(
+                state.substate === 'clarifying'
+                  ? `输入提交失败，请重试：${message}`
+                  : `需求提交失败，请重试：${message}`,
+              );
               return false;
             }
             console.warn(
@@ -431,12 +591,6 @@ export function TeamConversationView({
             strategy.messageType,
           );
         }
-      }
-
-      if (strategy.kind === 'handoff') {
-        console.warn(
-          '[TeamConversationView] handoff submit strategy not implemented; falling back to stream',
-        );
       }
 
       try {
@@ -609,8 +763,20 @@ export function TeamConversationView({
     'answered' | 'dismissed' | null
   >(null);
   const [inlineQuestionReplyError, setInlineQuestionReplyError] = useState<string | null>(null);
+  const [inlinePermissionPendingDecision, setInlinePermissionPendingDecision] = useState<{
+    decision: PermissionDecision;
+    requestId: string;
+  } | null>(null);
+  const [inlinePermissionErrors, setInlinePermissionErrors] = useState<Record<string, string>>({});
+  const [selectedPermissionScopeLevels, setSelectedPermissionScopeLevels] = useState<
+    Record<string, AlwaysScopeLevel>
+  >({});
   const activePendingQuestion = state.pendingQuestions[0] ?? null;
   const activeQuestionIdRef = useRef<string | null>(null);
+  const pendingPermissionsById = useMemo(
+    () => new Map(state.pendingPermissions.map((permission) => [permission.requestId, permission])),
+    [state.pendingPermissions],
+  );
 
   // Reset inline answers state when the active question changes.
   useEffect(() => {
@@ -669,6 +835,7 @@ export function TeamConversationView({
           activePendingQuestion.requestId,
           status,
           status === 'answered' ? mergedAnswers : undefined,
+          { targetSessionId: activePendingQuestion.sessionId },
         );
         setInlineQuestionReplyStatus(status);
       } catch (err) {
@@ -676,6 +843,148 @@ export function TeamConversationView({
       }
     },
     [activePendingQuestion, inlineQuestionAnswers, inlineQuestionCustomInputs, state],
+  );
+
+  const handleInlinePermissionDecision = useCallback(
+    async (request: PendingPermissionRequest, decision: PermissionDecision) => {
+      setInlinePermissionPendingDecision({
+        decision,
+        requestId: request.requestId,
+      });
+      setInlinePermissionErrors((previous) => {
+        const next = { ...previous };
+        delete next[request.requestId];
+        return next;
+      });
+
+      const selectedScopeLevel =
+        selectedPermissionScopeLevels[request.requestId] ??
+        categorizeAlwaysPatterns(request.previewAction, request.scope, request.always).at(-1);
+      const alwaysOverride =
+        decision !== 'once' && decision !== 'reject' && selectedScopeLevel
+          ? [selectedScopeLevel.pattern]
+          : undefined;
+
+      try {
+        await state.replyPermission(request.requestId, decision, {
+          ...(alwaysOverride ? { alwaysOverride } : {}),
+          targetSessionId: request.sessionId,
+        });
+        setInlinePermissionErrors((previous) => {
+          const next = { ...previous };
+          delete next[request.requestId];
+          return next;
+        });
+        state.setMessages((previous) =>
+          dismissPermissionEventMessage(
+            applyPermissionDecisionToLocalAssistantMessages(
+              previous,
+              request.requestId,
+              decision,
+            ),
+            request.requestId,
+          ),
+        );
+        toast(getPermissionReplySuccessMessage(decision), decision === 'reject' ? 'warning' : 'success', 2200);
+      } catch (error) {
+        const status = getPermissionReplyStatusCode(error);
+        const errorMessage = error instanceof Error ? error.message : '权限处理失败，请重试。';
+        if (status === 404 || status === 409) {
+          state.setPendingPermissions((previous) =>
+            previous.filter((permission) => permission.requestId !== request.requestId),
+          );
+          toast('该权限请求已被处理或已过期，已重新同步。', 'warning', 3000);
+          return;
+        }
+        setInlinePermissionErrors((previous) => ({
+          ...previous,
+          [request.requestId]: errorMessage,
+        }));
+      } finally {
+        setInlinePermissionPendingDecision((current) =>
+          current?.requestId === request.requestId ? null : current,
+        );
+      }
+    },
+    [selectedPermissionScopeLevels, state],
+  );
+
+  const resolveInlinePermissionActions = useCallback(
+    (requestId: string) => {
+      const request = pendingPermissionsById.get(requestId);
+      if (!request) {
+        return undefined;
+      }
+
+      const pendingDecision =
+        inlinePermissionPendingDecision?.requestId === requestId
+          ? inlinePermissionPendingDecision.decision
+          : null;
+      const disabled = pendingDecision !== null;
+      const scopeLevels = categorizeAlwaysPatterns(
+        request.previewAction,
+        request.scope,
+        request.always,
+      );
+      const selectedScopeLevel =
+        selectedPermissionScopeLevels[requestId] ?? scopeLevels[scopeLevels.length - 1];
+
+      return {
+        items: [
+          {
+            id: 'session',
+            label: pendingDecision === 'session' ? '处理中…' : '本会话允许',
+            disabled,
+            hint: '仅在当前会话内记住这次授权选择，适合继续当前任务。',
+            primary: true,
+            onClick: () => void handleInlinePermissionDecision(request, 'session'),
+          },
+          {
+            id: 'once',
+            label: pendingDecision === 'once' ? '处理中…' : '允许一次',
+            disabled,
+            hint: '只批准当前这一次工具调用，不保留后续授权。',
+            onClick: () => void handleInlinePermissionDecision(request, 'once'),
+          },
+          {
+            id: 'permanent',
+            label: pendingDecision === 'permanent' ? '处理中…' : '永久允许',
+            disabled,
+            hint: '会记住后续同类请求，请在充分确认风险后再使用。',
+            onClick: () => void handleInlinePermissionDecision(request, 'permanent'),
+          },
+          {
+            id: 'reject',
+            label: pendingDecision === 'reject' ? '处理中…' : '拒绝',
+            danger: true,
+            disabled,
+            hint: '阻止本次调用，工具不会继续执行。',
+            onClick: () => void handleInlinePermissionDecision(request, 'reject'),
+          },
+        ],
+        pendingLabel: pendingDecision
+          ? '正在提交审批结果…'
+          : '推荐：本会话允许 · 临时：允许一次 · 持久：永久允许',
+        helperMessage: pendingDecision ? undefined : '永久允许会记住后续同类请求，请谨慎选择。',
+        errorMessage: inlinePermissionErrors[requestId],
+        scopeLevels,
+        selectedScopeCategory: selectedScopeLevel?.category,
+        selectedScopePattern: selectedScopeLevel?.pattern,
+        onSelectScopeLevel: (level: AlwaysScopeLevel) => {
+          setSelectedPermissionScopeLevels((previous) => ({
+            ...previous,
+            [requestId]: level,
+          }));
+        },
+      };
+    },
+    [
+      handleInlinePermissionDecision,
+      inlinePermissionErrors,
+      inlinePermissionPendingDecision,
+      pendingPermissionsById,
+      selectedPermissionScopeLevels,
+    ],
   );
 
   // ─── 派生 props ─────────────────────────────────────────────────────
@@ -690,6 +999,9 @@ export function TeamConversationView({
    */
   const buildEntryActions = useCallback(
     (message: ChatMessage): ChatRenderAction[] => {
+      if (readOnly) {
+        return [];
+      }
       const actions: ChatRenderAction[] = [
         {
           id: 'copy',
@@ -740,13 +1052,14 @@ export function TeamConversationView({
       }
       return actions;
     },
-    [composerEnabled, findRetrySource],
+    [composerEnabled, findRetrySource, readOnly],
   );
 
   const groupedMessageEntries = useMemo<ChatRenderGroup[]>(() => {
     return buildTeamGroupedMessageEntries({
       messages: state.messages,
       roleLayer: state.roleLayer,
+      resolveInlinePermissionActions,
       visibleStreaming: state.visibleStreaming,
       streamBuffer: state.streamBuffer,
       streamingSegments: state.streamingSegments,
@@ -755,6 +1068,7 @@ export function TeamConversationView({
   }, [
     state.messages,
     state.roleLayer,
+    resolveInlinePermissionActions,
     state.visibleStreaming,
     state.streamBuffer,
     state.streamingSegments,
@@ -769,6 +1083,24 @@ export function TeamConversationView({
     }
     return map;
   }, [state.providers]);
+
+  const activeProvider = useMemo(
+    () => state.providers.find((provider) => provider.id === state.activeProviderId),
+    [state.activeProviderId, state.providers],
+  );
+  const activeModelOption = useMemo(
+    () => activeProvider?.defaultModels.find((model) => model.id === state.activeModelId),
+    [activeProvider, state.activeModelId],
+  );
+  const activeModelCanConfigureThinking = canConfigureThinkingForModel(
+    activeProvider?.type,
+    activeModelOption?.id ?? state.activeModelId,
+  );
+  const activeModelTooltip = activeModelOption?.label
+    ? `当前使用模型：${activeProvider?.name ? `${activeProvider.name} / ` : ''}${activeModelOption.label}`
+    : activeProvider?.name
+      ? `当前使用提供商：${activeProvider.name}`
+      : '当前使用模型';
 
   // Latest finalized assistant message id —— 驱动 CollapsibleAssistantContent
   // 的"最新一条不折叠"行为。
@@ -794,177 +1126,347 @@ export function TeamConversationView({
   // working "stop" button.
   const canStopCurrentSessionStream = composerEnabled && state.streaming;
 
+  useEffect(() => {
+    setSelectedLayer(focusedLayer);
+  }, [focusedLayer, sessionId]);
+
+  const multiLayerMessages = useMemo<LayerMessages[]>(() => {
+    // 按角色实例（session）独立分组，不再把同层多个角色实例的消息合并。
+    // 每个角色实例（如"前端开发者"、"后端开发者"）各自成为一个 LayerMessages 条目，
+    // 用户可以在群聊汇总面板中分别看到每个角色的完整对话。
+    const entries: LayerMessages[] = [];
+
+    // 当前 session 自身作为一个条目
+    const currentLayer = state.roleLayer?.trim() || 'reception';
+
+    // 当主对话处于流式状态时，构建一条流式占位消息注入汇总面板，
+    // 让用户在群聊汇总中也能实时看到"正在输入"的流式回复。
+    let streamingMessage: ChatMessage | null = null;
+    if (state.visibleStreaming) {
+      streamingMessage = {
+        id: 'team-layer-streaming-assistant',
+        role: 'assistant',
+        content:
+          state.streamBuffer.trim().length > 0
+            ? state.streamBuffer
+            : '团队正在处理中…',
+        ...(state.streamingSegments.length > 0
+          ? { parts: state.streamingSegments }
+          : {}),
+        ...(state.roleLayer ? { agentId: state.roleLayer } : {}),
+        createdAt: Date.now(),
+        status: 'streaming',
+      };
+    }
+
+    entries.push({
+      layer: currentLayer,
+      messages: [...state.messages],
+      sessionIds: [sessionId],
+      isActive: true,
+      displayName: null,
+      streamingMessage,
+    });
+
+    // soloMode 下不包含子 session，只展示当前角色自身的消息
+    if (!soloMode && Array.isArray(state.childSessions)) {
+      for (const child of state.childSessions) {
+        const childLayer = child.role_layer?.trim() || 'reception';
+        entries.push({
+          layer: childLayer,
+          messages: [...child.messages],
+          sessionIds: [child.id],
+          isActive: false,
+          displayName: child.displayName ?? null,
+        });
+      }
+    }
+
+    return entries;
+  }, [
+    sessionId,
+    soloMode,
+    state.childSessions,
+    state.messages,
+    state.roleLayer,
+    state.visibleStreaming,
+    state.streamBuffer,
+    state.streamingSegments,
+  ]);
+
+  /** 是否有任何消息（包括当前层级自身）—— 有消息就自动展开左侧群聊汇总面板。 */
+  const hasAnyMessages = useMemo(
+    () => multiLayerMessages.some((layer) => layer.messages.length > 0),
+    [multiLayerMessages],
+  );
+  const defaultDetailLayer = useMemo(
+    () =>
+      multiLayerMessages.find((layer) => !layer.isActive && layer.messages.length > 0)?.layer ??
+      null,
+    [multiLayerMessages],
+  );
+
+  useEffect(() => {
+    if (readOnly || hasAutoOpenedMultiLayerRef.current || compact || viewMode !== 'single') return;
+    // 有任何层级消息就自动展开左侧群聊汇总面板（不再要求必须有其它层级消息）
+    if (!hasAnyMessages) return;
+    if (isNarrowLayout) return;
+    hasAutoOpenedMultiLayerRef.current = true;
+    setSelectedLayer((previous) => previous ?? defaultDetailLayer);
+    setViewMode('dual');
+  }, [compact, defaultDetailLayer, hasAnyMessages, isNarrowLayout, readOnly, viewMode]);
+
+  useEffect(() => {
+    const updateNarrowLayout = () => setIsNarrowLayout(window.innerWidth < 900);
+    updateNarrowLayout();
+    window.addEventListener('resize', updateNarrowLayout);
+    return () => window.removeEventListener('resize', updateNarrowLayout);
+  }, []);
+
+  useEffect(() => {
+    if (isNarrowLayout && viewMode === 'dual') {
+      setViewMode('single');
+    }
+  }, [isNarrowLayout, viewMode]);
+
+  useEffect(() => {
+    if (readOnly || compact || isNarrowLayout || !focusedLayer || viewMode !== 'single') {
+      return;
+    }
+    if (!multiLayerMessages.some((layer) => layer.layer === focusedLayer)) {
+      return;
+    }
+    setViewMode('dual');
+  }, [compact, focusedLayer, isNarrowLayout, multiLayerMessages, readOnly, viewMode]);
+
+  const handlePanelLayerSelect = useCallback((layer: string) => {
+    setSelectedLayer(layer);
+  }, []);
+
+  const DUAL_LAYOUT_STYLE: CSSProperties = {
+    display: 'flex',
+    flex: 1,
+    minHeight: 0,
+    overflow: 'hidden',
+  };
+
+  // 左侧：群聊式多层级消息汇总面板（dual 模式下占 40%）
+  const SIDE_PANEL_STYLE: CSSProperties = {
+    flex: viewMode === 'dual' ? '0 0 40%' : '0 0 0%',
+    minWidth: 0,
+    minHeight: 0,
+    display: viewMode === 'dual' ? 'flex' : 'none',
+    flexDirection: 'column',
+    transition: 'flex 200ms ease',
+    position: 'relative',
+    overflow: 'hidden',
+  };
+
+  // 右侧：用户与接待的主对话区（dual 模式下占 60%，single 模式下占 100%）
+  const MAIN_PANEL_STYLE: CSSProperties = {
+    flex: viewMode === 'dual' ? '1 1 60%' : '1 1 100%',
+    minWidth: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    transition: 'flex 200ms ease',
+  };
+
   return (
     <>
-      {state.roleLayer === 'reception' ? (
+      {state.roleLayer === 'reception' && !readOnly ? (
         <TeamInitModal sessionId={sessionId} sessionMetadata={state.sessionMetadata} />
       ) : null}
-      <PromptTemplatePanel
-        isOpen={showTemplatePanel}
-        onClose={() => setShowTemplatePanel(false)}
-        onInsert={(content) => {
-          state.setInput((prev) => (prev.trim() ? `${prev.trimEnd()}\n${content}` : content));
-          requestAnimationFrame(() => state.textareaRef.current?.focus());
-        }}
-      />
-      <LatestAssistantMessageContext value={latestAssistantMessageId}>
-        <TeamConversationLayout
-          sessionId={sessionId}
-          sessionSource="team"
-          currentUserEmail={currentUserEmail}
-          gatewayUrl={gatewayUrl}
-          token={token}
-          topBar={effectiveTopBar}
-          beforeMessages={
-            <>
-              {/* 优化：reception 层的主对话不显示 TeamSessionHeader（用户已经在看
+      {readOnly ? null : (
+        <PromptTemplatePanel
+          isOpen={showTemplatePanel}
+          onClose={() => setShowTemplatePanel(false)}
+          onInsert={(content) => {
+            state.setInput((prev) => (prev.trim() ? `${prev.trimEnd()}\n${content}` : content));
+            requestAnimationFrame(() => state.textareaRef.current?.focus());
+          }}
+        />
+      )}
+      <div style={soloMode ? { display: 'flex', flex: 1, minHeight: 0 } : DUAL_LAYOUT_STYLE}>
+        {/* 左侧：所有层级的对话消息汇总（群聊式，层级标识清晰不混合） */}
+        {/* soloMode 下不显示群聊面板，只展示当前角色自身的对话 */}
+        {soloMode ? null : (
+          <div aria-label="团队层级消息汇总" style={SIDE_PANEL_STYLE}>
+            <TeamLayerChatPanel
+              activeLayer={state.roleLayer}
+              currentSessionId={sessionId}
+              layers={multiLayerMessages}
+              onOpenLayerSession={onOpenLayerSession ? handleOpenLayerSession : undefined}
+              onLayerSelect={handlePanelLayerSelect}
+            />
+        </div>
+        )}
+        {/* 右侧：用户与接待的对话 */}
+        <div style={soloMode ? { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' } : MAIN_PANEL_STYLE}>
+          <LatestAssistantMessageContext value={latestAssistantMessageId}>
+            <TeamConversationLayout
+              sessionId={sessionId}
+              sessionSource="team"
+              currentUserEmail={currentUserEmail}
+              gatewayUrl={gatewayUrl}
+              token={token}
+              topBar={effectiveTopBar}
+              beforeMessages={
+                <>
+                  {/* 优化：reception 层的主对话不显示 TeamSessionHeader（用户已经在看
                   对话了，不需要再看"接待层 / idle"这种元数据）。非 reception
                   层（pm1/pm2/executor/reviewer）保留 header 以便用户知道当前看
-                  的是哪个子 session。 */}
-              {state.roleLayer && state.roleLayer !== 'reception' ? (
-                <TeamSessionHeader
-                  roleLayer={state.roleLayer}
-                  substate={state.substate}
-                  stateStatus={state.sessionStateStatus}
-                  sessionMetadata={state.sessionMetadata}
-                />
-              ) : null}
-              {beforeMessages}
-            </>
-          }
-          afterMessagesInline={
-            <>
-              <TeamRoleTypingIndicator
-                roleLayer={state.roleLayer}
-                visible={
-                  (state.streaming && !state.visibleStreaming) ||
-                  (!state.visibleStreaming && state.remoteSessionBusyState === 'running')
-                }
-              />
-              {/* 推送条（团队反馈）等尾随内容也走 inline，紧贴对话流末尾，
+                  的是哪个子 session。readOnly 模式下全部禁用。 */}
+                  {state.roleLayer && state.roleLayer !== 'reception' && !readOnly ? (
+                    <TeamSessionHeader
+                      roleLayer={state.roleLayer}
+                      substate={state.substate}
+                      stateStatus={state.sessionStateStatus}
+                      sessionMetadata={state.sessionMetadata}
+                    />
+                  ) : null}
+                  {state.runEvents.length > 0 && !readOnly ? (
+                    <TeamRunEventsPreview runEvents={state.runEvents} />
+                  ) : null}
+                  {beforeMessages}
+                </>
+              }
+              afterMessagesInline={
+                <>
+                  <TeamRoleTypingIndicator
+                    roleLayer={state.roleLayer}
+                    visible={
+                      (state.streaming && !state.visibleStreaming) ||
+                      (!state.visibleStreaming && state.remoteSessionBusyState === 'running')
+                    }
+                  />
+                  {/* 推送条（团队反馈）等尾随内容也走 inline，紧贴对话流末尾，
                   消息很少时不会孤零零悬浮在输入框上方与对话脱节。 */}
-              {afterMessages}
-            </>
-          }
-          rightFloatingSlot={
-            <TeamUserJumpRail
+                  {afterMessages}
+                </>
+              }
+              rightFloatingSlot={
+                readOnly ? null : (
+                  <TeamUserJumpRail
+                    scrollRegionRef={state.scrollRegionRef}
+                    userCount={userMessageCount}
+                    onPrev={handleScrollToPrevUser}
+                    onNext={handleScrollToNextUser}
+                  />
+                )
+              }
+              anchorConversationToBottom
+              composerDisabled={!composerEnabled}
+              composerDisabledHint={composerDisabledHint}
+              composerExtras={{
+                // chat-only image / skill / yolo / dialogueMode 仍然关闭——这些功能
+                // 依赖 chat 专属管线（ChatPage 的 image-generation hook、skill
+                // drawer 等）。
+                imageGeneration: false,
+                skillRecommendation: false,
+                yoloMode: false,
+                dialogueModeToggle: false,
+                // v1.5：放开这些通用对话能力，与 chat 体验对齐。
+                multiSelect: true,
+                bookmarks: true,
+                promptTemplate: true,
+                commandPalette: true,
+                agentSwitch: true,
+              }}
+              composerWorkspaceCatalog={composerWorkspaceCatalog}
+              messages={state.messages}
+              groupedMessageEntries={groupedMessageEntries}
+              visibleMessageCount={state.messages.length}
+              hiddenMessageCount={state.hiddenMessageCount}
+              visibleStreaming={state.visibleStreaming}
+              showSessionSwitchSkeleton={state.isSessionLoading}
+              remoteSessionBusyState={state.remoteSessionBusyState}
+              pendingPermissions={state.pendingPermissions}
+              resolveInlinePermissionActions={resolveInlinePermissionActions}
+              providerCatalog={providerCatalog}
+              activeProviderId={state.activeProviderId}
+              activeModelId={state.activeModelId}
+              activeProvider={activeProvider}
+              activeModelOption={activeModelOption}
+              activeModelCanConfigureThinking={activeModelCanConfigureThinking}
+              activeModelTooltip={activeModelTooltip}
+              onLoadEarlier={() => {
+                void state.loadEarlierMessages();
+              }}
+              emptyContent={
+                <TeamSessionEmptyState
+                  roleLayer={state.roleLayer}
+                  stateStatus={state.sessionStateStatus}
+                  isLoading={state.isSessionLoading}
+                  sessionMetadata={state.sessionMetadata}
+                  onSelectStarter={handleSelectStarter}
+                />
+              }
+              streaming={state.streaming}
+              stoppingStream={state.stoppingStream}
+              streamError={state.streamError ?? state.snapshotError ?? state.providersError}
+              onDismissStreamError={() => {
+                state.setStreamError(null);
+                state.setSnapshotError(null);
+                state.setProvidersError(null);
+              }}
+              checkpointCount={0}
+              pendingQuestionsCount={state.pendingQuestions.length}
+              stopCapability={canStopCurrentSessionStream ? 'best_effort' : 'none'}
               scrollRegionRef={state.scrollRegionRef}
-              userCount={userMessageCount}
-              onPrev={handleScrollToPrevUser}
-              onNext={handleScrollToNextUser}
+              contentColumnRef={state.contentColumnRef}
+              bottomRef={state.bottomRef}
+              onScroll={state.onScroll}
+              showScrollToBottom={state.showScrollToBottom}
+              hasPendingFollowContent={state.hasPendingFollowContent}
+              onScrollToBottom={(behavior, target) =>
+                state.scrollToBottom(behavior, target === 'center' ? 'center' : 'latest-edge')
+              }
+              editorMode={false}
+              compact={compact}
+              sessionTodos={state.sessionTodos}
+              rightOpen={false}
+              activePendingQuestion={activePendingQuestion}
+              inlineQuestionAnswers={inlineQuestionAnswers}
+              inlineQuestionCustomInputs={inlineQuestionCustomInputs}
+              inlineQuestionReplyStatus={inlineQuestionReplyStatus}
+              inlineQuestionReplyError={inlineQuestionReplyError}
+              onToggleInlineQuestionOption={onToggleInlineQuestionOption}
+              onChangeInlineQuestionCustomInput={onChangeInlineQuestionCustomInput}
+              onReplyInlineQuestion={onReplyInlineQuestion}
+              historyEditPrompt={historyEditPrompt}
+              onCloseHistoryEdit={() => setHistoryEditPrompt(null)}
+              onResendHistoryEdit={handleResendHistoryEdit}
+              onContinueHistoryEdit={handleContinueHistoryEdit}
+              retryPrompt={retryPrompt}
+              onCloseRetry={() => setRetryPrompt(null)}
+              onRetryCurrent={handleRetryCurrent}
+              chatSearch={chatSearch}
+              composerVariant="session"
+              providers={state.providers}
+              canStopCurrentSessionStream={canStopCurrentSessionStream}
+              dialogueMode="coding"
+              manualAgentId=""
+              yoloMode={false}
+              webSearchEnabled={false}
+              thinkingEnabled={state.thinkingEnabled}
+              reasoningEffort={state.reasoningEffort}
+              selectedImageEditReferenceArtifactId={null}
+              input={state.input}
+              setInput={state.setInput}
+              textareaRef={state.textareaRef}
+              onComposerSubmit={composerEnabled ? handleComposerSubmit : disabledComposerAsyncAction}
+              onStopComposer={composerEnabled ? handleStopStream : disabledComposerAsyncAction}
+              onComposerModelSelect={handleComposerModelSelect}
+              onToggleWebSearch={disabledComposerAction}
+              onThinkingEnabledChange={state.setThinkingEnabled}
+              onReasoningEffortChange={state.setReasoningEffort}
+              onManualAgentChange={disabledComposerAction}
+              onClearManualAgentId={disabledComposerAction}
+              composerPlaceholder={effectivePlaceholder}
             />
-          }
-          anchorConversationToBottom
-          composerDisabled={!composerEnabled}
-          composerDisabledHint={composerDisabledHint}
-          composerExtras={{
-            // chat-only image / skill / yolo / dialogueMode 仍然关闭——这些功能
-            // 依赖 chat 专属管线（ChatPage 的 image-generation hook、skill
-            // drawer 等）。
-            imageGeneration: false,
-            skillRecommendation: false,
-            yoloMode: false,
-            dialogueModeToggle: false,
-            // v1.5：放开这些通用对话能力，与 chat 体验对齐。
-            multiSelect: true,
-            bookmarks: true,
-            promptTemplate: true,
-            commandPalette: true,
-            agentSwitch: true,
-          }}
-          composerWorkspaceCatalog={composerWorkspaceCatalog}
-          messages={state.messages}
-          groupedMessageEntries={groupedMessageEntries}
-          visibleMessageCount={state.messages.length}
-          hiddenMessageCount={state.hiddenMessageCount}
-          visibleStreaming={state.visibleStreaming}
-          showSessionSwitchSkeleton={state.isSessionLoading}
-          remoteSessionBusyState={state.remoteSessionBusyState}
-          pendingPermissions={state.pendingPermissions}
-          providerCatalog={providerCatalog}
-          activeProviderId={state.activeProviderId}
-          activeModelId={state.activeModelId}
-          onLoadEarlier={() => {
-            void state.loadEarlierMessages();
-          }}
-          emptyContent={
-            <TeamSessionEmptyState
-              roleLayer={state.roleLayer}
-              stateStatus={state.sessionStateStatus}
-              isLoading={state.isSessionLoading}
-              sessionMetadata={state.sessionMetadata}
-              onSelectStarter={handleSelectStarter}
-            />
-          }
-          streaming={state.streaming}
-          stoppingStream={state.stoppingStream}
-          streamError={state.streamError ?? state.snapshotError ?? state.providersError}
-          onDismissStreamError={() => {
-            state.setStreamError(null);
-            state.setSnapshotError(null);
-            state.setProvidersError(null);
-          }}
-          checkpointCount={0}
-          pendingQuestionsCount={state.pendingQuestions.length}
-          stopCapability={canStopCurrentSessionStream ? 'best_effort' : 'none'}
-          scrollRegionRef={state.scrollRegionRef}
-          contentColumnRef={state.contentColumnRef}
-          bottomRef={state.bottomRef}
-          onScroll={state.onScroll}
-          showScrollToBottom={state.showScrollToBottom}
-          hasPendingFollowContent={state.hasPendingFollowContent}
-          onScrollToBottom={(behavior, target) =>
-            state.scrollToBottom(behavior, target === 'center' ? 'center' : 'latest-edge')
-          }
-          editorMode={false}
-          compact={compact}
-          sessionTodos={state.sessionTodos}
-          rightOpen={false}
-          activePendingQuestion={activePendingQuestion}
-          inlineQuestionAnswers={inlineQuestionAnswers}
-          inlineQuestionCustomInputs={inlineQuestionCustomInputs}
-          inlineQuestionReplyStatus={inlineQuestionReplyStatus}
-          inlineQuestionReplyError={inlineQuestionReplyError}
-          onToggleInlineQuestionOption={onToggleInlineQuestionOption}
-          onChangeInlineQuestionCustomInput={onChangeInlineQuestionCustomInput}
-          onReplyInlineQuestion={onReplyInlineQuestion}
-          historyEditPrompt={historyEditPrompt}
-          onCloseHistoryEdit={() => setHistoryEditPrompt(null)}
-          onResendHistoryEdit={handleResendHistoryEdit}
-          onContinueHistoryEdit={handleContinueHistoryEdit}
-          retryPrompt={retryPrompt}
-          onCloseRetry={() => setRetryPrompt(null)}
-          onRetryCurrent={handleRetryCurrent}
-          chatSearch={chatSearch}
-          composerVariant="session"
-          providers={state.providers}
-          canStopCurrentSessionStream={canStopCurrentSessionStream}
-          /* chat-only 偏好已从 useTeamConversationState 中删除。这里硬编码
-             默认值喂给 layout，避免 layout 内部的 props 形状变化（layout 是
-             ChatConversationView 的副本，仍然要求这些字段存在）。team 端
-             不会真正用到它们：composerExtras.dialogueModeToggle/yoloMode 都
-             置 false，所以即使 layout 渲染相关控件也是 disabled 状态。 */
-          dialogueMode="coding"
-          manualAgentId=""
-          yoloMode={false}
-          webSearchEnabled={false}
-          thinkingEnabled={false}
-          reasoningEffort="medium"
-          selectedImageEditReferenceArtifactId={null}
-          input={state.input}
-          setInput={state.setInput}
-          textareaRef={state.textareaRef}
-          onComposerSubmit={composerEnabled ? handleComposerSubmit : noopAsync}
-          onStopComposer={composerEnabled ? handleStopStream : noopAsync}
-          onComposerModelSelect={handleComposerModelSelect}
-          onToggleWebSearch={noopVoid}
-          onThinkingEnabledChange={noopVoid}
-          onReasoningEffortChange={noopVoid}
-          onManualAgentChange={noopVoid}
-          onClearManualAgentId={noopVoid}
-          composerPlaceholder={effectivePlaceholder}
-        />
-      </LatestAssistantMessageContext>
+          </LatestAssistantMessageContext>
+        </div>
+      </div>
     </>
   );
 }

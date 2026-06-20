@@ -18,6 +18,7 @@ export interface ToolCallDisplayProps {
   resumedAfterApproval?: boolean;
   kind?: ToolCallCardProps['kind'];
   toolCallId?: string;
+  pendingPermissionRequestId?: string;
 }
 
 export function ToolCallDisplay(props: ToolCallDisplayProps) {
@@ -62,6 +63,7 @@ export function ToolCallDisplay(props: ToolCallDisplayProps) {
     return (
       <InlineToolCall
         approvalActions={props.approvalActions}
+        pendingPermissionRequestId={props.pendingPermissionRequestId}
         kind={props.kind}
         toolName={props.toolName}
         input={props.input}
@@ -75,6 +77,7 @@ export function ToolCallDisplay(props: ToolCallDisplayProps) {
   return (
     <BlockToolCall
       approvalActions={props.approvalActions}
+      pendingPermissionRequestId={props.pendingPermissionRequestId}
       kind={props.kind}
       toolName={props.toolName}
       input={props.input}

@@ -103,6 +103,42 @@ interface RetryableTextRequest {
   userInputImages?: Message['inputImages'];
 }
 
+function inferMimeTypeFromFileName(fileName: string): string | undefined {
+  const lowerName = fileName.toLowerCase();
+  if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) {
+    return 'image/jpeg';
+  }
+  if (lowerName.endsWith('.png')) {
+    return 'image/png';
+  }
+  if (lowerName.endsWith('.webp')) {
+    return 'image/webp';
+  }
+  if (lowerName.endsWith('.gif')) {
+    return 'image/gif';
+  }
+  return undefined;
+}
+
+function resolveAttachmentMimeType(input: { mimeType?: string; name: string }): string | undefined {
+  const mimeType = input.mimeType || inferMimeTypeFromFileName(input.name);
+  return mimeType?.toLowerCase() === 'image/jpg' ? 'image/jpeg' : mimeType;
+}
+
+function inferAttachmentType(input: {
+  mimeType?: string;
+  name: string;
+}): MobileAttachmentItem['type'] {
+  const mimeType = resolveAttachmentMimeType(input);
+  if (mimeType?.startsWith('image/')) {
+    return 'image';
+  }
+  if (mimeType?.startsWith('audio/')) {
+    return 'audio';
+  }
+  return 'file';
+}
+
 export function ChatScreen({ sessionId }: ChatScreenProps) {
   const { accessToken, gatewayUrl } = useAuthStore();
   const { stream, disconnect } = useGatewayClient(gatewayUrl, accessToken);
@@ -331,18 +367,20 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
         setArtifactHistory(
           [...(data.artifacts ?? [])]
             .sort((left, right) => (right.createdAt ?? 0) - (left.createdAt ?? 0))
-            .map((artifact) => ({
-              id: artifact.id,
-              artifactId: artifact.id,
-              name: artifact.name,
-              mimeType: artifact.mimeType,
-              type: artifact.mimeType?.startsWith('image/')
-                ? 'image'
-                : artifact.mimeType?.startsWith('audio/')
-                  ? 'audio'
-                  : 'file',
-              sizeBytes: artifact.sizeBytes ?? 0,
-            })),
+            .map((artifact) => {
+              const mimeType = resolveAttachmentMimeType({
+                mimeType: artifact.mimeType,
+                name: artifact.name,
+              });
+              return {
+                id: artifact.id,
+                artifactId: artifact.id,
+                name: artifact.name,
+                ...(mimeType ? { mimeType } : {}),
+                type: inferAttachmentType({ mimeType, name: artifact.name }),
+                sizeBytes: artifact.sizeBytes ?? 0,
+              };
+            }),
         );
       } catch (error) {
         console.warn('Failed to load mobile artifact history', error);
@@ -363,12 +401,16 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
           const contentBase64 = await FileSystem.readAsStringAsync(attachment.uri, {
             encoding: FileSystem.EncodingType.Base64,
           });
+          const mimeType = resolveAttachmentMimeType({
+            mimeType: attachment.mimeType,
+            name: attachment.name,
+          });
           const data = (await createArtifactsClient(gatewayUrl).uploadToSession(
             accessToken,
             requestSessionId,
             {
               name: attachment.name,
-              mimeType: attachment.mimeType,
+              mimeType,
               sizeBytes: attachment.sizeBytes,
               contentBase64,
             },
@@ -383,9 +425,12 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
             artifactId: data.artifact.id,
             fileName: data.artifact.name,
             localUri: attachment.uri,
-            mimeType: data.artifact.mimeType ?? attachment.mimeType,
+            mimeType: data.artifact.mimeType ?? mimeType,
             preview: data.artifact.preview,
-            type: attachment.type,
+            type: inferAttachmentType({
+              mimeType: data.artifact.mimeType ?? mimeType,
+              name: data.artifact.name,
+            }),
           });
         } catch (error) {
           console.warn('Failed to upload mobile attachment', error);
@@ -762,18 +807,20 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
       if (result.canceled) return;
       setAttachments((prev) => [
         ...prev,
-        ...result.assets.map((asset) => ({
-          id: `att-${asset.uri}-${asset.name}`,
-          name: asset.name,
-          uri: asset.uri,
-          mimeType: asset.mimeType ?? undefined,
-          type: asset.mimeType?.startsWith('image/')
-            ? ('image' as const)
-            : asset.mimeType?.startsWith('audio/')
-              ? ('audio' as const)
-              : ('file' as const),
-          sizeBytes: asset.size ?? 0,
-        })),
+        ...result.assets.map((asset) => {
+          const mimeType = resolveAttachmentMimeType({
+            mimeType: asset.mimeType ?? undefined,
+            name: asset.name,
+          });
+          return {
+            id: `att-${asset.uri}-${asset.name}`,
+            name: asset.name,
+            uri: asset.uri,
+            ...(mimeType ? { mimeType } : {}),
+            type: inferAttachmentType({ mimeType, name: asset.name }),
+            sizeBytes: asset.size ?? 0,
+          };
+        }),
       ]);
     } catch (error) {
       console.warn('Failed to pick mobile attachment', error);

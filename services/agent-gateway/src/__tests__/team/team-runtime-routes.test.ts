@@ -9,7 +9,6 @@ import type * as TeamEventsBusModule from '../../handoff/bus/team-events-bus.js'
 import type * as TeamRuntimeDiagnosticsStoreModule from '../../team/team-runtime-diagnostics-store.js';
 import type * as TeamRuntimeAlertStoreModule from '../../team/team-runtime-alert-store.js';
 import type * as TeamRuntimeTelemetryModule from '../../team/team-runtime-telemetry.js';
-import { SESSION_RUNTIME_THREAD_STALE_AFTER_MS } from '../../session/session-runtime-thread-store.js';
 
 process.env['DATABASE_URL'] = ':memory:';
 process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
@@ -19,6 +18,7 @@ process.env['AI_DEFAULT_MODEL'] = '';
 
 vi.mock('../../provider/auxiliary-llm-config.js', () => ({
   resolveAuxiliaryLlmConfig: async () => null,
+  resolveAuxiliaryLlmConfigCandidates: async () => [],
 }));
 
 let dbModule: typeof DbModule;
@@ -30,6 +30,7 @@ let teamEventsBus: typeof TeamEventsBusModule;
 let diagnosticsStore: typeof TeamRuntimeDiagnosticsStoreModule;
 let alertStore: typeof TeamRuntimeAlertStoreModule;
 let telemetryModule: typeof TeamRuntimeTelemetryModule;
+let sessionRuntimeThreadStaleAfterMs: number;
 
 const USER_ID = 'u-team-runtime';
 const SESSION_ACTIVE_ID = 's-team-runtime-active';
@@ -80,17 +81,19 @@ function seedTeamMessage(
     content: string;
     recipientMemberId?: string | null;
     replyToMessageId?: string | null;
+    sessionId?: string | null;
     senderId?: string | null;
     type: string;
   },
 ): void {
   dbModule.sqliteRun(
     `INSERT INTO team_messages
-      (id, user_id, sender_id, recipient_member_id, reply_to_message_id, content, type)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      (id, user_id, session_id, sender_id, recipient_member_id, reply_to_message_id, content, type)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       messageId,
       userId,
+      input.sessionId ?? null,
       input.senderId ?? null,
       input.recipientMemberId ?? null,
       input.replyToMessageId ?? null,
@@ -102,7 +105,11 @@ function seedTeamMessage(
 
 beforeAll(async () => {
   dbModule = await import('../../infra/db.js');
+  await dbModule.connectDb();
   await dbModule.migrate();
+  const sessionRuntimeThreadStore = await import('../../session/session-runtime-thread-store.js');
+  sessionRuntimeThreadStaleAfterMs =
+    sessionRuntimeThreadStore.SESSION_RUNTIME_THREAD_STALE_AFTER_MS;
   const auth = await import('../../infra/auth.js');
   authPlugin = auth.default;
   const requestWorkflow = await import('../../runtime/request-workflow.js');
@@ -148,7 +155,18 @@ describe('GET /team/runtime', () => {
     dbModule.sqliteRun(`UPDATE sessions SET role_layer = 'reception' WHERE id = ?`, [
       SESSION_ACTIVE_ID,
     ]);
-    dbModule.sqliteRun(`UPDATE sessions SET role_layer = 'pm1' WHERE id = ?`, [SESSION_STALE_ID]);
+    dbModule.sqliteRun(`UPDATE sessions SET role_layer = 'pm1', metadata_json = ? WHERE id = ?`, [
+      JSON.stringify({
+        teamWorkspaceId: TEAM_WORKSPACE_ID,
+        teamRoleInstance: {
+          rootSessionId: SESSION_ACTIVE_ID,
+          roleLayer: 'pm1',
+          personaKey: 'pm1:default',
+          displayName: '规划负责人',
+        },
+      }),
+      SESSION_STALE_ID,
+    ]);
 
     const handoff = store.createHandoff({
       userId: USER_ID,
@@ -186,6 +204,12 @@ describe('GET /team/runtime', () => {
         sessions?: Array<{
           id: string;
           parentSessionId: string | null;
+          roleInstance?: {
+            rootSessionId: string;
+            roleLayer: string;
+            personaKey: string | null;
+            displayName: string | null;
+          };
           roleLayer: string | null;
         }>;
       };
@@ -215,10 +239,152 @@ describe('GET /team/runtime', () => {
           expect.objectContaining({
             id: SESSION_STALE_ID,
             parentSessionId: null,
+            roleInstance: {
+              rootSessionId: SESSION_ACTIVE_ID,
+              roleLayer: 'pm1',
+              personaKey: 'pm1:default',
+              displayName: '规划负责人',
+            },
             roleLayer: 'pm1',
           }),
         ]),
       );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('从 PM2 派发 handoff 投影 runtime task，不依赖人工任务表或 session todo', async () => {
+    const store = await import('../../handoff/store/handoff-store.js');
+    dbModule.sqliteRun(`UPDATE sessions SET role_layer = 'pm2' WHERE id = ?`, [SESSION_ACTIVE_ID]);
+    dbModule.sqliteRun(
+      `UPDATE sessions
+          SET role_layer = 'executor',
+              team_parent_session_id = ?
+        WHERE id = ?`,
+      [SESSION_ACTIVE_ID, SESSION_STALE_ID],
+    );
+
+    const handoff = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: SESSION_ACTIVE_ID,
+      fromRoleLayer: 'pm2',
+      toRoleLayer: 'executor',
+      payload: {
+        goal: '实现 /api/chat-widget/init 端点',
+        role: 'executor',
+        taskMarkers: {
+          taskId: 'T007',
+          priority: 'high',
+        },
+        assignedMember: {
+          id: 'executor-backend',
+          displayName: '后端开发者',
+          specialty: 'backend',
+        },
+        dependsOn: ['T003'],
+      },
+    });
+    store.claimHandoff({ handoffId: handoff.id, claimToken: 'tok-dispatch-task' });
+    store.startHandoff({
+      handoffId: handoff.id,
+      claimToken: 'tok-dispatch-task',
+      toSessionId: SESSION_STALE_ID,
+    });
+    store.failHandoff({
+      handoffId: handoff.id,
+      claimToken: 'tok-dispatch-task',
+      reason: 'executor 层执行失败：模型服务内部错误，请稍后重试',
+    });
+    const duplicateMarkerHandoff = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: SESSION_ACTIVE_ID,
+      fromRoleLayer: 'pm2',
+      toRoleLayer: 'executor',
+      payload: {
+        goal: '实现 /api/chat-widget/status 端点',
+        role: 'executor',
+        taskMarkers: {
+          taskId: 'T007',
+          priority: 'medium',
+        },
+        assignedMember: {
+          id: 'executor-backend',
+          displayName: '后端开发者',
+          specialty: 'backend',
+        },
+      },
+    });
+    store.claimHandoff({
+      handoffId: duplicateMarkerHandoff.id,
+      claimToken: 'tok-dispatch-task-duplicate',
+    });
+    store.startHandoff({
+      handoffId: duplicateMarkerHandoff.id,
+      claimToken: 'tok-dispatch-task-duplicate',
+      toSessionId: SESSION_STALE_ID,
+    });
+
+    expect(
+      dbModule.sqliteGet<{ count: number }>('SELECT COUNT(*) AS count FROM team_tasks', []),
+    ).toMatchObject({ count: 0 });
+    expect(
+      dbModule.sqliteGet<{ count: number }>('SELECT COUNT(*) AS count FROM session_todos', []),
+    ).toMatchObject({ count: 0 });
+
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/team/runtime',
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const data = res.json() as {
+        runtimeTaskGroups?: Array<{
+          sessionIds: string[];
+          tasks: Array<{
+            blockedBy: string[];
+            assignedAgent?: string;
+            errorMessage?: string;
+            id: string;
+            priority: string;
+            sessionId?: string;
+            status: string;
+            tags: string[];
+            taskThreadId?: string;
+            title: string;
+          }>;
+        }>;
+      };
+      const projectedTasks = (data.runtimeTaskGroups ?? []).flatMap((group) => group.tasks);
+
+      expect(projectedTasks).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            blockedBy: [`handoff:${SESSION_ACTIVE_ID}:T003`],
+            assignedAgent: '后端开发者',
+            errorMessage: 'executor 层执行失败：模型服务内部错误，请稍后重试',
+            id: `handoff:${handoff.id}:T007`,
+            priority: 'high',
+            sessionId: SESSION_STALE_ID,
+            status: 'failed',
+            tags: expect.arrayContaining(['T007', 'executor', 'backend']),
+            taskThreadId: `handoff:${handoff.id}`,
+            title: '实现 /api/chat-widget/init 端点',
+          }),
+          expect.objectContaining({
+            id: `handoff:${duplicateMarkerHandoff.id}:T007`,
+            priority: 'medium',
+            sessionId: SESSION_STALE_ID,
+            status: 'running',
+            taskThreadId: `handoff:${duplicateMarkerHandoff.id}`,
+            title: '实现 /api/chat-widget/status 端点',
+          }),
+        ]),
+      );
+      expect(projectedTasks.filter((task) => task.tags.includes('T007'))).toHaveLength(2);
     } finally {
       await app.close();
     }
@@ -309,14 +475,17 @@ describe('GET /team/runtime', () => {
   });
 
   it('返回 messages 快照，并保留定向跟进字段供前端恢复上下文', async () => {
+    seedTeamSession(SESSION_ACTIVE_ID, USER_ID);
     seedTeamMember('member-pm1', USER_ID, 'PM1', 'pm1@example.com');
     seedTeamMember('member-executor', USER_ID, '执行代理', 'executor@example.com');
     seedTeamMessage('msg-parent', USER_ID, {
+      sessionId: SESSION_ACTIVE_ID,
       senderId: 'member-pm1',
       content: '同步设计稿调整',
       type: 'update',
     });
     seedTeamMessage('msg-followup', USER_ID, {
+      sessionId: SESSION_ACTIVE_ID,
       senderId: 'member-executor',
       recipientMemberId: 'member-pm1',
       replyToMessageId: 'msg-parent',
@@ -340,6 +509,7 @@ describe('GET /team/runtime', () => {
           memberId: string;
           recipientMemberId?: string | null;
           replyToMessageId?: string | null;
+          sessionId?: string | null;
           type: string;
         }>;
       };
@@ -349,12 +519,14 @@ describe('GET /team/runtime', () => {
           expect.objectContaining({
             id: 'msg-parent',
             memberId: 'member-pm1',
+            sessionId: SESSION_ACTIVE_ID,
             content: '同步设计稿调整',
             type: 'update',
           }),
           expect.objectContaining({
             id: 'msg-followup',
             memberId: 'member-executor',
+            sessionId: SESSION_ACTIVE_ID,
             recipientMemberId: 'member-pm1',
             replyToMessageId: 'msg-parent',
             content: '接口联调已完成',
@@ -631,6 +803,199 @@ describe('GET /team/runtime', () => {
     }
   });
 
+  it('runtime incident 缺少 sessionId 时会从 reception/from/to 等上下文补 session 归属', () => {
+    diagnosticsStore.recordTeamRuntimeIncident({
+      category: 'handoff_failure',
+      code: 'reception-awaiting-downstream-deadlock',
+      context: {
+        receptionSessionId: SESSION_ACTIVE_ID,
+        totalHandoffs: 3,
+      },
+      message: 'reception 停在 awaiting_downstream 但下游链已全部终止',
+      severity: 'warning',
+      timestamp: Date.now(),
+      userId: USER_ID,
+    });
+
+    const auditRow = dbModule.sqliteGet<{ session_id: string | null }>(
+      `SELECT session_id
+         FROM team_audit_logs
+        WHERE user_id = ? AND action = 'runtime_incident'
+        ORDER BY id DESC
+        LIMIT 1`,
+      [USER_ID],
+    );
+    expect(auditRow?.session_id).toBe(SESSION_ACTIVE_ID);
+  });
+
+  it('进程内 incident 清空后，/team/runtime 仍可从 audit 恢复 runtime incidents', async () => {
+    diagnosticsStore.recordTeamRuntimeIncident({
+      category: 'handoff_failure',
+      code: 'handoff-runner-failed',
+      context: {
+        handoffId: 'handoff-persisted-1',
+        sessionId: SESSION_ACTIVE_ID,
+      },
+      message: 'executor 层执行失败：持久化回放',
+      severity: 'error',
+      timestamp: Date.now(),
+      userId: USER_ID,
+    });
+
+    diagnosticsStore.__resetTeamRuntimeDiagnosticsForTesting();
+
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/team/runtime',
+        headers: { authorization: bearer(app) },
+      });
+      expect(res.statusCode).toBe(200);
+      const data = res.json() as {
+        diagnostics?: {
+          incidentSummary: {
+            handoff_failure: number;
+          };
+          incidents: Array<{
+            category: string;
+            code: string;
+            message: string;
+          }>;
+        };
+      };
+
+      expect(data.diagnostics?.incidentSummary.handoff_failure).toBe(1);
+      expect(data.diagnostics?.incidents[0]).toMatchObject({
+        category: 'handoff_failure',
+        code: 'handoff-runner-failed',
+        message: 'executor 层执行失败：持久化回放',
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('内存 incident 与 audit 持久化 incident 会合并展示，不因新事件遮掉旧记录', async () => {
+    diagnosticsStore.recordTeamRuntimeIncident({
+      category: 'handoff_failure',
+      code: 'handoff-runner-failed',
+      context: {
+        handoffId: 'handoff-persisted-2',
+        sessionId: SESSION_ACTIVE_ID,
+      },
+      message: 'pm2 层失败：旧持久化记录',
+      severity: 'error',
+      timestamp: Date.now() - 10_000,
+      userId: USER_ID,
+    });
+
+    diagnosticsStore.__resetTeamRuntimeDiagnosticsForTesting();
+
+    diagnosticsStore.recordTeamRuntimeIncident({
+      category: 'team_events_connection',
+      code: 'team-events:IDLE_TIMEOUT',
+      context: {
+        closeCode: 1001,
+      },
+      message: 'TEAM_EVENTS_IDLE_TIMEOUT',
+      severity: 'warning',
+      timestamp: Date.now(),
+      userId: USER_ID,
+    });
+
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/team/runtime',
+        headers: { authorization: bearer(app) },
+      });
+      expect(res.statusCode).toBe(200);
+      const data = res.json() as {
+        diagnostics?: {
+          incidentSummary: {
+            handoff_failure: number;
+            team_events_connection: number;
+          };
+          incidents: Array<{
+            code: string;
+            message: string;
+          }>;
+        };
+      };
+
+      expect(data.diagnostics?.incidentSummary.handoff_failure).toBe(1);
+      expect(data.diagnostics?.incidentSummary.team_events_connection).toBe(1);
+      expect(data.diagnostics?.incidents.map((incident) => incident.code)).toEqual(
+        expect.arrayContaining(['handoff-runner-failed', 'team-events:IDLE_TIMEOUT']),
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('带 sessionId 查询时，diagnostics incidents 只返回当前会话子树内的异常', async () => {
+    const OUTSIDE_SESSION_ID = 's-team-runtime-outside';
+    dbModule.sqliteRun(
+      `INSERT INTO sessions (id, user_id, title, metadata_json, state_status)
+       VALUES (?, ?, 'outside-session', ?, 'idle')`,
+      [OUTSIDE_SESSION_ID, USER_ID, JSON.stringify({ teamWorkspaceId: 'tw-team-runtime-outside' })],
+    );
+    diagnosticsStore.recordTeamRuntimeIncident({
+      category: 'handoff_failure',
+      code: 'handoff-runner-failed',
+      context: {
+        sessionId: SESSION_ACTIVE_ID,
+      },
+      message: 'active session failure',
+      severity: 'error',
+      timestamp: Date.now(),
+      userId: USER_ID,
+    });
+    diagnosticsStore.recordTeamRuntimeIncident({
+      category: 'team_events_connection',
+      code: 'team-events:IDLE_TIMEOUT',
+      context: {
+        sessionId: OUTSIDE_SESSION_ID,
+      },
+      message: 'other session timeout',
+      severity: 'warning',
+      timestamp: Date.now() + 1,
+      userId: USER_ID,
+    });
+
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/team/runtime?sessionId=${encodeURIComponent(SESSION_ACTIVE_ID)}`,
+        headers: { authorization: bearer(app) },
+      });
+      expect(res.statusCode).toBe(200);
+      const data = res.json() as {
+        diagnostics?: {
+          incidentSummary: {
+            handoff_failure: number;
+            team_events_connection: number;
+          };
+          incidents: Array<{ code: string; message: string }>;
+        };
+      };
+
+      expect(data.diagnostics?.incidentSummary.handoff_failure).toBe(1);
+      expect(data.diagnostics?.incidentSummary.team_events_connection).toBe(0);
+      expect(data.diagnostics?.incidents).toEqual([
+        expect.objectContaining({
+          code: 'handoff-runner-failed',
+          message: 'active session failure',
+        }),
+      ]);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('持续 latency 违规（durationMs 每次不同）在去重窗口内只落一条 audit', () => {
     // 复现写风暴回归：latency_violation 的 durationMs/message 每次采样都不同，
     // 早期签名纳入 context/message 会让 60s 去重永不命中，对 team_audit_logs 形成写风暴。
@@ -709,8 +1074,8 @@ describe('GET /team/runtime', () => {
         SESSION_STALE_ID,
         USER_ID,
         'req-stale',
-        nowMs - SESSION_RUNTIME_THREAD_STALE_AFTER_MS - 30_000,
-        nowMs - SESSION_RUNTIME_THREAD_STALE_AFTER_MS - 1_000,
+        nowMs - sessionRuntimeThreadStaleAfterMs - 30_000,
+        nowMs - sessionRuntimeThreadStaleAfterMs - 1_000,
       ],
     );
     dbModule.sqliteRun(
@@ -1380,8 +1745,8 @@ describe('GET /team/runtime', () => {
         SESSION_STALE_ID,
         USER_ID,
         'req-remediation',
-        nowMs - SESSION_RUNTIME_THREAD_STALE_AFTER_MS - 30_000,
-        nowMs - SESSION_RUNTIME_THREAD_STALE_AFTER_MS - 1_000,
+        nowMs - sessionRuntimeThreadStaleAfterMs - 30_000,
+        nowMs - sessionRuntimeThreadStaleAfterMs - 1_000,
       ],
     );
 
@@ -1456,8 +1821,8 @@ describe('GET /team/runtime', () => {
         SESSION_ACTIVE_ID,
         USER_ID,
         'req-remediation-session-scope',
-        nowMs - SESSION_RUNTIME_THREAD_STALE_AFTER_MS - 30_000,
-        nowMs - SESSION_RUNTIME_THREAD_STALE_AFTER_MS - 1_000,
+        nowMs - sessionRuntimeThreadStaleAfterMs - 30_000,
+        nowMs - sessionRuntimeThreadStaleAfterMs - 1_000,
       ],
     );
 
@@ -1583,8 +1948,8 @@ describe('GET /team/runtime', () => {
         SESSION_STALE_ID,
         USER_ID,
         'req-generic-remediation',
-        nowMs - SESSION_RUNTIME_THREAD_STALE_AFTER_MS - 30_000,
-        nowMs - SESSION_RUNTIME_THREAD_STALE_AFTER_MS - 1_000,
+        nowMs - sessionRuntimeThreadStaleAfterMs - 30_000,
+        nowMs - sessionRuntimeThreadStaleAfterMs - 1_000,
       ],
     );
 

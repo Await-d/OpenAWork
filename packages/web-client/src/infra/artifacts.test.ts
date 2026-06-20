@@ -104,6 +104,37 @@ describe('createArtifactsClient', () => {
     ).rejects.toThrow('网络异常，更新产物失败。');
   });
 
+  it('remove 会发起 DELETE /artifacts/:id 并接受 204', async () => {
+    let calledUrl = '';
+    let calledMethod = '';
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calledUrl = String(input);
+      calledMethod = init?.method ?? 'GET';
+      return {
+        ok: true,
+        status: 204,
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createArtifactsClient('http://localhost:3000');
+
+    await expect(client.remove('token-1', 'artifact-1')).resolves.toBeUndefined();
+    expect(calledUrl).toBe('http://localhost:3000/artifacts/artifact-1');
+    expect(calledMethod).toBe('DELETE');
+  });
+
+  it('remove 网络异常时会转换成中文网络错误', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error('Failed to fetch');
+    }) as typeof fetch;
+
+    const client = createArtifactsClient('http://localhost:3000');
+
+    await expect(client.remove('token-1', 'artifact-1')).rejects.toThrow(
+      '网络异常，删除产物失败。',
+    );
+  });
+
   it('create 会读取 ApiErrorResponse.data.message', async () => {
     globalThis.fetch = vi.fn(async () => {
       return {

@@ -1,5 +1,6 @@
 import { trackTeamRuntimeIncident } from './team-runtime-telemetry.js';
 import { logTeamAudit } from './team-audit-store.js';
+import { sqliteAll } from '../infra/db.js';
 
 export type TeamRuntimeIncidentCategory =
   | 'architecture_review'
@@ -24,6 +25,11 @@ const MAX_INCIDENTS = 100;
 const INCIDENT_AUDIT_DEDUPE_MS = 60 * 1000;
 const incidentsByUser = new Map<string, TeamRuntimeIncident[]>();
 const lastIncidentAuditAtBySignature = new Map<string, number>();
+
+interface PersistedRuntimeIncidentRow {
+  created_at: string;
+  detail: string | null;
+}
 
 // Opportunistic sweep bookkeeping for `lastIncidentAuditAtBySignature`. The
 // dedupe map keys on (user × category × code × entityId); entityId derives
@@ -71,7 +77,14 @@ export function listTeamRuntimeIncidents(input?: {
   if (limit <= 0) {
     return [];
   }
-  return bucket.slice(-limit).reverse();
+  if (!input?.userId) {
+    return bucket.slice(-limit).reverse();
+  }
+  return mergeRuntimeIncidentSources({
+    inMemory: bucket,
+    limit,
+    persisted: listPersistedTeamRuntimeIncidents({ limit: Math.max(limit * 4, 100), userId: input.userId }),
+  });
 }
 
 export function getTeamRuntimeIncidentSummary(input?: {
@@ -81,10 +94,21 @@ export function getTeamRuntimeIncidentSummary(input?: {
   const sinceMs = input?.sinceMs;
   const key = resolveIncidentBucketKey(input?.userId ?? null);
   const bucket = incidentsByUser.get(key) ?? [];
+  const incidents =
+    input?.userId
+      ? mergeRuntimeIncidentSources({
+          inMemory: bucket,
+          limit: 400,
+          persisted: listPersistedTeamRuntimeIncidents({
+            limit: 400,
+            userId: input.userId,
+          }),
+        })
+      : bucket;
   const filtered =
     typeof sinceMs === 'number'
-      ? bucket.filter((incident) => incident.timestamp >= sinceMs)
-      : bucket;
+      ? incidents.filter((incident) => incident.timestamp >= sinceMs)
+      : incidents;
   return filtered.reduce<Record<TeamRuntimeIncidentCategory, number>>(
     (acc, incident) => {
       acc[incident.category] += 1;
@@ -98,6 +122,40 @@ export function getTeamRuntimeIncidentSummary(input?: {
       team_events_listener: 0,
     },
   );
+}
+
+function buildRuntimeIncidentDedupeKey(incident: TeamRuntimeIncident): string {
+  return JSON.stringify({
+    category: incident.category,
+    code: incident.code,
+    context: incident.context,
+    message: incident.message,
+    severity: incident.severity,
+    timestamp: incident.timestamp,
+    userId: incident.userId,
+  });
+}
+
+function mergeRuntimeIncidentSources(input: {
+  inMemory: TeamRuntimeIncident[];
+  limit: number;
+  persisted: TeamRuntimeIncident[];
+}): TeamRuntimeIncident[] {
+  const merged = [...input.inMemory, ...input.persisted];
+  const seen = new Set<string>();
+  const deduped: TeamRuntimeIncident[] = [];
+  for (const incident of merged.sort((left, right) => right.timestamp - left.timestamp)) {
+    const key = buildRuntimeIncidentDedupeKey(incident);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    deduped.push(incident);
+    if (deduped.length >= input.limit) {
+      break;
+    }
+  }
+  return deduped;
 }
 
 export function getTeamRuntimeIncidentCodeSummary(input?: {
@@ -153,6 +211,88 @@ function resolveIncidentAuditEntityId(input: TeamRuntimeIncident): string {
   return input.code;
 }
 
+function resolveIncidentSessionId(input: TeamRuntimeIncident): string | null {
+  for (const key of [
+    'sessionId',
+    'receptionSessionId',
+    'fromSessionId',
+    'toSessionId',
+    'childSessionId',
+  ] as const) {
+    const value = input.context[key];
+    if (typeof value === 'string' && value.length > 0) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function parsePersistedRuntimeIncident(
+  row: PersistedRuntimeIncidentRow,
+  userId: string,
+): TeamRuntimeIncident | null {
+  if (!row.detail) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(row.detail) as Record<string, unknown>;
+    const category = parsed['category'];
+    const code = parsed['code'];
+    const context = parsed['context'];
+    const message = parsed['message'];
+    const severity = parsed['severity'];
+    const timestamp = parsed['timestamp'];
+    if (
+      category !== 'architecture_review' &&
+      category !== 'handoff_failure' &&
+      category !== 'latency_violation' &&
+      category !== 'team_events_connection' &&
+      category !== 'team_events_listener'
+    ) {
+      return null;
+    }
+    if (
+      typeof code !== 'string' ||
+      typeof message !== 'string' ||
+      (severity !== 'warning' && severity !== 'error') ||
+      typeof timestamp !== 'number' ||
+      typeof context !== 'object' ||
+      context === null ||
+      Array.isArray(context)
+    ) {
+      return null;
+    }
+    return {
+      category,
+      code,
+      context: context as Record<string, boolean | number | string | null>,
+      message,
+      severity,
+      timestamp,
+      userId,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function listPersistedTeamRuntimeIncidents(input: {
+  limit: number;
+  userId: string;
+}): TeamRuntimeIncident[] {
+  const rows = sqliteAll<PersistedRuntimeIncidentRow>(
+    `SELECT detail, created_at
+       FROM team_audit_logs
+      WHERE user_id = ? AND action = 'runtime_incident'
+      ORDER BY id DESC
+      LIMIT ?`,
+    [input.userId, input.limit],
+  );
+  return rows
+    .map((row) => parsePersistedRuntimeIncident(row, input.userId))
+    .filter((incident): incident is TeamRuntimeIncident => incident !== null);
+}
+
 function buildIncidentAuditSignature(input: TeamRuntimeIncident): string | null {
   if (!input.userId) {
     return null;
@@ -200,10 +340,7 @@ function writeTeamRuntimeIncidentAudit(input: TeamRuntimeIncident): void {
     }),
     entityId,
     entityType: 'runtime_incident',
-    sessionId:
-      typeof input.context['sessionId'] === 'string' && input.context['sessionId'].length > 0
-        ? input.context['sessionId']
-        : null,
+    sessionId: resolveIncidentSessionId(input),
     summary,
     userId: input.userId,
   });

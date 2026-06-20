@@ -24,14 +24,22 @@ type TeamLayer = (typeof TEAM_LAYERS)[number];
 const READ_ONLY_FALLBACK = ['read'] as const;
 const SAFE_FALLBACK_NAMES = new Set([
   'read',
+  'list',
   'glob',
   'grep',
   'read_tool_output',
   'look_at',
   'repo_overview',
-  'AskUserQuestion',
-  'todo_read',
-  'todo_write',
+  'todoread',
+  'todowrite',
+  'subtodoread',
+  'subtodowrite',
+  'task_list',
+  'task_get',
+  'session_list',
+  'session_read',
+  'session_search',
+  'session_info',
 ]);
 
 export function isTeamRoleLayer(value: string | null | undefined): value is TeamLayer {

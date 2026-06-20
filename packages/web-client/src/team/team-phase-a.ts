@@ -66,6 +66,42 @@ export interface UserMemoryRecord {
   body: string;
 }
 
+export type TeamWorkspaceKnowledgeType =
+  | 'preference'
+  | 'fact'
+  | 'instruction'
+  | 'project_context'
+  | 'learned_pattern';
+
+export type TeamWorkspaceKnowledgeSource = 'manual' | 'auto_extracted' | 'api';
+export type TeamWorkspaceKnowledgeRoleLayer = 'reception' | 'pm1' | 'pm2' | 'executor' | 'reviewer';
+
+export interface TeamWorkspaceKnowledgeRecord {
+  confidence: number;
+  createdAt: string;
+  enabled: boolean;
+  id: string;
+  key: string;
+  priority: number;
+  source: TeamWorkspaceKnowledgeSource;
+  teamWorkspaceId: string | null;
+  roleLayers: TeamWorkspaceKnowledgeRoleLayer[] | null;
+  type: TeamWorkspaceKnowledgeType;
+  updatedAt: string;
+  value: string;
+  workspaceRoot: string | null;
+}
+
+export interface UpsertTeamWorkspaceKnowledgeInput {
+  confidence?: number;
+  key: string;
+  priority?: number;
+  roleLayers?: TeamWorkspaceKnowledgeRoleLayer[] | null;
+  source?: TeamWorkspaceKnowledgeSource;
+  type: TeamWorkspaceKnowledgeType;
+  value: string;
+}
+
 export interface ForceApplyState {
   usedInWindow: number;
   maxInWindow: number;
@@ -83,6 +119,7 @@ export interface InstructionStackPreview {
     projectMemory: boolean;
     lessonsLearned: boolean;
     userMemory: boolean;
+    workspaceKnowledge: boolean;
     soul: boolean;
   };
 }
@@ -172,6 +209,35 @@ export interface TeamPhaseAClient {
   getUserMemoryResult(token: string): Promise<UserMemoryLoadResult>;
   getUserMemory(token: string): Promise<UserMemoryRecord>;
   putUserMemory(token: string, body: string): Promise<UserMemoryRecord>;
+  listWorkspaceKnowledge(
+    token: string,
+    teamWorkspaceId: string,
+    options?: {
+      enabled?: boolean;
+      limit?: number;
+      offset?: number;
+      roleLayer?: TeamWorkspaceKnowledgeRoleLayer;
+      search?: string;
+      type?: TeamWorkspaceKnowledgeType;
+    },
+  ): Promise<TeamWorkspaceKnowledgeRecord[]>;
+  listWorkspaceKnowledgeResult(
+    token: string,
+    teamWorkspaceId: string,
+    options?: {
+      enabled?: boolean;
+      limit?: number;
+      offset?: number;
+      roleLayer?: TeamWorkspaceKnowledgeRoleLayer;
+      search?: string;
+      type?: TeamWorkspaceKnowledgeType;
+    },
+  ): Promise<TeamWorkspaceKnowledgeListResult>;
+  upsertWorkspaceKnowledge(
+    token: string,
+    teamWorkspaceId: string,
+    input: UpsertTeamWorkspaceKnowledgeInput,
+  ): Promise<UpsertTeamWorkspaceKnowledgeResult>;
 
   getForceApplyStateResult(token: string): Promise<ForceApplyStateLoadResult>;
   getForceApplyState(token: string): Promise<ForceApplyState>;
@@ -207,26 +273,73 @@ export interface TeamPhaseAClient {
     token: string,
     options: { phase?: string; teamWorkspaceId?: string; sessionId?: string },
   ): Promise<
-    Array<{ id: string; content: string; phase: string | null; title: string; sessionId?: string }>
+    Array<{
+      content: string;
+      createdAt?: string;
+      id: string;
+      parentArtifactId?: string | null;
+      phase: string | null;
+      sessionId?: string;
+      teamWorkspaceId?: string | null;
+      title: string;
+      type?: string;
+      updatedAt?: string;
+      version?: number;
+    }>
   >;
   listTeamArtifactsResult(
     token: string,
     options: { phase?: string; teamWorkspaceId?: string; sessionId?: string },
   ): Promise<TeamArtifactsListResult>;
+
+  /** Converge — 评估代码库与 spec/plan/tasks 的一致性 */
+  runConverge(
+    token: string,
+    sessionId: string,
+  ): Promise<ConvergeResult>;
 }
 
 export interface TeamArtifactsListResult {
   artifacts: Array<{
-    id: string;
     content: string;
+    createdAt?: string;
+    id: string;
+    parentArtifactId?: string | null;
     phase: string | null;
-    title: string;
     sessionId?: string;
+    teamWorkspaceId?: string | null;
+    title: string;
+    type?: string;
+    updatedAt?: string;
+    version?: number;
   }>;
   errorMessage?: string;
   ok: boolean;
   retryable: boolean;
   status?: number;
+}
+
+export interface ConvergeDeviation {
+  type:
+    | 'spec_not_implemented'
+    | 'plan_not_executed'
+    | 'task_not_completed'
+    | 'code_not_in_spec'
+    | 'spec_changed_without_plan'
+    | 'missing_artifact';
+  severity: 'critical' | 'warning' | 'info';
+  description: string;
+  reference?: string;
+  suggestedAction: string;
+}
+
+export interface ConvergeResult {
+  deviations: ConvergeDeviation[];
+  evaluatedArtifacts: string[];
+  timestamp: number;
+  durationMs: number;
+  hasCriticalDeviations: boolean;
+  report: string;
 }
 
 export interface ConstitutionLoadResult {
@@ -251,6 +364,26 @@ export interface UserMemoryLoadResult {
   ok: boolean;
   retryable: boolean;
   status?: number;
+}
+
+export interface TeamWorkspaceKnowledgeListResult {
+  errorMessage?: string;
+  knowledge: TeamWorkspaceKnowledgeRecord[];
+  ok: boolean;
+  persistedKnowledge: TeamWorkspaceKnowledgeRecord[];
+  persistedKnowledgeTruncated: boolean;
+  retryable: boolean;
+  status?: number;
+  workspace?: {
+    id: string;
+    name: string;
+    workspaceRoot: string | null;
+  };
+}
+
+export interface UpsertTeamWorkspaceKnowledgeResult {
+  created: boolean;
+  knowledge: TeamWorkspaceKnowledgeRecord;
 }
 
 export interface PersonaLoadResult {
@@ -334,6 +467,34 @@ function buildUserMemoryErrorMessage(status: number, data: JsonErrorData | undef
   return `加载个人长期记忆失败（HTTP ${status}）。`;
 }
 
+function buildWorkspaceKnowledgeErrorMessage(
+  status: number,
+  data: JsonErrorData | undefined,
+): string {
+  const extracted = extractJsonErrorMessage(data);
+  if (extracted) {
+    return extracted;
+  }
+  if (status === 401 || status === 403) {
+    return '认证失效或当前账号无权读取工作区知识。';
+  }
+  if (status === 404) {
+    return '目标团队工作区不存在，无法读取知识库。';
+  }
+  return `加载工作区知识失败（HTTP ${status}）。`;
+}
+
+function extractKnowledgeKeyConflictMessage(
+  data: (JsonErrorData & { error?: string; message?: string }) | undefined,
+): string | null {
+  if (data?.error !== 'knowledge-key-conflict') {
+    return null;
+  }
+  return typeof data.message === 'string' && data.message.length > 0
+    ? data.message
+    : '该知识 key 已被其它工作区占用。';
+}
+
 function buildPersonaErrorMessage(status: number, data: JsonErrorData | undefined): string {
   const extracted = extractJsonErrorMessage(data);
   if (extracted) {
@@ -386,6 +547,10 @@ function buildTeamPhaseAActionErrorMessage(
       })
     | undefined,
 ): string {
+  const knowledgeConflictMessage = extractKnowledgeKeyConflictMessage(data);
+  if (status === 409 && knowledgeConflictMessage) {
+    return knowledgeConflictMessage;
+  }
   if (status === 400 && (typeof data?.reason === 'string' || typeof data?.threat === 'string')) {
     return `安全扫描拒绝：${data.reason ?? data.threat ?? '未知威胁'}`;
   }
@@ -421,9 +586,14 @@ function isGenericTeamPhaseANetworkErrorMessage(message: string): boolean {
 
 function normalizeTeamPhaseAActionError(actionLabel: string, error: unknown): Error {
   if (error instanceof HttpError) {
-    const extracted = extractJsonErrorMessage(
-      (error.data ?? undefined) as JsonErrorData | undefined,
-    );
+    const data = (error.data ?? undefined) as
+      | (JsonErrorData & { error?: string; message?: string })
+      | undefined;
+    const knowledgeConflictMessage = extractKnowledgeKeyConflictMessage(data);
+    if (knowledgeConflictMessage) {
+      return new HttpError(knowledgeConflictMessage, error.status, error.data);
+    }
+    const extracted = extractJsonErrorMessage(data);
     if (
       extracted &&
       extracted !== 'memory-write-blocked' &&
@@ -486,12 +656,7 @@ export function createTeamPhaseAClient(baseUrl: string): TeamPhaseAClient {
         { headers: authHeader(token) },
       );
       if (!response.ok) {
-        let data: JsonErrorData | undefined;
-        try {
-          data = (await response.json()) as JsonErrorData;
-        } catch {
-          data = undefined;
-        }
+        const data = await readJsonErrorData<JsonErrorData>(response);
         return {
           ok: false,
           retryable: isRetryableTeamPhaseAStatus(response.status),
@@ -521,12 +686,7 @@ export function createTeamPhaseAClient(baseUrl: string): TeamPhaseAClient {
         headers: authHeader(token),
       });
       if (!response.ok) {
-        let data: JsonErrorData | undefined;
-        try {
-          data = (await response.json()) as JsonErrorData;
-        } catch {
-          data = undefined;
-        }
+        const data = await readJsonErrorData<JsonErrorData>(response);
         return {
           ok: false,
           retryable: isRetryableTeamPhaseAStatus(response.status),
@@ -557,12 +717,7 @@ export function createTeamPhaseAClient(baseUrl: string): TeamPhaseAClient {
         headers: authHeader(token),
       });
       if (!response.ok) {
-        let data: JsonErrorData | undefined;
-        try {
-          data = (await response.json()) as JsonErrorData;
-        } catch {
-          data = undefined;
-        }
+        const data = await readJsonErrorData<JsonErrorData>(response);
         return {
           ok: false,
           retryable: isRetryableTeamPhaseAStatus(response.status),
@@ -584,6 +739,73 @@ export function createTeamPhaseAClient(baseUrl: string): TeamPhaseAClient {
     }
   };
 
+  const listWorkspaceKnowledgeResult = async (
+    token: string,
+    teamWorkspaceId: string,
+    options: {
+      enabled?: boolean;
+      limit?: number;
+      offset?: number;
+      roleLayer?: TeamWorkspaceKnowledgeRoleLayer;
+      search?: string;
+      type?: TeamWorkspaceKnowledgeType;
+    } = {},
+  ): Promise<TeamWorkspaceKnowledgeListResult> => {
+    const params = new URLSearchParams();
+    appendQueryParam(params, 'enabled', options.enabled);
+    appendQueryParam(params, 'limit', options.limit);
+    appendQueryParam(params, 'offset', options.offset);
+    appendQueryParam(params, 'roleLayer', options.roleLayer);
+    appendQueryParam(params, 'search', options.search);
+    appendQueryParam(params, 'type', options.type);
+    const url = withQuery(
+      `${baseUrl}/team/workspaces/${encodeURIComponent(teamWorkspaceId)}/knowledge`,
+      params,
+    );
+    try {
+      const response = await fetchWithTimeout(url, { headers: authHeader(token) });
+      if (!response.ok) {
+        const data = await readJsonErrorData<JsonErrorData>(response);
+        return {
+          knowledge: [],
+          ok: false,
+          persistedKnowledge: [],
+          persistedKnowledgeTruncated: false,
+          retryable: isRetryableTeamPhaseAStatus(response.status),
+          errorMessage: buildWorkspaceKnowledgeErrorMessage(response.status, data),
+          status: response.status,
+        };
+      }
+      const data = (await response.json()) as {
+        knowledge: TeamWorkspaceKnowledgeRecord[];
+        persistedKnowledge?: TeamWorkspaceKnowledgeRecord[];
+        persistedKnowledgeTruncated?: boolean;
+        workspace?: {
+          id: string;
+          name: string;
+          workspaceRoot: string | null;
+        };
+      };
+      return {
+        knowledge: data.knowledge,
+        ok: true,
+        persistedKnowledge: data.persistedKnowledge ?? data.knowledge,
+        persistedKnowledgeTruncated: data.persistedKnowledgeTruncated ?? false,
+        retryable: false,
+        workspace: data.workspace,
+      };
+    } catch (error) {
+      return {
+        knowledge: [],
+        ok: false,
+        persistedKnowledge: [],
+        persistedKnowledgeTruncated: false,
+        retryable: true,
+        errorMessage: normalizeTeamPhaseAActionError('加载工作区知识', error).message,
+      };
+    }
+  };
+
   const getPersonaResult = async (
     token: string,
     roleLayer: SoulRoleLayer,
@@ -595,12 +817,7 @@ export function createTeamPhaseAClient(baseUrl: string): TeamPhaseAClient {
     try {
       const response = await fetchWithTimeout(url, { headers: authHeader(token) });
       if (!response.ok) {
-        let data: JsonErrorData | undefined;
-        try {
-          data = (await response.json()) as JsonErrorData;
-        } catch {
-          data = undefined;
-        }
+        const data = await readJsonErrorData<JsonErrorData>(response);
         return {
           ok: false,
           retryable: isRetryableTeamPhaseAStatus(response.status),
@@ -628,12 +845,7 @@ export function createTeamPhaseAClient(baseUrl: string): TeamPhaseAClient {
         headers: authHeader(token),
       });
       if (!response.ok) {
-        let data: JsonErrorData | undefined;
-        try {
-          data = (await response.json()) as JsonErrorData;
-        } catch {
-          data = undefined;
-        }
+        const data = await readJsonErrorData<JsonErrorData>(response);
         return {
           ok: false,
           retryable: isRetryableTeamPhaseAStatus(response.status),
@@ -673,12 +885,7 @@ export function createTeamPhaseAClient(baseUrl: string): TeamPhaseAClient {
     try {
       const response = await fetchWithTimeout(url, { headers: authHeader(token) });
       if (!response.ok) {
-        let data: JsonErrorData | undefined;
-        try {
-          data = (await response.json()) as JsonErrorData;
-        } catch {
-          data = undefined;
-        }
+        const data = await readJsonErrorData<JsonErrorData>(response);
         return {
           ok: false,
           retryable: isRetryableTeamPhaseAStatus(response.status),
@@ -710,12 +917,7 @@ export function createTeamPhaseAClient(baseUrl: string): TeamPhaseAClient {
     try {
       const response = await fetchWithTimeout(url, { headers: authHeader(token) });
       if (!response.ok) {
-        let data: JsonErrorData | undefined;
-        try {
-          data = (await response.json()) as JsonErrorData;
-        } catch {
-          data = undefined;
-        }
+        const data = await readJsonErrorData<JsonErrorData>(response);
         return {
           ok: false,
           retryable: isRetryableTeamPhaseAStatus(response.status),
@@ -746,12 +948,7 @@ export function createTeamPhaseAClient(baseUrl: string): TeamPhaseAClient {
     try {
       const response = await fetchWithTimeout(url, { headers: authHeader(token) });
       if (!response.ok) {
-        let data: { error?: string } | undefined;
-        try {
-          data = (await response.json()) as { error?: string };
-        } catch {
-          data = undefined;
-        }
+        const data = await readJsonErrorData<JsonErrorData>(response);
         return {
           artifacts: [],
           ok: false,
@@ -762,11 +959,17 @@ export function createTeamPhaseAClient(baseUrl: string): TeamPhaseAClient {
       }
       const data = (await response.json()) as {
         artifacts: Array<{
-          id: string;
           content: string;
+          createdAt?: string;
+          id: string;
+          parentArtifactId?: string | null;
           phase: string | null;
-          title: string;
           sessionId?: string;
+          teamWorkspaceId?: string | null;
+          title: string;
+          type?: string;
+          updatedAt?: string;
+          version?: number;
         }>;
       };
       return {
@@ -904,6 +1107,31 @@ export function createTeamPhaseAClient(baseUrl: string): TeamPhaseAClient {
       });
     },
 
+    listWorkspaceKnowledgeResult,
+
+    async listWorkspaceKnowledge(token, teamWorkspaceId, options) {
+      const result = await listWorkspaceKnowledgeResult(token, teamWorkspaceId, options);
+      if (!result.ok) {
+        throw new Error(result.errorMessage ?? '加载工作区知识失败');
+      }
+      return result.knowledge;
+    },
+
+    async upsertWorkspaceKnowledge(token, teamWorkspaceId, input) {
+      return performTeamPhaseARequest<UpsertTeamWorkspaceKnowledgeResult>({
+        actionLabel: '入库工作区知识',
+        request: () =>
+          fetchWithTimeout(
+            `${baseUrl}/team/workspaces/${encodeURIComponent(teamWorkspaceId)}/knowledge`,
+            {
+              method: 'POST',
+              headers: jsonAuthHeaders(token),
+              body: JSON.stringify(input),
+            },
+          ),
+      });
+    },
+
     getForceApplyStateResult,
 
     async getForceApplyState(token) {
@@ -945,6 +1173,20 @@ export function createTeamPhaseAClient(baseUrl: string): TeamPhaseAClient {
         throw new Error(result.errorMessage ?? '加载团队产物失败');
       }
       return result.artifacts;
+    },
+
+    async runConverge(token, sessionId) {
+      return performTeamPhaseARequest<ConvergeResult>({
+        actionLabel: '执行一致性评估',
+        request: () =>
+          fetchWithTimeout(
+            `${baseUrl}/team/sessions/${encodeURIComponent(sessionId)}/converge`,
+            {
+              method: 'POST',
+              headers: jsonAuthHeaders(token),
+            },
+          ),
+      });
     },
   };
 }

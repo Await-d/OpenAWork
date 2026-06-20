@@ -234,6 +234,7 @@ export function ConversationArea({
         {topBar}
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <TeamConversationView
+            key={receptionSessionId}
             sessionId={receptionSessionId}
             composerEnabled={receptionComposerEnabled}
             afterMessages={
@@ -295,7 +296,7 @@ function EmptyState({
   onSelectSuggestion?: (text: string) => void | Promise<void>;
 }) {
   return (
-    <div style={STATE_PANEL_STYLE}>
+    <div className="team-conversation-empty-state" style={STATE_PANEL_STYLE}>
       <div style={{ display: 'grid', gap: 'var(--team-space-2)' }}>
         <strong style={{ fontSize: 'var(--team-font-lg)', color: 'var(--fg-strong)' }}>
           🤖 欢迎使用 AI 开发团队
@@ -308,6 +309,7 @@ function EmptyState({
         </span>
       </div>
       <div
+        className="team-conversation-quick-actions"
         style={{
           display: 'flex',
           flexWrap: 'wrap',
@@ -320,6 +322,7 @@ function EmptyState({
           <button
             key={action}
             type="button"
+            className="team-conversation-quick-action"
             onClick={() => void onSelectSuggestion?.(action)}
             style={{
               minHeight: 'var(--team-control-height-sm)',

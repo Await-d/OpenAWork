@@ -22,7 +22,7 @@ import { getEffectiveReviewDisposition, type HandoffRecord } from '@openAwork/we
 import type { AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
 import { useLayerStore } from '../../../../../stores/team/team-events.js';
-import { ReviewReportView } from './ReviewReportView.js';
+import { ReviewReportView, type ReviewVerdict } from './ReviewReportView.js';
 import { ReviewTab } from './ReviewTab.js';
 import { useSessionHandoffs } from '../../hooks/use-session-handoffs.js';
 import { useReviewDisposition } from '../../hooks/use-review-disposition.js';
@@ -427,7 +427,7 @@ function ReportSegment({
   loading: boolean;
   error: string | null;
   reportMarkdown: string | null;
-  overallVerdict: 'pass' | 'implementation-failure' | 'planning-failure' | null;
+  overallVerdict: ReviewVerdict;
   specReviewPassed: boolean | null;
   qualityReviewPassed: boolean | null;
   hasSession: boolean;

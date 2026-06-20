@@ -9,7 +9,7 @@ import {
   parseWorkspaceAccessMode,
 } from '../workspace/workspace-config.js';
 import { loadAppVersion } from '../app/app-version.js';
-import { resolveGatewayDatabasePath } from './storage-paths.js';
+import { assertSafeGatewayDatabasePath, resolveGatewayDatabasePath } from './storage-paths.js';
 import {
   normalizeToolArgumentsForStorage,
   normalizeToolResultOutputForStorage,
@@ -74,6 +74,7 @@ export const WORKSPACE_BROWSER_ROOT =
   parse(WORKSPACE_ROOT).root || parse(process.cwd()).root || resolve('/');
 
 function createDatabase(dbPath: string): GatewayDatabase {
+  assertSafeGatewayDatabasePath(dbPath);
   const dbDir = dbPath === ':memory:' ? null : dirname(dbPath);
   if (dbDir) mkdirSync(dbDir, { recursive: true });
   const database = new DatabaseSync(dbPath);
@@ -351,6 +352,7 @@ export async function migrate(): Promise<void> {
   ensureColumn('session_file_diffs', 'backup_after_ref_json', 'TEXT');
   ensureColumn('session_file_diffs', 'before_backup_id', 'TEXT');
   ensureColumn('session_file_diffs', 'after_backup_id', 'TEXT');
+  ensureColumn('session_messages', 'agent_id', 'TEXT');
   migrateSessionFileDiffsDropLegacyTextColumns();
 
   db.exec(`
@@ -697,6 +699,8 @@ export async function migrate(): Promise<void> {
     )
   `);
   ensureColumn('team_messages', 'type', "TEXT NOT NULL DEFAULT 'update'");
+  ensureColumn('team_messages', 'session_id', 'TEXT REFERENCES sessions(id) ON DELETE SET NULL');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_team_messages_session ON team_messages(user_id, session_id)');
   ensureColumn(
     'team_messages',
     'recipient_member_id',
@@ -988,13 +992,23 @@ export async function migrate(): Promise<void> {
       confidence REAL NOT NULL DEFAULT 1.0,
       priority INTEGER NOT NULL DEFAULT 50,
       workspace_root TEXT,
+      team_workspace_id TEXT,
+      role_layers_json TEXT,
       enabled INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
+  ensureColumn('memories', 'team_workspace_id', 'TEXT DEFAULT NULL');
+  ensureColumn('memories', 'role_layers_json', 'TEXT DEFAULT NULL');
   db.exec('CREATE INDEX IF NOT EXISTS idx_memories_user_enabled ON memories(user_id, enabled)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_memories_user_type ON memories(user_id, type)');
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_memories_team_workspace ON memories(user_id, team_workspace_id) WHERE team_workspace_id IS NOT NULL',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_memories_role_layers ON memories(user_id, role_layers_json) WHERE role_layers_json IS NOT NULL',
+  );
   db.exec(
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_user_type_key ON memories(user_id, type, key) WHERE enabled = 1',
   );
@@ -1208,6 +1222,28 @@ export async function migrate(): Promise<void> {
   );
   db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_paused ON sessions(paused) WHERE paused = 1');
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS team_role_session_instances (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      root_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      role_layer TEXT NOT NULL,
+      persona_key TEXT NOT NULL DEFAULT '',
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      display_name TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(user_id, root_session_id, role_layer, persona_key),
+      UNIQUE(session_id)
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_team_role_session_instances_root ON team_role_session_instances(user_id, root_session_id)',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_team_role_session_instances_session ON team_role_session_instances(session_id)',
+  );
+
   // T-02: handoff_records —— b→c→d→e/f/g 派发协议的核心表
   // 状态机：pending → claimed → running → (completed | failed | cancelled)
   //         任何状态 → cancelled（用户主动 cancel）
@@ -1328,6 +1364,15 @@ export async function migrate(): Promise<void> {
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_handoff_records_idempotency ON handoff_records(idempotency_key) WHERE idempotency_key IS NOT NULL',
   );
 
+  // ─── Team schema 兜底：确保关键表/列存在 ────────────────────────────
+  // 如果 migrate() 中间某步抛异常（如旧表 schema 冲突、磁盘错误），后续的
+  // ensureColumn / CREATE TABLE 不会执行。Team Phase B 的 handoff_records
+  // 表和 sessions 上的 role_layer / team_parent_session_id 列是 recovery
+  // API 和 handoff 流程的硬依赖——缺失会导致所有 team 功能静默失败。
+  // 这里用独立容错块再跑一次，确保即使前面的步骤出错，这些关键 schema
+  // 也一定被创建。
+  ensureTeamSchemaSafe();
+
   // ─── App meta：跨版本状态戳 ───
   // 卸载桌面端但「保留用户数据」时，旧的 sqlite 仍在新版本启动时被复用。
   // 这里建立一张轻量的 key/value meta 表，为后续「按版本号触发兼容修补」
@@ -1335,6 +1380,242 @@ export async function migrate(): Promise<void> {
   // 启动时的版本（previous_app_version），供观测/日志使用。
   ensureAppMetaTable();
   stampCurrentAppVersion();
+}
+
+/**
+ * Team schema 兜底：独立容错地确保 Team 相关的关键表和列存在。
+ *
+ * 每个步骤独立 try-catch，单个失败不影响其他步骤。日志以 warn 级别
+ * 输出，不中断 migrate() 主流程。这保证了即使旧数据库 schema 与
+ * migrate() 中间步骤不兼容，Team 功能所需的最小 schema 也会被补上。
+ */
+function ensureTeamSchemaSafe(): void {
+  const safe = (label: string, fn: () => void): void => {
+    try {
+      fn();
+    } catch (err) {
+      console.warn(
+        `[migrate] ensureTeamSchemaSafe · ${label} 失败：` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  };
+
+  // sessions 表 Team 相关列
+  safe('sessions.team_parent_session_id', () =>
+    ensureColumn('sessions', 'team_parent_session_id', 'TEXT DEFAULT NULL'),
+  );
+  safe('sessions.role_layer', () => ensureColumn('sessions', 'role_layer', 'TEXT DEFAULT NULL'));
+  safe('sessions.handoff_state', () =>
+    ensureColumn('sessions', 'handoff_state', 'TEXT DEFAULT NULL'),
+  );
+  safe('sessions.intent_state', () =>
+    ensureColumn('sessions', 'intent_state', 'TEXT DEFAULT NULL'),
+  );
+  safe('sessions.structural_depth', () =>
+    ensureColumn('sessions', 'structural_depth', 'INTEGER NOT NULL DEFAULT 0'),
+  );
+  safe('sessions.execution_depth', () =>
+    ensureColumn('sessions', 'execution_depth', 'INTEGER NOT NULL DEFAULT 0'),
+  );
+  safe('sessions.substate', () => ensureColumn('sessions', 'substate', 'TEXT DEFAULT NULL'));
+  safe('sessions.substate_updated_at', () =>
+    ensureColumn('sessions', 'substate_updated_at', 'TEXT DEFAULT NULL'),
+  );
+  safe('sessions.paused', () => ensureColumn('sessions', 'paused', 'INTEGER NOT NULL DEFAULT 0'));
+  safe('sessions.paused_at', () => ensureColumn('sessions', 'paused_at', 'TEXT DEFAULT NULL'));
+  safe('sessions.paused_by_user_id', () =>
+    ensureColumn('sessions', 'paused_by_user_id', 'TEXT DEFAULT NULL'),
+  );
+  safe('sessions.pause_reason', () =>
+    ensureColumn('sessions', 'pause_reason', 'TEXT DEFAULT NULL'),
+  );
+  safe('sessions.last_heartbeat', () =>
+    ensureColumn('sessions', 'last_heartbeat', 'TEXT DEFAULT NULL'),
+  );
+
+  // handoff_records 表
+  safe('handoff_records', () =>
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS handoff_records (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        from_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        from_role_layer TEXT NOT NULL,
+        to_role_layer TEXT NOT NULL,
+        to_session_id TEXT,
+        payload_json TEXT NOT NULL DEFAULT '{}',
+        state TEXT NOT NULL DEFAULT 'pending',
+        claim_token TEXT,
+        claimed_at TEXT,
+        started_at TEXT,
+        completed_at TEXT,
+        failure_reason TEXT,
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        escalation_round INTEGER NOT NULL DEFAULT 0,
+        cancel_requested INTEGER NOT NULL DEFAULT 0,
+        paused INTEGER NOT NULL DEFAULT 0,
+        crash_retry_count INTEGER NOT NULL DEFAULT 0,
+        idempotency_key TEXT DEFAULT NULL,
+        paused_at TEXT DEFAULT NULL,
+        paused_by_user_id TEXT DEFAULT NULL,
+        pause_reason TEXT DEFAULT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `),
+  );
+  safe('handoff_records.escalation_round', () =>
+    ensureColumn('handoff_records', 'escalation_round', 'INTEGER NOT NULL DEFAULT 0'),
+  );
+  safe('handoff_records.cancel_requested', () =>
+    ensureColumn('handoff_records', 'cancel_requested', 'INTEGER NOT NULL DEFAULT 0'),
+  );
+  safe('handoff_records.paused', () =>
+    ensureColumn('handoff_records', 'paused', 'INTEGER NOT NULL DEFAULT 0'),
+  );
+  safe('handoff_records.crash_retry_count', () =>
+    ensureColumn('handoff_records', 'crash_retry_count', 'INTEGER NOT NULL DEFAULT 0'),
+  );
+  safe('handoff_records.idempotency_key', () =>
+    ensureColumn('handoff_records', 'idempotency_key', 'TEXT DEFAULT NULL'),
+  );
+  safe('handoff_records.paused_at', () =>
+    ensureColumn('handoff_records', 'paused_at', 'TEXT DEFAULT NULL'),
+  );
+  safe('handoff_records.paused_by_user_id', () =>
+    ensureColumn('handoff_records', 'paused_by_user_id', 'TEXT DEFAULT NULL'),
+  );
+  safe('handoff_records.pause_reason', () =>
+    ensureColumn('handoff_records', 'pause_reason', 'TEXT DEFAULT NULL'),
+  );
+
+  // team_role_session_instances 表
+  safe('team_role_session_instances', () =>
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS team_role_session_instances (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        root_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        role_layer TEXT NOT NULL,
+        persona_key TEXT NOT NULL DEFAULT '',
+        session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        display_name TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(user_id, root_session_id, role_layer, persona_key),
+        UNIQUE(session_id)
+      )
+    `),
+  );
+
+  // session_inbound_messages 表
+  safe('session_inbound_messages', () =>
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS session_inbound_messages (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        to_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        from_role_layer TEXT NOT NULL,
+        message_type TEXT NOT NULL,
+        payload_json TEXT NOT NULL DEFAULT '{}',
+        state TEXT NOT NULL DEFAULT 'pending',
+        client_idempotency_key TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `),
+  );
+
+  // 关键索引
+  safe('idx_sessions_team_parent', () =>
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_sessions_team_parent ON sessions(team_parent_session_id) WHERE team_parent_session_id IS NOT NULL',
+    ),
+  );
+  safe('idx_sessions_role_layer', () =>
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_sessions_role_layer ON sessions(role_layer) WHERE role_layer IS NOT NULL',
+    ),
+  );
+  safe('idx_sessions_handoff_state', () =>
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_sessions_handoff_state ON sessions(handoff_state) WHERE handoff_state IS NOT NULL',
+    ),
+  );
+  safe('idx_sessions_substate', () =>
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_sessions_substate ON sessions(substate) WHERE substate IS NOT NULL',
+    ),
+  );
+  safe('idx_handoff_records_state', () =>
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_handoff_records_state ON handoff_records(state, created_at)',
+    ),
+  );
+  safe('idx_handoff_records_from_session', () =>
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_handoff_records_from_session ON handoff_records(from_session_id, created_at DESC)',
+    ),
+  );
+  safe('idx_handoff_records_to_session', () =>
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_handoff_records_to_session ON handoff_records(to_session_id) WHERE to_session_id IS NOT NULL',
+    ),
+  );
+  safe('idx_handoff_records_user', () =>
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_handoff_records_user ON handoff_records(user_id, updated_at DESC)',
+    ),
+  );
+  safe('idx_handoff_records_idempotency', () =>
+    db.exec(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_handoff_records_idempotency ON handoff_records(idempotency_key) WHERE idempotency_key IS NOT NULL',
+    ),
+  );
+  safe('idx_team_role_session_instances_root', () =>
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_team_role_session_instances_root ON team_role_session_instances(user_id, root_session_id)',
+    ),
+  );
+  safe('idx_team_role_session_instances_session', () =>
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_team_role_session_instances_session ON team_role_session_instances(session_id)',
+    ),
+  );
+
+  // Checkpoints v2 — handoff 重启恢复追踪表
+  safe('handoff_checkpoints', () =>
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS handoff_checkpoints (
+        id TEXT PRIMARY KEY,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        metadata_json TEXT NOT NULL DEFAULT '{}'
+      )
+    `),
+  );
+  safe('idx_handoff_checkpoints_created', () =>
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_handoff_checkpoints_created ON handoff_checkpoints(created_at DESC)',
+    ),
+  );
+
+  // /converge 一致性评估结果表
+  safe('team_converge_results', () =>
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS team_converge_results (
+        id TEXT PRIMARY KEY,
+        team_workspace_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        result_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `),
+  );
+  safe('idx_team_converge_results_workspace', () =>
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_team_converge_results_workspace ON team_converge_results(team_workspace_id, created_at DESC)',
+    ),
+  );
 }
 
 function ensureAppMetaTable(): void {
@@ -1568,7 +1849,7 @@ function migrateV1MessagesToV2(): void {
 
   const rows = db
     .prepare(
-      'SELECT id, session_id, user_id, seq, role, content_json, status, client_request_id, created_at_ms FROM session_messages ORDER BY session_id, seq ASC',
+      'SELECT id, session_id, user_id, seq, role, content_json, status, client_request_id, agent_id, created_at_ms FROM session_messages ORDER BY session_id, seq ASC',
     )
     .all() as Array<{
     id: string;
@@ -1579,6 +1860,7 @@ function migrateV1MessagesToV2(): void {
     content_json: string;
     status: string;
     client_request_id: string | null;
+    agent_id: string | null;
     created_at_ms: number;
   }>;
 
@@ -1703,6 +1985,19 @@ function migrateV1MessagesToV2(): void {
 export function sqliteRun(query: string, params: readonly SqliteBindableValue[] = []): void {
   const stmt = db.prepare(query);
   stmt.run(...normalizeSqliteBindParams(params));
+}
+
+/**
+ * Like sqliteRun but returns the last inserted rowid.
+ * Useful when the caller needs the auto-increment id of the just-inserted row.
+ */
+export function sqliteRunWithRowId(
+  query: string,
+  params: readonly SqliteBindableValue[] = [],
+): number {
+  const stmt = db.prepare(query);
+  const result = stmt.run(...normalizeSqliteBindParams(params)) as { lastInsertRowid?: unknown };
+  return Number(result.lastInsertRowid ?? 0);
 }
 
 export function sqliteGet<T>(

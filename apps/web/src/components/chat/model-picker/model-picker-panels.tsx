@@ -757,6 +757,57 @@ export function ModelSettingsPopover({
             ) : null}
           </div>
         </div>
+        <div
+          style={{
+            marginBottom: 9,
+            padding: '8px 9px',
+            borderRadius: 9,
+            background: 'color-mix(in oklch, var(--accent) 8%, transparent)',
+            border: '1px solid color-mix(in oklch, var(--accent) 22%, var(--border-subtle) 78%)',
+            display: 'grid',
+            gap: 7,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--fg-strong)' }}>
+              Fast 快速模型
+            </span>
+            <span
+              style={{
+                borderRadius: 999,
+                padding: '2px 6px',
+                fontSize: 9,
+                fontWeight: 700,
+                color: 'var(--accent)',
+                background: 'var(--accent-muted)',
+              }}
+            >
+              全局
+            </span>
+          </div>
+          <div style={{ fontSize: 9.5, color: 'var(--fg-muted)', lineHeight: 1.45 }}>
+            用于标题、内联、辅助与子任务等轻量路径；在设置里选择模型并开启默认思考等级。
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              window.location.href = '/settings/connection';
+            }}
+            style={{
+              justifySelf: 'start',
+              border: '1px solid var(--border-default)',
+              borderRadius: 8,
+              background: 'var(--bg-overlay)',
+              color: 'var(--accent)',
+              cursor: 'pointer',
+              fontSize: 10,
+              fontWeight: 700,
+              padding: '5px 8px',
+            }}
+          >
+            打开 Fast 设置
+          </button>
+        </div>
         {supportsThinking ? (
           <>
             {!canConfigureThinking ? (

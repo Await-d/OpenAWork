@@ -2,276 +2,354 @@
  * 260530-team-page · Wave 3 · CrossLayerConversationView（F3 跨层对话线程）
  *
  * 与 LayeredConversationView（双栏 timeline + 右侧单会话）不同，这里把一次任务链
- * 的层间 handoff **纵向串联成一条对话线程**：
+ * 的历史层级会话 **纵向串联成一条对话线程**：
  *
  *   接待 ─▶ PM1 ─▶ PM2 ─▶ 执行 ─▶ 评审
- *     每个节点展示：from→to、状态、时间、请求载荷摘要
+ *     每个节点展示：from→to / 层级、状态、时间、会话摘要
  *     点击节点 → 内联展开该层 session 的完整 TeamConversationView
  *
- * 数据来源：useHandoffStore（层间 handoff 边）。无新后端依赖。
+ * 数据来源：runtime snapshot sessions + useLayerStore + useHandoffStore。
  */
 
-import { useCallback, useMemo, useState, type CSSProperties } from 'react';
-import { useHandoffStore, type TeamRoleLayer } from '../../../../../stores/team/team-events.js';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import {
+  useHandoffStore,
+  useLayerStore,
+  type TeamRoleLayer,
+} from '../../../../../stores/team/team-events.js';
 import { TeamConversationView } from '../../../conversation/TeamConversationView.js';
 import { TabContainer } from '../TabContainer.js';
 import { EmptyState, CK_BORDER, CK_SURFACE } from '../../shared/content-kit/index.js';
 import { RolePromptPreviewPanel } from '../../shared/RolePromptPreviewPanel.js';
-
-const LAYER_LABELS: Record<TeamRoleLayer, string> = {
-  user: '用户',
-  reception: '接待',
-  pm1: 'PM1 · 规划',
-  pm2: 'PM2 · 管控',
-  executor: '执行',
-  tester: '测试',
-  reviewer: '评审',
-};
-
-const LAYER_ORDER: Record<TeamRoleLayer, number> = {
-  user: 0,
-  reception: 1,
-  pm1: 2,
-  pm2: 3,
-  executor: 4,
-  tester: 5,
-  reviewer: 6,
-};
-
-const STATE_COLORS: Record<string, string> = {
-  idle: 'var(--fg-muted)',
-  pending: 'var(--warning)',
-  claimed: 'var(--aux)',
-  running: 'var(--success)',
-  completed: 'var(--fg-muted)',
-  failed: 'var(--danger)',
-  cancelled: 'var(--fg-muted)',
-};
-
-const STATE_LABELS: Record<string, string> = {
-  idle: '空闲',
-  pending: '等待中',
-  claimed: '已认领',
-  running: '运行中',
-  completed: '已完成',
-  failed: '失败',
-  cancelled: '已取消',
-};
+import type { AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
+import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
+import type { HandoffRecord } from '@openAwork/web-client';
+import {
+  TEAM_LAYER_LABELS,
+  buildLayerConversationRows,
+  canPreviewTeamLayerPrompt,
+  type LayerConversationRow,
+  type LayerConversationState,
+} from './layered-conversation-model.js';
+import { useSessionHandoffs } from '../../hooks/use-session-handoffs.js';
+import { useTeamArtifactData } from '../tasks/use-team-artifact-data.js';
+import { resolveTeamArtifactContext } from '../tasks/team-artifact-context.js';
+import { resolveIncomingDialoguePreview } from './layer-dialogue-preview.js';
+import { LayerSummarySidebar } from './LayerSummarySidebar.js';
+import { LayerProcessPanel } from './LayerProcessPanel.js';
+import { LayerDetailWorkspace } from './LayerDetailWorkspace.js';
+import { CrossLayerThreadListPanel } from './CrossLayerThreadListPanel.js';
+import { useNarrowConversationLayout } from './use-narrow-conversation-layout.js';
 
 const CONTAINER_STYLE: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   gap: 8,
+  flex: 1,
+  minHeight: 0,
+};
+
+const SPLIT_STYLE: CSSProperties = {
+  flex: 1,
+  minHeight: 0,
+  display: 'grid',
+  gridTemplateColumns: 'minmax(240px, 300px) minmax(0, 1fr)',
+  gap: 12,
+};
+
+const DETAIL_PANEL_STYLE: CSSProperties = {
+  minHeight: 0,
+  minWidth: 0,
+  display: 'flex',
+  flexDirection: 'column',
+  borderRadius: 12,
+  border: `1px solid ${CK_BORDER}`,
+  background: CK_SURFACE,
+  overflow: 'hidden',
+};
+
+const PANEL_HEADER_STYLE: CSSProperties = {
+  display: 'grid',
+  gap: 4,
+  padding: '12px 14px',
+  borderBottom: `1px solid ${CK_BORDER}`,
+  background: 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base))',
+  flexShrink: 0,
 };
 
 export interface CrossLayerConversationViewProps {
   /** 可选：聚焦某条 handoff（默认展开它）。 */
   focusHandoffId?: string | null;
+  /** 可选：聚焦某个层级 session（默认展开它）。 */
+  focusSessionId?: string | null;
+  /** 当前选中团队会话；有值时线程限定在其根会话子树内。 */
+  selectedTeam?: AgentTeamsSidebarTeam | null;
+  /** 作为右侧详情嵌入时，不再重复套一层 TabContainer。 */
+  embedded?: boolean;
 }
 
-export function CrossLayerConversationView({ focusHandoffId }: CrossLayerConversationViewProps) {
+export function CrossLayerConversationView({
+  focusHandoffId,
+  focusSessionId,
+  selectedTeam = null,
+  embedded = false,
+}: CrossLayerConversationViewProps) {
+  const isNarrowLayout = useNarrowConversationLayout();
   const handoffs = useHandoffStore((s) => s.handoffs);
+  const nodes = useLayerStore((s) => s.nodes);
+  const { sessions } = useTeamRuntimeReferenceViewData();
   const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null);
   const [promptPreviewLayer, setPromptPreviewLayer] = useState<TeamRoleLayer | null>(null);
+  const expandedSessionHandoffs = useSessionHandoffs(expandedSessionId);
 
-  // 按层级顺序 + 时间排序，形成一条自上而下的链路线程。
-  const thread = useMemo(() => {
-    const list = Array.from(handoffs.values());
-    list.sort((a, b) => {
-      const layerDelta = (LAYER_ORDER[a.toRoleLayer] ?? 99) - (LAYER_ORDER[b.toRoleLayer] ?? 99);
-      if (layerDelta !== 0) return layerDelta;
-      return (a.startedAt ?? a.updatedAt) - (b.startedAt ?? b.updatedAt);
-    });
-    return list;
-  }, [handoffs]);
+  const thread = useMemo(
+    () =>
+      buildLayerConversationRows({
+        handoffs: handoffs.values(),
+        nodes: nodes.values(),
+        selectedSessionId: selectedTeam?.isSharedSession ? null : selectedTeam?.id,
+        sessions,
+      }),
+    [handoffs, nodes, selectedTeam?.id, selectedTeam?.isSharedSession, sessions],
+  );
 
-  const handleToggle = useCallback((sessionId: string | undefined) => {
-    if (!sessionId) return;
+  const handleToggle = useCallback((sessionId: string) => {
     setExpandedSessionId((prev) => (prev === sessionId ? null : sessionId));
   }, []);
 
+  const expandedArtifactContext = useMemo(
+    () =>
+      resolveTeamArtifactContext({
+        focusHandoffId,
+        handoffs: expandedSessionHandoffs.handoffs,
+        selectedSessionId: expandedSessionId,
+        selectedSessionRoleLayer:
+          expandedSessionId ? (thread.find((row) => row.sessionId === expandedSessionId)?.roleLayer ?? null) : null,
+      }),
+    [expandedSessionHandoffs.handoffs, expandedSessionId, focusHandoffId, thread],
+  );
+  const expandedFocusRow = useMemo(
+    () => (expandedSessionId ? (thread.find((row) => row.sessionId === expandedSessionId) ?? null) : null),
+    [expandedSessionId, thread],
+  );
+  const sessionTitleById = useMemo(
+    () => new Map(thread.map((row) => [row.sessionId, row.title])),
+    [thread],
+  );
+  const expandedDialoguePreview = useMemo(
+    () =>
+      resolveIncomingDialoguePreview({
+        fallbackSummary: expandedFocusRow?.detail ?? null,
+        focusHandoffId,
+        records: expandedSessionHandoffs.handoffs,
+        targetSessionId: expandedSessionId,
+      }),
+    [expandedFocusRow?.detail, expandedSessionHandoffs.handoffs, expandedSessionId, focusHandoffId],
+  );
+  const {
+    artifactError,
+    artifactLoading,
+    planArtifact,
+    reviewArtifact,
+    specArtifact,
+    tasksArtifact,
+  } = useTeamArtifactData({
+    pm1ArtifactSessionId: expandedArtifactContext.pm1ArtifactSessionId,
+    pm2ArtifactSessionId: expandedArtifactContext.pm2ArtifactSessionId,
+    preferredArtifactCreatedBeforeMs: expandedFocusRow?.timestampMs ?? null,
+  });
+
+  useEffect(() => {
+    if (thread.length === 0) {
+      setExpandedSessionId(null);
+      return;
+    }
+
+    if (focusSessionId && thread.some((row) => row.sessionId === focusSessionId)) {
+      setExpandedSessionId(focusSessionId);
+      return;
+    }
+
+    if (focusHandoffId) {
+      const focusRow = thread.find((row) => row.id === `handoff-${focusHandoffId}`);
+      if (focusRow) {
+        setExpandedSessionId(focusRow.sessionId);
+        return;
+      }
+    }
+
+    setExpandedSessionId((previous) => {
+      if (previous && thread.some((row) => row.sessionId === previous)) {
+        return previous;
+      }
+      return thread.find((row) => row.parentSessionId !== null)?.sessionId ?? thread[0]!.sessionId;
+    });
+  }, [focusHandoffId, focusSessionId, thread]);
+
+const EMBEDDED_BODY_STYLE: CSSProperties = {
+  flex: 1,
+  minHeight: 0,
+  display: 'flex',
+  flexDirection: 'column',
+  overflow: 'hidden',
+};
+
+const body = embedded ? (
+  <div style={EMBEDDED_BODY_STYLE}>
+    {expandedFocusRow ? (
+      <TeamConversationView
+        key={expandedFocusRow.sessionId}
+        sessionId={expandedFocusRow.sessionId}
+        compact
+        topBar={null}
+        readOnly
+        soloMode
+      />
+    ) : (
+      <EmptyState
+        emoji="🧵"
+        title="选择左侧线程节点查看详情"
+        description="右侧会展示该层的上下文和正文。"
+        style={{ flex: 1 }}
+      />
+    )}
+  </div>
+) : (
+  <div style={CONTAINER_STYLE}>
+    <div
+      style={
+        isNarrowLayout
+          ? {
+              ...SPLIT_STYLE,
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+            }
+          : SPLIT_STYLE
+      }
+    >
+      <CrossLayerThreadListPanel
+        expandedSessionId={expandedSessionId}
+        focusHandoffId={focusHandoffId}
+        rows={thread}
+        onPreviewPrompt={setPromptPreviewLayer}
+        onToggle={handleToggle}
+      />
+      <div
+        style={
+          isNarrowLayout
+            ? {
+                ...DETAIL_PANEL_STYLE,
+                minHeight: 360,
+              }
+            : DETAIL_PANEL_STYLE
+        }
+      >
+        {expandedFocusRow ? (
+          <>
+            <LayerDetailWorkspace
+              fromRoleLayer={expandedFocusRow.fromRoleLayer}
+              fromSessionId={expandedFocusRow.parentSessionId}
+              fromSessionTitle={
+                expandedFocusRow.parentSessionId
+                  ? (sessionTitleById.get(expandedFocusRow.parentSessionId) ?? null)
+                  : null
+              }
+              modeBadge="跨层线程视角"
+              reuseBadge={
+                expandedFocusRow.handoffCount > 1
+                  ? `当前轮次 · 第 ${expandedFocusRow.handoffCount} 轮（复用会话）`
+                  : null
+              }
+              main={
+                <TeamConversationView
+                  key={expandedFocusRow.sessionId}
+                  sessionId={expandedFocusRow.sessionId}
+                  compact
+                  soloMode
+                  beforeMessages={
+                    <LayerProcessPanel
+                      focusHandoffId={focusHandoffId}
+                      records={expandedSessionHandoffs.handoffs}
+                      roleLayer={expandedFocusRow.roleLayer}
+                      sessionId={expandedFocusRow.sessionId}
+                    />
+                  }
+                />
+              }
+              sessionId={expandedFocusRow.sessionId}
+              sessionTitle={expandedFocusRow.title}
+              sidebar={
+                <LayerSummarySidebar
+                  artifactError={artifactError}
+                  artifactLoading={artifactLoading}
+                  dialoguePreview={expandedDialoguePreview}
+                  planArtifact={planArtifact}
+                  reviewArtifact={reviewArtifact}
+                  row={expandedFocusRow}
+                  sessionLabel={expandedFocusRow.sessionId}
+                  specArtifact={specArtifact}
+                  summaryTitle={undefined}
+                  tasksArtifact={tasksArtifact}
+                />
+              }
+              title={expandedFocusRow.title}
+              toRoleLayer={expandedFocusRow.toRoleLayer}
+            />
+          </>
+        ) : (
+          <EmptyState
+            emoji="🧵"
+            title="选择左侧线程节点查看详情"
+            description="右侧会固定展示该层的上下文、产物和正文，左侧节点高度不会再受右侧内容影响。"
+            style={{ flex: 1 }}
+          />
+        )}
+      </div>
+    </div>
+    <RolePromptPreviewPanel
+      layer={promptPreviewLayer}
+      onClose={() => setPromptPreviewLayer(null)}
+    />
+  </div>
+);
+
   if (thread.length === 0) {
+    if (embedded) {
+      return (
+        <EmptyState
+          emoji="🧵"
+          title="暂无跨层对话"
+          description="团队启动后，接待、规划、管控、执行、测试、评审等历史会话会在这里串成线程。"
+          style={{ flex: 1 }}
+        />
+      );
+    }
+
     return (
       <TabContainer
         title="跨层对话线程"
-        subtitle="把一次任务链的层间 handoff 串成一条线程，逐层展开会话内容。"
+        subtitle="把当前会话树的历史层级串成一条线程，逐层展开普通对话内容。"
       >
         <EmptyState
           emoji="🧵"
           title="暂无跨层对话"
-          description="团队启动后，reception → pm1 → pm2 → executor → reviewer 的 handoff 会在这里串成线程。"
+          description="团队启动后，接待、规划、管控、执行、测试、评审等历史会话会在这里串成线程。"
         />
       </TabContainer>
     );
   }
 
+  if (embedded) {
+    return body;
+  }
+
   return (
     <TabContainer
       title="跨层对话线程"
-      subtitle="把一次任务链的层间 handoff 串成一条线程，逐层展开会话内容。"
+      subtitle="把当前会话树的历史层级串成一条线程，逐层展开普通对话内容。"
     >
-      <div style={CONTAINER_STYLE}>
-        {thread.map((entry, idx) => {
-          const color = STATE_COLORS[entry.state] ?? 'var(--fg-muted)';
-          const expanded = Boolean(entry.sessionId && expandedSessionId === entry.sessionId);
-          const isFocus = Boolean(focusHandoffId && entry.id === focusHandoffId);
-          const clickable = Boolean(entry.sessionId);
-          const isLast = idx === thread.length - 1;
-          return (
-            <div key={entry.id} style={{ display: 'flex', gap: 10 }}>
-              {/* 左侧时间轴：圆点 + 连接线 */}
-              <div
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  flexShrink: 0,
-                  width: 14,
-                }}
-              >
-                <span
-                  style={{
-                    width: 10,
-                    height: 10,
-                    borderRadius: 999,
-                    background: color,
-                    marginTop: 12,
-                    boxShadow:
-                      entry.state === 'running'
-                        ? `0 0 0 3px color-mix(in srgb, ${color} 30%, transparent)`
-                        : 'none',
-                  }}
-                />
-                {!isLast ? (
-                  <span
-                    style={{
-                      flex: 1,
-                      width: 2,
-                      background: 'color-mix(in srgb, var(--border-default) 50%, transparent)',
-                      marginTop: 4,
-                    }}
-                  />
-                ) : null}
-              </div>
-
-              {/* 右侧节点卡片 */}
-              <div style={{ flex: 1, minWidth: 0, paddingBottom: isLast ? 0 : 8 }}>
-                <div style={{ display: 'flex', alignItems: 'stretch', gap: 6 }}>
-                  <button
-                    type="button"
-                    onClick={() => handleToggle(entry.sessionId)}
-                    disabled={!clickable}
-                    aria-expanded={expanded}
-                    className="team-card-soft"
-                    style={{
-                      flex: 1,
-                      minWidth: 0,
-                      textAlign: 'left',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      padding: '8px 12px',
-                      borderRadius: 10,
-                      border: isFocus
-                        ? '1px solid color-mix(in srgb, var(--accent) 55%, transparent)'
-                        : `1px solid ${CK_BORDER}`,
-                      background: expanded
-                        ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))'
-                        : CK_SURFACE,
-                      cursor: clickable ? 'pointer' : 'default',
-                      opacity: clickable ? 1 : 0.6,
-                    }}
-                  >
-                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-strong)' }}>
-                      {LAYER_LABELS[entry.fromRoleLayer]} → {LAYER_LABELS[entry.toRoleLayer]}
-                    </span>
-                    <span
-                      style={{
-                        padding: '1px 8px',
-                        borderRadius: 999,
-                        background: `color-mix(in srgb, ${color} 16%, transparent)`,
-                        color,
-                        fontSize: 10,
-                        fontWeight: 700,
-                      }}
-                    >
-                      {STATE_LABELS[entry.state] ?? entry.state}
-                    </span>
-                    <span style={{ flex: 1 }} />
-                    <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
-                      {new Date(entry.updatedAt).toLocaleTimeString()}
-                    </span>
-                    {clickable ? (
-                      <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
-                        {expanded ? '收起 ▲' : '展开 ▼'}
-                      </span>
-                    ) : null}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPromptPreviewLayer(entry.toRoleLayer)}
-                    title={`查看 ${LAYER_LABELS[entry.toRoleLayer]} 层的角色提示词`}
-                    aria-label={`查看 ${LAYER_LABELS[entry.toRoleLayer]} 层的角色提示词`}
-                    style={{
-                      flexShrink: 0,
-                      padding: '0 10px',
-                      borderRadius: 10,
-                      border: '1px solid color-mix(in srgb, var(--accent) 35%, transparent)',
-                      background: 'color-mix(in srgb, var(--accent) 8%, transparent)',
-                      color: 'var(--accent)',
-                      fontSize: 13,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    🧬
-                  </button>
-                </div>
-
-                {entry.summary ? (
-                  <div
-                    style={{
-                      marginTop: 4,
-                      padding: '6px 10px',
-                      borderRadius: 8,
-                      background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base))',
-                      fontSize: 11,
-                      color: 'var(--fg-muted)',
-                      lineHeight: 1.5,
-                      overflow: 'hidden',
-                      display: '-webkit-box',
-                      WebkitLineClamp: 2,
-                      WebkitBoxOrient: 'vertical',
-                    }}
-                    title={entry.summary}
-                  >
-                    {entry.summary}
-                  </div>
-                ) : null}
-
-                {expanded && entry.sessionId ? (
-                  <div
-                    style={{
-                      marginTop: 6,
-                      height: 'min(420px, 50vh)',
-                      borderRadius: 10,
-                      border: `1px solid ${CK_BORDER}`,
-                      overflow: 'hidden',
-                      display: 'flex',
-                      flexDirection: 'column',
-                    }}
-                  >
-                    <TeamConversationView sessionId={entry.sessionId} compact />
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      <RolePromptPreviewPanel
-        layer={promptPreviewLayer}
-        onClose={() => setPromptPreviewLayer(null)}
-      />
+      {body}
     </TabContainer>
   );
 }

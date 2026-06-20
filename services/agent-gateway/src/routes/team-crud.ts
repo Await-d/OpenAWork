@@ -31,6 +31,7 @@ const updateTaskSchema = z.object({
 });
 
 const createMessageSchema = z.object({
+  sessionId: z.string().min(1).nullable().optional(),
   senderId: z.string().optional(),
   recipientMemberId: z.string().nullable().optional(),
   replyToMessageId: z.string().nullable().optional(),
@@ -95,6 +96,7 @@ interface TaskRow {
 
 interface MessageRow {
   id: string;
+  session_id: string | null;
   sender_id: string | null;
   recipient_member_id: string | null;
   reply_to_message_id: string | null;
@@ -374,11 +376,12 @@ export async function teamCrudRoutes(app: FastifyInstance): Promise<void> {
 
       const queryStep = child('query');
       const rows = sqliteAll<MessageRow>(
-        `SELECT id, sender_id, recipient_member_id, reply_to_message_id, content, type, created_at
+        `SELECT id, session_id, sender_id, recipient_member_id, reply_to_message_id, content, type, created_at
            FROM (
              SELECT
                rowid,
                id,
+               session_id,
                sender_id,
                recipient_member_id,
                reply_to_message_id,
@@ -399,6 +402,7 @@ export async function teamCrudRoutes(app: FastifyInstance): Promise<void> {
       return reply.send(
         rows.map((row) => ({
           id: row.id,
+          sessionId: row.session_id,
           memberId: row.sender_id ?? 'system',
           recipientMemberId: row.recipient_member_id,
           replyToMessageId: row.reply_to_message_id,
@@ -426,6 +430,20 @@ export async function teamCrudRoutes(app: FastifyInstance): Promise<void> {
       const parseStep = child('parse-body');
       const body = parseBody(createMessageSchema, request.body);
       parseStep.succeed();
+
+      if (body.sessionId) {
+        const sessionStep = child('validate-session');
+        const session = sqliteGet<{ id: string }>(
+          `SELECT id FROM sessions WHERE user_id = ? AND id = ? LIMIT 1`,
+          [user.sub, body.sessionId],
+        );
+        if (!session) {
+          sessionStep.fail('session not found');
+          step.fail('session not found');
+          return reply.status(404).send(teamCrudRouteErrorPayload('team_session_not_found'));
+        }
+        sessionStep.succeed(undefined, { sessionId: body.sessionId });
+      }
 
       if (body.senderId) {
         const senderStep = child('validate-sender');
@@ -474,6 +492,7 @@ export async function teamCrudRoutes(app: FastifyInstance): Promise<void> {
       appendTeamMessage({
         id,
         userId: user.sub,
+        sessionId: body.sessionId ?? null,
         senderId: body.senderId ?? null,
         recipientMemberId: body.recipientMemberId ?? null,
         replyToMessageId: body.replyToMessageId ?? null,
@@ -485,6 +504,7 @@ export async function teamCrudRoutes(app: FastifyInstance): Promise<void> {
       step.succeed(undefined, { messageId: id, type: body.type });
       return reply.status(201).send({
         id,
+        sessionId: body.sessionId ?? null,
         memberId: body.senderId ?? 'system',
         recipientMemberId: body.recipientMemberId ?? null,
         replyToMessageId: body.replyToMessageId ?? null,

@@ -217,7 +217,15 @@ export function inferReviewDispositionFromFailureReason(
   if (!failureReason) {
     return null;
   }
-  if (failureReason.startsWith('Spec Review 未通过')) {
+
+  // 规划型失败 → 退回 PM1 重新生成 spec/plan/tasks
+  const returnToCPrefixes = [
+    'Spec Review 未通过',
+    'Planning Contract 未通过',
+    'Constitution Check 硬门禁未通过',
+    'Architecture Review 未通过',
+  ];
+  if (returnToCPrefixes.some((prefix) => failureReason.startsWith(prefix))) {
     return {
       action: 'return-to-c',
       reason: failureReason,
@@ -226,6 +234,7 @@ export function inferReviewDispositionFromFailureReason(
       updatedAtMs: 0,
     };
   }
+
   if (failureReason.includes('需要用户介入')) {
     return {
       action: 'escalate-to-user',

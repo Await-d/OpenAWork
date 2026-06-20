@@ -55,6 +55,21 @@ const NOTICE_STYLE: CSSProperties = {
   lineHeight: 1.6,
 };
 
+/**
+ * Returns true when the message carries enough trace data (reasoning
+ * blocks, tool calls, or modified files) to render a non-empty process
+ * outline.  Used by `TeamAssistantReplyCard` to avoid showing an empty
+ * "处理过程（已折叠）" `<details>` when the outline would return null.
+ */
+export function hasProcessContent(message: ChatMessage): boolean {
+  const presentation = buildTeamAssistantPresentation(message);
+  return (
+    presentation.stats.reasoningCount > 0 ||
+    presentation.toolSummaries.length > 0 ||
+    presentation.modifiedFiles.length > 0
+  );
+}
+
 export function TeamAssistantProcessOutline({
   message,
 }: TeamAssistantProcessOutlineProps): React.ReactElement | null {
@@ -88,8 +103,8 @@ export function TeamAssistantProcessOutline({
         <section style={SECTION_STYLE}>
           <span style={SECTION_TITLE_STYLE}>过程摘要</span>
           <ul style={LIST_STYLE}>
-            {toolSummaries.map((item) => (
-              <li key={item} style={ITEM_STYLE}>
+            {toolSummaries.map((item, index) => (
+              <li key={`tool-summary-${index}-${item}`} style={ITEM_STYLE}>
                 <span style={DOT_STYLE} />
                 <span>{item}</span>
               </li>
@@ -108,8 +123,8 @@ export function TeamAssistantProcessOutline({
         <section style={SECTION_STYLE}>
           <span style={SECTION_TITLE_STYLE}>触达文件</span>
           <ul style={LIST_STYLE}>
-            {modifiedFiles.map((file) => (
-              <li key={file} style={ITEM_STYLE}>
+            {modifiedFiles.map((file, index) => (
+              <li key={`modified-file-${index}-${file}`} style={ITEM_STYLE}>
                 <span style={DOT_STYLE} />
                 <code style={{ fontSize: 11, color: 'var(--fg-default)' }}>{file}</code>
               </li>

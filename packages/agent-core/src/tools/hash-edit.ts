@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
+import { lintFile, formatLintFeedback, type LintResult } from './post-write-lint.js';
 
 export interface LineHash {
   lineNumber: number;
@@ -21,7 +22,12 @@ export interface HashAnchoredEditor {
   applyEdit(edit: AnchoredEdit): Promise<{ success: boolean; error?: string }>;
   applyEdits(
     edits: AnchoredEdit[],
-  ): Promise<{ success: boolean; failed: number[]; error?: string }>;
+  ): Promise<{
+    success: boolean;
+    failed: number[];
+    error?: string;
+    lintFeedback?: string;
+  }>;
 }
 
 interface ParsedFile {
@@ -84,7 +90,12 @@ export class HashAnchoredEditorImpl implements HashAnchoredEditor {
 
   async applyEdits(
     edits: AnchoredEdit[],
-  ): Promise<{ success: boolean; failed: number[]; error?: string }> {
+  ): Promise<{
+    success: boolean;
+    failed: number[];
+    error?: string;
+    lintFeedback?: string;
+  }> {
     if (edits.length === 0) {
       return { success: true, failed: [] };
     }
@@ -169,6 +180,19 @@ export class HashAnchoredEditorImpl implements HashAnchoredEditor {
       };
     }
 
-    return { success: true, failed: [] };
+    // Post-Write Delta Lint — 对刚写入的文件执行增量 lint
+    let lintFeedback: string | undefined;
+    try {
+      const lintResults: LintResult[] = [];
+      for (const filePath of writtenFiles) {
+        const result = await lintFile(filePath);
+        lintResults.push(result);
+      }
+      lintFeedback = formatLintFeedback(lintResults) || undefined;
+    } catch {
+      // lint 失败不影响写入成功的事实
+    }
+
+    return { success: true, failed: [], lintFeedback };
   }
 }

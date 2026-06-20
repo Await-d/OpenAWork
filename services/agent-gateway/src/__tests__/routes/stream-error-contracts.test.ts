@@ -1,5 +1,5 @@
 import Fastify, { type FastifyInstance } from 'fastify';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as AuthModule from '../../infra/auth.js';
 import type * as DbModule from '../../infra/db.js';
 import { registerErrorHandler } from '../../infra/error-handler.js';
@@ -10,6 +10,14 @@ process.env['DATABASE_URL'] = ':memory:';
 process.env['JWT_SECRET'] = 'stream-routes-test-secret-1234567890';
 process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
 
+const providerCatalogMocks = vi.hoisted(() => ({
+  getChatProvider: vi.fn(),
+  getFastProvider: vi.fn(),
+  getProviderForSelection: vi.fn(),
+}));
+
+vi.mock('../../provider/provider-catalog.js', () => providerCatalogMocks);
+
 let authPlugin: typeof AuthModule.default;
 let dbModule: typeof DbModule;
 let streamRequestSchema: typeof StreamRoutesModule.streamRequestSchema;
@@ -17,6 +25,7 @@ let streamRoutes: typeof StreamRoutesPluginModule.streamRoutes;
 let STREAM_ERROR_MESSAGES: typeof StreamRoutesModule.STREAM_ERROR_MESSAGES;
 let STREAM_PLUGIN_ERROR_MESSAGES: typeof StreamRoutesPluginModule.STREAM_PLUGIN_ERROR_MESSAGES;
 let createStreamErrorChunk: typeof StreamRoutesModule.createStreamErrorChunk;
+let resolveStreamModelRoute: typeof StreamRoutesModule.resolveStreamModelRoute;
 
 const SESSION_ID = 'sess-stream-routes';
 const USER_ID = 'u-stream-routes';
@@ -58,6 +67,7 @@ beforeAll(async () => {
   streamRequestSchema = streamModule.streamRequestSchema;
   STREAM_ERROR_MESSAGES = streamModule.STREAM_ERROR_MESSAGES;
   createStreamErrorChunk = streamModule.createStreamErrorChunk;
+  resolveStreamModelRoute = streamModule.resolveStreamModelRoute;
   const pluginModule = await import('../../routes/stream-routes-plugin.js');
   streamRoutes = pluginModule.streamRoutes;
   STREAM_PLUGIN_ERROR_MESSAGES = pluginModule.STREAM_PLUGIN_ERROR_MESSAGES;
@@ -66,6 +76,7 @@ beforeAll(async () => {
 beforeEach(() => {
   dbModule.sqliteRun('DELETE FROM sessions', []);
   dbModule.sqliteRun('DELETE FROM users', []);
+  providerCatalogMocks.getProviderForSelection.mockReset();
   seedUser(USER_ID);
   seedSession(SESSION_ID);
 });
@@ -112,6 +123,36 @@ describe('stream error contracts', () => {
       'WebSocket 流式响应处理中断，请稍后重试。',
     );
     expect(STREAM_PLUGIN_ERROR_MESSAGES.sseStreamError).toBe('SSE 流式响应处理中断，请稍后重试。');
+  });
+
+  it('Team metadata 固定模型不可用时不 fallback 到 Chat 默认模型', async () => {
+    providerCatalogMocks.getProviderForSelection.mockResolvedValueOnce(null);
+
+    await expect(
+      resolveStreamModelRoute({
+        metadataJson: JSON.stringify({
+          teamDefinition: { version: 2 },
+          providerId: 'fixed-provider',
+          modelId: 'fixed-model',
+        }),
+        requestData: {
+          clientRequestId: 'req-fixed-model',
+          maxTokens: 2048,
+          message: 'hello',
+          temperature: 1,
+        },
+        userId: USER_ID,
+      }),
+    ).rejects.toMatchObject({ code: 'TEAM_MODEL_BINDING_UNAVAILABLE' });
+
+    expect(providerCatalogMocks.getProviderForSelection).toHaveBeenCalledWith(
+      USER_ID,
+      {
+        providerId: 'fixed-provider',
+        modelId: 'fixed-model',
+      },
+      { fallbackToChat: false },
+    );
   });
 
   it('GET /sessions/:id/stream/attach 在请求流已失活时返回中文 409', async () => {

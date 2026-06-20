@@ -1,5 +1,19 @@
 import { cancelHandoff, pauseHandoff, resumeHandoff } from '../handoff/store/handoff-store.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
+import { submitInboundMessage } from '../handoff/store/inbound-store.js';
+
+const TEAM_RUNTIME_CONTROL_SESSION_LIMIT = 200;
+const TEAM_RUNTIME_CONTROL_MAX_DEPTH = 16;
+
+/**
+ * substate 终态集合——这些状态的 session 不需要恢复，直接跳过。
+ */
+const TERMINAL_SUBSTATES = new Set(['completed', 'failed', 'cancelled']);
+
+/**
+ * 需要用户交互才能继续的 substate——不注入 resume_signal，改为写提示消息。
+ */
+const USER_BLOCKED_SUBSTATES = new Set(['clarifying']);
 
 interface TeamRuntimeControlScopeRow {
   id: string;
@@ -12,15 +26,29 @@ interface TeamRuntimeControlSessionRow {
   paused_at: string | null;
 }
 
+interface TeamRuntimeControlPausedSessionWithSubstateRow {
+  id: string;
+  paused: number;
+  paused_at: string | null;
+  role_layer: string | null;
+  substate: string | null;
+}
+
 interface TeamRuntimeControlHandoffRow {
   id: string;
 }
 
 export interface TeamRuntimeControlScope {
   controllableSessionIds: string[];
+  depthLimitReached: boolean;
+  limitReached: boolean;
+  omittedSessionCount: number;
   rootRoleLayer: string | null;
   rootSessionId: string;
+  sessionLimit: number;
+  sessionMaxDepth: number;
   treeSessionIds: string[];
+  truncated: boolean;
 }
 
 export interface PauseTeamRuntimeTreeResult extends TeamRuntimeControlScope {
@@ -32,6 +60,28 @@ export interface ResumeTeamRuntimeTreeResult extends TeamRuntimeControlScope {
   resumedHandoffIds: string[];
   resumedSessionIds: string[];
   staleSessionCount: number;
+  /** 被跳过的 session（终态或需用户交互） */
+  skippedSessionIds: string[];
+  /** 因 substate=clarifying 被保持暂停、已写提示消息的 session */
+  userBlockedSessionIds: string[];
+  /** 分层恢复详情 */
+  layerResumeDetails: LayerResumeDetail[];
+}
+
+/**
+ * 每层的恢复动作分类。
+ */
+export type LayerResumeAction =
+  | 'resumed'          // 正常恢复（注入 resume_signal）
+  | 'skipped_terminal' // 终态，无需恢复
+  | 'skipped_user_blocked' // clarifying 等需用户交互，保持暂停 + 写提示
+  | 'skipped_not_paused';  // 本来就没暂停
+
+export interface LayerResumeDetail {
+  sessionId: string;
+  roleLayer: string | null;
+  substate: string | null;
+  action: LayerResumeAction;
 }
 
 export interface CancelTeamRuntimeTreeResult extends TeamRuntimeControlScope {
@@ -53,23 +103,46 @@ export function resolveTeamRuntimeControlScope(input: {
     return null;
   }
 
-  const treeRows = sqliteAll<{ id: string }>(
-    `WITH RECURSIVE session_tree(id) AS (
-       SELECT id
+  const rawTreeRows = sqliteAll<{ depth: number; id: string }>(
+    `WITH RECURSIVE session_tree(id, depth, path) AS (
+       SELECT id,
+              0,
+              char(31) || id || char(31)
          FROM sessions
         WHERE id = ? AND user_id = ?
        UNION ALL
-       SELECT child.id
+       SELECT child.id,
+              tree.depth + 1,
+              tree.path || child.id || char(31)
          FROM sessions child
          JOIN session_tree tree
            ON child.team_parent_session_id = tree.id
         WHERE child.user_id = ?
+          AND tree.depth < ?
+          AND instr(tree.path, char(31) || child.id || char(31)) = 0
      )
-     SELECT id FROM session_tree`,
-    [input.rootSessionId, input.userId, input.userId],
+     SELECT id, MIN(depth) AS depth
+       FROM session_tree
+      GROUP BY id
+      ORDER BY depth ASC, id ASC
+     LIMIT ?`,
+    [
+      input.rootSessionId,
+      input.userId,
+      input.userId,
+      TEAM_RUNTIME_CONTROL_MAX_DEPTH + 1,
+      TEAM_RUNTIME_CONTROL_SESSION_LIMIT + 1,
+    ],
   );
 
-  const treeSessionIds = treeRows.map((row) => row.id);
+  const rowsWithinDepth = rawTreeRows.filter((row) => row.depth <= TEAM_RUNTIME_CONTROL_MAX_DEPTH);
+  const depthLimitReached = rawTreeRows.some((row) => row.depth > TEAM_RUNTIME_CONTROL_MAX_DEPTH);
+  const limitReached = rowsWithinDepth.length > TEAM_RUNTIME_CONTROL_SESSION_LIMIT;
+  const includedRows = rowsWithinDepth.slice(0, TEAM_RUNTIME_CONTROL_SESSION_LIMIT);
+  const omittedSessionCount =
+    Math.max(0, rowsWithinDepth.length - includedRows.length) +
+    rawTreeRows.filter((row) => row.depth > TEAM_RUNTIME_CONTROL_MAX_DEPTH).length;
+  const treeSessionIds = includedRows.map((row) => row.id);
   const controllableSessionIds =
     root.role_layer === 'reception'
       ? treeSessionIds.filter((sessionId) => sessionId !== input.rootSessionId)
@@ -77,9 +150,15 @@ export function resolveTeamRuntimeControlScope(input: {
 
   return {
     controllableSessionIds,
+    depthLimitReached,
+    limitReached,
+    omittedSessionCount,
     rootRoleLayer: root.role_layer,
     rootSessionId: input.rootSessionId,
+    sessionLimit: TEAM_RUNTIME_CONTROL_SESSION_LIMIT,
+    sessionMaxDepth: TEAM_RUNTIME_CONTROL_MAX_DEPTH,
     treeSessionIds,
+    truncated: limitReached || depthLimitReached,
   };
 }
 
@@ -133,6 +212,16 @@ export function pauseTeamRuntimeTree(input: {
   };
 }
 
+/**
+ * 分层恢复：按 session 的 substate 决定恢复动作。
+ *
+ * 恢复决策矩阵：
+ *   - 终态（completed/failed/cancelled）→ 跳过
+ *   - 用户阻塞态（clarifying）→ 保持暂停，写提示消息让用户回答
+ *   - 其他非终态 → 正常恢复（unpause + resume_signal）
+ *
+ * 与旧版区别：不再一刀切地 unpaused 所有 session，而是按 substate 精细控制。
+ */
 export function resumeTeamRuntimeTree(input: {
   rootSessionId: string;
   userId: string;
@@ -142,15 +231,88 @@ export function resumeTeamRuntimeTree(input: {
     return null;
   }
 
-  const pausedSessionRows = selectPausedSessionRows({
+  // ── 收集子树中所有暂停 session 的 substate ────────────────────────
+  const pausedSessionRows = selectPausedSessionRowsWithSubstate({
     sessionIds: scope.controllableSessionIds,
     userId: input.userId,
   });
-  const resumedSessionIds = pausedSessionRows.map((row) => row.id);
-  const staleSessionCount = pausedSessionRows.filter(
-    (row) => row.paused_at !== null && row.paused_at < oneHourAgoSqliteDateTime(),
-  ).length;
 
+  const resumedSessionIds: string[] = [];
+  const skippedSessionIds: string[] = [];
+  const userBlockedSessionIds: string[] = [];
+  const layerResumeDetails: LayerResumeDetail[] = [];
+
+  for (const row of pausedSessionRows) {
+    const substate = row.substate;
+
+    if (substate && TERMINAL_SUBSTATES.has(substate)) {
+      // 终态 session：unpause 但不发 resume_signal（它已经结束了）
+      skippedSessionIds.push(row.id);
+      layerResumeDetails.push({
+        sessionId: row.id,
+        roleLayer: row.role_layer,
+        substate,
+        action: 'skipped_terminal',
+      });
+      // 仍清除 paused 标志，避免界面停在"暂停"态
+      sqliteRun(
+        `UPDATE sessions
+            SET paused = 0,
+                paused_at = NULL,
+                paused_by_user_id = NULL,
+                pause_reason = NULL,
+                updated_at = datetime('now')
+          WHERE id = ? AND user_id = ? AND paused = 1`,
+        [row.id, input.userId],
+      );
+      continue;
+    }
+
+    if (substate && USER_BLOCKED_SUBSTATES.has(substate)) {
+      // 用户阻塞态：保持暂停，写提示消息
+      userBlockedSessionIds.push(row.id);
+      layerResumeDetails.push({
+        sessionId: row.id,
+        roleLayer: row.role_layer,
+        substate,
+        action: 'skipped_user_blocked',
+      });
+      // 不 unpaused，不发 resume_signal
+      // 写一条 inbound message 提示用户需要回答澄清问题
+      // 使用 clarification_answer 类型：pm1 的 allowedInboundTypes 包含它，
+      // 且语义比 user_input 更准确——这是对之前 clarification 请求的回复。
+      try {
+        submitInboundMessage({
+          userId: input.userId,
+          toSessionId: row.id,
+          fromRoleLayer: 'system',
+          messageType: 'clarification_answer',
+          payload: {
+            text: '用户已恢复团队会话。该会话之前正在等待你的澄清回答，请在对话中回答之前的提问以继续推进。',
+            source: 'resume-all-user-blocked-hint',
+          },
+        });
+      } catch (err) {
+        console.warn(
+          `[resume-tree] 写用户阻塞提示失败（${row.id}）：${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+      continue;
+    }
+
+    // 正常恢复：unpause + 后续会注入 resume_signal
+    resumedSessionIds.push(row.id);
+    layerResumeDetails.push({
+      sessionId: row.id,
+      roleLayer: row.role_layer,
+      substate: substate ?? null,
+      action: 'resumed',
+    });
+  }
+
+  // ── 批量 unpaused 正常恢复的 session ──────────────────────────────
   if (resumedSessionIds.length > 0) {
     sqliteRun(
       `UPDATE sessions
@@ -166,6 +328,12 @@ export function resumeTeamRuntimeTree(input: {
     );
   }
 
+  // ── stale 统计（暂停超过 1 小时） ─────────────────────────────────
+  const staleSessionCount = pausedSessionRows.filter(
+    (row) => row.paused_at !== null && row.paused_at < oneHourAgoSqliteDateTime(),
+  ).length;
+
+  // ── 恢复暂停的 handoff ────────────────────────────────────────────
   const handoffIds = listControllableHandoffIds({
     paused: true,
     sessionIds: scope.treeSessionIds,
@@ -183,6 +351,9 @@ export function resumeTeamRuntimeTree(input: {
     resumedHandoffIds,
     resumedSessionIds,
     staleSessionCount,
+    skippedSessionIds,
+    userBlockedSessionIds,
+    layerResumeDetails,
   };
 }
 
@@ -274,16 +445,16 @@ function oneHourAgoSqliteDateTime(): string {
   return sqliteGet<{ value: string }>(`SELECT datetime('now', '-1 hour') AS value`)?.value ?? '';
 }
 
-function selectPausedSessionRows(input: {
+function selectPausedSessionRowsWithSubstate(input: {
   sessionIds: string[];
   userId: string;
-}): TeamRuntimeControlSessionRow[] {
+}): TeamRuntimeControlPausedSessionWithSubstateRow[] {
   if (input.sessionIds.length === 0) {
     return [];
   }
 
-  return sqliteAll<TeamRuntimeControlSessionRow>(
-    `SELECT id, paused, paused_at
+  return sqliteAll<TeamRuntimeControlPausedSessionWithSubstateRow>(
+    `SELECT id, paused, paused_at, role_layer, substate
        FROM sessions
       WHERE user_id = ?
         AND paused = 1

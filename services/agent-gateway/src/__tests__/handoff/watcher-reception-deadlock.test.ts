@@ -65,6 +65,15 @@ function getSubstate(sessionId: string): string | null {
   );
 }
 
+function getStateStatus(sessionId: string): string | null {
+  return (
+    dbModule.sqliteGet<{ state_status: string | null }>(
+      `SELECT state_status FROM sessions WHERE id = ?`,
+      [sessionId],
+    )?.state_status ?? null
+  );
+}
+
 function messageCount(sessionId: string): number {
   return (
     dbModule.sqliteGet<{ c: number }>(`SELECT COUNT(*) AS c FROM message_v2 WHERE session_id = ?`, [
@@ -104,6 +113,7 @@ describe('reconcileStuckReceptionSessions（经 recoveryTick）', () => {
     await watcher.recoveryTick();
 
     expect(getSubstate(RECEPTION_ID)).toBe('idle');
+    expect(getStateStatus(RECEPTION_ID)).toBe('idle');
     expect(messageCount(RECEPTION_ID)).toBeGreaterThanOrEqual(1);
   });
 
@@ -141,6 +151,7 @@ describe('reconcileStuckReceptionSessions（经 recoveryTick）', () => {
     await watcher.recoveryTick();
 
     expect(getSubstate(RECEPTION_ID)).toBe('idle');
+    expect(getStateStatus(RECEPTION_ID)).toBe('idle');
     expect(messageCount(RECEPTION_ID)).toBe(0);
   });
 });

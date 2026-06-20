@@ -261,6 +261,7 @@ function validateToolCallIntegrity(content: MessageContent[], _sessionId: string
 }
 
 function mirrorSessionMessageForLegacySearch(input: {
+  agentId?: string | null;
   clientRequestId?: string | null;
   content: MessageContent[];
   createdAt: number;
@@ -278,13 +279,14 @@ function mirrorSessionMessageForLegacySearch(input: {
   const contentJson = JSON.stringify(input.content);
 
   sqliteRun(
-    `INSERT INTO session_messages (id, session_id, user_id, seq, role, content_json, status, client_request_id, created_at_ms, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    `INSERT INTO session_messages (id, session_id, user_id, seq, role, content_json, status, client_request_id, agent_id, created_at_ms, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
      ON CONFLICT(id) DO UPDATE SET
        role = excluded.role,
        content_json = excluded.content_json,
        status = excluded.status,
        client_request_id = excluded.client_request_id,
+       agent_id = excluded.agent_id,
        created_at_ms = excluded.created_at_ms,
        updated_at = datetime('now')`,
     [
@@ -296,6 +298,7 @@ function mirrorSessionMessageForLegacySearch(input: {
       contentJson,
       input.status ?? 'final',
       input.clientRequestId ?? null,
+      input.agentId ?? null,
       input.createdAt,
     ],
   );
@@ -685,6 +688,7 @@ export function appendSessionMessageV2(input: {
   }
 
   mirrorSessionMessageForLegacySearch({
+    agentId: input.agentId,
     clientRequestId: input.clientRequestId,
     content: input.content,
     createdAt: timeCreated,

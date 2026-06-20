@@ -41,7 +41,7 @@ function estimateTokensFromText(text: string | null | undefined): number {
  * would leave reception / pm1 / pm2 / quality-review calls pending
  * forever (and, via the in-flight dedup sets, wedge the whole runtime).
  */
-const DEFAULT_WORKFLOW_LLM_TIMEOUT_MS = 60_000;
+const DEFAULT_WORKFLOW_LLM_TIMEOUT_MS = 300_000;
 
 export interface WorkflowLlmRequestConfig {
   apiBaseUrl: string;

@@ -4,12 +4,14 @@ import type {
   DAGEdge,
   DAGEvent,
   DAGEventHandler,
+  DAGEventSubscription,
   WorkflowMode,
   RetryPolicy,
   FailureEscalationRecord,
   RootCauseAnalysis,
   DAGNodeStatus,
 } from './types.js';
+import { checkHallucination, diagnoseNodeIssues, isRetryBudgetExhausted } from './hallucination-checker.js';
 
 const DEFAULT_RETRY_POLICY: RetryPolicy = {
   maxRetries: 1,
@@ -19,7 +21,7 @@ const DEFAULT_RETRY_POLICY: RetryPolicy = {
 
 export class DAGRunner {
   private dags = new Map<string, AgentDAG>();
-  private eventHandlers = new Map<string, Set<DAGEventHandler>>();
+  private eventHandlers = new Map<string, DAGEventSubscription[]>();
 
   store(dag: AgentDAG): void {
     this.dags.set(dag.id, dag);
@@ -30,30 +32,46 @@ export class DAGRunner {
   }
 
   subscribe(dagId: string, handler: DAGEventHandler): () => void {
+    return this.subscribeWithPriority(dagId, { handler });
+  }
+
+  subscribeWithPriority(dagId: string, subscription: DAGEventSubscription): () => void {
     if (!this.eventHandlers.has(dagId)) {
-      this.eventHandlers.set(dagId, new Set());
+      this.eventHandlers.set(dagId, []);
     }
-    this.eventHandlers.get(dagId)!.add(handler);
-    return () => this.eventHandlers.get(dagId)?.delete(handler);
+    this.eventHandlers.get(dagId)!.push(subscription);
+    // 按 priority 升序排序（默认 priority=0）
+    this.eventHandlers.get(dagId)!.sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0));
+    return () => {
+      const list = this.eventHandlers.get(dagId);
+      if (!list) return;
+      const idx = list.indexOf(subscription);
+      if (idx >= 0) list.splice(idx, 1);
+    };
   }
 
   emit(dagId: string, event: DAGEvent): void {
-    const handlers = this.eventHandlers.get(dagId);
-    if (!handlers) {
+    const subscriptions = this.eventHandlers.get(dagId);
+    if (!subscriptions || subscriptions.length === 0) {
       return;
     }
-    // Per-subscriber fault isolation: a throwing handler (e.g. a closed
-    // SSE/WS socket whose write rejects, or a buggy listener) must not abort
-    // delivery to the remaining subscribers nor bubble back into the
-    // orchestration loop that called `emit` (several emits — notably the
-    // terminal `dag_completed` — run inside `executeDAG`). Snapshot the set so
-    // a handler that unsubscribes itself mid-dispatch can't shift iteration.
-    for (const h of [...handlers]) {
+    // Per-subscriber fault isolation with priority ordering (spec-kit v0.10.0):
+    // handlers execute in priority order. A throwing handler with
+    // continueOnError=true (default) is isolated and doesn't block subsequent
+    // handlers. Only when continueOnError=false does the error propagate.
+    // Snapshot the array so a handler that unsubscribes itself mid-dispatch
+    // can't shift iteration.
+    for (const subscription of [...subscriptions]) {
       try {
-        h(event);
+        subscription.handler(event);
       } catch (err) {
+        const handlerName = subscription.name ?? 'anonymous';
+        if (subscription.continueOnError === false) {
+          // Re-throw: caller explicitly opted out of fault isolation
+          throw err;
+        }
         console.warn(
-          `[multi-agent] DAG event handler threw, isolating: ${
+          `[multi-agent] DAG event handler "${handlerName}" threw, isolating: ${
             err instanceof Error ? err.message : String(err)
           }`,
         );
@@ -175,6 +193,41 @@ export class DAGRunner {
         });
 
         const output = await executeNodeWithTimeout(node, (signal) => executor(node, mode, signal));
+
+        // 临时设置 output 以供幻觉检测器读取
+        const previousOutput = node.output;
+        node.output = output;
+
+        // 幻觉检测门禁 — 验证节点输出是否真实（参考 hermes-agent v0.13.0）
+        const hallucinationResult = checkHallucination(node);
+        node.hallucinationCheck = hallucinationResult;
+
+        if (!hallucinationResult.passed && !isRetryBudgetExhausted(node)) {
+          // 检测到幻觉且重试预算未耗尽 → 恢复旧 output，标记为失败并重试
+          node.output = previousOutput;
+          this.emit(dagId, {
+            type: 'hallucination_detected',
+            nodeId: node.id,
+            issues: hallucinationResult.issues.map((i) => ({ type: i.type, detail: i.detail })),
+            timestamp: Date.now(),
+          });
+          throw new Error(
+            `Hallucination detected: ${hallucinationResult.issues.map((i) => i.detail).join('; ')}`,
+          );
+        }
+
+        // 诊断引擎：检查异常模式
+        const diagnosticAlerts = diagnoseNodeIssues(node);
+        for (const alert of diagnosticAlerts) {
+          this.emit(dagId, {
+            type: 'diagnostic_alert',
+            nodeId: node.id,
+            pattern: alert.pattern,
+            detail: alert.detail,
+            timestamp: Date.now(),
+          });
+        }
+
         this.updateNodeStatus(dagId, node.id, 'completed', output);
         this.emit(dagId, {
           type: 'node_completed',
@@ -376,6 +429,7 @@ export type {
   DAGEdge,
   DAGEvent,
   DAGEventHandler,
+  DAGEventSubscription,
   WorkflowMode,
   RetryPolicy,
   FailureEscalationRecord,

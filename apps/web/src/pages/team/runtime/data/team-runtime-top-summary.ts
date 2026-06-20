@@ -1,32 +1,22 @@
+import {
+  formatTeamRuntimeSemanticStatus,
+  type TeamRuntimeSemanticStatus,
+} from './team-runtime-status.js';
+
 export function resolveTopSummaryStatus(input: {
   hasPausedRuntimeSessions: boolean;
-  selectedRuntimeSessionPaused?: boolean | null;
-  selectedRuntimeSessionStateStatus?: string | null;
-  selectedSharedSessionStateStatus?: string | null;
+  selectedRuntimeStatus?: TeamRuntimeSemanticStatus | null;
+  selectedSharedStatus?: TeamRuntimeSemanticStatus | null;
 }): string {
-  if (
-    input.selectedSharedSessionStateStatus === 'paused' ||
-    input.selectedSharedSessionStateStatus === 'idle'
-  ) {
+  if (input.selectedSharedStatus === 'paused') {
     return '已暂停';
   }
 
-  if (input.selectedRuntimeSessionPaused === true) {
+  if (input.selectedRuntimeStatus === 'paused') {
     return '已暂停';
   }
 
-  if (
-    input.selectedRuntimeSessionStateStatus === 'paused' ||
-    input.selectedRuntimeSessionStateStatus === 'idle'
-  ) {
-    return '已暂停';
-  }
-
-  if (
-    input.selectedRuntimeSessionPaused != null ||
-    input.selectedSharedSessionStateStatus != null ||
-    input.selectedRuntimeSessionStateStatus != null
-  ) {
+  if (input.selectedRuntimeStatus != null || input.selectedSharedStatus != null) {
     return '运行中';
   }
 
@@ -56,32 +46,13 @@ export function resolveTopSummaryAudience(input: {
 }
 
 function resolveRuntimeSessionStatusLabel(input: {
-  paused?: boolean | null;
-  stateStatus?: string | null;
+  status?: TeamRuntimeSemanticStatus | null;
 }): string {
-  if (input.paused === true || input.stateStatus === 'paused' || input.stateStatus === 'idle') {
-    return '已暂停';
-  }
-  if (input.stateStatus === 'running') {
-    return '运行中';
-  }
-  if (input.stateStatus === 'failed') {
-    return '失败';
-  }
-  if (input.stateStatus === 'completed') {
-    return '已完成';
-  }
-  return '空闲';
+  return formatTeamRuntimeSemanticStatus(input.status ?? 'idle');
 }
 
-function resolveSharedSessionStatusLabel(stateStatus?: string | null): string {
-  if (stateStatus === 'running') {
-    return '运行中';
-  }
-  if (stateStatus === 'paused' || stateStatus === 'idle') {
-    return '已暂停';
-  }
-  return '已空闲';
+function resolveSharedSessionStatusLabel(status?: TeamRuntimeSemanticStatus | null): string {
+  return formatTeamRuntimeSemanticStatus(status ?? 'idle');
 }
 
 export function resolveTopSummaryTitle(input: {
@@ -118,11 +89,10 @@ export function resolveTopSummaryDescription(input: {
   activeWorkspaceName?: string | null;
   activeWorkspaceWorkingRoot?: string | null;
   selectedRuntimeSessionId?: string | null;
-  selectedRuntimeSessionPaused?: boolean | null;
-  selectedRuntimeSessionStateStatus?: string | null;
+  selectedRuntimeStatus?: TeamRuntimeSemanticStatus | null;
   selectedRuntimeSessionTitle?: string | null;
   selectedSharedSessionId?: string | null;
-  selectedSharedSessionStateStatus?: string | null;
+  selectedSharedStatus?: TeamRuntimeSemanticStatus | null;
   selectedSharedSessionTitle?: string | null;
   selectedSharedWorkspaceLabel?: string | null;
   workspaceOverviewLead?: string | null;
@@ -130,8 +100,7 @@ export function resolveTopSummaryDescription(input: {
   const runtimeTitle = input.selectedRuntimeSessionTitle?.trim() || input.selectedRuntimeSessionId;
   if (runtimeTitle) {
     return `当前会话：${runtimeTitle} · ${resolveRuntimeSessionStatusLabel({
-      paused: input.selectedRuntimeSessionPaused,
-      stateStatus: input.selectedRuntimeSessionStateStatus,
+      status: input.selectedRuntimeStatus,
     })}`;
   }
 
@@ -140,7 +109,7 @@ export function resolveTopSummaryDescription(input: {
     const workspaceSuffix = input.selectedSharedWorkspaceLabel
       ? ` · ${input.selectedSharedWorkspaceLabel}`
       : '';
-    return `当前共享：${sharedTitle} · ${resolveSharedSessionStatusLabel(input.selectedSharedSessionStateStatus)}${workspaceSuffix}`;
+    return `当前共享：${sharedTitle} · ${resolveSharedSessionStatusLabel(input.selectedSharedStatus)}${workspaceSuffix}`;
   }
 
   if (input.activeWorkspaceName?.trim()) {

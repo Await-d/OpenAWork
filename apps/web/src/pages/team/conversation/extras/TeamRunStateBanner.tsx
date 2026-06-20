@@ -13,16 +13,14 @@
  *   - idle       : 不渲染（还没开始，交给空态卡片引导）
  */
 
-import { useMemo, type CSSProperties } from 'react';
+import { useMemo, type CSSProperties, type ReactNode } from 'react';
 import { useTeamRunState, type TeamRunPhase } from '../../runtime/hooks/use-team-run-state.js';
+import type { TeamRuntimeDiagnostics } from '@openAwork/web-client';
 
 export interface TeamRunStateBannerProps {
-  /**
-   * 接待会话自身的 state_status。提交需求后、子 handoff 尚未出现的早期窗口，
-   * reception 会话可能处于 running（direct 直答 / orchestrate 改写中），此时也应
-   * 显示「运行中」，避免出现「明明在跑却显示空闲」的空窗。
-   */
+  diagnostics?: TeamRuntimeDiagnostics;
   receptionStateStatus?: 'idle' | 'running' | 'paused' | null;
+  rightSlot?: ReactNode;
 }
 
 const LAYER_LABEL: Record<string, string> = {
@@ -53,16 +51,17 @@ function formatAgo(ms: number | null): string | null {
 const CONTAINER_BASE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 10,
+  gap: 8,
   flexShrink: 0,
-  padding: '8px 14px',
-  borderBottom: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
+  padding: '5px 10px',
+  borderBottom: '1px solid',
   fontSize: 12,
+  fontWeight: 500,
 };
 
 const SPINNER_STYLE: CSSProperties = {
-  width: 12,
-  height: 12,
+  width: 10,
+  height: 10,
   borderRadius: '50%',
   border: '2px solid color-mix(in srgb, var(--accent) 30%, transparent)',
   borderTopColor: 'var(--accent)',
@@ -72,7 +71,11 @@ const SPINNER_STYLE: CSSProperties = {
 
 const DANGER = 'var(--danger, #e5484d)';
 
-export function TeamRunStateBanner({ receptionStateStatus }: TeamRunStateBannerProps = {}) {
+export function TeamRunStateBanner({
+  diagnostics,
+  receptionStateStatus,
+  rightSlot,
+}: TeamRunStateBannerProps = {}) {
   const run = useTeamRunState();
 
   // reception 会话自身在跑（早期编排窗口），但还没有子 handoff → 也显示 working，
@@ -96,6 +99,12 @@ export function TeamRunStateBanner({ receptionStateStatus }: TeamRunStateBannerP
 
   const ago = formatAgo(run.lastActivityAgoMs);
   const layerName = run.activeLayer ? (LAYER_LABEL[run.activeLayer] ?? run.activeLayer) : null;
+  const topAlert = diagnostics?.activeAlerts?.[0] ?? null;
+  const latestIncident = diagnostics?.incidents?.[0] ?? null;
+  const diagnosticsSummary =
+    topAlert?.message?.trim() ||
+    latestIncident?.message?.trim() ||
+    null;
 
   let detail: string;
   switch (effectivePhase) {
@@ -104,6 +113,7 @@ export function TeamRunStateBanner({ receptionStateStatus }: TeamRunStateBannerP
         run.activeCount > 0 ? `${run.activeCount} 个活跃任务` : '正在准备任务',
         layerName ? `正在「${layerName}」层` : null,
         ago ? `最后活动 ${ago}` : null,
+        diagnosticsSummary ? `关注：${diagnosticsSummary}` : null,
       ]
         .filter(Boolean)
         .join(' · ');
@@ -111,10 +121,14 @@ export function TeamRunStateBanner({ receptionStateStatus }: TeamRunStateBannerP
     case 'stalled':
       detail = `${run.activeCount} 个任务${
         ago ? `已 ${ago}` : ''
-      }无新活动——可能在等待长耗时调用，或已卡住，可在「任务」tab 查看或取消`;
+      }无新活动——可能在等待长耗时调用，或已卡住，可在「任务」tab 查看或取消${
+        diagnosticsSummary ? ` · 线索：${diagnosticsSummary}` : ''
+      }`;
       break;
     case 'failed':
-      detail = `${run.failedCount} 个任务失败，请到「任务 / 评审」tab 查看详情并重试`;
+      detail = `${run.failedCount} 个任务失败，请到「任务 / 评审」tab 查看详情并重试${
+        diagnosticsSummary ? ` · 原因：${diagnosticsSummary}` : ''
+      }`;
       break;
     case 'completed':
       detail = `共 ${run.completedCount}/${run.totalCount} 个任务完成${
@@ -122,7 +136,9 @@ export function TeamRunStateBanner({ receptionStateStatus }: TeamRunStateBannerP
       }${run.cancelledCount > 0 ? `，${run.cancelledCount} 个已取消` : ''}`;
       break;
     case 'disconnected':
-      detail = '与团队的实时连接已断开，当前状态可能不是最新，正在尝试重连…';
+      detail = `与团队的实时连接已断开，当前状态可能不是最新，正在尝试重连…${
+        diagnosticsSummary ? ` · 最近异常：${diagnosticsSummary}` : ''
+      }`;
       break;
     default:
       detail = '';
@@ -139,14 +155,15 @@ export function TeamRunStateBanner({ receptionStateStatus }: TeamRunStateBannerP
       {visual.spinning ? (
         <span style={SPINNER_STYLE} aria-hidden />
       ) : (
-        <span aria-hidden style={{ fontSize: 13 }}>
+        <span aria-hidden style={{ fontSize: 12 }}>
           {visual.icon}
         </span>
       )}
-      <strong style={{ color: 'var(--fg-strong)', fontWeight: 800, flexShrink: 0 }}>
+      <strong style={{ color: visual.color, fontWeight: 700, flexShrink: 0, fontSize: 12 }}>
         {visual.title}
       </strong>
-      <span style={{ color: 'var(--fg-muted)', minWidth: 0, lineHeight: 1.4 }}>{detail}</span>
+      <span style={{ color: 'var(--fg-muted)', minWidth: 0, lineHeight: 1.4, fontSize: 11, flex: 1 }}>{detail}</span>
+      {rightSlot && <div style={{ flexShrink: 0, marginLeft: 'auto' }}>{rightSlot}</div>}
     </div>
   );
 }

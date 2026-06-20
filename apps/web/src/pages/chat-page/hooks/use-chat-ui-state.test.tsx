@@ -29,6 +29,7 @@ const WS_B = '/workspace/beta';
  */
 function resetUiStateStore() {
   useUIStateStore.setState({
+    chatView: 'home',
     rightOpen: false,
     rightTab: 'overview',
     editorMode: false,
@@ -244,5 +245,26 @@ describe('useChatUiState — sidebar 透传', () => {
     expect(typeof result.current.isNarrowViewport).toBe('boolean');
     expect(typeof result.current.shouldOverlaySidebar).toBe('boolean');
     expect(typeof result.current.sidebarWidth).toBe('string');
+  });
+});
+
+describe('useUIStateStore — chatView 导航', () => {
+  it('已处于 session 视图时再次 navigateToSession 不会广播更新', () => {
+    useUIStateStore.setState({ chatView: 'session' });
+    let updateCount = 0;
+    const unsubscribe = useUIStateStore.subscribe(() => {
+      updateCount += 1;
+    });
+
+    try {
+      act(() => {
+        useUIStateStore.getState().navigateToSession();
+      });
+
+      expect(useUIStateStore.getState().chatView).toBe('session');
+      expect(updateCount).toBe(0);
+    } finally {
+      unsubscribe();
+    }
   });
 });

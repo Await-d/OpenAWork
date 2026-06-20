@@ -27,15 +27,13 @@ export interface TeamInitSummaryPanelProps {
   variant?: 'compact' | 'full';
 }
 
-const DANGER = 'var(--danger, #e5484d)';
-
 const STATUS_META: Record<TeamInitStepStatus, { label: string; color: string; icon: string }> = {
   proposed: { label: '待确认', color: 'var(--fg-muted)', icon: '○' },
   confirmed: { label: '已确认', color: 'var(--accent)', icon: '◔' },
   running: { label: '执行中', color: 'var(--accent)', icon: '◌' },
   done: { label: '已完成', color: 'var(--success)', icon: '●' },
   skipped: { label: '已跳过', color: 'var(--fg-muted)', icon: '–' },
-  failed: { label: '失败', color: DANGER, icon: '✕' },
+  failed: { label: '失败', color: 'var(--danger)', icon: '✕' },
   not_applicable: { label: '不适用', color: 'var(--fg-muted)', icon: '·' },
 };
 
@@ -196,8 +194,26 @@ export function TeamInitSummaryPanel({
     (bindResult?.['perLayer'] as
       | Record<string, { skillIds: string[]; mcpServerIds: string[]; rationale: string | null }>
       | undefined) ?? {};
+  const deferredEmptyInit =
+    teamInit.projectKind === 'empty' &&
+    teamInit.steps.some(
+      (step) =>
+        (step.key === 'bind-tools-per-layer' || step.key === 'scaffold-memory') &&
+        step.status === 'not_applicable',
+    );
 
   const sections: ReactNode[] = [];
+
+  if (deferredEmptyInit) {
+    sections.push(
+      <div key="deferred-empty">
+        <div style={SECTION_LABEL_STYLE}>空项目初始化策略</div>
+        <div style={{ ...SUBBLOCK_STYLE, color: 'var(--fg-default)' }}>
+          当前工作区尚无项目内容，已暂缓工具绑定与项目记忆生成；收到首个明确需求后会按目标自动初始化。
+        </div>
+      </div>,
+    );
+  }
 
   if (teamInit?.bindings.architectureSummary) {
     sections.push(
@@ -254,7 +270,9 @@ export function TeamInitSummaryPanel({
   if (layerEntries.length > 0) {
     sections.push(
       <div key="bindings">
-        <div style={SECTION_LABEL_STYLE}>各层工具绑定</div>
+        <div style={SECTION_LABEL_STYLE}>
+          {bindResult?.['mode'] === 'goal-driven' ? '按首个目标绑定工具' : '各层工具绑定'}
+        </div>
         <div style={{ ...SUBBLOCK_STYLE, display: 'grid', gap: 10 }}>
           {layerEntries.map(([layer, binding]) => (
             <div key={layer}>
@@ -359,7 +377,9 @@ export function TeamInitSummaryPanel({
         <div style={{ display: 'grid', gap: 10 }}>{sections}</div>
       ) : (
         <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
-          {teamInit ? '初始化尚未产出可展示的成果（步骤未执行或已跳过）。' : ''}
+          {teamInit.projectKind === 'empty'
+            ? '空项目尚未产出项目化初始化成果；收到首个明确需求后会按目标自动初始化。'
+            : '初始化尚未产出可展示的成果（步骤未执行或已跳过）。'}
         </div>
       )}
     </div>

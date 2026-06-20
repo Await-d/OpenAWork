@@ -2,6 +2,7 @@ import type { ArtifactRecord } from '@openAwork/artifacts';
 import { tokens } from '@openAwork/shared-ui';
 import MarkdownMessageContent from '../../../components/chat/markdown/markdown-message-content.js';
 import { FilePreviewPane } from '../../../components/file-editor/preview/FilePreviewPane.js';
+import { tryFormatJson } from '../../../utils/format-json.js';
 import {
   buildArtifactVirtualPath,
   buildSvgPreviewDocument,
@@ -233,7 +234,7 @@ function CodeFallback({ content }: { content: string }) {
         minHeight: 240,
       }}
     >
-      {content}
+      {tryFormatJson(content)}
     </pre>
   );
 }

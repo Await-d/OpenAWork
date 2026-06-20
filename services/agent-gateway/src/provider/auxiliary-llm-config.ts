@@ -88,7 +88,7 @@ export interface ResolvedAuxiliaryLlmConfig {
  *
  * reception/pm1/pm2 层走 auxiliary LLM 路径，本身只认用户全局 fast/active 选择。
  * 当模板给该层成员显式绑定了 modelId/providerId 时，调用方把它作为 override 传入，
- * 引擎会优先解析该 provider+model（仍 enabled 时）；解析不到则回退原有优先级链。
+ * 引擎只解析该 provider+model（仍 enabled 时）；解析不到则返回 null，由调用方提示重绑。
  */
 export interface AuxiliaryModelOverride {
   providerId?: string;
@@ -99,28 +99,76 @@ export async function resolveAuxiliaryLlmConfig(
   userId: string,
   override?: AuxiliaryModelOverride,
 ): Promise<ResolvedAuxiliaryLlmConfig | null> {
+  const configs = await resolveAuxiliaryLlmConfigs({
+    collectAll: false,
+    override,
+    userId,
+  });
+  return configs[0] ?? null;
+}
+
+/**
+ * 返回辅助 LLM 的可用候选列表，顺序仍然保持：
+ * 无 override 时返回 fast / inline → active chat → env fallback。
+ * 有 override 时只返回 override 指定的 provider/model，避免 Team 层级绑定被默认模型覆盖。
+ *
+ * 用于质量评审这类后台收口任务：首选 provider 临时返回非 JSON / 502 /
+ * 协议错误时，可以在同一轮内试下一个候选，避免 PM2 长时间停在
+ * qualityReviewPending 的自动重试循环。
+ */
+export async function resolveAuxiliaryLlmConfigCandidates(
+  userId: string,
+  override?: AuxiliaryModelOverride,
+): Promise<ResolvedAuxiliaryLlmConfig[]> {
+  return resolveAuxiliaryLlmConfigs({
+    collectAll: true,
+    override,
+    userId,
+  });
+}
+
+async function resolveAuxiliaryLlmConfigs(input: {
+  collectAll: boolean;
+  override?: AuxiliaryModelOverride;
+  userId: string;
+}): Promise<ResolvedAuxiliaryLlmConfig[]> {
   const providersRow = sqliteGet<UserSettingRow>(
     `SELECT value FROM user_settings WHERE user_id = ? AND key = 'providers'`,
-    [userId],
+    [input.userId],
   );
   const selectionRow = sqliteGet<UserSettingRow>(
     `SELECT value FROM user_settings WHERE user_id = ? AND key = 'active_selection'`,
-    [userId],
+    [input.userId],
   );
   const rawProviders = parseUserSettingValue(providersRow?.value, 'providers');
   const rawSelection = parseUserSettingValue(selectionRow?.value, 'active_selection');
+  const configs: ResolvedAuxiliaryLlmConfig[] = [];
+  const seen = new Set<string>();
+  const pushResolved = (
+    cfg: Awaited<ReturnType<typeof getFastProviderConfig>>,
+  ): ResolvedAuxiliaryLlmConfig | null => {
+    if (!cfg) return null;
+    const resolved = resolveProviderCredentials(cfg.provider, cfg.modelId);
+    if (!resolved) return null;
+    const key = buildResolvedConfigKey(resolved);
+    if (seen.has(key)) return null;
+    seen.add(key);
+    configs.push(resolved);
+    return resolved;
+  };
 
-  // Phase 2：显式成员模型优先。getProviderConfigForSelection 在 model 失活/缺失时
-  // 会自动回退到 chat 配置，因此这里既是优先项也是 Phase 3 的兜底。
-  if (override?.providerId && override.modelId) {
-    const cfg = await getProviderConfigForSelection(rawProviders, rawSelection, {
-      providerId: override.providerId,
-      modelId: override.modelId,
-    });
-    if (cfg) {
-      const resolved = resolveProviderCredentials(cfg.provider, cfg.modelId);
-      if (resolved) return resolved;
-    }
+  if (input.override?.providerId && input.override.modelId) {
+    const cfg = await getProviderConfigForSelection(
+      rawProviders,
+      rawSelection,
+      {
+        providerId: input.override.providerId,
+        modelId: input.override.modelId,
+      },
+      { fallbackToChat: false },
+    );
+    const resolved = pushResolved(cfg);
+    return resolved ? configs : [];
   }
 
   const candidates = [
@@ -129,18 +177,23 @@ export async function resolveAuxiliaryLlmConfig(
   ];
   for (const lookup of candidates) {
     const cfg = await lookup();
-    if (!cfg) continue;
-    const resolved = resolveProviderCredentials(cfg.provider, cfg.modelId);
-    if (resolved) return resolved;
+    const resolved = pushResolved(cfg);
+    if (resolved && !input.collectAll) {
+      return configs;
+    }
   }
 
   const envBase = (process.env['AI_API_BASE_URL'] ?? '').trim();
   const envKey = (process.env['AI_API_KEY'] ?? '').trim();
   const envModel = (process.env['AI_DEFAULT_MODEL'] ?? 'gpt-4o').trim();
   if (envBase && envKey) {
-    return { apiBaseUrl: envBase, apiKey: envKey, model: envModel };
+    const resolved = { apiBaseUrl: envBase, apiKey: envKey, model: envModel };
+    const key = buildResolvedConfigKey(resolved);
+    if (!seen.has(key)) {
+      configs.push(resolved);
+    }
   }
-  return null;
+  return configs;
 }
 
 function resolveProviderCredentials(
@@ -168,6 +221,16 @@ function resolveProviderCredentials(
       ? { outputPricePerMillion: modelEntry.outputPricePerMillion }
       : {}),
   };
+}
+
+function buildResolvedConfigKey(config: ResolvedAuxiliaryLlmConfig): string {
+  return [
+    config.providerType ?? '',
+    config.upstreamProtocol ?? '',
+    config.apiBaseUrl,
+    config.model,
+    config.apiKey,
+  ].join('\0');
 }
 
 function pickProviderApiKey(provider: AIProvider): string | null {

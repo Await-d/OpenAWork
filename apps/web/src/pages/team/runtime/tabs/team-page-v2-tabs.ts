@@ -48,7 +48,7 @@ export const PRIMARY_TABS: ReadonlyArray<PrimaryTabDef> = [
     children: [
       { key: 'conversation', label: '当前对话', icon: '💬' },
       { key: 'flow', label: '层级流动', icon: '🪜' },
-      { key: 'layered', label: '层级', icon: '🗂️' },
+      { key: 'layered', label: '历史层级', icon: '🗂️' },
       { key: 'messages', label: '消息', icon: '✉️' },
     ],
   },
@@ -57,6 +57,7 @@ export const PRIMARY_TABS: ReadonlyArray<PrimaryTabDef> = [
     label: '任务',
     icon: '📋',
     children: [
+      { key: 'taskboard', label: '任务看板', icon: '📋' },
       { key: 'artifacts', label: '任务与产物', icon: '🧱' },
       { key: 'review', label: '评审', icon: '✅' },
     ],
