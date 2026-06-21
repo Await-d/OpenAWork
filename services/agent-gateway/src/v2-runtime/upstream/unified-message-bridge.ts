@@ -291,3 +291,42 @@ export function unifiedMessageToModelMessages(message: UnifiedMessage): ModelMes
 export function unifiedConversationToModelMessages(messages: UnifiedMessage[]): ModelMessage[] {
   return messages.flatMap(unifiedMessageToModelMessages);
 }
+
+/**
+ * Extract leading system messages from a unified conversation and return
+ * them as a separate `SystemModelMessage[]`, along with the remaining
+ * non-system messages converted to `ModelMessage[]`.
+ *
+ * This allows callers to pass system prompts via the AI SDK's dedicated
+ * `system` parameter instead of embedding them in the `messages` array,
+ * avoiding the `allowSystemInMessages` security warning while preserving
+ * the multi-segment system-prompt design (stable prefix + dynamic suffix)
+ * used for prompt-cache breakpoints.
+ *
+ * Only **leading** system messages are extracted — system messages that
+ * appear after user/assistant/tool turns in the conversation history are
+ * left in the messages array (they originate from persisted session
+ * messages and are rare; the `allowSystemInMessages: true` fallback in
+ * the stream/generate runners handles them gracefully).
+ */
+export function extractSystemFromUnifiedMessages(
+  messages: UnifiedMessage[],
+): { system: ModelMessage[]; messages: ModelMessage[] } {
+  const systemMessages: ModelMessage[] = [];
+  const remaining: UnifiedMessage[] = [];
+
+  let foundNonSystem = false;
+  for (const msg of messages) {
+    if (msg.role === 'system' && !foundNonSystem) {
+      systemMessages.push(...bridgeSystem(msg));
+    } else {
+      foundNonSystem = true;
+      remaining.push(msg);
+    }
+  }
+
+  return {
+    system: systemMessages,
+    messages: remaining.flatMap(unifiedMessageToModelMessages),
+  };
+}

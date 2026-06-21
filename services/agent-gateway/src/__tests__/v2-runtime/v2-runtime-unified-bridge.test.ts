@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  extractSystemFromUnifiedMessages,
   unifiedConversationToModelMessages,
   unifiedMessageToModelMessages,
   wrapGatewayToolsForAiSdkDeclarationsOnly,
@@ -315,5 +316,64 @@ describe('wrapGatewayToolsForAiSdkDeclarationsOnly', () => {
       buildGatewayTool('dup', 'second'),
     ]);
     expect(set['dup']!.description).toBe('second');
+  });
+});
+
+describe('extractSystemFromUnifiedMessages', () => {
+  it('extracts leading system messages and returns remaining messages', () => {
+    const messages: UnifiedMessage[] = [
+      { role: 'system', content: 'stable prefix' },
+      { role: 'system', content: 'dynamic suffix' },
+      { role: 'user', content: 'q' },
+      { role: 'assistant', content: 'a' },
+    ];
+    const { system, messages: nonSystem } = extractSystemFromUnifiedMessages(messages);
+    expect(system).toEqual([
+      { role: 'system', content: 'stable prefix' },
+      { role: 'system', content: 'dynamic suffix' },
+    ]);
+    expect(nonSystem.map((m) => m.role)).toEqual(['user', 'assistant']);
+  });
+
+  it('returns empty system array when no leading system messages', () => {
+    const messages: UnifiedMessage[] = [
+      { role: 'user', content: 'q' },
+      { role: 'assistant', content: 'a' },
+    ];
+    const { system, messages: nonSystem } = extractSystemFromUnifiedMessages(messages);
+    expect(system).toEqual([]);
+    expect(nonSystem.map((m) => m.role)).toEqual(['user', 'assistant']);
+  });
+
+  it('does not extract system messages that appear after non-system messages', () => {
+    const messages: UnifiedMessage[] = [
+      { role: 'system', content: 'leading' },
+      { role: 'user', content: 'q' },
+      { role: 'system', content: 'mid-conversation' },
+      { role: 'assistant', content: 'a' },
+    ];
+    const { system, messages: nonSystem } = extractSystemFromUnifiedMessages(messages);
+    expect(system).toEqual([{ role: 'system', content: 'leading' }]);
+    // The mid-conversation system message stays in the messages array
+    expect(nonSystem.map((m) => m.role)).toEqual(['user', 'system', 'assistant']);
+  });
+
+  it('handles empty input', () => {
+    const { system, messages: nonSystem } = extractSystemFromUnifiedMessages([]);
+    expect(system).toEqual([]);
+    expect(nonSystem).toEqual([]);
+  });
+
+  it('handles all-system input', () => {
+    const messages: UnifiedMessage[] = [
+      { role: 'system', content: 'a' },
+      { role: 'system', content: 'b' },
+    ];
+    const { system, messages: nonSystem } = extractSystemFromUnifiedMessages(messages);
+    expect(system).toEqual([
+      { role: 'system', content: 'a' },
+      { role: 'system', content: 'b' },
+    ]);
+    expect(nonSystem).toEqual([]);
   });
 });

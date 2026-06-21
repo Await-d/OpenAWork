@@ -22,7 +22,7 @@
  *   - Other providers with array content use the last content part.
  */
 
-import type { ModelMessage } from 'ai';
+import type { ModelMessage, SystemModelMessage } from 'ai';
 
 type ProviderOptionsRecord = Record<string, unknown>;
 
@@ -148,6 +148,35 @@ function mergeProviderOptionsIntoContentPart(part: ProviderOptionsRecord): void 
   );
 }
 
+/**
+ * Apply a cache breakpoint to a single message in place. Extracted from
+ * `applyCaching` so it can be reused by `applyCachingToSystemMessages`
+ * for messages passed via the dedicated `system` parameter.
+ */
+function applyCacheBreakpointToMessage(message: ModelMessage, model: PromptCacheModelInfo): void {
+  const shouldUseContentOptions =
+    !useMessageLevelOptions(model) &&
+    Array.isArray(message.content) &&
+    message.content.length > 0;
+
+  if (shouldUseContentOptions) {
+    const lastContent = message.content[message.content.length - 1] as
+      | ProviderOptionsRecord
+      | undefined;
+    if (
+      lastContent &&
+      typeof lastContent === 'object' &&
+      lastContent['type'] !== 'tool-approval-request' &&
+      lastContent['type'] !== 'tool-approval-response'
+    ) {
+      mergeProviderOptionsIntoContentPart(lastContent);
+      return;
+    }
+  }
+
+  mergeProviderOptionsIntoMessage(message);
+}
+
 export function applyCaching(
   messages: ModelMessage[],
   model: PromptCacheModelInfo,
@@ -156,32 +185,44 @@ export function applyCaching(
     return messages;
   }
 
-  const system = messages.filter((message) => message.role === 'system').slice(0, 2);
+  // System messages passed via the dedicated `system` parameter are
+  // cached separately by `applyCachingToSystemMessages`. Here we only
+  // handle the trailing non-system messages to avoid exceeding
+  // Anthropic's 4-breakpoint limit (2 system + 2 trailing = 4 max).
+  // Residual system messages in the `messages` array (from persisted
+  // session history, passed through via `allowSystemInMessages`) are
+  // intentionally NOT cached — they are not part of the stable prefix.
   const final = messages.filter((message) => message.role !== 'system').slice(-2);
 
-  for (const message of uniqueMessages([...system, ...final])) {
-    const shouldUseContentOptions =
-      !useMessageLevelOptions(model) &&
-      Array.isArray(message.content) &&
-      message.content.length > 0;
-
-    if (shouldUseContentOptions) {
-      const lastContent = message.content[message.content.length - 1] as
-        | ProviderOptionsRecord
-        | undefined;
-      if (
-        lastContent &&
-        typeof lastContent === 'object' &&
-        lastContent['type'] !== 'tool-approval-request' &&
-        lastContent['type'] !== 'tool-approval-response'
-      ) {
-        mergeProviderOptionsIntoContentPart(lastContent);
-        continue;
-      }
-    }
-
-    mergeProviderOptionsIntoMessage(message);
+  for (const message of uniqueMessages(final)) {
+    applyCacheBreakpointToMessage(message, model);
   }
 
   return messages;
+}
+
+/**
+ * Apply prompt-cache breakpoints to system messages passed via the AI SDK's
+ * dedicated `system` parameter. This is the companion to `applyCaching` for
+ * the pattern where leading system messages are extracted from the
+ * conversation and passed separately — it ensures the same cache breakpoints
+ * are applied to those messages.
+ *
+ * Takes up to the first 2 system messages (matching `applyCaching`'s
+ * heuristic) and mutates them in place with `providerOptions` cache markers.
+ */
+export function applyCachingToSystemMessages(
+  system: SystemModelMessage[],
+  model: PromptCacheModelInfo,
+): SystemModelMessage[] {
+  if (!shouldApplyCaching(model) || system.length === 0) {
+    return system;
+  }
+
+  const toCache = system.slice(0, 2);
+  for (const message of toCache) {
+    applyCacheBreakpointToMessage(message as unknown as ModelMessage, model);
+  }
+
+  return system;
 }

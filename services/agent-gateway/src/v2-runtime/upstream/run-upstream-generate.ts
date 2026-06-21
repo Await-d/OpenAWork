@@ -34,8 +34,18 @@
  */
 
 import type { RequestOverrides } from '@openAwork/agent-core';
-import { generateText, type GenerateTextResult, type ModelMessage, type ToolSet } from 'ai';
-import { applyCaching, buildPromptCacheModelInfo } from './cache-breakpoints.js';
+import {
+  generateText,
+  type GenerateTextResult,
+  type ModelMessage,
+  type SystemModelMessage,
+  type ToolSet,
+} from 'ai';
+import {
+  applyCaching,
+  applyCachingToSystemMessages,
+  buildPromptCacheModelInfo,
+} from './cache-breakpoints.js';
 import { buildAISdkProvider, type UpstreamProtocolKind } from './provider.js';
 import {
   buildBaseProviderOptions,
@@ -44,6 +54,7 @@ import {
   type ThinkingConfig,
 } from './provider-options.js';
 import { applyProviderMessageTransforms } from './message-transforms.js';
+import { sanitizeSurrogates } from './message-transforms.js';
 
 export interface RunUpstreamGenerateInput {
   /** OpenAWork-side provider type (`openai`, `anthropic`, `gemini`, ...). */
@@ -67,8 +78,13 @@ export interface RunUpstreamGenerateInput {
   /** Model identifier (passed straight to AI SDK `languageModel`). */
   model: string;
   sessionId?: string;
-  /** Optional system prompt — short-circuited when empty. */
-  system?: string;
+  /**
+   * Optional system prompt(s). Supports a plain string (single prompt)
+   * or an array of `SystemModelMessage` objects (multi-segment prompts).
+   * When provided, these are passed via the AI SDK's dedicated `system`
+   * parameter rather than embedded in the `messages` array.
+   */
+  system?: string | SystemModelMessage | SystemModelMessage[];
   /** Conversation history in AI SDK ModelMessage shape. */
   messages: ModelMessage[];
   /** Sampling parameters — pass-through to `generateText`. */
@@ -176,10 +192,28 @@ export async function runUpstreamGenerate(
   });
 
   // Decorate the conversation with prompt-cache breakpoints when applicable.
-  const decoratedMessages = applyCaching(
-    transformedMessages,
-    buildPromptCacheModelInfo({ providerType: input.providerType, model: input.model }),
-  );
+  const cacheModelInfo = buildPromptCacheModelInfo({
+    providerType: input.providerType,
+    model: input.model,
+  });
+  const decoratedMessages = applyCaching(transformedMessages, cacheModelInfo);
+
+  // Apply cache breakpoints to system messages passed via the dedicated
+  // `system` parameter, mirroring the stream-runner path. Also apply
+  // surrogate sanitisation to system text content to match
+  // `applyProviderMessageTransforms` → `sanitizeAllTextContent`.
+  let decoratedSystem: typeof input.system = input.system;
+  if (decoratedSystem && typeof decoratedSystem !== 'string') {
+    const systemArray = Array.isArray(decoratedSystem) ? decoratedSystem : [decoratedSystem];
+    const sanitizedSystem = systemArray.map((msg) =>
+      typeof msg.content === 'string'
+        ? { ...msg, content: sanitizeSurrogates(msg.content) }
+        : msg,
+    );
+    decoratedSystem = applyCachingToSystemMessages(sanitizedSystem, cacheModelInfo);
+  } else if (typeof decoratedSystem === 'string') {
+    decoratedSystem = sanitizeSurrogates(decoratedSystem);
+  }
 
   const providerOptions = mergeProviderOptions(
     buildBaseProviderOptions({
@@ -224,7 +258,13 @@ export async function runUpstreamGenerate(
     result = await generateText({
       model: model as unknown as GenerateTextModelParam,
       messages: decoratedMessages,
-      ...(input.system ? { system: input.system } : {}),
+      // Allow system messages that may appear mid-conversation (from
+      // persisted session history) to pass through without triggering
+      // the SDK's security warning. Callers pass system prompts via the
+      // dedicated `system` parameter; this covers residual system
+      // messages in historical turns.
+      allowSystemInMessages: true,
+      ...(decoratedSystem ? { system: decoratedSystem } : {}),
       ...(providerOptions ? { providerOptions } : {}),
       ...(typeof input.temperature === 'number' && !shouldOmit(omit, 'temperature')
         ? { temperature: input.temperature }

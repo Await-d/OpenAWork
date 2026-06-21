@@ -40,11 +40,16 @@
  */
 
 import type { StreamChunk, StreamDoneChunk, StreamErrorChunk } from '@openAwork/shared';
+import { resolveThinkingStyle } from '@openAwork/agent-core';
 import type { RequestOverrides } from '@openAwork/agent-core';
 import type { JSONValue, SharedV2ProviderOptions } from '@ai-sdk/provider';
-import type { ModelMessage, StreamTextResult, ToolSet } from 'ai';
+import type { ModelMessage, StreamTextResult, SystemModelMessage, ToolSet } from 'ai';
 import { streamText, tool as defineTool, jsonSchema } from 'ai';
-import { applyCaching, buildPromptCacheModelInfo } from './cache-breakpoints.js';
+import {
+  applyCaching,
+  applyCachingToSystemMessages,
+  buildPromptCacheModelInfo,
+} from './cache-breakpoints.js';
 import { dispatchChatParams } from '../../runtime/plugin-host.js';
 import type { V2LanguageModel } from './provider.js';
 import {
@@ -55,6 +60,7 @@ import {
   type ThinkingConfig,
 } from './provider-options.js';
 import { applyProviderMessageTransforms } from './message-transforms.js';
+import { sanitizeSurrogates } from './message-transforms.js';
 
 export interface RunUpstreamStreamInput {
   /** AI SDK language model handle (build via `buildAISdkProvider`). */
@@ -83,8 +89,15 @@ export interface RunUpstreamStreamInput {
    * value) to disable. Defaults to `DEFAULT_STREAM_IDLE_TIMEOUT_MS`.
    */
   idleTimeoutMs?: number;
-  /** Optional system prompt. */
-  system?: string;
+  /**
+   * Optional system prompt(s). Supports a plain string (single prompt)
+   * or an array of `SystemModelMessage` objects (multi-segment prompts
+   * used for prompt-cache breakpoints). When provided, these are passed
+   * via the AI SDK's dedicated `system` parameter rather than embedded
+   * in the `messages` array, avoiding the SDK's security warning about
+   * system messages in `messages`.
+   */
+  system?: string | SystemModelMessage | SystemModelMessage[];
   /** Temperature / max tokens / top-p — pass-through to streamText. */
   temperature?: number;
   maxOutputTokens?: number;
@@ -460,10 +473,35 @@ export async function* runUpstreamStream(
     model: modelIdForOptions,
   });
   // Decorate the conversation with prompt-cache breakpoints when applicable.
-  const decoratedMessages = applyCaching(
-    transformedMessages,
-    buildPromptCacheModelInfo({ providerType: input.providerType, model: modelIdForOptions }),
-  );
+  const cacheModelInfo = buildPromptCacheModelInfo({
+    providerType: input.providerType,
+    model: modelIdForOptions,
+  });
+  const decoratedMessages = applyCaching(transformedMessages, cacheModelInfo);
+
+  // Apply cache breakpoints to system messages passed via the dedicated
+  // `system` parameter (when callers extract leading system messages from
+  // the conversation). This preserves the multi-segment cache breakpoint
+  // design (stable prefix + dynamic suffix) that previously worked when
+  // system messages were embedded in the `messages` array.
+  //
+  // We also apply surrogate sanitisation to system message text content,
+  // mirroring `applyProviderMessageTransforms` → `sanitizeAllTextContent`
+  // for the `messages` array. Without this, lone UTF-16 surrogates in
+  // system prompts could produce different serialised bytes across rounds
+  // and silently invalidate Anthropic prompt cache prefixes.
+  let decoratedSystem: typeof input.system = input.system;
+  if (decoratedSystem && typeof decoratedSystem !== 'string') {
+    const systemArray = Array.isArray(decoratedSystem) ? decoratedSystem : [decoratedSystem];
+    const sanitizedSystem = systemArray.map((msg) =>
+      typeof msg.content === 'string'
+        ? { ...msg, content: sanitizeSurrogates(msg.content) }
+        : msg,
+    );
+    decoratedSystem = applyCachingToSystemMessages(sanitizedSystem, cacheModelInfo);
+  } else if (typeof decoratedSystem === 'string') {
+    decoratedSystem = sanitizeSurrogates(decoratedSystem);
+  }
   const omit = input.requestOverrides?.omitBodyKeys;
   const providerOptions = mergeProviderOptions(
     buildBaseProviderOptions({
@@ -486,6 +524,27 @@ export async function* runUpstreamStream(
   let topP = input.requestOverrides?.topP ?? input.topP;
   let frequencyPenalty = input.requestOverrides?.frequencyPenalty ?? input.frequencyPenalty;
   let presencePenalty = input.requestOverrides?.presencePenalty ?? input.presencePenalty;
+
+  // MiMo / Moonshot（body_thinking_type 风格）在思考模式下会强制锁定
+  // temperature=1.0 / top_p=0.95，发送自定义值无意义且部分代理可能因参数
+  // 冲突导致首次请求失败触发 AI SDK 自动重试。在思考启用时主动省略这些
+  // 采样参数，减少不必要的请求体体积和潜在冲突。
+  // 通过 resolveThinkingStyle 判断（含 modelId 推断），覆盖用户通过 OpenAI
+  // 兼容代理使用 MiMo/Moonshot 模型的场景。不检查 supportsThinking，因为
+  // 该字段在代理场景下可能为 false（modelConfig 找不到），但 modelId 推断
+  // 仍能识别出真实厂商。
+  if (input.thinking?.enabled) {
+    const style = resolveThinkingStyle(
+      input.providerType ?? '',
+      modelIdForOptions,
+    );
+    if (style === 'body_thinking_type') {
+      temperature = undefined;
+      topP = undefined;
+      frequencyPenalty = undefined;
+      presencePenalty = undefined;
+    }
+  }
 
   // PR-D-Plugin: `chat.params` hook — let plugins override sampling
   // params + arbitrary `options` immediately before the AI SDK
@@ -572,6 +631,13 @@ export async function* runUpstreamStream(
   const result = streamText({
     model: input.model as unknown as StreamTextModelParam,
     messages: decoratedMessages,
+    // Allow system messages that may appear mid-conversation (from
+    // persisted session history) to pass through without triggering the
+    // SDK's security warning. Leading system messages are already
+    // extracted and passed via the dedicated `system` parameter by
+    // callers; this only covers residual system messages embedded in
+    // historical turns.
+    allowSystemInMessages: true,
     ...(effectiveTools ? { tools: effectiveTools } : {}),
     // Repair tool calls whose name only differs in case before the AI
     // SDK rejects them. Matches opencode's `experimental_repairToolCall`.
@@ -588,7 +654,7 @@ export async function* runUpstreamStream(
           }) as Parameters<typeof streamText>[0]['experimental_repairToolCall'],
         }
       : {}),
-    ...(input.system ? { system: input.system } : {}),
+    ...(decoratedSystem ? { system: decoratedSystem } : {}),
     ...(providerOptions ? { providerOptions } : {}),
     ...(typeof temperature === 'number' && !shouldOmit(omit, 'temperature') ? { temperature } : {}),
     ...(typeof maxOutputTokens === 'number' &&

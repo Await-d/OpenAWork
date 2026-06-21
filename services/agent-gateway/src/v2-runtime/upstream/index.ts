@@ -39,6 +39,7 @@ export {
 } from './tool-adapter.js';
 
 export {
+  extractSystemFromUnifiedMessages,
   unifiedConversationToModelMessages,
   unifiedMessageToModelMessages,
 } from './unified-message-bridge.js';
@@ -56,6 +57,7 @@ export {
 
 export {
   applyCaching,
+  applyCachingToSystemMessages,
   buildPromptCacheModelInfo,
   type PromptCacheModelInfo,
 } from './cache-breakpoints.js';

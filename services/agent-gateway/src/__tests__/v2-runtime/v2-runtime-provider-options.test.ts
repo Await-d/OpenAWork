@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyCaching,
+  applyCachingToSystemMessages,
   buildBaseProviderOptions,
   buildPromptCacheModelInfo,
   buildProviderOptions,
@@ -9,7 +10,7 @@ import {
   type ProviderOptionsModelInfo,
   type ThinkingConfig,
 } from '../../v2-runtime/upstream/index.js';
-import type { ModelMessage } from 'ai';
+import type { ModelMessage, SystemModelMessage } from 'ai';
 
 const baseThinking: ThinkingConfig = {
   enabled: true,
@@ -82,13 +83,22 @@ describe('buildProviderOptions', () => {
     });
   });
 
-  it('emits qwen.body.enable_thinking for qwen', () => {
+  it('emits qwen.enable_thinking + thinking_budget for qwen', () => {
     const options = buildProviderOptions({
-      thinking: { ...baseThinking, providerType: 'qwen', enabled: true },
+      thinking: { ...baseThinking, providerType: 'qwen', enabled: true, effort: 'medium' },
       model: 'qwen-max',
     });
-    const oc = options?.['qwen'] as { body?: Record<string, unknown> } | undefined;
-    expect(oc?.body).toEqual({ enable_thinking: true });
+    const oc = options?.['qwen'] as Record<string, unknown> | undefined;
+    expect(oc).toEqual({ enable_thinking: true, thinking_budget: 8192 });
+  });
+
+  it('emits qwen.enable_thinking false without thinking_budget when disabled', () => {
+    const options = buildProviderOptions({
+      thinking: { ...baseThinking, providerType: 'qwen', enabled: false },
+      model: 'qwen-max',
+    });
+    const oc = options?.['qwen'] as Record<string, unknown> | undefined;
+    expect(oc).toEqual({ enable_thinking: false });
   });
 
   it('opts into gemini-3 thinking_level rather than thinking_budget for gemini-3 models', () => {
@@ -97,11 +107,9 @@ describe('buildProviderOptions', () => {
       model: 'gemini-3-pro',
     });
     const oc = options?.['gemini'] as
-      | {
-          body?: { google?: { thinking_config?: Record<string, unknown> } };
-        }
+      | { google?: { thinking_config?: Record<string, unknown> } }
       | undefined;
-    expect(oc?.body?.google?.thinking_config).toMatchObject({
+    expect(oc?.google?.thinking_config).toMatchObject({
       include_thoughts: true,
       thinking_level: 'medium',
     });
@@ -115,22 +123,56 @@ describe('buildProviderOptions', () => {
     expect(options).toBeUndefined();
   });
 
-  it('emits mimo.body.thinking enabled for mimo models', () => {
+  it('emits mimo.thinking enabled for mimo models', () => {
     const options = buildProviderOptions({
       thinking: { ...baseThinking, providerType: 'mimo', enabled: true },
       model: 'mimo-v2.5-pro',
     });
-    const oc = options?.['mimo'] as { body?: Record<string, unknown> } | undefined;
-    expect(oc?.body).toEqual({ thinking: { type: 'enabled' } });
+    const oc = options?.['mimo'] as Record<string, unknown> | undefined;
+    expect(oc).toEqual({ thinking: { type: 'enabled' } });
   });
 
-  it('emits mimo.body.thinking disabled when thinking is turned off', () => {
+  it('emits mimo.thinking disabled when thinking is turned off', () => {
     const options = buildProviderOptions({
       thinking: { ...baseThinking, providerType: 'mimo', enabled: false },
       model: 'mimo-v2.5',
     });
-    const oc = options?.['mimo'] as { body?: Record<string, unknown> } | undefined;
-    expect(oc?.body).toEqual({ thinking: { type: 'disabled' } });
+    const oc = options?.['mimo'] as Record<string, unknown> | undefined;
+    expect(oc).toEqual({ thinking: { type: 'disabled' } });
+  });
+
+  it('emits deepseek.thinking + reasoning_effort for high effort', () => {
+    const options = buildProviderOptions({
+      thinking: { ...baseThinking, providerType: 'deepseek', enabled: true, effort: 'high' },
+      model: 'deepseek-chat',
+    });
+    const oc = options?.['deepseek'] as Record<string, unknown> | undefined;
+    expect(oc).toEqual({ thinking: { type: 'enabled' }, reasoning_effort: 'max' });
+  });
+
+  it('emits deepseek.thinking without reasoning_effort for low effort', () => {
+    const options = buildProviderOptions({
+      thinking: { ...baseThinking, providerType: 'deepseek', enabled: true, effort: 'low' },
+      model: 'deepseek-chat',
+    });
+    const oc = options?.['deepseek'] as Record<string, unknown> | undefined;
+    expect(oc).toEqual({ thinking: { type: 'enabled' } });
+  });
+
+  it('skips thinking for deepseek-reasoner (built-in thinking)', () => {
+    const options = buildProviderOptions({
+      thinking: { ...baseThinking, providerType: 'deepseek', enabled: true },
+      model: 'deepseek-reasoner',
+    });
+    expect(options).toBeUndefined();
+  });
+
+  it('skips thinking for deepseek when disabled', () => {
+    const options = buildProviderOptions({
+      thinking: { ...baseThinking, providerType: 'deepseek', enabled: false },
+      model: 'deepseek-chat',
+    });
+    expect(options).toBeUndefined();
   });
 
   it('returns undefined for unrecognised providerType', () => {
@@ -274,8 +316,10 @@ describe('providerOptions', () => {
       api: { id: 'claude-compatible', npm: '@ai-sdk/openai-compatible' },
     };
 
+    // @ai-sdk/openai-compatible: `body` field is spread into the provider
+    // options object so its contents become top-level request body fields.
     expect(providerOptions(model, { body: { foo: 'bar' } })).toEqual({
-      wafer: { body: { foo: 'bar' } },
+      wafer: { foo: 'bar' },
     });
   });
 });
@@ -291,7 +335,7 @@ describe('applyCaching', () => {
     ];
   }
 
-  it('marks the system message and last 2 non-system messages on anthropic providers', () => {
+  it('marks the last 2 non-system messages on anthropic providers', () => {
     const result = applyCaching(
       buildMessages(),
       buildPromptCacheModelInfo({ providerType: 'anthropic', model: 'claude-sonnet-4-5' }),
@@ -299,7 +343,10 @@ describe('applyCaching', () => {
     const cacheMarked = result.map(
       (m) => ((m.providerOptions?.['anthropic'] ?? {}) as { cacheControl?: unknown }).cacheControl,
     );
-    expect(cacheMarked[0]).toEqual({ type: 'ephemeral' });
+    // System messages are no longer cached by applyCaching — they are
+    // cached separately via applyCachingToSystemMessages when passed as
+    // the dedicated `system` parameter.
+    expect(cacheMarked[0]).toBeUndefined();
     expect(cacheMarked[1]).toBeUndefined();
     expect(cacheMarked[2]).toBeUndefined();
     expect(cacheMarked[3]).toEqual({ type: 'ephemeral' });
@@ -342,7 +389,8 @@ describe('applyCaching', () => {
       (m) => ((m.providerOptions?.['anthropic'] ?? {}) as { cacheControl?: unknown }).cacheControl,
     );
 
-    expect(cacheMarked[0]).toEqual({ type: 'ephemeral' });
+    // System messages are not cached by applyCaching.
+    expect(cacheMarked[0]).toBeUndefined();
     expect(cacheMarked[1]).toBeUndefined();
     expect(cacheMarked[2]).toEqual({ type: 'ephemeral' });
     expect(cacheMarked[3]).toEqual({ type: 'ephemeral' });
@@ -382,9 +430,8 @@ describe('applyCaching', () => {
       providerOptions?: Record<string, { cacheControl?: unknown }>;
     }>;
 
-    expect(result[0]!.providerOptions?.['openrouter']).toEqual({
-      cacheControl: { type: 'ephemeral' },
-    });
+    // System messages are not cached by applyCaching.
+    expect(result[0]!.providerOptions).toBeUndefined();
     expect(result[2]!.providerOptions).toBeUndefined();
     // Last 2 non-system messages get a content-level breakpoint, so the
     // assistant tool-call AND the tool-result both carry cacheControl.
@@ -408,18 +455,68 @@ describe('applyCaching', () => {
 
   it('preserves caller-provided providerOptions when adding cacheControl', () => {
     const messages: ModelMessage[] = [
+      { role: 'user', content: 'q' },
+      {
+        role: 'assistant',
+        content: 'a',
+        providerOptions: { anthropic: { sendReasoning: true } },
+      },
+    ];
+    const result = applyCaching(
+      messages,
+      buildPromptCacheModelInfo({ providerType: 'anthropic', model: 'claude-sonnet-4-5' }),
+    );
+    // The assistant message is the last non-system message, so it gets a cache breakpoint.
+    const assistant = result[1]!;
+    const anthropic = (assistant.providerOptions?.['anthropic'] ?? {}) as {
+      sendReasoning?: boolean;
+      cacheControl?: unknown;
+    };
+    expect(anthropic.sendReasoning).toBe(true);
+    expect(anthropic.cacheControl).toEqual({ type: 'ephemeral' });
+  });
+});
+
+describe('applyCachingToSystemMessages', () => {
+  it('marks the first 2 system messages with cache breakpoints', () => {
+    const system: SystemModelMessage[] = [
+      { role: 'system', content: 'stable prefix' },
+      { role: 'system', content: 'dynamic suffix' },
+    ];
+    const result = applyCachingToSystemMessages(
+      system,
+      buildPromptCacheModelInfo({ providerType: 'anthropic', model: 'claude-sonnet-4-5' }),
+    );
+    expect(result[0]!.providerOptions?.['anthropic']).toEqual({
+      cacheControl: { type: 'ephemeral' },
+    });
+    expect(result[1]!.providerOptions?.['anthropic']).toEqual({
+      cacheControl: { type: 'ephemeral' },
+    });
+  });
+
+  it('is a noop on non-anthropic-backed providers', () => {
+    const system: SystemModelMessage[] = [{ role: 'system', content: 'sys' }];
+    const result = applyCachingToSystemMessages(
+      system,
+      buildPromptCacheModelInfo({ providerType: 'openrouter', model: 'openai/gpt-5' }),
+    );
+    expect(result[0]!.providerOptions).toBeUndefined();
+  });
+
+  it('preserves caller-provided providerOptions when adding cacheControl', () => {
+    const system: SystemModelMessage[] = [
       {
         role: 'system',
         content: 'sys',
         providerOptions: { anthropic: { sendReasoning: true } },
       },
-      { role: 'user', content: 'q' },
     ];
-    const [system] = applyCaching(
-      messages,
+    const result = applyCachingToSystemMessages(
+      system,
       buildPromptCacheModelInfo({ providerType: 'anthropic', model: 'claude-sonnet-4-5' }),
     );
-    const anthropic = (system!.providerOptions?.['anthropic'] ?? {}) as {
+    const anthropic = (result[0]!.providerOptions?.['anthropic'] ?? {}) as {
       sendReasoning?: boolean;
       cacheControl?: unknown;
     };

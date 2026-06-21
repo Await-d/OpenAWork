@@ -61,8 +61,8 @@ import {
 import { makeSessionEventId } from '../session/session-event.js';
 import {
   buildAISdkProvider,
+  extractSystemFromUnifiedMessages,
   runUpstreamStream,
-  unifiedConversationToModelMessages,
   wrapGatewayToolsForAiSdkDeclarationsOnly,
   type GatewayToolFunctionShape,
 } from '../v2-runtime/upstream/index.js';
@@ -1350,7 +1350,16 @@ export async function runModelRound(input: {
       supportsThinking: input.route.supportsThinking,
     });
     const modelHandle = provider.languageModel(input.route.model);
-    const modelMessages = unifiedConversationToModelMessages(allUnifiedMessages);
+
+    // Extract leading system messages from the conversation so they can be
+    // passed via the AI SDK's dedicated `system` parameter instead of being
+    // embedded in the `messages` array. This avoids the SDK's
+    // "system messages in messages can be a security risk" warning while
+    // preserving the multi-segment system-prompt design (stable prefix +
+    // dynamic suffix) used for prompt-cache breakpoints.
+    const { system: systemMessages, messages: nonSystemModelMessages } =
+      extractSystemFromUnifiedMessages(allUnifiedMessages);
+    const modelMessages = nonSystemModelMessages;
 
     // Declarations-only ToolSet — the gateway's `enabledTools` are
     // already JSON-schema'd, so we wrap them without an `execute` and
@@ -1386,6 +1395,11 @@ export async function runModelRound(input: {
         model: modelHandle,
         modelId: input.route.model,
         messages: modelMessages,
+        // Pass system prompts via the dedicated `system` parameter to avoid
+        // the AI SDK security warning about system messages in `messages`.
+        // The multi-segment design (stable prefix + dynamic suffix) is
+        // preserved because `system` accepts `SystemModelMessage[]`.
+        ...(systemMessages.length > 0 ? { system: systemMessages } : {}),
         signal: input.signal,
         runId: input.runId,
         ...(input.agentId ? { agentId: input.agentId } : {}),

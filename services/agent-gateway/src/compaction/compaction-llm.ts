@@ -10,6 +10,17 @@ import {
   stripAnalysisBlock,
 } from './compaction-prompt.js';
 
+/**
+ * Filter out system messages from the conversation history before sending
+ * to the compaction LLM. The compaction prompt is already passed via the
+ * dedicated `system` parameter — any system messages from the persisted
+ * session history would trigger the AI SDK security warning and are not
+ * relevant for summarization.
+ */
+function filterSystemMessages(messages: UnifiedMessage[]): UnifiedMessage[] {
+  return messages.filter((msg) => msg.role !== 'system');
+}
+
 export interface CompactionLlmInput {
   conversationMessages: UnifiedMessage[];
   route: ModelRouteConfig;
@@ -80,7 +91,7 @@ async function callCompactionLlmOnce(input: CompactionLlmInput): Promise<Compact
     ...(input.previousSummary ? { previousSummary: input.previousSummary } : {}),
   });
   const conversation: UnifiedMessage[] = [
-    ...input.conversationMessages,
+    ...filterSystemMessages(input.conversationMessages),
     { role: 'user', content: userPrompt },
   ];
   const messages = unifiedConversationToModelMessages(conversation);
