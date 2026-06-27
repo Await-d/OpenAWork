@@ -8,7 +8,10 @@ import type {
   AgentTeamsFooterStat,
   AgentTeamsSidebarTeam,
 } from '../runtime/data/team-runtime-types.js';
-import { WorkspaceSwitcher } from '../runtime/shell/header/WorkspaceSwitcher.js';
+import {
+  formatSidebarTeamStatus,
+  resolveSidebarTeamSubtitle,
+} from '../runtime/data/team-runtime-status.js';
 import { tryFormatJson, looksLikeJson } from '../../../utils/format-json.js';
 
 const FOCUS_BANNER_STYLE: CSSProperties = {
@@ -231,15 +234,8 @@ const SUPERBAR_CONTEXT_STYLE: CSSProperties = {
 
 export interface TeamPageSuperbarLeadingProps {
   activeWorkspaceId: string | null;
-  canCreateWorkspace: boolean;
-  canManageRuntime: boolean;
   compact?: boolean;
-  loading: boolean;
   memberCount: string;
-  onCreateWorkspace: () => void;
-  onRenameWorkspace: (workspaceId: string, name: string) => Promise<boolean>;
-  onRequestDeleteWorkspace: (workspace: TeamWorkspaceSummary) => void;
-  onSelectWorkspace: (workspaceId: string) => void;
   onlineCount: string;
   selectedTeam: AgentTeamsSidebarTeam | null;
   summaryDescription: string;
@@ -248,48 +244,56 @@ export interface TeamPageSuperbarLeadingProps {
 
 export function TeamPageSuperbarLeading({
   activeWorkspaceId,
-  canCreateWorkspace,
-  canManageRuntime,
   compact = false,
-  loading,
   memberCount,
-  onCreateWorkspace,
-  onRenameWorkspace,
-  onRequestDeleteWorkspace,
-  onSelectWorkspace,
   onlineCount,
   selectedTeam,
   summaryDescription,
   workspaces,
 }: TeamPageSuperbarLeadingProps) {
+  const activeWorkspace = workspaces.find((ws) => ws.id === activeWorkspaceId) ?? null;
+  const sessionStatus = selectedTeam ? formatSidebarTeamStatus(selectedTeam.status) : null;
+  const sessionSubtitle = selectedTeam
+    ? resolveSidebarTeamSubtitle(selectedTeam.status, selectedTeam.subtitle)
+    : null;
   return (
     <span style={SUPERBAR_LEADING_CLUSTER_STYLE}>
       <span style={SUPERBAR_WORKSPACE_GROUP_STYLE}>
         <strong style={{ fontSize: 13, whiteSpace: 'nowrap' }}>团队</strong>
         <span style={{ color: 'var(--fg-muted)', fontSize: 12 }}>·</span>
-        <WorkspaceSwitcher
-          workspaces={workspaces}
-          activeWorkspaceId={activeWorkspaceId}
-          loading={loading}
-          onSelect={onSelectWorkspace}
-          onCreateNew={canCreateWorkspace ? onCreateWorkspace : undefined}
-          onRename={canManageRuntime ? onRenameWorkspace : undefined}
-          onRequestDelete={canManageRuntime ? onRequestDeleteWorkspace : undefined}
-        />
+        <span
+          style={{
+            fontSize: 12,
+            color: 'var(--fg-default)',
+            fontWeight: 500,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            maxWidth: 200,
+          }}
+          title={activeWorkspace?.name ?? '未选择工作区'}
+        >
+          {activeWorkspace?.name ?? '未选择工作区'}
+        </span>
       </span>
       {selectedTeam ? (
         <span style={SUPERBAR_SESSION_GROUP_STYLE}>
           <span
             data-testid="team-current-session-pill"
             style={CURRENT_SESSION_PILL_STYLE}
-            title={`${selectedTeam.title} · ${selectedTeam.subtitle} · ${summaryDescription}`}
+            title={[selectedTeam.title, sessionStatus, sessionSubtitle, summaryDescription]
+              .filter(Boolean)
+              .join(' · ')}
           >
             <span style={CURRENT_SESSION_LABEL_STYLE}>当前会话</span>
             <span style={CURRENT_SESSION_TITLE_STYLE}>{selectedTeam.title}</span>
           </span>
           <span data-testid="team-current-session-status" style={CURRENT_SESSION_META_PILL_STYLE}>
-            {selectedTeam.subtitle}
+            {sessionStatus}
           </span>
+          {sessionSubtitle ? (
+            <span style={CURRENT_SESSION_META_PILL_STYLE}>{sessionSubtitle}</span>
+          ) : null}
           {!compact ? (
             <span
               data-testid="team-current-session-members"
@@ -413,6 +417,7 @@ export function TeamFocusHandoffBanner({
 }
 
 export interface TeamSharedConversationPanelProps {
+  selectedTeamStatus?: string | null;
   selectedTeamSubtitle?: string | null;
   selectedTeamTitle?: string | null;
   sharedSession: SharedSessionDetailRecord | null;
@@ -422,6 +427,7 @@ export interface TeamSharedConversationPanelProps {
 }
 
 export function TeamSharedConversationPanel({
+  selectedTeamStatus,
   selectedTeamSubtitle,
   selectedTeamTitle,
   sharedSession,
@@ -434,7 +440,11 @@ export function TeamSharedConversationPanel({
     sharedSession?.share.title?.trim() ||
     sharedSession?.share.sessionId ||
     '共享会话';
-  const statusLabel = selectedTeamSubtitle?.trim() || sharedSession?.share.stateStatus || '共享中';
+  const statusLabel =
+    selectedTeamStatus?.trim() ||
+    selectedTeamSubtitle?.trim() ||
+    sharedSession?.share.stateStatus ||
+    '共享中';
   const latestAssistantOutput = summarizeLatestAssistantOutput(sharedSession?.session.messages);
   const workspaceLabel = sharedSession?.share.workspacePath ?? '未绑定工作区';
   const messageCount = sharedSession?.session.messages?.length ?? 0;

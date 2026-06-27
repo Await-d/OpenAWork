@@ -2,6 +2,7 @@ import { useMemo, type CSSProperties } from 'react';
 import type { Message } from '@openAwork/shared';
 import type {} from '@openAwork/web-client';
 import type { AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
+import { resolveSidebarTeamSubtitle } from '../../data/team-runtime-status.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
 import {
   resolveMatchedSharedSessionDetail,
@@ -84,6 +85,7 @@ export function SharedSessionGraphView({ selectedTeam }: { selectedTeam: AgentTe
     ],
     [assistantMessages, sharedSession, sharedSummary?.sharedByEmail],
   );
+  const statusSubtitle = resolveSidebarTeamSubtitle(selectedTeam.status, selectedTeam.subtitle);
 
   if (sharedSessionLoading && !sharedSession) {
     return (
@@ -148,7 +150,9 @@ export function SharedSessionGraphView({ selectedTeam }: { selectedTeam: AgentTe
             <strong style={{ fontSize: 14, color: 'var(--fg-strong)' }}>
               {selectedTeam.title}
             </strong>
-            <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>{selectedTeam.subtitle}</span>
+            {statusSubtitle ? (
+              <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>{statusSubtitle}</span>
+            ) : null}
           </div>
           <span style={{ color: 'var(--fg-muted)', fontWeight: 700 }}>→</span>
           {graphNodes.map((node) => (

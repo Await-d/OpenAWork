@@ -20,8 +20,14 @@
  * Hover：微妙浮起 + 轻阴影。
  */
 
-import React, { type CSSProperties, type MouseEvent, useEffect, useMemo, useState } from 'react';
+import React, { type CSSProperties, type MouseEvent, useMemo } from 'react';
 import type { AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
+import {
+  formatSidebarTeamStatus,
+  refineFailedStatus,
+  formatRefinedFailedStatus,
+  refinedFailedStatusColor,
+} from '../../data/team-runtime-status.js';
 import {
   BaseSessionRow,
   DeleteIcon,
@@ -42,36 +48,13 @@ interface SessionCardProps {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const STATUS_LABEL: Record<AgentTeamsSidebarTeam['status'], string> = {
-  running: '运行中',
-  paused: '已暂停',
-  completed: '已完成',
-  failed: '失败',
-};
-
 const STATUS_COLOR: Record<AgentTeamsSidebarTeam['status'], string> = {
+  idle: 'var(--fg-subtle)',
   running: 'var(--success)',
   paused: 'var(--contrast)',
   completed: 'var(--fg-muted)',
   failed: 'var(--complement)',
 };
-
-/**
- * 每会话级「疑似停滞」判定阈值：会话仍处于 running，但其 updatedAt 距今超过此时间
- * 没有任何写入（消息 / 状态变化），视为可能卡住。与整体 run-state 的 90s 对齐，
- * 卡片层放宽到 120s 以减少误报（单会话写入本就更稀疏）。
- */
-const SESSION_STALL_THRESHOLD_MS = 120_000;
-
-function isSessionStalled(
-  status: AgentTeamsSidebarTeam['status'],
-  updatedAt: string | undefined,
-): boolean {
-  if (status !== 'running' || !updatedAt) return false;
-  const ts = new Date(updatedAt).getTime();
-  if (Number.isNaN(ts)) return false;
-  return Date.now() - ts > SESSION_STALL_THRESHOLD_MS;
-}
 
 const ICON_BOX_STYLE: CSSProperties = {
   position: 'relative',
@@ -82,7 +65,8 @@ const ICON_BOX_STYLE: CSSProperties = {
   width: 24,
   height: 24,
   borderRadius: 7,
-  transition: 'background 160ms cubic-bezier(0.4, 0, 0.2, 1), color 160ms cubic-bezier(0.4, 0, 0.2, 1)',
+  transition:
+    'background 160ms cubic-bezier(0.4, 0, 0.2, 1), color 160ms cubic-bezier(0.4, 0, 0.2, 1)',
 };
 
 const STATUS_BADGE_STYLE: CSSProperties = {
@@ -255,28 +239,35 @@ export function SessionCard({
   onHoverChange,
   onDelete,
 }: SessionCardProps) {
-  const stalled = isSessionStalled(session.status, session.updatedAt);
-  // running 会话需要让视图随时间推进自动翻转为「疑似停滞」，即使没有新的快照到达。
-  // 仅在 running 时挂 30s 心跳（idle/completed 卡片不空转计时器），且当判定已翻转为
-  // stalled 后停止 tick——因为状态已稳定，无需继续重算。
-  const [, setStallTick] = useState(0);
-  useEffect(() => {
-    if (session.status !== 'running' || stalled) return;
-    const timer = setInterval(() => setStallTick((v) => v + 1), 30_000);
-    return () => clearInterval(timer);
-  }, [session.status, stalled, session.updatedAt]);
-  // 停滞态：仍是 running 但长时间无写入。用 warning 色 + 「疑似停滞」覆盖默认运行态展示，
-  // 让用户在列表里就能区分「在跑」与「卡住」。
-  const dot = stalled ? 'var(--warning)' : STATUS_COLOR[session.status];
-  const label = stalled ? '疑似停滞' : STATUS_LABEL[session.status];
-  // 是否显示「运行中脉冲」动画：仅真正 running 且未停滞时。
-  const isLiveRunning = session.status === 'running' && !stalled;
+  const dot = STATUS_COLOR[session.status];
+  const isFailed = session.status === 'failed';
+
+  // 细分失败状态
+  const refinedFailed = useMemo(
+    () =>
+      refineFailedStatus({
+        status: session.status,
+        taskTotal: session.taskTotal,
+        taskCompleted: session.taskCompleted,
+        taskFailed: session.taskFailed,
+        taskRunning: session.taskRunning,
+      }),
+    [session.status, session.taskTotal, session.taskCompleted, session.taskFailed, session.taskRunning],
+  );
+
+  const label = isFailed && refinedFailed
+    ? formatRefinedFailedStatus(refinedFailed)
+    : formatSidebarTeamStatus(session.status);
+  const labelColor = isFailed && refinedFailed ? refinedFailedStatusColor(refinedFailed) : dot;
+
+  const isLiveRunning = session.status === 'running';
 
   const taskTotal = session.taskTotal ?? 0;
   const taskCompleted = session.taskCompleted ?? 0;
   const taskRunning = session.taskRunning ?? 0;
   const taskFailed = session.taskFailed ?? 0;
   const taskProgress = taskTotal > 0 ? taskCompleted / taskTotal : 0;
+  const taskFailedRatio = taskTotal > 0 ? taskFailed / taskTotal : 0;
   const childCount = session.childSessionCount ?? 0;
   const isDerived = session.isDerived ?? false;
   const agents = session.agents ?? [];
@@ -379,8 +370,8 @@ export function SessionCard({
       <span
         style={{
           ...STATUS_BADGE_STYLE,
-          background: `color-mix(in srgb, ${dot} 8%, var(--bg-overlay))`,
-          color: dot,
+          background: `color-mix(in srgb, ${labelColor} 8%, var(--bg-overlay))`,
+          color: labelColor,
         }}
       >
         {isLiveRunning ? (
@@ -478,16 +469,32 @@ export function SessionCard({
         </div>
       ) : null}
 
-      {/* 进度条 */}
+      {/* 进度条 — 绿红分段（完成 vs 失败） */}
       {taskTotal > 0 ? (
         <div style={PROGRESS_TRACK_STYLE} aria-hidden>
+          {/* 绿色：已完成 */}
           <span
             style={{
               ...PROGRESS_FILL_STYLE,
-              background: dot,
+              background: 'var(--success)',
               transform: `scaleX(${taskProgress})`,
             }}
           />
+          {/* 红色叠加：失败部分 */}
+          {taskFailed > 0 ? (
+            <span
+              style={{
+                position: 'absolute',
+                top: 0,
+                bottom: 0,
+                left: `${taskProgress * 100}%`,
+                width: `${taskFailedRatio * 100}%`,
+                borderRadius: 999,
+                background: 'var(--complement)',
+                transition: 'width 320ms cubic-bezier(0.4, 0, 0.2, 1), left 320ms cubic-bezier(0.4, 0, 0.2, 1)',
+              }}
+            />
+          ) : null}
         </div>
       ) : null}
 

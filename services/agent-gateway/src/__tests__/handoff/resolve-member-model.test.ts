@@ -68,6 +68,22 @@ const ROSTER_SNAPSHOT = {
         // no model binding → should resolve to undefined
       },
       {
+        id: 'executor-thinking-only',
+        layer: 'executor',
+        specialty: 'thinking-only',
+        personaKey: 'executor:thinking-only',
+        thinkingEnabled: true,
+        reasoningEffort: 'high',
+      },
+      {
+        id: 'pm1-thinking-only',
+        layer: 'pm1',
+        specialty: 'thinking-only',
+        personaKey: 'pm1:thinking-only',
+        thinkingEnabled: false,
+        reasoningEffort: 'low',
+      },
+      {
         id: 'executor-custom-abc',
         layer: 'executor',
         specialty: 'custom',
@@ -139,6 +155,18 @@ describe('resolveMemberModelForHandoff', () => {
     expect(resolved).toBeUndefined();
   });
 
+  it('保留自动解析模型时也会解析成员 thinking 覆盖', () => {
+    const resolved = resolver.resolveMemberModelForHandoff({
+      fromSessionId: PM2_SESSION_ID,
+      toRoleLayer: 'executor',
+      payload: { assignedMember: { personaKey: 'executor:thinking-only' } },
+    });
+    expect(resolved).toEqual({
+      thinkingEnabled: true,
+      reasoningEffort: 'high',
+    });
+  });
+
   it('falls back to the root session model snapshot when the matched slot has no model binding', () => {
     seedSession(ROOT_SESSION_ID, null, {
       ...ROSTER_SNAPSHOT,
@@ -181,12 +209,15 @@ describe('resolveMemberModelForSessionLayer', () => {
     expect(resolved?.modelId).toBe('fe-model');
   });
 
-  it('returns undefined for a layer with no model binding', () => {
+  it('returns thinking overrides for a layer without explicit model binding', () => {
     const resolved = resolver.resolveMemberModelForSessionLayer({
       sessionId: ROOT_SESSION_ID,
-      layer: 'reviewer',
+      layer: 'pm1',
     });
-    expect(resolved).toBeUndefined();
+    expect(resolved).toEqual({
+      thinkingEnabled: false,
+      reasoningEffort: 'low',
+    });
   });
 
   it('falls back to the root session model snapshot for an unbound layer', () => {
@@ -318,12 +349,39 @@ describe('mergeMemberModelIntoMetadata', () => {
     });
   });
 
+  it('在只有 thinking 覆盖时也会写入 metadata', () => {
+    const merged = resolver.mergeMemberModelIntoMetadata(undefined, {
+      thinkingEnabled: true,
+      reasoningEffort: 'high',
+    });
+    expect(merged).toBeDefined();
+    expect(JSON.parse(merged!)).toMatchObject({
+      thinkingEnabled: true,
+      reasoningEffort: 'high',
+    });
+  });
+
   it('does not overwrite an existing modelId', () => {
     const merged = resolver.mergeMemberModelIntoMetadata(JSON.stringify({ modelId: 'existing' }), {
       modelId: 'm1',
       providerId: 'p1',
     });
     expect(JSON.parse(merged!).modelId).toBe('existing');
+  });
+
+  it('不会用空 modelId 覆盖已有模型选择', () => {
+    const merged = resolver.mergeMemberModelIntoMetadata(
+      JSON.stringify({ modelId: 'existing' }),
+      {
+        thinkingEnabled: true,
+        reasoningEffort: 'medium',
+      },
+    );
+    expect(JSON.parse(merged!)).toMatchObject({
+      modelId: 'existing',
+      thinkingEnabled: true,
+      reasoningEffort: 'medium',
+    });
   });
 
   it('returns input unchanged when model is undefined', () => {

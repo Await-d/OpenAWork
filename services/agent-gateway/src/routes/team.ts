@@ -13,6 +13,7 @@ import type { JwtPayload } from '../infra/auth.js';
 import { parseBody, parseQuery } from '../infra/parse-request.js';
 import { requireAuth } from '../infra/auth.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
+import { buildSqlitePlaceholders, chunkSqliteBindValues } from '../infra/sqlite-batch.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import {
   normalizeIncomingSessionMetadata,
@@ -94,6 +95,8 @@ const teamMemberSlotSchema = z.object({
   providerId: z.string().min(1).max(200).optional(),
   modelId: z.string().min(1).max(200).optional(),
   variant: z.string().min(1).max(80).optional(),
+  thinkingEnabled: z.boolean().optional(),
+  reasoningEffort: z.enum(['minimal', 'low', 'medium', 'high', 'xhigh']).optional(),
   // 自定义角色字段（specialty === 'custom'）。
   custom: z.boolean().optional(),
   systemPrompt: z.string().max(8000).optional(),
@@ -488,6 +491,7 @@ const workflowTeamTemplateSchema = z.object({
     })
     .optional(),
   defaultProvider: z.string().nullable().optional(),
+  memberSlots: z.array(teamMemberSlotSchema).max(40).optional(),
   optionalAgentIds: z.array(z.string().min(1)).optional(),
   requiredRoles: z
     .array(z.enum(['leader', 'planner', 'researcher', 'executor', 'reviewer']))
@@ -608,10 +612,14 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
     const parentBySessionId = new Map<string, string | null>();
     for (const row of rows) {
       const metadata = parseSessionMetadataJson(row.metadata_json);
-      const twId = typeof metadata['teamWorkspaceId'] === 'string' ? metadata['teamWorkspaceId'] : null;
+      const twId =
+        typeof metadata['teamWorkspaceId'] === 'string' ? metadata['teamWorkspaceId'] : null;
       workspaceIdBySessionId.set(row.id, twId);
       const rawRow = row as unknown as Record<string, unknown>;
-      const teamParent = typeof rawRow['team_parent_session_id'] === 'string' ? rawRow['team_parent_session_id'] : null;
+      const teamParent =
+        typeof rawRow['team_parent_session_id'] === 'string'
+          ? rawRow['team_parent_session_id']
+          : null;
       parentBySessionId.set(row.id, teamParent);
     }
 
@@ -629,7 +637,8 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
 
     return rows.filter((row) => {
       const metadata = parseSessionMetadataJson(row.metadata_json);
-      const directWorkspaceId = typeof metadata['teamWorkspaceId'] === 'string' ? metadata['teamWorkspaceId'] : null;
+      const directWorkspaceId =
+        typeof metadata['teamWorkspaceId'] === 'string' ? metadata['teamWorkspaceId'] : null;
       if (directWorkspaceId === input.teamWorkspaceId) return true;
       // 没有直接的 teamWorkspaceId，通过 parent 链递归查找
       if (!directWorkspaceId) {
@@ -833,14 +842,65 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
     };
   };
 
+  const listRowsBySessionIds = <T>(input: {
+    fixedParams?: readonly (number | string | null)[];
+    query: (placeholders: string) => string;
+    sessionIds: string[];
+  }): T[] => {
+    if (input.sessionIds.length === 0) {
+      return [];
+    }
+
+    const fixedParams = input.fixedParams ?? [];
+    return chunkSqliteBindValues(input.sessionIds, fixedParams.length).flatMap((batchSessionIds) =>
+      sqliteAll<T>(input.query(buildSqlitePlaceholders(batchSessionIds.length, ', ')), [
+        ...fixedParams,
+        ...batchSessionIds,
+      ]),
+    );
+  };
+
+  const listRowsByEitherSessionIds = <T extends { id: string }>(input: {
+    fixedParams?: readonly (number | string | null)[];
+    query: (placeholders: string) => string;
+    sessionIds: string[];
+  }): T[] => {
+    if (input.sessionIds.length === 0) {
+      return [];
+    }
+
+    const fixedParams = input.fixedParams ?? [];
+    const rowsById = new Map<string, T>();
+    for (const batchSessionIds of chunkSqliteBindValues(
+      input.sessionIds,
+      fixedParams.length,
+      undefined,
+      2,
+    )) {
+      const placeholders = buildSqlitePlaceholders(batchSessionIds.length, ', ');
+      const rows = sqliteAll<T>(input.query(placeholders), [
+        ...fixedParams,
+        ...batchSessionIds,
+        ...batchSessionIds,
+      ]);
+      for (const row of rows) {
+        if (!rowsById.has(row.id)) {
+          rowsById.set(row.id, row);
+        }
+      }
+    }
+
+    return Array.from(rowsById.values());
+  };
+
   const listRuntimeHandoffs = (input: { sessionIds: string[]; userId: string }) => {
     if (input.sessionIds.length === 0) {
       return [];
     }
 
-    const placeholders = input.sessionIds.map(() => '?').join(', ');
-    const rows = sqliteAll<RuntimeHandoffRow>(
-      `SELECT
+    const rows = listRowsByEitherSessionIds<RuntimeHandoffRow>({
+      fixedParams: [input.userId],
+      query: (placeholders) => `SELECT
          id,
          user_id,
          from_session_id,
@@ -863,13 +923,15 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
          updated_at
        FROM handoff_records
       WHERE user_id = ?
-        AND (from_session_id IN (${placeholders}) OR to_session_id IN (${placeholders}))
-      ORDER BY updated_at DESC, created_at DESC
-        LIMIT 200`,
-      [input.userId, ...input.sessionIds, ...input.sessionIds],
+        AND (from_session_id IN (${placeholders}) OR to_session_id IN (${placeholders}))`,
+      sessionIds: input.sessionIds,
+    }).sort(
+      (left, right) =>
+        right.updated_at.localeCompare(left.updated_at) ||
+        right.created_at.localeCompare(left.created_at),
     );
 
-    return rows.map((row) => ({
+    return rows.slice(0, 200).map((row) => ({
       claimToken: row.claim_token,
       claimedAt: row.claimed_at,
       completedAt: row.completed_at,
@@ -950,9 +1012,9 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
 
     const sessionIds = input.sessionRows.map((row) => row.id);
     const sessionIdSet = new Set(sessionIds);
-    const placeholders = sessionIds.map(() => '?').join(', ');
-    const rows = sqliteAll<RuntimeDispatchTaskHandoffRow>(
-      `SELECT
+    const rows = listRowsByEitherSessionIds<RuntimeDispatchTaskHandoffRow>({
+      fixedParams: [input.userId],
+      query: (placeholders) => `SELECT
          id,
          from_session_id,
          to_session_id,
@@ -967,9 +1029,12 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       WHERE user_id = ?
         AND from_role_layer = 'pm2'
         AND to_role_layer = 'executor'
-        AND (from_session_id IN (${placeholders}) OR to_session_id IN (${placeholders}))
-      ORDER BY updated_at ASC, created_at ASC`,
-      [input.userId, ...sessionIds, ...sessionIds],
+        AND (from_session_id IN (${placeholders}) OR to_session_id IN (${placeholders}))`,
+      sessionIds,
+    }).sort(
+      (left, right) =>
+        left.updated_at.localeCompare(right.updated_at) ||
+        left.created_at.localeCompare(right.created_at),
     );
 
     const sessionById = new Map(input.sessionRows.map((row) => [row.id, row]));
@@ -1146,19 +1211,18 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       return [];
     }
 
-    const placeholders = input.sessionIds.map(() => '?').join(', ');
-    const rows = sqliteAll<RuntimeClarificationRow>(
-      `SELECT id, user_id, to_session_id, payload_json, state, created_at
+    const sessionIdSet = new Set(input.sessionIds);
+    const rows = listRowsBySessionIds<RuntimeClarificationRow>({
+      fixedParams: [input.userId],
+      query: (placeholders) => `SELECT id, user_id, to_session_id, payload_json, state, created_at
          FROM session_inbound_messages
         WHERE user_id = ?
           AND message_type = 'escalation_request'
           AND state IN ('pending', 'consumed')
           AND (expires_at IS NULL OR expires_at >= datetime('now'))
-          AND to_session_id IN (${placeholders})
-        ORDER BY created_at DESC
-        LIMIT 200`,
-      [input.userId, ...input.sessionIds],
-    );
+          AND to_session_id IN (${placeholders})`,
+      sessionIds: input.sessionIds,
+    }).sort((left, right) => right.created_at.localeCompare(left.created_at));
 
     const clarifications: Array<{
       answer?: string;
@@ -1188,7 +1252,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       }
       const fromSessionId =
         typeof payload['fromSessionId'] === 'string' ? payload['fromSessionId'] : row.to_session_id;
-      if (!input.sessionIds.includes(fromSessionId)) {
+      if (!sessionIdSet.has(fromSessionId)) {
         continue;
       }
       const questions = Array.isArray(payload['questions']) ? payload['questions'] : [];
@@ -1218,7 +1282,8 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
-    return clarifications;
+    clarifications.sort((left, right) => right.createdAt - left.createdAt);
+    return clarifications.slice(0, 200);
   };
 
   const listRuntimeNotifications = (input: { sessionIds: string[]; userId: string }) => {
@@ -1226,19 +1291,18 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       return [];
     }
 
-    const placeholders = input.sessionIds.map(() => '?').join(', ');
-    const rows = sqliteAll<RuntimeNotificationRow>(
-      `SELECT id, user_id, to_session_id, payload_json, created_at
+    const sessionIdSet = new Set(input.sessionIds);
+    const rows = listRowsBySessionIds<RuntimeNotificationRow>({
+      fixedParams: [input.userId],
+      query: (placeholders) => `SELECT id, user_id, to_session_id, payload_json, created_at
          FROM session_inbound_messages
         WHERE user_id = ?
           AND message_type IN ('escalation_request', 'progress_report')
           AND state IN ('pending', 'consumed')
           AND (expires_at IS NULL OR expires_at >= datetime('now'))
-          AND to_session_id IN (${placeholders})
-        ORDER BY created_at DESC
-        LIMIT 50`,
-      [input.userId, ...input.sessionIds],
-    );
+          AND to_session_id IN (${placeholders})`,
+      sessionIds: input.sessionIds,
+    }).sort((left, right) => right.created_at.localeCompare(left.created_at));
 
     const notifications: Array<{
       layer?: string;
@@ -1266,7 +1330,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
 
       const fromSessionId =
         typeof payload['fromSessionId'] === 'string' ? payload['fromSessionId'] : row.to_session_id;
-      if (!input.sessionIds.includes(fromSessionId)) {
+      if (!sessionIdSet.has(fromSessionId)) {
         continue;
       }
 
@@ -1326,6 +1390,10 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
+    notifications.sort((left, right) => right.timestamp - left.timestamp);
+    if (notifications.length > 50) {
+      notifications.length = 50;
+    }
     return notifications.reverse();
   };
 
@@ -1382,70 +1450,81 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
     if (input.sessionIds.length === 0) {
       return 0;
     }
-    const placeholders = input.sessionIds.map(() => '?').join(', ');
-    const row = sqliteGet<{ count: number }>(
-      `SELECT COUNT(1) AS count
-         FROM ${input.table}
-        WHERE session_id IN (${placeholders})${input.extraWhere ? ` AND ${input.extraWhere}` : ''}`,
-      input.sessionIds,
-    );
-    return row?.count ?? 0;
+    return chunkSqliteBindValues(input.sessionIds).reduce((total, batchSessionIds) => {
+      const placeholders = buildSqlitePlaceholders(batchSessionIds.length, ', ');
+      const row = sqliteGet<{ count: number }>(
+        `SELECT COUNT(1) AS count
+           FROM ${input.table}
+          WHERE session_id IN (${placeholders})${input.extraWhere ? ` AND ${input.extraWhere}` : ''}`,
+        batchSessionIds,
+      );
+      return total + (row?.count ?? 0);
+    }, 0);
   };
 
   const countAffectedInteractionSessions = (sessionIds: string[]): number => {
     if (sessionIds.length === 0) {
       return 0;
     }
-    const placeholders = sessionIds.map(() => '?').join(', ');
-    const row = sqliteGet<{ count: number }>(
-      `SELECT COUNT(DISTINCT session_id) AS count
-         FROM (
-           SELECT session_id
-             FROM permission_requests
-            WHERE session_id IN (${placeholders}) AND status IN ('pending', 'deciding')
-           UNION ALL
-           SELECT session_id
-             FROM question_requests
-            WHERE session_id IN (${placeholders}) AND status IN ('pending', 'deciding')
-         ) interactions`,
-      [...sessionIds, ...sessionIds],
-    );
-    return row?.count ?? 0;
+    const ids = new Set<string>();
+    for (const row of listRowsBySessionIds<{ session_id: string }>({
+      query: (placeholders) => `SELECT session_id
+         FROM permission_requests
+        WHERE session_id IN (${placeholders}) AND status IN ('pending', 'deciding')`,
+      sessionIds,
+    })) {
+      ids.add(row.session_id);
+    }
+    for (const row of listRowsBySessionIds<{ session_id: string }>({
+      query: (placeholders) => `SELECT session_id
+         FROM question_requests
+        WHERE session_id IN (${placeholders}) AND status IN ('pending', 'deciding')`,
+      sessionIds,
+    })) {
+      ids.add(row.session_id);
+    }
+    return ids.size;
   };
 
   const countStaleDecidingSessions = (sessionIds: string[]): number => {
     if (sessionIds.length === 0) {
       return 0;
     }
-    const placeholders = sessionIds.map(() => '?').join(', ');
-    const row = sqliteGet<{ count: number }>(
-      `SELECT COUNT(DISTINCT session_id) AS count
-         FROM (
-           SELECT session_id
-             FROM permission_requests
-            WHERE session_id IN (${placeholders}) AND status = 'deciding' AND updated_at < datetime('now', '-10 minutes')
-           UNION ALL
-           SELECT session_id
-             FROM question_requests
-            WHERE session_id IN (${placeholders}) AND status = 'deciding' AND updated_at < datetime('now', '-10 minutes')
-         ) interactions`,
-      [...sessionIds, ...sessionIds],
-    );
-    return row?.count ?? 0;
+    const ids = new Set<string>();
+    for (const row of listRowsBySessionIds<{ session_id: string }>({
+      query: (placeholders) => `SELECT session_id
+         FROM permission_requests
+        WHERE session_id IN (${placeholders}) AND status = 'deciding' AND updated_at < datetime('now', '-10 minutes')`,
+      sessionIds,
+    })) {
+      ids.add(row.session_id);
+    }
+    for (const row of listRowsBySessionIds<{ session_id: string }>({
+      query: (placeholders) => `SELECT session_id
+         FROM question_requests
+        WHERE session_id IN (${placeholders}) AND status = 'deciding' AND updated_at < datetime('now', '-10 minutes')`,
+      sessionIds,
+    })) {
+      ids.add(row.session_id);
+    }
+    return ids.size;
   };
 
   const countFailedHandoffsForSessionIds = (sessionIds: string[]): number => {
     if (sessionIds.length === 0) {
       return 0;
     }
-    const placeholders = sessionIds.map(() => '?').join(', ');
-    const rows = sqliteAll<{ payload_json: string | null; to_role_layer: string }>(
-      `SELECT payload_json, to_role_layer
+    const rows = listRowsByEitherSessionIds<{
+      id: string;
+      payload_json: string | null;
+      to_role_layer: string;
+    }>({
+      query: (placeholders) => `SELECT id, payload_json, to_role_layer
          FROM handoff_records
         WHERE state = 'failed'
           AND (from_session_id IN (${placeholders}) OR to_session_id IN (${placeholders}))`,
-      [...sessionIds, ...sessionIds],
-    );
+      sessionIds,
+    });
     return rows.filter(
       (row) =>
         !(row.to_role_layer === 'pm2' && isHandledReviewFailurePayloadJson(row.payload_json)),
@@ -1459,19 +1538,20 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
     if (sessionIds.length === 0) {
       return 0;
     }
-    const placeholders = sessionIds.map(() => '?').join(', ');
-    const rows = sqliteAll<{
+    const rows = listRowsByEitherSessionIds<{
+      id: string;
       failure_reason: string | null;
       payload_json: string | null;
       to_role_layer: string;
-    }>(
-      `SELECT failure_reason, payload_json, to_role_layer
+    }>({
+      fixedParams: [userId],
+      query: (placeholders) => `SELECT id, failure_reason, payload_json, to_role_layer
          FROM handoff_records
         WHERE user_id = ?
           AND state = 'failed'
           AND (from_session_id IN (${placeholders}) OR to_session_id IN (${placeholders}))`,
-      [userId, ...sessionIds, ...sessionIds],
-    );
+      sessionIds,
+    });
     return rows.filter(
       (row) =>
         !(row.to_role_layer === 'pm2' && isHandledReviewFailurePayloadJson(row.payload_json)) &&
@@ -1487,9 +1567,8 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
     if (sessionIds.length === 0) {
       return 0;
     }
-    const placeholders = sessionIds.map(() => '?').join(', ');
-    const row = sqliteGet<{ count: number }>(
-      `SELECT COUNT(1) AS count
+    return listRowsByEitherSessionIds<{ id: string }>({
+      query: (placeholders) => `SELECT id
          FROM handoff_records
         WHERE state = 'failed'
           AND json_extract(
@@ -1497,9 +1576,8 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
             '$.architectureReview.passed'
           ) = 0
           AND (from_session_id IN (${placeholders}) OR to_session_id IN (${placeholders}))`,
-      [...sessionIds, ...sessionIds],
-    );
-    return row?.count ?? 0;
+      sessionIds,
+    }).length;
   };
 
   const countUnhandledPm2ReviewFailuresForSessionIds = (input: {
@@ -1510,19 +1588,20 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
     if (input.sessionIds.length === 0) {
       return 0;
     }
-    const placeholders = input.sessionIds.map(() => '?').join(', ');
-    const rows = sqliteAll<{
+    const rows = listRowsByEitherSessionIds<{
+      id: string;
       failure_reason: string | null;
       payload_json: string | null;
-    }>(
-      `SELECT failure_reason, payload_json
+    }>({
+      fixedParams: [input.userId],
+      query: (placeholders) => `SELECT id, failure_reason, payload_json
          FROM handoff_records
         WHERE user_id = ?
           AND state = 'failed'
           AND to_role_layer = 'pm2'
           AND (from_session_id IN (${placeholders}) OR to_session_id IN (${placeholders}))`,
-      [input.userId, ...input.sessionIds, ...input.sessionIds],
-    );
+      sessionIds: input.sessionIds,
+    });
     return rows.filter((row) => {
       if (isHandledReviewFailurePayloadJson(row.payload_json)) {
         return false;
@@ -1720,7 +1799,11 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
     );
     const recentIncidentSummary = recentIncidents.reduce<
       Record<
-        'architecture_review' | 'handoff_failure' | 'latency_violation' | 'team_events_connection' | 'team_events_listener',
+        | 'architecture_review'
+        | 'handoff_failure'
+        | 'latency_violation'
+        | 'team_events_connection'
+        | 'team_events_listener',
         number
       >
     >(
@@ -1817,7 +1900,11 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       .filter((incident) => !shouldFilterIncidents || isIncidentInScope(incident))
       .reduce<
         Record<
-          'architecture_review' | 'handoff_failure' | 'latency_violation' | 'team_events_connection' | 'team_events_listener',
+          | 'architecture_review'
+          | 'handoff_failure'
+          | 'latency_violation'
+          | 'team_events_connection'
+          | 'team_events_listener',
           number
         >
       >(
@@ -2391,7 +2478,10 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       const rosterSource = normalizeTeamWorkspaceDefaultRoster(
         body.memberSlots && body.memberSlots.length > 0
           ? body.memberSlots
-          : parseTeamWorkspaceDefaultRosterJson(workspace.default_team_roster_json),
+          : templateLookup?.teamTemplate.memberSlots &&
+              templateLookup.teamTemplate.memberSlots.length > 0
+            ? templateLookup.teamTemplate.memberSlots
+            : parseTeamWorkspaceDefaultRosterJson(workspace.default_team_roster_json),
       );
       const memberSlots = rosterSource.map((slot) => {
         const agentId = resolveLayerAgentId(slot.layer);

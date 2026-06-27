@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import type { AgentTeamsSidebarTeam, AgentTeamsTaskCard } from '../../data/team-runtime-types.js';
+import { formatSidebarTeamStatus } from '../../data/team-runtime-status.js';
+import { resolveSidebarTeamSubtitle } from '../../data/team-runtime-status.js';
 import { ChromeBadge } from '../../shell/team-runtime-shell-primitives.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
 import { PANEL_STYLE, PRIORITY_META } from '../../shared/team-runtime-shared.js';
@@ -523,6 +525,9 @@ function LaneColumn({
  * ────────────────────────────────────────────────────────────── */
 
 export function TasksTab({ selectedTeam = null }: { selectedTeam?: AgentTeamsSidebarTeam | null }) {
+  const statusSubtitle = selectedTeam
+    ? resolveSidebarTeamSubtitle(selectedTeam.status, selectedTeam.subtitle)
+    : null;
   const { busy, canManageSessionEntries, createTask, moveTask, taskLanes } =
     useTeamRuntimeReferenceViewData();
   const [addingLane, setAddingLane] = useState<string | null>(null);
@@ -685,15 +690,9 @@ export function TasksTab({ selectedTeam = null }: { selectedTeam?: AgentTeamsSid
         </div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
           <ChromeBadge>
-            {selectedTeam.status === 'running'
-              ? '运行中'
-              : selectedTeam.status === 'paused'
-                ? '已暂停'
-                : selectedTeam.status === 'failed'
-                  ? '失败'
-                  : '已完成'}
+            {formatSidebarTeamStatus(selectedTeam.status)}
           </ChromeBadge>
-          <ChromeBadge>{selectedTeam.subtitle}</ChromeBadge>
+          {statusSubtitle ? <ChromeBadge>{statusSubtitle}</ChromeBadge> : null}
         </div>
       </div>
 

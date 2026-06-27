@@ -299,6 +299,9 @@ export function useSessions() {
         if (sessionId && deletedSessionIds.has(sessionId)) {
           void navigate('/chat');
         }
+        // 从服务器刷新完整列表——删除可能触发关联会话的级联删除
+        // （如 team session 的子会话），本地过滤可能遗漏。
+        void fetchSessions();
         return true;
       } catch (err) {
         if (isSessionAlreadyDeletedError(err)) {

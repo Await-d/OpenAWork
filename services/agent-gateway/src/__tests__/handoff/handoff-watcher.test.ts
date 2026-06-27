@@ -74,6 +74,122 @@ function seedSession(sessionId: string, userId: string): void {
   );
 }
 
+function buildValidSpec(title = '订单功能'): string {
+  return `# 功能规格：${title}
+
+## 用户场景与验收（必填）
+
+### 用户故事 1 — 创建订单（优先级：P1）
+
+用户可以提交订单。
+
+**为什么是这个优先级**：核心主路径。
+
+**独立可测**：调用接口并查看结果。
+
+**验收场景**：
+
+1. **给定** 已选择菜品，**当** 提交订单，**则** 返回订单详情
+
+---
+
+### 边界情况
+
+- 当网络失败时展示错误
+- 当参数缺失时拒绝提交
+
+## 验收场景覆盖矩阵（必填）
+
+| 用户故事 | 场景编号 | 场景摘要 | 对应需求 | 预期验证方式 | 预期证据 |
+|----------|----------|----------|----------|--------------|----------|
+| US1 | AC-1 | 提交订单成功 | FR-001 | API | 响应 |
+
+## 需求（必填）
+
+### 功能需求
+
+- **FR-001**：系统必须创建订单
+
+## 成功标准（必填）
+
+- **SC-001**：用户可成功提交订单
+`;
+}
+
+function buildValidPlan(extraLines = ''): string {
+  return `# 实施计划：订单功能
+
+## 技术上下文
+
+TypeScript
+
+## 宪法对齐检查
+
+| 宪法条目 | 本计划是否符合 | 备注 |
+|----------|---------------|------|
+| 通过 repository/store 访问数据 | ✅ | 通过 OrderRepository 持久化数据 |
+
+## 项目结构
+
+\`\`\`text
+services/agent-gateway/src/routes/orders.ts
+services/agent-gateway/src/modules/order-store.ts
+\`\`\`
+
+## 复杂度评估
+
+| 维度 | 评估 |
+|------|------|
+| 影响文件数 | 2 |
+
+## 风险与缓解
+
+| 风险 | 缓解措施 |
+|------|----------|
+| 网络失败 | 添加错误提示 |
+
+## 验收场景实施映射（必填）
+
+| 场景编号 | 实现模块/文件 | 分层路径 | 验证方式 | 交付证据 |
+|----------|---------------|----------|----------|----------|
+| AC-1 | services/agent-gateway/src/routes/orders.ts | Page -> web-client -> Route -> Service -> Repository/Store -> DB | API | 响应 |
+
+## 架构守卫（必填）
+
+- 数据访问只能通过 OrderRepository 层，禁止直接 SQL。
+${extraLines}`;
+}
+
+function buildValidTasks(lines: string[]): string {
+  const enrichTaskLine = (line: string): string[] => {
+    if (!/^\s*-\s*\[[ x]\]\s*T\d+/i.test(line)) {
+      return [line];
+    }
+    const pathMatches = Array.from(line.matchAll(/\[([^\]\n]+)\]/g))
+      .map((entry) => (entry[1] ?? '').trim())
+      .filter((value) => value.includes('/') || value.includes('\\') || /\.[A-Za-z0-9_-]+$/.test(value));
+    const uniquePaths = Array.from(new Set(pathMatches));
+    const checklistLines =
+      uniquePaths.length > 0
+        ? uniquePaths.map((path) =>
+            /\.test\.[A-Za-z0-9_-]+$/i.test(path) ? `- Test: \`${path}\`` : `- Modify: \`${path}\``,
+          )
+        : ['- Modify: `src/index.ts`'];
+    return [line, '**文件**：', ...checklistLines];
+  };
+
+  return [
+    '# 任务清单：订单功能',
+    '',
+    '## Phase 1: 基础设施（阻塞性前置）',
+    '',
+    ...lines.flatMap((line) => enrichTaskLine(line)),
+    '',
+    '**检查点**：用户故事 1 独立可用',
+    '',
+  ].join('\n');
+}
+
 beforeAll(async () => {
   dbModule = await import('../../infra/db.js');
   await dbModule.migrate();
@@ -149,7 +265,7 @@ describe('HandoffWatcher.tickOnce', () => {
     expect(result.claimed).toBe(3);
   });
 
-  it('同一会话内相同 personaKey 的 handoff 复用同一个角色 session', async () => {
+  it('同一会话内相同 personaKey 的并行 handoff 会隔离到不同角色 session', async () => {
     const watcher = new watcherModule.HandoffWatcher({
       taskRunner: async () => {},
       scheduler: new InProcessScheduler(),
@@ -184,7 +300,8 @@ describe('HandoffWatcher.tickOnce', () => {
     const afterFirst = store.getHandoff({ userId: USER_ID, handoffId: first.id });
     const afterSecond = store.getHandoff({ userId: USER_ID, handoffId: second.id });
     expect(afterFirst?.toSessionId).toBeTruthy();
-    expect(afterSecond?.toSessionId).toBe(afterFirst?.toSessionId);
+    expect(afterSecond?.toSessionId).toBeTruthy();
+    expect(afterSecond?.toSessionId).not.toBe(afterFirst?.toSessionId);
 
     const roleSessions = dbModule.sqliteAll<{ id: string; metadata_json: string; title: string }>(
       `SELECT id, metadata_json, title
@@ -197,19 +314,23 @@ describe('HandoffWatcher.tickOnce', () => {
           ) = 'executor:frontend'`,
       [USER_ID],
     );
-    expect(roleSessions).toHaveLength(1);
-    expect(roleSessions[0]?.id).toBe(afterFirst?.toSessionId);
-    expect(roleSessions[0]?.title).toBe('前端开发者');
-    expect(
-      JSON.parse(roleSessions[0]?.metadata_json ?? '{}') as Record<string, unknown>,
-    ).toMatchObject({
-      teamRoleInstance: {
-        rootSessionId: FROM_SESSION_ID,
-        roleLayer: 'executor',
-        personaKey: 'executor:frontend',
-        displayName: '前端开发者',
-      },
-    });
+    expect(roleSessions).toHaveLength(2);
+    expect(roleSessions.map((session) => session.id).sort()).toEqual(
+      [afterFirst?.toSessionId, afterSecond?.toSessionId].sort(),
+    );
+    for (const roleSession of roleSessions) {
+      expect(roleSession.title).toBe('前端开发者');
+      expect(
+        JSON.parse(roleSession.metadata_json) as Record<string, unknown>,
+      ).toMatchObject({
+        teamRoleInstance: {
+          rootSessionId: FROM_SESSION_ID,
+          roleLayer: 'executor',
+          personaKey: 'executor:frontend',
+          displayName: '前端开发者',
+        },
+      });
+    }
   });
 
   it('失败 handoff 重试后继续复用原角色 session', async () => {
@@ -343,6 +464,92 @@ describe('HandoffWatcher.tickOnce', () => {
     expect(after?.paused).toBe(true);
   });
 
+  it('有 dependencyHandoffIds 的 pending handoff 在依赖完成前不会被启动', async () => {
+    const watcher = new watcherModule.HandoffWatcher({
+      scheduler: new InProcessScheduler(),
+      taskRunner: async () => {},
+    });
+
+    const dependency = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'pm2',
+      toRoleLayer: 'executor',
+      payload: { goal: '先执行的任务' },
+    });
+    const dependent = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'pm2',
+      toRoleLayer: 'executor',
+      payload: {
+        goal: '依赖后执行的任务',
+        dependencyHandoffIds: [dependency.id],
+      },
+    });
+
+    const firstTick = await watcher.tickOnce();
+    expect(firstTick.claimed).toBe(1);
+    expect(firstTick.skipped).toBe(1);
+    expect(store.getHandoff({ userId: USER_ID, handoffId: dependency.id })?.state).toBe('running');
+    expect(store.getHandoff({ userId: USER_ID, handoffId: dependent.id })?.state).toBe('pending');
+
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    const secondTick = await watcher.tickOnce();
+    expect(secondTick.claimed).toBe(1);
+    expect(store.getHandoff({ userId: USER_ID, handoffId: dependent.id })?.state).toBe('running');
+  });
+
+  it('依赖失败时，后继 pending handoff 会直接收敛为 failed', async () => {
+    const scheduler = new InProcessScheduler();
+    let runCount = 0;
+    const watcher = new watcherModule.HandoffWatcher({
+      scheduler,
+      taskRunner: async ({ handoff }) => {
+        runCount += 1;
+        if (handoff.id === 'force-fail-me') {
+          throw new Error('upstream-runner-fail');
+        }
+      },
+    });
+
+    const dependency = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'pm2',
+      toRoleLayer: 'executor',
+      payload: { goal: '先执行的任务' },
+    });
+    dbModule.sqliteRun(`UPDATE handoff_records SET id = 'force-fail-me' WHERE id = ?`, [dependency.id]);
+    const failedDependencyId = 'force-fail-me';
+    const dependent = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'pm2',
+      toRoleLayer: 'executor',
+      payload: {
+        goal: '依赖后执行的任务',
+        dependencyHandoffIds: [failedDependencyId],
+      },
+    });
+
+    await watcher.tickOnce();
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    expect(runCount).toBe(1);
+    expect(store.getHandoff({ userId: USER_ID, handoffId: failedDependencyId })?.state).toBe('failed');
+    expect(store.getHandoff({ userId: USER_ID, handoffId: dependent.id })?.state).toBe('pending');
+
+    const secondTick = await watcher.tickOnce();
+    expect(secondTick.claimed).toBe(0);
+    const after = store.getHandoff({ userId: USER_ID, handoffId: dependent.id });
+    expect(after?.state).toBe('failed');
+    expect(after?.failureReason).toContain('blocked-by-dependency');
+  });
+
   it('runner 抛错时 handoff 进入 failed', async () => {
     const watcher = new watcherModule.HandoffWatcher({
       scheduler: new InProcessScheduler(),
@@ -374,10 +581,23 @@ describe('HandoffWatcher.tickOnce', () => {
     seedSession('s-pm2-parent', USER_ID);
     dbModule.sqliteRun(
       `INSERT INTO artifacts (id, session_id, user_id, type, title, content, version, phase)
+       VALUES ('spec-pm2-watcher', 's-pm2-parent', ?, 'markdown', 'spec', ?, 1, 'spec')`,
+      [USER_ID, buildValidSpec('Watcher PM2 派发')],
+    );
+    dbModule.sqliteRun(
+      `INSERT INTO artifacts (id, session_id, user_id, type, title, content, version, phase)
+       VALUES ('plan-pm2-watcher', 's-pm2-parent', ?, 'markdown', 'plan', ?, 1, 'plan')`,
+      [USER_ID, buildValidPlan()],
+    );
+    dbModule.sqliteRun(
+      `INSERT INTO artifacts (id, session_id, user_id, type, title, content, version, phase)
        VALUES ('tasks-pm2-watcher', 's-pm2-parent', ?, 'markdown', 'tasks', ?, 1, 'tasks')`,
       [
         USER_ID,
-        '# 任务清单\n\n## Phase 1\n- [ ] T001 [US1] 修复后端 API\n- [ ] T002 [US1] [P] 补测试',
+        buildValidTasks([
+          '- [ ] T001 [US1] [KIND:build] [SURFACE:backend] [services/agent-gateway/src/routes/orders.ts] 实现订单接口 - 返回订单详情',
+          '- [ ] T002 [US1] [P] [KIND:review] [SURFACE:backend] [services/agent-gateway/src/__tests__/orders.test.ts] 评审订单接口 - 输出审查意见',
+        ]),
       ],
     );
     const created = store.createHandoff({
@@ -387,6 +607,8 @@ describe('HandoffWatcher.tickOnce', () => {
       toRoleLayer: 'pm2',
       payload: {
         resultJson: {
+          specArtifactId: 'spec-pm2-watcher',
+          planArtifactId: 'plan-pm2-watcher',
           tasksArtifactId: 'tasks-pm2-watcher',
         },
       },
@@ -478,7 +700,7 @@ describe('HandoffWatcher.tickOnce', () => {
     expect(after?.state).toBe('completed');
   });
 
-  it('running 的 pm2 在 qualityReviewPending 且子任务有失败时，会走降级失败收口', async () => {
+  it('running 的 pm2 在 qualityReviewPending 且子任务有失败时，会回到 reclaimed 并等待重试', async () => {
     const reconciler = await import('../../handoff/runner/pm2-quality-review-reconciler.js');
     seedSession('s-pm2-review-parent-2', USER_ID);
     seedSession('s-pm2-review-2', USER_ID);
@@ -532,11 +754,13 @@ describe('HandoffWatcher.tickOnce', () => {
       pm2HandoffId: pm2.id,
       userId: USER_ID,
     });
-    expect(result.status).toBe('failed');
+    expect(result.status).toBe('reclaimed');
 
     const after = store.getHandoff({ userId: USER_ID, handoffId: pm2.id });
-    expect(after?.state).toBe('failed');
-    expect(after?.failureReason).toBe('quality-review-degraded-summary-failed:1');
+    expect(after?.state).toBe('pending');
+    expect(after?.failureReason).toBeNull();
+    expect(after?.retryCount).toBe(1);
+    expect(after?.toSessionId).toBeNull();
   });
 });
 

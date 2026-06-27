@@ -137,6 +137,8 @@ export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
         >
           <OfficeThreeCanvas
             selectedAgentId={selectedAgentId}
+            runtimeStatus={selectedTeam?.status ?? null}
+            selectedSessionTitle={selectedTeam?.title ?? null}
             onSelectAgent={onSelectAgent}
             state={officeSceneState}
           />

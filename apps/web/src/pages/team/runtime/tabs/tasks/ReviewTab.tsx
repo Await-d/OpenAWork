@@ -1,5 +1,7 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import type { AgentTeamsReviewCard, AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
+import { formatSidebarTeamStatus } from '../../data/team-runtime-status.js';
+import { resolveSidebarTeamSubtitle } from '../../data/team-runtime-status.js';
 import { ChromeBadge } from '../../shell/team-runtime-shell-primitives.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
 import { resolveMatchedSharedSessionDetail } from '../../data/team-runtime-shared-context.js';
@@ -14,7 +16,8 @@ import { Icon, ChevronDownIcon } from '../../shared/TeamIcons.js';
 import { EmptyState } from '../../shared/content-kit/index.js';
 import { TabContainer } from '../TabContainer.js';
 import { useConverge } from '../../hooks/use-converge.js';
-import { tryFormatJson } from '../../../../../utils/format-json.js';
+import { tryFormatJson, looksLikeJson } from '../../../../../utils/format-json.js';
+import { tryParseIncidentJson, IncidentReadableCard } from '../../../conversation/extras/incident-readable-card.js';
 
 export function ReviewTab({
   selectedTeam = null,
@@ -99,15 +102,8 @@ export function ReviewTab({
       return null;
     }
     return {
-      statusLabel:
-        selectedTeam.status === 'running'
-          ? '运行中'
-          : selectedTeam.status === 'paused'
-            ? '已暂停'
-            : selectedTeam.status === 'failed'
-              ? '失败'
-              : '已完成',
-      subtitle: selectedTeam.subtitle,
+      statusLabel: formatSidebarTeamStatus(selectedTeam.status),
+      subtitle: resolveSidebarTeamSubtitle(selectedTeam.status, selectedTeam.subtitle),
       title: selectedTeam.title,
     };
   }, [sharedSession, selectedTeam]);
@@ -204,7 +200,9 @@ export function ReviewTab({
           </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
             <ChromeBadge>{reviewHeaderContext.statusLabel}</ChromeBadge>
-            <ChromeBadge>{reviewHeaderContext.subtitle}</ChromeBadge>
+            {reviewHeaderContext.subtitle ? (
+              <ChromeBadge>{reviewHeaderContext.subtitle}</ChromeBadge>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -317,9 +315,36 @@ export function ReviewTab({
                     </button>
                   </div>
                 </div>
-                <span style={{ fontSize: 12, color: 'var(--fg-default)', lineHeight: 1.55 }}>
-                  {card.summary}
-                </span>
+                {(() => {
+                  const incident = tryParseIncidentJson(card.summary);
+                  if (incident) return <IncidentReadableCard data={incident} />;
+                  if (looksLikeJson(card.summary)) {
+                    return (
+                      <pre
+                        style={{
+                          margin: 0,
+                          padding: '8px 10px',
+                          borderRadius: 6,
+                          background: 'var(--bg-base)',
+                          border: '1px solid var(--border-subtle)',
+                          fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
+                          fontSize: 11,
+                          lineHeight: 1.6,
+                          color: 'var(--fg-default)',
+                          whiteSpace: 'pre',
+                          overflowX: 'auto',
+                        }}
+                      >
+                        {tryFormatJson(card.summary)}
+                      </pre>
+                    );
+                  }
+                  return (
+                    <span style={{ fontSize: 12, color: 'var(--fg-default)', lineHeight: 1.55 }}>
+                      {card.summary}
+                    </span>
+                  );
+                })()}
 
                 {isExpanded && cardComments.length > 0 && (
                   <div

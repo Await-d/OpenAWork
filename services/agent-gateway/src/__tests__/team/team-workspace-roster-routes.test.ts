@@ -46,6 +46,8 @@ const CUSTOM_ROSTER = [
     personaKey: 'executor:devops:route',
     toolsets: ['read', 'write', 'shell'],
     required: false,
+    thinkingEnabled: true,
+    reasoningEffort: 'high' as const,
   },
 ];
 
@@ -186,6 +188,10 @@ describe('team workspace default roster routes', () => {
 
       expect(Array.isArray(teamDefinition?.memberSlots)).toBe(true);
       expect(teamDefinition?.memberSlots?.[0]?.id).toBe('custom-executor-devops-route');
+      expect(teamDefinition?.memberSlots?.[0]).toMatchObject({
+        thinkingEnabled: true,
+        reasoningEffort: 'high',
+      });
     } finally {
       await app.close();
     }

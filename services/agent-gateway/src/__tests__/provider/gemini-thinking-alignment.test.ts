@@ -30,35 +30,33 @@ function geminiCfg(model: string, effort: ReasoningEffort, enabled = true) {
     model,
   });
   return options?.['gemini'] as
-    | {
-        body?: { google?: { thinking_config?: Record<string, unknown> } };
-      }
+    | { google?: { thinking_config?: Record<string, unknown> } }
     | undefined;
 }
 
 describe('buildProviderOptions — gemini-3 thinking_level subsets', () => {
   it('gemini-3-pro accepts low/medium/high; effort xhigh clamps to high', () => {
-    expect(geminiCfg('gemini-3-pro', 'xhigh')?.body?.google?.thinking_config).toMatchObject({
+    expect(geminiCfg('gemini-3-pro', 'xhigh')?.google?.thinking_config).toMatchObject({
       include_thoughts: true,
       thinking_level: 'high',
     });
   });
 
   it('gemini-3-pro upgrades minimal to low (minimal not in subset)', () => {
-    expect(geminiCfg('gemini-3-pro', 'minimal')?.body?.google?.thinking_config).toMatchObject({
+    expect(geminiCfg('gemini-3-pro', 'minimal')?.google?.thinking_config).toMatchObject({
       thinking_level: 'low',
     });
   });
 
   it('gemini-3-flash supports the full minimal/low/medium/high subset', () => {
-    expect(geminiCfg('gemini-3-flash', 'minimal')?.body?.google?.thinking_config).toMatchObject({
+    expect(geminiCfg('gemini-3-flash', 'minimal')?.google?.thinking_config).toMatchObject({
       thinking_level: 'minimal',
     });
-    expect(geminiCfg('gemini-3-flash', 'medium')?.body?.google?.thinking_config).toMatchObject({
+    expect(geminiCfg('gemini-3-flash', 'medium')?.google?.thinking_config).toMatchObject({
       thinking_level: 'medium',
     });
     // xhigh → high (Gemini level scale tops out at 'high')
-    expect(geminiCfg('gemini-3-flash', 'xhigh')?.body?.google?.thinking_config).toMatchObject({
+    expect(geminiCfg('gemini-3-flash', 'xhigh')?.google?.thinking_config).toMatchObject({
       thinking_level: 'high',
     });
   });
@@ -66,22 +64,20 @@ describe('buildProviderOptions — gemini-3 thinking_level subsets', () => {
   it('gemini-3-flash-image only accepts minimal / high', () => {
     // medium → minimal (largest supported ≤ medium is 'minimal')
     expect(
-      geminiCfg('gemini-3-flash-image', 'medium')?.body?.google?.thinking_config,
+      geminiCfg('gemini-3-flash-image', 'medium')?.google?.thinking_config,
     ).toMatchObject({
       thinking_level: 'minimal',
     });
-    expect(geminiCfg('gemini-3-flash-image', 'high')?.body?.google?.thinking_config).toMatchObject({
+    expect(geminiCfg('gemini-3-flash-image', 'high')?.google?.thinking_config).toMatchObject({
       thinking_level: 'high',
     });
   });
 
   it('gemini-3-pro-image only accepts high', () => {
-    expect(geminiCfg('gemini-3-pro-image', 'minimal')?.body?.google?.thinking_config).toMatchObject(
-      {
-        thinking_level: 'high',
-      },
-    );
-    expect(geminiCfg('gemini-3-pro-image', 'medium')?.body?.google?.thinking_config).toMatchObject({
+    expect(geminiCfg('gemini-3-pro-image', 'minimal')?.google?.thinking_config).toMatchObject({
+      thinking_level: 'high',
+    });
+    expect(geminiCfg('gemini-3-pro-image', 'medium')?.google?.thinking_config).toMatchObject({
       thinking_level: 'high',
     });
   });
@@ -89,20 +85,20 @@ describe('buildProviderOptions — gemini-3 thinking_level subsets', () => {
 
 describe('buildProviderOptions — gemini-2.5 thinking_budget caps', () => {
   it('gemini-2.5-pro caps xhigh at 32_768 (the higher pro-only ceiling)', () => {
-    expect(geminiCfg('gemini-2.5-pro', 'xhigh')?.body?.google?.thinking_config).toMatchObject({
+    expect(geminiCfg('gemini-2.5-pro', 'xhigh')?.google?.thinking_config).toMatchObject({
       include_thoughts: true,
       thinking_budget: 32_768,
     });
   });
 
   it('gemini-2.5-flash xhigh caps at 24_576 (default ceiling)', () => {
-    expect(geminiCfg('gemini-2.5-flash', 'xhigh')?.body?.google?.thinking_config).toMatchObject({
+    expect(geminiCfg('gemini-2.5-flash', 'xhigh')?.google?.thinking_config).toMatchObject({
       thinking_budget: 24_576,
     });
   });
 
   it('gemini-2.5-pro lower-tier budgets pass through unchanged', () => {
-    expect(geminiCfg('gemini-2.5-pro', 'medium')?.body?.google?.thinking_config).toMatchObject({
+    expect(geminiCfg('gemini-2.5-pro', 'medium')?.google?.thinking_config).toMatchObject({
       thinking_budget: 8192,
     });
   });
@@ -110,36 +106,33 @@ describe('buildProviderOptions — gemini-2.5 thinking_budget caps', () => {
 
 describe('buildProviderOptions — gemini disabled path', () => {
   it('gemini-3 emits thinking_level (lowest supported) — never thinking_budget=0', () => {
-    const cfg = geminiCfg('gemini-3-pro', 'medium', /* enabled */ false)?.body?.google
-      ?.thinking_config;
+    const cfg = geminiCfg('gemini-3-pro', 'medium', /* enabled */ false)?.google?.thinking_config;
     expect(cfg).toEqual({ thinking_level: 'low' });
     expect(cfg).not.toHaveProperty('thinking_budget');
   });
 
   it('gemini-3-flash-image disabled drops to minimal (its lowest)', () => {
     expect(
-      geminiCfg('gemini-3-flash-image', 'medium', false)?.body?.google?.thinking_config,
+      geminiCfg('gemini-3-flash-image', 'medium', false)?.google?.thinking_config,
     ).toEqual({
       thinking_level: 'minimal',
     });
   });
 
   it('gemini-3-pro-image disabled stays at high (no lower option)', () => {
-    expect(geminiCfg('gemini-3-pro-image', 'medium', false)?.body?.google?.thinking_config).toEqual(
-      {
-        thinking_level: 'high',
-      },
-    );
+    expect(geminiCfg('gemini-3-pro-image', 'medium', false)?.google?.thinking_config).toEqual({
+      thinking_level: 'high',
+    });
   });
 
   it('gemini-2.5-pro disabled uses non-zero floor 128 (model rejects budget=0)', () => {
-    expect(geminiCfg('gemini-2.5-pro', 'medium', false)?.body?.google?.thinking_config).toEqual({
+    expect(geminiCfg('gemini-2.5-pro', 'medium', false)?.google?.thinking_config).toEqual({
       thinking_budget: 128,
     });
   });
 
   it('gemini-2.5-flash disabled uses budget 0 (full off)', () => {
-    expect(geminiCfg('gemini-2.5-flash', 'medium', false)?.body?.google?.thinking_config).toEqual({
+    expect(geminiCfg('gemini-2.5-flash', 'medium', false)?.google?.thinking_config).toEqual({
       thinking_budget: 0,
     });
   });
@@ -185,10 +178,10 @@ describe('buildProviderOptions — openrouter GPT-5 effort clamp', () => {
       thinking: { ...baseThinking, providerType: 'openrouter', effort: 'xhigh' },
       model: 'openai/gpt-5.1',
     });
-    const body = (
-      opts?.['openrouter'] as { body?: { reasoning?: { effort?: string } } } | undefined
-    )?.body;
-    expect(body?.reasoning?.effort).toBe('high');
+    const reasoning = (
+      opts?.['openrouter'] as { reasoning?: { effort?: string } } | undefined
+    )?.reasoning;
+    expect(reasoning?.effort).toBe('high');
   });
 
   it('claude via OpenRouter is not clamped (non-GPT-5)', () => {
@@ -196,9 +189,9 @@ describe('buildProviderOptions — openrouter GPT-5 effort clamp', () => {
       thinking: { ...baseThinking, providerType: 'openrouter', effort: 'xhigh' },
       model: 'anthropic/claude-sonnet-4-5',
     });
-    const body = (
-      opts?.['openrouter'] as { body?: { reasoning?: { effort?: string } } } | undefined
-    )?.body;
-    expect(body?.reasoning?.effort).toBe('xhigh');
+    const reasoning = (
+      opts?.['openrouter'] as { reasoning?: { effort?: string } } | undefined
+    )?.reasoning;
+    expect(reasoning?.effort).toBe('xhigh');
   });
 });

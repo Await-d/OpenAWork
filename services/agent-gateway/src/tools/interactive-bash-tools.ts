@@ -57,9 +57,10 @@ function buildTmuxTerminalId(sessionName: string): string {
 
 export interface InteractiveBashRunContext {
   sessionId: string;
-  userId: string;
+  userId?: string;
   clientRequestId?: string;
   toolCallId?: string;
+  workingDirectory?: string;
 }
 
 export function tokenizeTmuxCommand(command: string): string[] {
@@ -137,6 +138,7 @@ export async function runInteractiveBashCommand(
   let outputIsError = false;
   try {
     const { stdout, stderr } = await execFileAsync(tmuxPath, parts, {
+      ...(trackingContext?.workingDirectory ? { cwd: trackingContext.workingDirectory } : {}),
       timeout: 60000,
       maxBuffer: 2 * 1024 * 1024,
     });
@@ -151,7 +153,7 @@ export async function runInteractiveBashCommand(
     outputIsError = true;
   }
 
-  if (trackingContext && !outputIsError) {
+  if (trackingContext?.userId && !outputIsError) {
     try {
       if (TMUX_SPAWN_SUBCOMMANDS.has(subcommand)) {
         const sessionName = extractTmuxSessionName(parts) ?? tmuxCommand;
@@ -169,7 +171,7 @@ export async function runInteractiveBashCommand(
           kind: 'tmux',
           command: tmuxCommand,
           description: `tmux ${subcommand} ${sessionName}`.trim(),
-          cwd: process.cwd(),
+          cwd: trackingContext.workingDirectory ?? process.cwd(),
           terminalId: buildTmuxTerminalId(sessionName),
           initialStatus: 'tmux-spawned',
           metadata: { tmuxSessionName: sessionName },

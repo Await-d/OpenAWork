@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   buildOfficeProjectionPages,
   OFFICE_PROJECTION_PAGE_COUNT,
+  resolveOfficeAgentStatusLabel,
+  resolveOfficeRuntimeFooter,
+  resolveOfficeRuntimeStatus,
   type OfficeCanvasDisplayData,
 } from './office-canvas-textures.js';
 
@@ -80,5 +83,34 @@ describe('buildOfficeProjectionPages', () => {
     expect(pages[1]?.lines).toEqual(['暂无角色状态数据']);
     expect(pages[3]?.subtitle).toBe('等待新的团队运行事件');
     expect(pages[3]?.lines).toEqual(['当前还没有新的活动事件进入时间线。']);
+  });
+
+  it('有实时状态时优先使用实时状态，而不是沿用旧的顶部状态文案', () => {
+    const pages = buildOfficeProjectionPages({
+      ...buildData(),
+      topSummary: {
+        ...buildData().topSummary,
+        status: '已完成',
+        runtimeStatus: 'running',
+      },
+    });
+
+    expect(pages[0]?.lines).toContain('状态：运行中');
+    expect(pages[3]?.footer).toBe('团队事件总线运行中。');
+  });
+});
+
+describe('office runtime helpers', () => {
+  it('会从旧状态文案回退解析实时状态', () => {
+    expect(resolveOfficeRuntimeStatus({ statusLabel: '已暂停' })).toBe('paused');
+    expect(resolveOfficeRuntimeStatus({ statusLabel: '已空闲' })).toBe('idle');
+    expect(resolveOfficeRuntimeStatus({ statusLabel: '运行中' })).toBe('running');
+  });
+
+  it('非运行态时 agent 标签跟随会话实时状态', () => {
+    expect(resolveOfficeAgentStatusLabel({ runtimeStatus: 'paused', agentStatus: 'working' })).toBe(
+      '已暂停',
+    );
+    expect(resolveOfficeRuntimeFooter('failed')).toBe('当前会话出现失败，请检查运行链路。');
   });
 });

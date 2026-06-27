@@ -18,7 +18,7 @@ import { setSubstate } from '../store/substate-store.js';
 import { sqliteRun, sqliteGet } from '../../infra/db.js';
 import { randomUUID } from 'node:crypto';
 import { publishHandoffEvent, publishTeamEvent } from '../bus/team-events-bus.js';
-import { inferTaskProfile, TOOLSET_CATEGORIES } from './dispatch-package.js';
+import { extractComparablePathsFromText, inferTaskProfile, TOOLSET_CATEGORIES } from './dispatch-package.js';
 
 // ─── b: reception 层指令 ────────────────────────────────────────────────────
 
@@ -378,6 +378,11 @@ registerInstruction({
     toolsets: z.array(z.enum(TOOLSET_CATEGORIES)).min(1),
     taskId: z.string().describe('tasks.md 中的任务 id（如 T001）'),
     parallel: z.boolean().default(false),
+    ownedPaths: z
+      .array(z.string().min(1).max(400))
+      .max(20)
+      .optional()
+      .describe('该任务明确负责的文件 / 模块路径；不传则从 goal 自动提取'),
     artifactRefs: z
       .object({
         specId: z.string().optional(),
@@ -398,6 +403,7 @@ registerInstruction({
         toolsets: args.toolsets,
         role: args.role,
         artifactRefs: args.artifactRefs ?? {},
+        ownedPaths: args.ownedPaths ?? extractComparablePathsFromText(args.goal),
         taskProfile: inferTaskProfile({ title: args.goal, context: args.context }),
         taskMarkers: { taskId: args.taskId, parallel: args.parallel },
       },

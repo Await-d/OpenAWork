@@ -74,14 +74,26 @@ const CONTAINER_STYLE: CSSProperties = {
 };
 
 const HEADER_STYLE: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
+  display: 'grid',
   gap: 10,
   padding: '10px 12px',
   borderRadius: 'var(--radius-md, 8px)',
   border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
   background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
   flexShrink: 0,
+};
+
+const HEADER_TOP_ROW_STYLE: CSSProperties = {
+  display: 'flex',
+  alignItems: 'flex-start',
+  gap: 10,
+  flexWrap: 'wrap',
+};
+
+const HEADER_ACTION_ROW_STYLE: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
   flexWrap: 'wrap',
 };
 
@@ -114,8 +126,7 @@ const TIMELINE_PANEL_STYLE: CSSProperties = {
   overflow: 'hidden',
   display: 'flex',
   flexDirection: 'column',
-  gap: 4,
-  padding: 4,
+  gap: 8,
 };
 
 /** 列表滚动区（嵌套在 TIMELINE_PANEL 内部） */
@@ -126,7 +137,22 @@ const TIMELINE_SCROLL_STYLE: CSSProperties = {
   overflowX: 'hidden',
   display: 'flex',
   flexDirection: 'column',
-  gap: 2,
+  gap: 4,
+};
+
+const TIMELINE_HEADER_STYLE: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 8,
+  padding: '0 6px 4px',
+};
+
+const TIMELINE_HEADER_LABEL_STYLE: CSSProperties = {
+  fontSize: 10,
+  fontWeight: 700,
+  color: 'var(--fg-muted)',
+  letterSpacing: '0.08em',
 };
 
 const SESSION_PANE_STYLE: CSSProperties = {
@@ -187,8 +213,13 @@ export function LayeredConversationView({
       if (previous && rows.some((row) => row.sessionId === previous)) {
         return previous;
       }
-      // 默认选中接待层（reception）的会话，让用户首先看到用户↔接待的对话
+      const activeStates = new Set<LayerConversationState>(['idle', 'paused', 'pending', 'claimed', 'running']);
+      if (!selectedTeam && rows.some((row) => activeStates.has(row.state))) {
+        return null;
+      }
+
       const preferredSessionId =
+        rows.find((row) => row.parentSessionId !== null)?.sessionId ??
         rows.find((row) => row.roleLayer === 'reception')?.sessionId ??
         rows.find((row) => row.parentSessionId === null)?.sessionId ??
         rows[0]?.sessionId ??
@@ -198,7 +229,7 @@ export function LayeredConversationView({
       }
       return null;
     });
-  }, [rows, selectedTeam?.id]);
+  }, [rows, selectedTeam]);
 
   const handleSelectRow = useCallback((row: LayerConversationRow) => {
     setSelectedSessionId((previous) => (previous === row.sessionId ? null : row.sessionId));
@@ -254,63 +285,66 @@ export function LayeredConversationView({
     >
       <div style={CONTAINER_STYLE}>
         <div style={HEADER_STYLE}>
-          <span style={{ display: 'grid', gap: 2, minWidth: 0, flex: '1 1 260px' }}>
-            <strong style={{ fontSize: 13, color: 'var(--fg-strong)' }}>{scopeTitle}</strong>
-            <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>{scopeSubtitle}</span>
-          </span>
-          <LayerSummaryPill label="层级会话" value={rows.length} />
-          <LayerSummaryPill label="交接记录" value={handoffRowCount} />
-          <div style={{ flex: 1 }} />
-          <SegmentedToggle<'split' | 'thread'>
-            ariaLabel="布局模式"
-            size="sm"
-            value={layoutMode}
-            onChange={setLayoutMode}
-            options={[
-              { value: 'split', label: '双栏', icon: '🗂️' },
-              { value: 'thread', label: '线程', icon: '🧵' },
-            ]}
-          />
-          {activeLayer !== 'all' && canPreviewTeamLayerPrompt(activeLayer) ? (
-            <button
-              type="button"
-              onClick={() => setPromptPreviewLayer(activeLayer)}
-              title={`查看 ${TEAM_LAYER_LABELS[activeLayer]} 层的角色提示词`}
-              className="team-v2-control team-v2-control--accent-soft"
-              style={{
-                padding: '4px 10px',
-                borderRadius: 'var(--radius-sm, 6px)',
-                border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
-                background: 'color-mix(in srgb, var(--accent) 10%, transparent)',
-                color: 'var(--accent)',
-                fontSize: 11,
-                fontWeight: 600,
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              🧬 角色提示词
-            </button>
-          ) : null}
-          {onSelectSessionDrawer ? (
-            <button
-              type="button"
-              onClick={onSelectSessionDrawer}
-              className="team-v2-control team-v2-control--transparent"
-              style={{
-                padding: '4px 10px',
-                borderRadius: 'var(--radius-sm, 6px)',
-                border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
-                background: 'transparent',
-                color: 'var(--fg-muted)',
-                fontSize: 11,
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              在抽屉中打开
-            </button>
-          ) : null}
+          <div style={HEADER_TOP_ROW_STYLE}>
+            <span style={{ display: 'grid', gap: 2, minWidth: 0, flex: '1 1 260px' }}>
+              <strong style={{ fontSize: 13, color: 'var(--fg-strong)' }}>{scopeTitle}</strong>
+              <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>{scopeSubtitle}</span>
+            </span>
+            <LayerSummaryPill label="层级会话" value={rows.length} />
+            <LayerSummaryPill label="交接记录" value={handoffRowCount} />
+          </div>
+          <div style={HEADER_ACTION_ROW_STYLE}>
+            <SegmentedToggle<'split' | 'thread'>
+              ariaLabel="布局模式"
+              size="sm"
+              value={layoutMode}
+              onChange={setLayoutMode}
+              options={[
+                { value: 'split', label: '双栏', icon: '🗂️' },
+                { value: 'thread', label: '线程', icon: '🧵' },
+              ]}
+            />
+            {activeLayer !== 'all' && canPreviewTeamLayerPrompt(activeLayer) ? (
+              <button
+                type="button"
+                onClick={() => setPromptPreviewLayer(activeLayer)}
+                title={`查看 ${TEAM_LAYER_LABELS[activeLayer]} 层的角色提示词`}
+                className="team-v2-control team-v2-control--accent-soft"
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: 'var(--radius-sm, 6px)',
+                  border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
+                  background: 'color-mix(in srgb, var(--accent) 10%, transparent)',
+                  color: 'var(--accent)',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                🧬 角色提示词
+              </button>
+            ) : null}
+            {onSelectSessionDrawer ? (
+              <button
+                type="button"
+                onClick={onSelectSessionDrawer}
+                className="team-v2-control team-v2-control--transparent"
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: 'var(--radius-sm, 6px)',
+                  border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
+                  background: 'transparent',
+                  color: 'var(--fg-muted)',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                在抽屉中打开
+              </button>
+            ) : null}
+          </div>
         </div>
 
         <div style={TAB_BAR_STYLE} role="group" aria-label="层级筛选">
@@ -338,11 +372,14 @@ export function LayeredConversationView({
             <CrossLayerConversationView focusHandoffId={null} selectedTeam={selectedThreadTeam} />
           </div>
         ) : (
-          <div
-            className="team-layered-conversation-split"
-            style={{ flex: 1, minHeight: 0 }}
-          >
+          <div className="team-layered-conversation-split" style={{ flex: 1, minHeight: 0 }}>
             <div style={TIMELINE_PANEL_STYLE}>
+              <div style={TIMELINE_HEADER_STYLE}>
+                <span style={TIMELINE_HEADER_LABEL_STYLE}>会话树</span>
+                <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
+                  当前显示 {visibleRows.length} / {rows.length}
+                </span>
+              </div>
               <div style={TIMELINE_SCROLL_STYLE}>
                 {visibleRows.length === 0 ? (
                   <EmptyState
@@ -369,7 +406,12 @@ export function LayeredConversationView({
               {selectedSessionId ? (
                 <>
                   {selectedRow ? <SelectedLayerHeader row={selectedRow} /> : null}
-                  <TeamConversationView key={selectedSessionId} sessionId={selectedSessionId} soloMode readOnly />
+                  <TeamConversationView
+                    key={selectedSessionId}
+                    sessionId={selectedSessionId}
+                    soloMode
+                    readOnly
+                  />
                 </>
               ) : (
                 <EmptyState
@@ -463,6 +505,7 @@ function shortSessionId(sessionId: string): string {
 function SelectedLayerHeader({ row }: { row: LayerConversationRow }) {
   const identity = getRoleLayerIdentity(row.roleLayer);
   const roleLabel = row.displayName ?? row.personaKey ?? null;
+  const title = row.title.trim() || identity.label;
   return (
     <div
       style={{
@@ -510,13 +553,13 @@ function SelectedLayerHeader({ row }: { row: LayerConversationRow }) {
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
             }}
-            title={roleLabel ? `${identity.label} · ${roleLabel}` : identity.label}
+            title={title}
           >
-            {roleLabel ? `${identity.label} · ${roleLabel}` : identity.label}
+            {title}
           </strong>
         </span>
         <span style={{ color: 'var(--fg-muted)', fontSize: 10.5 }}>
-          {identity.short}
+          {identity.short} · {identity.label}
           {roleLabel ? ` · ${roleLabel}` : ''}
           {' · '}
           {STATE_LABELS[row.state]} · {formatLayerRowTime(row.timestampMs)}
@@ -547,13 +590,7 @@ function LayerStateBadge({ state }: { state: LayerConversationState }) {
   );
 }
 
-function LayerRowAvatar({
-  layer,
-  state,
-}: {
-  layer: TeamRoleLayer;
-  state: LayerConversationState;
-}) {
+function LayerRowAvatar({ layer, state }: { layer: TeamRoleLayer; state: LayerConversationState }) {
   const identity = getRoleLayerIdentity(layer);
   const isRunning = state === 'running';
   return (
@@ -607,6 +644,11 @@ function LayerSessionRow({
   const identity = getRoleLayerIdentity(row.roleLayer);
   const hasChildren = row.childCount > 0;
   const roleLabel = row.displayName ?? row.personaKey ?? null;
+  const title =
+    row.title.trim() || (roleLabel ? `${identity.label} · ${roleLabel}` : identity.label);
+  const routeLabel = row.fromRoleLayer
+    ? `${TEAM_LAYER_LABELS[row.fromRoleLayer]} → ${TEAM_LAYER_LABELS[row.roleLayer]}`
+    : TEAM_LAYER_LABELS[row.roleLayer];
 
   /* 构建树形连接线：每层一个槽位，绘制竖线和拐角 */
   const treeLines: ('│' | '├' | '└' | ' ')[] = [];
@@ -624,17 +666,17 @@ function LayerSessionRow({
       style={{
         textAlign: 'left',
         display: 'flex',
-        alignItems: 'center',
-        gap: 6,
+        alignItems: 'flex-start',
+        gap: 8,
         width: '100%',
-        padding: `6px 10px 6px ${row.depth > 0 ? 4 : 10}px`,
+        padding: `8px 10px 8px ${row.depth > 0 ? 4 : 10}px`,
         borderRadius: 'var(--radius-md, 8px)',
         border: selected
           ? '1px solid color-mix(in srgb, var(--accent) 50%, transparent)'
-          : '1px solid transparent',
+          : '1px solid color-mix(in srgb, var(--border-default) 18%, transparent)',
         background: selected
           ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))'
-          : 'transparent',
+          : 'color-mix(in srgb, var(--bg-overlay) 42%, transparent)',
         cursor: 'pointer',
         transition: 'background 0.15s, border-color 0.15s',
       }}
@@ -670,7 +712,15 @@ function LayerSessionRow({
               {i === row.depth - 1 ? (hasChildren ? '├' : '└') : ch}
             </span>
           ))}
-          <span style={{ width: 6, height: 1, background: 'var(--border-default)', marginLeft: -2, opacity: 0.5 }} />
+          <span
+            style={{
+              width: 6,
+              height: 1,
+              background: 'var(--border-default)',
+              marginLeft: -2,
+              opacity: 0.5,
+            }}
+          />
         </span>
       )}
 
@@ -696,14 +746,14 @@ function LayerSessionRow({
           <strong
             style={{
               color: 'var(--fg-strong)',
-              fontSize: 12,
+              fontSize: 12.5,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
             }}
-            title={roleLabel ? `${identity.label} · ${roleLabel}` : identity.label}
+            title={title}
           >
-            {roleLabel ? `${identity.label} · ${roleLabel}` : identity.label}
+            {title}
           </strong>
           <span style={{ marginLeft: 'auto', flexShrink: 0 }}>
             <LayerStateBadge state={row.state} />
@@ -718,6 +768,7 @@ function LayerSessionRow({
             color: 'var(--fg-muted)',
             fontSize: 10,
             fontVariantNumeric: 'tabular-nums',
+            flexWrap: 'wrap',
           }}
         >
           <span
@@ -732,7 +783,7 @@ function LayerSessionRow({
               flexShrink: 0,
             }}
           >
-            {identity.short}
+            {routeLabel}
           </span>
           {roleLabel ? (
             <span
@@ -750,11 +801,6 @@ function LayerSessionRow({
               {roleLabel}
             </span>
           ) : null}
-          {row.fromRoleLayer ? (
-            <span style={{ flexShrink: 0, color: 'var(--fg-subtle)', fontSize: 9 }}>
-              ← {TEAM_LAYER_LABELS[row.fromRoleLayer]}
-            </span>
-          ) : null}
           <span style={{ flexShrink: 0 }}>{formatLayerRowTime(row.timestampMs)}</span>
           {hasChildren ? (
             <>
@@ -767,6 +813,22 @@ function LayerSessionRow({
             </>
           ) : null}
         </span>
+        {row.detail ? (
+          <span
+            style={{
+              color: selected ? 'var(--fg-default)' : 'var(--fg-muted)',
+              fontSize: 10.5,
+              lineHeight: 1.45,
+              overflow: 'hidden',
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
+            }}
+            title={row.detail}
+          >
+            {row.detail}
+          </span>
+        ) : null}
       </span>
     </button>
   );

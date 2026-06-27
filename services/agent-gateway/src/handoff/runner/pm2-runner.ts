@@ -32,7 +32,11 @@ import {
   buildTeamRosterManifest,
   resolveMemberModelForSessionLayer,
 } from '../bus/resolve-member-model.js';
-import { buildDispatchPackages, parseAllTasks } from '../capability/dispatch-package.js';
+import {
+  buildDispatchPackages,
+  inferTaskProfile,
+  parseAllTasks,
+} from '../capability/dispatch-package.js';
 import { setSubstate, SUBSTATES_D } from '../store/substate-store.js';
 import { resolveSessionWorkspacePath } from '../../session/session-workspace-resolution.js';
 import { assertCanWriteArtifactPhase } from '../capability/layer-capabilities.js';
@@ -177,6 +181,7 @@ VIOLATION: [违反描述2]`;
 async function createReturnToPm1Handoff(input: {
   userId: string;
   pm2HandoffId: string;
+  pm2SessionId: string;
   pm1SessionId: string;
   sourceIntent: string;
   teamWorkspaceId: string | null;
@@ -230,7 +235,7 @@ async function createReturnToPm1Handoff(input: {
       },
     });
 
-    // 向 reception session 写消息让用户知道团队在自动修正
+    // 向 reception session 写消息让用户知道团队在自动修正，并附带具体反馈
     try {
       appendSessionMessageV2({
         sessionId: receptionSessionId,
@@ -240,11 +245,42 @@ async function createReturnToPm1Handoff(input: {
         content: [
           {
             type: 'text',
-            text: `🔄 PM2 管控层检查发现规划质量问题（${input.step}），已自动退回 PM1 根据反馈重新规划。`,
+            text: [
+              `🔄 PM2 管控层检查发现规划质量问题（${input.step}），已自动退回 PM1 根据反馈重新规划。`,
+              '',
+              '**具体问题**：',
+              input.feedback,
+              '',
+              `PM1 将根据以上反馈修正 spec/plan/tasks 后重新提交给 PM2 审查。`,
+            ].join('\n'),
           },
         ],
         clientRequestId: `pm2:${input.pm2HandoffId}:return-to-pm1:${input.step}`,
       });
+    } catch {
+      /* best-effort */
+    }
+
+    // 设置 PM2 session 的 substate 为 escalating（退回修正中），
+    // 而非 failed——因为这是自动修正流程，不是终态失败。
+    // 前端据此显示"退回修正中"而非"失败"。
+    try {
+      setSubstate({
+        sessionId: input.pm2SessionId,
+        substate: SUBSTATES_D.ESCALATING,
+        userId: input.userId,
+        roleLayer: 'pm2',
+      });
+    } catch {
+      /* best-effort */
+    }
+
+    // 完成 PM2 handoff——PM2 的检查工作已完成（决定退回 PM1），
+    // handoff 应进入终态而非永远 running。
+    // 否则 reconcilePendingPm2QualityReviews 会反复扫描它。
+    try {
+      const { completeRunningHandoffById } = await import('../store/handoff-store.js');
+      completeRunningHandoffById(input.pm2HandoffId);
     } catch {
       /* best-effort */
     }
@@ -281,6 +317,14 @@ export function createPm2Runner(): HandoffTaskRunner {
     const planArtifactId = (resultJson?.['planArtifactId'] as string) ?? null;
     const specArtifactId = (resultJson?.['specArtifactId'] as string) ?? null;
     const teamWorkspaceId = (payload?.['teamWorkspaceId'] as string) ?? null;
+
+    // 提前查询 spec/plan 产物内容，供后续 fallback 逻辑与 readiness 校验共用
+    const specRow = specArtifactId
+      ? sqliteGet<{ content: string }>(`SELECT content FROM artifacts WHERE id = ?`, [specArtifactId])
+      : null;
+    const planRow = planArtifactId
+      ? sqliteGet<{ content: string }>(`SELECT content FROM artifacts WHERE id = ?`, [planArtifactId])
+      : null;
 
     // tasksArtifactId 缺失时，尝试从 PM1 session 的 artifacts 表直接查最新 tasks 产物
     // （可能 PM1 在写 result_json 前崩溃但 tasks artifact 已落库）
@@ -359,13 +403,6 @@ export function createPm2Runner(): HandoffTaskRunner {
       throw new Error(`PM2 runner: tasks artifact ${effectiveTasksArtifactId} 不存在`);
     }
 
-    const specRow = specArtifactId
-      ? sqliteGet<{ content: string }>(`SELECT content FROM artifacts WHERE id = ?`, [specArtifactId])
-      : null;
-    const planRow = planArtifactId
-      ? sqliteGet<{ content: string }>(`SELECT content FROM artifacts WHERE id = ?`, [planArtifactId])
-      : null;
-
     const readiness = validatePlanningReadiness({
       specContent: specRow?.content ?? '',
       planContent: planRow?.content ?? '',
@@ -383,6 +420,7 @@ export function createPm2Runner(): HandoffTaskRunner {
       await createReturnToPm1Handoff({
         userId: input.handoff.userId,
         pm2HandoffId: input.handoff.id,
+        pm2SessionId: input.toSessionId,
         pm1SessionId: input.handoff.fromSessionId,
         sourceIntent: '',
         teamWorkspaceId,
@@ -404,12 +442,14 @@ export function createPm2Runner(): HandoffTaskRunner {
         text: `⚠️ tasks.md 解析出 0 个任务，将把整个内容作为一个综合任务执行（降级模式）。`,
       });
       tasks = [{
-        id: 'fallback-0',
+        taskId: 'fallback-0',
         title: tasksRow.content.slice(0, 100) || '综合执行任务',
-        kind: 'build' as const,
-        surface: 'cross-cutting' as const,
         parallel: false,
-        rawLine: `- [ ] T001 [KIND:build] [SURFACE:cross-cutting] ${tasksRow.content.slice(0, 100)}`,
+        story: null,
+        explicitProfile: { kind: 'build', surface: 'cross-cutting' },
+        priority: 'medium',
+        fileEntries: [],
+        ownedPaths: [],
       }];
     }
 
@@ -586,6 +626,7 @@ export function createPm2Runner(): HandoffTaskRunner {
                   await createReturnToPm1Handoff({
                     userId: input.handoff.userId,
                     pm2HandoffId: input.handoff.id,
+                    pm2SessionId: input.toSessionId,
                     pm1SessionId: input.handoff.fromSessionId,
                     sourceIntent: '',
                     teamWorkspaceId,
@@ -610,6 +651,7 @@ export function createPm2Runner(): HandoffTaskRunner {
                 await createReturnToPm1Handoff({
                   userId: input.handoff.userId,
                   pm2HandoffId: input.handoff.id,
+                  pm2SessionId: input.toSessionId,
                   pm1SessionId: input.handoff.fromSessionId,
                   sourceIntent: '',
                   teamWorkspaceId,
@@ -656,7 +698,7 @@ export function createPm2Runner(): HandoffTaskRunner {
             if (workspaceRoot) {
               const archPath = resolve(join(workspaceRoot, 'architecture.md'));
               architectureContent = readFileSync(archPath, 'utf-8');
-              architectureMdLoaded = architectureContent.trim().length > 0;
+              architectureMdLoaded = (architectureContent ?? '').trim().length > 0;
             }
           } catch (err) {
             console.warn(
@@ -700,24 +742,6 @@ export function createPm2Runner(): HandoffTaskRunner {
             architectureReviewArtifactId,
             qualityReviewPending: false,
           });
-          try {
-            appendSessionMessageV2({
-              sessionId: input.toSessionId,
-              userId: input.handoff.userId,
-              role: 'assistant',
-              agentId: 'zeus',
-              content: [
-                {
-                  type: 'text',
-                  text: `⚠️ Architecture Review 发现 ${architectureReviewResult.blockingCount} 个阻断问题，但降级继续派发（质量问题将在后续质量评审中收口）：\n${architectureReviewResult.issues.filter((issue) => issue.severity === 'blocking').map((issue) => issue.message).join('；')}`,
-                },
-              ],
-            });
-          } catch (err) {
-            console.warn(
-              `[pm2-runner] 写 architecture review 警告消息失败：${err instanceof Error ? err.message : String(err)}`,
-            );
-          }
           // Architecture Review 有阻断问题 → 退回 PM1 重新规划
           const archFeedback = `Architecture Review 未通过：\n${architectureReviewResult.issues.filter((issue) => issue.severity === 'blocking').map((issue, i) => `${i + 1}. ${issue.message}`).join('\n')}`;
           persistPm2AssistantMessage({
@@ -730,6 +754,7 @@ export function createPm2Runner(): HandoffTaskRunner {
           await createReturnToPm1Handoff({
             userId: input.handoff.userId,
             pm2HandoffId: input.handoff.id,
+            pm2SessionId: input.toSessionId,
             pm1SessionId: input.handoff.fromSessionId,
             sourceIntent: '',
             teamWorkspaceId,
@@ -800,6 +825,101 @@ export function createPm2Runner(): HandoffTaskRunner {
 
     // packages 为空时的处理：如果 buildDispatchPackages 没有解析出任何包
     // （tasks.md 格式不标准或任务标题校验不通过），退回 PM1 重新生成 tasks。
+    // 同时检查任务粒度——任务过多（>8）说明 PM1 把工作拆得太细，
+    // 退回 PM1 要求合并任务，避免大量并行 executor 互相重复工作。
+    if (tasks.length > 8) {
+      const granularityFeedback = [
+        'tasks.md 任务数量过多（' + tasks.length + ' 个），任务拆分粒度过细。',
+        '',
+        'PM1 应将同一交付物的子步骤合并为一个完整任务。例如：',
+        '- ❌ 错误：把"写报告"拆成"确认格式""调研""撰写""验证" 4 个任务',
+        '- ✅ 正确：合并为"[docs/report.md] 撰写完整技术选型报告 - 包含对比评估和结论" 1 个任务',
+        '',
+        '理想任务数量：3-6 个，最多不超过 8 个。每个任务应是一个完整的可交付单元。',
+        '',
+        '当前任务列表（请合并后重新提交）：',
+        ...tasks.map((t, i) => `${i + 1}. [${t.taskId}] ${t.title}`),
+      ].join('\n');
+      persistPm2AssistantMessage({
+        userId: input.handoff.userId,
+        sessionId: input.toSessionId,
+        handoffId: input.handoff.id,
+        step: 'tasks-too-granular',
+        text: `⚠️ tasks.md 任务数量过多（${tasks.length} 个），退回 PM1 重新合并任务。`,
+      });
+      await createReturnToPm1Handoff({
+        userId: input.handoff.userId,
+        pm2HandoffId: input.handoff.id,
+        pm2SessionId: input.toSessionId,
+        pm1SessionId: input.handoff.fromSessionId,
+        sourceIntent: '',
+        teamWorkspaceId,
+        feedback: granularityFeedback,
+        step: 'tasks-too-granular',
+      });
+      return;
+    }
+
+    // 同文件多任务检测：如果多个任务指向同一文件路径，说明拆分过细。
+    // 同一文件的创建、修改应在一个任务中完成。
+    const fileTaskMap = new Map<string, number[]>();
+    for (const [taskIndex, task] of tasks.entries()) {
+      const taskProfile =
+        task.explicitProfile ??
+        inferTaskProfile({
+          title: task.title,
+          context: tasksRow.content,
+          story: task.story,
+        });
+      // reviewer 任务天然要和 executor 共享同一文件范围做审查，
+      // 这不属于“同文件被拆成多个执行任务”的反模式，不应在这里拦截。
+      if (taskProfile.kind === 'review') {
+        continue;
+      }
+      for (const filePath of task.ownedPaths) {
+        if (!fileTaskMap.has(filePath)) {
+          fileTaskMap.set(filePath, []);
+        }
+        fileTaskMap.get(filePath)!.push(taskIndex);
+      }
+    }
+    const duplicateFiles = Array.from(fileTaskMap.entries()).filter(
+      ([, indices]) => indices.length > 1,
+    );
+    if (duplicateFiles.length > 0) {
+      const dupFeedback = [
+        'tasks.md 中存在同一文件被拆成多个任务的情况，任务粒度过细。',
+        '',
+        '同一文件的创建和修改应合并为一个完整任务。例如：',
+        '- ❌ 错误：[apps/web/src/pages/login.tsx] 创建登录页面框架 + [apps/web/src/pages/login.tsx] 添加表单验证 + [apps/web/src/pages/login.tsx] 接入提交接口',
+        '- ✅ 正确：[apps/web/src/pages/login.tsx] 实现完整登录页面 - 包含表单、验证和提交功能',
+        '',
+        '重复文件的任务：',
+        ...duplicateFiles.map(
+          ([filePath, indices]) =>
+            `- ${filePath}：${indices.map((i) => tasks[i]?.taskId ?? `T${i + 1}`).join(', ')} 应合并为一个任务`,
+        ),
+      ].join('\n');
+      persistPm2AssistantMessage({
+        userId: input.handoff.userId,
+        sessionId: input.toSessionId,
+        handoffId: input.handoff.id,
+        step: 'tasks-duplicate-files',
+        text: `⚠️ tasks.md 中 ${duplicateFiles.length} 个文件被拆成多个任务，退回 PM1 重新合并。`,
+      });
+      await createReturnToPm1Handoff({
+        userId: input.handoff.userId,
+        pm2HandoffId: input.handoff.id,
+        pm2SessionId: input.toSessionId,
+        pm1SessionId: input.handoff.fromSessionId,
+        sourceIntent: '',
+        teamWorkspaceId,
+        feedback: dupFeedback,
+        step: 'tasks-duplicate-files',
+      });
+      return;
+    }
+
     if (packages.length === 0 && tasks.length > 0) {
       // 获取具体的校验问题，让 PM1 知道哪里需要修正
       const { validateParsedTasks } = await import('../capability/dispatch-package.js');
@@ -833,6 +953,7 @@ export function createPm2Runner(): HandoffTaskRunner {
       await createReturnToPm1Handoff({
         userId: input.handoff.userId,
         pm2HandoffId: input.handoff.id,
+        pm2SessionId: input.toSessionId,
         pm1SessionId: input.handoff.fromSessionId,
         sourceIntent: '',
         teamWorkspaceId,
@@ -851,17 +972,25 @@ export function createPm2Runner(): HandoffTaskRunner {
       });
       const fallbackTasksContent = tasksRow.content;
       packages.push({
-        role: 'executor' as const,
+        role: 'executor',
         goal: `根据任务清单执行所有任务`,
-        title: `综合执行任务（降级派发）`,
-        context: `${context}\n\n**完整任务清单**：\n${fallbackTasksContent}`,
-        taskMarkers: { parallel: false, kind: 'build', surface: 'cross-cutting' },
+        context: `${context}\n\n**完整任务清单**：\n${fallbackTasksContent}`.slice(0, 8000),
+        toolsets: ['read', 'write', 'shell'],
+        taskMarkers: {
+          taskId: 'fallback-dispatch',
+          parallel: false,
+          priority: 'medium',
+        },
+        taskProfile: { kind: 'build', surface: 'cross-cutting' },
         artifactRefs: {
           specId: specArtifactId ?? undefined,
           planId: planArtifactId ?? undefined,
           tasksId: tasksArtifactId,
         },
-      } as typeof packages[number]);
+        ownedPaths: [],
+        dependencyHandoffIds: [],
+        dependsOn: [],
+      });
     }
 
     // D50 全局并发上限：当解析出的任务数超过派发上限时，buildDispatchPackages
@@ -894,16 +1023,24 @@ export function createPm2Runner(): HandoffTaskRunner {
 
     // 7. 为每个 package 创建 handoff（d→e/f/g）
     const createdHandoffs: HandoffRecord[] = [];
+    const taskIdToHandoffId = new Map<string, string>();
     for (const pkg of packages) {
       const toRoleLayer = pkg.role === 'reviewer' ? ('reviewer' as const) : ('executor' as const);
+      const dependencyHandoffIds = pkg.dependsOn
+        .map((taskId) => taskIdToHandoffId.get(taskId))
+        .filter((handoffId): handoffId is string => typeof handoffId === 'string');
       const handoff = createHandoff({
         userId: input.handoff.userId,
         fromSessionId: input.toSessionId,
         fromRoleLayer: 'pm2',
         toRoleLayer,
-        payload: pkg,
+        payload: {
+          ...pkg,
+          dependencyHandoffIds,
+        },
       });
       createdHandoffs.push(handoff);
+      taskIdToHandoffId.set(pkg.taskMarkers.taskId, handoff.id);
       publishHandoffEvent({ type: 'handoff.created', record: handoff });
     }
 

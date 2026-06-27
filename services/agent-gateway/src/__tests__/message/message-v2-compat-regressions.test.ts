@@ -264,6 +264,44 @@ describe('message-v2 compatibility regressions', () => {
     expect(insertLegacyCallIndex).toBeGreaterThan(deleteLegacyCallIndex);
   });
 
+  it('chunks large request-role deletes to stay under SQLite variable limits', () => {
+    const clientRequestId = 'parent-req:tool:bulk-delete';
+    const existingRows = Array.from({ length: 1200 }, (_, index) => ({
+      id: `old-tool-message-${index}`,
+      data: JSON.stringify({
+        id: `old-tool-message-${index}`,
+        sessionID: 'session-1',
+        role: 'tool',
+        clientRequestId,
+        time: { created: index },
+      }),
+    }));
+    mocks.sqliteAll.mockReturnValueOnce(existingRows).mockReturnValueOnce([]);
+    mocks.sqliteGet.mockReturnValue({ max_seq: 0 });
+
+    appendSessionMessageV2({
+      sessionId: 'session-1',
+      userId: 'user-1',
+      role: 'tool',
+      messageId: 'new-tool-message-bulk',
+      createdAt: 123,
+      clientRequestId,
+      replaceExisting: true,
+      content: [{ type: 'text', text: 'replacement tool result' }],
+    });
+
+    const deleteCalls = mocks.sqliteRun.mock.calls.filter((call) =>
+      String(call[0]).includes(
+        'DELETE FROM message_v2 WHERE session_id = ? AND user_id = ? AND id IN (',
+      ),
+    );
+
+    expect(deleteCalls.length).toBeGreaterThan(1);
+    expect(
+      deleteCalls.every((call) => Array.isArray(call[1]) && (call[1] as unknown[]).length <= 900),
+    ).toBe(true);
+  });
+
   it('keeps legacy stream tool-result writes idempotent', () => {
     const streamRouteSource = readFileSync(
       new URL('../../routes/stream.ts', import.meta.url),

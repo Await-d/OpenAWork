@@ -1,6 +1,8 @@
 import { useCallback, useState, type CSSProperties } from 'react';
 import type { SharedSessionDetailRecord } from '@openAwork/web-client';
 import type { AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
+import { formatSidebarTeamStatus } from '../../data/team-runtime-status.js';
+import { resolveSidebarTeamSubtitle } from '../../data/team-runtime-status.js';
 import MarkdownMessageContent from '../../../../../components/chat/markdown/markdown-message-content.js';
 import { PANEL_STYLE } from '../../shared/team-runtime-shared.js';
 import { SendIcon } from '../../shared/TeamIcons.js';
@@ -46,16 +48,7 @@ const EMPTY_STYLE: CSSProperties = {
 };
 
 function formatSharedStatus(status: AgentTeamsSidebarTeam['status']): string {
-  if (status === 'running') {
-    return '运行中';
-  }
-  if (status === 'paused') {
-    return '已暂停';
-  }
-  if (status === 'failed') {
-    return '失败';
-  }
-  return '已完成';
+  return formatSidebarTeamStatus(status);
 }
 
 function formatCommentTime(createdAt: string): string {
@@ -87,6 +80,7 @@ export function SharedSessionMessagesView({
   sharedSessionLoading: boolean;
 }) {
   const [commentInput, setCommentInput] = useState('');
+  const statusSubtitle = resolveSidebarTeamSubtitle(selectedTeam.status, selectedTeam.subtitle);
 
   const handleSubmitComment = useCallback(() => {
     if (!canManageSessionEntries) {
@@ -123,7 +117,7 @@ export function SharedSessionMessagesView({
         </span>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
           <span style={HEADER_PILL_STYLE}>{formatSharedStatus(selectedTeam.status)}</span>
-          <span style={HEADER_PILL_STYLE}>{selectedTeam.subtitle}</span>
+          {statusSubtitle ? <span style={HEADER_PILL_STYLE}>{statusSubtitle}</span> : null}
           {sharedSession ? (
             <span style={HEADER_PILL_STYLE}>
               审批 {sharedSession.pendingPermissions.length} · 问题{' '}

@@ -13,9 +13,12 @@
  */
 
 import type { HandoffEvent } from '../../../../../stores/team/team-events.js';
-import { useState, type CSSProperties } from 'react';
+import { useMemo, useState, type CSSProperties } from 'react';
 import type { AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
-import { useTeamNotificationStore } from '../../../../../stores/team/team-events.js';
+import {
+  getTeamNotificationEventKey,
+  useTeamNotificationStore,
+} from '../../../../../stores/team/team-events.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
 import { resolveMatchedSharedSessionDetail } from '../../data/team-runtime-shared-context.js';
 import { MessagesTab } from './MessagesTab.js';
@@ -85,7 +88,8 @@ export function MessagesMergedTab({
   onOpenClarifications,
   selectedTeam,
 }: MessagesMergedTabProps) {
-  const unreadCount = useTeamNotificationStore((s) => s.unreadCount);
+  const allEvents = useTeamNotificationStore((s) => s.events);
+  const readEventKeys = useTeamNotificationStore((s) => s.readEventKeys);
   const { activeSharedSession, selectedSharedSession } = useTeamRuntimeReferenceViewData();
   const [segment, setSegment] = useState<MessagesSegment>('bus');
   const sharedSession =
@@ -97,10 +101,30 @@ export function MessagesMergedTab({
         })
       : null;
   const isSharedSessionSelected = selectedTeam?.isSharedSession === true;
-  const mentionsBadgeCount = isSharedSessionSelected
-    ? (sharedSession?.pendingPermissions.length ?? 0) +
-      (sharedSession?.pendingQuestions.length ?? 0)
-    : unreadCount;
+
+  // 按选中会话 scope 过滤未读事件数，让 badge 数字与内容一致
+  const scopedTeamId = selectedTeam && !isSharedSessionSelected ? selectedTeam.id : null;
+  const mentionsBadgeCount = useMemo(() => {
+    if (isSharedSessionSelected) {
+      return (sharedSession?.pendingPermissions.length ?? 0) +
+        (sharedSession?.pendingQuestions.length ?? 0);
+    }
+    if (!scopedTeamId) {
+      // 没有选中会话时回退到全局未读数
+      return allEvents.filter((e) => !readEventKeys.has(getTeamNotificationEventKey(e))).length;
+    }
+    // 按选中会话过滤未读事件
+    return allEvents.filter((event) => {
+      const eventSessionId = event.sessionId;
+      if (!eventSessionId) return true;
+      const matchesScope =
+        eventSessionId === scopedTeamId ||
+        (typeof event.payload['fromSessionId'] === 'string' &&
+          event.payload['fromSessionId'] === scopedTeamId);
+      return matchesScope && !readEventKeys.has(getTeamNotificationEventKey(event));
+    }).length;
+  }, [allEvents, isSharedSessionSelected, readEventKeys, scopedTeamId, sharedSession]);
+
   const mentionsLabel = isSharedSessionSelected ? '协作待办' : '待回复';
 
   return (
@@ -156,6 +180,7 @@ export function MessagesMergedTab({
           <MentionsView
             onOpenBlockingTarget={onOpenBlockingTarget}
             onOpenClarifications={onOpenClarifications}
+            selectedTeamId={selectedTeam && !selectedTeam.isSharedSession ? selectedTeam.id : null}
           />
         )}
       </div>

@@ -1227,18 +1227,20 @@ export async function migrate(): Promise<void> {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       root_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      parent_session_id TEXT NOT NULL DEFAULT '',
       role_layer TEXT NOT NULL,
       persona_key TEXT NOT NULL DEFAULT '',
       session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
       display_name TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-      UNIQUE(user_id, root_session_id, role_layer, persona_key),
+      UNIQUE(user_id, root_session_id, parent_session_id, role_layer, persona_key),
       UNIQUE(session_id)
     )
   `);
+  migrateTeamRoleSessionInstancesTable();
   db.exec(
-    'CREATE INDEX IF NOT EXISTS idx_team_role_session_instances_root ON team_role_session_instances(user_id, root_session_id)',
+    'CREATE INDEX IF NOT EXISTS idx_team_role_session_instances_root ON team_role_session_instances(user_id, root_session_id, parent_session_id)',
   );
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_team_role_session_instances_session ON team_role_session_instances(session_id)',
@@ -1497,16 +1499,20 @@ function ensureTeamSchemaSafe(): void {
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         root_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        parent_session_id TEXT NOT NULL DEFAULT '',
         role_layer TEXT NOT NULL,
         persona_key TEXT NOT NULL DEFAULT '',
         session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
         display_name TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-        UNIQUE(user_id, root_session_id, role_layer, persona_key),
+        UNIQUE(user_id, root_session_id, parent_session_id, role_layer, persona_key),
         UNIQUE(session_id)
       )
     `),
+  );
+  safe('team_role_session_instances.parent-scoped-unique', () =>
+    migrateTeamRoleSessionInstancesTable(),
   );
 
   // session_inbound_messages 表
@@ -1574,7 +1580,7 @@ function ensureTeamSchemaSafe(): void {
   );
   safe('idx_team_role_session_instances_root', () =>
     db.exec(
-      'CREATE INDEX IF NOT EXISTS idx_team_role_session_instances_root ON team_role_session_instances(user_id, root_session_id)',
+      'CREATE INDEX IF NOT EXISTS idx_team_role_session_instances_root ON team_role_session_instances(user_id, root_session_id, parent_session_id)',
     ),
   );
   safe('idx_team_role_session_instances_session', () =>
@@ -1700,6 +1706,92 @@ function ensureColumn(table: string, column: string, definition: string): void {
   if (!exists) {
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
+}
+
+function hasTeamRoleSessionInstancesParentScopedUniqueKey(): boolean {
+  const indexes = db.prepare('PRAGMA index_list(team_role_session_instances)').all() as Array<{
+    name: string;
+    unique: number;
+  }>;
+
+  return indexes.some((index) => {
+    if (index.unique !== 1) {
+      return false;
+    }
+    const columns = db.prepare(`PRAGMA index_info(${index.name})`).all() as Array<{
+      name: string;
+    }>;
+    return (
+      columns.length === 5 &&
+      columns[0]?.name === 'user_id' &&
+      columns[1]?.name === 'root_session_id' &&
+      columns[2]?.name === 'parent_session_id' &&
+      columns[3]?.name === 'role_layer' &&
+      columns[4]?.name === 'persona_key'
+    );
+  });
+}
+
+function migrateTeamRoleSessionInstancesTable(): void {
+  const rows = db.prepare('PRAGMA table_info(team_role_session_instances)').all() as Array<{
+    name: string;
+  }>;
+  if (rows.length === 0) {
+    return;
+  }
+
+  const hasParentSessionId = rows.some((row) => row.name === 'parent_session_id');
+  if (hasParentSessionId && hasTeamRoleSessionInstancesParentScopedUniqueKey()) {
+    return;
+  }
+
+  db.exec('DROP INDEX IF EXISTS idx_team_role_session_instances_root');
+  db.exec('DROP INDEX IF EXISTS idx_team_role_session_instances_session');
+  db.exec('ALTER TABLE team_role_session_instances RENAME TO team_role_session_instances_legacy');
+  db.exec(`
+    CREATE TABLE team_role_session_instances (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      root_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      parent_session_id TEXT NOT NULL DEFAULT '',
+      role_layer TEXT NOT NULL,
+      persona_key TEXT NOT NULL DEFAULT '',
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      display_name TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(user_id, root_session_id, parent_session_id, role_layer, persona_key),
+      UNIQUE(session_id)
+    )
+  `);
+  db.exec(`
+    INSERT INTO team_role_session_instances (
+      id,
+      user_id,
+      root_session_id,
+      parent_session_id,
+      role_layer,
+      persona_key,
+      session_id,
+      display_name,
+      created_at,
+      updated_at
+    )
+    SELECT
+      legacy.id,
+      legacy.user_id,
+      legacy.root_session_id,
+      COALESCE(sess.team_parent_session_id, ''),
+      legacy.role_layer,
+      legacy.persona_key,
+      legacy.session_id,
+      legacy.display_name,
+      legacy.created_at,
+      legacy.updated_at
+    FROM team_role_session_instances_legacy legacy
+    LEFT JOIN sessions sess ON sess.id = legacy.session_id
+  `);
+  db.exec('DROP TABLE team_role_session_instances_legacy');
 }
 
 function migrateSessionFileDiffsDropLegacyTextColumns(): void {

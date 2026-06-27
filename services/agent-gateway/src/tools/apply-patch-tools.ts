@@ -6,9 +6,9 @@ import type { FileBackupRef } from '@openAwork/shared';
 import { defaultIgnoreManager } from '@openAwork/agent-core';
 import { z } from 'zod';
 import { buildFileDiff, fileBackupRefSchema, fileDiffSchema } from './file-diff-format.js';
-import { validateWorkspacePath } from '../workspace/workspace-paths.js';
 import { lspManager } from '../lsp/router.js';
 import { getPostWriteDiagnostics, postWriteDiagnosticSchema } from './lsp-tools.js';
+import { assertSessionWorkspacePath } from '../workspace/workspace-safety.js';
 
 const applyPatchInputSchema = z.object({
   patchText: z.string().min(1),
@@ -48,11 +48,8 @@ type PlannedPatchOperation =
   | { type: 'write'; path: string; content: string }
   | { type: 'move'; sourcePath: string; targetPath: string; content: string };
 
-function assertPatchPath(path: string): string {
-  const safePath = validateWorkspacePath(path);
-  if (!safePath) {
-    throw new Error(`Forbidden workspace path: ${path}`);
-  }
+function assertPatchPath(path: string, sessionId: string): string {
+  const safePath = assertSessionWorkspacePath({ path, sessionId });
   if (defaultIgnoreManager.shouldIgnore(safePath)) {
     throw new Error(`Access denied: file "${safePath}" is protected by agentignore rules`);
   }
@@ -168,8 +165,9 @@ function parsePatchText(patchText: string): PatchAction[] {
 
 async function planUpdateAction(
   action: Extract<PatchAction, { type: 'update' }>,
+  sessionId: string,
 ): Promise<PlannedPatchOperation> {
-  const sourcePath = assertPatchPath(action.path);
+  const sourcePath = assertPatchPath(action.path, sessionId);
   const originalContent = await fsp.readFile(sourcePath, 'utf8');
   const eol = originalContent.includes('\r\n') ? '\r\n' : '\n';
   let nextContent = originalContent;
@@ -183,7 +181,7 @@ async function planUpdateAction(
     nextContent = nextContent.replace(oldText, newText);
   }
 
-  const targetPath = action.moveTo ? assertPatchPath(action.moveTo) : sourcePath;
+  const targetPath = action.moveTo ? assertPatchPath(action.moveTo, sessionId) : sourcePath;
   if (targetPath !== sourcePath) {
     return { type: 'move', sourcePath, targetPath, content: nextContent };
   }
@@ -191,25 +189,25 @@ async function planUpdateAction(
   return { type: 'write', path: sourcePath, content: nextContent };
 }
 
-async function planPatchText(patchText: string): Promise<PlannedPatchOperation[]> {
+async function planPatchText(patchText: string, sessionId: string): Promise<PlannedPatchOperation[]> {
   const actions = parsePatchText(patchText);
   const planned: PlannedPatchOperation[] = [];
 
   for (const action of actions) {
     if (action.type === 'add') {
-      const safePath = assertPatchPath(action.path);
+      const safePath = assertPatchPath(action.path, sessionId);
       planned.push({ type: 'add', path: safePath, content: action.content });
       continue;
     }
 
     if (action.type === 'delete') {
-      const safePath = assertPatchPath(action.path);
+      const safePath = assertPatchPath(action.path, sessionId);
       await fsp.stat(safePath);
       planned.push({ type: 'delete', path: safePath });
       continue;
     }
 
-    planned.push(await planUpdateAction(action));
+    planned.push(await planUpdateAction(action, sessionId));
   }
 
   return planned;
@@ -354,9 +352,13 @@ export async function executeApplyPatch(
       content: string;
       filePath: string;
     }) => Promise<FileBackupRef | undefined>;
+    sessionId?: string;
   },
 ): Promise<z.infer<typeof applyPatchOutputSchema>> {
-  const planned = await planPatchText(input.patchText);
+  if (!options?.sessionId) {
+    throw new Error('apply_patch requires session workspace context');
+  }
+  const planned = await planPatchText(input.patchText, options.sessionId);
   const files = await applyPlannedOperations(planned, options);
 
   const modifiedPaths = files.filter((f) => f.status !== 'deleted').map((f) => f.path);
@@ -391,7 +393,9 @@ export const applyPatchToolDefinition: ToolDefinition<
   inputSchema: applyPatchInputSchema,
   outputSchema: applyPatchOutputSchema,
   timeout: 120000,
-  execute: async (input) => executeApplyPatch(input),
+  execute: async () => {
+    throw new Error('apply_patch must execute through the gateway-managed sandbox path');
+  },
 };
 
 export { buildApplyPatchPermissionScope };

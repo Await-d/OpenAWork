@@ -10,6 +10,7 @@ import {
   canConfigureThinkingForModel,
   describeReasoningEffort,
   getSupportedReasoningEffortsForModel,
+  inferSupportsThinking,
 } from './model-reasoning-support.js';
 import {
   resolveProviderVisual,
@@ -555,7 +556,11 @@ export function ProviderSettings({
     }
 
     const current = defaultThinking[mode];
-    const supportsThinking = selectedModel?.supportsThinking === true;
+    const supportsThinking = inferSupportsThinking(
+      selectedProviderType,
+      selectedModel?.id,
+      selectedModel?.supportsThinking === true,
+    );
     const canConfigureThinking = canConfigureThinkingForModel(
       selectedProviderType,
       selectedModel?.id,

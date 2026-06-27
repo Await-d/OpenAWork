@@ -1,9 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react';
 import { getRoleLayerIdentity } from '../../data/role-layer-identity.js';
-import {
-  CONVERSATION_BADGE_STYLE,
-  CONVERSATION_INFO_CARD_STYLE,
-} from './conversation-shared-styles.js';
+import { CONVERSATION_BADGE_STYLE } from './conversation-shared-styles.js';
 
 const HEADER_STYLE: CSSProperties = {
   display: 'grid',
@@ -22,8 +19,34 @@ const BADGE_ROW_STYLE: CSSProperties = {
 
 const INFO_GRID_STYLE: CSSProperties = {
   display: 'grid',
+  gap: 6,
+};
+
+const CONTEXT_ROW_STYLE: CSSProperties = {
+  display: 'grid',
+  gap: 4,
+  paddingTop: 6,
+  borderTop: '1px solid color-mix(in srgb, var(--border-default) 18%, transparent)',
+};
+
+const CONTEXT_META_STYLE: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
   gap: 8,
-  gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+  flexWrap: 'wrap',
+};
+
+const CONTEXT_TEXT_STYLE: CSSProperties = {
+  fontSize: 11,
+  color: 'var(--fg-default)',
+  lineHeight: 1.5,
+  minWidth: 0,
+};
+
+const SESSION_ID_STYLE: CSSProperties = {
+  fontSize: 10,
+  color: 'var(--fg-muted)',
+  fontVariantNumeric: 'tabular-nums',
 };
 
 interface LayerConversationContextHeaderProps {
@@ -112,31 +135,40 @@ export function LayerConversationContextHeader({
       </div>
       <div style={INFO_GRID_STYLE}>
         {fromIdentity || fromSessionId ? (
-          <div style={CONVERSATION_INFO_CARD_STYLE}>
-            <span style={{ fontSize: 10, color: 'var(--fg-muted)', fontWeight: 700 }}>来源上下文</span>
-            {fromIdentity ? (
-              <span style={CONVERSATION_BADGE_STYLE}>
-                {fromIdentity.icon} 来源 · {fromIdentity.label}
-              </span>
-            ) : null}
-            {fromSessionId ? (
-              <span style={{ fontSize: 11, color: 'var(--fg-default)', lineHeight: 1.5 }}>
-                {(fromSessionTitle?.trim() || fromSessionId).slice(0, 28)}
-              </span>
-            ) : null}
+          <div style={CONTEXT_ROW_STYLE}>
+            <span style={{ fontSize: 10, color: 'var(--fg-muted)', fontWeight: 700 }}>
+              来源上下文
+            </span>
+            <div style={CONTEXT_META_STYLE}>
+              {fromIdentity ? (
+                <span style={CONVERSATION_BADGE_STYLE}>
+                  {fromIdentity.icon} 来源 · {fromIdentity.label}
+                </span>
+              ) : null}
+              {fromSessionId ? (
+                <span style={CONTEXT_TEXT_STYLE} title={fromSessionTitle?.trim() || fromSessionId}>
+                  {fromSessionTitle?.trim() || fromSessionId}
+                </span>
+              ) : null}
+              {fromSessionId ? (
+                <span style={SESSION_ID_STYLE}>session · {fromSessionId.slice(0, 8)}</span>
+              ) : null}
+            </div>
           </div>
         ) : null}
-        <div style={CONVERSATION_INFO_CARD_STYLE}>
+        <div style={CONTEXT_ROW_STYLE}>
           <span style={{ fontSize: 10, color: 'var(--fg-muted)', fontWeight: 700 }}>当前会话</span>
-          {toIdentity ? (
-            <span style={CONVERSATION_BADGE_STYLE}>
-              {toIdentity.icon} 当前 · {toIdentity.label}
+          <div style={CONTEXT_META_STYLE}>
+            {toIdentity ? (
+              <span style={CONVERSATION_BADGE_STYLE}>
+                {toIdentity.icon} 当前 · {toIdentity.label}
+              </span>
+            ) : null}
+            <span style={CONTEXT_TEXT_STYLE} title={sessionTitle?.trim() || sessionId}>
+              {sessionTitle?.trim() || sessionId}
             </span>
-          ) : null}
-          <span style={{ fontSize: 11, color: 'var(--fg-default)', lineHeight: 1.5 }}>
-            {(sessionTitle?.trim() || sessionId).slice(0, 28)}
-          </span>
-          <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>session · {sessionId.slice(0, 8)}</span>
+            <span style={SESSION_ID_STYLE}>session · {sessionId.slice(0, 8)}</span>
+          </div>
         </div>
       </div>
     </div>

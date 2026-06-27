@@ -148,12 +148,58 @@ describe('findOrCreateTeamRoleSession', () => {
            FROM team_role_session_instances
           WHERE user_id = ?
             AND root_session_id = ?
+            AND parent_session_id = ?
             AND role_layer = 'executor'
             AND persona_key = 'executor:frontend'
             AND session_id = ?`,
-        [USER_ID, root.sessionId, first.sessionId],
+        [USER_ID, root.sessionId, root.sessionId, first.sessionId],
       ),
     ).toMatchObject({ count: 1 });
+  });
+
+  it('同 personaKey 的角色 session 存在活跃 handoff 时会创建新的 session', () => {
+    const root = teamSessionCreate.createTeamSession({
+      userId: USER_ID,
+      roleLayer: 'reception',
+    });
+
+    const first = teamSessionCreate.findOrCreateTeamRoleSession({
+      userId: USER_ID,
+      roleLayer: 'executor',
+      teamParentSessionId: root.sessionId,
+      personaKey: 'executor:frontend',
+      displayName: '前端开发者',
+      handoffState: 'running',
+    });
+    dbModule.sqliteRun(
+      `INSERT INTO handoff_records (
+         id, user_id, from_session_id, from_role_layer, to_role_layer, to_session_id, payload_json, state
+       ) VALUES ('active-handoff', ?, ?, 'pm2', 'executor', ?, '{}', 'running')`,
+      [USER_ID, root.sessionId, first.sessionId],
+    );
+
+    const second = teamSessionCreate.findOrCreateTeamRoleSession({
+      userId: USER_ID,
+      roleLayer: 'executor',
+      teamParentSessionId: root.sessionId,
+      personaKey: 'executor:frontend',
+      displayName: '前端开发者',
+      handoffState: 'running',
+    });
+
+    expect(second.sessionId).not.toBe(first.sessionId);
+    expect(
+      dbModule.sqliteGet<{ session_id: string }>(
+        `SELECT session_id
+           FROM team_role_session_instances
+          WHERE user_id = ?
+            AND root_session_id = ?
+            AND parent_session_id = ?
+            AND role_layer = 'executor'
+            AND persona_key = 'executor:frontend'`,
+        [USER_ID, root.sessionId, root.sessionId],
+      ),
+    ).toMatchObject({ session_id: second.sessionId });
   });
 
   it('旧 metadata 中已重复存在的角色 session 会收敛到单个数据库绑定', () => {
@@ -205,19 +251,65 @@ describe('findOrCreateTeamRoleSession', () => {
            FROM team_role_session_instances
           WHERE user_id = ?
             AND root_session_id = ?
+            AND parent_session_id = ?
             AND role_layer = 'executor'
             AND persona_key = 'executor:frontend'`,
-        [USER_ID, root.sessionId],
+        [USER_ID, root.sessionId, root.sessionId],
       ),
     ).toMatchObject({ count: 1 });
     expect(() => {
       dbModule.sqliteRun(
         `INSERT INTO team_role_session_instances (
-           id, user_id, root_session_id, role_layer, persona_key, session_id
-         ) VALUES ('duplicate-binding', ?, ?, 'executor', 'executor:frontend', ?)`,
-        [USER_ID, root.sessionId, secondLegacy.sessionId],
+           id, user_id, root_session_id, parent_session_id, role_layer, persona_key, session_id
+         ) VALUES ('duplicate-binding', ?, ?, ?, 'executor', 'executor:frontend', ?)`,
+        [USER_ID, root.sessionId, root.sessionId, secondLegacy.sessionId],
       );
     }).toThrow();
+  });
+
+  it('同根会话但不同父节点时不会复用同一个角色 session', () => {
+    const root = teamSessionCreate.createTeamSession({
+      userId: USER_ID,
+      roleLayer: 'reception',
+    });
+    const pm1A = teamSessionCreate.createTeamSession({
+      userId: USER_ID,
+      roleLayer: 'pm1',
+      teamParentSessionId: root.sessionId,
+    });
+    const pm1B = teamSessionCreate.createTeamSession({
+      userId: USER_ID,
+      roleLayer: 'pm1',
+      teamParentSessionId: root.sessionId,
+    });
+
+    const childFromA = teamSessionCreate.findOrCreateTeamRoleSession({
+      userId: USER_ID,
+      roleLayer: 'executor',
+      teamParentSessionId: pm1A.sessionId,
+      personaKey: 'executor:frontend',
+      displayName: '前端开发者',
+    });
+    const childFromB = teamSessionCreate.findOrCreateTeamRoleSession({
+      userId: USER_ID,
+      roleLayer: 'executor',
+      teamParentSessionId: pm1B.sessionId,
+      personaKey: 'executor:frontend',
+      displayName: '前端开发者',
+    });
+
+    expect(childFromB.sessionId).not.toBe(childFromA.sessionId);
+    expect(
+      dbModule.sqliteGet<{ count: number }>(
+        `SELECT COUNT(*) AS count
+           FROM team_role_session_instances
+          WHERE user_id = ?
+            AND root_session_id = ?
+            AND role_layer = 'executor'
+            AND persona_key = 'executor:frontend'`,
+        [USER_ID, root.sessionId],
+      ),
+    ).toMatchObject({ count: 2 });
   });
 
   it('同一层级的不同 personaKey 会创建不同角色 session', () => {

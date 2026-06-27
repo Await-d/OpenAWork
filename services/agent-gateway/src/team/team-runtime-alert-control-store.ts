@@ -1,4 +1,5 @@
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
+import { buildSqlitePlaceholders, chunkSqliteBindValues } from '../infra/sqlite-batch.js';
 
 export type TeamRuntimeAlertControlState = 'acknowledged' | 'suppressed';
 
@@ -31,6 +32,23 @@ function mapRow(row: TeamRuntimeAlertControlRow): TeamRuntimeAlertControlRecord 
   };
 }
 
+function listRowsByAlertCodes<T>(input: {
+  alertCodes: string[];
+  fixedParams: readonly (number | string)[];
+  query: (placeholders: string) => string;
+}): T[] {
+  if (input.alertCodes.length === 0) {
+    return [];
+  }
+
+  return chunkSqliteBindValues(input.alertCodes, input.fixedParams.length).flatMap((batchCodes) =>
+    sqliteAll<T>(input.query(buildSqlitePlaceholders(batchCodes.length, ',')), [
+      ...input.fixedParams,
+      ...batchCodes,
+    ]),
+  );
+}
+
 function clearExpiredSuppressedControls(input: {
   alertCodes?: string[];
   nowMs?: number;
@@ -41,15 +59,17 @@ function clearExpiredSuppressedControls(input: {
     return;
   }
   if (input.alertCodes && input.alertCodes.length > 0) {
-    sqliteRun(
-      `DELETE FROM team_runtime_alert_controls
-        WHERE user_id = ?
-          AND state = 'suppressed'
-          AND suppressed_until_ms IS NOT NULL
-          AND suppressed_until_ms <= ?
-          AND alert_code IN (${input.alertCodes.map(() => '?').join(',')})`,
-      [input.userId, nowMs, ...input.alertCodes],
-    );
+    for (const batchCodes of chunkSqliteBindValues(input.alertCodes, 2)) {
+      sqliteRun(
+        `DELETE FROM team_runtime_alert_controls
+          WHERE user_id = ?
+            AND state = 'suppressed'
+            AND suppressed_until_ms IS NOT NULL
+            AND suppressed_until_ms <= ?
+            AND alert_code IN (${buildSqlitePlaceholders(batchCodes.length)})`,
+        [input.userId, nowMs, ...batchCodes],
+      );
+    }
     return;
   }
   sqliteRun(
@@ -73,16 +93,17 @@ export function consumeExpiredSuppressedAlertControls(input: {
   }
   const rows =
     input.alertCodes && input.alertCodes.length > 0
-      ? sqliteAll<{ alert_code: string }>(
-          `SELECT alert_code
+      ? listRowsByAlertCodes<{ alert_code: string }>({
+          alertCodes: input.alertCodes,
+          fixedParams: [input.userId, nowMs],
+          query: (placeholders) => `SELECT alert_code
              FROM team_runtime_alert_controls
             WHERE user_id = ?
               AND state = 'suppressed'
               AND suppressed_until_ms IS NOT NULL
               AND suppressed_until_ms <= ?
-              AND alert_code IN (${input.alertCodes.map(() => '?').join(',')})`,
-          [input.userId, nowMs, ...input.alertCodes],
-        )
+              AND alert_code IN (${placeholders})`,
+        })
       : sqliteAll<{ alert_code: string }>(
           `SELECT alert_code
              FROM team_runtime_alert_controls
@@ -116,12 +137,15 @@ export function listTeamRuntimeAlertControls(input: {
   }
   const rows =
     input.alertCodes && input.alertCodes.length > 0
-      ? sqliteAll<TeamRuntimeAlertControlRow>(
-          `SELECT user_id, alert_code, state, note, suppressed_until_ms, updated_at
+      ? listRowsByAlertCodes<TeamRuntimeAlertControlRow>({
+          alertCodes: input.alertCodes,
+          fixedParams: [input.userId],
+          query: (
+            placeholders,
+          ) => `SELECT user_id, alert_code, state, note, suppressed_until_ms, updated_at
              FROM team_runtime_alert_controls
-            WHERE user_id = ? AND alert_code IN (${input.alertCodes.map(() => '?').join(',')})`,
-          [input.userId, ...input.alertCodes],
-        )
+            WHERE user_id = ? AND alert_code IN (${placeholders})`,
+        })
       : sqliteAll<TeamRuntimeAlertControlRow>(
           `SELECT user_id, alert_code, state, note, suppressed_until_ms, updated_at
              FROM team_runtime_alert_controls

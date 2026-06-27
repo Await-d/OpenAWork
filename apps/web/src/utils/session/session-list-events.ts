@@ -15,8 +15,26 @@ let runStateDispatchScheduled = false;
 const pendingPermissionStateBySession = new Map<string, SessionPendingPermissionState | null>();
 const pendingQuestionStateBySession = new Map<string, PendingQuestionRequest | null>();
 const runStateBySession = new Map<string, SessionRunState>();
+const pendingInteractionSnapshotListeners = new Set<() => void>();
 
 export type SessionRunState = 'idle' | 'running' | 'paused';
+
+export interface SessionPendingInteractionSnapshot {
+  pendingPermissionBySession: ReadonlyMap<string, SessionPendingPermissionState>;
+  pendingQuestionBySession: ReadonlyMap<string, PendingQuestionRequest>;
+}
+
+let pendingInteractionSnapshot: SessionPendingInteractionSnapshot = {
+  pendingPermissionBySession: new Map(),
+  pendingQuestionBySession: new Map(),
+};
+
+function publishPendingInteractionSnapshot(next: SessionPendingInteractionSnapshot): void {
+  pendingInteractionSnapshot = next;
+  for (const listener of pendingInteractionSnapshotListeners) {
+    listener();
+  }
+}
 
 export function requestSessionListRefresh(): void {
   if (typeof window === 'undefined' || refreshScheduled) {
@@ -81,6 +99,18 @@ export function publishSessionPendingPermission(
   }
 
   pendingPermissionStateBySession.set(sessionId, permission);
+  const nextPendingPermissionBySession = new Map(
+    pendingInteractionSnapshot.pendingPermissionBySession,
+  );
+  if (permission) {
+    nextPendingPermissionBySession.set(sessionId, permission);
+  } else {
+    nextPendingPermissionBySession.delete(sessionId);
+  }
+  publishPendingInteractionSnapshot({
+    pendingPermissionBySession: nextPendingPermissionBySession,
+    pendingQuestionBySession: pendingInteractionSnapshot.pendingQuestionBySession,
+  });
   if (pendingPermissionDispatchScheduled) {
     return;
   }
@@ -142,6 +172,16 @@ export function publishSessionPendingQuestion(
   }
 
   pendingQuestionStateBySession.set(sessionId, question);
+  const nextPendingQuestionBySession = new Map(pendingInteractionSnapshot.pendingQuestionBySession);
+  if (question && question.status === 'pending') {
+    nextPendingQuestionBySession.set(sessionId, question);
+  } else {
+    nextPendingQuestionBySession.delete(sessionId);
+  }
+  publishPendingInteractionSnapshot({
+    pendingPermissionBySession: pendingInteractionSnapshot.pendingPermissionBySession,
+    pendingQuestionBySession: nextPendingQuestionBySession,
+  });
   if (pendingQuestionDispatchScheduled) {
     return;
   }
@@ -192,6 +232,17 @@ export function subscribeSessionPendingQuestion(
 
   window.addEventListener(SESSION_PENDING_QUESTION_EVENT, handleChange);
   return () => window.removeEventListener(SESSION_PENDING_QUESTION_EVENT, handleChange);
+}
+
+export function getSessionPendingInteractionSnapshot(): SessionPendingInteractionSnapshot {
+  return pendingInteractionSnapshot;
+}
+
+export function subscribeSessionPendingInteractionSnapshot(listener: () => void): () => void {
+  pendingInteractionSnapshotListeners.add(listener);
+  return () => {
+    pendingInteractionSnapshotListeners.delete(listener);
+  };
 }
 
 export function publishSessionRunState(sessionId: string, state: SessionRunState): void {

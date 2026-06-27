@@ -28,10 +28,12 @@ vi.mock('../../../../../stores/team/team-events.js', async () => {
         events: [
           {
             type: 'session.inbound.submitted',
+            sessionId: 'b-session-003',
             timestamp: Date.parse('2026-06-06T10:00:00.000Z'),
             payload: {
               blocking: true,
               reason: 'needs_clarification',
+              fromSessionId: 'pm1-current',
               context: 'PM1 需要你先补充仓库与部署约束',
               questions: [
                 { id: 'clarify-1', question: '仓库地址是什么？' },
@@ -43,6 +45,18 @@ vi.mock('../../../../../stores/team/team-events.js', async () => {
               ],
             },
           },
+          {
+            type: 'session.inbound.submitted',
+            sessionId: 'other-workspace-root',
+            timestamp: Date.parse('2026-06-06T10:01:00.000Z'),
+            payload: {
+              blocking: false,
+              reason: 'needs_clarification',
+              fromSessionId: 'pm1-other',
+              context: '这个是其它工作区的团队动态，不应混进来',
+              questions: [{ id: 'clarify-other', question: '其它会话问题' }],
+            },
+          },
         ],
       }),
     useClarificationStore: (selector: (state: { items: unknown[] }) => unknown) =>
@@ -51,6 +65,23 @@ vi.mock('../../../../../stores/team/team-events.js', async () => {
       }),
   };
 });
+
+vi.mock('../../data/team-runtime-reference-data.js', () => ({
+  useTeamRuntimeReferenceViewData: () => ({
+    error: null,
+    loading: false,
+    sessions: [
+      { id: 'b-session-001', parentSessionId: null },
+      { id: 'b-session-002', parentSessionId: null },
+      { id: 'b-session-003', parentSessionId: null },
+      { id: 'b-session-004', parentSessionId: null },
+      { id: 'pm1-current', parentSessionId: 'b-session-003' },
+      { id: 'pm1-session-1', parentSessionId: 'b-session-004' },
+      { id: 'other-workspace-root', parentSessionId: null },
+      { id: 'pm1-other', parentSessionId: 'other-workspace-root' },
+    ],
+  }),
+}));
 
 // 测试期把 TeamConversationView 替换成最小桩，便于断言 sessionId / composerEnabled 透传
 vi.mock('../../../conversation/TeamConversationView.js', () => ({
@@ -139,8 +170,17 @@ describe('ConversationArea — 三态路由', () => {
     expect(screen.getByText('团队动态')).toBeTruthy();
     expect(screen.getByText('GitHub')).toBeTruthy();
     expect(screen.getByText('Google')).toBeTruthy();
+    expect(screen.queryByText('这个是其它工作区的团队动态，不应混进来')).toBeNull();
     expect(screen.queryByRole('button', { name: 'GitHub' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Google' })).toBeNull();
+  });
+
+  it('团队动态会按当前 team 会话作用域过滤，不混入其它工作区会话', () => {
+    render(<ConversationArea receptionSessionId="b-session-003" />);
+
+    expect(screen.getByText('PM1 需要你先补充仓库与部署约束')).toBeTruthy();
+    expect(screen.queryByText('这个是其它工作区的团队动态，不应混进来')).toBeNull();
+    expect(screen.queryByText('其它会话问题')).toBeNull();
   });
 
   it('刷新恢复时即使通知流没有 needs_clarification 事件，也会从 pending clarifications 合成团队动态卡片', async () => {
@@ -164,6 +204,15 @@ describe('ConversationArea — 三态路由', () => {
                 createdAt: Date.parse('2026-06-06T10:05:00.000Z'),
                 status: 'pending',
               },
+              {
+                id: 'clarify-runtime-other',
+                sessionId: 'pm1-other',
+                fromSessionId: 'pm1-other',
+                question: '其它工作区问题',
+                context: '其它工作区不应混入当前团队动态',
+                createdAt: Date.parse('2026-06-06T10:06:00.000Z'),
+                status: 'pending',
+              },
             ],
           }),
       };
@@ -174,6 +223,8 @@ describe('ConversationArea — 三态路由', () => {
 
     expect(screen.getByText('团队动态')).toBeTruthy();
     expect(screen.getByText('回答澄清问题')).toBeTruthy();
+    expect(screen.queryByText('其它工作区不应混入当前团队动态')).toBeNull();
+    expect(screen.queryByText('其它工作区问题')).toBeNull();
     expect(screen.queryByRole('button', { name: '回答澄清问题' })).toBeNull();
   });
 });

@@ -28,4 +28,17 @@ describe('planning contract validators', () => {
     const issues = validateParsedTasks(parsed);
     expect(issues.some((issue) => issue.includes('未命名任务'))).toBe(true);
   });
+
+  it('会拒绝缺少文件清单的 tasks', () => {
+    const tasksContent = `# 任务清单：点餐
+
+## Phase 1
+- [ ] T001 [KIND:build] [SURFACE:backend] [services/agent-gateway/src/routes/orders.ts] 实现订单接口 - 返回订单详情
+
+**检查点**：完成`;
+
+    const validation = validateTasksOutput(tasksContent);
+    expect(validation.ok).toBe(false);
+    expect(validation.failed).toContain('任务包含文件清单');
+  });
 });

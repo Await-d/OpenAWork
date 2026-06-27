@@ -7,7 +7,6 @@ import { sqliteAll } from '../infra/db.js';
 import { lspManager } from '../lsp/router.js';
 import { getPostWriteDiagnostics, postWriteDiagnosticSchema } from './lsp-tools.js';
 import { captureBeforeWriteBackup } from '../session/session-file-backup-store.js';
-import { validateWorkspacePath } from '../workspace/workspace-paths.js';
 import {
   fuzzyReplace,
   normalizeLineEndings,
@@ -15,7 +14,7 @@ import {
   convertToLineEnding,
 } from './edit-replacers.js';
 import { formatFileAfterWrite } from './post-write-formatter.js';
-import { getSessionWorkspaceRoot } from '../workspace/workspace-safety.js';
+import { assertSessionWorkspacePath, getSessionWorkspaceRoot } from '../workspace/workspace-safety.js';
 import { getProjectWideDiagnostics } from './project-diagnostics.js';
 
 // Edit error recovery suffix (oh-my-opencode editErrorRecovery pattern)
@@ -57,12 +56,8 @@ interface AuditLogRow {
   output_json: string | null;
 }
 
-function assertEditableWorkspaceFilePath(filePath: string): string {
-  const safePath = validateWorkspacePath(filePath);
-  if (!safePath) {
-    throw new Error(`Forbidden workspace path: ${filePath}`);
-  }
-
+function assertEditableWorkspaceFilePath(sessionId: string, filePath: string): string {
+  const safePath = assertSessionWorkspacePath({ path: filePath, sessionId });
   if (defaultIgnoreManager.shouldIgnore(safePath)) {
     throw new Error(`Access denied: file "${safePath}" is protected by agentignore rules`);
   }
@@ -138,7 +133,7 @@ export function createEditTool(
     outputSchema: editOutputSchema,
     timeout: 10000,
     execute: async (input) => {
-      const safePath = assertEditableWorkspaceFilePath(input.filePath);
+      const safePath = assertEditableWorkspaceFilePath(sessionId, input.filePath);
       if (input.oldString === input.newString) {
         throw new Error(
           'newString must be different from oldString. ' + EDIT_ERROR_RECOVERY_SUFFIX,

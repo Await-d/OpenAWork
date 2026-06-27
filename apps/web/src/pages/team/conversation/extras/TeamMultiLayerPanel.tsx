@@ -2,8 +2,7 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import type { ChatMessage } from '../../../../components/conversation-runtime/messages/support.js';
 import type { MultiLayerViewMode } from './TeamViewModeToggle.js';
 import { getRoleLayerIdentity } from '../../runtime/data/role-layer-identity.js';
-import { buildTeamAssistantPresentation } from './team-assistant-presentation.js';
-import { tryFormatJson, looksLikeJson } from '../../../../utils/format-json.js';
+import { getTeamMessagePreviewText, TeamMessageBody } from './team-message-content.js';
 
 export interface LayerMessages {
   layer: string;
@@ -293,21 +292,7 @@ function formatTime(ts: number | string | undefined): string {
 }
 
 function getMessageSummary(message: ChatMessage): string {
-  const presentation = buildTeamAssistantPresentation(message);
-  if (presentation.summaryText) {
-    return presentation.summaryText.slice(0, 100);
-  }
-  return message.content.slice(0, 100) || '（空消息）';
-}
-
-function getMessageDetailText(message: ChatMessage): string {
-  if (message.role === 'user') {
-    return message.content || '（空消息）';
-  }
-  const presentation = buildTeamAssistantPresentation(message);
-  const raw = presentation.detailText || presentation.summaryText || message.content || '（空消息）';
-  // 如果内容是 JSON 字符串，自动格式化
-  return tryFormatJson(raw);
+  return getTeamMessagePreviewText(message, 100);
 }
 
 function LayerDetailHeader({ layer }: { layer: LayerMessages }) {
@@ -397,10 +382,7 @@ function TabView({
         {activeLayer ? <LayerDetailHeader layer={activeLayer} /> : null}
         {activeLayer && activeLayer.messages.length > 0 ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {activeLayer.messages.map((msg) => {
-              const detailText = getMessageDetailText(msg);
-              const isJson = msg.role !== 'user' && looksLikeJson(detailText);
-              return (
+            {activeLayer.messages.map((msg) => (
               <div
                 key={msg.id}
                 style={{
@@ -412,10 +394,13 @@ function TabView({
                 >
                   <span style={MESSAGE_TIME_STYLE}>{formatTime(msg.createdAt)}</span>
                 </div>
-                <div style={isJson ? MESSAGE_JSON_DETAIL_STYLE : MESSAGE_DETAIL_STYLE}>{detailText}</div>
+                <TeamMessageBody
+                  message={msg}
+                  textStyle={MESSAGE_DETAIL_STYLE}
+                  jsonStyle={MESSAGE_JSON_DETAIL_STYLE}
+                />
               </div>
-              );
-            })}
+            ))}
           </div>
         ) : (
           <div style={EMPTY_STYLE}>该层暂无消息</div>
@@ -425,7 +410,6 @@ function TabView({
   );
 }
 
-function WaterfallView({
 function WaterfallView({ layers }: { layers: LayerMessages[] }) {
   return (
     <div style={WATERFALL_STYLE}>

@@ -20,14 +20,18 @@ import {
   buildApplyPatchPermissionScope,
   executeApplyPatch,
 } from './apply-patch-tools.js';
-import { astGrepReplaceToolDefinition, astGrepSearchToolDefinition } from './ast-grep-tools.js';
+import {
+  astGrepReplaceToolDefinition,
+  astGrepSearchToolDefinition,
+  executeAstGrepReplace,
+} from './ast-grep-tools.js';
 import { writeAuditLog } from '../infra/audit-log.js';
 import {
   backgroundCancelToolDefinition,
   backgroundOutputToolDefinition,
 } from './background-task-tools.js';
 import { bashToolDefinition, deriveBashDescription, runBashCommand } from './bash-tools.js';
-import { bashCommandScope, tokenizeCommand } from './bash-arity.js';
+import { buildBashApprovalPatterns } from './bash-arity.js';
 import {
   bashKillToolDefinition,
   bashOutputToolDefinition,
@@ -70,6 +74,7 @@ import { repoCloneToolDefinition } from './repo-clone-tools.js';
 import { repoOverviewToolDefinition } from './repo-overview-tools.js';
 import { lspManager } from '../lsp/router.js';
 import {
+  executeLspRename,
   lspCallHierarchyToolDefinition,
   lspFindReferencesToolDefinition,
   lspGotoDefinitionToolDefinition,
@@ -204,13 +209,21 @@ import {
   UPSTREAM_RETRY_MAX_RETRIES_KEY,
 } from '../provider/upstream-retry-policy.js';
 import { webfetchTool } from './web-tools.js';
-import { validateWorkspacePath } from '../workspace/workspace-paths.js';
 import {
+  assertSessionWorkspacePath,
+  assertSessionWorkingDirectory,
   ensureIgnoreRulesLoadedForPath,
+  getSessionWorkingDirectory,
   getSessionWorkspaceRoot,
   hasWorkspacePermanentPermission,
+  requiresBoundSessionWorkspace,
+  validateSessionWorkspacePath,
 } from '../workspace/workspace-safety.js';
 import {
+  executeWorkspaceCreateDirectory,
+  executeWorkspaceReviewDiff,
+  executeWorkspaceReviewRevert,
+  executeWorkspaceReviewStatus,
   executeWriteTool,
   globTool,
   grepTool,
@@ -239,12 +252,112 @@ function formatToolInputValidationOutput(
   return `工具 "${toolName}" 参数校验失败：${details}`;
 }
 
+function normalizeWorkspaceManagedRawInput(
+  sessionId: string,
+  request: ToolCallRequest,
+): ToolCallRequest | null {
+  if (request.toolName === listTool.name) {
+    const parsed = listTool.inputSchema.safeParse(request.rawInput);
+    if (!parsed.success) {
+      return null;
+    }
+    return {
+      ...request,
+      rawInput: {
+        ...parsed.data,
+        path: assertSessionWorkspacePath({ path: parsed.data.path, sessionId }),
+      },
+    };
+  }
+
+  if (request.toolName === readTool.name) {
+    const parsed = readTool.inputSchema.safeParse(request.rawInput);
+    if (!parsed.success) {
+      return null;
+    }
+    const path = parsed.data.path ?? parsed.data.filePath;
+    if (!path) {
+      return null;
+    }
+    const normalizedPath = assertSessionWorkspacePath({ path, sessionId });
+    return {
+      ...request,
+      rawInput: {
+        ...parsed.data,
+        path: normalizedPath,
+        ...(parsed.data.filePath !== undefined ? { filePath: normalizedPath } : {}),
+      },
+    };
+  }
+
+  if (request.toolName === globTool.name) {
+    const parsed = globTool.inputSchema.safeParse(request.rawInput);
+    if (!parsed.success) {
+      return null;
+    }
+    return {
+      ...request,
+      rawInput: {
+        ...parsed.data,
+        ...(parsed.data.path
+          ? { path: assertSessionWorkspacePath({ path: parsed.data.path, sessionId }) }
+          : { path: assertSessionWorkingDirectory(sessionId) }),
+      },
+    };
+  }
+
+  if (request.toolName === grepTool.name) {
+    const parsed = grepTool.inputSchema.safeParse(request.rawInput);
+    if (!parsed.success) {
+      return null;
+    }
+    return {
+      ...request,
+      rawInput: {
+        ...parsed.data,
+        ...(parsed.data.path
+          ? { path: assertSessionWorkspacePath({ path: parsed.data.path, sessionId }) }
+          : { path: assertSessionWorkingDirectory(sessionId) }),
+      },
+    };
+  }
+
+  return null;
+}
+
 const FILE_TOOLS = new Set([
   'edit',
+  'glob',
+  'grep',
+  'list',
+  'lsp_rename',
+  'multi_edit',
   'read',
   'write',
+  'workspace_create_directory',
   'workspace_review_diff',
+  'workspace_review_status',
   'workspace_review_revert',
+]);
+
+const SESSION_WORKSPACE_REQUIRED_TOOLS = new Set([
+  'apply_patch',
+  'ast_grep_replace',
+  'bash',
+  'edit',
+  'glob',
+  'grep',
+  'interactive_bash',
+  'list',
+  'lsp_rename',
+  'multi_edit',
+  'read',
+  'run_bash_in_background',
+  'workspace_create_directory',
+  'workspace_review_diff',
+  'workspace_review_status',
+  'workspace_review_revert',
+  'write',
 ]);
 
 // Default permission rules: auto-generated from PERMISSION_CATEGORIES metadata.
@@ -1332,22 +1445,59 @@ function toRelativeScope(absolutePath: string): string {
   return absolutePath;
 }
 
-function buildBashApprovalPatterns(command: string): string[] {
-  const tokens = tokenizeCommand(command.trim());
-  const patterns = new Set<string>();
-  if (tokens.length > 2) {
-    patterns.add(`${tokens.slice(0, -1).join(' ')} *`);
+function formatSessionWorkspaceViolation(
+  sessionId: string,
+  path: string,
+  reason: 'forbidden-path' | 'outside-session-workspace',
+): string {
+  if (reason === 'forbidden-path') {
+    return `Forbidden workspace path: ${path}`;
   }
-  const arityPattern = bashCommandScope(command);
-  if (arityPattern.trim() !== '*') {
-    patterns.add(arityPattern);
+  const workingDirectory = getSessionWorkingDirectory(sessionId);
+  return workingDirectory
+    ? `目标路径超出当前工作区范围：${path}（当前工作区：${workingDirectory}）`
+    : `目标路径超出当前工作区范围：${path}`;
+}
+
+function formatMissingSessionWorkspace(toolName: string): string {
+  return `当前会话未绑定工作区，无法执行工具 "${toolName}"。请先设置 workingDirectory。`;
+}
+
+function hasWorkspaceScopedExecutionInput(request: ToolCallRequest): boolean {
+  const rawInput = request.rawInput as Record<string, unknown>;
+  switch (request.toolName) {
+    case 'read':
+    case 'list':
+    case 'workspace_review_status':
+    case 'workspace_review_diff':
+    case 'write':
+    case 'workspace_create_directory':
+    case 'workspace_review_revert':
+    case 'lsp_rename':
+      return (
+        typeof rawInput.path === 'string' ||
+        typeof rawInput.filePath === 'string'
+      );
+    case 'edit':
+    case 'multi_edit':
+      return typeof rawInput.filePath === 'string';
+    case 'glob':
+    case 'grep':
+      return typeof rawInput.pattern === 'string' && rawInput.pattern.trim().length > 0;
+    case 'apply_patch':
+      return typeof rawInput.patchText === 'string' && rawInput.patchText.trim().length > 0;
+    case 'ast_grep_replace':
+      return typeof rawInput.pattern === 'string' && rawInput.pattern.trim().length > 0;
+    case 'bash':
+    case 'run_bash_in_background':
+      return typeof rawInput.command === 'string' && rawInput.command.trim().length > 0;
+    case 'interactive_bash':
+      return (
+        typeof rawInput.tmux_command === 'string' && rawInput.tmux_command.trim().length > 0
+      );
+    default:
+      return true;
   }
-  const firstToken = tokens[0];
-  if (firstToken) {
-    patterns.add(`${firstToken} *`);
-  }
-  patterns.delete(command.trim());
-  return [...patterns];
 }
 
 function buildPermissionRequestContext(
@@ -1391,7 +1541,10 @@ function buildPermissionRequestContext(
 
   switch (request.toolName) {
     case 'write': {
-      const safePath = pathValue ? validateWorkspacePath(pathValue) : null;
+      const validation = pathValue
+        ? validateSessionWorkspacePath({ path: pathValue, sessionId })
+        : null;
+      const safePath = validation?.ok ? validation.safePath : null;
       if (!safePath) return null;
       const rel = toRelativeScope(safePath);
       return {
@@ -1403,7 +1556,10 @@ function buildPermissionRequestContext(
       };
     }
     case 'edit': {
-      const safePath = pathValue ? validateWorkspacePath(pathValue) : null;
+      const validation = pathValue
+        ? validateSessionWorkspacePath({ path: pathValue, sessionId })
+        : null;
+      const safePath = validation?.ok ? validation.safePath : null;
       if (!safePath) return null;
       const rel = toRelativeScope(safePath);
       return {
@@ -1415,7 +1571,10 @@ function buildPermissionRequestContext(
       };
     }
     case 'multi_edit': {
-      const safePath = pathValue ? validateWorkspacePath(pathValue) : null;
+      const validation = pathValue
+        ? validateSessionWorkspacePath({ path: pathValue, sessionId })
+        : null;
+      const safePath = validation?.ok ? validation.safePath : null;
       if (!safePath) return null;
       const rel = toRelativeScope(safePath);
       return {
@@ -1488,8 +1647,14 @@ function buildPermissionRequestContext(
     }
     case 'bash': {
       const command = typeof rawInput.command === 'string' ? rawInput.command.trim() : '';
-      const workdirValue = typeof rawInput.workdir === 'string' ? rawInput.workdir : WORKSPACE_ROOT;
-      const safeWorkdir = validateWorkspacePath(workdirValue);
+      const sessionWorkingDirectory = getSessionWorkingDirectory(sessionId);
+      if (!sessionWorkingDirectory && requiresBoundSessionWorkspace(sessionId)) return null;
+      const workdirValue =
+        typeof rawInput.workdir === 'string'
+          ? rawInput.workdir
+          : sessionWorkingDirectory ?? WORKSPACE_ROOT;
+      const validation = validateSessionWorkspacePath({ path: workdirValue, sessionId });
+      const safeWorkdir = validation.ok ? validation.safePath : null;
       if (!command || !safeWorkdir) return null;
       return {
         scope: command,
@@ -1512,6 +1677,9 @@ function buildPermissionRequestContext(
       };
     }
     case 'ast_grep_replace': {
+      if (!getSessionWorkingDirectory(sessionId) && requiresBoundSessionWorkspace(sessionId)) {
+        return null;
+      }
       const pattern = typeof rawInput.pattern === 'string' ? rawInput.pattern.trim() : '';
       const lang = typeof rawInput.lang === 'string' ? rawInput.lang.trim() : '';
       if (!pattern) return null;
@@ -1524,6 +1692,9 @@ function buildPermissionRequestContext(
       };
     }
     case 'apply_patch': {
+      if (!getSessionWorkingDirectory(sessionId) && requiresBoundSessionWorkspace(sessionId)) {
+        return null;
+      }
       const patchText = typeof rawInput.patchText === 'string' ? rawInput.patchText : '';
       if (!patchText.trim()) return null;
       return {
@@ -1547,7 +1718,10 @@ function buildPermissionRequestContext(
       };
     }
     case 'workspace_create_directory': {
-      const safePath = pathValue ? validateWorkspacePath(pathValue) : null;
+      const validation = pathValue
+        ? validateSessionWorkspacePath({ path: pathValue, sessionId })
+        : null;
+      const safePath = validation?.ok ? validation.safePath : null;
       if (!safePath) return null;
       const rel = toRelativeScope(safePath);
       return {
@@ -1559,7 +1733,10 @@ function buildPermissionRequestContext(
       };
     }
     case 'workspace_review_revert': {
-      const safeWorkspacePath = pathValue ? validateWorkspacePath(pathValue) : null;
+      const validation = pathValue
+        ? validateSessionWorkspacePath({ path: pathValue, sessionId })
+        : null;
+      const safeWorkspacePath = validation?.ok ? validation.safePath : null;
       const filePath = typeof rawInput.filePath === 'string' ? rawInput.filePath : null;
       if (!safeWorkspacePath || !filePath) return null;
       const relativeFilePath = resolveWorkspaceReviewFilePath(safeWorkspacePath, filePath);
@@ -1569,6 +1746,24 @@ function buildPermissionRequestContext(
         reason: '需要回滚工作区文件改动',
         riskLevel: 'high',
         previewAction: `回滚 ${absoluteFilePath}`,
+        always: ['*'],
+      };
+    }
+    case 'lsp_rename': {
+      if (!getSessionWorkingDirectory(sessionId) && requiresBoundSessionWorkspace(sessionId)) {
+        return null;
+      }
+      const validation = pathValue
+        ? validateSessionWorkspacePath({ path: pathValue, sessionId })
+        : null;
+      const safePath = validation?.ok ? validation.safePath : null;
+      const newName = typeof rawInput.newName === 'string' ? rawInput.newName.trim() : '';
+      if (!safePath || !newName) return null;
+      return {
+        scope: `${toRelativeScope(safePath)}:${newName}`,
+        reason: '需要通过 LSP 跨文件重命名符号',
+        riskLevel: 'high',
+        previewAction: `LSP 重命名 ${safePath} → ${newName}`,
         always: ['*'],
       };
     }
@@ -1605,18 +1800,6 @@ function buildPermissionRequestContext(
         reason: '需要操作桌面 sidecar 的浏览器自动化能力',
         riskLevel: 'high',
         previewAction: target ? `桌面自动化 ${action}: ${target}` : `桌面自动化 ${action}`,
-        always: ['*'],
-      };
-    }
-    case 'lsp_rename': {
-      const safePath = pathValue ? validateWorkspacePath(pathValue) : null;
-      const newName = typeof rawInput.newName === 'string' ? rawInput.newName.trim() : '';
-      if (!safePath || !newName) return null;
-      return {
-        scope: `${toRelativeScope(safePath)}:${newName}`,
-        reason: '需要通过 LSP 跨文件重命名符号',
-        riskLevel: 'high',
-        previewAction: `LSP 重命名 ${safePath} → ${newName}`,
         always: ['*'],
       };
     }
@@ -2446,6 +2629,94 @@ async function executeGatewayManagedToolImpl(
       };
     }
 
+    if (request.toolName === workspaceReviewStatusTool.name) {
+      const parsed = workspaceReviewStatusTool.inputSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatToolInputValidationOutput(request.toolName, parsed.error.issues),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const output = await executeWorkspaceReviewStatus(parsed.data, sessionId);
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output,
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === workspaceReviewDiffTool.name) {
+      const parsed = workspaceReviewDiffTool.inputSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatToolInputValidationOutput(request.toolName, parsed.error.issues),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const output = await executeWorkspaceReviewDiff(parsed.data, sessionId);
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output,
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === workspaceCreateDirectoryTool.name) {
+      const parsed = workspaceCreateDirectoryTool.inputSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatToolInputValidationOutput(request.toolName, parsed.error.issues),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const output = await executeWorkspaceCreateDirectory(parsed.data, sessionId);
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output,
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === workspaceReviewRevertTool.name) {
+      const parsed = workspaceReviewRevertTool.inputSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatToolInputValidationOutput(request.toolName, parsed.error.issues),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const output = await executeWorkspaceReviewRevert(parsed.data, sessionId);
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output,
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
     if (request.toolName === 'edit') {
       const userId = getSessionOwnerUserId(sessionId);
       if (!userId) {
@@ -2557,6 +2828,7 @@ async function executeGatewayManagedToolImpl(
             content,
             kind: 'before_write',
           }),
+        sessionId,
       });
 
       return {
@@ -2602,7 +2874,58 @@ async function executeGatewayManagedToolImpl(
             content,
             kind: 'before_write',
           }),
+        sessionId,
       });
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output,
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === astGrepReplaceToolDefinition.name) {
+      const parsed = astGrepReplaceToolDefinition.inputSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatToolInputValidationOutput(request.toolName, parsed.error.issues),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const output = await executeAstGrepReplace(
+        parsed.data,
+        assertSessionWorkingDirectory(sessionId),
+      );
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output,
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === lspRenameToolDefinition.name) {
+      const parsed = lspRenameToolDefinition.inputSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatToolInputValidationOutput(request.toolName, parsed.error.issues),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const output = await executeLspRename(
+        parsed.data,
+        assertSessionWorkingDirectory(sessionId),
+      );
       return {
         toolCallId: request.toolCallId,
         toolName: request.toolName,
@@ -3938,6 +4261,7 @@ async function executeGatewayManagedToolImpl(
 
       const output = await runBashCommand(parsed.data, {
         signal,
+        sessionId,
         ...(executionContext?.onPartialOutput
           ? { onPartialOutput: executionContext.onPartialOutput }
           : {}),
@@ -3979,19 +4303,19 @@ async function executeGatewayManagedToolImpl(
           durationMs: 0,
         };
       }
+      const workingDirectory = assertSessionWorkingDirectory(sessionId);
       const ownerUserId = executionContext?.userId ?? getSessionOwnerUserId(sessionId) ?? undefined;
       const output = await runInteractiveBashCommand(
         parsedTmux.data.tmux_command,
-        ownerUserId
-          ? {
-              sessionId,
-              userId: ownerUserId,
-              ...(executionContext?.clientRequestId
-                ? { clientRequestId: executionContext.clientRequestId }
-                : {}),
-              toolCallId: request.toolCallId,
-            }
-          : undefined,
+        {
+          sessionId,
+          ...(ownerUserId ? { userId: ownerUserId } : {}),
+          workingDirectory,
+          ...(executionContext?.clientRequestId
+            ? { clientRequestId: executionContext.clientRequestId }
+            : {}),
+          toolCallId: request.toolCallId,
+        },
       );
       return {
         toolCallId: request.toolCallId,
@@ -4879,6 +5203,36 @@ function getSessionMetadata(sessionId: string): Record<string, unknown> {
   return parseSessionMetadataJson(row?.metadata_json ?? '{}');
 }
 
+interface SessionRoleContextRow {
+  handoff_state: string | null;
+  role_layer: string | null;
+  team_parent_session_id: string | null;
+}
+
+function isBackgroundAutoApprovedTeamSession(sessionId: string): boolean {
+  const row = sqliteGet<SessionRoleContextRow>(
+    'SELECT role_layer, team_parent_session_id, handoff_state FROM sessions WHERE id = ? LIMIT 1',
+    [sessionId],
+  );
+  if (!row) {
+    return false;
+  }
+
+  const isTeamRole =
+    row.role_layer === 'pm1' ||
+    row.role_layer === 'pm2' ||
+    row.role_layer === 'executor' ||
+    row.role_layer === 'reviewer';
+
+  return (
+    isTeamRole &&
+    typeof row.team_parent_session_id === 'string' &&
+    row.team_parent_session_id.trim().length > 0 &&
+    typeof row.handoff_state === 'string' &&
+    row.handoff_state.trim().length > 0
+  );
+}
+
 function updateSessionMetadata(sessionId: string, metadata: Record<string, unknown>): void {
   sqliteRun("UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ?", [
     JSON.stringify(metadata),
@@ -5137,14 +5491,6 @@ function ensurePermissionForTool(
     };
   }
 
-  // Team/子代理 session 自动批准修改类工具：
-  // 后台运行的 team 成员（executor/reviewer 等）无法与用户交互审批，
-  // 且父 session 已通过权限检查——子 session 继承信任链。
-  // 同样适用于 yoloMode 开启的 session（用户已显式授权免审批）。
-  if (isTaskCreatedSession || sessionMetadata['yoloMode'] === true) {
-    return { kind: 'not_needed' };
-  }
-
   // 'ask' → build permission context for scope-specific evaluation.
   const context = buildPermissionRequestContext(sessionId, request);
   if (!context) {
@@ -5169,6 +5515,19 @@ function ensurePermissionForTool(
       kind: 'denied',
       reason: `工具 "${request.toolName}" 在作用域 "${context.scope}" 被权限规则禁止。`,
     };
+  }
+
+  // Team/子代理 session 自动批准修改类工具：
+  // 后台运行的 team 成员（pm1/pm2/executor/reviewer）无法与用户交互审批，
+  // 且父 session 已通过权限检查——子 session 继承信任链。
+  // 同样适用于 yoloMode 开启的 session（用户已显式授权免审批）。
+  // 注意：这里只跳过 ask，不绕过显式 deny。deny 已在 scopedAction 分支提前返回。
+  if (
+    isTaskCreatedSession ||
+    sessionMetadata['yoloMode'] === true ||
+    isBackgroundAutoApprovedTeamSession(sessionId)
+  ) {
+    return { kind: 'not_needed' };
   }
 
   // Use category ID for all permission lookup/storage so that tools in the
@@ -5385,19 +5744,68 @@ export class ToolSandbox {
       return result;
     }
 
+    if (
+      SESSION_WORKSPACE_REQUIRED_TOOLS.has(normalizedRequest.toolName) &&
+      hasWorkspaceScopedExecutionInput(normalizedRequest) &&
+      requiresBoundSessionWorkspace(sessionId) &&
+      !getSessionWorkingDirectory(sessionId)
+    ) {
+      const result: ToolCallResult = {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: formatMissingSessionWorkspace(request.toolName),
+        isError: true,
+        durationMs: 0,
+      };
+      writeAuditLog({
+        sessionId,
+        category: 'tool',
+        sourceName: request.toolName,
+        requestId: request.toolCallId,
+        input: request.rawInput,
+        output: result.output,
+        isError: result.isError ?? false,
+        durationMs: result.durationMs ?? null,
+      });
+      return result;
+    }
+
     if (FILE_TOOLS.has(normalizedRequest.toolName)) {
       const rawInput = normalizedRequest.rawInput as Record<string, unknown>;
       const filePath =
         (typeof rawInput.path === 'string' ? rawInput.path : undefined) ??
         (typeof rawInput.filePath === 'string' ? rawInput.filePath : undefined);
+      let safeFilePath: string | undefined;
       if (filePath) {
-        await ensureIgnoreRulesLoadedForPath(filePath);
+        const validation = validateSessionWorkspacePath({ path: filePath, sessionId });
+        if (!validation.ok) {
+          const result: ToolCallResult = {
+            toolCallId: request.toolCallId,
+            toolName: request.toolName,
+            output: formatSessionWorkspaceViolation(sessionId, filePath, validation.reason),
+            isError: true,
+            durationMs: 0,
+          };
+          writeAuditLog({
+            sessionId,
+            category: 'tool',
+            sourceName: request.toolName,
+            requestId: request.toolCallId,
+            input: request.rawInput,
+            output: result.output,
+            isError: result.isError ?? false,
+            durationMs: result.durationMs ?? null,
+          });
+          return result;
+        }
+        safeFilePath = validation.safePath;
+        await ensureIgnoreRulesLoadedForPath(safeFilePath);
       }
-      if (filePath && defaultIgnoreManager.shouldIgnore(filePath)) {
+      if (safeFilePath && defaultIgnoreManager.shouldIgnore(safeFilePath)) {
         const result: ToolCallResult = {
           toolCallId: request.toolCallId,
           toolName: request.toolName,
-          output: `Access denied: file "${filePath}" is protected by agentignore rules`,
+          output: `Access denied: file "${safeFilePath}" is protected by agentignore rules`,
           isError: true,
           durationMs: 0,
         };
@@ -5508,10 +5916,13 @@ export class ToolSandbox {
       this.registry.register(withTimeout);
     }
 
+    const normalizedWorkspaceRequest =
+      normalizeWorkspaceManagedRawInput(sessionId, normalizedRequest) ?? normalizedRequest;
+
     const startAt = Date.now();
     let result: ToolCallResult;
     try {
-      result = await this.registry.execute(normalizedRequest, signal);
+      result = await this.registry.execute(normalizedWorkspaceRequest, signal);
       result.toolName = request.toolName;
     } catch (error) {
       const durationMs = Date.now() - startAt;

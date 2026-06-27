@@ -144,18 +144,95 @@ describe('runArtifactChain', () => {
     });
 
     let callCount = 0;
-    const mockLlm = async (_system: string, _user: string): Promise<string> => {
+    const mockLlm = async (system: string, _user: string): Promise<string> => {
       callCount += 1;
-      if (callCount <= 2) {
-        // spec (may be called twice if retry triggers)
-        return `# 功能规格：测试功能\n\n## 用户故事 1\n\n描述\n\n## 需求\n\n- **FR-001**: 系统必须 [NEEDS CLARIFICATION: 具体范围未定]\n\n## 成功标准\n- SC-001: 可用`;
+      if (system.includes('功能规格')) {
+        return `# 功能规格：测试功能
+
+## 用户场景与验收（必填）
+
+### 用户故事 1 — 主流程（优先级：P1）
+
+描述
+
+**为什么是这个优先级**：核心路径
+
+**独立可测**：可单独验证
+
+**验收场景**：
+
+1. **给定** 系统已初始化，**当** 用户提交请求，**则** 返回成功结果
+
+### 边界情况
+
+- 当输入为空时返回提示
+- 当网络失败时降级处理
+
+## 验收场景覆盖矩阵（必填）
+
+| 用户故事 | 场景编号 | 场景摘要 | 对应需求 | 预期验证方式 | 预期证据 |
+|----------|----------|----------|----------|--------------|----------|
+| US1 | AC-1 | 主流程验证 | FR-001 | API | 响应 |
+
+## 需求
+
+- **FR-001**: 系统必须 [NEEDS CLARIFICATION: 具体范围未定]
+
+## 成功标准
+
+- **SC-001**: 可用`;
       }
-      if (callCount <= 4) {
-        // plan (may be called twice if retry triggers)
-        return `# 实施计划\n\n## 技术上下文\n\nTypeScript\n\n## 宪法对齐检查\n\n| 宪法条目 | 本计划是否符合 | 备注 |\n|---|---|---|\n| 禁止空 catch | ✅ | ok |`;
+      if (system.includes('实施计划')) {
+        return `# 实施计划
+
+## 技术上下文
+
+TypeScript
+
+## 宪法对齐检查
+
+| 宪法条目 | 本计划是否符合 | 备注 |
+|---|---|---|
+| 禁止空 catch | ✅ | ok |
+
+## 项目结构
+
+\`\`\`text
+src/
+\`\`\`
+
+## 复杂度评估
+
+| 维度 | 评估 |
+|---|---|
+| 影响文件数 | 1 |
+
+## 风险与缓解
+
+| 风险 | 缓解措施 |
+|---|---|
+| 网络失败 | 重试 |
+
+## 验收场景实施映射
+
+| 场景编号 | 实现模块/文件 | 分层路径 | 验证方式 | 交付证据 |
+|---|---|---|---|---|
+| AC-1 | src/core.ts | App -> Service | 测试 | 断言 |
+
+## 架构守卫
+
+- 数据访问只能通过 store/repository 层`;
       }
-      // tasks
-      return `# 任务清单\n\n## Phase 1\n\n- [ ] T001 [US1] 实现核心功能`;
+      return `# 任务清单
+
+## Phase 1
+
+- [ ] T001 [US1] [KIND:build] [SURFACE:backend] [src/core.ts] 实现核心功能 - 返回成功结果
+**文件**：
+- Modify: \`src/core.ts\`
+- Test: \`src/core.test.ts\`
+
+**检查点**：完成`;
     };
 
     const result = await artifactChain.runArtifactChain({

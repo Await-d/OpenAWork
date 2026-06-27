@@ -13,6 +13,7 @@
  *   - role：目标角色（executor / tester / reviewer）
  *   - artifactRefs：关联的产物 ID（spec / plan / tasks）
  *   - taskMarkers：从 tasks.md 提取的标记（[P] / [US1] 等）
+ *   - ownedPaths：该任务明确负责的文件 / 模块路径，用于自动修正责任边界
  *   - taskProfile：任务画像（kind + surface）
  *   - assignedMember：按 workspace 默认 roster 选中的具体人物槽位
  *   - dependsOn：依赖的 handoff ID 列表（g 依赖 e+f 全部完成）
@@ -93,12 +94,128 @@ export const dispatchPackageSchema = z.object({
     story: z.string().optional(),
     priority: z.enum(['high', 'medium', 'low']).default('medium'),
   }),
+  ownedPaths: z.array(z.string().min(1).max(400)).max(20).default([]),
+  dependencyHandoffIds: z.array(z.string().min(1)).default([]),
   taskProfile: taskProfileSchema,
   assignedMember: assignedMemberSchema.optional(),
   dependsOn: z.array(z.string()).default([]),
 });
 
 export type DispatchPackage = z.infer<typeof dispatchPackageSchema>;
+
+export interface ParsedTaskFileEntry {
+  kind: 'create' | 'modify' | 'test';
+  path: string;
+}
+
+export interface ParsedTaskLine {
+  taskId: string;
+  parallel: boolean;
+  story: string | null;
+  explicitProfile: TaskProfile | null;
+  title: string;
+  priority: 'high' | 'medium' | 'low';
+  fileEntries: ParsedTaskFileEntry[];
+  /**
+   * 当前任务明确负责的文件 / 模块路径。
+   * 优先来自任务块的 `Create/Modify/Test` 清单；标题里的 bracket 路径作兜底。
+   */
+  ownedPaths: string[];
+}
+
+export function normalizeComparablePath(value: string): string {
+  return value.trim().replace(/\\/g, '/').replace(/^\.\/+/, '').replace(/\/{2,}/g, '/');
+}
+
+function isLikelyPath(value: string): boolean {
+  return value.includes('/') || value.includes('\\') || /\.[A-Za-z0-9_-]+$/.test(value);
+}
+
+/**
+ * 从任务标题/错误文本中提取可能的文件或模块路径。
+ *
+ * 用途：
+ * - dispatch_package.ownedPaths：结构化声明任务负责范围
+ * - PM2 质量评审回收：判断报错是否落在当前派发 scope 内
+ */
+export function extractComparablePathsFromText(text: string): string[] {
+  const values = new Set<string>();
+
+  const bracketPattern = /\[([^\]\n]+)\]/g;
+  for (const match of text.matchAll(bracketPattern)) {
+    const raw = (match[1] ?? '').trim();
+    for (const candidate of raw.split(',')) {
+      const trimmed = candidate.trim();
+      if (trimmed.length === 0 || !isLikelyPath(trimmed)) {
+        continue;
+      }
+      values.add(normalizeComparablePath(trimmed));
+    }
+  }
+
+  // 裸路径匹配故意要求文件扩展名，避免把 executor/reviewer、pm1/pm2 这类
+  // 带斜杠的普通短语误判成路径。无扩展名的“模块路径”只接受显式 bracket 形式。
+  const barePathPattern =
+    /(?:^|[\s(])((?:[A-Za-z0-9._-]+\/)+[A-Za-z0-9._-]+\.[A-Za-z0-9._-]+)(?!\.[A-Za-z0-9._-])(?=$|[\s),:;])/g;
+  for (const match of text.matchAll(barePathPattern)) {
+    const candidate = (match[1] ?? '').trim();
+    if (candidate.length === 0) {
+      continue;
+    }
+    values.add(normalizeComparablePath(candidate));
+  }
+
+  return Array.from(values);
+}
+
+function mergeOwnedPaths(...parts: Array<readonly string[] | undefined>): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const part of parts) {
+    if (!part) continue;
+    for (const value of part) {
+      const normalized = normalizeComparablePath(value);
+      if (normalized.length === 0 || seen.has(normalized)) {
+        continue;
+      }
+      seen.add(normalized);
+      result.push(normalized);
+    }
+  }
+  return result;
+}
+
+function extractFileEntriesFromTaskBlock(lines: readonly string[]): ParsedTaskFileEntry[] {
+  const entries: ParsedTaskFileEntry[] = [];
+  for (const line of lines) {
+    const match = /-\s*(Create|Modify|Test):\s*`([^`]+)`/i.exec(line.trim());
+    if (!match) {
+      continue;
+    }
+    const kind =
+      match[1]?.toLowerCase() === 'create'
+        ? 'create'
+        : match[1]?.toLowerCase() === 'test'
+          ? 'test'
+          : 'modify';
+    const raw = match[2] ?? '';
+    for (const candidate of raw.split(',')) {
+      const trimmed = candidate.trim();
+      if (trimmed.length === 0 || !isLikelyPath(trimmed)) {
+        continue;
+      }
+      entries.push({
+        kind,
+        path: normalizeComparablePath(trimmed),
+      });
+    }
+  }
+  return entries;
+}
+
+function extractOwnedPathsFromTaskBlock(lines: readonly string[]): string[] {
+  return mergeOwnedPaths(extractFileEntriesFromTaskBlock(lines).map((entry) => entry.path));
+}
 
 function roleToTargetLayer(role: DispatchPackage['role']): TeamRuntimeLayer {
   return role === 'reviewer' ? 'reviewer' : 'executor';
@@ -492,6 +609,8 @@ export function parseTaskLine(line: string): {
   explicitProfile: TaskProfile | null;
   title: string;
   priority: 'high' | 'medium' | 'low';
+  fileEntries: ParsedTaskFileEntry[];
+  ownedPaths: string[];
 } | null {
   const trimmed = line.trim();
   // 匹配 `- [ ] T001` 或 `- [x] T001`
@@ -521,7 +640,16 @@ export function parseTaskLine(line: string): {
   if (/high|critical|阻塞|blocking/i.test(rest)) priority = 'high';
   if (/low|optional|nice.to.have/i.test(rest)) priority = 'low';
 
-  return { taskId, parallel, story, explicitProfile, title, priority };
+  return {
+    taskId,
+    parallel,
+    story,
+    explicitProfile,
+    title,
+    priority,
+    fileEntries: [],
+    ownedPaths: extractComparablePathsFromText(title),
+  };
 }
 
 function parseExplicitTaskProfile(
@@ -541,13 +669,39 @@ function parseExplicitTaskProfile(
 /**
  * 从完整 tasks.md 内容中提取所有任务行。
  */
-export function parseAllTasks(tasksContent: string): Array<ReturnType<typeof parseTaskLine> & {}> {
+export function parseAllTasks(tasksContent: string): ParsedTaskLine[] {
   const lines = tasksContent.split('\n');
-  const tasks: Array<NonNullable<ReturnType<typeof parseTaskLine>>> = [];
+  const tasks: ParsedTaskLine[] = [];
+  let currentTask: ParsedTaskLine | null = null;
+  let currentBlockLines: string[] = [];
+
+  const flushCurrentTask = (): void => {
+    if (!currentTask) {
+      return;
+    }
+    const blockFileEntries = extractFileEntriesFromTaskBlock(currentBlockLines);
+    const blockOwnedPaths = mergeOwnedPaths(blockFileEntries.map((entry) => entry.path));
+    tasks.push({
+      ...currentTask,
+      fileEntries: blockFileEntries,
+      ownedPaths: mergeOwnedPaths(currentTask.ownedPaths, blockOwnedPaths),
+    });
+    currentTask = null;
+    currentBlockLines = [];
+  };
+
   for (const line of lines) {
     const parsed = parseTaskLine(line);
-    if (parsed) tasks.push(parsed);
+    if (parsed) {
+      flushCurrentTask();
+      currentTask = parsed;
+      continue;
+    }
+    if (currentTask) {
+      currentBlockLines.push(line);
+    }
   }
+  flushCurrentTask();
   return tasks;
 }
 
@@ -555,20 +709,30 @@ function isStructuredTaskTitle(title: string): boolean {
   return /^\[[^\]\n]+\]\s+.+\s+-\s+.+$/.test(title.trim());
 }
 
-export function validateParsedTasks(tasks: Array<NonNullable<ReturnType<typeof parseTaskLine>>>): string[] {
+export function validateParsedTasks(tasks: ParsedTaskLine[]): string[] {
   const issues: string[] = [];
   if (tasks.length === 0) {
     issues.push('tasks.md 中未找到任何任务');
     return issues;
   }
+  // 检测步骤性任务标题——这些词开头通常意味着把一个交付物拆成了多个子步骤
+  const stepVerbPattern = /^(确认|调研|验证|检查|分析|对比|评估|梳理|整理|规划|设计.*规范|定义.*格式)/;
   for (const task of tasks) {
     if (!isStructuredTaskTitle(task.title)) {
       issues.push(
-        `${task.taskId} 任务标题不符合“[文件/模块路径] 动作 - 预期结果”格式：${task.title || '（空）'}`,
+        `${task.taskId} 任务标题不符合"[文件/模块路径] 动作 - 预期结果"格式：${task.title || '（空）'}`,
       );
     }
     if (/^(未命名任务|待补充|todo|tbd|无标题|暂无)$/i.test(task.title.trim())) {
       issues.push(`${task.taskId} 任务标题过于模糊：${task.title}`);
+    }
+    // 检测步骤性任务（如"确认文档格式""调研方案""验证报告"）
+    // 这些通常是拆分过细的信号——应合并到主任务中
+    const titleAfterPath = task.title.replace(/^\[[^\]]+\]\s*/, '');
+    if (stepVerbPattern.test(titleAfterPath)) {
+      issues.push(
+        `${task.taskId} 任务疑似拆分过细的子步骤（"${titleAfterPath}"）——应与主任务合并为一个完整可交付任务`,
+      );
     }
   }
   return issues;
@@ -583,7 +747,7 @@ export function validateParsedTasks(tasks: Array<NonNullable<ReturnType<typeof p
  *   - 最后一个 phase 的任务如果是 review 相关 → role=reviewer
  */
 export function buildDispatchPackages(input: {
-  tasks: Array<NonNullable<ReturnType<typeof parseTaskLine>>>;
+  tasks: ParsedTaskLine[];
   artifactRefs: DispatchPackage['artifactRefs'];
   context: string;
   assignedMemberRoster?: FixedTeamMemberSlot[];
@@ -655,6 +819,8 @@ export function buildDispatchPackages(input: {
       toolsets,
       role,
       artifactRefs: input.artifactRefs,
+      ownedPaths:
+        task.ownedPaths.length > 0 ? task.ownedPaths : extractComparablePathsFromText(task.title),
       taskProfile,
       taskMarkers: {
         taskId: task.taskId,
@@ -663,6 +829,7 @@ export function buildDispatchPackages(input: {
         priority: task.priority,
       },
       ...(assignedMember ? { assignedMember } : {}),
+      dependencyHandoffIds: [],
       dependsOn,
     };
     packages.push(pkg);

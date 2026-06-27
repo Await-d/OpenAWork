@@ -33,6 +33,16 @@ describe('resolveScopedTeamRuntimeStatus', () => {
     ).toBe('running');
   });
 
+  it('paused session 下遗留的 running task 不应继续把状态顶成 running', () => {
+    expect(
+      resolveScopedTeamRuntimeStatus({
+        stateStatus: 'idle',
+        sessionStates: [{ id: 'root', paused: true, stateStatus: 'paused' }],
+        runtimeTasks: [{ sessionId: 'root', status: 'running' }],
+      }),
+    ).toBe('paused');
+  });
+
   it('没有活跃工作时，显式 paused 仍返回 paused', () => {
     expect(
       resolveScopedTeamRuntimeStatus({
@@ -65,8 +75,8 @@ describe('resolveSessionTreeTeamRuntimeStatus', () => {
       resolveSessionTreeTeamRuntimeStatus({
         rootSessionId: 'root',
         sessions: [
-          { id: 'root', parentSessionId: null },
-          { id: 'child', parentSessionId: 'root' },
+          { id: 'root', parentSessionId: null, paused: false, stateStatus: 'idle' },
+          { id: 'child', parentSessionId: 'root', paused: false, stateStatus: 'idle' },
         ],
         stateStatus: 'idle',
         handoffs: [
@@ -81,11 +91,48 @@ describe('resolveSessionTreeTeamRuntimeStatus', () => {
       }),
     ).toBe('running');
   });
+
+  it('会把子会话自身仍为 running 的状态计入根会话运行态', () => {
+    expect(
+      resolveSessionTreeTeamRuntimeStatus({
+        rootSessionId: 'root',
+        sessions: [
+          { id: 'root', parentSessionId: null, paused: false, stateStatus: 'idle' },
+          { id: 'child', parentSessionId: 'root', paused: false, stateStatus: 'running' },
+        ],
+        stateStatus: 'idle',
+        handoffs: [
+          {
+            fromSessionId: 'child',
+            paused: false,
+            sessionId: 'child',
+            state: 'completed',
+            toSessionId: 'child',
+          },
+        ],
+        runtimeTasks: [{ sessionId: 'child', status: 'completed' }],
+      }),
+    ).toBe('running');
+  });
+
+  it('会把子会话 paused + 其 running task 视为 paused 而不是 running', () => {
+    expect(
+      resolveSessionTreeTeamRuntimeStatus({
+        rootSessionId: 'root',
+        sessions: [
+          { id: 'root', parentSessionId: null, paused: false, stateStatus: 'idle' },
+          { id: 'child', parentSessionId: 'root', paused: true, stateStatus: 'paused' },
+        ],
+        stateStatus: 'idle',
+        runtimeTasks: [{ sessionId: 'child', status: 'running' }],
+      }),
+    ).toBe('paused');
+  });
 });
 
 describe('status mappers', () => {
-  it('idle 在 sidebar 中不再显示为 paused', () => {
-    expect(mapSemanticStatusToSidebarStatus('idle')).toBe('completed');
+  it('idle 在 sidebar 中保留为空闲态，而不是误记为已完成', () => {
+    expect(mapSemanticStatusToSidebarStatus('idle')).toBe('idle');
   });
 
   it('idle 的文案显示为已空闲', () => {

@@ -1233,13 +1233,17 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
             type: 'string',
             description: '要写入的工作区文件绝对路径；不存在时会创建',
           },
-          filePath: { type: 'string', description: 'path 的旧别名' },
+          filePath: {
+            type: 'string',
+            description: 'path 的旧别名。新调用请始终使用 path。',
+          },
           content: {
             type: 'string',
             description: '写入文件的 UTF-8 内容。会覆盖已有文件。',
           },
         },
         required: ['content'],
+        anyOf: [{ required: ['path'] }, { required: ['filePath'] }],
         additionalProperties: false,
       };
     case 'workspace_create_directory':

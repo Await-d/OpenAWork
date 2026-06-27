@@ -6,7 +6,10 @@ import type { FileBackupRef } from '@openAwork/shared';
 import { z } from 'zod';
 import { WORKSPACE_ROOT } from '../infra/db.js';
 import { formatFileAfterWrite } from './post-write-formatter.js';
-import { ensureIgnoreRulesLoadedForPath } from '../workspace/workspace-safety.js';
+import {
+  assertSessionWorkingDirectory,
+  ensureIgnoreRulesLoadedForPath,
+} from '../workspace/workspace-safety.js';
 import { buildFileDiff, fileDiffSchema } from './file-diff-format.js';
 import {
   getWorkspaceReviewDiff,
@@ -21,6 +24,10 @@ import {
 } from '../workspace/workspace-paths.js';
 import { lspManager } from '../lsp/router.js';
 import { getPostWriteDiagnostics, postWriteDiagnosticSchema } from './lsp-tools.js';
+import {
+  assertSessionWorkspacePath,
+  getSessionWorkingDirectory,
+} from '../workspace/workspace-safety.js';
 
 interface WorkspaceTreeNode {
   path: string;
@@ -208,8 +215,14 @@ const workspaceReviewRevertOutputSchema = z.object({
   filePath: z.string(),
 });
 
-function assertAccessibleWorkspacePath(path: string, target: 'directory' | 'file'): string {
-  const safePath = validateWorkspacePath(path);
+function assertAccessibleWorkspacePath(
+  path: string,
+  target: 'directory' | 'file',
+  sessionId?: string,
+): string {
+  const safePath = sessionId
+    ? assertSessionWorkspacePath({ path, sessionId })
+    : validateWorkspacePath(path);
   if (!safePath) {
     throw new Error(`Forbidden workspace path: ${path}`);
   }
@@ -221,8 +234,14 @@ function assertAccessibleWorkspacePath(path: string, target: 'directory' | 'file
   return safePath;
 }
 
-function assertWritableWorkspacePath(path: string, target: 'directory' | 'file'): string {
-  const safePath = validateWorkspacePath(path);
+function assertWritableWorkspacePath(
+  path: string,
+  target: 'directory' | 'file',
+  sessionId?: string,
+): string {
+  const safePath = sessionId
+    ? assertSessionWorkspacePath({ path, sessionId })
+    : validateWorkspacePath(path);
   if (!safePath) {
     throw new Error(`Forbidden workspace path: ${path}`);
   }
@@ -234,8 +253,10 @@ function assertWritableWorkspacePath(path: string, target: 'directory' | 'file')
   return safePath;
 }
 
-function assertSearchablePath(path: string): string {
-  const safePath = validateWorkspacePath(path);
+function assertSearchablePath(path: string, sessionId?: string): string {
+  const safePath = sessionId
+    ? assertSessionWorkspacePath({ path, sessionId })
+    : validateWorkspacePath(path);
   if (!safePath) {
     throw new Error(`Forbidden workspace path: ${path}`);
   }
@@ -560,6 +581,16 @@ async function runCanonicalGrep(input: z.infer<typeof grepInputSchema>) {
     : 'No files found';
 }
 
+function resolveSearchRoot(path: string | undefined, sessionId?: string): string {
+  if (path) {
+    return assertSearchablePath(path, sessionId);
+  }
+  if (sessionId) {
+    return assertSearchablePath(assertSessionWorkingDirectory(sessionId), sessionId);
+  }
+  return assertSearchablePath(WORKSPACE_ROOT);
+}
+
 function sanitizeReviewChanges(changes: WorkspaceReviewChange[]) {
   return changes.filter((change) => !defaultIgnoreManager.shouldIgnore(join('/', change.path)));
 }
@@ -587,6 +618,22 @@ export const listTool: ToolDefinition<
     };
   },
 };
+
+export async function executeListTool(
+  input: z.infer<typeof workspaceTreeInputSchema>,
+  sessionId?: string,
+): Promise<z.infer<typeof workspaceTreeOutputSchema>> {
+  const safePath = assertSearchablePath(input.path, sessionId);
+  await assertDirectory(safePath);
+  const counter = { count: 0 };
+  const nodes = await readTree(safePath, input.depth, counter);
+  return {
+    path: safePath,
+    depth: input.depth,
+    visitedEntries: counter.count,
+    nodes,
+  };
+}
 
 function applyLineWindow(
   rawContent: string,
@@ -666,25 +713,32 @@ export const readTool: ToolDefinition<typeof readInputSchema, typeof readOutputS
   outputSchema: readOutputSchema,
   timeout: 10000,
   execute: async (input) => {
-    const safePath = assertAccessibleWorkspacePath(pickPathInput(input), 'file');
-    await ensureIgnoreRulesLoadedForPath(safePath);
-    const stat = await fsp.stat(safePath);
-    if (stat.isDirectory()) {
-      const listing = await readDirectoryListing(safePath);
-      const window = applyLineWindow(listing, false, input);
-      return {
-        path: safePath,
-        content: window.content,
-        truncated: window.truncated,
-        lineStart: window.lineStart,
-        lineEnd: window.lineEnd,
-        totalLines: window.totalLines,
-        byteLimitReached: window.byteLimitReached,
-      };
-    }
-    return readWorkspaceFileWithWindow(safePath, input);
+    return executeReadTool(input);
   },
 };
+
+export async function executeReadTool(
+  input: z.infer<typeof readInputSchema>,
+  sessionId?: string,
+): Promise<z.infer<typeof readOutputSchema>> {
+  const safePath = assertAccessibleWorkspacePath(pickPathInput(input), 'file', sessionId);
+  await ensureIgnoreRulesLoadedForPath(safePath);
+  const stat = await fsp.stat(safePath);
+  if (stat.isDirectory()) {
+    const listing = await readDirectoryListing(safePath);
+    const window = applyLineWindow(listing, false, input);
+    return {
+      path: safePath,
+      content: window.content,
+      truncated: window.truncated,
+      lineStart: window.lineStart,
+      lineEnd: window.lineEnd,
+      totalLines: window.totalLines,
+      byteLimitReached: window.byteLimitReached,
+    };
+  }
+  return readWorkspaceFileWithWindow(safePath, input);
+}
 
 export const globTool: ToolDefinition<typeof globToolInputSchema, typeof globToolOutputSchema> = {
   name: 'glob',
@@ -692,7 +746,7 @@ export const globTool: ToolDefinition<typeof globToolInputSchema, typeof globToo
   inputSchema: globToolInputSchema,
   outputSchema: globToolOutputSchema,
   timeout: 10000,
-  execute: async (input) => runGlobTool(input),
+  execute: async (input) => executeGlobTool(input),
 };
 
 export const grepTool: ToolDefinition<typeof grepInputSchema, typeof grepOutputSchema> = {
@@ -701,8 +755,24 @@ export const grepTool: ToolDefinition<typeof grepInputSchema, typeof grepOutputS
   inputSchema: grepInputSchema,
   outputSchema: grepOutputSchema,
   timeout: 15000,
-  execute: async (input) => runCanonicalGrep(input),
+  execute: async (input) => executeGrepTool(input),
 };
+
+export async function executeGlobTool(
+  input: z.infer<typeof globToolInputSchema>,
+  sessionId?: string,
+): Promise<z.infer<typeof globToolOutputSchema>> {
+  const safePath = resolveSearchRoot(input.path, sessionId);
+  return runGlobTool({ ...input, path: safePath });
+}
+
+export async function executeGrepTool(
+  input: z.infer<typeof grepInputSchema>,
+  sessionId?: string,
+): Promise<z.infer<typeof grepOutputSchema>> {
+  const safePath = resolveSearchRoot(input.path, sessionId);
+  return runCanonicalGrep({ ...input, path: safePath });
+}
 
 export const workspaceReviewStatusTool: ToolDefinition<
   typeof workspaceReviewStatusInputSchema,
@@ -713,17 +783,22 @@ export const workspaceReviewStatusTool: ToolDefinition<
   inputSchema: workspaceReviewStatusInputSchema,
   outputSchema: workspaceReviewStatusOutputSchema,
   timeout: 10000,
-  execute: async (input) => {
-    const safePath = assertSearchablePath(input.path);
-    await ensureIgnoreRulesLoadedForPath(safePath);
-    await assertDirectory(safePath);
-    const changes = await listWorkspaceReviewChanges(safePath);
-    return {
-      path: safePath,
-      changes: sanitizeReviewChanges(changes),
-    };
-  },
+  execute: async (input) => executeWorkspaceReviewStatus(input),
 };
+
+export async function executeWorkspaceReviewStatus(
+  input: z.infer<typeof workspaceReviewStatusInputSchema>,
+  sessionId?: string,
+): Promise<z.infer<typeof workspaceReviewStatusOutputSchema>> {
+  const safePath = assertSearchablePath(input.path, sessionId);
+  await ensureIgnoreRulesLoadedForPath(safePath);
+  await assertDirectory(safePath);
+  const changes = await listWorkspaceReviewChanges(safePath);
+  return {
+    path: safePath,
+    changes: sanitizeReviewChanges(changes),
+  };
+}
 
 export const workspaceReviewDiffTool: ToolDefinition<
   typeof workspaceReviewDiffInputSchema,
@@ -734,26 +809,29 @@ export const workspaceReviewDiffTool: ToolDefinition<
   inputSchema: workspaceReviewDiffInputSchema,
   outputSchema: workspaceReviewDiffOutputSchema,
   timeout: 10000,
-  execute: async (input) => {
-    const safePath = assertSearchablePath(input.path);
-    await ensureIgnoreRulesLoadedForPath(safePath);
-    await assertDirectory(safePath);
-    const relativeFilePath = resolveWorkspaceReviewFilePath(safePath, input.filePath);
-    const absoluteFilePath = join(safePath, relativeFilePath);
-    if (defaultIgnoreManager.shouldIgnore(absoluteFilePath)) {
-      throw new Error(
-        `Access denied: file "${absoluteFilePath}" is protected by agentignore rules`,
-      );
-    }
-
-    const diff = await getWorkspaceReviewDiff(safePath, relativeFilePath);
-    return {
-      path: safePath,
-      filePath: relativeFilePath,
-      diff,
-    };
-  },
+  execute: async (input) => executeWorkspaceReviewDiff(input),
 };
+
+export async function executeWorkspaceReviewDiff(
+  input: z.infer<typeof workspaceReviewDiffInputSchema>,
+  sessionId?: string,
+): Promise<z.infer<typeof workspaceReviewDiffOutputSchema>> {
+  const safePath = assertSearchablePath(input.path, sessionId);
+  await ensureIgnoreRulesLoadedForPath(safePath);
+  await assertDirectory(safePath);
+  const relativeFilePath = resolveWorkspaceReviewFilePath(safePath, input.filePath);
+  const absoluteFilePath = join(safePath, relativeFilePath);
+  if (defaultIgnoreManager.shouldIgnore(absoluteFilePath)) {
+    throw new Error(`Access denied: file "${absoluteFilePath}" is protected by agentignore rules`);
+  }
+
+  const diff = await getWorkspaceReviewDiff(safePath, relativeFilePath);
+  return {
+    path: safePath,
+    filePath: relativeFilePath,
+    diff,
+  };
+}
 
 export async function executeWorkspaceWriteFile(
   input: z.infer<typeof workspaceWriteFileInputSchema>,
@@ -762,10 +840,11 @@ export async function executeWorkspaceWriteFile(
       content: string;
       filePath: string;
     }) => Promise<FileBackupRef | undefined>;
+    sessionId?: string;
     workspaceRoot?: string;
   },
 ): Promise<z.infer<typeof workspaceWriteFileOutputSchema>> {
-  const safePath = assertWritableWorkspacePath(pickPathInput(input), 'file');
+  const safePath = assertWritableWorkspacePath(pickPathInput(input), 'file', options?.sessionId);
   await ensureIgnoreRulesLoadedForPath(safePath);
   await assertFile(safePath);
   const previousContent = await fsp.readFile(safePath, 'utf8');
@@ -776,7 +855,10 @@ export async function executeWorkspaceWriteFile(
       })
     : undefined;
   await fsp.writeFile(safePath, input.content, 'utf8');
-  const effectiveRoot = options?.workspaceRoot ?? WORKSPACE_ROOT;
+  const effectiveRoot =
+    options?.workspaceRoot ??
+    (options?.sessionId ? getSessionWorkingDirectory(options.sessionId) : null) ??
+    WORKSPACE_ROOT;
   if (effectiveRoot) {
     await formatFileAfterWrite(safePath, effectiveRoot).catch((_e: unknown) => undefined);
   }
@@ -817,9 +899,10 @@ export async function executeWriteTool(
       content: string;
       filePath: string;
     }) => Promise<FileBackupRef | undefined>;
+    sessionId?: string;
   },
 ): Promise<z.infer<typeof writeOutputSchema>> {
-  const safePath = assertWritableWorkspacePath(pickPathInput(input), 'file');
+  const safePath = assertWritableWorkspacePath(pickPathInput(input), 'file', options?.sessionId);
   await ensureIgnoreRulesLoadedForPath(safePath);
   const stat = await fsp.stat(safePath).catch((error: unknown) => {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -834,16 +917,26 @@ export async function executeWriteTool(
       throw new Error(`Path is not a file: ${safePath}`);
     }
 
-    return executeWorkspaceWriteFile({ path: safePath, content: input.content }, options);
+    return executeWorkspaceWriteFile(
+      { path: safePath, content: input.content },
+      {
+        ...(options?.beforeWriteBackup ? { beforeWriteBackup: options.beforeWriteBackup } : {}),
+        ...(options?.sessionId ? { sessionId: options.sessionId } : {}),
+      },
+    );
   }
 
-  return executeWorkspaceCreateFile({ path: safePath, content: input.content });
+  return executeWorkspaceCreateFile(
+    { path: safePath, content: input.content },
+    options?.sessionId,
+  );
 }
 
 export async function executeWorkspaceCreateFile(
   input: z.infer<typeof workspaceCreateFileInputSchema>,
+  sessionId?: string,
 ): Promise<z.infer<typeof workspaceCreateFileOutputSchema>> {
-  const safePath = assertWritableWorkspacePath(input.path, 'file');
+  const safePath = assertWritableWorkspacePath(input.path, 'file', sessionId);
   await ensureIgnoreRulesLoadedForPath(safePath);
   const parentPath = resolve(join(safePath, '..'));
   const parentStat = await fsp.stat(parentPath);
@@ -872,6 +965,25 @@ export async function executeWorkspaceCreateFile(
   };
 }
 
+export async function executeWorkspaceCreateDirectory(
+  input: z.infer<typeof workspaceCreateDirectoryInputSchema>,
+  sessionId?: string,
+): Promise<z.infer<typeof workspaceCreateDirectoryOutputSchema>> {
+  const safePath = assertWritableWorkspacePath(input.path, 'directory', sessionId);
+  await ensureIgnoreRulesLoadedForPath(safePath);
+  const parentPath = resolve(join(safePath, '..'));
+  const parentStat = await fsp.stat(parentPath);
+  if (!parentStat.isDirectory()) {
+    throw new Error(`Parent directory is invalid: ${parentPath}`);
+  }
+
+  await fsp.mkdir(safePath);
+  return {
+    success: true,
+    path: safePath,
+  };
+}
+
 export const workspaceCreateDirectoryTool: ToolDefinition<
   typeof workspaceCreateDirectoryInputSchema,
   typeof workspaceCreateDirectoryOutputSchema
@@ -881,21 +993,7 @@ export const workspaceCreateDirectoryTool: ToolDefinition<
   inputSchema: workspaceCreateDirectoryInputSchema,
   outputSchema: workspaceCreateDirectoryOutputSchema,
   timeout: 10000,
-  execute: async (input) => {
-    const safePath = assertWritableWorkspacePath(input.path, 'directory');
-    await ensureIgnoreRulesLoadedForPath(safePath);
-    const parentPath = resolve(join(safePath, '..'));
-    const parentStat = await fsp.stat(parentPath);
-    if (!parentStat.isDirectory()) {
-      throw new Error(`Parent directory is invalid: ${parentPath}`);
-    }
-
-    await fsp.mkdir(safePath);
-    return {
-      success: true,
-      path: safePath,
-    };
-  },
+  execute: async (input) => executeWorkspaceCreateDirectory(input),
 };
 
 export const workspaceReviewRevertTool: ToolDefinition<
@@ -907,26 +1005,29 @@ export const workspaceReviewRevertTool: ToolDefinition<
   inputSchema: workspaceReviewRevertInputSchema,
   outputSchema: workspaceReviewRevertOutputSchema,
   timeout: 10000,
-  execute: async (input) => {
-    const safePath = assertSearchablePath(input.path);
-    await ensureIgnoreRulesLoadedForPath(safePath);
-    await assertDirectory(safePath);
-    const relativeFilePath = resolveWorkspaceReviewFilePath(safePath, input.filePath);
-    const absoluteFilePath = join(safePath, relativeFilePath);
-    if (defaultIgnoreManager.shouldIgnore(absoluteFilePath)) {
-      throw new Error(
-        `Access denied: file "${absoluteFilePath}" is protected by agentignore rules`,
-      );
-    }
-
-    await revertWorkspaceReviewPath(safePath, relativeFilePath);
-    return {
-      ok: true,
-      path: safePath,
-      filePath: relativeFilePath,
-    };
-  },
+  execute: async (input) => executeWorkspaceReviewRevert(input),
 };
+
+export async function executeWorkspaceReviewRevert(
+  input: z.infer<typeof workspaceReviewRevertInputSchema>,
+  sessionId?: string,
+): Promise<z.infer<typeof workspaceReviewRevertOutputSchema>> {
+  const safePath = assertSearchablePath(input.path, sessionId);
+  await ensureIgnoreRulesLoadedForPath(safePath);
+  await assertDirectory(safePath);
+  const relativeFilePath = resolveWorkspaceReviewFilePath(safePath, input.filePath);
+  const absoluteFilePath = join(safePath, relativeFilePath);
+  if (defaultIgnoreManager.shouldIgnore(absoluteFilePath)) {
+    throw new Error(`Access denied: file "${absoluteFilePath}" is protected by agentignore rules`);
+  }
+
+  await revertWorkspaceReviewPath(safePath, relativeFilePath);
+  return {
+    ok: true,
+    path: safePath,
+    filePath: relativeFilePath,
+  };
+}
 
 export const WORKSPACE_TOOL_NAMES = [
   listTool.name,

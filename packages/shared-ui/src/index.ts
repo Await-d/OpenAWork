@@ -56,6 +56,7 @@ export {
   canConfigureThinkingForModel,
   describeReasoningEffort,
   getSupportedReasoningEffortsForModel,
+  inferSupportsThinking,
 } from './models/model-reasoning-support.js';
 export type { SupportedReasoningEffort } from './models/model-reasoning-support.js';
 

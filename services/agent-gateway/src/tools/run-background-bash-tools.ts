@@ -251,6 +251,7 @@ export async function dispatchRunBashInBackground(input: {
   // the model will see it through bash_output(terminalId).
   void runBashCommand(bashInput, {
     signal: abortController.signal,
+    sessionId: input.context.sessionId,
     tracking: {
       sessionId: input.context.sessionId,
       userId: input.context.userId,

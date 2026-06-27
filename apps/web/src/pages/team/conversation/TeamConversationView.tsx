@@ -369,6 +369,7 @@ export function TeamConversationView({
           <TeamRunStateBanner
             diagnostics={diagnostics}
             receptionStateStatus={state.sessionStateStatus}
+            sessionId={sessionId}
             rightSlot={
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                 <TeamPendingInteractionChip
@@ -877,15 +878,15 @@ export function TeamConversationView({
         });
         state.setMessages((previous) =>
           dismissPermissionEventMessage(
-            applyPermissionDecisionToLocalAssistantMessages(
-              previous,
-              request.requestId,
-              decision,
-            ),
+            applyPermissionDecisionToLocalAssistantMessages(previous, request.requestId, decision),
             request.requestId,
           ),
         );
-        toast(getPermissionReplySuccessMessage(decision), decision === 'reject' ? 'warning' : 'success', 2200);
+        toast(
+          getPermissionReplySuccessMessage(decision),
+          decision === 'reject' ? 'warning' : 'success',
+          2200,
+        );
       } catch (error) {
         const status = getPermissionReplyStatusCode(error);
         const errorMessage = error instanceof Error ? error.message : '权限处理失败，请重试。';
@@ -1146,13 +1147,8 @@ export function TeamConversationView({
       streamingMessage = {
         id: 'team-layer-streaming-assistant',
         role: 'assistant',
-        content:
-          state.streamBuffer.trim().length > 0
-            ? state.streamBuffer
-            : '团队正在处理中…',
-        ...(state.streamingSegments.length > 0
-          ? { parts: state.streamingSegments }
-          : {}),
+        content: state.streamBuffer.trim().length > 0 ? state.streamBuffer : '团队正在处理中…',
+        ...(state.streamingSegments.length > 0 ? { parts: state.streamingSegments } : {}),
         ...(state.roleLayer ? { agentId: state.roleLayer } : {}),
         createdAt: Date.now(),
         status: 'streaming',
@@ -1252,7 +1248,7 @@ export function TeamConversationView({
 
   // 左侧：群聊式多层级消息汇总面板（dual 模式下占 40%）
   const SIDE_PANEL_STYLE: CSSProperties = {
-    flex: viewMode === 'dual' ? '0 0 40%' : '0 0 0%',
+    flex: viewMode === 'dual' ? '0 0 clamp(360px, 40%, 520px)' : '0 0 0%',
     minWidth: 0,
     minHeight: 0,
     display: viewMode === 'dual' ? 'flex' : 'none',
@@ -1298,10 +1294,16 @@ export function TeamConversationView({
               onOpenLayerSession={onOpenLayerSession ? handleOpenLayerSession : undefined}
               onLayerSelect={handlePanelLayerSelect}
             />
-        </div>
+          </div>
         )}
         {/* 右侧：用户与接待的对话 */}
-        <div style={soloMode ? { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' } : MAIN_PANEL_STYLE}>
+        <div
+          style={
+            soloMode
+              ? { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }
+              : MAIN_PANEL_STYLE
+          }
+        >
           <LatestAssistantMessageContext value={latestAssistantMessageId}>
             <TeamConversationLayout
               sessionId={sessionId}
@@ -1454,7 +1456,9 @@ export function TeamConversationView({
               input={state.input}
               setInput={state.setInput}
               textareaRef={state.textareaRef}
-              onComposerSubmit={composerEnabled ? handleComposerSubmit : disabledComposerAsyncAction}
+              onComposerSubmit={
+                composerEnabled ? handleComposerSubmit : disabledComposerAsyncAction
+              }
               onStopComposer={composerEnabled ? handleStopStream : disabledComposerAsyncAction}
               onComposerModelSelect={handleComposerModelSelect}
               onToggleWebSearch={disabledComposerAction}

@@ -18,9 +18,9 @@
  *                   (works for both OpenAI-compatible chat completions and
  *                   @ai-sdk/openai Responses models.)
  *   - openrouter  → providerOptions.openrouter.body.reasoning
- *   - deepseek    → providerOptions.deepseek.body.thinking
+ *   - deepseek    → providerOptions.deepseek.body.thinking + reasoning_effort
  *   - gemini      → providerOptions.gemini.body.google.thinking_config
- *   - qwen        → providerOptions.qwen.body.enable_thinking
+ *   - qwen        → providerOptions.qwen.body.enable_thinking + thinking_budget
  *   - moonshot    → providerOptions.moonshot.body.thinking
  *   - mimo        → providerOptions.mimo.body.thinking
  *
@@ -72,6 +72,35 @@ const GEMINI_THINKING_BUDGETS: Record<ReasoningEffort, number> = {
   high: 16384,
   xhigh: 24576,
 };
+
+// Qwen DashScope thinking_budget 映射。Qwen3 系列支持 enable_thinking +
+// thinking_budget（整数 Token 数）。QwQ 系列不响应这两个参数但也不会报错。
+// 参考 https://help.aliyun.com/zh/model-studio/deep-thinking
+const QWEN_THINKING_BUDGETS: Record<ReasoningEffort, number> = {
+  minimal: 512,
+  low: 2048,
+  medium: 8192,
+  high: 16384,
+  xhigh: 32768,
+};
+
+// DeepSeek reasoning_effort 映射。DeepSeek API 支持 reasoning_effort 参数，
+// 取值为 "high" 或 "max"（以及省略）。我们将 5 档 effort 映射到这两个取值
+// 加上省略（不发送 reasoning_effort，让上游用默认行为）。
+// 参考 https://api-docs.deepseek.com/guides/thinking_mode
+function deepseekReasoningEffort(effort: ReasoningEffort): string | undefined {
+  switch (effort) {
+    case 'minimal':
+    case 'low':
+      // 不发送 reasoning_effort，让 DeepSeek 使用默认（较低）行为
+      return undefined;
+    case 'medium':
+      return 'high';
+    case 'high':
+    case 'xhigh':
+      return 'max';
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Gemini thinking-control alignment (mirrors opencode #26279).
@@ -321,6 +350,7 @@ function sdkNpmForProviderType(providerType: string): string {
 export function buildProviderOptionsModelInfo(input: {
   providerType: string;
   model: string;
+  sdkNpmOverride?: string;
 }): ProviderOptionsModelInfo {
   const providerID = input.providerType.toLowerCase();
   return {
@@ -328,9 +358,25 @@ export function buildProviderOptionsModelInfo(input: {
     id: input.model,
     api: {
       id: input.model,
-      npm: sdkNpmForProviderType(providerID),
+      npm: input.sdkNpmOverride ?? sdkNpmForProviderType(providerID),
     },
   };
+}
+
+function shouldUseOpenAICompatibleBodyFlatten(
+  providerType: string,
+  style: ReturnType<typeof resolveThinkingStyle>,
+): boolean {
+  if (providerType !== 'openai') {
+    return false;
+  }
+  return (
+    style === 'openrouter_reasoning' ||
+    style === 'deepseek_thinking' ||
+    style === 'gemini_thinking' ||
+    style === 'qwen_enable_thinking' ||
+    style === 'body_thinking_type'
+  );
 }
 
 function isJsonRecord(value: unknown): value is Record<string, JSONValue> {
@@ -407,6 +453,16 @@ export function providerOptions(
     return { openai: options, azure: options };
   }
 
+  // @ai-sdk/openai-compatible 会把 providerOptions[name] 下的所有 key 直接
+  // 作为顶层字段插入请求体。它不会展开 `body` 字段——如果传入
+  // `{ body: { thinking: ... } }`，请求体顶层会出现 `body: { thinking: ... }`
+  // 而不是 `thinking: ...`。因此对 openai-compatible，展开 `body` 字段。
+  if (model.api.npm === '@ai-sdk/openai-compatible' && 'body' in options) {
+    const { body, ...rest } = options;
+    const merged = { ...(body as Record<string, JSONValue>), ...rest };
+    return { [key]: merged };
+  }
+
   return { [key]: options };
 }
 
@@ -420,19 +476,40 @@ export function buildProviderOptions(input: {
   model: string;
 }): SharedV2ProviderOptions | undefined {
   const { thinking } = input;
-  if (!thinking || !thinking.supportsThinking) {
+  if (!thinking) {
+    return undefined;
+  }
+
+  // 当 supportsThinking 为 false 时，检查是否是因为用户通过 OpenAI 兼容代理
+  // 使用非 OpenAI 模型（如 MiMo/Qwen/DeepSeek），此时 providerType 是 'openai'
+  // 或 'custom'，modelConfig 找不到导致 supportsThinking=false。通过 modelId
+  // 推断出真实厂商后，应视为支持思考。
+  let effectiveSupportsThinking = thinking.supportsThinking;
+  const normalizedProviderType = thinking.providerType.toLowerCase();
+  if (
+    !effectiveSupportsThinking &&
+    (normalizedProviderType === 'openai' || normalizedProviderType === 'custom')
+  ) {
+    const inferredStyle = resolveThinkingStyle(thinking.providerType, input.model);
+    if (inferredStyle !== 'none' && catalogModelSupportsThinking(thinking.providerType, input.model)) {
+      // 仅在 openai/custom 代理场景下，且根据 modelId 能推断出真实支持 thinking
+      // 的厂商模型时，才恢复 supportsThinking。
+      effectiveSupportsThinking = true;
+    }
+  }
+  if (!effectiveSupportsThinking) {
     return undefined;
   }
 
   const model = input.model.toLowerCase();
+  const style = resolveThinkingStyle(thinking.providerType, input.model);
   const modelInfo = buildProviderOptionsModelInfo({
     providerType: thinking.providerType,
     model: input.model,
+    ...(shouldUseOpenAICompatibleBodyFlatten(normalizedProviderType, style)
+      ? { sdkNpmOverride: '@ai-sdk/openai-compatible' }
+      : {}),
   });
-
-  // 由 catalog 把 providerType 映射到 thinking「风格」，新增平台复用已有风格时
-  // 无需在此新增 case——只在 catalog 里声明 thinkingStyle 即可。
-  const style = resolveThinkingStyle(thinking.providerType);
 
   switch (style) {
     case 'anthropic_budget': {
@@ -480,16 +557,28 @@ export function buildProviderOptions(input: {
     }
 
     case 'deepseek_thinking': {
-      if (!thinking.enabled) {
-        return undefined;
-      }
       // DeepSeek-Reasoner exposes thinking via the model id; only
       // non-reasoner deepseek models need the explicit toggle.
       if (model.includes('reasoner')) {
         return undefined;
       }
+      // DeepSeek API 默认 thinking=enabled。用户关闭时需要显式下发
+      // thinking: { type: 'disabled' } 才能真正关闭思考。
+      if (!thinking.enabled) {
+        return providerOptions(modelInfo, {
+          body: { thinking: { type: 'disabled' } },
+        });
+      }
+      // DeepSeek API 支持 thinking + reasoning_effort 两个参数：
+      //   - thinking: { type: 'enabled' } 开启思维链
+      //   - reasoning_effort: 'high' | 'max' 控制推理力度
+      // minimal/low 不发送 reasoning_effort（让上游用默认行为）。
+      const effortParam = deepseekReasoningEffort(thinking.effort);
       return providerOptions(modelInfo, {
-        body: { thinking: { type: 'enabled' } },
+        body: {
+          thinking: { type: 'enabled' },
+          ...(effortParam ? { reasoning_effort: effortParam } : {}),
+        },
       });
     }
 
@@ -537,8 +626,18 @@ export function buildProviderOptions(input: {
     }
 
     case 'qwen_enable_thinking': {
+      // Qwen3 系列：enable_thinking 开关 + thinking_budget 力度控制。
+      // QwQ 系列不响应这两个参数但也不会报错，所以统一下发即可。
+      if (!thinking.enabled) {
+        return providerOptions(modelInfo, {
+          body: { enable_thinking: false },
+        });
+      }
       return providerOptions(modelInfo, {
-        body: { enable_thinking: thinking.enabled },
+        body: {
+          enable_thinking: true,
+          thinking_budget: QWEN_THINKING_BUDGETS[thinking.effort],
+        },
       });
     }
 

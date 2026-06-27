@@ -11,6 +11,7 @@
 
 import type { Message, MessageContent, MessageRole } from '@openAwork/shared';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
+import { buildSqlitePlaceholders, chunkSqliteBindValues } from '../infra/sqlite-batch.js';
 import {
   type AssistantMessage,
   type AssistantErrorObject,
@@ -336,6 +337,20 @@ function deleteLegacySessionMessagesByRequestRole(input: {
   );
 }
 
+function deleteMessageV2RowsByIds(input: {
+  messageIds: readonly string[];
+  sessionId: string;
+  userId: string;
+}): void {
+  for (const batchIds of chunkSqliteBindValues(input.messageIds, 2)) {
+    const placeholders = buildSqlitePlaceholders(batchIds.length);
+    sqliteRun(
+      `DELETE FROM message_v2 WHERE session_id = ? AND user_id = ? AND id IN (${placeholders})`,
+      [input.sessionId, input.userId, ...batchIds],
+    );
+  }
+}
+
 function deleteSessionMessagesByExactRequestRole(input: {
   clientRequestId: string;
   role: MessageRole;
@@ -366,11 +381,11 @@ function deleteSessionMessagesByExactRequestRole(input: {
   }
 
   if (targetIds.length > 0) {
-    const placeholders = targetIds.map(() => '?').join(',');
-    sqliteRun(
-      `DELETE FROM message_v2 WHERE session_id = ? AND user_id = ? AND id IN (${placeholders})`,
-      [input.sessionId, input.userId, ...targetIds],
-    );
+    deleteMessageV2RowsByIds({
+      messageIds: targetIds,
+      sessionId: input.sessionId,
+      userId: input.userId,
+    });
   }
 
   deleteLegacySessionMessagesByRequestRole(input);
@@ -834,11 +849,11 @@ export function truncateSessionMessagesAfterV2(input: {
           input.sessionId,
         ]);
       }
-      const placeholders = deleteIds.map(() => '?').join(',');
-      sqliteRun(
-        `DELETE FROM message_v2 WHERE session_id = ? AND user_id = ? AND id IN (${placeholders})`,
-        [input.sessionId, input.userId, ...deleteIds],
-      );
+      deleteMessageV2RowsByIds({
+        messageIds: deleteIds,
+        sessionId: input.sessionId,
+        userId: input.userId,
+      });
     }
   }
 
@@ -1417,11 +1432,11 @@ export function deleteSessionMessagesByRequestScope(input: {
   for (const id of targetIds) {
     sqliteRun('DELETE FROM part_v2 WHERE message_id = ? AND session_id = ?', [id, input.sessionId]);
   }
-  const placeholders = targetIds.map(() => '?').join(',');
-  sqliteRun(
-    `DELETE FROM message_v2 WHERE session_id = ? AND user_id = ? AND id IN (${placeholders})`,
-    [input.sessionId, input.userId, ...targetIds],
-  );
+  deleteMessageV2RowsByIds({
+    messageIds: targetIds,
+    sessionId: input.sessionId,
+    userId: input.userId,
+  });
 }
 
 // ─── V2-native implementations (no V1 dependency) ───

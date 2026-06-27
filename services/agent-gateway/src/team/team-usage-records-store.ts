@@ -12,6 +12,7 @@
  */
 
 import { sqliteAll, sqliteRun } from '../infra/db.js';
+import { buildSqlitePlaceholders, chunkSqliteBindValues } from '../infra/sqlite-batch.js';
 
 export interface TeamUsagePersistInput {
   userId: string;
@@ -92,12 +93,40 @@ export interface TeamToolCallRecordRow {
 
 interface ToolCallRowRaw {
   agent_id: string | null;
+  created_at: string;
   duration_ms: number;
   error_type: string | null;
+  id: number | string;
   layer: string | null;
   session_id: string;
   success: number;
   tool_name: string;
+}
+
+function listRowsBySessionIds<T>(input: {
+  query: (placeholders: string) => string;
+  sessionIds: string[];
+  userId: string;
+}): T[] {
+  if (input.sessionIds.length === 0) {
+    return [];
+  }
+
+  return chunkSqliteBindValues(input.sessionIds, 1).flatMap((batchSessionIds) =>
+    sqliteAll<T>(input.query(buildSqlitePlaceholders(batchSessionIds.length, ', ')), [
+      input.userId,
+      ...batchSessionIds,
+    ]),
+  );
+}
+
+function compareSqliteIds(left: number | string, right: number | string): number {
+  const leftNumber = typeof left === 'number' ? left : Number(left);
+  const rightNumber = typeof right === 'number' ? right : Number(right);
+  if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
+    return leftNumber - rightNumber;
+  }
+  return String(left).localeCompare(String(right));
 }
 
 // SQLite 的 UNIQUE 约束里 NULL 不等于 NULL，会导致同一 (session, provider, model)
@@ -241,18 +270,15 @@ export function listTeamUsageRecords(input: {
   userId: string;
   sessionIds: string[];
 }): TeamUsageRecordRow[] {
-  if (input.sessionIds.length === 0) {
-    return [];
-  }
-  const placeholders = input.sessionIds.map(() => '?').join(', ');
-  const rows = sqliteAll<UsageRowRaw>(
-    `SELECT session_id, layer, agent_id, provider, model,
+  const rows = listRowsBySessionIds<UsageRowRaw>({
+    query: (placeholders) => `SELECT session_id, layer, agent_id, provider, model,
             input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens,
             cost_usd, call_count, total_duration_ms, tool_call_count, tool_error_count, updated_at
        FROM team_usage_records
       WHERE user_id = ? AND session_id IN (${placeholders})`,
-    [input.userId, ...input.sessionIds],
-  );
+    sessionIds: input.sessionIds,
+    userId: input.userId,
+  });
   return rows.map((row) => ({
     sessionId: row.session_id,
     layer: row.layer && row.layer.length > 0 ? row.layer : null,
@@ -291,16 +317,18 @@ export function listTeamToolCallRecords(input: {
   userId: string;
   sessionIds: string[];
 }): TeamToolCallRecordRow[] {
-  if (input.sessionIds.length === 0) {
-    return [];
-  }
-  const placeholders = input.sessionIds.map(() => '?').join(', ');
-  const rows = sqliteAll<ToolCallRowRaw>(
-    `SELECT session_id, layer, agent_id, tool_name, duration_ms, success, error_type
+  const rows = listRowsBySessionIds<ToolCallRowRaw>({
+    query: (
+      placeholders,
+    ) => `SELECT id, created_at, session_id, layer, agent_id, tool_name, duration_ms, success, error_type
        FROM team_tool_call_records
       WHERE user_id = ? AND session_id IN (${placeholders})
       ORDER BY created_at ASC, id ASC`,
-    [input.userId, ...input.sessionIds],
+    sessionIds: input.sessionIds,
+    userId: input.userId,
+  }).sort(
+    (left, right) =>
+      left.created_at.localeCompare(right.created_at) || compareSqliteIds(left.id, right.id),
   );
 
   const aggregates = new Map<

@@ -241,4 +241,32 @@ describe('categorizeAlwaysPatterns', () => {
     const levels = categorizeAlwaysPatterns(undefined, 'ls -la', ['ls *']);
     expect(levels[0]!.pattern).toBe('ls -la');
   });
+
+  it('从 bash previewAction 推导 curl 主命令前缀，避免三档全等', () => {
+    const levels = categorizeAlwaysPatterns(
+      '执行命令: curl -s "https://news.google.com/rss?hl=zh-CN&gl=CN&ceid=CN:zh-Hans" | head -20',
+      'curl -s "https://news.google.com/rss?hl=zh-CN&gl=CN&ceid=CN:zh-Hans" | head -20',
+      undefined,
+    );
+    expect(levels).toEqual([
+      {
+        label: '仅本次指令',
+        description: '只覆盖当前命令，不会扩大到其它参数或子命令。',
+        pattern: 'curl -s "https://news.google.com/rss?hl=zh-CN&gl=CN&ceid=CN:zh-Hans" | head -20',
+        category: 'full',
+      },
+      {
+        label: '同子命令',
+        description: '覆盖网关提供的相同子命令模式。',
+        pattern: 'curl -s *',
+        category: 'partial',
+      },
+      {
+        label: '同类指令',
+        description: '覆盖网关提供的同类指令模式。',
+        pattern: 'curl *',
+        category: 'base',
+      },
+    ]);
+  });
 });

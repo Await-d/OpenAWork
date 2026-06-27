@@ -1,7 +1,8 @@
 import type { CSSProperties } from 'react';
-import type { TeamRuntimeResumeAllResult, TeamConsistencyFix } from '@openAwork/web-client';
+import type { TeamRuntimeResumeAllResult } from '@openAwork/web-client';
 
 type RuntimeResumeNoticePhase = 'resuming' | 'submitted';
+type TeamConsistencyFix = TeamRuntimeResumeAllResult['consistencyFixes'][number];
 
 export interface RuntimeResumeNotice {
   detail: string;
@@ -50,6 +51,15 @@ const RESUME_MODE_LABELS: Record<string, string> = {
   'background-rerun': '后台续跑',
   'full-rebuild': '全量重建',
 };
+
+export function buildRuntimeResumeResumingNotice(): RuntimeResumeNotice {
+  return {
+    title: '正在恢复团队会话',
+    detail: '准备后台读取恢复上下文继续调度。',
+    phase: 'resuming',
+    truncated: false,
+  };
+}
 
 export function buildRuntimeResumeSubmittedNotice(
   result: TeamRuntimeResumeAllResult,

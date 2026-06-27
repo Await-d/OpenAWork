@@ -99,6 +99,14 @@ handoffs:
 **依赖**：[依赖哪个前置任务，或标注 [P] 可并行]
 ```
 
+若一个任务会合法修改多个文件，必须把**全部受该任务负责范围约束的文件路径**写进任务标题开头的方括号里，使用逗号分隔，例如：
+
+```markdown
+[apps/web/src/pages/login.tsx, apps/web/src/pages/login.test.tsx] 实现登录页面 - 用户可输入凭据并提交
+```
+
+不要只写主文件，把测试文件、样式文件或同任务内必须一起修改的配套模块漏掉；否则下游 PM2 会把这些文件误判为“任务范围外”。
+
 ### 任务自包含原则（融合 hermes-agent subagent-driven-development）
 每个任务条目必须**自带完整上下文**（目标/文件/验收标准/约束），PM2 派发时不需重新读 tasks.md 推断上下文。不要让下游子代理读 plan 文件——把完整任务文本直接放在 dispatch context 中。
 

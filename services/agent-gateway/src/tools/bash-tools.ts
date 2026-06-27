@@ -69,6 +69,11 @@ import {
   collectWorkspaceReconcileDiffs,
   type WorkspaceReconcileSnapshot,
 } from '../workspace/workspace-reconcile.js';
+import {
+  assertSessionWorkingDirectory,
+  getSessionWorkingDirectory,
+  validateSessionWorkspacePath,
+} from '../workspace/workspace-safety.js';
 
 // Mirrors opencode's `DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000`.
 // We don't expose the experimental flag yet, but the env override hook keeps
@@ -288,10 +293,33 @@ function pickShell(): ShellChoice {
 
 // ---------- workdir resolution ----------
 
-async function resolveBashWorkdir(workdir: string | undefined): Promise<string> {
-  const candidate = workdir ?? WORKSPACE_ROOT;
-  const safe = validateWorkspacePath(candidate);
+async function resolveBashWorkdir(
+  workdir: string | undefined,
+  sessionId?: string,
+): Promise<string> {
+  let candidate: string;
+  let validation: ReturnType<typeof validateSessionWorkspacePath> | null;
+
+  if (sessionId) {
+    const sessionWorkingDirectory = assertSessionWorkingDirectory(sessionId);
+    candidate = workdir ?? sessionWorkingDirectory;
+    validation = validateSessionWorkspacePath({ path: candidate, sessionId });
+  } else {
+    candidate = workdir ?? WORKSPACE_ROOT;
+    validation = null;
+  }
+
+  const safe = validation?.ok ? validation.safePath : validation ? null : validateWorkspacePath(candidate);
   if (!safe) {
+    if (validation?.ok === false && validation.reason === 'outside-session-workspace') {
+      const workingDirectory =
+        typeof sessionId === 'string' ? getSessionWorkingDirectory(sessionId) : null;
+      throw new Error(
+        workingDirectory
+          ? `Workdir is outside current session workspace: ${candidate} (session workspace: ${workingDirectory})`
+          : `Workdir is outside current session workspace: ${candidate}`,
+      );
+    }
     throw new Error(
       `Forbidden workspace path: ${candidate}. Provide an absolute path inside an allowed workspace root.`,
     );
@@ -356,6 +384,7 @@ export interface BashRunTracking {
 
 interface RunOptions {
   signal?: AbortSignal;
+  sessionId?: string;
   /**
    * Optional callback fired with the *current accumulated* stdout+stderr
    * snapshot as the child writes more output. Throttled internally so
@@ -600,7 +629,7 @@ export async function runBashCommand(
   options: RunOptions = {},
 ): Promise<BashExecutionResult> {
   assertSafeBashCommand(input.command);
-  const cwd = await resolveBashWorkdir(input.workdir);
+  const cwd = await resolveBashWorkdir(input.workdir, options.sessionId);
   const timeoutMs = input.timeout ?? DEFAULT_BASH_TIMEOUT_MS;
   // Many models (especially smaller / non-Claude variants) skip the
   // `description` field even though the tool schema requests it. We

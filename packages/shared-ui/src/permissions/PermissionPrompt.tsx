@@ -45,6 +45,165 @@ export interface AlwaysScopeLevel {
   category: 'full' | 'partial' | 'base';
 }
 
+const BASH_PREVIEW_PREFIXES = ['执行命令:', '执行 tmux 命令:'] as const;
+const SHELL_CONTROL_TOKENS = new Set(['|', '||', '&&', ';', '&', '>', '>>', '<', '<<']);
+
+function isBashLikePreviewAction(previewAction: string | undefined): boolean {
+  if (!previewAction) {
+    return false;
+  }
+
+  return BASH_PREVIEW_PREFIXES.some((prefix) => previewAction.startsWith(prefix));
+}
+
+function tokenizeShellCommand(command: string): string[] {
+  const tokens: string[] = [];
+  let current = '';
+  let inSingle = false;
+  let inDouble = false;
+  let escaped = false;
+
+  const pushCurrent = () => {
+    if (current.length > 0) {
+      tokens.push(current);
+      current = '';
+    }
+  };
+
+  for (const ch of command) {
+    if (escaped) {
+      current += ch;
+      escaped = false;
+      continue;
+    }
+
+    if (ch === '\\' && !inSingle) {
+      escaped = true;
+      continue;
+    }
+
+    if (ch === "'" && !inDouble) {
+      inSingle = !inSingle;
+      continue;
+    }
+
+    if (ch === '"' && !inSingle) {
+      inDouble = !inDouble;
+      continue;
+    }
+
+    if (!inSingle && !inDouble && /\s/.test(ch)) {
+      pushCurrent();
+      continue;
+    }
+
+    if (!inSingle && !inDouble && (ch === '|' || ch === '&' || ch === ';' || ch === '<' || ch === '>')) {
+      pushCurrent();
+      tokens.push(ch);
+      continue;
+    }
+
+    current += ch;
+  }
+
+  pushCurrent();
+  return tokens;
+}
+
+function readPrimaryCommandTokens(tokens: string[]): string[] {
+  const primary: string[] = [];
+
+  for (const token of tokens) {
+    if (SHELL_CONTROL_TOKENS.has(token)) {
+      break;
+    }
+    primary.push(token);
+  }
+
+  return primary;
+}
+
+function deriveBashLikeAlwaysPatterns(
+  previewAction: string | undefined,
+  scope: string,
+): string[] {
+  if (!isBashLikePreviewAction(previewAction)) {
+    return [];
+  }
+
+  const primaryTokens = readPrimaryCommandTokens(tokenizeShellCommand(scope.trim()));
+  if (primaryTokens.length === 0) {
+    return [];
+  }
+
+  const patterns = new Set<string>();
+
+  if (primaryTokens.length > 2) {
+    patterns.add(`${primaryTokens.slice(0, -1).join(' ')} *`);
+  }
+
+  if (primaryTokens[0]) {
+    patterns.add(`${primaryTokens[0]} *`);
+  }
+
+  patterns.delete(scope.trim());
+  return [...patterns];
+}
+
+function countNonControlTokens(pattern: string): number {
+  return tokenizeShellCommand(pattern).filter((token) => !SHELL_CONTROL_TOKENS.has(token)).length;
+}
+
+function isValidBashLikeAlwaysPattern(pattern: string): boolean {
+  const tokens = tokenizeShellCommand(pattern.trim());
+  if (tokens.length === 0) {
+    return false;
+  }
+
+  return readPrimaryCommandTokens(tokens).length === tokens.length;
+}
+
+function resolveAlwaysCandidates(
+  previewAction: string | undefined,
+  scope: string,
+  always: string[] | undefined,
+): string[] {
+  const fallbackPatterns = deriveBashLikeAlwaysPatterns(previewAction, scope);
+  if (!isBashLikePreviewAction(previewAction)) {
+    return always ?? fallbackPatterns;
+  }
+
+  const candidates = new Map<string, number>();
+
+  for (const pattern of always ?? []) {
+    const trimmed = pattern.trim();
+    if (trimmed.length === 0 || trimmed === scope) {
+      continue;
+    }
+    if (!isValidBashLikeAlwaysPattern(trimmed)) {
+      continue;
+    }
+    candidates.set(trimmed, countNonControlTokens(trimmed));
+  }
+
+  for (const pattern of fallbackPatterns) {
+    const trimmed = pattern.trim();
+    if (trimmed.length === 0 || trimmed === scope) {
+      continue;
+    }
+    candidates.set(trimmed, Math.max(candidates.get(trimmed) ?? 0, countNonControlTokens(trimmed)));
+  }
+
+  return [...candidates.entries()]
+    .sort((left, right) => {
+      if (right[1] !== left[1]) {
+        return right[1] - left[1];
+      }
+      return right[0].length - left[0].length;
+    })
+    .map(([pattern]) => pattern);
+}
+
 /**
  * Categorize the `always` patterns + previewAction/scope into three levels:
  * - Full command: the complete command (most specific, narrowest approval)
@@ -61,12 +220,12 @@ export function categorizeAlwaysPatterns(
   scope: string,
   always: string[] | undefined,
 ): AlwaysScopeLevel[] {
-  void previewAction;
   const fullCommand = scope;
   const seenPatterns = new Set<string>([fullCommand]);
   const uniqueAlways: string[] = [];
+  const alwaysCandidates = resolveAlwaysCandidates(previewAction, scope, always);
 
-  for (const pattern of always ?? []) {
+  for (const pattern of alwaysCandidates) {
     if (pattern.trim().length === 0 || seenPatterns.has(pattern)) continue;
     seenPatterns.add(pattern);
     uniqueAlways.push(pattern);

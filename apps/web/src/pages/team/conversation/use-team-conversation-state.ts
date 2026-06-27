@@ -60,7 +60,11 @@ import {
   loadSavedChatSessionDefaultsResult,
   type ChatSettingsProvider,
 } from '../../../utils/chat/chat-session-defaults.js';
-import { publishSessionPendingPermission } from '../../../utils/session/session-list-events.js';
+import {
+  publishSessionPendingPermission,
+  publishSessionPendingQuestion,
+  publishSessionRunState,
+} from '../../../utils/session/session-list-events.js';
 import { toSessionPendingPermissionState } from '../../../utils/permission/pending-permission-state.js';
 import {
   useLayerStore,
@@ -74,6 +78,7 @@ import {
   useGatewayClient,
 } from '../../../hooks/gateway/useGatewayClient.js';
 import { usePrefersReducedMotion } from '../../../hooks/ui/usePrefersReducedMotion.js';
+import { resolveChatThinkingRequest } from '../../chat-page/conversation/settings/resolve-chat-thinking-request.js';
 import { useScrollManager } from '../../../components/conversation-runtime/scroll/use-scroll-manager.js';
 import { useStreamReveal } from '../../../components/conversation-runtime/reveal/use-stream-reveal.js';
 import { useConversationStream } from '../../../components/conversation-runtime/stream/use-conversation-stream.js';
@@ -352,6 +357,26 @@ export function formatTeamConversationProvidersLoadError(input: {
   });
 }
 
+function resolveSessionSidebarRunState(
+  streaming: boolean,
+  sessionStateStatus: SessionStateStatus | null,
+): 'idle' | 'running' | 'paused' {
+  if (streaming || sessionStateStatus === 'running') {
+    return 'running';
+  }
+  if (sessionStateStatus === 'paused') {
+    return 'paused';
+  }
+  return 'idle';
+}
+
+function isSessionBusyForSidebar(
+  streaming: boolean,
+  sessionStateStatus: SessionStateStatus | null,
+): boolean {
+  return streaming || sessionStateStatus === 'running' || sessionStateStatus === 'paused';
+}
+
 // ─── 主 hook 实现 ─────────────────────────────────────────────────────────
 
 /**
@@ -502,6 +527,42 @@ export function useTeamConversationState(
   }, [pendingPermissions, sessionId]);
 
   useEffect(() => {
+    if (!sessionId) {
+      return;
+    }
+    publishSessionPendingQuestion(
+      sessionId,
+      pendingQuestions.find((question) => question.status === 'pending') ?? null,
+    );
+  }, [pendingQuestions, sessionId]);
+
+  useEffect(() => {
+    if (!sessionId) {
+      return;
+    }
+
+    publishSessionRunState(sessionId, resolveSessionSidebarRunState(streaming, sessionStateStatus));
+
+    return () => {
+      if (isSessionBusyForSidebar(streaming, sessionStateStatus)) {
+        return;
+      }
+      publishSessionRunState(sessionId, 'idle');
+    };
+  }, [sessionId, sessionStateStatus, streaming]);
+
+  useEffect(
+    () => () => {
+      if (!sessionId) {
+        return;
+      }
+      publishSessionPendingPermission(sessionId, null);
+      publishSessionPendingQuestion(sessionId, null);
+    },
+    [sessionId],
+  );
+
+  useEffect(() => {
     requestedTurnLimitRef.current = TEAM_CONVERSATION_INITIAL_TURN_LIMIT;
     setServerTotalTurnCount(null);
   }, [sessionId]);
@@ -564,10 +625,10 @@ export function useTeamConversationState(
         setChildSessions([]);
         setSessionStateStatus(null);
         setIsSessionSnapshotReady(false);
-      setPendingPermissions([]);
-      setPendingQuestions([]);
-      setRunEvents([]);
-      setRoleLayer(null);
+        setPendingPermissions([]);
+        setPendingQuestions([]);
+        setRunEvents([]);
+        setRoleLayer(null);
         setSubstate(null);
         setServerTotalTurnCount(null);
         setSessionMetadata(null);
@@ -638,7 +699,9 @@ export function useTeamConversationState(
               const parsed = JSON.parse(child.metadata_json) as unknown;
               if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
                 const metadata = parsed as Record<string, unknown>;
-                const roleInstance = metadata['teamRoleInstance'] as Record<string, unknown> | undefined;
+                const roleInstance = metadata['teamRoleInstance'] as
+                  | Record<string, unknown>
+                  | undefined;
                 if (roleInstance) {
                   if (typeof roleInstance['displayName'] === 'string') {
                     displayName = roleInstance['displayName'];
@@ -744,6 +807,11 @@ export function useTeamConversationState(
       }
     }
   }, [clearRetry, enabled, gatewayUrl, resetRetry, scheduleRetry, sessionId, token]);
+
+  // Keep a ref to reload for use in effects that need to trigger a refresh
+  // without adding it to their dependency array (avoids re-registration churn).
+  const reloadRef = useRef(reload);
+  reloadRef.current = reload;
 
   // ─── 当 sessionId 变化时自动 reload ─────────────────────────────
   useEffect(() => {
@@ -860,6 +928,23 @@ export function useTeamConversationState(
       unsub();
     };
   }, [sessionId, enabled, reload]);
+
+  // ─── 从 layer store 实时读取 substate ──────────────────────────────
+  // dispatchTeamEvent 收到 session.substate.changed 事件后会实时更新 layer store，
+  // 这里订阅 layer store 中当前 session 的 substate，无需等待 HTTP reload。
+  // 这让进度条（TeamSubstateProgressBar）能在 substate 变更后立即更新。
+  useEffect(() => {
+    if (!sessionId || !enabled) return undefined;
+    const unsub = useLayerStore.subscribe((state) => {
+      const node = state.nodes.get(sessionId);
+      if (node?.substate !== undefined) {
+        setSubstate(node.substate);
+      }
+    });
+    return () => {
+      unsub();
+    };
+  }, [sessionId, enabled]);
 
   // ─── 高频 polling：当 session 处于 running 状态时自动刷新 ──────────
   // e/f/g 层用 runSessionInBackground 跑 stream 时，消息实时写入 DB。
@@ -1054,10 +1139,15 @@ export function useTeamConversationState(
 
       onChatOnlyEventRef.current = opts?.onChatOnlyEvent;
       requestProviderIdRef.current = activeProviderId || undefined;
-      const activeModel = providers
-        .find((p) => p.id === activeProviderId)
-        ?.defaultModels.find((m) => m.id === activeModelId);
-      const requestModelSupportsThinking = activeModel?.supportsThinking === true;
+      const activeProvider = providers.find((provider) => provider.id === activeProviderId);
+      const activeModel = activeProvider?.defaultModels.find((model) => model.id === activeModelId);
+      const resolvedThinkingRequest = resolveChatThinkingRequest({
+        providerType: activeProvider?.type,
+        modelId: activeModel?.id ?? activeModelId,
+        declaredSupportsThinking: activeModel?.supportsThinking === true,
+        thinkingEnabled,
+        reasoningEffort,
+      });
       const activeModelLabel = activeModel?.label;
       requestModelLabelRef.current = activeModelLabel ?? activeModelId ?? undefined;
       requestAgentIdRef.current = opts?.agentId || effectiveAgentId || undefined;
@@ -1093,8 +1183,8 @@ export function useTeamConversationState(
         ...(opts?.inputParts ? { inputParts: opts.inputParts } : {}),
         model: activeModelId || 'default',
         providerId: activeProviderId || undefined,
-        thinkingEnabled: requestModelSupportsThinking ? thinkingEnabled : false,
-        reasoningEffort: requestModelSupportsThinking ? reasoningEffort : undefined,
+        thinkingEnabled: resolvedThinkingRequest.thinkingEnabled,
+        reasoningEffort: resolvedThinkingRequest.reasoningEffort,
         // team 端不传 dialogueMode / webSearchEnabled / yoloMode：这些是
         // chat-only 偏好，与 team 数据流无关。
         onDelta: () => {
@@ -1329,7 +1419,10 @@ export function useTeamConversationState(
 
   // 当 sessionId 变化时重置 attach 尝试标记，允许新 session 重新 attach。
   useEffect(() => {
-    if (attachAttemptedSessionRef.current !== null && attachAttemptedSessionRef.current !== sessionId) {
+    if (
+      attachAttemptedSessionRef.current !== null &&
+      attachAttemptedSessionRef.current !== sessionId
+    ) {
       attachAttemptedSessionRef.current = null;
       attachRetryCountRef.current = 0;
     }
@@ -1350,7 +1443,14 @@ export function useTeamConversationState(
       void attachToSessionStream();
     }, 500);
     return () => clearTimeout(timer);
-  }, [sessionId, enabled, enableWriters, sessionStateStatus, attachToSessionStream, multiAttachActive]);
+  }, [
+    sessionId,
+    enabled,
+    enableWriters,
+    sessionStateStatus,
+    attachToSessionStream,
+    multiAttachActive,
+  ]);
 
   // ─── 多路 SSE 注册：把 stream.handleEvent 注册到 multi-attach store ──
   // 当 useMultiSessionAttach 为此 session 建立了 SSE 连接时，收到的
@@ -1409,10 +1509,9 @@ export function useTeamConversationState(
       stream.handleEvent(event);
     };
 
-    const unregisterHandler = useMultiAttachStore.getState().registerHandler(
-      sessionId,
-      handleMultiAttachEvent,
-    );
+    const unregisterHandler = useMultiAttachStore
+      .getState()
+      .registerHandler(sessionId, handleMultiAttachEvent);
 
     return () => {
       unsubMultiAttach();
@@ -1430,6 +1529,95 @@ export function useTeamConversationState(
     setActiveStreamStartedAt,
     setActiveStreamFirstTokenLatencyMs,
   ]);
+
+  // ─── 子 session 流式：为 childSessions 中 running 的子 session 注册 handler ──
+  // multi-attach SSE 会为所有 running session 建立连接并接收 RunEvent，
+  // 但默认只有当前聚焦 session 注册了 handler。子 session (executor/reviewer)
+  // 的流式 token 事件会被 multi-attach-store 接收但无 handler 消费，被丢弃。
+  // 这里为每个 running 子 session 注册一个简化的 handler，将 text_delta
+  // 累积到 childSessions 对应项的流式消息中，实现子 session 的实时流式展示。
+  const childStreamBuffersRef = useRef<Map<string, string>>(new Map());
+
+  useEffect(() => {
+    // 找出所有可能是 running 的子 session（executor/reviewer/pm1/pm2 层级）
+    const runningChildren = childSessions.filter(
+      (child) =>
+        child.role_layer === 'executor' ||
+        child.role_layer === 'reviewer' ||
+        child.role_layer === 'pm1' ||
+        child.role_layer === 'pm2',
+    );
+    if (runningChildren.length === 0) return undefined;
+
+    const unregisters: Array<() => void> = [];
+
+    for (const child of runningChildren) {
+      const childSessionId = child.id;
+      const streamingMsgId = `streaming:${childSessionId}`;
+
+      const handleChildEvent = (
+        event: RunEvent,
+        _meta: { rowId: number; clientRequestId?: string },
+      ) => {
+        if (event.type === 'text_delta' && typeof event.delta === 'string') {
+          // 累积流式文本到 per-child buffer
+          const buffers = childStreamBuffersRef.current;
+          const current = buffers.get(childSessionId) ?? '';
+          buffers.set(childSessionId, current + event.delta);
+          const buffer = buffers.get(childSessionId) ?? '';
+
+          // 更新 childSessions：在对应子 session 的 messages 末尾
+          // 追加或更新一条流式 assistant 消息
+          setChildSessions((prev) =>
+            prev.map((cs) => {
+              if (cs.id !== childSessionId) return cs;
+              const existingMessages = cs.messages ?? [];
+              // 检查最后一条消息是否是我们的流式消息
+              const lastMsg = existingMessages[existingMessages.length - 1];
+              if (lastMsg && lastMsg.id === streamingMsgId) {
+                // 更新已有的流式消息
+                const updatedMessages = [...existingMessages];
+                updatedMessages[updatedMessages.length - 1] = {
+                  ...lastMsg,
+                  content: buffer,
+                };
+                return { ...cs, messages: updatedMessages };
+              }
+              // 追加新的流式消息
+              return {
+                ...cs,
+                messages: [
+                  ...existingMessages,
+                  {
+                    id: streamingMsgId,
+                    role: 'assistant' as const,
+                    content: buffer,
+                    createdAt: Date.now(),
+                  } as ChatMessage,
+                ],
+              };
+            }),
+          );
+        } else if (event.type === 'message_persisted' || event.type === 'round_complete') {
+          // 流式结束：清空 buffer，让下次 reload() 拉取最终消息
+          childStreamBuffersRef.current.delete(childSessionId);
+          // 触发 reload 刷新子 session 的消息
+          void reloadRef.current?.();
+        }
+      };
+
+      const unregister = useMultiAttachStore
+        .getState()
+        .registerHandler(childSessionId, handleChildEvent);
+      unregisters.push(unregister);
+    }
+
+    return () => {
+      for (const unregister of unregisters) {
+        unregister();
+      }
+    };
+  }, [childSessions.length, childSessions.map((c) => c.id).join(',')]);
 
   const replyPermission: TeamConversationState['replyPermission'] = useCallback(
     async (requestId, decision, options) => {
@@ -1458,15 +1646,11 @@ export function useTeamConversationState(
       if (!sessionId || !token) {
         throw new Error('当前团队会话或登录状态无效，无法处理提问请求。');
       }
-      await createQuestionsClient(gatewayUrl).reply(
-        token,
-        options?.targetSessionId ?? sessionId,
-        {
-          requestId,
-          status,
-          ...(answers ? { answers } : {}),
-        },
-      );
+      await createQuestionsClient(gatewayUrl).reply(token, options?.targetSessionId ?? sessionId, {
+        requestId,
+        status,
+        ...(answers ? { answers } : {}),
+      });
       setPendingQuestions((prev) => prev.filter((q) => q.requestId !== requestId));
     },
     [enableWriters, sessionId, token, gatewayUrl],

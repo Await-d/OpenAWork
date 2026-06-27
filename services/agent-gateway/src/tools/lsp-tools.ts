@@ -1,5 +1,6 @@
 import { promises as fsp } from 'node:fs';
 import { dirname } from 'node:path';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import {
@@ -14,6 +15,7 @@ import {
 } from '@openAwork/agent-core';
 import { z } from 'zod';
 import { lspManager } from '../lsp/router.js';
+import { isPathWithinRoot } from '../workspace/workspace-paths.js';
 
 type Position = { line: number; character: number };
 type Range = { start: Position; end: Position };
@@ -267,6 +269,42 @@ async function applyWorkspaceEdit(edit: WorkspaceEdit | null): Promise<string> {
   return `Applied ${totalEdits} edit(s) to ${filesModified.length} file(s):\n${filesModified.map((file) => `- ${file}`).join('\n')}`;
 }
 
+function assertWorkspacePathWithinRoot(filePath: string, workspaceRoot: string): void {
+  const resolvedPath = resolve(filePath);
+  const resolvedRoot = resolve(workspaceRoot);
+  if (!isPathWithinRoot(resolvedPath, resolvedRoot)) {
+    throw new Error(`Target path is outside current session workspace: ${resolvedPath}`);
+  }
+}
+
+export async function executeLspRename(
+  input: z.infer<typeof renameInputSchema>,
+  workspaceRoot?: string,
+): Promise<z.infer<typeof renameOutputSchema>> {
+  await preTouchForQuery(input.filePath);
+  if (workspaceRoot) {
+    assertWorkspacePathWithinRoot(input.filePath, workspaceRoot);
+  }
+  const workspaceEdit = (await lspManager.rename({
+    file: input.filePath,
+    line: input.line - 1,
+    character: input.character,
+    newName: input.newName,
+  })) as WorkspaceEdit | null;
+  const modifiedFiles = collectWorkspaceEditFiles(workspaceEdit);
+  if (workspaceRoot) {
+    for (const filePath of modifiedFiles) {
+      assertWorkspacePathWithinRoot(filePath, workspaceRoot);
+    }
+  }
+  const result = await applyWorkspaceEdit(workspaceEdit);
+  const diagnostics = await postWriteTouch(modifiedFiles);
+  return {
+    result,
+    diagnostics: diagnostics.length > 0 ? diagnostics : undefined,
+  };
+}
+
 export const lspGotoDefinitionToolDefinition: ToolDefinition<
   typeof gotoDefinitionInputSchema,
   z.ZodString
@@ -399,22 +437,7 @@ export const lspRenameToolDefinition: ToolDefinition<
   inputSchema: renameInputSchema,
   outputSchema: renameOutputSchema,
   timeout: 30000,
-  execute: async (input) => {
-    await preTouchForQuery(input.filePath);
-    const workspaceEdit = (await lspManager.rename({
-      file: input.filePath,
-      line: input.line - 1,
-      character: input.character,
-      newName: input.newName,
-    })) as WorkspaceEdit | null;
-    const modifiedFiles = collectWorkspaceEditFiles(workspaceEdit);
-    const result = await applyWorkspaceEdit(workspaceEdit);
-    const diagnostics = await postWriteTouch(modifiedFiles);
-    return {
-      result,
-      diagnostics: diagnostics.length > 0 ? diagnostics : undefined,
-    };
-  },
+  execute: async (input) => executeLspRename(input),
 };
 
 type MarkedString = string | { language: string; value: string };

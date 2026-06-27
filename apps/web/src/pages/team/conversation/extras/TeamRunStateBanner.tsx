@@ -6,7 +6,6 @@
  *
  * 显示内容随 phase 变化：
  *   - working    : 🟢 团队运行中 · N 个活跃任务 · 正在 X 层 · 最后活动 Ns 前
- *   - stalled    : 🟡 疑似停滞 · N 个任务超过 90s 无活动（可能在等长耗时调用或卡住）
  *   - failed     : 🔴 出现失败 · N 个任务失败，去任务/评审查看
  *   - completed  : ✅ 团队已完成本轮 · 共 N 个任务
  *   - disconnected: ⚠ 实时连接断开 · 状态可能不是最新
@@ -21,6 +20,7 @@ export interface TeamRunStateBannerProps {
   diagnostics?: TeamRuntimeDiagnostics;
   receptionStateStatus?: 'idle' | 'running' | 'paused' | null;
   rightSlot?: ReactNode;
+  sessionId?: string | null;
 }
 
 const LAYER_LABEL: Record<string, string> = {
@@ -75,8 +75,13 @@ export function TeamRunStateBanner({
   diagnostics,
   receptionStateStatus,
   rightSlot,
+  sessionId = null,
 }: TeamRunStateBannerProps = {}) {
-  const run = useTeamRunState();
+  const run = useTeamRunState({
+    pendingPermissionCount: diagnostics?.pendingInteractions.pendingPermissionCount ?? 0,
+    pendingQuestionCount: diagnostics?.pendingInteractions.pendingQuestionCount ?? 0,
+    pendingSessionId: sessionId,
+  });
 
   // reception 会话自身在跑（早期编排窗口），但还没有子 handoff → 也显示 working，
   // 避免「正在跑却显示 idle/不渲染」的空窗。
@@ -86,7 +91,6 @@ export function TeamRunStateBanner({
   const visual = useMemo<PhaseVisual | null>(() => {
     const map: Record<Exclude<TeamRunPhase, 'idle'>, PhaseVisual> = {
       working: { color: 'var(--accent)', icon: '🟢', title: '团队运行中', spinning: true },
-      stalled: { color: 'var(--warning)', icon: '🟡', title: '疑似停滞' },
       failed: { color: DANGER, icon: '🔴', title: '出现失败' },
       completed: { color: 'var(--success)', icon: '✅', title: '团队已完成本轮' },
       disconnected: { color: 'var(--warning)', icon: '⚠', title: '实时连接断开' },
@@ -101,10 +105,7 @@ export function TeamRunStateBanner({
   const layerName = run.activeLayer ? (LAYER_LABEL[run.activeLayer] ?? run.activeLayer) : null;
   const topAlert = diagnostics?.activeAlerts?.[0] ?? null;
   const latestIncident = diagnostics?.incidents?.[0] ?? null;
-  const diagnosticsSummary =
-    topAlert?.message?.trim() ||
-    latestIncident?.message?.trim() ||
-    null;
+  const diagnosticsSummary = topAlert?.message?.trim() || latestIncident?.message?.trim() || null;
 
   let detail: string;
   switch (effectivePhase) {
@@ -117,13 +118,6 @@ export function TeamRunStateBanner({
       ]
         .filter(Boolean)
         .join(' · ');
-      break;
-    case 'stalled':
-      detail = `${run.activeCount} 个任务${
-        ago ? `已 ${ago}` : ''
-      }无新活动——可能在等待长耗时调用，或已卡住，可在「任务」tab 查看或取消${
-        diagnosticsSummary ? ` · 线索：${diagnosticsSummary}` : ''
-      }`;
       break;
     case 'failed':
       detail = `${run.failedCount} 个任务失败，请到「任务 / 评审」tab 查看详情并重试${
@@ -162,7 +156,11 @@ export function TeamRunStateBanner({
       <strong style={{ color: visual.color, fontWeight: 700, flexShrink: 0, fontSize: 12 }}>
         {visual.title}
       </strong>
-      <span style={{ color: 'var(--fg-muted)', minWidth: 0, lineHeight: 1.4, fontSize: 11, flex: 1 }}>{detail}</span>
+      <span
+        style={{ color: 'var(--fg-muted)', minWidth: 0, lineHeight: 1.4, fontSize: 11, flex: 1 }}
+      >
+        {detail}
+      </span>
       {rightSlot && <div style={{ flexShrink: 0, marginLeft: 'auto' }}>{rightSlot}</div>}
     </div>
   );

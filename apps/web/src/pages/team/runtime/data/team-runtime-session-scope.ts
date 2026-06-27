@@ -1,5 +1,9 @@
 import type { SessionTask } from '@openAwork/web-client';
-import type { HandoffEntry, LayerNode } from '../../../../stores/team/team-events.js';
+import type {
+  HandoffEntry,
+  HandoffEvent,
+  LayerNode,
+} from '../../../../stores/team/team-events.js';
 
 type SessionScopeNode =
   | Pick<LayerNode, 'parentSessionId' | 'sessionId'>
@@ -60,4 +64,34 @@ export function isRuntimeTaskInSessionScope(
   sessionScope: Set<string>,
 ): boolean {
   return isSessionInScope(task.sessionId, sessionScope);
+}
+
+export function countUnreadNotificationEventsInScope(
+  events: ReadonlyArray<HandoffEvent>,
+  readEventKeys: ReadonlySet<string>,
+  sessionScope: Set<string> | null,
+  getEventKey: (event: HandoffEvent) => string,
+  fallbackUnreadCount: number,
+): number {
+  if (!sessionScope) {
+    return fallbackUnreadCount;
+  }
+
+  return events.filter((event) => {
+    const candidateSessionIds = [
+      event.sessionId,
+      typeof event.payload['sessionId'] === 'string' ? event.payload['sessionId'] : null,
+      typeof event.payload['fromSessionId'] === 'string' ? event.payload['fromSessionId'] : null,
+      typeof event.payload['toSessionId'] === 'string' ? event.payload['toSessionId'] : null,
+    ].filter((value): value is string => typeof value === 'string' && value.length > 0);
+
+    if (candidateSessionIds.length === 0) {
+      return false;
+    }
+
+    return (
+      candidateSessionIds.some((sessionId) => sessionScope.has(sessionId)) &&
+      !readEventKeys.has(getEventKey(event))
+    );
+  }).length;
 }

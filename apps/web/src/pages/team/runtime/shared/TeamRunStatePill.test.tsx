@@ -46,6 +46,21 @@ describe('TeamRunStatePill', () => {
     expect(screen.getByText('运行中')).toBeTruthy();
   });
 
+  it('长时间无活动的活跃 handoff 也不显示停滞提示', () => {
+    setHandoffs([
+      {
+        id: 'a',
+        state: 'running',
+        fromRoleLayer: 'reception',
+        toRoleLayer: 'pm1',
+        updatedAt: Date.now() - 10 * 60_000,
+      } as HandoffEntry,
+    ]);
+    render(<TeamRunStatePill />);
+    expect(screen.getByText('运行中')).toBeTruthy();
+    expect(screen.queryByText('疑似停滞')).toBeNull();
+  });
+
   it('compact 模式只显示计数不显示文字标签', () => {
     setHandoffs([
       {

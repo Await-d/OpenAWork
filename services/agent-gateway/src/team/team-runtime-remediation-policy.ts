@@ -1,4 +1,5 @@
 import { sqliteAll } from '../infra/db.js';
+import { buildSqlitePlaceholders, chunkSqliteBindValues } from '../infra/sqlite-batch.js';
 import { reconcileSessionRuntime } from '../session/session-runtime-reconciler.js';
 import { SESSION_RUNTIME_THREAD_STALE_AFTER_MS } from '../session/session-runtime-thread-store.js';
 import {
@@ -108,6 +109,60 @@ export async function runTeamRuntimeRemediation(input: {
   };
 }
 
+function listRowsBySessionIds<T>(input: {
+  query: (placeholders: string) => string;
+  sessionIds: string[];
+  tailParams?: readonly number[];
+  userId?: string;
+}): T[] {
+  if (input.sessionIds.length === 0) {
+    return [];
+  }
+
+  const fixedParams = input.userId ? [input.userId] : [];
+  const tailParams = input.tailParams ?? [];
+  return chunkSqliteBindValues(input.sessionIds, fixedParams.length + tailParams.length).flatMap(
+    (batchSessionIds) =>
+      sqliteAll<T>(input.query(buildSqlitePlaceholders(batchSessionIds.length, ',')), [
+        ...fixedParams,
+        ...batchSessionIds,
+        ...tailParams,
+      ]),
+  );
+}
+
+function listRowsByEitherSessionIds<T extends { id: string }>(input: {
+  query: (placeholders: string) => string;
+  sessionIds: string[];
+  userId?: string;
+}): T[] {
+  if (input.sessionIds.length === 0) {
+    return [];
+  }
+
+  const fixedParams = input.userId ? [input.userId] : [];
+  const rowsById = new Map<string, T>();
+  for (const batchSessionIds of chunkSqliteBindValues(
+    input.sessionIds,
+    fixedParams.length,
+    undefined,
+    2,
+  )) {
+    const placeholders = buildSqlitePlaceholders(batchSessionIds.length, ',');
+    const rows = sqliteAll<T>(input.query(placeholders), [
+      ...fixedParams,
+      ...batchSessionIds,
+      ...batchSessionIds,
+    ]);
+    for (const row of rows) {
+      if (!rowsById.has(row.id)) {
+        rowsById.set(row.id, row);
+      }
+    }
+  }
+  return Array.from(rowsById.values());
+}
+
 async function runFailedHandoffRemediation(input: {
   code: 'handoff-failure';
   handoffId?: string;
@@ -124,22 +179,23 @@ async function runFailedHandoffRemediation(input: {
     };
   }
 
-  const rows = sqliteAll<{
+  const rows = listRowsByEitherSessionIds<{
     failure_reason: string | null;
     id: string;
     payload_json: string | null;
     to_role_layer: string;
-  }>(
-    `SELECT id
+  }>({
+    query: (placeholders) => `SELECT id
           , failure_reason
           , payload_json
           , to_role_layer
        FROM handoff_records
       WHERE user_id = ?
         AND state = 'failed'
-        AND (from_session_id IN (${input.sessionIds.map(() => '?').join(',')}) OR to_session_id IN (${input.sessionIds.map(() => '?').join(',')}))`,
-    [input.userId, ...input.sessionIds, ...input.sessionIds],
-  ).filter(
+        AND (from_session_id IN (${placeholders}) OR to_session_id IN (${placeholders}))`,
+    sessionIds: input.sessionIds,
+    userId: input.userId,
+  }).filter(
     (row) =>
       (input.handoffId ? row.id === input.handoffId : true) &&
       isRecoverableFailedHandoff({
@@ -308,30 +364,36 @@ async function collectRemediationCandidates(input: {
 
   if (input.code === 'stale-runtime-threads') {
     const staleBeforeMs = Date.now() - SESSION_RUNTIME_THREAD_STALE_AFTER_MS;
-    return sqliteAll<{ session_id: string }>(
-      `SELECT session_id
+    return listRowsBySessionIds<{ session_id: string }>({
+      query: (placeholders) => `SELECT session_id
          FROM session_runtime_threads
-        WHERE session_id IN (${input.sessionIds.map(() => '?').join(',')})
+        WHERE session_id IN (${placeholders})
           AND heartbeat_at_ms < ?`,
-      [...input.sessionIds, staleBeforeMs],
-    );
+      tailParams: [staleBeforeMs],
+      sessionIds: input.sessionIds,
+    });
   }
 
-  return sqliteAll<{ session_id: string }>(
-    `SELECT DISTINCT session_id
-       FROM (
-         SELECT session_id
-           FROM permission_requests
-          WHERE session_id IN (${input.sessionIds.map(() => '?').join(',')})
-            AND status = 'deciding'
-            AND updated_at < datetime('now', '-10 minutes')
-         UNION ALL
-         SELECT session_id
-           FROM question_requests
-          WHERE session_id IN (${input.sessionIds.map(() => '?').join(',')})
-            AND status = 'deciding'
-            AND updated_at < datetime('now', '-10 minutes')
-       ) stale_sessions`,
-    [...input.sessionIds, ...input.sessionIds],
-  );
+  const sessionIds = new Set<string>();
+  for (const row of listRowsBySessionIds<{ session_id: string }>({
+    query: (placeholders) => `SELECT session_id
+         FROM permission_requests
+        WHERE session_id IN (${placeholders})
+          AND status = 'deciding'
+          AND updated_at < datetime('now', '-10 minutes')`,
+    sessionIds: input.sessionIds,
+  })) {
+    sessionIds.add(row.session_id);
+  }
+  for (const row of listRowsBySessionIds<{ session_id: string }>({
+    query: (placeholders) => `SELECT session_id
+         FROM question_requests
+        WHERE session_id IN (${placeholders})
+          AND status = 'deciding'
+          AND updated_at < datetime('now', '-10 minutes')`,
+    sessionIds: input.sessionIds,
+  })) {
+    sessionIds.add(row.session_id);
+  }
+  return Array.from(sessionIds, (session_id) => ({ session_id }));
 }

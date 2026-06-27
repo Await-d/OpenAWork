@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react';
 import type { RunEvent } from '@openAwork/shared';
-import { tryFormatJson } from '../../../../utils/format-json.js';
+import { getTeamRichTextPreviewText } from './team-message-content.js';
 
 interface RunEventPreviewItem {
   detail: string;
@@ -27,8 +27,7 @@ const ITEM_STYLE: CSSProperties = {
 };
 
 function truncate(value: string, max = 180): string {
-  const formatted = tryFormatJson(value);
-  return formatted.length > max ? `${formatted.slice(0, max)}…` : formatted;
+  return getTeamRichTextPreviewText(value, max);
 }
 
 function mergeTextEvents(events: RunEvent[]): RunEventPreviewItem[] {

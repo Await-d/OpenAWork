@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   collectSessionScope,
+  countUnreadNotificationEventsInScope,
   isHandoffInSessionScope,
   isRuntimeTaskInSessionScope,
   isSessionInScope,
@@ -88,5 +89,43 @@ describe('session scope matchers', () => {
     expect(isRuntimeTaskInSessionScope({ sessionId: 'child' }, scope)).toBe(true);
     expect(isRuntimeTaskInSessionScope({ sessionId: 'other' }, scope)).toBe(false);
     expect(isRuntimeTaskInSessionScope({ sessionId: undefined }, scope)).toBe(false);
+  });
+
+  it('countUnreadNotificationEventsInScope 只统计当前会话树内的未读事件', () => {
+    const events = [
+      {
+        timestamp: 1,
+        type: 'escalation_request',
+        payload: { fromSessionId: 'root' },
+        sessionId: 'child',
+      },
+      {
+        timestamp: 2,
+        type: 'escalation_request',
+        payload: { fromSessionId: 'other' },
+        sessionId: 'other',
+      },
+      {
+        timestamp: 3,
+        type: 'escalation_request',
+        payload: {},
+        sessionId: undefined,
+      },
+    ];
+
+    const count = countUnreadNotificationEventsInScope(
+      events,
+      new Set(['other|read']),
+      scope,
+      (event) => `${event.sessionId ?? 'none'}|${event.payload['fromSessionId'] ?? 'none'}`,
+      99,
+    );
+
+    expect(count).toBe(1);
+  });
+
+  it('countUnreadNotificationEventsInScope 在无 scope 时回退到全局未读数', () => {
+    const count = countUnreadNotificationEventsInScope([], new Set(), null, () => 'unused', 7);
+    expect(count).toBe(7);
   });
 });

@@ -55,6 +55,10 @@ import {
   ToolCallDisplay,
 } from '../tool-call/display/tool-call-inline.js';
 import { tryFormatJson, looksLikeJson } from '../../../utils/format-json.js';
+import {
+  tryParseIncidentJson,
+  IncidentReadableCard,
+} from '../../../pages/team/conversation/extras/incident-readable-card.js';
 
 export const sharedUiThemeVars = {
   '--color-bg': 'var(--bg-base)',
@@ -1136,8 +1140,18 @@ function AssistantRichContentBody({
     return <AssistantErrorContent content={content} />;
   }
 
-  // JSON 内容：格式化后用 <pre> 展示，避免原始 JSON 被 Markdown 渲染为不可读文本
+  // JSON 内容：先尝试解析为 incident 卡片，否则格式化为代码块
   if (!streaming && looksLikeJson(content)) {
+    // 1. 尝试解析为 incident JSON → 人类可读卡片
+    const incident = tryParseIncidentJson(content);
+    if (incident) {
+      return (
+        <div className="assistant-rich-content-body">
+          <IncidentReadableCard data={incident} />
+        </div>
+      );
+    }
+    // 2. 其他 JSON → 格式化代码块
     const formatted = tryFormatJson(content);
     if (formatted !== content) {
       return (

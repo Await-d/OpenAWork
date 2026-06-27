@@ -43,6 +43,11 @@ interface MultiAttachStoreState {
   handlers: Map<string, Set<RunEventHandler>>;
   /** 各 session 已处理的 rowId 集合（去重，防止多 handler 实例重复处理） */
   processedRowIds: Map<string, Set<number>>;
+  /** 在 handler 尚未注册前收到的事件，等待首个 handler 挂载后补发。 */
+  pendingEvents: Map<
+    string,
+    Array<{ event: RunEvent; meta: { rowId: number; clientRequestId?: string } }>
+  >;
 
   /** 注册事件处理器 */
   registerHandler: (sessionId: string, handler: RunEventHandler) => () => void;
@@ -80,15 +85,39 @@ export const useMultiAttachStore = create<MultiAttachStoreState>((set, get) => (
   sessions: new Map(),
   handlers: new Map(),
   processedRowIds: new Map(),
+  pendingEvents: new Map(),
 
   registerHandler: (sessionId, handler) => {
     const current = get().handlers.get(sessionId) ?? new Set<RunEventHandler>();
+    const hadNoHandlers = current.size === 0;
     current.add(handler);
     set((state) => {
       const next = new Map(state.handlers);
       next.set(sessionId, current);
       return { handlers: next };
     });
+
+    if (hadNoHandlers) {
+      const pending = get().pendingEvents.get(sessionId) ?? [];
+      if (pending.length > 0) {
+        for (const item of pending) {
+          try {
+            handler(item.event, item.meta);
+          } catch (error) {
+            console.error('[multi-attach] handler failed', {
+              error: error instanceof Error ? error.message : String(error),
+              eventType: item.event.type,
+              sessionId,
+            });
+          }
+        }
+        set((state) => {
+          const nextPending = new Map(state.pendingEvents);
+          nextPending.delete(sessionId);
+          return { pendingEvents: nextPending };
+        });
+      }
+    }
 
     return () => {
       const existing = get().handlers.get(sessionId);
@@ -100,7 +129,13 @@ export const useMultiAttachStore = create<MultiAttachStoreState>((set, get) => (
           nextHandlers.delete(sessionId);
           const nextProcessed = new Map(state.processedRowIds);
           nextProcessed.delete(sessionId);
-          return { handlers: nextHandlers, processedRowIds: nextProcessed };
+          const nextPending = new Map(state.pendingEvents);
+          nextPending.delete(sessionId);
+          return {
+            handlers: nextHandlers,
+            processedRowIds: nextProcessed,
+            pendingEvents: nextPending,
+          };
         });
       }
     };
@@ -133,7 +168,20 @@ export const useMultiAttachStore = create<MultiAttachStoreState>((set, get) => (
     }
 
     const handlers = get().handlers.get(sessionId);
-    if (!handlers || handlers.size === 0) return;
+    if (!handlers || handlers.size === 0) {
+      set((state) => {
+        const nextPending = new Map(state.pendingEvents);
+        const pending = nextPending.get(sessionId) ?? [];
+        const nextQueue = [...pending, { event, meta }];
+        if (nextQueue.length > 100) {
+          nextQueue.splice(0, nextQueue.length - 100);
+        }
+        nextPending.set(sessionId, nextQueue);
+        return { pendingEvents: nextPending };
+      });
+      return;
+    }
+
     for (const handler of [...handlers]) {
       try {
         handler(event, meta);
@@ -153,7 +201,6 @@ export const useMultiAttachStore = create<MultiAttachStoreState>((set, get) => (
       const existing = next.get(sessionId);
       next.set(sessionId, {
         sessionId,
-        state: existing?.state ?? 'idle',
         activeClientRequestId: existing?.activeClientRequestId ?? null,
         lastRowId: existing?.lastRowId ?? 0,
         connectedAt: existing?.connectedAt ?? null,
@@ -204,7 +251,15 @@ export const useMultiAttachStore = create<MultiAttachStoreState>((set, get) => (
     set((s) => {
       const next = new Map(s.sessions);
       next.delete(sessionId);
-      return { sessions: next };
+      const nextProcessed = new Map(s.processedRowIds);
+      nextProcessed.delete(sessionId);
+      const nextPending = new Map(s.pendingEvents);
+      nextPending.delete(sessionId);
+      return {
+        sessions: next,
+        processedRowIds: nextProcessed,
+        pendingEvents: nextPending,
+      };
     }),
 
   isSessionAttached: (sessionId) => {

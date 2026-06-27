@@ -14,6 +14,7 @@
 import { sqliteAll, sqliteRun } from '../infra/db.js';
 import { cancelHandoff } from '../handoff/store/handoff-store.js';
 import { findStaleHeartbeatCutoffIso, HEARTBEAT_STALE_AFTER_MS } from '../handoff/bus/heartbeat.js';
+import { buildSqlitePlaceholders, chunkSqliteBindValues } from '../infra/sqlite-batch.js';
 
 export interface ConsistencyFix {
   type:
@@ -99,8 +100,7 @@ export function preResumeConsistencyCheck(input: {
     const parent = sessionById.get(session.parent_id);
     if (!parent) continue;
 
-    const parentTerminal =
-      parent.substate === 'cancelled' || parent.substate === 'failed';
+    const parentTerminal = parent.substate === 'cancelled' || parent.substate === 'failed';
     if (!parentTerminal) continue;
 
     const childTerminal =
@@ -133,9 +133,11 @@ export function preResumeConsistencyCheck(input: {
   }
 
   // ── 收集子树所有 handoff ──────────────────────────────────────────
-  const placeholders = sessionIds.map(() => '?').join(', ');
-  const handoffs = sqliteAll<HandoffRow>(
-    `SELECT id, state, from_session_id, to_session_id,
+  const handoffsById = new Map<string, HandoffRow>();
+  for (const batchSessionIds of chunkSqliteBindValues(sessionIds, 1, undefined, 2)) {
+    const placeholders = buildSqlitePlaceholders(batchSessionIds.length, ', ');
+    const rows = sqliteAll<HandoffRow>(
+      `SELECT id, state, from_session_id, to_session_id,
             from_role_layer, to_role_layer, paused, retry_count
        FROM handoff_records
       WHERE user_id = ?
@@ -143,8 +145,15 @@ export function preResumeConsistencyCheck(input: {
           from_session_id IN (${placeholders})
           OR to_session_id IN (${placeholders})
         )`,
-    [input.userId, ...sessionIds, ...sessionIds],
-  );
+      [input.userId, ...batchSessionIds, ...batchSessionIds],
+    );
+    for (const row of rows) {
+      if (!handoffsById.has(row.id)) {
+        handoffsById.set(row.id, row);
+      }
+    }
+  }
+  const handoffs = Array.from(handoffsById.values());
 
   // ── 2. zombie handoff 检测 ────────────────────────────────────────
   // state=running/claimed 但 to_session 不存在或不在子树中 → 置 failed
@@ -224,12 +233,15 @@ export function preResumeConsistencyCheck(input: {
   const staleCutoff = findStaleHeartbeatCutoffIso(HEARTBEAT_STALE_AFTER_MS);
   for (const handoff of handoffs) {
     if (handoff.state !== 'running' && handoff.state !== 'claimed') continue;
+    // Paused handoffs are intentionally waiting for user/system control flow;
+    // reclaiming them here would clear to_session_id before resume-all can
+    // fan out resume_signal to the existing assignee session.
+    if (handoff.paused === 1) continue;
     if (!handoff.to_session_id) continue;
     const session = sessionById.get(handoff.to_session_id);
     if (!session) continue;
 
-    const heartbeatStale =
-      session.last_heartbeat === null || session.last_heartbeat < staleCutoff;
+    const heartbeatStale = session.last_heartbeat === null || session.last_heartbeat < staleCutoff;
     if (!heartbeatStale) continue;
 
     try {

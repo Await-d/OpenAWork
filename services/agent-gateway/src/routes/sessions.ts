@@ -15,6 +15,7 @@ import { requireAuth } from '../infra/auth.js';
 import { ApiError } from '../infra/error-response.js';
 import { parseBody, parseQuery } from '../infra/parse-request.js';
 import { WORKSPACE_ROOT, sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
+import { buildSqlitePlaceholders, chunkSqliteBindValues } from '../infra/sqlite-batch.js';
 import { filterVisibleSessionMessages } from '../session/session-message-store.js';
 import {
   hydrateLegacySessionMessagesForSearch,
@@ -709,7 +710,7 @@ function buildSafeSessionSelectColumns(): string {
     'last_heartbeat',
   ];
   const existing = new Set(
-    (sqliteAll<{ name: string }>('PRAGMA table_info(sessions)').map((row) => row.name)),
+    sqliteAll<{ name: string }>('PRAGMA table_info(sessions)').map((row) => row.name),
   );
   const safeColumns = [...baseColumns];
   for (const col of optionalColumns) {
@@ -1184,14 +1185,18 @@ function listRecoveryPermissionRequests(sessionIds: string[]) {
     return [];
   }
 
-  const placeholders = sessionIds.map(() => '?').join(', ');
-  return sqliteAll<RecoveryPermissionRequestRow>(
-    `SELECT id, session_id, tool_name, scope, reason, risk_level, preview_action, status, decision, created_at
-     FROM permission_requests
-     WHERE session_id IN (${placeholders}) AND status = 'pending'
-     ORDER BY created_at ASC`,
-    sessionIds,
-  ).map(mapRecoveryPermissionRequestRow);
+  const rows = chunkSqliteBindValues(sessionIds).flatMap((batchSessionIds) => {
+    const placeholders = buildSqlitePlaceholders(batchSessionIds.length, ', ');
+    return sqliteAll<RecoveryPermissionRequestRow>(
+      `SELECT id, session_id, tool_name, scope, reason, risk_level, preview_action, status, decision, created_at
+       FROM permission_requests
+       WHERE session_id IN (${placeholders}) AND status = 'pending'
+       ORDER BY created_at ASC`,
+      batchSessionIds,
+    );
+  });
+  rows.sort((left, right) => left.created_at.localeCompare(right.created_at));
+  return rows.map(mapRecoveryPermissionRequestRow);
 }
 
 function listRecoveryQuestionRequests(sessionIds: string[]) {
@@ -1199,14 +1204,18 @@ function listRecoveryQuestionRequests(sessionIds: string[]) {
     return [];
   }
 
-  const placeholders = sessionIds.map(() => '?').join(', ');
-  return sqliteAll<RecoveryQuestionRequestRow>(
-    `SELECT id, session_id, tool_name, title, questions_json, status, created_at
-     FROM question_requests
-     WHERE session_id IN (${placeholders}) AND status = 'pending'
-     ORDER BY created_at ASC`,
-    sessionIds,
-  ).flatMap((row) => {
+  const rows = chunkSqliteBindValues(sessionIds).flatMap((batchSessionIds) => {
+    const placeholders = buildSqlitePlaceholders(batchSessionIds.length, ', ');
+    return sqliteAll<RecoveryQuestionRequestRow>(
+      `SELECT id, session_id, tool_name, title, questions_json, status, created_at
+       FROM question_requests
+       WHERE session_id IN (${placeholders}) AND status = 'pending'
+       ORDER BY created_at ASC`,
+      batchSessionIds,
+    );
+  });
+  rows.sort((left, right) => left.created_at.localeCompare(right.created_at));
+  return rows.flatMap((row) => {
     const mapped = mapRecoveryQuestionRequestRow(row);
     return mapped ? [mapped] : [];
   });
@@ -1215,54 +1224,18 @@ function listRecoveryQuestionRequests(sessionIds: string[]) {
 async function buildSessionStatusReadModel(input: { session: SessionRow; userId: string }) {
   const sessionId = input.session.id;
   const safeSessionCols = buildSafeSessionSelectColumns();
-  const hasTeamParentColumn = safeSessionCols.includes('team_parent_session_id');
+  const allSessions = sqliteAll<SessionRow>(
+    `SELECT ${safeSessionCols} FROM sessions WHERE user_id = ? ORDER BY updated_at DESC`,
+    [input.userId],
+  );
+  const descendantSessionIds = [...collectDescendantSessionIds(allSessions, sessionId)].filter(
+    (candidateSessionId) => candidateSessionId !== sessionId,
+  );
+  const sessionRowsById = new Map(allSessions.map((session) => [session.id, session] as const));
+  const descendantRows = descendantSessionIds
+    .map((childSessionId) => sessionRowsById.get(childSessionId) ?? null)
+    .filter((session): session is SessionRow => session !== null);
 
-  // Optimization 1: Only query descendant sessions instead of ALL user sessions.
-  // Use a BFS approach: iteratively fetch sessions whose parent is in the known set.
-  const descendantRows: SessionRow[] = [];
-  const visitedIds = new Set<string>([sessionId]);
-  let frontier = [sessionId];
-
-  while (frontier.length > 0) {
-    const candidates = sqliteAll<SessionRow>(
-      `SELECT ${safeSessionCols}
-       FROM sessions
-       WHERE user_id = ?
-         AND id NOT IN (${[...visitedIds].map(() => '?').join(', ')})
-         AND (
-           ${frontier.map(() => `metadata_json LIKE ?`).join(' OR ')}
-           ${hasTeamParentColumn ? `OR team_parent_session_id IN (${frontier.map(() => '?').join(', ')})` : ''}
-         )
-       LIMIT 200`,
-      hasTeamParentColumn
-        ? [
-            input.userId,
-            ...visitedIds,
-            ...frontier.map((parentId) => `%"parentSessionId":"${parentId}"%`),
-            ...frontier,
-          ]
-        : [
-            input.userId,
-            ...visitedIds,
-            ...frontier.map((parentId) => `%"parentSessionId":"${parentId}"%`),
-          ],
-    );
-
-    const nextFrontier: string[] = [];
-    for (const candidate of candidates) {
-      const hasVisitedParent = getSessionParentIds(candidate).some((parentId) =>
-        visitedIds.has(parentId),
-      );
-      if (hasVisitedParent && !visitedIds.has(candidate.id)) {
-        visitedIds.add(candidate.id);
-        descendantRows.push(candidate);
-        nextFrontier.push(candidate.id);
-      }
-    }
-    frontier = nextFrontier;
-  }
-
-  // Optimization 2: Single reconcile pass for all descendant rows
   const reconciledDescendants = await reconcileSessionRuntimeRowsForResponse(
     descendantRows,
     input.userId,
@@ -1280,10 +1253,8 @@ async function buildSessionStatusReadModel(input: { session: SessionRow; userId:
 
   const relevantSessionIds = [sessionId, ...children.map((child) => child.id)];
 
-  // Optimization 3: Skip task projection when there are no descendants
   let tasks: SessionTaskResponse[] = [];
   if (descendantRows.length > 0) {
-    // Build a minimal sessions array for task projection (root + descendants only)
     const allRows = [input.session, ...reconciledDescendants];
     const includedSessionIds = new Set(allRows.map((s) => s.id));
     const projection = await buildMergedSessionTaskProjection({

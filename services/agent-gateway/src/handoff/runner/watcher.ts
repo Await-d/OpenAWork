@@ -22,6 +22,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { sqliteAll, sqliteGet, sqliteRun } from '../../infra/db.js';
+import { buildSqlitePlaceholders, chunkSqliteBindValues } from '../../infra/sqlite-batch.js';
 import {
   claimHandoff,
   failHandoff,
@@ -68,6 +69,11 @@ interface AssignedMemberSessionSummary {
   displayName?: string;
 }
 
+interface PendingHandoffDependencyState {
+  reason?: string;
+  status: 'failed' | 'ready' | 'waiting';
+}
+
 function readAssignedMemberSessionSummary(payload: unknown): AssignedMemberSessionSummary | null {
   if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
     return null;
@@ -98,6 +104,83 @@ function readAssignedMemberSessionSummary(payload: unknown): AssignedMemberSessi
     ...(personaKey ? { personaKey } : {}),
     ...(displayName ? { displayName } : {}),
   };
+}
+
+function readDependencyHandoffIds(payload: unknown): string[] {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+    return [];
+  }
+  const raw = (payload as Record<string, unknown>)['dependencyHandoffIds'];
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw.filter(
+    (value): value is string => typeof value === 'string' && value.trim().length > 0,
+  );
+}
+
+function evaluatePendingHandoffDependencies(record: HandoffRecord): PendingHandoffDependencyState {
+  const dependencyHandoffIds = readDependencyHandoffIds(record.payload);
+  if (dependencyHandoffIds.length === 0) {
+    return { status: 'ready' };
+  }
+
+  const byId = new Map<string, { id: string; state: string; failure_reason: string | null }>();
+  for (const batchIds of chunkSqliteBindValues(dependencyHandoffIds, 1)) {
+    const rows = sqliteAll<{ id: string; state: string; failure_reason: string | null }>(
+      `SELECT id, state, failure_reason
+         FROM handoff_records
+        WHERE user_id = ?
+          AND id IN (${buildSqlitePlaceholders(batchIds.length)})`,
+      [record.userId, ...batchIds],
+    );
+    for (const row of rows) {
+      if (!byId.has(row.id)) {
+        byId.set(row.id, row);
+      }
+    }
+  }
+
+  for (const dependencyHandoffId of dependencyHandoffIds) {
+    const row = byId.get(dependencyHandoffId);
+    if (!row) {
+      return {
+        status: 'failed',
+        reason: `dependency-missing:${dependencyHandoffId}`,
+      };
+    }
+    if (row.state === 'completed') {
+      continue;
+    }
+    if (row.state === 'failed' || row.state === 'cancelled') {
+      return {
+        status: 'failed',
+        reason: `dependency-${row.state}:${dependencyHandoffId}${
+          row.failure_reason ? `:${row.failure_reason}` : ''
+        }`,
+      };
+    }
+    return { status: 'waiting' };
+  }
+
+  return { status: 'ready' };
+}
+
+function failPendingHandoffDueToDependency(record: HandoffRecord, reason: string): boolean {
+  sqliteRun(
+    `UPDATE handoff_records
+        SET state = 'failed',
+            failure_reason = ?,
+            completed_at = datetime('now'),
+            updated_at = datetime('now')
+      WHERE id = ? AND state = 'pending' AND paused = 0`,
+    [reason, record.id],
+  );
+  const updated = sqliteGet<{ state: string }>(
+    `SELECT state FROM handoff_records WHERE id = ? LIMIT 1`,
+    [record.id],
+  );
+  return updated?.state === 'failed';
 }
 
 /**
@@ -235,6 +318,93 @@ export class HandoffWatcher {
         // (the recovery tick re-pends any handoff left mid-claim) and let the
         // rest of the sweep proceed.
         try {
+          const dependencyState = evaluatePendingHandoffDependencies(record);
+          if (dependencyState.status === 'waiting') {
+            skipped += 1;
+            continue;
+          }
+          if (dependencyState.status === 'failed') {
+            if (
+              failPendingHandoffDueToDependency(
+                record,
+                `blocked-by-dependency:${dependencyState.reason ?? 'unknown'}`,
+              )
+            ) {
+              const failedRecord = sqliteGet<{
+                id: string;
+                user_id: string;
+                from_session_id: string;
+                from_role_layer: string;
+                to_role_layer: string;
+                to_session_id: string | null;
+                payload_json: string;
+                result_json: string | null;
+                state: string;
+                claim_token: string | null;
+                claimed_at: string | null;
+                started_at: string | null;
+                completed_at: string | null;
+                failure_reason: string | null;
+                retry_count: number;
+                idempotency_key: string | null;
+                paused: number;
+                paused_at: string | null;
+                paused_by_user_id: string | null;
+                pause_reason: string | null;
+                created_at: string;
+                updated_at: string;
+              }>(`SELECT * FROM handoff_records WHERE id = ? LIMIT 1`, [record.id]);
+              if (failedRecord) {
+                const eventRecord: HandoffRecord = {
+                  id: failedRecord.id,
+                  userId: failedRecord.user_id,
+                  fromSessionId: failedRecord.from_session_id,
+                  fromRoleLayer: failedRecord.from_role_layer as HandoffRecord['fromRoleLayer'],
+                  toRoleLayer: failedRecord.to_role_layer as HandoffRecord['toRoleLayer'],
+                  toSessionId: failedRecord.to_session_id,
+                  payload: JSON.parse(failedRecord.payload_json),
+                  resultJson: failedRecord.result_json
+                    ? JSON.parse(failedRecord.result_json)
+                    : null,
+                  state: 'failed',
+                  claimToken: failedRecord.claim_token,
+                  claimedAt: failedRecord.claimed_at,
+                  startedAt: failedRecord.started_at,
+                  completedAt: failedRecord.completed_at,
+                  failureReason: failedRecord.failure_reason,
+                  retryCount: failedRecord.retry_count,
+                  idempotencyKey: failedRecord.idempotency_key,
+                  paused: failedRecord.paused === 1,
+                  pausedAt: failedRecord.paused_at,
+                  pausedByUserId: failedRecord.paused_by_user_id,
+                  pauseReason: failedRecord.pause_reason,
+                  createdAt: failedRecord.created_at,
+                  updatedAt: failedRecord.updated_at,
+                };
+                recordTeamRuntimeIncident({
+                  category: 'handoff_failure',
+                  code: 'handoff-dependency-blocked',
+                  context: {
+                    dependencyReason: dependencyState.reason ?? 'unknown',
+                    handoffId: eventRecord.id,
+                    toRoleLayer: eventRecord.toRoleLayer,
+                  },
+                  message: eventRecord.failureReason ?? 'blocked-by-dependency',
+                  severity: 'warning',
+                  timestamp: Date.now(),
+                  userId: eventRecord.userId,
+                });
+                publishHandoffEvent({
+                  type: 'handoff.failed',
+                  record: eventRecord,
+                  payload: { reason: eventRecord.failureReason ?? 'blocked-by-dependency' },
+                });
+              }
+            }
+            skipped += 1;
+            continue;
+          }
+
           const claimToken = randomUUID();
           const claimedRecord = claimHandoff({
             handoffId: record.id,
@@ -775,23 +945,17 @@ export class HandoffWatcher {
             // 幻觉检测门禁 — handoff 完成后验证 agent 输出是否真实
             //（参考 hermes-agent v0.13.0）
             try {
-              const { listSessionMessagesV2 } = await import(
-                '../../message/message-v2-adapter.js'
-              );
+              const { listSessionMessagesV2 } = await import('../../message/message-v2-adapter.js');
               const messages = listSessionMessagesV2({
                 sessionId: input.toSessionId,
                 userId: input.handoff.userId,
               });
               // 检查最后一条 assistant 消息是否为空或包含错误标志
-              const lastAssistant = [...messages]
-                .reverse()
-                .find((m) => m.role === 'assistant');
+              const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
               if (lastAssistant) {
                 const issues: Array<{ type: string; detail: string }> = [];
                 const content = lastAssistant.content;
-                const hasText = content.some(
-                  (c) => c.type === 'text' && c.text.trim().length > 0,
-                );
+                const hasText = content.some((c) => c.type === 'text' && c.text.trim().length > 0);
                 if (!hasText) {
                   issues.push({
                     type: 'empty_output',
@@ -800,9 +964,7 @@ export class HandoffWatcher {
                 }
                 // 检查是否包含错误标志但状态是 completed
                 const hasErrorFlag = content.some(
-                  (c) =>
-                    c.type === 'text' &&
-                    /^(error|failed|❌|⚠️.*fail)/i.test(c.text.trim()),
+                  (c) => c.type === 'text' && /^(error|failed|❌|⚠️.*fail)/i.test(c.text.trim()),
                 );
                 if (hasErrorFlag) {
                   issues.push({
@@ -1191,6 +1353,29 @@ export class HandoffWatcher {
                     ],
                     clientRequestId: `handoff:${input.handoff.id}:degraded-chain`,
                   });
+
+                  // 向 reception session 写消息让用户知道 PM1 部分失败但 PM2 会接管
+                  const receptionSessionIdForDegraded = sqliteGet<{ from_session_id: string }>(
+                    `SELECT from_session_id FROM handoff_records
+                     WHERE to_role_layer = 'pm1' AND to_session_id = ?
+                     ORDER BY created_at DESC LIMIT 1`,
+                    [input.toSessionId],
+                  )?.from_session_id;
+                  if (receptionSessionIdForDegraded) {
+                    appendSessionMessageV2({
+                      sessionId: receptionSessionIdForDegraded,
+                      userId: input.handoff.userId,
+                      role: 'assistant',
+                      agentId: 'interaction-agent',
+                      content: [
+                        {
+                          type: 'text',
+                          text: `⚠️ PM1 规划过程中遇到错误（${reason}），但已有部分产物。已降级将任务转交给 PM2 管控层尝试继续执行。`,
+                        },
+                      ],
+                      clientRequestId: `handoff:${input.handoff.id}:degraded-chain-reception`,
+                    });
+                  }
                 } catch {
                   /* best-effort */
                 }

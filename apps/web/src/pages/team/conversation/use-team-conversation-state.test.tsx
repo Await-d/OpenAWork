@@ -238,6 +238,7 @@ describe('useTeamConversationState — 加载快照', () => {
       sessionListEvents,
       'publishSessionPendingPermission',
     );
+    const publishSessionRunStateSpy = vi.spyOn(sessionListEvents, 'publishSessionRunState');
     stubRecovery({
       session: {
         id: SESSION_ID,
@@ -305,6 +306,7 @@ describe('useTeamConversationState — 加载快照', () => {
         targetSessionId: SESSION_ID,
       }),
     );
+    expect(publishSessionRunStateSpy).toHaveBeenCalledWith(SESSION_ID, 'running');
   });
 
   it('recovery.children 中的团队层级会进入 childSessions', async () => {
@@ -1290,6 +1292,67 @@ describe('useTeamConversationState — submitInbound (v0.2)', () => {
     expect(payload.providerId).toBe('openai');
     expect(payload.thinkingEnabled).toBe(true);
     expect(payload.reasoningEffort).toBe('xhigh');
+  });
+
+  it('startStream 会为 custom 代理下的其他平台模型下发思考请求', async () => {
+    vi.stubGlobal('WebSocket', MockWebSocket as unknown as typeof WebSocket);
+    class InertEventSource {
+      close(): void {
+        return undefined;
+      }
+    }
+    vi.stubGlobal('EventSource', InertEventSource as unknown as typeof EventSource);
+
+    const { result } = renderHook(() =>
+      useTeamConversationState({
+        sessionId: SESSION_ID,
+        currentUserEmail: EMAIL,
+        gatewayUrl: GATEWAY,
+        token: TOKEN,
+        enableWriters: true,
+        defaults: {
+          activeProviderId: 'custom-proxy',
+          activeModelId: 'gemini-2.5-pro',
+          thinkingEnabled: true,
+          reasoningEffort: 'high',
+        },
+      }),
+    );
+
+    act(() => {
+      result.current.setProviders([
+        {
+          id: 'custom-proxy',
+          name: 'Gemini Proxy',
+          type: 'custom',
+          enabled: true,
+          defaultModels: [
+            {
+              id: 'gemini-2.5-pro',
+              label: 'Gemini 2.5 Pro',
+              enabled: true,
+              supportsThinking: false,
+            },
+          ],
+        },
+      ]);
+    });
+
+    await act(async () => {
+      await result.current.startStream('team proxy reasoning');
+    });
+    MockWebSocket.instances[0]?.onopen?.();
+
+    const payload = JSON.parse(MockWebSocket.instances[0]?.sentPayloads[0] ?? '{}') as {
+      model?: string;
+      providerId?: string;
+      reasoningEffort?: string;
+      thinkingEnabled?: boolean;
+    };
+    expect(payload.model).toBe('gemini-2.5-pro');
+    expect(payload.providerId).toBe('custom-proxy');
+    expect(payload.thinkingEnabled).toBe(true);
+    expect(payload.reasoningEffort).toBe('high');
   });
 
   it('成功提交 user_input 时 POST 到正确端点 + 返回 messageId', async () => {

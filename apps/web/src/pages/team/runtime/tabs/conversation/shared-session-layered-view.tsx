@@ -12,6 +12,7 @@ import { tryFormatJson, looksLikeJson } from '../../../../../utils/format-json.j
 import MarkdownMessageContent from '../../../../../components/chat/markdown/markdown-message-content.js';
 import { EmptyState, SegmentedToggle } from '../../shared/content-kit/index.js';
 import { TabContainer } from '../TabContainer.js';
+import { useNarrowConversationLayout } from './use-narrow-conversation-layout.js';
 
 type SharedLayeredMode = 'assistant' | 'comments' | 'todo';
 
@@ -30,14 +31,27 @@ const CONTAINER_STYLE: CSSProperties = {
 };
 
 const HEADER_STYLE: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
+  display: 'grid',
   gap: 10,
-  padding: '6px 10px',
+  padding: '10px 12px',
   borderRadius: 10,
   border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
   background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
   flexShrink: 0,
+};
+
+const HEADER_TOP_ROW_STYLE: CSSProperties = {
+  display: 'flex',
+  alignItems: 'flex-start',
+  gap: 10,
+  flexWrap: 'wrap',
+};
+
+const HEADER_ACTION_ROW_STYLE: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  flexWrap: 'wrap',
 };
 
 const SPLIT_STYLE: CSSProperties = {
@@ -54,9 +68,24 @@ const TIMELINE_PANEL_STYLE: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   gap: 8,
-  padding: 4,
+  padding: 0,
   borderRight: '1px solid color-mix(in srgb, var(--border-default) 30%, transparent)',
   paddingRight: 12,
+};
+
+const TIMELINE_HEADER_STYLE: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 8,
+  padding: '0 4px 4px',
+};
+
+const TIMELINE_HEADER_LABEL_STYLE: CSSProperties = {
+  fontSize: 10,
+  fontWeight: 700,
+  color: 'var(--fg-muted)',
+  letterSpacing: '0.08em',
 };
 
 const DETAIL_PANE_STYLE: CSSProperties = {
@@ -138,15 +167,15 @@ function buildTodoItems(input: {
     timestampMs: parseIsoMs(request.createdAt) ?? 0,
     title: `问题请求 · ${request.toolName}`,
   }));
-    const auditItems = input.auditLogs
-      .filter((log) => log.sessionId === input.selectedTeamId)
-      .map((log) => ({
-        detail: formatTimelineDetail(log.detail ?? log.summary, 200),
-        id: `audit-${log.id}`,
-        summary: log.actorEmail ?? log.actorUserId ?? '系统',
-        timestampMs: parseIsoMs(log.createdAt) ?? 0,
-        title: formatTimelineDetail(log.summary, 80),
-      }));
+  const auditItems = input.auditLogs
+    .filter((log) => log.sessionId === input.selectedTeamId)
+    .map((log) => ({
+      detail: formatTimelineDetail(log.detail ?? log.summary, 200),
+      id: `audit-${log.id}`,
+      summary: log.actorEmail ?? log.actorUserId ?? '系统',
+      timestampMs: parseIsoMs(log.createdAt) ?? 0,
+      title: formatTimelineDetail(log.summary, 80),
+    }));
 
   return [...permissionItems, ...questionItems, ...auditItems]
     .filter((item) => item.timestampMs > 0)
@@ -176,6 +205,7 @@ export function SharedSessionLayeredView({
     selectedSharedSession,
     sharedSessions,
   });
+  const isNarrowLayout = useNarrowConversationLayout();
   const [mode, setMode] = useState<SharedLayeredMode>('assistant');
   const items = useMemo(() => {
     if (!sharedSession) return [];
@@ -206,6 +236,23 @@ export function SharedSessionLayeredView({
   }, [items]);
 
   const selectedItem = items.find((item) => item.id === selectedItemId) ?? null;
+  const splitStyle: CSSProperties = isNarrowLayout
+    ? {
+        ...SPLIT_STYLE,
+        display: 'flex',
+        flexDirection: 'column',
+      }
+    : SPLIT_STYLE;
+  const timelinePanelStyle: CSSProperties = isNarrowLayout
+    ? {
+        ...TIMELINE_PANEL_STYLE,
+        borderRight: 'none',
+        borderBottom: '1px solid color-mix(in srgb, var(--border-default) 30%, transparent)',
+        paddingBottom: 12,
+        paddingRight: 0,
+        maxHeight: 260,
+      }
+    : TIMELINE_PANEL_STYLE;
 
   if (sharedSessionLoading && !sharedSession) {
     return (
@@ -244,30 +291,41 @@ export function SharedSessionLayeredView({
     >
       <div data-testid="shared-layered-view" style={CONTAINER_STYLE}>
         <div style={HEADER_STYLE}>
-          <strong style={{ fontSize: 12, color: 'var(--fg-strong)' }}>共享线程</strong>
-          <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
-            输出{' '}
-            {sharedSession.session.messages?.filter((message) => message.role === 'assistant')
-              .length ?? 0}{' '}
-            · 评论 {sharedSession.comments.length} · 待办{' '}
-            {sharedSession.pendingPermissions.length + sharedSession.pendingQuestions.length}
-          </span>
-          <div style={{ flex: 1 }} />
-          <SegmentedToggle<SharedLayeredMode>
-            ariaLabel="共享线程模式"
-            size="sm"
-            value={mode}
-            onChange={setMode}
-            options={[
-              { value: 'assistant', label: '输出', icon: '✨' },
-              { value: 'comments', label: '评论', icon: '💬' },
-              { value: 'todo', label: '待办', icon: '🧾' },
-            ]}
-          />
+          <div style={HEADER_TOP_ROW_STYLE}>
+            <span style={{ display: 'grid', gap: 2, minWidth: 0, flex: '1 1 260px' }}>
+              <strong style={{ fontSize: 12, color: 'var(--fg-strong)' }}>共享线程</strong>
+              <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+                输出{' '}
+                {sharedSession.session.messages?.filter((message) => message.role === 'assistant')
+                  .length ?? 0}{' '}
+                · 评论 {sharedSession.comments.length} · 待办{' '}
+                {sharedSession.pendingPermissions.length + sharedSession.pendingQuestions.length}
+              </span>
+            </span>
+          </div>
+          <div style={HEADER_ACTION_ROW_STYLE}>
+            <SegmentedToggle<SharedLayeredMode>
+              ariaLabel="共享线程模式"
+              size="sm"
+              value={mode}
+              onChange={setMode}
+              options={[
+                { value: 'assistant', label: '输出', icon: '✨' },
+                { value: 'comments', label: '评论', icon: '💬' },
+                { value: 'todo', label: '待办', icon: '🧾' },
+              ]}
+            />
+          </div>
         </div>
 
-        <div style={SPLIT_STYLE}>
-          <div style={TIMELINE_PANEL_STYLE}>
+        <div style={splitStyle}>
+          <div style={timelinePanelStyle}>
+            <div style={TIMELINE_HEADER_STYLE}>
+              <span style={TIMELINE_HEADER_LABEL_STYLE}>共享条目</span>
+              <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
+                当前显示 {items.length}
+              </span>
+            </div>
             {items.length === 0 ? (
               <EmptyState emoji="📭" title="当前分类暂无内容" compact style={{ flex: 1 }} />
             ) : (
@@ -281,27 +339,111 @@ export function SharedSessionLayeredView({
                     textAlign: 'left',
                     display: 'grid',
                     gap: 4,
-                    padding: '8px 12px',
+                    padding: '8px 10px',
                     borderRadius: 10,
                     border:
                       selectedItemId === item.id
                         ? '1px solid color-mix(in srgb, var(--accent) 60%, transparent)'
-                        : '1px solid color-mix(in srgb, var(--border-default) 45%, transparent)',
+                        : '1px solid color-mix(in srgb, var(--border-default) 24%, transparent)',
                     background:
                       selectedItemId === item.id
                         ? 'color-mix(in srgb, var(--accent) 12%, var(--bg-overlay))'
-                        : 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+                        : 'color-mix(in srgb, var(--bg-overlay) 68%, var(--bg-base))',
                     cursor: 'pointer',
                     width: '100%',
                   }}
                 >
-                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--fg-strong)' }}>
-                    {item.title}
+                  <span
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      minWidth: 0,
+                    }}
+                  >
+                    <strong
+                      style={{
+                        minWidth: 0,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        fontSize: 11.5,
+                        fontWeight: 700,
+                        color: 'var(--fg-strong)',
+                      }}
+                      title={item.title}
+                    >
+                      {item.title}
+                    </strong>
+                    <span
+                      style={{
+                        marginLeft: 'auto',
+                        flexShrink: 0,
+                        fontSize: 10,
+                        color: 'var(--fg-muted)',
+                        fontVariantNumeric: 'tabular-nums',
+                      }}
+                    >
+                      {formatTimeMs(item.timestampMs)}
+                    </span>
                   </span>
-                  <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>{tryFormatJson(item.summary)}</span>
-                  <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
-                    {formatTimeMs(item.timestampMs)}
+                  <span
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      minWidth: 0,
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <span
+                      style={{
+                        padding: '1px 6px',
+                        borderRadius: 999,
+                        background: 'color-mix(in srgb, var(--accent) 10%, transparent)',
+                        border: '1px solid color-mix(in srgb, var(--accent) 20%, transparent)',
+                        color: 'var(--accent)',
+                        fontSize: 9.5,
+                        fontWeight: 700,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {mode === 'assistant'
+                        ? '共享输出'
+                        : mode === 'comments'
+                          ? '共享评论'
+                          : '协作待办'}
+                    </span>
+                    <span
+                      style={{
+                        minWidth: 0,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        fontSize: 10,
+                        color: 'var(--fg-muted)',
+                      }}
+                      title={tryFormatJson(item.summary)}
+                    >
+                      {tryFormatJson(item.summary)}
+                    </span>
                   </span>
+                  {item.detail && selectedItemId !== item.id ? (
+                    <span
+                      style={{
+                        color: 'var(--fg-muted)',
+                        fontSize: 10.5,
+                        lineHeight: 1.45,
+                        overflow: 'hidden',
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                      }}
+                      title={item.detail}
+                    >
+                      {item.detail}
+                    </span>
+                  ) : null}
                 </button>
               ))
             )}

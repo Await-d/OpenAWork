@@ -49,6 +49,28 @@ describe('provider catalog (single source of truth)', () => {
     expect(resolveThinkingStyle('unknown-vendor')).toBe('none');
   });
 
+  it('通过 modelId 推断真实厂商的 thinking 风格（第三方代理场景）', () => {
+    // openai + 非_openai 模型 → 推断真实厂商
+    expect(resolveThinkingStyle('openai', 'mimo-v2.5-pro')).toBe('body_thinking_type');
+    expect(resolveThinkingStyle('openai', 'deepseek-chat')).toBe('deepseek_thinking');
+    expect(resolveThinkingStyle('openai', 'qwen3-235b-a22b')).toBe('qwen_enable_thinking');
+    expect(resolveThinkingStyle('openai', 'kimi-k2.5')).toBe('body_thinking_type');
+    expect(resolveThinkingStyle('openai', 'claude-sonnet-4-0')).toBe('anthropic_budget');
+    expect(resolveThinkingStyle('openai', 'gemini-2.5-pro')).toBe('gemini_thinking');
+    // openai + 真 OpenAI 模型 → 保持 openai_effort
+    expect(resolveThinkingStyle('openai', 'gpt-5')).toBe('openai_effort');
+    expect(resolveThinkingStyle('openai', 'gpt-4o')).toBe('openai_effort');
+    // custom + 任意已知模型 → 推断真实厂商
+    expect(resolveThinkingStyle('custom', 'mimo-v2.5-pro')).toBe('body_thinking_type');
+    expect(resolveThinkingStyle('custom', 'anthropic/claude-sonnet-4-0')).toBe(
+      'anthropic_budget',
+    );
+    expect(resolveThinkingStyle('custom', 'google/gemini-2.5-pro')).toBe('gemini_thinking');
+    expect(resolveThinkingStyle('custom', 'openai/gpt-5')).toBe('openai_effort');
+    // custom + 未知模型 → none
+    expect(resolveThinkingStyle('custom', 'totally-unknown')).toBe('none');
+  });
+
   it('OpenAI 内置模型包含可直接用于 fast 的 GPT-5.x reasoning 候选', () => {
     const openai = getCatalogEntry('openai');
     expect(openai).toBeDefined();
@@ -69,6 +91,14 @@ describe('provider catalog (single source of truth)', () => {
     expect(catalogModelSupportsThinking('moonshot', 'moonshot-v1-32k')).toBe(false);
     expect(catalogModelSupportsThinking('mimo', 'mimo-v2.5-pro')).toBe(true);
     expect(catalogModelSupportsThinking('mimo', 'mimo-v2-flash')).toBe(true);
+    expect(catalogModelSupportsThinking('custom', 'anthropic/claude-haiku-4-5')).toBe(false);
+    expect(catalogModelSupportsThinking('custom', 'openai/gpt-5')).toBe(true);
+    expect(catalogModelSupportsThinking('custom', 'openai/o3')).toBe(true);
+    expect(catalogModelSupportsThinking('custom', 'openai/gpt-4o')).toBe(false);
+    expect(catalogModelSupportsThinking('custom', 'google/gemini-2.5-pro')).toBe(true);
+    expect(catalogModelSupportsThinking('custom', 'qwen-max')).toBe(false);
+    expect(catalogModelSupportsThinking('custom', 'gemini-2.0-flash')).toBe(false);
+    expect(catalogModelSupportsThinking('custom', 'moonshot-v1-32k')).toBe(false);
   });
 
   it('host → providerType 反推覆盖各内置平台', () => {
@@ -91,6 +121,9 @@ describe('provider catalog (single source of truth)', () => {
   it('modelId 前缀 → 厂商显示名', () => {
     expect(inferProviderLabelFromModelId('claude-opus-4-0')).toBe('Anthropic');
     expect(inferProviderLabelFromModelId('gpt-4o')).toBe('OpenAI');
+    expect(inferProviderLabelFromModelId('anthropic/claude-sonnet-4-0')).toBe('Anthropic');
+    expect(inferProviderLabelFromModelId('google/gemini-2.5-pro')).toBe('Google Gemini');
+    expect(inferProviderLabelFromModelId('openai/gpt-5')).toBe('OpenAI');
     expect(inferProviderLabelFromModelId('kimi-k2.5')).toBe('Moonshot (Kimi)');
     expect(inferProviderLabelFromModelId('mimo-v2.5-pro')).toBe('Xiaomi MiMo');
     expect(inferProviderLabelFromModelId('totally-unknown')).toBeUndefined();

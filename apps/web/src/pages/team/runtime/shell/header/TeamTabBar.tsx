@@ -321,6 +321,8 @@ export interface TeamTabBarProps {
   unreadCount: number;
   /** 待澄清数（任务主 tab 上的黄点）。 */
   clarificationPending: number;
+  /** 失败任务数（任务主 tab 上的红色气泡，引导用户查看任务看板）。 */
+  failedTaskCount?: number;
   /** 是否显示 3D 办公入口（移动端隐藏）。 */
   showOffice: boolean;
   /** 当前是否处于 3D 办公视图。 */
@@ -348,10 +350,15 @@ function primaryBadge(
   key: PrimaryTabKey,
   unreadCount: number,
   clarificationPending: number,
+  failedTaskCount: number,
 ): { count: number; tone: 'danger' | 'warning' } | null {
   if (key === 'conversation' && unreadCount > 0) return { count: unreadCount, tone: 'danger' };
-  if (key === 'tasks' && clarificationPending > 0)
-    return { count: clarificationPending, tone: 'warning' };
+  // 任务 tab：失败任务数优先用红色 danger 气泡，
+  // 其次待澄清用黄色 warning 气泡
+  if (key === 'tasks') {
+    if (failedTaskCount > 0) return { count: failedTaskCount, tone: 'danger' };
+    if (clarificationPending > 0) return { count: clarificationPending, tone: 'warning' };
+  }
   return null;
 }
 
@@ -362,6 +369,7 @@ export function TeamTabBar({
   onMiddleChange,
   unreadCount,
   clarificationPending,
+  failedTaskCount = 0,
   showOffice,
   officeActive,
   onOfficeClick,
@@ -384,6 +392,7 @@ export function TeamTabBar({
         onMiddleChange={onMiddleChange}
         unreadCount={unreadCount}
         clarificationPending={clarificationPending}
+        failedTaskCount={failedTaskCount}
         showOffice={showOffice}
         officeActive={officeActive}
         onOfficeClick={onOfficeClick}
@@ -401,7 +410,7 @@ export function TeamTabBar({
         <div style={PRIMARY_GROUP_STYLE} role="tablist" aria-label="主分类切换">
           {PRIMARY_TABS.map((primary) => {
             const active = !officeActive && activePrimary === primary.key;
-            const badge = primaryBadge(primary.key, unreadCount, clarificationPending);
+            const badge = primaryBadge(primary.key, unreadCount, clarificationPending, failedTaskCount);
             return (
               <button
                 key={primary.key}
@@ -498,6 +507,7 @@ type SingleRowProps = Pick<
   | 'onMiddleChange'
   | 'unreadCount'
   | 'clarificationPending'
+  | 'failedTaskCount'
   | 'showOffice'
   | 'officeActive'
   | 'onOfficeClick'
@@ -522,6 +532,7 @@ function SingleRowTabBar({
   onMiddleChange,
   unreadCount,
   clarificationPending,
+  failedTaskCount = 0,
   showOffice,
   officeActive,
   onOfficeClick,
@@ -647,7 +658,7 @@ function SingleRowTabBar({
 
   const renderPrimaryPill = (primary: (typeof PRIMARY_TABS)[number]) => {
     const active = !officeActive && activePrimary === primary.key;
-    const badge = primaryBadge(primary.key, unreadCount, clarificationPending);
+    const badge = primaryBadge(primary.key, unreadCount, clarificationPending, failedTaskCount);
     return (
       <button
         key={primary.key}
@@ -732,7 +743,7 @@ function SingleRowTabBar({
               >
                 {overflowTabs.map((primary) => {
                   const active = !officeActive && activePrimary === primary.key;
-                  const badge = primaryBadge(primary.key, unreadCount, clarificationPending);
+                  const badge = primaryBadge(primary.key, unreadCount, clarificationPending, failedTaskCount);
                   return (
                     <button
                       key={primary.key}

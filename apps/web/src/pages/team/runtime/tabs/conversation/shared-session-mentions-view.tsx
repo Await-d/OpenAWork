@@ -1,5 +1,6 @@
 import { useCallback, type CSSProperties } from 'react';
 import type { AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
+import { formatSidebarTeamStatus } from '../../data/team-runtime-status.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
 import { resolveMatchedSharedSessionDetail } from '../../data/team-runtime-shared-context.js';
 import { EmptyState } from '../../shared/content-kit/index.js';
@@ -53,10 +54,7 @@ const PRIMARY_ACTION_BTN_STYLE: CSSProperties = {
 };
 
 function formatSharedStatus(status: AgentTeamsSidebarTeam['status']): string {
-  if (status === 'running') return '运行中';
-  if (status === 'paused') return '已暂停';
-  if (status === 'failed') return '失败';
-  return '已完成';
+  return formatSidebarTeamStatus(status);
 }
 
 export function SharedSessionMentionsView({

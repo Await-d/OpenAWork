@@ -71,6 +71,10 @@ export interface LayerNode {
   personaKey?: string | null;
   displayName?: string | null;
   title?: string;
+  /** 细粒度子状态（如 drafting_spec、dispatching、reviewing 等），来自 WS 实时推送 */
+  substate?: string | null;
+  /** substate 最后更新时间戳，用于单调性守卫 */
+  substateUpdatedAt?: number;
 }
 
 export type TeamEventsConnectionState =
@@ -271,6 +275,7 @@ interface LayerStoreState {
   nodes: Map<string, LayerNode>;
   addNode: (node: LayerNode) => void;
   updateNodeState: (sessionId: string, state: HandoffState | 'idle') => void;
+  updateNodeSubstate: (sessionId: string, substate: string | null, timestamp: number) => void;
   clear: () => void;
   replaceAll: (nodes: LayerNode[]) => void;
 }
@@ -290,6 +295,23 @@ export const useLayerStore = create<LayerStoreState>((set) => ({
       const existing = next.get(sessionId);
       if (existing) {
         next.set(sessionId, { ...existing, state: newState });
+      }
+      return { nodes: next };
+    }),
+  updateNodeSubstate: (sessionId, substate, timestamp) =>
+    set((state) => {
+      const next = new Map(state.nodes);
+      const existing = next.get(sessionId);
+      if (existing) {
+        // 单调性守卫：忽略比当前更旧的 substate 更新
+        if (existing.substateUpdatedAt && timestamp < existing.substateUpdatedAt) {
+          return state;
+        }
+        next.set(sessionId, {
+          ...existing,
+          substate,
+          substateUpdatedAt: timestamp,
+        });
       }
       return { nodes: next };
     }),
@@ -610,7 +632,7 @@ export const useTeamEventsConnectionStore = create<TeamEventsConnectionStoreStat
 
 export function dispatchTeamEvent(event: HandoffEvent): void {
   const { applyEvent } = useHandoffStore.getState();
-  const { addNode, updateNodeState } = useLayerStore.getState();
+  const { addNode, updateNodeState, updateNodeSubstate } = useLayerStore.getState();
   const { push } = useTeamNotificationStore.getState();
   const { push: pushClarifications } = useClarificationStore.getState();
 
@@ -630,7 +652,16 @@ export function dispatchTeamEvent(event: HandoffEvent): void {
     teamEventKind === 'team_timing';
 
   if (!isTelemetryEvent) {
-    applyEvent(event);
+    // handoff.* 与 scheduler.task-* 都承载 handoff 状态/paused 位变化，
+    // 必须进入 handoff store。否则 pause/resume 只能等下一轮 snapshot 才可见，
+    // 页面会表现为"不实时"。
+    if (
+      event.type.startsWith('handoff.') ||
+      event.type === 'scheduler.task-paused' ||
+      event.type === 'scheduler.task-resumed'
+    ) {
+      applyEvent(event);
+    }
     push(event);
   }
 
@@ -674,6 +705,57 @@ export function dispatchTeamEvent(event: HandoffEvent): void {
   ) {
     const state = event.type.replace('handoff.', '') as HandoffState;
     updateNodeState(event.sessionId, state);
+  }
+
+  if (
+    (event.type === 'scheduler.task-paused' || event.type === 'scheduler.task-resumed') &&
+    event.sessionId
+  ) {
+    const nextState =
+      event.type === 'scheduler.task-paused'
+        ? 'claimed'
+        : normalizeLayerNodeState((event.payload['state'] as string | undefined) ?? 'running');
+    updateNodeState(event.sessionId, nextState);
+  }
+
+  // ─── substate 实时更新 ──────────────────────────────────────────────
+  // 后端每次 setSubstate 都会推送 session.substate.changed 事件。
+  // 直接更新 layer store 中的 substate 字段，无需等待 HTTP reload，
+  // 让进度条（TeamSubstateProgressBar）能实时更新。
+  if (
+    event.type === 'session.substate.changed' &&
+    !isTelemetryEvent &&
+    event.sessionId
+  ) {
+    const substate = (event.payload['substate'] as string | null | undefined) ?? null;
+    const ts = typeof event.timestamp === 'number' ? event.timestamp : Date.now();
+    updateNodeSubstate(event.sessionId, substate, ts);
+  }
+
+  // ─── handoff.created：提前将新 session 加入 layer tree ──────────────
+  // 不等 handoff.started，在 created 阶段就添加节点（状态为 pending），
+  // 让 useMultiSessionAttach 尽早建立 SSE 连接，减少流式事件丢失窗口。
+  if (event.type === 'handoff.created' && event.sessionId) {
+    const toRoleLayer = (event.payload['toRoleLayer'] as TeamRoleLayer) ?? 'executor';
+    const fromSessionId = (event.payload['fromSessionId'] as string) ?? null;
+    // 只在节点不存在时添加（避免覆盖已 started 的节点状态）
+    if (!useLayerStore.getState().nodes.has(event.sessionId)) {
+      addNode({
+        sessionId: event.sessionId,
+        roleLayer: toRoleLayer,
+        parentSessionId: fromSessionId,
+        state: 'pending',
+      });
+    }
+  }
+
+  // ─── handoff.reclaimed：将状态回退到 pending ────────────────────────
+  // 崩溃恢复时 handoff 被回收重试，前端节点状态应回退，
+  // 让用户看到进度条回退而非停留在旧的 running 状态。
+  if (event.type === 'handoff.reclaimed' && event.sessionId) {
+    updateNodeState(event.sessionId, 'pending');
+    // 清除 substate，让进度条重置
+    updateNodeSubstate(event.sessionId, null, Date.now());
   }
 
   // ─── Team tabs data: usage / tool_call / timing 事件路由 ─────────────
@@ -755,6 +837,8 @@ function normalizeLayerNodeState(value: string | null | undefined): HandoffState
     case 'failed':
     case 'cancelled':
       return value;
+    case 'paused':
+      return 'claimed';
     default:
       return 'idle';
   }

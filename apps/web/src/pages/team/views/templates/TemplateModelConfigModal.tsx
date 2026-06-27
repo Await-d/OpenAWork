@@ -25,11 +25,15 @@ import {
   MODEL_STRATEGY_OPTIONS,
   countAssignedModels,
   setLayerModel,
+  setLayerThinking,
   setSlotModel,
+  setSlotThinking,
+  getLayerThinking,
   type ModelAssignment,
   type ModelCandidate,
 } from './model-assignment.js';
 import { groupRosterByLayer } from './template-roster-state.js';
+import { ThinkingConfigControl } from './ThinkingConfigControl.js';
 
 interface Props {
   open: boolean;
@@ -309,6 +313,12 @@ export function TemplateModelConfigModal({
                       ? {
                           providerId: layerSlots[0]!.providerId ?? '',
                           modelId: layerSlots[0]!.modelId!,
+                          ...(typeof layerSlots[0]!.thinkingEnabled === 'boolean'
+                            ? { thinkingEnabled: layerSlots[0]!.thinkingEnabled }
+                            : {}),
+                          ...(layerSlots[0]!.reasoningEffort
+                            ? { reasoningEffort: layerSlots[0]!.reasoningEffort }
+                            : {}),
                         }
                       : null;
                   return (
@@ -353,6 +363,14 @@ export function TemplateModelConfigModal({
                             onChangeRoster(setLayerModel(roster, layer, assignment))
                           }
                           style={{ minWidth: 180 }}
+                        />
+                        <ThinkingConfigControl
+                          value={getLayerThinking(roster, layer)}
+                          editable={editable}
+                          compact
+                          onChange={(thinking) =>
+                            onChangeRoster(setLayerThinking(roster, layer, thinking))
+                          }
                         />
                       </div>
                       {assignReasons[layer] && (
@@ -406,7 +424,16 @@ export function TemplateModelConfigModal({
                             <ModelSelect
                               value={
                                 slot.modelId
-                                  ? { providerId: slot.providerId ?? '', modelId: slot.modelId }
+                                  ? {
+                                      providerId: slot.providerId ?? '',
+                                      modelId: slot.modelId,
+                                      ...(typeof slot.thinkingEnabled === 'boolean'
+                                        ? { thinkingEnabled: slot.thinkingEnabled }
+                                        : {}),
+                                      ...(slot.reasoningEffort
+                                        ? { reasoningEffort: slot.reasoningEffort }
+                                        : {}),
+                                    }
                                   : null
                               }
                               options={poolCandidates}
@@ -416,6 +443,23 @@ export function TemplateModelConfigModal({
                                 onChangeRoster(setSlotModel(roster, slot.id, assignment))
                               }
                               style={{ minWidth: 200 }}
+                            />
+                            <ThinkingConfigControl
+                              value={
+                                typeof slot.thinkingEnabled === 'boolean'
+                                  ? {
+                                      thinkingEnabled: slot.thinkingEnabled,
+                                      ...(slot.reasoningEffort
+                                        ? { reasoningEffort: slot.reasoningEffort }
+                                        : {}),
+                                    }
+                                  : null
+                              }
+                              editable={editable}
+                              compact
+                              onChange={(thinking) =>
+                                onChangeRoster(setSlotThinking(roster, slot.id, thinking))
+                              }
                             />
                           </div>
                         ))}

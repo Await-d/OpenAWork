@@ -3,10 +3,18 @@ import type {
   AgentTeamsFooterStat,
   AgentTeamsMetricCard,
   AgentTeamsOfficeAgent,
+  AgentTeamsSidebarTeam,
 } from '../../data/team-runtime-types.js';
+import { formatSidebarTeamStatus } from '../../data/team-runtime-status.js';
 
 export interface OfficeCanvasDisplayData {
-  topSummary: { title: string; memberCount: string; onlineCount: string; status: string };
+  topSummary: {
+    title: string;
+    memberCount: string;
+    onlineCount: string;
+    status: string;
+    runtimeStatus?: AgentTeamsSidebarTeam['status'] | null;
+  };
   metricCards: AgentTeamsMetricCard[];
   footerStats: AgentTeamsFooterStat[];
   officeAgents: Pick<AgentTeamsOfficeAgent, 'id' | 'label' | 'status'>[];
@@ -37,6 +45,9 @@ interface OfficeCanvasPalette {
   border: string;
   surface: string;
 }
+
+type OfficeRuntimePalette = 'accent' | 'aux' | 'warning' | 'success' | 'danger';
+export type OfficeStatusTone = 'accent' | 'warning' | 'success' | 'danger' | 'muted';
 
 const TOKEN_FALLBACKS = {
   accent: '#6471f0',
@@ -79,6 +90,125 @@ const ACTIVITY_LABELS: Record<string, string> = {
 };
 
 export const OFFICE_PROJECTION_PAGE_COUNT = 4;
+
+export function resolveOfficeRuntimeStatus(input: {
+  runtimeStatus?: AgentTeamsSidebarTeam['status'] | null;
+  statusLabel?: string | null;
+}): AgentTeamsSidebarTeam['status'] {
+  if (input.runtimeStatus) {
+    return input.runtimeStatus;
+  }
+
+  const normalized = input.statusLabel?.trim() ?? '';
+  if (normalized.includes('暂停')) {
+    return 'paused';
+  }
+  if (normalized.includes('失败')) {
+    return 'failed';
+  }
+  if (normalized.includes('完成')) {
+    return 'completed';
+  }
+  if (normalized.includes('空闲')) {
+    return 'idle';
+  }
+  return 'running';
+}
+
+export function formatOfficeRuntimeStatus(status: AgentTeamsSidebarTeam['status']): string {
+  return formatSidebarTeamStatus(status);
+}
+
+export function formatOfficeRuntimeMonitorStatus(status: AgentTeamsSidebarTeam['status']): string {
+  if (status === 'paused') {
+    return 'PAUSED';
+  }
+  if (status === 'failed') {
+    return 'FAILED';
+  }
+  if (status === 'completed') {
+    return 'DONE';
+  }
+  if (status === 'idle') {
+    return 'IDLE';
+  }
+  return 'RUNNING';
+}
+
+export function resolveOfficeRuntimePalette(
+  status: AgentTeamsSidebarTeam['status'],
+): OfficeRuntimePalette {
+  if (status === 'paused') {
+    return 'warning';
+  }
+  if (status === 'failed') {
+    return 'danger';
+  }
+  if (status === 'completed') {
+    return 'success';
+  }
+  if (status === 'idle') {
+    return 'aux';
+  }
+  return 'accent';
+}
+
+export function resolveOfficeRuntimeFooter(status: AgentTeamsSidebarTeam['status']): string {
+  if (status === 'paused') {
+    return '当前会话暂停中。';
+  }
+  if (status === 'failed') {
+    return '当前会话出现失败，请检查运行链路。';
+  }
+  if (status === 'completed') {
+    return '当前会话已完成本轮运行。';
+  }
+  if (status === 'idle') {
+    return '当前会话待命中，等待新的团队运行事件。';
+  }
+  return '团队事件总线运行中。';
+}
+
+export function resolveOfficeAgentStatusLabel(input: {
+  runtimeStatus: AgentTeamsSidebarTeam['status'];
+  agentStatus?: AgentTeamsOfficeAgent['status'] | null;
+}): string {
+  if (input.runtimeStatus !== 'running') {
+    return formatOfficeRuntimeStatus(input.runtimeStatus);
+  }
+  if (input.agentStatus === 'resting') {
+    return '休息中';
+  }
+  if (input.agentStatus === 'discussing') {
+    return '讨论中';
+  }
+  return '运行中';
+}
+
+export function resolveOfficeAgentStatusTone(input: {
+  runtimeStatus: AgentTeamsSidebarTeam['status'];
+  agentStatus?: AgentTeamsOfficeAgent['status'] | null;
+}): OfficeStatusTone {
+  if (input.runtimeStatus === 'paused') {
+    return 'warning';
+  }
+  if (input.runtimeStatus === 'failed') {
+    return 'danger';
+  }
+  if (input.runtimeStatus === 'completed') {
+    return 'success';
+  }
+  if (input.runtimeStatus === 'idle') {
+    return 'muted';
+  }
+  if (input.agentStatus === 'resting') {
+    return 'warning';
+  }
+  if (input.agentStatus === 'discussing') {
+    return 'accent';
+  }
+  return 'success';
+}
 
 export function makeCanvasTexture(
   w: number,
@@ -171,6 +301,12 @@ function getTopActivities(
 }
 
 export function buildOfficeProjectionPages(data: OfficeCanvasDisplayData): OfficeProjectionPage[] {
+  const runtimeStatus = resolveOfficeRuntimeStatus({
+    runtimeStatus: data.topSummary.runtimeStatus,
+    statusLabel: data.topSummary.status,
+  });
+  const runtimeStatusLabel = formatOfficeRuntimeStatus(runtimeStatus);
+  const runtimePalette = resolveOfficeRuntimePalette(runtimeStatus);
   const statusCounts = getStatusCounts(data.officeAgents);
   const topActivities = getTopActivities(data.activityStats);
   const taskMetric = data.metricCards.find((card) => card.label === '任务');
@@ -180,9 +316,9 @@ export function buildOfficeProjectionPages(data: OfficeCanvasDisplayData): Offic
     {
       title: '运行总览',
       subtitle: clampLabel(data.topSummary.title, 20),
-      accent: data.topSummary.status === '已暂停' ? 'warning' : 'accent',
+      accent: runtimePalette,
       lines: [
-        `状态：${data.topSummary.status}`,
+        `状态：${runtimeStatusLabel}`,
         `成员：${data.topSummary.memberCount} / ${data.topSummary.onlineCount}`,
         ...data.footerStats.slice(0, 3).map((stat) => `${stat.label}：${stat.value}`),
       ],
@@ -263,9 +399,7 @@ export function buildOfficeProjectionPages(data: OfficeCanvasDisplayData): Offic
                     : 'warning') satisfies keyof OfficeCanvasPalette,
             }))
           : [{ label: '事件', value: 0, color: 'fgMuted' }],
-      footer: compactLine(
-        data.topSummary.status === '已暂停' ? '当前会话暂停中。' : '团队事件总线运行中。',
-      ),
+      footer: compactLine(resolveOfficeRuntimeFooter(runtimeStatus)),
     },
   ];
 }
@@ -273,6 +407,10 @@ export function buildOfficeProjectionPages(data: OfficeCanvasDisplayData): Offic
 export function createMonitorTexture(data: OfficeCanvasDisplayData): THREE.CanvasTexture {
   const { topSummary, metricCards, footerStats, officeAgents, activityStats, elapsed } = data;
   const palette = resolveOfficeCanvasPalette();
+  const runtimeStatus = resolveOfficeRuntimeStatus({
+    runtimeStatus: topSummary.runtimeStatus,
+    statusLabel: topSummary.status,
+  });
   const w = 384;
   const h = 192;
 
@@ -283,8 +421,8 @@ export function createMonitorTexture(data: OfficeCanvasDisplayData): THREE.Canva
     ctx.fillStyle = palette.aux;
     ctx.fillRect(0, 0, w, 3);
 
-    const statusColor = topSummary.status === '已暂停' ? palette.warning : palette.success;
-    const statusLabel = topSummary.status === '已暂停' ? 'PAUSED' : 'ACTIVE';
+    const statusColor = palette[resolveOfficeRuntimePalette(runtimeStatus)];
+    const statusLabel = formatOfficeRuntimeMonitorStatus(runtimeStatus);
 
     ctx.font = 'bold 16px ui-monospace, Menlo, monospace';
     ctx.textBaseline = 'top';

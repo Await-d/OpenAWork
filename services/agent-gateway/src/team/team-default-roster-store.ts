@@ -9,7 +9,12 @@
  */
 
 import { DEFAULT_FIXED_TEAM_MEMBER_SLOTS, TEAM_RUNTIME_LAYER_ORDER } from '@openAwork/shared';
-import type { FixedTeamMemberSlot, TeamMemberSpecialty, TeamRuntimeLayer } from '@openAwork/shared';
+import type {
+  FixedTeamMemberSlot,
+  TeamMemberSpecialty,
+  TeamReasoningEffort,
+  TeamRuntimeLayer,
+} from '@openAwork/shared';
 import { sqliteGet, sqliteRun } from '../infra/db.js';
 
 interface TeamWorkspaceRosterRow {
@@ -28,6 +33,14 @@ const VALID_LAYERS = new Set<TeamRuntimeLayer>(TEAM_RUNTIME_LAYER_ORDER);
 const VALID_SPECIALTIES = new Set<TeamMemberSpecialty>([
   ...DEFAULT_FIXED_TEAM_MEMBER_SLOTS.map((slot) => slot.specialty),
   'custom',
+]);
+
+const VALID_REASONING_EFFORTS = new Set<TeamReasoningEffort>([
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
 ]);
 
 /**
@@ -57,6 +70,10 @@ function isTeamRuntimeLayer(value: unknown): value is TeamRuntimeLayer {
 
 function isTeamMemberSpecialty(value: unknown): value is TeamMemberSpecialty {
   return typeof value === 'string' && VALID_SPECIALTIES.has(value as TeamMemberSpecialty);
+}
+
+function isTeamReasoningEffort(value: unknown): value is TeamReasoningEffort {
+  return typeof value === 'string' && VALID_REASONING_EFFORTS.has(value as TeamReasoningEffort);
 }
 
 function normalizeToolsets(value: unknown): string[] | null {
@@ -107,6 +124,8 @@ function normalizeMemberSlot(entry: unknown): FixedTeamMemberSlot | null {
   const modelId = rec['modelId'];
   const providerId = rec['providerId'];
   const variant = rec['variant'];
+  const thinkingEnabled = rec['thinkingEnabled'];
+  const reasoningEffort = rec['reasoningEffort'];
   // 自定义角色字段：custom 标记 + systemPrompt 人物设定提示词。
   const custom = rec['custom'] === true;
   const systemPrompt = rec['systemPrompt'];
@@ -135,6 +154,10 @@ function normalizeMemberSlot(entry: unknown): FixedTeamMemberSlot | null {
     ...(isBoundedString(modelId, 200) ? { modelId: modelId.trim() } : {}),
     ...(isBoundedString(providerId, 200) ? { providerId: providerId.trim() } : {}),
     ...(isBoundedString(variant, 80) ? { variant: variant.trim() } : {}),
+    ...(typeof thinkingEnabled === 'boolean' ? { thinkingEnabled } : {}),
+    ...(isTeamReasoningEffort(reasoningEffort)
+      ? { reasoningEffort }
+      : {}),
     ...(custom ? { custom: true } : {}),
     ...(isBoundedString(systemPrompt, 8000) ? { systemPrompt: systemPrompt.trim() } : {}),
     ...(skillIds.length > 0 ? { skillIds } : {}),

@@ -100,4 +100,31 @@ describe('checkAllChildrenCompleted per-child payload resilience', () => {
     expect(poison?.payload).toBeNull();
     expect(good?.payload).toEqual({ goal: 'ok' });
   });
+
+  it('大批量 dispatchedHandoffIds 也能完整读取子 handoff', () => {
+    const childIds = Array.from({ length: 905 }, (_, index) => `h-child-bulk-${index}`);
+    dbModule.sqliteRun(
+      `INSERT INTO handoff_records
+         (id, user_id, from_session_id, from_role_layer, to_role_layer, to_session_id, payload_json, state, result_json)
+       VALUES (?, ?, ?, 'pm1', 'pm2', ?, '{}', 'completed', ?)`,
+      [
+        PM2_HANDOFF_ID,
+        USER_ID,
+        FROM_SESSION_ID,
+        FROM_SESSION_ID,
+        JSON.stringify({ dispatchedHandoffIds: childIds }),
+      ],
+    );
+
+    for (const childId of childIds) {
+      seedChildHandoff(childId, 'completed', JSON.stringify({ goal: childId }));
+    }
+
+    const result = reviewAggregator.checkAllChildrenCompleted(PM2_HANDOFF_ID);
+
+    expect(result.allDone).toBe(true);
+    expect(result.children).toHaveLength(childIds.length);
+    expect(result.children[0]?.id).toBe(childIds[0]);
+    expect(result.children.at(-1)?.id).toBe(childIds.at(-1));
+  });
 });

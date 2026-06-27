@@ -427,6 +427,33 @@ describe('message-store-v2 single write path (Phase 2.1)', () => {
     expect(removedEvents).toHaveLength(2);
   });
 
+  it('truncateMessagesAfter chunks bulk deletes under the SQLite bind limit', () => {
+    insertMessage({
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      info: makeUserMessage('msg-0000', 0),
+    });
+    for (let index = 1; index <= 1200; index += 1) {
+      const id = `msg-${index.toString().padStart(4, '0')}`;
+      insertMessage({
+        sessionId: SESSION_ID,
+        userId: USER_ID,
+        info: makeUserMessage(id, index),
+      });
+    }
+
+    const removed = truncateMessagesAfter({
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      messageId: 'msg-0001' as MessageID,
+    });
+
+    expect(removed).toHaveLength(1200);
+    const deleteCalls = eventLog.filter((event) => event.type === 'message.removed');
+    expect(deleteCalls).toHaveLength(1200);
+    expect(messageRows).toHaveLength(1);
+  });
+
   it('event_log entries carry monotonic seq per session aggregate', () => {
     insertMessage({
       sessionId: SESSION_ID,

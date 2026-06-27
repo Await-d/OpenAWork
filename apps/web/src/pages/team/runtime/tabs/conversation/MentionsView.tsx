@@ -142,6 +142,8 @@ function summarize(event: HandoffEvent): string {
 export interface MentionsViewProps {
   onOpenBlockingTarget?: (event: HandoffEvent) => void;
   onOpenClarifications?: () => void;
+  /** 当前选中会话 ID，用于按 session scope 过滤通知事件。 */
+  selectedTeamId?: string | null;
 }
 
 function getBlockingActionLabel(event: HandoffEvent): string | null {
@@ -163,7 +165,11 @@ function describeBlockingActionLabel(targetTab: TeamRuntimeHandoffContextTab): s
   return '前往健康度';
 }
 
-export function MentionsView({ onOpenBlockingTarget, onOpenClarifications }: MentionsViewProps) {
+export function MentionsView({
+  onOpenBlockingTarget,
+  onOpenClarifications,
+  selectedTeamId,
+}: MentionsViewProps) {
   const events = useTeamNotificationStore((s) => s.events);
   const markAllRead = useTeamNotificationStore((s) => s.markAllRead);
   const markEventRead = useTeamNotificationStore((s) => s.markEventRead);
@@ -174,14 +180,34 @@ export function MentionsView({ onOpenBlockingTarget, onOpenClarifications }: Men
 
   const [filter, setFilter] = useState<MentionFilter>('all');
 
+  // 按选中会话过滤事件——只显示属于当前会话 scope 的通知
+  const scopedEvents = useMemo(() => {
+    if (!selectedTeamId) {
+      return events;
+    }
+    return events.filter((event) => {
+      const eventSessionId = event.sessionId;
+      if (!eventSessionId) {
+        // 没有关联 sessionId 的事件保留（如全局通知）
+        return true;
+      }
+      // 精确匹配或属于会话子树（通过 fromSessionId 判断）
+      return (
+        eventSessionId === selectedTeamId ||
+        (typeof event.payload['fromSessionId'] === 'string' &&
+          event.payload['fromSessionId'] === selectedTeamId)
+      );
+    });
+  }, [events, selectedTeamId]);
+
   const enriched = useMemo(
     () =>
-      events.map((event) => ({
+      scopedEvents.map((event) => ({
         event,
         id: getTeamNotificationEventKey(event),
         blocking: isBlocking(event),
       })),
-    [events],
+    [scopedEvents],
   );
 
   const visible = useMemo(() => {
@@ -205,7 +231,7 @@ export function MentionsView({ onOpenBlockingTarget, onOpenClarifications }: Men
     [visible],
   );
 
-  if (events.length === 0) {
+  if (scopedEvents.length === 0) {
     return (
       <div style={CONTAINER_STYLE}>
         <div style={EMPTY_STYLE}>

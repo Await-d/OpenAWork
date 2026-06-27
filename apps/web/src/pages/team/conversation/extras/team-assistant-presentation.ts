@@ -12,6 +12,41 @@ import { extractFilePath } from '../../../../components/chat/tool-call/shared/in
 import { buildGenericInputSummary } from '../../../../components/chat/tool-call/shared/input-summary.js';
 import { tryFormatJson } from '../../../../utils/format-json.js';
 
+const INLINE_REASONING_TAG_NAMES = [
+  'analysis',
+  'thinking',
+  'think',
+  'reasoning',
+  'reasoning_process',
+  'thought',
+  'thoughts',
+  'thought_process',
+  'reflection',
+  'scratchpad',
+  'scratch_pad',
+  'scratch',
+  'inner_monologue',
+  'monologue',
+  'plan',
+  'planning',
+  'rationale',
+  'deliberation',
+] as const;
+
+const INLINE_REASONING_TAG_GROUP = `(?:${INLINE_REASONING_TAG_NAMES.map((name) =>
+  name.replace(/_/g, '[_-]'),
+).join('|')})`;
+
+const INLINE_REASONING_TAG_PROBE_RE = new RegExp(
+  `<\\s*\\/?\\s*${INLINE_REASONING_TAG_GROUP}\\b`,
+  'i',
+);
+
+const INLINE_REASONING_TAG_RE = new RegExp(
+  `<\\s*\\/?\\s*${INLINE_REASONING_TAG_GROUP}\\s*>`,
+  'gi',
+);
+
 const READ_LIKE_TOOLS = new Set([
   'read',
   'glob',
@@ -53,9 +88,10 @@ export function buildTeamAssistantPresentation(message: ChatMessage): TeamAssist
   const traceText = trace?.text?.trim();
   const plainTextSummary = isPlainTextSummary(message.content) ? message.content.trim() : null;
   const traceToolCalls = trace?.toolCalls ?? [];
-  const reasoningBlocks =
+  const reasoningBlocks = dedupeReasoningBlocks(
     trace?.reasoningBlocks?.map((item) => item.trim()).filter((item) => item.length > 0) ??
-    extractReasoningBlocksFromParts(message.parts);
+      extractReasoningBlocksFromParts(message.parts),
+  );
   const toolCalls =
     traceToolCalls.length > 0
       ? traceToolCalls
@@ -103,7 +139,35 @@ export function buildTeamAssistantPresentation(message: ChatMessage): TeamAssist
 }
 
 function normalizeSummaryText(value: string): string {
-  return value.trim();
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+  if (!INLINE_REASONING_TAG_PROBE_RE.test(trimmed)) {
+    return trimmed;
+  }
+
+  const blocks = trimmed
+    .replace(/\r\n?/g, '\n')
+    .replace(INLINE_REASONING_TAG_RE, '\n\n')
+    .replace(/[ \t]*\n[ \t]*/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter((block) => block.length > 0);
+
+  const dedupedBlocks: string[] = [];
+  let lastKey: string | null = null;
+  for (const block of blocks) {
+    const key = normalizeBlockForComparison(block);
+    if (!key || key === lastKey) {
+      continue;
+    }
+    dedupedBlocks.push(block);
+    lastKey = key;
+  }
+
+  return dedupedBlocks.join('\n\n').trim();
 }
 
 function isPlainTextSummary(value: string): boolean {
@@ -123,8 +187,33 @@ function extractReasoningBlocksFromParts(parts: ChatMessagePart[] | undefined): 
     .filter(
       (part): part is Extract<ChatMessagePart, { type: 'reasoning' }> => part.type === 'reasoning',
     )
-    .map((part) => part.text.trim())
+    .map((part) => normalizeSummaryText(part.text))
     .filter((item) => item.length > 0);
+}
+
+function dedupeReasoningBlocks(blocks: string[]): string[] {
+  const deduped: string[] = [];
+  const seen = new Set<string>();
+
+  for (const block of blocks) {
+    const normalized = normalizeSummaryText(block);
+    const key = normalizeBlockForComparison(normalized);
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    deduped.push(normalized);
+  }
+
+  return deduped;
+}
+
+function normalizeBlockForComparison(block: string): string {
+  return block
+    .split('\n')
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter((line) => line.length > 0)
+    .join('\n');
 }
 
 function extractToolCallsFromParts(parts: ChatMessagePart[] | undefined): AssistantTraceToolCall[] {

@@ -1,9 +1,13 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { TeamAssistantReplyCard } from './TeamAssistantReplyCard.js';
 import { TeamAssistantProcessOutline } from './TeamAssistantProcessOutline.js';
 import type { ChatMessage } from '../../../../components/conversation-runtime/messages/support.js';
+
+vi.mock('../../../../components/chat/markdown/markdown-message-content.js', () => ({
+  default: ({ content }: { content: string }) => <div data-testid="md">{content}</div>,
+}));
 
 afterEach(() => cleanup());
 
@@ -59,5 +63,29 @@ describe('TeamAssistantReplyCard', () => {
 
     expect(screen.getByText('结论')).toBeTruthy();
     expect(screen.queryByText('处理过程（已折叠）')).toBeNull();
+  });
+
+  it('结论和下一步都会复用统一富文本渲染规则', () => {
+    const message: ChatMessage = {
+      id: 'team-assistant-3',
+      role: 'assistant',
+      content: [
+        '## 当前结论',
+        '',
+        '- 已完成 markdown 渲染收口',
+        '',
+        '下一步：{"summary":"继续补 run events 预览","count":1}',
+      ].join('\n'),
+    };
+
+    const { container } = render(<TeamAssistantReplyCard message={message} />);
+
+    const markdownBlocks = screen.getAllByTestId('md');
+    expect(markdownBlocks[0]?.textContent).toContain('## 当前结论');
+    expect(markdownBlocks[0]?.textContent).toContain('- 已完成 markdown 渲染收口');
+
+    const pre = container.querySelector('pre');
+    expect(pre).not.toBeNull();
+    expect(pre?.textContent).toContain('"summary": "继续补 run events 预览"');
   });
 });

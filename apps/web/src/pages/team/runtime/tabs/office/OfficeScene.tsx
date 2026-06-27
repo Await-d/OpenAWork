@@ -2,8 +2,30 @@ import { useState, useRef, useEffect } from 'react';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
 import { PANEL_STYLE } from '../../shared/team-runtime-shared.js';
 import { XIcon } from '../../shared/TeamIcons.js';
+import {
+  resolveOfficeAgentStatusLabel,
+  resolveOfficeAgentStatusTone,
+  resolveOfficeRuntimeStatus,
+  type OfficeStatusTone,
+} from './office-canvas-textures.js';
 
 /* ── Old 2D canvas components removed ── */
+
+function resolveOfficeToneColor(tone: OfficeStatusTone): string {
+  if (tone === 'warning') {
+    return 'var(--warning)';
+  }
+  if (tone === 'danger') {
+    return 'var(--danger)';
+  }
+  if (tone === 'accent') {
+    return 'var(--accent)';
+  }
+  if (tone === 'muted') {
+    return 'var(--fg-muted)';
+  }
+  return 'var(--success)';
+}
 
 export interface OfficeSceneState {
   zoom: number;
@@ -94,21 +116,17 @@ export function OfficeSidebar({
   const selectedAgent = officeAgents.find((a) => a.id === selectedAgentId);
   const restingCount = officeAgents.filter((agent) => agent.status === 'resting').length;
   const onlineCount = Math.max(0, officeAgents.length - restingCount);
-  const isSessionPaused = topSummary.status === '已暂停';
   const selectedAgentIsResting = selectedAgent?.status === 'resting';
-  const selectedAgentStatusLabel = isSessionPaused
-    ? '团队已暂停'
-    : selectedAgentIsResting
-      ? '休息中'
-      : selectedAgent?.status === 'discussing'
-        ? '讨论中'
-        : '运行中';
-  const selectedAgentDotColor =
-    isSessionPaused || selectedAgentIsResting
-      ? 'var(--warning)'
-      : selectedAgent?.status === 'discussing'
-        ? 'var(--accent)'
-        : 'var(--success)';
+  const runtimeStatus = resolveOfficeRuntimeStatus({ statusLabel: topSummary.status });
+  const selectedAgentStatusTone = resolveOfficeAgentStatusTone({
+    runtimeStatus,
+    agentStatus: selectedAgent?.status,
+  });
+  const selectedAgentStatusLabel = resolveOfficeAgentStatusLabel({
+    runtimeStatus,
+    agentStatus: selectedAgent?.status,
+  });
+  const selectedAgentDotColor = resolveOfficeToneColor(selectedAgentStatusTone);
 
   return (
     <div style={{ display: 'grid', gap: 10 }}>
@@ -190,7 +208,10 @@ export function OfficeSidebar({
                   height: 8,
                   borderRadius: '50%',
                   background: selectedAgentDotColor,
-                  boxShadow: selectedAgentIsResting ? 'none' : `0 0 4px ${selectedAgentDotColor}`,
+                  boxShadow:
+                    selectedAgentIsResting || selectedAgentStatusTone === 'muted'
+                      ? 'none'
+                      : `0 0 4px ${selectedAgentDotColor}`,
                 }}
               />
               <span style={{ fontSize: 11, color: 'var(--fg-default)', fontWeight: 600 }}>

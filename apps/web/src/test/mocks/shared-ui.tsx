@@ -205,3 +205,161 @@ export function resolveProviderVisual(input: {
 export function inferProviderLabelFromModelId(_modelId: string): string | undefined {
   return undefined;
 }
+
+export type SupportedReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+
+const OPENAI_REASONING_MODEL_RE = /(?:^|\/)(?:gpt-5(?:[.-]|$)|o[134](?:[.-]|$))/;
+
+function isOpenAIReasoningModel(modelId: string): boolean {
+  return OPENAI_REASONING_MODEL_RE.test(modelId.toLowerCase());
+}
+
+function isAnthropicThinkingModel(modelId: string): boolean {
+  const id = modelId.toLowerCase();
+  return (
+    id.includes('claude-opus-4') ||
+    id.includes('claude-sonnet-4') ||
+    id.includes('claude-3-7-sonnet')
+  );
+}
+
+function modelIdCandidates(modelId: string): string[] {
+  const normalized = modelId.toLowerCase();
+  const slash = normalized.indexOf('/');
+  if (slash <= 0 || slash === normalized.length - 1) {
+    return [normalized];
+  }
+  return [normalized, normalized.slice(slash + 1)];
+}
+
+function leafModelId(modelId: string): string {
+  const [, actualModelId] = modelIdCandidates(modelId);
+  return actualModelId ?? modelId.toLowerCase();
+}
+
+function inferVendorFromModelId(modelId: string): string | undefined {
+  const candidates = modelIdCandidates(modelId);
+  if (candidates.some((id) => id.startsWith('claude'))) return 'anthropic';
+  if (candidates.some((id) => id.startsWith('deepseek'))) return 'deepseek';
+  if (candidates.some((id) => id.startsWith('gemini'))) return 'gemini';
+  if (candidates.some((id) => id.startsWith('qwen') || id.startsWith('qwq'))) return 'qwen';
+  if (candidates.some((id) => id.startsWith('kimi') || id.startsWith('moonshot'))) {
+    return 'moonshot';
+  }
+  if (candidates.some((id) => id.startsWith('mimo'))) return 'mimo';
+  if (candidates.some((id) => isOpenAIReasoningModel(id))) return 'openai';
+  return undefined;
+}
+
+function resolveEffectiveProviderType(providerType: string, modelId: string): string {
+  if (providerType === 'openai' || providerType === 'custom') {
+    return inferVendorFromModelId(modelId) ?? providerType;
+  }
+  return providerType;
+}
+
+export function inferSupportsThinking(
+  providerType: string | undefined,
+  modelId: string | undefined,
+  declaredSupportsThinking: boolean,
+): boolean {
+  if (declaredSupportsThinking) return true;
+  if (!providerType || !modelId) return false;
+  const effectiveType = resolveEffectiveProviderType(providerType, modelId);
+  if (providerType === 'openai' || providerType === 'custom') {
+    const inferredVendor = inferVendorFromModelId(modelId);
+    if (!inferredVendor) {
+      return false;
+    }
+    if (inferredVendor === 'openai') {
+      return isOpenAIReasoningModel(modelId);
+    }
+    if (inferredVendor === 'anthropic') {
+      return isAnthropicThinkingModel(modelId);
+    }
+    return true;
+  }
+  if (effectiveType === 'openrouter') {
+    const id = modelId.toLowerCase();
+    return id.includes('gpt') || id.includes('claude') || id.includes('gemini-3');
+  }
+  return false;
+}
+
+export function canConfigureThinkingForModel(
+  providerType: string | undefined,
+  modelId: string | undefined,
+): boolean {
+  if (!providerType || !modelId) return false;
+  const id = modelId.toLowerCase();
+  const effectiveType = resolveEffectiveProviderType(providerType, modelId);
+  const actualModelId = leafModelId(modelId);
+
+  if (effectiveType === 'openai') {
+    return inferSupportsThinking(providerType, modelId, false) && !/^gpt-5(?:\.\d+)?-pro/.test(actualModelId);
+  }
+  if (effectiveType === 'deepseek') {
+    return !actualModelId.includes('reasoner');
+  }
+  if (effectiveType === 'moonshot') {
+    return (
+      actualModelId.includes('kimi-k2.5') ||
+      actualModelId.includes('kimi-k2-thinking') ||
+      actualModelId.includes('kimi-k2p5') ||
+      actualModelId.includes('kimi-k2-5')
+    );
+  }
+  if (
+    effectiveType === 'mimo' ||
+    effectiveType === 'anthropic' ||
+    effectiveType === 'claude' ||
+    effectiveType === 'gemini' ||
+    effectiveType === 'qwen'
+  ) {
+    return true;
+  }
+  if (effectiveType === 'openrouter') {
+    return id.includes('gpt') || id.includes('claude') || id.includes('gemini-3');
+  }
+  return false;
+}
+
+export function getSupportedReasoningEffortsForModel(
+  providerType: string | undefined,
+  modelId: string | undefined,
+): readonly SupportedReasoningEffort[] {
+  if (!providerType || !modelId) return ['low', 'medium', 'high'];
+  const id = leafModelId(modelId);
+  const effectiveType = resolveEffectiveProviderType(providerType, modelId);
+
+  if (effectiveType === 'openai') {
+    if (/^gpt-5(?:\.\d+)?-pro/.test(id)) return [];
+    if (id.includes('codex-max')) return ['medium', 'high', 'xhigh'];
+    const minorMatch = /^gpt-5\.(\d+)(?=$|[^\d])/.exec(id);
+    const minor = minorMatch?.[1] ? Number.parseInt(minorMatch[1], 10) : undefined;
+    if (Number.isFinite(minor) && (minor ?? 0) >= 2) {
+      return ['low', 'medium', 'high', 'xhigh'];
+    }
+    if (id.startsWith('gpt-5.1')) return ['low', 'medium', 'high'];
+    if (id === 'gpt-5' || id.startsWith('gpt-5-')) return ['minimal', 'low', 'medium', 'high'];
+    return ['low', 'medium', 'high'];
+  }
+  if (
+    effectiveType === 'anthropic' ||
+    effectiveType === 'claude' ||
+    effectiveType === 'gemini' ||
+    effectiveType === 'openrouter' ||
+    effectiveType === 'deepseek' ||
+    effectiveType === 'qwen'
+  ) {
+    return ['minimal', 'low', 'medium', 'high', 'xhigh'];
+  }
+  if (effectiveType === 'moonshot' || effectiveType === 'mimo') {
+    return ['medium'];
+  }
+  return ['low', 'medium', 'high'];
+}
+
+export function describeReasoningEffort(level: SupportedReasoningEffort): string {
+  return level;
+}

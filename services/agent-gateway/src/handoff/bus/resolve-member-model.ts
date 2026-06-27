@@ -20,9 +20,13 @@ import { sqliteGet } from '../../infra/db.js';
 import type { HandoffRoleLayer } from '../store/handoff-store.js';
 
 export interface ResolvedMemberModel {
-  modelId: string;
+  modelId?: string;
   providerId?: string;
   variant?: string;
+  /** 该成员是否启用思考模式（来自模板 slot 配置）。 */
+  thinkingEnabled?: boolean;
+  /** 思考强度等级（来自模板 slot 配置，仅 thinkingEnabled=true 时有意义）。 */
+  reasoningEffort?: string;
 }
 
 interface SessionRow {
@@ -36,6 +40,8 @@ interface RosterSlotLike {
   modelId?: unknown;
   providerId?: unknown;
   variant?: unknown;
+  thinkingEnabled?: unknown;
+  reasoningEffort?: unknown;
   specialty?: unknown;
   displayName?: unknown;
   systemPrompt?: unknown;
@@ -84,18 +90,43 @@ function readMemberSlots(metadata: Record<string, unknown> | null): RosterSlotLi
   return Array.isArray(memberSlots) ? (memberSlots as RosterSlotLike[]) : [];
 }
 
-function toResolvedModel(slot: RosterSlotLike | undefined): ResolvedMemberModel | undefined {
-  if (!slot) return undefined;
+function hasMemberModelOverrides(slot: RosterSlotLike | undefined): boolean {
+  if (!slot) return false;
   const modelId = typeof slot.modelId === 'string' ? slot.modelId.trim() : '';
-  if (modelId.length === 0) return undefined;
+  const providerId = typeof slot.providerId === 'string' ? slot.providerId.trim() : '';
+  const variant = typeof slot.variant === 'string' ? slot.variant.trim() : '';
+  const thinkingEnabled =
+    typeof slot.thinkingEnabled === 'boolean' ? slot.thinkingEnabled : undefined;
+  const reasoningEffort =
+    typeof slot.reasoningEffort === 'string' ? slot.reasoningEffort.trim() : '';
+  return (
+    modelId.length > 0 ||
+    providerId.length > 0 ||
+    variant.length > 0 ||
+    thinkingEnabled !== undefined ||
+    reasoningEffort.length > 0
+  );
+}
+
+function toResolvedModel(slot: RosterSlotLike | undefined): ResolvedMemberModel | undefined {
+  if (!hasMemberModelOverrides(slot) || !slot) return undefined;
+  const modelId = typeof slot.modelId === 'string' ? slot.modelId.trim() : '';
+  const thinkingEnabled =
+    typeof slot.thinkingEnabled === 'boolean' ? slot.thinkingEnabled : undefined;
+  const reasoningEffort =
+    typeof slot.reasoningEffort === 'string' && slot.reasoningEffort.trim().length > 0
+      ? slot.reasoningEffort.trim()
+      : undefined;
   return {
-    modelId,
+    ...(modelId.length > 0 ? { modelId } : {}),
     ...(typeof slot.providerId === 'string' && slot.providerId.trim().length > 0
       ? { providerId: slot.providerId.trim() }
       : {}),
     ...(typeof slot.variant === 'string' && slot.variant.trim().length > 0
       ? { variant: slot.variant.trim() }
       : {}),
+    ...(thinkingEnabled !== undefined ? { thinkingEnabled } : {}),
+    ...(reasoningEffort ? { reasoningEffort } : {}),
   };
 }
 
@@ -108,10 +139,18 @@ function readRootSessionModel(
     typeof metadata['providerId'] === 'string' ? metadata['providerId'].trim() : '';
   if (modelId.length === 0 || providerId.length === 0) return undefined;
   const variant = typeof metadata['variant'] === 'string' ? metadata['variant'].trim() : '';
+  const thinkingEnabled =
+    typeof metadata['thinkingEnabled'] === 'boolean' ? metadata['thinkingEnabled'] : undefined;
+  const reasoningEffort =
+    typeof metadata['reasoningEffort'] === 'string' && metadata['reasoningEffort'].trim().length > 0
+      ? metadata['reasoningEffort'].trim()
+      : undefined;
   return {
     modelId,
     providerId,
     ...(variant.length > 0 ? { variant } : {}),
+    ...(thinkingEnabled !== undefined ? { thinkingEnabled } : {}),
+    ...(reasoningEffort ? { reasoningEffort } : {}),
   };
 }
 
@@ -144,9 +183,7 @@ export function resolveMemberModelForHandoff(input: {
   }
 
   // 兜底：按 layer 匹配该层第一个带模型绑定的槽位。
-  const byLayer = slots.find(
-    (slot) => slot.layer === input.toRoleLayer && typeof slot.modelId === 'string',
-  );
+  const byLayer = slots.find((slot) => slot.layer === input.toRoleLayer && hasMemberModelOverrides(slot));
   return toResolvedModel(byLayer) ?? readRootSessionModel(metadata);
 }
 
@@ -200,7 +237,10 @@ export function mergeMemberModelIntoMetadata(
       metadata = {};
     }
   }
-  if (typeof metadata['modelId'] !== 'string' || metadata['modelId'].length === 0) {
+  if (
+    model.modelId &&
+    (typeof metadata['modelId'] !== 'string' || metadata['modelId'].length === 0)
+  ) {
     metadata['modelId'] = model.modelId;
   }
   if (
@@ -214,6 +254,20 @@ export function mergeMemberModelIntoMetadata(
     (typeof metadata['variant'] !== 'string' || metadata['variant'].length === 0)
   ) {
     metadata['variant'] = model.variant;
+  }
+  // 思考模式：仅当模板 slot 显式配置了 thinkingEnabled 时写入，
+  // 不覆盖已存在的值（子 session 可能有自己独立的覆盖）。
+  if (
+    model.thinkingEnabled !== undefined &&
+    typeof metadata['thinkingEnabled'] !== 'boolean'
+  ) {
+    metadata['thinkingEnabled'] = model.thinkingEnabled;
+  }
+  if (
+    model.reasoningEffort &&
+    (typeof metadata['reasoningEffort'] !== 'string' || metadata['reasoningEffort'].length === 0)
+  ) {
+    metadata['reasoningEffort'] = model.reasoningEffort;
   }
   return JSON.stringify(metadata);
 }
@@ -451,8 +505,6 @@ export function resolveMemberModelForSessionLayer(input: {
   const metadata = loadRootSessionMetadata(input.sessionId);
   const slots = readMemberSlots(metadata);
   if (slots.length === 0) return undefined;
-  const byLayer = slots.find(
-    (slot) => slot.layer === input.layer && typeof slot.modelId === 'string',
-  );
+  const byLayer = slots.find((slot) => slot.layer === input.layer && hasMemberModelOverrides(slot));
   return toResolvedModel(byLayer) ?? readRootSessionModel(metadata);
 }

@@ -57,7 +57,28 @@ export const SUBSTATES_RECEPTION = {
 
 export type SubstateValue = string;
 
-const lastSubstateChangeAtBySession = new Map<string, number>();
+const WAITING_PROGRESS_SUBSTATES = new Set<string>([
+  SUBSTATES_C.CLARIFYING,
+  SUBSTATES_D.AWAITING_EG,
+  SUBSTATES_RECEPTION.AWAITING_DOWNSTREAM,
+]);
+
+const TERMINAL_PROGRESS_SUBSTATES = new Set<string>(['idle', 'completed', 'failed', 'cancelled']);
+
+const lastActiveProgressAtBySession = new Map<string, number>();
+
+function isActiveProgressSubstate(substate: SubstateValue | null): substate is SubstateValue {
+  if (substate === null) {
+    return false;
+  }
+  if (WAITING_PROGRESS_SUBSTATES.has(substate)) {
+    return false;
+  }
+  if (TERMINAL_PROGRESS_SUBSTATES.has(substate)) {
+    return false;
+  }
+  return true;
+}
 
 export interface SetSubstateInput {
   sessionId: string;
@@ -87,11 +108,15 @@ export function setSubstate(input: SetSubstateInput): void {
   });
 
   const now = Date.now();
-  const previousAt = lastSubstateChangeAtBySession.get(input.sessionId);
+  const previousAt = lastActiveProgressAtBySession.get(input.sessionId);
   if (typeof previousAt === 'number' && now > previousAt) {
     recordLatency('progress_interval', now - previousAt, input.userId);
   }
-  lastSubstateChangeAtBySession.set(input.sessionId, now);
+  if (isActiveProgressSubstate(input.substate)) {
+    lastActiveProgressAtBySession.set(input.sessionId, now);
+  } else {
+    lastActiveProgressAtBySession.delete(input.sessionId);
+  }
 
   sqliteRun(
     `UPDATE sessions
@@ -118,12 +143,12 @@ export function setSubstate(input: SetSubstateInput): void {
 
 /**
  * 清理某会话的 substate 进度计时状态。`lastSubstateChangeAtBySession` 按
- * sessionId 累积（每个出现过的会话留一条，用于 progress_interval 延迟采样），
+ * sessionId 累积（仅在活跃进度态留一条，用于 progress_interval 延迟采样），
  * 但从不主动清理——会话删除后其条目会永久滞留，属于按高基数维度（sessionId）
  * 单调增长的内存泄漏。会话删除时调用此函数回收对应条目。
  */
 export function clearSubstateTrackingForSession(sessionId: string): void {
-  lastSubstateChangeAtBySession.delete(sessionId);
+  lastActiveProgressAtBySession.delete(sessionId);
 }
 
 /**

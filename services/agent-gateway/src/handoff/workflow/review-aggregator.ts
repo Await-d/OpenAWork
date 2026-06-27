@@ -17,6 +17,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { sqliteAll, sqliteGet, sqliteRun } from '../../infra/db.js';
+import { buildSqlitePlaceholders, chunkSqliteBindValues } from '../../infra/sqlite-batch.js';
 import { type HandoffRecord } from '../store/handoff-store.js';
 import { publishTeamEvent } from '../bus/team-events-bus.js';
 import { deriveQualityReviewDisposition } from '../../team/team-failure-policy.js';
@@ -253,7 +254,7 @@ function persistReviewReport(input: {
 }): void {
   const reportArtifactId = randomUUID();
   sqliteRun(
-     `INSERT INTO artifacts (id, session_id, user_id, type, title, content, version, phase)
+    `INSERT INTO artifacts (id, session_id, user_id, type, title, content, version, phase)
      VALUES (?, ?, ?, 'markdown', 'Review Report', ?, 1, 'review')`,
     [reportArtifactId, input.pm2SessionId, input.userId, input.report.reportMarkdown],
   );
@@ -307,7 +308,9 @@ function buildReviewReadiness(childHandoffs: HandoffRecord[]): ReviewReadinessRe
           : h.state === 'cancelled'
             ? '（任务被取消）'
             : '';
-        issues.push(`${h.id} 子任务执行${h.state === 'cancelled' ? '被取消' : '失败'}${failReason}，无法参与质量评审`);
+        issues.push(
+          `${h.id} 子任务执行${h.state === 'cancelled' ? '被取消' : '失败'}${failReason}，无法参与质量评审`,
+        );
 
         return [
           `[${h.toRoleLayer}:${h.id}]`,
@@ -324,7 +327,10 @@ function buildReviewReadiness(childHandoffs: HandoffRecord[]): ReviewReadinessRe
       const resultFromRecord = h.resultJson;
       let resultJson = '';
       if (resultFromRecord !== null && resultFromRecord !== undefined) {
-        resultJson = typeof resultFromRecord === 'string' ? resultFromRecord : JSON.stringify(resultFromRecord);
+        resultJson =
+          typeof resultFromRecord === 'string'
+            ? resultFromRecord
+            : JSON.stringify(resultFromRecord);
       } else {
         const resultRow = sqliteGet<{ result_json: string | null }>(
           `SELECT result_json FROM handoff_records WHERE id = ?`,
@@ -422,30 +428,97 @@ export function checkAllChildrenCompleted(pm2HandoffId: string): {
     return { allDone: true, children: [] };
   }
 
-  const children = sqliteAll<{
-    id: string;
-    user_id: string;
-    from_session_id: string;
-    from_role_layer: string;
-    to_role_layer: string;
-    to_session_id: string | null;
-    payload_json: string;
-    result_json: string | null;
-    state: string;
-    claim_token: string | null;
-    claimed_at: string | null;
-    started_at: string | null;
-    completed_at: string | null;
-    failure_reason: string | null;
-    retry_count: number;
-    idempotency_key: string | null;
-    paused: number;
-    paused_at: string | null;
-    paused_by_user_id: string | null;
-    pause_reason: string | null;
-    created_at: string;
-    updated_at: string;
-  }>(`SELECT * FROM handoff_records WHERE id IN (${childIds.map(() => '?').join(',')})`, childIds);
+  const rowsById = new Map<
+    string,
+    {
+      id: string;
+      user_id: string;
+      from_session_id: string;
+      from_role_layer: string;
+      to_role_layer: string;
+      to_session_id: string | null;
+      payload_json: string;
+      result_json: string | null;
+      state: string;
+      claim_token: string | null;
+      claimed_at: string | null;
+      started_at: string | null;
+      completed_at: string | null;
+      failure_reason: string | null;
+      retry_count: number;
+      idempotency_key: string | null;
+      paused: number;
+      paused_at: string | null;
+      paused_by_user_id: string | null;
+      pause_reason: string | null;
+      created_at: string;
+      updated_at: string;
+    }
+  >();
+  for (const batchIds of chunkSqliteBindValues(childIds)) {
+    const rows = sqliteAll<{
+      id: string;
+      user_id: string;
+      from_session_id: string;
+      from_role_layer: string;
+      to_role_layer: string;
+      to_session_id: string | null;
+      payload_json: string;
+      result_json: string | null;
+      state: string;
+      claim_token: string | null;
+      claimed_at: string | null;
+      started_at: string | null;
+      completed_at: string | null;
+      failure_reason: string | null;
+      retry_count: number;
+      idempotency_key: string | null;
+      paused: number;
+      paused_at: string | null;
+      paused_by_user_id: string | null;
+      pause_reason: string | null;
+      created_at: string;
+      updated_at: string;
+    }>(
+      `SELECT * FROM handoff_records WHERE id IN (${buildSqlitePlaceholders(batchIds.length)})`,
+      batchIds,
+    );
+    for (const row of rows) {
+      if (!rowsById.has(row.id)) {
+        rowsById.set(row.id, row);
+      }
+    }
+  }
+  const children = childIds
+    .map((childId) => rowsById.get(childId) ?? null)
+    .filter(
+      (
+        row,
+      ): row is {
+        id: string;
+        user_id: string;
+        from_session_id: string;
+        from_role_layer: string;
+        to_role_layer: string;
+        to_session_id: string | null;
+        payload_json: string;
+        result_json: string | null;
+        state: string;
+        claim_token: string | null;
+        claimed_at: string | null;
+        started_at: string | null;
+        completed_at: string | null;
+        failure_reason: string | null;
+        retry_count: number;
+        idempotency_key: string | null;
+        paused: number;
+        paused_at: string | null;
+        paused_by_user_id: string | null;
+        pause_reason: string | null;
+        created_at: string;
+        updated_at: string;
+      } => row !== null,
+    );
 
   const terminalStates = new Set(['completed', 'failed', 'cancelled']);
   const allDone =

@@ -92,6 +92,21 @@ const isMoonshotThinkingModel = (modelId: string): boolean => {
   );
 };
 
+const OPENAI_REASONING_MODEL_RE = /(?:^|\/)(?:gpt-5(?:[.-]|$)|o[134](?:[.-]|$))/;
+
+function isOpenAIReasoningModel(modelId: string): boolean {
+  return OPENAI_REASONING_MODEL_RE.test(modelId.toLowerCase());
+}
+
+function isAnthropicThinkingModel(modelId: string): boolean {
+  const id = modelId.toLowerCase();
+  return (
+    id.includes('claude-opus-4') ||
+    id.includes('claude-sonnet-4') ||
+    id.includes('claude-3-7-sonnet')
+  );
+}
+
 export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
   {
     type: 'anthropic',
@@ -676,26 +691,127 @@ export const getDefaultUpstream = (
 ): ProviderUpstreamVariant | undefined =>
   entry.upstreams.find((u) => u.isDefault) ?? entry.upstreams[0];
 
+function modelIdCandidates(modelId: string): string[] {
+  const normalized = modelId.toLowerCase();
+  const slash = normalized.indexOf('/');
+  if (slash <= 0 || slash === normalized.length - 1) {
+    return [normalized];
+  }
+  return [normalized, normalized.slice(slash + 1)];
+}
+
+function findCatalogEntryByModelId(
+  modelId: string,
+  options?: { includeOpenAI?: boolean },
+): ProviderCatalogEntry | undefined {
+  const candidates = modelIdCandidates(modelId);
+  for (const entry of PROVIDER_CATALOG) {
+    if (options?.includeOpenAI !== true && entry.type === 'openai') {
+      continue;
+    }
+    if (entry.ui.modelIdPrefixes?.some((prefix) => candidates.some((candidate) => candidate.startsWith(prefix)))) {
+      return entry;
+    }
+  }
+  return undefined;
+}
+
+function findCatalogModelConfig(
+  entry: ProviderCatalogEntry,
+  modelId: string,
+): AIModelConfig | undefined {
+  const candidates = new Set(modelIdCandidates(modelId));
+  return entry.defaultModels.find((model) => candidates.has(model.id.toLowerCase()));
+}
+
+function inferModelThinkingSupport(
+  entry: ProviderCatalogEntry,
+  modelId: string,
+): boolean {
+  const explicitModel = findCatalogModelConfig(entry, modelId);
+  if (typeof explicitModel?.supportsThinking === 'boolean') {
+    return explicitModel.supportsThinking;
+  }
+  if (entry.thinkingModelMatcher) {
+    return entry.thinkingModelMatcher(modelId);
+  }
+  if (entry.type === 'anthropic') {
+    return isAnthropicThinkingModel(modelId);
+  }
+  if (entry.type === 'openai') {
+    return isOpenAIReasoningModel(modelId);
+  }
+  return false;
+}
+
 /**
  * thinking 风格解析：把 providerType(含 'claude' 这种别名)映射到风格。
  * 网关 provider-options.ts 用它替代原先的 `switch(providerType)`，使新增平台
  * 复用已有风格时无需改网关代码。
+ *
+ * 当 providerType 是 'openai' 或 'custom'（用户通过第三方代理使用非 OpenAI 模型）
+ * 时，通过 modelId 前缀推断真实厂商的 thinking 风格。例如用户配了一个 OpenAI
+ * 兼容的代理来访问 MiMo 模型，modelId 是 'mimo-v2.5-pro'，此时应使用
+ * 'body_thinking_type' 风格而非 'openai_effort'。
  */
-export const resolveThinkingStyle = (providerType: string): ProviderThinkingStyle => {
+export const resolveThinkingStyle = (
+  providerType: string,
+  modelId?: string,
+): ProviderThinkingStyle => {
   const normalized = providerType.toLowerCase();
   if (normalized === 'claude') {
     return 'anthropic_budget';
   }
-  return getCatalogEntry(normalized)?.thinkingStyle ?? 'none';
+
+  // 对 'openai' 和 'custom'，先尝试通过 modelId 前缀推断真实厂商——
+  // 用户可能通过 OpenAI 兼容代理使用 MiMo/Qwen/DeepSeek 等模型。
+  // 只有推断失败时才 fallback 到 openai 的默认 'openai_effort'。
+  if (normalized === 'openai' || normalized === 'custom') {
+    if (modelId) {
+      const catalogEntry = findCatalogEntryByModelId(modelId, {
+        includeOpenAI: true,
+      });
+      if (catalogEntry) {
+        return catalogEntry.thinkingStyle;
+      }
+    }
+    // 推断失败：openai 用 openai_effort，custom 用 none
+    return normalized === 'openai' ? 'openai_effort' : 'none';
+  }
+
+  const entry = getCatalogEntry(normalized);
+  if (entry) {
+    return entry.thinkingStyle;
+  }
+
+  return 'none';
 };
 
 /** 该平台下某模型是否真正支持下发 thinking(用于 moonshot 这种部分模型场景)。 */
 export const catalogModelSupportsThinking = (providerType: string, modelId: string): boolean => {
-  const entry = getCatalogEntry(providerType.toLowerCase());
-  if (!entry) {
-    return true;
+  const normalized = providerType.toLowerCase();
+
+  // 对 'openai' 和 'custom'，先尝试通过 modelId 前缀推断真实厂商
+  // （与 resolveThinkingStyle 对齐）。
+  if (normalized === 'openai' || normalized === 'custom') {
+    if (modelId) {
+      const catalogEntry = findCatalogEntryByModelId(modelId, {
+        includeOpenAI: true,
+      });
+      if (catalogEntry) {
+        return inferModelThinkingSupport(catalogEntry, modelId);
+      }
+    }
+    // 推断失败：不要恢复 thinking，保持保守。
+    return false;
   }
-  return entry.thinkingModelMatcher ? entry.thinkingModelMatcher(modelId) : true;
+
+  const entry = getCatalogEntry(normalized);
+  if (entry) {
+    return inferModelThinkingSupport(entry, modelId);
+  }
+
+  return false;
 };
 
 /** 由官方 host 反推 providerType(用于 workflow-llm 的 baseUrl 推断)。 */
@@ -725,13 +841,7 @@ export const normalizeProviderAlias = (value: string): string => {
 
 /** 由 modelId 前缀反推厂商显示名(用量页用)。 */
 export const inferProviderLabelFromModelId = (modelId: string): string | undefined => {
-  const normalized = modelId.toLowerCase();
-  for (const entry of PROVIDER_CATALOG) {
-    if (entry.ui.modelIdPrefixes?.some((prefix) => normalized.startsWith(prefix))) {
-      return entry.displayName;
-    }
-  }
-  return undefined;
+  return findCatalogEntryByModelId(modelId, { includeOpenAI: true })?.displayName;
 };
 
 /** 平台显示名映射(供工作流模板等使用)。 */

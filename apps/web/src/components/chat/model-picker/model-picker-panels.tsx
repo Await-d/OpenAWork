@@ -2,6 +2,7 @@ import React from 'react';
 import {
   describeReasoningEffort,
   getSupportedReasoningEffortsForModel,
+  inferSupportsThinking,
   resolveProviderVisual,
 } from '@openAwork/shared-ui';
 import type { ReasoningEffort } from '../../conversation-runtime/messages/support.js';
@@ -563,7 +564,11 @@ export function ModelPicker({
                         >
                           {model.supportsVision && <CapabilityTag label="视觉" tone="emerald" />}
                           {model.supportsTools && <CapabilityTag label="工具" tone="accent" />}
-                          {model.supportsThinking && <CapabilityTag label="思考" tone="violet" />}
+                          {inferSupportsThinking(
+                            provider.type,
+                            model.id,
+                            model.supportsThinking === true,
+                          ) && <CapabilityTag label="思考" tone="violet" />}
                           {contextLabel && <CapabilityTag label={contextLabel} />}
                         </span>
                       </span>

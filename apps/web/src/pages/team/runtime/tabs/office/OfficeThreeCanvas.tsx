@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef } from 'react';
 import * as THREE from 'three';
-import type { AgentTeamsOfficeAgent } from '../../data/team-runtime-types.js';
+import type {
+  AgentTeamsOfficeAgent,
+  AgentTeamsSidebarTeam,
+} from '../../data/team-runtime-types.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
 import { useOfficeLayerBinding } from '../../hooks/use-office-layer-binding.js';
 import type { OfficeSceneState } from './OfficeScene.js';
@@ -9,8 +12,14 @@ import {
   createLabelTexture,
   createMonitorTexture,
   createProjectionScreenTexture,
+  formatOfficeRuntimeStatus,
   makeCanvasTexture,
   OFFICE_PROJECTION_PAGE_COUNT,
+  resolveOfficeAgentStatusLabel,
+  resolveOfficeAgentStatusTone,
+  resolveOfficeRuntimeStatus,
+  type OfficeCanvasDisplayData,
+  type OfficeStatusTone,
 } from './office-canvas-textures.js';
 
 // ── World units (meters) ─────────────────────────────────────────────
@@ -24,6 +33,22 @@ function ignoreNumericStateUpdate(): void {
 
 function ignorePanStateUpdate(): void {
   return undefined;
+}
+
+function resolveOfficeToneColor(tone: OfficeStatusTone): string {
+  if (tone === 'warning') {
+    return 'var(--warning)';
+  }
+  if (tone === 'danger') {
+    return 'var(--danger)';
+  }
+  if (tone === 'accent') {
+    return 'var(--accent)';
+  }
+  if (tone === 'muted') {
+    return 'var(--fg-muted)';
+  }
+  return 'var(--success)';
 }
 
 // ── Seat Registry: shared positions for all zones ─────────────────────
@@ -516,10 +541,14 @@ function createBuddy(
 // ── Main component ────────────────────────────────────────────────────
 export function OfficeThreeCanvas({
   selectedAgentId,
+  runtimeStatus,
+  selectedSessionTitle,
   onSelectAgent,
   state,
 }: {
   selectedAgentId: string;
+  runtimeStatus?: AgentTeamsSidebarTeam['status'] | null;
+  selectedSessionTitle?: string | null;
   onSelectAgent: (id: string) => void;
   state: OfficeSceneState;
 }) {
@@ -553,6 +582,8 @@ export function OfficeThreeCanvas({
   const topSummaryRef = useRef(topSummary);
   const footerStatsRef = useRef(footerStats);
   const activityStatsRef = useRef(activityStats);
+  const runtimeStatusRef = useRef<AgentTeamsSidebarTeam['status'] | null>(runtimeStatus ?? null);
+  const selectedSessionTitleRef = useRef<string | null>(selectedSessionTitle ?? null);
   const zoomRef = useRef(1);
   const panRef = useRef({ x: 0, y: 0 });
   const setZoomRef = useRef<React.Dispatch<React.SetStateAction<number>>>(ignoreNumericStateUpdate);
@@ -567,10 +598,36 @@ export function OfficeThreeCanvas({
   topSummaryRef.current = topSummary;
   footerStatsRef.current = footerStats;
   activityStatsRef.current = activityStats;
+  runtimeStatusRef.current = runtimeStatus ?? null;
+  selectedSessionTitleRef.current = selectedSessionTitle ?? null;
   zoomRef.current = zoom;
   panRef.current = pan;
   setZoomRef.current = setZoom;
   setPanRef.current = setPan;
+
+  const buildDisplayData = useCallback(
+    (elapsed: number): OfficeCanvasDisplayData => {
+      const effectiveRuntimeStatus = resolveOfficeRuntimeStatus({
+        runtimeStatus: runtimeStatusRef.current,
+        statusLabel: topSummaryRef.current.status,
+      });
+      const sessionTitle = selectedSessionTitleRef.current?.trim();
+      return {
+        topSummary: {
+          ...topSummaryRef.current,
+          title: sessionTitle && sessionTitle.length > 0 ? sessionTitle : topSummaryRef.current.title,
+          status: formatOfficeRuntimeStatus(effectiveRuntimeStatus),
+          runtimeStatus: effectiveRuntimeStatus,
+        },
+        metricCards: metricCardsRef.current,
+        footerStats: footerStatsRef.current,
+        officeAgents: officeAgentsRef.current,
+        activityStats: activityStatsRef.current,
+        elapsed,
+      };
+    },
+    [],
+  );
 
   // ── Initialize Three.js scene ──────────────────────────────────────
   useEffect(() => {
@@ -640,14 +697,7 @@ export function OfficeThreeCanvas({
     scene.add(ceilLight3);
 
     // ── Build office ────────────────────────────────────────────────
-    const { monitorMesh, projScreen } = buildOffice(scene, {
-      topSummary,
-      metricCards,
-      footerStats,
-      officeAgents: officeAgentsRef.current,
-      activityStats,
-      elapsed: 0,
-    });
+    const { monitorMesh, projScreen } = buildOffice(scene, buildDisplayData(0));
     monitorMeshRef.current = monitorMesh;
     projScreenRef.current = projScreen;
 
@@ -827,17 +877,7 @@ export function OfficeThreeCanvas({
           slideTimerRef.current = 0;
           slideIdxRef.current = (slideIdxRef.current + 1) % OFFICE_PROJECTION_PAGE_COUNT;
           const slideIdx = slideIdxRef.current;
-          const slideTex = createProjectionScreenTexture(
-            {
-              topSummary: topSummaryRef.current,
-              metricCards: metricCardsRef.current,
-              footerStats: footerStatsRef.current,
-              officeAgents: officeAgentsRef.current,
-              activityStats: activityStatsRef.current,
-              elapsed,
-            },
-            slideIdx,
-          );
+          const slideTex = createProjectionScreenTexture(buildDisplayData(elapsed), slideIdx);
           (projScreen.material as THREE.MeshStandardMaterial).map = slideTex;
           (projScreen.material as THREE.MeshStandardMaterial).emissive.set(0x334455);
           (projScreen.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.3;
@@ -1045,15 +1085,7 @@ export function OfficeThreeCanvas({
           const mat = monMesh.material as THREE.MeshStandardMaterial;
           // Dispose old texture to prevent GPU memory leak
           if (mat.map) mat.map.dispose();
-          const agents = officeAgentsRef.current;
-          const newTex = createMonitorTexture({
-            topSummary: topSummaryRef.current,
-            metricCards: metricCardsRef.current,
-            footerStats: footerStatsRef.current,
-            officeAgents: agents,
-            activityStats: activityStatsRef.current,
-            elapsed,
-          });
+          const newTex = createMonitorTexture(buildDisplayData(elapsed));
           mat.map = newTex;
           mat.needsUpdate = true;
         }
@@ -1094,7 +1126,39 @@ export function OfficeThreeCanvas({
       renderer.dispose();
       if (el.contains(renderer.domElement)) el.removeChild(renderer.domElement);
     };
-  }, []);
+  }, [buildDisplayData]);
+
+  useEffect(() => {
+    const elapsed = typeof performance === 'undefined' ? 0 : performance.now() / 1000;
+    const displayData = buildDisplayData(elapsed);
+
+    const monitorMesh = monitorMeshRef.current;
+    if (monitorMesh?.material instanceof THREE.MeshStandardMaterial) {
+      const material = monitorMesh.material;
+      material.map?.dispose();
+      material.map = createMonitorTexture(displayData);
+      material.needsUpdate = true;
+    }
+
+    const projScreen = projScreenRef.current;
+    if (projScreen?.material instanceof THREE.MeshStandardMaterial) {
+      const material = projScreen.material;
+      material.map?.dispose();
+      material.map = createProjectionScreenTexture(displayData, slideIdxRef.current);
+      material.emissive.set(0x334455);
+      material.emissiveIntensity = 0.3;
+      material.needsUpdate = true;
+    }
+  }, [
+    activityStats,
+    buildDisplayData,
+    footerStats,
+    metricCards,
+    officeAgents,
+    runtimeStatus,
+    selectedSessionTitle,
+    topSummary,
+  ]);
 
   // ── Rebuild buddies when agents/selection change ────────────────────
   useEffect(() => {
@@ -1161,20 +1225,19 @@ export function OfficeThreeCanvas({
   }, [officeAgents, selectedAgentId, onSelectAgent]);
 
   const selectedAgent = officeAgentsRef.current.find((a) => a.id === selectedAgentId);
-  const isSessionPaused = topSummary.status === '已暂停';
-  const selectedAgentStatusLabel = isSessionPaused
-    ? '团队已暂停'
-    : selectedAgent?.status === 'resting'
-      ? '休息中'
-      : selectedAgent?.status === 'discussing'
-        ? '讨论中'
-        : '运行中';
-  const selectedAgentDotColor =
-    isSessionPaused || selectedAgent?.status === 'resting'
-      ? 'var(--warning)'
-      : selectedAgent?.status === 'discussing'
-        ? 'var(--accent)'
-        : 'var(--success)';
+  const effectiveRuntimeStatus = resolveOfficeRuntimeStatus({
+    runtimeStatus,
+    statusLabel: topSummary.status,
+  });
+  const selectedAgentStatusTone = resolveOfficeAgentStatusTone({
+    runtimeStatus: effectiveRuntimeStatus,
+    agentStatus: selectedAgent?.status,
+  });
+  const selectedAgentStatusLabel = resolveOfficeAgentStatusLabel({
+    runtimeStatus: effectiveRuntimeStatus,
+    agentStatus: selectedAgent?.status,
+  });
+  const selectedAgentDotColor = resolveOfficeToneColor(selectedAgentStatusTone);
 
   return (
     <div
@@ -1213,8 +1276,8 @@ export function OfficeThreeCanvas({
               flexDirection: 'column',
               gap: 8,
               alignItems: 'center',
-              background: 'rgba(26, 28, 44, 0.88)',
-              border: `1px solid ${isSessionPaused || selectedAgent?.status === 'resting' ? 'rgba(239, 90, 90, 0.4)' : selectedAgent?.status === 'discussing' ? 'rgba(240, 136, 62, 0.4)' : 'rgba(63, 185, 80, 0.4)'}`,
+              background: 'color-mix(in srgb, var(--bg-base) 88%, transparent)',
+              border: `1px solid color-mix(in srgb, ${selectedAgentDotColor} 40%, transparent)`,
               borderRadius: 14,
               padding: '14px 12px',
               backdropFilter: 'blur(10px)',
@@ -1249,7 +1312,7 @@ export function OfficeThreeCanvas({
                   borderRadius: '50%',
                   background: selectedAgentDotColor,
                   boxShadow:
-                    isSessionPaused || selectedAgent?.status === 'resting'
+                    selectedAgentStatusTone === 'warning' || selectedAgentStatusTone === 'muted'
                       ? 'none'
                       : `0 0 4px ${selectedAgentDotColor}`,
                 }}

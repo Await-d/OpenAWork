@@ -41,6 +41,7 @@ export interface CreateTeamSessionResult {
 export interface TeamRoleSessionLookupInput {
   userId: string;
   rootSessionId: string;
+  parentSessionId: string | null;
   roleLayer: HandoffRoleLayer;
   personaKey?: string | null;
 }
@@ -104,6 +105,23 @@ function normalizeOptionalMetadataString(value: string | null | undefined): stri
 
 function normalizeTeamRoleInstancePersonaKey(value: string | null | undefined): string {
   return normalizeOptionalMetadataString(value) ?? '';
+}
+
+function normalizeTeamRoleParentSessionId(value: string | null | undefined): string {
+  return normalizeOptionalMetadataString(value) ?? '';
+}
+
+function hasActiveHandoffForSession(input: { sessionId: string; userId: string }): boolean {
+  const row = sqliteGet<{ id: string }>(
+    `SELECT id
+       FROM handoff_records
+      WHERE user_id = ?
+        AND to_session_id = ?
+        AND state NOT IN ('completed', 'failed', 'cancelled')
+      LIMIT 1`,
+    [input.userId, input.sessionId],
+  );
+  return row !== undefined;
 }
 
 export function withRoleLayerDialogueMetadataDefaults(input: {
@@ -196,12 +214,15 @@ export function findReusableTeamRoleSession(
   input: TeamRoleSessionLookupInput,
 ): CreateTeamSessionResult | null {
   const metadataExpression = `CASE WHEN json_valid(metadata_json) THEN metadata_json ELSE '{}' END`;
+  const parentSessionExpression = `COALESCE(team_parent_session_id, NULLIF(json_extract(${metadataExpression}, '$.parentSessionId'), ''), '')`;
   const normalizedPersonaKey = normalizeOptionalMetadataString(input.personaKey);
+  const normalizedParentSessionId = normalizeTeamRoleParentSessionId(input.parentSessionId);
   const params: Array<string> = [
     input.userId,
     input.roleLayer,
     input.rootSessionId,
     input.roleLayer,
+    normalizedParentSessionId,
   ];
   const personaPredicate =
     normalizedPersonaKey !== null
@@ -212,13 +233,21 @@ export function findReusableTeamRoleSession(
   }
 
   const row = sqliteGet<{ id: string }>(
-    `SELECT id
-       FROM sessions
+    `SELECT s.id
+       FROM sessions s
       WHERE user_id = ?
         AND role_layer = ?
         AND json_extract(${metadataExpression}, '$.teamRoleInstance.rootSessionId') = ?
         AND json_extract(${metadataExpression}, '$.teamRoleInstance.roleLayer') = ?
+        AND ${parentSessionExpression} = ?
         ${personaPredicate}
+        AND NOT EXISTS (
+          SELECT 1
+            FROM handoff_records h
+           WHERE h.user_id = s.user_id
+             AND h.to_session_id = s.id
+             AND h.state NOT IN ('completed', 'failed', 'cancelled')
+        )
       ORDER BY created_at ASC, id ASC
       LIMIT 1`,
     params,
@@ -236,12 +265,14 @@ function findBoundTeamRoleSessionInstance(
        JOIN sessions s ON s.id = i.session_id AND s.user_id = i.user_id
       WHERE i.user_id = ?
         AND i.root_session_id = ?
+        AND i.parent_session_id = ?
         AND i.role_layer = ?
         AND i.persona_key = ?
       LIMIT 1`,
     [
       input.userId,
       input.rootSessionId,
+      normalizeTeamRoleParentSessionId(input.parentSessionId),
       input.roleLayer,
       normalizeTeamRoleInstancePersonaKey(input.personaKey),
     ],
@@ -255,13 +286,19 @@ function bindTeamRoleSessionInstance(input: TeamRoleSessionLookupInput & {
   sessionId: string;
 }): BoundTeamRoleSessionInstance {
   sqliteRun(
-    `INSERT OR IGNORE INTO team_role_session_instances (
-       id, user_id, root_session_id, role_layer, persona_key, session_id, display_name
-     ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO team_role_session_instances (
+       id, user_id, root_session_id, parent_session_id, role_layer, persona_key, session_id, display_name
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(user_id, root_session_id, parent_session_id, role_layer, persona_key)
+     DO UPDATE SET
+       session_id = excluded.session_id,
+       display_name = COALESCE(excluded.display_name, team_role_session_instances.display_name),
+       updated_at = datetime('now')`,
     [
       randomUUID(),
       input.userId,
       input.rootSessionId,
+      normalizeTeamRoleParentSessionId(input.parentSessionId),
       input.roleLayer,
       normalizeTeamRoleInstancePersonaKey(input.personaKey),
       input.sessionId,
@@ -293,7 +330,10 @@ function findLegacyReusableTeamRoleSession(input: TeamRoleSessionLookupInput): {
   metadataJson: string;
 } | null {
   const payloadExpression = `CASE WHEN json_valid(h.payload_json) THEN h.payload_json ELSE '{}' END`;
+  const sessionMetadataExpression = `CASE WHEN json_valid(s.metadata_json) THEN s.metadata_json ELSE '{}' END`;
+  const parentSessionExpression = `COALESCE(s.team_parent_session_id, NULLIF(json_extract(${sessionMetadataExpression}, '$.parentSessionId'), ''), '')`;
   const normalizedPersonaKey = normalizeOptionalMetadataString(input.personaKey);
+  const normalizedParentSessionId = normalizeTeamRoleParentSessionId(input.parentSessionId);
   const params: Array<string> = [
     input.rootSessionId,
     input.userId,
@@ -301,6 +341,7 @@ function findLegacyReusableTeamRoleSession(input: TeamRoleSessionLookupInput): {
     input.userId,
     input.roleLayer,
     input.roleLayer,
+    normalizedParentSessionId,
   ];
   const personaPredicate =
     normalizedPersonaKey !== null
@@ -324,10 +365,18 @@ function findLegacyReusableTeamRoleSession(input: TeamRoleSessionLookupInput): {
      SELECT s.id, s.metadata_json
        FROM handoff_records h
        JOIN sessions s ON s.id = h.to_session_id AND s.user_id = h.user_id
-      WHERE h.user_id = ?
-        AND h.to_role_layer = ?
-        AND h.to_session_id IS NOT NULL
-        AND s.role_layer = ?
+     WHERE h.user_id = ?
+       AND h.to_role_layer = ?
+       AND h.to_session_id IS NOT NULL
+       AND s.role_layer = ?
+       AND ${parentSessionExpression} = ?
+        AND NOT EXISTS (
+          SELECT 1
+            FROM handoff_records active
+           WHERE active.user_id = s.user_id
+             AND active.to_session_id = s.id
+             AND active.state NOT IN ('completed', 'failed', 'cancelled')
+        )
         AND (h.from_session_id IN (SELECT id FROM session_tree)
           OR h.to_session_id IN (SELECT id FROM session_tree))
         ${personaPredicate}
@@ -406,12 +455,19 @@ function findOrCreateTeamRoleSessionInTransaction(
   const lookup: TeamRoleSessionLookupInput = {
     userId: input.userId,
     rootSessionId: input.rootSessionId,
+    parentSessionId: input.teamParentSessionId ?? null,
     roleLayer: input.roleLayer,
     personaKey: input.personaKey,
   };
 
   const bound = findBoundTeamRoleSessionInstance(lookup);
-  if (bound) {
+  if (
+    bound &&
+    !hasActiveHandoffForSession({
+      sessionId: bound.sessionId,
+      userId: input.userId,
+    })
+  ) {
     updateReusableTeamRoleSessionState({
       handoffState: input.handoffState,
       sessionId: bound.sessionId,
@@ -423,6 +479,7 @@ function findOrCreateTeamRoleSessionInTransaction(
   const existing = findReusableTeamRoleSession({
     userId: input.userId,
     rootSessionId: input.rootSessionId,
+    parentSessionId: input.teamParentSessionId ?? null,
     roleLayer: input.roleLayer,
     personaKey: input.personaKey,
   });
@@ -443,6 +500,7 @@ function findOrCreateTeamRoleSessionInTransaction(
   const legacy = findLegacyReusableTeamRoleSession({
     userId: input.userId,
     rootSessionId: input.rootSessionId,
+    parentSessionId: input.teamParentSessionId ?? null,
     roleLayer: input.roleLayer,
     personaKey: input.personaKey,
   });

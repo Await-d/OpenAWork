@@ -8,7 +8,9 @@ import {
   buildDispatchPackages,
   buildTaskProfilePromptFragment,
   dispatchPackageSchema,
+  extractComparablePathsFromText,
   inferTaskProfile,
+  parseAllTasks,
   parseTaskLine,
   resolveAssignedMember,
   validateParsedTasks,
@@ -68,6 +70,8 @@ describe('buildDispatchPackages', () => {
           explicitProfile: null,
           title: '[apps/web/src/pages/login.tsx] 修复前端登录页面样式问题 - 页面样式恢复正常',
           priority: 'medium',
+          fileEntries: [],
+          ownedPaths: ['apps/web/src/pages/login.tsx'],
         },
         {
           taskId: 'T002',
@@ -76,6 +80,8 @@ describe('buildDispatchPackages', () => {
           explicitProfile: null,
           title: '[services/agent-gateway/src/routes/auth.ts] 代码评审检查后端鉴权实现 - 输出审查结论',
           priority: 'medium',
+          fileEntries: [],
+          ownedPaths: ['services/agent-gateway/src/routes/auth.ts'],
         },
       ],
       artifactRefs: { specId: 'spec-1', planId: 'plan-1', tasksId: 'tasks-1' },
@@ -85,11 +91,13 @@ describe('buildDispatchPackages', () => {
     expect(dispatchPackageSchema.parse(packages[0]!)).toBeTruthy();
     expect(packages[0]!.taskProfile.kind).toBe('fix');
     expect(packages[0]!.taskProfile.surface).toBe('ui');
+    expect(packages[0]!.ownedPaths).toEqual(['apps/web/src/pages/login.tsx']);
 
     expect(packages[1]!.role).toBe('reviewer');
     expect(packages[1]!.taskProfile.kind).toBe('review');
     expect(packages[1]!.taskProfile.surface).toBe('backend');
     expect(packages[1]!.dependsOn).toContain('T001');
+    expect(packages[1]!.ownedPaths).toEqual(['services/agent-gateway/src/routes/auth.ts']);
   });
 
   it('优先使用 tasks.md 显式画像，而不是上下文自动推断', () => {
@@ -103,6 +111,7 @@ describe('buildDispatchPackages', () => {
         {
           ...explicitTask!,
           title: '[docs/api/auth.md] 编写后端 API 使用说明 - 提供接入文档',
+          ownedPaths: ['docs/api/auth.md'],
         },
       ],
       artifactRefs: { tasksId: 'tasks-1' },
@@ -124,6 +133,8 @@ describe('buildDispatchPackages', () => {
           explicitProfile: { kind: 'build', surface: 'ui' },
           title: '[apps/web/src/pages/settings.tsx] 实现前端设置页面 - 可展示并编辑设置项',
           priority: 'medium',
+          fileEntries: [],
+          ownedPaths: ['apps/web/src/pages/settings.tsx'],
         },
       ],
       artifactRefs: { tasksId: 'tasks-1' },
@@ -144,6 +155,8 @@ describe('buildDispatchPackages', () => {
       explicitProfile: { kind: 'build' as const, surface: 'backend' as const },
       title: `[services/agent-gateway/src/modules/task-${i + 1}.ts] 实现任务 ${i + 1} - 交付对应能力`,
       priority: 'medium' as const,
+      fileEntries: [],
+      ownedPaths: [`services/agent-gateway/src/modules/task-${i + 1}.ts`],
     }));
 
     const capped = buildDispatchPackages({
@@ -182,11 +195,63 @@ describe('buildDispatchPackages', () => {
         explicitProfile: null,
         title: '未命名任务',
         priority: 'medium',
+        fileEntries: [],
+        ownedPaths: [],
       },
     ]);
 
     expect(issues.length).toBeGreaterThan(0);
     expect(issues.join('；')).toContain('未命名任务');
+  });
+});
+
+describe('extractComparablePathsFromText', () => {
+  it('能从标题和错误文本中提取结构化路径', () => {
+    expect(
+      extractComparablePathsFromText(
+        '[apps/web/src/pages/login.tsx] 修复登录页 - 处理 apps/web/src/components/login-form.tsx 的交互问题',
+      ),
+    ).toEqual([
+      'apps/web/src/pages/login.tsx',
+      'apps/web/src/components/login-form.tsx',
+    ]);
+  });
+
+  it('支持方括号内的多文件逗号列举', () => {
+    expect(
+      extractComparablePathsFromText(
+        '[apps/web/src/pages/login.tsx, apps/web/src/pages/login.test.tsx] 实现登录页面 - 页面可提交且测试覆盖主流程',
+      ),
+    ).toEqual([
+      'apps/web/src/pages/login.tsx',
+      'apps/web/src/pages/login.test.tsx',
+    ]);
+  });
+
+  it('parseAllTasks 会把任务块中的 Create/Modify/Test 文件清单并入 ownedPaths', () => {
+    const tasks = parseAllTasks(`## Phase 1
+
+- [ ] T001 [KIND:build] [SURFACE:ui] [apps/web/src/pages/login.tsx] 实现登录页面 - 页面可提交
+**文件**：
+- Modify: \`apps/web/src/pages/login.tsx\`
+- Test: \`apps/web/src/pages/login.test.tsx\`
+- Modify: \`apps/web/src/components/login-form.tsx\`
+`);
+
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]?.ownedPaths).toEqual([
+      'apps/web/src/pages/login.tsx',
+      'apps/web/src/pages/login.test.tsx',
+      'apps/web/src/components/login-form.tsx',
+    ]);
+  });
+
+  it('不会把 executor/reviewer 这类带斜杠短语误判成路径', () => {
+    expect(
+      extractComparablePathsFromText(
+        'PM2 将重新派发 executor/reviewer 任务，并等待 pm1/pm2 链路重新收口',
+      ),
+    ).toEqual([]);
   });
 });
 

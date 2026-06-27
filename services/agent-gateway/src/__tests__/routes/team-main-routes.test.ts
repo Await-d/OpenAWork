@@ -35,6 +35,18 @@ let teamRoutes: typeof TeamRoutesModule.teamRoutes;
 const USER_ID = 'u-team-main-route';
 const TEAM_WORKSPACE_ID = 'tw-team-main-route';
 const workspaceRoots: string[] = [];
+const TEMPLATE_MEMBER_SLOT = {
+  id: 'executor-custom-thinking',
+  layer: 'executor',
+  specialty: 'custom',
+  displayName: '推理执行者',
+  personaKey: 'executor:custom:thinking',
+  toolsets: ['read', 'write', 'shell'],
+  required: false,
+  custom: true,
+  thinkingEnabled: true,
+  reasoningEffort: 'high',
+} as const;
 
 async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify();
@@ -64,6 +76,19 @@ function seedWorkspace(teamWorkspaceId: string, userId: string): void {
       id, user_id, name, description, visibility, default_working_root, default_team_roster_json
     ) VALUES (?, ?, '团队工作区', NULL, 'private', NULL, '[]')`,
     [teamWorkspaceId, userId],
+  );
+}
+
+function seedWorkflowTemplate(
+  templateId: string,
+  userId: string,
+  metadataJson: string,
+): void {
+  dbModule.sqliteRun(
+    `INSERT INTO workflow_templates
+      (id, user_id, name, description, category, metadata_json, nodes_json, edges_json)
+     VALUES (?, ?, '团队模板', 'desc', 'team-playbook', ?, '[]', '[]')`,
+    [templateId, userId, metadataJson],
   );
 }
 
@@ -262,6 +287,56 @@ describe('team main routes error contracts', () => {
       expect(
         metadata.teamInit?.steps?.find((step) => step.key === 'read-project-level1')?.status,
       ).toBe('proposed');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('POST /team/workspaces/:id/sessions 会把 saved-template 的成员思考配置写入 session 快照', async () => {
+    seedWorkspace(TEAM_WORKSPACE_ID, USER_ID);
+    seedWorkflowTemplate(
+      'wf-thinking-template',
+      USER_ID,
+      JSON.stringify({
+        teamTemplate: {
+          memberSlots: [TEMPLATE_MEMBER_SLOT],
+        },
+      }),
+    );
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/team/workspaces/${TEAM_WORKSPACE_ID}/sessions`,
+        headers: {
+          authorization: bearer(app),
+          'content-type': 'application/json',
+        },
+        payload: {
+          source: {
+            kind: 'saved-template',
+            templateId: 'wf-thinking-template',
+          },
+        },
+      });
+
+      expect(response.statusCode).toBe(201);
+      const body = response.json() as { metadata_json: string };
+      const metadata = JSON.parse(body.metadata_json) as {
+        teamDefinition?: {
+          memberSlots?: Array<{
+            id: string;
+            thinkingEnabled?: boolean;
+            reasoningEffort?: string;
+          }>;
+        };
+      };
+      expect(metadata.teamDefinition?.memberSlots?.[0]).toMatchObject({
+        id: TEMPLATE_MEMBER_SLOT.id,
+        thinkingEnabled: true,
+        reasoningEffort: 'high',
+      });
     } finally {
       await app.close();
     }

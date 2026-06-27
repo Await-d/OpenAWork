@@ -36,14 +36,14 @@ function seed(): void {
     USER_ID,
     'bg@example.com',
   ]);
-  dbModule.sqliteRun("INSERT OR IGNORE INTO sessions (id, user_id, title) VALUES (?, ?, 'demo')", [
-    SESSION_ID,
-    USER_ID,
-  ]);
-  dbModule.sqliteRun("INSERT OR IGNORE INTO sessions (id, user_id, title) VALUES (?, ?, 'other')", [
-    OTHER_SESSION_ID,
-    USER_ID,
-  ]);
+  dbModule.sqliteRun(
+    "INSERT OR IGNORE INTO sessions (id, user_id, title, metadata_json) VALUES (?, ?, 'demo', ?)",
+    [SESSION_ID, USER_ID, JSON.stringify({ workingDirectory: workdir })],
+  );
+  dbModule.sqliteRun(
+    "INSERT OR IGNORE INTO sessions (id, user_id, title, metadata_json) VALUES (?, ?, 'other', ?)",
+    [OTHER_SESSION_ID, USER_ID, JSON.stringify({ workingDirectory: workdir })],
+  );
 }
 
 beforeAll(async () => {
@@ -52,8 +52,8 @@ beforeAll(async () => {
   registry = await import('../../session/session-terminal-registry.js');
   await dbModule.connectDb();
   await dbModule.migrate();
-  seed();
   workdir = await mkdtemp(path.join(tmpdir(), 'openAwork-bg-bash-'));
+  seed();
 });
 
 afterAll(async () => {

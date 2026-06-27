@@ -10,6 +10,7 @@
  */
 
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
+import { buildSqlitePlaceholders, chunkSqliteBindValues } from '../infra/sqlite-batch.js';
 import {
   type MessageID,
   type PartID,
@@ -62,6 +63,31 @@ function mapPartRows(rows: PartV2Row[]): MessagePart[] {
     if (part) out.push(part);
   }
   return out;
+}
+
+// SQLite's variable cap differs by runtime/build. Keep a conservative ceiling
+// so large transcripts remain readable across Bun / node:sqlite variants.
+const MAX_SQLITE_BIND_PARAMS = 900;
+const PART_QUERY_MESSAGE_ID_BATCH_SIZE = MAX_SQLITE_BIND_PARAMS - 1;
+
+function listPartRowsByMessageIds(
+  sessionId: string,
+  messageIds: readonly MessageID[],
+): PartV2Row[] {
+  if (messageIds.length === 0) return [];
+
+  const rows: PartV2Row[] = [];
+  for (let start = 0; start < messageIds.length; start += PART_QUERY_MESSAGE_ID_BATCH_SIZE) {
+    const batchIds = messageIds.slice(start, start + PART_QUERY_MESSAGE_ID_BATCH_SIZE);
+    const placeholders = batchIds.map(() => '?').join(',');
+    rows.push(
+      ...sqliteAll<PartV2Row>(
+        `SELECT * FROM part_v2 WHERE session_id = ? AND message_id IN (${placeholders}) ORDER BY message_id, id ASC`,
+        [sessionId, ...batchIds],
+      ),
+    );
+  }
+  return rows;
 }
 
 // ─── Message CRUD ───
@@ -331,12 +357,8 @@ export function listMessagesWithPartsByTurnLimit(input: {
 function attachPartsToMessages(sessionId: string, messages: MessageInfo[]): MessageWithParts[] {
   if (messages.length === 0) return [];
 
-  const messageIds = messages.map((m) => m.id);
-  const placeholders = messageIds.map(() => '?').join(',');
-  const partRows = sqliteAll<PartV2Row>(
-    `SELECT * FROM part_v2 WHERE session_id = ? AND message_id IN (${placeholders}) ORDER BY message_id, id ASC`,
-    [sessionId, ...messageIds],
-  );
+  const messageIds = messages.map((message) => message.id);
+  const partRows = listPartRowsByMessageIds(sessionId, messageIds);
 
   const partsByMessage = new Map<string, MessagePart[]>();
   for (const row of partRows) {
@@ -505,12 +527,12 @@ export function truncateMessagesAfter(input: {
   for (const id of ids) {
     sqliteRun('DELETE FROM part_v2 WHERE message_id = ? AND session_id = ?', [id, input.sessionId]);
   }
-  sqliteRun(
-    'DELETE FROM message_v2 WHERE session_id = ? AND user_id = ? AND id IN (' +
-      ids.map(() => '?').join(',') +
-      ')',
-    [input.sessionId, input.userId, ...ids],
-  );
+  for (const batchIds of chunkSqliteBindValues(ids, 2)) {
+    sqliteRun(
+      `DELETE FROM message_v2 WHERE session_id = ? AND user_id = ? AND id IN (${buildSqlitePlaceholders(batchIds.length)})`,
+      [input.sessionId, input.userId, ...batchIds],
+    );
+  }
 
   return ids as MessageID[];
 }
@@ -553,12 +575,8 @@ export function pageMessagesWithParts(input: {
   }
 
   const messages = mapMessageInfoRows(slice);
-  const messageIds = messages.map((m) => m.id);
-  const placeholders = messageIds.map(() => '?').join(',');
-  const partRows = sqliteAll<PartV2Row>(
-    `SELECT * FROM part_v2 WHERE session_id = ? AND message_id IN (${placeholders}) ORDER BY message_id, id ASC`,
-    [input.sessionId, ...messageIds],
-  );
+  const messageIds = messages.map((message) => message.id);
+  const partRows = listPartRowsByMessageIds(input.sessionId, messageIds);
 
   const partsByMessage = new Map<string, MessagePart[]>();
   for (const row of partRows) {

@@ -2,6 +2,8 @@ import { useMemo, type CSSProperties } from 'react';
 import type { Message } from '@openAwork/shared';
 import type { TeamAuditLogRecord } from '@openAwork/web-client';
 import type { AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
+import { formatSidebarTeamStatus } from '../../data/team-runtime-status.js';
+import { resolveSidebarTeamSubtitle } from '../../data/team-runtime-status.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
 import {
   resolveMatchedSharedSessionDetail,
@@ -61,6 +63,9 @@ function formatSharedStatus(status: AgentTeamsSidebarTeam['status']): {
   color: string;
   label: string;
 } {
+  if (status === 'idle') {
+    return { color: 'var(--fg-subtle)', label: formatSidebarTeamStatus(status) };
+  }
   if (status === 'running') {
     return { color: 'var(--success)', label: '运行中' };
   }
@@ -70,7 +75,7 @@ function formatSharedStatus(status: AgentTeamsSidebarTeam['status']): {
   if (status === 'failed') {
     return { color: 'var(--danger)', label: '失败' };
   }
-  return { color: 'var(--fg-muted)', label: '已完成' };
+  return { color: 'var(--fg-muted)', label: formatSidebarTeamStatus(status) };
 }
 
 function formatIsoTime(value: string | undefined): string {
@@ -167,6 +172,7 @@ export function SharedSessionOverviewView({
       .sort((left, right) => right.timestamp - left.timestamp)
       .slice(0, 12);
   }, [assistantMessages, sharedAuditLogs, sharedSession?.comments]);
+  const statusSubtitle = resolveSidebarTeamSubtitle(selectedTeam.status, selectedTeam.subtitle);
 
   if (sharedSessionLoading && !sharedSession) {
     return (
@@ -230,7 +236,9 @@ export function SharedSessionOverviewView({
           >
             {selectedTeam.title}
           </span>
-          <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>{selectedTeam.subtitle}</span>
+          {statusSubtitle ? (
+            <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>{statusSubtitle}</span>
+          ) : null}
         </div>
         <span
           style={{

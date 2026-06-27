@@ -8,7 +8,7 @@ import type {
   HistoricalPlan,
 } from '@openAwork/shared-ui';
 import type { UpstreamStreamSummary } from '@openAwork/shared';
-import { tryFormatJson } from '../../utils/format-json.js';
+import { tryFormatJson } from '../../../utils/format-json.js';
 import { Link } from 'react-router';
 import { copyTextToClipboard } from '../../../components/layout/file-tree/file-tree-actions.js';
 import type { DialogueMode } from '../mode/dialogue-mode.js';

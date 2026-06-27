@@ -20,6 +20,7 @@ import { z } from 'zod';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
+import { buildSqlitePlaceholders } from '../infra/sqlite-batch.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import {
   cancelHandoff,
@@ -55,10 +56,7 @@ import {
   stopAllInFlightStreamRequestsForSession,
 } from './stream-cancellation.js';
 import { buildTeamResumeBackgroundRequestData } from '../team/team-resume-context.js';
-import {
-  assessTeamResumeMode,
-  resolveBackgroundRerunTarget,
-} from '../team/team-resume-context.js';
+import { assessTeamResumeMode, resolveBackgroundRerunTarget } from '../team/team-resume-context.js';
 import { preResumeConsistencyCheck } from '../team/team-resume-consistency-check.js';
 import { runSessionInBackground } from './stream-runtime.js';
 
@@ -1083,7 +1081,7 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
         if (result.treeSessionIds.length > 0) {
           try {
             const roleRows = sqliteAll<{ id: string; role_layer: string | null }>(
-              `SELECT id, role_layer FROM sessions WHERE id IN (${result.treeSessionIds.map(() => '?').join(', ')}) AND user_id = ?`,
+              `SELECT id, role_layer FROM sessions WHERE id IN (${buildSqlitePlaceholders(result.treeSessionIds.length, ', ')}) AND user_id = ?`,
               [...result.treeSessionIds, user.sub],
             );
             for (const row of roleRows) {

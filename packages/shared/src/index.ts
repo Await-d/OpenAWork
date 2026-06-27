@@ -114,6 +114,12 @@ export function isFixedTeamCoreAgentId(agentId: string): boolean {
 
 export type TeamRuntimeLayer = 'reception' | 'pm1' | 'pm2' | 'executor' | 'reviewer';
 
+/**
+ * 推理强度等级（与聊天端 ReasoningEffort 保持一致）。
+ * 用于团队模板中按成员/层独立配置思考模式。
+ */
+export type TeamReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+
 export type TeamMemberSpecialty =
   | 'intake'
   | 'product-planning'
@@ -158,6 +164,17 @@ export interface FixedTeamMemberSlot {
   providerId?: string;
   modelId?: string;
   variant?: string;
+  /**
+   * 该成员运行时是否启用思考模式（可选，向后兼容）。
+   * 未指定时运行时回退到全局默认设置。
+   * 仅对支持思考的模型（supportsThinking=true）生效。
+   */
+  thinkingEnabled?: boolean;
+  /**
+   * 思考强度等级（可选，向后兼容）。
+   * 仅在 thinkingEnabled=true 时生效；未指定时默认 'medium'。
+   */
+  reasoningEffort?: TeamReasoningEffort;
   /**
    * 自定义角色专属字段（specialty === 'custom' 时有意义）：
    *   - custom: 标记这是用户自定义成员（UI / 运行时据此走自定义路径）

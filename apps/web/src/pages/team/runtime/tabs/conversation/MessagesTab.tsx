@@ -3,6 +3,8 @@ import type {
   AgentTeamsMessageCard,
   AgentTeamsSidebarTeam,
 } from '../../data/team-runtime-types.js';
+import { formatSidebarTeamStatus } from '../../data/team-runtime-status.js';
+import { resolveSidebarTeamSubtitle } from '../../data/team-runtime-status.js';
 import { resolveMatchedSharedSessionDetail } from '../../data/team-runtime-shared-context.js';
 import { ChromeBadge } from '../../shell/team-runtime-shell-primitives.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
@@ -11,6 +13,7 @@ import { Icon, DirectIcon, SendIcon, XIcon } from '../../shared/TeamIcons.js';
 import MarkdownMessageContent from '../../../../../components/chat/markdown/markdown-message-content.js';
 import { SharedSessionMessagesView } from './shared-session-messages-view.js';
 import { tryFormatJson, looksLikeJson } from '../../../../../utils/format-json.js';
+import { tryParseIncidentJson, IncidentReadableCard } from '../../../conversation/extras/incident-readable-card.js';
 
 const INITIAL_PAGE_SIZE = 8;
 const LOAD_MORE_STEP = 10;
@@ -156,15 +159,10 @@ export function MessagesTab({
     );
   }
 
-  const statusLabel = selectedTeam
-    ? selectedTeam.status === 'running'
-      ? '运行中'
-      : selectedTeam.status === 'paused'
-        ? '已暂停'
-        : selectedTeam.status === 'failed'
-          ? '失败'
-          : '已完成'
-    : '';
+  const statusLabel = selectedTeam ? formatSidebarTeamStatus(selectedTeam.status) : '';
+  const statusSubtitle = selectedTeam
+    ? resolveSidebarTeamSubtitle(selectedTeam.status, selectedTeam.subtitle)
+    : null;
 
   const showFeedback = feedback && feedback.tone === 'error';
   const showError = !showFeedback && error;
@@ -364,7 +362,7 @@ export function MessagesTab({
           </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
             <ChromeBadge>{statusLabel}</ChromeBadge>
-            <ChromeBadge>{selectedTeam.subtitle}</ChromeBadge>
+            {statusSubtitle ? <ChromeBadge>{statusSubtitle}</ChromeBadge> : null}
           </div>
         </div>
       ) : null}
@@ -559,26 +557,31 @@ export function MessagesTab({
                     overflowWrap: 'anywhere',
                   }}
                 >
-                  {looksLikeJson(card.summary) ? (
-                    <pre
-                      style={{
-                        margin: 0,
-                        padding: '8px 10px',
-                        borderRadius: 6,
-                        background: 'var(--bg-base)',
-                        border: '1px solid var(--border-subtle)',
-                        fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
-                        fontSize: 11.5,
-                        lineHeight: 1.6,
-                        whiteSpace: 'pre',
-                        overflowX: 'auto',
-                      }}
-                    >
-                      {tryFormatJson(card.summary)}
-                    </pre>
-                  ) : (
-                    <MarkdownMessageContent content={card.summary} />
-                  )}
+                  {(() => {
+                    const incident = tryParseIncidentJson(card.summary);
+                    if (incident) return <IncidentReadableCard data={incident} />;
+                    if (looksLikeJson(card.summary)) {
+                      return (
+                        <pre
+                          style={{
+                            margin: 0,
+                            padding: '8px 10px',
+                            borderRadius: 6,
+                            background: 'var(--bg-base)',
+                            border: '1px solid var(--border-subtle)',
+                            fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
+                            fontSize: 11.5,
+                            lineHeight: 1.6,
+                            whiteSpace: 'pre',
+                            overflowX: 'auto',
+                          }}
+                        >
+                          {tryFormatJson(card.summary)}
+                        </pre>
+                      );
+                    }
+                    return <MarkdownMessageContent content={card.summary} />;
+                  })()}
                 </div>
 
                 {/* 跟进回复区 */}
@@ -946,26 +949,31 @@ export function MessagesTab({
                         overflowWrap: 'anywhere',
                       }}
                     >
-                      {looksLikeJson(card.summary) ? (
-                        <pre
-                          style={{
-                            margin: 0,
-                            padding: '6px 8px',
-                            borderRadius: 6,
-                            background: 'var(--bg-base)',
-                            border: '1px solid var(--border-subtle)',
-                            fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
-                            fontSize: 11,
-                            lineHeight: 1.5,
-                            whiteSpace: 'pre',
-                            overflowX: 'auto',
-                          }}
-                        >
-                          {tryFormatJson(card.summary)}
-                        </pre>
-                      ) : (
-                        <MarkdownMessageContent content={card.summary} />
-                      )}
+                      {(() => {
+                        const incident = tryParseIncidentJson(card.summary);
+                        if (incident) return <IncidentReadableCard data={incident} />;
+                        if (looksLikeJson(card.summary)) {
+                          return (
+                            <pre
+                              style={{
+                                margin: 0,
+                                padding: '6px 8px',
+                                borderRadius: 6,
+                                background: 'var(--bg-base)',
+                                border: '1px solid var(--border-subtle)',
+                                fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
+                                fontSize: 11,
+                                lineHeight: 1.5,
+                                whiteSpace: 'pre',
+                                overflowX: 'auto',
+                              }}
+                            >
+                              {tryFormatJson(card.summary)}
+                            </pre>
+                          );
+                        }
+                        return <MarkdownMessageContent content={card.summary} />;
+                      })()}
                     </span>
                   </div>
                 ))}

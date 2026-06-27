@@ -100,22 +100,52 @@ async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promi
   // 构建 user message：把任务描述作为用户输入发给 session
   const roleInstruction =
     role === 'reviewer'
-      ? '请对以下任务的实施结果进行代码评审，指出问题并给出改进建议。你必须提交可评审结果，不允许只重复分析。'
-      : '请根据以下任务描述进行实施，给出具体的代码实现。你必须留下可交付结果，不允许只重复分析。';
+      ? [
+          '你是代码审查员（Reviewer）。请对以下任务的实施结果进行代码评审。',
+          '',
+          '**执行要求**：',
+          '1. 必须先调用工具读取相关代码文件，不要只凭任务描述猜测。',
+          '2. 必须输出结构化评审结果，包含：通过/不通过判定、具体问题列表（含文件位置和行号）、改进建议。',
+          '3. 不允许只回复"已评审"或"看起来没问题"就结束——必须有具体的审查证据。',
+          '4. 如果代码不存在或无法访问，明确说明并标记为"无法评审"。',
+        ].join('\n')
+      : [
+          '你是实施工程师（Executor）。请根据以下任务描述完成具体的代码实现或文档编写。',
+          '',
+          '**执行要求**：',
+          '1. 第一轮必须调用工具——先读取相关文件了解现状，再写入/修改文件。',
+          '2. 不允许只回复文字描述就结束——必须调用 write/submit_patch 等工具产出实际文件。',
+          '3. 如果任务需要创建新文件，直接用 write 工具创建，不要说"建议创建文件"。',
+          '4. 如果任务需要修改现有文件，先 read 再 edit/submit_patch，不要只描述修改方案。',
+          '5. 完成实施后，输出实施摘要：修改了哪些文件、核心实现逻辑、如何验证。',
+        ].join('\n');
 
   const completionProtocol =
     role === 'reviewer'
       ? [
-          '【完成协议】',
+          '【完成协议——必须遵守】',
           '1. 先直接读代码/查证据，不要只口头计划。',
-          '2. 结束前必须至少满足一项：提交 review artifact、输出结构化评审摘要。',
+          '2. 结束前必须满足以下全部条件：',
+          '   a. 至少调用过一次文件读取工具（read/list）',
+          '   b. 输出结构化评审摘要，包含：通过/不通过判定、具体问题列表（含文件位置）、改进建议',
           '3. 如果连续两轮没有新证据、工具调用或有效结论，必须明确失败原因，不要重复 thinking。',
+          '4. 使用工具时必须传入完整参数，不允许空参数调用。',
+          '5. 评审摘要必须包含：通过/不通过判定、具体问题列表（含文件位置）、改进建议。',
+          '6. 禁止在第一轮就回复 end_turn——必须先调用工具获取证据。',
         ].join('\n')
       : [
-          '【完成协议】',
-          '1. 需要查文件/跑命令时直接调用工具，不要反复说“先看看结构”。',
-          '2. 结束前必须至少满足一项：提交 patch/implementation artifact、或输出结构化实施摘要。',
+          '【完成协议——必须遵守】',
+          '1. 需要查文件/跑命令时直接调用工具，不要反复说"先看看结构"。',
+          '2. 结束前必须满足以下全部条件：',
+          '   a. 至少调用过一次文件写入工具（write/submit_patch/edit）',
+          '   b. 输出实施摘要：修改了哪些文件、核心实现逻辑、如何验证',
           '3. 如果连续两轮没有实际产出、工具调用或结论，必须明确失败原因，不要重复 thinking。',
+          '4. 使用工具时必须传入完整参数，不允许空参数调用。',
+          '5. 写文件时使用文件写入工具（如 submit_patch/write），不要用 bash 工具写大文件——大文件应分段写入。',
+          '6. 实施摘要必须包含：修改了哪些文件、核心实现逻辑、如何验证。',
+          '7. 如果任务包含多个子步骤，在一个回合内完成所有步骤，不要拆成多轮对话。',
+          '8. 禁止在第一轮就回复 end_turn——必须先调用工具完成实际工作。',
+          '9. 如果文件内容过大，使用 write 工具分段写入（每次写一部分），不要因为内容大就放弃。',
         ].join('\n');
 
   const userMessage = [
@@ -143,7 +173,19 @@ async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promi
   // 误判为"执行成功"，让 handoff 卡成假完成、上层链路继续派发错误产物。
   let streamResult: Awaited<ReturnType<typeof runSessionInBackground>> | null = null;
   let streamThrew: unknown = null;
-  const streamClientRequestId = createHandoffStreamClientRequestId(input.handoff.id);
+
+  // 从 DB 读取 handoff 的 retry_count，用于生成唯一的 clientRequestId。
+  // 如果 handoff 被 recoveryTick reclaim 后重新执行，retry_count 会递增，
+  // 确保每次执行用不同的 clientRequestId，避免触发 replay。
+  const handoffRetryRow = sqliteGet<{ retry_count: number }>(
+    `SELECT retry_count FROM handoff_records WHERE id = ? LIMIT 1`,
+    [input.handoff.id],
+  );
+  const handoffRetryCount = handoffRetryRow?.retry_count ?? 0;
+  const streamClientRequestId = createHandoffStreamClientRequestId(
+    input.handoff.id,
+    handoffRetryCount,
+  );
 
   // 解析 team root session id，让 stream 管线自动注入 resume context。
   // 执行层（executor/reviewer）需要知道整个任务树的未完成状态，
@@ -194,22 +236,125 @@ async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promi
 
   if (input.signal.aborted) return;
 
-  // 失败判定：抛异常 或 返回 stopReason==='error'。两者都视为本层执行失败。
-  // 对于非 cancelled 的失败，先等 3 秒重试一次（LLM API 偶发 5xx/超时很常见），
+  // 失败判定：抛异常 或 返回 stopReason==='error' 或 stopReason 缺失。
+  // 两者都视为本层执行失败。
+  // 对于非 cancelled 的失败，先等 5 秒重试一次（LLM API 偶发 5xx/超时很常见），
   // 重试仍失败才抛异常让 watcher 走 failHandoff。
-  const streamFailed = streamThrew !== null || streamResult?.stopReason === 'error';
+  // 注意：handleStreamRequest 的某些 early-return 路径（如 model route 解析失败、
+  // replay 命中）返回不含 stopReason 的结果，这种"静默失败"必须被捕获，
+  // 否则会走到 collectExecutionCompletionEvidence 并抛出"缺少 artifact"——
+  // 错误消息不明确，不利于诊断。
+  const streamFailed = streamThrew !== null || !streamResult || streamResult.stopReason === 'error' || !streamResult.stopReason;
   if (streamFailed) {
     const reason =
       streamThrew instanceof Error
         ? streamThrew.message
         : typeof streamThrew === 'string'
           ? streamThrew
-          : (streamResult?.errorSummary ?? '模型流式执行返回错误（stopReason=error）');
+          : !streamResult
+            ? 'stream 执行返回空结果（handleStreamRequest 可能未正确启动）'
+            : !streamResult.stopReason
+              ? `stream 执行返回无 stopReason（statusCode=${streamResult.statusCode ?? 'unknown'}），可能模型路由解析失败或 replay 命中`
+              : (streamResult.errorSummary ?? '模型流式执行返回错误（stopReason=error）');
 
-    // 重试一次
-    console.warn(`[${role}-runner] stream 首次失败（${reason}），3 秒后重试一次…`);
-    await new Promise<void>((resolve) => setTimeout(resolve, 3000));
+    // 重试一次——等 5 秒让模型服务恢复（比 3 秒更稳妥，
+    // "模型服务内部错误"通常需要几秒恢复）
+    console.warn(`[${role}-runner] stream 首次失败（${reason}），5 秒后重试一次…`);
+    await new Promise<void>((resolve) => setTimeout(resolve, 5000));
     if (input.signal.aborted) return;
+
+    // 检查是否有残留的 in-flight 请求（SESSION_ALREADY_RUNNING 场景）。
+    // 如果有，等待它结束，避免重试被 single-flight 拒绝。
+    try {
+      const { getAnyInFlightStreamRequestForSession } = await import(
+        '../../routes/stream-cancellation.js'
+      );
+      let waitCount = 0;
+      while (waitCount < 10) {
+        const inFlight = getAnyInFlightStreamRequestForSession({
+          sessionId: input.toSessionId,
+          userId: input.handoff.userId,
+          excludeClientRequestId: streamClientRequestId,
+        });
+        if (!inFlight) break;
+        console.warn(
+          `[${role}-runner] 等待 session ${input.toSessionId} 的残留 in-flight 请求结束…`,
+        );
+        await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+        waitCount++;
+      }
+    } catch {
+      /* best-effort */
+    }
+
+    // 如果 statusCode=409，尝试多种降级策略：
+    // 1. 清除 session metadata 中的 modelId/providerId（模型绑定不可用场景）
+    // 2. 解析辅助 LLM 配置，在 requestData 中显式传入 providerId/model（绕过 metadata 绑定）
+    // 3. 清除 teamDefinition 中的模型绑定（防止 hasAuthoritativeTeamModel 仍为 true）
+    let retryProviderId: string | undefined;
+    let retryModel: string | undefined;
+    if (streamResult?.statusCode === 409) {
+      try {
+        const metaRow = sqliteGet<{ metadata_json: string | null }>(
+          `SELECT metadata_json FROM sessions WHERE id = ? LIMIT 1`,
+          [input.toSessionId],
+        );
+        if (metaRow?.metadata_json) {
+          const meta = JSON.parse(metaRow.metadata_json) as Record<string, unknown>;
+          let changed = false;
+          // 清除 session 级模型绑定
+          if (meta['modelId']) { delete meta['modelId']; changed = true; }
+          if (meta['providerId']) { delete meta['providerId']; changed = true; }
+          // 清除 teamRoleInstance 中的模型绑定
+          const roleInst = meta['teamRoleInstance'];
+          if (typeof roleInst === 'object' && roleInst !== null) {
+            const ri = roleInst as Record<string, unknown>;
+            if (ri['modelId']) { delete ri['modelId']; changed = true; }
+            if (ri['providerId']) { delete ri['providerId']; changed = true; }
+          }
+          // 清除 teamDefinition 中的成员模型绑定
+          const teamDef = meta['teamDefinition'];
+          if (typeof teamDef === 'object' && teamDef !== null) {
+            const td = teamDef as Record<string, unknown>;
+            if (Array.isArray(td['memberSlots'])) {
+              td['memberSlots'] = (td['memberSlots'] as Array<Record<string, unknown>>).map(
+                (slot) => {
+                  const { modelId: _m, providerId: _p, ...rest } = slot;
+                  void _m; void _p;
+                  return rest;
+                },
+              );
+              changed = true;
+            }
+          }
+          if (changed) {
+            sqliteRun(
+              `UPDATE sessions SET metadata_json = ? WHERE id = ?`,
+              [JSON.stringify(meta), input.toSessionId],
+            );
+            console.warn(
+              `[${role}-runner] 检测到 409，已清除 session metadata 中所有模型绑定`,
+            );
+          }
+        }
+
+        // 解析辅助 LLM 配置，作为重试的显式 providerId/model
+        const executorMemberModel = resolveMemberModelForSessionLayer({
+          sessionId: input.toSessionId,
+          layer: role,
+        });
+        const auxConfig = await resolveAuxiliaryLlmConfig(input.handoff.userId, executorMemberModel);
+        if (auxConfig) {
+          retryProviderId = auxConfig.providerType ?? undefined;
+          retryModel = auxConfig.model;
+          console.warn(
+            `[${role}-runner] 409 降级：重试将使用辅助 LLM 配置（model=${retryModel}）`,
+          );
+        }
+      } catch {
+        /* best-effort */
+      }
+    }
 
     const retryStreamClientRequestId = `${streamClientRequestId}:retry`;
     try {
@@ -219,19 +364,20 @@ async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promi
         ...(teamResumeRootSessionId ? { teamResumeRootSessionId } : {}),
         requestData: {
           message: userMessage,
-          model: 'default',
+          model: retryModel ?? 'default',
+          ...(retryProviderId ? { providerId: retryProviderId } : {}),
           clientRequestId: retryStreamClientRequestId,
           teamTaskThreadId: retryStreamClientRequestId,
         },
       });
       if (input.signal.aborted) return;
-      if (retryResult.stopReason !== 'error' && retryResult.stopReason !== 'cancelled') {
-        // 重试成功
+      if (retryResult.stopReason !== 'error' && retryResult.stopReason !== 'cancelled' && retryResult.stopReason) {
+        // 重试成功（有有效 stopReason 且非 error/cancelled）
         streamResult = retryResult;
         streamThrew = null;
       } else {
         // 重试也失败 → 抛异常
-        const retryReason = retryResult.errorSummary ?? `重试后仍 stopReason=${retryResult.stopReason}`;
+        const retryReason = retryResult.errorSummary ?? `重试后仍 stopReason=${retryResult.stopReason ?? 'undefined'}`;
         throw new Error(`${role} 层执行失败（重试后仍失败）：${retryReason}`);
       }
     } catch (retryErr) {
@@ -297,7 +443,13 @@ function collectExecutionCompletionEvidence(input: {
     }
   | { ok: false; reason: string } {
   const summary = extractLatestChildSessionSummary(
-    listSessionMessagesV2({ sessionId: input.sessionId, userId: input.userId }),
+    listSessionMessagesV2({
+      sessionId: input.sessionId,
+      userId: input.userId,
+      // 只读 final 状态的消息——error 状态的 assistant 消息是 LLM 报错时
+    // 写入的错误提示，不是真正的实施摘要，不应被当作"有效总结"。
+      statuses: ['final'],
+    }),
   );
   const artifactRows = sqliteGet<{ count: number }>(
     `SELECT COUNT(*) AS count
@@ -323,8 +475,13 @@ function collectExecutionCompletionEvidence(input: {
   };
 }
 
-function createHandoffStreamClientRequestId(handoffId: string): string {
-  return `handoff:${handoffId}`;
+function createHandoffStreamClientRequestId(handoffId: string, retryCount?: number): string {
+  // 加入 retryCount 避免 handoff 被 recoveryTick reclaim 后重新执行时
+  // 触发 replay（同一 clientRequestId 会命中 replayPersistedAssistantResponse，
+  // 返回 { statusCode: 200 } 无 stopReason，导致 executor 判定为失败）。
+  return retryCount && retryCount > 0
+    ? `handoff:${handoffId}:r${retryCount}`
+    : `handoff:${handoffId}`;
 }
 
 function taskStatusLabel(status: string): string {
@@ -412,11 +569,14 @@ async function runPm1(input: Parameters<HandoffTaskRunner>[0]): Promise<void> {
     return;
   }
 
-  // 如果是质量评审退回的重新规划，在 PM1 session 写一条明确的标注消息，
+  // 如果是质量评审退回的重新规划，在 PM1 session 和 reception session 各写一条消息，
   // 让前端对话流能清楚区分"首次规划"和"根据反馈修正的重新规划"。
+  // PM1 session 的消息记录 PM1 内部的规划上下文；reception session 的消息让用户
+  // 在接待层对话流中看到 PM1 正在根据反馈重新规划。
   if (isQualityFeedback && qualityFeedback) {
     try {
       const { appendSessionMessageV2 } = await import('../../message/message-v2-adapter.js');
+      // 1. PM1 session 内部消息
       appendSessionMessageV2({
         sessionId: input.toSessionId,
         userId: input.handoff.userId,
@@ -436,6 +596,37 @@ async function runPm1(input: Parameters<HandoffTaskRunner>[0]): Promise<void> {
         ],
         clientRequestId: `handoff:${input.handoff.id}:quality-feedback-notice`,
       });
+
+      // 2. 向 reception session 写消息，让用户在接待层对话流中看到
+      const { sqliteGet } = await import('../../infra/db.js');
+      const receptionRow = sqliteGet<{ from_session_id: string }>(
+        `SELECT from_session_id FROM handoff_records
+         WHERE to_role_layer = 'pm1' AND to_session_id = ?
+         ORDER BY created_at DESC LIMIT 1`,
+        [input.toSessionId],
+      );
+      if (receptionRow?.from_session_id) {
+        appendSessionMessageV2({
+          sessionId: receptionRow.from_session_id,
+          userId: input.handoff.userId,
+          role: 'assistant',
+          agentId: 'interaction-agent',
+          content: [
+            {
+              type: 'text',
+              text: [
+                `🔄 PM1 规划层正在根据 PM2 的反馈重新规划（第 ${escalationRound} 轮）…`,
+                '',
+                '**PM2 反馈的问题**：',
+                qualityFeedback,
+                '',
+                'PM1 将针对以上问题修正 spec/plan/tasks，完成后重新提交给 PM2 审查。',
+              ].join('\n'),
+            },
+          ],
+          clientRequestId: `handoff:${input.handoff.id}:quality-feedback-reception`,
+        });
+      }
     } catch {
       /* best-effort */
     }

@@ -1,9 +1,8 @@
 import type { CSSProperties, ReactNode } from 'react';
-import MarkdownMessageContent from '../../../../components/chat/markdown/markdown-message-content.js';
 import type { ChatMessage } from '../../../../components/conversation-runtime/messages/support.js';
 import { buildTeamAssistantPresentation } from './team-assistant-presentation.js';
 import { hasProcessContent } from './TeamAssistantProcessOutline.js';
-import { tryFormatJson, looksLikeJson } from '../../../../utils/format-json.js';
+import { TeamRichTextContent } from './team-message-content.js';
 
 export interface TeamAssistantReplyCardProps {
   message: ChatMessage;
@@ -87,27 +86,7 @@ export function TeamAssistantReplyCard({
       </div>
 
       <div>
-        {looksLikeJson(mainContent) ? (
-          <pre
-            style={{
-              margin: 0,
-              padding: '10px 12px',
-              borderRadius: 8,
-              background: 'var(--bg-base)',
-              border: '1px solid var(--border-subtle)',
-              fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
-              fontSize: 11.5,
-              lineHeight: 1.6,
-              color: 'var(--fg-default)',
-              whiteSpace: 'pre',
-              overflowX: 'auto',
-            }}
-          >
-            {tryFormatJson(mainContent)}
-          </pre>
-        ) : (
-          <MarkdownMessageContent content={mainContent} />
-        )}
+        <TeamRichTextContent content={mainContent} fallback="团队已处理该步骤，技术过程已默认折叠。" />
       </div>
 
       {presentation.nextStep ? (
@@ -115,27 +94,7 @@ export function TeamAssistantReplyCard({
           <div style={DIVIDER_STYLE} />
           <div style={SECTION_STYLE}>
             <span style={LABEL_STYLE}>下一步</span>
-            {looksLikeJson(presentation.nextStep) ? (
-              <pre
-                style={{
-                  margin: 0,
-                  padding: '8px 10px',
-                  borderRadius: 6,
-                  background: 'var(--bg-base)',
-                  border: '1px solid var(--border-subtle)',
-                  fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
-                  fontSize: 11,
-                  lineHeight: 1.6,
-                  color: 'var(--fg-default)',
-                  whiteSpace: 'pre',
-                  overflowX: 'auto',
-                }}
-              >
-                {tryFormatJson(presentation.nextStep)}
-              </pre>
-            ) : (
-              <MarkdownMessageContent content={presentation.nextStep} />
-            )}
+            <TeamRichTextContent content={presentation.nextStep} />
           </div>
         </>
       ) : null}

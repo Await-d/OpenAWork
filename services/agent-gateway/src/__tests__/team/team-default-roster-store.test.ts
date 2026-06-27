@@ -57,6 +57,27 @@ describe('team-default-roster-store', () => {
     expect(roster[0]?.routingKeywords).toEqual(['性能', '渲染瓶颈', 'profiling']);
   });
 
+  it('会保留 thinkingEnabled / reasoningEffort（模型思考配置）', () => {
+    const customSlot = {
+      id: 'executor-custom-thinking',
+      layer: 'executor' as const,
+      specialty: 'custom' as const,
+      displayName: '推理执行者',
+      personaKey: 'executor:custom:thinking',
+      toolsets: ['read', 'write', 'shell'],
+      required: false,
+      custom: true,
+      thinkingEnabled: true,
+      reasoningEffort: 'high' as const,
+    };
+
+    const roster = store.parseTeamWorkspaceDefaultRosterJson(JSON.stringify([customSlot]));
+
+    expect(roster).toHaveLength(1);
+    expect(roster[0]?.thinkingEnabled).toBe(true);
+    expect(roster[0]?.reasoningEffort).toBe('high');
+  });
+
   it('非法 JSON 会回退到系统默认固定团队', () => {
     const roster = store.parseTeamWorkspaceDefaultRosterJson('{bad-json');
 

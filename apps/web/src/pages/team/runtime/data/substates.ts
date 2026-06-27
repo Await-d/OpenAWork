@@ -79,6 +79,7 @@ export const SUBSTATE_D_ORDER: SubstateD[] = [
   SUBSTATES_D.DISPATCHING,
   SUBSTATES_D.AWAITING_EG,
   SUBSTATES_D.REVIEWING,
+  SUBSTATES_D.ESCALATING,
   SUBSTATES_D.COMPLETED,
 ];
 
@@ -89,8 +90,32 @@ export const SUBSTATE_D_LABEL: Record<SubstateD, string> = {
   dispatching: '派发任务',
   awaiting_eg: '等待执行',
   reviewing: '双重 review',
-  escalating: '升级',
+  escalating: '退回修正中',
   completed: '已完成',
+  failed: '失败',
+  cancelled: '已取消',
+};
+
+// ─── reception 层（接待 / 等待下游）substate ─────────────────────────────
+
+export const SUBSTATES_RECEPTION = {
+  IDLE: 'idle',
+  CHATTING: 'chatting',
+  ROUTING: 'routing',
+  DISPATCHING: 'dispatching',
+  AWAITING_DOWNSTREAM: 'awaiting_downstream',
+  FAILED: 'failed',
+  CANCELLED: 'cancelled',
+} as const;
+
+export type SubstateReception = (typeof SUBSTATES_RECEPTION)[keyof typeof SUBSTATES_RECEPTION];
+
+export const SUBSTATE_RECEPTION_LABEL: Record<SubstateReception, string> = {
+  idle: '等待开始',
+  chatting: '对话中',
+  routing: '路由中',
+  dispatching: '派发任务',
+  awaiting_downstream: '等待下游',
   failed: '失败',
   cancelled: '已取消',
 };
@@ -132,6 +157,7 @@ export const SUBSTATE_E_LABEL: Record<SubstateE, string> = {
  * 合并时语义一致，后写覆盖不影响结果。
  */
 export const SUBSTATE_LABEL_ANY: Record<string, string> = {
+  ...SUBSTATE_RECEPTION_LABEL,
   ...SUBSTATE_C_LABEL,
   ...SUBSTATE_D_LABEL,
   ...SUBSTATE_E_LABEL,
@@ -152,6 +178,8 @@ export function selectSubstateMeta(roleLayer: string | null | undefined): {
   label: Record<string, string>;
 } | null {
   switch (roleLayer) {
+    case 'reception':
+      return { order: Object.values(SUBSTATES_RECEPTION), label: SUBSTATE_RECEPTION_LABEL };
     case 'pm1':
       return { order: SUBSTATE_C_ORDER, label: SUBSTATE_C_LABEL };
     case 'pm2':

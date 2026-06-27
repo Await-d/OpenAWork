@@ -495,6 +495,25 @@ export function useTeamCollaboration(
     void refresh();
   }, [refresh]);
 
+  // 当 teamWorkspaceId 变化时（切换工作区），立即清空旧数据，
+  // 避免在新工作区 snapshot 加载完成前右侧内容体残留旧工作区的
+  // messages / tasks / auditLogs 等。
+  useEffect(() => {
+    setAuditLogs([]);
+    setDiagnostics(undefined);
+    setMessages([]);
+    setRuntimeTaskGroups([]);
+    setSessionShares([]);
+    setSharedSessions([]);
+    setSessions([]);
+    setRuntimeTasks([]);
+    hydrateClarificationStore([]);
+    hydrateTeamRuntimeStores({ handoffs: [], sessions: [] });
+    // 注意：不调用 useTeamUsageStore.clear()——用量数据是跨工作区累积的，
+    // 清空会导致度量 tab 闪烁。也不清 members / tasks——它们会在 refresh
+    // 完成后由 applySnapshot 覆盖，清空反而导致 UI 闪烁。
+  }, [teamWorkspaceId]);
+
   useEffect(() => {
     if (!enabled || !accessToken || typeof window === 'undefined') {
       return;

@@ -105,7 +105,7 @@ export interface AgentTeamsTaskCard {
 
 export interface AgentTeamsTaskLane {
   cards: AgentTeamsTaskCard[];
-  id: string;
+  id: 'todo' | 'doing' | 'review';
   title: string;
 }
 
@@ -153,7 +153,7 @@ export interface AgentTeamsSidebarTeam {
   id: string;
   isSharedSession?: boolean;
   lastMessage?: string;
-  status: 'running' | 'paused' | 'completed' | 'failed';
+  status: 'idle' | 'running' | 'paused' | 'completed' | 'failed';
   subtitle: string;
   title: string;
   updatedAt?: string;

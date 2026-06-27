@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { sqliteAll, sqliteGet } from '../infra/db.js';
+import { buildSqlitePlaceholders } from '../infra/sqlite-batch.js';
 import { buildMergedSessionTaskProjection, type SessionRow } from '../routes/sessions.js';
 import type { SessionTaskResponse } from '../routes/session-task-projection.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
@@ -328,7 +329,8 @@ export function buildTeamResumeSystemPromptFromContext(context: TeamResumeContex
 
 export function buildTeamUserFacingStatusPromptFromContext(context: TeamResumeContext): string {
   const totalTaskCount = context.completedTaskCount + context.incompleteTasks.length;
-  const completionRate = totalTaskCount > 0 ? Math.round((context.completedTaskCount / totalTaskCount) * 100) : 0;
+  const completionRate =
+    totalTaskCount > 0 ? Math.round((context.completedTaskCount / totalTaskCount) * 100) : 0;
   const completedTaskLines = context.completedTasks
     .slice(0, TEAM_STATUS_COMPLETED_LIMIT)
     .map(
@@ -392,7 +394,8 @@ export function resolveTeamRootSessionId(input: {
   userId: string;
 }): string | null {
   const normalizedInputMetadata = parseTeamMetadata(input.metadataJson ?? null);
-  const rootFromInputMetadata = extractTeamRoleInstanceRootSessionIdFromParsed(normalizedInputMetadata);
+  const rootFromInputMetadata =
+    extractTeamRoleInstanceRootSessionIdFromParsed(normalizedInputMetadata);
   if (rootFromInputMetadata) {
     return rootFromInputMetadata;
   }
@@ -479,9 +482,15 @@ function parseTeamMetadata(metadataJson: string | null): Record<string, unknown>
   }
 }
 
-function extractTeamRoleInstanceRootSessionIdFromParsed(parsed: Record<string, unknown>): string | null {
+function extractTeamRoleInstanceRootSessionIdFromParsed(
+  parsed: Record<string, unknown>,
+): string | null {
   const rawRoleInstance = parsed['teamRoleInstance'];
-  if (typeof rawRoleInstance !== 'object' || rawRoleInstance === null || Array.isArray(rawRoleInstance)) {
+  if (
+    typeof rawRoleInstance !== 'object' ||
+    rawRoleInstance === null ||
+    Array.isArray(rawRoleInstance)
+  ) {
     return null;
   }
   const rootSessionId = (rawRoleInstance as Record<string, unknown>)['rootSessionId'];
@@ -497,12 +506,20 @@ function hasTeamMetadata(parsed: Record<string, unknown>): boolean {
   }
 
   const teamDefinition = parsed['teamDefinition'];
-  if (typeof teamDefinition === 'object' && teamDefinition !== null && !Array.isArray(teamDefinition)) {
+  if (
+    typeof teamDefinition === 'object' &&
+    teamDefinition !== null &&
+    !Array.isArray(teamDefinition)
+  ) {
     return true;
   }
 
   const teamRoleInstance = parsed['teamRoleInstance'];
-  return typeof teamRoleInstance === 'object' && teamRoleInstance !== null && !Array.isArray(teamRoleInstance);
+  return (
+    typeof teamRoleInstance === 'object' &&
+    teamRoleInstance !== null &&
+    !Array.isArray(teamRoleInstance)
+  );
 }
 
 function listTeamResumeSessionScope(input: {
@@ -582,7 +599,8 @@ function listTeamResumeHandoffs(input: {
     return [];
   }
 
-  const placeholders = input.sessionIds.map(() => '?').join(', ');
+  const placeholders = buildSqlitePlaceholders(input.sessionIds.length, ', ');
+  const terminalStatePlaceholders = buildSqlitePlaceholders(TERMINAL_HANDOFF_STATES.size, ', ');
   const rows = sqliteAll<{
     failure_reason: string | null;
     from_role_layer: string;
@@ -605,9 +623,7 @@ function listTeamResumeHandoffs(input: {
             updated_at
        FROM handoff_records
       WHERE user_id = ?
-        AND state NOT IN (${Array.from(TERMINAL_HANDOFF_STATES)
-          .map(() => '?')
-          .join(', ')})
+        AND state NOT IN (${terminalStatePlaceholders})
         AND (
           from_session_id IN (${placeholders})
           OR to_session_id IN (${placeholders})
@@ -644,7 +660,7 @@ function listTeamResumeArtifacts(input: {
     return [];
   }
 
-  const placeholders = input.sessionIds.map(() => '?').join(', ');
+  const placeholders = buildSqlitePlaceholders(input.sessionIds.length, ', ');
   const rows = sqliteAll<{
     id: string;
     phase: string | null;
@@ -900,10 +916,7 @@ function buildReceptionResumeSummary(context: TeamResumeContext): string {
     .join('\n');
 }
 
-function buildPm1ResumeContext(
-  context: TeamResumeContext,
-  pm1Tasks: TeamResumeTask[],
-): string {
+function buildPm1ResumeContext(context: TeamResumeContext, pm1Tasks: TeamResumeTask[]): string {
   const taskLines = pm1Tasks
     .slice(0, RESUME_TASK_LIMIT)
     .map(
@@ -1048,7 +1061,10 @@ export function resolveBackgroundRerunTarget(input: {
 
   // 如果没有按层匹配的，回退到根 session
   if (input.assessment.sessionsNeedingRerun.includes(input.rootSessionId)) {
-    return { sessionId: input.rootSessionId, roleLayer: input.sessionRoleLayers.get(input.rootSessionId) ?? null };
+    return {
+      sessionId: input.rootSessionId,
+      roleLayer: input.sessionRoleLayers.get(input.rootSessionId) ?? null,
+    };
   }
 
   return null;

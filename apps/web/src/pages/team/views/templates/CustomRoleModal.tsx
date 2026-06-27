@@ -12,10 +12,11 @@
  */
 
 import { type CSSProperties, useEffect, useMemo, useState } from 'react';
-import type { FixedTeamMemberSlot, TeamRuntimeLayer } from '@openAwork/shared';
+import type { FixedTeamMemberSlot, TeamRuntimeLayer, TeamReasoningEffort } from '@openAwork/shared';
 import { LAYER_ALLOWED_TOOLSETS, TEAM_LAYER_META, TOOLSET_LABEL } from './template-architecture.js';
 import { ModelSelect } from './ModelSelect.js';
 import type { ModelAssignment, ModelCandidate } from './model-assignment.js';
+import { ThinkingConfigControl, type ThinkingConfigValue } from './ThinkingConfigControl.js';
 import type { CapabilityOption } from './use-capability-catalog.js';
 
 const ALL_TOOLS: Array<{ id: string; label: string }> = [
@@ -39,6 +40,7 @@ export interface CustomRoleDraft {
   routingKeywords: string[];
   variant: string | null;
   dispatchPriority: 'high' | 'normal' | 'low';
+  thinking: ThinkingConfigValue | null;
 }
 
 interface Props {
@@ -119,6 +121,8 @@ export function CustomRoleModal({
   const [variant, setVariant] = useState<string | null>(null);
   /** 派发优先级（同分排序权重）。 */
   const [dispatchPriority, setDispatchPriority] = useState<'high' | 'normal' | 'low'>('normal');
+  /** 思考模式配置（开关 + 强度等级）。 */
+  const [thinking, setThinking] = useState<ThinkingConfigValue | null>(null);
   const [optimizing, setOptimizing] = useState(false);
   const [optimizeError, setOptimizeError] = useState<string | null>(null);
 
@@ -143,6 +147,16 @@ export function CustomRoleModal({
       setKeywordsText((editingSlot.routingKeywords ?? []).join('、'));
       setVariant(editingSlot.variant ?? null);
       setDispatchPriority(editingSlot.dispatchPriority ?? 'normal');
+      setThinking(
+        typeof editingSlot.thinkingEnabled === 'boolean'
+          ? {
+              thinkingEnabled: editingSlot.thinkingEnabled,
+              ...(editingSlot.reasoningEffort
+                ? { reasoningEffort: editingSlot.reasoningEffort }
+                : {}),
+            }
+          : null,
+      );
     } else {
       setName('');
       setPrompt('');
@@ -154,6 +168,7 @@ export function CustomRoleModal({
       setKeywordsText('');
       setVariant(null);
       setDispatchPriority('normal');
+      setThinking(null);
     }
     setOptimizeError(null);
   }, [open, editingSlot, layer]);
@@ -520,6 +535,19 @@ export function CustomRoleModal({
               </select>
             </label>
           </div>
+
+          {/* 思考模式配置 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={LABEL}>思考模式</span>
+            <ThinkingConfigControl
+              value={thinking}
+              editable
+              onChange={setThinking}
+            />
+            <span style={{ fontSize: 10, color: 'var(--fg-subtle)', lineHeight: 1.5 }}>
+              开启后该成员运行时使用扩展思考链；仅对支持思考的模型生效。
+            </span>
+          </div>
         </div>
 
         {/* Footer */}
@@ -571,6 +599,7 @@ export function CustomRoleModal({
                 ).slice(0, 30),
                 variant,
                 dispatchPriority,
+                thinking,
               })
             }
             style={{

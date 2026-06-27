@@ -25,6 +25,28 @@ vi.mock('../../message/message-store-v2.js', async () => {
   };
 });
 
+vi.mock('../../tools/workspace-tools.js', async () => {
+  const actual =
+    await vi.importActual<typeof import('../../tools/workspace-tools.js')>(
+      '../../tools/workspace-tools.js',
+    );
+  return {
+    ...actual,
+    listTool: {
+      ...actual.listTool,
+      execute: vi.fn(async (_input, signal: AbortSignal) => {
+        await new Promise<never>((_resolve, reject) => {
+          signal.addEventListener(
+            'abort',
+            () => reject(new Error('workspace list aborted by timeout')),
+            { once: true },
+          );
+        });
+      }),
+    },
+  };
+});
+
 describe('ToolSandbox.execute', () => {
   beforeEach(() => {
     mocks.transitionToolToRunningMock.mockReset();
@@ -72,5 +94,23 @@ describe('ToolSandbox.execute', () => {
     const transitionOrder = mocks.transitionToolToRunningMock.mock.invocationCallOrder[0] ?? 0;
     const executeOrder = toolExecute.mock.invocationCallOrder[0] ?? 0;
     expect(transitionOrder).toBeLessThan(executeOrder);
+  }, 15_000);
+
+  it('keeps ToolRegistry timeout protection for gateway-managed workspace tools', async () => {
+    const { createDefaultSandbox } = await import('../../tools/tool-sandbox.js');
+
+    const sandbox = createDefaultSandbox();
+    const result = await sandbox.execute(
+      {
+        toolCallId: 'call-list-timeout',
+        toolName: 'list',
+        rawInput: { path: '/home/await/project/OpenAWork', depth: 1 },
+      },
+      new AbortController().signal,
+      'session-1',
+    );
+
+    expect(result.isError).toBe(true);
+    expect(String(result.output)).toContain('Tool timed out after 10000ms');
   }, 15_000);
 });

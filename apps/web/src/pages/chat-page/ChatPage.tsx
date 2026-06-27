@@ -214,7 +214,6 @@ import {
   mergePendingQuestion,
   selectPendingQuestionForRequest,
 } from './conversation/render/select-pending-question.js';
-import { detectThinkKeyword } from '../../components/conversation-runtime/reveal/think-keyword-detector.js';
 import { useChatTodoController } from '../../components/conversation-runtime/views/todo-bar.js';
 import {
   filterTranscriptMessages,
@@ -249,6 +248,10 @@ import { useSessionSnapshotLoader } from './conversation/snapshot/use-session-sn
 import { type SessionArtifactsResponse } from '../artifacts/workspace/artifact-workspace-types.js';
 import { type SessionViewStreamingSnapshot } from './conversation/snapshot/use-session-view-cache.js';
 import { useStreamAttachRetry } from '../../components/conversation-runtime/attach/use-stream-attach-retry.js';
+import {
+  normalizeChatThinkingState,
+  resolveChatThinkingRequest,
+} from './conversation/settings/resolve-chat-thinking-request.js';
 import {
   applyChatRightPanelChunk,
   applyChatRightPanelEvent,
@@ -1920,11 +1923,13 @@ export default function ChatPage() {
     const originSessionId = activeSessionRef.current;
     const originSessionViewEpoch = currentSessionViewRef.current.epoch;
     let savedDefaults = savedChatDefaultsRef.current;
+    let availableProviders = providers;
     if (!savedDefaults) {
       try {
         const loadedDefaults = await loadSavedChatDefaults();
         if (loadedDefaults) {
           savedDefaults = loadedDefaults.defaults;
+          availableProviders = loadedDefaults.providers;
           setProviders(loadedDefaults.providers);
           if (!hasAppliedSavedImageDefaultsRef.current) {
             applySavedImageDefaults(loadedDefaults.imageDefaults);
@@ -1955,16 +1960,27 @@ export default function ChatPage() {
     if (!activeModelId && resolvedModelId) {
       setActiveModelId(resolvedModelId);
     }
+
+    const resolvedProvider = availableProviders.find((provider) => provider.id === resolvedProviderId);
+    const resolvedModel = resolvedProvider?.defaultModels.find((model) => model.id === resolvedModelId);
+    const normalizedThinkingState = normalizeChatThinkingState({
+      providerType: resolvedProvider?.type,
+      modelId: resolvedModel?.id ?? resolvedModelId,
+      declaredSupportsThinking: resolvedModel?.supportsThinking === true,
+      thinkingEnabled: resolvedThinkingEnabled,
+      reasoningEffort: resolvedReasoningEffort,
+    });
+
     if (!sessionMetadataDirty) {
-      setThinkingEnabled(resolvedThinkingEnabled);
-      setReasoningEffort(resolvedReasoningEffort);
+      setThinkingEnabled(normalizedThinkingState.thinkingEnabled);
+      setReasoningEffort(normalizedThinkingState.reasoningEffort);
     }
 
     const resolvedMetadata = buildSessionMetadata({
       ...(resolvedProviderId ? { providerId: resolvedProviderId } : {}),
       ...(resolvedModelId ? { modelId: resolvedModelId } : {}),
-      reasoningEffort: resolvedReasoningEffort,
-      thinkingEnabled: resolvedThinkingEnabled,
+      reasoningEffort: normalizedThinkingState.reasoningEffort,
+      thinkingEnabled: normalizedThinkingState.thinkingEnabled,
     });
     const session = await createSessionsClient(gatewayUrl).create(token ?? '', {
       metadata: resolvedMetadata,
@@ -2331,7 +2347,6 @@ export default function ChatPage() {
     let pausedForQuestion = false;
     let currentRoundStartedAt = requestStartedAt;
     let firstTokenLatencyAttached = false;
-    const requestModelSupportsThinking = activeModelOption?.supportsThinking === true;
 
     // Round boundary commit:
     // The gateway persists one assistant message per agent round (see
@@ -2386,10 +2401,24 @@ export default function ChatPage() {
 
     setRightPanelState((prev) => startChatRightPanelRun(prev, text));
 
+    const resolvedThinkingRequest = resolveChatThinkingRequest({
+      providerType: activeProvider?.type,
+      modelId: activeModelOption?.id ?? activeModelId,
+      declaredSupportsThinking: activeModelOption?.supportsThinking === true,
+      thinkingEnabled,
+      reasoningEffort,
+    });
+
     client.stream(sid, requestText, {
       agentId: effectiveAgentId,
       dialogueMode,
       displayMessage: displayMessageForStream,
+      model: activeModelId || 'default',
+      ...(activeProviderId ? { providerId: activeProviderId } : {}),
+      thinkingEnabled: resolvedThinkingRequest.thinkingEnabled,
+      reasoningEffort: resolvedThinkingRequest.reasoningEffort,
+      webSearchEnabled,
+      yoloMode,
       ...(requestInputParts ? { inputParts: requestInputParts } : {}),
       onEvent: (event) => {
         if (activeSessionRef.current !== sid) {
@@ -2885,16 +2914,6 @@ export default function ChatPage() {
         setStreamError(resolvedMessage);
         requestSessionListRefresh();
       },
-      model: activeModelId || 'default',
-      providerId: activeProviderId || undefined,
-      thinkingEnabled: requestModelSupportsThinking ? thinkingEnabled : false,
-      reasoningEffort: requestModelSupportsThinking
-        ? thinkingEnabled && detectThinkKeyword(requestText)
-          ? 'high'
-          : reasoningEffort
-        : undefined,
-      webSearchEnabled,
-      yoloMode,
     });
     return true;
   }
@@ -3913,6 +3932,30 @@ export default function ChatPage() {
     setActiveModelId,
   });
 
+  useEffect(() => {
+    const normalizedThinkingState = normalizeChatThinkingState({
+      providerType: activeProvider?.type,
+      modelId: activeModelOption?.id ?? activeModelId,
+      declaredSupportsThinking: activeModelOption?.supportsThinking === true,
+      thinkingEnabled,
+      reasoningEffort,
+    });
+
+    if (thinkingEnabled !== normalizedThinkingState.thinkingEnabled) {
+      setThinkingEnabled(normalizedThinkingState.thinkingEnabled);
+    }
+    if (reasoningEffort !== normalizedThinkingState.reasoningEffort) {
+      setReasoningEffort(normalizedThinkingState.reasoningEffort);
+    }
+  }, [
+    activeModelId,
+    activeModelOption?.id,
+    activeModelOption?.supportsThinking,
+    activeProvider?.type,
+    reasoningEffort,
+    thinkingEnabled,
+  ]);
+
   const {
     assistantUsageDetails,
     messageInputTokens,
@@ -4798,8 +4841,19 @@ export default function ChatPage() {
               }}
               onStopComposer={() => void stopActiveMessage()}
               onComposerModelSelect={async (pid: string, mid: string) => {
+                const nextProvider = providers.find((provider) => provider.id === pid);
+                const nextModel = nextProvider?.defaultModels.find((model) => model.id === mid);
+                const normalizedThinkingState = normalizeChatThinkingState({
+                  providerType: nextProvider?.type,
+                  modelId: nextModel?.id ?? mid,
+                  declaredSupportsThinking: nextModel?.supportsThinking === true,
+                  thinkingEnabled,
+                  reasoningEffort,
+                });
                 setActiveProviderId(pid);
                 setActiveModelId(mid);
+                setThinkingEnabled(normalizedThinkingState.thinkingEnabled);
+                setReasoningEffort(normalizedThinkingState.reasoningEffort);
                 markSessionMetadataDirty();
               }}
               onToggleWebSearch={handleToggleWebSearch}

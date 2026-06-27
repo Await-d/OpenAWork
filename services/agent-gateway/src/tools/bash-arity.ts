@@ -219,6 +219,51 @@ export function tokenizeCommand(command: string): string[] {
   return tokens;
 }
 
+const SHELL_CONTROL_TOKENS = new Set(['|', '||', '&&', ';', '&', '>', '>>', '<', '<<']);
+const PARTIAL_SCOPE_SKIP_TOKENS = new Set(['--']);
+
+export function readPrimaryCommandTokens(tokens: string[]): string[] {
+  const primary: string[] = [];
+
+  for (const token of tokens) {
+    if (SHELL_CONTROL_TOKENS.has(token)) {
+      break;
+    }
+    primary.push(token);
+  }
+
+  return primary;
+}
+
+export function buildBashApprovalPatterns(command: string): string[] {
+  const primaryTokens = readPrimaryCommandTokens(tokenizeCommand(command.trim()));
+  const patterns = new Set<string>();
+
+  const partialTokens = [...primaryTokens];
+  if (partialTokens.length > 0) {
+    partialTokens.pop();
+  }
+  while (partialTokens.length > 0 && PARTIAL_SCOPE_SKIP_TOKENS.has(partialTokens[partialTokens.length - 1]!)) {
+    partialTokens.pop();
+  }
+  if (partialTokens.length > 1) {
+    patterns.add(`${partialTokens.join(' ')} *`);
+  }
+
+  const arityPattern = bashCommandScope(command);
+  if (arityPattern.trim() !== '*') {
+    patterns.add(arityPattern);
+  }
+
+  const firstToken = primaryTokens[0];
+  if (firstToken) {
+    patterns.add(`${firstToken} *`);
+  }
+
+  patterns.delete(command.trim());
+  return [...patterns];
+}
+
 /**
  * Build a human-readable permission scope string for a bash command.
  * Uses arity-based prefix extraction.
@@ -228,7 +273,7 @@ export function tokenizeCommand(command: string): string[] {
  * bashCommandScope("npm run dev")       // → "npm run dev *"
  */
 export function bashCommandScope(command: string): string {
-  const tokens = tokenizeCommand(command.trim());
+  const tokens = readPrimaryCommandTokens(tokenizeCommand(command.trim()));
   const prefix = bashArityPrefix(tokens);
   return prefix.join(' ') + ' *';
 }

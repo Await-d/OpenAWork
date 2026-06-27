@@ -7,7 +7,11 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import type { TeamRuntimeAlertControlRecord, TeamMessageRecord } from '@openAwork/web-client';
+import type {
+  TeamRuntimeAlertControlRecord,
+  TeamMessageRecord,
+  TeamRuntimeSessionRecord,
+} from '@openAwork/web-client';
 import { createTeamClient } from '@openAwork/web-client';
 import { categorizeAlwaysPatterns } from '@openAwork/shared-ui';
 import type { CreateTeamSessionInput, SessionTask } from '@openAwork/web-client';
@@ -43,7 +47,7 @@ import {
 import { useTeamRuntimeProjection } from '../hooks/use-team-runtime-projection.js';
 import { useTeamRuntimeRoleBindings } from '../hooks/use-team-runtime-role-bindings.js';
 import { useTeamWorkflowTemplates } from '../hooks/use-team-workflow-templates.js';
-import { useHandoffStore } from '../../../../stores/team/team-events.js';
+import { useHandoffStore, useTeamEventsConnectionStore } from '../../../../stores/team/team-events.js';
 import type { TeamSessionCreationDraft } from './team-session-creation.types.js';
 import { EMPTY_VIEW_DATA } from './team-runtime-reference-empty.js';
 import type {
@@ -111,13 +115,126 @@ export function useResolvedTeamRuntimeReferenceData(
   const workflowTemplates = useTeamWorkflowTemplates();
   const [sessionActionBusy, setSessionActionBusy] = useState(false);
   const [localFeedback, setLocalFeedback] = useState<TeamActionFeedback | null>(null);
-  // 新建 session 后立刻记住 id，让 defaultReceptionSessionId 能在 refresh 完成前就指向它
-  const [createdSessionId, setCreatedSessionId] = useState<string | null>(null);
+  // 新建 session 后立刻记住 id + title，让 defaultReceptionSessionId 能在 refresh
+  // 完成前就指向它，同时把临时 session 注入 effectiveSessions 让侧边栏即时展示。
+  const [createdSessionInfo, setCreatedSessionInfo] = useState<{
+    id: string;
+    title: string | null;
+  } | null>(null);
+  const createdSessionId = createdSessionInfo?.id ?? null;
   const snapshotSharedSessions = activeWorkspaceSnapshot?.sharedSessions ?? [];
   const snapshotSessions = activeWorkspaceSnapshot?.sessions ?? [];
-  const effectiveSessions = snapshotSessions.length > 0 ? snapshotSessions : collaboration.sessions;
+
+  // 全局 sessions：不绑定到特定 teamWorkspaceId，用于侧边栏展示所有工作区的会话。
+  // collaboration 传入了 teamWorkspaceId，其 sessions 只包含当前工作区的数据；
+  // 这里额外用全局 runtime（不带过滤）拉取所有工作区的 sessions 做合并。
+  const teamEventsRecoveredAt = useTeamEventsConnectionStore((state) => state.lastRecoveredAt);
+  const [globalSessions, setGlobalSessions] = useState<TeamRuntimeSessionRecord[]>([]);
+  useEffect(() => {
+    if (!accessToken) {
+      setGlobalSessions([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = await teamClient.getRuntimeResult(accessToken);
+        if (cancelled) return;
+        if (result.ok && result.runtime) {
+          setGlobalSessions(result.runtime.sessions);
+        }
+      } catch {
+        // 全局 sessions 加载失败不影响主流程，侧边栏回退到当前工作区数据
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, teamClient, teamEventsRecoveredAt]);
+
+  // 定期刷新全局 sessions，让侧边栏能及时看到其他工作区的新会话。
+  // 与 collaboration 的 20s 轮询独立，这里用 30s 降低网络开销。
+  const [globalSessionsTick, setGlobalSessionsTick] = useState(0);
+  useEffect(() => {
+    if (!accessToken) return undefined;
+    const intervalId = window.setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      setGlobalSessionsTick((v) => v + 1);
+    }, 30_000);
+    return () => window.clearInterval(intervalId);
+  }, [accessToken]);
+
+  useEffect(() => {
+    if (!accessToken || globalSessionsTick === 0) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = await teamClient.getRuntimeResult(accessToken);
+        if (cancelled) return;
+        if (result.ok && result.runtime) {
+          setGlobalSessions(result.runtime.sessions);
+        }
+      } catch {
+        // 轮询失败不影响已有数据
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, teamClient, globalSessionsTick]);
+
+  // 合并全局 sessions 和当前工作区 snapshot sessions：
+  // - 全局 sessions 提供所有工作区的会话列表（侧边栏展示用）
+  // - snapshot sessions 提供当前工作区的详细数据（状态、任务等更即时）
+  // - collaboration.sessions 作为最终 fallback
+  // 去重：以 session.id 为准，snapshot/collaboration 数据优先于全局数据
+  const baseSessions = useMemo(() => {
+    const merged = new Map<string, TeamRuntimeSessionRecord>();
+    // 先放全局 sessions（优先级最低）
+    for (const session of globalSessions) {
+      merged.set(session.id, session);
+    }
+    // 再放 snapshot sessions（覆盖全局同 id 数据，优先级更高）
+    for (const session of snapshotSessions) {
+      merged.set(session.id, session);
+    }
+    // 再放 collaboration sessions（优先级最高）
+    for (const session of collaboration.sessions) {
+      merged.set(session.id, session);
+    }
+    return Array.from(merged.values());
+  }, [collaboration.sessions, globalSessions, snapshotSessions]);
+  // 把刚创建但尚未被 snapshot/collaboration 刷新到的 session 注入到 effectiveSessions 中，
+  // 让侧边栏列表和选中态高亮在 refresh 完成前就能正确展示。
+  const effectiveSessions = useMemo(() => {
+    if (!createdSessionInfo) {
+      return baseSessions;
+    }
+    if (baseSessions.some((s) => s.id === createdSessionInfo.id)) {
+      return baseSessions;
+    }
+    const tempSession: TeamRuntimeSessionRecord = {
+      id: createdSessionInfo.id,
+      metadataJson: '',
+      parentSessionId: null,
+      roleLayer: null,
+      stateStatus: 'idle',
+      title: createdSessionInfo.title ?? '新会话',
+      updatedAt: new Date().toISOString(),
+      workspacePath: activeWorkspace?.defaultWorkingRoot ?? null,
+    };
+    return [tempSession, ...baseSessions];
+  }, [activeWorkspace?.defaultWorkingRoot, baseSessions, createdSessionInfo]);
   const effectiveSharedSessions =
     snapshotSharedSessions.length > 0 ? snapshotSharedSessions : collaboration.sharedSessions;
+
+  // 当 snapshot/collaboration 已包含创建的 session 后，清除临时记录，
+  // 避免临时 session 记录长期残留。
+  useEffect(() => {
+    if (createdSessionInfo && baseSessions.some((s) => s.id === createdSessionInfo.id)) {
+      setCreatedSessionInfo(null);
+    }
+  }, [baseSessions, createdSessionInfo]);
 
   useEffect(() => {
     if (!localFeedback || typeof window === 'undefined') {
@@ -249,7 +366,7 @@ export function useResolvedTeamRuntimeReferenceData(
           message: '当前工作区不可用，无法创建团队会话',
           tone: 'error',
         });
-        return false;
+        return null;
       }
 
       // 把前端 draft 完整转成后端 createTeamSessionSchema 期望的 payload。
@@ -280,10 +397,13 @@ export function useResolvedTeamRuntimeReferenceData(
           });
           return null;
         }
-        // 立刻把新建的 session 注入到 collaboration.sessions 中，
-        // 避免等 refresh 完成前 defaultReceptionSessionId 为空导致对话区空白。
-        // refresh 完成后会用完整数据覆盖这条临时记录。
-        setCreatedSessionId(session.id);
+        // 立刻把新建的 session 注入到 effectiveSessions 中，
+        // 避免等 refresh/snapshot 完成前侧边栏列表和选中态高亮缺失。
+        // snapshot 刷新完成后会由 useEffect 自动清除临时记录。
+        setCreatedSessionInfo({
+          id: session.id,
+          title: session.title ?? (draft.title.trim() || null),
+        });
         const refreshed = await collaboration.refresh();
         setLocalFeedback({
           message: refreshed

@@ -21,14 +21,16 @@ import {
   mapTimelineEventTypeFromMessage,
   mapTimelineEventTypeFromRuntimeTask,
 } from './team-runtime-reference-formatters.js';
-import { getSharedSessionStateLabel } from './team-runtime-model.js';
 import {
   OFFICE_AGENT_POSITIONS,
   ROLE_SLOT_CONFIG,
   mapOfficeStatusFromRole,
   resolveOfficeRole,
 } from './team-runtime-reference-config.js';
-import type { TeamRuntimeSemanticStatus } from './team-runtime-status.js';
+import {
+  formatTeamRuntimeSemanticStatus,
+  type TeamRuntimeSemanticStatus,
+} from './team-runtime-status.js';
 import type {
   AgentTeamsConversationCard,
   AgentTeamsMessageCard,
@@ -221,6 +223,7 @@ export function buildWorkspaceGroupsProjection(input: {
     }
     seenSessionIds.add(session.id);
     const key = session.workspacePath ?? '__unbound__';
+    const runtimeStatus = input.runtimeSessionStatuses.get(session.id) ?? 'idle';
     const current =
       groups.get(key) ?? {
         workspaceLabel: formatWorkspaceLabel(session.workspacePath),
@@ -231,8 +234,8 @@ export function buildWorkspaceGroupsProjection(input: {
     current.sessions.push({
       id: session.id,
       isSharedSession: false,
-      status: mapSidebarStatus(input.runtimeSessionStatuses.get(session.id) ?? 'idle'),
-      subtitle: getSharedSessionStateLabel(session.stateStatus),
+      status: mapSidebarStatus(runtimeStatus),
+      subtitle: formatTeamRuntimeSemanticStatus(runtimeStatus),
       title: session.title ?? session.id,
       updatedAt: session.updatedAt,
       parentSessionId: session.parentSessionId,
@@ -251,6 +254,7 @@ export function buildWorkspaceGroupsProjection(input: {
     }
     seenSessionIds.add(sharedSession.sessionId);
     const key = sharedSession.workspacePath ?? '__unbound__';
+    const runtimeStatus = input.sharedSessionStatuses.get(sharedSession.sessionId) ?? 'idle';
     const current =
       groups.get(key) ?? {
         workspaceLabel: formatWorkspaceLabel(sharedSession.workspacePath),
@@ -260,8 +264,8 @@ export function buildWorkspaceGroupsProjection(input: {
     current.sessions.push({
       id: sharedSession.sessionId,
       isSharedSession: true,
-      status: mapSidebarStatus(input.sharedSessionStatuses.get(sharedSession.sessionId) ?? 'idle'),
-      subtitle: getSharedSessionStateLabel(sharedSession.stateStatus),
+      status: mapSidebarStatus(runtimeStatus),
+      subtitle: formatTeamRuntimeSemanticStatus(runtimeStatus),
       title: sharedSession.title ?? sharedSession.sessionId,
       updatedAt: sharedSession.shareUpdatedAt,
       ...buildWorkspaceExtraFields(taskStats, sharedSession.sessionId),
@@ -273,21 +277,13 @@ export function buildWorkspaceGroupsProjection(input: {
   }
 
   const workspaceGroups = Array.from(groups.values()).map((group) => ({
-      ...group,
-      sessions: [...group.sessions].sort((left, right) =>
-        left.title.localeCompare(right.title, 'zh-CN'),
-      ),
-    }));
+    ...group,
+    sessions: [...group.sessions].sort((left, right) => left.title.localeCompare(right.title, 'zh-CN')),
+  }));
 
-  const effectiveWorkspaceGroups =
-    input.activeWorkspaceDefaultWorkingRoot == null
-      ? workspaceGroups
-      : (() => {
-          const filteredGroups = workspaceGroups.filter(
-            (group) => group.workspacePath === input.activeWorkspaceDefaultWorkingRoot,
-          );
-          return filteredGroups.length > 0 ? filteredGroups : workspaceGroups;
-        })();
+  // 不再按 activeWorkspaceDefaultWorkingRoot 过滤 workspaceGroups，
+  // 让侧边栏同时展示所有工作区的会话分组。
+  const effectiveWorkspaceGroups = workspaceGroups;
 
   const allSidebarTeams = effectiveWorkspaceGroups.flatMap((group) => group.sessions);
   const runningTeams = allSidebarTeams.filter((team) => team.status === 'running');
@@ -608,7 +604,14 @@ export function buildTimelineProjection(input: {
   >;
   memberNameById: ReadonlyMap<string, string>;
   messages: Array<Pick<TeamMessageRecord, 'content' | 'id' | 'memberId' | 'timestamp' | 'type'>>;
-  runtimeTasks: Array<Pick<SessionTask, 'assignedAgent' | 'description' | 'errorMessage' | 'id' | 'result' | 'status' | 'subject' | 'title' | 'updatedAt'>>;
+  runtimeTasks: Array<
+    Pick<
+      SessionTask,
+      'assignedAgent' | 'description' | 'errorMessage' | 'id' | 'result' | 'status' | 'title' | 'updatedAt'
+    > & {
+      subject?: string | null;
+    }
+  >;
 }): {
   activityStats: Record<string, number>;
   timelineEvents: AgentTeamsTimelineEvent[];

@@ -674,8 +674,10 @@ interface SessionProviderSelection {
   delegatedSystemPrompt?: string;
   modelId?: string;
   providerId?: string;
-  variant?: string;
+  reasoningEffort?: string;
   systemPrompt?: string;
+  thinkingEnabled?: boolean;
+  variant?: string;
 }
 
 interface StreamInteractionModes {
@@ -1145,6 +1147,14 @@ function parseSessionProviderSelection(metadataJson: string): SessionProviderSel
           ? parsed['delegatedSystemPrompt']
           : undefined,
       systemPrompt: typeof parsed['systemPrompt'] === 'string' ? parsed['systemPrompt'] : undefined,
+      thinkingEnabled:
+        typeof parsed['thinkingEnabled'] === 'boolean'
+          ? parsed['thinkingEnabled']
+          : undefined,
+      reasoningEffort:
+        typeof parsed['reasoningEffort'] === 'string'
+          ? parsed['reasoningEffort']
+          : undefined,
     };
   } catch {
     return {};
@@ -1315,6 +1325,16 @@ export async function resolveStreamModelRoute(input: {
       input.requestData.systemPrompt ??
       agentSelection.systemPrompt ??
       sessionSelection.systemPrompt,
+    // 团队模板思考模式配置：当 session metadata 中显式设置了 thinking 字段时，
+    // 覆盖请求中的默认值（模板优先于全局默认）。
+    thinkingEnabled:
+      hasAuthoritativeTeamModel && sessionSelection.thinkingEnabled !== undefined
+        ? sessionSelection.thinkingEnabled
+        : input.requestData.thinkingEnabled,
+    reasoningEffort:
+      hasAuthoritativeTeamModel && sessionSelection.reasoningEffort
+        ? (sessionSelection.reasoningEffort as StreamRequest['reasoningEffort'])
+        : input.requestData.reasoningEffort,
   };
   const providerConfig = await getProviderForSelection(
     input.userId,
@@ -1862,6 +1882,22 @@ export async function handleStreamRequest(input: {
       roleLayer: input.sessionContext.roleLayer,
       userId: input.user.sub,
     });
+    // 团队模板思考模式配置：将 session metadata 中的 thinking 字段
+    // 合并到 requestData，确保 runModelRound 中的 shouldApplyThinkingConfig 能正确读取。
+    const sessionSelection = parseSessionProviderSelection(input.sessionContext.metadataJson);
+    const hasAuthoritativeTeamModel =
+      (isTeamRoleLayer(input.sessionContext.roleLayer) ||
+        hasTeamDefinition(input.sessionContext.metadataJson)) &&
+      Boolean(sessionSelection.providerId && sessionSelection.modelId);
+    if (hasAuthoritativeTeamModel) {
+      if (sessionSelection.thinkingEnabled !== undefined) {
+        requestData.thinkingEnabled = sessionSelection.thinkingEnabled;
+      }
+      if (sessionSelection.reasoningEffort) {
+        requestData.reasoningEffort = sessionSelection
+          .reasoningEffort as StreamRequest['reasoningEffort'];
+      }
+    }
     wl.succeed(stepRoute, undefined, {
       downgradeReason: route.downgradeReason ?? 'none',
       effectiveAgentId: route.effectiveAgentId ?? 'none',
@@ -1882,7 +1918,7 @@ export async function handleStreamRequest(input: {
     if (error instanceof TeamModelBindingUnavailableError) {
       input.writeChunk(createStreamErrorChunk(error.code, message, runId));
       wl.flush(ctx, 409);
-      return { statusCode: 409 };
+      return { statusCode: 409, errorSummary: `模型绑定不可用：${message}` };
     }
     wl.flush(ctx, 500);
     throw error;
@@ -1985,7 +2021,7 @@ export async function handleStreamRequest(input: {
     })
   ) {
     wl.flush(ctx, 200);
-    return { statusCode: 200 };
+    return { statusCode: 200, errorSummary: '请求被 replay 拦截（同 clientRequestId 已有持久化结果），未执行新 LLM 调用' };
   }
 
   const inFlight = getInFlightStreamRequest(input.sessionId, requestData.clientRequestId);
@@ -2001,7 +2037,7 @@ export async function handleStreamRequest(input: {
       })
     ) {
       wl.flush(ctx, 200);
-      return { statusCode: 200 };
+      return { statusCode: 200, errorSummary: '请求被 in-flight replay 拦截，未执行新 LLM 调用' };
     }
 
     wl.flush(ctx, 409);
@@ -2019,7 +2055,7 @@ export async function handleStreamRequest(input: {
         runId,
       ),
     );
-    return { statusCode: 409 };
+    return { statusCode: 409, errorSummary: '请求重放失败（REQUEST_REPLAY_FAILED）' };
   }
 
   if (
@@ -2047,7 +2083,7 @@ export async function handleStreamRequest(input: {
         runId,
       ),
     );
-    return { statusCode: 409 };
+    return { statusCode: 409, errorSummary: '会话已有其他请求运行中（SESSION_ALREADY_RUNNING）' };
   }
 
   const abortController = new AbortController();
@@ -2654,6 +2690,35 @@ export async function handleStreamRequest(input: {
             if (incompleteTodos.length > 0 && round < MAX_CONSECUTIVE_TASK_PARENT_AUTO_RESUMES) {
               const total = incompleteTodos.length;
               syntheticContinuationPrompt = `[SYSTEM DIRECTIVE: OPENAWORK - TODO CONTINUATION]\n\nIncomplete tasks remain in your todo list. Continue working on the next pending task.\n\n- Proceed without asking for permission\n- Mark each task complete when finished\n- Do not stop until all tasks are done\n\n[Status: ${total - incompleteTodos.filter((t) => t.status === 'pending').length}/${total} completed, ${incompleteTodos.filter((t) => t.status === 'pending').length} remaining]`;
+              continue;
+            }
+          }
+
+          // Team executor/reviewer 无产出续接：
+          // 当 executor/reviewer 在前几轮就 end_turn 但没有调用任何工具（write/read/submit_patch 等）时，
+          // 注入续接 prompt 让 LLM 继续工作。这防止 LLM 只回复文字描述就结束，
+          // 导致 collectExecutionCompletionEvidence 判定为"缺少 artifact 且缺少有效 assistant 总结"。
+          if (
+            result.stopReason !== 'error' &&
+            result.shouldStop &&
+            round <= 3 &&
+            (input.sessionContext.roleLayer === 'executor' ||
+              input.sessionContext.roleLayer === 'reviewer')
+          ) {
+            const assistantText = result.state?.assistantText ?? '';
+            const hasToolCalls = (result.state?.toolCalls?.size ?? 0) > 0;
+            // 检查是否有工具调用或产出物
+            if (!hasToolCalls && assistantText.length < 200 && round <= 3) {
+              syntheticContinuationPrompt = [
+                '[SYSTEM DIRECTIVE: EXECUTOR CONTINUATION]',
+                '',
+                '你还没有完成实际工作。根据完成协议，你必须：',
+                input.sessionContext.roleLayer === 'executor'
+                  ? '1. 调用 read 工具读取相关文件\n2. 调用 write 或 submit_patch 工具创建/修改文件\n3. 输出实施摘要（修改了哪些文件、核心逻辑、如何验证）'
+                  : '1. 调用 read 工具读取需要审查的代码\n2. 输出结构化评审摘要（通过/不通过判定、问题列表、改进建议）',
+                '',
+                '不要只回复文字描述，必须调用工具完成实际工作。现在请继续执行。',
+              ].join('\n');
               continue;
             }
           }

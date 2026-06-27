@@ -53,3 +53,12 @@ services/agent-gateway/data/
 
 # 本地重构前的代码备份
 .backup/
+
+# AI 工作区本地数据
+.openAwork/
+
+# TypeScript 增量构建缓存
+*.tsbuildinfo
+
+# 临时文件
+file.txt

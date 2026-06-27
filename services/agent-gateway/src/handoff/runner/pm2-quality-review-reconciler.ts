@@ -1,10 +1,15 @@
 import { sqliteAll, sqliteGet, sqliteRun } from '../../infra/db.js';
+import { buildSqlitePlaceholders, chunkSqliteBindValues } from '../../infra/sqlite-batch.js';
 import type { ResolvedAuxiliaryLlmConfig } from '../../provider/auxiliary-llm-config.js';
 import { appendSessionMessageV2 } from '../../message/message-v2-adapter.js';
 import {
   buildAuxiliaryTeamInstructionPrefix,
   prependAuxiliaryTeamInstructionPrefix,
 } from '../../team/team-auxiliary-instruction-stack.js';
+import {
+  extractComparablePathsFromText,
+  normalizeComparablePath,
+} from '../capability/dispatch-package.js';
 import { getTeamConstitution } from '../../team/team-constitution-store.js';
 import { recordTeamRuntimeIncident } from '../../team/team-runtime-diagnostics-store.js';
 import {
@@ -14,6 +19,7 @@ import {
   mergeReviewDispositionIntoPayload,
   retryRunningHandoffById,
 } from '../store/handoff-store.js';
+import type { HandoffRecord } from '../store/handoff-store.js';
 import { submitInboundMessage } from '../store/inbound-store.js';
 import { setSubstate } from '../store/substate-store.js';
 import { publishHandoffEvent } from '../bus/team-events-bus.js';
@@ -22,6 +28,7 @@ import {
   determineFailureDisposition,
   runReviewAggregation,
 } from '../workflow/review-aggregator.js';
+import type { ReviewReport } from '../workflow/review-aggregator.js';
 
 const inFlightPm2QualityReviews = new Set<string>();
 export const QUALITY_REVIEW_RETRY_INTERVAL_MS = 30 * 1000;
@@ -40,6 +47,11 @@ interface Pm2ResultJson {
   qualityReviewLastAttemptAt?: number;
   qualityReviewLastError?: string | null;
   qualityReviewPending?: boolean;
+}
+
+interface RedispatchOwnershipGuardResult {
+  eligible: boolean;
+  reason?: string;
 }
 
 export interface Pm2QualityReviewCandidate {
@@ -98,9 +110,71 @@ export function listPm2HandoffsPendingQualityReview(
   }
 
   if (input.sessionIds && input.sessionIds.length > 0) {
-    const placeholders = input.sessionIds.map(() => '?').join(', ');
-    conditions.push(`(from_session_id IN (${placeholders}) OR to_session_id IN (${placeholders}))`);
-    params.push(...input.sessionIds, ...input.sessionIds);
+    const rowsById = new Map<
+      string,
+      {
+        id: string;
+        result_json: string | null;
+        to_session_id: string | null;
+        user_id: string;
+      }
+    >();
+    for (const batchSessionIds of chunkSqliteBindValues(
+      input.sessionIds,
+      params.length,
+      undefined,
+      2,
+    )) {
+      const placeholders = buildSqlitePlaceholders(batchSessionIds.length, ', ');
+      const rows = sqliteAll<{
+        id: string;
+        result_json: string | null;
+        to_session_id: string | null;
+        user_id: string;
+      }>(
+        `SELECT id, result_json, to_session_id, user_id
+           FROM handoff_records
+          WHERE ${[
+            ...conditions,
+            `(from_session_id IN (${placeholders}) OR to_session_id IN (${placeholders}))`,
+          ].join(' AND ')}`,
+        [...params, ...batchSessionIds, ...batchSessionIds],
+      );
+      for (const row of rows) {
+        if (!rowsById.has(row.id)) {
+          rowsById.set(row.id, row);
+        }
+      }
+    }
+
+    return Array.from(rowsById.values())
+      .map((row) => {
+        const parsed = parsePm2ResultJson(row.result_json);
+        const lastAttemptAtMs =
+          typeof parsed?.qualityReviewLastAttemptAt === 'number'
+            ? parsed.qualityReviewLastAttemptAt
+            : null;
+        const readyNow = shouldAttemptPm2QualityReview(row.result_json, nowMs);
+        const nextAttemptAtMs =
+          readyNow || lastAttemptAtMs === null
+            ? null
+            : lastAttemptAtMs + QUALITY_REVIEW_RETRY_INTERVAL_MS;
+        return {
+          handoffId: row.id,
+          lastError: parsed?.qualityReviewLastError ?? null,
+          lastAttemptAtMs,
+          nextAttemptAtMs,
+          readyNow,
+          sessionId: row.to_session_id,
+          userId: row.user_id,
+        };
+      })
+      .filter((row) => checkAllChildrenCompleted(row.handoffId).allDone)
+      .sort(
+        (left, right) =>
+          (left.lastAttemptAtMs ?? 0) - (right.lastAttemptAtMs ?? 0) ||
+          left.handoffId.localeCompare(right.handoffId),
+      );
   }
 
   const rows = sqliteAll<{
@@ -169,6 +243,96 @@ export function markPm2QualityReviewRetryableFailure(
   });
 }
 
+function collectChildTaskScopePaths(children: readonly (HandoffRecord | undefined)[]): Set<string> {
+  const values = new Set<string>();
+  for (const child of children) {
+    if (!child) {
+      continue;
+    }
+    const payload =
+      typeof child.payload === 'object' && child.payload !== null && !Array.isArray(child.payload)
+        ? (child.payload as Record<string, unknown>)
+        : null;
+    const resultJson =
+      typeof child.resultJson === 'object' &&
+      child.resultJson !== null &&
+      !Array.isArray(child.resultJson)
+        ? (child.resultJson as Record<string, unknown>)
+        : null;
+    const explicitOwnedPaths = Array.isArray(payload?.['ownedPaths'])
+      ? payload['ownedPaths']
+          .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+          .map((value) => normalizeComparablePath(value))
+      : [];
+    for (const path of explicitOwnedPaths) {
+      values.add(path);
+    }
+    if (explicitOwnedPaths.length > 0) {
+      continue;
+    }
+
+    const goal = typeof payload?.['goal'] === 'string' ? payload['goal'] : '';
+    const taskTitle = typeof resultJson?.['taskTitle'] === 'string' ? resultJson['taskTitle'] : '';
+    for (const text of [goal, taskTitle]) {
+      for (const path of extractComparablePathsFromText(text)) {
+        values.add(path);
+      }
+    }
+  }
+  return values;
+}
+
+/**
+ * 自动回收只允许处理当前 PM2 这轮 handoff 子树显式覆盖的任务文件。
+ *
+ * 现有 runtime 没有“全局并发写文件归因”索引，所以这里采用保守守卫：
+ * 只有当评审问题提到的文件路径能和当前子任务 scope 对上时，才允许
+ * 自动回收（redispatch / return-to-c）。若问题只命中外部文件范围，则停止
+ * 自动修正，改为人工介入。
+ *
+ * 这是 fail-safe 而非完美因果分析：
+ * - 没有具体文件路径 → 不拦截（避免误伤正常自动回收）
+ * - 同时提到 in-scope 与 out-of-scope 文件 → 不拦截（视为共享边界的模糊案例）
+ * - 只提到 out-of-scope 文件 → 拦截，防止 PM2 去修别人链路里的问题
+ */
+function assessAutoRemediationOwnershipScope(input: {
+  children: readonly ReturnType<typeof getHandoffById>[];
+  report: ReviewReport;
+}): RedispatchOwnershipGuardResult {
+  if (input.report.overallVerdict === 'pass') {
+    return { eligible: true };
+  }
+
+  const scopedPaths = collectChildTaskScopePaths(input.children);
+  if (scopedPaths.size === 0) {
+    return { eligible: true };
+  }
+
+  const mentionedPaths = Array.from(
+    new Set(
+      [...input.report.specIssues, ...input.report.qualityIssues].flatMap((issue) =>
+        extractComparablePathsFromText(issue),
+      ),
+    ),
+  );
+  if (mentionedPaths.length === 0) {
+    return { eligible: true };
+  }
+
+  const inScope = mentionedPaths.filter((path) => scopedPaths.has(path));
+  const outOfScope = mentionedPaths.filter((path) => !scopedPaths.has(path));
+  if (outOfScope.length === 0 || inScope.length > 0) {
+    return { eligible: true };
+  }
+
+  return {
+    eligible: false,
+    reason: `质量评审命中了当前 PM2 派发范围外的文件（${outOfScope
+      .slice(0, 3)
+      .join('、')}），已停止自动修正，需人工确认是否属于其它角色或并发修改导致。`,
+  };
+}
+
 export async function reconcilePm2QualityReview(input: {
   force?: boolean;
   nowMs?: number;
@@ -196,6 +360,27 @@ export async function reconcilePm2QualityReview(input: {
     // 也检查子任务是否全部完成。如果全部终态，直接触发 quality review，
     // 避免 PM2 永远卡在 running 状态。
     if (!input.force && !shouldAttemptPm2QualityReview(row.result_json, nowMs)) {
+      // 检查 PM2 是否已退回 PM1（result_json 中无 dispatchedHandoffIds 且
+      // qualityReviewPending=false）——这种情况不应触发质量评审。
+      // PM2 runner 在退回 PM1 时设置了 qualityReviewPending: false，
+      // 且没有创建任何子 handoff，所以 result_json 中没有 dispatchedHandoffIds。
+      let parsedResult: Record<string, unknown> | null = null;
+      try {
+        parsedResult = row.result_json
+          ? (JSON.parse(row.result_json) as Record<string, unknown>)
+          : null;
+      } catch {
+        /* ignore */
+      }
+      const hasDispatched =
+        Array.isArray(parsedResult?.['dispatchedHandoffIds']) &&
+        (parsedResult!['dispatchedHandoffIds'] as unknown[]).length > 0;
+      if (!hasDispatched) {
+        // PM2 没有派发任何子任务——可能是退回 PM1 的路径，
+        // 或者 PM2 runner 还没执行到派发步骤。跳过质量评审。
+        return { status: 'noop' };
+      }
+
       // 二次检查：子任务是否全部完成
       const quickCheck = checkAllChildrenCompleted(row.id);
       if (!quickCheck.allDone) {
@@ -206,6 +391,10 @@ export async function reconcilePm2QualityReview(input: {
 
     const { allDone, children } = checkAllChildrenCompleted(row.id);
     if (!allDone) {
+      return { status: 'noop' };
+    }
+    // 没有子任务（PM2 退回了 PM1，没有派发 executor/reviewer）→ 不触发质量评审
+    if (children.length === 0) {
       return { status: 'noop' };
     }
 
@@ -364,15 +553,25 @@ export async function reconcilePm2QualityReview(input: {
         escalationRound: row.retry_count ?? 0,
         report,
       });
+      const ownershipGuard =
+        disposition.action === 'redispatch' || disposition.action === 'return-to-c'
+          ? assessAutoRemediationOwnershipScope({ children, report })
+          : { eligible: true };
+      const effectiveDisposition = !ownershipGuard.eligible
+        ? {
+            action: 'escalate-to-user' as const,
+            reason: ownershipGuard.reason ?? disposition.reason,
+          }
+        : disposition;
       const payloadWithDisposition = mergeReviewDispositionIntoPayload(payload, {
-        action: disposition.action,
-        reason: disposition.reason,
+        action: effectiveDisposition.action,
+        reason: effectiveDisposition.reason,
         status: 'pending',
         updatedAtMs: nowMs,
       });
       writePm2PayloadJson(row.id, payloadWithDisposition);
 
-      if (disposition.action === 'redispatch') {
+      if (effectiveDisposition.action === 'redispatch') {
         recordTeamRuntimeIncident({
           category: 'handoff_failure',
           code: 'handoff-quality-review-redispatch',
@@ -381,7 +580,7 @@ export async function reconcilePm2QualityReview(input: {
             escalationRound: row.retry_count ?? 0,
             toSessionId: pm2SessionId,
           },
-          message: disposition.reason,
+          message: effectiveDisposition.reason,
           severity: 'warning',
           timestamp: nowMs,
           userId: input.userId,
@@ -397,9 +596,53 @@ export async function reconcilePm2QualityReview(input: {
           userId: input.userId,
           role: 'assistant',
           content: [
-            { type: 'text', text: `⚠️ 实现型失败，准备重新派发。原因：${disposition.reason}` },
+            {
+              type: 'text',
+              text: `⚠️ 实现型失败，准备重新派发。原因：${effectiveDisposition.reason}`,
+            },
           ],
         });
+
+        // 向 reception session 写消息让用户知道执行层在自动重试
+        try {
+          const pm1SessionId = sqliteGet<{ from_session_id: string }>(
+            `SELECT from_session_id FROM handoff_records WHERE id = ? LIMIT 1`,
+            [row.id],
+          )?.from_session_id;
+          if (pm1SessionId) {
+            const receptionSessionId = sqliteGet<{ from_session_id: string }>(
+              `SELECT from_session_id FROM handoff_records
+               WHERE to_role_layer = 'pm1' AND to_session_id = ?
+               ORDER BY created_at DESC LIMIT 1`,
+              [pm1SessionId],
+            )?.from_session_id;
+            if (receptionSessionId) {
+              appendSessionMessageV2({
+                sessionId: receptionSessionId,
+                userId: input.userId,
+                role: 'assistant',
+                agentId: 'interaction-agent',
+                content: [
+                  {
+                    type: 'text',
+                    text: [
+                      `🔄 执行层部分任务失败，PM2 正在自动重新派发（第 ${(row.retry_count ?? 0) + 1} 轮）…`,
+                      '',
+                      '**失败原因**：',
+                      effectiveDisposition.reason,
+                      '',
+                      'PM2 将重新派发执行任务，让 executor/reviewer 重新执行。',
+                    ].join('\n'),
+                  },
+                ],
+                clientRequestId: `pm2:${row.id}:redispatch-notice`,
+              });
+            }
+          }
+        } catch {
+          /* best-effort */
+        }
+
         const didRetryPm2 = retryRunningHandoffById(row.id);
         if (didRetryPm2) {
           const updatedPm2 = getHandoffById(row.id);
@@ -410,7 +653,7 @@ export async function reconcilePm2QualityReview(input: {
         return { status: 'reclaimed' };
       }
 
-      if (disposition.action === 'return-to-c') {
+      if (effectiveDisposition.action === 'return-to-c') {
         recordTeamRuntimeIncident({
           category: 'handoff_failure',
           code: 'handoff-quality-review-return-to-c',
@@ -419,7 +662,7 @@ export async function reconcilePm2QualityReview(input: {
             escalationRound: row.retry_count ?? 0,
             toSessionId: pm2SessionId,
           },
-          message: disposition.reason,
+          message: effectiveDisposition.reason,
           severity: 'warning',
           timestamp: nowMs,
           userId: input.userId,
@@ -435,19 +678,17 @@ export async function reconcilePm2QualityReview(input: {
         const qualityFeedback = [
           `## 质量评审反馈（第 ${row.retry_count ?? 0} 轮）`,
           '',
-          `**退回原因**：${disposition.reason}`,
+          `**退回原因**：${effectiveDisposition.reason}`,
           '',
           `**Spec Review 问题**：`,
           ...(report.specIssues.length > 0
             ? report.specIssues.map((issue, idx) => `${idx + 1}. ${issue}`)
-            : ['- 无具体问题'])
-          ,
+            : ['- 无具体问题']),
           '',
           `**Quality Review 问题**：`,
           ...(report.qualityIssues.length > 0
             ? report.qualityIssues.map((issue, idx) => `${idx + 1}. ${issue}`)
-            : ['- 无具体问题'])
-          ,
+            : ['- 无具体问题']),
           '',
           `**PM1 需要根据以上反馈修正 spec/plan/tasks，重点解决评审中指出的问题。**`,
         ].join('\n');
@@ -457,13 +698,16 @@ export async function reconcilePm2QualityReview(input: {
           userId: input.userId,
           role: 'assistant',
           content: [
-            { type: 'text', text: `⚠️ 规划型失败，自动退回 PM1 重新规划。\n\n${qualityFeedback}` },
+            {
+              type: 'text',
+              text: `⚠️ 规划型失败，自动退回 PM1 重新规划。\n\n${qualityFeedback}`,
+            },
           ],
         });
         submitEscalationToReception({
           payload: {
             pm2HandoffId: row.id,
-            reason: disposition.reason,
+            reason: effectiveDisposition.reason,
             source: 'quality-review',
           },
           userId: input.userId,
@@ -471,7 +715,7 @@ export async function reconcilePm2QualityReview(input: {
         });
         const didFailPm2 = failRunningHandoffById({
           handoffId: row.id,
-          reason: disposition.reason,
+          reason: effectiveDisposition.reason,
         });
         if (didFailPm2) {
           const updatedPm2 = getHandoffById(row.id);
@@ -479,13 +723,13 @@ export async function reconcilePm2QualityReview(input: {
             publishHandoffEvent({
               type: 'handoff.failed',
               record: updatedPm2,
-              payload: { reason: disposition.reason },
+              payload: { reason: effectiveDisposition.reason },
             });
           }
         }
         safeSetPm2Substate({
           sessionId: pm2SessionId,
-          substate: 'failed',
+          substate: 'escalating',
           userId: input.userId,
           roleLayer: 'pm2',
         });
@@ -529,7 +773,8 @@ export async function reconcilePm2QualityReview(input: {
                   sourceIntent,
                   rewrittenIntent: `【质量评审退回重新规划】${sourceIntent}\n\n---\n\n${qualityFeedback}`,
                   recommendedRole: 'planner',
-                  recommendedNextStep: '根据质量评审反馈修正 spec/plan/tasks，重点解决评审中指出的问题。',
+                  recommendedNextStep:
+                    '根据质量评审反馈修正 spec/plan/tasks，重点解决评审中指出的问题。',
                   teamWorkspaceId,
                   isQualityFeedback: true,
                   qualityFeedback,
@@ -539,7 +784,7 @@ export async function reconcilePm2QualityReview(input: {
               });
               publishHandoffEvent({ type: 'handoff.created', record: newPm1Handoff });
 
-              // 向 reception session 写消息让用户知道团队在自动修正
+              // 向 reception session 写消息让用户知道团队在自动修正，并附带具体反馈
               try {
                 appendSessionMessageV2({
                   sessionId: receptionSessionId,
@@ -549,7 +794,14 @@ export async function reconcilePm2QualityReview(input: {
                   content: [
                     {
                       type: 'text',
-                      text: `🔄 质量评审发现规划问题，已自动退回 PM1 重新规划（第 ${(row.retry_count ?? 0) + 1} 轮）。PM1 将根据评审反馈修正方案后重新提交。`,
+                      text: [
+                        `🔄 质量评审发现规划问题，已自动退回 PM1 重新规划（第 ${(row.retry_count ?? 0) + 1} 轮）。`,
+                        '',
+                        '**评审反馈**：',
+                        qualityFeedback,
+                        '',
+                        'PM1 将根据以上反馈修正方案后重新提交给 PM2 审查。',
+                      ].join('\n'),
                     },
                   ],
                   clientRequestId: `pm2:${row.id}:auto-return-to-c`,
@@ -576,7 +828,7 @@ export async function reconcilePm2QualityReview(input: {
           escalationRound: row.retry_count ?? 0,
           toSessionId: pm2SessionId,
         },
-        message: disposition.reason,
+        message: effectiveDisposition.reason,
         severity: 'error',
         timestamp: nowMs,
         userId: input.userId,
@@ -594,7 +846,7 @@ export async function reconcilePm2QualityReview(input: {
         content: [
           {
             type: 'text',
-            text: `🔴 多次自动修正仍未通过评审，需要用户介入。\n\n**退回原因**：${disposition.reason}\n\n**Spec Review 问题**：\n${report.specIssues.length > 0 ? report.specIssues.map((s, i) => `${i + 1}. ${s}`).join('\n') : '无'}\n\n**Quality Review 问题**：\n${report.qualityIssues.length > 0 ? report.qualityIssues.map((s, i) => `${i + 1}. ${s}`).join('\n') : '无'}`,
+            text: `🔴 多次自动修正仍未通过评审，需要用户介入。\n\n**退回原因**：${effectiveDisposition.reason}\n\n**Spec Review 问题**：\n${report.specIssues.length > 0 ? report.specIssues.map((s, i) => `${i + 1}. ${s}`).join('\n') : '无'}\n\n**Quality Review 问题**：\n${report.qualityIssues.length > 0 ? report.qualityIssues.map((s, i) => `${i + 1}. ${s}`).join('\n') : '无'}`,
           },
         ],
       });
@@ -624,7 +876,7 @@ export async function reconcilePm2QualityReview(input: {
                     `🔴 团队已自动修正 ${row.retry_count ?? 0} 轮仍未通过质量评审，需要你的帮助。`,
                     '',
                     `**具体问题**：`,
-                    `**退回原因**：${disposition.reason}`,
+                    `**退回原因**：${effectiveDisposition.reason}`,
                     report.specIssues.length > 0
                       ? `**Spec 问题**：\n${report.specIssues.map((s, i) => `${i + 1}. ${s}`).join('\n')}`
                       : '',
@@ -633,7 +885,9 @@ export async function reconcilePm2QualityReview(input: {
                       : '',
                     '',
                     '你可以：调整需求描述后重新发起，或直接告诉团队如何修正这些问题。',
-                  ].filter(Boolean).join('\n'),
+                  ]
+                    .filter(Boolean)
+                    .join('\n'),
                 },
               ],
               clientRequestId: `pm2:${row.id}:escalate-to-user`,
@@ -647,7 +901,7 @@ export async function reconcilePm2QualityReview(input: {
         payload: {
           escalationRound: row.retry_count ?? 0,
           pm2HandoffId: row.id,
-          reason: disposition.reason,
+          reason: effectiveDisposition.reason,
           source: 'quality-review-escalation',
         },
         userId: input.userId,
@@ -655,7 +909,7 @@ export async function reconcilePm2QualityReview(input: {
       });
       const didFailPm2 = failRunningHandoffById({
         handoffId: row.id,
-        reason: disposition.reason,
+        reason: effectiveDisposition.reason,
       });
       if (didFailPm2) {
         const updatedPm2 = getHandoffById(row.id);
@@ -663,7 +917,7 @@ export async function reconcilePm2QualityReview(input: {
           publishHandoffEvent({
             type: 'handoff.failed',
             record: updatedPm2,
-            payload: { reason: disposition.reason },
+            payload: { reason: effectiveDisposition.reason },
           });
         }
       }

@@ -231,9 +231,9 @@ export async function routeByLlm(
   callLlm: (prompt: string) => Promise<string>,
   context?: RouteLlmContext | null,
 ): Promise<RouteResult> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
     const contextBlock = buildContextBlock(context ?? null);
     const fullPrompt = `${ROUTER_CLASSIFICATION_PROMPT}\n\n历史任务上下文：\n${contextBlock}\n\n用户输入：${userIntent}`;
     const output = await Promise.race([
@@ -244,7 +244,6 @@ export async function routeByLlm(
         );
       }),
     ]);
-    clearTimeout(timeout);
 
     const decisionMatch = /DECISION:\s*(RESUME|DIRECT|ORCHESTRATE|CLARIFY)/i.exec(output);
     const reasonMatch = /REASON:\s*(.+)/i.exec(output);
@@ -281,5 +280,7 @@ export async function routeByLlm(
       decisionSource: 'llm',
       reason: `LLM 路由失败（${err instanceof Error ? err.message : 'unknown'}），默认走编排`,
     };
+  } finally {
+    clearTimeout(timeout);
   }
 }

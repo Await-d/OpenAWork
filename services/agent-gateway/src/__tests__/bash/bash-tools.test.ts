@@ -22,6 +22,7 @@ vi.mock('../../infra/db.js', () => ({
 
 const { bashToolDefinition, buildBashPermissionScope, deriveBashDescription, runBashCommand } =
   await import('../../tools/bash-tools.js');
+const { buildBashApprovalPatterns } = await import('../../tools/bash-arity.js');
 const { TRUNCATION_DIR } = await import('../../tools/bash-output-truncator.js');
 
 /**
@@ -150,6 +151,14 @@ describe('bash-tools', () => {
         }),
       ).toBe('git checkout *');
     });
+
+    it('忽略管道后的消费命令，只基于主命令提取审批前缀', () => {
+      expect(
+        buildBashApprovalPatterns(
+          'curl -s "https://news.google.com/rss?hl=zh-CN&gl=CN&ceid=CN:zh-Hans" | head -20',
+        ),
+      ).toEqual(['curl -s *', 'curl *']);
+    });
   });
 
   describe('safety pre-checks', () => {
@@ -205,6 +214,18 @@ describe('bash-tools', () => {
   });
 
   describe('workdir resolution', () => {
+    it('rejects session-scoped bash when the session has no workingDirectory', async () => {
+      await expect(
+        runBashCommand(
+          {
+            command: 'echo hi',
+            description: 'missing workspace',
+          },
+          { sessionId: 'session-without-workspace' },
+        ),
+      ).rejects.toThrow(/当前会话未绑定工作区/);
+    });
+
     it('rejects nonexistent workdir with a clear message', async () => {
       await expect(
         runBashCommand({
@@ -265,8 +286,7 @@ describe('bash-tools', () => {
         description: 'print cwd',
         workdir,
       });
-      // macOS resolves /tmp -> /private/tmp; accept either by matching basename
-      expect(result.output).toContain(path.basename(workdir));
+      expect(result.cwd).toBe(workdir);
     });
   });
 

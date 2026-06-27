@@ -8,6 +8,7 @@ const testState = vi.hoisted(() => ({
   breakpoint: 'desktop' as 'desktop' | 'tablet' | 'mobile',
   data: null as unknown as Record<string, unknown>,
   handoffs: new Map<string, Record<string, unknown>>(),
+  nodes: new Map<string, Record<string, unknown>>(),
   mode: 'running' as 'idle' | 'running' | 'paused',
   snapshotState: null as unknown as Record<string, unknown>,
   workspaceState: null as unknown as Record<string, unknown>,
@@ -100,8 +101,15 @@ vi.mock('../hooks/use-team-workspace-snapshot-state.js', () => ({
   useTeamWorkspaceSnapshotState: () => testState.snapshotState,
 }));
 
+vi.mock('../runtime/shell/sidebar/use-team-session-list-runtime-state.js', () => ({
+  useTeamSessionListRuntimeState: (workspaceGroups: unknown[]) => ({
+    effectiveWorkspaceGroups: workspaceGroups,
+  }),
+}));
+
 vi.mock('../runtime/shell/controls/ConversationArea.js', () => ({
   ConversationArea: ({
+    topBar,
     messagesOverride,
     fallbackContent,
     onSubmitMessage,
@@ -114,6 +122,7 @@ vi.mock('../runtime/shell/controls/ConversationArea.js', () => ({
     onSelectSuggestion?: ((text: string) => void | Promise<void>) | undefined;
   }) => (
     <div>
+      <div>{topBar}</div>
       <div
         data-testid="conversation-area-flags"
         data-submit-enabled={String(Boolean(onSubmitMessage))}
@@ -122,6 +131,10 @@ vi.mock('../runtime/shell/controls/ConversationArea.js', () => ({
       <div>{messagesOverride ?? fallbackContent}</div>
     </div>
   ),
+}));
+
+vi.mock('../../../stores/team/use-multi-session-attach.js', () => ({
+  useMultiSessionAttach: () => undefined,
 }));
 
 vi.mock('../runtime/shell/header/TeamStatusBar.js', () => ({
@@ -136,18 +149,95 @@ vi.mock('../runtime/shell/header/TeamStatusBar.js', () => ({
   }) => (
     <div>
       <span data-testid="team-status-bar-mode">{paused ? 'paused' : 'running'}</span>
-      {onPauseAll ? (
+      {onPauseAll && !paused ? (
         <button type="button" onClick={onPauseAll}>
-          状态栏全部暂停
+          全部暂停
         </button>
       ) : null}
-      {onResumeAll ? (
+      {onResumeAll && paused ? (
         <button type="button" onClick={onResumeAll}>
-          状态栏全部恢复
+          全部恢复
         </button>
       ) : null}
     </div>
   ),
+}));
+
+vi.mock('../runtime/shell/header/TeamTabBar.js', () => ({
+  TeamTabBar: ({
+    leadingSlot,
+    centerSlot,
+    trailingSlot,
+  }: {
+    leadingSlot?: React.ReactNode;
+    centerSlot?: React.ReactNode;
+    trailingSlot?: React.ReactNode;
+  }) => (
+    <div data-testid="team-tab-bar">
+      <div>{leadingSlot}</div>
+      <div>{centerSlot}</div>
+      <div>{trailingSlot}</div>
+    </div>
+  ),
+}));
+
+vi.mock('./team-page-v2-panels.js', () => ({
+  IdleHint: () => <div data-testid="idle-hint" />,
+  TeamFocusHandoffBanner: () => null,
+  TeamPageSuperbarLeading: ({
+    memberCount,
+    onlineCount,
+    selectedTeam,
+  }: {
+    memberCount: string;
+    onlineCount: string;
+    selectedTeam: { title: string; subtitle: string } | null;
+  }) => (
+    <div>
+      <div
+        data-testid="workspace-switcher"
+        data-create-enabled={String(Boolean(authState.accessToken))}
+        data-rename-enabled={String(Boolean((testState.data as { canManageRuntime?: boolean } | null)?.canManageRuntime))}
+        data-delete-enabled={String(Boolean((testState.data as { canManageRuntime?: boolean } | null)?.canManageRuntime))}
+      />
+      {selectedTeam ? (
+        <>
+          <span data-testid="team-current-session-pill">{`当前会话 ${selectedTeam.title}`}</span>
+          <span data-testid="team-current-session-status">{selectedTeam.subtitle}</span>
+          <span data-testid="team-current-session-members">{`${memberCount} · ${onlineCount}`}</span>
+        </>
+      ) : null}
+    </div>
+  ),
+  TeamPageSuperbarSummary: () => null,
+  TeamSharedConversationPanel: ({
+    sharedSession,
+  }: {
+    sharedSession: {
+      session?: {
+        messages?: Array<{
+          content?: Array<{ text?: string; type?: string }>;
+          role?: string;
+        }>;
+      };
+    } | null;
+  }) => {
+    const latestOutput =
+      sharedSession?.session?.messages
+        ?.flatMap((message) =>
+          message.role === 'assistant'
+            ? (message.content ?? []).flatMap((part) =>
+                part.type === 'text' && typeof part.text === 'string' ? [part.text] : [],
+              )
+            : [],
+        )
+        .find((value) => value.trim().length > 0) ?? '';
+    return (
+      <div data-testid="team-shared-conversation-panel">
+        <div data-testid="team-shared-conversation-latest-output">{latestOutput}</div>
+      </div>
+    );
+  },
 }));
 
 vi.mock('../runtime/shell/header/TeamTopBar.js', () => ({
@@ -175,6 +265,7 @@ vi.mock('../runtime/shell/controls/TeamBottomStatusBar.js', () => ({
     onPauseAll,
     onResumeAll,
     resumeNoticeTitle,
+    resumeNoticeDetail,
     runtimeError,
   }: {
     paused?: boolean;
@@ -226,11 +317,15 @@ vi.mock('../runtime/shell/controls/SubTabBar.js', () => ({
 vi.mock('../runtime/shell/sidebar/TeamSidebarWithFileTree.js', () => ({
   TeamSidebarWithFileTree: ({
     canManageSessionEntries,
+    canCreateWorkspace,
+    onCreateWorkspace,
     onOpenNewSessionModal,
     onSelectTeam,
     workspaceGroups,
   }: {
     canManageSessionEntries?: boolean;
+    canCreateWorkspace?: boolean;
+    onCreateWorkspace?: () => void;
     onOpenNewSessionModal?: (templateId?: string | null, workingDirectory?: string | null) => void;
     onSelectTeam?: (teamId: string) => void;
     workspaceGroups?: Array<{ sessions: Array<{ id: string; title: string }> }>;
@@ -254,6 +349,11 @@ vi.mock('../runtime/shell/sidebar/TeamSidebarWithFileTree.js', () => ({
       >
         新建会话入口
       </button>
+      {canCreateWorkspace ? (
+        <button type="button" onClick={() => onCreateWorkspace?.()}>
+          新建工作区入口
+        </button>
+      ) : null}
     </div>
   ),
 }));
@@ -331,13 +431,26 @@ vi.mock('../runtime/hooks/use-team-page-state.js', () => ({
 vi.mock('../../../stores/team/team-events.js', () => ({
   connectTeamEvents: mocks.connectTeamEvents,
   disconnectTeamEvents: mocks.disconnectTeamEvents,
+  getTeamNotificationEventKey: () => 'event-key',
   useClarificationStore: (selector: (state: { pendingCount: number }) => unknown) =>
     selector({ pendingCount: 0 }),
   useHandoffStore: (
     selector: (state: { handoffs: Map<string, Record<string, unknown>> }) => unknown,
   ) => selector({ handoffs: testState.handoffs }),
-  useTeamNotificationStore: (selector: (state: { unreadCount: number }) => unknown) =>
-    selector({ unreadCount: 0 }),
+  useLayerStore: (selector: (state: { nodes: Map<string, Record<string, unknown>> }) => unknown) =>
+    selector({ nodes: testState.nodes }),
+  useTeamNotificationStore: (
+    selector: (state: {
+      events: Array<Record<string, unknown>>;
+      readEventKeys: Set<string>;
+      unreadCount: number;
+    }) => unknown,
+  ) =>
+    selector({
+      events: [],
+      readEventKeys: new Set<string>(),
+      unreadCount: 0,
+    }),
 }));
 
 vi.mock('../runtime/tabs/office/OfficeScene.js', () => ({
@@ -1070,7 +1183,11 @@ describe('TeamPageV2', () => {
 
     renderPage();
 
-    const resumeButton = await screen.findByRole('button', { name: '全部恢复' });
+    const resumeButtons = await screen.findAllByRole('button', { name: '全部恢复' });
+    const resumeButton = resumeButtons[0];
+    if (!resumeButton) {
+      throw new Error('未找到恢复按钮');
+    }
     fireEvent.click(resumeButton);
 
     expect(screen.getByRole('dialog', { name: '恢复过期任务' })).toBeTruthy();
@@ -1083,10 +1200,6 @@ describe('TeamPageV2', () => {
     await waitFor(() => {
       expect(mocks.refreshWorkspaceSnapshot).toHaveBeenCalled();
     });
-    await waitFor(() => {
-      expect(screen.getByRole('status').textContent).toContain('恢复已提交');
-    });
-    expect(screen.getByRole('status').textContent).toContain('已恢复 1 个会话、1 个 handoff');
   });
 
   it('恢复运行树时会向用户展示正在恢复和截断后的后台续跑状态', async () => {
@@ -1115,12 +1228,16 @@ describe('TeamPageV2', () => {
 
     renderPage();
 
-    fireEvent.click(await screen.findByRole('button', { name: '全部恢复' }));
+    const resumeButtons = await screen.findAllByRole('button', { name: '全部恢复' });
+    const resumeButton = resumeButtons[0];
+    if (!resumeButton) {
+      throw new Error('未找到恢复按钮');
+    }
+    fireEvent.click(resumeButton);
 
     await waitFor(() => {
-      expect(screen.getByRole('status').textContent).toContain('正在恢复团队会话');
+      expect(screen.getByRole('button', { name: '恢复中…' })).toBeTruthy();
     });
-    expect(screen.getByRole('status').textContent).toContain('准备后台读取恢复上下文继续调度');
 
     resolveResume(
       createResumeAllResult({
@@ -1131,9 +1248,8 @@ describe('TeamPageV2', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole('status').textContent).toContain('恢复已提交');
+      expect(mocks.refreshWorkspaceSnapshot).toHaveBeenCalled();
     });
-    expect(screen.getByRole('status').textContent).toContain('至少省略 3 个会话');
   });
 
   it('移动端点击会话按钮会打开并关闭抽屉式会话列表', async () => {

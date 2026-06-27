@@ -72,6 +72,7 @@ beforeAll(async () => {
 beforeEach(() => {
   dbModule.sqliteRun('DELETE FROM session_snapshots', []);
   dbModule.sqliteRun('DELETE FROM message_ratings', []);
+  dbModule.sqliteRun('DELETE FROM permission_requests', []);
   dbModule.sqliteRun('DELETE FROM question_requests', []);
   dbModule.sqliteRun('DELETE FROM sessions', []);
   dbModule.sqliteRun('DELETE FROM users', []);
@@ -502,6 +503,70 @@ describe('sessions route error contracts', () => {
       expect(JSON.stringify(reviewerMessages.map((message) => message.content))).not.toContain(
         'PM1 独立消息',
       );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('GET /sessions/:sessionId/status 在大量团队子会话下返回完整子树且不触发 SQL 变量上限', async () => {
+    const rootSessionId = 'team-status-root';
+    dbModule.sqliteRun(
+      `INSERT INTO sessions (id, user_id, title, metadata_json, state_status, role_layer)
+       VALUES (?, ?, 'root', '{}', 'idle', 'reception')`,
+      [rootSessionId, USER_ID],
+    );
+
+    const childCount = 905;
+    for (let index = 0; index < childCount; index += 1) {
+      dbModule.sqliteRun(
+        `INSERT INTO sessions (id, user_id, title, metadata_json, state_status, role_layer, team_parent_session_id)
+         VALUES (?, ?, 'child', '{}', 'idle', 'pm1', ?)`,
+        [`team-status-child-${index}`, USER_ID, rootSessionId],
+      );
+    }
+
+    dbModule.sqliteRun(
+      `INSERT INTO permission_requests
+        (id, session_id, tool_name, scope, reason, risk_level, status)
+       VALUES ('perm-bulk-status', ?, 'bash', 'workspace', 'test', 'medium', 'pending')`,
+      ['team-status-child-904'],
+    );
+    dbModule.sqliteRun(
+      `INSERT INTO question_requests
+        (id, session_id, user_id, tool_name, title, questions_json, status)
+       VALUES ('question-bulk-status', ?, ?, 'ask', '需要回答', '[]', 'pending')`,
+      ['team-status-child-903', USER_ID],
+    );
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/sessions/${rootSessionId}/status`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const status = response.json().status as {
+        children: Array<{ id: string }>;
+        pendingPermissions: Array<{ requestId: string; sessionId: string }>;
+        pendingQuestions: Array<{ requestId: string; sessionId: string }>;
+      };
+
+      expect(status.children).toHaveLength(childCount);
+      expect(status.children.some((child) => child.id === 'team-status-child-904')).toBe(true);
+      expect(status.pendingPermissions).toEqual([
+        expect.objectContaining({
+          requestId: 'perm-bulk-status',
+          sessionId: 'team-status-child-904',
+        }),
+      ]);
+      expect(status.pendingQuestions).toEqual([
+        expect.objectContaining({
+          requestId: 'question-bulk-status',
+          sessionId: 'team-status-child-903',
+        }),
+      ]);
     } finally {
       await app.close();
     }

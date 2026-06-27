@@ -102,4 +102,35 @@ describe('buildTeamAssistantPresentation', () => {
     expect(result.stats.toolCallCount).toBe(1);
     expect(result.stats.readLikeToolCount).toBe(1);
   });
+
+  it('会清洗内联 thinking 标签，并折叠连续重复的思考片段', () => {
+    const repeatedThinking =
+      'Good, the tech selection report was written successfully. Now I need to write the roles and workflow spec.';
+    const message: ChatMessage = {
+      id: 'm-4',
+      role: 'assistant',
+      content: [
+        `<thinking>${repeatedThinking}</thinking>`,
+        `<thinking>${repeatedThinking}</thinking>`,
+        '已完成技术选型报告，接下来整理角色分工与协作流程说明。',
+      ].join(' '),
+    };
+
+    const result = buildTeamAssistantPresentation(message);
+    expect(result.summaryText).not.toContain('<thinking>');
+    expect(result.summaryText).not.toContain('</thinking>');
+    expect(result.summaryText.match(/Good, the tech selection report/g)?.length ?? 0).toBe(1);
+    expect(result.summaryText).toContain('已完成技术选型报告');
+  });
+
+  it('会忽略空的 thinking 标签块', () => {
+    const message: ChatMessage = {
+      id: 'm-5',
+      role: 'assistant',
+      content: '<thinking>   </thinking>\n\n最终结论：保留当前实现，先补角色与流程规范。',
+    };
+
+    const result = buildTeamAssistantPresentation(message);
+    expect(result.summaryText).toBe('最终结论：保留当前实现，先补角色与流程规范。');
+  });
 });

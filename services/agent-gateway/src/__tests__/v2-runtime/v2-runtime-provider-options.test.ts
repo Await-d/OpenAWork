@@ -51,6 +51,116 @@ describe('buildProviderOptions', () => {
     expect(options).toBeUndefined();
   });
 
+  it('keeps explicit unsupported models disabled outside openai/custom proxy fallback', () => {
+    const options = buildProviderOptions({
+      thinking: {
+        ...baseThinking,
+        providerType: 'anthropic',
+        supportsThinking: false,
+      },
+      model: 'claude-haiku-4-5',
+    });
+    expect(options).toBeUndefined();
+  });
+
+  it('infers vendor-qualified proxy model ids before choosing option shape', () => {
+    const anthropicProxy = buildProviderOptions({
+      thinking: {
+        ...baseThinking,
+        providerType: 'openai',
+        supportsThinking: false,
+      },
+      model: 'anthropic/claude-sonnet-4-0',
+    });
+    expect(anthropicProxy?.['openai']).toMatchObject({
+      thinking: { type: 'enabled', budgetTokens: 8192 },
+    });
+
+    const customOpenAIProxy = buildProviderOptions({
+      thinking: {
+        ...baseThinking,
+        providerType: 'custom',
+        supportsThinking: false,
+      },
+      model: 'openai/gpt-5',
+    });
+    expect(customOpenAIProxy?.['custom']).toMatchObject({ reasoningEffort: 'medium' });
+  });
+
+  it('flattens body-based thinking params for openai-compatible OpenAI proxies', () => {
+    const geminiProxy = buildProviderOptions({
+      thinking: {
+        ...baseThinking,
+        providerType: 'openai',
+        supportsThinking: false,
+      },
+      model: 'gemini-2.5-pro',
+    });
+    expect(geminiProxy?.['openai']).toMatchObject({
+      google: {
+        thinking_config: {
+          include_thoughts: true,
+          thinking_budget: 8192,
+        },
+      },
+    });
+    expect(geminiProxy?.['openai']).not.toHaveProperty('body');
+  });
+
+  it('keeps unsupported vendor-qualified proxy models disabled', () => {
+    const customAnthropicProxy = buildProviderOptions({
+      thinking: {
+        ...baseThinking,
+        providerType: 'custom',
+        supportsThinking: false,
+      },
+      model: 'anthropic/claude-haiku-4-5',
+    });
+    expect(customAnthropicProxy).toBeUndefined();
+
+    const customOpenAIProxy = buildProviderOptions({
+      thinking: {
+        ...baseThinking,
+        providerType: 'custom',
+        supportsThinking: false,
+      },
+      model: 'openai/gpt-4o',
+    });
+    expect(customOpenAIProxy).toBeUndefined();
+  });
+
+  it('does not re-enable thinking for proxy models that only match a vendor prefix', () => {
+    const customQwenProxy = buildProviderOptions({
+      thinking: {
+        ...baseThinking,
+        providerType: 'custom',
+        supportsThinking: false,
+      },
+      model: 'qwen-max',
+    });
+    expect(customQwenProxy).toBeUndefined();
+
+    const openaiGeminiProxy = buildProviderOptions({
+      thinking: {
+        ...baseThinking,
+        providerType: 'openai',
+        supportsThinking: false,
+      },
+      model: 'gemini-2.0-flash',
+    });
+    expect(openaiGeminiProxy).toBeUndefined();
+
+    const customMoonshotProxy = buildProviderOptions({
+      thinking: {
+        ...baseThinking,
+        providerType: 'custom',
+        supportsThinking: false,
+      },
+      model: 'moonshot-v1-32k',
+    });
+    expect(customMoonshotProxy).toBeUndefined();
+  });
+
   it('maps openai providerType to openai.reasoningEffort', () => {
     const options = buildProviderOptions({
       thinking: { ...baseThinking, providerType: 'openai' },
@@ -167,12 +277,13 @@ describe('buildProviderOptions', () => {
     expect(options).toBeUndefined();
   });
 
-  it('skips thinking for deepseek when disabled', () => {
+  it('emits deepseek.thinking disabled when thinking is turned off', () => {
     const options = buildProviderOptions({
       thinking: { ...baseThinking, providerType: 'deepseek', enabled: false },
       model: 'deepseek-chat',
     });
-    expect(options).toBeUndefined();
+    const oc = options?.['deepseek'] as Record<string, unknown> | undefined;
+    expect(oc).toEqual({ thinking: { type: 'disabled' } });
   });
 
   it('returns undefined for unrecognised providerType', () => {

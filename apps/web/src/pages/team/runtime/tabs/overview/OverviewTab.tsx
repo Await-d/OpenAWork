@@ -4,6 +4,8 @@ import type {
   AgentTeamsSidebarTeam,
   AgentTeamsTimelineEventType,
 } from '../../data/team-runtime-types.js';
+import { formatSidebarTeamStatus } from '../../data/team-runtime-status.js';
+import { resolveSidebarTeamSubtitle } from '../../data/team-runtime-status.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
 import { formatTimelineDetail } from '../../data/team-runtime-reference-formatters.js';
 import { PANEL_STYLE, TREND_META } from '../../shared/team-runtime-shared.js';
@@ -26,6 +28,9 @@ export function OverviewTab({
   selectedTeam?: AgentTeamsSidebarTeam | null;
 }) {
   const { activityStats, overviewCards, timelineEvents } = useTeamRuntimeReferenceViewData();
+  const selectedTeamSubtitle = selectedTeam
+    ? resolveSidebarTeamSubtitle(selectedTeam.status, selectedTeam.subtitle)
+    : null;
   if (selectedTeam?.isSharedSession) {
     return (
       <TabContainer
@@ -127,27 +132,24 @@ export function OverviewTab({
               >
                 {selectedTeam.title}
               </span>
-              <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
-                {selectedTeam.subtitle}
-              </span>
+              {selectedTeamSubtitle ? (
+                <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
+                  {selectedTeamSubtitle}
+                </span>
+              ) : null}
             </div>
             {(() => {
               const statusColor =
-                selectedTeam.status === 'running'
+                selectedTeam.status === 'idle'
+                  ? 'var(--fg-subtle)'
+                  : selectedTeam.status === 'running'
                   ? 'var(--success)'
                   : selectedTeam.status === 'paused'
                     ? 'var(--warning)'
                     : selectedTeam.status === 'failed'
                       ? 'var(--danger)'
                       : 'var(--fg-muted)';
-              const statusLabel =
-                selectedTeam.status === 'running'
-                  ? '运行中'
-                  : selectedTeam.status === 'paused'
-                    ? '已暂停'
-                    : selectedTeam.status === 'failed'
-                      ? '失败'
-                      : '已完成';
+              const statusLabel = formatSidebarTeamStatus(selectedTeam.status);
               return (
                 <span
                   style={{

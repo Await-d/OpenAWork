@@ -3,7 +3,7 @@
  *
  * 复用 useTeamRunState 的聚合结果，渲染成一个小胶囊（圆点/spinner + 文案），
  * 用于「顶部 tab 栏」等空间受限处，让用户在任意 tab 都能一眼看到团队是在跑 /
- * 卡住 / 失败 / 完成 / 断连。与接待对话顶部的完整横幅（TeamRunStateBanner）共用
+ * 失败 / 完成 / 断连。与接待对话顶部的完整横幅（TeamRunStateBanner）共用
  * 同一份运行态来源，保证全局一致。
  *
  * idle（从未开始）时不渲染，避免噪音。
@@ -23,7 +23,6 @@ interface PhaseVisual {
 
 const PHASE_VISUAL: Record<Exclude<TeamRunPhase, 'idle'>, PhaseVisual> = {
   working: { color: 'var(--accent)', icon: '🟢', label: '运行中', spinning: true },
-  stalled: { color: 'var(--warning)', icon: '🟡', label: '疑似停滞' },
   failed: { color: DANGER, icon: '🔴', label: '出现失败' },
   completed: { color: 'var(--success)', icon: '✅', label: '已完成' },
   disconnected: { color: 'var(--warning)', icon: '⚠', label: '连接断开' },
@@ -63,9 +62,7 @@ export function TeamRunStatePill({ compact = false, style }: TeamRunStatePillPro
 
   const visual = PHASE_VISUAL[run.phase];
   const count =
-    run.phase === 'working' || run.phase === 'stalled'
-      ? run.activeCount
-      : run.phase === 'failed'
+    run.phase === 'working' ? run.activeCount : run.phase === 'failed'
         ? run.failedCount
         : 0;
 

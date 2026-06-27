@@ -197,6 +197,10 @@ export interface TeamSidebarWithFileTreeProps extends TeamSessionListSidebarProp
   onOpenWorkspacePicker?: () => void;
   /** 顶层受控打开新会话弹窗（可附带模板预选）。 */
   onOpenNewSessionModal?: (templateId?: string | null, workingDirectory?: string | null) => void;
+  /** 新建工作区回调（split button 副按钮）。 */
+  onCreateWorkspace?: () => void;
+  /** 是否有权限创建工作区。 */
+  canCreateWorkspace?: boolean;
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -206,6 +210,8 @@ export function TeamSidebarWithFileTree({
   onOpenFile,
   onOpenWorkspacePicker,
   onOpenNewSessionModal,
+  onCreateWorkspace,
+  canCreateWorkspace,
   canManageSessionEntries = true,
   collapsed,
   onSubmitDraft,
@@ -567,7 +573,7 @@ export function TeamSidebarWithFileTree({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-      {/* 顶部主按钮行：新建会话 + 工作区入口（split button） */}
+      {/* 顶部主按钮行：新建会话 + 工作区切换（split button 模式） */}
       <div style={TOP_BAR_STYLE}>
         <div style={{ display: 'flex', gap: 0, flex: 1, minWidth: 0 }}>
           <button
@@ -600,7 +606,31 @@ export function TeamSidebarWithFileTree({
             </svg>
             新建会话
           </button>
-          {onOpenWorkspacePicker ? (
+          {/* 新建工作区按钮（split button 副按钮，与 chat 端布局一致） */}
+          {canCreateWorkspace && onCreateWorkspace ? (
+            <button
+              type="button"
+              onClick={onCreateWorkspace}
+              title="新建工作区"
+              style={PRIMARY_SPLIT_BTN_STYLE}
+            >
+              <svg
+                aria-hidden="true"
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                <line x1="12" y1="11" x2="12" y2="17" />
+                <line x1="9" y1="14" x2="15" y2="14" />
+              </svg>
+            </button>
+          ) : onOpenWorkspacePicker ? (
             <button
               type="button"
               onClick={onOpenWorkspacePicker}
@@ -698,6 +728,14 @@ export function TeamSidebarWithFileTree({
           onCloseNewSessionModal={handleCloseNewSessionModal}
           initialTemplateId={initialTemplateId}
           initialWorkingDirectory={effectiveInitialWorkingDirectory}
+          onOpenNewSessionModal={
+            onOpenNewSessionModal
+              ? onOpenNewSessionModal
+              : (_templateId: string | null, workingDirectory?: string | null) => {
+                  setInternalInitialWorkingDirectory(workingDirectory ?? null);
+                  setInternalShowNewSessionModal(true);
+                }
+          }
           {...sidebarProps}
         />
       ) : (

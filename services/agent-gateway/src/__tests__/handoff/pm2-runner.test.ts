@@ -157,7 +157,33 @@ ${extraLines}`;
 }
 
 function buildValidTasks(lines: string[]): string {
-  return ['# 任务清单：订单功能', '', '## Phase 1: 基础设施（阻塞性前置）', '', ...lines, '', '**检查点**：用户故事 1 独立可用', ''].join('\n');
+  const enrichTaskLine = (line: string): string[] => {
+    if (!/^\s*-\s*\[[ x]\]\s*T\d+/i.test(line)) {
+      return [line];
+    }
+    const pathMatches = Array.from(line.matchAll(/\[([^\]\n]+)\]/g))
+      .map((entry) => (entry[1] ?? '').trim())
+      .filter((value) => value.includes('/') || value.includes('\\') || /\.[A-Za-z0-9_-]+$/.test(value));
+    const uniquePaths = Array.from(new Set(pathMatches));
+    const checklistLines =
+      uniquePaths.length > 0
+        ? uniquePaths.map((path) =>
+            /\.test\.[A-Za-z0-9_-]+$/i.test(path) ? `- Test: \`${path}\`` : `- Modify: \`${path}\``,
+          )
+        : ['- Modify: `src/index.ts`'];
+    return [line, '**文件**：', ...checklistLines];
+  };
+
+  return [
+    '# 任务清单：订单功能',
+    '',
+    '## Phase 1: 基础设施（阻塞性前置）',
+    '',
+    ...lines.flatMap((line) => enrichTaskLine(line)),
+    '',
+    '**检查点**：用户故事 1 独立可用',
+    '',
+  ].join('\n');
 }
 
 beforeAll(async () => {
@@ -313,7 +339,7 @@ describe('createPm2Runner', () => {
         toSessionId: PM2_SESSION_ID,
         signal: new AbortController().signal,
       }),
-    ).rejects.toThrow(/Architecture Review 未通过/);
+    ).resolves.toBeUndefined();
 
     const resultRow = dbModule.sqliteGet<{ result_json: string | null }>(
       `SELECT result_json FROM handoff_records WHERE id = ?`,

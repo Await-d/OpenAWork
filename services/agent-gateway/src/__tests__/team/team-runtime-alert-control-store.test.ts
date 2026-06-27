@@ -62,4 +62,25 @@ describe('team-runtime-alert-control-store', () => {
     );
     expect(count?.c).toBe(0);
   });
+
+  it('支持大批量 alertCodes 过滤查询', () => {
+    const alertCodes = Array.from({ length: 905 }, (_, index) => `alert-${index}`);
+    for (const alertCode of alertCodes) {
+      alertControlStore.upsertTeamRuntimeAlertControl({
+        alertCode,
+        note: null,
+        state: 'acknowledged',
+        userId: USER_ID,
+      });
+    }
+
+    const controls = alertControlStore.listTeamRuntimeAlertControls({
+      alertCodes,
+      userId: USER_ID,
+    });
+
+    expect(controls).toHaveLength(alertCodes.length);
+    expect(controls[0]?.alertCode).toBe(alertCodes[0]);
+    expect(controls.at(-1)?.alertCode).toBe(alertCodes.at(-1));
+  });
 });

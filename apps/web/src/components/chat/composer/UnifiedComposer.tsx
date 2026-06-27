@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import type { AttachmentItem } from '@openAwork/shared-ui';
+import { inferSupportsThinking } from '@openAwork/shared-ui';
 import type { CommandDescriptor } from '@openAwork/shared';
 import type { PromptOptimizerResult } from '@openAwork/web-client';
 import { createWorkflowsClient } from '@openAwork/web-client';
@@ -393,7 +394,11 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
         modelSettingsRef={modelSettingsBtnRef}
         showModelPicker={showModelPicker}
         showModelSettings={showModelSettings}
-        activeModelSupportsThinking={activeModelOption?.supportsThinking === true}
+        activeModelSupportsThinking={inferSupportsThinking(
+          activeProvider?.type,
+          activeModelOption?.id ?? activeModelId,
+          activeModelOption?.supportsThinking === true,
+        )}
         hasConfiguredImageModel={hasConfiguredImageModel}
         imageGenerationBusy={imageGenerationBusy}
         imageGenerationDefaults={imageGenerationDefaults}
@@ -507,7 +512,11 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
           modelLabel={(activeModelOption?.label ?? activeModelId) || '当前模型'}
           providerType={activeProvider?.type}
           modelId={activeModelOption?.id ?? activeModelId}
-          supportsThinking={activeModelOption?.supportsThinking === true}
+          supportsThinking={inferSupportsThinking(
+            activeProvider?.type,
+            activeModelOption?.id ?? activeModelId,
+            activeModelOption?.supportsThinking === true,
+          )}
           canConfigureThinking={activeModelCanConfigureThinking ?? false}
           contextWindow={activeModelOption?.contextWindow}
           supportsTools={activeModelOption?.supportsTools}

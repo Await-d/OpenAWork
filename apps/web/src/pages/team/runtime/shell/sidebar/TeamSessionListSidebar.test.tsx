@@ -3,6 +3,8 @@
 import React from 'react';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useHandoffStore, useLayerStore } from '../../../../../stores/team/team-events.js';
+import { publishSessionRunState } from '../../../../../utils/session/session-list-events.js';
 import { TeamSessionListSidebar } from './TeamSessionListSidebar.js';
 
 const copyTextToClipboardMock = vi.hoisted(() => vi.fn(async () => undefined));
@@ -87,6 +89,8 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  useHandoffStore.setState({ handoffs: new Map() });
+  useLayerStore.setState({ nodes: new Map() });
   vi.restoreAllMocks();
 });
 
@@ -253,5 +257,168 @@ describe('TeamSessionListSidebar', () => {
     const createButton = screen.getByRole('button', { name: '新建会话' });
     expect(createButton.hasAttribute('disabled')).toBe(true);
     expect(createButton.getAttribute('title')).toBe('请先选择工作空间');
+  });
+
+  it('收到 session 运行态事件后会立即用最新状态更新会话动作', async () => {
+    renderSidebar({
+      workspaceGroups: [
+        {
+          sessions: [
+            createSession({
+              id: 'session-1',
+              status: 'running',
+              subtitle: '运行中',
+              title: '运行会话',
+            }),
+          ],
+          workspaceLabel: 'workspace/demo',
+          workspacePath: '/workspace/demo',
+        },
+      ],
+      onToggleSessionState: vi.fn(async () => true),
+    });
+
+    fireEvent.contextMenu(screen.getByRole('button', { name: '运行会话' }));
+    expect(screen.getByRole('menuitem', { name: '⏸ 暂停会话' })).not.toBeNull();
+
+    publishSessionRunState('session-1', 'paused');
+
+    await waitFor(() => {
+      fireEvent.contextMenu(screen.getByRole('button', { name: '运行会话' }));
+      expect(screen.getByRole('menuitem', { name: '▶ 恢复会话' })).not.toBeNull();
+    });
+  });
+
+  it('收到 session idle 事件后，不再把会话误当作已完成或继续展示暂停动作', async () => {
+    renderSidebar({
+      workspaceGroups: [
+        {
+          sessions: [
+            createSession({
+              id: 'session-1',
+              status: 'running',
+              subtitle: '运行中',
+              title: '运行会话',
+            }),
+          ],
+          workspaceLabel: 'workspace/demo',
+          workspacePath: '/workspace/demo',
+        },
+      ],
+      onToggleSessionState: vi.fn(async () => true),
+    });
+
+    publishSessionRunState('session-1', 'idle');
+
+    await waitFor(() => {
+      fireEvent.contextMenu(screen.getByRole('button', { name: '运行会话' }));
+      expect(screen.queryByRole('menuitem', { name: '▶ 恢复会话' })).toBeNull();
+      expect(screen.queryByRole('menuitem', { name: '⏸ 暂停会话' })).toBeNull();
+    });
+  });
+
+  it('服务端快照为 completed，但实时下游仍在运行时，仍按运行中展示会话动作', async () => {
+    useLayerStore.setState({
+      nodes: new Map([
+        [
+          'session-1',
+          {
+            sessionId: 'session-1',
+            parentSessionId: null,
+            roleLayer: 'reception',
+            state: 'idle',
+          },
+        ],
+        [
+          'child-1',
+          {
+            sessionId: 'child-1',
+            parentSessionId: 'session-1',
+            roleLayer: 'executor',
+            state: 'running',
+          },
+        ],
+      ]),
+    });
+
+    renderSidebar({
+      workspaceGroups: [
+        {
+          sessions: [
+            createSession({
+              id: 'session-1',
+              status: 'completed',
+              subtitle: '已完成',
+              title: '运行会话',
+            }),
+          ],
+          workspaceLabel: 'workspace/demo',
+          workspacePath: '/workspace/demo',
+        },
+      ],
+      onToggleSessionState: vi.fn(async () => true),
+    });
+
+    await waitFor(() => {
+      fireEvent.contextMenu(screen.getByRole('button', { name: '运行会话' }));
+      expect(screen.getByRole('menuitem', { name: '⏸ 暂停会话' })).not.toBeNull();
+    });
+  });
+
+  it('当服务端新列表给出终态时会清除本地过期运行态覆盖', async () => {
+    const rendered = renderSidebar({
+      workspaceGroups: [
+        {
+          sessions: [
+            createSession({
+              id: 'session-1',
+              status: 'running',
+              subtitle: '运行中',
+              title: '运行会话',
+            }),
+          ],
+          workspaceLabel: 'workspace/demo',
+          workspacePath: '/workspace/demo',
+        },
+      ],
+      onToggleSessionState: vi.fn(async () => true),
+    });
+
+    publishSessionRunState('session-1', 'paused');
+
+    await waitFor(() => {
+      fireEvent.contextMenu(screen.getByRole('button', { name: '运行会话' }));
+      expect(screen.getByRole('menuitem', { name: '▶ 恢复会话' })).not.toBeNull();
+    });
+
+    rendered.rerender(
+      <TeamSessionListSidebar
+        collapsed={false}
+        onToggleCollapsed={() => {}}
+        workspaceGroups={[
+          {
+            sessions: [
+              createSession({
+                id: 'session-1',
+                status: 'completed',
+                subtitle: '已完成',
+                title: '运行会话',
+              }),
+            ],
+            workspaceLabel: 'workspace/demo',
+            workspacePath: '/workspace/demo',
+          },
+        ]}
+        selectedTeamId=""
+        onSelectTeam={() => {}}
+        onToggleSessionState={vi.fn(async () => true)}
+      />,
+    );
+
+    await waitFor(() => {
+      fireEvent.contextMenu(screen.getByRole('button', { name: '运行会话' }));
+      expect(screen.queryByRole('menuitem', { name: '▶ 恢复会话' })).toBeNull();
+      expect(screen.queryByRole('menuitem', { name: '⏸ 暂停会话' })).toBeNull();
+    });
   });
 });

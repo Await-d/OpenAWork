@@ -1,7 +1,9 @@
 import { execFile } from 'node:child_process';
+import { isAbsolute, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import { z } from 'zod';
+import { isPathWithinRoot } from '../workspace/workspace-paths.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -146,7 +148,10 @@ function formatAstGrepReplaceResults(results: AstGrepResultItem[], dryRun: boole
   ].join('\n\n');
 }
 
-async function runAstGrep(args: string[]): Promise<AstGrepResultItem[]> {
+async function runAstGrep(
+  args: string[],
+  options?: { cwd?: string },
+): Promise<AstGrepResultItem[]> {
   const binary = await resolveAstGrepBinary();
   if (!binary) {
     throw new Error(
@@ -154,10 +159,39 @@ async function runAstGrep(args: string[]): Promise<AstGrepResultItem[]> {
     );
   }
   const { stdout } = await execFileAsync(binary, args, {
+    ...(options?.cwd ? { cwd: options.cwd } : {}),
     timeout: 60000,
     maxBuffer: 10 * 1024 * 1024,
   });
   return parseAstGrepStdout(stdout);
+}
+
+function normalizeAstGrepPaths(paths: string[], workspaceRoot?: string): string[] {
+  if (!workspaceRoot) {
+    return paths;
+  }
+  const normalizedRoot = resolve(workspaceRoot);
+  return paths.map((entry) => {
+    const resolvedPath = isAbsolute(entry) ? resolve(entry) : resolve(normalizedRoot, entry);
+    if (!isPathWithinRoot(resolvedPath, normalizedRoot)) {
+      throw new Error(`Target path is outside current session workspace: ${resolvedPath}`);
+    }
+    return resolvedPath;
+  });
+}
+
+export async function executeAstGrepReplace(
+  input: z.infer<typeof astGrepReplaceInputSchema>,
+  workspaceRoot?: string,
+): Promise<string> {
+  const normalizedPaths = normalizeAstGrepPaths(input.paths, workspaceRoot);
+  const args = buildCommonArgs(input.pattern, input.lang, normalizedPaths, input.globs);
+  args.push('--rewrite', input.rewrite);
+  if (!input.dryRun) {
+    args.push('--update-all');
+  }
+  const results = await runAstGrep(args, workspaceRoot ? { cwd: workspaceRoot } : undefined);
+  return formatAstGrepReplaceResults(results, input.dryRun);
 }
 
 export const astGrepSearchToolDefinition: ToolDefinition<
@@ -189,12 +223,6 @@ export const astGrepReplaceToolDefinition: ToolDefinition<
   outputSchema: z.string(),
   timeout: 60000,
   execute: async (input) => {
-    const args = buildCommonArgs(input.pattern, input.lang, input.paths, input.globs);
-    args.push('--rewrite', input.rewrite);
-    if (!input.dryRun) {
-      args.push('--update-all');
-    }
-    const results = await runAstGrep(args);
-    return formatAstGrepReplaceResults(results, input.dryRun);
+    return executeAstGrepReplace(input);
   },
 };

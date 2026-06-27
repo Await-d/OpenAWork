@@ -48,15 +48,14 @@ const LIST_SCROLL_STYLE: CSSProperties = {
   minHeight: 0,
   overflow: 'auto',
   display: 'grid',
-  gap: 10,
-  padding: '12px',
+  gap: 8,
+  padding: '10px',
 };
 
 const ROW_CARD_STYLE: CSSProperties = {
   display: 'grid',
   gap: 4,
-  padding: '6px 10px 0',
-  borderRadius: 10,
+  padding: '0',
 };
 
 const META_ROW_STYLE: CSSProperties = {
@@ -118,21 +117,13 @@ export function CrossLayerThreadListPanel({
               key={row.id}
               style={{
                 ...ROW_CARD_STYLE,
-                background:
-                  expanded || isFocus
-                    ? 'color-mix(in srgb, var(--accent) 6%, var(--bg-overlay))'
-                    : row.handoffCount > 1
-                      ? 'color-mix(in srgb, var(--warning) 4%, var(--bg-overlay))'
-                      : 'transparent',
-                border: expanded
-                  ? '1px solid color-mix(in srgb, var(--accent) 24%, transparent)'
-                  : row.handoffCount > 1
-                    ? '1px solid color-mix(in srgb, var(--warning) 16%, transparent)'
-                    : '1px solid transparent',
+                paddingBottom: isLast ? 0 : 2,
               }}
             >
               <div style={META_ROW_STYLE}>
-                <span style={{ ...CONVERSATION_META_BADGE_STYLE, color: 'var(--fg-muted)', padding: 0 }}>
+                <span
+                  style={{ ...CONVERSATION_META_BADGE_STYLE, color: 'var(--fg-muted)', padding: 0 }}
+                >
                   #{idx + 1}
                 </span>
                 {row.handoffCount > 1 ? (
@@ -215,15 +206,16 @@ export function CrossLayerThreadListPanel({
                       minWidth: 0,
                       textAlign: 'left',
                       display: 'grid',
-                      gap: 6,
-                      padding: '8px 12px',
+                      gap: 4,
+                      padding: '8px 10px',
                       borderRadius: 10,
-                      border: isFocus
-                        ? '1px solid color-mix(in srgb, var(--accent) 55%, transparent)'
-                        : `1px solid ${CK_BORDER}`,
+                      border:
+                        expanded || isFocus
+                          ? '1px solid color-mix(in srgb, var(--accent) 45%, transparent)'
+                          : `1px solid ${CK_BORDER}`,
                       background: expanded
                         ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))'
-                        : CK_SURFACE,
+                        : 'color-mix(in srgb, var(--bg-overlay) 68%, var(--bg-base))',
                       cursor: 'pointer',
                     }}
                   >
@@ -246,34 +238,12 @@ export function CrossLayerThreadListPanel({
                           color: 'var(--fg-strong)',
                         }}
                         title={
-                          row.displayName
-                            ? `${formatThreadRoute(row)} · ${row.displayName}`
-                            : formatThreadRoute(row)
+                          row.title.trim() ||
+                          (row.displayName ? `${row.title} · ${row.displayName}` : row.title)
                         }
                       >
-                        {formatThreadRoute(row)}
+                        {row.title}
                       </span>
-                      {row.displayName ? (
-                        <span
-                          style={{
-                            padding: '1px 6px',
-                            borderRadius: 999,
-                            background: 'color-mix(in srgb, var(--accent) 10%, transparent)',
-                            border: '1px solid color-mix(in srgb, var(--accent) 20%, transparent)',
-                            color: 'var(--accent)',
-                            fontSize: 9.5,
-                            fontWeight: 700,
-                            flexShrink: 0,
-                            maxWidth: 100,
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}
-                          title={row.displayName}
-                        >
-                          {row.displayName}
-                        </span>
-                      ) : null}
                       <span
                         style={{
                           padding: '1px 8px',
@@ -292,30 +262,65 @@ export function CrossLayerThreadListPanel({
                       style={{
                         display: 'flex',
                         alignItems: 'center',
-                        gap: 8,
+                        gap: 6,
                         minWidth: 0,
+                        flexWrap: 'wrap',
                       }}
                     >
                       <span
                         style={{
-                          minWidth: 0,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                          color: 'var(--fg-muted)',
-                          fontSize: 11,
+                          padding: '1px 6px',
+                          borderRadius: 999,
+                          background: 'color-mix(in srgb, var(--accent) 10%, transparent)',
+                          border: '1px solid color-mix(in srgb, var(--accent) 20%, transparent)',
+                          color: 'var(--accent)',
+                          fontSize: 9.5,
+                          fontWeight: 700,
+                          flexShrink: 0,
                         }}
-                        title={row.title}
                       >
-                        {row.title}
+                        {formatThreadRoute(row)}
                       </span>
+                      {row.displayName ? (
+                        <span
+                          style={{
+                            padding: '1px 6px',
+                            borderRadius: 999,
+                            background: 'color-mix(in srgb, var(--fg-muted) 10%, transparent)',
+                            color: 'var(--fg-default)',
+                            fontSize: 9.5,
+                            fontWeight: 600,
+                            flexShrink: 0,
+                            maxWidth: 100,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                          title={row.displayName}
+                        >
+                          {row.displayName}
+                        </span>
+                      ) : null}
                       <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--fg-muted)' }}>
                         {formatThreadTime(row)}
                       </span>
-                      <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
-                        {expanded ? '已选中' : '查看'}
-                      </span>
                     </div>
+                    {row.detail ? (
+                      <span
+                        style={{
+                          color: expanded ? 'var(--fg-default)' : 'var(--fg-muted)',
+                          fontSize: 10.5,
+                          lineHeight: 1.45,
+                          overflow: 'hidden',
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical',
+                        }}
+                        title={row.detail}
+                      >
+                        {row.detail}
+                      </span>
+                    ) : null}
                   </button>
                   {canPreviewTeamLayerPrompt(row.toRoleLayer) ? (
                     <button
@@ -338,26 +343,6 @@ export function CrossLayerThreadListPanel({
                     </button>
                   ) : null}
                 </div>
-                {row.detail ? (
-                  <div
-                    style={{
-                      marginTop: 6,
-                      padding: '6px 10px',
-                      borderRadius: 8,
-                      background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base))',
-                      fontSize: 11,
-                      color: 'var(--fg-muted)',
-                      lineHeight: 1.5,
-                      overflow: 'hidden',
-                      display: '-webkit-box',
-                      WebkitLineClamp: 2,
-                      WebkitBoxOrient: 'vertical',
-                    }}
-                    title={row.detail}
-                  >
-                    {row.detail}
-                  </div>
-                ) : null}
               </div>
             </div>
           );

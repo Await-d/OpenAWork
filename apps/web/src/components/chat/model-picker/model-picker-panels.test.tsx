@@ -5,11 +5,17 @@ import { render, screen } from '@testing-library/react';
 import { createRef } from 'react';
 import { ModelSettingsPopover } from './model-picker-panels.js';
 
-vi.mock('@openAwork/shared-ui', () => ({
-  describeReasoningEffort: (level: string) => level,
-  getSupportedReasoningEffortsForModel: () => ['low', 'medium', 'high'],
-  resolveProviderVisual: () => ({ accentKey: 'accent', displayName: 'OpenAI' }),
-}));
+vi.mock('@openAwork/shared-ui', async () => {
+  const actual = await vi.importActual<typeof import('@openAwork/shared-ui')>(
+    '@openAwork/shared-ui',
+  );
+  return {
+    ...actual,
+    describeReasoningEffort: (level: string) => level,
+    getSupportedReasoningEffortsForModel: () => ['low', 'medium', 'high'],
+    resolveProviderVisual: () => ({ accentKey: 'accent', displayName: 'OpenAI' }),
+  };
+});
 
 describe('ModelSettingsPopover', () => {
   it('renders the global Fast settings entry', () => {

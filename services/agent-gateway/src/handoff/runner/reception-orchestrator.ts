@@ -369,7 +369,7 @@ async function runReceptionOrchestrationBody(
       userId: input.userId,
       roleLayer: 'reception',
     });
-    return { triggered: false, reason: 'direct-answer' as never };
+    return { triggered: false, reason: 'direct-answer' };
   }
 
   // ─── 路径 B：clarify → b.companion 追问 ────────────────────────────────
@@ -385,7 +385,7 @@ async function runReceptionOrchestrationBody(
         clarifyText,
       );
     }
-    return { triggered: false, reason: 'clarify-needed' as never };
+    return { triggered: false, reason: 'clarify-needed' };
   }
 
   // ─── 路径 D：resume → 续接上次未完成任务，跳过 LLM 意图改写 ─────────────
@@ -404,7 +404,7 @@ async function runReceptionOrchestrationBody(
       streamClientRequestId,
     });
 
-    if (resumeResult.handled) {
+    if (resumeResult.handled && resumeResult.result) {
       return resumeResult.result;
     }
     // 没有可恢复的工作 → 降级走路径 C

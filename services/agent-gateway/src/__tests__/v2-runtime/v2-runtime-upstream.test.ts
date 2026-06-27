@@ -481,15 +481,13 @@ describe('runUpstreamStream', () => {
     expect(settings['providerOptions']).toMatchObject({
       openrouter: {
         usage: { include: true },
-        body: {
-          extra_body_flag: true,
-        },
+        extra_body_flag: true,
       },
     });
     const openrouterOptions = (
-      settings['providerOptions'] as Record<string, Record<string, Record<string, unknown>>>
+      settings['providerOptions'] as Record<string, Record<string, unknown>>
     )['openrouter'];
-    expect((openrouterOptions?.body ?? {})['top_p']).toBeUndefined();
+    expect(openrouterOptions?.['top_p']).toBeUndefined();
   });
 
   it('fires onFinish with totalUsage propagated from the V2 finish event', async () => {

@@ -53,18 +53,24 @@ function seedSession(sessionId: string, roleLayer = 'pm2'): void {
 function seedCompletedChild(input: {
   childSessionId: string;
   fromSessionId: string;
+  goal?: string;
+  ownedPaths?: string[];
   roleLayer: 'executor' | 'reviewer';
+  taskId?: string;
   token: string;
 }): HandoffStoreModule.HandoffRecord {
   seedSession(input.childSessionId, input.roleLayer);
+  const goal = input.goal ?? `[demo/${input.roleLayer}.md] 完成 ${input.roleLayer} 任务 - 产出结果`;
+  const taskId = input.taskId ?? `T-${input.roleLayer}`;
   const child = store.createHandoff({
     userId: USER_ID,
     fromSessionId: input.fromSessionId,
     fromRoleLayer: 'pm2',
     toRoleLayer: input.roleLayer,
     payload: {
-      goal: `[demo/${input.roleLayer}.md] 完成 ${input.roleLayer} 任务 - 产出结果`,
-      taskMarkers: { taskId: `T-${input.roleLayer}` },
+      goal,
+      ownedPaths: input.ownedPaths,
+      taskMarkers: { taskId },
     },
   });
   store.claimHandoff({ handoffId: child.id, claimToken: input.token });
@@ -78,7 +84,7 @@ function seedCompletedChild(input: {
     [
       JSON.stringify({
         role: input.roleLayer,
-        taskTitle: `[demo/${input.roleLayer}.md] 完成 ${input.roleLayer} 任务 - 产出结果`,
+        taskTitle: goal,
         summary: `${input.roleLayer} 已提交结果摘要。`,
         artifactCount: 1,
         evidenceSource: 'summary',
@@ -220,5 +226,248 @@ describe('reconcilePm2QualityReview', () => {
     expect(
       prompts.every((prompt) => prompt.includes('PM2 质量复核辅助模型必须使用的工作区知识。')),
     ).toBe(true);
+  });
+
+  it('quality review 只命中当前 dispatch scope 时，仍允许自动 redispatch', async () => {
+    mocks.resolveAuxiliaryLlmConfigCandidates.mockResolvedValue([
+      {
+        apiBaseUrl: 'https://healthy.example.com/v1',
+        apiKey: 'healthy-key',
+        model: 'healthy-model',
+        providerType: 'openai',
+      },
+    ]);
+    mocks.requestWorkflowLlmCompletion.mockImplementation(
+      async (input: WorkflowLlmModule.WorkflowLlmRequestConfig) => {
+        if (input.prompt.includes('Spec Review 审查员')) {
+          return 'PASS';
+        }
+        return 'ISSUE: [apps/web/src/current-form.tsx] 当前任务文件测试失败';
+      },
+    );
+
+    const pm2 = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: PM1_SESSION_ID,
+      fromRoleLayer: 'pm1',
+      toRoleLayer: 'pm2',
+      payload: { teamWorkspaceId: TEAM_WORKSPACE_ID },
+    });
+    store.claimHandoff({ handoffId: pm2.id, claimToken: 'tok-pm2-scope-ok' });
+    store.startHandoff({
+      handoffId: pm2.id,
+      claimToken: 'tok-pm2-scope-ok',
+      toSessionId: PM2_SESSION_ID,
+    });
+    const executor = seedCompletedChild({
+      childSessionId: 's-pm2-quality-review-executor-scope-ok',
+      fromSessionId: PM2_SESSION_ID,
+      goal: '[apps/web/src/current-form.tsx] 实现当前表单 - 可提交并校验',
+      ownedPaths: ['apps/web/src/current-form.tsx'],
+      roleLayer: 'executor',
+      taskId: 'T-current-form',
+      token: 'tok-executor-scope-ok',
+    });
+    const reviewer = seedCompletedChild({
+      childSessionId: 's-pm2-quality-review-reviewer-scope-ok',
+      fromSessionId: PM2_SESSION_ID,
+      goal: '[apps/web/src/current-form.tsx] 评审当前表单 - 验证交互与测试',
+      ownedPaths: ['apps/web/src/current-form.tsx'],
+      roleLayer: 'reviewer',
+      taskId: 'T-current-form-review',
+      token: 'tok-reviewer-scope-ok',
+    });
+    dbModule.sqliteRun(
+      `UPDATE handoff_records
+          SET result_json = ?
+        WHERE id = ?`,
+      [
+        JSON.stringify({
+          dispatchedHandoffIds: [executor.id, reviewer.id],
+          qualityReviewPending: true,
+        }),
+        pm2.id,
+      ],
+    );
+
+    const result = await reconciler.reconcilePm2QualityReview({
+      pm2HandoffId: pm2.id,
+      userId: USER_ID,
+    });
+
+    expect(result.status).toBe('reclaimed');
+    const after = store.getHandoff({ userId: USER_ID, handoffId: pm2.id });
+    expect(after?.state).toBe('pending');
+    expect(after?.retryCount).toBe(1);
+  });
+
+  it('quality review 只命中当前 dispatch scope 外的文件时，不自动 redispatch', async () => {
+    mocks.resolveAuxiliaryLlmConfigCandidates.mockResolvedValue([
+      {
+        apiBaseUrl: 'https://healthy.example.com/v1',
+        apiKey: 'healthy-key',
+        model: 'healthy-model',
+        providerType: 'openai',
+      },
+    ]);
+    mocks.requestWorkflowLlmCompletion.mockImplementation(
+      async (input: WorkflowLlmModule.WorkflowLlmRequestConfig) => {
+        if (input.prompt.includes('Spec Review 审查员')) {
+          return 'PASS';
+        }
+        return 'ISSUE: [apps/web/src/external-shared-file.tsx] 外部并发修改导致当前检查失败';
+      },
+    );
+
+    const pm2 = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: PM1_SESSION_ID,
+      fromRoleLayer: 'pm1',
+      toRoleLayer: 'pm2',
+      payload: { teamWorkspaceId: TEAM_WORKSPACE_ID },
+    });
+    store.claimHandoff({ handoffId: pm2.id, claimToken: 'tok-pm2-scope-blocked' });
+    store.startHandoff({
+      handoffId: pm2.id,
+      claimToken: 'tok-pm2-scope-blocked',
+      toSessionId: PM2_SESSION_ID,
+    });
+    const executor = seedCompletedChild({
+      childSessionId: 's-pm2-quality-review-executor-scope-blocked',
+      fromSessionId: PM2_SESSION_ID,
+      goal: '[apps/web/src/current-panel.tsx] 实现当前面板 - 可展示状态',
+      ownedPaths: ['apps/web/src/current-panel.tsx'],
+      roleLayer: 'executor',
+      taskId: 'T-current-panel',
+      token: 'tok-executor-scope-blocked',
+    });
+    const reviewer = seedCompletedChild({
+      childSessionId: 's-pm2-quality-review-reviewer-scope-blocked',
+      fromSessionId: PM2_SESSION_ID,
+      goal: '[apps/web/src/current-panel.tsx] 评审当前面板 - 验证行为与回归',
+      ownedPaths: ['apps/web/src/current-panel.tsx'],
+      roleLayer: 'reviewer',
+      taskId: 'T-current-panel-review',
+      token: 'tok-reviewer-scope-blocked',
+    });
+    dbModule.sqliteRun(
+      `UPDATE handoff_records
+          SET result_json = ?
+        WHERE id = ?`,
+      [
+        JSON.stringify({
+          dispatchedHandoffIds: [executor.id, reviewer.id],
+          qualityReviewPending: true,
+        }),
+        pm2.id,
+      ],
+    );
+
+    const result = await reconciler.reconcilePm2QualityReview({
+      pm2HandoffId: pm2.id,
+      userId: USER_ID,
+    });
+
+    expect(result.status).toBe('failed');
+    const after = store.getHandoff({ userId: USER_ID, handoffId: pm2.id });
+    expect(after?.state).toBe('failed');
+    expect(after?.failureReason).toContain('当前 PM2 派发范围外的文件');
+    const payload =
+      after?.payload && typeof after.payload === 'object' && !Array.isArray(after.payload)
+        ? (after.payload as Record<string, unknown>)
+        : null;
+    const reviewDisposition =
+      payload?.['reviewDisposition'] &&
+      typeof payload['reviewDisposition'] === 'object' &&
+      payload['reviewDisposition'] !== null &&
+      !Array.isArray(payload['reviewDisposition'])
+        ? (payload['reviewDisposition'] as Record<string, unknown>)
+        : null;
+    expect(reviewDisposition?.['action']).toBe('escalate-to-user');
+  });
+
+  it('spec review 只命中当前 dispatch scope 外的文件时，不自动 return-to-c', async () => {
+    mocks.resolveAuxiliaryLlmConfigCandidates.mockResolvedValue([
+      {
+        apiBaseUrl: 'https://healthy.example.com/v1',
+        apiKey: 'healthy-key',
+        model: 'healthy-model',
+        providerType: 'openai',
+      },
+    ]);
+    mocks.requestWorkflowLlmCompletion.mockImplementation(
+      async (input: WorkflowLlmModule.WorkflowLlmRequestConfig) => {
+        if (input.prompt.includes('Spec Review 审查员')) {
+          return 'ISSUE: [apps/web/src/external-plan.ts] 外部规划文件和当前实现不一致';
+        }
+        return 'PASS';
+      },
+    );
+
+    const pm2 = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: PM1_SESSION_ID,
+      fromRoleLayer: 'pm1',
+      toRoleLayer: 'pm2',
+      payload: { teamWorkspaceId: TEAM_WORKSPACE_ID },
+    });
+    store.claimHandoff({ handoffId: pm2.id, claimToken: 'tok-pm2-return-to-c-blocked' });
+    store.startHandoff({
+      handoffId: pm2.id,
+      claimToken: 'tok-pm2-return-to-c-blocked',
+      toSessionId: PM2_SESSION_ID,
+    });
+    const executor = seedCompletedChild({
+      childSessionId: 's-pm2-quality-review-executor-return-to-c-blocked',
+      fromSessionId: PM2_SESSION_ID,
+      goal: '[apps/web/src/current-panel.tsx] 实现当前面板 - 可展示状态',
+      ownedPaths: ['apps/web/src/current-panel.tsx'],
+      roleLayer: 'executor',
+      taskId: 'T-current-panel',
+      token: 'tok-executor-return-to-c-blocked',
+    });
+    const reviewer = seedCompletedChild({
+      childSessionId: 's-pm2-quality-review-reviewer-return-to-c-blocked',
+      fromSessionId: PM2_SESSION_ID,
+      goal: '[apps/web/src/current-panel.tsx] 评审当前面板 - 验证行为与回归',
+      ownedPaths: ['apps/web/src/current-panel.tsx'],
+      roleLayer: 'reviewer',
+      taskId: 'T-current-panel-review',
+      token: 'tok-reviewer-return-to-c-blocked',
+    });
+    dbModule.sqliteRun(
+      `UPDATE handoff_records
+          SET result_json = ?
+        WHERE id = ?`,
+      [
+        JSON.stringify({
+          dispatchedHandoffIds: [executor.id, reviewer.id],
+          qualityReviewPending: true,
+        }),
+        pm2.id,
+      ],
+    );
+
+    const result = await reconciler.reconcilePm2QualityReview({
+      pm2HandoffId: pm2.id,
+      userId: USER_ID,
+    });
+
+    expect(result.status).toBe('failed');
+    const after = store.getHandoff({ userId: USER_ID, handoffId: pm2.id });
+    expect(after?.state).toBe('failed');
+    expect(after?.failureReason).toContain('当前 PM2 派发范围外的文件');
+    const payload =
+      after?.payload && typeof after.payload === 'object' && !Array.isArray(after.payload)
+        ? (after.payload as Record<string, unknown>)
+        : null;
+    const reviewDisposition =
+      payload?.['reviewDisposition'] &&
+      typeof payload['reviewDisposition'] === 'object' &&
+      payload['reviewDisposition'] !== null &&
+      !Array.isArray(payload['reviewDisposition'])
+        ? (payload['reviewDisposition'] as Record<string, unknown>)
+        : null;
+    expect(reviewDisposition?.['action']).toBe('escalate-to-user');
   });
 });

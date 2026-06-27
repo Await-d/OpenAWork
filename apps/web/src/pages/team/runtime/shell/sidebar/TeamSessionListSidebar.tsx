@@ -44,6 +44,7 @@ import {
 } from './DeleteSessionImpactDialog.js';
 import { SessionCard } from './SessionCard.js';
 import { TeamRunStatePill } from '../../shared/TeamRunStatePill.js';
+import { useTeamSessionListRuntimeState } from './use-team-session-list-runtime-state.js';
 
 type TimeBucket = '今天' | '昨天' | '更早';
 function getTimeGroup(timestamp: string | undefined): TimeBucket {
@@ -95,14 +96,44 @@ const SCROLL_STYLE: CSSProperties = {
   padding: '8px 0',
 };
 
-const GROUP_LABEL_STYLE: CSSProperties = {
-  display: 'block',
-  padding: '6px 14px 4px',
-  fontSize: 10,
-  fontWeight: 700,
+const GROUP_HEADER_BTN_STYLE: CSSProperties = {
+  flex: 1,
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  minWidth: 0,
+  padding: '5px 4px 4px 8px',
+  borderRadius: 6,
+  border: 'none',
+  background: 'transparent',
+  cursor: 'pointer',
+  color: 'var(--fg-default)',
+  textAlign: 'left',
+};
+
+const GROUP_ADD_BTN_STYLE: CSSProperties = {
+  flexShrink: 0,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 20,
+  height: 20,
+  borderRadius: 5,
+  background: 'transparent',
+  border: 'none',
   color: 'var(--fg-muted)',
-  textTransform: 'uppercase',
-  letterSpacing: '0.06em',
+  cursor: 'pointer',
+  padding: 0,
+  marginRight: 4,
+};
+
+const GROUP_CHILDREN_STYLE: CSSProperties = {
+  marginLeft: 16,
+  borderLeft: '1px solid var(--border-subtle)',
+  paddingLeft: 4,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 1,
 };
 
 const TIME_BUCKET_LABEL_STYLE: CSSProperties = {
@@ -199,6 +230,8 @@ const QUICK_BTN_STYLE: CSSProperties = {
 
 function dotColor(status: AgentTeamsSidebarTeam['status']): string {
   switch (status) {
+    case 'idle':
+      return 'var(--fg-subtle)';
     case 'running':
       return 'var(--success)';
     case 'paused':
@@ -209,21 +242,6 @@ function dotColor(status: AgentTeamsSidebarTeam['status']): string {
       return 'var(--danger)';
     default:
       return 'color-mix(in srgb, var(--border-default) 80%, transparent)';
-  }
-}
-
-function statusLabel(status: AgentTeamsSidebarTeam['status']): string {
-  switch (status) {
-    case 'running':
-      return '运行中';
-    case 'paused':
-      return '已暂停';
-    case 'completed':
-      return '已完成';
-    case 'failed':
-      return '失败';
-    default:
-      return '未知状态';
   }
 }
 
@@ -350,6 +368,8 @@ export interface TeamSessionListSidebarProps {
   initialTemplateId?: string | null;
   /** 新会话初始工作目录（review / 创建时透传到 metadata.workingDirectory） */
   initialWorkingDirectory?: string | null;
+  /** 顶层受控打开新会话弹窗（可附带模板预选）。用于工作区分组头「+」按钮。 */
+  onOpenNewSessionModal?: (templateId?: string | null, workingDirectory?: string | null) => void;
 }
 
 const SKELETON_ITEM_STYLE: CSSProperties = {
@@ -391,6 +411,7 @@ export function TeamSessionListSidebar({
   onCloseNewSessionModal,
   initialTemplateId,
   initialWorkingDirectory,
+  onOpenNewSessionModal,
 }: TeamSessionListSidebarProps) {
   const [internalShowModal, setInternalShowModal] = useState(false);
   const showNewSessionModal = controlledShowModal ?? internalShowModal;
@@ -410,14 +431,39 @@ export function TeamSessionListSidebar({
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteSessionConfirmTarget | null>(null);
   const [hoveredSessionId, setHoveredSessionId] = useState<string | null>(null);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const contextMenuRef = useRef<HTMLDivElement>(null);
+  const { effectiveWorkspaceGroups } = useTeamSessionListRuntimeState(workspaceGroups);
   const allSessions = useMemo(
-    () => workspaceGroups.flatMap((group) => group.sessions),
-    [workspaceGroups],
+    () => effectiveWorkspaceGroups.flatMap((group) => group.sessions),
+    [effectiveWorkspaceGroups],
   );
   const deleteImpact = useMemo(
     () => (deleteConfirm ? buildDeleteSessionImpactTree(deleteConfirm, allSessions) : null),
     [allSessions, deleteConfirm],
+  );
+  const contextMenuSession = useMemo(
+    () =>
+      contextMenu ? allSessions.find((session) => session.id === contextMenu.sessionId) ?? null : null,
+    [allSessions, contextMenu],
+  );
+
+  const toggleGroupCollapsed = useCallback((groupKey: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupKey)) {
+        next.delete(groupKey);
+      } else {
+        next.add(groupKey);
+      }
+      return next;
+    });
+  }, []);
+
+  const getGroupKey = useCallback(
+    (group: { workspacePath: string | null; workspaceLabel: string }) =>
+      group.workspacePath ?? group.workspaceLabel,
+    [],
   );
 
   const handleContextMenu = useCallback(
@@ -483,13 +529,25 @@ export function TeamSessionListSidebar({
   }, [canManageSessionEntries, closeContextMenu, contextMenu, onRenameSession]);
 
   const handleToggleSessionStateClick = useCallback(async () => {
-    if (!contextMenu || !onToggleSessionState || !canManageSessionEntries) {
+    const liveSessionStatus = contextMenuSession?.status;
+    if (
+      !contextMenu ||
+      !onToggleSessionState ||
+      !canManageSessionEntries ||
+      (liveSessionStatus !== 'running' && liveSessionStatus !== 'paused')
+    ) {
       closeContextMenu();
       return;
     }
     closeContextMenu();
-    await onToggleSessionState(contextMenu.sessionId, contextMenu.sessionStatus);
-  }, [canManageSessionEntries, closeContextMenu, contextMenu, onToggleSessionState]);
+    await onToggleSessionState(contextMenu.sessionId, liveSessionStatus);
+  }, [
+    canManageSessionEntries,
+    closeContextMenu,
+    contextMenu,
+    contextMenuSession?.status,
+    onToggleSessionState,
+  ]);
 
   const menuActions = useMemo(() => {
     if (!contextMenu) {
@@ -530,11 +588,11 @@ export function TeamSessionListSidebar({
       canManageSessionEntries &&
       onToggleSessionState &&
       !contextMenu.sessionIsShared &&
-      (contextMenu.sessionStatus === 'running' || contextMenu.sessionStatus === 'paused')
+      (contextMenuSession?.status === 'running' || contextMenuSession?.status === 'paused')
     ) {
       actions.push({
         key: 'toggle-state',
-        label: contextMenu.sessionStatus === 'running' ? '⏸ 暂停会话' : '▶ 恢复会话',
+        label: contextMenuSession.status === 'running' ? '⏸ 暂停会话' : '▶ 恢复会话',
         onClick: handleToggleSessionStateClick,
       });
     }
@@ -556,6 +614,7 @@ export function TeamSessionListSidebar({
     handleRenameClick,
     handleToggleSessionStateClick,
     canManageSessionEntries,
+    contextMenuSession,
     onRenameSession,
     onToggleSessionState,
   ]);
@@ -616,7 +675,7 @@ export function TeamSessionListSidebar({
 
   const filteredGroups = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
-    return workspaceGroups
+    return effectiveWorkspaceGroups
       .map((group) => {
         const sessions = query
           ? group.sessions.filter(
@@ -635,7 +694,7 @@ export function TeamSessionListSidebar({
         return { ...group, sessions: sorted, buckets };
       })
       .filter((group) => group.sessions.length > 0);
-  }, [workspaceGroups, searchQuery]);
+  }, [effectiveWorkspaceGroups, searchQuery]);
 
   if (collapsed) {
     return (
@@ -676,7 +735,7 @@ export function TeamSessionListSidebar({
             gap: 6,
           }}
         >
-          {workspaceGroups.flatMap((group) =>
+          {effectiveWorkspaceGroups.flatMap((group) =>
             group.sessions.map((session) => {
               const active = session.id === selectedTeamId;
               return (
@@ -744,8 +803,8 @@ export function TeamSessionListSidebar({
             </strong>
             <TeamRunStatePill compact />
             {(() => {
-              const total = workspaceGroups.reduce((acc, g) => acc + g.sessions.length, 0);
-              const running = workspaceGroups.reduce(
+              const total = effectiveWorkspaceGroups.reduce((acc, g) => acc + g.sessions.length, 0);
+              const running = effectiveWorkspaceGroups.reduce(
                 (acc, g) => acc + g.sessions.filter((s) => s.status === 'running').length,
                 0,
               );
@@ -837,7 +896,7 @@ export function TeamSessionListSidebar({
 
       {/* 多 workspace 切换器（仅在 workspaceGroups > 1 时出现）；
           单 workspace 时不再显示 workspaceLabel 静态框，避免与顶部 page-header 重复 */}
-      {!chromeless && workspaceGroups.length > 1 && onWorkspaceChange ? (
+      {!chromeless && effectiveWorkspaceGroups.length > 1 && onWorkspaceChange ? (
         <div style={{ padding: '8px 10px 0' }}>
           <select
             value={selectedWorkspacePath ?? '__all__'}
@@ -849,7 +908,7 @@ export function TeamSessionListSidebar({
             aria-label="切换工作空间"
           >
             <option value="__all__">全部工作空间</option>
-            {workspaceGroups.map((group) => (
+            {effectiveWorkspaceGroups.map((group) => (
               <option
                 key={group.workspacePath ?? group.workspaceLabel}
                 value={group.workspacePath ?? group.workspaceLabel}
@@ -984,21 +1043,41 @@ export function TeamSessionListSidebar({
                 borderRadius: 14,
                 display: 'grid',
                 placeItems: 'center',
-                background:
-                  searchQuery.trim()
-                    ? 'color-mix(in srgb, var(--aux) 10%, transparent)'
-                    : 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
-                boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--border-subtle) 40%, transparent)',
+                background: searchQuery.trim()
+                  ? 'color-mix(in srgb, var(--aux) 10%, transparent)'
+                  : 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
+                boxShadow:
+                  'inset 0 0 0 1px color-mix(in srgb, var(--border-subtle) 40%, transparent)',
                 fontSize: 22,
               }}
             >
               {searchQuery.trim() ? (
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}>
+                <svg
+                  width="22"
+                  height="22"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.75"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{ opacity: 0.6 }}
+                >
                   <circle cx="11" cy="11" r="8" />
                   <line x1="21" y1="21" x2="16.65" y2="16.65" />
                 </svg>
               ) : (
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.45 }}>
+                <svg
+                  width="22"
+                  height="22"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{ opacity: 0.45 }}
+                >
                   <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                 </svg>
               )}
@@ -1032,44 +1111,151 @@ export function TeamSessionListSidebar({
           </div>
         ) : null}
         {filteredGroups.map((group) => {
-          const showWorkspaceLabel = filteredGroups.length > 1;
+          const groupKey = getGroupKey(group);
+          const isCollapsed = collapsedGroups.has(groupKey);
+          // 始终显示工作区分组头（与 chat 端 SessionSidebar 对齐，方便快速折叠不同工作区的会话）
+          const showWorkspaceLabel = true;
           // 仅当存在多个时间桶有内容时才显示「今天 / 昨天 / 更早」分隔标签
           const nonEmptyBuckets = TIME_BUCKET_ORDER.filter(
             (b) => (group.buckets.get(b) ?? []).length > 0,
           );
           const showBucketLabels = nonEmptyBuckets.length > 1;
           return (
-            <div key={group.workspacePath ?? group.workspaceLabel} style={{ marginBottom: 6 }}>
+            <div key={groupKey} style={{ marginBottom: 6 }}>
               {showWorkspaceLabel ? (
-                <span style={GROUP_LABEL_STYLE}>{group.workspaceLabel}</span>
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                  <button
+                    type="button"
+                    onClick={() => toggleGroupCollapsed(groupKey)}
+                    style={GROUP_HEADER_BTN_STYLE}
+                    aria-label={
+                      isCollapsed ? `展开 ${group.workspaceLabel}` : `折叠 ${group.workspaceLabel}`
+                    }
+                    aria-expanded={!isCollapsed}
+                  >
+                    <svg
+                      width="9"
+                      height="9"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                      style={{
+                        flexShrink: 0,
+                        transform: isCollapsed ? 'rotate(0deg)' : 'rotate(90deg)',
+                        transition: 'transform 150ms ease',
+                      }}
+                    >
+                      <polyline points="9 18 15 12 9 6" />
+                    </svg>
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                      style={{ flexShrink: 0 }}
+                    >
+                      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                    </svg>
+                    <span
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        fontSize: 11,
+                        fontWeight: 700,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {group.workspaceLabel}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 10,
+                        color: 'var(--fg-muted)',
+                        flexShrink: 0,
+                        marginRight: 2,
+                      }}
+                    >
+                      {group.sessions.length}
+                    </span>
+                  </button>
+                  {group.workspacePath && canManageSessionEntries
+                    ? (() => {
+                        const handleNewSession = onOpenNewSessionModal
+                          ? () => onOpenNewSessionModal(null, group.workspacePath)
+                          : () => {
+                              if (teamWorkspaceId) {
+                                setShowNewSessionModal(true);
+                              }
+                            };
+                        return (
+                          <button
+                            type="button"
+                            onClick={handleNewSession}
+                            title={`在 ${group.workspaceLabel} 中新建会话`}
+                            style={GROUP_ADD_BTN_STYLE}
+                          >
+                            <svg
+                              width="12"
+                              height="12"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden="true"
+                            >
+                              <line x1="12" y1="5" x2="12" y2="19" />
+                              <line x1="5" y1="12" x2="19" y2="12" />
+                            </svg>
+                          </button>
+                        );
+                      })()
+                    : null}
+                </div>
               ) : null}
-              {TIME_BUCKET_ORDER.map((bucket) => {
-                const sessions = group.buckets.get(bucket) ?? [];
-                if (sessions.length === 0) return null;
-                return (
-                  <Fragment key={`${group.workspacePath ?? group.workspaceLabel}-${bucket}`}>
-                    {showBucketLabels ? (
-                      <span style={TIME_BUCKET_LABEL_STYLE}>{bucket}</span>
-                    ) : null}
-                    {sessions.map((session) => (
-                      <SessionCard
-                        key={session.id}
-                        session={session}
-                        active={session.id === selectedTeamId}
-                        hovered={hoveredSessionId === session.id}
-                        onSelect={onSelectTeam}
-                        onContextMenu={handleContextMenu}
-                        onHoverChange={setHoveredSessionId}
-                        onDelete={
-                          onDeleteSession
-                            ? (id, title) => setDeleteConfirm({ id, title })
-                            : undefined
-                        }
-                      />
-                    ))}
-                  </Fragment>
-                );
-              })}
+              {!isCollapsed && (
+                <div style={showWorkspaceLabel ? GROUP_CHILDREN_STYLE : undefined}>
+                  {TIME_BUCKET_ORDER.map((bucket) => {
+                    const sessions = group.buckets.get(bucket) ?? [];
+                    if (sessions.length === 0) return null;
+                    return (
+                      <Fragment key={`${groupKey}-${bucket}`}>
+                        {showBucketLabels ? (
+                          <span style={TIME_BUCKET_LABEL_STYLE}>{bucket}</span>
+                        ) : null}
+                        {sessions.map((session) => (
+                          <SessionCard
+                            key={session.id}
+                            session={session}
+                            active={session.id === selectedTeamId}
+                            hovered={hoveredSessionId === session.id}
+                            onSelect={onSelectTeam}
+                            onContextMenu={handleContextMenu}
+                            onHoverChange={setHoveredSessionId}
+                            onDelete={
+                              onDeleteSession
+                                ? (id, title) => setDeleteConfirm({ id, title })
+                                : undefined
+                            }
+                          />
+                        ))}
+                      </Fragment>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           );
         })}

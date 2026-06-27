@@ -35,6 +35,7 @@ import type {
   AssistantModelMessage,
   ImagePart,
   ModelMessage,
+  SystemModelMessage,
   TextPart,
   ToolCallPart,
   UserModelMessage,
@@ -256,7 +257,7 @@ function bridgeTool(message: ToolResultMessage): ModelMessage[] {
   ];
 }
 
-function bridgeSystem(message: SystemMessage): ModelMessage[] {
+function bridgeSystem(message: SystemMessage): SystemModelMessage[] {
   return [{ role: 'system', content: message.content }];
 }
 
@@ -311,8 +312,8 @@ export function unifiedConversationToModelMessages(messages: UnifiedMessage[]): 
  */
 export function extractSystemFromUnifiedMessages(
   messages: UnifiedMessage[],
-): { system: ModelMessage[]; messages: ModelMessage[] } {
-  const systemMessages: ModelMessage[] = [];
+): { system: SystemModelMessage[]; messages: ModelMessage[] } {
+  const systemMessages: SystemModelMessage[] = [];
   const remaining: UnifiedMessage[] = [];
 
   let foundNonSystem = false;

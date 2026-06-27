@@ -1,5 +1,6 @@
 import { cancelHandoff, pauseHandoff, resumeHandoff } from '../handoff/store/handoff-store.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
+import { buildSqlitePlaceholders } from '../infra/sqlite-batch.js';
 import { submitInboundMessage } from '../handoff/store/inbound-store.js';
 
 const TEAM_RUNTIME_CONTROL_SESSION_LIMIT = 200;
@@ -72,10 +73,10 @@ export interface ResumeTeamRuntimeTreeResult extends TeamRuntimeControlScope {
  * 每层的恢复动作分类。
  */
 export type LayerResumeAction =
-  | 'resumed'          // 正常恢复（注入 resume_signal）
+  | 'resumed' // 正常恢复（注入 resume_signal）
   | 'skipped_terminal' // 终态，无需恢复
   | 'skipped_user_blocked' // clarifying 等需用户交互，保持暂停 + 写提示
-  | 'skipped_not_paused';  // 本来就没暂停
+  | 'skipped_not_paused'; // 本来就没暂停
 
 export interface LayerResumeDetail {
   sessionId: string;
@@ -188,7 +189,7 @@ export function pauseTeamRuntimeTree(input: {
               updated_at = datetime('now')
         WHERE user_id = ?
           AND paused = 0
-          AND id IN (${pausedSessionIds.map(() => '?').join(', ')})`,
+          AND id IN (${buildSqlitePlaceholders(pausedSessionIds.length, ', ')})`,
       [input.userId, input.reason ?? null, input.userId, ...pausedSessionIds],
     );
   }
@@ -323,7 +324,7 @@ export function resumeTeamRuntimeTree(input: {
               updated_at = datetime('now')
         WHERE user_id = ?
           AND paused = 1
-          AND id IN (${resumedSessionIds.map(() => '?').join(', ')})`,
+          AND id IN (${buildSqlitePlaceholders(resumedSessionIds.length, ', ')})`,
       [input.userId, ...resumedSessionIds],
     );
   }
@@ -401,7 +402,7 @@ function listCancellableHandoffIds(input: { sessionIds: string[]; userId: string
     return [];
   }
 
-  const placeholders = input.sessionIds.map(() => '?').join(', ');
+  const placeholders = buildSqlitePlaceholders(input.sessionIds.length, ', ');
   const rows = sqliteAll<TeamRuntimeControlHandoffRow>(
     `SELECT id
        FROM handoff_records
@@ -425,7 +426,7 @@ function listControllableHandoffIds(input: {
     return [];
   }
 
-  const placeholders = input.sessionIds.map(() => '?').join(', ');
+  const placeholders = buildSqlitePlaceholders(input.sessionIds.length, ', ');
   const rows = sqliteAll<TeamRuntimeControlHandoffRow>(
     `SELECT id
        FROM handoff_records
@@ -458,7 +459,7 @@ function selectPausedSessionRowsWithSubstate(input: {
        FROM sessions
       WHERE user_id = ?
         AND paused = 1
-        AND id IN (${input.sessionIds.map(() => '?').join(', ')})`,
+        AND id IN (${buildSqlitePlaceholders(input.sessionIds.length, ', ')})`,
     [input.userId, ...input.sessionIds],
   );
 }
@@ -477,7 +478,7 @@ function selectSessionIdsByPausedState(input: {
        FROM sessions
       WHERE user_id = ?
         AND paused = ?
-        AND id IN (${input.sessionIds.map(() => '?').join(', ')})`,
+        AND id IN (${buildSqlitePlaceholders(input.sessionIds.length, ', ')})`,
     [input.userId, input.paused ? 1 : 0, ...input.sessionIds],
   );
   return rows.map((row) => row.id);

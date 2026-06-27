@@ -13,7 +13,6 @@ import { z } from 'zod';
 import { buildFileDiff, fileDiffSchema } from './file-diff-format.js';
 import { getPostWriteDiagnostics, postWriteDiagnosticSchema } from './lsp-tools.js';
 import { captureBeforeWriteBackup } from '../session/session-file-backup-store.js';
-import { validateWorkspacePath } from '../workspace/workspace-paths.js';
 import { lspManager } from '../lsp/router.js';
 import {
   fuzzyReplace,
@@ -22,7 +21,10 @@ import {
   convertToLineEnding,
 } from './edit-replacers.js';
 import { formatFileAfterWrite } from './post-write-formatter.js';
-import { getSessionWorkspaceRoot } from '../workspace/workspace-safety.js';
+import {
+  assertSessionWorkspacePath,
+  getSessionWorkspaceRoot,
+} from '../workspace/workspace-safety.js';
 import { getProjectWideDiagnostics } from './project-diagnostics.js';
 
 const EDIT_ERROR_RECOVERY_SUFFIX =
@@ -59,11 +61,8 @@ const multiEditOutputSchema = z.object({
     .optional(),
 });
 
-function assertEditableWorkspacePath(filePath: string): string {
-  const safePath = validateWorkspacePath(filePath);
-  if (!safePath) {
-    throw new Error(`Forbidden workspace path: ${filePath}`);
-  }
+function assertEditableWorkspacePath(sessionId: string, filePath: string): string {
+  const safePath = assertSessionWorkspacePath({ path: filePath, sessionId });
   if (defaultIgnoreManager.shouldIgnore(safePath)) {
     throw new Error(`Access denied: file "${safePath}" is protected by agentignore rules`);
   }
@@ -84,7 +83,7 @@ export function createMultiEditTool(
     outputSchema: multiEditOutputSchema,
     timeout: 15000,
     execute: async (input) => {
-      const safePath = assertEditableWorkspacePath(input.filePath);
+      const safePath = assertEditableWorkspacePath(sessionId, input.filePath);
 
       if (!input.edits || input.edits.length === 0) {
         throw new Error('At least one edit is required.');

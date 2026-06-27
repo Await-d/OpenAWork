@@ -21,6 +21,8 @@ const teamMemberSlotSchema = z.object({
   providerId: z.string().min(1).max(200).optional(),
   modelId: z.string().min(1).max(200).optional(),
   variant: z.string().min(1).max(80).optional(),
+  thinkingEnabled: z.boolean().optional(),
+  reasoningEffort: z.enum(['minimal', 'low', 'medium', 'high', 'xhigh']).optional(),
   // 自定义角色字段（specialty === 'custom'）。
   custom: z.boolean().optional(),
   systemPrompt: z.string().max(8000).optional(),

@@ -300,6 +300,14 @@ export default function TeamTemplatesPage() {
           ...(input.model
             ? { providerId: input.model.providerId, modelId: input.model.modelId }
             : { providerId: undefined, modelId: undefined }),
+          ...(input.thinking
+            ? {
+                thinkingEnabled: input.thinking.thinkingEnabled,
+                ...(input.thinking.reasoningEffort
+                  ? { reasoningEffort: input.thinking.reasoningEffort }
+                  : { reasoningEffort: undefined }),
+              }
+            : { thinkingEnabled: undefined, reasoningEffort: undefined }),
         };
         const nextRoster = editingSlot
           ? updateCustomSlot(prev.memberSlots, editingSlot.id, patch)
@@ -315,6 +323,14 @@ export default function TeamTemplatesPage() {
               ...(input.variant ? { variant: input.variant } : {}),
               ...(input.model
                 ? { providerId: input.model.providerId, modelId: input.model.modelId }
+                : {}),
+              ...(input.thinking
+                ? {
+                    thinkingEnabled: input.thinking.thinkingEnabled,
+                    ...(input.thinking.reasoningEffort
+                      ? { reasoningEffort: input.thinking.reasoningEffort }
+                      : {}),
+                  }
                 : {}),
             });
         return { ...prev, memberSlots: nextRoster };

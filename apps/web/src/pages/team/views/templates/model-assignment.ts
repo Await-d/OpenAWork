@@ -9,7 +9,7 @@
  * 的可选模型字段；运行时是否消费由后端 seam 决定（见设计文档 Phase 2）。
  */
 
-import type { TeamRuntimeLayer, FixedTeamMemberSlot } from '@openAwork/shared';
+import type { TeamRuntimeLayer, TeamReasoningEffort, FixedTeamMemberSlot } from '@openAwork/shared';
 import type { WorkflowTeamTemplateModelStrategy } from '@openAwork/web-client';
 
 /**
@@ -35,6 +35,10 @@ export interface ModelCandidate {
 export interface ModelAssignment {
   providerId: string;
   modelId: string;
+  /** 是否启用思考模式（可选，未指定时不修改已有值）。 */
+  thinkingEnabled?: boolean;
+  /** 思考强度等级（可选，仅在 thinkingEnabled=true 时有意义）。 */
+  reasoningEffort?: TeamReasoningEffort;
 }
 
 /**
@@ -236,7 +240,14 @@ export function setLayerModel(
   return roster.map((slot) => {
     if (slot.layer !== layer) return slot;
     if (assignment === null) {
-      const { providerId: _p, modelId: _m, variant: _v, ...rest } = slot;
+      const {
+        providerId: _p,
+        modelId: _m,
+        variant: _v,
+        thinkingEnabled: _t,
+        reasoningEffort: _r,
+        ...rest
+      } = slot;
       return { ...rest, toolsets: [...slot.toolsets] };
     }
     return {
@@ -244,6 +255,12 @@ export function setLayerModel(
       toolsets: [...slot.toolsets],
       providerId: assignment.providerId,
       modelId: assignment.modelId,
+      ...(assignment.thinkingEnabled !== undefined
+        ? { thinkingEnabled: assignment.thinkingEnabled }
+        : {}),
+      ...(assignment.reasoningEffort !== undefined
+        ? { reasoningEffort: assignment.reasoningEffort }
+        : {}),
     };
   });
 }
@@ -257,7 +274,14 @@ export function setSlotModel(
   return roster.map((slot) => {
     if (slot.id !== slotId) return slot;
     if (assignment === null) {
-      const { providerId: _p, modelId: _m, variant: _v, ...rest } = slot;
+      const {
+        providerId: _p,
+        modelId: _m,
+        variant: _v,
+        thinkingEnabled: _t,
+        reasoningEffort: _r,
+        ...rest
+      } = slot;
       return { ...rest, toolsets: [...slot.toolsets] };
     }
     return {
@@ -265,6 +289,12 @@ export function setSlotModel(
       toolsets: [...slot.toolsets],
       providerId: assignment.providerId,
       modelId: assignment.modelId,
+      ...(assignment.thinkingEnabled !== undefined
+        ? { thinkingEnabled: assignment.thinkingEnabled }
+        : {}),
+      ...(assignment.reasoningEffort !== undefined
+        ? { reasoningEffort: assignment.reasoningEffort }
+        : {}),
     };
   });
 }
@@ -272,7 +302,14 @@ export function setSlotModel(
 /** 清空整份花名册的模型绑定（恢复到"按默认解析"）。 */
 export function clearAllModels(roster: FixedTeamMemberSlot[]): FixedTeamMemberSlot[] {
   return roster.map((slot) => {
-    const { providerId: _p, modelId: _m, variant: _v, ...rest } = slot;
+    const {
+      providerId: _p,
+      modelId: _m,
+      variant: _v,
+      thinkingEnabled: _t,
+      reasoningEffort: _r,
+      ...rest
+    } = slot;
     return { ...rest, toolsets: [...slot.toolsets] };
   });
 }
@@ -293,3 +330,81 @@ export const MODEL_STRATEGY_OPTIONS: Array<{
   { value: 'cost', label: '成本优先', hint: '每层挑池中最便宜的可用模型' },
   { value: 'single', label: '单一铺满', hint: '所有层统一用池中最强的一个模型' },
 ];
+
+/** 推理强度选项（与聊天端一致）。 */
+export const REASONING_EFFORT_OPTIONS: Array<{
+  value: TeamReasoningEffort;
+  label: string;
+}> = [
+  { value: 'minimal', label: 'minimal · 最低' },
+  { value: 'low', label: 'low · 低' },
+  { value: 'medium', label: 'medium · 中' },
+  { value: 'high', label: 'high · 高' },
+  { value: 'xhigh', label: 'xhigh · 最高' },
+];
+
+/** 设置整层的思考配置（不改变模型绑定）。 */
+export function setLayerThinking(
+  roster: FixedTeamMemberSlot[],
+  layer: TeamRuntimeLayer,
+  thinking: { thinkingEnabled: boolean; reasoningEffort?: TeamReasoningEffort } | null,
+): FixedTeamMemberSlot[] {
+  return roster.map((slot) => {
+    if (slot.layer !== layer) return slot;
+    if (thinking === null) {
+      const { thinkingEnabled: _t, reasoningEffort: _r, ...rest } = slot;
+      return { ...rest, toolsets: [...slot.toolsets] };
+    }
+    return {
+      ...slot,
+      toolsets: [...slot.toolsets],
+      thinkingEnabled: thinking.thinkingEnabled,
+      ...(thinking.reasoningEffort ? { reasoningEffort: thinking.reasoningEffort } : {}),
+    };
+  });
+}
+
+/** 设置单个槽位的思考配置（不改变模型绑定）。 */
+export function setSlotThinking(
+  roster: FixedTeamMemberSlot[],
+  slotId: string,
+  thinking: { thinkingEnabled: boolean; reasoningEffort?: TeamReasoningEffort } | null,
+): FixedTeamMemberSlot[] {
+  return roster.map((slot) => {
+    if (slot.id !== slotId) return slot;
+    if (thinking === null) {
+      const { thinkingEnabled: _t, reasoningEffort: _r, ...rest } = slot;
+      return { ...rest, toolsets: [...slot.toolsets] };
+    }
+    return {
+      ...slot,
+      toolsets: [...slot.toolsets],
+      thinkingEnabled: thinking.thinkingEnabled,
+      ...(thinking.reasoningEffort ? { reasoningEffort: thinking.reasoningEffort } : {}),
+    };
+  });
+}
+
+/**
+ * 从 roster 某层的槽位中提取统一的思考配置。
+ * 返回 null 表示该层无统一值（混合或未设置）。
+ */
+export function getLayerThinking(
+  roster: FixedTeamMemberSlot[],
+  layer: TeamRuntimeLayer,
+): { thinkingEnabled: boolean; reasoningEffort?: TeamReasoningEffort } | null {
+  const layerSlots = roster.filter((s) => s.layer === layer);
+  if (layerSlots.length === 0) return null;
+  const first = layerSlots[0];
+  if (!first || typeof first.thinkingEnabled !== 'boolean') return null;
+  const allSame = layerSlots.every(
+    (s) =>
+      s.thinkingEnabled === first.thinkingEnabled &&
+      s.reasoningEffort === first.reasoningEffort,
+  );
+  if (!allSame) return null;
+  return {
+    thinkingEnabled: first.thinkingEnabled,
+    ...(first.reasoningEffort ? { reasoningEffort: first.reasoningEffort } : {}),
+  };
+}

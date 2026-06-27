@@ -16,6 +16,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -24,9 +25,12 @@ import {
 } from 'react';
 import type { ChatMessage } from '../../../../components/conversation-runtime/messages/support.js';
 import { getRoleLayerIdentity } from '../../runtime/data/role-layer-identity.js';
-import { buildTeamAssistantPresentation } from './team-assistant-presentation.js';
 import type { LayerMessages } from './TeamMultiLayerPanel.js';
-import { tryFormatJson, looksLikeJson } from '../../../../utils/format-json.js';
+import {
+  getTeamMessageDetailText,
+  getTeamMessagePreviewText,
+  TeamMessageBody,
+} from './team-message-content.js';
 
 export interface TeamLayerChatPanelProps {
   /** 当前活跃层级（高亮标识）。 */
@@ -55,8 +59,8 @@ const PANEL_STYLE: CSSProperties = {
 
 const HEADER_STYLE: CSSProperties = {
   display: 'grid',
-  gap: 'var(--spacing-2, 8px)',
-  padding: 'var(--spacing-3, 12px) var(--spacing-3, 12px) var(--spacing-2, 8px)',
+  gap: 3,
+  padding: '6px var(--spacing-2, 8px)',
   borderBottom: '1px solid color-mix(in srgb, var(--border-default) 36%, transparent)',
   background:
     'linear-gradient(180deg, color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base)), var(--bg-base))',
@@ -67,7 +71,7 @@ const HEADER_TITLE_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
-  gap: 'var(--spacing-2, 8px)',
+  gap: 'var(--spacing-1, 4px)',
 };
 
 const METRIC_ROW_STYLE: CSSProperties = {
@@ -77,16 +81,29 @@ const METRIC_ROW_STYLE: CSSProperties = {
   flexWrap: 'wrap',
 };
 
+const WINDOW_SUMMARY_STYLE: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 'var(--spacing-1, 4px)',
+  flexWrap: 'wrap',
+  paddingTop: 3,
+  borderTop: '1px solid color-mix(in srgb, var(--border-subtle) 28%, transparent)',
+  color: 'var(--fg-muted)',
+  fontSize: 10,
+  lineHeight: 1.35,
+};
+
 const METRIC_PILL_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  gap: 'var(--spacing-1, 4px)',
-  padding: '2px 9px',
+  gap: 3,
+  padding: '1px 6px',
   borderRadius: 'var(--radius-pill, 9999px)',
   border: '1px solid color-mix(in srgb, var(--border-subtle) 40%, transparent)',
   background: 'color-mix(in srgb, var(--bg-overlay) 60%, transparent)',
   color: 'var(--fg-muted)',
-  fontSize: 10,
+  fontSize: 9.5,
   fontWeight: 600,
   fontVariantNumeric: 'tabular-nums',
 };
@@ -96,24 +113,38 @@ const SCROLL_STYLE: CSSProperties = {
   minHeight: 0,
   overflowY: 'auto',
   overflowX: 'hidden',
-  padding: 'var(--spacing-1, 4px) var(--spacing-2, 8px) var(--spacing-3, 12px)',
+  padding: '0 2px 4px',
   display: 'flex',
   flexDirection: 'column',
-  gap: 1,
+  gap: 0,
+};
+
+const LOAD_MORE_HINT_STYLE: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 3,
+  padding: '6px 4px 4px',
+  color: 'var(--fg-subtle)',
+  fontSize: 10,
+  lineHeight: 1.3,
+  textAlign: 'center',
 };
 
 const LAYER_DIVIDER_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 'var(--spacing-1, 4px)',
-  padding: '9px 4px 6px',
-  marginTop: 2,
-  fontSize: 10,
+  gap: 3,
+  padding: '5px 4px 2px',
+  marginTop: 0,
+  fontSize: 9.5,
   fontWeight: 700,
   letterSpacing: '0.04em',
   textTransform: 'uppercase',
   color: 'var(--fg-subtle)',
-  borderBottom: '1px solid color-mix(in srgb, var(--border-subtle) 30%, transparent)',
+  borderBottomWidth: 1,
+  borderBottomStyle: 'solid',
+  borderBottomColor: 'color-mix(in srgb, var(--border-subtle) 30%, transparent)',
   flexShrink: 0,
   cursor: 'pointer',
   transition: 'background 120ms ease, border-color 120ms ease',
@@ -129,39 +160,37 @@ const LAYER_DIVIDER_HOVER_STYLE: CSSProperties = {
 
 const MESSAGE_CARD_BASE_STYLE: CSSProperties = {
   display: 'flex',
-  gap: 'var(--spacing-2, 8px)',
-  padding: '6px 10px',
-  borderRadius: 'var(--radius-md, 10px)',
-  background: 'var(--bg-overlay)',
-  borderWidth: 1,
+  gap: 5,
+  padding: '4px',
+  borderRadius: 'var(--radius-sm, 6px)',
+  background: 'transparent',
+  borderWidth: 0,
   borderStyle: 'solid',
-  borderColor: 'color-mix(in srgb, var(--border-subtle) 40%, transparent)',
-  transition: 'background 120ms ease, border-color 120ms ease, transform 120ms ease',
+  borderColor: 'transparent',
+  transition: 'background 120ms ease',
   cursor: 'default',
 };
 
 const MESSAGE_CARD_HOVER_STYLE: CSSProperties = {
   ...MESSAGE_CARD_BASE_STYLE,
-  background: 'color-mix(in srgb, var(--bg-surface) 70%, transparent)',
-  borderColor: 'color-mix(in srgb, var(--border-default) 20%, transparent)',
-  transform: 'translateY(-1px)',
+  background: 'color-mix(in srgb, var(--bg-surface) 60%, transparent)',
 };
 
 const AVATAR_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  width: 28,
-  height: 28,
+  width: 20,
+  height: 20,
   borderRadius: '50%',
   flexShrink: 0,
-  fontSize: 13,
+  fontSize: 10,
 };
 
 const MESSAGE_BODY_STYLE: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  gap: 2,
+  gap: 0,
   minWidth: 0,
   flex: 1,
 };
@@ -169,27 +198,27 @@ const MESSAGE_BODY_STYLE: CSSProperties = {
 const MESSAGE_HEADER_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 'var(--spacing-1, 4px)',
+  gap: 3,
   flexWrap: 'wrap',
 };
 
 const LAYER_NAME_STYLE: CSSProperties = {
-  fontSize: 11.5,
+  fontSize: 11,
   fontWeight: 600,
   whiteSpace: 'nowrap',
   letterSpacing: '-0.01em',
 };
 
 const MESSAGE_TIME_STYLE: CSSProperties = {
-  fontSize: 10,
+  fontSize: 9.5,
   color: 'var(--fg-subtle)',
   fontVariantNumeric: 'tabular-nums',
   marginLeft: 'auto',
 };
 
 const MESSAGE_TEXT_CLAMP_STYLE: CSSProperties = {
-  fontSize: 12.5,
-  lineHeight: 1.55,
+  fontSize: 12,
+  lineHeight: 1.5,
   color: 'var(--fg-default)',
   overflow: 'hidden',
   display: '-webkit-box',
@@ -200,8 +229,8 @@ const MESSAGE_TEXT_CLAMP_STYLE: CSSProperties = {
 };
 
 const MESSAGE_TEXT_FULL_STYLE: CSSProperties = {
-  fontSize: 12.5,
-  lineHeight: 1.6,
+  fontSize: 12,
+  lineHeight: 1.55,
   color: 'var(--fg-default)',
   whiteSpace: 'pre-wrap',
   overflowWrap: 'anywhere',
@@ -216,14 +245,6 @@ const MESSAGE_JSON_STYLE: CSSProperties = {
   overflowX: 'auto',
 };
 
-const USER_MESSAGE_TEXT_STYLE: CSSProperties = {
-  fontSize: 12.5,
-  lineHeight: 1.55,
-  color: 'var(--fg-strong)',
-  fontWeight: 500,
-  overflowWrap: 'anywhere',
-};
-
 const EMPTY_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
@@ -232,7 +253,7 @@ const EMPTY_STYLE: CSSProperties = {
   color: 'var(--fg-subtle)',
   fontSize: 12,
   textAlign: 'center' as const,
-  padding: 'var(--spacing-6, 24px) var(--spacing-4, 16px)',
+  padding: 'var(--spacing-3, 12px) var(--spacing-2, 8px)',
 };
 
 const COUNT_BADGE_STYLE: CSSProperties = {
@@ -252,15 +273,15 @@ const OPEN_BUTTON_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   gap: 3,
-  padding: '2px 7px',
-  marginTop: 2,
+  padding: '1px 6px',
+  marginTop: 3,
   borderRadius: 'var(--radius-sm, 6px)',
   borderWidth: 1,
   borderStyle: 'solid',
   borderColor: 'color-mix(in srgb, var(--border-default) 25%, transparent)',
   background: 'transparent',
   color: 'var(--fg-muted)',
-  fontSize: 10,
+  fontSize: 9.5,
   fontWeight: 700,
   cursor: 'pointer',
   transition: 'all 120ms ease',
@@ -277,18 +298,18 @@ const OPEN_BUTTON_HOVER_STYLE: CSSProperties = {
 
 const SCROLL_BOTTOM_BTN_STYLE: CSSProperties = {
   position: 'absolute',
-  bottom: 10,
+  bottom: 8,
   left: '50%',
   transform: 'translateX(-50%)',
   display: 'inline-flex',
   alignItems: 'center',
   gap: 4,
-  padding: '4px 12px',
+  padding: '3px 10px',
   borderRadius: 'var(--radius-pill, 9999px)',
   border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
   background: 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay))',
   color: 'var(--fg-strong)',
-  fontSize: 11,
+  fontSize: 10.5,
   fontWeight: 700,
   cursor: 'pointer',
   boxShadow: 'var(--shadow-sm)',
@@ -306,6 +327,10 @@ interface FlattenedMessage {
   timestamp: number;
 }
 
+const INITIAL_VISIBLE_MESSAGE_COUNT = 50;
+const LOAD_MORE_BATCH_SIZE = 50;
+const LOAD_MORE_SCROLL_THRESHOLD_PX = 48;
+
 function parseTimestamp(ts: number | string | undefined): number {
   if (!ts) return 0;
   return typeof ts === 'string' ? parseInt(ts, 10) : ts;
@@ -321,13 +346,7 @@ function formatTime(ts: number | string | undefined): string {
 }
 
 function getMessageDisplayText(message: ChatMessage): string {
-  if (message.role === 'user') {
-    return message.content || '（空消息）';
-  }
-  const presentation = buildTeamAssistantPresentation(message);
-  const raw = presentation.summaryText || presentation.detailText || message.content || '（空消息）';
-  // 如果内容是 JSON 字符串，自动格式化
-  return tryFormatJson(raw);
+  return getTeamMessagePreviewText(message, 180);
 }
 
 function getPrimarySessionId(
@@ -346,18 +365,11 @@ interface MessageGroup {
   messages: FlattenedMessage[];
 }
 
-/**
- * 把所有层级的消息按时间排序后，按「层级连续性」分组：
- * 相邻的同层级消息归为一组，层级切换时插入新的分组。
- */
-function buildMessageGroups(layers: LayerMessages[]): MessageGroup[] {
+function flattenLayerMessages(layers: LayerMessages[]): FlattenedMessage[] {
   const allMessages: FlattenedMessage[] = [];
-  // 记录有 streamingMessage 但没有已完成消息的层，需要为其创建空 group。
-  const layersWithOnlyStreaming: Array<{ layer: string; sessionId: string }> = [];
 
   for (const layer of layers) {
     const sessionId = layer.sessionIds[0] ?? '';
-    let hadMessages = false;
     for (const message of layer.messages) {
       allMessages.push({
         message,
@@ -365,18 +377,26 @@ function buildMessageGroups(layers: LayerMessages[]): MessageGroup[] {
         sessionId,
         timestamp: parseTimestamp(message.createdAt),
       });
-      hadMessages = true;
-    }
-    // 有流式消息但没有已完成消息：稍后补充一个空 group。
-    if (!hadMessages && layer.streamingMessage) {
-      layersWithOnlyStreaming.push({ layer: layer.layer, sessionId });
     }
   }
 
   allMessages.sort((a, b) => a.timestamp - b.timestamp);
+  return allMessages;
+}
 
+/**
+ * 把所有层级的消息按时间排序后，按「层级连续性」分组：
+ * 相邻的同层级消息归为一组，层级切换时插入新的分组。
+ */
+function buildMessageGroups(
+  visibleMessages: FlattenedMessage[],
+  layers: LayerMessages[],
+): MessageGroup[] {
   const groups: MessageGroup[] = [];
-  for (const item of allMessages) {
+  const visibleSessionIds = new Set<string>();
+
+  for (const item of visibleMessages) {
+    visibleSessionIds.add(item.sessionId);
     const lastGroup = groups[groups.length - 1];
     // 按 sessionId 分组（同一角色实例的连续消息归为一组）
     if (lastGroup && lastGroup.sessionId === item.sessionId) {
@@ -386,9 +406,12 @@ function buildMessageGroups(layers: LayerMessages[]): MessageGroup[] {
     }
   }
 
-  // 为只有 streamingMessage 的层补充空 group（放在末尾，因为流式消息是最新产生的）。
-  for (const entry of layersWithOnlyStreaming) {
-    groups.push({ layer: entry.layer, sessionId: entry.sessionId, messages: [] });
+  // 可见窗口里没有已完成消息，但有流式消息时，补一个空 group 承载正在输入态。
+  for (const layer of layers) {
+    const sessionId = layer.sessionIds[0] ?? '';
+    if (layer.streamingMessage && !visibleSessionIds.has(sessionId)) {
+      groups.push({ layer: layer.layer, sessionId, messages: [] });
+    }
   }
 
   return groups;
@@ -413,10 +436,19 @@ function LayerChatMessageCard({
   const [hovered, setHovered] = useState(false);
   const [openHovered, setOpenHovered] = useState(false);
   const id = getRoleLayerIdentity(layer);
-  const displayText = getMessageDisplayText(message);
-  const isLong = displayText.length > 120;
   const isUser = message.role === 'user';
-  const isJson = !isUser && looksLikeJson(displayText);
+  const previewText = getMessageDisplayText(message);
+  const detailText = getTeamMessageDetailText(message);
+  const isLong = previewText.length > 120 || detailText.length > 180;
+  const bodyTextStyle =
+    isUser
+      ? {
+          color: 'var(--fg-strong)',
+          fontWeight: 500,
+          fontSize: 12.5,
+          lineHeight: 1.55,
+        }
+      : undefined;
 
   const handleToggleExpand = useCallback(() => {
     if (isLong) setExpanded((prev) => !prev);
@@ -495,40 +527,49 @@ function LayerChatMessageCard({
           </span>
           <time style={MESSAGE_TIME_STYLE}>{formatTime(message.createdAt)}</time>
         </div>
-        {isUser ? (
-          <div style={USER_MESSAGE_TEXT_STYLE}>{displayText}</div>
+        {!isLong || expanded ? (
+          <TeamMessageBody
+            message={message}
+            textStyle={bodyTextStyle}
+            jsonStyle={MESSAGE_JSON_STYLE}
+          />
         ) : (
-          <>
-            <div
-              style={
-                isJson
-                  ? MESSAGE_JSON_STYLE
-                  : isLong && !expanded
-                    ? MESSAGE_TEXT_CLAMP_STYLE
-                    : MESSAGE_TEXT_FULL_STYLE
-              }
-              onClick={handleToggleExpand}
-              role={isLong && !isJson ? 'button' : undefined}
-              tabIndex={isLong && !isJson ? 0 : undefined}
-              onKeyDown={handleKeyDown}
-            >
-              {displayText}
-            </div>
-            {isLong && !expanded && (
-              <span
-                style={{
-                  fontSize: 10,
-                  color: 'var(--fg-muted)',
-                  cursor: 'pointer',
-                  marginTop: 1,
-                }}
-                onClick={handleToggleExpand}
-              >
-                展开全部 ↓
-              </span>
-            )}
-          </>
+          <div
+            style={MESSAGE_TEXT_CLAMP_STYLE}
+            onClick={handleToggleExpand}
+            role="button"
+            tabIndex={0}
+            onKeyDown={handleKeyDown}
+          >
+            {previewText}
+          </div>
         )}
+        {isLong && !expanded ? (
+          <span
+            style={{
+              fontSize: 10,
+              color: 'var(--fg-muted)',
+              cursor: 'pointer',
+              marginTop: 1,
+            }}
+            onClick={handleToggleExpand}
+          >
+            展开全部 ↓
+          </span>
+        ) : null}
+        {isLong && expanded ? (
+          <span
+            style={{
+              fontSize: 10,
+              color: 'var(--fg-muted)',
+              cursor: 'pointer',
+              marginTop: 1,
+            }}
+            onClick={handleToggleExpand}
+          >
+            收起 ↑
+          </span>
+        ) : null}
         {sessionId && onOpenLayerSession && (
           <button
             type="button"
@@ -596,15 +637,13 @@ function StreamingMessageCard({
   displayName?: string | null;
 }) {
   const id = getRoleLayerIdentity(layer);
-  const displayText = getMessageDisplayText(message);
+  const displayText = getTeamMessageDetailText(message);
   const isEmpty = displayText === '团队正在处理中…' || displayText.trim().length === 0;
 
   return (
     <div
       style={{
         ...MESSAGE_CARD_BASE_STYLE,
-        borderColor: `color-mix(in srgb, ${id.color} 24%, transparent)`,
-        background: `color-mix(in srgb, ${id.color} 4%, var(--bg-overlay))`,
       }}
       data-layer={layer}
       data-streaming="true"
@@ -788,6 +827,11 @@ export function TeamLayerChatPanel({
   const scrollRef = useRef<HTMLDivElement>(null);
   const autoScrollRef = useRef(true);
   const rafCleanupRef = useRef<(() => void) | null>(null);
+  const historyExpansionRef = useRef(false);
+  const prependAnchorRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
+  const previousHistoryContextRef = useRef<{ layerSessionKey: string; totalMessages: number } | null>(
+    null,
+  );
   const [autoScroll, setAutoScrollState] = useState(true);
   const [hoveredDivider, setHoveredDivider] = useState<string | null>(null);
 
@@ -796,7 +840,55 @@ export function TeamLayerChatPanel({
     setAutoScrollState(value);
   }, []);
 
-  const messageGroups = useMemo(() => buildMessageGroups(layers), [layers]);
+  const flattenedMessages = useMemo(() => flattenLayerMessages(layers), [layers]);
+  const totalHistoricalMessageCount = flattenedMessages.length;
+  const layerSessionKey = useMemo(
+    () => layers.map((layer) => `${layer.layer}:${layer.sessionIds.join(',')}`).join('|'),
+    [layers],
+  );
+  const [visibleStartIndex, setVisibleStartIndex] = useState(() =>
+    Math.max(totalHistoricalMessageCount - INITIAL_VISIBLE_MESSAGE_COUNT, 0),
+  );
+
+  useEffect(() => {
+    const nextDefaultStart = Math.max(totalHistoricalMessageCount - INITIAL_VISIBLE_MESSAGE_COUNT, 0);
+    const previousContext = previousHistoryContextRef.current;
+
+    if (
+      !previousContext ||
+      previousContext.layerSessionKey !== layerSessionKey ||
+      totalHistoricalMessageCount < previousContext.totalMessages
+    ) {
+      historyExpansionRef.current = false;
+      setVisibleStartIndex(nextDefaultStart);
+    } else if (
+      totalHistoricalMessageCount > previousContext.totalMessages &&
+      !historyExpansionRef.current
+    ) {
+      setVisibleStartIndex(nextDefaultStart);
+    }
+
+    previousHistoryContextRef.current = {
+      layerSessionKey,
+      totalMessages: totalHistoricalMessageCount,
+    };
+  }, [layerSessionKey, totalHistoricalMessageCount]);
+
+  const visibleMessages = useMemo(
+    () => flattenedMessages.slice(visibleStartIndex),
+    [flattenedMessages, visibleStartIndex],
+  );
+  const messageGroups = useMemo(
+    () => buildMessageGroups(visibleMessages, layers),
+    [layers, visibleMessages],
+  );
+  const lastVisibleGroupIndexBySession = useMemo(() => {
+    const groupIndexMap = new Map<string, number>();
+    messageGroups.forEach((group, index) => {
+      groupIndexMap.set(group.sessionId, index);
+    });
+    return groupIndexMap;
+  }, [messageGroups]);
   const layerMap = useMemo(() => {
     const map = new Map<string, LayerMessages>();
     for (const layer of layers) {
@@ -817,13 +909,22 @@ export function TeamLayerChatPanel({
     [layers],
   );
   const activeLayerCount = useMemo(
-    () => layers.filter((layer) => layer.messages.length > 0).length,
+    () => layers.filter((layer) => layer.messages.length > 0 || layer.streamingMessage).length,
     [layers],
   );
   const totalSessionCount = useMemo(
     () => layers.reduce((sum, layer) => sum + layer.sessionIds.length, 0),
     [layers],
   );
+  const visibleStreamingCount = useMemo(
+    () => layers.filter((layer) => layer.streamingMessage).length,
+    [layers],
+  );
+  const visibleRenderedCount = visibleMessages.length + visibleStreamingCount;
+  const hasHiddenHistory = visibleStartIndex > 0;
+  const visibleWindowLabel = hasHiddenHistory
+    ? `已显示最近 ${visibleRenderedCount} / ${totalMessageCount} 条消息`
+    : `已显示全部 ${totalMessageCount} 条消息`;
 
   // 计算最后一条消息的 id + 内容长度作为「消息流是否变化」的稳定签名，
   // 即使 layers 引用因 React 重新渲染而变化，只要内容没变就不重复滚动；
@@ -850,6 +951,17 @@ export function TeamLayerChatPanel({
     }
     return base;
   }, [messageGroups, totalMessageCount, layers]);
+
+  useLayoutEffect(() => {
+    const anchor = prependAnchorRef.current;
+    const el = scrollRef.current;
+    if (!anchor || !el) {
+      return;
+    }
+    const delta = el.scrollHeight - anchor.scrollHeight;
+    el.scrollTop = anchor.scrollTop + delta;
+    prependAnchorRef.current = null;
+  }, [messageGroups]);
 
   // 自动滚动到底部 —— 用双 rAF 确保在 DOM 布局完成后执行，
   // 避免高频流式更新时 scrollTop 赋值被后续重绘覆盖。
@@ -897,12 +1009,31 @@ export function TeamLayerChatPanel({
     return () => observer.disconnect();
   }, []);
 
+  const loadOlderMessages = useCallback(() => {
+    if (visibleStartIndex <= 0 || prependAnchorRef.current) {
+      return;
+    }
+    const el = scrollRef.current;
+    if (!el) {
+      return;
+    }
+    prependAnchorRef.current = {
+      scrollHeight: el.scrollHeight,
+      scrollTop: el.scrollTop,
+    };
+    historyExpansionRef.current = true;
+    setVisibleStartIndex((current) => Math.max(0, current - LOAD_MORE_BATCH_SIZE));
+  }, [visibleStartIndex]);
+
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
+    if (el.scrollTop <= LOAD_MORE_SCROLL_THRESHOLD_PX) {
+      loadOlderMessages();
+    }
     const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
     setAutoScroll(isNearBottom);
-  }, [setAutoScroll]);
+  }, [loadOlderMessages, setAutoScroll]);
 
   const scrollToBottom = useCallback(() => {
     setAutoScroll(true);
@@ -966,6 +1097,10 @@ export function TeamLayerChatPanel({
             <strong style={{ color: 'var(--fg-strong)' }}>{totalMessageCount}</strong>
           </span>
         </div>
+        <div style={WINDOW_SUMMARY_STYLE} aria-live="polite">
+          <span>{visibleWindowLabel}</span>
+          <span>{hasHiddenHistory ? `上滑继续加载更早 ${LOAD_MORE_BATCH_SIZE} 条` : '已展开完整历史'}</span>
+        </div>
       </div>
 
       {/* 消息流 */}
@@ -977,6 +1112,9 @@ export function TeamLayerChatPanel({
         aria-label="团队层级消息汇总"
         aria-live="polite"
       >
+        {hasHiddenHistory ? (
+          <div style={LOAD_MORE_HINT_STYLE}>上滑到顶部后自动加载更早消息</div>
+        ) : null}
         {messageGroups.map((group, groupIdx) => {
           const groupKey = `group-${groupIdx}-${group.layer}-${groupIdx}`;
           const isActive = group.layer === activeLayer;
@@ -985,8 +1123,9 @@ export function TeamLayerChatPanel({
           const sessionId = layerData
             ? getPrimarySessionId(layerData, currentSessionId)
             : (group.sessionId ?? null);
-          // 活跃层的流式消息：附加在该组消息列表末尾渲染。
-          const streamingMsg = layerData?.streamingMessage ?? null;
+          // 流式消息只附加到该 session 当前最后一个可见 group，避免重复渲染。
+          const shouldRenderStreaming = lastVisibleGroupIndexBySession.get(group.sessionId) === groupIdx;
+          const streamingMsg = shouldRenderStreaming ? (layerData?.streamingMessage ?? null) : null;
 
           return (
             <div key={groupKey}>
@@ -1002,8 +1141,8 @@ export function TeamLayerChatPanel({
                 style={{
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: 2,
-                  padding: '3px 0',
+                  gap: 0,
+                  padding: 0,
                 }}
                 onMouseEnter={() => setHoveredDivider(groupKey)}
                 onMouseLeave={() => setHoveredDivider(null)}

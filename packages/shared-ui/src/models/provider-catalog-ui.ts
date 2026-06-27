@@ -125,6 +125,15 @@ const STATIC_FALLBACK: readonly ProviderCatalogUiEntry[] = [
 
 const normalizeKey = (value: string): string => value.trim().toLowerCase();
 
+function modelIdCandidates(modelId: string): string[] {
+  const normalized = normalizeKey(modelId);
+  const slash = normalized.indexOf('/');
+  if (slash <= 0 || slash === normalized.length - 1) {
+    return [normalized];
+  }
+  return [normalized, normalized.slice(slash + 1)];
+}
+
 let catalogEntries: ProviderCatalogUiEntry[] = [...STATIC_FALLBACK];
 let byKey = new Map<string, ProviderCatalogUiEntry>();
 
@@ -234,9 +243,9 @@ export function resolveProviderVisual(input: {
 
 /** 由 modelId 前缀反推厂商显示名(用量页)。 */
 export function inferProviderLabelFromModelId(modelId: string): string | undefined {
-  const normalized = normalizeKey(modelId);
+  const candidates = modelIdCandidates(modelId);
   for (const entry of catalogEntries) {
-    if (entry.modelIdPrefixes?.some((prefix) => normalized.startsWith(prefix))) {
+    if (entry.modelIdPrefixes?.some((prefix) => candidates.some((candidate) => candidate.startsWith(prefix)))) {
       return entry.displayName;
     }
   }

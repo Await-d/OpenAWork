@@ -66,6 +66,7 @@ export {
   TASK_KINDS,
   TASK_SURFACES,
   type DispatchPackage,
+  type ParsedTaskLine,
   type AssignedMember,
   type TaskProfile,
   type TaskKind,
