@@ -106,8 +106,10 @@ export function MessagesMergedTab({
   const scopedTeamId = selectedTeam && !isSharedSessionSelected ? selectedTeam.id : null;
   const mentionsBadgeCount = useMemo(() => {
     if (isSharedSessionSelected) {
-      return (sharedSession?.pendingPermissions.length ?? 0) +
-        (sharedSession?.pendingQuestions.length ?? 0);
+      return (
+        (sharedSession?.pendingPermissions.length ?? 0) +
+        (sharedSession?.pendingQuestions.length ?? 0)
+      );
     }
     if (!scopedTeamId) {
       // 没有选中会话时回退到全局未读数

@@ -64,12 +64,7 @@ describe('buildSystemPromptChain · 槽位顺序', () => {
     const joined = chain.join('\n');
     // teamStack 之后不应再有其它已知槽位标记
     const teamIdx = joined.indexOf('<<TEAM_STACK>>');
-    for (const marker of [
-      '<<ROUTE>>',
-      '<<WORKSPACE>>',
-      '<<LSP>>',
-      '<<PINNED_SKILLS>>',
-    ]) {
+    for (const marker of ['<<ROUTE>>', '<<WORKSPACE>>', '<<LSP>>', '<<PINNED_SKILLS>>']) {
       expect(joined.indexOf(marker)).toBeLessThan(teamIdx);
     }
   });

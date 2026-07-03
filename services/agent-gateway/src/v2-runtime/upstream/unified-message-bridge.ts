@@ -310,9 +310,10 @@ export function unifiedConversationToModelMessages(messages: UnifiedMessage[]): 
  * messages and are rare; the `allowSystemInMessages: true` fallback in
  * the stream/generate runners handles them gracefully).
  */
-export function extractSystemFromUnifiedMessages(
-  messages: UnifiedMessage[],
-): { system: SystemModelMessage[]; messages: ModelMessage[] } {
+export function extractSystemFromUnifiedMessages(messages: UnifiedMessage[]): {
+  system: SystemModelMessage[];
+  messages: ModelMessage[];
+} {
   const systemMessages: SystemModelMessage[] = [];
   const remaining: UnifiedMessage[] = [];
 

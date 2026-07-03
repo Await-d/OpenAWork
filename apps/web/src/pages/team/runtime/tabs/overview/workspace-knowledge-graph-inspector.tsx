@@ -11,9 +11,7 @@ import {
 } from './workspace-knowledge-graph-constants.js';
 import type { LocalGraphDepth } from './workspace-knowledge-graph-toolbar.js';
 import { SectionPanel } from '../../shared/content-kit/SectionPanel.js';
-import {
-  SegmentedToggle,
-} from '../../shared/content-kit/SegmentedToggle.js';
+import { SegmentedToggle } from '../../shared/content-kit/SegmentedToggle.js';
 
 export function KnowledgeNodeInspector({
   activeRoleLayer,
@@ -65,17 +63,12 @@ export function KnowledgeNodeInspector({
             <span className="workspace-knowledge-graph-inspector-kicker">
               {nodeKindLabel(node)}
             </span>
-            <h3
-              className="workspace-knowledge-graph-inspector-title"
-              title={node.label}
-            >
+            <h3 className="workspace-knowledge-graph-inspector-title" title={node.label}>
               {node.label}
             </h3>
             <span
               className="workspace-knowledge-graph-inspector-source"
-              title={
-                `${nodeKindLabel(node)} · ${node.sourceRef ?? node.state ?? 'workspace'}`
-              }
+              title={`${nodeKindLabel(node)} · ${node.sourceRef ?? node.state ?? 'workspace'}`}
             >
               {node.sourceRef ?? node.state ?? 'workspace'}
             </span>
@@ -191,10 +184,7 @@ export function KnowledgeNodeInspector({
   );
 }
 
-function nodePersistDisabledReason(
-  node: GraphNode | null,
-  persistable: boolean,
-): string | null {
+function nodePersistDisabledReason(node: GraphNode | null, persistable: boolean): string | null {
   if (!node || persistable) return null;
   if (node.kind === 'workspace') {
     return '工作区根节点用于定位知识范围，不会作为知识条目入库。';
@@ -205,10 +195,7 @@ function nodePersistDisabledReason(
   return '该节点缺少可入库来源或知识类型。';
 }
 
-function nodePersistenceBadge(
-  node: GraphNode,
-  persistable: boolean,
-): string | null {
+function nodePersistenceBadge(node: GraphNode, persistable: boolean): string | null {
   if (node.kind === 'workspace' || node.kind === 'category') return null;
   if (node.persistedMemoryId) return '已入库';
   return persistable ? '未入库' : '不可入库';
@@ -263,11 +250,7 @@ function RoleLayerScopeSelector({
   return (
     <SectionPanel
       title="AI 层级读取范围"
-      hint={
-        activeRoleLayer
-          ? `当前预览层：${ROLE_LAYER_LABELS[activeRoleLayer]}`
-          : undefined
-      }
+      hint={activeRoleLayer ? `当前预览层：${ROLE_LAYER_LABELS[activeRoleLayer]}` : undefined}
       style={{ padding: '8px 10px', gap: 6 }}
     >
       <div className="workspace-knowledge-graph-inspector-button-row">

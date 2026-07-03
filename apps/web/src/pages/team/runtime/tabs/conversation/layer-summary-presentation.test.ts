@@ -50,7 +50,9 @@ describe('layer-summary-presentation', () => {
     expect(getLayerSummaryPresentation('pm1').dialogueFieldLabels.rewrittenIntent).toBe('规划入口');
     expect(getLayerSummaryPresentation('pm2').title).toBe('评审链摘要');
     expect(getLayerSummaryPresentation('pm2').artifactSectionTitle).toBe('评审产物链');
-    expect(getLayerSummaryPresentation('pm2').dialogueFieldLabels.recommendedNextStep).toBe('评审建议');
+    expect(getLayerSummaryPresentation('pm2').dialogueFieldLabels.recommendedNextStep).toBe(
+      '评审建议',
+    );
     expect(getLayerSummaryPresentation('executor').title).toBe('执行链摘要');
     expect(getLayerSummaryPresentation('executor').dialogueSectionTitle).toBe('执行过程线索');
   });

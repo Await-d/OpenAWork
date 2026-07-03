@@ -1471,15 +1471,14 @@ describe('useTeamConversationState — submitInbound (v0.2)', () => {
     });
 
     await act(async () => {
-      await result.current.replyQuestion(
-        'question-child-1',
-        'answered',
-        [['自己查看上下文任务']],
-        { targetSessionId: childSessionId },
-      );
+      await result.current.replyQuestion('question-child-1', 'answered', [['自己查看上下文任务']], {
+        targetSessionId: childSessionId,
+      });
     });
 
-    const replyCall = fetchMock.mock.calls.find(([url]) => String(url).includes('/questions/reply'));
+    const replyCall = fetchMock.mock.calls.find(([url]) =>
+      String(url).includes('/questions/reply'),
+    );
     expect(replyCall?.[0]).toBe(`${GATEWAY}/sessions/${childSessionId}/questions/reply`);
   });
 

@@ -90,13 +90,13 @@ export function isSharedSessionPaused(stateStatus: string | undefined): boolean 
   return stateStatus === 'paused';
 }
 
-export function mapSidebarStatus(status: TeamRuntimeSemanticStatus): AgentTeamsSidebarTeam['status'] {
+export function mapSidebarStatus(
+  status: TeamRuntimeSemanticStatus,
+): AgentTeamsSidebarTeam['status'] {
   return mapSemanticStatusToSidebarStatus(status);
 }
 
-export function mapMessageCardType(
-  type: TeamMessageRecord['type'],
-): AgentTeamsMessageCard['type'] {
+export function mapMessageCardType(type: TeamMessageRecord['type']): AgentTeamsMessageCard['type'] {
   return type;
 }
 
@@ -284,7 +284,16 @@ function buildObjectSummary(record: Record<string, unknown>, maxLen: number): st
   }
 
   // 2. 提取动作类字段（前缀），英文 action 做中文映射
-  const actionFields = ['action', 'toolName', 'tool', 'operation', 'event', 'status', 'state', 'type'];
+  const actionFields = [
+    'action',
+    'toolName',
+    'tool',
+    'operation',
+    'event',
+    'status',
+    'state',
+    'type',
+  ];
   let rawAction = '';
   for (const key of actionFields) {
     const value = record[key];
@@ -339,44 +348,44 @@ function humanizeAction(action: string): string {
     'stop-all': '停止全部运行',
     'restart-all': '重启全部运行',
     'cancel-all': '取消全部运行',
-    'resume': '恢复运行',
-    'pause': '暂停运行',
-    'stop': '停止运行',
-    'start': '开始运行',
-    'restart': '重启运行',
-    'cancel': '取消运行',
-    'create': '创建',
-    'update': '更新',
-    'delete': '删除',
-    'edit': '编辑',
-    'submit': '提交',
-    'approve': '审批通过',
-    'reject': '拒绝',
-    'complete': '完成',
-    'fail': '失败',
-    'retry': '重试',
-    'sync': '同步',
-    'refresh': '刷新',
-    'init': '初始化',
-    'clone': '克隆',
-    'merge': '合并',
-    'deploy': '部署',
-    'build': '构建',
-    'test': '测试',
-    'run': '执行',
-    'execute': '执行',
-    'invoke': '调用',
-    'query': '查询',
-    'notify': '通知',
-    'assign': '分配',
-    'handoff': '交接',
-    'transfer': '转交',
-    'accept': '接受',
-    'decline': '拒绝',
-    'plan': '规划',
-    'review': '审查',
-    'analyze': '分析',
-    'summarize': '总结',
+    resume: '恢复运行',
+    pause: '暂停运行',
+    stop: '停止运行',
+    start: '开始运行',
+    restart: '重启运行',
+    cancel: '取消运行',
+    create: '创建',
+    update: '更新',
+    delete: '删除',
+    edit: '编辑',
+    submit: '提交',
+    approve: '审批通过',
+    reject: '拒绝',
+    complete: '完成',
+    fail: '失败',
+    retry: '重试',
+    sync: '同步',
+    refresh: '刷新',
+    init: '初始化',
+    clone: '克隆',
+    merge: '合并',
+    deploy: '部署',
+    build: '构建',
+    test: '测试',
+    run: '执行',
+    execute: '执行',
+    invoke: '调用',
+    query: '查询',
+    notify: '通知',
+    assign: '分配',
+    handoff: '交接',
+    transfer: '转交',
+    accept: '接受',
+    decline: '拒绝',
+    plan: '规划',
+    review: '审查',
+    analyze: '分析',
+    summarize: '总结',
   };
 
   return map[action] ?? action;

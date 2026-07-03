@@ -440,15 +440,14 @@ function LayerChatMessageCard({
   const previewText = getMessageDisplayText(message);
   const detailText = getTeamMessageDetailText(message);
   const isLong = previewText.length > 120 || detailText.length > 180;
-  const bodyTextStyle =
-    isUser
-      ? {
-          color: 'var(--fg-strong)',
-          fontWeight: 500,
-          fontSize: 12.5,
-          lineHeight: 1.55,
-        }
-      : undefined;
+  const bodyTextStyle = isUser
+    ? {
+        color: 'var(--fg-strong)',
+        fontWeight: 500,
+        fontSize: 12.5,
+        lineHeight: 1.55,
+      }
+    : undefined;
 
   const handleToggleExpand = useCallback(() => {
     if (isLong) setExpanded((prev) => !prev);
@@ -829,9 +828,10 @@ export function TeamLayerChatPanel({
   const rafCleanupRef = useRef<(() => void) | null>(null);
   const historyExpansionRef = useRef(false);
   const prependAnchorRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
-  const previousHistoryContextRef = useRef<{ layerSessionKey: string; totalMessages: number } | null>(
-    null,
-  );
+  const previousHistoryContextRef = useRef<{
+    layerSessionKey: string;
+    totalMessages: number;
+  } | null>(null);
   const [autoScroll, setAutoScrollState] = useState(true);
   const [hoveredDivider, setHoveredDivider] = useState<string | null>(null);
 
@@ -851,7 +851,10 @@ export function TeamLayerChatPanel({
   );
 
   useEffect(() => {
-    const nextDefaultStart = Math.max(totalHistoricalMessageCount - INITIAL_VISIBLE_MESSAGE_COUNT, 0);
+    const nextDefaultStart = Math.max(
+      totalHistoricalMessageCount - INITIAL_VISIBLE_MESSAGE_COUNT,
+      0,
+    );
     const previousContext = previousHistoryContextRef.current;
 
     if (
@@ -1099,7 +1102,9 @@ export function TeamLayerChatPanel({
         </div>
         <div style={WINDOW_SUMMARY_STYLE} aria-live="polite">
           <span>{visibleWindowLabel}</span>
-          <span>{hasHiddenHistory ? `上滑继续加载更早 ${LOAD_MORE_BATCH_SIZE} 条` : '已展开完整历史'}</span>
+          <span>
+            {hasHiddenHistory ? `上滑继续加载更早 ${LOAD_MORE_BATCH_SIZE} 条` : '已展开完整历史'}
+          </span>
         </div>
       </div>
 
@@ -1124,7 +1129,8 @@ export function TeamLayerChatPanel({
             ? getPrimarySessionId(layerData, currentSessionId)
             : (group.sessionId ?? null);
           // 流式消息只附加到该 session 当前最后一个可见 group，避免重复渲染。
-          const shouldRenderStreaming = lastVisibleGroupIndexBySession.get(group.sessionId) === groupIdx;
+          const shouldRenderStreaming =
+            lastVisibleGroupIndexBySession.get(group.sessionId) === groupIdx;
           const streamingMsg = shouldRenderStreaming ? (layerData?.streamingMessage ?? null) : null;
 
           return (

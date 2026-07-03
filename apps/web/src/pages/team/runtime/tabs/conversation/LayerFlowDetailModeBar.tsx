@@ -5,10 +5,7 @@ export interface LayerFlowDetailModeBarProps {
   onChange: (value: 'session' | 'thread') => void;
 }
 
-export function LayerFlowDetailModeBar({
-  detailMode,
-  onChange,
-}: LayerFlowDetailModeBarProps) {
+export function LayerFlowDetailModeBar({ detailMode, onChange }: LayerFlowDetailModeBarProps) {
   return (
     <SegmentedToggle<'session' | 'thread'>
       ariaLabel="层级流动详情模式"

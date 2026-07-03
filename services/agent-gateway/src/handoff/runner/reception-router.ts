@@ -69,7 +69,8 @@ const ORCHESTRATE_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   // 操作指令类：执行 / 运行 / 开始 / 启动 / 停止 / 暂停 / 重试 等
   // 注意：不含"重新来"/"再试"/"重做"/"redo"等——这些归"重新执行指令"模式
   {
-    pattern: /^(执行|运行|跑一下|跑|开始|启动|停止|暂停|重试|再试一次|再来一次|重启|restart|run|start|stop|pause|retry)/i,
+    pattern:
+      /^(执行|运行|跑一下|跑|开始|启动|停止|暂停|重试|再试一次|再来一次|重启|restart|run|start|stop|pause|retry)/i,
     reason: '操作指令',
   },
   // 撤销 / 回退类
@@ -89,7 +90,8 @@ const ORCHESTRATE_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   },
   // 指代+动作类："这个改一下" "那个看看" "上面那个" 等——虽短但有动作意图
   {
-    pattern: /^(这个|那个|上面|下面|之前|刚才|上次).*(看|改|修|调|查|做|弄|处理|搞|弄一下|改一下|调一下)/i,
+    pattern:
+      /^(这个|那个|上面|下面|之前|刚才|上次).*(看|改|修|调|查|做|弄|处理|搞|弄一下|改一下|调一下)/i,
     reason: '指代+动作指令',
   },
   // 重新/重做/再来类（含 redo，语义上更接近"重做"而非"撤销"）

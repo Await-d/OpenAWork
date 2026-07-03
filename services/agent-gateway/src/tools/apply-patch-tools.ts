@@ -189,7 +189,10 @@ async function planUpdateAction(
   return { type: 'write', path: sourcePath, content: nextContent };
 }
 
-async function planPatchText(patchText: string, sessionId: string): Promise<PlannedPatchOperation[]> {
+async function planPatchText(
+  patchText: string,
+  sessionId: string,
+): Promise<PlannedPatchOperation[]> {
   const actions = parsePatchText(patchText);
   const planned: PlannedPatchOperation[] = [];
 

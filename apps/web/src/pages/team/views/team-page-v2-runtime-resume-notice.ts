@@ -77,9 +77,10 @@ export function buildRuntimeResumeSubmittedNotice(
     skipParts.push(`${result.skippedSessionCount} 个已完成/终态会话已跳过`);
   }
   if (result.userBlockedSessionCount > 0) {
-    const blockedLayers = result.userBlockedSessionIds.length > 0
-      ? `（${result.userBlockedSessionIds.length} 个需回答问题）`
-      : '';
+    const blockedLayers =
+      result.userBlockedSessionIds.length > 0
+        ? `（${result.userBlockedSessionIds.length} 个需回答问题）`
+        : '';
     skipParts.push(`${result.userBlockedSessionCount} 个会话保持暂停${blockedLayers}`);
   }
 

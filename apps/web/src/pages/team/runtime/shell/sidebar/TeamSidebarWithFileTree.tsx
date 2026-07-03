@@ -125,7 +125,8 @@ function tabButtonStyle(active: boolean): CSSProperties {
     fontSize: 12,
     fontWeight: active ? 600 : 450,
     cursor: 'pointer',
-    transition: 'background 160ms cubic-bezier(0.4, 0, 0.2, 1), color 160ms ease, border-color 160ms ease',
+    transition:
+      'background 160ms cubic-bezier(0.4, 0, 0.2, 1), color 160ms ease, border-color 160ms ease',
     whiteSpace: 'nowrap',
     position: 'relative',
   };
@@ -731,7 +732,7 @@ export function TeamSidebarWithFileTree({
           onOpenNewSessionModal={
             onOpenNewSessionModal
               ? onOpenNewSessionModal
-              : (_templateId: string | null, workingDirectory?: string | null) => {
+              : (_templateId?: string | null, workingDirectory?: string | null) => {
                   setInternalInitialWorkingDirectory(workingDirectory ?? null);
                   setInternalShowNewSessionModal(true);
                 }

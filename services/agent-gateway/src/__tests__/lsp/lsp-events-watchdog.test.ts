@@ -106,10 +106,11 @@ async function openSocket(
 beforeAll(async () => {
   dbModule = await import('../../infra/db.js');
   await dbModule.migrate();
-  dbModule.sqliteRun(
-    'INSERT OR IGNORE INTO users (id, email, password_hash) VALUES (?, ?, ?)',
-    [USER_ID, `${USER_ID}@example.com`, 'hash'],
-  );
+  dbModule.sqliteRun('INSERT OR IGNORE INTO users (id, email, password_hash) VALUES (?, ?, ?)', [
+    USER_ID,
+    `${USER_ID}@example.com`,
+    'hash',
+  ]);
   authPlugin = (await import('../../infra/auth.js')).default;
   requestWorkflowPlugin = (await import('../../runtime/request-workflow.js')).default;
   lspRouter = await import('../../lsp/router.js');

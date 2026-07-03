@@ -12,7 +12,6 @@ describe('team-runtime-stall-detection', () => {
         {
           fromSessionId: 'session-root',
           sessionId: 'session-child',
-          state: 'running',
           toSessionId: 'session-child',
           updatedAt: Date.parse('2026-06-21T11:59:30.000Z'),
         },

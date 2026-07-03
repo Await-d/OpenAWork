@@ -76,13 +76,7 @@ export function lintFile(filePath: string, workspaceRoot?: string): Promise<Lint
   }
 
   return new Promise<LintResult>((resolve) => {
-    const args = [
-      'eslint',
-      '--no-error-on-unmatched-pattern',
-      '--format',
-      'compact',
-      filePath,
-    ];
+    const args = ['eslint', '--no-error-on-unmatched-pattern', '--format', 'compact', filePath];
 
     // 使用 npx eslint 确保使用项目本地的 eslint
     const child = spawn('npx', args, {

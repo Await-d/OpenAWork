@@ -216,7 +216,10 @@ vi.mock('./extras/TeamRunStateBanner.js', () => ({
     diagnostics,
     rightSlot,
   }: {
-    diagnostics?: { activeAlerts?: Array<{ message: string }>; incidents?: Array<{ message: string }> };
+    diagnostics?: {
+      activeAlerts?: Array<{ message: string }>;
+      incidents?: Array<{ message: string }>;
+    };
     rightSlot?: ReactNode;
   }) => (
     <div

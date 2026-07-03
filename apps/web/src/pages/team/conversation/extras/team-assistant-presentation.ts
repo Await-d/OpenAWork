@@ -42,10 +42,7 @@ const INLINE_REASONING_TAG_PROBE_RE = new RegExp(
   'i',
 );
 
-const INLINE_REASONING_TAG_RE = new RegExp(
-  `<\\s*\\/?\\s*${INLINE_REASONING_TAG_GROUP}\\s*>`,
-  'gi',
-);
+const INLINE_REASONING_TAG_RE = new RegExp(`<\\s*\\/?\\s*${INLINE_REASONING_TAG_GROUP}\\s*>`, 'gi');
 
 const READ_LIKE_TOOLS = new Set([
   'read',

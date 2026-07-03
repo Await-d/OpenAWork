@@ -27,14 +27,14 @@ function parseIsoTimestampMs(value: string | null | undefined): number | null {
 }
 
 function isScopeEmpty(sessionScope: ReadonlySet<string> | null | undefined): boolean {
-  return !sessionScope;
+  return !sessionScope || sessionScope.size === 0;
 }
 
 function matchesScope(
   sessionScope: ReadonlySet<string> | null | undefined,
   sessionId: string | null | undefined,
 ): boolean {
-  if (isScopeEmpty(sessionScope)) {
+  if (!sessionScope || sessionScope.size === 0) {
     return true;
   }
   return typeof sessionId === 'string' && sessionId.length > 0 && sessionScope.has(sessionId);

@@ -78,7 +78,8 @@ describe('buildDispatchPackages', () => {
           parallel: false,
           story: 'US1',
           explicitProfile: null,
-          title: '[services/agent-gateway/src/routes/auth.ts] 代码评审检查后端鉴权实现 - 输出审查结论',
+          title:
+            '[services/agent-gateway/src/routes/auth.ts] 代码评审检查后端鉴权实现 - 输出审查结论',
           priority: 'medium',
           fileEntries: [],
           ownedPaths: ['services/agent-gateway/src/routes/auth.ts'],
@@ -211,10 +212,7 @@ describe('extractComparablePathsFromText', () => {
       extractComparablePathsFromText(
         '[apps/web/src/pages/login.tsx] 修复登录页 - 处理 apps/web/src/components/login-form.tsx 的交互问题',
       ),
-    ).toEqual([
-      'apps/web/src/pages/login.tsx',
-      'apps/web/src/components/login-form.tsx',
-    ]);
+    ).toEqual(['apps/web/src/pages/login.tsx', 'apps/web/src/components/login-form.tsx']);
   });
 
   it('支持方括号内的多文件逗号列举', () => {
@@ -222,10 +220,7 @@ describe('extractComparablePathsFromText', () => {
       extractComparablePathsFromText(
         '[apps/web/src/pages/login.tsx, apps/web/src/pages/login.test.tsx] 实现登录页面 - 页面可提交且测试覆盖主流程',
       ),
-    ).toEqual([
-      'apps/web/src/pages/login.tsx',
-      'apps/web/src/pages/login.test.tsx',
-    ]);
+    ).toEqual(['apps/web/src/pages/login.tsx', 'apps/web/src/pages/login.test.tsx']);
   });
 
   it('parseAllTasks 会把任务块中的 Create/Modify/Test 文件清单并入 ownedPaths', () => {

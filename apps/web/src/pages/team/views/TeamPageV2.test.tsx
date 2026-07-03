@@ -197,8 +197,12 @@ vi.mock('./team-page-v2-panels.js', () => ({
       <div
         data-testid="workspace-switcher"
         data-create-enabled={String(Boolean(authState.accessToken))}
-        data-rename-enabled={String(Boolean((testState.data as { canManageRuntime?: boolean } | null)?.canManageRuntime))}
-        data-delete-enabled={String(Boolean((testState.data as { canManageRuntime?: boolean } | null)?.canManageRuntime))}
+        data-rename-enabled={String(
+          Boolean((testState.data as { canManageRuntime?: boolean } | null)?.canManageRuntime),
+        )}
+        data-delete-enabled={String(
+          Boolean((testState.data as { canManageRuntime?: boolean } | null)?.canManageRuntime),
+        )}
       />
       {selectedTeam ? (
         <>
@@ -760,9 +764,7 @@ describe('TeamPageV2', () => {
     expect(screen.getByTestId('team-current-session-pill').textContent).toContain('当前会话');
     expect(screen.getByTestId('team-current-session-pill').textContent).toContain('根会话');
     expect(screen.getByTestId('team-current-session-status').textContent).toBe('运行中');
-    expect(screen.getByTestId('team-current-session-members').textContent).toBe(
-      '1 成员 · 1 在线',
-    );
+    expect(screen.getByTestId('team-current-session-members').textContent).toBe('1 成员 · 1 在线');
   });
 
   it('不再把 topSummary 的旧暂停文案当成真实暂停态', async () => {

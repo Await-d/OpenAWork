@@ -646,17 +646,17 @@ function applyToolResultEvent(
         : ('completed' as const),
   });
 
-    return {
-      ...state,
-      toolCalls,
-      planTasks,
-      dagNodes,
-      agentEvents: [
-        ...state.agentEvents,
-        createRequestScopedEvent(
-          isPendingPermission ? 'agent_thinking' : event.isError ? 'agent_error' : 'tool_done',
-          isPendingPermission
-            ? `等待权限：${event.toolName}`
+  return {
+    ...state,
+    toolCalls,
+    planTasks,
+    dagNodes,
+    agentEvents: [
+      ...state.agentEvents,
+      createRequestScopedEvent(
+        isPendingPermission ? 'agent_thinking' : event.isError ? 'agent_error' : 'tool_done',
+        isPendingPermission
+          ? `等待权限：${event.toolName}`
           : event.isError
             ? event.reason === 'timeout'
               ? `工具超时：${event.toolName}`
@@ -664,17 +664,17 @@ function applyToolResultEvent(
                 ? `审批后执行失败：${event.toolName}`
                 : `工具失败：${event.toolName}`
             : `工具完成：${event.toolName}`,
-          event.clientRequestId,
-          isPendingPermission || event.isError
-            ? event.reason === 'timeout'
-              ? `原因：超时 · ${stringifyToolOutput(event.output)}`
-              : resumedAfterApproval
-                ? `审批已通过并恢复执行。
+        event.clientRequestId,
+        isPendingPermission || event.isError
+          ? event.reason === 'timeout'
+            ? `原因：超时 · ${stringifyToolOutput(event.output)}`
+            : resumedAfterApproval
+              ? `审批已通过并恢复执行。
 ${stringifyToolOutput(event.output)}`
               : stringifyToolOutput(event.output)
-            : undefined,
-        ),
-      ],
+          : undefined,
+      ),
+    ],
   };
 }
 

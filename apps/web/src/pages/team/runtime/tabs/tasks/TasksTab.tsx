@@ -130,9 +130,7 @@ function TaskCard({
       <div
         style={{ display: 'flex', justifyContent: 'space-between', gap: 6, alignItems: 'center' }}
       >
-        <div
-          style={{ display: 'flex', gap: 5, alignItems: 'center', minWidth: 0, flex: 1 }}
-        >
+        <div style={{ display: 'flex', gap: 5, alignItems: 'center', minWidth: 0, flex: 1 }}>
           <button
             type="button"
             onClick={onToggleExpand}
@@ -196,9 +194,7 @@ function TaskCard({
       ) : null}
 
       {/* Footer: assignee + tags + actions */}
-      <div
-        style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}
-      >
+      <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
         <span
           style={{
             display: 'inline-flex',
@@ -501,8 +497,7 @@ function LaneColumn({
               width: '100%',
               minHeight: 28,
               borderRadius: 8,
-              border:
-                '1px dashed color-mix(in oklch, var(--border-default) 50%, transparent)',
+              border: '1px dashed color-mix(in oklch, var(--border-default) 50%, transparent)',
               color: 'var(--fg-muted)',
               background: 'transparent',
               fontSize: 11,
@@ -644,250 +639,248 @@ export function TasksTab({ selectedTeam = null }: { selectedTeam?: AgentTeamsSid
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minHeight: 0 }}>
         {/* ── Header ── */}
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--fg-strong)' }}>任务看板</span>
-        <span
-          style={{
-            padding: '1px 8px',
-            borderRadius: 999,
-            background: 'color-mix(in oklch, var(--accent) 12%, transparent)',
-            color: 'var(--accent)',
-            fontSize: 10,
-            fontWeight: 700,
-          }}
-        >
-          {stats.total}
-        </span>
-        {!canManageSessionEntries ? (
-          <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
-            当前工作区不可写，无法新增或推进任务。
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--fg-strong)' }}>任务看板</span>
+          <span
+            style={{
+              padding: '1px 8px',
+              borderRadius: 999,
+              background: 'color-mix(in oklch, var(--accent) 12%, transparent)',
+              color: 'var(--accent)',
+              fontSize: 10,
+              fontWeight: 700,
+            }}
+          >
+            {stats.total}
           </span>
-        ) : null}
-      </div>
-
-      {/* ── 会话信息条 ── */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          gap: 10,
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          padding: '10px 12px',
-          borderRadius: 10,
-          border: '1px solid var(--border-subtle)',
-          background: 'var(--bg-overlay)',
-          boxShadow: 'var(--shadow-sm)',
-        }}
-      >
-        <div style={{ display: 'grid', gap: 3 }}>
-          <span style={{ fontSize: 11, color: 'var(--fg-muted)', fontWeight: 700 }}>
-            当前任务会话
-          </span>
-          <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--fg-strong)' }}>
-            {selectedTeam.title}
-          </span>
+          {!canManageSessionEntries ? (
+            <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
+              当前工作区不可写，无法新增或推进任务。
+            </span>
+          ) : null}
         </div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-          <ChromeBadge>
-            {formatSidebarTeamStatus(selectedTeam.status)}
-          </ChromeBadge>
-          {statusSubtitle ? <ChromeBadge>{statusSubtitle}</ChromeBadge> : null}
-        </div>
-      </div>
 
-      {/* ── 统计概览 ── */}
-      {stats.total > 0 ? (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))',
-            gap: 8,
-          }}
-        >
-          <div style={STAT_CARD_STYLE}>
-            <span style={STAT_LABEL_STYLE}>总任务</span>
-            <span style={{ ...STAT_VALUE_STYLE, color: 'var(--fg-strong)' }}>{stats.total}</span>
-          </div>
-          <div style={STAT_CARD_STYLE}>
-            <span style={STAT_LABEL_STYLE}>进行中</span>
-            <span style={{ ...STAT_VALUE_STYLE, color: 'var(--accent)' }}>{stats.doing}</span>
-          </div>
-          <div style={STAT_CARD_STYLE}>
-            <span style={STAT_LABEL_STYLE}>待办</span>
-            <span style={{ ...STAT_VALUE_STYLE, color: 'var(--fg-muted)' }}>{stats.todo}</span>
-          </div>
-          <div style={STAT_CARD_STYLE}>
-            <span style={STAT_LABEL_STYLE}>已完成/失败</span>
-            <span style={{ ...STAT_VALUE_STYLE, color: 'var(--warning)' }}>{stats.review}</span>
-          </div>
-        </div>
-      ) : null}
-
-      {/* ── 进度条 + 筛选 ── */}
-      {stats.total > 0 ? (
+        {/* ── 会话信息条 ── */}
         <div
           style={{
             display: 'flex',
-            gap: 12,
+            justifyContent: 'space-between',
+            gap: 10,
             alignItems: 'center',
             flexWrap: 'wrap',
-            padding: '8px 12px',
-            borderRadius: 8,
+            padding: '10px 12px',
+            borderRadius: 10,
             border: '1px solid var(--border-subtle)',
             background: 'var(--bg-overlay)',
+            boxShadow: 'var(--shadow-sm)',
           }}
         >
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flex: 1, minWidth: 120 }}>
-            <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--fg-muted)' }}>进度</span>
-            <div style={PROGRESS_TRACK_STYLE}>
-              <div
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  height: '100%',
-                  borderRadius: 999,
-                  width: `${stats.progress * 100}%`,
-                  background:
-                    stats.progress === 1
-                      ? 'var(--success)'
-                      : stats.progress > 0.5
-                        ? 'var(--accent)'
-                        : 'var(--warning)',
-                  transition: 'width 300ms ease',
-                }}
-              />
-            </div>
-            <span
-              style={{
-                fontSize: 10,
-                fontWeight: 700,
-                color: 'var(--fg-muted)',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {Math.round(stats.progress * 100)}%
+          <div style={{ display: 'grid', gap: 3 }}>
+            <span style={{ fontSize: 11, color: 'var(--fg-muted)', fontWeight: 700 }}>
+              当前任务会话
+            </span>
+            <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--fg-strong)' }}>
+              {selectedTeam.title}
             </span>
           </div>
-
-          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-            <button
-              type="button"
-              onClick={() => setFilter('all')}
-              style={{
-                ...FILTER_BTN_BASE,
-                ...(filter === 'all'
-                  ? {
-                      background: 'color-mix(in oklch, var(--accent) 14%, transparent)',
-                      color: 'var(--accent)',
-                      fontWeight: 700,
-                    }
-                  : { color: 'var(--fg-muted)' }),
-              }}
-              className="team-hover-surface"
-            >
-              全部 ({stats.total})
-            </button>
-            <button
-              type="button"
-              onClick={() => setFilter('active')}
-              style={{
-                ...FILTER_BTN_BASE,
-                ...(filter === 'active'
-                  ? {
-                      background: 'color-mix(in oklch, var(--accent) 14%, transparent)',
-                      color: 'var(--accent)',
-                      fontWeight: 700,
-                    }
-                  : { color: 'var(--fg-muted)' }),
-              }}
-              className="team-hover-surface"
-            >
-              进行中 ({stats.active})
-            </button>
-            <button
-              type="button"
-              onClick={() => setFilter('done')}
-              style={{
-                ...FILTER_BTN_BASE,
-                ...(filter === 'done'
-                  ? {
-                      background: 'color-mix(in oklch, var(--warning) 14%, transparent)',
-                      color: 'var(--warning)',
-                      fontWeight: 700,
-                    }
-                  : { color: 'var(--fg-muted)' }),
-              }}
-              className="team-hover-surface"
-            >
-              已完成 ({stats.done})
-            </button>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            <ChromeBadge>{formatSidebarTeamStatus(selectedTeam.status)}</ChromeBadge>
+            {statusSubtitle ? <ChromeBadge>{statusSubtitle}</ChromeBadge> : null}
           </div>
         </div>
-      ) : null}
 
-      {/* ── 看板列 ── */}
-      {stats.total === 0 ? (
-        <EmptyState
-          emoji="🗒️"
-          title="暂无任务"
-          description={
-            canManageSessionEntries
-              ? '点击下方按钮添加第一个任务，任务会实时同步到运行时。'
-              : '当前会话还没有任务数据。'
-          }
-          action={
-            canManageSessionEntries ? (
-              <button
-                type="button"
-                onClick={() => setAddingLane('todo')}
+        {/* ── 统计概览 ── */}
+        {stats.total > 0 ? (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))',
+              gap: 8,
+            }}
+          >
+            <div style={STAT_CARD_STYLE}>
+              <span style={STAT_LABEL_STYLE}>总任务</span>
+              <span style={{ ...STAT_VALUE_STYLE, color: 'var(--fg-strong)' }}>{stats.total}</span>
+            </div>
+            <div style={STAT_CARD_STYLE}>
+              <span style={STAT_LABEL_STYLE}>进行中</span>
+              <span style={{ ...STAT_VALUE_STYLE, color: 'var(--accent)' }}>{stats.doing}</span>
+            </div>
+            <div style={STAT_CARD_STYLE}>
+              <span style={STAT_LABEL_STYLE}>待办</span>
+              <span style={{ ...STAT_VALUE_STYLE, color: 'var(--fg-muted)' }}>{stats.todo}</span>
+            </div>
+            <div style={STAT_CARD_STYLE}>
+              <span style={STAT_LABEL_STYLE}>已完成/失败</span>
+              <span style={{ ...STAT_VALUE_STYLE, color: 'var(--warning)' }}>{stats.review}</span>
+            </div>
+          </div>
+        ) : null}
+
+        {/* ── 进度条 + 筛选 ── */}
+        {stats.total > 0 ? (
+          <div
+            style={{
+              display: 'flex',
+              gap: 12,
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              padding: '8px 12px',
+              borderRadius: 8,
+              border: '1px solid var(--border-subtle)',
+              background: 'var(--bg-overlay)',
+            }}
+          >
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flex: 1, minWidth: 120 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--fg-muted)' }}>进度</span>
+              <div style={PROGRESS_TRACK_STYLE}>
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    height: '100%',
+                    borderRadius: 999,
+                    width: `${stats.progress * 100}%`,
+                    background:
+                      stats.progress === 1
+                        ? 'var(--success)'
+                        : stats.progress > 0.5
+                          ? 'var(--accent)'
+                          : 'var(--warning)',
+                    transition: 'width 300ms ease',
+                  }}
+                />
+              </div>
+              <span
                 style={{
-                  padding: '6px 16px',
-                  borderRadius: 8,
-                  border: '1px solid color-mix(in oklch, var(--accent) 40%, transparent)',
-                  background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
-                  color: 'var(--accent)',
-                  fontSize: 12,
+                  fontSize: 10,
                   fontWeight: 700,
-                  cursor: 'pointer',
+                  color: 'var(--fg-muted)',
+                  whiteSpace: 'nowrap',
                 }}
               >
-                <PlusIcon size={12} color="var(--accent)" /> 添加任务
+                {Math.round(stats.progress * 100)}%
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              <button
+                type="button"
+                onClick={() => setFilter('all')}
+                style={{
+                  ...FILTER_BTN_BASE,
+                  ...(filter === 'all'
+                    ? {
+                        background: 'color-mix(in oklch, var(--accent) 14%, transparent)',
+                        color: 'var(--accent)',
+                        fontWeight: 700,
+                      }
+                    : { color: 'var(--fg-muted)' }),
+                }}
+                className="team-hover-surface"
+              >
+                全部 ({stats.total})
               </button>
-            ) : null
-          }
-        />
-      ) : (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-            gap: 10,
-            flex: 1,
-            minHeight: 0,
-          }}
-        >
-          {filteredLanes.map((lane) => (
-            <LaneColumn
-              key={lane.id}
-              lane={lane}
-              cards={lane.cards}
-              expandedTaskIds={expandedTaskIds}
-              canManageSessionEntries={canManageSessionEntries}
-              onToggleExpand={toggleExpandTask}
-              onMove={handleMoveTask}
-              onAdvance={handleAdvanceTask}
-              addingLane={addingLane}
-              setAddingLane={setAddingLane}
-              newTitle={newTitle}
-              setNewTitle={setNewTitle}
-              onAddTask={handleAddTask}
-              busy={busy}
-            />
-          ))}
-        </div>
-      )}
+              <button
+                type="button"
+                onClick={() => setFilter('active')}
+                style={{
+                  ...FILTER_BTN_BASE,
+                  ...(filter === 'active'
+                    ? {
+                        background: 'color-mix(in oklch, var(--accent) 14%, transparent)',
+                        color: 'var(--accent)',
+                        fontWeight: 700,
+                      }
+                    : { color: 'var(--fg-muted)' }),
+                }}
+                className="team-hover-surface"
+              >
+                进行中 ({stats.active})
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilter('done')}
+                style={{
+                  ...FILTER_BTN_BASE,
+                  ...(filter === 'done'
+                    ? {
+                        background: 'color-mix(in oklch, var(--warning) 14%, transparent)',
+                        color: 'var(--warning)',
+                        fontWeight: 700,
+                      }
+                    : { color: 'var(--fg-muted)' }),
+                }}
+                className="team-hover-surface"
+              >
+                已完成 ({stats.done})
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {/* ── 看板列 ── */}
+        {stats.total === 0 ? (
+          <EmptyState
+            emoji="🗒️"
+            title="暂无任务"
+            description={
+              canManageSessionEntries
+                ? '点击下方按钮添加第一个任务，任务会实时同步到运行时。'
+                : '当前会话还没有任务数据。'
+            }
+            action={
+              canManageSessionEntries ? (
+                <button
+                  type="button"
+                  onClick={() => setAddingLane('todo')}
+                  style={{
+                    padding: '6px 16px',
+                    borderRadius: 8,
+                    border: '1px solid color-mix(in oklch, var(--accent) 40%, transparent)',
+                    background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
+                    color: 'var(--accent)',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <PlusIcon size={12} color="var(--accent)" /> 添加任务
+                </button>
+              ) : null
+            }
+          />
+        ) : (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+              gap: 10,
+              flex: 1,
+              minHeight: 0,
+            }}
+          >
+            {filteredLanes.map((lane) => (
+              <LaneColumn
+                key={lane.id}
+                lane={lane}
+                cards={lane.cards}
+                expandedTaskIds={expandedTaskIds}
+                canManageSessionEntries={canManageSessionEntries}
+                onToggleExpand={toggleExpandTask}
+                onMove={handleMoveTask}
+                onAdvance={handleAdvanceTask}
+                addingLane={addingLane}
+                setAddingLane={setAddingLane}
+                newTitle={newTitle}
+                setNewTitle={setNewTitle}
+                onAddTask={handleAddTask}
+                busy={busy}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </TabContainer>
   );

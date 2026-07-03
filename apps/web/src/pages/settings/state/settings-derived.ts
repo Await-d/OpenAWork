@@ -6,7 +6,13 @@ import type {
   SettingsDevLogRecord,
 } from './settings-types.js';
 
-type StreamStopReason = 'end_turn' | 'tool_use' | 'max_tokens' | 'error' | 'cancelled' | 'tool_permission';
+type StreamStopReason =
+  | 'end_turn'
+  | 'tool_use'
+  | 'max_tokens'
+  | 'error'
+  | 'cancelled'
+  | 'tool_permission';
 
 interface UpstreamStreamSummaryPayload {
   stopReason?: StreamStopReason;
@@ -150,7 +156,8 @@ function asUpstreamStreamSummaryPayload(payload: unknown): UpstreamStreamSummary
   }
   return {
     stopReason,
-    textDeltaCount: typeof record['textDeltaCount'] === 'number' ? record['textDeltaCount'] : undefined,
+    textDeltaCount:
+      typeof record['textDeltaCount'] === 'number' ? record['textDeltaCount'] : undefined,
     reasoningDeltaCount:
       typeof record['reasoningDeltaCount'] === 'number' ? record['reasoningDeltaCount'] : undefined,
     toolCallDeltaCount:

@@ -2,7 +2,10 @@
 import { useEffect, useState } from 'react';
 import { describe, expect, it } from 'vitest';
 import { renderHook } from '@testing-library/react';
-import { useSessionSnapshotLoader, type SessionSnapshotLoaderSetters } from './use-session-snapshot-loader.js';
+import {
+  useSessionSnapshotLoader,
+  type SessionSnapshotLoaderSetters,
+} from './use-session-snapshot-loader.js';
 
 function createSetters(): SessionSnapshotLoaderSetters {
   const setMessages: SessionSnapshotLoaderSetters['setMessages'] = () => undefined;
@@ -11,15 +14,19 @@ function createSetters(): SessionSnapshotLoaderSetters {
   const setSessionTodos: SessionSnapshotLoaderSetters['setSessionTodos'] = () => undefined;
   const setChildSessions: SessionSnapshotLoaderSetters['setChildSessions'] = () => undefined;
   const setSessionTasks: SessionSnapshotLoaderSetters['setSessionTasks'] = () => undefined;
-  const setPendingPermissions: SessionSnapshotLoaderSetters['setPendingPermissions'] = () => undefined;
+  const setPendingPermissions: SessionSnapshotLoaderSetters['setPendingPermissions'] = () =>
+    undefined;
   const setPendingQuestions: SessionSnapshotLoaderSetters['setPendingQuestions'] = () => undefined;
-  const setSessionStateStatus: SessionSnapshotLoaderSetters['setSessionStateStatus'] = () => undefined;
-  const setRecoveryActiveStream: SessionSnapshotLoaderSetters['setRecoveryActiveStream'] = () => undefined;
-  const setLatestUpstreamSummary: SessionSnapshotLoaderSetters['setLatestUpstreamSummary'] = () => undefined;
+  const setSessionStateStatus: SessionSnapshotLoaderSetters['setSessionStateStatus'] = () =>
+    undefined;
+  const setRecoveryActiveStream: SessionSnapshotLoaderSetters['setRecoveryActiveStream'] = () =>
+    undefined;
+  const setLatestUpstreamSummary: SessionSnapshotLoaderSetters['setLatestUpstreamSummary'] = () =>
+    undefined;
   const setRecoveredStreamSnapshot: SessionSnapshotLoaderSetters['setRecoveredStreamSnapshot'] =
     () => undefined;
-  const setIsSessionSnapshotReady: SessionSnapshotLoaderSetters['setIsSessionSnapshotReady'] =
-    () => undefined;
+  const setIsSessionSnapshotReady: SessionSnapshotLoaderSetters['setIsSessionSnapshotReady'] = () =>
+    undefined;
 
   return {
     setMessages,
@@ -49,7 +56,13 @@ describe('useSessionSnapshotLoader', () => {
 
     const { result, rerender } = renderHook(
       ({ currentSetters }: { currentSetters: SessionSnapshotLoaderSetters }) =>
-        useSessionSnapshotLoader('https://gateway.test', 'token', isCurrentSessionView, refs, currentSetters),
+        useSessionSnapshotLoader(
+          'https://gateway.test',
+          'token',
+          isCurrentSessionView,
+          refs,
+          currentSetters,
+        ),
       {
         initialProps: {
           currentSetters: { ...setters },

@@ -806,7 +806,9 @@ export async function runSessionInBackground(input: {
       return {
         ...result,
         stopReason: 'error' as const,
-        errorSummary: result.errorSummary ?? `stream 执行未正常结束（statusCode=${result.statusCode}，无 stopReason），可能模型路由解析失败、replay 命中或 session 冲突`,
+        errorSummary:
+          result.errorSummary ??
+          `stream 执行未正常结束（statusCode=${result.statusCode}，无 stopReason），可能模型路由解析失败、replay 命中或 session 冲突`,
       };
     }
     return result;

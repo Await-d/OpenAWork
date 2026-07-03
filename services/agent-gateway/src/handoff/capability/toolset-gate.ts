@@ -48,7 +48,15 @@ export const TOOLSET_TO_TOOL_NAMES: Record<ToolsetCategory, readonly string[]> =
   test: [
     'bash', // 测试通过 bash 执行
   ],
-  review: ['read', 'list', 'grep', 'glob', 'lsp_goto_definition', 'lsp_find_references', 'lsp_diagnostics'],
+  review: [
+    'read',
+    'list',
+    'grep',
+    'glob',
+    'lsp_goto_definition',
+    'lsp_find_references',
+    'lsp_diagnostics',
+  ],
   all: [], // 特殊值：不过滤
 };
 

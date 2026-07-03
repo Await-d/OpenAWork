@@ -89,26 +89,40 @@ export function LayerFlowHandoffHeader({
           gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
         }}
       >
-        {(fromSessionTitle || entry.fromSessionId) ? (
+        {fromSessionTitle || entry.fromSessionId ? (
           <div style={CONVERSATION_INFO_CARD_STYLE}>
-            <span style={{ fontSize: 10, color: 'var(--fg-muted)', fontWeight: 700 }}>来源会话</span>
+            <span style={{ fontSize: 10, color: 'var(--fg-muted)', fontWeight: 700 }}>
+              来源会话
+            </span>
             <span style={{ fontSize: 11, color: 'var(--fg-default)', lineHeight: 1.5 }}>
               {(fromSessionTitle?.trim() || entry.fromSessionId || '').slice(0, 28)}
             </span>
-            {entry.fromSessionId ? <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>from · {entry.fromSessionId.slice(0, 8)}</span> : null}
+            {entry.fromSessionId ? (
+              <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
+                from · {entry.fromSessionId.slice(0, 8)}
+              </span>
+            ) : null}
           </div>
         ) : null}
-        {(toSessionTitle || entry.toSessionId) ? (
+        {toSessionTitle || entry.toSessionId ? (
           <div style={CONVERSATION_INFO_CARD_STYLE}>
-            <span style={{ fontSize: 10, color: 'var(--fg-muted)', fontWeight: 700 }}>目标会话</span>
+            <span style={{ fontSize: 10, color: 'var(--fg-muted)', fontWeight: 700 }}>
+              目标会话
+            </span>
             <span style={{ fontSize: 11, color: 'var(--fg-default)', lineHeight: 1.5 }}>
               {(toSessionTitle?.trim() || entry.toSessionId || '').slice(0, 28)}
             </span>
-            {entry.toSessionId ? <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>to · {entry.toSessionId.slice(0, 8)}</span> : null}
+            {entry.toSessionId ? (
+              <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
+                to · {entry.toSessionId.slice(0, 8)}
+              </span>
+            ) : null}
           </div>
         ) : null}
         <div style={CONVERSATION_INFO_CARD_STYLE}>
-          <span style={{ fontSize: 10, color: 'var(--fg-muted)', fontWeight: 700 }}>交接元信息</span>
+          <span style={{ fontSize: 10, color: 'var(--fg-muted)', fontWeight: 700 }}>
+            交接元信息
+          </span>
           <span style={{ fontSize: 11, color: 'var(--fg-default)', lineHeight: 1.5 }}>
             {fromId.short} → {toId.short}
           </span>

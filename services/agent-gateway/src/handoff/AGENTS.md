@@ -165,20 +165,20 @@ store/      ──→ runner/    ❌ 禁止（store 不依赖执行逻辑）
 
 **受控通道**（层间唯一合法路径）：
 
-| 通道                         | 用途                                  |
-| ---------------------------- | ------------------------------------- |
-| `store/handoff-store`        | createHandoff / complete / fail —— 派发协议 |
-| `store/inbound-store`        | submitInboundMessage —— 反向消息通道  |
-| `store/substate-store`       | setSubstate —— 子状态机               |
-| `bus/team-events-bus`        | publishHandoffEvent / publishTeamEvent —— 事件 |
+| 通道                   | 用途                                           |
+| ---------------------- | ---------------------------------------------- |
+| `store/handoff-store`  | createHandoff / complete / fail —— 派发协议    |
+| `store/inbound-store`  | submitInboundMessage —— 反向消息通道           |
+| `store/substate-store` | setSubstate —— 子状态机                        |
+| `bus/team-events-bus`  | publishHandoffEvent / publishTeamEvent —— 事件 |
 
 **runner ↔ 运行层映射**：
 
-| runner 文件                       | 层      |
-| --------------------------------- | ------- |
-| `reception-orchestrator` / `reception-router` | reception (b) |
-| `pm1-runner` / `artifact-chain`   | pm1 (c) |
-| `pm2-runner` / `pm2-quality-review-reconciler` | pm2 (d) |
+| runner 文件                                    | 层            |
+| ---------------------------------------------- | ------------- |
+| `reception-orchestrator` / `reception-router`  | reception (b) |
+| `pm1-runner` / `artifact-chain`                | pm1 (c)       |
+| `pm2-runner` / `pm2-quality-review-reconciler` | pm2 (d)       |
 
 **禁止**：上述任一 runner 跨层直接 `import`（含静态 `import` 与动态 `await import()`）另一层的 runner。例如 `artifact-chain`（c）不得 import `pm2-runner`（d）。
 

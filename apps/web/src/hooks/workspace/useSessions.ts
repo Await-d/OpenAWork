@@ -3,11 +3,7 @@ import { useNavigate, useParams } from 'react-router';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { useUIStateStore } from '../../stores/ui/uiState.js';
 import { readPersistedActiveStreamSessionId } from '../gateway/useGatewayClient.js';
-import {
-  createSessionsClient,
-  withTokenRefresh,
-  HttpError,
-} from '@openAwork/web-client';
+import { createSessionsClient, withTokenRefresh, HttpError } from '@openAwork/web-client';
 import type { TokenStore, SessionsListOptions } from '@openAwork/web-client';
 import { toast } from '../../components/common/feedback/ToastNotification.js';
 import { exportSession } from '../../utils/session/session-transfer.js';
@@ -164,9 +160,7 @@ export function useSessions() {
           }
         }
 
-        const nonTeamSessions = hydratedSessions.filter(
-          (session) => !isTeamSession(session),
-        );
+        const nonTeamSessions = hydratedSessions.filter((session) => !isTeamSession(session));
         return applySessionRunStateOverrides(nonTeamSessions, runStateOverridesRef.current);
       });
       if (fetchRequestIdRef.current !== requestId) {

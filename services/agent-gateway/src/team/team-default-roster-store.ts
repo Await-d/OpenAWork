@@ -155,9 +155,7 @@ function normalizeMemberSlot(entry: unknown): FixedTeamMemberSlot | null {
     ...(isBoundedString(providerId, 200) ? { providerId: providerId.trim() } : {}),
     ...(isBoundedString(variant, 80) ? { variant: variant.trim() } : {}),
     ...(typeof thinkingEnabled === 'boolean' ? { thinkingEnabled } : {}),
-    ...(isTeamReasoningEffort(reasoningEffort)
-      ? { reasoningEffort }
-      : {}),
+    ...(isTeamReasoningEffort(reasoningEffort) ? { reasoningEffort } : {}),
     ...(custom ? { custom: true } : {}),
     ...(isBoundedString(systemPrompt, 8000) ? { systemPrompt: systemPrompt.trim() } : {}),
     ...(skillIds.length > 0 ? { skillIds } : {}),

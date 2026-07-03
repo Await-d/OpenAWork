@@ -444,7 +444,9 @@ export function TeamSessionListSidebar({
   );
   const contextMenuSession = useMemo(
     () =>
-      contextMenu ? allSessions.find((session) => session.id === contextMenu.sessionId) ?? null : null,
+      contextMenu
+        ? (allSessions.find((session) => session.id === contextMenu.sessionId) ?? null)
+        : null,
     [allSessions, contextMenu],
   );
 

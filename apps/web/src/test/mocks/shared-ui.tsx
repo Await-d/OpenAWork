@@ -296,7 +296,10 @@ export function canConfigureThinkingForModel(
   const actualModelId = leafModelId(modelId);
 
   if (effectiveType === 'openai') {
-    return inferSupportsThinking(providerType, modelId, false) && !/^gpt-5(?:\.\d+)?-pro/.test(actualModelId);
+    return (
+      inferSupportsThinking(providerType, modelId, false) &&
+      !/^gpt-5(?:\.\d+)?-pro/.test(actualModelId)
+    );
   }
   if (effectiveType === 'deepseek') {
     return !actualModelId.includes('reasoner');

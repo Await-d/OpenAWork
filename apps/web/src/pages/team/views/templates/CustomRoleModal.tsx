@@ -539,11 +539,7 @@ export function CustomRoleModal({
           {/* 思考模式配置 */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={LABEL}>思考模式</span>
-            <ThinkingConfigControl
-              value={thinking}
-              editable
-              onChange={setThinking}
-            />
+            <ThinkingConfigControl value={thinking} editable onChange={setThinking} />
             <span style={{ fontSize: 10, color: 'var(--fg-subtle)', lineHeight: 1.5 }}>
               开启后该成员运行时使用扩展思考链；仅对支持思考的模型生效。
             </span>

@@ -55,7 +55,11 @@ const STATE_LABEL_STYLE: CSSProperties = {
   fontSize: 10,
 };
 
-function progressFillStyle(percent: number, status: 'running' | 'paused' | 'idle', layerColor?: string): CSSProperties {
+function progressFillStyle(
+  percent: number,
+  status: 'running' | 'paused' | 'idle',
+  layerColor?: string,
+): CSSProperties {
   const accentColor =
     status === 'paused'
       ? 'color-mix(in srgb, var(--warning) 60%, var(--bg-overlay))'

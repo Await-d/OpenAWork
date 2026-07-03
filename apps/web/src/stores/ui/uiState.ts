@@ -313,8 +313,7 @@ export const useUIStateStore = create<UIStateStore>()(
 
       // Chat view
       chatView: 'home',
-      setChatView: (v) =>
-        set((state) => (state.chatView === v ? state : { chatView: v })),
+      setChatView: (v) => set((state) => (state.chatView === v ? state : { chatView: v })),
       navigateToHome: () =>
         set((state) => (state.chatView === 'home' ? state : { chatView: 'home' })),
       navigateToSession: () =>

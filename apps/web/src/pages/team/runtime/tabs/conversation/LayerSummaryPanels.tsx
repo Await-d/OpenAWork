@@ -1,7 +1,10 @@
 import type { CSSProperties } from 'react';
 import { ArtifactPreview } from '../tasks/ArtifactPreview.js';
 import { getRoleLayerIdentity } from '../../data/role-layer-identity.js';
-import type { LayerArtifactSelection, LayerSummaryPresentation } from './layer-summary-presentation.js';
+import type {
+  LayerArtifactSelection,
+  LayerSummaryPresentation,
+} from './layer-summary-presentation.js';
 import { resolveIncomingDialoguePreview } from './layer-dialogue-preview.js';
 
 const SECTION_STYLE: CSSProperties = {
@@ -84,11 +87,7 @@ function renderDialogueField(input: {
   );
 }
 
-function ArtifactStack({
-  items,
-}: {
-  items: LayerArtifactSelection[];
-}) {
+function ArtifactStack({ items }: { items: LayerArtifactSelection[] }) {
   return (
     <div style={{ display: 'grid', gap: 10 }}>
       {items.map((item) => (
@@ -115,8 +114,15 @@ function Pm1SummaryPanel({
   return (
     <div style={RAIL_STYLE}>
       {dialoguePreview ? (
-        <div style={{ ...SECTION_STYLE, borderColor: 'color-mix(in srgb, var(--aux) 24%, transparent)' }}>
-          <strong style={{ fontSize: 11, color: 'var(--fg-strong)' }}>{presentation.dialogueSectionTitle}</strong>
+        <div
+          style={{
+            ...SECTION_STYLE,
+            borderColor: 'color-mix(in srgb, var(--aux) 24%, transparent)',
+          }}
+        >
+          <strong style={{ fontSize: 11, color: 'var(--fg-strong)' }}>
+            {presentation.dialogueSectionTitle}
+          </strong>
           {presentation.dialogueFieldOrder.map((keyName) =>
             renderDialogueField({
               keyName,
@@ -128,12 +134,18 @@ function Pm1SummaryPanel({
       ) : null}
       {artifactSequence.length > 0 ? (
         <div style={SECTION_STYLE}>
-          <strong style={{ fontSize: 11, color: 'var(--fg-strong)' }}>{presentation.artifactSectionTitle}</strong>
+          <strong style={{ fontSize: 11, color: 'var(--fg-strong)' }}>
+            {presentation.artifactSectionTitle}
+          </strong>
           <div style={STRIP_STYLE}>
             {artifactSequence.map((item) => (
               <div key={`${item.phase}-strip`} style={STRIP_CARD_STYLE}>
-                <span style={{ fontSize: 10, color: 'var(--fg-muted)', fontWeight: 700 }}>{item.phase}</span>
-                <strong style={{ fontSize: 11, color: 'var(--fg-strong)' }}>{item.artifact.title}</strong>
+                <span style={{ fontSize: 10, color: 'var(--fg-muted)', fontWeight: 700 }}>
+                  {item.phase}
+                </span>
+                <strong style={{ fontSize: 11, color: 'var(--fg-strong)' }}>
+                  {item.artifact.title}
+                </strong>
                 <span style={{ fontSize: 10, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
                   规划链条中的 {item.phase} 产物
                 </span>
@@ -170,7 +182,9 @@ function Pm2SummaryPanel({
           }}
         >
           <strong style={{ fontSize: 11, color: 'var(--fg-strong)' }}>评审主结论</strong>
-          <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>{reviewLead.artifact.title}</span>
+          <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+            {reviewLead.artifact.title}
+          </span>
           <ArtifactPreview
             title={reviewLead.artifact.title}
             content={reviewLead.artifact.content}
@@ -180,7 +194,9 @@ function Pm2SummaryPanel({
       ) : null}
       {dialoguePreview ? (
         <div style={SECTION_STYLE}>
-          <strong style={{ fontSize: 11, color: 'var(--fg-strong)' }}>{presentation.dialogueSectionTitle}</strong>
+          <strong style={{ fontSize: 11, color: 'var(--fg-strong)' }}>
+            {presentation.dialogueSectionTitle}
+          </strong>
           <div style={TIMELINE_STYLE}>
             {presentation.dialogueFieldOrder.map((keyName) => {
               const node = renderDialogueField({
@@ -245,19 +261,27 @@ function ExecutorSummaryPanel({
           background: `color-mix(in srgb, ${identity.color} 8%, var(--bg-overlay))`,
         }}
       >
-        <strong style={{ fontSize: 11, color: 'var(--fg-strong)' }}>{presentation.dialogueSectionTitle}</strong>
+        <strong style={{ fontSize: 11, color: 'var(--fg-strong)' }}>
+          {presentation.dialogueSectionTitle}
+        </strong>
         <div style={TWO_COLUMN_STYLE}>
           {quickFields.map((field) => (
             <div key={field.label} style={STRIP_CARD_STYLE}>
-              <span style={{ fontSize: 10, color: 'var(--fg-muted)', fontWeight: 700 }}>{field.label}</span>
-              <span style={{ fontSize: 11, color: 'var(--fg-default)', lineHeight: 1.6 }}>{field.value}</span>
+              <span style={{ fontSize: 10, color: 'var(--fg-muted)', fontWeight: 700 }}>
+                {field.label}
+              </span>
+              <span style={{ fontSize: 11, color: 'var(--fg-default)', lineHeight: 1.6 }}>
+                {field.value}
+              </span>
             </div>
           ))}
         </div>
       </div>
       {artifactSequence.length > 0 ? (
         <div style={SECTION_STYLE}>
-          <strong style={{ fontSize: 11, color: 'var(--fg-strong)' }}>{presentation.artifactSectionTitle}</strong>
+          <strong style={{ fontSize: 11, color: 'var(--fg-strong)' }}>
+            {presentation.artifactSectionTitle}
+          </strong>
           <ArtifactStack items={artifactSequence} />
         </div>
       ) : null}

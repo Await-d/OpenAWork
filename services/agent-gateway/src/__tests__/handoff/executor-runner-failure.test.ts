@@ -110,9 +110,9 @@ describe('runExecutionLayer 失败语义（🔴#1）', () => {
     const handoff = makeExecutorHandoff();
     const signal = new AbortController().signal;
 
-    await expect(
-      runner({ handoff, toSessionId: EXECUTOR_SESSION_ID, signal }),
-    ).rejects.toThrow(/executor 层执行失败/);
+    await expect(runner({ handoff, toSessionId: EXECUTOR_SESSION_ID, signal })).rejects.toThrow(
+      /executor 层执行失败/,
+    );
 
     // substate 推进到 implementing（开工）但绝不能是 completed。
     expect(readSubstate(EXECUTOR_SESSION_ID)).not.toBe('completed');
@@ -132,9 +132,9 @@ describe('runExecutionLayer 失败语义（🔴#1）', () => {
     const handoff = makeExecutorHandoff();
     const signal = new AbortController().signal;
 
-    await expect(
-      runner({ handoff, toSessionId: EXECUTOR_SESSION_ID, signal }),
-    ).rejects.toThrow(/executor 层执行失败[\s\S]*socket hang up/);
+    await expect(runner({ handoff, toSessionId: EXECUTOR_SESSION_ID, signal })).rejects.toThrow(
+      /executor 层执行失败[\s\S]*socket hang up/,
+    );
 
     expect(readSubstate(EXECUTOR_SESSION_ID)).not.toBe('completed');
   });

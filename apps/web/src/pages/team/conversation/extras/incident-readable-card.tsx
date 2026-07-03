@@ -57,10 +57,12 @@ const CODE_LABELS: Record<string, string> = {
   'quality-review-pending': '评审待处理',
 };
 
+const DEFAULT_SEVERITY_META = { icon: 'ℹ️', label: '提示', color: 'var(--aux)' } as const;
+
 const SEVERITY_META: Record<string, { icon: string; label: string; color: string }> = {
   error: { icon: '⚠️', label: '错误', color: 'var(--danger)' },
   warning: { icon: '⚡', label: '警告', color: 'var(--warning)' },
-  info: { icon: 'ℹ️', label: '提示', color: 'var(--aux)' },
+  info: DEFAULT_SEVERITY_META,
   critical: { icon: '🚨', label: '严重', color: 'var(--danger)' },
 };
 
@@ -157,7 +159,8 @@ export function tryParseIncidentJson(text: string): IncidentData | null {
     code: typeof parsed['code'] === 'string' ? (parsed['code'] as string) : undefined,
     message: typeof parsed['message'] === 'string' ? (parsed['message'] as string) : undefined,
     severity: typeof parsed['severity'] === 'string' ? (parsed['severity'] as string) : undefined,
-    timestamp: typeof parsed['timestamp'] === 'number' ? (parsed['timestamp'] as number) : undefined,
+    timestamp:
+      typeof parsed['timestamp'] === 'number' ? (parsed['timestamp'] as number) : undefined,
     context:
       typeof parsed['context'] === 'object' && parsed['context'] !== null
         ? (parsed['context'] as Record<string, unknown>)
@@ -166,8 +169,7 @@ export function tryParseIncidentJson(text: string): IncidentData | null {
 }
 
 export function IncidentReadableCard({ data }: { data: IncidentData }): React.ReactElement {
-  const severityMeta =
-    SEVERITY_META[data.severity ?? ''] ?? SEVERITY_META['info'] ?? SEVERITY_META['info'];
+  const severityMeta = SEVERITY_META[data.severity ?? ''] ?? DEFAULT_SEVERITY_META;
   const categoryLabel = CATEGORY_LABELS[data.category ?? ''] ?? data.category ?? '事件';
   const codeLabel = CODE_LABELS[data.code ?? ''] ?? data.code;
 
@@ -225,9 +227,7 @@ export function IncidentReadableCard({ data }: { data: IncidentData }): React.Re
           {categoryLabel}
         </span>
         {codeLabel ? <span style={CODE_BADGE_STYLE}>{codeLabel}</span> : null}
-        {timeStr ? (
-          <span style={{ color: 'var(--fg-muted)', fontSize: 11 }}>{timeStr}</span>
-        ) : null}
+        {timeStr ? <span style={{ color: 'var(--fg-muted)', fontSize: 11 }}>{timeStr}</span> : null}
       </div>
       {data.message ? (
         <span style={{ color: 'var(--fg-default)', fontSize: 12, lineHeight: 1.6 }}>

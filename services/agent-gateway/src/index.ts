@@ -476,9 +476,8 @@ try {
     // 避免 watcher 启动后这些 handoff 永远卡在中间态。
     step = bootLogger.start('gateway.handoff-checkpoint-recovery');
     try {
-      const { recoverInterruptedHandoffs, createStartupCheckpoint } = await import(
-        './handoff/store/checkpoint-recovery.js'
-      );
+      const { recoverInterruptedHandoffs, createStartupCheckpoint } =
+        await import('./handoff/store/checkpoint-recovery.js');
       const recoveryResult = recoverInterruptedHandoffs();
       createStartupCheckpoint(recoveryResult);
       bootLogger.succeed(step, undefined, {

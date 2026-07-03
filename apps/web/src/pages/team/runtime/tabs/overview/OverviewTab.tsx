@@ -143,12 +143,12 @@ export function OverviewTab({
                 selectedTeam.status === 'idle'
                   ? 'var(--fg-subtle)'
                   : selectedTeam.status === 'running'
-                  ? 'var(--success)'
-                  : selectedTeam.status === 'paused'
-                    ? 'var(--warning)'
-                    : selectedTeam.status === 'failed'
-                      ? 'var(--danger)'
-                      : 'var(--fg-muted)';
+                    ? 'var(--success)'
+                    : selectedTeam.status === 'paused'
+                      ? 'var(--warning)'
+                      : selectedTeam.status === 'failed'
+                        ? 'var(--danger)'
+                        : 'var(--fg-muted)';
               const statusLabel = formatSidebarTeamStatus(selectedTeam.status);
               return (
                 <span
@@ -568,7 +568,14 @@ export function OverviewTab({
                           <span style={{ fontSize: 9, color: 'var(--fg-muted)' }}>
                             主体: {event.agentName}
                           </span>
-                          <span style={{ fontSize: 10, color: 'var(--fg-default)', lineHeight: 1.5, wordBreak: 'break-word' }}>
+                          <span
+                            style={{
+                              fontSize: 10,
+                              color: 'var(--fg-default)',
+                              lineHeight: 1.5,
+                              wordBreak: 'break-word',
+                            }}
+                          >
                             {formatTimelineDetail(event.detail, 300)}
                           </span>
                         </div>

@@ -700,7 +700,9 @@ export async function migrate(): Promise<void> {
   `);
   ensureColumn('team_messages', 'type', "TEXT NOT NULL DEFAULT 'update'");
   ensureColumn('team_messages', 'session_id', 'TEXT REFERENCES sessions(id) ON DELETE SET NULL');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_team_messages_session ON team_messages(user_id, session_id)');
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_team_messages_session ON team_messages(user_id, session_id)',
+  );
   ensureColumn(
     'team_messages',
     'recipient_member_id',

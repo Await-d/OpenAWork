@@ -139,6 +139,7 @@ export interface TeamConversationViewProps {
    * 某个具体角色实例后只看该角色的对话，而非混合所有子角色。
    */
   soloMode?: boolean;
+  onOpenLayerSession?: (sessionId: string) => void;
 }
 
 const TEAM_CONVERSATION_LAYER_ORDER = [
@@ -1291,7 +1292,7 @@ export function TeamConversationView({
               activeLayer={state.roleLayer}
               currentSessionId={sessionId}
               layers={multiLayerMessages}
-              onOpenLayerSession={onOpenLayerSession ? handleOpenLayerSession : undefined}
+              onOpenLayerSession={onOpenLayerSession}
               onLayerSelect={handlePanelLayerSelect}
             />
           </div>

@@ -79,20 +79,17 @@ function seedCompletedChild(input: {
     claimToken: input.token,
     toSessionId: input.childSessionId,
   });
-  dbModule.sqliteRun(
-    `UPDATE handoff_records SET result_json = ? WHERE id = ?`,
-    [
-      JSON.stringify({
-        role: input.roleLayer,
-        taskTitle: goal,
-        summary: `${input.roleLayer} 已提交结果摘要。`,
-        artifactCount: 1,
-        evidenceSource: 'summary',
-        protocol: 'stream',
-      }),
-      child.id,
-    ],
-  );
+  dbModule.sqliteRun(`UPDATE handoff_records SET result_json = ? WHERE id = ?`, [
+    JSON.stringify({
+      role: input.roleLayer,
+      taskTitle: goal,
+      summary: `${input.roleLayer} 已提交结果摘要。`,
+      artifactCount: 1,
+      evidenceSource: 'summary',
+      protocol: 'stream',
+    }),
+    child.id,
+  ]);
   store.completeHandoff({ handoffId: child.id, claimToken: input.token });
   return child;
 }

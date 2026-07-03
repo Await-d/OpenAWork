@@ -224,12 +224,11 @@ export function buildWorkspaceGroupsProjection(input: {
     seenSessionIds.add(session.id);
     const key = session.workspacePath ?? '__unbound__';
     const runtimeStatus = input.runtimeSessionStatuses.get(session.id) ?? 'idle';
-    const current =
-      groups.get(key) ?? {
-        workspaceLabel: formatWorkspaceLabel(session.workspacePath),
-        workspacePath: session.workspacePath,
-        sessions: [],
-      };
+    const current = groups.get(key) ?? {
+      workspaceLabel: formatWorkspaceLabel(session.workspacePath),
+      workspacePath: session.workspacePath,
+      sessions: [],
+    };
     const workingDirectory = parseWorkingDirectory(session.metadataJson ?? '');
     current.sessions.push({
       id: session.id,
@@ -255,12 +254,11 @@ export function buildWorkspaceGroupsProjection(input: {
     seenSessionIds.add(sharedSession.sessionId);
     const key = sharedSession.workspacePath ?? '__unbound__';
     const runtimeStatus = input.sharedSessionStatuses.get(sharedSession.sessionId) ?? 'idle';
-    const current =
-      groups.get(key) ?? {
-        workspaceLabel: formatWorkspaceLabel(sharedSession.workspacePath),
-        workspacePath: sharedSession.workspacePath,
-        sessions: [],
-      };
+    const current = groups.get(key) ?? {
+      workspaceLabel: formatWorkspaceLabel(sharedSession.workspacePath),
+      workspacePath: sharedSession.workspacePath,
+      sessions: [],
+    };
     current.sessions.push({
       id: sharedSession.sessionId,
       isSharedSession: true,
@@ -278,7 +276,9 @@ export function buildWorkspaceGroupsProjection(input: {
 
   const workspaceGroups = Array.from(groups.values()).map((group) => ({
     ...group,
-    sessions: [...group.sessions].sort((left, right) => left.title.localeCompare(right.title, 'zh-CN')),
+    sessions: [...group.sessions].sort((left, right) =>
+      left.title.localeCompare(right.title, 'zh-CN'),
+    ),
   }));
 
   // 不再按 activeWorkspaceDefaultWorkingRoot 过滤 workspaceGroups，
@@ -328,7 +328,10 @@ export function buildWorkspaceGroupsProjection(input: {
 
 export function buildConversationCardsProjection(input: {
   auditLogs: Array<
-    Pick<TeamAuditLogRecord, 'actorEmail' | 'actorUserId' | 'createdAt' | 'detail' | 'id' | 'summary'>
+    Pick<
+      TeamAuditLogRecord,
+      'actorEmail' | 'actorUserId' | 'createdAt' | 'detail' | 'id' | 'summary'
+    >
   >;
   accentByMemberId: ReadonlyMap<string, string>;
   memberNameById: ReadonlyMap<string, string>;
@@ -409,7 +412,8 @@ export function buildMessageCardsProjection(input: {
         .sort((left, right) => right.timestamp - left.timestamp)
         .map((message) => {
           const from = input.memberNameById.get(message.memberId) ?? '团队成员';
-          const fromAccent = input.accentByMemberId.get(message.memberId) ?? ROLE_SLOT_CONFIG[0].accent;
+          const fromAccent =
+            input.accentByMemberId.get(message.memberId) ?? ROLE_SLOT_CONFIG[0].accent;
           return {
             from,
             fromAccent,
@@ -419,7 +423,9 @@ export function buildMessageCardsProjection(input: {
             ...(message.recipientMemberId !== undefined
               ? { recipientMemberId: message.recipientMemberId }
               : {}),
-            ...(message.replyToMessageId !== undefined ? { replyToMessageId: message.replyToMessageId } : {}),
+            ...(message.replyToMessageId !== undefined
+              ? { replyToMessageId: message.replyToMessageId }
+              : {}),
             route:
               message.recipientMemberId != null || message.replyToMessageId != null
                 ? 'followup'
@@ -598,7 +604,12 @@ function buildTaskDetail(task: {
 
 export function buildTimelineProjection(input: {
   accentByMemberId: ReadonlyMap<string, string>;
-  auditLogs: Array<Pick<TeamAuditLogRecord, 'action' | 'actorEmail' | 'actorUserId' | 'createdAt' | 'detail' | 'id' | 'summary'>>;
+  auditLogs: Array<
+    Pick<
+      TeamAuditLogRecord,
+      'action' | 'actorEmail' | 'actorUserId' | 'createdAt' | 'detail' | 'id' | 'summary'
+    >
+  >;
   handoffs: Array<
     Pick<HandoffEntry, 'fromRoleLayer' | 'id' | 'state' | 'summary' | 'toRoleLayer' | 'updatedAt'>
   >;
@@ -607,7 +618,14 @@ export function buildTimelineProjection(input: {
   runtimeTasks: Array<
     Pick<
       SessionTask,
-      'assignedAgent' | 'description' | 'errorMessage' | 'id' | 'result' | 'status' | 'title' | 'updatedAt'
+      | 'assignedAgent'
+      | 'description'
+      | 'errorMessage'
+      | 'id'
+      | 'result'
+      | 'status'
+      | 'title'
+      | 'updatedAt'
     > & {
       subject?: string | null;
     }
@@ -620,11 +638,13 @@ export function buildTimelineProjection(input: {
     ...input.handoffs.map(
       (handoff, index) =>
         ({
-          agentAccent: ROLE_SLOT_CONFIG[index % ROLE_SLOT_CONFIG.length]?.accent ?? ROLE_SLOT_CONFIG[0].accent,
+          agentAccent:
+            ROLE_SLOT_CONFIG[index % ROLE_SLOT_CONFIG.length]?.accent ?? ROLE_SLOT_CONFIG[0].accent,
           agentId: handoff.id,
           agentName: `${handoff.fromRoleLayer} → ${handoff.toRoleLayer ?? handoff.fromRoleLayer}`,
           detail: formatTimelineDetail(
-            handoff.summary ?? `${handoff.toRoleLayer ?? '下一层'} 层交接状态已更新为 ${handoff.state}。`,
+            handoff.summary ??
+              `${handoff.toRoleLayer ?? '下一层'} 层交接状态已更新为 ${handoff.state}。`,
           ),
           id: `handoff-${handoff.id}`,
           timestamp: new Date(handoff.updatedAt).toISOString(),
@@ -681,9 +701,7 @@ export function buildTimelineProjection(input: {
         }) satisfies AgentTeamsTimelineEvent,
     ),
   ]
-    .sort(
-      (left, right) => new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime(),
-    )
+    .sort((left, right) => new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime())
     .slice(0, 16);
 
   const activityStats = timelineEvents.reduce<Record<string, number>>((acc, event) => {
@@ -698,13 +716,16 @@ export function buildTimelineProjection(input: {
 }
 
 export function buildRuntimeActivityProjection(input: {
-  handoffs: Array<Pick<HandoffEntry, 'fromRoleLayer' | 'state' | 'toRoleLayer' | 'updatedAt' | 'startedAt'>>;
+  handoffs: Array<
+    Pick<HandoffEntry, 'fromRoleLayer' | 'state' | 'toRoleLayer' | 'updatedAt' | 'startedAt'>
+  >;
   runtimeTasks: SessionTask[];
   sessions: Array<Pick<TeamRuntimeSessionRecord, 'roleLayer' | 'stateStatus'>>;
 }): TeamRuntimeActivityProjection {
   const handoffs = input.handoffs;
   const activeHandoffs = handoffs.filter(
-    (handoff) => handoff.state === 'running' || handoff.state === 'claimed' || handoff.state === 'pending',
+    (handoff) =>
+      handoff.state === 'running' || handoff.state === 'claimed' || handoff.state === 'pending',
   ).length;
   const completedHandoffs = handoffs.filter((handoff) => handoff.state === 'completed').length;
   const failedHandoffs = handoffs.filter(
@@ -770,7 +791,11 @@ export function buildOfficeAgentsProjection(input: {
   roleBindings: Array<{
     role?: string;
     roleLabel?: string;
-    selectedAgent?: { id: string; label: string; canonicalRole?: { coreRole?: string | null } | null } | null;
+    selectedAgent?: {
+      id: string;
+      label: string;
+      canonicalRole?: { coreRole?: string | null } | null;
+    } | null;
   }>;
   roleChips: AgentTeamsRoleChip[];
   taskLaneCount: number;
@@ -780,7 +805,10 @@ export function buildOfficeAgentsProjection(input: {
     const binding = input.roleBindings[index] ?? null;
     const boundRole = binding?.role ?? null;
     const boundAgent = binding?.selectedAgent ?? null;
-    const effectiveRole = resolveOfficeRole(boundAgent?.canonicalRole?.coreRole ?? boundRole, index);
+    const effectiveRole = resolveOfficeRole(
+      boundAgent?.canonicalRole?.coreRole ?? boundRole,
+      index,
+    );
     const taskNote =
       index === 0
         ? `待处理 ${input.activeSharedSession?.pendingPermissions.length ?? 0} 个审批`
@@ -793,7 +821,9 @@ export function buildOfficeAgentsProjection(input: {
         ? `阻塞 ${input.collaborationTasks.filter((task) => task.status === 'failed').length} 项`
         : undefined;
 
-    const agentStatus = input.isSelectedTeamPaused ? 'resting' : mapOfficeStatusFromRole(effectiveRole);
+    const agentStatus = input.isSelectedTeamPaused
+      ? 'resting'
+      : mapOfficeStatusFromRole(effectiveRole);
 
     return {
       accent: chip.accent,
@@ -801,7 +831,9 @@ export function buildOfficeAgentsProjection(input: {
       extraNote,
       id: boundAgent?.id ?? chip.id,
       label:
-        effectiveRole === 'planner' ? `[L] ${boundAgent?.label ?? chip.role}` : (boundAgent?.label ?? chip.role),
+        effectiveRole === 'planner'
+          ? `[L] ${boundAgent?.label ?? chip.role}`
+          : (boundAgent?.label ?? chip.role),
       note: taskNote,
       status: agentStatus,
       x: position.x,

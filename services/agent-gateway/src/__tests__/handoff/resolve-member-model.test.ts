@@ -370,13 +370,10 @@ describe('mergeMemberModelIntoMetadata', () => {
   });
 
   it('不会用空 modelId 覆盖已有模型选择', () => {
-    const merged = resolver.mergeMemberModelIntoMetadata(
-      JSON.stringify({ modelId: 'existing' }),
-      {
-        thinkingEnabled: true,
-        reasoningEffort: 'medium',
-      },
-    );
+    const merged = resolver.mergeMemberModelIntoMetadata(JSON.stringify({ modelId: 'existing' }), {
+      thinkingEnabled: true,
+      reasoningEffort: 'medium',
+    });
     expect(JSON.parse(merged!)).toMatchObject({
       modelId: 'existing',
       thinkingEnabled: true,

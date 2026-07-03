@@ -522,7 +522,9 @@ export function TeamSharedConversationPanel({
                   lineHeight: 1.65,
                   color: latestAssistantOutput ? 'var(--fg-default)' : 'var(--fg-muted)',
                   whiteSpace: looksLikeJson(latestAssistantOutput ?? '') ? 'pre' : 'pre-wrap',
-                  fontFamily: looksLikeJson(latestAssistantOutput ?? '') ? 'ui-monospace, SFMono-Regular, monospace' : undefined,
+                  fontFamily: looksLikeJson(latestAssistantOutput ?? '')
+                    ? 'ui-monospace, SFMono-Regular, monospace'
+                    : undefined,
                 }}
               >
                 {latestAssistantOutput

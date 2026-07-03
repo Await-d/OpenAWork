@@ -18,7 +18,9 @@ import {
 } from '../../handoff/runner/team-stream-control.js';
 import type { InboundMessageRecord } from '../../handoff/store/inbound-store.js';
 
-function makeSignal(record: Partial<InboundMessageRecord> & { messageType: string }): InboundMessageRecord {
+function makeSignal(
+  record: Partial<InboundMessageRecord> & { messageType: string },
+): InboundMessageRecord {
   return {
     id: 'm-1',
     userId: 'u-1',
@@ -86,7 +88,8 @@ describe('checkTeamControlSignals', () => {
       signal: notAborted,
       round: 3,
       deps: {
-        consume: () => makeSignal({ messageType: 'cancel_signal', payload: { reason: '用户取消' } }),
+        consume: () =>
+          makeSignal({ messageType: 'cancel_signal', payload: { reason: '用户取消' } }),
       },
     });
     expect(result).toEqual({ kind: 'cancelled', reason: '用户取消' });

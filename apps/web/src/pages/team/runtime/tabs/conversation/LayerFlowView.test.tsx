@@ -207,8 +207,20 @@ describe('LayerFlowView', () => {
 
   it('单层详情头会显示来源会话与当前会话', () => {
     seedNodes([
-      { sessionId: 'sess-root', roleLayer: 'reception', parentSessionId: null, state: 'completed', title: '主接待会话' },
-      { sessionId: 'sess-pm1', roleLayer: 'pm1', parentSessionId: 'sess-root', state: 'completed', title: 'PM1 规划会话' },
+      {
+        sessionId: 'sess-root',
+        roleLayer: 'reception',
+        parentSessionId: null,
+        state: 'completed',
+        title: '主接待会话',
+      },
+      {
+        sessionId: 'sess-pm1',
+        roleLayer: 'pm1',
+        parentSessionId: 'sess-root',
+        state: 'completed',
+        title: 'PM1 规划会话',
+      },
     ]);
     useHandoffStore.setState({
       handoffs: new Map([
@@ -354,7 +366,12 @@ describe('LayerFlowView', () => {
 
   it('handoff 缺少 toSessionId 且 sessionId 是上游时，层级节点打开目标子会话', () => {
     seedNodes([
-      { sessionId: 'sess-root-old', roleLayer: 'reception', parentSessionId: null, state: 'running' },
+      {
+        sessionId: 'sess-root-old',
+        roleLayer: 'reception',
+        parentSessionId: null,
+        state: 'running',
+      },
       {
         sessionId: 'sess-pm1-old',
         roleLayer: 'pm1',

@@ -13,7 +13,10 @@ import { Icon, DirectIcon, SendIcon, XIcon } from '../../shared/TeamIcons.js';
 import MarkdownMessageContent from '../../../../../components/chat/markdown/markdown-message-content.js';
 import { SharedSessionMessagesView } from './shared-session-messages-view.js';
 import { tryFormatJson, looksLikeJson } from '../../../../../utils/format-json.js';
-import { tryParseIncidentJson, IncidentReadableCard } from '../../../conversation/extras/incident-readable-card.js';
+import {
+  tryParseIncidentJson,
+  IncidentReadableCard,
+} from '../../../conversation/extras/incident-readable-card.js';
 
 const INITIAL_PAGE_SIZE = 8;
 const LOAD_MORE_STEP = 10;
@@ -83,18 +86,14 @@ export function MessagesTab({
     [filteredCards],
   );
 
-  const visibleCards = useMemo(
-    () => validCards.slice(0, visibleCount),
-    [validCards, visibleCount],
-  );
+  const visibleCards = useMemo(() => validCards.slice(0, visibleCount), [validCards, visibleCount]);
 
   const hasMore = validCards.length > visibleCount;
 
   const visibleMessageCount = validCards.length;
 
   const recentBroadcastCards = useMemo(
-    () =>
-      validCards.filter((card) => card.route === 'broadcast').slice(0, 4),
+    () => validCards.filter((card) => card.route === 'broadcast').slice(0, 4),
     [validCards],
   );
 
@@ -821,8 +820,7 @@ export function MessagesTab({
                   canManageSessionEntries && broadcastInput.trim() && !busy
                     ? 'pointer'
                     : 'not-allowed',
-                opacity:
-                  canManageSessionEntries && broadcastInput.trim() && !busy ? 1 : 0.5,
+                opacity: canManageSessionEntries && broadcastInput.trim() && !busy ? 1 : 0.5,
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -909,7 +907,9 @@ export function MessagesTab({
                       background: 'color-mix(in oklch, var(--accent) 4%, var(--bg-overlay))',
                     }}
                   >
-                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <div
+                      style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}
+                    >
                       <span
                         style={{
                           padding: '1px 6px',

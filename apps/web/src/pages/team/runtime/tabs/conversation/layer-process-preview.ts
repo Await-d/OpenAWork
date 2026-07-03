@@ -1,5 +1,8 @@
 import type { HandoffRecord } from '@openAwork/web-client';
-import { extractLayerDialoguePreview, type LayerDialoguePreview } from './layer-dialogue-preview.js';
+import {
+  extractLayerDialoguePreview,
+  type LayerDialoguePreview,
+} from './layer-dialogue-preview.js';
 
 export type LayerProcessRecordKind = 'incoming' | 'outgoing' | 'related';
 
@@ -72,7 +75,8 @@ export function resolveLayerProcessRecords(input: {
   const windowedRecords =
     currentRoundStartRecord !== null
       ? relatedRecords.filter(
-          (record) => record.timeMs >= currentRoundStartRecord.timeMs && record.timeMs <= anchorTimeMs,
+          (record) =>
+            record.timeMs >= currentRoundStartRecord.timeMs && record.timeMs <= anchorTimeMs,
         )
       : relatedRecords.filter((record) => record.timeMs <= anchorTimeMs);
 

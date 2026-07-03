@@ -709,7 +709,11 @@ function findCatalogEntryByModelId(
     if (options?.includeOpenAI !== true && entry.type === 'openai') {
       continue;
     }
-    if (entry.ui.modelIdPrefixes?.some((prefix) => candidates.some((candidate) => candidate.startsWith(prefix)))) {
+    if (
+      entry.ui.modelIdPrefixes?.some((prefix) =>
+        candidates.some((candidate) => candidate.startsWith(prefix)),
+      )
+    ) {
       return entry;
     }
   }
@@ -724,10 +728,7 @@ function findCatalogModelConfig(
   return entry.defaultModels.find((model) => candidates.has(model.id.toLowerCase()));
 }
 
-function inferModelThinkingSupport(
-  entry: ProviderCatalogEntry,
-  modelId: string,
-): boolean {
+function inferModelThinkingSupport(entry: ProviderCatalogEntry, modelId: string): boolean {
   const explicitModel = findCatalogModelConfig(entry, modelId);
   if (typeof explicitModel?.supportsThinking === 'boolean') {
     return explicitModel.supportsThinking;

@@ -37,10 +37,7 @@ import { resolveLayerConversationRootId } from './layered-conversation-model.js'
 import { LayerFlowPipeline, type EdgeView, type LayerNodeView } from './LayerFlowPipeline.js';
 import { LayerFlowDetailModeBar } from './LayerFlowDetailModeBar.js';
 import { LayerFlowDetailEmptyState } from './LayerFlowDetailEmptyState.js';
-import {
-  LayerFlowTimelinePanel,
-  type LayerFlowTimelineSection,
-} from './LayerFlowTimelinePanel.js';
+import { LayerFlowTimelinePanel, type LayerFlowTimelineSection } from './LayerFlowTimelinePanel.js';
 import { useNarrowConversationLayout } from './use-narrow-conversation-layout.js';
 
 /** 流水线展示的层级顺序（不含 user / tester，聚焦核心 5 层）。 */
@@ -114,8 +111,7 @@ function resolveFlowHandoffSessionId(
   const directChild = handoff.fromSessionId
     ? Array.from(nodes.values()).find(
         (node) =>
-          node.parentSessionId === handoff.fromSessionId &&
-          node.roleLayer === handoff.toRoleLayer,
+          node.parentSessionId === handoff.fromSessionId && node.roleLayer === handoff.toRoleLayer,
       )
     : null;
   if (directChild) {
@@ -620,7 +616,9 @@ export function LayerFlowView({ selectedTeam = null }: LayerFlowViewProps) {
             {selectedSessionId || selectedHandoff ? (
               <div style={DETAIL_BODY_STYLE}>
                 <div style={DETAIL_TOOLBAR_STYLE}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
+                  <div
+                    style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}
+                  >
                     <strong
                       style={{
                         fontSize: 13,
@@ -656,7 +654,9 @@ export function LayerFlowView({ selectedTeam = null }: LayerFlowViewProps) {
                           }}
                         >
                           <span>{getRoleLayerIdentity(selectedHandoff.fromRoleLayer).short}</span>
-                          <span aria-hidden style={{ color: 'var(--fg-subtle)' }}>→</span>
+                          <span aria-hidden style={{ color: 'var(--fg-subtle)' }}>
+                            →
+                          </span>
                           <span>{getRoleLayerIdentity(selectedHandoff.toRoleLayer).short}</span>
                         </span>
                         <span
@@ -698,10 +698,7 @@ export function LayerFlowView({ selectedTeam = null }: LayerFlowViewProps) {
                       const selectedView = layerViews.find(
                         (v) => v.sessionId === selectedSessionId,
                       );
-                      if (
-                        selectedView &&
-                        selectedView.roleInstances.length > 1
-                      ) {
+                      if (selectedView && selectedView.roleInstances.length > 1) {
                         return (
                           <div
                             style={{

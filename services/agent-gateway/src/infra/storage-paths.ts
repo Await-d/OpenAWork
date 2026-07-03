@@ -46,7 +46,9 @@ export function resolveDefaultGatewayDatabasePath(): string {
 }
 
 export function resolveGatewayDatabasePath(): string {
-  const explicitDatabasePath = normalizeConfiguredDatabasePath(process.env['OPENAWORK_DATABASE_PATH']);
+  const explicitDatabasePath = normalizeConfiguredDatabasePath(
+    process.env['OPENAWORK_DATABASE_PATH'],
+  );
   if (explicitDatabasePath) {
     return explicitDatabasePath;
   }

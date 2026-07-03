@@ -1528,7 +1528,9 @@ export function createMultiAttachStream(input: {
     if (payload && typeof payload === 'object' && 'event' in payload) {
       const envelopePayload = payload as Record<string, unknown>;
       const runEvent = envelopePayload['event'] as RunEvent;
-      const cursor = envelopePayload['cursor'] as { seq?: number; clientRequestId?: string } | undefined;
+      const cursor = envelopePayload['cursor'] as
+        | { seq?: number; clientRequestId?: string }
+        | undefined;
       const rowId = cursor?.seq ?? (parsed['seq'] as number | undefined) ?? 0;
       const clientRequestId = cursor?.clientRequestId;
 

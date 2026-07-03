@@ -37,9 +37,7 @@ export const TEAM_PAUSE_POLL_INTERVAL_MS = 1_000;
 /** pause 状态下的最大阻塞时长（ms）。超过即放弃等待并按取消处理，避免永久占用执行槽。 */
 export const TEAM_PAUSE_MAX_BLOCK_MS = 30 * 60 * 1000;
 
-export type TeamControlGateOutcome =
-  | { kind: 'continue' }
-  | { kind: 'cancelled'; reason: string };
+export type TeamControlGateOutcome = { kind: 'continue' } | { kind: 'cancelled'; reason: string };
 
 export function isTeamControlledRoleLayer(roleLayer: string | null | undefined): boolean {
   return typeof roleLayer === 'string' && TEAM_LAYERS.has(roleLayer);

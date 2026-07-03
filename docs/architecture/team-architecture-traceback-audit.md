@@ -22,11 +22,11 @@
 
 ### 0.1 三项旧"缺口"已追平
 
-| 旧结论（v1.0）                                   | 2026-06-01 真实状态                                                                                                                                                                                  |
-| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| L1.3 流式 handoff ❌ 未实施                      | ✅ **已实施闭环**。`artifact-chain.ts` 的 `waitForClarificationAnswers` 是真实阻塞等待循环（轮询 inbound / 30 分钟超时回退 / cancel 立即退出 / pause→resume 状态机）；spec→clarify→plan→tasks 全程 `setSubstate`。原"行 22 不等待回复"注释已不复存在。 |
+| 旧结论（v1.0）                                     | 2026-06-01 真实状态                                                                                                                                                                                                                                                                   |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| L1.3 流式 handoff ❌ 未实施                        | ✅ **已实施闭环**。`artifact-chain.ts` 的 `waitForClarificationAnswers` 是真实阻塞等待循环（轮询 inbound / 30 分钟超时回退 / cancel 立即退出 / pause→resume 状态机）；spec→clarify→plan→tasks 全程 `setSubstate`。原"行 22 不等待回复"注释已不复存在。                                |
 | L1.4 跨层禁止直连 ⚠️ feature flag 灰度，老路径仍在 | ✅ **老路径已退役**。`isHandoffModeEnabled` / `OPENAWORK_TEAM_HANDOFF_MODE` / `team-leader` / `interaction-agent` 在真实 `src/` 下**零匹配**；`feature-flags.ts` 仅存在于历史备份路径。routes 已模块化为 `team-crud.ts` / `team-handoffs.ts` / `team-inbound.ts` / `team-events.ts`。 |
-| L1.6 延迟约束 ❌ 未实施                          | ✅ **已实施**。`handoff/bus/latency-monitor.ts` 四指标采样点全部接入（`a_to_b_direct` / `a_to_b_ack` / `substate_push` / `progress_interval`），超阈值写 incident 并接 telemetry。 |
+| L1.6 延迟约束 ❌ 未实施                            | ✅ **已实施**。`handoff/bus/latency-monitor.ts` 四指标采样点全部接入（`a_to_b_direct` / `a_to_b_ack` / `substate_push` / `progress_interval`），超阈值写 incident 并接 telemetry。                                                                                                    |
 
 ### 0.2 L1.8 字段已补齐
 
@@ -59,17 +59,17 @@ L1.3 收口记录曾称该 verification 阻塞完整 gateway 测试。2026-06-01
 
 ## TL;DR：8 项审计结果（v1.0 原表；状态列已按 v2.0 追平）
 
-| 决策                         | 审计结果（v2.0 更新）                              | 备注                                                        |
-| ---------------------------- | ------------------------------------------------- | ----------------------------------------------------------- |
-| L1.1 五层架构                | ✅ **完整实施**                                   | 无差距                                                      |
-| L1.2 d/b 拆分原则            | ✅ **意外符合**                                   | 实际比 L1 更简洁（dispatch 拆分用纯代码不用 LLM）           |
-| L1.3 流式 handoff            | ✅ **已实施闭环**（v2.0 追平）                    | `artifact-chain.ts` 阻塞等待循环 + substate 全程写入        |
-| L1.4 跨层禁止直连            | ✅ **老路径已退役 + 静态护栏已补**（v2.0 追平）   | 老路径零匹配；新增 `no-cross-layer-runner-import` lint 规则 |
-| L1.5 项目记忆双存储          | ✅ **完整实施且优于设计**                         | 7 层注入栈 + cache breaker 实现完善                         |
-| L1.6 延迟约束                | ✅ **已实施**（v2.0 追平）                        | `latency-monitor.ts` 四指标 + incident + telemetry          |
-| L1.7 Handoff 存储位置        | ✅ **完整实施**                                   | claim_token 防双 claim 是教科书级实现                       |
-| L1.8 Session 状态机          | ✅ **字段已补齐**（v2.0 追平）                    | substate / paused 系列已落库                                |
-| L1.9 BackgroundTaskScheduler | ✅ **9 方法完整实施**                             | 接口比文档简化（去掉了 priority/scheduledAt 等扩展字段）    |
+| 决策                         | 审计结果（v2.0 更新）                           | 备注                                                        |
+| ---------------------------- | ----------------------------------------------- | ----------------------------------------------------------- |
+| L1.1 五层架构                | ✅ **完整实施**                                 | 无差距                                                      |
+| L1.2 d/b 拆分原则            | ✅ **意外符合**                                 | 实际比 L1 更简洁（dispatch 拆分用纯代码不用 LLM）           |
+| L1.3 流式 handoff            | ✅ **已实施闭环**（v2.0 追平）                  | `artifact-chain.ts` 阻塞等待循环 + substate 全程写入        |
+| L1.4 跨层禁止直连            | ✅ **老路径已退役 + 静态护栏已补**（v2.0 追平） | 老路径零匹配；新增 `no-cross-layer-runner-import` lint 规则 |
+| L1.5 项目记忆双存储          | ✅ **完整实施且优于设计**                       | 7 层注入栈 + cache breaker 实现完善                         |
+| L1.6 延迟约束                | ✅ **已实施**（v2.0 追平）                      | `latency-monitor.ts` 四指标 + incident + telemetry          |
+| L1.7 Handoff 存储位置        | ✅ **完整实施**                                 | claim_token 防双 claim 是教科书级实现                       |
+| L1.8 Session 状态机          | ✅ **字段已补齐**（v2.0 追平）                  | substate / paused 系列已落库                                |
+| L1.9 BackgroundTaskScheduler | ✅ **9 方法完整实施**                           | 接口比文档简化（去掉了 priority/scheduledAt 等扩展字段）    |
 
 **核心结论（v2.0 更新）**：
 

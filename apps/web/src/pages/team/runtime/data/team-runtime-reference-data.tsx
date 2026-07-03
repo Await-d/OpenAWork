@@ -25,7 +25,11 @@ import {
   type AgentTeamsRoleChip,
   type AgentTeamsTaskLane,
 } from './team-runtime-types.js';
-import { collectRuntimeTasksForSession, mapTaskToLaneId, resolveTaskRecordsForView } from './team-runtime-task-lanes.js';
+import {
+  collectRuntimeTasksForSession,
+  mapTaskToLaneId,
+  resolveTaskRecordsForView,
+} from './team-runtime-task-lanes.js';
 import { collectSessionScope } from './team-runtime-session-scope.js';
 import { scopeTeamRuntimeOverviewData } from './team-runtime-overview-scope.js';
 import {
@@ -47,7 +51,10 @@ import {
 import { useTeamRuntimeProjection } from '../hooks/use-team-runtime-projection.js';
 import { useTeamRuntimeRoleBindings } from '../hooks/use-team-runtime-role-bindings.js';
 import { useTeamWorkflowTemplates } from '../hooks/use-team-workflow-templates.js';
-import { useHandoffStore, useTeamEventsConnectionStore } from '../../../../stores/team/team-events.js';
+import {
+  useHandoffStore,
+  useTeamEventsConnectionStore,
+} from '../../../../stores/team/team-events.js';
 import type { TeamSessionCreationDraft } from './team-session-creation.types.js';
 import { EMPTY_VIEW_DATA } from './team-runtime-reference-empty.js';
 import type {
@@ -965,21 +972,18 @@ export function useResolvedTeamRuntimeReferenceData(
   // 从 runtimeTaskGroups 展开全量任务列表（不按 session scope 过滤），
   // 供 runtimeSessionStatuses / sharedSessionStatuses 计算每个 session 的状态。
   // collaboration.runtimeTasks 只在共享会话选中时有数据，不能覆盖运行时会话场景。
-  const allRuntimeTasksFromGroups = useMemo(
-    () => {
-      const deduped = new Map<string, SessionTask>();
-      for (const group of runtimeTaskGroupsSource) {
-        for (const task of group.tasks) {
-          const existing = deduped.get(task.id);
-          if (!existing || task.updatedAt > existing.updatedAt) {
-            deduped.set(task.id, task);
-          }
+  const allRuntimeTasksFromGroups = useMemo(() => {
+    const deduped = new Map<string, SessionTask>();
+    for (const group of runtimeTaskGroupsSource) {
+      for (const task of group.tasks) {
+        const existing = deduped.get(task.id);
+        if (!existing || task.updatedAt > existing.updatedAt) {
+          deduped.set(task.id, task);
         }
       }
-      return Array.from(deduped.values());
-    },
-    [runtimeTaskGroupsSource],
-  );
+    }
+    return Array.from(deduped.values());
+  }, [runtimeTaskGroupsSource]);
 
   // 合并 groups 展开的任务和 collaboration.runtimeTasks，作为全量任务来源。
   const effectiveAllRuntimeTasks = useMemo(() => {
@@ -1340,15 +1344,15 @@ export function useResolvedTeamRuntimeReferenceData(
     const isScoped = Boolean(selectedSessionScope);
     const failedTaskCount = isScoped
       ? runtimeActivity.failedTasks
-      : (runtimeActivity.failedTasks ||
-          collaboration.tasks.filter((task) => task.status === 'failed').length);
+      : runtimeActivity.failedTasks ||
+        collaboration.tasks.filter((task) => task.status === 'failed').length;
     const pendingTaskCount = isScoped
       ? selectedRuntimeTaskRecords.filter((task) => task.status === 'pending').length
       : collaboration.tasks.filter((task) => task.status === 'pending').length;
     const runningTaskCount = isScoped
       ? runtimeActivity.runningTasks
-      : (runtimeActivity.runningTasks ||
-          collaboration.tasks.filter((task) => task.status === 'in_progress').length);
+      : runtimeActivity.runningTasks ||
+        collaboration.tasks.filter((task) => task.status === 'in_progress').length;
 
     return {
       activeMode: 'live',

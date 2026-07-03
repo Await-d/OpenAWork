@@ -491,7 +491,10 @@ export function buildProviderOptions(input: {
     (normalizedProviderType === 'openai' || normalizedProviderType === 'custom')
   ) {
     const inferredStyle = resolveThinkingStyle(thinking.providerType, input.model);
-    if (inferredStyle !== 'none' && catalogModelSupportsThinking(thinking.providerType, input.model)) {
+    if (
+      inferredStyle !== 'none' &&
+      catalogModelSupportsThinking(thinking.providerType, input.model)
+    ) {
       // 仅在 openai/custom 代理场景下，且根据 modelId 能推断出真实支持 thinking
       // 的厂商模型时，才恢复 supportsThinking。
       effectiveSupportsThinking = true;

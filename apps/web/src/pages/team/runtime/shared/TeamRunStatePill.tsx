@@ -62,9 +62,7 @@ export function TeamRunStatePill({ compact = false, style }: TeamRunStatePillPro
 
   const visual = PHASE_VISUAL[run.phase];
   const count =
-    run.phase === 'working' ? run.activeCount : run.phase === 'failed'
-        ? run.failedCount
-        : 0;
+    run.phase === 'working' ? run.activeCount : run.phase === 'failed' ? run.failedCount : 0;
 
   const title = `团队状态：${visual.label}${count > 0 ? ` · ${count}` : ''}`;
 

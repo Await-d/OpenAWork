@@ -167,7 +167,9 @@ function buildValidTasks(lines: string[]): string {
     }
     const pathMatches = Array.from(line.matchAll(/\[([^\]\n]+)\]/g))
       .map((entry) => (entry[1] ?? '').trim())
-      .filter((value) => value.includes('/') || value.includes('\\') || /\.[A-Za-z0-9_-]+$/.test(value));
+      .filter(
+        (value) => value.includes('/') || value.includes('\\') || /\.[A-Za-z0-9_-]+$/.test(value),
+      );
     const uniquePaths = Array.from(new Set(pathMatches));
     const checklistLines =
       uniquePaths.length > 0
@@ -320,9 +322,7 @@ describe('HandoffWatcher.tickOnce', () => {
     );
     for (const roleSession of roleSessions) {
       expect(roleSession.title).toBe('前端开发者');
-      expect(
-        JSON.parse(roleSession.metadata_json) as Record<string, unknown>,
-      ).toMatchObject({
+      expect(JSON.parse(roleSession.metadata_json) as Record<string, unknown>).toMatchObject({
         teamRoleInstance: {
           rootSessionId: FROM_SESSION_ID,
           roleLayer: 'executor',
@@ -522,7 +522,9 @@ describe('HandoffWatcher.tickOnce', () => {
       toRoleLayer: 'executor',
       payload: { goal: '先执行的任务' },
     });
-    dbModule.sqliteRun(`UPDATE handoff_records SET id = 'force-fail-me' WHERE id = ?`, [dependency.id]);
+    dbModule.sqliteRun(`UPDATE handoff_records SET id = 'force-fail-me' WHERE id = ?`, [
+      dependency.id,
+    ]);
     const failedDependencyId = 'force-fail-me';
     const dependent = store.createHandoff({
       userId: USER_ID,
@@ -540,7 +542,9 @@ describe('HandoffWatcher.tickOnce', () => {
     await new Promise((r) => setImmediate(r));
 
     expect(runCount).toBe(1);
-    expect(store.getHandoff({ userId: USER_ID, handoffId: failedDependencyId })?.state).toBe('failed');
+    expect(store.getHandoff({ userId: USER_ID, handoffId: failedDependencyId })?.state).toBe(
+      'failed',
+    );
     expect(store.getHandoff({ userId: USER_ID, handoffId: dependent.id })?.state).toBe('pending');
 
     const secondTick = await watcher.tickOnce();

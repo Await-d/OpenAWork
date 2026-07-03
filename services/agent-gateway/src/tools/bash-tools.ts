@@ -309,7 +309,11 @@ async function resolveBashWorkdir(
     validation = null;
   }
 
-  const safe = validation?.ok ? validation.safePath : validation ? null : validateWorkspacePath(candidate);
+  const safe = validation?.ok
+    ? validation.safePath
+    : validation
+      ? null
+      : validateWorkspacePath(candidate);
   if (!safe) {
     if (validation?.ok === false && validation.reason === 'outside-session-workspace') {
       const workingDirectory =

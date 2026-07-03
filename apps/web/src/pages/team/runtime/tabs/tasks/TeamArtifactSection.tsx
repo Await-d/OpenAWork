@@ -721,11 +721,11 @@ export function TeamArtifactSection({
 
   if (!selectedTeamId) {
     return (
-    <TabContainer
-      title="任务与产物"
-      subtitle="按当前会话和 handoff 上下文查看任务、派发与 PM1 / PM2 的产物。"
-      scroll={false}
-    >
+      <TabContainer
+        title="任务与产物"
+        subtitle="按当前会话和 handoff 上下文查看任务、派发与 PM1 / PM2 的产物。"
+        scroll={false}
+      >
         <EmptyState
           emoji="🧱"
           title="先选择一个团队会话"
@@ -771,205 +771,214 @@ export function TeamArtifactSection({
         </button>
       }
     >
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {focusHandoffId && artifactContext.focusHandoff ? (
-        <section style={CONTEXT_CARD_STYLE}>
-          <strong style={{ color: 'var(--accent)', fontSize: 13 }}>
-            已定位到 Handoff #{focusHandoffId.slice(0, 8)}
-          </strong>
-          <span style={{ color: 'var(--fg-strong)', fontSize: 12, fontWeight: 700 }}>
-            {artifactContext.focusHandoff.fromRoleLayer} →{' '}
-            {artifactContext.focusHandoff.toRoleLayer} · {artifactContext.focusHandoff.state}
-          </span>
-          <div style={CONTEXT_META_ROW_STYLE}>
-            {artifactContext.pm1ArtifactSessionId ? (
-              <span style={CONTEXT_BADGE_STYLE}>
-                PM1 会话 #{artifactContext.pm1ArtifactSessionId.slice(0, 8)}
-              </span>
-            ) : null}
-            {artifactContext.pm2ArtifactSessionId ? (
-              <span style={CONTEXT_BADGE_STYLE}>
-                PM2 会话 #{artifactContext.pm2ArtifactSessionId.slice(0, 8)}
-              </span>
-            ) : null}
-            {artifactContext.pm2Handoff ? (
-              <span style={CONTEXT_BADGE_STYLE}>
-                PM2 Handoff #{artifactContext.pm2Handoff.id.slice(0, 8)}
-              </span>
-            ) : null}
-          </div>
-          {artifactContext.focusHandoff.failureReason ? (
-            <span style={{ color: 'var(--fg-muted)', fontSize: 11, lineHeight: 1.5 }}>
-              {artifactContext.focusHandoff.failureReason}
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 14,
+        }}
+      >
+        {focusHandoffId && artifactContext.focusHandoff ? (
+          <section style={CONTEXT_CARD_STYLE}>
+            <strong style={{ color: 'var(--accent)', fontSize: 13 }}>
+              已定位到 Handoff #{focusHandoffId.slice(0, 8)}
+            </strong>
+            <span style={{ color: 'var(--fg-strong)', fontSize: 12, fontWeight: 700 }}>
+              {artifactContext.focusHandoff.fromRoleLayer} →{' '}
+              {artifactContext.focusHandoff.toRoleLayer} · {artifactContext.focusHandoff.state}
             </span>
-          ) : null}
-          {onClearFocus || artifactContext.focusHandoff.recoverableFailure ? (
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {onClearFocus ? (
-                <button type="button" onClick={onClearFocus} style={ACTION_BTN_STYLE}>
-                  清除定位
-                </button>
+            <div style={CONTEXT_META_ROW_STYLE}>
+              {artifactContext.pm1ArtifactSessionId ? (
+                <span style={CONTEXT_BADGE_STYLE}>
+                  PM1 会话 #{artifactContext.pm1ArtifactSessionId.slice(0, 8)}
+                </span>
               ) : null}
-              {artifactContext.focusHandoff.recoverableFailure ? (
+              {artifactContext.pm2ArtifactSessionId ? (
+                <span style={CONTEXT_BADGE_STYLE}>
+                  PM2 会话 #{artifactContext.pm2ArtifactSessionId.slice(0, 8)}
+                </span>
+              ) : null}
+              {artifactContext.pm2Handoff ? (
+                <span style={CONTEXT_BADGE_STYLE}>
+                  PM2 Handoff #{artifactContext.pm2Handoff.id.slice(0, 8)}
+                </span>
+              ) : null}
+            </div>
+            {artifactContext.focusHandoff.failureReason ? (
+              <span style={{ color: 'var(--fg-muted)', fontSize: 11, lineHeight: 1.5 }}>
+                {artifactContext.focusHandoff.failureReason}
+              </span>
+            ) : null}
+            {onClearFocus || artifactContext.focusHandoff.recoverableFailure ? (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {onClearFocus ? (
+                  <button type="button" onClick={onClearFocus} style={ACTION_BTN_STYLE}>
+                    清除定位
+                  </button>
+                ) : null}
+                {artifactContext.focusHandoff.recoverableFailure ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void retryFocusedHandoff(artifactContext.focusHandoff!.id);
+                    }}
+                    style={PRIMARY_ACTION_BTN_STYLE}
+                    disabled={retryBusyHandoffId === artifactContext.focusHandoff.id}
+                    aria-label={`重试失败 handoff ${artifactContext.focusHandoff.id}`}
+                  >
+                    {retryBusyHandoffId === artifactContext.focusHandoff.id
+                      ? '重试中…'
+                      : '重试失败 handoff'}
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
+        {runtimeError ? (
+          <div style={ERROR_BANNER_STYLE}>handoff 上下文加载失败：{runtimeError}</div>
+        ) : null}
+        {artifactError ? <div style={ERROR_BANNER_STYLE}>{artifactError}</div> : null}
+
+        {disposition.action ? (
+          <FailureFlowIndicator
+            action={disposition.action}
+            reason={disposition.reason}
+            escalationRound={disposition.escalationRound}
+            pm2HandoffId={disposition.pm2HandoffId}
+            onActionComplete={(result) => {
+              selectedSessionHandoffs.applyPreview(result.handoffs);
+              pm1SessionHandoffs.applyPreview(result.handoffs);
+              pm2SessionHandoffs.applyPreview(result.handoffs);
+              selectedSessionHandoffs.refresh();
+              pm1SessionHandoffs.refresh();
+              pm2SessionHandoffs.refresh();
+              refreshArtifacts();
+            }}
+          />
+        ) : null}
+
+        {nodes.size > 0 ? (
+          <TabSection title="会话树" hint="帮助确认当前产物链所处的层级上下文。">
+            <SessionTreeView />
+          </TabSection>
+        ) : null}
+
+        {selectedTeamId ? (
+          <TabSection title="待澄清" hint="PM1 解析 spec 时产生的澄清问题。">
+            <ClarificationsPanel
+              filterSessionId={artifactContext.pm1ArtifactSessionId ?? selectedTeamId}
+            />
+          </TabSection>
+        ) : null}
+
+        {handoffs && onCancelHandoff ? (
+          <RunningHandoffCancelList
+            focusHandoffId={focusHandoffId}
+            handoffs={handoffs}
+            onCancel={onCancelHandoff}
+            {...(onClearFocus ? { onClearFocus } : {})}
+          />
+        ) : null}
+
+        {hasAnyContent ? (
+          <>
+            <TabSection
+              title="PM1 规划链"
+              hint={
+                artifactContext.pm1ArtifactSessionId
+                  ? `会话 #${artifactContext.pm1ArtifactSessionId.slice(0, 8)}`
+                  : '等待 PM1 会话建立'
+              }
+            >
+              <ArtifactChainWizard
+                specContent={specArtifact?.content ?? null}
+                planContent={planArtifact?.content ?? null}
+                tasksContent={tasksArtifact?.content ?? null}
+                clarifications={pendingClarifications}
+                constitutionWarnings={constitutionWarnings}
+                currentStep={wizardStep}
+                onStepChange={setWizardStep}
+              />
+            </TabSection>
+
+            <TabSection
+              title="PM2 派发包"
+              hint={
+                artifactContext.pm2ArtifactSessionId
+                  ? `会话 #${artifactContext.pm2ArtifactSessionId.slice(0, 8)}`
+                  : '等待 PM2 接手'
+              }
+            >
+              <DispatchPackageView
+                packages={dispatchPackages.map(({ dispatch, handoff }) => ({
+                  goal: dispatch.goal ?? `任务 ${handoff.id.slice(0, 8)}`,
+                  role: dispatch.role ?? handoff.toRoleLayer,
+                  toolsets: dispatch.toolsets ?? [],
+                  taskMarkers: {
+                    taskId: dispatch.taskMarkers?.taskId ?? handoff.id.slice(0, 8),
+                    parallel: dispatch.taskMarkers?.parallel ?? false,
+                    story: dispatch.taskMarkers?.story,
+                    priority: dispatch.taskMarkers?.priority ?? 'medium',
+                  },
+                  dependsOn: dispatch.dependsOn ?? [],
+                }))}
+              />
+            </TabSection>
+
+            <TabSection
+              title="评审报告"
+              hint={
+                artifactContext.pm2ArtifactSessionId
+                  ? `会话 #${artifactContext.pm2ArtifactSessionId.slice(0, 8)}`
+                  : '等待 PM2 评审完成'
+              }
+            >
+              <ReviewReportView
+                reportMarkdown={reviewReport.markdown}
+                overallVerdict={reviewReport.overallVerdict}
+                specReviewPassed={reviewReport.specReviewPassed}
+                qualityReviewPassed={reviewReport.qualityReviewPassed}
+              />
+            </TabSection>
+          </>
+        ) : (
+          <EmptyState
+            emoji="🪵"
+            title="当前还没有可读产物"
+            description="这通常表示 handoff 仍在早期阶段，或当前聚焦节点还没进入 PM1 / PM2 的产物生成区。"
+            action={
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
                 <button
                   type="button"
                   onClick={() => {
-                    void retryFocusedHandoff(artifactContext.focusHandoff!.id);
+                    selectedSessionHandoffs.refresh();
+                    pm2SessionHandoffs.refresh();
+                    refreshArtifacts();
                   }}
                   style={PRIMARY_ACTION_BTN_STYLE}
-                  disabled={retryBusyHandoffId === artifactContext.focusHandoff.id}
-                  aria-label={`重试失败 handoff ${artifactContext.focusHandoff.id}`}
                 >
-                  {retryBusyHandoffId === artifactContext.focusHandoff.id
-                    ? '重试中…'
-                    : '重试失败 handoff'}
+                  重新拉取上下文
                 </button>
-              ) : null}
-            </div>
-          ) : null}
-        </section>
-      ) : null}
-
-      {runtimeError ? (
-        <div style={ERROR_BANNER_STYLE}>handoff 上下文加载失败：{runtimeError}</div>
-      ) : null}
-      {artifactError ? <div style={ERROR_BANNER_STYLE}>{artifactError}</div> : null}
-
-      {disposition.action ? (
-        <FailureFlowIndicator
-          action={disposition.action}
-          reason={disposition.reason}
-          escalationRound={disposition.escalationRound}
-          pm2HandoffId={disposition.pm2HandoffId}
-          onActionComplete={(result) => {
-            selectedSessionHandoffs.applyPreview(result.handoffs);
-            pm1SessionHandoffs.applyPreview(result.handoffs);
-            pm2SessionHandoffs.applyPreview(result.handoffs);
-            selectedSessionHandoffs.refresh();
-            pm1SessionHandoffs.refresh();
-            pm2SessionHandoffs.refresh();
-            refreshArtifacts();
-          }}
-        />
-      ) : null}
-
-      {nodes.size > 0 ? (
-        <TabSection title="会话树" hint="帮助确认当前产物链所处的层级上下文。">
-          <SessionTreeView />
-        </TabSection>
-      ) : null}
-
-      {selectedTeamId ? (
-        <TabSection title="待澄清" hint="PM1 解析 spec 时产生的澄清问题。">
-          <ClarificationsPanel
-            filterSessionId={artifactContext.pm1ArtifactSessionId ?? selectedTeamId}
+                <button
+                  type="button"
+                  onClick={() => {
+                    selectedSessionHandoffs.refresh();
+                    pm1SessionHandoffs.refresh();
+                    pm2SessionHandoffs.refresh();
+                  }}
+                  style={ACTION_BTN_STYLE}
+                >
+                  刷新 handoff 链
+                </button>
+              </div>
+            }
           />
-        </TabSection>
-      ) : null}
-
-      {handoffs && onCancelHandoff ? (
-        <RunningHandoffCancelList
-          focusHandoffId={focusHandoffId}
-          handoffs={handoffs}
-          onCancel={onCancelHandoff}
-          {...(onClearFocus ? { onClearFocus } : {})}
-        />
-      ) : null}
-
-      {hasAnyContent ? (
-        <>
-          <TabSection
-            title="PM1 规划链"
-            hint={
-              artifactContext.pm1ArtifactSessionId
-                ? `会话 #${artifactContext.pm1ArtifactSessionId.slice(0, 8)}`
-                : '等待 PM1 会话建立'
-            }
-          >
-            <ArtifactChainWizard
-              specContent={specArtifact?.content ?? null}
-              planContent={planArtifact?.content ?? null}
-              tasksContent={tasksArtifact?.content ?? null}
-              clarifications={pendingClarifications}
-              constitutionWarnings={constitutionWarnings}
-              currentStep={wizardStep}
-              onStepChange={setWizardStep}
-            />
-          </TabSection>
-
-          <TabSection
-            title="PM2 派发包"
-            hint={
-              artifactContext.pm2ArtifactSessionId
-                ? `会话 #${artifactContext.pm2ArtifactSessionId.slice(0, 8)}`
-                : '等待 PM2 接手'
-            }
-          >
-            <DispatchPackageView
-              packages={dispatchPackages.map(({ dispatch, handoff }) => ({
-                goal: dispatch.goal ?? `任务 ${handoff.id.slice(0, 8)}`,
-                role: dispatch.role ?? handoff.toRoleLayer,
-                toolsets: dispatch.toolsets ?? [],
-                taskMarkers: {
-                  taskId: dispatch.taskMarkers?.taskId ?? handoff.id.slice(0, 8),
-                  parallel: dispatch.taskMarkers?.parallel ?? false,
-                  story: dispatch.taskMarkers?.story,
-                  priority: dispatch.taskMarkers?.priority ?? 'medium',
-                },
-                dependsOn: dispatch.dependsOn ?? [],
-              }))}
-            />
-          </TabSection>
-
-          <TabSection
-            title="评审报告"
-            hint={
-              artifactContext.pm2ArtifactSessionId
-                ? `会话 #${artifactContext.pm2ArtifactSessionId.slice(0, 8)}`
-                : '等待 PM2 评审完成'
-            }
-          >
-            <ReviewReportView
-              reportMarkdown={reviewReport.markdown}
-              overallVerdict={reviewReport.overallVerdict}
-              specReviewPassed={reviewReport.specReviewPassed}
-              qualityReviewPassed={reviewReport.qualityReviewPassed}
-            />
-          </TabSection>
-        </>
-      ) : (
-        <EmptyState
-          emoji="🪵"
-          title="当前还没有可读产物"
-          description="这通常表示 handoff 仍在早期阶段，或当前聚焦节点还没进入 PM1 / PM2 的产物生成区。"
-          action={
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-              <button
-                type="button"
-                onClick={() => {
-                  selectedSessionHandoffs.refresh();
-                  pm2SessionHandoffs.refresh();
-                  refreshArtifacts();
-                }}
-                style={PRIMARY_ACTION_BTN_STYLE}
-              >
-                重新拉取上下文
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  selectedSessionHandoffs.refresh();
-                  pm1SessionHandoffs.refresh();
-                  pm2SessionHandoffs.refresh();
-                }}
-                style={ACTION_BTN_STYLE}
-              >
-                刷新 handoff 链
-              </button>
-            </div>
-          }
-        />
-      )}
+        )}
       </div>
     </TabContainer>
   );

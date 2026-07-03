@@ -142,7 +142,7 @@ export function ConversationArea({
   receptionComposerEnabled = false,
 }: ConversationAreaProps) {
   const { error, loading } = useTeamRuntimeReferenceViewData();
-  const dynamicEntries = useTeamDynamicEntries(receptionSessionId);
+  const dynamicEntries = useTeamDynamicEntries(receptionSessionId ?? null);
   const handleSuggestion = onSelectSuggestion ?? onSubmitMessage;
 
   // ─── Path 1: 外部注入消息内容（如 conversation tab 选中具体子 session）───

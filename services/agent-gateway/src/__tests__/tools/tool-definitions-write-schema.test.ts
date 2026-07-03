@@ -4,9 +4,7 @@ import { buildGatewayToolDefinitions } from '../../tools/tool-definitions.js';
 
 describe('buildGatewayToolDefinitions write schema', () => {
   it('requires content plus either path or filePath for the model-visible write tool', () => {
-    const writeTool = buildGatewayToolDefinitions().find(
-      (tool) => tool.function.name === 'write',
-    );
+    const writeTool = buildGatewayToolDefinitions().find((tool) => tool.function.name === 'write');
 
     expect(writeTool).toBeDefined();
     expect(writeTool?.function.parameters.type).toBe('object');

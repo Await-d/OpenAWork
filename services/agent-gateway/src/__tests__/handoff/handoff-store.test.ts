@@ -767,10 +767,9 @@ describe('reclaimAbandonedHandoffs（崩溃恢复）', () => {
       toSessionId: TO_SESSION_ID,
     });
     // 心跳保持新鲜（datetime('now')），但人为把 started_at 推到很久以前。
-    dbModule.sqliteRun(
-      `UPDATE sessions SET last_heartbeat = datetime('now') WHERE id = ?`,
-      [TO_SESSION_ID],
-    );
+    dbModule.sqliteRun(`UPDATE sessions SET last_heartbeat = datetime('now') WHERE id = ?`, [
+      TO_SESSION_ID,
+    ]);
     dbModule.sqliteRun(
       `UPDATE handoff_records SET started_at = '2000-01-01 00:00:00' WHERE id = ?`,
       [created.id],
@@ -804,10 +803,9 @@ describe('reclaimAbandonedHandoffs（崩溃恢复）', () => {
       claimToken: 'tok',
       toSessionId: TO_SESSION_ID,
     });
-    dbModule.sqliteRun(
-      `UPDATE sessions SET last_heartbeat = datetime('now') WHERE id = ?`,
-      [TO_SESSION_ID],
-    );
+    dbModule.sqliteRun(`UPDATE sessions SET last_heartbeat = datetime('now') WHERE id = ?`, [
+      TO_SESSION_ID,
+    ]);
 
     const recovered = store.reclaimAbandonedHandoffs({
       staleHeartbeatBeforeIso: '1900-01-01 00:00:00',
@@ -834,10 +832,9 @@ describe('reclaimAbandonedHandoffs（崩溃恢复）', () => {
       claimToken: 'tok',
       toSessionId: TO_SESSION_ID,
     });
-    dbModule.sqliteRun(
-      `UPDATE sessions SET last_heartbeat = datetime('now') WHERE id = ?`,
-      [TO_SESSION_ID],
-    );
+    dbModule.sqliteRun(`UPDATE sessions SET last_heartbeat = datetime('now') WHERE id = ?`, [
+      TO_SESSION_ID,
+    ]);
     dbModule.sqliteRun(
       `UPDATE handoff_records SET started_at = '2000-01-01 00:00:00' WHERE id = ?`,
       [created.id],

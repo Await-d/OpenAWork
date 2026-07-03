@@ -11,7 +11,11 @@ import type {
   RootCauseAnalysis,
   DAGNodeStatus,
 } from './types.js';
-import { checkHallucination, diagnoseNodeIssues, isRetryBudgetExhausted } from './hallucination-checker.js';
+import {
+  checkHallucination,
+  diagnoseNodeIssues,
+  isRetryBudgetExhausted,
+} from './hallucination-checker.js';
 
 const DEFAULT_RETRY_POLICY: RetryPolicy = {
   maxRetries: 1,

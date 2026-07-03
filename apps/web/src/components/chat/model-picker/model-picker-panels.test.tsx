@@ -6,9 +6,8 @@ import { createRef } from 'react';
 import { ModelSettingsPopover } from './model-picker-panels.js';
 
 vi.mock('@openAwork/shared-ui', async () => {
-  const actual = await vi.importActual<typeof import('@openAwork/shared-ui')>(
-    '@openAwork/shared-ui',
-  );
+  const actual =
+    await vi.importActual<typeof import('@openAwork/shared-ui')>('@openAwork/shared-ui');
   return {
     ...actual,
     describeReasoningEffort: (level: string) => level,

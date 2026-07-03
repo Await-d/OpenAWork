@@ -252,12 +252,19 @@ export function SessionCard({
         taskFailed: session.taskFailed,
         taskRunning: session.taskRunning,
       }),
-    [session.status, session.taskTotal, session.taskCompleted, session.taskFailed, session.taskRunning],
+    [
+      session.status,
+      session.taskTotal,
+      session.taskCompleted,
+      session.taskFailed,
+      session.taskRunning,
+    ],
   );
 
-  const label = isFailed && refinedFailed
-    ? formatRefinedFailedStatus(refinedFailed)
-    : formatSidebarTeamStatus(session.status);
+  const label =
+    isFailed && refinedFailed
+      ? formatRefinedFailedStatus(refinedFailed)
+      : formatSidebarTeamStatus(session.status);
   const labelColor = isFailed && refinedFailed ? refinedFailedStatusColor(refinedFailed) : dot;
 
   const isLiveRunning = session.status === 'running';
@@ -491,7 +498,8 @@ export function SessionCard({
                 width: `${taskFailedRatio * 100}%`,
                 borderRadius: 999,
                 background: 'var(--complement)',
-                transition: 'width 320ms cubic-bezier(0.4, 0, 0.2, 1), left 320ms cubic-bezier(0.4, 0, 0.2, 1)',
+                transition:
+                  'width 320ms cubic-bezier(0.4, 0, 0.2, 1), left 320ms cubic-bezier(0.4, 0, 0.2, 1)',
               }}
             />
           ) : null}

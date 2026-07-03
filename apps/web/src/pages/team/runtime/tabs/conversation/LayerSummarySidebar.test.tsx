@@ -21,6 +21,8 @@ describe('LayerSummarySidebar', () => {
         reviewArtifact={null}
         row={{
           detail: 'pm1 detail',
+          displayName: null,
+          personaKey: null,
           roleLayer: 'pm1',
           sessionId: 'pm1-session',
           state: 'completed',
@@ -60,6 +62,8 @@ describe('LayerSummarySidebar', () => {
         reviewArtifact={{ content: 'review-content', title: 'review-title' }}
         row={{
           detail: 'pm2 detail',
+          displayName: null,
+          personaKey: null,
           roleLayer: 'pm2',
           sessionId: 'pm2-session',
           state: 'failed',
@@ -103,6 +107,8 @@ describe('LayerSummarySidebar', () => {
         reviewArtifact={null}
         row={{
           detail: 'executor detail',
+          displayName: null,
+          personaKey: null,
           roleLayer: 'executor',
           sessionId: 'executor-session',
           state: 'running',

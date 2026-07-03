@@ -1031,10 +1031,7 @@ export function drawDerivesLinkFlowPulse({
 }
 
 /** 测量文本宽度（使用当前 context.font） */
-function measureTextWidth(
-  context: CanvasRenderingContext2D,
-  text: string,
-): number {
+function measureTextWidth(context: CanvasRenderingContext2D, text: string): number {
   return context.measureText(text).width;
 }
 
@@ -1066,7 +1063,7 @@ export function drawNodeLabelWithBackground({
   fontSizePx: number;
   zoom: number;
   textAlign?: CanvasTextAlign;
-  paddingBottom?: number
+  paddingBottom?: number;
 }): void {
   const font = `${fontSizePx / zoom}px system-ui, sans-serif`;
   context.font = font;

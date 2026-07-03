@@ -150,11 +150,12 @@ function FlowNode({
   };
 
   /* 构建角色实例 tooltip 文本 */
-  const roleTooltip = view.roleInstances.length > 0
-    ? view.roleInstances
-        .map((r) => r.displayName ?? r.personaKey ?? r.sessionId.slice(-8))
-        .join(', ')
-    : undefined;
+  const roleTooltip =
+    view.roleInstances.length > 0
+      ? view.roleInstances
+          .map((r) => r.displayName ?? r.personaKey ?? r.sessionId.slice(-8))
+          .join(', ')
+      : undefined;
 
   return (
     <button
@@ -221,7 +222,9 @@ function FlowNode({
             </span>
           ) : null}
           {view.roleInstances.length > 1 && view.inboundCount > 0 ? (
-            <span aria-hidden style={{ color: 'var(--border-default)' }}>·</span>
+            <span aria-hidden style={{ color: 'var(--border-default)' }}>
+              ·
+            </span>
           ) : null}
           {view.inboundCount > 0 ? <span>{view.inboundCount}次</span> : null}
         </span>
@@ -370,9 +373,7 @@ export function LayerFlowPipeline({
           <FlowEdge
             key={`edge-${item.idx}`}
             edge={item.edge}
-            onSelect={
-              item.edge.latest ? () => onSelectHandoff(item.edge.latest!) : undefined
-            }
+            onSelect={item.edge.latest ? () => onSelectHandoff(item.edge.latest!) : undefined}
           />
         ),
       )}

@@ -1,7 +1,11 @@
 import { useCallback, useState, type CSSProperties } from 'react';
 import { EmptyState } from '../../shared/content-kit/index.js';
 import { getRoleLayerIdentity } from '../../data/role-layer-identity.js';
-import type { HandoffEntry, LayerNode, TeamRoleLayer } from '../../../../../stores/team/team-events.js';
+import type {
+  HandoffEntry,
+  LayerNode,
+  TeamRoleLayer,
+} from '../../../../../stores/team/team-events.js';
 import { CONVERSATION_SECTION_HEADER_STYLE } from './conversation-shared-styles.js';
 
 // ─── Types ────────────────────────────────────────────────────────────
@@ -184,12 +188,18 @@ function SessionGroupRow({
           >
             ▶
           </span>
-          <span aria-hidden style={{ fontSize: 12 }}>{fromId.icon}</span>
+          <span aria-hidden style={{ fontSize: 12 }}>
+            {fromId.icon}
+          </span>
           <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--fg-strong)' }}>
             {fromId.short}
           </span>
-          <span aria-hidden style={{ color: 'var(--fg-muted)', fontSize: 11 }}>→</span>
-          <span aria-hidden style={{ fontSize: 12 }}>{toId.icon}</span>
+          <span aria-hidden style={{ color: 'var(--fg-muted)', fontSize: 11 }}>
+            →
+          </span>
+          <span aria-hidden style={{ fontSize: 12 }}>
+            {toId.icon}
+          </span>
           <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--fg-strong)' }}>
             {toId.short}
           </span>

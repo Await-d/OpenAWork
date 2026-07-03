@@ -19,9 +19,7 @@ vi.mock('react-router', () => ({
 }));
 
 vi.mock('../../stores/auth/auth.js', () => ({
-  useAuthStore: (
-    selector?: (state: { accessToken: string; gatewayUrl: string }) => unknown,
-  ) => {
+  useAuthStore: (selector?: (state: { accessToken: string; gatewayUrl: string }) => unknown) => {
     const authState = {
       accessToken: 'token-test',
       gatewayUrl: 'https://gateway.test',

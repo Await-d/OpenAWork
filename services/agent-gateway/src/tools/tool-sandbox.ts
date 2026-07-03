@@ -1474,10 +1474,7 @@ function hasWorkspaceScopedExecutionInput(request: ToolCallRequest): boolean {
     case 'workspace_create_directory':
     case 'workspace_review_revert':
     case 'lsp_rename':
-      return (
-        typeof rawInput.path === 'string' ||
-        typeof rawInput.filePath === 'string'
-      );
+      return typeof rawInput.path === 'string' || typeof rawInput.filePath === 'string';
     case 'edit':
     case 'multi_edit':
       return typeof rawInput.filePath === 'string';
@@ -1492,9 +1489,7 @@ function hasWorkspaceScopedExecutionInput(request: ToolCallRequest): boolean {
     case 'run_bash_in_background':
       return typeof rawInput.command === 'string' && rawInput.command.trim().length > 0;
     case 'interactive_bash':
-      return (
-        typeof rawInput.tmux_command === 'string' && rawInput.tmux_command.trim().length > 0
-      );
+      return typeof rawInput.tmux_command === 'string' && rawInput.tmux_command.trim().length > 0;
     default:
       return true;
   }
@@ -1652,7 +1647,7 @@ function buildPermissionRequestContext(
       const workdirValue =
         typeof rawInput.workdir === 'string'
           ? rawInput.workdir
-          : sessionWorkingDirectory ?? WORKSPACE_ROOT;
+          : (sessionWorkingDirectory ?? WORKSPACE_ROOT);
       const validation = validateSessionWorkspacePath({ path: workdirValue, sessionId });
       const safeWorkdir = validation.ok ? validation.safePath : null;
       if (!command || !safeWorkdir) return null;
@@ -2922,10 +2917,7 @@ async function executeGatewayManagedToolImpl(
         };
       }
 
-      const output = await executeLspRename(
-        parsed.data,
-        assertSessionWorkingDirectory(sessionId),
-      );
+      const output = await executeLspRename(parsed.data, assertSessionWorkingDirectory(sessionId));
       return {
         toolCallId: request.toolCallId,
         toolName: request.toolName,
@@ -4305,18 +4297,15 @@ async function executeGatewayManagedToolImpl(
       }
       const workingDirectory = assertSessionWorkingDirectory(sessionId);
       const ownerUserId = executionContext?.userId ?? getSessionOwnerUserId(sessionId) ?? undefined;
-      const output = await runInteractiveBashCommand(
-        parsedTmux.data.tmux_command,
-        {
-          sessionId,
-          ...(ownerUserId ? { userId: ownerUserId } : {}),
-          workingDirectory,
-          ...(executionContext?.clientRequestId
-            ? { clientRequestId: executionContext.clientRequestId }
-            : {}),
-          toolCallId: request.toolCallId,
-        },
-      );
+      const output = await runInteractiveBashCommand(parsedTmux.data.tmux_command, {
+        sessionId,
+        ...(ownerUserId ? { userId: ownerUserId } : {}),
+        workingDirectory,
+        ...(executionContext?.clientRequestId
+          ? { clientRequestId: executionContext.clientRequestId }
+          : {}),
+        toolCallId: request.toolCallId,
+      });
       return {
         toolCallId: request.toolCallId,
         toolName: request.toolName,
@@ -5693,7 +5682,11 @@ export class ToolSandbox {
     // rejects the call with `is not allowed` before dispatch can run.
     const isBuiltinInstruction = isBuiltinInstructionName(normalizedRequest.toolName);
 
-    if (!isFlatMcpTool && !isBuiltinInstruction && !this.whitelist.has(normalizedRequest.toolName)) {
+    if (
+      !isFlatMcpTool &&
+      !isBuiltinInstruction &&
+      !this.whitelist.has(normalizedRequest.toolName)
+    ) {
       const result: ToolCallResult = {
         toolCallId: request.toolCallId,
         toolName: request.toolName,

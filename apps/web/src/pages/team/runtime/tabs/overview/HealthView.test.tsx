@@ -402,7 +402,8 @@ describe('HealthView', () => {
             errorMessage: 'clientRequestId Required',
             apiKey: 'sk-context-secret',
           },
-          message: 'executor 层执行失败：clientRequestId Required Authorization: Bearer token-secret',
+          message:
+            'executor 层执行失败：clientRequestId Required Authorization: Bearer token-secret',
           severity: 'error',
           timestamp: Date.parse('2026-06-04T15:59:30.000Z'),
         },
@@ -413,7 +414,9 @@ describe('HealthView', () => {
 
     expect(screen.getByText('handoff-runner-failed')).toBeTruthy();
     expect(
-      screen.getByText('executor 层执行失败：clientRequestId Required Authorization: Bearer [已隐藏]'),
+      screen.getByText(
+        'executor 层执行失败：clientRequestId Required Authorization: Bearer [已隐藏]',
+      ),
     ).toBeTruthy();
     expect(screen.getByText('handoffId: handoff-blocked-1')).toBeTruthy();
     expect(screen.getByText('toRoleLayer: executor')).toBeTruthy();

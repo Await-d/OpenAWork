@@ -1,8 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import type {
-  MessageID,
-  MessageWithParts,
-} from '../../message/message-v2-schema.js';
+import type { MessageID, MessageWithParts } from '../../message/message-v2-schema.js';
 
 process.env['DATABASE_URL'] = ':memory:';
 process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
@@ -50,7 +47,8 @@ describe('filterMessagesByTeamTaskThread', () => {
       buildMessage('m-empty'),
     ];
 
-    expect([...filterMessagesByTeamTaskThread(messages, 'handoff:h-1')].map((item) => item.info.id))
-      .toEqual(['m-root', 'm-assistant', 'm-tool']);
+    expect(
+      [...filterMessagesByTeamTaskThread(messages, 'handoff:h-1')].map((item) => item.info.id),
+    ).toEqual(['m-root', 'm-assistant', 'm-tool']);
   });
 });

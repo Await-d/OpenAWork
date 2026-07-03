@@ -293,10 +293,7 @@ export interface TeamPhaseAClient {
   ): Promise<TeamArtifactsListResult>;
 
   /** Converge — 评估代码库与 spec/plan/tasks 的一致性 */
-  runConverge(
-    token: string,
-    sessionId: string,
-  ): Promise<ConvergeResult>;
+  runConverge(token: string, sessionId: string): Promise<ConvergeResult>;
 }
 
 export interface TeamArtifactsListResult {
@@ -1179,13 +1176,10 @@ export function createTeamPhaseAClient(baseUrl: string): TeamPhaseAClient {
       return performTeamPhaseARequest<ConvergeResult>({
         actionLabel: '执行一致性评估',
         request: () =>
-          fetchWithTimeout(
-            `${baseUrl}/team/sessions/${encodeURIComponent(sessionId)}/converge`,
-            {
-              method: 'POST',
-              headers: jsonAuthHeaders(token),
-            },
-          ),
+          fetchWithTimeout(`${baseUrl}/team/sessions/${encodeURIComponent(sessionId)}/converge`, {
+            method: 'POST',
+            headers: jsonAuthHeaders(token),
+          }),
       });
     },
   };

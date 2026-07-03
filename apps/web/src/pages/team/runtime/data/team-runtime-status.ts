@@ -19,12 +19,7 @@ type RuntimeStatusHandoff = Pick<
 >;
 type RuntimeStatusTask = Pick<SessionTask, 'sessionId' | 'status'>;
 
-export type TeamRuntimeSemanticStatus =
-  | 'idle'
-  | 'running'
-  | 'paused'
-  | 'completed'
-  | 'failed';
+export type TeamRuntimeSemanticStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed';
 
 export function resolveScopedTeamRuntimeStatus(input: {
   paused?: boolean | null;

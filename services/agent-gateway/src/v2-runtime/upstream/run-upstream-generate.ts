@@ -206,9 +206,7 @@ export async function runUpstreamGenerate(
   if (decoratedSystem && typeof decoratedSystem !== 'string') {
     const systemArray = Array.isArray(decoratedSystem) ? decoratedSystem : [decoratedSystem];
     const sanitizedSystem = systemArray.map((msg) =>
-      typeof msg.content === 'string'
-        ? { ...msg, content: sanitizeSurrogates(msg.content) }
-        : msg,
+      typeof msg.content === 'string' ? { ...msg, content: sanitizeSurrogates(msg.content) } : msg,
     );
     decoratedSystem = applyCachingToSystemMessages(sanitizedSystem, cacheModelInfo);
   } else if (typeof decoratedSystem === 'string') {

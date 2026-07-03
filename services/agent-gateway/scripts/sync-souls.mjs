@@ -76,9 +76,7 @@ function generateSoulConstant(roleName) {
   };
 
   // 转义模板字符串中的反引号和 ${}
-  const escapedContent = parsed.fullContent
-    .replace(/`/g, '\\`')
-    .replace(/\$\{/g, '\\${');
+  const escapedContent = parsed.fullContent.replace(/`/g, '\\`').replace(/\$\{/g, '\\${');
 
   const constName = `${roleName.toUpperCase()}_SOUL`;
 
@@ -105,10 +103,7 @@ for (const role of ROLES) {
   const constName = `${role.toUpperCase()}_SOUL`;
 
   // 匹配现有的常量定义（从 `const XXX_SOUL: DefaultSoul = {` 到 `};`）
-  const regex = new RegExp(
-    `const ${constName}: DefaultSoul = \\{[\\s\\S]*?^\\};`,
-    'm',
-  );
+  const regex = new RegExp(`const ${constName}: DefaultSoul = \\{[\\s\\S]*?^\\};`, 'm');
 
   if (!regex.test(targetContent)) {
     console.error(`  ✗ 无法找到 ${constName} 的现有定义`);

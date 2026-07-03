@@ -86,7 +86,10 @@ export function TeamAssistantReplyCard({
       </div>
 
       <div>
-        <TeamRichTextContent content={mainContent} fallback="团队已处理该步骤，技术过程已默认折叠。" />
+        <TeamRichTextContent
+          content={mainContent}
+          fallback="团队已处理该步骤，技术过程已默认折叠。"
+        />
       </div>
 
       {presentation.nextStep ? (

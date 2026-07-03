@@ -163,7 +163,9 @@ function buildValidTasks(lines: string[]): string {
     }
     const pathMatches = Array.from(line.matchAll(/\[([^\]\n]+)\]/g))
       .map((entry) => (entry[1] ?? '').trim())
-      .filter((value) => value.includes('/') || value.includes('\\') || /\.[A-Za-z0-9_-]+$/.test(value));
+      .filter(
+        (value) => value.includes('/') || value.includes('\\') || /\.[A-Za-z0-9_-]+$/.test(value),
+      );
     const uniquePaths = Array.from(new Set(pathMatches));
     const checklistLines =
       uniquePaths.length > 0

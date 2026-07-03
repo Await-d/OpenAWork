@@ -539,8 +539,7 @@ export default function TeamPageV2() {
     () => scopedHandoffs.some((handoff) => handoff.paused === true),
     [scopedHandoffs],
   );
-  const isSelectedTeamPaused =
-    selectedTeam?.status === 'paused' || hasPausedHandoffInScope;
+  const isSelectedTeamPaused = selectedTeam?.status === 'paused' || hasPausedHandoffInScope;
   const effectiveMode = resolveEffectiveTeamPageMode(mode, isSelectedTeamPaused);
   const canManageSelectedRuntimeTree =
     data.canManageRuntime &&
@@ -1051,7 +1050,13 @@ export default function TeamPageV2() {
   const [retryingFailed, setRetryingFailed] = useState(false);
 
   const handleRetryFailed = useCallback(async () => {
-    if (!accessToken || !teamClient || !selectedTeamId || isSelectedSharedSession || pauseResumeBusy) {
+    if (
+      !accessToken ||
+      !teamClient ||
+      !selectedTeamId ||
+      isSelectedSharedSession ||
+      pauseResumeBusy
+    ) {
       return;
     }
     setRetryingFailed(true);
@@ -1260,7 +1265,9 @@ export default function TeamPageV2() {
                 loading={workspaceState.loading || workspaceSnapshotState.loading}
                 workspacePath={fileTreeWorkspacePath}
                 onOpenFile={handleOpenFile}
-                onCreateWorkspace={canCreateWorkspace ? () => setShowNewWorkspaceModal(true) : undefined}
+                onCreateWorkspace={
+                  canCreateWorkspace ? () => setShowNewWorkspaceModal(true) : undefined
+                }
                 canCreateWorkspace={canCreateWorkspace}
               />
             </aside>
@@ -1332,9 +1339,7 @@ export default function TeamPageV2() {
               <SmartSuggestionBubble
                 context={suggestionContext}
                 failedCount={failedTaskCount}
-                onSelectSuggestion={
-                  data.canManageSessionEntries ? handleSubmitMessage : undefined
-                }
+                onSelectSuggestion={data.canManageSessionEntries ? handleSubmitMessage : undefined}
                 onDismiss={() => setSuggestionDismissed(true)}
               />
             ) : null}
@@ -1440,8 +1445,7 @@ export default function TeamPageV2() {
                       onOpenReview={() => handleMiddleTabChange('review')}
                       onOpenShares={() => handleMiddleTabChange('shares')}
                     />
-                  ) : selectedTeamId &&
-                    selectedTeamId !== conversationReceptionSessionId ? (
+                  ) : selectedTeamId && selectedTeamId !== conversationReceptionSessionId ? (
                     <TeamConversationView
                       key={selectedTeamId}
                       sessionId={selectedTeamId}
@@ -1587,7 +1591,9 @@ export default function TeamPageV2() {
                 loading={workspaceState.loading || workspaceSnapshotState.loading}
                 workspacePath={fileTreeWorkspacePath}
                 onOpenFile={handleOpenFile}
-                onCreateWorkspace={canCreateWorkspace ? () => setShowNewWorkspaceModal(true) : undefined}
+                onCreateWorkspace={
+                  canCreateWorkspace ? () => setShowNewWorkspaceModal(true) : undefined
+                }
                 canCreateWorkspace={canCreateWorkspace}
               />
             </div>

@@ -410,7 +410,12 @@ export function TeamTabBar({
         <div style={PRIMARY_GROUP_STYLE} role="tablist" aria-label="主分类切换">
           {PRIMARY_TABS.map((primary) => {
             const active = !officeActive && activePrimary === primary.key;
-            const badge = primaryBadge(primary.key, unreadCount, clarificationPending, failedTaskCount);
+            const badge = primaryBadge(
+              primary.key,
+              unreadCount,
+              clarificationPending,
+              failedTaskCount,
+            );
             return (
               <button
                 key={primary.key}
@@ -743,7 +748,12 @@ function SingleRowTabBar({
               >
                 {overflowTabs.map((primary) => {
                   const active = !officeActive && activePrimary === primary.key;
-                  const badge = primaryBadge(primary.key, unreadCount, clarificationPending, failedTaskCount);
+                  const badge = primaryBadge(
+                    primary.key,
+                    unreadCount,
+                    clarificationPending,
+                    failedTaskCount,
+                  );
                   return (
                     <button
                       key={primary.key}

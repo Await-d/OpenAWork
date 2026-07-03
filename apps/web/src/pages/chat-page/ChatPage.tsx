@@ -1961,8 +1961,12 @@ export default function ChatPage() {
       setActiveModelId(resolvedModelId);
     }
 
-    const resolvedProvider = availableProviders.find((provider) => provider.id === resolvedProviderId);
-    const resolvedModel = resolvedProvider?.defaultModels.find((model) => model.id === resolvedModelId);
+    const resolvedProvider = availableProviders.find(
+      (provider) => provider.id === resolvedProviderId,
+    );
+    const resolvedModel = resolvedProvider?.defaultModels.find(
+      (model) => model.id === resolvedModelId,
+    );
     const normalizedThinkingState = normalizeChatThinkingState({
       providerType: resolvedProvider?.type,
       modelId: resolvedModel?.id ?? resolvedModelId,
@@ -3255,7 +3259,9 @@ export default function ChatPage() {
           accumulatedUsage,
           attachStateInitialized,
           currentAssistantStreamMessageId: currentAssistantStreamMessageIdRef.current,
-          ...(visibleLatestUpstreamSummary ? { latestUpstreamSummary: visibleLatestUpstreamSummary } : {}),
+          ...(visibleLatestUpstreamSummary
+            ? { latestUpstreamSummary: visibleLatestUpstreamSummary }
+            : {}),
           ...(recoveredModifiedFilesSummary ? { recoveredModifiedFilesSummary } : {}),
           requestStartedAt,
           toolCalls: buildAttachToolCalls(),
@@ -3743,7 +3749,7 @@ export default function ChatPage() {
             setRightTab('tools');
           }
         },
-      onDone: (stopReason, streamAgentId, cancellation, upstreamSummary) => {
+        onDone: (stopReason, streamAgentId, cancellation, upstreamSummary) => {
           if (!isCurrentSessionRequest(sid, attachSessionViewEpoch)) {
             requestSessionListRefresh();
             return;

@@ -268,9 +268,9 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
     ? agentEvents.filter((event) => event.requestId === focusedRequestId)
     : agentEvents;
   const focusedUpstreamGroup = focusedRequestId
-    ? groupUpstreamSummariesByRequest(upstreamSummaries).find(
+    ? (groupUpstreamSummariesByRequest(upstreamSummaries).find(
         (candidate) => candidate.key === `request:${focusedRequestId}`,
-      ) ?? null
+      ) ?? null)
     : null;
   const focusedRequestToolCalls = focusedRequestId
     ? toolCallCards.filter((toolCall) => toolCall.requestId === focusedRequestId)

@@ -14,7 +14,10 @@ import {
   convertToLineEnding,
 } from './edit-replacers.js';
 import { formatFileAfterWrite } from './post-write-formatter.js';
-import { assertSessionWorkspacePath, getSessionWorkspaceRoot } from '../workspace/workspace-safety.js';
+import {
+  assertSessionWorkspacePath,
+  getSessionWorkspaceRoot,
+} from '../workspace/workspace-safety.js';
 import { getProjectWideDiagnostics } from './project-diagnostics.js';
 
 // Edit error recovery suffix (oh-my-opencode editErrorRecovery pattern)
