@@ -10,6 +10,7 @@ import type {
   MessageContent,
   RunEvent,
   ToolCallObservabilityAnnotation,
+  UpstreamStreamSummary,
 } from '@openAwork/shared';
 import { z } from 'zod';
 import type { JwtPayload } from '../infra/auth.js';
@@ -1148,13 +1149,9 @@ function parseSessionProviderSelection(metadataJson: string): SessionProviderSel
           : undefined,
       systemPrompt: typeof parsed['systemPrompt'] === 'string' ? parsed['systemPrompt'] : undefined,
       thinkingEnabled:
-        typeof parsed['thinkingEnabled'] === 'boolean'
-          ? parsed['thinkingEnabled']
-          : undefined,
+        typeof parsed['thinkingEnabled'] === 'boolean' ? parsed['thinkingEnabled'] : undefined,
       reasoningEffort:
-        typeof parsed['reasoningEffort'] === 'string'
-          ? parsed['reasoningEffort']
-          : undefined,
+        typeof parsed['reasoningEffort'] === 'string' ? parsed['reasoningEffort'] : undefined,
     };
   } catch {
     return {};
@@ -1431,13 +1428,14 @@ export async function executeToolCalls(input: {
     typeof sessionMetadata['workingDirectory'] === 'string'
       ? sessionMetadata['workingDirectory']
       : undefined;
-  const resolvedWorkingDirectory = directWorkingDirectory
-    ?? resolveSessionWorkspacePath({
+  const resolvedWorkingDirectory =
+    directWorkingDirectory ??
+    resolveSessionWorkspacePath({
       metadataJson: input.sessionContext.metadataJson,
       sessionId: input.sessionId,
       userId: input.userId,
-    })
-    ?? undefined;
+    }) ??
+    undefined;
   const workingDirectory = resolvedWorkingDirectory;
 
   // Dynamic tool loading: scan workspace {tool,tools}/*.{js,ts} for custom tools
@@ -1894,8 +1892,8 @@ export async function handleStreamRequest(input: {
         requestData.thinkingEnabled = sessionSelection.thinkingEnabled;
       }
       if (sessionSelection.reasoningEffort) {
-        requestData.reasoningEffort = sessionSelection
-          .reasoningEffort as StreamRequest['reasoningEffort'];
+        requestData.reasoningEffort =
+          sessionSelection.reasoningEffort as StreamRequest['reasoningEffort'];
       }
     }
     wl.succeed(stepRoute, undefined, {
@@ -2021,7 +2019,10 @@ export async function handleStreamRequest(input: {
     })
   ) {
     wl.flush(ctx, 200);
-    return { statusCode: 200, errorSummary: '请求被 replay 拦截（同 clientRequestId 已有持久化结果），未执行新 LLM 调用' };
+    return {
+      statusCode: 200,
+      errorSummary: '请求被 replay 拦截（同 clientRequestId 已有持久化结果），未执行新 LLM 调用',
+    };
   }
 
   const inFlight = getInFlightStreamRequest(input.sessionId, requestData.clientRequestId);
@@ -3002,7 +3003,7 @@ export function createStreamErrorChunk(
   code: string,
   message: string,
   runId: string,
-  upstreamSummary?: import('@openAwork/shared').UpstreamStreamSummary,
+  upstreamSummary?: UpstreamStreamSummary,
   requestId?: string,
 ) {
   return {

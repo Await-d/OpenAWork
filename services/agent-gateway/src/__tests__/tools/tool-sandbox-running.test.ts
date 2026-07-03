@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import type * as MessageStoreV2 from '../../message/message-store-v2.js';
+import type * as WorkspaceToolsModule from '../../tools/workspace-tools.js';
 
 const mocks = vi.hoisted(() => ({
   transitionToolToRunningMock: vi.fn(),
@@ -26,10 +27,9 @@ vi.mock('../../message/message-store-v2.js', async () => {
 });
 
 vi.mock('../../tools/workspace-tools.js', async () => {
-  const actual =
-    await vi.importActual<typeof import('../../tools/workspace-tools.js')>(
-      '../../tools/workspace-tools.js',
-    );
+  const actual = await vi.importActual<typeof WorkspaceToolsModule>(
+    '../../tools/workspace-tools.js',
+  );
   return {
     ...actual,
     listTool: {

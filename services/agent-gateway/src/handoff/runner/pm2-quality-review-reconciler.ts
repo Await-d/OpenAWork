@@ -372,9 +372,8 @@ export async function reconcilePm2QualityReview(input: {
       } catch {
         /* ignore */
       }
-      const hasDispatched =
-        Array.isArray(parsedResult?.['dispatchedHandoffIds']) &&
-        (parsedResult!['dispatchedHandoffIds'] as unknown[]).length > 0;
+      const dispatchedHandoffIds = parsedResult?.['dispatchedHandoffIds'];
+      const hasDispatched = Array.isArray(dispatchedHandoffIds) && dispatchedHandoffIds.length > 0;
       if (!hasDispatched) {
         // PM2 没有派发任何子任务——可能是退回 PM1 的路径，
         // 或者 PM2 runner 还没执行到派发步骤。跳过质量评审。

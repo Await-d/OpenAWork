@@ -45,7 +45,7 @@ import {
   validatePlanOutput,
   validateSpecOutput,
   validateTasksOutput,
-} from './artifact-chain.js';
+} from '../capability/planning-validation.js';
 
 const MIN_EXECUTOR_PARALLEL = 2;
 const DEFAULT_MAX_EXECUTOR_PARALLEL = 8;
@@ -174,7 +174,7 @@ VIOLATION: [违反描述2]`;
  *   - Planning Contract 未通过
  *   - Constitution Check 修正后仍不通过
  *   - Architecture Review 有阻断问题
- * 
+ *
  * 查找原始 reception session 和 sourceIntent，创建 reception→PM1 handoff，
  * payload 中带质量反馈，PM1 收到后会根据反馈重新生成 spec/plan/tasks。
  */
@@ -211,12 +211,18 @@ async function createReturnToPm1Handoff(input: {
     }
     const receptionSessionId = receptionHandoffRow.from_session_id;
     const originalPayload = JSON.parse(receptionHandoffRow.payload_json) as Record<string, unknown>;
-    const sourceIntent = input.sourceIntent ||
-      (typeof originalPayload['sourceIntent'] === 'string' ? originalPayload['sourceIntent'] : '未提供意图');
-    const teamWorkspaceId = input.teamWorkspaceId ??
-      (typeof originalPayload['teamWorkspaceId'] === 'string' ? originalPayload['teamWorkspaceId'] : null);
+    const sourceIntent =
+      input.sourceIntent ||
+      (typeof originalPayload['sourceIntent'] === 'string'
+        ? originalPayload['sourceIntent']
+        : '未提供意图');
+    const teamWorkspaceId =
+      input.teamWorkspaceId ??
+      (typeof originalPayload['teamWorkspaceId'] === 'string'
+        ? originalPayload['teamWorkspaceId']
+        : null);
 
-    await createHandoff({
+    createHandoff({
       userId: input.userId,
       fromSessionId: receptionSessionId,
       fromRoleLayer: 'reception',
@@ -320,10 +326,14 @@ export function createPm2Runner(): HandoffTaskRunner {
 
     // 提前查询 spec/plan 产物内容，供后续 fallback 逻辑与 readiness 校验共用
     const specRow = specArtifactId
-      ? sqliteGet<{ content: string }>(`SELECT content FROM artifacts WHERE id = ?`, [specArtifactId])
+      ? sqliteGet<{ content: string }>(`SELECT content FROM artifacts WHERE id = ?`, [
+          specArtifactId,
+        ])
       : null;
     const planRow = planArtifactId
-      ? sqliteGet<{ content: string }>(`SELECT content FROM artifacts WHERE id = ?`, [planArtifactId])
+      ? sqliteGet<{ content: string }>(`SELECT content FROM artifacts WHERE id = ?`, [
+          planArtifactId,
+        ])
       : null;
 
     // tasksArtifactId 缺失时，尝试从 PM1 session 的 artifacts 表直接查最新 tasks 产物
@@ -441,16 +451,18 @@ export function createPm2Runner(): HandoffTaskRunner {
         step: 'tasks-parse-empty',
         text: `⚠️ tasks.md 解析出 0 个任务，将把整个内容作为一个综合任务执行（降级模式）。`,
       });
-      tasks = [{
-        taskId: 'fallback-0',
-        title: tasksRow.content.slice(0, 100) || '综合执行任务',
-        parallel: false,
-        story: null,
-        explicitProfile: { kind: 'build', surface: 'cross-cutting' },
-        priority: 'medium',
-        fileEntries: [],
-        ownedPaths: [],
-      }];
+      tasks = [
+        {
+          taskId: 'fallback-0',
+          title: tasksRow.content.slice(0, 100) || '综合执行任务',
+          parallel: false,
+          story: null,
+          explicitProfile: { kind: 'build', surface: 'cross-cutting' },
+          priority: 'medium',
+          fileEntries: [],
+          ownedPaths: [],
+        },
+      ];
     }
 
     // 4. Constitution Check 硬门禁
@@ -487,10 +499,8 @@ export function createPm2Runner(): HandoffTaskRunner {
               // 注入 resume context：让 PM2 在 Constitution Check 时也能感知
               // 未完成任务状态，避免重复派发已完成任务。
               try {
-                const {
-                  buildTeamResumeSystemPrompt,
-                  resolveTeamRootSessionId,
-                } = await import('../../team/team-resume-context.js');
+                const { buildTeamResumeSystemPrompt, resolveTeamRootSessionId } =
+                  await import('../../team/team-resume-context.js');
                 const sessionMetaRow = sqliteGet<{ metadata_json: string | null }>(
                   `SELECT metadata_json FROM sessions WHERE id = ? LIMIT 1`,
                   [input.toSessionId],
@@ -525,7 +535,9 @@ export function createPm2Runner(): HandoffTaskRunner {
               // 网络重试：对可重试错误（503/429/网络错误）做指数退避重试
               const isRetryable = (err: unknown): boolean => {
                 const msg = err instanceof Error ? err.message : String(err);
-                return /429|too many requests|rate.?limit|503|502|500|service.*unavailable|temporarily.*unavailable|bad gateway|overloaded|invalid.*json|ECONNRESET|ETIMEDOUT|fetch.*failed|network/i.test(msg);
+                return /429|too many requests|rate.?limit|503|502|500|service.*unavailable|temporarily.*unavailable|bad gateway|overloaded|invalid.*json|ECONNRESET|ETIMEDOUT|fetch.*failed|network/i.test(
+                  msg,
+                );
               };
               const delays = [5_000, 10_000, 20_000];
               for (let attempt = 0; ; attempt++) {
@@ -554,11 +566,13 @@ export function createPm2Runner(): HandoffTaskRunner {
                   });
                 } catch (err) {
                   if (!isRetryable(err) || attempt >= delays.length) throw err;
+                  const delay = delays[attempt];
+                  if (delay === undefined) throw err;
                   const reason = err instanceof Error ? err.message : String(err);
                   console.warn(
-                    `[pm2-runner] LLM 调用失败（${reason}），${delays[attempt]! / 1000} 秒后重试（第 ${attempt + 1}/${delays.length} 次）…`,
+                    `[pm2-runner] LLM 调用失败（${reason}），${delay / 1000} 秒后重试（第 ${attempt + 1}/${delays.length} 次）…`,
                   );
-                  await new Promise<void>((resolve) => setTimeout(resolve, delays[attempt]!));
+                  await new Promise<void>((resolve) => setTimeout(resolve, delay));
                 }
               }
             };
@@ -743,7 +757,10 @@ export function createPm2Runner(): HandoffTaskRunner {
             qualityReviewPending: false,
           });
           // Architecture Review 有阻断问题 → 退回 PM1 重新规划
-          const archFeedback = `Architecture Review 未通过：\n${architectureReviewResult.issues.filter((issue) => issue.severity === 'blocking').map((issue, i) => `${i + 1}. ${issue.message}`).join('\n')}`;
+          const archFeedback = `Architecture Review 未通过：\n${architectureReviewResult.issues
+            .filter((issue) => issue.severity === 'blocking')
+            .map((issue, i) => `${i + 1}. ${issue.message}`)
+            .join('\n')}`;
           persistPm2AssistantMessage({
             userId: input.handoff.userId,
             sessionId: input.toSessionId,
@@ -763,15 +780,14 @@ export function createPm2Runner(): HandoffTaskRunner {
           });
           return;
         } else {
-
-        // Architecture review 通过时记录消息
-        persistPm2AssistantMessage({
-          userId: input.handoff.userId,
-          sessionId: input.toSessionId,
-          handoffId: input.handoff.id,
-          step: 'architecture-review',
-          text: `✅ Architecture Review 已通过${architectureReviewResult.warningCount > 0 ? `（${architectureReviewResult.warningCount} 个警告）` : '，无警告'}。`,
-        });
+          // Architecture review 通过时记录消息
+          persistPm2AssistantMessage({
+            userId: input.handoff.userId,
+            sessionId: input.toSessionId,
+            handoffId: input.handoff.id,
+            step: 'architecture-review',
+            text: `✅ Architecture Review 已通过${architectureReviewResult.warningCount > 0 ? `（${architectureReviewResult.warningCount} 个警告）` : '，无警告'}。`,
+          });
         }
       }
     }
@@ -781,12 +797,8 @@ export function createPm2Runner(): HandoffTaskRunner {
     // 6. 构建 dispatch_packages
     // 构建 dispatch context：包含 spec/plan 摘要 + 任务清单概览 + 上轮质量反馈（如果是重试），
     // 让 executor 在执行时能看到整体设计意图，而非只看到自己的任务标题。
-    const specSummary = specRow?.content
-      ? specRow.content.slice(0, 800)
-      : '';
-    const planSummary = planRow?.content
-      ? planRow.content.slice(0, 1200)
-      : '';
+    const specSummary = specRow?.content ? specRow.content.slice(0, 800) : '';
+    const planSummary = planRow?.content ? planRow.content.slice(0, 1200) : '';
     // 如果是重试（payload 中有 reviewDisposition），把上轮质量反馈注入 context
     const reviewDisposition = payload?.['reviewDisposition'] as Record<string, unknown> | undefined;
     const lastReviewReason =

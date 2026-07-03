@@ -466,11 +466,6 @@ function mapProjectionTaskToResumeTask(
   };
 }
 
-function extractTeamRoleInstanceRootSessionId(metadataJson: string | null): string | null {
-  const parsed = parseTeamMetadata(metadataJson);
-  return extractTeamRoleInstanceRootSessionIdFromParsed(parsed);
-}
-
 function parseTeamMetadata(metadataJson: string | null): Record<string, unknown> {
   if (!metadataJson || metadataJson.trim().length === 0) {
     return {};

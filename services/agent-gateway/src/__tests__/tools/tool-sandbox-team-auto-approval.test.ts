@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type * as MessageStoreV2 from '../../message/message-store-v2.js';
 
 const mocks = vi.hoisted(() => ({
   sqliteAllMock: vi.fn(() => []),
@@ -46,9 +47,7 @@ vi.mock('../../infra/db.js', () => ({
 }));
 
 vi.mock('../../message/message-store-v2.js', async () => {
-  const actual = await vi.importActual<typeof import('../../message/message-store-v2.js')>(
-    '../../message/message-store-v2.js',
-  );
+  const actual = await vi.importActual<typeof MessageStoreV2>('../../message/message-store-v2.js');
   return {
     ...actual,
     transitionToolToRunning: mocks.transitionToolToRunningMock,
@@ -101,8 +100,8 @@ describe('tool-sandbox team session auto approval', () => {
     expect(String(result.output)).toContain('参数校验失败');
     expect(String(result.output)).not.toContain('waiting for approval');
     expect(
-      mocks.sqliteRunMock.mock.calls.some(([query]) =>
-        typeof query === 'string' && query.includes('INSERT INTO permission_requests'),
+      mocks.sqliteRunMock.mock.calls.some(
+        ([query]) => typeof query === 'string' && query.includes('INSERT INTO permission_requests'),
       ),
     ).toBe(false);
   });
@@ -223,8 +222,9 @@ describe('tool-sandbox team session auto approval', () => {
       expect(result.pendingPermissionRequestId).toBeUndefined();
       expect(existsSync(targetPath)).toBe(true);
       expect(
-        mocks.sqliteRunMock.mock.calls.some(([query]) =>
-          typeof query === 'string' && query.includes('INSERT INTO permission_requests'),
+        mocks.sqliteRunMock.mock.calls.some(
+          ([query]) =>
+            typeof query === 'string' && query.includes('INSERT INTO permission_requests'),
         ),
       ).toBe(false);
     } finally {
@@ -332,8 +332,8 @@ describe('tool-sandbox team session auto approval', () => {
     expect(String(result.output)).toContain('当前会话未绑定工作区');
     expect(result.pendingPermissionRequestId).toBeUndefined();
     expect(
-      mocks.sqliteRunMock.mock.calls.some(([query]) =>
-        typeof query === 'string' && query.includes('INSERT INTO permission_requests'),
+      mocks.sqliteRunMock.mock.calls.some(
+        ([query]) => typeof query === 'string' && query.includes('INSERT INTO permission_requests'),
       ),
     ).toBe(false);
   });

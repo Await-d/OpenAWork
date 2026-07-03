@@ -61,15 +61,10 @@ const SESSION_TERMINAL_ERROR_MESSAGES: Record<
   unauthorized: '未授权或登录已失效。',
 };
 
-function terminalErrorPayload(code: Exclude<SessionTerminalErrorCode, 'spawn_failed'>): {
-  error: Exclude<SessionTerminalErrorCode, 'spawn_failed'>;
-  message: string;
-};
 function terminalErrorPayload(
-  code: 'spawn_failed',
-  message: string,
-): { error: 'spawn_failed'; message: string };
-function terminalErrorPayload(code: SessionTerminalErrorCode, message?: string) {
+  code: SessionTerminalErrorCode,
+  message?: string,
+): { error: SessionTerminalErrorCode; message: string } {
   if (code === 'spawn_failed') {
     return {
       error: code,

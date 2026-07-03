@@ -124,7 +124,11 @@ export interface ParsedTaskLine {
 }
 
 export function normalizeComparablePath(value: string): string {
-  return value.trim().replace(/\\/g, '/').replace(/^\.\/+/, '').replace(/\/{2,}/g, '/');
+  return value
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/^\.\/+/, '')
+    .replace(/\/{2,}/g, '/');
 }
 
 function isLikelyPath(value: string): boolean {
@@ -211,10 +215,6 @@ function extractFileEntriesFromTaskBlock(lines: readonly string[]): ParsedTaskFi
     }
   }
   return entries;
-}
-
-function extractOwnedPathsFromTaskBlock(lines: readonly string[]): string[] {
-  return mergeOwnedPaths(extractFileEntriesFromTaskBlock(lines).map((entry) => entry.path));
 }
 
 function roleToTargetLayer(role: DispatchPackage['role']): TeamRuntimeLayer {
@@ -716,7 +716,8 @@ export function validateParsedTasks(tasks: ParsedTaskLine[]): string[] {
     return issues;
   }
   // 检测步骤性任务标题——这些词开头通常意味着把一个交付物拆成了多个子步骤
-  const stepVerbPattern = /^(确认|调研|验证|检查|分析|对比|评估|梳理|整理|规划|设计.*规范|定义.*格式)/;
+  const stepVerbPattern =
+    /^(确认|调研|验证|检查|分析|对比|评估|梳理|整理|规划|设计.*规范|定义.*格式)/;
   for (const task of tasks) {
     if (!isStructuredTaskTitle(task.title)) {
       issues.push(

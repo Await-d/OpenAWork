@@ -1,4 +1,10 @@
-import type { FileDiffContent, MessageContent, RunEvent, StreamChunk } from '@openAwork/shared';
+import type {
+  FileDiffContent,
+  MessageContent,
+  RunEvent,
+  StreamChunk,
+  UpstreamStreamSummary,
+} from '@openAwork/shared';
 import type { WorkflowLogger, createRequestContext } from '@openAwork/logger';
 import { validateThinkingBlocks } from '../session/thinking-block-validator.js';
 import { isContextOverflow } from '../session/session-message-store.js';
@@ -168,7 +174,7 @@ export function buildUpstreamStreamSummaryLog(input: {
 function toUpstreamStreamSummary(
   stopReason: StreamStopReason,
   diagnostics: UpstreamStreamDiagnosticsSummary,
-): import('@openAwork/shared').UpstreamStreamSummary {
+): UpstreamStreamSummary {
   return {
     stopReason,
     textDeltaCount: diagnostics.textDeltaCount,
@@ -1459,7 +1465,11 @@ export async function runModelRound(input: {
       })) {
         input.eventSequence.value += 1;
         const meta = createRunEventMeta(input.runId, input.eventSequence);
-        const chunkWithMeta = { ...chunk, requestId: input.clientRequestId, ...meta } as StreamChunk;
+        const chunkWithMeta = {
+          ...chunk,
+          requestId: input.clientRequestId,
+          ...meta,
+        } as StreamChunk;
 
         if (chunkWithMeta.type === 'done') {
           doneEmitted = true;

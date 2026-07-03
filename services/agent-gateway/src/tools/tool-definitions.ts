@@ -109,6 +109,7 @@ export interface GatewayToolDefinition {
       type: 'object';
       properties: Record<string, unknown>;
       required: string[];
+      anyOf?: { required: string[] }[];
       additionalProperties: boolean;
     };
     strict: boolean;

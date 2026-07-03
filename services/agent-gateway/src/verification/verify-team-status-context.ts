@@ -176,7 +176,7 @@ async function createSession(app: FastifyInstance, accessToken: string): Promise
       },
     },
   });
-  const body = response.json() as { sessionId: string };
+  const body = response.json<{ sessionId: string }>();
   return body.sessionId;
 }
 
@@ -280,9 +280,9 @@ function extractRequestTexts(body: Record<string, unknown>): string[] {
 function writeResponseEvent(res: ServerResponse, event: string, payload: unknown): void {
   const normalizedPayload =
     payload && typeof payload === 'object' && !Array.isArray(payload)
-      ? ('type' in (payload as Record<string, unknown>)
-          ? (payload as Record<string, unknown>)
-          : { type: event, ...(payload as Record<string, unknown>) })
+      ? 'type' in (payload as Record<string, unknown>)
+        ? (payload as Record<string, unknown>)
+        : { type: event, ...(payload as Record<string, unknown>) }
       : { type: event };
   res.write(`event: ${event}\n`);
   res.write(`data: ${JSON.stringify(normalizedPayload)}\n\n`);

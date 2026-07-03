@@ -20,7 +20,6 @@ import {
   getRunEventRunId,
   getLatestSessionRunEventSeqByRequest,
   listRecentSessionRunEventsWithMeta,
-  listSessionRunEvents,
   listSessionRunEventsByRequest,
   listSessionRunEventsByRequestAfterSeq,
   subscribeSessionRunEvents,
@@ -920,12 +919,9 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       wl.succeed(authStep);
 
       const { id: sessionId } = request.params as { id: string };
-      const parseStep = wl.startChild(
-        routeStep,
-        'stream.multi-attach.parse-query',
-        undefined,
-        { sessionId },
-      );
+      const parseStep = wl.startChild(routeStep, 'stream.multi-attach.parse-query', undefined, {
+        sessionId,
+      });
       const query = streamMultiAttachQuerySchema.safeParse(request.query);
       if (!query.success) {
         wl.fail(parseStep, 'invalid query');
@@ -935,12 +931,9 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       }
       wl.succeed(parseStep);
 
-      const sessionStep = wl.startChild(
-        routeStep,
-        'stream.multi-attach.session-check',
-        undefined,
-        { sessionId },
-      );
+      const sessionStep = wl.startChild(routeStep, 'stream.multi-attach.session-check', undefined, {
+        sessionId,
+      });
       const sessionRow = sqliteGet<{ id: string }>(
         'SELECT id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
         [sessionId, user.sub],
@@ -976,14 +969,16 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
 
       // Write the active stream metadata as the first event so the client
       // knows whether the session is currently streaming.
-      if (!safeWriteReplyRaw(
-        reply,
-        `data: ${JSON.stringify({
-          type: 'multi-attach:status',
-          sessionId,
-          activeClientRequestId: currentActiveThread?.clientRequestId ?? null,
-        })}\n\n`,
-      )) {
+      if (
+        !safeWriteReplyRaw(
+          reply,
+          `data: ${JSON.stringify({
+            type: 'multi-attach:status',
+            sessionId,
+            activeClientRequestId: currentActiveThread?.clientRequestId ?? null,
+          })}\n\n`,
+        )
+      ) {
         safeEndReplyRaw(reply);
         return;
       }
@@ -1000,11 +995,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
         const noopUnsubscribe: () => void = () => undefined;
         let unsubscribe: () => void = noopUnsubscribe;
 
-        const deliverEvent = (
-          event: RunEvent,
-          rowId: number,
-          clientRequestId?: string,
-        ) => {
+        const deliverEvent = (event: RunEvent, rowId: number, clientRequestId?: string) => {
           if (settled || rowId <= lastRowId) {
             return;
           }

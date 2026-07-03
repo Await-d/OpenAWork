@@ -1,13 +1,16 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import type * as DbModule from '../../infra/db.js';
+import type { SshService as SshServiceClass } from '../../ssh/ssh-service.js';
+import type { __resetSshStoreForTests as ResetSshStoreForTests } from '../../ssh/ssh-store.js';
 
 process.env['DATABASE_URL'] = ':memory:';
 process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
 
-let connectDb: typeof import('../../infra/db.js').connectDb;
-let migrate: typeof import('../../infra/db.js').migrate;
-let closeDb: typeof import('../../infra/db.js').closeDb;
-let SshService: typeof import('../../ssh/ssh-service.js').SshService;
-let __resetSshStoreForTests: typeof import('../../ssh/ssh-store.js').__resetSshStoreForTests;
+let connectDb: typeof DbModule.connectDb;
+let migrate: typeof DbModule.migrate;
+let closeDb: typeof DbModule.closeDb;
+let SshService: typeof SshServiceClass;
+let __resetSshStoreForTests: typeof ResetSshStoreForTests;
 
 const TEST_USER = 'u-ssh-persistence';
 const OTHER_USER = 'u-ssh-other';

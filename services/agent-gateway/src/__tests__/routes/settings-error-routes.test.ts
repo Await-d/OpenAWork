@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as AuthModule from '../../infra/auth.js';
 import type * as DbModule from '../../infra/db.js';
+import type * as ZodModule from 'zod';
 import { registerErrorHandler } from '../../infra/error-handler.js';
 import type * as RequestWorkflowModule from '../../runtime/request-workflow.js';
 import type * as SettingsRoutesModule from '../../routes/settings.js';
@@ -30,7 +31,7 @@ vi.mock('../../routes/workflow-llm.js', () => ({
 
 vi.mock('../../workspace/companion-settings.js', () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { z } = require('zod') as typeof import('zod');
+  const { z } = require('zod') as typeof ZodModule;
   return {
     buildCompanionFeatureState: vi.fn(() => ({ enabled: false })),
     buildCompanionIntroText: vi.fn(() => '温和、简洁地陪伴用户。'),

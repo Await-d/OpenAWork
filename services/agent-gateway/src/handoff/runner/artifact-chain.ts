@@ -283,7 +283,9 @@ const SPEC_VALIDATION_RULES: ValidationRule[] = [
   {
     name: '包含边界情况',
     check: (c) => /###\s*边界情况/.test(c),
-    patch: (c) => c + '\n\n### 边界情况\n\n- 当输入为空时，系统应给出友好提示\n- 当网络异常时，系统应降级处理\n',
+    patch: (c) =>
+      c +
+      '\n\n### 边界情况\n\n- 当输入为空时，系统应给出友好提示\n- 当网络异常时，系统应降级处理\n',
   },
   {
     name: '包含验收场景覆盖矩阵',
@@ -300,7 +302,9 @@ const SPEC_VALIDATION_RULES: ValidationRule[] = [
   {
     name: '包含成功标准',
     check: (c) => /SC-\d+/i.test(c),
-    patch: (c) => c + '\n\n## 成功标准\n\n- **SC-001**：核心功能在 3 秒内返回响应\n- **SC-002**：错误率低于 1%\n',
+    patch: (c) =>
+      c +
+      '\n\n## 成功标准\n\n- **SC-001**：核心功能在 3 秒内返回响应\n- **SC-002**：错误率低于 1%\n',
   },
 ];
 
@@ -308,7 +312,9 @@ const PLAN_VALIDATION_RULES: ValidationRule[] = [
   {
     name: '包含技术上下文',
     check: (c) => /##\s*技术上下文/.test(c),
-    patch: (c) => c + '\n\n## 技术上下文\n\n**语言/版本**：TypeScript（strict，NodeNext）\n**主要依赖**：见项目 package.json\n**存储**：SQLite\n**测试**：Vitest\n',
+    patch: (c) =>
+      c +
+      '\n\n## 技术上下文\n\n**语言/版本**：TypeScript（strict，NodeNext）\n**主要依赖**：见项目 package.json\n**存储**：SQLite\n**测试**：Vitest\n',
   },
   {
     name: '包含宪法对齐',
@@ -326,7 +332,8 @@ const PLAN_VALIDATION_RULES: ValidationRule[] = [
     name: '包含复杂度评估',
     check: (c) => /##\s*复杂度评估/.test(c),
     patch: (c) =>
-      c + '\n\n## 复杂度评估\n\n| 维度 | 评估 |\n|------|------|\n| 影响文件数 | 待评估 |\n| 新增模块数 | 待评估 |\n| 是否涉及 DB schema | 待评估 |\n',
+      c +
+      '\n\n## 复杂度评估\n\n| 维度 | 评估 |\n|------|------|\n| 影响文件数 | 待评估 |\n| 新增模块数 | 待评估 |\n| 是否涉及 DB schema | 待评估 |\n',
   },
   {
     name: '包含风险与缓解',
@@ -336,7 +343,8 @@ const PLAN_VALIDATION_RULES: ValidationRule[] = [
   },
   {
     name: '包含验收场景实施映射',
-    check: (c) => /##\s*验收场景实施映射/.test(c) && /\|\s*场景编号\s*\|\s*实现模块\/文件\s*\|/.test(c),
+    check: (c) =>
+      /##\s*验收场景实施映射/.test(c) && /\|\s*场景编号\s*\|\s*实现模块\/文件\s*\|/.test(c),
     patch: (c) =>
       c +
       '\n\n## 验收场景实施映射\n\n| 场景编号 | 实现模块/文件 | 分层路径 | 验证方式 | 交付证据 |\n|----------|---------------|----------|----------|----------|\n| AC-1 | 待补充 | 待补充 | 测试 | 断言 |\n',
@@ -345,7 +353,8 @@ const PLAN_VALIDATION_RULES: ValidationRule[] = [
     name: '包含架构守卫',
     check: (c) => /##\s*架构守卫/.test(c),
     patch: (c) =>
-      c + '\n\n## 架构守卫\n\n- 数据访问只能通过 store/repository 层\n- 前端访问网关只能通过 @openAwork/web-client\n',
+      c +
+      '\n\n## 架构守卫\n\n- 数据访问只能通过 store/repository 层\n- 前端访问网关只能通过 @openAwork/web-client\n',
   },
 ];
 
@@ -469,9 +478,7 @@ function applyPatches(content: string, rules: ValidationRule[]): string {
 
   const postPatch = validateOutput(patched, rules);
   if (postPatch.ok) {
-    console.warn(
-      `[artifact-chain] 程序化兜底修补成功，所有校验规则已通过。`,
-    );
+    console.warn(`[artifact-chain] 程序化兜底修补成功，所有校验规则已通过。`);
   } else {
     console.warn(
       `[artifact-chain] 程序化兜底后仍有未通过项：${postPatch.failed.join('、')}（这些规则无 patch 函数）。`,
@@ -521,7 +528,9 @@ async function callLlmWithRetry(
       err instanceof Error ? err.name : '',
       String(err),
     ].join(' ');
-    return /429|too many requests|rate.?limit|503|502|500|service.*unavailable|temporarily.*unavailable|bad gateway|gateway.*timeout|internal.*server.*error|overloaded|exhausted|invalid.*json|json.*parse|JSONParse|ECONNRESET|ETIMEDOUT|fetch.*failed|network.*error|socket.*hang/i.test(errStr);
+    return /429|too many requests|rate.?limit|503|502|500|service.*unavailable|temporarily.*unavailable|bad gateway|gateway.*timeout|internal.*server.*error|overloaded|exhausted|invalid.*json|json.*parse|JSONParse|ECONNRESET|ETIMEDOUT|fetch.*failed|network.*error|socket.*hang/i.test(
+      errStr,
+    );
   };
 
   // 通用指数退避重试：最多 4 次（首次立即，后续 10s/20s/30s/40s）
@@ -541,7 +550,9 @@ async function callLlmWithRetry(
         if (attempt < delays.length) {
           const delay = delays[attempt]!;
           const reason = err instanceof Error ? err.message : String(err);
-          console.warn(`[artifact-chain] LLM 调用失败（${reason}），${delay / 1000} 秒后重试（第 ${attempt + 1}/${delays.length} 次）…`);
+          console.warn(
+            `[artifact-chain] LLM 调用失败（${reason}），${delay / 1000} 秒后重试（第 ${attempt + 1}/${delays.length} 次）…`,
+          );
           await sleep(delay);
         }
       }
@@ -587,9 +598,7 @@ async function callLlmWithRetry(
     const retryHint = `\n\n${escalationPrefix}（缺少：${missingItems}）。\n\n请严格按照模板结构重新输出完整内容，必须包含上述缺失的章节/标记。不要省略任何部分，不要说"见上文"，直接输出完整文档。`;
 
     try {
-      currentContent = await retryWithBackoff(() =>
-        callLlm(systemPrompt, userMessage + retryHint),
-      );
+      currentContent = await retryWithBackoff(() => callLlm(systemPrompt, userMessage + retryHint));
     } catch (networkErr) {
       // 网络失败 → 用当前结果 + 程序化兜底 patch
       console.warn(
@@ -1032,10 +1041,10 @@ export async function runArtifactChain(input: ArtifactChainInput): Promise<Artif
       if (reSpecValidation.ok) {
         finalSpecContent = fixedSpec;
         // 更新已创建的 spec artifact
-        sqliteRun(
-          `UPDATE artifacts SET content = ?, updated_at = datetime('now') WHERE id = ?`,
-          [fixedSpec, specArtifactId],
-        );
+        sqliteRun(`UPDATE artifacts SET content = ?, updated_at = datetime('now') WHERE id = ?`, [
+          fixedSpec,
+          specArtifactId,
+        ]);
         persistPm1LlmTurn({
           userId: input.userId,
           sessionId: input.sessionId,
@@ -1049,10 +1058,10 @@ export async function runArtifactChain(input: ArtifactChainInput): Promise<Artif
         // 做最后一道直接 patch
         const patchedSpec = applyPatches(fixedSpec, SPEC_VALIDATION_RULES);
         finalSpecContent = patchedSpec;
-        sqliteRun(
-          `UPDATE artifacts SET content = ?, updated_at = datetime('now') WHERE id = ?`,
-          [patchedSpec, specArtifactId],
-        );
+        sqliteRun(`UPDATE artifacts SET content = ?, updated_at = datetime('now') WHERE id = ?`, [
+          patchedSpec,
+          specArtifactId,
+        ]);
       }
     }
   } catch (specReviewErr) {
@@ -1097,10 +1106,10 @@ export async function runArtifactChain(input: ArtifactChainInput): Promise<Artif
       const rePlanValidation = validatePlanOutput(fixedPlan);
       if (rePlanValidation.ok) {
         finalPlanContent = fixedPlan;
-        sqliteRun(
-          `UPDATE artifacts SET content = ?, updated_at = datetime('now') WHERE id = ?`,
-          [fixedPlan, planArtifactId],
-        );
+        sqliteRun(`UPDATE artifacts SET content = ?, updated_at = datetime('now') WHERE id = ?`, [
+          fixedPlan,
+          planArtifactId,
+        ]);
         persistPm1LlmTurn({
           userId: input.userId,
           sessionId: input.sessionId,
@@ -1114,10 +1123,10 @@ export async function runArtifactChain(input: ArtifactChainInput): Promise<Artif
         // 做最后一道直接 patch
         const patchedPlan = applyPatches(fixedPlan, PLAN_VALIDATION_RULES);
         finalPlanContent = patchedPlan;
-        sqliteRun(
-          `UPDATE artifacts SET content = ?, updated_at = datetime('now') WHERE id = ?`,
-          [patchedPlan, planArtifactId],
-        );
+        sqliteRun(`UPDATE artifacts SET content = ?, updated_at = datetime('now') WHERE id = ?`, [
+          patchedPlan,
+          planArtifactId,
+        ]);
       }
     }
   } catch (planReviewErr) {
@@ -1129,9 +1138,8 @@ export async function runArtifactChain(input: ArtifactChainInput): Promise<Artif
   // 5.5c: tasks 自审
   let finalTasksContent = tasksContent;
   try {
-    const { parseAllTasks, validateParsedTasks } = await import(
-      '../capability/dispatch-package.js'
-    );
+    const { parseAllTasks, validateParsedTasks } =
+      await import('../capability/dispatch-package.js');
     const parsedTasks = parseAllTasks(finalTasksContent);
     const taskIssues = validateParsedTasks(parsedTasks);
 

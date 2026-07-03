@@ -77,7 +77,7 @@ async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promi
         ? payload['title']
         : '未命名任务';
   const taskContext = typeof payload?.['context'] === 'string' ? payload['context'] : '';
-  const role = input.handoff.toRoleLayer as 'executor' | 'reviewer';
+  const role = input.handoff.toRoleLayer;
   const parsedProfile = taskProfileSchema.safeParse(payload?.['taskProfile']);
   const taskProfile = parsedProfile.success
     ? parsedProfile.data
@@ -192,9 +192,7 @@ async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promi
   // 避免重复执行已完成任务、能感知上下游进度。
   let teamResumeRootSessionId: string | undefined;
   try {
-    const { resolveTeamRootSessionId } = await import(
-      '../../team/team-resume-context.js'
-    );
+    const { resolveTeamRootSessionId } = await import('../../team/team-resume-context.js');
     const sessionMetaRow = sqliteGet<{ metadata_json: string | null }>(
       `SELECT metadata_json FROM sessions WHERE id = ? LIMIT 1`,
       [input.toSessionId],
@@ -244,7 +242,11 @@ async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promi
   // replay 命中）返回不含 stopReason 的结果，这种"静默失败"必须被捕获，
   // 否则会走到 collectExecutionCompletionEvidence 并抛出"缺少 artifact"——
   // 错误消息不明确，不利于诊断。
-  const streamFailed = streamThrew !== null || !streamResult || streamResult.stopReason === 'error' || !streamResult.stopReason;
+  const streamFailed =
+    streamThrew !== null ||
+    !streamResult ||
+    streamResult.stopReason === 'error' ||
+    !streamResult.stopReason;
   if (streamFailed) {
     const reason =
       streamThrew instanceof Error
@@ -266,9 +268,8 @@ async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promi
     // 检查是否有残留的 in-flight 请求（SESSION_ALREADY_RUNNING 场景）。
     // 如果有，等待它结束，避免重试被 single-flight 拒绝。
     try {
-      const { getAnyInFlightStreamRequestForSession } = await import(
-        '../../routes/stream-cancellation.js'
-      );
+      const { getAnyInFlightStreamRequestForSession } =
+        await import('../../routes/stream-cancellation.js');
       let waitCount = 0;
       while (waitCount < 10) {
         const inFlight = getAnyInFlightStreamRequestForSession({
@@ -303,14 +304,26 @@ async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promi
           const meta = JSON.parse(metaRow.metadata_json) as Record<string, unknown>;
           let changed = false;
           // 清除 session 级模型绑定
-          if (meta['modelId']) { delete meta['modelId']; changed = true; }
-          if (meta['providerId']) { delete meta['providerId']; changed = true; }
+          if (meta['modelId']) {
+            delete meta['modelId'];
+            changed = true;
+          }
+          if (meta['providerId']) {
+            delete meta['providerId'];
+            changed = true;
+          }
           // 清除 teamRoleInstance 中的模型绑定
           const roleInst = meta['teamRoleInstance'];
           if (typeof roleInst === 'object' && roleInst !== null) {
             const ri = roleInst as Record<string, unknown>;
-            if (ri['modelId']) { delete ri['modelId']; changed = true; }
-            if (ri['providerId']) { delete ri['providerId']; changed = true; }
+            if (ri['modelId']) {
+              delete ri['modelId'];
+              changed = true;
+            }
+            if (ri['providerId']) {
+              delete ri['providerId'];
+              changed = true;
+            }
           }
           // 清除 teamDefinition 中的成员模型绑定
           const teamDef = meta['teamDefinition'];
@@ -320,7 +333,8 @@ async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promi
               td['memberSlots'] = (td['memberSlots'] as Array<Record<string, unknown>>).map(
                 (slot) => {
                   const { modelId: _m, providerId: _p, ...rest } = slot;
-                  void _m; void _p;
+                  void _m;
+                  void _p;
                   return rest;
                 },
               );
@@ -328,13 +342,11 @@ async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promi
             }
           }
           if (changed) {
-            sqliteRun(
-              `UPDATE sessions SET metadata_json = ? WHERE id = ?`,
-              [JSON.stringify(meta), input.toSessionId],
-            );
-            console.warn(
-              `[${role}-runner] 检测到 409，已清除 session metadata 中所有模型绑定`,
-            );
+            sqliteRun(`UPDATE sessions SET metadata_json = ? WHERE id = ?`, [
+              JSON.stringify(meta),
+              input.toSessionId,
+            ]);
+            console.warn(`[${role}-runner] 检测到 409，已清除 session metadata 中所有模型绑定`);
           }
         }
 
@@ -343,13 +355,14 @@ async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promi
           sessionId: input.toSessionId,
           layer: role,
         });
-        const auxConfig = await resolveAuxiliaryLlmConfig(input.handoff.userId, executorMemberModel);
+        const auxConfig = await resolveAuxiliaryLlmConfig(
+          input.handoff.userId,
+          executorMemberModel,
+        );
         if (auxConfig) {
           retryProviderId = auxConfig.providerType ?? undefined;
           retryModel = auxConfig.model;
-          console.warn(
-            `[${role}-runner] 409 降级：重试将使用辅助 LLM 配置（model=${retryModel}）`,
-          );
+          console.warn(`[${role}-runner] 409 降级：重试将使用辅助 LLM 配置（model=${retryModel}）`);
         }
       } catch {
         /* best-effort */
@@ -371,18 +384,26 @@ async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promi
         },
       });
       if (input.signal.aborted) return;
-      if (retryResult.stopReason !== 'error' && retryResult.stopReason !== 'cancelled' && retryResult.stopReason) {
+      if (
+        retryResult.stopReason !== 'error' &&
+        retryResult.stopReason !== 'cancelled' &&
+        retryResult.stopReason
+      ) {
         // 重试成功（有有效 stopReason 且非 error/cancelled）
         streamResult = retryResult;
         streamThrew = null;
       } else {
         // 重试也失败 → 抛异常
-        const retryReason = retryResult.errorSummary ?? `重试后仍 stopReason=${retryResult.stopReason ?? 'undefined'}`;
+        const retryReason =
+          retryResult.errorSummary ??
+          `重试后仍 stopReason=${retryResult.stopReason ?? 'undefined'}`;
         throw new Error(`${role} 层执行失败（重试后仍失败）：${retryReason}`);
       }
     } catch (retryErr) {
       if (input.signal.aborted) return;
-      throw new Error(`${role} 层执行失败（重试也失败）：${retryErr instanceof Error ? retryErr.message : String(retryErr)}`);
+      throw new Error(
+        `${role} 层执行失败（重试也失败）：${retryErr instanceof Error ? retryErr.message : String(retryErr)}`,
+      );
     }
   }
 
@@ -447,7 +468,7 @@ function collectExecutionCompletionEvidence(input: {
       sessionId: input.sessionId,
       userId: input.userId,
       // 只读 final 状态的消息——error 状态的 assistant 消息是 LLM 报错时
-    // 写入的错误提示，不是真正的实施摘要，不应被当作"有效总结"。
+      // 写入的错误提示，不是真正的实施摘要，不应被当作"有效总结"。
       statuses: ['final'],
     }),
   );
@@ -469,7 +490,11 @@ function collectExecutionCompletionEvidence(input: {
 
   return {
     ok: true,
-    summary: hasSummary ? summary : input.role === 'reviewer' ? '已提交评审 artifact。' : '已提交实现 artifact。',
+    summary: hasSummary
+      ? summary
+      : input.role === 'reviewer'
+        ? '已提交评审 artifact。'
+        : '已提交实现 artifact。',
     artifactCount,
     source: hasSummary && hasArtifact ? 'artifact+summary' : hasArtifact ? 'artifact' : 'summary',
   };
@@ -515,13 +540,9 @@ async function runPm1(input: Parameters<HandoffTaskRunner>[0]): Promise<void> {
     typeof payload?.['teamWorkspaceId'] === 'string' ? payload['teamWorkspaceId'] : null;
   const isResume = payload?.['isResume'] === true;
   const resumeRootSessionId =
-    typeof payload?.['resumeRootSessionId'] === 'string'
-      ? payload['resumeRootSessionId']
-      : null;
+    typeof payload?.['resumeRootSessionId'] === 'string' ? payload['resumeRootSessionId'] : null;
   const qualityFeedback =
-    typeof payload?.['qualityFeedback'] === 'string'
-      ? payload['qualityFeedback']
-      : null;
+    typeof payload?.['qualityFeedback'] === 'string' ? payload['qualityFeedback'] : null;
   const isQualityFeedback = payload?.['isQualityFeedback'] === true;
   const escalationRound =
     typeof payload?.['escalationRound'] === 'number' ? payload['escalationRound'] : 0;
@@ -559,7 +580,10 @@ async function runPm1(input: Parameters<HandoffTaskRunner>[0]): Promise<void> {
         role: 'assistant',
         agentId: 'pm1',
         content: [
-          { type: 'text', text: `🔴 已退回重新规划 ${escalationRound} 轮仍未通过 PM2 检查，停止自动重试，等待用户介入。` },
+          {
+            type: 'text',
+            text: `🔴 已退回重新规划 ${escalationRound} 轮仍未通过 PM2 检查，停止自动重试，等待用户介入。`,
+          },
         ],
         clientRequestId: `pm1:${input.handoff.id}:escalation-limit-notice`,
       });
@@ -648,14 +672,19 @@ async function runPm1(input: Parameters<HandoffTaskRunner>[0]): Promise<void> {
         role: 'assistant',
         agentId: 'pm1',
         content: [
-          { type: 'text', text: '⚠️ PM1 暂无可用的辅助 LLM 配置。请检查 AI API Key 设置。系统会自动重试。' },
+          {
+            type: 'text',
+            text: '⚠️ PM1 暂无可用的辅助 LLM 配置。请检查 AI API Key 设置。系统会自动重试。',
+          },
         ],
         clientRequestId: `handoff:${input.handoff.id}:no-llm`,
       });
     } catch {
       /* best-effort */
     }
-    throw new Error('PM1 artifact chain: 无可用 LLM 配置（auxiliary-llm-config 未设置），等待自动重试');
+    throw new Error(
+      'PM1 artifact chain: 无可用 LLM 配置（auxiliary-llm-config 未设置），等待自动重试',
+    );
   }
 
   const { requestWorkflowLlmCompletion } = await import('../../routes/workflow-llm.js');
@@ -679,10 +708,8 @@ async function runPm1(input: Parameters<HandoffTaskRunner>[0]): Promise<void> {
   let taskStatusSummary: string | null = null;
   if (isResume && resumeRootSessionId) {
     try {
-      const {
-        buildTeamResumeSystemPrompt,
-        buildTeamResumeContext,
-      } = await import('../../team/team-resume-context.js');
+      const { buildTeamResumeSystemPrompt, buildTeamResumeContext } =
+        await import('../../team/team-resume-context.js');
       resumeSystemPrompt = await buildTeamResumeSystemPrompt({
         rootSessionId: resumeRootSessionId,
         userId: input.handoff.userId,
@@ -697,10 +724,7 @@ async function runPm1(input: Parameters<HandoffTaskRunner>[0]): Promise<void> {
       if (resumeContext) {
         const completedLines = resumeContext.completedTasks
           .slice(0, 8)
-          .map(
-            (task, index) =>
-              `${index + 1}. ✅ ${task.title}（${task.roleLayer ?? 'unknown'}）`,
-          );
+          .map((task, index) => `${index + 1}. ✅ ${task.title}（${task.roleLayer ?? 'unknown'}）`);
         const incompleteLines = resumeContext.incompleteTasks
           .slice(0, 10)
           .map(
@@ -793,7 +817,8 @@ async function runPm1(input: Parameters<HandoffTaskRunner>[0]): Promise<void> {
     );
     if (sessionMetaRow?.metadata_json) {
       const meta = JSON.parse(sessionMetaRow.metadata_json) as Record<string, unknown>;
-      const workingDir = typeof meta['workingDirectory'] === 'string' ? meta['workingDirectory'] : null;
+      const workingDir =
+        typeof meta['workingDirectory'] === 'string' ? meta['workingDirectory'] : null;
       if (workingDir) {
         const { readFileSync, existsSync } = await import('node:fs');
         const { join } = await import('node:path');

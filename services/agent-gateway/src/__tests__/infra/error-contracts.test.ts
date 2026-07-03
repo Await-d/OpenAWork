@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type * as AuthModule from '../../infra/auth.js';
 import type * as DbModule from '../../infra/db.js';
+import type { requireAuth as RequireAuthHook } from '../../infra/auth.js';
 import { registerErrorHandler } from '../../infra/error-handler.js';
 import { parseBody, parseParams, parseQuery } from '../../infra/parse-request.js';
 import type * as RequestWorkflowModule from '../../runtime/request-workflow.js';
@@ -13,7 +14,7 @@ process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
 let authPlugin: typeof AuthModule.default;
 let dbModule: typeof DbModule;
 let requestWorkflowPlugin: typeof RequestWorkflowModule.default;
-let requireAuthHook: typeof import('../../infra/auth.js').requireAuth;
+let requireAuthHook: typeof RequireAuthHook;
 
 async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify();

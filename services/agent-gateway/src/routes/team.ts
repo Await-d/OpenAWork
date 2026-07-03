@@ -36,10 +36,7 @@ import {
   SESSION_RUNTIME_THREAD_HEARTBEAT_MS,
   SESSION_RUNTIME_THREAD_STALE_AFTER_MS,
 } from '../session/session-runtime-thread-store.js';
-import {
-  getTeamRuntimeIncidentSummary,
-  listTeamRuntimeIncidents,
-} from '../team/team-runtime-diagnostics-store.js';
+import { listTeamRuntimeIncidents } from '../team/team-runtime-diagnostics-store.js';
 import { reconcileTeamRuntimeAlerts } from '../team/team-runtime-alert-store.js';
 import {
   consumeExpiredSuppressedAlertControls,

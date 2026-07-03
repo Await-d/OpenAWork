@@ -325,7 +325,7 @@ export const __testing = {
   reset(): void {
     // Importing eagerly would create a cycle; resolve lazily here so the
     // helper can be used in setup hooks without risking a load order issue.
-    import('../ssh/ssh-service.js').then((mod) => {
+    void import('../ssh/ssh-service.js').then((mod) => {
       mod.__resetSshServiceForTests(new mod.SshService());
     });
   },
