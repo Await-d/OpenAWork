@@ -58,8 +58,7 @@ export const DEFAULT_REDACTION_PATTERNS: RedactionPattern[] = [
   // 数据库连接字符串密码 postgresql://user:pass@host
   {
     name: 'db-connection-password',
-    pattern:
-      /((?:postgres|postgresql|mysql|mongodb|redis|amqp):\/\/[^:]+:)[^@]+(@[^\s/]+)/g,
+    pattern: /((?:postgres|postgresql|mysql|mongodb|redis|amqp):\/\/[^:]+:)[^@]+(@[^\s/]+)/g,
     replacement: '$1[REDACTED]$2',
   },
   // key=value 或 key: value 形式中的敏感 key
@@ -84,13 +83,14 @@ export const DEFAULT_REDACTION_PATTERNS: RedactionPattern[] = [
   // Google API Key（AIza 开头）
   {
     name: 'google-api-key',
-    pattern: /\bAIza[0-9A-Za-z_\-]{35}\b/g,
+    pattern: /\bAIza[0-9A-Za-z_-]{35}\b/g,
     replacement: '[REDACTED_GOOGLE_KEY]',
   },
   // PEM 私钥块
   {
     name: 'pem-private-key',
-    pattern: /-----BEGIN (?:RSA |EC |OPENSSH |DSA |)PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH |DSA |)PRIVATE KEY-----/g,
+    pattern:
+      /-----BEGIN (?:RSA |EC |OPENSSH |DSA |)PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH |DSA |)PRIVATE KEY-----/g,
     replacement: '[REDACTED_PRIVATE_KEY]',
   },
   // 信用卡号（16 位，可能含空格或连字符，需以 4/5/3 开头）
@@ -178,7 +178,7 @@ export function redactText(input: string): string {
   if (placeholders.length > 0) {
     for (let i = 0; i < placeholders.length; i++) {
       const placeholder = `\x00ALLOW_${i}\x00`;
-      text = text.split(placeholder).join(placeholders[i]!);
+      text = text.split(placeholder).join(placeholders[i]);
     }
   }
 
