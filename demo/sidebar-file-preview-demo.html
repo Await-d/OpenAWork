@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>OpenAWork — 侧边栏文件预览方案</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<style>
+:root {
+  --accent:#5cd4c0;--accent-muted:rgba(92,212,192,.14);--accent-subtle:rgba(92,212,192,.07);--accent-border:rgba(92,212,192,.3);--accent-glow:rgba(92,212,192,.15);
+  --contrast:#f0b429;--contrast-muted:rgba(240,180,41,.14);--contrast-subtle:rgba(240,180,41,.07);
+  --complement:#f06b7e;--complement-muted:rgba(240,107,126,.14);
+  --aux:#8b9cf5;--aux-muted:rgba(139,156,245,.14);
+  --line-subtle:hsla(215,20%,50%,.07);--line-default:hsla(215,18%,50%,.12);--line-emphasis:hsla(215,16%,55%,.2);--line-strong:hsla(215,14%,60%,.3);
+  --fg-strong:#f1f4f8;--fg-default:#c8d1e0;--fg-muted:#7b8a9e;--fg-subtle:#4d5b6e;--fg-on-accent:#052e22;
+  --bg-base:#0d1117;--bg-surface:#111820;--bg-elevated:#161d27;--bg-hover:rgba(255,255,255,.03);
+  --r-xs:4px;--r-sm:6px;--r-md:8px;--r-lg:12px;--r-pill:9999px;
+  --sh-md:0 2px 4px rgba(0,0,0,.2),0 8px 24px -8px rgba(0,0,0,.4),inset 0 1px 0 rgba(255,255,255,.02);
+  --sh-lg:0 4px 8px rgba(0,0,0,.2),0 24px 56px -16px rgba(0,0,0,.5);
+  --sh-glow:0 0 16px -4px rgba(92,212,192,.25);
+  --t-micro:100ms cubic-bezier(.4,0,.2,1);--t-normal:200ms cubic-bezier(.16,1,.3,1);--t-emphasis:350ms cubic-bezier(.34,1.56,.64,1);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden;font-family:'Manrope',system-ui,sans-serif;background:var(--bg-base);color:var(--fg-default);font-size:14px;-webkit-font-smoothing:antialiased}
+.mono,code,pre{font-family:'JetBrains Mono',monospace}
+
+/* topbar */
+.topbar{position:fixed;top:0;left:0;right:0;height:52px;display:flex;align-items:center;gap:20px;padding:0 20px;background:var(--bg-surface);border-bottom:1px solid var(--line-default);z-index:100}
+.topbar-title{font-weight:800;font-size:15px;color:var(--fg-strong);letter-spacing:-.02em;white-space:nowrap}
+.topbar-title .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:var(--sh-glow);margin-right:8px;vertical-align:1px}
+.scheme-tabs{display:flex;gap:2px;background:var(--bg-base);padding:3px;border-radius:var(--r-md);border:1px solid var(--line-subtle)}
+.scheme-tab{padding:6px 14px;font-size:12.5px;font-weight:600;border:none;background:transparent;color:var(--fg-muted);border-radius:var(--r-sm);cursor:pointer;transition:all var(--t-micro);font-family:inherit;white-space:nowrap}
+.scheme-tab:hover{color:var(--fg-default);background:var(--bg-hover)}
+.scheme-tab.active{background:var(--accent-muted);color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent-border)}
+.scheme-desc{font-size:12px;color:var(--fg-subtle);margin-left:auto;white-space:nowrap}
+
+/* ctx tabs (chat vs team) */
+.ctx-tabs{display:flex;align-items:center;gap:4px}
+.ctx-label{font-size:11px;color:var(--fg-subtle);font-weight:600;white-space:nowrap}
+.ctx-tab{padding:5px 12px;font-size:11.5px;font-weight:600;border:1px solid var(--line-default);background:transparent;color:var(--fg-muted);border-radius:var(--r-sm);cursor:pointer;transition:all var(--t-micro);font-family:inherit}
+.ctx-tab:hover{color:var(--fg-default);border-color:var(--line-emphasis)}
+.ctx-tab.active{background:var(--aux-muted);color:var(--aux);border-color:rgba(139,156,245,.3)}
+
+/* layout */
+.main{padding-top:52px;height:100vh;display:flex;overflow:hidden}
+.sidebar{width:280px;flex-shrink:0;background:var(--bg-surface);border-right:1px solid var(--line-default);display:flex;flex-direction:column;overflow:hidden;transition:width var(--t-normal)}
+.sidebar.collapsed{width:56px}
+.sidebar.collapsed .sb-body,.sidebar.collapsed .sb-viewtabs,.sidebar.collapsed .sb-search,.sidebar.collapsed .sb-footer{display:none}
+.sidebar.collapsed .sb-rail{display:flex}
+
+/* sidebar header */
+.sb-header{display:flex;align-items:center;gap:8px;padding:12px;border-bottom:1px solid var(--line-subtle);min-height:48px}
+.sb-logo{width:28px;height:28px;border-radius:var(--r-sm);background:linear-gradient(135deg,var(--accent),var(--aux));display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;color:var(--fg-on-accent);flex-shrink:0}
+.sb-status{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--fg-muted);font-weight:500}
+.sb-status .sd{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 6px var(--accent-glow)}
+.sb-collapse{margin-left:auto;width:28px;height:28px;display:flex;align-items:center;justify-content:center;border:none;background:transparent;color:var(--fg-muted);cursor:pointer;border-radius:var(--r-sm);transition:all var(--t-micro)}
+.sb-collapse:hover{color:var(--fg-default);background:var(--bg-hover)}
+.sb-collapse svg{width:16px;height:16px;transition:transform var(--t-normal)}
+.sidebar.collapsed .sb-collapse svg{transform:rotate(180deg)}
+
+/* rail */
+.sb-rail{display:none;flex-direction:column;align-items:center;gap:8px;padding:12px 0;flex:1}
+.rail-btn{width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:var(--r-md);border:1px solid transparent;background:transparent;color:var(--fg-muted);cursor:pointer;transition:all var(--t-micro)}
+.rail-btn:hover{color:var(--fg-default);background:var(--bg-hover)}
+.rail-btn.active{color:var(--accent);background:var(--accent-subtle);border-color:var(--accent-border)}
+.rail-btn svg{width:18px;height:18px}
+
+/* view tabs */
+.sb-viewtabs{display:flex;gap:2px;padding:8px 12px;border-bottom:1px solid var(--line-subtle);background:var(--bg-base)}
+.vtab{flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:7px 0;font-size:11.5px;font-weight:600;border:none;background:transparent;color:var(--fg-muted);border-radius:var(--r-sm);cursor:pointer;transition:all var(--t-micro);font-family:inherit}
+.vtab svg{width:14px;height:14px}
+.vtab:hover{color:var(--fg-default)}
+.vtab.active{background:var(--accent-muted);color:var(--accent)}
+
+/* search */
+.sb-search{padding:8px 12px;border-bottom:1px solid var(--line-subtle)}
+.sinput{width:100%;height:32px;padding:0 12px 0 30px;font-size:12px;font-family:inherit;background:var(--bg-base);border:1px solid var(--line-default);border-radius:var(--r-sm);color:var(--fg-default);outline:none;transition:all var(--t-micro);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%237b8a9e' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.3-4.3'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:10px center}
+.sinput::placeholder{color:var(--fg-subtle)}
+.sinput:focus{border-color:var(--accent-border);box-shadow:0 0 0 2px var(--accent-subtle)}
+
+/* body */
+.sb-body{flex:1;overflow-y:auto;overflow-x:hidden}
+.sb-body::-webkit-scrollbar{width:6px}
+.sb-body::-webkit-scrollbar-thumb{background:var(--line-emphasis);border-radius:3px}
+
+/* footer */
+.sb-footer{border-top:1px solid var(--line-subtle);padding:8px;display:flex;gap:4px}
+.fbtn{flex:1;height:34px;display:flex;align-items:center;justify-content:center;gap:5px;border:none;background:transparent;color:var(--fg-muted);border-radius:var(--r-sm);cursor:pointer;transition:all var(--t-micro);font-family:inherit;font-size:11.5px;font-weight:500}
+.fbtn:hover{color:var(--fg-default);background:var(--bg-hover)}
+.fbtn svg{width:15px;height:15px}
+
+/* session list */
+.ws-group{margin-bottom:4px}
+.ws-header{display:flex;align-items:center;gap:6px;padding:8px 12px;cursor:pointer;transition:background var(--t-micro);user-select:none}
+.ws-header:hover{background:var(--bg-hover)}
+.ws-chev{width:14px;height:14px;color:var(--fg-muted);transition:transform var(--t-micro);flex-shrink:0}
+.ws-header.collapsed .ws-chev{transform:rotate(-90deg)}
+.ws-name{font-size:11px;font-weight:700;color:var(--fg-muted);text-transform:uppercase;letter-spacing:.04em;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ws-add{width:20px;height:20px;display:flex;align-items:center;justify-content:center;border:none;background:transparent;color:var(--fg-subtle);cursor:pointer;border-radius:var(--r-xs);transition:all var(--t-micro)}
+.ws-add:hover{color:var(--accent);background:var(--accent-subtle)}
+.ws-add svg{width:13px;height:13px}
+.sess-list{padding:0 8px}
+.sess-item{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:var(--r-sm);cursor:pointer;transition:all var(--t-micro);position:relative}
+.sess-item:hover{background:var(--bg-hover)}
+.sess-item.active{background:var(--accent-subtle)}
+.sess-item.active::before{content:'';position:absolute;left:0;top:50%;transform:translateY(-50%);width:3px;height:18px;background:var(--accent);border-radius:0 2px 2px 0;box-shadow:var(--sh-glow)}
+.sess-icon{width:16px;height:16px;flex-shrink:0;color:var(--fg-muted)}
+.sess-item.active .sess-icon{color:var(--accent)}
+.sess-title{font-size:12.5px;font-weight:500;color:var(--fg-default);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sess-item.active .sess-title{color:var(--accent);font-weight:600}
+.sess-time{font-size:10.5px;color:var(--fg-subtle);flex-shrink:0}
+
+/* file tree */
+.file-tree{padding:4px 8px}
+.fnode{display:flex;align-items:center;gap:5px;padding:4px 8px;border-radius:var(--r-sm);cursor:pointer;transition:all var(--t-micro);font-size:12px;user-select:none;position:relative}
+.fnode:hover{background:var(--bg-hover)}
+.fnode.active{background:var(--accent-subtle)}
+.fnode .fchev{width:14px;height:14px;color:var(--fg-muted);transition:transform var(--t-micro);flex-shrink:0}
+.fnode.collapsed .fchev{transform:rotate(-90deg)}
+.fnode .ficon{width:15px;height:15px;flex-shrink:0}
+.fnode .fname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg-default)}
+.fnode.active .fname{color:var(--accent)}
+.fbadge{font-size:9px;font-weight:700;padding:1px 5px;border-radius:var(--r-pill);text-transform:uppercase}
+.fbadge.added{background:var(--accent-muted);color:var(--accent)}
+.fbadge.modified{background:var(--contrast-muted);color:var(--contrast)}
+.fbadge.deleted{background:var(--complement-muted);color:var(--complement)}
+.fchildren{padding-left:14px;overflow:hidden;transition:max-height var(--t-normal)}
+.fchildren.collapsed{max-height:0!important}
+
+/* content area */
+.content{flex:1;display:flex;overflow:hidden;background:var(--bg-base)}
+
+/* chat */
+.chat{flex:1;display:flex;flex-direction:column;min-width:0}
+.chat-tb{display:flex;align-items:center;gap:12px;padding:12px 20px;border-bottom:1px solid var(--line-default);background:var(--bg-surface);min-height:48px}
+.chat-tb-title{font-size:14px;font-weight:700;color:var(--fg-strong)}
+.chat-tb-meta{font-size:11.5px;color:var(--fg-muted);padding:3px 8px;background:var(--bg-base);border-radius:var(--r-pill);border:1px solid var(--line-subtle)}
+.chat-msgs{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:16px}
+.chat-msgs::-webkit-scrollbar{width:6px}
+.chat-msgs::-webkit-scrollbar-thumb{background:var(--line-emphasis);border-radius:3px}
+.cmsg{display:flex;gap:12px;max-width:85%}
+.cmsg.user{align-self:flex-end;flex-direction:row-reverse}
+.cmsg-av{width:30px;height:30px;border-radius:var(--r-md);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0}
+.cmsg.assistant .cmsg-av{background:linear-gradient(135deg,var(--accent),var(--aux));color:var(--fg-on-accent)}
+.cmsg.user .cmsg-av{background:var(--bg-elevated);border:1px solid var(--line-default);color:var(--fg-muted)}
+.cmsg-bub{padding:12px 16px;border-radius:var(--r-lg);font-size:13px;line-height:1.6}
+.cmsg.assistant .cmsg-bub{background:var(--bg-surface);border:1px solid var(--line-subtle);border-top-left-radius:var(--r-xs);color:var(--fg-default)}
+.cmsg.user .cmsg-bub{background:var(--accent-muted);border:1px solid var(--accent-border);border-top-right-radius:var(--r-xs);color:var(--fg-strong)}
+.file-ref{display:inline-flex;align-items:center;gap:4px;padding:2px 7px;background:var(--aux-muted);border:1px solid rgba(139,156,245,.25);border-radius:var(--r-sm);font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--aux);cursor:pointer;transition:all var(--t-micro)}
+.file-ref:hover{background:rgba(139,156,245,.22);box-shadow:0 0 0 2px rgba(139,156,245,.1)}
+.code-block{margin:8px 0;background:var(--bg-base);border:1px solid var(--line-subtle);border-radius:var(--r-md);overflow:hidden}
+.code-hdr{display:flex;align-items:center;justify-content:space-between;padding:6px 12px;background:var(--bg-surface);border-bottom:1px solid var(--line-subtle);font-size:11px;color:var(--fg-muted)}
+.code-block pre{padding:12px;font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.55;overflow-x:auto;color:var(--fg-default)}
+.code-block .kw{color:var(--aux)}
+.code-block .fn{color:var(--accent)}
+.code-block .ty{color:var(--contrast)}
+.code-block .str{color:#86efac}
+.code-block .cmt{color:var(--fg-subtle);font-style:italic}
+
+/* composer */
+.composer{padding:12px 20px;border-top:1px solid var(--line-default);background:var(--bg-surface)}
+.cinput{width:100%;min-height:40px;max-height:120px;padding:8px 12px;font-family:inherit;font-size:13px;background:var(--bg-base);border:1px solid var(--line-default);border-radius:var(--r-md);color:var(--fg-default);outline:none;resize:none;transition:all var(--t-micro)}
+.cinput:focus{border-color:var(--accent-border);box-shadow:0 0 0 2px var(--accent-subtle)}
+.cbar{display:flex;align-items:center;gap:8px;margin-top:8px}
+.cbtn{display:flex;align-items:center;gap:5px;padding:5px 10px;font-size:11.5px;font-weight:600;border:1px solid var(--line-default);background:transparent;color:var(--fg-muted);border-radius:var(--r-sm);cursor:pointer;transition:all var(--t-micro);font-family:inherit}
+.cbtn:hover{color:var(--fg-default);border-color:var(--line-emphasis)}
+.cbtn svg{width:14px;height:14px}
+.csend{margin-left:auto;background:var(--accent);color:var(--fg-on-accent);border-color:var(--accent);font-weight:700}
+.csend:hover{filter:brightness(1.1);box-shadow:var(--sh-glow)}
+
+/* popover (方案A) */
+.popover{position:fixed;z-index:200;width:460px;max-height:70vh;background:var(--bg-elevated);border:1px solid var(--line-emphasis);border-radius:var(--r-lg);box-shadow:var(--sh-lg);display:flex;flex-direction:column;overflow:hidden;opacity:0;transform:scale(.96) translateX(8px);transform-origin:left center;transition:all var(--t-normal);pointer-events:none}
+.popover.visible{opacity:1;transform:scale(1) translateX(0);pointer-events:auto}
+.pop-hdr{display:flex;align-items:center;gap:8px;padding:12px;border-bottom:1px solid var(--line-subtle);background:var(--bg-surface)}
+.pop-icon{width:18px;height:18px;flex-shrink:0}
+.pop-path{flex:1;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--fg-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pop-path .fn{color:var(--fg-strong);font-weight:600}
+.pop-close{width:24px;height:24px;display:flex;align-items:center;justify-content:center;border:none;background:transparent;color:var(--fg-muted);cursor:pointer;border-radius:var(--r-xs);transition:all var(--t-micro)}
+.pop-close:hover{color:var(--complement);background:var(--complement-muted)}
+.pop-close svg{width:14px;height:14px}
+.pop-body{flex:1;overflow:auto;padding:0}
+.pop-body::-webkit-scrollbar{width:6px}
+.pop-body::-webkit-scrollbar-thumb{background:var(--line-emphasis);border-radius:3px}
+.pop-code{font-family:'JetBrains Mono',monospace;font-size:11.5px;line-height:1.6}
+.pop-code .ln{display:flex;padding:0 12px}
+.pop-code .lnn{width:32px;text-align:right;color:var(--fg-subtle);user-select:none;padding-right:12px;flex-shrink:0}
+.pop-code .lnc{flex:1;white-space:pre;color:var(--fg-default)}
+.pop-code .ln.hl{background:var(--contrast-subtle)}
+.pop-code .ln.hl .lnn{color:var(--contrast);font-weight:600}
+.pop-code .kw{color:var(--aux)}
+.pop-code .fn{color:var(--accent)}
+.pop-code .ty{color:var(--contrast)}
+.pop-code .str{color:#86efac}
+.pop-code .cmt{color:var(--fg-subtle);font-style:italic}
+.pop-foot{display:flex;align-items:center;gap:8px;padding:8px 12px;border-top:1px solid var(--line-subtle);background:var(--bg-surface)}
+.pop-meta{font-size:10.5px;color:var(--fg-subtle);flex:1}
+.pop-action{display:flex;align-items:center;gap:4px;padding:4px 10px;font-size:11px;font-weight:600;border:1px solid var(--accent-border);background:var(--accent-subtle);color:var(--accent);border-radius:var(--r-sm);cursor:pointer;transition:all var(--t-micro);font-family:inherit}
+.pop-action:hover{background:var(--accent-muted);box-shadow:var(--sh-glow)}
+.pop-action svg{width:12px;height:12px}
+
+/* editor pane (方案B/C) */
+.editor{width:0;overflow:hidden;border-left:1px solid var(--line-default);background:var(--bg-surface);display:flex;flex-direction:column;transition:width var(--t-normal),flex var(--t-normal);flex-shrink:0;flex-basis:0}
+.editor.open{width:500px;flex-basis:auto}
+.editor.dragging{transition:none}
+.ed-hdr{display:flex;align-items:center;gap:8px;padding:12px;border-bottom:1px solid var(--line-subtle);background:var(--bg-surface);min-height:48px}
+.ed-tabs{display:flex;gap:2px;flex:1;overflow:hidden}
+.ed-tab{display:flex;align-items:center;gap:5px;padding:5px 10px;font-size:11.5px;font-weight:500;border:1px solid transparent;background:transparent;color:var(--fg-muted);border-radius:var(--r-sm);cursor:pointer;transition:all var(--t-micro);font-family:inherit;white-space:nowrap}
+.ed-tab.active{background:var(--bg-base);border-color:var(--line-default);color:var(--fg-strong)}
+.ed-tab .close{width:14px;height:14px;display:flex;align-items:center;justify-content:center;border-radius:var(--r-xs);opacity:.5;transition:all var(--t-micro)}
+.ed-tab .close:hover{opacity:1;background:var(--complement-muted);color:var(--complement)}
+.ed-body{flex:1;overflow:auto;background:var(--bg-base)}
+.ed-body::-webkit-scrollbar{width:6px}
+.ed-body::-webkit-scrollbar-thumb{background:var(--line-emphasis);border-radius:3px}
+.ed-code{font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.65}
+.ed-code .ln{display:flex;padding:0 16px}
+.ed-code .lnn{width:36px;text-align:right;color:var(--fg-subtle);user-select:none;padding-right:12px;flex-shrink:0}
+.ed-code .lnc{flex:1;white-space:pre}
+.ed-code .ln.hl{background:var(--contrast-subtle)}
+.ed-code .ln.hl .lnn{color:var(--contrast);font-weight:600}
+.ed-code .kw{color:var(--aux)}
+.ed-code .fn{color:var(--accent)}
+.ed-code .ty{color:var(--contrast)}
+.ed-code .str{color:#86efac}
+.ed-code .cmt{color:var(--fg-subtle);font-style:italic}
+
+/* search results */
+.sr-item{display:flex;align-items:flex-start;gap:8px;padding:8px 12px;border-radius:var(--r-sm);cursor:pointer;transition:all var(--t-micro)}
+.sr-item:hover{background:var(--bg-hover)}
+.sr-item.active{background:var(--accent-subtle)}
+.sr-icon{width:16px;height:16px;flex-shrink:0;margin-top:1px}
+.sr-info{flex:1;min-width:0}
+.sr-name{font-size:12.5px;font-weight:500;color:var(--fg-default);margin-bottom:2px}
+.sr-item.active .sr-name{color:var(--accent)}
+.sr-path{font-size:10.5px;color:var(--fg-subtle);font-family:'JetBrains Mono',monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sr-prev{font-size:11px;color:var(--fg-muted);margin-top:3px;font-family:'JetBrains Mono',monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sr-prev .match{background:var(--contrast-muted);color:var(--contrast);padding:1px 3px;border-radius:var(--r-xs)}
+
+/* annotation */
+.annot{position:fixed;bottom:20px;right:20px;max-width:340px;padding:16px;background:var(--bg-elevated);border:1px solid var(--line-emphasis);border-radius:var(--r-lg);box-shadow:var(--sh-lg);z-index:300;animation:su var(--t-emphasis) both}
+@keyframes su{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+.annot-title{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:var(--accent);margin-bottom:8px}
+.annot-title svg{width:16px;height:16px}
+.annot-body{font-size:12px;color:var(--fg-muted);line-height:1.6}
+.annot-body strong{color:var(--fg-default)}
+.annot-body .mono{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg-base);padding:1px 4px;border-radius:var(--r-xs);color:var(--aux)}
+.annot-close{position:absolute;top:8px;right:8px;width:22px;height:22px;display:flex;align-items:center;justify-content:center;border:none;background:transparent;color:var(--fg-subtle);cursor:pointer;border-radius:var(--r-xs)}
+.annot-close:hover{color:var(--fg-default);background:var(--bg-hover)}
+.sbadge{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:var(--r-pill);text-transform:uppercase;letter-spacing:.03em;margin-left:8px}
+.sbadge.a{background:var(--accent-muted);color:var(--accent)}
+.sbadge.b{background:var(--contrast-muted);color:var(--contrast)}
+.sbadge.c{background:var(--aux-muted);color:var(--aux)}
+
+/* resizer (方案C) — 位于 chat 与 editor 之间 */
+.resizer{width:4px;cursor:col-resize;background:transparent;flex-shrink:0;position:relative;transition:background var(--t-micro);z-index:10}
+.resizer:hover,.resizer.dragging{background:var(--accent-border)}
+.resizer::after{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:2px;height:24px;background:var(--line-strong);border-radius:1px;opacity:0;transition:opacity var(--t-micro)}
+.resizer:hover::after{opacity:1}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-title"><span class="dot"></span>OpenAWork · 侧边栏文件预览方案</div>
+  <div class="ctx-tabs">
+    <span class="ctx-label">页面：</span>
+    <button class="ctx-tab active" data-ctx="chat">Chat</button>
+    <button class="ctx-tab" data-ctx="team">Team</button>
+  </div>
+  <div class="scheme-tabs">
+    <button class="scheme-tab active" data-scheme="A">方案 A · 浮层预览</button>
+    <button class="scheme-tab" data-scheme="B">方案 B · 分屏编辑器</button>
+    <button class="scheme-tab" data-scheme="C">方案 C · Team 分屏改造</button>
+  </div>
+  <div class="scheme-desc" id="schemeDesc">单击文件 → 侧边栏右侧弹出轻量浮层预览</div>
+</div>
+
+<div class="main">
+  <aside class="sidebar" id="sidebar">
+    <div class="sb-rail">
+      <button class="rail-btn active" title="会话"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button>
+      <button class="rail-btn" title="文件"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button>
+      <button class="rail-btn" title="搜索"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></button>
+    </div>
+
+    <div class="sb-header">
+      <div class="sb-logo">O</div>
+      <div class="sb-status"><span class="sd"></span>Gateway · :3000</div>
+      <button class="sb-collapse" id="collapseBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg></button>
+    </div>
+
+    <div class="sb-viewtabs" id="viewTabs">
+      <button class="vtab active" data-view="sessions"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>会话</button>
+      <button class="vtab" data-view="files"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>文件</button>
+      <button class="vtab" data-view="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>搜索</button>
+    </div>
+
+    <div class="sb-search"><input class="sinput" id="sbSearch" placeholder="搜索会话…" /></div>
+
+    <div class="sb-body" id="sbBody">
+      <div id="sessionsView">
+        <div class="ws-group"><div class="ws-header"><svg class="ws-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg><span class="ws-name">工作空间 · 前端重构</span><button class="ws-add"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14M12 5v14"/></svg></button></div><div class="sess-list">
+          <div class="sess-item active"><svg class="sess-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span class="sess-title">侧边栏文件预览方案讨论</span><span class="sess-time">现在</span></div>
+          <div class="sess-item"><svg class="sess-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span class="sess-title">ChatPage 布局重构</span><span class="sess-time">2h</span></div>
+          <div class="sess-item"><svg class="sess-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span class="sess-title">设计 Token 迁移到 E·Nebula</span><span class="sess-time">昨天</span></div>
+        </div></div>
+        <div class="ws-group"><div class="ws-header"><svg class="ws-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg><span class="ws-name">工作空间 · 网关优化</span><button class="ws-add"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14M12 5v14"/></svg></button></div><div class="sess-list">
+          <div class="sess-item"><svg class="sess-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span class="sess-title">SSE 流式输出性能调优</span><span class="sess-time">3d</span></div>
+          <div class="sess-item"><svg class="sess-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span class="sess-title">Redis 连接池泄漏排查</span><span class="sess-time">5d</span></div>
+        </div></div>
+        <div class="ws-group"><div class="ws-header"><svg class="ws-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg><span class="ws-name">团队工作空间</span><button class="ws-add"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14M12 5v14"/></svg></button></div><div class="sess-list">
+          <div class="sess-item"><svg class="sess-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg><span class="sess-title">前端团队 · 周迭代规划</span><span class="sess-time">1h</span></div>
+          <div class="sess-item"><svg class="sess-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg><span class="sess-title">全栈团队 · API 对齐</span><span class="sess-time">4h</span></div>
+        </div></div>
+      </div>
+
+      <div id="filesView" style="display:none"><div class="file-tree" id="fileTree"></div></div>
+      <div id="searchView" style="display:none"><div id="searchResults" style="padding:8px"></div></div>
+    </div>
+
+    <div class="sb-footer">
+      <button class="fbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/></svg>通知</button>
+      <button class="fbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41m11.32-11.32 1.41-1.41"/></svg>设置</button>
+    </div>
+  </aside>
+
+  <div class="content" id="contentArea">
+    <div class="chat">
+      <div class="chat-tb"><span class="chat-tb-title" id="chatTbTitle">Chat · 侧边栏文件预览方案讨论</span><span class="chat-tb-meta" id="chatTbMeta">GPT-4o · 16 条消息</span></div>
+      <div class="chat-msgs">
+        <div class="cmsg user"><div class="cmsg-av">我</div><div class="cmsg-bub">目前全局 chat 跟 team 中左侧的布局好像还没有考虑到实际的工作区文件预览查看，有什么好的方案？</div></div>
+        <div class="cmsg assistant"><div class="cmsg-av">AI</div><div class="cmsg-bub">我分析了现有代码，发现 <span class="file-ref" data-file="AppSidebar.tsx">AppSidebar.tsx</span> 目前纯粹是会话列表侧边栏，没有文件树和文件预览能力。但项目中已有完整组件：<br/><br/><span class="file-ref" data-file="TeamSidebarWithFileTree.tsx">TeamSidebarWithFileTree.tsx</span> — 双 tab 侧边栏<br/><span class="file-ref" data-file="FilePreviewPane.tsx">FilePreviewPane.tsx</span> — 通用文件预览<br/><span class="file-ref" data-file="FileTreePanel.tsx">FileTreePanel.tsx</span> — 文件树面板<br/><br/>建议在 AppSidebar 中增加 View Mode 切换：会话 / 文件 / 搜索三种模式。</div></div>
+        <div class="cmsg assistant"><div class="cmsg-av">AI</div><div class="cmsg-bub">核心改动在 <span class="file-ref" data-file="AppSidebar.tsx">AppSidebar.tsx</span>，新增 view mode 状态：
+          <div class="code-block"><div class="code-hdr"><span class="mono">AppSidebar.tsx · 新增</span><span>TSX</span></div><pre><span class="cmt">// useUIStateStore 中新增</span>
+<span class="kw">type</span> <span class="ty">SidebarViewMode</span> = <span class="str">'sessions'</span> | <span class="str">'files'</span> | <span class="str">'search'</span>;
+
+<span class="kw">const</span> [viewMode, setViewMode] = <span class="fn">useUIStateStore</span>(s => [s.sidebarViewMode, s.setSidebarViewMode]);
+
+<span class="cmt">// 渲染切换条</span>
+{viewMode === <span class="str">'files'</span> && &lt;<span class="ty">FileTreePanel</span> onFileClick={handlePreview} /&gt;}
+{viewMode === <span class="str">'search'</span> && &lt;<span class="ty">FileSearch</span> onResultClick={handlePreview} /&gt;}</pre></div>
+        </div></div>
+      </div>
+      <div class="composer">
+        <textarea class="cinput" placeholder="输入消息…"></textarea>
+        <div class="cbar">
+          <button class="cbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>附件</button>
+          <button class="cbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3"/></svg>语音</button>
+          <button class="csend"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>发送</button>
+        </div>
+      </div>
+    </div>
+    <div class="resizer" id="resizer" style="display:none"></div>
+    <div class="editor" id="editorPane">
+      <div class="ed-hdr"><div class="ed-tabs"><div class="ed-tab active"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg><span id="edTabName">AppSidebar.tsx</span><span class="close" id="edClose"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></span></div></div></div>
+      <div class="ed-body"><div class="ed-code" id="edCode"></div></div>
+    </div>
+  </div>
+</div>
+
+<div class="popover" id="popover">
+  <div class="pop-hdr">
+    <svg class="pop-icon" viewBox="0 0 24 24" fill="none" stroke="var(--aux)" stroke-width="1.75"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+    <span class="pop-path" id="popPath"></span>
+    <button class="pop-close" id="popClose"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="pop-body"><div class="pop-code" id="popCode"></div></div>
+  <div class="pop-foot"><span class="pop-meta" id="popMeta">—</span><button class="pop-action" id="popOpen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>在编辑器中打开</button></div>
+</div>
+
+<div class="annot" id="annot">
+  <button class="annot-close" onclick="document.getElementById('annot').remove()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  <div class="annot-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg><span id="annotTitle">方案 A · 浮层预览</span><span class="sbadge a" id="annotBadge">A</span></div>
+  <div class="annot-body" id="annotBody"></div>
+</div>
+
+<script>
+// ====== file data ======
+const fileTreeData=[
+  {type:'folder',name:'apps',children:[
+    {type:'folder',name:'web',children:[
+      {type:'folder',name:'src',children:[
+        {type:'folder',name:'components',children:[
+          {type:'folder',name:'layout',children:[
+            {type:'file',name:'AppSidebar.tsx',badge:'modified'},
+            {type:'file',name:'SessionSidebar.tsx'},
+          ]},
+          {type:'folder',name:'chat',children:[
+            {type:'file',name:'ChatPage.tsx'},
+            {type:'file',name:'chat-message.css'},
+          ]},
+          {type:'folder',name:'file-editor',children:[
+            {type:'file',name:'FilePreviewPane.tsx'},
+          ]},
+        ]},
+      ]},
+    ]},
+    {type:'folder',name:'desktop',children:[
+      {type:'file',name:'tauri.conf.json'},
+    ]},
+  ]},
+  {type:'folder',name:'packages',children:[
+    {type:'folder',name:'shared-ui',children:[
+      {type:'folder',name:'src',children:[
+        {type:'folder',name:'file',children:[
+          {type:'file',name:'FileTreePanel.tsx'},
+          {type:'file',name:'FileSearch.tsx',badge:'added'},
+          {type:'file',name:'FileStatusPanel.tsx'},
+        ]},
+      ]},
+      {type:'file',name:'DESIGN-TOKENS.md'},
+    ]},
+    {type:'folder',name:'agent-core',children:[
+      {type:'file',name:'state-machine.ts'},
+      {type:'file',name:'routing.ts'},
+    ]},
+  ]},
+  {type:'folder',name:'services',children:[
+    {type:'folder',name:'agent-gateway',children:[
+      {type:'file',name:'stream.ts'},
+    ]},
+  ]},
+  {type:'file',name:'AGENTS.md'},
+  {type:'file',name:'docker-compose.yml',badge:'deleted'},
+];
+
+const fileContents={
+'AppSidebar.tsx':{path:'apps/web/src/components/layout/AppSidebar.tsx',size:'18.2 KB · 485 行',highlight:[9,10,12,13],lines:[
+"import { useCallback, useEffect, useMemo, useRef, useState } from 'react';",
+"import { createPortal } from 'react-dom';",
+"import { NavLink, useLocation, useNavigate } from 'react-router';",
+"import { createHealthClient, createWorkspaceClient } from '@openAwork/web-client';",
+"",
+"const SIDEBAR_WIDTH = 260;",
+"const COLLAPSED_WIDTH = 56;",
+"",
+"// 新增：View Mode 类型定义",
+"type SidebarViewMode = 'sessions' | 'files' | 'search';",
+"",
+"// 新增：从 UIStateStore 获取当前 view mode",
+"const viewMode = useUIStateStore(s => s.sidebarViewMode);",
+"const setViewMode = useUIStateStore(s => s.setSidebarViewMode);",
+"",
+"return (",
+"  <aside className=\"sidebar\">",
+"    <SidebarViewTabs mode={viewMode} onChange={setViewMode} />",
+"    {viewMode === 'sessions' && <SessionList />}",
+"    {viewMode === 'files' && <FileTreePanel onFileClick={handlePreview} />}",
+"    {viewMode === 'search' && <FileSearch onResultClick={handlePreview} />}",
+"  </aside>",
+");",
+]},
+'FilePreviewPane.tsx':{path:'apps/web/src/components/file-editor/preview/FilePreviewPane.tsx',size:'8.5 KB · 220 行',highlight:[8,9,19],lines:[
+"import { useEffect, useState } from 'react';",
+"import type { FileNode } from '@openAwork/shared-ui';",
+"",
+"interface FilePreviewPaneProps {",
+"  filePath: string;",
+"  workspaceId: string;",
+"}",
+"",
+"// 通用文件预览：支持文本/Markdown/代码/图片/SVG/JSON/PDF/Office",
+"export function FilePreviewPane({ filePath, workspaceId }: FilePreviewPaneProps) {",
+"  const [content, setContent] = useState<string>('');",
+"  const [loading, setLoading] = useState(true);",
+"",
+"  useEffect(() => {",
+"    void loadFile(filePath);",
+"  }, [filePath]);",
+"",
+"  // 根据文件扩展名选择渲染器",
+"  const renderer = selectRenderer(filePath);",
+"  return <div className=\"file-preview-pane\">{renderer(content)}</div>;",
+"}",
+]},
+'FileTreePanel.tsx':{path:'packages/shared-ui/src/file/FileTreePanel.tsx',size:'6.3 KB · 165 行',highlight:[9,10,11,12],lines:[
+"import { useCallback, useMemo } from 'react';",
+"import type { FileTreeNode, FileChangeStatus } from '../types.js';",
+"",
+"interface FileTreePanelProps {",
+"  nodes: FileTreeNode[];",
+"  selectedPath?: string;",
+"  onFileClick?: (node: FileTreeNode) => void;",
+"  showChangeStatus?: boolean;",
+"}",
+"",
+"// shared-ui 文件树面板：支持树形/列表视图，显示文件变更状态",
+"export function FileTreePanel({",
+"  nodes, selectedPath, onFileClick, showChangeStatus,",
+"}: FileTreePanelProps) {",
+"  const tree = useMemo(() => buildTree(nodes), [nodes]);",
+"  return <FileTreeView nodes={tree} onFileClick={onFileClick} />;",
+"}",
+]},
+'TeamSidebarWithFileTree.tsx':{path:'apps/web/src/pages/team/runtime/shell/sidebar/TeamSidebarWithFileTree.tsx',size:'4.8 KB · 112 行',highlight:[0,1,6,7],lines:[
+"// 双 tab 侧边栏：会话 tab + 文件树 tab",
+"export function TeamSidebarWithFileTree({",
+"  sessions, activeSessionId, onSessionClick,",
+"  workspaceId, onOpenFile,",
+"}: TeamSidebarWithFileTreeProps) {",
+"  const [activeTab, setActiveTab] = useState<'sessions' | 'files'>('sessions');",
+"  const fileTreeState = useTeamSidebarFileTreeState(workspaceId);",
+"",
+"  return (",
+"    <div className=\"team-sidebar\">",
+"      <div className=\"tab-bar\">",
+"        <button onClick={() => setActiveTab('sessions')}>会话</button>",
+"        <button onClick={() => setActiveTab('files')}>文件树</button>",
+"      </div>",
+"      {activeTab === 'files' && (",
+"        <FileTreeView nodes={fileTreeState.tree} onFileClick={onOpenFile} />",
+"      )}",
+"    </div>",
+"  );",
+"}",
+]},
+'ChatPage.tsx':{path:'apps/web/src/pages/chat-page/ChatPage.tsx',size:'189 KB · 4500 行',highlight:[10,11,16],lines:[
+"import { useRef, useState, useEffect } from 'react';",
+"import { ChatConversationView } from '../components/chat/ChatConversationView.js';",
+"import { ChatEditorPane } from '../components/chat/ChatEditorPane.js';",
+"import { ChatRightPanel } from '../components/chat/ChatRightPanel.js';",
+"",
+"export default function ChatPage() {",
+"  const [editorMode, setEditorMode] = useState(false);",
+"  const splitContainerRef = useRef<HTMLDivElement>(null);",
+"",
+"  return (",
+"    <div className=\"page-root page-root-row\">",
+"      <div ref={splitContainerRef} style={{ display: 'flex', flex: 1 }}>",
+"        {/* 左侧：对话区 */}",
+"        <div style={{ flex: editorMode ? '0 0 auto' : 1 }}>",
+"          <ChatConversationView />",
+"        </div>",
+"        {/* 右侧：分屏编辑器 */}",
+"        <ChatEditorPane mode={editorMode} />",
+"      </div>",
+"      <ChatRightPanel />",
+"    </div>",
+"  );",
+"}",
+]},
+'SessionSidebar.tsx':{path:'apps/web/src/components/layout/sidebar/SessionSidebar.tsx',size:'12.1 KB · 310 行',highlight:[4,5,6],lines:[
+"import { useState } from 'react';",
+"import { FileTreeView } from './SidebarHelpers.js';",
+"import { useSessionSidebarFileTreeState } from './use-session-sidebar-file-tree-state.js';",
+"",
+"// 旧版双 tab 侧边栏（会话 + 文件树）",
+"export function SessionSidebar() {",
+"  const [activeTab, setActiveTab] = useState<'sessions' | 'files'>('sessions');",
+"  const fileTreeState = useSessionSidebarFileTreeState();",
+"",
+"  return (",
+"    <div className=\"sidebar-tabs\">",
+"      <TabButton active={activeTab === 'sessions'}",
+"        onClick={() => setActiveTab('sessions')}>会话</TabButton>",
+"      <TabButton active={activeTab === 'files'}",
+"        onClick={() => setActiveTab('files')}>文件树</TabButton>",
+"    </div>",
+"  );",
+"}",
+]},
+'DESIGN-TOKENS.md':{path:'packages/shared-ui/DESIGN-TOKENS.md',size:'8.0 KB · 200 行',highlight:[3,4,5],lines:[
+"# shared-ui 设计 Token 规范",
+"",
+"## 色彩体系（E · Nebula）",
+"",
+"### 四色系统",
+"| 角色 | 暗色值 | 亮色值 | 用途 |",
+"| accent（靛青） | #5cd4c0 | #6471f0 | CTA / active / 选中 |",
+"| contrast（琥珀） | #f0b429 | #a06bff | warning / 次级强调 |",
+"| complement（珊瑚） | #f06b7e | #e0497a | danger / destructive |",
+"| aux（靛蓝） | #8b9cf5 | #3aa0ff | info / 链接 / 代码高亮 |",
+"",
+"### 间距系统",
+"| Token | 值 | 用途 |",
+"| spacing-1 | 4px | 图标内间距 |",
+"| spacing-2 | 8px | 紧凑元素间 |",
+"| spacing-3 | 12px | 卡片内 padding |",
+"| spacing-4 | 16px | 标准间距 |",
+]},
+'state-machine.ts':{path:'packages/agent-core/src/state-machine.ts',size:'15.4 KB · 380 行',highlight:[0,1,2],lines:[
+"export type AgentState =",
+"  | 'idle' | 'running' | 'tool-calling'",
+"  | 'retry' | 'interrupted' | 'error';",
+"",
+"export interface StateTransition {",
+"  from: AgentState; to: AgentState; trigger: string;",
+"}",
+"",
+"// 纯函数状态机，无副作用",
+"export function transition(current: AgentState, trigger: string): AgentState {",
+"  const rule = TRANSITIONS.find(t =>",
+"    t.from === current && t.trigger === trigger",
+"  );",
+"  if (!rule) return current;",
+"  return rule.to;",
+"}",
+]},
+};
+
+const searchData=[
+  {name:'AppSidebar.tsx',path:'apps/web/src/components/layout/',prev:'type SidebarViewMode = sessions | files | search'},
+  {name:'FilePreviewPane.tsx',path:'apps/web/src/components/file-editor/preview/',prev:'export function FilePreviewPane({ filePath })'},
+  {name:'FileTreePanel.tsx',path:'packages/shared-ui/src/file/',prev:'export function FileTreePanel({ nodes, onFileClick })'},
+  {name:'TeamSidebarWithFileTree.tsx',path:'apps/web/src/pages/team/runtime/shell/sidebar/',prev:'const [activeTab, setActiveTab] = useState'},
+  {name:'SessionSidebar.tsx',path:'apps/web/src/components/layout/sidebar/',prev:'旧版双 tab 侧边栏（会话 + 文件树）'},
+  {name:'use-ui-state.ts',path:'apps/web/src/stores/ui/',prev:'sidebarViewMode: SidebarViewMode'},
+];
+
+// ====== icons ======
+const folderIcon='<svg class="ficon" viewBox="0 0 24 24" fill="none" stroke="var(--contrast)" stroke-width="1.75"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
+const fileIcon='<svg class="ficon" viewBox="0 0 24 24" fill="none" stroke="var(--aux)" stroke-width="1.75"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>';
+const chevron='<svg class="fchev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg>';
+
+// ====== render file tree ======
+function renderTree(nodes,container,depth){
+  nodes.forEach(node=>{
+    const div=document.createElement('div');
+    if(node.type==='folder'){
+      const header=document.createElement('div');
+      header.className='fnode';
+      header.innerHTML=chevron+folderIcon+'<span class="fname">'+node.name+'</span>';
+      const children=document.createElement('div');
+      children.className='fchildren';
+      if(node.children)renderTree(node.children,children,depth+1);
+      header.addEventListener('click',e=>{
+        e.stopPropagation();
+        header.classList.toggle('collapsed');
+        children.classList.toggle('collapsed');
+      });
+      div.appendChild(header);
+      div.appendChild(children);
+    }else{
+      const item=document.createElement('div');
+      item.className='fnode file';
+      item.dataset.file=node.name;
+      let badge='';
+      if(node.badge)badge='<span class="fbadge '+node.badge+'">'+node.badge+'</span>';
+      item.innerHTML='<span style="width:14px"></span>'+fileIcon+'<span class="fname">'+node.name+'</span>'+badge;
+      item.addEventListener('click',e=>{
+        e.stopPropagation();
+        document.querySelectorAll('.fnode.file.active').forEach(el=>el.classList.remove('active'));
+        item.classList.add('active');
+        handleFileClick(node.name);
+      });
+      item.addEventListener('dblclick',()=>{
+        openInEditor(node.name);
+      });
+      div.appendChild(item);
+    }
+    container.appendChild(div);
+  });
+}
+
+// ====== syntax highlight (simple) ======
+function hl(line){
+  return line
+    .replace(/(\/\/.*$)/g,'<span class="cmt">$1</span>')
+    .replace(/\b(type|const|let|var|function|return|import|from|export|interface|if|else|void|new)\b/g,'<span class="kw">$1</span>')
+    .replace(/'([^']*)'/g,"<span class=\"str\">'$1'</span>")
+    .replace(/\b([A-Z][a-zA-Z0-9]+)\b/g,'<span class="ty">$1</span>')
+    .replace(/\b([a-z][a-zA-Z0-9]+)(\()/g,'<span class="fn">$1</span>$2');
+}
+
+// ====== state ======
+let currentScheme='A';
+let currentView='sessions';
+let currentCtx='chat';
+
+const schemeDescs={
+  A:{chat:'单击文件 → 侧边栏右侧弹出轻量浮层预览（Chat/Team 通用）',
+     team:'单击文件 → 侧边栏右侧弹出轻量浮层预览（Chat/Team 通用）'},
+  B:{chat:'单击文件 → 复用已有 ChatEditorPane 分屏打开（Chat 原生支持）',
+     team:'单击文件 → 新增分屏编辑器面板，替代全屏 Overlay（Team 需改造）'},
+  C:{chat:'Chat 已有 ChatEditorPane 可拖拽分屏，无需额外改造',
+     team:'WorkspaceEditorOverlay → 改为可拖拽分屏，对话与编辑器共存'},
+};
+const annotData={
+  A:{title:'方案 A · 浮层预览',badge:'a',chat:'<strong>Chat & Team 通用</strong><br/><br/><strong>交互：</strong>侧边栏「文件」tab → 单击文件 → 弹出轻量浮层预览<br/><br/><strong>Chat：</strong>浮层不侵入对话区，双击文件可打开 ChatEditorPane<br/><strong>Team：</strong>浮层不侵入对话区，双击文件可打开 Overlay<br/><br/><strong>复用：</strong>TeamFilePreviewPanel + FilePreviewPane<br/><strong>改动量：</strong>低 — 仅在 AppSidebar 新增文件 tab'},
+  B:{title:'方案 B · 分屏编辑器',badge:'b',chat:'<strong>Chat — 已有能力，零改造</strong><br/><br/>Chat 页面已有 <span class="mono">ChatEditorPane</span>，支持 flex 分屏 + 拖拽 split（20%-80%）。<br/>只需在侧边栏文件树点击时调用已有的 <span class="mono">setEditorMode(true)</span> + <span class="mono">fileEditor.openFile(path)</span>。<br/><br/><strong>改动量：</strong>极低 — 绑定 onFileClick 回调即可',
+     team:'<strong>Team — 需新增分屏面板</strong><br/><br/>Team 目前只有 <span class="mono">WorkspaceEditorOverlay</span>（absolute 覆盖全屏），编辑器与对话互斥。<br/>新增一个 flex 分屏容器，将 Overlay 改为 inline 面板，支持宽度过渡。<br/><br/><strong>复用：</strong>EditorBrowserWorkspace（内部组件不变）<br/><strong>改动量：</strong>中 — 改造 WorkspaceEditorOverlay 或新建 TeamEditorPane'},
+  C:{title:'方案 C · Team 分屏改造',badge:'c',chat:'<strong>Chat — 已有，无需改造</strong><br/><br/>Chat 的 <span class="mono">ChatEditorPane</span> 已实现完整的可拖拽分屏：<br/>• CSS 变量 <span class="mono">--split-pos</span> 驱动宽度<br/>• 拖拽手柄 + splitDragging ref<br/>• 全屏模式 editorFullScreen<br/>• splitPos 持久化到 localStorage<br/><br/><strong>方案 C 对 Chat 无额外工作。</strong>',
+     team:'<strong>Team — 核心改造方案</strong><br/><br/>将 <span class="mono">WorkspaceEditorOverlay</span> 从 absolute 覆盖改为 flex 分屏：<br/><br/>1. 移除 <span class="mono">position:absolute;inset:0</span><br/>2. 改为 flex 兄弟节点，与 ConversationArea 并排<br/>3. 新增拖拽 resizer（复用 Chat 的 split 逻辑）<br/>4. 新增 <span class="mono">teamSplitPos</span> 状态 + localStorage 持久化<br/>5. 保留 Overlay 模式作为"全屏"切换选项<br/><br/><strong>改动量：</strong>中高 — 改造布局 + 新增状态管理'},
+};
+
+// ====== update annotation ======
+function updateAnnotation(){
+  const a=annotData[currentScheme];
+  const ctxBody=a[currentCtx];
+  document.getElementById('annotTitle').textContent=a.title;
+  document.getElementById('annotBody').innerHTML=ctxBody;
+  const badge=document.getElementById('annotBadge');
+  badge.textContent=currentScheme;
+  badge.className='sbadge '+a.badge;
+  document.getElementById('schemeDesc').textContent=schemeDescs[currentScheme][currentCtx];
+}
+
+// ====== file click handler ======
+function handleFileClick(filename){
+  const content=fileContents[filename];
+  if(!content)return;
+  if(currentScheme==='A'){
+    showPopover(content);
+  }else if(currentScheme==='B'||currentScheme==='C'){
+    openInEditor(filename);
+  }
+}
+
+function showPopover(content){
+  const pop=document.getElementById('popover');
+  const sidebar=document.getElementById('sidebar');
+  const rect=sidebar.getBoundingClientRect();
+  pop.style.left=(rect.right+8)+'px';
+  pop.style.top='72px';
+  document.getElementById('popPath').innerHTML=content.path.replace(/([^/]+)$/,'<span class="fn">$1</span>');
+  document.getElementById('popMeta').textContent=content.size;
+  const codeEl=document.getElementById('popCode');
+  codeEl.innerHTML=content.lines.map((line,i)=>{
+    const isHl=content.highlight.includes(i);
+    return '<div class="ln'+(isHl?' hl':'')+'"><span class="lnn">'+(i+1)+'</span><span class="lnc">'+hl(line.replace(/</g,'&lt;').replace(/>/g,'&gt;'))+'</span></div>';
+  }).join('');
+  pop.classList.add('visible');
+}
+
+function openInEditor(filename){
+  const content=fileContents[filename];
+  if(!content)return;
+  const editor=document.getElementById('editorPane');
+  document.getElementById('edTabName').textContent=filename;
+  const codeEl=document.getElementById('edCode');
+  codeEl.innerHTML=content.lines.map((line,i)=>{
+    const isHl=content.highlight.includes(i);
+    return '<div class="ln'+(isHl?' hl':'')+'"><span class="lnn">'+(i+1)+'</span><span class="lnc">'+hl(line.replace(/</g,'&lt;').replace(/>/g,'&gt;'))+'</span></div>';
+  }).join('');
+  editor.classList.add('open');
+}
+
+// ====== render search ======
+function renderSearch(){
+  const container=document.getElementById('searchResults');
+  container.innerHTML='';
+  searchData.forEach((r,i)=>{
+    const div=document.createElement('div');
+    div.className='sr-item'+(i===0?' active':'');
+    div.innerHTML=fileIcon.replace('class="ficon"','class="sr-icon"')+
+      '<div class="sr-info"><div class="sr-name">'+r.name+'</div>'+
+      '<div class="sr-path">'+r.path+'</div>'+
+      '<div class="sr-prev">'+r.prev.replace('SidebarViewMode','<span class="match">SidebarViewMode</span>')+'</div></div>';
+    div.addEventListener('click',()=>{
+      container.querySelectorAll('.sr-item').forEach(el=>el.classList.remove('active'));
+      div.classList.add('active');
+      handleFileClick(r.name);
+    });
+    container.appendChild(div);
+  });
+}
+
+// ====== view tabs ======
+document.querySelectorAll('.vtab').forEach(tab=>{
+  tab.addEventListener('click',()=>{
+    document.querySelectorAll('.vtab').forEach(t=>t.classList.remove('active'));
+    tab.classList.add('active');
+    currentView=tab.dataset.view;
+    document.getElementById('sessionsView').style.display=currentView==='sessions'?'block':'none';
+    document.getElementById('filesView').style.display=currentView==='files'?'block':'none';
+    document.getElementById('searchView').style.display=currentView==='search'?'block':'none';
+    const search=document.getElementById('sbSearch');
+    if(currentView==='files')search.placeholder='过滤文件…';
+    else if(currentView==='search')search.placeholder='搜索文件内容…';
+    else search.placeholder='搜索会话…';
+    if(currentView==='search')renderSearch();
+  });
+});
+
+// ====== rail buttons ======
+document.querySelectorAll('.rail-btn').forEach((btn,i)=>{
+  btn.addEventListener('click',()=>{
+    // 折叠态下点击 rail 按钮先展开侧边栏
+    const sidebar=document.getElementById('sidebar');
+    if(sidebar.classList.contains('collapsed')){
+      sidebar.classList.remove('collapsed');
+    }
+    document.querySelectorAll('.rail-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    const views=['sessions','files','search'];
+    const target=views[i];
+    document.querySelector('.vtab[data-view="'+target+'"]').click();
+  });
+});
+
+// ====== workspace group collapse ======
+document.querySelectorAll('.ws-header').forEach(hdr=>{
+  hdr.addEventListener('click',e=>{
+    // 不拦截 add 按钮
+    if(e.target.closest('.ws-add'))return;
+    hdr.classList.toggle('collapsed');
+    const list=hdr.nextElementSibling;
+    if(list)list.style.display=hdr.classList.contains('collapsed')?'none':'block';
+  });
+});
+
+// ====== collapse ======
+document.getElementById('collapseBtn').addEventListener('click',()=>{
+  const sb=document.getElementById('sidebar');
+  sb.classList.toggle('collapsed');
+  // 折叠时关闭浮层
+  if(sb.classList.contains('collapsed')){
+    document.getElementById('popover').classList.remove('visible');
+  }
+});
+
+// ====== scheme tabs ======
+document.querySelectorAll('.scheme-tab').forEach(tab=>{
+  tab.addEventListener('click',()=>{
+    document.querySelectorAll('.scheme-tab').forEach(t=>t.classList.remove('active'));
+    tab.classList.add('active');
+    currentScheme=tab.dataset.scheme;
+    document.getElementById('popover').classList.remove('visible');
+    const resizer=document.getElementById('resizer');
+    const editor=document.getElementById('editorPane');
+
+    if(currentScheme==='C'){
+      // 方案 C：仅 Team 时显示 resizer + 自动开编辑器
+      // Chat 已有 ChatEditorPane，demo 中也展示分屏效果
+      resizer.style.display='block';
+      document.querySelector('.vtab[data-view="files"]').click();
+      openInEditor('AppSidebar.tsx');
+    }else{
+      resizer.style.display='none';
+      editor.style.width='';
+      editor.style.flexBasis='';
+      if(currentScheme==='A'){
+        editor.classList.remove('open');
+      }
+    }
+    updateAnnotation();
+    // re-trigger animation
+    const annot=document.getElementById('annot');
+    annot.style.animation='none';
+    void annot.offsetWidth;
+    annot.style.animation='';
+  });
+});
+
+// ====== ctx tabs (chat vs team) ======
+document.querySelectorAll('.ctx-tab').forEach(tab=>{
+  tab.addEventListener('click',()=>{
+    document.querySelectorAll('.ctx-tab').forEach(t=>t.classList.remove('active'));
+    tab.classList.add('active');
+    currentCtx=tab.dataset.ctx;
+    // 更新 toolbar 显示
+    if(currentCtx==='team'){
+      document.getElementById('chatTbTitle').textContent='Team · 前端团队 · 周迭代规划';
+      document.getElementById('chatTbMeta').textContent='4 Agents · 32 条消息';
+    }else{
+      document.getElementById('chatTbTitle').textContent='Chat · 侧边栏文件预览方案讨论';
+      document.getElementById('chatTbMeta').textContent='GPT-4o · 16 条消息';
+    }
+    updateAnnotation();
+    // re-trigger animation
+    const annot=document.getElementById('annot');
+    annot.style.animation='none';
+    void annot.offsetWidth;
+    annot.style.animation='';
+  });
+});
+
+// ====== resizer drag (方案 C) ======
+(function(){
+  const resizer=document.getElementById('resizer');
+  const editor=document.getElementById('editorPane');
+  let dragging=false;
+  let startX=0;
+  let startW=0;
+  resizer.addEventListener('mousedown',e=>{
+    dragging=true;
+    startX=e.clientX;
+    startW=editor.offsetWidth;
+    resizer.classList.add('dragging');
+    editor.classList.add('dragging');
+    document.body.style.cursor='col-resize';
+    document.body.style.userSelect='none';
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove',e=>{
+    if(!dragging)return;
+    const delta=startX-e.clientX;
+    let w=startW+delta;
+    if(w<280)w=280;
+    if(w>800)w=800;
+    editor.style.width=w+'px';
+    editor.style.flexBasis=w+'px';
+  });
+  document.addEventListener('mouseup',()=>{
+    if(!dragging)return;
+    dragging=false;
+    resizer.classList.remove('dragging');
+    editor.classList.remove('dragging');
+    document.body.style.cursor='';
+    document.body.style.userSelect='';
+  });
+})();
+
+// ====== file refs in chat ======
+document.querySelectorAll('.file-ref').forEach(ref=>{
+  ref.addEventListener('click',()=>{
+    const filename=ref.dataset.file;
+    if(fileContents[filename]){
+      if(currentScheme==='A')showPopover(fileContents[filename]);
+      else openInEditor(filename);
+    }
+  });
+});
+
+// ====== popover close ======
+document.getElementById('popClose').addEventListener('click',()=>{
+  document.getElementById('popover').classList.remove('visible');
+});
+document.getElementById('popOpen').addEventListener('click',()=>{
+  const activeFile=document.querySelector('.fnode.file.active');
+  if(activeFile)openInEditor(activeFile.dataset.file);
+});
+
+// ====== editor close ======
+document.getElementById('edClose').addEventListener('click',()=>{
+  document.getElementById('editorPane').classList.remove('open');
+});
+
+// ====== init ======
+renderTree(fileTreeData,document.getElementById('fileTree'),0);
+updateAnnotation();
+</script>
+</body>
+</html>

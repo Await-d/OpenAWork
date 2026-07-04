@@ -81,6 +81,7 @@ import {
 } from './extras/TeamViewModeToggle.js';
 import { type LayerMessages } from './extras/TeamMultiLayerPanel.js';
 import { TeamLayerChatPanel } from './extras/TeamLayerChatPanel.js';
+import { TeamMultiLayerFeed } from './extras/TeamMultiLayerFeed.js';
 import { useTeamConversationState } from './use-team-conversation-state.js';
 import { resolveTeamSubmitStrategy } from './submit/team-submit-router.js';
 import { buildTeamGroupedMessageEntries } from './build-team-grouped-message-entries.js';
@@ -1246,9 +1247,9 @@ export function TeamConversationView({
     overflow: 'hidden',
   };
 
-  // 左侧：用户与接待的主对话区（dual 模式下占 45%）
+  // 左侧：用户与接待的主对话区（dual 模式下占 55%）
   const MAIN_PANEL_STYLE: CSSProperties = {
-    flex: viewMode === 'dual' ? '0 0 clamp(320px, 45%, 520px)' : '1 1 100%',
+    flex: viewMode === 'dual' ? '0 0 clamp(360px, 55%, 640px)' : '1 1 100%',
     minWidth: 0,
     minHeight: 0,
     display: 'flex',
@@ -1256,9 +1257,9 @@ export function TeamConversationView({
     transition: 'flex 200ms ease',
   };
 
-  // 右侧：各层级对话交互消息汇总面板（dual 模式下占 55%）
+  // 右侧：各层级对话交互消息汇总面板（dual 模式下占 45%）
   const SIDE_PANEL_STYLE: CSSProperties = {
-    flex: viewMode === 'dual' ? '1 1 55%' : '0 0 0%',
+    flex: viewMode === 'dual' ? '1 1 45%' : '0 0 0%',
     minWidth: 0,
     minHeight: 0,
     display: viewMode === 'dual' ? 'flex' : 'none',
@@ -1459,16 +1460,21 @@ export function TeamConversationView({
             />
           </LatestAssistantMessageContext>
         </div>
-        {/* 右侧：所有层级的对话消息汇总（群聊式，层级标识清晰不混合） */}
-        {/* soloMode 下不显示群聊面板，只展示当前角色自身的对话 */}
+        {/* 右侧：各层级消息流（混合模式：全部层级合并时间线 + 单层级切换） */}
+        {/* soloMode 下不显示汇总面板，只展示当前角色自身的对话 */}
         {soloMode ? null : (
           <div aria-label="团队层级消息汇总" style={SIDE_PANEL_STYLE}>
-            <TeamLayerChatPanel
+            <TeamMultiLayerFeed
               activeLayer={state.roleLayer}
               currentSessionId={sessionId}
               layers={multiLayerMessages}
-              onOpenLayerSession={onOpenLayerSession ? handleOpenLayerSession : undefined}
-              onLayerSelect={handlePanelLayerSelect}
+              activeModelId={state.activeModelId}
+              activeModelLabel={activeModelOption?.label}
+              activeProviderId={state.activeProviderId}
+              providerCatalog={providerCatalog}
+              currentUserEmail={currentUserEmail}
+              scrollRegionRef={state.scrollRegionRef}
+              resolveInlinePermissionActions={resolveInlinePermissionActions}
             />
           </div>
         )}

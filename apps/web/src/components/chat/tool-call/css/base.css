@@ -378,7 +378,13 @@
 .tool-call-block-diff {
   margin-top: 4px;
   padding-top: 4px;
-  border-top: 1px dashed color-mix(in oklch, var(--border-default) 60%, transparent);
+  border-top: 1px solid color-mix(in oklch, var(--border-subtle) 50%, transparent);
+}
+
+.tool-call-block-diff-multi {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .tool-call-block-output {

@@ -266,13 +266,6 @@ export function MessageRow({
         className="chat-message-avatar-frame"
         data-role={message.role}
         data-grouped={groupedWithPrevious ? 'true' : 'false'}
-        style={
-          agentAccent
-            ? {
-                boxShadow: `0 0 0 2px var(--bg-overlay), 0 0 0 3px color-mix(in oklch, ${agentAccent} 70%, transparent)`,
-              }
-            : undefined
-        }
       >
         {isUser ? (
           <UserAvatar email={email} size={28} />

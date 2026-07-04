@@ -392,7 +392,7 @@ export function BlockToolCall({
         <span className="tool-call-block-title" data-tool-category={getToolCategory(toolName)}>
           {colorizeSummary(title)}
         </span>
-        {diffSummary && visualState === 'completed' && (
+        {diffSummary && visualState === 'completed' && !open && (
           <span className="tool-call-block-diff-summary">{diffSummary}</span>
         )}
         {searchVisualState && <SearchStateBadge state={searchVisualState} />}
@@ -437,26 +437,16 @@ export function BlockToolCall({
           {hasDiff && (
             <div className="tool-call-block-diff">
               {displayData.diffView?.files && displayData.diffView?.files.length > 1 ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <div className="tool-call-block-diff-multi">
                   {displayData.diffView?.files.map((file, i) => (
-                    <div key={i}>
-                      <div
-                        style={{
-                          fontSize: 10,
-                          color: 'var(--fg-muted)',
-                          marginBottom: 2,
-                        }}
-                      >
-                        {file.summary}
-                      </div>
-                      <UnifiedCodeDiff
-                        beforeText={file.beforeText}
-                        afterText={file.afterText}
-                        chrome="minimal"
-                        filePath={file.filePath}
-                        maxHeight={240}
-                      />
-                    </div>
+                    <UnifiedCodeDiff
+                      key={i}
+                      beforeText={file.beforeText}
+                      afterText={file.afterText}
+                      chrome="minimal"
+                      filePath={file.filePath}
+                      maxHeight={240}
+                    />
                   ))}
                 </div>
               ) : (

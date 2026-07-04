@@ -1,33 +1,17 @@
 # .agentdocs 索引
 
 ## Active Workflows
-- [260704-telemetry-consent-implementation](workflow/260704-telemetry-consent-implementation.md) — 遥测同意与数据收集功能完整实施：12 任务 / 6 Phase / Full orchestration；前端弹窗 accept/decline 同步网关 + web-client 封装 + 网关遥测路由 + 通用事件采集 + GitHub Issue 同步（error_boundary 自动创建 Issue，堆栈签名去重）
 - [260704-composer-optimization](workflow/260704-composer-optimization.md) — 输入框 ChatComposer 整体优化：13 项 / 3 Phase / Full orchestration；拆分超限文件 + 动画微交互(发送脉冲/拖拽淡入/按钮微弹/弹窗入场/队列pill) + 功能增强(字符计数/placeholder轮换/Esc清空/大文本折叠) + 视觉样式(流式呼吸光效/home glassmorphism/工具栏分组)
 - [260704-companion-linkage-enhancement](workflow/260704-companion-linkage-enhancement.md) — 伴侣系统联动场景强化：8 任务 / 5 Phase / Full orchestration；补齐工具调用联动、错误/重试反应、附件/队列真实计数、空闲检测提醒、后端上下文增强
-- [260704-display-settings-expansion](workflow/260704-display-settings-expansion.md) — 显示设置扩展：5 任务 / 2 Phase / Lightweight；新增推理块显隐、命令面板按钮显隐、网关状态指示点显隐、顶栏终端按钮显隐、主题模式（跟随系统/浅色/深色）切换；store v2→v3 + 消费接入 ChatTopBar/AppSidebar/ChatPageSections/App.tsx
 - [260704-opencode-ui-layout-borrow-plan](workflow/260704-opencode-ui-layout-borrow-plan.md) — OpenCode UI 布局借鉴升级：6 波次方案（W1 顶部标签页栏 / W2 双层侧边栏 Rail+Panel / W3 会话页面板化 Diff+终端 / W4 消息时间线智能滚动+预取 / W5 首页视图双栏+时间分组 / W6 拖拽排序+内联重命名+命令扩充）；推荐执行顺序 W1→W3→W2→W4→W5→W6
-- [260627-sidebar-layout-refactor-plan](workflow/260627-sidebar-layout-refactor-plan.md) — 主界面左侧栏布局改造：合并 NavRail + SessionSidebar 为统一 AppSidebar(260px) 三区块式布局（顶部:定时任务/技能/智能体 / 中间:会话列表 / 底部:不变）；删除工作流页面；会话列表/模板移入设置页；7 Step 顺序推进
-- [260530-team-page-内容区功能加强方案](workflow/260530-team-page-内容区功能加强方案.md) — ✅ 全部完成 2026-05-31：content-kit 视觉地基 + 当前会话统计/各层级消耗(byLayer + 单层下钻) + 文件内联预览 + 跨层对话线程 + 知识图谱(SVG) + 3D 与真实 layer-handoff 联动；后端 team_usage/team_tool_call emission 复查确认全链路已通；typecheck/build/团队 27 suites 171 tests 全通过
-- [260523-chat-page-split-b-e](workflow/260523-chat-page-split-b-e.md) — ChatPage 域 B 流式收尾 + 域 E 状态/测试/文档同步
-- [260516-team-page-重构调整方案](workflow/260516-team-page-重构调整方案.md) — TeamPage 重构：从"左侧 Sidebar + Tab 工作台"改为"对话中心 + 右侧可收起面板 + 顶部固定状态栏"；15 项任务 / 5 Wave / feature flag 保护
-- [260509-skill-workspace-selection-spec](workflow/260509-skill-workspace-selection-spec.md) — 让用户在 chat 工作区维度可控地选择启用哪些 skill（workspace 默认 + session 覆盖），支持 AI 一键根据项目特征推荐勾选集；BUILTIN 始终可用、不参与过滤；pinned 仅首轮注入 system prompt
-- [260507-web-图片生成工作台实施](workflow/260507-web-图片生成工作台实施.md) — 为 Web 左侧新增专用图片工作台入口，收口独立页面下的文生图、图片编辑、结果历史与产物联动能力
-- [260507-image-workspace-新建图片工作区流程](workflow/260507-image-workspace-新建图片工作区流程.md) — 支持用户新建图片工作区，包含图片生成、编辑、历史记录等功能
-- [260418-net10-网关功能迁移清单图](workflow/260418-net10-网关功能迁移清单图.md) — .NET 10 gateway 一比一迁移总账：按波次、能力闭环、前置依赖、完成定义与去重规则维护，防止遗漏与重复
-- [260419-net10-wave1-agents-控制面迁移](workflow/260419-net10-wave1-agents-控制面迁移.md) — 收口 `.NET 10 gateway` Wave 1 控制面剩余的 `/agents` 管理面：复刻 TS catalog 语义、user_settings 持久化与集成测试
-- [260419-net10-wave1-workflows-控制面迁移](workflow/260419-net10-wave1-workflows-控制面迁移.md) — 收口 `.NET 10 gateway` Wave 1 控制面中的 `/workflows`：优先补 team-playbook 模板控制面与 saved-template 协议，再评估 optimize/translate 附属端点
-- [260419-net10-wave2-sessions-基础crud迁移](workflow/260419-net10-wave2-sessions-基础crud迁移.md) — 进入 Wave 2 首刀：补 `sessions` 主表与 `/sessions` 基础 CRUD，为 search/message_v2/stream/recovery 建立前置主表闭环
-- [260419-net10-wave2-message-v2-权威消息层迁移](workflow/260419-net10-wave2-message-v2-权威消息层迁移.md) — 进入 Wave 2 第二刀：补 `message_v2 / part_v2` 权威消息层，为 event_log/run_events/stream 打下前置数据闭环
-- [260419-net10-wave2-event-log-溯源层迁移](workflow/260419-net10-wave2-event-log-溯源层迁移.md) — 进入 Wave 2 第三刀：补 `event_log / event_sequences` 溯源层，为 run_events/stream/replay 打下 seq 与事件序语义闭环
-- [260419-net10-wave2-run-events-运行线程迁移](workflow/260419-net10-wave2-run-events-运行线程迁移.md) — 进入 Wave 2 第四刀：补 `session_run_events / session_runtime_threads`，为 WS/SSE attach replay 与 active/stale runtime 判定打下 durable layer 闭环
-- [260420-net10-wave2-ws-stream-runtime迁移](workflow/260420-net10-wave2-ws-stream-runtime迁移.md) — 进入 Wave 2 第五刀：补 `/sessions/:id/stream` WS runtime 最小闭环，先做 single-flight、durable run events、runtime thread 与 stop，显式排除 attach/SSE/replay
-- [260420-net10-wave2-sse-attach-replay迁移](workflow/260420-net10-wave2-sse-attach-replay迁移.md) — 进入 Wave 2 第六刀：补 `/sessions/:id/stream/active` + `/sessions/:id/stream/attach`，实现 active snapshot、durable replay、live attach 与 keepalive 协议面
-- [260420-net10-wave2-pending-interactions-持久化迁移](workflow/260420-net10-wave2-pending-interactions-持久化迁移.md) — 进入 Wave 2 第八刀：补 `permission_requests` + `question_requests` durable layer，为后续 permissions/questions resume 主线打下前置数据闭环
-- [260422-net10-wave2-run-003-session-truncate迁移](workflow/260422-net10-wave2-run-003-session-truncate迁移.md) — 继续推进 RUN-003：补 `/sessions/{id}/messages/truncate` 最小写路由，把 message-v2 truncate 行为接到现有 sessions 主线
-- [260416-team-创建流程设计分析](workflow/260416-team-创建流程设计分析.md) — Team 会话创建流、团队选择、agent 来源与模板复用设计分析
-- [260416-team-创建实施方案](workflow/260416-team-创建实施方案.md) — Team 会话创建向导、DTO/API、template metadata 与测试落地计划
 
 ## Done Workflows
+- [260704-telemetry-consent-implementation](workflow/done/260704-telemetry-consent-implementation.md) — ✅ 已完成：遥测同意状态、网关遥测路由、web-client 封装、通用事件采集与 GitHub Issue 同步链路已收口
+- [260704-display-settings-expansion](workflow/done/260704-display-settings-expansion.md) — ✅ 已完成：显示设置新增推理块显隐、命令面板/网关状态/终端按钮显隐与主题模式切换
+- [260627-sidebar-layout-refactor-plan](workflow/done/260627-sidebar-layout-refactor-plan.md) — ✅ 已完成 2026-06-27：主界面左侧栏合并为统一 AppSidebar，路由与设置入口同步清理，typecheck 与 lint 通过
+- [260530-team-page-内容区功能加强方案](workflow/done/260530-team-page-内容区功能加强方案.md) — ✅ 全部完成 2026-05-31：content-kit 视觉地基、会话统计、层级消耗、文件内联预览、跨层对话线程、知识图谱、3D 真实联动与验证闭环已完成
+- [260516-team-page-重构调整方案](workflow/done/260516-team-page-重构调整方案.md) — ✅ 已完成：TeamPage 从左侧 Sidebar + Tab 工作台重构为对话中心 + 右侧可收起面板 + 顶部固定状态栏
+- [260507-web-图片生成工作台实施](workflow/done/260507-web-图片生成工作台实施.md) — ✅ 已完成：Web 图片工作台独立路由、专用 session、生成/编辑/历史与跨会话图片画廊已落地并通过验证
 - [260522-team-fixed-roster-specialists](workflow/done/260522-team-fixed-roster-specialists.md) — ✅ 已完成 2026-05-22：默认固定团队升级为全层级可见成员槽位，含 DevOps/SRE/Platform/Security/Release/Observability，并写入 session teamDefinition 快照
 - [260522-team-explicit-task-profile-markers](workflow/done/260522-team-explicit-task-profile-markers.md) — ✅ 已完成 2026-05-22：PM1 tasks.md 显式输出 `[KIND] [SURFACE]` 画像标记，PM2 解析优先使用显式标记并保留 fallback 推断
 - [260522-team-task-classification-taxonomy](workflow/done/260522-team-task-classification-taxonomy.md) — ✅ 已完成 2026-05-22：Team / dispatch 链路引入任务画像 `kind + surface`，executor / reviewer prompt 可按任务类型与领域注入更具体的提示词
@@ -44,6 +28,7 @@
 - [260509-p2-并行websearch-rollout](workflow/done/260509-p2-并行websearch-rollout.md) — ✅ P2 core 层完成 2026-05-09：`searchMultiProvider` + first-success/merge/sequential 三档 + canonical URL 去 utm_ + weight 排序；14 项单元 + agent-gateway 436/436 未受影响；settings UI 推迟
 - [260509-p2-task工具schema与slashcommand补齐](workflow/done/260509-p2-task工具schema与slashcommand补齐.md) — ✅ P2-DELEGATE 已完成 2026-05-09：盘点发现 `session_id` 替代 `resume` 早就到位；本批补 `command` 为 reserved no-op + 15 项 schema 单元；T-DEADCODE 推迟独立工作流
 - [260509-p3-session-warping评估](workflow/done/260509-p3-session-warping评估.md) — ✅ P3 ADR 产出 2026-05-09：结论不实施完整 warping（OpenAWork 单 instance 无 sync 层，`owner_id` 不适用），推荐阶段 0 但本批不做；ADR 全文见 `done/260509-session-warping-ADR.md`
+- [260509-session-warping-ADR](workflow/done/260509-session-warping-ADR.md) — ✅ ADR 已归档 2026-05-09：OpenAWork 不复刻完整 session warping，推荐阶段 0 轻量切换 workspace
 - [260509-p3-会话路径过滤与devbrowser-skill](workflow/done/260509-p3-会话路径过滤与devbrowser-skill.md) — ✅ P3 后端完成 2026-05-09：(1) `/sessions?path=&includeDescendants=` + `session-path-filter.ts` 纯函数 + `/a` vs `/abc` 守卫 + 18 项单元；(2) `dev-browser` SKILL prompt 从虚假 oh-my-opencode API 改写到真实 `desktop_automation` 6 action + 反回归 token 黑名单 18 项单元；51 文件 / 472 全过
 - [260422-gpt-image2-集成方案](workflow/done/260422-gpt-image2-集成方案.md) — 已完成 GPT Image 2 从设置、生成路由、Web/Desktop 聊天、生图结果联动、多模态 `input_image` 到移动端补齐的最小全链路闭环，并通过收口后的移动端安全/入口修复与复查
 - [260420-net10-wave2-stop-active迁移](workflow/done/260420-net10-wave2-stop-active迁移.md) — 已完成 RUN-006 的最小 stop-active 收口：`.NET` 现已提供 `POST /sessions/{id}/stream/stop-active`，具备 owner/auth 校验、`{ stopped: boolean }` 返回、等待清理后返回，以及 session 级原子 active-slot 管理与 replay-slot 释放修复
