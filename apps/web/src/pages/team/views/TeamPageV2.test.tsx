@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import React from 'react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const testState = vi.hoisted(() => ({
@@ -112,12 +112,14 @@ vi.mock('../runtime/shell/controls/ConversationArea.js', () => ({
     topBar,
     messagesOverride,
     fallbackContent,
+    onNewSession,
     onSubmitMessage,
     onSelectSuggestion,
   }: {
     topBar?: React.ReactNode;
     messagesOverride?: React.ReactNode;
     fallbackContent?: React.ReactNode;
+    onNewSession?: (() => void) | undefined;
     onSubmitMessage?: ((text: string) => void | Promise<void>) | undefined;
     onSelectSuggestion?: ((text: string) => void | Promise<void>) | undefined;
   }) => (
@@ -129,6 +131,11 @@ vi.mock('../runtime/shell/controls/ConversationArea.js', () => ({
         data-suggestion-enabled={String(Boolean(onSelectSuggestion))}
       />
       <div>{messagesOverride ?? fallbackContent}</div>
+      {onNewSession ? (
+        <button type="button" data-testid="conversation-open-new-session" onClick={onNewSession}>
+          新建会话入口
+        </button>
+      ) : null}
     </div>
   ),
 }));
@@ -197,8 +204,12 @@ vi.mock('./team-page-v2-panels.js', () => ({
       <div
         data-testid="workspace-switcher"
         data-create-enabled={String(Boolean(authState.accessToken))}
-        data-rename-enabled={String(Boolean((testState.data as { canManageRuntime?: boolean } | null)?.canManageRuntime))}
-        data-delete-enabled={String(Boolean((testState.data as { canManageRuntime?: boolean } | null)?.canManageRuntime))}
+        data-rename-enabled={String(
+          Boolean((testState.data as { canManageRuntime?: boolean } | null)?.canManageRuntime),
+        )}
+        data-delete-enabled={String(
+          Boolean((testState.data as { canManageRuntime?: boolean } | null)?.canManageRuntime),
+        )}
       />
       {selectedTeam ? (
         <>
@@ -705,6 +716,9 @@ beforeEach(() => {
   cleanup();
   localStorage.clear();
   vi.clearAllMocks();
+  useUIStateStore.getState().setActiveTeamSessionId(null);
+  useUIStateStore.getState().consumeTeamNewSessionSignal();
+  useUIStateStore.getState().consumeTeamSelectSessionSignal();
   teamConversationViewState.sessionIds = [];
   toastMock.mockReset();
   mocks.cancelHandoff.mockReset().mockResolvedValue({ ok: true });
@@ -752,6 +766,7 @@ afterEach(() => {
 });
 
 import TeamPageV2 from './TeamPageV2.js';
+import { useUIStateStore } from '../../../stores/ui/uiState.js';
 
 describe('TeamPageV2', () => {
   it('顶部栏会持续显示当前选中的会话标题', async () => {
@@ -760,9 +775,7 @@ describe('TeamPageV2', () => {
     expect(screen.getByTestId('team-current-session-pill').textContent).toContain('当前会话');
     expect(screen.getByTestId('team-current-session-pill').textContent).toContain('根会话');
     expect(screen.getByTestId('team-current-session-status').textContent).toBe('运行中');
-    expect(screen.getByTestId('team-current-session-members').textContent).toBe(
-      '1 成员 · 1 在线',
-    );
+    expect(screen.getByTestId('team-current-session-members').textContent).toBe('1 成员 · 1 在线');
   });
 
   it('不再把 topSummary 的旧暂停文案当成真实暂停态', async () => {
@@ -782,7 +795,7 @@ describe('TeamPageV2', () => {
     expect(await screen.findByRole('button', { name: '全部暂停' })).toBeTruthy();
   });
 
-  it('URL query 中带 sessionId 时会自动选中对应 team 会话并清掉 query', async () => {
+  it('URL query 中带 sessionId 时会自动选中对应 team 会话', async () => {
     routeState.searchParams = new URLSearchParams('sessionId=session-root');
 
     renderPage();
@@ -790,7 +803,6 @@ describe('TeamPageV2', () => {
     await waitFor(() => {
       expect(mocks.selectTeam).toHaveBeenCalledWith('session-root');
     });
-    expect(routeState.searchParams.get('sessionId')).toBeNull();
   });
 
   it('选中共享会话时，对话主 tab 会显示共享详情而不是误挂本地 TeamConversationView', async () => {
@@ -978,7 +990,9 @@ describe('TeamPageV2', () => {
 
     expect(screen.queryByTestId('team-conversation-view')).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'PM1 会话' }));
+    act(() => {
+      useUIStateStore.getState().triggerTeamSelectSession('workspace-1', 'session-pm1');
+    });
 
     await waitFor(() => {
       expect(screen.getByTestId('team-conversation-view').getAttribute('data-session-id')).toBe(
@@ -1252,29 +1266,20 @@ describe('TeamPageV2', () => {
     });
   });
 
-  it('移动端点击会话按钮会打开并关闭抽屉式会话列表', async () => {
+  it('移动端默认不展开会话列表抽屉，但会保留浮动入口', async () => {
     testState.breakpoint = 'mobile';
 
     renderPage();
 
     expect(screen.queryByRole('dialog', { name: '团队会话列表' })).toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: '展开会话列表' }));
-
-    expect(screen.getByRole('dialog', { name: '团队会话列表' })).toBeTruthy();
-    expect(screen.getByTestId('team-sidebar')).toBeTruthy();
-
-    fireEvent.click(screen.getByRole('button', { name: '关闭会话列表' }));
-
-    await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: '团队会话列表' })).toBeNull();
-    });
+    expect(screen.getByRole('button', { name: '展开会话列表' })).toBeTruthy();
+    expect(screen.getByTestId('team-tab-bar')).toBeTruthy();
   });
 
   it('创建工作区成功后会跳转到新工作区', async () => {
-    renderPage();
+    routeState.searchParams = new URLSearchParams('action=newWorkspace');
 
-    fireEvent.click(screen.getByRole('button', { name: '新建工作区入口' }));
+    renderPage();
 
     expect(screen.getByTestId('new-team-workspace-modal')).toBeTruthy();
     fireEvent.click(screen.getByTestId('new-team-workspace-modal'));
@@ -1389,17 +1394,12 @@ describe('TeamPageV2', () => {
     expect(screen.queryByText('MockNewTeamSessionModal')).toBeNull();
   });
 
-  it('真路径会把 canManageSessionEntries 下传给侧边栏', () => {
-    testState.data = {
-      ...createReferenceData('running'),
-      canManageSessionEntries: false,
-    };
-
+  it('真路径会把当前选中会话同步给全局侧栏状态', async () => {
     renderPage();
 
-    expect(screen.getByTestId('team-sidebar').getAttribute('data-can-manage-session-entries')).toBe(
-      'false',
-    );
+    await waitFor(() => {
+      expect(useUIStateStore.getState().activeTeamSessionId).toBe('session-root');
+    });
   });
 
   it('无写入能力时不会把 idle 建议提交链路传给 ConversationArea', () => {

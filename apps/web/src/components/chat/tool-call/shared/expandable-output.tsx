@@ -15,11 +15,13 @@ export function ExpandableOutput({
   maxChars = 400,
   maxLines = 12,
   defaultExpanded = false,
+  compact = false,
 }: {
   text: string;
   maxChars?: number;
   maxLines?: number;
   defaultExpanded?: boolean;
+  compact?: boolean;
 }) {
   const lines = text.split('\n');
   const lineCount = lines.length;
@@ -41,7 +43,7 @@ export function ExpandableOutput({
   })();
 
   return (
-    <div style={{ position: 'relative' }}>
+    <div className={compact ? 'tool-output-compact' : 'tool-output'}>
       <div className="tool-output-header">
         <span className="tool-output-meta">
           {lineCount} 行 · {formatSize(charCount)}
@@ -49,17 +51,17 @@ export function ExpandableOutput({
         <CopyBtn text={text} />
       </div>
       <div style={{ position: 'relative', overflow: 'hidden' }}>
-        <pre className="tool-output-pre">{displayed}</pre>
+        <pre className={compact ? 'tool-output-pre-compact' : 'tool-output-pre'}>{displayed}</pre>
         {/* Gradient fade when collapsed */}
         {isLong && !expanded && (
           <div
             aria-hidden="true"
+            className="tool-output-fade"
             style={{
               position: 'absolute',
               bottom: 0,
               left: 0,
               right: 0,
-              height: 48,
               background: 'linear-gradient(transparent, var(--bg-overlay)',
               pointerEvents: 'none',
             }}

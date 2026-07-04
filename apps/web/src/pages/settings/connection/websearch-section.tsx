@@ -1,13 +1,11 @@
 /**
- * `<WebsearchSection>` — Connection-tab card for the multi-provider
- * web search rollout policy (P2-WEBSEARCH workflow 260509). Lets the
- * user pick one or more providers, set the rollout mode and an
- * optional timeout, then PUT the result via
- * `useSettingsWebsearch`.
+ * `<WebsearchSection>` — Plugins-tab card for the multi-provider
+ * web search rollout policy. Lets the user pick one or more providers,
+ * set the rollout mode and an optional timeout, then PUT the result
+ * via `useSettingsWebsearch`.
  *
  * The visual language deliberately mirrors `<UpstreamRetrySection>`
- * (pill toggle group + apply button) so the Connection tab keeps a
- * single style across closely-related sections.
+ * (pill toggle group + apply button) for cross-section consistency.
  */
 
 import React from 'react';
@@ -59,13 +57,13 @@ const ROLLOUT_MODES: ReadonlyArray<{ id: WebsearchRolloutMode; label: string; hi
 ];
 
 const PILL_BUTTON: React.CSSProperties = {
-  minWidth: 56,
+  minWidth: 52,
   borderRadius: 999,
   border: '1px solid var(--border-default)',
   background: 'var(--bg-overlay)',
   color: 'var(--fg-default)',
-  padding: '6px 12px',
-  fontSize: 12,
+  padding: '5px 10px',
+  fontSize: 11,
   fontWeight: 600,
   cursor: 'pointer',
   transition: 'all 150ms ease',
@@ -74,10 +72,10 @@ const PILL_BUTTON: React.CSSProperties = {
 const INPUT_STYLE: React.CSSProperties = {
   flex: '1 1 160px',
   minWidth: 120,
-  padding: '6px 8px',
+  padding: '5px 8px',
   border: '1px solid var(--border-default)',
   borderRadius: 6,
-  fontSize: 12,
+  fontSize: 11,
   background: 'var(--bg-overlay)',
   color: 'var(--fg-strong)',
 };
@@ -151,16 +149,16 @@ export function WebsearchSection({
   }
 
   return (
-    <section style={SS}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ minWidth: 220, flex: '1 1 260px' }}>
+    <section style={{ ...SS, marginBottom: 0, padding: '10px 12px', gap: '0.5rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ minWidth: 200, flex: '1 1 240px' }}>
           <h3 style={ST}>Web 搜索 Provider</h3>
           <p
             style={{
-              margin: '4px 0 0',
+              margin: '2px 0 0',
               color: 'var(--fg-default)',
-              fontSize: 13,
-              lineHeight: 1.6,
+              fontSize: 11,
+              lineHeight: 1.5,
             }}
           >
             为 LLM 工具 <code>websearch</code> 配置 provider 列表。未配置时仍按默认 DuckDuckGo
@@ -171,12 +169,12 @@ export function WebsearchSection({
           style={{
             display: 'inline-flex',
             alignItems: 'center',
-            gap: 8,
-            padding: '6px 10px',
+            gap: 6,
+            padding: '4px 8px',
             borderRadius: 999,
             background: 'color-mix(in srgb, var(--accent) 10%, transparent)',
             color: 'var(--accent)',
-            fontSize: 12,
+            fontSize: 11,
             fontWeight: 600,
           }}
         >
@@ -188,11 +186,11 @@ export function WebsearchSection({
       </div>
 
       {/* Rollout mode picker */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-default)' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-default)' }}>
           Rollout 模式
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {ROLLOUT_MODES.map((mode) => {
             const selected = mode.id === policy.rolloutMode;
             return (
@@ -216,25 +214,25 @@ export function WebsearchSection({
             );
           })}
         </div>
-        <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
+        <span style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.4 }}>
           {ROLLOUT_MODES.find((m) => m.id === policy.rolloutMode)?.hint ?? ''}
         </span>
       </div>
 
       {/* Configured provider list */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-default)' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-default)' }}>
           已配置 provider（{policy.providers.length} / 8）
         </div>
         {policy.providers.length === 0 && (
           <div
             style={{
-              padding: '10px 12px',
+              padding: '6px 10px',
               border: '1px dashed var(--border-default)',
               borderRadius: 6,
               color: 'var(--fg-muted)',
-              fontSize: 12,
-              lineHeight: 1.5,
+              fontSize: 11,
+              lineHeight: 1.4,
             }}
           >
             未配置时，<code>websearch</code> 会回退到内置默认（DuckDuckGo 免 key）。
@@ -247,10 +245,10 @@ export function WebsearchSection({
               key={`${entry.provider}-${index}`}
               style={{
                 display: 'flex',
-                gap: 8,
+                gap: 6,
                 alignItems: 'center',
                 flexWrap: 'wrap',
-                padding: 8,
+                padding: 6,
                 border: '1px solid var(--border-subtle)',
                 borderRadius: 6,
                 background: 'var(--bg-overlay)',
@@ -258,10 +256,10 @@ export function WebsearchSection({
             >
               <span
                 style={{
-                  fontSize: 12,
+                  fontSize: 11,
                   fontWeight: 700,
                   color: 'var(--fg-strong)',
-                  minWidth: 96,
+                  minWidth: 88,
                 }}
               >
                 {meta?.label ?? entry.provider}
@@ -294,7 +292,7 @@ export function WebsearchSection({
                 }
                 style={{ ...INPUT_STYLE, flex: '0 0 80px', minWidth: 64 }}
               />
-              <div style={{ display: 'inline-flex', gap: 4 }}>
+              <div style={{ display: 'inline-flex', gap: 3 }}>
                 <button
                   type="button"
                   onClick={() => moveProviderAt(index, -1)}
@@ -302,8 +300,8 @@ export function WebsearchSection({
                   title="上移"
                   style={{
                     ...PILL_BUTTON,
-                    minWidth: 32,
-                    padding: '4px 8px',
+                    minWidth: 28,
+                    padding: '3px 6px',
                     opacity: index === 0 ? 0.4 : 1,
                   }}
                 >
@@ -316,8 +314,8 @@ export function WebsearchSection({
                   title="下移"
                   style={{
                     ...PILL_BUTTON,
-                    minWidth: 32,
-                    padding: '4px 8px',
+                    minWidth: 28,
+                    padding: '3px 6px',
                     opacity: index === policy.providers.length - 1 ? 0.4 : 1,
                   }}
                 >
@@ -329,8 +327,8 @@ export function WebsearchSection({
                   title="移除"
                   style={{
                     ...PILL_BUTTON,
-                    minWidth: 32,
-                    padding: '4px 8px',
+                    minWidth: 28,
+                    padding: '3px 6px',
                     color: 'var(--danger)',
                   }}
                 >
@@ -342,7 +340,7 @@ export function WebsearchSection({
         })}
 
         {/* Add buttons */}
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
           {PROVIDER_OPTIONS.map((opt) => (
             <button
               key={opt.id}
@@ -362,8 +360,8 @@ export function WebsearchSection({
       </div>
 
       {/* Optional merge timeout */}
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <label style={{ fontSize: 12, color: 'var(--fg-default)' }}>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+        <label style={{ fontSize: 11, color: 'var(--fg-default)' }}>
           合并模式超时 (ms)，仅 <code>merge</code> 生效；范围 1000–120000：
         </label>
         <input
@@ -379,7 +377,7 @@ export function WebsearchSection({
               timeoutMs: e.target.value === '' ? undefined : Number(e.target.value),
             }))
           }
-          style={{ ...INPUT_STYLE, flex: '0 0 120px' }}
+          style={{ ...INPUT_STYLE, flex: '0 0 100px' }}
         />
       </div>
 
@@ -388,11 +386,11 @@ export function WebsearchSection({
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          gap: 12,
+          gap: 8,
           flexWrap: 'wrap',
         }}
       >
-        <span style={{ color: 'var(--fg-muted)', fontSize: 12, lineHeight: 1.5 }}>
+        <span style={{ color: 'var(--fg-muted)', fontSize: 11, lineHeight: 1.4 }}>
           LLM 在调用 websearch 时显式指定 provider 仍会被尊重；多 provider rollout 仅在 LLM
           未指定时生效。
         </span>
@@ -402,6 +400,7 @@ export function WebsearchSection({
           disabled={!isDirty || isSaving}
           style={{
             ...BP,
+            padding: '5px 12px',
             opacity: !isDirty || isSaving ? 0.6 : 1,
             cursor: !isDirty || isSaving ? 'not-allowed' : 'pointer',
           }}

@@ -110,6 +110,9 @@ vi.mock('../../../conversation/TeamConversationView.js', () => ({
 
 import { ConversationArea } from './ConversationArea.js';
 
+const getReadyEmptyTitle = () =>
+  screen.getByText((_, element) => element?.textContent === '团队工作空间已就绪');
+
 beforeEach(() => {
   // useTeamNotificationStore 是 zustand store，重置 events 防止跨用例污染
   // （store 模块缓存在测试运行期内，无法 importOriginal 重置）
@@ -154,13 +157,13 @@ describe('ConversationArea — 三态路由', () => {
 
     expect(screen.queryByTestId('team-session-view-mock')).toBeNull();
     // EmptyState 的标题文案
-    expect(screen.getByText('🤖 欢迎使用 AI 开发团队')).toBeTruthy();
+    expect(getReadyEmptyTitle()).toBeTruthy();
   });
 
   it('receptionSessionId 为空字符串 → 与 null 等价，走引导面板', () => {
     render(<ConversationArea receptionSessionId="" />);
     expect(screen.queryByTestId('team-session-view-mock')).toBeNull();
-    expect(screen.getByText('🤖 欢迎使用 AI 开发团队')).toBeTruthy();
+    expect(getReadyEmptyTitle()).toBeTruthy();
   });
 
   it('团队动态里的 suggestedActions 渲染为只读标签而不是可点击按钮', () => {

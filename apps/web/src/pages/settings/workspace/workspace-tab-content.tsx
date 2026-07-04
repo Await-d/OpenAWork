@@ -8,7 +8,7 @@ import {
   type SSHConnectionEntry,
   type SSHAuthType,
 } from '@openAwork/shared-ui';
-import type { DevtoolsSourceState, SettingsVersionInfo } from '../state/settings-types.js';
+import type { DevtoolsSourceState } from '../state/settings-types.js';
 import { InlineFailureNotice } from '../devtools/devtools-workbench-primitives.js';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
 
@@ -56,8 +56,6 @@ interface WorkspaceTabContentProps {
   onUploadSshFile: (file: File) => void;
   githubTriggers: Array<{ repo: string; events: string[] }>;
   providerUpdatesDetail: string;
-  versionInfo: SettingsVersionInfo;
-  onCheckVersion: () => Promise<void>;
   onSaveGitHubTrigger: (config: GitHubTriggerConfig) => Promise<void>;
   onDesktopAutomationStart: (url?: string) => Promise<void>;
   onDesktopAutomationGoto: (url: string) => Promise<void>;
@@ -302,8 +300,6 @@ export function WorkspaceTabContent({
   onUploadSshFile,
   githubTriggers,
   providerUpdatesDetail,
-  versionInfo,
-  onCheckVersion,
   onSaveGitHubTrigger,
   onDesktopAutomationStart,
   onDesktopAutomationGoto,
@@ -858,110 +854,9 @@ export function WorkspaceTabContent({
             )}
           </div>
 
-          <div style={DASHED_CARD}>
-            <div style={{ ...ROW, justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
-              <div style={ROW}>
-                <div
-                  style={{
-                    width: 14,
-                    height: 14,
-                    borderRadius: 3,
-                    border: '1.5px solid var(--fg-muted)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: 8,
-                    color: 'var(--fg-muted)',
-                    flexShrink: 0,
-                  }}
-                >
-                  ↻
-                </div>
-                <span style={SECTION_TITLE}>应用版本</span>
-              </div>
-              <button
-                type="button"
-                disabled={versionInfo.checking}
-                onClick={() => {
-                  void onCheckVersion();
-                }}
-                style={{ ...GHOST_BTN, fontSize: 10, opacity: versionInfo.checking ? 0.6 : 1 }}
-              >
-                {versionInfo.checking ? '检查中…' : '检查更新'}
-              </button>
-            </div>
-            <div
-              style={{
-                marginTop: 8,
-                display: 'flex',
-                flexWrap: 'wrap',
-                gap: 6,
-                alignItems: 'center',
-              }}
-            >
-              <span style={{ ...SECTION_SUB, margin: 0 }}>
-                当前版本 v{versionInfo.currentVersion}
-              </span>
-              {versionInfo.latestVersion && !versionInfo.updateAvailable && (
-                <span
-                  style={{
-                    fontSize: 10,
-                    color: 'var(--success)',
-                    fontWeight: 600,
-                    background: 'color-mix(in srgb, var(--success) 12%, transparent)',
-                    borderRadius: 5,
-                    padding: '1px 7px',
-                    border: '1px solid color-mix(in srgb, var(--success) 30%, transparent)',
-                  }}
-                >
-                  已是最新
-                </span>
-              )}
-              {versionInfo.updateAvailable && versionInfo.latestVersion && (
-                <span
-                  style={{
-                    fontSize: 10,
-                    color: 'var(--warning)',
-                    fontWeight: 600,
-                    background: 'color-mix(in srgb, var(--warning) 12%, transparent)',
-                    borderRadius: 5,
-                    padding: '1px 7px',
-                    border: '1px solid color-mix(in srgb, var(--warning) 30%, transparent)',
-                  }}
-                >
-                  有新版本 v{versionInfo.latestVersion}
-                </span>
-              )}
-            </div>
-            <p style={{ ...SECTION_SUB, margin: '4px 0 0', color: 'var(--fg-muted)' }}>
-              上次检查：
-              {versionInfo.checkedAt ? new Date(versionInfo.checkedAt).toLocaleString() : '—'}
-            </p>
-            {versionInfo.checkError && (
-              <p style={{ ...SECTION_SUB, margin: '4px 0 0', color: 'var(--danger)' }}>
-                {versionInfo.checkError}
-              </p>
-            )}
-            {versionInfo.updateAvailable && (
-              <div
-                style={{
-                  marginTop: 8,
-                  padding: '6px 10px',
-                  borderRadius: 6,
-                  background: 'color-mix(in srgb, var(--warning) 10%, transparent)',
-                  border: '1px solid color-mix(in srgb, var(--warning) 30%, transparent)',
-                  fontSize: 11,
-                  color: 'var(--warning)',
-                  fontWeight: 600,
-                }}
-              >
-                有新版本可用，建议尽快更新。
-              </div>
-            )}
-            {providerUpdatesDetail ? (
-              <p style={{ ...SECTION_SUB, marginTop: 6 }}>{providerUpdatesDetail}</p>
-            ) : null}
-          </div>
+          {providerUpdatesDetail ? (
+            <p style={{ ...SECTION_SUB, marginTop: 6 }}>{providerUpdatesDetail}</p>
+          ) : null}
         </div>
       </div>
 

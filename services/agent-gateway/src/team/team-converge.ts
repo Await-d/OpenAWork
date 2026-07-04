@@ -174,7 +174,10 @@ export async function executeConverge(input: ConvergeInput): Promise<ConvergeRes
   };
 }
 
-async function readArtifactFile(workspaceRoot: string, relativePath: string): Promise<string | null> {
+async function readArtifactFile(
+  workspaceRoot: string,
+  relativePath: string,
+): Promise<string | null> {
   try {
     const fullPath = path.join(workspaceRoot, relativePath);
     const content = await fs.readFile(fullPath, 'utf8');
@@ -312,11 +315,6 @@ export function recordConvergeResult(
   sqliteRun(
     `INSERT INTO team_converge_results (id, team_workspace_id, session_id, result_json, created_at)
      VALUES (?, ?, ?, ?, datetime('now'))`,
-    [
-      `converge-${result.timestamp}`,
-      teamWorkspaceId,
-      sessionId,
-      JSON.stringify(result),
-    ],
+    [`converge-${result.timestamp}`, teamWorkspaceId, sessionId, JSON.stringify(result)],
   );
 }

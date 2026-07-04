@@ -12,9 +12,9 @@
 /* ── BlockToolCall raw parameters drawer ── */
 
 .tool-call-block-params {
-  margin-top: 6px;
-  border-top: 1px dashed color-mix(in oklch, var(--border-default) 60%, transparent);
-  padding-top: 6px;
+  margin-top: 4px;
+  border-top: 1px solid color-mix(in oklch, var(--border-subtle) 50%, transparent);
+  padding-top: 4px;
 }
 
 .tool-call-block-params > summary {
@@ -26,7 +26,7 @@
   color: var(--fg-muted);
   list-style: none;
   user-select: none;
-  padding: 2px 0;
+  padding: 1px 0;
 }
 
 .tool-call-block-params > summary::-webkit-details-marker {
@@ -120,7 +120,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
   font-size: 10px;
 }
 
@@ -140,20 +140,53 @@
   margin: 0;
   padding: 6px 8px;
   font-size: 11px;
-  line-height: 1.6;
+  line-height: 1.5;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color: var(--fg-default);
   background: var(--bg-surface);
   border-radius: 4px;
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 240px;
+  max-height: 200px;
   overflow-y: auto;
+}
+
+.tool-output-pre-compact {
+  margin: 0;
+  padding: 2px 4px;
+  font-size: 11px;
+  line-height: 1.5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--fg-default);
+  background: transparent;
+  border-radius: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.tool-output-compact .tool-output-header {
+  display: none;
+}
+
+.tool-output-fade {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 48px;
+  background: linear-gradient(transparent, var(--bg-overlay));
+  pointer-events: none;
+}
+
+.tool-output-compact .tool-output-fade {
+  height: 24px;
 }
 
 .tool-output-toggle {
   display: inline-block;
-  margin-top: 4px;
+  margin-top: 2px;
   padding: 0;
   border: none;
   background: transparent;
@@ -173,7 +206,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
   font-size: 10px;
 }
 
@@ -212,25 +245,26 @@
 .tool-call-block-search-results {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 4px 0;
+  gap: 4px;
+  padding: 2px 0;
 }
 
 .tool-call-block-search-item {
-  padding: 4px 8px;
+  padding: 3px 6px;
   border-radius: 4px;
-  background: var(--bg-surface);
+  border: 1px solid color-mix(in oklch, var(--border-subtle) 50%, transparent);
+  background: transparent;
 }
 
 .tool-call-block-search-item:hover {
-  background: var(--bg-surface);
+  background: color-mix(in oklch, var(--bg-surface) 50%, transparent);
 }
 
 .tool-call-block-search-title {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-1);
-  line-height: 1.4;
+  line-height: 1.35;
   display: flex;
   align-items: flex-start;
   gap: 4px;
@@ -241,8 +275,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 15px;
   border-radius: 3px;
   background: color-mix(in oklch, var(--accent) 15%, transparent);
   color: var(--accent);
@@ -252,26 +286,44 @@
 }
 
 .tool-call-block-search-url {
-  font-size: 10px;
+  font-size: 9px;
   color: var(--accent);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   margin-top: 1px;
-  opacity: 0.7;
+  opacity: 0.6;
 }
 
 .tool-call-block-search-snippet {
   font-size: 11px;
   color: var(--fg-muted);
-  line-height: 1.5;
-  margin-top: 2px;
+  line-height: 1.45;
+  margin-top: 1px;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.tool-search-results-toggle {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: color-mix(in oklch, var(--bg-surface) 60%, transparent);
+  color: var(--fg-muted);
+  font-size: 10px;
+  cursor: pointer;
+  border: 1px solid color-mix(in oklch, var(--border-subtle) 50%, transparent);
+  transition: background 0.15s, color 0.15s;
+}
+
+.tool-search-results-toggle:hover {
+  background: color-mix(in oklch, var(--bg-surface) 100%, transparent);
+  color: var(--text-1);
 }
 
 .tool-call-block-web-markdown {

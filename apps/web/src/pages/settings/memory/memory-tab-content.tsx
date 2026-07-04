@@ -1,15 +1,15 @@
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import type {
   MemoryActionFeedback,
   MemoryEntry,
   MemoryLoadStatus,
-  MemorySettings,
   MemorySource,
   MemoryStats,
   MemoryType,
   UseMemoryManagementResult,
 } from './memory-types.js';
 import { BP, IS, SS, ST } from '../shared/settings-section-styles.js';
+import { MemorySettingsPanel } from './memory-settings-panel.js';
 
 interface MemoryTabContentProps {
   memoryState: UseMemoryManagementResult;
@@ -29,11 +29,21 @@ const TYPE_LABELS: Record<MemoryType, string> = {
   learned_pattern: '学习模式',
 };
 
+const TYPE_ORDER: MemoryType[] = [
+  'preference',
+  'fact',
+  'instruction',
+  'project_context',
+  'learned_pattern',
+];
+
+/* ── 样式常量（遵循 token 阶梯） ───────────────────── */
+
 const BADGE: React.CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  padding: '2px 7px',
-  borderRadius: 999,
+  padding: '2px 8px',
+  borderRadius: 9999,
   fontSize: 10,
   fontWeight: 600,
   lineHeight: 1.4,
@@ -45,10 +55,10 @@ const CARD: React.CSSProperties = {
   borderRadius: 12,
   border: '1px solid var(--border-default)',
   background: 'color-mix(in srgb, var(--bg-overlay) 94%, var(--bg-base))',
-  padding: '14px 16px',
+  padding: '12px 16px',
   display: 'flex',
   flexDirection: 'column',
-  gap: 10,
+  gap: 8,
   transition: 'border-color 180ms ease, box-shadow 180ms ease',
 };
 
@@ -58,25 +68,29 @@ const CARD_HOVER: React.CSSProperties = {
   boxShadow: '0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent)',
 };
 
-const STAT_CELL: React.CSSProperties = {
+const KPI_CARD: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  alignItems: 'center',
-  gap: 2,
-  padding: '10px 0',
+  gap: 4,
+  padding: '12px 16px',
+  borderRadius: 12,
+  border: '1px solid var(--border-default)',
+  background: 'linear-gradient(180deg, var(--bg-overlay), var(--bg-raised))',
   flex: 1,
   minWidth: 0,
+  position: 'relative',
+  overflow: 'hidden',
 };
 
-const STAT_NUM: React.CSSProperties = {
-  fontSize: 20,
+const KPI_NUM: React.CSSProperties = {
+  fontSize: 22,
   fontWeight: 700,
   color: 'var(--fg-strong)',
-  lineHeight: 1.2,
+  lineHeight: 1.1,
   fontVariantNumeric: 'tabular-nums',
 };
 
-const STAT_LABEL: React.CSSProperties = {
+const KPI_LABEL: React.CSSProperties = {
   fontSize: 10,
   color: 'var(--fg-muted)',
   textTransform: 'uppercase',
@@ -84,56 +98,42 @@ const STAT_LABEL: React.CSSProperties = {
   fontWeight: 500,
 };
 
+const KPI_TOP_LINE: React.CSSProperties = {
+  position: 'absolute',
+  top: 0,
+  left: 0,
+  right: 0,
+  height: 1,
+  background: 'linear-gradient(90deg, transparent, var(--border-emphasis), transparent)',
+};
+
 const ERROR_BOX: React.CSSProperties = {
-  borderRadius: 10,
+  borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--danger) 42%, var(--border-default))',
   background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay))',
-  padding: '14px 16px',
+  padding: '16px 20px',
   display: 'flex',
   flexDirection: 'column',
   gap: 8,
 };
 
 const EMPTY_BOX: React.CSSProperties = {
-  borderRadius: 10,
-  border: '1px dashed var(--border-default)',
+  borderRadius: 12,
+  border: '1px dashed var(--border-emphasis)',
   background: 'color-mix(in srgb, var(--bg-overlay) 96%, var(--bg-base))',
-  padding: '32px 20px',
+  padding: '40px 24px',
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'center',
-  gap: 10,
+  gap: 12,
   textAlign: 'center',
-};
-
-const TOGGLE_TRACK: React.CSSProperties = {
-  position: 'relative',
-  width: 36,
-  height: 20,
-  borderRadius: 10,
-  cursor: 'pointer',
-  transition: 'background 200ms ease',
-  flexShrink: 0,
-  border: 'none',
-  padding: 0,
-};
-
-const TOGGLE_KNOB: React.CSSProperties = {
-  position: 'absolute',
-  top: 2,
-  width: 16,
-  height: 16,
-  borderRadius: '50%',
-  background: 'var(--bg-raised)',
-  transition: 'left 200ms ease',
-  boxShadow: '0 1px 3px rgba(0,0,0,0.18)',
 };
 
 const BTN_GHOST: React.CSSProperties = {
   background: 'transparent',
   border: '1px solid var(--border-default)',
   borderRadius: 8,
-  padding: '5px 10px',
+  padding: '6px 12px',
   fontSize: 11,
   fontWeight: 500,
   color: 'var(--fg-default)',
@@ -146,7 +146,7 @@ const BTN_DANGER: React.CSSProperties = {
   background: 'transparent',
   border: '1px solid color-mix(in srgb, var(--danger) 40%, var(--border-default))',
   borderRadius: 8,
-  padding: '4px 8px',
+  padding: '5px 10px',
   fontSize: 10,
   fontWeight: 600,
   color: 'var(--danger)',
@@ -154,6 +154,28 @@ const BTN_DANGER: React.CSSProperties = {
   transition: 'background 150ms ease',
   whiteSpace: 'nowrap',
 };
+
+const FILTER_CHIP: React.CSSProperties = {
+  background: 'transparent',
+  border: '1px solid var(--border-default)',
+  borderRadius: 9999,
+  padding: '4px 12px',
+  fontSize: 11,
+  fontWeight: 500,
+  color: 'var(--fg-muted)',
+  cursor: 'pointer',
+  transition: 'all 150ms ease',
+  whiteSpace: 'nowrap',
+};
+
+const FILTER_CHIP_ACTIVE: React.CSSProperties = {
+  ...FILTER_CHIP,
+  background: 'var(--accent-muted)',
+  border: '1px solid var(--accent-border)',
+  color: 'var(--accent)',
+};
+
+/* ── 工具函数 ──────────────────────────────────────── */
 
 function formatDate(iso: string): string {
   try {
@@ -172,22 +194,17 @@ function formatConfidence(confidence: number): string {
   return `${String(Math.round(confidence * 100))}%`;
 }
 
+/* ── 子组件 ────────────────────────────────────────── */
+
 function LoadingPulse() {
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 10,
-        padding: '8px 0',
-      }}
-    >
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {Array.from({ length: 4 }, (_, i) => (
         <div
           key={i}
           style={{
             height: 56,
-            borderRadius: 10,
+            borderRadius: 12,
             background:
               'linear-gradient(90deg, var(--bg-overlay) 25%, color-mix(in srgb, var(--bg-overlay) 80%, var(--accent)) 50%, var(--bg-overlay) 75%)',
             backgroundSize: '200% 100%',
@@ -201,54 +218,45 @@ function LoadingPulse() {
   );
 }
 
-function StatsBar({ stats, status }: { stats: MemoryStats | null; status: MemoryLoadStatus }) {
+function KpiGrid({ stats, status }: { stats: MemoryStats | null; status: MemoryLoadStatus }) {
   if (status === 'loading' || !stats) {
     return (
-      <div
-        style={{
-          height: 64,
-          borderRadius: 10,
-          background: 'var(--bg-overlay)',
-          border: '1px solid var(--border-default)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: 11,
-          color: 'var(--fg-muted)',
-        }}
-      >
-        {status === 'loading' ? '统计加载中…' : '暂无统计数据'}
+      <div style={{ display: 'flex', gap: 12 }}>
+        {Array.from({ length: 4 }, (_, i) => (
+          <div
+            key={i}
+            style={{
+              ...KPI_CARD,
+              height: 64,
+              background:
+                'linear-gradient(90deg, var(--bg-overlay) 25%, color-mix(in srgb, var(--bg-overlay) 80%, var(--accent)) 50%, var(--bg-overlay) 75%)',
+              backgroundSize: '200% 100%',
+              animation: `memoryShimmer 1.6s ease-in-out infinite`,
+              animationDelay: `${String(i * 100)}ms`,
+            }}
+          />
+        ))}
+        <style>{`@keyframes memoryShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }`}</style>
       </div>
     );
   }
 
-  const cells: Array<{ label: string; value: string }> = [
-    { label: '总条目', value: String(stats.total) },
+  const cells: Array<{ label: string; value: string; accent?: boolean }> = [
+    { label: '总条目', value: String(stats.total), accent: true },
     { label: '已启用', value: String(stats.enabled) },
-    { label: '手动', value: String(stats.bySource.manual) },
+    { label: '已停用', value: String(stats.disabled) },
     { label: '自动提取', value: String(stats.bySource.auto_extracted) },
   ];
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        borderRadius: 10,
-        border: '1px solid var(--border-default)',
-        background: 'var(--bg-overlay)',
-        overflow: 'hidden',
-      }}
-    >
-      {cells.map((cell, idx) => (
-        <div
-          key={cell.label}
-          style={{
-            ...STAT_CELL,
-            borderLeft: idx > 0 ? '1px solid var(--border-subtle)' : 'none',
-          }}
-        >
-          <span style={STAT_NUM}>{cell.value}</span>
-          <span style={STAT_LABEL}>{cell.label}</span>
+    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+      {cells.map((cell) => (
+        <div key={cell.label} style={KPI_CARD}>
+          <div style={KPI_TOP_LINE} />
+          <span style={{ ...KPI_NUM, color: cell.accent ? 'var(--accent)' : 'var(--fg-strong)' }}>
+            {cell.value}
+          </span>
+          <span style={KPI_LABEL}>{cell.label}</span>
         </div>
       ))}
     </div>
@@ -366,7 +374,6 @@ function MemoryCard({
       setConfirmDelete(false);
       return;
     }
-
     setConfirmDelete(true);
     setTimeout(() => setConfirmDelete(false), 3000);
   };
@@ -382,6 +389,7 @@ function MemoryCard({
       role="article"
       aria-label={`记忆条目 ${entry.key}`}
     >
+      {/* ── 行 1：类型 + 来源 + 启用状态 + 时间 ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
         <span
           style={{
@@ -395,7 +403,7 @@ function MemoryCard({
         <span
           style={{
             ...BADGE,
-            color: 'var(--fg-default)',
+            color: 'var(--fg-muted)',
             background: 'color-mix(in srgb, var(--fg-muted) 10%, transparent)',
           }}
         >
@@ -410,25 +418,7 @@ function MemoryCard({
               : 'color-mix(in srgb, var(--fg-muted) 10%, transparent)',
           }}
         >
-          {entry.enabled ? '已启用' : '已停用'}
-        </span>
-        <span
-          style={{
-            ...BADGE,
-            color: 'var(--fg-muted)',
-            background: 'color-mix(in srgb, var(--border-default) 60%, transparent)',
-          }}
-        >
-          置信度 {formatConfidence(entry.confidence)}
-        </span>
-        <span
-          style={{
-            ...BADGE,
-            color: 'var(--fg-muted)',
-            background: 'color-mix(in srgb, var(--border-default) 60%, transparent)',
-          }}
-        >
-          优先级 {String(entry.priority)}
+          {entry.enabled ? '启用' : '停用'}
         </span>
         <span
           style={{
@@ -436,23 +426,30 @@ function MemoryCard({
             fontSize: 10,
             color: 'var(--fg-muted)',
             whiteSpace: 'nowrap',
+            fontVariantNumeric: 'tabular-nums',
           }}
         >
           {formatDate(entry.createdAt)}
         </span>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <div style={{ fontSize: 10, color: 'var(--fg-muted)', textTransform: 'uppercase' }}>键</div>
-        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-strong)' }}>{entry.key}</div>
+      {/* ── 行 2：键名 + 置信度/优先级辅助信息 ── */}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-strong)' }}>
+          {entry.key}
+        </span>
+        <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
+          置信度 {formatConfidence(entry.confidence)} · 优先级 {String(entry.priority)}
+        </span>
       </div>
 
+      {/* ── 行 3：作用域（如有） ── */}
       {entry.workspaceRoot && (
         <div
           style={{
             fontSize: 11,
             color: 'var(--fg-default)',
-            padding: '8px 10px',
+            padding: '6px 10px',
             borderRadius: 8,
             background: 'color-mix(in srgb, var(--bg-overlay) 75%, var(--bg-base))',
             border: '1px solid var(--border-subtle)',
@@ -463,6 +460,7 @@ function MemoryCard({
         </div>
       )}
 
+      {/* ── 行 4：值 / 编辑区 ── */}
       {editing ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <textarea
@@ -493,7 +491,7 @@ function MemoryCard({
             </button>
             <button
               type="button"
-              style={{ ...BP, padding: '5px 12px', fontSize: 11 }}
+              style={{ ...BP, padding: '6px 14px', fontSize: 11 }}
               onClick={handleSave}
             >
               保存
@@ -515,6 +513,7 @@ function MemoryCard({
         </p>
       )}
 
+      {/* ── 行 5：操作栏 ── */}
       <div
         style={{
           display: 'flex',
@@ -522,10 +521,11 @@ function MemoryCard({
           justifyContent: 'space-between',
           gap: 8,
           flexWrap: 'wrap',
+          paddingTop: 2,
         }}
       >
         <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
-          更新时间 {formatDate(entry.updatedAt)}
+          更新于 {formatDate(entry.updatedAt)}
         </span>
         <div style={{ display: 'flex', gap: 6 }}>
           {!editing && (
@@ -561,137 +561,12 @@ function MemoryCard({
   );
 }
 
-function ToggleRow({
-  title,
-  description,
-  checked,
-  ariaLabel,
-  onToggle,
-}: {
-  title: string;
-  description: string;
-  checked: boolean;
-  ariaLabel: string;
-  onToggle: () => void;
-}) {
-  return (
-    <div
-      style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}
-    >
-      <div>
-        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>{title}</div>
-        <div style={{ fontSize: 10, color: 'var(--fg-muted)', marginTop: 2 }}>{description}</div>
-      </div>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        aria-label={ariaLabel}
-        style={{
-          ...TOGGLE_TRACK,
-          background: checked ? 'var(--accent)' : 'var(--border-default)',
-        }}
-        onClick={onToggle}
-      >
-        <span
-          style={{
-            ...TOGGLE_KNOB,
-            left: checked ? 18 : 2,
-          }}
-        />
-      </button>
-    </div>
-  );
-}
-
-function SettingsPanel({
-  settings,
-  settingsStatus,
-  updateSettings,
-}: {
-  settings: MemorySettings;
-  settingsStatus: MemoryLoadStatus;
-  updateSettings: (patch: Partial<MemorySettings>) => Promise<void>;
-}) {
-  if (settingsStatus === 'loading') {
-    return <div style={{ fontSize: 11, color: 'var(--fg-muted)', padding: 8 }}>设置加载中…</div>;
-  }
-
-  if (settingsStatus === 'error') {
-    return (
-      <div style={{ fontSize: 11, color: 'var(--danger)', padding: 8 }}>
-        设置加载失败，请稍后重试。
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <ToggleRow
-        title="启用记忆系统"
-        description="关闭后不会在 system prompt 注入记忆，也不会自动提取。"
-        checked={settings.enabled}
-        ariaLabel="切换记忆系统"
-        onToggle={() => void updateSettings({ enabled: !settings.enabled })}
-      />
-
-      <ToggleRow
-        title="自动提取"
-        description="每次请求完成后，从用户消息里提取可复用的记忆。"
-        checked={settings.autoExtract}
-        ariaLabel="切换自动提取"
-        onToggle={() => void updateSettings({ autoExtract: !settings.autoExtract })}
-      />
-
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 160 }}>
-          <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--fg-default)' }}>
-            最大注入预算
-          </span>
-          <input
-            type="number"
-            min={100}
-            max={10000}
-            value={settings.maxTokenBudget}
-            onChange={(event) => {
-              const value = Number.parseInt(event.target.value, 10);
-              if (Number.isFinite(value) && value >= 100 && value <= 10000) {
-                void updateSettings({ maxTokenBudget: value });
-              }
-            }}
-            style={{ ...IS, width: '100%' }}
-            aria-label="最大注入预算"
-          />
-        </label>
-
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 160 }}>
-          <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--fg-default)' }}>
-            最低置信度
-          </span>
-          <input
-            type="number"
-            min={0}
-            max={1}
-            step={0.05}
-            value={settings.minConfidence}
-            onChange={(event) => {
-              const value = Number.parseFloat(event.target.value);
-              if (Number.isFinite(value) && value >= 0 && value <= 1) {
-                void updateSettings({ minConfidence: value });
-              }
-            }}
-            style={{ ...IS, width: '100%' }}
-            aria-label="最低置信度"
-          />
-        </label>
-      </div>
-    </div>
-  );
-}
+/* ── 主组件 ────────────────────────────────────────── */
 
 export function MemoryTabContent({ memoryState }: MemoryTabContentProps) {
   const {
     filteredMemories,
+    memories,
     loadStatus,
     loadError,
     stats,
@@ -710,53 +585,82 @@ export function MemoryTabContent({ memoryState }: MemoryTabContentProps) {
     clearActionFeedback,
   } = memoryState;
 
+  const [typeFilter, setTypeFilter] = useState<MemoryType | 'all'>('all');
+
+  // 按类型筛选（在搜索基础上叠加）
+  const visibleMemories = useMemo(() => {
+    if (typeFilter === 'all') {
+      return filteredMemories;
+    }
+    return filteredMemories.filter((m) => m.type === typeFilter);
+  }, [filteredMemories, typeFilter]);
+
+  // 计算各类型计数（基于全量数据，非搜索结果）
+  const typeCounts = useMemo(() => {
+    const counts: Record<MemoryType, number> = {
+      preference: 0,
+      fact: 0,
+      instruction: 0,
+      project_context: 0,
+      learned_pattern: 0,
+    };
+    for (const m of memories) {
+      counts[m.type]++;
+    }
+    return counts;
+  }, [memories]);
+
+  // 是否有该类型的条目（用于隐藏空类型 chip）
+  const availableTypes = useMemo(() => TYPE_ORDER.filter((t) => typeCounts[t] > 0), [typeCounts]);
+
+  const hasActiveFilter = searchQuery.trim().length > 0 || typeFilter !== 'all';
+
   return (
     <>
       <ActionFeedbackBar feedback={actionFeedback} onClear={clearActionFeedback} />
 
+      {/* ── 概览区：KPI + 操作 ── */}
       <section style={SS}>
-        <h3 style={ST}>记忆概览</h3>
-        <StatsBar stats={stats} status={statsStatus} />
-        <div
-          style={{
-            display: 'flex',
-            gap: 8,
-            flexWrap: 'wrap',
-            alignItems: 'center',
-          }}
-        >
-          <button
-            type="button"
-            style={BP}
-            onClick={() => void extractMemories()}
-            aria-label="提取记忆"
-          >
-            提取记忆
-          </button>
-          <button
-            type="button"
-            style={BTN_GHOST}
-            onClick={() => {
-              void refreshMemories();
-              void refreshStats();
-            }}
-            aria-label="刷新"
-          >
-            刷新
-          </button>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <h3 style={ST}>记忆概览</h3>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              type="button"
+              style={BTN_GHOST}
+              onClick={() => {
+                void refreshMemories();
+                void refreshStats();
+              }}
+              aria-label="刷新"
+            >
+              刷新
+            </button>
+            <button
+              type="button"
+              style={BP}
+              onClick={() => void extractMemories()}
+              aria-label="提取记忆"
+            >
+              提取记忆
+            </button>
+          </div>
         </div>
+        <KpiGrid stats={stats} status={statsStatus} />
       </section>
 
+      {/* ── 设置区 ── */}
       <section style={SS}>
         <h3 style={ST}>记忆设置</h3>
-        <SettingsPanel
+        <MemorySettingsPanel
           settings={settings}
           settingsStatus={settingsStatus}
           updateSettings={updateSettings}
         />
       </section>
 
+      {/* ── 记忆列表区 ── */}
       <section style={SS}>
+        {/* 工具栏：标题 + 搜索 + 计数 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <h3 style={{ ...ST, margin: 0, flex: 'none' }}>记忆列表</h3>
           <input
@@ -772,10 +676,56 @@ export function MemoryTabContent({ memoryState }: MemoryTabContentProps) {
             }}
             aria-label="搜索记忆"
           />
+          {memories.length > 0 && (
+            <span
+              style={{
+                fontSize: 10,
+                color: 'var(--fg-muted)',
+                fontVariantNumeric: 'tabular-nums',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {String(visibleMemories.length)} / {String(memories.length)}
+            </span>
+          )}
         </div>
 
+        {/* 类型筛选 chips（仅有数据时显示） */}
+        {availableTypes.length > 1 && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              style={typeFilter === 'all' ? FILTER_CHIP_ACTIVE : FILTER_CHIP}
+              onClick={() => setTypeFilter('all')}
+            >
+              全部
+            </button>
+            {availableTypes.map((t) => (
+              <button
+                key={t}
+                type="button"
+                style={typeFilter === t ? FILTER_CHIP_ACTIVE : FILTER_CHIP}
+                onClick={() => setTypeFilter(typeFilter === t ? 'all' : t)}
+              >
+                {TYPE_LABELS[t]}
+                <span
+                  style={{
+                    marginLeft: 4,
+                    opacity: 0.6,
+                    fontVariantNumeric: 'tabular-nums',
+                  }}
+                >
+                  {String(typeCounts[t])}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* 加载态 */}
         {loadStatus === 'loading' && <LoadingPulse />}
 
+        {/* 错误态 */}
         {loadStatus === 'error' && loadError && (
           <div style={ERROR_BOX}>
             <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--danger)' }}>
@@ -794,7 +744,8 @@ export function MemoryTabContent({ memoryState }: MemoryTabContentProps) {
           </div>
         )}
 
-        {loadStatus === 'loaded' && filteredMemories.length === 0 && (
+        {/* 空态 */}
+        {loadStatus === 'loaded' && visibleMemories.length === 0 && (
           <div style={EMPTY_BOX}>
             <div
               style={{
@@ -811,14 +762,14 @@ export function MemoryTabContent({ memoryState }: MemoryTabContentProps) {
               ✦
             </div>
             <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-strong)' }}>
-              {searchQuery ? '未找到匹配的记忆' : '还没有记忆'}
+              {hasActiveFilter ? '未找到匹配的记忆' : '还没有记忆'}
             </div>
             <div style={{ fontSize: 11, color: 'var(--fg-muted)', maxWidth: 260 }}>
-              {searchQuery
-                ? '尝试调整搜索关键词，或清除搜索查看所有记忆'
+              {hasActiveFilter
+                ? '尝试调整搜索关键词或筛选条件'
                 : 'Agent 会自动提取关键记忆，你也可以手动触发一次提取。'}
             </div>
-            {!searchQuery && (
+            {!hasActiveFilter && (
               <button
                 type="button"
                 style={{ ...BP, marginTop: 4 }}
@@ -830,9 +781,10 @@ export function MemoryTabContent({ memoryState }: MemoryTabContentProps) {
           </div>
         )}
 
-        {loadStatus === 'loaded' && filteredMemories.length > 0 && (
+        {/* 记忆卡片列表 */}
+        {loadStatus === 'loaded' && visibleMemories.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {filteredMemories.map((entry) => (
+            {visibleMemories.map((entry) => (
               <MemoryCard
                 key={entry.id}
                 entry={entry}

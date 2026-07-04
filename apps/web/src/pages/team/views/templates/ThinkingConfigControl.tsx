@@ -133,9 +133,7 @@ export function ThinkingConfigControl({
           ))}
         </select>
       )}
-      {!enabled && !compact && (
-        <span style={{ fontSize: 9, color: 'var(--fg-subtle)' }}>思考</span>
-      )}
+      {!enabled && !compact && <span style={{ fontSize: 9, color: 'var(--fg-subtle)' }}>思考</span>}
     </div>
   );
 }

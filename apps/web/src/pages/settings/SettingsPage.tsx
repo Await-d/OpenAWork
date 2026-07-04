@@ -29,7 +29,6 @@ import {
   updateProviderModel,
 } from './connection/provider-model-mutations.js';
 import type {
-  MCPServerEntry,
   AIProviderRef,
   AIModelConfigRef,
   ActiveSelectionRef,
@@ -42,7 +41,6 @@ import type {
   PermissionCategoryMeta,
   ModelPriceEntry,
   AttributionConfig,
-  MCPServerStatus,
   WorkerEntry,
   SSHConnectionEntry,
   FileTreeNode,
@@ -51,8 +49,10 @@ import type {
 } from '@openAwork/shared-ui';
 import { hydrateProviderCatalogUi } from '@openAwork/shared-ui';
 import { ConnectionTabContent } from './connection/connection-tab-content.js';
+import { DisplayTabContent } from './display/display-tab-content.js';
 import { ChannelsTabContent } from './channels/channels-tab-content.js';
 import { DevtoolsTabContent } from './devtools/devtools-tab-content.js';
+import AboutPage from '../misc/AboutPage.js';
 import {
   BUILTIN_PROVIDER_TYPE_SET,
   isTauri,
@@ -69,7 +69,6 @@ import {
 } from './shared/settings-page-helpers.js';
 import { useSettingsEnvironment } from './shared/use-settings-environment.js';
 import { useSettingsUpstreamRetry } from './connection/use-settings-upstream-retry.js';
-import { useSettingsWebsearch } from './connection/use-settings-websearch.js';
 import { WorkspaceTabContent } from './workspace/workspace-tab-content.js';
 import { SecurityTabContent } from './security/security-tab-content.js';
 import { UsageTabContent } from './usage/usage-tab-content.js';
@@ -95,6 +94,13 @@ function SettingsNavIcon({ id }: { id: string }) {
       <>
         <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
         <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+      </>
+    ),
+    display: (
+      <>
+        <rect x="2" y="4" width="20" height="13" rx="2" ry="2" />
+        <line x1="8" y1="21" x2="16" y2="21" />
+        <line x1="12" y1="17" x2="12" y2="21" />
       </>
     ),
     desktop: (
@@ -142,6 +148,13 @@ function SettingsNavIcon({ id }: { id: string }) {
         <line x1="17.5" y1="15" x2="9" y2="15" />
       </>
     ),
+    about: (
+      <>
+        <circle cx="12" cy="12" r="9" />
+        <line x1="12" y1="11" x2="12" y2="17" />
+        <circle cx="12" cy="7.5" r="1" fill="currentColor" stroke="none" />
+      </>
+    ),
   };
 
   const content = icons[id];
@@ -164,11 +177,7 @@ function SettingsNavIcon({ id }: { id: string }) {
   );
 }
 
-export interface SettingsPageProps {
-  onCheckDesktopUpdates?: () => void;
-}
-
-export default function SettingsPage({ onCheckDesktopUpdates }: SettingsPageProps = {}) {
+export default function SettingsPage() {
   const {
     gatewayUrl,
     setGatewayUrl,
@@ -182,7 +191,6 @@ export default function SettingsPage({ onCheckDesktopUpdates }: SettingsPageProp
   const { tab } = useParams<{ tab: string }>();
   const activeTab = (TABS.find((t) => t.id === tab)?.id ?? 'connection') as TabId;
   const {
-    checkVersionUpdate,
     desktopGatewayBusy,
     desktopGatewayError,
     desktopGatewayMode,
@@ -194,7 +202,6 @@ export default function SettingsPage({ onCheckDesktopUpdates }: SettingsPageProp
     setUrlInput,
     urlInput,
     urlSaved,
-    versionInfo,
   } = useSettingsEnvironment({
     gatewayUrl,
     setGatewayUrl,
@@ -213,21 +220,12 @@ export default function SettingsPage({ onCheckDesktopUpdates }: SettingsPageProp
     setUpstreamRetryMaxRetries,
     upstreamRetryMaxRetries,
   } = useSettingsUpstreamRetry({ gatewayUrl, token });
-  const {
-    loadWebsearchPolicy,
-    saveWebsearchPolicy,
-    savedPolicy: websearchSavedPolicy,
-    saving: websearchSaving,
-    setPolicy: setWebsearchPolicy,
-    policy: websearchPolicy,
-  } = useSettingsWebsearch({ gatewayUrl, token });
   const memoryManagement = useMemoryManagement({
     gatewayUrl,
     token,
     active: activeTab === 'memory',
   });
 
-  const [mcpServers, setMcpServersState] = useState<MCPServerEntry[]>([]);
   const [providers, setProviders] = useState<AIProviderRef[]>([]);
   const providersRef = useRef<AIProviderRef[]>(providers);
   const normalizeProviderSelection = React.useCallback(
@@ -276,7 +274,6 @@ export default function SettingsPage({ onCheckDesktopUpdates }: SettingsPageProp
   const [permissionCategories, setPermissionCategories] = useState<PermissionCategoryMeta[]>([]);
   const [permissionRulesSaving, setPermissionRulesSaving] = useState(false);
   const [devLogs, setDevLogs] = useState<SettingsDevLogRecord[]>([]);
-  const [mcpStatuses, setMcpStatuses] = useState<MCPServerStatus[]>([]);
   const [workers, setWorkers] = useState<WorkerEntry[]>([]);
   const [priceModels, setPriceModels] = useState<ModelPriceEntry[]>([]);
   const [priceModelsError, setPriceModelsError] = useState<string | null>(null);
@@ -685,10 +682,6 @@ export default function SettingsPage({ onCheckDesktopUpdates }: SettingsPageProp
         );
       })
       .catch(() => undefined);
-    void settingsClient
-      .listMcpServers(token)
-      .then((data) => setMcpServersState((data as { servers?: MCPServerEntry[] }).servers ?? []))
-      .catch(() => undefined);
     void usageClient
       .getRecords(token)
       .then((d) => {
@@ -745,40 +738,6 @@ export default function SettingsPage({ onCheckDesktopUpdates }: SettingsPageProp
       })
       .catch(() => undefined);
     void loadDevLogs();
-    void settingsClient
-      .getMcpStatus(token)
-      .then((d) => {
-        const typed = d as {
-          servers: Array<{
-            id: string;
-            name: string;
-            type?: string;
-            status?: string;
-            builtin?: boolean;
-          }>;
-        };
-        setMcpStatuses(
-          (typed.servers ?? []).map((server) => ({
-            id: server.id,
-            name: server.name,
-            // 后端可能返回 'disabled'（来自 PR-D-Plugin retry 路由的
-            // mcp-status 增强），在前端列表里和 'disconnected' 同处理：
-            // 列表只渲染 connected/connecting/disconnected/error 四
-            // 种；disabled 等价于灰点，但 retry 按钮仍会出现，让用户
-            // 知道点了之后会因 enabled=false 短路返回 disabled。
-            status:
-              server.status === 'connected' ||
-              server.status === 'connecting' ||
-              server.status === 'error'
-                ? server.status
-                : 'disconnected',
-            toolCount: 0,
-            authType: server.type,
-            builtin: server.builtin === true,
-          })),
-        );
-      })
-      .catch(() => undefined);
     void loadWorkers();
     void loadDiagnostics();
     void settingsClient
@@ -810,8 +769,6 @@ export default function SettingsPage({ onCheckDesktopUpdates }: SettingsPageProp
       .then((triggers) => setGithubTriggers(triggers))
       .catch(() => undefined);
     void loadUpstreamRetrySettings().catch(() => undefined);
-    void loadWebsearchPolicy().catch(() => undefined);
-    void checkVersionUpdate();
     void channelsClient
       .list(token)
       .then((data) => {
@@ -840,10 +797,8 @@ export default function SettingsPage({ onCheckDesktopUpdates }: SettingsPageProp
     loadDevLogs,
     loadDiagnostics,
     loadUpstreamRetrySettings,
-    loadWebsearchPolicy,
     loadSshConnections,
     loadWorkers,
-    checkVersionUpdate,
     token,
   ]);
 
@@ -906,104 +861,6 @@ export default function SettingsPage({ onCheckDesktopUpdates }: SettingsPageProp
         () => undefined,
       );
       await queuedSave;
-    },
-    [token, gatewayUrl],
-  );
-
-  const setMcpServers = React.useCallback(
-    (updater: React.SetStateAction<MCPServerEntry[]>) => {
-      setMcpServersState((prev) => {
-        const next = typeof updater === 'function' ? updater(prev) : updater;
-        if (token) {
-          void createSettingsClient(gatewayUrl).putMcpServers(token, { servers: next });
-        }
-        return next;
-      });
-    },
-    [token, gatewayUrl],
-  );
-
-  /**
-   * 触发"重试连接 / 安装"。三段式：
-   *   1) 立刻在状态里把 retryFeedback 设为 pending → 按钮转灰；
-   *   2) POST /settings/mcp-servers/{id}/retry，后端实际跑 disconnect
-   *      + 重连（stdio 用 npx -y 时顺带按需安装包）；
-   *   3) 解析 200 响应里的 status：
-   *      - `connected` → status 染绿、retryFeedback 为 ok，刷新
-   *        toolCount；
-   *      - `error` → retryFeedback 携带错误信息；
-   *      - `disabled` → 把状态置为 disconnected（按当前列表设计，
-   *        disabled 在加载阶段就被规整成 disconnected，这里保持
-   *        一致）。
-   *   网络错误 / 4xx 也染红，避免 UI 死挂在 pending。
-   */
-  const handleRetryMcp = React.useCallback(
-    (serverId: string) => {
-      if (!token) return;
-      setMcpStatuses((prev) =>
-        prev.map((server) =>
-          server.id === serverId
-            ? { ...server, retryFeedback: { kind: 'pending' as const } }
-            : server,
-        ),
-      );
-
-      void (async () => {
-        try {
-          const data = (await createSettingsClient(gatewayUrl).retryMcpServer(token, serverId)) as {
-            status: 'connected' | 'error' | 'disabled';
-            toolCount: number;
-            durationMs: number;
-            error?: string;
-          };
-          setMcpStatuses((prev) =>
-            prev.map((server) => {
-              if (server.id !== serverId) return server;
-              if (data.status === 'connected') {
-                return {
-                  ...server,
-                  status: 'connected' as const,
-                  toolCount: data.toolCount,
-                  retryFeedback: {
-                    kind: 'ok' as const,
-                    toolCount: data.toolCount,
-                    durationMs: data.durationMs,
-                  },
-                };
-              }
-              if (data.status === 'error') {
-                return {
-                  ...server,
-                  status: 'error' as const,
-                  retryFeedback: {
-                    kind: 'fail' as const,
-                    error: data.error ?? '未知错误',
-                  },
-                };
-              }
-              // disabled — 按钮点了等于无操作；归位到 disconnected 灰点。
-              return {
-                ...server,
-                status: 'disconnected' as const,
-                retryFeedback: undefined,
-              };
-            }),
-          );
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          setMcpStatuses((prev) =>
-            prev.map((server) =>
-              server.id === serverId
-                ? {
-                    ...server,
-                    status: 'error' as const,
-                    retryFeedback: { kind: 'fail' as const, error: message },
-                  }
-                : server,
-            ),
-          );
-        }
-      })();
     },
     [token, gatewayUrl],
   );
@@ -1709,10 +1566,6 @@ export default function SettingsPage({ onCheckDesktopUpdates }: SettingsPageProp
                     handleAddProvider={handleAddProvider}
                     onTestModel={handleTestModel}
                     onSyncCatalog={handleSyncCatalog}
-                    mcpServers={mcpServers}
-                    setMcpServers={setMcpServers}
-                    mcpStatuses={mcpStatuses}
-                    onRetryMcp={handleRetryMcp}
                     urlInput={urlInput}
                     setUrlInput={setUrlInput}
                     saveGatewayUrl={saveGatewayUrl}
@@ -1732,15 +1585,9 @@ export default function SettingsPage({ onCheckDesktopUpdates }: SettingsPageProp
                       void saveUpstreamRetrySettings();
                     }}
                     savedUpstreamRetryMaxRetries={savedUpstreamRetryMaxRetries}
-                    websearchPolicy={websearchPolicy}
-                    websearchSavedPolicy={websearchSavedPolicy}
-                    websearchSaving={websearchSaving}
-                    setWebsearchPolicy={setWebsearchPolicy}
-                    saveWebsearchPolicy={() => {
-                      void saveWebsearchPolicy();
-                    }}
                   />
                 )}
+                {activeTab === 'display' && <DisplayTabContent />}
                 {activeTab === 'channels' && (
                   <ChannelsTabContent
                     channels={channels}
@@ -1815,8 +1662,6 @@ export default function SettingsPage({ onCheckDesktopUpdates }: SettingsPageProp
                     onUploadSshFile={uploadSshFile}
                     githubTriggers={githubTriggers}
                     providerUpdatesDetail={devtoolsSourceStates.providerUpdates.detail}
-                    versionInfo={versionInfo}
-                    onCheckVersion={checkVersionUpdate}
                     onSaveGitHubTrigger={handleSaveGitHubTrigger}
                     onDesktopAutomationStart={handleDesktopAutomationStart}
                     onDesktopAutomationGoto={handleDesktopAutomationGoto}
@@ -1832,9 +1677,7 @@ export default function SettingsPage({ onCheckDesktopUpdates }: SettingsPageProp
                     activeImageModelId={activeSelection.image?.modelId}
                   />
                 )}
-                {activeTab === 'desktop' && isTauri && (
-                  <DesktopTabContent onCheckUpdates={onCheckDesktopUpdates} />
-                )}
+                {activeTab === 'desktop' && isTauri && <DesktopTabContent />}
                 {activeTab === 'devtools' && (
                   <DevtoolsTabContent
                     devLogs={devLogs}
@@ -1849,8 +1692,13 @@ export default function SettingsPage({ onCheckDesktopUpdates }: SettingsPageProp
                     onExportLogs={exportDevLogs}
                     onRefreshAllSources={refreshAllDevtoolsSources}
                     onRefreshSource={refreshDevtoolsSource}
+                    sshConnections={sshConnections}
+                    onAddSshConnection={addSshConnection}
+                    onConnectSsh={connectSsh}
+                    onDisconnectSsh={disconnectSsh}
                   />
                 )}
+                {activeTab === 'about' && <AboutPage />}
               </div>
             </div>
             <div aria-hidden="true" style={{ gridColumn: '4' }} />

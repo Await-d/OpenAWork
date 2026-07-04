@@ -1,6 +1,12 @@
 # .agentdocs 索引
 
 ## Active Workflows
+- [260704-telemetry-consent-implementation](workflow/260704-telemetry-consent-implementation.md) — 遥测同意与数据收集功能完整实施：12 任务 / 6 Phase / Full orchestration；前端弹窗 accept/decline 同步网关 + web-client 封装 + 网关遥测路由 + 通用事件采集 + GitHub Issue 同步（error_boundary 自动创建 Issue，堆栈签名去重）
+- [260704-composer-optimization](workflow/260704-composer-optimization.md) — 输入框 ChatComposer 整体优化：13 项 / 3 Phase / Full orchestration；拆分超限文件 + 动画微交互(发送脉冲/拖拽淡入/按钮微弹/弹窗入场/队列pill) + 功能增强(字符计数/placeholder轮换/Esc清空/大文本折叠) + 视觉样式(流式呼吸光效/home glassmorphism/工具栏分组)
+- [260704-companion-linkage-enhancement](workflow/260704-companion-linkage-enhancement.md) — 伴侣系统联动场景强化：8 任务 / 5 Phase / Full orchestration；补齐工具调用联动、错误/重试反应、附件/队列真实计数、空闲检测提醒、后端上下文增强
+- [260704-display-settings-expansion](workflow/260704-display-settings-expansion.md) — 显示设置扩展：5 任务 / 2 Phase / Lightweight；新增推理块显隐、命令面板按钮显隐、网关状态指示点显隐、顶栏终端按钮显隐、主题模式（跟随系统/浅色/深色）切换；store v2→v3 + 消费接入 ChatTopBar/AppSidebar/ChatPageSections/App.tsx
+- [260704-opencode-ui-layout-borrow-plan](workflow/260704-opencode-ui-layout-borrow-plan.md) — OpenCode UI 布局借鉴升级：6 波次方案（W1 顶部标签页栏 / W2 双层侧边栏 Rail+Panel / W3 会话页面板化 Diff+终端 / W4 消息时间线智能滚动+预取 / W5 首页视图双栏+时间分组 / W6 拖拽排序+内联重命名+命令扩充）；推荐执行顺序 W1→W3→W2→W4→W5→W6
+- [260627-sidebar-layout-refactor-plan](workflow/260627-sidebar-layout-refactor-plan.md) — 主界面左侧栏布局改造：合并 NavRail + SessionSidebar 为统一 AppSidebar(260px) 三区块式布局（顶部:定时任务/技能/智能体 / 中间:会话列表 / 底部:不变）；删除工作流页面；会话列表/模板移入设置页；7 Step 顺序推进
 - [260530-team-page-内容区功能加强方案](workflow/260530-team-page-内容区功能加强方案.md) — ✅ 全部完成 2026-05-31：content-kit 视觉地基 + 当前会话统计/各层级消耗(byLayer + 单层下钻) + 文件内联预览 + 跨层对话线程 + 知识图谱(SVG) + 3D 与真实 layer-handoff 联动；后端 team_usage/team_tool_call emission 复查确认全链路已通；typecheck/build/团队 27 suites 171 tests 全通过
 - [260523-chat-page-split-b-e](workflow/260523-chat-page-split-b-e.md) — ChatPage 域 B 流式收尾 + 域 E 状态/测试/文档同步
 - [260516-team-page-重构调整方案](workflow/260516-team-page-重构调整方案.md) — TeamPage 重构：从"左侧 Sidebar + Tab 工作台"改为"对话中心 + 右侧可收起面板 + 顶部固定状态栏"；15 项任务 / 5 Wave / feature flag 保护

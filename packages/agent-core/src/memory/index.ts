@@ -10,6 +10,10 @@ export type {
   MemoryInjectionConfig,
   MemorySettings,
   ExtractedMemoryCandidate,
+  MemoryCandidateDecision,
+  MemoryCandidateDecisionReason,
+  MemoryCandidateDecisionStatus,
+  MemoryCandidatePersistencePolicy,
   MemoryExtractionLog,
 } from './types.js';
 
@@ -37,3 +41,4 @@ export { deduplicateMemories } from './deduplicator.js';
 export { buildMemoryInjectionBlock } from './injector.js';
 
 export { extractMemoriesFromText } from './extractor.js';
+export { evaluateMemoryCandidateForPersistence } from './persistence-policy.js';

@@ -34,6 +34,8 @@ export interface MemorySettings {
   autoExtract: boolean;
   maxTokenBudget: number;
   minConfidence: number;
+  autoWriteMinConfidence: number;
+  reviewLowConfidence: boolean;
 }
 
 export interface MemoryCreateInput {

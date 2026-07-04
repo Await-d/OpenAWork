@@ -44,6 +44,7 @@ export function extractSearchResults(cleaned: string): SearchResultItem[] | null
     if (!numMatch) continue;
     const title = numMatch[2]?.trim();
     const snippetLines: string[] = [];
+    let url: string | undefined;
     let j = i + 1;
     while (
       j < lines.length &&
@@ -51,12 +52,26 @@ export function extractSearchResults(cleaned: string): SearchResultItem[] | null
       !/^\*?\s*(Privacy|Terms|Next|Pagination)/.test(lines[j]!)
     ) {
       const sl = lines[j]?.trim();
-      if (sl) snippetLines.push(sl);
+      if (sl) {
+        // Detect standalone URL lines (http/https)
+        const urlMatch = sl.match(/^https?:\/\/\S+$/);
+        if (urlMatch && !url) {
+          url = urlMatch[0];
+        } else {
+          // Also detect "URL: ..." or "Link: ..." prefixes
+          const prefixedUrl = sl.match(/^(?:URL|Link|Source):\s*(https?:\/\/\S+)$/i);
+          if (prefixedUrl && !url) {
+            url = prefixedUrl[1];
+          } else {
+            snippetLines.push(sl);
+          }
+        }
+      }
       j++;
     }
     const snippet = snippetLines.join(' ').slice(0, 200);
     if (title && title.length > 2) {
-      results.push({ title, snippet });
+      results.push({ title, snippet, url });
     }
     if (results.length >= 8) break;
   }

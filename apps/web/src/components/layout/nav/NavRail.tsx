@@ -4,6 +4,7 @@ import { createHealthClient } from '@openAwork/web-client';
 import { railGroups, railLabelCn, railIcon, type RailItem } from './RailIcon.js';
 import { preloadRouteModuleByPath } from '../../../routes/preloadable-route-modules.js';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
+import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
 import NotificationCenter from '../notification/NotificationCenter.js';
 
 interface NavRailProps {
@@ -193,6 +194,9 @@ export default function NavRail({
   const wideViewport = useWideViewport();
   const expanded = navRailExpandedPref ?? wideViewport;
   const gatewayStatus = useGatewayStatus(gatewayUrl);
+  const showGatewayStatusIndicator = useDisplayPreferencesStore(
+    (s) => s.showGatewayStatusIndicator,
+  );
 
   const showExpandSidebarButton = isChatRoute && !leftSidebarOpen && !!onExpandSidebar;
   const railWidth = expanded ? EXPANDED_RAIL_WIDTH : COLLAPSED_RAIL_WIDTH;
@@ -344,11 +348,13 @@ export default function NavRail({
             >
               OpenAWork
             </span>
-            <span
-              className="nav-rail-status-dot"
-              data-status={gatewayStatus}
-              aria-label={gatewayStatusLabel[gatewayStatus]}
-            />
+            {showGatewayStatusIndicator && (
+              <span
+                className="nav-rail-status-dot"
+                data-status={gatewayStatus}
+                aria-label={gatewayStatusLabel[gatewayStatus]}
+              />
+            )}
           </span>
         </span>
 

@@ -31,9 +31,9 @@ export interface TeamSubstateProgressBarProps {
 const CONTAINER_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 8,
-  padding: '4px 10px',
-  borderBottom: '1px solid color-mix(in srgb, var(--border-default) 30%, transparent)',
+  gap: 10,
+  padding: '6px 12px',
+  borderBottom: '1px solid var(--border-default)',
   background: 'var(--bg-overlay)',
   fontSize: 11,
   flexShrink: 0,
@@ -55,7 +55,11 @@ const STATE_LABEL_STYLE: CSSProperties = {
   fontSize: 10,
 };
 
-function progressFillStyle(percent: number, status: 'running' | 'paused' | 'idle', layerColor?: string): CSSProperties {
+function progressFillStyle(
+  percent: number,
+  status: 'running' | 'paused' | 'idle',
+  layerColor?: string,
+): CSSProperties {
   const accentColor =
     status === 'paused'
       ? 'color-mix(in srgb, var(--warning) 60%, var(--bg-overlay))'

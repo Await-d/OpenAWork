@@ -22,9 +22,9 @@ export interface TeamSessionHeaderProps {
 const HEADER_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 6,
-  padding: '5px 10px',
-  borderBottom: '1px solid color-mix(in srgb, var(--border-default) 20%, transparent)',
+  gap: 8,
+  padding: '8px 12px',
+  borderBottom: '1px solid var(--border-default)',
   background: 'var(--bg-overlay)',
   flexShrink: 0,
   flexWrap: 'wrap',

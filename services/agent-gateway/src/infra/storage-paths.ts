@@ -46,7 +46,9 @@ export function resolveDefaultGatewayDatabasePath(): string {
 }
 
 export function resolveGatewayDatabasePath(): string {
-  const explicitDatabasePath = normalizeConfiguredDatabasePath(process.env['OPENAWORK_DATABASE_PATH']);
+  const explicitDatabasePath = normalizeConfiguredDatabasePath(
+    process.env['OPENAWORK_DATABASE_PATH'],
+  );
   if (explicitDatabasePath) {
     return explicitDatabasePath;
   }
@@ -108,4 +110,12 @@ export function resolveGatewayFileBackupsDir(): string {
  */
 export function resolveGatewayReposDir(): string {
   return join(resolveGatewayDataDir(), 'repos');
+}
+
+export function resolveGatewayCodegraphCacheDir(): string {
+  return join(resolveGatewayDataDir(), 'codegraph');
+}
+
+export function resolveGatewayCodegraphDatabasePath(): string {
+  return join(resolveGatewayCodegraphCacheDir(), 'codegraph.sqlite');
 }

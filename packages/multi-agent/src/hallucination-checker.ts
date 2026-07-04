@@ -153,9 +153,7 @@ export function diagnoseNodeIssues(node: DAGNode): DiagnosticAlert[] {
   }
 
   // 超时模式
-  const timeoutCount = recentErrors.filter((e) =>
-    /timeout|timed out|ETIMEDOUT/i.test(e),
-  ).length;
+  const timeoutCount = recentErrors.filter((e) => /timeout|timed out|ETIMEDOUT/i.test(e)).length;
   if (timeoutCount >= 2) {
     alerts.push({
       pattern: 'timeout_pattern',

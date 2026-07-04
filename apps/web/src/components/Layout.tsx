@@ -1,7 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import NavRail from './layout/nav/NavRail.js';
-import WorkspacePickerModal from './common/modal/WorkspacePickerModal.js';
-import { buildWorkspacePickerDataSource } from './common/modal/workspace-picker-data-source.js';
+import AppSidebar from './layout/AppSidebar.js';
 import { CachedRouteOutlet } from './common/routing/CachedRouteOutlet.js';
 import QuestionPromptCard from './common/display/QuestionPromptCard.js';
 import { useUIStateStore } from '../stores/ui/uiState.js';
@@ -11,11 +9,7 @@ import { CommandPalette, PermissionConfirmDialog } from '@openAwork/shared-ui';
 import type { CommandItem, PermissionItem } from '@openAwork/shared-ui';
 import { useCommandRegistry } from '../hooks/command/useCommandRegistry.js';
 import { preloadRouteModuleByPath } from '../routes/preloadable-route-modules.js';
-import {
-  createQuestionsClient,
-  createSessionsClient,
-  createWorkspaceClient,
-} from '@openAwork/web-client';
+import { createQuestionsClient, createSessionsClient } from '@openAwork/web-client';
 import type { PendingQuestionRequest, SessionSearchResult } from '@openAwork/web-client';
 import {
   requestCurrentSessionRefresh,
@@ -90,17 +84,8 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
   const clearAuth = useAuthStore((s) => s.clearAuth);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
 
-  const [showWorkspacePicker, setShowWorkspacePicker] = useState(false);
   const [isNarrowViewport, setIsNarrowViewport] = useState(() =>
     typeof window !== 'undefined' ? window.innerWidth <= 960 : false,
-  );
-  const workspacePickerDataSource = useMemo(
-    () =>
-      buildWorkspacePickerDataSource({
-        client: createWorkspaceClient(gatewayUrl),
-        token: accessToken,
-      }),
-    [accessToken, gatewayUrl],
   );
 
   const uiState = useUIStateStore();
@@ -117,10 +102,6 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
   const pinnedSessions = uiState.pinnedSessions;
   const togglePinSession = uiState.togglePinSession;
   const isPinned = uiState.isPinned;
-  const selectedWorkspacePath = uiState.selectedWorkspacePath;
-  const addSavedWorkspacePath = uiState.addSavedWorkspacePath;
-  const setSelectedWorkspacePath = uiState.setSelectedWorkspacePath;
-  const setFileTreeRootPath = uiState.setFileTreeRootPath;
   const setExpandedDirs = useCallback(
     (updater: Set<string> | ((prev: Set<string>) => Set<string>)) => {
       const next = typeof updater === 'function' ? updater(new Set(expandedDirsArr)) : updater;
@@ -515,16 +496,6 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
   // shouldOverlaySessionSidebar / sessionSidebarWidth 已随 SessionSidebar 一起
   // 迁出至 ChatPage 内部计算;Layout 不再渲染会话列表。
 
-  const handleSelectWorkspace = useCallback(
-    async (path: string) => {
-      addSavedWorkspacePath(path);
-      setSelectedWorkspacePath(path);
-      setFileTreeRootPath(path);
-      setShowWorkspacePicker(false);
-    },
-    [addSavedWorkspacePath, setFileTreeRootPath, setSelectedWorkspacePath],
-  );
-
   return (
     <>
       <style>{`@keyframes toast-in { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
@@ -569,17 +540,6 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
           setPendingConfirmDialog(null);
         }}
       />
-      <WorkspacePickerModal
-        isOpen={showWorkspacePicker}
-        onClose={() => setShowWorkspacePicker(false)}
-        onSelect={handleSelectWorkspace}
-        fetchRootPath={workspacePickerDataSource.fetchRootPath}
-        fetchWorkspaceRoots={workspacePickerDataSource.fetchWorkspaceRoots}
-        fetchTree={workspacePickerDataSource.fetchTree}
-        createDirectory={workspacePickerDataSource.createDirectory}
-        validatePath={workspacePickerDataSource.validatePath}
-        initialPath={uiState.fileTreeRootPath ?? selectedWorkspacePath ?? undefined}
-      />
       <div
         style={{
           display: 'flex',
@@ -598,20 +558,17 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
             position: 'relative',
           }}
         >
-          <NavRail
-            clearAuth={clearAuth}
+          <AppSidebar
             accessToken={accessToken}
             gatewayUrl={gatewayUrl}
             theme={theme}
             onToggleTheme={onToggleTheme}
-            isChatRoute={isChatRoute}
-            leftSidebarOpen={leftSidebarOpen}
-            onExpandSidebar={() => setLeftSidebarOpen(true)}
+            onLogout={() => {
+              clearAuth();
+              void navigate('/');
+            }}
             pendingPermissionIndicator={pendingPermissionIndicator}
           />
-
-          {/* 会话列表 (SessionSidebar) 已迁至 ChatPage 内部渲染。
-              其他页面(团队/设置/技能等)由各自页面自行决定是否需要 left rail。 */}
 
           <div
             style={{

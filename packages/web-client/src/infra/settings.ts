@@ -86,6 +86,17 @@ export interface SettingsClient {
   putWebsearch(token: string, payload: unknown): Promise<unknown>;
   // 版本 / 校验
   getVersion(token: string, options?: { signal?: AbortSignal }): Promise<unknown>;
+  // 遥测同意 & 事件上报
+  getTelemetryConsent(token: string, options?: { signal?: AbortSignal }): Promise<unknown>;
+  updateTelemetryConsent(
+    token: string,
+    status: 'accepted' | 'declined',
+  ): Promise<{ ok: boolean; status: string }>;
+  reportTelemetryEvent(
+    token: string,
+    name: string,
+    properties?: Record<string, string | number | boolean>,
+  ): Promise<{ ok: boolean }>;
 }
 
 function buildCompanionQueryString(options?: { agentId?: string }): URLSearchParams {
@@ -567,6 +578,41 @@ export function createSettingsClient(baseUrl: string): SettingsClient {
           fetchWithTimeout(`${baseUrl}/settings/version`, {
             headers: authHeader(token),
             signal: options?.signal,
+          }),
+      });
+    },
+
+    async getTelemetryConsent(token, options) {
+      return performSettingsRequest<unknown>({
+        actionLabel: '读取遥测同意状态',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/settings/telemetry/consent`, {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
+      });
+    },
+
+    async updateTelemetryConsent(token, status) {
+      return performSettingsRequest<{ ok: boolean; status: string }>({
+        actionLabel: '保存遥测同意状态',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/settings/telemetry/consent`, {
+            method: 'PUT',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify({ status }),
+          }),
+      });
+    },
+
+    async reportTelemetryEvent(token, name, properties) {
+      return performSettingsRequest<{ ok: boolean }>({
+        actionLabel: '上报遥测事件',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/settings/telemetry/event`, {
+            method: 'POST',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify({ name, properties: properties ?? {} }),
           }),
       });
     },

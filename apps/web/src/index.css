@@ -1152,6 +1152,76 @@ textarea {
     var(--shadow-sm),
     0 16px 36px -24px oklch(0 0 0 / 0.9);
 }
+
+/* ── Composer 动画 / 微交互 ──────────────────────────────────── */
+
+@keyframes composer-pulse-send {
+  0% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 40%, transparent); }
+  100% { box-shadow: 0 0 0 12px transparent; }
+}
+.composer-pulse { animation: composer-pulse-send 400ms ease-out; }
+
+@keyframes composer-drag-enter {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+.composer-drag-overlay { animation: composer-drag-enter 200ms ease-out; }
+
+.composer-shell .icon-btn,
+.composer-shell button[class*='icon-btn'] {
+  transition: transform 120ms ease, background 150ms ease, color 150ms ease, border-color 150ms ease, opacity 150ms ease;
+}
+.composer-shell .icon-btn:hover,
+.composer-shell button[class*='icon-btn']:hover { transform: scale(1.08); }
+.composer-shell .icon-btn:active,
+.composer-shell button[class*='icon-btn']:active { transform: scale(0.92); }
+.composer-shell .btn-accent:hover { transform: scale(1.04); }
+.composer-shell .btn-accent:active { transform: scale(0.96); }
+
+@keyframes composer-optimize-enter {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.composer-optimize-popover { animation: composer-optimize-enter 220ms ease-out; }
+
+@keyframes composer-queue-enter {
+  from { opacity: 0; transform: translateX(12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.composer-queue-pill { animation: composer-queue-enter 220ms ease-out; }
+
+@keyframes composer-breathe {
+  0%, 100% { box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 12%, transparent), 0 1px 0 var(--border-subtle), inset 0 1px 0 rgba(255,255,255,0.04); }
+  50% { box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent), 0 1px 0 var(--border-subtle), inset 0 1px 0 rgba(255,255,255,0.04); }
+}
+.composer-shell.composer-streaming { animation: composer-breathe 2s ease-in-out infinite; }
+
+.composer-shell.composer-home-variant {
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  background: color-mix(in oklch, var(--bg-surface) 75%, transparent);
+}
+:root.light .composer-shell.composer-home-variant {
+  background: color-mix(in oklch, var(--bg-raised) 70%, transparent);
+}
+
+.composer-toolbar-divider { width: 1px; height: 16px; background: var(--border-subtle); flex-shrink: 0; margin: 0 2px; }
+
+.composer-char-counter {
+  position: absolute; bottom: 3px; right: 6px; font-size: 9px; color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums; pointer-events: none; opacity: 0;
+  transition: opacity 200ms ease, color 200ms ease; z-index: 2;
+}
+.composer-char-counter.composer-char-visible { opacity: 0.7; }
+.composer-char-counter.composer-char-warning { color: var(--warning); opacity: 1; }
+.composer-char-counter.composer-char-danger { color: var(--danger); opacity: 1; }
+
+@keyframes composer-toast-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.composer-undo-toast { animation: composer-toast-enter 200ms ease-out; }
+
 :root.light .nav-rail-btn:hover {
   background: var(--bg-hover) !important;
 }

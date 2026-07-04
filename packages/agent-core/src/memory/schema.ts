@@ -76,6 +76,8 @@ export const memorySettingsSchema = z.object({
   autoExtract: z.boolean(),
   maxTokenBudget: z.number().int().min(100).max(10000),
   minConfidence: z.number().min(0).max(1),
+  autoWriteMinConfidence: z.number().min(0).max(1),
+  reviewLowConfidence: z.boolean(),
 });
 
 export const DEFAULT_MEMORY_SETTINGS = {
@@ -83,6 +85,8 @@ export const DEFAULT_MEMORY_SETTINGS = {
   autoExtract: true,
   maxTokenBudget: 2000,
   minConfidence: 0.3,
+  autoWriteMinConfidence: 0.65,
+  reviewLowConfidence: true,
 } as const;
 
 export const MEMORY_SETTINGS_KEY = 'memory_settings' as const;

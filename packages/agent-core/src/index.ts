@@ -417,6 +417,10 @@ export type {
   MemoryInjectionConfig,
   MemorySettings,
   ExtractedMemoryCandidate,
+  MemoryCandidateDecision,
+  MemoryCandidateDecisionReason,
+  MemoryCandidateDecisionStatus,
+  MemoryCandidatePersistencePolicy,
   MemoryExtractionLog,
   DeduplicationResult,
 } from './memory/index.js';
@@ -440,4 +444,5 @@ export {
   deduplicateMemories,
   buildMemoryInjectionBlock,
   extractMemoriesFromText,
+  evaluateMemoryCandidateForPersistence,
 } from './memory/index.js';

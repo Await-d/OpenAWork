@@ -12,8 +12,11 @@ interface DevtoolsToolbarSectionProps {
     sshConnections: number;
     workers: number;
   };
+  errorCount: number;
+  lastGlobalRefreshAt: number | null;
   workerErrors: number;
   onExportDebugBundle: () => void;
+  onExportErrorReport: () => void;
   onExportMarkdownBundle: () => void;
   onRefreshAllSources: () => void;
   onScrollToSection: (sectionId: DevtoolsSectionId) => void;
@@ -46,8 +49,11 @@ export function DevtoolsToolbarSection({
   anyRefreshableSourceLoading,
   autoRefreshEnabled,
   counts,
+  errorCount,
+  lastGlobalRefreshAt,
   workerErrors,
   onExportDebugBundle,
+  onExportErrorReport,
   onExportMarkdownBundle,
   onRefreshAllSources,
   onScrollToSection,
@@ -158,6 +164,17 @@ export function DevtoolsToolbarSection({
           }}
         >
           <span style={{ fontSize: 11, fontWeight: 700 }}>SSH</span>
+          {counts.sshConnections > 0 ? (
+            <span
+              style={{
+                fontSize: 10,
+                color: 'var(--fg-muted)',
+                fontVariantNumeric: 'tabular-nums',
+              }}
+            >
+              {counts.sshConnections}
+            </span>
+          ) : null}
         </button>
         <button
           type="button"
@@ -210,7 +227,11 @@ export function DevtoolsToolbarSection({
           onClick={onToggleAutoRefresh}
           style={{
             borderRadius: 8,
-            border: `1px solid ${autoRefreshEnabled ? 'color-mix(in srgb, var(--accent) 30%, var(--border-default))' : 'var(--border-default)'}`,
+            border: `1px solid ${
+              autoRefreshEnabled
+                ? 'color-mix(in srgb, var(--accent) 30%, var(--border-default))'
+                : 'var(--border-default)'
+            }`,
             padding: '5px 8px',
             background: autoRefreshEnabled
               ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))'
@@ -232,6 +253,28 @@ export function DevtoolsToolbarSection({
             margin: '0 2px',
           }}
         />
+        <button
+          type="button"
+          onClick={onExportErrorReport}
+          disabled={errorCount === 0}
+          style={{
+            borderRadius: 8,
+            border: errorCount > 0 ? '2px solid var(--danger)' : '1px solid var(--border-default)',
+            padding: '5px 10px',
+            background: errorCount > 0 ? 'var(--danger)' : 'var(--bg-overlay)',
+            color: errorCount > 0 ? 'var(--fg-on-accent)' : 'var(--fg-muted)',
+            fontSize: 10,
+            fontWeight: 700,
+            cursor: errorCount > 0 ? 'pointer' : 'not-allowed',
+            opacity: errorCount > 0 ? 1 : 0.5,
+            whiteSpace: 'nowrap',
+          }}
+          title={
+            errorCount > 0 ? `导出包含 ${errorCount} 条错误的完整 HTML 报告` : '当前无错误可导出'
+          }
+        >
+          导出错误报告{errorCount > 0 ? ` (${errorCount})` : ''}
+        </button>
         <button
           type="button"
           onClick={onExportDebugBundle}
@@ -263,6 +306,19 @@ export function DevtoolsToolbarSection({
         >
           导出 MD
         </button>
+        {lastGlobalRefreshAt !== null ? (
+          <span
+            style={{
+              fontSize: 10,
+              color: 'var(--fg-muted)',
+              fontVariantNumeric: 'tabular-nums',
+              marginLeft: 4,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            最后刷新 {new Date(lastGlobalRefreshAt).toLocaleTimeString('zh-CN', { hour12: false })}
+          </span>
+        ) : null}
       </div>
     </section>
   );

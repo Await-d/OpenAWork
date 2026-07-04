@@ -27,6 +27,7 @@ import { ToolApprovalActions } from '../shared/tool-approval-actions.js';
 import { extractWebSummary } from '../shared/web-helpers.js';
 import { ToolInputPreview } from '../io/tool-input-preview.js';
 import { ToolOutputPreview } from '../io/tool-output-preview.js';
+import { useDisplayPreferencesStore } from '../../../../stores/settings/display-preferences.js';
 
 /* ── BlockToolCall (write / edit / bash / web / apply_patch / multi_edit) ── */
 
@@ -76,10 +77,41 @@ export function BlockToolCall({
     return outStr.length > 2000;
   })();
 
+  const webSummary = useMemo(
+    () => (isWebTool && visualState === 'completed' ? extractWebSummary(output) : null),
+    [isWebTool, visualState, output],
+  );
+
+  const searchVisualState: SearchVisualState | null = useMemo(() => {
+    if (!isWebTool || !webSummary) return null;
+    if (visualState === 'failed') return 'error';
+    if (webSummary.searchResults && webSummary.searchResults.length > 0) return 'found';
+    if (webSummary.cleanedContent.length === 0) return 'empty';
+    // Treat "No results found" style messages as empty so they don't claim success.
+    if (/^No results found\b/i.test(webSummary.cleanedContent.trim())) return 'empty';
+    return 'found';
+  }, [isWebTool, webSummary, visualState]);
+
+  const toolCallsExpandedByDefault = useDisplayPreferencesStore(
+    (s) => s.toolCallsExpandedByDefault,
+  );
+
+  const isWebEmptyResult = isWebTool && searchVisualState === 'empty';
+
   const shouldAutoExpand =
-    visualState !== 'pending' && !(visualState === 'completed' && hasLargeOutput);
+    visualState !== 'pending' &&
+    !isWebEmptyResult &&
+    (toolCallsExpandedByDefault || !(visualState === 'completed' && hasLargeOutput));
 
   const [open, setOpen] = useState(shouldAutoExpand);
+  const [webResultsExpanded, setWebResultsExpanded] = useState(false);
+
+  const webResults = webSummary?.searchResults ?? [];
+  const MAX_VISIBLE_RESULTS = 3;
+  const hasMoreResults = webResults.length > MAX_VISIBLE_RESULTS;
+  const visibleWebResults = webResultsExpanded
+    ? webResults
+    : webResults.slice(0, MAX_VISIBLE_RESULTS);
 
   // Re-open if the visual state transitions out of pending mid-stream
   // (e.g. the model just finished emitting input + output deltas).
@@ -335,10 +367,6 @@ export function BlockToolCall({
 
   const hasDiff = displayData.diffView !== undefined;
   const hasBashOutput = isBashLike && displayData.bashView !== undefined;
-  const webSummary = useMemo(
-    () => (isWebTool && visualState === 'completed' ? extractWebSummary(output) : null),
-    [isWebTool, visualState, output],
-  );
 
   const diffSummary = displayData.diffView?.summary;
 
@@ -350,15 +378,6 @@ export function BlockToolCall({
     () => (visualState === 'failed' ? extractErrorSummary(output, isError) : null),
     [visualState, output, isError],
   );
-
-  // Search visual state for badge
-  const searchVisualState: SearchVisualState | null = useMemo(() => {
-    if (!isWebTool || !webSummary) return null;
-    if (visualState === 'failed') return 'error';
-    if (webSummary.searchResults && webSummary.searchResults.length > 0) return 'found';
-    if (webSummary.cleanedContent.length > 0) return 'found';
-    return 'empty';
-  }, [isWebTool, webSummary, visualState]);
 
   return (
     <div className="tool-call-block" data-tool-status={visualState}>
@@ -480,14 +499,25 @@ export function BlockToolCall({
                       : webSummary.url}
                   </span>
                 )}
-                <span className="tool-call-block-web-lines">{webSummary.lineCount} lines</span>
-                <CopyBtn text={webSummary.cleanedContent} title="Copy content" />
+                <CopyBtn
+                  text={
+                    webSummary.searchResults
+                      ? webSummary.searchResults
+                          .map(
+                            (r, idx) =>
+                              `${idx + 1}. ${r.title}${r.url ? `\n   ${r.url}` : ''}${r.snippet ? `\n   ${r.snippet}` : ''}`,
+                          )
+                          .join('\n')
+                      : webSummary.cleanedContent
+                  }
+                  title="Copy content"
+                />
               </div>
 
-              {/* Search results */}
-              {webSummary.searchResults && (
+              {/* Search results — compact list, no raw content duplication */}
+              {webSummary.searchResults && webSummary.searchResults.length > 0 && (
                 <div className="tool-call-block-search-results">
-                  {webSummary.searchResults.map((r, idx) => (
+                  {visibleWebResults.map((r, idx) => (
                     <div key={idx} className="tool-call-block-search-item">
                       <div className="tool-call-block-search-title">
                         <span className="tool-call-block-search-idx">{idx + 1}</span>
@@ -503,6 +533,20 @@ export function BlockToolCall({
                       )}
                     </div>
                   ))}
+                  {hasMoreResults && (
+                    <button
+                      type="button"
+                      className="tool-output-toggle tool-search-results-toggle"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setWebResultsExpanded((v) => !v);
+                      }}
+                    >
+                      {webResultsExpanded
+                        ? '收起结果'
+                        : `展开其余 ${webResults.length - MAX_VISIBLE_RESULTS} 个结果`}
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -515,9 +559,13 @@ export function BlockToolCall({
                 </div>
               )}
 
-              {/* Plain text with expand/collapse */}
+              {/* Plain text with expand/collapse; for empty search results keep it compact */}
               {!webSummary.searchResults && !webSummary.isMarkdown && (
-                <ExpandableOutput text={webSummary.cleanedContent} maxChars={600} />
+                <ExpandableOutput
+                  text={webSummary.cleanedContent}
+                  maxChars={600}
+                  compact={searchVisualState === 'empty'}
+                />
               )}
             </div>
           )}

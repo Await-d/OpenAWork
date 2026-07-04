@@ -11,7 +11,6 @@ import {
   localGatewayUrl,
   waitForGatewayHealth,
 } from '../../../utils/gateway/desktop-gateway.js';
-import { DesktopAboutUpdateSection } from './desktop-about-update-section.js';
 import { DesktopWebAccessSection } from './desktop-web-access-section.js';
 import { isTauri, tauriInvoke } from '../shared/settings-page-helpers.js';
 import { BP, IS, SS, ST } from '../shared/settings-section-styles.js';
@@ -179,12 +178,8 @@ function ToggleSwitch({
   );
 }
 
-interface DesktopTabContentProps {
-  onCheckUpdates?: () => void;
-}
-
 /** 仅在 Tauri 运行时渲染——非桌面端时显示一个降级提示。 */
-export function DesktopTabContent({ onCheckUpdates }: DesktopTabContentProps = {}) {
+export function DesktopTabContent() {
   const webPort = useAuthStore((state) => state.webPort);
   const webAccessEnabled = useAuthStore((state) => state.webAccessEnabled);
   const webExposeLan = useAuthStore((state) => state.webExposeLan);
@@ -530,7 +525,6 @@ export function DesktopTabContent({ onCheckUpdates }: DesktopTabContentProps = {
   if (loading) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <DesktopAboutUpdateSection onCheckUpdates={onCheckUpdates} />
         <section style={SS}>
           <h3 style={ST}>桌面端</h3>
           <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>正在加载桌面端配置…</div>
@@ -542,7 +536,6 @@ export function DesktopTabContent({ onCheckUpdates }: DesktopTabContentProps = {
   if (!view) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <DesktopAboutUpdateSection onCheckUpdates={onCheckUpdates} />
         <section style={SS}>
           <h3 style={ST}>桌面端</h3>
           <div style={{ fontSize: 12, color: 'var(--danger)' }}>
@@ -558,8 +551,6 @@ export function DesktopTabContent({ onCheckUpdates }: DesktopTabContentProps = {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <DesktopAboutUpdateSection onCheckUpdates={onCheckUpdates} />
-
       {busy !== null ? (
         <div
           role="status"

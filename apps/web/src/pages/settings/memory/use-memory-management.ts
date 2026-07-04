@@ -16,6 +16,8 @@ const DEFAULT_SETTINGS: MemorySettings = {
   autoExtract: true,
   maxTokenBudget: 2000,
   minConfidence: 0.3,
+  autoWriteMinConfidence: 0.65,
+  reviewLowConfidence: true,
 };
 
 const FEEDBACK_CLEAR_MS = 4000;
@@ -48,6 +50,12 @@ interface MemoryMutationResponse {
 
 interface MemoryExtractResponse {
   extracted?: number;
+  blocked?: number;
+  created?: number;
+  duplicates?: number;
+  rejected?: number;
+  reviewed?: number;
+  updated?: number;
 }
 
 export function useMemoryManagement({
@@ -235,7 +243,13 @@ export function useMemoryManagement({
         token,
         {},
       )) as MemoryExtractResponse;
-      showFeedback('success', `已提取 ${String(payload.extracted ?? 0)} 条记忆`);
+      const written = payload.extracted ?? payload.created ?? 0;
+      const reviewed = payload.reviewed ?? 0;
+      const skipped = (payload.duplicates ?? 0) + (payload.rejected ?? 0) + (payload.blocked ?? 0);
+      showFeedback(
+        'success',
+        `已写入 ${String(written)} 条，待确认 ${String(reviewed)} 条，已跳过 ${String(skipped)} 条`,
+      );
       await Promise.all([refreshMemories(), refreshStats()]);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : '提取记忆失败';

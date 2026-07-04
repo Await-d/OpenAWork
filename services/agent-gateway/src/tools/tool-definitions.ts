@@ -60,6 +60,7 @@ import {
   lspRenameToolDefinition,
   lspSymbolsToolDefinition,
 } from './lsp-tools.js';
+import { CODEGRAPH_TOOL_DEFINITIONS } from './codegraph-tools.js';
 import {
   taskCreateToolDefinition,
   taskGetToolDefinition,
@@ -191,6 +192,7 @@ const MODEL_VISIBLE_GATEWAY_TOOLS = [
   generateImageToolDefinition,
   repoCloneToolDefinition,
   repoOverviewToolDefinition,
+  ...CODEGRAPH_TOOL_DEFINITIONS,
 ] as const;
 
 export interface BuildGatewayToolDefinitionsContext {
@@ -491,6 +493,94 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
           direction: { type: 'string', enum: ['incoming', 'outgoing', 'both'] },
         },
         required: ['filePath', 'line', 'character'],
+        additionalProperties: false,
+      };
+    case 'codegraph_status':
+      return {
+        type: 'object',
+        properties: {
+          workspaceRoot: { type: 'string', description: '可选：当前 active workspace 内的根目录' },
+        },
+        required: [],
+        additionalProperties: false,
+      };
+    case 'codegraph_index':
+      return {
+        type: 'object',
+        properties: {
+          workspaceRoot: { type: 'string', description: '可选：当前 active workspace 内的根目录' },
+          path: { type: 'string', description: '可选：只索引 active workspace 内的子路径' },
+          force: { type: 'boolean', description: '是否强制重新索引' },
+        },
+        required: [],
+        additionalProperties: false,
+      };
+    case 'codegraph_search':
+      return {
+        type: 'object',
+        properties: {
+          workspaceRoot: { type: 'string', description: '可选：当前 active workspace 内的根目录' },
+          query: { type: 'string', description: '符号名称或部分名称' },
+          kind: {
+            type: 'string',
+            enum: [
+              'function',
+              'method',
+              'class',
+              'interface',
+              'type',
+              'variable',
+              'route',
+              'component',
+            ],
+          },
+          limit: { type: 'integer', minimum: 1, maximum: 100 },
+        },
+        required: ['query'],
+        additionalProperties: false,
+      };
+    case 'codegraph_node':
+      return {
+        type: 'object',
+        properties: {
+          workspaceRoot: { type: 'string', description: '可选：当前 active workspace 内的根目录' },
+          symbol: { type: 'string', description: '要查看的符号名' },
+          file: {
+            type: 'string',
+            description: 'active workspace 内的文件路径，用于文件模式或消歧',
+          },
+          includeCode: { type: 'boolean' },
+          offset: { type: 'integer', minimum: 1 },
+          limit: { type: 'integer', minimum: 1, maximum: 2000 },
+          symbolsOnly: { type: 'boolean' },
+        },
+        required: [],
+        anyOf: [{ required: ['symbol'] }, { required: ['file'] }],
+        additionalProperties: false,
+      };
+    case 'codegraph_callers':
+      return {
+        type: 'object',
+        properties: {
+          workspaceRoot: { type: 'string', description: '可选：当前 active workspace 内的根目录' },
+          symbol: { type: 'string', description: '要查找调用方的符号名' },
+          file: { type: 'string', description: 'active workspace 内的文件路径，用于消歧' },
+          limit: { type: 'integer', minimum: 1, maximum: 100 },
+        },
+        required: ['symbol'],
+        additionalProperties: false,
+      };
+    case 'codegraph_impact':
+      return {
+        type: 'object',
+        properties: {
+          workspaceRoot: { type: 'string', description: '可选：当前 active workspace 内的根目录' },
+          symbol: { type: 'string', description: '影响面遍历起点符号' },
+          file: { type: 'string', description: 'active workspace 内的文件路径，用于消歧' },
+          maxDepth: { type: 'integer', minimum: 1, maximum: 5 },
+          maxResults: { type: 'integer', minimum: 1, maximum: 100 },
+        },
+        required: ['symbol'],
         additionalProperties: false,
       };
     case 'task_create':

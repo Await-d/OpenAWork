@@ -18,9 +18,9 @@ import {
   listMemories,
   readMemorySettings,
   updateMemory,
-  upsertExtractedMemories,
   writeMemorySettings,
 } from '../memory/memory-store.js';
+import { upsertExtractedMemories } from '../memory/memory-extraction-store.js';
 import { sqliteGet } from '../infra/db.js';
 import { buildMemoryExtractionTextForSession } from '../memory/memory-runtime.js';
 import { scanMemoryWriteContent } from '../memory/memory-security-scanner.js';
@@ -254,13 +254,23 @@ export async function memoriesRoutes(app: FastifyInstance): Promise<void> {
 
       const candidates = extractMemoriesFromText(extractionText);
       const workspaceRoot = readWorkspaceRootFromSessionMetadata(session?.metadata_json);
-      const result = upsertExtractedMemories(user.sub, candidates, workspaceRoot);
-      step.succeed(undefined, { ...result, candidates: candidates.length });
-      return reply.send({
+      const settings = readMemorySettings(user.sub);
+      const result = upsertExtractedMemories(user.sub, candidates, workspaceRoot, settings);
+      const extractionSummary = {
+        blocked: result.blocked,
         candidates: candidates.length,
+        created: result.created,
+        duplicates: result.duplicates,
+        rejected: result.rejected,
+        reviewed: result.reviewed,
+        updated: result.updated,
+      };
+
+      step.succeed(undefined, extractionSummary);
+      return reply.send({
         extracted: result.created + result.updated,
         extractedFromSessionId,
-        ...result,
+        ...extractionSummary,
       });
     },
   );

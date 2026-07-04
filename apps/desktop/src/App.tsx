@@ -302,7 +302,7 @@ export default function App() {
             path="/settings/:tab?"
             element={
               <ProtectedRoute>
-                <SettingsPage onCheckDesktopUpdates={() => setShowUpdateDialog(true)} />
+                <SettingsPage />
               </ProtectedRoute>
             }
           />

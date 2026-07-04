@@ -5,8 +5,8 @@ import {
   insertExtractionLog,
   listEnabledMemoriesForInjection,
   readMemorySettings,
-  upsertExtractedMemories,
 } from './memory-store.js';
+import { upsertExtractedMemories } from './memory-extraction-store.js';
 import {
   listSessionMessagesByRequestScope,
   listSessionMessagesV2,
@@ -83,25 +83,57 @@ export function autoExtractMemoriesForRequest(input: {
   metadataJson: string;
   sessionId: string;
   userId: string;
-}): { created: number; duplicates: number; skipped: boolean; updated: number } {
+}): {
+  blocked: number;
+  created: number;
+  duplicates: number;
+  rejected: number;
+  reviewed: number;
+  skipped: boolean;
+  updated: number;
+} {
   const settings = readMemorySettings(input.userId);
   if (!settings.enabled || !settings.autoExtract) {
-    return { created: 0, duplicates: 0, skipped: true, updated: 0 };
+    return {
+      blocked: 0,
+      created: 0,
+      duplicates: 0,
+      rejected: 0,
+      reviewed: 0,
+      skipped: true,
+      updated: 0,
+    };
   }
 
   if (hasExtractionLog(input.userId, input.sessionId, input.clientRequestId)) {
-    return { created: 0, duplicates: 0, skipped: true, updated: 0 };
+    return {
+      blocked: 0,
+      created: 0,
+      duplicates: 0,
+      rejected: 0,
+      reviewed: 0,
+      skipped: true,
+      updated: 0,
+    };
   }
 
   const text = buildMemoryExtractionTextForRequest(input);
   if (text.trim().length === 0) {
     insertExtractionLog(input.userId, input.sessionId, input.clientRequestId, 0);
-    return { created: 0, duplicates: 0, skipped: true, updated: 0 };
+    return {
+      blocked: 0,
+      created: 0,
+      duplicates: 0,
+      rejected: 0,
+      reviewed: 0,
+      skipped: true,
+      updated: 0,
+    };
   }
 
   const workspaceRoot = readWorkspaceRootFromMetadata(input.metadataJson);
   const candidates = extractMemoriesFromText(text);
-  const result = upsertExtractedMemories(input.userId, candidates, workspaceRoot);
+  const result = upsertExtractedMemories(input.userId, candidates, workspaceRoot, settings);
   insertExtractionLog(
     input.userId,
     input.sessionId,
@@ -109,8 +141,11 @@ export function autoExtractMemoriesForRequest(input: {
     result.created + result.updated,
   );
   return {
+    blocked: result.blocked,
     created: result.created,
     duplicates: result.duplicates,
+    rejected: result.rejected,
+    reviewed: result.reviewed,
     skipped: false,
     updated: result.updated,
   };

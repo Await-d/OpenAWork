@@ -1,5 +1,11 @@
 import React from 'react';
-import { RootCausePanel, type DevEvent, type WorkerEntry } from '@openAwork/shared-ui';
+import {
+  RootCausePanel,
+  SSHConnectionPanel,
+  type DevEvent,
+  type SSHConnectionEntry,
+  type WorkerEntry,
+} from '@openAwork/shared-ui';
 import type {
   DevtoolsSourceKey,
   DevtoolsSourceState,
@@ -31,9 +37,16 @@ import { DevtoolsDiagnosticsSection } from './devtools-diagnostics-section.js';
 import {
   buildErrorExportPayload,
   buildErrorExportMarkdown,
+  buildErrorReportHtml,
   triggerDownload,
 } from './devtools-error-command.js';
 import { DevtoolsLogsSection } from './devtools-logs-section.js';
+
+declare const __APP_VERSION__: string;
+declare const __APP_BUILD_VERSION__: string;
+declare const __APP_BUILD_TIME__: string;
+declare const __APP_GIT_HASH__: string;
+declare const __APP_GIT_BRANCH__: string;
 
 interface DevtoolsTabContentProps {
   devLogs: SettingsDevLogRecord[];
@@ -48,6 +61,10 @@ interface DevtoolsTabContentProps {
   onExportLogs: () => void;
   onRefreshAllSources: () => void;
   onRefreshSource: (key: DevtoolsSourceKey) => void;
+  sshConnections: SSHConnectionEntry[];
+  onAddSshConnection: (entry: Omit<SSHConnectionEntry, 'id' | 'status'>) => void;
+  onConnectSsh: (id: string) => void;
+  onDisconnectSsh: (id: string) => void;
 }
 
 async function copyToClipboard(text: string): Promise<boolean> {
@@ -76,6 +93,10 @@ export function DevtoolsTabContent({
   onExportLogs,
   onRefreshAllSources,
   onRefreshSource,
+  sshConnections,
+  onAddSshConnection,
+  onConnectSsh,
+  onDisconnectSsh,
 }: DevtoolsTabContentProps) {
   const overviewSectionRef = React.useRef<HTMLDivElement | null>(null);
   const diagnosticsSectionRef = React.useRef<HTMLDivElement | null>(null);
@@ -96,6 +117,7 @@ export function DevtoolsTabContent({
   const [copiedWorkerAction, setCopiedWorkerAction] = React.useState<string | null>(null);
   const copiedWorkerTimeoutRef = React.useRef<number | null>(null);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = React.useState(false);
+  const [lastGlobalRefreshAt, setLastGlobalRefreshAt] = React.useState<number | null>(null);
   const sourceList = Object.values(sourceStates);
   const anyRefreshableSourceLoading = [
     sourceStates.devLogs.status,
@@ -305,6 +327,7 @@ export function DevtoolsTabContent({
 
     const intervalId = window.setInterval(() => {
       if (!anyRefreshableSourceLoading) {
+        setLastGlobalRefreshAt(Date.now());
         onRefreshAllSources();
       }
     }, 30000);
@@ -594,6 +617,77 @@ export function DevtoolsTabContent({
     filteredWorkers,
   ]);
 
+  const exportErrorReport = React.useCallback(() => {
+    if (
+      filteredDiagnostics.length === 0 &&
+      selectedDiagnostic === null &&
+      relatedLogs.length === 0 &&
+      devLogs.filter((log) => log.level === 'error').length === 0
+    ) {
+      return;
+    }
+
+    let appVersion = 'dev';
+    let buildVersion = 'dev';
+    let buildTime = 'unknown';
+    let gitHash = 'unknown';
+    let gitBranch = 'unknown';
+
+    try {
+      appVersion = __APP_VERSION__;
+    } catch (_e) {
+      // 降级为 dev
+    }
+    try {
+      buildVersion = __APP_BUILD_VERSION__;
+    } catch (_e) {
+      // 降级
+    }
+    try {
+      buildTime = __APP_BUILD_TIME__;
+    } catch (_e) {
+      // 降级
+    }
+    try {
+      gitHash = __APP_GIT_HASH__;
+    } catch (_e) {
+      // 降级
+    }
+    try {
+      gitBranch = __APP_GIT_BRANCH__;
+    } catch (_e) {
+      // 降级
+    }
+
+    const html = buildErrorReportHtml({
+      diagnostics,
+      filteredDiagnostics,
+      selectedDiagnostic,
+      relatedLogs,
+      allLogs: devLogs,
+      workers,
+      sourceStates,
+      appVersion,
+      buildVersion,
+      buildTime,
+      gitHash,
+      gitBranch,
+      platform: typeof navigator !== 'undefined' ? navigator.platform : 'unknown',
+      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 200) : 'unknown',
+      gatewayUrl: sourceStates.devLogs.endpoint,
+    });
+
+    triggerDownload(html, 'text/html', `openawork-error-report-${Date.now()}.html`);
+  }, [
+    devLogs,
+    diagnostics,
+    filteredDiagnostics,
+    relatedLogs,
+    selectedDiagnostic,
+    sourceStates,
+    workers,
+  ]);
+
   return (
     <>
       <DevtoolsToolbarSection
@@ -603,21 +697,34 @@ export function DevtoolsTabContent({
           diagnostics: filteredDiagnostics.length,
           errorSources: errorSources.length,
           logs: filteredLogs.length,
-          sshConnections: 0,
+          sshConnections: sshConnections.length,
           workers: workers.length,
         }}
+        errorCount={filteredDiagnostics.length + logErrors + workerErrors}
+        lastGlobalRefreshAt={lastGlobalRefreshAt}
         workerErrors={workerErrors}
         onExportDebugBundle={exportDebugBundle}
+        onExportErrorReport={() => {
+          void exportErrorReport();
+        }}
         onExportMarkdownBundle={exportDebugBundleAsMarkdown}
-        onRefreshAllSources={onRefreshAllSources}
+        onRefreshAllSources={() => {
+          setLastGlobalRefreshAt(Date.now());
+          onRefreshAllSources();
+        }}
         onScrollToSection={scrollToSection}
         onToggleAutoRefresh={() => setAutoRefreshEnabled((prev) => !prev)}
       />
 
       <section ref={overviewSectionRef} style={SS}>
         <h3 style={ST}>数据源概览</h3>
-        <div style={{ fontSize: 11, color: 'var(--fg-muted)', maxWidth: 760 }}>
-          哪个数据源失败，再往下钻日志、诊断和远程连接细节。
+        <div style={{ fontSize: 11, color: 'var(--fg-muted)', maxWidth: 760, lineHeight: 1.6 }}>
+          以下展示各数据源的实时健康状态。点击数据源卡片中的刷新按钮可单独刷新，也可使用工具栏的「刷新」按钮批量刷新。
+          {errorSources.length > 0 ? (
+            <span style={{ color: 'var(--danger)', fontWeight: 600, marginLeft: 4 }}>
+              当前有 {errorSources.length} 个数据源失败，请优先排查。
+            </span>
+          ) : null}
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {[
@@ -632,11 +739,21 @@ export function DevtoolsTabContent({
               style={{
                 borderRadius: 999,
                 padding: '3px 8px',
-                background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base))',
-                border: '1px solid var(--border-default)',
+                background:
+                  item.value > 0 &&
+                  (item.color === 'var(--danger)' || item.color === 'var(--warning)')
+                    ? `color-mix(in srgb, ${item.color} 10%, var(--bg-overlay))`
+                    : 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base))',
+                border:
+                  item.value > 0 &&
+                  (item.color === 'var(--danger)' || item.color === 'var(--warning)')
+                    ? `1px solid color-mix(in srgb, ${item.color} 30%, var(--border-default))`
+                    : '1px solid var(--border-default)',
                 fontSize: 11,
-                color: item.color,
+                color: item.value > 0 ? item.color : 'var(--fg-subtle)',
                 fontWeight: 600,
+                fontVariantNumeric: 'tabular-nums',
+                opacity: item.value > 0 ? 1 : 0.6,
               }}
             >
               {item.label} {item.value}
@@ -759,6 +876,9 @@ export function DevtoolsTabContent({
             `error-export-${Date.now()}.md`,
           );
         }}
+        onExportErrorReport={() => {
+          void exportErrorReport();
+        }}
         onScrollToLogs={() => {
           const hasVisibleRelatedLogs = relatedLogs.some((relatedLog) =>
             filteredLogs.some((visibleLog) => buildLogKey(visibleLog) === buildLogKey(relatedLog)),
@@ -829,6 +949,39 @@ export function DevtoolsTabContent({
           workerQuery={workerQuery}
           workers={workers}
         />
+      </section>
+
+      <section ref={sshSectionRef} style={SS}>
+        <h3 style={ST}>SSH 远程连接</h3>
+        {sourceStates.sshConnections.status === 'error' && sourceStates.sshConnections.error ? (
+          <InlineFailureNotice
+            title="SSH 连接加载失败"
+            message={sourceStates.sshConnections.error}
+          />
+        ) : null}
+        <div
+          style={{
+            fontSize: 11,
+            color: 'var(--fg-muted)',
+            maxWidth: 760,
+            lineHeight: 1.6,
+          }}
+        >
+          管理远程 SSH 连接，连接成功后可浏览远程文件树并与远程会话绑定。
+          {sshConnections.length > 0 ? (
+            <span style={{ marginLeft: 6, color: 'var(--accent)', fontWeight: 600 }}>
+              当前 {sshConnections.length} 个连接
+            </span>
+          ) : null}
+        </div>
+        <div style={UV}>
+          <SSHConnectionPanel
+            connections={sshConnections}
+            onAdd={onAddSshConnection}
+            onConnect={onConnectSsh}
+            onDisconnect={onDisconnectSsh}
+          />
+        </div>
       </section>
     </>
   );

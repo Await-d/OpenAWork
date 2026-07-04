@@ -4,12 +4,13 @@ import { randomUUID } from 'node:crypto';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
-import { startRequestWorkflow } from '../runtime/request-workflow.js';
-import { extractMessageText } from '../session/session-message-store.js';
 import { listSessionMessagesV2 } from '../message/message-v2-adapter.js';
+import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
+import { extractMessageText } from '../session/session-message-store.js';
 import { runSessionInBackground } from '../routes/stream-runtime.js';
 import { AutoReplyPipeline } from './auto-reply.js';
+import { listChannelConversations } from './channel-conversations.js';
 import { createPartialTextQueue } from './partial-text-queue.js';
 import { resolveSendableChannel } from './channel-access.js';
 import { CHANNEL_DESCRIPTORS } from './descriptors.js';
@@ -46,6 +47,13 @@ const channels = new Map<string, ChannelInstance>();
 const channelSendBodySchema = z.object({
   chatId: z.string().min(1),
   content: z.string().min(1),
+});
+const channelConversationsQuerySchema = z.object({
+  limit: z.coerce.number().min(1).max(100).default(20),
+  offset: z.coerce.number().min(0).default(0),
+});
+const channelRouteParamsSchema = z.object({
+  id: z.string().min(1),
 });
 
 function buildChannelSessionMetadata(
@@ -506,6 +514,43 @@ export async function channelRoutes(app: FastifyInstance): Promise<void> {
       const groups = await service.listGroups();
       step.succeed(undefined, { channelId: id, count: groups.length });
       return reply.send({ groups });
+    },
+  );
+
+  app.get(
+    '/channels/:id/conversations',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const parsedParams = channelRouteParamsSchema.safeParse(request.params);
+      if (!parsedParams.success) {
+        return reply.status(400).send({ error: 'Invalid channel id' });
+      }
+
+      const { id } = parsedParams.data;
+      const { step } = startRequestWorkflow(request, 'channel.list-conversations', undefined, {
+        channelId: id,
+      });
+      const parsedQuery = channelConversationsQuerySchema.safeParse(request.query);
+      if (!parsedQuery.success) {
+        step.fail('invalid input');
+        return reply.status(400).send({ error: 'Invalid input', issues: parsedQuery.error.issues });
+      }
+
+      const user = request.user as JwtPayload;
+      const instance = resolveUserChannels(user.sub).find((channel) => channel.id === id);
+      if (!instance) {
+        step.fail('channel not found');
+        return reply.status(404).send({ error: 'Channel not found' });
+      }
+
+      const conversations = listChannelConversations({
+        channel: instance,
+        limit: parsedQuery.data.limit,
+        offset: parsedQuery.data.offset,
+        userId: user.sub,
+      });
+      step.succeed(undefined, { channelId: id, count: conversations.length });
+      return reply.send({ conversations });
     },
   );
 

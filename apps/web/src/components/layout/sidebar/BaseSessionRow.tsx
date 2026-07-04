@@ -260,7 +260,8 @@ export function BaseSessionRow({
         borderRadius: 10,
         border: '1px solid transparent',
         cursor: 'pointer',
-        transition: 'background 160ms cubic-bezier(0.4, 0, 0.2, 1), border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease',
+        transition:
+          'background 160ms cubic-bezier(0.4, 0, 0.2, 1), border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease',
         outline: 'none',
         position: 'relative',
         background: active

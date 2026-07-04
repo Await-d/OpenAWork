@@ -12,10 +12,10 @@
 .tool-call-batch {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   border: 1px solid color-mix(in oklch, var(--border-default) 70%, transparent);
   border-radius: 6px;
-  padding: 6px 8px;
+  padding: 5px 8px;
   background: var(--bg-overlay);
 }
 
@@ -69,7 +69,7 @@
 .tool-call-batch-children {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
 
 .tool-call-batch-child {
@@ -97,6 +97,7 @@
   text-align: left;
   cursor: pointer;
   min-width: 0;
+  flex-wrap: nowrap;
   transition: background-color 120ms ease;
 }
 

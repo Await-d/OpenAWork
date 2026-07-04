@@ -564,11 +564,10 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
 
   const contentColumnStyle: CSSProperties = {
     width: '100%',
-    // team 对话区两边铺满（与 chat 的窄体居中区别开）：非 compact/editor 模式下
-    // 不再限制 maxWidth=768 + margin auto，而是占满可用宽度。editorMode（分屏编辑）
-    // 仍保留较窄的 680 居中以给编辑器让位；compact（抽屉等受限嵌入）保持 100%。
-    maxWidth: editorMode ? 680 : '100%',
-    margin: editorMode ? '0 auto' : 0,
+    // 与 chat 页面对齐：内容列居中、限制最大宽度，让消息流在宽屏下不会过度拉伸。
+    // compact（抽屉等受限嵌入）保持 100% 铺满；editorMode（分屏编辑）较窄居中。
+    maxWidth: compact ? '100%' : editorMode ? 720 : 1024,
+    margin: compact ? 0 : '0 auto',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'stretch',

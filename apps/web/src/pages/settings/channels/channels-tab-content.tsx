@@ -10,7 +10,7 @@ import type {
 } from '../../../components/common/display/ChannelSubscriptionSettings.js';
 import { ChannelSubscriptionSettings } from '../../../components/common/display/ChannelSubscriptionSettings.js';
 import { logger } from '../../../utils/log/logger.js';
-import { SS, UV } from '../shared/settings-section-styles.js';
+import { ChannelConversationHistoryPanel } from './channel-conversation-history-panel.js';
 
 interface ChannelsTabContentProps {
   channels: ChannelSettingsEntry[];
@@ -186,43 +186,83 @@ export function ChannelsTabContent({
   };
 
   return (
-    <>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: '1.5rem' }}>
-        <h2 style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)', flex: 1 }}>
-          消息频道
-        </h2>
-        {connectedCount > 0 && <StatusPill label={`${connectedCount} 已连接`} color="success" />}
-        {disconnectedCount > 0 && (
-          <StatusPill label={`${disconnectedCount} 未连接`} color="muted" />
-        )}
-      </div>
-      <section style={SS}>
-        {loadError ? (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 16,
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div
             style={{
-              ...UV,
-              marginBottom: 12,
-              color: 'var(--danger)',
-              fontSize: 12,
-              fontWeight: 600,
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+              color: 'var(--accent)',
+              marginBottom: 4,
             }}
           >
-            {loadError}
+            Channels
           </div>
-        ) : null}
-        <div style={UV}>
-          <ChannelSubscriptionSettings
-            channels={channels}
-            descriptors={descriptors}
-            providers={providers}
-            onSave={saveChannel}
-            onConnect={connectChannel}
-            onDisconnect={disconnectChannel}
-            onDelete={deleteChannel}
-            onRefreshTargets={refreshTargets}
-          />
+          <h2
+            style={{
+              fontSize: 16,
+              fontWeight: 700,
+              color: 'var(--fg-strong)',
+              letterSpacing: '-0.01em',
+              margin: 0,
+            }}
+          >
+            消息频道
+          </h2>
+          <p
+            style={{
+              fontSize: 12,
+              color: 'var(--fg-muted)',
+              margin: '6px 0 0',
+              lineHeight: 1.5,
+            }}
+          >
+            配置 Telegram、Discord、飞书、钉钉等消息平台渠道，绑定模型与工具权限。
+          </p>
         </div>
-      </section>
-    </>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          {connectedCount > 0 && <StatusPill label={`${connectedCount} 已连接`} color="success" />}
+          {disconnectedCount > 0 && (
+            <StatusPill label={`${disconnectedCount} 未连接`} color="muted" />
+          )}
+        </div>
+      </div>
+      {loadError ? (
+        <div
+          style={{
+            padding: '12px 16px',
+            borderRadius: 10,
+            border: '1px solid var(--complement-border)',
+            background: 'var(--complement-subtle)',
+            color: 'var(--complement)',
+            fontSize: 13,
+            fontWeight: 500,
+            lineHeight: 1.5,
+          }}
+        >
+          {loadError}
+        </div>
+      ) : null}
+      <ChannelSubscriptionSettings
+        channels={channels}
+        descriptors={descriptors}
+        providers={providers}
+        onSave={saveChannel}
+        onConnect={connectChannel}
+        onDisconnect={disconnectChannel}
+        onDelete={deleteChannel}
+        onRefreshTargets={refreshTargets}
+      />
+      <ChannelConversationHistoryPanel channels={channels} gatewayUrl={gatewayUrl} token={token} />
+    </div>
   );
 }

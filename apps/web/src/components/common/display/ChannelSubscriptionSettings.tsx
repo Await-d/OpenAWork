@@ -717,8 +717,7 @@ export function ChannelSubscriptionSettings({
             <div>
               <h3 className="channel-sidebar__title">渠道模板库</h3>
               <p className="channel-sidebar__description">
-                借鉴 OpenCowork
-                的使用方式：先选择平台模板，再围绕配置、模型、工具与权限完成一站式接入。
+                选择平台模板，围绕配置、模型、工具与权限完成一站式接入。
               </p>
             </div>
             <span className="channel-chip">{channels.length} 个实例</span>
@@ -829,8 +828,8 @@ export function ChannelSubscriptionSettings({
               <div className="channel-panel__eyebrow">Ready to Configure</div>
               <h3 className="channel-panel__title">选择一个渠道模板开始配置</h3>
               <p className="channel-panel__description">
-                左侧模板库会按照国内 /
-                国际平台分组展示。保存实例后，你就可以在这里继续管理启停、模型覆盖、权限与订阅目标。
+                左侧模板库按国内 /
+                国际平台分组展示。保存实例后，即可管理启停、模型覆盖、权限与订阅目标。
               </p>
             </div>
           </div>
@@ -1067,8 +1066,7 @@ export function ChannelSubscriptionSettings({
                   <div>
                     <h4 className="channel-section__title">运行策略</h4>
                     <div className="channel-muted">
-                      沿用 OpenCowork
-                      的核心思路：通道本身决定是否自动回复、是否流式返回以及是否自启动。
+                      通道本身决定是否自动回复、是否流式返回以及是否自启动。
                     </div>
                   </div>
                 </div>

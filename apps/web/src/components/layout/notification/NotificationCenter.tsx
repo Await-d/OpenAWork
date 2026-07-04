@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router';
 import {
   createNotificationsClient,
@@ -17,6 +18,11 @@ import type {
 import { subscribeNotificationPreferenceRefresh } from '../../../utils/chat/notification-preference-events.js';
 import { preloadRouteModuleByPath } from '../../../routes/preloadable-route-modules.js';
 import { toast } from '../../common/feedback/ToastNotification.js';
+import { BellIcon } from './notification-icons.js';
+import { NotificationPanel } from './NotificationPanel.js';
+import { parsePermissionNotificationBody } from './NotificationItem.js';
+
+// ── Types ──────────────────────────────────────────────────────
 
 type NotificationPreferenceMap = Record<NotificationPreferenceEventType, boolean>;
 
@@ -29,45 +35,11 @@ const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferenceMap = {
 function toNotificationPreferenceMap(
   records: NotificationPreferenceRecord[],
 ): NotificationPreferenceMap {
-  const nextPreferences: NotificationPreferenceMap = { ...DEFAULT_NOTIFICATION_PREFERENCES };
+  const next: NotificationPreferenceMap = { ...DEFAULT_NOTIFICATION_PREFERENCES };
   records.forEach((record) => {
-    nextPreferences[record.eventType] = record.enabled;
+    next[record.eventType] = record.enabled;
   });
-  return nextPreferences;
-}
-
-interface NotificationTypeMeta {
-  bg: string;
-  color: string;
-  label: string;
-}
-
-const NOTIFICATION_TYPE_META: Record<string, NotificationTypeMeta> = {
-  permission_asked: {
-    bg: 'rgba(245, 158, 11, 0.12)',
-    color: 'var(--warning)',
-    label: '权限请求',
-  },
-  question_asked: {
-    bg: 'rgba(59, 130, 246, 0.12)',
-    color: 'var(--aux)',
-    label: '提问',
-  },
-  task_update: {
-    bg: 'rgba(16, 185, 129, 0.12)',
-    color: 'var(--success)',
-    label: '任务',
-  },
-};
-
-const NOTIFICATION_TYPE_FALLBACK: NotificationTypeMeta = {
-  bg: 'rgba(148, 163, 184, 0.16)',
-  color: 'var(--fg-default)',
-  label: '通知',
-};
-
-function getNotificationTypeMeta(eventType: string): NotificationTypeMeta {
-  return NOTIFICATION_TYPE_META[eventType] ?? NOTIFICATION_TYPE_FALLBACK;
+  return next;
 }
 
 function isBrowserNotificationEnabled(
@@ -81,57 +53,20 @@ function isBrowserNotificationEnabled(
   ) {
     return preferences[eventType];
   }
-
   return true;
 }
 
-interface ParsedPermissionBody {
-  reason: string;
-  previewAction: string;
-  scope: string;
-  riskLevel: string;
-}
-
-/**
- * Parse the structured notification body for permission_asked events.
- * Format: "reason\npreviewAction\nscope\nriskLevel"
- * Falls back gracefully for legacy notifications that only have a single line.
- */
-function parsePermissionNotificationBody(body: string): ParsedPermissionBody | null {
-  const lines = body.split('\n');
-  if (lines.length < 2) {
-    return null;
-  }
-  return {
-    reason: lines[0] ?? '',
-    previewAction: lines[1] ?? '',
-    scope: lines[2] ?? '',
-    riskLevel: lines[3] ?? '',
-  };
-}
+// ── Props ──────────────────────────────────────────────────────
 
 interface NotificationCenterProps {
   accessToken: string | null;
   gatewayUrl: string;
-  /**
-   * Whether to show a small pulsing dot when there is a pending permission
-   * but no unread notifications. Kept compatible with the previous topbar
-   * behaviour.
-   */
   pendingPermissionIndicator?: boolean;
-  /**
-   * Optional inline style override applied to the label span. Used by the
-   * surrounding NavRail to force the label hidden/visible regardless of the
-   * CSS media query. When omitted the label follows the global
-   * `.nav-rail-label` rules.
-   */
   labelStyleOverride?: React.CSSProperties;
-  /**
-   * Whether the nav rail is in expanded state. Used to align padding and
-   * justifyContent with sibling items.
-   */
   expanded?: boolean;
 }
+
+// ── Component ──────────────────────────────────────────────────
 
 export default function NotificationCenter({
   accessToken,
@@ -147,6 +82,7 @@ export default function NotificationCenter({
 
   const [open, setOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
+  const [loading, setLoading] = useState(false);
   const [preferences, setPreferences] = useState<NotificationPreferenceMap>(
     DEFAULT_NOTIFICATION_PREFERENCES,
   );
@@ -155,6 +91,8 @@ export default function NotificationCenter({
   const preferencesRef = useRef<NotificationPreferenceMap>(DEFAULT_NOTIFICATION_PREFERENCES);
   const abortRef = useRef<AbortController | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const [panelPos, setPanelPos] = useState<{ bottom: number; left: number } | null>(null);
 
   useEffect(() => {
     preferencesRef.current = preferences;
@@ -162,19 +100,21 @@ export default function NotificationCenter({
 
   // Close on outside click / Escape.
   useEffect(() => {
-    if (!open) {
-      return;
-    }
+    if (!open) return;
     const handlePointerDown = (event: MouseEvent) => {
       const container = containerRef.current;
-      if (container && event.target instanceof Node && !container.contains(event.target)) {
+      const panel = document.getElementById('nc-panel-portal');
+      if (
+        container &&
+        event.target instanceof Node &&
+        !container.contains(event.target) &&
+        !(panel && panel.contains(event.target))
+      ) {
         setOpen(false);
       }
     };
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setOpen(false);
-      }
+      if (event.key === 'Escape') setOpen(false);
     };
     document.addEventListener('mousedown', handlePointerDown);
     document.addEventListener('keydown', handleKeyDown);
@@ -184,12 +124,60 @@ export default function NotificationCenter({
     };
   }, [open]);
 
+  // Compute panel position from trigger button rect.
+  // Panel opens to the right of the button, bottom-aligned to the button's bottom edge.
+  // Using CSS `bottom` so the panel's actual bottom edge sits exactly at the button's
+  // bottom edge regardless of the panel's content height.
+  const computePanelPos = useCallback(() => {
+    const btn = triggerRef.current;
+    if (!btn) return;
+    const rect = btn.getBoundingClientRect();
+    const PANEL_MAX_HEIGHT = 520;
+    const PANEL_WIDTH = 380;
+    const MARGIN = 8;
+
+    // Horizontal: place to the right of the button; if not enough space, place to the left.
+    let left = rect.right + MARGIN;
+    if (left + PANEL_WIDTH > window.innerWidth - MARGIN) {
+      left = rect.left - PANEL_WIDTH - MARGIN;
+    }
+
+    // Vertical: bottom-align panel to the button's bottom edge.
+    // `bottom` in fixed positioning = distance from viewport bottom.
+    // So bottom = window.innerHeight - rect.bottom.
+    const bottom = window.innerHeight - rect.bottom;
+
+    // If the panel's max height would overflow above the viewport top,
+    // clamp bottom so top stays at least MARGIN from the viewport top.
+    // bottom_max = window.innerHeight - MARGIN - PANEL_MAX_HEIGHT
+    const maxBottom = window.innerHeight - MARGIN - PANEL_MAX_HEIGHT;
+    const clampedBottom = Math.min(bottom, maxBottom < MARGIN ? MARGIN : maxBottom);
+
+    setPanelPos({ bottom: clampedBottom, left });
+  }, []);
+
+  useEffect(() => {
+    if (!open) {
+      setPanelPos(null);
+      return;
+    }
+    computePanelPos();
+    const handleResize = () => computePanelPos();
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('scroll', handleResize, true);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('scroll', handleResize, true);
+    };
+  }, [open, computePanelPos]);
+
+  // ── Data loading ────────────────────────────────────────
+
   const loadPreferences = useCallback(async (): Promise<NotificationPreferenceMap> => {
     if (!accessToken) {
       setPreferences(DEFAULT_NOTIFICATION_PREFERENCES);
       return DEFAULT_NOTIFICATION_PREFERENCES;
     }
-
     try {
       const next = toNotificationPreferenceMap(
         await createNotificationsClient(gatewayUrl).listPreferences(accessToken, {
@@ -209,11 +197,11 @@ export default function NotificationCenter({
         setNotifications([]);
         return;
       }
-      if (abortRef.current) {
-        return;
-      }
+      if (abortRef.current) return;
+
       const controller = new AbortController();
       abortRef.current = controller;
+      setLoading(true);
       const effectivePreferences = options?.preferences ?? preferencesRef.current;
       try {
         const next = await createNotificationsClient(gatewayUrl).list(accessToken, {
@@ -221,11 +209,10 @@ export default function NotificationCenter({
           signal: controller.signal,
           status: 'unread',
         });
-        if (controller.signal.aborted) {
-          return;
-        }
+        if (controller.signal.aborted) return;
         setNotifications(next);
 
+        // Browser notification when page hidden
         if (
           typeof window !== 'undefined' &&
           document.visibilityState === 'hidden' &&
@@ -233,13 +220,9 @@ export default function NotificationCenter({
           Notification.permission === 'granted'
         ) {
           next.forEach((item) => {
-            if (seenIdsRef.has(item.id)) {
-              return;
-            }
+            if (seenIdsRef.has(item.id)) return;
             seenIdsRef.add(item.id);
-            if (!isBrowserNotificationEnabled(item.eventType, effectivePreferences)) {
-              return;
-            }
+            if (!isBrowserNotificationEnabled(item.eventType, effectivePreferences)) return;
             new Notification(item.title, {
               body: (() => {
                 if (item.eventType !== 'permission_asked') return item.body;
@@ -253,27 +236,23 @@ export default function NotificationCenter({
             });
           });
         } else {
-          next.forEach((item) => {
-            seenIdsRef.add(item.id);
-          });
+          next.forEach((item) => seenIdsRef.add(item.id));
         }
       } finally {
-        if (abortRef.current === controller) {
-          abortRef.current = null;
-        }
+        if (abortRef.current === controller) abortRef.current = null;
+        setLoading(false);
       }
     },
     [accessToken, gatewayUrl, seenIdsRef],
   );
 
+  // ── Actions ─────────────────────────────────────────────
+
   const handleOpenNotification = useCallback(
     async (notification: NotificationRecord) => {
-      if (!accessToken) {
-        return;
-      }
-
+      if (!accessToken) return;
       await createNotificationsClient(gatewayUrl).markRead(accessToken, notification.id);
-      setNotifications((previous) => previous.filter((item) => item.id !== notification.id));
+      setNotifications((prev) => prev.filter((item) => item.id !== notification.id));
       setOpen(false);
       if (notification.sessionId) {
         preloadRoute('/chat');
@@ -285,10 +264,8 @@ export default function NotificationCenter({
 
   const handleDismissNotification = useCallback(
     async (notification: NotificationRecord) => {
-      if (!accessToken) {
-        return;
-      }
-      setNotifications((previous) => previous.filter((item) => item.id !== notification.id));
+      if (!accessToken) return;
+      setNotifications((prev) => prev.filter((item) => item.id !== notification.id));
       try {
         await createNotificationsClient(gatewayUrl).markRead(accessToken, notification.id);
       } catch {
@@ -299,9 +276,7 @@ export default function NotificationCenter({
   );
 
   const handleMarkAllRead = useCallback(async () => {
-    if (!accessToken) {
-      return;
-    }
+    if (!accessToken) return;
     const previous = notifications;
     setNotifications([]);
     try {
@@ -312,27 +287,18 @@ export default function NotificationCenter({
     }
   }, [accessToken, gatewayUrl, notifications]);
 
-  // --- Session title cache for showing source info ---
+  // ── Session title cache ────────────────────────────────
+
   const [sessionTitles, setSessionTitles] = useState<Record<string, string>>({});
   const sessionTitleFetchedRef = useRef<Set<string>>(new Set());
 
-  // --- Permission details cache for three-level display ---
-  const [permissionDetails, setPermissionDetails] = useState<
-    Record<string, PendingPermissionRequest>
-  >({});
-  const permissionDetailsFetchedRef = useRef<Set<string>>(new Set());
-
   useEffect(() => {
-    if (!accessToken) {
-      return;
-    }
+    if (!accessToken) return;
     const sessionIds = notifications
       .filter((n) => n.sessionId && !sessionTitleFetchedRef.current.has(n.sessionId))
       .map((n) => n.sessionId as string);
     const unique = [...new Set(sessionIds)];
-    if (unique.length === 0) {
-      return;
-    }
+    if (unique.length === 0) return;
     unique.forEach((id) => sessionTitleFetchedRef.current.add(id));
     const client = createSessionsClient(gatewayUrl);
     unique.forEach((sessionId) => {
@@ -347,23 +313,24 @@ export default function NotificationCenter({
     });
   }, [accessToken, gatewayUrl, notifications]);
 
-  // Fetch pending permission details for permission_asked notifications
+  // ── Permission details cache ───────────────────────────
+
+  const [permissionDetails, setPermissionDetails] = useState<
+    Record<string, PendingPermissionRequest>
+  >({});
+  const permissionDetailsFetchedRef = useRef<Set<string>>(new Set());
+
   useEffect(() => {
-    if (!accessToken) {
-      return;
-    }
+    if (!accessToken) return;
     const permNotifications = notifications.filter(
       (n) =>
         n.eventType === 'permission_asked' &&
         n.sessionId &&
         !permissionDetailsFetchedRef.current.has(n.id),
     );
-    if (permNotifications.length === 0) {
-      return;
-    }
+    if (permNotifications.length === 0) return;
     permNotifications.forEach((n) => permissionDetailsFetchedRef.current.add(n.id));
     const permClient = createPermissionsClient(gatewayUrl);
-    // Group by sessionId to avoid duplicate fetches
     const bySession = new Map<string, NotificationRecord[]>();
     permNotifications.forEach((n) => {
       const list = bySession.get(n.sessionId as string) ?? [];
@@ -376,7 +343,6 @@ export default function NotificationCenter({
         .then((pending) => {
           const firstPending = pending.find((p) => p.status === 'pending');
           if (firstPending) {
-            // Map the first pending permission to all permission notifications for this session
             const updates: Record<string, PendingPermissionRequest> = {};
             notifs.forEach((n) => {
               updates[n.id] = firstPending;
@@ -388,7 +354,8 @@ export default function NotificationCenter({
     });
   }, [accessToken, gatewayUrl, notifications]);
 
-  // --- Quick permission reply ---
+  // ── Quick permission reply ─────────────────────────────
+
   const [replyingIds, setReplyingIds] = useState<Set<string>>(new Set());
   const [selectedScopes, setSelectedScopes] = useState<
     Record<string, AlwaysScopeLevel['category']>
@@ -396,13 +363,10 @@ export default function NotificationCenter({
 
   const handleQuickPermissionReply = useCallback(
     async (notification: NotificationRecord, decision: PermissionDecision) => {
-      if (!accessToken || !notification.sessionId) {
-        return;
-      }
+      if (!accessToken || !notification.sessionId) return;
       setReplyingIds((prev) => new Set(prev).add(notification.id));
       try {
         const permClient = createPermissionsClient(gatewayUrl);
-        // Use cached permission details if available, otherwise fetch
         const details = permissionDetails[notification.id];
         let requestId = details?.requestId;
         if (!requestId) {
@@ -415,7 +379,6 @@ export default function NotificationCenter({
           }
           requestId = firstPending.requestId;
         }
-        // Compute alwaysOverride based on selected scope level
         let alwaysOverride: string[] | undefined;
         if (decision !== 'once' && decision !== 'reject' && details) {
           const levels = categorizeAlwaysPatterns(
@@ -456,7 +419,12 @@ export default function NotificationCenter({
     [accessToken, gatewayUrl, handleDismissNotification, permissionDetails, selectedScopes],
   );
 
-  // Initial fetch + polling.
+  const handleScopeChange = useCallback((id: string, category: AlwaysScopeLevel['category']) => {
+    setSelectedScopes((prev) => ({ ...prev, [id]: category }));
+  }, []);
+
+  // ── Initial fetch + polling ────────────────────────────
+
   useEffect(() => {
     if (!accessToken) {
       setNotifications([]);
@@ -469,13 +437,9 @@ export default function NotificationCenter({
 
     void (async () => {
       const next = await loadPreferences();
-      if (cancelled) {
-        return;
-      }
+      if (cancelled) return;
       await loadNotifications({ preferences: next });
-      if (cancelled) {
-        return;
-      }
+      if (cancelled) return;
       intervalId = window.setInterval(() => {
         void loadNotifications().catch(() => undefined);
       }, 15_000);
@@ -483,9 +447,7 @@ export default function NotificationCenter({
 
     return () => {
       cancelled = true;
-      if (intervalId !== null) {
-        window.clearInterval(intervalId);
-      }
+      if (intervalId !== null) window.clearInterval(intervalId);
       if (abortRef.current) {
         abortRef.current.abort();
         abortRef.current = null;
@@ -499,14 +461,16 @@ export default function NotificationCenter({
     });
   }, [loadPreferences]);
 
-  if (!accessToken) {
-    return null;
-  }
+  if (!accessToken) return null;
+
+  const unreadCount = notifications.length;
 
   return (
     <div style={{ position: 'relative', width: '100%' }} ref={containerRef}>
+      {/* ── Trigger button ─────────────────────────────── */}
       <button
         type="button"
+        ref={triggerRef}
         onClick={() => {
           setOpen((previous) => !previous);
           void loadNotifications().catch(() => undefined);
@@ -523,31 +487,19 @@ export default function NotificationCenter({
           gap: 10,
           padding: expanded ? '0 12px' : '0',
           borderRadius: 9,
-          color: 'var(--fg-muted)',
-          background: 'transparent',
+          color: open ? 'var(--accent)' : 'var(--fg-muted)',
+          background: open ? 'color-mix(in srgb, var(--accent) 8%, transparent)' : 'transparent',
           border: 'none',
           cursor: 'pointer',
           overflow: 'visible',
           fontWeight: 500,
           justifyContent: expanded ? 'flex-start' : 'center',
+          transition: 'color 100ms cubic-bezier(0.4,0,0.2,1), background 100ms',
         }}
       >
-        <span className="nav-rail-icon" style={{ position: 'relative' }}>
-          <svg
-            aria-hidden="true"
-            width="17"
-            height="17"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.75"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M15 17h5l-1.4-1.4a2 2 0 0 1-.6-1.4V11a6 6 0 1 0-12 0v3.2a2 2 0 0 1-.6 1.4L4 17h5" />
-            <path d="M9 17a3 3 0 0 0 6 0" />
-          </svg>
-          {notifications.length > 0 ? (
+        <span className="nav-rail-icon" style={{ position: 'relative', display: 'inline-flex' }}>
+          <BellIcon size={17} />
+          {unreadCount > 0 ? (
             <span
               style={{
                 position: 'absolute',
@@ -565,12 +517,13 @@ export default function NotificationCenter({
                 placeItems: 'center',
                 lineHeight: 1,
                 boxShadow: '0 0 0 2px var(--bg-raised)',
+                animation: 'nc-badge-pop 300ms cubic-bezier(0.34,1.56,0.64,1)',
               }}
             >
-              {notifications.length > 9 ? '9+' : notifications.length}
+              {unreadCount > 9 ? '9+' : unreadCount}
             </span>
           ) : null}
-          {pendingPermissionIndicator && notifications.length === 0 && (
+          {pendingPermissionIndicator && unreadCount === 0 && (
             <span
               style={{
                 position: 'absolute',
@@ -600,527 +553,38 @@ export default function NotificationCenter({
         >
           通知
         </span>
-      </button>{' '}
-      {open ? (
-        <div
-          style={{
-            position: 'absolute',
-            bottom: 0,
-            left: 'calc(100% + 8px)',
-            width: 360,
-            maxHeight: 480,
-            borderRadius: 14,
-            border: '1px solid var(--border-default)',
-            background: 'var(--bg-overlay)',
-            boxShadow: 'var(--shadow-lg)',
-            zIndex: 40,
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              padding: '10px 12px',
-              borderBottom: '1px solid var(--border-subtle)',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-strong)' }}>
-                通知中心
-              </span>
-              <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
-                {notifications.length === 0 ? '已全部清空' : `${notifications.length} 条未读`}
-              </span>
-            </div>
-            <div style={{ display: 'flex', gap: 4 }}>
-              <button
-                type="button"
-                title="刷新"
-                onClick={() => void loadNotifications().catch(() => undefined)}
-                style={{
-                  width: 26,
-                  height: 26,
-                  borderRadius: 6,
-                  border: '1px solid var(--border-subtle)',
-                  background: 'var(--bg-overlay)',
-                  color: 'var(--fg-muted)',
-                  cursor: 'pointer',
-                  display: 'grid',
-                  placeItems: 'center',
-                }}
-              >
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <polyline points="23 4 23 10 17 10" />
-                  <polyline points="1 20 1 14 7 14" />
-                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                disabled={notifications.length === 0}
-                onClick={() => void handleMarkAllRead()}
-                style={{
-                  fontSize: 11,
-                  padding: '4px 8px',
-                  borderRadius: 6,
-                  border: '1px solid var(--border-subtle)',
-                  background:
-                    notifications.length === 0 ? 'var(--bg-overlay)' : 'var(--bg-overlay)',
-                  color: notifications.length === 0 ? 'var(--fg-muted)' : 'var(--fg-default)',
-                  cursor: notifications.length === 0 ? 'not-allowed' : 'pointer',
-                }}
-              >
-                全部已读
-              </button>
-            </div>
-          </div>
-          <div style={{ overflowY: 'auto', padding: 8, display: 'grid', gap: 6 }}>
-            {notifications.length === 0 ? (
-              <div
-                style={{
-                  fontSize: 12,
-                  color: 'var(--fg-muted)',
-                  padding: '24px 8px',
-                  textAlign: 'center',
-                }}
-              >
-                暂无未读通知
-              </div>
-            ) : (
-              notifications.map((notification) => {
-                const typeMeta = getNotificationTypeMeta(notification.eventType);
-                const permDetail = permissionDetails[notification.id];
-                return (
-                  <div
-                    key={notification.id}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => void handleOpenNotification(notification)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        void handleOpenNotification(notification);
-                      }
-                    }}
-                    style={{
-                      position: 'relative',
-                      display: 'grid',
-                      gridTemplateColumns: '4px 1fr',
-                      gap: 10,
-                      padding: '10px 32px 10px 10px',
-                      borderRadius: 10,
-                      border: '1px solid var(--border-subtle)',
-                      background: 'var(--bg-overlay)',
-                      cursor: 'pointer',
-                    }}
-                    className="ui-hover-list-row"
-                  >
-                    <span
-                      aria-hidden="true"
-                      style={{ width: 4, borderRadius: 2, background: typeMeta.color }}
-                    />
-                    <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 6,
-                          flexWrap: 'wrap',
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: 10,
-                            fontWeight: 600,
-                            padding: '1px 6px',
-                            borderRadius: 999,
-                            background: typeMeta.bg,
-                            color: typeMeta.color,
-                          }}
-                        >
-                          {typeMeta.label}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: 12,
-                            fontWeight: 700,
-                            color: 'var(--fg-strong)',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                            minWidth: 0,
-                            flex: 1,
-                          }}
-                          title={notification.title}
-                        >
-                          {notification.title}
-                        </span>
-                      </div>
-                      <span
-                        style={{
-                          fontSize: 12,
-                          color: 'var(--fg-default)',
-                          lineHeight: 1.5,
-                          display:
-                            notification.eventType === 'permission_asked' &&
-                            (permDetail || parsePermissionNotificationBody(notification.body))
-                              ? 'none'
-                              : '-webkit-box',
-                          WebkitLineClamp: 2,
-                          WebkitBoxOrient: 'vertical',
-                          overflow: 'hidden',
-                        }}
-                      >
-                        {notification.body}
-                      </span>
-                      {/* Three-level permission detail display */}
-                      {notification.eventType === 'permission_asked' &&
-                        (() => {
-                          const parsed = permDetail
-                            ? {
-                                toolName: permDetail.toolName,
-                                reason: permDetail.reason,
-                                previewAction: permDetail.previewAction ?? '',
-                                riskLevel: permDetail.riskLevel,
-                              }
-                            : (() => {
-                                const p = parsePermissionNotificationBody(notification.body);
-                                if (!p) return null;
-                                // Extract toolName from title "等待权限 · bash"
-                                const titleMatch = notification.title.match(/·\s*(.+)$/);
-                                return {
-                                  toolName: titleMatch?.[1]?.trim() ?? '',
-                                  reason: p.reason,
-                                  previewAction: p.previewAction,
-                                  riskLevel: p.riskLevel,
-                                };
-                              })();
-                          if (!parsed) return null;
-                          return (
-                            <div
-                              style={{
-                                display: 'flex',
-                                flexDirection: 'column',
-                                gap: 2,
-                                marginTop: 2,
-                                fontSize: 10,
-                              }}
-                            >
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                                <span
-                                  style={{
-                                    width: 5,
-                                    height: 5,
-                                    borderRadius: '50%',
-                                    background: 'var(--warning)',
-                                    flexShrink: 0,
-                                  }}
-                                />
-                                <span style={{ fontWeight: 700, color: 'var(--accent)' }}>
-                                  {parsed.toolName}
-                                </span>
-                                {parsed.riskLevel && (
-                                  <span
-                                    style={{
-                                      fontSize: 9,
-                                      padding: '0 4px',
-                                      borderRadius: 3,
-                                      background:
-                                        parsed.riskLevel === 'high'
-                                          ? 'color-mix(in srgb, var(--danger) 14%, transparent)'
-                                          : parsed.riskLevel === 'medium'
-                                            ? 'color-mix(in srgb, var(--warning) 14%, transparent)'
-                                            : 'color-mix(in srgb, var(--success) 14%, transparent)',
-                                      color:
-                                        parsed.riskLevel === 'high'
-                                          ? 'var(--danger)'
-                                          : parsed.riskLevel === 'medium'
-                                            ? 'var(--warning)'
-                                            : 'var(--success)',
-                                      fontWeight: 600,
-                                    }}
-                                  >
-                                    {parsed.riskLevel}
-                                  </span>
-                                )}
-                              </div>
-                              {parsed.reason && (
-                                <div
-                                  style={{
-                                    marginLeft: 10,
-                                    color: 'var(--fg-default)',
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis',
-                                    whiteSpace: 'nowrap',
-                                  }}
-                                  title={parsed.reason}
-                                >
-                                  {parsed.reason}
-                                </div>
-                              )}
-                              {parsed.previewAction && (
-                                <div
-                                  style={{
-                                    marginLeft: 10,
-                                    color: 'var(--fg-muted)',
-                                    fontFamily: 'var(--font-mono, monospace)',
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis',
-                                    whiteSpace: 'nowrap',
-                                  }}
-                                  title={parsed.previewAction}
-                                >
-                                  {parsed.previewAction}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })()}
-                      <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
-                        {new Date(notification.createdAt).toLocaleString('zh-CN', {
-                          month: 'short',
-                          day: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                        {notification.sessionId && sessionTitles[notification.sessionId] && (
-                          <>
-                            {' · '}
-                            <span title={`来自会话: ${sessionTitles[notification.sessionId]}`}>
-                              {sessionTitles[notification.sessionId]}
-                            </span>
-                          </>
-                        )}
-                      </span>
-                      {notification.eventType === 'permission_asked' && notification.sessionId && (
-                        <div
-                          style={{
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: 5,
-                            marginTop: 2,
-                          }}
-                        >
-                          {permDetail &&
-                            (() => {
-                              const levels = categorizeAlwaysPatterns(
-                                permDetail.previewAction,
-                                permDetail.scope,
-                                permDetail.always,
-                              );
-                              const selectedCategory = selectedScopes[notification.id] ?? 'base';
-                              return (
-                                <div
-                                  style={{
-                                    display: 'flex',
-                                    gap: 4,
-                                    alignItems: 'center',
-                                    flexWrap: 'wrap',
-                                  }}
-                                >
-                                  <span
-                                    style={{ fontSize: 9, color: 'var(--fg-muted)', flexShrink: 0 }}
-                                  >
-                                    范围:
-                                  </span>
-                                  {levels.map((level) => {
-                                    const isSelected = selectedCategory === level.category;
-                                    return (
-                                      <button
-                                        key={level.category}
-                                        type="button"
-                                        onClick={(event) => {
-                                          event.stopPropagation();
-                                          setSelectedScopes((prev) => ({
-                                            ...prev,
-                                            [notification.id]: level.category,
-                                          }));
-                                        }}
-                                        title={`${level.description}: ${level.pattern}`}
-                                        style={{
-                                          fontSize: 9,
-                                          fontWeight: isSelected ? 700 : 500,
-                                          padding: '2px 6px',
-                                          borderRadius: 4,
-                                          border: isSelected
-                                            ? '1px solid var(--accent)'
-                                            : '1px solid var(--border-subtle)',
-                                          background: isSelected
-                                            ? 'color-mix(in srgb, var(--accent) 12%, transparent)'
-                                            : 'transparent',
-                                          color: isSelected ? 'var(--accent)' : 'var(--fg-muted)',
-                                          cursor: 'pointer',
-                                          fontFamily: 'var(--font-mono, monospace)',
-                                          maxWidth: 120,
-                                          overflow: 'hidden',
-                                          textOverflow: 'ellipsis',
-                                          whiteSpace: 'nowrap',
-                                        }}
-                                      >
-                                        {level.label}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              );
-                            })()}
-                          <div
-                            style={{
-                              display: 'flex',
-                              gap: 6,
-                              alignItems: 'center',
-                              flexWrap: 'wrap',
-                            }}
-                          >
-                            <button
-                              type="button"
-                              disabled={replyingIds.has(notification.id)}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                void handleQuickPermissionReply(notification, 'session');
-                              }}
-                              title="仅在当前会话内记住这次授权选择"
-                              style={{
-                                fontSize: 10,
-                                fontWeight: 700,
-                                padding: '3px 8px',
-                                borderRadius: 999,
-                                border: 'none',
-                                background: 'color-mix(in srgb, var(--accent) 18%, transparent)',
-                                color: 'var(--accent)',
-                                cursor: replyingIds.has(notification.id) ? 'wait' : 'pointer',
-                                opacity: replyingIds.has(notification.id) ? 0.55 : 1,
-                              }}
-                            >
-                              本会话允许
-                            </button>
-                            <button
-                              type="button"
-                              disabled={replyingIds.has(notification.id)}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                void handleQuickPermissionReply(notification, 'once');
-                              }}
-                              title="只批准当前这一次工具调用"
-                              style={{
-                                fontSize: 10,
-                                fontWeight: 700,
-                                padding: '3px 8px',
-                                borderRadius: 999,
-                                border: 'none',
-                                background: 'color-mix(in srgb, var(--accent) 10%, transparent)',
-                                color: 'var(--accent)',
-                                cursor: replyingIds.has(notification.id) ? 'wait' : 'pointer',
-                                opacity: replyingIds.has(notification.id) ? 0.55 : 1,
-                              }}
-                            >
-                              允许一次
-                            </button>
-                            <button
-                              type="button"
-                              disabled={replyingIds.has(notification.id)}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                void handleQuickPermissionReply(notification, 'permanent');
-                              }}
-                              title="会记住后续同类请求，请谨慎选择"
-                              style={{
-                                fontSize: 10,
-                                fontWeight: 700,
-                                padding: '3px 8px',
-                                borderRadius: 999,
-                                border: 'none',
-                                background: 'color-mix(in srgb, var(--accent) 10%, transparent)',
-                                color: 'var(--accent)',
-                                cursor: replyingIds.has(notification.id) ? 'wait' : 'pointer',
-                                opacity: replyingIds.has(notification.id) ? 0.55 : 1,
-                              }}
-                            >
-                              永久允许
-                            </button>
-                            <button
-                              type="button"
-                              disabled={replyingIds.has(notification.id)}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                void handleQuickPermissionReply(notification, 'reject');
-                              }}
-                              title="阻止本次调用，工具不会继续执行"
-                              style={{
-                                fontSize: 10,
-                                fontWeight: 700,
-                                padding: '3px 8px',
-                                borderRadius: 999,
-                                border: 'none',
-                                background: 'color-mix(in srgb, var(--danger) 14%, transparent)',
-                                color: 'var(--danger)',
-                                cursor: replyingIds.has(notification.id) ? 'wait' : 'pointer',
-                                opacity: replyingIds.has(notification.id) ? 0.55 : 1,
-                              }}
-                            >
-                              拒绝
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                    <button
-                      type="button"
-                      title="标记已读"
-                      aria-label="标记已读"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void handleDismissNotification(notification);
-                      }}
-                      style={{
-                        position: 'absolute',
-                        top: 6,
-                        right: 6,
-                        width: 20,
-                        height: 20,
-                        borderRadius: 6,
-                        border: 'none',
-                        background: 'transparent',
-                        color: 'var(--fg-muted)',
-                        cursor: 'pointer',
-                        display: 'grid',
-                        placeItems: 'center',
-                      }}
-                    >
-                      <svg
-                        width="12"
-                        height="12"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <line x1="18" y1="6" x2="6" y2="18" />
-                        <line x1="6" y1="6" x2="18" y2="18" />
-                      </svg>
-                    </button>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-      ) : null}
+      </button>
+
+      {/* ── Panel (portal to body, escapes sidebar overflow:hidden) ── */}
+      {open &&
+        panelPos &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <NotificationPanel
+            notifications={notifications}
+            permissionDetails={permissionDetails}
+            sessionTitles={sessionTitles}
+            replyingIds={replyingIds}
+            selectedScopes={selectedScopes}
+            loading={loading}
+            position={panelPos}
+            onOpen={handleOpenNotification}
+            onDismiss={handleDismissNotification}
+            onMarkAllRead={() => void handleMarkAllRead()}
+            onRefresh={() => void loadNotifications().catch(() => undefined)}
+            onReply={handleQuickPermissionReply}
+            onScopeChange={handleScopeChange}
+          />,
+          document.body,
+        )}
+
+      <style>{`
+        @keyframes nc-badge-pop {
+          0% { transform: scale(0); }
+          60% { transform: scale(1.2); }
+          100% { transform: scale(1); }
+        }
+      `}</style>
     </div>
   );
 }

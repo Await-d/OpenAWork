@@ -1,68 +1,22 @@
 import React from 'react';
 
-export interface RailItem {
+export interface NavItem {
   to: string;
   label: string;
+  iconKey: string;
 }
 
-export interface RailGroup {
-  /** Unique id for keying. */
-  id: string;
-  /** Title shown above the group when the rail is expanded. */
-  title: string;
-  items: RailItem[];
-}
-
-export const railGroups: RailGroup[] = [
-  {
-    id: 'workspace',
-    title: '工作台',
-    items: [
-      { to: '/chat', label: 'Chat' },
-      { to: '/sessions', label: 'Sessions' },
-    ],
-  },
-  {
-    id: 'collaboration',
-    title: '协作',
-    items: [
-      { to: '/team', label: 'Team' },
-      { to: '/templates', label: 'Templates' },
-    ],
-  },
-  {
-    id: 'automation',
-    title: '自动化',
-    items: [
-      { to: '/agents', label: 'Agents' },
-      { to: '/skills', label: 'Skills' },
-      { to: '/workflows', label: 'Workflows' },
-      { to: '/schedules', label: 'Schedules' },
-    ],
-  },
-  {
-    id: 'content',
-    title: '内容',
-    items: [{ to: '/images', label: 'Images' }],
-  },
+/** 顶部区块导航项：定时任务 / 技能 / 智能体 */
+export const TOP_NAV_ITEMS: NavItem[] = [
+  { to: '/schedules', label: '定时任务', iconKey: 'Schedules' },
+  { to: '/skills', label: '技能', iconKey: 'Skills' },
+  { to: '/agents', label: '智能体', iconKey: 'Agents' },
 ];
 
-/** @deprecated Use railGroups instead. Kept for backward compatibility. */
-export const railItems: RailItem[] = railGroups.flatMap((group) => group.items);
-
-export const railLabelCn: Record<string, string> = {
-  Chat: '对话',
-  Images: '图片',
-  Sessions: '会话',
-  Settings: '设置',
-  Skills: '技能',
-  Agents: '智能体',
-  Workflows: '工作流',
-  Team: '团队',
-  Templates: '模板',
-  Schedules: '定时',
-  About: '关于',
-};
+/** 底部区块导航项：设置 */
+export const BOTTOM_NAV_ITEMS: NavItem[] = [
+  { to: '/settings', label: '设置', iconKey: 'Settings' },
+];
 
 const I = ({ d, children }: { d?: string; children?: React.ReactNode }) => (
   <svg

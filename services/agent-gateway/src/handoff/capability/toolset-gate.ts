@@ -26,7 +26,20 @@ import type { ToolsetCategory } from './dispatch-package.js';
  * executor 只能看到这两个类别下的工具。
  */
 export const TOOLSET_TO_TOOL_NAMES: Record<ToolsetCategory, readonly string[]> = {
-  read: ['read', 'list', 'glob', 'grep', 'read_tool_output', 'look_at', 'repo_overview'],
+  read: [
+    'read',
+    'list',
+    'glob',
+    'grep',
+    'read_tool_output',
+    'look_at',
+    'repo_overview',
+    'codegraph_status',
+    'codegraph_search',
+    'codegraph_node',
+    'codegraph_callers',
+    'codegraph_impact',
+  ],
   write: ['write', 'edit', 'multi_edit', 'apply_patch'],
   shell: ['bash', 'run_background_bash', 'interactive_bash'],
   // 实际注册的联网工具规范名是 'websearch' / 'webfetch'（tools/tool-aliases.ts、
@@ -48,7 +61,15 @@ export const TOOLSET_TO_TOOL_NAMES: Record<ToolsetCategory, readonly string[]> =
   test: [
     'bash', // 测试通过 bash 执行
   ],
-  review: ['read', 'list', 'grep', 'glob', 'lsp_goto_definition', 'lsp_find_references', 'lsp_diagnostics'],
+  review: [
+    'read',
+    'list',
+    'grep',
+    'glob',
+    'lsp_goto_definition',
+    'lsp_find_references',
+    'lsp_diagnostics',
+  ],
   all: [], // 特殊值：不过滤
 };
 

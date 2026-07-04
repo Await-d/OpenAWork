@@ -134,3 +134,85 @@ describe('createSettingsClient mutation error handling', () => {
     );
   });
 });
+
+describe('createSettingsClient telemetry methods', () => {
+  it('getTelemetryConsent 成功时返回同意状态', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({ status: 'accepted', updatedAt: '2026-07-04T00:00:00Z' }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createSettingsClient('http://localhost:3000');
+    const result = await client.getTelemetryConsent('token-1');
+
+    expect(result).toMatchObject({ status: 'accepted', updatedAt: '2026-07-04T00:00:00Z' });
+  });
+
+  it('updateTelemetryConsent 发送 PUT 请求并返回结果', async () => {
+    const fetchMock = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({ ok: true, status: 'accepted' }),
+      } as unknown as Response;
+    }) as typeof fetch;
+    globalThis.fetch = fetchMock;
+
+    const client = createSettingsClient('http://localhost:3000');
+    const result = await client.updateTelemetryConsent('token-1', 'accepted');
+
+    expect(result).toMatchObject({ ok: true, status: 'accepted' });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:3000/settings/telemetry/consent',
+      expect.objectContaining({ method: 'PUT' }),
+    );
+  });
+
+  it('updateTelemetryConsent 失败时抛出错误', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: false,
+        status: 403,
+        json: async () => ({ error: 'forbidden' }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createSettingsClient('http://localhost:3000');
+
+    await expect(client.updateTelemetryConsent('token-1', 'declined')).rejects.toThrow();
+  });
+
+  it('reportTelemetryEvent 发送 POST 请求并返回结果', async () => {
+    const fetchMock = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({ ok: true }),
+      } as unknown as Response;
+    }) as typeof fetch;
+    globalThis.fetch = fetchMock;
+
+    const client = createSettingsClient('http://localhost:3000');
+    const result = await client.reportTelemetryEvent('token-1', 'app_start', {
+      platform: 'win32',
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:3000/settings/telemetry/event',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('reportTelemetryEvent 网络异常时抛出中文错误', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error('Failed to fetch');
+    }) as typeof fetch;
+
+    const client = createSettingsClient('http://localhost:3000');
+
+    await expect(client.reportTelemetryEvent('token-1', 'app_start')).rejects.toThrow(
+      '网络异常，上报遥测事件失败。',
+    );
+  });
+});

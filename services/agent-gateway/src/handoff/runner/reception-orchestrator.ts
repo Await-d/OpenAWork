@@ -25,7 +25,12 @@ import { publishHandoffEvent, publishTeamEvent } from '../bus/team-events-bus.js
 import { recordLatency } from '../bus/latency-monitor.js';
 import { setSubstate, SUBSTATES_RECEPTION } from '../store/substate-store.js';
 import { appendSessionMessageV2 } from '../../message/message-v2-adapter.js';
-import { routeByRules, routeByLlm, type RouteResult, type RouteLlmContext } from './reception-router.js';
+import {
+  routeByRules,
+  routeByLlm,
+  type RouteResult,
+  type RouteLlmContext,
+} from './reception-router.js';
 import {
   buildTeamResumeContext,
   resolveTeamRootSessionId,
@@ -379,11 +384,7 @@ async function runReceptionOrchestrationBody(
         routeResult.clarifyKind === 'too_short'
           ? `你这次输入的内容太少了，我还没法准确判断你是想提问、查资料，还是要我直接开始做事。请再补一句更具体的目标，例如“帮我解释 XX”“帮我修复 XX”“帮我实现 XX”。\n\n_（路由判断：${routeResult.reason}）_`
           : `我需要更多信息才能帮你。能否详细描述一下你想做什么？\n\n_（路由判断：${routeResult.reason}）_`;
-      writeAck(
-        input.userId,
-        input.receptionSessionId,
-        clarifyText,
-      );
+      writeAck(input.userId, input.receptionSessionId, clarifyText);
     }
     return { triggered: false, reason: 'clarify-needed' };
   }
@@ -787,7 +788,8 @@ async function tryResumePreviousWork(input: {
       sourceIntent: input.userIntent,
       rewrittenIntent: `【续接模式】用户请求继续上次未完成的任务。\n\n未完成任务概览：\n${incompleteTaskSummary}`,
       recommendedRole: 'planner',
-      recommendedNextStep: '读取已有 spec/plan/tasks 产物，续接未完成任务，不要重新规划已完成的部分。',
+      recommendedNextStep:
+        '读取已有 spec/plan/tasks 产物，续接未完成任务，不要重新规划已完成的部分。',
       teamWorkspaceId: input.teamWorkspaceId,
       isResume: true,
       resumeRootSessionId: rootSessionId,

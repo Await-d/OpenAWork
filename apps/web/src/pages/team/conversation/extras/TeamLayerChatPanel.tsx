@@ -54,14 +54,13 @@ const PANEL_STYLE: CSSProperties = {
   minHeight: 0,
   overflow: 'hidden',
   background: 'var(--bg-base)',
-  borderRight: '1px solid color-mix(in srgb, var(--border-default) 30%, transparent)',
 };
 
 const HEADER_STYLE: CSSProperties = {
   display: 'grid',
-  gap: 3,
-  padding: '6px var(--spacing-2, 8px)',
-  borderBottom: '1px solid color-mix(in srgb, var(--border-default) 36%, transparent)',
+  gap: 8,
+  padding: '12px var(--spacing-3, 12px)',
+  borderBottom: '1px solid var(--border-default)',
   background:
     'linear-gradient(180deg, color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base)), var(--bg-base))',
   flexShrink: 0,
@@ -71,13 +70,13 @@ const HEADER_TITLE_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
-  gap: 'var(--spacing-1, 4px)',
+  gap: 'var(--spacing-2, 8px)',
 };
 
 const METRIC_ROW_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 'var(--spacing-1, 4px)',
+  gap: 'var(--spacing-2, 8px)',
   flexWrap: 'wrap',
 };
 
@@ -85,25 +84,25 @@ const WINDOW_SUMMARY_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
-  gap: 'var(--spacing-1, 4px)',
+  gap: 'var(--spacing-2, 8px)',
   flexWrap: 'wrap',
-  paddingTop: 3,
-  borderTop: '1px solid color-mix(in srgb, var(--border-subtle) 28%, transparent)',
+  paddingTop: 6,
+  borderTop: '1px solid var(--border-subtle)',
   color: 'var(--fg-muted)',
   fontSize: 10,
-  lineHeight: 1.35,
+  lineHeight: 1.4,
 };
 
 const METRIC_PILL_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  gap: 3,
-  padding: '1px 6px',
+  gap: 4,
+  padding: '2px 8px',
   borderRadius: 'var(--radius-pill, 9999px)',
-  border: '1px solid color-mix(in srgb, var(--border-subtle) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 60%, transparent)',
+  border: '1px solid var(--border-subtle)',
+  background: 'var(--bg-overlay)',
   color: 'var(--fg-muted)',
-  fontSize: 9.5,
+  fontSize: 10,
   fontWeight: 600,
   fontVariantNumeric: 'tabular-nums',
 };
@@ -113,7 +112,7 @@ const SCROLL_STYLE: CSSProperties = {
   minHeight: 0,
   overflowY: 'auto',
   overflowX: 'hidden',
-  padding: '0 2px 4px',
+  padding: '8px 6px 12px',
   display: 'flex',
   flexDirection: 'column',
   gap: 0,
@@ -123,28 +122,28 @@ const LOAD_MORE_HINT_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  gap: 3,
-  padding: '6px 4px 4px',
+  gap: 4,
+  padding: '8px 4px 6px',
   color: 'var(--fg-subtle)',
   fontSize: 10,
-  lineHeight: 1.3,
+  lineHeight: 1.35,
   textAlign: 'center',
 };
 
 const LAYER_DIVIDER_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 3,
-  padding: '5px 4px 2px',
+  gap: 4,
+  padding: '8px 6px 4px',
   marginTop: 0,
-  fontSize: 9.5,
+  fontSize: 10,
   fontWeight: 700,
   letterSpacing: '0.04em',
   textTransform: 'uppercase',
   color: 'var(--fg-subtle)',
   borderBottomWidth: 1,
   borderBottomStyle: 'solid',
-  borderBottomColor: 'color-mix(in srgb, var(--border-subtle) 30%, transparent)',
+  borderBottomColor: 'var(--border-subtle)',
   flexShrink: 0,
   cursor: 'pointer',
   transition: 'background 120ms ease, border-color 120ms ease',
@@ -154,14 +153,14 @@ const LAYER_DIVIDER_STYLE: CSSProperties = {
 
 const LAYER_DIVIDER_HOVER_STYLE: CSSProperties = {
   ...LAYER_DIVIDER_STYLE,
-  background: 'color-mix(in srgb, var(--bg-overlay) 50%, transparent)',
-  borderBottomColor: 'color-mix(in srgb, var(--border-default) 20%, transparent)',
+  background: 'var(--bg-overlay)',
+  borderBottomColor: 'var(--border-default)',
 };
 
 const MESSAGE_CARD_BASE_STYLE: CSSProperties = {
   display: 'flex',
-  gap: 5,
-  padding: '4px',
+  gap: 8,
+  padding: '8px 6px',
   borderRadius: 'var(--radius-sm, 6px)',
   background: 'transparent',
   borderWidth: 0,
@@ -173,7 +172,7 @@ const MESSAGE_CARD_BASE_STYLE: CSSProperties = {
 
 const MESSAGE_CARD_HOVER_STYLE: CSSProperties = {
   ...MESSAGE_CARD_BASE_STYLE,
-  background: 'color-mix(in srgb, var(--bg-surface) 60%, transparent)',
+  background: 'var(--bg-surface)',
 };
 
 const AVATAR_STYLE: CSSProperties = {
@@ -198,19 +197,19 @@ const MESSAGE_BODY_STYLE: CSSProperties = {
 const MESSAGE_HEADER_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 3,
+  gap: 6,
   flexWrap: 'wrap',
 };
 
 const LAYER_NAME_STYLE: CSSProperties = {
-  fontSize: 11,
+  fontSize: 11.5,
   fontWeight: 600,
   whiteSpace: 'nowrap',
   letterSpacing: '-0.01em',
 };
 
 const MESSAGE_TIME_STYLE: CSSProperties = {
-  fontSize: 9.5,
+  fontSize: 10,
   color: 'var(--fg-subtle)',
   fontVariantNumeric: 'tabular-nums',
   marginLeft: 'auto',
@@ -218,7 +217,7 @@ const MESSAGE_TIME_STYLE: CSSProperties = {
 
 const MESSAGE_TEXT_CLAMP_STYLE: CSSProperties = {
   fontSize: 12,
-  lineHeight: 1.5,
+  lineHeight: 1.55,
   color: 'var(--fg-default)',
   overflow: 'hidden',
   display: '-webkit-box',
@@ -230,7 +229,7 @@ const MESSAGE_TEXT_CLAMP_STYLE: CSSProperties = {
 
 const MESSAGE_TEXT_FULL_STYLE: CSSProperties = {
   fontSize: 12,
-  lineHeight: 1.55,
+  lineHeight: 1.6,
   color: 'var(--fg-default)',
   whiteSpace: 'pre-wrap',
   overflowWrap: 'anywhere',
@@ -253,18 +252,18 @@ const EMPTY_STYLE: CSSProperties = {
   color: 'var(--fg-subtle)',
   fontSize: 12,
   textAlign: 'center' as const,
-  padding: 'var(--spacing-3, 12px) var(--spacing-2, 8px)',
+  padding: 'var(--spacing-4, 16px) var(--spacing-3, 12px)',
 };
 
 const COUNT_BADGE_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  minWidth: 16,
-  height: 15,
-  padding: '0 5px',
+  minWidth: 18,
+  height: 16,
+  padding: '0 6px',
   borderRadius: 'var(--radius-pill, 9999px)',
-  fontSize: 9,
+  fontSize: 9.5,
   fontWeight: 800,
   fontVariantNumeric: 'tabular-nums',
 };
@@ -272,16 +271,16 @@ const COUNT_BADGE_STYLE: CSSProperties = {
 const OPEN_BUTTON_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  gap: 3,
-  padding: '1px 6px',
-  marginTop: 3,
+  gap: 4,
+  padding: '2px 8px',
+  marginTop: 4,
   borderRadius: 'var(--radius-sm, 6px)',
   borderWidth: 1,
   borderStyle: 'solid',
-  borderColor: 'color-mix(in srgb, var(--border-default) 25%, transparent)',
+  borderColor: 'var(--border-subtle)',
   background: 'transparent',
   color: 'var(--fg-muted)',
-  fontSize: 9.5,
+  fontSize: 10,
   fontWeight: 700,
   cursor: 'pointer',
   transition: 'all 120ms ease',
@@ -298,18 +297,18 @@ const OPEN_BUTTON_HOVER_STYLE: CSSProperties = {
 
 const SCROLL_BOTTOM_BTN_STYLE: CSSProperties = {
   position: 'absolute',
-  bottom: 8,
+  bottom: 12,
   left: '50%',
   transform: 'translateX(-50%)',
   display: 'inline-flex',
   alignItems: 'center',
   gap: 4,
-  padding: '3px 10px',
+  padding: '5px 12px',
   borderRadius: 'var(--radius-pill, 9999px)',
-  border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
+  border: '1px solid var(--accent-border)',
   background: 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay))',
   color: 'var(--fg-strong)',
-  fontSize: 10.5,
+  fontSize: 11,
   fontWeight: 700,
   cursor: 'pointer',
   boxShadow: 'var(--shadow-sm)',
@@ -440,15 +439,14 @@ function LayerChatMessageCard({
   const previewText = getMessageDisplayText(message);
   const detailText = getTeamMessageDetailText(message);
   const isLong = previewText.length > 120 || detailText.length > 180;
-  const bodyTextStyle =
-    isUser
-      ? {
-          color: 'var(--fg-strong)',
-          fontWeight: 500,
-          fontSize: 12.5,
-          lineHeight: 1.55,
-        }
-      : undefined;
+  const bodyTextStyle = isUser
+    ? {
+        color: 'var(--fg-strong)',
+        fontWeight: 500,
+        fontSize: 12.5,
+        lineHeight: 1.55,
+      }
+    : undefined;
 
   const handleToggleExpand = useCallback(() => {
     if (isLong) setExpanded((prev) => !prev);
@@ -829,9 +827,10 @@ export function TeamLayerChatPanel({
   const rafCleanupRef = useRef<(() => void) | null>(null);
   const historyExpansionRef = useRef(false);
   const prependAnchorRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
-  const previousHistoryContextRef = useRef<{ layerSessionKey: string; totalMessages: number } | null>(
-    null,
-  );
+  const previousHistoryContextRef = useRef<{
+    layerSessionKey: string;
+    totalMessages: number;
+  } | null>(null);
   const [autoScroll, setAutoScrollState] = useState(true);
   const [hoveredDivider, setHoveredDivider] = useState<string | null>(null);
 
@@ -851,7 +850,10 @@ export function TeamLayerChatPanel({
   );
 
   useEffect(() => {
-    const nextDefaultStart = Math.max(totalHistoricalMessageCount - INITIAL_VISIBLE_MESSAGE_COUNT, 0);
+    const nextDefaultStart = Math.max(
+      totalHistoricalMessageCount - INITIAL_VISIBLE_MESSAGE_COUNT,
+      0,
+    );
     const previousContext = previousHistoryContextRef.current;
 
     if (
@@ -1049,7 +1051,9 @@ export function TeamLayerChatPanel({
         <div style={HEADER_STYLE}>
           <div style={HEADER_TITLE_STYLE}>
             <span style={{ display: 'grid', gap: 2, minWidth: 0 }}>
-              <strong style={{ color: 'var(--fg-strong)', fontSize: 13 }}>团队消息汇总</strong>
+              <strong style={{ color: 'var(--fg-strong)', fontSize: 14, fontWeight: 700 }}>
+                团队消息汇总
+              </strong>
               <span style={{ color: 'var(--fg-muted)', fontSize: 11 }}>
                 所有层级的对话动态将在这里实时汇总
               </span>
@@ -1058,7 +1062,7 @@ export function TeamLayerChatPanel({
         </div>
         <div style={EMPTY_STYLE}>
           <div>
-            <div style={{ fontSize: 28, marginBottom: 8 }}>💬</div>
+            <div style={{ fontSize: 32, marginBottom: 12, opacity: 0.85 }}>💬</div>
             <div style={{ fontWeight: 700, color: 'var(--fg-muted)' }}>暂无消息</div>
             <div style={{ fontSize: 11, marginTop: 4, color: 'var(--fg-subtle)', lineHeight: 1.6 }}>
               团队开始工作后，各层级的消息会
@@ -1076,8 +1080,10 @@ export function TeamLayerChatPanel({
       {/* 头部 */}
       <div style={HEADER_STYLE}>
         <div style={HEADER_TITLE_STYLE}>
-          <span style={{ display: 'grid', gap: 2, minWidth: 0 }}>
-            <strong style={{ color: 'var(--fg-strong)', fontSize: 13 }}>团队消息汇总</strong>
+          <span style={{ display: 'grid', gap: 4, minWidth: 0 }}>
+            <strong style={{ color: 'var(--fg-strong)', fontSize: 14, fontWeight: 700 }}>
+              团队消息汇总
+            </strong>
             <span style={{ color: 'var(--fg-muted)', fontSize: 11 }}>
               所有层级对话按时间汇总，层级标识清晰不混合
             </span>
@@ -1099,7 +1105,9 @@ export function TeamLayerChatPanel({
         </div>
         <div style={WINDOW_SUMMARY_STYLE} aria-live="polite">
           <span>{visibleWindowLabel}</span>
-          <span>{hasHiddenHistory ? `上滑继续加载更早 ${LOAD_MORE_BATCH_SIZE} 条` : '已展开完整历史'}</span>
+          <span>
+            {hasHiddenHistory ? `上滑继续加载更早 ${LOAD_MORE_BATCH_SIZE} 条` : '已展开完整历史'}
+          </span>
         </div>
       </div>
 
@@ -1124,7 +1132,8 @@ export function TeamLayerChatPanel({
             ? getPrimarySessionId(layerData, currentSessionId)
             : (group.sessionId ?? null);
           // 流式消息只附加到该 session 当前最后一个可见 group，避免重复渲染。
-          const shouldRenderStreaming = lastVisibleGroupIndexBySession.get(group.sessionId) === groupIdx;
+          const shouldRenderStreaming =
+            lastVisibleGroupIndexBySession.get(group.sessionId) === groupIdx;
           const streamingMsg = shouldRenderStreaming ? (layerData?.streamingMessage ?? null) : null;
 
           return (

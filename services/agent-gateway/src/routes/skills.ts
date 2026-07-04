@@ -11,6 +11,7 @@ import {
 import type { RegistrySource, SkillEntry } from '@openAwork/skill-registry';
 import { BUILTIN_SKILLS } from '@openAwork/skills';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
+import { trackEvent } from '../telemetry/telemetry-service.js';
 import {
   readResponseJsonWithLimit,
   readResponseTextWithLimit,
@@ -1857,6 +1858,7 @@ export async function skillsRoutes(app: FastifyInstance): Promise<void> {
         );
 
         step.succeed(undefined, { skillId });
+        trackEvent(user.sub, 'skill_installed', { skillId, sourceId });
         return reply.status(201).send(
           rowToInstalledSkill({
             skill_id: skillId,

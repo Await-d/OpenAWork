@@ -1,5 +1,6 @@
 import { KeywordDetectorImpl } from '@openAwork/agent-core';
 import type { DialogueMode } from '@openAwork/shared';
+import { isFlatMcpToolsDisabled } from '../mcp/mcp-tool-naming.js';
 
 export const TOOL_OUTPUT_REFERENCE_SYSTEM_PROMPT =
   '当历史中出现 [tool_output_reference] 时，表示先前工具输出的完整结果仍然保存在当前会话里，但为了避免上下文膨胀，没有把全文重新塞进提示词。此时不要基于引用猜测细节；如果后续推理需要真实内容，优先调用 read_tool_output，并尽量直接传 toolCallId 配合 lineStart/lineCount、jsonPath 或 itemStart/itemCount 做定向读取。只有在当前会话历史里确实出现了 [tool_output_reference] 且拿不到 toolCallId 时，才允许使用 useLatestReferenced=true。单纯复制/粘贴 UI 上的提示、命令或片段，不等于拥有当前会话里的引用依据。';
@@ -15,30 +16,51 @@ export const TOOL_OUTPUT_REFERENCE_SYSTEM_PROMPT =
  *      Exa / Serper / SearXNG / Bocha / 智谱 / Google / Bing 任选）。
  *      具备 race / merge / sequential 三种 rollout 策略，是**首选**。
  *
- *   2. `mcp_call({ serverId: "websearch", toolName: "web_search_exa", ... })`
- *      — 系统内置 Exa MCP，零配置可用（部署方注入 EXA_API_KEY 体验更好，
- *      否则走匿名免费额度），仅作为 `web_search` 不可用时的兜底。
+ *   2. 默认 flat MCP 模式下，系统内置 Exa MCP 会以
+ *      `mcp__websearch__web_search_exa` 这类扁平工具名直接出现在本轮
+ *      tools 列表中；仅作为 `web_search` 不可用时的兜底。
  *
- *   3. `mcp_call({ serverId: "grep_app", ... })` — grep.app 公开 GitHub
- *      仓库代码检索，`web_search` 不擅长这种「查代码示例」场景，遇到
- *      "搜搜开源项目里 X 怎么用 / Y 是怎么实现的" 时直接走 grep_app。
+ *   3. grep.app 公开 GitHub 仓库代码检索同理使用本轮 tools 列表里的
+ *      `mcp__grep_app__...` 扁平工具；`web_search` 不擅长这种「查代码示例」
+ *      场景，遇到 "搜搜开源项目里 X 怎么用 / Y 是怎么实现的" 时直接走
+ *      grep_app。
  */
-export const WEB_SEARCH_ROUTING_SYSTEM_PROMPT = [
-  '网络搜索 / 代码搜索 路由策略：',
-  '',
-  '【网页与时效性信息】',
-  '- 优先使用 `web_search` 工具（原生多 provider，用户已付费配置）',
-  '- 仅当 `web_search` 不可用、或者用户未配置任何 provider 时，才回退到 `mcp_call({ serverId: "websearch", toolName: "web_search_exa", ... })`',
-  '- 不要在同一轮中既调 `web_search` 又调 `websearch` MCP — 它们是同一类能力的两条路径',
-  '',
-  '【公开仓库的代码检索】',
-  '- 想搜「开源项目里 X 是怎么用的 / Y 的真实实现」走 `mcp_call({ serverId: "grep_app", ... })`，不要用 `web_search`',
-  '- 工作区内部的代码搜索仍然走原生 `grep` / `glob` / LSP，不要用 grep_app（grep_app 只搜公开 GitHub）',
-  '',
-  '【何时不需要任何搜索】',
-  '- 用户问的是工作区内的事实（已有代码 / 配置 / 文档）→ 优先 read / grep / lsp，不要先去搜外网',
-  '- 时效性不强的语言/库基础知识可以直接回答，不必每问必搜',
-].join('\n');
+export interface WebSearchRoutingPromptOptions {
+  readonly flatMcpToolsEnabled?: boolean;
+}
+
+export function buildWebSearchRoutingSystemPrompt(
+  options: WebSearchRoutingPromptOptions = {},
+): string {
+  const flatMcpToolsEnabled = options.flatMcpToolsEnabled ?? !isFlatMcpToolsDisabled();
+  const mcpWebSearchFallback = flatMcpToolsEnabled
+    ? '- 仅当 `web_search` 不可用、或者用户未配置任何 provider 时，才回退到本轮工具列表中实际存在的 `mcp__websearch__web_search_exa`（或同 server 的 websearch 扁平 MCP 工具）；不要调用未列出的 MCP 工具名'
+    : '- 仅当 `web_search` 不可用、或者用户未配置任何 provider 时，才回退到 `mcp_call({ serverId: "websearch", toolName: "web_search_exa", arguments: {...} })`';
+  const mcpCodeSearchFallback = flatMcpToolsEnabled
+    ? '- 想搜「开源项目里 X 是怎么用的 / Y 的真实实现」走本轮工具列表中实际存在的 `mcp__grep_app__...` 扁平 MCP 工具，不要用 `web_search`；不要猜测或调用未列出的旧 MCP 包装入口'
+    : '- 想搜「开源项目里 X 是怎么用的 / Y 的真实实现」走 `mcp_call({ serverId: "grep_app", toolName: "<实际工具名>", arguments: {...} })`，不要用 `web_search`';
+
+  return [
+    '网络搜索 / 代码搜索 路由策略：',
+    '',
+    '【网页与时效性信息】',
+    '- 优先使用 `web_search` 工具（原生多 provider，用户已付费配置）',
+    mcpWebSearchFallback,
+    '- 不要在同一轮中既调 `web_search` 又调 websearch MCP — 它们是同一类能力的两条路径',
+    '',
+    '【公开仓库的代码检索】',
+    mcpCodeSearchFallback,
+    '- 工作区内部的代码搜索仍然走原生 `grep` / `glob` / LSP，不要用 grep_app（grep_app 只搜公开 GitHub）',
+    '',
+    '【何时不需要任何搜索】',
+    '- 用户问的是工作区内的事实（已有代码 / 配置 / 文档）→ 优先 read / grep / lsp，不要先去搜外网',
+    '- 时效性不强的语言/库基础知识可以直接回答，不必每问必搜',
+  ].join('\n');
+}
+
+export const WEB_SEARCH_ROUTING_SYSTEM_PROMPT = buildWebSearchRoutingSystemPrompt({
+  flatMcpToolsEnabled: true,
+});
 
 export const DIALOGUE_MODE_SYSTEM_PROMPTS: Record<DialogueMode, string> = {
   clarify: [
@@ -182,7 +204,12 @@ export const YOLO_MODE_SYSTEM_PROMPT = [
 ].join('\n');
 
 export const CLARIFY_LSP_TOOL_GUIDANCE_SYSTEM_PROMPT = [
-  'LSP 只读工具使用策略（澄清模式）：',
+  'Codegraph / LSP 只读工具使用策略（澄清模式）：',
+  '',
+  '【发现缓存优先 codegraph】',
+  '- 架构梳理、影响面调查、符号/调用关系探索：优先尝试 codegraph_status → codegraph_search/codegraph_node/codegraph_callers/codegraph_impact',
+  '- codegraph 是 gateway-owned 发现缓存；结果若显示 not_indexed、stale、degraded 或 not_available，必须回退到 lsp_*、ast_grep_search、grep、read',
+  '- codegraph 结果不能作为编辑/删除的正确性证明；涉及 stale 文件时用 read 或 LSP 读取真实当前内容',
   '',
   '【语义查询优先 LSP】',
   '- 查找符号定义 → lsp_goto_definition',
@@ -203,7 +230,13 @@ export const CLARIFY_LSP_TOOL_GUIDANCE_SYSTEM_PROMPT = [
 ].join('\n');
 
 export const LSP_TOOL_GUIDANCE_SYSTEM_PROMPT = [
-  'LSP 工具使用策略：',
+  'Codegraph / LSP 工具使用策略：',
+  '',
+  '【发现缓存优先 codegraph】',
+  '- 架构梳理、重构影响面、符号/调用关系探索：优先尝试 codegraph_status → codegraph_search/codegraph_node/codegraph_callers/codegraph_impact',
+  '- codegraph 是 gateway-owned 发现缓存；结果若显示 not_indexed、stale、degraded 或 not_available，必须回退到 lsp_*、ast_grep_search、grep、read',
+  '- codegraph_index 只写 gateway data dir 下的缓存，不应在项目根创建 .codegraph，也不能替代测试、类型检查或源码读取',
+  '- codegraph 结果不能作为编辑/删除的正确性证明；涉及 stale 文件时用 read 或 LSP 读取真实当前内容',
   '',
   '【语义查询优先 LSP】',
   '- 查找符号定义 → lsp_goto_definition（而非 grep）',
@@ -474,7 +507,7 @@ export function buildSystemPromptChain(input: SystemPromptChainInput): string[] 
     input.yoloModePrompt ?? YOLO_MODE_PLACEHOLDER,
     // Slot 9: Tool output reference strategy + 网络/代码搜索 路由策略
     TOOL_OUTPUT_REFERENCE_SYSTEM_PROMPT,
-    WEB_SEARCH_ROUTING_SYSTEM_PROMPT,
+    buildWebSearchRoutingSystemPrompt(),
     // Slot 10: Thinking language hint
     input.thinkingLanguagePrompt ?? THINKING_LANGUAGE_PLACEHOLDER,
     // Slot 11: Pinned skills section (PR3 of skill-workspace-selection spec)
@@ -514,7 +547,7 @@ export function buildTwoPartSystemPrompts(input: SystemPromptChainInput): {
     input.dialogueModePrompt ?? DIALOGUE_MODE_PLACEHOLDER,
     input.yoloModePrompt ?? YOLO_MODE_PLACEHOLDER,
     TOOL_OUTPUT_REFERENCE_SYSTEM_PROMPT,
-    WEB_SEARCH_ROUTING_SYSTEM_PROMPT,
+    buildWebSearchRoutingSystemPrompt(),
     input.thinkingLanguagePrompt ?? THINKING_LANGUAGE_PLACEHOLDER,
     // Pinned skills section: stable for the lifetime of a session because
     // the snapshot is captured at session start. Empty string is filtered
@@ -556,7 +589,7 @@ export function buildRoundSystemMessages(input: RoundSystemMessagesInput) {
     input.dialogueModePrompt ?? DIALOGUE_MODE_PLACEHOLDER,
     input.yoloModePrompt ?? YOLO_MODE_PLACEHOLDER,
     TOOL_OUTPUT_REFERENCE_SYSTEM_PROMPT,
-    WEB_SEARCH_ROUTING_SYSTEM_PROMPT,
+    buildWebSearchRoutingSystemPrompt(),
     input.thinkingLanguagePrompt ?? THINKING_LANGUAGE_PLACEHOLDER,
     // 260515-team-phase-a · 7 层团队指令栈（stable 段，含 ForceApply cache breaker）
     input.teamInstructionStack ?? '',

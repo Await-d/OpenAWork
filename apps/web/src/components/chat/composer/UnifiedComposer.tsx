@@ -5,6 +5,7 @@ import type { CommandDescriptor } from '@openAwork/shared';
 import type { PromptOptimizerResult } from '@openAwork/web-client';
 import { createWorkflowsClient } from '@openAwork/web-client';
 import { ChatComposer } from './ChatComposer.js';
+import type { ComposerStatsData } from './ComposerStatsBar.js';
 import { ChatImageGenerationResultStrip } from '../image/ChatImageGenerationResultStrip.js';
 import { ModelPicker, ModelSettingsPopover } from '../session/ChatPageSections.js';
 import type {
@@ -104,10 +105,8 @@ export interface UnifiedComposerProps {
   onNavigateToArtifacts?: () => void;
   onSelectImageReferenceArtifactId?: (id: string | null) => void;
   markSessionMetadataDirty?: () => void;
-  /** Context window usage (tokens/maxTokens) to render next to the send button. */
-  contextUsedTokens?: number;
-  contextMaxTokens?: number;
-  contextIsEstimated?: boolean;
+  /** 会话统计数据，渲染在输入框下方 */
+  statsData?: ComposerStatsData | null;
   /**
    * Optional slot rendered next to the composer input box on the right.
    * Forwarded to ChatComposer.composerRightSlot which renders it as a
@@ -459,9 +458,7 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
         onOptimizePrompt={features.promptOptimize && token ? handleOptimizePrompt : undefined}
         onDropFiles={appendFiles}
         onReplaceInput={(nextValue: string) => setInput(nextValue)}
-        contextUsedTokens={props.contextUsedTokens}
-        contextMaxTokens={props.contextMaxTokens}
-        contextIsEstimated={props.contextIsEstimated}
+        statsData={props.statsData}
         placeholder={props.placeholder}
         composerRightSlot={props.composerRightSlot}
         gatewayUrl={gatewayUrl}

@@ -130,9 +130,10 @@ export function ToolOutputPreview({ toolName, output }: { toolName: string; outp
   const textPayload = extractTextFromOutput(output);
   const diagnostics = extractDiagnosticsFromOutput(output);
   if (textPayload && textPayload.text.length > 0) {
+    const isShortOutput = textPayload.text.length < 200 && textPayload.text.split('\n').length <= 5;
     return (
       <>
-        <ExpandableOutput text={textPayload.text} maxChars={500} />
+        <ExpandableOutput text={textPayload.text} maxChars={500} compact={isShortOutput} />
         {diagnostics && diagnostics.length > 0 && <DiagnosticsPreview items={diagnostics} />}
       </>
     );
@@ -140,10 +141,8 @@ export function ToolOutputPreview({ toolName, output }: { toolName: string; outp
 
   // True last resort: structured object we don't have a renderer for.
   // Pretty-print JSON so the user can still inspect every field.
-  return (
-    <ExpandableOutput
-      text={typeof output === 'string' ? output : (JSON.stringify(output, null, 2) ?? '')}
-      maxChars={500}
-    />
-  );
+  const fallbackText =
+    typeof output === 'string' ? output : (JSON.stringify(output, null, 2) ?? '');
+  const isShortFallback = fallbackText.length < 200 && fallbackText.split('\n').length <= 5;
+  return <ExpandableOutput text={fallbackText} maxChars={500} compact={isShortFallback} />;
 }

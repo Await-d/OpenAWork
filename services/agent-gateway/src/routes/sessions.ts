@@ -4,6 +4,7 @@ import { promises as fsp } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { RunEvent } from '@openAwork/shared';
+import { trackEvent } from '../telemetry/telemetry-service.js';
 import {
   AgentTaskManagerImpl,
   AgentTaskStoreImpl,
@@ -1494,6 +1495,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       // hit /workspace/* endpoints against the working directory of
       // the freshly-created session.
       invalidateUserWorkspaceAllowlist(user.sub);
+      trackEvent(user.sub, 'session_created', { sessionSource: 'manual' });
       step.succeed(undefined, { sessionId: id });
       return reply.status(201).send({ sessionId: id });
     },

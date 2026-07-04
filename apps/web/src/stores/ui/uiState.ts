@@ -107,6 +107,16 @@ export interface UIStateStore {
   lastChatPath: string | null;
   setLastChatPath: (path: string | null) => void;
 
+  teamNewSessionSignal: { teamWorkspaceId: string; nonce: number } | null;
+  triggerTeamNewSession: (teamWorkspaceId: string) => void;
+  consumeTeamNewSessionSignal: () => void;
+
+  teamSelectSessionSignal: { teamWorkspaceId: string; sessionId: string; nonce: number } | null;
+  triggerTeamSelectSession: (teamWorkspaceId: string, sessionId: string) => void;
+  consumeTeamSelectSessionSignal: () => void;
+  activeTeamSessionId: string | null;
+  setActiveTeamSessionId: (id: string | null) => void;
+
   // Pinned sessions (frontend-only)
   pinnedSessions: string[];
   togglePinSession: (id: string) => void;
@@ -313,14 +323,36 @@ export const useUIStateStore = create<UIStateStore>()(
 
       // Chat view
       chatView: 'home',
-      setChatView: (v) =>
-        set((state) => (state.chatView === v ? state : { chatView: v })),
+      setChatView: (v) => set((state) => (state.chatView === v ? state : { chatView: v })),
       navigateToHome: () =>
         set((state) => (state.chatView === 'home' ? state : { chatView: 'home' })),
       navigateToSession: () =>
         set((state) => (state.chatView === 'session' ? state : { chatView: 'session' })),
       lastChatPath: null,
       setLastChatPath: (path) => set({ lastChatPath: normalizeChatPath(path) }),
+
+      teamNewSessionSignal: null,
+      triggerTeamNewSession: (teamWorkspaceId) =>
+        set({
+          teamNewSessionSignal: {
+            teamWorkspaceId,
+            nonce: Date.now(),
+          },
+        }),
+      consumeTeamNewSessionSignal: () => set({ teamNewSessionSignal: null }),
+
+      teamSelectSessionSignal: null,
+      triggerTeamSelectSession: (teamWorkspaceId, sessionId) =>
+        set({
+          teamSelectSessionSignal: {
+            teamWorkspaceId,
+            sessionId,
+            nonce: Date.now(),
+          },
+        }),
+      consumeTeamSelectSessionSignal: () => set({ teamSelectSessionSignal: null }),
+      activeTeamSessionId: null,
+      setActiveTeamSessionId: (id) => set({ activeTeamSessionId: id }),
 
       // Pinned sessions
       pinnedSessions: [],

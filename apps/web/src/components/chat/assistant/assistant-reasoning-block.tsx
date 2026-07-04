@@ -38,6 +38,7 @@ function formatReasoningEndedBadge(durationMs?: number): string {
 // allowing recovery commits to skip the embedded markdown re-parse here.
 export const AssistantReasoningBlock = memo(function AssistantReasoningBlock({
   content,
+  defaultExpanded = false,
   durationMs,
   ended = false,
   index,
@@ -47,17 +48,9 @@ export const AssistantReasoningBlock = memo(function AssistantReasoningBlock({
   total,
 }: {
   content: string;
-  /**
-   * Total wall-clock millis the upstream spent on this reasoning block.
-   * Surfaced as a friendly suffix (e.g. "已完成思考 · 12.3 秒"). Undefined when
-   * the backend did not report `startedAt`/`endedAt`.
-   */
+  /** 控制折叠初始状态。为 true 时不折叠（用于显示设置中的"推理过程默认展开"）。 */
+  defaultExpanded?: boolean;
   durationMs?: number;
-  /**
-   * Whether the upstream `thinking_end` signal has already arrived for this
-   * specific reasoning block. Drives the explicit "已完成思考" UI cue so users
-   * no longer have to infer the boundary from text/tool transitions.
-   */
   ended?: boolean;
   index: number;
   messageStreaming?: boolean;
@@ -66,7 +59,7 @@ export const AssistantReasoningBlock = memo(function AssistantReasoningBlock({
   streaming?: boolean;
   total: number;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const label = getLocalReasoningLabel({ index, streaming, total });
   const labeledContent = `*${label}* ${content}`;
   const lineCount = content.split('\n').length;

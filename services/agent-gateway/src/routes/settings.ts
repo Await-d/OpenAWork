@@ -59,6 +59,13 @@ import {
 import type { AIProvider } from '@openAwork/agent-core';
 import { WORKSPACE_ROOT } from '../infra/db.js';
 import { z } from 'zod';
+import {
+  getTelemetryConsent,
+  setTelemetryConsent,
+  type TelemetryConsentStatus,
+} from '../telemetry/telemetry-consent-store.js';
+import { trackEvent } from '../telemetry/telemetry-service.js';
+import type { TelemetryEventName } from '@openAwork/telemetry';
 
 const APP_VERSION = loadAppVersion();
 
@@ -1541,6 +1548,68 @@ ${contextBlock}
         step.fail('llm error');
         return reply.status(500).send({ error: 'Companion 陪跑聊天失败。' });
       }
+    },
+  );
+
+  // ── Telemetry consent & event reporting ────────────────────────
+
+  const telemetryConsentSchema = z.object({
+    status: z.enum(['accepted', 'declined']),
+  });
+
+  app.get(
+    '/settings/telemetry/consent',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'settings.telemetry.consent.get');
+      const user = request.user as JwtPayload;
+      const consent = getTelemetryConsent(user.sub);
+      step.succeed(undefined, { status: consent.status ?? 'unset' });
+      return reply.send(consent);
+    },
+  );
+
+  app.put(
+    '/settings/telemetry/consent',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'settings.telemetry.consent.put');
+      const user = request.user as JwtPayload;
+      const parsed = parseBody(telemetryConsentSchema, request.body);
+      setTelemetryConsent(user.sub, parsed.status as TelemetryConsentStatus);
+      step.succeed(undefined, { status: parsed.status });
+      return reply.send({ ok: true, status: parsed.status });
+    },
+  );
+
+  const telemetryEventSchema = z.object({
+    name: z.enum([
+      'app_start',
+      'session_created',
+      'tool_call',
+      'skill_installed',
+      'error_boundary',
+    ]) satisfies z.ZodType<TelemetryEventName>,
+    properties: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({}),
+  });
+
+  app.post(
+    '/settings/telemetry/event',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'settings.telemetry.event');
+      const user = request.user as JwtPayload;
+
+      const consent = getTelemetryConsent(user.sub);
+      if (consent.status !== 'accepted') {
+        step.succeed(undefined, { skipped: 'no-consent' });
+        return reply.status(403).send({ error: '遥测未授权。' });
+      }
+
+      const parsed = parseBody(telemetryEventSchema, request.body);
+      trackEvent(user.sub, parsed.name, parsed.properties);
+      step.succeed(undefined, { event: parsed.name });
+      return reply.send({ ok: true });
     },
   );
 }

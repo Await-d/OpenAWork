@@ -6,6 +6,7 @@ import {
   ChatTopBarTodoSlot,
   type ChatTodoController,
 } from '../../conversation-runtime/views/todo-bar.js';
+import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
 
 interface ChatTopBarProps {
   dialogueMode: DialogueMode;
@@ -110,6 +111,9 @@ export function ChatTopBar({
   hideYoloToggle = false,
   hideRightPanelToggle = false,
 }: ChatTopBarProps) {
+  const showCommandPaletteButton = useDisplayPreferencesStore((s) => s.showCommandPaletteButton);
+  const showTerminalButton = useDisplayPreferencesStore((s) => s.showTerminalButton);
+
   // 测量自身宽度，决定 todo slot 是 compact（徽章）还是 full（摘要）。
   const barRef = useRef<HTMLDivElement>(null);
   const todoAnchorRef = useRef<HTMLDivElement>(null);
@@ -214,7 +218,7 @@ export function ChatTopBar({
         )}
 
         {/* Command palette trigger */}
-        {onOpenCommandPalette && (
+        {onOpenCommandPalette && showCommandPaletteButton && (
           <button
             type="button"
             onClick={onOpenCommandPalette}
@@ -334,8 +338,8 @@ export function ChatTopBar({
           border: '1px solid var(--border-subtle)',
         }}
       >
-        {terminalsChip}
-        {quickTerminalToggle}
+        {showTerminalButton && terminalsChip}
+        {showTerminalButton && quickTerminalToggle}
         {hideYoloToggle ? null : (
           <button
             type="button"

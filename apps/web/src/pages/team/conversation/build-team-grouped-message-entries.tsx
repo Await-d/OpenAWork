@@ -1,26 +1,21 @@
-import type { ReactNode } from 'react';
 import type {
   ChatRenderAction,
   ChatRenderEntry,
   ChatRenderGroup,
 } from '../../../components/chat/message/chat-message-group-list.js';
-import { renderChatMessageContentWithOptions } from '../../../components/chat/session/ChatPageSections.js';
+import {
+  renderChatMessageContentWithOptions,
+  renderStreamingChatMessageContentWithOptions,
+} from '../../../components/chat/session/ChatPageSections.js';
 import type {
   ChatMessage,
   ChatMessagePart,
-} from '../../../components/conversation-runtime/messages/support.js';
-import {
-  hasActivePendingPermissionRequest,
-  readAssistantTracePayload,
-  parseAssistantEventContent,
 } from '../../../components/conversation-runtime/messages/support.js';
 import { groupChatRenderEntries } from '../../../components/conversation-runtime/messages/group-render-entries.js';
 import {
   getRoleLayerIdentity,
   getRoleLayerIdentityFromAgentId,
 } from '../runtime/data/role-layer-identity.js';
-import { TeamAssistantProcessOutline } from './extras/TeamAssistantProcessOutline.js';
-import { TeamAssistantReplyCard } from './extras/TeamAssistantReplyCard.js';
 import type { ResolveInlinePermissionActionsFn } from '../../../components/chat/session/ChatPageSections.js';
 
 export function buildTeamGroupedMessageEntries(input: {
@@ -33,32 +28,6 @@ export function buildTeamGroupedMessageEntries(input: {
   visibleStreaming: boolean;
 }): ChatRenderGroup[] {
   const entries: ChatRenderEntry[] = input.messages.map((message) => {
-    const tracePayload = readAssistantTracePayload(message);
-    const partHasPendingPermission =
-      message.parts?.some(
-        (part) =>
-          part.type === 'tool' &&
-          hasActivePendingPermissionRequest({
-            pendingPermissionRequestId: part.pendingPermissionRequestId,
-            resumedAfterApproval: part.resumedAfterApproval,
-            status: part.status,
-            isError: part.isError,
-          }),
-      ) ?? false;
-    const traceHasPendingPermission =
-      tracePayload?.toolCalls.some((toolCall) =>
-        hasActivePendingPermissionRequest({
-          pendingPermissionRequestId: toolCall.pendingPermissionRequestId,
-          resumedAfterApproval: toolCall.resumedAfterApproval,
-          status: toolCall.status,
-          isError: toolCall.isError,
-        }),
-      ) ?? false;
-    const messageHasPendingPermission = partHasPendingPermission || traceHasPendingPermission;
-    const useChatStyleRender =
-      message.role !== 'assistant' ||
-      parseAssistantEventContent(message.content) !== null ||
-      messageHasPendingPermission;
     const messageIdentity =
       message.role === 'assistant'
         ? message.agentId
@@ -69,17 +38,13 @@ export function buildTeamGroupedMessageEntries(input: {
     return {
       message,
       renderContent: (m) =>
-        useChatStyleRender ? (
-          renderChatMessageContentWithOptions(m, {
-            resolveInlinePermissionActions: input.resolveInlinePermissionActions,
-          })
-        ) : (
-          <TeamAssistantReplyCard
-            message={m}
-            processContent={<TeamAssistantProcessOutline message={m} />}
-            layerColor={messageIdentity?.color}
-          />
-        ),
+        m.role === 'assistant'
+          ? renderChatMessageContentWithOptions(m, {
+              resolveInlinePermissionActions: input.resolveInlinePermissionActions,
+            })
+          : renderChatMessageContentWithOptions(m, {
+              resolveInlinePermissionActions: input.resolveInlinePermissionActions,
+            }),
       ...(message.role === 'assistant'
         ? {
             groupIdentityKey:
@@ -91,7 +56,6 @@ export function buildTeamGroupedMessageEntries(input: {
               icon: messageIdentity?.icon,
               initials: messageIdentity?.initials,
             },
-            presentationMode: 'team' as const,
           }
         : {}),
       actions: input.buildEntryActions(message),
@@ -112,13 +76,10 @@ export function buildTeamGroupedMessageEntries(input: {
       : getRoleLayerIdentity(input.roleLayer);
     entries.push({
       message: streamingMessage,
-      renderContent: (m): ReactNode => (
-        <TeamAssistantReplyCard
-          message={m}
-          processContent={<TeamAssistantProcessOutline message={m} />}
-          layerColor={streamingIdentity.color}
-        />
-      ),
+      renderContent: (m) =>
+        renderStreamingChatMessageContentWithOptions(m, {
+          resolveInlinePermissionActions: input.resolveInlinePermissionActions,
+        }),
       groupIdentityKey:
         streamingMessage.agentId?.trim() ||
         (input.roleLayer ? `layer:${input.roleLayer}` : 'layer:fallback'),
@@ -128,7 +89,6 @@ export function buildTeamGroupedMessageEntries(input: {
         icon: streamingIdentity.icon,
         initials: streamingIdentity.initials,
       },
-      presentationMode: 'team',
       actions: [],
     });
   }

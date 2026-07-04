@@ -6,19 +6,20 @@ import type {
   MentionItem,
   SlashCommandItem,
 } from '../../conversation-runtime/messages/support.js';
-import type { PromptCandidate, PromptOptimizerResult } from '@openAwork/web-client';
+import type { PromptOptimizerResult } from '@openAwork/web-client';
 import { ProviderMark } from '../model-picker/chat-provider-display.js';
 import { ChatImageGenerationControls } from '../image/ChatImageGenerationControls.js';
-import {
-  ComposerHintChip,
-  composerHeaderTitleStyle,
-  composerListPrimaryTextStyle,
-  getSlashBadgeStyle,
-} from './chat-composer-primitives.js';
+import { ComposerHintChip } from './chat-composer-primitives.js';
 import { detectThinkKeyword } from '../../conversation-runtime/reveal/think-keyword-detector.js';
 import type { SavedChatImageDefaults } from '../../../utils/chat/chat-session-defaults.js';
 import type { ChatImageGenerationReferenceArtifact } from '../image/ChatImageGenerationControls.js';
 import { PromptSnippetsTrigger } from '../prompt-snippets/PromptSnippetsTrigger.js';
+import { ChatComposerMenu } from './ChatComposerMenu.js';
+import { ChatComposerOptimize } from './ChatComposerOptimize.js';
+import { ChatComposerPasteCollapse } from './ChatComposerPasteCollapse.js';
+import { ComposerStatsBar } from './ComposerStatsBar.js';
+import type { ComposerStatsData } from './ComposerStatsBar.js';
+import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
 
 interface ChatComposerProps {
   variant: 'home' | 'session';
@@ -98,10 +99,6 @@ interface ChatComposerProps {
   onDropFiles?: (files: File[]) => void;
   onOptimizePrompt?: (text: string) => Promise<PromptOptimizerResult>;
   onReplaceInput?: (nextValue: string) => void;
-  /** Context window usage to render inline next to the send button. */
-  contextUsedTokens?: number;
-  contextMaxTokens?: number;
-  contextIsEstimated?: boolean;
   /**
    * 自定义 textarea placeholder。team 接待会话用此覆盖默认的 chat 占位文案，
    * 与 D26（b 直答 vs 走 c 路由）的语义对齐——告诉用户"输入需求会被派发给团队"。
@@ -121,6 +118,8 @@ interface ChatComposerProps {
   snippetsToken?: string | null;
   /** Callback to insert text at cursor position in the textarea. */
   onInsertAtCursor?: (text: string) => void;
+  /** 会话统计数据，渲染在输入框下方 */
+  statsData?: ComposerStatsData | null;
 }
 
 export function ChatComposer({
@@ -196,15 +195,14 @@ export function ChatComposer({
   onDropFiles,
   onOptimizePrompt,
   onReplaceInput,
-  contextUsedTokens,
-  contextMaxTokens,
-  contextIsEstimated,
   placeholder,
   composerRightSlot,
   gatewayUrl,
   snippetsToken,
   onInsertAtCursor,
+  statsData,
 }: ChatComposerProps) {
+  const showComposerStatsBar = useDisplayPreferencesStore((s) => s.showComposerStatsBar);
   const [composerDragging, setComposerDragging] = useState(false);
   const composerDragCounterRef = useRef(0);
   const [optimizeLoading, setOptimizeLoading] = useState(false);
@@ -212,6 +210,34 @@ export function ChatComposer({
   const [optimizeError, setOptimizeError] = useState<string | null>(null);
   const optimizePopoverRef = useRef<HTMLDivElement | null>(null);
   const isHomeVariant = variant === 'home';
+  const sendButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [sendPulse, setSendPulse] = useState(false);
+  const [undoText, setUndoText] = useState<string | null>(null);
+  const [pasteCollapsed, setPasteCollapsed] = useState<{ text: string; lineCount: number } | null>(
+    null,
+  );
+  const [pastePreviewExpanded, setPastePreviewExpanded] = useState(false);
+
+  // T-07: placeholder 动态轮换
+  const PLACEHOLDER_POOL = useMemo(
+    () => [
+      '发送消息…（Enter 发送，Shift+Enter 换行，Tab 切换代理）',
+      '问点什么…',
+      '描述你的需求，我来实现…',
+      '输入 / 查看快捷命令，@ 引用文件…',
+      '试试描述一个功能或粘贴一段代码…',
+    ],
+    [],
+  );
+  const [placeholderIndex, setPlaceholderIndex] = useState(0);
+  useEffect(() => {
+    if (input.length > 0) return;
+    const id = setInterval(() => {
+      setPlaceholderIndex((prev) => (prev + 1) % PLACEHOLDER_POOL.length);
+    }, 4500);
+    return () => clearInterval(id);
+  }, [input.length, PLACEHOLDER_POOL]);
+
   const composerListRef = useRef<HTMLDivElement | null>(null);
   const composerItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const imagePreviews = useMemo(() => {
@@ -248,25 +274,14 @@ export function ChatComposer({
     : defaultAgentLabel;
   const hasAgentOverride = manualAgentId.trim().length > 0;
 
-  // 上下文容量进度条:把 composer-shell 的下边框替换为状态色填充。
-  // 阈值与原 ContextUsageMeter 保持一致(70%/90% 切换 success/warning/danger)。
-  const contextPctRaw =
-    contextUsedTokens != null && contextMaxTokens != null && contextMaxTokens > 0
-      ? Math.max(0, Math.round((Math.max(0, contextUsedTokens) / contextMaxTokens) * 100))
-      : null;
-  const contextPctVisible = contextPctRaw != null ? Math.min(100, contextPctRaw) : null;
-  const contextStateColor =
-    contextPctRaw == null
-      ? null
-      : contextPctRaw >= 90
-        ? 'var(--danger)'
-        : contextPctRaw >= 70
-          ? 'var(--warning)'
-          : 'var(--success)';
-  const contextBarTitle =
-    contextPctRaw != null && contextUsedTokens != null && contextMaxTokens != null
-      ? `${contextIsEstimated ? '上下文估算已用' : '上下文已用'} ${contextUsedTokens.toLocaleString()} / ${contextMaxTokens.toLocaleString()} (${contextPctRaw}%)${contextIsEstimated ? ' · 基于当前会话消息与流式输出估算' : ''}`
-      : undefined;
+  const slashIncludesWorkspaceCatalog = slashCommandItems.some((item) => item.source !== 'command');
+  const canSubmit = imageGenerationMode
+    ? input.trim().length > 0
+    : input.trim().length > 0 || attachedFiles.length > 0;
+  const effectiveStopCapability =
+    stopCapability !== 'none' ? stopCapability : canStopSession ? 'precise' : 'none';
+  const showStopAction =
+    streaming || effectiveStopCapability === 'precise' || effectiveStopCapability === 'best_effort';
 
   const handleAgentTabCycle = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -292,9 +307,45 @@ export function ChatComposer({
         handleAgentTabCycle(e);
         return;
       }
+      if (
+        e.key === 'Escape' &&
+        !showStopAction &&
+        !composerMenu &&
+        input.trim().length > 0 &&
+        !streaming
+      ) {
+        e.preventDefault();
+        setUndoText(input);
+        onReplaceInput?.('');
+        return;
+      }
       onKeyDown(e);
     },
-    [composerMenu, handleAgentTabCycle, onKeyDown],
+    [
+      composerMenu,
+      handleAgentTabCycle,
+      onKeyDown,
+      showStopAction,
+      input,
+      streaming,
+      onReplaceInput,
+    ],
+  );
+
+  // T-09: 粘贴大文本折叠
+  const wrappedOnPaste = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const pastedText = e.clipboardData.getData('text/plain');
+      if (pastedText.length > 500 && !e.shiftKey) {
+        e.preventDefault();
+        const lineCount = pastedText.split('\n').length;
+        setPasteCollapsed({ text: pastedText, lineCount });
+        setPastePreviewExpanded(false);
+        return;
+      }
+      onInputPaste(e);
+    },
+    [onInputPaste],
   );
 
   useEffect(() => {
@@ -318,14 +369,6 @@ export function ChatComposer({
     selectedItem.scrollIntoView({ block: 'nearest' });
   }, [composerMenu, currentItems.length]);
 
-  const slashIncludesWorkspaceCatalog = slashCommandItems.some((item) => item.source !== 'command');
-  const canSubmit = imageGenerationMode
-    ? input.trim().length > 0
-    : input.trim().length > 0 || attachedFiles.length > 0;
-  const effectiveStopCapability =
-    stopCapability !== 'none' ? stopCapability : canStopSession ? 'precise' : 'none';
-  const showStopAction =
-    streaming || effectiveStopCapability === 'precise' || effectiveStopCapability === 'best_effort';
   const hasRemoteSessionBusyState = !showStopAction && sessionBusyState !== null;
   const showQueueAction =
     !imageGenerationMode &&
@@ -342,14 +385,14 @@ export function ChatComposer({
     <div
       style={{
         padding: '0 16px 12px',
-        background: 'transparent',
+        background: 'var(--bg-base)',
+        borderTop: '1px solid var(--border-default)',
         transition: 'padding 220ms ease',
-        borderTop: '1px solid var(--border-subtle)',
       }}
     >
       <div
         style={{
-          maxWidth: editorMode ? 800 : 880,
+          maxWidth: editorMode ? 720 : 1024,
           margin: '0 auto',
           width: '100%',
           position: 'relative',
@@ -367,217 +410,15 @@ export function ChatComposer({
           accept="image/*,text/*,.md,.json,.ts,.tsx,.js,.jsx,.py,.go,.rs,.java,.cpp,.c,.h,.yaml,.yml,.toml,.csv"
         />
         {composerMenu && (currentItems.length > 0 || composerMenu.type === 'mention') && (
-          <div
-            style={{
-              position: 'absolute',
-              left: 0,
-              right: 0,
-              bottom: 'calc(100% + 14px)',
-              zIndex: 12,
-              display: 'flex',
-              justifyContent: 'center',
-            }}
-          >
-            <div
-              style={{
-                width: 'min(100%, 600px)',
-                border: '1px solid var(--border-default)',
-                background: 'var(--bg-overlay)',
-                borderRadius: 14,
-                boxShadow: 'var(--shadow-lg)',
-                overflow: 'hidden',
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 8,
-                  padding: '8px 10px 7px',
-                  borderBottom: '1px solid var(--border-subtle)',
-                  background: 'var(--bg-overlay)',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                  <span
-                    style={{
-                      width: 20,
-                      height: 20,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      borderRadius: 999,
-                      background: 'var(--accent-muted)',
-                      color: 'var(--accent)',
-                      flexShrink: 0,
-                    }}
-                  >
-                    {composerMenu.type === 'slash' ? '/' : '@'}
-                  </span>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={composerHeaderTitleStyle}>
-                      {composerMenu.type === 'slash'
-                        ? slashIncludesWorkspaceCatalog
-                          ? '快捷命令与工作区能力'
-                          : '快捷命令'
-                        : '工作区文件'}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 10,
-                        color: 'var(--fg-muted)',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {composerMenu.type === 'slash'
-                        ? slashIncludesWorkspaceCatalog
-                          ? '按 Enter 或 Tab 插入；仅 / 命令会在发送时直接执行'
-                          : '按 Enter 或 Tab 插入 / 执行'
-                        : '输入 @ 引用文件到当前消息'}
-                    </div>
-                  </div>
-                </div>
-                <ComposerHintChip
-                  label={`${composerMenu.type === 'slash' ? '/' : '@'}${composerMenu.query || '...'}`}
-                  tone="accent"
-                />
-              </div>
-              <div
-                ref={composerListRef}
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  padding: '8px 6px',
-                  gap: 4,
-                  maxHeight: 'min(320px, 45vh)',
-                  overflowY: 'auto',
-                }}
-              >
-                {currentItems.length === 0 && composerMenu.type === 'mention' && (
-                  // Mention menu has no matching files. Render a short
-                  // explanation instead of staying silently invisible —
-                  // most often this means the current chat session has
-                  // not picked a working directory yet, so the file
-                  // tree never loaded any candidates.
-                  <div
-                    style={{
-                      padding: '14px 12px',
-                      color: 'var(--fg-muted)',
-                      fontSize: 12,
-                      lineHeight: 1.55,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 6,
-                    }}
-                  >
-                    <span style={{ color: 'var(--fg-default)', fontWeight: 600 }}>
-                      暂无可引用的工作区文件
-                    </span>
-                    <span>
-                      请先在左上角「打开工作目录」选择一个目录，索引完成后再用 @ 引用文件。
-                    </span>
-                  </div>
-                )}
-                {currentItems.map((item, index) => {
-                  const selected = index === composerMenu.selectedIndex;
-                  const slashItem =
-                    composerMenu.type === 'slash' && item.kind === 'slash' ? item : null;
-                  return (
-                    <button
-                      ref={(node) => {
-                        composerItemRefs.current[index] = node;
-                      }}
-                      key={item.id}
-                      type="button"
-                      onMouseEnter={() => {
-                        onComposerHover(index);
-                      }}
-                      onClick={() => {
-                        void onApplyComposerSelection(item);
-                      }}
-                      style={{
-                        width: '100%',
-                        textAlign: 'left',
-                        border: 'none',
-                        borderRadius: 10,
-                        background: selected ? 'var(--accent-muted)' : 'transparent',
-                        color: 'var(--fg-strong)',
-                        padding: '8px 10px',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        justifyContent: 'space-between',
-                        gap: 10,
-                      }}
-                    >
-                      <span
-                        style={{
-                          minWidth: 0,
-                          flex: 1,
-                          display: 'flex',
-                          flexDirection: 'column',
-                        }}
-                      >
-                        <span style={composerListPrimaryTextStyle} title={item.label}>
-                          {item.label}
-                        </span>
-                        {item.description && (
-                          <span
-                            style={{
-                              marginTop: 2,
-                              fontSize: 10,
-                              lineHeight: 1.45,
-                              color: 'var(--fg-muted)',
-                              overflow: 'hidden',
-                              display: '-webkit-box',
-                              WebkitLineClamp: 2,
-                              WebkitBoxOrient: 'vertical',
-                              maxWidth: '100%',
-                            }}
-                            title={item.description}
-                          >
-                            {item.description}
-                          </span>
-                        )}
-                      </span>
-                      <span
-                        style={{
-                          fontSize: 10,
-                          color: 'var(--fg-muted)',
-                          flexShrink: 0,
-                          marginLeft: 8,
-                          alignSelf: 'flex-start',
-                        }}
-                      >
-                        {slashItem ? (
-                          <span
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              height: 18,
-                              padding: '0 6px',
-                              borderRadius: 999,
-                              fontSize: 10,
-                              fontWeight: 700,
-                              letterSpacing: '0.01em',
-                              ...getSlashBadgeStyle(slashItem.source),
-                            }}
-                          >
-                            {slashItem.badgeLabel ?? '命令'}
-                          </span>
-                        ) : (
-                          '@'
-                        )}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
+          <ChatComposerMenu
+            composerMenu={composerMenu}
+            currentItems={currentItems}
+            slashIncludesWorkspaceCatalog={slashIncludesWorkspaceCatalog}
+            composerListRef={composerListRef}
+            composerItemRefs={composerItemRefs}
+            onComposerHover={onComposerHover}
+            onApplyComposerSelection={onApplyComposerSelection}
+          />
         )}
 
         <div
@@ -591,10 +432,7 @@ export function ChatComposer({
           }}
         >
           <div
-            className={`composer-shell${hasAgentOverride ? ' agent-override' : ''}`}
-            data-context-bar={contextPctVisible != null ? '1' : undefined}
-            title={contextBarTitle}
-            aria-label={contextBarTitle}
+            className={`composer-shell${hasAgentOverride ? ' agent-override' : ''}${streaming ? ' composer-streaming' : ''}${isHomeVariant ? ' composer-home-variant' : ''}`}
             onDragEnter={(e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -633,12 +471,6 @@ export function ChatComposer({
               transition:
                 'padding 220ms ease, border-radius 220ms ease, gap 220ms ease, border-color 150ms ease, background 150ms ease',
               position: 'relative',
-              ...(contextPctVisible != null && contextStateColor
-                ? ({
-                    ['--ctx-bar-pct' as string]: `${contextPctVisible}%`,
-                    ['--ctx-bar-color' as string]: contextStateColor,
-                  } as React.CSSProperties)
-                : {}),
               ...(composerDragging
                 ? {
                     borderColor: 'var(--accent-border)',
@@ -650,6 +482,7 @@ export function ChatComposer({
           >
             {composerDragging && (
               <div
+                className="composer-drag-overlay"
                 style={{
                   position: 'absolute',
                   inset: 0,
@@ -758,6 +591,7 @@ export function ChatComposer({
                   {queuedMessages.slice(0, 3).map((item, index) => (
                     <span
                       key={item.id}
+                      className="composer-queue-pill"
                       style={{
                         display: 'inline-flex',
                         alignItems: 'center',
@@ -869,10 +703,13 @@ export function ChatComposer({
                   value={input}
                   onChange={onInputChange}
                   onSelect={onInputSelect}
-                  onPaste={onInputPaste}
+                  onPaste={wrappedOnPaste}
                   onKeyDown={wrappedOnKeyDown}
                   placeholder={
-                    placeholder ?? '发送消息…（Enter 发送，Shift+Enter 换行，Tab 切换代理）'
+                    placeholder ??
+                    (input.length === 0
+                      ? (PLACEHOLDER_POOL[placeholderIndex] ?? PLACEHOLDER_POOL[0]!)
+                      : '')
                   }
                   rows={3}
                   style={{
@@ -893,6 +730,19 @@ export function ChatComposer({
                       'min-height 220ms ease, font-size 220ms ease, max-height 220ms ease',
                   }}
                 />
+                {input.length > 0 && (
+                  <span
+                    className={`composer-char-counter${
+                      input.length > 8000
+                        ? ' composer-char-danger'
+                        : input.length > 6000
+                          ? ' composer-char-warning'
+                          : ' composer-char-visible'
+                    }`}
+                  >
+                    {input.length.toLocaleString()} 字符
+                  </span>
+                )}
                 {agentOptions.length > 1 && (
                   <span
                     style={{
@@ -980,233 +830,60 @@ export function ChatComposer({
                   </div>
                 )}
 
-              {optimizeError && (
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    padding: '2px 8px',
-                    borderRadius: 6,
-                    background: 'color-mix(in srgb, var(--danger) 8%, transparent)',
-                    color: 'color-mix(in srgb, var(--danger) 80%, var(--fg-on-accent) 20%)',
-                    fontSize: 10,
-                    lineHeight: 1.5,
-                    flexShrink: 0,
+              {pasteCollapsed && (
+                <ChatComposerPasteCollapse
+                  pasteCollapsed={pasteCollapsed}
+                  pastePreviewExpanded={pastePreviewExpanded}
+                  onToggleExpand={() => setPastePreviewExpanded((v) => !v)}
+                  onInsert={() => {
+                    const textarea = textareaRef.current;
+                    if (!textarea) {
+                      onReplaceInput?.(input + pasteCollapsed.text);
+                    } else {
+                      const start = textarea.selectionStart ?? input.length;
+                      const end = textarea.selectionEnd ?? input.length;
+                      onReplaceInput?.(
+                        input.slice(0, start) + pasteCollapsed.text + input.slice(end),
+                      );
+                      requestAnimationFrame(() => {
+                        textarea.focus();
+                        const pos = start + pasteCollapsed.text.length;
+                        textarea.setSelectionRange(pos, pos);
+                      });
+                    }
+                    setPasteCollapsed(null);
+                    setPastePreviewExpanded(false);
                   }}
-                >
-                  <svg
-                    width="10"
-                    height="10"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <circle cx="12" cy="12" r="10" />
-                    <line x1="15" y1="9" x2="9" y2="15" />
-                    <line x1="9" y1="9" x2="15" y2="15" />
-                  </svg>
-                  {optimizeError}
-                  <button
-                    type="button"
-                    onClick={() => setOptimizeError(null)}
-                    style={{
-                      border: 'none',
-                      background: 'transparent',
-                      color: 'inherit',
-                      cursor: 'pointer',
-                      padding: 0,
-                      fontSize: 10,
-                      lineHeight: 1,
-                      marginLeft: 2,
-                      opacity: 0.7,
-                    }}
-                  >
-                    ✕
-                  </button>
-                </div>
+                  onDiscard={() => {
+                    setPasteCollapsed(null);
+                    setPastePreviewExpanded(false);
+                  }}
+                />
               )}
 
-              {optimizeResult && (
-                <div
-                  ref={optimizePopoverRef}
-                  style={{
-                    border: '1px solid var(--border-default)',
-                    borderRadius: 10,
-                    background: 'var(--bg-overlay)',
-                    overflow: 'hidden',
-                    flexShrink: 0,
-                  }}
-                >
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: 8,
-                      padding: '6px 10px 5px',
-                      borderBottom: '1px solid var(--border-subtle)',
-                      background: 'var(--bg-overlay)',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                      <span
-                        style={{
-                          width: 18,
-                          height: 18,
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          borderRadius: 999,
-                          background: 'color-mix(in oklch, var(--success) 14%, transparent)',
-                          color: 'color-mix(in oklch, var(--success) 82%, var(--fg-on-accent) 18%)',
-                          flexShrink: 0,
-                          fontSize: 9,
-                        }}
-                      >
-                        ✦
-                      </span>
-                      <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--fg-strong)' }}>
-                        提示词优化建议
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setOptimizeResult(null);
-                        setOptimizeError(null);
-                      }}
-                      style={{
-                        border: 'none',
-                        background: 'transparent',
-                        color: 'var(--fg-muted)',
-                        cursor: 'pointer',
-                        padding: 0,
-                        fontSize: 11,
-                        lineHeight: 1,
-                      }}
-                      title="关闭"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                  {optimizeResult.rationale && (
-                    <div
-                      style={{
-                        padding: '4px 10px',
-                        fontSize: 10,
-                        color: 'var(--fg-default)',
-                        lineHeight: 1.5,
-                        borderBottom: '1px solid var(--border-subtle)',
-                        background: 'color-mix(in oklch, var(--success) 4%, transparent)',
-                      }}
-                    >
-                      {optimizeResult.rationale}
-                    </div>
-                  )}
-                  <div
-                    style={{ padding: '6px 6px', display: 'flex', flexDirection: 'column', gap: 4 }}
-                  >
-                    {optimizeResult.candidates.map((candidate: PromptCandidate) => {
-                      const isRecommended = candidate.id === optimizeResult.recommended;
-                      return (
-                        <button
-                          key={candidate.id}
-                          type="button"
-                          onClick={() => {
-                            onReplaceInput?.(candidate.text);
-                            setOptimizeResult(null);
-                            setOptimizeError(null);
-                            requestAnimationFrame(() => {
-                              if (!textareaRef.current) return;
-                              textareaRef.current.focus();
-                              textareaRef.current.setSelectionRange(
-                                candidate.text.length,
-                                candidate.text.length,
-                              );
-                            });
-                          }}
-                          style={{
-                            width: '100%',
-                            textAlign: 'left',
-                            border: isRecommended
-                              ? '1px solid color-mix(in oklch, var(--success) 30%, var(--border-subtle))'
-                              : '1px solid var(--border-subtle)',
-                            borderRadius: 8,
-                            background: isRecommended
-                              ? 'color-mix(in oklch, var(--success) 6%, transparent)'
-                              : 'transparent',
-                            color: 'var(--fg-strong)',
-                            padding: '6px 8px',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: 3,
-                            transition: 'background 150ms ease, border-color 150ms ease',
-                          }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <span
-                              style={{
-                                fontSize: 10,
-                                fontWeight: isRecommended ? 700 : 600,
-                                color: isRecommended
-                                  ? 'color-mix(in oklch, var(--success) 82%, var(--fg-on-accent) 18%)'
-                                  : 'var(--fg-default)',
-                              }}
-                            >
-                              {isRecommended ? '★ 推荐' : `候选 ${candidate.id}`}
-                            </span>
-                          </div>
-                          <span
-                            style={{
-                              fontSize: 11,
-                              lineHeight: 1.5,
-                              color: 'var(--fg-strong)',
-                              whiteSpace: 'pre-wrap',
-                              wordBreak: 'break-word',
-                            }}
-                          >
-                            {candidate.text}
-                          </span>
-                          {candidate.improvements.length > 0 && (
-                            <div
-                              style={{
-                                display: 'flex',
-                                flexWrap: 'wrap',
-                                gap: 3,
-                                marginTop: 2,
-                              }}
-                            >
-                              {candidate.improvements.map((imp: string, idx: number) => (
-                                <span
-                                  key={idx}
-                                  style={{
-                                    fontSize: 9,
-                                    padding: '1px 5px',
-                                    borderRadius: 999,
-                                    background:
-                                      'color-mix(in oklch, var(--accent) 8%, transparent)',
-                                    color:
-                                      'color-mix(in oklch, var(--accent) 70%, var(--fg-on-accent) 30%)',
-                                    whiteSpace: 'nowrap',
-                                  }}
-                                >
-                                  {imp}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
+              <ChatComposerOptimize
+                optimizeError={optimizeError}
+                optimizeResult={optimizeResult}
+                optimizePopoverRef={optimizePopoverRef}
+                onClearError={() => setOptimizeError(null)}
+                onClose={() => {
+                  setOptimizeResult(null);
+                  setOptimizeError(null);
+                }}
+                onSelectCandidate={(candidate) => {
+                  onReplaceInput?.(candidate.text);
+                  setOptimizeResult(null);
+                  setOptimizeError(null);
+                  requestAnimationFrame(() => {
+                    if (!textareaRef.current) return;
+                    textareaRef.current.focus();
+                    textareaRef.current.setSelectionRange(
+                      candidate.text.length,
+                      candidate.text.length,
+                    );
+                  });
+                }}
+              />
 
               <div
                 style={{
@@ -1510,6 +1187,7 @@ export function ChatComposer({
                       onInject={onInsertAtCursor}
                     />
                   )}
+                  <span className="composer-toolbar-divider" />
                   <ComposerHintChip label="/ 命令" />
                   <ComposerHintChip label="@ 文件" />
                 </div>
@@ -1675,10 +1353,12 @@ export function ChatComposer({
                         void onStop();
                         return;
                       }
+                      setSendPulse(true);
+                      setTimeout(() => setSendPulse(false), 450);
                       void onSend();
                     }}
                     disabled={primaryButtonDisabled}
-                    className="btn-accent"
+                    className={`btn-accent${sendPulse ? ' composer-pulse' : ''}`}
                     style={{
                       borderRadius: 8,
                       height: 28,
@@ -1764,6 +1444,63 @@ export function ChatComposer({
             </div>
           )}
         </div>
+        {undoText !== null && (
+          <div
+            className="composer-undo-toast"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '3px 8px',
+              marginTop: 4,
+              borderRadius: 8,
+              background: 'color-mix(in oklch, var(--accent) 8%, transparent)',
+              border: '1px solid color-mix(in oklch, var(--accent) 20%, var(--border-subtle))',
+              fontSize: 10,
+              color: 'var(--fg-muted)',
+            }}
+          >
+            <span>已清空输入</span>
+            <button
+              type="button"
+              onClick={() => {
+                onReplaceInput?.(undoText);
+                setUndoText(null);
+              }}
+              style={{
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--accent)',
+                cursor: 'pointer',
+                padding: 0,
+                fontSize: 10,
+                fontWeight: 600,
+                lineHeight: 1,
+              }}
+            >
+              恢复
+            </button>
+            <button
+              type="button"
+              onClick={() => setUndoText(null)}
+              style={{
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--fg-subtle)',
+                cursor: 'pointer',
+                padding: 0,
+                fontSize: 11,
+                lineHeight: 1,
+                marginLeft: 'auto',
+              }}
+            >
+              ×
+            </button>
+          </div>
+        )}
+        {showComposerStatsBar && statsData && (
+          <ComposerStatsBar data={statsData} variant={variant} />
+        )}
       </div>
     </div>
   );

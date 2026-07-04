@@ -14,6 +14,7 @@ import { Routes, Route, Navigate, useNavigate } from 'react-router';
 import { UnlockOverlay } from './components/common/modal/UnlockOverlay.js';
 import { tauriInvoke } from './pages/settings/shared/settings-page-helpers.js';
 import { useAuthStore } from './stores/auth/auth.js';
+import { useDisplayPreferencesStore } from './stores/settings/display-preferences.js';
 import LoginPage from './pages/misc/LoginPage.js';
 import NotFoundPage from './pages/misc/NotFoundPage.js';
 import Layout from './components/Layout.js';
@@ -24,6 +25,7 @@ import UpdateBanner from './components/common/feedback/UpdateBanner.js';
 import { usePrefersReducedMotion } from './hooks/ui/usePrefersReducedMotion.js';
 import { PRELOADABLE_ROUTE_MODULES } from './routes/preloadable-route-modules.js';
 import { TelemetryConsentModal } from '@openAwork/shared-ui';
+import { useTelemetry } from './hooks/use-telemetry.js';
 import {
   authenticateDesktopGateway,
   DESKTOP_DEFAULT_EMAIL,
@@ -272,6 +274,8 @@ function useDesktopGatewayBootstrap(
 
 export default function App() {
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
+  const themeMode = useDisplayPreferencesStore((s) => s.themeMode);
+  const setThemeMode = useDisplayPreferencesStore((s) => s.setThemeMode);
   const openFileRef = useRef<OpenFileFn | null>(null);
   const prefersReducedMotion = usePrefersReducedMotion();
   const authHydrated = useHasHydrated();
@@ -283,9 +287,25 @@ export default function App() {
   const [showTelemetryConsent, setShowTelemetryConsent] = useState(
     () => localStorage.getItem('telemetry_consent_shown') !== '1',
   );
+  const telemetry = useTelemetry();
   const [showOnboarding, setShowOnboarding] = useState(
     () => localStorage.getItem('onboarded') !== '1',
   );
+
+  // 主题模式：system 跟随系统，light/dark 强制。
+  useEffect(() => {
+    if (themeMode === 'system') {
+      const mql = window.matchMedia('(prefers-color-scheme: light)');
+      const next: Theme = mql.matches ? 'light' : 'dark';
+      setTheme(next);
+      const handler = (e: MediaQueryListEvent) => {
+        setTheme(e.matches ? 'light' : 'dark');
+      };
+      mql.addEventListener('change', handler);
+      return () => mql.removeEventListener('change', handler);
+    }
+    setTheme(themeMode === 'light' ? 'light' : 'dark');
+  }, [themeMode]);
 
   useEffect(() => {
     if (theme === 'light') {
@@ -305,7 +325,7 @@ export default function App() {
 
   // C-9 系统主题跟随：监听 Rust 端 emit 的 'theme-changed'，自动切换 dark/light。
   useEffect(() => {
-    if (!desktopRuntime) return;
+    if (!desktopRuntime || themeMode !== 'system') return;
     let unlistenFn: UnlistenFn | null = null;
     let cancelled = false;
     void (async () => {
@@ -325,7 +345,7 @@ export default function App() {
       cancelled = true;
       unlistenFn?.();
     };
-  }, [desktopRuntime]);
+  }, [desktopRuntime, themeMode]);
 
   // 监听托盘菜单「显示配对二维码」点击事件（Rust 端 emit 'tray:show-pairing-qr'）。
   // 收到后跳转到设置、桌面端 tab，带 show=pairing 参数让 DesktopTabContent 自动展开 QR。
@@ -467,7 +487,8 @@ export default function App() {
   }, [desktopRuntime, desktopLocked, idleLockMinutes]);
 
   function toggleTheme() {
-    setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
+    setThemeMode(theme === 'dark' ? 'light' : 'dark');
+    setTheme(theme === 'dark' ? 'light' : 'dark');
   }
 
   // 锁定时全屏遮罩，阻断主界面交互。解锁后 Rust 端会 emit
@@ -489,11 +510,11 @@ export default function App() {
       <TelemetryConsentModal
         open={showTelemetryConsent}
         onAccept={() => {
-          localStorage.setItem('telemetry_consent_shown', '1');
+          void telemetry.updateConsent('accepted');
           setShowTelemetryConsent(false);
         }}
         onDecline={() => {
-          localStorage.setItem('telemetry_consent_shown', '1');
+          void telemetry.updateConsent('declined');
           setShowTelemetryConsent(false);
         }}
       />
@@ -683,16 +704,7 @@ export default function App() {
               />
             }
           />
-          <Route
-            path="/about"
-            element={
-              <LazyRoutePage
-                component={PRELOADABLE_ROUTE_MODULES.about.component}
-                prefersReducedMotion={prefersReducedMotion}
-                title={PRELOADABLE_ROUTE_MODULES.about.title}
-              />
-            }
-          />
+          <Route path="/about" element={<Navigate to="/settings/about" replace />} />
         </Route>
         <Route path="*" element={<NotFoundPage />} />
       </Routes>

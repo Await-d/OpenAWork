@@ -2,8 +2,13 @@ import React, { useCallback, useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { createSettingsClient } from '@openAwork/web-client';
 import type { AIProviderRef } from '@openAwork/shared-ui';
+import { MCPServerConfig, MCPServerList } from '@openAwork/shared-ui';
 import { useAuthStore } from '../../../stores/auth/auth.js';
 import { SkillsPluginPanel } from './skills-plugin-panel.js';
+import { WebsearchSection } from '../connection/websearch-section.js';
+import { useSettingsWebsearch } from '../connection/use-settings-websearch.js';
+import { useMcpServers } from '../connection/use-mcp-servers.js';
+import { SS, ST, UV } from '../shared/settings-section-styles.js';
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -151,6 +156,27 @@ export function PluginsTabContent({
   const [saving, setSaving] = useState(false);
   const [selectedPluginId, setSelectedPluginId] = useState<string>('image-generation');
 
+  // Web 搜索策略——独立加载/保存
+  const {
+    loadWebsearchPolicy,
+    saveWebsearchPolicy,
+    savedPolicy: websearchSavedPolicy,
+    saving: websearchSaving,
+    setPolicy: setWebsearchPolicy,
+    policy: websearchPolicy,
+  } = useSettingsWebsearch({ gatewayUrl, token });
+
+  // MCP 服务器——独立加载/保存/重试
+  const { mcpServers, setMcpServers, mcpStatuses, onRetryMcp } = useMcpServers({
+    gatewayUrl,
+    token,
+    active: true,
+  });
+
+  useEffect(() => {
+    void loadWebsearchPolicy().catch(() => undefined);
+  }, [loadWebsearchPolicy]);
+
   // Load plugin settings
   useEffect(() => {
     if (!token) return;
@@ -263,6 +289,52 @@ export function PluginsTabContent({
       // Skill enablement is per-row inside the panel, so there's no
       // single global "enabled" badge to display in the sidebar.
       enabled: undefined,
+    },
+    {
+      id: 'websearch',
+      icon: (
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <circle cx="12" cy="12" r="10" />
+          <path d="M2 12h20" />
+          <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+        </svg>
+      ),
+      label: 'Web 搜索',
+      description: '为 Agent 的 websearch 工具配置多 provider 策略。',
+      enabled: websearchSavedPolicy.providers.length > 0,
+    },
+    {
+      id: 'mcp',
+      icon: (
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <rect x="3" y="3" width="7" height="7" rx="1" />
+          <rect x="14" y="3" width="7" height="7" rx="1" />
+          <rect x="3" y="14" width="7" height="7" rx="1" />
+          <rect x="14" y="14" width="7" height="7" rx="1" />
+          <path d="M10 6.5h4M6.5 10v4M17.5 10v4M10 17.5h4" />
+        </svg>
+      ),
+      label: 'MCP 服务器',
+      description: '通过 MCP 协议接入外部工具，扩展 Agent 能力。',
+      enabled: mcpServers.length > 0,
     },
   ];
 
@@ -545,6 +617,61 @@ export function PluginsTabContent({
         )}
 
         {selectedPlugin && selectedPluginId === 'skills' && <SkillsPluginPanel />}
+
+        {selectedPlugin && selectedPluginId === 'websearch' && (
+          <>
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--fg-strong)' }}>
+                Web 搜索
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginTop: 2 }}>
+                为 Agent 的 websearch 工具配置多 provider
+                策略，支持顺序回退、首个成功和合并去重三种模式。
+              </div>
+            </div>
+            <WebsearchSection
+              isSaving={websearchSaving}
+              policy={websearchPolicy}
+              savedPolicy={websearchSavedPolicy}
+              setPolicy={setWebsearchPolicy}
+              onSave={() => {
+                void saveWebsearchPolicy();
+              }}
+            />
+          </>
+        )}
+
+        {selectedPlugin && selectedPluginId === 'mcp' && (
+          <>
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--fg-strong)' }}>
+                MCP 服务器
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginTop: 2 }}>
+                通过 Model Context Protocol 接入外部工具服务器，为 Agent
+                扩展数据源访问、工具执行和第三方集成能力。
+              </div>
+            </div>
+            <section style={{ ...SS, marginBottom: 0, padding: '10px 12px', gap: '0.5rem' }}>
+              <h3 style={ST}>服务器配置</h3>
+              <div style={UV}>
+                <MCPServerConfig
+                  servers={mcpServers}
+                  onAdd={(entry) => setMcpServers((prev) => [...prev, entry])}
+                  onRemove={(id) =>
+                    setMcpServers((prev) => prev.filter((server) => server.id !== id))
+                  }
+                />
+              </div>
+            </section>
+            <section style={{ ...SS, marginBottom: 0, padding: '10px 12px', gap: '0.5rem' }}>
+              <h3 style={ST}>运行状态</h3>
+              <div style={UV}>
+                <MCPServerList servers={mcpStatuses} onRetry={onRetryMcp} />
+              </div>
+            </section>
+          </>
+        )}
       </div>
     </div>
   );

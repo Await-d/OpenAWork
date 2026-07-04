@@ -322,21 +322,41 @@ export function TaskQuickOverview({ selectedSessionId }: TaskQuickOverviewProps)
             }}
           />
         </div>
-        <span style={{ fontSize: 10, color: 'var(--fg-muted)', fontWeight: 600, whiteSpace: 'nowrap' }}>
+        <span
+          style={{ fontSize: 10, color: 'var(--fg-muted)', fontWeight: 600, whiteSpace: 'nowrap' }}
+        >
           {stats.completed}/{stats.total}
         </span>
         {stats.running > 0 ? (
-          <span style={{ ...STAT_PILL_STYLE, color: 'var(--accent)', background: 'color-mix(in srgb, var(--accent) 12%, transparent)' }}>
+          <span
+            style={{
+              ...STAT_PILL_STYLE,
+              color: 'var(--accent)',
+              background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
+            }}
+          >
             ● {stats.running} 运行
           </span>
         ) : null}
         {stats.pending > 0 ? (
-          <span style={{ ...STAT_PILL_STYLE, color: 'var(--fg-muted)', background: 'color-mix(in srgb, var(--fg-muted) 10%, transparent)' }}>
+          <span
+            style={{
+              ...STAT_PILL_STYLE,
+              color: 'var(--fg-muted)',
+              background: 'color-mix(in srgb, var(--fg-muted) 10%, transparent)',
+            }}
+          >
             ◌ {stats.pending} 等待
           </span>
         ) : null}
         {stats.failed > 0 ? (
-          <span style={{ ...STAT_PILL_STYLE, color: 'var(--danger)', background: 'color-mix(in srgb, var(--danger) 10%, transparent)' }}>
+          <span
+            style={{
+              ...STAT_PILL_STYLE,
+              color: 'var(--danger)',
+              background: 'color-mix(in srgb, var(--danger) 10%, transparent)',
+            }}
+          >
             ✗ {stats.failed}
           </span>
         ) : null}
@@ -443,7 +463,9 @@ export function TaskQuickOverview({ selectedSessionId }: TaskQuickOverviewProps)
                     {title}
                   </span>
                   <span style={TASK_META_STYLE}>
-                    <span>{LAYER_LABELS[task.fromRoleLayer]} → {LAYER_LABELS[task.toRoleLayer]}</span>
+                    <span>
+                      {LAYER_LABELS[task.fromRoleLayer]} → {LAYER_LABELS[task.toRoleLayer]}
+                    </span>
                     {timeLabel ? (
                       <>
                         <span>·</span>
@@ -468,8 +490,19 @@ export function TaskQuickOverview({ selectedSessionId }: TaskQuickOverviewProps)
           })}
         </div>
       ) : (
-        <div style={{ fontSize: 11, color: 'var(--fg-muted)', padding: '8px 6px', textAlign: 'center' }}>
-          {filter === 'active' ? '没有进行中的任务' : filter === 'done' ? '还没有已完成的任务' : '暂无任务'}
+        <div
+          style={{
+            fontSize: 11,
+            color: 'var(--fg-muted)',
+            padding: '8px 6px',
+            textAlign: 'center',
+          }}
+        >
+          {filter === 'active'
+            ? '没有进行中的任务'
+            : filter === 'done'
+              ? '还没有已完成的任务'
+              : '暂无任务'}
         </div>
       )}
     </div>

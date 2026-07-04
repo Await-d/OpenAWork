@@ -16,6 +16,7 @@ import type { DevtoolsSourceState, SettingsDiagnosticRecord } from '../state/set
 import { groupDiagnosticsByFile } from '../state/settings-derived.js';
 import { BP, SS, ST, UV } from '../shared/settings-section-styles.js';
 import { NotificationPreferencePanel } from './notification-preference-panel.js';
+import { useTelemetry } from '../../../hooks/use-telemetry.js';
 
 interface SecurityTabContentProps {
   permissions: PermissionDecisionRecord[];
@@ -41,6 +42,7 @@ export function SecurityTabContent({
   diagnosticsSource,
 }: SecurityTabContentProps) {
   const [telemetryDialogOpen, setTelemetryDialogOpen] = React.useState(false);
+  const telemetry = useTelemetry();
   const groupedDiagnostics = groupDiagnosticsByFile(diagnostics);
 
   return (
@@ -65,17 +67,31 @@ export function SecurityTabContent({
       </section>
       <section style={SS}>
         <h3 style={ST}>遥测授权</h3>
-        <button type="button" style={BP} onClick={() => setTelemetryDialogOpen(true)}>
-          配置遥测
-        </button>
+        <div style={{ ...UV, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <span
+            style={{
+              fontSize: 12,
+              color: telemetry.isTelemetryEnabled ? 'var(--accent)' : 'var(--fg-muted)',
+            }}
+          >
+            {telemetry.isLoading
+              ? '加载中…'
+              : telemetry.isTelemetryEnabled
+                ? '已启用匿名遥测'
+                : '遥测未启用'}
+          </span>
+          <button type="button" style={BP} onClick={() => setTelemetryDialogOpen(true)}>
+            配置遥测
+          </button>
+        </div>
         <TelemetryConsentDialog
           open={telemetryDialogOpen}
           onAccept={() => {
-            localStorage.setItem('telemetry_consent_shown', '1');
+            void telemetry.updateConsent('accepted');
             setTelemetryDialogOpen(false);
           }}
           onDecline={() => {
-            localStorage.setItem('telemetry_consent_shown', '0');
+            void telemetry.updateConsent('declined');
             setTelemetryDialogOpen(false);
           }}
         />

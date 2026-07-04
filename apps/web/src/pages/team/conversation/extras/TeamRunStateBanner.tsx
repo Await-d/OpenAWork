@@ -51,9 +51,9 @@ function formatAgo(ms: number | null): string | null {
 const CONTAINER_BASE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 8,
+  gap: 10,
   flexShrink: 0,
-  padding: '5px 10px',
+  padding: '7px 12px',
   borderBottom: '1px solid',
   fontSize: 12,
   fontWeight: 500,

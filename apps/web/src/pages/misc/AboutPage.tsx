@@ -1,5 +1,13 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { createSettingsClient } from '@openAwork/web-client';
+import { useAuthStore } from '../../stores/auth/auth.js';
 import { toast } from '../../components/common/feedback/ToastNotification.js';
+import { isTauri } from '../settings/shared/settings-page-helpers.js';
+import type { SettingsVersionInfo } from '../settings/state/settings-types.js';
+
+const RELEASES_URL = 'https://github.com/Await-d/OpenAWork/releases';
+
+/* ── 工具函数 ──────────────────────────────────────────────────────────── */
 
 function formatDate(input: string): string {
   if (!input) return '—';
@@ -32,24 +40,41 @@ function formatRelative(input: string): string {
   return `${years} 年前`;
 }
 
+function buildCommitUrl(repositoryUrl: string, fullHash: string): string | null {
+  if (!repositoryUrl || !fullHash) return null;
+  const trimmed = repositoryUrl.replace(/\.git$/, '').replace(/\/+$/, '');
+  if (/^https?:\/\/(www\.)?github\.com\//.test(trimmed)) {
+    return `${trimmed}/commit/${fullHash}`;
+  }
+  if (/^https?:\/\/(www\.)?gitlab\.com\//.test(trimmed)) {
+    return `${trimmed}/-/commit/${fullHash}`;
+  }
+  if (/^https?:\/\/(www\.)?bitbucket\.org\//.test(trimmed)) {
+    return `${trimmed}/commits/${fullHash}`;
+  }
+  return `${trimmed}/commit/${fullHash}`;
+}
+
+/* ── 类型 ──────────────────────────────────────────────────────────────── */
+
 interface InfoRow {
   label: string;
   value: string;
-  /** Optional: when set, the value renders as a clickable external link. */
   href?: string;
-  /** Whether to render the value in a monospace font. */
   mono?: boolean;
 }
+
+/* ── 子组件 ────────────────────────────────────────────────────────────── */
 
 function InfoCardRow({ row }: { row: InfoRow }) {
   return (
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: '120px 1fr',
+        gridTemplateColumns: '110px 1fr',
         gap: 12,
         alignItems: 'baseline',
-        padding: '10px 0',
+        padding: '9px 0',
         borderTop: '1px solid var(--border-subtle)',
       }}
     >
@@ -82,24 +107,383 @@ function InfoCardRow({ row }: { row: InfoRow }) {
   );
 }
 
-function buildCommitUrl(repositoryUrl: string, fullHash: string): string | null {
-  if (!repositoryUrl || !fullHash) return null;
-  const trimmed = repositoryUrl.replace(/\.git$/, '').replace(/\/+$/, '');
-  if (/^https?:\/\/(www\.)?github\.com\//.test(trimmed)) {
-    return `${trimmed}/commit/${fullHash}`;
-  }
-  if (/^https?:\/\/(www\.)?gitlab\.com\//.test(trimmed)) {
-    return `${trimmed}/-/commit/${fullHash}`;
-  }
-  if (/^https?:\/\/(www\.)?bitbucket\.org\//.test(trimmed)) {
-    return `${trimmed}/commits/${fullHash}`;
-  }
-  // Generic fallback: most self-hosted git platforms accept /commit/<hash>.
-  return `${trimmed}/commit/${fullHash}`;
+/* ── 更新检查区块 ──────────────────────────────────────────────────────── */
+
+interface UpdateSectionProps {
+  versionInfo: SettingsVersionInfo;
+  onCheckVersion: () => void;
+  isTauriEnv: boolean;
 }
+
+function UpdateSection({ versionInfo, onCheckVersion, isTauriEnv }: UpdateSectionProps) {
+  const handleDesktopUpdate = useCallback(async () => {
+    if (!isTauriEnv) return;
+    try {
+      // 通过 emit tray:check-updates 事件触发桌面端更新面板
+      // 桌面端 App.tsx 监听了该事件并显示 UpdateActionPanel
+      const { emit } = await import('@tauri-apps/api/event');
+      await emit('tray:check-updates');
+    } catch {
+      // 如果 emit 失败，退回打开 releases 页面
+      window.open(RELEASES_URL, '_blank', 'noopener,noreferrer');
+    }
+  }, [isTauriEnv]);
+
+  const hasUpdate = versionInfo.updateAvailable && versionInfo.latestVersion;
+  const isLatest =
+    versionInfo.latestVersion && !versionInfo.updateAvailable && !versionInfo.checkError;
+
+  return (
+    <section
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        border: '1px solid var(--border-default)',
+        borderRadius: 14,
+        background:
+          'linear-gradient(135deg, color-mix(in srgb, var(--accent) 6%, var(--bg-overlay)), var(--bg-overlay) 52%)',
+        padding: '4px 20px 18px',
+        boxShadow: '0 4px 18px -14px color-mix(in oklch, black 80%, transparent)',
+        position: 'relative',
+        overflow: 'hidden',
+      }}
+    >
+      {/* 装饰光斑 */}
+      <div
+        aria-hidden
+        style={{
+          position: 'absolute',
+          right: -36,
+          top: -44,
+          width: 140,
+          height: 140,
+          borderRadius: '50%',
+          background: 'radial-gradient(circle, var(--accent-subtle), transparent 68%)',
+          pointerEvents: 'none',
+        }}
+      />
+
+      <div
+        style={{
+          position: 'relative',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 16,
+          flexWrap: 'wrap',
+          padding: '14px 0 10px',
+          borderBottom: '1px solid var(--border-subtle)',
+          marginBottom: 14,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+          <div
+            aria-hidden
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 10,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'var(--accent-muted)',
+              border: '1px solid var(--accent-border)',
+              color: 'var(--accent)',
+              boxShadow: 'var(--shadow-glow)',
+              flexShrink: 0,
+            }}
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.75"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M12 3v12" />
+              <path d="m8 11 4 4 4-4" />
+              <path d="M5 21h14" />
+            </svg>
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <h2
+              style={{
+                margin: 0,
+                fontSize: 14,
+                fontWeight: 700,
+                color: 'var(--fg-strong)',
+                letterSpacing: '-0.01em',
+              }}
+            >
+              更新检查
+            </h2>
+            <span style={{ color: 'var(--fg-muted)', fontSize: 11, lineHeight: 1.5 }}>
+              检查网关版本是否有更新，或查看 GitHub 发布记录
+            </span>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <button
+            type="button"
+            disabled={versionInfo.checking}
+            onClick={() => void onCheckVersion()}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              height: 32,
+              padding: '0 14px',
+              borderRadius: 8,
+              border: 'none',
+              background: 'var(--accent)',
+              color: 'var(--fg-on-accent)',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: versionInfo.checking ? 'wait' : 'pointer',
+              opacity: versionInfo.checking ? 0.7 : 1,
+              transition: 'opacity 120ms ease',
+            }}
+          >
+            {versionInfo.checking ? '检查中…' : '检查更新'}
+          </button>
+          {isTauriEnv && (
+            <button
+              type="button"
+              onClick={() => void handleDesktopUpdate()}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                height: 32,
+                padding: '0 14px',
+                borderRadius: 8,
+                border: '1px solid var(--border-default)',
+                background: 'var(--bg-overlay)',
+                color: 'var(--fg-default)',
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              桌面端更新
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => window.open(RELEASES_URL, '_blank', 'noopener,noreferrer')}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              height: 32,
+              padding: '0 14px',
+              borderRadius: 8,
+              border: '1px solid var(--border-default)',
+              background: 'var(--bg-overlay)',
+              color: 'var(--fg-default)',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            GitHub 发布记录
+          </button>
+        </div>
+      </div>
+
+      {/* 版本状态指标 */}
+      <div
+        style={{
+          position: 'relative',
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+          gap: 10,
+        }}
+      >
+        <div
+          style={{
+            minWidth: 0,
+            padding: '10px 14px',
+            borderRadius: 10,
+            border: '1px solid var(--border-subtle)',
+            background: 'color-mix(in srgb, var(--bg-base) 38%, var(--bg-overlay))',
+          }}
+        >
+          <div style={{ fontSize: 10, color: 'var(--fg-muted)', marginBottom: 4 }}>当前版本</div>
+          <div
+            translate="no"
+            style={{
+              fontSize: 14,
+              fontWeight: 700,
+              color: 'var(--fg-strong)',
+              fontVariantNumeric: 'tabular-nums',
+              fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, monospace)',
+            }}
+          >
+            v{versionInfo.currentVersion}
+          </div>
+        </div>
+        <div
+          style={{
+            minWidth: 0,
+            padding: '10px 14px',
+            borderRadius: 10,
+            border: '1px solid var(--border-subtle)',
+            background: 'color-mix(in srgb, var(--bg-base) 38%, var(--bg-overlay))',
+          }}
+        >
+          <div style={{ fontSize: 10, color: 'var(--fg-muted)', marginBottom: 4 }}>最新版本</div>
+          <div
+            translate="no"
+            style={{
+              fontSize: 14,
+              fontWeight: 700,
+              color: hasUpdate
+                ? 'var(--contrast)'
+                : isLatest
+                  ? 'var(--fg-strong)'
+                  : 'var(--fg-muted)',
+              fontVariantNumeric: 'tabular-nums',
+              fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, monospace)',
+            }}
+          >
+            {versionInfo.latestVersion
+              ? `v${versionInfo.latestVersion}`
+              : versionInfo.checking
+                ? '检查中…'
+                : '—'}
+          </div>
+        </div>
+        <div
+          style={{
+            minWidth: 0,
+            padding: '10px 14px',
+            borderRadius: 10,
+            border: '1px solid var(--border-subtle)',
+            background: 'color-mix(in srgb, var(--bg-base) 38%, var(--bg-overlay))',
+          }}
+        >
+          <div style={{ fontSize: 10, color: 'var(--fg-muted)', marginBottom: 4 }}>上次检查</div>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: 'var(--fg-strong)',
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          >
+            {versionInfo.checkedAt
+              ? new Date(versionInfo.checkedAt).toLocaleString('zh-CN', {
+                  month: '2-digit',
+                  day: '2-digit',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })
+              : '—'}
+          </div>
+        </div>
+      </div>
+
+      {/* 状态提示 */}
+      {hasUpdate && (
+        <div
+          role="status"
+          style={{
+            marginTop: 12,
+            padding: '10px 14px',
+            borderRadius: 8,
+            background: 'color-mix(in srgb, var(--contrast) 10%, transparent)',
+            border: '1px solid color-mix(in srgb, var(--contrast) 30%, transparent)',
+            fontSize: 12,
+            color: 'var(--contrast)',
+            fontWeight: 600,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+            <path d="M12 9v4" />
+            <path d="M12 17h.01" />
+          </svg>
+          有新版本 v{versionInfo.latestVersion} 可用，建议尽快更新。
+        </div>
+      )}
+      {isLatest && (
+        <div
+          role="status"
+          style={{
+            marginTop: 12,
+            padding: '8px 14px',
+            borderRadius: 8,
+            background: 'color-mix(in srgb, var(--accent) 8%, transparent)',
+            border: '1px solid color-mix(in srgb, var(--accent) 25%, transparent)',
+            fontSize: 12,
+            color: 'var(--accent)',
+            fontWeight: 600,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+          }}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+          已是最新版本
+        </div>
+      )}
+      {versionInfo.checkError && (
+        <div
+          role="alert"
+          style={{
+            marginTop: 12,
+            padding: '8px 14px',
+            borderRadius: 8,
+            background: 'color-mix(in srgb, var(--complement) 8%, transparent)',
+            border: '1px solid color-mix(in srgb, var(--complement) 30%, transparent)',
+            fontSize: 12,
+            color: 'var(--complement)',
+          }}
+        >
+          {versionInfo.checkError}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ── 主页面 ────────────────────────────────────────────────────────────── */
 
 export default function AboutPage() {
   const [copying, setCopying] = useState(false);
+  const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
+  const token = useAuthStore((s) => s.accessToken);
+  const tauriEnv = isTauri;
 
   const version = __APP_VERSION__;
   const buildVersion = __APP_BUILD_VERSION__;
@@ -110,6 +494,48 @@ export default function AboutPage() {
   const repositoryUrl = __APP_REPOSITORY_URL__;
   const commits = __APP_RECENT_COMMITS__;
 
+  /* ── 版本检查状态 ── */
+  const [versionInfo, setVersionInfo] = useState<SettingsVersionInfo>({
+    currentVersion: version || '0.0.1',
+    latestVersion: null,
+    updateAvailable: false,
+    checkError: null,
+    checkedAt: null,
+    checking: false,
+  });
+
+  const checkVersionUpdate = useCallback(async () => {
+    if (!token) return;
+    setVersionInfo((prev) => ({ ...prev, checking: true, checkError: null }));
+    try {
+      const data = (await createSettingsClient(gatewayUrl).getVersion(
+        token,
+      )) as SettingsVersionInfo;
+      setVersionInfo({
+        currentVersion: data.currentVersion,
+        latestVersion: data.latestVersion,
+        updateAvailable: data.updateAvailable,
+        checkError: data.checkError,
+        checkedAt: data.checkedAt,
+        checking: false,
+      });
+    } catch {
+      setVersionInfo((prev) => ({
+        ...prev,
+        checking: false,
+        checkError: '检查失败，请稍后重试',
+      }));
+    }
+  }, [gatewayUrl, token]);
+
+  /* ── 页面加载时自动检查一次 ── */
+  useEffect(() => {
+    if (token) {
+      void checkVersionUpdate();
+    }
+  }, [checkVersionUpdate, token]);
+
+  /* ── 构建信息行 ── */
   const infoRows = useMemo<InfoRow[]>(() => {
     const rows: InfoRow[] = [
       { label: '版本号', value: version, mono: true },
@@ -158,15 +584,12 @@ export default function AboutPage() {
       style={{
         flex: 1,
         minWidth: 0,
-        overflowY: 'auto',
-        padding: '32px 40px 56px',
+        paddingBottom: 40,
         background: 'var(--bg-base)',
       }}
     >
       <div
         style={{
-          maxWidth: 760,
-          margin: '0 auto',
           display: 'flex',
           flexDirection: 'column',
           gap: 24,
@@ -278,6 +701,13 @@ export default function AboutPage() {
             复制构建信息
           </button>
         </header>
+
+        {/* 更新检查 */}
+        <UpdateSection
+          versionInfo={versionInfo}
+          onCheckVersion={checkVersionUpdate}
+          isTauriEnv={tauriEnv}
+        />
 
         {/* Info card */}
         <section

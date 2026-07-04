@@ -6,7 +6,15 @@ import { WorkflowLogger } from '@openAwork/logger';
 import authPlugin from './infra/auth.js';
 import { registerErrorHandler } from './infra/error-handler.js';
 import { registerOpenApi } from './infra/openapi.js';
-import { connectDb, closeDb, db, migrate, sqliteGet, sqliteRun } from './infra/db.js';
+import {
+  connectDb,
+  closeDb,
+  db,
+  migrate,
+  sqliteGet,
+  sqliteRun,
+  WORKSPACE_ROOTS,
+} from './infra/db.js';
 import { bootV2Runtime, getRuntimeFlags, shutdownV2Runtime } from './v2-runtime/index.js';
 import { skillMcpPool } from './skill/skill-mcp-connection-pool.js';
 import { ensureDefaultInstalledSkillsForAllUsers } from './skill/default-skills.js';
@@ -22,6 +30,11 @@ import { startParentProcessWatch } from './infra/parent-watch.js';
 import { installProcessSafetyHandlers } from './infra/process-safety.js';
 import { resolveWsMaxPayloadBytes } from './infra/ws-payload-limit.js';
 import { GATEWAY_MAX_PARAM_LENGTH } from './infra/router-options.js';
+import { resolveGatewayCodegraphDatabasePath } from './infra/storage-paths.js';
+import {
+  resolveCodegraphStartupAutoInstall,
+  runCodegraphStartupPreflight,
+} from './codegraph/startup-preflight.js';
 
 const ADMIN_EMAIL = globalThis.process?.env['ADMIN_EMAIL'] ?? 'admin@openAwork.local';
 const ADMIN_PASSWORD = globalThis.process?.env['ADMIN_PASSWORD'] ?? 'admin123456';
@@ -86,6 +99,8 @@ import { mcpOAuthRoutes } from './routes/mcp-oauth.js';
 import { snapshotTreeRoutes } from './routes/snapshot-tree-routes.js';
 import { ensurePluginsLoaded } from './runtime/plugin-host.js';
 import { shutdownTeamRuntimeTelemetry } from './team/team-runtime-telemetry.js';
+import { shutdownTelemetry } from './telemetry/telemetry-service.js';
+import { migrateTelemetryDb, cleanupStaleDedupEntries } from './telemetry/telemetry-db.js';
 
 // 方案 5：加载所有内置 provider 插件
 import './provider/plugins/index.js';
@@ -236,6 +251,11 @@ app.addHook('onClose', async () => {
   } catch (err) {
     app.log.error({ err }, 'shutdownTeamRuntimeTelemetry failed');
   }
+  try {
+    await shutdownTelemetry();
+  } catch (err) {
+    app.log.error({ err }, 'shutdownTelemetry failed');
+  }
   // Invalidate the cached v2-runtime drizzle handle BEFORE closing the
   // legacy connection — once `closeDb()` runs the handle would be a
   // dangling reference to a closed `node:sqlite` connection. Isolated so a
@@ -269,6 +289,10 @@ try {
   step = bootLogger.start('gateway.migrate');
   await migrate();
   bootLogger.succeed(step);
+
+  // 遥测去重表 migration + 过期清理
+  migrateTelemetryDb();
+  cleanupStaleDedupEntries();
 
   // v2-runtime boot — only initialises the drizzle handle + Effect
   // service layer when `OPENAWORK_RUNTIME[_STORAGE]=v2` is set. When
@@ -387,6 +411,31 @@ try {
     bootLogger.fail(step, message);
   }
 
+  step = bootLogger.start('gateway.codegraph-preflight');
+  try {
+    const status = await runCodegraphStartupPreflight({
+      databasePath: resolveGatewayCodegraphDatabasePath(),
+      workspaceRoots: WORKSPACE_ROOTS,
+      installManager: lspManager,
+      autoInstall: resolveCodegraphStartupAutoInstall(),
+    });
+    if (status.status === 'healthy') {
+      bootLogger.succeed(step, undefined, {
+        schemaVersion: status.schemaVersion,
+        missingServers: status.missingServers.length,
+      });
+    } else {
+      bootLogger.succeed(step, status.degradedReason ?? 'codegraph preflight degraded', {
+        status: status.status,
+        schemaVersion: status.schemaVersion,
+        missingServers: status.missingServers.length,
+      });
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    bootLogger.fail(step, message);
+  }
+
   // PR-D-Plugin: load operator-configured plugins listed in
   // OPENAWORK_PLUGINS. Idempotent + failure-tolerant — a broken
   // plugin path logs a warning but doesn't abort boot. Without this
@@ -476,9 +525,8 @@ try {
     // 避免 watcher 启动后这些 handoff 永远卡在中间态。
     step = bootLogger.start('gateway.handoff-checkpoint-recovery');
     try {
-      const { recoverInterruptedHandoffs, createStartupCheckpoint } = await import(
-        './handoff/store/checkpoint-recovery.js'
-      );
+      const { recoverInterruptedHandoffs, createStartupCheckpoint } =
+        await import('./handoff/store/checkpoint-recovery.js');
       const recoveryResult = recoverInterruptedHandoffs();
       createStartupCheckpoint(recoveryResult);
       bootLogger.succeed(step, undefined, {

@@ -37,7 +37,6 @@ describe('buildTeamGroupedMessageEntries', () => {
     expect(streamingEntry?.message.role).toBe('assistant');
     expect(streamingEntry?.message.status).toBe('streaming');
     expect(streamingEntry?.message.agentId).toBe('pm1');
-    expect(streamingEntry?.presentationMode).toBe('team');
     expect(streamingEntry?.groupIdentityKey).toBe('pm1');
     expect(streamingEntry?.identityOverride?.displayName).toBe('PM1 规划层');
     expect(streamingEntry?.identityOverride?.initials).toBe('划');
@@ -101,8 +100,7 @@ describe('buildTeamGroupedMessageEntries', () => {
 
     const assistantEntry = groups[0]?.entries[0];
     expect(assistantEntry).toBeTruthy();
-    expect(assistantEntry?.presentationMode).toBe('team');
-    // renderContent 在 chat 风格路径下不应抛错，并会消费审批解析器。
+    // renderContent 在统一 chat 风格渲染下不应抛错，并会消费审批解析器。
     expect(() => assistantEntry?.renderContent(assistantEntry.message)).not.toThrow();
   });
 });

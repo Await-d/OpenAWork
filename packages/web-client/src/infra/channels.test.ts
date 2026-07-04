@@ -94,4 +94,53 @@ describe('createChannelsClient', () => {
       '请求体参数无效。',
     );
   });
+
+  it('listConversations 会请求渠道对话历史并返回摘要', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      expect(String(input)).toBe(
+        'http://localhost:3000/channels/channel-1/conversations?limit=50&offset=10',
+      );
+      return new Response(
+        JSON.stringify({
+          conversations: [
+            {
+              id: 'session-channel-1',
+              chatId: 'chat-1',
+              chatName: '工程群',
+              title: 'channel:channel-1:chat:chat-1',
+              stateStatus: 'idle',
+              messageCount: 2,
+              lastMessagePreview: '已整理最近的渠道对话。',
+              createdAt: '2026-07-04 10:01:00',
+              updatedAt: '2026-07-04 10:02:00',
+            },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as typeof fetch;
+    globalThis.fetch = fetchMock;
+
+    const client = createChannelsClient('http://localhost:3000');
+    const result = await client.listConversations('token-1', 'channel-1', {
+      limit: 50,
+      offset: 10,
+    });
+
+    const [firstConversation] = result;
+    expect(firstConversation).toMatchObject({
+      id: 'session-channel-1',
+      chatId: 'chat-1',
+      chatName: '工程群',
+      messageCount: 2,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:3000/channels/channel-1/conversations?limit=50&offset=10',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer token-1',
+        }),
+      }),
+    );
+  });
 });

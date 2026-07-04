@@ -89,6 +89,8 @@ export interface MemorySettings {
   autoExtract: boolean;
   maxTokenBudget: number;
   minConfidence: number;
+  autoWriteMinConfidence: number;
+  reviewLowConfidence: boolean;
 }
 
 export interface ExtractedMemoryCandidate {
@@ -96,6 +98,28 @@ export interface ExtractedMemoryCandidate {
   key: string;
   value: string;
   confidence: number;
+}
+
+export type MemoryCandidateDecisionStatus = 'persist' | 'review' | 'reject';
+
+export type MemoryCandidateDecisionReason =
+  | 'eligible'
+  | 'empty_value'
+  | 'low_confidence'
+  | 'sensitive_information'
+  | 'transient_context'
+  | 'unsupported_type';
+
+export interface MemoryCandidateDecision {
+  candidate: ExtractedMemoryCandidate;
+  status: MemoryCandidateDecisionStatus;
+  reason: MemoryCandidateDecisionReason;
+  detail: string;
+}
+
+export interface MemoryCandidatePersistencePolicy {
+  autoWriteMinConfidence: number;
+  reviewLowConfidence: boolean;
 }
 
 export interface MemoryExtractionLog {

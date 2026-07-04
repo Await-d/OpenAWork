@@ -10,11 +10,19 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ExtractedMemoryCandidate } from '@openAwork/agent-core';
-import type * as MemoryStoreModule from '../../memory/memory-store.js';
+import type { ExtractedMemoryCandidate, MemorySettings } from '@openAwork/agent-core';
+import type * as MemoryExtractionStoreModule from '../../memory/memory-extraction-store.js';
 
 const POISON_KEY = 'poison-key';
 const insertedKeys: string[] = [];
+const SETTINGS: MemorySettings = {
+  enabled: true,
+  autoExtract: true,
+  maxTokenBudget: 2000,
+  minConfidence: 0.3,
+  autoWriteMinConfidence: 0.65,
+  reviewLowConfidence: true,
+};
 
 vi.mock('../../infra/db.js', () => ({
   // No existing memories → every candidate routes to the create path.
@@ -33,12 +41,12 @@ vi.mock('../../infra/db.js', () => ({
   },
 }));
 
-let memoryStore: typeof MemoryStoreModule;
+let memoryStore: typeof MemoryExtractionStoreModule;
 
 beforeEach(async () => {
   insertedKeys.length = 0;
   vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-  memoryStore = await import('../../memory/memory-store.js');
+  memoryStore = await import('../../memory/memory-extraction-store.js');
 });
 
 describe('upsertExtractedMemories per-candidate resilience', () => {
@@ -50,7 +58,7 @@ describe('upsertExtractedMemories per-candidate resilience', () => {
     ];
 
     // Must not throw despite the poison candidate's INSERT failing.
-    const result = memoryStore.upsertExtractedMemories('u-1', candidates, null);
+    const result = memoryStore.upsertExtractedMemories('u-1', candidates, null, SETTINGS);
 
     // Two healthy candidates were written; the poison one was skipped.
     expect(insertedKeys).toContain('good-1');
@@ -59,5 +67,36 @@ describe('upsertExtractedMemories per-candidate resilience', () => {
     // created counts only ACTUAL successes (2), not the planned 3.
     expect(result.created).toBe(2);
     expect(console.warn).toHaveBeenCalled();
+  });
+
+  it('低置信候选进入审阅且不会写入数据库', () => {
+    const candidates: ExtractedMemoryCandidate[] = [
+      { type: 'preference', key: 'style.response', value: '回复尽量短。', confidence: 0.6 },
+    ];
+
+    const result = memoryStore.upsertExtractedMemories('u-1', candidates, null, SETTINGS);
+
+    expect(insertedKeys).toEqual([]);
+    expect(result.created).toBe(0);
+    expect(result.reviewed).toBe(1);
+    expect(result.decisions[0]?.reason).toBe('low_confidence');
+  });
+
+  it('疑似敏感信息候选被拒绝且不会写入数据库', () => {
+    const candidates: ExtractedMemoryCandidate[] = [
+      {
+        type: 'fact',
+        key: 'secret',
+        value: 'api_key = sk-abcdefghijklmnopqrstuvwxyz123456',
+        confidence: 0.95,
+      },
+    ];
+
+    const result = memoryStore.upsertExtractedMemories('u-1', candidates, null, SETTINGS);
+
+    expect(insertedKeys).toEqual([]);
+    expect(result.created).toBe(0);
+    expect(result.rejected).toBe(1);
+    expect(result.decisions[0]?.reason).toBe('sensitive_information');
   });
 });

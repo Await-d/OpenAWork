@@ -593,7 +593,7 @@ export function ChatTodoBar(props: {
         data-testid="chat-todo-bar"
         className="chat-todo-card"
         data-expanded={expanded ? 'true' : 'false'}
-        style={{ maxWidth: editorMode ? 680 : rightOpen ? 700 : 740 }}
+        style={{ maxWidth: editorMode ? 720 : rightOpen ? 880 : 1024 }}
       >
         <button
           type="button"

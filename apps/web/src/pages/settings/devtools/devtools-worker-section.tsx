@@ -51,7 +51,22 @@ export function DevtoolsWorkerSection({
 
   return (
     <section style={SS}>
-      <h3 style={ST}>Worker 状态</h3>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: 12,
+          flexWrap: 'wrap',
+        }}
+      >
+        <h3 style={ST}>Worker 状态</h3>
+        <span
+          style={{ fontSize: 11, color: 'var(--fg-muted)', fontVariantNumeric: 'tabular-nums' }}
+        >
+          共 {workers.length} 个 Worker · {errorCount} 个错误
+        </span>
+      </div>
       {sourceState.status === 'error' && sourceState.error ? (
         <InlineFailureNotice title="Worker 状态加载失败" message={sourceState.error} />
       ) : null}
@@ -282,9 +297,36 @@ export function DevtoolsWorkerSection({
             );
           })
         ) : (
-          <p style={{ fontSize: 12, color: 'var(--fg-muted)', gridColumn: '1 / -1' }}>
-            筛选后没有匹配 Worker。
-          </p>
+          <div
+            style={{
+              borderRadius: 8,
+              border: '1px dashed var(--border-default)',
+              padding: '16px 14px',
+              textAlign: 'center',
+              gridColumn: '1 / -1',
+            }}
+          >
+            <p style={{ fontSize: 12, color: 'var(--fg-muted)', margin: 0 }}>
+              {workers.length > 0 ? '筛选后没有匹配 Worker。' : '暂无 Worker 配置。'}
+            </p>
+            {workers.length > 0 && workerQuery ? (
+              <button
+                type="button"
+                onClick={() => setWorkerQuery('')}
+                style={{
+                  marginTop: 8,
+                  fontSize: 11,
+                  color: 'var(--accent)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: 0,
+                }}
+              >
+                清空搜索
+              </button>
+            ) : null}
+          </div>
         )}
       </div>
       <WorkerDetailsPanel worker={selectedWorker} />

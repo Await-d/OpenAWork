@@ -26,6 +26,14 @@ export function parseMemorySettings(raw: unknown): MemorySettings {
       typeof record['minConfidence'] === 'number'
         ? record['minConfidence']
         : DEFAULT_MEMORY_SETTINGS.minConfidence,
+    autoWriteMinConfidence:
+      typeof record['autoWriteMinConfidence'] === 'number'
+        ? record['autoWriteMinConfidence']
+        : DEFAULT_MEMORY_SETTINGS.autoWriteMinConfidence,
+    reviewLowConfidence:
+      typeof record['reviewLowConfidence'] === 'boolean'
+        ? record['reviewLowConfidence']
+        : DEFAULT_MEMORY_SETTINGS.reviewLowConfidence,
   };
 }
 

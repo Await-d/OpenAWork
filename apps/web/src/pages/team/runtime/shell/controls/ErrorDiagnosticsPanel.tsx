@@ -94,7 +94,8 @@ const ERROR_GROUP_STYLE: CSSProperties = {
   padding: '8px 10px',
   borderRadius: 8,
   background: 'color-mix(in srgb, var(--bg-base) 60%, transparent)',
-  border: '1px solid color-mix(in srgb, var(--border-subtle, var(--border-default)) 50%, transparent)',
+  border:
+    '1px solid color-mix(in srgb, var(--border-subtle, var(--border-default)) 50%, transparent)',
 };
 
 const ERROR_GROUP_HEADER_STYLE: CSSProperties = {
@@ -252,7 +253,9 @@ export function ErrorDiagnosticsPanel({
       if (handoff.state !== 'failed') continue;
       const message = handoff.failureReason ?? handoff.summary ?? '未知错误';
       const category = classifyError(message);
-      const layer = handoff.toRoleLayer ? (LAYER_LABELS[handoff.toRoleLayer] ?? handoff.toRoleLayer) : '未知';
+      const layer = handoff.toRoleLayer
+        ? (LAYER_LABELS[handoff.toRoleLayer] ?? handoff.toRoleLayer)
+        : '未知';
       const item: ErrorItem = {
         handoffId: handoff.id,
         layer,
@@ -292,7 +295,12 @@ export function ErrorDiagnosticsPanel({
   if (totalFailed <= 0) return null;
 
   return (
-    <div className="team-error-diagnostics-panel" style={PANEL_ROOT_STYLE} role="region" aria-label="错误诊断简报">
+    <div
+      className="team-error-diagnostics-panel"
+      style={PANEL_ROOT_STYLE}
+      role="region"
+      aria-label="错误诊断简报"
+    >
       <div
         style={HEADER_ROW_STYLE}
         onClick={handleToggle}
@@ -307,7 +315,9 @@ export function ErrorDiagnosticsPanel({
           }
         }}
       >
-        <span style={HEADER_ICON_STYLE} aria-hidden>!</span>
+        <span style={HEADER_ICON_STYLE} aria-hidden>
+          !
+        </span>
         <span style={HEADER_TITLE_STYLE}>错误诊断简报</span>
         <span style={HEADER_COUNT_STYLE}>{totalFailed}</span>
         {onRetryFailed ? (
@@ -341,7 +351,9 @@ export function ErrorDiagnosticsPanel({
           {errorGroups.map((group) => (
             <div key={group.category} style={ERROR_GROUP_STYLE}>
               <div style={ERROR_GROUP_HEADER_STYLE}>
-                <span style={ERROR_GROUP_ICON_STYLE} aria-hidden>{group.icon}</span>
+                <span style={ERROR_GROUP_ICON_STYLE} aria-hidden>
+                  {group.icon}
+                </span>
                 <span>{group.label}</span>
                 <span
                   style={{

@@ -1384,7 +1384,7 @@ export function ProviderSettings({
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(2, 1fr)',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
             gap: 12,
           }}
         >
@@ -1457,20 +1457,45 @@ export function ProviderSettings({
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 12,
-                    padding: '0.75rem 1rem',
+                    gap: 10,
+                    padding: '0.6rem 1rem',
                     borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
                   }}
                 >
-                  <ProviderLogo type={provider.type} size={32} />
+                  <ProviderLogo type={provider.type} size={28} />
 
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: 12 }}>{provider.name}</div>
-                    <div style={{ fontSize: 11, color: 'var(--fg-muted)', marginTop: 2 }}>
-                      {provider.type} &nbsp;·&nbsp; {provider.defaultModels.length} 个模型
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontWeight: 600, fontSize: 12 }}>{provider.name}</span>
+                      <span
+                        style={{
+                          fontSize: 10,
+                          color: 'var(--fg-muted)',
+                          background: 'var(--bg-raised)',
+                          borderRadius: 4,
+                          padding: '1px 6px',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {provider.defaultModels.length} 个模型
+                      </span>
+                      {provider.enabled ? null : (
+                        <span
+                          style={{
+                            fontSize: 10,
+                            color: 'var(--fg-subtle)',
+                            fontStyle: 'italic',
+                          }}
+                        >
+                          已禁用
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--fg-muted)', marginTop: 1 }}>
+                      {provider.type}
                       {provider.baseUrl ? (
                         <>
-                          &nbsp;·&nbsp;
+                          {' · '}
                           <span style={{ fontFamily: 'monospace', fontSize: 10 }}>
                             {provider.baseUrl.replace(/^https?:\/\//, '').replace(/\/+$/, '')}
                           </span>

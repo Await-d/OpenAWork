@@ -157,7 +157,8 @@ export function tryParseIncidentJson(text: string): IncidentData | null {
     code: typeof parsed['code'] === 'string' ? (parsed['code'] as string) : undefined,
     message: typeof parsed['message'] === 'string' ? (parsed['message'] as string) : undefined,
     severity: typeof parsed['severity'] === 'string' ? (parsed['severity'] as string) : undefined,
-    timestamp: typeof parsed['timestamp'] === 'number' ? (parsed['timestamp'] as number) : undefined,
+    timestamp:
+      typeof parsed['timestamp'] === 'number' ? (parsed['timestamp'] as number) : undefined,
     context:
       typeof parsed['context'] === 'object' && parsed['context'] !== null
         ? (parsed['context'] as Record<string, unknown>)
@@ -225,9 +226,7 @@ export function IncidentReadableCard({ data }: { data: IncidentData }): React.Re
           {categoryLabel}
         </span>
         {codeLabel ? <span style={CODE_BADGE_STYLE}>{codeLabel}</span> : null}
-        {timeStr ? (
-          <span style={{ color: 'var(--fg-muted)', fontSize: 11 }}>{timeStr}</span>
-        ) : null}
+        {timeStr ? <span style={{ color: 'var(--fg-muted)', fontSize: 11 }}>{timeStr}</span> : null}
       </div>
       {data.message ? (
         <span style={{ color: 'var(--fg-default)', fontSize: 12, lineHeight: 1.6 }}>

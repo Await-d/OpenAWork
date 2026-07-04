@@ -1246,9 +1246,19 @@ export function TeamConversationView({
     overflow: 'hidden',
   };
 
-  // 左侧：群聊式多层级消息汇总面板（dual 模式下占 40%）
+  // 左侧：用户与接待的主对话区（dual 模式下占 45%）
+  const MAIN_PANEL_STYLE: CSSProperties = {
+    flex: viewMode === 'dual' ? '0 0 clamp(320px, 45%, 520px)' : '1 1 100%',
+    minWidth: 0,
+    minHeight: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    transition: 'flex 200ms ease',
+  };
+
+  // 右侧：各层级对话交互消息汇总面板（dual 模式下占 55%）
   const SIDE_PANEL_STYLE: CSSProperties = {
-    flex: viewMode === 'dual' ? '0 0 clamp(360px, 40%, 520px)' : '0 0 0%',
+    flex: viewMode === 'dual' ? '1 1 55%' : '0 0 0%',
     minWidth: 0,
     minHeight: 0,
     display: viewMode === 'dual' ? 'flex' : 'none',
@@ -1256,15 +1266,7 @@ export function TeamConversationView({
     transition: 'flex 200ms ease',
     position: 'relative',
     overflow: 'hidden',
-  };
-
-  // 右侧：用户与接待的主对话区（dual 模式下占 60%，single 模式下占 100%）
-  const MAIN_PANEL_STYLE: CSSProperties = {
-    flex: viewMode === 'dual' ? '1 1 60%' : '1 1 100%',
-    minWidth: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    transition: 'flex 200ms ease',
+    borderLeft: '1px solid var(--border-default)',
   };
 
   return (
@@ -1283,20 +1285,7 @@ export function TeamConversationView({
         />
       )}
       <div style={soloMode ? { display: 'flex', flex: 1, minHeight: 0 } : DUAL_LAYOUT_STYLE}>
-        {/* 左侧：所有层级的对话消息汇总（群聊式，层级标识清晰不混合） */}
-        {/* soloMode 下不显示群聊面板，只展示当前角色自身的对话 */}
-        {soloMode ? null : (
-          <div aria-label="团队层级消息汇总" style={SIDE_PANEL_STYLE}>
-            <TeamLayerChatPanel
-              activeLayer={state.roleLayer}
-              currentSessionId={sessionId}
-              layers={multiLayerMessages}
-              onOpenLayerSession={onOpenLayerSession ? handleOpenLayerSession : undefined}
-              onLayerSelect={handlePanelLayerSelect}
-            />
-          </div>
-        )}
-        {/* 右侧：用户与接待的对话 */}
+        {/* 左侧：用户与接待的对话 */}
         <div
           style={
             soloMode
@@ -1470,6 +1459,19 @@ export function TeamConversationView({
             />
           </LatestAssistantMessageContext>
         </div>
+        {/* 右侧：所有层级的对话消息汇总（群聊式，层级标识清晰不混合） */}
+        {/* soloMode 下不显示群聊面板，只展示当前角色自身的对话 */}
+        {soloMode ? null : (
+          <div aria-label="团队层级消息汇总" style={SIDE_PANEL_STYLE}>
+            <TeamLayerChatPanel
+              activeLayer={state.roleLayer}
+              currentSessionId={sessionId}
+              layers={multiLayerMessages}
+              onOpenLayerSession={onOpenLayerSession ? handleOpenLayerSession : undefined}
+              onLayerSelect={handlePanelLayerSelect}
+            />
+          </div>
+        )}
       </div>
     </>
   );

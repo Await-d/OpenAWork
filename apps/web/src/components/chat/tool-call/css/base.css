@@ -22,6 +22,7 @@
   font-size: 12px;
   line-height: 1.5;
   color: var(--fg-muted);
+  flex-wrap: nowrap;
 }
 
 .tool-call-inline[data-tool-status='running'] {
@@ -133,13 +134,15 @@
   margin-bottom: 2px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
 }
 
 .tool-call-inline-section {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: baseline;
 }
 
 /* Inline-row variant: used by the params section so the label and the
@@ -163,6 +166,8 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--fg-muted);
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 /* ── Grouped consecutive tool-call pill (read/grep/glob runs) ── */
@@ -170,7 +175,7 @@
 .tool-call-grouped {
   display: flex;
   flex-direction: column;
-  margin: 4px 0;
+  margin: 2px 0;
 }
 
 .tool-call-grouped-header {
@@ -187,6 +192,7 @@
   font-size: 12px;
   line-height: 1.5;
   appearance: none;
+  flex-wrap: nowrap;
 }
 
 .tool-call-grouped-header:hover {
@@ -253,11 +259,11 @@
  * un-grouped session. The 18px left indent gives a subtle "child of"
  * relationship without needing a tree connector. */
 .tool-call-grouped-children {
-  margin-top: 2px;
+  margin-top: 1px;
   padding-left: 18px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   border-left: 1px solid color-mix(in oklch, var(--border-default) 50%, transparent);
   margin-left: 6px;
 }
@@ -267,7 +273,7 @@
 .tool-call-block {
   display: flex;
   flex-direction: column;
-  margin: 4px 0;
+  margin: 2px 0;
 }
 
 .tool-call-block-header {
@@ -275,15 +281,16 @@
   align-items: center;
   gap: 6px;
   width: 100%;
-  padding: 3px 0;
+  padding: 2px 0;
   background: transparent;
   border: none;
   color: inherit;
   cursor: pointer;
   text-align: left;
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.4;
   appearance: none;
+  flex-wrap: nowrap;
 }
 
 .tool-call-block-header:hover {
@@ -294,13 +301,14 @@
 /* tool-call-block-icon removed — replaced by ToolStatusDot */
 
 .tool-call-block-title {
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
   font-weight: 600;
   font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 50%;
+  max-width: 100%;
 }
 
 .tool-call-block-diff-summary {
@@ -338,7 +346,7 @@
 .tool-call-error-summary {
   min-width: 0;
   flex-shrink: 1;
-  max-width: 60%;
+  max-width: 100%;
   padding: 1px 7px;
   border-radius: 4px;
   background: color-mix(in oklch, var(--danger) 12%, transparent);
@@ -361,7 +369,7 @@
 }
 
 .tool-call-block-body {
-  margin-top: 4px;
+  margin-top: 2px;
   padding-left: 4px;
   min-width: 0;
   overflow: hidden;
@@ -374,9 +382,9 @@
 }
 
 .tool-call-block-output {
-  margin-top: 4px;
-  padding-top: 4px;
-  border-top: 1px dashed color-mix(in oklch, var(--border-default) 60%, transparent);
+  margin-top: 2px;
+  padding-top: 2px;
+  border-top: 1px solid color-mix(in oklch, var(--border-subtle) 60%, transparent);
 }
 
 /* ── Collapsed summary (shown in header when not expanded) ── */
@@ -384,7 +392,7 @@
 .tool-call-block-collapsed-summary {
   flex: 1;
   min-width: 0;
-  max-width: 280px;
+  max-width: 100%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

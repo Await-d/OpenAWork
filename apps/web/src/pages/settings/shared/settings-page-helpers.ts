@@ -13,7 +13,8 @@ import type {
 
 export const TABS = [
   { id: 'connection', label: '连接与模型' },
-  { id: 'desktop', label: '桌面与关于' },
+  { id: 'display', label: '显示设置' },
+  { id: 'desktop', label: '桌面端' },
   { id: 'channels', label: '消息频道' },
   { id: 'companion', label: 'Buddy 伴侣' },
   { id: 'memory', label: '记忆管理' },
@@ -22,6 +23,7 @@ export const TABS = [
   { id: 'workspace', label: '工作区' },
   { id: 'plugins', label: '插件' },
   { id: 'devtools', label: '开发者工具' },
+  { id: 'about', label: '关于' },
 ] as const;
 
 export type TabId = (typeof TABS)[number]['id'];
@@ -37,11 +39,12 @@ export const TAB_CATEGORIES: ReadonlyArray<{
   label: string;
   tabIds: readonly TabId[];
 }> = [
-  { id: 'general', label: '常规', tabIds: ['connection', 'desktop'] },
+  { id: 'general', label: '常规', tabIds: ['connection', 'display', 'desktop'] },
   { id: 'assistant', label: '助理', tabIds: ['companion', 'memory', 'channels'] },
   { id: 'account', label: '账户', tabIds: ['usage', 'security'] },
   { id: 'extensions', label: '扩展与集成', tabIds: ['plugins'] },
   { id: 'tools', label: '工具', tabIds: ['workspace', 'devtools'] },
+  { id: 'about', label: '关于', tabIds: ['about'] },
 ];
 
 export const SETTINGS_TAB_NAV_WIDTH = 192;

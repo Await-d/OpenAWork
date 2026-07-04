@@ -119,7 +119,6 @@ import {
   SESSION_SWITCH_DEFER_THRESHOLD,
 } from './conversation/render/chat-page-utils.js';
 import { ChatRightPanel } from './panels/chat-right-panel.js';
-import { SessionSidebar } from '../../components/layout/sidebar/SessionSidebar.js';
 import type { RightPanelTabId } from './panels/right-panel-tabs.js';
 import { ChatScrollBottomButton } from '../../components/conversation-runtime/views/scroll-bottom-button.js';
 import { ChatStreamErrorBar } from '../../components/conversation-runtime/views/stream-error-bar.js';
@@ -230,6 +229,7 @@ import {
 } from './hooks/use-chat-message-actions.js';
 import { useChatBranchSession } from './hooks/use-chat-branch-session.js';
 import { useChatRenderData } from './conversation/render/use-chat-render-data.js';
+import type { ComposerStatsData } from '../../components/chat/composer/ComposerStatsBar.js';
 import { useChatPendingActions } from './hooks/use-chat-pending-actions.js';
 import { useChatRetryAndEdit } from './hooks/use-chat-retry-and-edit.js';
 import { useChatSessionLifecycle } from './hooks/use-chat-session-lifecycle.js';
@@ -582,13 +582,6 @@ export default function ChatPage() {
     pendingScrollFrameRef,
     showScrollToBottom,
     setShowScrollToBottom,
-    // sidebar 透传
-    leftSidebarOpen,
-    setLeftSidebarOpen,
-    toggleLeftSidebar,
-    isNarrowViewport,
-    shouldOverlaySidebar,
-    sidebarWidth,
   } = ui;
   const attachAttemptedSessionRef = useRef<string | null>(null);
   // Tracks the last logged attach-eligibility signature so the diagnostic
@@ -1961,8 +1954,12 @@ export default function ChatPage() {
       setActiveModelId(resolvedModelId);
     }
 
-    const resolvedProvider = availableProviders.find((provider) => provider.id === resolvedProviderId);
-    const resolvedModel = resolvedProvider?.defaultModels.find((model) => model.id === resolvedModelId);
+    const resolvedProvider = availableProviders.find(
+      (provider) => provider.id === resolvedProviderId,
+    );
+    const resolvedModel = resolvedProvider?.defaultModels.find(
+      (model) => model.id === resolvedModelId,
+    );
     const normalizedThinkingState = normalizeChatThinkingState({
       providerType: resolvedProvider?.type,
       modelId: resolvedModel?.id ?? resolvedModelId,
@@ -3255,7 +3252,9 @@ export default function ChatPage() {
           accumulatedUsage,
           attachStateInitialized,
           currentAssistantStreamMessageId: currentAssistantStreamMessageIdRef.current,
-          ...(visibleLatestUpstreamSummary ? { latestUpstreamSummary: visibleLatestUpstreamSummary } : {}),
+          ...(visibleLatestUpstreamSummary
+            ? { latestUpstreamSummary: visibleLatestUpstreamSummary }
+            : {}),
           ...(recoveredModifiedFilesSummary ? { recoveredModifiedFilesSummary } : {}),
           requestStartedAt,
           toolCalls: buildAttachToolCalls(),
@@ -3743,7 +3742,7 @@ export default function ChatPage() {
             setRightTab('tools');
           }
         },
-      onDone: (stopReason, streamAgentId, cancellation, upstreamSummary) => {
+        onDone: (stopReason, streamAgentId, cancellation, upstreamSummary) => {
           if (!isCurrentSessionRequest(sid, attachSessionViewEpoch)) {
             requestSessionListRefresh();
             return;
@@ -4033,6 +4032,79 @@ export default function ChatPage() {
 
   const chatSearch = useChatSearch({ messages, scrollRegionRef, ensureMessageVisible });
 
+  // ─── 输入框下方统计栏数据 ──────────────────────────────────────────────
+  const composerStatsData = useMemo<ComposerStatsData | null>(() => {
+    const usageDetails = assistantUsageDetails;
+    if (usageDetails.size === 0 && !visibleStreaming) {
+      return null;
+    }
+
+    let totalCostUsd = 0;
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    let totalDurationMs = 0;
+
+    for (const details of usageDetails.values()) {
+      totalCostUsd += details.estimatedCostUsd ?? 0;
+      totalInputTokens += details.inputTokens;
+      totalOutputTokens += details.outputTokens;
+      totalDurationMs += details.durationMs ?? 0;
+    }
+
+    // 流式中的实时数据叠加
+    let currentRoundCostUsd = 0;
+    if (streamingUsageDetails) {
+      const streamingNotCounted = streamingUsageDetails.requestIndex > usageDetails.size;
+      if (streamingNotCounted) {
+        totalCostUsd += streamingUsageDetails.estimatedCostUsd ?? 0;
+        totalInputTokens += streamingUsageDetails.inputTokens;
+        totalOutputTokens += streamingUsageDetails.outputTokens;
+      }
+      currentRoundCostUsd = streamingUsageDetails.estimatedCostUsd ?? 0;
+    } else {
+      // 非流式时，取最后一轮的费用作为"本轮"
+      const lastDetails = Array.from(usageDetails.values()).pop();
+      currentRoundCostUsd = lastDetails?.estimatedCostUsd ?? 0;
+    }
+
+    const contextUsedTokens = contextUsageSnapshot?.usedTokens ?? 0;
+    const contextMaxTokens = contextUsageSnapshot?.maxTokens ?? 0;
+    const contextIsEstimated = contextUsageSnapshot?.estimated ?? false;
+
+    return {
+      totalCostUsd,
+      currentRoundCostUsd,
+      totalInputTokens,
+      totalOutputTokens,
+      reasoningTokens: effectiveReportedStreamUsage?.reasoningTokens,
+      cacheReadTokens: effectiveReportedStreamUsage?.cacheReadTokens,
+      cacheWriteTokens: effectiveReportedStreamUsage?.cacheWriteTokens,
+      contextUsedTokens,
+      contextMaxTokens,
+      contextIsEstimated,
+      messageTurns: usageDetails.size,
+      hiddenMessageCount: hiddenMessageCount ?? 0,
+      serverTotalTurnCount: serverTotalTurnCount ?? null,
+      childSessionCount: childSessions.length,
+      sessionTaskCount: sessionTasks.length,
+      tokensPerSecond: streamingUsageDetails?.tokensPerSecond,
+      firstTokenLatencyMs: streamingUsageDetails?.firstTokenLatencyMs,
+      currentRoundDurationMs: streamingUsageDetails?.durationMs,
+      totalDurationMs,
+      streaming: visibleStreaming,
+    };
+  }, [
+    assistantUsageDetails,
+    contextUsageSnapshot,
+    streamingUsageDetails,
+    effectiveReportedStreamUsage,
+    visibleStreaming,
+    hiddenMessageCount,
+    serverTotalTurnCount,
+    childSessions.length,
+    sessionTasks.length,
+  ]);
+
   // ─── Command Palette items ──────────────────────────────────────────────
   const commandPaletteItems = useMemo<CommandPaletteItem[]>(
     () => [
@@ -4281,7 +4353,6 @@ export default function ChatPage() {
           }
         }
       },
-      onToggleSidebar: () => toggleLeftSidebar(),
       onToggleRightPanel: () => setRightOpen((v) => !v),
       onNewSession: () => {
         navigate('/chat');
@@ -4351,72 +4422,6 @@ export default function ChatPage() {
           requestAnimationFrame(() => textareaRef.current?.focus());
         }}
       />
-
-      <div
-        aria-hidden={!leftSidebarOpen}
-        style={{
-          width: shouldOverlaySidebar ? sidebarWidth : leftSidebarOpen ? sidebarWidth : 0,
-          flexShrink: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-          height: '100%',
-          borderRight: leftSidebarOpen ? '1px solid var(--border-subtle)' : 'none',
-          transition: shouldOverlaySidebar
-            ? 'transform 200ms ease, opacity 200ms ease'
-            : 'width 200ms ease',
-          pointerEvents: leftSidebarOpen ? undefined : 'none',
-          position: shouldOverlaySidebar ? 'absolute' : 'relative',
-          left: shouldOverlaySidebar ? 0 : undefined,
-          top: shouldOverlaySidebar ? 0 : undefined,
-          bottom: shouldOverlaySidebar ? 0 : undefined,
-          zIndex: shouldOverlaySidebar ? 35 : undefined,
-          transform: shouldOverlaySidebar
-            ? leftSidebarOpen
-              ? 'translateX(0)'
-              : 'translateX(-100%)'
-            : undefined,
-          opacity: shouldOverlaySidebar ? (leftSidebarOpen ? 1 : 0) : 1,
-          boxShadow: shouldOverlaySidebar && leftSidebarOpen ? 'var(--shadow-lg)' : 'none',
-          background: shouldOverlaySidebar ? 'var(--bg-overlay)' : undefined,
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            height: '100%',
-            width: sidebarWidth,
-            maxWidth: '100%',
-          }}
-        >
-          <SessionSidebar
-            onOpenFile={(path) => {
-              void fileEditor.openFile(path);
-              setEditorMode(true);
-              setEditorPaneTab('code');
-            }}
-            fetchRootPath={workspace.fetchRootPath}
-            fetchTree={workspace.fetchTree}
-            onOpenWorkspacePicker={() => setShowWorkspaceSelector(true)}
-          />
-        </div>
-      </div>
-
-      {shouldOverlaySidebar && leftSidebarOpen && (
-        <button
-          type="button"
-          aria-label="关闭侧栏遮罩"
-          onClick={() => setLeftSidebarOpen(false)}
-          style={{
-            position: 'absolute',
-            inset: 0,
-            zIndex: 30,
-            background: 'rgba(0, 0, 0, 0.42)',
-            backdropFilter: 'blur(1px)',
-          }}
-        />
-      )}
 
       <div
         ref={splitContainerRef}
@@ -4559,8 +4564,6 @@ export default function ChatPage() {
                       });
                     }}
                     browserActive={!!browserPreviewUrl}
-                    sidebarOpen={leftSidebarOpen}
-                    onToggleSidebar={() => toggleLeftSidebar()}
                     editorPaneTab={editorPaneTab}
                     onActivateCodeTab={() => {
                       // 用 transition 降级为非阻塞更新 — `editorMode` /
@@ -4873,9 +4876,7 @@ export default function ChatPage() {
               }
               onSelectImageReferenceArtifactId={setSelectedImageEditReferenceArtifactId}
               markSessionMetadataDirty={markSessionMetadataDirty}
-              contextUsedTokens={contextUsageSnapshot?.usedTokens}
-              contextMaxTokens={contextUsageSnapshot?.maxTokens}
-              contextIsEstimated={contextUsageSnapshot?.estimated}
+              statsData={composerStatsData}
             />
             {currentSessionId ? (
               <QuickTerminalPanel

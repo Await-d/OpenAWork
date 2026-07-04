@@ -344,6 +344,10 @@ export function ModelManager({
   // 模型目录同步状态：进行中 / 结果提示（成功统计或失败原因）。
   const [syncing, setSyncing] = useState(false);
   const [syncNotice, setSyncNotice] = useState<{ ok: boolean; message: string } | null>(null);
+  // 模型搜索 + 折叠——模型数量多时仅渲染匹配项且默认折叠到前 N 个
+  const [modelSearch, setModelSearch] = useState('');
+  const [showAllModels, setShowAllModels] = useState(false);
+  const COLLAPSE_THRESHOLD = 15;
 
   async function handleSyncCatalog() {
     if (!onSyncCatalog || syncing) return;
@@ -528,252 +532,370 @@ export function ModelManager({
         (() => {
           // 表格行按模型名称统一降序展示（与聊天选择器 / 设置下拉一致）。
           const sortedModels = [...provider.defaultModels].sort(compareModelsByName);
+          // 搜索过滤
+          const search = modelSearch.trim().toLowerCase();
+          const filteredModels = search
+            ? sortedModels.filter(
+                (model) =>
+                  model.label.toLowerCase().includes(search) ||
+                  model.id.toLowerCase().includes(search),
+              )
+            : sortedModels;
+          // 折叠逻辑：超过阈值时默认仅显示前 COLLAPSE_THRESHOLD 个
+          const shouldCollapse =
+            !showAllModels && !search && filteredModels.length > COLLAPSE_THRESHOLD;
+          const visibleModels = shouldCollapse
+            ? filteredModels.slice(0, COLLAPSE_THRESHOLD)
+            : filteredModels;
           return (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', minWidth: 940, borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr
-                    style={{
-                      borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-                    }}
+            <>
+              {/* 搜索栏——仅当模型总数超过阈值时显示 */}
+              {sortedModels.length > COLLAPSE_THRESHOLD ? (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 7,
+                    height: 30,
+                    margin: '0 1.5rem',
+                    marginTop: 10,
+                    borderRadius: 8,
+                    border:
+                      '1px solid var(--border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
+                    background: 'var(--bg-raised)',
+                    padding: '0 9px',
+                  }}
+                >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                    style={{ color: 'var(--fg-muted)', flexShrink: 0 }}
                   >
-                    {[
-                      '模型',
-                      '上下文',
-                      '输出',
-                      '输入 $/M',
-                      '输出 $/M',
-                      '自动压缩',
-                      '4K',
-                      '已启用',
-                      '检测',
-                      '',
-                    ].map((h) => (
-                      <th
-                        key={h}
-                        style={{
-                          ...mutedStyle,
-                          fontWeight: 500,
-                          textAlign: 'left',
-                          fontSize: 12,
-                        }}
-                      >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortedModels.map((model, idx) => (
-                    <tr
-                      key={model.id}
+                    <circle cx="11" cy="11" r="8" />
+                    <path d="m21 21-4.3-4.3" />
+                  </svg>
+                  <input
+                    value={modelSearch}
+                    onChange={(event) => {
+                      setModelSearch(event.target.value);
+                      setShowAllModels(false);
+                    }}
+                    placeholder={`搜索 ${sortedModels.length} 个模型…`}
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      background: 'transparent',
+                      border: 'none',
+                      outline: 'none',
+                      color: 'var(--fg-default)',
+                      fontSize: 11,
+                    }}
+                  />
+                  {modelSearch ? (
+                    <button
+                      type="button"
+                      onClick={() => setModelSearch('')}
                       style={{
-                        borderBottom:
-                          idx < sortedModels.length - 1
-                            ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))'
-                            : 'none',
-                        opacity: model.enabled ? 1 : 0.5,
+                        background: 'transparent',
+                        border: 'none',
+                        color: 'var(--fg-muted)',
+                        cursor: 'pointer',
+                        fontSize: 11,
+                        padding: 0,
                       }}
                     >
-                      <td style={cellStyle}>
-                        <div style={{ fontWeight: 500 }}>{model.label}</div>
-                        <div style={{ fontSize: 11, color: 'var(--fg-muted)', marginTop: 1 }}>
-                          {model.id}
-                        </div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
-                          {model.supportsImageGeneration ? <CapabilityDot label="生图" /> : null}
-                          {model.supportsImageGeneration &&
-                          model.supportsImageGeneration4K === true ? (
-                            <CapabilityDot label="4K" />
-                          ) : null}
-                          {model.supportsTools ? <CapabilityDot label="工具" /> : null}
-                          {model.supportsVision ? <CapabilityDot label="视觉" /> : null}
-                          {model.supportsThinking ? <CapabilityDot label="思考" /> : null}
-                        </div>
-                      </td>
-                      <td style={mutedStyle}>{formatContext(model.contextWindow)}</td>
-                      <td style={mutedStyle}>{formatContext(model.maxOutputTokens)}</td>
-                      <td style={mutedStyle}>{formatPrice(model.inputPricePerMillion)}</td>
-                      <td style={mutedStyle}>{formatPrice(model.outputPricePerMillion)}</td>
-                      <td style={cellStyle}>
-                        {(() => {
-                          const summary = buildAutoCompactSummary(model);
-                          const warning = getAutoCompactWarning(model);
+                      清除
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+              <div style={{ overflowX: 'auto', marginTop: 10 }}>
+                <table style={{ width: '100%', minWidth: 940, borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr
+                      style={{
+                        borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+                      }}
+                    >
+                      {[
+                        '模型',
+                        '上下文',
+                        '输出',
+                        '输入 $/M',
+                        '输出 $/M',
+                        '自动压缩',
+                        '4K',
+                        '已启用',
+                        '检测',
+                        '',
+                      ].map((h) => (
+                        <th
+                          key={h}
+                          style={{
+                            ...mutedStyle,
+                            fontWeight: 500,
+                            textAlign: 'left',
+                            fontSize: 12,
+                          }}
+                        >
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleModels.map((model, idx) => (
+                      <tr
+                        key={model.id}
+                        style={{
+                          borderBottom:
+                            idx < visibleModels.length - 1
+                              ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))'
+                              : 'none',
+                          opacity: model.enabled ? 1 : 0.5,
+                        }}
+                      >
+                        <td style={cellStyle}>
+                          <div style={{ fontWeight: 500 }}>{model.label}</div>
+                          <div style={{ fontSize: 11, color: 'var(--fg-muted)', marginTop: 1 }}>
+                            {model.id}
+                          </div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
+                            {model.supportsImageGeneration ? <CapabilityDot label="生图" /> : null}
+                            {model.supportsImageGeneration &&
+                            model.supportsImageGeneration4K === true ? (
+                              <CapabilityDot label="4K" />
+                            ) : null}
+                            {model.supportsTools ? <CapabilityDot label="工具" /> : null}
+                            {model.supportsVision ? <CapabilityDot label="视觉" /> : null}
+                            {model.supportsThinking ? <CapabilityDot label="思考" /> : null}
+                          </div>
+                        </td>
+                        <td style={mutedStyle}>{formatContext(model.contextWindow)}</td>
+                        <td style={mutedStyle}>{formatContext(model.maxOutputTokens)}</td>
+                        <td style={mutedStyle}>{formatPrice(model.inputPricePerMillion)}</td>
+                        <td style={mutedStyle}>{formatPrice(model.outputPricePerMillion)}</td>
+                        <td style={cellStyle}>
+                          {(() => {
+                            const summary = buildAutoCompactSummary(model);
+                            const warning = getAutoCompactWarning(model);
 
-                          return (
-                            <>
+                            return (
+                              <>
+                                <div
+                                  style={{
+                                    display: 'flex',
+                                    gap: 8,
+                                    flexWrap: 'wrap',
+                                    alignItems: 'flex-end',
+                                  }}
+                                >
+                                  <ModelRatioInput
+                                    ariaLabel={`${model.label} 自动压缩阈值`}
+                                    fallbackLabel="阈值"
+                                    value={model.autoCompactThresholdRatio}
+                                    onCommit={
+                                      onUpdateModel
+                                        ? (nextValue) => {
+                                            onUpdateModel(provider.id, model.id, {
+                                              autoCompactThresholdRatio: nextValue,
+                                            });
+                                          }
+                                        : undefined
+                                    }
+                                  />
+                                  <ModelRatioInput
+                                    ariaLabel={`${model.label} 压缩目标比例`}
+                                    fallbackLabel="目标"
+                                    value={model.autoCompactTargetRatio}
+                                    onCommit={
+                                      onUpdateModel
+                                        ? (nextValue) => {
+                                            onUpdateModel(provider.id, model.id, {
+                                              autoCompactTargetRatio: nextValue,
+                                            });
+                                          }
+                                        : undefined
+                                    }
+                                  />
+                                </div>
+                                <div
+                                  style={{
+                                    marginTop: 6,
+                                    fontSize: 10,
+                                    color: 'var(--fg-muted)',
+                                    lineHeight: 1.45,
+                                  }}
+                                >
+                                  当前：阈值{' '}
+                                  {formatRatio(model.autoCompactThresholdRatio, '默认 95%')} · 目标{' '}
+                                  {formatRatio(model.autoCompactTargetRatio, '默认 60%')}
+                                </div>
+                                <InlineNotice tone="info">{summary}</InlineNotice>
+                                {warning ? (
+                                  <InlineNotice tone="warning">{`提醒：${warning}`}</InlineNotice>
+                                ) : null}
+                              </>
+                            );
+                          })()}
+                        </td>
+                        <td style={cellStyle}>
+                          {model.supportsImageGeneration ? (
+                            <label
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                fontSize: 11,
+                                color: 'var(--fg-muted)',
+                                cursor: onUpdateModel ? 'pointer' : 'default',
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={model.supportsImageGeneration4K === true}
+                                disabled={!onUpdateModel}
+                                onChange={(event) =>
+                                  onUpdateModel?.(provider.id, model.id, {
+                                    supportsImageGeneration4K: event.target.checked,
+                                  })
+                                }
+                              />
+                              <span>支持 4K</span>
+                            </label>
+                          ) : null}
+                        </td>
+                        <td style={cellStyle}>
+                          <Toggle
+                            enabled={model.enabled}
+                            onToggle={() => onToggleModel?.(provider.id, model.id)}
+                          />
+                        </td>
+                        <td style={cellStyle}>
+                          {(() => {
+                            const isTesting = testing[model.id] === true;
+                            const result = testResults[model.id];
+                            const statusColor = result
+                              ? result.ok
+                                ? 'var(--success)'
+                                : result.status === 'rate_limited'
+                                  ? 'var(--warning)'
+                                  : 'var(--danger)'
+                              : 'var(--fg-muted)';
+                            return (
                               <div
                                 style={{
                                   display: 'flex',
-                                  gap: 8,
-                                  flexWrap: 'wrap',
-                                  alignItems: 'flex-end',
+                                  flexDirection: 'column',
+                                  gap: 4,
+                                  minWidth: 132,
                                 }}
                               >
-                                <ModelRatioInput
-                                  ariaLabel={`${model.label} 自动压缩阈值`}
-                                  fallbackLabel="阈值"
-                                  value={model.autoCompactThresholdRatio}
-                                  onCommit={
-                                    onUpdateModel
-                                      ? (nextValue) => {
-                                          onUpdateModel(provider.id, model.id, {
-                                            autoCompactThresholdRatio: nextValue,
-                                          });
-                                        }
-                                      : undefined
-                                  }
-                                />
-                                <ModelRatioInput
-                                  ariaLabel={`${model.label} 压缩目标比例`}
-                                  fallbackLabel="目标"
-                                  value={model.autoCompactTargetRatio}
-                                  onCommit={
-                                    onUpdateModel
-                                      ? (nextValue) => {
-                                          onUpdateModel(provider.id, model.id, {
-                                            autoCompactTargetRatio: nextValue,
-                                          });
-                                        }
-                                      : undefined
-                                  }
-                                />
+                                <button
+                                  type="button"
+                                  onClick={() => void handleTestModel(model.id)}
+                                  disabled={!onTestModel || isTesting}
+                                  title="对该模型发起一次最小化上游调用，检查是否配置正确且可用"
+                                  style={{
+                                    background: 'transparent',
+                                    border: '1px solid var(--accent)',
+                                    borderRadius: 6,
+                                    color: 'var(--accent)',
+                                    padding: '0.2rem 0.6rem',
+                                    fontSize: 12,
+                                    cursor: !onTestModel || isTesting ? 'not-allowed' : 'pointer',
+                                    opacity: !onTestModel || isTesting ? 0.6 : 1,
+                                    fontWeight: 500,
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                >
+                                  {isTesting ? '检测中…' : '检测连接'}
+                                </button>
+                                {result ? (
+                                  <span
+                                    style={{
+                                      fontSize: 10,
+                                      lineHeight: 1.4,
+                                      color: statusColor,
+                                    }}
+                                    title={result.message}
+                                  >
+                                    {result.ok ? '✓ ' : '✕ '}
+                                    {result.message.length > 28
+                                      ? `${result.message.slice(0, 28)}…`
+                                      : result.message}
+                                  </span>
+                                ) : null}
                               </div>
-                              <div
-                                style={{
-                                  marginTop: 6,
-                                  fontSize: 10,
-                                  color: 'var(--fg-muted)',
-                                  lineHeight: 1.45,
-                                }}
-                              >
-                                当前：阈值{' '}
-                                {formatRatio(model.autoCompactThresholdRatio, '默认 95%')} · 目标{' '}
-                                {formatRatio(model.autoCompactTargetRatio, '默认 60%')}
-                              </div>
-                              <InlineNotice tone="info">{summary}</InlineNotice>
-                              {warning ? (
-                                <InlineNotice tone="warning">{`提醒：${warning}`}</InlineNotice>
-                              ) : null}
-                            </>
-                          );
-                        })()}
-                      </td>
-                      <td style={cellStyle}>
-                        {model.supportsImageGeneration ? (
-                          <label
+                            );
+                          })()}
+                        </td>
+                        <td style={cellStyle}>
+                          <button
+                            type="button"
+                            onClick={() => onRemoveModel?.(provider.id, model.id)}
+                            disabled={!onRemoveModel}
                             style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 6,
-                              fontSize: 11,
-                              color: 'var(--fg-muted)',
-                              cursor: onUpdateModel ? 'pointer' : 'default',
+                              background: 'transparent',
+                              border: '1px solid var(--fg-subtle)',
+                              borderRadius: 6,
+                              color: color.danger,
+                              padding: '0.2rem 0.5rem',
+                              fontSize: 12,
+                              cursor: onRemoveModel ? 'pointer' : 'not-allowed',
+                              opacity: onRemoveModel ? 1 : 0.5,
                             }}
                           >
-                            <input
-                              type="checkbox"
-                              checked={model.supportsImageGeneration4K === true}
-                              disabled={!onUpdateModel}
-                              onChange={(event) =>
-                                onUpdateModel?.(provider.id, model.id, {
-                                  supportsImageGeneration4K: event.target.checked,
-                                })
-                              }
-                            />
-                            <span>支持 4K</span>
-                          </label>
-                        ) : null}
-                      </td>
-                      <td style={cellStyle}>
-                        <Toggle
-                          enabled={model.enabled}
-                          onToggle={() => onToggleModel?.(provider.id, model.id)}
-                        />
-                      </td>
-                      <td style={cellStyle}>
-                        {(() => {
-                          const isTesting = testing[model.id] === true;
-                          const result = testResults[model.id];
-                          const statusColor = result
-                            ? result.ok
-                              ? 'var(--success)'
-                              : result.status === 'rate_limited'
-                                ? 'var(--warning)'
-                                : 'var(--danger)'
-                            : 'var(--fg-muted)';
-                          return (
-                            <div
-                              style={{
-                                display: 'flex',
-                                flexDirection: 'column',
-                                gap: 4,
-                                minWidth: 132,
-                              }}
-                            >
-                              <button
-                                type="button"
-                                onClick={() => void handleTestModel(model.id)}
-                                disabled={!onTestModel || isTesting}
-                                title="对该模型发起一次最小化上游调用，检查是否配置正确且可用"
-                                style={{
-                                  background: 'transparent',
-                                  border: '1px solid var(--accent)',
-                                  borderRadius: 6,
-                                  color: 'var(--accent)',
-                                  padding: '0.2rem 0.6rem',
-                                  fontSize: 12,
-                                  cursor: !onTestModel || isTesting ? 'not-allowed' : 'pointer',
-                                  opacity: !onTestModel || isTesting ? 0.6 : 1,
-                                  fontWeight: 500,
-                                  whiteSpace: 'nowrap',
-                                }}
-                              >
-                                {isTesting ? '检测中…' : '检测连接'}
-                              </button>
-                              {result ? (
-                                <span
-                                  style={{
-                                    fontSize: 10,
-                                    lineHeight: 1.4,
-                                    color: statusColor,
-                                  }}
-                                  title={result.message}
-                                >
-                                  {result.ok ? '✓ ' : '✕ '}
-                                  {result.message.length > 28
-                                    ? `${result.message.slice(0, 28)}…`
-                                    : result.message}
-                                </span>
-                              ) : null}
-                            </div>
-                          );
-                        })()}
-                      </td>
-                      <td style={cellStyle}>
-                        <button
-                          type="button"
-                          onClick={() => onRemoveModel?.(provider.id, model.id)}
-                          disabled={!onRemoveModel}
-                          style={{
-                            background: 'transparent',
-                            border: '1px solid var(--fg-subtle)',
-                            borderRadius: 6,
-                            color: color.danger,
-                            padding: '0.2rem 0.5rem',
-                            fontSize: 12,
-                            cursor: onRemoveModel ? 'pointer' : 'not-allowed',
-                            opacity: onRemoveModel ? 1 : 0.5,
-                          }}
-                        >
-                          移除
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                            移除
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {shouldCollapse ? (
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 8,
+                      padding: '0.75rem 1.5rem',
+                      borderTop: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+                    }}
+                  >
+                    <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+                      已显示前 {COLLAPSE_THRESHOLD} 个，还有{' '}
+                      {filteredModels.length - COLLAPSE_THRESHOLD} 个模型被折叠
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowAllModels(true)}
+                      style={{
+                        background: 'transparent',
+                        border: '1px solid var(--accent)',
+                        borderRadius: 6,
+                        color: 'var(--accent)',
+                        padding: '0.25rem 0.75rem',
+                        fontSize: 11,
+                        fontWeight: 500,
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      展开全部
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            </>
           );
         })()
       )}

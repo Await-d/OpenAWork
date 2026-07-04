@@ -266,6 +266,8 @@ export type { CreateGitHubTriggerInput, GitHubClient, GitHubTrigger } from './in
 
 export { createChannelsClient } from './infra/channels.js';
 export type {
+  ChannelConversationSummary,
+  ChannelConversationsResponse,
   ChannelDescriptorListResponse,
   ChannelListResponse,
   ChannelMutationResponse,

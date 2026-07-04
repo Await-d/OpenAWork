@@ -144,6 +144,38 @@ describe('memories routes', () => {
     }
   });
 
+  it('POST /memories/extract 拒绝敏感候选时不会在响应中回显原文', async () => {
+    const sensitiveToken = 'sk-abcdefghijklmnopqrstuvwxyz123456';
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/memories/extract',
+        headers: {
+          authorization: bearer(app),
+          'content-type': 'application/json',
+        },
+        payload: {
+          text: `请记住 api_key = ${sensitiveToken}`,
+        },
+      });
+
+      const body = response.json();
+      const serializedBody = JSON.stringify(body);
+
+      expect(response.statusCode).toBe(200);
+      expect(body).toMatchObject({
+        candidates: 1,
+        extracted: 0,
+        rejected: 1,
+      });
+      expect(body).not.toHaveProperty('decisions');
+      expect(serializedBody).not.toContain(sensitiveToken);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('POST /memories/extract 遇到损坏的 session metadata 也不会崩溃', async () => {
     seedSession(SESSION_ID, '{broken-json');
     const app = await buildApp();

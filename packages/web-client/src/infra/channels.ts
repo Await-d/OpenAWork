@@ -37,6 +37,23 @@ export interface ChannelTargetsResponse<TTarget> {
   error?: string;
 }
 
+export interface ChannelConversationSummary {
+  readonly id: string;
+  readonly chatId: string;
+  readonly chatName: string | null;
+  readonly title: string;
+  readonly stateStatus: string;
+  readonly messageCount: number;
+  readonly lastMessagePreview: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ChannelConversationsResponse {
+  conversations?: ChannelConversationSummary[];
+  error?: string;
+}
+
 export interface ChannelsClient<
   TChannel = Record<string, unknown>,
   TDescriptor = Record<string, unknown>,
@@ -50,6 +67,11 @@ export interface ChannelsClient<
   start(token: string, channelId: string): Promise<{ status?: string }>;
   stop(token: string, channelId: string): Promise<{ status?: string }>;
   listTargets(token: string, channelId: string): Promise<TTarget[]>;
+  listConversations(
+    token: string,
+    channelId: string,
+    options?: { limit?: number; offset?: number },
+  ): Promise<ChannelConversationSummary[]>;
 }
 
 function buildChannelsActionErrorMessage(
@@ -107,6 +129,7 @@ async function performChannelsRequest<T>(input: {
       | ChannelDescriptorListResponse<T>
       | ChannelMutationResponse<T>
       | ChannelTargetsResponse<T>
+      | ChannelConversationsResponse
       | (JsonErrorData & { status?: string })
       | null;
     if (!response.ok) {
@@ -232,6 +255,30 @@ export function createChannelsClient<
           }),
       });
       return data.groups ?? [];
+    },
+
+    async listConversations(token, channelId, options) {
+      const query = new URLSearchParams();
+      if (options?.limit !== undefined) {
+        query.set('limit', String(options.limit));
+      }
+      if (options?.offset !== undefined) {
+        query.set('offset', String(options.offset));
+      }
+      const suffix = query.toString();
+      const data = await performChannelsRequest<ChannelConversationsResponse>({
+        actionLabel: '读取渠道对话历史',
+        request: () =>
+          fetchWithTimeout(
+            `${baseUrl}/channels/${encodeURIComponent(channelId)}/conversations${
+              suffix ? `?${suffix}` : ''
+            }`,
+            {
+              headers: authHeader(token),
+            },
+          ),
+      });
+      return data.conversations ?? [];
     },
   };
 }

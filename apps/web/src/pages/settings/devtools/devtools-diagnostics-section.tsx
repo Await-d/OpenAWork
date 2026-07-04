@@ -35,6 +35,7 @@ interface DevtoolsDiagnosticsSectionProps {
   onCopyRelatedContext: () => void;
   onExportJson: () => void;
   onExportMarkdown: () => void;
+  onExportErrorReport: () => void;
   onScrollToLogs: () => void;
   onCopyDiagnosticField: (label: string, value: unknown) => void;
 }
@@ -117,6 +118,7 @@ export function DevtoolsDiagnosticsSection({
   onCopyRelatedContext,
   onExportJson,
   onExportMarkdown,
+  onExportErrorReport,
   onScrollToLogs,
   onCopyDiagnosticField,
 }: DevtoolsDiagnosticsSectionProps) {
@@ -219,6 +221,7 @@ export function DevtoolsDiagnosticsSection({
         onCopyRelatedContext={onCopyRelatedContext}
         onExportJson={onExportJson}
         onExportMarkdown={onExportMarkdown}
+        onExportErrorReport={onExportErrorReport}
         onSelectDiagnostic={onSelectDiagnostic}
         onScrollToLogs={onScrollToLogs}
       />

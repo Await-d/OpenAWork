@@ -1,25 +1,60 @@
 import type React from 'react';
+import type { CSSProperties } from 'react';
 import type { DesktopGatewayMode } from '../../../utils/gateway/desktop-gateway.js';
 import {
-  MCPServerConfig,
-  MCPServerList,
   ProviderSettings,
   type ActiveSelectionRef,
   type AIModelConfigItem,
   type AIProviderRef,
   type ImageGenerationDefaultsRef,
-  type MCPServerEntry,
-  type MCPServerStatus,
 } from '@openAwork/shared-ui';
 import type {
   ProviderEditData,
   ThinkingDefaultsRef,
   ThinkingModeRef,
 } from '../state/settings-types.js';
-import { BP, IS, SS, ST, UV } from '../shared/settings-section-styles.js';
+import { BP, IS, SS, UV } from '../shared/settings-section-styles.js';
 import { UpstreamRetrySection } from './upstream-retry-section.js';
-import { WebsearchSection } from './websearch-section.js';
-import type { WebsearchPolicy } from './use-settings-websearch.js';
+
+/** 区域分组标题——比 ST 更大，用于二级信息架构 */
+const GROUP_TITLE: CSSProperties = {
+  fontSize: 13,
+  fontWeight: 700,
+  color: 'var(--fg-strong)',
+  letterSpacing: '-0.01em',
+  margin: 0,
+};
+
+/** 区域分组描述文字 */
+const GROUP_DESC: CSSProperties = {
+  fontSize: 11,
+  color: 'var(--fg-muted)',
+  lineHeight: 1.5,
+  margin: '1px 0 0',
+};
+
+/** 区域分组容器 */
+const GROUP_WRAPPER: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 6,
+};
+
+/** 区域分组头部——标题+描述行 */
+const GROUP_HEADER: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 1,
+  padding: '0 2px',
+};
+
+/** 紧凑版 section——覆盖 SS 的 padding 和 gap */
+const SS_TIGHT: CSSProperties = {
+  ...SS,
+  marginBottom: 0,
+  padding: '10px 12px',
+  gap: '0.5rem',
+};
 
 interface ConnectionTabContentProps {
   providers: AIProviderRef[];
@@ -43,7 +78,6 @@ interface ConnectionTabContentProps {
   handleToggleProvider: (id: string) => void;
   handleEditProvider: (id: string, data: ProviderEditData) => void;
   handleAddProvider: (data: ProviderEditData) => void;
-  /** 连通性自检：对指定 provider+模型发起最小化上游调用，返回结构化结果。 */
   onTestModel?: (
     providerId: string,
     modelId: string,
@@ -53,27 +87,16 @@ interface ConnectionTabContentProps {
     message: string;
     latencyMs?: number;
   }>;
-  /** 手动从 models.dev 同步内置模型目录，返回 provider/model 统计。 */
   onSyncCatalog?: () => Promise<{
     ok: boolean;
     providerCount?: number;
     modelCount?: number;
     message?: string;
   }>;
-  mcpServers: MCPServerEntry[];
-  setMcpServers: React.Dispatch<React.SetStateAction<MCPServerEntry[]>>;
-  mcpStatuses: MCPServerStatus[];
-  onRetryMcp?: (serverId: string) => void;
   urlInput: string;
   setUrlInput: React.Dispatch<React.SetStateAction<string>>;
   saveGatewayUrl: () => void;
   urlSaved: boolean;
-  /**
-   * 「桌面端」tab →「Web 端访问」section 已经接管本地 sidecar 启停 / 端口 /
-   * 暴露范围 / 可访问地址。这里只保留 mode 状态展示与远程网关 URL/凭据维护。
-   * 旧的 webAccessEnabled / webPort / portInput / saveWebPort / toggleWebAccess /
-   * copyAddress 等 props 已不再需要从这里传入。
-   */
   desktopGatewayBusy: boolean;
   desktopGatewayError: string | null;
   desktopGatewayMode: DesktopGatewayMode;
@@ -87,11 +110,6 @@ interface ConnectionTabContentProps {
   upstreamRetryMaxRetries: number;
   saveUpstreamRetrySettings: () => void;
   savedUpstreamRetryMaxRetries: number;
-  websearchPolicy: WebsearchPolicy;
-  websearchSavedPolicy: WebsearchPolicy;
-  websearchSaving: boolean;
-  setWebsearchPolicy: React.Dispatch<React.SetStateAction<WebsearchPolicy>>;
-  saveWebsearchPolicy: () => void;
 }
 
 export function ConnectionTabContent({
@@ -114,10 +132,6 @@ export function ConnectionTabContent({
   handleAddProvider,
   onTestModel,
   onSyncCatalog,
-  mcpServers,
-  setMcpServers,
-  mcpStatuses,
-  onRetryMcp,
   urlInput,
   setUrlInput,
   saveGatewayUrl,
@@ -135,124 +149,151 @@ export function ConnectionTabContent({
   upstreamRetryMaxRetries,
   saveUpstreamRetrySettings,
   savedUpstreamRetryMaxRetries,
-  websearchPolicy,
-  websearchSavedPolicy,
-  websearchSaving,
-  setWebsearchPolicy,
-  saveWebsearchPolicy,
 }: ConnectionTabContentProps) {
   return (
-    <>
-      <section style={SS}>
-        <h3 style={ST}>网关</h3>
-        {isTauri ? (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 12,
-              padding: '10px 12px',
-              borderRadius: 10,
-              border: '1px solid var(--border-default)',
-              background: 'var(--bg-overlay)',
-              fontSize: 12,
-              color: 'var(--fg-muted)',
-            }}
-          >
-            <span>当前桌面网关模式</span>
-            <strong style={{ color: 'var(--accent)' }}>
-              {desktopGatewayMode === 'local' ? '本地网关' : '远程网关'}
-            </strong>
-          </div>
-        ) : null}
-        <label
-          htmlFor="gw-url"
-          style={{ fontSize: 12, color: 'var(--fg-strong)', fontWeight: 500 }}
-        >
-          网关地址
-        </label>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <input
-            id="gw-url"
-            style={{ ...IS, flex: 1 }}
-            type="url"
-            value={urlInput}
-            onChange={(event) => setUrlInput(event.target.value)}
-            placeholder="http://localhost:3000"
-          />
-          <button type="button" onClick={saveGatewayUrl} style={BP}>
-            {desktopGatewayBusy ? '同步中…' : urlSaved ? '✓ 已保存' : '保存'}
-          </button>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* ───── 区域一：网关连接 ───── */}
+      <div style={GROUP_WRAPPER}>
+        <div style={GROUP_HEADER}>
+          <h3 style={GROUP_TITLE}>网关连接</h3>
+          <p style={GROUP_DESC}>配置网关地址与认证凭据，桌面端可在本地与远程模式间切换。</p>
         </div>
-        {desktopGatewayError ? (
-          <p style={{ color: 'var(--danger)', fontSize: 12, margin: 0 }}>{desktopGatewayError}</p>
-        ) : null}
-        {isTauri ? (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <label
+        <section style={SS_TIGHT}>
+          {isTauri ? (
+            <div
               style={{
                 display: 'flex',
-                flexDirection: 'column',
-                gap: 6,
-                color: 'var(--fg-muted)',
-                fontSize: 12,
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+                padding: '6px 10px',
+                borderRadius: 6,
+                border: '1px solid var(--accent-border)',
+                background:
+                  desktopGatewayMode === 'local'
+                    ? 'var(--accent-subtle)'
+                    : 'var(--contrast-subtle)',
               }}
             >
-              远程管理员邮箱
-              <input
-                style={IS}
-                type="email"
-                value={remoteAdminEmail}
-                onChange={(event) => setRemoteAdminEmail(event.target.value)}
-                placeholder="admin@openAwork.local"
-                autoComplete="username"
-              />
-            </label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span
+                  style={{
+                    width: 7,
+                    height: 7,
+                    borderRadius: '50%',
+                    background:
+                      desktopGatewayMode === 'local' ? 'var(--accent)' : 'var(--contrast)',
+                    boxShadow: `0 0 6px ${
+                      desktopGatewayMode === 'local' ? 'var(--accent)' : 'var(--contrast)'
+                    }`,
+                  }}
+                />
+                <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>当前模式</span>
+              </div>
+              <strong
+                style={{
+                  fontSize: 11,
+                  color: desktopGatewayMode === 'local' ? 'var(--accent)' : 'var(--contrast)',
+                  fontWeight: 700,
+                }}
+              >
+                {desktopGatewayMode === 'local' ? '本地网关' : '远程网关'}
+              </strong>
+            </div>
+          ) : null}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <label
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 6,
-                color: 'var(--fg-muted)',
-                fontSize: 12,
-              }}
+              htmlFor="gw-url"
+              style={{ fontSize: 11, color: 'var(--fg-strong)', fontWeight: 500 }}
             >
-              远程管理员密码
-              <input
-                style={IS}
-                type="password"
-                value={remoteAdminPassword}
-                onChange={(event) => setRemoteAdminPassword(event.target.value)}
-                placeholder="切换远程网关时必填"
-                autoComplete="current-password"
-              />
+              网关地址
             </label>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input
+                id="gw-url"
+                style={{ ...IS, flex: 1, padding: '6px 10px' }}
+                type="url"
+                value={urlInput}
+                onChange={(event) => setUrlInput(event.target.value)}
+                placeholder="http://localhost:3000"
+              />
+              <button type="button" onClick={saveGatewayUrl} style={{ ...BP, padding: '6px 12px' }}>
+                {desktopGatewayBusy ? '同步中…' : urlSaved ? '✓ 已保存' : '保存'}
+              </button>
+            </div>
           </div>
-        ) : null}
-      </section>
-      <UpstreamRetrySection
-        isSaving={savingUpstreamRetrySettings}
-        maxRetries={upstreamRetryMaxRetries}
-        onChange={(value) => setUpstreamRetryMaxRetries(value)}
-        onSave={saveUpstreamRetrySettings}
-        savedMaxRetries={savedUpstreamRetryMaxRetries}
-      />
-      <WebsearchSection
-        isSaving={websearchSaving}
-        policy={websearchPolicy}
-        savedPolicy={websearchSavedPolicy}
-        setPolicy={setWebsearchPolicy}
-        onSave={saveWebsearchPolicy}
-      />
-      <div>
-        <h3 style={{ ...ST, marginBottom: 12 }}>模型与提供商</h3>
-        <div style={{ ...SS, marginBottom: 12 }}>
-          <div style={{ display: 'grid', gap: 6, maxWidth: 520 }}>
-            <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.6 }}>
-              新建会话会默认继承这里的工具配置档；进入具体会话后，仍可在聊天顶部继续临时切换。
-            </span>
-          </div>
+          {desktopGatewayError ? (
+            <p style={{ color: 'var(--complement)', fontSize: 11, margin: 0 }}>
+              {desktopGatewayError}
+            </p>
+          ) : null}
+          {isTauri ? (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <label
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 4,
+                  color: 'var(--fg-muted)',
+                  fontSize: 11,
+                }}
+              >
+                远程管理员邮箱
+                <input
+                  style={{ ...IS, padding: '6px 10px' }}
+                  type="email"
+                  value={remoteAdminEmail}
+                  onChange={(event) => setRemoteAdminEmail(event.target.value)}
+                  placeholder="admin@openAwork.local"
+                  autoComplete="username"
+                />
+              </label>
+              <label
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 4,
+                  color: 'var(--fg-muted)',
+                  fontSize: 11,
+                }}
+              >
+                远程管理员密码
+                <input
+                  style={{ ...IS, padding: '6px 10px' }}
+                  type="password"
+                  value={remoteAdminPassword}
+                  onChange={(event) => setRemoteAdminPassword(event.target.value)}
+                  placeholder="切换远程网关时必填"
+                  autoComplete="current-password"
+                />
+              </label>
+            </div>
+          ) : null}
+        </section>
+      </div>
+
+      {/* ───── 区域二：调用策略 ───── */}
+      <div style={GROUP_WRAPPER}>
+        <div style={GROUP_HEADER}>
+          <h3 style={GROUP_TITLE}>调用策略</h3>
+          <p style={GROUP_DESC}>上游重试策略，影响所有会话的全局行为。</p>
+        </div>
+        <UpstreamRetrySection
+          isSaving={savingUpstreamRetrySettings}
+          maxRetries={upstreamRetryMaxRetries}
+          onChange={(value) => setUpstreamRetryMaxRetries(value)}
+          onSave={saveUpstreamRetrySettings}
+          savedMaxRetries={savedUpstreamRetryMaxRetries}
+        />
+      </div>
+
+      {/* ───── 区域三：模型与提供商 ───── */}
+      <div style={GROUP_WRAPPER}>
+        <div style={GROUP_HEADER}>
+          <h3 style={GROUP_TITLE}>模型与提供商</h3>
+          <p style={GROUP_DESC}>
+            新建会话会默认继承这里的工具配置档；进入具体会话后，仍可在聊天顶部继续临时切换。
+          </p>
         </div>
         <div style={UV}>
           <ProviderSettings
@@ -305,22 +346,6 @@ export function ConnectionTabContent({
           />
         </div>
       </div>
-      <section style={SS}>
-        <h3 style={ST}>MCP 服务器</h3>
-        <div style={UV}>
-          <MCPServerConfig
-            servers={mcpServers}
-            onAdd={(entry) => setMcpServers((prev) => [...prev, entry])}
-            onRemove={(id) => setMcpServers((prev) => prev.filter((server) => server.id !== id))}
-          />
-        </div>
-      </section>
-      <section style={SS}>
-        <h3 style={ST}>MCP 服务器状态</h3>
-        <div style={UV}>
-          <MCPServerList servers={mcpStatuses} onRetry={onRetryMcp} />
-        </div>
-      </section>
-    </>
+    </div>
   );
 }

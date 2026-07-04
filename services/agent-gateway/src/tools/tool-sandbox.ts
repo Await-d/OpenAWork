@@ -47,6 +47,12 @@ import {
   buildDelegatedChildClientRequestId,
 } from './call-omo-agent-output.js';
 import { CALL_OMO_ALLOWED_AGENTS, callOmoAgentToolDefinition } from './call-omo-agent-tools.js';
+import {
+  CODEGRAPH_TOOL_DEFINITIONS,
+  CODEGRAPH_TOOL_NAME_SET,
+  executeCodegraphTool,
+  markCodegraphFilesStaleBestEffort,
+} from './codegraph-tools.js';
 import { dispatchClaudeCodeTool } from '../claude-code/claude-code-tool-dispatch.js';
 import { codesearchToolDefinition } from './codesearch-tools.js';
 import { sqliteAll, sqliteGet, sqliteRun, WORKSPACE_ROOT } from '../infra/db.js';
@@ -427,6 +433,7 @@ const TOOL_WHITELIST = new Set<string>([
   'generate_image',
   repoCloneToolDefinition.name,
   repoOverviewToolDefinition.name,
+  ...CODEGRAPH_TOOL_DEFINITIONS.map((tool) => tool.name),
   ...WORKSPACE_TOOL_NAMES,
 ]);
 const DEFAULT_TOOL_TIMEOUT_MS = 30000;
@@ -1474,10 +1481,7 @@ function hasWorkspaceScopedExecutionInput(request: ToolCallRequest): boolean {
     case 'workspace_create_directory':
     case 'workspace_review_revert':
     case 'lsp_rename':
-      return (
-        typeof rawInput.path === 'string' ||
-        typeof rawInput.filePath === 'string'
-      );
+      return typeof rawInput.path === 'string' || typeof rawInput.filePath === 'string';
     case 'edit':
     case 'multi_edit':
       return typeof rawInput.filePath === 'string';
@@ -1492,9 +1496,7 @@ function hasWorkspaceScopedExecutionInput(request: ToolCallRequest): boolean {
     case 'run_bash_in_background':
       return typeof rawInput.command === 'string' && rawInput.command.trim().length > 0;
     case 'interactive_bash':
-      return (
-        typeof rawInput.tmux_command === 'string' && rawInput.tmux_command.trim().length > 0
-      );
+      return typeof rawInput.tmux_command === 'string' && rawInput.tmux_command.trim().length > 0;
     default:
       return true;
   }
@@ -1652,7 +1654,7 @@ function buildPermissionRequestContext(
       const workdirValue =
         typeof rawInput.workdir === 'string'
           ? rawInput.workdir
-          : sessionWorkingDirectory ?? WORKSPACE_ROOT;
+          : (sessionWorkingDirectory ?? WORKSPACE_ROOT);
       const validation = validateSessionWorkspacePath({ path: workdirValue, sessionId });
       const safeWorkdir = validation.ok ? validation.safePath : null;
       if (!command || !safeWorkdir) return null;
@@ -1894,6 +1896,15 @@ async function executeGatewayManagedTool(
     output: afterOutput.output,
     isError: afterOutput.metadata['isError'] === true,
   };
+}
+
+function isCodegraphUnavailableOutput(output: unknown): boolean {
+  return (
+    typeof output === 'object' &&
+    output !== null &&
+    'status' in output &&
+    output.status === 'not_available'
+  );
 }
 
 async function executeGatewayManagedToolImpl(
@@ -2717,6 +2728,21 @@ async function executeGatewayManagedToolImpl(
       };
     }
 
+    if (CODEGRAPH_TOOL_NAME_SET.has(request.toolName)) {
+      const output = await executeCodegraphTool({
+        sessionId,
+        toolName: request.toolName,
+        rawInput,
+      });
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output,
+        isError: isCodegraphUnavailableOutput(output),
+        durationMs: 0,
+      };
+    }
+
     if (request.toolName === 'edit') {
       const userId = getSessionOwnerUserId(sessionId);
       if (!userId) {
@@ -2746,6 +2772,11 @@ async function executeGatewayManagedToolImpl(
       }
 
       const output = await editTool.execute(parsed.data, signal);
+      await markCodegraphFilesStaleBestEffort({
+        sessionId,
+        files: [output.path],
+        reason: 'edit',
+      });
       return {
         toolCallId: request.toolCallId,
         toolName: request.toolName,
@@ -2784,6 +2815,11 @@ async function executeGatewayManagedToolImpl(
       }
 
       const output = await multiEditToolInstance.execute(parsed.data, signal);
+      await markCodegraphFilesStaleBestEffort({
+        sessionId,
+        files: [output.path],
+        reason: 'multi_edit',
+      });
       return {
         toolCallId: request.toolCallId,
         toolName: request.toolName,
@@ -2829,6 +2865,11 @@ async function executeGatewayManagedToolImpl(
             kind: 'before_write',
           }),
         sessionId,
+      });
+      await markCodegraphFilesStaleBestEffort({
+        sessionId,
+        files: [output.path],
+        reason: 'write',
       });
 
       return {
@@ -2876,6 +2917,11 @@ async function executeGatewayManagedToolImpl(
           }),
         sessionId,
       });
+      await markCodegraphFilesStaleBestEffort({
+        sessionId,
+        files: output.files.map((file) => file.path),
+        reason: 'apply_patch',
+      });
       return {
         toolCallId: request.toolCallId,
         toolName: request.toolName,
@@ -2922,10 +2968,12 @@ async function executeGatewayManagedToolImpl(
         };
       }
 
-      const output = await executeLspRename(
-        parsed.data,
-        assertSessionWorkingDirectory(sessionId),
-      );
+      const output = await executeLspRename(parsed.data, assertSessionWorkingDirectory(sessionId));
+      await markCodegraphFilesStaleBestEffort({
+        sessionId,
+        files: [parsed.data.filePath],
+        reason: 'lsp_rename',
+      });
       return {
         toolCallId: request.toolCallId,
         toolName: request.toolName,
@@ -4305,18 +4353,15 @@ async function executeGatewayManagedToolImpl(
       }
       const workingDirectory = assertSessionWorkingDirectory(sessionId);
       const ownerUserId = executionContext?.userId ?? getSessionOwnerUserId(sessionId) ?? undefined;
-      const output = await runInteractiveBashCommand(
-        parsedTmux.data.tmux_command,
-        {
-          sessionId,
-          ...(ownerUserId ? { userId: ownerUserId } : {}),
-          workingDirectory,
-          ...(executionContext?.clientRequestId
-            ? { clientRequestId: executionContext.clientRequestId }
-            : {}),
-          toolCallId: request.toolCallId,
-        },
-      );
+      const output = await runInteractiveBashCommand(parsedTmux.data.tmux_command, {
+        sessionId,
+        ...(ownerUserId ? { userId: ownerUserId } : {}),
+        workingDirectory,
+        ...(executionContext?.clientRequestId
+          ? { clientRequestId: executionContext.clientRequestId }
+          : {}),
+        toolCallId: request.toolCallId,
+      });
       return {
         toolCallId: request.toolCallId,
         toolName: request.toolName,
@@ -5693,7 +5738,11 @@ export class ToolSandbox {
     // rejects the call with `is not allowed` before dispatch can run.
     const isBuiltinInstruction = isBuiltinInstructionName(normalizedRequest.toolName);
 
-    if (!isFlatMcpTool && !isBuiltinInstruction && !this.whitelist.has(normalizedRequest.toolName)) {
+    if (
+      !isFlatMcpTool &&
+      !isBuiltinInstruction &&
+      !this.whitelist.has(normalizedRequest.toolName)
+    ) {
       const result: ToolCallResult = {
         toolCallId: request.toolCallId,
         toolName: request.toolName,

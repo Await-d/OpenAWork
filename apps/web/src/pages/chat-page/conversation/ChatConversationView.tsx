@@ -43,6 +43,7 @@ import type {
   UnifiedComposerFeatures,
   UnifiedComposerSubmitPayload,
 } from '../../../components/chat/composer/UnifiedComposer.js';
+import type { ComposerStatsData } from '../../../components/chat/composer/ComposerStatsBar.js';
 import { WelcomeScreen } from '../../../components/chat/session/ChatPageSections.js';
 import type { DialogueMode } from '../mode/dialogue-mode.js';
 import type { ComposerWorkspaceCatalog } from '../../../hooks/chat/useComposerWorkspaceCatalog.js';
@@ -300,9 +301,8 @@ export interface ChatConversationViewProps {
   onSelectImageReferenceArtifactId?: (id: string | null) => void;
   markSessionMetadataDirty?: () => void;
   /** Context window usage to render inline next to the send button. */
-  contextUsedTokens?: number;
-  contextMaxTokens?: number;
-  contextIsEstimated?: boolean;
+  /** 会话统计数据，渲染在输入框下方 */
+  statsData?: ComposerStatsData | null;
   /**
    * 自定义 composer textarea placeholder。team 接待会话用此覆盖默认占位，
    * 与 D26（b 直答 vs 走 c 路由）的语义对齐——告诉用户"输入需求会被派发给团队"。
@@ -506,9 +506,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
     onNavigateToArtifacts,
     onSelectImageReferenceArtifactId,
     markSessionMetadataDirty,
-    contextUsedTokens,
-    contextMaxTokens,
-    contextIsEstimated,
+    statsData,
     composerPlaceholder,
     composerRightSlot,
   } = props;
@@ -542,7 +540,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
 
   const contentColumnStyle: CSSProperties = {
     width: '100%',
-    maxWidth: compact ? '100%' : editorMode ? 680 : 768,
+    maxWidth: compact ? '100%' : editorMode ? 720 : 1024,
     margin: compact ? 0 : '0 auto',
     display: 'flex',
     flexDirection: 'column',
@@ -816,9 +814,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
           onNavigateToArtifacts={onNavigateToArtifacts}
           onSelectImageReferenceArtifactId={onSelectImageReferenceArtifactId}
           markSessionMetadataDirty={markSessionMetadataDirty}
-          contextUsedTokens={contextUsedTokens}
-          contextMaxTokens={contextMaxTokens}
-          contextIsEstimated={contextIsEstimated}
+          statsData={statsData}
           placeholder={composerPlaceholder}
           composerRightSlot={composerRightSlot}
         />

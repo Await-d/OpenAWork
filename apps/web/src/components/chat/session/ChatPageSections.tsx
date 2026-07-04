@@ -3,6 +3,7 @@ import '../message/chat-message.css';
 import type { AlwaysScopeLevel, GenerativeUIMessage } from '@openAwork/shared-ui';
 import { GenerativeUIRenderer } from '@openAwork/shared-ui';
 import { usePrefersReducedMotion } from '../../../hooks/ui/usePrefersReducedMotion.js';
+import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
 import {
   type AssistantTracePayload,
   type ChatMessage,
@@ -121,6 +122,13 @@ export function MessageRow({
   usageDetails?: ChatUsageDetails;
 }) {
   const isUser = message.role === 'user';
+  const showMessageTimestamps = useDisplayPreferencesStore((s) => s.showMessageTimestamps);
+  const showModelNamePref = useDisplayPreferencesStore((s) => s.showModelName);
+  const showProviderLabelPref = useDisplayPreferencesStore((s) => s.showProviderLabel);
+  const showDurationPref = useDisplayPreferencesStore((s) => s.showDuration);
+  const showStopReasonPref = useDisplayPreferencesStore((s) => s.showStopReason);
+  const showTokenBreakdownPref = useDisplayPreferencesStore((s) => s.showTokenBreakdown);
+  const showEstimatedTokensPref = useDisplayPreferencesStore((s) => s.showEstimatedTokens);
   const resolvedProviderId = message.providerId?.trim() || providerId.trim();
   const resolvedProviderIdentity = resolveProviderIdentity({
     providerId: resolvedProviderId,
@@ -134,7 +142,7 @@ export function MessageRow({
   const normalizedResolvedProvider = normalizeProviderKey(resolvedProviderIdentity.displayName);
   const displayName = isUser
     ? email || '你'
-    : identityOverride?.displayName?.trim() || assistantModelLabel;
+    : identityOverride?.displayName?.trim() || (showModelNamePref ? assistantModelLabel : '助手');
   const timestamp = formatShortTime(message.createdAt);
   const tokenCount = message.tokenEstimate ?? estimateTokenCount(message.content);
   // During streaming, `message.durationMs` on the live virtual assistant
@@ -161,8 +169,18 @@ export function MessageRow({
   const showMeta =
     !isUser &&
     (presentationMode === 'team'
-      ? Boolean(toolLabel || statusLabel || stopReasonLabel || message.modifiedFilesSummary)
-      : tokenCount > 0 || durationLabel || toolLabel || stopReasonLabel || statusLabel);
+      ? Boolean(
+          toolLabel ||
+          statusLabel ||
+          (showStopReasonPref && stopReasonLabel) ||
+          message.modifiedFilesSummary,
+        )
+      : (showEstimatedTokensPref && tokenCount > 0) ||
+        (showDurationPref && durationLabel) ||
+        toolLabel ||
+        (showStopReasonPref && stopReasonLabel) ||
+        (showTokenBreakdownPref && usageDetails) ||
+        statusLabel);
   const avatarProviderId = resolvedProviderId || 'assistant';
   const agentAccent = !isUser
     ? identityOverride?.color || resolveAgentAccentColor(message.agentId)
@@ -182,13 +200,17 @@ export function MessageRow({
   if (!isUser) {
     if (presentationMode !== 'team' && usageDetails) {
       metaItems.push({ label: `请求 ${usageDetails.requestIndex}` });
-      metaItems.push({
-        label: `${formatCompactTokenCount(usageDetails.totalTokens)} tokens (${formatCompactTokenCount(usageDetails.inputTokens)}↓ ${formatCompactTokenCount(usageDetails.outputTokens)}↑)`,
-      });
+      if (showTokenBreakdownPref) {
+        metaItems.push({
+          label: `${formatCompactTokenCount(usageDetails.totalTokens)} tokens (${formatCompactTokenCount(usageDetails.inputTokens)}↓ ${formatCompactTokenCount(usageDetails.outputTokens)}↑)`,
+        });
+      }
       if (usageDetails.estimatedCostUsd !== undefined) {
         metaItems.push({ label: formatUsdCost(usageDetails.estimatedCostUsd) });
       }
-      metaItems.push({ label: durationLabel ?? '耗时 --' });
+      if (showDurationPref) {
+        metaItems.push({ label: durationLabel ?? '耗时 --' });
+      }
       metaItems.push({
         label:
           usageDetails.firstTokenLatencyMs && usageDetails.firstTokenLatencyMs > 0
@@ -202,9 +224,11 @@ export function MessageRow({
             : 'TPS --',
       });
     } else if (presentationMode !== 'team' && tokenCount > 0) {
-      metaItems.push({ label: `~${tokenCount} tok` });
-      if (durationLabel) metaItems.push({ label: durationLabel });
-    } else if (presentationMode !== 'team' && durationLabel) {
+      if (showEstimatedTokensPref) {
+        metaItems.push({ label: `~${tokenCount} tok` });
+      }
+      if (showDurationPref && durationLabel) metaItems.push({ label: durationLabel });
+    } else if (presentationMode !== 'team' && showDurationPref && durationLabel) {
       metaItems.push({ label: durationLabel });
     }
 
@@ -214,7 +238,7 @@ export function MessageRow({
         label: `修改 ${message.modifiedFilesSummary.files.length} 文件`,
       });
     }
-    if (stopReasonLabel) {
+    if (showStopReasonPref && stopReasonLabel) {
       metaItems.push({
         label: stopReasonLabel,
         tone: message.status === 'error' ? 'danger' : 'accent',
@@ -292,7 +316,7 @@ export function MessageRow({
               >
                 {displayName}
               </div>
-              {presentationMode !== 'team' && providerLabel && (
+              {presentationMode !== 'team' && showProviderLabelPref && providerLabel && (
                 <span className="chat-message-provider-pill" style={agentPillStyle}>
                   {providerLabel}
                 </span>
@@ -334,7 +358,9 @@ export function MessageRow({
                   ))}
                 </div>
               )}
-              {timestamp && <div className="chat-message-timestamp">{timestamp}</div>}
+              {showMessageTimestamps && timestamp && (
+                <div className="chat-message-timestamp">{timestamp}</div>
+              )}
             </div>
           </div>
         )}
@@ -867,6 +893,10 @@ function AssistantPartsContent({
 }) {
   const parts = message.parts ?? [];
   const streaming = options?.streaming === true;
+  const showReasoningBlock = useDisplayPreferencesStore((s) => s.showReasoningBlock);
+  const reasoningExpandedByDefault = useDisplayPreferencesStore(
+    (s) => s.reasoningExpandedByDefault,
+  );
   const reasoningParts = parts.filter(
     (part): part is ChatReasoningPart => part.type === 'reasoning',
   );
@@ -888,6 +918,7 @@ function AssistantPartsContent({
     <div className="assistant-rich-content" style={{ minWidth: 0, gap: 4 }}>
       {parts.map((part) => {
         if (part.type === 'reasoning') {
+          if (!showReasoningBlock) return null;
           const myIndex = reasoningCursor++;
           // Default to "ended" when no streaming flag list is supplied
           // (i.e. message is finalized / loaded from history). While
@@ -909,6 +940,7 @@ function AssistantPartsContent({
             <AssistantReasoningBlock
               key={part.id}
               content={part.text}
+              defaultExpanded={reasoningExpandedByDefault}
               durationMs={durationMs}
               ended={ended}
               index={myIndex}
@@ -998,10 +1030,15 @@ function AssistantTraceContent({
     (toolCall) => toolCall.status === 'running' || toolCall.status === 'paused',
   );
   const hasAssistantText = payload.text.trim().length > 0;
+  const showReasoningBlockStreaming = useDisplayPreferencesStore((s) => s.showReasoningBlock);
+  const reasoningExpandedByDefaultStreaming = useDisplayPreferencesStore(
+    (s) => s.reasoningExpandedByDefault,
+  );
 
   return (
     <div className="assistant-rich-content" style={{ minWidth: 0, gap: 4 }}>
       {(payload.reasoningBlocks ?? []).map((reasoning, index) => {
+        if (!showReasoningBlockStreaming) return null;
         // Default: when no explicit ended-flag list is supplied (i.e. the
         // message is finalized / loaded from history), treat every reasoning
         // block as ended. While streaming, use the per-block flag from the
@@ -1030,6 +1067,7 @@ function AssistantTraceContent({
               streaming ? `streaming-reasoning-${index}` : buildReasoningBlockKey(reasoning, index)
             }
             content={reasoning}
+            defaultExpanded={reasoningExpandedByDefaultStreaming}
             durationMs={durationMs}
             ended={ended}
             index={index}
@@ -1318,7 +1356,7 @@ export function WelcomeScreen({
         justifyContent: 'center',
         padding: '16px 24px 12px',
         gap: 18,
-        maxWidth: 700,
+        maxWidth: 1024,
         width: '100%',
       }}
     >
