@@ -4,6 +4,8 @@
 
 This document freezes the runtime source-of-truth for OpenAWork chat capabilities that were integrated by referencing opencode.
 
+For LazyCodex / OmO workflow semantics, see `docs/chat/lazycodex-native-workflow.md`. OpenAWork borrows those workflow semantics as native protocol and UI behavior; it does not depend on `lazycodex-ai` at runtime.
+
 ## Permission SSOT
 
 - **Authoritative interaction model**: `packages/agent-core/src/permission/index.ts`
@@ -53,6 +55,22 @@ The minimum runtime event set for Chat remains:
 - `audit_ref`
 
 Realtime updates are delivered through stream events.
+
+## Workflow Runtime SSOT
+
+- **Shared protocol**: `packages/shared/src/index.ts` (`WorkflowRuntimeState`)
+- **Gateway state builder**: `services/agent-gateway/src/session/workflow-runtime-state.ts`
+- **Public session response**: `services/agent-gateway/src/routes/session-route-helpers.ts`
+- **Web transport**: `packages/web-client/src/session/workflow-runtime.ts`
+- **Chat UI**: `apps/web/src/pages/chat-page/panels/WorkflowRuntimeStatusStrip.tsx`
+
+Rules:
+
+1. Workflow mode, active plan, active loop and evidence state come from `WorkflowRuntimeState`, not assistant text parsing.
+2. Web clients consume workflow runtime through `@openAwork/web-client`.
+3. ULW verification must write durable artifacts and publish `task_update` plus `audit_ref`.
+4. start-work completion remains blocked until reviewer verdict is `confirmed`.
+5. Team role compatibility is implemented through OpenAWork agent aliases and `role_layer`, not through Codex `agent_type`.
 
 ### Protocol SSOT
 

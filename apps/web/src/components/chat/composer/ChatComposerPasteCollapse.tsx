@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react';
+
 /**
  * ChatComposerPasteCollapse — 粘贴大文本折叠面板
  */
@@ -6,7 +8,7 @@ export interface ChatComposerPasteCollapseProps {
   pasteCollapsed: { text: string; lineCount: number };
   pastePreviewExpanded: boolean;
   onToggleExpand: () => void;
-  onInsert: () => void;
+  onInsert: (text: string) => void;
   onDiscard: () => void;
 }
 
@@ -17,6 +19,12 @@ export function ChatComposerPasteCollapse({
   onInsert,
   onDiscard,
 }: ChatComposerPasteCollapseProps) {
+  const [draft, setDraft] = useState(pasteCollapsed.text);
+
+  useEffect(() => {
+    setDraft(pasteCollapsed.text);
+  }, [pasteCollapsed.text]);
+
   return (
     <div
       style={{
@@ -76,20 +84,26 @@ export function ChatComposerPasteCollapse({
             overflowY: 'auto',
           }}
         >
-          <pre
+          <textarea
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            aria-label="编辑粘贴文本"
             style={{
-              margin: 0,
+              width: '100%',
+              minHeight: 120,
               fontSize: 10,
               lineHeight: 1.5,
-              color: 'var(--fg-muted)',
+              color: 'var(--fg-default)',
+              background: 'var(--bg-overlay)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 6,
+              padding: '6px 8px',
               whiteSpace: 'pre-wrap',
               wordBreak: 'break-word',
               fontFamily: 'inherit',
+              resize: 'vertical',
             }}
-          >
-            {pasteCollapsed.text.slice(0, 2000)}
-            {pasteCollapsed.text.length > 2000 && '\n…（仅显示前 2000 字符）'}
-          </pre>
+          />
         </div>
       )}
       <div
@@ -102,7 +116,7 @@ export function ChatComposerPasteCollapse({
       >
         <button
           type="button"
-          onClick={onInsert}
+          onClick={() => onInsert(draft)}
           style={{
             border: '1px solid color-mix(in oklch, var(--accent) 25%, var(--border-subtle))',
             borderRadius: 6,
@@ -114,7 +128,7 @@ export function ChatComposerPasteCollapse({
             fontWeight: 600,
           }}
         >
-          插入原文
+          {draft === pasteCollapsed.text ? '插入原文' : '插入编辑后文本'}
         </button>
         <button
           type="button"

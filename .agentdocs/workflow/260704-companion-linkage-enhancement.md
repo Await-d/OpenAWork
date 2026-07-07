@@ -80,22 +80,22 @@ input (string)               ───✓──→  input
 ## Implementation Plan
 
 ### Phase 1: 模型层扩展（基础设施）
-- [ ] T-01: 扩展 `CompanionActivitySnapshot` 类型，新增 `toolCallCount`、`lastToolName`、`hasStreamError`、`streamErrorMessage`、`idleSeconds` 字段
-- [ ] T-02: 扩展 `deriveCompanionReaction`，新增工具调用中/工具出错/Agent出错/空闲太久反应规则；扩展 `deriveCompanionStatus` 和 `deriveCompanionFocusTags`
+- [x] T-01: 扩展 `CompanionActivitySnapshot` 类型，新增 `toolCallCount`、`lastToolName`、`hasStreamError`、`streamErrorMessage`、`idleSeconds` 字段
+- [x] T-02: 扩展 `deriveCompanionReaction`，新增工具调用中/工具出错/Agent出错/空闲太久反应规则；扩展 `deriveCompanionStatus` 和 `deriveCompanionFocusTags`
 
 ### Phase 2: 空闲检测 Hook
-- [ ] T-03: 新建 `use-buddy-idle-detector.ts`，监听用户最后操作时间（鼠标/键盘/输入框变化），返回 `idleSeconds`
+- [x] T-03: 新建 `use-buddy-idle-detector.ts`，监听用户最后操作时间（鼠标/键盘/输入框变化），返回 `idleSeconds`
 
 ### Phase 3: 组件层联动（依赖 Phase 1）
-- [ ] T-04: 扩展 `CompanionStageProps`，新增工具/错误/空闲相关 props
-- [ ] T-05: 在 `companion-stage.tsx` 新增 useEffect：工具调用开始/完成反应、错误发生/恢复反应、空闲提醒
+- [x] T-04: 扩展 `CompanionStageProps`，新增工具/错误/空闲相关 props
+- [x] T-05: 在 `companion-stage.tsx` 新增 useEffect：工具调用开始/完成反应、错误发生/恢复反应、空闲提醒
 
 ### Phase 4: ChatPage 接入（依赖 Phase 3）
-- [ ] T-06: 在 `ChatPage.tsx` 中把 `toolCallCards.length`、`streamError`、真实 `attachedCount`、`queuedCount` 传入 CompanionStage
-- [ ] T-07: 在 `ChatPage.tsx` 中接入 `useBuddyIdleDetector`，把 `idleSeconds` 传入 CompanionStage
+- [x] T-06: 在 `ChatPage.tsx` 中把 `toolCallCards.length`、`streamError`、真实 `attachedCount`、`queuedCount` 传入 CompanionStage
+- [x] T-07: 在 `ChatPage.tsx` 中接入 `useBuddyIdleDetector`，把 `idleSeconds` 传入 CompanionStage
 
 ### Phase 5: 后端增强
-- [ ] T-08: 在 `companion-settings.ts` 的 `buildCompanionPrompt` 中增加工具调用/错误上下文感知，让伴侣在 `/buddy` 聊天时能感知当前工具状态
+- [x] T-08: 在 `companion-settings.ts` 的 `buildCompanionPrompt` 中增加工具调用/错误上下文感知，让伴侣在 `/buddy` 聊天时能感知当前工具状态
 
 ## Dependency DAG
 
@@ -113,3 +113,18 @@ T-08 (独立，可并行)  ─────────────────�
 - 工具调用反应需要区分"开始执行"和"执行完成"两个时刻
 - 错误反应需要区分"出错"和"恢复"两个时刻
 - `ChatPage.tsx` 已超过 4000 行，改动需最小化，仅扩展 props 传参
+
+## Implementation Notes
+- 2026-07-04: 已扩展 `CompanionActivitySnapshot`，工具调用/流错误/空闲状态现在进入 `deriveCompanionReaction`、`deriveCompanionStatus`、`deriveCompanionFocusTags`。
+- 2026-07-04: 新增 `useBuddyIdleDetector`，监听键盘、指针、滚轮、focus 与输入变化，返回整秒 `idleSeconds`。
+- 2026-07-04: `CompanionStage` 新增工具开始/完成、错误发生/恢复、空闲提醒 effect；muted/quietMode 时不主动推送通知。
+- 2026-07-04: `ChatPage` 通过 `ChatConversationView`/`UnifiedComposer` 轻量 activity 回调接入真实附件数、队列数、语音开关，并传入 `toolCallCards.length`、最近工具名、`streamError` 与 `idleSeconds`。
+- 2026-07-04: `buildCompanionPrompt` 新增可选工作台上下文；`/settings/companion/chat` schema 与 route 同步接收工具、错误、附件、队列、空闲上下文。
+
+## Validation
+- 2026-07-04: `pnpm --filter @openAwork/web exec vitest run src/components/chat/companion/companion-display-model.test.ts src/components/chat/companion/use-buddy-idle-detector.test.tsx` 通过（2 files / 6 tests）。
+- 2026-07-04: `pnpm --filter @openAwork/agent-gateway exec vitest run src/__tests__/companion-settings.test.ts` 通过（1 file / 1 test）。
+- 2026-07-04: `pnpm --filter @openAwork/agent-gateway typecheck` 通过。
+- 2026-07-04: `pnpm --filter @openAwork/web typecheck` 通过（收口阶段重跑，确认并行集成后的 Web 类型错误已清除）。
+- 2026-07-04: `pnpm exec prettier --check ...` 针对本次 11 个改动文件通过。
+- 2026-07-04: `pnpm --filter @openAwork/web dev --host 127.0.0.1 --port 4174` 可启动，`curl -I http://127.0.0.1:4174/` 返回 HTTP 200；截图级 visual QA 未完成，原因是当前环境 `playwright` CLI 缺 Python 模块且 Node 侧未安装 `playwright` 包。

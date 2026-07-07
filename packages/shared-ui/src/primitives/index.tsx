@@ -1,5 +1,7 @@
 import { useState, type CSSProperties, type HTMLAttributes, type ReactNode } from 'react';
 import { color, radius, spacing, shadow, motion } from '../tokens.js';
+export { InlineEditor } from './InlineEditor.js';
+export type { InlineEditorProps } from './InlineEditor.js';
 
 // ── ShellCard ─────────────────────────────────────────────
 

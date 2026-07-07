@@ -25,11 +25,18 @@ const AGENT_ID_TO_ROLE_LAYER: ReadonlyMap<string, SoulRoleLayer> = new Map<strin
   ['reception', 'reception'],
 
   // PM1（任务规划）
+  ['plan', 'pm1'],
   ['planner', 'pm1'],
+  ['prometheus', 'pm1'],
   ['team-planner', 'pm1'],
   ['pm1', 'pm1'],
 
   // PM2（开发管控 / hermes 与 spec-kit 桥接）
+  ['explore', 'pm2'],
+  ['explorer', 'pm2'],
+  ['librarian', 'pm2'],
+  ['scout', 'pm2'],
+  ['zeus', 'pm2'],
   ['team-leader', 'pm2'],
   ['researcher', 'pm2'],
   ['leader', 'pm2'],
@@ -37,11 +44,20 @@ const AGENT_ID_TO_ROLE_LAYER: ReadonlyMap<string, SoulRoleLayer> = new Map<strin
 
   // 执行层
   ['executor', 'executor'],
+  ['hephaestus', 'executor'],
+  ['sisyphus-junior', 'executor'],
   ['team-executor', 'executor'],
+  ['qa-executor', 'executor'],
+  ['qa_executor', 'executor'],
+  ['test-executor', 'executor'],
 
   // 评审层
   ['reviewer', 'reviewer'],
+  ['momus', 'reviewer'],
+  ['atlas', 'reviewer'],
   ['team-reviewer', 'reviewer'],
+  ['lazycodex-gate-reviewer', 'reviewer'],
+  ['verification-reviewer', 'reviewer'],
 ]);
 
 export function mapAgentToTeamRoleLayer(agentId: string | null | undefined): SoulRoleLayer | null {

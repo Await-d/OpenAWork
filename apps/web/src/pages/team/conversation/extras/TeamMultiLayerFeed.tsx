@@ -195,7 +195,17 @@ const EMPTY_ICON_STYLE: CSSProperties = {
 
 function LayersIcon({ size = 14 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <path d="M12 2 2 7l10 5 10-5-10-5Z" />
       <path d="m2 17 10 5 10-5" />
       <path d="m2 12 10 5 10-5" />
@@ -205,7 +215,17 @@ function LayersIcon({ size = 14 }: { size?: number }) {
 
 function ClockIcon({ size = 12 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <circle cx="12" cy="12" r="10" />
       <polyline points="12 6 12 12 16 14" />
     </svg>
@@ -214,7 +234,17 @@ function ClockIcon({ size = 12 }: { size?: number }) {
 
 function EmptyFeedIcon({ size = 22 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <path d="M12 2 2 7l10 5 10-5-10-5Z" />
       <path d="m2 17 10 5 10-5" />
       <path d="m2 12 10 5 10-5" />
@@ -233,6 +263,41 @@ function parseTimestamp(ts: number | string | undefined): number {
   return typeof ts === 'string' ? parseInt(ts, 10) : ts;
 }
 
+function buildLayerMessageIdentity(
+  message: ChatMessage,
+  layer: Pick<LayerMessages, 'displayName' | 'layer' | 'sourceDisplayName' | 'sourceLayer'>,
+) {
+  const identity =
+    message.role === 'assistant'
+      ? message.agentId
+        ? getRoleLayerIdentityFromAgentId(message.agentId)
+        : getRoleLayerIdentity(layer.layer)
+      : layer.sourceLayer
+        ? getRoleLayerIdentity(layer.sourceLayer)
+        : null;
+  const displayName =
+    message.role === 'assistant'
+      ? (layer.displayName ?? identity?.label)
+      : (layer.sourceDisplayName ?? null);
+
+  if (!identity || !displayName) {
+    return null;
+  }
+
+  return {
+    groupIdentityKey:
+      message.role === 'assistant'
+        ? message.agentId?.trim() || `layer:${layer.layer}`
+        : `source:${layer.sourceLayer ?? layer.layer}:${displayName}`,
+    identityOverride: {
+      color: identity.color,
+      displayName,
+      icon: identity.icon,
+      initials: identity.initials,
+    },
+  };
+}
+
 /**
  * 合并所有层级的消息为一条按时间排序的扁平列表，
  * 并为每条消息注入对应层级的 identityOverride。
@@ -242,24 +307,24 @@ function buildMergedEntries(
   resolveInlinePermissionActions?: TeamMultiLayerFeedProps['resolveInlinePermissionActions'],
 ): ChatRenderEntry[] {
   const allMessages: Array<{
+    layerData: LayerMessages;
     message: ChatMessage;
-    layer: string;
     timestamp: number;
   }> = [];
 
   for (const layer of layers) {
     for (const message of layer.messages) {
       allMessages.push({
+        layerData: layer,
         message,
-        layer: layer.layer,
         timestamp: parseTimestamp(message.createdAt),
       });
     }
     // 注入流式占位消息
     if (layer.streamingMessage) {
       allMessages.push({
+        layerData: layer,
         message: layer.streamingMessage,
-        layer: layer.layer,
         timestamp: Date.now(),
       });
     }
@@ -267,30 +332,14 @@ function buildMergedEntries(
 
   allMessages.sort((a, b) => a.timestamp - b.timestamp);
 
-  return allMessages.map(({ message, layer }) => {
-    const identity =
-      message.role === 'assistant'
-        ? message.agentId
-          ? getRoleLayerIdentityFromAgentId(message.agentId)
-          : getRoleLayerIdentity(layer)
-        : null;
+  return allMessages.map(({ message, layerData }) => {
+    const identity = buildLayerMessageIdentity(message, layerData);
 
     return {
       message,
       renderContent: (m: ChatMessage) =>
         renderChatMessageContentWithOptions(m, { resolveInlinePermissionActions }),
-      ...(message.role === 'assistant' && identity
-        ? {
-            groupIdentityKey:
-              message.agentId?.trim() || `layer:${layer}`,
-            identityOverride: {
-              color: identity.color,
-              displayName: identity.label,
-              icon: identity.icon,
-              initials: identity.initials,
-            },
-          }
-        : {}),
+      ...(identity ?? {}),
       actions: [] as ChatRenderAction[],
     };
   });
@@ -308,35 +357,14 @@ function buildSingleLayerEntries(
     messages.push(layer.streamingMessage);
   }
 
-  const identity =
-    layer.layer === 'reception'
-      ? getRoleLayerIdentity('reception')
-      : getRoleLayerIdentity(layer.layer);
-
   return messages.map((message) => {
-    const msgIdentity =
-      message.role === 'assistant'
-        ? message.agentId
-          ? getRoleLayerIdentityFromAgentId(message.agentId)
-          : identity
-        : null;
+    const identity = buildLayerMessageIdentity(message, layer);
 
     return {
       message,
       renderContent: (m: ChatMessage) =>
         renderChatMessageContentWithOptions(m, { resolveInlinePermissionActions }),
-      ...(message.role === 'assistant' && msgIdentity
-        ? {
-            groupIdentityKey:
-              message.agentId?.trim() || `layer:${layer.layer}`,
-            identityOverride: {
-              color: msgIdentity.color,
-              displayName: layer.displayName ?? msgIdentity.label,
-              icon: msgIdentity.icon,
-              initials: msgIdentity.initials,
-            },
-          }
-        : {}),
+      ...(identity ?? {}),
       actions: [] as ChatRenderAction[],
     };
   });

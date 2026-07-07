@@ -80,8 +80,7 @@ import {
   type MultiLayerViewMode,
 } from './extras/TeamViewModeToggle.js';
 import { type LayerMessages } from './extras/TeamMultiLayerPanel.js';
-import { TeamLayerChatPanel } from './extras/TeamLayerChatPanel.js';
-import { TeamMultiLayerFeed } from './extras/TeamMultiLayerFeed.js';
+import { TeamConversationLayerSidePanel } from './TeamConversationLayerSidePanel.js';
 import { useTeamConversationState } from './use-team-conversation-state.js';
 import { resolveTeamSubmitStrategy } from './submit/team-submit-router.js';
 import { buildTeamGroupedMessageEntries } from './build-team-grouped-message-entries.js';
@@ -94,6 +93,8 @@ import {
   getPermissionReplySuccessMessage,
 } from '../../../utils/permission/permission-reply.js';
 import { useTeamRuntimeReferenceViewData } from '../runtime/data/team-runtime-reference-data.js';
+import { useLayerStore } from '../../../stores/team/team-events.js';
+import { extractInputImageParts } from './team-conversation-input-parts.js';
 
 export interface TeamConversationViewProps {
   /** 要渲染的 team session id。 */
@@ -150,7 +151,6 @@ const TEAM_CONVERSATION_LAYER_ORDER = [
   'tester',
   'reviewer',
 ] as const;
-
 function escapeCssAttributeValue(value: string): string {
   if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
     return CSS.escape(value);
@@ -166,6 +166,21 @@ function disabledComposerAction(): void {
   return undefined;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readRoleInstanceDisplayName(metadata: Record<string, unknown> | null): string | null {
+  const roleInstance = metadata?.['teamRoleInstance'];
+  if (!isRecord(roleInstance)) {
+    return null;
+  }
+  const displayName = roleInstance['displayName'];
+  return typeof displayName === 'string' && displayName.trim().length > 0
+    ? displayName.trim()
+    : null;
+}
+
 export function TeamConversationView({
   sessionId,
   topBar,
@@ -178,15 +193,15 @@ export function TeamConversationView({
   focusedLayer = null,
   readOnly = false,
   soloMode = false,
-  onOpenLayerSession,
 }: TeamConversationViewProps) {
   const token = useAuthStore((s) => s.accessToken);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
   const currentUserEmail = useAuthStore((s) => s.email) ?? '';
   const { diagnostics } = useTeamRuntimeReferenceViewData();
+  const layerNodes = useLayerStore((s) => s.nodes);
 
   const [viewMode, setViewMode] = useState<ViewMode>('single');
-  const [multiLayerMode, setMultiLayerMode] = useState<MultiLayerViewMode>('tab');
+  const [multiLayerMode, setMultiLayerMode] = useState<MultiLayerViewMode>('feed');
   const [selectedLayer, setSelectedLayer] = useState<string | null>(focusedLayer);
   const [isNarrowLayout, setIsNarrowLayout] = useState(() =>
     typeof window === 'undefined' ? false : window.innerWidth < 900,
@@ -236,7 +251,7 @@ export function TeamConversationView({
     }
     previousSessionIdRef.current = sessionId;
     setViewMode('single');
-    setMultiLayerMode('tab');
+    setMultiLayerMode('feed');
     setSelectedLayer(focusedLayer);
     setShowTemplatePanel(false);
     hasAutoOpenedMultiLayerRef.current = false;
@@ -1021,11 +1036,7 @@ export function TeamConversationView({
             label: '编辑重试',
             title: '编辑这条消息并从此处重新发送',
             onClick: () => {
-              const inputParts = Array.isArray(message.rawContent)
-                ? (message.rawContent.filter(
-                    (p) => (p as { type?: string }).type === 'input_image',
-                  ) as unknown[])
-                : undefined;
+              const inputParts = extractInputImageParts(message.rawContent);
               setRetryPrompt(null);
               setHistoryEditPrompt({
                 messageId: message.id,
@@ -1140,6 +1151,14 @@ export function TeamConversationView({
 
     // 当前 session 自身作为一个条目
     const currentLayer = state.roleLayer?.trim() || 'reception';
+    const currentNode = layerNodes.get(sessionId);
+    const currentDisplayName =
+      currentNode?.displayName ?? readRoleInstanceDisplayName(state.sessionMetadata);
+    const currentParentNode = currentNode?.parentSessionId
+      ? layerNodes.get(currentNode.parentSessionId)
+      : undefined;
+    const currentSourceDisplayName = currentParentNode?.displayName ?? null;
+    const currentSourceLayer = currentParentNode?.roleLayer ?? null;
 
     // 当主对话处于流式状态时，构建一条流式占位消息注入汇总面板，
     // 让用户在群聊汇总中也能实时看到"正在输入"的流式回复。
@@ -1161,7 +1180,9 @@ export function TeamConversationView({
       messages: [...state.messages],
       sessionIds: [sessionId],
       isActive: true,
-      displayName: null,
+      displayName: currentDisplayName,
+      sourceLayer: currentSourceLayer,
+      sourceDisplayName: currentSourceDisplayName,
       streamingMessage,
     });
 
@@ -1169,12 +1190,18 @@ export function TeamConversationView({
     if (!soloMode && Array.isArray(state.childSessions)) {
       for (const child of state.childSessions) {
         const childLayer = child.role_layer?.trim() || 'reception';
+        const childNode = layerNodes.get(child.id);
+        const parentNode = childNode?.parentSessionId
+          ? layerNodes.get(childNode.parentSessionId)
+          : currentNode;
         entries.push({
           layer: childLayer,
           messages: [...child.messages],
           sessionIds: [child.id],
           isActive: false,
-          displayName: child.displayName ?? null,
+          displayName: child.displayName ?? childNode?.displayName ?? null,
+          sourceLayer: parentNode?.roleLayer ?? currentLayer,
+          sourceDisplayName: parentNode?.displayName ?? currentDisplayName,
         });
       }
     }
@@ -1182,9 +1209,11 @@ export function TeamConversationView({
     return entries;
   }, [
     sessionId,
+    layerNodes,
     soloMode,
     state.childSessions,
     state.messages,
+    state.sessionMetadata,
     state.roleLayer,
     state.visibleStreaming,
     state.streamBuffer,
@@ -1255,19 +1284,6 @@ export function TeamConversationView({
     display: 'flex',
     flexDirection: 'column',
     transition: 'flex 200ms ease',
-  };
-
-  // 右侧：各层级对话交互消息汇总面板（dual 模式下占 45%）
-  const SIDE_PANEL_STYLE: CSSProperties = {
-    flex: viewMode === 'dual' ? '1 1 45%' : '0 0 0%',
-    minWidth: 0,
-    minHeight: 0,
-    display: viewMode === 'dual' ? 'flex' : 'none',
-    flexDirection: 'column',
-    transition: 'flex 200ms ease',
-    position: 'relative',
-    overflow: 'hidden',
-    borderLeft: '1px solid var(--border-default)',
   };
 
   return (
@@ -1460,23 +1476,23 @@ export function TeamConversationView({
             />
           </LatestAssistantMessageContext>
         </div>
-        {/* 右侧：各层级消息流（混合模式：全部层级合并时间线 + 单层级切换） */}
-        {/* soloMode 下不显示汇总面板，只展示当前角色自身的对话 */}
         {soloMode ? null : (
-          <div aria-label="团队层级消息汇总" style={SIDE_PANEL_STYLE}>
-            <TeamMultiLayerFeed
-              activeLayer={state.roleLayer}
-              currentSessionId={sessionId}
-              layers={multiLayerMessages}
-              activeModelId={state.activeModelId}
-              activeModelLabel={activeModelOption?.label}
-              activeProviderId={state.activeProviderId}
-              providerCatalog={providerCatalog}
-              currentUserEmail={currentUserEmail}
-              scrollRegionRef={state.scrollRegionRef}
-              resolveInlinePermissionActions={resolveInlinePermissionActions}
-            />
-          </div>
+          <TeamConversationLayerSidePanel
+            activeLayer={state.roleLayer}
+            currentSessionId={sessionId}
+            layers={multiLayerMessages}
+            mode={multiLayerMode}
+            selectedLayer={selectedLayer}
+            isOpen={viewMode === 'dual'}
+            activeModelId={state.activeModelId}
+            activeModelLabel={activeModelOption?.label}
+            activeProviderId={state.activeProviderId}
+            providerCatalog={providerCatalog}
+            currentUserEmail={currentUserEmail}
+            scrollRegionRef={state.scrollRegionRef}
+            resolveInlinePermissionActions={resolveInlinePermissionActions}
+            onLayerSelect={handlePanelLayerSelect}
+          />
         )}
       </div>
     </>

@@ -4,6 +4,72 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ChatComposer } from './ChatComposer.js';
+import { getComposerCharacterCount } from './composer-character-count.js';
+
+function makeComposerProps(
+  overrides: Partial<React.ComponentProps<typeof ChatComposer>> = {},
+): React.ComponentProps<typeof ChatComposer> {
+  return {
+    variant: 'session',
+    activeProviderId: 'openai',
+    activeProviderName: 'OpenAI',
+    activeProviderType: 'openai',
+    modelPickerRef: { current: null },
+    modelSettingsRef: { current: null },
+    showModelPicker: false,
+    showModelSettings: false,
+    activeModelSupportsThinking: false,
+    hasConfiguredImageModel: false,
+    imageGenerationBusy: false,
+    imageGenerationDefaults: {
+      providerId: '',
+      modelId: '',
+      size: '1024x1024',
+      quality: 'medium',
+      outputFormat: 'png',
+      background: 'auto',
+    },
+    imageGenerationMode: false,
+    imageModelLabel: '',
+    webSearchEnabled: false,
+    thinkingEnabled: false,
+    input: '',
+    streaming: false,
+    attachedFiles: [],
+    attachmentItems: [],
+    showVoice: false,
+    composerMenu: null,
+    slashCommandItems: [],
+    mentionItems: [],
+    textareaRef: { current: null },
+    fileInputRef: { current: null },
+    agentOptions: [],
+    manualAgentId: '',
+    defaultAgentLabel: '',
+    onFileChange: vi.fn(),
+    onInputChange: vi.fn(),
+    onInputSelect: vi.fn(),
+    onInputPaste: vi.fn(),
+    onKeyDown: vi.fn(),
+    onRemoveAttachment: vi.fn(),
+    onApplyComposerSelection: vi.fn(),
+    onComposerHover: vi.fn(),
+    onToggleVoice: vi.fn(),
+    onVoiceTranscript: vi.fn(),
+    onRemoveQueuedMessage: vi.fn(),
+    onSend: vi.fn(),
+    onStop: vi.fn(),
+    onRequestFiles: vi.fn(),
+    onToggleModelPicker: vi.fn(),
+    onToggleModelSettings: vi.fn(),
+    onToggleImageGenerationMode: vi.fn(),
+    onToggleWebSearch: vi.fn(),
+    onUpdateImageGenerationDefaults: vi.fn(),
+    onChangeManualAgentId: vi.fn(),
+    onClearManualAgentId: vi.fn(),
+    ...overrides,
+  };
+}
 
 afterEach(() => {
   cleanup();
@@ -11,6 +77,82 @@ afterEach(() => {
 });
 
 describe('ChatComposer', () => {
+  it('按 Esc 清空输入后可以恢复', () => {
+    const onReplaceInput = vi.fn();
+
+    render(<ChatComposer {...makeComposerProps({ input: '需要暂存的草稿', onReplaceInput })} />);
+
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' });
+
+    expect(onReplaceInput).toHaveBeenCalledWith('');
+    fireEvent.click(screen.getByText('恢复'));
+    expect(onReplaceInput).toHaveBeenLastCalledWith('需要暂存的草稿');
+  });
+
+  it('粘贴大文本时折叠为可编辑面板再插入', () => {
+    const onInputPaste = vi.fn();
+    const onReplaceInput = vi.fn();
+    const largeText = `${'第一行内容\n'.repeat(120)}最后一行`;
+
+    render(
+      <ChatComposer {...makeComposerProps({ input: '前缀：', onInputPaste, onReplaceInput })} />,
+    );
+
+    const textarea = screen.getByRole('textbox');
+    if (!(textarea instanceof HTMLTextAreaElement)) {
+      throw new TypeError('Expected ChatComposer textbox to be a textarea.');
+    }
+    textarea.setSelectionRange('前缀：'.length, '前缀：'.length);
+
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        getData: () => largeText,
+      },
+    });
+
+    expect(onInputPaste).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText('粘贴的文本'));
+    const editor = screen.getByLabelText('编辑粘贴文本');
+    fireEvent.change(editor, { target: { value: '编辑后的长文本' } });
+    fireEvent.click(screen.getByText('插入编辑后文本'));
+    expect(onReplaceInput).toHaveBeenCalledWith('前缀：编辑后的长文本');
+  });
+
+  it('字符计数按上下文窗口的四分之一 token 预算提示', () => {
+    const input = 'a'.repeat(850);
+
+    render(
+      <ChatComposer
+        {...makeComposerProps({
+          input,
+          statsData: {
+            totalCostUsd: 0,
+            currentRoundCostUsd: 0,
+            totalInputTokens: 0,
+            totalOutputTokens: 0,
+            contextUsedTokens: 0,
+            contextMaxTokens: 4000,
+            contextIsEstimated: false,
+            messageTurns: 0,
+            hiddenMessageCount: 0,
+            serverTotalTurnCount: null,
+            childSessionCount: 0,
+            sessionTaskCount: 0,
+            totalDurationMs: 0,
+            streaming: false,
+          },
+        })}
+      />,
+    );
+
+    const counter = screen.getByText('850 / 1,000 字符');
+    expect(counter.className).toContain('composer-char-warning');
+  });
+
+  it('字符计数 util 在超过阈值时返回 danger', () => {
+    expect(getComposerCharacterCount('a'.repeat(1001), 1000).tone).toBe('danger');
+  });
+
   it('提示词优化失败时会展示错误信息', async () => {
     render(
       <ChatComposer

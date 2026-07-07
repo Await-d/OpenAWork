@@ -1,0 +1,110 @@
+.session-side-panel {
+  background: var(--bg-surface);
+  border: none;
+  border-radius: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 280px;
+  overflow: hidden;
+}
+
+.session-side-panel__tabs {
+  align-items: center;
+  background: var(--bg-overlay);
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
+  height: 40px;
+  overflow-x: auto;
+  padding: 0 var(--spacing-2);
+}
+
+.session-side-panel__tab,
+.session-side-panel__add-button {
+  align-items: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--fg-muted);
+  cursor: pointer;
+  display: flex;
+  flex-shrink: 0;
+  justify-content: center;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  transition:
+    background var(--dur-micro) var(--ease-micro),
+    border-color var(--dur-micro) var(--ease-micro),
+    box-shadow var(--dur-micro) var(--ease-micro),
+    color var(--dur-micro) var(--ease-micro),
+    transform var(--dur-micro) var(--ease-micro);
+}
+
+.session-side-panel__tab {
+  border-bottom: 2px solid transparent;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 5px;
+  height: 30px;
+  padding: 0 var(--spacing-3);
+  white-space: nowrap;
+}
+
+.session-side-panel__tab[data-active='true'] {
+  border-bottom-color: var(--accent);
+}
+
+.session-side-panel__tab-badge {
+  background: var(--accent-subtle);
+  border-radius: var(--radius-pill);
+  color: var(--accent);
+  display: grid;
+  font-size: 10px;
+  font-weight: 800;
+  height: 16px;
+  min-width: 16px;
+  padding: 0 var(--spacing-1);
+  place-items: center;
+}
+
+.session-side-panel__add-button {
+  height: 26px;
+  margin-left: auto;
+  width: 26px;
+}
+
+.session-side-panel__content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.session-side-panel__tab:hover {
+  background: var(--bg-hover);
+  color: var(--fg-default);
+}
+
+.session-side-panel__tab[data-active='true'],
+.session-side-panel__tab[data-active='true']:hover {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.session-side-panel__tab:active,
+.session-side-panel__add-button:active {
+  transform: translateY(1px);
+}
+
+.session-side-panel__tab:focus-visible,
+.session-side-panel__add-button:focus-visible {
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+  outline-color: var(--accent);
+}
+
+.session-side-panel__add-button:hover {
+  background: var(--bg-hover);
+  color: var(--fg-default);
+}

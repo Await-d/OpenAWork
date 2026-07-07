@@ -4,15 +4,18 @@ import type { CSSProperties } from 'react';
 export type MCPServerStatus = {
   id: string;
   name: string;
-  status: 'connected' | 'connecting' | 'disconnected' | 'error';
+  status: 'connected' | 'connecting' | 'disconnected' | 'disabled' | 'error';
   toolCount: number;
   authType?: string;
+  disabledTools?: string[];
+  error?: string;
   /**
-   * 系统内置 MCP（如 websearch / grep_app）。后端 `/settings/mcp-status`
+   * 系统内置 MCP（如 websearch / grep_app / codegraph / git_bash / lsp）。后端 `/settings/mcp-status`
    * 在合并用户配置与内置项后会标注此字段。前端用它显示"系统内置"
    * 徽章并提示"通过添加同 id 配置可覆盖/禁用"。
    */
   builtin?: boolean;
+  tools?: Array<{ description?: string; name: string }>;
   /**
    * 最近一次重试连接 / 安装的反馈。`null` 表示用户从未触发过重试，
    * 此时按钮显示默认文案。设置后用于在右侧显示成功/失败的小字
@@ -46,6 +49,7 @@ export interface MCPServerListProps {
 const STATUS_COLOR: Record<MCPServerStatus['status'], string> = {
   connected: clr.success,
   connecting: clr.contrast,
+  disabled: 'var(--fg-subtle)',
   disconnected: 'var(--fg-muted)',
   error: clr.danger,
 };
@@ -53,6 +57,7 @@ const STATUS_COLOR: Record<MCPServerStatus['status'], string> = {
 const STATUS_LABEL: Record<MCPServerStatus['status'], string> = {
   connected: '已连接',
   connecting: '连接中…',
+  disabled: '已禁用',
   disconnected: '已断开',
   error: '错误',
 };
@@ -151,9 +156,9 @@ export function MCPServerList({ servers, onRetry, style }: MCPServerListProps) {
                           fontWeight: 600,
                           padding: '1px 6px',
                           borderRadius: 8,
-                          background: 'rgba(52,211,153,0.12)',
+                          background: clr.successMuted,
                           color: clr.success,
-                          border: '1px solid rgba(52,211,153,0.32)',
+                          border: `1px solid ${clr.successBorder}`,
                           flexShrink: 0,
                           whiteSpace: 'nowrap',
                         }}
@@ -176,7 +181,61 @@ export function MCPServerList({ servers, onRetry, style }: MCPServerListProps) {
                     {server.authType && (
                       <span style={{ color: 'var(--fg-muted)' }}>· {server.authType}</span>
                     )}
+                    {server.error ? (
+                      <span style={{ color: clr.danger }} title={server.error}>
+                        · {server.error}
+                      </span>
+                    ) : null}
                   </div>
+                  {(server.tools?.length ?? 0) > 0 || (server.disabledTools?.length ?? 0) > 0 ? (
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        gap: 4,
+                        marginTop: 6,
+                      }}
+                    >
+                      {(server.tools ?? []).slice(0, 8).map((tool) => (
+                        <span
+                          key={tool.name}
+                          title={tool.description ?? tool.name}
+                          style={{
+                            border: '1px solid var(--border-subtle)',
+                            borderRadius: 4,
+                            color: 'var(--fg-muted)',
+                            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                            fontSize: 10,
+                            padding: '1px 5px',
+                          }}
+                        >
+                          {tool.name}
+                        </span>
+                      ))}
+                      {(server.tools?.length ?? 0) > 8 ? (
+                        <span style={{ color: 'var(--fg-subtle)', fontSize: 10 }}>
+                          +{(server.tools?.length ?? 0) - 8}
+                        </span>
+                      ) : null}
+                      {(server.disabledTools ?? []).map((tool) => (
+                        <span
+                          key={`disabled-${tool}`}
+                          title="已在此 MCP 配置中禁用"
+                          style={{
+                            border: `1px solid ${clr.dangerBorder}`,
+                            borderRadius: 4,
+                            color: clr.danger,
+                            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                            fontSize: 10,
+                            padding: '1px 5px',
+                            textDecoration: 'line-through',
+                          }}
+                        >
+                          {tool}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
 
                 <span
@@ -185,9 +244,9 @@ export function MCPServerList({ servers, onRetry, style }: MCPServerListProps) {
                     fontWeight: 700,
                     padding: '2px 8px',
                     borderRadius: 10,
-                    background: 'rgba(99,102,241,0.15)',
+                    background: clr.auxMuted,
                     color: 'var(--accent)',
-                    border: '1px solid rgba(99,102,241,0.25)',
+                    border: `1px solid ${clr.auxBorder}`,
                     flexShrink: 0,
                     whiteSpace: 'nowrap',
                   }}
@@ -253,7 +312,7 @@ function RetryControl({ server, onClick }: RetryControlProps) {
           padding: '4px 10px',
           borderRadius: 8,
           border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-          background: isPending ? 'rgba(148,163,184,0.15)' : 'rgba(99,102,241,0.15)',
+          background: isPending ? clr.borderSubtle : clr.auxMuted,
           color: isPending ? 'var(--fg-muted)' : 'var(--accent)',
           cursor: isPending ? 'not-allowed' : 'pointer',
           whiteSpace: 'nowrap',

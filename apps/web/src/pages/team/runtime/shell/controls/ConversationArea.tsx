@@ -107,6 +107,7 @@ export interface ConversationAreaProps {
   onSubmitMessage?: (text: string) => void | Promise<void>;
   topBar?: ReactNode;
   messagesOverride?: ReactNode;
+  sidePanel?: ReactNode;
   /**
    * 团队主对话所归属的 reception/b session id。
    * 当 `messagesOverride` 未传入时：
@@ -138,21 +139,20 @@ export function ConversationArea({
   onSubmitMessage,
   topBar,
   messagesOverride,
+  sidePanel,
   receptionSessionId,
   receptionComposerEnabled = false,
 }: ConversationAreaProps) {
   const { error, loading } = useTeamRuntimeReferenceViewData();
-  const dynamicEntries = useTeamDynamicEntries(receptionSessionId);
+  const dynamicEntries = useTeamDynamicEntries(receptionSessionId ?? null);
   const handleSuggestion = onSelectSuggestion ?? onSubmitMessage;
 
   // ─── Path 1: 外部注入消息内容（如 conversation tab 选中具体子 session）───
   if (messagesOverride !== undefined) {
     return (
-      <section style={CONTAINER_STYLE} aria-label="对话区">
+      <section className="team-conversation-area" style={CONTAINER_STYLE} aria-label="对话区">
         {topBar}
-        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-          {messagesOverride}
-        </div>
+        <ConversationAreaBody sidePanel={sidePanel}>{messagesOverride}</ConversationAreaBody>
       </section>
     );
   }
@@ -160,9 +160,9 @@ export function ConversationArea({
   // ─── Path 2: reception session 存在 → 复用 chat 渲染 ───
   if (receptionSessionId) {
     return (
-      <section style={CONTAINER_STYLE} aria-label="对话区">
+      <section className="team-conversation-area" style={CONTAINER_STYLE} aria-label="对话区">
         {topBar}
-        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <ConversationAreaBody sidePanel={sidePanel}>
           <TeamConversationView
             key={receptionSessionId}
             sessionId={receptionSessionId}
@@ -174,36 +174,59 @@ export function ConversationArea({
               </>
             }
           />
-        </div>
+        </ConversationAreaBody>
       </section>
     );
   }
 
   // ─── Path 3: 没有 session → 状态/引导面板 ───
   return (
-    <section style={CONTAINER_STYLE} aria-label="对话区">
+    <section className="team-conversation-area" style={CONTAINER_STYLE} aria-label="对话区">
       {topBar}
-      <div
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflow: 'auto',
-          padding: 'clamp(16px, 4vh, 48px) 20px',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 12,
-        }}
-      >
-        {loading ? <LoadingState /> : null}
-        {!loading && error ? (
-          <ErrorState error={error} onRetryConnection={onRetryConnection} />
-        ) : null}
-        {!loading && !error ? <EmptyState onSelectSuggestion={handleSuggestion} /> : null}
-        {fallbackContent}
-      </div>
+      <ConversationAreaBody sidePanel={sidePanel}>
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            overflow: 'auto',
+            padding: 'clamp(16px, 4vh, 48px) 20px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 12,
+          }}
+        >
+          {loading ? <LoadingState /> : null}
+          {!loading && error ? (
+            <ErrorState error={error} onRetryConnection={onRetryConnection} />
+          ) : null}
+          {!loading && !error ? <EmptyState onSelectSuggestion={handleSuggestion} /> : null}
+          {fallbackContent}
+        </div>
+      </ConversationAreaBody>
     </section>
+  );
+}
+
+function ConversationAreaBody({
+  children,
+  sidePanel,
+}: {
+  readonly children: ReactNode;
+  readonly sidePanel?: ReactNode;
+}) {
+  if (!sidePanel) {
+    return <div className="team-conversation-area__body">{children}</div>;
+  }
+
+  return (
+    <div className="team-conversation-area__workbench">
+      <div className="team-conversation-area__session">{children}</div>
+      <aside className="team-conversation-area__side-panel" aria-label="团队工作台侧栏">
+        {sidePanel}
+      </aside>
+    </div>
   );
 }
 
@@ -229,10 +252,10 @@ function EmptyState({
     <div className="team-conversation-empty-state" style={STATE_PANEL_STYLE}>
       <div style={{ display: 'grid', gap: 'var(--team-space-2)' }}>
         <strong style={{ fontSize: 'var(--team-font-lg)', color: 'var(--fg-strong)' }}>
-          🤖 欢迎使用 AI 开发团队
+          团队工作空间已就绪
         </strong>
         <span style={{ color: 'var(--fg-default)', lineHeight: 'var(--team-line-height-relaxed)' }}>
-          你的团队已就绪：💬助手 · 📋规划师 · 🎯主管 · ⚡开发者 · 🧪测试员 · 🔍审查员
+          接待助手、规划师、主管、开发者、测试员和审查员已准备好协作。
         </span>
         <span style={{ fontSize: 'var(--team-font-xxs)', color: 'var(--fg-muted)' }}>
           创建首个会话后，下方将出现统一对话区。

@@ -2,6 +2,7 @@ import { useMemo, type CSSProperties } from 'react';
 import type { Message } from '@openAwork/shared';
 import type { SharedSessionDetailRecord, SharedSessionSummaryRecord } from '@openAwork/web-client';
 import { EmptyState, MetricGrid, StatCard } from '../../shared/content-kit/index.js';
+import { TeamTabIcon } from '../team-tab-icons.js';
 
 function formatTokens(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return '0';
@@ -144,7 +145,7 @@ export function SharedSessionUsageView({
   if (sharedSessionLoading && !sharedSession) {
     return (
       <EmptyState
-        emoji={mode === 'usage' ? '🔋' : '🛠️'}
+        icon={<TeamTabIcon name={mode === 'usage' ? 'usage' : 'settings'} size={24} />}
         title={mode === 'usage' ? '正在同步共享用量' : '正在同步共享工具调用'}
         description="共享会话详情加载完成后，这里会展示共享快照里的真实统计信息。"
       />
@@ -154,7 +155,7 @@ export function SharedSessionUsageView({
   if (!sharedSummary) {
     return (
       <EmptyState
-        emoji={mode === 'usage' ? '🔋' : '🛠️'}
+        icon={<TeamTabIcon name={mode === 'usage' ? 'usage' : 'settings'} size={24} />}
         title={mode === 'usage' ? '共享用量暂不可用' : '共享工具调用暂不可用'}
         description="当前只拿到了共享会话选择状态，详细共享快照还未同步。"
       />
@@ -164,7 +165,7 @@ export function SharedSessionUsageView({
   if (mode === 'usage' && usageRows.length === 0) {
     return (
       <EmptyState
-        emoji="🔋"
+        icon={<TeamTabIcon name="usage" size={24} />}
         title="当前共享会话暂无用量数据"
         description="共享快照里的 assistant 消息尚未附带 providerUsage。后续同步到 token 统计后，这里会自动展示。"
       />
@@ -174,7 +175,7 @@ export function SharedSessionUsageView({
   if (mode === 'tools' && toolRows.length === 0) {
     return (
       <EmptyState
-        emoji="🛠️"
+        icon={<TeamTabIcon name="settings" size={24} />}
         title="当前共享会话暂无工具调用数据"
         description="共享快照里还没有可聚合的 tool_call / tool_result 片段。"
       />

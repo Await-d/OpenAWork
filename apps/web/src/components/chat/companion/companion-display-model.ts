@@ -10,15 +10,20 @@ import {
 export interface CompanionActivitySnapshot {
   attachedCount: number;
   currentUserEmail: string;
+  hasStreamError: boolean;
+  idleSeconds: number;
   input: string;
+  lastToolName: string | null;
   pendingPermissionCount: number;
   queuedCount: number;
   rightOpen: boolean;
   sessionBusyState: 'running' | 'paused' | null;
   sessionId: string | null;
   showVoice: boolean;
+  streamErrorMessage: string | null;
   streaming: boolean;
   todoCount: number;
+  toolCallCount: number;
 }
 
 export interface CompanionProfile {
@@ -93,6 +98,7 @@ const IDLE_REACTIONS = [
   '如果你开始引用文件或排队消息，我会先一步提醒。',
   '我会贴着工作台边缘待命，不抢镜。',
 ];
+const IDLE_REMINDER_THRESHOLD_SECONDS = 180;
 
 const HUBBY_NAMES = ['暖石', '锚点', '壁炉', '护城', '基石', '织网', '归港', '承托'];
 const HUBBY_ARCHETYPES = [
@@ -141,6 +147,26 @@ function hashString(value: string): number {
 
 function pickBySeed<T>(values: readonly T[], seed: number, offset = 0): T {
   return values[(seed + offset) % values.length] ?? values[0]!;
+}
+
+function summarizeStreamError(message: string | null): string {
+  const normalized = message?.trim();
+  if (!normalized) {
+    return '这轮请求遇到错误，我会先帮你稳住上下文，等恢复后继续跟进。';
+  }
+  return `${normalized.slice(0, 36)}${normalized.length > 36 ? '…' : ''}`;
+}
+
+function describeToolCall(snapshot: CompanionActivitySnapshot): string {
+  const toolName = snapshot.lastToolName?.trim();
+  if (!toolName) {
+    return `${snapshot.toolCallCount} 个工具正在执行，我会盯住中间状态。`;
+  }
+  return `${snapshot.toolCallCount} 个工具正在执行，最近是 ${toolName}。`;
+}
+
+function formatIdleMinutes(seconds: number): number {
+  return Math.max(1, Math.round(seconds / 60));
 }
 
 export function createCompanionProfile(seedInput: string): CompanionProfile {
@@ -204,6 +230,22 @@ export function createHubbyProfile(seedInput: string): CompanionProfile {
 }
 
 export function deriveCompanionReaction(snapshot: CompanionActivitySnapshot): CompanionReaction {
+  if (snapshot.hasStreamError) {
+    return {
+      badge: '错误恢复',
+      importance: 'notice',
+      text: `${summarizeStreamError(snapshot.streamErrorMessage)} 我先保持低打扰，等你决定重试或切换策略。`,
+    };
+  }
+
+  if (snapshot.toolCallCount > 0) {
+    return {
+      badge: '工具执行中',
+      importance: 'active',
+      text: describeToolCall(snapshot),
+    };
+  }
+
   if (snapshot.streaming) {
     return {
       badge: '跟随生成',
@@ -308,6 +350,14 @@ export function deriveCompanionReaction(snapshot: CompanionActivitySnapshot): Co
     };
   }
 
+  if (snapshot.idleSeconds >= IDLE_REMINDER_THRESHOLD_SECONDS) {
+    return {
+      badge: '空闲提醒',
+      importance: 'ambient',
+      text: `你已经停了约 ${formatIdleMinutes(snapshot.idleSeconds)} 分钟，我先把上下文守住，等你下一步。`,
+    };
+  }
+
   const idleSeed = hashString(`${snapshot.currentUserEmail}:${snapshot.sessionId ?? 'home'}`);
   return {
     badge: '安静陪伴',
@@ -317,6 +367,12 @@ export function deriveCompanionReaction(snapshot: CompanionActivitySnapshot): Co
 }
 
 export function deriveCompanionStatus(snapshot: CompanionActivitySnapshot): string {
+  if (snapshot.hasStreamError) {
+    return '等待错误恢复';
+  }
+  if (snapshot.toolCallCount > 0) {
+    return '跟随工具执行';
+  }
   if (snapshot.streaming) {
     return '跟随当前生成';
   }
@@ -338,12 +394,21 @@ export function deriveCompanionStatus(snapshot: CompanionActivitySnapshot): stri
   if (snapshot.sessionBusyState === 'paused') {
     return '等待会话恢复';
   }
+  if (snapshot.idleSeconds >= IDLE_REMINDER_THRESHOLD_SECONDS) {
+    return '等待下一步输入';
+  }
   return '安静陪伴中';
 }
 
 export function deriveCompanionFocusTags(snapshot: CompanionActivitySnapshot): string[] {
   const tags = ['Web/Desktop'];
 
+  if (snapshot.hasStreamError) {
+    tags.push('错误');
+  }
+  if (snapshot.toolCallCount > 0) {
+    tags.push('工具');
+  }
   if (snapshot.streaming) {
     tags.push('生成中');
   }
@@ -361,6 +426,9 @@ export function deriveCompanionFocusTags(snapshot: CompanionActivitySnapshot): s
   }
   if (snapshot.showVoice) {
     tags.push('语音');
+  }
+  if (snapshot.idleSeconds >= IDLE_REMINDER_THRESHOLD_SECONDS) {
+    tags.push('空闲');
   }
 
   return tags;

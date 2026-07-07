@@ -23,6 +23,9 @@ import { InteractiveTerminalView } from './InteractiveTerminalView.js';
 interface QuickTerminalPanelProps {
   open: boolean;
   onRequestClose: () => void;
+  presentation?: 'overlay' | 'inline';
+  height?: number;
+  onHeightChange?: (height: number) => void;
   workspacePath: string | null;
   gatewayUrl: string;
   token: string | null;
@@ -60,6 +63,9 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
   const {
     open,
     onRequestClose,
+    presentation = 'overlay',
+    height: controlledHeight,
+    onHeightChange,
     workspacePath,
     gatewayUrl,
     token,
@@ -70,12 +76,15 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
     onDismissTerminal,
   } = props;
 
-  const height = useUIStateStore((s) => s.quickTerminalHeight);
-  const setHeight = useUIStateStore((s) => s.setQuickTerminalHeight);
+  const quickTerminalHeight = useUIStateStore((s) => s.quickTerminalHeight);
+  const setQuickTerminalHeight = useUIStateStore((s) => s.setQuickTerminalHeight);
   const activeIdByWs = useUIStateStore((s) => s.quickTerminalActiveIdByWorkspace);
   const setActiveIdForWs = useUIStateStore((s) => s.setQuickTerminalActiveIdForWorkspace);
 
   const wsKey = workspacePath && workspacePath.trim().length > 0 ? workspacePath : '__default__';
+  const height = controlledHeight ?? quickTerminalHeight;
+  const setHeight = onHeightChange ?? setQuickTerminalHeight;
+  const inlinePresentation = presentation === 'inline';
 
   // Show only currently-live terminals as tabs; closed ones live in the
   // top-bar history popover (SessionTerminalsPanel) where the user can
@@ -251,17 +260,19 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
       role="region"
       aria-label="快捷终端面板"
       style={{
-        position: 'absolute',
+        position: inlinePresentation ? 'relative' : 'absolute',
         left: 0,
         right: 0,
         bottom: 0,
         height,
+        minHeight: height,
         background: 'var(--bg-overlay)',
         borderTop: '1px solid var(--border-subtle)',
-        boxShadow: '0 -8px 24px rgba(0,0,0,0.18)',
+        boxShadow: inlinePresentation ? 'none' : '0 -8px 24px rgba(0,0,0,0.18)',
         display: 'flex',
         flexDirection: 'column',
-        zIndex: 35,
+        flexShrink: 0,
+        zIndex: inlinePresentation ? 1 : 35,
       }}
     >
       {/* Drag handle */}

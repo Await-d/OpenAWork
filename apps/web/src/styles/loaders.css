@@ -68,6 +68,160 @@
   border-radius: 6px;
 }
 
+/* ─── 酷炫骨架屏（渐变流光 + 光晕扫描） ───────────────────────── */
+@keyframes omo-skeleton-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes omo-skeleton-glow-scan {
+  0% {
+    transform: translateX(-100%) skewX(-15deg);
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 0.6;
+  }
+  80% {
+    opacity: 0.5;
+  }
+  100% {
+    transform: translateX(200%) skewX(-15deg);
+    opacity: 0;
+  }
+}
+
+@keyframes omo-skeleton-avatar-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 25%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 0%, transparent);
+  }
+}
+
+@keyframes omo-skeleton-line-in {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.omo-skeleton-cool {
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(
+      100deg,
+      var(--bg-surface) 0%,
+      var(--bg-surface) 35%,
+      color-mix(in oklch, var(--accent-muted) 30%, var(--bg-surface)) 50%,
+      var(--bg-surface) 65%,
+      var(--bg-surface) 100%
+    );
+  background-size: 200% 100%;
+  animation: omo-skeleton-shimmer 2.2s ease-in-out infinite;
+  border-radius: 6px;
+}
+
+.omo-skeleton-cool::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.08) 40%,
+    rgba(255, 255, 255, 0.14) 50%,
+    rgba(255, 255, 255, 0.08) 60%,
+    transparent 100%
+  );
+  animation: omo-skeleton-glow-scan 2.8s ease-in-out infinite;
+}
+
+/* ─── 整体页面入场动画 ────────────────────────────────────────── */
+@keyframes omo-page-enter-glow {
+  0% {
+    opacity: 0;
+    filter: blur(8px);
+    transform: scale(0.98);
+  }
+  60% {
+    opacity: 1;
+    filter: blur(0);
+    transform: scale(1.002);
+  }
+  100% {
+    opacity: 1;
+    filter: blur(0);
+    transform: scale(1);
+  }
+}
+
+@keyframes omo-page-enter-particles {
+  0% {
+    opacity: 0;
+    transform: translateY(20px) scale(0.9);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.omo-page-enter {
+  animation: omo-page-enter-glow 420ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+.omo-page-enter > * {
+  animation: omo-page-enter-particles 360ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+.omo-page-enter > *:nth-child(1) {
+  animation-delay: 40ms;
+}
+.omo-page-enter > *:nth-child(2) {
+  animation-delay: 80ms;
+}
+.omo-page-enter > *:nth-child(3) {
+  animation-delay: 120ms;
+}
+.omo-page-enter > *:nth-child(4) {
+  animation-delay: 160ms;
+}
+.omo-page-enter > *:nth-child(5) {
+  animation-delay: 200ms;
+}
+
+/* ─── 内容区淡入 ──────────────────────────────────────────────── */
+@keyframes omo-content-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.omo-content-fade-up {
+  animation: omo-content-fade-up 280ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
 /* ─── chat 远端流恢复占位（光晕 + 三点闪烁） ───────────────────── */
 @keyframes omo-chat-remote-stream-pulse {
   0%,
@@ -115,7 +269,12 @@
   .omo-session-running-dot,
   .omo-chat-session-skel,
   .omo-chat-remote-stream-dot,
-  .omo-chat-remote-stream-glow {
+  .omo-chat-remote-stream-glow,
+  .omo-skeleton-cool,
+  .omo-skeleton-cool::after,
+  .omo-page-enter,
+  .omo-page-enter > *,
+  .omo-content-fade-up {
     animation: none !important;
   }
 }

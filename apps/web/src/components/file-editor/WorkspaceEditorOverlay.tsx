@@ -1,4 +1,4 @@
-import { type CSSProperties } from 'react';
+import { type CSSProperties, useCallback, useEffect, useRef, useState } from 'react';
 import { EditorBrowserWorkspace, type EditorPaneTab } from './EditorBrowserWorkspace.js';
 import type { OpenFile, RevealTarget } from '../../hooks/editor/useFileEditor.js';
 
@@ -10,6 +10,9 @@ import type { OpenFile, RevealTarget } from '../../hooks/editor/useFileEditor.js
  * 点击文件树节点时铺满内容区打开真正的编辑器,而不是窄边栏只读预览。
  *
  * 纯展示组件 —— 文件状态由调用方的 `useFileEditor` 拥有并通过 props 传入。
+ *
+ * 除了传统的全屏覆盖模式(`mode='overlay'`),还支持分屏模式(`mode='split'`),
+ * 此时编辑器作为 flex 兄弟节点与对话区并排,可通过拖拽 resizer 调整宽度。
  */
 export interface WorkspaceEditorOverlayProps {
   /** 是否显示浮层。 */
@@ -40,6 +43,18 @@ export interface WorkspaceEditorOverlayProps {
   onTabChange?: (tab: EditorPaneTab) => void;
   /** 浮层标题(默认「文件编辑器」)。 */
   title?: string;
+  /**
+   * 渲染模式:
+   * - `'overlay'`(默认): absolute 覆盖整个父容器,编辑器与对话区互斥。
+   * - `'split'`: flex 兄弟节点,与对话区并排,可拖拽调整宽度。
+   */
+  mode?: 'overlay' | 'split';
+  /** split 模式下的初始宽度百分比(20-80,默认 50)。 */
+  splitPos?: number;
+  /** split 模式下拖拽结束时回调,用于持久化宽度。 */
+  onSplitPosChange?: (pos: number) => void;
+  /** 切换模式(overlay ↔ split)回调。不传则不显示切换按钮。 */
+  onModeChange?: (mode: 'overlay' | 'split') => void;
 }
 
 const OVERLAY_STYLE: CSSProperties = {
@@ -50,6 +65,28 @@ const OVERLAY_STYLE: CSSProperties = {
   flexDirection: 'column',
   background: 'var(--bg-base)',
   overflow: 'hidden',
+};
+
+/** split 模式:作为 flex 兄弟节点,不覆盖对话区 */
+const SPLIT_STYLE: CSSProperties = {
+  position: 'relative',
+  zIndex: 90,
+  display: 'flex',
+  flexDirection: 'column',
+  background: 'var(--bg-base)',
+  overflow: 'hidden',
+  flexShrink: 0,
+};
+
+/** split 模式:拖拽手柄 */
+const RESIZER_STYLE: CSSProperties = {
+  width: 4,
+  flexShrink: 0,
+  cursor: 'col-resize',
+  background: 'transparent',
+  position: 'relative',
+  zIndex: 91,
+  transition: 'background 100ms ease',
 };
 
 const HEADER_STYLE: CSSProperties = {
@@ -90,14 +127,77 @@ export function WorkspaceEditorOverlay({
   activeTab,
   onTabChange,
   title = '文件编辑器',
+  mode = 'overlay',
+  splitPos: splitPosProp = 50,
+  onSplitPosChange,
+  onModeChange,
 }: WorkspaceEditorOverlayProps) {
+  // ─── split 模式拖拽状态 ───
+  const [splitPos, setSplitPos] = useState(splitPosProp);
+  const draggingRef = useRef(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const splitPosRef = useRef(splitPos);
+  splitPosRef.current = splitPos;
+
+  // 同步外部 splitPos 变化
+  useEffect(() => {
+    setSplitPos(splitPosProp);
+  }, [splitPosProp]);
+
+  // 拖拽逻辑
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    draggingRef.current = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, []);
+
+  useEffect(() => {
+    if (mode !== 'split') return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!draggingRef.current || !containerRef.current) return;
+      const parent = containerRef.current.parentElement;
+      if (!parent) return;
+      const parentRect = parent.getBoundingClientRect();
+      const editorWidth = parentRect.right - e.clientX;
+      const pct = (editorWidth / parentRect.width) * 100;
+      const clamped = Math.min(80, Math.max(20, pct));
+      setSplitPos(clamped);
+    };
+
+    const handleMouseUp = () => {
+      if (!draggingRef.current) return;
+      draggingRef.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      onSplitPosChange?.(splitPosRef.current);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [mode, onSplitPosChange]);
+
   if (!open) return null;
 
   const activePath = fileEditor.activeFile?.path ?? null;
   const activeName = activePath ? (activePath.split('/').pop() ?? activePath) : null;
 
-  return (
-    <div style={OVERLAY_STYLE} role="dialog" aria-label={title}>
+  const isSplit = mode === 'split';
+  const containerStyle = isSplit ? SPLIT_STYLE : OVERLAY_STYLE;
+  const editorWidth = isSplit ? `${100 - splitPos}%` : undefined;
+
+  const content = (
+    <div
+      ref={containerRef}
+      style={{ ...containerStyle, ...(isSplit ? { width: editorWidth } : {}) }}
+      role="dialog"
+      aria-label={title}
+    >
       <header style={HEADER_STYLE}>
         <span aria-hidden style={{ fontSize: 0, color: 'var(--fg-muted)' }}>
           <svg
@@ -137,6 +237,39 @@ export function WorkspaceEditorOverlay({
         ) : (
           <span style={{ flex: 1, minWidth: 0 }} />
         )}
+        {onModeChange ? (
+          <button
+            type="button"
+            style={{ ...CLOSE_BTN_STYLE, marginRight: 4 }}
+            onClick={() => onModeChange(isSplit ? 'overlay' : 'split')}
+            aria-label={isSplit ? '切换为全屏覆盖' : '切换为分屏'}
+            title={isSplit ? '切换为全屏覆盖' : '切换为分屏'}
+          >
+            <svg
+              aria-hidden="true"
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              {isSplit ? (
+                <>
+                  <rect x="2" y="3" width="20" height="18" rx="2" />
+                  <line x1="12" y1="3" x2="12" y2="21" />
+                </>
+              ) : (
+                <>
+                  <rect x="2" y="3" width="20" height="18" rx="2" />
+                  <line x1="2" y1="12" x2="22" y2="12" />
+                </>
+              )}
+            </svg>
+          </button>
+        ) : null}
         <button type="button" style={CLOSE_BTN_STYLE} onClick={onClose} aria-label="关闭编辑器">
           <svg
             aria-hidden="true"
@@ -167,4 +300,40 @@ export function WorkspaceEditorOverlay({
       />
     </div>
   );
+
+  // split 模式:返回 resizer + editor 的片段,由父容器 flex 排列
+  if (isSplit) {
+    return (
+      <>
+        <div
+          style={RESIZER_STYLE}
+          onMouseDown={handleMouseDown}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'var(--border-emphasis)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'transparent';
+          }}
+        >
+          <span
+            style={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              width: 2,
+              height: 24,
+              background: 'var(--border-strong)',
+              borderRadius: 1,
+              opacity: 0.6,
+            }}
+          />
+        </div>
+        {content}
+      </>
+    );
+  }
+
+  // overlay 模式:直接返回覆盖层
+  return content;
 }

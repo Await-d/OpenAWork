@@ -15,7 +15,14 @@ import { join, dirname, basename } from 'node:path';
 export const BOULDER_DIR = '.sisyphus';
 export const BOULDER_FILE = 'boulder.json';
 export const BOULDER_STATE_PATH = `${BOULDER_DIR}/${BOULDER_FILE}`;
+export const AGENTDOCS_WORKFLOW_DIR = '.agentdocs/workflow';
+export const OMO_PLANS_DIR = '.omo/plans';
 export const PROMETHEUS_PLANS_DIR = '.sisyphus/plans';
+export const PLAN_DISCOVERY_DIRS = [
+  AGENTDOCS_WORKFLOW_DIR,
+  OMO_PLANS_DIR,
+  PROMETHEUS_PLANS_DIR,
+] as const;
 
 export interface BoulderState {
   /** Absolute path to the active plan file */
@@ -93,13 +100,8 @@ export async function clearBoulderState(directory: string): Promise<boolean> {
   }
 }
 
-/**
- * Find Prometheus plan files for this project.
- * Prometheus stores plans at: {project}/.sisyphus/plans/{name}.md
- */
-export async function findPrometheusPlans(directory: string): Promise<string[]> {
-  const plansDir = join(directory, PROMETHEUS_PLANS_DIR);
-
+async function collectPlanFiles(directory: string, relativeDir: string, priority: number) {
+  const plansDir = join(directory, relativeDir);
   try {
     const entries = await fsp.readdir(plansDir);
     const mdFiles = entries.filter((f) => f.endsWith('.md'));
@@ -118,19 +120,47 @@ export async function findPrometheusPlans(directory: string): Promise<string[]> 
           const fullPath = join(plansDir, f);
           try {
             const stat = await fsp.stat(fullPath);
-            return { path: fullPath, mtimeMs: stat.mtimeMs };
+            return { path: fullPath, mtimeMs: stat.mtimeMs, priority };
           } catch {
             return null;
           }
         }),
       )
-    ).filter((entry): entry is { path: string; mtimeMs: number } => entry !== null);
+    ).filter(
+      (entry): entry is { path: string; mtimeMs: number; priority: number } => entry !== null,
+    );
 
-    withStats.sort((a, b) => b.mtimeMs - a.mtimeMs);
-    return withStats.map((s) => s.path);
+    return withStats;
   } catch {
     return [];
   }
+}
+
+/**
+ * Find executable workflow plan files for this project.
+ *
+ * OpenAWork's native /start-work surface uses `.agentdocs/workflow` as the
+ * canonical plan directory. `.omo/plans` and the legacy `.sisyphus/plans`
+ * directories are still discovered as compatibility inputs so existing
+ * OmO/LazyCodex and older Sisyphus plans can be resumed deliberately.
+ */
+export async function findPrometheusPlans(directory: string): Promise<string[]> {
+  const discovered = (
+    await Promise.all(
+      PLAN_DISCOVERY_DIRS.map((relativeDir, index) =>
+        collectPlanFiles(directory, relativeDir, index),
+      ),
+    )
+  ).flat();
+
+  discovered.sort((a, b) => {
+    const byMtime = b.mtimeMs - a.mtimeMs;
+    if (byMtime !== 0) return byMtime;
+    const byPriority = a.priority - b.priority;
+    return byPriority !== 0 ? byPriority : a.path.localeCompare(b.path);
+  });
+
+  return discovered.map((entry) => entry.path);
 }
 
 /**

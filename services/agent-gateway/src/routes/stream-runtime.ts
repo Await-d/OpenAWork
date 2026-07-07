@@ -31,6 +31,7 @@ import {
 } from './stream-system-prompts.js';
 import { KeywordDetectorImpl } from '@openAwork/agent-core';
 import { buildCapabilityContext } from './capabilities.js';
+import { filterPluginControlledToolsForUser } from '../tools/plugin-tool-settings.js';
 import {
   type ApprovedPermissionResumePayload,
   buildWorkspaceContext,
@@ -159,7 +160,10 @@ async function continueFromApprovedToolResult(input: {
     // Per-turn model-aware tool filter (mirrors opencode
     // `tool/registry.ts:303-315`). See routes/stream.ts getEnabledTools
     // doc for the full GPT-5 vs edit/write split rationale.
-    getEnabledTools(webSearchEnabled, { modelId: route.model }),
+    filterPluginControlledToolsForUser(
+      getEnabledTools(webSearchEnabled, { modelId: route.model }),
+      input.userId,
+    ),
     sessionContext.metadataJson,
   );
   const sessionMeta = parseSessionMetadataJson(sessionContext.metadataJson);
@@ -806,7 +810,9 @@ export async function runSessionInBackground(input: {
       return {
         ...result,
         stopReason: 'error' as const,
-        errorSummary: result.errorSummary ?? `stream 执行未正常结束（statusCode=${result.statusCode}，无 stopReason），可能模型路由解析失败、replay 命中或 session 冲突`,
+        errorSummary:
+          result.errorSummary ??
+          `stream 执行未正常结束（statusCode=${result.statusCode}，无 stopReason），可能模型路由解析失败、replay 命中或 session 冲突`,
       };
     }
     return result;

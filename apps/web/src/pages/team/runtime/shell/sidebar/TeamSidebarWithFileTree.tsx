@@ -3,11 +3,11 @@
  *
  * 与 chat 端 SessionSidebar 的整体布局对齐：
  *   ┌──────────────────────────────┐
- *   │ [+ 新建会话] [📁 工作区]      │  ← 顶部主按钮行
+ *   │ [+ 新建会话] [工作区]         │  ← 顶部主按钮行
  *   ├──────────────────────────────┤
- *   │ [💬 会话] [📁 文件树]         │  ← tab 切换
+ *   │ [会话] [文件树]               │  ← tab 切换
  *   ├──────────────────────────────┤
- *   │ 🔍 搜索会话…                  │  ← 搜索框（仅会话 tab）
+ *   │ 搜索会话…                     │  ← 搜索框（仅会话 tab）
  *   ├──────────────────────────────┤
  *   │ 会话卡片列表 / 文件树          │  ← 内容区
  *   └──────────────────────────────┘
@@ -125,7 +125,8 @@ function tabButtonStyle(active: boolean): CSSProperties {
     fontSize: 12,
     fontWeight: active ? 600 : 450,
     cursor: 'pointer',
-    transition: 'background 160ms cubic-bezier(0.4, 0, 0.2, 1), color 160ms ease, border-color 160ms ease',
+    transition:
+      'background 160ms cubic-bezier(0.4, 0, 0.2, 1), color 160ms ease, border-color 160ms ease',
     whiteSpace: 'nowrap',
     position: 'relative',
   };
@@ -572,10 +573,16 @@ export function TeamSidebarWithFileTree({
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+    <div
+      className="team-v2-workspace-sidebar-content"
+      style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}
+    >
       {/* 顶部主按钮行：新建会话 + 工作区切换（split button 模式） */}
-      <div style={TOP_BAR_STYLE}>
-        <div style={{ display: 'flex', gap: 0, flex: 1, minWidth: 0 }}>
+      <div className="team-v2-workspace-sidebar-actions" style={TOP_BAR_STYLE}>
+        <div
+          className="team-v2-workspace-sidebar-action-group"
+          style={{ display: 'flex', gap: 0, flex: 1, minWidth: 0 }}
+        >
           <button
             type="button"
             onClick={handleNewSessionClick}
@@ -612,6 +619,7 @@ export function TeamSidebarWithFileTree({
               type="button"
               onClick={onCreateWorkspace}
               title="新建工作区"
+              className="team-v2-workspace-sidebar-split-action"
               style={PRIMARY_SPLIT_BTN_STYLE}
             >
               <svg
@@ -635,6 +643,7 @@ export function TeamSidebarWithFileTree({
               type="button"
               onClick={onOpenWorkspacePicker}
               title="选择工作区"
+              className="team-v2-workspace-sidebar-split-action"
               style={PRIMARY_SPLIT_BTN_STYLE}
             >
               <svg
@@ -656,10 +665,12 @@ export function TeamSidebarWithFileTree({
       </div>
 
       {/* Tab 切换器 */}
-      <div style={TAB_BAR_STYLE}>
+      <div className="team-v2-workspace-sidebar-tabs" style={TAB_BAR_STYLE}>
         <button
           type="button"
           onClick={() => setActiveTab('sessions')}
+          className="team-v2-workspace-sidebar-tab"
+          data-active={activeTab === 'sessions' ? 'true' : 'false'}
           style={tabButtonStyle(activeTab === 'sessions')}
         >
           <svg
@@ -680,6 +691,8 @@ export function TeamSidebarWithFileTree({
         <button
           type="button"
           onClick={() => setActiveTab('files')}
+          className="team-v2-workspace-sidebar-tab"
+          data-active={activeTab === 'files' ? 'true' : 'false'}
           style={tabButtonStyle(activeTab === 'files')}
           disabled={!workspacePath}
           title={workspacePath ? '浏览工作区文件' : '无工作区路径'}
@@ -703,8 +716,9 @@ export function TeamSidebarWithFileTree({
 
       {/* 搜索框（仅会话 tab） */}
       {activeTab === 'sessions' && (
-        <div style={SEARCH_BAR_STYLE}>
+        <div className="team-v2-workspace-sidebar-search" style={SEARCH_BAR_STYLE}>
           <input
+            className="team-v2-workspace-sidebar-search-input"
             type="text"
             placeholder="搜索会话…"
             value={searchQuery}
@@ -731,7 +745,7 @@ export function TeamSidebarWithFileTree({
           onOpenNewSessionModal={
             onOpenNewSessionModal
               ? onOpenNewSessionModal
-              : (_templateId: string | null, workingDirectory?: string | null) => {
+              : (_templateId?: string | null, workingDirectory?: string | null) => {
                   setInternalInitialWorkingDirectory(workingDirectory ?? null);
                   setInternalShowNewSessionModal(true);
                 }
@@ -739,8 +753,8 @@ export function TeamSidebarWithFileTree({
           {...sidebarProps}
         />
       ) : (
-        <div style={FILE_TREE_CONTAINER_STYLE}>
-          <div style={FILE_TREE_HEADER_STYLE}>
+        <div className="team-v2-workspace-sidebar-file-tree" style={FILE_TREE_CONTAINER_STYLE}>
+          <div className="team-v2-workspace-sidebar-file-header" style={FILE_TREE_HEADER_STYLE}>
             <div
               style={{
                 display: 'flex',
@@ -769,6 +783,7 @@ export function TeamSidebarWithFileTree({
             </div>
             <button
               type="button"
+              className="team-v2-workspace-sidebar-tool"
               title={
                 !token ? '当前未连接到网关' : workspacePath ? '在根目录新建文件' : '请先选择工作区'
               }
@@ -783,10 +798,24 @@ export function TeamSidebarWithFileTree({
                 cursor: canMutateWorkspaceTree ? 'pointer' : 'not-allowed',
               }}
             >
-              +
+              <svg
+                aria-hidden="true"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12 5v14" />
+                <path d="M5 12h14" />
+              </svg>
             </button>
             <button
               type="button"
+              className="team-v2-workspace-sidebar-tool"
               title={
                 !token
                   ? '当前未连接到网关'
@@ -805,10 +834,25 @@ export function TeamSidebarWithFileTree({
                 cursor: canMutateWorkspaceTree ? 'pointer' : 'not-allowed',
               }}
             >
-              📁
+              <svg
+                aria-hidden="true"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                <path d="M12 11v6" />
+                <path d="M9 14h6" />
+              </svg>
             </button>
             <button
               type="button"
+              className="team-v2-workspace-sidebar-tool"
               title={!token ? '当前未连接到网关' : workspacePath ? '刷新目录' : '请先选择工作区'}
               onClick={handleRefreshTree}
               disabled={!canRefreshWorkspaceTree}
@@ -818,7 +862,22 @@ export function TeamSidebarWithFileTree({
                 cursor: canRefreshWorkspaceTree ? 'pointer' : 'not-allowed',
               }}
             >
-              ↻
+              <svg
+                aria-hidden="true"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M21 12a9 9 0 0 1-15.7 6" />
+                <path d="M3 12a9 9 0 0 1 15.7-6" />
+                <path d="M3 6v6h6" />
+                <path d="M21 18v-6h-6" />
+              </svg>
             </button>
           </div>
           {treeError ? (

@@ -8,12 +8,20 @@ process.env['DATABASE_URL'] = ':memory:';
 process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
 
 const desktopAutomationMocks = vi.hoisted(() => ({
+  back: vi.fn(),
   click: vi.fn(),
+  content: vi.fn(),
+  forward: vi.fn(),
   goto: vi.fn(),
+  press: vi.fn(),
+  reload: vi.fn(),
   screenshot: vi.fn(),
+  scroll: vi.fn(),
+  snapshot: vi.fn(),
   start: vi.fn(),
   status: vi.fn(),
   type: vi.fn(),
+  wait: vi.fn(),
 }));
 
 vi.mock('../../tools/desktop-automation.js', () => ({
@@ -63,15 +71,36 @@ beforeEach(() => {
   desktopAutomationMocks.status.mockReset();
   desktopAutomationMocks.start.mockReset();
   desktopAutomationMocks.goto.mockReset();
+  desktopAutomationMocks.back.mockReset();
+  desktopAutomationMocks.forward.mockReset();
+  desktopAutomationMocks.reload.mockReset();
   desktopAutomationMocks.click.mockReset();
   desktopAutomationMocks.type.mockReset();
+  desktopAutomationMocks.press.mockReset();
+  desktopAutomationMocks.scroll.mockReset();
+  desktopAutomationMocks.wait.mockReset();
+  desktopAutomationMocks.content.mockReset();
+  desktopAutomationMocks.snapshot.mockReset();
   desktopAutomationMocks.screenshot.mockReset();
 
   desktopAutomationMocks.status.mockResolvedValue({ enabled: true, started: false });
   desktopAutomationMocks.start.mockResolvedValue(undefined);
   desktopAutomationMocks.goto.mockResolvedValue(undefined);
+  desktopAutomationMocks.back.mockResolvedValue(undefined);
+  desktopAutomationMocks.forward.mockResolvedValue(undefined);
+  desktopAutomationMocks.reload.mockResolvedValue(undefined);
   desktopAutomationMocks.click.mockResolvedValue(undefined);
   desktopAutomationMocks.type.mockResolvedValue(undefined);
+  desktopAutomationMocks.press.mockResolvedValue(undefined);
+  desktopAutomationMocks.scroll.mockResolvedValue(undefined);
+  desktopAutomationMocks.wait.mockResolvedValue(undefined);
+  desktopAutomationMocks.content.mockResolvedValue('<html lang="zh"></html>');
+  desktopAutomationMocks.snapshot.mockResolvedValue({
+    currentPageId: 'page-1',
+    openPages: ['page-1'],
+    url: 'https://example.com/',
+    title: 'Example',
+  });
   desktopAutomationMocks.screenshot.mockResolvedValue('base64-image');
 });
 
@@ -131,6 +160,75 @@ describe('desktop automation routes', () => {
     expect(response.json()).toMatchObject({
       error: 'selector not found',
       code: 'desktop_automation_failed',
+    });
+    await app.close();
+  });
+
+  it('POST /desktop-automation/press 会把 selector 与 key 转给 manager', async () => {
+    const app = await buildApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/desktop-automation/press',
+      headers: {
+        authorization: bearer(app),
+        'content-type': 'application/json',
+      },
+      payload: { selector: '#query', key: 'Enter' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true });
+    expect(desktopAutomationMocks.press).toHaveBeenCalledWith('#query', 'Enter');
+    await app.close();
+  });
+
+  it('POST /desktop-automation/scroll 会使用默认向下滚动方向', async () => {
+    const app = await buildApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/desktop-automation/scroll',
+      headers: {
+        authorization: bearer(app),
+        'content-type': 'application/json',
+      },
+      payload: { amount: 600 },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true });
+    expect(desktopAutomationMocks.scroll).toHaveBeenCalledWith('down', 600);
+    await app.close();
+  });
+
+  it('POST /desktop-automation/content 返回页面 HTML 内容', async () => {
+    const app = await buildApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/desktop-automation/content',
+      headers: { authorization: bearer(app) },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ content: '<html lang="zh"></html>' });
+    await app.close();
+  });
+
+  it('POST /desktop-automation/snapshot 返回当前页面快照', async () => {
+    const app = await buildApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/desktop-automation/snapshot',
+      headers: { authorization: bearer(app) },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      snapshot: {
+        currentPageId: 'page-1',
+        openPages: ['page-1'],
+        url: 'https://example.com/',
+        title: 'Example',
+      },
     });
     await app.close();
   });

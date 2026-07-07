@@ -22,6 +22,76 @@ interface UseMcpServersResult {
   onRetryMcp: (serverId: string) => void;
 }
 
+type McpStatusPayload = {
+  servers?: Array<{
+    builtin?: boolean;
+    disabledTools?: string[];
+    enabled?: boolean;
+    error?: string;
+    id: string;
+    name: string;
+    status?: string;
+    toolCount?: number;
+    tools?: Array<{ description?: string; name: string }>;
+    type?: string;
+  }>;
+};
+
+type McpStatusServerPayload = NonNullable<McpStatusPayload['servers']>[number];
+
+type McpServersPayload = {
+  builtinServers?: MCPServerEntry[];
+  servers?: MCPServerEntry[];
+};
+
+function toMcpServerStatus(server: McpStatusServerPayload): MCPServerStatus {
+  const status =
+    server.status === 'connected' ||
+    server.status === 'connecting' ||
+    server.status === 'error' ||
+    server.status === 'disabled'
+      ? server.status
+      : 'disconnected';
+
+  return {
+    id: server.id,
+    name: server.name,
+    status,
+    toolCount: server.toolCount ?? server.tools?.length ?? 0,
+    authType: server.type,
+    builtin: server.builtin === true,
+    disabledTools: server.disabledTools ?? [],
+    error: server.error,
+    tools: server.tools ?? [],
+  };
+}
+
+function mergeUserAndBuiltinServers(payload: McpServersPayload): MCPServerEntry[] {
+  const builtinServers = payload.builtinServers ?? [];
+  const userServers = payload.servers ?? [];
+  const builtinIds = new Set(builtinServers.map((server) => server.id));
+  const userIds = new Set(userServers.map((server) => server.id));
+  return [
+    ...userServers.map((server) => ({
+      ...server,
+      ...(builtinIds.has(server.id) ? { builtin: true } : {}),
+      source: 'user' as const,
+    })),
+    ...builtinServers
+      .filter((server) => !userIds.has(server.id))
+      .map((server) => ({ ...server, builtin: true, source: 'builtin' as const })),
+  ];
+}
+
+function stripDisplayFields(server: MCPServerEntry): MCPServerEntry {
+  const { source: _source, ...persisted } = server;
+  return persisted;
+}
+
+function serversForPersistence(servers: MCPServerEntry[]): MCPServerEntry[] {
+  return servers.filter((server) => server.source !== 'builtin').map(stripDisplayFields);
+}
+
 export function useMcpServers({
   gatewayUrl,
   token,
@@ -29,56 +99,45 @@ export function useMcpServers({
 }: UseMcpServersArgs): UseMcpServersResult {
   const [mcpServers, setMcpServersState] = useState<MCPServerEntry[]>([]);
   const [mcpStatuses, setMcpStatuses] = useState<MCPServerStatus[]>([]);
+  const [builtinMcpServers, setBuiltinMcpServers] = useState<MCPServerEntry[]>([]);
 
   useEffect(() => {
     if (!token || !active) return;
     const client = createSettingsClient(gatewayUrl);
     void client
       .listMcpServers(token)
-      .then((data) => setMcpServersState((data as { servers?: MCPServerEntry[] }).servers ?? []))
+      .then((data) => {
+        const payload = data as McpServersPayload;
+        setBuiltinMcpServers(payload.builtinServers ?? []);
+        setMcpServersState(mergeUserAndBuiltinServers(payload));
+      })
       .catch(() => undefined);
     void client
-      .getMcpStatus(token)
-      .then((d) => {
-        const typed = d as {
-          servers: Array<{
-            id: string;
-            name: string;
-            type?: string;
-            status?: string;
-            builtin?: boolean;
-          }>;
-        };
-        setMcpStatuses(
-          (typed.servers ?? []).map((server) => ({
-            id: server.id,
-            name: server.name,
-            status:
-              server.status === 'connected' ||
-              server.status === 'connecting' ||
-              server.status === 'error'
-                ? server.status
-                : 'disconnected',
-            toolCount: 0,
-            authType: server.type,
-            builtin: server.builtin === true,
-          })),
-        );
-      })
+      .getMcpStatus(token, { includeTools: true })
+      .then((data) =>
+        setMcpStatuses(((data as McpStatusPayload).servers ?? []).map(toMcpServerStatus)),
+      )
       .catch(() => undefined);
   }, [gatewayUrl, token, active]);
 
   const setMcpServers = useCallback(
     (updater: SetStateAction<MCPServerEntry[]>) => {
       setMcpServersState((prev) => {
-        const next = typeof updater === 'function' ? updater(prev) : updater;
+        const rawNext = typeof updater === 'function' ? updater(prev) : updater;
+        const persistedServers = serversForPersistence(rawNext);
+        const next = mergeUserAndBuiltinServers({
+          servers: persistedServers,
+          builtinServers: builtinMcpServers,
+        });
         if (token) {
-          void createSettingsClient(gatewayUrl).putMcpServers(token, { servers: next });
+          void createSettingsClient(gatewayUrl).putMcpServers(token, {
+            servers: persistedServers,
+          });
         }
         return next;
       });
     },
-    [token, gatewayUrl],
+    [token, gatewayUrl, builtinMcpServers],
   );
 
   const onRetryMcp = useCallback(
@@ -127,7 +186,7 @@ export function useMcpServers({
               }
               return {
                 ...server,
-                status: 'disconnected' as const,
+                status: 'disabled' as const,
                 retryFeedback: undefined,
               };
             }),

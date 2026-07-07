@@ -311,7 +311,10 @@ export function CompanionStage({
   attachedCount,
   currentUserEmail,
   editorMode,
+  hasStreamError,
+  idleSeconds,
   input,
+  lastToolName,
   panelOpenSignal = 0,
   pendingPermissionCount,
   prefersReducedMotion,
@@ -320,8 +323,10 @@ export function CompanionStage({
   sessionBusyState,
   sessionId,
   showVoice,
+  streamErrorMessage,
   streaming,
   todoCount,
+  toolCallCount,
 }: CompanionStageProps) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [liveOutputId, setLiveOutputId] = useState<string | null>(null);
@@ -345,6 +350,9 @@ export function CompanionStage({
   const lastOutputKeyRef = useRef<string | null>(null);
   const buddyMentionActiveRef = useRef(false);
   const lastPanelOpenSignalRef = useRef(panelOpenSignal);
+  const prevToolCallCountRef = useRef(toolCallCount);
+  const prevStreamErrorRef = useRef(hasStreamError);
+  const idleReminderActiveRef = useRef(false);
 
   useEffect(() => {
     setPanelOpen(false);
@@ -354,28 +362,38 @@ export function CompanionStage({
     () => ({
       attachedCount,
       currentUserEmail,
+      hasStreamError,
+      idleSeconds,
       input,
+      lastToolName,
       pendingPermissionCount,
       queuedCount,
       rightOpen,
       sessionBusyState,
       sessionId,
       showVoice,
+      streamErrorMessage,
       streaming,
       todoCount,
+      toolCallCount,
     }),
     [
       attachedCount,
       currentUserEmail,
+      hasStreamError,
+      idleSeconds,
       input,
+      lastToolName,
       pendingPermissionCount,
       queuedCount,
       rightOpen,
       sessionBusyState,
       sessionId,
       showVoice,
+      streamErrorMessage,
       streaming,
       todoCount,
+      toolCallCount,
     ],
   );
 
@@ -497,7 +515,11 @@ export function CompanionStage({
   ]);
 
   useEffect(() => {
-    const outputKey = `${sessionId ?? 'home'}:${reaction.badge}:${reaction.text}`;
+    const idleCooldownBucket = reaction.badge === '空闲提醒' ? Math.floor(idleSeconds / 180) : null;
+    const outputKey =
+      idleCooldownBucket === null
+        ? `${sessionId ?? 'home'}:${reaction.badge}:${reaction.text}`
+        : `${sessionId ?? 'home'}:${reaction.badge}:${idleCooldownBucket}`;
     if (lastOutputKeyRef.current === outputKey) {
       return;
     }
@@ -517,6 +539,7 @@ export function CompanionStage({
     reaction.text,
     reactionOutputPolicy.shouldShowLiveOutput,
     sessionId,
+    idleSeconds,
   ]);
 
   const prevStreamingRef = useRef(streaming);
@@ -525,13 +548,19 @@ export function CompanionStage({
     if (muted || quietMode) {
       prevStreamingRef.current = streaming;
       prevPendingRef.current = pendingPermissionCount;
+      prevToolCallCountRef.current = toolCallCount;
+      prevStreamErrorRef.current = hasStreamError;
       return;
     }
 
     const wasStreaming = prevStreamingRef.current;
     const wasPending = prevPendingRef.current;
+    const previousToolCallCount = prevToolCallCountRef.current;
+    const hadStreamError = prevStreamErrorRef.current;
     prevStreamingRef.current = streaming;
     prevPendingRef.current = pendingPermissionCount;
+    prevToolCallCountRef.current = toolCallCount;
+    prevStreamErrorRef.current = hasStreamError;
 
     if (wasStreaming && !streaming) {
       pushOutput(
@@ -552,7 +581,88 @@ export function CompanionStage({
       );
       recordInteraction('notification', `新审批:${pendingPermissionCount}`);
     }
-  }, [muted, quietMode, streaming, pendingPermissionCount, pushOutput, recordInteraction]);
+
+    if (previousToolCallCount === 0 && toolCallCount > 0) {
+      pushOutput(
+        {
+          badge: '工具启动',
+          text: lastToolName
+            ? `开始执行 ${lastToolName}，我会盯住工具状态。`
+            : `开始执行 ${toolCallCount} 个工具，我会盯住工具状态。`,
+          tone: 'notice',
+        },
+        true,
+      );
+      recordInteraction('notification', `工具启动:${lastToolName ?? toolCallCount}`);
+    }
+
+    if (previousToolCallCount > 0 && toolCallCount === 0) {
+      pushOutput(
+        { badge: '工具完成', text: '工具调用结束了，我把上下文继续贴回主线。', tone: 'notice' },
+        true,
+      );
+      recordInteraction('notification', '工具完成');
+    }
+
+    if (!hadStreamError && hasStreamError) {
+      pushOutput(
+        {
+          badge: '错误提示',
+          text: streamErrorMessage?.trim()
+            ? `这轮遇到错误：${streamErrorMessage.trim()}`
+            : '这轮遇到错误，我会先帮你稳住上下文。',
+          tone: 'notice',
+        },
+        true,
+      );
+      recordInteraction('notification', '错误提示');
+    }
+
+    if (hadStreamError && !hasStreamError) {
+      pushOutput(
+        { badge: '错误恢复', text: '错误状态已经恢复，我继续低打扰跟着。', tone: 'notice' },
+        true,
+      );
+      recordInteraction('notification', '错误恢复');
+    }
+  }, [
+    hasStreamError,
+    lastToolName,
+    muted,
+    pendingPermissionCount,
+    pushOutput,
+    quietMode,
+    recordInteraction,
+    streamErrorMessage,
+    streaming,
+    toolCallCount,
+  ]);
+
+  useEffect(() => {
+    if (muted || quietMode) {
+      return;
+    }
+
+    if (idleSeconds < 180) {
+      idleReminderActiveRef.current = false;
+      return;
+    }
+
+    if (idleReminderActiveRef.current) {
+      return;
+    }
+
+    idleReminderActiveRef.current = true;
+    pushOutput(
+      {
+        badge: '空闲提醒',
+        text: '你停了一会儿，我先替你守着这轮上下文。',
+        tone: 'ambient',
+      },
+      true,
+    );
+    recordInteraction('notification', '空闲提醒');
+  }, [idleSeconds, muted, pushOutput, quietMode, recordInteraction]);
 
   useEffect(() => {
     if (!liveOutputId) {
@@ -607,10 +717,17 @@ export function CompanionStage({
         const data = (await createSettingsClient(gatewayUrl).putCompanionChat(accessToken, {
           message: userMessage,
           context: {
+            attachedCount,
+            hasStreamError,
+            idleSeconds,
+            lastToolName,
             sessionBusy: sessionBusyState === 'running',
             pendingApprovals: pendingPermissionCount,
             pendingQuestions: pendingPermissionCount,
-            runningTasks: attachedCount,
+            queuedCount,
+            runningTasks: toolCallCount,
+            streamErrorMessage,
+            toolCallCount,
             todoCount,
           },
           agentId,
@@ -640,13 +757,19 @@ export function CompanionStage({
       attachedCount,
       buddyChatBusy,
       gatewayUrl,
+      hasStreamError,
+      idleSeconds,
+      lastToolName,
       muted,
       pendingPermissionCount,
       pushOutput,
+      queuedCount,
       quietMode,
       recordInteraction,
       sessionBusyState,
+      streamErrorMessage,
       todoCount,
+      toolCallCount,
     ],
   );
 

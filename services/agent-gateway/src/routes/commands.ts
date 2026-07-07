@@ -36,9 +36,12 @@ import {
 } from '../message/message-v2-adapter.js';
 import { executeSessionCompaction } from '../session/session-compaction.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
+import { recordUlwVerificationEvidence } from '../session/ulw-verification-evidence.js';
+import { withWorkflowRuntimeEvidenceArtifact } from '../session/workflow-runtime-state.js';
 import { stringifyToolResultOutput } from '../tools/tool-result-contract.js';
 import { parseUlwVerifyDecision } from './command-helpers.js';
 import { buildCommandDescriptors } from './command-descriptors.js';
+import { findPrometheusPlans } from '../session/boulder-state.js';
 import {
   clearActiveLoopMetadata,
   clearPersistedLoopState,
@@ -52,12 +55,15 @@ import {
   stopActiveLoopExecution,
 } from './command-loop-runtime.js';
 import {
+  applyStartWorkVerifierVerdict,
   buildStartWorkTaskTags,
   createTaskUpdateEvent,
   createWorkflowPlanSubtasks,
   findReusableStartWorkTask,
   listWorkflowPlanSubtasks,
+  recordStartWorkDoneClaim,
   toTaskUpdateStatus,
+  type StartWorkVerifierVerdict,
 } from './start-work-subtasks.js';
 
 const textContentSchema = z.object({
@@ -100,6 +106,9 @@ interface SessionRow {
   user_id: string;
   metadata_json: string;
 }
+
+type CommandTaskGraph = Awaited<ReturnType<AgentTaskManagerImpl['loadOrCreate']>>;
+type CommandTask = CommandTaskGraph['tasks'][string];
 
 const taskManager = new AgentTaskManagerImpl();
 
@@ -229,6 +238,12 @@ export async function commandsRoutes(app: FastifyInstance): Promise<void> {
           break;
         case 'start_work':
           result = await executeStartWorkCommand(cmdParams);
+          break;
+        case 'submit_start_work_done_claim':
+          result = await executeStartWorkDoneClaimCommand(cmdParams);
+          break;
+        case 'review_start_work_done_claim':
+          result = await executeStartWorkReviewCommand(cmdParams);
           break;
         case 'generate_handoff':
           result = await executeHandoffCommand(cmdParams);
@@ -760,7 +775,7 @@ async function executeCancelRalphCommand(params: {
     await taskManager.save(params.graph);
   }
 
-  const metadata = clearUlwLoopMetadata(params.metadataJson);
+  let metadata = clearUlwLoopMetadata(params.metadataJson);
   clearPersistedLoopState(WORKSPACE_ROOT, params.sessionId);
   const cardMessage = didCancelTask
     ? `已取消当前 ${activeLoop.kind} 循环。${activeLoop.taskId ? `\n任务 ID：${activeLoop.taskId}` : ''}`
@@ -982,7 +997,7 @@ async function executeUlwVerifyCommand(params: {
 
   const explanation = verifyDecision.note;
 
-  const metadata = clearUlwLoopMetadata(params.metadataJson);
+  let metadata = clearUlwLoopMetadata(params.metadataJson);
   let events: CommandExecutionResult['events'];
   let card: CommandExecutionResult['card'];
 
@@ -1011,21 +1026,20 @@ async function executeUlwVerifyCommand(params: {
       message: explanation ? `ULW 验证已通过。\n说明：${explanation}` : 'ULW 验证已通过。',
       tone: 'info',
     };
-    events = didTransition
-      ? [
-          {
-            type: 'task_update',
-            taskId: loopTask.id,
-            label: loopTask.title,
-            status: 'done',
-            sessionId: params.sessionId,
-            parentTaskId: loopTask.parentTaskId,
-            eventId: `${params.sessionId}:${loopTask.id}:verified`,
-            runId: `command:${params.sessionId}:${params.commandId}`,
-            occurredAt: Date.now(),
-          },
-        ]
-      : [];
+    const evidence = recordUlwVerificationEvidence({
+      note: explanation,
+      prompt: effectivePersistedState.prompt,
+      sessionId: params.sessionId,
+      status: 'passed',
+      taskId: loopTask.id,
+      taskTitle: loopTask.title,
+      userId: params.userId,
+    });
+    events = [...evidence.events];
+    metadata = withWorkflowRuntimeEvidenceArtifact(metadata, {
+      artifactId: evidence.artifactId,
+      status: 'available',
+    });
   } else {
     const didTransition =
       loopTask.status !== 'completed' &&
@@ -1043,21 +1057,20 @@ async function executeUlwVerifyCommand(params: {
       message: explanation ? `ULW 验证未通过。\n原因：${explanation}` : 'ULW 验证未通过。',
       tone: 'warning',
     };
-    events = didTransition
-      ? [
-          {
-            type: 'task_update',
-            taskId: loopTask.id,
-            label: loopTask.title,
-            status: 'failed',
-            sessionId: params.sessionId,
-            parentTaskId: loopTask.parentTaskId,
-            eventId: `${params.sessionId}:${loopTask.id}:verification-failed`,
-            runId: `command:${params.sessionId}:${params.commandId}`,
-            occurredAt: Date.now(),
-          },
-        ]
-      : [];
+    const evidence = recordUlwVerificationEvidence({
+      note: explanation,
+      prompt: effectivePersistedState.prompt,
+      sessionId: params.sessionId,
+      status: 'failed',
+      taskId: loopTask.id,
+      taskTitle: loopTask.title,
+      userId: params.userId,
+    });
+    events = [...evidence.events];
+    metadata = withWorkflowRuntimeEvidenceArtifact(metadata, {
+      artifactId: evidence.artifactId,
+      status: 'available',
+    });
   }
 
   appendCommandCardArtifacts({
@@ -1475,6 +1488,218 @@ async function executeStartWorkCommand(params: {
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readStartWorkGateMetadata(task: CommandTask): Record<string, unknown> | null {
+  const metadata = task.metadata;
+  if (!isRecord(metadata)) {
+    return null;
+  }
+  const gate = metadata['startWorkGate'];
+  return isRecord(gate) ? gate : null;
+}
+
+function parseStartWorkGateTaskId(parsedArgs: {
+  readonly named: Record<string, string | boolean>;
+}): string | undefined {
+  return (
+    parseStringOption(parsedArgs.named['task']) ?? parseStringOption(parsedArgs.named['task-id'])
+  );
+}
+
+function findStartWorkGateTask(input: {
+  readonly graph: CommandTaskGraph;
+  readonly mode: 'done-claim' | 'review';
+  readonly sessionId: string;
+  readonly taskId?: string;
+}): CommandTask | null {
+  if (input.taskId) {
+    const task = input.graph.tasks[input.taskId];
+    if (!task || task.sessionId !== input.sessionId || !readStartWorkGateMetadata(task)) {
+      return null;
+    }
+    return task;
+  }
+
+  const candidates = Object.values(input.graph.tasks)
+    .filter((task) => task.sessionId === input.sessionId && task.status === 'running')
+    .filter((task) => {
+      const gate = readStartWorkGateMetadata(task);
+      if (!gate) {
+        return false;
+      }
+      if (input.mode === 'review') {
+        return gate['executorClaimStatus'] === 'submitted';
+      }
+      return true;
+    })
+    .sort((left, right) => right.updatedAt - left.updatedAt);
+
+  return candidates[0] ?? null;
+}
+
+function parseStartWorkVerifierVerdict(
+  value: string | undefined,
+): StartWorkVerifierVerdict | undefined {
+  switch (value) {
+    case 'confirmed':
+    case 'needs-fix':
+    case 'false-positive':
+    case 'needs-human-review':
+      return value;
+    default:
+      return undefined;
+  }
+}
+
+async function executeStartWorkDoneClaimCommand(params: {
+  args: string[];
+  commandId: string;
+  graph: CommandTaskGraph;
+  messages: Message[];
+  metadataJson: string;
+  rawInput?: string;
+  sessionId: string;
+  userId: string;
+}): Promise<CommandExecutionResult> {
+  const parsedArgs = parseCommandArgs(params.args);
+  const task = findStartWorkGateTask({
+    graph: params.graph,
+    mode: 'done-claim',
+    sessionId: params.sessionId,
+    taskId: parseStartWorkGateTaskId(parsedArgs),
+  });
+  if (!task) {
+    return {
+      sessionId: params.sessionId,
+      events: [],
+      card: {
+        type: 'status',
+        title: '/start-work-done unavailable',
+        message:
+          '没有找到可提交完成声明的 running start-work 子任务。可使用 /start-work-done --task <任务ID> <说明> 指定目标。',
+        tone: 'warning',
+      },
+    };
+  }
+
+  const positionalSummary = parsedArgs.positional.join(' ').trim();
+  const summary =
+    parseStringOption(parsedArgs.named['summary']) ??
+    (positionalSummary.length > 0 ? positionalSummary : '执行者已声明完成，等待 reviewer 确认。');
+  recordStartWorkDoneClaim({
+    graph: params.graph,
+    summary,
+    taskId: task.id,
+    taskManager,
+  });
+  await taskManager.save(params.graph);
+  const updatedTask = params.graph.tasks[task.id] ?? task;
+
+  return {
+    sessionId: params.sessionId,
+    events: [
+      createTaskUpdateEvent({
+        commandId: params.commandId,
+        sessionId: params.sessionId,
+        status: toTaskUpdateStatus(updatedTask.status),
+        task: updatedTask,
+      }),
+    ],
+    card: {
+      type: 'status',
+      title: '/start-work-done 已提交',
+      message: `已提交完成声明，等待 reviewer verdict。\n任务：${updatedTask.title}\n任务 ID：${updatedTask.id}`,
+      tone: 'info',
+    },
+  };
+}
+
+async function executeStartWorkReviewCommand(params: {
+  args: string[];
+  commandId: string;
+  graph: CommandTaskGraph;
+  messages: Message[];
+  metadataJson: string;
+  rawInput?: string;
+  sessionId: string;
+  userId: string;
+}): Promise<CommandExecutionResult> {
+  const parsedArgs = parseCommandArgs(params.args);
+  const explicitVerdict = parseStringOption(parsedArgs.named['verdict']);
+  const verdict = parseStartWorkVerifierVerdict(explicitVerdict ?? parsedArgs.positional[0]);
+  if (!verdict) {
+    return {
+      sessionId: params.sessionId,
+      events: [],
+      card: {
+        type: 'status',
+        title: '/start-work-review 参数无效',
+        message:
+          '请使用 /start-work-review --verdict confirmed|needs-fix|false-positive|needs-human-review [说明]。',
+        tone: 'warning',
+      },
+    };
+  }
+
+  const task = findStartWorkGateTask({
+    graph: params.graph,
+    mode: 'review',
+    sessionId: params.sessionId,
+    taskId: parseStartWorkGateTaskId(parsedArgs),
+  });
+  if (!task) {
+    return {
+      sessionId: params.sessionId,
+      events: [],
+      card: {
+        type: 'status',
+        title: '/start-work-review unavailable',
+        message:
+          '没有找到已提交完成声明且可 review 的 running start-work 子任务。可使用 /start-work-review --task <任务ID> --verdict confirmed 指定目标。',
+        tone: 'warning',
+      },
+    };
+  }
+
+  const positionalNote =
+    explicitVerdict === undefined && parsedArgs.positional[0] === verdict
+      ? parsedArgs.positional.slice(1).join(' ').trim()
+      : parsedArgs.positional.join(' ').trim();
+  const note =
+    parseStringOption(parsedArgs.named['note']) ??
+    (positionalNote.length > 0 ? positionalNote : undefined);
+  applyStartWorkVerifierVerdict({
+    graph: params.graph,
+    ...(note ? { note } : {}),
+    taskId: task.id,
+    taskManager,
+    verdict,
+  });
+  await taskManager.save(params.graph);
+  const updatedTask = params.graph.tasks[task.id] ?? task;
+
+  return {
+    sessionId: params.sessionId,
+    events: [
+      createTaskUpdateEvent({
+        commandId: params.commandId,
+        sessionId: params.sessionId,
+        status: toTaskUpdateStatus(updatedTask.status),
+        task: updatedTask,
+      }),
+    ],
+    card: {
+      type: 'status',
+      title: '/start-work-review 已提交',
+      message: `Reviewer verdict: ${verdict}\n任务：${updatedTask.title}\n任务 ID：${updatedTask.id}`,
+      tone: verdict === 'confirmed' ? 'info' : 'warning',
+    },
+  };
+}
+
 function mergeMetadata(
   metadataJson: string,
   updates: Record<string, unknown>,
@@ -1616,6 +1841,40 @@ interface WorkflowPlanSummary {
   total: number;
 }
 
+function getWorkflowPlanSearchFields(plan: WorkflowPlanSummary): readonly string[] {
+  const relativePathWithoutExtension = plan.relativePath.endsWith('.md')
+    ? plan.relativePath.slice(0, -'.md'.length)
+    : plan.relativePath;
+
+  return [
+    plan.title,
+    relativePathWithoutExtension,
+    path.basename(plan.relativePath, '.md'),
+    plan.relativePath,
+  ].map((field) => field.toLowerCase());
+}
+
+function findMatchingWorkflowPlan(
+  summaries: readonly WorkflowPlanSummary[],
+  requestedPlan: string | undefined,
+): WorkflowPlanSummary | null {
+  const requested = requestedPlan?.trim().toLowerCase();
+  if (!requested) {
+    return summaries[0] ?? null;
+  }
+
+  const exactMatch = summaries.find((item) =>
+    getWorkflowPlanSearchFields(item).some((field) => field === requested),
+  );
+  if (exactMatch) return exactMatch;
+
+  return (
+    summaries.find((item) =>
+      getWorkflowPlanSearchFields(item).some((field) => field.includes(requested)),
+    ) ?? null
+  );
+}
+
 function extractLatestUserGoal(messages: Message[]): string {
   const latestUserMessage = [...messages]
     .reverse()
@@ -1652,8 +1911,7 @@ async function findLatestWorkflowPlan(
   workspaceRoot: string,
   requestedPlan?: string,
 ): Promise<WorkflowPlanSummary | null> {
-  const workflowDir = path.join(workspaceRoot, '.agentdocs', 'workflow');
-  const files = await collectWorkflowMarkdownFiles(workflowDir);
+  const files = await collectWorkflowPlanFiles(workspaceRoot);
   const summaries = (
     await Promise.all(files.map((filePath) => readWorkflowPlanSummary(filePath, workspaceRoot)))
   )
@@ -1661,15 +1919,15 @@ async function findLatestWorkflowPlan(
     .filter((item) => item.total > 0 && item.completed < item.total)
     .sort((a, b) => b.modifiedAt - a.modifiedAt);
 
-  if (requestedPlan) {
-    const requested = requestedPlan.toLowerCase();
-    const exactMatch = summaries.find((item) => item.title.toLowerCase() === requested);
-    if (exactMatch) return exactMatch;
-    const partialMatch = summaries.find((item) => item.title.toLowerCase().includes(requested));
-    if (partialMatch) return partialMatch;
-  }
+  return findMatchingWorkflowPlan(summaries, requestedPlan);
+}
 
-  return summaries[0] ?? null;
+async function collectWorkflowPlanFiles(workspaceRoot: string): Promise<string[]> {
+  const nativeFiles = await collectWorkflowMarkdownFiles(
+    path.join(workspaceRoot, '.agentdocs', 'workflow'),
+  );
+  const compatibilityFiles = await findPrometheusPlans(workspaceRoot);
+  return [...new Set([...nativeFiles, ...compatibilityFiles])];
 }
 
 function extractCommandArgs(rawInput: string | undefined, label: string): string[] {
@@ -1820,3 +2078,10 @@ function toWorkspaceRelativePath(filePath: string, workspaceRoot: string): strin
   const relativePath = path.relative(workspaceRoot, filePath);
   return relativePath && !relativePath.startsWith('..') ? relativePath : filePath;
 }
+
+export const __testing = {
+  executeStartWorkDoneClaimCommand,
+  executeStartWorkReviewCommand,
+  findLatestWorkflowPlan,
+  findMatchingWorkflowPlan,
+};

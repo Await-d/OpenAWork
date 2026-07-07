@@ -140,9 +140,10 @@ export function MessageRow({
     resolvedModelLabel || (!isUser ? resolvedProviderIdentity.displayName : '助手');
   const normalizedAssistantLabel = normalizeProviderKey(assistantModelLabel);
   const normalizedResolvedProvider = normalizeProviderKey(resolvedProviderIdentity.displayName);
+  const overrideDisplayName = identityOverride?.displayName?.trim();
   const displayName = isUser
-    ? email || '你'
-    : identityOverride?.displayName?.trim() || (showModelNamePref ? assistantModelLabel : '助手');
+    ? overrideDisplayName || email || '你'
+    : overrideDisplayName || (showModelNamePref ? assistantModelLabel : '助手');
   const timestamp = formatShortTime(message.createdAt);
   const tokenCount = message.tokenEstimate ?? estimateTokenCount(message.content);
   // During streaming, `message.durationMs` on the live virtual assistant
@@ -267,7 +268,28 @@ export function MessageRow({
         data-role={message.role}
         data-grouped={groupedWithPrevious ? 'true' : 'false'}
       >
-        {isUser ? (
+        {isUser && identityOverride ? (
+          <div
+            aria-hidden
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: '50%',
+              display: 'grid',
+              placeItems: 'center',
+              fontSize: 13,
+              fontWeight: 700,
+              color: identityOverride.color ?? 'var(--fg-strong)',
+              background: `color-mix(in srgb, ${identityOverride.color ?? 'var(--accent)'} 12%, var(--bg-overlay))`,
+              border: `1px solid color-mix(in srgb, ${identityOverride.color ?? 'var(--accent)'} 28%, transparent)`,
+            }}
+            title={identityOverride.displayName}
+          >
+            {identityOverride.icon ??
+              identityOverride.initials ??
+              identityOverride.displayName.slice(0, 1)}
+          </div>
+        ) : isUser ? (
           <UserAvatar email={email} size={28} />
         ) : identityOverride ? (
           <div
@@ -1291,23 +1313,76 @@ function looksLikeStructuredJsonContent(content: string): boolean {
   return normalized.includes('"type"') || normalized.endsWith('}');
 }
 
-const MODE_ACCENTS: Record<DialogueMode, { bg: string; color: string; icon: string }> = {
+const MODE_ACCENTS: Record<DialogueMode, { bg: string; color: string }> = {
   clarify: {
-    bg: 'rgba(245, 158, 11, 0.10)',
-    color: 'rgb(245, 158, 11)',
-    icon: '🔍',
+    bg: 'var(--contrast-subtle)',
+    color: 'var(--contrast)',
   },
   coding: {
-    bg: 'rgba(139, 92, 246, 0.12)',
-    color: 'rgb(167, 139, 250)',
-    icon: '⚡',
+    bg: 'var(--accent-subtle)',
+    color: 'var(--accent)',
   },
   programmer: {
-    bg: 'rgba(16, 185, 129, 0.12)',
-    color: 'rgb(52, 211, 153)',
-    icon: '🛠',
+    bg: 'var(--aux-subtle)',
+    color: 'var(--aux)',
   },
 };
+
+function renderDialogueModeIcon(mode: DialogueMode) {
+  switch (mode) {
+    case 'clarify':
+      return (
+        <svg
+          aria-hidden="true"
+          width="17"
+          height="17"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <circle cx="11" cy="11" r="7" />
+          <path d="m20 20-3.5-3.5" />
+        </svg>
+      );
+    case 'coding':
+      return (
+        <svg
+          aria-hidden="true"
+          width="17"
+          height="17"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M13 2 4 14h7l-1 8 10-13h-7l1-7Z" />
+        </svg>
+      );
+    case 'programmer':
+      return (
+        <svg
+          aria-hidden="true"
+          width="17"
+          height="17"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="m16 18 6-6-6-6" />
+          <path d="m8 6-6 6 6 6" />
+          <path d="m14.5 4-5 16" />
+        </svg>
+      );
+  }
+}
 
 const WELCOME_KEYFRAMES = `
 @keyframes ws-fade-up{0%{opacity:0;transform:translateY(18px)}100%{opacity:1;transform:translateY(0)}}
@@ -1319,6 +1394,13 @@ const WELCOME_KEYFRAMES = `
 .ws-pill{transition:transform .18s,box-shadow .18s}
 .ws-pill:hover{transform:translateY(-1px);box-shadow:0 3px 12px rgba(0,0,0,.1)}
 .ws-pill:active{transform:scale(.97)}
+.ws-mode-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;width:100%}
+@media (max-width: 900px){
+  .ws-mode-grid{grid-template-columns:1fr;max-width:520px}
+  .ws-card{display:grid!important;grid-template-columns:auto minmax(0,1fr);align-items:start;gap:8px!important}
+  .ws-card ul{grid-column:2;margin-top:0!important}
+  .ws-card:hover{transform:none}
+}
 `;
 
 export function WelcomeScreen({
@@ -1415,15 +1497,7 @@ export function WelcomeScreen({
         </div>
       </div>
 
-      {/* Mode cards – horizontal grid */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: 12,
-          width: '100%',
-        }}
-      >
+      <div className="ws-mode-grid">
         {DIALOGUE_MODE_OPTIONS.map((mode, idx) => {
           const accent = MODE_ACCENTS[mode.value];
           const isActive = dialogueMode === mode.value;
@@ -1452,6 +1526,7 @@ export function WelcomeScreen({
                   textAlign: 'left',
                   animation: `ws-fade-up .5s ease both ${0.1 + idx * 0.08}s${isActive ? ', ws-glow-pulse 2.5s ease-in-out infinite .6s' : ''}`,
                   overflow: 'hidden',
+                  minWidth: 0,
                 } as React.CSSProperties
               }
             >
@@ -1483,12 +1558,13 @@ export function WelcomeScreen({
                   alignItems: 'center',
                   justifyContent: 'center',
                   fontSize: 16,
+                  color: accent.color,
                   flexShrink: 0,
                   transition: 'transform .2s',
                   transform: isActive ? 'scale(1.08)' : 'scale(1)',
                 }}
               >
-                {accent.icon}
+                {renderDialogueModeIcon(mode.value)}
               </span>
               <span
                 style={{
@@ -1496,6 +1572,7 @@ export function WelcomeScreen({
                   flexDirection: 'column',
                   gap: 2,
                   position: 'relative',
+                  minWidth: 0,
                 }}
               >
                 <span
@@ -1506,6 +1583,8 @@ export function WelcomeScreen({
                     display: 'flex',
                     alignItems: 'center',
                     gap: 5,
+                    textWrap: 'pretty',
+                    wordBreak: 'keep-all',
                   }}
                 >
                   {mode.label}
@@ -1535,6 +1614,8 @@ export function WelcomeScreen({
                     fontSize: 11,
                     color: 'var(--fg-muted)',
                     lineHeight: 1.4,
+                    textWrap: 'pretty',
+                    wordBreak: 'keep-all',
                   }}
                 >
                   {mode.description}
@@ -1550,6 +1631,8 @@ export function WelcomeScreen({
                   lineHeight: 1.5,
                   listStyle: 'none',
                   transition: 'color .2s',
+                  textWrap: 'pretty',
+                  wordBreak: 'keep-all',
                 }}
               >
                 {mode.details.slice(0, 2).map((detail) => (

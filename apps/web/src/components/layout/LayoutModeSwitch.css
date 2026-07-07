@@ -1,0 +1,61 @@
+.layout-mode-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1, 4px);
+  padding: var(--spacing-1, 4px);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-overlay);
+  flex-shrink: 0;
+}
+
+.layout-mode-switch[data-floating='true'] {
+  position: fixed;
+  top: var(--spacing-2, 8px);
+  right: var(--spacing-3, 12px);
+  z-index: 50;
+  box-shadow: var(--shadow-md);
+}
+
+.layout-mode-switch__button {
+  height: calc(var(--spacing-3, 12px) * 2);
+  padding: 0 var(--spacing-2, 8px);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  transition:
+    background var(--dur-micro) var(--ease-micro),
+    border-color var(--dur-micro) var(--ease-micro),
+    color var(--dur-micro) var(--ease-micro),
+    transform var(--dur-micro) var(--ease-micro);
+}
+
+.layout-mode-switch__button:hover {
+  border-color: var(--border-emphasis);
+  background: var(--bg-hover);
+  color: var(--fg-default);
+}
+
+.layout-mode-switch__button:active {
+  background: var(--bg-active);
+  transform: translateY(1px);
+}
+
+.layout-mode-switch__button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
+.layout-mode-switch__button[aria-pressed='true'] {
+  border-color: var(--accent-border);
+  background: var(--accent-subtle);
+  color: var(--accent);
+  font-weight: 700;
+}

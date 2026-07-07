@@ -68,6 +68,7 @@ import { createDefaultSandbox } from '../tools/tool-sandbox.js';
 import type { SandboxExecutionContext } from '../tools/tool-sandbox.js';
 import { cancelDescendantSessionStreams } from '../session/cancel-descendant-streams.js';
 import { buildGatewayToolDefinitions } from '../tools/tool-definitions.js';
+import { filterPluginControlledToolsForUser } from '../tools/plugin-tool-settings.js';
 import { buildFlatMcpToolDefinitions } from '../mcp/mcp-flat-tool-defs.js';
 import { listMcpToolsForSession } from '../mcp/mcp-runtime.js';
 import { isFlatMcpToolsDisabled } from '../mcp/mcp-tool-naming.js';
@@ -2294,16 +2295,19 @@ export async function handleStreamRequest(input: {
       );
       const pinnedSkillsPrompt = pinnedSection.section;
 
-      const baseTools = getEnabledTools(webSearchEnabled, {
-        effectiveSkills,
-        // Per-turn model-aware tool filter (mirrors opencode
-        // `tool/registry.ts:303-315`): GPT-5 generation models get
-        // `apply_patch` and lose `edit/multi_edit/write`; other models
-        // keep `edit/multi_edit/write` and lose `apply_patch`. Falls
-        // back to the legacy "expose everything" behaviour when
-        // `route.model` is missing or `OPENAWORK_DISABLE_MODEL_AWARE_TOOL_FILTER=1`.
-        modelId: route.model,
-      });
+      const baseTools = filterPluginControlledToolsForUser(
+        getEnabledTools(webSearchEnabled, {
+          effectiveSkills,
+          // Per-turn model-aware tool filter (mirrors opencode
+          // `tool/registry.ts:303-315`): GPT-5 generation models get
+          // `apply_patch` and lose `edit/multi_edit/write`; other models
+          // keep `edit/multi_edit/write` and lose `apply_patch`. Falls
+          // back to the legacy "expose everything" behaviour when
+          // `route.model` is missing or `OPENAWORK_DISABLE_MODEL_AWARE_TOOL_FILTER=1`.
+          modelId: route.model,
+        }),
+        input.user.sub,
+      );
 
       // Flatten MCP tools into the LLM tool dictionary (PR-C).
       // Mirrors opencode's `mcp.tools()` injection

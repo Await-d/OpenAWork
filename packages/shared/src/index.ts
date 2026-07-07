@@ -516,7 +516,7 @@ export const REFERENCE_AGENT_ROLE_METADATA: Record<
       preset: 'explore',
       confidence: 'high',
     },
-    aliases: ['explorer'],
+    aliases: ['explorer', 'codebase-explorer', 'repository-explorer'],
     category: 'exploration',
     cost: 'FREE',
     keyTrigger: '2+ 模块涉及 → 启动 explore 后台',
@@ -577,7 +577,7 @@ export const REFERENCE_AGENT_ROLE_METADATA: Record<
       preset: 'librarian',
       confidence: 'high',
     },
-    aliases: ['librarian'],
+    aliases: ['librarian', 'docs-librarian', 'research-librarian'],
     category: 'exploration',
     cost: 'CHEAP',
     keyTrigger: '外部库/文档提及 → 启动 librarian',
@@ -602,7 +602,13 @@ export const REFERENCE_AGENT_ROLE_METADATA: Record<
       preset: 'critic',
       confidence: 'high',
     },
-    aliases: ['critic', '/prompts:critic', '/ccg:team-review'],
+    aliases: [
+      'critic',
+      'reviewer',
+      'lazycodex-gate-reviewer',
+      '/prompts:critic',
+      '/ccg:team-review',
+    ],
     category: 'advisor',
     cost: 'CHEAP',
     triggers: [{ domain: '审查', trigger: '工作计划审查，捕捉缺口、歧义和缺失上下文' }],
@@ -613,7 +619,7 @@ export const REFERENCE_AGENT_ROLE_METADATA: Record<
       preset: 'verifier',
       confidence: 'low',
     },
-    aliases: ['verifier', '/prompts:verifier'],
+    aliases: ['verifier', 'verification-reviewer', '/prompts:verifier'],
     category: 'advisor',
     cost: 'EXPENSIVE',
     triggers: [{ domain: '验证', trigger: '编排验证，委派任务并验证完成证据' }],
@@ -634,7 +640,7 @@ export const REFERENCE_AGENT_ROLE_METADATA: Record<
       preset: 'default',
       confidence: 'high',
     },
-    aliases: ['junior'],
+    aliases: ['junior', 'qa-executor', 'qa_executor', 'test-executor'],
     category: 'specialist',
     cost: 'CHEAP',
   },
@@ -848,7 +854,9 @@ export type CommandAction =
   | { kind: 'stop_continuation' }
   | { kind: 'refactor_session' }
   | { kind: 'remove_deadcode' }
-  | { kind: 'start_work' };
+  | { kind: 'start_work' }
+  | { kind: 'submit_start_work_done_claim' }
+  | { kind: 'review_start_work_done_claim' };
 
 export interface CommandDescriptor {
   id: string;
@@ -880,6 +888,43 @@ export interface CommandExecutionResult {
   events: RunEvent[];
   card?: CommandResultCard;
   sessionId?: string;
+}
+
+export type WorkflowRuntimeMode = 'normal' | 'planning' | 'execution' | 'ulw';
+
+export type WorkflowRuntimeVerificationStatus = 'none' | 'pending' | 'passed' | 'failed';
+
+export type WorkflowRuntimeEvidenceStatus = 'none' | 'pending' | 'available';
+
+export interface WorkflowRuntimePlanState {
+  readonly path?: string;
+  readonly progress?: string;
+  readonly requestedWorktreePath?: string;
+  readonly title?: string;
+  readonly worktreePath?: string;
+}
+
+export interface WorkflowRuntimeLoopState {
+  readonly completionPromise?: string;
+  readonly kind: 'ralph' | 'ulw';
+  readonly startedAt?: number;
+  readonly strategy?: 'continue' | 'reset';
+  readonly taskDescription?: string;
+  readonly taskId?: string;
+  readonly verificationRequired: boolean;
+  readonly verificationStatus: WorkflowRuntimeVerificationStatus;
+}
+
+export interface WorkflowRuntimeEvidenceState {
+  readonly artifactRefs: readonly string[];
+  readonly status: WorkflowRuntimeEvidenceStatus;
+}
+
+export interface WorkflowRuntimeState {
+  readonly activeLoop?: WorkflowRuntimeLoopState;
+  readonly activePlan?: WorkflowRuntimePlanState;
+  readonly evidence: WorkflowRuntimeEvidenceState;
+  readonly mode: WorkflowRuntimeMode;
 }
 
 export interface TaskOwnership {

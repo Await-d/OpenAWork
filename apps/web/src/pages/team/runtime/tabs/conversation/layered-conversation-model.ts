@@ -428,6 +428,7 @@ export function buildLayerConversationRows({
       handoffCount: handoffCountBySession.get(sessionId) ?? 1,
       id: `handoff-${handoff.id}`,
       parentSessionId: handoff.fromSessionId ?? null,
+      personaKey: null,
       roleLayer,
       sessionId,
       source: 'handoff',

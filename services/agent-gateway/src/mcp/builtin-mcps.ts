@@ -4,8 +4,9 @@
  * `mcp_list_tools` 使用。
  *
  * 设计要点：
- * - 仅声明**远程 MCP**（transport=sse），不内置任何本地 stdio MCP，
- *   避免在用户机器上启动外部进程的副作用。
+ * - 远程 MCP 直接声明为 SSE；codegraph / git_bash / lsp 声明为
+ *   OpenAWork 内置虚拟 stdio MCP，由 runtime 直接桥接到本地能力，
+ *   不实际启动占位 command。
  * - 用户可以在 user_settings 里**用相同 id 覆盖**任一内置 server
  *   （例如换 baseUrl、加自定义 header、或者用 enabled=false 禁用）。
  *   合并语义在 `loadConfiguredMcpServersForUser` 中实现。
@@ -24,7 +25,7 @@ import type { ConfiguredMCPServer } from './mcp-runtime.js';
  * Stable id 用作合并键。用户在 user_settings.mcp_servers 里写
  * `{ "id": "websearch", ... }` 会**覆盖**同名内置 server。
  */
-export const BUILTIN_MCP_IDS = ['websearch', 'grep_app'] as const;
+export const BUILTIN_MCP_IDS = ['websearch', 'grep_app', 'codegraph', 'git_bash', 'lsp'] as const;
 export type BuiltinMcpId = (typeof BUILTIN_MCP_IDS)[number];
 
 interface BuildBuiltinMcpServersOptions {
@@ -51,6 +52,7 @@ export function buildBuiltinMcpServers(
     transport: 'sse',
     url: 'https://mcp.exa.ai/mcp?tools=web_search_exa',
     enabled: true,
+    builtin: true,
     ...(exaApiKey ? { headers: { 'x-api-key': exaApiKey } } : {}),
   };
 
@@ -61,9 +63,40 @@ export function buildBuiltinMcpServers(
     transport: 'sse',
     url: 'https://mcp.grep.app',
     enabled: true,
+    builtin: true,
   };
 
-  return [websearch, grepApp];
+  const codegraph: ConfiguredMCPServer = {
+    id: 'codegraph',
+    name: 'codegraph',
+    transport: 'stdio',
+    command: 'openawork-virtual-codegraph',
+    enabled: true,
+    required: false,
+    builtin: true,
+  };
+
+  const gitBash: ConfiguredMCPServer = {
+    id: 'git_bash',
+    name: 'git_bash',
+    transport: 'stdio',
+    command: 'openawork-virtual-git-bash',
+    enabled: process.platform === 'win32',
+    required: false,
+    builtin: true,
+  };
+
+  const lsp: ConfiguredMCPServer = {
+    id: 'lsp',
+    name: 'lsp',
+    transport: 'stdio',
+    command: 'openawork-virtual-lsp',
+    enabled: true,
+    required: false,
+    builtin: true,
+  };
+
+  return [websearch, grepApp, codegraph, gitBash, lsp];
 }
 
 function readEnvString(env: NodeJS.ProcessEnv, key: string): string | undefined {

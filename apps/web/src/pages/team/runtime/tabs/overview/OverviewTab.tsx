@@ -4,23 +4,16 @@ import type {
   AgentTeamsSidebarTeam,
   AgentTeamsTimelineEventType,
 } from '../../data/team-runtime-types.js';
-import { formatSidebarTeamStatus } from '../../data/team-runtime-status.js';
-import { resolveSidebarTeamSubtitle } from '../../data/team-runtime-status.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
 import { formatTimelineDetail } from '../../data/team-runtime-reference-formatters.js';
 import { PANEL_STYLE, TREND_META } from '../../shared/team-runtime-shared.js';
 import { Icon, ChevronDownIcon } from '../../shared/TeamIcons.js';
 import type { IconKey } from '../../shared/TeamIcons.js';
 import { TabContainer } from '../TabContainer.js';
-import {
-  CK_GAP_LG,
-  CK_PAD_LG,
-  CK_RADIUS_LG,
-  MetricGrid,
-  MiniBar,
-  SectionPanel,
-} from '../../shared/content-kit/index.js';
+import { CK_GAP_LG, MetricGrid, MiniBar, SectionPanel } from '../../shared/content-kit/index.js';
 import { SharedSessionOverviewView } from './shared-session-overview-view.js';
+import { TeamSessionContextStrip } from './TeamSessionContextStrip.js';
+import { TeamOverviewWorkbenchMap } from './TeamOverviewWorkbenchMap.js';
 
 export function OverviewTab({
   selectedTeam = null,
@@ -28,9 +21,6 @@ export function OverviewTab({
   selectedTeam?: AgentTeamsSidebarTeam | null;
 }) {
   const { activityStats, overviewCards, timelineEvents } = useTeamRuntimeReferenceViewData();
-  const selectedTeamSubtitle = selectedTeam
-    ? resolveSidebarTeamSubtitle(selectedTeam.status, selectedTeam.subtitle)
-    : null;
   if (selectedTeam?.isSharedSession) {
     return (
       <TabContainer
@@ -91,105 +81,26 @@ export function OverviewTab({
   }, []);
 
   return (
-    <TabContainer title="运行概览" subtitle="当前团队会话的关键指标 + 活动时间线，按选中会话联动。">
+    <TabContainer title="运行概览" subtitle="关键指标 + 活动时间线，按会话联动。">
       <div style={{ display: 'flex', flexDirection: 'column', gap: CK_GAP_LG }}>
-        {selectedTeam ? (
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              gap: 10,
-              flexWrap: 'wrap',
-              padding: CK_PAD_LG,
-              borderRadius: CK_RADIUS_LG,
-              background:
-                'linear-gradient(135deg, color-mix(in oklch, var(--accent) 8%, var(--bg-overlay)) 0%, var(--bg-base) 100%)',
-              border: '1px solid color-mix(in srgb, var(--accent) 24%, transparent)',
-            }}
-          >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
-              <span
-                style={{
-                  fontSize: 10,
-                  color: 'var(--fg-muted)',
-                  fontWeight: 700,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.08em',
-                }}
-              >
-                当前会话
-              </span>
-              <span
-                style={{
-                  fontSize: 16,
-                  fontWeight: 800,
-                  color: 'var(--fg-strong)',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                }}
-              >
-                {selectedTeam.title}
-              </span>
-              {selectedTeamSubtitle ? (
-                <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
-                  {selectedTeamSubtitle}
-                </span>
-              ) : null}
-            </div>
-            {(() => {
-              const statusColor =
-                selectedTeam.status === 'idle'
-                  ? 'var(--fg-subtle)'
-                  : selectedTeam.status === 'running'
-                  ? 'var(--success)'
-                  : selectedTeam.status === 'paused'
-                    ? 'var(--warning)'
-                    : selectedTeam.status === 'failed'
-                      ? 'var(--danger)'
-                      : 'var(--fg-muted)';
-              const statusLabel = formatSidebarTeamStatus(selectedTeam.status);
-              return (
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    padding: '6px 14px',
-                    borderRadius: 999,
-                    background: `color-mix(in srgb, ${statusColor} 14%, transparent)`,
-                    border: `1px solid color-mix(in srgb, ${statusColor} 38%, transparent)`,
-                    color: statusColor,
-                    fontSize: 11,
-                    fontWeight: 700,
-                    flexShrink: 0,
-                  }}
-                >
-                  <span
-                    aria-hidden
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: 999,
-                      background: statusColor,
-                    }}
-                  />
-                  {statusLabel}
-                </span>
-              );
-            })()}
-          </div>
-        ) : null}
+        <TeamSessionContextStrip selectedTeam={selectedTeam} />
+
+        <TeamOverviewWorkbenchMap />
 
         {/* Overview metric cards */}
-        <MetricGrid minColumnWidth={180} fill="auto-fit" gap={12}>
+        <MetricGrid
+          className="team-v2-overview-metrics"
+          minColumnWidth={180}
+          fill="auto-fit"
+          gap={12}
+        >
           {overviewCards.map((card) => {
             const trend = TREND_META[card.trend ?? 'stable'];
             const isExpanded = expandedCardIds.has(card.id);
             return (
               <div
                 key={card.id}
+                className="team-v2-overview-card"
                 style={{
                   ...PANEL_STYLE,
                   padding: '10px 12px',
@@ -234,11 +145,17 @@ export function OverviewTab({
                     >
                       <Icon name={card.icon as IconKey} size={11} color="var(--accent)" />
                     </span>
-                    <span style={{ fontWeight: 600, color: 'var(--fg-default)' }}>
+                    <span
+                      className="team-v2-overview-card-label"
+                      style={{ fontWeight: 600, color: 'var(--fg-default)' }}
+                    >
                       {card.label}
                     </span>
                   </div>
-                  <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                  <div
+                    className="team-v2-overview-card-actions"
+                    style={{ display: 'flex', gap: 4, alignItems: 'center' }}
+                  >
                     {trend ? (
                       <span
                         style={{
@@ -275,6 +192,7 @@ export function OverviewTab({
                   </div>
                 </div>
                 <span
+                  className="team-v2-overview-card-value"
                   style={{
                     fontSize: 26,
                     lineHeight: 1.1,
@@ -284,7 +202,10 @@ export function OverviewTab({
                 >
                   {card.value}
                 </span>
-                <span style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.4 }}>
+                <span
+                  className="team-v2-overview-card-note"
+                  style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.4 }}
+                >
                   {card.note}
                 </span>
                 {isExpanded && (
@@ -568,7 +489,14 @@ export function OverviewTab({
                           <span style={{ fontSize: 9, color: 'var(--fg-muted)' }}>
                             主体: {event.agentName}
                           </span>
-                          <span style={{ fontSize: 10, color: 'var(--fg-default)', lineHeight: 1.5, wordBreak: 'break-word' }}>
+                          <span
+                            style={{
+                              fontSize: 10,
+                              color: 'var(--fg-default)',
+                              lineHeight: 1.5,
+                              wordBreak: 'break-word',
+                            }}
+                          >
                             {formatTimelineDetail(event.detail, 300)}
                           </span>
                         </div>

@@ -13,6 +13,7 @@ import {
   OpenAiImageGenerationError,
 } from '../image-generation/openai-image-generation.js';
 import { createArtifact } from '../session/artifact-content-store.js';
+import { isImageGenerationPluginEnabledForUser } from './plugin-tool-settings.js';
 
 const generateImageInputSchema = z.object({
   prompt: z.string().min(1).max(4000).describe('描述要生成图片的文本 prompt。'),
@@ -109,15 +110,7 @@ export async function executeGenerateImageTool(input: {
 }> {
   const { sessionId, userId, toolCallId, toolInput } = input;
 
-  // Check if the image generation plugin is enabled
-  const pluginRow = sqliteGet<UserSettingRow>(
-    `SELECT value FROM user_settings WHERE user_id = ? AND key = 'plugin_settings'`,
-    [userId],
-  );
-  const pluginSettings = parseStoredJson(pluginRow?.value) as
-    | { imageGeneration?: { enabled?: boolean } }
-    | undefined;
-  if (!pluginSettings?.imageGeneration?.enabled) {
+  if (!isImageGenerationPluginEnabledForUser(userId)) {
     return {
       output: '图片生成插件未启用。请在设置 → 插件中启用"图片插件"后再使用此工具。',
       isError: true,

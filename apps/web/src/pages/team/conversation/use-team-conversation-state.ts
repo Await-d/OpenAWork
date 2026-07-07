@@ -1598,11 +1598,6 @@ export function useTeamConversationState(
               };
             }),
           );
-        } else if (event.type === 'message_persisted' || event.type === 'round_complete') {
-          // 流式结束：清空 buffer，让下次 reload() 拉取最终消息
-          childStreamBuffersRef.current.delete(childSessionId);
-          // 触发 reload 刷新子 session 的消息
-          void reloadRef.current?.();
         }
       };
 

@@ -105,6 +105,10 @@ describe('TemplatesTab', () => {
 
     render(<TemplatesTab onUseTemplate={onUseTemplateMock} />);
 
+    expect(screen.getByText('治理工作台摘要')).toBeTruthy();
+    expect(screen.getByText('模板总数')).toBeTruthy();
+    expect(screen.getByText('创建会话')).toBeTruthy();
+
     fireEvent.click(screen.getByRole('button', { name: /代码评审模板/i }));
 
     const useButton = screen.getByRole('button', { name: '使用此模板创建会话' });

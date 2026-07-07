@@ -1,0 +1,132 @@
+.review-panel-header {
+  background: var(--bg-overlay);
+  border-bottom: 1px solid var(--border-subtle);
+  display: grid;
+  flex-shrink: 0;
+  gap: var(--spacing-2);
+  padding: var(--spacing-2);
+}
+
+.review-panel-header__top {
+  align-items: start;
+  display: grid;
+  gap: var(--spacing-2);
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.review-panel-header__identity {
+  display: grid;
+  gap: var(--spacing-1);
+  min-width: 0;
+}
+
+.review-panel-header__title {
+  align-items: center;
+  color: var(--fg-strong);
+  display: flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: var(--spacing-1);
+}
+
+.review-panel-header__status {
+  color: var(--fg-muted);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-panel-header__controls {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+}
+
+.review-panel-header__segmented-group {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  display: flex;
+  overflow: hidden;
+}
+
+.review-panel-header__segmented-button,
+.review-panel-header__close-button {
+  cursor: pointer;
+  transition:
+    background var(--dur-micro) var(--ease-micro),
+    border-color var(--dur-micro) var(--ease-micro),
+    box-shadow var(--dur-micro) var(--ease-micro),
+    color var(--dur-micro) var(--ease-micro),
+    transform var(--dur-micro) var(--ease-micro);
+}
+
+.review-panel-header__segmented-button {
+  background: transparent;
+  border: 0;
+  color: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 650;
+  min-height: 24px;
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+  padding: 0 var(--spacing-2);
+}
+
+.review-panel-header__segmented-button:hover {
+  background: var(--bg-hover);
+  color: var(--fg-default);
+}
+
+.review-panel-header__segmented-button:active {
+  transform: translateY(1px);
+}
+
+.review-panel-header__segmented-button:focus-visible {
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+  outline-color: var(--accent);
+}
+
+.review-panel-header__segmented-button--active {
+  background: color-mix(in oklch, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+.review-panel-header__segmented-button--active:hover {
+  background: color-mix(in oklch, var(--accent) 18%, transparent);
+  color: var(--accent);
+}
+
+.review-panel-header__close-button {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--fg-muted);
+  display: flex;
+  flex-shrink: 0;
+  height: 24px;
+  justify-content: center;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  padding: 0;
+  width: 24px;
+}
+
+.review-panel-header__close-button:hover {
+  background: var(--bg-hover);
+  color: var(--fg-default);
+}
+
+.review-panel-header__close-button:active {
+  transform: translateY(1px);
+}
+
+.review-panel-header__close-button:focus-visible {
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+  outline-color: var(--accent);
+}

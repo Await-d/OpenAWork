@@ -7,18 +7,19 @@ import type {
   SlashCommandItem,
 } from '../../conversation-runtime/messages/support.js';
 import type { PromptOptimizerResult } from '@openAwork/web-client';
-import { ProviderMark } from '../model-picker/chat-provider-display.js';
-import { ChatImageGenerationControls } from '../image/ChatImageGenerationControls.js';
-import { ComposerHintChip } from './chat-composer-primitives.js';
 import { detectThinkKeyword } from '../../conversation-runtime/reveal/think-keyword-detector.js';
 import type { SavedChatImageDefaults } from '../../../utils/chat/chat-session-defaults.js';
 import type { ChatImageGenerationReferenceArtifact } from '../image/ChatImageGenerationControls.js';
-import { PromptSnippetsTrigger } from '../prompt-snippets/PromptSnippetsTrigger.js';
 import { ChatComposerMenu } from './ChatComposerMenu.js';
 import { ChatComposerOptimize } from './ChatComposerOptimize.js';
 import { ChatComposerPasteCollapse } from './ChatComposerPasteCollapse.js';
+import { ChatComposerImagePanel } from './ChatComposerFeatureToggles.js';
+import { ChatComposerQueue } from './ChatComposerQueue.js';
+import { ChatComposerToolbar } from './ChatComposerToolbar.js';
 import { ComposerStatsBar } from './ComposerStatsBar.js';
 import type { ComposerStatsData } from './ComposerStatsBar.js';
+import { getComposerCharacterCount } from './composer-character-count.js';
+import { useComposerPlaceholder } from './use-composer-placeholder.js';
 import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
 
 interface ChatComposerProps {
@@ -45,7 +46,7 @@ interface ChatComposerProps {
   imageGenerationMode: boolean;
   imageModelLabel: string;
   imagePluginEnabled?: boolean;
-  imageReferenceArtifacts?: ChatImageGenerationReferenceArtifact[];
+  imageReferenceArtifacts?: readonly ChatImageGenerationReferenceArtifact[];
   selectedImageReferenceArtifactId?: string | null;
   webSearchEnabled: boolean;
   thinkingEnabled: boolean;
@@ -210,33 +211,26 @@ export function ChatComposer({
   const [optimizeError, setOptimizeError] = useState<string | null>(null);
   const optimizePopoverRef = useRef<HTMLDivElement | null>(null);
   const isHomeVariant = variant === 'home';
-  const sendButtonRef = useRef<HTMLButtonElement | null>(null);
-  const [sendPulse, setSendPulse] = useState(false);
   const [undoText, setUndoText] = useState<string | null>(null);
   const [pasteCollapsed, setPasteCollapsed] = useState<{ text: string; lineCount: number } | null>(
     null,
   );
   const [pastePreviewExpanded, setPastePreviewExpanded] = useState(false);
-
-  // T-07: placeholder 动态轮换
-  const PLACEHOLDER_POOL = useMemo(
-    () => [
-      '发送消息…（Enter 发送，Shift+Enter 换行，Tab 切换代理）',
-      '问点什么…',
-      '描述你的需求，我来实现…',
-      '输入 / 查看快捷命令，@ 引用文件…',
-      '试试描述一个功能或粘贴一段代码…',
-    ],
-    [],
+  const [pasteInsertionRange, setPasteInsertionRange] = useState<{
+    readonly start: number;
+    readonly end: number;
+  } | null>(null);
+  const composerPlaceholder = useComposerPlaceholder(input, placeholder);
+  const characterCount = useMemo(
+    () => getComposerCharacterCount(input, statsData?.contextMaxTokens),
+    [input, statsData?.contextMaxTokens],
   );
-  const [placeholderIndex, setPlaceholderIndex] = useState(0);
+
   useEffect(() => {
-    if (input.length > 0) return;
-    const id = setInterval(() => {
-      setPlaceholderIndex((prev) => (prev + 1) % PLACEHOLDER_POOL.length);
-    }, 4500);
-    return () => clearInterval(id);
-  }, [input.length, PLACEHOLDER_POOL]);
+    if (undoText === null) return;
+    const id = window.setTimeout(() => setUndoText(null), 3000);
+    return () => window.clearTimeout(id);
+  }, [undoText]);
 
   const composerListRef = useRef<HTMLDivElement | null>(null);
   const composerItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -336,10 +330,14 @@ export function ChatComposer({
   const wrappedOnPaste = useCallback(
     (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
       const pastedText = e.clipboardData.getData('text/plain');
-      if (pastedText.length > 500 && !e.shiftKey) {
+      if (pastedText.length > 500) {
         e.preventDefault();
         const lineCount = pastedText.split('\n').length;
         setPasteCollapsed({ text: pastedText, lineCount });
+        setPasteInsertionRange({
+          start: e.currentTarget.selectionStart,
+          end: e.currentTarget.selectionEnd,
+        });
         setPastePreviewExpanded(false);
         return;
       }
@@ -537,23 +535,20 @@ export function ChatComposer({
               </div>
             )}
 
-            {imageGenerationMode && (
-              <ChatImageGenerationControls
-                busy={imageGenerationBusy}
-                disabled={streaming || imageGenerationBusy}
-                hasConfiguredModel={hasConfiguredImageModel}
-                imageDefaults={imageGenerationDefaults}
-                imageMode={imageGenerationMode}
-                imageModelLabel={imageModelLabel}
-                imagePluginEnabled={imagePluginEnabled}
-                referenceArtifacts={imageReferenceArtifacts}
-                selectedReferenceArtifactId={selectedImageReferenceArtifactId}
-                onToggleImageMode={onToggleImageGenerationMode}
-                onSelectReferenceArtifactId={onSelectImageReferenceArtifactId}
-                onUpdateImageDefaults={onUpdateImageGenerationDefaults}
-                variant="panel"
-              />
-            )}
+            <ChatComposerImagePanel
+              imageGenerationBusy={imageGenerationBusy}
+              streaming={streaming}
+              hasConfiguredImageModel={hasConfiguredImageModel}
+              imageGenerationDefaults={imageGenerationDefaults}
+              imageGenerationMode={imageGenerationMode}
+              imageModelLabel={imageModelLabel}
+              imagePluginEnabled={imagePluginEnabled}
+              imageReferenceArtifacts={imageReferenceArtifacts}
+              selectedImageReferenceArtifactId={selectedImageReferenceArtifactId}
+              onToggleImageGenerationMode={onToggleImageGenerationMode}
+              onSelectImageReferenceArtifactId={onSelectImageReferenceArtifactId}
+              onUpdateImageGenerationDefaults={onUpdateImageGenerationDefaults}
+            />
 
             {attachmentItems.length > 0 && (
               <div style={{ padding: '0 1px' }}>
@@ -565,121 +560,11 @@ export function ChatComposer({
               </div>
             )}
 
-            {queuedMessages.length > 0 && (
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: 8,
-                  flexWrap: 'wrap',
-                  padding: '0 2px',
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    letterSpacing: '0.04em',
-                    color: 'rgb(96, 165, 250)',
-                    whiteSpace: 'nowrap',
-                    paddingTop: 4,
-                  }}
-                >
-                  待发队列
-                </span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                  {queuedMessages.slice(0, 3).map((item, index) => (
-                    <span
-                      key={item.id}
-                      className="composer-queue-pill"
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        maxWidth: '100%',
-                        gap: 6,
-                        padding: '3px 8px',
-                        borderRadius: 999,
-                        border: item.requiresAttachmentRebind
-                          ? '1px solid color-mix(in srgb, var(--warning) 28%, var(--border-default))'
-                          : '1px solid color-mix(in oklch, var(--accent) 18%, var(--border-default))',
-                        background: item.requiresAttachmentRebind
-                          ? 'color-mix(in srgb, var(--warning) 12%, transparent)'
-                          : index === 0
-                            ? 'color-mix(in oklch, var(--accent) 10%, transparent)'
-                            : 'var(--bg-overlay)',
-                        color: item.requiresAttachmentRebind
-                          ? 'var(--warning)'
-                          : index === 0
-                            ? 'var(--accent)'
-                            : 'var(--fg-default)',
-                        minWidth: 0,
-                      }}
-                      title={item.title ?? item.label}
-                    >
-                      <span
-                        style={{
-                          fontSize: 10,
-                          fontWeight: 600,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                          maxWidth: 280,
-                        }}
-                      >
-                        {index === 0 ? `下一条：${item.label}` : item.label}
-                      </span>
-                      {onRestoreQueuedMessage && (
-                        <button
-                          type="button"
-                          onClick={() => onRestoreQueuedMessage(item.id)}
-                          style={{
-                            border: 'none',
-                            background: 'transparent',
-                            color: 'inherit',
-                            cursor: 'pointer',
-                            padding: 0,
-                            fontSize: 10,
-                            lineHeight: 1,
-                            flexShrink: 0,
-                            fontWeight: 700,
-                          }}
-                          title={
-                            item.requiresAttachmentRebind
-                              ? '恢复到输入框，并重新选择附件后发送'
-                              : '恢复到输入框继续编辑'
-                          }
-                        >
-                          恢复
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => onRemoveQueuedMessage?.(item.id)}
-                        style={{
-                          border: 'none',
-                          background: 'transparent',
-                          color: 'inherit',
-                          cursor: 'pointer',
-                          padding: 0,
-                          fontSize: 11,
-                          lineHeight: 1,
-                          flexShrink: 0,
-                        }}
-                        title="移出队列"
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))}
-                  {queuedMessages.length > 3 && (
-                    <ComposerHintChip
-                      label={`+${queuedMessages.length - 3} 条待发`}
-                      tone="accent"
-                    />
-                  )}
-                </div>
-              </div>
-            )}
+            <ChatComposerQueue
+              queuedMessages={queuedMessages}
+              onRemoveQueuedMessage={onRemoveQueuedMessage}
+              onRestoreQueuedMessage={onRestoreQueuedMessage}
+            />
 
             <div
               style={{
@@ -705,12 +590,9 @@ export function ChatComposer({
                   onSelect={onInputSelect}
                   onPaste={wrappedOnPaste}
                   onKeyDown={wrappedOnKeyDown}
-                  placeholder={
-                    placeholder ??
-                    (input.length === 0
-                      ? (PLACEHOLDER_POOL[placeholderIndex] ?? PLACEHOLDER_POOL[0]!)
-                      : '')
-                  }
+                  onFocus={composerPlaceholder.onFocus}
+                  onBlur={composerPlaceholder.onBlur}
+                  placeholder={composerPlaceholder.placeholder}
                   rows={3}
                   style={{
                     width: '100%',
@@ -731,16 +613,8 @@ export function ChatComposer({
                   }}
                 />
                 {input.length > 0 && (
-                  <span
-                    className={`composer-char-counter${
-                      input.length > 8000
-                        ? ' composer-char-danger'
-                        : input.length > 6000
-                          ? ' composer-char-warning'
-                          : ' composer-char-visible'
-                    }`}
-                  >
-                    {input.length.toLocaleString()} 字符
+                  <span className={`composer-char-counter composer-char-${characterCount.tone}`}>
+                    {characterCount.label}
                   </span>
                 )}
                 {agentOptions.length > 1 && (
@@ -835,28 +709,29 @@ export function ChatComposer({
                   pasteCollapsed={pasteCollapsed}
                   pastePreviewExpanded={pastePreviewExpanded}
                   onToggleExpand={() => setPastePreviewExpanded((v) => !v)}
-                  onInsert={() => {
+                  onInsert={(text) => {
                     const textarea = textareaRef.current;
+                    const start =
+                      pasteInsertionRange?.start ?? textarea?.selectionStart ?? input.length;
+                    const end = pasteInsertionRange?.end ?? textarea?.selectionEnd ?? input.length;
                     if (!textarea) {
-                      onReplaceInput?.(input + pasteCollapsed.text);
+                      onReplaceInput?.(input.slice(0, start) + text + input.slice(end));
                     } else {
-                      const start = textarea.selectionStart ?? input.length;
-                      const end = textarea.selectionEnd ?? input.length;
-                      onReplaceInput?.(
-                        input.slice(0, start) + pasteCollapsed.text + input.slice(end),
-                      );
+                      onReplaceInput?.(input.slice(0, start) + text + input.slice(end));
                       requestAnimationFrame(() => {
                         textarea.focus();
-                        const pos = start + pasteCollapsed.text.length;
+                        const pos = start + text.length;
                         textarea.setSelectionRange(pos, pos);
                       });
                     }
                     setPasteCollapsed(null);
                     setPastePreviewExpanded(false);
+                    setPasteInsertionRange(null);
                   }}
                   onDiscard={() => {
                     setPasteCollapsed(null);
                     setPastePreviewExpanded(false);
+                    setPasteInsertionRange(null);
                   }}
                 />
               )}
@@ -885,551 +760,60 @@ export function ChatComposer({
                 }}
               />
 
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 10,
-                  flexWrap: 'wrap',
-                }}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    minWidth: 0,
-                    overflowX: 'auto',
-                    paddingBottom: 2,
-                    scrollbarWidth: 'none',
-                  }}
-                >
-                  {(showModelPickerButton || showModelSettingsButton) && (
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'stretch',
-                        border: '1px solid var(--border-subtle)',
-                        borderRadius: 8,
-                        background: 'var(--bg-overlay)',
-                        overflow: 'hidden',
-                        flexShrink: 0,
-                        maxWidth: showModelPickerButton && showModelSettingsButton ? 56 : 28,
-                      }}
-                    >
-                      {showModelPickerButton && (
-                        <button
-                          ref={modelPickerRef}
-                          type="button"
-                          onClick={onToggleModelPicker}
-                          title={activeModelTooltip ?? '当前使用模型'}
-                          aria-label="打开模型选择"
-                          aria-haspopup="dialog"
-                          aria-expanded={showModelPicker}
-                          aria-controls="chat-model-picker-dialog"
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            height: 26,
-                            width: 28,
-                            border: 'none',
-                            background: 'transparent',
-                            color: 'var(--fg-default)',
-                            cursor: 'pointer',
-                            flexShrink: 0,
-                            transition:
-                              'height 220ms ease, color 150ms ease, background 150ms ease',
-                          }}
-                        >
-                          {activeProviderId || activeProviderType ? (
-                            <ProviderMark
-                              providerId={activeProviderId}
-                              providerName={activeProviderName}
-                              providerType={activeProviderType}
-                              size={12}
-                            />
-                          ) : (
-                            <svg
-                              width="13"
-                              height="13"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              aria-hidden="true"
-                            >
-                              <path d="M12 3v18" />
-                              <path d="M3 12h18" />
-                            </svg>
-                          )}
-                        </button>
-                      )}
-                      {showModelSettingsButton && (
-                        <button
-                          ref={modelSettingsRef}
-                          type="button"
-                          onClick={onToggleModelSettings}
-                          title={
-                            activeModelSupportsThinking ? '思考等级与模型设置' : '模型能力设置'
-                          }
-                          aria-label={
-                            activeModelSupportsThinking
-                              ? '打开模型设置与思考等级'
-                              : '打开模型能力设置'
-                          }
-                          aria-haspopup="dialog"
-                          aria-expanded={showModelSettings}
-                          aria-controls="chat-model-settings-dialog"
-                          style={{
-                            width: 26,
-                            height: 26,
-                            border: 'none',
-                            borderLeft: showModelPickerButton
-                              ? '1px solid var(--border-subtle)'
-                              : 'none',
-                            background: thinkingEnabled
-                              ? 'color-mix(in oklch, var(--accent) 10%, transparent)'
-                              : 'transparent',
-                            color: thinkingEnabled
-                              ? 'color-mix(in oklch, var(--accent) 80%, var(--fg-on-accent) 20%)'
-                              : 'var(--fg-muted)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            cursor: 'pointer',
-                            flexShrink: 0,
-                          }}
-                        >
-                          {activeModelSupportsThinking ? (
-                            <svg
-                              width="13"
-                              height="13"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              aria-hidden="true"
-                            >
-                              <path d="M9.5 9a2.5 2.5 0 1 1 5 0c0 1.6-1.5 2.2-2.2 2.8-.4.3-.6.7-.6 1.2" />
-                              <circle cx="12" cy="17" r=".8" fill="currentColor" stroke="none" />
-                              <path d="M12 2a8.5 8.5 0 0 0-5.7 14.8c.4.4.7.9.8 1.5l.2 1.1a1.4 1.4 0 0 0 1.4 1.1h6.6a1.4 1.4 0 0 0 1.4-1.1l.2-1.1c.1-.6.4-1.1.8-1.5A8.5 8.5 0 0 0 12 2Z" />
-                            </svg>
-                          ) : (
-                            <svg
-                              width="13"
-                              height="13"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              aria-hidden="true"
-                            >
-                              <circle cx="12" cy="12" r="3" />
-                              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.33 1V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-.33-1 1.65 1.65 0 0 0-1-.6 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 0-1-.33H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1-.33 1.65 1.65 0 0 0 .6-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .33-1V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 .33 1 1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.3.3.5.7.6 1 .1.4.1.7.1 1s0 .6-.1 1c-.1.4-.3.8-.6 1Z" />
-                            </svg>
-                          )}
-                        </button>
-                      )}
-                    </div>
-                  )}
-                  {showWebSearchButton && (
-                    <button
-                      type="button"
-                      onClick={onToggleWebSearch}
-                      disabled={streaming || imageGenerationBusy}
-                      title={webSearchEnabled ? '关闭联网搜索' : '开启联网搜索'}
-                      className={`icon-btn${webSearchEnabled ? ' active' : ''}`}
-                      style={{
-                        border: '1px solid var(--border-subtle)',
-                        borderRadius: 8,
-                        width: 26,
-                        height: 26,
-                        flexShrink: 0,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        opacity: streaming || imageGenerationBusy ? 0.45 : 1,
-                        background: webSearchEnabled
-                          ? 'color-mix(in oklch, var(--info) 10%, transparent)'
-                          : 'var(--bg-overlay)',
-                        color: webSearchEnabled
-                          ? 'color-mix(in oklch, var(--info) 82%, var(--fg-on-accent) 18%)'
-                          : 'var(--fg-muted)',
-                        transition:
-                          'width 220ms ease, height 220ms ease, opacity 150ms ease, background 150ms ease, color 150ms ease',
-                      }}
-                    >
-                      <svg
-                        width="13"
-                        height="13"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden="true"
-                      >
-                        <circle cx="12" cy="12" r="9" />
-                        <path d="M3 12h18" />
-                        <path d="M12 3a15.3 15.3 0 0 1 4 9 15.3 15.3 0 0 1-4 9 15.3 15.3 0 0 1-4-9 15.3 15.3 0 0 1 4-9Z" />
-                      </svg>
-                    </button>
-                  )}
-                  {showImageGenerationButton && (
-                    <ChatImageGenerationControls
-                      busy={imageGenerationBusy}
-                      disabled={streaming || imageGenerationBusy}
-                      hasConfiguredModel={hasConfiguredImageModel}
-                      imageDefaults={imageGenerationDefaults}
-                      imageMode={imageGenerationMode}
-                      imageModelLabel={imageModelLabel}
-                      imagePluginEnabled={imagePluginEnabled}
-                      onToggleImageMode={onToggleImageGenerationMode}
-                      onUpdateImageDefaults={onUpdateImageGenerationDefaults}
-                      variant="toggle"
-                    />
-                  )}
-                  {showVoiceButton && (
-                    <button
-                      type="button"
-                      onClick={onToggleVoice}
-                      disabled={streaming || imageGenerationBusy}
-                      title={showVoice ? '关闭语音输入' : '语音输入'}
-                      className={`icon-btn${showVoice ? ' active' : ''}`}
-                      style={{
-                        border: '1px solid var(--border-subtle)',
-                        borderRadius: 8,
-                        width: 26,
-                        height: 26,
-                        flexShrink: 0,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        opacity: streaming || imageGenerationBusy ? 0.45 : 1,
-                        background: showVoice
-                          ? 'color-mix(in oklch, var(--accent) 10%, transparent)'
-                          : 'var(--bg-overlay)',
-                        color: showVoice
-                          ? 'color-mix(in oklch, var(--accent) 82%, var(--fg-on-accent) 18%)'
-                          : 'var(--fg-muted)',
-                        transition:
-                          'width 220ms ease, height 220ms ease, opacity 150ms ease, background 150ms ease, color 150ms ease',
-                      }}
-                    >
-                      <svg
-                        aria-hidden="true"
-                        width="13"
-                        height="13"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <rect x="9" y="2" width="6" height="12" rx="3" />
-                        <path d="M5 10a7 7 0 0 0 14 0" />
-                        <line x1="12" y1="19" x2="12" y2="22" />
-                        <line x1="8" y1="22" x2="16" y2="22" />
-                      </svg>
-                    </button>
-                  )}
-                  {showAttachmentButton && (
-                    <button
-                      type="button"
-                      onClick={onRequestFiles}
-                      disabled={streaming || imageGenerationBusy}
-                      title={imageGenerationMode ? '上传参考图' : '上传文件'}
-                      className="icon-btn"
-                      style={{
-                        border: '1px solid var(--border-subtle)',
-                        borderRadius: 8,
-                        width: 26,
-                        height: 26,
-                        flexShrink: 0,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        opacity: streaming || imageGenerationBusy ? 0.45 : 1,
-                        background: 'var(--bg-overlay)',
-                        transition: 'width 220ms ease, height 220ms ease, opacity 150ms ease',
-                      }}
-                    >
-                      <svg
-                        aria-hidden="true"
-                        width="13"
-                        height="13"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66L9.41 17.41a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                      </svg>
-                    </button>
-                  )}
-                  {gatewayUrl && onInsertAtCursor && (
-                    <PromptSnippetsTrigger
-                      gatewayUrl={gatewayUrl}
-                      token={snippetsToken ?? null}
-                      disabled={streaming || imageGenerationBusy}
-                      onInject={onInsertAtCursor}
-                    />
-                  )}
-                  <span className="composer-toolbar-divider" />
-                  <ComposerHintChip label="/ 命令" />
-                  <ComposerHintChip label="@ 文件" />
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-                  {onOptimizePrompt && input.trim().length > 0 && !streaming && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (optimizeResult) {
-                          setOptimizeResult(null);
-                          setOptimizeError(null);
-                          return;
-                        }
-                        setOptimizeLoading(true);
-                        setOptimizeError(null);
-                        onOptimizePrompt(input.trim())
-                          .then((result) => {
-                            setOptimizeResult(result);
-                          })
-                          .catch((err: unknown) => {
-                            setOptimizeError(
-                              err instanceof Error ? err.message : '提示词优化失败。',
-                            );
-                          })
-                          .finally(() => {
-                            setOptimizeLoading(false);
-                          });
-                      }}
-                      disabled={optimizeLoading}
-                      title={optimizeLoading ? '正在优化提示词…' : '提示词优化'}
-                      aria-busy={optimizeLoading}
-                      className={`icon-btn${optimizeResult ? ' active' : ''}`}
-                      style={{
-                        border: optimizeLoading
-                          ? '1px solid color-mix(in oklch, var(--accent) 45%, var(--border-subtle))'
-                          : optimizeResult
-                            ? '1px solid color-mix(in oklch, var(--success) 40%, var(--border-subtle))'
-                            : '1px solid var(--border-subtle)',
-                        borderRadius: 8,
-                        width: 26,
-                        height: 26,
-                        flexShrink: 0,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        background: optimizeLoading
-                          ? 'color-mix(in oklch, var(--accent) 12%, transparent)'
-                          : optimizeResult
-                            ? 'color-mix(in oklch, var(--success) 10%, transparent)'
-                            : 'var(--bg-overlay)',
-                        color: optimizeLoading
-                          ? 'color-mix(in oklch, var(--accent) 82%, var(--fg-on-accent) 18%)'
-                          : optimizeResult
-                            ? 'color-mix(in oklch, var(--success) 82%, var(--fg-on-accent) 18%)'
-                            : 'color-mix(in oklch, var(--accent) 72%, var(--fg-on-accent) 28%)',
-                        cursor: optimizeLoading ? 'wait' : 'pointer',
-                        transition:
-                          'background 150ms ease, color 150ms ease, border-color 150ms ease',
-                      }}
-                    >
-                      {optimizeLoading ? (
-                        // Inline spinner — uses the global `@keyframes spin`
-                        // defined in `apps/web/src/index.css` so no extra
-                        // <style> tag is needed here.
-                        <span
-                          aria-hidden="true"
-                          style={{
-                            width: 12,
-                            height: 12,
-                            borderRadius: '50%',
-                            border: '1.6px solid currentColor',
-                            borderTopColor: 'transparent',
-                            animation: 'spin 0.7s linear infinite',
-                            display: 'inline-block',
-                          }}
-                        />
-                      ) : (
-                        <svg
-                          width="13"
-                          height="13"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          aria-hidden="true"
-                        >
-                          <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z" />
-                        </svg>
-                      )}
-                    </button>
-                  )}
-                  {showQueueAction && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void onQueueMessage?.();
-                      }}
-                      className="btn-accent"
-                      style={{
-                        borderRadius: 8,
-                        height: 28,
-                        padding: '0 10px',
-                        gap: 6,
-                        fontSize: 11,
-                        background: 'color-mix(in oklch, var(--accent) 14%, transparent)',
-                        color: 'var(--accent)',
-                      }}
-                    >
-                      <span>追加</span>
-                      <svg
-                        aria-hidden="true"
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M12 5v14" />
-                        <path d="M5 12h14" />
-                      </svg>
-                    </button>
-                  )}
-                  <span
-                    style={{
-                      fontSize: 10,
-                      color: 'var(--fg-muted)',
-                      whiteSpace: 'nowrap',
-                      letterSpacing: '0.01em',
-                    }}
-                  >
-                    {showStopAction
-                      ? stoppingStream
-                        ? '正在停止…'
-                        : streaming
-                          ? '正在生成… · Esc 停止'
-                          : effectiveStopCapability === 'best_effort'
-                            ? '当前页未接管原始请求 · 将尝试停止本会话的当前运行'
-                            : '当前运行流仍受此页控制 · 可直接停止'
-                      : showQueueAction
-                        ? `可先追加到队列${queuedMessages.length > 0 ? ` · 已排队 ${queuedMessages.length} 条` : ''}`
-                        : imageGenerationBusy
-                          ? '图片生成中 · 请等待结果返回'
-                          : sessionBusyState === 'running'
-                            ? '会话持续运行中 · 正在同步最新结果'
-                            : sessionBusyState === 'paused'
-                              ? '会话等待处理 · 处理后继续同步'
-                              : imageGenerationMode
-                                ? 'Enter 生成 · Shift+Enter 换行'
-                                : isHomeVariant
-                                  ? 'Enter 发送 · Shift+Enter 换行'
-                                  : 'Enter 发送'}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (showStopAction) {
-                        void onStop();
-                        return;
-                      }
-                      setSendPulse(true);
-                      setTimeout(() => setSendPulse(false), 450);
-                      void onSend();
-                    }}
-                    disabled={primaryButtonDisabled}
-                    className={`btn-accent${sendPulse ? ' composer-pulse' : ''}`}
-                    style={{
-                      borderRadius: 8,
-                      height: 28,
-                      padding: '0 10px',
-                      gap: 6,
-                      fontSize: 11,
-                      opacity: primaryButtonDisabled ? 0.5 : 1,
-                      transition: 'height 220ms ease, padding 220ms ease, opacity 150ms ease',
-                      background: showStopAction
-                        ? effectiveStopCapability === 'best_effort'
-                          ? 'color-mix(in srgb, var(--warning) 14%, transparent)'
-                          : 'rgba(239, 68, 68, 0.14)'
-                        : sessionBusyState === 'running'
-                          ? 'color-mix(in oklch, var(--accent) 14%, transparent)'
-                          : sessionBusyState === 'paused'
-                            ? 'rgba(245, 158, 11, 0.14)'
-                            : undefined,
-                      color: showStopAction
-                        ? effectiveStopCapability === 'best_effort'
-                          ? 'var(--warning)'
-                          : 'rgb(252, 165, 165)'
-                        : sessionBusyState === 'running'
-                          ? 'var(--accent)'
-                          : sessionBusyState === 'paused'
-                            ? 'var(--warning)'
-                            : undefined,
-                    }}
-                  >
-                    <span>
-                      {showStopAction
-                        ? stoppingStream
-                          ? '停止中'
-                          : effectiveStopCapability === 'best_effort'
-                            ? '尝试停止'
-                            : '停止'
-                        : sessionBusyState === 'running'
-                          ? '运行中'
-                          : sessionBusyState === 'paused'
-                            ? '待处理'
-                            : imageGenerationMode
-                              ? '生成'
-                              : '发送'}
-                    </span>
-                    <svg
-                      aria-hidden="true"
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      {showStopAction ? (
-                        <rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" />
-                      ) : sessionBusyState ? (
-                        <>
-                          <circle cx="12" cy="12" r="7" />
-                          <path d="M12 8v4l2.5 1.5" />
-                        </>
-                      ) : (
-                        <>
-                          <line x1="5" y1="12" x2="19" y2="12" />
-                          <polyline points="12 5 19 12 12 19" />
-                        </>
-                      )}
-                    </svg>
-                  </button>
-                </div>
-              </div>
+              <ChatComposerToolbar
+                activeProviderId={activeProviderId}
+                activeProviderName={activeProviderName}
+                activeProviderType={activeProviderType}
+                activeModelTooltip={activeModelTooltip}
+                activeModelSupportsThinking={activeModelSupportsThinking}
+                thinkingEnabled={thinkingEnabled}
+                modelPickerRef={modelPickerRef}
+                modelSettingsRef={modelSettingsRef}
+                showModelPicker={showModelPicker}
+                showModelSettings={showModelSettings}
+                showModelPickerButton={showModelPickerButton}
+                showModelSettingsButton={showModelSettingsButton}
+                showWebSearchButton={showWebSearchButton}
+                showImageGenerationButton={showImageGenerationButton}
+                showVoiceButton={showVoiceButton}
+                showAttachmentButton={showAttachmentButton}
+                streaming={streaming}
+                imageGenerationBusy={imageGenerationBusy}
+                canSubmit={canSubmit}
+                webSearchEnabled={webSearchEnabled}
+                showVoice={showVoice}
+                imageGenerationMode={imageGenerationMode}
+                hasConfiguredImageModel={hasConfiguredImageModel}
+                imageGenerationDefaults={imageGenerationDefaults}
+                imageModelLabel={imageModelLabel}
+                imagePluginEnabled={imagePluginEnabled}
+                input={input}
+                stoppingStream={stoppingStream}
+                sessionBusyState={sessionBusyState}
+                effectiveStopCapability={effectiveStopCapability}
+                showStopAction={showStopAction}
+                showQueueAction={showQueueAction}
+                queuedMessageCount={queuedMessages.length}
+                optimizeLoading={optimizeLoading}
+                optimizeResult={optimizeResult}
+                gatewayUrl={gatewayUrl}
+                snippetsToken={snippetsToken}
+                onInsertAtCursor={onInsertAtCursor}
+                onOptimizePrompt={onOptimizePrompt}
+                onSetOptimizeLoading={setOptimizeLoading}
+                onSetOptimizeResult={setOptimizeResult}
+                onSetOptimizeError={setOptimizeError}
+                onQueueMessage={onQueueMessage}
+                onSend={onSend}
+                onStop={onStop}
+                onToggleModelPicker={onToggleModelPicker}
+                onToggleModelSettings={onToggleModelSettings}
+                onToggleWebSearch={onToggleWebSearch}
+                onToggleVoice={onToggleVoice}
+                onRequestFiles={onRequestFiles}
+                onToggleImageGenerationMode={onToggleImageGenerationMode}
+                onUpdateImageGenerationDefaults={onUpdateImageGenerationDefaults}
+              />
             </div>
           </div>
           {composerRightSlot && (

@@ -1,0 +1,66 @@
+.terminal-panel-collapsed-rail {
+  align-items: center;
+  background: var(--bg-base);
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--fg-muted);
+  cursor: pointer;
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--spacing-2);
+  height: 36px;
+  justify-content: space-between;
+  min-height: 36px;
+  outline: 2px solid transparent;
+  outline-offset: -4px;
+  padding: 0 var(--spacing-3);
+  transition:
+    background var(--dur-micro) var(--ease-micro),
+    box-shadow var(--dur-micro) var(--ease-micro),
+    color var(--dur-micro) var(--ease-micro),
+    transform var(--dur-micro) var(--ease-micro);
+  width: 100%;
+}
+
+.terminal-panel-collapsed-rail:hover {
+  background: color-mix(in oklch, var(--accent) 8%, var(--bg-base));
+  color: var(--accent);
+}
+
+.terminal-panel-collapsed-rail:active {
+  transform: translateY(1px);
+}
+
+.terminal-panel-collapsed-rail:focus-visible {
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+  outline-color: var(--accent);
+}
+
+.terminal-panel-collapsed-rail__label {
+  align-items: center;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 650;
+  gap: var(--spacing-1);
+  min-width: 0;
+}
+
+.terminal-panel-collapsed-rail__label svg {
+  flex-shrink: 0;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.75;
+}
+
+.terminal-panel-collapsed-rail__status {
+  color: var(--fg-subtle);
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.terminal-panel-collapsed-rail:hover .terminal-panel-collapsed-rail__status {
+  color: var(--fg-muted);
+}

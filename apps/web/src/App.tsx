@@ -17,6 +17,7 @@ import { useAuthStore } from './stores/auth/auth.js';
 import { useDisplayPreferencesStore } from './stores/settings/display-preferences.js';
 import LoginPage from './pages/misc/LoginPage.js';
 import NotFoundPage from './pages/misc/NotFoundPage.js';
+import HomePage from './pages/home/HomePage.js';
 import Layout from './components/Layout.js';
 import OnboardingModal from './components/onboarding/OnboardingModal.js';
 import PageTransitionLoader from './components/common/feedback/PageTransitionLoader.js';
@@ -541,8 +542,8 @@ export default function App() {
         <Route
           path="/"
           element={
-            desktopRuntime ? (
-              <Navigate to="/chat" replace />
+            desktopRuntime || accessToken ? (
+              <Navigate to="/home" replace />
             ) : (
               <LoginPage theme={theme} onToggleTheme={toggleTheme} />
             )
@@ -561,6 +562,7 @@ export default function App() {
             </ProtectedRoute>
           }
         >
+          <Route path="/home" element={<HomePage />} />
           <Route
             path="/chat/:sessionId?"
             element={

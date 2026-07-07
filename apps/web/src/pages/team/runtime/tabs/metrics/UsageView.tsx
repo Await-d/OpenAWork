@@ -6,9 +6,10 @@
  * 空态表示当前工作区还没有产生任何 LLM 调用，而不是数据链路未接入。
  */
 
-import { useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useLayerStore, type LayerNode } from '../../../../../stores/team/team-events.js';
 import {
+  useTeamToolCallStore,
   useTeamUsageStore,
   type UsageBucket,
   type TeamUsageEvent,
@@ -19,6 +20,7 @@ import {
   resolveMatchedSharedSummary,
 } from '../../data/team-runtime-shared-context.js';
 import { TabContainer } from '../TabContainer.js';
+import { TeamTabIcon } from '../team-tab-icons.js';
 import { SessionStatsPanel } from './SessionStatsPanel.js';
 import { ToolCallsView } from './ToolCallsView.js';
 import { SharedSessionUsageView } from './shared-session-usage-view.js';
@@ -26,11 +28,11 @@ import {
   StatCard,
   MetricGrid,
   EmptyState,
-  SegmentedToggle,
   CK_SECTION_LABEL_STYLE,
   CK_BORDER,
   CK_SURFACE,
 } from '../../shared/content-kit/index.js';
+import { TeamMetricsWorkbenchHeader, type MetricsMode } from './TeamMetricsWorkbenchHeader.js';
 
 const CONTAINER_STYLE: CSSProperties = {
   display: 'flex',
@@ -152,18 +154,29 @@ export interface UsageViewProps {
   selectedSessionId?: string | null;
   selectedSessionIsShared?: boolean;
   selectedSessionTitle?: string | null;
+  initialMode?: MetricsMode;
 }
-
-type MetricsMode = 'usage' | 'tools';
 
 /**
  * 度量·用量 tab 入口：在「用量 & 费用」与「工具调用」之间切换。
- * 工具调用原先是独立 tab（tools），tab 整理后并入用量域。
+ * Team 顶部子 tab 也会把「工具调用」作为正式 leaf 暴露；路由传入
+ * initialMode="tools" 时复用本组件已有的共享会话快照链路。
  */
 export function UsageView(props: UsageViewProps = {}) {
-  const [mode, setMode] = useState<MetricsMode>('usage');
+  const [mode, setMode] = useState<MetricsMode>(props.initialMode ?? 'usage');
+  const nodes = useLayerStore((s) => s.nodes);
+  const total = useTeamUsageStore((s) => s.total);
+  const byProvider = useTeamUsageStore((s) => s.byProvider);
+  const bySession = useTeamUsageStore((s) => s.bySession);
+  const recent = useTeamUsageStore((s) => s.recent);
+  const toolCallsBySession = useTeamToolCallStore((s) => s.bySession);
+  const totalToolFailures = useTeamToolCallStore((s) => s.totalFailures);
+  const totalToolInvocations = useTeamToolCallStore((s) => s.totalInvocations);
   const { activeSharedSession, selectedSharedSession, sharedSessionLoading, sharedSessions } =
     useTeamRuntimeReferenceViewData();
+  useEffect(() => {
+    setMode(props.initialMode ?? 'usage');
+  }, [props.initialMode]);
   const sharedSummary = useMemo(
     () =>
       resolveMatchedSharedSummary({
@@ -175,6 +188,68 @@ export function UsageView(props: UsageViewProps = {}) {
     [activeSharedSession, props.selectedSessionId, selectedSharedSession, sharedSessions],
   );
   const isSharedSelected = props.selectedSessionIsShared === true || sharedSummary !== null;
+  const sessionScope = useMemo(
+    () => (props.selectedSessionId ? collectSessionScope(nodes, props.selectedSessionId) : null),
+    [nodes, props.selectedSessionId],
+  );
+  const headerUsageTotal = useMemo(() => {
+    if (!sessionScope) {
+      return total;
+    }
+    let bucket = emptyUsageBucket();
+    for (const sessionId of sessionScope) {
+      const sessionBucket = bySession.get(sessionId);
+      if (sessionBucket) {
+        bucket = mergeUsageBuckets(bucket, sessionBucket);
+      }
+    }
+    return bucket;
+  }, [bySession, sessionScope, total]);
+  const headerToolTotal = useMemo(() => {
+    if (!sessionScope) {
+      return {
+        failures: totalToolFailures,
+        invocations: totalToolInvocations,
+      };
+    }
+    let failures = 0;
+    let invocations = 0;
+    for (const sessionId of sessionScope) {
+      const bucket = toolCallsBySession.get(sessionId);
+      if (bucket) {
+        failures += bucket.failures;
+        invocations += bucket.invocations;
+      }
+    }
+    return { failures, invocations };
+  }, [sessionScope, toolCallsBySession, totalToolFailures, totalToolInvocations]);
+  const headerRecentCount = useMemo(() => {
+    if (!sessionScope) {
+      return recent.length;
+    }
+    return recent.filter(
+      (event) =>
+        typeof event.sessionId === 'string' &&
+        event.sessionId.length > 0 &&
+        sessionScope.has(event.sessionId),
+    ).length;
+  }, [recent, sessionScope]);
+  const scopeLabel = isSharedSelected
+    ? (props.selectedSessionTitle ?? sharedSummary?.title ?? '共享会话')
+    : props.selectedSessionId
+      ? (props.selectedSessionTitle ?? `会话 ${props.selectedSessionId.slice(0, 8)}`)
+      : '全部团队';
+  const headerCallCountLabel = isSharedSelected
+    ? sharedSessionLoading
+      ? '同步中'
+      : '快照'
+    : String(headerUsageTotal.count);
+  const headerTotalTokensLabel = isSharedSelected
+    ? '按消息'
+    : formatTokens(headerUsageTotal.inputTokens + headerUsageTotal.outputTokens);
+  const headerCostLabel = isSharedSelected ? '—' : formatCost(headerUsageTotal.costUsd);
+  const headerToolCallsLabel = isSharedSelected ? '消息内' : String(headerToolTotal.invocations);
+  const headerToolFailuresLabel = isSharedSelected ? '快照' : String(headerToolTotal.failures);
   const sharedSession = useMemo(
     () =>
       resolveMatchedSharedSessionDetail({
@@ -186,25 +261,19 @@ export function UsageView(props: UsageViewProps = {}) {
   );
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          padding: '8px 12px',
-          borderBottom: '1px solid color-mix(in srgb, var(--border-default) 32%, transparent)',
-          background: 'var(--bg-base)',
-        }}
-      >
-        <SegmentedToggle<MetricsMode>
-          ariaLabel="度量视图切换"
-          value={mode}
-          onChange={setMode}
-          options={[
-            { value: 'usage', label: '用量 & 费用', icon: '🔋' },
-            { value: 'tools', label: '工具调用', icon: '🛠️' },
-          ]}
-        />
-      </div>
+      <TeamMetricsWorkbenchHeader
+        mode={mode}
+        onModeChange={setMode}
+        scopeLabel={scopeLabel}
+        callCountLabel={headerCallCountLabel}
+        totalTokensLabel={headerTotalTokensLabel}
+        costLabel={headerCostLabel}
+        toolCallsLabel={headerToolCallsLabel}
+        toolFailuresLabel={headerToolFailuresLabel}
+        providerCountLabel={isSharedSelected ? '快照' : String(byProvider.size)}
+        recentCountLabel={isSharedSelected ? '按消息' : String(headerRecentCount)}
+        sharedSnapshot={isSharedSelected}
+      />
       <div
         style={{
           flex: 1,
@@ -348,7 +417,7 @@ function UsageMetricsPanel({ selectedSessionId, selectedSessionTitle }: UsageVie
             sessionTitle={selectedSessionTitle ?? null}
           />
           <EmptyState
-            emoji="🔋"
+            icon={<TeamTabIcon name="usage" size={24} />}
             title={selectedSessionId ? '当前会话暂无用量数据' : '暂无用量数据'}
             description={
               selectedSessionId ? (

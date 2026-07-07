@@ -78,6 +78,17 @@ const throttledStorage = createJSONStorage(() => ({
 }));
 
 export type ChatView = 'home' | 'session';
+export type SessionTabType = 'session' | 'draft';
+export type WorkbenchLayoutMode = 'classic' | 'fusion';
+
+export interface SessionTab {
+  readonly id: string;
+  readonly type: SessionTabType;
+  readonly sessionId?: string;
+  readonly title: string;
+  readonly workspacePath?: string;
+  readonly createdAt: number;
+}
 
 export interface UIStateStore {
   // Sidebar
@@ -98,14 +109,39 @@ export interface UIStateStore {
 
   sidebarTab: 'sessions' | 'files';
   setSidebarTab: (tab: 'sessions' | 'files') => void;
+  sidebarViewMode: 'sessions' | 'files' | 'search';
+  setSidebarViewMode: (mode: 'sessions' | 'files' | 'search') => void;
+  sidebarPanelWidth: number;
+  setSidebarPanelWidth: (width: number) => void;
+  sidebarPanelOpened: boolean;
+  setSidebarPanelOpened: (opened: boolean) => void;
+  toggleSidebarPanelOpened: () => void;
+
+  /** Team 编辑器分屏位置(百分比 20-80) */
+  teamSplitPos: number;
+  setTeamSplitPos: (pos: number) => void;
+  /** Team 编辑器渲染模式 */
+  teamEditorMode: 'overlay' | 'split';
+  setTeamEditorMode: (mode: 'overlay' | 'split') => void;
 
   // Chat view
+  workbenchLayoutMode: WorkbenchLayoutMode;
+  setWorkbenchLayoutMode: (mode: WorkbenchLayoutMode) => void;
   chatView: ChatView;
   setChatView: (v: ChatView) => void;
   navigateToHome: () => void;
   navigateToSession: () => void;
   lastChatPath: string | null;
   setLastChatPath: (path: string | null) => void;
+  tabs: SessionTab[];
+  activeTabId: string | null;
+  addSessionTab: (sessionId: string, title: string, workspacePath?: string) => string;
+  addDraftTab: (workspacePath?: string) => string;
+  closeTab: (tabId: string) => SessionTab | null;
+  selectTab: (tabId: string) => SessionTab | null;
+  selectAdjacentTab: (direction: 'previous' | 'next') => SessionTab | null;
+  reorderTabs: (fromIndex: number, toIndex: number) => void;
+  updateTabTitle: (tabId: string, title: string) => void;
 
   teamNewSessionSignal: { teamWorkspaceId: string; nonce: number } | null;
   triggerTeamNewSession: (teamWorkspaceId: string) => void;
@@ -241,6 +277,19 @@ export interface UIStateStore {
   rightTab: string;
   setRightTab: (tab: string) => void;
 
+  reviewPanelOpened: boolean;
+  setReviewPanelOpened: (opened: boolean) => void;
+  toggleReviewPanelOpened: () => void;
+  reviewPanelWidth: number;
+  setReviewPanelWidth: (width: number) => void;
+  sidePanelActiveTab: 'review' | 'files' | 'context';
+  setSidePanelActiveTab: (tab: 'review' | 'files' | 'context') => void;
+  terminalPanelOpened: boolean;
+  setTerminalPanelOpened: (opened: boolean) => void;
+  toggleTerminalPanelOpened: () => void;
+  terminalPanelHeight: number;
+  setTerminalPanelHeight: (height: number) => void;
+
   /**
    * 快捷终端面板(VS Code 风格底部抽屉)是否开启,按 workspace 持久化。
    * 用户主动开/关,刷新后保留;无 workspace 时归入 __default__ 桶。
@@ -280,9 +329,100 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
 }
 
+function isWorkbenchLayoutMode(value: unknown): value is WorkbenchLayoutMode {
+  return value === 'classic' || value === 'fusion';
+}
+
 const SESSIONS_LIST_PANE_MIN_WIDTH = 260;
 const SESSIONS_LIST_PANE_MAX_WIDTH = 520;
 const SESSIONS_LIST_PANE_DEFAULT_WIDTH = 320;
+const SIDEBAR_PANEL_MIN_WIDTH = 244;
+const SIDEBAR_PANEL_MAX_WIDTH = 480;
+const SIDEBAR_PANEL_DEFAULT_WIDTH = 288;
+const REVIEW_PANEL_MIN_WIDTH = 300;
+const REVIEW_PANEL_MAX_WIDTH = 640;
+const REVIEW_PANEL_DEFAULT_WIDTH = 400;
+const TERMINAL_PANEL_MIN_HEIGHT = 120;
+const TERMINAL_PANEL_MAX_HEIGHT = 360;
+const TERMINAL_PANEL_DEFAULT_HEIGHT = 160;
+
+function createTabId(prefix: SessionTabType): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function normalizeTabTitle(title: string, fallback: string): string {
+  const normalized = title.trim();
+  return normalized.length > 0 ? normalized : fallback;
+}
+
+function createSessionTab(
+  id: string,
+  sessionId: string,
+  title: string,
+  workspacePath: string | undefined,
+): SessionTab {
+  const baseTab = {
+    id,
+    type: 'session',
+    sessionId,
+    title: normalizeTabTitle(title, `会话 ${sessionId.slice(0, 8)}`),
+    createdAt: Date.now(),
+  } satisfies SessionTab;
+
+  return workspacePath ? { ...baseTab, workspacePath } : baseTab;
+}
+
+function createDraftTab(id: string, workspacePath: string | undefined): SessionTab {
+  const baseTab = {
+    id,
+    type: 'draft',
+    title: '新会话',
+    createdAt: Date.now(),
+  } satisfies SessionTab;
+
+  return workspacePath ? { ...baseTab, workspacePath } : baseTab;
+}
+
+function isSessionTab(value: unknown): value is SessionTab {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const type = Reflect.get(value, 'type');
+  if (type !== 'session' && type !== 'draft') {
+    return false;
+  }
+
+  if (
+    typeof Reflect.get(value, 'id') !== 'string' ||
+    typeof Reflect.get(value, 'title') !== 'string'
+  ) {
+    return false;
+  }
+
+  if (typeof Reflect.get(value, 'createdAt') !== 'number') {
+    return false;
+  }
+
+  if (type === 'session' && typeof Reflect.get(value, 'sessionId') !== 'string') {
+    return false;
+  }
+
+  const workspacePath = Reflect.get(value, 'workspacePath');
+  return typeof workspacePath === 'undefined' || typeof workspacePath === 'string';
+}
+
+function normalizePersistedTabs(value: unknown): SessionTab[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(isSessionTab).slice(0, 12);
+}
 
 export function clampSessionsListPaneWidth(width: number): number {
   if (!Number.isFinite(width)) {
@@ -298,6 +438,51 @@ export const SESSIONS_LIST_PANE_WIDTH_BOUNDS = {
   min: SESSIONS_LIST_PANE_MIN_WIDTH,
   max: SESSIONS_LIST_PANE_MAX_WIDTH,
   default: SESSIONS_LIST_PANE_DEFAULT_WIDTH,
+} as const;
+
+export function clampSidebarPanelWidth(width: number): number {
+  if (!Number.isFinite(width)) {
+    return SIDEBAR_PANEL_DEFAULT_WIDTH;
+  }
+
+  return Math.min(SIDEBAR_PANEL_MAX_WIDTH, Math.max(SIDEBAR_PANEL_MIN_WIDTH, Math.round(width)));
+}
+
+export const SIDEBAR_PANEL_WIDTH_BOUNDS = {
+  min: SIDEBAR_PANEL_MIN_WIDTH,
+  max: SIDEBAR_PANEL_MAX_WIDTH,
+  default: SIDEBAR_PANEL_DEFAULT_WIDTH,
+} as const;
+
+export function clampReviewPanelWidth(width: number): number {
+  if (!Number.isFinite(width)) {
+    return REVIEW_PANEL_DEFAULT_WIDTH;
+  }
+
+  return Math.min(REVIEW_PANEL_MAX_WIDTH, Math.max(REVIEW_PANEL_MIN_WIDTH, Math.round(width)));
+}
+
+export const REVIEW_PANEL_WIDTH_BOUNDS = {
+  min: REVIEW_PANEL_MIN_WIDTH,
+  max: REVIEW_PANEL_MAX_WIDTH,
+  default: REVIEW_PANEL_DEFAULT_WIDTH,
+} as const;
+
+export function clampTerminalPanelHeight(height: number): number {
+  if (!Number.isFinite(height)) {
+    return TERMINAL_PANEL_DEFAULT_HEIGHT;
+  }
+
+  return Math.min(
+    TERMINAL_PANEL_MAX_HEIGHT,
+    Math.max(TERMINAL_PANEL_MIN_HEIGHT, Math.round(height)),
+  );
+}
+
+export const TERMINAL_PANEL_HEIGHT_BOUNDS = {
+  min: TERMINAL_PANEL_MIN_HEIGHT,
+  max: TERMINAL_PANEL_MAX_HEIGHT,
+  default: TERMINAL_PANEL_DEFAULT_HEIGHT,
 } as const;
 
 export const useUIStateStore = create<UIStateStore>()(
@@ -319,9 +504,25 @@ export const useUIStateStore = create<UIStateStore>()(
         }),
 
       sidebarTab: 'sessions',
-      setSidebarTab: (tab) => set({ sidebarTab: tab }),
+      setSidebarTab: (tab) => set({ sidebarTab: tab, sidebarViewMode: tab }),
+      sidebarViewMode: 'sessions',
+      setSidebarViewMode: (mode) =>
+        set({ sidebarViewMode: mode, sidebarTab: mode === 'search' ? 'files' : mode }),
+      sidebarPanelWidth: SIDEBAR_PANEL_DEFAULT_WIDTH,
+      setSidebarPanelWidth: (width) => set({ sidebarPanelWidth: clampSidebarPanelWidth(width) }),
+      sidebarPanelOpened: true,
+      setSidebarPanelOpened: (opened) => set({ sidebarPanelOpened: opened }),
+      toggleSidebarPanelOpened: () =>
+        set((state) => ({ sidebarPanelOpened: !state.sidebarPanelOpened })),
+
+      teamSplitPos: 50,
+      setTeamSplitPos: (pos) => set({ teamSplitPos: Math.min(80, Math.max(20, pos)) }),
+      teamEditorMode: 'overlay',
+      setTeamEditorMode: (mode) => set({ teamEditorMode: mode }),
 
       // Chat view
+      workbenchLayoutMode: 'fusion',
+      setWorkbenchLayoutMode: (mode) => set({ workbenchLayoutMode: mode }),
       chatView: 'home',
       setChatView: (v) => set((state) => (state.chatView === v ? state : { chatView: v })),
       navigateToHome: () =>
@@ -330,6 +531,102 @@ export const useUIStateStore = create<UIStateStore>()(
         set((state) => (state.chatView === 'session' ? state : { chatView: 'session' })),
       lastChatPath: null,
       setLastChatPath: (path) => set({ lastChatPath: normalizeChatPath(path) }),
+      tabs: [],
+      activeTabId: null,
+      addSessionTab: (sessionId, title, workspacePath) => {
+        const state = get();
+        const existingTab = state.tabs.find(
+          (tab) => tab.type === 'session' && tab.sessionId === sessionId,
+        );
+        const tabId = existingTab?.id ?? createTabId('session');
+        const nextTab = createSessionTab(tabId, sessionId, title, workspacePath);
+        set({
+          tabs: existingTab
+            ? state.tabs.map((tab) =>
+                tab.id === tabId ? { ...nextTab, createdAt: tab.createdAt } : tab,
+              )
+            : [...state.tabs, nextTab],
+          activeTabId: tabId,
+        });
+        return tabId;
+      },
+      addDraftTab: (workspacePath) => {
+        const tabId = createTabId('draft');
+        set((state) => ({
+          tabs: [...state.tabs, createDraftTab(tabId, workspacePath)],
+          activeTabId: tabId,
+        }));
+        return tabId;
+      },
+      closeTab: (tabId) => {
+        const state = get();
+        const closingIndex = state.tabs.findIndex((tab) => tab.id === tabId);
+        if (closingIndex < 0) {
+          return state.tabs.find((tab) => tab.id === state.activeTabId) ?? null;
+        }
+
+        const nextTabs = state.tabs.filter((tab) => tab.id !== tabId);
+        const nextActiveTab =
+          state.activeTabId === tabId
+            ? (nextTabs[Math.min(closingIndex, nextTabs.length - 1)] ?? null)
+            : (nextTabs.find((tab) => tab.id === state.activeTabId) ?? null);
+        set({
+          tabs: nextTabs,
+          activeTabId: nextActiveTab?.id ?? null,
+        });
+        return nextActiveTab;
+      },
+      selectTab: (tabId) => {
+        const tab = get().tabs.find((entry) => entry.id === tabId) ?? null;
+        if (tab) {
+          set({ activeTabId: tab.id });
+        }
+        return tab;
+      },
+      selectAdjacentTab: (direction) => {
+        const state = get();
+        if (state.tabs.length === 0) {
+          return null;
+        }
+
+        const currentIndex = Math.max(
+          0,
+          state.tabs.findIndex((tab) => tab.id === state.activeTabId),
+        );
+        const offset = direction === 'next' ? 1 : -1;
+        const nextIndex = (currentIndex + offset + state.tabs.length) % state.tabs.length;
+        const tab = state.tabs[nextIndex] ?? null;
+        if (tab) {
+          set({ activeTabId: tab.id });
+        }
+        return tab;
+      },
+      reorderTabs: (fromIndex, toIndex) =>
+        set((state) => {
+          if (
+            fromIndex === toIndex ||
+            fromIndex < 0 ||
+            toIndex < 0 ||
+            fromIndex >= state.tabs.length ||
+            toIndex >= state.tabs.length
+          ) {
+            return state;
+          }
+
+          const nextTabs = [...state.tabs];
+          const [movingTab] = nextTabs.splice(fromIndex, 1);
+          if (!movingTab) {
+            return state;
+          }
+          nextTabs.splice(toIndex, 0, movingTab);
+          return { tabs: nextTabs };
+        }),
+      updateTabTitle: (tabId, title) =>
+        set((state) => ({
+          tabs: state.tabs.map((tab) =>
+            tab.id === tabId ? { ...tab, title: normalizeTabTitle(title, tab.title) } : tab,
+          ),
+        })),
 
       teamNewSessionSignal: null,
       triggerTeamNewSession: (teamWorkspaceId) =>
@@ -565,6 +862,21 @@ export const useUIStateStore = create<UIStateStore>()(
       toggleRightOpen: () => set((s) => ({ rightOpen: !s.rightOpen })),
       rightTab: 'overview',
       setRightTab: (tab) => set({ rightTab: tab }),
+      reviewPanelOpened: false,
+      setReviewPanelOpened: (opened) => set({ reviewPanelOpened: opened }),
+      toggleReviewPanelOpened: () =>
+        set((state) => ({ reviewPanelOpened: !state.reviewPanelOpened })),
+      reviewPanelWidth: REVIEW_PANEL_WIDTH_BOUNDS.default,
+      setReviewPanelWidth: (width) => set({ reviewPanelWidth: clampReviewPanelWidth(width) }),
+      sidePanelActiveTab: 'review',
+      setSidePanelActiveTab: (tab) => set({ sidePanelActiveTab: tab }),
+      terminalPanelOpened: false,
+      setTerminalPanelOpened: (opened) => set({ terminalPanelOpened: opened }),
+      toggleTerminalPanelOpened: () =>
+        set((state) => ({ terminalPanelOpened: !state.terminalPanelOpened })),
+      terminalPanelHeight: TERMINAL_PANEL_HEIGHT_BOUNDS.default,
+      setTerminalPanelHeight: (height) =>
+        set({ terminalPanelHeight: clampTerminalPanelHeight(height) }),
 
       quickTerminalOpenByWorkspace: {},
       setQuickTerminalOpenForWorkspace: (workspacePath, open) =>
@@ -598,7 +910,7 @@ export const useUIStateStore = create<UIStateStore>()(
     }),
     {
       name: 'openAwork-ui-state',
-      version: 14,
+      version: 18,
       // Throttle storage writes to avoid JSON.stringify+setItem on
       // every fast UI mutation (tab clicks, expand/collapse). See
       // throttledStorage definition above.
@@ -690,6 +1002,36 @@ export const useUIStateStore = create<UIStateStore>()(
           nextState.editorFullScreen = false;
         }
 
+        // v15:sidebarTab 重命名为 sidebarViewMode,并新增 'search' 模式。
+        // 旧值 'sessions' / 'files' 直接映射,其他值回退为 'sessions'。
+        // 同时新增 Team 编辑器分屏相关字段。
+        if (version < 15) {
+          const oldTab = nextState.sidebarTab;
+          delete nextState.sidebarTab;
+          nextState.sidebarViewMode = oldTab === 'files' ? 'files' : 'sessions';
+          nextState.teamSplitPos = 50;
+          nextState.teamEditorMode = 'overlay';
+        }
+
+        // v16:OpenCode 布局借鉴引入顶部会话标签和 Rail+Panel 侧栏状态。
+        if (version < 16) {
+          nextState.sidebarPanelWidth = SIDEBAR_PANEL_WIDTH_BOUNDS.default;
+          nextState.sidebarPanelOpened = true;
+          nextState.tabs = [];
+          nextState.activeTabId = null;
+        }
+
+        if (version < 17) {
+          nextState.reviewPanelOpened = false;
+          nextState.reviewPanelWidth = REVIEW_PANEL_WIDTH_BOUNDS.default;
+          nextState.terminalPanelOpened = false;
+          nextState.terminalPanelHeight = TERMINAL_PANEL_HEIGHT_BOUNDS.default;
+        }
+
+        if (version < 18) {
+          nextState.workbenchLayoutMode = 'fusion' satisfies WorkbenchLayoutMode;
+        }
+
         if (!isStringArray(nextState.savedWorkspacePaths)) {
           nextState.savedWorkspacePaths = [];
         }
@@ -702,12 +1044,54 @@ export const useUIStateStore = create<UIStateStore>()(
           nextState.lastChatPath = null;
         }
 
+        if (!isWorkbenchLayoutMode(nextState.workbenchLayoutMode)) {
+          nextState.workbenchLayoutMode = 'fusion' satisfies WorkbenchLayoutMode;
+        }
+
         if (typeof nextState.sessionListPathFilterEnabled !== 'boolean') {
           nextState.sessionListPathFilterEnabled = false;
         }
 
         if (nextState.navRailExpanded !== null && typeof nextState.navRailExpanded !== 'boolean') {
           nextState.navRailExpanded = null;
+        }
+
+        nextState.sidebarPanelWidth = clampSidebarPanelWidth(
+          typeof nextState.sidebarPanelWidth === 'number'
+            ? nextState.sidebarPanelWidth
+            : SIDEBAR_PANEL_WIDTH_BOUNDS.default,
+        );
+
+        if (typeof nextState.sidebarPanelOpened !== 'boolean') {
+          nextState.sidebarPanelOpened = true;
+        }
+
+        nextState.reviewPanelWidth = clampReviewPanelWidth(
+          typeof nextState.reviewPanelWidth === 'number'
+            ? nextState.reviewPanelWidth
+            : REVIEW_PANEL_WIDTH_BOUNDS.default,
+        );
+
+        if (typeof nextState.reviewPanelOpened !== 'boolean') {
+          nextState.reviewPanelOpened = false;
+        }
+
+        nextState.terminalPanelHeight = clampTerminalPanelHeight(
+          typeof nextState.terminalPanelHeight === 'number'
+            ? nextState.terminalPanelHeight
+            : TERMINAL_PANEL_HEIGHT_BOUNDS.default,
+        );
+
+        if (typeof nextState.terminalPanelOpened !== 'boolean') {
+          nextState.terminalPanelOpened = false;
+        }
+
+        nextState.tabs = normalizePersistedTabs(nextState.tabs);
+        if (
+          typeof nextState.activeTabId !== 'string' ||
+          !(nextState.tabs as SessionTab[]).some((tab) => tab.id === nextState.activeTabId)
+        ) {
+          nextState.activeTabId = (nextState.tabs as SessionTab[])[0]?.id ?? null;
         }
 
         nextState.sessionsListPaneWidth = clampSessionsListPaneWidth(

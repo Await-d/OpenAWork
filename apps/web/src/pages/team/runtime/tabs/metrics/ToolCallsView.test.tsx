@@ -162,6 +162,23 @@ afterEach(() => {
 });
 
 describe('ToolCallsView', () => {
+  it('无工具数据时使用 SVG/token 空态', () => {
+    mockToolState.byTool = new Map();
+    mockToolState.byAgent = new Map();
+    mockToolState.bySession = new Map();
+    mockToolState.byLayer = new Map();
+    mockToolState.bySessionLayer = new Map();
+    mockToolState.bySessionTool = new Map();
+    mockToolState.bySessionAgent = new Map();
+    mockToolState.totalFailures = 0;
+    mockToolState.totalInvocations = 0;
+
+    const { container } = render(<ToolCallsView />);
+
+    expect(screen.getByText('暂无工具调用数据')).toBeTruthy();
+    expect(container.querySelector('svg')).toBeTruthy();
+  });
+
   it('未选中会话时显示全局工具聚合', () => {
     render(<ToolCallsView />);
 

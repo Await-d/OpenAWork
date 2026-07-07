@@ -58,6 +58,7 @@ interface ChatTopBarProps {
   sidebarOpen?: boolean;
   /** 切换左侧会话列表 sidebar 的回调。 */
   onToggleSidebar?: () => void;
+  density?: 'normal' | 'compact';
   /** Todo controller from upstream (shared with ChatTodoFloatingPanel). */
   todoController?: ChatTodoController;
   /** id for aria-controls linking the slot button to the floating panel. */
@@ -105,6 +106,7 @@ export function ChatTopBar({
   browserActive = false,
   sidebarOpen,
   onToggleSidebar,
+  density = 'normal',
   todoController,
   todoDetailsId,
   hideDialogueModeToggle = false,
@@ -113,6 +115,7 @@ export function ChatTopBar({
 }: ChatTopBarProps) {
   const showCommandPaletteButton = useDisplayPreferencesStore((s) => s.showCommandPaletteButton);
   const showTerminalButton = useDisplayPreferencesStore((s) => s.showTerminalButton);
+  const compactDensity = density === 'compact';
 
   // 测量自身宽度，决定 todo slot 是 compact（徽章）还是 full（摘要）。
   const barRef = useRef<HTMLDivElement>(null);
@@ -144,11 +147,11 @@ export function ChatTopBar({
         // 一定不换行 — 一旦换行右侧 pill 会跑到下一行,而 SessionTerminalsPanel
         // 等 popover 是相对 pill 定位的,跟随换行就会显示在错乱位置。
         flexWrap: 'nowrap',
-        padding: '6px 12px',
+        padding: compactDensity ? '4px 8px' : '6px 12px',
         borderBottom: '1px solid var(--border-subtle)',
         flexShrink: 0,
-        background: 'var(--bg-overlay)',
-        minHeight: 44,
+        background: compactDensity ? 'var(--bg-surface)' : 'var(--bg-overlay)',
+        minHeight: compactDensity ? 36 : 44,
         // 让中间 group 在窄屏时可被压缩,但本行不换。
         overflow: 'hidden',
       }}

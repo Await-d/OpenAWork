@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AttachmentItem } from '@openAwork/shared-ui';
 import { inferSupportsThinking } from '@openAwork/shared-ui';
 import type { CommandDescriptor } from '@openAwork/shared';
@@ -50,6 +50,12 @@ export interface UnifiedComposerSubmitPayload {
   effectiveAgentId: string;
   imageModelLabel: string;
   queuedMessageId?: string;
+}
+
+export interface UnifiedComposerActivity {
+  readonly attachedCount: number;
+  readonly queuedCount: number;
+  readonly showVoice: boolean;
 }
 
 export interface UnifiedComposerProps {
@@ -104,9 +110,13 @@ export interface UnifiedComposerProps {
   onContinueEditingImage?: () => void;
   onNavigateToArtifacts?: () => void;
   onSelectImageReferenceArtifactId?: (id: string | null) => void;
+  onCompanionActivityChange?: (activity: UnifiedComposerActivity) => void;
   markSessionMetadataDirty?: () => void;
   /** 会话统计数据，渲染在输入框下方 */
   statsData?: ComposerStatsData | null;
+  contextUsedTokens?: number;
+  contextMaxTokens?: number;
+  contextIsEstimated?: boolean;
   /**
    * Optional slot rendered next to the composer input box on the right.
    * Forwarded to ChatComposer.composerRightSlot which renders it as a
@@ -199,6 +209,11 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
     onContinueEditingImage,
     onNavigateToArtifacts,
     onSelectImageReferenceArtifactId,
+    onCompanionActivityChange,
+    statsData: statsDataProp,
+    contextUsedTokens,
+    contextMaxTokens,
+    contextIsEstimated,
 
     imageGenerationMode: imageGenerationModeProp,
     hasConfiguredImageModel: hasConfiguredImageModelProp,
@@ -253,6 +268,30 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
   const resolvedComposerMenu = composerMenuProp ?? internalComposerMenu;
   const resolvedSetComposerMenu = setComposerMenuProp ?? setInternalComposerMenu;
   const resolvedTextareaRef = textareaRefProp ?? internalTextareaRef;
+  const resolvedStatsData = useMemo<ComposerStatsData | null>(() => {
+    if (statsDataProp) {
+      return statsDataProp;
+    }
+    if (contextUsedTokens === undefined || contextMaxTokens === undefined) {
+      return null;
+    }
+    return {
+      totalCostUsd: 0,
+      currentRoundCostUsd: 0,
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      contextUsedTokens,
+      contextMaxTokens,
+      contextIsEstimated: contextIsEstimated ?? true,
+      messageTurns: 0,
+      hiddenMessageCount: 0,
+      serverTotalTurnCount: null,
+      childSessionCount: 0,
+      sessionTaskCount: 0,
+      totalDurationMs: 0,
+      streaming,
+    };
+  }, [contextIsEstimated, contextMaxTokens, contextUsedTokens, statsDataProp, streaming]);
 
   const composerState = useUnifiedComposerState({
     sessionId,
@@ -365,6 +404,14 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
 
   const composerVariant = props.variant;
 
+  useEffect(() => {
+    onCompanionActivityChange?.({
+      attachedCount: attachmentItems.length,
+      queuedCount: queuedComposerPreviews.length,
+      showVoice,
+    });
+  }, [attachmentItems.length, onCompanionActivityChange, queuedComposerPreviews.length, showVoice]);
+
   return (
     <>
       {latestGeneratedImageResult && artifactsWorkspaceHref && (
@@ -458,7 +505,7 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
         onOptimizePrompt={features.promptOptimize && token ? handleOptimizePrompt : undefined}
         onDropFiles={appendFiles}
         onReplaceInput={(nextValue: string) => setInput(nextValue)}
-        statsData={props.statsData}
+        statsData={resolvedStatsData}
         placeholder={props.placeholder}
         composerRightSlot={props.composerRightSlot}
         gatewayUrl={gatewayUrl}

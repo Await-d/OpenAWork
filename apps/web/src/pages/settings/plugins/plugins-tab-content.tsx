@@ -19,8 +19,13 @@ export interface ImageGenerationPluginSettings {
   dedicatedModelId?: string;
 }
 
+export interface DesktopControlPluginSettings {
+  enabled: boolean;
+}
+
 export interface PluginSettings {
   imageGeneration?: ImageGenerationPluginSettings;
+  desktopControl?: DesktopControlPluginSettings;
 }
 
 interface PluginsTabContentProps {
@@ -227,7 +232,26 @@ export function PluginsTabContent({
     [saveSettings],
   );
 
+  const updateDesktopControlPlugin = useCallback(
+    (patch: Partial<DesktopControlPluginSettings>) => {
+      setPluginSettings((prev) => {
+        const next: PluginSettings = {
+          ...prev,
+          desktopControl: {
+            enabled: prev.desktopControl?.enabled ?? false,
+            ...prev.desktopControl,
+            ...patch,
+          },
+        };
+        void saveSettings(next);
+        return next;
+      });
+    },
+    [saveSettings],
+  );
+
   const imgPlugin = pluginSettings.imageGeneration ?? { enabled: false, modelSource: 'global' };
+  const desktopControlPlugin = pluginSettings.desktopControl ?? { enabled: false };
 
   // Resolve the active image model info for display
   const imageProviders = providers.filter(
@@ -267,6 +291,29 @@ export function PluginsTabContent({
       label: '图片插件',
       description: '为 Agent 提供专用图片生成 Tool。',
       enabled: imgPlugin.enabled,
+    },
+    {
+      id: 'desktop-control',
+      icon: (
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <rect x="3" y="4" width="18" height="12" rx="2" />
+          <path d="M8 20h8" />
+          <path d="M12 16v4" />
+          <path d="M8 9l2.5 2.5L16 7" />
+        </svg>
+      ),
+      label: '系统桌面控制',
+      description: '为 Agent 提供截图、点击、输入和按键 Tool。',
+      enabled: desktopControlPlugin.enabled,
     },
     {
       id: 'skills',
@@ -333,7 +380,7 @@ export function PluginsTabContent({
         </svg>
       ),
       label: 'MCP 服务器',
-      description: '通过 MCP 协议接入外部工具，扩展 Agent 能力。',
+      description: '管理内置与自定义 MCP 服务器，扩展 Agent 工具能力。',
       enabled: mcpServers.length > 0,
     },
   ];
@@ -618,6 +665,99 @@ export function PluginsTabContent({
 
         {selectedPlugin && selectedPluginId === 'skills' && <SkillsPluginPanel />}
 
+        {selectedPlugin && selectedPluginId === 'desktop-control' && (
+          <>
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--fg-strong)' }}>
+                系统桌面控制
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginTop: 2 }}>
+                控制 Agent 是否获得系统级 desktop_control Tool。
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 16,
+                ...CARD,
+              }}
+            >
+              <div>
+                <div style={SECTION_TITLE}>启用插件</div>
+                <div style={SECTION_DESC}>启用后才会把 desktop_control 注入 Agent 工具列表</div>
+              </div>
+              <ToggleSwitch
+                checked={desktopControlPlugin.enabled}
+                onChange={(v) => updateDesktopControlPlugin({ enabled: v })}
+              />
+            </div>
+
+            <div style={{ ...CARD, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={SECTION_TITLE}>Tool 状态</div>
+              <div
+                style={{
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 8,
+                  padding: '12px 14px',
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: 'var(--fg-strong)',
+                    fontFamily: 'monospace',
+                  }}
+                >
+                  desktop_control
+                </div>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: desktopControlPlugin.enabled ? 'var(--accent)' : 'var(--fg-muted)',
+                    marginTop: 2,
+                  }}
+                >
+                  {desktopControlPlugin.enabled
+                    ? '插件已启用，后端会在本用户会话中注入该工具。'
+                    : '插件未启用，后端不会注入该工具，历史调用也会被拒绝。'}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--fg-muted)', marginTop: 4 }}>
+                  可用参数：action、x、y、text、key、keys、scrollX、scrollY、ms
+                </div>
+                <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                  <span style={PARAM_CHIP}>action</span>
+                  <span style={PARAM_CHIP}>x</span>
+                  <span style={PARAM_CHIP}>y</span>
+                  <span style={PARAM_CHIP}>text</span>
+                  <span style={PARAM_CHIP}>key</span>
+                  <span style={PARAM_CHIP}>keys</span>
+                  <span style={PARAM_CHIP}>scrollX</span>
+                  <span style={PARAM_CHIP}>scrollY</span>
+                  <span style={PARAM_CHIP}>ms</span>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ ...CARD, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={SECTION_TITLE}>执行边界</div>
+              <div style={SECTION_DESC}>
+                插件开关只决定 Agent 工具是否注入和是否允许执行；实际截图、点击、输入、按键、
+                滚动等动作仍会继续走权限审批与运行环境能力检查。
+              </div>
+            </div>
+
+            {saving && (
+              <div style={{ fontSize: 11, color: 'var(--fg-muted)', textAlign: 'right' }}>
+                保存中…
+              </div>
+            )}
+          </>
+        )}
+
         {selectedPlugin && selectedPluginId === 'websearch' && (
           <>
             <div>
@@ -648,8 +788,8 @@ export function PluginsTabContent({
                 MCP 服务器
               </div>
               <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginTop: 2 }}>
-                通过 Model Context Protocol 接入外部工具服务器，为 Agent
-                扩展数据源访问、工具执行和第三方集成能力。
+                系统内置 websearch、grep_app、codegraph、git_bash、lsp；也可以接入自定义 SSE / stdio
+                MCP，并对同 id 内置项做禁用或覆盖。
               </div>
             </div>
             <section style={{ ...SS, marginBottom: 0, padding: '10px 12px', gap: '0.5rem' }}>
@@ -657,9 +797,33 @@ export function PluginsTabContent({
               <div style={UV}>
                 <MCPServerConfig
                   servers={mcpServers}
-                  onAdd={(entry) => setMcpServers((prev) => [...prev, entry])}
-                  onRemove={(id) =>
-                    setMcpServers((prev) => prev.filter((server) => server.id !== id))
+                  onAdd={(entry) =>
+                    setMcpServers((prev) => [...prev, { ...entry, source: 'user' }])
+                  }
+                  onRemove={(id) => {
+                    setMcpServers((prev) => {
+                      const target = prev.find((server) => server.id === id);
+                      if (target?.builtin && target.source === 'builtin') {
+                        return prev.map((server) =>
+                          server.id === id
+                            ? { ...server, enabled: false, source: 'user' as const }
+                            : server,
+                        );
+                      }
+                      return prev.filter((server) => server.id !== id);
+                    });
+                  }}
+                  onUpdate={(id, entry) =>
+                    setMcpServers((prev) =>
+                      prev.map((server) =>
+                        server.id === id
+                          ? {
+                              ...entry,
+                              source: server.builtin ? ('user' as const) : (entry.source ?? 'user'),
+                            }
+                          : server,
+                      ),
+                    )
                   }
                 />
               </div>

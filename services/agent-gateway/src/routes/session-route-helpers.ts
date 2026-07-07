@@ -1,5 +1,12 @@
-import type { FileDiffContent, Message, MessageContent, RunEvent } from '@openAwork/shared';
+import type {
+  FileDiffContent,
+  Message,
+  MessageContent,
+  RunEvent,
+  WorkflowRuntimeState,
+} from '@openAwork/shared';
 import type { SessionTodo } from '../tools/todo-tools.js';
+import { buildWorkflowRuntimeState } from '../session/workflow-runtime-state.js';
 
 const SLIM_STRING_MAX = 800;
 const SLIM_INPUT_MAX = 2000;
@@ -173,6 +180,7 @@ export interface PublicSessionResponse extends SessionResponseLike {
   messages: Message[];
   runEvents: RunEvent[];
   todos: SessionTodo[];
+  workflowRuntime: WorkflowRuntimeState;
 }
 
 export const MAX_IMPORTED_MESSAGES = 500;
@@ -202,6 +210,7 @@ export function toPublicSessionResponse(
     messages,
     runEvents,
     todos,
+    workflowRuntime: buildWorkflowRuntimeState(session.metadata_json),
   };
 }
 

@@ -1,5 +1,9 @@
+mod desktop_control_bridge;
+mod desktop_control_native;
+
 use argon2::password_hash::{rand_core::OsRng as ArgonRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
+use desktop_control_bridge::DesktopControlBridgeProcess;
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -807,6 +811,13 @@ async fn spawn_gateway_sidecar(
     // 上的 root package.json 而退化到兜底版本号 '0.0.1'，导致前端「设置 →
     // 工作区」展示的「当前版本」与实际安装包版本不一致。
     let app_version = app.package_info().version.to_string();
+    let desktop_control_url = match std::env::var("OPENAWORK_DESKTOP_CONTROL_URL") {
+        Ok(url) if !url.trim().is_empty() => url,
+        _ => {
+            let bridge = app.state::<DesktopControlBridgeProcess>();
+            bridge.ensure_started(desktop_auth_token.clone()).await?
+        }
+    };
     let mut command = app
         .shell()
         .sidecar("agent-gateway")
@@ -814,7 +825,8 @@ async fn spawn_gateway_sidecar(
         .env("GATEWAY_PORT", port.to_string())
         .env("GATEWAY_HOST", host)
         .env("DESKTOP_AUTOMATION", "1")
-        .env("OPENAWORK_DESKTOP_AUTH_TOKEN", desktop_auth_token)
+        .env("OPENAWORK_DESKTOP_AUTH_TOKEN", desktop_auth_token.clone())
+        .env("OPENAWORK_DESKTOP_CONTROL_TOKEN", desktop_auth_token)
         .env("OPENAWORK_DATA_DIR", data_dir.to_string_lossy().to_string())
         .env("OPENAWORK_APP_VERSION", app_version)
         // 让 sidecar 监视 Tauri 主进程；主进程被强杀 / 系统崩溃 / 安装器卸载
@@ -828,6 +840,7 @@ async fn spawn_gateway_sidecar(
     if let Some(web_dist) = resolve_web_dist_path(&app) {
         command = command.env("OPENAWORK_WEB_DIST", web_dist);
     }
+    command = command.env("OPENAWORK_DESKTOP_CONTROL_URL", desktop_control_url);
 
     let (mut rx, child) = command.spawn().map_err(|e| e.to_string())?;
 
@@ -1791,6 +1804,7 @@ pub fn run() {
             generation: 0,
             desktop_auth_token: load_or_create_desktop_auth_token(),
         }))))
+        .manage(DesktopControlBridgeProcess::default())
         .manage(GatewayHealthState(Arc::new(Mutex::new(GatewayHealth::Stopped))))
         .invoke_handler(tauri::generate_handler![
             start_gateway,

@@ -12,6 +12,8 @@ import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-referen
 import { formatTimelineDetail } from '../../data/team-runtime-reference-formatters.js';
 import { TabContainer } from '../TabContainer.js';
 import { collectSessionScope, isSessionInScope } from '../../data/team-runtime-session-scope.js';
+import { SecurityIcon } from '../../shared/TeamIcons.js';
+import { TeamGovernanceWorkbenchHeader } from './TeamGovernanceWorkbenchHeader.js';
 
 const ACTION_LABELS: Record<TeamAuditLogRecord['action'], string> = {
   capability_violation: '能力越权',
@@ -136,6 +138,22 @@ export function AuditView({
     return list.slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }, [scopedAuditLogs, entityFilter, actorFilter]);
 
+  const actorCount = useMemo(() => {
+    const actors = new Set<string>();
+    for (const log of scopedAuditLogs) {
+      const actor = log.actorEmail ?? log.actorUserId;
+      if (actor) {
+        actors.add(actor);
+      }
+    }
+    return actors.size;
+  }, [scopedAuditLogs]);
+
+  const entityTypeCount = useMemo(
+    () => new Set(scopedAuditLogs.map((log) => log.entityType)).size,
+    [scopedAuditLogs],
+  );
+
   const exportCsv = () => {
     const header = 'createdAt,action,entityType,entityId,actor,summary\n';
     const rows = filtered
@@ -161,10 +179,62 @@ export function AuditView({
     URL.revokeObjectURL(url);
   };
 
+  const summaryHeader = (
+    <TeamGovernanceWorkbenchHeader
+      area="audit"
+      eyebrow="Governance · Audit"
+      title="治理工作台摘要"
+      description="把审计范围、实体类型、操作者和导出动作放在同一首屏，先确认追踪边界，再进入过滤列表。"
+      metrics={[
+        {
+          label: '审计记录',
+          value: scopedAuditLogs.length,
+          detail: scopeMode === 'session' ? '当前会话子树' : '工作区全部',
+          tone: scopedAuditLogs.length > 0 ? 'warning' : 'muted',
+        },
+        {
+          label: '实体类型',
+          value: entityTypeCount,
+          detail: '敏感对象覆盖',
+          tone: entityTypeCount > 0 ? 'aux' : 'muted',
+        },
+        {
+          label: '操作者',
+          value: actorCount,
+          detail: 'actor 去重统计',
+          tone: actorCount > 0 ? 'accent' : 'muted',
+        },
+        {
+          label: '过滤结果',
+          value: filtered.length,
+          detail:
+            entityFilter === 'all' ? '全部类型' : (ENTITY_LABELS[entityFilter] ?? entityFilter),
+          tone: filtered.length > 0 ? 'success' : 'warning',
+        },
+      ]}
+      signals={[
+        {
+          label: '范围',
+          value:
+            scopeMode === 'session'
+              ? (selectedSessionTitle ?? selectedSessionId?.slice(0, 8) ?? '当前会话')
+              : '工作区全部',
+          tone: scopeMode === 'session' ? 'accent' : 'muted',
+        },
+        {
+          label: 'Actor 过滤',
+          value: actorFilter.trim() ? actorFilter.trim() : '未启用',
+          tone: actorFilter.trim() ? 'aux' : 'muted',
+        },
+      ]}
+    />
+  );
+
   if (scopedAuditLogs.length === 0) {
     return (
       <TabContainer title="审计日志" subtitle="共享 / 评论 / 权限变更等敏感操作的完整轨迹。">
         <div style={CONTAINER_STYLE}>
+          {summaryHeader}
           <div
             style={{
               display: 'grid',
@@ -177,8 +247,20 @@ export function AuditView({
               gap: 6,
             }}
           >
-            <span style={{ fontSize: 26 }} aria-hidden>
-              📜
+            <span
+              style={{
+                width: 34,
+                height: 34,
+                display: 'grid',
+                placeItems: 'center',
+                borderRadius: 10,
+                color: 'var(--fg-muted)',
+                border: '1px solid color-mix(in srgb, var(--border-default) 48%, transparent)',
+                background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base))',
+              }}
+              aria-hidden
+            >
+              <SecurityIcon size={18} color="currentColor" />
             </span>
             <strong style={{ color: 'var(--fg-default)' }}>暂无审计记录</strong>
             <span>共享、评论、权限变更等操作发生后会自动出现在这里。</span>
@@ -191,6 +273,7 @@ export function AuditView({
   return (
     <TabContainer title="审计日志" subtitle="共享 / 评论 / 权限变更等敏感操作的完整轨迹。">
       <div style={CONTAINER_STYLE}>
+        {summaryHeader}
         <div style={FILTER_BAR_STYLE}>
           {selectedSessionId ? (
             <>

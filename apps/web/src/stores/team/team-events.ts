@@ -93,7 +93,7 @@ interface TeamRuntimeSnapshotHandoffRecord {
   fromSessionId: string;
   id: string;
   /** 后端快照返回的持久化 payload（含 rewrittenIntent/goal 等），用于提取 summary */
-  payload?: Record<string, unknown> | null;
+  payload?: unknown;
   paused?: boolean;
   recoverableFailure?: boolean;
   retryCount?: number;
@@ -102,6 +102,13 @@ interface TeamRuntimeSnapshotHandoffRecord {
   toRoleLayer: string;
   toSessionId: string | null;
   updatedAt: string;
+}
+
+function normalizeSnapshotPayload(payload: unknown): Record<string, unknown> | null {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+    return null;
+  }
+  return Object.fromEntries(Object.entries(payload));
 }
 
 interface TeamRuntimeSnapshotSessionRecord {
@@ -722,11 +729,7 @@ export function dispatchTeamEvent(event: HandoffEvent): void {
   // 后端每次 setSubstate 都会推送 session.substate.changed 事件。
   // 直接更新 layer store 中的 substate 字段，无需等待 HTTP reload，
   // 让进度条（TeamSubstateProgressBar）能实时更新。
-  if (
-    event.type === 'session.substate.changed' &&
-    !isTelemetryEvent &&
-    event.sessionId
-  ) {
+  if (event.type === 'session.substate.changed' && !isTelemetryEvent && event.sessionId) {
     const substate = (event.payload['substate'] as string | null | undefined) ?? null;
     const ts = typeof event.timestamp === 'number' ? event.timestamp : Date.now();
     updateNodeSubstate(event.sessionId, substate, ts);
@@ -852,8 +855,9 @@ export function hydrateTeamRuntimeStores(input: {
     input.handoffs.map((record) => {
       const updatedAt = parseTimestampMs(record.updatedAt) ?? Date.now();
       // 从快照 payload 提取 summary，使刷新后任务清单仍能显示有意义的标题
-      const summaryFromSnapshot = record.payload
-        ? extractHandoffSummary(record.payload)
+      const snapshotPayload = normalizeSnapshotPayload(record.payload);
+      const summaryFromSnapshot = snapshotPayload
+        ? extractHandoffSummary(snapshotPayload)
         : undefined;
       return {
         ...(parseTimestampMs(record.completedAt)

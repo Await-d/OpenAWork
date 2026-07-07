@@ -1,0 +1,386 @@
+[
+  {
+    "name": "plugins-desktop-control",
+    "viewportName": "desktop",
+    "metrics": {
+      "innerWidth": 1280,
+      "bodyScrollWidth": 1280,
+      "documentScrollWidth": 1280,
+      "documentClientWidth": 1280,
+      "overflowingElements": []
+    }
+  },
+  {
+    "name": "workspace",
+    "viewportName": "desktop",
+    "metrics": {
+      "innerWidth": 1280,
+      "bodyScrollWidth": 1280,
+      "documentScrollWidth": 1280,
+      "documentClientWidth": 1280,
+      "overflowingElements": []
+    }
+  },
+  {
+    "name": "plugins-desktop-control",
+    "viewportName": "tablet",
+    "metrics": {
+      "innerWidth": 768,
+      "bodyScrollWidth": 768,
+      "documentScrollWidth": 768,
+      "documentClientWidth": 768,
+      "overflowingElements": []
+    }
+  },
+  {
+    "name": "workspace",
+    "viewportName": "tablet",
+    "metrics": {
+      "innerWidth": 768,
+      "bodyScrollWidth": 768,
+      "documentScrollWidth": 768,
+      "documentClientWidth": 768,
+      "overflowingElements": [
+        {
+          "tag": "DIV",
+          "rectRight": 774,
+          "rectLeft": 597,
+          "width": 177,
+          "text": "桌面自动化○打开页面○点击操作○表单输入○截图当前模式：Web 降级🔒桌面 Sidecar 未启用，操作控制台不可用系统桌面控制✓截图qa-screensho"
+        },
+        {
+          "tag": "DIV",
+          "rectRight": 774,
+          "rectLeft": 597,
+          "width": 177,
+          "text": "桌面自动化○打开页面○点击操作○表单输入○截图当前模式：Web 降级🔒桌面 Sidecar 未启用，操作控制台不可用"
+        },
+        {
+          "tag": "DIV",
+          "rectRight": 774,
+          "rectLeft": 597,
+          "width": 177,
+          "text": "系统桌面控制✓截图qa-screenshot✓点击qa-input✓输入qa-input✓按键qa-input✓组合键qa-input✓滚动qa-input✓等"
+        },
+        {
+          "tag": "DIV",
+          "rectRight": 774,
+          "rectLeft": 597,
+          "width": 177,
+          "text": "GitHub 触发器+ 注册触发器⚡尚未配置 GitHub 触发器通过 API 注册触发器后，此处会显示实时状态查看配置格式 ▾"
+        },
+        {
+          "tag": "P",
+          "rectRight": 774,
+          "rectLeft": 597,
+          "width": 177,
+          "text": "暂无提供商更新记录。"
+        }
+      ]
+    }
+  },
+  {
+    "name": "plugins-desktop-control",
+    "viewportName": "mobile",
+    "metrics": {
+      "innerWidth": 375,
+      "bodyScrollWidth": 375,
+      "documentScrollWidth": 375,
+      "documentClientWidth": 375,
+      "overflowingElements": [
+        {
+          "tag": "DIV",
+          "rectRight": 490,
+          "rectLeft": 250,
+          "width": 240,
+          "text": "插件配置可选 Tool 插件，默认均为禁用图片插件为 Agent 提供专用图片生成 Tool。系统桌面控制已启用为 Agent 提供截图、点击、输入和按键 To"
+        },
+        {
+          "tag": "DIV",
+          "rectRight": 490,
+          "rectLeft": 250,
+          "width": 240,
+          "text": "插件配置可选 Tool 插件，默认均为禁用"
+        },
+        {
+          "tag": "DIV",
+          "rectRight": 490,
+          "rectLeft": 250,
+          "width": 240,
+          "text": "插件"
+        },
+        {
+          "tag": "DIV",
+          "rectRight": 490,
+          "rectLeft": 250,
+          "width": 240,
+          "text": "配置可选 Tool 插件，默认均为禁用"
+        },
+        {
+          "tag": "DIV",
+          "rectRight": 490,
+          "rectLeft": 250,
+          "width": 240,
+          "text": "图片插件为 Agent 提供专用图片生成 Tool。系统桌面控制已启用为 Agent 提供截图、点击、输入和按键 Tool。技能管理已安装 Agent 技能，控"
+        },
+        {
+          "tag": "BUTTON",
+          "rectRight": 490,
+          "rectLeft": 250,
+          "width": 240,
+          "text": "图片插件为 Agent 提供专用图片生成 Tool。"
+        },
+        {
+          "tag": "SPAN",
+          "rectRight": 478,
+          "rectLeft": 290,
+          "width": 188,
+          "text": "图片插件为 Agent 提供专用图片生成 Tool。"
+        },
+        {
+          "tag": "SPAN",
+          "rectRight": 478,
+          "rectLeft": 290,
+          "width": 188,
+          "text": "图片插件"
+        },
+        {
+          "tag": "SPAN",
+          "rectRight": 478,
+          "rectLeft": 290,
+          "width": 188,
+          "text": "为 Agent 提供专用图片生成 Tool。"
+        },
+        {
+          "tag": "BUTTON",
+          "rectRight": 490,
+          "rectLeft": 250,
+          "width": 240,
+          "text": "系统桌面控制已启用为 Agent 提供截图、点击、输入和按键 Tool。"
+        },
+        {
+          "tag": "SPAN",
+          "rectRight": 478,
+          "rectLeft": 290,
+          "width": 188,
+          "text": "系统桌面控制已启用为 Agent 提供截图、点击、输入和按键 Tool。"
+        },
+        {
+          "tag": "SPAN",
+          "rectRight": 478,
+          "rectLeft": 290,
+          "width": 188,
+          "text": "系统桌面控制已启用"
+        },
+        {
+          "tag": "SPAN",
+          "rectRight": 413,
+          "rectLeft": 367,
+          "width": 46,
+          "text": "已启用"
+        },
+        {
+          "tag": "SPAN",
+          "rectRight": 478,
+          "rectLeft": 290,
+          "width": 188,
+          "text": "为 Agent 提供截图、点击、输入和按键 Tool。"
+        },
+        {
+          "tag": "BUTTON",
+          "rectRight": 490,
+          "rectLeft": 250,
+          "width": 240,
+          "text": "技能管理已安装 Agent 技能，控制每条技能是否启用。"
+        },
+        {
+          "tag": "SPAN",
+          "rectRight": 478,
+          "rectLeft": 290,
+          "width": 188,
+          "text": "技能管理已安装 Agent 技能，控制每条技能是否启用。"
+        },
+        {
+          "tag": "SPAN",
+          "rectRight": 478,
+          "rectLeft": 290,
+          "width": 188,
+          "text": "技能"
+        },
+        {
+          "tag": "SPAN",
+          "rectRight": 478,
+          "rectLeft": 290,
+          "width": 188,
+          "text": "管理已安装 Agent 技能，控制每条技能是否启用。"
+        },
+        {
+          "tag": "BUTTON",
+          "rectRight": 490,
+          "rectLeft": 250,
+          "width": 240,
+          "text": "Web 搜索为 Agent 的 websearch 工具配置多 provider 策略。"
+        },
+        {
+          "tag": "SPAN",
+          "rectRight": 478,
+          "rectLeft": 290,
+          "width": 188,
+          "text": "Web 搜索为 Agent 的 websearch 工具配置多 provider 策略。"
+        }
+      ]
+    }
+  },
+  {
+    "name": "workspace",
+    "viewportName": "mobile",
+    "metrics": {
+      "innerWidth": 375,
+      "bodyScrollWidth": 375,
+      "documentScrollWidth": 375,
+      "documentClientWidth": 375,
+      "overflowingElements": [
+        {
+          "tag": "LABEL",
+          "rectRight": 392,
+          "rectLeft": 351,
+          "width": 41,
+          "text": "启用"
+        },
+        {
+          "tag": "DIV",
+          "rectRight": 589,
+          "rectLeft": 308,
+          "width": 281,
+          "text": "文件过滤规则.crushignore 规则文件过滤规则.crushignore 规则 — 每行一条暂无过滤规则。添加●规则已自动保存到 .crushignore"
+        },
+        {
+          "tag": "DIV",
+          "rectRight": 578,
+          "rectLeft": 319,
+          "width": 259,
+          "text": "文件过滤规则.crushignore 规则"
+        },
+        {
+          "tag": "SPAN",
+          "rectRight": 386,
+          "rectLeft": 319,
+          "width": 67,
+          "text": "文件过滤规则"
+        },
+        {
+          "tag": "SPAN",
+          "rectRight": 578,
+          "rectLeft": 494,
+          "width": 84,
+          "text": ".crushignore 规则"
+        },
+        {
+          "tag": "DIV",
+          "rectRight": 578,
+          "rectLeft": 319,
+          "width": 259,
+          "text": "文件过滤规则.crushignore 规则 — 每行一条暂无过滤规则。添加"
+        },
+        {
+          "tag": "DIV",
+          "rectRight": 577,
+          "rectLeft": 320,
+          "width": 257,
+          "text": "文件过滤规则.crushignore 规则 — 每行一条暂无过滤规则。添加"
+        },
+        {
+          "tag": "DIV",
+          "rectRight": 576,
+          "rectLeft": 321,
+          "width": 255,
+          "text": "文件过滤规则.crushignore 规则 — 每行一条"
+        },
+        {
+          "tag": "SPAN",
+          "rectRight": 408,
+          "rectLeft": 337,
+          "width": 71,
+          "text": "文件过滤规则"
+        },
+        {
+          "tag": "DIV",
+          "rectRight": 560,
+          "rectLeft": 337,
+          "width": 223,
+          "text": ".crushignore 规则 — 每行一条"
+        },
+        {
+          "tag": "DIV",
+          "rectRight": 576,
+          "rectLeft": 321,
+          "width": 255,
+          "text": "暂无过滤规则。"
+        },
+        {
+          "tag": "DIV",
+          "rectRight": 576,
+          "rectLeft": 321,
+          "width": 255,
+          "text": "暂无过滤规则。"
+        },
+        {
+          "tag": "DIV",
+          "rectRight": 576,
+          "rectLeft": 321,
+          "width": 255,
+          "text": "添加"
+        },
+        {
+          "tag": "INPUT",
+          "rectRight": 511,
+          "rectLeft": 337,
+          "width": 174,
+          "text": ""
+        },
+        {
+          "tag": "BUTTON",
+          "rectRight": 560,
+          "rectLeft": 519,
+          "width": 41,
+          "text": "添加"
+        },
+        {
+          "tag": "DIV",
+          "rectRight": 578,
+          "rectLeft": 319,
+          "width": 259,
+          "text": ""
+        },
+        {
+          "tag": "DIV",
+          "rectRight": 578,
+          "rectLeft": 319,
+          "width": 259,
+          "text": "●规则已自动保存到 .crushignore"
+        },
+        {
+          "tag": "SPAN",
+          "rectRight": 459,
+          "rectLeft": 331,
+          "width": 128,
+          "text": "规则已自动保存到 .crushignore"
+        },
+        {
+          "tag": "DIV",
+          "rectRight": 774,
+          "rectLeft": 597,
+          "width": 177,
+          "text": "桌面自动化○打开页面○点击操作○表单输入○截图当前模式：Web 降级🔒桌面 Sidecar 未启用，操作控制台不可用系统桌面控制✓截图qa-screensho"
+        },
+        {
+          "tag": "DIV",
+          "rectRight": 774,
+          "rectLeft": 597,
+          "width": 177,
+          "text": "桌面自动化○打开页面○点击操作○表单输入○截图当前模式：Web 降级🔒桌面 Sidecar 未启用，操作控制台不可用"
+        }
+      ]
+    }
+  }
+]

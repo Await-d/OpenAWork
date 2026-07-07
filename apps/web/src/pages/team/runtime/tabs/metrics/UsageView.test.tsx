@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import type { TeamUsageEvent, UsageBucket } from '../../../../../stores/team/team-usage.js';
+import type {
+  TeamUsageEvent,
+  ToolCallAggregateBucket,
+  UsageBucket,
+} from '../../../../../stores/team/team-usage.js';
 
 const mockNodes = new Map();
 
@@ -51,6 +55,11 @@ const mockUsageState = {
   bySessionLayer: new Map<string, Map<string, UsageBucket>>(),
   recent: [] as TeamUsageEvent[],
 };
+const mockToolCallState = {
+  bySession: new Map<string, ToolCallAggregateBucket>(),
+  totalFailures: 0,
+  totalInvocations: 0,
+};
 const runtimeReferenceState = {
   activeSharedSession: null as null | {
     session: { messages: Array<unknown> };
@@ -75,6 +84,8 @@ vi.mock('../../../../../stores/team/team-events.js', () => ({
 vi.mock('../../../../../stores/team/team-usage.js', () => ({
   useTeamUsageStore: (selector: (state: typeof mockUsageState) => unknown) =>
     selector(mockUsageState),
+  useTeamToolCallStore: (selector: (state: typeof mockToolCallState) => unknown) =>
+    selector(mockToolCallState),
 }));
 
 vi.mock('../../data/team-runtime-reference-data.js', () => ({
@@ -190,6 +201,13 @@ beforeEach(() => {
       timestamp: Date.parse('2026-06-04T16:02:00.000Z'),
     }),
   ];
+  mockToolCallState.bySession = new Map([
+    ['session-root', { invocations: 4, failures: 1 }],
+    ['session-child', { invocations: 2, failures: 0 }],
+    ['session-other', { invocations: 6, failures: 2 }],
+  ]);
+  mockToolCallState.totalFailures = 3;
+  mockToolCallState.totalInvocations = 12;
   runtimeReferenceState.activeSharedSession = null;
   runtimeReferenceState.selectedSharedSession = null;
   runtimeReferenceState.sharedSessionLoading = false;
@@ -204,6 +222,11 @@ describe('UsageView', () => {
   it('未选中会话时显示全局聚合', () => {
     render(<UsageView />);
 
+    expect(screen.getByRole('region', { name: '度量工作台摘要' })).toBeTruthy();
+    expect(screen.getByText('度量成本面板')).toBeTruthy();
+    expect(screen.getByText('全部团队')).toBeTruthy();
+    expect(screen.getByText('900')).toBeTruthy();
+    expect(screen.getAllByText('12').length).toBeGreaterThan(0);
     expect(screen.getByText('调用次数')).toBeTruthy();
     expect(screen.getByText(hasExactNormalizedText('调用次数6'))).toBeTruthy();
     expect(screen.queryByText(/当前统计范围：/)).toBeNull();
@@ -232,6 +255,8 @@ describe('UsageView', () => {
 
     render(<UsageView selectedSessionId="session-root" selectedSessionTitle="根会话" />);
 
+    expect(screen.getAllByText('根会话').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('6').length).toBeGreaterThan(0);
     expect(screen.getByText(hasExactNormalizedText('当前统计范围：根会话 及其子树'))).toBeTruthy();
     expect(screen.getByText(hasExactNormalizedText('调用次数3'))).toBeTruthy();
     expect(screen.getByText('最近 2 条调用')).toBeTruthy();
@@ -379,7 +404,7 @@ describe('UsageView', () => {
     runtimeReferenceState.sharedSessions = [];
     runtimeReferenceState.sharedSessionLoading = true;
 
-    render(
+    const { container } = render(
       <UsageView
         selectedSessionId="shared-1"
         selectedSessionIsShared
@@ -388,6 +413,7 @@ describe('UsageView', () => {
     );
 
     expect(screen.getByText('正在同步共享用量')).toBeTruthy();
+    expect(container.querySelector('svg')).toBeTruthy();
     expect(screen.queryByText('调用次数')).toBeNull();
   });
 });

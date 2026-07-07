@@ -7,6 +7,7 @@ import type {
 } from '@openAwork/web-client';
 import { EmptyState, MetricGrid, StatCard } from '../../shared/content-kit/index.js';
 import { tryFormatJson } from '../../../../../utils/format-json.js';
+import { TeamTabIcon } from '../team-tab-icons.js';
 
 interface TimelineItem {
   detail?: string;
@@ -152,7 +153,7 @@ export function SharedSessionTimingView({
   if (sharedSessionLoading && !sharedSession) {
     return (
       <EmptyState
-        emoji="⏱️"
+        icon={<TeamTabIcon name="timing" size={24} />}
         title="正在同步共享耗时信息"
         description="共享会话详情加载完成后，这里会展示共享协作节奏和关键时间节点。"
       />
@@ -162,7 +163,7 @@ export function SharedSessionTimingView({
   if (!summary) {
     return (
       <EmptyState
-        emoji="⏱️"
+        icon={<TeamTabIcon name="timing" size={24} />}
         title="共享耗时暂不可用"
         description="当前只拿到了共享会话选择状态，详细共享快照还未同步。"
       />
@@ -288,7 +289,7 @@ export function SharedSessionTimingView({
         </div>
       ) : (
         <EmptyState
-          emoji="⏱️"
+          icon={<TeamTabIcon name="timing" size={24} />}
           title="暂无共享时序节点"
           description="共享输出、评论或快照出现后，这里会形成真实的协作时间线。"
         />

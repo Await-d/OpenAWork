@@ -63,6 +63,7 @@ export type DevtoolsSourceKey =
   | 'devLogs'
   | 'diagnostics'
   | 'desktopAutomation'
+  | 'desktopControl'
   | 'sshConnections'
   | 'workers'
   | 'githubTriggers'

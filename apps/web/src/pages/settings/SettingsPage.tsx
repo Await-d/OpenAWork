@@ -10,12 +10,13 @@ import { validateImageGenerationSize } from '@openAwork/shared';
 import {
   createChannelsClient,
   createDesktopAutomationClient,
+  createDesktopControlClient,
   createGitHubClient,
   createSettingsClient,
   createSshClient,
   createUsageClient,
 } from '@openAwork/web-client';
-import type { SSHDialogEntry } from '@openAwork/web-client';
+import type { DesktopControlStatus, SSHDialogEntry } from '@openAwork/web-client';
 import {
   buildDevEventsFromLogs,
   createInitialDevtoolsSourceStates,
@@ -293,6 +294,13 @@ export default function SettingsPage() {
     handleDesktopAutomationScreenshot,
     handleDesktopAutomationStart,
     handleDesktopAutomationType,
+    handleDesktopControlClick,
+    handleDesktopControlHotkey,
+    handleDesktopControlKey,
+    handleDesktopControlScreenshot,
+    handleDesktopControlScroll,
+    handleDesktopControlType,
+    handleDesktopControlWait,
     handleSaveGitHubTrigger,
   } = useSettingsTabActions({
     gatewayUrl,
@@ -305,6 +313,10 @@ export default function SettingsPage() {
     createInitialDevtoolsSourceStates(),
   );
   const [desktopAutomationEnabled, setDesktopAutomationEnabled] = useState(false);
+  const [desktopControlEnabled, setDesktopControlEnabled] = useState(false);
+  const [desktopControlStatus, setDesktopControlStatus] = useState<DesktopControlStatus | null>(
+    null,
+  );
   const [sshConnections, setSshConnections] = useState<SSHConnectionEntry[]>([]);
   const [sshCurrentPath, setSshCurrentPath] = useState('/');
   const [sshNodes, setSshNodes] = useState<FileTreeNode[]>([]);
@@ -319,6 +331,7 @@ export default function SettingsPage() {
   const workersRef = useRef<WorkerEntry[]>(workers);
   const diagnosticsRef = useRef<SettingsDiagnosticRecord[]>(diagnostics);
   const desktopAutomationEnabledRef = useRef(desktopAutomationEnabled);
+  const desktopControlEnabledRef = useRef(desktopControlEnabled);
   const sshConnectionsRef = useRef<SSHConnectionEntry[]>(sshConnections);
   const providerSaveSeqRef = useRef(0);
   const providerSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -343,6 +356,10 @@ export default function SettingsPage() {
   useEffect(() => {
     desktopAutomationEnabledRef.current = desktopAutomationEnabled;
   }, [desktopAutomationEnabled]);
+
+  useEffect(() => {
+    desktopControlEnabledRef.current = desktopControlEnabled;
+  }, [desktopControlEnabled]);
 
   useEffect(() => {
     sshConnectionsRef.current = sshConnections;
@@ -559,6 +576,41 @@ export default function SettingsPage() {
     }
   }, [gatewayUrl, token, updateDevtoolsSourceState]);
 
+  const loadDesktopControlStatus = React.useCallback(async () => {
+    if (!token) return;
+
+    updateDevtoolsSourceState('desktopControl', {
+      status: 'loading',
+      detail: '正在刷新系统桌面控制状态',
+      error: null,
+    });
+
+    try {
+      const payload = await createDesktopControlClient(gatewayUrl).getStatus(token);
+      const enabled = payload.enabled === true;
+      setDesktopControlEnabled(enabled);
+      setDesktopControlStatus(payload);
+      updateDevtoolsSourceState('desktopControl', {
+        status: enabled ? 'healthy' : 'unavailable',
+        detail: enabled
+          ? '系统桌面控制桥接已启用'
+          : (payload.reason ?? '当前环境未启用系统桌面控制'),
+        error: null,
+        count: enabled ? 1 : 0,
+        updatedAt: Date.now(),
+      });
+    } catch (error: unknown) {
+      updateDevtoolsSourceState('desktopControl', {
+        status: 'error',
+        detail: '系统桌面控制状态加载失败',
+        error: error instanceof Error ? error.message : '加载系统桌面控制状态失败',
+        count: desktopControlEnabledRef.current ? 1 : 0,
+        updatedAt: Date.now(),
+      });
+      logger.error('failed to load desktop control status', error);
+    }
+  }, [gatewayUrl, token, updateDevtoolsSourceState]);
+
   const loadSshConnections = React.useCallback(async () => {
     if (!token) return;
 
@@ -614,6 +666,9 @@ export default function SettingsPage() {
         case 'desktopAutomation':
           void loadDesktopAutomationStatus();
           break;
+        case 'desktopControl':
+          void loadDesktopControlStatus();
+          break;
         case 'sshConnections':
           void loadSshConnections();
           break;
@@ -624,7 +679,14 @@ export default function SettingsPage() {
           break;
       }
     },
-    [loadDesktopAutomationStatus, loadDevLogs, loadDiagnostics, loadSshConnections, loadWorkers],
+    [
+      loadDesktopAutomationStatus,
+      loadDesktopControlStatus,
+      loadDevLogs,
+      loadDiagnostics,
+      loadSshConnections,
+      loadWorkers,
+    ],
   );
 
   const refreshAllDevtoolsSources = React.useCallback(() => {
@@ -632,10 +694,18 @@ export default function SettingsPage() {
       loadDevLogs(),
       loadDiagnostics(),
       loadDesktopAutomationStatus(),
+      loadDesktopControlStatus(),
       loadSshConnections(),
       loadWorkers(),
     ]);
-  }, [loadDesktopAutomationStatus, loadDevLogs, loadDiagnostics, loadSshConnections, loadWorkers]);
+  }, [
+    loadDesktopAutomationStatus,
+    loadDesktopControlStatus,
+    loadDevLogs,
+    loadDiagnostics,
+    loadSshConnections,
+    loadWorkers,
+  ]);
 
   useEffect(() => {
     if (!token) return;
@@ -753,6 +823,7 @@ export default function SettingsPage() {
         logger.error('failed to load settings model prices', error);
       });
     void loadDesktopAutomationStatus();
+    void loadDesktopControlStatus();
     void loadSshConnections();
     void settingsClient
       .getFilePatterns(token)
@@ -794,6 +865,7 @@ export default function SettingsPage() {
   }, [
     gatewayUrl,
     loadDesktopAutomationStatus,
+    loadDesktopControlStatus,
     loadDevLogs,
     loadDiagnostics,
     loadUpstreamRetrySettings,
@@ -1639,6 +1711,9 @@ export default function SettingsPage() {
                     setFilePatterns={setFilePatterns}
                     desktopAutomationEnabled={desktopAutomationEnabled}
                     desktopAutomationSourceState={devtoolsSourceStates.desktopAutomation}
+                    desktopControlEnabled={desktopControlEnabled}
+                    desktopControlStatus={desktopControlStatus}
+                    desktopControlSourceState={devtoolsSourceStates.desktopControl}
                     sshConnections={sshConnections}
                     sshSourceState={devtoolsSourceStates.sshConnections}
                     sshNodes={sshNodes}
@@ -1668,6 +1743,13 @@ export default function SettingsPage() {
                     onDesktopAutomationClick={handleDesktopAutomationClick}
                     onDesktopAutomationType={handleDesktopAutomationType}
                     onDesktopAutomationScreenshot={handleDesktopAutomationScreenshot}
+                    onDesktopControlScreenshot={handleDesktopControlScreenshot}
+                    onDesktopControlClick={handleDesktopControlClick}
+                    onDesktopControlType={handleDesktopControlType}
+                    onDesktopControlKey={handleDesktopControlKey}
+                    onDesktopControlHotkey={handleDesktopControlHotkey}
+                    onDesktopControlScroll={handleDesktopControlScroll}
+                    onDesktopControlWait={handleDesktopControlWait}
                   />
                 )}
                 {activeTab === 'plugins' && (

@@ -138,6 +138,17 @@ export interface CompanionSettingsRecord {
   updatedAt?: string;
 }
 
+export interface CompanionWorkspaceContext {
+  readonly attachedCount?: number | undefined;
+  readonly hasStreamError?: boolean | undefined;
+  readonly idleSeconds?: number | undefined;
+  readonly lastToolName?: string | null | undefined;
+  readonly pendingApprovals?: number | undefined;
+  readonly queuedCount?: number | undefined;
+  readonly streamErrorMessage?: string | null | undefined;
+  readonly toolCallCount?: number | undefined;
+}
+
 const SPRITE_SPECIES_LABELS: Record<CompanionSpriteSpecies, string> = {
   duck: '小鸭',
   goose: '白鹅',
@@ -392,6 +403,45 @@ export function buildCompanionIntroText(
   return `${profile.name} 会以一只${profile.species}的身份坐在输入框旁边轻声陪跑。除非你点名，不然我会把话让给主助手。`;
 }
 
+function buildCompanionWorkspaceContextLines(context: CompanionWorkspaceContext): string[] {
+  const lines: string[] = [];
+  const toolCallCount = context.toolCallCount ?? 0;
+  const attachedCount = context.attachedCount ?? 0;
+  const queuedCount = context.queuedCount ?? 0;
+  const pendingApprovals = context.pendingApprovals ?? 0;
+
+  if (toolCallCount > 0) {
+    const toolSuffix = context.lastToolName ? `，最近工具 ${context.lastToolName}` : '';
+    lines.push(`工具调用：${toolCallCount} 个工具正在联动${toolSuffix}`);
+  }
+  if (context.hasStreamError) {
+    const errorMessage = context.streamErrorMessage?.trim() || '当前流式请求遇到错误';
+    lines.push(`错误状态：${errorMessage}`);
+  }
+  if (attachedCount > 0 || queuedCount > 0) {
+    lines.push(`附件与队列：${attachedCount} 个附件，${queuedCount} 条待发消息`);
+  }
+  if (pendingApprovals > 0) {
+    lines.push(`审批状态：${pendingApprovals} 个待确认动作`);
+  }
+  if ((context.idleSeconds ?? 0) >= 180) {
+    lines.push(`用户已空闲约 ${Math.max(1, Math.round((context.idleSeconds ?? 0) / 60))} 分钟`);
+  }
+
+  return lines;
+}
+
+export function buildCompanionWorkspaceContextText(
+  context: CompanionWorkspaceContext | undefined,
+): string | null {
+  if (!context) {
+    return null;
+  }
+
+  const lines = buildCompanionWorkspaceContextLines(context);
+  return lines.length > 0 ? lines.join('\n') : null;
+}
+
 export function readCompanionSettings(value: string | undefined): CompanionSettingsRecord {
   const parsed = companionSettingsStoredSchema.safeParse(parseStoredJson(value));
   const preferences = parsed.success ? parsed.data.preferences : DEFAULT_COMPANION_PREFERENCES;
@@ -504,6 +554,7 @@ export function buildCompanionFeatureState(preferences: CompanionPreferences): {
 export function buildCompanionPrompt(
   settings: CompanionSettingsRecord,
   message: string,
+  workspaceContext?: CompanionWorkspaceContext,
 ): string | null {
   const effectivePreferences = resolveEffectiveCompanionPreferences({
     activeBinding: settings.activeBinding,
@@ -533,6 +584,7 @@ export function buildCompanionPrompt(
   const toneInstruction = settings.activeBinding?.behaviorTone
     ? `行为语气：${COMPANION_TONE_PROFILES[settings.activeBinding.behaviorTone].note}`
     : null;
+  const workspaceContextText = buildCompanionWorkspaceContextText(workspaceContext);
 
   return [
     'OpenAWork companion 上下文：',
@@ -540,6 +592,7 @@ export function buildCompanionPrompt(
     `${settings.profile.name} 的定位：${settings.profile.archetype}。`,
     `行为基调：${settings.profile.note}`,
     `关注标签：${settings.profile.traits.join(' / ')}`,
+    workspaceContextText ? `当前工作台联动状态：\n${workspaceContextText}` : null,
     toneInstruction,
     `注入原因：${injectionReason}`,
     `输出约束：${behaviorInstruction}`,

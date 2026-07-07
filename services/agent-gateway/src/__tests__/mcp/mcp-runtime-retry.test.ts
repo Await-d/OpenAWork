@@ -44,6 +44,9 @@ const dbMock = vi.hoisted(() => {
     keyOf,
     sqliteAllMock: vi.fn(() => [] as Array<{ user_id: string; value: string }>),
     sqliteGetMock: vi.fn((sql: string, params: readonly unknown[] = []) => {
+      if (sql.includes('SELECT user_id FROM sessions')) {
+        return { user_id: 'user-1' };
+      }
       const userId = params[0] as string;
       const key = inferKeyFromSql(sql, params);
       if (!key) return undefined;
@@ -97,8 +100,10 @@ vi.mock('../../skill/skill-mcp-connection-pool.js', () => {
 });
 
 import {
+  callMcpToolForSession,
   getMcpPoolKey,
   isMcpServerConnectedForUser,
+  listMcpToolsForUser,
   retryMcpConnectionForUser,
   type ConfiguredMCPServer,
 } from '../../mcp/mcp-runtime.js';
@@ -123,6 +128,7 @@ function setUserMcpServers(servers: ConfiguredMCPServer[]): void {
     url: server.url,
     command: server.command,
     args: server.args,
+    builtin: server.builtin,
     enabled: server.enabled,
     headers: server.headers,
     disabledTools: server.disabledTools,
@@ -228,6 +234,75 @@ describe('retryMcpConnectionForUser', () => {
     expect(poolMock.withOperationRetryMock).not.toHaveBeenCalled();
   });
 
+  it('connects virtual builtin MCP servers without touching the stdio pool', async () => {
+    const result = await retryMcpConnectionForUser(USER_ID, 'codegraph');
+
+    expect(result.status).toBe('connected');
+    expect(result.toolCount).toBeGreaterThan(0);
+    expect(poolMock.disconnectUserConnectionMock).not.toHaveBeenCalled();
+    expect(poolMock.withOperationRetryMock).not.toHaveBeenCalled();
+  });
+
+  it('lists virtual builtin MCP tools without touching the stdio pool', async () => {
+    const catalogs = await listMcpToolsForUser(USER_ID, { serverId: 'lsp' });
+
+    expect(catalogs).toHaveLength(1);
+    expect(catalogs[0]?.serverId).toBe('lsp');
+    expect(catalogs[0]?.status).toBe('connected');
+    expect(catalogs[0]?.tools.map((tool) => tool.name)).toContain('goto_definition');
+    expect(poolMock.withOperationRetryMock).not.toHaveBeenCalled();
+  });
+
+  it('filters disabled tools from virtual builtin MCP catalogs and retry counts', async () => {
+    setUserMcpServers([
+      {
+        id: 'codegraph',
+        name: 'codegraph',
+        transport: 'stdio',
+        command: 'openawork-virtual-codegraph',
+        enabled: true,
+        builtin: true,
+        disabledTools: ['codegraph_status'],
+      },
+    ]);
+
+    const catalogs = await listMcpToolsForUser(USER_ID, { serverId: 'codegraph' });
+    const toolNames = catalogs[0]?.tools.map((tool) => tool.name) ?? [];
+    const retryResult = await retryMcpConnectionForUser(USER_ID, 'codegraph');
+
+    expect(catalogs[0]?.status).toBe('connected');
+    expect(toolNames).not.toContain('codegraph_status');
+    expect(toolNames).toContain('codegraph_search');
+    expect(retryResult.status).toBe('connected');
+    expect(retryResult.toolCount).toBe(toolNames.length);
+    expect(poolMock.withOperationRetryMock).not.toHaveBeenCalled();
+  });
+
+  it('honors user overrides of virtual builtin ids instead of forcing the virtual bridge', async () => {
+    setUserMcpServers([
+      {
+        id: 'codegraph',
+        name: 'custom-codegraph',
+        transport: 'sse',
+        url: 'https://example.test/codegraph-mcp',
+        enabled: true,
+      },
+    ]);
+    poolMock.withOperationRetryMock.mockImplementation(async (_userId, _poolKey, _ref, op) => {
+      const fakeAdapter = {
+        listTools: vi.fn(async () => [{ name: 'remote_codegraph_search' }]),
+      };
+      return op(fakeAdapter as unknown as never, 'codegraph');
+    });
+
+    const result = await retryMcpConnectionForUser(USER_ID, 'codegraph');
+
+    expect(result.status).toBe('connected');
+    expect(result.toolCount).toBe(1);
+    expect(poolMock.disconnectUserConnectionMock).toHaveBeenCalledTimes(1);
+    expect(poolMock.withOperationRetryMock).toHaveBeenCalledTimes(1);
+  });
+
   it('writes the tool catalog snapshot on success and clears it on failure', async () => {
     setUserMcpServers([STDIO_BASE]);
     const poolKey = getMcpPoolKey({ ...STDIO_BASE });
@@ -315,6 +390,27 @@ describe('isMcpServerConnectedForUser', () => {
 
     // No connection attempts were made — purely peek.
     expect(poolMock.disconnectUserConnectionMock).not.toHaveBeenCalled();
+    expect(poolMock.withOperationRetryMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('callMcpToolForSession virtual builtins', () => {
+  beforeEach(() => {
+    dbMock.rows.clear();
+    poolMock.resetSpies();
+  });
+
+  it('routes lsp virtual MCP calls through the in-process bridge without stdio pool usage', async () => {
+    const result = await callMcpToolForSession('session-1', {
+      serverId: 'lsp',
+      toolName: 'status',
+      arguments: {},
+    });
+
+    expect(result.serverId).toBe('lsp');
+    expect(result.toolName).toBe('status');
+    expect(result.content[0]?.type).toBe('text');
+    expect(result.content[0]?.text).toContain('servers');
     expect(poolMock.withOperationRetryMock).not.toHaveBeenCalled();
   });
 });

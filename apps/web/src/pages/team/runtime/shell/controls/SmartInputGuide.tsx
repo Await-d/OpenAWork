@@ -19,38 +19,57 @@ import {
   type KeyboardEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
+import {
+  CommandIcon,
+  FileMentionIcon,
+  GuideIcon,
+  type CommandIconName,
+} from './smart-input-guide-icons.js';
 
 // ─── 样式 ──────────────────────────────────────────────────────────
 
 const BUBBLE_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
+  flexWrap: 'nowrap',
   gap: 6,
-  padding: '6px 12px',
-  margin: '0 0 6px',
-  borderRadius: 8,
+  padding: '5px 8px',
+  margin: '0 0 4px',
+  borderRadius: 6,
   background: 'color-mix(in srgb, var(--aux) 8%, var(--bg-overlay))',
   border: '1px solid color-mix(in srgb, var(--aux) 25%, transparent)',
   color: 'var(--fg-default)',
   fontSize: 11,
-  lineHeight: 1.5,
+  lineHeight: 1.35,
   flexShrink: 0,
+  overflow: 'hidden',
 };
 
 const BUBBLE_ICON_STYLE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
   flexShrink: 0,
-  fontSize: 13,
+  width: 16,
+  height: 16,
+  color: 'var(--aux)',
 };
 
 const BUBBLE_TEXT_STYLE: CSSProperties = {
-  flex: 1,
+  flex: '0 1 auto',
   minWidth: 0,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  textWrap: 'pretty',
+  whiteSpace: 'nowrap',
 };
 
 const BUBBLE_EXAMPLE_STYLE: CSSProperties = {
-  display: 'inline-block',
+  display: 'inline-flex',
+  alignItems: 'center',
+  flexShrink: 0,
   padding: '2px 8px',
-  margin: '2px 4px 0 0',
+  margin: 0,
   borderRadius: 6,
   background: 'color-mix(in srgb, var(--accent) 8%, transparent)',
   border: '1px solid color-mix(in srgb, var(--accent) 25%, transparent)',
@@ -59,6 +78,9 @@ const BUBBLE_EXAMPLE_STYLE: CSSProperties = {
   fontWeight: 600,
   cursor: 'pointer',
   whiteSpace: 'nowrap',
+  maxWidth: 112,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
   transition: 'background 120ms ease',
 };
 
@@ -102,8 +124,13 @@ const COMPLETION_ITEM_ACTIVE_STYLE: CSSProperties = {
 };
 
 const COMPLETION_ITEM_ICON_STYLE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
   flexShrink: 0,
-  fontSize: 13,
+  width: 16,
+  height: 16,
+  color: 'var(--aux)',
 };
 
 const COMPLETION_ITEM_DESC_STYLE: CSSProperties = {
@@ -126,7 +153,7 @@ export interface SuggestionEntry {
 interface CommandEntry {
   name: string;
   description: string;
-  icon: string;
+  icon: CommandIconName;
 }
 
 interface MentionEntry {
@@ -138,14 +165,14 @@ interface MentionEntry {
 // ─── 预设数据 ──────────────────────────────────────────────────────
 
 const COMMAND_SUGGESTIONS: CommandEntry[] = [
-  { name: '/new', description: '新建会话', icon: '✨' },
-  { name: '/help', description: '查看帮助', icon: '❓' },
-  { name: '/template', description: '从模板创建', icon: '📐' },
-  { name: '/retry', description: '重试失败任务', icon: '↻' },
-  { name: '/pause', description: '暂停运行', icon: '⏸' },
-  { name: '/resume', description: '恢复运行', icon: '▶' },
-  { name: '/status', description: '查看状态', icon: '📊' },
-  { name: '/agent', description: '切换 Agent', icon: '🤖' },
+  { name: '/new', description: '新建会话', icon: 'new' },
+  { name: '/help', description: '查看帮助', icon: 'help' },
+  { name: '/template', description: '从模板创建', icon: 'template' },
+  { name: '/retry', description: '重试失败任务', icon: 'retry' },
+  { name: '/pause', description: '暂停运行', icon: 'pause' },
+  { name: '/resume', description: '恢复运行', icon: 'resume' },
+  { name: '/status', description: '查看状态', icon: 'status' },
+  { name: '/agent', description: '切换 Agent', icon: 'agent' },
 ];
 
 const FAILURE_SUGGESTIONS: SuggestionEntry[] = [
@@ -164,9 +191,9 @@ const FAILURE_SUGGESTIONS: SuggestionEntry[] = [
 ];
 
 const IDLE_SUGGESTIONS: SuggestionEntry[] = [
-  { text: '帮我实现一个登录功能' },
-  { text: '创建一个 React 组件库' },
-  { text: '给项目加上单元测试' },
+  { text: '帮我实现一个登录功能', label: '登录功能' },
+  { text: '创建一个 React 组件库', label: '组件库' },
+  { text: '给项目加上单元测试', label: '单元测试' },
 ];
 
 // ─── 智能引导气泡 ──────────────────────────────────────────────────
@@ -194,15 +221,15 @@ export function SmartSuggestionBubble({
 
   const hintText =
     context === 'failure'
-      ? `💡 系统提示：${failedCount > 0 ? `${failedCount} 个任务失败，` : ''}意图改写失败通常是因为需求较为模糊。您可以尝试这样输入：`
+      ? `${failedCount > 0 ? `${failedCount} 个任务失败，` : ''}可改写需求或拆分步骤`
       : context === 'idle'
-        ? '💡 提示：支持 /命令 和 @文件引用。试试以下快捷操作：'
+        ? '支持 / 命令与 @ 文件引用'
         : '';
 
   return (
     <div style={BUBBLE_STYLE} role="status" aria-live="polite">
       <span style={BUBBLE_ICON_STYLE} aria-hidden>
-        {context === 'failure' ? '⚠' : '💡'}
+        <GuideIcon tone={context === 'failure' ? 'failure' : 'default'} />
       </span>
       <span style={BUBBLE_TEXT_STYLE}>{hintText}</span>
       {onDismiss ? (
@@ -232,7 +259,7 @@ export function SmartSuggestionBubble({
           onClick={() => onSelectSuggestion?.(s.text)}
           title={s.text}
         >
-          {s.label ?? s.text.slice(0, 20) + (s.text.length > 20 ? '…' : '')}
+          {s.label ?? s.text.slice(0, 10) + (s.text.length > 10 ? '…' : '')}
         </button>
       ))}
     </div>
@@ -317,6 +344,13 @@ export function CompletionMenu({
 
   if (!anchorRect || items.length === 0) return null;
 
+  const viewportWidth = typeof window === 'undefined' ? 390 : window.innerWidth;
+  const menuWidth = Math.min(360, Math.max(220, viewportWidth - 16));
+  const menuLeft = Math.min(
+    Math.max(8, anchorRect.left),
+    Math.max(8, viewportWidth - menuWidth - 8),
+  );
+
   const menu = (
     <div
       ref={menuRef}
@@ -325,8 +359,9 @@ export function CompletionMenu({
       aria-label={type === 'command' ? '命令补全' : '文件引用补全'}
       style={{
         ...COMPLETION_MENU_STYLE,
+        width: menuWidth,
         top: anchorRect.bottom + 4,
-        left: anchorRect.left,
+        left: menuLeft,
       }}
       onKeyDown={handleKeyDown}
     >
@@ -345,7 +380,7 @@ export function CompletionMenu({
               onClick={() => onSelect(cmd.name + ' ')}
             >
               <span style={COMPLETION_ITEM_ICON_STYLE} aria-hidden>
-                {cmd.icon}
+                <CommandIcon name={cmd.icon} />
               </span>
               <span style={{ fontWeight: 700 }}>{cmd.name}</span>
               <span style={COMPLETION_ITEM_DESC_STYLE}>{cmd.description}</span>
@@ -364,7 +399,7 @@ export function CompletionMenu({
             onClick={() => onSelect('@' + mention.name + ' ')}
           >
             <span style={COMPLETION_ITEM_ICON_STYLE} aria-hidden>
-              {mention.icon}
+              <FileMentionIcon />
             </span>
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{mention.name}</span>
             <span style={COMPLETION_ITEM_DESC_STYLE}>{mention.path}</span>

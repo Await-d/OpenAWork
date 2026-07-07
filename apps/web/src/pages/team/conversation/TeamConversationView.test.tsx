@@ -3,12 +3,19 @@ import type { ReactNode } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TeamConversationView } from './TeamConversationView.js';
+import { useLayerStore } from '../../../stores/team/team-events.js';
 import type { RunEvent } from '@openAwork/shared';
 
 const state = vi.hoisted(() => ({
   childSessions: [] as Array<{
+    displayName?: string | null;
     id: string;
-    messages: Array<{ content: string; id: string; role: 'assistant' | 'user' }>;
+    messages: Array<{
+      content: string;
+      createdAt?: number | string;
+      id: string;
+      role: 'assistant' | 'user';
+    }>;
     role_layer?: string | null;
   }>,
   messages: [
@@ -216,7 +223,10 @@ vi.mock('./extras/TeamRunStateBanner.js', () => ({
     diagnostics,
     rightSlot,
   }: {
-    diagnostics?: { activeAlerts?: Array<{ message: string }>; incidents?: Array<{ message: string }> };
+    diagnostics?: {
+      activeAlerts?: Array<{ message: string }>;
+      incidents?: Array<{ message: string }>;
+    };
     rightSlot?: ReactNode;
   }) => (
     <div
@@ -275,6 +285,7 @@ beforeEach(() => {
   state.pendingPermissions = [];
   state.pendingQuestions = [];
   state.runEvents = [];
+  useLayerStore.getState().clear();
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
   mocks.diagnostics = undefined;
 });
@@ -331,7 +342,7 @@ describe('TeamConversationView', () => {
     expect(updater('')).toBe('[参考页](https://example.com)');
   });
 
-  it('桌面宽度存在子层消息时自动展开其它层级对话详情', async () => {
+  it('桌面宽度存在子层消息时自动展开团队层级消息汇总', async () => {
     state.childSessions = [
       {
         id: 'child-pm1',
@@ -342,7 +353,7 @@ describe('TeamConversationView', () => {
 
     render(<TeamConversationView sessionId="session-1" composerEnabled />);
 
-    const panel = await screen.findByLabelText('其它层级对话详情');
+    const panel = await screen.findByLabelText('团队层级消息汇总');
     await waitFor(() => {
       expect(panel.getAttribute('style')).toContain('display: flex');
     });
@@ -353,6 +364,70 @@ describe('TeamConversationView', () => {
 
     expect(screen.getByRole('button', { name: '单栏视图' }).textContent).toContain('主对话');
     expect(screen.getByRole('button', { name: '分层并排视图' }).textContent).toContain('分层并排');
+  });
+
+  it('分层并排模式支持切回旧版分层面板', async () => {
+    state.childSessions = [
+      {
+        id: 'child-pm1',
+        role_layer: 'pm1',
+        messages: [{ id: 'pm1-msg', role: 'assistant', content: 'PM1 详情' }],
+      },
+    ];
+
+    render(<TeamConversationView sessionId="session-1" composerEnabled />);
+
+    const oldLayerButton = await screen.findByRole('button', {
+      name: '切换到旧版分层标签视图',
+    });
+    fireEvent.click(oldLayerButton);
+
+    expect(await screen.findByText('团队分层流程')).toBeTruthy();
+  });
+
+  it('群聊汇总流用父级角色实例名标注子层 user 消息', async () => {
+    useLayerStore.getState().addNode({
+      sessionId: 'session-1',
+      parentSessionId: null,
+      roleLayer: 'pm2',
+      state: 'running',
+      displayName: '产品经理二号',
+    });
+    useLayerStore.getState().addNode({
+      sessionId: 'child-executor',
+      parentSessionId: 'session-1',
+      roleLayer: 'executor',
+      state: 'running',
+      displayName: '前端开发者',
+    });
+    state.childSessions = [
+      {
+        id: 'child-executor',
+        role_layer: 'executor',
+        displayName: '前端开发者',
+        messages: [
+          {
+            id: 'handoff-user',
+            role: 'user',
+            content: '请实现前端会话列表。',
+            createdAt: Date.parse('2026-07-04T10:00:00.000Z'),
+          },
+          {
+            id: 'executor-reply',
+            role: 'assistant',
+            content: '前端开发者开始处理。',
+            createdAt: Date.parse('2026-07-04T10:01:00.000Z'),
+          },
+        ],
+      },
+    ];
+
+    render(<TeamConversationView sessionId="session-1" composerEnabled />);
+
+    await screen.findByText('请实现前端会话列表。');
+    expect(screen.getAllByText('产品经理二号').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('前端开发者').length).toBeGreaterThan(0);
+    expect(screen.queryByText('team@example.com')).toBeNull();
   });
 
   it('存在 runEvents 时会展示过程时间线预览', () => {
@@ -373,7 +448,7 @@ describe('TeamConversationView', () => {
     expect(screen.getByText('工具调用 · read')).toBeTruthy();
   });
 
-  it('focusedLayer 会让其它层级对话详情直接展示指定层消息', async () => {
+  it('focusedLayer 会让团队层级消息汇总直接展示指定层消息', async () => {
     state.childSessions = [
       {
         id: 'child-pm1',
@@ -440,7 +515,7 @@ describe('TeamConversationView', () => {
 
     render(<TeamConversationView focusedLayer="pm1" sessionId="session-1" composerEnabled />);
 
-    const panel = await screen.findByLabelText('其它层级对话详情');
+    const panel = await screen.findByLabelText('团队层级消息汇总');
     await waitFor(() => {
       expect(panel.getAttribute('style')).toContain('display: none');
     });

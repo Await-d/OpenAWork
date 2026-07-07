@@ -126,6 +126,8 @@ describe('TimingView', () => {
 
     render(<TimingView />);
 
+    expect(screen.getByRole('region', { name: '耗时工作台摘要' })).toBeTruthy();
+    expect(screen.getByText('耗时节奏面板')).toBeTruthy();
     expect(screen.getByText('接待 → PM1')).toBeTruthy();
     expect(screen.queryByText('当前统计范围：')).toBeNull();
   });
@@ -259,11 +261,13 @@ describe('TimingView', () => {
 
     render(<TimingView selectedSessionId="shared-1" selectedSessionTitle="共享会话 A" />);
 
+    expect(screen.getByRole('region', { name: '耗时工作台摘要' })).toBeTruthy();
+    expect(screen.getByText('耗时节奏面板')).toBeTruthy();
     expect(screen.getByTestId('shared-timing-view')).toBeTruthy();
     expect(screen.getByText(/当前统计范围：共享会话 A（共享会话快照）/)).toBeTruthy();
     expect(screen.getByText('Assistant 输出')).toBeTruthy();
     expect(screen.getByText('关键时间线')).toBeTruthy();
     expect(screen.getByText('共享建立')).toBeTruthy();
-    expect(screen.queryByText('Handoff 总数')).toBeNull();
+    expect(screen.getByText('Handoff 总数')).toBeTruthy();
   });
 });

@@ -63,6 +63,7 @@ const SEVERITY_META: Record<string, { icon: string; label: string; color: string
   info: { icon: 'ℹ️', label: '提示', color: 'var(--aux)' },
   critical: { icon: '🚨', label: '严重', color: 'var(--danger)' },
 };
+const DEFAULT_SEVERITY_META = { icon: 'ℹ️', label: '提示', color: 'var(--aux)' };
 
 const CONTEXT_PRIORITY_KEYS = [
   'handoffId',
@@ -167,8 +168,7 @@ export function tryParseIncidentJson(text: string): IncidentData | null {
 }
 
 export function IncidentReadableCard({ data }: { data: IncidentData }): React.ReactElement {
-  const severityMeta =
-    SEVERITY_META[data.severity ?? ''] ?? SEVERITY_META['info'] ?? SEVERITY_META['info'];
+  const severityMeta = SEVERITY_META[data.severity ?? ''] ?? DEFAULT_SEVERITY_META;
   const categoryLabel = CATEGORY_LABELS[data.category ?? ''] ?? data.category ?? '事件';
   const codeLabel = CODE_LABELS[data.code ?? ''] ?? data.code;
 

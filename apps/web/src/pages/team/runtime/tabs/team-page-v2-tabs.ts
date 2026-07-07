@@ -14,19 +14,20 @@
  */
 
 import type { MiddleTabKey } from './MiddleTabRouter.js';
+import type { TeamTabIconName } from './team-tab-icons.js';
 
 export type PrimaryTabKey = 'overview' | 'conversation' | 'tasks' | 'metrics' | 'governance';
 
 export interface SubTabDef {
   key: MiddleTabKey;
   label: string;
-  icon: string;
+  icon: TeamTabIconName;
 }
 
 export interface PrimaryTabDef {
   key: PrimaryTabKey;
   label: string;
-  icon: string;
+  icon: TeamTabIconName;
   children: SubTabDef[];
 }
 
@@ -34,53 +35,54 @@ export const PRIMARY_TABS: ReadonlyArray<PrimaryTabDef> = [
   {
     key: 'overview',
     label: '概览',
-    icon: '📊',
+    icon: 'overview',
     children: [
-      { key: 'dashboard', label: '仪表盘', icon: '📊' },
-      { key: 'graph', label: '关系图谱', icon: '🕸️' },
-      { key: 'health', label: '健康度', icon: '🩺' },
+      { key: 'dashboard', label: '仪表盘', icon: 'overview' },
+      { key: 'graph', label: '关系图谱', icon: 'graph' },
+      { key: 'health', label: '健康度', icon: 'health' },
     ],
   },
   {
     key: 'conversation',
     label: '对话',
-    icon: '💬',
+    icon: 'conversation',
     children: [
-      { key: 'conversation', label: '当前对话', icon: '💬' },
-      { key: 'flow', label: '层级流动', icon: '🪜' },
-      { key: 'layered', label: '历史层级', icon: '🗂️' },
-      { key: 'messages', label: '消息', icon: '✉️' },
+      { key: 'conversation', label: '当前对话', icon: 'conversation' },
+      { key: 'flow', label: '层级流动', icon: 'flow' },
+      { key: 'layered', label: '历史层级', icon: 'layered' },
+      { key: 'messages', label: '消息', icon: 'messages' },
     ],
   },
   {
     key: 'tasks',
     label: '任务',
-    icon: '📋',
+    icon: 'tasks',
     children: [
-      { key: 'taskboard', label: '任务看板', icon: '📋' },
-      { key: 'artifacts', label: '任务与产物', icon: '🧱' },
-      { key: 'review', label: '评审', icon: '✅' },
+      { key: 'taskboard', label: '任务看板', icon: 'tasks' },
+      { key: 'artifacts', label: '任务与产物', icon: 'artifacts' },
+      { key: 'review', label: '评审', icon: 'review' },
     ],
   },
   {
     key: 'metrics',
     label: '度量',
-    icon: '⏱️',
+    icon: 'metrics',
     children: [
-      { key: 'usage', label: '用量', icon: '🔋' },
-      { key: 'timing', label: '耗时', icon: '⏱️' },
+      { key: 'usage', label: '用量', icon: 'usage' },
+      { key: 'timing', label: '耗时', icon: 'timing' },
+      { key: 'tools', label: '工具调用', icon: 'settings' },
     ],
   },
   {
     key: 'governance',
     label: '治理',
-    icon: '⚙️',
+    icon: 'governance',
     children: [
-      { key: 'init', label: '初始化', icon: '🧭' },
-      { key: 'templates', label: '模板', icon: '📐' },
-      { key: 'shares', label: '共享', icon: '🤝' },
-      { key: 'audit', label: '审计', icon: '📜' },
-      { key: 'settings', label: '设置', icon: '⚙️' },
+      { key: 'init', label: '初始化', icon: 'init' },
+      { key: 'templates', label: '模板', icon: 'templates' },
+      { key: 'shares', label: '共享', icon: 'shares' },
+      { key: 'audit', label: '审计', icon: 'audit' },
+      { key: 'settings', label: '设置', icon: 'settings' },
     ],
   },
 ];

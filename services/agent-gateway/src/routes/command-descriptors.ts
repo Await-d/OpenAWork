@@ -140,5 +140,21 @@ export function buildCommandDescriptors(): CommandDescriptor[] {
       execution: 'server',
       action: { kind: 'start_work' },
     },
+    {
+      id: 'slash-start-work-done',
+      label: '/start-work-done',
+      description: '提交 start-work 子任务完成声明，等待 reviewer 确认',
+      contexts: ['composer'],
+      execution: 'server',
+      action: { kind: 'submit_start_work_done_claim' },
+    },
+    {
+      id: 'slash-start-work-review',
+      label: '/start-work-review',
+      description: '提交 start-work reviewer verdict 并解除或保持完成门禁',
+      contexts: ['composer'],
+      execution: 'server',
+      action: { kind: 'review_start_work_done_claim' },
+    },
   ];
 }

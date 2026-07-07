@@ -6,6 +6,65 @@ export interface NavItem {
   iconKey: string;
 }
 
+export interface RailItem {
+  readonly to: string;
+  readonly label: string;
+}
+
+export interface RailGroup {
+  readonly id: string;
+  readonly title: string;
+  readonly items: readonly RailItem[];
+}
+
+export const railLabelCn: Record<string, string> = {
+  About: '关于',
+  Agents: '智能体',
+  Channels: '渠道',
+  Chat: '对话',
+  Images: '图像',
+  Schedules: '定时任务',
+  Sessions: '会话',
+  Settings: '设置',
+  Skills: '技能',
+  Team: '团队',
+  Templates: '模板',
+  Usage: '用量',
+  Workflows: '工作流',
+};
+
+export const railGroups: readonly RailGroup[] = [
+  {
+    id: 'workspace',
+    title: '工作区',
+    items: [
+      { to: '/chat', label: 'Chat' },
+      { to: '/team', label: 'Team' },
+      { to: '/sessions', label: 'Sessions' },
+      { to: '/images', label: 'Images' },
+    ],
+  },
+  {
+    id: 'automation',
+    title: '自动化',
+    items: [
+      { to: '/workflows', label: 'Workflows' },
+      { to: '/schedules', label: 'Schedules' },
+      { to: '/skills', label: 'Skills' },
+      { to: '/agents', label: 'Agents' },
+    ],
+  },
+  {
+    id: 'ops',
+    title: '运维',
+    items: [
+      { to: '/channels', label: 'Channels' },
+      { to: '/usage', label: 'Usage' },
+      { to: '/templates', label: 'Templates' },
+    ],
+  },
+];
+
 /** 顶部区块导航项：定时任务 / 技能 / 智能体 */
 export const TOP_NAV_ITEMS: NavItem[] = [
   { to: '/schedules', label: '定时任务', iconKey: 'Schedules' },

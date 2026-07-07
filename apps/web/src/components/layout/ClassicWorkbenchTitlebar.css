@@ -1,0 +1,14 @@
+.classic-workbench-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-2);
+  min-height: calc(var(--spacing-4) + var(--spacing-5));
+  height: calc(var(--spacing-4) + var(--spacing-5));
+  padding: 0 var(--spacing-2);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-base);
+  flex-shrink: 0;
+  overflow: hidden;
+  user-select: none;
+}

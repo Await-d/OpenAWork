@@ -4,7 +4,7 @@
  * 统一空态，替换各 tab 复制的 EMPTY_STYLE（emoji + 标题 + 说明 + 可选 CTA）。
  *
  * 用法：
- *   <EmptyState emoji="🔋" title="暂无用量数据" description="…" />
+ *   <EmptyState icon={<Icon />} title="暂无用量数据" description="…" />
  *   <EmptyState emoji="📭" title="当前层级暂无 handoff" compact />
  */
 
@@ -13,6 +13,7 @@ import { CK_DASHED_BORDER, CK_RADIUS_LG } from './content-kit-tokens.js';
 
 export interface EmptyStateProps {
   emoji?: string;
+  icon?: ReactNode;
   title: ReactNode;
   description?: ReactNode;
   /** 可选行动按钮 / 自定义节点。 */
@@ -24,6 +25,7 @@ export interface EmptyStateProps {
 
 export function EmptyState({
   emoji = '🗂️',
+  icon,
   title,
   description,
   action,
@@ -47,9 +49,15 @@ export function EmptyState({
         ...style,
       }}
     >
-      <span style={{ fontSize: compact ? 22 : 26 }} aria-hidden>
-        {emoji}
-      </span>
+      {icon ? (
+        <span style={{ color: 'var(--fg-muted)' }} aria-hidden>
+          {icon}
+        </span>
+      ) : (
+        <span style={{ fontSize: compact ? 22 : 26 }} aria-hidden>
+          {emoji}
+        </span>
+      )}
       <strong style={{ color: 'var(--fg-default)' }}>{title}</strong>
       {description ? <span style={{ maxWidth: 420, lineHeight: 1.5 }}>{description}</span> : null}
       {action ? <div style={{ marginTop: compact ? 2 : 6 }}>{action}</div> : null}

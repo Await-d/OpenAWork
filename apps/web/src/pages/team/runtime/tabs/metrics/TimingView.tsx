@@ -26,6 +26,7 @@ import {
   resolveMatchedSharedSessionDetail,
   resolveMatchedSharedSummary,
 } from '../../data/team-runtime-shared-context.js';
+import { TeamTabIcon } from '../team-tab-icons.js';
 import { TabContainer } from '../TabContainer.js';
 import {
   StatCard,
@@ -36,6 +37,7 @@ import {
   CK_SURFACE,
 } from '../../shared/content-kit/index.js';
 import { SharedSessionTimingView } from './shared-session-timing-view.js';
+import { TeamTimingWorkbenchHeader } from './TeamTimingWorkbenchHeader.js';
 
 const LAYER_LABELS: Record<TeamRoleLayer, string> = {
   user: '用户',
@@ -158,6 +160,7 @@ export function TimingView({
       }),
     [activeSharedSession, selectedSessionId, selectedSharedSession],
   );
+  const sharedScopeLabel = selectedSessionTitle ?? sharedSummary?.title ?? '共享会话';
 
   // 1s tick 用于刷新「正在运行」的耗时
   useEffect(() => {
@@ -167,17 +170,31 @@ export function TimingView({
 
   if (selectedSessionIsShared || sharedSummary) {
     return (
-      <TabContainer
-        title="耗时分析"
-        subtitle="共享会话展示共享协作节奏与关键同步时间线，不再沿用本地 runtime handoff 时序。"
-      >
-        <SharedSessionTimingView
-          selectedSessionTitle={selectedSessionTitle}
-          sharedSession={sharedSession}
-          sharedSessionLoading={sharedSessionLoading}
-          sharedSummary={sharedSummary}
+      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+        <TeamTimingWorkbenchHeader
+          scopeLabel={sharedScopeLabel}
+          handoffCountLabel={sharedSessionLoading ? '同步中' : '快照'}
+          runningCountLabel="共享"
+          successRateLabel="按消息"
+          completedSampleLabel={String(sharedSession?.session.messages?.length ?? 0)}
+          p50Label="—"
+          p95Label="—"
+          sharedSnapshot
         />
-      </TabContainer>
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+          <TabContainer
+            title="耗时分析"
+            subtitle="共享会话展示共享协作节奏与关键同步时间线，不再沿用本地 runtime handoff 时序。"
+          >
+            <SharedSessionTimingView
+              selectedSessionTitle={selectedSessionTitle}
+              sharedSession={sharedSession}
+              sharedSessionLoading={sharedSessionLoading}
+              sharedSummary={sharedSummary}
+            />
+          </TabContainer>
+        </div>
+      </div>
     );
   }
 
@@ -242,6 +259,17 @@ export function TimingView({
   );
 
   const totalCount = scopedEntries.length;
+  const completedDurations = useMemo(
+    () =>
+      scopedEntries
+        .flatMap((entry) => {
+          const start = entry.startedAt ?? entry.updatedAt;
+          const end = entry.endedAt ?? (isTerminal(entry.state) ? entry.updatedAt : null);
+          return end && end >= start ? [end - start] : [];
+        })
+        .sort((left, right) => left - right),
+    [scopedEntries],
+  );
   const successRate = useMemo(() => {
     let success = 0;
     let failed = 0;
@@ -252,123 +280,153 @@ export function TimingView({
     const total = success + failed;
     return total > 0 ? Math.round((success / total) * 100) : null;
   }, [scopedEntries]);
+  const scopeLabel = selectedSessionId
+    ? (selectedSessionTitle ?? `会话 ${selectedSessionId.slice(0, 8)}`)
+    : '全部团队';
+  const header = (
+    <TeamTimingWorkbenchHeader
+      scopeLabel={scopeLabel}
+      handoffCountLabel={String(totalCount)}
+      runningCountLabel={String(running.length)}
+      successRateLabel={successRate !== null ? `${successRate}%` : '—'}
+      completedSampleLabel={String(completed.length === 30 ? '≥ 30' : completed.length)}
+      p50Label={formatMs(quantile(completedDurations, 0.5))}
+      p95Label={formatMs(quantile(completedDurations, 0.95))}
+      sharedSnapshot={false}
+    />
+  );
 
   if (totalCount === 0) {
     return (
-      <TabContainer
-        title="耗时分析"
-        subtitle={
-          selectedSessionId
-            ? '按当前会话及其子树的 handoff 统计执行耗时与 P50 / P95 分布。'
-            : '按 handoff 维度统计执行耗时与 P50 / P95 分布。'
-        }
-      >
-        <div style={CONTAINER_STYLE}>
-          <EmptyState
-            emoji="⏱️"
-            title={selectedSessionId ? '当前会话暂无 handoff 记录' : '暂无 handoff 记录'}
-            description={
+      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+        {header}
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+          <TabContainer
+            title="耗时分析"
+            subtitle={
               selectedSessionId
-                ? `${selectedSessionTitle ?? `会话 ${selectedSessionId.slice(0, 8)}`} 及其下游会话产生 handoff 后，这里会展示对应耗时。`
-                : '团队启动后耗时数据会出现在这里。'
+                ? '按当前会话及其子树的 handoff 统计执行耗时与 P50 / P95 分布。'
+                : '按 handoff 维度统计执行耗时与 P50 / P95 分布。'
             }
-          />
+          >
+            <div style={CONTAINER_STYLE}>
+              <EmptyState
+                icon={<TeamTabIcon name="timing" size={24} />}
+                title={selectedSessionId ? '当前会话暂无 handoff 记录' : '暂无 handoff 记录'}
+                description={
+                  selectedSessionId
+                    ? `${selectedSessionTitle ?? `会话 ${selectedSessionId.slice(0, 8)}`} 及其下游会话产生 handoff 后，这里会展示对应耗时。`
+                    : '团队启动后耗时数据会出现在这里。'
+                }
+              />
+            </div>
+          </TabContainer>
         </div>
-      </TabContainer>
+      </div>
     );
   }
 
   return (
-    <TabContainer
-      title="耗时分析"
-      subtitle={
-        selectedSessionId
-          ? '按当前会话及其子树的 handoff 统计执行耗时与 P50 / P95 分布。'
-          : '按 handoff 维度统计执行耗时与 P50 / P95 分布。'
-      }
-    >
-      <div style={CONTAINER_STYLE}>
-        {selectedSessionId ? (
-          <div
-            style={{
-              padding: '8px 12px',
-              borderRadius: 10,
-              border: '1px solid color-mix(in srgb, var(--accent) 28%, transparent)',
-              background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
-              color: 'var(--fg-default)',
-              fontSize: 12,
-            }}
-          >
-            当前统计范围：{selectedSessionTitle ?? `会话 ${selectedSessionId.slice(0, 8)}`} 及其子树
-          </div>
-        ) : null}
-        {/* 概览 */}
-        <div style={SECTION_STYLE}>
-          <span style={SECTION_TITLE_STYLE}>概览</span>
-          <MetricGrid>
-            <StatCard label="Handoff 总数" value={String(totalCount)} />
-            <StatCard label="运行中" value={String(running.length)} tone="success" />
-            <StatCard
-              label="成功率"
-              value={successRate !== null ? `${successRate}%` : '—'}
-              tone={successRate !== null && successRate < 80 ? 'warning' : 'default'}
-            />
-            <StatCard
-              label="样本（已结束）"
-              value={String(completed.length === 30 ? '≥ 30' : completed.length)}
-            />
-          </MetricGrid>
-        </div>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+      {header}
+      <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+        <TabContainer
+          title="耗时分析"
+          subtitle={
+            selectedSessionId
+              ? '按当前会话及其子树的 handoff 统计执行耗时与 P50 / P95 分布。'
+              : '按 handoff 维度统计执行耗时与 P50 / P95 分布。'
+          }
+        >
+          <div style={CONTAINER_STYLE}>
+            {selectedSessionId ? (
+              <div
+                style={{
+                  padding: '8px 12px',
+                  borderRadius: 10,
+                  border: '1px solid color-mix(in srgb, var(--accent) 28%, transparent)',
+                  background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
+                  color: 'var(--fg-default)',
+                  fontSize: 12,
+                }}
+              >
+                当前统计范围：{selectedSessionTitle ?? `会话 ${selectedSessionId.slice(0, 8)}`}{' '}
+                及其子树
+              </div>
+            ) : null}
+            {/* 概览 */}
+            <div style={SECTION_STYLE}>
+              <span style={SECTION_TITLE_STYLE}>概览</span>
+              <MetricGrid>
+                <StatCard label="Handoff 总数" value={String(totalCount)} />
+                <StatCard label="运行中" value={String(running.length)} tone="success" />
+                <StatCard
+                  label="成功率"
+                  value={successRate !== null ? `${successRate}%` : '—'}
+                  tone={successRate !== null && successRate < 80 ? 'warning' : 'default'}
+                />
+                <StatCard
+                  label="样本（已结束）"
+                  value={String(completed.length === 30 ? '≥ 30' : completed.length)}
+                />
+              </MetricGrid>
+            </div>
 
-        {/* 各层级 P50/P95 */}
-        <div style={SECTION_STYLE}>
-          <span style={SECTION_TITLE_STYLE}>各层级耗时</span>
-          <MetricGrid>
-            {layerStats.map((stat) => (
-              <div key={stat.layer} style={STAT_CARD_STYLE}>
-                <span
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 700,
-                    color: 'var(--fg-strong)',
-                  }}
-                >
-                  {LAYER_LABELS[stat.layer]}
-                </span>
-                <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>样本 {stat.count}</span>
-                <div style={{ display: 'flex', gap: 10, fontSize: 11, color: 'var(--fg-default)' }}>
-                  <KV k="P50" v={formatMs(stat.p50)} />
-                  <KV k="P95" v={formatMs(stat.p95)} />
-                  <KV k="Max" v={formatMs(stat.max)} />
+            {/* 各层级 P50/P95 */}
+            <div style={SECTION_STYLE}>
+              <span style={SECTION_TITLE_STYLE}>各层级耗时</span>
+              <MetricGrid>
+                {layerStats.map((stat) => (
+                  <div key={stat.layer} style={STAT_CARD_STYLE}>
+                    <span
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 700,
+                        color: 'var(--fg-strong)',
+                      }}
+                    >
+                      {LAYER_LABELS[stat.layer]}
+                    </span>
+                    <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+                      样本 {stat.count}
+                    </span>
+                    <div
+                      style={{ display: 'flex', gap: 10, fontSize: 11, color: 'var(--fg-default)' }}
+                    >
+                      <KV k="P50" v={formatMs(stat.p50)} />
+                      <KV k="P95" v={formatMs(stat.p95)} />
+                      <KV k="Max" v={formatMs(stat.max)} />
+                    </div>
+                  </div>
+                ))}
+              </MetricGrid>
+            </div>
+
+            {/* 运行中（实时） */}
+            {running.length > 0 ? (
+              <div style={SECTION_STYLE}>
+                <span style={SECTION_TITLE_STYLE}>运行中（实时）</span>
+                <div style={{ display: 'grid', gap: 6 }}>
+                  {running.map((entry) => {
+                    const start = entry.startedAt ?? entry.updatedAt;
+                    const dur = now - start;
+                    return <RunningRow key={entry.id} entry={entry} dur={dur} />;
+                  })}
                 </div>
               </div>
-            ))}
-          </MetricGrid>
-        </div>
+            ) : null}
 
-        {/* 运行中（实时） */}
-        {running.length > 0 ? (
-          <div style={SECTION_STYLE}>
-            <span style={SECTION_TITLE_STYLE}>运行中（实时）</span>
-            <div style={{ display: 'grid', gap: 6 }}>
-              {running.map((entry) => {
-                const start = entry.startedAt ?? entry.updatedAt;
-                const dur = now - start;
-                return <RunningRow key={entry.id} entry={entry} dur={dur} />;
-              })}
-            </div>
+            {/* 已完成甘特 */}
+            {completed.length > 0 ? (
+              <div style={SECTION_STYLE}>
+                <span style={SECTION_TITLE_STYLE}>最近已结束（前 30 条）</span>
+                <CompletedGantt entries={completed} />
+              </div>
+            ) : null}
           </div>
-        ) : null}
-
-        {/* 已完成甘特 */}
-        {completed.length > 0 ? (
-          <div style={SECTION_STYLE}>
-            <span style={SECTION_TITLE_STYLE}>最近已结束（前 30 条）</span>
-            <CompletedGantt entries={completed} />
-          </div>
-        ) : null}
+        </TabContainer>
       </div>
-    </TabContainer>
+    </div>
   );
 }
 

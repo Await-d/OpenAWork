@@ -1,3 +1,4 @@
+// allow: SIZE_OK — package barrel export surface; entries are intentionally centralized.
 export { GatewayWebSocketClient } from './gateway/gateway-ws.js';
 export { GatewaySSEClient } from './gateway/gateway-sse.js';
 export { login, refreshAccessToken, logout } from './gateway/auth.js';
@@ -152,6 +153,8 @@ export type {
   QuestionsClient,
 } from './session/questions.js';
 export { createSessionsClient, createMultiAttachStream } from './session/sessions.js';
+export { getSessionWorkflowRuntime } from './session/workflow-runtime.js';
+export type { SessionWorkflowRuntimeSource } from './session/workflow-runtime.js';
 export type {
   DeleteSessionBlockReason,
   DeleteSessionErrorData,
@@ -244,9 +247,32 @@ export type { HealthClient } from './infra/health.js';
 export { createDesktopAutomationClient } from './infra/desktop-automation.js';
 export type {
   DesktopAutomationClient,
+  DesktopAutomationContentResult,
+  DesktopAutomationScrollDirection,
   DesktopAutomationScreenshotResult,
+  DesktopAutomationSnapshot,
+  DesktopAutomationSnapshotResult,
   DesktopAutomationStatus,
+  DesktopAutomationWaitInput,
 } from './infra/desktop-automation.js';
+
+export { createDesktopControlClient } from './infra/desktop-control.js';
+export type {
+  DesktopControlActionResult,
+  DesktopControlCapabilities,
+  DesktopControlCapability,
+  DesktopControlClickAction,
+  DesktopControlClickInput,
+  DesktopControlClient,
+  DesktopControlHotkeyInput,
+  DesktopControlKeyInput,
+  DesktopControlMouseButton,
+  DesktopControlScreenshotInput,
+  DesktopControlScrollInput,
+  DesktopControlStatus,
+  DesktopControlTypeInput,
+  DesktopControlWaitInput,
+} from './infra/desktop-control.js';
 
 export { createSshClient } from './infra/ssh.js';
 export type {

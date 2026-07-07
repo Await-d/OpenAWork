@@ -98,6 +98,9 @@ describe('SharesView', () => {
 
     render(<SharesView />);
 
+    expect(screen.getByText('治理工作台摘要')).toBeTruthy();
+    expect(screen.getAllByText('我共享的').length).toBeGreaterThan(0);
+    expect(screen.getByText('权限维护')).toBeTruthy();
     expect(screen.getByTestId('shares-create-form')).toBeTruthy();
     expect(screen.getByText('你还没有共享任何会话。')).toBeTruthy();
     expect(screen.queryByText('暂无共享记录')).toBeNull();

@@ -113,6 +113,9 @@ describe('AuditView', () => {
   it('支持切换到当前会话子树范围，并过滤掉 scope 外的审计记录', () => {
     render(<AuditView selectedSessionId="root-session" selectedSessionTitle="根会话" />);
 
+    expect(screen.getByText('治理工作台摘要')).toBeTruthy();
+    expect(screen.getByText('审计记录')).toBeTruthy();
+    expect(screen.getByText('操作者')).toBeTruthy();
     expect(screen.getByText('当前子树内的审计')).toBeTruthy();
     expect(screen.getByText('其他会话的审计')).toBeTruthy();
 

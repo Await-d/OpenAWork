@@ -14,10 +14,13 @@ interface QuickTerminalToggleProps {
 }
 
 export function QuickTerminalToggle({ open, onToggle, disabled }: QuickTerminalToggleProps) {
+  const actionLabel = open ? '收起快捷终端面板' : '打开快捷终端面板';
+
   return (
     <button
       type="button"
       aria-pressed={open}
+      aria-label={actionLabel}
       onClick={onToggle}
       disabled={disabled}
       title={open ? '收起快捷终端面板' : '打开快捷终端(VS Code 风格底部面板)'}

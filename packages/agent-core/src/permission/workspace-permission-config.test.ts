@@ -50,6 +50,7 @@ describe('resolvePermissionCategory', () => {
     expect(resolvePermissionCategory('mcp_call')).toBe('mcp_call');
     expect(resolvePermissionCategory('lsp_rename')).toBe('lsp');
     expect(resolvePermissionCategory('desktop_automation')).toBe('desktop_automation');
+    expect(resolvePermissionCategory('desktop_control')).toBe('desktop_control');
     expect(resolvePermissionCategory('workspace_review_revert')).toBe('edit');
     expect(resolvePermissionCategory('ast_grep_replace')).toBe('edit');
   });
@@ -100,6 +101,7 @@ describe('default permission rule evaluation', () => {
     expect(effectiveActionFor('skill_mcp')).toBe('ask');
     expect(effectiveActionFor('mcp_call')).toBe('ask');
     expect(effectiveActionFor('lsp_rename')).toBe('ask');
+    expect(effectiveActionFor('desktop_control')).toBe('ask');
   });
 });
 

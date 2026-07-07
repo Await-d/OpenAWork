@@ -1,0 +1,26 @@
+{
+  "cookies": [],
+  "origins": [
+    {
+      "origin": "http://127.0.0.1:5176",
+      "localStorage": [
+        {
+          "name": "auth-store",
+          "value": "{\"state\":{\"accessToken\":\"visual-token\",\"refreshToken\":null,\"tokenExpiresAt\":1999999999999,\"email\":\"qa@openawork.local\",\"gatewayUrl\":\"http://localhost:3000\",\"webAccessEnabled\":false,\"webPort\":3000,\"webExposeLan\":false},\"version\":0}"
+        },
+        {
+          "name": "openAwork-ui-state",
+          "value": "{\"state\":{\"workbenchLayoutMode\":\"fusion\",\"leftSidebarOpen\":true,\"reviewPanelOpened\":true,\"terminalPanelOpened\":false,\"terminalPanelHeight\":160,\"reviewPanelWidth\":400,\"sidePanelActiveTab\":\"review\",\"chatView\":\"session\"},\"version\":18}"
+        },
+        {
+          "name": "onboarded",
+          "value": "1"
+        },
+        {
+          "name": "telemetry_consent_shown",
+          "value": "1"
+        }
+      ]
+    }
+  ]
+}

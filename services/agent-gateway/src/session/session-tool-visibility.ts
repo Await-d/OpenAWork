@@ -160,7 +160,7 @@ function isChannelPolicyToolEnabled(metadata: Record<string, unknown>, toolName:
     return true;
   }
 
-  if (toolName === 'desktop_automation') {
+  if (toolName === 'desktop_automation' || toolName === 'desktop_control') {
     return false;
   }
 
@@ -211,10 +211,7 @@ export function isQuestionToolEnabledForSessionMetadata(
   //   1. metadata.teamWorkspaceId 存在（watcher 从父 session 继承）
   //   2. metadata.teamRoleInstance 存在（team-session-create.ts 创建时必定写入）
   // 即使 questionToolEnabled 被显式设为 true 也不放行。
-  if (
-    typeof metadata['teamWorkspaceId'] === 'string' ||
-    isRecord(metadata['teamRoleInstance'])
-  ) {
+  if (typeof metadata['teamWorkspaceId'] === 'string' || isRecord(metadata['teamRoleInstance'])) {
     return false;
   }
 

@@ -10,7 +10,33 @@ import {
   templateDataToEditorState,
   editorStateToTemplateData,
 } from './TemplateEditorPanel.js';
+import { TeamGovernanceWorkbenchHeader } from './TeamGovernanceWorkbenchHeader.js';
 import type { WorkflowTemplateRecord, UpdateWorkflowTemplateInput } from '@openAwork/web-client';
+
+function getBadgeToneStyle(tone: string | undefined): { background: string; color: string } {
+  switch (tone) {
+    case 'accent':
+      return {
+        background: 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay))',
+        color: 'var(--accent)',
+      };
+    case 'success':
+      return {
+        background: 'color-mix(in srgb, var(--success) 14%, var(--bg-overlay))',
+        color: 'var(--success)',
+      };
+    case 'warning':
+      return {
+        background: 'color-mix(in srgb, var(--warning) 16%, var(--bg-overlay))',
+        color: 'var(--warning)',
+      };
+    default:
+      return {
+        background: 'var(--bg-surface)',
+        color: 'var(--fg-default)',
+      };
+  }
+}
 
 function TemplateCard({
   template,
@@ -94,38 +120,27 @@ function TemplateCard({
             {template.name}
           </span>
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-            {badges.map((badge) => (
-              <span
-                key={badge.label}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  minHeight: 16,
-                  padding: '0 6px',
-                  borderRadius: 999,
-                  background:
-                    badge.tone === 'accent'
-                      ? 'rgba(99, 102, 241, 0.14)'
-                      : badge.tone === 'success'
-                        ? 'rgba(16, 185, 129, 0.14)'
-                        : badge.tone === 'warning'
-                          ? 'rgba(245, 158, 11, 0.16)'
-                          : 'var(--surface-3)',
-                  color:
-                    badge.tone === 'accent'
-                      ? 'var(--chart-5)'
-                      : badge.tone === 'success'
-                        ? 'var(--success)'
-                        : badge.tone === 'warning'
-                          ? 'var(--warning)'
-                          : 'var(--fg-default)',
-                  fontSize: 9,
-                  fontWeight: 700,
-                }}
-              >
-                {badge.label}
-              </span>
-            ))}
+            {badges.map((badge) => {
+              const toneStyle = getBadgeToneStyle(badge.tone);
+              return (
+                <span
+                  key={badge.label}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    minHeight: 16,
+                    padding: '0 6px',
+                    borderRadius: 999,
+                    background: toneStyle.background,
+                    color: toneStyle.color,
+                    fontSize: 9,
+                    fontWeight: 700,
+                  }}
+                >
+                  {badge.label}
+                </span>
+              );
+            })}
           </div>
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
             {roleTags.map((tag) => (
@@ -287,6 +302,13 @@ export function TemplatesTab({ onUseTemplate }: { onUseTemplate: (templateId: st
   const categoryLabel = (id: string) =>
     id === 'team-playbook' ? '团队模板' : id.replace(/[-_]/g, ' ');
 
+  const roleBindingCount = templates.reduce(
+    (count, template) =>
+      count +
+      template.nodes.filter((node) => node.type === 'subagent' || node.type === 'tool').length,
+    0,
+  );
+
   const selectedTemplate = useMemo(
     () => templates.find((template) => template.id === selectedTemplateId) ?? null,
     [selectedTemplateId, templates],
@@ -398,6 +420,51 @@ export function TemplatesTab({ onUseTemplate }: { onUseTemplate: (templateId: st
         }}
       >
         <div style={{ display: 'grid', gap: 10, alignContent: 'start' }}>
+          <TeamGovernanceWorkbenchHeader
+            area="templates"
+            eyebrow="Governance · Templates"
+            title="治理工作台摘要"
+            description="把团队模板、默认角色和启动权限放在同一首屏，先判断能不能复用，再进入模板细节。"
+            metrics={[
+              {
+                label: '模板总数',
+                value: templateCount,
+                detail: `${sections.size} 个分类`,
+                tone: 'accent',
+              },
+              {
+                label: '角色节点',
+                value: roleBindingCount,
+                detail: '模板内可绑定执行位',
+                tone: roleBindingCount > 0 ? 'aux' : 'muted',
+              },
+              {
+                label: '创建会话',
+                value: canCreateSession ? '可用' : '受限',
+                detail: canCreateSession ? '可直接用模板启动' : '只能查看模板配置',
+                tone: canCreateSession ? 'success' : 'warning',
+              },
+              {
+                label: '模板维护',
+                value: canCreateTemplate ? '可写' : '只读',
+                detail: canCreateTemplate ? '允许编辑和新建' : '保留只读查看',
+                tone: canCreateTemplate ? 'success' : 'warning',
+              },
+            ]}
+            signals={[
+              {
+                label: '同步状态',
+                value: templateLoading ? '同步中' : '已就绪',
+                tone: templateLoading ? 'warning' : 'success',
+              },
+              {
+                label: '当前选择',
+                value: selectedTemplate?.name ?? '未选择',
+                tone: selectedTemplate ? 'accent' : 'muted',
+              },
+            ]}
+          />
+
           {/* Error */}
           {templateError && (
             <div

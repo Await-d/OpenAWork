@@ -149,7 +149,7 @@ export async function processStartWork(
     const incompletePlans = incompletePlansWithProgress.filter((p) => !p.progress.isComplete);
 
     if (plans.length === 0) {
-      contextInfo += `\n\n## 未找到计划\n\n在 .sisyphus/plans/ 未找到 Prometheus 计划文件。\n使用 Prometheus 先创建工作计划。`;
+      contextInfo += `\n\n## 未找到计划\n\n在 .agentdocs/workflow/、.omo/plans/ 或旧版 .sisyphus/plans/ 中未找到可执行计划文件。\n请先创建工作计划。`;
     } else if (incompletePlans.length === 0) {
       contextInfo += `\n\n## 所有计划已完成\n\n所有 ${plans.length} 个计划已完成。使用 /plan 创建新计划。`;
     } else if (incompletePlans.length === 1) {

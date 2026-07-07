@@ -1,6 +1,6 @@
 /**
  * Regression (§0.128, findPrometheusPlans per-file stat isolation):
- * findPrometheusPlans lists `.sisyphus/plans/*.md` then `stat`s each inside a
+ * findPrometheusPlans lists known plan directories then `stat`s each file inside a
  * `Promise.all` to sort by mtime. The stat was unguarded, so a plan file that
  * vanished between `readdir` and `stat` (TOCTOU — concurrent /plan edit, git
  * checkout, manual cleanup) rejected the WHOLE batch; the outer catch then
@@ -47,7 +47,12 @@ afterEach(() => {
 
 describe('findPrometheusPlans per-file stat resilience', () => {
   it('某个计划文件在 readdir 与 stat 之间消失时跳过它而非返回空列表', async () => {
-    mocks.readdir.mockResolvedValue(['good.md', 'vanished.md', 'notes.txt'] as unknown as never);
+    mocks.readdir.mockImplementation(async (dir: string) => {
+      if (dir.endsWith('.agentdocs/workflow')) {
+        return ['good.md', 'vanished.md', 'notes.txt'];
+      }
+      return [];
+    });
     mocks.stat.mockImplementation(async (p: string) => {
       if (p.endsWith('vanished.md')) {
         const err = new Error('ENOENT') as NodeJS.ErrnoException;
@@ -66,7 +71,12 @@ describe('findPrometheusPlans per-file stat resilience', () => {
   });
 
   it('全部计划文件可 stat 时按 mtime 倒序返回', async () => {
-    mocks.readdir.mockResolvedValue(['older.md', 'newer.md'] as unknown as never);
+    mocks.readdir.mockImplementation(async (dir: string) => {
+      if (dir.endsWith('.agentdocs/workflow')) {
+        return ['older.md', 'newer.md'];
+      }
+      return [];
+    });
     mocks.stat.mockImplementation(async (p: string) => {
       return { mtimeMs: p.endsWith('newer.md') ? 2000 : 1000 } as unknown as never;
     });
@@ -76,5 +86,28 @@ describe('findPrometheusPlans per-file stat resilience', () => {
     expect(plans).toHaveLength(2);
     expect(plans[0]?.endsWith('newer.md')).toBe(true);
     expect(plans[1]?.endsWith('older.md')).toBe(true);
+  });
+
+  it('优先发现 .agentdocs/workflow，同时兼容 .omo/plans 与旧版 .sisyphus/plans', async () => {
+    mocks.readdir.mockImplementation(async (dir: string) => {
+      if (dir.endsWith('.agentdocs/workflow')) {
+        return ['native.md'];
+      }
+      if (dir.endsWith('.omo/plans')) {
+        return ['omo.md'];
+      }
+      if (dir.endsWith('.sisyphus/plans')) {
+        return ['legacy.md'];
+      }
+      return [];
+    });
+    mocks.stat.mockResolvedValue({ mtimeMs: 1000 } as unknown as never);
+
+    const plans = await findPrometheusPlans('/workspace');
+
+    expect(plans).toHaveLength(3);
+    expect(plans[0]).toContain('.agentdocs/workflow/native.md');
+    expect(plans[1]).toContain('.omo/plans/omo.md');
+    expect(plans[2]).toContain('.sisyphus/plans/legacy.md');
   });
 });

@@ -11,6 +11,11 @@ import {
   setCatalogSnapshot,
 } from './mcp-tool-catalog.js';
 import { McpOAuthProvider } from './mcp-oauth-provider.js';
+import {
+  callVirtualMcpToolForSession,
+  isVirtualBuiltinMcpServer,
+  listVirtualMcpTools,
+} from './builtin-virtual-mcps.js';
 
 // Wire the catalog cache to the connection pool's
 // `notifications/tools/list_changed` fan-out at module load time.
@@ -55,6 +60,10 @@ export interface ConfiguredMCPServer {
   url?: string;
   command?: string;
   args?: string[];
+  cwd?: string;
+  env?: Record<string, string>;
+  required?: boolean;
+  builtin?: boolean;
   enabled: boolean;
   disabledTools?: string[];
   headers?: Record<string, string>;
@@ -144,6 +153,14 @@ export function loadConfiguredMcpServersForUser(userId: string): ConfiguredMCPSe
       const disabledTools = Array.isArray(server['disabledTools'])
         ? server['disabledTools'].filter((tool): tool is string => typeof tool === 'string')
         : undefined;
+      const env =
+        server['env'] && typeof server['env'] === 'object'
+          ? Object.fromEntries(
+              Object.entries(server['env'] as Record<string, unknown>).filter(
+                (pair): pair is [string, string] => typeof pair[1] === 'string',
+              ),
+            )
+          : undefined;
       const headers =
         server['headers'] && typeof server['headers'] === 'object'
           ? Object.fromEntries(
@@ -180,6 +197,10 @@ export function loadConfiguredMcpServersForUser(userId: string): ConfiguredMCPSe
           url: typeof server['url'] === 'string' ? server['url'] : undefined,
           command: typeof server['command'] === 'string' ? server['command'] : undefined,
           args,
+          cwd: typeof server['cwd'] === 'string' ? server['cwd'] : undefined,
+          env,
+          required: server['required'] === true,
+          builtin: server['builtin'] === true,
           enabled: server['enabled'] !== false,
           disabledTools,
           headers,
@@ -227,6 +248,10 @@ export function getMcpServerFingerprint(server: ConfiguredMCPServer): string {
     url: server.url ?? null,
     command: server.command ?? null,
     args: server.args ?? [],
+    cwd: server.cwd ?? null,
+    env: server.env ?? {},
+    required: server.required ?? false,
+    builtin: server.builtin ?? false,
     disabledTools: server.disabledTools ?? [],
   });
 
@@ -269,6 +294,9 @@ function toMcpServerRef(
     url: server.url,
     command: server.command,
     args: server.args,
+    cwd: server.cwd,
+    env: server.env,
+    required: server.required,
     disabledTools: server.disabledTools,
     headers: server.headers,
   };
@@ -318,12 +346,22 @@ export function getMcpPoolKey(server: ConfiguredMCPServer): string {
   return `${server.id}:${getMcpServerFingerprint(server)}`;
 }
 
-export async function listMcpToolsForSession(
-  sessionId: string,
+function filterEnabledMcpTools(
+  tools: readonly MCPToolDef[],
+  disabledTools?: readonly string[],
+): MCPToolDef[] {
+  if (!disabledTools || disabledTools.length === 0) {
+    return [...tools];
+  }
+  const disabled = new Set(disabledTools);
+  return tools.filter((tool) => !disabled.has(tool.name));
+}
+
+export async function listMcpToolsForUser(
+  userId: string,
   filter?: { serverId?: string; allowedServerIds?: string[] },
 ): Promise<MCPServerToolCatalog[]> {
-  const userId = getUserIdForSession(sessionId);
-  const configuredServers = getConfiguredMcpServersForSession(sessionId);
+  const configuredServers = loadConfiguredMcpServersForUser(userId);
   let selectedServers = filter?.serverId
     ? configuredServers.filter((server) => server.id === filter.serverId)
     : configuredServers;
@@ -356,6 +394,19 @@ export async function listMcpToolsForSession(
       }
 
       try {
+        if (isVirtualBuiltinMcpServer(server)) {
+          const tools = filterEnabledMcpTools(listVirtualMcpTools(server.id), server.disabledTools);
+          setCatalogSnapshot(userId, getMcpPoolKey(server), server.id, tools);
+          return {
+            serverId: server.id,
+            serverName: server.name,
+            transport: server.transport,
+            enabled: true,
+            status: 'connected',
+            tools,
+          };
+        }
+
         // Persistent-pool path (PR-B): reuse the same connection across
         // turns instead of building/tearing-down a fresh
         // `MCPClientAdapterImpl` for every request. Mirrors opencode's
@@ -395,6 +446,13 @@ export async function listMcpToolsForSession(
       }
     }),
   );
+}
+
+export async function listMcpToolsForSession(
+  sessionId: string,
+  filter?: { serverId?: string; allowedServerIds?: string[] },
+): Promise<MCPServerToolCatalog[]> {
+  return listMcpToolsForUser(getUserIdForSession(sessionId), filter);
 }
 
 /**
@@ -464,6 +522,19 @@ export async function retryMcpConnectionForUser(
   }
 
   const poolKey = getMcpPoolKey(server);
+  if (isVirtualBuiltinMcpServer(server)) {
+    const startedAt = Date.now();
+    const tools = filterEnabledMcpTools(listVirtualMcpTools(server.id), server.disabledTools);
+    setCatalogSnapshot(userId, poolKey, server.id, tools);
+    return {
+      serverId: server.id,
+      serverName: server.name,
+      status: 'connected',
+      toolCount: tools.length,
+      durationMs: Date.now() - startedAt,
+    };
+  }
+
   // Always start from a clean slate so a previously failed connect
   // doesn't keep returning a cached error from the same broken
   // adapter. `disconnectUserConnection` is a no-op if no entry is
@@ -516,6 +587,7 @@ export async function retryMcpConnectionForUser(
  */
 export function isMcpServerConnectedForUser(userId: string, server: ConfiguredMCPServer): boolean {
   if (!server.enabled) return false;
+  if (isVirtualBuiltinMcpServer(server)) return true;
   return mcpConnectionPool.isConnected(userId, getMcpPoolKey(server));
 }
 
@@ -527,6 +599,9 @@ export async function callMcpToolForSession(
   const server = getConfiguredMcpServerForSession(sessionId, input.serverId);
   if (server.disabledTools?.includes(input.toolName)) {
     throw new Error(`MCP tool ${input.toolName} is disabled for server ${server.id}`);
+  }
+  if (isVirtualBuiltinMcpServer(server)) {
+    return callVirtualMcpToolForSession(sessionId, server, input);
   }
   // Persistent-pool path (PR-B). See listMcpToolsForSession for rationale.
   const result = await mcpConnectionPool.withOperationRetry(

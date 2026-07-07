@@ -23,6 +23,7 @@ import {
   CK_BORDER,
   CK_SURFACE,
 } from '../../shared/content-kit/index.js';
+import { TeamTabIcon } from '../team-tab-icons.js';
 
 const CONTAINER_STYLE: CSSProperties = {
   display: 'flex',
@@ -289,7 +290,7 @@ export function ToolCallsView({
       >
         <div style={CONTAINER_STYLE}>
           <EmptyState
-            emoji="🛠️"
+            icon={<TeamTabIcon name="settings" size={24} />}
             title={selectedSessionId ? '当前会话暂无工具调用数据' : '暂无工具调用数据'}
             description={
               selectedSessionId ? (

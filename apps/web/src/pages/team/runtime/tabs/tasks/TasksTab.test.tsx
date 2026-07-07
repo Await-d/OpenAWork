@@ -76,7 +76,8 @@ describe('TasksTab', () => {
 
     render(<TasksTab selectedTeam={SELECTED_TEAM} />);
 
-    expect(screen.getByText('当前工作区不可写，无法新增或推进任务。')).toBeTruthy();
+    expect(screen.getByText('当前工作区只读，无法新增或推进任务。')).toBeTruthy();
+    expect(screen.getByText('只读')).toBeTruthy();
     expect(screen.getByTitle('开始处理').hasAttribute('disabled')).toBe(true);
 
     const addButtons = screen.getAllByRole('button', { name: /添加任务/i });
@@ -100,8 +101,10 @@ describe('TasksTab', () => {
   it('展示统计概览和进度条', () => {
     render(<TasksTab selectedTeam={SELECTED_TEAM} />);
 
-    expect(screen.getByText('总任务')).toBeTruthy();
-    expect(screen.getByText('1')).toBeTruthy();
-    expect(screen.getByText(/进度/)).toBeTruthy();
+    expect(screen.getByRole('region', { name: '任务工作台摘要' })).toBeTruthy();
+    expect(screen.getByText('任务编排面板')).toBeTruthy();
+    expect(screen.getByText('完成/总数')).toBeTruthy();
+    expect(screen.getByText('0/1')).toBeTruthy();
+    expect(screen.getByLabelText('任务完成度 0%')).toBeTruthy();
   });
 });

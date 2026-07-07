@@ -11,6 +11,8 @@ export interface LayerMessages {
   isActive: boolean;
   /** 该层角色实例的显示名称（如"前端开发者"），同层多角色时取第一个 */
   displayName?: string | null;
+  sourceLayer?: string | null;
+  sourceDisplayName?: string | null;
   /**
    * 当前正在流式生成的消息（仅活跃层在流式时存在）。
    * 前端通过 attach/startStream 接收 text_delta 实时累积的内容，
@@ -474,8 +476,9 @@ function TimelineView({ layers }: { layers: LayerMessages[] }) {
   const timeSlots = new Map<string, typeof allMessages>();
   for (const msg of allMessages) {
     const key = formatTime(msg.createdAt);
-    if (!timeSlots.has(key)) timeSlots.set(key, []);
-    timeSlots.get(key)!.push(msg);
+    const bucket = timeSlots.get(key) ?? [];
+    bucket.push(msg);
+    timeSlots.set(key, bucket);
   }
 
   return (

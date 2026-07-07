@@ -6,7 +6,7 @@
  *
  * 统一为一套视觉系统：
  *   ┌──────────────────────────────────────────────────────────────┐
- *   │ 〔概览〕〔对话〕〔任务〕〔度量〕〔治理〕            │ 🏢 3D │   ← 主 tab：segmented 胶囊
+ *   │ 〔概览〕〔对话〕〔任务〕〔度量〕〔治理〕            │ 3D │   ← 主 tab：segmented 胶囊
  *   ├──────────────────────────────────────────────────────────────┤
  *   │  仪表盘 · 关系图谱 · 健康度                                     │   ← 子 tab：轻量文字胶囊
  *   └──────────────────────────────────────────────────────────────┘
@@ -29,6 +29,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { PRIMARY_TABS, type PrimaryTabKey, type SubTabDef } from '../../tabs/team-page-v2-tabs.js';
+import { TeamTabIcon } from '../../tabs/team-tab-icons.js';
 import type { MiddleTabKey } from '../../tabs/MiddleTabRouter.js';
 import { TeamRunStatePill } from '../../shared/TeamRunStatePill.js';
 
@@ -177,6 +178,13 @@ const SINGLE_NAV_ROW_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   gap: 6,
+  padding: '0 10px 4px',
+  minWidth: 0,
+};
+
+const SINGLE_STATUS_ROW_STYLE: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
   padding: '0 10px 4px',
   minWidth: 0,
 };
@@ -341,6 +349,7 @@ export interface TeamTabBarProps {
   leadingSlot?: ReactNode;
   /** 单行模式下，主 tab 组与右侧操作之间的内容（如运行状态栏）。 */
   centerSlot?: ReactNode;
+  stackCenterSlot?: boolean;
   /** 单行模式下，最右侧操作区（如暂停按钮、治理齿轮）；显示在运行胶囊与 3D 之后。 */
   trailingSlot?: ReactNode;
 }
@@ -376,6 +385,7 @@ export function TeamTabBar({
   variant = 'rows',
   leadingSlot,
   centerSlot,
+  stackCenterSlot = false,
   trailingSlot,
 }: TeamTabBarProps) {
   const subTabs: ReadonlyArray<SubTabDef> =
@@ -398,6 +408,7 @@ export function TeamTabBar({
         onOfficeClick={onOfficeClick}
         leadingSlot={leadingSlot}
         centerSlot={centerSlot}
+        stackCenterSlot={stackCenterSlot}
         trailingSlot={trailingSlot}
       />
     );
@@ -410,7 +421,12 @@ export function TeamTabBar({
         <div style={PRIMARY_GROUP_STYLE} role="tablist" aria-label="主分类切换">
           {PRIMARY_TABS.map((primary) => {
             const active = !officeActive && activePrimary === primary.key;
-            const badge = primaryBadge(primary.key, unreadCount, clarificationPending, failedTaskCount);
+            const badge = primaryBadge(
+              primary.key,
+              unreadCount,
+              clarificationPending,
+              failedTaskCount,
+            );
             return (
               <button
                 key={primary.key}
@@ -422,9 +438,7 @@ export function TeamTabBar({
                 data-active={active || undefined}
                 style={active ? PRIMARY_PILL_ACTIVE_STYLE : PRIMARY_PILL_STYLE}
               >
-                <span aria-hidden style={{ fontSize: 14 }}>
-                  {primary.icon}
-                </span>
+                <TeamTabIcon name={primary.icon} />
                 <span>{primary.label}</span>
                 {badge ? <Badge count={badge.count} tone={badge.tone} /> : null}
               </button>
@@ -453,15 +467,8 @@ export function TeamTabBar({
               data-active={officeActive || undefined}
               style={officeActive ? OFFICE_BTN_ACTIVE_INLINE_STYLE : OFFICE_BTN_INLINE_STYLE}
             >
-              <span aria-hidden style={{ fontSize: 14 }}>
-                🏢
-              </span>
+              <TeamTabIcon name="office" />
               <span>3D 办公</span>
-              {officeActive ? (
-                <span aria-hidden style={{ fontSize: 11, opacity: 0.8 }}>
-                  ⛶
-                </span>
-              ) : null}
             </button>
           ) : null}
         </span>
@@ -483,7 +490,7 @@ export function TeamTabBar({
                 data-active={active || undefined}
                 style={active ? SUB_PILL_ACTIVE_STYLE : SUB_PILL_STYLE}
               >
-                <span aria-hidden>{sub.icon}</span>
+                <TeamTabIcon name={sub.icon} size={13} />
                 <span>{sub.label}</span>
                 {sub.key === 'messages' && unreadCount > 0 ? (
                   <Badge count={unreadCount} tone="danger" />
@@ -513,6 +520,7 @@ type SingleRowProps = Pick<
   | 'onOfficeClick'
   | 'leadingSlot'
   | 'centerSlot'
+  | 'stackCenterSlot'
   | 'trailingSlot'
 >;
 
@@ -538,6 +546,7 @@ function SingleRowTabBar({
   onOfficeClick,
   leadingSlot,
   centerSlot,
+  stackCenterSlot = false,
   trailingSlot,
 }: SingleRowProps) {
   // 主 tab「更多」溢出菜单的展开态与锚点。
@@ -649,6 +658,7 @@ function SingleRowTabBar({
   const visibleTabs = PRIMARY_TABS.slice(0, visibleCount);
   const overflowTabs = PRIMARY_TABS.slice(visibleCount);
   const overflowActive = overflowTabs.some((p) => !officeActive && activePrimary === p.key);
+  const hasContextRow = Boolean(leadingSlot || trailingSlot);
 
   // 当前主 tab 的子视图（常驻第二行）。office 视图下不显示子 tab。
   const subTabs: ReadonlyArray<SubTabDef> =
@@ -671,9 +681,7 @@ function SingleRowTabBar({
         style={active ? PRIMARY_PILL_ACTIVE_STYLE : PRIMARY_PILL_STYLE}
         title={primary.label}
       >
-        <span aria-hidden style={{ fontSize: 14 }}>
-          {primary.icon}
-        </span>
+        <TeamTabIcon name={primary.icon} />
         <span>{primary.label}</span>
         {badge ? <Badge count={badge.count} tone={badge.tone} /> : null}
       </button>
@@ -683,10 +691,18 @@ function SingleRowTabBar({
   return (
     <div ref={rootRef} style={BAR_ROOT_STYLE}>
       {/* 第 ① 行：上下文信息。工作区 / 当前会话与统计分开，避免导航行被挤压。 */}
-      <div style={SINGLE_CONTEXT_ROW_STYLE}>
-        {leadingSlot ? <span style={LEADING_STYLE}>{leadingSlot}</span> : null}
-        {trailingSlot ? <span style={CONTEXT_TRAILING_STYLE}>{trailingSlot}</span> : null}
-      </div>
+      {hasContextRow ? (
+        <div style={SINGLE_CONTEXT_ROW_STYLE}>
+          {leadingSlot ? <span style={LEADING_STYLE}>{leadingSlot}</span> : null}
+          {trailingSlot ? <span style={CONTEXT_TRAILING_STYLE}>{trailingSlot}</span> : null}
+        </div>
+      ) : null}
+
+      {centerSlot && stackCenterSlot ? (
+        <div style={SINGLE_STATUS_ROW_STYLE}>
+          <span style={CENTER_SLOT_STYLE}>{centerSlot}</span>
+        </div>
+      ) : null}
 
       {/* 第 ② 行：主 tab（窄屏溢出「更多」）+ 运行状态 + 3D。 */}
       <div style={SINGLE_NAV_ROW_STYLE}>
@@ -700,7 +716,7 @@ function SingleRowTabBar({
           <div ref={ghostRef} style={GHOST_ROW_STYLE} aria-hidden>
             {PRIMARY_TABS.map((primary) => (
               <span key={primary.key} style={PRIMARY_PILL_STYLE}>
-                <span style={{ fontSize: 14 }}>{primary.icon}</span>
+                <TeamTabIcon name={primary.icon} />
                 <span>{primary.label}</span>
               </span>
             ))}
@@ -743,7 +759,12 @@ function SingleRowTabBar({
               >
                 {overflowTabs.map((primary) => {
                   const active = !officeActive && activePrimary === primary.key;
-                  const badge = primaryBadge(primary.key, unreadCount, clarificationPending, failedTaskCount);
+                  const badge = primaryBadge(
+                    primary.key,
+                    unreadCount,
+                    clarificationPending,
+                    failedTaskCount,
+                  );
                   return (
                     <button
                       key={primary.key}
@@ -758,7 +779,7 @@ function SingleRowTabBar({
                       data-active={active || undefined}
                       style={active ? DROPDOWN_ITEM_ACTIVE_STYLE : DROPDOWN_ITEM_STYLE}
                     >
-                      <span aria-hidden>{primary.icon}</span>
+                      <TeamTabIcon name={primary.icon} />
                       <span style={{ flex: 1 }}>{primary.label}</span>
                       {badge ? <Badge count={badge.count} tone={badge.tone} /> : null}
                     </button>
@@ -769,7 +790,9 @@ function SingleRowTabBar({
             )
           : null}
 
-        {centerSlot ? <span style={CENTER_SLOT_STYLE}>{centerSlot}</span> : null}
+        {centerSlot && !stackCenterSlot ? (
+          <span style={CENTER_SLOT_STYLE}>{centerSlot}</span>
+        ) : null}
 
         <span style={SINGLE_ACTIONS_STYLE}>
           <TeamRunStatePill />
@@ -783,9 +806,7 @@ function SingleRowTabBar({
               data-active={officeActive || undefined}
               style={officeActive ? OFFICE_BTN_ACTIVE_INLINE_STYLE : OFFICE_BTN_INLINE_STYLE}
             >
-              <span aria-hidden style={{ fontSize: 14 }}>
-                🏢
-              </span>
+              <TeamTabIcon name="office" />
               <span>3D</span>
             </button>
           ) : null}
@@ -808,7 +829,7 @@ function SingleRowTabBar({
                 data-active={active || undefined}
                 style={active ? SUB_PILL_ACTIVE_STYLE : SUB_PILL_STYLE}
               >
-                <span aria-hidden>{sub.icon}</span>
+                <TeamTabIcon name={sub.icon} size={13} />
                 <span>{sub.label}</span>
                 {sub.key === 'messages' && unreadCount > 0 ? (
                   <Badge count={unreadCount} tone="danger" />

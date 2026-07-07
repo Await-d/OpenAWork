@@ -234,6 +234,7 @@ const SUPERBAR_CONTEXT_STYLE: CSSProperties = {
 
 export interface TeamPageSuperbarLeadingProps {
   activeWorkspaceId: string | null;
+  activeWorkspaceName?: string;
   compact?: boolean;
   memberCount: string;
   onlineCount: string;
@@ -244,6 +245,7 @@ export interface TeamPageSuperbarLeadingProps {
 
 export function TeamPageSuperbarLeading({
   activeWorkspaceId,
+  activeWorkspaceName,
   compact = false,
   memberCount,
   onlineCount,
@@ -252,6 +254,8 @@ export function TeamPageSuperbarLeading({
   workspaces,
 }: TeamPageSuperbarLeadingProps) {
   const activeWorkspace = workspaces.find((ws) => ws.id === activeWorkspaceId) ?? null;
+  const activeWorkspaceDisplayName =
+    activeWorkspaceName ?? activeWorkspace?.name ?? activeWorkspaceId ?? '未选择工作区';
   const sessionStatus = selectedTeam ? formatSidebarTeamStatus(selectedTeam.status) : null;
   const sessionSubtitle = selectedTeam
     ? resolveSidebarTeamSubtitle(selectedTeam.status, selectedTeam.subtitle)
@@ -271,9 +275,9 @@ export function TeamPageSuperbarLeading({
             textOverflow: 'ellipsis',
             maxWidth: 200,
           }}
-          title={activeWorkspace?.name ?? '未选择工作区'}
+          title={activeWorkspaceDisplayName}
         >
-          {activeWorkspace?.name ?? '未选择工作区'}
+          {activeWorkspaceDisplayName}
         </span>
       </span>
       {selectedTeam ? (
@@ -522,7 +526,9 @@ export function TeamSharedConversationPanel({
                   lineHeight: 1.65,
                   color: latestAssistantOutput ? 'var(--fg-default)' : 'var(--fg-muted)',
                   whiteSpace: looksLikeJson(latestAssistantOutput ?? '') ? 'pre' : 'pre-wrap',
-                  fontFamily: looksLikeJson(latestAssistantOutput ?? '') ? 'ui-monospace, SFMono-Regular, monospace' : undefined,
+                  fontFamily: looksLikeJson(latestAssistantOutput ?? '')
+                    ? 'ui-monospace, SFMono-Regular, monospace'
+                    : undefined,
                 }}
               >
                 {latestAssistantOutput

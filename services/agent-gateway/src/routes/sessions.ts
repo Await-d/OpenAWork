@@ -106,6 +106,7 @@ import {
 } from '../message/message-v2-adapter.js';
 import { countUserMessages } from '../message/message-store-v2.js';
 import { mergeRuntimeSafeSessionMessages } from '../session/runtime-safe-message-merge.js';
+import { buildWorkflowRuntimeState } from '../session/workflow-runtime-state.js';
 
 const createSessionSchema = z.object({
   metadata: z.record(z.unknown()).optional().default({}),
@@ -1286,6 +1287,9 @@ async function buildSessionStatusReadModel(input: { session: SessionRow; userId:
     pendingQuestions: listRecoveryQuestionRequests(relevantSessionIds),
     tasks,
     todoLanes: listSessionTodoLanes(sessionId),
+    workflowRuntime: buildWorkflowRuntimeState(
+      sanitizeSessionMetadataJson(input.session.metadata_json),
+    ),
   };
 }
 

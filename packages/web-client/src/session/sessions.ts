@@ -6,6 +6,7 @@ import type {
   Message,
   RunEvent,
   TaskTimeoutSource,
+  WorkflowRuntimeState,
 } from '@openAwork/shared';
 import type { PendingPermissionRequest, PermissionDecision } from './permissions.js';
 import type { PendingQuestionRequest } from './questions.js';
@@ -271,6 +272,7 @@ export interface Session {
   substate?: string | null;
   messages?: Message[];
   metadata_json?: string;
+  workflowRuntime?: WorkflowRuntimeState;
   runEvents?: RunEvent[];
   todos?: SessionTodo[];
   fileChangesSummary?: SessionFileChangesSummary;
@@ -400,6 +402,7 @@ export interface SessionStatusReadModel {
   pendingQuestions: PendingQuestionRequest[];
   tasks: SessionTask[];
   todoLanes: SessionTodoLanes;
+  workflowRuntime: WorkflowRuntimeState;
 }
 
 export interface SessionTask {
@@ -425,6 +428,7 @@ export interface SessionTask {
   unmetDependencyCount: number;
   result?: string;
   errorMessage?: string;
+  metadata?: Record<string, unknown>;
   terminalReason?: string;
   timeoutSource?: TaskTimeoutSource;
 }
@@ -1528,7 +1532,9 @@ export function createMultiAttachStream(input: {
     if (payload && typeof payload === 'object' && 'event' in payload) {
       const envelopePayload = payload as Record<string, unknown>;
       const runEvent = envelopePayload['event'] as RunEvent;
-      const cursor = envelopePayload['cursor'] as { seq?: number; clientRequestId?: string } | undefined;
+      const cursor = envelopePayload['cursor'] as
+        | { seq?: number; clientRequestId?: string }
+        | undefined;
       const rowId = cursor?.seq ?? (parsed['seq'] as number | undefined) ?? 0;
       const clientRequestId = cursor?.clientRequestId;
 

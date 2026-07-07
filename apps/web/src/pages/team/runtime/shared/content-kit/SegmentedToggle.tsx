@@ -8,7 +8,7 @@
  *   <SegmentedToggle
  *     value={mode}
  *     onChange={setMode}
- *     options={[{ value: 'usage', label: '用量 & 费用', icon: '🔋' }, …]}
+ *     options={[{ value: 'usage', label: '用量 & 费用', icon: <UsageIcon /> }, …]}
  *   />
  *
  * 设计：外层一个轻量"轨道"容器（圆角 + 弱描边 + base 软底），内部选项为

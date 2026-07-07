@@ -206,4 +206,34 @@ describe('tool-sandbox plugin hook integration (PR-D-Plugin)', () => {
       content: [{ type: 'text', text: 'still works' }],
     });
   });
+
+  it('desktop_control is rejected before permission when the plugin is disabled', async () => {
+    const sandbox = createDefaultSandbox();
+
+    const result = await sandbox.execute(
+      {
+        toolCallId: 'call-desktop-control-disabled',
+        toolName: 'desktop_control',
+        rawInput: { action: 'status' },
+      },
+      new AbortController().signal,
+      'session-1',
+      {
+        clientRequestId: 'req-desktop-control-disabled',
+        nextRound: 1,
+        requestData: { clientRequestId: 'req-desktop-control-disabled' },
+      },
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toBe(
+      '系统桌面控制插件未启用。请在设置 → 插件中启用后再使用 desktop_control。',
+    );
+    expect(result.pendingPermissionRequestId).toBeUndefined();
+    expect(
+      mocks.sqliteRunMock.mock.calls.some(
+        ([query]) => typeof query === 'string' && query.includes('permission_requests'),
+      ),
+    ).toBe(false);
+  });
 });

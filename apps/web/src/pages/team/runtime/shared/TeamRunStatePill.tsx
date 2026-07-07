@@ -9,23 +9,23 @@
  * idle（从未开始）时不渲染，避免噪音。
  */
 
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { useTeamRunState, type TeamRunPhase } from '../hooks/use-team-run-state.js';
 
-const DANGER = 'var(--danger, #e5484d)';
+const DANGER = 'var(--complement)';
 
 interface PhaseVisual {
   color: string;
-  icon: string;
+  icon: 'check' | 'dot' | 'warning';
   label: string;
   spinning?: boolean;
 }
 
 const PHASE_VISUAL: Record<Exclude<TeamRunPhase, 'idle'>, PhaseVisual> = {
-  working: { color: 'var(--accent)', icon: '🟢', label: '运行中', spinning: true },
-  failed: { color: DANGER, icon: '🔴', label: '出现失败' },
-  completed: { color: 'var(--success)', icon: '✅', label: '已完成' },
-  disconnected: { color: 'var(--warning)', icon: '⚠', label: '连接断开' },
+  working: { color: 'var(--accent)', icon: 'dot', label: '运行中', spinning: true },
+  failed: { color: DANGER, icon: 'dot', label: '出现失败' },
+  completed: { color: 'var(--success)', icon: 'check', label: '已完成' },
+  disconnected: { color: 'var(--warning)', icon: 'warning', label: '连接断开' },
 };
 
 const PILL_BASE: CSSProperties = {
@@ -50,10 +50,67 @@ const SPINNER_STYLE: CSSProperties = {
   flexShrink: 0,
 };
 
+const ICON_STYLE: CSSProperties = {
+  width: 12,
+  height: 12,
+  flexShrink: 0,
+};
+
 export interface TeamRunStatePillProps {
   /** 紧凑模式：仅显示圆点 + 计数，不显示文字标签（更省空间）。 */
   compact?: boolean;
   style?: CSSProperties;
+}
+
+function StatusIcon({ icon }: { readonly icon: PhaseVisual['icon'] }): ReactNode {
+  if (icon === 'dot') {
+    return (
+      <span
+        aria-hidden
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: '50%',
+          background: 'currentColor',
+          flexShrink: 0,
+        }}
+      />
+    );
+  }
+
+  if (icon === 'check') {
+    return (
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        style={ICON_STYLE}
+      >
+        <path d="M20 6 9 17l-5-5" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={ICON_STYLE}
+    >
+      <path d="M12 9v4" />
+      <path d="M12 17h.01" />
+      <path d="M10.3 4.4 2.7 18a2 2 0 0 0 1.8 3h15a2 2 0 0 0 1.8-3L13.7 4.4a2 2 0 0 0-3.4 0Z" />
+    </svg>
+  );
 }
 
 export function TeamRunStatePill({ compact = false, style }: TeamRunStatePillProps) {
@@ -62,9 +119,7 @@ export function TeamRunStatePill({ compact = false, style }: TeamRunStatePillPro
 
   const visual = PHASE_VISUAL[run.phase];
   const count =
-    run.phase === 'working' ? run.activeCount : run.phase === 'failed'
-        ? run.failedCount
-        : 0;
+    run.phase === 'working' ? run.activeCount : run.phase === 'failed' ? run.failedCount : 0;
 
   const title = `团队状态：${visual.label}${count > 0 ? ` · ${count}` : ''}`;
 
@@ -84,9 +139,7 @@ export function TeamRunStatePill({ compact = false, style }: TeamRunStatePillPro
       {visual.spinning ? (
         <span style={SPINNER_STYLE} aria-hidden />
       ) : (
-        <span aria-hidden style={{ fontSize: 10 }}>
-          {visual.icon}
-        </span>
+        <StatusIcon icon={visual.icon} />
       )}
       {!compact ? <span>{visual.label}</span> : null}
       {count > 0 ? <span style={{ fontVariantNumeric: 'tabular-nums' }}>{count}</span> : null}

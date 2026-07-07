@@ -2,6 +2,7 @@
 
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AgentTeamsOverviewCard } from '../../data/team-runtime-types.js';
 
 const runtimeReferenceState = vi.hoisted(() => ({
   activityStats: {
@@ -46,7 +47,7 @@ const runtimeReferenceState = vi.hoisted(() => ({
     sessionId: string | null;
     summary: string;
   }>,
-  overviewCards: [],
+  overviewCards: new Array<AgentTeamsOverviewCard>(),
   selectedSharedSession: null as null | {
     comments: Array<{ authorEmail: string; content: string; createdAt: string; id: string }>;
     pendingPermissions: Array<{ requestId: string }>;
@@ -92,6 +93,84 @@ afterEach(() => {
 });
 
 describe('OverviewTab', () => {
+  it('默认概览指标使用移动端紧凑样式 hook', () => {
+    runtimeReferenceState.overviewCards = [
+      {
+        icon: 'members',
+        id: 'active-members',
+        label: '活跃角色',
+        note: '参与层级 2 · 工作中成员 1 · 总成员 4',
+        value: '4',
+      },
+      {
+        icon: 'tasks',
+        id: 'tasks',
+        label: '办公室任务',
+        note: '进行中 3 · 已完成 7 · 失败 0',
+        trend: 'up',
+        value: '10',
+      },
+    ];
+
+    render(<OverviewTab />);
+
+    expect(screen.getByText('运行概览')).toBeTruthy();
+    expect(screen.getByLabelText('团队工作区概览')).toBeTruthy();
+    expect(screen.getByText('全局指标 · 活动时间线')).toBeTruthy();
+    const workbenchMap = screen.getByLabelText('Team 工作台层级导览');
+    expect(workbenchMap).toBeTruthy();
+    expect(screen.getByText('Team 页面结构')).toBeTruthy();
+    expect(screen.getByText('5 个主域 · 18 个页内视图')).toBeTruthy();
+    expect(workbenchMap.querySelectorAll('.team-v2-overview-workbench-card')).toHaveLength(5);
+    expect(workbenchMap.textContent).toContain('概览');
+    expect(workbenchMap.textContent).toContain('对话');
+    expect(workbenchMap.textContent).toContain('任务');
+    expect(workbenchMap.textContent).toContain('度量');
+    expect(workbenchMap.textContent).toContain('治理');
+    expect(workbenchMap.textContent).toContain('看板产物评审。');
+    expect(workbenchMap.textContent).toContain('用量耗时工具。');
+    expect(workbenchMap.textContent).toContain('模板共享审计。');
+    expect(workbenchMap.textContent).toContain('任务看板');
+    expect(workbenchMap.textContent).toContain('工具调用');
+    expect(workbenchMap.textContent).toContain('审计');
+    const metricGrid = screen.getByText('活跃角色').closest('.team-v2-overview-metrics');
+    expect(metricGrid).toBeTruthy();
+    const card = screen.getByText('活跃角色').closest('.team-v2-overview-card');
+    expect(card).toBeTruthy();
+    expect(screen.getByText('关键指标 + 活动时间线，按会话联动。')).toBeTruthy();
+  });
+
+  it('选中普通会话时使用紧凑会话上下文条', () => {
+    runtimeReferenceState.overviewCards = [
+      {
+        icon: 'members',
+        id: 'active-members',
+        label: '活跃角色',
+        note: '参与层级 2 · 工作中成员 1 · 总成员 4',
+        value: '4',
+      },
+    ];
+
+    render(
+      <OverviewTab
+        selectedTeam={{
+          id: 'team-session-1',
+          status: 'running',
+          subtitle: '执行层正在同步文件变更',
+          title: '工作区布局融合',
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByLabelText('当前团队会话').classList.contains('team-v2-session-context-strip'),
+    ).toBe(true);
+    expect(screen.getByText('工作区布局融合')).toBeTruthy();
+    expect(screen.getByText('运行中').classList.contains('team-v2-session-context-status')).toBe(
+      true,
+    );
+  });
+
   it('选中共享会话时渲染共享概览而不是默认 runtime 时间线', () => {
     runtimeReferenceState.sharedSessions = [{ sessionId: 'shared-1', title: '共享会话 A' }];
     runtimeReferenceState.activeSharedSession = {

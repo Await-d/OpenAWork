@@ -34,10 +34,11 @@ function matchesScope(
   sessionScope: ReadonlySet<string> | null | undefined,
   sessionId: string | null | undefined,
 ): boolean {
-  if (isScopeEmpty(sessionScope)) {
+  const scope = sessionScope;
+  if (!scope) {
     return true;
   }
-  return typeof sessionId === 'string' && sessionId.length > 0 && sessionScope.has(sessionId);
+  return typeof sessionId === 'string' && sessionId.length > 0 && scope.has(sessionId);
 }
 
 function matchesHandoffScope(

@@ -1,0 +1,49 @@
+.review-panel-collapsed-rail {
+  align-items: center;
+  background: var(--bg-base);
+  border: 0;
+  border-left: 1px solid var(--border-subtle);
+  color: var(--fg-muted);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: var(--spacing-1);
+  height: 100%;
+  justify-content: center;
+  outline: 2px solid transparent;
+  outline-offset: -4px;
+  transition:
+    background var(--motion-micro),
+    color var(--motion-micro),
+    box-shadow var(--motion-micro);
+  width: 32px;
+}
+
+.review-panel-collapsed-rail:hover {
+  background: var(--bg-hover);
+  color: var(--fg-default);
+}
+
+.review-panel-collapsed-rail:active {
+  background: var(--bg-active);
+  color: var(--fg-strong);
+}
+
+.review-panel-collapsed-rail:focus-visible {
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+  outline-color: var(--accent);
+}
+
+.review-panel-collapsed-rail__icon {
+  flex-shrink: 0;
+  transform: rotate(180deg);
+}
+
+.review-panel-collapsed-rail__label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1;
+  writing-mode: vertical-rl;
+}

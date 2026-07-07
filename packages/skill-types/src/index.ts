@@ -6,6 +6,9 @@ export interface MCPServerRef {
   url?: string;
   command?: string;
   args?: string[];
+  cwd?: string;
+  env?: Record<string, string>;
+  required?: boolean;
 }
 
 export interface SkillPermission {

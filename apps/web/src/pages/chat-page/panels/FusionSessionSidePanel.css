@@ -1,0 +1,284 @@
+.fusion-docked-side-panel {
+  display: flex;
+  min-width: 280px;
+}
+
+.fusion-side-panel__scroll {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--spacing-3);
+  min-height: 0;
+  overflow: auto;
+  padding: var(--spacing-3);
+}
+
+.fusion-side-panel__section-head {
+  align-items: flex-start;
+  display: flex;
+  gap: var(--spacing-3);
+  justify-content: space-between;
+}
+
+.fusion-side-panel__eyebrow {
+  color: var(--fg-subtle);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.fusion-side-panel__title {
+  color: var(--fg-strong);
+  font-size: 13px;
+  font-weight: 700;
+  margin-top: var(--spacing-1);
+}
+
+.fusion-side-panel__ghost-button {
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--fg-default);
+  cursor: pointer;
+  flex-shrink: 0;
+  font-size: 10.5px;
+  font-weight: 650;
+  min-height: 26px;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  padding: 0 var(--spacing-2);
+  transition:
+    background var(--dur-micro) var(--ease-micro),
+    border-color var(--dur-micro) var(--ease-micro),
+    box-shadow var(--dur-micro) var(--ease-micro),
+    color var(--dur-micro) var(--ease-micro),
+    transform var(--dur-micro) var(--ease-micro);
+}
+
+.fusion-side-panel__ghost-button:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-emphasis);
+  color: var(--fg-strong);
+}
+
+.fusion-side-panel__ghost-button:active {
+  transform: translateY(1px);
+}
+
+.fusion-side-panel__ghost-button:focus-visible {
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+  outline-color: var(--accent);
+}
+
+.fusion-side-panel__meta-card,
+.fusion-side-panel__usage-card,
+.fusion-side-panel__stat-grid > div,
+.fusion-side-panel__empty,
+.fusion-side-panel__file-row {
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.fusion-side-panel__meta-card {
+  align-items: center;
+  display: grid;
+  gap: var(--spacing-1);
+  min-width: 0;
+  padding: var(--spacing-3);
+}
+
+.fusion-side-panel__meta-card span,
+.fusion-side-panel__stat-grid span {
+  color: var(--fg-subtle);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.fusion-side-panel__meta-card strong,
+.fusion-side-panel__stat-grid strong {
+  color: var(--fg-strong);
+  font-size: 12px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fusion-side-panel__file-list {
+  display: grid;
+  gap: var(--spacing-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.fusion-side-panel__file-row {
+  align-items: center;
+  display: grid;
+  gap: var(--spacing-2);
+  grid-template-columns: 24px minmax(0, 1fr);
+  padding: var(--spacing-2);
+}
+
+.fusion-side-panel__file-icon {
+  align-items: center;
+  background: var(--aux-subtle);
+  border: 1px solid var(--aux-border);
+  border-radius: var(--radius-sm);
+  color: var(--aux);
+  display: flex;
+  height: 24px;
+  justify-content: center;
+  width: 24px;
+}
+
+.fusion-side-panel__file-icon svg {
+  stroke-width: 1.75;
+}
+
+.fusion-side-panel__file-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fusion-side-panel__file-main span,
+.fusion-side-panel__file-main small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fusion-side-panel__file-main span {
+  color: var(--fg-strong);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.fusion-side-panel__file-main small {
+  color: var(--fg-muted);
+  font-size: 10px;
+}
+
+.fusion-side-panel__empty {
+  color: var(--fg-muted);
+  display: grid;
+  gap: var(--spacing-1);
+  line-height: 1.5;
+  padding: var(--spacing-4);
+}
+
+.fusion-side-panel__empty strong {
+  color: var(--fg-default);
+  font-size: 12px;
+}
+
+.fusion-side-panel__empty span {
+  font-size: 11px;
+}
+
+.fusion-side-panel__usage-card {
+  display: grid;
+  gap: var(--spacing-3);
+  padding: var(--spacing-3);
+}
+
+.fusion-side-panel__usage-head {
+  align-items: baseline;
+  display: flex;
+  gap: var(--spacing-3);
+  justify-content: space-between;
+}
+
+.fusion-side-panel__usage-head span {
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.fusion-side-panel__usage-head strong {
+  color: var(--fg-strong);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.fusion-side-panel__usage-meter {
+  background: var(--bg-base);
+  border-radius: var(--radius-pill);
+  height: 6px;
+  overflow: hidden;
+}
+
+.fusion-side-panel__usage-meter span {
+  background: var(--success);
+  border-radius: inherit;
+  display: block;
+  height: 100%;
+  transition:
+    background var(--dur-normal) var(--ease-normal),
+    width var(--dur-normal) var(--ease-normal);
+}
+
+.fusion-side-panel__usage-card[data-tone='warning'] .fusion-side-panel__usage-meter span {
+  background: var(--warning);
+}
+
+.fusion-side-panel__usage-card[data-tone='danger'] .fusion-side-panel__usage-meter span {
+  background: var(--danger);
+}
+
+.fusion-side-panel__usage-card[data-tone='muted'] .fusion-side-panel__usage-meter span {
+  background: var(--fg-subtle);
+}
+
+.fusion-side-panel__stat-grid {
+  display: grid;
+  gap: var(--spacing-2);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.fusion-side-panel__stat-grid > div {
+  display: grid;
+  gap: var(--spacing-1);
+  min-width: 0;
+  padding: var(--spacing-3);
+}
+
+.fusion-side-panel__review-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--spacing-3);
+  min-height: 0;
+  overflow: auto;
+  padding: var(--spacing-3);
+}
+
+.fusion-side-panel__review-split {
+  display: flex;
+  flex: 1;
+  gap: var(--spacing-3);
+  min-height: 0;
+}
+
+.fusion-side-panel__review-split .review-panel-file-list {
+  flex: 0 0 min(220px, 42%);
+  min-width: 0;
+}
+
+.fusion-side-panel__review-split .review-panel-diff-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+}
+
+@media (max-width: 1180px) {
+  .fusion-side-panel__review-split {
+    flex-direction: column;
+  }
+
+  .fusion-side-panel__review-split .review-panel-file-list {
+    flex: 0 0 auto;
+  }
+}

@@ -11,6 +11,8 @@ import {
 import type { DevtoolsSourceState } from '../state/settings-types.js';
 import { InlineFailureNotice } from '../devtools/devtools-workbench-primitives.js';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
+import type { DesktopControlActionResult, DesktopControlStatus } from '@openAwork/web-client';
+import { SystemDesktopControlCard } from './system-desktop-control-card.js';
 
 interface GitHubTriggerConfig {
   appId: string;
@@ -37,6 +39,9 @@ interface WorkspaceTabContentProps {
   setFilePatterns: React.Dispatch<React.SetStateAction<string[]>>;
   desktopAutomationEnabled: boolean;
   desktopAutomationSourceState: DevtoolsSourceState;
+  desktopControlEnabled: boolean;
+  desktopControlStatus: DesktopControlStatus | null;
+  desktopControlSourceState: DevtoolsSourceState;
   sshConnections: SSHConnectionEntry[];
   sshSourceState: DevtoolsSourceState;
   sshNodes: FileTreeNode[];
@@ -62,6 +67,13 @@ interface WorkspaceTabContentProps {
   onDesktopAutomationClick: (selector: string) => Promise<void>;
   onDesktopAutomationType: (selector: string, text: string) => Promise<void>;
   onDesktopAutomationScreenshot: () => Promise<string>;
+  onDesktopControlScreenshot: (delayMs?: number) => Promise<DesktopControlActionResult>;
+  onDesktopControlClick: (x: number, y: number) => Promise<DesktopControlActionResult>;
+  onDesktopControlType: (text: string) => Promise<DesktopControlActionResult>;
+  onDesktopControlKey: (key: string) => Promise<DesktopControlActionResult>;
+  onDesktopControlHotkey: (keys: readonly string[]) => Promise<DesktopControlActionResult>;
+  onDesktopControlScroll: (scrollX: number, scrollY: number) => Promise<DesktopControlActionResult>;
+  onDesktopControlWait: (ms?: number) => Promise<DesktopControlActionResult>;
 }
 
 const CARD: React.CSSProperties = {
@@ -285,6 +297,9 @@ export function WorkspaceTabContent({
   setFilePatterns,
   desktopAutomationEnabled,
   desktopAutomationSourceState,
+  desktopControlEnabled,
+  desktopControlStatus,
+  desktopControlSourceState,
   sshConnections,
   sshSourceState,
   sshNodes,
@@ -306,6 +321,13 @@ export function WorkspaceTabContent({
   onDesktopAutomationClick,
   onDesktopAutomationType,
   onDesktopAutomationScreenshot,
+  onDesktopControlScreenshot,
+  onDesktopControlClick,
+  onDesktopControlType,
+  onDesktopControlKey,
+  onDesktopControlHotkey,
+  onDesktopControlScroll,
+  onDesktopControlWait,
 }: WorkspaceTabContentProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -643,6 +665,19 @@ export function WorkspaceTabContent({
               </div>
             )}
           </div>
+
+          <SystemDesktopControlCard
+            desktopControlEnabled={desktopControlEnabled}
+            desktopControlStatus={desktopControlStatus}
+            desktopControlSourceState={desktopControlSourceState}
+            onDesktopControlScreenshot={onDesktopControlScreenshot}
+            onDesktopControlClick={onDesktopControlClick}
+            onDesktopControlType={onDesktopControlType}
+            onDesktopControlKey={onDesktopControlKey}
+            onDesktopControlHotkey={onDesktopControlHotkey}
+            onDesktopControlScroll={onDesktopControlScroll}
+            onDesktopControlWait={onDesktopControlWait}
+          />
 
           <div style={DASHED_CARD}>
             <div style={{ ...ROW, marginBottom: 8 }}>

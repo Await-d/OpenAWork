@@ -56,7 +56,10 @@ export interface SettingsClient {
   listMcpServers(token: string, options?: { signal?: AbortSignal }): Promise<unknown>;
   putMcpServers(token: string, payload: unknown): Promise<void>;
   retryMcpServer(token: string, serverId: string): Promise<unknown>;
-  getMcpStatus(token: string, options?: { signal?: AbortSignal }): Promise<unknown>;
+  getMcpStatus(
+    token: string,
+    options?: { includeTools?: boolean; signal?: AbortSignal },
+  ): Promise<unknown>;
   // 价格 / 文件 patterns / dev logs / workers / diagnostics
   getModelPrices(token: string, options?: { signal?: AbortSignal }): Promise<unknown>;
   getFilePatterns(token: string, options?: { signal?: AbortSignal }): Promise<unknown>;
@@ -339,10 +342,13 @@ export function createSettingsClient(baseUrl: string): SettingsClient {
     },
 
     async getMcpStatus(token, options) {
+      const params = new URLSearchParams();
+      if (options?.includeTools) params.set('includeTools', 'true');
+      const path = withQuery('/settings/mcp-status', params);
       return performSettingsRequest<unknown>({
         actionLabel: '读取 MCP 状态',
         request: () =>
-          fetchWithTimeout(`${baseUrl}/settings/mcp-status`, {
+          fetchWithTimeout(`${baseUrl}${path}`, {
             headers: authHeader(token),
             signal: options?.signal,
           }),

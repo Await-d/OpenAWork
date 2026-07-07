@@ -11,11 +11,13 @@ const mocks = vi.hoisted(() => ({
   requestWorkflowLlmCompletion: vi.fn(),
   resolveAuxiliaryLlmConfig: vi.fn(),
   resolveAuxiliaryLlmConfigCandidates: vi.fn(),
+  listMcpToolsForUser: vi.fn(),
   retryMcpConnectionForUser: vi.fn(),
 }));
 
 vi.mock('../../mcp/mcp-runtime.js', () => ({
   isMcpServerConnectedForUser: vi.fn(() => false),
+  listMcpToolsForUser: mocks.listMcpToolsForUser,
   loadConfiguredMcpServersForUser: vi.fn(() => []),
   retryMcpConnectionForUser: mocks.retryMcpConnectionForUser,
 }));
@@ -35,6 +37,7 @@ vi.mock('../../workspace/companion-settings.js', () => {
   return {
     buildCompanionFeatureState: vi.fn(() => ({ enabled: false })),
     buildCompanionIntroText: vi.fn(() => '温和、简洁地陪伴用户。'),
+    buildCompanionWorkspaceContextText: vi.fn(() => ''),
     companionSettingsUpdateSchema: z.object({}).passthrough(),
     getCompanionSettingsKey: vi.fn(() => 'companion'),
     loadCompanionSettingsForUser: vi.fn(() => ({
@@ -92,10 +95,12 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  dbModule.sqliteRun('DELETE FROM user_settings', []);
   dbModule.sqliteRun('DELETE FROM users', []);
   seedUser(USER_ID);
   mocks.resolveAuxiliaryLlmConfig.mockReset();
   mocks.resolveAuxiliaryLlmConfigCandidates.mockReset();
+  mocks.listMcpToolsForUser.mockReset();
   mocks.requestWorkflowLlmCompletion.mockReset();
   mocks.retryMcpConnectionForUser.mockReset();
 });
@@ -109,6 +114,124 @@ afterAll(async () => {
 });
 
 describe('settings routes error contracts', () => {
+  it('PUT /settings/plugins 保存 desktopControl 并由 GET 返回', async () => {
+    const app = await buildApp();
+    try {
+      const putResponse = await app.inject({
+        method: 'PUT',
+        url: '/settings/plugins',
+        headers: { authorization: bearer(app) },
+        payload: {
+          imageGeneration: { enabled: false, modelSource: 'global' },
+          desktopControl: { enabled: true },
+        },
+      });
+
+      expect(putResponse.statusCode).toBe(200);
+      expect(putResponse.json()).toEqual({
+        imageGeneration: { enabled: false, modelSource: 'global' },
+        desktopControl: { enabled: true },
+      });
+
+      const getResponse = await app.inject({
+        method: 'GET',
+        url: '/settings/plugins',
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(getResponse.statusCode).toBe(200);
+      expect(getResponse.json()).toEqual({
+        imageGeneration: { enabled: false, modelSource: 'global' },
+        desktopControl: { enabled: true },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('GET /settings/mcp-status?includeTools=true 返回工具明细与禁用工具', async () => {
+    mocks.listMcpToolsForUser.mockResolvedValue([
+      {
+        serverId: 'websearch',
+        serverName: 'websearch',
+        transport: 'sse',
+        enabled: true,
+        status: 'connected',
+        tools: [
+          {
+            name: 'web_search_exa',
+            description: 'Search with Exa',
+            inputSchema: { type: 'object', properties: {} },
+          },
+        ],
+      },
+    ]);
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/settings/mcp-status?includeTools=true',
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        servers: [
+          {
+            id: 'websearch',
+            builtin: true,
+            status: 'connected',
+            toolCount: 1,
+            tools: [{ name: 'web_search_exa' }],
+          },
+        ],
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('PUT /settings/mcp-servers 校验并归一化高级 MCP 字段', async () => {
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'PUT',
+        url: '/settings/mcp-servers',
+        headers: { authorization: bearer(app) },
+        payload: {
+          servers: [
+            {
+              id: 'websearch',
+              name: 'websearch',
+              transport: 'sse',
+              enabled: false,
+              disabledTools: ['web_search_exa', 'web_search_exa'],
+              headers: { 'x-api-key': 'secret' },
+              oauth: false,
+            },
+          ],
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        ok: true,
+        servers: [
+          {
+            id: 'websearch',
+            enabled: false,
+            disabledTools: ['web_search_exa'],
+            headers: { 'x-api-key': 'secret' },
+            oauth: false,
+          },
+        ],
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   it('POST /settings/mcp-servers/:id/retry 在缺少 serverId 时返回中文 400', async () => {
     const app = await buildApp();
     try {

@@ -708,4 +708,47 @@ describe('sessions route error contracts', () => {
       await app.close();
     }
   });
+
+  it('GET /sessions/:sessionId/status 返回当前会话 workflowRuntime 供轻量轮询同步', async () => {
+    seedSession({
+      activeWorkflowPlanPath: '.agentdocs/workflow/260706-lazycodex-native-workflow.md',
+      activeWorkflowPlanProgress: '2/8',
+      activeWorkflowPlanTitle: 'LazyCodex/OmO 原生化接入工作流',
+      workflowRuntimeEvidenceArtifactRefs: ['artifact-1'],
+      workflowRuntimeEvidenceStatus: 'available',
+    });
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/sessions/${SESSION_ID}/status`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const status = response.json().status as {
+        workflowRuntime?: {
+          activePlan?: { path?: string; progress?: string; title?: string };
+          evidence: { artifactRefs: string[]; status: string };
+          mode: string;
+        };
+      };
+
+      expect(status.workflowRuntime).toEqual({
+        mode: 'execution',
+        activePlan: {
+          path: '.agentdocs/workflow/260706-lazycodex-native-workflow.md',
+          progress: '2/8',
+          title: 'LazyCodex/OmO 原生化接入工作流',
+        },
+        evidence: {
+          artifactRefs: ['artifact-1'],
+          status: 'available',
+        },
+      });
+    } finally {
+      await app.close();
+    }
+  });
 });

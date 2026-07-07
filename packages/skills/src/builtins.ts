@@ -5,12 +5,6 @@ export interface BuiltinSkillDef {
   executor: SkillExecutor;
 }
 
-// ---------------------------------------------------------------------------
-// oh-my-opencode 移植的 prompt-based skill（descriptionForModel 自身就是
-// SKILL.md 全文）。OpenAWork 仅保留 `git-master` 一项 —— agent-browser /
-// dev-browser / frontend-ui-ux 与原生工具表不匹配或重复，已移除。
-// ---------------------------------------------------------------------------
-
 const gitMasterManifest: SkillManifest = {
   apiVersion: 'agent-skill/v1',
   id: 'com.openAwork.builtin.git-master',
@@ -93,6 +87,104 @@ Quick reference:
   lifecycle: { activation: 'on-demand' },
 };
 
+function promptSkill(input: {
+  name: string;
+  displayName: string;
+  description: string;
+  descriptionForModel: string;
+  capabilities: string[];
+  permissions?: SkillManifest['permissions'];
+}): SkillManifest {
+  return {
+    apiVersion: 'agent-skill/v1',
+    id: `com.openAwork.builtin.${input.name}`,
+    name: input.name,
+    displayName: input.displayName,
+    version: '1.0.0',
+    description: input.description,
+    descriptionForModel: input.descriptionForModel,
+    capabilities: input.capabilities,
+    permissions: input.permissions ?? [{ type: 'filesystem', scope: '**', required: false }],
+    lifecycle: { activation: 'on-demand' },
+  };
+}
+
+const reviewWorkManifest = promptSkill({
+  name: 'review-work',
+  displayName: 'review-work',
+  description:
+    'Post-implementation review: verify goal fit, code quality, security, tests, and observable behavior before claiming done.',
+  capabilities: ['review.goal', 'review.code-quality', 'review.security', 'review.qa'],
+  descriptionForModel: `Review Work is used after a meaningful implementation change.
+
+Review the actual diff and the user goal before approving. Check: requested behavior, type boundaries, error handling, security-sensitive inputs, persistence side effects, test coverage, and whether the feature was exercised through its real surface. Findings come first, ordered by severity with file and line references. If no issue is found, say that clearly and name remaining risk or test gaps. Do not invent verification; report only commands, screenshots, or runtime behavior that actually happened in OpenAWork.`,
+});
+
+const programmingManifest = promptSkill({
+  name: 'programming',
+  displayName: 'programming',
+  description:
+    'Strict TypeScript/Python/Rust/Go engineering guidance for surgical, tested, type-safe changes.',
+  capabilities: ['code.implementation', 'code.type-safety', 'code.testing'],
+  descriptionForModel: `Programming is active for production code changes.
+
+Prefer the smallest correct change that follows the existing module boundary. Read the relevant code first, reuse local helpers, and make illegal states unrepresentable with strict types. Do not use any, TypeScript suppressions, empty catch blocks, or broad rewrites. Add tests when behavior changes or a regression is subtle. After editing, run the narrowest meaningful test/typecheck commands and report exact failures instead of hiding them.`,
+});
+
+const frontendManifest = promptSkill({
+  name: 'frontend',
+  displayName: 'frontend',
+  description:
+    'OpenAWork frontend design and implementation guidance for responsive, token-driven UI work.',
+  capabilities: ['frontend.react', 'frontend.design-system', 'frontend.accessibility'],
+  descriptionForModel: `Frontend is active for Web UI work.
+
+Use the existing OpenAWork design tokens and components before adding new styling. Build the real workflow surface, not a marketing placeholder. Include loading, empty, error, hover, active, and focus states. Keep layouts responsive down to 375px, avoid hardcoded colors, and avoid nested card-heavy compositions. All gateway access from apps/packages must go through @openAwork/web-client unless the target is an external third-party API.`,
+});
+
+const visualQaManifest = promptSkill({
+  name: 'visual-qa',
+  displayName: 'visual-qa',
+  description:
+    'Visual QA checklist for web UI changes: screenshots, responsive checks, overlap, contrast, and state fidelity.',
+  capabilities: ['qa.visual', 'qa.responsive', 'qa.accessibility'],
+  descriptionForModel: `Visual QA is active after UI changes.
+
+Exercise the changed page or component in a browser-like surface and capture evidence. Check desktop and narrow mobile widths, text clipping, overlapping controls, focus rings, contrast, disabled/loading/empty/error states, and whether dynamic data changes resize fixed controls. If automated screenshot tooling is unavailable, state that plainly and run the closest component or browser test available.`,
+});
+
+const lspManifest = promptSkill({
+  name: 'lsp',
+  displayName: 'lsp',
+  description: 'Language-server diagnostics, definitions, references, and rename-safety guidance.',
+  capabilities: ['lsp.diagnostics', 'lsp.references', 'lsp.rename'],
+  descriptionForModel: `LSP is active when diagnostics or symbol safety matter.
+
+Use language-server diagnostics to validate changed files when available. Prefer definitions and references over text search for rename-sensitive work. Treat stale diagnostics as a signal to rerun typecheck or reopen the changed file, not as proof of success. Never suppress diagnostics with comments; fix the underlying type, import, or contract.`,
+});
+
+const astGrepManifest = promptSkill({
+  name: 'ast-grep',
+  displayName: 'ast-grep',
+  description:
+    'AST-aware search/rewrite guidance for structural code queries and deterministic codemods.',
+  capabilities: ['code.ast-search', 'code.codemod'],
+  descriptionForModel: `ast-grep is active for structural code search or codemods.
+
+Use AST-shaped queries when the target is syntax rather than plain text: function calls, imports, JSX attributes, class members, empty catch blocks, missing awaits, or unsafe casts. Keep rewrites deterministic and scoped, then run formatter, typecheck, and targeted tests. Use plain text search for comments, filenames, string contents, and quick literal lookup.`,
+});
+
+const rulesManifest = promptSkill({
+  name: 'rules',
+  displayName: 'rules',
+  description:
+    'Project and workspace rules guidance: discover applicable instructions and obey the deepest matching scope.',
+  capabilities: ['rules.discovery', 'rules.compliance'],
+  descriptionForModel: `Rules is active when project instructions, AGENTS files, or scoped conventions affect work.
+
+Before editing, identify the rules that apply to the target path and follow the most specific scope. User instructions override repository defaults, but safety and type-safety constraints remain binding. Do not edit generated or read-only evidence directories unless the task explicitly targets them. If rules conflict, state the conflict and choose the narrower or newer instruction.`,
+});
+
 const noopExecutor: SkillExecutor = async (): Promise<ToolResult> => {
   return {
     content: 'This is a prompt-based skill. Content is injected via descriptionForModel.',
@@ -101,8 +193,12 @@ const noopExecutor: SkillExecutor = async (): Promise<ToolResult> => {
 };
 
 export const BUILTIN_SKILLS: BuiltinSkillDef[] = [
-  // OpenAWork 仅保留 git-master 这一个 prompt-based 内置 skill。
-  // file-read / clipboard-read / web-search 等已被原生 tool（read /
-  // workspace_read_file / web_search）取代，这里不再重复声明。
   { manifest: gitMasterManifest, executor: noopExecutor },
+  { manifest: reviewWorkManifest, executor: noopExecutor },
+  { manifest: programmingManifest, executor: noopExecutor },
+  { manifest: frontendManifest, executor: noopExecutor },
+  { manifest: visualQaManifest, executor: noopExecutor },
+  { manifest: lspManifest, executor: noopExecutor },
+  { manifest: astGrepManifest, executor: noopExecutor },
+  { manifest: rulesManifest, executor: noopExecutor },
 ];

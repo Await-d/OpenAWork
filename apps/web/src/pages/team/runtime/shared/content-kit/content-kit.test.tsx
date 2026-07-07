@@ -5,7 +5,7 @@
  * 覆盖：
  *   - StatCard：值/标签渲染、可点击下钻、active 态 aria-pressed
  *   - MiniBar：percent clamp（>100 / <0）
- *   - EmptyState：标题 + 说明渲染
+ *   - EmptyState：标题 + 说明渲染、SVG 图标优先级
  *   - Sparkline：空数组与正常数组都能渲染出 <svg>
  */
 
@@ -64,6 +64,23 @@ describe('content-kit · EmptyState', () => {
     render(<EmptyState title="暂无用量数据" description="等待后端接入" />);
     expect(screen.getByText('暂无用量数据')).toBeTruthy();
     expect(screen.getByText('等待后端接入')).toBeTruthy();
+  });
+
+  it('优先渲染传入的 SVG 图标', () => {
+    const { container } = render(
+      <EmptyState
+        icon={
+          <svg data-testid="empty-state-icon" viewBox="0 0 20 20">
+            <path d="M4 10h12" />
+          </svg>
+        }
+        title="暂无工具调用数据"
+      />,
+    );
+
+    expect(screen.getByTestId('empty-state-icon')).toBeTruthy();
+    expect(screen.getByText('暂无工具调用数据')).toBeTruthy();
+    expect(container.textContent).not.toContain('🗂️');
   });
 });
 

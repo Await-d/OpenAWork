@@ -1,5 +1,5 @@
 import { startTransition, useCallback } from 'react';
-import type { UpstreamStreamSummary } from '@openAwork/shared';
+import type { UpstreamStreamSummary, WorkflowRuntimeState } from '@openAwork/shared';
 import type {
   Session,
   SessionActiveStream,
@@ -51,6 +51,7 @@ export interface SessionSnapshotLoaderSetters {
   ) => void;
   setChildSessions: (value: Session[] | ((prev: Session[]) => Session[])) => void;
   setSessionTasks: (value: SessionTask[] | ((prev: SessionTask[]) => SessionTask[])) => void;
+  setWorkflowRuntime: (value: WorkflowRuntimeState | null) => void;
   setPendingPermissions: (
     value:
       | PendingPermissionRequest[]
@@ -112,6 +113,7 @@ export function useSessionSnapshotLoader(
     setSessionTodos,
     setChildSessions,
     setSessionTasks,
+    setWorkflowRuntime,
     setPendingPermissions,
     setPendingQuestions,
     setSessionStateStatus,
@@ -136,6 +138,7 @@ export function useSessionSnapshotLoader(
       setPendingPermissions(pendingInteractions.pendingPermissions);
       setPendingQuestions(pendingInteractions.pendingQuestions);
       setRecoveryActiveStream(status.activeStream);
+      setWorkflowRuntime(status.workflowRuntime);
     },
     [
       gatewayUrl,
@@ -148,6 +151,7 @@ export function useSessionSnapshotLoader(
       setPendingPermissions,
       setPendingQuestions,
       setRecoveryActiveStream,
+      setWorkflowRuntime,
     ],
   );
 
@@ -232,6 +236,7 @@ export function useSessionSnapshotLoader(
         setSessionTodos(prepared.sessionTodos);
         setChildSessions(recovery.children);
         setSessionTasks(recovery.tasks);
+        setWorkflowRuntime(prepared.session.workflowRuntime ?? null);
         setPendingPermissions(prepared.pendingPermissions);
         setPendingQuestions(prepared.pendingQuestions);
         setSessionStateStatus(prepared.sessionStateStatus);
@@ -258,6 +263,7 @@ export function useSessionSnapshotLoader(
       setSessionTodos,
       setChildSessions,
       setSessionTasks,
+      setWorkflowRuntime,
       setPendingPermissions,
       setPendingQuestions,
       setSessionStateStatus,

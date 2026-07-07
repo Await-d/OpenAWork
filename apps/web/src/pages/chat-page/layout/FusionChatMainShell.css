@@ -1,0 +1,99 @@
+.fusion-chat-main-shell {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.fusion-chat-main-shell--fusion {
+  background: var(--bg-base);
+}
+
+.fusion-chat-main-shell--classic,
+.fusion-chat-main-shell--classic .fusion-chat-main-shell__workbench-row {
+  display: contents;
+}
+
+.fusion-chat-main-shell__workbench-row {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.fusion-chat-main-shell__split {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.fusion-chat-main-shell__split--classic {
+  background: var(--bg-base);
+}
+
+.fusion-chat-main-shell__split--fusion {
+  background: transparent;
+}
+
+.fusion-chat-main-shell__split--with-editor {
+  gap: var(--spacing-2);
+}
+
+.fusion-chat-main-shell__conversation-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.fusion-chat-main-shell__conversation-pane--fusion {
+  background: var(--bg-base);
+  border-right: 1px solid var(--border-subtle);
+  box-shadow: none;
+}
+
+.fusion-chat-main-shell__conversation-pane--classic {
+  background: transparent;
+}
+
+.fusion-chat-main-shell__conversation-pane--editor {
+  flex: 0 0 auto;
+}
+
+.fusion-chat-main-shell__conversation-pane--docked {
+  flex: 0 0 clamp(520px, 44vw, 600px);
+}
+
+.fusion-chat-main-shell__conversation-pane--fluid {
+  flex: 1 1 auto;
+}
+
+.fusion-chat-main-shell__conversation-frame {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.fusion-chat-main-shell__conversation-frame--fusion {
+  background: var(--bg-surface);
+  box-shadow: inset -1px 0 0 var(--border-invisible);
+}
+
+.fusion-chat-main-shell__conversation-frame--classic {
+  display: contents;
+}
+
+.fusion-chat-main-shell__terminal {
+  flex-shrink: 0;
+  min-width: 0;
+}

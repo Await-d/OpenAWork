@@ -56,6 +56,7 @@ import {
 import { dispatchClaudeCodeTool } from '../claude-code/claude-code-tool-dispatch.js';
 import { codesearchToolDefinition } from './codesearch-tools.js';
 import { sqliteAll, sqliteGet, sqliteRun, WORKSPACE_ROOT } from '../infra/db.js';
+import { isTeamRoleLayer } from '../handoff/capability/apply-team-layer-tools.js';
 import {
   buildBackgroundCancelAllMessage,
   buildBackgroundCancelSingleMessage,
@@ -67,6 +68,8 @@ import {
   extractLatestDelegatedSessionMessage,
 } from '../task/delegated-task-display.js';
 import { desktopAutomationToolDefinition, runDesktopAutomationTool } from './desktop-automation.js';
+import { desktopControlToolDefinition, runDesktopControlTool } from './desktop-control.js';
+import { isDesktopControlPluginEnabledForUser } from './plugin-tool-settings.js';
 import type { DynamicToolEntry } from './dynamic-tool-loader.js';
 import { dynamicEntryToToolDefinition } from './dynamic-tool-loader.js';
 import { createEditTool } from './edit-tools.js';
@@ -430,6 +433,7 @@ const TOOL_WHITELIST = new Set<string>([
   'mcp_list_tools',
   'mcp_call',
   desktopAutomationToolDefinition.name,
+  desktopControlToolDefinition.name,
   'generate_image',
   repoCloneToolDefinition.name,
   repoOverviewToolDefinition.name,
@@ -1246,17 +1250,30 @@ function readTaskRequestedSkills(metadata: Record<string, unknown>): string[] | 
  * 用于 mcp_list_tools 包装工具路径的按需过滤（flat 模式下该包装通常隐藏，
  * 但 flat 关闭时仍需尊重白名单）。
  */
-function readSessionRequestedMcpServers(sessionId: string): string[] {
+function readSessionMcpScope(sessionId: string): {
+  readonly isTeamSession: boolean;
+  readonly requestedMcpServers: readonly string[];
+} {
   const row = sqliteGet<{ metadata_json: string }>(
     'SELECT metadata_json FROM sessions WHERE id = ? LIMIT 1',
     [sessionId],
   );
-  if (!row) return [];
+  if (!row) return { isTeamSession: false, requestedMcpServers: [] };
   const metadata = parseSessionMetadataJson(row.metadata_json ?? '{}');
   const candidate = metadata['requestedMcpServers'];
-  return Array.isArray(candidate)
+  const requestedMcpServers = Array.isArray(candidate)
     ? candidate.filter((v): v is string => typeof v === 'string' && v.length > 0)
     : [];
+  const roleInstance = metadata['teamRoleInstance'];
+  const nestedRoleLayer =
+    typeof roleInstance === 'object' && roleInstance !== null && 'roleLayer' in roleInstance
+      ? roleInstance.roleLayer
+      : undefined;
+  const roleLayer = typeof metadata.roleLayer === 'string' ? metadata.roleLayer : nestedRoleLayer;
+  return {
+    isTeamSession: typeof roleLayer === 'string' && isTeamRoleLayer(roleLayer),
+    requestedMcpServers,
+  };
 }
 
 function readTaskCategory(metadata: Record<string, unknown>): string | undefined {
@@ -1805,6 +1822,28 @@ function buildPermissionRequestContext(
         always: ['*'],
       };
     }
+    case 'desktop_control': {
+      const action =
+        typeof rawInput.action === 'string' ? rawInput.action.trim().toLowerCase() : '';
+      if (!action) {
+        return null;
+      }
+      const target =
+        typeof rawInput.x === 'number' && typeof rawInput.y === 'number'
+          ? `${rawInput.x},${rawInput.y}`
+          : typeof rawInput.key === 'string'
+            ? rawInput.key.trim()
+            : Array.isArray(rawInput.keys)
+              ? rawInput.keys.join('+')
+              : '';
+      return {
+        scope: target ? `${action}:${target}` : action,
+        reason: '需要控制本机系统桌面',
+        riskLevel: 'high',
+        previewAction: target ? `系统桌面控制 ${action}: ${target}` : `系统桌面控制 ${action}`,
+        always: ['*'],
+      };
+    }
     default: {
       // Generic fallback: tools without explicit context builders can still
       // request permission when configured via workspace rules.
@@ -2008,10 +2047,14 @@ async function executeGatewayManagedToolImpl(
 
     if (request.toolName === 'mcp_list_tools') {
       const { serverId } = parseMcpListToolsRawInput(rawInput);
-      const allowedServerIds = readSessionRequestedMcpServers(sessionId);
+      const mcpScope = readSessionMcpScope(sessionId);
+      const mcpFilter =
+        mcpScope.requestedMcpServers.length > 0 || mcpScope.isTeamSession
+          ? { allowedServerIds: [...mcpScope.requestedMcpServers] }
+          : {};
       const output = await listMcpToolsForSession(sessionId, {
         ...(serverId ? { serverId } : {}),
-        ...(allowedServerIds.length > 0 ? { allowedServerIds } : {}),
+        ...mcpFilter,
       });
       return {
         toolCallId: request.toolCallId,
@@ -2038,6 +2081,27 @@ async function executeGatewayManagedToolImpl(
         toolCallId: request.toolCallId,
         toolName: request.toolName,
         output: await runDesktopAutomationTool(parsed.data),
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === desktopControlToolDefinition.name) {
+      const parsed = desktopControlToolDefinition.inputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatToolInputValidationOutput(request.toolName, parsed.error.issues),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: await runDesktopControlTool(parsed.data),
         isError: false,
         durationMs: 0,
       };
@@ -5791,6 +5855,33 @@ export class ToolSandbox {
         durationMs: result.durationMs ?? null,
       });
       return result;
+    }
+
+    if (normalizedRequest.toolName === desktopControlToolDefinition.name) {
+      const userId = getSessionOwnerUserId(sessionId);
+      const output = userId
+        ? '系统桌面控制插件未启用。请在设置 → 插件中启用后再使用 desktop_control。'
+        : `Session owner not found for session ${sessionId}`;
+      if (!userId || !isDesktopControlPluginEnabledForUser(userId)) {
+        const result: ToolCallResult = {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output,
+          isError: true,
+          durationMs: 0,
+        };
+        writeAuditLog({
+          sessionId,
+          category: 'tool',
+          sourceName: request.toolName,
+          requestId: request.toolCallId,
+          input: request.rawInput,
+          output: result.output,
+          isError: result.isError ?? false,
+          durationMs: result.durationMs ?? null,
+        });
+        return result;
+      }
     }
 
     if (

@@ -50,6 +50,11 @@ import { skillMcpToolDefinition } from '../skill/skill-mcp-tools.js';
 import { lookAtToolDefinition } from './look-at-tools.js';
 import { generateImageToolDefinition } from './image-generation-tool.js';
 import { desktopAutomationToolDefinition } from './desktop-automation.js';
+import { desktopControlToolDefinition } from './desktop-control.js';
+import {
+  buildDesktopAutomationParameters,
+  buildDesktopControlParameters,
+} from './desktop-tool-parameters.js';
 import {
   lspCallHierarchyToolDefinition,
   lspFindReferencesToolDefinition,
@@ -178,6 +183,7 @@ const MODEL_VISIBLE_GATEWAY_TOOLS = [
   skillMcpToolDefinition,
   lookAtToolDefinition,
   desktopAutomationToolDefinition,
+  desktopControlToolDefinition,
   workspaceReviewStatusTool,
   workspaceReviewDiffTool,
   writeTool,
@@ -683,20 +689,9 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
         additionalProperties: false,
       };
     case 'desktop_automation':
-      return {
-        type: 'object',
-        properties: {
-          action: {
-            type: 'string',
-            enum: ['status', 'start', 'goto', 'click', 'type', 'screenshot'],
-          },
-          url: { type: 'string' },
-          selector: { type: 'string' },
-          text: { type: 'string' },
-        },
-        required: ['action'],
-        additionalProperties: false,
-      };
+      return buildDesktopAutomationParameters();
+    case 'desktop_control':
+      return buildDesktopControlParameters();
     case 'list':
       return {
         type: 'object',

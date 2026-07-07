@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import type { TeamSessionShareRecord } from '@openAwork/web-client';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
 import { TabContainer } from '../TabContainer.js';
+import { TeamGovernanceWorkbenchHeader } from './TeamGovernanceWorkbenchHeader.js';
 
 const PERMISSION_LABELS: Record<TeamSessionShareRecord['permission'], string> = {
   view: '只读',
@@ -199,6 +200,51 @@ export function SharesView() {
   return (
     <TabContainer title="共享 / 协作" subtitle="管理我对外共享的会话以及别人共享给我的会话。">
       <div style={CONTAINER_STYLE}>
+        <TeamGovernanceWorkbenchHeader
+          area="shares"
+          eyebrow="Governance · Shares"
+          title="治理工作台摘要"
+          description="把共享出口、共享入口、可共享会话和写入权限放在同一层，先判断协作边界，再处理成员权限。"
+          metrics={[
+            {
+              label: '我共享的',
+              value: totalOutgoing,
+              detail: `${groupedOutgoing.size} 个会话`,
+              tone: totalOutgoing > 0 ? 'aux' : 'muted',
+            },
+            {
+              label: '共享给我的',
+              value: totalIncoming,
+              detail: '外部协作入口',
+              tone: totalIncoming > 0 ? 'accent' : 'muted',
+            },
+            {
+              label: '可共享会话',
+              value: shareableSessions.length,
+              detail: `${availableMembersForNewShare.length} 个可选成员`,
+              tone: shareableSessions.length > 0 ? 'success' : 'warning',
+            },
+            {
+              label: '权限维护',
+              value: canManageSessionEntries ? '可写' : '只读',
+              detail: canManageSessionEntries ? '允许新建和调整' : '只能查看共享关系',
+              tone: canManageSessionEntries ? 'success' : 'warning',
+            },
+          ]}
+          signals={[
+            {
+              label: '当前视图',
+              value: tab === 'outgoing' ? '我共享的' : '共享给我的',
+              tone: tab === 'outgoing' ? 'aux' : 'accent',
+            },
+            {
+              label: '详情加载',
+              value: sharedSessionLoading ? '加载中' : selectedSharedSession ? '已选中' : '未选择',
+              tone: sharedSessionLoading ? 'warning' : selectedSharedSession ? 'success' : 'muted',
+            },
+          ]}
+        />
+
         <div
           aria-label="新建共享表单"
           data-testid="shares-create-form"

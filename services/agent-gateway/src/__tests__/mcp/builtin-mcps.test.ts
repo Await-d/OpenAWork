@@ -2,8 +2,8 @@
  * Tests for `builtin-mcps.ts`：内置远程 MCP 注册与"用户配置覆盖"
  * 合并语义。覆盖：
  *
- *  1. **默认产出**：在零环境变量下也输出 websearch + grep_app 两条
- *     稳定的远程 server 配置。
+ *  1. **默认产出**：在零环境变量下输出 websearch + grep_app 远程 MCP，
+ *     以及 codegraph / git_bash / lsp 三条内置虚拟 MCP。
  *  2. **EXA_API_KEY 注入**：`process.env.EXA_API_KEY` 存在时，会被
  *     当作 `x-api-key` header 写到 websearch；不存在时不挂任何
  *     header（确保不污染匿名访问）。
@@ -25,9 +25,9 @@ import {
 import type { ConfiguredMCPServer } from '../../mcp/mcp-runtime.js';
 
 describe('buildBuiltinMcpServers', () => {
-  it('exposes websearch + grep_app with stable remote URLs by default', () => {
+  it('exposes remote and virtual builtin MCP servers by default', () => {
     const out = buildBuiltinMcpServers({ env: {} });
-    expect(out).toHaveLength(2);
+    expect(out).toHaveLength(5);
 
     const websearch = out.find((server) => server.id === 'websearch');
     expect(websearch).toMatchObject({
@@ -36,6 +36,7 @@ describe('buildBuiltinMcpServers', () => {
       transport: 'sse',
       url: 'https://mcp.exa.ai/mcp?tools=web_search_exa',
       enabled: true,
+      builtin: true,
     });
     // 没传 EXA_API_KEY 时不挂 header，避免给匿名访问加奇怪头。
     expect(websearch?.headers).toBeUndefined();
@@ -47,8 +48,33 @@ describe('buildBuiltinMcpServers', () => {
       transport: 'sse',
       url: 'https://mcp.grep.app',
       enabled: true,
+      builtin: true,
     });
     expect(grepApp?.headers).toBeUndefined();
+
+    expect(out.find((server) => server.id === 'codegraph')).toMatchObject({
+      id: 'codegraph',
+      transport: 'stdio',
+      command: 'openawork-virtual-codegraph',
+      required: false,
+      builtin: true,
+      enabled: true,
+    });
+    expect(out.find((server) => server.id === 'git_bash')).toMatchObject({
+      id: 'git_bash',
+      transport: 'stdio',
+      command: 'openawork-virtual-git-bash',
+      required: false,
+      builtin: true,
+    });
+    expect(out.find((server) => server.id === 'lsp')).toMatchObject({
+      id: 'lsp',
+      transport: 'stdio',
+      command: 'openawork-virtual-lsp',
+      required: false,
+      builtin: true,
+      enabled: true,
+    });
   });
 
   it('injects EXA_API_KEY header when present in env', () => {
@@ -75,7 +101,10 @@ describe('mergeBuiltinAndConfiguredMcps', () => {
     const ids = merged.map((server) => server.id);
     expect(ids).toContain('websearch');
     expect(ids).toContain('grep_app');
-    expect(merged.every((server) => server.enabled === true)).toBe(true);
+    expect(merged.find((server) => server.id === 'websearch')?.enabled).toBe(true);
+    expect(merged.find((server) => server.id === 'grep_app')?.enabled).toBe(true);
+    expect(merged.find((server) => server.id === 'codegraph')?.enabled).toBe(true);
+    expect(merged.find((server) => server.id === 'lsp')?.enabled).toBe(true);
   });
 
   it('user config with the same id overrides the builtin entry entirely', () => {
@@ -98,6 +127,7 @@ describe('mergeBuiltinAndConfiguredMcps', () => {
 
     // 同时 grep_app 内置项应原样保留。
     expect(merged.some((server) => server.id === 'grep_app')).toBe(true);
+    expect(merged.some((server) => server.id === 'codegraph')).toBe(true);
   });
 
   it('appends user configs that do not collide with any builtin id', () => {
@@ -111,7 +141,14 @@ describe('mergeBuiltinAndConfiguredMcps', () => {
 
     const merged = mergeBuiltinAndConfiguredMcps([customServer]);
     expect(merged.map((server) => server.id)).toEqual(
-      expect.arrayContaining(['websearch', 'grep_app', 'my-custom-mcp']),
+      expect.arrayContaining([
+        'websearch',
+        'grep_app',
+        'codegraph',
+        'git_bash',
+        'lsp',
+        'my-custom-mcp',
+      ]),
     );
     // 用户自定义项排在内置项之后（顺序：内置在前）。
     const customIndex = merged.findIndex((server) => server.id === 'my-custom-mcp');

@@ -10,6 +10,7 @@ import { CK_GAP } from './content-kit-tokens.js';
 
 export interface MetricGridProps {
   children: ReactNode;
+  className?: string;
   /** 每列最小宽度，默认 160。 */
   minColumnWidth?: number;
   /** 列填充策略，默认 auto-fill（不拉伸最后一行）。 */
@@ -20,6 +21,7 @@ export interface MetricGridProps {
 
 export function MetricGrid({
   children,
+  className,
   minColumnWidth = 160,
   fill = 'auto-fill',
   gap = CK_GAP,
@@ -27,6 +29,7 @@ export function MetricGrid({
 }: MetricGridProps) {
   return (
     <div
+      className={className}
       style={{
         display: 'grid',
         gap,

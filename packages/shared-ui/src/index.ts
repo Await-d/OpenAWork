@@ -239,12 +239,19 @@ export { CommandPalette } from './misc/CommandPalette.js';
 export type { CommandPaletteProps, CommandItem } from './misc/CommandPalette.js';
 export { tokens } from './tokens.js';
 export type { Tokens } from './tokens.js';
-export { ShellCard, RailButton, PanelSection, StatusPill } from './primitives/index.js';
+export {
+  ShellCard,
+  RailButton,
+  PanelSection,
+  StatusPill,
+  InlineEditor,
+} from './primitives/index.js';
 export type {
   ShellCardProps,
   RailButtonProps,
   PanelSectionProps,
   StatusPillProps,
+  InlineEditorProps,
 } from './primitives/index.js';
 
 export { DeveloperModePanel } from './agent/DeveloperModePanel.js';

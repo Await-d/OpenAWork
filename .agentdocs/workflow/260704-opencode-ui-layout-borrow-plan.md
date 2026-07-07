@@ -12,7 +12,7 @@
 > - `apps/web/src/pages/chat-page/ChatPage.tsx`（当前会话页）
 > - `.agentdocs/workflow/260627-sidebar-layout-refactor-plan.md`（上一轮侧边栏改造记录）
 >
-> 状态：**待实施**
+> 状态：**进行中（2026-07-04 已完成 W1/W2，W5 基础子集已落）**
 
 ---
 
@@ -163,23 +163,23 @@ interface TabState {
 
 ### 3.3 实施步骤
 
-- [ ] T-W1-01: uiState store 新增 TabState 切片（tabs / activeTabId / addSessionTab / addDraftTab / closeTab / selectTab / reorderTabs / updateTabTitle）→ `stores/ui/uiState.ts`
-- [ ] T-W1-02: 新建 `TitlebarTabStrip.tsx` 组件（Home 按钮 + 标签列表 + 新建按钮 + 溢出滚动）→ `components/layout/TitlebarTabStrip.tsx`
-- [ ] T-W1-03: 新建 `TitlebarTab.tsx` 单标签组件（标题截断 + 关闭按钮 + 拖拽手柄 + 活跃高亮）→ `components/layout/TitlebarTab.tsx`
-- [ ] T-W1-04: Layout.tsx 顶部插入 TitlebarTabStrip（36px 高，与现有 Titlebar 区域合并）→ `components/Layout.tsx`
-- [ ] T-W1-05: ChatPage 监听标签切换，按 activeTab.sessionId 加载对应会话 → `pages/chat-page/ChatPage.tsx`
-- [ ] T-W1-06: 路由集成：`/chat/:sessionId` 时自动 addSessionTab；标签切换时同步路由 → `components/Layout.tsx`
-- [ ] T-W1-07: 拖拽排序实现（@dnd-kit/sortable）→ `components/layout/TitlebarTabStrip.tsx`
-- [ ] T-W1-08: 快捷键注册（Ctrl+T/W/Tab/数字键）→ `components/Layout.tsx`
+- [x] T-W1-01: uiState store 新增 TabState 切片（tabs / activeTabId / addSessionTab / addDraftTab / closeTab / selectTab / reorderTabs / updateTabTitle）→ `stores/ui/uiState.ts`
+- [x] T-W1-02: 新建 `TitlebarTabStrip.tsx` 组件（Home 按钮 + 标签列表 + 新建按钮 + 溢出滚动）→ `components/layout/TitlebarTabStrip.tsx`
+- [x] T-W1-03: 新建 `TitlebarTab.tsx` 单标签组件（标题截断 + 关闭按钮 + 拖拽手柄 + 活跃高亮）→ `components/layout/TitlebarTab.tsx`
+- [x] T-W1-04: Layout.tsx 顶部插入 TitlebarTabStrip（36px 高，与现有 Titlebar 区域合并）→ `components/Layout.tsx`
+- [x] T-W1-05: ChatPage 监听标签切换，按 activeTab.sessionId 加载对应会话 → `pages/chat-page/ChatPage.tsx`
+- [x] T-W1-06: 路由集成：`/chat/:sessionId` 时自动 addSessionTab；标签切换时同步路由 → `components/Layout.tsx`
+- [x] T-W1-07: 拖拽排序实现（@dnd-kit/sortable）→ `components/layout/TitlebarTabStrip.tsx`
+- [x] T-W1-08: 快捷键注册（Ctrl+T/W/Tab/数字键）→ `components/Layout.tsx`
 
 ### 3.4 验收标准
 
-- [ ] 顶部标签页栏正确渲染，高度 36px
-- [ ] 打开会话自动新增标签，关闭标签自动切换相邻标签
-- [ ] 标签可拖拽排序
-- [ ] 快捷键 Ctrl+T/W/Tab/数字键正常工作
-- [ ] 标签溢出时横向滚动正常
-- [ ] `tsc --noEmit` 零错误
+- [x] 顶部标签页栏正确渲染，高度 36px
+- [x] 打开会话自动新增标签，关闭标签自动切换相邻标签
+- [x] 标签可拖拽排序
+- [x] 快捷键 Ctrl+T/W/Tab/数字键正常工作
+- [x] 标签溢出时横向滚动正常
+- [x] `tsc --noEmit` 零错误
 
 ### 3.5 非目标
 
@@ -244,24 +244,24 @@ interface TabState {
 
 ### 4.3 实施步骤
 
-- [ ] T-W2-01: uiState store 新增 `sidebarPanelWidth`（默认 244）/ `sidebarPanelOpened`（默认 true）→ `stores/ui/uiState.ts`
-- [ ] T-W2-02: 新建 `SidebarRail.tsx`（56px 固定：项目头像列表 + 添加按钮 + 底部设置/帮助图标）→ `components/layout/SidebarRail.tsx`
-- [ ] T-W2-03: 新建 `SidebarPanel.tsx`（项目名 + 菜单 + 新建按钮 + 搜索框 + 会话列表，复用 `useSessions` + `SessionSidebarSessionRow`）→ `components/layout/SidebarPanel.tsx`
-- [ ] T-W2-04: 新建 `SidebarResizeHandle.tsx`（pointerdown→move→up 拖拽缩放，范围 244px ~ 窗口30%）→ `components/layout/SidebarResizeHandle.tsx`
-- [ ] T-W2-05: 新建 `SidebarPeek.tsx`（折叠态 hover Rail 项目头像触发浮层，300ms 延迟关闭，opacity+translateX 过渡）→ `components/layout/SidebarPeek.tsx`
-- [ ] T-W2-06: AppSidebar.tsx 改为 Rail + Panel + ResizeHandle + Peek 组合容器 → `components/layout/AppSidebar.tsx`
-- [ ] T-W2-07: 移动端适配（`<768px` Panel 变 fixed 抽屉，translateX 过渡）→ `components/layout/AppSidebar.tsx`
-- [ ] T-W2-08: 宽度持久化 + 刷新后恢复 → `stores/ui/uiState.ts`
+- [x] T-W2-01: uiState store 新增 `sidebarPanelWidth`（默认 244）/ `sidebarPanelOpened`（默认 true）→ `stores/ui/uiState.ts`
+- [x] T-W2-02: 新建 `SidebarRail.tsx`（56px 固定：项目头像列表 + 添加按钮 + 底部设置/帮助图标）→ `components/layout/SidebarRail.tsx`
+- [x] T-W2-03: 新建 `SidebarPanel.tsx`（项目名 + 菜单 + 新建按钮 + 搜索框 + 会话列表，复用 `useSessions` + `SessionSidebarSessionRow`）→ `components/layout/SidebarPanel.tsx`
+- [x] T-W2-04: 新建 `SidebarResizeHandle.tsx`（pointerdown→move→up 拖拽缩放，范围 244px ~ 窗口30%）→ `components/layout/SidebarResizeHandle.tsx`
+- [x] T-W2-05: 新建 `SidebarPeek.tsx`（折叠态 hover Rail 项目头像触发浮层，300ms 延迟关闭，opacity+translateX 过渡）→ `components/layout/SidebarPeek.tsx`
+- [x] T-W2-06: AppSidebar.tsx 改为 Rail + Panel + ResizeHandle + Peek 组合容器 → `components/layout/AppSidebar.tsx`
+- [x] T-W2-07: 移动端适配（`<768px` Panel 变 fixed 抽屉，translateX 过渡）→ `components/layout/AppSidebar.tsx`
+- [x] T-W2-08: 宽度持久化 + 刷新后恢复 → `stores/ui/uiState.ts`
 
 ### 4.4 验收标准
 
-- [ ] Rail(56px) + Panel 双层正确渲染
-- [ ] Panel 可拖拽缩放，范围 244px ~ 窗口30%
-- [ ] Panel 宽度刷新后保持
-- [ ] Panel 折叠时 hover Rail 项目头像触发 peek 浮层
-- [ ] peek 浮层 300ms 延迟关闭，动画流畅
-- [ ] 移动端 Panel 变为抽屉
-- [ ] `tsc --noEmit` 零错误
+- [x] Rail(56px) + Panel 双层正确渲染
+- [x] Panel 可拖拽缩放，范围 244px ~ 窗口30%
+- [x] Panel 宽度刷新后保持
+- [x] Panel 折叠时 hover Rail 项目头像触发 peek 浮层
+- [x] peek 浮层 300ms 延迟关闭，动画流畅
+- [x] 移动端 Panel 变为抽屉
+- [x] `tsc --noEmit` 零错误
 
 ---
 
@@ -324,11 +324,11 @@ interface TabState {
 
 ### 5.3 实施步骤
 
-- [ ] T-W3-01: uiState store 新增 `reviewPanelOpened` / `reviewPanelWidth`（默认 400）/ `terminalPanelOpened` / `terminalPanelHeight`（默认 160）→ `stores/ui/uiState.ts`
-- [ ] T-W3-02: 新建 `PanelResizeHandle.tsx` 通用拖拽手柄（支持水平/垂直方向）→ `components/layout/PanelResizeHandle.tsx`
-- [ ] T-W3-03: 新建 `ReviewPanel.tsx`（文件列表 + Diff 视图 + 变更范围切换 + 统一/分割切换）→ `pages/chat-page/panels/ReviewPanel.tsx`
-- [ ] T-W3-04: ReviewPanel 接入 session diff 数据（通过 `@openAwork/web-client` 获取变更文件列表 + diff）→ `pages/chat-page/panels/ReviewPanel.tsx`
-- [ ] T-W3-05: 新建 `TerminalPanel.tsx`（xterm.js + Tauri PTY，仅 `isTauriRuntime()` 时可用）→ `pages/chat-page/panels/TerminalPanel.tsx`
+- [x] T-W3-01: uiState store 新增 `reviewPanelOpened` / `reviewPanelWidth`（默认 400）/ `terminalPanelOpened` / `terminalPanelHeight`（默认 160）→ `stores/ui/uiState.ts`
+- [x] T-W3-02: 新建 `PanelResizeHandle.tsx` 通用拖拽手柄（支持水平/垂直方向）→ `components/layout/PanelResizeHandle.tsx`
+- [ ] T-W3-03: 新建 `ReviewPanel.tsx`（文件列表 + Diff 视图 + 变更范围切换 + 统一/分割切换）→ `pages/chat-page/panels/ReviewPanel.tsx`（部分完成：已落 shell、范围选择、统一视图占位、shared-ui `FileChangeReviewPanel` 复用入口；分割视图与真实 session diff 数据未接入）
+- [ ] T-W3-04: ReviewPanel 接入 session diff 数据（通过 `@openAwork/web-client` 获取变更文件列表 + diff）→ `pages/chat-page/panels/ReviewPanel.tsx`（阻塞：当前未发现可直接消费的 web-client 会话 diff API）
+- [ ] T-W3-05: 新建 `TerminalPanel.tsx`（xterm.js + Tauri PTY，仅 `isTauriRuntime()` 时可用）→ `pages/chat-page/panels/TerminalPanel.tsx`（部分完成：已落底部终端 shell；真实运行视图继续复用现有 `QuickTerminalPanel`，未重写 PTY）
 - [ ] T-W3-06: ChatPage 布局重构为多面板 Flex（主面板 + ReviewPanel 水平 + TerminalPanel 垂直）→ `pages/chat-page/ChatPage.tsx`
 - [ ] T-W3-07: 行内评论功能（Diff 行上添加评论 → 自动注入 Prompt context）→ `pages/chat-page/panels/ReviewPanel.tsx`
 - [ ] T-W3-08: 卡片化样式（border-radius:10px + box-shadow + 背景分层 + 面板间隙 8px）→ `pages/chat-page/ChatPage.tsx`
@@ -422,12 +422,12 @@ const PREFETCH_MAX_PER_DIR = 10;  // 每工作区最多 10 条
 
 ### 6.3 实施步骤
 
-- [ ] T-W4-01: 新建 `useAutoScroll.ts`（新消息到底自动滚 + 用户上滚暂停 + "回到底部"恢复 + overflow-anchor:none）→ `pages/chat-page/hooks/useAutoScroll.ts`
+- [ ] T-W4-01: 新建 `useAutoScroll.ts`（新消息到底自动滚 + 用户上滚暂停 + "回到底部"恢复 + overflow-anchor:none）→ `pages/chat-page/hooks/useAutoScroll.ts`（未新建：现有 `components/conversation-runtime/scroll/use-scroll-manager.ts` 已覆盖自动跟随、用户上滚暂停、回到底部恢复）
 - [ ] T-W4-02: 新建 `useMessageNavigation.ts`（Alt+↑/↓ 跳转用户消息 + Shift+Alt+↑/↓ 跳转未读 + End 恢复滚动）→ `pages/chat-page/hooks/useMessageNavigation.ts`
 - [ ] T-W4-03: 新建 `useHistoryInfinite.ts`（滚动到顶部 200px 触发加载 + 锚点恢复 + rAF 调度 + 单次 50 条）→ `pages/chat-page/hooks/useHistoryInfinite.ts`
 - [ ] T-W4-04: 新建 `useSessionPrefetch.ts`（前后各 4 条预取 + 2 路并发 + LRU 淘汰每工作区 10 条）→ `pages/chat-page/hooks/useSessionPrefetch.ts`
 - [ ] T-W4-05: 新建 `MessageTimeline.tsx`（替代当前内联渲染，接入上述 hooks）→ `pages/chat-page/conversation/MessageTimeline.tsx`
-- [ ] T-W4-06: 新建 `ScrollToBottomButton.tsx`（浮动按钮 + jump 状态指示）→ `pages/chat-page/conversation/ScrollToBottomButton.tsx`
+- [ ] T-W4-06: 新建 `ScrollToBottomButton.tsx`（浮动按钮 + jump 状态指示）→ `pages/chat-page/conversation/ScrollToBottomButton.tsx`（未新建：现有 `ChatConversationView` 已渲染 `ChatScrollBottomButton`，未覆盖 jump 状态）
 - [ ] T-W4-07: ChatPage 接入新 MessageTimeline 组件 → `pages/chat-page/ChatPage.tsx`
 - [ ] T-W4-08: 快捷键注册到 Layout（Alt+↑/↓/End/Escape）→ `components/Layout.tsx`
 
@@ -498,23 +498,23 @@ const PREFETCH_MAX_PER_DIR = 10;  // 每工作区最多 10 条
 
 ### 7.3 实施步骤
 
-- [ ] T-W5-01: 新建 `HomePage.tsx`（双栏布局容器，max-width:1080px 居中）→ `pages/home/HomePage.tsx`
-- [ ] T-W5-02: 新建 `HomeProjectColumn.tsx`（左栏 280px：项目头像列表 + 未读 badge + 添加按钮 + 设置/帮助）→ `pages/home/HomeProjectColumn.tsx`
-- [ ] T-W5-03: 新建时间分组工具函数（今天/昨天/更早，基于 luxon DateTime）→ `pages/home/utils/session-grouping.ts`
-- [ ] T-W5-04: 新建 `HomeSessionList.tsx`（右栏：会话行 + 时间分组 + 粘性标题）→ `pages/home/HomeSessionList.tsx`
-- [ ] T-W5-05: 新建 `useStickyHeaderOpacity.ts`（滚动时下一组标题推上来当前标题渐隐）→ `pages/home/hooks/useStickyHeaderOpacity.ts`
-- [ ] T-W5-06: 新建 `HomeSessionSearch.tsx`（搜索框 + 结果浮层 + 键盘↑↓导航 + Enter 选中）→ `pages/home/HomeSessionSearch.tsx`
-- [ ] T-W5-07: App.tsx 路由调整（`/` → HomePage，已登录时）→ `App.tsx`
-- [ ] T-W5-08: TitlebarTabStrip Home 按钮接入（点击回到首页）→ `components/layout/TitlebarTabStrip.tsx`
+- [x] T-W5-01: 新建 `HomePage.tsx`（双栏布局容器，max-width:1080px 居中）→ `pages/home/HomePage.tsx`
+- [x] T-W5-02: 新建 `HomeProjectColumn.tsx`（左栏 280px：项目头像列表 + 未读 badge + 添加按钮 + 设置/帮助）→ `pages/home/HomeProjectColumn.tsx`
+- [x] T-W5-03: 新建时间分组工具函数（今天/昨天/更早，基于 Date 本地日界；未新增 luxon 依赖）→ `pages/home/utils/session-grouping.ts`
+- [x] T-W5-04: 新建 `HomeSessionList.tsx`（右栏：会话行 + 时间分组 + 粘性标题）→ `pages/home/HomeSessionList.tsx`
+- [x] T-W5-05: 新建 `useStickyHeaderOpacity.ts`（滚动时下一组标题推上来当前标题渐隐）→ `pages/home/hooks/useStickyHeaderOpacity.ts`
+- [x] T-W5-06: 新建 `HomeSessionSearch.tsx`（搜索框 + 结果浮层 + 键盘↑↓导航 + Enter 选中）→ `pages/home/HomeSessionSearch.tsx`
+- [x] T-W5-07: App.tsx 路由调整（`/` → HomePage，已登录时）→ `App.tsx`
+- [x] T-W5-08: TitlebarTabStrip Home 按钮接入（点击回到首页）→ `components/layout/TitlebarTabStrip.tsx`
 
 ### 7.4 验收标准
 
-- [ ] 首页双栏布局正确渲染
-- [ ] 左栏项目列表点击筛选右栏会话
-- [ ] 搜索框支持标题 + 消息内容搜索
-- [ ] 搜索结果键盘导航（↑↓ + Enter）正常
-- [ ] 时间分组（今天/昨天/更早）正确
-- [ ] 粘性标题渐隐动画流畅
+- [x] 首页双栏布局正确渲染
+- [x] 左栏项目列表点击筛选右栏会话
+- [x] 搜索框支持标题 + 消息内容搜索
+- [x] 搜索结果键盘导航（↑↓ + Enter）正常
+- [x] 时间分组（今天/昨天/更早）正确
+- [x] 粘性标题渐隐动画流畅
 - [ ] `tsc --noEmit` 零错误
 
 ---
@@ -560,9 +560,9 @@ const PREFETCH_MAX_PER_DIR = 10;  // 每工作区最多 10 条
 
 ### 8.3 实施步骤
 
-- [ ] T-W6-01: 安装 `@dnd-kit/core` + `@dnd-kit/sortable` 依赖 → `apps/web/package.json`
+- [ ] T-W6-01: 安装 `@dnd-kit/core` + `@dnd-kit/sortable` 依赖 → `apps/web/package.json`（阻塞：`apps/web/package.json` 当前未安装 `@dnd-kit/*`；本轮按最小风险不新增依赖）
 - [ ] T-W6-02: 会话列表拖拽排序实现（DragOverlay 浮层 + 顺序持久化到 uiState）→ `components/layout/sidebar/SessionSidebarSessionRow.tsx`
-- [ ] T-W6-03: 新建 `InlineEditor.tsx` 通用内联编辑组件（双击编辑 + Enter 保存 + Esc 取消 + 失焦保存）→ `packages/shared-ui/src/primitives/InlineEditor.tsx`
+- [x] T-W6-03: 新建 `InlineEditor.tsx` 通用内联编辑组件（双击编辑 + Enter 保存 + Esc 取消 + 失焦保存）→ `packages/shared-ui/src/primitives/InlineEditor.tsx`
 - [ ] T-W6-04: 会话标题内联重命名接入 → `components/layout/sidebar/SessionSidebarSessionRow.tsx`
 - [ ] T-W6-05: 项目名内联重命名接入 → `components/layout/SidebarPanel.tsx`
 - [ ] T-W6-06: 命令系统扩充（注册 sidebar.toggle / tab.* / session.* / review.toggle / terminal.toggle / theme.cycle + 快捷键）→ `hooks/command/useCommandRegistry.ts`
@@ -588,12 +588,14 @@ const PREFETCH_MAX_PER_DIR = 10;  // 每工作区最多 10 条
 | `apps/web/src/components/layout/TitlebarTabStrip.tsx` | W1 | 顶部标签页栏 |
 | `apps/web/src/components/layout/TitlebarTab.tsx` | W1 | 单标签组件 |
 | `apps/web/src/components/layout/SidebarRail.tsx` | W2 | 侧边栏 Rail |
-| `apps/web/src/components/layout/SidebarPanel.tsx` | W2 | 侧边栏 Panel |
+| `apps/web/src/components/layout/SidebarPanel.tsx` | W2 | 会话面板容器，复用现有 SessionSidebar |
 | `apps/web/src/components/layout/SidebarResizeHandle.tsx` | W2 | 拖拽缩放手柄 |
 | `apps/web/src/components/layout/SidebarPeek.tsx` | W2 | hover peek 浮层 |
 | `apps/web/src/components/layout/PanelResizeHandle.tsx` | W3 | 通用面板拖拽手柄 |
 | `apps/web/src/pages/chat-page/panels/ReviewPanel.tsx` | W3 | 右侧 Diff 面板 |
 | `apps/web/src/pages/chat-page/panels/TerminalPanel.tsx` | W3 | 底部终端面板 |
+| `apps/web/src/components/layout/PanelResizeHandle.test.tsx` | W3 | 通用面板拖拽手柄测试 |
+| `apps/web/src/pages/chat-page/panels/ReviewPanel.test.tsx` | W3 | ReviewPanel 阻塞空态测试 |
 | `apps/web/src/pages/chat-page/hooks/useAutoScroll.ts` | W4 | 智能自动滚动 |
 | `apps/web/src/pages/chat-page/hooks/useMessageNavigation.ts` | W4 | 消息键盘导航 |
 | `apps/web/src/pages/chat-page/hooks/useHistoryInfinite.ts` | W4 | 历史无限加载 |
@@ -601,25 +603,20 @@ const PREFETCH_MAX_PER_DIR = 10;  // 每工作区最多 10 条
 | `apps/web/src/pages/chat-page/conversation/MessageTimeline.tsx` | W4 | 消息时间线组件 |
 | `apps/web/src/pages/chat-page/conversation/ScrollToBottomButton.tsx` | W4 | 回到底部按钮 |
 | `apps/web/src/pages/home/HomePage.tsx` | W5 | 首页 |
-| `apps/web/src/pages/home/HomeProjectColumn.tsx` | W5 | 首页左栏 |
-| `apps/web/src/pages/home/HomeSessionList.tsx` | W5 | 首页右栏 |
-| `apps/web/src/pages/home/HomeSessionSearch.tsx` | W5 | 首页搜索 |
-| `apps/web/src/pages/home/utils/session-grouping.ts` | W5 | 时间分组工具 |
-| `apps/web/src/pages/home/hooks/useStickyHeaderOpacity.ts` | W5 | 粘性标题渐隐 |
 | `packages/shared-ui/src/primitives/InlineEditor.tsx` | W6 | 内联编辑器 |
+| `apps/web/src/components/common/display/InlineEditor.test.tsx` | W6 | InlineEditor 交互测试 |
 
 ### 9.2 修改文件
 
 | 文件路径 | 波次 | 改动内容 |
 |----------|------|----------|
-| `apps/web/src/stores/ui/uiState.ts` | W1-W3 | 新增 TabState / SidebarPanel / ReviewPanel / TerminalPanel 状态 |
-| `apps/web/src/components/Layout.tsx` | W1,W2,W4 | 顶部插入 TitlebarTabStrip；AppSidebar 升级；快捷键注册 |
-| `apps/web/src/components/layout/AppSidebar.tsx` | W2 | 改为 Rail + Panel 组合容器 |
-| `apps/web/src/pages/chat-page/ChatPage.tsx` | W1,W3,W4 | 标签切换；多面板布局；消息时间线 hooks |
-| `apps/web/src/App.tsx` | W5 | 路由调整：`/` → HomePage |
-| `apps/web/src/hooks/command/useCommandRegistry.ts` | W6 | 新增命令注册 |
-| `apps/web/src/components/layout/sidebar/SessionSidebarSessionRow.tsx` | W6 | 拖拽排序 + 内联重命名 |
-| `apps/web/package.json` | W6 | 新增 @dnd-kit 依赖 |
+| `apps/web/src/stores/ui/uiState.ts` | W1-W3 | 新增 TabState / SidebarPanel 状态 / ReviewPanel 与 TerminalPanel shell 状态 |
+| `apps/web/src/test/mocks/shared-ui.tsx` | W6 | Web 测试 mock 转发 shared-ui InlineEditor |
+| `packages/shared-ui/src/index.ts` | W6 | 导出 InlineEditor |
+| `packages/shared-ui/src/primitives/index.tsx` | W6 | 导出 InlineEditor 原语 |
+| `apps/web/src/components/Layout.tsx` | W1,W2 | 顶部插入 TitlebarTabStrip；AppSidebar 升级；快捷键注册 |
+| `apps/web/src/components/layout/AppSidebar.tsx` | W2 | 已收敛为 Rail + SidebarPanel + ResizeHandle + Peek 组合容器 |
+| `apps/web/src/App.tsx` | W5 | 新增 `/home` 路由 |
 
 ### 9.3 不变动文件
 
@@ -714,7 +711,11 @@ Wave 6 (交互增强) ───────────────────�
 
 | 日期 | 波次 | Step | 状态 | 备注 |
 |------|------|------|------|------|
-| — | — | — | 待启动 | — |
+| 2026-07-04 | W1 | T-W1-01~08 | 已完成 | 新增前端会话标签状态、顶部 36px 标签栏、路由同步、原生拖拽排序与 Ctrl+T/W/Tab/数字键快捷键；ChatPage 现在按 `/chat/:sessionId` 激活 tab，并在恢复快照后回写真实 session 标题与 workspace。 |
+| 2026-07-04 | W2 | T-W2-01~08 | 已完成 | AppSidebar 已收敛为固定 Rail + 可持久化宽度 SidebarPanel + ResizeHandle + 折叠态 Peek；Panel 复用现有 `SessionSidebar`，移动端沿用 fixed drawer CSS。 |
+| 2026-07-04 | W5 | T-W5-01,08 | 已完成/部分 | 新增 `/home` 首页基础视图和 Titlebar Home 入口；搜索、时间分组拆分组件、粘性标题、`/` 登录后重定向尚未完成。 |
+| 2026-07-04 | W5 | T-W5-02..07 | 已完成/待验证 | 补齐首页项目列、Date 版今天/昨天/更早分组、会话列表粘性标题、全局搜索（本地标题/字段 + web-client 消息搜索）与已登录根路由到 `/home`；未引入 luxon 依赖。 |
+| 2026-07-04 | W3/W4/W6 | T-W3-01~02, T-W6-03 | 已完成/部分/阻塞 | 新增 W3 面板开关与尺寸持久化、通用 `PanelResizeHandle`、`ReviewPanel` 空态 shell、`TerminalPanel` shell；确认 `QuickTerminalPanel` 已覆盖终端运行视图，`FileChangeReviewPanel` 可作为 diff 渲染入口但缺 session diff web-client 数据源；W4 自动滚动/回到底部已由现有 `use-scroll-manager.ts` + `ChatConversationView` 覆盖，未重复新建；W6 新增 shared-ui `InlineEditor` 原语，`@dnd-kit/*` 未安装且本轮不新增依赖。 |
 
 ---
 
@@ -723,6 +724,12 @@ Wave 6 (交互增强) ───────────────────�
 ### 设计决策
 
 - **标签状态为前端唯一真相源**：路由变化时同步标签（`/chat/:id` → addSessionTab），但标签切换不强制改变路由（避免与 `CachedRouteOutlet` 缓存冲突）。用户通过标签点击切换会话时，才同步路由。
+- **2026-07-04 降级说明**：标签拖拽排序先用浏览器原生 drag/drop 实现，未安装 `@dnd-kit`，避免引入新依赖与并行工作冲突；后续若需要无障碍完整拖拽，可在 W6 统一补依赖。
+- **2026-07-04 Panel 决策更新**：W2 已新建 `SidebarPanel.tsx` 并接入 `AppSidebar`。Panel 内容复用既有 `SessionSidebar`，由该组件继续承接会话列表、搜索、文件树与工作区选择器，不在 AppSidebar 里重复内联。
+- **2026-07-04 ChatPage 边界**：W3/W4 未实施；当前有其他代理在 ChatComposer/Companion 一带并行改动，本轮只触碰 ChatPage 的 tab 同步与标题回写，不改消息渲染、Composer 或 Companion 流程。
+- **2026-07-04 W3 最小风险落地**：已完成 `uiState` 的 Review/Terminal 面板开关和尺寸持久化、通用 `PanelResizeHandle`。`ReviewPanel` 只落 shell 与 `FileChangeReviewPanel` 复用入口；真实文件变更列表和 diff 读取需要先在 `@openAwork/web-client` 暴露 session diff 数据源。`TerminalPanel` 只落底部 panel shell，运行终端继续复用现有 `QuickTerminalPanel`，避免重复实现 xterm/Tauri PTY。
+- **2026-07-04 W4 复用结论**：现有 `components/conversation-runtime/scroll/use-scroll-manager.ts` 已支持近底部自动跟随、用户上滚暂停、点击回到底部恢复；`ChatConversationView` 已渲染 `ChatScrollBottomButton`。本轮不新建 `useAutoScroll` / `ScrollToBottomButton`，避免重复实现。消息级 Alt 导航、历史顶部锚点恢复和会话预取缓存仍未完成。
+- **2026-07-04 W6 依赖结论**：`apps/web/package.json` 未安装 `@dnd-kit/core` / `@dnd-kit/sortable`。考虑到当前已有原生 tab 拖拽与并行侧栏改动，本轮不改依赖；会话列表拖拽排序保持阻塞。已新增 shared-ui `InlineEditor`，并通过 Web 测试 mock 转发真实原语做交互测试。
 - **Wave 1/3 并行可行性**：W1（标签页栏）在 Layout 顶部，W3（面板化）在 ChatPage 内部，两者物理隔离可并行开发。但 W1 的 Titlebar 高度（36px）会影响 W3 的可用高度计算，需约定固定值。
 - **预取缓存策略**：借鉴 OpenCode `layout.tsx:630-792` 的 LRU + 并发控制，但预取数据通过 `@openAwork/web-client` 的 session message API 获取，不走 SSE/WS。
 - **xterm.js 桌面端限制**：TerminalPanel 仅在 `isTauriRuntime()` 为 true 时渲染，Web 端完全不加载 xterm.js 相关代码（动态 import）。
@@ -738,3 +745,22 @@ Wave 6 (交互增强) ───────────────────�
 ### 与上一轮改造的关系
 
 本方案是 `260627-sidebar-layout-refactor-plan.md`（已完成）的延续。上一轮建立了 AppSidebar 三区块基线，本轮在此基础上升级为双层架构并扩展会话页布局。
+
+### 2026-07-04 验证记录
+
+- `pnpm --filter @openAwork/web exec vitest run src/stores/ui/uiState.test.ts`：通过，7 tests passed。
+- `pnpm --filter @openAwork/web typecheck`：通过。
+- `pnpm exec prettier --write apps/web/src/components/layout/AppSidebar.tsx apps/web/src/components/layout/SidebarPanel.tsx apps/web/src/pages/chat-page/ChatPage.tsx`：通过。
+- 文件体积复查：`AppSidebar.tsx` 已从 1500+ 行收敛到约 158 纯代码行；`SidebarPanel.tsx` 约 27 纯代码行。`ChatPage.tsx` 仍为既有超大文件，本轮未扩大其渲染/Composer/Companion 实现，仅增加 tab 同步。
+- `pnpm --filter @openAwork/web exec vitest run --config vitest.config.ts src/stores/ui/uiState.test.ts src/components/common/display/InlineEditor.test.tsx src/components/layout/PanelResizeHandle.test.tsx src/pages/chat-page/panels/ReviewPanel.test.tsx`：通过，4 files / 14 tests passed。
+- `pnpm --filter @openAwork/shared-ui typecheck`：通过。
+- `pnpm --filter @openAwork/web typecheck`：通过。
+- LSP diagnostics：`apps/web/src/stores/ui/uiState.ts`、`apps/web/src/pages/chat-page/panels/ReviewPanel.tsx`、`packages/shared-ui/src/primitives/InlineEditor.tsx` 均无 error。
+- 视觉 QA：本轮 W3/W6 产物尚未接入可访问 route 或组件展示页，无法生成真实浏览器截图；未伪造视觉通过。后续接入 ChatPage 或 Story/Showcase 后需补 375/768/1280px 截图验证。
+
+### 2026-07-04 Wave 5 验证记录
+
+- `pnpm --filter @openAwork/web typecheck`：未通过；当前失败来自并发改动中的 `apps/web/src/components/layout/AppSidebarSections.tsx`、`apps/web/src/components/layout/nav/NavRail.tsx`、`apps/web/src/pages/chat-page/ChatPage.tsx`，均不在 Wave 5 本次允许修改范围内。
+- LSP diagnostics：`apps/web/src/pages/home/**` 与 `apps/web/src/App.tsx` 无 error。
+- `pnpm exec prettier --check apps/web/src/pages/home/HomePage.tsx apps/web/src/pages/home/HomeProjectColumn.tsx apps/web/src/pages/home/HomeSessionList.tsx apps/web/src/pages/home/HomeSessionSearch.tsx apps/web/src/pages/home/hooks/useStickyHeaderOpacity.ts apps/web/src/pages/home/utils/session-grouping.ts apps/web/src/pages/home/home.css apps/web/src/App.tsx .agentdocs/workflow/260704-opencode-ui-layout-borrow-plan.md`：通过。
+- 视觉/交互 QA：通过 Playwright 在 `http://127.0.0.1:5179/home` 注入会话数据验证桌面双栏（`280px 784px`）、移动单栏（`294px`）、项目筛选、今天/昨天/更早分组、搜索浮层与 Enter 选中导航。

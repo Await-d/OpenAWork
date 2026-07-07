@@ -29,10 +29,16 @@ import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { listRequestWorkflowLogs } from '../runtime/request-workflow-log-store.js';
 import {
   isMcpServerConnectedForUser,
+  listMcpToolsForUser,
   loadConfiguredMcpServersForUser,
   retryMcpConnectionForUser,
 } from '../mcp/mcp-runtime.js';
 import { BUILTIN_MCP_IDS } from '../mcp/builtin-mcps.js';
+import {
+  buildSettingsBuiltinMcpServers,
+  mcpServersBodySchema,
+  mcpStatusQuerySchema,
+} from '../mcp/mcp-settings-schemas.js';
 import {
   readUpstreamRetrySettings,
   UPSTREAM_RETRY_SETTINGS_KEY,
@@ -43,6 +49,11 @@ import {
   WEBSEARCH_POLICY_KEY,
   websearchPolicySchema,
 } from '../provider/websearch-policy.js';
+import {
+  PLUGIN_SETTINGS_KEY,
+  pluginSettingsSchema,
+  readPluginSettingsForUser,
+} from '../tools/plugin-tool-settings.js';
 import {
   buildCompanionFeatureState,
   companionSettingsUpdateSchema,
@@ -350,6 +361,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step, child } = startRequestWorkflow(request, 'settings.mcp-status.get');
       const user = request.user as JwtPayload;
+      const query = parseQuery(mcpStatusQuerySchema, request.query);
 
       // 走 mcp-runtime 而不是直接读 SQL，让前端展示同时包含
       // 内置 MCP（websearch / grep_app）与用户自定义项；同 id 的
@@ -361,6 +373,35 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       loadStep.succeed(undefined, { servers: merged.length });
 
       const builtinIds = new Set<string>(BUILTIN_MCP_IDS);
+      if (query.includeTools) {
+        const catalogStep = child('list-tools');
+        const catalogs = await listMcpToolsForUser(user.sub);
+        catalogStep.succeed(undefined, { servers: catalogs.length });
+
+        const servers = catalogs.map((catalog) => {
+          const configured = merged.find((entry) => entry.id === catalog.serverId);
+          const disabledTools = configured?.disabledTools ?? [];
+          return {
+            id: catalog.serverId,
+            name: catalog.serverName,
+            type: catalog.transport,
+            status: catalog.status,
+            enabled: catalog.enabled,
+            builtin: builtinIds.has(catalog.serverId),
+            toolCount: catalog.tools.length,
+            tools: catalog.tools.map((tool) => ({
+              name: tool.name,
+              ...(tool.description ? { description: tool.description } : {}),
+            })),
+            disabledTools,
+            ...(catalog.error ? { error: catalog.error } : {}),
+          };
+        });
+
+        step.succeed(undefined, { servers: servers.length, includeTools: true });
+        return reply.send({ servers });
+      }
+
       // Real connection status — `isMcpServerConnectedForUser` is a
       // peek-only `Map.has` against the pool, so polling this
       // endpoint never warms an idle connection. Disabled servers
@@ -377,6 +418,8 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
             : ('disconnected' as const),
         enabled: server.enabled,
         builtin: builtinIds.has(server.id),
+        toolCount: 0,
+        disabledTools: server.disabledTools ?? [],
       }));
 
       step.succeed(undefined, { servers: servers.length });
@@ -1128,17 +1171,6 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
 
   // ── Plugin settings ──────────────────────────────────────────
 
-  const pluginSettingsSchema = z.object({
-    imageGeneration: z
-      .object({
-        enabled: z.boolean(),
-        modelSource: z.enum(['global', 'dedicated']).optional(),
-        dedicatedProviderId: z.string().optional(),
-        dedicatedModelId: z.string().optional(),
-      })
-      .optional(),
-  });
-
   app.get(
     '/settings/plugins',
     { onRequest: [requireAuth] },
@@ -1147,20 +1179,11 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
 
       const loadStep = child('load');
-      const row = sqliteGet<UserSettingRow>(
-        `SELECT value FROM user_settings WHERE user_id = ? AND key = 'plugin_settings'`,
-        [user.sub],
-      );
-      loadStep.succeed(undefined, { found: row !== undefined });
-
-      let settings: Record<string, unknown> = {};
-      if (row?.value) {
-        try {
-          settings = JSON.parse(row.value) as Record<string, unknown>;
-        } catch {
-          /* ignore corrupted data */
-        }
-      }
+      const settings = readPluginSettingsForUser(user.sub);
+      loadStep.succeed(undefined, {
+        imageGeneration: settings.imageGeneration?.enabled === true,
+        desktopControl: settings.desktopControl?.enabled === true,
+      });
 
       step.succeed();
       return reply.send(settings);
@@ -1178,9 +1201,9 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
 
       const saveStep = child('save');
       sqliteRun(
-        `INSERT INTO user_settings (user_id, key, value) VALUES (?, 'plugin_settings', ?)
+        `INSERT INTO user_settings (user_id, key, value) VALUES (?, ?, ?)
          ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
-        [user.sub, JSON.stringify(parsed)],
+        [user.sub, PLUGIN_SETTINGS_KEY, JSON.stringify(parsed)],
       );
       saveStep.succeed();
       step.succeed(undefined, { saved: true });
@@ -1202,6 +1225,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         [user.sub],
       );
       loadStep.succeed(undefined, { found: row !== undefined });
+      const builtinServers = buildSettingsBuiltinMcpServers();
 
       const parseStep = child('parse-json');
       if (row?.value) {
@@ -1209,17 +1233,17 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
           const servers = JSON.parse(row.value) as unknown[];
           parseStep.succeed(undefined, { servers: Array.isArray(servers) ? servers.length : 0 });
           step.succeed(undefined, { servers: Array.isArray(servers) ? servers.length : 0 });
-          return reply.send({ servers });
+          return reply.send({ servers, builtinServers });
         } catch {
           parseStep.fail('invalid mcp_servers JSON');
           step.succeed(undefined, { servers: 0 });
-          return reply.send({ servers: [] });
+          return reply.send({ servers: [], builtinServers });
         }
       }
 
       parseStep.succeed(undefined, { servers: 0 });
       step.succeed(undefined, { servers: 0 });
-      return reply.send({ servers: [] });
+      return reply.send({ servers: [], builtinServers });
     },
   );
 
@@ -1229,7 +1253,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step, child } = startRequestWorkflow(request, 'settings.mcp-servers.put');
       const user = request.user as JwtPayload;
-      const body = request.body as { servers: unknown };
+      const body = parseBody(mcpServersBodySchema, request.body);
 
       const saveStep = child('save');
       sqliteRun(
@@ -1237,10 +1261,10 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
          ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
         [user.sub, JSON.stringify(body.servers)],
       );
-      saveStep.succeed();
-      step.succeed();
+      saveStep.succeed(undefined, { servers: body.servers.length });
+      step.succeed(undefined, { servers: body.servers.length });
 
-      return reply.send({ ok: true });
+      return reply.send({ ok: true, servers: body.servers });
     },
   );
 
@@ -1441,12 +1465,19 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     message: z.string().min(1).max(2000),
     context: z
       .object({
+        attachedCount: z.number().optional(),
+        hasStreamError: z.boolean().optional(),
+        idleSeconds: z.number().optional(),
+        lastToolName: z.string().nullable().optional(),
         sessionBusy: z.boolean().optional(),
         pendingApprovals: z.number().optional(),
         pendingQuestions: z.number().optional(),
+        queuedCount: z.number().optional(),
         runningTasks: z.number().optional(),
         blockedTasks: z.number().optional(),
+        streamErrorMessage: z.string().nullable().optional(),
         todoCount: z.number().optional(),
+        toolCallCount: z.number().optional(),
       })
       .optional(),
     agentId: z.string().optional(),
@@ -1475,12 +1506,14 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(503).send({ error: 'Companion 陪跑聊天模型尚未配置。' });
       }
 
-      const { loadCompanionSettingsForUser } = await import('../workspace/companion-settings.js');
+      const {
+        buildCompanionIntroText,
+        buildCompanionWorkspaceContextText,
+        loadCompanionSettingsForUser,
+      } = await import('../workspace/companion-settings.js');
       const companionSettings = loadCompanionSettingsForUser(user.sub, user.email, body.agentId);
       const profile = companionSettings.profile;
-      const intro = (await import('../workspace/companion-settings.js')).buildCompanionIntroText(
-        profile,
-      );
+      const intro = buildCompanionIntroText(profile);
 
       const contextParts: string[] = [];
       if (body.context) {
@@ -1495,6 +1528,17 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         if (ctx.blockedTasks && ctx.blockedTasks > 0)
           contextParts.push(`${ctx.blockedTasks} 个被阻塞的任务`);
         if (ctx.todoCount && ctx.todoCount > 0) contextParts.push(`${ctx.todoCount} 个待办事项`);
+        const companionContext = buildCompanionWorkspaceContextText({
+          attachedCount: ctx.attachedCount,
+          hasStreamError: ctx.hasStreamError,
+          idleSeconds: ctx.idleSeconds,
+          lastToolName: ctx.lastToolName,
+          pendingApprovals: ctx.pendingApprovals,
+          queuedCount: ctx.queuedCount,
+          streamErrorMessage: ctx.streamErrorMessage,
+          toolCallCount: ctx.toolCallCount,
+        });
+        if (companionContext) contextParts.push(companionContext);
       }
 
       const contextBlock =

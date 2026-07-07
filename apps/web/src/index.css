@@ -558,6 +558,12 @@ textarea {
   outline-offset: -2px;
 }
 
+.sidebar-rail-v2__project-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
 .nav-rail-icon {
   position: relative;
   display: inline-flex;
@@ -1156,45 +1162,101 @@ textarea {
 /* ── Composer 动画 / 微交互 ──────────────────────────────────── */
 
 @keyframes composer-pulse-send {
-  0% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 40%, transparent); }
-  100% { box-shadow: 0 0 0 12px transparent; }
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 40%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 12px transparent;
+  }
 }
-.composer-pulse { animation: composer-pulse-send 400ms ease-out; }
+.composer-pulse {
+  animation: composer-pulse-send 400ms ease-out;
+}
 
 @keyframes composer-drag-enter {
-  from { opacity: 0; transform: scale(0.96); }
-  to { opacity: 1; transform: scale(1); }
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
-.composer-drag-overlay { animation: composer-drag-enter 200ms ease-out; }
+.composer-drag-overlay {
+  animation: composer-drag-enter 200ms ease-out;
+}
 
 .composer-shell .icon-btn,
 .composer-shell button[class*='icon-btn'] {
-  transition: transform 120ms ease, background 150ms ease, color 150ms ease, border-color 150ms ease, opacity 150ms ease;
+  transition:
+    transform 120ms ease,
+    background 150ms ease,
+    color 150ms ease,
+    border-color 150ms ease,
+    opacity 150ms ease;
 }
 .composer-shell .icon-btn:hover,
-.composer-shell button[class*='icon-btn']:hover { transform: scale(1.08); }
+.composer-shell button[class*='icon-btn']:hover {
+  transform: scale(1.08);
+}
 .composer-shell .icon-btn:active,
-.composer-shell button[class*='icon-btn']:active { transform: scale(0.92); }
-.composer-shell .btn-accent:hover { transform: scale(1.04); }
-.composer-shell .btn-accent:active { transform: scale(0.96); }
+.composer-shell button[class*='icon-btn']:active {
+  transform: scale(0.92);
+}
+.composer-shell .btn-accent:hover {
+  transform: scale(1.04);
+}
+.composer-shell .btn-accent:active {
+  transform: scale(0.96);
+}
 
 @keyframes composer-optimize-enter {
-  from { opacity: 0; transform: translateY(-8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
-.composer-optimize-popover { animation: composer-optimize-enter 220ms ease-out; }
+.composer-optimize-popover {
+  animation: composer-optimize-enter 220ms ease-out;
+}
 
 @keyframes composer-queue-enter {
-  from { opacity: 0; transform: translateX(12px); }
-  to { opacity: 1; transform: translateX(0); }
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
-.composer-queue-pill { animation: composer-queue-enter 220ms ease-out; }
+.composer-queue-pill {
+  animation: composer-queue-enter 220ms ease-out;
+}
 
 @keyframes composer-breathe {
-  0%, 100% { box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 12%, transparent), 0 1px 0 var(--border-subtle), inset 0 1px 0 rgba(255,255,255,0.04); }
-  50% { box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent), 0 1px 0 var(--border-subtle), inset 0 1px 0 rgba(255,255,255,0.04); }
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 2px color-mix(in oklch, var(--accent) 12%, transparent),
+      0 1px 0 var(--border-subtle),
+      inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  }
+  50% {
+    box-shadow:
+      0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent),
+      0 1px 0 var(--border-subtle),
+      inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  }
 }
-.composer-shell.composer-streaming { animation: composer-breathe 2s ease-in-out infinite; }
+.composer-shell.composer-streaming {
+  animation: composer-breathe 2s ease-in-out infinite;
+}
 
 .composer-shell.composer-home-variant {
   backdrop-filter: blur(12px);
@@ -1205,22 +1267,232 @@ textarea {
   background: color-mix(in oklch, var(--bg-raised) 70%, transparent);
 }
 
-.composer-toolbar-divider { width: 1px; height: 16px; background: var(--border-subtle); flex-shrink: 0; margin: 0 2px; }
+.composer-queue {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 0 2px;
+}
+.composer-queue-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--aux);
+  white-space: nowrap;
+  padding-top: 4px;
+}
+.composer-queue-items {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.composer-queue-pill {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  border: 1px solid color-mix(in oklch, var(--accent) 18%, var(--border-default));
+  background: var(--bg-overlay);
+  color: var(--fg-default);
+  min-width: 0;
+  animation: composer-queue-enter 220ms ease-out;
+}
+.composer-queue-pill.next {
+  background: color-mix(in oklch, var(--accent) 10%, transparent);
+  color: var(--accent);
+}
+.composer-queue-pill.warning {
+  border-color: color-mix(in srgb, var(--warning) 28%, var(--border-default));
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  color: var(--warning);
+}
+.composer-queue-text {
+  font-size: 10px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 280px;
+}
+.composer-queue-action,
+.composer-queue-remove {
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.composer-queue-action {
+  font-size: 10px;
+  font-weight: 700;
+}
+.composer-queue-remove {
+  font-size: 11px;
+}
+
+.composer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.composer-toolbar-left,
+.composer-primary-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.composer-toolbar-left {
+  min-width: 0;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+.composer-primary-actions {
+  flex-shrink: 0;
+}
+.composer-model-group {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-overlay);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.composer-model-button,
+.composer-toolbar-icon,
+.composer-optimize-button {
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-overlay);
+  color: var(--fg-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.composer-model-button {
+  width: 28px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--fg-default);
+}
+.composer-model-button.with-divider {
+  border-left: 1px solid var(--border-subtle);
+}
+.composer-model-button.active,
+.composer-toolbar-icon.active,
+.composer-optimize-button.active {
+  background: color-mix(in oklch, var(--accent) 10%, transparent);
+  color: color-mix(in oklch, var(--accent) 82%, var(--fg-on-accent) 18%);
+}
+.composer-toolbar-icon:disabled,
+.composer-optimize-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.composer-toolbar-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--border-subtle);
+  flex-shrink: 0;
+  margin: 0 2px;
+}
+.composer-status-copy {
+  font-size: 10px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  letter-spacing: 0.01em;
+}
+.composer-spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-pill);
+  border: 1.6px solid currentColor;
+  border-top-color: transparent;
+  animation: spin 0.7s linear infinite;
+  display: inline-block;
+}
+.composer-secondary-action,
+.composer-send-button {
+  border-radius: var(--radius-md) !important;
+  height: 28px;
+  padding: 0 10px;
+  gap: 6px;
+  font-size: 11px;
+}
+.composer-secondary-action {
+  background: color-mix(in oklch, var(--accent) 14%, transparent) !important;
+  color: var(--accent) !important;
+}
+.composer-send-button:disabled {
+  opacity: 0.5;
+}
+.composer-send-button[data-tone='danger'] {
+  background: color-mix(in oklch, var(--danger) 14%, transparent) !important;
+  color: var(--danger) !important;
+}
+.composer-send-button[data-tone='warning'] {
+  background: color-mix(in oklch, var(--warning) 14%, transparent) !important;
+  color: var(--warning) !important;
+}
+.composer-send-button[data-tone='running'] {
+  background: color-mix(in oklch, var(--accent) 14%, transparent) !important;
+  color: var(--accent) !important;
+}
 
 .composer-char-counter {
-  position: absolute; bottom: 3px; right: 6px; font-size: 9px; color: var(--fg-subtle);
-  font-variant-numeric: tabular-nums; pointer-events: none; opacity: 0;
-  transition: opacity 200ms ease, color 200ms ease; z-index: 2;
+  position: absolute;
+  bottom: 3px;
+  right: 6px;
+  font-size: 9px;
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  opacity: 0;
+  transition:
+    opacity 200ms ease,
+    color 200ms ease;
+  z-index: 2;
 }
-.composer-char-counter.composer-char-visible { opacity: 0.7; }
-.composer-char-counter.composer-char-warning { color: var(--warning); opacity: 1; }
-.composer-char-counter.composer-char-danger { color: var(--danger); opacity: 1; }
+.composer-char-counter.composer-char-visible,
+.composer-char-counter.composer-char-normal {
+  opacity: 0.7;
+}
+.composer-char-counter.composer-char-warning {
+  color: var(--warning);
+  opacity: 1;
+}
+.composer-char-counter.composer-char-danger {
+  color: var(--danger);
+  opacity: 1;
+}
 
 @keyframes composer-toast-enter {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
-.composer-undo-toast { animation: composer-toast-enter 200ms ease-out; }
+.composer-undo-toast {
+  animation: composer-toast-enter 200ms ease-out;
+}
 
 :root.light .nav-rail-btn:hover {
   background: var(--bg-hover) !important;
@@ -3152,6 +3424,11 @@ body.theme-transitioning *::after {
   box-shadow:
     0 0 0 2px rgba(100, 113, 240, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.5) !important;
+}
+:root.light .composer-shell.composer-home-variant {
+  background: color-mix(in oklch, var(--bg-raised) 70%, transparent) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 /* ── E. 顶部 Tabs — 渐变下划线 ──────────────────────────── */

@@ -1,0 +1,23 @@
+[
+  {
+    "pageName": "plugins-desktop-control",
+    "viewportName": "desktop",
+    "screenshotPath": "/home/await/project/OpenAWork/.tmp/visual-qa/desktop-control-settings-current/plugins-desktop-control-desktop.png",
+    "pageErrors": [],
+    "consoleErrors": []
+  },
+  {
+    "pageName": "plugins-desktop-control",
+    "viewportName": "tablet",
+    "screenshotPath": "/home/await/project/OpenAWork/.tmp/visual-qa/desktop-control-settings-current/plugins-desktop-control-tablet.png",
+    "pageErrors": [],
+    "consoleErrors": []
+  },
+  {
+    "pageName": "plugins-desktop-control",
+    "viewportName": "mobile",
+    "screenshotPath": "/home/await/project/OpenAWork/.tmp/visual-qa/desktop-control-settings-current/plugins-desktop-control-mobile.png",
+    "pageErrors": [],
+    "consoleErrors": []
+  }
+]

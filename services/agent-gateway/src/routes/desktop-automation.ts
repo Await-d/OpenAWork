@@ -98,6 +98,51 @@ export async function desktopAutomationRoutes(app: FastifyInstance): Promise<voi
   );
 
   app.post(
+    '/desktop-automation/back',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'desktop-automation.back');
+      try {
+        await desktopAutomationManager.back();
+        step.succeed();
+        return reply.send({ ok: true });
+      } catch (error) {
+        return failDesktopAutomationRoute(request, reply, step, '返回上一页', error);
+      }
+    },
+  );
+
+  app.post(
+    '/desktop-automation/forward',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'desktop-automation.forward');
+      try {
+        await desktopAutomationManager.forward();
+        step.succeed();
+        return reply.send({ ok: true });
+      } catch (error) {
+        return failDesktopAutomationRoute(request, reply, step, '前进到下一页', error);
+      }
+    },
+  );
+
+  app.post(
+    '/desktop-automation/reload',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'desktop-automation.reload');
+      try {
+        await desktopAutomationManager.reload();
+        step.succeed();
+        return reply.send({ ok: true });
+      } catch (error) {
+        return failDesktopAutomationRoute(request, reply, step, '刷新桌面自动化页面', error);
+      }
+    },
+  );
+
+  app.post(
     '/desktop-automation/click',
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
@@ -128,6 +173,99 @@ export async function desktopAutomationRoutes(app: FastifyInstance): Promise<voi
         return reply.send({ ok: true });
       } catch (error) {
         return failDesktopAutomationRoute(request, reply, step, '执行桌面自动化输入', error);
+      }
+    },
+  );
+
+  app.post(
+    '/desktop-automation/press',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'desktop-automation.press');
+      const body = parseBody(
+        z.object({ selector: z.string().min(1), key: z.string().min(1) }),
+        request.body,
+      );
+      try {
+        await desktopAutomationManager.press(body.selector, body.key);
+        step.succeed();
+        return reply.send({ ok: true });
+      } catch (error) {
+        return failDesktopAutomationRoute(request, reply, step, '执行桌面自动化按键', error);
+      }
+    },
+  );
+
+  app.post(
+    '/desktop-automation/scroll',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'desktop-automation.scroll');
+      const body = parseBody(
+        z.object({
+          direction: z.enum(['up', 'down']).default('down'),
+          amount: z.number().int().min(1).max(10000).optional(),
+        }),
+        request.body,
+      );
+      try {
+        await desktopAutomationManager.scroll(body.direction, body.amount);
+        step.succeed();
+        return reply.send({ ok: true });
+      } catch (error) {
+        return failDesktopAutomationRoute(request, reply, step, '执行桌面自动化滚动', error);
+      }
+    },
+  );
+
+  app.post(
+    '/desktop-automation/wait',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'desktop-automation.wait');
+      const body = parseBody(
+        z.object({
+          ms: z.number().int().min(0).max(60000).optional(),
+          selector: z.string().min(1).optional(),
+        }),
+        request.body,
+      );
+      try {
+        await desktopAutomationManager.wait(body);
+        step.succeed();
+        return reply.send({ ok: true });
+      } catch (error) {
+        return failDesktopAutomationRoute(request, reply, step, '等待桌面自动化页面', error);
+      }
+    },
+  );
+
+  app.post(
+    '/desktop-automation/content',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'desktop-automation.content');
+      try {
+        const content = await desktopAutomationManager.content();
+        step.succeed(undefined, { bytes: content.length });
+        return reply.send({ content });
+      } catch (error) {
+        return failDesktopAutomationRoute(request, reply, step, '读取桌面自动化页面内容', error);
+      }
+    },
+  );
+
+  app.post(
+    '/desktop-automation/snapshot',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'desktop-automation.snapshot');
+      try {
+        const snapshot = await desktopAutomationManager.snapshot();
+        step.succeed(undefined, { url: snapshot.url });
+        return reply.send({ snapshot });
+      } catch (error) {
+        return failDesktopAutomationRoute(request, reply, step, '读取桌面自动化页面快照', error);
       }
     },
   );

@@ -115,6 +115,7 @@ vi.mock('../runtime/shell/controls/ConversationArea.js', () => ({
     onNewSession,
     onSubmitMessage,
     onSelectSuggestion,
+    sidePanel,
   }: {
     topBar?: React.ReactNode;
     messagesOverride?: React.ReactNode;
@@ -122,6 +123,7 @@ vi.mock('../runtime/shell/controls/ConversationArea.js', () => ({
     onNewSession?: (() => void) | undefined;
     onSubmitMessage?: ((text: string) => void | Promise<void>) | undefined;
     onSelectSuggestion?: ((text: string) => void | Promise<void>) | undefined;
+    sidePanel?: React.ReactNode;
   }) => (
     <div>
       <div>{topBar}</div>
@@ -131,6 +133,7 @@ vi.mock('../runtime/shell/controls/ConversationArea.js', () => ({
         data-suggestion-enabled={String(Boolean(onSelectSuggestion))}
       />
       <div>{messagesOverride ?? fallbackContent}</div>
+      {sidePanel ? <aside data-testid="conversation-area-side-panel">{sidePanel}</aside> : null}
       {onNewSession ? (
         <button type="button" data-testid="conversation-open-new-session" onClick={onNewSession}>
           新建会话入口
@@ -192,15 +195,18 @@ vi.mock('./team-page-v2-panels.js', () => ({
   IdleHint: () => <div data-testid="idle-hint" />,
   TeamFocusHandoffBanner: () => null,
   TeamPageSuperbarLeading: ({
+    activeWorkspaceName,
     memberCount,
     onlineCount,
     selectedTeam,
   }: {
+    activeWorkspaceName?: string;
     memberCount: string;
     onlineCount: string;
     selectedTeam: { title: string; subtitle: string } | null;
   }) => (
     <div>
+      <span data-testid="team-superbar-workspace-name">{activeWorkspaceName}</span>
       <div
         data-testid="workspace-switcher"
         data-create-enabled={String(Boolean(authState.accessToken))}
@@ -399,13 +405,16 @@ vi.mock('../runtime/shell/session-view/LayerConversationDrawer.js', () => ({
 
 vi.mock('../runtime/tabs/MiddleTabRouter.js', () => ({
   renderMiddleTabContent: ({
+    middleTab,
     onCancelHandoff,
     onUseTemplate,
   }: {
+    middleTab: string;
     onCancelHandoff: (handoffId: string) => void;
     onUseTemplate?: (templateId: string) => void;
   }) => (
     <div>
+      <span data-testid="middle-tab-key">{middleTab}</span>
       <button
         type="button"
         data-testid="middle-tab-content"
@@ -425,9 +434,21 @@ vi.mock('../runtime/tabs/MiddleTabRouter.js', () => ({
 }));
 
 vi.mock('../runtime/tabs/team-page-v2-tabs.js', () => ({
-  LEAF_TO_PRIMARY: new Map([['conversation', 'conversation']]),
-  MIDDLE_TAB_KEYS: new Set(['conversation', 'health']),
-  getDefaultLeafFor: () => 'conversation',
+  LEAF_TO_PRIMARY: new Map([
+    ['dashboard', 'overview'],
+    ['conversation', 'conversation'],
+    ['health', 'overview'],
+  ]),
+  MIDDLE_TAB_KEYS: new Set(['dashboard', 'conversation', 'health']),
+  PRIMARY_TABS: [
+    { key: 'overview', label: '概览', icon: 'overview', children: [] },
+    { key: 'conversation', label: '对话', icon: 'conversation', children: [] },
+    { key: 'tasks', label: '任务', icon: 'tasks', children: [] },
+    { key: 'metrics', label: '度量', icon: 'metrics', children: [] },
+    { key: 'governance', label: '治理', icon: 'governance', children: [] },
+  ],
+  getDefaultLeafFor: (primaryKey: string) =>
+    primaryKey === 'conversation' ? 'conversation' : 'dashboard',
 }));
 
 vi.mock('../runtime/tabs/team-runtime-navigation.js', () => ({
@@ -769,6 +790,85 @@ import TeamPageV2 from './TeamPageV2.js';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
 
 describe('TeamPageV2', () => {
+  it('fusion 默认首屏展示团队概览并保留团队工作台侧栏', async () => {
+    const { container } = renderPage();
+
+    expect(screen.getByTestId('team-sidebar')).toBeTruthy();
+    expect(container.querySelector('.team-v2-root')?.getAttribute('data-workbench-layout')).toBe(
+      'fusion',
+    );
+    expect(
+      container
+        .querySelector('.team-v2-workspace-sidebar-shell')
+        ?.getAttribute('data-workbench-layout'),
+    ).toBe('fusion');
+    expect(
+      (container.querySelector('.team-v2-main-shell') as HTMLElement | null)?.style
+        .gridTemplateColumns,
+    ).toBe('244px 1fr');
+    expect(screen.getByTestId('middle-tab-key').textContent).toBe('dashboard');
+    expect(screen.getByTestId('conversation-area-side-panel')).toBeTruthy();
+    expect(container.querySelector('.team-v2-fusion-side-panel')).toBeTruthy();
+    expect(screen.getByLabelText('团队工作台上下文').textContent).toContain('根会话');
+    expect(screen.getByLabelText('团队工作台上下文').textContent).toContain('Handoff1');
+    expect(screen.getByLabelText('团队运行摘要').textContent).toContain('活跃 1 / 共 1');
+  });
+
+  it('URL 指定工作区但接口暂未返回详情时仍展示路由工作区', async () => {
+    routeState.teamWorkspaceId = 'workspace-alpha';
+    testState.workspaceState = {
+      activeWorkspace: null,
+      error: '加载团队工作区失败。',
+      loading: false,
+      refresh: mocks.refreshWorkspaces,
+      workspaces: [],
+    };
+
+    renderPage();
+
+    expect(screen.getByTestId('team-superbar-workspace-name').textContent).toBe('workspace-alpha');
+  });
+
+  it('点击团队侧栏会话后切回对话视图并打开对应会话', async () => {
+    testState.data = {
+      ...createReferenceData('running'),
+      workspaceGroups: [
+        {
+          sessions: [
+            {
+              id: 'session-root',
+              status: 'running',
+              subtitle: '运行中',
+              title: '根会话',
+              updatedAt: '2026-06-04T09:00:00.000Z',
+            },
+            {
+              id: 'session-pm1',
+              status: 'running',
+              subtitle: 'PM1',
+              title: 'PM1 会话',
+              updatedAt: '2026-06-04T09:01:00.000Z',
+            },
+          ],
+          workspaceLabel: 'workspace/demo',
+          workspacePath: '/workspace/demo',
+        },
+      ],
+    };
+
+    renderPage();
+
+    expect(screen.getByTestId('middle-tab-key').textContent).toBe('dashboard');
+    fireEvent.click(screen.getByRole('button', { name: 'PM1 会话' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('team-conversation-view').getAttribute('data-session-id')).toBe(
+        'session-pm1',
+      );
+    });
+    expect(localStorage.getItem('teamV2.middleTab')).toBe('conversation');
+  });
+
   it('顶部栏会持续显示当前选中的会话标题', async () => {
     renderPage();
 
@@ -806,6 +906,7 @@ describe('TeamPageV2', () => {
   });
 
   it('选中共享会话时，对话主 tab 会显示共享详情而不是误挂本地 TeamConversationView', async () => {
+    localStorage.setItem('teamV2.middleTab', 'conversation');
     testState.data = {
       ...createReferenceData('running'),
       activeSharedSession: {
@@ -960,6 +1061,7 @@ describe('TeamPageV2', () => {
   });
 
   it('切换 selectedTeamId 时会把新的会话 id 传给右侧 TeamConversationView', async () => {
+    localStorage.setItem('teamV2.middleTab', 'conversation');
     testState.data = {
       ...createReferenceData('running'),
       workspaceGroups: [
@@ -1003,6 +1105,7 @@ describe('TeamPageV2', () => {
   });
 
   it('共享会话仅存在于 snapshot/workspaceGroups 时，仍按共享会话路由而不是误判为本地会话', async () => {
+    localStorage.setItem('teamV2.middleTab', 'conversation');
     testState.data = {
       ...createReferenceData('running'),
       activeSharedSession: null,

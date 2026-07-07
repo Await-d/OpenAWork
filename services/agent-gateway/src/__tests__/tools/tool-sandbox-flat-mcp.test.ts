@@ -58,12 +58,24 @@ import { createDefaultSandbox } from '../../tools/tool-sandbox.js';
 describe('tool-sandbox flat MCP routing (PR-C)', () => {
   beforeEach(() => {
     mocks.callMcpToolForSessionMock.mockReset();
+    mocks.listMcpToolsForSessionMock.mockReset();
+    mocks.listMcpToolsForSessionMock.mockResolvedValue([]);
     mocks.getConfiguredMcpServerForSessionMock.mockReset();
     mocks.getConfiguredMcpServerForSessionMock.mockReturnValue({
       id: 'github',
       name: 'GitHub',
       transport: 'sse',
       enabled: true,
+    });
+    mocks.sqliteGetMock.mockReset();
+    mocks.sqliteGetMock.mockImplementation((query: string) => {
+      if (query.includes('SELECT user_id FROM sessions')) {
+        return { user_id: 'user-1' };
+      }
+      if (query.includes('SELECT metadata_json')) {
+        return { metadata_json: '{}' };
+      }
+      return undefined;
     });
   });
 
@@ -203,5 +215,44 @@ describe('tool-sandbox flat MCP routing (PR-C)', () => {
         toolName: 'create_issue',
       });
     }
+  });
+
+  it('keeps team sessions on an empty MCP allowlist when no server is explicitly requested', async () => {
+    mocks.listMcpToolsForSessionMock.mockResolvedValueOnce([]);
+    mocks.sqliteGetMock.mockImplementation((query: string) => {
+      if (query.includes('SELECT user_id FROM sessions')) {
+        return { user_id: 'user-1' };
+      }
+      if (query.includes('SELECT metadata_json')) {
+        return {
+          metadata_json: JSON.stringify({
+            requestedMcpServers: [],
+            teamRoleInstance: { roleLayer: 'executor' },
+          }),
+        };
+      }
+      return undefined;
+    });
+
+    const sandbox = createDefaultSandbox();
+    const result = await sandbox.execute(
+      {
+        toolCallId: 'call-mcp-list-team-empty',
+        toolName: 'mcp_list_tools',
+        rawInput: {},
+      },
+      new AbortController().signal,
+      'session-1',
+      {
+        clientRequestId: 'req-mcp-list-team-empty',
+        nextRound: 1,
+        requestData: { clientRequestId: 'req-mcp-list-team-empty' },
+      },
+    );
+
+    expect(result.isError).toBe(false);
+    expect(mocks.listMcpToolsForSessionMock).toHaveBeenCalledWith('session-1', {
+      allowedServerIds: [],
+    });
   });
 });

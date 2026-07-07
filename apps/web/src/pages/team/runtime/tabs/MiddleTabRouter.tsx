@@ -60,6 +60,7 @@ export type MiddleTabKey =
   | 'review'
   | 'timing'
   | 'usage'
+  | 'tools'
   | 'templates'
   | 'shares'
   | 'audit'
@@ -279,6 +280,18 @@ export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
     case 'usage':
       return (
         <UsageView
+          selectedSessionId={selectedSharedSession ? selectedTeamId : runtimeSelectedSessionId}
+          selectedSessionIsShared={selectedSharedSession}
+          selectedSessionTitle={
+            selectedSharedSession ? (selectedTeam?.title ?? null) : runtimeSelectedSessionTitle
+          }
+        />
+      );
+
+    case 'tools':
+      return (
+        <UsageView
+          initialMode="tools"
           selectedSessionId={selectedSharedSession ? selectedTeamId : runtimeSelectedSessionId}
           selectedSessionIsShared={selectedSharedSession}
           selectedSessionTitle={

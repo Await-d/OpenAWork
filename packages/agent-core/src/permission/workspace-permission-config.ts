@@ -280,6 +280,13 @@ export const PERMISSION_CATEGORIES: PermissionCategoryMeta[] = [
     defaultAction: 'ask',
     supportsPatterns: false,
   },
+  {
+    id: 'desktop_control',
+    label: '系统桌面控制',
+    description: '控制本机系统桌面截图、鼠标和键盘',
+    defaultAction: 'ask',
+    supportsPatterns: false,
+  },
 ];
 
 /** Map a tool name to its permission category (like opencode's ctx.ask permission field). */
@@ -312,6 +319,7 @@ export function resolvePermissionCategory(toolName: string): string {
     workspace_review_revert: 'edit',
     ast_grep_replace: 'edit',
     desktop_automation: 'desktop_automation',
+    desktop_control: 'desktop_control',
   };
   if (toolName in TOOL_TO_CATEGORY) return TOOL_TO_CATEGORY[toolName]!;
   if (toolName.startsWith('custom_')) return 'custom';

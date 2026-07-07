@@ -57,10 +57,17 @@ describe('TeamTabBar', () => {
     expect(onMiddleChange).toHaveBeenCalledWith('health');
   });
 
-  it('对话主 tab 子视图含「层级」与「当前对话」', () => {
+  it('对话主 tab 子视图含「层级流动」与「当前对话」', () => {
     renderBar({ activePrimary: 'conversation', middleTab: 'conversation' });
-    expect(screen.getByText('层级')).toBeTruthy();
+    expect(screen.getByText('层级流动')).toBeTruthy();
     expect(screen.getByText('当前对话')).toBeTruthy();
+  });
+
+  it('度量主 tab 子视图含「用量」「耗时」「工具调用」', () => {
+    renderBar({ activePrimary: 'metrics', middleTab: 'usage' });
+    expect(screen.getByText('用量')).toBeTruthy();
+    expect(screen.getByText('耗时')).toBeTruthy();
+    expect(screen.getByText('工具调用')).toBeTruthy();
   });
 
   it('3D 办公按钮点击触发回调', () => {

@@ -1,4 +1,6 @@
 import type { ReactElement, ReactNode } from 'react';
+export { InlineEditor } from '../../../../../packages/shared-ui/src/primitives/InlineEditor.js';
+export type { InlineEditorProps } from '../../../../../packages/shared-ui/src/primitives/InlineEditor.js';
 
 export interface GenerativeUIMessage {
   payload?: Record<string, unknown>;
@@ -7,6 +9,25 @@ export interface GenerativeUIMessage {
 
 export function GenerativeUIRenderer(_props: { message: GenerativeUIMessage }): ReactNode {
   return null;
+}
+
+export interface UnifiedCodeDiffProps {
+  afterText?: string;
+  beforeText?: string;
+  chrome?: 'default' | 'minimal';
+  diffText?: string;
+  filePath?: string;
+  maxHeight?: number;
+  viewMode?: 'split' | 'unified';
+}
+
+export function UnifiedCodeDiff(props: UnifiedCodeDiffProps): ReactElement {
+  return (
+    <div data-testid="unified-code-diff">
+      {props.filePath ? <div>{props.filePath}</div> : null}
+      <pre>{props.diffText ?? `${props.beforeText ?? ''}${props.afterText ?? ''}`}</pre>
+    </div>
+  );
 }
 
 export interface AlwaysScopeLevel {
@@ -296,7 +317,10 @@ export function canConfigureThinkingForModel(
   const actualModelId = leafModelId(modelId);
 
   if (effectiveType === 'openai') {
-    return inferSupportsThinking(providerType, modelId, false) && !/^gpt-5(?:\.\d+)?-pro/.test(actualModelId);
+    return (
+      inferSupportsThinking(providerType, modelId, false) &&
+      !/^gpt-5(?:\.\d+)?-pro/.test(actualModelId)
+    );
   }
   if (effectiveType === 'deepseek') {
     return !actualModelId.includes('reasoner');

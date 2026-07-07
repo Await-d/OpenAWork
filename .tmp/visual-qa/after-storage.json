@@ -1,0 +1,30 @@
+{
+  "cookies": [],
+  "origins": [
+    {
+      "origin": "http://127.0.0.1:5176",
+      "localStorage": [
+        {
+          "name": "theme",
+          "value": "light"
+        },
+        {
+          "name": "openAwork-ui-state",
+          "value": "{\"state\":{\"leftSidebarOpen\":false,\"navRailExpanded\":null,\"sidebarTab\":\"sessions\",\"sidebarViewMode\":\"sessions\",\"sidebarPanelWidth\":288,\"sidebarPanelOpened\":true,\"teamSplitPos\":50,\"teamEditorMode\":\"overlay\",\"workbenchLayoutMode\":\"fusion\",\"chatView\":\"session\",\"lastChatPath\":null,\"tabs\":[],\"activeTabId\":null,\"teamNewSessionSignal\":null,\"teamSelectSessionSignal\":null,\"activeTeamSessionId\":null,\"pinnedSessions\":[],\"expandedDirs\":[],\"fileTreeRootPath\":null,\"workspaceTreeVersion\":0,\"savedWorkspacePaths\":[],\"selectedWorkspacePath\":null,\"activeSessionWorkspace\":null,\"sessionListPathFilterEnabled\":false,\"sessionListPathFilterFeatureEnabled\":true,\"sessionsListPaneWidth\":320,\"sessionsCollapsedWorkspaceGroups\":[],\"sessionsScopeFilter\":\"all\",\"sessionsCollapsedScopes\":[],\"editorMode\":false,\"editorFullScreen\":false,\"splitPos\":50,\"openFilePathsByWorkspace\":{},\"activeFilePathByWorkspace\":{},\"editorPaneTabByWorkspace\":{},\"browserPreviewUrl\":null,\"browserActive\":false,\"browserPreviewUrlByWorkspace\":{},\"rightOpen\":false,\"rightTab\":\"overview\",\"reviewPanelOpened\":true,\"reviewPanelWidth\":400,\"sidePanelActiveTab\":\"review\",\"terminalPanelOpened\":false,\"terminalPanelHeight\":160,\"quickTerminalOpenByWorkspace\":{},\"quickTerminalHeight\":280,\"quickTerminalActiveIdByWorkspace\":{}},\"version\":18}"
+        },
+        {
+          "name": "telemetry_consent_shown",
+          "value": "1"
+        },
+        {
+          "name": "onboarded",
+          "value": "1"
+        },
+        {
+          "name": "auth-store",
+          "value": "{\"state\":{\"accessToken\":null,\"refreshToken\":null,\"tokenExpiresAt\":null,\"email\":null,\"gatewayUrl\":\"http://localhost:3000\",\"webAccessEnabled\":false,\"webPort\":3000,\"webExposeLan\":false},\"version\":0}"
+        }
+      ]
+    }
+  ]
+}

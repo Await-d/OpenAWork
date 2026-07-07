@@ -249,6 +249,7 @@ type SDKModule = {
   StdioClientTransport: new (config: {
     command: string;
     args?: string[];
+    cwd?: string;
     env?: Record<string, string>;
   }) => unknown;
 };
@@ -354,7 +355,8 @@ export class MCPClientAdapterImpl implements MCPClientAdapter {
         new sdk.StdioClientTransport({
           command: server.command,
           args: server.args ?? [],
-          env,
+          cwd: server.cwd,
+          env: { ...env, ...(server.env ?? {}) },
         }),
       );
     } else {

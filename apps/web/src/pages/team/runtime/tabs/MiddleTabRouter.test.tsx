@@ -9,7 +9,11 @@ const childState = vi.hoisted(() => ({
     selectedSessionId?: string | null;
     selectedSessionTitle?: string | null;
   },
-  usage: null as null | { selectedSessionId?: string | null; selectedSessionTitle?: string | null },
+  usage: null as null | {
+    initialMode?: 'usage' | 'tools';
+    selectedSessionId?: string | null;
+    selectedSessionTitle?: string | null;
+  },
   timing: null as null | {
     selectedSessionId?: string | null;
     selectedSessionTitle?: string | null;
@@ -42,6 +46,7 @@ vi.mock('./overview/HealthView.js', () => ({
 
 vi.mock('./metrics/UsageView.js', () => ({
   UsageView: (props: {
+    initialMode?: 'usage' | 'tools';
     selectedSessionId?: string | null;
     selectedSessionTitle?: string | null;
   }) => {
@@ -233,7 +238,7 @@ function buildArgs(overrides: Partial<MiddleTabRenderArgs> = {}): MiddleTabRende
 }
 
 describe('renderMiddleTabContent', () => {
-  it('选中共享会话时，health / usage / timing 会走共享链路', () => {
+  it('选中共享会话时，health / usage / timing / tools 会走共享链路', () => {
     render(renderMiddleTabContent(buildArgs({ middleTab: 'health' })));
     expect(screen.getByTestId('health-view')).toBeTruthy();
     expect(childState.health).toMatchObject({
@@ -253,6 +258,15 @@ describe('renderMiddleTabContent', () => {
     render(renderMiddleTabContent(buildArgs({ middleTab: 'timing' })));
     expect(screen.getByTestId('timing-view')).toBeTruthy();
     expect(childState.timing).toMatchObject({
+      selectedSessionId: 'shared-1',
+      selectedSessionTitle: '共享会话 A',
+    });
+
+    cleanup();
+    render(renderMiddleTabContent(buildArgs({ middleTab: 'tools' })));
+    expect(screen.getByTestId('usage-view')).toBeTruthy();
+    expect(childState.usage).toMatchObject({
+      initialMode: 'tools',
       selectedSessionId: 'shared-1',
       selectedSessionTitle: '共享会话 A',
     });

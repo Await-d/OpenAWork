@@ -11,6 +11,8 @@ import {
   listSessionMessagesV2 as listSessionMessages,
 } from '../message/message-v2-adapter.js';
 import { sqliteGet, sqliteRun } from '../infra/db.js';
+import { recordUlwVerificationEvidence } from '../session/ulw-verification-evidence.js';
+import { withWorkflowRuntimeEvidenceArtifact } from '../session/workflow-runtime-state.js';
 
 const execFileAsync = promisify(execFile);
 const activeLoopExecutions = new Map<string, ActiveLoopRuntime>();
@@ -669,13 +671,26 @@ async function finalizeLoopExecution(
     });
     await config.taskManager.save(graph);
 
+    const pendingEvidence = recordUlwVerificationEvidence({
+      note: 'DONE checkpoint reached; waiting for /ulw-verify.',
+      prompt: config.target,
+      sessionId: config.sessionId,
+      status: 'pending',
+      taskId: task.id,
+      taskTitle: task.title,
+      userId: config.userId,
+    });
+    const pendingMetadata = withWorkflowRuntimeEvidenceArtifact(
+      markUlwVerificationPendingMetadata(session.metadata_json, task.id),
+      {
+        artifactId: pendingEvidence.artifactId,
+        status: 'pending',
+      },
+    );
+
     sqliteRun(
       "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
-      [
-        JSON.stringify(markUlwVerificationPendingMetadata(session.metadata_json, task.id)),
-        config.sessionId,
-        config.userId,
-      ],
+      [JSON.stringify(pendingMetadata), config.sessionId, config.userId],
     );
 
     appendSessionMessage({

@@ -1,11 +1,16 @@
 # .agentdocs 索引
 
 ## Active Workflows
+- [260707-omo-mcp-adapter-integration](workflow/260707-omo-mcp-adapter-integration.md) — OMO/LazyCodex MCP 适配器集成：9 任务 / Full orchestration；坚持 OpenAWork 原生 MCP runtime 为主路径，OMO/Hook 仅作为 typed manifest 输入源，落到 MCP catalog、flat tool 注入、sandbox 权限审计、Settings 管理与 team 最小授权链路
+- [260706-lazycodex-native-workflow](workflow/260706-lazycodex-native-workflow.md) — LazyCodex/OmO 原生化接入：8 任务 / 6 Wave / Full orchestration；不直接依赖 `lazycodex-ai`，而是把 `ulw-plan` / `start-work` / `ulw-loop` / skills / reviewer gate / 证据包映射到 OpenAWork 原生 session、run events、artifacts、skill registry、Web 对话 UI 与 Team runtime
 - [260704-composer-optimization](workflow/260704-composer-optimization.md) — 输入框 ChatComposer 整体优化：13 项 / 3 Phase / Full orchestration；拆分超限文件 + 动画微交互(发送脉冲/拖拽淡入/按钮微弹/弹窗入场/队列pill) + 功能增强(字符计数/placeholder轮换/Esc清空/大文本折叠) + 视觉样式(流式呼吸光效/home glassmorphism/工具栏分组)
 - [260704-companion-linkage-enhancement](workflow/260704-companion-linkage-enhancement.md) — 伴侣系统联动场景强化：8 任务 / 5 Phase / Full orchestration；补齐工具调用联动、错误/重试反应、附件/队列真实计数、空闲检测提醒、后端上下文增强
 - [260704-opencode-ui-layout-borrow-plan](workflow/260704-opencode-ui-layout-borrow-plan.md) — OpenCode UI 布局借鉴升级：6 波次方案（W1 顶部标签页栏 / W2 双层侧边栏 Rail+Panel / W3 会话页面板化 Diff+终端 / W4 消息时间线智能滚动+预取 / W5 首页视图双栏+时间分组 / W6 拖拽排序+内联重命名+命令扩充）；推荐执行顺序 W1→W3→W2→W4→W5→W6
+- [260705-layout-component-fusion](workflow/260705-layout-component-fusion.md) — 布局组件化融合方案：8 任务 / 4 Phase / Full orchestration；补齐母方案 W3/W4 缺失组件文件（TitlebarTabStrip / PanelResizeHandle / ReviewPanel / TerminalPanel），将 uiState store 已就绪状态接入真实 UI，清理纯 demo 产物
+- [260706-fusion-layout-t1-s2-refactor](workflow/260706-fusion-layout-t1-s2-refactor.md) — 融合布局重构 T1+S2：5 波次 / Full orchestration；Titlebar 精简为纯标签栏+⚙菜单 / AppSidebar 拆为 Rail(64px 项目头像)+Panel(244px 扁平会话) / SessionPanel 卡片化+弹性宽度 / 侧面板 Tab 聚合(审查/文件/Context) / 终端底部横跨全宽+折叠窄条
 
 ## Done Workflows
+- [260706-desktop-control-plugin-integration](workflow/done/260706-desktop-control-plugin-integration.md) — ✅ 已完成 2026-07-06：系统桌面控制插件集成闭环，包含前端插件开关、工作区状态/操作控制台、`plugin_settings.desktopControl`、后端按用户注入过滤、sandbox 二次门控、desktop-control route/web-client、Tauri loopback bridge 与多项验证
 - [260704-telemetry-consent-implementation](workflow/done/260704-telemetry-consent-implementation.md) — ✅ 已完成：遥测同意状态、网关遥测路由、web-client 封装、通用事件采集与 GitHub Issue 同步链路已收口
 - [260704-display-settings-expansion](workflow/done/260704-display-settings-expansion.md) — ✅ 已完成：显示设置新增推理块显隐、命令面板/网关状态/终端按钮显隐与主题模式切换
 - [260627-sidebar-layout-refactor-plan](workflow/done/260627-sidebar-layout-refactor-plan.md) — ✅ 已完成 2026-06-27：主界面左侧栏合并为统一 AppSidebar，路由与设置入口同步清理，typecheck 与 lint 通过
@@ -59,6 +64,8 @@
 - [260415-team-page-收口方案](workflow/done/260415-team-page-收口方案.md) — Team 页面收口、契约稳定化、shell adapter 与验收闭环
 
 ## Architecture Decisions
+- [2026-07-06] 系统桌面控制采用“用户级插件开关 + 后端工具注入过滤 + sandbox 二次门控 + Tauri loopback bridge”四层闭环：前端只保存意图，Agent 可见工具和实际执行权限均由 gateway 按 `plugin_settings.desktopControl.enabled` 判定，避免仅靠 UI 开关导致历史/恢复调用绕过门控。
+- [2026-07-06] LazyCodex/OmO 新版工作流只作为语义参考，不作为 OpenAWork runtime 依赖：计划发现、ULW/start-work、reviewer gate、证据包、skills 与团队角色分别落到 OpenAWork 原生 session/read model、`WorkflowRuntimeState`、`session_run_events`、artifacts、`@openAwork/skills`、agent catalog aliases 与 team `role_layer`；不得引入 `lazycodex-ai` SDK 或 Codex `agent_type` 作为产品协议。
 - [2026-05-23] ChatPage 流式域采用“状态容器 hook + 页面内 attach/recovery 协调层”分离；`useChatStreaming` 只承接流式 state/refs/reset/reveal，跨域 attach/recovery effect 继续留在 `ChatPage.tsx`，避免形成第二套流式真相源。
 - [2026-05-22] Team workspace 默认固定团队最终采用 `team_workspaces.default_team_roster_json` 持久化；新 session 默认快照使用 workspace roster，PM2 派发通过 `resolveAssignedMember()` 按 `taskProfile + roster` 选择具体 `assignedMember`。
 - [2026-05-22] Team 默认固定团队采用 visible member slots / specialist personas，而不是新增 `roleLayer`；DevOps/Platform 归 executor，Release 归 pm2，Security/SRE/Observability/Quality 归 reviewer，并在 session `teamDefinition.version=2` 中保存不可变快照。

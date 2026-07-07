@@ -40,6 +40,7 @@ import { ChatSessionSkeleton } from '../../../components/chat/session/chat-sessi
 import { InlineQuestionPanel } from '../../../components/chat/misc/InlineQuestionPanel.js';
 import { UnifiedComposer } from '../../../components/chat/composer/UnifiedComposer.js';
 import type {
+  UnifiedComposerActivity,
   UnifiedComposerFeatures,
   UnifiedComposerSubmitPayload,
 } from '../../../components/chat/composer/UnifiedComposer.js';
@@ -299,6 +300,7 @@ export interface ChatConversationViewProps {
   onContinueEditingImage?: () => void;
   onNavigateToArtifacts?: () => void;
   onSelectImageReferenceArtifactId?: (id: string | null) => void;
+  onCompanionActivityChange?: (activity: UnifiedComposerActivity) => void;
   markSessionMetadataDirty?: () => void;
   /** Context window usage to render inline next to the send button. */
   /** 会话统计数据，渲染在输入框下方 */
@@ -505,6 +507,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
     onContinueEditingImage,
     onNavigateToArtifacts,
     onSelectImageReferenceArtifactId,
+    onCompanionActivityChange,
     markSessionMetadataDirty,
     statsData,
     composerPlaceholder,
@@ -813,6 +816,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
           onContinueEditingImage={onContinueEditingImage}
           onNavigateToArtifacts={onNavigateToArtifacts}
           onSelectImageReferenceArtifactId={onSelectImageReferenceArtifactId}
+          onCompanionActivityChange={onCompanionActivityChange}
           markSessionMetadataDirty={markSessionMetadataDirty}
           statsData={statsData}
           placeholder={composerPlaceholder}
