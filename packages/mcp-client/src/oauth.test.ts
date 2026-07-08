@@ -52,6 +52,7 @@ describe('runOAuthCodeExchange', () => {
     const promise = runOAuthCodeExchange(fakeProvider, 'https://srv.example/mcp', 'code-1');
     const settled = expect(promise).rejects.toBeInstanceOf(MCPTimeoutError);
 
+    await vi.waitFor(() => expect(authMock).toHaveBeenCalledTimes(1));
     await vi.advanceTimersByTimeAsync(OAUTH_CODE_EXCHANGE_TIMEOUT_MS);
     await settled;
   });
