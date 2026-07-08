@@ -281,10 +281,12 @@ function findBoundTeamRoleSessionInstance(
   return row ? { metadataJson: row.metadata_json, sessionId: row.session_id } : null;
 }
 
-function bindTeamRoleSessionInstance(input: TeamRoleSessionLookupInput & {
-  displayName?: string | null;
-  sessionId: string;
-}): BoundTeamRoleSessionInstance {
+function bindTeamRoleSessionInstance(
+  input: TeamRoleSessionLookupInput & {
+    displayName?: string | null;
+    sessionId: string;
+  },
+): BoundTeamRoleSessionInstance {
   sqliteRun(
     `INSERT INTO team_role_session_instances (
        id, user_id, root_session_id, parent_session_id, role_layer, persona_key, session_id, display_name

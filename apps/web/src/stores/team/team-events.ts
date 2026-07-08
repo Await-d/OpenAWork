@@ -142,9 +142,13 @@ interface HandoffStoreState {
  * 因此 goal 必须排在最前，否则所有 PM2→executor/reviewer 的任务都会回退到
  * "层级名 · id短码"的无意义显示。
  */
-function extractHandoffSummary(payload: Record<string, unknown>): string | undefined {
+function extractHandoffSummary(payload: unknown): string | undefined {
+  if (typeof payload !== 'object' || payload === null) {
+    return undefined;
+  }
+  const record = payload as Record<string, unknown>;
   for (const key of ['goal', 'rewrittenIntent', 'sourceIntent', 'recommendedNextStep', 'summary']) {
-    const value = payload[key];
+    const value = record[key];
     if (typeof value === 'string' && value.trim().length > 0) {
       return value.trim();
     }

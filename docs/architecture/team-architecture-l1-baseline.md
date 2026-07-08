@@ -332,11 +332,11 @@ a → b → c → d → e/f/g 单向链式调用，**严格禁止**：
 
 #### L1.4.2 四个 escape hatch（v1.1 新增 #4）
 
-| Escape Hatch                       | 方向       | 协议                                                                          | 限制                                                                                                         |
-| ---------------------------------- | ---------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| **#1 escalation 反向通道**         | 任意层 → b | 通过 `session_inbound_messages` (message_type='escalation_request')           | 只能传结构化 escalation 事件，不能传业务数据；必须经 audit log；必须在 handoff_records.escalation_round 留痕 |
-| **#2 进度上报通道**                | 任意层 → b | 通过 EventEmitter 推送 progress event                                         | 只能传 substate 变更 + 进度数字（如 "3/8 task 完成"）；不携带业务上下文                                      |
-| **#3 cancel/pause 信号广播**       | b → 任意层 | 通过 `session_inbound_messages` (message_type='cancel_signal'/'pause_signal') | 只能携带控制信号；由各层主动检查（pull 模式）；级联生效（父→子）                                             |
+| Escape Hatch                       | 方向       | 协议                                                                          | 限制                                                                                                                                                                                |
+| ---------------------------------- | ---------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **#1 escalation 反向通道**         | 任意层 → b | 通过 `session_inbound_messages` (message_type='escalation_request')           | 只能传结构化 escalation 事件，不能传业务数据；必须经 audit log；必须在 handoff_records.escalation_round 留痕                                                                        |
+| **#2 进度上报通道**                | 任意层 → b | 通过 EventEmitter 推送 progress event                                         | 只能传 substate 变更 + 进度数字（如 "3/8 task 完成"）；不携带业务上下文                                                                                                             |
+| **#3 cancel/pause 信号广播**       | b → 任意层 | 通过 `session_inbound_messages` (message_type='cancel_signal'/'pause_signal') | 只能携带控制信号；由各层主动检查（pull 模式）；级联生效（父→子）                                                                                                                    |
 | **#4 迁移期 feature flag**（新增） | 老路径     | `OPENAWORK_TEAM_HANDOFF_MODE` 环境变量；`isHandoffModeEnabled()` 控制         | **临时**机制；新功能不允许走老路径；只能修 bug 不能加功能；Phase F+ 评估彻底删除时机 ⟶ **2026-06-01 复核：老路径已退役，flag/老路由在真实 `src/` 下零匹配，escape hatch #4 已退场** |
 
 #### L1.4.3 实施约束

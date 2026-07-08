@@ -43,7 +43,9 @@ const SAFE_FALLBACK_NAMES = new Set([
 ]);
 
 export function isTeamRoleLayer(value: string | null | undefined): value is TeamLayer {
-  return value !== null && value !== undefined && (TEAM_LAYERS as readonly string[]).includes(value);
+  return (
+    value !== null && value !== undefined && (TEAM_LAYERS as readonly string[]).includes(value)
+  );
 }
 
 /**
@@ -64,9 +66,8 @@ export async function applyTeamLayerToolGate(input: {
     // 原本只在 handoff watcher 启动时 import；这里兜底，重复 import 由 ESM 缓存去重）。
     await import('./builtin-instructions-impl.js');
     const { getInstructionsForLayer, toToolDefinition } = await import('./builtin-instructions.js');
-    const { filterToolsByAllowedSets, extractToolsetsFromMetadata } = await import(
-      './toolset-gate.js'
-    );
+    const { filterToolsByAllowedSets, extractToolsetsFromMetadata } =
+      await import('./toolset-gate.js');
 
     const caps = LAYER_CAPABILITIES[roleLayer];
     // 1. toolset 过滤：层白名单 ∩ 成员 toolsets，交集空退回层白名单，再并入层必备。
@@ -108,7 +109,6 @@ export async function applyTeamLayerToolGate(input: {
   }
 }
 
-
 /**
  * 给团队指令栈追加两段动态内容（stream.ts 与 stream-runtime.ts 共享，保证一致）：
  *   1. roster-manifest：watcher 写入 metadata.teamRosterManifest 的实时编制清单。
@@ -140,7 +140,11 @@ export function appendTeamDynamicInstructionBlocks(input: {
       ...nonMcp.map((n) => `- ${n}`),
     ];
     if (mcp.length > 0) {
-      lines.push('', '已为你绑定的 MCP 工具（按需调用，参数见各工具定义）：', ...mcp.map((n) => `- ${n}`));
+      lines.push(
+        '',
+        '已为你绑定的 MCP 工具（按需调用，参数见各工具定义）：',
+        ...mcp.map((n) => `- ${n}`),
+      );
     }
     const block = `<team-instruction layer="available-tools">\n${lines.join('\n')}\n</team-instruction>`;
     stack = stack ? `${stack}\n\n${block}` : block;

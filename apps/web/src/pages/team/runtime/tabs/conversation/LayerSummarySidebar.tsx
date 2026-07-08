@@ -59,7 +59,10 @@ interface LayerSummarySidebarProps {
   artifactError: string | null;
   artifactLoading: boolean;
   dialoguePreview: ReturnType<typeof resolveIncomingDialoguePreview>;
-  row: Pick<LayerConversationRow, 'detail' | 'roleLayer' | 'sessionId' | 'state' | 'displayName' | 'personaKey'>;
+  row: Pick<
+    LayerConversationRow,
+    'detail' | 'roleLayer' | 'sessionId' | 'state' | 'displayName' | 'personaKey'
+  >;
   planArtifact: { content: string; title: string } | null;
   reviewArtifact: { content: string; title: string } | null;
   sessionLabel?: string | null;
@@ -107,7 +110,9 @@ function SummaryHero({
         </span>
         <div style={{ display: 'grid', gap: 2, minWidth: 0 }}>
           <strong style={{ fontSize: 12, color: 'var(--fg-strong)' }}>{title}</strong>
-          <span style={{ fontSize: 11, color: toneColor, fontWeight: 700 }}>{identityCodeLabel}</span>
+          <span style={{ fontSize: 11, color: toneColor, fontWeight: 700 }}>
+            {identityCodeLabel}
+          </span>
         </div>
       </div>
       <span style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.6 }}>{note}</span>
@@ -115,11 +120,7 @@ function SummaryHero({
   );
 }
 
-function SummaryBadges({
-  labels,
-}: {
-  labels: string[];
-}) {
+function SummaryBadges({ labels }: { labels: string[] }) {
   return (
     <div style={BADGE_ROW_STYLE}>
       {labels.map((label) => (
@@ -131,16 +132,12 @@ function SummaryBadges({
   );
 }
 
-function SummaryTextBlock({
-  body,
-  title,
-}: {
-  body: string;
-  title: string;
-}) {
+function SummaryTextBlock({ body, title }: { body: string; title: string }) {
   return (
     <div style={{ ...SECTION_STYLE, color: 'var(--fg-default)', fontSize: 11, lineHeight: 1.6 }}>
-      <strong style={{ display: 'block', marginBottom: 4, fontSize: 11, color: 'var(--fg-strong)' }}>
+      <strong
+        style={{ display: 'block', marginBottom: 4, fontSize: 11, color: 'var(--fg-strong)' }}
+      >
         {title}
       </strong>
       {body}
@@ -165,7 +162,15 @@ function PrimaryLensBlock({
         background: `color-mix(in srgb, ${toneColor} 8%, transparent)`,
       }}
     >
-      <strong style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--fg-strong)' }}>
+      <strong
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          fontSize: 11,
+          color: 'var(--fg-strong)',
+        }}
+      >
         <span
           aria-hidden
           style={{
@@ -334,30 +339,29 @@ export function LayerSummarySidebar({
   const summaryBlock = (
     <SummaryTextBlock body={row.detail} title={summaryTitle ?? presentation.summaryCardTitle} />
   );
-  const artifactBlock =
-    artifactLoading ? (
-      <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>正在加载当前层级产物摘要…</div>
-    ) : artifactSequence.length > 0 || dialoguePreview ? (
-      renderLayerSummaryContent({
-        artifactSequence,
-        dialoguePreview,
-        presentation,
-        roleLayer: row.roleLayer,
-      })
-    ) : (
-      <div
-        style={{
-          padding: '10px 12px',
-          borderRadius: 10,
-          border: '1px dashed color-mix(in srgb, var(--border-default) 48%, transparent)',
-          color: 'var(--fg-muted)',
-          fontSize: 11,
-          lineHeight: 1.6,
-        }}
-      >
-        {presentation.emptyMessage}
-      </div>
-    );
+  const artifactBlock = artifactLoading ? (
+    <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>正在加载当前层级产物摘要…</div>
+  ) : artifactSequence.length > 0 || dialoguePreview ? (
+    renderLayerSummaryContent({
+      artifactSequence,
+      dialoguePreview,
+      presentation,
+      roleLayer: row.roleLayer,
+    })
+  ) : (
+    <div
+      style={{
+        padding: '10px 12px',
+        borderRadius: 10,
+        border: '1px dashed color-mix(in srgb, var(--border-default) 48%, transparent)',
+        color: 'var(--fg-muted)',
+        fontSize: 11,
+        lineHeight: 1.6,
+      }}
+    >
+      {presentation.emptyMessage}
+    </div>
+  );
   const orderedSections = presentation.sectionOrder
     .map((section, index) => {
       switch (section) {

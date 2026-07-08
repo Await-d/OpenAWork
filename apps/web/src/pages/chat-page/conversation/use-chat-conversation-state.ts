@@ -335,7 +335,9 @@ export function useChatConversationState(
     null,
   );
   const [streamError, setStreamError] = useState<string | null>(null);
-  const [latestUpstreamSummary, setLatestUpstreamSummary] = useState<UpstreamStreamSummary | null>(null);
+  const [latestUpstreamSummary, setLatestUpstreamSummary] = useState<UpstreamStreamSummary | null>(
+    null,
+  );
   const [activeStreamStartedAt, setActiveStreamStartedAt] = useState<number | null>(null);
   const [activeStreamFirstTokenLatencyMs, setActiveStreamFirstTokenLatencyMs] = useState<
     number | null
@@ -451,7 +453,9 @@ export function useChatConversationState(
 
       const normalized = normalizeChatMessages(recovery.session?.messages ?? []);
       setMessages(normalized);
-      setLatestUpstreamSummary(extractLatestUpstreamSummaryFromRunEvents(recovery.session?.runEvents));
+      setLatestUpstreamSummary(
+        extractLatestUpstreamSummaryFromRunEvents(recovery.session?.runEvents),
+      );
 
       const stateStatus = (recovery.session?.state_status ?? null) as SessionStateStatus | null;
       setSessionStateStatus(stateStatus);

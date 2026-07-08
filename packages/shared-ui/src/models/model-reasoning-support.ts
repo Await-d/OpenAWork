@@ -90,10 +90,7 @@ function inferVendorFromModelId(modelId: string): string | undefined {
 }
 
 // 归一化 providerType：当是 openai/custom 时尝试通过 modelId 推断真实厂商。
-function resolveEffectiveProviderType(
-  providerType: string,
-  modelId: string,
-): string {
+function resolveEffectiveProviderType(providerType: string, modelId: string): string {
   if (providerType === 'openai' || providerType === 'custom') {
     return inferVendorFromModelId(modelId) ?? providerType;
   }
@@ -286,9 +283,7 @@ const QWEN_REASONING_EFFORTS = [
 // 上游 API 不暴露 thinking_budget / effort / thinking_level 等力度参数，
 // 展示多档位会误导用户。返回单档 'medium' 作为"开启思考"的默认选项，
 // UI 上表现为"关闭思考" + "开启思考"二选一。
-const BINARY_TOGGLE_EFFORTS = [
-  'medium',
-] as const satisfies readonly SupportedReasoningEffort[];
+const BINARY_TOGGLE_EFFORTS = ['medium'] as const satisfies readonly SupportedReasoningEffort[];
 
 export function getSupportedReasoningEffortsForModel(
   providerType: string | undefined,

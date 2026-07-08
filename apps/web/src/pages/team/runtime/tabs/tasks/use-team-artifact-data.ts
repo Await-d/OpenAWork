@@ -95,7 +95,10 @@ async function loadLatestArtifactResult(input: {
             ? result.artifacts.filter((artifact) => {
                 const createdAtMs =
                   typeof artifact.createdAt === 'string' ? Date.parse(artifact.createdAt) : NaN;
-                return Number.isNaN(createdAtMs) || createdAtMs <= input.preferredArtifactCreatedBeforeMs!;
+                return (
+                  Number.isNaN(createdAtMs) ||
+                  createdAtMs <= input.preferredArtifactCreatedBeforeMs!
+                );
               })
             : result.artifacts,
           input.preferredArtifactId,

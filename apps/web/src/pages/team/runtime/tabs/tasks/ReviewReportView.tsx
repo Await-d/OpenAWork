@@ -64,7 +64,9 @@ export function ReviewReportView({
   }
 
   const verdictStyle =
-    overallVerdict !== null ? (VERDICT_STYLES[overallVerdict] ?? VERDICT_STYLES.unknown) : VERDICT_STYLES.unknown;
+    overallVerdict !== null
+      ? (VERDICT_STYLES[overallVerdict] ?? VERDICT_STYLES.unknown)
+      : VERDICT_STYLES.unknown;
   const verdictLabel =
     overallVerdict === null
       ? '📝 已生成'

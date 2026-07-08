@@ -245,7 +245,11 @@ export function resolveProviderVisual(input: {
 export function inferProviderLabelFromModelId(modelId: string): string | undefined {
   const candidates = modelIdCandidates(modelId);
   for (const entry of catalogEntries) {
-    if (entry.modelIdPrefixes?.some((prefix) => candidates.some((candidate) => candidate.startsWith(prefix)))) {
+    if (
+      entry.modelIdPrefixes?.some((prefix) =>
+        candidates.some((candidate) => candidate.startsWith(prefix)),
+      )
+    ) {
       return entry.displayName;
     }
   }

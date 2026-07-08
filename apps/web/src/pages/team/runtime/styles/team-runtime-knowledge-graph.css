@@ -455,7 +455,8 @@
   background: transparent;
 }
 
-.workspace-knowledge-graph-zoom-cluster .workspace-knowledge-graph-control-button:hover:not(:disabled) {
+.workspace-knowledge-graph-zoom-cluster
+  .workspace-knowledge-graph-control-button:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 

@@ -213,7 +213,13 @@ export function LayeredConversationView({
       if (previous && rows.some((row) => row.sessionId === previous)) {
         return previous;
       }
-      const activeStates = new Set<LayerConversationState>(['idle', 'paused', 'pending', 'claimed', 'running']);
+      const activeStates = new Set<LayerConversationState>([
+        'idle',
+        'paused',
+        'pending',
+        'claimed',
+        'running',
+      ]);
       if (!selectedTeam && rows.some((row) => activeStates.has(row.state))) {
         return null;
       }

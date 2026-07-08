@@ -587,9 +587,8 @@ export function OfficeThreeCanvas({
   const zoomRef = useRef(1);
   const panRef = useRef({ x: 0, y: 0 });
   const setZoomRef = useRef<React.Dispatch<React.SetStateAction<number>>>(ignoreNumericStateUpdate);
-  const setPanRef = useRef<React.Dispatch<React.SetStateAction<{ x: number; y: number }>>>(
-    ignorePanStateUpdate,
-  );
+  const setPanRef =
+    useRef<React.Dispatch<React.SetStateAction<{ x: number; y: number }>>>(ignorePanStateUpdate);
   const { zoom, setZoom, pan, setPan, dragRef } = state;
 
   // Keep refs in sync for animation loop / event handler access
@@ -605,29 +604,26 @@ export function OfficeThreeCanvas({
   setZoomRef.current = setZoom;
   setPanRef.current = setPan;
 
-  const buildDisplayData = useCallback(
-    (elapsed: number): OfficeCanvasDisplayData => {
-      const effectiveRuntimeStatus = resolveOfficeRuntimeStatus({
-        runtimeStatus: runtimeStatusRef.current,
-        statusLabel: topSummaryRef.current.status,
-      });
-      const sessionTitle = selectedSessionTitleRef.current?.trim();
-      return {
-        topSummary: {
-          ...topSummaryRef.current,
-          title: sessionTitle && sessionTitle.length > 0 ? sessionTitle : topSummaryRef.current.title,
-          status: formatOfficeRuntimeStatus(effectiveRuntimeStatus),
-          runtimeStatus: effectiveRuntimeStatus,
-        },
-        metricCards: metricCardsRef.current,
-        footerStats: footerStatsRef.current,
-        officeAgents: officeAgentsRef.current,
-        activityStats: activityStatsRef.current,
-        elapsed,
-      };
-    },
-    [],
-  );
+  const buildDisplayData = useCallback((elapsed: number): OfficeCanvasDisplayData => {
+    const effectiveRuntimeStatus = resolveOfficeRuntimeStatus({
+      runtimeStatus: runtimeStatusRef.current,
+      statusLabel: topSummaryRef.current.status,
+    });
+    const sessionTitle = selectedSessionTitleRef.current?.trim();
+    return {
+      topSummary: {
+        ...topSummaryRef.current,
+        title: sessionTitle && sessionTitle.length > 0 ? sessionTitle : topSummaryRef.current.title,
+        status: formatOfficeRuntimeStatus(effectiveRuntimeStatus),
+        runtimeStatus: effectiveRuntimeStatus,
+      },
+      metricCards: metricCardsRef.current,
+      footerStats: footerStatsRef.current,
+      officeAgents: officeAgentsRef.current,
+      activityStats: activityStatsRef.current,
+      elapsed,
+    };
+  }, []);
 
   // ── Initialize Three.js scene ──────────────────────────────────────
   useEffect(() => {

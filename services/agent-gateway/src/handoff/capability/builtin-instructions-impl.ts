@@ -18,7 +18,11 @@ import { setSubstate } from '../store/substate-store.js';
 import { sqliteRun, sqliteGet } from '../../infra/db.js';
 import { randomUUID } from 'node:crypto';
 import { publishHandoffEvent, publishTeamEvent } from '../bus/team-events-bus.js';
-import { extractComparablePathsFromText, inferTaskProfile, TOOLSET_CATEGORIES } from './dispatch-package.js';
+import {
+  extractComparablePathsFromText,
+  inferTaskProfile,
+  TOOLSET_CATEGORIES,
+} from './dispatch-package.js';
 
 // ─── b: reception 层指令 ────────────────────────────────────────────────────
 

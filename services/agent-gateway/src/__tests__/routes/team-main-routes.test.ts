@@ -79,11 +79,7 @@ function seedWorkspace(teamWorkspaceId: string, userId: string): void {
   );
 }
 
-function seedWorkflowTemplate(
-  templateId: string,
-  userId: string,
-  metadataJson: string,
-): void {
+function seedWorkflowTemplate(templateId: string, userId: string, metadataJson: string): void {
   dbModule.sqliteRun(
     `INSERT INTO workflow_templates
       (id, user_id, name, description, category, metadata_json, nodes_json, edges_json)

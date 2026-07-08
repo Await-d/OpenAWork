@@ -155,9 +155,7 @@ function mergeProviderOptionsIntoContentPart(part: ProviderOptionsRecord): void 
  */
 function applyCacheBreakpointToMessage(message: ModelMessage, model: PromptCacheModelInfo): void {
   const shouldUseContentOptions =
-    !useMessageLevelOptions(model) &&
-    Array.isArray(message.content) &&
-    message.content.length > 0;
+    !useMessageLevelOptions(model) && Array.isArray(message.content) && message.content.length > 0;
 
   if (shouldUseContentOptions) {
     const lastContent = message.content[message.content.length - 1] as

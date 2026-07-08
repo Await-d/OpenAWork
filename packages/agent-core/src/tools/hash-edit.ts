@@ -20,9 +20,7 @@ export interface HashAnchoredEditor {
   computeLineHashes(filePath: string): Promise<LineHash[]>;
   formatWithHashes(filePath: string): Promise<string>;
   applyEdit(edit: AnchoredEdit): Promise<{ success: boolean; error?: string }>;
-  applyEdits(
-    edits: AnchoredEdit[],
-  ): Promise<{
+  applyEdits(edits: AnchoredEdit[]): Promise<{
     success: boolean;
     failed: number[];
     error?: string;
@@ -88,9 +86,7 @@ export class HashAnchoredEditorImpl implements HashAnchoredEditor {
     return { success: true };
   }
 
-  async applyEdits(
-    edits: AnchoredEdit[],
-  ): Promise<{
+  async applyEdits(edits: AnchoredEdit[]): Promise<{
     success: boolean;
     failed: number[];
     error?: string;

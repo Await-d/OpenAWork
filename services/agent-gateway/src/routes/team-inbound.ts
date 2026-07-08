@@ -47,9 +47,7 @@ const TEAM_INBOUND_ROUTE_ERROR_MESSAGES: Record<TeamInboundRouteErrorCode, strin
   team_clarification_dismiss_failed: '忽略澄清问题失败。',
 };
 
-function createInternalClientIdempotencyKey(input: {
-  messageType: string;
-}): string {
+function createInternalClientIdempotencyKey(input: { messageType: string }): string {
   return `team-inbound:${input.messageType}:${randomUUID()}`;
 }
 

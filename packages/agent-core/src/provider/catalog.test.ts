@@ -62,9 +62,7 @@ describe('provider catalog (single source of truth)', () => {
     expect(resolveThinkingStyle('openai', 'gpt-4o')).toBe('openai_effort');
     // custom + 任意已知模型 → 推断真实厂商
     expect(resolveThinkingStyle('custom', 'mimo-v2.5-pro')).toBe('body_thinking_type');
-    expect(resolveThinkingStyle('custom', 'anthropic/claude-sonnet-4-0')).toBe(
-      'anthropic_budget',
-    );
+    expect(resolveThinkingStyle('custom', 'anthropic/claude-sonnet-4-0')).toBe('anthropic_budget');
     expect(resolveThinkingStyle('custom', 'google/gemini-2.5-pro')).toBe('gemini_thinking');
     expect(resolveThinkingStyle('custom', 'openai/gpt-5')).toBe('openai_effort');
     // custom + 未知模型 → none

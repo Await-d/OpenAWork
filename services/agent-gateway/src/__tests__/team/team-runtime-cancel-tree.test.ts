@@ -53,7 +53,15 @@ function seedHandoff(input: {
     `INSERT OR REPLACE INTO handoff_records
        (id, user_id, from_session_id, from_role_layer, to_role_layer, to_session_id, payload_json, state, retry_count)
      VALUES (?, ?, ?, ?, ?, ?, '{}', ?, 0)`,
-    [input.id, USER_ID, input.fromSessionId, input.fromLayer, input.toLayer, input.toSessionId, input.state],
+    [
+      input.id,
+      USER_ID,
+      input.fromSessionId,
+      input.fromLayer,
+      input.toLayer,
+      input.toSessionId,
+      input.state,
+    ],
   );
 }
 

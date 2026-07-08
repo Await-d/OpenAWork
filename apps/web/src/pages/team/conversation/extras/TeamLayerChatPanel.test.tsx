@@ -81,13 +81,7 @@ describe('TeamLayerChatPanel', () => {
       },
     ];
 
-    render(
-      <TeamLayerChatPanel
-        activeLayer="pm2"
-        currentSessionId={null}
-        layers={layers}
-      />,
-    );
+    render(<TeamLayerChatPanel activeLayer="pm2" currentSessionId={null} layers={layers} />);
 
     expect(screen.getByText('已显示最近 50 / 60 条消息')).toBeTruthy();
     expect(screen.getByText('上滑继续加载更早 50 条')).toBeTruthy();

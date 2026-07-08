@@ -6,7 +6,11 @@ export interface QualityReviewDispositionInput {
    * - `implementation-failure`：执行层任务失败（failed/cancelled）或代码质量问题
    * - `planning-failure`：规划层问题
    */
-  overallVerdict?: 'pass' | 'implementation-failure' | 'planning-failure' | 'execution-protocol-failure';
+  overallVerdict?:
+    | 'pass'
+    | 'implementation-failure'
+    | 'planning-failure'
+    | 'execution-protocol-failure';
   qualityIssues: string[];
   qualityReviewPassed: boolean;
   specIssues: string[];

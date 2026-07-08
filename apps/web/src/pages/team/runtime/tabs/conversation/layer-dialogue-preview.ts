@@ -54,7 +54,10 @@ export function resolveIncomingDialoguePreview(input: {
     : candidates;
   const preferred =
     orderedCandidates.sort((left, right) =>
-      (right.completedAt ?? right.updatedAt).localeCompare(left.completedAt ?? left.updatedAt, 'zh-CN'),
+      (right.completedAt ?? right.updatedAt).localeCompare(
+        left.completedAt ?? left.updatedAt,
+        'zh-CN',
+      ),
     )[0] ?? null;
   if (!preferred) {
     return null;

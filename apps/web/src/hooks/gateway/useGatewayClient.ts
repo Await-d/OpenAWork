@@ -296,7 +296,12 @@ export function connectAttachEventSource(
           settled = true;
           cleanup(true, eventSource);
           callbacks.onEvent?.(chunk);
-          callbacks.onDone(chunk.stopReason, chunk.agentId, chunk.cancellation, chunk.upstreamSummary);
+          callbacks.onDone(
+            chunk.stopReason,
+            chunk.agentId,
+            chunk.cancellation,
+            chunk.upstreamSummary,
+          );
           return;
         case 'error':
           settled = true;

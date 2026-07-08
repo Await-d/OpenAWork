@@ -97,7 +97,11 @@ function tokenizeShellCommand(command: string): string[] {
       continue;
     }
 
-    if (!inSingle && !inDouble && (ch === '|' || ch === '&' || ch === ';' || ch === '<' || ch === '>')) {
+    if (
+      !inSingle &&
+      !inDouble &&
+      (ch === '|' || ch === '&' || ch === ';' || ch === '<' || ch === '>')
+    ) {
       pushCurrent();
       tokens.push(ch);
       continue;
@@ -123,10 +127,7 @@ function readPrimaryCommandTokens(tokens: string[]): string[] {
   return primary;
 }
 
-function deriveBashLikeAlwaysPatterns(
-  previewAction: string | undefined,
-  scope: string,
-): string[] {
+function deriveBashLikeAlwaysPatterns(previewAction: string | undefined, scope: string): string[] {
   if (!isBashLikePreviewAction(previewAction)) {
     return [];
   }

@@ -75,13 +75,7 @@ function RolePanelShell({
   );
 }
 
-function StatusCard({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
+function StatusCard({ label, value }: { label: string; value: string }) {
   return (
     <div style={CARD_STYLE}>
       <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>{label}</span>
@@ -153,7 +147,10 @@ export function LayerRoleHighlightsPanel({
           title="执行观察"
         >
           <div style={GRID_STYLE}>
-            <StatusCard label="任务线索" value={dialoguePreview?.sourceIntent ? '已捕获' : '缺失'} />
+            <StatusCard
+              label="任务线索"
+              value={dialoguePreview?.sourceIntent ? '已捕获' : '缺失'}
+            />
             <StatusCard
               label="执行产物"
               value={tasksArtifact || reviewArtifact ? '有输出' : '待输出'}

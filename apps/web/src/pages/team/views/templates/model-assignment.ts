@@ -399,8 +399,7 @@ export function getLayerThinking(
   if (!first || typeof first.thinkingEnabled !== 'boolean') return null;
   const allSame = layerSlots.every(
     (s) =>
-      s.thinkingEnabled === first.thinkingEnabled &&
-      s.reasoningEffort === first.reasoningEffort,
+      s.thinkingEnabled === first.thinkingEnabled && s.reasoningEffort === first.reasoningEffort,
   );
   if (!allSame) return null;
   return {

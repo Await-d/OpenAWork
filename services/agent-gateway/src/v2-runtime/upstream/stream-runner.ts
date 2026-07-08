@@ -494,9 +494,7 @@ export async function* runUpstreamStream(
   if (decoratedSystem && typeof decoratedSystem !== 'string') {
     const systemArray = Array.isArray(decoratedSystem) ? decoratedSystem : [decoratedSystem];
     const sanitizedSystem = systemArray.map((msg) =>
-      typeof msg.content === 'string'
-        ? { ...msg, content: sanitizeSurrogates(msg.content) }
-        : msg,
+      typeof msg.content === 'string' ? { ...msg, content: sanitizeSurrogates(msg.content) } : msg,
     );
     decoratedSystem = applyCachingToSystemMessages(sanitizedSystem, cacheModelInfo);
   } else if (typeof decoratedSystem === 'string') {
@@ -534,10 +532,7 @@ export async function* runUpstreamStream(
   // 该字段在代理场景下可能为 false（modelConfig 找不到），但 modelId 推断
   // 仍能识别出真实厂商。
   if (input.thinking?.enabled) {
-    const style = resolveThinkingStyle(
-      input.providerType ?? '',
-      modelIdForOptions,
-    );
+    const style = resolveThinkingStyle(input.providerType ?? '', modelIdForOptions);
     if (style === 'body_thinking_type') {
       temperature = undefined;
       topP = undefined;

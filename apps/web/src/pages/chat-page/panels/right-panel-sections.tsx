@@ -230,7 +230,8 @@ function matchesUpstreamSummaryFilter(
   if (filter === 'all') return true;
   if (filter === 'error') return item.summary.sawError || item.summary.stopReason === 'error';
   if (filter === 'stalled') return item.summary.stalled;
-  if (filter === 'tool') return item.summary.stopReason === 'tool_use' || item.summary.toolCallDeltaCount > 0;
+  if (filter === 'tool')
+    return item.summary.stopReason === 'tool_use' || item.summary.toolCallDeltaCount > 0;
   return item.summary.stopReason === 'cancelled';
 }
 
@@ -242,7 +243,11 @@ function matchesUpstreamSummaryQuery(item: UpstreamSummaryItem, query: string): 
     item.runId,
     formatUpstreamSummaryStatusLabel(item.summary),
     formatUpstreamSummaryMetricLine(item.summary),
-  ].some((field) => String(field ?? '').toLowerCase().includes(keyword));
+  ].some((field) =>
+    String(field ?? '')
+      .toLowerCase()
+      .includes(keyword),
+  );
 }
 
 export function groupUpstreamSummariesByRequest(
@@ -253,11 +258,7 @@ export function groupUpstreamSummariesByRequest(
     const requestId = item.requestId?.trim();
     const runId = item.runId?.trim();
     const key = requestId ? `request:${requestId}` : runId ? `run:${runId}` : `orphan:${item.id}`;
-    const label = requestId
-      ? `请求 ${requestId}`
-      : runId
-        ? `运行 ${runId}`
-        : '未绑定请求';
+    const label = requestId ? `请求 ${requestId}` : runId ? `运行 ${runId}` : '未绑定请求';
     const existing = groups.get(key);
     if (existing) {
       existing.items.push(item);
@@ -376,9 +377,9 @@ export function ChatHistoryTabContent(props: {
   const hasTempTodos = tempTodos.length > 0;
   const [upstreamFilter, setUpstreamFilter] = React.useState<UpstreamSummaryFilter>('all');
   const [upstreamQuery, setUpstreamQuery] = React.useState('');
-  const [collapsedUpstreamGroups, setCollapsedUpstreamGroups] = React.useState<Record<string, boolean>>(
-    {},
-  );
+  const [collapsedUpstreamGroups, setCollapsedUpstreamGroups] = React.useState<
+    Record<string, boolean>
+  >({});
   const filteredUpstreamSummaries = upstreamSummaries.filter(
     (item) =>
       matchesUpstreamSummaryFilter(item, upstreamFilter) &&
@@ -868,7 +869,9 @@ export function ChatHistoryTabContent(props: {
                       </span>
                       <span>{group.label}</span>
                     </button>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <div
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}
+                    >
                       <button
                         type="button"
                         onClick={() => handleCopyUpstreamGroupContext(group)}
@@ -969,7 +972,8 @@ export function ChatHistoryTabContent(props: {
                                 borderRadius: 999,
                                 border: '1px solid var(--border-default)',
                                 padding: '1px 6px',
-                                background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
+                                background:
+                                  'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
                               }}
                             >
                               {group.items.length} 条
@@ -1001,7 +1005,11 @@ export function ChatHistoryTabContent(props: {
                           {formatUpstreamSummaryMetricLine(item.summary)}
                         </div>
                         <div
-                          style={{ fontSize: 10, color: 'var(--fg-muted)', fontFamily: 'monospace' }}
+                          style={{
+                            fontSize: 10,
+                            color: 'var(--fg-muted)',
+                            fontFamily: 'monospace',
+                          }}
                         >
                           {new Date(item.occurredAt).toLocaleTimeString('zh-CN', { hour12: false })}
                           {item.runId ? ` · ${item.runId}` : ''}
@@ -1011,7 +1019,9 @@ export function ChatHistoryTabContent(props: {
                 </div>
               ))}
               {filteredUpstreamSummaries.length === 0 && (
-                <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>当前筛选下没有匹配的流式诊断。</div>
+                <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+                  当前筛选下没有匹配的流式诊断。
+                </div>
               )}
             </>
           )}
@@ -1308,9 +1318,9 @@ export function ChatOverviewTabContent(props: {
     (todo) => todo.status === 'pending' || todo.status === 'in_progress',
   ).length;
   const focusedUpstreamGroup = focusedUpstreamGroupKey
-    ? groupUpstreamSummariesByRequest(upstreamSummaries).find(
+    ? (groupUpstreamSummariesByRequest(upstreamSummaries).find(
         (group) => group.key === focusedUpstreamGroupKey,
-      ) ?? null
+      ) ?? null)
     : null;
   const focusedUpstreamSummaries = focusedUpstreamGroup?.items ?? upstreamSummaries;
   const artifactCountLabel =
@@ -1577,14 +1587,17 @@ export function ChatOverviewTabContent(props: {
                 </div>
                 {focusedUpstreamSummaries[0] ? (
                   <div style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
-                    最近状态 · {formatUpstreamSummaryStatusLabel(focusedUpstreamSummaries[0].summary)}
+                    最近状态 ·{' '}
+                    {formatUpstreamSummaryStatusLabel(focusedUpstreamSummaries[0].summary)}
                   </div>
                 ) : null}
               </div>
               <button
                 type="button"
                 onClick={() =>
-                  void copyTextToClipboard(buildUpstreamSummaryGroupContextText(focusedUpstreamGroup))
+                  void copyTextToClipboard(
+                    buildUpstreamSummaryGroupContextText(focusedUpstreamGroup),
+                  )
                 }
                 aria-label="复制当前聚焦请求诊断上下文"
                 style={{

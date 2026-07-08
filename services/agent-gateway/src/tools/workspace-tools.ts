@@ -926,10 +926,7 @@ export async function executeWriteTool(
     );
   }
 
-  return executeWorkspaceCreateFile(
-    { path: safePath, content: input.content },
-    options?.sessionId,
-  );
+  return executeWorkspaceCreateFile({ path: safePath, content: input.content }, options?.sessionId);
 }
 
 export async function executeWorkspaceCreateFile(

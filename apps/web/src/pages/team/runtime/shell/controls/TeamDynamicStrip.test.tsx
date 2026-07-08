@@ -25,12 +25,7 @@ describe('TeamDynamicStrip', () => {
   it('默认只显示前三条，并可展开剩余动态', () => {
     render(
       <TeamDynamicStrip
-        entries={[
-          createEntry(0),
-          createEntry(1),
-          createEntry(2),
-          createEntry(3),
-        ]}
+        entries={[createEntry(0), createEntry(1), createEntry(2), createEntry(3)]}
       />,
     );
 

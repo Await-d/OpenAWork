@@ -93,7 +93,9 @@ function resolveSessionNavigationTarget(input: {
 }): FloatingPermissionSessionTarget {
   if (typeof input.roleLayer === 'string' && input.roleLayer.trim().length > 0) {
     try {
-      const parsed = input.metadataJson ? (JSON.parse(input.metadataJson) as Record<string, unknown>) : null;
+      const parsed = input.metadataJson
+        ? (JSON.parse(input.metadataJson) as Record<string, unknown>)
+        : null;
       const teamWorkspaceId =
         typeof parsed?.['teamWorkspaceId'] === 'string' ? parsed['teamWorkspaceId'] : null;
       if (teamWorkspaceId && teamWorkspaceId.trim().length > 0) {

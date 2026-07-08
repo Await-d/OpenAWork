@@ -63,9 +63,7 @@ describe('buildProviderOptions — gemini-3 thinking_level subsets', () => {
 
   it('gemini-3-flash-image only accepts minimal / high', () => {
     // medium → minimal (largest supported ≤ medium is 'minimal')
-    expect(
-      geminiCfg('gemini-3-flash-image', 'medium')?.google?.thinking_config,
-    ).toMatchObject({
+    expect(geminiCfg('gemini-3-flash-image', 'medium')?.google?.thinking_config).toMatchObject({
       thinking_level: 'minimal',
     });
     expect(geminiCfg('gemini-3-flash-image', 'high')?.google?.thinking_config).toMatchObject({
@@ -112,9 +110,7 @@ describe('buildProviderOptions — gemini disabled path', () => {
   });
 
   it('gemini-3-flash-image disabled drops to minimal (its lowest)', () => {
-    expect(
-      geminiCfg('gemini-3-flash-image', 'medium', false)?.google?.thinking_config,
-    ).toEqual({
+    expect(geminiCfg('gemini-3-flash-image', 'medium', false)?.google?.thinking_config).toEqual({
       thinking_level: 'minimal',
     });
   });
@@ -178,9 +174,8 @@ describe('buildProviderOptions — openrouter GPT-5 effort clamp', () => {
       thinking: { ...baseThinking, providerType: 'openrouter', effort: 'xhigh' },
       model: 'openai/gpt-5.1',
     });
-    const reasoning = (
-      opts?.['openrouter'] as { reasoning?: { effort?: string } } | undefined
-    )?.reasoning;
+    const reasoning = (opts?.['openrouter'] as { reasoning?: { effort?: string } } | undefined)
+      ?.reasoning;
     expect(reasoning?.effort).toBe('high');
   });
 
@@ -189,9 +184,8 @@ describe('buildProviderOptions — openrouter GPT-5 effort clamp', () => {
       thinking: { ...baseThinking, providerType: 'openrouter', effort: 'xhigh' },
       model: 'anthropic/claude-sonnet-4-5',
     });
-    const reasoning = (
-      opts?.['openrouter'] as { reasoning?: { effort?: string } } | undefined
-    )?.reasoning;
+    const reasoning = (opts?.['openrouter'] as { reasoning?: { effort?: string } } | undefined)
+      ?.reasoning;
     expect(reasoning?.effort).toBe('xhigh');
   });
 });

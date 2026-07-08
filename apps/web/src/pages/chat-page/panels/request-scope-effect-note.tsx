@@ -64,7 +64,9 @@ export function RequestScopeEffectNote(props: {
       </div>
       {summary ? <div style={{ fontSize: 11, color: 'var(--fg-default)' }}>{summary}</div> : null}
       {description ? (
-        <div style={{ fontSize: 10, color: 'var(--fg-muted)', lineHeight: 1.45 }}>{description}</div>
+        <div style={{ fontSize: 10, color: 'var(--fg-muted)', lineHeight: 1.45 }}>
+          {description}
+        </div>
       ) : null}
     </div>
   );

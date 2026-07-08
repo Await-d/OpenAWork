@@ -685,9 +685,7 @@ export default function SessionsPage() {
               .list(token)
               .then((list) =>
                 setSessions(
-                  (list as SessionRow[]).filter(
-                    (session) => !session.team_parent_session_id,
-                  ),
+                  (list as SessionRow[]).filter((session) => !session.team_parent_session_id),
                 ),
               )
               .catch(() => null);

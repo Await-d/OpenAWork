@@ -114,7 +114,9 @@ export function useTeamRunState(input?: {
       );
       const pendingSessionId = input?.pendingSessionId ?? null;
       const includeExtraPending =
-        pendingSessionId !== null && pendingSessionId.length > 0 && sessionScope.has(pendingSessionId);
+        pendingSessionId !== null &&
+        pendingSessionId.length > 0 &&
+        sessionScope.has(pendingSessionId);
       return resolveSessionScopeStallState({
         clarifications,
         events,

@@ -179,9 +179,7 @@ describe('groupUpstreamSummariesByRequest', () => {
       },
     ]);
 
-    expect(formatUpstreamSummaryGroupHeadline(groups[0]!)).toBe(
-      '2 条 · 错误 1 / 卡住 1 / 工具 2',
-    );
+    expect(formatUpstreamSummaryGroupHeadline(groups[0]!)).toBe('2 条 · 错误 1 / 卡住 1 / 工具 2');
     expect(buildUpstreamSummaryGroupContextText(groups[0]!)).toContain('请求 req-copy-1');
     expect(buildUpstreamSummaryGroupContextText(groups[0]!)).toContain(
       '2 条 · 错误 1 / 卡住 1 / 工具 2',

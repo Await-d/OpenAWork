@@ -130,8 +130,7 @@ describe('reconcileStuckReceptionSessions（经 recoveryTick）', () => {
 
   it('年龄护栏：substate 刚更新（瞬态窗口）→ 不复位', async () => {
     // substate_updated_at = now → 早于 cutoff 的条件不满足，跳过。
-    const nowIso =
-      dbModule.sqliteGet<{ v: string }>(`SELECT datetime('now') AS v`)?.v ?? OLD_TS;
+    const nowIso = dbModule.sqliteGet<{ v: string }>(`SELECT datetime('now') AS v`)?.v ?? OLD_TS;
     seedReception(nowIso);
     seedChild(PM1_ID, 'pm1', RECEPTION_ID);
     seedHandoff('h-done', RECEPTION_ID, PM1_ID, 'pm1', 'completed');

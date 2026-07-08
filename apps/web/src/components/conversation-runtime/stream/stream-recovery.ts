@@ -1,4 +1,8 @@
-import type { ModifiedFilesSummaryContent, RunEvent, UpstreamStreamSummary } from '@openAwork/shared';
+import type {
+  ModifiedFilesSummaryContent,
+  RunEvent,
+  UpstreamStreamSummary,
+} from '@openAwork/shared';
 import type { SessionStateStatus } from '../session/session-runtime.js';
 import {
   readAssistantTracePayload,

@@ -89,7 +89,9 @@ export function useChatStreaming(): UseChatStreamingReturn {
     number | null
   >(null);
   const [streamError, setStreamError] = useState<string | null>(null);
-  const [latestUpstreamSummary, setLatestUpstreamSummary] = useState<UpstreamStreamSummary | null>(null);
+  const [latestUpstreamSummary, setLatestUpstreamSummary] = useState<UpstreamStreamSummary | null>(
+    null,
+  );
 
   const streamingRef = useRef(false);
   const stoppingStreamRef = useRef(false);

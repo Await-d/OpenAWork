@@ -171,8 +171,7 @@ function resolveDetail(event: HandoffEvent, layerLabel: string | null): string |
     return `${layerLabel} · ${teamEventTypeLabel(event.type)}`;
   }
 
-  const detail =
-    typeof event.payload['detail'] === 'string' ? event.payload['detail'].trim() : '';
+  const detail = typeof event.payload['detail'] === 'string' ? event.payload['detail'].trim() : '';
   return detail.length > 0 ? detail : undefined;
 }
 
@@ -330,7 +329,9 @@ export function filterTeamDynamicEventsForScope(
         sessionScope,
         rootSessionId,
       ) ||
-      payloadSessionIds.some((sessionId) => isSessionIdInScope(sessionId, sessionScope, rootSessionId))
+      payloadSessionIds.some((sessionId) =>
+        isSessionIdInScope(sessionId, sessionScope, rootSessionId),
+      )
     );
   });
 }

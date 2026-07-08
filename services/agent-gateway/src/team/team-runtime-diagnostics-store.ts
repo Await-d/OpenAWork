@@ -83,7 +83,10 @@ export function listTeamRuntimeIncidents(input?: {
   return mergeRuntimeIncidentSources({
     inMemory: bucket,
     limit,
-    persisted: listPersistedTeamRuntimeIncidents({ limit: Math.max(limit * 4, 100), userId: input.userId }),
+    persisted: listPersistedTeamRuntimeIncidents({
+      limit: Math.max(limit * 4, 100),
+      userId: input.userId,
+    }),
   });
 }
 
@@ -94,17 +97,16 @@ export function getTeamRuntimeIncidentSummary(input?: {
   const sinceMs = input?.sinceMs;
   const key = resolveIncidentBucketKey(input?.userId ?? null);
   const bucket = incidentsByUser.get(key) ?? [];
-  const incidents =
-    input?.userId
-      ? mergeRuntimeIncidentSources({
-          inMemory: bucket,
+  const incidents = input?.userId
+    ? mergeRuntimeIncidentSources({
+        inMemory: bucket,
+        limit: 400,
+        persisted: listPersistedTeamRuntimeIncidents({
           limit: 400,
-          persisted: listPersistedTeamRuntimeIncidents({
-            limit: 400,
-            userId: input.userId,
-          }),
-        })
-      : bucket;
+          userId: input.userId,
+        }),
+      })
+    : bucket;
   const filtered =
     typeof sinceMs === 'number'
       ? incidents.filter((incident) => incident.timestamp >= sinceMs)

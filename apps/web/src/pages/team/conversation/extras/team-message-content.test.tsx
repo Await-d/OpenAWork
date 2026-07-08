@@ -2,10 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import type { ChatMessage } from '../../../../components/conversation-runtime/messages/support.js';
-import {
-  getTeamMessagePreviewText,
-  TeamMessageBody,
-} from './team-message-content.js';
+import { getTeamMessagePreviewText, TeamMessageBody } from './team-message-content.js';
 
 vi.mock('../../../../components/chat/markdown/markdown-message-content.js', () => ({
   default: ({ content }: { content: string }) => <div data-testid="md">{content}</div>,
@@ -18,7 +15,8 @@ describe('team-message-content', () => {
     const message: ChatMessage = {
       id: 'preview-markdown',
       role: 'assistant',
-      content: '# 阶段结论\n- 完成接口联调\n- 补充 `team-message-content.tsx`\n[查看详情](https://example.com)',
+      content:
+        '# 阶段结论\n- 完成接口联调\n- 补充 `team-message-content.tsx`\n[查看详情](https://example.com)',
     };
 
     const preview = getTeamMessagePreviewText(message, 200);

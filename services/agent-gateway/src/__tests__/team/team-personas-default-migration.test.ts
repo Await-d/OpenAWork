@@ -24,10 +24,10 @@ let content: typeof ContentModule;
 const USER_ID = 'u-persona-mig';
 
 function seedUser(id: string): void {
-  dbModule.sqliteRun(
-    "INSERT OR IGNORE INTO users (id, email, password_hash) VALUES (?, ?, 'x')",
-    [id, `${id}@example.com`],
-  );
+  dbModule.sqliteRun("INSERT OR IGNORE INTO users (id, email, password_hash) VALUES (?, ?, 'x')", [
+    id,
+    `${id}@example.com`,
+  ]);
 }
 
 beforeAll(async () => {

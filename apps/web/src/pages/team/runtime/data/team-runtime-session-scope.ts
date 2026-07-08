@@ -1,9 +1,5 @@
 import type { SessionTask } from '@openAwork/web-client';
-import type {
-  HandoffEntry,
-  HandoffEvent,
-  LayerNode,
-} from '../../../../stores/team/team-events.js';
+import type { HandoffEntry, HandoffEvent, LayerNode } from '../../../../stores/team/team-events.js';
 
 type SessionScopeNode =
   | Pick<LayerNode, 'parentSessionId' | 'sessionId'>

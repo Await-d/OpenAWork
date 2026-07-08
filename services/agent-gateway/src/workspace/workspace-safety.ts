@@ -85,8 +85,7 @@ export function requiresBoundSessionWorkspace(sessionId: string): boolean {
 
   const metadata = parseSessionMetadataJson(row.metadata_json);
   return (
-    typeof metadata['teamWorkspaceId'] === 'string' &&
-    metadata['teamWorkspaceId'].trim().length > 0
+    typeof metadata['teamWorkspaceId'] === 'string' && metadata['teamWorkspaceId'].trim().length > 0
   );
 }
 
@@ -145,10 +144,7 @@ export function validateSessionWorkspacePath(input: {
   };
 }
 
-export function assertSessionWorkspacePath(input: {
-  path: string;
-  sessionId: string;
-}): string {
+export function assertSessionWorkspacePath(input: { path: string; sessionId: string }): string {
   const workingDirectory = getSessionWorkingDirectory(input.sessionId);
   if (!workingDirectory && requiresBoundSessionWorkspace(input.sessionId)) {
     throw new Error(`当前会话未绑定工作区，禁止访问路径：${input.path}`);

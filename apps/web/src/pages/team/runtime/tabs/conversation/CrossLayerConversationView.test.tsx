@@ -16,9 +16,10 @@ vi.mock('../../../conversation/TeamConversationView.js', () => ({
 }));
 
 const artifactState = vi.hoisted(() => ({
-  planArtifact: { content: '规划产物内容', title: 'plan-artifact' } as
-    | { content: string; title: string }
-    | null,
+  planArtifact: { content: '规划产物内容', title: 'plan-artifact' } as {
+    content: string;
+    title: string;
+  } | null,
   reviewArtifact: null as { content: string; title: string } | null,
 }));
 

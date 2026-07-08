@@ -123,13 +123,17 @@ export function CrossLayerConversationView({
         focusHandoffId,
         handoffs: expandedSessionHandoffs.handoffs,
         selectedSessionId: expandedSessionId,
-        selectedSessionRoleLayer:
-          expandedSessionId ? (thread.find((row) => row.sessionId === expandedSessionId)?.roleLayer ?? null) : null,
+        selectedSessionRoleLayer: expandedSessionId
+          ? (thread.find((row) => row.sessionId === expandedSessionId)?.roleLayer ?? null)
+          : null,
       }),
     [expandedSessionHandoffs.handoffs, expandedSessionId, focusHandoffId, thread],
   );
   const expandedFocusRow = useMemo(
-    () => (expandedSessionId ? (thread.find((row) => row.sessionId === expandedSessionId) ?? null) : null),
+    () =>
+      expandedSessionId
+        ? (thread.find((row) => row.sessionId === expandedSessionId) ?? null)
+        : null,
     [expandedSessionId, thread],
   );
   const sessionTitleById = useMemo(
@@ -186,133 +190,133 @@ export function CrossLayerConversationView({
     });
   }, [focusHandoffId, focusSessionId, thread]);
 
-const EMBEDDED_BODY_STYLE: CSSProperties = {
-  flex: 1,
-  minHeight: 0,
-  display: 'flex',
-  flexDirection: 'column',
-  overflow: 'hidden',
-};
+  const EMBEDDED_BODY_STYLE: CSSProperties = {
+    flex: 1,
+    minHeight: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
+  };
 
-const body = embedded ? (
-  <div style={EMBEDDED_BODY_STYLE}>
-    {expandedFocusRow ? (
-      <TeamConversationView
-        key={expandedFocusRow.sessionId}
-        sessionId={expandedFocusRow.sessionId}
-        compact
-        topBar={null}
-        readOnly
-        soloMode
-      />
-    ) : (
-      <EmptyState
-        emoji="🧵"
-        title="选择左侧线程节点查看详情"
-        description="右侧会展示该层的上下文和正文。"
-        style={{ flex: 1 }}
-      />
-    )}
-  </div>
-) : (
-  <div style={CONTAINER_STYLE}>
-    <div
-      style={
-        isNarrowLayout
-          ? {
-              ...SPLIT_STYLE,
-              display: 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden',
-            }
-          : SPLIT_STYLE
-      }
-    >
-      <CrossLayerThreadListPanel
-        expandedSessionId={expandedSessionId}
-        focusHandoffId={focusHandoffId}
-        rows={thread}
-        onPreviewPrompt={setPromptPreviewLayer}
-        onToggle={handleToggle}
-      />
+  const body = embedded ? (
+    <div style={EMBEDDED_BODY_STYLE}>
+      {expandedFocusRow ? (
+        <TeamConversationView
+          key={expandedFocusRow.sessionId}
+          sessionId={expandedFocusRow.sessionId}
+          compact
+          topBar={null}
+          readOnly
+          soloMode
+        />
+      ) : (
+        <EmptyState
+          emoji="🧵"
+          title="选择左侧线程节点查看详情"
+          description="右侧会展示该层的上下文和正文。"
+          style={{ flex: 1 }}
+        />
+      )}
+    </div>
+  ) : (
+    <div style={CONTAINER_STYLE}>
       <div
         style={
           isNarrowLayout
             ? {
-                ...DETAIL_PANEL_STYLE,
-                minHeight: 360,
+                ...SPLIT_STYLE,
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden',
               }
-            : DETAIL_PANEL_STYLE
+            : SPLIT_STYLE
         }
       >
-        {expandedFocusRow ? (
-          <>
-            <LayerDetailWorkspace
-              fromRoleLayer={expandedFocusRow.fromRoleLayer}
-              fromSessionId={expandedFocusRow.parentSessionId}
-              fromSessionTitle={
-                expandedFocusRow.parentSessionId
-                  ? (sessionTitleById.get(expandedFocusRow.parentSessionId) ?? null)
-                  : null
-              }
-              modeBadge="跨层线程视角"
-              reuseBadge={
-                expandedFocusRow.handoffCount > 1
-                  ? `当前轮次 · 第 ${expandedFocusRow.handoffCount} 轮（复用会话）`
-                  : null
-              }
-              main={
-                <TeamConversationView
-                  key={expandedFocusRow.sessionId}
-                  sessionId={expandedFocusRow.sessionId}
-                  compact
-                  soloMode
-                  beforeMessages={
-                    <LayerProcessPanel
-                      focusHandoffId={focusHandoffId}
-                      records={expandedSessionHandoffs.handoffs}
-                      roleLayer={expandedFocusRow.roleLayer}
-                      sessionId={expandedFocusRow.sessionId}
-                    />
-                  }
-                />
-              }
-              sessionId={expandedFocusRow.sessionId}
-              sessionTitle={expandedFocusRow.title}
-              sidebar={
-                <LayerSummarySidebar
-                  artifactError={artifactError}
-                  artifactLoading={artifactLoading}
-                  dialoguePreview={expandedDialoguePreview}
-                  planArtifact={planArtifact}
-                  reviewArtifact={reviewArtifact}
-                  row={expandedFocusRow}
-                  sessionLabel={expandedFocusRow.sessionId}
-                  specArtifact={specArtifact}
-                  summaryTitle={undefined}
-                  tasksArtifact={tasksArtifact}
-                />
-              }
-              title={expandedFocusRow.title}
-              toRoleLayer={expandedFocusRow.toRoleLayer}
+        <CrossLayerThreadListPanel
+          expandedSessionId={expandedSessionId}
+          focusHandoffId={focusHandoffId}
+          rows={thread}
+          onPreviewPrompt={setPromptPreviewLayer}
+          onToggle={handleToggle}
+        />
+        <div
+          style={
+            isNarrowLayout
+              ? {
+                  ...DETAIL_PANEL_STYLE,
+                  minHeight: 360,
+                }
+              : DETAIL_PANEL_STYLE
+          }
+        >
+          {expandedFocusRow ? (
+            <>
+              <LayerDetailWorkspace
+                fromRoleLayer={expandedFocusRow.fromRoleLayer}
+                fromSessionId={expandedFocusRow.parentSessionId}
+                fromSessionTitle={
+                  expandedFocusRow.parentSessionId
+                    ? (sessionTitleById.get(expandedFocusRow.parentSessionId) ?? null)
+                    : null
+                }
+                modeBadge="跨层线程视角"
+                reuseBadge={
+                  expandedFocusRow.handoffCount > 1
+                    ? `当前轮次 · 第 ${expandedFocusRow.handoffCount} 轮（复用会话）`
+                    : null
+                }
+                main={
+                  <TeamConversationView
+                    key={expandedFocusRow.sessionId}
+                    sessionId={expandedFocusRow.sessionId}
+                    compact
+                    soloMode
+                    beforeMessages={
+                      <LayerProcessPanel
+                        focusHandoffId={focusHandoffId}
+                        records={expandedSessionHandoffs.handoffs}
+                        roleLayer={expandedFocusRow.roleLayer}
+                        sessionId={expandedFocusRow.sessionId}
+                      />
+                    }
+                  />
+                }
+                sessionId={expandedFocusRow.sessionId}
+                sessionTitle={expandedFocusRow.title}
+                sidebar={
+                  <LayerSummarySidebar
+                    artifactError={artifactError}
+                    artifactLoading={artifactLoading}
+                    dialoguePreview={expandedDialoguePreview}
+                    planArtifact={planArtifact}
+                    reviewArtifact={reviewArtifact}
+                    row={expandedFocusRow}
+                    sessionLabel={expandedFocusRow.sessionId}
+                    specArtifact={specArtifact}
+                    summaryTitle={undefined}
+                    tasksArtifact={tasksArtifact}
+                  />
+                }
+                title={expandedFocusRow.title}
+                toRoleLayer={expandedFocusRow.toRoleLayer}
+              />
+            </>
+          ) : (
+            <EmptyState
+              emoji="🧵"
+              title="选择左侧线程节点查看详情"
+              description="右侧会固定展示该层的上下文、产物和正文，左侧节点高度不会再受右侧内容影响。"
+              style={{ flex: 1 }}
             />
-          </>
-        ) : (
-          <EmptyState
-            emoji="🧵"
-            title="选择左侧线程节点查看详情"
-            description="右侧会固定展示该层的上下文、产物和正文，左侧节点高度不会再受右侧内容影响。"
-            style={{ flex: 1 }}
-          />
-        )}
+          )}
+        </div>
       </div>
+      <RolePromptPreviewPanel
+        layer={promptPreviewLayer}
+        onClose={() => setPromptPreviewLayer(null)}
+      />
     </div>
-    <RolePromptPreviewPanel
-      layer={promptPreviewLayer}
-      onClose={() => setPromptPreviewLayer(null)}
-    />
-  </div>
-);
+  );
 
   if (thread.length === 0) {
     if (embedded) {

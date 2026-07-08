@@ -243,7 +243,10 @@ export function buildBashApprovalPatterns(command: string): string[] {
   if (partialTokens.length > 0) {
     partialTokens.pop();
   }
-  while (partialTokens.length > 0 && PARTIAL_SCOPE_SKIP_TOKENS.has(partialTokens[partialTokens.length - 1]!)) {
+  while (
+    partialTokens.length > 0 &&
+    PARTIAL_SCOPE_SKIP_TOKENS.has(partialTokens[partialTokens.length - 1]!)
+  ) {
     partialTokens.pop();
   }
   if (partialTokens.length > 1) {

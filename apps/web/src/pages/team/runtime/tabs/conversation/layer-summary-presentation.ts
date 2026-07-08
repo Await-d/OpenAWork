@@ -5,7 +5,9 @@ export interface LayerArtifactPreview {
 
 export interface LayerSummaryPresentation {
   artifactSectionTitle: string;
-  dialogueFieldOrder: Array<'recommendedNextStep' | 'recommendedRole' | 'rewrittenIntent' | 'sourceIntent'>;
+  dialogueFieldOrder: Array<
+    'recommendedNextStep' | 'recommendedRole' | 'rewrittenIntent' | 'sourceIntent'
+  >;
   dialogueSectionTitle: string;
   dialogueFieldLabels: {
     recommendedNextStep: string;
@@ -27,12 +29,19 @@ export interface LayerArtifactSelection {
   phase: 'plan' | 'review' | 'spec' | 'tasks';
 }
 
-export function getLayerSummaryPresentation(roleLayer: string | null | undefined): LayerSummaryPresentation {
+export function getLayerSummaryPresentation(
+  roleLayer: string | null | undefined,
+): LayerSummaryPresentation {
   switch (roleLayer) {
     case 'pm1':
       return {
         artifactSectionTitle: '规划产物链',
-        dialogueFieldOrder: ['sourceIntent', 'rewrittenIntent', 'recommendedRole', 'recommendedNextStep'],
+        dialogueFieldOrder: [
+          'sourceIntent',
+          'rewrittenIntent',
+          'recommendedRole',
+          'recommendedNextStep',
+        ],
         dialogueSectionTitle: '规划讨论线索',
         dialogueFieldLabels: {
           recommendedNextStep: '规划下一步',
@@ -42,7 +51,8 @@ export function getLayerSummaryPresentation(roleLayer: string | null | undefined
         },
         title: '规划链摘要',
         note: '规划层通常先澄清意图，再沉淀 spec / plan / tasks。这里优先看规划上下文与产物，而不是只看空消息壳。',
-        emptyMessage: '当前规划层还没有可展示的 spec / plan / tasks 产物，将仅展示正文或交接上下文。',
+        emptyMessage:
+          '当前规划层还没有可展示的 spec / plan / tasks 产物，将仅展示正文或交接上下文。',
         primaryLensDescription: '优先确认需求是否被澄清，并检查规格、计划和任务是否已经连续产出。',
         primaryLensLabel: '规划完整度',
         sectionOrder: ['summary', 'dialogue', 'artifact'],
@@ -52,7 +62,12 @@ export function getLayerSummaryPresentation(roleLayer: string | null | undefined
     case 'reviewer':
       return {
         artifactSectionTitle: '评审产物链',
-        dialogueFieldOrder: ['recommendedNextStep', 'rewrittenIntent', 'sourceIntent', 'recommendedRole'],
+        dialogueFieldOrder: [
+          'recommendedNextStep',
+          'rewrittenIntent',
+          'sourceIntent',
+          'recommendedRole',
+        ],
         dialogueSectionTitle: '评审判断线索',
         dialogueFieldLabels: {
           recommendedNextStep: '评审建议',
@@ -62,8 +77,10 @@ export function getLayerSummaryPresentation(roleLayer: string | null | undefined
         },
         title: '评审链摘要',
         note: '管控与评审层更强调 review 结论、风险判断和回退建议。这里优先显示 review / review_report，再回退到计划产物。',
-        emptyMessage: '当前评审链还没有可展示的 review / review_report 产物，将仅展示正文或交接上下文。',
-        primaryLensDescription: '优先判断是否已经产出评审结论，以及是否具备足够依据支持回退、升级或继续执行。',
+        emptyMessage:
+          '当前评审链还没有可展示的 review / review_report 产物，将仅展示正文或交接上下文。',
+        primaryLensDescription:
+          '优先判断是否已经产出评审结论，以及是否具备足够依据支持回退、升级或继续执行。',
         primaryLensLabel: '评审结论',
         sectionOrder: ['summary', 'artifact', 'dialogue'],
         summaryCardTitle: '本次评审摘要',
@@ -72,7 +89,12 @@ export function getLayerSummaryPresentation(roleLayer: string | null | undefined
     case 'tester':
       return {
         artifactSectionTitle: '执行产物链',
-        dialogueFieldOrder: ['sourceIntent', 'recommendedNextStep', 'rewrittenIntent', 'recommendedRole'],
+        dialogueFieldOrder: [
+          'sourceIntent',
+          'recommendedNextStep',
+          'rewrittenIntent',
+          'recommendedRole',
+        ],
         dialogueSectionTitle: '执行过程线索',
         dialogueFieldLabels: {
           recommendedNextStep: '当前动作',
@@ -83,7 +105,8 @@ export function getLayerSummaryPresentation(roleLayer: string | null | undefined
         title: '执行链摘要',
         note: '执行层更看重过程、工具调用和错误定位。这里会结合过程时间线、任务上下文和执行产物一起展示。',
         emptyMessage: '当前执行链还没有可展示的产物，将优先展示正文和过程时间线。',
-        primaryLensDescription: '优先确认执行过程是否可追踪、工具调用是否完成，以及当前任务是否已经产生可验收输出。',
+        primaryLensDescription:
+          '优先确认执行过程是否可追踪、工具调用是否完成，以及当前任务是否已经产生可验收输出。',
         primaryLensLabel: '执行过程',
         sectionOrder: ['dialogue', 'summary', 'artifact'],
         summaryCardTitle: '本次执行摘要',
@@ -91,7 +114,12 @@ export function getLayerSummaryPresentation(roleLayer: string | null | undefined
     case 'reception':
       return {
         artifactSectionTitle: '接待层补充信息',
-        dialogueFieldOrder: ['sourceIntent', 'rewrittenIntent', 'recommendedRole', 'recommendedNextStep'],
+        dialogueFieldOrder: [
+          'sourceIntent',
+          'rewrittenIntent',
+          'recommendedRole',
+          'recommendedNextStep',
+        ],
         dialogueSectionTitle: '原始需求线索',
         dialogueFieldLabels: {
           recommendedNextStep: '建议下发',
@@ -102,7 +130,8 @@ export function getLayerSummaryPresentation(roleLayer: string | null | undefined
         title: '接待层摘要',
         note: '接待层主要负责接收原始意图、改写任务并决定下发方向，这里优先展示原始需求与改写后的下发内容。',
         emptyMessage: '当前接待层暂无额外产物，将展示原始意图和下发上下文。',
-        primaryLensDescription: '优先确认用户原始需求是否被准确改写，并且已经被下发给正确的下游角色。',
+        primaryLensDescription:
+          '优先确认用户原始需求是否被准确改写，并且已经被下发给正确的下游角色。',
         primaryLensLabel: '需求转译',
         sectionOrder: ['dialogue', 'summary', 'artifact'],
         summaryCardTitle: '本次接待摘要',
@@ -110,7 +139,12 @@ export function getLayerSummaryPresentation(roleLayer: string | null | undefined
     default:
       return {
         artifactSectionTitle: '关联产物',
-        dialogueFieldOrder: ['sourceIntent', 'rewrittenIntent', 'recommendedRole', 'recommendedNextStep'],
+        dialogueFieldOrder: [
+          'sourceIntent',
+          'rewrittenIntent',
+          'recommendedRole',
+          'recommendedNextStep',
+        ],
         dialogueSectionTitle: '对话线索',
         dialogueFieldLabels: {
           recommendedNextStep: '下一步建议',
@@ -121,7 +155,8 @@ export function getLayerSummaryPresentation(roleLayer: string | null | undefined
         title: '本层摘要',
         note: '这里优先展示当前层的上下文、摘要与产物，补足消息较少时的可读性。',
         emptyMessage: '当前层级暂无可展示产物，将仅展示正文或交接上下文。',
-        primaryLensDescription: '优先查看该层当前留下的上下文与产物，确认它在这次链路中的职责和输出。',
+        primaryLensDescription:
+          '优先查看该层当前留下的上下文与产物，确认它在这次链路中的职责和输出。',
         primaryLensLabel: '当前重点',
         sectionOrder: ['summary', 'dialogue', 'artifact'],
         summaryCardTitle: '当前摘要',

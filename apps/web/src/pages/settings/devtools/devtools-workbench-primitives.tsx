@@ -499,7 +499,9 @@ export function LogDetailsPanel({ log }: { log: SettingsDevLogRecord | null }) {
   }
 
   const upstreamStreamSummary =
-    log.source === 'stream:V2_UPSTREAM_STREAM_SUMMARY' ? formatUpstreamStreamSummary(log.output) : null;
+    log.source === 'stream:V2_UPSTREAM_STREAM_SUMMARY'
+      ? formatUpstreamStreamSummary(log.output)
+      : null;
   const summaryOutput =
     log.output && typeof log.output === 'object' && !Array.isArray(log.output)
       ? (log.output as Record<string, unknown>)

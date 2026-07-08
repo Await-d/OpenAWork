@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  buildDevEventsFromLogs,
-  formatUpstreamStreamSummary,
-} from './settings-derived.js';
+import { buildDevEventsFromLogs, formatUpstreamStreamSummary } from './settings-derived.js';
 import type { SettingsDevLogRecord } from './settings-types.js';
 
 describe('formatUpstreamStreamSummary', () => {

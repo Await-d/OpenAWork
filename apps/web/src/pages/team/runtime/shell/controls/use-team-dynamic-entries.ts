@@ -61,8 +61,7 @@ export function useTeamDynamicEntries(receptionSessionId: string | null): TeamDy
   );
 
   const dynamicSessionScope = useMemo(
-    () =>
-      receptionSessionId ? collectSessionScope(receptionSessionId, dynamicScopeNodes) : null,
+    () => (receptionSessionId ? collectSessionScope(receptionSessionId, dynamicScopeNodes) : null),
     [dynamicScopeNodes, receptionSessionId],
   );
 

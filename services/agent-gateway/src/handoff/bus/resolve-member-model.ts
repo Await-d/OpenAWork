@@ -183,7 +183,9 @@ export function resolveMemberModelForHandoff(input: {
   }
 
   // 兜底：按 layer 匹配该层第一个带模型绑定的槽位。
-  const byLayer = slots.find((slot) => slot.layer === input.toRoleLayer && hasMemberModelOverrides(slot));
+  const byLayer = slots.find(
+    (slot) => slot.layer === input.toRoleLayer && hasMemberModelOverrides(slot),
+  );
   return toResolvedModel(byLayer) ?? readRootSessionModel(metadata);
 }
 
@@ -257,10 +259,7 @@ export function mergeMemberModelIntoMetadata(
   }
   // 思考模式：仅当模板 slot 显式配置了 thinkingEnabled 时写入，
   // 不覆盖已存在的值（子 session 可能有自己独立的覆盖）。
-  if (
-    model.thinkingEnabled !== undefined &&
-    typeof metadata['thinkingEnabled'] !== 'boolean'
-  ) {
+  if (model.thinkingEnabled !== undefined && typeof metadata['thinkingEnabled'] !== 'boolean') {
     metadata['thinkingEnabled'] = model.thinkingEnabled;
   }
   if (

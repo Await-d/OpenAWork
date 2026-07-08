@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { routeByRules, routeByLlm, type RouteLlmContext } from '../../handoff/runner/reception-router.js';
+import {
+  routeByRules,
+  routeByLlm,
+  type RouteLlmContext,
+} from '../../handoff/runner/reception-router.js';
 
 describe('reception-router', () => {
   describe('routeByRules', () => {
@@ -226,10 +230,14 @@ describe('reception-router', () => {
         previousTaskSummary: '1. 实现 OAuth 登录（运行中 / executor）',
         incompleteTaskCount: 1,
       };
-      await routeByLlm('继续', async (prompt) => {
-        capturedPrompt = prompt;
-        return 'DECISION: RESUME\nREASON: 有未完成任务且用户想继续';
-      }, context);
+      await routeByLlm(
+        '继续',
+        async (prompt) => {
+          capturedPrompt = prompt;
+          return 'DECISION: RESUME\nREASON: 有未完成任务且用户想继续';
+        },
+        context,
+      );
 
       expect(capturedPrompt).toContain('历史任务上下文');
       expect(capturedPrompt).toContain('实现 OAuth 登录');
@@ -242,10 +250,14 @@ describe('reception-router', () => {
         previousTaskSummary: null,
         incompleteTaskCount: 0,
       };
-      await routeByLlm('继续', async (prompt) => {
-        capturedPrompt = prompt;
-        return 'DECISION: ORCHESTRATE\nREASON: 没有可续接的任务';
-      }, context);
+      await routeByLlm(
+        '继续',
+        async (prompt) => {
+          capturedPrompt = prompt;
+          return 'DECISION: ORCHESTRATE\nREASON: 没有可续接的任务';
+        },
+        context,
+      );
 
       expect(capturedPrompt).toContain('历史任务上下文');
       expect(capturedPrompt).toContain('没有未完成');
@@ -278,9 +290,13 @@ describe('reception-router', () => {
         previousTaskSummary: '1. 修复路由 bug（待执行 / executor）',
         incompleteTaskCount: 1,
       };
-      const result = await routeByLlm('继续干', async () => {
-        return 'DECISION: RESUME\nREASON: 用户想续接上次任务';
-      }, context);
+      const result = await routeByLlm(
+        '继续干',
+        async () => {
+          return 'DECISION: RESUME\nREASON: 用户想续接上次任务';
+        },
+        context,
+      );
 
       expect(result).toMatchObject({
         decision: 'resume',
@@ -294,9 +310,13 @@ describe('reception-router', () => {
         previousTaskSummary: '1. 修复路由 bug（待执行 / executor）',
         incompleteTaskCount: 1,
       };
-      const result = await routeByLlm('帮我新增一个用户管理模块', async () => {
-        return 'DECISION: ORCHESTRATE\nREASON: 新需求与上次任务无关';
-      }, context);
+      const result = await routeByLlm(
+        '帮我新增一个用户管理模块',
+        async () => {
+          return 'DECISION: ORCHESTRATE\nREASON: 新需求与上次任务无关';
+        },
+        context,
+      );
 
       expect(result).toMatchObject({
         decision: 'orchestrate',
