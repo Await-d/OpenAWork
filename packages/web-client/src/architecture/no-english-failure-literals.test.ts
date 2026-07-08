@@ -1,8 +1,9 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { dirname, join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-const ROOT = '/home/await/project/OpenAWork/packages/web-client/src';
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 const DISALLOWED_PATTERNS: RegExp[] = [
   /Failed to (?!fetch\b)/,
