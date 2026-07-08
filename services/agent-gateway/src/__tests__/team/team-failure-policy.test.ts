@@ -9,7 +9,7 @@ describe('deriveQualityReviewDisposition', () => {
   it('超过重试阈值时升级给用户', () => {
     expect(
       deriveQualityReviewDisposition({
-        escalationRound: 2,
+        escalationRound: 4,
         qualityIssues: ['测试失败'],
         qualityReviewPassed: false,
         specIssues: [],

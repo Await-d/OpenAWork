@@ -12,6 +12,7 @@ import {
   extractToolResultPart,
   createChatCompletionsStream,
   readLastUserMessage,
+  seedPendingToolCallConversation,
   waitFor,
   withMockFetch,
   withTempEnv,
@@ -119,6 +120,15 @@ async function main(): Promise<void> {
             await taskManager.save(graph);
 
             const sandbox = createDefaultSandbox();
+            await seedPendingToolCallConversation({
+              clientRequestId: 'child-paused-req-1',
+              rawInput: { command: 'pwd' },
+              sessionId: childSessionId,
+              toolCallId: 'call_bash_1',
+              toolName: 'bash',
+              userId,
+              userMessage: '请调用 bash 工具查看当前目录',
+            });
             const pauseResult = await sandbox.execute(
               {
                 toolCallId: 'call_bash_1',

@@ -1,5 +1,12 @@
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as MessageStoreV2 from '../../message/message-store-v2.js';
+
+const { TEST_WORKSPACE } = vi.hoisted(() => {
+  return {
+    TEST_WORKSPACE: `/tmp/openawork-tool-sandbox-${process.pid}`,
+  };
+});
 
 const mocks = vi.hoisted(() => ({
   sqliteAllMock: vi.fn(() => []),
@@ -38,8 +45,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../../infra/db.js', () => ({
   WORKSPACE_ACCESS_RESTRICTED: false,
-  WORKSPACE_ROOT: '/home/await/project/OpenAWork',
-  WORKSPACE_ROOTS: ['/home/await/project/OpenAWork'],
+  WORKSPACE_ROOT: TEST_WORKSPACE,
+  WORKSPACE_ROOTS: [TEST_WORKSPACE],
   sqliteAll: mocks.sqliteAllMock,
   sqliteGet: mocks.sqliteGetMock,
   sqliteRun: mocks.sqliteRunMock,
@@ -233,14 +240,17 @@ describe('tool-sandbox team session auto approval', () => {
   });
 
   it('executor team session 命中 scoped deny 时仍会被拒绝', async () => {
+    const blockedDir = join(TEST_WORKSPACE, 'blocked');
+    const permissionFile = join(TEST_WORKSPACE, '.openawork.permissions.json');
+    const targetPath = join(blockedDir, 'file.txt');
     mocks.metadataJson = JSON.stringify({
-      workingDirectory: '/home/await/project/OpenAWork',
+      workingDirectory: TEST_WORKSPACE,
     });
 
     const { mkdirSync, rmSync, writeFileSync } = await import('node:fs');
-    mkdirSync('/home/await/project/OpenAWork/blocked', { recursive: true });
+    mkdirSync(blockedDir, { recursive: true });
     writeFileSync(
-      '/home/await/project/OpenAWork/.openawork.permissions.json',
+      permissionFile,
       JSON.stringify({
         rules: [{ permission: 'write', pattern: 'blocked/**', action: 'deny' }],
       }),
@@ -254,7 +264,7 @@ describe('tool-sandbox team session auto approval', () => {
           toolCallId: 'call-denied-write',
           toolName: 'write',
           rawInput: {
-            path: '/home/await/project/OpenAWork/blocked/file.txt',
+            path: targetPath,
             content: 'demo',
           },
         },
@@ -271,8 +281,8 @@ describe('tool-sandbox team session auto approval', () => {
       expect(String(result.output)).toContain('被权限规则禁止');
       expect(result.pendingPermissionRequestId).toBeUndefined();
     } finally {
-      rmSync('/home/await/project/OpenAWork/.openawork.permissions.json', { force: true });
-      rmSync('/home/await/project/OpenAWork/blocked', { recursive: true, force: true });
+      rmSync(permissionFile, { force: true });
+      rmSync(blockedDir, { recursive: true, force: true });
     }
   });
 

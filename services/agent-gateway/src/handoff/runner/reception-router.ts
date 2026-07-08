@@ -91,7 +91,7 @@ const ORCHESTRATE_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   // 指代+动作类："这个改一下" "那个看看" "上面那个" 等——虽短但有动作意图
   {
     pattern:
-      /^(这个|那个|上面|下面|之前|刚才|上次).*(看|改|修|调|查|做|弄|处理|搞|弄一下|改一下|调一下)/i,
+      /^(这个|那个|上面|下面|之前|刚才).*(看|改|修|调|查|做|弄|处理|搞|弄一下|改一下|调一下)/i,
     reason: '指代+动作指令',
   },
   // 重新/重做/再来类（含 redo，语义上更接近"重做"而非"撤销"）
@@ -136,8 +136,13 @@ export function routeByRules(userIntent: string): RouteResult | null {
     };
   }
 
-  // 太短 → 先尝试匹配直答模式
   if (trimmed.length < MIN_ORCHESTRATE_LENGTH) {
+    for (const { pattern, reason } of ORCHESTRATE_PATTERNS) {
+      if (pattern.test(trimmed)) {
+        return { decision: 'orchestrate', decisionSource: 'rule', reason };
+      }
+    }
+
     // 检查直答模式
     for (const { pattern, reason } of DIRECT_ANSWER_PATTERNS) {
       if (pattern.test(trimmed)) {

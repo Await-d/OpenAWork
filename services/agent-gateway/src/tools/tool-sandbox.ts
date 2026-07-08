@@ -5661,16 +5661,12 @@ function ensurePermissionForTool(
     };
   }
 
-  // Team/子代理 session 自动批准修改类工具：
+  // Team session 自动批准修改类工具：
   // 后台运行的 team 成员（pm1/pm2/executor/reviewer）无法与用户交互审批，
   // 且父 session 已通过权限检查——子 session 继承信任链。
   // 同样适用于 yoloMode 开启的 session（用户已显式授权免审批）。
   // 注意：这里只跳过 ask，不绕过显式 deny。deny 已在 scopedAction 分支提前返回。
-  if (
-    isTaskCreatedSession ||
-    sessionMetadata['yoloMode'] === true ||
-    isBackgroundAutoApprovedTeamSession(sessionId)
-  ) {
+  if (sessionMetadata['yoloMode'] === true || isBackgroundAutoApprovedTeamSession(sessionId)) {
     return { kind: 'not_needed' };
   }
 

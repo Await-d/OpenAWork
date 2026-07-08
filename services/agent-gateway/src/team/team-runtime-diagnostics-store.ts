@@ -282,14 +282,26 @@ function listPersistedTeamRuntimeIncidents(input: {
   limit: number;
   userId: string;
 }): TeamRuntimeIncident[] {
-  const rows = sqliteAll<PersistedRuntimeIncidentRow>(
-    `SELECT detail, created_at
-       FROM team_audit_logs
-      WHERE user_id = ? AND action = 'runtime_incident'
-      ORDER BY id DESC
-      LIMIT ?`,
-    [input.userId, input.limit],
-  );
+  let rows: PersistedRuntimeIncidentRow[];
+  try {
+    rows = sqliteAll<PersistedRuntimeIncidentRow>(
+      `SELECT detail, created_at
+         FROM team_audit_logs
+        WHERE user_id = ? AND action = 'runtime_incident'
+        ORDER BY id DESC
+        LIMIT ?`,
+      [input.userId, input.limit],
+    );
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      (error.message.includes('no such table: team_audit_logs') ||
+        error.message.includes('no such table'))
+    ) {
+      return [];
+    }
+    throw error;
+  }
   return rows
     .map((row) => parsePersistedRuntimeIncident(row, input.userId))
     .filter((incident): incident is TeamRuntimeIncident => incident !== null);

@@ -11,6 +11,7 @@ import {
   extractStructuredToolResultOutput,
   extractToolResultPart,
   createChatCompletionsStream,
+  seedPendingToolCallConversation,
   waitFor,
   withMockFetch,
   withTempEnv,
@@ -83,6 +84,26 @@ async function main(): Promise<void> {
             await taskManager.save(graph);
 
             const sandbox = createDefaultSandbox();
+            await seedPendingToolCallConversation({
+              clientRequestId: 'child-question-req-1',
+              rawInput: {
+                questions: [
+                  {
+                    header: '选择目录',
+                    question: '请选择要查看的目录',
+                    options: [
+                      { label: 'workspace', description: '查看工作目录' },
+                      { label: 'home', description: '查看主目录' },
+                    ],
+                  },
+                ],
+              },
+              sessionId: childSessionId,
+              toolCallId: 'question-call-1',
+              toolName: 'question',
+              userId,
+              userMessage: '请先问我一个问题再继续',
+            });
             const questionResult = await sandbox.execute(
               {
                 toolCallId: 'question-call-1',

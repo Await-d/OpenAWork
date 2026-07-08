@@ -10,6 +10,7 @@ import {
   assert,
   createChatCompletionsStream,
   readLastUserMessage,
+  seedPendingToolCallConversation,
   waitFor,
   withMockFetch,
   withTempEnv,
@@ -117,6 +118,15 @@ async function verifyParentPermissionDecisionErrorFallback(): Promise<void> {
             );
 
             const sandbox = createDefaultSandbox();
+            await seedPendingToolCallConversation({
+              clientRequestId: 'child-parent-permission-error-req-1',
+              rawInput: { command: 'pwd' },
+              sessionId: childSessionId,
+              toolCallId: 'call_bash_parent_permission_error',
+              toolName: 'bash',
+              userId,
+              userMessage: '请调用 bash 查看当前目录',
+            });
             const pauseResult = await sandbox.execute(
               {
                 toolCallId: 'call_bash_parent_permission_error',
@@ -280,6 +290,15 @@ async function verifyLatePermissionDecisionFallback(): Promise<void> {
             );
 
             const sandbox = createDefaultSandbox();
+            await seedPendingToolCallConversation({
+              clientRequestId: 'child-late-permission-req-1',
+              rawInput: { command: 'pwd' },
+              sessionId: childSessionId,
+              toolCallId: 'call_bash_late_permission',
+              toolName: 'bash',
+              userId,
+              userMessage: '请调用 bash 查看当前目录',
+            });
             const pauseResult = await sandbox.execute(
               {
                 toolCallId: 'call_bash_late_permission',
@@ -469,6 +488,15 @@ async function verifyParentRejectsPermission(): Promise<void> {
             );
 
             const sandbox = createDefaultSandbox();
+            await seedPendingToolCallConversation({
+              clientRequestId: 'child-parent-permission-reject-req-1',
+              rawInput: { command: 'pwd' },
+              sessionId: childSessionId,
+              toolCallId: 'call_bash_parent_permission_reject',
+              toolName: 'bash',
+              userId,
+              userMessage: '请调用 bash 查看当前目录',
+            });
             const pauseResult = await sandbox.execute(
               {
                 toolCallId: 'call_bash_parent_permission_reject',
@@ -637,6 +665,15 @@ async function main(): Promise<void> {
             );
 
             const sandbox = createDefaultSandbox();
+            await seedPendingToolCallConversation({
+              clientRequestId: 'child-parent-permission-req-1',
+              rawInput: { command: 'pwd' },
+              sessionId: childSessionId,
+              toolCallId: 'call_bash_parent_permission',
+              toolName: 'bash',
+              userId,
+              userMessage: '请调用 bash 查看当前目录',
+            });
             const pauseResult = await sandbox.execute(
               {
                 toolCallId: 'call_bash_parent_permission',

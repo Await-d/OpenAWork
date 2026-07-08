@@ -35,6 +35,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../infra/db.js', () => ({
+  WORKSPACE_ACCESS_RESTRICTED: false,
+  WORKSPACE_ROOTS: ['/tmp/openawork-snapshot-tree-test'],
   sqliteGet: mocks.sqliteGet,
   sqliteRun: vi.fn(),
   sqliteAll: vi.fn(() => []),
@@ -54,6 +56,10 @@ vi.mock('../../runtime/request-workflow.js', () => ({
 }));
 
 vi.mock('../../session/session-workspace-metadata.js', () => ({
+  extractSessionWorkingDirectory: (metadata: Record<string, unknown>) => {
+    const value = metadata['workingDirectory'];
+    return typeof value === 'string' && value.length > 0 ? value : null;
+  },
   parseSessionMetadataJson: (raw: string) => {
     try {
       return JSON.parse(raw) as Record<string, unknown>;
@@ -61,6 +67,7 @@ vi.mock('../../session/session-workspace-metadata.js', () => ({
       return {};
     }
   },
+  sanitizeSessionMetadataJson: (raw: string) => raw,
 }));
 
 vi.mock('../../workspace/workspace-paths.js', () => ({
@@ -410,6 +417,7 @@ describe('snapshot-tree routes', () => {
         const [sessionId] = params as [string];
         if (sessionId === SESSION_ID) {
           return {
+            team_parent_session_id: null,
             user_id: USER_ID,
             metadata_json: JSON.stringify({}),
           };

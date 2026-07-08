@@ -9,6 +9,7 @@ import {
   assert,
   createChatCompletionsStream,
   readLastUserMessage,
+  seedPendingToolCallConversation,
   waitFor,
   withMockFetch,
   withTempEnv,
@@ -776,22 +777,23 @@ async function main(): Promise<void> {
             );
 
             const sandbox = createDefaultSandbox();
+            const questionRawInput = {
+              questions: [
+                {
+                  header: '选择目录',
+                  question: '请选择要查看的目录',
+                  options: [
+                    { label: 'workspace', description: '查看工作目录' },
+                    { label: 'home', description: '查看主目录' },
+                  ],
+                },
+              ],
+            };
             const questionResult = await sandbox.execute(
               {
                 toolCallId: 'question-call-parent-decision',
                 toolName: 'question',
-                rawInput: {
-                  questions: [
-                    {
-                      header: '选择目录',
-                      question: '请选择要查看的目录',
-                      options: [
-                        { label: 'workspace', description: '查看工作目录' },
-                        { label: 'home', description: '查看主目录' },
-                      ],
-                    },
-                  ],
-                },
+                rawInput: questionRawInput,
               },
               new AbortController().signal,
               childSessionId,
@@ -808,6 +810,15 @@ async function main(): Promise<void> {
                 },
               },
             );
+            await seedPendingToolCallConversation({
+              clientRequestId: 'child-parent-decision-req-1',
+              rawInput: questionRawInput,
+              sessionId: childSessionId,
+              toolCallId: 'question-call-parent-decision',
+              toolName: 'question',
+              userId,
+              userMessage: '请先问一个开发层选择题再继续',
+            });
 
             assert(
               typeof questionResult.pendingPermissionRequestId === 'string',

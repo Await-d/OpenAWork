@@ -15,7 +15,17 @@ vi.mock('../../infra/db.js', () => ({
   WORKSPACE_ACCESS_RESTRICTED: false,
   WORKSPACE_BROWSER_ROOT: '/',
   sqliteAll: vi.fn(() => []),
-  sqliteGet: vi.fn(() => undefined),
+  sqliteGet: vi.fn((query: string) => {
+    if (query.includes('role_layer') && query.includes('team_parent_session_id')) {
+      return {
+        metadata_json: '{}',
+        role_layer: 'executor',
+        team_parent_session_id: null,
+        user_id: 'test-user',
+      };
+    }
+    return undefined;
+  }),
   sqliteRun: vi.fn(),
   sqliteTransaction: vi.fn((fn: () => unknown) => fn()),
 }));

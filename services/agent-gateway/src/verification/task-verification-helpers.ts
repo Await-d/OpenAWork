@@ -291,3 +291,38 @@ export function readSingleTextMessage(message: {
     ? firstContent.text
     : '';
 }
+
+export async function seedPendingToolCallConversation(input: {
+  clientRequestId: string;
+  rawInput: Record<string, unknown>;
+  sessionId: string;
+  toolCallId: string;
+  toolName: string;
+  userId: string;
+  userMessage: string;
+}): Promise<void> {
+  const { appendSessionMessageV2: appendSessionMessage } =
+    await import('../message/message-v2-adapter.js');
+
+  appendSessionMessage({
+    sessionId: input.sessionId,
+    userId: input.userId,
+    role: 'user',
+    clientRequestId: input.clientRequestId,
+    content: [{ type: 'text', text: input.userMessage }],
+  });
+  appendSessionMessage({
+    sessionId: input.sessionId,
+    userId: input.userId,
+    role: 'assistant',
+    clientRequestId: `${input.clientRequestId}:assistant:1`,
+    content: [
+      {
+        type: 'tool_call',
+        toolCallId: input.toolCallId,
+        toolName: input.toolName,
+        input: input.rawInput,
+      },
+    ],
+  });
+}

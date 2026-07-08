@@ -62,6 +62,13 @@ function readSubstate(sessionId: string): string | null {
   return row?.substate ?? null;
 }
 
+function speedUpExecutorRetryDelay(): void {
+  const originalSetTimeout = globalThis.setTimeout;
+  vi.spyOn(globalThis, 'setTimeout').mockImplementation((handler, timeout, ...args) =>
+    originalSetTimeout(handler, timeout === 5_000 ? 0 : timeout, ...args),
+  );
+}
+
 function makeExecutorHandoff(): HandoffStoreModule.HandoffRecord {
   // 直接构造一个 toRoleLayer='executor' 的 handoff 记录（claimed/running 态），
   // 让 createPhaseCAwareRunner 走 runExecutionLayer 分支。
@@ -91,6 +98,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.clearAllMocks();
 });
 
@@ -100,6 +108,7 @@ afterAll(async () => {
 
 describe('runExecutionLayer 失败语义（🔴#1）', () => {
   it('stream 返回 stopReason==="error" 时 runner 抛错，substate 不被标 completed', async () => {
+    speedUpExecutorRetryDelay();
     runSessionInBackgroundMock.mockResolvedValue({
       stopReason: 'error',
       statusCode: 502,
@@ -126,6 +135,7 @@ describe('runExecutionLayer 失败语义（🔴#1）', () => {
   });
 
   it('runSessionInBackground 抛异常时 runner 同样抛错', async () => {
+    speedUpExecutorRetryDelay();
     runSessionInBackgroundMock.mockRejectedValue(new Error('socket hang up'));
 
     const runner = pm1RunnerModule.createPhaseCAwareRunner();

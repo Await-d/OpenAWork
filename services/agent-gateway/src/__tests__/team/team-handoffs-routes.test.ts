@@ -1227,7 +1227,7 @@ describe('POST /team/sessions/:sessionId/resume-all', () => {
       });
       expect(runSessionInBackgroundMock).toHaveBeenCalledWith(
         expect.objectContaining({
-          sessionId: FROM_SESSION_ID,
+          sessionId: PM1_SESSION_ID,
           teamResumeRootSessionId: FROM_SESSION_ID,
           userId: USER_ID,
           requestData: expect.objectContaining({
