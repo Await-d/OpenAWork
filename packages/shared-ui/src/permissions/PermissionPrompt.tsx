@@ -232,8 +232,8 @@ export function categorizeAlwaysPatterns(
     uniqueAlways.push(pattern);
   }
 
-  const hasPartialPattern = uniqueAlways.length >= 2;
-  const hasBasePattern = uniqueAlways.length >= 1;
+  const hasPartialPattern = uniqueAlways.length >= 1;
+  const hasBasePattern = uniqueAlways.length >= 2;
   const partialPattern = hasPartialPattern ? uniqueAlways[0]! : fullCommand;
   const basePattern = hasBasePattern ? uniqueAlways[uniqueAlways.length - 1]! : fullCommand;
 

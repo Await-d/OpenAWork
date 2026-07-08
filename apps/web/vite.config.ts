@@ -20,7 +20,12 @@ export default defineConfig({
       '@openAwork/web-client': fileURLToPath(
         new URL('../../packages/web-client/src/index.ts', import.meta.url),
       ),
+      // 强制所有 workspace 包解析到同一份 React 实例，避免 monorepo 中
+      // 多个 React 副本导致 "Invalid hook call" / useContext 返回 null
+      react: fileURLToPath(new URL('node_modules/react', import.meta.url)),
+      'react-dom': fileURLToPath(new URL('node_modules/react-dom', import.meta.url)),
     },
+    dedupe: ['react', 'react-dom'],
   },
   plugins: [
     versionPlugin(),
@@ -74,6 +79,11 @@ export default defineConfig({
   ],
   server: {
     port: 5173,
+    hmr: {
+      protocol: 'ws',
+      host: 'localhost',
+      port: 5173,
+    },
     proxy: {
       '/api': {
         target: 'http://localhost:3000',

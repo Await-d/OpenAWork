@@ -1,0 +1,233 @@
+# OpenCowork 工具生态集成方案
+
+## Task Overview
+
+目标是分析参考库 `temp/OpenCowork` 已内置的 MCP、Skill、Agent 工具、App Plugin、Channel Plugin 与 Custom Extension 能力，并为 OpenAWork 创建一套可执行的集成方案。
+
+本方案特别遵守用户约束：如果 OpenAWork 已经有等价的简单工具或更完整的原生实现，不重复完整集成，只做登记、别名、文档、入口补齐或 provider-specific 扩展。
+
+## Current Analysis
+
+### OpenCowork 能力清单
+
+OpenCowork 参考库当前可归纳为六类能力：
+
+| 类别 | 已观察能力 | 关键路径 |
+| --- | --- | --- |
+| MCP | 通用 MCP 客户端与动态桥接，支持 `stdio`、`sse`、`streamable-http`；工具名 `mcp__{serverId}__{toolName}`；资源名 `mcp__{serverId}__resource__{resourceName}` | `temp/OpenCowork/src/main/mcp/`、`temp/OpenCowork/src/renderer/src/lib/mcp/` |
+| 随包 Skills | `create-extension`、`csv-pipeline`、`docx`、`email-drafter`、`excel-processor`、`frontend-skill`、`image-ocr`、`pdf`、`post-to-x`、`product-design`、`web-scraper`、`xlsx` | `temp/OpenCowork/resources/skills/` |
+| 核心 Agent 工具 | 文件读写编辑、Glob/Grep、Bash、WebSearch/WebFetch、Todo/Task、Plan、Cron、Goal、Memory、AskUser、Notify、Widget、Team、Browser、Desktop、Image 等 | `temp/OpenCowork/src/renderer/src/lib/tools/` |
+| App Plugins | `image`、`browser`、`product-design` workflow、`desktop-control` | `temp/OpenCowork/docs/docs/capabilities/app-plugins.mdx`、相关 renderer/native tool |
+| Channel Plugins | 飞书、钉钉、企业微信、QQ、微信公众、Telegram、Discord、WhatsApp；通用消息工具 + 飞书媒体/Bitable/成员/@/urgent + 微信媒体 | `temp/OpenCowork/src/main/channels/`、`temp/OpenCowork/src/renderer/src/lib/channel/plugin-tools.ts` |
+| Custom Extensions | 本地 `extension.json` 声明 HTTP/JS 工具、权限 allowlist、配置、HTML renderer；工具名 `extension__{extensionId}__{toolName}` | `temp/OpenCowork/docs/docs/capabilities/custom-extensions.mdx`、`examples/extensions/demo-extension/` |
+
+### OpenAWork 现状映射
+
+OpenAWork 已有的主要底座：
+
+| 表面 | 当前能力 | 判断 |
+| --- | --- | --- |
+| MCP runtime | `websearch`、`grep_app`、`codegraph`、`git_bash`、`lsp`、`omo` 内置；flat MCP 工具定义与命名已存在；OAuth、catalog、authorization 已有 | 不搬 OpenCowork MCP runtime，只补缺口 |
+| MCP transport | `ConfiguredMCPServer.transport` 当前为 `'sse' | 'stdio'` | 缺 `streamable-http` |
+| Skills | `@openAwork/skills` 已有 `git-master`、`review-work`、`programming`、`frontend`、`visual-qa`、`lsp`、`ast-grep`、`rules`；gateway 会扫描系统 `SKILL.md` | 通用工程类不重复；文档处理类可补 |
+| 核心工具 | gateway 已有 `websearch`/`webfetch`、LSP、workspace read/write/edit/grep/glob、bash/background bash、question、plan mode、task、session read/search、ast-grep、image、desktop、codegraph、repo 等 | OpenCowork 简单工具大多已覆盖 |
+| App plugin gate | `plugin_settings` 当前控制 `generate_image` 与 `desktop_control` 的 Agent 可见性 | Image/Desktop 不重复 |
+| Channel | 已支持 `telegram`、`discord`、`slack`、`feishu`、`dingtalk`、`wecom`、`whatsapp`、`qq`；有自动回复和工具 allowlist | 平台覆盖基本齐；细分媒体/Bitable 能力不足 |
+| Plugin host | 支持 `OPENAWORK_PLUGINS` 加载 hook：`tool.execute.before/after`、`chat.message`、`chat.params` | 这是可信 hook 插件，不等价于用户 Custom Extension |
+| Dynamic tools | workspace `tool/`、`tools/` 动态扫描 JS/TS 工具 | 已有轻量本地工具能力，但缺安装、权限、UI、HTTP 声明式工具 |
+| Web 设置入口 | 已有 MCP、Skills、Channels、Plugins、Desktop Control 等设置页和 web-client 封装 | 后续实现必须复用入口，不直接 `fetch()` 网关 |
+
+## Solution Design
+
+### 总体原则
+
+1. 原生优先：OpenAWork 已有 gateway tool registry、MCP runtime、skill registry、channel manager、plugin settings 时，不搬 OpenCowork 的 renderer/native worker 注册体系。
+2. 不重复简单工具：Read/Write/Edit/Glob/Grep/Bash/WebSearch/WebFetch/Todo/Task/Plan/AskUser/Memory/Goal/Cron/Image/Desktop/Browser 类能力，默认归入“已有，仅登记或补别名”。
+3. 网关统一注入：所有 Agent 可见工具必须从 gateway tool definitions、MCP flat tool 或 skill tool 注入，不从 Web UI 绕开。
+4. 权限统一收口：执行必须经过 `tool-sandbox`、session visibility、permission、audit、plugin settings 或 channel allowlist，不能因插件迁移引入第二套授权。
+5. UI 统一走 web-client：后续 Web/桌面界面若新增配置入口，必须先补 `@openAwork/web-client`，再由 `apps/web` 消费。
+6. 分层扩展：平台通用动作走 channel generic API；飞书 Bitable、媒体、urgent 等走 provider-specific action，不复制一整套 `PluginSendMessage` 工具命名。
+7. 高风险能力延后：`post-to-x`、JS extension、跨平台桌面控制、未沙箱第三方插件默认暂缓或强门控。
+
+### 内置资源目录方案
+
+可以借鉴 OpenCowork 的 `resources/` 存放方式，但不建议把参考库目录原样复制到 OpenAWork 根目录。OpenAWork 是 pnpm monorepo，且已有 `@openAwork/skills`、agent catalog、team persona、commands、workflow templates、prompt snippets 等运行时入口；因此推荐新增一个 workspace 包作为静态资源包：
+
+```text
+packages/resources/
+  package.json
+  src/index.ts
+  resources/
+    skills/
+      csv-pipeline/
+        SKILL.md
+        scripts/
+      spreadsheet/
+        SKILL.md
+        scripts/
+      docx/
+      pdf/
+      image-ocr/
+      email-drafter/
+      web-scraper/
+      product-design/
+      create-extension/
+    agents/
+      api-designer.md
+      architect-reviewer.md
+      code-reviewer.md
+      frontend-developer.md
+      security-auditor.md
+      ...
+    souls/
+      reception.md
+      pm1.md
+      pm2.md
+      executor.md
+      reviewer.md
+    commands/
+      init.md
+      plan.md
+      review.md
+      security-review.md
+      commit.md
+    prompts/
+      codex-instructions.md
+    extensions/
+      demo-http-extension/
+        extension.json
+```
+
+资源包职责是“随应用发布的默认资产”，不是运行时唯一真相源。运行时仍按现有架构落库或注册：
+
+| 资源类型 | 推荐存放 | 运行时真相源 | 加载方式 |
+| --- | --- | --- | --- |
+| Skills | `packages/resources/resources/skills/<name>/SKILL.md` | `installed_skills` + `@openAwork/skills` manifest | gateway 启动时 seed 为 builtin/system skills；用户启停仍在 DB |
+| Agents | `packages/resources/resources/agents/<id>.md` 或 `<id>.json` | `user_settings.agent_catalog` + builtin agent catalog | 启动时构建 builtin agent base；用户覆盖仍在 DB |
+| SOUL / personas | `packages/resources/resources/souls/<role>.md` | `agent_personas` 表 | 默认版本 seed；用户自定义不被覆盖 |
+| Commands | `packages/resources/resources/commands/<id>.md` | `buildCommandDescriptors()` + server action switch | 只作为描述/帮助/提示词资源；真正执行仍由 TS action 控制 |
+| Prompt snippets | `packages/resources/resources/prompts/*.md` | prompt-snippets DB/API | 可 seed 默认分组；用户编辑后走 DB |
+| Workflow templates | `packages/resources/resources/workflows/*.json` | workflow templates API/DB | 可 seed 默认模板；团队绑定仍走现有接口 |
+| Extensions 示例 | `packages/resources/resources/extensions/*/extension.json` | 后续 Custom Extension registry | 只放示例/官方模板，不默认启用 |
+
+这个设计保留 OpenCowork `resources/` 的可浏览、可打包、可复制优点，同时避免破坏 OpenAWork 已经形成的“设置/DB 是用户态真相源、gateway 统一注入工具、web-client 统一访问”的架构。
+
+#### 为什么不直接放根目录 `resources/`
+
+- 根目录 `resources/` 不属于当前 workspace 包，构建、发布、桌面 sidecar 打包时容易遗漏。
+- OpenAWork 已有 `packages/skills`，如果再新增根 `resources/skills` 但没有明确 loader，会形成第二套 skill 真相源。
+- Agents、SOUL、commands 现在与 DB 迁移、路由、权限和 UI 强绑定，直接文件化会绕开用户覆盖/重置逻辑。
+- `packages/resources` 可以通过 package exports 提供稳定路径和 manifest 索引，更适合 Web/Desktop/Gateway 共同消费。
+
+#### 分阶段迁移建议
+
+1. P0：先建 `packages/resources` 和只读索引，不改变运行时行为。
+2. P1：把 OpenCowork 中低风险 skills 迁入 `resources/skills`，由 `@openAwork/skills` 或 gateway seed 读入。
+3. P1：把 OpenCowork `agents/*.md` 转换为 OpenAWork `ManagedAgentRecord` 默认定义，但仍由 `agent-catalog.ts` 负责合并用户覆盖。
+4. P2：把 SOUL 默认文案从 TS 常量迁到 `resources/souls/*.md`，保留 `DEFAULT_SOUL_VERSION` 和默认指纹迁移逻辑。
+5. P2：commands/prompts/workflows 先做资源化文案与模板，不允许文件直接声明新的可执行 server action。
+6. P3：Custom Extension 官方示例放入 `resources/extensions`，等 extension registry v1 完成后作为安装模板暴露。
+
+### 能力处置矩阵
+
+| OpenCowork 能力 | OpenAWork 处置 | 优先级 | 原因与落点 |
+| --- | --- | --- | --- |
+| MCP `stdio` / `sse` | 已有，不重复 | P0-登记 | 继续使用 `services/agent-gateway/src/mcp/mcp-runtime.ts` 与 settings schemas |
+| MCP `streamable-http` | 新增 transport | P1 | 补 `ConfiguredMCPServer`、settings schema、mcp-client adapter、状态页测试 |
+| MCP flat 命名 | 已有，不重复 | P0-登记 | 现有 `mcp__server__tool` 机制已对齐 |
+| MCP resources/prompts 工具化 | 补齐读资源/取 prompt 的平面工具或 catalog 展示 | P2 | OpenCowork 暴露 resource/prompt，OpenAWork 当前重点在 tools |
+| `frontend-skill` | 不复制 | P0-登记 | 已有 `frontend` + `visual-qa`，后续只补 OpenAWork token 指引 |
+| `product-design` | 选择性迁移为 workflow skill | P2 | 价值在研究/原型/QA 流程，不是简单 frontend skill |
+| `csv-pipeline` | 新增 builtin/system skill | P1 | 高价值文档/数据处理能力，风险低 |
+| `excel-processor` / `xlsx` | 合并为一个 spreadsheet skill | P1 | 避免重复两个 Excel skill；统一为 `spreadsheet` 或 `excel-xlsx` |
+| `docx` | 新增 builtin/system skill | P1 | 保留 OOXML 参考与脚本，需审查 license 与 Python 依赖 |
+| `pdf` | 新增 builtin/system skill | P1 | 表单、图片转换、校验能力有产品价值 |
+| `image-ocr` | 新增 skill，但优先复用现有图片/附件管线 | P1 | 不新增一套 image plugin，只加 OCR workflow |
+| `email-drafter` | 新增 prompt skill | P2 | 简单低风险，可作为写作 skill |
+| `web-scraper` | 部分迁移 | P2 | 已有 `webfetch`/`websearch`，只补动态 crawl/链接抽取流程 |
+| `create-extension` | 改造为 OpenAWork extension authoring skill | P2 | 不能照搬 OpenCowork manifest；需生成 OpenAWork 规范 |
+| `post-to-x` | 暂缓 | P3 | 外部发帖风险高，需 OAuth、审批、审计和速率限制 |
+| 文件/Bash/搜索/Plan/Todo/Task/Question/Memory/Goal/Cron | 已有，不重复 | P0-登记 | 只需兼容别名或文档 |
+| BrowserNavigate/GetContent/Screenshot/Click/Type/Scroll | 已有能力映射，不新增全套 | P1-补体验 | 映射到 `desktop_automation` / browser automation；补 alias 或 skill 文案 |
+| DesktopScreenshot/Click/Type/Scroll/Wait | 已完成，不重复 | P0-登记 | 见 `260706-desktop-control-plugin-integration` |
+| ImageGenerate | 已有，不重复 | P0-登记 | `generate_image` 已受 plugin settings 控制 |
+| Channel 通用 send/reply/list/read/summarize | 不复制 `Plugin*` 命名，映射现有 channel service | P1 | 如需 Agent 主动调 channel，新增 `channel_send_message` 等 OpenAWork 命名 |
+| 飞书图片/文件/@/成员/urgent | provider-specific channel action | P1/P2 | `sendImage/sendFile/listMembers/mention/urgent`，全部需要审批 |
+| 飞书 Bitable CRUD | provider-specific channel/data action | P2 | 读操作先行；写/删必须强审批 |
+| 微信公众图片/文件 | 暂缓或 P2 | P2/P3 | OpenAWork 当前无 `weixin-official` 平台，需先确认产品方向 |
+| Custom Extension HTTP tool | 新增 OpenAWork Custom Tool Extension v1 | P2 | 声明式 HTTP + network allowlist 先行 |
+| Custom Extension JS tool | 暂缓或受限 worker | P3 | 当前 plugin-host 不沙箱；workspace dynamic JS 不等于可安装 extension |
+| HTML renderer | 暂缓 | P3 | 需 artifact/UI 安全模型，先只返回 text/json/artifact |
+| `resources/skills` 存放方式 | 借鉴但放入 `packages/resources` | P0/P1 | 作为默认资产包；运行时仍 seed 到 skill registry/DB |
+| `resources/agents` 存放方式 | 借鉴并转换为 builtin agent definitions | P1 | 不直接绕过 `agent-catalog.ts` 用户覆盖模型 |
+| `resources/souls` 存放方式 | 借鉴并逐步替换 TS 默认文案 | P2 | 保留 `DEFAULT_SOUL_VERSION`、默认指纹和用户自定义保护 |
+| `resources/commands` 存放方式 | 仅用于描述/帮助/模板 | P2 | 可执行 action 继续由 `command-descriptors.ts` 和路由 switch 白名单控制 |
+
+### 分阶段路线
+
+#### Phase 0：登记与不重复声明
+
+- R-01: 在文档和设置文案中明确已覆盖能力：核心文件工具、Bash、Web、Task、Plan、Image、Desktop、Browser 基础动作、MCP flat naming、通用工程 skills。
+- R-02: 建立 OpenCowork → OpenAWork 工具别名表，只为兼容模型提示，不新增重复执行器。
+- R-03: 对 `generate_image`、`desktop_control`、`desktop_automation`、`webfetch`、`websearch`、workspace tools 做一次 capability catalog 展示校验。
+
+#### Phase 1：低风险高价值补齐
+
+- R-04: MCP 增加 `streamable-http` transport，并保留 SSE fallback 策略。
+- R-05: 新增文档/数据处理 builtin skills：CSV、Spreadsheet、DOCX、PDF、Image OCR。
+- R-06: Browser automation 只补 alias/说明/状态页，不新增第二套工具执行链。
+- R-07: Channel 增加 OpenAWork 命名的通用 Agent 工具：发送、回复、读取群消息、列群、摘要当前会话；统一走 `MessagingChannelService` 与 channel allowlist。
+
+#### Phase 2：平台细分能力
+
+- R-08: 飞书 provider-specific actions：发图片、发文件、列成员、@成员、urgent；写类动作必须审批。
+- R-09: 飞书 Bitable 读能力先行：list apps/tables/fields/records。
+- R-10: 飞书 Bitable 写能力后置：create/update/delete records，强审批 + audit + dry-run 文案。
+- R-11: `product-design` 迁移为 OpenAWork workflow skill，复用现有 `frontend`、`visual-qa`、artifacts 与 Web 原型入口。
+
+#### Phase 3：Custom Extension v1
+
+- R-12: 设计 OpenAWork extension manifest schema：id/name/version/config/permissions/tools/http/readOnly。
+- R-13: 实现声明式 HTTP extension tool，工具名 `extension__{id}__{tool}`，支持 network allowlist、secret config、输入 schema 校验。
+- R-14: 接入安装/启停/移除 API 与 web-client，Web 设置页复用现有插件/skill 风格。
+- R-15: JS extension、HTML renderer、社交发帖类能力暂缓，等沙箱和 UI 安全边界明确后再做。
+
+## Complexity Assessment
+
+- Atomic steps: 5+ → +2
+- Parallel streams: yes（MCP、Skill、Tool、Channel、Extension 可并行分析）→ +2
+- Modules/systems/services: 7（gateway tools、mcp、skills、channels、plugin host、web-client、apps/web settings）→ +1
+- Long step (>5 min): yes → +1
+- Persisted review artifacts: yes → +1
+- OpenCode available: no → 0
+- **Total score**: 7
+- **Chosen mode**: Full orchestration
+- **Routing rationale**: 该方案横跨多个产品运行时表面，且必须把“不重复已有简单工具”的裁剪依据持久化，适合用完整 workflow + runtime 记录。
+
+## Implementation Plan
+
+### Phase 0: 范围锁定
+
+- [x] T-01 ✅: 盘点 OpenCowork MCP、skills、tools、plugins、channels、extensions。
+- [x] T-02 ✅: 盘点 OpenAWork 已有 MCP、skills、gateway tools、channels、plugin settings、dynamic tools 与 UI 入口。
+- [x] T-03 ✅: 建立处置原则：原生优先、已有不重复、权限统一、web-client 统一。
+
+### Phase 1: 集成路线
+
+- [x] T-04 ✅: 形成能力处置矩阵，区分已有登记、补齐、选择性迁移、暂缓。
+- [x] T-05 ✅: 按 P0/P1/P2/P3 制定阶段路线和主要落点。
+- [x] T-06 ✅: 记录后续执行要求：Phase 1 代码集成前，为每个子项拆独立实施 workflow 并补测试清单。
+
+### Phase 2: 验收基线
+
+- [x] T-07 ✅: 明确验证命令与 QA 入口。
+- [x] T-08 ✅: 记录后续验收要求：进入代码实现后，按子项运行对应 package 的 `pnpm --filter ... test`、`pnpm typecheck`、相关 Web 设置页视觉 QA。
+
+## Notes
+
+- `streamable-http` 是当前最明确的 MCP 协议缺口。
+- OpenAWork 已有 `desktop_control` 集成闭环，不应再搬 OpenCowork 的 Desktop plugin。
+- OpenAWork 已有 `generate_image`，不应再搬 OpenCowork 的 Image plugin，只需保持技能/workflow 能调用。
+- OpenAWork 已有 `frontend` 与 `visual-qa`，不应复制 `frontend-skill`；`product-design` 的价值在更高层 workflow。
+- OpenAWork 当前 `plugin-host` 是可信 hook，不是用户可安装沙箱 extension；Custom Extension 需要单独设计。
+- Memory sync: completed，已将“OpenCowork 工具体系接入采用原生优先、不重复简单工具”写入 `.agentdocs/index.md` 架构决策。

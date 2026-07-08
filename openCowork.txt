@@ -1,0 +1,118 @@
+我看了 /home/await/project/OpenAWork/temp/OpenCowork，这个参考库里“内置工具生态”大致分为 5 类：MCP 桥接、随包 Skills、核心 Agent 工具、应用
+  插件工具、消息渠道/扩展工具。
+
+  MCP
+  它没有看到随仓库固定内置某个具体 MCP server 配置，比如 filesystem/git 之类的预置 JSON；它内置的是一个通用 MCP 客户端和动态工具桥接：
+
+  - 支持传输：stdio、sse、streamable-http
+  - 配置持久化：mcp-servers.json
+  - IPC 能力：mcp:list、mcp:add、mcp:update、mcp:remove、mcp:connect、mcp:disconnect、mcp:list-tools、mcp:call-tool、mcp:list-resources、
+    mcp:read-resource、mcp:list-prompts、mcp:get-prompt
+
+  - 动态工具命名：mcp__{serverId}__{toolName}
+  - 动态资源工具命名：mcp__{serverId}__resource__{resourceName}
+
+  关键路径：
+
+  - temp/OpenCowork/src/main/mcp/mcp-client.ts
+  - temp/OpenCowork/src/main/mcp/mcp-manager.ts
+  - temp/OpenCowork/src/main/ipc/mcp-handlers.ts
+  - temp/OpenCowork/src/renderer/src/lib/mcp/mcp-tools.ts
+  - temp/OpenCowork/sidecars/OpenCowork.Native.Worker/Modules/Mcp/McpConfigModule.cs
+  - temp/OpenCowork/sidecars/OpenCowork.Native.Worker/Modules/AgentRuntime/AgentRuntimeMcpExecutor.cs
+
+  随包 Skills
+  实际随包放在 temp/OpenCowork/resources/skills/，目前有 12 个：
+
+  - create-extension：创建/修改 OpenCowork 自定义扩展
+  - csv-pipeline：CSV/TSV/JSON/JSONL 数据处理
+  - docx：Word 文档创建、编辑、分析
+  - email-drafter：邮件草稿生成
+  - excel-processor：Excel 读取、生成、格式化
+  - frontend-skill：前端/落地页/原型 UI 设计实现
+  - image-ocr：图片 OCR
+  - pdf：PDF 处理、生成、表单
+  - post-to-x：通过系统浏览器登录态发 X/Twitter
+  - product-design：产品设计工作流插件
+  - web-scraper：网页抓取、搜索、动态页面爬取
+  - xlsx：更完整的 XLSX 表格创建、分析、重算
+
+  Skill 入口工具是统一的 Skill，会从 IPC 的 skills:list 加载已安装 skill 元数据，再把可用 skill 写进工具描述。相关路径：
+
+  - temp/OpenCowork/resources/skills/
+  - temp/OpenCowork/src/renderer/src/lib/tools/skill-tool.ts
+  - temp/OpenCowork/src/renderer/src/stores/skills-store.ts
+  - temp/OpenCowork/src/renderer/src/components/skills/SkillsPage.tsx
+
+  核心 Agent 工具
+  这些是在 registerAllTools() 里注册的基础工具：
+
+  - 文件：Read、Write、Edit、NotebookEdit、LS
+  - 搜索：Glob、Grep
+  - Shell：Bash
+  - Web：WebSearch、WebFetch，按设置动态注册
+  - 任务/Todo：TaskCreate、TaskGet、TaskUpdate、TaskList
+  - 计划：EnterPlanMode、ExitPlanMode
+  - Cron：CronAdd、CronUpdate、CronRemove、CronList、CronCreate、CronDelete
+  - Goal：get_goal、create_goal、update_goal
+  - Memory：MemoryList、MemoryRead、MemorySearch
+  - 交互/通知：AskUserQuestion、Notify
+  - 可视化：visualize_show_widget
+  - 兼容别名：PowerShell、Monitor
+  - 子 Agent：Task
+  - Team：TeamCreate、SendMessage、TeamStatus、TeamDelete
+
+  关键路径：
+
+  - temp/OpenCowork/src/renderer/src/lib/tools/index.ts
+  - temp/OpenCowork/src/renderer/src/lib/tools/*.ts
+  - temp/OpenCowork/src/renderer/src/lib/agent/sub-agents/
+  - temp/OpenCowork/src/renderer/src/lib/agent/teams/
+  - temp/OpenCowork/sidecars/OpenCowork.Native.Worker/Modules/AgentRuntime/AgentRuntimeNativeToolExecutor.cs
+
+  应用插件工具
+  内置 app plugin 有 4 个：
+
+  - image：工具 ImageGenerate
+  - browser：BrowserNavigate、BrowserGetContent、BrowserScreenshot、BrowserSnapshot、BrowserClick、BrowserType、BrowserScroll
+  - product-design：本身不新增低层工具，主要通过 product-design skill 编排 Image、Browser、Search、File、Shell、MCP 等工具
+  - desktop-control：隐藏插件，工具 DesktopScreenshot、DesktopClick、DesktopType、DesktopScroll、DesktopWait
+
+  关键路径：
+
+  - temp/OpenCowork/src/renderer/src/lib/app-plugin/types.ts
+  - temp/OpenCowork/src/renderer/src/lib/app-plugin/index.ts
+  - temp/OpenCowork/src/renderer/src/lib/tools/browser-tool.ts
+  - temp/OpenCowork/sidecars/OpenCowork.Native.Worker/Modules/AgentRuntime/AgentRuntimeDesktopExecutor.cs
+  - temp/OpenCowork/sidecars/OpenCowork.Native.Worker/Modules/AgentRuntime/AgentRuntimeBrowserExecutor.cs
+
+  消息渠道插件
+  内置渠道 provider 有 8 个：
+
+  - whatsapp-bot
+
+  通用插件工具：
+  - PluginReplyMessage
+  - PluginGetGroupMessages
+  - PluginListGroups
+  飞书额外工具：
+
+  - FeishuSendImage
+  - FeishuSendFile
+  - FeishuListChatMembers
+  - FeishuAtMember
+  - FeishuSendUrgent
+  - FeishuBitableListApps
+  - FeishuBitableListTables
+  - FeishuBitableCreateRecords
+  - FeishuBitableUpdateRecords
+  - FeishuBitableDeleteRecords
+
+  微信额外工具：
+
+  - WeixinSendImage
+  - WeixinSendFile
+
+  - temp/OpenCowork/src/renderer/src/lib/channel/plugin-tools.ts
+  - temp/OpenCowork/sidecars/OpenCowork.Native.Worker/Modules/AgentRuntime/AgentRuntimePluginExecutor.cs
+  - temp/OpenCowork/sidecars/OpenCowork.Native.Worker/Modules/AgentRuntime/AgentRuntimeChannelPluginExecutor.cs

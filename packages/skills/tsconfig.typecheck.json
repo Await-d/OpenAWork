@@ -5,6 +5,7 @@
   },
   "references": [
     { "path": "../mcp-client/tsconfig.typecheck.json" },
+    { "path": "../resources/tsconfig.typecheck.json" },
     { "path": "../skill-types/tsconfig.typecheck.json" }
   ]
 }

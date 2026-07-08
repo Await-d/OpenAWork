@@ -99,7 +99,7 @@ describe('categorizeAlwaysPatterns', () => {
     ]);
   });
 
-  it('returns three Chinese scope levels when always has one unique pattern', () => {
+  it('assigns single unique pattern to 同子命令, falls back to scope for 同类指令', () => {
     const levels = categorizeAlwaysPatterns('ls -la /tmp', 'ls -la /tmp', ['ls *']);
     expect(levels).toEqual([
       {
@@ -110,14 +110,14 @@ describe('categorizeAlwaysPatterns', () => {
       },
       {
         label: '同子命令',
-        description: '当前没有可用的同子命令规则，选择后仍只覆盖当前命令。',
-        pattern: 'ls -la /tmp',
+        description: '覆盖网关提供的相同子命令模式。',
+        pattern: 'ls *',
         category: 'partial',
       },
       {
         label: '同类指令',
-        description: '覆盖网关提供的同类指令模式。',
-        pattern: 'ls *',
+        description: '当前没有可用的同类指令规则，选择后仍只覆盖当前命令。',
+        pattern: 'ls -la /tmp',
         category: 'base',
       },
     ]);
@@ -163,14 +163,14 @@ describe('categorizeAlwaysPatterns', () => {
       },
       {
         label: '同子命令',
-        description: '当前没有可用的同子命令规则，选择后仍只覆盖当前命令。',
-        pattern: 'git status',
+        description: '覆盖网关提供的相同子命令模式。',
+        pattern: 'git *',
         category: 'partial',
       },
       {
         label: '同类指令',
-        description: '覆盖网关提供的同类指令模式。',
-        pattern: 'git *',
+        description: '当前没有可用的同类指令规则，选择后仍只覆盖当前命令。',
+        pattern: 'git status',
         category: 'base',
       },
     ]);
@@ -187,14 +187,14 @@ describe('categorizeAlwaysPatterns', () => {
       },
       {
         label: '同子命令',
-        description: '当前没有可用的同子命令规则，选择后仍只覆盖当前命令。',
-        pattern: 'git status',
+        description: '覆盖网关提供的相同子命令模式。',
+        pattern: 'git *',
         category: 'partial',
       },
       {
         label: '同类指令',
-        description: '覆盖网关提供的同类指令模式。',
-        pattern: 'git *',
+        description: '当前没有可用的同类指令规则，选择后仍只覆盖当前命令。',
+        pattern: 'git status',
         category: 'base',
       },
     ]);
@@ -265,6 +265,62 @@ describe('categorizeAlwaysPatterns', () => {
         label: '同类指令',
         description: '覆盖网关提供的同类指令模式。',
         pattern: 'curl *',
+        category: 'base',
+      },
+    ]);
+  });
+
+  it('MCP 工具双层级 always 分配到 同子命令 和 同类指令', () => {
+    const levels = categorizeAlwaysPatterns(
+      '调用 websearch/web_search_exa {"numResults":8,"query":"latest news"}',
+      'websearch:web_search_exa:a929023238de309b',
+      ['websearch:web_search_exa:*', 'websearch:*'],
+    );
+    expect(levels).toEqual([
+      {
+        label: '仅本次指令',
+        description: '只覆盖当前命令，不会扩大到其它参数或子命令。',
+        pattern: 'websearch:web_search_exa:a929023238de309b',
+        category: 'full',
+      },
+      {
+        label: '同子命令',
+        description: '覆盖网关提供的相同子命令模式。',
+        pattern: 'websearch:web_search_exa:*',
+        category: 'partial',
+      },
+      {
+        label: '同类指令',
+        description: '覆盖网关提供的同类指令模式。',
+        pattern: 'websearch:*',
+        category: 'base',
+      },
+    ]);
+  });
+
+  it('MCP 工具单层级 always 分配到 同子命令，同类指令 fallback 到 scope', () => {
+    const levels = categorizeAlwaysPatterns(
+      '调用 websearch/web_search_exa {"query":"test"}',
+      'websearch:web_search_exa:abc123',
+      ['websearch:*'],
+    );
+    expect(levels).toEqual([
+      {
+        label: '仅本次指令',
+        description: '只覆盖当前命令，不会扩大到其它参数或子命令。',
+        pattern: 'websearch:web_search_exa:abc123',
+        category: 'full',
+      },
+      {
+        label: '同子命令',
+        description: '覆盖网关提供的相同子命令模式。',
+        pattern: 'websearch:*',
+        category: 'partial',
+      },
+      {
+        label: '同类指令',
+        description: '当前没有可用的同类指令规则，选择后仍只覆盖当前命令。',
+        pattern: 'websearch:web_search_exa:abc123',
         category: 'base',
       },
     ]);

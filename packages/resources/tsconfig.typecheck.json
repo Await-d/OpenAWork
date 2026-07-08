@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "/tmp/openawork-resources.typecheck.tsbuildinfo"
+  },
+  "references": [{ "path": "../skill-types/tsconfig.typecheck.json" }]
+}

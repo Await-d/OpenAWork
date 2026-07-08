@@ -1557,7 +1557,10 @@ function buildPermissionRequestContext(
         reason: '需要调用 MCP 工具',
         riskLevel: 'high',
         previewAction: `调用 ${flatMcp.serverId}/${flatMcp.toolName} ${previewArguments}`,
-        always: [`${flatMcp.serverId}:*`],
+        always: [
+          `${flatMcp.serverId}:${flatMcp.toolName}:*`,
+          `${flatMcp.serverId}:*`,
+        ],
       };
     } catch {
       // If the server is no longer configured (user removed it mid-turn),
@@ -1808,7 +1811,10 @@ function buildPermissionRequestContext(
         reason: '需要调用 MCP 工具',
         riskLevel: 'high',
         previewAction: `调用 ${parsed.serverId}/${parsed.toolName} ${previewArguments}`,
-        always: [`${parsed.serverId}:*`],
+        always: [
+          `${parsed.serverId}:${parsed.toolName}:*`,
+          `${parsed.serverId}:*`,
+        ],
       };
     }
     case 'desktop_automation': {

@@ -16,7 +16,7 @@
 import type { MiddleTabKey } from './MiddleTabRouter.js';
 import type { TeamTabIconName } from './team-tab-icons.js';
 
-export type PrimaryTabKey = 'overview' | 'conversation' | 'tasks' | 'metrics' | 'governance';
+export type PrimaryTabKey = 'overview' | 'files' | 'conversation' | 'tasks' | 'metrics' | 'governance';
 
 export interface SubTabDef {
   key: MiddleTabKey;
@@ -41,6 +41,12 @@ export const PRIMARY_TABS: ReadonlyArray<PrimaryTabDef> = [
       { key: 'graph', label: '关系图谱', icon: 'graph' },
       { key: 'health', label: '健康度', icon: 'health' },
     ],
+  },
+  {
+    key: 'files',
+    label: '文件',
+    icon: 'files',
+    children: [{ key: 'files', label: '工作区文件', icon: 'files' }],
   },
   {
     key: 'conversation',

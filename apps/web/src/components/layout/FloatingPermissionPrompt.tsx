@@ -137,12 +137,16 @@ export function FloatingPermissionPrompt({ onPendingChange }: FloatingPermission
 
       if (next !== null && current?.requestId === next.requestId) {
         if (current.sessionTitle && !next.sessionTitle) return;
+        const currentAlways = current.always ?? [];
+        const nextAlways = next.always ?? [];
         if (
           current.scope === next.scope &&
           current.toolName === next.toolName &&
           current.reason === next.reason &&
           current.riskLevel === next.riskLevel &&
-          current.previewAction === next.previewAction
+          current.previewAction === next.previewAction &&
+          currentAlways.length === nextAlways.length &&
+          currentAlways.every((v, i) => v === nextAlways[i])
         ) {
           return;
         }

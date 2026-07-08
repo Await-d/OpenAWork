@@ -123,7 +123,6 @@ import {
   SmartSuggestionBubble,
   type SuggestionContext,
 } from '../runtime/shell/controls/SmartInputGuide.js';
-import { TeamWorkspaceSidebarShell } from '../runtime/shell/sidebar/TeamWorkspaceSidebarShell.js';
 import {
   buildRuntimeResumeResumingNotice,
   buildRuntimeResumeSubmittedNotice,
@@ -226,19 +225,9 @@ export default function TeamPageV2() {
       ? activeWorkspaceName
       : (resolvedTeamWorkspaceId ?? '默认工作区');
 
-  // 当 URL 没指定工作区但已加载到工作区列表时，自动跳转到第一个工作区。
-  // 这样 useTeamWorkspaceState 的 activeWorkspace 才能正确加载，
-  // 顶部工作区名称与会话列表也能显示对应工作区的内容。
-  useEffect(() => {
-    if (!teamWorkspaceId && workspaceState.workspaces.length > 0 && !workspaceState.loading) {
-      const firstId = workspaceState.workspaces[0]?.id;
-      if (firstId) {
-        // 保留现有 query string（如 ?action=new 或 ?sessionId=xxx）
-        const qs = searchParams.toString();
-        void navigate(`/team/${firstId}${qs ? `?${qs}` : ''}`, { replace: true });
-      }
-    }
-  }, [teamWorkspaceId, workspaceState.workspaces, workspaceState.loading, navigate, searchParams]);
+  // 不自动重定向 /team → /team/:workspaceId。
+  // /team 路由保持不变，显示欢迎页面；resolvedTeamWorkspaceId 仍从工作区列表派生用于数据加载。
+  // 只有用户从侧边栏点击具体工作区的会话时，才导航到 /team/:workspaceId。
   const workspaceSnapshotState = useTeamWorkspaceSnapshotState(
     resolvedTeamWorkspaceId ?? undefined,
   );
@@ -346,12 +335,8 @@ export default function TeamPageV2() {
     onWorkspacesChanged: workspaceState.refresh,
   });
 
-  useEffect(() => {
-    if (!selectedTeamId && data.defaultSelectedTeamId) {
-      setSelectedTeamId(data.defaultSelectedTeamId);
-    }
-  }, [data.defaultSelectedTeamId, selectedTeamId]);
-
+  // 不在初次加载时自动选中会话——让用户先看到欢迎页面，
+  // 从侧边栏主动选择会话后再进入会话视图。
   // 跨工作区切换会话后，等新工作区数据加载完成（workspaceGroups 包含
   // pending 会话）时恢复选中。避免在新数据加载前用旧 sessionId 加载内容。
   useEffect(() => {
@@ -428,12 +413,8 @@ export default function TeamPageV2() {
 
     setFocusedHandoffId(null);
 
-    if (data.defaultSelectedTeamId && data.defaultSelectedTeamId !== selectedTeamId) {
-      setSelectedTeamId(data.defaultSelectedTeamId);
-      data.selectTeam(data.defaultSelectedTeamId);
-      return;
-    }
-
+    // 不自动选中 defaultSelectedTeamId——让用户从侧边栏主动选择。
+    // 仅在没有可用会话时清除选中态。
     if (!data.defaultSelectedTeamId) {
       setSelectedTeamId('');
       data.setSelectedSharedSessionId(null);
@@ -822,6 +803,16 @@ export default function TeamPageV2() {
   const consumeTeamNewSessionSignal = useUIStateStore((s) => s.consumeTeamNewSessionSignal);
   const teamSelectSessionSignal = useUIStateStore((s) => s.teamSelectSessionSignal);
   const consumeTeamSelectSessionSignal = useUIStateStore((s) => s.consumeTeamSelectSessionSignal);
+  const resetToWelcomeSignal = useUIStateStore((s) => s.resetToWelcomeSignal);
+  const consumeResetToWelcomeSignal = useUIStateStore((s) => s.consumeResetToWelcomeSignal);
+
+  // 点击导航栏 Team 图标时（已在 /team 路由），清除会话选中回到欢迎页面。
+  useEffect(() => {
+    if (!resetToWelcomeSignal || resetToWelcomeSignal.route !== 'team') return;
+    setSelectedTeamId('');
+    setEditorOverlayOpen(false);
+    consumeResetToWelcomeSignal();
+  }, [resetToWelcomeSignal, consumeResetToWelcomeSignal]);
 
   useEffect(() => {
     if (!teamNewSessionSignal) {
@@ -979,6 +970,7 @@ export default function TeamPageV2() {
   const [browserPreviewUrl, setBrowserPreviewUrl] = useState<string | null>(null);
   const [editorPaneTab, setEditorPaneTab] = useState<EditorPaneTab>('code');
   const [savingFile, setSavingFile] = useState(false);
+
   const teamEditorMode = useUIStateStore((s) => s.teamEditorMode);
   const teamSplitPos = useUIStateStore((s) => s.teamSplitPos);
   const setTeamSplitPos = useUIStateStore((s) => s.setTeamSplitPos);
@@ -1066,22 +1058,9 @@ export default function TeamPageV2() {
   }, [openBrowserPreview]);
 
   // grid template 列数（只在桌面/平板下生效）
-  const gridTemplateColumns = useMemo(() => {
-    if (isMobile || effectiveFocusMode) {
-      return '1fr';
-    }
-    if (isFusionWorkbench) {
-      return shellCollapsed ? `${SIDEBAR_COLLAPSED_WIDTH}px 1fr` : '244px 1fr';
-    }
-    const width = shellCollapsed
-      ? SIDEBAR_COLLAPSED_WIDTH
-      : breakpoint === 'tablet'
-        ? Math.min(sidebarWidth, SIDEBAR_TABLET_WIDTH)
-        : sidebarWidth;
-    return `${width}px 10px 1fr`;
-  }, [breakpoint, effectiveFocusMode, isFusionWorkbench, isMobile, shellCollapsed, sidebarWidth]);
+  const gridTemplateColumns = '1fr';
 
-  const showSidebarDivider = !isMobile && !effectiveFocusMode && !isFusionWorkbench;
+  const showSidebarDivider = false;
 
   const mainGridStyle: CSSProperties = {
     ...MAIN_GRID_BASE_STYLE,
@@ -1164,6 +1143,13 @@ export default function TeamPageV2() {
     return receptionSession?.isSharedSession ? null : data.defaultReceptionSessionId;
   }, [data.defaultReceptionSessionId, effectiveWorkspaceGroups]);
 
+  // 没有选中会话时，自动切到「对话」tab 显示欢迎页面。
+  useEffect(() => {
+    if (!selectedTeamId && middleTab !== 'conversation') {
+      handleMiddleTabChange('conversation');
+    }
+  }, [handleMiddleTabChange, middleTab, selectedTeamId]);
+
   const focusSuggestedTab = useMemo<MiddleTabKey | null>(() => {
     if (!focusedHandoffEntry) return null;
     if (focusedHandoffEntry.toRoleLayer === 'pm2') return 'review';
@@ -1227,10 +1213,12 @@ export default function TeamPageV2() {
         handoffs,
         gatewayUrl,
         accessToken,
-        activeWorkspaceName: teamWorkspaceDisplayName,
+        activeWorkspaceName: fileTreeWorkspacePath,
         onWorkspaceChanged: workspaceState.refresh,
         teamWorkspaceId: resolvedTeamWorkspaceId,
         onUseTemplate: handleOpenNewSessionModal,
+        fileEditor,
+        onSaveFile: handleSaveFile,
       })}
     </div>
   );
@@ -1297,42 +1285,6 @@ export default function TeamPageV2() {
         />
 
         <main className="team-v2-main-shell" style={mainGridStyle}>
-          <TeamWorkspaceSidebarShell
-            collapsed={shellCollapsed}
-            defaultWidth={SIDEBAR_WIDTH}
-            focusMode={effectiveFocusMode}
-            isMobile={isMobile}
-            maxWidth={SIDEBAR_MAX_WIDTH}
-            minWidth={SIDEBAR_MIN_WIDTH}
-            mobileOpen={mobileSidebarOpen}
-            showDivider={showSidebarDivider}
-            width={sidebarWidth}
-            workbenchLayoutMode={workbenchLayoutMode}
-            workspaceGroups={effectiveWorkspaceGroups}
-            selectedTeamId={selectedTeamId}
-            onSelectTeam={handleSelectTeam}
-            onToggleCollapsed={handleToggleSidebar}
-            onResize={handleSidebarResize}
-            onCloseMobile={() => setMobileSidebarOpen(false)}
-            onOpenMobile={() => setMobileSidebarOpen(true)}
-            canManageSessionEntries={data.canManageSessionEntries}
-            workspaceLabel={teamWorkspaceDisplayName}
-            teamWorkspaceId={resolvedTeamWorkspaceId ?? undefined}
-            defaultMemberSlots={workspaceState.activeWorkspace?.defaultTeamRoster}
-            onSubmitDraft={handleSubmitDraft}
-            onDeleteSession={handleDeleteSession}
-            onRenameSession={data.renameSession}
-            onToggleSessionState={data.toggleSessionState}
-            selectedWorkspacePath={selectedWorkspacePath}
-            onWorkspaceChange={handleWorkspaceChange}
-            loading={data.loading || workspaceSnapshotState.loading || workspaceState.loading}
-            workspacePath={fileTreeWorkspacePath}
-            onOpenFile={handleOpenFile}
-            onOpenWorkspacePicker={() => setShowNewWorkspaceModal(true)}
-            onOpenNewSessionModal={handleOpenNewSessionModal}
-            onCreateWorkspace={() => setShowNewWorkspaceModal(true)}
-            canCreateWorkspace={canCreateWorkspace}
-          />
           {/* 中：对话区（紧凑流程栏已并入「概览 / 拓扑」子 tab） */}
           <section
             className="team-v2-pane team-v2-pane--main"
@@ -1407,7 +1359,8 @@ export default function TeamPageV2() {
             ) : null}
 
             {/* 智能输入引导气泡 */}
-            {(suggestionContext === 'failure' || suggestionContext === 'idle') &&
+            {selectedTeamId &&
+            (suggestionContext === 'failure' || suggestionContext === 'idle') &&
             !suggestionDismissed &&
             !isMobile ? (
               <SmartSuggestionBubble
@@ -1451,7 +1404,7 @@ export default function TeamPageV2() {
                     resolvedTeamWorkspaceId,
                   )}
                   canCreateWorkspace={canCreateWorkspace}
-                  workspaceLabel={teamWorkspaceDisplayName}
+                  workspaceLabel={selectedTeamId ? teamWorkspaceDisplayName : null}
                   onCreateWorkspace={
                     canCreateWorkspace ? () => setShowNewWorkspaceModal(true) : undefined
                   }
@@ -1463,42 +1416,45 @@ export default function TeamPageV2() {
                   }
                   onSubmitMessage={data.canManageSessionEntries ? handleSubmitMessage : undefined}
                   onRetryConnection={handleRetryConnection}
-                  receptionSessionId={conversationReceptionSessionId}
+                  receptionSessionId={
+                    selectedTeamId ? conversationReceptionSessionId : null
+                  }
                   receptionComposerEnabled={true}
                   topBar={
-                    <>
-                      <TeamTabBar
-                        variant="single"
-                        activePrimary={activePrimary}
-                        middleTab={middleTab}
-                        onPrimaryChange={handlePrimaryTabChange}
-                        onMiddleChange={handleMiddleTabChange}
-                        unreadCount={scopedUnreadCount}
-                        clarificationPending={clarificationPending}
-                        failedTaskCount={failedTaskCount}
-                        showOffice={showOffice}
-                        officeActive={middleTab === 'office'}
-                        onOfficeClick={() => {
-                          if (middleTab === 'office') {
-                            handleOpenFullscreen();
-                          } else {
-                            handleMiddleTabChange('office');
+                    selectedTeamId ? (
+                      <>
+                        <TeamTabBar
+                          variant="single"
+                          activePrimary={activePrimary}
+                          middleTab={middleTab}
+                          onPrimaryChange={handlePrimaryTabChange}
+                          onMiddleChange={handleMiddleTabChange}
+                          unreadCount={scopedUnreadCount}
+                          clarificationPending={clarificationPending}
+                          failedTaskCount={failedTaskCount}
+                          showOffice={showOffice}
+                          officeActive={middleTab === 'office'}
+                          onOfficeClick={() => {
+                            if (middleTab === 'office') {
+                              handleOpenFullscreen();
+                            } else {
+                              handleMiddleTabChange('office');
+                            }
+                          }}
+                          leadingSlot={
+                            !isMobile ? (
+                              <TeamPageSuperbarLeading
+                                activeWorkspaceId={resolvedTeamWorkspaceId}
+                                activeWorkspaceName={teamWorkspaceDisplayName}
+                                compact={isFusionWorkbench || breakpoint !== 'desktop'}
+                                memberCount={data.topSummary.memberCount}
+                                onlineCount={data.topSummary.onlineCount}
+                                selectedTeam={selectedTeam}
+                                summaryDescription={data.topSummary.description}
+                                workspaces={workspaceState.workspaces}
+                              />
+                            ) : null
                           }
-                        }}
-                        leadingSlot={
-                          !isMobile ? (
-                            <TeamPageSuperbarLeading
-                              activeWorkspaceId={resolvedTeamWorkspaceId}
-                              activeWorkspaceName={teamWorkspaceDisplayName}
-                              compact={isFusionWorkbench || breakpoint !== 'desktop'}
-                              memberCount={data.topSummary.memberCount}
-                              onlineCount={data.topSummary.onlineCount}
-                              selectedTeam={selectedTeam}
-                              summaryDescription={data.topSummary.description}
-                              workspaces={workspaceState.workspaces}
-                            />
-                          ) : null
-                        }
                         centerSlot={
                           !isMobile ? (
                             <div
@@ -1561,6 +1517,7 @@ export default function TeamPageV2() {
                         />
                       ) : null}
                     </>
+                    ) : null
                   }
                   messagesOverride={conversationAreaMessagesOverride}
                   sidePanel={fusionSidePanel}

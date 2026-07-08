@@ -8,10 +8,12 @@
     "composite": true,
     "paths": {
       "@openAwork/mcp-client": ["../mcp-client/src/index.ts"],
+      "@openAwork/resources": ["../resources/src/index.ts"],
+      "@openAwork/resources/node": ["../resources/src/node.ts"],
       "@openAwork/skill-types": ["../skill-types/src/index.ts"]
     }
   },
-  "references": [{ "path": "../mcp-client" }, { "path": "../skill-types" }],
+  "references": [{ "path": "../mcp-client" }, { "path": "../resources" }, { "path": "../skill-types" }],
   "include": ["src"],
   "exclude": ["node_modules", "dist"]
 }

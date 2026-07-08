@@ -18,6 +18,14 @@ export const TABS = [
   { id: 'channels', label: '消息频道' },
   { id: 'companion', label: 'Buddy 伴侣' },
   { id: 'memory', label: '记忆管理' },
+  { id: 'templates', label: '模板配置' },
+  { id: 'agents', label: '智能体' },
+  { id: 'skills', label: '技能库' },
+  { id: 'workflows', label: '工作流' },
+  { id: 'schedules', label: '定时任务' },
+  { id: 'artifacts', label: '产物中心' },
+  { id: 'images', label: '图片' },
+  { id: 'sessions', label: '会话列表' },
   { id: 'usage', label: '用量与账单' },
   { id: 'security', label: '安全与权限' },
   { id: 'workspace', label: '工作区' },
@@ -40,10 +48,23 @@ export const TAB_CATEGORIES: ReadonlyArray<{
   tabIds: readonly TabId[];
 }> = [
   { id: 'general', label: '常规', tabIds: ['connection', 'display', 'desktop'] },
-  { id: 'assistant', label: '助理', tabIds: ['companion', 'memory', 'channels'] },
+  {
+    id: 'assistant',
+    label: '助理',
+    tabIds: ['companion', 'memory', 'templates', 'agents', 'channels'],
+  },
+  {
+    id: 'automation',
+    label: '自动化',
+    tabIds: ['workflows', 'schedules', 'skills'],
+  },
   { id: 'account', label: '账户', tabIds: ['usage', 'security'] },
-  { id: 'extensions', label: '扩展与集成', tabIds: ['plugins'] },
-  { id: 'tools', label: '工具', tabIds: ['workspace', 'devtools'] },
+  {
+    id: 'extensions',
+    label: '扩展与集成',
+    tabIds: ['plugins'],
+  },
+  { id: 'tools', label: '工具', tabIds: ['workspace', 'artifacts', 'images', 'sessions', 'devtools'] },
   { id: 'about', label: '关于', tabIds: ['about'] },
 ];
 

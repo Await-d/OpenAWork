@@ -153,6 +153,11 @@ export interface UIStateStore {
   activeTeamSessionId: string | null;
   setActiveTeamSessionId: (id: string | null) => void;
 
+  /** 点击导航图标时回到欢迎页面的信号（Chat / Team 共用）。 */
+  resetToWelcomeSignal: { route: 'chat' | 'team'; nonce: number } | null;
+  triggerResetToWelcome: (route: 'chat' | 'team') => void;
+  consumeResetToWelcomeSignal: () => void;
+
   // Pinned sessions (frontend-only)
   pinnedSessions: string[];
   togglePinSession: (id: string) => void;
@@ -651,6 +656,11 @@ export const useUIStateStore = create<UIStateStore>()(
       activeTeamSessionId: null,
       setActiveTeamSessionId: (id) => set({ activeTeamSessionId: id }),
 
+      resetToWelcomeSignal: null,
+      triggerResetToWelcome: (route) =>
+        set({ resetToWelcomeSignal: { route, nonce: Date.now() } }),
+      consumeResetToWelcomeSignal: () => set({ resetToWelcomeSignal: null }),
+
       // Pinned sessions
       pinnedSessions: [],
       togglePinSession: (id) =>
@@ -910,7 +920,18 @@ export const useUIStateStore = create<UIStateStore>()(
     }),
     {
       name: 'openAwork-ui-state',
-      version: 18,
+      version: 20,
+      // reviewPanelOpened / editorMode 不持久化——每次启动默认关闭。
+      partialize: (state) => {
+        const { reviewPanelOpened: _rp, editorMode: _em, ...rest } = state;
+        return rest as typeof state;
+      },
+      merge: (persistedState, currentState) => {
+        const merged = { ...currentState, ...(persistedState as object) };
+        merged.reviewPanelOpened = false;
+        merged.editorMode = false;
+        return merged as typeof currentState;
+      },
       // Throttle storage writes to avoid JSON.stringify+setItem on
       // every fast UI mutation (tab clicks, expand/collapse). See
       // throttledStorage definition above.
@@ -1030,6 +1051,17 @@ export const useUIStateStore = create<UIStateStore>()(
 
         if (version < 18) {
           nextState.workbenchLayoutMode = 'fusion' satisfies WorkbenchLayoutMode;
+        }
+
+        // v19:默认展开编辑器/文件预览面板，提供 IDE 式工作区视图。
+        if (version < 19) {
+          nextState.editorMode = true;
+        }
+
+        // v20:reviewPanelOpened / editorMode 不再持久化，每次启动强制关闭。
+        if (version < 20) {
+          nextState.reviewPanelOpened = false;
+          nextState.editorMode = false;
         }
 
         if (!isStringArray(nextState.savedWorkspacePaths)) {

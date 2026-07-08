@@ -1,4 +1,4 @@
-import { type CSSProperties, useCallback, useEffect, useRef, useState } from 'react';
+import { type CSSProperties, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { EditorBrowserWorkspace, type EditorPaneTab } from './EditorBrowserWorkspace.js';
 import type { OpenFile, RevealTarget } from '../../hooks/editor/useFileEditor.js';
 
@@ -55,6 +55,8 @@ export interface WorkspaceEditorOverlayProps {
   onSplitPosChange?: (pos: number) => void;
   /** 切换模式(overlay ↔ split)回调。不传则不显示切换按钮。 */
   onModeChange?: (mode: 'overlay' | 'split') => void;
+  /** Optional file tree rendered inside the code tab (same as EditorBrowserWorkspace). */
+  fileTree?: ReactNode;
 }
 
 const OVERLAY_STYLE: CSSProperties = {
@@ -131,6 +133,7 @@ export function WorkspaceEditorOverlay({
   splitPos: splitPosProp = 50,
   onSplitPosChange,
   onModeChange,
+  fileTree,
 }: WorkspaceEditorOverlayProps) {
   // ─── split 模式拖拽状态 ───
   const [splitPos, setSplitPos] = useState(splitPosProp);
@@ -297,6 +300,7 @@ export function WorkspaceEditorOverlay({
         workspacePath={workspacePath}
         activeTab={activeTab}
         onTabChange={onTabChange}
+        fileTree={fileTree}
       />
     </div>
   );

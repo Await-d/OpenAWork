@@ -12,7 +12,12 @@
  * TeamPageV2 主体。
  */
 
-import { type ReactNode } from 'react';
+import { type ReactNode, useCallback, useMemo } from 'react';
+import { createWorkspaceClient } from '@openAwork/web-client';
+import { WorkspaceFileTreePanel } from '../../../../components/layout/sidebar/WorkspaceFileTreePanel.js';
+import { EditorBrowserWorkspace } from '../../../../components/file-editor/EditorBrowserWorkspace.js';
+import type { FileTreeNode } from '../../../../components/common/modal/WorkspacePickerModal.js';
+import type { OpenFile, RevealTarget } from '../../../../hooks/editor/useFileEditor.js';
 import type { OfficeSceneState } from './office/OfficeScene.js';
 import type { AgentTeamsSidebarTeam } from '../data/team-runtime-types.js';
 import type { HandoffEntry, HandoffEvent } from '../../../../stores/team/team-events.js';
@@ -65,7 +70,8 @@ export type MiddleTabKey =
   | 'shares'
   | 'audit'
   | 'settings'
-  | 'init';
+  | 'init'
+  | 'files';
 
 export interface MiddleTabRenderArgs {
   middleTab: MiddleTabKey;
@@ -90,6 +96,22 @@ export interface MiddleTabRenderArgs {
   activeWorkspaceName: string | undefined;
   onWorkspaceChanged?: () => void;
   teamWorkspaceId: string | null;
+  /** File editor state (shared with the overlay editor — reused by 'files' tab). */
+  fileEditor?: {
+    openFiles: OpenFile[];
+    activeFile: OpenFile | null;
+    activeFilePath: string | null;
+    isDirty: (path: string) => boolean;
+    saveError: string | null;
+    setActiveFilePath: (path: string | null) => void;
+    closeFile: (path: string) => void;
+    updateContent: (path: string, content: string) => void;
+    reorderFiles?: (fromIndex: number, toIndex: number) => void;
+    revealTarget?: RevealTarget | null;
+    clearRevealTarget?: () => void;
+  };
+  /** Save handler for the 'files' tab inline editor. */
+  onSaveFile?: (path: string) => Promise<void>;
 }
 
 export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
@@ -116,6 +138,8 @@ export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
     activeWorkspaceName,
     onWorkspaceChanged,
     teamWorkspaceId,
+    fileEditor,
+    onSaveFile,
   } = args;
 
   const runtimeSelectedSessionId =
@@ -362,6 +386,18 @@ export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
         </TabContainer>
       );
 
+    // ─── F. 文件浏览 ────────────────────────────────────────────────
+    case 'files':
+      return (
+        <FilesTabContent
+          gatewayUrl={gatewayUrl}
+          accessToken={accessToken}
+          workspacePath={activeWorkspaceName ?? null}
+          fileEditor={fileEditor}
+          onSaveFile={onSaveFile}
+        />
+      );
+
     case 'conversation':
       // 「对话」tab 由 TeamPageV2 直接处理（messagesOverride 走 TeamConversationView 分支）。
       // 这里返回 null 仅用于 TS 穷尽检查，正常路径不会进入。
@@ -372,4 +408,90 @@ export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
       return _exhaustive;
     }
   }
+}
+
+// ─── Files tab: 左侧文件树 + 右侧编辑器（与 chat 页同款布局） ────────────
+
+function FilesTabContent({
+  gatewayUrl,
+  accessToken,
+  workspacePath,
+  fileEditor,
+  onSaveFile,
+}: {
+  gatewayUrl: string | null;
+  accessToken: string | null;
+  workspacePath: string | null;
+  fileEditor?: {
+    openFiles: OpenFile[];
+    activeFile: OpenFile | null;
+    activeFilePath: string | null;
+    isDirty: (path: string) => boolean;
+    saveError: string | null;
+    setActiveFilePath: (path: string | null) => void;
+    closeFile: (path: string) => void;
+    updateContent: (path: string, content: string) => void;
+    reorderFiles?: (fromIndex: number, toIndex: number) => void;
+    revealTarget?: RevealTarget | null;
+    clearRevealTarget?: () => void;
+  };
+  onSaveFile?: (path: string) => Promise<void>;
+}) {
+  const workspaceClient = useMemo(
+    () => (gatewayUrl ? createWorkspaceClient(gatewayUrl) : null),
+    [gatewayUrl],
+  );
+
+  const fetchTree = useCallback(
+    async (path: string, depth?: number): Promise<FileTreeNode[]> => {
+      if (!workspaceClient || !accessToken) return [];
+      const result = await workspaceClient.fetchTreeResult(accessToken, path, { depth });
+      if (!result.ok) {
+        throw new Error(result.errorMessage ?? '读取文件树失败');
+      }
+      return result.nodes;
+    },
+    [accessToken, workspaceClient],
+  );
+
+  if (!gatewayUrl || !accessToken || !fileEditor || !onSaveFile) {
+    return (
+      <div
+        style={{
+          flex: 1,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: 'var(--fg-muted)',
+          fontSize: 12,
+        }}
+      >
+        {(!gatewayUrl || !accessToken) ? '未连接到网关，无法浏览文件。' : '编辑器未就绪。'}
+      </div>
+    );
+  }
+
+  return (
+    <EditorBrowserWorkspace
+      fileEditor={fileEditor}
+      saving={false}
+      handleSaveFile={onSaveFile}
+      workspacePath={workspacePath}
+      fileTree={
+        <WorkspaceFileTreePanel
+          workspacePath={workspacePath}
+          onOpenFile={(path) => void fileEditor.openFile(path)}
+          fetchTree={fetchTree}
+          active
+          variant="embedded"
+          style={{
+            flex: 1,
+            minHeight: 0,
+            background: 'var(--bg-surface)',
+            overflow: 'hidden',
+          }}
+        />
+      }
+    />
+  );
 }

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { FileEditorPanel } from './editor/FileEditorPanel.js';
 import { BuiltInBrowser } from '../chat/misc/BuiltInBrowser.js';
 import type { OpenFile, RevealTarget } from '../../hooks/editor/useFileEditor.js';
@@ -50,6 +50,11 @@ export interface EditorBrowserWorkspaceProps {
   fullScreen?: boolean;
   /** Toggle between full-content and split layouts. */
   onToggleFullScreen?: () => void;
+  /**
+   * Optional file tree rendered to the left of the code editor
+   * (e.g. a workspace file explorer in the chat editor pane).
+   */
+  fileTree?: React.ReactNode;
 }
 
 export function EditorBrowserWorkspace({
@@ -62,10 +67,47 @@ export function EditorBrowserWorkspace({
   onTabChange,
   fullScreen = false,
   onToggleFullScreen,
+  fileTree,
 }: EditorBrowserWorkspaceProps) {
   const [localTab, setLocalTab] = useState<EditorPaneTab>('code');
   const currentTab = onTabChange ? activeTab : localTab;
   const setCurrentTab = onTabChange ?? setLocalTab;
+
+  // ── File tree resizable width ──────────────────────────────────────
+  const FILE_TREE_MIN = 140;
+  const FILE_TREE_MAX = 480;
+  const FILE_TREE_DEFAULT = 220;
+  const [fileTreeWidth, setFileTreeWidth] = useState(FILE_TREE_DEFAULT);
+  const fileTreeDraggingRef = useRef(false);
+  const fileTreeContainerRef = useRef<HTMLDivElement | null>(null);
+
+  const handleFileTreeResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    fileTreeDraggingRef.current = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, []);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!fileTreeDraggingRef.current || !fileTreeContainerRef.current) return;
+      const rect = fileTreeContainerRef.current.getBoundingClientRect();
+      const newWidth = e.clientX - rect.left;
+      setFileTreeWidth(Math.max(FILE_TREE_MIN, Math.min(FILE_TREE_MAX, newWidth)));
+    };
+    const handleMouseUp = () => {
+      if (!fileTreeDraggingRef.current) return;
+      fileTreeDraggingRef.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, []);
 
   // Keep browser mounted once activated (preserves page state across tab switches)
   const [browserMounted, setBrowserMounted] = useState(false);
@@ -238,24 +280,88 @@ export function EditorBrowserWorkspace({
           flex: 1,
           minHeight: 0,
           display: effectiveTab === 'code' ? 'flex' : 'none',
-          flexDirection: 'column',
+          flexDirection: 'row',
+          overflow: 'hidden',
         }}
       >
-        <FileEditorPanel
-          files={fileEditor.openFiles}
-          activeFile={fileEditor.activeFile}
-          activeFilePath={fileEditor.activeFilePath}
-          isDirty={fileEditor.isDirty}
-          saving={saving}
-          saveError={fileEditor.saveError}
-          onActivate={fileEditor.setActiveFilePath}
-          onClose={fileEditor.closeFile}
-          onChange={fileEditor.updateContent}
-          onSave={handleSaveFile}
-          onReorder={fileEditor.reorderFiles}
-          revealTarget={fileEditor.revealTarget ?? null}
-          onRevealConsumed={fileEditor.clearRevealTarget}
-        />
+        {fileTree && (
+          <div
+            ref={fileTreeContainerRef}
+            style={{
+              width: fileTreeWidth,
+              flexShrink: 0,
+              minWidth: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+            }}
+          >
+            {fileTree}
+          </div>
+        )}
+        {fileTree && (
+          <div
+            onMouseDown={handleFileTreeResizeStart}
+            style={{
+              width: 4,
+              flexShrink: 0,
+              cursor: 'col-resize',
+              background: 'var(--border-subtle)',
+              position: 'relative',
+              zIndex: 5,
+              transition: fileTreeDraggingRef.current ? 'none' : 'background 120ms ease',
+            }}
+            onMouseEnter={(e) => {
+              if (!fileTreeDraggingRef.current) {
+                e.currentTarget.style.background = 'var(--accent)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!fileTreeDraggingRef.current) {
+                e.currentTarget.style.background = 'var(--border-subtle)';
+              }
+            }}
+          >
+            <div
+              style={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                width: 2,
+                height: 24,
+                borderRadius: 1,
+                background: 'var(--fg-muted)',
+                opacity: 0.4,
+              }}
+            />
+          </div>
+        )}
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          }}
+        >
+          <FileEditorPanel
+            files={fileEditor.openFiles}
+            activeFile={fileEditor.activeFile}
+            activeFilePath={fileEditor.activeFilePath}
+            isDirty={fileEditor.isDirty}
+            saving={saving}
+            saveError={fileEditor.saveError}
+            onActivate={fileEditor.setActiveFilePath}
+            onClose={fileEditor.closeFile}
+            onChange={fileEditor.updateContent}
+            onSave={handleSaveFile}
+            onReorder={fileEditor.reorderFiles}
+            revealTarget={fileEditor.revealTarget ?? null}
+            onRevealConsumed={fileEditor.clearRevealTarget}
+          />
+        </div>
       </div>
 
       {/* Browser preview — stays mounted once activated */}

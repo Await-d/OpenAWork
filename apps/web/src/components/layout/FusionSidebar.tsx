@@ -9,6 +9,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router';
 import { createWorkspaceClient } from '@openAwork/web-client';
 import { useUIStateStore } from '../../stores/ui/uiState.js';
@@ -319,6 +320,7 @@ export function FusionSidebar({
   const fileTreeRootPath = useUIStateStore((s) => s.fileTreeRootPath);
   const triggerTeamNewSession = useUIStateStore((s) => s.triggerTeamNewSession);
   const triggerTeamSelectSession = useUIStateStore((s) => s.triggerTeamSelectSession);
+  const triggerResetToWelcome = useUIStateStore((s) => s.triggerResetToWelcome);
 
   const [showWorkspacePicker, setShowWorkspacePicker] = useState(false);
   const [peekWorkspacePath, setPeekWorkspacePath] = useState<string | null>(null);
@@ -654,6 +656,13 @@ export function FusionSidebar({
                 style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border-subtle)' }}
               >
                 <div
+                  onClick={() => {
+                    if (!location.pathname.startsWith('/team')) {
+                      void navigate('/team');
+                    }
+                    triggerResetToWelcome('team');
+                  }}
+                  title="点击回到团队欢迎页面"
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -662,6 +671,7 @@ export function FusionSidebar({
                     fontSize: 11,
                     fontWeight: 700,
                     color: 'var(--fg-muted)',
+                    cursor: 'pointer',
                   }}
                 >
                   <svg
@@ -764,17 +774,20 @@ export function FusionSidebar({
         </button>
       </div>
 
-      <WorkspacePickerModal
-        isOpen={showWorkspacePicker}
-        onClose={() => setShowWorkspacePicker(false)}
-        onSelect={handleSelectWorkspace}
-        fetchRootPath={workspacePickerDataSource.fetchRootPath}
-        fetchWorkspaceRoots={workspacePickerDataSource.fetchWorkspaceRoots}
-        fetchTree={workspacePickerDataSource.fetchTree}
-        createDirectory={workspacePickerDataSource.createDirectory}
-        validatePath={workspacePickerDataSource.validatePath}
-        initialPath={fileTreeRootPath ?? selectedWorkspacePath ?? undefined}
-      />
+      {createPortal(
+        <WorkspacePickerModal
+          isOpen={showWorkspacePicker}
+          onClose={() => setShowWorkspacePicker(false)}
+          onSelect={handleSelectWorkspace}
+          fetchRootPath={workspacePickerDataSource.fetchRootPath}
+          fetchWorkspaceRoots={workspacePickerDataSource.fetchWorkspaceRoots}
+          fetchTree={workspacePickerDataSource.fetchTree}
+          createDirectory={workspacePickerDataSource.createDirectory}
+          validatePath={workspacePickerDataSource.validatePath}
+          initialPath={fileTreeRootPath ?? selectedWorkspacePath ?? undefined}
+        />,
+        document.body,
+      )}
     </div>
   );
 }

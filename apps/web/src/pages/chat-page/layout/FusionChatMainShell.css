@@ -13,9 +13,21 @@
   padding: var(--spacing-2) var(--spacing-2) 0;
 }
 
-.fusion-chat-main-shell--classic,
+.fusion-chat-main-shell--classic {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
 .fusion-chat-main-shell--classic .fusion-chat-main-shell__workbench-row {
-  display: contents;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .fusion-chat-main-shell__workbench-row {
@@ -93,7 +105,7 @@
 }
 
 .fusion-chat-main-shell__conversation-frame--classic {
-  display: contents;
+  background: transparent;
 }
 
 .fusion-chat-main-shell__terminal {

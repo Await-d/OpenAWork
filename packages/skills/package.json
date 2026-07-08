@@ -20,6 +20,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@openAwork/resources": "workspace:*",
     "@openAwork/skill-types": "workspace:*",
     "@openAwork/mcp-client": "workspace:*",
     "@openAwork/agent-core": "workspace:*"

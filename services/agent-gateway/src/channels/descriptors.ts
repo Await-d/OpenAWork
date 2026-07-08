@@ -68,6 +68,22 @@ const DEFAULT_AGENT_TOOLS: ChannelDescriptorTool[] = [
   },
 ];
 
+const INBOUND_SECRET_FIELD: ChannelDescriptorField = {
+  key: 'inboundSecret',
+  label: 'Inbound Secret',
+  type: 'secret',
+  placeholder: '用于 /channels/<id>/inbound 回调鉴权',
+  description: '外部 Webhook 或中转服务推送消息时需要携带的共享密钥。',
+};
+
+const WS_RELAY_FIELD: ChannelDescriptorField = {
+  key: 'wsUrl',
+  label: 'WebSocket Relay URL',
+  type: 'text',
+  placeholder: 'wss://your-relay-server/ws',
+  description: '可选，用于接入外部消息中转服务的实时入站消息。',
+};
+
 export const CHANNEL_DESCRIPTORS: ChannelDescriptor[] = [
   {
     type: 'feishu',
@@ -102,6 +118,8 @@ export const CHANNEL_DESCRIPTORS: ChannelDescriptor[] = [
         type: 'secret',
         placeholder: '可选，用于事件加密',
       },
+      INBOUND_SECRET_FIELD,
+      WS_RELAY_FIELD,
     ],
   },
   {
@@ -140,6 +158,8 @@ export const CHANNEL_DESCRIPTORS: ChannelDescriptor[] = [
         label: 'Robot Code',
         type: 'text',
       },
+      INBOUND_SECRET_FIELD,
+      WS_RELAY_FIELD,
     ],
   },
   {
@@ -173,6 +193,8 @@ export const CHANNEL_DESCRIPTORS: ChannelDescriptor[] = [
         placeholder: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?...',
         description: '群机器人模式下可仅填写 Webhook URL。',
       },
+      INBOUND_SECRET_FIELD,
+      WS_RELAY_FIELD,
     ],
   },
   {
@@ -201,6 +223,8 @@ export const CHANNEL_DESCRIPTORS: ChannelDescriptor[] = [
         type: 'secret',
         placeholder: '可选，用于回调验签',
       },
+      INBOUND_SECRET_FIELD,
+      WS_RELAY_FIELD,
     ],
   },
   {
@@ -218,6 +242,8 @@ export const CHANNEL_DESCRIPTORS: ChannelDescriptor[] = [
         required: true,
         placeholder: '123456:ABC...',
       },
+      INBOUND_SECRET_FIELD,
+      WS_RELAY_FIELD,
     ],
   },
   {
@@ -234,6 +260,8 @@ export const CHANNEL_DESCRIPTORS: ChannelDescriptor[] = [
         type: 'secret',
         required: true,
       },
+      INBOUND_SECRET_FIELD,
+      WS_RELAY_FIELD,
     ],
   },
   {
@@ -262,6 +290,8 @@ export const CHANNEL_DESCRIPTORS: ChannelDescriptor[] = [
         type: 'secret',
         placeholder: '可选，用于校验 Meta Webhook',
       },
+      INBOUND_SECRET_FIELD,
+      WS_RELAY_FIELD,
     ],
   },
   {
@@ -297,6 +327,8 @@ export const CHANNEL_DESCRIPTORS: ChannelDescriptor[] = [
         type: 'text',
         placeholder: '3000',
       },
+      INBOUND_SECRET_FIELD,
+      WS_RELAY_FIELD,
     ],
   },
 ];

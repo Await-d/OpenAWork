@@ -107,6 +107,7 @@ import {
   uploadChatAttachments,
 } from '../../components/conversation-runtime/attachments/attachment-upload.js';
 import { ChatEditorPane } from './panels/chat-editor-pane.js';
+import { WorkspaceFileTreePanel } from '../../components/layout/sidebar/WorkspaceFileTreePanel.js';
 import {
   buildQueuedComposerScopeKey,
   buildRightPanelStateFromSessionSnapshot,
@@ -563,6 +564,8 @@ export default function ChatPage() {
   const addSavedWorkspacePath = useUIStateStore((s) => s.addSavedWorkspacePath);
   const setFileTreeRootPath = useUIStateStore((s) => s.setFileTreeRootPath);
   const setLastChatPath = useUIStateStore((s) => s.setLastChatPath);
+  const resetToWelcomeSignal = useUIStateStore((s) => s.resetToWelcomeSignal);
+  const consumeResetToWelcomeSignal = useUIStateStore((s) => s.consumeResetToWelcomeSignal);
   const isFusionLayout = layoutMode === 'fusion';
   const canDockFusionSidePanel = useFusionDockedPanelViewport();
 
@@ -630,6 +633,34 @@ export default function ChatPage() {
   const attachEligibilitySignatureRef = useRef<string | null>(null);
   const autoOpenedTerminalPanelRef = useRef(false);
   const previousTerminalRunningCountRef = useRef(0);
+
+  // 点击导航栏 Chat 图标时（已在 /chat 路由），清除当前会话回到欢迎页面。
+  useEffect(() => {
+    if (!resetToWelcomeSignal || resetToWelcomeSignal.route !== 'chat') return;
+    setCurrentSessionId(null);
+    setSelectedChildSessionId(null);
+    setIsSessionLoading(false);
+    setMessages([]);
+    setVisibleMessageCount(DEFAULT_VISIBLE_MESSAGE_COUNT);
+    setServerTotalTurnCount(null);
+    setRightPanelState(createInitialChatRightPanelState());
+    setSessionTodos([]);
+    setChildSessions([]);
+    setSessionTasks([]);
+    setWorkflowRuntime(null);
+    setPendingPermissions([]);
+    setPendingQuestions([]);
+    setSessionStateStatus(null);
+    setIsSessionSnapshotReady(true);
+    setSessionModesHydrated(false);
+    clearSessionMetadataDirty();
+    lastPersistedSessionMetadataSnapshotRef.current = null;
+    resetStreamState();
+    setStreamError(null);
+    currentLoadedSessionIdRef.current = null;
+    consumeResetToWelcomeSignal();
+  }, [resetToWelcomeSignal, consumeResetToWelcomeSignal]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const { attachRetryNonce, cancelAttachRetry, scheduleAttachRetry } = useStreamAttachRetry();
   const artifactsWorkspaceHref = currentSessionId
     ? `/artifacts?sessionId=${encodeURIComponent(currentSessionId)}`
@@ -4686,6 +4717,21 @@ export default function ChatPage() {
                 setEditorMode(true);
                 setEditorFullScreen(true);
               })
+            }
+            fileTree={
+              <WorkspaceFileTreePanel
+                workspacePath={effectiveWorkingDirectory}
+                onOpenFile={(path) => void fileEditor.openFile(path)}
+                fetchTree={workspace.fetchTree}
+                active={editorMode}
+                variant="embedded"
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  background: 'var(--bg-surface)',
+                  overflow: 'hidden',
+                }}
+              />
             }
           />
         }

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { Suspense, useEffect, useRef, useState } from 'react';
 import { NavLink, useParams } from 'react-router';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { logger } from '../../utils/log/logger.js';
@@ -80,6 +80,9 @@ import { DesktopTabContent } from './desktop/desktop-tab-content.js';
 import { useMemoryManagement } from './memory/use-memory-management.js';
 import { useProviderDefaultProfile } from './connection/use-provider-default-profile.js';
 import { useSettingsTabActions } from './shared/use-settings-tab-actions.js';
+import { PRELOADABLE_ROUTE_MODULES } from '../../routes/preloadable-route-modules.js';
+import PageTransitionLoader from '../../components/common/feedback/PageTransitionLoader.js';
+import { usePrefersReducedMotion } from '../../hooks/ui/usePrefersReducedMotion.js';
 import type {
   DevtoolsSourceKey,
   DevtoolsSourceState,
@@ -123,6 +126,68 @@ function SettingsNavIcon({ id }: { id: string }) {
         <ellipse cx="12" cy="5" rx="9" ry="3" />
         <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
         <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+      </>
+    ),
+    templates: (
+      <>
+        <rect x="3" y="3" width="18" height="18" rx="2" />
+        <line x1="3" y1="9" x2="21" y2="9" />
+        <line x1="9" y1="9" x2="9" y2="21" />
+      </>
+    ),
+    agents: (
+      <>
+        <rect x="3" y="4" width="7" height="7" rx="2" />
+        <rect x="14" y="4" width="7" height="7" rx="2" />
+        <rect x="3" y="13" width="7" height="7" rx="2" />
+        <rect x="14" y="13" width="7" height="7" rx="2" />
+      </>
+    ),
+    skills: (
+      <>
+        <path d="M19.439 7.85c-.049.322.059.648.289.878l1.568 1.568c.47.47.47 1.229 0 1.698l-1.568 1.568a1.1 1.1 0 0 0-.289.878l.31 2.208a1.1 1.1 0 0 1-1.271 1.271l-2.208-.31a1.1 1.1 0 0 0-.878.289l-1.568 1.568a1.2 1.2 0 0 1-1.698 0l-1.568-1.568a1.1 1.1 0 0 0-.878-.289l-2.208.31a1.1 1.1 0 0 1-1.271-1.271l.31-2.208a1.1 1.1 0 0 0-.289-.878L4.753 13.1a1.2 1.2 0 0 1 0-1.698l1.568-1.568a1.1 1.1 0 0 0 .289-.878l-.31-2.208a1.1 1.1 0 0 1 1.271-1.271l2.208.31a1.1 1.1 0 0 0 .878-.289l1.568-1.568a1.2 1.2 0 0 1 1.698 0l1.568 1.568a1.1 1.1 0 0 0 .878.289l2.208-.31a1.1 1.1 0 0 1 1.271 1.271z" />
+        <circle cx="12" cy="12" r="3" />
+      </>
+    ),
+    workflows: (
+      <>
+        <circle cx="6" cy="6" r="2" />
+        <circle cx="18" cy="6" r="2" />
+        <circle cx="12" cy="18" r="2" />
+        <path d="M8 6h8" />
+        <path d="M7 7.5 10.8 15" />
+        <path d="M17 7.5 13.2 15" />
+      </>
+    ),
+    schedules: (
+      <>
+        <circle cx="12" cy="12" r="10" />
+        <polyline points="12 6 12 12 16 14" />
+      </>
+    ),
+    artifacts: (
+      <>
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        <line x1="9" y1="10" x2="9" y2="10" />
+        <line x1="12" y1="10" x2="12" y2="10" />
+        <line x1="15" y1="10" x2="15" y2="10" />
+      </>
+    ),
+    images: (
+      <>
+        <rect x="3" y="5" width="18" height="14" rx="2" />
+        <circle cx="8.5" cy="10" r="1.5" />
+        <path d="M21 15l-5-5L5 21" />
+      </>
+    ),
+    sessions: (
+      <>
+        <line x1="8" y1="6" x2="21" y2="6" />
+        <line x1="8" y1="12" x2="21" y2="12" />
+        <line x1="8" y1="18" x2="21" y2="18" />
+        <line x1="3" y1="6" x2="3.01" y2="6" />
+        <line x1="3" y1="12" x2="3.01" y2="12" />
+        <line x1="3" y1="18" x2="3.01" y2="18" />
       </>
     ),
     usage: (
@@ -179,6 +244,7 @@ function SettingsNavIcon({ id }: { id: string }) {
 }
 
 export default function SettingsPage() {
+  const prefersReducedMotion = usePrefersReducedMotion();
   const {
     gatewayUrl,
     setGatewayUrl,
@@ -1550,10 +1616,12 @@ export default function SettingsPage() {
                       (t) =>
                         (category.tabIds as readonly string[]).includes(t.id) &&
                         (!TAURI_ONLY_TAB_IDS.has(t.id) || isTauri),
-                    ).map((tabItem) => (
+                    ).map((tabItem) => {
+                      const linkTo = `/settings/${tabItem.id}`;
+                      return (
                       <NavLink
                         key={tabItem.id}
-                        to={`/settings/${tabItem.id}`}
+                        to={linkTo}
                         style={() => {
                           // NavLink 的内置 isActive 仅在 URL 精确匹配 `/settings/<id>` 时才为 true。
                           // 当用户进入 `/settings`（无 tab 参数）时，SettingsPage 会把 activeTab
@@ -1601,7 +1669,8 @@ export default function SettingsPage() {
                           {tabItem.label}
                         </span>
                       </NavLink>
-                    ))}
+                      );
+                    })}
                   </div>
                 ))}
               </div>
@@ -1781,6 +1850,40 @@ export default function SettingsPage() {
                   />
                 )}
                 {activeTab === 'about' && <AboutPage />}
+                {(['templates', 'agents', 'skills', 'workflows', 'schedules', 'artifacts', 'images', 'sessions'] as const).includes(
+                  activeTab,
+                ) && (
+                  <div
+                    style={{
+                      height: 'calc(100vh - 80px)',
+                      margin: '-20px 0',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      minHeight: 0,
+                    }}
+                  >
+                    <Suspense
+                      fallback={
+                        <PageTransitionLoader
+                          variant="overlay"
+                          caption="加载中"
+                          title="正在加载页面"
+                          description="正在加载页面资源，请稍候。"
+                          prefersReducedMotion={prefersReducedMotion}
+                        />
+                      }
+                    >
+                      {activeTab === 'templates' && <PRELOADABLE_ROUTE_MODULES.templates.component />}
+                      {activeTab === 'agents' && <PRELOADABLE_ROUTE_MODULES.agents.component />}
+                      {activeTab === 'skills' && <PRELOADABLE_ROUTE_MODULES.skills.component />}
+                      {activeTab === 'workflows' && <PRELOADABLE_ROUTE_MODULES.workflows.component />}
+                      {activeTab === 'schedules' && <PRELOADABLE_ROUTE_MODULES.schedules.component />}
+                      {activeTab === 'artifacts' && <PRELOADABLE_ROUTE_MODULES.artifacts.component />}
+                      {activeTab === 'images' && <PRELOADABLE_ROUTE_MODULES.images.component />}
+                      {activeTab === 'sessions' && <PRELOADABLE_ROUTE_MODULES.sessions.component />}
+                    </Suspense>
+                  </div>
+                )}
               </div>
             </div>
             <div aria-hidden="true" style={{ gridColumn: '4' }} />

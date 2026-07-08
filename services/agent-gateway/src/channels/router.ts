@@ -13,6 +13,7 @@ import { AutoReplyPipeline } from './auto-reply.js';
 import { listChannelConversations } from './channel-conversations.js';
 import { createPartialTextQueue } from './partial-text-queue.js';
 import { resolveSendableChannel } from './channel-access.js';
+import { registerChannelInboundRoutes } from './channel-inbound-route.js';
 import { CHANNEL_DESCRIPTORS } from './descriptors.js';
 import { createDingTalkService } from './dingtalk.js';
 import { discordFactory } from './discord.js';
@@ -25,6 +26,15 @@ import { whatsAppFactory } from './whatsapp.js';
 import { qqFactory } from './qq.js';
 import { shouldHandleChannelEvent } from './subscription-filter.js';
 import type { ChannelEvent, ChannelInstance } from './types.js';
+import {
+  parseDingTalkInboundMessage,
+  parseDiscordInboundMessage,
+  parseFeishuInboundMessage,
+  parseQQInboundMessage,
+  parseTelegramInboundMessage,
+  parseWeComInboundMessage,
+  parseWhatsAppInboundMessage,
+} from './inbound-parsers.js';
 import {
   channelCreateSchema,
   channelUpdateSchema,
@@ -146,17 +156,24 @@ function upsertChannelSession(input: {
 }
 
 channelManager.registerFactory('telegram', telegramFactory);
+channelManager.registerParser('telegram', parseTelegramInboundMessage);
 channelManager.registerFactory('discord', discordFactory);
+channelManager.registerParser('discord', parseDiscordInboundMessage);
 channelManager.registerFactory('slack', slackFactory);
 channelManager.registerFactory('wecom', weComFactory);
+channelManager.registerParser('wecom', parseWeComInboundMessage);
 channelManager.registerFactory('whatsapp', whatsAppFactory);
+channelManager.registerParser('whatsapp', parseWhatsAppInboundMessage);
 channelManager.registerFactory('qq', qqFactory);
+channelManager.registerParser('qq', parseQQInboundMessage);
 channelManager.registerFactory('feishu', (instance, notify) =>
   createFeishuService(instance, notify),
 );
+channelManager.registerParser('feishu', parseFeishuInboundMessage);
 channelManager.registerFactory('dingtalk', (instance, notify) =>
   createDingTalkService(instance, notify),
 );
+channelManager.registerParser('dingtalk', parseDingTalkInboundMessage);
 
 const autoReply = new AutoReplyPipeline({
   resolveChannel: (pluginId: string) => channels.get(pluginId),
@@ -281,6 +298,30 @@ const resolveUserChannels = (userId: string): ChannelInstance[] => {
   return storedChannels;
 };
 
+function resolveAnyChannel(channelId: string): ChannelInstance | null {
+  const cached = channels.get(channelId);
+  if (cached) {
+    return cached;
+  }
+
+  const rows = sqliteAll<UserSettingRow>(`SELECT user_id, value FROM user_settings WHERE key = ?`, [
+    CHANNELS_SETTINGS_KEY,
+  ]);
+  for (const row of rows) {
+    if (!row.user_id) {
+      continue;
+    }
+    const storedChannels = materializeStoredChannels(parseStoredJson(row.value), row.user_id);
+    syncChannelCache(row.user_id, storedChannels);
+    const found = storedChannels.find((channel) => channel.id === channelId);
+    if (found) {
+      return found;
+    }
+  }
+
+  return null;
+}
+
 const toConnectionStatus = (channelId: string): 'connected' | 'disconnected' | 'error' => {
   const status = channelManager.getStatus(channelId);
   if (status === 'running') {
@@ -340,6 +381,12 @@ export async function autoStartConfiguredChannels(
 }
 
 export async function channelRoutes(app: FastifyInstance): Promise<void> {
+  await registerChannelInboundRoutes(app, {
+    resolveChannel: resolveAnyChannel,
+    parseMessage: (type, raw) => channelManager.parseMessage(type, raw),
+    notifyChannel,
+  });
+
   app.get(
     '/channels/descriptors',
     { onRequest: [requireAuth] },

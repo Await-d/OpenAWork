@@ -20,7 +20,8 @@ export type TeamTabIconName =
   | 'shares'
   | 'audit'
   | 'settings'
-  | 'office';
+  | 'office'
+  | 'files';
 
 interface TeamTabIconProps {
   readonly name: TeamTabIconName;
@@ -209,6 +210,13 @@ function renderIconPath(name: TeamTabIconName): ReactNode {
           <path d="M7 11h2" />
           <path d="M7 14h2" />
           <path d="M3 17h14" />
+        </>
+      );
+    case 'files':
+      return (
+        <>
+          <path d="M3 5a1 1 0 0 1 1-1h4l2 2h6a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5Z" />
+          <path d="M3 17a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2H3v2Z" />
         </>
       );
     default:

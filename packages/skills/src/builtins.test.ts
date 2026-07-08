@@ -1,4 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import {
+  INTEGRATED_RESOURCE_SKILL_NAMES,
+  REFERENCE_ONLY_SKILL_NAMES,
+} from '@openAwork/resources';
 import { BUILTIN_SKILLS } from './builtins.js';
 
 const LAZYCODEX_SKILL_NAMES = [
@@ -36,6 +40,30 @@ describe('BUILTIN_SKILLS LazyCodex subset', () => {
       for (const token of forbidden) {
         expect(entry.manifest.descriptionForModel ?? '').not.toContain(token);
       }
+    }
+  });
+});
+
+describe('BUILTIN_SKILLS OpenCowork resource subset', () => {
+  it('adds selected OpenCowork resource skills as on-demand builtins', () => {
+    const byName = new Map(BUILTIN_SKILLS.map((entry) => [entry.manifest.name, entry.manifest]));
+
+    for (const skillName of INTEGRATED_RESOURCE_SKILL_NAMES) {
+      const manifest = byName.get(skillName);
+      expect(manifest?.id).toBe(`com.openAwork.resource.${skillName}`);
+      expect(manifest?.descriptionForModel?.length ?? 0).toBeGreaterThan(300);
+      expect(manifest?.references?.[0]?.path.endsWith(`/skills/${skillName}/SKILL.md`)).toBe(
+        true,
+      );
+      expect(manifest?.lifecycle?.activation).toBe('on-demand');
+    }
+  });
+
+  it('keeps overlapping or high-risk reference skills out of the executable builtin list', () => {
+    const names = new Set(BUILTIN_SKILLS.map((entry) => entry.manifest.name));
+
+    for (const skillName of REFERENCE_ONLY_SKILL_NAMES) {
+      expect(names.has(skillName)).toBe(false);
     }
   });
 });

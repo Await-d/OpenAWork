@@ -6,6 +6,7 @@ import type {
   ChannelWsMessageParser,
   MessagingChannelService,
 } from './types.js';
+import { ChannelRelay } from './channel-relay.js';
 
 export class ChannelManager {
   private factories = new Map<string, ChannelServiceFactory>();
@@ -13,6 +14,7 @@ export class ChannelManager {
   private services = new Map<string, MessagingChannelService>();
   private statuses = new Map<string, ChannelStatus>();
   private startQueues = new Map<string, Promise<void>>();
+  private relays = new Map<string, ChannelRelay>();
 
   registerFactory(type: string, factory: ChannelServiceFactory): void {
     this.factories.set(type, factory);
@@ -38,6 +40,7 @@ export class ChannelManager {
         const existing = this.services.get(instance.id);
         if (existing?.isRunning()) {
           try {
+            this.stopRelay(instance.id);
             await existing.stop();
             this.statuses.set(instance.id, 'stopped');
           } catch (err) {
@@ -52,9 +55,11 @@ export class ChannelManager {
 
         try {
           await service.start();
+          this.startRelay(instance, notify);
           this.statuses.set(instance.id, 'running');
           notify({ type: 'status', pluginId: instance.id, status: 'running' });
         } catch (err) {
+          this.stopRelay(instance.id);
           this.services.delete(instance.id);
           this.statuses.set(instance.id, 'error');
           notify({
@@ -78,8 +83,12 @@ export class ChannelManager {
 
   async stopPlugin(id: string): Promise<void> {
     const service = this.services.get(id);
-    if (!service) return;
+    if (!service) {
+      this.stopRelay(id);
+      return;
+    }
     try {
+      this.stopRelay(id);
       await service.stop();
       this.services.delete(id);
       this.statuses.set(id, 'stopped');
@@ -108,6 +117,29 @@ export class ChannelManager {
   parseMessage(type: string, raw: unknown) {
     const parser = this.parsers.get(type);
     return parser ? parser(raw) : null;
+  }
+
+  private startRelay(instance: ChannelInstance, notify: (event: ChannelEvent) => void): void {
+    this.stopRelay(instance.id);
+    if (!instance.config['wsUrl']) {
+      return;
+    }
+    const parser = this.parsers.get(instance.type);
+    if (!parser) {
+      return;
+    }
+    const relay = new ChannelRelay({ channel: instance, parser, notify });
+    this.relays.set(instance.id, relay);
+    relay.start();
+  }
+
+  private stopRelay(id: string): void {
+    const relay = this.relays.get(id);
+    if (!relay) {
+      return;
+    }
+    relay.stop();
+    this.relays.delete(id);
   }
 
   async stopAll(): Promise<void> {

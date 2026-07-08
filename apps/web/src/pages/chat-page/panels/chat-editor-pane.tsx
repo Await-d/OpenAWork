@@ -40,6 +40,8 @@ export interface ChatEditorPaneProps {
   fullScreen?: boolean;
   /** Toggle between full-content and split layouts. */
   onToggleFullScreen?: () => void;
+  /** Optional file tree rendered inside the code tab. */
+  fileTree?: React.ReactNode;
 }
 
 /**
@@ -63,6 +65,7 @@ export function ChatEditorPane({
   onTabChange,
   fullScreen = false,
   onToggleFullScreen,
+  fileTree,
 }: ChatEditorPaneProps) {
   // 全屏时编辑器占满内容区,既不需要拖拽手柄也不需要为对话列留出宽度。
   const splitHandleVisible = editorMode && !fullScreen;
@@ -124,6 +127,7 @@ export function ChatEditorPane({
           onTabChange={onTabChange}
           fullScreen={fullScreen}
           onToggleFullScreen={onToggleFullScreen}
+          fileTree={fileTree}
         />
       </div>
     </>

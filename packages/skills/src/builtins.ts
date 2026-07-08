@@ -1,3 +1,4 @@
+import { createBuiltinResourceSkillDefs } from '@openAwork/resources/node';
 import type { SkillManifest, SkillExecutor, ToolResult } from '@openAwork/skill-types';
 
 export interface BuiltinSkillDef {
@@ -201,4 +202,5 @@ export const BUILTIN_SKILLS: BuiltinSkillDef[] = [
   { manifest: lspManifest, executor: noopExecutor },
   { manifest: astGrepManifest, executor: noopExecutor },
   { manifest: rulesManifest, executor: noopExecutor },
+  ...createBuiltinResourceSkillDefs(noopExecutor),
 ];

@@ -402,6 +402,7 @@ export default function AppSidebar({
   const setFileTreeRootPath = useUIStateStore((s) => s.setFileTreeRootPath);
   const selectedWorkspacePath = useUIStateStore((s) => s.selectedWorkspacePath);
   const fileTreeRootPath = useUIStateStore((s) => s.fileTreeRootPath);
+  const triggerResetToWelcome = useUIStateStore((s) => s.triggerResetToWelcome);
   const workspacePickerDataSource = useMemo(
     () =>
       buildWorkspacePickerDataSource({
@@ -785,6 +786,13 @@ export default function AppSidebar({
 
             {/* 对话工作空间标题行 + 新建工作区按钮 */}
             <div
+              onClick={() => {
+                if (!location.pathname.startsWith('/chat')) {
+                  void navigate('/chat');
+                }
+                triggerResetToWelcome('chat');
+              }}
+              title="点击回到对话欢迎页面"
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -794,6 +802,7 @@ export default function AppSidebar({
                 fontWeight: 700,
                 color: 'var(--fg-muted)',
                 flexShrink: 0,
+                cursor: 'pointer',
               }}
             >
               <svg
@@ -1083,6 +1092,13 @@ export default function AppSidebar({
                 >
                   {/* 团队工作空间标题行 + 新建工作区按钮（与对话区域一致） */}
                   <div
+                    onClick={() => {
+                      if (!location.pathname.startsWith('/team')) {
+                        void navigate('/team');
+                      }
+                      triggerResetToWelcome('team');
+                    }}
+                    title="点击回到团队欢迎页面"
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -1091,6 +1107,7 @@ export default function AppSidebar({
                       fontSize: 11,
                       fontWeight: 700,
                       color: 'var(--fg-muted)',
+                      cursor: 'pointer',
                     }}
                   >
                     <svg
@@ -1436,17 +1453,20 @@ export default function AppSidebar({
           document.body,
         )}
 
-      <WorkspacePickerModal
-        isOpen={showWorkspacePicker}
-        onClose={() => setShowWorkspacePicker(false)}
-        onSelect={handleSelectWorkspace}
-        fetchRootPath={workspacePickerDataSource.fetchRootPath}
-        fetchWorkspaceRoots={workspacePickerDataSource.fetchWorkspaceRoots}
-        fetchTree={workspacePickerDataSource.fetchTree}
-        createDirectory={workspacePickerDataSource.createDirectory}
-        validatePath={workspacePickerDataSource.validatePath}
-        initialPath={fileTreeRootPath ?? selectedWorkspacePath ?? undefined}
-      />
+      {createPortal(
+        <WorkspacePickerModal
+          isOpen={showWorkspacePicker}
+          onClose={() => setShowWorkspacePicker(false)}
+          onSelect={handleSelectWorkspace}
+          fetchRootPath={workspacePickerDataSource.fetchRootPath}
+          fetchWorkspaceRoots={workspacePickerDataSource.fetchWorkspaceRoots}
+          fetchTree={workspacePickerDataSource.fetchTree}
+          createDirectory={workspacePickerDataSource.createDirectory}
+          validatePath={workspacePickerDataSource.validatePath}
+          initialPath={fileTreeRootPath ?? selectedWorkspacePath ?? undefined}
+        />,
+        document.body,
+      )}
     </nav>
   );
 }

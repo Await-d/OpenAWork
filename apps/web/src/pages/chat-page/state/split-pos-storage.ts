@@ -20,7 +20,7 @@
  */
 
 const STORAGE_KEY = 'openAwork-split-pos';
-const DEFAULT_SPLIT_POS = 50;
+const DEFAULT_SPLIT_POS = 62;
 
 export function readSplitPos(): number {
   if (typeof window === 'undefined') return DEFAULT_SPLIT_POS;

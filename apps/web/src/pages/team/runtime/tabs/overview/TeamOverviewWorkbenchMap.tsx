@@ -11,6 +11,10 @@ const WORKBENCH_MAP_COPY = {
     summary: '状态图谱汇总。',
     signal: '默认落点',
   },
+  files: {
+    summary: '工作区文件浏览。',
+    signal: '文件面',
+  },
   conversation: {
     summary: '对话层级追踪。',
     signal: '协作流',

@@ -4,6 +4,8 @@ import {
   useDisplayPreferencesStore,
   type ThemeMode,
 } from '../../../stores/settings/display-preferences.js';
+import { useUIStateStore } from '../../../stores/ui/uiState.js';
+import type { WorkbenchLayoutMode } from '../../../stores/ui/uiState.js';
 
 // ── Toggle 开关组件 ─────────────────────────────────────────
 
@@ -325,6 +327,7 @@ export function DisplayTabContent() {
           options={THEME_OPTIONS}
           onChange={(v) => store.setThemeMode(v as ThemeMode)}
         />
+        <LayoutModeRow />
       </section>
 
       <section style={SS}>
@@ -350,5 +353,27 @@ export function DisplayTabContent() {
         </div>
       </section>
     </>
+  );
+}
+
+// ── 布局模式选择 ──────────────────────────────────────────
+
+const LAYOUT_OPTIONS: { value: WorkbenchLayoutMode; label: string; description: string }[] = [
+  { value: 'fusion', label: '融合布局', description: '侧栏 Rail + Panel 分离，支持工作区切换 peek' },
+  { value: 'classic', label: '经典布局', description: '侧栏一体化，简洁紧凑' },
+];
+
+function LayoutModeRow() {
+  const layoutMode = useUIStateStore((s) => s.workbenchLayoutMode);
+  const setLayoutMode = useUIStateStore((s) => s.setWorkbenchLayoutMode);
+
+  return (
+    <SelectRow
+      title="工作台布局"
+      description="切换界面布局模式（融合 / 经典），切换后即时生效"
+      value={layoutMode}
+      options={LAYOUT_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label }))}
+      onChange={(v) => setLayoutMode(v as WorkbenchLayoutMode)}
+    />
   );
 }

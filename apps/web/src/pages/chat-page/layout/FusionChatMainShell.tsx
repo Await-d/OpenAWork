@@ -56,7 +56,7 @@ export function FusionChatMainShell({
     isFusionLayout
       ? 'fusion-chat-main-shell__split--fusion'
       : 'fusion-chat-main-shell__split--classic',
-    isFusionLayout && editorMode ? 'fusion-chat-main-shell__split--with-editor' : null,
+    editorMode ? 'fusion-chat-main-shell__split--with-editor' : null,
   ]
     .filter(Boolean)
     .join(' ');

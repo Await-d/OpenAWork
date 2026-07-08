@@ -198,6 +198,7 @@ export function SidebarRailV2({
   const selectedWorkspacePath = useUIStateStore((s) => s.selectedWorkspacePath);
   const setSelectedWorkspacePath = useUIStateStore((s) => s.setSelectedWorkspacePath);
   const setFileTreeRootPath = useUIStateStore((s) => s.setFileTreeRootPath);
+  const triggerResetToWelcome = useUIStateStore((s) => s.triggerResetToWelcome);
 
   const isTeamRoute = location.pathname.startsWith('/team');
   const isChatRoute = location.pathname.startsWith('/chat');
@@ -217,13 +218,21 @@ export function SidebarRailV2({
 
   const handleNavigateChat = useCallback(() => {
     preloadRoute('/chat');
+    if (isChatRoute) {
+      triggerResetToWelcome('chat');
+      return;
+    }
     void navigate('/chat');
-  }, [navigate, preloadRoute]);
+  }, [isChatRoute, navigate, preloadRoute]);
 
   const handleNavigateTeam = useCallback(() => {
     preloadRoute('/team');
+    if (isTeamRoute) {
+      triggerResetToWelcome('team');
+      return;
+    }
     void navigate('/team');
-  }, [navigate, preloadRoute]);
+  }, [isTeamRoute, navigate, preloadRoute]);
 
   return (
     <div className="sidebar-rail-v2" style={RAIL_STYLE}>

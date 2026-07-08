@@ -48,6 +48,25 @@ const STARTER_PROMPTS = [
   '为这个工作目录补齐测试策略',
 ] as const;
 
+const WELCOME_KEYFRAMES = `
+@keyframes tws-fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes tws-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+@keyframes tws-glow-pulse {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50% { opacity: 0.8; transform: scale(1.08); }
+}
+@keyframes tws-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+`;
+
 export function TeamWelcomeScreen({
   canCreateSession,
   canCreateWorkspace,
@@ -57,67 +76,237 @@ export function TeamWelcomeScreen({
   onSelectSuggestion,
 }: TeamWelcomeScreenProps) {
   const sessionActionEnabled = (canCreateSession ?? Boolean(onNewSession)) && Boolean(onNewSession);
-  const workspaceActionEnabled =
-    (canCreateWorkspace ?? Boolean(onCreateWorkspace)) && Boolean(onCreateWorkspace);
-  const workspaceText = workspaceLabel?.trim() || '尚未选择工作区';
 
   return (
-    <section className="team-welcome-screen" aria-labelledby="team-welcome-title">
-      <div className="team-welcome-screen__hero">
-        <span className="team-welcome-screen__mark" aria-hidden="true">
-          <OverviewIcon size={24} />
-        </span>
-        <div className="team-welcome-screen__copy">
-          <span className="team-welcome-screen__workspace">{workspaceText}</span>
-          <h2 id="team-welcome-title">团队工作空间已就绪</h2>
-          <p>选择模板、确认工作目录，然后启动一棵可追踪的协作运行树。</p>
+    <section
+      className="team-welcome-screen"
+      aria-labelledby="team-welcome-title"
+      style={{
+        margin: 'auto',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '24px 24px 16px',
+        gap: 20,
+        maxWidth: 860,
+        width: '100%',
+      }}
+    >
+      <style>{WELCOME_KEYFRAMES}</style>
+
+      {/* Hero */}
+      <div
+        style={{
+          textAlign: 'center',
+          animation: 'tws-fade-up .5s ease both',
+        }}
+      >
+        {/* Glow background */}
+        <div
+          aria-hidden
+          style={{
+            position: 'absolute',
+            width: 120,
+            height: 120,
+            borderRadius: '50%',
+            background:
+              'radial-gradient(circle, color-mix(in srgb, var(--accent) 22%, transparent), transparent 70%)',
+            animation: 'tws-glow-pulse 4s ease-in-out infinite',
+            pointerEvents: 'none',
+            zIndex: 0,
+          }}
+        />
+        {/* Logo mark */}
+        <div
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 44,
+            height: 44,
+            borderRadius: 14,
+            background:
+              'linear-gradient(135deg, var(--accent), color-mix(in oklch, var(--accent) 60%, var(--chart-5, var(--accent))))',
+            marginBottom: 12,
+            boxShadow: '0 4px 24px color-mix(in srgb, var(--accent) 28%, transparent)',
+            animation: 'tws-float 3s ease-in-out infinite',
+            position: 'relative',
+            zIndex: 1,
+          }}
+        >
+          <OverviewIcon size={22} color="var(--fg-on-accent)" />
         </div>
+        <h2
+          id="team-welcome-title"
+          style={{
+            margin: 0,
+            fontSize: 22,
+            fontWeight: 800,
+            color: 'var(--fg-strong)',
+            letterSpacing: '-0.03em',
+          }}
+        >
+          团队工作空间已就绪
+        </h2>
+        <p
+          style={{
+            margin: '4px 0 0',
+            fontSize: 13,
+            color: 'var(--fg-muted)',
+            lineHeight: 1.6,
+            maxWidth: 440,
+          }}
+        >
+          选择模板、确认工作目录，然后启动一棵可追踪的协作运行树。
+        </p>
       </div>
 
-      <div className="team-welcome-screen__cards" aria-label="团队启动能力">
+      {/* Action buttons */}
+      <div
+        style={{
+          display: 'flex',
+          gap: 10,
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          justifyContent: 'center',
+          animation: 'tws-fade-up .5s ease .1s both',
+        }}
+      >
+        <button
+          type="button"
+          disabled={!sessionActionEnabled}
+          onClick={sessionActionEnabled ? onNewSession : undefined}
+          onMouseEnter={(e) => {
+            if (sessionActionEnabled) e.currentTarget.style.background = 'color-mix(in srgb, var(--accent) 88%, var(--fg-strong))';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'var(--accent)';
+          }}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            height: 38,
+            padding: '0 18px',
+            borderRadius: 10,
+            border: '1px solid color-mix(in srgb, var(--fg-strong) 12%, transparent)',
+            background: 'var(--accent)',
+            color: 'var(--fg-on-accent)',
+            fontSize: 13,
+            fontWeight: 700,
+            cursor: sessionActionEnabled ? 'pointer' : 'not-allowed',
+            opacity: sessionActionEnabled ? 1 : 0.45,
+            boxShadow: '0 0 16px -4px color-mix(in srgb, var(--accent) 25%, transparent)',
+            transition: 'background 120ms ease',
+          }}
+        >
+          <PlusIcon size={14} color="var(--fg-on-accent)" />
+          <span>新建团队会话</span>
+        </button>
+      </div>
+
+      {/* Feature cards */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+          gap: 10,
+          width: '100%',
+          animation: 'tws-fade-up .5s ease .2s both',
+        }}
+      >
         {WELCOME_CARDS.map((card) => {
           const Icon = WELCOME_ICON_BY_KEY[card.icon];
           return (
-            <article key={card.icon} className="team-welcome-screen__card">
-              <span className="team-welcome-screen__card-icon" aria-hidden="true">
-                <Icon size={18} />
+            <div
+              key={card.icon}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+                padding: '14px 13px',
+                borderRadius: 12,
+                border: '1px solid var(--border-subtle)',
+                background:
+                  'linear-gradient(135deg, var(--bg-surface), color-mix(in srgb, var(--bg-overlay) 50%, var(--bg-base)))',
+              }}
+            >
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 28,
+                  height: 28,
+                  borderRadius: 8,
+                  border: '1px solid var(--accent-border)',
+                  background: 'var(--accent-subtle)',
+                  color: 'var(--accent)',
+                }}
+              >
+                <Icon size={15} color="var(--accent)" />
               </span>
-              <span className="team-welcome-screen__card-title">{card.title}</span>
-              <span className="team-welcome-screen__card-description">{card.description}</span>
-            </article>
+              <span
+                style={{
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: 'var(--fg-strong)',
+                }}
+              >
+                {card.title}
+              </span>
+              <span
+                style={{
+                  fontSize: 11,
+                  lineHeight: 1.55,
+                  color: 'var(--fg-muted)',
+                }}
+              >
+                {card.description}
+              </span>
+            </div>
           );
         })}
       </div>
 
-      <div className="team-welcome-screen__actions" aria-label="团队会话操作">
-        <button
-          type="button"
-          className="team-v2-control team-welcome-screen__primary"
-          disabled={!sessionActionEnabled}
-          onClick={sessionActionEnabled ? onNewSession : undefined}
-        >
-          <PlusIcon size={15} />
-          <span>新建团队会话</span>
-        </button>
-        <button
-          type="button"
-          className="team-v2-control team-welcome-screen__secondary"
-          disabled={!workspaceActionEnabled}
-          onClick={workspaceActionEnabled ? onCreateWorkspace : undefined}
-        >
-          <FolderIcon size={15} />
-          <span>{workspaceActionEnabled ? '新建工作区' : '工作区受限'}</span>
-        </button>
-      </div>
-
-      <div className="team-welcome-screen__prompts" aria-label="团队启动建议">
+      {/* Starter prompts */}
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          justifyContent: 'center',
+          gap: 8,
+          animation: 'tws-fade-up .5s ease .3s both',
+        }}
+      >
         {STARTER_PROMPTS.map((prompt) => (
           <button
             key={prompt}
             type="button"
-            className="team-v2-control team-welcome-screen__prompt"
             disabled={!onSelectSuggestion}
             onClick={() => void onSelectSuggestion?.(prompt)}
+            onMouseEnter={(e) => {
+              if (onSelectSuggestion) e.currentTarget.style.background = 'var(--accent-subtle)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent';
+            }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              height: 30,
+              padding: '0 12px',
+              borderRadius: 999,
+              border: '1px solid var(--accent-border)',
+              background: 'transparent',
+              color: 'var(--accent)',
+              fontSize: 11,
+              fontWeight: 500,
+              cursor: onSelectSuggestion ? 'pointer' : 'not-allowed',
+              opacity: onSelectSuggestion ? 1 : 0.45,
+              transition: 'background 120ms ease',
+            }}
           >
             {prompt}
           </button>

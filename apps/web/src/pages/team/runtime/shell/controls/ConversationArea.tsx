@@ -196,7 +196,14 @@ function ConversationAreaBody({
   readonly sidePanel?: ReactNode;
 }) {
   if (!sidePanel) {
-    return <div className="team-conversation-area__body">{children}</div>;
+    return (
+      <div
+        className="team-conversation-area__body"
+        style={{ display: 'flex', flex: 1, flexDirection: 'column', minHeight: 0 }}
+      >
+        {children}
+      </div>
+    );
   }
 
   const className =
