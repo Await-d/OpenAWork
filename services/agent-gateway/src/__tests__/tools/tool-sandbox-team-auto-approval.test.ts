@@ -1,3 +1,4 @@
+import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as MessageStoreV2 from '../../message/message-store-v2.js';
@@ -69,6 +70,8 @@ import { createDefaultSandbox } from '../../tools/tool-sandbox.js';
 
 describe('tool-sandbox team session auto approval', () => {
   beforeEach(() => {
+    rmSync(TEST_WORKSPACE, { recursive: true, force: true });
+    mkdirSync(TEST_WORKSPACE, { recursive: true });
     mocks.sqliteAllMock.mockReset();
     mocks.sqliteAllMock.mockImplementation(() => []);
     mocks.sqliteGetMock.mockClear();
@@ -83,6 +86,7 @@ describe('tool-sandbox team session auto approval', () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    rmSync(TEST_WORKSPACE, { recursive: true, force: true });
   });
 
   it('executor team session 调 write 空参数时返回参数错误而不是 pending approval', async () => {
@@ -117,7 +121,7 @@ describe('tool-sandbox team session auto approval', () => {
     mocks.roleLayer = null;
     mocks.metadataJson = JSON.stringify({
       teamRoleInstance: { roleLayer: 'executor', rootSessionId: 'fake-root' },
-      workingDirectory: '/home/await/project/OpenAWork',
+      workingDirectory: TEST_WORKSPACE,
     });
 
     const sandbox = createDefaultSandbox();
@@ -125,7 +129,7 @@ describe('tool-sandbox team session auto approval', () => {
       {
         toolCallId: 'call-fake-team-write',
         toolName: 'write',
-        rawInput: { path: '/home/await/project/OpenAWork/fake.txt', content: 'demo' },
+        rawInput: { path: join(TEST_WORKSPACE, 'fake.txt'), content: 'demo' },
       },
       new AbortController().signal,
       'plain-session',
@@ -149,7 +153,7 @@ describe('tool-sandbox team session auto approval', () => {
       {
         toolCallId: 'call-legacy-no-workspace',
         toolName: 'write',
-        rawInput: { path: '/home/await/project/OpenAWork/legacy.txt', content: 'demo' },
+        rawInput: { path: join(TEST_WORKSPACE, 'legacy.txt'), content: 'demo' },
       },
       new AbortController().signal,
       'plain-session',
@@ -171,7 +175,7 @@ describe('tool-sandbox team session auto approval', () => {
     mocks.teamParentSessionId = null;
     mocks.handoffState = null;
     mocks.metadataJson = JSON.stringify({
-      workingDirectory: '/home/await/project/OpenAWork',
+      workingDirectory: TEST_WORKSPACE,
     });
 
     const sandbox = createDefaultSandbox();
@@ -179,7 +183,7 @@ describe('tool-sandbox team session auto approval', () => {
       {
         toolCallId: 'call-foreground-team-write',
         toolName: 'write',
-        rawInput: { path: '/home/await/project/OpenAWork/foreground.txt', content: 'demo' },
+        rawInput: { path: join(TEST_WORKSPACE, 'foreground.txt'), content: 'demo' },
       },
       new AbortController().signal,
       'team-foreground-session',
@@ -201,11 +205,11 @@ describe('tool-sandbox team session auto approval', () => {
     mocks.teamParentSessionId = 'team-root-session';
     mocks.handoffState = '{"status":"running"}';
     mocks.metadataJson = JSON.stringify({
-      workingDirectory: '/home/await/project/OpenAWork',
+      workingDirectory: TEST_WORKSPACE,
     });
 
-    const { existsSync, rmSync } = await import('node:fs');
-    const targetPath = '/home/await/project/OpenAWork/background-child-write.txt';
+    const { existsSync } = await import('node:fs');
+    const targetPath = join(TEST_WORKSPACE, 'background-child-write.txt');
     rmSync(targetPath, { force: true });
 
     try {
@@ -287,8 +291,10 @@ describe('tool-sandbox team session auto approval', () => {
   });
 
   it('会话工作区外的写入路径会被直接拦截', async () => {
+    const currentWorkspace = join(TEST_WORKSPACE, 'current-workspace');
+    const otherWorkspaceFile = join(TEST_WORKSPACE, 'other-workspace', 'file.txt');
     mocks.metadataJson = JSON.stringify({
-      workingDirectory: '/home/await/project/OpenAWork/current-workspace',
+      workingDirectory: currentWorkspace,
     });
 
     const sandbox = createDefaultSandbox();
@@ -297,7 +303,7 @@ describe('tool-sandbox team session auto approval', () => {
         toolCallId: 'call-outside-workspace',
         toolName: 'write',
         rawInput: {
-          path: '/home/await/project/OpenAWork/other-workspace/file.txt',
+          path: otherWorkspaceFile,
           content: 'demo',
         },
       },
@@ -325,7 +331,7 @@ describe('tool-sandbox team session auto approval', () => {
         toolCallId: 'call-missing-workspace',
         toolName: 'write',
         rawInput: {
-          path: '/home/await/project/OpenAWork/file.txt',
+          path: join(TEST_WORKSPACE, 'file.txt'),
           content: 'demo',
         },
       },
