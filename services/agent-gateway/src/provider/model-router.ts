@@ -49,8 +49,10 @@ export interface ModelRouteConfig {
   systemPrompt?: string;
 }
 
-const OPENAI_BASE = globalThis.process?.env['AI_API_BASE_URL'] ?? 'https://api.openai.com/v1';
-const DEFAULT_API_KEY = globalThis.process?.env['AI_API_KEY'] ?? '';
+const getOpenAiBaseUrl = (): string =>
+  globalThis.process?.env['AI_API_BASE_URL'] ?? 'https://api.openai.com/v1';
+
+const getDefaultApiKey = (): string => globalThis.process?.env['AI_API_KEY'] ?? '';
 
 const BUILTIN_MODEL_INDEX = new Map<
   string,
@@ -83,7 +85,7 @@ const normalizeBaseUrl = (value: string | undefined): string => {
 
 const resolveProviderDefaultBaseUrl = (providerType: AIProvider['type']): string => {
   if (providerType === 'openai') {
-    return normalizeBaseUrl(OPENAI_BASE);
+    return normalizeBaseUrl(getOpenAiBaseUrl());
   }
 
   if (providerType === 'anthropic') {
@@ -116,10 +118,10 @@ const resolveProviderApiKey = (provider: AIProvider): string => {
   }
 
   if (provider.apiKeyEnv) {
-    return globalThis.process?.env[provider.apiKeyEnv] ?? '';
+    return globalThis.process?.env[provider.apiKeyEnv] ?? getDefaultApiKey();
   }
 
-  return DEFAULT_API_KEY;
+  return getDefaultApiKey();
 };
 
 const resolveBuiltinFallbackModel = (
@@ -147,7 +149,7 @@ export function resolveModelRoute(request: ModelRequest): ModelRouteConfig {
     (builtinProvider ? resolveProviderDefaultBaseUrl(builtinProvider.type) : undefined) ??
       (isAnthropic
         ? (globalThis.process?.env['ANTHROPIC_API_BASE_URL'] ?? 'https://api.anthropic.com/v1')
-        : OPENAI_BASE),
+        : getOpenAiBaseUrl()),
   );
 
   // 方案 5：插件优先解析协议，fallback 到原有逻辑
@@ -168,8 +170,8 @@ export function resolveModelRoute(request: ModelRequest): ModelRouteConfig {
     (builtinProvider
       ? resolveProviderApiKey(builtinProvider)
       : isAnthropic
-        ? (globalThis.process?.env['ANTHROPIC_API_KEY'] ?? DEFAULT_API_KEY)
-        : DEFAULT_API_KEY);
+        ? (globalThis.process?.env['ANTHROPIC_API_KEY'] ?? getDefaultApiKey())
+        : getDefaultApiKey());
 
   return {
     model,
