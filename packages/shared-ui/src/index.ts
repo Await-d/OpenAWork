@@ -149,6 +149,7 @@ export { SkillManagerDesktop } from './skills/SkillManagerDesktop.js';
 export type { SkillManagerDesktopProps } from './skills/SkillManagerDesktop.js';
 export { MCPServerConfig } from './mcp/MCPServerConfig.js';
 export type { MCPServerConfigProps, MCPServerEntry } from './mcp/MCPServerConfig.js';
+export { toPersistedMcpServers } from './mcp/mcp-server-config-utils.js';
 export { MCPServerList } from './mcp/MCPServerList.js';
 export type { MCPServerListProps, MCPServerStatus } from './mcp/MCPServerList.js';
 export { ModelCostDisplay } from './models/ModelCostDisplay.js';

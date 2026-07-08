@@ -308,6 +308,10 @@ import { ChatTerminalToggle } from './panels/ChatTerminalToggle.js';
 import { ChatWorkbenchStatusStrip } from './panels/ChatWorkbenchStatusStrip.js';
 import { SessionHeaderBar } from './panels/SessionHeaderBar.js';
 import { FusionDockedSidePanel } from './panels/FusionDockedSidePanel.js';
+import type {
+  FusionContextOverviewProps,
+  FusionContextRuntimeSummary,
+} from './panels/FusionContextTab.js';
 import { FusionChatMainShell } from './layout/FusionChatMainShell.js';
 import { useFusionDockedPanelViewport } from './layout/use-fusion-docked-panel-viewport.js';
 
@@ -548,6 +552,7 @@ export default function ChatPage() {
   const setReviewPanelOpened = useUIStateStore((s) => s.setReviewPanelOpened);
   const toggleReviewPanelOpened = useUIStateStore((s) => s.toggleReviewPanelOpened);
   const terminalPanelOpened = useUIStateStore((s) => s.terminalPanelOpened);
+  const setTerminalPanelOpened = useUIStateStore((s) => s.setTerminalPanelOpened);
   const toggleTerminalPanelOpened = useUIStateStore((s) => s.toggleTerminalPanelOpened);
   const sidePanelActiveTab = useUIStateStore((s) => s.sidePanelActiveTab);
   const setSidePanelActiveTab = useUIStateStore((s) => s.setSidePanelActiveTab);
@@ -623,6 +628,8 @@ export default function ChatPage() {
   // [ATTACH_ELIGIBILITY] line in the effect below only prints when the
   // decision-relevant inputs actually change (not on every token delta).
   const attachEligibilitySignatureRef = useRef<string | null>(null);
+  const autoOpenedTerminalPanelRef = useRef(false);
+  const previousTerminalRunningCountRef = useRef(0);
   const { attachRetryNonce, cancelAttachRetry, scheduleAttachRetry } = useStreamAttachRetry();
   const artifactsWorkspaceHref = currentSessionId
     ? `/artifacts?sessionId=${encodeURIComponent(currentSessionId)}`
@@ -639,6 +646,38 @@ export default function ChatPage() {
     gatewayUrl,
     token,
   });
+  useEffect(() => {
+    const previousRunningCount = previousTerminalRunningCountRef.current;
+    const runningCount = sessionTerminals.runningCount;
+
+    if (!isFusionLayout || !currentSessionId) {
+      autoOpenedTerminalPanelRef.current = false;
+      previousTerminalRunningCountRef.current = runningCount;
+      return;
+    }
+
+    if (previousRunningCount === 0 && runningCount > 0 && !terminalPanelOpened) {
+      autoOpenedTerminalPanelRef.current = true;
+      setTerminalPanelOpened(true);
+    }
+
+    if (runningCount === 0 && autoOpenedTerminalPanelRef.current && terminalPanelOpened) {
+      autoOpenedTerminalPanelRef.current = false;
+      setTerminalPanelOpened(false);
+    }
+
+    if (runningCount === 0) {
+      autoOpenedTerminalPanelRef.current = false;
+    }
+
+    previousTerminalRunningCountRef.current = runningCount;
+  }, [
+    currentSessionId,
+    isFusionLayout,
+    sessionTerminals.runningCount,
+    setTerminalPanelOpened,
+    terminalPanelOpened,
+  ]);
   const availableImageEditReferenceArtifacts = useMemo(() => {
     if (!latestGeneratedImageResult) {
       return sessionImageEditReferenceArtifacts;
@@ -875,6 +914,34 @@ export default function ChatPage() {
 
   const { planTasks, agentEvents, planHistory, dagNodes, dagEdges, compactions } = rightPanelState;
   const toolCallCards = useMemo(() => getToolCallCards(rightPanelState), [rightPanelState]);
+  const fusionContextRuntimeSummary = useMemo<FusionContextRuntimeSummary>(
+    () => ({
+      activePlanTaskCount: planTasks.filter(
+        (task) => task.status === 'pending' || task.status === 'in_progress',
+      ).length,
+      childSessionCount: childSessions.length,
+      dagEdgeCount: dagEdges.length,
+      dagNodeCount: dagNodes.length,
+      failedToolCallCount: toolCallCards.filter((toolCall) => toolCall.isError).length,
+      mcpServerCount: mcpServers.length,
+      pendingPermissionCount: pendingPermissions.length,
+      toolCallCount: toolCallCards.length,
+      totalPlanTaskCount: planTasks.length,
+    }),
+    [
+      childSessions.length,
+      dagEdges.length,
+      dagNodes.length,
+      mcpServers.length,
+      pendingPermissions.length,
+      planTasks,
+      toolCallCards,
+    ],
+  );
+  const handleTerminalPanelToggle = useCallback(() => {
+    autoOpenedTerminalPanelRef.current = false;
+    toggleTerminalPanelOpened();
+  }, [toggleTerminalPanelOpened]);
   const lastToolName = useMemo(() => {
     if (toolCallCards.length === 0) {
       return null;
@@ -4172,6 +4239,62 @@ export default function ChatPage() {
     sidePanelActiveTab,
     toggleReviewPanelOpened,
   ]);
+  const handleFusionContextCompactSession = useCallback(() => {
+    void handleCompactCurrentSession();
+  }, [handleCompactCurrentSession]);
+  const handleFusionContextOpenRecoveryStrategy = useCallback(() => {
+    setRightOpen(true);
+    setRightTab('history');
+  }, [setRightOpen, setRightTab]);
+  const fusionContextSessionStateStatus: FusionContextOverviewProps['sessionStateStatus'] =
+    sessionStateStatus === undefined ? null : sessionStateStatus;
+  const fusionContextOverview = useMemo<FusionContextOverviewProps>(
+    () => ({
+      attachmentItems: [],
+      artifactsWorkspaceHref,
+      childSessions,
+      compactions,
+      contextUsageSnapshot,
+      contentArtifactCount,
+      contentArtifactCountStatus,
+      currentSessionId,
+      dialogueMode,
+      effectiveWorkingDirectory,
+      messages,
+      onCompactSession: handleFusionContextCompactSession,
+      onOpenRecoveryStrategy: handleFusionContextOpenRecoveryStrategy,
+      pendingPermissions,
+      pendingQuestionsCount: pendingQuestions.length,
+      sessionStateStatus: fusionContextSessionStateStatus,
+      sessionTasks,
+      sessionTodos,
+      upstreamSummaries: rightPanelState.upstreamSummaries,
+      workspaceFileItems,
+      yoloMode,
+    }),
+    [
+      artifactsWorkspaceHref,
+      childSessions,
+      compactions,
+      contextUsageSnapshot,
+      contentArtifactCount,
+      contentArtifactCountStatus,
+      currentSessionId,
+      dialogueMode,
+      effectiveWorkingDirectory,
+      handleFusionContextCompactSession,
+      handleFusionContextOpenRecoveryStrategy,
+      messages,
+      pendingPermissions,
+      pendingQuestions.length,
+      rightPanelState.upstreamSummaries,
+      fusionContextSessionStateStatus,
+      sessionTasks,
+      sessionTodos,
+      workspaceFileItems,
+      yoloMode,
+    ],
+  );
 
   // ─── Command Palette items ──────────────────────────────────────────────
   const commandPaletteItems = useMemo<CommandPaletteItem[]>(
@@ -4579,6 +4702,8 @@ export default function ChatPage() {
             onCompactSession={() => void handleCompactCurrentSession()}
             onOpenWorkspace={() => setShowWorkspaceSelector(true)}
             onTabChange={setSidePanelActiveTab}
+            overview={fusionContextOverview}
+            runtimeSummary={fusionContextRuntimeSummary}
             token={token}
             workspaceFileItems={workspaceFileItems}
           />
@@ -4625,6 +4750,10 @@ export default function ChatPage() {
             sessionId={currentSessionId}
             sessionSource="chat"
             compact={isFusionLayout}
+            centerContent={!isFusionLayout || !editorMode}
+            contentMaxWidth={
+              isFusionLayout ? (editorMode ? 'fluid' : 720) : editorMode ? 720 : 1024
+            }
             currentUserEmail={currentUserEmail}
             gatewayUrl={gatewayUrl}
             token={token}
@@ -4639,7 +4768,7 @@ export default function ChatPage() {
                     reviewPanelOpened={reviewPanelOpened}
                     terminalPanelOpened={terminalPanelOpened}
                     onToggleReviewPanel={handleFusionReviewPanelToggle}
-                    onToggleTerminalPanel={toggleTerminalPanelOpened}
+                    onToggleTerminalPanel={handleTerminalPanelToggle}
                     onMore={commandPalette.open}
                   />
                 ) : null}
@@ -4693,7 +4822,7 @@ export default function ChatPage() {
                         isFusionLayout={isFusionLayout}
                         terminalPanelOpened={terminalPanelOpened}
                         quickTerminalOpen={quickTerminalOpen}
-                        onToggleTerminalPanelOpened={toggleTerminalPanelOpened}
+                        onToggleTerminalPanelOpened={handleTerminalPanelToggle}
                         onSetQuickTerminalOpen={(open) =>
                           setQuickTerminalOpenForWorkspace(effectiveWorkingDirectory, open)
                         }
@@ -4803,7 +4932,7 @@ export default function ChatPage() {
                     messageCount={messages.length}
                     modelLabel={activeModelOption?.label ?? activeModelId}
                     onToggleReviewPanel={handleFusionReviewPanelToggle}
-                    onToggleTerminalPanel={toggleTerminalPanelOpened}
+                    onToggleTerminalPanel={handleTerminalPanelToggle}
                     reviewPanelOpened={reviewPanelOpened}
                     sessionId={currentSessionId}
                     taskCount={sessionTasks.length}

@@ -31,6 +31,7 @@ export function FusionDockedSidePanel(props: FusionDockedSidePanelProps) {
         data-testid="fusion-docked-side-panel"
         style={{
           flex: `1 1 ${width}px`,
+          maxWidth: width,
           width,
         }}
       >

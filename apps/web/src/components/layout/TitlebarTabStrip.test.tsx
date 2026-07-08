@@ -101,7 +101,9 @@ describe('TitlebarTabStrip', () => {
       expect(screen.getByLabelText('Team 工作台层级').textContent).toContain('worksp…');
       expect(screen.getByRole('button', { name: '新建' })).not.toBeNull();
       expect(screen.getByRole('tab', { name: '首页' })).not.toBeNull();
-      expect(screen.getByRole('button', { name: '当前布局：融合，切换布局版本' })).not.toBeNull();
+      expect(
+        screen.getByRole('button', { name: '当前布局：融合，点击切换到经典布局' }),
+      ).not.toBeNull();
       expect(screen.queryByRole('tablist', { name: 'Chat 会话标签' })).toBeNull();
     } finally {
       restoreMatchMedia();
@@ -125,22 +127,23 @@ describe('TitlebarTabStrip', () => {
 
     expect(screen.getByRole('tablist', { name: 'Chat 会话标签' })).not.toBeNull();
     expect(screen.getByText('Chat 会话一')).not.toBeNull();
-    expect(screen.getByRole('button', { name: '当前布局：融合，切换布局版本' })).not.toBeNull();
+    expect(
+      screen.getByRole('button', { name: '当前布局：融合，点击切换到经典布局' }),
+    ).not.toBeNull();
     expect(screen.getByRole('button', { name: '工具菜单' })).not.toBeNull();
   });
 
-  it('顶部布局入口展示 classic/fusion 说明并可切回旧版布局', () => {
+  it('顶部布局入口点击后直接切回经典布局', () => {
     useUIStateStore.getState().addSessionTab('chat-session-1', 'Chat 会话一');
 
     renderTitlebar('/chat/chat-session-1');
 
-    fireEvent.click(screen.getByRole('button', { name: '当前布局：融合，切换布局版本' }));
-
-    expect(screen.getByRole('menu', { name: '布局版本切换' })).not.toBeNull();
-    expect(screen.getByText('旧版侧栏、会话标签与传统工作台展示')).not.toBeNull();
-    fireEvent.click(screen.getByRole('menuitemradio', { name: /经典/ }));
+    fireEvent.click(screen.getByRole('button', { name: '当前布局：融合，点击切换到经典布局' }));
 
     expect(useUIStateStore.getState().workbenchLayoutMode).toBe('classic');
+    expect(
+      screen.getByRole('button', { name: '当前布局：经典，点击切换到融合布局' }),
+    ).not.toBeNull();
   });
 
   it('在工具菜单中仍可切换 classic/fusion 布局', () => {
@@ -149,7 +152,7 @@ describe('TitlebarTabStrip', () => {
     renderTitlebar('/chat/chat-session-1');
 
     fireEvent.click(screen.getByRole('button', { name: '工具菜单' }));
-    fireEvent.click(screen.getByRole('menuitemradio', { name: '经典' }));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /经典/ }));
 
     expect(useUIStateStore.getState().workbenchLayoutMode).toBe('classic');
   });

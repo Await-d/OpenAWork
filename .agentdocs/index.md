@@ -64,6 +64,7 @@
 - [260415-team-page-收口方案](workflow/done/260415-team-page-收口方案.md) — Team 页面收口、契约稳定化、shell adapter 与验收闭环
 
 ## Architecture Decisions
+- [2026-07-07] OMO MCP 适配固定为“原生 MCP runtime 主路径 + OMO adapter typed manifest 输入源”：Agent 可见工具只来自 OpenAWork MCP catalog / gateway tool registry；`codegraph`、`git_bash`、`lsp`、`grep_app`、`websearch` 等已有 builtin/virtual MCP 不重复注册为 `mcp__omo__*`；hook 只允许 before/after 修改 args 或观察结果，不能绕过 `tool-sandbox`、permission、session visibility、audit；Settings 必须通过 gateway runtime 与 `@openAwork/web-client` 同源管理 builtin、virtual、adapter MCP；team `allowedServerIds: []` 只保留 system builtin，用户私有/插件来源 OMO MCP 不默认继承。ADR 见 [omo-mcp-adapter-architecture](../docs/chat/omo-mcp-adapter-architecture.md)。
 - [2026-07-06] 系统桌面控制采用“用户级插件开关 + 后端工具注入过滤 + sandbox 二次门控 + Tauri loopback bridge”四层闭环：前端只保存意图，Agent 可见工具和实际执行权限均由 gateway 按 `plugin_settings.desktopControl.enabled` 判定，避免仅靠 UI 开关导致历史/恢复调用绕过门控。
 - [2026-07-06] LazyCodex/OmO 新版工作流只作为语义参考，不作为 OpenAWork runtime 依赖：计划发现、ULW/start-work、reviewer gate、证据包、skills 与团队角色分别落到 OpenAWork 原生 session/read model、`WorkflowRuntimeState`、`session_run_events`、artifacts、`@openAwork/skills`、agent catalog aliases 与 team `role_layer`；不得引入 `lazycodex-ai` SDK 或 Codex `agent_type` 作为产品协议。
 - [2026-05-23] ChatPage 流式域采用“状态容器 hook + 页面内 attach/recovery 协调层”分离；`useChatStreaming` 只承接流式 state/refs/reset/reveal，跨域 attach/recovery effect 继续留在 `ChatPage.tsx`，避免形成第二套流式真相源。

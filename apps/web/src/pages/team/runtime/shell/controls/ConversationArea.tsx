@@ -24,12 +24,14 @@
 
 import type { CSSProperties, ReactNode } from 'react';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
-import { SuggestionBar } from './SuggestionBar.js';
 import { TeamConversationView } from '../../../conversation/TeamConversationView.js';
 import { TeamDynamicStrip } from './TeamDynamicStrip.js';
+import { ErrorState, LoadingState } from './ConversationAreaStates.js';
+import { TeamWelcomeScreen } from './TeamWelcomeScreen.js';
 import { useTeamDynamicEntries } from './use-team-dynamic-entries.js';
 
 type TeamConversationStyle = CSSProperties & Record<`--team-${string}`, string>;
+type ConversationAreaPresentation = 'session-first' | 'workspace-first';
 
 const CONTAINER_STYLE: TeamConversationStyle = {
   '--team-space-1': '4px',
@@ -68,46 +70,19 @@ const CONTAINER_STYLE: TeamConversationStyle = {
   // 避免双层 bg 叠加导致颜色偏差。
 };
 
-const STATE_PANEL_STYLE: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  justifyContent: 'center',
-  gap: 'var(--team-space-4)',
-  width: '100%',
-  maxWidth: 520,
-  margin: '0 auto',
-  // 内容自然高度即可，不再用 flex:1 撑满整个对话区导致内容漂浮在大片空白里。
-  padding: 'var(--team-space-6) var(--team-space-5)',
-  textAlign: 'center',
-  borderRadius: 'var(--team-radius-xl)',
-  border: '1px dashed color-mix(in srgb, var(--border-default) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base))',
-};
-
-const SPINNER_STYLE: CSSProperties = {
-  width: 'var(--team-spinner-size)',
-  height: 'var(--team-spinner-size)',
-  borderRadius: 'var(--team-radius-pill)',
-  border: 'var(--team-spinner-border) solid color-mix(in srgb, var(--accent) 20%, transparent)',
-  borderTopColor: 'var(--accent)',
-  animation: 'spin var(--team-spin-duration) linear infinite',
-};
-
-const EMPTY_QUICK_ACTIONS = [
-  '帮我实现一个登录功能',
-  '修复 issue #42',
-  '给项目加上单元测试',
-] as const;
-
 export interface ConversationAreaProps {
+  canCreateSession?: boolean;
+  canCreateWorkspace?: boolean;
   fallbackContent?: ReactNode;
+  onCreateWorkspace?: () => void;
+  onNewSession?: () => void;
   onRetryConnection?: () => void;
   onSelectSuggestion?: (text: string) => void | Promise<void>;
   onSubmitMessage?: (text: string) => void | Promise<void>;
   topBar?: ReactNode;
   messagesOverride?: ReactNode;
   sidePanel?: ReactNode;
+  workspaceLabel?: string | null;
   /**
    * 团队主对话所归属的 reception/b session id。
    * 当 `messagesOverride` 未传入时：
@@ -133,7 +108,11 @@ export interface ConversationAreaProps {
 }
 
 export function ConversationArea({
+  canCreateSession,
+  canCreateWorkspace,
   fallbackContent,
+  onCreateWorkspace,
+  onNewSession,
   onRetryConnection,
   onSelectSuggestion,
   onSubmitMessage,
@@ -142,6 +121,7 @@ export function ConversationArea({
   sidePanel,
   receptionSessionId,
   receptionComposerEnabled = false,
+  workspaceLabel,
 }: ConversationAreaProps) {
   const { error, loading } = useTeamRuntimeReferenceViewData();
   const dynamicEntries = useTeamDynamicEntries(receptionSessionId ?? null);
@@ -183,25 +163,22 @@ export function ConversationArea({
   return (
     <section className="team-conversation-area" style={CONTAINER_STYLE} aria-label="对话区">
       {topBar}
-      <ConversationAreaBody sidePanel={sidePanel}>
-        <div
-          style={{
-            flex: 1,
-            minHeight: 0,
-            overflow: 'auto',
-            padding: 'clamp(16px, 4vh, 48px) 20px',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 12,
-          }}
-        >
+      <ConversationAreaBody sidePanel={sidePanel} presentation="workspace-first">
+        <div className="team-welcome-screen-host">
           {loading ? <LoadingState /> : null}
           {!loading && error ? (
             <ErrorState error={error} onRetryConnection={onRetryConnection} />
           ) : null}
-          {!loading && !error ? <EmptyState onSelectSuggestion={handleSuggestion} /> : null}
+          {!loading && !error ? (
+            <TeamWelcomeScreen
+              canCreateSession={canCreateSession}
+              canCreateWorkspace={canCreateWorkspace}
+              workspaceLabel={workspaceLabel}
+              onCreateWorkspace={onCreateWorkspace}
+              onNewSession={onNewSession}
+              onSelectSuggestion={handleSuggestion}
+            />
+          ) : null}
           {fallbackContent}
         </div>
       </ConversationAreaBody>
@@ -211,137 +188,28 @@ export function ConversationArea({
 
 function ConversationAreaBody({
   children,
+  presentation = 'session-first',
   sidePanel,
 }: {
   readonly children: ReactNode;
+  readonly presentation?: ConversationAreaPresentation;
   readonly sidePanel?: ReactNode;
 }) {
   if (!sidePanel) {
     return <div className="team-conversation-area__body">{children}</div>;
   }
 
+  const className =
+    presentation === 'workspace-first'
+      ? 'team-conversation-area__workbench team-conversation-area__workbench--workspace-first'
+      : 'team-conversation-area__workbench';
+
   return (
-    <div className="team-conversation-area__workbench">
+    <div className={className}>
       <div className="team-conversation-area__session">{children}</div>
       <aside className="team-conversation-area__side-panel" aria-label="团队工作台侧栏">
         {sidePanel}
       </aside>
-    </div>
-  );
-}
-
-function LoadingState() {
-  return (
-    <div style={STATE_PANEL_STYLE} role="status" aria-live="polite">
-      <span style={SPINNER_STYLE} aria-hidden="true" />
-      <span
-        style={{ fontSize: 'var(--team-font-sm)', color: 'var(--fg-default)', fontWeight: 700 }}
-      >
-        正在连接团队...
-      </span>
-    </div>
-  );
-}
-
-function EmptyState({
-  onSelectSuggestion,
-}: {
-  onSelectSuggestion?: (text: string) => void | Promise<void>;
-}) {
-  return (
-    <div className="team-conversation-empty-state" style={STATE_PANEL_STYLE}>
-      <div style={{ display: 'grid', gap: 'var(--team-space-2)' }}>
-        <strong style={{ fontSize: 'var(--team-font-lg)', color: 'var(--fg-strong)' }}>
-          团队工作空间已就绪
-        </strong>
-        <span style={{ color: 'var(--fg-default)', lineHeight: 'var(--team-line-height-relaxed)' }}>
-          接待助手、规划师、主管、开发者、测试员和审查员已准备好协作。
-        </span>
-        <span style={{ fontSize: 'var(--team-font-xxs)', color: 'var(--fg-muted)' }}>
-          创建首个会话后，下方将出现统一对话区。
-        </span>
-      </div>
-      <div
-        className="team-conversation-quick-actions"
-        style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          justifyContent: 'center',
-          gap: 'var(--team-space-2)',
-        }}
-        aria-label="快捷建议"
-      >
-        {EMPTY_QUICK_ACTIONS.map((action) => (
-          <button
-            key={action}
-            type="button"
-            className="team-conversation-quick-action"
-            onClick={() => void onSelectSuggestion?.(action)}
-            style={{
-              minHeight: 'var(--team-control-height-sm)',
-              padding: '0 var(--team-space-3)',
-              borderRadius: 'var(--team-radius-pill)',
-              border: '1px solid color-mix(in srgb, var(--accent) 34%, transparent)',
-              background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
-              color: 'var(--fg-strong)',
-              fontSize: 'var(--team-font-xs)',
-              fontWeight: 700,
-              cursor: onSelectSuggestion ? 'pointer' : 'not-allowed',
-              opacity: onSelectSuggestion ? 1 : 0.55,
-            }}
-          >
-            {action}
-          </button>
-        ))}
-      </div>
-      {onSelectSuggestion ? <SuggestionBar onSelectSuggestion={onSelectSuggestion} /> : null}
-    </div>
-  );
-}
-
-function ErrorState({
-  error,
-  onRetryConnection,
-}: {
-  error: string;
-  onRetryConnection?: () => void;
-}) {
-  return (
-    <div
-      style={{
-        ...STATE_PANEL_STYLE,
-        borderColor: 'color-mix(in srgb, var(--danger) 40%, transparent)',
-        background: 'color-mix(in srgb, var(--danger) 7%, var(--bg-overlay))',
-      }}
-      role="alert"
-    >
-      <div style={{ display: 'grid', gap: 'var(--team-space-2)' }}>
-        <strong style={{ fontSize: 'var(--team-font-md)', color: 'var(--fg-strong)' }}>
-          ⚠️ 网络连接已断开
-        </strong>
-        <span style={{ color: 'var(--fg-default)' }}>
-          当前离线 — 可查看历史记录，无法执行新任务
-        </span>
-        <span style={{ color: 'var(--fg-muted)', fontSize: 'var(--team-font-xxs)' }}>{error}</span>
-      </div>
-      <button
-        type="button"
-        onClick={onRetryConnection}
-        style={{
-          minHeight: 'var(--team-control-height-sm)',
-          padding: '0 var(--team-space-4)',
-          borderRadius: 'var(--team-radius-pill)',
-          border: '1px solid color-mix(in srgb, var(--danger) 44%, transparent)',
-          background: 'color-mix(in srgb, var(--danger) 12%, var(--bg-overlay))',
-          color: 'var(--fg-strong)',
-          fontSize: 'var(--team-font-xs)',
-          fontWeight: 800,
-          cursor: onRetryConnection ? 'pointer' : 'not-allowed',
-          opacity: onRetryConnection ? 1 : 0.55,
-        }}
-      >
-        重试连接
-      </button>
     </div>
   );
 }

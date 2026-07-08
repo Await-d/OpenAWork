@@ -3,6 +3,10 @@ import type { ChatContextUsageSnapshot } from '../../../components/conversation-
 import type { WorkspaceFileMentionItem } from '../../../components/conversation-runtime/messages/support.js';
 import './FusionSessionSidePanel.css';
 import { FusionContextTab } from './FusionContextTab.js';
+import type {
+  FusionContextOverviewProps,
+  FusionContextRuntimeSummary,
+} from './FusionContextTab.js';
 import { FusionFilesTab } from './FusionFilesTab.js';
 import { FusionReviewTab } from './FusionReviewTab.js';
 import { SessionSidePanel } from './SessionSidePanel.js';
@@ -19,6 +23,8 @@ export interface FusionSessionSidePanelProps {
   readonly onCompactSession: () => void;
   readonly onOpenWorkspace: () => void;
   readonly onTabChange: (tab: SidePanelTabId) => void;
+  readonly overview?: FusionContextOverviewProps;
+  readonly runtimeSummary?: FusionContextRuntimeSummary;
   readonly token: string | null;
   readonly workspaceFileItems: readonly WorkspaceFileMentionItem[];
 }
@@ -32,6 +38,8 @@ export function FusionSessionSidePanel({
   onCompactSession,
   onOpenWorkspace,
   onTabChange,
+  overview,
+  runtimeSummary,
   token,
   workspaceFileItems,
 }: FusionSessionSidePanelProps) {
@@ -72,6 +80,8 @@ export function FusionSessionSidePanel({
           currentSessionId={currentSessionId}
           effectiveWorkingDirectory={effectiveWorkingDirectory}
           onCompactSession={onCompactSession}
+          overview={overview}
+          runtimeSummary={runtimeSummary}
           workspaceFileItems={workspaceFileItems}
         />
       )}

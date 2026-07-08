@@ -985,6 +985,9 @@ export default function TeamPageV2() {
   const setTeamEditorMode = useUIStateStore((s) => s.setTeamEditorMode);
   const workbenchLayoutMode = useUIStateStore((s) => s.workbenchLayoutMode);
   const isFusionWorkbench = workbenchLayoutMode === 'fusion';
+  // 全局侧栏（classic 的 AppSidebar / fusion 的 FusionSidebar）已承载「团队会话」段，
+  // 团队页自己的左侧栏现仅渲染文件树（会话列表已从该栏彻底移除，而非隐藏）。
+  const shellCollapsed = effectiveSidebarCollapsed;
   const handleOpenFile = useCallback(
     (path: string) => {
       if (isMobile) {
@@ -1068,22 +1071,15 @@ export default function TeamPageV2() {
       return '1fr';
     }
     if (isFusionWorkbench) {
-      return effectiveSidebarCollapsed ? `${SIDEBAR_COLLAPSED_WIDTH}px 1fr` : '244px 1fr';
+      return shellCollapsed ? `${SIDEBAR_COLLAPSED_WIDTH}px 1fr` : '244px 1fr';
     }
-    const width = effectiveSidebarCollapsed
+    const width = shellCollapsed
       ? SIDEBAR_COLLAPSED_WIDTH
       : breakpoint === 'tablet'
         ? Math.min(sidebarWidth, SIDEBAR_TABLET_WIDTH)
         : sidebarWidth;
     return `${width}px 10px 1fr`;
-  }, [
-    breakpoint,
-    effectiveFocusMode,
-    effectiveSidebarCollapsed,
-    isFusionWorkbench,
-    isMobile,
-    sidebarWidth,
-  ]);
+  }, [breakpoint, effectiveFocusMode, isFusionWorkbench, isMobile, shellCollapsed, sidebarWidth]);
 
   const showSidebarDivider = !isMobile && !effectiveFocusMode && !isFusionWorkbench;
 
@@ -1302,7 +1298,7 @@ export default function TeamPageV2() {
 
         <main className="team-v2-main-shell" style={mainGridStyle}>
           <TeamWorkspaceSidebarShell
-            collapsed={effectiveSidebarCollapsed}
+            collapsed={shellCollapsed}
             defaultWidth={SIDEBAR_WIDTH}
             focusMode={effectiveFocusMode}
             isMobile={isMobile}
@@ -1449,6 +1445,19 @@ export default function TeamPageV2() {
                 }
               >
                 <ConversationArea
+                  canCreateSession={Boolean(
+                    data.canManageSessionEntries &&
+                    data.canCreateSession &&
+                    resolvedTeamWorkspaceId,
+                  )}
+                  canCreateWorkspace={canCreateWorkspace}
+                  workspaceLabel={teamWorkspaceDisplayName}
+                  onCreateWorkspace={
+                    canCreateWorkspace ? () => setShowNewWorkspaceModal(true) : undefined
+                  }
+                  onNewSession={
+                    data.canManageSessionEntries ? () => handleOpenNewSessionModal() : undefined
+                  }
                   onSelectSuggestion={
                     data.canManageSessionEntries ? handleSubmitMessage : undefined
                   }

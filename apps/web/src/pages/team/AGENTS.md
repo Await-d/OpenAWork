@@ -55,11 +55,13 @@ team/
 
 **命名规范**：`Team*.tsx` / `Layer*.tsx`
 
-### sidebar/ — session 列表侧边栏
+### sidebar/ — 团队页文件树侧边栏
 
 **放什么**：
 
-- `TeamSessionListSidebar.tsx`：session 列表容器
+- `TeamSidebarWithFileTree.tsx`：团队页左侧栏，仅渲染工作区文件树与「新建会话 / 工作区」入口。
+  会话列表已不再在此渲染（由全局侧栏 AppSidebar / FusionSidebar 承载），相关
+  `TeamSessionListSidebar.tsx` 组件已删除。
 - `TeamSessionSidebar.tsx`：侧边栏外壳（含搜索 / 过滤）
 - `SessionCard.tsx`：单条 session 卡片
 

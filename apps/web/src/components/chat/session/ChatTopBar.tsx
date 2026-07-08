@@ -216,7 +216,7 @@ export function ChatTopBar({
           <DialogueModeToggle
             mode={dialogueMode}
             onChange={onChangeDialogueMode}
-            style={{ flexShrink: 0 }}
+            style={{ flexShrink: 1, minWidth: 0 }}
           />
         )}
 

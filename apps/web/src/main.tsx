@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router';
 import App from './App.js';
+import './styles/layout-tokens.css';
 import './index.css';
 import './styles/loaders.css';
 import './styles/ui-hovers.css';

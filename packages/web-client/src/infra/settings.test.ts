@@ -73,6 +73,76 @@ describe('createSettingsClient.getProvidersResult', () => {
 });
 
 describe('createSettingsClient mutation error handling', () => {
+  it('listMcpServers 通过 settings MCP endpoint 读取同源配置', async () => {
+    const fetchMock = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({
+          servers: [],
+          builtinServers: [{ id: 'omo', builtinKind: 'adapter', source: 'system' }],
+        }),
+      } as unknown as Response;
+    }) as typeof fetch;
+    globalThis.fetch = fetchMock;
+
+    const client = createSettingsClient('http://localhost:3000');
+    const result = await client.listMcpServers('token-1');
+
+    expect(result).toMatchObject({
+      builtinServers: [{ id: 'omo', builtinKind: 'adapter', source: 'system' }],
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:3000/settings/mcp-servers',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer token-1' }),
+      }),
+    );
+  });
+
+  it('putMcpServers writes the normalized settings payload through the web client', async () => {
+    const fetchMock = vi.fn(async () => {
+      return { ok: true, status: 200 } as unknown as Response;
+    }) as typeof fetch;
+    globalThis.fetch = fetchMock;
+
+    const client = createSettingsClient('http://localhost:3000');
+    await client.putMcpServers('token-1', {
+      servers: [
+        {
+          id: 'omo',
+          name: 'omo',
+          transport: 'stdio',
+          builtin: true,
+          builtinKind: 'adapter',
+          source: 'system',
+          enabled: false,
+          disabledTools: ['omo_list_agents'],
+        },
+      ],
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:3000/settings/mcp-servers',
+      expect.objectContaining({
+        body: JSON.stringify({
+          servers: [
+            {
+              id: 'omo',
+              name: 'omo',
+              transport: 'stdio',
+              builtin: true,
+              builtinKind: 'adapter',
+              source: 'system',
+              enabled: false,
+              disabledTools: ['omo_list_agents'],
+            },
+          ],
+        }),
+        method: 'PUT',
+      }),
+    );
+  });
+
   it('putProviders 会保留后端 error 文案', async () => {
     globalThis.fetch = vi.fn(async () => {
       return {

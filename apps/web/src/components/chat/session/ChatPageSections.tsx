@@ -1493,7 +1493,7 @@ export function WelcomeScreen({
             marginTop: 4,
           }}
         >
-          选择一个对话模式，然后在下方输入框开始对话
+          选择模式，然后开始对话
         </div>
       </div>
 

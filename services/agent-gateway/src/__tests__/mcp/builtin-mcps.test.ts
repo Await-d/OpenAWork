@@ -3,13 +3,13 @@
  * 合并语义。覆盖：
  *
  *  1. **默认产出**：在零环境变量下输出 websearch + grep_app 远程 MCP，
- *     以及 codegraph / git_bash / lsp 三条内置虚拟 MCP。
+ *     以及 codegraph / git_bash / lsp / omo 四条内置虚拟 MCP。
  *  2. **EXA_API_KEY 注入**：`process.env.EXA_API_KEY` 存在时，会被
  *     当作 `x-api-key` header 写到 websearch；不存在时不挂任何
  *     header（确保不污染匿名访问）。
- *  3. **mergeBuiltinAndConfiguredMcps**：用户配置同 id 完全覆盖
- *     内置项；不同 id 的用户配置追加在内置项之后。空数组等价于
- *     "用户没配过"，应得到全部内置项。
+ *  3. **mergeBuiltinAndConfiguredMcps**：system builtin 允许同 id 用户
+ *     配置完整覆盖；protected virtual / adapter builtin 只接受管理字段。
+ *     不同 id 的用户配置追加在内置项之后。空数组等价于"用户没配过"。
  *
  * 这些断言覆盖了运行时每次 `loadConfiguredMcpServersForUser` 调用
  * 内置 MCP 是否真的出现的关键路径。
@@ -22,12 +22,21 @@ import {
   buildBuiltinMcpServers,
   mergeBuiltinAndConfiguredMcps,
 } from '../../mcp/builtin-mcps.js';
+import {
+  isVirtualBuiltinMcpId,
+  listVirtualMcpTools,
+  VIRTUAL_BUILTIN_MCP_IDS,
+} from '../../mcp/builtin-virtual-mcps.js';
+import {
+  getVirtualMcpProvider,
+  listVirtualMcpProviders,
+} from '../../mcp/virtual-mcp-provider-registry.js';
 import type { ConfiguredMCPServer } from '../../mcp/mcp-runtime.js';
 
 describe('buildBuiltinMcpServers', () => {
   it('exposes remote and virtual builtin MCP servers by default', () => {
     const out = buildBuiltinMcpServers({ env: {} });
-    expect(out).toHaveLength(5);
+    expect(out).toHaveLength(6);
 
     const websearch = out.find((server) => server.id === 'websearch');
     expect(websearch).toMatchObject({
@@ -75,6 +84,14 @@ describe('buildBuiltinMcpServers', () => {
       builtin: true,
       enabled: true,
     });
+    expect(out.find((server) => server.id === 'omo')).toMatchObject({
+      id: 'omo',
+      transport: 'stdio',
+      command: 'openawork-virtual-omo',
+      required: false,
+      builtin: true,
+      enabled: true,
+    });
   });
 
   it('injects EXA_API_KEY header when present in env', () => {
@@ -92,6 +109,22 @@ describe('buildBuiltinMcpServers', () => {
   it('keeps BUILTIN_MCP_IDS in sync with the actual server list', () => {
     const ids = buildBuiltinMcpServers({ env: {} }).map((server) => server.id);
     expect(new Set(ids)).toEqual(new Set(BUILTIN_MCP_IDS));
+  });
+});
+
+describe('virtual builtin MCP provider registry', () => {
+  it('keeps provider ids, virtual id checks, and tool listing on one source of truth', () => {
+    const providerIds = listVirtualMcpProviders().map((provider) => provider.id);
+
+    expect(providerIds).toEqual([...VIRTUAL_BUILTIN_MCP_IDS]);
+    for (const providerId of providerIds) {
+      const provider = getVirtualMcpProvider(providerId);
+      expect(provider).toBeDefined();
+      expect(isVirtualBuiltinMcpId(providerId)).toBe(true);
+      expect(provider?.listTools()).toEqual(listVirtualMcpTools(providerId));
+    }
+    expect(getVirtualMcpProvider('websearch')).toBeUndefined();
+    expect(isVirtualBuiltinMcpId('websearch')).toBe(false);
   });
 });
 
@@ -147,6 +180,7 @@ describe('mergeBuiltinAndConfiguredMcps', () => {
         'codegraph',
         'git_bash',
         'lsp',
+        'omo',
         'my-custom-mcp',
       ]),
     );

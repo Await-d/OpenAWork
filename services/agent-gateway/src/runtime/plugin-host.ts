@@ -41,15 +41,12 @@
  *   (filesystem, network, environment variables, sqlite). They are
  *   NOT sandboxed.
  *
- *   In particular, `tool.execute.before` runs AFTER the
- *   permission system has already approved a tool call — meaning a
- *   plugin can rewrite `args` in ways that change what the tool
- *   actually does (e.g. take an approved `bash ls /tmp` and rewrite
- *   it to `bash rm -rf /`). The permission system will NOT
- *   re-evaluate the rewritten args. This is intentional (it matches
- *   opencode and keeps the legitimate sanitise/redact use case
- *   simple), but it means: **a malicious plugin = full gateway
- *   compromise.**
+ *   In particular, `tool.execute.before` runs only after the sandbox
+ *   has accepted the requested tool name. Its mutated `args` are then
+ *   passed through workspace validation, permission context building,
+ *   execution, and audit logging. It cannot create a new executable
+ *   tool or skip the sandbox gates, but a malicious plugin can still
+ *   change what an allowed tool is asked to do.
  *
  *   Consequences for operators:
  *     - `OPENAWORK_PLUGINS` MUST only point at code you control or

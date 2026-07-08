@@ -6,6 +6,7 @@ import { MCPServerConfig, MCPServerList } from '@openAwork/shared-ui';
 import { useAuthStore } from '../../../stores/auth/auth.js';
 import { SkillsPluginPanel } from './skills-plugin-panel.js';
 import { WebsearchSection } from '../connection/websearch-section.js';
+import { resolvePersistableMcpServerSource } from '../connection/mcp-server-source-utils.js';
 import { useSettingsWebsearch } from '../connection/use-settings-websearch.js';
 import { useMcpServers } from '../connection/use-mcp-servers.js';
 import { SS, ST, UV } from '../shared/settings-section-styles.js';
@@ -90,12 +91,6 @@ const BADGE_ENABLED: CSSProperties = {
   background: 'color-mix(in oklch, var(--accent) 12%, transparent)',
   borderRadius: 6,
   padding: '2px 8px',
-};
-
-const BADGE_DISABLED: CSSProperties = {
-  ...BADGE_ENABLED,
-  color: 'var(--fg-muted)',
-  background: 'color-mix(in oklch, var(--fg-muted) 10%, transparent)',
 };
 
 const PARAM_CHIP: CSSProperties = {
@@ -788,8 +783,8 @@ export function PluginsTabContent({
                 MCP 服务器
               </div>
               <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginTop: 2 }}>
-                系统内置 websearch、grep_app、codegraph、git_bash、lsp；也可以接入自定义 SSE / stdio
-                MCP，并对同 id 内置项做禁用或覆盖。
+                系统内置 websearch、grep_app、codegraph、git_bash、lsp、omo；也可以接入自定义 SSE /
+                stdio MCP，并对同 id 内置项做禁用或覆盖。
               </div>
             </div>
             <section style={{ ...SS, marginBottom: 0, padding: '10px 12px', gap: '0.5rem' }}>
@@ -806,7 +801,11 @@ export function PluginsTabContent({
                       if (target?.builtin && target.source === 'builtin') {
                         return prev.map((server) =>
                           server.id === id
-                            ? { ...server, enabled: false, source: 'user' as const }
+                            ? {
+                                ...server,
+                                enabled: false,
+                                source: resolvePersistableMcpServerSource(server, undefined),
+                              }
                             : server,
                         );
                       }
@@ -819,7 +818,7 @@ export function PluginsTabContent({
                         server.id === id
                           ? {
                               ...entry,
-                              source: server.builtin ? ('user' as const) : (entry.source ?? 'user'),
+                              source: resolvePersistableMcpServerSource(server, entry.source),
                             }
                           : server,
                       ),

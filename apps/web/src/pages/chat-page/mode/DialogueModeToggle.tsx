@@ -1,11 +1,14 @@
 import type { CSSProperties } from 'react';
 import { DIALOGUE_MODE_OPTIONS, type DialogueMode } from './dialogue-mode.js';
+import './DialogueModeToggle.css';
 
-const MODE_ACCENTS: Record<DialogueMode, { bg: string; color: string }> = {
-  clarify: { bg: 'rgba(245, 158, 11, 0.10)', color: 'rgb(245, 158, 11)' },
-  coding: { bg: 'rgba(139, 92, 246, 0.12)', color: 'rgb(167, 139, 250)' },
-  programmer: { bg: 'rgba(16, 185, 129, 0.12)', color: 'rgb(52, 211, 153)' },
-};
+type ModeTone = 'accent' | 'aux' | 'contrast';
+
+const MODE_TONES = {
+  clarify: 'contrast',
+  coding: 'accent',
+  programmer: 'aux',
+} as const satisfies Record<DialogueMode, ModeTone>;
 
 function ModeIcon({ mode }: { mode: DialogueMode }) {
   if (mode === 'clarify') {
@@ -79,48 +82,32 @@ export default function DialogueModeToggle({
 }: DialogueModeToggleProps) {
   return (
     <div
+      className="dialogue-mode-toggle"
       data-testid="dialogue-mode-toggle"
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 1,
-        borderRadius: 8,
-        padding: 2,
-        background: 'var(--bg-overlay)',
-        border: '1px solid var(--border-subtle)',
-        opacity: disabled ? 0.55 : 1,
-        ...style,
-      }}
+      data-disabled={disabled ? 'true' : 'false'}
+      style={style}
     >
-      {DIALOGUE_MODE_OPTIONS.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          aria-pressed={mode === option.value}
-          disabled={disabled}
-          title={option.description}
-          onClick={() => onChange(option.value)}
-          style={{
-            height: 26,
-            padding: '0 9px',
-            fontSize: 11,
-            fontWeight: mode === option.value ? 600 : 500,
-            border: 'none',
-            borderRadius: 6,
-            cursor: disabled ? 'not-allowed' : 'pointer',
-            background: mode === option.value ? MODE_ACCENTS[option.value].bg : 'transparent',
-            color: mode === option.value ? MODE_ACCENTS[option.value].color : 'var(--fg-muted)',
-            transition: 'background 0.15s ease, color 0.15s ease',
-            flexShrink: 0,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 5,
-          }}
-        >
-          <ModeIcon mode={option.value} />
-          {option.label}
-        </button>
-      ))}
+      {DIALOGUE_MODE_OPTIONS.map((option) => {
+        const active = mode === option.value;
+
+        return (
+          <button
+            key={option.value}
+            className="dialogue-mode-toggle__button"
+            type="button"
+            aria-label={option.label}
+            aria-pressed={active}
+            data-active={active ? 'true' : 'false'}
+            data-tone={MODE_TONES[option.value]}
+            disabled={disabled}
+            title={option.description}
+            onClick={() => onChange(option.value)}
+          >
+            <ModeIcon mode={option.value} />
+            {active ? <span className="dialogue-mode-toggle__label">{option.label}</span> : null}
+          </button>
+        );
+      })}
     </div>
   );
 }

@@ -1,0 +1,44 @@
+
+ RUN  v2.1.9 /home/await/project/OpenAWork/apps/web
+
+ ✓ src/pages/team/runtime/shell/controls/ConversationArea.test.tsx (10 tests) 358ms
+ ✓ src/components/layout/FusionSidebarPeek.test.tsx (3 tests) 750ms
+   ✓ FusionSidebarPeek > 按深度优先展示会话预览，并限制最多 8 条 643ms
+ ✓ src/pages/team/runtime/tabs/governance/team-runtime-settings-panel.test.tsx (1 test) 562ms
+   ✓ TeamRuntimeSettingsPanel > 确认后恢复角色 SOUL 默认值并回填编辑器 560ms
+ ✓ src/pages/chat-page/panels/FusionSessionSidePanel.test.tsx (8 tests) 717ms
+   ✓ FusionSessionSidePanel > 在审查 tab 展示真实变更数量与 diff 内容 321ms
+ ✓ src/components/layout/TitlebarTabStrip.test.tsx (6 tests) 1006ms
+   ✓ TitlebarTabStrip > 在 Team workspace 路由下展示 Team 层级摘要并隐藏 Chat 会话标签 313ms
+ ✓ src/pages/team/runtime/tabs/overview/HealthView.test.tsx (9 tests) 1290ms
+   ✓ HealthView > 可恢复失败会展示行级重试按钮，并按 handoffId 定向触发 remediation 418ms
+ ✓ src/pages/team/runtime/shell/sidebar/TeamSidebarWithFileTree.test.tsx (11 tests) 1998ms
+   ✓ TeamSidebarWithFileTree > 文件节点菜单暴露真实引用入口，但不会对文件暴露目录建会话入口 473ms
+   ✓ TeamSidebarWithFileTree > 文件节点右键菜单会走真实新建/重命名/删除文件链路 489ms
+ ✓ src/pages/team/runtime/tabs/conversation/LayerFlowView.test.tsx (15 tests) 2226ms
+   ✓ LayerFlowView > handoff 缺少 toSessionId 且 sessionId 是上游时，层级节点打开目标子会话 362ms
+stderr | src/pages/team/views/TeamPageV2.test.tsx > TeamPageV2 > 取消 handoff 失败后会提示错误，不刷新快照
+[TeamPageV2] cancel handoff failed: handoff-running 当前状态：completed
+
+ ✓ src/pages/team/views/TeamFusionSidePanel.test.tsx (2 tests) 319ms
+ ✓ src/pages/team/views/TeamPageV2.test.tsx (25 tests) 3021ms
+   ✓ TeamPageV2 > 点击团队侧栏会话后切回对话视图并打开对应会话 526ms
+   ✓ TeamPageV2 > 点击顶部暂停后会经确认弹层调用真实 pause-all 接口 337ms
+   ✓ TeamPageV2 > 工作区切换后旧会话失效时会回退到新的默认会话 342ms
+ ✓ src/pages/team/runtime/tabs/conversation/LayerFlowPipeline.test.tsx (1 test) 362ms
+   ✓ LayerFlowPipeline > 过滤后的可见节点使用原始层级索引匹配边点击目标 360ms
+ ✓ src/components/layout/ClassicWorkbenchTitlebar.test.tsx (1 test) 394ms
+   ✓ ClassicWorkbenchTitlebar > classic 布局下提供 Chat/Team 模式切换与一键 fusion 入口，但不渲染 Chat 会话标签 393ms
+ ✓ src/components/layout/SidebarRailV2.test.tsx (4 tests) 830ms
+   ✓ SidebarRailV2 > 项目头像是可聚焦按钮，并支持 hover/focus 触发 peek 541ms
+ ✓ src/components/layout/FusionSidebarPanel.integration.test.tsx (3 tests) 1165ms
+   ✓ FusionSidebar 展开 Panel > 点击新建会话会回到 Chat 首页 729ms
+   ✓ FusionSidebar 展开 Panel > 工作区头像切换后 Panel 只展示当前工作区会话 330ms
+ ✓ src/components/layout/FusionSidebarPeek.integration.test.tsx (3 tests) 1264ms
+   ✓ FusionSidebar 折叠预览 > 折叠态 hover 工作区头像时展示对应工作区的会话预览 893ms
+
+ Test Files  15 passed (15)
+      Tests  102 passed (102)
+   Start at  11:29:20
+   Duration  6.90s (transform 4.89s, setup 0ms, collect 12.47s, tests 16.26s, environment 18.86s, prepare 1.84s)
+

@@ -168,10 +168,6 @@ vi.mock('../../../../../components/layout/file-tree/FileTreeContextMenu.js', () 
   ),
 }));
 
-vi.mock('./TeamSessionListSidebar.js', () => ({
-  TeamSessionListSidebar: () => <div data-testid="team-session-list-sidebar" />,
-}));
-
 vi.mock('./use-team-sidebar-file-tree-state.js', () => ({
   useTeamSidebarFileTreeState: () => ({
     applyCreatedEntry: state.applyCreatedEntry,
@@ -249,6 +245,18 @@ function renderSidebarWithProps(
   );
 }
 
+function getDisconnectedGatewayToolbarButtons(): readonly [HTMLElement, HTMLElement, HTMLElement] {
+  const buttons = screen.getAllByTitle('当前未连接到网关');
+  expect(buttons).toHaveLength(3);
+  const [createFileButton, createFolderButton, refreshButton] = buttons;
+
+  if (!createFileButton || !createFolderButton || !refreshButton) {
+    throw new Error('Expected disconnected file-tree toolbar buttons');
+  }
+
+  return [createFileButton, createFolderButton, refreshButton];
+}
+
 beforeEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -292,7 +300,6 @@ afterEach(() => {
 describe('TeamSidebarWithFileTree', () => {
   it('文件节点菜单暴露真实引用入口，但不会对文件暴露目录建会话入口', () => {
     renderSidebar();
-    fireEvent.click(screen.getByRole('button', { name: '文件树' }));
 
     fireEvent.contextMenu(screen.getByRole('button', { name: '文件树节点' }));
 
@@ -312,7 +319,6 @@ describe('TeamSidebarWithFileTree', () => {
     } as MockContextTarget;
 
     renderSidebar();
-    fireEvent.click(screen.getByRole('button', { name: '文件树' }));
     fireEvent.contextMenu(screen.getByRole('button', { name: '文件树节点' }));
 
     fireEvent.click(screen.getByRole('button', { name: '以此目录新建会话' }));
@@ -340,7 +346,6 @@ describe('TeamSidebarWithFileTree', () => {
     expect(newSessionButton.hasAttribute('disabled')).toBe(true);
     expect(newSessionButton.getAttribute('title')).toBe('当前工作区不可写');
 
-    fireEvent.click(screen.getByRole('button', { name: '文件树' }));
     fireEvent.contextMenu(screen.getByRole('button', { name: '文件树节点' }));
 
     const createFromDirectoryButton = screen.getByRole('button', { name: '以此目录新建会话' });
@@ -356,24 +361,20 @@ describe('TeamSidebarWithFileTree', () => {
     authState.accessToken = null;
 
     renderSidebar();
-    fireEvent.click(screen.getByRole('button', { name: '文件树' }));
 
-    const buttons = screen.getAllByRole('button');
-    const refreshButton = buttons.find((button) => button.textContent === '↻');
-    const createFileButton = buttons.find((button) => button.textContent === '+');
-    const createFolderButton = buttons.find((button) => button.textContent === '📁');
+    const [createFileButton, createFolderButton, refreshButton] =
+      getDisconnectedGatewayToolbarButtons();
 
     expect(refreshButton?.hasAttribute('disabled')).toBe(true);
     expect(createFileButton?.hasAttribute('disabled')).toBe(true);
     expect(createFolderButton?.hasAttribute('disabled')).toBe(true);
 
-    fireEvent.click(refreshButton!);
+    fireEvent.click(refreshButton);
     expect(state.handleRefresh).not.toHaveBeenCalled();
   });
 
   it('引用到对话会分发真实 composer reference 事件并提示成功', () => {
     renderSidebar();
-    fireEvent.click(screen.getByRole('button', { name: '文件树' }));
     fireEvent.contextMenu(screen.getByRole('button', { name: '文件树节点' }));
 
     fireEvent.click(screen.getByRole('button', { name: '引用到对话' }));
@@ -387,7 +388,6 @@ describe('TeamSidebarWithFileTree', () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     renderSidebar();
-    fireEvent.click(screen.getByRole('button', { name: '文件树' }));
     fireEvent.contextMenu(screen.getByRole('button', { name: '文件树节点' }));
 
     promptSpy.mockReturnValueOnce('feature.ts');
@@ -451,7 +451,6 @@ describe('TeamSidebarWithFileTree', () => {
     const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('nested-dir');
 
     renderSidebar();
-    fireEvent.click(screen.getByRole('button', { name: '文件树' }));
     fireEvent.contextMenu(screen.getByRole('button', { name: '文件树节点' }));
     fireEvent.click(screen.getByRole('button', { name: '新建文件夹' }));
 
@@ -478,7 +477,6 @@ describe('TeamSidebarWithFileTree', () => {
     const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('root.ts');
 
     renderSidebar();
-    fireEvent.click(screen.getByRole('button', { name: '文件树' }));
 
     expect(screen.getByText('目录为空')).toBeTruthy();
     fireEvent.click(screen.getByTitle('在根目录新建文件'));
@@ -500,23 +498,20 @@ describe('TeamSidebarWithFileTree', () => {
     expect(promptSpy).toHaveBeenCalled();
   });
 
-  it('未连接网关时会禁用文件树工具条的所有网关操作入口', () => {
+  it('未连接网关时不会触发文件树工具条的网关操作', () => {
     authState.accessToken = null;
 
     renderSidebar();
-    fireEvent.click(screen.getByRole('button', { name: '文件树' }));
 
-    const createFileBtn = screen.getByText('+').closest('button');
-    const createFolderBtn = screen.getByText('📁').closest('button');
-    const refreshBtn = screen.getByText('↻').closest('button');
+    const [createFileBtn, createFolderBtn, refreshBtn] = getDisconnectedGatewayToolbarButtons();
 
     expect(createFileBtn?.hasAttribute('disabled')).toBe(true);
     expect(createFolderBtn?.hasAttribute('disabled')).toBe(true);
     expect(refreshBtn?.hasAttribute('disabled')).toBe(true);
 
-    fireEvent.click(createFileBtn!);
-    fireEvent.click(createFolderBtn!);
-    fireEvent.click(refreshBtn!);
+    fireEvent.click(createFileBtn);
+    fireEvent.click(createFolderBtn);
+    fireEvent.click(refreshBtn);
 
     expect(workspaceClientMocks.createFile).not.toHaveBeenCalled();
     expect(workspaceClientMocks.createDirectory).not.toHaveBeenCalled();
@@ -525,7 +520,6 @@ describe('TeamSidebarWithFileTree', () => {
 
   it('复制完整路径后会显示成功反馈', async () => {
     renderSidebar();
-    fireEvent.click(screen.getByRole('button', { name: '文件树' }));
     fireEvent.contextMenu(screen.getByRole('button', { name: '文件树节点' }));
 
     fireEvent.click(screen.getByRole('button', { name: '复制完整路径' }));
@@ -538,7 +532,6 @@ describe('TeamSidebarWithFileTree', () => {
 
   it('复制相对路径会优先复制 workspace 内相对路径', async () => {
     renderSidebar();
-    fireEvent.click(screen.getByRole('button', { name: '文件树' }));
     fireEvent.contextMenu(screen.getByRole('button', { name: '文件树节点' }));
 
     fireEvent.click(screen.getByRole('button', { name: '复制相对路径' }));

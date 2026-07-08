@@ -119,6 +119,14 @@ function basename(path: string | null): string {
   return parts.at(-1) ?? 'OpenAWork';
 }
 
+function isCompactFusionSidebarViewport(): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return false;
+  }
+
+  return window.matchMedia('(max-width: 640px)').matches;
+}
+
 function TeamWorkspaceGroupItem({
   group,
   activeTeamSessionId,
@@ -314,6 +322,7 @@ export function FusionSidebar({
 
   const [showWorkspacePicker, setShowWorkspacePicker] = useState(false);
   const [peekWorkspacePath, setPeekWorkspacePath] = useState<string | null>(null);
+  const [compactViewport, setCompactViewport] = useState(isCompactFusionSidebarViewport);
   const peekCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const workspacePickerDataSource = useState(() =>
     buildWorkspacePickerDataSource({
@@ -371,17 +380,24 @@ export function FusionSidebar({
   const isTeamRoute = location.pathname.startsWith('/team');
   const storedActiveTeamSessionId = useUIStateStore((s) => s.activeTeamSessionId);
   const activeTeamSessionId = isTeamRoute ? storedActiveTeamSessionId : null;
-  const expanded = leftSidebarOpen;
+  const expanded = leftSidebarOpen && !compactViewport;
   const chatSessionNodes = useMemo(
     () =>
-      groupedSessions.flatMap((group) => {
-        const groupKey = getWorkspaceGroupKey(group.workspacePath);
-        const treeGroup = groupedSessionTrees.find(
-          (tg) => getWorkspaceGroupKey(tg.workspacePath) === groupKey,
-        );
-        return treeGroup?.roots ?? [];
-      }),
-    [groupedSessionTrees, groupedSessions],
+      groupedSessions
+        .filter(
+          (group) =>
+            selectedWorkspacePath === null ||
+            getWorkspaceGroupKey(group.workspacePath) ===
+              getWorkspaceGroupKey(selectedWorkspacePath),
+        )
+        .flatMap((group) => {
+          const groupKey = getWorkspaceGroupKey(group.workspacePath);
+          const treeGroup = groupedSessionTrees.find(
+            (tg) => getWorkspaceGroupKey(tg.workspacePath) === groupKey,
+          );
+          return treeGroup?.roots ?? [];
+        }),
+    [groupedSessionTrees, groupedSessions, selectedWorkspacePath],
   );
   const peekSessionNodes = useMemo(() => {
     const peekGroupKey = getWorkspaceGroupKey(peekWorkspacePath);
@@ -421,14 +437,14 @@ export function FusionSidebar({
   }, []);
   const openProjectPeek = useCallback(
     (path: string) => {
-      if (expanded) {
+      if (expanded || compactViewport) {
         return;
       }
 
       clearPeekCloseTimer();
       setPeekWorkspacePath(path);
     },
-    [clearPeekCloseTimer, expanded],
+    [clearPeekCloseTimer, compactViewport, expanded],
   );
   const scheduleCloseProjectPeek = useCallback(() => {
     clearPeekCloseTimer();
@@ -456,8 +472,34 @@ export function FusionSidebar({
 
   useEffect(() => clearPeekCloseTimer, [clearPeekCloseTimer]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return;
+    }
+
+    const viewportQuery = window.matchMedia('(max-width: 640px)');
+    const updateCompactViewport = () => setCompactViewport(viewportQuery.matches);
+
+    updateCompactViewport();
+    viewportQuery.addEventListener('change', updateCompactViewport);
+
+    return () => {
+      viewportQuery.removeEventListener('change', updateCompactViewport);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (compactViewport) {
+      setPeekWorkspacePath(null);
+    }
+  }, [compactViewport]);
+
   return (
-    <div className="fusion-sidebar" style={CONTAINER_STYLE}>
+    <div
+      className="fusion-sidebar"
+      data-compact-viewport={compactViewport ? 'true' : 'false'}
+      style={CONTAINER_STYLE}
+    >
       <SidebarRailV2
         accessToken={accessToken}
         gatewayUrl={gatewayUrl}

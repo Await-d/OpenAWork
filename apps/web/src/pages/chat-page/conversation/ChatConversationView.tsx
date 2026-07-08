@@ -28,6 +28,7 @@ import type { CommandDescriptor } from '@openAwork/shared';
 import type { UpstreamStreamSummary } from '@openAwork/shared';
 import type { AttachmentItem } from '@openAwork/shared-ui';
 import type { PendingPermissionRequest, PendingQuestionRequest } from '@openAwork/web-client';
+import './ChatConversationView.css';
 import { ChatMessageGroupList } from '../../../components/chat/message/chat-message-group-list.js';
 import type {
   ChatRenderEntry,
@@ -211,6 +212,8 @@ export interface ChatConversationViewProps {
   editorMode: boolean;
   /** 紧凑模式（team 嵌入时用）：减少顶部/侧边 padding，充分利用空间。 */
   compact?: boolean;
+  contentMaxWidth?: number | 'fluid';
+  centerContent?: boolean;
 
   // ─── todo bar ───────────────────────────────────────────────────────
   sessionTodos: SessionTodoItem[];
@@ -437,6 +440,8 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
     onScrollToBottom,
     editorMode,
     compact,
+    contentMaxWidth,
+    centerContent,
 
     sessionTodos,
     rightOpen,
@@ -540,11 +545,19 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
     minHeight: 0,
     scrollPaddingBottom: CHAT_SCROLL_BOTTOM_SPACER_HEIGHT,
   };
+  const resolvedContentMaxWidth =
+    contentMaxWidth === 'fluid'
+      ? '100%'
+      : (contentMaxWidth ?? (compact ? '100%' : editorMode ? 720 : 1024));
+  const shouldCenterContent = centerContent ?? !compact;
+  const scrollRegionClassName = showWelcome
+    ? 'chat-conversation-view__scroll chat-conversation-view__scroll--welcome'
+    : 'chat-conversation-view__scroll';
 
   const contentColumnStyle: CSSProperties = {
     width: '100%',
-    maxWidth: compact ? '100%' : editorMode ? 720 : 1024,
-    margin: compact ? 0 : '0 auto',
+    maxWidth: resolvedContentMaxWidth,
+    margin: shouldCenterContent ? '0 auto' : 0,
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'stretch',
@@ -603,6 +616,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
           <div
             ref={scrollRegionRef}
             onScroll={onScroll}
+            className={scrollRegionClassName}
             data-testid="chat-scroll-region"
             style={scrollRegionStyle}
           >

@@ -38,6 +38,7 @@ import {
   buildSettingsBuiltinMcpServers,
   mcpServersBodySchema,
   mcpStatusQuerySchema,
+  sanitizePersistedMcpServers,
 } from '../mcp/mcp-settings-schemas.js';
 import {
   readUpstreamRetrySettings,
@@ -1230,7 +1231,8 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       const parseStep = child('parse-json');
       if (row?.value) {
         try {
-          const servers = JSON.parse(row.value) as unknown[];
+          const parsed: unknown = JSON.parse(row.value);
+          const servers = sanitizePersistedMcpServers(parsed);
           parseStep.succeed(undefined, { servers: Array.isArray(servers) ? servers.length : 0 });
           step.succeed(undefined, { servers: Array.isArray(servers) ? servers.length : 0 });
           return reply.send({ servers, builtinServers });

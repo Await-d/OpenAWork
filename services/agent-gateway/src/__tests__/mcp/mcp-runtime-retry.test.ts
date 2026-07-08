@@ -104,6 +104,7 @@ import {
   getMcpPoolKey,
   isMcpServerConnectedForUser,
   listMcpToolsForUser,
+  loadConfiguredMcpServersForUser,
   retryMcpConnectionForUser,
   type ConfiguredMCPServer,
 } from '../../mcp/mcp-runtime.js';
@@ -129,11 +130,17 @@ function setUserMcpServers(servers: ConfiguredMCPServer[]): void {
     command: server.command,
     args: server.args,
     builtin: server.builtin,
+    builtinKind: server.builtinKind,
     enabled: server.enabled,
     headers: server.headers,
     disabledTools: server.disabledTools,
+    source: server.source,
   }));
   dbMock.rows.set(dbMock.keyOf(USER_ID, 'mcp_servers'), JSON.stringify(userServers));
+}
+
+function setRawUserMcpServers(servers: readonly unknown[]): void {
+  dbMock.rows.set(dbMock.keyOf(USER_ID, 'mcp_servers'), JSON.stringify(servers));
 }
 
 const STDIO_BASE: ConfiguredMCPServer = {
@@ -259,7 +266,6 @@ describe('retryMcpConnectionForUser', () => {
         id: 'codegraph',
         name: 'codegraph',
         transport: 'stdio',
-        command: 'openawork-virtual-codegraph',
         enabled: true,
         builtin: true,
         disabledTools: ['codegraph_status'],
@@ -278,29 +284,107 @@ describe('retryMcpConnectionForUser', () => {
     expect(poolMock.withOperationRetryMock).not.toHaveBeenCalled();
   });
 
-  it('honors user overrides of virtual builtin ids instead of forcing the virtual bridge', async () => {
+  it('merges virtual builtin management patches onto the runtime virtual builtin', async () => {
     setUserMcpServers([
       {
         id: 'codegraph',
-        name: 'custom-codegraph',
+        name: 'codegraph',
+        transport: 'stdio',
+        enabled: true,
+        builtin: true,
+        source: 'system',
+        disabledTools: ['codegraph_status'],
+      },
+    ]);
+
+    const catalogs = await listMcpToolsForUser(USER_ID, { serverId: 'codegraph' });
+    const toolNames = catalogs[0]?.tools.map((tool) => tool.name) ?? [];
+
+    expect(catalogs[0]?.status).toBe('connected');
+    expect(toolNames).not.toContain('codegraph_status');
+    expect(toolNames).toContain('codegraph_search');
+    expect(poolMock.withOperationRetryMock).not.toHaveBeenCalled();
+  });
+
+  it('normalizes stale persisted protected builtin rows before runtime use', async () => {
+    setRawUserMcpServers([
+      {
+        id: 'codegraph',
+        name: 'stale-codegraph',
+        type: 'stdio',
+        source: 'user',
+        command: 'malicious-fake-command',
+        url: 'https://fake.invalid/codegraph',
+        enabled: false,
+        disabledTools: ['codegraph_status', 'codegraph_status'],
+      },
+      {
+        id: 'omo',
+        name: 'stale-omo',
+        transport: 'stdio',
+        command: 'malicious-omo-command',
+        url: 'https://fake.invalid/omo',
+        enabled: true,
+      },
+      {
+        id: 'local-user-stdio',
+        name: 'Local user stdio',
+        transport: 'stdio',
+        source: 'user',
+        command: 'node',
+        args: ['server.js'],
+        enabled: true,
+      },
+      {
+        id: 'remote-user-sse',
+        name: 'Remote user sse',
         transport: 'sse',
-        url: 'https://example.test/codegraph-mcp',
+        source: 'user',
+        url: 'https://example.com/mcp',
         enabled: true,
       },
     ]);
-    poolMock.withOperationRetryMock.mockImplementation(async (_userId, _poolKey, _ref, op) => {
-      const fakeAdapter = {
-        listTools: vi.fn(async () => [{ name: 'remote_codegraph_search' }]),
-      };
-      return op(fakeAdapter as unknown as never, 'codegraph');
+
+    const servers = loadConfiguredMcpServersForUser(USER_ID);
+    const codegraph = servers.find((server) => server.id === 'codegraph');
+    const omo = servers.find((server) => server.id === 'omo');
+    const localUser = servers.find((server) => server.id === 'local-user-stdio');
+    const remoteUser = servers.find((server) => server.id === 'remote-user-sse');
+
+    expect(codegraph).toMatchObject({
+      id: 'codegraph',
+      name: 'codegraph',
+      transport: 'stdio',
+      builtin: true,
+      builtinKind: 'virtual',
+      source: 'user',
+      enabled: false,
+      disabledTools: ['codegraph_status'],
     });
-
-    const result = await retryMcpConnectionForUser(USER_ID, 'codegraph');
-
-    expect(result.status).toBe('connected');
-    expect(result.toolCount).toBe(1);
-    expect(poolMock.disconnectUserConnectionMock).toHaveBeenCalledTimes(1);
-    expect(poolMock.withOperationRetryMock).toHaveBeenCalledTimes(1);
+    expect(codegraph?.command).toBeUndefined();
+    expect(codegraph?.url).toBeUndefined();
+    expect(omo).toMatchObject({
+      id: 'omo',
+      name: 'omo',
+      transport: 'stdio',
+      builtin: true,
+      builtinKind: 'adapter',
+      source: 'system',
+      enabled: true,
+    });
+    expect(omo?.command).toBeUndefined();
+    expect(omo?.url).toBeUndefined();
+    expect(localUser).toMatchObject({
+      id: 'local-user-stdio',
+      command: 'node',
+      args: ['server.js'],
+      source: 'user',
+    });
+    expect(remoteUser).toMatchObject({
+      id: 'remote-user-sse',
+      url: 'https://example.com/mcp',
+      source: 'user',
+    });
   });
 
   it('writes the tool catalog snapshot on success and clears it on failure', async () => {

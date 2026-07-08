@@ -5,7 +5,11 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
-import type { MCPServerEntry, MCPServerStatus } from '@openAwork/shared-ui';
+import {
+  toPersistedMcpServers,
+  type MCPServerEntry,
+  type MCPServerStatus,
+} from '@openAwork/shared-ui';
 import { createSettingsClient } from '@openAwork/web-client';
 
 interface UseMcpServersArgs {
@@ -75,7 +79,7 @@ function mergeUserAndBuiltinServers(payload: McpServersPayload): MCPServerEntry[
     ...userServers.map((server) => ({
       ...server,
       ...(builtinIds.has(server.id) ? { builtin: true } : {}),
-      source: 'user' as const,
+      source: server.source === 'system' ? ('system' as const) : ('user' as const),
     })),
     ...builtinServers
       .filter((server) => !userIds.has(server.id))
@@ -83,13 +87,8 @@ function mergeUserAndBuiltinServers(payload: McpServersPayload): MCPServerEntry[
   ];
 }
 
-function stripDisplayFields(server: MCPServerEntry): MCPServerEntry {
-  const { source: _source, ...persisted } = server;
-  return persisted;
-}
-
 function serversForPersistence(servers: MCPServerEntry[]): MCPServerEntry[] {
-  return servers.filter((server) => server.source !== 'builtin').map(stripDisplayFields);
+  return toPersistedMcpServers(servers);
 }
 
 export function useMcpServers({

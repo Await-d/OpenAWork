@@ -157,7 +157,19 @@ export function TeamRunStateBanner({
         {visual.title}
       </strong>
       <span
-        style={{ color: 'var(--fg-muted)', minWidth: 0, lineHeight: 1.4, fontSize: 11, flex: 1 }}
+        style={{
+          color: 'var(--fg-muted)',
+          minWidth: 0,
+          lineHeight: 1.4,
+          fontSize: 11,
+          flex: 1,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          wordBreak: 'keep-all',
+          overflowWrap: 'normal',
+        }}
+        title={detail}
       >
         {detail}
       </span>

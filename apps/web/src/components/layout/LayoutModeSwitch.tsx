@@ -1,15 +1,6 @@
-import type { WorkbenchLayoutMode } from '../../stores/ui/uiState.js';
 import { useUIStateStore } from '../../stores/ui/uiState.js';
+import { LAYOUT_MODE_OPTIONS } from './layout-mode-options.js';
 import './LayoutModeSwitch.css';
-
-const LAYOUT_MODE_OPTIONS = [
-  { mode: 'classic', label: '经典', title: '切换到旧版经典布局' },
-  { mode: 'fusion', label: '融合', title: '切换到新版融合布局' },
-] as const satisfies readonly {
-  readonly mode: WorkbenchLayoutMode;
-  readonly label: string;
-  readonly title: string;
-}[];
 
 export interface LayoutModeSwitchProps {
   readonly variant?: 'inline' | 'floating';

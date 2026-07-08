@@ -402,7 +402,8 @@ describe('HealthView', () => {
             errorMessage: 'clientRequestId Required',
             apiKey: 'sk-context-secret',
           },
-          message: 'executor 层执行失败：clientRequestId Required Authorization: Bearer token-secret',
+          message:
+            'executor 层执行失败：clientRequestId Required Authorization: Bearer token-secret',
           severity: 'error',
           timestamp: Date.parse('2026-06-04T15:59:30.000Z'),
         },
@@ -413,7 +414,9 @@ describe('HealthView', () => {
 
     expect(screen.getByText('handoff-runner-failed')).toBeTruthy();
     expect(
-      screen.getByText('executor 层执行失败：clientRequestId Required Authorization: Bearer [已隐藏]'),
+      screen.getByText(
+        'executor 层执行失败：clientRequestId Required Authorization: Bearer [已隐藏]',
+      ),
     ).toBeTruthy();
     expect(screen.getByText('handoffId: handoff-blocked-1')).toBeTruthy();
     expect(screen.getByText('toRoleLayer: executor')).toBeTruthy();
@@ -422,6 +425,56 @@ describe('HealthView', () => {
     expect(screen.getByText('apiKey: [已隐藏]')).toBeTruthy();
     expect(screen.queryByText(/token-secret/)).toBeNull();
     expect(screen.queryByText(/sk-context-secret/)).toBeNull();
+  });
+
+  it('待收口评审允许同一 handoff 出现多条记录', () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    mockRuntimeReferenceData.diagnostics = {
+      ...createDefaultDiagnostics(),
+      qualityReview: {
+        escalateToUserCount: 0,
+        pendingCount: 2,
+        pendingHandoffs: [
+          {
+            handoffId: 'handoff-dependency-blocked-1',
+            sessionId: 'session-quality-review-retry-1',
+            lastAttemptAtMs: Date.parse('2026-06-04T15:58:00.000Z'),
+            lastError: '第一次评审执行失败',
+            nextAttemptAtMs: Date.parse('2026-06-04T16:02:00.000Z'),
+            readyNow: false,
+          },
+          {
+            handoffId: 'handoff-dependency-blocked-1',
+            sessionId: 'session-quality-review-retry-2',
+            lastAttemptAtMs: Date.parse('2026-06-04T15:59:00.000Z'),
+            lastError: '第二次评审执行失败',
+            nextAttemptAtMs: Date.parse('2026-06-04T16:03:00.000Z'),
+            readyNow: false,
+          },
+        ],
+        redispatchCount: 1,
+        retryableErrorCount: 2,
+        returnToCCount: 0,
+      },
+    };
+
+    try {
+      render(<HealthView />);
+
+      expect(screen.getByText('最近错误：第一次评审执行失败')).toBeTruthy();
+      expect(screen.getByText('最近错误：第二次评审执行失败')).toBeTruthy();
+      expect(
+        consoleErrorSpy.mock.calls.some((call) =>
+          call.some(
+            (part) =>
+              typeof part === 'string' &&
+              part.includes('Encountered two children with the same key'),
+          ),
+        ),
+      ).toBe(false);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
   });
 
   it('选中共享会话时展示共享健康视图，而不是 runtime handoff 下钻', () => {

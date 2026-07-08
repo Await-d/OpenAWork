@@ -151,6 +151,17 @@ function formatAttemptTime(atMs: number | null): string {
   return new Date(atMs).toLocaleTimeString();
 }
 
+function qualityReviewPendingKey(
+  pending: TeamRuntimeDiagnostics['qualityReview']['pendingHandoffs'][number],
+): string {
+  return [
+    pending.handoffId,
+    pending.sessionId ?? 'sessionless',
+    pending.lastAttemptAtMs ?? 'no-last-attempt',
+    pending.nextAttemptAtMs ?? 'no-next-attempt',
+  ].join(':');
+}
+
 function formatIncidentContextValue(
   value: boolean | number | string | null | undefined,
 ): string | null {
@@ -595,7 +606,7 @@ export function HealthView({
                   </div>
                   {qualityReview.pendingHandoffs.map((pending) => (
                     <div
-                      key={pending.handoffId}
+                      key={qualityReviewPendingKey(pending)}
                       style={{
                         ...ROW_STYLE,
                         paddingLeft: 16,

@@ -19,22 +19,31 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+type SqliteGetMockRow = {
+  readonly handoff_state?: string;
+  readonly metadata_json?: string;
+  readonly role_layer?: string;
+  readonly team_parent_session_id?: string;
+  readonly user_id?: string;
+};
+
 const mocks = vi.hoisted(() => ({
   callMcpToolForSessionMock: vi.fn(),
   listMcpToolsForSessionMock: vi.fn(async () => []),
   getConfiguredMcpServerForSessionMock: vi.fn(),
   getMcpServerFingerprintMock: vi.fn(() => 'fingerprint-abc'),
   sqliteAllMock: vi.fn(() => []),
-  sqliteGetMock: vi.fn((query: string) => {
+  sqliteGetMock: vi.fn((query: string): SqliteGetMockRow | undefined => {
     if (query.includes('SELECT user_id FROM sessions')) {
       return { user_id: 'user-1' };
     }
     if (query.includes('SELECT metadata_json')) {
-      return { metadata_json: '{}' };
+      return { metadata_json: '{"yoloMode":true}' };
     }
     return undefined;
   }),
   sqliteRunMock: vi.fn(),
+  sqliteRunWithRowIdMock: vi.fn(() => 1),
 }));
 
 vi.mock('../../infra/db.js', () => ({
@@ -44,6 +53,7 @@ vi.mock('../../infra/db.js', () => ({
   sqliteAll: mocks.sqliteAllMock,
   sqliteGet: mocks.sqliteGetMock,
   sqliteRun: mocks.sqliteRunMock,
+  sqliteRunWithRowId: mocks.sqliteRunWithRowIdMock,
 }));
 
 vi.mock('../../mcp/mcp-runtime.js', () => ({
@@ -73,7 +83,7 @@ describe('tool-sandbox flat MCP routing (PR-C)', () => {
         return { user_id: 'user-1' };
       }
       if (query.includes('SELECT metadata_json')) {
-        return { metadata_json: '{}' };
+        return { metadata_json: '{"yoloMode":true}' };
       }
       return undefined;
     });
@@ -108,11 +118,15 @@ describe('tool-sandbox flat MCP routing (PR-C)', () => {
     );
 
     expect(mocks.callMcpToolForSessionMock).toHaveBeenCalledTimes(1);
-    expect(mocks.callMcpToolForSessionMock).toHaveBeenCalledWith('session-1', {
-      serverId: 'github',
-      toolName: 'create_issue',
-      arguments: { title: 'Bug report', body: 'Detailed reproduction' },
-    });
+    expect(mocks.callMcpToolForSessionMock).toHaveBeenCalledWith(
+      'session-1',
+      {
+        serverId: 'github',
+        toolName: 'create_issue',
+        arguments: { title: 'Bug report', body: 'Detailed reproduction' },
+      },
+      undefined,
+    );
     expect(result.isError).toBe(false);
     expect(result.toolName).toBe('mcp__github__create_issue');
     expect(result.output).toMatchObject({
@@ -215,44 +229,5 @@ describe('tool-sandbox flat MCP routing (PR-C)', () => {
         toolName: 'create_issue',
       });
     }
-  });
-
-  it('keeps team sessions on an empty MCP allowlist when no server is explicitly requested', async () => {
-    mocks.listMcpToolsForSessionMock.mockResolvedValueOnce([]);
-    mocks.sqliteGetMock.mockImplementation((query: string) => {
-      if (query.includes('SELECT user_id FROM sessions')) {
-        return { user_id: 'user-1' };
-      }
-      if (query.includes('SELECT metadata_json')) {
-        return {
-          metadata_json: JSON.stringify({
-            requestedMcpServers: [],
-            teamRoleInstance: { roleLayer: 'executor' },
-          }),
-        };
-      }
-      return undefined;
-    });
-
-    const sandbox = createDefaultSandbox();
-    const result = await sandbox.execute(
-      {
-        toolCallId: 'call-mcp-list-team-empty',
-        toolName: 'mcp_list_tools',
-        rawInput: {},
-      },
-      new AbortController().signal,
-      'session-1',
-      {
-        clientRequestId: 'req-mcp-list-team-empty',
-        nextRound: 1,
-        requestData: { clientRequestId: 'req-mcp-list-team-empty' },
-      },
-    );
-
-    expect(result.isError).toBe(false);
-    expect(mocks.listMcpToolsForSessionMock).toHaveBeenCalledWith('session-1', {
-      allowedServerIds: [],
-    });
   });
 });

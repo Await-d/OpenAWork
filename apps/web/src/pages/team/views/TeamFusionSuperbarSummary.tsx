@@ -12,12 +12,27 @@ export function TeamFusionSuperbarSummary({
   footerStats,
 }: TeamFusionSuperbarSummaryProps) {
   const visibleStats = footerStats.slice(0, 3);
+  const leadParts = splitFooterLead(footerLead);
 
   return (
     <section className="team-fusion-superbar-summary" aria-label="团队运行摘要">
       {footerLead ? (
-        <span className="team-fusion-superbar-summary__lead" title={footerLead}>
-          {footerLead}
+        <span
+          className="team-fusion-superbar-summary__lead"
+          aria-label={footerLead}
+          title={footerLead}
+        >
+          {leadParts ? (
+            <>
+              <span className="team-fusion-superbar-summary__lead-prefix">{leadParts.prefix}</span>
+              <span className="team-fusion-superbar-summary__lead-separator" aria-hidden="true">
+                {' / '}
+              </span>
+              <span className="team-fusion-superbar-summary__lead-core">{leadParts.core}</span>
+            </>
+          ) : (
+            footerLead
+          )}
         </span>
       ) : null}
       {visibleStats.map((stat) => (
@@ -37,4 +52,20 @@ export function TeamFusionSuperbarSummary({
       ) : null}
     </section>
   );
+}
+
+function splitFooterLead(footerLead: string) {
+  const separator = ' / ';
+  const separatorIndex = footerLead.indexOf(separator);
+  if (separatorIndex < 0) {
+    return null;
+  }
+
+  const prefix = footerLead.slice(0, separatorIndex).trim();
+  const core = footerLead.slice(separatorIndex + separator.length).trim();
+  if (!prefix || !core) {
+    return null;
+  }
+
+  return { core, prefix };
 }

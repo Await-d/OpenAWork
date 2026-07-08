@@ -94,6 +94,7 @@ import {
   lspSymbolsToolDefinition,
 } from './lsp-tools.js';
 import { parseFlatMcpToolName } from '../mcp/mcp-tool-naming.js';
+import type { McpSessionScope } from '../mcp/mcp-server-authorization.js';
 import { isBuiltinInstructionName } from '../handoff/capability/layer-capabilities.js';
 import { dispatchToolExecuteAfter, dispatchToolExecuteBefore } from '../runtime/plugin-host.js';
 import {
@@ -1276,6 +1277,14 @@ function readSessionMcpScope(sessionId: string): {
   };
 }
 
+function buildSessionMcpExecutionScope(sessionId: string): McpSessionScope | undefined {
+  const mcpScope = readSessionMcpScope(sessionId);
+  if (mcpScope.requestedMcpServers.length > 0 || mcpScope.isTeamSession) {
+    return { allowedServerIds: [...mcpScope.requestedMcpServers] };
+  }
+  return undefined;
+}
+
 function readTaskCategory(metadata: Record<string, unknown>): string | undefined {
   return typeof metadata.taskCategory === 'string' ? metadata.taskCategory : undefined;
 }
@@ -1860,15 +1869,17 @@ function buildPermissionRequestContext(
 }
 
 /**
- * PR-D-Plugin entry wrapper: runs `tool.execute.before` to let
- * plugins rewrite the rawInput, calls the original implementation,
- * then runs `tool.execute.after` to let plugins rewrite the output.
+ * PR-D-Plugin hook handling: `tool.execute.before` is applied after
+ * the requested tool name passes the whitelist / visibility gate and
+ * before workspace validation, permission context building, execution,
+ * and audit logging. Gateway-managed tools additionally run
+ * `tool.execute.after` so plugins can observe or rewrite the output.
  *
  * The hook contracts mirror opencode
  * (`@/temp/opencode/packages/plugin/src/index.ts:170-200`):
- *   - `output.args` is mutated in place by the before hook; we
- *     replace `request.rawInput` with the (possibly rewritten)
- *     value before dispatching the actual tool execution.
+ *   - `output.args` is mutated in place by the before hook; the
+ *     sandbox replaces `request.rawInput` with the rewritten value
+ *     before downstream safety gates and actual tool execution.
  *   - `output.output` / `output.metadata.isError` are mutated by the
  *     after hook; we propagate both back into the `ToolCallResult`.
  *
@@ -1883,6 +1894,42 @@ async function executeGatewayManagedTool(
   observability: PermissionRequestPayload['observability'] | undefined,
   executionContext?: SandboxExecutionContext,
 ): Promise<ToolCallResult | null> {
+  const result = await executeGatewayManagedToolImpl(
+    sandbox,
+    sessionId,
+    request,
+    signal,
+    observability,
+    executionContext,
+  );
+
+  if (!result) return null;
+
+  const afterOutput = {
+    output: result.output,
+    metadata: { isError: result.isError ?? false } as Record<string, unknown>,
+  };
+  await dispatchToolExecuteAfter(
+    {
+      tool: request.toolName,
+      sessionID: sessionId,
+      callID: request.toolCallId,
+      args: request.rawInput,
+    },
+    afterOutput,
+  );
+
+  return {
+    ...result,
+    output: afterOutput.output,
+    isError: afterOutput.metadata['isError'] === true,
+  };
+}
+
+async function applyToolExecuteBeforeHook(
+  sessionId: string,
+  request: ToolCallRequest,
+): Promise<ToolCallRequest> {
   const beforeOutput = {
     args: request.rawInput,
   };
@@ -1902,39 +1949,9 @@ async function executeGatewayManagedTool(
       ? request
       : {
           ...request,
-          rawInput: beforeOutput.args as Record<string, unknown>,
+          rawInput: beforeOutput.args,
         };
-
-  const result = await executeGatewayManagedToolImpl(
-    sandbox,
-    sessionId,
-    effectiveRequest,
-    signal,
-    observability,
-    executionContext,
-  );
-
-  if (!result) return null;
-
-  const afterOutput = {
-    output: result.output,
-    metadata: { isError: result.isError ?? false } as Record<string, unknown>,
-  };
-  await dispatchToolExecuteAfter(
-    {
-      tool: request.toolName,
-      sessionID: sessionId,
-      callID: request.toolCallId,
-      args: effectiveRequest.rawInput,
-    },
-    afterOutput,
-  );
-
-  return {
-    ...result,
-    output: afterOutput.output,
-    isError: afterOutput.metadata['isError'] === true,
-  };
+  return effectiveRequest;
 }
 
 function isCodegraphUnavailableOutput(output: unknown): boolean {
@@ -2047,11 +2064,7 @@ async function executeGatewayManagedToolImpl(
 
     if (request.toolName === 'mcp_list_tools') {
       const { serverId } = parseMcpListToolsRawInput(rawInput);
-      const mcpScope = readSessionMcpScope(sessionId);
-      const mcpFilter =
-        mcpScope.requestedMcpServers.length > 0 || mcpScope.isTeamSession
-          ? { allowedServerIds: [...mcpScope.requestedMcpServers] }
-          : {};
+      const mcpFilter = buildSessionMcpExecutionScope(sessionId) ?? {};
       const output = await listMcpToolsForSession(sessionId, {
         ...(serverId ? { serverId } : {}),
         ...mcpFilter,
@@ -2651,11 +2664,15 @@ async function executeGatewayManagedToolImpl(
       const flatMcp = parseFlatMcpToolName(request.toolName);
       if (flatMcp) {
         try {
-          const output = await callMcpToolForSession(sessionId, {
-            serverId: flatMcp.serverId,
-            toolName: flatMcp.toolName,
-            arguments: rawInput,
-          });
+          const output = await callMcpToolForSession(
+            sessionId,
+            {
+              serverId: flatMcp.serverId,
+              toolName: flatMcp.toolName,
+              arguments: rawInput,
+            },
+            buildSessionMcpExecutionScope(sessionId),
+          );
           return {
             toolCallId: request.toolCallId,
             toolName: request.toolName,
@@ -2690,18 +2707,32 @@ async function executeGatewayManagedToolImpl(
         };
       }
 
-      const output = await callMcpToolForSession(sessionId, {
-        serverId: parsed.serverId,
-        toolName: parsed.toolName,
-        arguments: parsed.arguments,
-      });
-      return {
-        toolCallId: request.toolCallId,
-        toolName: request.toolName,
-        output,
-        isError: output.isError === true,
-        durationMs: 0,
-      };
+      try {
+        const output = await callMcpToolForSession(
+          sessionId,
+          {
+            serverId: parsed.serverId,
+            toolName: parsed.toolName,
+            arguments: parsed.arguments,
+          },
+          buildSessionMcpExecutionScope(sessionId),
+        );
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output,
+          isError: output.isError === true,
+          durationMs: 0,
+        };
+      } catch (err) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: err instanceof Error ? err.message : String(err),
+          isError: true,
+          durationMs: 0,
+        };
+      }
     }
 
     if (request.toolName === workspaceReviewStatusTool.name) {
@@ -5556,14 +5587,18 @@ function consumeOncePermission(requestId: string): void {
   );
 }
 
+function resolveEffectivePermissionCategory(toolName: string): string {
+  // Map raw tool name to permission category (e.g. 'workspace_write_file' → 'write').
+  return parseFlatMcpToolName(toolName) ? 'mcp_call' : resolvePermissionCategory(toolName);
+}
+
 function resolveEffectivePermissionAction(
   toolName: string,
   scope: string,
   workspaceRules: PermissionRule[],
 ): PermissionAction {
-  // Map raw tool name to permission category (e.g. 'workspace_write_file' → 'write').
   // Evaluate default rules first, then workspace rules on top (last-match-wins).
-  const category = resolvePermissionCategory(toolName);
+  const category = resolveEffectivePermissionCategory(toolName);
   return evaluatePermissionRules(category, scope, DEFAULT_PERMISSION_RULES, workspaceRules).action;
 }
 
@@ -5642,7 +5677,7 @@ function ensurePermissionForTool(
   // Use category ID for all permission lookup/storage so that tools in the
   // same category (e.g. edit, apply_patch, workspace_review_revert → 'edit')
   // share a single approval and don't prompt the user repeatedly.
-  const category = resolvePermissionCategory(request.toolName);
+  const category = resolveEffectivePermissionCategory(request.toolName);
 
   if (shouldAutoApproveToolForSessionMetadata(request.toolName, sessionMetadata)) {
     return {
@@ -5857,7 +5892,9 @@ export class ToolSandbox {
       return result;
     }
 
-    if (normalizedRequest.toolName === desktopControlToolDefinition.name) {
+    const effectiveRequest = await applyToolExecuteBeforeHook(sessionId, normalizedRequest);
+
+    if (effectiveRequest.toolName === desktopControlToolDefinition.name) {
       const userId = getSessionOwnerUserId(sessionId);
       const output = userId
         ? '系统桌面控制插件未启用。请在设置 → 插件中启用后再使用 desktop_control。'
@@ -5875,7 +5912,7 @@ export class ToolSandbox {
           category: 'tool',
           sourceName: request.toolName,
           requestId: request.toolCallId,
-          input: request.rawInput,
+          input: effectiveRequest.rawInput,
           output: result.output,
           isError: result.isError ?? false,
           durationMs: result.durationMs ?? null,
@@ -5885,8 +5922,8 @@ export class ToolSandbox {
     }
 
     if (
-      SESSION_WORKSPACE_REQUIRED_TOOLS.has(normalizedRequest.toolName) &&
-      hasWorkspaceScopedExecutionInput(normalizedRequest) &&
+      SESSION_WORKSPACE_REQUIRED_TOOLS.has(effectiveRequest.toolName) &&
+      hasWorkspaceScopedExecutionInput(effectiveRequest) &&
       requiresBoundSessionWorkspace(sessionId) &&
       !getSessionWorkingDirectory(sessionId)
     ) {
@@ -5902,7 +5939,7 @@ export class ToolSandbox {
         category: 'tool',
         sourceName: request.toolName,
         requestId: request.toolCallId,
-        input: request.rawInput,
+        input: effectiveRequest.rawInput,
         output: result.output,
         isError: result.isError ?? false,
         durationMs: result.durationMs ?? null,
@@ -5910,8 +5947,8 @@ export class ToolSandbox {
       return result;
     }
 
-    if (FILE_TOOLS.has(normalizedRequest.toolName)) {
-      const rawInput = normalizedRequest.rawInput as Record<string, unknown>;
+    if (FILE_TOOLS.has(effectiveRequest.toolName)) {
+      const rawInput = effectiveRequest.rawInput as Record<string, unknown>;
       const filePath =
         (typeof rawInput.path === 'string' ? rawInput.path : undefined) ??
         (typeof rawInput.filePath === 'string' ? rawInput.filePath : undefined);
@@ -5931,7 +5968,7 @@ export class ToolSandbox {
             category: 'tool',
             sourceName: request.toolName,
             requestId: request.toolCallId,
-            input: request.rawInput,
+            input: effectiveRequest.rawInput,
             output: result.output,
             isError: result.isError ?? false,
             durationMs: result.durationMs ?? null,
@@ -5954,7 +5991,7 @@ export class ToolSandbox {
           category: 'tool',
           sourceName: request.toolName,
           requestId: request.toolCallId,
-          input: request.rawInput,
+          input: effectiveRequest.rawInput,
           output: result.output,
           isError: result.isError ?? false,
           durationMs: result.durationMs ?? null,
@@ -5965,7 +6002,7 @@ export class ToolSandbox {
 
     const permissionState = ensurePermissionForTool(
       sessionId,
-      normalizedRequest,
+      effectiveRequest,
       toolObservability,
       executionContext,
     );
@@ -5982,7 +6019,7 @@ export class ToolSandbox {
         category: 'tool',
         sourceName: request.toolName,
         requestId: request.toolCallId,
-        input: request.rawInput,
+        input: effectiveRequest.rawInput,
         output: result.output,
         isError: true,
         durationMs: 0,
@@ -6006,7 +6043,7 @@ export class ToolSandbox {
         category: 'tool',
         sourceName: request.toolName,
         requestId: request.toolCallId,
-        input: request.rawInput,
+        input: effectiveRequest.rawInput,
         output: result.output,
         isError: result.isError ?? false,
         durationMs: result.durationMs ?? null,
@@ -6027,7 +6064,7 @@ export class ToolSandbox {
     const gatewayManagedResult = await executeGatewayManagedTool(
       this,
       sessionId,
-      normalizedRequest,
+      effectiveRequest,
       signal,
       toolObservability,
       executionContext,
@@ -6039,7 +6076,7 @@ export class ToolSandbox {
         category: 'tool',
         sourceName: request.toolName,
         requestId: request.toolCallId,
-        input: request.rawInput,
+        input: effectiveRequest.rawInput,
         output: gatewayManagedResult.output,
         isError: gatewayManagedResult.isError ?? false,
         durationMs: gatewayManagedResult.durationMs ?? null,
@@ -6050,14 +6087,14 @@ export class ToolSandbox {
       return gatewayManagedResult;
     }
 
-    const tool = this.registry.get(normalizedRequest.toolName);
+    const tool = this.registry.get(effectiveRequest.toolName);
     if (tool && !tool.timeout) {
       const withTimeout = { ...tool, timeout: this.defaultTimeout };
       this.registry.register(withTimeout);
     }
 
     const normalizedWorkspaceRequest =
-      normalizeWorkspaceManagedRawInput(sessionId, normalizedRequest) ?? normalizedRequest;
+      normalizeWorkspaceManagedRawInput(sessionId, effectiveRequest) ?? effectiveRequest;
 
     const startAt = Date.now();
     let result: ToolCallResult;
@@ -6106,7 +6143,7 @@ export class ToolSandbox {
       category: 'tool',
       sourceName: request.toolName,
       requestId: request.toolCallId,
-      input: request.rawInput,
+      input: effectiveRequest.rawInput,
       output: result.output,
       isError: result.isError ?? false,
       durationMs: result.durationMs ?? null,

@@ -366,8 +366,8 @@ export function ErrorDiagnosticsPanel({
                   {group.items.length} 项
                 </span>
               </div>
-              {group.items.slice(0, 5).map((item) => (
-                <div key={item.handoffId} style={ERROR_ITEM_STYLE}>
+              {group.items.slice(0, 5).map((item, index) => (
+                <div key={`${group.category}-${item.handoffId}-${index}`} style={ERROR_ITEM_STYLE}>
                   <span style={ERROR_ITEM_LABEL_STYLE}>[{item.layer}]</span>
                   <span style={ERROR_ITEM_MSG_STYLE} title={item.message}>
                     {item.message}

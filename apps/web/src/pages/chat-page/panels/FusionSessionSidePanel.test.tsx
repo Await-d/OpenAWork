@@ -17,6 +17,14 @@ vi.mock('@openAwork/web-client', () => ({
   }),
 }));
 
+vi.mock('@openAwork/shared-ui', () => ({
+  ContextPanel: () => <div data-testid="context-panel-mock" />,
+  PlanHistoryPanel: () => <div data-testid="plan-history-panel-mock" />,
+  UnifiedCodeDiff: (props: { readonly afterText?: string; readonly beforeText?: string }) => (
+    <pre>{props.afterText ?? props.beforeText ?? ''}</pre>
+  ),
+}));
+
 function resetUiState(): void {
   useUIStateStore.setState({
     reviewPanelOpened: true,
@@ -35,6 +43,18 @@ const BASE_PROPS = {
   onTabChange: () => undefined,
   token: 'token',
   workspaceFileItems: [],
+} as const;
+
+const RUNTIME_SUMMARY = {
+  activePlanTaskCount: 2,
+  childSessionCount: 1,
+  dagEdgeCount: 2,
+  dagNodeCount: 3,
+  failedToolCallCount: 1,
+  mcpServerCount: 4,
+  pendingPermissionCount: 1,
+  toolCallCount: 5,
+  totalPlanTaskCount: 6,
 } as const;
 
 beforeEach(() => {
@@ -78,9 +98,43 @@ describe('FusionSessionSidePanel', () => {
       expect(screen.getAllByText('src/app.ts').length).toBeGreaterThan(0);
     });
 
-    expect(screen.getAllByRole('button', { name: /审查/ })[0]?.textContent).toContain('2');
+    expect(screen.getAllByRole('tab', { name: /审查/ })[0]?.textContent).toContain('2');
     expect(screen.getByText('2 文件 · +4 / -1 · 强保证')).not.toBeNull();
     expect(screen.getByText(/export const layout/)).not.toBeNull();
+  });
+
+  it('侧栏 tab 使用可访问 tablist 并上报切换动作', () => {
+    getFileChangesMock.mockResolvedValue(makeReviewPanelProjection([]));
+    const onTabChange = vi.fn();
+
+    render(<FusionSessionSidePanel {...BASE_PROPS} activeTab="review" onTabChange={onTabChange} />);
+
+    const tablist = screen.getByRole('tablist', { name: '会话侧面板' });
+    const reviewTab = screen.getByRole('tab', { name: '审查' });
+    const filesTab = screen.getByRole('tab', { name: '文件' });
+
+    expect(tablist).not.toBeNull();
+    expect(reviewTab.getAttribute('aria-selected')).toBe('true');
+
+    fireEvent.click(filesTab);
+
+    expect(onTabChange).toHaveBeenCalledWith('files');
+  });
+
+  it('侧栏 tab 支持方向键切换焦点和激活目标', () => {
+    getFileChangesMock.mockResolvedValue(makeReviewPanelProjection([]));
+    const onTabChange = vi.fn();
+
+    render(<FusionSessionSidePanel {...BASE_PROPS} activeTab="review" onTabChange={onTabChange} />);
+
+    const reviewTab = screen.getByRole('tab', { name: '审查' });
+    const filesTab = screen.getByRole('tab', { name: '文件' });
+
+    reviewTab.focus();
+    fireEvent.keyDown(reviewTab, { key: 'ArrowRight' });
+
+    expect(onTabChange).toHaveBeenCalledWith('files');
+    expect(document.activeElement).toBe(filesTab);
   });
 
   it('在文件 tab 展示工作区文件上下文并触发工作区选择', () => {
@@ -131,6 +185,77 @@ describe('FusionSessionSidePanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '压缩会话' }));
 
     expect(compactSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('在 Context tab 展示 Fusion 运行摘要，覆盖工具、计划、DAG、MCP 和审批信号', () => {
+    getFileChangesMock.mockResolvedValue(makeReviewPanelProjection([]));
+
+    render(
+      <FusionSessionSidePanel
+        {...BASE_PROPS}
+        activeTab="context"
+        runtimeSummary={RUNTIME_SUMMARY}
+      />,
+    );
+
+    expect(screen.getByText('工具调用')).not.toBeNull();
+    expect(screen.getByText('5 次')).not.toBeNull();
+    expect(screen.getByText('1 个失败')).not.toBeNull();
+    expect(screen.getByText('计划任务')).not.toBeNull();
+    expect(screen.getByText('2/6 进行中')).not.toBeNull();
+    expect(screen.getByText('DAG')).not.toBeNull();
+    expect(screen.getByText('3 节点 / 2 边')).not.toBeNull();
+    expect(screen.getByText('MCP')).not.toBeNull();
+    expect(screen.getByText('4 个服务')).not.toBeNull();
+    expect(screen.getByText('待审批')).not.toBeNull();
+    expect(screen.getByText('1 项')).not.toBeNull();
+    expect(screen.getByText('子会话')).not.toBeNull();
+    expect(screen.getByText('1 个')).not.toBeNull();
+  });
+
+  it('在 Context tab 融合旧版概览信息并避免重复 fallback 小卡', () => {
+    getFileChangesMock.mockResolvedValue(makeReviewPanelProjection([]));
+    const openRecoveryStrategy = vi.fn();
+
+    render(
+      <FusionSessionSidePanel
+        {...BASE_PROPS}
+        activeTab="context"
+        overview={{
+          attachmentItems: [],
+          artifactsWorkspaceHref: null,
+          childSessions: [],
+          compactions: [],
+          contextUsageSnapshot: null,
+          contentArtifactCount: 2,
+          contentArtifactCountStatus: 'ready',
+          currentSessionId: 'session-1',
+          dialogueMode: 'coding',
+          effectiveWorkingDirectory: '/home/await/project/OpenAWork',
+          messages: [],
+          onCompactSession: () => undefined,
+          onOpenRecoveryStrategy: openRecoveryStrategy,
+          pendingPermissions: [],
+          pendingQuestionsCount: 1,
+          sessionStateStatus: 'paused',
+          sessionTasks: [],
+          sessionTodos: [],
+          upstreamSummaries: [],
+          workspaceFileItems: [],
+          yoloMode: false,
+        }}
+      />,
+    );
+
+    expect(screen.getByText('消息数量')).not.toBeNull();
+    expect(screen.getByText('0 条')).not.toBeNull();
+    expect(screen.getByText('产物工作区')).not.toBeNull();
+    expect(screen.getByText('2 个')).not.toBeNull();
+    expect(screen.queryByText('剩余 Token')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '恢复详情' }));
+
+    expect(openRecoveryStrategy).toHaveBeenCalledTimes(1);
   });
 
   it('在融合 dock 内拖拽手柄可调整右侧面板宽度', () => {

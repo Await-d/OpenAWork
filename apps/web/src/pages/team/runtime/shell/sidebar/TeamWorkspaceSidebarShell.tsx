@@ -149,8 +149,8 @@ export function TeamWorkspaceSidebarShell(props: TeamWorkspaceSidebarShellProps)
           className="team-v2-mobile-sidebar-trigger"
           style={MOBILE_TRIGGER_STYLE}
           onClick={onOpenMobile}
-          aria-label="展开会话列表"
-          title="会话与文件"
+          aria-label="展开文件树"
+          title="文件树"
         >
           <svg
             aria-hidden="true"
@@ -172,7 +172,7 @@ export function TeamWorkspaceSidebarShell(props: TeamWorkspaceSidebarShellProps)
           <div
             role="dialog"
             aria-modal="true"
-            aria-label="团队会话与文件"
+            aria-label="团队文件树"
             style={MOBILE_BACKDROP_STYLE}
           >
             <aside

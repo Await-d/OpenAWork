@@ -1,0 +1,32 @@
+.chat-composer__right-slot {
+  min-width: 0;
+}
+
+@media (max-width: 520px) {
+  .chat-composer {
+    padding: 0 var(--spacing-2) var(--spacing-2) !important;
+  }
+
+  .chat-composer__inner {
+    padding-top: var(--spacing-2) !important;
+  }
+
+  .chat-composer__body {
+    gap: var(--spacing-2) !important;
+  }
+
+  .chat-composer .composer-shell {
+    gap: var(--spacing-1) !important;
+    padding: var(--spacing-1) !important;
+  }
+
+  .chat-composer__textarea {
+    font-size: 11px !important;
+    line-height: 1.45 !important;
+    min-height: 74px !important;
+  }
+
+  .chat-composer__right-slot {
+    display: none !important;
+  }
+}

@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import type { MCPToolDef, MCPToolResult } from '@openAwork/mcp-client';
 import type { MCPServerRef } from '@openAwork/skill-types';
 import { sqliteGet } from '../infra/db.js';
-import { BUILTIN_MCP_IDS, mergeBuiltinAndConfiguredMcps } from './builtin-mcps.js';
+import { mergeBuiltinAndConfiguredMcps } from './builtin-mcps.js';
+import { sanitizePersistedMcpServers } from './mcp-settings-schemas.js';
 import { mcpConnectionPool } from '../skill/skill-mcp-connection-pool.js';
 import {
   clearCatalogSnapshot,
@@ -13,9 +14,15 @@ import {
 import { McpOAuthProvider } from './mcp-oauth-provider.js';
 import {
   callVirtualMcpToolForSession,
-  isVirtualBuiltinMcpServer,
+  isVirtualBuiltinMcpId,
   listVirtualMcpTools,
 } from './builtin-virtual-mcps.js';
+import {
+  assertMcpServerAllowedForScope,
+  isSystemMcpServer,
+  type McpServerSource,
+  type McpSessionScope,
+} from './mcp-server-authorization.js';
 
 // Wire the catalog cache to the connection pool's
 // `notifications/tools/list_changed` fan-out at module load time.
@@ -64,9 +71,11 @@ export interface ConfiguredMCPServer {
   env?: Record<string, string>;
   required?: boolean;
   builtin?: boolean;
+  builtinKind?: 'system' | 'virtual' | 'adapter';
   enabled: boolean;
   disabledTools?: string[];
   headers?: Record<string, string>;
+  source?: McpServerSource;
   /**
    * OAuth opt-in/opt-out. See {@link McpOAuthConfig}. Stdio servers
    * always treat this as `false` regardless of value (OAuth is
@@ -115,10 +124,6 @@ export function getConfiguredMcpServersForSession(sessionId: string): Configured
   return loadConfiguredMcpServersForUser(getUserIdForSession(sessionId));
 }
 
-function normalizeMcpTransport(value: unknown): 'sse' | 'stdio' {
-  return value === 'stdio' ? 'stdio' : 'sse';
-}
-
 export function loadConfiguredMcpServersForUser(userId: string): ConfiguredMCPServer[] {
   const row = sqliteGet<UserSettingRow>(
     `SELECT value FROM user_settings WHERE user_id = ? AND key = 'mcp_servers'`,
@@ -133,81 +138,8 @@ export function loadConfiguredMcpServersForUser(userId: string): ConfiguredMCPSe
   }
 
   try {
-    const parsed = JSON.parse(row.value) as unknown[];
-    if (!Array.isArray(parsed)) {
-      return mergeBuiltinAndConfiguredMcps([]);
-    }
-
-    const userServers = parsed.flatMap((entry) => {
-      const server = entry as Record<string, unknown>;
-      const id = typeof server['id'] === 'string' ? server['id'].trim() : '';
-      const name = typeof server['name'] === 'string' ? server['name'].trim() : id;
-      if (!id || !name) {
-        return [];
-      }
-
-      const transport = normalizeMcpTransport(server['transport'] ?? server['type']);
-      const args = Array.isArray(server['args'])
-        ? server['args'].filter((arg): arg is string => typeof arg === 'string')
-        : undefined;
-      const disabledTools = Array.isArray(server['disabledTools'])
-        ? server['disabledTools'].filter((tool): tool is string => typeof tool === 'string')
-        : undefined;
-      const env =
-        server['env'] && typeof server['env'] === 'object'
-          ? Object.fromEntries(
-              Object.entries(server['env'] as Record<string, unknown>).filter(
-                (pair): pair is [string, string] => typeof pair[1] === 'string',
-              ),
-            )
-          : undefined;
-      const headers =
-        server['headers'] && typeof server['headers'] === 'object'
-          ? Object.fromEntries(
-              Object.entries(server['headers'] as Record<string, unknown>).filter(
-                (pair): pair is [string, string] => typeof pair[1] === 'string',
-              ),
-            )
-          : undefined;
-
-      // PR-D-OAuth: parse the `oauth` field. Three shapes accepted —
-      // `false` (opt-out), missing/null (default to no OAuth), and
-      // object (opt-in, optional clientId/clientSecret/scope/redirectUri).
-      // Anything malformed (e.g. `oauth: 7`) silently falls back to
-      // "no OAuth" rather than blowing up the user's whole config.
-      let oauth: McpOAuthConfig | false | undefined;
-      const rawOauth = server['oauth'];
-      if (rawOauth === false) {
-        oauth = false;
-      } else if (rawOauth && typeof rawOauth === 'object') {
-        const obj = rawOauth as Record<string, unknown>;
-        oauth = {
-          clientId: typeof obj['clientId'] === 'string' ? obj['clientId'] : undefined,
-          clientSecret: typeof obj['clientSecret'] === 'string' ? obj['clientSecret'] : undefined,
-          scope: typeof obj['scope'] === 'string' ? obj['scope'] : undefined,
-          redirectUri: typeof obj['redirectUri'] === 'string' ? obj['redirectUri'] : undefined,
-        };
-      }
-
-      return [
-        {
-          id,
-          name,
-          transport,
-          url: typeof server['url'] === 'string' ? server['url'] : undefined,
-          command: typeof server['command'] === 'string' ? server['command'] : undefined,
-          args,
-          cwd: typeof server['cwd'] === 'string' ? server['cwd'] : undefined,
-          env,
-          required: server['required'] === true,
-          builtin: server['builtin'] === true,
-          enabled: server['enabled'] !== false,
-          disabledTools,
-          headers,
-          oauth,
-        },
-      ];
-    });
+    const parsed: unknown = JSON.parse(row.value);
+    const userServers = sanitizePersistedMcpServers(parsed);
     return mergeBuiltinAndConfiguredMcps(userServers);
   } catch {
     // JSON 解析失败时仍要兜底暴露内置 MCP，避免单条坏配置把整组
@@ -357,9 +289,15 @@ function filterEnabledMcpTools(
   return tools.filter((tool) => !disabled.has(tool.name));
 }
 
+function isRuntimeVirtualBuiltinMcpServer(server: ConfiguredMCPServer): boolean {
+  return (
+    server.builtin === true && isVirtualBuiltinMcpId(server.id) && server.transport === 'stdio'
+  );
+}
+
 export async function listMcpToolsForUser(
   userId: string,
-  filter?: { serverId?: string; allowedServerIds?: string[] },
+  filter?: { serverId?: string; allowedServerIds?: readonly string[] },
 ): Promise<MCPServerToolCatalog[]> {
   const configuredServers = loadConfiguredMcpServersForUser(userId);
   let selectedServers = filter?.serverId
@@ -375,8 +313,7 @@ export async function listMcpToolsForUser(
   if (filter?.allowedServerIds !== undefined) {
     const allow = new Set(filter.allowedServerIds);
     selectedServers = selectedServers.filter(
-      (server) =>
-        allow.has(server.id) || (BUILTIN_MCP_IDS as readonly string[]).includes(server.id),
+      (server) => allow.has(server.id) || isSystemMcpServer(server),
     );
   }
 
@@ -394,7 +331,7 @@ export async function listMcpToolsForUser(
       }
 
       try {
-        if (isVirtualBuiltinMcpServer(server)) {
+        if (isRuntimeVirtualBuiltinMcpServer(server)) {
           const tools = filterEnabledMcpTools(listVirtualMcpTools(server.id), server.disabledTools);
           setCatalogSnapshot(userId, getMcpPoolKey(server), server.id, tools);
           return {
@@ -450,7 +387,7 @@ export async function listMcpToolsForUser(
 
 export async function listMcpToolsForSession(
   sessionId: string,
-  filter?: { serverId?: string; allowedServerIds?: string[] },
+  filter?: { serverId?: string; allowedServerIds?: readonly string[] },
 ): Promise<MCPServerToolCatalog[]> {
   return listMcpToolsForUser(getUserIdForSession(sessionId), filter);
 }
@@ -522,7 +459,7 @@ export async function retryMcpConnectionForUser(
   }
 
   const poolKey = getMcpPoolKey(server);
-  if (isVirtualBuiltinMcpServer(server)) {
+  if (isRuntimeVirtualBuiltinMcpServer(server)) {
     const startedAt = Date.now();
     const tools = filterEnabledMcpTools(listVirtualMcpTools(server.id), server.disabledTools);
     setCatalogSnapshot(userId, poolKey, server.id, tools);
@@ -587,20 +524,22 @@ export async function retryMcpConnectionForUser(
  */
 export function isMcpServerConnectedForUser(userId: string, server: ConfiguredMCPServer): boolean {
   if (!server.enabled) return false;
-  if (isVirtualBuiltinMcpServer(server)) return true;
+  if (isRuntimeVirtualBuiltinMcpServer(server)) return true;
   return mcpConnectionPool.isConnected(userId, getMcpPoolKey(server));
 }
 
 export async function callMcpToolForSession(
   sessionId: string,
   input: MCPCallInput,
+  scope?: McpSessionScope,
 ): Promise<MCPCallOutput> {
   const userId = getUserIdForSession(sessionId);
   const server = getConfiguredMcpServerForSession(sessionId, input.serverId);
+  assertMcpServerAllowedForScope(server, scope);
   if (server.disabledTools?.includes(input.toolName)) {
     throw new Error(`MCP tool ${input.toolName} is disabled for server ${server.id}`);
   }
-  if (isVirtualBuiltinMcpServer(server)) {
+  if (isRuntimeVirtualBuiltinMcpServer(server)) {
     return callVirtualMcpToolForSession(sessionId, server, input);
   }
   // Persistent-pool path (PR-B). See listMcpToolsForSession for rationale.

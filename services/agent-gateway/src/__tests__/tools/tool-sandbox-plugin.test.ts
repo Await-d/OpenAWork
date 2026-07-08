@@ -26,7 +26,7 @@ const mocks = vi.hoisted(() => ({
       return { user_id: 'user-1' };
     }
     if (query.includes('SELECT metadata_json')) {
-      return { metadata_json: '{}' };
+      return { metadata_json: '{"yoloMode":true}' };
     }
     return undefined;
   }),
@@ -40,6 +40,7 @@ vi.mock('../../infra/db.js', () => ({
   sqliteAll: mocks.sqliteAllMock,
   sqliteGet: mocks.sqliteGetMock,
   sqliteRun: mocks.sqliteRunMock,
+  sqliteRunWithRowId: vi.fn(() => 1),
 }));
 
 vi.mock('../../mcp/mcp-runtime.js', () => ({
@@ -99,11 +100,15 @@ describe('tool-sandbox plugin hook integration (PR-D-Plugin)', () => {
     );
 
     // The tool actually saw the mutated args, not the originals.
-    expect(mocks.callMcpToolForSessionMock).toHaveBeenCalledWith('session-1', {
-      serverId: 'github',
-      toolName: 'create_issue',
-      arguments: { title: '[REDACTED]', body: 'detail' },
-    });
+    expect(mocks.callMcpToolForSessionMock).toHaveBeenCalledWith(
+      'session-1',
+      {
+        serverId: 'github',
+        toolName: 'create_issue',
+        arguments: { title: '[REDACTED]', body: 'detail' },
+      },
+      undefined,
+    );
   });
 
   it('tool.execute.after mutations to output flow back to the caller', async () => {

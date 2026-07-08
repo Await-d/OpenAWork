@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 const PLACEHOLDER_ROTATION_MS = 4000;
 
 export const COMPOSER_PLACEHOLDER_POOL = [
-  '发送消息…（Enter 发送，Shift+Enter 换行，Tab 切换代理）',
+  '发送消息…',
   '问点什么…',
   '描述你的需求，我来实现…',
   '输入 / 查看快捷命令，@ 引用文件…',

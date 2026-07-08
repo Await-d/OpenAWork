@@ -21,6 +21,7 @@ import type { ComposerStatsData } from './ComposerStatsBar.js';
 import { getComposerCharacterCount } from './composer-character-count.js';
 import { useComposerPlaceholder } from './use-composer-placeholder.js';
 import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
+import './ChatComposer.css';
 
 interface ChatComposerProps {
   variant: 'home' | 'session';
@@ -381,6 +382,7 @@ export function ChatComposer({
 
   return (
     <div
+      className="chat-composer"
       style={{
         padding: '0 16px 12px',
         background: 'var(--bg-base)',
@@ -389,6 +391,7 @@ export function ChatComposer({
       }}
     >
       <div
+        className="chat-composer__inner"
         style={{
           maxWidth: editorMode ? 720 : 1024,
           margin: '0 auto',
@@ -420,6 +423,7 @@ export function ChatComposer({
         )}
 
         <div
+          className="chat-composer__body"
           style={{
             display: 'flex',
             alignItems: 'stretch',
@@ -584,6 +588,7 @@ export function ChatComposer({
             >
               <div style={{ position: 'relative' }}>
                 <textarea
+                  className="chat-composer__textarea"
                   ref={textareaRef}
                   value={input}
                   onChange={onInputChange}
@@ -818,6 +823,7 @@ export function ChatComposer({
           </div>
           {composerRightSlot && (
             <div
+              className="chat-composer__right-slot"
               style={{
                 display: 'flex',
                 alignItems: 'stretch',

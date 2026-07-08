@@ -16,7 +16,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
 vi.mock('../../../../../stores/team/team-events.js', async () => {
@@ -156,8 +156,55 @@ describe('ConversationArea — 三态路由', () => {
     render(<ConversationArea receptionSessionId={null} />);
 
     expect(screen.queryByTestId('team-session-view-mock')).toBeNull();
-    // EmptyState 的标题文案
     expect(getReadyEmptyTitle()).toBeTruthy();
+  });
+
+  it('receptionSessionId 为空时展示团队欢迎页，并可触发快捷建议入口', () => {
+    const onSelectSuggestion = vi.fn();
+
+    render(<ConversationArea receptionSessionId={null} onSelectSuggestion={onSelectSuggestion} />);
+
+    expect(getReadyEmptyTitle()).toBeTruthy();
+
+    const suggestionButton = screen.getByRole('button', {
+      name: '基于当前仓库制定一个交付计划',
+    });
+    fireEvent.click(suggestionButton);
+
+    expect(onSelectSuggestion).toHaveBeenCalledOnce();
+    expect(onSelectSuggestion).toHaveBeenCalledWith('基于当前仓库制定一个交付计划');
+  });
+
+  it('没有 team 会话但存在工作台侧栏时，使用 workspace-first 布局避免空对话区抢占首屏', () => {
+    render(
+      <ConversationArea
+        receptionSessionId={null}
+        sidePanel={<div data-testid="team-workbench-side-panel">工作台内容</div>}
+      />,
+    );
+
+    const workbench = screen.getByLabelText('团队工作台侧栏').parentElement;
+    expect(
+      workbench?.classList.contains('team-conversation-area__workbench--workspace-first'),
+    ).toBe(true);
+    expect(screen.getByTestId('team-workbench-side-panel')).toBeTruthy();
+    expect(getReadyEmptyTitle()).toBeTruthy();
+  });
+
+  it('存在 team 会话时保留 session-first 双栏布局', () => {
+    render(
+      <ConversationArea
+        receptionSessionId="b-session-001"
+        sidePanel={<div data-testid="team-workbench-side-panel">工作台内容</div>}
+      />,
+    );
+
+    const workbench = screen.getByLabelText('团队工作台侧栏').parentElement;
+    expect(
+      workbench?.classList.contains('team-conversation-area__workbench--workspace-first'),
+    ).toBe(false);
+    expect(screen.getByTestId('team-session-view-mock')).toBeTruthy();
+    expect(screen.getByTestId('team-workbench-side-panel')).toBeTruthy();
   });
 
   it('receptionSessionId 为空字符串 → 与 null 等价，走引导面板', () => {

@@ -15,4 +15,20 @@ describe('session tool visibility', () => {
     expect(isGatewayToolEnabledForSessionMetadata('desktop_automation', metadata)).toBe(true);
     expect(isGatewayToolEnabledForSessionMetadata('desktop_control', metadata)).toBe(true);
   });
+
+  it('Given channel-managed metadata disables MCP When checking flat and legacy MCP tools Then neither entry point is visible', () => {
+    const metadata = {
+      source: 'channel',
+      channel: {
+        tools: {
+          mcp: false,
+        },
+      },
+    };
+
+    expect(isGatewayToolEnabledForSessionMetadata('mcp_call', metadata)).toBe(false);
+    expect(isGatewayToolEnabledForSessionMetadata('mcp__omo__adapter_catalog', metadata)).toBe(
+      false,
+    );
+  });
 });

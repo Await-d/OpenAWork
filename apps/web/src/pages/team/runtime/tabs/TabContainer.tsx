@@ -33,7 +33,7 @@ const SCROLL_AREA_STYLE: CSSProperties = {
 const INNER_BASE: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  gap: 14,
+  gap: 'var(--team-tab-container-gap, 14px)',
   width: '100%',
   flex: 1,
   minHeight: 0,
@@ -42,9 +42,9 @@ const INNER_BASE: CSSProperties = {
 const HEADER_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'flex-end',
-  gap: 12,
+  gap: 'var(--team-tab-container-header-gap, 12px)',
   flexWrap: 'wrap',
-  paddingBottom: 10,
+  paddingBottom: 'var(--team-tab-container-header-padding-bottom, 10px)',
   borderBottom: '1px solid color-mix(in srgb, var(--border-default) 28%, transparent)',
 };
 
@@ -57,16 +57,16 @@ const HEADER_TEXT_GROUP_STYLE: CSSProperties = {
 };
 
 const TITLE_STYLE: CSSProperties = {
-  fontSize: 15,
+  fontSize: 'var(--team-tab-container-title-size, 15px)',
   fontWeight: 700,
   color: 'var(--fg-strong)',
   lineHeight: 1.25,
 };
 
 const SUBTITLE_STYLE: CSSProperties = {
-  fontSize: 11.5,
+  fontSize: 'var(--team-tab-container-subtitle-size, 11.5px)',
   color: 'var(--fg-muted)',
-  lineHeight: 1.6,
+  lineHeight: 'var(--team-tab-container-subtitle-line-height, 1.6)',
 };
 
 const ACTIONS_STYLE: CSSProperties = {
@@ -109,7 +109,7 @@ export function TabContainer({
   const innerStyle: CSSProperties = {
     ...INNER_BASE,
     maxWidth: maxWidth === 'none' ? undefined : maxWidth,
-    padding: padded ? '16px 18px 22px' : 0,
+    padding: padded ? 'var(--team-tab-container-padding, 16px 18px 22px)' : 0,
   };
 
   const hasHeader = Boolean(title || subtitle || actions);

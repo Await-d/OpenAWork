@@ -524,7 +524,7 @@ vi.mock('../runtime/shell/modals/ConfirmDeleteWorkspaceModal.js', () => ({
 }));
 
 vi.mock('../runtime/shell/modals/NewTeamSessionModal.js', () => ({
-  NewTeamSessionModal: () => null,
+  NewTeamSessionModal: () => <div data-testid="new-team-session-modal">新建团队会话弹窗</div>,
 }));
 
 vi.mock('../../../hooks/editor/useFileEditor.js', () => ({
@@ -1369,13 +1369,13 @@ describe('TeamPageV2', () => {
     });
   });
 
-  it('移动端默认不展开会话列表抽屉，但会保留浮动入口', async () => {
+  it('移动端默认不展开文件树抽屉，但会保留浮动入口', async () => {
     testState.breakpoint = 'mobile';
 
     renderPage();
 
-    expect(screen.queryByRole('dialog', { name: '团队会话列表' })).toBeNull();
-    expect(screen.getByRole('button', { name: '展开会话列表' })).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: '团队文件树' })).toBeNull();
+    expect(screen.getByRole('button', { name: '展开文件树' })).toBeTruthy();
     expect(screen.getByTestId('team-tab-bar')).toBeTruthy();
   });
 
@@ -1494,7 +1494,15 @@ describe('TeamPageV2', () => {
     await waitFor(() => {
       expect(toastMock).toHaveBeenCalledWith('请先选择工作空间后再创建会话。', 'warning');
     });
-    expect(screen.queryByText('MockNewTeamSessionModal')).toBeNull();
+    expect(screen.queryByTestId('new-team-session-modal')).toBeNull();
+  });
+
+  it('对话欢迎页的新建团队会话入口会打开新建会话弹窗', () => {
+    renderPage();
+
+    fireEvent.click(screen.getByTestId('conversation-open-new-session'));
+
+    expect(screen.getByTestId('new-team-session-modal')).toBeTruthy();
   });
 
   it('真路径会把当前选中会话同步给全局侧栏状态', async () => {

@@ -1,0 +1,155 @@
+@keyframes team-flow-dash {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes team-flow-node-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--team-flow-glow, color-mix(in srgb, var(--success) 45%, transparent));
+  }
+  50% {
+    box-shadow: 0 0 0 7px
+      color-mix(in srgb, var(--team-flow-glow-mid, var(--success)) 0%, transparent);
+  }
+}
+
+@keyframes team-flow-node-arrive {
+  0% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.14);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes team-flow-edge-flash {
+  0% {
+    opacity: 0.35;
+  }
+  40% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.55;
+  }
+}
+
+@keyframes team-flow-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes team-flow-dash {
+    from {
+      background-position: 0 0;
+    }
+    to {
+      background-position: 0 0;
+    }
+  }
+  @keyframes team-flow-node-pulse {
+    0%,
+    100% {
+      box-shadow: none;
+    }
+  }
+  @keyframes team-flow-node-arrive {
+    0%,
+    100% {
+      transform: none;
+    }
+  }
+  @keyframes team-flow-edge-flash {
+    0%,
+    100% {
+      opacity: 0.7;
+    }
+  }
+  @keyframes team-flow-row-in {
+    from {
+      opacity: 1;
+      transform: none;
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+
+@keyframes team-typing-bounce {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  40% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes team-typing-bounce {
+    0%,
+    100% {
+      transform: none;
+      opacity: 0.7;
+    }
+  }
+}
+
+@keyframes team-streaming-bounce {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  40% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
+@keyframes team-streaming-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes team-streaming-bounce {
+    0%,
+    100% {
+      transform: none;
+      opacity: 0.7;
+    }
+  }
+  @keyframes team-streaming-pulse {
+    0%,
+    100% {
+      opacity: 0.7;
+    }
+  }
+}

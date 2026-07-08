@@ -1,19 +1,8 @@
 /**
- * TeamSidebarWithFileTree · 会话列表 + 文件目录 双 tab 侧边栏
+ * TeamSidebarWithFileTree · 团队页文件树侧边栏
  *
- * 与 chat 端 SessionSidebar 的整体布局对齐：
- *   ┌──────────────────────────────┐
- *   │ [+ 新建会话] [工作区]         │  ← 顶部主按钮行
- *   ├──────────────────────────────┤
- *   │ [会话] [文件树]               │  ← tab 切换
- *   ├──────────────────────────────┤
- *   │ 搜索会话…                     │  ← 搜索框（仅会话 tab）
- *   ├──────────────────────────────┤
- *   │ 会话卡片列表 / 文件树          │  ← 内容区
- *   └──────────────────────────────┘
- *
- * 通过 TeamSessionListSidebar 的 chromeless 模式，把 header / 搜索框 / 工作区
- * 切换器从内部组件抽到这里集中渲染，避免和 chat 体验产生差异。
+ * 团队页左侧栏现已聚焦于「文件树」：会话列表由全局侧栏（AppSidebar / FusionSidebar）
+ * 承载，避免在团队页内重复展示。本组件仅渲染工作区目录树与「新建会话 / 工作区」入口。
  */
 
 import { useCallback, useMemo, useState, type CSSProperties } from 'react';
@@ -33,16 +22,46 @@ import {
   joinFileTreePath,
 } from '../../../../../components/layout/file-tree/file-tree-actions.js';
 import { dispatchComposerReference } from '../../../../../utils/chat/composer-reference-events.js';
-import {
-  TeamSessionListSidebar,
-  type TeamSessionListSidebarProps,
-} from './TeamSessionListSidebar.js';
+import type {
+  AgentTeamsSidebarTeam,
+  AgentTeamsWorkspaceGroup,
+} from '../../data/team-runtime-types.js';
+import type { TeamSessionCreationDraft } from '../../data/team-session-creation.types.js';
 import { NewTeamSessionModal } from '../modals/NewTeamSessionModal.js';
+
+// 团队页左侧栏已不再渲染会话列表（由全局侧栏承载），以下 props 仅被接收而不使用，
+// 保留类型以便 TeamPageV2 调用端无需改动。
+export interface TeamSessionListSidebarProps {
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+  workspaceGroups: AgentTeamsWorkspaceGroup[];
+  selectedTeamId: string;
+  onSelectTeam: (teamId: string) => void;
+  canManageSessionEntries?: boolean;
+  workspaceLabel?: string;
+  teamWorkspaceId?: string;
+  defaultMemberSlots?: TeamSessionCreationDraft['memberSlots'];
+  onSubmitDraft?: (draft: TeamSessionCreationDraft) => boolean | void | Promise<boolean | void>;
+  onDeleteSession?: (sessionId: string) => void;
+  onRenameSession?: (sessionId: string, title: string) => Promise<boolean> | boolean;
+  onToggleSessionState?: (
+    sessionId: string,
+    currentStatus: AgentTeamsSidebarTeam['status'],
+  ) => Promise<boolean> | boolean;
+  selectedWorkspacePath?: string | null;
+  onWorkspaceChange?: (workspacePath: string | null) => void;
+  loading?: boolean;
+  chromeless?: boolean;
+  controlledSearchQuery?: string;
+  showNewSessionModal?: boolean;
+  onCloseNewSessionModal?: () => void;
+  initialTemplateId?: string | null;
+  initialWorkingDirectory?: string | null;
+  onOpenNewSessionModal?: (templateId?: string | null, workingDirectory?: string | null) => void;
+}
 import { useTeamSidebarFileTreeState } from './use-team-sidebar-file-tree-state.js';
 import { useTeamFilePreview } from './use-team-file-preview.js';
 import { TeamFilePreviewPanel } from './TeamFilePreviewPanel.js';
-
-type SidebarTab = 'sessions' | 'files';
 
 function getParentDirectory(path: string): string {
   if (path === '/') return '/';
@@ -99,59 +118,6 @@ const PRIMARY_SPLIT_BTN_STYLE: CSSProperties = {
   cursor: 'pointer',
   flexShrink: 0,
   border: 'none',
-};
-
-const TAB_BAR_STYLE: CSSProperties = {
-  display: 'flex',
-  padding: '0 8px 6px',
-  flexShrink: 0,
-  borderBottom: '1px solid var(--border-default)',
-  gap: 4,
-};
-
-function tabButtonStyle(active: boolean): CSSProperties {
-  return {
-    flex: 1,
-    height: 30,
-    padding: '0 10px',
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-    borderRadius: 8,
-    border: active ? '1px solid var(--border-subtle)' : '1px solid transparent',
-    background: active ? 'color-mix(in srgb, var(--fg-muted) 6%, transparent)' : 'transparent',
-    color: active ? 'var(--fg-strong)' : 'var(--fg-muted)',
-    fontSize: 12,
-    fontWeight: active ? 600 : 450,
-    cursor: 'pointer',
-    transition:
-      'background 160ms cubic-bezier(0.4, 0, 0.2, 1), color 160ms ease, border-color 160ms ease',
-    whiteSpace: 'nowrap',
-    position: 'relative',
-  };
-}
-
-const SEARCH_BAR_STYLE: CSSProperties = {
-  padding: '4px 6px',
-  flexShrink: 0,
-  borderBottom: '1px solid var(--border-subtle)',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 4,
-};
-
-const SEARCH_INPUT_STYLE: CSSProperties = {
-  width: '100%',
-  background: 'var(--bg-overlay)',
-  border: '1px solid var(--border-subtle)',
-  borderRadius: 7,
-  padding: '5px 9px',
-  fontSize: 11.5,
-  color: 'var(--fg-strong)',
-  outline: 'none',
-  boxSizing: 'border-box',
-  transition: 'border-color 150ms ease, box-shadow 150ms ease',
 };
 
 const FILE_TREE_CONTAINER_STYLE: CSSProperties = {
@@ -214,17 +180,16 @@ export function TeamSidebarWithFileTree({
   onCreateWorkspace,
   canCreateWorkspace,
   canManageSessionEntries = true,
-  collapsed,
   onSubmitDraft,
   teamWorkspaceId,
   initialTemplateId,
   initialWorkingDirectory,
   showNewSessionModal: controlledShowModal,
   onCloseNewSessionModal,
-  ...sidebarProps
+  collapsed,
+  onToggleCollapsed,
+  ..._sidebarProps
 }: TeamSidebarWithFileTreeProps) {
-  const [activeTab, setActiveTab] = useState<SidebarTab>('sessions');
-  const [searchQuery, setSearchQuery] = useState('');
   const [internalShowNewSessionModal, setInternalShowNewSessionModal] = useState(false);
   const [internalInitialWorkingDirectory, setInternalInitialWorkingDirectory] = useState<
     string | null
@@ -254,7 +219,7 @@ export function TeamSidebarWithFileTree({
     treeLoading,
     treeNodes,
   } = useTeamSidebarFileTreeState({
-    active: activeTab === 'files',
+    active: true,
     gatewayUrl,
     token,
     workspacePath,
@@ -555,20 +520,55 @@ export function TeamSidebarWithFileTree({
   const canMutateWorkspaceTree = Boolean(token && workspacePath);
   const canRefreshWorkspaceTree = Boolean(token && workspacePath);
 
-  // 折叠态：完全委托给 TeamSessionListSidebar 处理（它有自己的 columnar 视图）
+  // 折叠态：会话列表已从本栏移除，文件树也无需在 52px 窄列中渲染，
+  // 因此只展示一个「展开」入口，点击后恢复文件树全宽。
   if (collapsed) {
     return (
-      <TeamSessionListSidebar
-        collapsed={collapsed}
-        canManageSessionEntries={canManageSessionEntries}
-        onSubmitDraft={onSubmitDraft}
-        teamWorkspaceId={teamWorkspaceId}
-        showNewSessionModal={showNewSessionModal}
-        onCloseNewSessionModal={handleCloseNewSessionModal}
-        initialTemplateId={initialTemplateId}
-        initialWorkingDirectory={effectiveInitialWorkingDirectory}
-        {...sidebarProps}
-      />
+      <div
+        className="team-v2-workspace-sidebar-collapsed"
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'center',
+          paddingTop: 8,
+          height: '100%',
+          minHeight: 0,
+        }}
+      >
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          title="展开文件树"
+          aria-label="展开文件树"
+          className="icon-btn"
+          style={{
+            display: 'inline-flex',
+            width: 34,
+            height: 34,
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: 8,
+            border: '1px solid var(--border-default)',
+            background: 'transparent',
+            color: 'var(--fg-default)',
+            cursor: 'pointer',
+          }}
+        >
+          <svg
+            aria-hidden="true"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M9 18l6-6-6-6" />
+          </svg>
+        </button>
+      </div>
     );
   }
 
@@ -664,293 +664,201 @@ export function TeamSidebarWithFileTree({
         </div>
       </div>
 
-      {/* Tab 切换器 */}
-      <div className="team-v2-workspace-sidebar-tabs" style={TAB_BAR_STYLE}>
-        <button
-          type="button"
-          onClick={() => setActiveTab('sessions')}
-          className="team-v2-workspace-sidebar-tab"
-          data-active={activeTab === 'sessions' ? 'true' : 'false'}
-          style={tabButtonStyle(activeTab === 'sessions')}
-        >
-          <svg
-            aria-hidden="true"
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-          </svg>
-          <span>会话</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab('files')}
-          className="team-v2-workspace-sidebar-tab"
-          data-active={activeTab === 'files' ? 'true' : 'false'}
-          style={tabButtonStyle(activeTab === 'files')}
-          disabled={!workspacePath}
-          title={workspacePath ? '浏览工作区文件' : '无工作区路径'}
-        >
-          <svg
-            aria-hidden="true"
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-          </svg>
-          <span>文件树</span>
-        </button>
-      </div>
+      {/* 内容区：文件树 */}
 
-      {/* 搜索框（仅会话 tab） */}
-      {activeTab === 'sessions' && (
-        <div className="team-v2-workspace-sidebar-search" style={SEARCH_BAR_STYLE}>
-          <input
-            className="team-v2-workspace-sidebar-search-input"
-            type="text"
-            placeholder="搜索会话…"
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            style={SEARCH_INPUT_STYLE}
-            aria-label="搜索会话"
-          />
-        </div>
-      )}
-
-      {/* 内容区 */}
-      {activeTab === 'sessions' ? (
-        <TeamSessionListSidebar
-          collapsed={false}
-          canManageSessionEntries={canManageSessionEntries}
-          onSubmitDraft={onSubmitDraft}
-          teamWorkspaceId={teamWorkspaceId}
-          chromeless
-          controlledSearchQuery={searchQuery}
-          showNewSessionModal={showNewSessionModal}
-          onCloseNewSessionModal={handleCloseNewSessionModal}
-          initialTemplateId={initialTemplateId}
-          initialWorkingDirectory={effectiveInitialWorkingDirectory}
-          onOpenNewSessionModal={
-            onOpenNewSessionModal
-              ? onOpenNewSessionModal
-              : (_templateId?: string | null, workingDirectory?: string | null) => {
-                  setInternalInitialWorkingDirectory(workingDirectory ?? null);
-                  setInternalShowNewSessionModal(true);
-                }
-          }
-          {...sidebarProps}
-        />
-      ) : (
-        <div className="team-v2-workspace-sidebar-file-tree" style={FILE_TREE_CONTAINER_STYLE}>
-          <div className="team-v2-workspace-sidebar-file-header" style={FILE_TREE_HEADER_STYLE}>
-            <div
+      <div className="team-v2-workspace-sidebar-file-tree" style={FILE_TREE_CONTAINER_STYLE}>
+        <div className="team-v2-workspace-sidebar-file-header" style={FILE_TREE_HEADER_STYLE}>
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 2,
+              minWidth: 0,
+              flex: 1,
+            }}
+          >
+            <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--fg-muted)' }}>
+              工作区目录
+            </span>
+            <span
               style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 2,
-                minWidth: 0,
-                flex: 1,
-              }}
-            >
-              <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--fg-muted)' }}>
-                工作区目录
-              </span>
-              <span
-                style={{
-                  fontSize: 11,
-                  color: 'var(--fg-default)',
-                  fontWeight: 600,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-                title={workspacePath ?? '尚未选择工作区'}
-              >
-                {workspacePath ?? '尚未选择工作区'}
-              </span>
-            </div>
-            <button
-              type="button"
-              className="team-v2-workspace-sidebar-tool"
-              title={
-                !token ? '当前未连接到网关' : workspacePath ? '在根目录新建文件' : '请先选择工作区'
-              }
-              onClick={() => {
-                if (!workspacePath) return;
-                void createEntryAt('file', workspacePath, '工作区根目录');
-              }}
-              disabled={!canMutateWorkspaceTree}
-              style={{
-                ...FILE_TREE_TOOL_BTN_STYLE,
-                opacity: canMutateWorkspaceTree ? 1 : 0.5,
-                cursor: canMutateWorkspaceTree ? 'pointer' : 'not-allowed',
-              }}
-            >
-              <svg
-                aria-hidden="true"
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M12 5v14" />
-                <path d="M5 12h14" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              className="team-v2-workspace-sidebar-tool"
-              title={
-                !token
-                  ? '当前未连接到网关'
-                  : workspacePath
-                    ? '在根目录新建文件夹'
-                    : '请先选择工作区'
-              }
-              onClick={() => {
-                if (!workspacePath) return;
-                void createEntryAt('directory', workspacePath, '工作区根目录');
-              }}
-              disabled={!canMutateWorkspaceTree}
-              style={{
-                ...FILE_TREE_TOOL_BTN_STYLE,
-                opacity: canMutateWorkspaceTree ? 1 : 0.5,
-                cursor: canMutateWorkspaceTree ? 'pointer' : 'not-allowed',
-              }}
-            >
-              <svg
-                aria-hidden="true"
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                <path d="M12 11v6" />
-                <path d="M9 14h6" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              className="team-v2-workspace-sidebar-tool"
-              title={!token ? '当前未连接到网关' : workspacePath ? '刷新目录' : '请先选择工作区'}
-              onClick={handleRefreshTree}
-              disabled={!canRefreshWorkspaceTree}
-              style={{
-                ...FILE_TREE_TOOL_BTN_STYLE,
-                opacity: canRefreshWorkspaceTree ? 1 : 0.5,
-                cursor: canRefreshWorkspaceTree ? 'pointer' : 'not-allowed',
-              }}
-            >
-              <svg
-                aria-hidden="true"
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M21 12a9 9 0 0 1-15.7 6" />
-                <path d="M3 12a9 9 0 0 1 15.7-6" />
-                <path d="M3 6v6h6" />
-                <path d="M21 18v-6h-6" />
-              </svg>
-            </button>
-          </div>
-          {treeError ? (
-            <div
-              style={{
-                margin: '0 12px 8px',
-                padding: '8px 10px',
-                borderRadius: 8,
-                border: '1px solid color-mix(in srgb, var(--danger) 32%, transparent)',
-                background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay))',
-                color: 'var(--danger)',
                 fontSize: 11,
-                lineHeight: 1.5,
+                color: 'var(--fg-default)',
+                fontWeight: 600,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
               }}
+              title={workspacePath ?? '尚未选择工作区'}
             >
-              {treeError}
-            </div>
-          ) : null}
-          {treeLoading ? (
-            <div style={{ padding: '16px', color: 'var(--fg-muted)', fontSize: 11 }}>
-              加载文件目录…
-            </div>
-          ) : treeNodes.length === 0 ? (
-            <div style={{ padding: '16px', color: 'var(--fg-muted)', fontSize: 11 }}>
-              {workspacePath ? '目录为空' : '无工作区路径'}
-            </div>
-          ) : (
-            <>
-              <FileTreeView
-                nodes={treeNodes}
-                expandedDirs={expandedDirs}
-                onToggleDir={handleToggleDir}
-                onOpenFile={handlePreviewFile}
-                onNodeContextMenu={handleNodeContextMenu}
-              />
-              {contextMenu &&
-                createPortal(
-                  <FileTreeContextMenu
-                    x={contextMenu.x}
-                    y={contextMenu.y}
-                    targetLabel={contextMenu.target.name}
-                    targetType={contextMenu.target.type}
-                    relativePath={
-                      workspacePath
-                        ? getFileTreeRelativePath(workspacePath, contextMenu.target.path)
-                        : contextMenu.target.path
-                    }
-                    canOpen={contextMenu.target.type === 'file'}
-                    canCreateSession={Boolean(
-                      canManageSessionEntries && onSubmitDraft && teamWorkspaceId,
-                    )}
-                    onClose={handleCloseContextMenu}
-                    onOpen={handleContextMenuOpen}
-                    onCopyPath={handleCopyPath}
-                    onCopyRelativePath={handleCopyRelativePath}
-                    onCreateSession={
-                      contextMenu.target.type === 'directory'
-                        ? handleCreateSessionFromDirectory
-                        : undefined
-                    }
-                    onCreateFile={() => void handleCreateEntry('file')}
-                    onCreateFolder={() => void handleCreateEntry('directory')}
-                    onRefresh={handleRefreshTree}
-                    onDelete={() => void handleDeleteEntry()}
-                    onRename={() => void handleRenameEntry()}
-                    onReferenceInChat={handleReferenceInChat}
-                  />,
-                  document.body,
-                )}
-            </>
-          )}
+              {workspacePath ?? '尚未选择工作区'}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="team-v2-workspace-sidebar-tool"
+            title={
+              !token ? '当前未连接到网关' : workspacePath ? '在根目录新建文件' : '请先选择工作区'
+            }
+            onClick={() => {
+              if (!workspacePath) return;
+              void createEntryAt('file', workspacePath, '工作区根目录');
+            }}
+            disabled={!canMutateWorkspaceTree}
+            style={{
+              ...FILE_TREE_TOOL_BTN_STYLE,
+              opacity: canMutateWorkspaceTree ? 1 : 0.5,
+              cursor: canMutateWorkspaceTree ? 'pointer' : 'not-allowed',
+            }}
+          >
+            <svg
+              aria-hidden="true"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M12 5v14" />
+              <path d="M5 12h14" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="team-v2-workspace-sidebar-tool"
+            title={
+              !token ? '当前未连接到网关' : workspacePath ? '在根目录新建文件夹' : '请先选择工作区'
+            }
+            onClick={() => {
+              if (!workspacePath) return;
+              void createEntryAt('directory', workspacePath, '工作区根目录');
+            }}
+            disabled={!canMutateWorkspaceTree}
+            style={{
+              ...FILE_TREE_TOOL_BTN_STYLE,
+              opacity: canMutateWorkspaceTree ? 1 : 0.5,
+              cursor: canMutateWorkspaceTree ? 'pointer' : 'not-allowed',
+            }}
+          >
+            <svg
+              aria-hidden="true"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+              <path d="M12 11v6" />
+              <path d="M9 14h6" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="team-v2-workspace-sidebar-tool"
+            title={!token ? '当前未连接到网关' : workspacePath ? '刷新目录' : '请先选择工作区'}
+            onClick={handleRefreshTree}
+            disabled={!canRefreshWorkspaceTree}
+            style={{
+              ...FILE_TREE_TOOL_BTN_STYLE,
+              opacity: canRefreshWorkspaceTree ? 1 : 0.5,
+              cursor: canRefreshWorkspaceTree ? 'pointer' : 'not-allowed',
+            }}
+          >
+            <svg
+              aria-hidden="true"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M21 12a9 9 0 0 1-15.7 6" />
+              <path d="M3 12a9 9 0 0 1 15.7-6" />
+              <path d="M3 6v6h6" />
+              <path d="M21 18v-6h-6" />
+            </svg>
+          </button>
         </div>
-      )}
+        {treeError ? (
+          <div
+            style={{
+              margin: '0 12px 8px',
+              padding: '8px 10px',
+              borderRadius: 8,
+              border: '1px solid color-mix(in srgb, var(--danger) 32%, transparent)',
+              background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay))',
+              color: 'var(--danger)',
+              fontSize: 11,
+              lineHeight: 1.5,
+            }}
+          >
+            {treeError}
+          </div>
+        ) : null}
+        {treeLoading ? (
+          <div style={{ padding: '16px', color: 'var(--fg-muted)', fontSize: 11 }}>
+            加载文件目录…
+          </div>
+        ) : treeNodes.length === 0 ? (
+          <div style={{ padding: '16px', color: 'var(--fg-muted)', fontSize: 11 }}>
+            {workspacePath ? '目录为空' : '无工作区路径'}
+          </div>
+        ) : (
+          <>
+            <FileTreeView
+              nodes={treeNodes}
+              expandedDirs={expandedDirs}
+              onToggleDir={handleToggleDir}
+              onOpenFile={handlePreviewFile}
+              onNodeContextMenu={handleNodeContextMenu}
+            />
+            {contextMenu &&
+              createPortal(
+                <FileTreeContextMenu
+                  x={contextMenu.x}
+                  y={contextMenu.y}
+                  targetLabel={contextMenu.target.name}
+                  targetType={contextMenu.target.type}
+                  relativePath={
+                    workspacePath
+                      ? getFileTreeRelativePath(workspacePath, contextMenu.target.path)
+                      : contextMenu.target.path
+                  }
+                  canOpen={contextMenu.target.type === 'file'}
+                  canCreateSession={Boolean(
+                    canManageSessionEntries && onSubmitDraft && teamWorkspaceId,
+                  )}
+                  onClose={handleCloseContextMenu}
+                  onOpen={handleContextMenuOpen}
+                  onCopyPath={handleCopyPath}
+                  onCopyRelativePath={handleCopyRelativePath}
+                  onCreateSession={
+                    contextMenu.target.type === 'directory'
+                      ? handleCreateSessionFromDirectory
+                      : undefined
+                  }
+                  onCreateFile={() => void handleCreateEntry('file')}
+                  onCreateFolder={() => void handleCreateEntry('directory')}
+                  onRefresh={handleRefreshTree}
+                  onDelete={() => void handleDeleteEntry()}
+                  onRename={() => void handleRenameEntry()}
+                  onReferenceInChat={handleReferenceInChat}
+                />,
+                document.body,
+              )}
+          </>
+        )}
+      </div>
 
       <TeamFilePreviewPanel
         path={filePreview.path}
@@ -967,13 +875,13 @@ export function TeamSidebarWithFileTree({
             }
           : {})}
       />
-      {activeTab === 'files' && showNewSessionModal && teamWorkspaceId && onSubmitDraft ? (
+      {showNewSessionModal && teamWorkspaceId && onSubmitDraft ? (
         <NewTeamSessionModal
           onClose={handleCloseNewSessionModal}
           onSubmitDraft={onSubmitDraft}
-          workspaceLabel={sidebarProps.workspaceLabel ?? '默认工作区'}
+          workspaceLabel={_sidebarProps.workspaceLabel ?? '默认工作区'}
           teamWorkspaceId={teamWorkspaceId}
-          defaultMemberSlots={sidebarProps.defaultMemberSlots}
+          defaultMemberSlots={_sidebarProps.defaultMemberSlots}
           initialTemplateId={initialTemplateId}
           initialWorkingDirectory={effectiveInitialWorkingDirectory}
         />

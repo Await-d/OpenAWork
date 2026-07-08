@@ -5,7 +5,14 @@
  *   [审查 N] [文件] [Context] [+]
  */
 
-import type { CSSProperties, ReactNode } from 'react';
+import {
+  useCallback,
+  useId,
+  useRef,
+  type CSSProperties,
+  type KeyboardEvent,
+  type ReactNode,
+} from 'react';
 import './SessionSidePanel.css';
 
 export type SidePanelTabId = 'review' | 'files' | 'context';
@@ -25,6 +32,18 @@ interface TabDef {
   badge?: number;
 }
 
+type TabDirection = 'next' | 'previous';
+
+function getAdjacentTabId(tabId: SidePanelTabId, direction: TabDirection): SidePanelTabId {
+  if (tabId === 'review') {
+    return direction === 'next' ? 'files' : 'context';
+  }
+  if (tabId === 'files') {
+    return direction === 'next' ? 'context' : 'review';
+  }
+  return direction === 'next' ? 'review' : 'files';
+}
+
 export function SessionSidePanel({
   reviewCount = 0,
   activeTab,
@@ -33,24 +52,72 @@ export function SessionSidePanel({
   children,
   style,
 }: SessionSidePanelProps) {
+  const panelInstanceId = useId();
+  const tabButtonRefs = useRef<Record<SidePanelTabId, HTMLButtonElement | null>>({
+    context: null,
+    files: null,
+    review: null,
+  });
   const tabs: TabDef[] = [
     { id: 'review', label: '审查', badge: reviewCount || undefined },
     { id: 'files', label: '文件' },
     { id: 'context', label: 'Context' },
   ];
+  const activePanelId = `${panelInstanceId}-${activeTab}-panel`;
+  const activeTabId = `${panelInstanceId}-${activeTab}-tab`;
+  const focusTab = useCallback(
+    (tabId: SidePanelTabId) => {
+      onTabChange(tabId);
+      tabButtonRefs.current[tabId]?.focus();
+    },
+    [onTabChange],
+  );
+  const handleTabKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLButtonElement>, tabId: SidePanelTabId) => {
+      let nextTabId: SidePanelTabId | null = null;
+
+      if (event.key === 'ArrowRight') {
+        nextTabId = getAdjacentTabId(tabId, 'next');
+      } else if (event.key === 'ArrowLeft') {
+        nextTabId = getAdjacentTabId(tabId, 'previous');
+      } else if (event.key === 'Home') {
+        nextTabId = 'review';
+      } else if (event.key === 'End') {
+        nextTabId = 'context';
+      }
+
+      if (nextTabId === null) {
+        return;
+      }
+
+      event.preventDefault();
+      focusTab(nextTabId);
+    },
+    [focusTab],
+  );
 
   return (
     <aside className="session-side-panel" style={style}>
-      <div className="session-side-panel__tabs">
+      <div className="session-side-panel__tabs" role="tablist" aria-label="会话侧面板">
         {tabs.map((tab) => {
           const isActive = activeTab === tab.id;
+          const tabId = `${panelInstanceId}-${tab.id}-tab`;
           return (
             <button
               key={tab.id}
               type="button"
+              role="tab"
+              aria-controls={isActive ? activePanelId : undefined}
+              aria-selected={isActive}
               className="session-side-panel__tab"
               data-active={isActive ? 'true' : 'false'}
+              id={tabId}
               onClick={() => onTabChange(tab.id)}
+              onKeyDown={(event) => handleTabKeyDown(event, tab.id)}
+              ref={(element) => {
+                tabButtonRefs.current[tab.id] = element;
+              }}
+              tabIndex={isActive ? 0 : -1}
             >
               {tab.label}
               {tab.badge !== undefined && (
@@ -85,7 +152,14 @@ export function SessionSidePanel({
         )}
       </div>
 
-      <div className="session-side-panel__content">{children}</div>
+      <div
+        className="session-side-panel__content"
+        role="tabpanel"
+        aria-labelledby={activeTabId}
+        id={activePanelId}
+      >
+        {children}
+      </div>
     </aside>
   );
 }
