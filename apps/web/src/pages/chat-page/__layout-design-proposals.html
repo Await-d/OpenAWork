@@ -1,657 +1,1625 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>布局骨架 — T1 + S2 定稿</title>
-<style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body {
-  font-family: -apple-system, 'Segoe UI', monospace;
-  background: #0d1117;
-  color: #c8d1e0;
-  padding: 32px;
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-}
-h1 { font-size: 18px; color: #f1f4f8; text-align: center; }
-h2 { font-size: 15px; color: #5cd4c0; margin-bottom: 12px; }
-h3 { font-size: 13px; color: #f1f4f8; margin-bottom: 8px; }
-.desc { font-size: 12px; color: #7b8a9e; line-height: 1.6; margin-bottom: 12px; }
-.desc strong { color: #c8d1e0; }
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>布局骨架 — T1 + S2 定稿</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family: -apple-system, 'Segoe UI', monospace;
+        background: #0d1117;
+        color: #c8d1e0;
+        padding: 32px;
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+      }
+      h1 {
+        font-size: 18px;
+        color: #f1f4f8;
+        text-align: center;
+      }
+      h2 {
+        font-size: 15px;
+        color: #5cd4c0;
+        margin-bottom: 12px;
+      }
+      h3 {
+        font-size: 13px;
+        color: #f1f4f8;
+        margin-bottom: 8px;
+      }
+      .desc {
+        font-size: 12px;
+        color: #7b8a9e;
+        line-height: 1.6;
+        margin-bottom: 12px;
+      }
+      .desc strong {
+        color: #c8d1e0;
+      }
 
-.section {
-  background: #11151c;
-  border: 1px solid #1c2230;
-  border-radius: 8px;
-  padding: 20px;
-}
+      .section {
+        background: #11151c;
+        border: 1px solid #1c2230;
+        border-radius: 8px;
+        padding: 20px;
+      }
 
-.wf {
-  width: 100%;
-  border: 1px solid #2a3243;
-  border-radius: 8px;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  background: #0d1117;
-}
-.wf-row { display: flex; min-height: 0; }
-.wf-col { display: flex; flex-direction: column; min-width: 0; }
-.box {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px dashed #2a3243;
-  font-size: 11px;
-  color: #7b8a9e;
-  padding: 8px;
-  text-align: center;
-  background: #11151c;
-}
-.box.accent { border-color: rgba(92,212,192,0.3); background: rgba(92,212,192,0.04); color: #5cd4c0; }
-.box.aux { border-color: rgba(139,156,245,0.3); background: rgba(139,156,245,0.04); color: #8b9cf5; }
-.box.contrast { border-color: rgba(240,180,41,0.3); background: rgba(240,180,41,0.04); color: #f0b429; }
-.box.muted { background: #0d1117; color: #4d5b6e; border-style: dotted; }
+      .wf {
+        width: 100%;
+        border: 1px solid #2a3243;
+        border-radius: 8px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        background: #0d1117;
+      }
+      .wf-row {
+        display: flex;
+        min-height: 0;
+      }
+      .wf-col {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+      }
+      .box {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px dashed #2a3243;
+        font-size: 11px;
+        color: #7b8a9e;
+        padding: 8px;
+        text-align: center;
+        background: #11151c;
+      }
+      .box.accent {
+        border-color: rgba(92, 212, 192, 0.3);
+        background: rgba(92, 212, 192, 0.04);
+        color: #5cd4c0;
+      }
+      .box.aux {
+        border-color: rgba(139, 156, 245, 0.3);
+        background: rgba(139, 156, 245, 0.04);
+        color: #8b9cf5;
+      }
+      .box.contrast {
+        border-color: rgba(240, 180, 41, 0.3);
+        background: rgba(240, 180, 41, 0.04);
+        color: #f0b429;
+      }
+      .box.muted {
+        background: #0d1117;
+        color: #4d5b6e;
+        border-style: dotted;
+      }
 
-.ascii {
-  font-family: 'Cascadia Code', monospace;
-  font-size: 11px;
-  line-height: 1.5;
-  color: #7b8a9e;
-  white-space: pre;
-  background: #0d1117;
-  border: 1px solid #1c2230;
-  border-radius: 8px;
-  padding: 16px;
-  overflow-x: auto;
-}
-.ascii .hi { color: #5cd4c0; }
-.ascii .hi2 { color: #8b9cf5; }
-.ascii .dim { color: #4d5b6e; }
+      .ascii {
+        font-family: 'Cascadia Code', monospace;
+        font-size: 11px;
+        line-height: 1.5;
+        color: #7b8a9e;
+        white-space: pre;
+        background: #0d1117;
+        border: 1px solid #1c2230;
+        border-radius: 8px;
+        padding: 16px;
+        overflow-x: auto;
+      }
+      .ascii .hi {
+        color: #5cd4c0;
+      }
+      .ascii .hi2 {
+        color: #8b9cf5;
+      }
+      .ascii .dim {
+        color: #4d5b6e;
+      }
 
-.states { display: flex; gap: 8px; justify-content: center; margin-bottom: 16px; }
-.state-btn {
-  padding: 8px 16px; border-radius: 6px; font-size: 12px; font-weight: 700;
-  cursor: pointer; border: 1px solid #2a3243; background: #161b27; color: #7b8a9e;
-}
-.state-btn.active { color: #5cd4c0; border-color: rgba(92,212,192,0.3); background: rgba(92,212,192,0.07); }
-.state { display: none; }
-.state.visible { display: block; }
+      .states {
+        display: flex;
+        gap: 8px;
+        justify-content: center;
+        margin-bottom: 16px;
+      }
+      .state-btn {
+        padding: 8px 16px;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+        border: 1px solid #2a3243;
+        background: #161b27;
+        color: #7b8a9e;
+      }
+      .state-btn.active {
+        color: #5cd4c0;
+        border-color: rgba(92, 212, 192, 0.3);
+        background: rgba(92, 212, 192, 0.07);
+      }
+      .state {
+        display: none;
+      }
+      .state.visible {
+        display: block;
+      }
 
-@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
-</style>
-</head>
-<body>
+      @keyframes blink {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>布局定稿 — T1(纯标签栏) + S2(项目头像 Rail)</h1>
+    <p class="desc" style="text-align: center">
+      内容区固定为状态 2（对话 600px + 侧面板 flex:1），下方可切换不同展开状态
+    </p>
 
-<h1>布局定稿 — T1(纯标签栏) + S2(项目头像 Rail)</h1>
-<p class="desc" style="text-align: center;">内容区固定为状态 2（对话 600px + 侧面板 flex:1），下方可切换不同展开状态</p>
+    <!-- ═══ 全景 ASCII ═══ -->
+    <div class="section">
+      <h2>全景结构</h2>
+      <div class="ascii">
+        ┌─────────────────────────────────────────────────────────────────────┐ │ 🚦🟡🟢 [🏠] │
+        <span class="hi">[● 重构认证模块 ×]</span> [数据库 ×] [+] [⚙] │
+        <span class="dim">Titlebar 36px</span>
+        ├──────┬──────────────┬─────────────────┬──────────────────────────────┤ │ │ │ │ │ │
+        <span class="hi">[OA]</span> │ OpenAWork │ SessionHeader │
+        <span class="hi2">[审查 3]</span> [文件] [Ctx] [+] │ │ <span class="dim">[MA]</span> │
+        ~/projects │ GPT-4o · Agentic │ [Git ▾] [统一|分割] │ │ <span class="dim">[+]</span> │ [⋯] │
+        │ │ │ <span class="dim">───</span> │ │ │ ┌────────┬─────────────────┐ │ │
+        <span class="dim">[💬]</span> │ 🔍 搜索会话 │ │ │文件列表 │ Diff 视图 │ │ │
+        <span class="dim">[👥]</span> │ │ MessageTimeline │ │ 220px │ │ │ │
+        <span class="dim">[📅]</span> │ 会话列表 │ │ │▸ auth │ +10 -0 │ │ │
+        <span class="dim">[🔧]</span> │ · 会话A ● │ (600px) │ │▸ stream│ -12 +3 │ │ │
+        <span class="dim">[🤖]</span> │ · 会话B │ │ │▸ sess │ -15 +3 │ │ │ │ · 会话C │ Composer │ │
+        │ (代码 diff) │ │ │ │ │ │ └────────┴─────────────────┘ │ │ <span class="dim">[🔔]</span> │ +
+        新建会话 │ │ │ │ <span class="dim">[⚙️]</span> │ │ │ │ │ <span class="dim">[❓]</span> │ │ │
+        │ ├──────┴──────────────┴────────┬────────┴──────────────────────────────┤ │ ↔
+        <span class="dim">ResizeHandle</span> │
+        ├─────────────────────────────────────────────────────────────────────┤ │ ▸ 终端 ·
+        <span class="hi">2 个运行中</span> · Gateway ready [▴] │
+        <span class="dim">Terminal 36px</span>
+        └─────────────────────────────────────────────────────────────────────┘
 
-<!-- ═══ 全景 ASCII ═══ -->
-<div class="section">
-  <h2>全景结构</h2>
-<div class="ascii">┌─────────────────────────────────────────────────────────────────────┐
-│ 🚦🟡🟢  [🏠] │ <span class="hi">[● 重构认证模块 ×]</span> [数据库 ×] [+]            [⚙] │  <span class="dim">Titlebar 36px</span>
-├──────┬──────────────┬─────────────────┬──────────────────────────────┤
-│      │              │                 │                              │
-│ <span class="hi">[OA]</span> │ OpenAWork    │ SessionHeader   │ <span class="hi2">[审查 3]</span> [文件] [Ctx] [+]   │
-│ <span class="dim">[MA]</span> │ ~/projects   │ GPT-4o · Agentic │ [Git ▾] [统一|分割]          │
-│ <span class="dim">[+]</span> │         [⋯]  │                 │                              │
-│ <span class="dim">───</span> │              │                 │ ┌────────┬─────────────────┐ │
-│ <span class="dim">[💬]</span> │ 🔍 搜索会话  │                 │ │文件列表 │ Diff 视图       │ │
-│ <span class="dim">[👥]</span> │              │ MessageTimeline │ │ 220px  │                 │ │
-│ <span class="dim">[📅]</span> │ 会话列表      │                 │ │▸ auth  │ +10 -0          │ │
-│ <span class="dim">[🔧]</span> │  · 会话A ●   │ (600px)         │ │▸ stream│ -12 +3          │ │
-│ <span class="dim">[🤖]</span> │  · 会话B      │                 │ │▸ sess  │ -15 +3          │ │
-│      │  · 会话C      │ Composer        │ │        │ (代码 diff)    │ │
-│      │              │                 │ └────────┴─────────────────┘ │
-│ <span class="dim">[🔔]</span> │ + 新建会话   │                 │                              │
-│ <span class="dim">[⚙️]</span> │              │                 │                              │
-│ <span class="dim">[❓]</span> │              │                 │                              │
-├──────┴──────────────┴────────┬────────┴──────────────────────────────┤
-│                              ↔ <span class="dim">ResizeHandle</span>                    │
-├─────────────────────────────────────────────────────────────────────┤
-│ ▸ 终端 · <span class="hi">2 个运行中</span> · Gateway ready                        [▴]  │  <span class="dim">Terminal 36px</span>
-└─────────────────────────────────────────────────────────────────────┘
+        <span class="hi">Rail 64px</span> <span class="hi">Panel 244px</span>
+        <span class="hi2">SessionPanel 600px</span> <span class="hi2">SidePanel flex:1</span>
 
- <span class="hi">Rail 64px</span>  <span class="hi">Panel 244px</span>  <span class="hi2">SessionPanel 600px</span>  <span class="hi2">SidePanel flex:1</span>
+        <span class="hi">Rail 64px (永远可见, 不可折叠):</span>
+        顶部: 项目头像 [OA](active) [MA] [+] ← 点击切换工作区, Panel 跟随变化 ─── 分隔线 ─── 中部:
+        [💬] [👥] [📅] [🔧] [🤖] ← 功能导航图标 ─── 底部 ─── 底部: [🔔] [⚙️] [❓] ← 通知/设置/帮助
 
- <span class="hi">Rail 64px (永远可见, 不可折叠):</span>
-   顶部: 项目头像 [OA](active) [MA] [+]  ← 点击切换工作区, Panel 跟随变化
-   ─── 分隔线 ───
-   中部: [💬] [👥] [📅] [🔧] [🤖]          ← 功能导航图标
-   ─── 底部 ───
-   底部: [🔔] [⚙️] [❓]                    ← 通知/设置/帮助
+        <span class="hi">Panel 244px (可折叠, 折叠时 hover Rail 头像触发 peek):</span>
+        顶部: 当前项目名 + 路径 + [⋯]菜单 中部: 搜索框 + 该项目的会话列表 (扁平, 不按工作区分组)
+        底部: + 新建会话
 
- <span class="hi">Panel 244px (可折叠, 折叠时 hover Rail 头像触发 peek):</span>
-   顶部: 当前项目名 + 路径 + [⋯]菜单
-   中部: 搜索框 + 该项目的会话列表 (扁平, 不按工作区分组)
-   底部: + 新建会话
-
- <span class="hi2">Titlebar 36px:</span>
-   交通灯(macos) | [🏠]Home | 会话标签(flex:1, 可滚动可拖拽) | [⚙]工具菜单
-   [⚙] 弹出: 布局模式切换(融合/经典) + 主题 + 设置</div>
-</div>
-
-<!-- ═══ 交互线框 ═══ -->
-<div class="section">
-  <h2>交互线框 — 点击下方按钮切换状态</h2>
-  <div class="states">
-    <div class="state-btn active" onclick="showState('a')">终端折叠</div>
-    <div class="state-btn" onclick="showState('b')">终端展开</div>
-    <div class="state-btn" onclick="showState('c')">Panel 折叠 + Peek</div>
-  </div>
-
-<!-- 状态 A: 终端折叠 -->
-<div class="state visible" id="s-a">
-  <div class="wf" style="height: 520px;">
-    <!-- Titlebar -->
-    <div class="wf-row" style="height: 36px; border-bottom: 1px solid #1c2230;">
-      <div class="box muted" style="width: 72px; font-size: 10px;">🚦🟡🟢</div>
-      <div class="box" style="width: 36px; border-left: none; border-right: none;">🏠</div>
-      <div class="box" style="width: 1px; background: #2a3243; border: none;"></div>
-      <div class="box accent" style="flex: 1; justify-content: flex-start; padding-left: 10px; gap: 4px;">
-        <span style="background: rgba(92,212,192,0.12); padding: 3px 10px; border-radius: 4px; border: 1px solid rgba(92,212,192,0.2);">● 重构认证模块 ×</span>
-        <span style="color: #7b8a9e; padding: 3px 10px;">数据库设计 ×</span>
-        <span style="color: #4d5b6e; padding: 3px 6px; border: 1px solid #1c2230; border-radius: 4px;">+</span>
+        <span class="hi2">Titlebar 36px:</span>
+        交通灯(macos) | [🏠]Home | 会话标签(flex:1, 可滚动可拖拽) | [⚙]工具菜单 [⚙] 弹出:
+        布局模式切换(融合/经典) + 主题 + 设置
       </div>
-      <div class="box muted" style="width: 44px;">⚙</div>
     </div>
-    <!-- Main -->
-    <div class="wf-row" style="flex: 1;">
-      <!-- Rail -->
-      <div class="wf-col" style="width: 64px; border-right: 1px solid #1c2230;">
-        <div class="box accent" style="height: 120px; flex-direction: column; gap: 8px;">
-          <div style="width: 32px; height: 32px; border-radius: 6px; background: rgba(92,212,192,0.15); border: 2px solid #5cd4c0; display: grid; place-items: center; font-size: 10px; font-weight: 800; color: #5cd4c0;">OA</div>
-          <div style="width: 32px; height: 32px; border-radius: 6px; background: #1c2230; display: grid; place-items: center; font-size: 10px; font-weight: 800; color: #4d5b6e;">MA</div>
-          <div style="width: 32px; height: 24px; border-radius: 6px; border: 1px dashed #2a3243; display: grid; place-items: center; font-size: 12px; color: #4d5b6e;">+</div>
-        </div>
-        <div class="box" style="height: 6px; border: none; background: #1c2230;"></div>
-        <div class="box" style="flex: 1; flex-direction: column; gap: 10px; font-size: 18px;">
-          <span>💬</span><span style="opacity: 0.4;">👥</span><span style="opacity: 0.4;">📅</span><span style="opacity: 0.4;">🔧</span><span style="opacity: 0.4;">🤖</span>
-        </div>
-        <div class="box muted" style="height: 90px; flex-direction: column; gap: 10px; font-size: 18px; border-top: 1px solid #1c2230;">
-          <span>🔔</span><span>⚙️</span><span>❓</span>
-        </div>
+
+    <!-- ═══ 交互线框 ═══ -->
+    <div class="section">
+      <h2>交互线框 — 点击下方按钮切换状态</h2>
+      <div class="states">
+        <div class="state-btn active" onclick="showState('a')">终端折叠</div>
+        <div class="state-btn" onclick="showState('b')">终端展开</div>
+        <div class="state-btn" onclick="showState('c')">Panel 折叠 + Peek</div>
       </div>
-      <!-- Panel -->
-      <div class="wf-col" style="width: 244px; border-right: 1px solid #1c2230; flex-shrink: 0;">
-        <div class="box" style="height: 44px; border-bottom: 1px solid #1c2230; justify-content: space-between; padding: 0 12px;">
-          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 1px;">
-            <span style="color: #f1f4f8; font-weight: 700; font-size: 12px;">OpenAWork</span>
-            <span style="font-size: 10px; color: #4d5b6e;">~/projects/openawork</span>
-          </div>
-          <span style="color: #4d5b6e;">⋯</span>
-        </div>
-        <div class="box" style="height: 36px; border-bottom: 1px solid #1c2230; justify-content: flex-start; padding-left: 12px; color: #4d5b6e; font-size: 11px;">🔍 搜索会话...</div>
-        <div class="box" style="height: 24px; border-bottom: 1px solid #1c2230; justify-content: flex-start; padding-left: 12px; font-size: 10px; font-weight: 700; color: #4d5b6e; text-transform: uppercase;">会话列表 (4)</div>
-        <div class="wf-col" style="flex: 1;">
-          <div class="box accent" style="height: 36px; justify-content: flex-start; padding-left: 13px; border: none; border-radius: 0; border-left: 3px solid #5cd4c0;">· 重构认证模块 ●</div>
-          <div class="box muted" style="height: 36px; justify-content: flex-start; padding-left: 16px; border: none; border-radius: 0;">· 数据库设计</div>
-          <div class="box muted" style="height: 36px; justify-content: flex-start; padding-left: 16px; border: none; border-radius: 0;">· WebSocket 修复</div>
-          <div class="box muted" style="height: 36px; justify-content: flex-start; padding-left: 16px; border: none; border-radius: 0;">· Tauri v2 升级</div>
-        </div>
-        <div class="box accent" style="height: 36px; border-top: 1px solid #1c2230; font-weight: 600;">+ 新建会话</div>
-      </div>
-      <!-- SessionPanel 600px -->
-      <div class="wf-col" style="width: 600px; flex-shrink: 0; border-right: 1px solid #1c2230;">
-        <div class="box" style="height: 44px; border-bottom: 1px solid #1c2230; justify-content: space-between; padding: 0 16px;">
-          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 1px;">
-            <span style="color: #f1f4f8; font-weight: 700;">重构认证模块</span>
-            <span style="font-size: 10px; color: #7b8a9e;">GPT-4o · Agentic · ~/projects/openawork</span>
-          </div>
-          <div style="display: flex; gap: 4px;">
-            <span style="color: #5cd4c0; border: 1px solid rgba(92,212,192,0.2); padding: 2px 8px; border-radius: 4px; font-size: 10px;">审查</span>
-            <span style="color: #7b8a9e; border: 1px solid #2a3243; padding: 2px 8px; border-radius: 4px; font-size: 10px;">终端</span>
-            <span style="color: #7b8a9e; border: 1px solid #2a3243; padding: 2px 8px; border-radius: 4px; font-size: 10px;">⋯</span>
-          </div>
-        </div>
-        <div class="box muted" style="flex: 1; flex-direction: column; gap: 10px; padding: 14px; align-items: stretch;">
-          <div style="border: 1px solid #2a3243; border-radius: 6px; padding: 10px; font-size: 11px; color: #c8d1e0;">
-            <span style="color: #8b9cf5; font-weight: 700;">You:</span> 帮我重构 auth 模块，把 JWT 验证逻辑抽成独立中间件
-          </div>
-          <div style="border: 1px solid #2a3243; border-radius: 6px; padding: 10px; font-size: 11px; color: #c8d1e0;">
-            <span style="color: #5cd4c0; font-weight: 700;">AI:</span> 好的，已修改 3 个文件。点击右侧审查面板查看 Diff。
-          </div>
-          <div style="border: 1px solid rgba(92,212,192,0.15); background: rgba(92,212,192,0.04); border-radius: 6px; padding: 10px; font-size: 11px;">
-            <span style="color: #5cd4c0; font-weight: 700;">✓ 变更摘要:</span>
-            <span style="color: #7b8a9e;"> auth-middleware.ts (+45) · stream.ts (+3 -12) · session.ts (+3 -15)</span>
-          </div>
-          <div style="color: #4d5b6e; font-size: 11px; padding: 4px 0;">● ● ● (typing)</div>
-        </div>
-        <div class="box" style="height: 72px; border-top: 1px solid #1c2230; justify-content: flex-start; padding: 10px 16px; flex-direction: column; align-items: stretch; gap: 6px;">
-          <div style="font-size: 11px; color: #4d5b6e; border: 1px solid #2a3243; border-radius: 6px; padding: 6px 10px;">输入消息或 / 命令...</div>
-          <div style="display: flex; justify-content: space-between; align-items: center;">
-            <div style="display: flex; gap: 4px;">
-              <span style="font-size: 10px; color: #5cd4c0; border: 1px solid rgba(92,212,192,0.2); padding: 2px 8px; border-radius: 4px;">Agentic</span>
-              <span style="font-size: 10px; color: #7b8a9e; border: 1px solid #2a3243; padding: 2px 8px; border-radius: 4px;">@文件</span>
-              <span style="font-size: 10px; color: #7b8a9e; border: 1px solid #2a3243; padding: 2px 8px; border-radius: 4px;">🌐</span>
+
+      <!-- 状态 A: 终端折叠 -->
+      <div class="state visible" id="s-a">
+        <div class="wf" style="height: 520px">
+          <!-- Titlebar -->
+          <div class="wf-row" style="height: 36px; border-bottom: 1px solid #1c2230">
+            <div class="box muted" style="width: 72px; font-size: 10px">🚦🟡🟢</div>
+            <div class="box" style="width: 36px; border-left: none; border-right: none">🏠</div>
+            <div class="box" style="width: 1px; background: #2a3243; border: none"></div>
+            <div
+              class="box accent"
+              style="flex: 1; justify-content: flex-start; padding-left: 10px; gap: 4px"
+            >
+              <span
+                style="
+                  background: rgba(92, 212, 192, 0.12);
+                  padding: 3px 10px;
+                  border-radius: 4px;
+                  border: 1px solid rgba(92, 212, 192, 0.2);
+                "
+                >● 重构认证模块 ×</span
+              >
+              <span style="color: #7b8a9e; padding: 3px 10px">数据库设计 ×</span>
+              <span
+                style="
+                  color: #4d5b6e;
+                  padding: 3px 6px;
+                  border: 1px solid #1c2230;
+                  border-radius: 4px;
+                "
+                >+</span
+              >
             </div>
-            <span style="font-size: 10px; background: #5cd4c0; color: #052e22; padding: 3px 12px; border-radius: 4px; font-weight: 700;">发送 →</span>
+            <div class="box muted" style="width: 44px">⚙</div>
           </div>
-        </div>
-      </div>
-      <!-- ResizeHandle -->
-      <div class="box contrast" style="width: 8px; border-left: 1px solid #1c2230; border-right: 1px solid #1c2230;">↔</div>
-      <!-- SidePanel -->
-      <div class="wf-col" style="flex: 1;">
-        <div class="box aux" style="height: 40px; border-bottom: 1px solid #1c2230; justify-content: flex-start; padding-left: 12px; gap: 6px;">
-          <span style="border-bottom: 2px solid #8b9cf5; padding-bottom: 4px; color: #8b9cf5;">审查 (3)</span>
-          <span style="color: #4d5b6e; padding-bottom: 4px;">文件</span>
-          <span style="color: #4d5b6e; padding-bottom: 4px;">Context</span>
-          <span style="margin-left: auto; color: #4d5b6e;">+</span>
-        </div>
-        <div class="box" style="height: 36px; border-bottom: 1px solid #1c2230; justify-content: flex-start; padding-left: 12px; gap: 8px; font-size: 10px;">
-          <span style="border: 1px solid #2a3243; padding: 2px 8px; border-radius: 4px;">Git ▾</span>
-          <span style="border: 1px solid #2a3243; padding: 2px 8px; border-radius: 4px; color: #5cd4c0;">统一</span>
-          <span style="border: 1px solid #2a3243; padding: 2px 8px; border-radius: 4px; color: #7b8a9e;">分割</span>
-        </div>
-        <div class="wf-row" style="flex: 1;">
-          <div class="box" style="width: 220px; border-right: 1px solid #1c2230; flex-direction: column; align-items: stretch; padding: 8px; gap: 4px;">
-            <div style="font-size: 11px; color: #5cd4c0; padding: 4px 8px; background: rgba(92,212,192,0.06); border-radius: 4px;">▸ auth-middleware.ts <span style="color: #5cd4c0;">+45</span></div>
-            <div style="font-size: 11px; color: #7b8a9e; padding: 4px 8px;">▸ stream.ts <span style="color: #5cd4c0;">+3</span> <span style="color: #f06b7e;">-12</span></div>
-            <div style="font-size: 11px; color: #7b8a9e; padding: 4px 8px;">▸ session.ts <span style="color: #5cd4c0;">+3</span> <span style="color: #f06b7e;">-15</span></div>
-          </div>
-          <div class="box muted" style="flex: 1; justify-content: flex-start; align-items: flex-start; padding: 8px; font-family: monospace; font-size: 10px; text-align: left; line-height: 1.6;">
-            <div style="color: #5cd4c0;">+ export async function authMiddleware()</div>
-            <div style="color: #5cd4c0;">+   const token = req.headers...</div>
-            <div style="color: #5cd4c0;">+   if (!token) return 401</div>
-            <div style="color: #f06b7e;">- const token = req.headers['x-auth']</div>
-            <div style="color: #f06b7e;">- if (!token) return 403</div>
-          </div>
-        </div>
-      </div>
-    </div>
-    <!-- Terminal (折叠) -->
-    <div class="wf-row" style="height: 36px; border-top: 1px solid #1c2230;">
-      <div class="box muted" style="flex: 1; justify-content: flex-start; padding-left: 16px; font-size: 11px;">
-        <span>▸</span>&nbsp; 终端 · <span style="color: #5cd4c0;">2 个运行中</span> · Gateway ready · localhost:3000
-        <span style="margin-left: auto; padding-right: 16px;">▴</span>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- 状态 B: 终端展开 -->
-<div class="state" id="s-b">
-  <div class="wf" style="height: 520px;">
-    <div class="wf-row" style="height: 36px; border-bottom: 1px solid #1c2230;">
-      <div class="box muted" style="width: 72px; font-size: 10px;">🚦🟡🟢</div>
-      <div class="box" style="width: 36px; border-left: none; border-right: none;">🏠</div>
-      <div class="box" style="width: 1px; background: #2a3243; border: none;"></div>
-      <div class="box accent" style="flex: 1; justify-content: flex-start; padding-left: 10px; gap: 4px;">
-        <span style="background: rgba(92,212,192,0.12); padding: 3px 10px; border-radius: 4px; border: 1px solid rgba(92,212,192,0.2);">● 重构认证模块 ×</span>
-        <span style="color: #7b8a9e; padding: 3px 10px;">数据库设计 ×</span>
-        <span style="color: #4d5b6e; padding: 3px 6px; border: 1px solid #1c2230; border-radius: 4px;">+</span>
-      </div>
-      <div class="box muted" style="width: 44px;">⚙</div>
-    </div>
-    <div class="wf-row" style="flex: 1;">
-      <div class="wf-col" style="width: 64px; border-right: 1px solid #1c2230;">
-        <div class="box accent" style="height: 120px; flex-direction: column; gap: 8px;">
-          <div style="width: 32px; height: 32px; border-radius: 6px; background: rgba(92,212,192,0.15); border: 2px solid #5cd4c0; display: grid; place-items: center; font-size: 10px; font-weight: 800; color: #5cd4c0;">OA</div>
-          <div style="width: 32px; height: 32px; border-radius: 6px; background: #1c2230; display: grid; place-items: center; font-size: 10px; font-weight: 800; color: #4d5b6e;">MA</div>
-          <div style="width: 32px; height: 24px; border-radius: 6px; border: 1px dashed #2a3243; display: grid; place-items: center; font-size: 12px; color: #4d5b6e;">+</div>
-        </div>
-        <div class="box" style="height: 6px; border: none; background: #1c2230;"></div>
-        <div class="box" style="flex: 1; flex-direction: column; gap: 10px; font-size: 18px;">
-          <span>💬</span><span style="opacity: 0.4;">👥</span><span style="opacity: 0.4;">📅</span><span style="opacity: 0.4;">🔧</span><span style="opacity: 0.4;">🤖</span>
-        </div>
-        <div class="box muted" style="height: 90px; flex-direction: column; gap: 10px; font-size: 18px; border-top: 1px solid #1c2230;">
-          <span>🔔</span><span>⚙️</span><span>❓</span>
-        </div>
-      </div>
-      <div class="wf-col" style="width: 244px; border-right: 1px solid #1c2230; flex-shrink: 0;">
-        <div class="box" style="height: 44px; border-bottom: 1px solid #1c2230; justify-content: space-between; padding: 0 12px;">
-          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 1px;">
-            <span style="color: #f1f4f8; font-weight: 700; font-size: 12px;">OpenAWork</span>
-            <span style="font-size: 10px; color: #4d5b6e;">~/projects/openawork</span>
-          </div>
-          <span style="color: #4d5b6e;">⋯</span>
-        </div>
-        <div class="box" style="height: 36px; border-bottom: 1px solid #1c2230; justify-content: flex-start; padding-left: 12px; color: #4d5b6e; font-size: 11px;">🔍 搜索会话...</div>
-        <div class="box" style="height: 24px; border-bottom: 1px solid #1c2230; justify-content: flex-start; padding-left: 12px; font-size: 10px; font-weight: 700; color: #4d5b6e;">会话列表 (4)</div>
-        <div class="wf-col" style="flex: 1;">
-          <div class="box accent" style="height: 32px; justify-content: flex-start; padding-left: 13px; border: none; border-radius: 0; border-left: 3px solid #5cd4c0;">· 重构认证模块 ●</div>
-          <div class="box muted" style="height: 32px; justify-content: flex-start; padding-left: 16px; border: none; border-radius: 0;">· 数据库设计</div>
-          <div class="box muted" style="height: 32px; justify-content: flex-start; padding-left: 16px; border: none; border-radius: 0;">· WebSocket 修复</div>
-        </div>
-        <div class="box accent" style="height: 32px; border-top: 1px solid #1c2230; font-size: 11px;">+ 新建会话</div>
-      </div>
-      <div class="wf-col" style="width: 600px; flex-shrink: 0; border-right: 1px solid #1c2230;">
-        <div class="box" style="height: 40px; border-bottom: 1px solid #1c2230; justify-content: space-between; padding: 0 16px;">
-          <span style="color: #f1f4f8; font-weight: 700; font-size: 12px;">重构认证模块</span>
-          <div style="display: flex; gap: 4px;">
-            <span style="color: #5cd4c0; border: 1px solid rgba(92,212,192,0.2); padding: 2px 8px; border-radius: 4px; font-size: 10px;">审查</span>
-            <span style="color: #5cd4c0; border: 1px solid rgba(92,212,192,0.2); padding: 2px 8px; border-radius: 4px; font-size: 10px;">终端</span>
-          </div>
-        </div>
-        <div class="box muted" style="flex: 1; flex-direction: column; gap: 8px; padding: 12px; align-items: stretch;">
-          <div style="border: 1px solid #2a3243; border-radius: 6px; padding: 8px; font-size: 11px; color: #c8d1e0;">
-            <span style="color: #8b9cf5;">You:</span> 帮我重构 auth 模块
-          </div>
-          <div style="border: 1px solid #2a3243; border-radius: 6px; padding: 8px; font-size: 11px; color: #c8d1e0;">
-            <span style="color: #5cd4c0;">AI:</span> 已修改 3 个文件，终端正在运行测试...
-          </div>
-          <div style="color: #4d5b6e; font-size: 11px;">● ● ●</div>
-        </div>
-        <div class="box" style="height: 56px; border-top: 1px solid #1c2230; justify-content: flex-start; padding: 8px 16px; flex-direction: column; align-items: stretch; gap: 4px;">
-          <div style="font-size: 11px; color: #4d5b6e; border: 1px solid #2a3243; border-radius: 6px; padding: 4px 10px;">输入消息...</div>
-          <div style="display: flex; justify-content: space-between;">
-            <span style="font-size: 10px; color: #5cd4c0;">Agentic · @文件</span>
-            <span style="font-size: 10px; background: #5cd4c0; color: #052e22; padding: 2px 10px; border-radius: 4px; font-weight: 700;">发送</span>
-          </div>
-        </div>
-      </div>
-      <div class="box contrast" style="width: 8px;">↔</div>
-      <div class="wf-col" style="flex: 1;">
-        <div class="box aux" style="height: 40px; border-bottom: 1px solid #1c2230; justify-content: flex-start; padding-left: 12px; gap: 6px;">
-          <span style="border-bottom: 2px solid #8b9cf5; color: #8b9cf5;">审查 (3)</span>
-          <span style="color: #4d5b6e;">文件</span>
-          <span style="color: #4d5b6e;">Context</span>
-          <span style="margin-left: auto; color: #4d5b6e;">+</span>
-        </div>
-        <div class="box" style="height: 36px; border-bottom: 1px solid #1c2230; justify-content: flex-start; padding-left: 12px; gap: 8px; font-size: 10px;">
-          <span style="border: 1px solid #2a3243; padding: 2px 8px; border-radius: 4px;">当前轮次 ▾</span>
-          <span style="border: 1px solid #2a3243; padding: 2px 8px; border-radius: 4px; color: #5cd4c0;">统一</span>
-        </div>
-        <div class="wf-row" style="flex: 1;">
-          <div class="box" style="width: 220px; border-right: 1px solid #1c2230; flex-direction: column; align-items: stretch; padding: 8px; gap: 4px;">
-            <div style="font-size: 11px; color: #5cd4c0; padding: 4px 8px; background: rgba(92,212,192,0.06); border-radius: 4px;">▸ auth-mw.ts +45</div>
-            <div style="font-size: 11px; color: #7b8a9e; padding: 4px 8px;">▸ stream.ts +3 -12</div>
-            <div style="font-size: 11px; color: #7b8a9e; padding: 4px 8px;">▸ session.ts +3 -15</div>
-          </div>
-          <div class="box muted" style="flex: 1; justify-content: flex-start; align-items: flex-start; padding: 8px; font-family: monospace; font-size: 10px; text-align: left; line-height: 1.6;">
-            <div style="color: #5cd4c0;">+ export async function authMiddleware()</div>
-            <div style="color: #5cd4c0;">+   if (!token) return 401</div>
-            <div style="color: #f06b7e;">- if (!token) return 403</div>
-          </div>
-        </div>
-      </div>
-    </div>
-    <!-- Terminal (展开) -->
-    <div class="wf-row" style="height: 140px; border-top: 1px solid #1c2230;">
-      <div class="wf-col" style="flex: 1;">
-        <div class="box" style="height: 36px; border-bottom: 1px solid #1c2230; justify-content: flex-start; padding-left: 16px; gap: 8px; font-size: 11px;">
-          <span style="color: #5cd4c0;">bash ●</span>
-          <span style="color: #7b8a9e;">node</span>
-          <span style="color: #4d5b6e; border: 1px solid #2a3243; padding: 1px 6px; border-radius: 4px; font-size: 10px;">+</span>
-          <span style="margin-left: auto; font-size: 10px; color: #4d5b6e;">2 运行中</span>
-          <span style="color: #4d5b6e;">▾</span>
-          <span style="color: #4d5b6e;">✕</span>
-        </div>
-        <div class="box muted" style="flex: 1; justify-content: flex-start; align-items: flex-start; padding: 12px 16px; font-family: monospace; font-size: 11px; text-align: left; line-height: 1.6;">
-          <div><span style="color: #5cd4c0;">$</span> pnpm dev</div>
-          <div style="color: #7b8a9e;">Server listening on http://localhost:3000</div>
-          <div><span style="color: #5cd4c0;">✓</span> Gateway ready in 234ms</div>
-          <div><span style="color: #5cd4c0;">$</span> <span style="animation: blink 1s infinite; color: #5cd4c0;">▋</span></div>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- 状态 C: Panel 折叠 + Peek -->
-<div class="state" id="s-c">
-  <div class="wf" style="height: 520px;">
-    <div class="wf-row" style="height: 36px; border-bottom: 1px solid #1c2230;">
-      <div class="box muted" style="width: 72px; font-size: 10px;">🚦🟡🟢</div>
-      <div class="box" style="width: 36px; border-left: none; border-right: none;">🏠</div>
-      <div class="box" style="width: 1px; background: #2a3243; border: none;"></div>
-      <div class="box accent" style="flex: 1; justify-content: flex-start; padding-left: 10px; gap: 4px;">
-        <span style="background: rgba(92,212,192,0.12); padding: 3px 10px; border-radius: 4px; border: 1px solid rgba(92,212,192,0.2);">● 重构认证模块 ×</span>
-        <span style="color: #4d5b6e; padding: 3px 6px; border: 1px solid #1c2230; border-radius: 4px;">+</span>
-      </div>
-      <div class="box muted" style="width: 44px;">⚙</div>
-    </div>
-    <div class="wf-row" style="flex: 1;">
-      <!-- Rail (Panel 折叠, Rail 始终可见) -->
-      <div class="wf-col" style="width: 64px; border-right: 1px solid #1c2230; position: relative;">
-        <div class="box accent" style="height: 120px; flex-direction: column; gap: 8px; position: relative;">
-          <div style="width: 36px; height: 36px; border-radius: 6px; background: rgba(92,212,192,0.15); border: 2px solid #5cd4c0; display: grid; place-items: center; font-size: 10px; font-weight: 800; color: #5cd4c0; position: relative;">
-            OA
-            <!-- Peek 浮层 -->
-            <div style="position: absolute; left: 42px; top: -2px; width: 244px; height: 380px; background: #161b27; border: 1px solid rgba(92,212,192,0.2); border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); z-index: 10; display: flex; flex-direction: column; overflow: hidden; text-align: left;">
-              <div style="height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; border-bottom: 1px solid #1c2230; background: rgba(92,212,192,0.06);">
-                <div style="display: flex; flex-direction: column;">
-                  <span style="color: #5cd4c0; font-weight: 700; font-size: 12px;">OpenAWork</span>
-                  <span style="font-size: 10px; color: #4d5b6e;">~/projects/openawork</span>
+          <!-- Main -->
+          <div class="wf-row" style="flex: 1">
+            <!-- Rail -->
+            <div class="wf-col" style="width: 64px; border-right: 1px solid #1c2230">
+              <div class="box accent" style="height: 120px; flex-direction: column; gap: 8px">
+                <div
+                  style="
+                    width: 32px;
+                    height: 32px;
+                    border-radius: 6px;
+                    background: rgba(92, 212, 192, 0.15);
+                    border: 2px solid #5cd4c0;
+                    display: grid;
+                    place-items: center;
+                    font-size: 10px;
+                    font-weight: 800;
+                    color: #5cd4c0;
+                  "
+                >
+                  OA
                 </div>
-                <span style="color: #4d5b6e;">⋯</span>
+                <div
+                  style="
+                    width: 32px;
+                    height: 32px;
+                    border-radius: 6px;
+                    background: #1c2230;
+                    display: grid;
+                    place-items: center;
+                    font-size: 10px;
+                    font-weight: 800;
+                    color: #4d5b6e;
+                  "
+                >
+                  MA
+                </div>
+                <div
+                  style="
+                    width: 32px;
+                    height: 24px;
+                    border-radius: 6px;
+                    border: 1px dashed #2a3243;
+                    display: grid;
+                    place-items: center;
+                    font-size: 12px;
+                    color: #4d5b6e;
+                  "
+                >
+                  +
+                </div>
               </div>
-              <div style="height: 36px; display: flex; align-items: center; padding: 0 12px; border-bottom: 1px solid #1c2230; color: #4d5b6e; font-size: 11px;">🔍 搜索会话...</div>
-              <div style="flex: 1; overflow: hidden;">
-                <div style="height: 36px; display: flex; align-items: center; padding-left: 16px; border-left: 3px solid #5cd4c0; background: rgba(92,212,192,0.06); color: #5cd4c0; font-size: 11px;">· 重构认证模块 ●</div>
-                <div style="height: 36px; display: flex; align-items: center; padding-left: 16px; color: #4d5b6e; font-size: 11px;">· 数据库设计</div>
-                <div style="height: 36px; display: flex; align-items: center; padding-left: 16px; color: #4d5b6e; font-size: 11px;">· WebSocket 修复</div>
-                <div style="height: 36px; display: flex; align-items: center; padding-left: 16px; color: #4d5b6e; font-size: 11px;">· Tauri v2 升级</div>
+              <div class="box" style="height: 6px; border: none; background: #1c2230"></div>
+              <div class="box" style="flex: 1; flex-direction: column; gap: 10px; font-size: 18px">
+                <span>💬</span><span style="opacity: 0.4">👥</span
+                ><span style="opacity: 0.4">📅</span><span style="opacity: 0.4">🔧</span
+                ><span style="opacity: 0.4">🤖</span>
               </div>
-              <div style="height: 36px; display: flex; align-items: center; justify-content: center; border-top: 1px solid #1c2230; color: #5cd4c0; font-size: 11px; font-weight: 600;">+ 新建会话</div>
+              <div
+                class="box muted"
+                style="
+                  height: 90px;
+                  flex-direction: column;
+                  gap: 10px;
+                  font-size: 18px;
+                  border-top: 1px solid #1c2230;
+                "
+              >
+                <span>🔔</span><span>⚙️</span><span>❓</span>
+              </div>
+            </div>
+            <!-- Panel -->
+            <div
+              class="wf-col"
+              style="width: 244px; border-right: 1px solid #1c2230; flex-shrink: 0"
+            >
+              <div
+                class="box"
+                style="
+                  height: 44px;
+                  border-bottom: 1px solid #1c2230;
+                  justify-content: space-between;
+                  padding: 0 12px;
+                "
+              >
+                <div
+                  style="display: flex; flex-direction: column; align-items: flex-start; gap: 1px"
+                >
+                  <span style="color: #f1f4f8; font-weight: 700; font-size: 12px">OpenAWork</span>
+                  <span style="font-size: 10px; color: #4d5b6e">~/projects/openawork</span>
+                </div>
+                <span style="color: #4d5b6e">⋯</span>
+              </div>
+              <div
+                class="box"
+                style="
+                  height: 36px;
+                  border-bottom: 1px solid #1c2230;
+                  justify-content: flex-start;
+                  padding-left: 12px;
+                  color: #4d5b6e;
+                  font-size: 11px;
+                "
+              >
+                🔍 搜索会话...
+              </div>
+              <div
+                class="box"
+                style="
+                  height: 24px;
+                  border-bottom: 1px solid #1c2230;
+                  justify-content: flex-start;
+                  padding-left: 12px;
+                  font-size: 10px;
+                  font-weight: 700;
+                  color: #4d5b6e;
+                  text-transform: uppercase;
+                "
+              >
+                会话列表 (4)
+              </div>
+              <div class="wf-col" style="flex: 1">
+                <div
+                  class="box accent"
+                  style="
+                    height: 36px;
+                    justify-content: flex-start;
+                    padding-left: 13px;
+                    border: none;
+                    border-radius: 0;
+                    border-left: 3px solid #5cd4c0;
+                  "
+                >
+                  · 重构认证模块 ●
+                </div>
+                <div
+                  class="box muted"
+                  style="
+                    height: 36px;
+                    justify-content: flex-start;
+                    padding-left: 16px;
+                    border: none;
+                    border-radius: 0;
+                  "
+                >
+                  · 数据库设计
+                </div>
+                <div
+                  class="box muted"
+                  style="
+                    height: 36px;
+                    justify-content: flex-start;
+                    padding-left: 16px;
+                    border: none;
+                    border-radius: 0;
+                  "
+                >
+                  · WebSocket 修复
+                </div>
+                <div
+                  class="box muted"
+                  style="
+                    height: 36px;
+                    justify-content: flex-start;
+                    padding-left: 16px;
+                    border: none;
+                    border-radius: 0;
+                  "
+                >
+                  · Tauri v2 升级
+                </div>
+              </div>
+              <div
+                class="box accent"
+                style="height: 36px; border-top: 1px solid #1c2230; font-weight: 600"
+              >
+                + 新建会话
+              </div>
+            </div>
+            <!-- SessionPanel 600px -->
+            <div
+              class="wf-col"
+              style="width: 600px; flex-shrink: 0; border-right: 1px solid #1c2230"
+            >
+              <div
+                class="box"
+                style="
+                  height: 44px;
+                  border-bottom: 1px solid #1c2230;
+                  justify-content: space-between;
+                  padding: 0 16px;
+                "
+              >
+                <div
+                  style="display: flex; flex-direction: column; align-items: flex-start; gap: 1px"
+                >
+                  <span style="color: #f1f4f8; font-weight: 700">重构认证模块</span>
+                  <span style="font-size: 10px; color: #7b8a9e"
+                    >GPT-4o · Agentic · ~/projects/openawork</span
+                  >
+                </div>
+                <div style="display: flex; gap: 4px">
+                  <span
+                    style="
+                      color: #5cd4c0;
+                      border: 1px solid rgba(92, 212, 192, 0.2);
+                      padding: 2px 8px;
+                      border-radius: 4px;
+                      font-size: 10px;
+                    "
+                    >审查</span
+                  >
+                  <span
+                    style="
+                      color: #7b8a9e;
+                      border: 1px solid #2a3243;
+                      padding: 2px 8px;
+                      border-radius: 4px;
+                      font-size: 10px;
+                    "
+                    >终端</span
+                  >
+                  <span
+                    style="
+                      color: #7b8a9e;
+                      border: 1px solid #2a3243;
+                      padding: 2px 8px;
+                      border-radius: 4px;
+                      font-size: 10px;
+                    "
+                    >⋯</span
+                  >
+                </div>
+              </div>
+              <div
+                class="box muted"
+                style="
+                  flex: 1;
+                  flex-direction: column;
+                  gap: 10px;
+                  padding: 14px;
+                  align-items: stretch;
+                "
+              >
+                <div
+                  style="
+                    border: 1px solid #2a3243;
+                    border-radius: 6px;
+                    padding: 10px;
+                    font-size: 11px;
+                    color: #c8d1e0;
+                  "
+                >
+                  <span style="color: #8b9cf5; font-weight: 700">You:</span> 帮我重构 auth 模块，把
+                  JWT 验证逻辑抽成独立中间件
+                </div>
+                <div
+                  style="
+                    border: 1px solid #2a3243;
+                    border-radius: 6px;
+                    padding: 10px;
+                    font-size: 11px;
+                    color: #c8d1e0;
+                  "
+                >
+                  <span style="color: #5cd4c0; font-weight: 700">AI:</span> 好的，已修改 3
+                  个文件。点击右侧审查面板查看 Diff。
+                </div>
+                <div
+                  style="
+                    border: 1px solid rgba(92, 212, 192, 0.15);
+                    background: rgba(92, 212, 192, 0.04);
+                    border-radius: 6px;
+                    padding: 10px;
+                    font-size: 11px;
+                  "
+                >
+                  <span style="color: #5cd4c0; font-weight: 700">✓ 变更摘要:</span>
+                  <span style="color: #7b8a9e">
+                    auth-middleware.ts (+45) · stream.ts (+3 -12) · session.ts (+3 -15)</span
+                  >
+                </div>
+                <div style="color: #4d5b6e; font-size: 11px; padding: 4px 0">● ● ● (typing)</div>
+              </div>
+              <div
+                class="box"
+                style="
+                  height: 72px;
+                  border-top: 1px solid #1c2230;
+                  justify-content: flex-start;
+                  padding: 10px 16px;
+                  flex-direction: column;
+                  align-items: stretch;
+                  gap: 6px;
+                "
+              >
+                <div
+                  style="
+                    font-size: 11px;
+                    color: #4d5b6e;
+                    border: 1px solid #2a3243;
+                    border-radius: 6px;
+                    padding: 6px 10px;
+                  "
+                >
+                  输入消息或 / 命令...
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center">
+                  <div style="display: flex; gap: 4px">
+                    <span
+                      style="
+                        font-size: 10px;
+                        color: #5cd4c0;
+                        border: 1px solid rgba(92, 212, 192, 0.2);
+                        padding: 2px 8px;
+                        border-radius: 4px;
+                      "
+                      >Agentic</span
+                    >
+                    <span
+                      style="
+                        font-size: 10px;
+                        color: #7b8a9e;
+                        border: 1px solid #2a3243;
+                        padding: 2px 8px;
+                        border-radius: 4px;
+                      "
+                      >@文件</span
+                    >
+                    <span
+                      style="
+                        font-size: 10px;
+                        color: #7b8a9e;
+                        border: 1px solid #2a3243;
+                        padding: 2px 8px;
+                        border-radius: 4px;
+                      "
+                      >🌐</span
+                    >
+                  </div>
+                  <span
+                    style="
+                      font-size: 10px;
+                      background: #5cd4c0;
+                      color: #052e22;
+                      padding: 3px 12px;
+                      border-radius: 4px;
+                      font-weight: 700;
+                    "
+                    >发送 →</span
+                  >
+                </div>
+              </div>
+            </div>
+            <!-- ResizeHandle -->
+            <div
+              class="box contrast"
+              style="width: 8px; border-left: 1px solid #1c2230; border-right: 1px solid #1c2230"
+            >
+              ↔
+            </div>
+            <!-- SidePanel -->
+            <div class="wf-col" style="flex: 1">
+              <div
+                class="box aux"
+                style="
+                  height: 40px;
+                  border-bottom: 1px solid #1c2230;
+                  justify-content: flex-start;
+                  padding-left: 12px;
+                  gap: 6px;
+                "
+              >
+                <span style="border-bottom: 2px solid #8b9cf5; padding-bottom: 4px; color: #8b9cf5"
+                  >审查 (3)</span
+                >
+                <span style="color: #4d5b6e; padding-bottom: 4px">文件</span>
+                <span style="color: #4d5b6e; padding-bottom: 4px">Context</span>
+                <span style="margin-left: auto; color: #4d5b6e">+</span>
+              </div>
+              <div
+                class="box"
+                style="
+                  height: 36px;
+                  border-bottom: 1px solid #1c2230;
+                  justify-content: flex-start;
+                  padding-left: 12px;
+                  gap: 8px;
+                  font-size: 10px;
+                "
+              >
+                <span style="border: 1px solid #2a3243; padding: 2px 8px; border-radius: 4px"
+                  >Git ▾</span
+                >
+                <span
+                  style="
+                    border: 1px solid #2a3243;
+                    padding: 2px 8px;
+                    border-radius: 4px;
+                    color: #5cd4c0;
+                  "
+                  >统一</span
+                >
+                <span
+                  style="
+                    border: 1px solid #2a3243;
+                    padding: 2px 8px;
+                    border-radius: 4px;
+                    color: #7b8a9e;
+                  "
+                  >分割</span
+                >
+              </div>
+              <div class="wf-row" style="flex: 1">
+                <div
+                  class="box"
+                  style="
+                    width: 220px;
+                    border-right: 1px solid #1c2230;
+                    flex-direction: column;
+                    align-items: stretch;
+                    padding: 8px;
+                    gap: 4px;
+                  "
+                >
+                  <div
+                    style="
+                      font-size: 11px;
+                      color: #5cd4c0;
+                      padding: 4px 8px;
+                      background: rgba(92, 212, 192, 0.06);
+                      border-radius: 4px;
+                    "
+                  >
+                    ▸ auth-middleware.ts <span style="color: #5cd4c0">+45</span>
+                  </div>
+                  <div style="font-size: 11px; color: #7b8a9e; padding: 4px 8px">
+                    ▸ stream.ts <span style="color: #5cd4c0">+3</span>
+                    <span style="color: #f06b7e">-12</span>
+                  </div>
+                  <div style="font-size: 11px; color: #7b8a9e; padding: 4px 8px">
+                    ▸ session.ts <span style="color: #5cd4c0">+3</span>
+                    <span style="color: #f06b7e">-15</span>
+                  </div>
+                </div>
+                <div
+                  class="box muted"
+                  style="
+                    flex: 1;
+                    justify-content: flex-start;
+                    align-items: flex-start;
+                    padding: 8px;
+                    font-family: monospace;
+                    font-size: 10px;
+                    text-align: left;
+                    line-height: 1.6;
+                  "
+                >
+                  <div style="color: #5cd4c0">+ export async function authMiddleware()</div>
+                  <div style="color: #5cd4c0">+ const token = req.headers...</div>
+                  <div style="color: #5cd4c0">+ if (!token) return 401</div>
+                  <div style="color: #f06b7e">- const token = req.headers['x-auth']</div>
+                  <div style="color: #f06b7e">- if (!token) return 403</div>
+                </div>
+              </div>
             </div>
           </div>
-          <div style="width: 32px; height: 32px; border-radius: 6px; background: #1c2230; display: grid; place-items: center; font-size: 10px; font-weight: 800; color: #4d5b6e;">MA</div>
-          <div style="width: 32px; height: 24px; border-radius: 6px; border: 1px dashed #2a3243; display: grid; place-items: center; font-size: 12px; color: #4d5b6e;">+</div>
-        </div>
-        <div class="box" style="height: 6px; border: none; background: #1c2230;"></div>
-        <div class="box" style="flex: 1; flex-direction: column; gap: 10px; font-size: 18px;">
-          <span>💬</span><span style="opacity: 0.4;">👥</span><span style="opacity: 0.4;">📅</span><span style="opacity: 0.4;">🔧</span><span style="opacity: 0.4;">🤖</span>
-        </div>
-        <div class="box muted" style="height: 90px; flex-direction: column; gap: 10px; font-size: 18px; border-top: 1px solid #1c2230;">
-          <span>🔔</span><span>⚙️</span><span>❓</span>
-        </div>
-      </div>
-      <!-- SessionPanel (Panel 折叠后占满) -->
-      <div class="wf-col" style="flex: 1;">
-        <div class="box" style="height: 44px; border-bottom: 1px solid #1c2230; justify-content: space-between; padding: 0 16px;">
-          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 1px;">
-            <span style="color: #f1f4f8; font-weight: 700;">重构认证模块</span>
-            <span style="font-size: 10px; color: #7b8a9e;">GPT-4o · Agentic</span>
-          </div>
-          <div style="display: flex; gap: 4px;">
-            <span style="color: #5cd4c0; border: 1px solid rgba(92,212,192,0.2); padding: 2px 8px; border-radius: 4px; font-size: 10px;">审查</span>
-            <span style="color: #7b8a9e; border: 1px solid #2a3243; padding: 2px 8px; border-radius: 4px; font-size: 10px;">终端</span>
+          <!-- Terminal (折叠) -->
+          <div class="wf-row" style="height: 36px; border-top: 1px solid #1c2230">
+            <div
+              class="box muted"
+              style="flex: 1; justify-content: flex-start; padding-left: 16px; font-size: 11px"
+            >
+              <span>▸</span>&nbsp; 终端 · <span style="color: #5cd4c0">2 个运行中</span> · Gateway
+              ready · localhost:3000
+              <span style="margin-left: auto; padding-right: 16px">▴</span>
+            </div>
           </div>
         </div>
-        <div class="box muted" style="flex: 1; position: relative;">
-          MessageTimeline
-          <div style="position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 50%; border: 1px dashed rgba(92,212,192,0.15); border-radius: 6px; padding: 16px; color: #5cd4c0; font-size: 11px;">
-            居中 720px 消息区
+      </div>
+
+      <!-- 状态 B: 终端展开 -->
+      <div class="state" id="s-b">
+        <div class="wf" style="height: 520px">
+          <div class="wf-row" style="height: 36px; border-bottom: 1px solid #1c2230">
+            <div class="box muted" style="width: 72px; font-size: 10px">🚦🟡🟢</div>
+            <div class="box" style="width: 36px; border-left: none; border-right: none">🏠</div>
+            <div class="box" style="width: 1px; background: #2a3243; border: none"></div>
+            <div
+              class="box accent"
+              style="flex: 1; justify-content: flex-start; padding-left: 10px; gap: 4px"
+            >
+              <span
+                style="
+                  background: rgba(92, 212, 192, 0.12);
+                  padding: 3px 10px;
+                  border-radius: 4px;
+                  border: 1px solid rgba(92, 212, 192, 0.2);
+                "
+                >● 重构认证模块 ×</span
+              >
+              <span style="color: #7b8a9e; padding: 3px 10px">数据库设计 ×</span>
+              <span
+                style="
+                  color: #4d5b6e;
+                  padding: 3px 6px;
+                  border: 1px solid #1c2230;
+                  border-radius: 4px;
+                "
+                >+</span
+              >
+            </div>
+            <div class="box muted" style="width: 44px">⚙</div>
+          </div>
+          <div class="wf-row" style="flex: 1">
+            <div class="wf-col" style="width: 64px; border-right: 1px solid #1c2230">
+              <div class="box accent" style="height: 120px; flex-direction: column; gap: 8px">
+                <div
+                  style="
+                    width: 32px;
+                    height: 32px;
+                    border-radius: 6px;
+                    background: rgba(92, 212, 192, 0.15);
+                    border: 2px solid #5cd4c0;
+                    display: grid;
+                    place-items: center;
+                    font-size: 10px;
+                    font-weight: 800;
+                    color: #5cd4c0;
+                  "
+                >
+                  OA
+                </div>
+                <div
+                  style="
+                    width: 32px;
+                    height: 32px;
+                    border-radius: 6px;
+                    background: #1c2230;
+                    display: grid;
+                    place-items: center;
+                    font-size: 10px;
+                    font-weight: 800;
+                    color: #4d5b6e;
+                  "
+                >
+                  MA
+                </div>
+                <div
+                  style="
+                    width: 32px;
+                    height: 24px;
+                    border-radius: 6px;
+                    border: 1px dashed #2a3243;
+                    display: grid;
+                    place-items: center;
+                    font-size: 12px;
+                    color: #4d5b6e;
+                  "
+                >
+                  +
+                </div>
+              </div>
+              <div class="box" style="height: 6px; border: none; background: #1c2230"></div>
+              <div class="box" style="flex: 1; flex-direction: column; gap: 10px; font-size: 18px">
+                <span>💬</span><span style="opacity: 0.4">👥</span
+                ><span style="opacity: 0.4">📅</span><span style="opacity: 0.4">🔧</span
+                ><span style="opacity: 0.4">🤖</span>
+              </div>
+              <div
+                class="box muted"
+                style="
+                  height: 90px;
+                  flex-direction: column;
+                  gap: 10px;
+                  font-size: 18px;
+                  border-top: 1px solid #1c2230;
+                "
+              >
+                <span>🔔</span><span>⚙️</span><span>❓</span>
+              </div>
+            </div>
+            <div
+              class="wf-col"
+              style="width: 244px; border-right: 1px solid #1c2230; flex-shrink: 0"
+            >
+              <div
+                class="box"
+                style="
+                  height: 44px;
+                  border-bottom: 1px solid #1c2230;
+                  justify-content: space-between;
+                  padding: 0 12px;
+                "
+              >
+                <div
+                  style="display: flex; flex-direction: column; align-items: flex-start; gap: 1px"
+                >
+                  <span style="color: #f1f4f8; font-weight: 700; font-size: 12px">OpenAWork</span>
+                  <span style="font-size: 10px; color: #4d5b6e">~/projects/openawork</span>
+                </div>
+                <span style="color: #4d5b6e">⋯</span>
+              </div>
+              <div
+                class="box"
+                style="
+                  height: 36px;
+                  border-bottom: 1px solid #1c2230;
+                  justify-content: flex-start;
+                  padding-left: 12px;
+                  color: #4d5b6e;
+                  font-size: 11px;
+                "
+              >
+                🔍 搜索会话...
+              </div>
+              <div
+                class="box"
+                style="
+                  height: 24px;
+                  border-bottom: 1px solid #1c2230;
+                  justify-content: flex-start;
+                  padding-left: 12px;
+                  font-size: 10px;
+                  font-weight: 700;
+                  color: #4d5b6e;
+                "
+              >
+                会话列表 (4)
+              </div>
+              <div class="wf-col" style="flex: 1">
+                <div
+                  class="box accent"
+                  style="
+                    height: 32px;
+                    justify-content: flex-start;
+                    padding-left: 13px;
+                    border: none;
+                    border-radius: 0;
+                    border-left: 3px solid #5cd4c0;
+                  "
+                >
+                  · 重构认证模块 ●
+                </div>
+                <div
+                  class="box muted"
+                  style="
+                    height: 32px;
+                    justify-content: flex-start;
+                    padding-left: 16px;
+                    border: none;
+                    border-radius: 0;
+                  "
+                >
+                  · 数据库设计
+                </div>
+                <div
+                  class="box muted"
+                  style="
+                    height: 32px;
+                    justify-content: flex-start;
+                    padding-left: 16px;
+                    border: none;
+                    border-radius: 0;
+                  "
+                >
+                  · WebSocket 修复
+                </div>
+              </div>
+              <div
+                class="box accent"
+                style="height: 32px; border-top: 1px solid #1c2230; font-size: 11px"
+              >
+                + 新建会话
+              </div>
+            </div>
+            <div
+              class="wf-col"
+              style="width: 600px; flex-shrink: 0; border-right: 1px solid #1c2230"
+            >
+              <div
+                class="box"
+                style="
+                  height: 40px;
+                  border-bottom: 1px solid #1c2230;
+                  justify-content: space-between;
+                  padding: 0 16px;
+                "
+              >
+                <span style="color: #f1f4f8; font-weight: 700; font-size: 12px">重构认证模块</span>
+                <div style="display: flex; gap: 4px">
+                  <span
+                    style="
+                      color: #5cd4c0;
+                      border: 1px solid rgba(92, 212, 192, 0.2);
+                      padding: 2px 8px;
+                      border-radius: 4px;
+                      font-size: 10px;
+                    "
+                    >审查</span
+                  >
+                  <span
+                    style="
+                      color: #5cd4c0;
+                      border: 1px solid rgba(92, 212, 192, 0.2);
+                      padding: 2px 8px;
+                      border-radius: 4px;
+                      font-size: 10px;
+                    "
+                    >终端</span
+                  >
+                </div>
+              </div>
+              <div
+                class="box muted"
+                style="
+                  flex: 1;
+                  flex-direction: column;
+                  gap: 8px;
+                  padding: 12px;
+                  align-items: stretch;
+                "
+              >
+                <div
+                  style="
+                    border: 1px solid #2a3243;
+                    border-radius: 6px;
+                    padding: 8px;
+                    font-size: 11px;
+                    color: #c8d1e0;
+                  "
+                >
+                  <span style="color: #8b9cf5">You:</span> 帮我重构 auth 模块
+                </div>
+                <div
+                  style="
+                    border: 1px solid #2a3243;
+                    border-radius: 6px;
+                    padding: 8px;
+                    font-size: 11px;
+                    color: #c8d1e0;
+                  "
+                >
+                  <span style="color: #5cd4c0">AI:</span> 已修改 3 个文件，终端正在运行测试...
+                </div>
+                <div style="color: #4d5b6e; font-size: 11px">● ● ●</div>
+              </div>
+              <div
+                class="box"
+                style="
+                  height: 56px;
+                  border-top: 1px solid #1c2230;
+                  justify-content: flex-start;
+                  padding: 8px 16px;
+                  flex-direction: column;
+                  align-items: stretch;
+                  gap: 4px;
+                "
+              >
+                <div
+                  style="
+                    font-size: 11px;
+                    color: #4d5b6e;
+                    border: 1px solid #2a3243;
+                    border-radius: 6px;
+                    padding: 4px 10px;
+                  "
+                >
+                  输入消息...
+                </div>
+                <div style="display: flex; justify-content: space-between">
+                  <span style="font-size: 10px; color: #5cd4c0">Agentic · @文件</span>
+                  <span
+                    style="
+                      font-size: 10px;
+                      background: #5cd4c0;
+                      color: #052e22;
+                      padding: 2px 10px;
+                      border-radius: 4px;
+                      font-weight: 700;
+                    "
+                    >发送</span
+                  >
+                </div>
+              </div>
+            </div>
+            <div class="box contrast" style="width: 8px">↔</div>
+            <div class="wf-col" style="flex: 1">
+              <div
+                class="box aux"
+                style="
+                  height: 40px;
+                  border-bottom: 1px solid #1c2230;
+                  justify-content: flex-start;
+                  padding-left: 12px;
+                  gap: 6px;
+                "
+              >
+                <span style="border-bottom: 2px solid #8b9cf5; color: #8b9cf5">审查 (3)</span>
+                <span style="color: #4d5b6e">文件</span>
+                <span style="color: #4d5b6e">Context</span>
+                <span style="margin-left: auto; color: #4d5b6e">+</span>
+              </div>
+              <div
+                class="box"
+                style="
+                  height: 36px;
+                  border-bottom: 1px solid #1c2230;
+                  justify-content: flex-start;
+                  padding-left: 12px;
+                  gap: 8px;
+                  font-size: 10px;
+                "
+              >
+                <span style="border: 1px solid #2a3243; padding: 2px 8px; border-radius: 4px"
+                  >当前轮次 ▾</span
+                >
+                <span
+                  style="
+                    border: 1px solid #2a3243;
+                    padding: 2px 8px;
+                    border-radius: 4px;
+                    color: #5cd4c0;
+                  "
+                  >统一</span
+                >
+              </div>
+              <div class="wf-row" style="flex: 1">
+                <div
+                  class="box"
+                  style="
+                    width: 220px;
+                    border-right: 1px solid #1c2230;
+                    flex-direction: column;
+                    align-items: stretch;
+                    padding: 8px;
+                    gap: 4px;
+                  "
+                >
+                  <div
+                    style="
+                      font-size: 11px;
+                      color: #5cd4c0;
+                      padding: 4px 8px;
+                      background: rgba(92, 212, 192, 0.06);
+                      border-radius: 4px;
+                    "
+                  >
+                    ▸ auth-mw.ts +45
+                  </div>
+                  <div style="font-size: 11px; color: #7b8a9e; padding: 4px 8px">
+                    ▸ stream.ts +3 -12
+                  </div>
+                  <div style="font-size: 11px; color: #7b8a9e; padding: 4px 8px">
+                    ▸ session.ts +3 -15
+                  </div>
+                </div>
+                <div
+                  class="box muted"
+                  style="
+                    flex: 1;
+                    justify-content: flex-start;
+                    align-items: flex-start;
+                    padding: 8px;
+                    font-family: monospace;
+                    font-size: 10px;
+                    text-align: left;
+                    line-height: 1.6;
+                  "
+                >
+                  <div style="color: #5cd4c0">+ export async function authMiddleware()</div>
+                  <div style="color: #5cd4c0">+ if (!token) return 401</div>
+                  <div style="color: #f06b7e">- if (!token) return 403</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- Terminal (展开) -->
+          <div class="wf-row" style="height: 140px; border-top: 1px solid #1c2230">
+            <div class="wf-col" style="flex: 1">
+              <div
+                class="box"
+                style="
+                  height: 36px;
+                  border-bottom: 1px solid #1c2230;
+                  justify-content: flex-start;
+                  padding-left: 16px;
+                  gap: 8px;
+                  font-size: 11px;
+                "
+              >
+                <span style="color: #5cd4c0">bash ●</span>
+                <span style="color: #7b8a9e">node</span>
+                <span
+                  style="
+                    color: #4d5b6e;
+                    border: 1px solid #2a3243;
+                    padding: 1px 6px;
+                    border-radius: 4px;
+                    font-size: 10px;
+                  "
+                  >+</span
+                >
+                <span style="margin-left: auto; font-size: 10px; color: #4d5b6e">2 运行中</span>
+                <span style="color: #4d5b6e">▾</span>
+                <span style="color: #4d5b6e">✕</span>
+              </div>
+              <div
+                class="box muted"
+                style="
+                  flex: 1;
+                  justify-content: flex-start;
+                  align-items: flex-start;
+                  padding: 12px 16px;
+                  font-family: monospace;
+                  font-size: 11px;
+                  text-align: left;
+                  line-height: 1.6;
+                "
+              >
+                <div><span style="color: #5cd4c0">$</span> pnpm dev</div>
+                <div style="color: #7b8a9e">Server listening on http://localhost:3000</div>
+                <div><span style="color: #5cd4c0">✓</span> Gateway ready in 234ms</div>
+                <div>
+                  <span style="color: #5cd4c0">$</span>
+                  <span style="animation: blink 1s infinite; color: #5cd4c0">▋</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
-        <div class="box" style="height: 72px; border-top: 1px solid #1c2230;">Composer</div>
       </div>
-      <!-- SidePanel 仍展开 -->
-      <div class="box contrast" style="width: 8px;">↔</div>
-      <div class="wf-col" style="flex: 0 0 340px;">
-        <div class="box aux" style="height: 40px; border-bottom: 1px solid #1c2230;">[审查 3] [文件] [Ctx]</div>
-        <div class="box muted" style="flex: 1;">Diff 视图</div>
+
+      <!-- 状态 C: Panel 折叠 + Peek -->
+      <div class="state" id="s-c">
+        <div class="wf" style="height: 520px">
+          <div class="wf-row" style="height: 36px; border-bottom: 1px solid #1c2230">
+            <div class="box muted" style="width: 72px; font-size: 10px">🚦🟡🟢</div>
+            <div class="box" style="width: 36px; border-left: none; border-right: none">🏠</div>
+            <div class="box" style="width: 1px; background: #2a3243; border: none"></div>
+            <div
+              class="box accent"
+              style="flex: 1; justify-content: flex-start; padding-left: 10px; gap: 4px"
+            >
+              <span
+                style="
+                  background: rgba(92, 212, 192, 0.12);
+                  padding: 3px 10px;
+                  border-radius: 4px;
+                  border: 1px solid rgba(92, 212, 192, 0.2);
+                "
+                >● 重构认证模块 ×</span
+              >
+              <span
+                style="
+                  color: #4d5b6e;
+                  padding: 3px 6px;
+                  border: 1px solid #1c2230;
+                  border-radius: 4px;
+                "
+                >+</span
+              >
+            </div>
+            <div class="box muted" style="width: 44px">⚙</div>
+          </div>
+          <div class="wf-row" style="flex: 1">
+            <!-- Rail (Panel 折叠, Rail 始终可见) -->
+            <div
+              class="wf-col"
+              style="width: 64px; border-right: 1px solid #1c2230; position: relative"
+            >
+              <div
+                class="box accent"
+                style="height: 120px; flex-direction: column; gap: 8px; position: relative"
+              >
+                <div
+                  style="
+                    width: 36px;
+                    height: 36px;
+                    border-radius: 6px;
+                    background: rgba(92, 212, 192, 0.15);
+                    border: 2px solid #5cd4c0;
+                    display: grid;
+                    place-items: center;
+                    font-size: 10px;
+                    font-weight: 800;
+                    color: #5cd4c0;
+                    position: relative;
+                  "
+                >
+                  OA
+                  <!-- Peek 浮层 -->
+                  <div
+                    style="
+                      position: absolute;
+                      left: 42px;
+                      top: -2px;
+                      width: 244px;
+                      height: 380px;
+                      background: #161b27;
+                      border: 1px solid rgba(92, 212, 192, 0.2);
+                      border-radius: 8px;
+                      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+                      z-index: 10;
+                      display: flex;
+                      flex-direction: column;
+                      overflow: hidden;
+                      text-align: left;
+                    "
+                  >
+                    <div
+                      style="
+                        height: 44px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        padding: 0 12px;
+                        border-bottom: 1px solid #1c2230;
+                        background: rgba(92, 212, 192, 0.06);
+                      "
+                    >
+                      <div style="display: flex; flex-direction: column">
+                        <span style="color: #5cd4c0; font-weight: 700; font-size: 12px"
+                          >OpenAWork</span
+                        >
+                        <span style="font-size: 10px; color: #4d5b6e">~/projects/openawork</span>
+                      </div>
+                      <span style="color: #4d5b6e">⋯</span>
+                    </div>
+                    <div
+                      style="
+                        height: 36px;
+                        display: flex;
+                        align-items: center;
+                        padding: 0 12px;
+                        border-bottom: 1px solid #1c2230;
+                        color: #4d5b6e;
+                        font-size: 11px;
+                      "
+                    >
+                      🔍 搜索会话...
+                    </div>
+                    <div style="flex: 1; overflow: hidden">
+                      <div
+                        style="
+                          height: 36px;
+                          display: flex;
+                          align-items: center;
+                          padding-left: 16px;
+                          border-left: 3px solid #5cd4c0;
+                          background: rgba(92, 212, 192, 0.06);
+                          color: #5cd4c0;
+                          font-size: 11px;
+                        "
+                      >
+                        · 重构认证模块 ●
+                      </div>
+                      <div
+                        style="
+                          height: 36px;
+                          display: flex;
+                          align-items: center;
+                          padding-left: 16px;
+                          color: #4d5b6e;
+                          font-size: 11px;
+                        "
+                      >
+                        · 数据库设计
+                      </div>
+                      <div
+                        style="
+                          height: 36px;
+                          display: flex;
+                          align-items: center;
+                          padding-left: 16px;
+                          color: #4d5b6e;
+                          font-size: 11px;
+                        "
+                      >
+                        · WebSocket 修复
+                      </div>
+                      <div
+                        style="
+                          height: 36px;
+                          display: flex;
+                          align-items: center;
+                          padding-left: 16px;
+                          color: #4d5b6e;
+                          font-size: 11px;
+                        "
+                      >
+                        · Tauri v2 升级
+                      </div>
+                    </div>
+                    <div
+                      style="
+                        height: 36px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        border-top: 1px solid #1c2230;
+                        color: #5cd4c0;
+                        font-size: 11px;
+                        font-weight: 600;
+                      "
+                    >
+                      + 新建会话
+                    </div>
+                  </div>
+                </div>
+                <div
+                  style="
+                    width: 32px;
+                    height: 32px;
+                    border-radius: 6px;
+                    background: #1c2230;
+                    display: grid;
+                    place-items: center;
+                    font-size: 10px;
+                    font-weight: 800;
+                    color: #4d5b6e;
+                  "
+                >
+                  MA
+                </div>
+                <div
+                  style="
+                    width: 32px;
+                    height: 24px;
+                    border-radius: 6px;
+                    border: 1px dashed #2a3243;
+                    display: grid;
+                    place-items: center;
+                    font-size: 12px;
+                    color: #4d5b6e;
+                  "
+                >
+                  +
+                </div>
+              </div>
+              <div class="box" style="height: 6px; border: none; background: #1c2230"></div>
+              <div class="box" style="flex: 1; flex-direction: column; gap: 10px; font-size: 18px">
+                <span>💬</span><span style="opacity: 0.4">👥</span
+                ><span style="opacity: 0.4">📅</span><span style="opacity: 0.4">🔧</span
+                ><span style="opacity: 0.4">🤖</span>
+              </div>
+              <div
+                class="box muted"
+                style="
+                  height: 90px;
+                  flex-direction: column;
+                  gap: 10px;
+                  font-size: 18px;
+                  border-top: 1px solid #1c2230;
+                "
+              >
+                <span>🔔</span><span>⚙️</span><span>❓</span>
+              </div>
+            </div>
+            <!-- SessionPanel (Panel 折叠后占满) -->
+            <div class="wf-col" style="flex: 1">
+              <div
+                class="box"
+                style="
+                  height: 44px;
+                  border-bottom: 1px solid #1c2230;
+                  justify-content: space-between;
+                  padding: 0 16px;
+                "
+              >
+                <div
+                  style="display: flex; flex-direction: column; align-items: flex-start; gap: 1px"
+                >
+                  <span style="color: #f1f4f8; font-weight: 700">重构认证模块</span>
+                  <span style="font-size: 10px; color: #7b8a9e">GPT-4o · Agentic</span>
+                </div>
+                <div style="display: flex; gap: 4px">
+                  <span
+                    style="
+                      color: #5cd4c0;
+                      border: 1px solid rgba(92, 212, 192, 0.2);
+                      padding: 2px 8px;
+                      border-radius: 4px;
+                      font-size: 10px;
+                    "
+                    >审查</span
+                  >
+                  <span
+                    style="
+                      color: #7b8a9e;
+                      border: 1px solid #2a3243;
+                      padding: 2px 8px;
+                      border-radius: 4px;
+                      font-size: 10px;
+                    "
+                    >终端</span
+                  >
+                </div>
+              </div>
+              <div class="box muted" style="flex: 1; position: relative">
+                MessageTimeline
+                <div
+                  style="
+                    position: absolute;
+                    left: 50%;
+                    top: 50%;
+                    transform: translate(-50%, -50%);
+                    width: 50%;
+                    border: 1px dashed rgba(92, 212, 192, 0.15);
+                    border-radius: 6px;
+                    padding: 16px;
+                    color: #5cd4c0;
+                    font-size: 11px;
+                  "
+                >
+                  居中 720px 消息区
+                </div>
+              </div>
+              <div class="box" style="height: 72px; border-top: 1px solid #1c2230">Composer</div>
+            </div>
+            <!-- SidePanel 仍展开 -->
+            <div class="box contrast" style="width: 8px">↔</div>
+            <div class="wf-col" style="flex: 0 0 340px">
+              <div class="box aux" style="height: 40px; border-bottom: 1px solid #1c2230">
+                [审查 3] [文件] [Ctx]
+              </div>
+              <div class="box muted" style="flex: 1">Diff 视图</div>
+            </div>
+          </div>
+          <div class="wf-row" style="height: 36px; border-top: 1px solid #1c2230">
+            <div
+              class="box muted"
+              style="flex: 1; justify-content: flex-start; padding-left: 16px; font-size: 11px"
+            >
+              ▸ 终端 · <span style="color: #5cd4c0">2 个运行中</span>
+            </div>
+          </div>
+        </div>
+        <p class="desc" style="margin-top: 12px">
+          <strong>Panel 折叠态</strong>：Panel 收起后 Rail 始终可见。鼠标 hover 到 Rail 上的项目头像
+          [OA] 时，触发 peek 浮层预览会话列表（300ms 延迟关闭），点击浮层内会话即展开 Panel 并跳转。
+        </p>
       </div>
     </div>
-    <div class="wf-row" style="height: 36px; border-top: 1px solid #1c2230;">
-      <div class="box muted" style="flex: 1; justify-content: flex-start; padding-left: 16px; font-size: 11px;">
-        ▸ 终端 · <span style="color: #5cd4c0;">2 个运行中</span>
+
+    <!-- ═══ 区域明细 ═══ -->
+    <div class="section">
+      <h2>各区域结构明细</h2>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px">
+        <div>
+          <h3>Titlebar (36px) — T1</h3>
+          <div class="ascii">
+            ┌────┬──┬─┬──────────────────────┬──┐ │🚦🟡│🏠││ 会话标签 (flex:1) │⚙ │
+            └────┴──┴─┴──────────────────────┴──┘ ① 交通灯 (macOS 桌面端, Web 隐藏) ② [🏠] Home 按钮
+            → 回首页/新建会话 ③ 分隔线 ④ 会话标签区: · flex:1, overflow-x:auto · 每个标签: [● 标题
+            ×] · 可拖拽排序, 可关闭 · 溢出横向滚动 · [+] 新建标签 ⑤ [⚙] 工具菜单 (弹出): · 布局模式:
+            融合/经典 · 主题切换 · 设置入口
+          </div>
+        </div>
+
+        <div>
+          <h3>Rail (64px) — S2</h3>
+          <div class="ascii">
+            ┌────────┐ │ │ │ <span class="hi">[OA]</span> │ ← 项目头像 (active) │ [MA] │ ← 其他项目
+            │ [ +] │ ← 添加项目 │ │ │ ────── │ ← 分隔线 │ │ │ [💬] │ ← Chat │ [👥] │ ← Team │ [📅] │
+            ← 定时任务 │ [🔧] │ ← 技能 │ [🤖] │ ← 智能体 │ │ │ (flex) │ ← 弹性空间 │ │ │ [🔔] │ ←
+            通知 (badge) │ [⚙️] │ ← 设置 │ [❓] │ ← 帮助 │ │ └────────┘ 固定 64px, 不可折叠
+            项目头像: 圆角矩形, active 高亮 hover 项目头像 → peek Panel (折叠时)
+          </div>
+        </div>
+
+        <div>
+          <h3>Panel (244px) — S2</h3>
+          <div class="ascii">
+            ┌────────────────────┐ │ OpenAWork [⋯] │ ← 项目名+路径+菜单 │ ~/projects/openawork│
+            ├────────────────────┤ │ 🔍 搜索会话... │ ← 搜索框 ├────────────────────┤ │ │ │ ·
+            重构认证模块 <span class="hi">●</span> │ ← 会话列表 (扁平) │ · 数据库设计 │ active
+            高亮+左侧条 │ · WebSocket 修复 │ │ · Tauri v2 升级 │ │ │ │ (flex, overflow) │ │ │
+            ├────────────────────┤ │ + 新建会话 │ ← 底部按钮 └────────────────────┘ 244px, 可折叠
+            折叠 → width:0, hover Rail 头像触发 peek 会话列表不按工作区分组 (项目已在 Rail 头像切换)
+            右键会话 → 上下文菜单
+          </div>
+        </div>
+
+        <div>
+          <h3>内容区 (状态 2)</h3>
+          <div class="ascii">
+            ┌────────────────┬─┬──────────────┐ │ SessionPanel │↔│ SidePanel │ │ 600px (固定) │ │
+            flex:1 │ │ │ │ │ │ SessionHeader │ │ <span class="hi2">[Tab]</span> [Tab] [+]│ │ (44px)
+            │ │ │ ├────────────────┤ ├──────────────┤ │ │ │ [Toolbar] │ │ MessageTimeline│
+            ├──────┬───────┤ │ (flex:1) │ │文件列表│Diff │ │ │ │220px │flex:1│ │ │ │ │ │
+            ├────────────────┤ │ │ │ │ Composer │ │ │ │ │ (72px) │ │ │ │ └────────────────┘
+            └──────┴──────┘ SessionPanel: 600px, 可拖拽缩放 (450~45%窗口) SidePanel: flex:1, Tab
+            切换 ResizeHandle: 8px, 水平拖拽
+          </div>
+        </div>
       </div>
     </div>
-  </div>
-  <p class="desc" style="margin-top: 12px;"><strong>Panel 折叠态</strong>：Panel 收起后 Rail 始终可见。鼠标 hover 到 Rail 上的项目头像 [OA] 时，触发 peek 浮层预览会话列表（300ms 延迟关闭），点击浮层内会话即展开 Panel 并跳转。</p>
-</div>
-</div>
 
-<!-- ═══ 区域明细 ═══ -->
-<div class="section">
-  <h2>各区域结构明细</h2>
-  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-
-    <div>
-      <h3>Titlebar (36px) — T1</h3>
-<div class="ascii">┌────┬──┬─┬──────────────────────┬──┐
-│🚦🟡│🏠││  会话标签 (flex:1)    │⚙ │
-└────┴──┴─┴──────────────────────┴──┘
-
- ① 交通灯 (macOS 桌面端, Web 隐藏)
- ② [🏠] Home 按钮 → 回首页/新建会话
- ③ 分隔线
- ④ 会话标签区:
-    · flex:1, overflow-x:auto
-    · 每个标签: [● 标题 ×]
-    · 可拖拽排序, 可关闭
-    · 溢出横向滚动
-    · [+] 新建标签
- ⑤ [⚙] 工具菜单 (弹出):
-    · 布局模式: 融合/经典
-    · 主题切换
-    · 设置入口</div>
+    <!-- ═══ 代码映射 ═══ -->
+    <div class="section">
+      <h2>与现有代码的映射</h2>
+      <table style="width: 100%; border-collapse: collapse; font-size: 12px">
+        <tr style="border-bottom: 1px solid #2a3243">
+          <th style="text-align: left; padding: 8px; color: #f1f4f8">新设计区域</th>
+          <th style="text-align: left; padding: 8px; color: #f1f4f8">现有组件</th>
+          <th style="text-align: left; padding: 8px; color: #f1f4f8">改动</th>
+        </tr>
+        <tr style="border-bottom: 1px solid #1c2230">
+          <td style="padding: 8px; color: #5cd4c0">Titlebar 36px</td>
+          <td style="padding: 8px">TitlebarTabStrip.tsx</td>
+          <td style="padding: 8px; color: #7b8a9e">
+            移除 WorkbenchModeTabs + LayoutModeSwitch → ⚙ 弹出菜单
+          </td>
+        </tr>
+        <tr style="border-bottom: 1px solid #1c2230">
+          <td style="padding: 8px; color: #5cd4c0">Rail 64px</td>
+          <td style="padding: 8px">AppSidebar.tsx (折叠态)</td>
+          <td style="padding: 8px; color: #7b8a9e">物理拆分: 项目头像区 + 导航图标 + 底部图标</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #1c2230">
+          <td style="padding: 8px; color: #5cd4c0">Panel 244px</td>
+          <td style="padding: 8px">AppSidebar.tsx (展开态)</td>
+          <td style="padding: 8px; color: #7b8a9e">移除 Logo/导航/底部, 只保留搜索+会话+新建</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #1c2230">
+          <td style="padding: 8px; color: #5cd4c0">Panel Peek</td>
+          <td style="padding: 8px">SidebarPeek.tsx (已有)</td>
+          <td style="padding: 8px; color: #5cd4c0">已有, 复用</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #1c2230">
+          <td style="padding: 8px; color: #5cd4c0">SessionPanel</td>
+          <td style="padding: 8px">ChatPage.tsx 主区域</td>
+          <td style="padding: 8px; color: #7b8a9e">
+            包装为卡片(rounded+shadow), 宽度 600px/100% 切换
+          </td>
+        </tr>
+        <tr style="border-bottom: 1px solid #1c2230">
+          <td style="padding: 8px; color: #5cd4c0">SessionHeader</td>
+          <td style="padding: 8px">ChatTopBar.tsx</td>
+          <td style="padding: 8px; color: #7b8a9e">精简为: 标题+模型+模式 + 审查/终端/更多按钮</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #1c2230">
+          <td style="padding: 8px; color: #5cd4c0">SidePanel</td>
+          <td style="padding: 8px">ChatRightPanel.tsx + ReviewPanel.tsx</td>
+          <td style="padding: 8px; color: #7b8a9e">合并为 Tab 式面板(审查/文件/Context)</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #1c2230">
+          <td style="padding: 8px; color: #5cd4c0">TerminalPanel</td>
+          <td style="padding: 8px">TerminalPanel.tsx + QuickTerminalPanel</td>
+          <td style="padding: 8px; color: #7b8a9e">改为底部横跨全宽, 增加 36px 折叠态窄条</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px; color: #5cd4c0">ResizeHandle</td>
+          <td style="padding: 8px">PanelResizeHandle.tsx (已有)</td>
+          <td style="padding: 8px; color: #5cd4c0">已有, 复用</td>
+        </tr>
+      </table>
     </div>
 
-    <div>
-      <h3>Rail (64px) — S2</h3>
-<div class="ascii">┌────────┐
-│        │
-│  <span class="hi">[OA]</span>  │ ← 项目头像 (active)
-│  [MA]  │ ← 其他项目
-│  [ +]  │ ← 添加项目
-│        │
-│ ────── │ ← 分隔线
-│        │
-│  [💬]  │ ← Chat
-│  [👥]  │ ← Team
-│  [📅]  │ ← 定时任务
-│  [🔧]  │ ← 技能
-│  [🤖]  │ ← 智能体
-│        │
-│ (flex) │ ← 弹性空间
-│        │
-│  [🔔]  │ ← 通知 (badge)
-│  [⚙️]  │ ← 设置
-│  [❓]  │ ← 帮助
-│        │
-└────────┘
-
- 固定 64px, 不可折叠
- 项目头像: 圆角矩形, active 高亮
- hover 项目头像 → peek Panel (折叠时)</div>
-    </div>
-
-    <div>
-      <h3>Panel (244px) — S2</h3>
-<div class="ascii">┌────────────────────┐
-│ OpenAWork      [⋯] │ ← 项目名+路径+菜单
-│ ~/projects/openawork│
-├────────────────────┤
-│ 🔍 搜索会话...      │ ← 搜索框
-├────────────────────┤
-│                    │
-│ · 重构认证模块 <span class="hi">●</span>  │ ← 会话列表 (扁平)
-│ · 数据库设计        │   active 高亮+左侧条
-│ · WebSocket 修复    │
-│ · Tauri v2 升级     │
-│                    │
-│ (flex, overflow)    │
-│                    │
-├────────────────────┤
-│ + 新建会话          │ ← 底部按钮
-└────────────────────┘
-
- 244px, 可折叠
- 折叠 → width:0, hover Rail 头像触发 peek
- 会话列表不按工作区分组
- (项目已在 Rail 头像切换)
- 右键会话 → 上下文菜单</div>
-    </div>
-
-    <div>
-      <h3>内容区 (状态 2)</h3>
-<div class="ascii">┌────────────────┬─┬──────────────┐
-│ SessionPanel   │↔│ SidePanel    │
-│ 600px (固定)   │ │ flex:1       │
-│                │ │              │
-│ SessionHeader  │ │ <span class="hi2">[Tab]</span> [Tab] [+]│
-│ (44px)         │ │              │
-├────────────────┤ ├──────────────┤
-│                │ │ [Toolbar]    │
-│ MessageTimeline│ ├──────┬───────┤
-│ (flex:1)       │ │文件列表│Diff  │
-│                │ │220px  │flex:1│
-│                │ │      │      │
-├────────────────┤ │      │      │
-│ Composer       │ │      │      │
-│ (72px)         │ │      │      │
-└────────────────┘ └──────┴──────┘
-
- SessionPanel: 600px, 可拖拽缩放
-               (450~45%窗口)
- SidePanel: flex:1, Tab 切换
- ResizeHandle: 8px, 水平拖拽</div>
-    </div>
-  </div>
-</div>
-
-<!-- ═══ 代码映射 ═══ -->
-<div class="section">
-  <h2>与现有代码的映射</h2>
-  <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
-    <tr style="border-bottom: 1px solid #2a3243;">
-      <th style="text-align: left; padding: 8px; color: #f1f4f8;">新设计区域</th>
-      <th style="text-align: left; padding: 8px; color: #f1f4f8;">现有组件</th>
-      <th style="text-align: left; padding: 8px; color: #f1f4f8;">改动</th>
-    </tr>
-    <tr style="border-bottom: 1px solid #1c2230;">
-      <td style="padding: 8px; color: #5cd4c0;">Titlebar 36px</td>
-      <td style="padding: 8px;">TitlebarTabStrip.tsx</td>
-      <td style="padding: 8px; color: #7b8a9e;">移除 WorkbenchModeTabs + LayoutModeSwitch → ⚙ 弹出菜单</td>
-    </tr>
-    <tr style="border-bottom: 1px solid #1c2230;">
-      <td style="padding: 8px; color: #5cd4c0;">Rail 64px</td>
-      <td style="padding: 8px;">AppSidebar.tsx (折叠态)</td>
-      <td style="padding: 8px; color: #7b8a9e;">物理拆分: 项目头像区 + 导航图标 + 底部图标</td>
-    </tr>
-    <tr style="border-bottom: 1px solid #1c2230;">
-      <td style="padding: 8px; color: #5cd4c0;">Panel 244px</td>
-      <td style="padding: 8px;">AppSidebar.tsx (展开态)</td>
-      <td style="padding: 8px; color: #7b8a9e;">移除 Logo/导航/底部, 只保留搜索+会话+新建</td>
-    </tr>
-    <tr style="border-bottom: 1px solid #1c2230;">
-      <td style="padding: 8px; color: #5cd4c0;">Panel Peek</td>
-      <td style="padding: 8px;">SidebarPeek.tsx (已有)</td>
-      <td style="padding: 8px; color: #5cd4c0;">已有, 复用</td>
-    </tr>
-    <tr style="border-bottom: 1px solid #1c2230;">
-      <td style="padding: 8px; color: #5cd4c0;">SessionPanel</td>
-      <td style="padding: 8px;">ChatPage.tsx 主区域</td>
-      <td style="padding: 8px; color: #7b8a9e;">包装为卡片(rounded+shadow), 宽度 600px/100% 切换</td>
-    </tr>
-    <tr style="border-bottom: 1px solid #1c2230;">
-      <td style="padding: 8px; color: #5cd4c0;">SessionHeader</td>
-      <td style="padding: 8px;">ChatTopBar.tsx</td>
-      <td style="padding: 8px; color: #7b8a9e;">精简为: 标题+模型+模式 + 审查/终端/更多按钮</td>
-    </tr>
-    <tr style="border-bottom: 1px solid #1c2230;">
-      <td style="padding: 8px; color: #5cd4c0;">SidePanel</td>
-      <td style="padding: 8px;">ChatRightPanel.tsx + ReviewPanel.tsx</td>
-      <td style="padding: 8px; color: #7b8a9e;">合并为 Tab 式面板(审查/文件/Context)</td>
-    </tr>
-    <tr style="border-bottom: 1px solid #1c2230;">
-      <td style="padding: 8px; color: #5cd4c0;">TerminalPanel</td>
-      <td style="padding: 8px;">TerminalPanel.tsx + QuickTerminalPanel</td>
-      <td style="padding: 8px; color: #7b8a9e;">改为底部横跨全宽, 增加 36px 折叠态窄条</td>
-    </tr>
-    <tr>
-      <td style="padding: 8px; color: #5cd4c0;">ResizeHandle</td>
-      <td style="padding: 8px;">PanelResizeHandle.tsx (已有)</td>
-      <td style="padding: 8px; color: #5cd4c0;">已有, 复用</td>
-    </tr>
-  </table>
-</div>
-
-<script>
-function showState(id) {
-  document.querySelectorAll('.state').forEach(s => s.classList.remove('visible'));
-  document.getElementById('s-' + id).classList.add('visible');
-  document.querySelectorAll('.state-btn').forEach(b => b.classList.remove('active'));
-  event.target.classList.add('active');
-}
-</script>
-
-</body>
+    <script>
+      function showState(id) {
+        document.querySelectorAll('.state').forEach((s) => s.classList.remove('visible'));
+        document.getElementById('s-' + id).classList.add('visible');
+        document.querySelectorAll('.state-btn').forEach((b) => b.classList.remove('active'));
+        event.target.classList.add('active');
+      }
+    </script>
+  </body>
 </html>

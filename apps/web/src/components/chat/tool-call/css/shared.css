@@ -318,7 +318,9 @@
   font-size: 10px;
   cursor: pointer;
   border: 1px solid color-mix(in oklch, var(--border-subtle) 50%, transparent);
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .tool-search-results-toggle:hover {
