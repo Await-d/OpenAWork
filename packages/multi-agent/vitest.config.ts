@@ -7,6 +7,9 @@ export default defineConfig({
       '@openAwork/agent-core': fileURLToPath(
         new URL('../agent-core/src/index.ts', import.meta.url),
       ),
+      '@openAwork/platform-adapter': fileURLToPath(
+        new URL('../platform-adapter/src/index.ts', import.meta.url),
+      ),
       '@openAwork/shared': fileURLToPath(new URL('../shared/src/index.ts', import.meta.url)),
     },
   },
