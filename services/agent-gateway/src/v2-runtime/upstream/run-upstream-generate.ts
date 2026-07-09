@@ -34,13 +34,7 @@
  */
 
 import type { RequestOverrides } from '@openAwork/agent-core';
-import {
-  generateText,
-  type GenerateTextResult,
-  type ModelMessage,
-  type SystemModelMessage,
-  type ToolSet,
-} from 'ai';
+import { generateText, type ModelMessage, type SystemModelMessage, type ToolSet } from 'ai';
 import {
   applyCaching,
   applyCachingToSystemMessages,
@@ -123,8 +117,10 @@ export interface RunUpstreamGenerateResult {
   outputTokens: number;
   finishReason: string;
   /** Raw AI SDK result — surfaced for callers that need vendor-specific fields. */
-  raw: GenerateTextResult<ToolSet, never>;
+  raw: UpstreamGenerateTextResult;
 }
+
+type UpstreamGenerateTextResult = Awaited<ReturnType<typeof generateText<ToolSet>>>;
 
 /**
  * Resolve which params should be omitted given OpenAWork
@@ -251,7 +247,7 @@ export async function runUpstreamGenerate(
       : timeoutController.signal;
   }
 
-  let result: GenerateTextResult<ToolSet, never>;
+  let result: UpstreamGenerateTextResult;
   try {
     result = await generateText({
       model: model as unknown as GenerateTextModelParam,

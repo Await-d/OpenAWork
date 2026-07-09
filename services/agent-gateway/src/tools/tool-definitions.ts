@@ -55,6 +55,7 @@ import {
   buildDesktopAutomationParameters,
   buildDesktopControlParameters,
 } from './desktop-tool-parameters.js';
+import { buildChannelToolParameters } from './channel-tool-parameters.js';
 import {
   lspCallHierarchyToolDefinition,
   lspFindReferencesToolDefinition,
@@ -74,6 +75,7 @@ import {
 } from '../task/task-crud-tools.js';
 import { repoCloneToolDefinition } from './repo-clone-tools.js';
 import { repoOverviewToolDefinition } from './repo-overview-tools.js';
+import { CHANNEL_TOOL_DEFINITIONS } from './channel-tools.js';
 import type { EffectiveSkill } from '../skill/skill-selection.js';
 
 const CLAUDE_FIRST_VISIBLE_NAME_OVERRIDES = {
@@ -198,6 +200,7 @@ const MODEL_VISIBLE_GATEWAY_TOOLS = [
   generateImageToolDefinition,
   repoCloneToolDefinition,
   repoOverviewToolDefinition,
+  ...CHANNEL_TOOL_DEFINITIONS,
   ...CODEGRAPH_TOOL_DEFINITIONS,
 ] as const;
 
@@ -245,6 +248,11 @@ export function forEachDefaultGatewayTool(
 }
 
 function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function']['parameters'] {
+  const channelParameters = buildChannelToolParameters(tool.name);
+  if (channelParameters) {
+    return channelParameters;
+  }
+
   switch (tool.name) {
     case 'websearch':
       return {

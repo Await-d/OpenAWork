@@ -39,11 +39,7 @@ describe('wrapToolForAiSdk', () => {
     }
     const result = await wrapped.execute(
       { value: 'hello' },
-      // Minimal ToolCallOptions: AI SDK passes more fields in
-      // production, but `toolCallId` + `messages` are the only
-      // strictly-required ones for the contract; the adapter only
-      // reads `abortSignal` so a no-signal call is allowed.
-      { toolCallId: 't1', messages: [] },
+      { toolCallId: 't1', messages: [], context: {} },
     );
     expect(result).toEqual({ echoed: 'hello' });
   });
@@ -62,7 +58,7 @@ describe('wrapToolForAiSdk', () => {
     const ac = new AbortController();
     await wrapped.execute(
       { value: 'x' },
-      { toolCallId: 't1', messages: [], abortSignal: ac.signal },
+      { toolCallId: 't1', messages: [], context: {}, abortSignal: ac.signal },
     );
     expect(observedSignal).toBe(ac.signal);
   });
@@ -78,7 +74,7 @@ describe('wrapToolForAiSdk', () => {
     };
     const wrapped = wrapToolForAiSdk(probe);
     if (!wrapped.execute) throw new Error('expected execute');
-    await wrapped.execute({ value: 'x' }, { toolCallId: 't1', messages: [] });
+    await wrapped.execute({ value: 'x' }, { toolCallId: 't1', messages: [], context: {} });
     expect(observedSignal).toBeInstanceOf(AbortSignal);
     expect(observedSignal?.aborted).toBe(false);
   });

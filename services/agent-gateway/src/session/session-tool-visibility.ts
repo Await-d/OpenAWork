@@ -2,6 +2,12 @@ import type { DialogueMode } from '@openAwork/shared';
 import type { GatewayToolDefinition } from '../tools/tool-definitions.js';
 import { parseSessionMetadataJson } from './session-workspace-metadata.js';
 import { parseFlatMcpToolName } from '../mcp/mcp-tool-naming.js';
+import {
+  CHANNEL_SEND_TOOL_NAMES,
+  FEISHU_CHANNEL_TOOL_NAMES,
+  WEIXIN_CHANNEL_TOOL_NAMES,
+} from './channel-tool-visibility-policy.js';
+import { isClarifyModeToolAllowed } from './clarify-mode-tool-policy.js';
 
 interface ChannelToolPermissionsLike {
   allowShell?: boolean;
@@ -42,6 +48,14 @@ function readChannelPermissions(
 
   const permissions = channel['permissions'];
   return isRecord(permissions) ? permissions : null;
+}
+
+function readChannelType(metadata: Record<string, unknown>): string | null {
+  const channel = metadata['channel'];
+  if (!isRecord(channel)) {
+    return null;
+  }
+  return typeof channel['type'] === 'string' ? channel['type'] : null;
 }
 
 function resolveChannelToolKey(toolName: string): string | null {
@@ -99,64 +113,31 @@ function resolveChannelToolKey(toolName: string): string | null {
   }
 }
 
-const CLARIFY_MODE_ALLOWED_TOOLS: ReadonlySet<string> = new Set([
-  // Read-only file tools
-  'list',
-  'read',
-  'glob',
-  'grep',
-  'read_tool_output',
-  // Read-only workspace tools
-  'workspace_review_status',
-  'workspace_review_diff',
-  // Read-only LSP tools
-  'lsp_diagnostics',
-  'lsp_touch',
-  'lsp_goto_definition',
-  'lsp_goto_implementation',
-  'lsp_find_references',
-  'lsp_symbols',
-  'lsp_hover',
-  'lsp_call_hierarchy',
-  // Code search
-  'codesearch',
-  // Web search/fetch
-  'websearch',
-  'webfetch',
-  // Interactive questioning
-  'question',
-  'AskUserQuestion',
-  // Plan mode
-  'EnterPlanMode',
-  'ExitPlanMode',
-  // Session read-only
-  'session_list',
-  'session_read',
-  'session_search',
-  'session_info',
-  // Todo read-only（实际工具名为 todoread/subtodoread，非 todo_read/subtodo_read）
-  'todoread',
-  'subtodoread',
-  // Task read-only
-  'task_list',
-  'task_get',
-  // Look at (image/file viewing)
-  'look_at',
-  // Sub-task/agent for analysis (child sessions inherit clarify restrictions)
-  'task',
-  'Agent',
-]);
-
-function isClarifyModeToolAllowed(toolName: string): boolean {
-  return CLARIFY_MODE_ALLOWED_TOOLS.has(toolName);
-}
-
 function isChannelManagedSession(metadata: Record<string, unknown>): boolean {
   return metadata['source'] === 'channel';
 }
 
 function isChannelPolicyToolEnabled(metadata: Record<string, unknown>, toolName: string): boolean {
-  if (!isChannelManagedSession(metadata)) {
+  const isChannelTool = CHANNEL_SEND_TOOL_NAMES.has(toolName);
+  const isChannelSession = isChannelManagedSession(metadata);
+  if (!isChannelSession) {
+    if (isChannelTool) {
+      return false;
+    }
+    return true;
+  }
+
+  if (isChannelTool) {
+    const channelTools = readChannelTools(metadata);
+    if (channelTools?.[toolName] === false) {
+      return false;
+    }
+    if (WEIXIN_CHANNEL_TOOL_NAMES.has(toolName)) {
+      return readChannelType(metadata) === 'weixin';
+    }
+    if (FEISHU_CHANNEL_TOOL_NAMES.has(toolName)) {
+      return readChannelType(metadata) === 'feishu';
+    }
     return true;
   }
 

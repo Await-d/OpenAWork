@@ -43,7 +43,7 @@ import type { StreamChunk, StreamDoneChunk, StreamErrorChunk } from '@openAwork/
 import { resolveThinkingStyle } from '@openAwork/agent-core';
 import type { RequestOverrides } from '@openAwork/agent-core';
 import type { JSONValue, SharedV2ProviderOptions } from '@ai-sdk/provider';
-import type { ModelMessage, StreamTextResult, SystemModelMessage, ToolSet } from 'ai';
+import type { ModelMessage, SystemModelMessage, ToolSet } from 'ai';
 import { streamText, tool as defineTool, jsonSchema } from 'ai';
 import {
   applyCaching,
@@ -194,7 +194,7 @@ export function sortToolsByName(tools: ToolSet | undefined): ToolSet | undefined
   const sortedEntries = Object.entries(tools)
     .slice()
     .sort(([a]: [string, unknown], [b]: [string, unknown]) => a.localeCompare(b));
-  return Object.fromEntries(sortedEntries) as ToolSet;
+  return Object.fromEntries(sortedEntries);
 }
 
 const FINISH_REASON_TO_STOP: Record<string, StreamDoneChunk['stopReason']> = {
@@ -217,17 +217,19 @@ function shouldOmit(upstreamKeys: string[] | undefined, ...candidates: string[])
   return candidates.some((k) => upstreamKeys.includes(k));
 }
 
-type ProviderOptionsRecord = Record<string, unknown>;
+type ProviderOptionsRecord = SharedV2ProviderOptions;
+type ProviderSettingsRecord = Record<string, JSONValue>;
+type UpstreamStreamTextResult = ReturnType<typeof streamText<ToolSet>>;
 
-function isRecord(value: unknown): value is ProviderOptionsRecord {
+function isRecord(value: unknown): value is ProviderSettingsRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function mergeDeep(
-  target: ProviderOptionsRecord,
-  source: ProviderOptionsRecord,
-): ProviderOptionsRecord {
-  const result: ProviderOptionsRecord = { ...target };
+  target: ProviderSettingsRecord,
+  source: ProviderSettingsRecord,
+): ProviderSettingsRecord {
+  const result: ProviderSettingsRecord = { ...target };
   for (const [key, value] of Object.entries(source)) {
     const current = result[key];
     result[key] = isRecord(current) && isRecord(value) ? mergeDeep(current, value) : value;
@@ -240,9 +242,14 @@ function mergeProviderOptions(
 ): SharedV2ProviderOptions | undefined {
   const merged = items.reduce<ProviderOptionsRecord>((acc, item) => {
     if (!item) return acc;
-    return mergeDeep(acc, item as ProviderOptionsRecord);
+    const next: ProviderOptionsRecord = { ...acc };
+    for (const [provider, settings] of Object.entries(item)) {
+      const current = next[provider];
+      next[provider] = current ? mergeDeep(current, settings) : settings;
+    }
+    return next;
   }, {});
-  return Object.keys(merged).length > 0 ? (merged as SharedV2ProviderOptions) : undefined;
+  return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
 /**
@@ -434,7 +441,7 @@ export async function* withStreamIdleWatchdog<T>(
 
 export async function* runUpstreamStream(
   input: RunUpstreamStreamInput,
-): AsyncGenerator<RunUpstreamStreamEvent, StreamTextResult<ToolSet, never> | undefined, void> {
+): AsyncGenerator<RunUpstreamStreamEvent, UpstreamStreamTextResult | undefined, void> {
   const state: RunnerState = {
     runId: input.runId,
     agentId: input.agentId,
@@ -609,7 +616,7 @@ export async function* runUpstreamStream(
   // Mirrors opencode #26370.
   const sortedIncomingTools = sortToolsByName(incomingTools);
   const effectiveTools: ToolSet | undefined = needsStub
-    ? ({ _noop: NOOP_TOOL_DEFINITION } as unknown as ToolSet)
+    ? { _noop: NOOP_TOOL_DEFINITION }
     : sortedIncomingTools;
   const toolNameLookup = new Map<string, string>();
   if (effectiveTools) {
@@ -622,9 +629,8 @@ export async function* runUpstreamStream(
   // internal controller so a stalled-but-open upstream socket can be
   // aborted even when the client never disconnects.
   const idleController = new AbortController();
-  type StreamTextModelParam = Parameters<typeof streamText>[0]['model'];
   const result = streamText({
-    model: input.model as unknown as StreamTextModelParam,
+    model: input.model,
     messages: decoratedMessages,
     // Allow system messages that may appear mid-conversation (from
     // persisted session history) to pass through without triggering the
@@ -669,7 +675,7 @@ export async function* runUpstreamStream(
     abortSignal: input.signal
       ? AbortSignal.any([input.signal, idleController.signal])
       : idleController.signal,
-  }) as unknown as StreamTextResult<ToolSet, never>;
+  });
 
   const meta = (extra: Record<string, unknown>) => ({
     ...(state.runId ? { runId: state.runId } : {}),
@@ -710,8 +716,7 @@ export async function* runUpstreamStream(
         // / `input.reasoning` parity).
         const startPmd = (part as { providerMetadata?: Record<string, unknown> }).providerMetadata;
         const openaiStartMeta = startPmd?.['openai'] as
-          | { reasoningEncryptedContent?: unknown; itemId?: unknown }
-          | undefined;
+          { reasoningEncryptedContent?: unknown; itemId?: unknown } | undefined;
         if (
           typeof openaiStartMeta?.reasoningEncryptedContent === 'string' &&
           openaiStartMeta.reasoningEncryptedContent.length > 0
@@ -748,8 +753,7 @@ export async function* runUpstreamStream(
         // ReasoningPart for multi-turn replay.
         const pmd = (part as { providerMetadata?: Record<string, unknown> }).providerMetadata;
         const anthropicMeta = (pmd?.['anthropic'] ?? pmd?.['bedrock']) as
-          | { signature?: unknown }
-          | undefined;
+          { signature?: unknown } | undefined;
         const signature =
           typeof anthropicMeta?.signature === 'string' && anthropicMeta.signature.length > 0
             ? anthropicMeta.signature

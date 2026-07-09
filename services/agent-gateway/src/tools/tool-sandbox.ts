@@ -48,6 +48,11 @@ import {
 } from './call-omo-agent-output.js';
 import { CALL_OMO_ALLOWED_AGENTS, callOmoAgentToolDefinition } from './call-omo-agent-tools.js';
 import {
+  CHANNEL_TOOL_DEFINITIONS,
+  CHANNEL_TOOL_NAME_SET,
+  executeChannelTool,
+} from './channel-tools.js';
+import {
   CODEGRAPH_TOOL_DEFINITIONS,
   CODEGRAPH_TOOL_NAME_SET,
   executeCodegraphTool,
@@ -438,6 +443,7 @@ const TOOL_WHITELIST = new Set<string>([
   'generate_image',
   repoCloneToolDefinition.name,
   repoOverviewToolDefinition.name,
+  ...CHANNEL_TOOL_DEFINITIONS.map((tool) => tool.name),
   ...CODEGRAPH_TOOL_DEFINITIONS.map((tool) => tool.name),
   ...WORKSPACE_TOOL_NAMES,
 ]);
@@ -1557,10 +1563,7 @@ function buildPermissionRequestContext(
         reason: '需要调用 MCP 工具',
         riskLevel: 'high',
         previewAction: `调用 ${flatMcp.serverId}/${flatMcp.toolName} ${previewArguments}`,
-        always: [
-          `${flatMcp.serverId}:${flatMcp.toolName}:*`,
-          `${flatMcp.serverId}:*`,
-        ],
+        always: [`${flatMcp.serverId}:${flatMcp.toolName}:*`, `${flatMcp.serverId}:*`],
       };
     } catch {
       // If the server is no longer configured (user removed it mid-turn),
@@ -1643,6 +1646,56 @@ function buildPermissionRequestContext(
         reason: '需要调用子 Agent',
         riskLevel: 'high',
         previewAction: agentDesc ? `调用子 Agent: ${agentDesc}` : '调用子 Agent',
+        always: ['*'],
+      };
+    }
+    case 'PluginSendMessage':
+    case 'WeixinSendImage':
+    case 'WeixinSendFile':
+    case 'FeishuSendImage':
+    case 'FeishuSendFile':
+    case 'FeishuAtMember':
+    case 'FeishuSendUrgent':
+    case 'FeishuBitableCreateRecords':
+    case 'FeishuBitableUpdateRecords':
+    case 'FeishuBitableDeleteRecords': {
+      const pluginId = typeof rawInput.plugin_id === 'string' ? rawInput.plugin_id.trim() : '';
+      const chatId = typeof rawInput.chat_id === 'string' ? rawInput.chat_id.trim() : '';
+      return {
+        scope: `channel:${pluginId || '*'}:${chatId || '*'}:send`,
+        reason: '需要向消息渠道发送内容',
+        riskLevel: 'high',
+        previewAction: `向消息渠道发送 ${request.toolName}`,
+        always: ['*'],
+      };
+    }
+    case 'PluginReplyMessage': {
+      const pluginId = typeof rawInput.plugin_id === 'string' ? rawInput.plugin_id.trim() : '';
+      const messageId = typeof rawInput.message_id === 'string' ? rawInput.message_id.trim() : '';
+      return {
+        scope: `channel:${pluginId || '*'}:reply:${messageId || '*'}`,
+        reason: '需要回复消息渠道中的指定消息',
+        riskLevel: 'high',
+        previewAction: `回复消息渠道消息 ${messageId || '*'}`,
+        always: ['*'],
+      };
+    }
+    case 'PluginGetGroupMessages':
+    case 'PluginListGroups':
+    case 'PluginSummarizeGroup':
+    case 'PluginGetCurrentChatMessages':
+    case 'FeishuListChatMembers':
+    case 'FeishuBitableListApps':
+    case 'FeishuBitableListTables':
+    case 'FeishuBitableListFields':
+    case 'FeishuBitableGetRecords': {
+      const pluginId = typeof rawInput.plugin_id === 'string' ? rawInput.plugin_id.trim() : '';
+      const chatId = typeof rawInput.chat_id === 'string' ? rawInput.chat_id.trim() : '';
+      return {
+        scope: `channel:${pluginId || '*'}:${chatId || '*'}:read`,
+        reason: '需要读取消息渠道会话信息',
+        riskLevel: 'medium',
+        previewAction: `读取消息渠道 ${request.toolName}`,
         always: ['*'],
       };
     }
@@ -1811,10 +1864,7 @@ function buildPermissionRequestContext(
         reason: '需要调用 MCP 工具',
         riskLevel: 'high',
         previewAction: `调用 ${parsed.serverId}/${parsed.toolName} ${previewArguments}`,
-        always: [
-          `${parsed.serverId}:${parsed.toolName}:*`,
-          `${parsed.serverId}:*`,
-        ],
+        always: [`${parsed.serverId}:${parsed.toolName}:*`, `${parsed.serverId}:*`],
       };
     }
     case 'desktop_automation': {
@@ -2066,6 +2116,31 @@ async function executeGatewayManagedToolImpl(
         isError: false,
         durationMs: 0,
       };
+    }
+
+    if (CHANNEL_TOOL_NAME_SET.has(request.toolName)) {
+      try {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: await executeChannelTool({
+            rawInput,
+            sessionId,
+            signal,
+            toolName: request.toolName,
+          }),
+          isError: false,
+          durationMs: 0,
+        };
+      } catch (error) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: error instanceof Error ? error.message : String(error),
+          isError: true,
+          durationMs: 0,
+        };
+      }
     }
 
     if (request.toolName === 'mcp_list_tools') {
@@ -4584,11 +4659,7 @@ async function executeGatewayManagedToolImpl(
         const { getInstruction, invokeInstruction } =
           await import('../handoff/capability/builtin-instructions.js');
         const layer = sessionRow.role_layer as
-          | 'reception'
-          | 'pm1'
-          | 'pm2'
-          | 'executor'
-          | 'reviewer';
+          'reception' | 'pm1' | 'pm2' | 'executor' | 'reviewer';
         const inst = getInstruction(request.toolName, layer);
         if (inst) {
           const userId = sessionRow.user_id ?? executionContext?.userId ?? '';
@@ -5765,7 +5836,7 @@ export class ToolSandbox {
   registerDynamicTools(entries: DynamicToolEntry[]): void {
     for (const entry of entries) {
       const toolDef = dynamicEntryToToolDefinition(entry);
-      this.registry.register(toolDef as unknown as ToolDefinition);
+      this.registry.register(toolDef);
       this.whitelist.add(entry.name);
     }
   }

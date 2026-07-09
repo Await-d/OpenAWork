@@ -22,6 +22,21 @@ const DEFAULT_PERMISSION_RULES: WorkspacePermissionRule[] = [
   })),
 ];
 
+const FEISHU_CHANNEL_TOOL_NAMES = [
+  'FeishuSendImage',
+  'FeishuSendFile',
+  'FeishuListChatMembers',
+  'FeishuAtMember',
+  'FeishuSendUrgent',
+  'FeishuBitableListApps',
+  'FeishuBitableListTables',
+  'FeishuBitableListFields',
+  'FeishuBitableGetRecords',
+  'FeishuBitableCreateRecords',
+  'FeishuBitableUpdateRecords',
+  'FeishuBitableDeleteRecords',
+] as const;
+
 function effectiveActionFor(toolName: string): string {
   const category = resolvePermissionCategory(toolName);
   return evaluateWorkspacePermissionRules(category, '*', DEFAULT_PERMISSION_RULES).action;
@@ -53,6 +68,13 @@ describe('resolvePermissionCategory', () => {
     expect(resolvePermissionCategory('desktop_control')).toBe('desktop_control');
     expect(resolvePermissionCategory('workspace_review_revert')).toBe('edit');
     expect(resolvePermissionCategory('ast_grep_replace')).toBe('edit');
+    expect(resolvePermissionCategory('PluginSendMessage')).toBe('channel');
+    expect(resolvePermissionCategory('PluginReplyMessage')).toBe('channel');
+    expect(resolvePermissionCategory('WeixinSendImage')).toBe('channel');
+    expect(resolvePermissionCategory('WeixinSendFile')).toBe('channel');
+    for (const toolName of FEISHU_CHANNEL_TOOL_NAMES) {
+      expect(resolvePermissionCategory(toolName)).toBe('channel');
+    }
   });
 
   it('maps custom_ prefix tools to the custom category', () => {
@@ -102,6 +124,16 @@ describe('default permission rule evaluation', () => {
     expect(effectiveActionFor('mcp_call')).toBe('ask');
     expect(effectiveActionFor('lsp_rename')).toBe('ask');
     expect(effectiveActionFor('desktop_control')).toBe('ask');
+  });
+
+  it("forces 'ask' for messaging channel send tools", () => {
+    expect(effectiveActionFor('PluginSendMessage')).toBe('ask');
+    expect(effectiveActionFor('PluginReplyMessage')).toBe('ask');
+    expect(effectiveActionFor('WeixinSendImage')).toBe('ask');
+    expect(effectiveActionFor('WeixinSendFile')).toBe('ask');
+    for (const toolName of FEISHU_CHANNEL_TOOL_NAMES) {
+      expect(effectiveActionFor(toolName)).toBe('ask');
+    }
   });
 });
 
