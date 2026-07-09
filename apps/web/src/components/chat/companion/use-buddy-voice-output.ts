@@ -38,12 +38,11 @@ function canUseSpeechSynthesis(): boolean {
   );
 }
 
-function buildSpokenText(profileName: string, output: CompanionUtteranceSeed): string {
-  const body = output.text.replace(/\s+/g, ' ').trim();
+function buildSpokenText(output: CompanionUtteranceSeed): string {
+  const body = (output.spokenText ?? output.text).replace(/\s+/g, ' ').trim();
   const clippedBody =
     body.length > MAX_SPOKEN_CHARS ? `${body.slice(0, MAX_SPOKEN_CHARS).trimEnd()}。` : body;
-  const prefix = output.tone === 'notice' ? `${profileName}提醒：` : `${profileName}：`;
-  return `${prefix}${clippedBody}`;
+  return clippedBody;
 }
 
 function buildUtteranceCooldownKey(output: CompanionUtteranceSeed): string {
@@ -72,7 +71,6 @@ export function useBuddyVoiceOutput({
   liveOutput,
   liveOutputId,
   muted,
-  profileName,
   quietMode,
   voiceOutputMode,
   voiceRate,
@@ -152,9 +150,7 @@ export function useBuddyVoiceOutput({
       return;
     }
 
-    const utterance = new globalThis.SpeechSynthesisUtterance(
-      buildSpokenText(profileName, liveOutput),
-    );
+    const utterance = new globalThis.SpeechSynthesisUtterance(buildSpokenText(liveOutput));
     const tuning = resolveVoiceVariantTuning(voiceVariant);
     utterance.rate = Math.min(2, Math.max(0.5, voiceRate + tuning.rateOffset));
     utterance.pitch = tuning.pitch;
@@ -190,7 +186,6 @@ export function useBuddyVoiceOutput({
     liveOutput,
     liveOutputId,
     muted,
-    profileName,
     quietMode,
     voiceOutputMode,
     voiceRate,

@@ -219,3 +219,36 @@ describe('useBuddyVoiceOutput · AudioContext 警告回归', () => {
     expect(fakeSynth.cancel).not.toHaveBeenCalled();
   });
 });
+
+describe('useBuddyVoiceOutput · 人性化播报文案', () => {
+  it('优先播报 spokenText 且不添加 Buddy 提醒前缀', () => {
+    renderHook((props: BuddyOptions) => useBuddyVoiceOutput(props), {
+      initialProps: buildOptions({
+        enabled: true,
+        liveOutput: {
+          badge: '工具启动',
+          spokenText: '它开始读文件了，我替你看着。',
+          text: '它开始读文件了。我替你看着中间状态，你先不用分心。',
+          tone: 'notice',
+        },
+        liveOutputId: 'spoken-humanized',
+      }),
+    });
+
+    expect(fakeSynth.speak).toHaveBeenCalledTimes(1);
+    expect(createdUtterances.at(-1)?.text).toBe('它开始读文件了，我替你看着。');
+  });
+
+  it('没有 spokenText 时播报 text 本身且不添加系统前缀', () => {
+    renderHook((props: BuddyOptions) => useBuddyVoiceOutput(props), {
+      initialProps: buildOptions({
+        enabled: true,
+        liveOutput: makeSeed('跑完了，线索我收好了。'),
+        liveOutputId: 'spoken-fallback',
+      }),
+    });
+
+    expect(fakeSynth.speak).toHaveBeenCalledTimes(1);
+    expect(createdUtterances.at(-1)?.text).toBe('跑完了，线索我收好了。');
+  });
+});

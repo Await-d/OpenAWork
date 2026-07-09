@@ -47,6 +47,7 @@ export interface CompanionReaction {
 
 export interface CompanionUtteranceSeed {
   badge: string;
+  spokenText?: string;
   text: string;
   tone: 'intro' | CompanionReaction['importance'] | 'chat';
 }
@@ -93,10 +94,10 @@ const COMPANION_PALETTES = [
   },
 ];
 const IDLE_REACTIONS = [
-  '我在侧边安静跟着，不会打断主线。',
-  '今天我负责看节奏，你继续把注意力放在主对话。',
-  '如果你开始引用文件或排队消息，我会先一步提醒。',
-  '我会贴着工作台边缘待命，不抢镜。',
+  '我在旁边，不打断你。',
+  '你看主线就好，节奏我帮你留一眼。',
+  '有文件、队列或审批冒出来，我会轻轻提醒。',
+  '我先在边上待命，需要时叫我一声就行。',
 ];
 const IDLE_REMINDER_THRESHOLD_SECONDS = 180;
 
@@ -160,13 +161,115 @@ function summarizeStreamError(message: string | null): string {
 function describeToolCall(snapshot: CompanionActivitySnapshot): string {
   const toolName = snapshot.lastToolName?.trim();
   if (!toolName) {
-    return `${snapshot.toolCallCount} 个工具正在执行，我会盯住中间状态。`;
+    return `${snapshot.toolCallCount} 个工具在跑，我看着就好。`;
   }
-  return `${snapshot.toolCallCount} 个工具正在执行，最近是 ${toolName}。`;
+  return `${toolName} 在跑，我帮你盯一下。`;
 }
 
 function formatIdleMinutes(seconds: number): number {
   return Math.max(1, Math.round(seconds / 60));
+}
+
+function describeToolForHuman(toolName: string | null | undefined): string | null {
+  const normalized = toolName?.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const lower = normalized.toLowerCase();
+  if (lower.includes('read') || lower.includes('file')) return '读文件';
+  if (lower.includes('write') || lower.includes('edit')) return '改文件';
+  if (lower.includes('bash') || lower.includes('shell') || lower.includes('command')) {
+    return '跑命令';
+  }
+  if (lower.includes('search') || lower.includes('grep') || lower.includes('rg')) return '查东西';
+  if (lower.includes('web') || lower.includes('browser')) return '看网页';
+  if (lower.includes('test') || lower.includes('vitest')) return '跑测试';
+  return normalized.replace(/[_-]+/g, ' ');
+}
+
+export function buildCompanionEventUtterance(input: {
+  kind:
+    | 'generationFinished'
+    | 'permissionArrived'
+    | 'toolStarted'
+    | 'toolFinished'
+    | 'streamError'
+    | 'streamRecovered'
+    | 'idleReminder';
+  count?: number;
+  lastToolName?: string | null;
+  streamErrorMessage?: string | null;
+}): CompanionUtteranceSeed {
+  switch (input.kind) {
+    case 'generationFinished':
+      return {
+        badge: '生成完成',
+        spokenText: '写完了。你慢慢看，我在旁边。',
+        text: '写完了。你不用马上接，我先把这轮稳稳放在这里。',
+        tone: 'notice',
+      };
+    case 'permissionArrived': {
+      const count = input.count ?? 1;
+      return {
+        badge: '新审批',
+        spokenText: count === 1 ? '有一步需要你确认。' : `有 ${count} 步需要你确认。`,
+        text:
+          count === 1
+            ? '有一步需要你确认。我先停住，不催你。'
+            : `有 ${count} 步需要你确认。我先停住，不催你。`,
+        tone: 'notice',
+      };
+    }
+    case 'toolStarted': {
+      const toolName = describeToolForHuman(input.lastToolName);
+      const count = input.count ?? 1;
+      return {
+        badge: '工具启动',
+        spokenText: toolName ? `它开始${toolName}了，我替你看着。` : '工具开始跑了，我替你看着。',
+        text: toolName
+          ? `它开始${toolName}了。我替你看着中间状态，你先不用分心。`
+          : `${count} 个工具开始跑了。我替你看着中间状态，你先不用分心。`,
+        tone: 'notice',
+      };
+    }
+    case 'toolFinished':
+      return {
+        badge: '工具完成',
+        spokenText: '跑完了，线索我收好了。',
+        text: '跑完了，线索我收好了。你可以直接接着看结果。',
+        tone: 'notice',
+      };
+    case 'streamError': {
+      const errorText = summarizeStreamError(input.streamErrorMessage ?? null);
+      return {
+        badge: '错误提示',
+        spokenText: '这轮卡住了。先别急，我在。',
+        text: `${errorText} 这轮先卡住了。先别急，我帮你把上下文稳住，等你决定下一步。`,
+        tone: 'notice',
+      };
+    }
+    case 'streamRecovered':
+      return {
+        badge: '错误恢复',
+        spokenText: '恢复了。我继续轻轻跟着。',
+        text: '恢复了。我继续轻轻跟着，不打断你。',
+        tone: 'notice',
+      };
+    case 'idleReminder':
+      return {
+        badge: '空闲提醒',
+        spokenText: '你先歇着也行，我在。',
+        text: '你先歇着也行。这轮我替你守着，回来还能接上，不会丢。',
+        tone: 'ambient',
+      };
+    default:
+      return {
+        badge: '安静陪伴',
+        text: '我在旁边，等你下一步。',
+        tone: 'ambient',
+      };
+  }
 }
 
 export function createCompanionProfile(seedInput: string): CompanionProfile {
@@ -234,7 +337,7 @@ export function deriveCompanionReaction(snapshot: CompanionActivitySnapshot): Co
     return {
       badge: '错误恢复',
       importance: 'notice',
-      text: `${summarizeStreamError(snapshot.streamErrorMessage)} 我先保持低打扰，等你决定重试或切换策略。`,
+      text: `${summarizeStreamError(snapshot.streamErrorMessage)} 先别急，我在这儿。`,
     };
   }
 
@@ -250,7 +353,7 @@ export function deriveCompanionReaction(snapshot: CompanionActivitySnapshot): Co
     return {
       badge: '跟随生成',
       importance: 'active',
-      text: '主助手正在生成，我贴着边观察这轮输出。',
+      text: '正在写，我先安静跟着。',
     };
   }
 
@@ -258,7 +361,7 @@ export function deriveCompanionReaction(snapshot: CompanionActivitySnapshot): Co
     return {
       badge: '待确认',
       importance: 'notice',
-      text: `右侧还有 ${snapshot.pendingPermissionCount} 项待确认动作，别忘了看一眼。`,
+      text: `${snapshot.pendingPermissionCount} 项要你点头，我先标着。`,
     };
   }
 
@@ -266,7 +369,7 @@ export function deriveCompanionReaction(snapshot: CompanionActivitySnapshot): Co
     return {
       badge: '待发队列',
       importance: 'notice',
-      text: `我在替你看着 ${snapshot.queuedCount} 条待发消息，节奏不会丢。`,
+      text: `${snapshot.queuedCount} 条在队列里，我帮你看着节奏。`,
     };
   }
 
@@ -274,7 +377,7 @@ export function deriveCompanionReaction(snapshot: CompanionActivitySnapshot): Co
     return {
       badge: '附件在场',
       importance: 'active',
-      text: '这轮带上了附件，我会把注意力贴近上下文。',
+      text: '附件我看到了，这轮会贴着上下文。',
     };
   }
 
@@ -282,7 +385,7 @@ export function deriveCompanionReaction(snapshot: CompanionActivitySnapshot): Co
     return {
       badge: '语音输入',
       importance: 'active',
-      text: '语音已打开，我会尽量保持短句和低打扰。',
+      text: '你说，我听着。需要时我只回短句。',
     };
   }
 
@@ -290,7 +393,7 @@ export function deriveCompanionReaction(snapshot: CompanionActivitySnapshot): Co
     return {
       badge: '会话运行中',
       importance: 'notice',
-      text: '当前会话还在继续运行，我先待在边缘，不挤占焦点。',
+      text: '这轮还在跑，我先不插话。',
     };
   }
 
@@ -298,7 +401,7 @@ export function deriveCompanionReaction(snapshot: CompanionActivitySnapshot): Co
     return {
       badge: '等待处理',
       importance: 'notice',
-      text: '会话正在等待下一步处理，我会继续跟着状态变化。',
+      text: '它在等你一步，我先陪着。',
     };
   }
 
@@ -306,7 +409,7 @@ export function deriveCompanionReaction(snapshot: CompanionActivitySnapshot): Co
     return {
       badge: '被点名',
       importance: 'active',
-      text: '你刚刚叫到我了——我在，而且会尽量不喧宾夺主。',
+      text: '我在。你继续，我轻声跟着。',
     };
   }
 
@@ -314,7 +417,7 @@ export function deriveCompanionReaction(snapshot: CompanionActivitySnapshot): Co
     return {
       badge: '命令模式',
       importance: 'ambient',
-      text: '命令氛围已经起来了，我先把存在感调低一点。',
+      text: '看到命令了，我先退半步。',
     };
   }
 
@@ -322,7 +425,7 @@ export function deriveCompanionReaction(snapshot: CompanionActivitySnapshot): Co
     return {
       badge: '文件引用',
       importance: 'ambient',
-      text: '看到文件引用了，我会更贴近这轮上下文。',
+      text: '文件我看到了，会贴着这轮上下文。',
     };
   }
 
@@ -330,7 +433,7 @@ export function deriveCompanionReaction(snapshot: CompanionActivitySnapshot): Co
     return {
       badge: '待办在前景',
       importance: 'ambient',
-      text: `今天有 ${snapshot.todoCount} 条待办挂在前景，我保持轻声提醒。`,
+      text: `${snapshot.todoCount} 条待办在前面，我轻轻提醒就好。`,
     };
   }
 
@@ -338,7 +441,7 @@ export function deriveCompanionReaction(snapshot: CompanionActivitySnapshot): Co
     return {
       badge: '右侧已展开',
       importance: 'ambient',
-      text: '右侧面板已经打开，我把注意力往中线收一点。',
+      text: '右侧打开了，我把话收一点。',
     };
   }
 
@@ -346,7 +449,7 @@ export function deriveCompanionReaction(snapshot: CompanionActivitySnapshot): Co
     return {
       badge: '长输入',
       importance: 'ambient',
-      text: '这条输入信息量很足，我会安静跟着，不额外加压。',
+      text: '这段信息不少，我安静跟着。',
     };
   }
 
@@ -354,7 +457,7 @@ export function deriveCompanionReaction(snapshot: CompanionActivitySnapshot): Co
     return {
       badge: '空闲提醒',
       importance: 'ambient',
-      text: `你已经停了约 ${formatIdleMinutes(snapshot.idleSeconds)} 分钟，我先把上下文守住，等你下一步。`,
+      text: `停了约 ${formatIdleMinutes(snapshot.idleSeconds)} 分钟，没事，我把这轮先守着。`,
     };
   }
 

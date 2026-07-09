@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from 'react-dom';
 import { createSettingsClient } from '@openAwork/web-client';
 import {
+  buildCompanionEventUtterance,
   buildCompanionIntroText,
   createCompanionProfile,
   deriveCompanionOutputPolicy,
@@ -310,7 +311,6 @@ export function CompanionStage({
   agentId,
   attachedCount,
   currentUserEmail,
-  editorMode,
   hasStreamError,
   idleSeconds,
   input,
@@ -455,9 +455,7 @@ export function CompanionStage({
     ? 'none'
     : 'transform 220ms ease, opacity 220ms ease, box-shadow 220ms ease, background 220ms ease';
 
-  const { memory: interactionMemory, recordInteraction } = useBuddyInteractionMemory(
-    currentUserEmail || sessionId || 'guest',
-  );
+  const { recordInteraction } = useBuddyInteractionMemory(currentUserEmail || sessionId || 'guest');
 
   const pushOutput = useCallback((entry: CompanionUtteranceSeed, announce: boolean) => {
     const createdAt = Date.now();
@@ -563,20 +561,16 @@ export function CompanionStage({
     prevStreamErrorRef.current = hasStreamError;
 
     if (wasStreaming && !streaming) {
-      pushOutput(
-        { badge: '生成完成', text: '这轮输出结束了，需要我帮忙看看吗？', tone: 'notice' },
-        true,
-      );
+      pushOutput(buildCompanionEventUtterance({ kind: 'generationFinished' }), true);
       recordInteraction('notification', '生成完成');
     }
 
     if (pendingPermissionCount > wasPending && pendingPermissionCount > 0) {
       pushOutput(
-        {
-          badge: '新审批',
-          text: `有 ${pendingPermissionCount} 项新审批等你处理。`,
-          tone: 'notice',
-        },
+        buildCompanionEventUtterance({
+          count: pendingPermissionCount,
+          kind: 'permissionArrived',
+        }),
         true,
       );
       recordInteraction('notification', `新审批:${pendingPermissionCount}`);
@@ -584,45 +578,34 @@ export function CompanionStage({
 
     if (previousToolCallCount === 0 && toolCallCount > 0) {
       pushOutput(
-        {
-          badge: '工具启动',
-          text: lastToolName
-            ? `开始执行 ${lastToolName}，我会盯住工具状态。`
-            : `开始执行 ${toolCallCount} 个工具，我会盯住工具状态。`,
-          tone: 'notice',
-        },
+        buildCompanionEventUtterance({
+          count: toolCallCount,
+          kind: 'toolStarted',
+          lastToolName,
+        }),
         true,
       );
       recordInteraction('notification', `工具启动:${lastToolName ?? toolCallCount}`);
     }
 
     if (previousToolCallCount > 0 && toolCallCount === 0) {
-      pushOutput(
-        { badge: '工具完成', text: '工具调用结束了，我把上下文继续贴回主线。', tone: 'notice' },
-        true,
-      );
+      pushOutput(buildCompanionEventUtterance({ kind: 'toolFinished' }), true);
       recordInteraction('notification', '工具完成');
     }
 
     if (!hadStreamError && hasStreamError) {
       pushOutput(
-        {
-          badge: '错误提示',
-          text: streamErrorMessage?.trim()
-            ? `这轮遇到错误：${streamErrorMessage.trim()}`
-            : '这轮遇到错误，我会先帮你稳住上下文。',
-          tone: 'notice',
-        },
+        buildCompanionEventUtterance({
+          kind: 'streamError',
+          streamErrorMessage,
+        }),
         true,
       );
       recordInteraction('notification', '错误提示');
     }
 
     if (hadStreamError && !hasStreamError) {
-      pushOutput(
-        { badge: '错误恢复', text: '错误状态已经恢复，我继续低打扰跟着。', tone: 'notice' },
-        true,
-      );
+      pushOutput(buildCompanionEventUtterance({ kind: 'streamRecovered' }), true);
       recordInteraction('notification', '错误恢复');
     }
   }, [
@@ -653,14 +636,7 @@ export function CompanionStage({
     }
 
     idleReminderActiveRef.current = true;
-    pushOutput(
-      {
-        badge: '空闲提醒',
-        text: '你停了一会儿，我先替你守着这轮上下文。',
-        tone: 'ambient',
-      },
-      true,
-    );
+    pushOutput(buildCompanionEventUtterance({ kind: 'idleReminder' }), true);
     recordInteraction('notification', '空闲提醒');
   }, [idleSeconds, muted, pushOutput, quietMode, recordInteraction]);
 
@@ -1325,7 +1301,7 @@ export function CompanionStage({
                       />
                       <CompanionMetaCard
                         label="当前阶段"
-                        value={`注入模式：${enabled ? companionFeatureMode : 'off'}`}
+                        value={`触发模式：${enabled ? companionFeatureMode : 'off'}`}
                       />
                       <CompanionMetaCard
                         label="稀有度"
