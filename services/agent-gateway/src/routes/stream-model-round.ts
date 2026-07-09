@@ -32,6 +32,7 @@ import { upsertArtifactsFromAssistantMessage } from '../session/assistant-conten
 import { touchSessionHeartbeat } from '../handoff/bus/heartbeat.js';
 import { resolveSessionWorkspacePath } from '../session/session-workspace-resolution.js';
 import { validateWorkspacePath } from '../workspace/workspace-paths.js';
+import { buildChannelPersonaPromptFromMetadata } from '../channels/channel-persona-prompt.js';
 import { getSnapshotEngine } from '../snapshot/snapshot-engine.js';
 import {
   getLatestSnapshotTreeForSession,
@@ -1075,8 +1076,12 @@ export async function runModelRound(input: {
   });
 
   const memoryContent = input.memoryBlock ?? '<user-memory />\n当前会话无持久化记忆。';
+  const channelPersonaPrompt = buildChannelPersonaPromptFromMetadata(
+    input.sessionContext.metadataJson,
+  );
   const dynamicSystemTail = [
     dynamicSystemContent,
+    channelPersonaPrompt,
     input.teamResumePrompt ?? null,
     input.teamStatusPrompt ?? null,
     memoryContent,
@@ -1481,7 +1486,7 @@ export async function runModelRound(input: {
           // which ends with `end_turn` / `error` / `cancelled` etc. —
           // surfaces a `done` event downstream.
           if (chunkWithMeta.stopReason !== 'tool_use') {
-            input.writeChunk(chunkWithMeta as RunEvent);
+            input.writeChunk(chunkWithMeta);
           }
           break;
         }
@@ -1501,7 +1506,7 @@ export async function runModelRound(input: {
         }
 
         accumulateChunk(state, chunkWithMeta);
-        input.writeChunk(chunkWithMeta as RunEvent);
+        input.writeChunk(chunkWithMeta);
         ensureStepStarted();
         persistStreamChunkAsSessionEvents({
           sessionId: input.sessionId,
@@ -1599,7 +1604,7 @@ export async function runModelRound(input: {
         requestId: input.clientRequestId,
         upstreamSummary: toUpstreamStreamSummary(stopReason, streamDiagnostics),
         ...createRunEventMeta(input.runId, input.eventSequence),
-      } as RunEvent);
+      });
     }
 
     if (stepStream && stepStream.status === 'pending') {

@@ -4,6 +4,7 @@ import {
   normalizeInboundRaw,
   parseSimpleEnvelope,
   readRecord,
+  readRecordArray,
   readString,
   readTimestamp,
   stripLeadingMentions,
@@ -12,7 +13,10 @@ import {
 export function parseQQInboundMessage(raw: unknown): ChannelMessage | null {
   const envelope = parseSimpleEnvelope(raw);
   if (envelope) {
-    return envelope;
+    return {
+      ...envelope,
+      id: buildQQReplyReference(envelope.chatId, envelope.id),
+    };
   }
 
   const data = normalizeInboundRaw(raw);
@@ -34,7 +38,11 @@ export function parseQQInboundMessage(raw: unknown): ChannelMessage | null {
     return parseQQGroupMessage(data, event);
   }
 
-  if (eventType !== 'AT_MESSAGE_CREATE' && eventType !== 'MESSAGE_CREATE') {
+  if (
+    eventType !== 'AT_MESSAGE_CREATE' &&
+    eventType !== 'MESSAGE_CREATE' &&
+    eventType !== 'DIRECT_MESSAGE_CREATE'
+  ) {
     return null;
   }
 
@@ -47,12 +55,12 @@ function parseQQC2CMessage(
 ): ChannelMessage | null {
   const author = readRecord(event, 'author');
   const senderId = readString(author, 'user_openid') || readString(author, 'id');
-  const content = stripLeadingMentions(readString(event, 'content'));
+  const content = readQQMessageContent(event);
   if (!senderId || !content) {
     return null;
   }
   return {
-    id: readString(event, 'id') || `${Date.now()}`,
+    id: buildQQReplyReference(`c2c:${senderId}`, readString(event, 'id')),
     senderId,
     senderName: senderId,
     chatId: `c2c:${senderId}`,
@@ -69,15 +77,16 @@ function parseQQGroupMessage(
 ): ChannelMessage | null {
   const author = readRecord(event, 'author');
   const groupOpenId = readString(event, 'group_openid') || readString(event, 'group_id');
-  const content = stripLeadingMentions(readString(event, 'content'));
+  const content = readQQMessageContent(event);
   if (!groupOpenId || !content) {
     return null;
   }
+  const chatId = `group:${groupOpenId}`;
   return {
-    id: readString(event, 'id') || `${Date.now()}`,
+    id: buildQQReplyReference(chatId, readString(event, 'id')),
     senderId: readString(author, 'member_openid') || readString(author, 'id') || 'unknown',
     senderName: readString(author, 'username') || readString(author, 'id') || 'unknown',
-    chatId: `group:${groupOpenId}`,
+    chatId,
     chatName: groupOpenId,
     content,
     timestamp: readTimestamp(event['timestamp']),
@@ -94,19 +103,55 @@ function parseQQChannelMessage(
     return null;
   }
   const channelId = readString(event, 'channel_id');
-  const content = stripLeadingMentions(readString(event, 'content'));
+  const content = readQQMessageContent(event);
   if (!channelId || !content) {
     return null;
   }
+  const chatId = `channel:${channelId}`;
 
   return {
-    id: readString(event, 'id') || `${Date.now()}`,
+    id: buildQQReplyReference(chatId, readString(event, 'id')),
     senderId: readString(author, 'id') || 'unknown',
     senderName: readString(author, 'username') || readString(author, 'id') || 'unknown',
-    chatId: `channel:${channelId}`,
+    chatId,
     chatName: readString(event, 'guild_id') || channelId,
     content,
     timestamp: readTimestamp(event['timestamp']),
     raw,
   };
+}
+
+function buildQQReplyReference(chatId: string, messageId: string): string {
+  const rawMessageId = messageId || `${Date.now()}`;
+  if (rawMessageId.startsWith(`${chatId}|`)) {
+    return rawMessageId;
+  }
+  return `${chatId}|${rawMessageId}`;
+}
+
+function readQQMessageContent(event: Record<string, unknown>): string {
+  const text = stripLeadingMentions(readString(event, 'content'));
+  if (text) {
+    return text;
+  }
+  return describeQQAttachments(event);
+}
+
+function describeQQAttachments(event: Record<string, unknown>): string {
+  const firstAttachment = readRecordArray(event, 'attachments')[0];
+  if (!firstAttachment) {
+    return '';
+  }
+
+  const contentType = readString(firstAttachment, 'content_type');
+  if (contentType.startsWith('image/')) {
+    return '[User sent an image]';
+  }
+  if (contentType.startsWith('audio/')) {
+    return '[User sent an audio message]';
+  }
+  if (contentType.startsWith('video/')) {
+    return '[User sent a video]';
+  }
+  return '[User sent an attachment]';
 }

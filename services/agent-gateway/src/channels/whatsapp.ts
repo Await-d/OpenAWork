@@ -7,6 +7,7 @@ import type {
   ChannelServiceFactory,
 } from './types.js';
 import { channelFetch } from './channel-http.js';
+import { listRecentChannelGroups, listRecentChannelMessages } from './channel-message-cache.js';
 
 export class WhatsAppChannelService implements MessagingChannelService {
   readonly pluginId: string;
@@ -50,6 +51,7 @@ export class WhatsAppChannelService implements MessagingChannelService {
     if (!this.phoneNumberId || !this.accessToken) {
       throw new Error('WhatsApp channel requires phoneNumberId and accessToken');
     }
+    await this.verifyCredentials();
     this.running = true;
   }
 
@@ -59,6 +61,26 @@ export class WhatsAppChannelService implements MessagingChannelService {
 
   isRunning(): boolean {
     return this.running;
+  }
+
+  private async verifyCredentials(): Promise<void> {
+    const response = await channelFetch(
+      `https://graph.facebook.com/v19.0/${this.phoneNumberId}?fields=id,display_phone_number`,
+      {
+        headers: {
+          Authorization: `Bearer ${this.accessToken}`,
+        },
+      },
+    );
+    const data = (await response.json()) as {
+      id?: string;
+      error?: { message?: string };
+    };
+    if (!response.ok || data.error || !data.id) {
+      throw new Error(
+        `WhatsApp credential check failed: ${data.error?.message ?? response.status}`,
+      );
+    }
   }
 
   async sendMessage(chatId: string, content: string): Promise<{ messageId: string }> {
@@ -140,11 +162,11 @@ export class WhatsAppChannelService implements MessagingChannelService {
   }
 
   async getGroupMessages(_chatId: string, _count?: number): Promise<ChannelMessage[]> {
-    return [];
+    return listRecentChannelMessages(this.pluginId, _chatId, _count);
   }
 
   async listGroups(): Promise<ChannelGroup[]> {
-    return [];
+    return listRecentChannelGroups(this.pluginId);
   }
 }
 

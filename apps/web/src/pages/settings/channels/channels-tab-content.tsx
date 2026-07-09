@@ -1,8 +1,9 @@
 import React from 'react';
-import { createChannelsClient } from '@openAwork/web-client';
+import { createChannelsClient, createResourcesClient } from '@openAwork/web-client';
 import { StatusPill } from '@openAwork/shared-ui';
 import type {
   ChannelDraft,
+  ChannelPersonaOption,
   ChannelTypeDescriptor,
   ChannelProviderOption,
   ChannelSettingsEntry,
@@ -25,6 +26,19 @@ interface ChannelsTabContentProps {
   disconnectedCount: number;
 }
 
+function toChannelPersonaSource(
+  source: string | undefined,
+  integration: string,
+): ChannelPersonaOption['source'] {
+  if (source === 'user') {
+    return 'user';
+  }
+  if (source === 'builtin' || source === 'system' || integration === 'builtin') {
+    return 'builtin';
+  }
+  return 'reference';
+}
+
 export function ChannelsTabContent({
   channels,
   setChannels,
@@ -36,15 +50,61 @@ export function ChannelsTabContent({
   connectedCount,
   disconnectedCount,
 }: ChannelsTabContentProps) {
-  const channelsClient = createChannelsClient<
-    ChannelSettingsEntry,
-    ChannelTypeDescriptor,
-    ChannelTargetEntry
-  >(gatewayUrl);
+  const channelsClient = React.useMemo(
+    () =>
+      createChannelsClient<ChannelSettingsEntry, ChannelTypeDescriptor, ChannelTargetEntry>(
+        gatewayUrl,
+      ),
+    [gatewayUrl],
+  );
+  const resourcesClient = React.useMemo(() => createResourcesClient(gatewayUrl), [gatewayUrl]);
+  const [personas, setPersonas] = React.useState<readonly ChannelPersonaOption[]>([]);
+  const [personaError, setPersonaError] = React.useState<string | null>(null);
   const ensureToken = (): string => {
     if (!token) throw new Error('未登录');
     return token;
   };
+
+  React.useEffect(() => {
+    if (!token) {
+      setPersonas([]);
+      return;
+    }
+
+    const abortController = new AbortController();
+    void resourcesClient
+      .list(token)
+      .then((resources) => {
+        if (abortController.signal.aborted) {
+          return;
+        }
+        setPersonas(
+          resources.souls
+            .filter(
+              (soul) =>
+                soul.visibility === 'feature' &&
+                soul.feature === 'channels' &&
+                soul.usageKind === 'channel-persona',
+            )
+            .map((soul) => ({
+              resourceId: soul.id,
+              title: soul.title,
+              description: soul.description,
+              source: toChannelPersonaSource(soul.source, soul.integration),
+            })),
+        );
+        setPersonaError(null);
+      })
+      .catch((error: unknown) => {
+        if (abortController.signal.aborted) {
+          return;
+        }
+        logger.error('failed to load channel personas', error);
+        setPersonaError(error instanceof Error ? error.message : '通道人设资源加载失败');
+      });
+
+    return () => abortController.abort();
+  }, [resourcesClient, token]);
   const applyChannelError = (channelId: string, errorMessage?: string) => {
     setChannels((prev) =>
       prev.map((channel) =>
@@ -185,6 +245,24 @@ export function ChannelsTabContent({
     }
   };
 
+  const startWeixinLogin = async (input: {
+    accountId?: string;
+    baseUrl?: string;
+    routeTag?: string;
+    force?: boolean;
+  }) => {
+    return channelsClient.startWeixinLogin(ensureToken(), input);
+  };
+
+  const waitWeixinLogin = async (input: {
+    sessionKey: string;
+    baseUrl?: string;
+    routeTag?: string;
+    timeoutMs?: number;
+  }) => {
+    return channelsClient.waitWeixinLogin(ensureToken(), input);
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
       <div
@@ -236,7 +314,7 @@ export function ChannelsTabContent({
           )}
         </div>
       </div>
-      {loadError ? (
+      {(loadError ?? personaError) ? (
         <div
           style={{
             padding: '12px 16px',
@@ -249,18 +327,21 @@ export function ChannelsTabContent({
             lineHeight: 1.5,
           }}
         >
-          {loadError}
+          {loadError ?? personaError}
         </div>
       ) : null}
       <ChannelSubscriptionSettings
         channels={channels}
         descriptors={descriptors}
         providers={providers}
+        personas={personas}
         onSave={saveChannel}
         onConnect={connectChannel}
         onDisconnect={disconnectChannel}
         onDelete={deleteChannel}
         onRefreshTargets={refreshTargets}
+        onStartWeixinLogin={startWeixinLogin}
+        onWaitWeixinLogin={waitWeixinLogin}
       />
       <ChannelConversationHistoryPanel channels={channels} gatewayUrl={gatewayUrl} token={token} />
     </div>

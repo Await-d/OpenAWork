@@ -1,16 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { ChannelQuickLinks } from './ChannelQuickLinks.js';
+import type { ChannelQuickLinkEntry } from './ChannelQuickLinks.js';
 import { CHANNEL_SUBSCRIPTION_SETTINGS_STYLES } from './channel-subscription-settings.styles.js';
 
 export type ChannelEditorType =
-  | 'telegram'
-  | 'discord'
-  | 'slack'
-  | 'feishu'
-  | 'dingtalk'
-  | 'wecom'
-  | 'whatsapp'
-  | 'qq';
+  'telegram' | 'discord' | 'slack' | 'feishu' | 'dingtalk' | 'weixin' | 'wecom' | 'whatsapp' | 'qq';
 
 export type ChannelEditorStatus = 'connected' | 'disconnected' | 'error' | 'pending';
 export type ChannelDescriptorCategory = 'china' | 'international' | 'custom';
@@ -48,6 +43,18 @@ export interface ChannelProviderOption {
   defaultModels: Array<{ id: string; label: string; enabled: boolean }>;
 }
 
+export interface ChannelPersonaOption {
+  resourceId: string;
+  title: string;
+  description: string;
+  source: 'reference' | 'user' | 'builtin';
+}
+
+export interface ChannelPersonaSelection {
+  resourceId: string;
+  title: string;
+}
+
 export interface ChannelDescriptorField {
   key: string;
   label: string;
@@ -64,6 +71,8 @@ export interface ChannelDescriptorTool {
   defaultEnabled?: boolean;
 }
 
+export type ChannelDescriptorLink = ChannelQuickLinkEntry;
+
 export interface ChannelTypeDescriptor {
   type: ChannelEditorType;
   displayName: string;
@@ -71,6 +80,7 @@ export interface ChannelTypeDescriptor {
   icon: string;
   category: ChannelDescriptorCategory;
   configSchema: ChannelDescriptorField[];
+  quickLinks?: ChannelDescriptorLink[];
   tools: ChannelDescriptorTool[];
 }
 
@@ -87,6 +97,7 @@ export interface ChannelSettingsEntry {
   model?: string | null;
   tools?: Record<string, boolean>;
   permissions?: ChannelPermissionsEntry;
+  persona?: ChannelPersonaSelection | null;
   errorMessage?: string;
   availableTargets?: ChannelTargetEntry[];
   loadingTargets?: boolean;
@@ -103,21 +114,54 @@ export interface ChannelDraft {
   model: string | null;
   tools: Record<string, boolean>;
   permissions: ChannelPermissionsEntry;
+  persona: ChannelPersonaSelection | null;
+}
+
+export interface WeixinLoginStartInput {
+  accountId?: string;
+  baseUrl?: string;
+  routeTag?: string;
+  force?: boolean;
+}
+
+export interface WeixinLoginStartResult {
+  sessionKey: string;
+  qrCodeUrl?: string;
+  message: string;
+}
+
+export interface WeixinLoginWaitInput {
+  sessionKey: string;
+  baseUrl?: string;
+  routeTag?: string;
+  timeoutMs?: number;
+}
+
+export interface WeixinLoginWaitResult {
+  connected: boolean;
+  message: string;
+  token?: string;
+  accountId?: string;
+  baseUrl?: string;
+  userId?: string;
 }
 
 export interface ChannelSubscriptionSettingsProps {
   channels: ChannelSettingsEntry[];
   descriptors: ChannelTypeDescriptor[];
   providers?: ChannelProviderOption[];
+  personas?: readonly ChannelPersonaOption[];
   onSave: (channelId: string | null, draft: ChannelDraft) => Promise<ChannelSettingsEntry>;
   onDelete?: (channelId: string) => Promise<void>;
   onConnect?: (channelId: string) => Promise<void>;
   onDisconnect?: (channelId: string) => Promise<void>;
   onRefreshTargets?: (channelId: string) => Promise<void>;
+  onStartWeixinLogin?: (input: WeixinLoginStartInput) => Promise<WeixinLoginStartResult>;
+  onWaitWeixinLogin?: (input: WeixinLoginWaitInput) => Promise<WeixinLoginWaitResult>;
   style?: CSSProperties;
 }
 
-type PendingAction = 'save' | 'connect' | 'disconnect' | 'delete' | 'refresh' | null;
+type PendingAction = 'save' | 'connect' | 'disconnect' | 'delete' | 'refresh' | 'weixin' | null;
 
 const CATEGORY_ORDER: ChannelDescriptorCategory[] = ['china', 'international', 'custom'];
 
@@ -133,6 +177,7 @@ const CHANNEL_ICON: Record<string, string> = {
   slack: '#',
   feishu: '飞',
   dingtalk: '钉',
+  weixin: '微',
   wecom: '企',
   whatsapp: '◎',
   qq: 'Q',
@@ -208,6 +253,7 @@ const EMPTY_DRAFT: ChannelDraft = {
     allowShell: false,
     allowSubAgents: true,
   },
+  persona: null,
 };
 
 function cloneDraft(draft: ChannelDraft): ChannelDraft {
@@ -221,6 +267,7 @@ function cloneDraft(draft: ChannelDraft): ChannelDraft {
       ...draft.permissions,
       readablePathPrefixes: [...draft.permissions.readablePathPrefixes],
     },
+    persona: draft.persona ? { ...draft.persona } : null,
   };
 }
 
@@ -261,6 +308,10 @@ function createToolsFromDescriptor(
   }, {});
 }
 
+function isChannelRuntimeToolKey(key: string): boolean {
+  return key.startsWith('Plugin') || key.startsWith('Feishu') || key.startsWith('Weixin');
+}
+
 function createDraftFromDescriptor(descriptor: ChannelTypeDescriptor): ChannelDraft {
   return {
     type: descriptor.type,
@@ -276,6 +327,7 @@ function createDraftFromDescriptor(descriptor: ChannelTypeDescriptor): ChannelDr
     model: null,
     tools: createToolsFromDescriptor(descriptor),
     permissions: createDefaultPermissions(),
+    persona: null,
   };
 }
 
@@ -283,6 +335,14 @@ function buildDraftFromEntry(
   entry: ChannelSettingsEntry,
   descriptor: ChannelTypeDescriptor | undefined,
 ): ChannelDraft {
+  const tools = entry.tools ? { ...entry.tools } : createToolsFromDescriptor(descriptor);
+  for (const tool of descriptor?.tools ?? []) {
+    if (tool.key in tools || tool.defaultEnabled === false || !isChannelRuntimeToolKey(tool.key)) {
+      continue;
+    }
+    tools[tool.key] = true;
+  }
+
   return cloneDraft({
     type: entry.type,
     name: entry.name,
@@ -295,8 +355,9 @@ function buildDraftFromEntry(
     features: { ...createDefaultFeatures(), ...(entry.features ?? {}) },
     providerId: entry.providerId ?? null,
     model: entry.model ?? null,
-    tools: entry.tools ?? createToolsFromDescriptor(descriptor),
+    tools,
     permissions: { ...createDefaultPermissions(), ...(entry.permissions ?? {}) },
+    persona: entry.persona ?? null,
   });
 }
 
@@ -332,11 +393,12 @@ function normalizeDraft(draft: ChannelDraft): ChannelDraft {
     ...draft,
     name: draft.name.trim(),
     config: normalizedConfig,
-    tools: Object.fromEntries(Object.entries(draft.tools).filter(([, enabled]) => enabled)),
+    tools: { ...draft.tools },
     permissions: {
       ...draft.permissions,
       readablePathPrefixes: normalizedPrefixes,
     },
+    persona: draft.persona,
     subscriptions: normalizedSubscriptions,
   };
 }
@@ -391,15 +453,24 @@ function isDraftValid(draft: ChannelDraft, descriptor: ChannelTypeDescriptor | u
   );
 }
 
+function buildAutoStartFailureMessage(channel: ChannelSettingsEntry): string {
+  return `已保存配置，但自动启动失败：${
+    channel.errorMessage?.trim() || '请检查平台凭证、事件订阅与网关权限。'
+  }`;
+}
+
 export function ChannelSubscriptionSettings({
   channels,
   descriptors,
   providers = [],
+  personas = [],
   onSave,
   onDelete,
   onConnect,
   onDisconnect,
   onRefreshTargets,
+  onStartWeixinLogin,
+  onWaitWeixinLogin,
   style,
 }: ChannelSubscriptionSettingsProps) {
   const [query, setQuery] = useState('');
@@ -410,6 +481,8 @@ export function ChannelSubscriptionSettings({
   const [newReadPath, setNewReadPath] = useState('');
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [weixinQrCodeUrl, setWeixinQrCodeUrl] = useState('');
+  const [weixinLoginMessage, setWeixinLoginMessage] = useState('');
   const firstInputRef = useRef<HTMLInputElement | null>(null);
 
   const descriptorMap = useMemo(
@@ -464,6 +537,8 @@ export function ChannelSubscriptionSettings({
       setDraft(descriptor ? createDraftFromDescriptor(descriptor) : cloneDraft(EMPTY_DRAFT));
       setVisibleSecrets({});
       setNewReadPath('');
+      setWeixinQrCodeUrl('');
+      setWeixinLoginMessage('');
       return;
     }
 
@@ -471,6 +546,8 @@ export function ChannelSubscriptionSettings({
       setDraft(buildDraftFromEntry(selectedChannel, descriptorMap.get(selectedChannel.type)));
       setVisibleSecrets({});
       setNewReadPath('');
+      setWeixinQrCodeUrl('');
+      setWeixinLoginMessage('');
     }
   }, [creatingType, descriptorMap, selectedChannel]);
 
@@ -502,6 +579,9 @@ export function ChannelSubscriptionSettings({
 
   const selectedProvider = providers.find((provider) => provider.id === draft.providerId) ?? null;
   const providerModels = selectedProvider?.defaultModels ?? [];
+  const selectedPersona = personas.find(
+    (persona) => persona.resourceId === draft.persona?.resourceId,
+  );
   const toolOptions = useMemo(() => {
     const descriptorTools = activeDescriptor?.tools ?? [];
     const extraKeys = Object.keys(draft.tools).filter(
@@ -527,6 +607,7 @@ export function ChannelSubscriptionSettings({
   const isValid = isDraftValid(draft, activeDescriptor);
   const isBusy = pendingAction !== null;
   const canRefreshTargets = Boolean(selectedChannel && onRefreshTargets);
+  const canBindWeixin = Boolean(onStartWeixinLogin && onWaitWeixinLogin);
   const availableTargets = selectedChannel?.availableTargets ?? [];
   const currentError = actionError ?? selectedChannel?.errorMessage ?? null;
 
@@ -563,6 +644,14 @@ export function ChannelSubscriptionSettings({
         ...current.tools,
         [toolKey]: !current.tools[toolKey],
       },
+    }));
+  }
+
+  function selectPersona(resourceId: string): void {
+    const persona = personas.find((item) => item.resourceId === resourceId);
+    setDraft((current) => ({
+      ...current,
+      persona: persona ? { resourceId: persona.resourceId, title: persona.title } : null,
     }));
   }
 
@@ -627,6 +716,13 @@ export function ChannelSubscriptionSettings({
       const savedChannel = await onSave(selectedChannel?.id ?? null, normalizedDraft);
       setCreatingType(null);
       setSelectedKey(savedChannel.id);
+      if (
+        normalizedDraft.enabled &&
+        normalizedDraft.features.autoStart &&
+        savedChannel.status === 'error'
+      ) {
+        setActionError(buildAutoStartFailureMessage(savedChannel));
+      }
     } catch (error) {
       setActionError(error instanceof Error ? error.message : '保存通道配置失败');
     } finally {
@@ -694,6 +790,58 @@ export function ChannelSubscriptionSettings({
       await onRefreshTargets(selectedChannel.id);
     } catch (error) {
       setActionError(error instanceof Error ? error.message : '刷新订阅目标失败');
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function handleWeixinBind(force = false): Promise<void> {
+    if (!onStartWeixinLogin || !onWaitWeixinLogin) {
+      return;
+    }
+
+    setPendingAction('weixin');
+    setActionError(null);
+    setWeixinQrCodeUrl('');
+    setWeixinLoginMessage('正在生成微信绑定二维码…');
+    try {
+      const baseUrl = draft.config['baseUrl'] || undefined;
+      const routeTag = draft.config['routeTag'] || undefined;
+      const startResult = await onStartWeixinLogin({
+        accountId: draft.config['accountId'] || undefined,
+        baseUrl,
+        routeTag,
+        force,
+      });
+      setWeixinQrCodeUrl(startResult.qrCodeUrl ?? '');
+      setWeixinLoginMessage(startResult.message);
+      const waitResult = await onWaitWeixinLogin({
+        sessionKey: startResult.sessionKey,
+        baseUrl,
+        routeTag,
+        timeoutMs: 480_000,
+      });
+      setWeixinLoginMessage(waitResult.message);
+      if (!waitResult.connected) {
+        setActionError(waitResult.message || '微信绑定未完成');
+        return;
+      }
+
+      setDraft((current) => ({
+        ...current,
+        config: {
+          ...current.config,
+          ...(waitResult.token ? { token: waitResult.token } : {}),
+          ...(waitResult.accountId ? { accountId: waitResult.accountId } : {}),
+          ...(waitResult.baseUrl ? { baseUrl: waitResult.baseUrl } : {}),
+          ...(waitResult.userId ? { userId: waitResult.userId } : {}),
+        },
+      }));
+      setVisibleSecrets((current) => ({ ...current, token: true }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '微信绑定失败';
+      setActionError(message);
+      setWeixinLoginMessage(message);
     } finally {
       setPendingAction(null);
     }
@@ -874,6 +1022,7 @@ export function ChannelSubscriptionSettings({
                     )}
                     <span className="channel-mini-badge">修改后需保存</span>
                   </div>
+                  <ChannelQuickLinks links={activeDescriptor?.quickLinks} />
                 </div>
               </div>
 
@@ -1006,6 +1155,57 @@ export function ChannelSubscriptionSettings({
                 </div>
               </section>
 
+              {draft.type === 'weixin' ? (
+                <section className="channel-section">
+                  <div className="channel-section__head">
+                    <div>
+                      <h4 className="channel-section__title">微信扫码绑定</h4>
+                      <div className="channel-muted">
+                        使用微信扫码完成 iLink Bot 绑定，成功后会自动填入 Token 与 Account ID。
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="channel-button channel-button--ghost"
+                      disabled={!canBindWeixin || isBusy}
+                      onClick={() => {
+                        void handleWeixinBind(Boolean(weixinQrCodeUrl));
+                      }}
+                    >
+                      {pendingAction === 'weixin'
+                        ? '等待扫码…'
+                        : weixinQrCodeUrl
+                          ? '刷新二维码'
+                          : '生成二维码'}
+                    </button>
+                  </div>
+                  <div className="channel-section__body">
+                    <div className="channel-weixin-bind">
+                      <div>
+                        <div className="channel-weixin-bind__title">
+                          {draft.config['accountId']
+                            ? `已绑定账号 ${draft.config['accountId']}`
+                            : '尚未绑定微信公众平台账号'}
+                        </div>
+                        <div className="channel-field__hint">
+                          扫码确认后请保存实例，Gateway 才会持久化新的凭证配置。
+                        </div>
+                        {weixinLoginMessage ? (
+                          <div className="channel-field__hint">{weixinLoginMessage}</div>
+                        ) : null}
+                      </div>
+                      {weixinQrCodeUrl ? (
+                        <img
+                          className="channel-weixin-bind__qr"
+                          src={weixinQrCodeUrl}
+                          alt="微信公众平台绑定二维码"
+                        />
+                      ) : null}
+                    </div>
+                  </div>
+                </section>
+              ) : null}
+
               <section className="channel-section">
                 <div className="channel-section__head">
                   <div>
@@ -1098,9 +1298,52 @@ export function ChannelSubscriptionSettings({
               <section className="channel-section">
                 <div className="channel-section__head">
                   <div>
+                    <h4 className="channel-section__title">通道人设</h4>
+                    <div className="channel-muted">
+                      仅读取资源目录中标记为 channel-persona 的 souls，用于当前通道的个人角色设定。
+                    </div>
+                  </div>
+                </div>
+                <div className="channel-section__body channel-persona-layout">
+                  <div className="channel-field">
+                    <div className="channel-field__label">Persona</div>
+                    <select
+                      value={draft.persona?.resourceId ?? ''}
+                      onChange={(event) => selectPersona(event.target.value)}
+                    >
+                      <option value="">不绑定，使用默认助手人格</option>
+                      {personas.map((persona) => (
+                        <option key={persona.resourceId} value={persona.resourceId}>
+                          {persona.title}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="channel-persona-preview">
+                    <div className="channel-persona-preview__title">
+                      {selectedPersona?.title ?? '默认助手人格'}
+                    </div>
+                    <div className="channel-persona-preview__desc">
+                      {selectedPersona?.description ??
+                        '未绑定 souls 资源时，通道回复继续使用会话默认系统提示。'}
+                    </div>
+                    <span className="channel-mini-badge">
+                      {selectedPersona
+                        ? selectedPersona.source === 'user'
+                          ? '用户上传'
+                          : '参考资源'
+                        : '未绑定'}
+                    </span>
+                  </div>
+                </div>
+              </section>
+
+              <section className="channel-section">
+                <div className="channel-section__head">
+                  <div>
                     <h4 className="channel-section__title">Agent 工具白名单</h4>
                     <div className="channel-muted">
-                      默认跟随模板建议开启。关闭后会在保存时从通道配置中移除该工具能力。
+                      默认跟随模板建议开启。关闭后会保存为禁用状态并在执行链路中隐藏该工具。
                     </div>
                   </div>
                 </div>

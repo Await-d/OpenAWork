@@ -143,4 +143,68 @@ describe('createChannelsClient', () => {
       }),
     );
   });
+
+  it('startWeixinLogin 会请求微信 QR 登录启动接口', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe('http://localhost:3000/channels/weixin/login/start');
+      expect(init?.method).toBe('POST');
+      expect(init?.headers).toMatchObject({
+        Authorization: 'Bearer token-1',
+        'Content-Type': 'application/json',
+      });
+      expect(JSON.parse(String(init?.body))).toEqual({
+        baseUrl: 'https://weixin.example',
+        routeTag: 'route-a',
+      });
+      return new Response(
+        JSON.stringify({
+          sessionKey: 'session-1',
+          qrCodeUrl: 'data:image/png;base64,QR',
+          message: '请使用微信扫码。',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as typeof fetch;
+    globalThis.fetch = fetchMock;
+
+    const client = createChannelsClient('http://localhost:3000');
+    const result = await client.startWeixinLogin('token-1', {
+      baseUrl: 'https://weixin.example',
+      routeTag: 'route-a',
+    });
+
+    expect(result).toMatchObject({
+      sessionKey: 'session-1',
+      qrCodeUrl: 'data:image/png;base64,QR',
+    });
+  });
+
+  it('waitWeixinLogin 会返回微信绑定凭证', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          connected: true,
+          message: '已连接。',
+          token: 'bot-token-1',
+          accountId: 'account-1',
+          baseUrl: 'https://weixin.example',
+          userId: 'wx-user-1',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as typeof fetch;
+
+    const client = createChannelsClient('http://localhost:3000');
+    const result = await client.waitWeixinLogin('token-1', {
+      sessionKey: 'session-1',
+      baseUrl: 'https://weixin.example',
+      timeoutMs: 1_000,
+    });
+
+    expect(result).toMatchObject({
+      connected: true,
+      token: 'bot-token-1',
+      accountId: 'account-1',
+    });
+  });
 });

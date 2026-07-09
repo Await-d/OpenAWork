@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type {
   ChannelFeatures,
   ChannelInstance,
+  ChannelPersonaSelection,
   ChannelPermissions,
   ChannelSubscription,
 } from './types.js';
@@ -21,6 +22,11 @@ const channelPermissionsSchema = z.object({
   allowSubAgents: z.boolean().default(false),
 });
 
+const channelPersonaSchema = z.object({
+  resourceId: z.string().trim().min(1).max(200),
+  title: z.string().trim().min(1).max(200),
+});
+
 export const channelSubscriptionSchema = z.object({
   chatId: z.string().min(1),
   name: z.string().min(1),
@@ -37,6 +43,7 @@ const channelBaseSchema = z.object({
   model: z.string().nullable().optional(),
   features: channelFeaturesSchema.optional(),
   permissions: channelPermissionsSchema.optional(),
+  persona: channelPersonaSchema.nullable().optional(),
   subscriptions: z.array(channelSubscriptionSchema).optional(),
 });
 
@@ -94,6 +101,17 @@ const normalizeConfig = (config: Record<string, string>): Record<string, string>
   }, {});
 };
 
+const normalizePersona = (
+  persona: ChannelPersonaSelection | null | undefined,
+): ChannelPersonaSelection | null => {
+  const resourceId = persona?.resourceId.trim();
+  const title = persona?.title.trim();
+  if (!resourceId || !title) {
+    return null;
+  }
+  return { resourceId, title };
+};
+
 export const materializeStoredChannels = (raw: unknown, ownerUserId: string): ChannelInstance[] => {
   if (!Array.isArray(raw)) {
     return [];
@@ -125,6 +143,7 @@ export const createChannelInstance = (
       providerId: input.providerId === undefined ? existing?.providerId : input.providerId,
       model: input.model === undefined ? existing?.model : input.model,
       permissions: input.permissions ?? existing?.permissions,
+      persona: input.persona === undefined ? existing?.persona : input.persona,
       id: input.id ?? existing?.id ?? crypto.randomUUID(),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
@@ -146,6 +165,7 @@ function normalizeChannel(input: StoredChannelInput, ownerUserId: string): Chann
     model: input.model ?? null,
     features: { ...defaultFeatures(), ...(input.features ?? {}) },
     permissions: { ...defaultPermissions(), ...(input.permissions ?? {}) },
+    persona: normalizePersona(input.persona),
     subscriptions: normalizeSubscriptions(input.subscriptions),
     ownerUserId,
     createdAt: input.createdAt ?? Date.now(),

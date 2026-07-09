@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FeishuChannelService } from '../../channels/feishu.js';
 import type { ChannelInstance } from '../../channels/types.js';
+import type { FeishuGatewayFactory } from '../../channels/feishu-gateway.js';
 
 const OriginalFetch = globalThis.fetch;
 
@@ -33,6 +34,11 @@ function tokenResponse(): Response {
   });
 }
 
+const noopGatewayFactory: FeishuGatewayFactory = () => ({
+  start: async () => undefined,
+  stop: () => undefined,
+});
+
 describe('FeishuChannelService send error handling', () => {
   it('上游返回非零 code 时抛出清晰错误，而不是读 undefined.message_id 崩溃', async () => {
     let call = 0;
@@ -48,7 +54,7 @@ describe('FeishuChannelService send error handling', () => {
       );
     }) as typeof fetch;
 
-    const svc = new FeishuChannelService(instance(), () => undefined);
+    const svc = new FeishuChannelService(instance(), () => undefined, noopGatewayFactory);
     await svc.start();
     await expect(svc.sendMessage('chat-1', 'hi')).rejects.toThrow(
       /Feishu send failed: code 230002/,
@@ -68,7 +74,7 @@ describe('FeishuChannelService send error handling', () => {
       );
     }) as typeof fetch;
 
-    const svc = new FeishuChannelService(instance(), () => undefined);
+    const svc = new FeishuChannelService(instance(), () => undefined, noopGatewayFactory);
     await svc.start();
     await expect(svc.sendMessage('chat-1', 'hi')).resolves.toEqual({ messageId: 'om-123' });
   });
@@ -86,7 +92,7 @@ describe('FeishuChannelService send error handling', () => {
       );
     }) as typeof fetch;
 
-    const svc = new FeishuChannelService(instance(), () => undefined);
+    const svc = new FeishuChannelService(instance(), () => undefined, noopGatewayFactory);
     await svc.start();
     await expect(svc.sendMessage('chat-1', 'hi')).rejects.toThrow(/no message_id/);
   });
@@ -104,7 +110,7 @@ describe('FeishuChannelService send error handling', () => {
       );
     }) as typeof fetch;
 
-    const svc = new FeishuChannelService(instance(), () => undefined);
+    const svc = new FeishuChannelService(instance(), () => undefined, noopGatewayFactory);
     await svc.start();
     await expect(svc.getGroupMessages('chat-1')).resolves.toEqual([]);
   });
@@ -122,8 +128,37 @@ describe('FeishuChannelService send error handling', () => {
       );
     }) as typeof fetch;
 
-    const svc = new FeishuChannelService(instance(), () => undefined);
+    const svc = new FeishuChannelService(instance(), () => undefined, noopGatewayFactory);
     await svc.start();
     await expect(svc.listGroups()).resolves.toEqual([]);
+  });
+
+  it('流式回复带原消息 id 时首条卡片使用 reply endpoint', async () => {
+    const calls: Array<{ url: string; body: unknown }> = [];
+    globalThis.fetch = ((url: string, init?: RequestInit): Promise<Response> => {
+      calls.push({
+        url,
+        body: init?.body ? JSON.parse(String(init.body)) : null,
+      });
+      if (calls.length === 1) return Promise.resolve(tokenResponse());
+      return Promise.resolve(
+        new Response(JSON.stringify({ code: 0, data: { message_id: `om-${calls.length}` } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+    }) as typeof fetch;
+
+    const svc = new FeishuChannelService(instance(), () => undefined, noopGatewayFactory);
+    await svc.start();
+
+    await svc.sendStreamingMessage('chat-1', 'thinking', 'original-message-id');
+
+    expect(calls[1]?.url).toBe(
+      'https://open.feishu.cn/open-apis/im/v1/messages/original-message-id/reply',
+    );
+    expect(calls[1]?.body).toMatchObject({
+      msg_type: 'interactive',
+    });
   });
 });

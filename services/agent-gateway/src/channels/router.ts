@@ -6,10 +6,16 @@ import { requireAuth } from '../infra/auth.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import { listSessionMessagesV2 } from '../message/message-v2-adapter.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
-import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
 import { extractMessageText } from '../session/session-message-store.js';
 import { runSessionInBackground } from '../routes/stream-runtime.js';
 import { AutoReplyPipeline } from './auto-reply.js';
+import { recordChannelMessage } from './channel-message-cache.js';
+import { buildChannelSessionKey, upsertChannelSession } from './channel-session-store.js';
+import {
+  compactChannelConversation,
+  getChannelUsageStats,
+  resetChannelConversation,
+} from './channel-sessions.js';
 import { listChannelConversations } from './channel-conversations.js';
 import { createPartialTextQueue } from './partial-text-queue.js';
 import { resolveSendableChannel } from './channel-access.js';
@@ -19,13 +25,15 @@ import { createDingTalkService } from './dingtalk.js';
 import { discordFactory } from './discord.js';
 import { createFeishuService } from './feishu.js';
 import { channelManager } from './manager.js';
+import { registerWeixinLoginRoutes } from './weixin-login-route.js';
 import { slackFactory } from './slack.js';
 import { telegramFactory } from './telegram.js';
 import { weComFactory } from './wecom.js';
+import { weixinFactory } from './weixin.js';
 import { whatsAppFactory } from './whatsapp.js';
 import { qqFactory } from './qq.js';
 import { shouldHandleChannelEvent } from './subscription-filter.js';
-import type { ChannelEvent, ChannelInstance } from './types.js';
+import type { ChannelDiagnostics, ChannelEvent, ChannelInstance } from './types.js';
 import {
   parseDingTalkInboundMessage,
   parseDiscordInboundMessage,
@@ -33,6 +41,7 @@ import {
   parseQQInboundMessage,
   parseTelegramInboundMessage,
   parseWeComInboundMessage,
+  parseWeixinInboundMessage,
   parseWhatsAppInboundMessage,
 } from './inbound-parsers.js';
 import {
@@ -45,11 +54,6 @@ import {
 interface UserSettingRow {
   user_id?: string;
   value: string;
-}
-
-interface ReusableSessionRow {
-  id: string;
-  metadata_json: string;
 }
 
 const CHANNELS_SETTINGS_KEY = 'channels';
@@ -66,95 +70,6 @@ const channelRouteParamsSchema = z.object({
   id: z.string().min(1),
 });
 
-function buildChannelSessionMetadata(
-  channel: ChannelInstance,
-  currentMetadata: Record<string, unknown> = {},
-): Record<string, unknown> {
-  const nextMetadata: Record<string, unknown> = {
-    ...currentMetadata,
-    source: 'channel',
-    webSearchEnabled: channel.tools?.['web_search'] === true,
-    taskToolEnabled:
-      channel.tools?.['task'] === true && (channel.permissions?.allowSubAgents ?? true),
-    questionToolEnabled: false,
-    channel: {
-      id: channel.id,
-      type: channel.type,
-      name: channel.name,
-      providerId: channel.providerId ?? null,
-      model: channel.model ?? null,
-      permissions: channel.permissions ?? null,
-      tools: channel.tools ?? {},
-    },
-  };
-
-  if (channel.providerId) {
-    nextMetadata['providerId'] = channel.providerId;
-  } else {
-    delete nextMetadata['providerId'];
-  }
-
-  if (channel.model) {
-    nextMetadata['modelId'] = channel.model;
-  } else {
-    delete nextMetadata['modelId'];
-  }
-
-  return nextMetadata;
-}
-
-function findReusableChannelSession(userId: string, sessionKey: string): ReusableSessionRow | null {
-  const idleSession = sqliteGet<ReusableSessionRow>(
-    `SELECT id, metadata_json
-     FROM sessions
-     WHERE user_id = ? AND title = ? AND state_status = 'idle'
-     ORDER BY updated_at DESC
-     LIMIT 1`,
-    [userId, sessionKey],
-  );
-  if (idleSession) {
-    return idleSession;
-  }
-
-  return (
-    sqliteGet<ReusableSessionRow>(
-      `SELECT id, metadata_json
-     FROM sessions
-     WHERE user_id = ? AND title = ?
-     ORDER BY updated_at DESC
-     LIMIT 1`,
-      [userId, sessionKey],
-    ) ?? null
-  );
-}
-
-function upsertChannelSession(input: {
-  channel: ChannelInstance;
-  sessionKey: string;
-  userId: string;
-}): string {
-  const existingSession = findReusableChannelSession(input.userId, input.sessionKey);
-  const nextMetadata = buildChannelSessionMetadata(
-    input.channel,
-    parseSessionMetadataJson(existingSession?.metadata_json ?? '{}'),
-  );
-
-  if (existingSession) {
-    sqliteRun(
-      "UPDATE sessions SET title = ?, metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
-      [input.sessionKey, JSON.stringify(nextMetadata), existingSession.id, input.userId],
-    );
-    return existingSession.id;
-  }
-
-  const sessionId = randomUUID();
-  sqliteRun(
-    'INSERT INTO sessions (id, user_id, title, messages_json, state_status, metadata_json) VALUES (?, ?, ?, ?, ?, ?)',
-    [sessionId, input.userId, input.sessionKey, '[]', 'idle', JSON.stringify(nextMetadata)],
-  );
-  return sessionId;
-}
-
 channelManager.registerFactory('telegram', telegramFactory);
 channelManager.registerParser('telegram', parseTelegramInboundMessage);
 channelManager.registerFactory('discord', discordFactory);
@@ -162,6 +77,8 @@ channelManager.registerParser('discord', parseDiscordInboundMessage);
 channelManager.registerFactory('slack', slackFactory);
 channelManager.registerFactory('wecom', weComFactory);
 channelManager.registerParser('wecom', parseWeComInboundMessage);
+channelManager.registerFactory('weixin', weixinFactory);
+channelManager.registerParser('weixin', parseWeixinInboundMessage);
 channelManager.registerFactory('whatsapp', whatsAppFactory);
 channelManager.registerParser('whatsapp', parseWhatsAppInboundMessage);
 channelManager.registerFactory('qq', qqFactory);
@@ -177,15 +94,21 @@ channelManager.registerParser('dingtalk', parseDingTalkInboundMessage);
 
 const autoReply = new AutoReplyPipeline({
   resolveChannel: (pluginId: string) => channels.get(pluginId),
-  onAgentRun: async ({ sessionKey, message, pluginId, onPartialText }) => {
+  commandActions: {
+    compactConversation: compactChannelConversation,
+    getUsageStats: getChannelUsageStats,
+    resetConversation: resetChannelConversation,
+  },
+  onAgentRun: async ({ message, pluginId, chatId, onPartialText }) => {
     const channel = channels.get(pluginId);
     if (!channel?.ownerUserId) {
       throw new Error('Channel owner is missing for auto reply session');
     }
 
     const sessionId = upsertChannelSession({
+      chatId,
       channel,
-      sessionKey,
+      sessionKey: buildChannelSessionKey(pluginId, chatId),
       userId: channel.ownerUserId,
     });
     const clientRequestId = randomUUID();
@@ -244,6 +167,10 @@ const autoReply = new AutoReplyPipeline({
 
 function notifyChannel(event: ChannelEvent): void {
   const channel = channels.get(event.pluginId);
+  if (event.type === 'message') {
+    recordChannelMessage(event.pluginId, event.message);
+  }
+
   if (!shouldHandleChannelEvent(channel, event)) {
     return;
   }
@@ -342,10 +269,12 @@ const serializeChannel = (
     statusOverride?: 'connected' | 'disconnected' | 'error';
   },
 ): ChannelInstance & {
+  diagnostics: ChannelDiagnostics;
   errorMessage?: string;
   status: 'connected' | 'disconnected' | 'error';
 } => ({
   ...instance,
+  diagnostics: channelManager.getDiagnostics(instance.id),
   status: options?.statusOverride ?? toConnectionStatus(instance.id),
   ...(options?.errorMessage ? { errorMessage: options.errorMessage } : {}),
 });
@@ -381,10 +310,12 @@ export async function autoStartConfiguredChannels(
 }
 
 export async function channelRoutes(app: FastifyInstance): Promise<void> {
+  await registerWeixinLoginRoutes(app);
   await registerChannelInboundRoutes(app, {
     resolveChannel: resolveAnyChannel,
     parseMessage: (type, raw) => channelManager.parseMessage(type, raw),
     notifyChannel,
+    recordInboundDiagnostic: (input) => channelManager.recordInboundDiagnostic(input),
   });
 
   app.get(
@@ -514,6 +445,32 @@ export async function channelRoutes(app: FastifyInstance): Promise<void> {
       await channelManager.startPlugin(instance, notifyChannel);
       step.succeed(undefined, { channelId: id });
       return reply.send({ status: toConnectionStatus(instance.id) });
+    },
+  );
+
+  app.get(
+    '/channels/:id/diagnostics',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const parsedParams = channelRouteParamsSchema.safeParse(request.params);
+      if (!parsedParams.success) {
+        return reply.status(400).send({ error: 'Invalid channel id' });
+      }
+
+      const { id } = parsedParams.data;
+      const { step } = startRequestWorkflow(request, 'channel.diagnostics', undefined, {
+        channelId: id,
+      });
+      const user = request.user as JwtPayload;
+      const instance = resolveUserChannels(user.sub).find((channel) => channel.id === id);
+      if (!instance) {
+        step.fail('channel not found');
+        return reply.status(404).send({ error: 'Channel not found' });
+      }
+
+      const diagnostics = channelManager.getDiagnostics(id);
+      step.succeed(undefined, { channelId: id, status: diagnostics.status });
+      return reply.send({ diagnostics });
     },
   );
 

@@ -1,6 +1,7 @@
 import type {
   ChannelInstance,
   ChannelEvent,
+  ChannelDiagnostics,
   ChannelStatus,
   ChannelServiceFactory,
   ChannelWsMessageParser,
@@ -13,6 +14,14 @@ export class ChannelManager {
   private parsers = new Map<string, ChannelWsMessageParser>();
   private services = new Map<string, MessagingChannelService>();
   private statuses = new Map<string, ChannelStatus>();
+  private inboundDiagnostics = new Map<
+    string,
+    Pick<
+      ChannelDiagnostics,
+      'lastInboundAt' | 'lastInboundAccepted' | 'lastInboundType' | 'lastInboundError'
+    > &
+      Pick<ChannelDiagnostics, 'lastMessageAt' | 'lastMessageChatId'>
+  >();
   private startQueues = new Map<string, Promise<void>>();
   private relays = new Map<string, ChannelRelay>();
 
@@ -112,6 +121,48 @@ export class ChannelManager {
 
   getStatus(id: string): ChannelStatus {
     return this.statuses.get(id) ?? 'stopped';
+  }
+
+  getDiagnostics(id: string): ChannelDiagnostics {
+    const status = this.getStatus(id);
+    const service = this.services.get(id);
+    const inbound = this.inboundDiagnostics.get(id);
+    const diagnostics = service?.getDiagnostics?.();
+    if (diagnostics) {
+      return {
+        ...diagnostics,
+        ...inbound,
+        status,
+        running: service?.isRunning() ?? false,
+      };
+    }
+    return {
+      ...inbound,
+      status,
+      running: service?.isRunning() ?? false,
+      note:
+        status === 'running'
+          ? 'Channel service has no diagnostics provider.'
+          : 'Channel service is not running.',
+    };
+  }
+
+  recordInboundDiagnostic(input: {
+    readonly pluginId: string;
+    readonly accepted: boolean;
+    readonly eventType?: string;
+    readonly error?: string;
+    readonly message?: { readonly chatId: string };
+  }): void {
+    this.inboundDiagnostics.set(input.pluginId, {
+      lastInboundAt: Date.now(),
+      lastInboundAccepted: input.accepted,
+      ...(input.eventType ? { lastInboundType: input.eventType } : {}),
+      ...(input.error ? { lastInboundError: input.error } : {}),
+      ...(input.message
+        ? { lastMessageAt: Date.now(), lastMessageChatId: input.message.chatId }
+        : {}),
+    });
   }
 
   parseMessage(type: string, raw: unknown) {

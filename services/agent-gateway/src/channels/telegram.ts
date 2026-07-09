@@ -8,6 +8,7 @@ import type {
   ChannelServiceFactory,
 } from './types.js';
 import { channelFetch, computeChannelRetryDelayMs } from './channel-http.js';
+import { listRecentChannelGroups, listRecentChannelMessages } from './channel-message-cache.js';
 
 /**
  * Telegram long-poll uses `timeout=25`, so the upstream intentionally
@@ -16,6 +17,7 @@ import { channelFetch, computeChannelRetryDelayMs } from './channel-http.js';
  * polls.
  */
 const TELEGRAM_POLL_TIMEOUT_MS = 35_000;
+const TELEGRAM_STARTUP_TIMEOUT_MS = 15_000;
 
 interface TelegramUpdate {
   update_id: number;
@@ -73,6 +75,10 @@ export class TelegramChannelService implements MessagingChannelService {
 
   async start(): Promise<void> {
     if (!this.token) throw new Error('Telegram bot token is required');
+    if (this.running) {
+      return;
+    }
+    await this.verifyBotToken();
     this.running = true;
     this.poll();
   }
@@ -142,6 +148,19 @@ export class TelegramChannelService implements MessagingChannelService {
     }, delay);
   }
 
+  private async verifyBotToken(): Promise<void> {
+    const res = await channelFetch(`${this.apiBase}/getMe`, {
+      timeoutMs: TELEGRAM_STARTUP_TIMEOUT_MS,
+    });
+    if (!res.ok) {
+      throw new Error(`Telegram getMe failed: HTTP ${res.status}`);
+    }
+    const data = (await res.json()) as { ok?: boolean; description?: string };
+    if (data.ok !== true) {
+      throw new Error(`Telegram getMe failed: ${data.description ?? 'invalid response'}`);
+    }
+  }
+
   private parseUpdate(update: TelegramUpdate): ChannelMessage | null {
     const msg = update.message;
     if (!msg) return null;
@@ -179,13 +198,11 @@ export class TelegramChannelService implements MessagingChannelService {
   }
 
   async getGroupMessages(chatId: string, count?: number): Promise<ChannelMessage[]> {
-    void chatId;
-    void count;
-    return [];
+    return listRecentChannelMessages(this.pluginId, chatId, count);
   }
 
   async listGroups(): Promise<ChannelGroup[]> {
-    return [];
+    return listRecentChannelGroups(this.pluginId);
   }
 
   async sendStreamingMessage(

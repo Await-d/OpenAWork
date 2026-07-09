@@ -118,4 +118,24 @@ describe('QQChannelService', () => {
       content: 'channel hello',
     });
   });
+
+  it('使用入站消息引用回复 QQ 群消息时带原始 msg_id', async () => {
+    const fetchMock = mockFetchSequence(
+      jsonResponse({ access_token: 'token', expires_in: 7200 }),
+      jsonResponse({ id: 'sent-reply' }),
+    );
+    const service = new QQChannelService(makeQQChannel(), () => undefined);
+
+    const result = await service.replyMessage('group:group-open-id|incoming-msg-id', '收到');
+
+    expect(result).toEqual({ messageId: 'sent-reply' });
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      'https://api.sgroup.qq.com/v2/groups/group-open-id/messages',
+    );
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
+      content: '收到',
+      msg_id: 'incoming-msg-id',
+      msg_type: 0,
+    });
+  });
 });

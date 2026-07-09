@@ -15,64 +15,18 @@ import {
   type JsonErrorData,
   fetchWithTimeout,
 } from '../gateway/http.js';
+import type {
+  ChannelConversationsResponse,
+  ChannelDescriptorListResponse,
+  ChannelListResponse,
+  ChannelMutationResponse,
+  ChannelsClient,
+  ChannelTargetsResponse,
+  WeixinLoginStartResponse,
+  WeixinLoginWaitResponse,
+} from './channels-types.js';
 
-export interface ChannelListResponse<TChannel> {
-  channels?: TChannel[];
-  error?: string;
-}
-
-export interface ChannelDescriptorListResponse<TDescriptor> {
-  descriptors?: TDescriptor[];
-  error?: string;
-}
-
-export interface ChannelMutationResponse<TChannel> {
-  channel?: TChannel;
-  error?: string;
-  status?: TChannel extends { status: infer S } ? S : string;
-}
-
-export interface ChannelTargetsResponse<TTarget> {
-  groups?: TTarget[];
-  error?: string;
-}
-
-export interface ChannelConversationSummary {
-  readonly id: string;
-  readonly chatId: string;
-  readonly chatName: string | null;
-  readonly title: string;
-  readonly stateStatus: string;
-  readonly messageCount: number;
-  readonly lastMessagePreview: string | null;
-  readonly createdAt: string;
-  readonly updatedAt: string;
-}
-
-export interface ChannelConversationsResponse {
-  conversations?: ChannelConversationSummary[];
-  error?: string;
-}
-
-export interface ChannelsClient<
-  TChannel = Record<string, unknown>,
-  TDescriptor = Record<string, unknown>,
-  TTarget = Record<string, unknown>,
-> {
-  list(token: string, options?: { signal?: AbortSignal }): Promise<TChannel[]>;
-  listDescriptors(token: string, options?: { signal?: AbortSignal }): Promise<TDescriptor[]>;
-  create(token: string, draft: unknown): Promise<TChannel>;
-  update(token: string, channelId: string, draft: unknown): Promise<TChannel>;
-  remove(token: string, channelId: string): Promise<void>;
-  start(token: string, channelId: string): Promise<{ status?: string }>;
-  stop(token: string, channelId: string): Promise<{ status?: string }>;
-  listTargets(token: string, channelId: string): Promise<TTarget[]>;
-  listConversations(
-    token: string,
-    channelId: string,
-    options?: { limit?: number; offset?: number },
-  ): Promise<ChannelConversationSummary[]>;
-}
+export type * from './channels-types.js';
 
 function buildChannelsActionErrorMessage(
   actionLabel: string,
@@ -134,11 +88,7 @@ async function performChannelsRequest<T>(input: {
       | null;
     if (!response.ok) {
       throw new HttpError(
-        buildChannelsActionErrorMessage(
-          input.actionLabel,
-          response.status,
-          (data as { error?: string } | null) ?? undefined,
-        ),
+        buildChannelsActionErrorMessage(input.actionLabel, response.status, data ?? undefined),
         response.status,
         data ?? undefined,
       );
@@ -279,6 +229,31 @@ export function createChannelsClient<
           ),
       });
       return data.conversations ?? [];
+    },
+
+    async startWeixinLogin(token, input) {
+      return performChannelsRequest<WeixinLoginStartResponse>({
+        actionLabel: '启动微信登录',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/channels/weixin/login/start`, {
+            method: 'POST',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify(input),
+          }),
+      });
+    },
+
+    async waitWeixinLogin(token, input) {
+      return performChannelsRequest<WeixinLoginWaitResponse>({
+        actionLabel: '等待微信登录',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/channels/weixin/login/wait`, {
+            method: 'POST',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify(input),
+            timeoutMs: Math.max(input.timeoutMs ?? 60_000, 1_000) + 5_000,
+          }),
+      });
     },
   };
 }

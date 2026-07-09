@@ -5,66 +5,41 @@ import type {
   ChannelStreamingHandle,
   ChannelInstance,
   ChannelEvent,
+  FeishuBitableRecordsInput,
+  FeishuChatMembersResult,
+  FeishuFileType,
+  FeishuMemberIdType,
+  FeishuUrgentType,
 } from './types.js';
 import { channelFetch } from './channel-http.js';
-
-interface FeishuConfig {
-  appId: string;
-  appSecret: string;
-  verificationToken: string;
-  encryptKey?: string;
-}
-
-interface FeishuTokenResponse {
-  code: number;
-  tenant_access_token: string;
-  expire: number;
-}
-
-interface FeishuMessageResponse {
-  code: number;
-  msg?: string;
-  data?: { message_id?: string };
-}
-
-interface FeishuCardUpdateResponse {
-  code: number;
-}
-
-/**
- * Validate a Feishu IM send response. Feishu returns HTTP 200 even on
- * application errors (token expired, rate limited, etc.) with a non-zero
- * `code` and (often) a missing `data`. Reading `data.message_id` blindly
- * would throw an opaque "cannot read properties of undefined" and mask the
- * real failure. Surface a clear, actionable error instead.
- */
-function parseFeishuMessageId(resp: Response, body: FeishuMessageResponse): string {
-  if (!resp.ok) {
-    throw new Error(`Feishu send failed: HTTP ${resp.status}`);
-  }
-  if (body.code !== 0) {
-    throw new Error(`Feishu send failed: code ${body.code}${body.msg ? ` (${body.msg})` : ''}`);
-  }
-  const messageId = body.data?.message_id;
-  if (!messageId) {
-    throw new Error('Feishu send succeeded but returned no message_id');
-  }
-  return messageId;
-}
-
-const FEISHU_API = 'https://open.feishu.cn/open-apis';
-
-function buildTextCard(content: string): string {
-  return JSON.stringify({
-    config: { wide_screen_mode: true },
-    elements: [
-      {
-        tag: 'div',
-        text: { tag: 'lark_md', content },
-      },
-    ],
-  });
-}
+import {
+  createOfficialFeishuGateway,
+  type FeishuGateway,
+  type FeishuGatewayFactory,
+} from './feishu-gateway.js';
+import { FEISHU_API, type FeishuConfig } from './feishu-api-types.js';
+import {
+  createFeishuBitableRecords,
+  deleteFeishuBitableRecords,
+  getFeishuBitableRecords,
+  listFeishuBitableApps,
+  listFeishuBitableFields,
+  listFeishuBitableTables,
+  updateFeishuBitableRecords,
+} from './feishu-bitable.js';
+import { sendFeishuFile, sendFeishuImage } from './feishu-media.js';
+import {
+  getFeishuGroupMessages,
+  listFeishuChatMembers,
+  listFeishuGroups,
+  replyFeishuTextMessage,
+  sendFeishuStreamingMessage,
+  sendFeishuTextMessage,
+  sendFeishuUrgent,
+  type FeishuAuthContext,
+} from './feishu-messaging.js';
+import { sendFeishuMention } from './feishu-mention.js';
+import { feishuTokenResponseSchema } from './feishu-response-schemas.js';
 
 export class FeishuChannelService implements MessagingChannelService {
   readonly pluginId: string;
@@ -72,24 +47,54 @@ export class FeishuChannelService implements MessagingChannelService {
   readonly supportsStreaming = true;
 
   private config: FeishuConfig;
+  private readonly botName: string;
   private notify: (event: ChannelEvent) => void;
+  private readonly gatewayFactory: FeishuGatewayFactory;
+  private gateway: FeishuGateway | null = null;
   private running = false;
   private accessToken = '';
   private tokenExpiresAt = 0;
+  private readonly auth: FeishuAuthContext = { getToken: () => this.getToken() };
 
-  constructor(instance: ChannelInstance, notify: (event: ChannelEvent) => void) {
+  constructor(
+    instance: ChannelInstance,
+    notify: (event: ChannelEvent) => void,
+    gatewayFactory: FeishuGatewayFactory = createOfficialFeishuGateway,
+  ) {
     this.pluginId = instance.id;
+    this.botName = instance.name;
     this.config = instance.config as unknown as FeishuConfig;
     this.notify = notify;
+    this.gatewayFactory = gatewayFactory;
   }
 
   async start(): Promise<void> {
+    if (this.running) {
+      return;
+    }
     await this.refreshToken();
+    const gateway = this.gatewayFactory({
+      pluginId: this.pluginId,
+      appId: this.config.appId,
+      appSecret: this.config.appSecret,
+      botName: this.botName,
+      botOpenId: this.config.botOpenId,
+      notify: (event) => this.safeNotify(event),
+    });
+    this.gateway = gateway;
+    try {
+      await gateway.start();
+    } catch (error) {
+      this.gateway = null;
+      throw error;
+    }
     this.running = true;
     this.notify({ type: 'status', pluginId: this.pluginId, status: 'running' });
   }
 
   async stop(): Promise<void> {
+    this.gateway?.stop();
+    this.gateway = null;
     this.running = false;
     this.notify({ type: 'status', pluginId: this.pluginId, status: 'stopped' });
   }
@@ -99,117 +104,137 @@ export class FeishuChannelService implements MessagingChannelService {
   }
 
   async sendMessage(chatId: string, content: string): Promise<{ messageId: string }> {
-    const token = await this.getToken();
-    const resp = await channelFetch(`${FEISHU_API}/im/v1/messages?receive_id_type=chat_id`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        receive_id: chatId,
-        msg_type: 'text',
-        content: JSON.stringify({ text: content }),
-      }),
-    });
-    const data = (await resp.json()) as FeishuMessageResponse;
-    return { messageId: parseFeishuMessageId(resp, data) };
+    return sendFeishuTextMessage(this.auth, chatId, content);
   }
 
   async replyMessage(messageId: string, content: string): Promise<{ messageId: string }> {
-    const token = await this.getToken();
-    const resp = await channelFetch(`${FEISHU_API}/im/v1/messages/${messageId}/reply`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        msg_type: 'text',
-        content: JSON.stringify({ text: content }),
-      }),
-    });
-    const data = (await resp.json()) as FeishuMessageResponse;
-    return { messageId: parseFeishuMessageId(resp, data) };
+    return replyFeishuTextMessage(this.auth, messageId, content);
   }
 
   async sendStreamingMessage(
     chatId: string,
     initialContent: string,
-    _replyToMessageId?: string,
+    replyToMessageId?: string,
   ): Promise<ChannelStreamingHandle> {
-    const token = await this.getToken();
-    const resp = await channelFetch(`${FEISHU_API}/im/v1/messages?receive_id_type=chat_id`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        receive_id: chatId,
-        msg_type: 'interactive',
-        content: buildTextCard(initialContent),
-      }),
-    });
-    const data = (await resp.json()) as FeishuMessageResponse;
-    const messageId = parseFeishuMessageId(resp, data);
-
-    const updateCard = async (content: string): Promise<void> => {
-      const t = await this.getToken();
-      const r = await channelFetch(`${FEISHU_API}/im/v1/messages/${messageId}`, {
-        method: 'PATCH',
-        headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          msg_type: 'interactive',
-          content: buildTextCard(content),
-        }),
-      });
-      const result = (await r.json()) as FeishuCardUpdateResponse;
-      if (result.code !== 0) {
-        throw new Error(`Feishu card update failed: ${result.code}`);
-      }
-    };
-
-    return {
-      update: updateCard,
-      finish: updateCard,
-    };
+    return sendFeishuStreamingMessage(this.auth, { chatId, initialContent, replyToMessageId });
   }
 
   async getGroupMessages(chatId: string, count = 20): Promise<ChannelMessage[]> {
-    const token = await this.getToken();
-    const resp = await channelFetch(
-      `${FEISHU_API}/im/v1/messages?container_id_type=chat&container_id=${chatId}&page_size=${count}`,
-      { headers: { Authorization: `Bearer ${token}` } },
-    );
-    const data = (await resp.json()) as {
-      data?: {
-        items?: Array<{
-          message_id: string;
-          sender: { id: string; name?: string };
-          body: { content: string };
-          create_time: string;
-        }>;
-      };
-    };
-    // Feishu returns HTTP 200 with no `data` on error envelopes; and an
-    // individual item may omit sender/body. Read everything defensively so a
-    // malformed payload yields a (possibly partial) list rather than throwing.
-    return (data.data?.items ?? []).map((item) => ({
-      id: item.message_id,
-      senderId: item.sender?.id ?? 'unknown',
-      senderName: item.sender?.name ?? item.sender?.id ?? 'unknown',
-      chatId,
-      content: item.body?.content ?? '',
-      timestamp: Number(item.create_time) || Date.now(),
-      raw: item,
-    }));
+    return getFeishuGroupMessages(this.auth, chatId, count);
   }
 
   async listGroups(): Promise<ChannelGroup[]> {
-    const token = await this.getToken();
-    const resp = await channelFetch(`${FEISHU_API}/im/v1/chats`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const data = (await resp.json()) as {
-      data?: { items?: Array<{ chat_id: string; name: string; member_count?: number }> };
-    };
-    return (data.data?.items ?? []).map((g) => ({
-      id: g.chat_id,
-      name: g.name,
-      memberCount: g.member_count,
-    }));
+    return listFeishuGroups(this.auth);
+  }
+
+  async sendImage(
+    chatId: string,
+    input: { readonly buffer: Buffer; readonly fileName?: string; readonly signal?: AbortSignal },
+  ): Promise<{ messageId: string }> {
+    return sendFeishuImage(this.auth, chatId, input);
+  }
+
+  async sendFile(
+    chatId: string,
+    input: {
+      readonly buffer: Buffer;
+      readonly fileName: string;
+      readonly fileType?: FeishuFileType;
+      readonly signal?: AbortSignal;
+    },
+  ): Promise<{ messageId: string }> {
+    return sendFeishuFile(this.auth, chatId, input);
+  }
+
+  async listChatMembers(
+    chatId: string,
+    input?: {
+      readonly pageSize?: number;
+      readonly pageToken?: string;
+      readonly memberIdType?: FeishuMemberIdType;
+      readonly signal?: AbortSignal;
+    },
+  ): Promise<FeishuChatMembersResult> {
+    return listFeishuChatMembers(this.auth, chatId, input);
+  }
+
+  async sendMention(
+    chatId: string,
+    input: {
+      readonly userIds: readonly string[];
+      readonly atAll?: boolean;
+      readonly text: string;
+      readonly signal?: AbortSignal;
+    },
+  ): Promise<{ messageId: string }> {
+    return sendFeishuMention(this.auth, chatId, input);
+  }
+
+  async sendUrgent(
+    messageId: string,
+    input: {
+      readonly userIds: readonly string[];
+      readonly urgentTypes: readonly FeishuUrgentType[];
+      readonly userIdType?: FeishuMemberIdType;
+      readonly signal?: AbortSignal;
+    },
+  ): Promise<{ ok: true }> {
+    return sendFeishuUrgent(this.auth, messageId, input);
+  }
+
+  async listBitableApps(input?: {
+    readonly pageSize?: number;
+    readonly pageToken?: string;
+    readonly signal?: AbortSignal;
+  }): Promise<unknown> {
+    return listFeishuBitableApps(this.auth, input);
+  }
+
+  async listBitableTables(input: {
+    readonly appToken: string;
+    readonly pageSize?: number;
+    readonly pageToken?: string;
+    readonly signal?: AbortSignal;
+  }): Promise<unknown> {
+    return listFeishuBitableTables(this.auth, input);
+  }
+
+  async listBitableFields(input: {
+    readonly appToken: string;
+    readonly tableId: string;
+    readonly pageSize?: number;
+    readonly pageToken?: string;
+    readonly signal?: AbortSignal;
+  }): Promise<unknown> {
+    return listFeishuBitableFields(this.auth, input);
+  }
+
+  async getBitableRecords(input: {
+    readonly appToken: string;
+    readonly tableId: string;
+    readonly filter?: string;
+    readonly pageSize?: number;
+    readonly pageToken?: string;
+    readonly signal?: AbortSignal;
+  }): Promise<unknown> {
+    return getFeishuBitableRecords(this.auth, input);
+  }
+
+  async createBitableRecords(input: FeishuBitableRecordsInput): Promise<unknown> {
+    return createFeishuBitableRecords(this.auth, input);
+  }
+
+  async updateBitableRecords(input: FeishuBitableRecordsInput): Promise<unknown> {
+    return updateFeishuBitableRecords(this.auth, input);
+  }
+
+  async deleteBitableRecords(input: {
+    readonly appToken: string;
+    readonly tableId: string;
+    readonly recordIds: readonly string[];
+    readonly signal?: AbortSignal;
+  }): Promise<unknown> {
+    return deleteFeishuBitableRecords(this.auth, input);
   }
 
   private async getToken(): Promise<string> {
@@ -224,10 +249,21 @@ export class FeishuChannelService implements MessagingChannelService {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ app_id: this.config.appId, app_secret: this.config.appSecret }),
     });
-    const data = (await resp.json()) as FeishuTokenResponse;
+    const data = feishuTokenResponseSchema.parse(await resp.json());
     if (data.code !== 0) throw new Error(`Feishu auth failed: ${data.code}`);
     this.accessToken = data.tenant_access_token;
     this.tokenExpiresAt = Date.now() + data.expire * 1000;
+  }
+
+  private safeNotify(event: ChannelEvent): void {
+    try {
+      this.notify(event);
+    } catch (error) {
+      console.warn('[feishu] channel notify handler threw', {
+        pluginId: this.pluginId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 }
 

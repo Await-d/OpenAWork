@@ -1,71 +1,99 @@
-import { createHmac } from 'node:crypto';
 import type {
   MessagingChannelService,
   ChannelMessage,
   ChannelGroup,
   ChannelInstance,
   ChannelEvent,
+  ChannelStreamingHandle,
 } from './types.js';
 import { channelFetch } from './channel-http.js';
-
-interface DingTalkConfig {
-  webhookUrl: string;
-  secret?: string;
-  appKey?: string;
-  appSecret?: string;
-  robotCode?: string;
-}
-
-interface DingTalkWebhookResponse {
-  errcode: number;
-  errmsg: string;
-}
-
-interface DingTalkTokenResponse {
-  errcode: number;
-  access_token: string;
-  expires_in: number;
-}
-
-interface DingTalkSendResponse {
-  processQueryKey: string;
-  requestId: string;
-}
-
-const DINGTALK_API = 'https://oapi.dingtalk.com';
-const DINGTALK_NEW_API = 'https://api.dingtalk.com/v1.0';
-
-function signWebhook(secret: string, timestamp: number): string {
-  const payload = `${timestamp}\n${secret}`;
-  return encodeURIComponent(createHmac('sha256', secret).update(payload).digest('base64'));
-}
+import { listRecentChannelMessages } from './channel-message-cache.js';
+import { parseDingTalkInboundMessage } from './inbound-parsers/dingtalk.js';
+import { DingTalkReplyContext } from './dingtalk-reply-context.js';
+import { DingTalkCardStreamingClient } from './dingtalk-card-streaming.js';
+import {
+  createOfficialDingTalkGateway,
+  type DingTalkGateway,
+  type DingTalkGatewayFactory,
+} from './dingtalk-gateway.js';
+import {
+  DINGTALK_API,
+  DINGTALK_NEW_API,
+  normalizeDingTalkConfig,
+  signWebhook,
+  type DingTalkConfig,
+  type DingTalkSendResponse,
+  type DingTalkTokenResponse,
+  type DingTalkWebhookResponse,
+} from './dingtalk-api-types.js';
 
 export class DingTalkChannelService implements MessagingChannelService {
   readonly pluginId: string;
   readonly pluginType = 'dingtalk';
-  readonly supportsStreaming = false;
 
   private config: DingTalkConfig;
   private notify: (event: ChannelEvent) => void;
   private running = false;
   private accessToken = '';
   private tokenExpiresAt = 0;
+  private guidCounter = 0;
+  private readonly replyContext = new DingTalkReplyContext();
+  private readonly cardStreaming: DingTalkCardStreamingClient;
+  private readonly gatewayFactory: DingTalkGatewayFactory;
+  private gateway: DingTalkGateway | null = null;
 
-  constructor(instance: ChannelInstance, notify: (event: ChannelEvent) => void) {
+  constructor(
+    instance: ChannelInstance,
+    notify: (event: ChannelEvent) => void,
+    gatewayFactory: DingTalkGatewayFactory = createOfficialDingTalkGateway,
+  ) {
     this.pluginId = instance.id;
-    this.config = instance.config as unknown as DingTalkConfig;
+    this.config = normalizeDingTalkConfig(instance.config);
     this.notify = notify;
+    this.gatewayFactory = gatewayFactory;
+    this.cardStreaming = new DingTalkCardStreamingClient({
+      pluginId: this.pluginId,
+      robotCode: this.config.robotCode,
+      cardTemplateId: this.config.cardTemplateId,
+      getToken: () => this.getToken(),
+      nextGuid: () => this.nextGuid(),
+    });
+  }
+
+  get supportsStreaming(): boolean {
+    return Boolean(this.config.cardTemplateId);
   }
 
   async start(): Promise<void> {
-    if (this.config.appKey && this.config.appSecret) {
+    if (this.running) {
+      return;
+    }
+
+    const { appKey, appSecret } = this.config;
+    if (appKey && appSecret) {
       await this.refreshToken();
+      const gateway = this.gatewayFactory({
+        pluginId: this.pluginId,
+        appKey,
+        appSecret,
+        handleStreamEvent: (raw) => this.handleStreamEvent(raw),
+        notify: (event) => this.safeNotify(event),
+      });
+      this.gateway = gateway;
+      try {
+        await gateway.start();
+      } catch (error) {
+        this.gateway = null;
+        throw error;
+      }
     }
     this.running = true;
     this.notify({ type: 'status', pluginId: this.pluginId, status: 'running' });
   }
 
   async stop(): Promise<void> {
+    this.gateway?.stop();
+    this.gateway = null;
     this.running = false;
     this.notify({ type: 'status', pluginId: this.pluginId, status: 'stopped' });
   }
@@ -75,6 +103,18 @@ export class DingTalkChannelService implements MessagingChannelService {
   }
 
   async sendMessage(chatId: string, content: string): Promise<{ messageId: string }> {
+    const webhookUrl = this.replyContext.getSessionWebhook(chatId);
+    if (webhookUrl) {
+      try {
+        return await this.sendViaSessionWebhook(webhookUrl, content);
+      } catch (error) {
+        console.warn('[dingtalk] sessionWebhook reply failed, falling back', {
+          chatId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
     if (this.config.appKey && this.config.robotCode) {
       return this.sendViaRobotApi(chatId, content);
     }
@@ -82,11 +122,27 @@ export class DingTalkChannelService implements MessagingChannelService {
   }
 
   async replyMessage(messageId: string, content: string): Promise<{ messageId: string }> {
+    const chatId = this.replyContext.resolveChatId(messageId);
+    if (chatId) {
+      return this.sendMessage(chatId, content);
+    }
     return this.sendViaWebhook(content, messageId);
   }
 
+  async sendStreamingMessage(
+    chatId: string,
+    initialContent: string,
+    _replyToMessageId?: string,
+  ): Promise<ChannelStreamingHandle> {
+    return this.cardStreaming.createHandle({
+      chatId,
+      initialContent,
+      chatMeta: this.replyContext.resolveChatMeta(chatId),
+    });
+  }
+
   async getGroupMessages(_chatId: string, _count = 20): Promise<ChannelMessage[]> {
-    return [];
+    return listRecentChannelMessages(this.pluginId, _chatId, _count);
   }
 
   async listGroups(): Promise<ChannelGroup[]> {
@@ -102,6 +158,16 @@ export class DingTalkChannelService implements MessagingChannelService {
       id: g.chatId,
       name: g.title ?? g.chatId,
     }));
+  }
+
+  handleStreamEvent(raw: unknown): void {
+    const message = parseDingTalkInboundMessage(raw);
+    if (!message) {
+      return;
+    }
+
+    this.replyContext.rememberStreamEvent(raw, message.chatId, message.id);
+    this.safeNotify({ type: 'message', pluginId: this.pluginId, message });
   }
 
   private async sendViaWebhook(
@@ -124,6 +190,22 @@ export class DingTalkChannelService implements MessagingChannelService {
       throw new Error(`DingTalk webhook error ${data.errcode}: ${data.errmsg}`);
     }
     return { messageId: `webhook-${timestamp}` };
+  }
+
+  private async sendViaSessionWebhook(
+    webhookUrl: string,
+    content: string,
+  ): Promise<{ messageId: string }> {
+    const timestamp = Date.now();
+    const resp = await channelFetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ msgtype: 'text', text: { content } }),
+    });
+    if (!resp.ok) {
+      throw new Error(`DingTalk sessionWebhook error ${resp.status}`);
+    }
+    return { messageId: `session-webhook-${timestamp}` };
   }
 
   private async sendViaRobotApi(chatId: string, content: string): Promise<{ messageId: string }> {
@@ -159,6 +241,22 @@ export class DingTalkChannelService implements MessagingChannelService {
     if (data.errcode !== 0) throw new Error(`DingTalk auth failed: ${data.errcode}`);
     this.accessToken = data.access_token;
     this.tokenExpiresAt = Date.now() + data.expires_in * 1000;
+  }
+
+  private nextGuid(): string {
+    this.guidCounter += 1;
+    return `${this.pluginId}-${Date.now()}-${this.guidCounter}`;
+  }
+
+  private safeNotify(event: ChannelEvent): void {
+    try {
+      this.notify(event);
+    } catch (error) {
+      console.warn('[dingtalk] channel notify handler threw', {
+        pluginId: this.pluginId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 }
 

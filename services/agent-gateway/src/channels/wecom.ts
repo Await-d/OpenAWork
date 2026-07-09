@@ -7,6 +7,7 @@ import type {
   ChannelServiceFactory,
 } from './types.js';
 import { channelFetch } from './channel-http.js';
+import { listRecentChannelGroups, listRecentChannelMessages } from './channel-message-cache.js';
 
 export class WeComChannelService implements MessagingChannelService {
   readonly pluginId: string;
@@ -31,6 +32,12 @@ export class WeComChannelService implements MessagingChannelService {
   async start(): Promise<void> {
     if (!this.corpId && !this.webhookUrl) {
       throw new Error('WeCom channel requires corpId+corpSecret+agentId or webhookUrl');
+    }
+    if (!this.webhookUrl) {
+      if (!this.corpSecret || !this.agentId) {
+        throw new Error('WeCom API channel requires corpId, corpSecret and agentId');
+      }
+      await this.getAccessToken();
     }
     this.running = true;
   }
@@ -110,11 +117,11 @@ export class WeComChannelService implements MessagingChannelService {
   }
 
   async getGroupMessages(_chatId: string, _count?: number): Promise<ChannelMessage[]> {
-    return [];
+    return listRecentChannelMessages(this.pluginId, _chatId, _count);
   }
 
   async listGroups(): Promise<ChannelGroup[]> {
-    return [];
+    return listRecentChannelGroups(this.pluginId);
   }
 }
 

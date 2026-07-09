@@ -1,31 +1,16 @@
-import type { ChannelEvent, ChannelInstance, ChannelMessage } from './types.js';
+import type { ChannelEvent, ChannelInstance, MessagingChannelService } from './types.js';
 import { channelManager } from './manager.js';
+import {
+  tryHandleChannelCommand,
+  type ChannelCommandAction,
+  type ChannelCommandActions,
+  type ChannelCommandContext,
+} from './channel-commands.js';
 
-export type CommandHandler = (
-  message: ChannelMessage,
-  pluginId: string,
-) => Promise<string | true | false>;
-
-const BUILTIN_COMMANDS: Record<string, CommandHandler> = {
-  '/help': async () => 'Available commands: /help, /new, /status, /init',
-  '/status': async () => `Channels running: ${channelManager.listRunning().join(', ') || 'none'}`,
-  '/new': async () => true,
-  '/init': async () => 'Workspace initialized. Send me a task to get started.',
-};
-
-async function tryHandleCommand(
-  message: ChannelMessage,
-  pluginId: string,
-): Promise<string | true | false> {
-  const text = message.content.trim();
-  const cmd = text.split(' ')[0]?.toLowerCase();
-  if (!cmd?.startsWith('/')) return false;
-  const handler = BUILTIN_COMMANDS[cmd];
-  if (!handler) return false;
-  return handler(message, pluginId);
-}
+export type { ChannelCommandActions, ChannelCommandContext } from './channel-commands.js';
 
 export interface AutoReplyOptions {
+  commandActions?: ChannelCommandActions;
   resolveChannel?: (pluginId: string) => ChannelInstance | undefined;
   onAgentRun: (params: {
     sessionKey: string;
@@ -34,6 +19,13 @@ export interface AutoReplyOptions {
     chatId: string;
     onPartialText?: (text: string) => Promise<void> | void;
   }) => Promise<string>;
+}
+
+interface AutoReplySendContext {
+  readonly channel?: ChannelInstance;
+  readonly content: string;
+  readonly message: ChannelEvent & { readonly type: 'message' };
+  readonly service: MessagingChannelService;
 }
 
 export class AutoReplyPipeline {
@@ -72,13 +64,56 @@ export class AutoReplyPipeline {
       return;
     }
 
-    const commandResult = await tryHandleCommand(message, pluginId);
+    const commandResult = await tryHandleChannelCommand({
+      actions: this.options.commandActions,
+      channel,
+      message,
+      pluginId,
+    });
 
-    if (commandResult === true) {
+    if (commandResult.kind === 'skip') {
       return;
     }
 
-    const effectiveMessage = typeof commandResult === 'string' ? commandResult : message.content;
+    if (commandResult.kind === 'action') {
+      if (!channel) {
+        await this.sendChannelReply({
+          channel,
+          content: 'No channel configuration found.',
+          message: event,
+          service,
+        });
+        return;
+      }
+      const result = await this.handleCommandAction(commandResult.action, {
+        channel,
+        chatId: message.chatId,
+      });
+      await this.sendChannelReply({ channel, content: result.content, message: event, service });
+      return;
+    }
+
+    if (commandResult.kind === 'reply') {
+      await this.sendChannelReply({
+        channel,
+        content: commandResult.content,
+        message: event,
+        service,
+      });
+      return;
+    }
+
+    if (commandResult.kind === 'rewrite' && commandResult.reply) {
+      await this.sendChannelReply({
+        channel,
+        content: commandResult.reply,
+        message: event,
+        service,
+      });
+    }
+
+    const effectiveMessage =
+      commandResult.kind === 'rewrite' ? commandResult.content : message.content;
 
     const sessionKey = `channel:${pluginId}:chat:${message.chatId}`;
 
@@ -117,15 +152,38 @@ export class AutoReplyPipeline {
           pluginId,
           chatId: message.chatId,
         });
-        await service.sendMessage(message.chatId, response);
+        await this.sendChannelReply({ channel, content: response, message: event, service });
       } catch (err) {
         await this.safeSend(pluginId, () =>
-          service.sendMessage(
-            message.chatId,
-            `Error: ${err instanceof Error ? err.message : String(err)}`,
-          ),
+          this.sendChannelReply({
+            channel,
+            content: `Error: ${err instanceof Error ? err.message : String(err)}`,
+            message: event,
+            service,
+          }),
         );
       }
+    }
+  }
+
+  private async handleCommandAction(
+    action: ChannelCommandAction,
+    context: ChannelCommandContext,
+  ): Promise<{ readonly content: string }> {
+    const actions = this.options.commandActions;
+    if (!actions) {
+      return { content: 'Channel command actions are not configured.' };
+    }
+
+    switch (action) {
+      case 'compactConversation':
+        return actions.compactConversation(context);
+      case 'getUsageStats':
+        return actions.getUsageStats(context);
+      case 'resetConversation':
+        return actions.resetConversation(context);
+      default:
+        return assertNever(action);
     }
   }
 
@@ -145,4 +203,23 @@ export class AutoReplyPipeline {
       });
     }
   }
+
+  private async sendChannelReply(context: AutoReplySendContext): Promise<{ messageId: string }> {
+    const message = context.message.message;
+    if (shouldReplyToQQReferencedMessage(context.channel, message.id)) {
+      return context.service.replyMessage(message.id, context.content);
+    }
+    return context.service.sendMessage(message.chatId, context.content);
+  }
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled channel command action: ${String(value)}`);
+}
+
+function shouldReplyToQQReferencedMessage(
+  channel: ChannelInstance | undefined,
+  messageId: string,
+): boolean {
+  return channel?.type === 'qq' && messageId.includes('|');
 }

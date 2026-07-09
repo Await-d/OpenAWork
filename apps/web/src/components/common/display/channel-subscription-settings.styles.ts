@@ -397,6 +397,37 @@ export const CHANNEL_SUBSCRIPTION_SETTINGS_STYLES = `
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
 }
 
+.channel-persona-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.78fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+}
+
+.channel-persona-preview {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-height: 82px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-base);
+}
+
+.channel-persona-preview__title {
+  color: var(--fg-strong);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.channel-persona-preview__desc {
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .channel-section {
   border: none;
   border-bottom: 1px solid var(--border-subtle);
@@ -471,6 +502,34 @@ export const CHANNEL_SUBSCRIPTION_SETTINGS_STYLES = `
 
 .channel-field__secret-toggle:hover {
   color: var(--fg-strong);
+}
+
+.channel-weixin-bind {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-base);
+}
+
+.channel-weixin-bind__title {
+  color: var(--fg-strong);
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.channel-weixin-bind__qr {
+  width: 132px;
+  height: 132px;
+  object-fit: contain;
+  border-radius: 8px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-raised);
+  padding: 6px;
 }
 
 .channel-check-card {
@@ -664,6 +723,7 @@ export const CHANNEL_SUBSCRIPTION_SETTINGS_STYLES = `
   }
 
   .channel-grid-two,
+  .channel-persona-layout,
   .channel-panel__hero {
     grid-template-columns: minmax(0, 1fr);
   }

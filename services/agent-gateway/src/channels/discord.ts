@@ -7,6 +7,7 @@ import type {
   ChannelServiceFactory,
 } from './types.js';
 import { channelFetch } from './channel-http.js';
+import { DiscordGatewayClient } from './discord-gateway.js';
 
 const DISCORD_API = 'https://discord.com/api/v10';
 
@@ -17,10 +18,13 @@ export class DiscordChannelService implements MessagingChannelService {
   private token: string;
   private running = false;
   private notify: (event: ChannelEvent) => void;
+  private gateway: DiscordGatewayClient | null = null;
+  private gatewayUrl: string | undefined;
 
   constructor(instance: ChannelInstance, notify: (event: ChannelEvent) => void) {
     this.pluginId = instance.id;
     this.token = instance.config['token'] ?? '';
+    this.gatewayUrl = instance.config['gatewayUrl'];
     this.notify = notify;
   }
 
@@ -33,12 +37,31 @@ export class DiscordChannelService implements MessagingChannelService {
 
   async start(): Promise<void> {
     if (!this.token) throw new Error('Discord bot token is required');
+    if (this.running) {
+      return;
+    }
+    const gateway = new DiscordGatewayClient({
+      pluginId: this.pluginId,
+      token: this.token,
+      gatewayUrl: this.gatewayUrl,
+      notify: this.notify,
+    });
+    this.gateway = gateway;
+    try {
+      await gateway.start();
+    } catch (error) {
+      this.gateway = null;
+      this.running = false;
+      throw error;
+    }
     this.running = true;
     this.notify({ type: 'status', pluginId: this.pluginId, status: 'running' });
   }
 
   async stop(): Promise<void> {
     this.running = false;
+    this.gateway?.stop();
+    this.gateway = null;
     this.notify({ type: 'status', pluginId: this.pluginId, status: 'stopped' });
   }
 
