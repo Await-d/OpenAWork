@@ -47,7 +47,9 @@ export function HomeProjectColumn({
       <div className="home-project-list" role="listbox" aria-label="筛选项目">
         <button
           type="button"
+          role="option"
           className="home-project-row"
+          aria-selected={selectedProjectKey === 'all'}
           data-active={selectedProjectKey === 'all' ? 'true' : 'false'}
           onClick={() => onSelectProject('all')}
         >
@@ -65,7 +67,9 @@ export function HomeProjectColumn({
           <button
             key={project.key}
             type="button"
+            role="option"
             className="home-project-row"
+            aria-selected={selectedProjectKey === project.key}
             data-active={selectedProjectKey === project.key ? 'true' : 'false'}
             onClick={() => onSelectProject(project.key)}
           >

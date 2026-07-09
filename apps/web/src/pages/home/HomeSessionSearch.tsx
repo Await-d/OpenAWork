@@ -99,8 +99,8 @@ export function HomeSessionSearch<TSession extends HomeSessionLike>({
   }, [accessToken, clearAuth, gatewayUrl, normalizedQuery, refreshToken, tokenStore]);
 
   const results = useMemo(
-    () => mergeSearchResults(localResults, remoteResults),
-    [localResults, remoteResults],
+    () => mergeSearchResults(localResults, remoteResults, sessions),
+    [localResults, remoteResults, sessions],
   );
 
   const selectResult = (result: HomeSessionSearchResult) => {
@@ -182,8 +182,10 @@ export function HomeSessionSearch<TSession extends HomeSessionLike>({
 function mergeSearchResults<TSession extends HomeSessionLike>(
   localResults: readonly TSession[],
   remoteResults: readonly SessionSearchResult[],
+  allSessions: readonly TSession[],
 ): HomeSessionSearchResult[] {
   const resultsBySessionId = new Map<string, HomeSessionSearchResult>();
+  const sessionsById = new Map(allSessions.map((session) => [session.id, session]));
 
   for (const session of localResults) {
     const workspacePath = getWorkingDirectory(session.metadata_json);
@@ -198,6 +200,10 @@ function mergeSearchResults<TSession extends HomeSessionLike>(
   }
 
   for (const result of remoteResults) {
+    const sourceSession = sessionsById.get(result.sessionId);
+    if (!sourceSession) {
+      continue;
+    }
     const existing = resultsBySessionId.get(result.sessionId);
     resultsBySessionId.set(result.sessionId, {
       id: `message-${result.messageId}`,
@@ -205,7 +211,7 @@ function mergeSearchResults<TSession extends HomeSessionLike>(
       sessionId: result.sessionId,
       snippet: result.snippet,
       source: 'message',
-      title: result.title ?? existing?.title ?? `会话 ${result.sessionId.slice(0, 8)}`,
+      title: result.title ?? existing?.title ?? getSessionTitle(sourceSession),
     });
   }
 

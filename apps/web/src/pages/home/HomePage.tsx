@@ -1,13 +1,20 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
+import { HomeDashboardPanel } from './HomeDashboardPanel.js';
 import { HomeProjectColumn } from './HomeProjectColumn.js';
 import { HomeSessionList } from './HomeSessionList.js';
 import { HomeSessionSearch } from './HomeSessionSearch.js';
+import {
+  HomeSessionStatusFilterBar,
+  type HomeSessionStatusCounts,
+  type HomeSessionStatusFilter,
+} from './HomeSessionStatusFilterBar.js';
 import './home.css';
 import { useSessions } from '../../hooks/workspace/useSessions.js';
 import { preloadRouteModuleByPath } from '../../routes/preloadable-route-modules.js';
 import { useUIStateStore } from '../../stores/ui/uiState.js';
 import { buildHomeProjects, filterSessionsByProject } from './utils/session-grouping.js';
+import type { HomeSessionLike } from './utils/session-grouping.js';
 
 export default function HomePage() {
   const navigate = useNavigate();
@@ -16,14 +23,34 @@ export default function HomePage() {
   const addDraftTab = useUIStateStore((state) => state.addDraftTab);
   const addSessionTab = useUIStateStore((state) => state.addSessionTab);
   const [selectedProjectKey, setSelectedProjectKey] = useState('all');
+  const [statusFilter, setStatusFilter] = useState<HomeSessionStatusFilter>('all');
 
   const projects = useMemo(() => buildHomeProjects(sessions), [sessions]);
   const selectedProject = projects.find((project) => project.key === selectedProjectKey);
-  const filteredSessions = useMemo(
+  const projectSessions = useMemo(
     () => filterSessionsByProject(sessions, selectedProjectKey),
     [selectedProjectKey, sessions],
   );
-  const runningCount = sessions.filter((session) => session.state_status === 'running').length;
+  const visibleSessions = useMemo(
+    () => filterSessionsByStatus(projectSessions, statusFilter),
+    [projectSessions, statusFilter],
+  );
+  const statusCounts = useMemo(() => countSessionsByStatus(projectSessions), [projectSessions]);
+  const attentionSessions = useMemo(
+    () =>
+      projectSessions
+        .filter(
+          (session) => session.state_status === 'running' || session.state_status === 'paused',
+        )
+        .slice(0, 4),
+    [projectSessions],
+  );
+  const runningCount = statusCounts.running;
+  const pausedCount = statusCounts.paused;
+  const activeProjectCount = projects.filter((project) => project.runningCount > 0).length;
+  const selectedProjectLabel = selectedProjectKey === 'all' ? '全部项目' : selectedProject?.label;
+  const selectedContextPath =
+    selectedProjectKey === 'all' ? selectedWorkspacePath : selectedProject?.path;
 
   const createSession = (workspacePath?: string | null) => {
     const path = workspacePath ?? selectedWorkspacePath;
@@ -57,41 +84,33 @@ export default function HomePage() {
         />
 
         <div className="home-main-column">
-          <section className="home-overview" aria-label="工作台概览">
-            <section className="home-hero">
-              <div className="home-hero-copy">
-                <span className="home-eyebrow">工作台概览</span>
-                <h1>OpenAWork</h1>
-                <p>从这里进入最近会话、当前项目和 Agent 工作流，不需要先进入某个聊天线程。</p>
-              </div>
-              <button type="button" className="home-primary-action" onClick={() => createSession()}>
-                新建会话
-              </button>
-            </section>
-
-            <section className="home-kpi-grid" aria-label="工作台指标">
-              <article className="home-kpi-card" data-tone="accent">
-                <span>会话总数</span>
-                <strong>{sessions.length}</strong>
-              </article>
-              <article className="home-kpi-card" data-tone="contrast">
-                <span>运行中</span>
-                <strong>{runningCount}</strong>
-              </article>
-              <article className="home-kpi-card" data-tone="aux">
-                <span>项目</span>
-                <strong>{projects.length}</strong>
-              </article>
-            </section>
-          </section>
+          <HomeDashboardPanel
+            activeProjectCount={activeProjectCount}
+            attentionSessions={attentionSessions}
+            pausedCount={pausedCount}
+            projectCount={projects.length}
+            runningCount={runningCount}
+            selectedContextPath={selectedContextPath}
+            selectedProjectLabel={selectedProjectLabel}
+            totalSessionCount={projectSessions.length}
+            onCreateSession={() =>
+              createSession(
+                selectedProjectKey === 'all' ? selectedWorkspacePath : selectedProject?.path,
+              )
+            }
+            onOpenRoute={openRoute}
+            onOpenSession={openSession}
+          />
 
           <HomeSessionList
             emptyDescription={
-              selectedProjectKey === 'all'
-                ? '新建会话后，这里会按更新时间展示最近任务。'
-                : '这个项目下还没有会话，点击新建会话即可开始。'
+              statusFilter !== 'all'
+                ? '当前筛选条件下没有会话，可以切回全部或新建会话。'
+                : selectedProjectKey === 'all'
+                  ? '新建会话后，这里会按更新时间展示最近任务。'
+                  : '这个项目下还没有会话，点击新建会话即可开始。'
             }
-            sessions={filteredSessions}
+            sessions={visibleSessions}
             title={
               selectedProjectKey === 'all' ? '最近会话' : `${selectedProject?.label ?? '项目'} 会话`
             }
@@ -102,10 +121,40 @@ export default function HomePage() {
             }
             onOpenSession={openSession}
           >
-            <HomeSessionSearch sessions={sessions} onSelectSession={openSession} />
+            <HomeSessionSearch sessions={projectSessions} onSelectSession={openSession} />
+            <HomeSessionStatusFilterBar
+              counts={statusCounts}
+              value={statusFilter}
+              onChange={setStatusFilter}
+            />
           </HomeSessionList>
         </div>
       </div>
     </main>
+  );
+}
+
+function filterSessionsByStatus<TSession extends HomeSessionLike>(
+  sessions: readonly TSession[],
+  statusFilter: HomeSessionStatusFilter,
+): TSession[] {
+  if (statusFilter === 'all') {
+    return [...sessions];
+  }
+
+  return sessions.filter((session) => (session.state_status ?? 'idle') === statusFilter);
+}
+
+function countSessionsByStatus(sessions: readonly HomeSessionLike[]): HomeSessionStatusCounts {
+  return sessions.reduce<HomeSessionStatusCounts>(
+    (counts, session) => {
+      const status = session.state_status ?? 'idle';
+      return {
+        ...counts,
+        all: counts.all + 1,
+        [status]: counts[status] + 1,
+      };
+    },
+    { all: 0, idle: 0, paused: 0, running: 0 },
   );
 }
