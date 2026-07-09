@@ -47,6 +47,8 @@ export function buildWebSearchRoutingSystemPrompt(
     '- 优先使用 `web_search` 工具（原生多 provider，用户已付费配置）',
     mcpWebSearchFallback,
     '- 不要在同一轮中既调 `web_search` 又调 websearch MCP — 它们是同一类能力的两条路径',
+    '- 用户要抓取、查找、获取、展示互联网上已经存在的图片时：先用 `web_search`/websearch MCP 找到页面或图片，再用 `webfetch` 抓取具体图片 URL；这不是图片生成任务',
+    '- 只有用户明确要求创建、画、设计、生成一张新的图片时，才允许调用 `generate_image`；不要把“抓取网络图片 / 展示已有图片”误路由到图片生成工具',
     '',
     '【公开仓库的代码检索】',
     mcpCodeSearchFallback,

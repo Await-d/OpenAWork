@@ -8,6 +8,7 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { ImageLightbox } from '../../image/image-lightbox.js';
 import { ToolIcon } from './tool-icon';
 import { colorizeSummary, getToolCategory } from '../shared/colorize-summary.js';
 import { CopyBtn } from '../shared/copy-btn.js';
@@ -85,6 +86,7 @@ export function BlockToolCall({
   const searchVisualState: SearchVisualState | null = useMemo(() => {
     if (!isWebTool || !webSummary) return null;
     if (visualState === 'failed') return 'error';
+    if (webSummary.imageUrl) return 'found';
     if (webSummary.searchResults && webSummary.searchResults.length > 0) return 'found';
     if (webSummary.cleanedContent.length === 0) return 'empty';
     // Treat "No results found" style messages as empty so they don't claim success.
@@ -105,6 +107,7 @@ export function BlockToolCall({
 
   const [open, setOpen] = useState(shouldAutoExpand);
   const [webResultsExpanded, setWebResultsExpanded] = useState(false);
+  const [webImageLightboxOpen, setWebImageLightboxOpen] = useState(false);
 
   const webResults = webSummary?.searchResults ?? [];
   const MAX_VISIBLE_RESULTS = 3;
@@ -468,97 +471,129 @@ export function BlockToolCall({
           )}
 
           {/* Web tool output */}
-          {isWebTool && webSummary && (webSummary.cleanedContent || webSummary.searchResults) && (
-            <div className="tool-call-block-output">
-              {/* Meta row: status + URL + line count + copy */}
-              <div className="tool-call-block-web-meta">
-                {webSummary.status !== undefined && (
-                  <span
-                    className="tool-call-block-web-status"
-                    data-status-ok={
-                      webSummary.status >= 200 && webSummary.status < 300 ? 'true' : undefined
+          {isWebTool &&
+            webSummary &&
+            (webSummary.imageUrl || webSummary.cleanedContent || webSummary.searchResults) && (
+              <div className="tool-call-block-output">
+                {/* Meta row: status + URL + line count + copy */}
+                <div className="tool-call-block-web-meta">
+                  {webSummary.status !== undefined && (
+                    <span
+                      className="tool-call-block-web-status"
+                      data-status-ok={
+                        webSummary.status >= 200 && webSummary.status < 300 ? 'true' : undefined
+                      }
+                    >
+                      {webSummary.status}
+                    </span>
+                  )}
+                  {webSummary.url && (
+                    <span className="tool-call-block-web-url" title={webSummary.url}>
+                      {webSummary.url.length > 80
+                        ? `${webSummary.url.slice(0, 77)}…`
+                        : webSummary.url}
+                    </span>
+                  )}
+                  <CopyBtn
+                    text={
+                      webSummary.imageUrl
+                        ? webSummary.imageUrl
+                        : webSummary.searchResults
+                          ? webSummary.searchResults
+                              .map(
+                                (r, idx) =>
+                                  `${idx + 1}. ${r.title}${r.url ? `\n   ${r.url}` : ''}${r.snippet ? `\n   ${r.snippet}` : ''}`,
+                              )
+                              .join('\n')
+                          : webSummary.cleanedContent
                     }
-                  >
-                    {webSummary.status}
-                  </span>
-                )}
-                {webSummary.url && (
-                  <span className="tool-call-block-web-url" title={webSummary.url}>
-                    {webSummary.url.length > 80
-                      ? `${webSummary.url.slice(0, 77)}…`
-                      : webSummary.url}
-                  </span>
-                )}
-                <CopyBtn
-                  text={
-                    webSummary.searchResults
-                      ? webSummary.searchResults
-                          .map(
-                            (r, idx) =>
-                              `${idx + 1}. ${r.title}${r.url ? `\n   ${r.url}` : ''}${r.snippet ? `\n   ${r.snippet}` : ''}`,
-                          )
-                          .join('\n')
-                      : webSummary.cleanedContent
-                  }
-                  title="Copy content"
-                />
-              </div>
+                    title="Copy content"
+                  />
+                </div>
 
-              {/* Search results — compact list, no raw content duplication */}
-              {webSummary.searchResults && webSummary.searchResults.length > 0 && (
-                <div className="tool-call-block-search-results">
-                  {visibleWebResults.map((r, idx) => (
-                    <div key={idx} className="tool-call-block-search-item">
-                      <div className="tool-call-block-search-title">
-                        <span className="tool-call-block-search-idx">{idx + 1}</span>
-                        {r.title}
-                      </div>
-                      {r.url && (
-                        <div className="tool-call-block-search-url" title={r.url}>
-                          {r.url.length > 70 ? `${r.url.slice(0, 67)}…` : r.url}
-                        </div>
-                      )}
-                      {r.snippet && (
-                        <div className="tool-call-block-search-snippet">{r.snippet}</div>
-                      )}
-                    </div>
-                  ))}
-                  {hasMoreResults && (
+                {webSummary.imageUrl && (
+                  <>
                     <button
                       type="button"
-                      className="tool-output-toggle tool-search-results-toggle"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setWebResultsExpanded((v) => !v);
+                      className="tool-call-block-web-image"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setWebImageLightboxOpen(true);
                       }}
+                      title="打开图片预览"
                     >
-                      {webResultsExpanded
-                        ? '收起结果'
-                        : `展开其余 ${webResults.length - MAX_VISIBLE_RESULTS} 个结果`}
+                      <img
+                        src={webSummary.imageUrl}
+                        alt="抓取到的网络图片"
+                        loading="lazy"
+                        referrerPolicy="no-referrer"
+                      />
                     </button>
-                  )}
-                </div>
-              )}
+                    <ImageLightbox
+                      src={webSummary.imageUrl}
+                      open={webImageLightboxOpen}
+                      onClose={() => setWebImageLightboxOpen(false)}
+                      alt="抓取到的网络图片"
+                      caption={webSummary.url}
+                    />
+                  </>
+                )}
 
-              {/* Markdown content */}
-              {!webSummary.searchResults && webSummary.isMarkdown && (
-                <div className="tool-call-block-web-markdown">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {webSummary.cleanedContent}
-                  </ReactMarkdown>
-                </div>
-              )}
+                {/* Search results — compact list, no raw content duplication */}
+                {webSummary.searchResults && webSummary.searchResults.length > 0 && (
+                  <div className="tool-call-block-search-results">
+                    {visibleWebResults.map((r, idx) => (
+                      <div key={idx} className="tool-call-block-search-item">
+                        <div className="tool-call-block-search-title">
+                          <span className="tool-call-block-search-idx">{idx + 1}</span>
+                          {r.title}
+                        </div>
+                        {r.url && (
+                          <div className="tool-call-block-search-url" title={r.url}>
+                            {r.url.length > 70 ? `${r.url.slice(0, 67)}…` : r.url}
+                          </div>
+                        )}
+                        {r.snippet && (
+                          <div className="tool-call-block-search-snippet">{r.snippet}</div>
+                        )}
+                      </div>
+                    ))}
+                    {hasMoreResults && (
+                      <button
+                        type="button"
+                        className="tool-output-toggle tool-search-results-toggle"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setWebResultsExpanded((v) => !v);
+                        }}
+                      >
+                        {webResultsExpanded
+                          ? '收起结果'
+                          : `展开其余 ${webResults.length - MAX_VISIBLE_RESULTS} 个结果`}
+                      </button>
+                    )}
+                  </div>
+                )}
 
-              {/* Plain text with expand/collapse; for empty search results keep it compact */}
-              {!webSummary.searchResults && !webSummary.isMarkdown && (
-                <ExpandableOutput
-                  text={webSummary.cleanedContent}
-                  maxChars={600}
-                  compact={searchVisualState === 'empty'}
-                />
-              )}
-            </div>
-          )}
+                {/* Markdown content */}
+                {!webSummary.imageUrl && !webSummary.searchResults && webSummary.isMarkdown && (
+                  <div className="tool-call-block-web-markdown">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {webSummary.cleanedContent}
+                    </ReactMarkdown>
+                  </div>
+                )}
+
+                {/* Plain text with expand/collapse; for empty search results keep it compact */}
+                {!webSummary.imageUrl && !webSummary.searchResults && !webSummary.isMarkdown && (
+                  <ExpandableOutput
+                    text={webSummary.cleanedContent}
+                    maxChars={600}
+                    compact={searchVisualState === 'empty'}
+                  />
+                )}
+              </div>
+            )}
 
           {/* Generic output fallback */}
           {!hasDiff && !hasBashOutput && !isWebTool && output !== undefined && (

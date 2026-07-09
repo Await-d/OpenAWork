@@ -189,6 +189,7 @@ export function ImageLightbox({ src, open, onClose, alt, caption, fileName }: Im
             const a = document.createElement('a');
             a.href = src;
             a.download = downloadName;
+            a.referrerPolicy = 'no-referrer';
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
@@ -218,6 +219,7 @@ export function ImageLightbox({ src, open, onClose, alt, caption, fileName }: Im
       <img
         src={src}
         alt={altText}
+        referrerPolicy="no-referrer"
         onClick={(e) => e.stopPropagation()}
         style={{
           maxWidth: 'calc(100vw - 80px)',

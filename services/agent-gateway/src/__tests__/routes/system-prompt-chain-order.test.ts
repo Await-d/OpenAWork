@@ -125,4 +125,13 @@ describe('buildWebSearchRoutingSystemPrompt · MCP 工具面一致性', () => {
     expect(prompt).toContain('mcp_call({ serverId: "grep_app"');
     expect(prompt).not.toContain('mcp__websearch__web_search_exa');
   });
+
+  it('明确区分抓取已有网络图片与生成新图片', () => {
+    const prompt = buildWebSearchRoutingSystemPrompt({ flatMcpToolsEnabled: true });
+
+    expect(prompt).toContain('抓取、查找、获取、展示互联网上已经存在的图片');
+    expect(prompt).toContain('webfetch');
+    expect(prompt).toContain('generate_image');
+    expect(prompt).toContain('不要把“抓取网络图片 / 展示已有图片”误路由到图片生成工具');
+  });
 });

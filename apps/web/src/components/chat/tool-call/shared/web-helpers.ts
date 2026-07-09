@@ -95,11 +95,22 @@ export interface WebSummary {
   status?: number;
   contentType?: string;
   format?: string;
+  mediaKind?: 'image';
+  imageUrl?: string;
   content: string;
   cleanedContent: string;
   isMarkdown: boolean;
   searchResults: SearchResultItem[] | null;
   lineCount: number;
+}
+
+function isPreviewableImageUrl(value: string): boolean {
+  try {
+    const protocol = new URL(value).protocol;
+    return protocol === 'http:' || protocol === 'https:';
+  } catch {
+    return false;
+  }
 }
 
 export function extractWebSummary(output: unknown): WebSummary {
@@ -119,6 +130,15 @@ export function extractWebSummary(output: unknown): WebSummary {
   const status = typeof obj.status === 'number' ? obj.status : undefined;
   const contentType = typeof obj.contentType === 'string' ? obj.contentType : undefined;
   const format = typeof obj.format === 'string' ? obj.format : undefined;
+  const mediaKind = obj.mediaKind === 'image' ? 'image' : undefined;
+  const candidateImageUrl =
+    typeof obj.imageUrl === 'string'
+      ? obj.imageUrl
+      : mediaKind === 'image' && typeof obj.url === 'string'
+        ? obj.url
+        : undefined;
+  const imageUrl =
+    candidateImageUrl && isPreviewableImageUrl(candidateImageUrl) ? candidateImageUrl : undefined;
   const content =
     typeof obj.content === 'string'
       ? obj.content
@@ -132,6 +152,8 @@ export function extractWebSummary(output: unknown): WebSummary {
     status,
     contentType,
     format,
+    ...(mediaKind ? { mediaKind } : {}),
+    ...(imageUrl ? { imageUrl } : {}),
     content: content.slice(0, 8000),
     cleanedContent: cleaned.slice(0, 8000),
     isMarkdown: isMd,

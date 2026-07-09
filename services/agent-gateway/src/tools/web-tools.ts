@@ -24,18 +24,34 @@ function resolveWebfetchMaxResponseBytes(): number {
   );
 }
 
+function isAllowedWebfetchUrl(value: string): boolean {
+  try {
+    const protocol = new URL(value).protocol;
+    return protocol === 'http:' || protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+const webfetchUrlSchema = z
+  .string()
+  .url()
+  .refine(isAllowedWebfetchUrl, 'webfetch only supports http(s) URLs');
+
 const webfetchInputSchema = z.object({
-  url: z.string().url(),
+  url: webfetchUrlSchema,
   format: z.enum(['markdown', 'text', 'html']).default('markdown'),
   timeout: z.number().int().min(1).max(MAX_WEBFETCH_TIMEOUT_SECONDS).default(20),
 });
 
 const webfetchOutputSchema = z.object({
-  url: z.string(),
+  url: webfetchUrlSchema,
   format: z.enum(['markdown', 'text', 'html']),
   status: z.number().int(),
   contentType: z.string(),
   content: z.string(),
+  mediaKind: z.literal('image').optional(),
+  imageUrl: webfetchUrlSchema.optional(),
 });
 
 function normalizeWebfetchUrl(url: string): string {
@@ -114,16 +130,23 @@ function formatFetchedContent(input: {
   return turndown.turndown(input.body).trim();
 }
 
+function isImageContentType(contentType: string): boolean {
+  return contentType.toLowerCase().split(';', 1)[0]?.trim().startsWith('image/') === true;
+}
+
 export const webfetchTool: ToolDefinition<typeof webfetchInputSchema, typeof webfetchOutputSchema> =
   {
     name: 'webfetch',
     description:
-      'Fetch content from a specific URL in markdown, text, or html format. Use websearch for discovery and webfetch for a concrete URL.',
+      'Fetch content from a specific URL in markdown, text, html, or image-preview format. Use websearch for discovery and webfetch for a concrete URL. If the user asks to fetch, find, show, or display an existing web image, use websearch/webfetch and return the existing image URL; do not use generate_image unless the user explicitly asks to create/draw/design a new image.',
     inputSchema: webfetchInputSchema,
     outputSchema: webfetchOutputSchema,
     timeout: MAX_WEBFETCH_TIMEOUT_SECONDS * 1000,
     execute: async (input, signal) => {
       const normalizedUrl = normalizeWebfetchUrl(input.url);
+      if (!isAllowedWebfetchUrl(normalizedUrl)) {
+        throw new Error('webfetch only supports http(s) URLs');
+      }
       const { signal: requestSignal, cleanup } = createAbortSignal(input.timeout, signal);
 
       try {
@@ -134,6 +157,19 @@ export const webfetchTool: ToolDefinition<typeof webfetchInputSchema, typeof web
           // Drop the (unused) error body so the socket is released promptly.
           await response.body?.cancel().catch(() => undefined);
           throw new Error(`webfetch request failed with status ${response.status}`);
+        }
+
+        if (isImageContentType(contentType)) {
+          await response.body?.cancel().catch(() => undefined);
+          return {
+            url: normalizedUrl,
+            format: input.format,
+            status: response.status,
+            contentType,
+            mediaKind: 'image',
+            imageUrl: normalizedUrl,
+            content: `![Fetched image](${normalizedUrl})`,
+          };
         }
 
         // Size-capped read: never buffer an unbounded body into memory.
