@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { isGatewayToolEnabledForSessionMetadata } from '../../session/session-tool-visibility.js';
+import type { GatewayToolDefinition } from '../../tools/tool-definitions.js';
+import {
+  filterEnabledGatewayToolsForSession,
+  isGatewayToolEnabledForSessionMetadata,
+} from '../../session/session-tool-visibility.js';
 
 const FEISHU_TOOL_NAMES = [
   'FeishuSendImage',
@@ -15,6 +19,23 @@ const FEISHU_TOOL_NAMES = [
   'FeishuBitableUpdateRecords',
   'FeishuBitableDeleteRecords',
 ] as const;
+
+function makeTool(name: string): GatewayToolDefinition {
+  return {
+    type: 'function',
+    function: {
+      name,
+      description: name,
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+        additionalProperties: false,
+      },
+      strict: false,
+    },
+  };
+}
 
 describe('session tool visibility', () => {
   it('disables desktop control tools for channel-managed sessions', () => {
@@ -132,5 +153,43 @@ describe('session tool visibility', () => {
     for (const toolName of FEISHU_TOOL_NAMES) {
       expect(isGatewayToolEnabledForSessionMetadata(toolName, metadata)).toBe(false);
     }
+  });
+
+  it('Given channel-managed metadata without LLM tool opt-in When filtering upstream tools Then no declarations are exposed', () => {
+    const metadata = JSON.stringify({
+      source: 'channel',
+      channel: {
+        type: 'qq',
+        tools: {
+          web_search: true,
+        },
+      },
+    });
+    const tools = [makeTool('websearch'), makeTool('read'), makeTool('PluginReplyMessage')];
+
+    expect(filterEnabledGatewayToolsForSession(tools, metadata)).toEqual([]);
+  });
+
+  it('Given channel-managed metadata with LLM tool opt-in When filtering upstream tools Then existing channel policy still applies', () => {
+    const metadata = JSON.stringify({
+      source: 'channel',
+      channelLlmToolsEnabled: true,
+      channel: {
+        type: 'qq',
+        tools: {
+          web_search: true,
+        },
+      },
+    });
+    const tools = [
+      makeTool('websearch'),
+      makeTool('desktop_control'),
+      makeTool('PluginReplyMessage'),
+      makeTool('WeixinSendImage'),
+    ];
+
+    expect(
+      filterEnabledGatewayToolsForSession(tools, metadata).map((tool) => tool.function.name),
+    ).toEqual(['websearch', 'PluginReplyMessage']);
   });
 });

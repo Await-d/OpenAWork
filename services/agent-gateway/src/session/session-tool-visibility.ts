@@ -117,6 +117,10 @@ function isChannelManagedSession(metadata: Record<string, unknown>): boolean {
   return metadata['source'] === 'channel';
 }
 
+function areChannelLlmToolDeclarationsEnabled(metadata: Record<string, unknown>): boolean {
+  return !isChannelManagedSession(metadata) || metadata['channelLlmToolsEnabled'] === true;
+}
+
 function isChannelPolicyToolEnabled(metadata: Record<string, unknown>, toolName: string): boolean {
   const isChannelTool = CHANNEL_SEND_TOOL_NAMES.has(toolName);
   const isChannelSession = isChannelManagedSession(metadata);
@@ -273,6 +277,9 @@ export function filterEnabledGatewayToolsForSession(
   metadataJson: string,
 ): GatewayToolDefinition[] {
   const metadata = parseSessionMetadataJson(metadataJson);
+  if (!areChannelLlmToolDeclarationsEnabled(metadata)) {
+    return [];
+  }
 
   return tools.filter((tool) =>
     isGatewayToolEnabledForSessionMetadata(tool.function.name, metadata),
