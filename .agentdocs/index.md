@@ -12,6 +12,7 @@
 - [260708-layout-isolation-refactor](workflow/260708-layout-isolation-refactor.md) — 新旧布局文件夹与逻辑隔离重构：4 Phase / 18 任务 / Full orchestration；死代码清理 + fusion/classic/shared 三目录物理隔离 + useLayoutShared 拆分 + ChatPage 26处 isFusionLayout + 3子组件策略模式解耦
 
 ## Done Workflows
+- [260709-资源能力集成使用方案](workflow/done/260709-资源能力集成使用方案.md) — ✅ 已完成 2026-07-09：资源能力完整集成闭环；后台保留完整 catalog，前端按 `visibility / feature / usageKind` 分层展示；Channels persona、Team 模板、Commands/Prompts 材料边界、Skill/MCP 现有管理面合流、上传/删除实时识别与真实浏览器 QA 已完成；已有简单工具只登记/补说明，不新增第二套执行器
 - [260706-desktop-control-plugin-integration](workflow/done/260706-desktop-control-plugin-integration.md) — ✅ 已完成 2026-07-06：系统桌面控制插件集成闭环，包含前端插件开关、工作区状态/操作控制台、`plugin_settings.desktopControl`、后端按用户注入过滤、sandbox 二次门控、desktop-control route/web-client、Tauri loopback bridge 与多项验证
 - [260704-telemetry-consent-implementation](workflow/done/260704-telemetry-consent-implementation.md) — ✅ 已完成：遥测同意状态、网关遥测路由、web-client 封装、通用事件采集与 GitHub Issue 同步链路已收口
 - [260704-display-settings-expansion](workflow/done/260704-display-settings-expansion.md) — ✅ 已完成：显示设置新增推理块显隐、命令面板/网关状态/终端按钮显隐与主题模式切换
@@ -66,6 +67,8 @@
 - [260415-team-page-收口方案](workflow/done/260415-team-page-收口方案.md) — Team 页面收口、契约稳定化、shell adapter 与验收闭环
 
 ## Architecture Decisions
+- [2026-07-09] 资源能力集成固定为“后台完整 catalog + 前端/功能按用途分层读取”：`GET /resources` 必须保留 `souls`、`agentTemplates`、`commands`、`prompts` 等 feature 资源供 Channels/Team/Commands/Prompts 读取；资源中心 UI 只在前端按 `visibility / feature / usageKind` 分主目录与功能专用区；`souls` 是 channel persona，`agentTemplates` 是 team/workspace template，不能作为普通 Skill/Agent 混入主目录。
+- [2026-07-09] 资源中心固定为“目录管理，不是运行时执行器”：Skill/MCP 资源详情只展示定义、来源、路径和用途边界；Skill 安装/启停/更新/系统目录扫描继续走技能库或 Settings 插件页，MCP server 配置/状态/重试/工具禁用继续走 Settings 插件页。资源页在设置页嵌入态应优先单列内容高度排布，避免列表和详情面板因外层高度压缩发生重叠。
 - [2026-07-08] OpenCowork 工具生态接入固定为“OpenAWork 原生表面优先 + 已有简单工具不重复完整集成”：MCP 继续走原生 runtime/flat naming/catalog/OAuth/authorization，只补 `streamable-http` 等缺口；Read/Write/Edit/Glob/Grep/Bash/WebSearch/WebFetch/Task/Plan/AskUser/Memory/Goal/Cron/Image/Desktop/Browser 基础动作只做登记、别名或文档；OpenCowork 文档/数据 skills 选择性迁移；Channel 细分能力走 provider-specific action；Custom Extension 另建声明式 HTTP v1，JS/HTML renderer 暂缓。
 - [2026-07-08] OpenCowork `resources/` 存放方式可借鉴但不应原样放到仓库根目录：OpenAWork 推荐新增 `packages/resources/resources/*` 作为默认资产包，skills/agents/souls/commands/prompts/workflows/extensions 示例都从这里 seed 或构建索引；运行时真相源仍分别是 skill registry/installed_skills、agent catalog DB、agent_personas、command 白名单、prompt snippets/workflow template API，避免形成第二套用户态配置。
 - [2026-07-07] OMO MCP 适配固定为“原生 MCP runtime 主路径 + OMO adapter typed manifest 输入源”：Agent 可见工具只来自 OpenAWork MCP catalog / gateway tool registry；`codegraph`、`git_bash`、`lsp`、`grep_app`、`websearch` 等已有 builtin/virtual MCP 不重复注册为 `mcp__omo__*`；hook 只允许 before/after 修改 args 或观察结果，不能绕过 `tool-sandbox`、permission、session visibility、audit；Settings 必须通过 gateway runtime 与 `@openAwork/web-client` 同源管理 builtin、virtual、adapter MCP；team `allowedServerIds: []` 只保留 system builtin，用户私有/插件来源 OMO MCP 不默认继承。ADR 见 [omo-mcp-adapter-architecture](../docs/chat/omo-mcp-adapter-architecture.md)。

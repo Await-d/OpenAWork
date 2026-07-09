@@ -74,6 +74,11 @@ export const PRELOADABLE_ROUTE_MODULES = {
     () => import('../pages/misc/SchedulesPage.js'),
     '计划任务',
   ),
+  resources: createPreloadableRouteModule(
+    'resources',
+    () => import('../pages/resources/ResourcesPage.js'),
+    '资源中心',
+  ),
   sessions: createPreloadableRouteModule(
     'sessions',
     () => import('../pages/sessions-page/SessionsPage.js'),

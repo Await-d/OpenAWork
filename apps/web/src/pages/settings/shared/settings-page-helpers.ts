@@ -29,6 +29,7 @@ export const TABS = [
   { id: 'usage', label: '用量与账单' },
   { id: 'security', label: '安全与权限' },
   { id: 'workspace', label: '工作区' },
+  { id: 'resources', label: '资源中心' },
   { id: 'plugins', label: '插件' },
   { id: 'devtools', label: '开发者工具' },
   { id: 'about', label: '关于' },
@@ -62,9 +63,13 @@ export const TAB_CATEGORIES: ReadonlyArray<{
   {
     id: 'extensions',
     label: '扩展与集成',
-    tabIds: ['plugins'],
+    tabIds: ['resources', 'plugins'],
   },
-  { id: 'tools', label: '工具', tabIds: ['workspace', 'artifacts', 'images', 'sessions', 'devtools'] },
+  {
+    id: 'tools',
+    label: '工具',
+    tabIds: ['workspace', 'artifacts', 'images', 'sessions', 'devtools'],
+  },
   { id: 'about', label: '关于', tabIds: ['about'] },
 ];
 
@@ -77,6 +82,34 @@ export const SETTINGS_TAB_CONTENT_GAP = 28;
 // 整体居中，丢掉额外右列，窄屏下把所有可用宽度都让给内容。
 export const SETTINGS_LAYOUT_SIDE_GUTTER = SETTINGS_TAB_NAV_WIDTH + SETTINGS_TAB_CONTENT_GAP;
 export const SETTINGS_LAYOUT_MAX_WIDTH = `calc(var(--content-max-width) + ${SETTINGS_LAYOUT_SIDE_GUTTER}px)`;
+
+export function isEmbeddedRouteTab(tab: TabId): boolean {
+  switch (tab) {
+    case 'templates':
+    case 'agents':
+    case 'skills':
+    case 'workflows':
+    case 'schedules':
+    case 'artifacts':
+    case 'images':
+    case 'sessions':
+    case 'resources':
+      return true;
+    case 'connection':
+    case 'display':
+    case 'desktop':
+    case 'channels':
+    case 'companion':
+    case 'memory':
+    case 'usage':
+    case 'security':
+    case 'workspace':
+    case 'plugins':
+    case 'devtools':
+    case 'about':
+      return false;
+  }
+}
 
 export const DEFAULT_THINKING_DEFAULTS: ThinkingDefaultsRef = {
   chat: { enabled: false, effort: 'medium' },

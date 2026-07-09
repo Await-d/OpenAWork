@@ -66,6 +66,7 @@ import {
   TAB_CATEGORIES,
   TABS,
   TAURI_ONLY_TAB_IDS,
+  isEmbeddedRouteTab,
   type TabId,
 } from './shared/settings-page-helpers.js';
 import { useSettingsEnvironment } from './shared/use-settings-environment.js';
@@ -91,6 +92,8 @@ import type {
   SettingsDevLogRecord,
   ThinkingDefaultsRef,
 } from './state/settings-types.js';
+
+const SETTINGS_COMPACT_VIEWPORT_QUERY = '(max-width: 820px)';
 
 function SettingsNavIcon({ id }: { id: string }) {
   const icons: Record<string, React.ReactNode> = {
@@ -200,6 +203,13 @@ function SettingsNavIcon({ id }: { id: string }) {
     security: <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />,
     workspace: (
       <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+    ),
+    resources: (
+      <>
+        <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+        <path d="M3.3 7 12 12l8.7-5" />
+        <path d="M12 22V12" />
+      </>
     ),
     devtools: (
       <>
@@ -378,6 +388,15 @@ export default function SettingsPage() {
   const [devtoolsSourceStates, setDevtoolsSourceStates] = useState(() =>
     createInitialDevtoolsSourceStates(),
   );
+  const [isCompactSettingsLayout, setIsCompactSettingsLayout] = useState(() => {
+    if (typeof window === 'undefined') {
+      return false;
+    }
+    if (typeof window.matchMedia === 'function') {
+      return window.matchMedia(SETTINGS_COMPACT_VIEWPORT_QUERY).matches;
+    }
+    return window.innerWidth <= 820;
+  });
   const [desktopAutomationEnabled, setDesktopAutomationEnabled] = useState(false);
   const [desktopControlEnabled, setDesktopControlEnabled] = useState(false);
   const [desktopControlStatus, setDesktopControlStatus] = useState<DesktopControlStatus | null>(
@@ -406,6 +425,25 @@ export default function SettingsPage() {
   useEffect(() => {
     providersRef.current = providers;
   }, [providers]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined;
+    }
+
+    if (typeof window.matchMedia !== 'function') {
+      const updateCompactLayout = () => setIsCompactSettingsLayout(window.innerWidth <= 820);
+      updateCompactLayout();
+      window.addEventListener('resize', updateCompactLayout);
+      return () => window.removeEventListener('resize', updateCompactLayout);
+    }
+
+    const media = window.matchMedia(SETTINGS_COMPACT_VIEWPORT_QUERY);
+    const updateCompactLayout = () => setIsCompactSettingsLayout(media.matches);
+    updateCompactLayout();
+    media.addEventListener('change', updateCompactLayout);
+    return () => media.removeEventListener('change', updateCompactLayout);
+  }, []);
 
   useEffect(() => {
     devLogsRef.current = devLogs;
@@ -1529,37 +1567,50 @@ export default function SettingsPage() {
         style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
       >
         <div
-          style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden', padding: '0 28px' }}
+          style={{
+            display: 'flex',
+            flex: 1,
+            minHeight: 0,
+            overflow: 'hidden',
+            padding: isCompactSettingsLayout ? '0 12px' : '0 28px',
+          }}
         >
           <div
             style={{
               display: 'grid',
               flex: 1,
               width: '100%',
-              maxWidth: SETTINGS_LAYOUT_MAX_WIDTH,
+              maxWidth: isCompactSettingsLayout ? '100%' : SETTINGS_LAYOUT_MAX_WIDTH,
               minHeight: 0,
               margin: '0 auto',
               overflow: 'hidden',
               // 3 列布局：nav | gap | content。外层 `margin: 0 auto` 负责在宽屏
               // 下整体居中；窄屏下 content 能拿到所有剩余宽度，不再被旧的
               // 第 4 列「装饰 gutter」吃掉 220px。
-              gridTemplateColumns: `${SETTINGS_TAB_NAV_WIDTH}px ${SETTINGS_TAB_CONTENT_GAP}px minmax(0, 1fr)`,
+              gridTemplateColumns: isCompactSettingsLayout
+                ? 'minmax(0, 1fr)'
+                : `${SETTINGS_TAB_NAV_WIDTH}px ${SETTINGS_TAB_CONTENT_GAP}px minmax(0, 1fr)`,
+              gridTemplateRows: isCompactSettingsLayout ? 'auto minmax(0, 1fr)' : undefined,
             }}
           >
             <nav
               style={{
                 gridColumn: '1',
-                width: SETTINGS_TAB_NAV_WIDTH,
+                gridRow: isCompactSettingsLayout ? '1' : undefined,
+                width: isCompactSettingsLayout ? '100%' : SETTINGS_TAB_NAV_WIDTH,
                 flexShrink: 0,
-                borderRight: '1px solid var(--border-subtle)',
+                borderRight: isCompactSettingsLayout ? 'none' : '1px solid var(--border-subtle)',
+                borderBottom: isCompactSettingsLayout ? '1px solid var(--border-subtle)' : 'none',
                 display: 'flex',
-                flexDirection: 'column',
+                flexDirection: isCompactSettingsLayout ? 'row' : 'column',
                 background: 'var(--bg-raised)',
                 minHeight: 0,
+                minWidth: 0,
               }}
             >
               <div
                 style={{
+                  display: isCompactSettingsLayout ? 'none' : 'block',
                   padding: '20px 12px 12px',
                   borderBottom: '1px solid var(--border-subtle)',
                   flexShrink: 0,
@@ -1588,18 +1639,27 @@ export default function SettingsPage() {
               <div
                 style={{
                   flex: 1,
-                  overflowY: 'auto',
-                  padding: '8px 8px 16px',
+                  overflowX: isCompactSettingsLayout ? 'auto' : 'hidden',
+                  overflowY: isCompactSettingsLayout ? 'hidden' : 'auto',
+                  padding: isCompactSettingsLayout ? '8px 0' : '8px 8px 16px',
                   display: 'flex',
-                  flexDirection: 'column',
-                  gap: 1,
+                  flexDirection: isCompactSettingsLayout ? 'row' : 'column',
+                  gap: isCompactSettingsLayout ? 8 : 1,
                   scrollbarWidth: 'none' as const,
+                  minWidth: 0,
                 }}
               >
                 {TAB_CATEGORIES.map((category, idx) => (
-                  <div key={category.id} style={{ marginTop: idx > 0 ? 12 : 0 }}>
+                  <div
+                    key={category.id}
+                    style={{
+                      display: isCompactSettingsLayout ? 'contents' : 'block',
+                      marginTop: !isCompactSettingsLayout && idx > 0 ? 12 : 0,
+                    }}
+                  >
                     <div
                       style={{
+                        display: isCompactSettingsLayout ? 'none' : 'block',
                         fontSize: 10,
                         fontWeight: 600,
                         color: 'var(--fg-muted)',
@@ -1619,56 +1679,57 @@ export default function SettingsPage() {
                     ).map((tabItem) => {
                       const linkTo = `/settings/${tabItem.id}`;
                       return (
-                      <NavLink
-                        key={tabItem.id}
-                        to={linkTo}
-                        style={() => {
-                          // NavLink 的内置 isActive 仅在 URL 精确匹配 `/settings/<id>` 时才为 true。
-                          // 当用户进入 `/settings`（无 tab 参数）时，SettingsPage 会把 activeTab
-                          // 回退到 'connection' 并渲染对应内容，但此时所有 NavLink 都没高亮。
-                          // 改为统一基于 activeTab 计算激活态，让侧栏选中始终与右侧内容一致。
-                          const isActive = activeTab === tabItem.id;
-                          return {
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 8,
-                            width: '100%',
-                            padding: '8px 10px',
-                            borderRadius: 8,
-                            fontSize: 12,
-                            fontWeight: isActive ? 600 : 400,
-                            background: isActive ? 'var(--accent-muted)' : 'transparent',
-                            color: isActive ? 'var(--accent)' : 'var(--fg-default)',
-                            boxShadow: isActive ? 'inset 2px 0 0 var(--accent)' : 'none',
-                            textDecoration: 'none',
-                            border: 'none',
-                            cursor: 'pointer',
-                            transition: 'background 150ms ease, color 150ms ease',
-                            overflow: 'hidden',
-                          };
-                        }}
-                      >
-                        <span
-                          style={{
-                            flexShrink: 0,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            width: 18,
+                        <NavLink
+                          key={tabItem.id}
+                          to={linkTo}
+                          style={() => {
+                            // NavLink 的内置 isActive 仅在 URL 精确匹配 `/settings/<id>` 时才为 true。
+                            // 当用户进入 `/settings`（无 tab 参数）时，SettingsPage 会把 activeTab
+                            // 回退到 'connection' 并渲染对应内容，但此时所有 NavLink 都没高亮。
+                            // 改为统一基于 activeTab 计算激活态，让侧栏选中始终与右侧内容一致。
+                            const isActive = activeTab === tabItem.id;
+                            return {
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 8,
+                              flex: isCompactSettingsLayout ? '0 0 auto' : undefined,
+                              width: isCompactSettingsLayout ? 'auto' : '100%',
+                              padding: isCompactSettingsLayout ? '8px 12px' : '8px 10px',
+                              borderRadius: 8,
+                              fontSize: 12,
+                              fontWeight: isActive ? 600 : 400,
+                              background: isActive ? 'var(--accent-muted)' : 'transparent',
+                              color: isActive ? 'var(--accent)' : 'var(--fg-default)',
+                              boxShadow: isActive ? 'inset 2px 0 0 var(--accent)' : 'none',
+                              textDecoration: 'none',
+                              border: 'none',
+                              cursor: 'pointer',
+                              transition: 'background 150ms ease, color 150ms ease',
+                              overflow: 'hidden',
+                            };
                           }}
                         >
-                          <SettingsNavIcon id={tabItem.id} />
-                        </span>
-                        <span
-                          style={{
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          {tabItem.label}
-                        </span>
-                      </NavLink>
+                          <span
+                            style={{
+                              flexShrink: 0,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              width: 18,
+                            }}
+                          >
+                            <SettingsNavIcon id={tabItem.id} />
+                          </span>
+                          <span
+                            style={{
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {tabItem.label}
+                          </span>
+                        </NavLink>
                       );
                     })}
                   </div>
@@ -1677,9 +1738,10 @@ export default function SettingsPage() {
             </nav>
             <div
               style={{
-                gridColumn: '3',
+                gridColumn: isCompactSettingsLayout ? '1' : '3',
+                gridRow: isCompactSettingsLayout ? '2' : undefined,
                 overflowY: 'auto',
-                padding: '20px 0',
+                padding: isCompactSettingsLayout ? '12px 0' : '20px 0',
                 minWidth: 0,
               }}
             >
@@ -1850,13 +1912,11 @@ export default function SettingsPage() {
                   />
                 )}
                 {activeTab === 'about' && <AboutPage />}
-                {(['templates', 'agents', 'skills', 'workflows', 'schedules', 'artifacts', 'images', 'sessions'] as const).includes(
-                  activeTab,
-                ) && (
+                {isEmbeddedRouteTab(activeTab) && (
                   <div
                     style={{
                       height: 'calc(100vh - 80px)',
-                      margin: '-20px 0',
+                      margin: isCompactSettingsLayout ? '-12px 0' : '-20px 0',
                       display: 'flex',
                       flexDirection: 'column',
                       minHeight: 0,
@@ -1873,12 +1933,23 @@ export default function SettingsPage() {
                         />
                       }
                     >
-                      {activeTab === 'templates' && <PRELOADABLE_ROUTE_MODULES.templates.component />}
+                      {activeTab === 'templates' && (
+                        <PRELOADABLE_ROUTE_MODULES.templates.component />
+                      )}
                       {activeTab === 'agents' && <PRELOADABLE_ROUTE_MODULES.agents.component />}
                       {activeTab === 'skills' && <PRELOADABLE_ROUTE_MODULES.skills.component />}
-                      {activeTab === 'workflows' && <PRELOADABLE_ROUTE_MODULES.workflows.component />}
-                      {activeTab === 'schedules' && <PRELOADABLE_ROUTE_MODULES.schedules.component />}
-                      {activeTab === 'artifacts' && <PRELOADABLE_ROUTE_MODULES.artifacts.component />}
+                      {activeTab === 'workflows' && (
+                        <PRELOADABLE_ROUTE_MODULES.workflows.component />
+                      )}
+                      {activeTab === 'schedules' && (
+                        <PRELOADABLE_ROUTE_MODULES.schedules.component />
+                      )}
+                      {activeTab === 'resources' && (
+                        <PRELOADABLE_ROUTE_MODULES.resources.component />
+                      )}
+                      {activeTab === 'artifacts' && (
+                        <PRELOADABLE_ROUTE_MODULES.artifacts.component />
+                      )}
                       {activeTab === 'images' && <PRELOADABLE_ROUTE_MODULES.images.component />}
                       {activeTab === 'sessions' && <PRELOADABLE_ROUTE_MODULES.sessions.component />}
                     </Suspense>
@@ -1886,7 +1957,9 @@ export default function SettingsPage() {
                 )}
               </div>
             </div>
-            <div aria-hidden="true" style={{ gridColumn: '4' }} />
+            {!isCompactSettingsLayout ? (
+              <div aria-hidden="true" style={{ gridColumn: '4' }} />
+            ) : null}
           </div>
         </div>
       </div>
