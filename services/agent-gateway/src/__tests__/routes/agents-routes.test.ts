@@ -17,6 +17,20 @@ let agentsRoutes: typeof AgentsRoutesModule.agentsRoutes;
 
 const USER_ID = 'u-agents-routes';
 
+interface ManagedAgentFixture {
+  readonly id: string;
+  readonly origin: string;
+  readonly removable: boolean;
+  readonly label: string;
+  readonly description: string;
+  readonly systemPrompt?: string;
+  readonly note?: string;
+}
+
+interface AgentsListResponse {
+  readonly agents: readonly ManagedAgentFixture[];
+}
+
 async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify();
   registerErrorHandler(app);
@@ -58,6 +72,44 @@ afterAll(async () => {
 });
 
 describe('agents routes error contracts', () => {
+  it('GET /agents 暴露安全内置 resource agents，并排除 reference-only cron agent', async () => {
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/agents',
+        headers: {
+          authorization: bearer(app),
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json<AgentsListResponse>();
+      const resourceCodeReviewer = body.agents.find(
+        (agent) => agent.id === 'resource-code-reviewer',
+      );
+      const resourceApiDesigner = body.agents.find((agent) => agent.id === 'resource-api-designer');
+
+      expect(resourceCodeReviewer).toMatchObject({
+        id: 'resource-code-reviewer',
+        origin: 'builtin',
+        removable: false,
+        label: 'code-reviewer',
+      });
+      expect(resourceCodeReviewer?.description).toContain('code reviews');
+      expect(resourceCodeReviewer?.systemPrompt).toContain('Code Review Checklist');
+      expect(resourceCodeReviewer?.note).toContain('参考资源 agent:');
+      expect(resourceApiDesigner).toMatchObject({
+        id: 'resource-api-designer',
+        origin: 'builtin',
+        removable: false,
+      });
+      expect(body.agents.some((agent) => agent.id === 'resource-cron-agent')).toBe(false);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('PUT /agents/:agentId 在空更新体时返回中文 issue', async () => {
     const app = await buildApp();
     try {

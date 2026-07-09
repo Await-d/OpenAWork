@@ -850,6 +850,24 @@ export async function migrate(): Promise<void> {
   `);
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS user_resources (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      area TEXT NOT NULL,
+      name TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      content TEXT NOT NULL,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_user_resources_user_area_created ON user_resources(user_id, area, created_at DESC)',
+  );
+
+  db.exec(`
     CREATE TABLE IF NOT EXISTS installed_skills (
       skill_id TEXT NOT NULL,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1640,8 +1658,7 @@ function ensureAppMetaTable(): void {
 export function getAppMetaValue(key: string): string | undefined {
   try {
     const row = db.prepare('SELECT value FROM app_meta WHERE key = ? LIMIT 1').get(key) as
-      | { value: string }
-      | undefined;
+      { value: string } | undefined;
     return row?.value;
   } catch {
     return undefined;

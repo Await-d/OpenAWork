@@ -19,37 +19,31 @@
  * context7 在 OpenAWork 当前没有真实使用场景，先不引入。
  */
 
+import {
+  listSystemBuiltinMcpDescriptors,
+  type SystemBuiltinMcpId,
+} from '@openAwork/resources/node';
 import type { ConfiguredMCPServer } from './mcp-runtime.js';
 
 /**
  * Stable id 用作合并键。用户在 user_settings.mcp_servers 里写同 id 配置
  * 会管理同名内置 server；protected virtual / adapter 不接受 endpoint 覆盖。
  */
-export const BUILTIN_MCP_IDS = [
-  'websearch',
-  'grep_app',
-  'codegraph',
-  'git_bash',
-  'lsp',
-  'omo',
-] as const;
-export type BuiltinMcpId = (typeof BUILTIN_MCP_IDS)[number];
+export const BUILTIN_MCP_IDS = listSystemBuiltinMcpDescriptors().map((server) => server.id);
+export type BuiltinMcpId = SystemBuiltinMcpId;
 export type BuiltinMcpKind = 'system' | 'virtual' | 'adapter';
 
+interface RuntimeBuiltinMcpBase {
+  readonly id: BuiltinMcpId;
+  readonly name: BuiltinMcpId;
+  readonly enabled: boolean;
+  readonly builtin: true;
+  readonly builtinKind: BuiltinMcpKind;
+  readonly source: 'system';
+}
+
 export function getBuiltinMcpKind(id: string): BuiltinMcpKind | undefined {
-  switch (id) {
-    case 'websearch':
-    case 'grep_app':
-      return 'system';
-    case 'codegraph':
-    case 'git_bash':
-    case 'lsp':
-      return 'virtual';
-    case 'omo':
-      return 'adapter';
-    default:
-      return undefined;
-  }
+  return listSystemBuiltinMcpDescriptors().find((server) => server.id === id)?.builtinKind;
 }
 
 export function isProtectedBuiltinMcpId(id: string): boolean {
@@ -72,82 +66,60 @@ export function buildBuiltinMcpServers(
 ): ConfiguredMCPServer[] {
   const env = options.env ?? globalThis.process?.env ?? {};
 
-  // 1) Exa Web Search MCP — `websearch` 工具集仅暴露 `web_search_exa`，
-  //    避免把 Exa 仪表板的其他实验性 tool 也牵进来。
   const exaApiKey = readEnvString(env, 'EXA_API_KEY');
-  const websearch: ConfiguredMCPServer = {
-    id: 'websearch',
-    name: 'websearch',
-    transport: 'sse',
-    url: 'https://mcp.exa.ai/mcp?tools=web_search_exa',
-    enabled: true,
-    builtin: true,
-    builtinKind: 'system',
-    source: 'system',
-    ...(exaApiKey ? { headers: { 'x-api-key': exaApiKey } } : {}),
-  };
+  return listSystemBuiltinMcpDescriptors().map((descriptor) =>
+    buildRuntimeBuiltinMcpServer(descriptor.id, descriptor.builtinKind, exaApiKey),
+  );
+}
 
-  // 2) grep.app MCP — 在公开 GitHub 仓库里做正则代码检索；无鉴权。
-  const grepApp: ConfiguredMCPServer = {
-    id: 'grep_app',
-    name: 'grep_app',
-    transport: 'sse',
-    url: 'https://mcp.grep.app',
-    enabled: true,
+function buildRuntimeBuiltinMcpServer(
+  id: BuiltinMcpId,
+  kind: BuiltinMcpKind,
+  exaApiKey: string | undefined,
+): ConfiguredMCPServer {
+  const base: RuntimeBuiltinMcpBase = {
+    id,
+    name: id,
+    enabled: id === 'git_bash' ? process.platform === 'win32' : true,
     builtin: true,
-    builtinKind: 'system',
-    source: 'system',
+    builtinKind: kind,
+    source: 'system' as const,
   };
+  switch (id) {
+    case 'websearch':
+      return {
+        ...base,
+        transport: 'sse',
+        url: 'https://mcp.exa.ai/mcp?tools=web_search_exa',
+        ...(exaApiKey ? { headers: { 'x-api-key': exaApiKey } } : {}),
+      };
+    case 'grep_app':
+      return {
+        ...base,
+        transport: 'sse',
+        url: 'https://mcp.grep.app',
+      };
+    case 'codegraph':
+      return virtualBuiltinMcpServer(base, 'openawork-virtual-codegraph');
+    case 'git_bash':
+      return virtualBuiltinMcpServer(base, 'openawork-virtual-git-bash');
+    case 'lsp':
+      return virtualBuiltinMcpServer(base, 'openawork-virtual-lsp');
+    case 'omo':
+      return virtualBuiltinMcpServer(base, 'openawork-virtual-omo');
+  }
+}
 
-  const codegraph: ConfiguredMCPServer = {
-    id: 'codegraph',
-    name: 'codegraph',
+function virtualBuiltinMcpServer(
+  base: RuntimeBuiltinMcpBase,
+  command: string,
+): ConfiguredMCPServer {
+  return {
+    ...base,
     transport: 'stdio',
-    command: 'openawork-virtual-codegraph',
-    enabled: true,
+    command,
     required: false,
-    builtin: true,
-    builtinKind: 'virtual',
-    source: 'system',
   };
-
-  const gitBash: ConfiguredMCPServer = {
-    id: 'git_bash',
-    name: 'git_bash',
-    transport: 'stdio',
-    command: 'openawork-virtual-git-bash',
-    enabled: process.platform === 'win32',
-    required: false,
-    builtin: true,
-    builtinKind: 'virtual',
-    source: 'system',
-  };
-
-  const lsp: ConfiguredMCPServer = {
-    id: 'lsp',
-    name: 'lsp',
-    transport: 'stdio',
-    command: 'openawork-virtual-lsp',
-    enabled: true,
-    required: false,
-    builtin: true,
-    builtinKind: 'virtual',
-    source: 'system',
-  };
-
-  const omo: ConfiguredMCPServer = {
-    id: 'omo',
-    name: 'omo',
-    transport: 'stdio',
-    command: 'openawork-virtual-omo',
-    enabled: true,
-    required: false,
-    builtin: true,
-    builtinKind: 'adapter',
-    source: 'system',
-  };
-
-  return [websearch, grepApp, codegraph, gitBash, lsp, omo];
 }
 
 function readEnvString(env: NodeJS.ProcessEnv, key: string): string | undefined {

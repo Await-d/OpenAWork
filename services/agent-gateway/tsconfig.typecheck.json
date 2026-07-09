@@ -12,6 +12,7 @@
     { "path": "../../packages/mcp-client/tsconfig.typecheck.json" },
     { "path": "../../packages/pairing" },
     { "path": "../../packages/platform-adapter/tsconfig.typecheck.json" },
+    { "path": "../../packages/resources/tsconfig.typecheck.json" },
     { "path": "../../packages/shared/tsconfig.typecheck.json" },
     { "path": "../../packages/skill-registry/tsconfig.typecheck.json" },
     { "path": "../../packages/skills/tsconfig.typecheck.json" },

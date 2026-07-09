@@ -37,11 +37,11 @@ export default defineConfig({
       '@openAwork/skills': fileURLToPath(
         new URL('../../packages/skills/src/index.ts', import.meta.url),
       ),
-      '@openAwork/resources': fileURLToPath(
-        new URL('../../packages/resources/src/index.ts', import.meta.url),
-      ),
       '@openAwork/resources/node': fileURLToPath(
         new URL('../../packages/resources/src/node.ts', import.meta.url),
+      ),
+      '@openAwork/resources': fileURLToPath(
+        new URL('../../packages/resources/src/index.ts', import.meta.url),
       ),
       '@openAwork/skill-types': fileURLToPath(
         new URL('../../packages/skill-types/src/index.ts', import.meta.url),

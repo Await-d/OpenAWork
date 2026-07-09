@@ -56,6 +56,36 @@ beforeEach(() => {
 });
 
 describe('listCapabilitiesForUser installed-manifest resilience', () => {
+  it('包含 resource agents 和 reference-only resource commands，但参考命令不可直接调用', () => {
+    const caps = capabilities.listCapabilitiesForUser(USER_ID);
+
+    expect(caps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'resource-code-reviewer',
+          kind: 'agent',
+          source: 'builtin',
+          callable: false,
+        }),
+        expect.objectContaining({
+          id: 'resource-command-commit',
+          kind: 'command',
+          source: 'reference',
+          callable: false,
+          tags: ['reference-resource', 'commit'],
+        }),
+      ]),
+    );
+    expect(
+      caps.some(
+        (capability) =>
+          capability.id === 'resource-command-commit' &&
+          capability.kind === 'command' &&
+          capability.callable === true,
+      ),
+    ).toBe(false);
+  });
+
   it('单行 manifest_json 损坏时不丢掉整份已安装技能能力，健康技能仍出现', () => {
     seedInstalledSkill(
       HEALTHY_SKILL_ID,

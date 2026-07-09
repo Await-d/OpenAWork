@@ -7,6 +7,7 @@ import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { buildCommandDescriptors } from './command-descriptors.js';
 import { buildGatewayToolDefinitions, getVisibleToolName } from '../tools/tool-definitions.js';
 import { BUILTIN_SKILLS } from '@openAwork/skills';
+import { listResourceCommandDescriptors } from '@openAwork/resources/node';
 import { listEnabledAgentCapabilitiesForUser } from '../agent/agent-catalog.js';
 import { filterEnabledGatewayToolsForSession } from '../session/session-tool-visibility.js';
 import {
@@ -164,6 +165,17 @@ export function listCapabilitiesForUser(
     callable: true,
     tags: command.contexts,
   }));
+  const resourceCommands = listResourceCommandDescriptors().map<CapabilityDescriptor>(
+    (command) => ({
+      id: command.id,
+      kind: 'command',
+      label: command.title,
+      description: command.description,
+      source: 'reference',
+      callable: false,
+      tags: ['reference-resource', command.name],
+    }),
+  );
 
   return [
     ...listEnabledAgentCapabilitiesForUser(userId),
@@ -172,6 +184,7 @@ export function listCapabilitiesForUser(
     ...mcps,
     ...tools,
     ...commands,
+    ...resourceCommands,
   ].sort((left, right) => {
     const kindOrder: Record<CapabilityDescriptor['kind'], number> = {
       agent: 0,

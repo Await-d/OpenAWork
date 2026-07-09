@@ -23,6 +23,25 @@ export type {
 } from './infra/notifications.js';
 export { createCapabilitiesClient } from './session/capabilities.js';
 export type { CapabilitiesClient, CapabilitiesListResult } from './session/capabilities.js';
+export { RESOURCE_USAGE_DEFAULTS, createResourcesClient } from './session/resources.js';
+export type {
+  ResourceAgentCatalogEntry,
+  ResourceCatalog,
+  ResourceCatalogEntry,
+  ResourceCommandCatalogEntry,
+  ResourceArea,
+  ResourceExtensionCatalogEntry,
+  ResourceFeature,
+  ResourceIntegrationMode,
+  ResourceMcpCatalogEntry,
+  ResourcesClient,
+  ResourcesListResult,
+  ResourceSkillCatalogEntry,
+  ResourceTextCatalogEntry,
+  ResourceUsageKind,
+  ResourceVisibility,
+  UploadResourceInput,
+} from './session/resources.js';
 export { createAgentsClient } from './session/agents.js';
 export type { AgentsClient, AgentsListResult } from './session/agents.js';
 export { createTeamClient } from './team/team.js';
