@@ -1,0 +1,7 @@
+{
+  "id": "slash-remove-deadcode",
+  "label": "/remove-deadcode",
+  "description": "用 LSP/AST 证据驱动的多阶段死代码清理流程",
+  "contexts": "composer",
+  "execution": "server"
+}

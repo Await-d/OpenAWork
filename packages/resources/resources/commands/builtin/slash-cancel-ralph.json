@@ -1,0 +1,7 @@
+{
+  "id": "slash-cancel-ralph",
+  "label": "/cancel-ralph",
+  "description": "取消当前活动中的 Ralph / ULW 循环",
+  "contexts": "composer",
+  "execution": "server"
+}

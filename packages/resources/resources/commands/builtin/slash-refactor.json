@@ -1,0 +1,7 @@
+{
+  "id": "slash-refactor",
+  "label": "/refactor",
+  "description": "启动带任务追踪与验证预期的重构流程",
+  "contexts": "composer",
+  "execution": "server"
+}

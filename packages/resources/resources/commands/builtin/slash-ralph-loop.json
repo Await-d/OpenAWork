@@ -1,0 +1,7 @@
+{
+  "id": "slash-ralph-loop",
+  "label": "/ralph-loop",
+  "description": "启动 Ralph Loop 自引用持续开发循环（默认上限 100 轮）",
+  "contexts": "composer",
+  "execution": "server"
+}

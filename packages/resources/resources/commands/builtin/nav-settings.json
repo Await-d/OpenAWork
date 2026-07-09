@@ -1,0 +1,7 @@
+{
+  "id": "nav-settings",
+  "label": "设置",
+  "description": "前往设置页面",
+  "contexts": "palette",
+  "execution": "client"
+}

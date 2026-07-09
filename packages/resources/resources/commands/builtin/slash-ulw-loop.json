@@ -1,0 +1,7 @@
+{
+  "id": "slash-ulw-loop",
+  "label": "/ulw-loop",
+  "description": "启动需要验证收尾的 UltraWork 循环",
+  "contexts": "composer",
+  "execution": "server"
+}

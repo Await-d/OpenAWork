@@ -1,0 +1,8 @@
+{
+  "id": "grep_app",
+  "title": "grep_app",
+  "description": "内置 grep.app MCP server（公开 GitHub 代码检索）",
+  "transport": "sse",
+  "builtinKind": "system",
+  "enabledByDefault": true
+}

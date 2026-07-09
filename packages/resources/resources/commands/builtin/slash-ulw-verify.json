@@ -1,0 +1,7 @@
+{
+  "id": "slash-ulw-verify",
+  "label": "/ulw-verify",
+  "description": "用 --pass / --fail 提交 ULW 验证结果",
+  "contexts": "composer",
+  "execution": "server"
+}

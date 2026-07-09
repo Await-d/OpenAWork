@@ -1,0 +1,8 @@
+{
+  "id": "lsp",
+  "title": "lsp",
+  "description": "内置虚拟 LSP MCP，桥接语言服务器诊断与引用能力",
+  "transport": "stdio",
+  "builtinKind": "virtual",
+  "enabledByDefault": true
+}

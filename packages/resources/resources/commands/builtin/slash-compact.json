@@ -1,0 +1,7 @@
+{
+  "id": "slash-compact",
+  "label": "/compact",
+  "description": "压缩当前会话上下文（别名：/summarize）",
+  "contexts": "composer",
+  "execution": "server"
+}

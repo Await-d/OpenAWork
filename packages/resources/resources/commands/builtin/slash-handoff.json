@@ -1,0 +1,7 @@
+{
+  "id": "slash-handoff",
+  "label": "/handoff",
+  "description": "生成可续跑的结构化交接摘要",
+  "contexts": "composer",
+  "execution": "server"
+}

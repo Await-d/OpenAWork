@@ -1,0 +1,8 @@
+{
+  "id": "omo",
+  "title": "omo",
+  "description": "内置 OMO adapter MCP，桥接 OMO 相关本地能力",
+  "transport": "stdio",
+  "builtinKind": "adapter",
+  "enabledByDefault": true
+}

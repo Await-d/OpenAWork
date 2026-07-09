@@ -1,0 +1,7 @@
+{
+  "id": "nav-sessions",
+  "label": "会话列表",
+  "description": "查看所有会话",
+  "contexts": "palette",
+  "execution": "client"
+}

@@ -1,0 +1,7 @@
+{
+  "id": "nav-chat",
+  "label": "新建对话",
+  "description": "前往 Chat 页面",
+  "contexts": "palette",
+  "execution": "client"
+}

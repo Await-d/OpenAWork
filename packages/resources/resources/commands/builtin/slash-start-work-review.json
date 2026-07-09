@@ -1,0 +1,7 @@
+{
+  "id": "slash-start-work-review",
+  "label": "/start-work-review",
+  "description": "提交 start-work reviewer verdict 并解除或保持完成门禁",
+  "contexts": "composer",
+  "execution": "server"
+}

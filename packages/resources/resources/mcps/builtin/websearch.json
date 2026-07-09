@@ -1,0 +1,8 @@
+{
+  "id": "websearch",
+  "title": "websearch",
+  "description": "内置 Web Search MCP server（Exa SSE）",
+  "transport": "sse",
+  "builtinKind": "system",
+  "enabledByDefault": true
+}

@@ -1,0 +1,8 @@
+{
+  "id": "git_bash",
+  "title": "git_bash",
+  "description": "内置虚拟 Git Bash MCP，主要用于 Windows shell 适配",
+  "transport": "stdio",
+  "builtinKind": "virtual",
+  "enabledByDefault": false
+}

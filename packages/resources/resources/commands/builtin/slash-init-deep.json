@@ -1,0 +1,7 @@
+{
+  "id": "slash-init-deep",
+  "label": "/init-deep",
+  "description": "递归汇总已有 AGENTS.md 到当前会话",
+  "contexts": "composer",
+  "execution": "server"
+}

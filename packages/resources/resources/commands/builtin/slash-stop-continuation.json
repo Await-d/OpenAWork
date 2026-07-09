@@ -1,0 +1,7 @@
+{
+  "id": "slash-stop-continuation",
+  "label": "/stop-continuation",
+  "description": "停止当前 continuation / loop 状态",
+  "contexts": "composer",
+  "execution": "server"
+}

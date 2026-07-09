@@ -1,0 +1,7 @@
+{
+  "id": "slash-start-work",
+  "label": "/start-work",
+  "description": "从计划或任务状态恢复执行",
+  "contexts": "composer",
+  "execution": "server"
+}

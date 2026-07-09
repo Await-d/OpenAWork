@@ -1,0 +1,8 @@
+{
+  "id": "codegraph",
+  "title": "codegraph",
+  "description": "内置虚拟 Codegraph MCP，桥接本地代码索引能力",
+  "transport": "stdio",
+  "builtinKind": "virtual",
+  "enabledByDefault": true
+}

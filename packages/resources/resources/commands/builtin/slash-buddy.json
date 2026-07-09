@@ -1,0 +1,7 @@
+{
+  "id": "slash-buddy",
+  "label": "/buddy",
+  "description": "打开 Buddy 伴侣面板并显式唤起陪跑模式",
+  "contexts": "composer",
+  "execution": "client"
+}

@@ -1,0 +1,7 @@
+{
+  "id": "toggle-theme",
+  "label": "切换主题",
+  "description": "切换当前主题",
+  "contexts": "palette",
+  "execution": "client"
+}
