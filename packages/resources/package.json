@@ -19,7 +19,7 @@
     "dev": "tsc --watch",
     "build": "tsc",
     "typecheck": "tsc -b tsconfig.typecheck.json --emitDeclarationOnly --force",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run --passWithNoTests src",
     "lint": "eslint .",
     "clean": "rm -rf dist"
   },

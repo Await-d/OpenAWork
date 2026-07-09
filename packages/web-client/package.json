@@ -21,5 +21,8 @@
   },
   "dependencies": {
     "@openAwork/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.37"
   }
 }
