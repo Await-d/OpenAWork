@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import type { SessionStore } from './session-store.js';
 import { SessionNotFoundError } from './session-store.js';
-import type { ConversationSession, SessionCheckpoint, AgentStatus } from './types.js';
+import type { ConversationSession, SessionCheckpoint } from './types.js';
 import type { Message } from '@openAwork/shared';
 
 export class SQLiteSessionStore implements SessionStore {
@@ -62,8 +62,7 @@ export class SQLiteSessionStore implements SessionStore {
 
   async get(id: string): Promise<ConversationSession | null> {
     const row = this.db.prepare('SELECT * FROM sessions WHERE id = ?').get(id) as
-      | SessionRow
-      | undefined;
+      SessionRow | undefined;
     return row ? rowToSession(row) : null;
   }
 
@@ -125,7 +124,7 @@ export class SQLiteSessionStore implements SessionStore {
       sessionId,
       checkpointAt: now,
       messages: [...session.messages],
-      stateStatus: session.state.status as AgentStatus,
+      stateStatus: session.state.status,
       metadata: { ...session.metadata },
     };
   }

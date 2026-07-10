@@ -141,7 +141,7 @@ export async function get(): Promise<ModelsDevData> {
   try {
     return await fetchAndCache();
   } catch {
-    _cache = {} as ModelsDevData;
+    _cache = {};
   }
   return _cache;
 }

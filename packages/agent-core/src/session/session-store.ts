@@ -1,4 +1,4 @@
-import type { ConversationSession, SessionCheckpoint, AgentStatus } from './types.js';
+import type { ConversationSession, SessionCheckpoint } from './types.js';
 import type { Message } from '@openAwork/shared';
 
 export interface SessionStore {
@@ -75,7 +75,7 @@ export class InMemorySessionStore implements SessionStore {
       sessionId: session.id,
       checkpointAt: Date.now(),
       messages: [...session.messages],
-      stateStatus: session.state.status as AgentStatus,
+      stateStatus: session.state.status,
       metadata: { ...session.metadata },
     };
   }

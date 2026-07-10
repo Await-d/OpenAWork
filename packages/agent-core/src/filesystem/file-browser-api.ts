@@ -62,7 +62,7 @@ type ExecFileFn = (
 async function getExecFile(): Promise<ExecFileFn> {
   const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');
-  return promisify(execFile) as unknown as ExecFileFn;
+  return promisify(execFile);
 }
 
 /**
