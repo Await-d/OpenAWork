@@ -66,10 +66,11 @@ const mocks = vi.hoisted(() => ({
 function makeChannelMetadata(
   type: ChannelInstance['type'] = 'telegram',
   currentMessageId?: string,
+  chatId = 'chat-1',
 ): string {
   return JSON.stringify({
     source: 'channel',
-    channelChatId: 'chat-1',
+    channelChatId: chatId,
     ...(currentMessageId ? { channelMessageId: currentMessageId } : {}),
     channel: {
       id: 'channel-1',
@@ -219,6 +220,26 @@ describe('channel tools', () => {
     expect(mocks.replyMessageMock).toHaveBeenCalledWith('chat-1:message-42', '收到');
   });
 
+  it('Given channel session When PluginReplyMessage gets a cross-chat message id Then it rejects before replying', async () => {
+    const { createDefaultSandbox } = await import('../../tools/tool-sandbox.js');
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-channel-reply-cross-chat',
+        toolName: 'PluginReplyMessage',
+        rawInput: { message_id: 'other-chat:message-42', content: '不要发送' },
+      },
+      new AbortController().signal,
+      'session-1',
+    );
+
+    expect(result.isError).toBe(true);
+    expect(String(result.output)).toContain(
+      'Reply message_id must belong to the current channel chat.',
+    );
+    expect(mocks.replyMessageMock).not.toHaveBeenCalled();
+  });
+
   it('Given channel session When PluginSendImage executes Then it sends an image through current channel service', async () => {
     const { createDefaultSandbox } = await import('../../tools/tool-sandbox.js');
 
@@ -250,10 +271,66 @@ describe('channel tools', () => {
     expect(Buffer.isBuffer(sendImageCall[1].buffer)).toBe(true);
   }, 15_000);
 
+  it('Given channel session When PluginSendImage receives an explicit reply message id Then it replies to that message', async () => {
+    const { createDefaultSandbox } = await import('../../tools/tool-sandbox.js');
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-channel-image-explicit-reply',
+        toolName: 'PluginSendImage',
+        rawInput: {
+          file_path: '/home/await/project/OpenAWork/package.json',
+          message_id: 'chat-1:message-42',
+          content: '图片说明',
+        },
+      },
+      new AbortController().signal,
+      'session-1',
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.output).toBe(JSON.stringify({ messageId: 'reply-image-1' }));
+    expect(mocks.replyImageMock).toHaveBeenCalledWith(
+      'chat-1:message-42',
+      expect.objectContaining({
+        fileName: 'package.json',
+      }),
+    );
+    expect(mocks.sendImageMock).not.toHaveBeenCalled();
+  }, 15_000);
+
+  it('Given channel session When PluginSendImage receives a cross-chat reply message id Then it rejects before replying', async () => {
+    const { createDefaultSandbox } = await import('../../tools/tool-sandbox.js');
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-channel-image-cross-chat-reply',
+        toolName: 'PluginSendImage',
+        rawInput: {
+          file_path: '/home/await/project/OpenAWork/package.json',
+          message_id: 'other-chat:message-42',
+        },
+      },
+      new AbortController().signal,
+      'session-1',
+    );
+
+    expect(result.isError).toBe(true);
+    expect(String(result.output)).toContain(
+      'Reply message_id must belong to the current channel chat.',
+    );
+    expect(mocks.replyImageMock).not.toHaveBeenCalled();
+    expect(mocks.sendImageMock).not.toHaveBeenCalled();
+  }, 15_000);
+
   it('Given QQ channel session with current message When PluginSendImage executes Then it replies with image to that message', async () => {
     const { channelManager } = await import('../../channels/manager.js');
     await channelManager.stopAll();
-    mocks.metadataJson = makeChannelMetadata('qq', 'c2c:user-open-id|incoming-msg-id');
+    mocks.metadataJson = makeChannelMetadata(
+      'qq',
+      'c2c:user-open-id|incoming-msg-id',
+      'c2c:user-open-id',
+    );
     await channelManager.startPlugin(makeChannel('qq'), (_event: ChannelEvent) => undefined);
     const { createDefaultSandbox } = await import('../../tools/tool-sandbox.js');
 
@@ -276,6 +353,176 @@ describe('channel tools', () => {
       expect.objectContaining({
         fileName: 'package.json',
       }),
+    );
+    expect(mocks.sendImageMock).not.toHaveBeenCalled();
+  }, 15_000);
+
+  it('Given QQ channel session When PluginSendImage receives an explicit QQ reply id Then it replies with image to that QQ message', async () => {
+    const { channelManager } = await import('../../channels/manager.js');
+    await channelManager.stopAll();
+    mocks.metadataJson = makeChannelMetadata('qq', undefined, 'c2c:user-open-id');
+    await channelManager.startPlugin(makeChannel('qq'), (_event: ChannelEvent) => undefined);
+    const { createDefaultSandbox } = await import('../../tools/tool-sandbox.js');
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-qq-channel-image-explicit-reply',
+        toolName: 'PluginSendImage',
+        rawInput: {
+          file_path: '/home/await/project/OpenAWork/package.json',
+          message_id: 'c2c:user-open-id|history-msg-id',
+        },
+      },
+      new AbortController().signal,
+      'session-1',
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.output).toBe(JSON.stringify({ messageId: 'reply-image-1' }));
+    expect(mocks.replyImageMock).toHaveBeenCalledWith(
+      'c2c:user-open-id|history-msg-id',
+      expect.objectContaining({
+        fileName: 'package.json',
+      }),
+    );
+    expect(mocks.sendImageMock).not.toHaveBeenCalled();
+  }, 15_000);
+
+  it('Given QQ channel session When PluginSendImage receives a cross-chat QQ reply id Then it rejects before replying', async () => {
+    const { channelManager } = await import('../../channels/manager.js');
+    await channelManager.stopAll();
+    mocks.metadataJson = makeChannelMetadata('qq', undefined, 'c2c:user-open-id');
+    await channelManager.startPlugin(makeChannel('qq'), (_event: ChannelEvent) => undefined);
+    const { createDefaultSandbox } = await import('../../tools/tool-sandbox.js');
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-qq-channel-image-cross-chat-reply',
+        toolName: 'PluginSendImage',
+        rawInput: {
+          file_path: '/home/await/project/OpenAWork/package.json',
+          message_id: 'c2c:other-user|history-msg-id',
+        },
+      },
+      new AbortController().signal,
+      'session-1',
+    );
+
+    expect(result.isError).toBe(true);
+    expect(String(result.output)).toContain(
+      'Reply message_id must belong to the current channel chat.',
+    );
+    expect(mocks.replyImageMock).not.toHaveBeenCalled();
+    expect(mocks.sendImageMock).not.toHaveBeenCalled();
+  }, 15_000);
+
+  it('Given channel session When PluginSendImage receives blank ids Then it still uses the current channel context', async () => {
+    const { createDefaultSandbox } = await import('../../tools/tool-sandbox.js');
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-channel-image-blank-ids',
+        toolName: 'PluginSendImage',
+        rawInput: {
+          plugin_id: '',
+          chat_id: '',
+          file_path: '/home/await/project/OpenAWork/package.json',
+          content: '',
+        },
+      },
+      new AbortController().signal,
+      'session-1',
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.output).toBe(JSON.stringify({ messageId: 'image-1' }));
+    expect(mocks.sendImageMock).toHaveBeenCalledTimes(1);
+    const sendImageCall = mocks.sendImageMock.mock.calls[0];
+    if (!sendImageCall) {
+      throw new Error('sendImage was not called');
+    }
+    expect(sendImageCall[0]).toBe('chat-1');
+    expect(sendImageCall[1]).not.toHaveProperty('text');
+  }, 15_000);
+
+  it.each([
+    { chatId: 'default', pluginId: 'current' },
+    { chatId: '__default__', pluginId: '__CURRENT_CHANNEL__' },
+  ])(
+    'Given channel session When PluginSendImage receives placeholder ids %j Then it still uses the current channel context',
+    async (rawIds) => {
+      const { createDefaultSandbox } = await import('../../tools/tool-sandbox.js');
+
+      const result = await createDefaultSandbox().execute(
+        {
+          toolCallId: `call-channel-image-placeholder-${rawIds.pluginId}`,
+          toolName: 'PluginSendImage',
+          rawInput: {
+            plugin_id: rawIds.pluginId,
+            chat_id: rawIds.chatId,
+            file_path: '/home/await/project/OpenAWork/package.json',
+          },
+        },
+        new AbortController().signal,
+        'session-1',
+      );
+
+      expect(result.isError).toBe(false);
+      expect(result.output).toBe(JSON.stringify({ messageId: 'image-1' }));
+      expect(mocks.sendImageMock).toHaveBeenCalledTimes(1);
+      const sendImageCall = mocks.sendImageMock.mock.calls[0];
+      if (!sendImageCall) {
+        throw new Error('sendImage was not called');
+      }
+      expect(sendImageCall[0]).toBe('chat-1');
+    },
+    15_000,
+  );
+
+  it('Given channel session When PluginSendImage receives mismatched explicit ids Then it rejects before sending', async () => {
+    const { createDefaultSandbox } = await import('../../tools/tool-sandbox.js');
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-channel-image-wrong-ids',
+        toolName: 'PluginSendImage',
+        rawInput: {
+          plugin_id: 'other-channel',
+          chat_id: 'other-chat',
+          file_path: '/home/await/project/OpenAWork/package.json',
+        },
+      },
+      new AbortController().signal,
+      'session-1',
+    );
+
+    expect(result.isError).toBe(true);
+    expect(String(result.output)).toContain(
+      'Requested plugin_id does not match the current channel session.',
+    );
+    expect(mocks.sendImageMock).not.toHaveBeenCalled();
+  }, 15_000);
+
+  it('Given channel session When PluginSendImage receives mismatched explicit chat id Then it rejects before sending', async () => {
+    const { createDefaultSandbox } = await import('../../tools/tool-sandbox.js');
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-channel-image-wrong-chat-id',
+        toolName: 'PluginSendImage',
+        rawInput: {
+          plugin_id: 'channel-1',
+          chat_id: 'other-chat',
+          file_path: '/home/await/project/OpenAWork/package.json',
+        },
+      },
+      new AbortController().signal,
+      'session-1',
+    );
+
+    expect(result.isError).toBe(true);
+    expect(String(result.output)).toContain(
+      'Requested chat_id does not match the current channel session.',
     );
     expect(mocks.sendImageMock).not.toHaveBeenCalled();
   }, 15_000);

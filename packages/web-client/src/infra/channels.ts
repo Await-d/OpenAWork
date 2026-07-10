@@ -18,6 +18,7 @@ import {
 import type {
   ChannelConversationsResponse,
   ChannelDescriptorListResponse,
+  ChannelDiagnosticsResponse,
   ChannelListResponse,
   ChannelMutationResponse,
   ChannelsClient,
@@ -194,6 +195,20 @@ export function createChannelsClient<
           }),
       });
       return { ...(data.status !== undefined ? { status: data.status } : {}) };
+    },
+
+    async diagnostics(token, channelId) {
+      const data = await performChannelsRequest<ChannelDiagnosticsResponse>({
+        actionLabel: '读取渠道诊断',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/channels/${encodeURIComponent(channelId)}/diagnostics`, {
+            headers: authHeader(token),
+          }),
+      });
+      if (!data.diagnostics) {
+        throw new Error('渠道诊断响应缺少 diagnostics 数据。');
+      }
+      return data.diagnostics;
     },
 
     async listTargets(token, channelId) {

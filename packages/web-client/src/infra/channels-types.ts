@@ -19,6 +19,38 @@ export interface ChannelTargetsResponse<TTarget> {
   error?: string;
 }
 
+export interface ChannelDiagnostics {
+  readonly status: string;
+  readonly running: boolean;
+  readonly transport?: string;
+  readonly currentIntent?: string;
+  readonly currentIntentDescription?: string;
+  readonly identified?: boolean;
+  readonly lastReadyAt?: number;
+  readonly lastHeartbeatAckAt?: number;
+  readonly lastDispatchAt?: number;
+  readonly lastDispatchType?: string;
+  readonly lastInboundAt?: number;
+  readonly lastInboundAccepted?: boolean;
+  readonly lastInboundType?: string;
+  readonly lastInboundError?: string;
+  readonly lastMessageAt?: number;
+  readonly lastMessageChatId?: string;
+  readonly lastIgnoredDispatchAt?: number;
+  readonly lastIgnoredDispatchType?: string;
+  readonly lastSocketCloseAt?: number;
+  readonly lastSocketCloseCode?: number;
+  readonly lastSocketCloseReason?: string;
+  readonly lastErrorAt?: number;
+  readonly lastError?: string;
+  readonly note?: string;
+}
+
+export interface ChannelDiagnosticsResponse<TDiagnostics = ChannelDiagnostics> {
+  diagnostics?: TDiagnostics;
+  error?: string;
+}
+
 export interface ChannelConversationSummary {
   readonly id: string;
   readonly chatId: string;
@@ -79,6 +111,7 @@ export interface ChannelsClient<
   remove(token: string, channelId: string): Promise<void>;
   start(token: string, channelId: string): Promise<{ status?: string }>;
   stop(token: string, channelId: string): Promise<{ status?: string }>;
+  diagnostics(token: string, channelId: string): Promise<ChannelDiagnostics>;
   listTargets(token: string, channelId: string): Promise<TTarget[]>;
   listConversations(
     token: string,

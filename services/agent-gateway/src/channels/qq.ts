@@ -13,6 +13,7 @@ import { QQGatewayClient } from './qq-gateway.js';
 import { parseQQInboundMessage } from './inbound-parsers/qq.js';
 import { parseQQChatId } from './qq-target.js';
 import { channelLogInfo, summarizeChannelMessage } from './channel-log.js';
+import { markQQWakeupSent, resolveQQWakeupEligibility } from './qq-wakeup-store.js';
 export { parseQQChatId } from './qq-target.js';
 
 function parseBooleanConfig(value: string | undefined): boolean {
@@ -139,16 +140,54 @@ export class QQChannelService implements MessagingChannelService {
   }
 
   async sendMessage(chatId: string, content: string): Promise<{ messageId: string }> {
+    return this.sendMessageInternal(chatId, content, false);
+  }
+
+  async sendWakeupMessage(chatId: string, content: string): Promise<{ messageId: string }> {
+    return this.sendMessageInternal(chatId, content, true);
+  }
+
+  private async sendMessageInternal(
+    chatId: string,
+    content: string,
+    allowWakeup: boolean,
+  ): Promise<{ messageId: string }> {
     channelLogInfo('qq sending text message', {
       pluginId: this.pluginId,
       chatId,
       contentLength: content.length,
+      allowWakeup,
     });
-    const result = await this.api.sendMessage(parseQQChatId(chatId), content);
+    const target = parseQQChatId(chatId);
+    if (target.type !== 'c2c' || !allowWakeup) {
+      const result = await this.api.sendMessage(target, content);
+      channelLogInfo('qq text message sent', {
+        pluginId: this.pluginId,
+        chatId,
+        messageId: result.messageId,
+        wakeup: false,
+      });
+      return result;
+    }
+
+    const wakeup = resolveQQWakeupEligibility(this.pluginId, target.id);
+    const result = await this.api.sendMessage(target, content, undefined, {
+      isWakeup: wakeup.enabled,
+    });
+    if (wakeup.enabled && wakeup.periodKey) {
+      markQQWakeupSent({
+        pluginId: this.pluginId,
+        openId: target.id,
+        periodKey: wakeup.periodKey,
+        sourceMessageId: wakeup.sourceMessageId,
+        sourceTimestamp: wakeup.sourceTimestamp,
+      });
+    }
     channelLogInfo('qq text message sent', {
       pluginId: this.pluginId,
       chatId,
       messageId: result.messageId,
+      wakeup: wakeup.enabled,
     });
     return result;
   }

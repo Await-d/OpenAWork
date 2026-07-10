@@ -30,6 +30,11 @@ describe('channel persona prompt', () => {
 
     expect(prompt).toContain('<channel-reply-policy>');
     expect(prompt).toContain('默认使用中文回复');
+    expect(prompt).toMatch(
+      /PluginSendMessage\s*\/\s*PluginSendImage[\s\S]*当前通道[\s\S]*当前会话/,
+    );
+    expect(prompt).toMatch(/PluginGetCurrentChatMessages[\s\S]*replyMessageId[\s\S]*message_id/);
+    expect(prompt).toMatch(/图片[\s\S]*优先调用 PluginSendImage[\s\S]*真实图片附件/);
   });
 
   it('Given non-channel metadata When building prompt Then it returns null', () => {

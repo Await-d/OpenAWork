@@ -689,6 +689,69 @@ export const CHANNEL_SUBSCRIPTION_SETTINGS_STYLES = `
   font-size: 11px;
 }
 
+.channel-diagnostics {
+  display: grid;
+  gap: var(--spacing-3);
+}
+
+.channel-diagnostics__group {
+  display: grid;
+  gap: var(--spacing-2);
+}
+
+.channel-diagnostics__group-title {
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.channel-diagnostics__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(calc(var(--spacing-12) * 4), 1fr));
+  gap: var(--spacing-2);
+}
+
+.channel-diagnostic-metric {
+  min-width: 0;
+  padding: var(--spacing-2) var(--spacing-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-base);
+}
+
+.channel-diagnostic-metric.is-success {
+  border-color: var(--success-border);
+  background: var(--success-muted);
+}
+
+.channel-diagnostic-metric.is-warning {
+  border-color: var(--contrast-border);
+  background: var(--contrast-subtle);
+}
+
+.channel-diagnostic-metric.is-danger {
+  border-color: var(--complement-border);
+  background: var(--complement-subtle);
+}
+
+.channel-diagnostic-metric__label {
+  color: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.channel-diagnostic-metric__value {
+  margin-top: var(--spacing-1);
+  color: var(--fg-strong);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .channel-notice {
   border-radius: 8px;
   padding: 12px 14px;

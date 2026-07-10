@@ -79,6 +79,7 @@ export class FeishuChannelService implements MessagingChannelService {
       appSecret: this.config.appSecret,
       botName: this.botName,
       botOpenId: this.config.botOpenId,
+      downloadImage: (messageId, imageKey) => this.downloadMessageImage(messageId, imageKey),
       notify: (event) => this.safeNotify(event),
     });
     this.gateway = gateway;
@@ -253,6 +254,30 @@ export class FeishuChannelService implements MessagingChannelService {
     if (data.code !== 0) throw new Error(`Feishu auth failed: ${data.code}`);
     this.accessToken = data.tenant_access_token;
     this.tokenExpiresAt = Date.now() + data.expire * 1000;
+  }
+
+  private async downloadMessageImage(
+    messageId: string,
+    imageKey: string,
+  ): Promise<{ readonly base64: string; readonly mediaType: string }> {
+    const token = await this.getToken();
+    const response = await channelFetch(
+      `${FEISHU_API}/im/v1/messages/${encodeURIComponent(messageId)}/resources/${encodeURIComponent(
+        imageKey,
+      )}?type=image`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
+    if (!response.ok) {
+      throw new Error(`Feishu image download failed: HTTP ${response.status}`);
+    }
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const mediaType = response.headers.get('content-type') || 'image/png';
+    return {
+      base64: buffer.toString('base64'),
+      mediaType,
+    };
   }
 
   private safeNotify(event: ChannelEvent): void {

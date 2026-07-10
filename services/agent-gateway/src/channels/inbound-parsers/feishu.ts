@@ -55,6 +55,28 @@ function readFeishuContent(message: Record<string, unknown>): string {
   return readString(contentPayload, 'text') || readString(message, 'content');
 }
 
+function readFeishuAudio(message: Record<string, unknown>): ChannelMessage['audio'] {
+  if ((readString(message, 'message_type') || 'text') !== 'audio') {
+    return undefined;
+  }
+  const contentPayload = parseJsonRecord(readString(message, 'content'));
+  const fileKey = readString(contentPayload, 'file_key');
+  if (!fileKey) {
+    return undefined;
+  }
+  const duration = contentPayload?.['duration'];
+  return {
+    fileKey,
+    ...(readString(contentPayload, 'file_name')
+      ? { fileName: readString(contentPayload, 'file_name') }
+      : {}),
+    ...(readString(contentPayload, 'media_type')
+      ? { mediaType: readString(contentPayload, 'media_type') }
+      : {}),
+    ...(typeof duration === 'number' ? { durationMs: duration } : {}),
+  };
+}
+
 export function parseFeishuInboundMessage(
   raw: unknown,
   options: FeishuInboundParseOptions = {},
@@ -90,6 +112,7 @@ export function parseFeishuInboundMessage(
     return null;
   }
   const content = stripMentionPlaceholders(readFeishuContent(message), mentions);
+  const audio = readFeishuAudio(message);
   const chatId = readString(message, 'chat_id');
   if (!chatId || !content) {
     return null;
@@ -102,6 +125,7 @@ export function parseFeishuInboundMessage(
     chatId,
     content,
     timestamp: readTimestamp(readString(message, 'create_time')),
+    ...(audio ? { audio } : {}),
     raw: data,
   };
 }

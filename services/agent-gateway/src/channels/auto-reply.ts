@@ -1,4 +1,10 @@
-import type { ChannelEvent, ChannelInstance, MessagingChannelService } from './types.js';
+import type { InputImageContent } from '@openAwork/shared';
+import type {
+  ChannelEvent,
+  ChannelImageAttachment,
+  ChannelInstance,
+  MessagingChannelService,
+} from './types.js';
 import { channelManager } from './manager.js';
 import {
   tryHandleChannelCommand,
@@ -18,6 +24,7 @@ export interface AutoReplyOptions {
     message: string;
     pluginId: string;
     chatId: string;
+    inputParts?: InputImageContent[];
     messageId: string;
     onPartialText?: (text: string) => Promise<void> | void;
   }) => Promise<string>;
@@ -138,6 +145,7 @@ export class AutoReplyPipeline {
 
     const effectiveMessage =
       commandResult.kind === 'rewrite' ? commandResult.content : message.content;
+    const inputParts = buildInputImageParts(message.images);
 
     const sessionKey = `channel:${pluginId}:chat:${message.chatId}`;
 
@@ -153,6 +161,8 @@ export class AutoReplyPipeline {
         chatId: message.chatId,
         sessionKey,
         supportsStreaming,
+        imageCount: inputParts.length,
+        hasAudio: Boolean(message.audio),
         messageLength: effectiveMessage.length,
       });
       if (supportsStreaming && service.sendStreamingMessage) {
@@ -164,6 +174,7 @@ export class AutoReplyPipeline {
             message: effectiveMessage,
             pluginId,
             chatId: message.chatId,
+            ...(inputParts.length > 0 ? { inputParts } : {}),
             messageId: message.id,
             onPartialText: async (text) => {
               await handle.update(text);
@@ -199,6 +210,7 @@ export class AutoReplyPipeline {
             message: effectiveMessage,
             pluginId,
             chatId: message.chatId,
+            ...(inputParts.length > 0 ? { inputParts } : {}),
             messageId: message.id,
           });
           channelLogInfo('auto-reply agent response ready', {
@@ -356,4 +368,35 @@ function shouldReplyToQQReferencedMessage(
   messageId: string,
 ): boolean {
   return channel?.type === 'qq' && messageId.includes('|');
+}
+
+function buildInputImageParts(
+  images: readonly ChannelImageAttachment[] | undefined,
+): InputImageContent[] {
+  if (!images || images.length === 0) {
+    return [];
+  }
+
+  return images.flatMap((image) => {
+    const imageUrl = image.imageUrl || buildDataImageUrl(image);
+    if (!imageUrl) {
+      return [];
+    }
+    return [
+      {
+        type: 'input_image',
+        imageUrl,
+        mimeType: image.mediaType,
+        detail: 'auto',
+        ...(image.fileName ? { fileName: image.fileName } : {}),
+      } satisfies InputImageContent,
+    ];
+  });
+}
+
+function buildDataImageUrl(image: ChannelImageAttachment): string {
+  if (!image.base64) {
+    return '';
+  }
+  return `data:${image.mediaType};base64,${image.base64}`;
 }

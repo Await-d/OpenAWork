@@ -23,7 +23,23 @@ export interface ChannelMessage {
   chatName?: string;
   content: string;
   timestamp: number;
+  images?: ChannelImageAttachment[];
+  audio?: ChannelAudioAttachment;
   raw?: unknown;
+}
+
+export interface ChannelImageAttachment {
+  readonly base64?: string;
+  readonly imageUrl?: string;
+  readonly mediaType: string;
+  readonly fileName?: string;
+}
+
+export interface ChannelAudioAttachment {
+  readonly fileKey: string;
+  readonly fileName?: string;
+  readonly mediaType?: string;
+  readonly durationMs?: number;
 }
 
 export interface ChannelGroup {
@@ -89,6 +105,7 @@ export interface MessagingChannelService {
   isRunning(): boolean;
   getDiagnostics?(): ChannelDiagnostics;
   sendMessage(chatId: string, content: string): Promise<{ messageId: string }>;
+  sendWakeupMessage?(chatId: string, content: string): Promise<{ messageId: string }>;
   replyMessage(messageId: string, content: string): Promise<{ messageId: string }>;
   sendImage?(
     chatId: string,

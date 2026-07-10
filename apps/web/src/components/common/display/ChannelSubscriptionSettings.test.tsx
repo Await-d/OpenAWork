@@ -271,6 +271,50 @@ describe('ChannelSubscriptionSettings · 工具白名单保存语义', () => {
     ).toBeTruthy();
   });
 
+  it('Given 网关返回详细诊断 When 打开配置面板 Then 展示分发入站和断开原因', async () => {
+    render(
+      <ChannelSubscriptionSettings
+        channels={[
+          {
+            ...makeChannel(),
+            diagnostics: {
+              status: 'connected',
+              running: true,
+              transport: 'qq-gateway',
+              currentIntent: 'full',
+              currentIntentDescription: 'Group + C2C + Channel DM + Channel Messages',
+              identified: true,
+              lastDispatchType: 'C2C_MESSAGE_CREATE',
+              lastInboundAccepted: false,
+              lastInboundType: 'c2c',
+              lastInboundError: 'missing author id',
+              lastIgnoredDispatchType: 'GUILD_MEMBER_UPDATE',
+              lastSocketCloseCode: 4001,
+              lastSocketCloseReason: 'gateway reconnect',
+              lastError: 'send failed',
+            },
+          },
+        ]}
+        descriptors={[FEISHU_DESCRIPTOR]}
+        onSave={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText('意图说明')).toBeTruthy();
+    expect(screen.getByText('Group + C2C + Channel DM + Channel Messages')).toBeTruthy();
+    expect(screen.getByText('分发类型')).toBeTruthy();
+    expect(screen.getByText('C2C_MESSAGE_CREATE')).toBeTruthy();
+    expect(screen.getByText('入站接受')).toBeTruthy();
+    expect(screen.getByText('已拒绝')).toBeTruthy();
+    expect(screen.getByText('忽略类型')).toBeTruthy();
+    expect(screen.getByText('GUILD_MEMBER_UPDATE')).toBeTruthy();
+    expect(screen.getByText('Socket 代码')).toBeTruthy();
+    expect(screen.getByText('4001')).toBeTruthy();
+    expect(screen.getAllByText('gateway reconnect').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('missing author id').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('send failed').length).toBeGreaterThan(0);
+  });
+
   it('Given channel persona options When selecting a persona Then save persists the resource selection', async () => {
     const channel = makeChannel();
     const onSave = vi.fn(

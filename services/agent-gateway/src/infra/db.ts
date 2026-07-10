@@ -1395,6 +1395,23 @@ export async function migrate(): Promise<void> {
   // 也一定被创建。
   ensureTeamSchemaSafe();
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS qq_wakeup_windows (
+      plugin_id TEXT NOT NULL,
+      open_id TEXT NOT NULL,
+      period_key TEXT NOT NULL,
+      source_message_id TEXT,
+      source_timestamp INTEGER NOT NULL,
+      sent_at INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (plugin_id, open_id, period_key)
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_qq_wakeup_windows_open_id ON qq_wakeup_windows(plugin_id, open_id, sent_at DESC)',
+  );
+
   // ─── App meta：跨版本状态戳 ───
   // 卸载桌面端但「保留用户数据」时，旧的 sqlite 仍在新版本启动时被复用。
   // 这里建立一张轻量的 key/value meta 表，为后续「按版本号触发兼容修补」

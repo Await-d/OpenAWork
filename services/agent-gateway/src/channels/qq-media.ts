@@ -62,14 +62,11 @@ function buildQQMediaMessageBody(
   text?: string,
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
+    content: text?.trim() || ' ',
     media: { file_info: media.fileInfo },
     msg_type: 7,
     msg_seq: replyToMessageId ? context.getNextMsgSeq(replyToMessageId) : 1,
   };
-  const content = text?.trim();
-  if (content) {
-    body['content'] = content;
-  }
   if (replyToMessageId) {
     body['msg_id'] = replyToMessageId;
   }

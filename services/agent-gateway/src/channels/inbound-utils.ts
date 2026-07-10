@@ -1,4 +1,4 @@
-import type { ChannelMessage } from './types.js';
+import type { ChannelImageAttachment, ChannelMessage } from './types.js';
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -78,7 +78,9 @@ export function parseSimpleEnvelope(raw: unknown): ChannelMessage | null {
   }
 
   const chatId = readString(data, 'chatId');
-  const content = readString(data, 'content');
+  const images = readImageAttachments(data);
+  const audio = readAudioAttachment(data);
+  const content = readString(data, 'content') || buildAttachmentFallback(images, audio);
   if (!chatId || !content) {
     return null;
   }
@@ -91,6 +93,8 @@ export function parseSimpleEnvelope(raw: unknown): ChannelMessage | null {
     chatName: readString(data, 'chatName') || undefined,
     content,
     timestamp: readTimestamp(data['timestamp']),
+    ...(images.length > 0 ? { images } : {}),
+    ...(audio ? { audio } : {}),
     raw: data,
   };
 }
@@ -100,4 +104,63 @@ export function stripLeadingMentions(content: string): string {
     .replace(/^(?:<@!?[^>]+>\s*)+/, '')
     .replace(/^(?:@\S+\s*)+/, '')
     .trim();
+}
+
+function readImageAttachments(data: Record<string, unknown>): ChannelImageAttachment[] {
+  const images = data['images'];
+  if (!Array.isArray(images)) {
+    return [];
+  }
+
+  return images
+    .filter(isRecord)
+    .map((image) => {
+      const base64 = readString(image, 'base64');
+      const imageUrl = readString(image, 'imageUrl') || readString(image, 'url');
+      const mediaType = readString(image, 'mediaType') || readString(image, 'mimeType');
+      const fileName = readString(image, 'fileName') || readString(image, 'name');
+      if (!mediaType || (!base64 && !imageUrl)) {
+        return null;
+      }
+      return {
+        ...(base64 ? { base64 } : {}),
+        ...(imageUrl ? { imageUrl } : {}),
+        mediaType,
+        ...(fileName ? { fileName } : {}),
+      };
+    })
+    .filter((image): image is ChannelImageAttachment => image !== null);
+}
+
+function readAudioAttachment(data: Record<string, unknown>): ChannelMessage['audio'] {
+  const audio = readRecord(data, 'audio');
+  if (!audio) {
+    return undefined;
+  }
+
+  const fileKey = readString(audio, 'fileKey');
+  if (!fileKey) {
+    return undefined;
+  }
+  const durationValue = audio['durationMs'];
+  const durationMs = typeof durationValue === 'number' ? durationValue : undefined;
+  return {
+    fileKey,
+    ...(readString(audio, 'fileName') ? { fileName: readString(audio, 'fileName') } : {}),
+    ...(readString(audio, 'mediaType') ? { mediaType: readString(audio, 'mediaType') } : {}),
+    ...(durationMs !== undefined ? { durationMs } : {}),
+  };
+}
+
+function buildAttachmentFallback(
+  images: readonly ChannelImageAttachment[],
+  audio: ChannelMessage['audio'],
+): string {
+  if (images.length > 0) {
+    return '[User sent an image]';
+  }
+  if (audio) {
+    return '[User sent an audio message]';
+  }
+  return '';
 }

@@ -13,7 +13,7 @@ export function buildChannelToolParameters(toolName: string): ToolParameters | n
     case 'PluginReplyMessage':
       return replyMessageParameters();
     case 'PluginSendImage':
-      return weixinMediaParameters();
+      return pluginMediaParameters();
     case 'PluginGetGroupMessages':
     case 'PluginSummarizeGroup':
     case 'PluginGetCurrentChatMessages':
@@ -107,6 +107,23 @@ function weixinMediaParameters(): ToolParameters {
       chat_id: { type: 'string', description: '可选，默认当前微信会话' },
       file_path: { type: 'string', description: '工作区内绝对路径，或 HTTP/HTTPS URL' },
       content: { type: 'string', description: '可选，发送媒体前附带的文本' },
+    },
+    required: ['file_path'],
+    additionalProperties: false,
+  };
+}
+
+function pluginMediaParameters(): ToolParameters {
+  return {
+    type: 'object',
+    properties: {
+      file_path: { type: 'string', description: '工作区内绝对路径，或 HTTP/HTTPS 图片 URL' },
+      content: { type: 'string', description: '可选，发送图片前附带的文本' },
+      message_id: {
+        type: 'string',
+        description:
+          '可选，要回复的历史消息 ID；优先使用 PluginGetCurrentChatMessages 返回的 replyMessageId',
+      },
     },
     required: ['file_path'],
     additionalProperties: false,

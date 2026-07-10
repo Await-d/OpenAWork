@@ -1,21 +1,12 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { requireAuth } from '../infra/auth.js';
-import { sqliteRun } from '../infra/db.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
+import { runCronAgentJob } from './agent-handler.js';
 import { CronScheduler } from './scheduler.js';
 import type { CronJobRecord } from './types.js';
 
-const defaultHandler = async (job: CronJobRecord): Promise<void> => {
-  if (!job.prompt) return;
-  const sessionId = crypto.randomUUID();
-  sqliteRun(
-    'INSERT INTO sessions (id, title, messages_json, state_status, metadata_json) VALUES (?, ?, ?, ?, ?)',
-    [sessionId, job.name, JSON.stringify([{ role: 'user', content: job.prompt }]), 'idle', '{}'],
-  );
-};
-
-export const cronScheduler = new CronScheduler(defaultHandler);
+export const cronScheduler = new CronScheduler(runCronAgentJob);
 
 const jobSchema = z.object({
   name: z.string().min(1),
@@ -37,6 +28,11 @@ const jobSchema = z.object({
   delete_after_run: z.boolean().default(false),
   max_iterations: z.number().int().default(10),
 });
+const jobPatchSchema = jobSchema.partial();
+const authUserSchema = z.object({
+  sub: z.string().min(1),
+  email: z.string().email(),
+});
 
 type CronRouteErrorCode = 'cron_job_not_found' | 'invalid_cron_job';
 
@@ -56,6 +52,15 @@ function cronRouteErrorPayload(
   };
 }
 
+function getUserCronJob(id: string, userId: string): CronJobRecord | undefined {
+  const job = cronScheduler.getJob(id);
+  return job?.user_id === userId ? job : undefined;
+}
+
+function parseAuthUser(request: FastifyRequest): z.infer<typeof authUserSchema> {
+  return authUserSchema.parse(request.user);
+}
+
 export async function cronRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     '/cron/jobs',
@@ -63,7 +68,8 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step, child } = startRequestWorkflow(request, 'cron.job.list');
       const readStep = child('read');
-      const jobs = cronScheduler.listJobs();
+      const user = parseAuthUser(request);
+      const jobs = cronScheduler.listJobs().filter((job) => job.user_id === user.sub);
       readStep.succeed(undefined, { count: jobs.length });
       step.succeed(undefined, { count: jobs.length });
       return reply.send({ jobs });
@@ -89,10 +95,12 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
       }
       parseStep.succeed();
 
+      const user = parseAuthUser(request);
       const now = Date.now();
       const job: CronJobRecord = {
         ...body.data,
         id: crypto.randomUUID(),
+        user_id: user.sub,
         last_fired_at: null,
         fire_count: 0,
         created_at: now,
@@ -126,7 +134,8 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
       });
 
       const lookupStep = child('lookup', undefined, { jobId: id });
-      const job = cronScheduler.getJob(id);
+      const user = parseAuthUser(request);
+      const job = getUserCronJob(id, user.sub);
       if (!job) {
         lookupStep.fail('job not found');
         step.fail('job not found');
@@ -134,8 +143,21 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
       }
       lookupStep.succeed();
 
+      const parseStep = child('parse-body');
+      const body = jobPatchSchema.safeParse(request.body);
+      if (!body.success) {
+        parseStep.fail('invalid input');
+        step.fail('invalid input');
+        return reply.status(400).send(
+          cronRouteErrorPayload('invalid_cron_job', {
+            issues: body.error.issues,
+          }),
+        );
+      }
+      parseStep.succeed();
+
       const applyStep = child('apply', undefined, { jobId: id });
-      cronScheduler.updateJob(id, request.body as Partial<CronJobRecord>);
+      cronScheduler.updateJob(id, body.data);
       applyStep.succeed();
 
       const readbackStep = child('readback', undefined, { jobId: id });
@@ -156,7 +178,8 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
         jobId: id,
       });
       const lookupStep = child('lookup', undefined, { jobId: id });
-      const job = cronScheduler.getJob(id);
+      const user = parseAuthUser(request);
+      const job = getUserCronJob(id, user.sub);
       if (!job) {
         lookupStep.fail('job not found');
         step.fail('job not found');
@@ -180,7 +203,8 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
         jobId: id,
       });
       const lookupStep = child('lookup', undefined, { jobId: id });
-      const job = cronScheduler.getJob(id);
+      const user = parseAuthUser(request);
+      const job = getUserCronJob(id, user.sub);
       if (!job) {
         lookupStep.fail('job not found');
         step.fail('job not found');
@@ -204,7 +228,8 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
         jobId: id,
       });
       const lookupStep = child('lookup', undefined, { jobId: id });
-      const job = cronScheduler.getJob(id);
+      const user = parseAuthUser(request);
+      const job = getUserCronJob(id, user.sub);
       if (!job) {
         lookupStep.fail('job not found');
         step.fail('job not found');
@@ -228,7 +253,8 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
         jobId: id,
       });
       const lookupStep = child('lookup', undefined, { jobId: id });
-      const job = cronScheduler.getJob(id);
+      const user = parseAuthUser(request);
+      const job = getUserCronJob(id, user.sub);
       if (!job) {
         lookupStep.fail('job not found');
         step.fail('job not found');

@@ -41,8 +41,8 @@ afterEach(() => {
 });
 
 describe('Feishu Gateway 入站', () => {
-  it('解析官方 WSClient 的 im.message.receive_v1 事件为统一 channel message', () => {
-    const event = parseFeishuGatewayEvent(
+  it('解析官方 WSClient 的 im.message.receive_v1 事件为统一 channel message', async () => {
+    const event = await parseFeishuGatewayEvent(
       { pluginId: 'feishu-gateway-1', botOpenId: 'ou-bot', botName: 'Feishu Gateway' },
       {
         message: {
@@ -68,8 +68,8 @@ describe('Feishu Gateway 入站', () => {
     });
   });
 
-  it('群聊中未 @ 当前机器人时跳过消息', () => {
-    const event = parseFeishuGatewayEvent(
+  it('群聊中未 @ 当前机器人时跳过消息', async () => {
+    const event = await parseFeishuGatewayEvent(
       { pluginId: 'feishu-gateway-1', botOpenId: 'ou-bot', botName: 'Feishu Gateway' },
       {
         message: {
@@ -86,8 +86,8 @@ describe('Feishu Gateway 入站', () => {
     expect(event).toBeNull();
   });
 
-  it('群聊 @ 当前机器人时剥离 mention placeholder 并转为消息', () => {
-    const event = parseFeishuGatewayEvent(
+  it('群聊 @ 当前机器人时剥离 mention placeholder 并转为消息', async () => {
+    const event = await parseFeishuGatewayEvent(
       { pluginId: 'feishu-gateway-1', botOpenId: 'ou-bot', botName: 'Feishu Gateway' },
       {
         message: {
@@ -107,7 +107,7 @@ describe('Feishu Gateway 入站', () => {
     expect(event.message.content).toBe('帮我总结');
   });
 
-  it('重复 message_id 只派发一次', () => {
+  it('重复 message_id 只派发一次', async () => {
     const parse = () =>
       parseFeishuGatewayEvent(
         { pluginId: 'feishu-gateway-1', botOpenId: 'ou-bot', botName: 'Feishu Gateway' },
@@ -122,8 +122,38 @@ describe('Feishu Gateway 入站', () => {
         },
       );
 
-    expect(parse()).not.toBeNull();
-    expect(parse()).toBeNull();
+    await expect(parse()).resolves.not.toBeNull();
+    await expect(parse()).resolves.toBeNull();
+  });
+
+  it('图片消息会下载为 channel image 附件', async () => {
+    const downloadImage = vi.fn(async () => ({
+      base64: Buffer.from('image').toString('base64'),
+      mediaType: 'image/png',
+    }));
+
+    const event = await parseFeishuGatewayEvent(
+      { pluginId: 'feishu-gateway-image', botOpenId: 'ou-bot', botName: 'Feishu Gateway' },
+      {
+        message: {
+          message_id: 'om-feishu-image',
+          chat_id: 'oc-chat-1',
+          chat_type: 'p2p',
+          message_type: 'image',
+          content: JSON.stringify({ image_key: 'img-key-1' }),
+        },
+        sender: { sender_id: { open_id: 'ou-user-1' } },
+      },
+      downloadImage,
+    );
+
+    expect(downloadImage).toHaveBeenCalledWith('om-feishu-image', 'img-key-1');
+    expect(event).toMatchObject({
+      type: 'message',
+      message: {
+        images: [{ mediaType: 'image/png' }],
+      },
+    });
   });
 
   it('启动和停止 service 时管理 Feishu Gateway 生命周期', async () => {

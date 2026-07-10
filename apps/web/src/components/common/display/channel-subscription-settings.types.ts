@@ -34,6 +34,33 @@ export interface ChannelPermissionsEntry {
   allowSubAgents: boolean;
 }
 
+export interface ChannelDiagnosticsEntry {
+  status: string;
+  running: boolean;
+  transport?: string;
+  currentIntent?: string;
+  currentIntentDescription?: string;
+  identified?: boolean;
+  lastReadyAt?: number;
+  lastHeartbeatAckAt?: number;
+  lastDispatchAt?: number;
+  lastDispatchType?: string;
+  lastInboundAt?: number;
+  lastInboundAccepted?: boolean;
+  lastInboundType?: string;
+  lastInboundError?: string;
+  lastMessageAt?: number;
+  lastMessageChatId?: string;
+  lastIgnoredDispatchAt?: number;
+  lastIgnoredDispatchType?: string;
+  lastSocketCloseAt?: number;
+  lastSocketCloseCode?: number;
+  lastSocketCloseReason?: string;
+  lastErrorAt?: number;
+  lastError?: string;
+  note?: string;
+}
+
 export interface ChannelProviderOption {
   id: string;
   name: string;
@@ -95,6 +122,7 @@ export interface ChannelSettingsEntry {
   model?: string | null;
   tools?: Record<string, boolean>;
   permissions?: ChannelPermissionsEntry;
+  diagnostics?: ChannelDiagnosticsEntry;
   persona?: ChannelPersonaSelection | null;
   errorMessage?: string;
   availableTargets?: ChannelTargetEntry[];
@@ -155,6 +183,7 @@ export interface ChannelSubscriptionSettingsProps {
   onConnect?: (channelId: string) => Promise<void>;
   onDisconnect?: (channelId: string) => Promise<void>;
   onRefreshTargets?: (channelId: string) => Promise<void>;
+  onRefreshDiagnostics?: (channelId: string) => Promise<void>;
   onStartWeixinLogin?: (input: WeixinLoginStartInput) => Promise<WeixinLoginStartResult>;
   onWaitWeixinLogin?: (input: WeixinLoginWaitInput) => Promise<WeixinLoginWaitResult>;
   style?: CSSProperties;

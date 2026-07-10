@@ -9,10 +9,12 @@ import {
 } from './channel-tool-runtime.js';
 import {
   pluginListGroupsInputSchema,
+  channelMediaInputSchema,
   pluginMessageInputSchema,
   pluginMessagesInputSchema,
   pluginReplyInputSchema,
   weixinMediaInputSchema,
+  type ChannelMediaInput,
   type WeixinMediaInput,
 } from './channel-tool-definitions.js';
 
@@ -43,7 +45,7 @@ export async function executeChannelTool(input: {
       );
     }
     case 'PluginSendImage':
-      return executeChannelMediaTool(input, weixinMediaInputSchema.parse(input.rawInput), 'image');
+      return executeChannelMediaTool(input, channelMediaInputSchema.parse(input.rawInput), 'image');
     case 'PluginGetGroupMessages':
     case 'PluginSummarizeGroup':
     case 'PluginGetCurrentChatMessages': {
@@ -75,11 +77,21 @@ export async function executeChannelTool(input: {
 
 async function executeChannelMediaTool(
   input: { readonly sessionId: string; readonly signal: AbortSignal },
-  parsed: WeixinMediaInput,
+  parsed: ChannelMediaInput | WeixinMediaInput,
   kind: 'file' | 'image',
 ): Promise<string> {
   const ctx = assertChannelContext(input.sessionId, parsed);
   const service = requireChannelService(ctx.pluginId);
+  const explicitReplyMessageId = readMediaReplyMessageId(parsed);
+  const explicitReplyReference = explicitReplyMessageId
+    ? buildChannelReplyReference(ctx, explicitReplyMessageId)
+    : undefined;
+  const currentMessageId = ctx.currentMessageId;
+  const currentReplyReference =
+    !explicitReplyReference && ctx.pluginType === 'qq' && currentMessageId
+      ? buildChannelReplyReference(ctx, currentMessageId)
+      : undefined;
+  const replyReference = explicitReplyReference ?? currentReplyReference;
   const media = await readChannelMedia({
     filePath: parsed.file_path,
     sessionId: input.sessionId,
@@ -88,9 +100,12 @@ async function executeChannelMediaTool(
   const textInput = parsed.content ? { text: parsed.content } : {};
   if (kind === 'image') {
     if (!service?.sendImage) throw new Error('Current channel does not support image sending.');
-    if (service.replyImage && ctx.pluginType === 'qq' && ctx.currentMessageId) {
+    if (replyReference) {
+      if (!service.replyImage) {
+        throw new Error('Current channel does not support image replies.');
+      }
       return JSON.stringify(
-        await service.replyImage(ctx.currentMessageId, {
+        await service.replyImage(replyReference, {
           ...media,
           ...textInput,
           signal: input.signal,
@@ -105,4 +120,11 @@ async function executeChannelMediaTool(
   return JSON.stringify(
     await service.sendFile(ctx.chatId, { ...media, ...textInput, signal: input.signal }),
   );
+}
+
+function readMediaReplyMessageId(parsed: ChannelMediaInput | WeixinMediaInput): string | undefined {
+  if ('message_id' in parsed) {
+    return parsed.message_id;
+  }
+  return undefined;
 }

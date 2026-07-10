@@ -120,18 +120,28 @@ export function serializeChannelMessages(
 }
 
 export function buildChannelReplyReference(context: ChannelContext, messageId: string): string {
-  if (messageId.includes(':') || messageId.includes('|')) {
-    return messageId;
-  }
-
   switch (context.pluginType) {
     case 'telegram':
     case 'discord':
     case 'slack':
     case 'wecom':
     case 'whatsapp':
+      if (messageId.includes(':')) {
+        const currentChatPrefix = `${context.chatId}:`;
+        if (!messageId.startsWith(currentChatPrefix)) {
+          throw new Error('Reply message_id must belong to the current channel chat.');
+        }
+        return messageId;
+      }
       return `${context.chatId}:${messageId}`;
     case 'qq':
+      if (messageId.includes('|')) {
+        const currentChatPrefix = `${context.chatId}|`;
+        if (!messageId.startsWith(currentChatPrefix)) {
+          throw new Error('Reply message_id must belong to the current channel chat.');
+        }
+        return messageId;
+      }
       return `${context.chatId}|${messageId}`;
     case 'dingtalk':
     case 'feishu':

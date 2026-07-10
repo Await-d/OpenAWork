@@ -12,6 +12,7 @@ import type { CronJobRecord } from '../../cron/types.js';
 function cronJob(overrides: Partial<CronJobRecord> = {}): CronJobRecord {
   return {
     id: 'job-1',
+    user_id: 'cron-user',
     name: 'every-job',
     schedule_kind: 'every',
     schedule_at: null,

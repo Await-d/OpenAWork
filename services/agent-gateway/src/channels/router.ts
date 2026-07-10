@@ -100,7 +100,7 @@ const autoReply = new AutoReplyPipeline({
     getUsageStats: getChannelUsageStats,
     resetConversation: resetChannelConversation,
   },
-  onAgentRun: async ({ message, pluginId, chatId, messageId, onPartialText }) => {
+  onAgentRun: async ({ inputParts, message, pluginId, chatId, messageId, onPartialText }) => {
     const channel = channels.get(pluginId);
     if (!channel?.ownerUserId) {
       throw new Error('Channel owner is missing for auto reply session');
@@ -133,6 +133,7 @@ const autoReply = new AutoReplyPipeline({
       requestData: {
         clientRequestId,
         displayMessage: message,
+        ...(inputParts && inputParts.length > 0 ? { inputParts } : {}),
         message,
       },
       writeChunk: (chunk) => {
@@ -229,7 +230,7 @@ const resolveUserChannels = (userId: string): ChannelInstance[] => {
   return storedChannels;
 };
 
-function resolveAnyChannel(channelId: string): ChannelInstance | null {
+export function resolveAnyChannel(channelId: string): ChannelInstance | null {
   const cached = channels.get(channelId);
   if (cached) {
     return cached;

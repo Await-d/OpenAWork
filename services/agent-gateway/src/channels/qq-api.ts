@@ -19,6 +19,10 @@ interface QQTokenCache {
   readonly expiresAt: number;
 }
 
+interface QQSendMessageOptions {
+  readonly isWakeup?: boolean;
+}
+
 export class QQApiClient {
   private readonly appId: string;
   private readonly clientSecret: string;
@@ -39,12 +43,13 @@ export class QQApiClient {
     target: QQChatTarget,
     content: string,
     replyToMessageId?: string,
+    options: QQSendMessageOptions = {},
   ): Promise<{ messageId: string }> {
     switch (target.type) {
       case 'c2c':
         return this.apiRequest(
           `/v2/users/${encodeURIComponent(target.id)}/messages`,
-          this.buildDirectMessageBody(content, replyToMessageId),
+          this.buildDirectMessageBody(content, replyToMessageId, options),
         );
       case 'group':
         return this.apiRequest(
@@ -143,6 +148,7 @@ export class QQApiClient {
   private buildDirectMessageBody(
     content: string,
     replyToMessageId?: string,
+    options: QQSendMessageOptions = {},
   ): Record<string, unknown> {
     const trimmed = this.requireMessageContent(content);
     const body: Record<string, unknown> = this.markdownSupport
@@ -151,6 +157,9 @@ export class QQApiClient {
     body['msg_seq'] = replyToMessageId ? this.getNextMsgSeq(replyToMessageId) : 1;
     if (replyToMessageId) {
       body['msg_id'] = replyToMessageId;
+    }
+    if (options.isWakeup === true) {
+      body['is_wakeup'] = true;
     }
     return body;
   }

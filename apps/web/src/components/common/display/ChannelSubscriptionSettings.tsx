@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { ChannelDiagnosticsPanel } from './ChannelDiagnosticsPanel.js';
 import { ChannelQuickLinks } from './ChannelQuickLinks.js';
 import { CHANNEL_SUBSCRIPTION_SETTINGS_STYLES } from './channel-subscription-settings.styles.js';
 import type {
@@ -39,7 +40,8 @@ export type {
   WeixinLoginWaitResult,
 } from './channel-subscription-settings.types.js';
 
-type PendingAction = 'save' | 'connect' | 'disconnect' | 'delete' | 'refresh' | 'weixin' | null;
+type PendingAction =
+  'save' | 'connect' | 'disconnect' | 'delete' | 'refresh' | 'diagnostics' | 'weixin' | null;
 
 const CATEGORY_ORDER: ChannelDescriptorCategory[] = ['china', 'international', 'custom'];
 
@@ -350,6 +352,7 @@ export function ChannelSubscriptionSettings({
   onConnect,
   onDisconnect,
   onRefreshTargets,
+  onRefreshDiagnostics,
   onStartWeixinLogin,
   onWaitWeixinLogin,
   style,
@@ -488,6 +491,7 @@ export function ChannelSubscriptionSettings({
   const isValid = isDraftValid(draft, activeDescriptor);
   const isBusy = pendingAction !== null;
   const canRefreshTargets = Boolean(selectedChannel && onRefreshTargets);
+  const canRefreshDiagnostics = Boolean(selectedChannel && onRefreshDiagnostics);
   const canBindWeixin = Boolean(onStartWeixinLogin && onWaitWeixinLogin);
   const availableTargets = selectedChannel?.availableTargets ?? [];
   const currentError = actionError ?? selectedChannel?.errorMessage ?? null;
@@ -678,6 +682,22 @@ export function ChannelSubscriptionSettings({
       await onRefreshTargets(selectedChannel.id);
     } catch (error) {
       setActionError(error instanceof Error ? error.message : '刷新订阅目标失败');
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function handleRefreshDiagnostics(): Promise<void> {
+    if (!selectedChannel || !onRefreshDiagnostics) {
+      return;
+    }
+
+    setPendingAction('diagnostics');
+    setActionError(null);
+    try {
+      await onRefreshDiagnostics(selectedChannel.id);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '刷新通道诊断失败');
     } finally {
       setPendingAction(null);
     }
@@ -1414,6 +1434,19 @@ export function ChannelSubscriptionSettings({
                   )}
                 </div>
               </section>
+
+              <ChannelDiagnosticsPanel
+                diagnostics={selectedChannel?.diagnostics}
+                disabled={!canRefreshDiagnostics || isBusy}
+                loading={pendingAction === 'diagnostics'}
+                onRefresh={
+                  selectedChannel && onRefreshDiagnostics
+                    ? () => {
+                        void handleRefreshDiagnostics();
+                      }
+                    : undefined
+                }
+              />
             </div>
 
             <div className="channel-panel__footer">

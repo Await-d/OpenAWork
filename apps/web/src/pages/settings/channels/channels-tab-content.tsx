@@ -135,6 +135,7 @@ export function ChannelsTabContent({
                   ...savedChannel,
                   availableTargets: channel.availableTargets,
                   loadingTargets: channel.loadingTargets,
+                  diagnostics: savedChannel.diagnostics ?? channel.diagnostics,
                 }
               : channel,
           );
@@ -230,6 +231,27 @@ export function ChannelsTabContent({
     } catch (error) {
       logger.error('failed to disconnect channel', error);
       applyChannelError(id, error instanceof Error ? error.message : '断开通道失败');
+      throw error;
+    }
+  };
+
+  const refreshDiagnostics = async (channelId: string): Promise<void> => {
+    try {
+      const diagnostics = await channelsClient.diagnostics(ensureToken(), channelId);
+      setChannels((prev) =>
+        prev.map((channel) =>
+          channel.id === channelId
+            ? {
+                ...channel,
+                diagnostics,
+                errorMessage: undefined,
+              }
+            : channel,
+        ),
+      );
+    } catch (error) {
+      logger.error('failed to load channel diagnostics', error);
+      applyChannelError(channelId, error instanceof Error ? error.message : '无法读取通道诊断');
       throw error;
     }
   };
@@ -340,6 +362,7 @@ export function ChannelsTabContent({
         onDisconnect={disconnectChannel}
         onDelete={deleteChannel}
         onRefreshTargets={refreshTargets}
+        onRefreshDiagnostics={refreshDiagnostics}
         onStartWeixinLogin={startWeixinLogin}
         onWaitWeixinLogin={waitWeixinLogin}
       />

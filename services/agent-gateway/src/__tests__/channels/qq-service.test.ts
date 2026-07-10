@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { QQChannelService, parseQQChatId } from '../../channels/qq.js';
+import { migrate, sqliteRun } from '../../infra/db.js';
 import type { ChannelInstance } from '../../channels/types.js';
 
 const originalFetch = globalThis.fetch;
@@ -57,8 +58,13 @@ describe('parseQQChatId', () => {
 });
 
 describe('QQChannelService', () => {
+  beforeAll(async () => {
+    await migrate();
+  });
+
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    sqliteRun('DELETE FROM qq_wakeup_windows');
     vi.restoreAllMocks();
   });
 
@@ -81,6 +87,29 @@ describe('QQChannelService', () => {
       msg_type: 0,
       msg_seq: 1,
     });
+  });
+
+  it('主动唤醒 QQ 私聊时只在当前唤醒窗口第一次发送 is_wakeup', async () => {
+    const fetchMock = mockFetchSequence(
+      jsonResponse({ access_token: 'token', expires_in: 7200 }),
+      jsonResponse({ id: 'wakeup-1' }),
+      jsonResponse({ id: 'wakeup-2' }),
+    );
+    const service = new QQChannelService(makeQQChannel(), () => undefined);
+
+    await service.sendWakeupMessage('c2c:user-open-id', '第一次唤醒');
+    await service.sendWakeupMessage('c2c:user-open-id', '第二次普通发送');
+
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
+      content: '第一次唤醒',
+      is_wakeup: true,
+      msg_type: 0,
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toMatchObject({
+      content: '第二次普通发送',
+      msg_type: 0,
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).not.toHaveProperty('is_wakeup');
   });
 
   it('向群聊发送到 v2 group endpoint', async () => {
@@ -192,6 +221,11 @@ describe('QQChannelService', () => {
       file_type: 1,
       url: 'https://example.com/remote.png',
     });
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toMatchObject({
+      content: ' ',
+      media: { file_info: 'file-info' },
+      msg_type: 7,
+    });
   });
 
   it('回复 QQ 群图片时在 media 消息中带原始 msg_id 与递增 msg_seq', async () => {
@@ -214,6 +248,7 @@ describe('QQChannelService', () => {
       'https://api.sgroup.qq.com/v2/groups/group-open-id/messages',
     );
     expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toMatchObject({
+      content: ' ',
       media: { file_info: 'file-info' },
       msg_id: 'incoming-msg-id',
       msg_type: 7,

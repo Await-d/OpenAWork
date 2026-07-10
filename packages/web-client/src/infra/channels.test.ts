@@ -76,6 +76,41 @@ describe('createChannelsClient', () => {
     }
   });
 
+  it('diagnostics 会读取渠道运行诊断', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      expect(String(input)).toBe('http://localhost:3000/channels/channel-1/diagnostics');
+      return new Response(
+        JSON.stringify({
+          diagnostics: {
+            status: 'running',
+            running: true,
+            transport: 'gateway',
+            lastDispatchType: 'C2C_MESSAGE_CREATE',
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as typeof fetch;
+    globalThis.fetch = fetchMock;
+
+    const client = createChannelsClient('http://localhost:3000');
+    const result = await client.diagnostics('token-1', 'channel-1');
+
+    expect(result).toMatchObject({
+      running: true,
+      status: 'running',
+      lastDispatchType: 'C2C_MESSAGE_CREATE',
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:3000/channels/channel-1/diagnostics',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer token-1',
+        }),
+      }),
+    );
+  });
+
   it('create 会读取 ApiErrorResponse.data.message', async () => {
     globalThis.fetch = vi.fn(async () => {
       return {

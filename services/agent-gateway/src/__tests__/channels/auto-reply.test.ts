@@ -190,6 +190,49 @@ describe('AutoReplyPipeline error isolation', () => {
     expect(sendMessage).toHaveBeenCalledWith('chat-1', 'the answer');
   });
 
+  it('图片附件会作为 inputParts 传给 channel session 运行', async () => {
+    const sendMessage = vi.fn(async () => ({ messageId: 'ok' }));
+    const id = 'tg-image-input';
+    await installFakeService(id, new FakeService(id, { sendMessage }));
+    const onAgentRun = vi.fn(async () => '看到了图片');
+    const pipeline = new AutoReplyPipeline({
+      resolveChannel: () => makeInstance(id),
+      onAgentRun,
+    });
+
+    await pipeline.handle({
+      type: 'message',
+      pluginId: id,
+      message: {
+        id: 'm1',
+        senderId: 's1',
+        senderName: 'Sender',
+        chatId: 'chat-1',
+        content: '[User sent an image]',
+        timestamp: Date.now(),
+        images: [
+          {
+            base64: Buffer.from('image').toString('base64'),
+            mediaType: 'image/png',
+          },
+        ],
+      },
+    });
+
+    expect(onAgentRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inputParts: [
+          expect.objectContaining({
+            imageUrl: expect.stringContaining('data:image/png;base64,'),
+            mimeType: 'image/png',
+            type: 'input_image',
+          }),
+        ],
+      }),
+    );
+    expect(sendMessage).toHaveBeenCalledWith('chat-1', '看到了图片');
+  });
+
   it('同一通道会话的自动回复串行执行，避免上一轮运行中时下一条消息被会话冲突丢弃', async () => {
     const sendMessage = vi.fn(async (_chatId: string, _content: string) => ({ messageId: 'ok' }));
     const id = 'tg-serialized-session';

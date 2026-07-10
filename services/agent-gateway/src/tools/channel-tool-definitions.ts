@@ -4,26 +4,70 @@ import { FEISHU_TOOL_DEFINITIONS } from './feishu-channel-tool-definitions.js';
 
 export const channelToolOutputSchema = z.string();
 
+function normalizeBlankString(value: unknown): unknown {
+  if (typeof value !== 'string') {
+    return value;
+  }
+  if (value.trim().length === 0) {
+    return undefined;
+  }
+  return value;
+}
+
+function normalizeCurrentChannelId(value: unknown): unknown {
+  const normalizedValue = normalizeBlankString(value);
+  if (typeof normalizedValue !== 'string') {
+    return normalizedValue;
+  }
+  const normalized = normalizedValue.trim().toLowerCase();
+  if (
+    normalized === 'default' ||
+    normalized === 'current' ||
+    normalized === '__default__' ||
+    normalized === '__current_channel__'
+  ) {
+    return undefined;
+  }
+  return normalizedValue;
+}
+
+const currentChannelIdSchema = z.preprocess(
+  normalizeCurrentChannelId,
+  z.string().min(1).optional(),
+);
+const optionalMessageIdSchema = z.preprocess(normalizeBlankString, z.string().min(1).optional());
+
 export const pluginMessageInputSchema = z.object({
-  plugin_id: z.string().min(1).optional(),
-  chat_id: z.string().min(1).optional(),
+  plugin_id: currentChannelIdSchema,
+  chat_id: currentChannelIdSchema,
   content: z.string().min(1),
 });
 
 export const pluginReplyInputSchema = z.object({
-  plugin_id: z.string().min(1).optional(),
+  plugin_id: currentChannelIdSchema,
   message_id: z.string().min(1),
   content: z.string().min(1),
 });
 
 export const pluginMessagesInputSchema = z.object({
-  plugin_id: z.string().min(1).optional(),
-  chat_id: z.string().min(1).optional(),
+  plugin_id: currentChannelIdSchema,
+  chat_id: currentChannelIdSchema,
   count: z.coerce.number().int().min(1).max(200).optional(),
 });
 
 export const pluginListGroupsInputSchema = z.object({
-  plugin_id: z.string().min(1).optional(),
+  plugin_id: currentChannelIdSchema,
+});
+
+export const pluginMediaInputSchema = z.object({
+  file_path: z.string().min(1),
+  content: z.preprocess(normalizeBlankString, z.string().min(1).optional()),
+  message_id: optionalMessageIdSchema,
+});
+
+export const channelMediaInputSchema = pluginMediaInputSchema.extend({
+  plugin_id: currentChannelIdSchema,
+  chat_id: currentChannelIdSchema,
 });
 
 export const weixinMediaInputSchema = z.object({
@@ -33,6 +77,7 @@ export const weixinMediaInputSchema = z.object({
   content: z.string().min(1).optional(),
 });
 
+export type ChannelMediaInput = z.infer<typeof channelMediaInputSchema>;
 export type WeixinMediaInput = z.infer<typeof weixinMediaInputSchema>;
 
 function gatewayOnly(): Promise<string> {
@@ -117,13 +162,13 @@ export const weixinSendImageToolDefinition: ToolDefinition<
 };
 
 export const pluginSendImageToolDefinition: ToolDefinition<
-  typeof weixinMediaInputSchema,
+  typeof pluginMediaInputSchema,
   typeof channelToolOutputSchema
 > = {
   name: 'PluginSendImage',
   description:
-    '向当前消息渠道会话发送真实图片附件。file_path 支持工作区内绝对路径或 HTTP/HTTPS URL，可附带 content 文本。当前通道支持图片时，看到 WebFetch 返回图片 URL 应优先调用本工具，不要只发送 Markdown 图片链接。',
-  inputSchema: weixinMediaInputSchema,
+    '向当前消息渠道会话发送真实图片附件。只需要传 file_path、可选 content，以及需要回复历史消息时的 message_id；plugin_id/chat_id 已由当前 channel session 自动提供，不要传空字符串、default、current 或占位符。file_path 支持工作区内绝对路径或 HTTP/HTTPS URL。当前通道支持图片时，看到 WebFetch 返回图片 URL 应优先调用本工具，不要只发送 Markdown 图片链接。QQ 私聊/群聊自动回复会自动使用当前消息的被动回复上下文发送图片；回复历史消息时请使用 PluginGetCurrentChatMessages 返回的 replyMessageId 作为 message_id。',
+  inputSchema: pluginMediaInputSchema,
   outputSchema: channelToolOutputSchema,
   execute: gatewayOnly,
 };

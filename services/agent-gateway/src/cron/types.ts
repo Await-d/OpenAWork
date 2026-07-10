@@ -3,6 +3,7 @@ export type DeliveryMode = 'desktop' | 'session' | 'none';
 
 export interface CronJobRecord {
   id: string;
+  user_id: string;
   name: string;
   schedule_kind: ScheduleKind;
   schedule_at: number | null;
