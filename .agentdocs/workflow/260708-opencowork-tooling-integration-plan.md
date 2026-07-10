@@ -176,7 +176,10 @@ packages/resources/
 - R-04: MCP 增加 `streamable-http` transport，并保留 SSE fallback 策略。
 - R-05: 新增文档/数据处理 builtin skills：CSV、Spreadsheet、DOCX、PDF、Image OCR。
 - R-06: Browser automation 只补 alias/说明/状态页，不新增第二套工具执行链。
-- R-07: Channel 增加 OpenAWork 命名的通用 Agent 工具：发送、回复、读取群消息、列群、摘要当前会话；统一走 `MessagingChannelService` 与 channel allowlist。
+- R-07: Channel 增加 OpenCowork 对齐的通用 Agent 工具：发送、回复、读取群消息、列群、摘要当前会话；当前实现保留 `Plugin*` 兼容工具名，但执行统一走 `MessagingChannelService`、active service 与 channel allowlist，后续 UI/文档可再补 OpenAWork 命名别名。
+- R-07a: Channel 自动回复 session 默认关闭 LLM gateway tool declarations，避免 Mimo / OpenAI-compatible 上游因 `tools` / `tool_choice:auto` 返回 400；本地 channel send/reply 工具与 LLM 工具声明分离。
+- R-07b: Channel session 工具执行层同步 fail-closed：未显式 `channelLlmToolsEnabled:true` 时只允许本地 channel tools；显式 opt-in 后也只允许已映射、且 `channel.tools` 显式启用的工具类别，`bash` / `task` 还必须满足 channel permissions。
+- R-07c: Channel 自动回复按 `pluginId + chatId` 串行进入 Agent run，参考 OpenCowork `pluginTaskChains`；同一外部聊天避免撞到 `SESSION_ALREADY_RUNNING` 并在用户消息持久化前丢消息，不同聊天仍保持并发。
 
 #### Phase 2：平台细分能力
 
@@ -223,6 +226,15 @@ packages/resources/
 - [x] T-07 ✅: 明确验证命令与 QA 入口。
 - [x] T-08 ✅: 记录后续验收要求：进入代码实现后，按子项运行对应 package 的 `pnpm --filter ... test`、`pnpm typecheck`、相关 Web 设置页视觉 QA。
 
+### Phase 3: QQ/channel 对话运行时修复
+
+- [x] T-09 ✅: 参考 OpenCowork QQ Gateway 生命周期补齐 QQ validate、gateway session 持久化/恢复、invalid session 降级、token refresh 与退避重连。
+- [x] T-10 ✅: 让 channel session 默认不向上游 LLM 暴露 gateway tools，修复 QQ 私聊入站后 Mimo / OpenAI-compatible 因大量 tools 请求体 400 导致无回复的问题。
+- [x] T-11 ✅: 将 channel 工具门控收口为声明层与执行层一致的 fail-closed；本地 `PluginSendMessage` / `PluginReplyMessage` 等 channel tools 继续可由 sandbox 执行。
+- [x] T-12 ✅: 保留已有 channel session 的显式 `channelLlmToolsEnabled:true`，新建/普通保存实例默认 false，避免保存实例时意外清掉用户明确 opt-in。
+- [x] T-13 ✅: 补充 session tool visibility 与 channel session metadata 回归测试，并运行通道/自动回复/QQ 相关验证命令。
+- [x] T-14 ✅: 参考 OpenCowork renderer 自动回复队列，为 OpenAWork `AutoReplyPipeline` 增加 per sessionKey 串行队列，修复 QQ/channel 快速连续消息“一发一回、非多轮状态”的冲突丢消息问题；队列带 per-chat 上限和忙碌回执，避免外部消息无限积压，并补同会话串行、不同会话并发、跨 plugin 隔离、队列超限后恢复、streaming 串行与异常推进测试。
+
 ## Notes
 
 - `streamable-http` 是当前最明确的 MCP 协议缺口。
@@ -231,3 +243,11 @@ packages/resources/
 - OpenAWork 已有 `frontend` 与 `visual-qa`，不应复制 `frontend-skill`；`product-design` 的价值在更高层 workflow。
 - OpenAWork 当前 `plugin-host` 是可信 hook，不是用户可安装沙箱 extension；Custom Extension 需要单独设计。
 - Memory sync: completed，已将“OpenCowork 工具体系接入采用原生优先、不重复简单工具”写入 `.agentdocs/index.md` 架构决策。
+- 2026-07-09 plan maintenance: QQ 私聊“发送消息无反应”的当前根因已定位为 channel session 自动回复链路向 Mimo / OpenAI-compatible 透传大量 gateway tools，导致上游 400；修复后 channel session 默认 `channelLlmToolsEnabled:false`，`filterEnabledGatewayToolsForSession()` 返回空声明，本地 channel reply/send 工具仍可用。
+- 2026-07-09 plan maintenance: channel 工具安全边界已改为 fail-closed。默认 channel session 不允许 `websearch/read/bash/run_bash_in_background/interactive_bash/flat MCP/task/Agent/generate_image/repo_clone/codegraph_search` 等普通 gateway tools；显式 opt-in 后仍要求工具名映射到 channel policy 且 `channel.tools[key] === true`，`bash` / `task` 还需 `allowShell` / `allowSubAgents` 为 true。
+- 2026-07-09 verification: `pnpm --filter @openAwork/agent-gateway exec vitest run src/__tests__/session/session-tool-visibility.test.ts src/__tests__/channels/channel-sessions.test.ts src/__tests__/channels/channel-session-tool-e2e.test.ts src/__tests__/channels/auto-reply.test.ts src/__tests__/channels/qq-gateway.test.ts --testTimeout 20000` 通过，5 files / 38 tests。
+- 2026-07-09 verification: `pnpm --filter @openAwork/agent-gateway exec vitest run src/__tests__/session/session-tool-visibility.test.ts src/__tests__/channels/channel-session-tool-e2e.test.ts src/__tests__/channels/auto-reply.test.ts src/__tests__/channels/qq-service.test.ts src/__tests__/channels/channel-inbound-route.test.ts --testTimeout 20000` 通过，5 files / 38 tests。
+- 2026-07-09 verification: scoped ESLint、`pnpm --filter @openAwork/agent-gateway exec tsc -p tsconfig.typecheck.json --pretty false --noEmit`、`git diff --check` 均通过。
+- 2026-07-09 root cause: channel 自动回复入口是 fire-and-forget 并发执行；`stream.ts` 在同 session 已有 in-flight request 时会于用户消息持久化之前返回 `SESSION_ALREADY_RUNNING`，所以外部平台快速连续发消息时第二条可能不会进入历史，表现为“一发一回”而不是多轮。OpenCowork 在 renderer 侧用 `pluginTaskChains` 按 `pluginId + chatId` 排队，OpenAWork 已在 gateway `AutoReplyPipeline` 侧迁移等价策略，覆盖所有 channel；当前实现同一 chat 最多保留 8 个正在处理/等待处理的自动回复任务，超过后直接给忙碌提示，防止无限排队与延迟 LLM 调用风暴。
+- 2026-07-09 verification: `pnpm --filter @openAwork/agent-gateway exec vitest run src/__tests__/channels/auto-reply.test.ts src/__tests__/channels/channel-session-tool-e2e.test.ts src/__tests__/channels/channel-sessions.test.ts src/__tests__/channels/inbound-parsers.test.ts --testTimeout 20000` 通过，4 files / 29 tests。
+- 2026-07-09 verification: 针对复查提出的“是否真正形成多轮历史”缺口，已新增 route 级回归：两次 `/channels/:id/inbound` 同 chat 入站必须复用同一个 channel session，并留下 `user/assistant/user/assistant` 历史；后续复查又把该用例改成第一轮仍 in-flight 时发第二条入站，断言第二轮会等第一轮释放后才进入 runtime。
