@@ -236,7 +236,7 @@ function bridgeAssistant(message: AssistantMessageUnified): AssistantModelMessag
   return [
     {
       role: 'assistant',
-      content: parts as unknown as AssistantModelMessage['content'],
+      content: parts,
     },
   ];
 }

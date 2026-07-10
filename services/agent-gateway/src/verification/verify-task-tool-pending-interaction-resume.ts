@@ -53,7 +53,7 @@ async function main(): Promise<void> {
     },
     async () => {
       await withMockFetch(
-        (async (_url, init) => {
+        async (_url, init) => {
           const body = typeof init?.body === 'string' ? init.body : '';
           const lastUserMessage = readLastUserMessage(body);
           if (lastUserMessage.includes('以下是后台子代理已完成后自动回流到主对话的结果')) {
@@ -65,7 +65,7 @@ async function main(): Promise<void> {
           }
 
           return createChatCompletionsStream('审批恢复后的子代理结论');
-        }) as typeof fetch,
+        },
         async () => {
           await connectDb();
           await migrate();

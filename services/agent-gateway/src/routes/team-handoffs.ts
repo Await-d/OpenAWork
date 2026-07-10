@@ -455,7 +455,7 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
 
       const result = createTeamSession({
         userId: user.sub,
-        roleLayer: body.roleLayer as HandoffRoleLayer,
+        roleLayer: body.roleLayer,
         teamParentSessionId: body.teamParentSessionId ?? null,
         title: body.title ?? null,
         metadataJson,
@@ -500,8 +500,8 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
       const record = createHandoff({
         userId: user.sub,
         fromSessionId: body.fromSessionId,
-        fromRoleLayer: body.fromRoleLayer as HandoffRoleLayer,
-        toRoleLayer: body.toRoleLayer as HandoffRoleLayer,
+        fromRoleLayer: body.fromRoleLayer,
+        toRoleLayer: body.toRoleLayer,
         payload: body.payload,
       });
       publishHandoffEvent({ type: 'handoff.created', record });

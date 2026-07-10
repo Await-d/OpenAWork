@@ -274,9 +274,7 @@ async function requestParentDecision(input: {
     return null;
   }
 
-  return parseParentDecision(
-    readTextContent(reply as { content: Array<{ type: string; text?: string }> }),
-  );
+  return parseParentDecision(readTextContent(reply));
 }
 
 function getLastSqliteChangeCount(): number {

@@ -27,7 +27,7 @@ async function main(): Promise<void> {
     },
     async () => {
       await withMockFetch(
-        (async () => createChatCompletionsStream('子代理已经执行完成。')) as typeof fetch,
+        async () => createChatCompletionsStream('子代理已经执行完成。'),
         async () => {
           await connectDb();
           await migrate();
@@ -55,7 +55,7 @@ async function main(): Promise<void> {
             const accessToken = app.jwt.sign({ sub: userId, email });
             const events: Array<{ type: string }> = [];
             const unsubscribe = subscribeSessionRunEvents(parentSessionId, (event) => {
-              events.push(event as { type: string });
+              events.push(event);
             });
 
             try {

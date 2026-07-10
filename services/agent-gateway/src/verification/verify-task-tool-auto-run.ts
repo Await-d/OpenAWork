@@ -70,12 +70,12 @@ async function main(): Promise<void> {
     },
     async () => {
       await withMockFetch(
-        (async (_url, init) => {
+        async (_url, init) => {
           if (typeof init?.body === 'string') {
             fetchCalls.push(init.body);
           }
           return createChatCompletionsStream('子代理已经执行完成。');
-        }) as typeof fetch,
+        },
         async () => {
           await connectDb();
           await migrate();
@@ -114,9 +114,7 @@ async function main(): Promise<void> {
               taskId?: string;
             }> = [];
             const unsubscribe = subscribeSessionRunEvents(parentSessionId, (event) => {
-              events.push(
-                event as { type: string; status?: string; sessionId?: string; taskId?: string },
-              );
+              events.push(event);
             });
 
             try {
@@ -709,7 +707,7 @@ async function main(): Promise<void> {
     },
     async () => {
       await withMockFetch(
-        (async (_url, init) => {
+        async (_url, init) => {
           if (typeof init?.body === 'string') {
             startupActivityFetchCalls.push(init.body);
           }
@@ -718,7 +716,7 @@ async function main(): Promise<void> {
             signal: init?.signal instanceof AbortSignal ? init.signal : undefined,
             text: '子代理启动后的最终结论。',
           });
-        }) as typeof fetch,
+        },
         async () => {
           await connectDb();
           await migrate();

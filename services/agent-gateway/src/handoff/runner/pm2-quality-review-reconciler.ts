@@ -1105,7 +1105,7 @@ function parsePm2ResultJson(resultJson: string | null | undefined): Pm2ResultJso
   }
   try {
     const parsed = JSON.parse(resultJson) as unknown;
-    return isRecord(parsed) ? (parsed as Pm2ResultJson) : null;
+    return isRecord(parsed) ? parsed : null;
   } catch {
     return null;
   }

@@ -131,7 +131,7 @@ export function parseTokenGapFromError(error: unknown): number | undefined {
       : typeof error === 'string'
         ? error
         : typeof error === 'object' && 'message' in error
-          ? String((error as { message: unknown }).message)
+          ? String(error.message)
           : undefined;
 
   if (!message) return undefined;

@@ -133,7 +133,7 @@ export function setSubstate(input: SetSubstateInput): void {
       type: 'session.substate.changed',
       sessionId: input.sessionId,
       taskId: input.sessionId, // event 总线要求带 taskId，这里用 sessionId 兜底
-      layer: (input.roleLayer ?? 'unknown') as never,
+      layer: input.roleLayer ?? 'unknown',
       timestamp: now,
       userId: input.userId,
       payload: { substate: input.substate },

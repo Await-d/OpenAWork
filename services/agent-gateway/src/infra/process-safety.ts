@@ -53,7 +53,7 @@ function toError(reason: unknown): Error {
  */
 export function installProcessSafetyHandlers(options: InstallProcessSafetyOptions): void {
   if (installed) return;
-  const proc = options.proc ?? (globalThis.process as unknown as ProcessLike | undefined);
+  const proc = options.proc ?? globalThis.process;
   if (!proc?.on) return;
   installed = true;
 

@@ -38,8 +38,7 @@ async function main(): Promise<void> {
     },
     async () => {
       await withMockFetch(
-        (async () =>
-          createChatCompletionsStream('Claude-first Agent 子代理已完成。')) as typeof fetch,
+        async () => createChatCompletionsStream('Claude-first Agent 子代理已完成。'),
         async () => {
           await connectDb();
           await migrate();

@@ -356,7 +356,7 @@ function parseObservability(value: string | null): ToolCallObservabilityAnnotati
   try {
     const parsed = JSON.parse(value) as unknown;
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed as ToolCallObservabilityAnnotation;
+      return parsed;
     }
   } catch {
     /* noop */

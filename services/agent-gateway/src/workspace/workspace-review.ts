@@ -21,7 +21,7 @@ async function execGit(args: string[], cwd: string): Promise<ExecResult> {
   const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');
   const execFileAsync = promisify(execFile);
-  return execFileAsync('git', args, { cwd, maxBuffer: 4 * 1024 * 1024 }) as Promise<ExecResult>;
+  return execFileAsync('git', args, { cwd, maxBuffer: 4 * 1024 * 1024 });
 }
 
 export async function listWorkspaceReviewChanges(

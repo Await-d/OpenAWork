@@ -230,7 +230,7 @@ export function appendSessionEvent(input: AppendSessionEventInput): SessionEvent
     ...input.event,
     id: input.event.id ?? makeSessionEventId(input.event.timestamp),
     timestamp: input.event.timestamp ?? Date.now(),
-  } as SessionEvent;
+  };
 
   const seq = nextSeq(input.sessionId);
 

@@ -272,7 +272,7 @@ class SkillMcpConnectionPool {
         ...serverRef,
         env: cleanEnv,
       };
-      await adapter.connect(serverWithCleanEnv as MCPServerRef);
+      await adapter.connect(serverWithCleanEnv);
     } else {
       await adapter.connect(serverRef);
     }

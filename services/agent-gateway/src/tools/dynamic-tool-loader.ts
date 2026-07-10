@@ -303,7 +303,7 @@ export function dynamicEntryToToolDefinition(entry: DynamicToolEntry): ToolDefin
     execute: async (input: Record<string, unknown>) => {
       return entry.execute(input);
     },
-  } as unknown as ToolDefinition;
+  };
 }
 
 /**

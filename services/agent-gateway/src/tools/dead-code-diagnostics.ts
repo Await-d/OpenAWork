@@ -94,9 +94,7 @@ export async function collectDeadCodeDiagnostics(
 ): Promise<DeadCodeCandidate[]> {
   const allowedCodes = options.allowedCodes ?? DEFAULT_DEAD_CODE_CODES;
   const maxCandidates = options.maxCandidates ?? DEFAULT_MAX_CANDIDATES;
-  const fetchDiagnostics =
-    options.fetchDiagnostics ??
-    (lspManager.diagnostics.bind(lspManager) as () => Promise<Record<string, DiagnosticLike[]>>);
+  const fetchDiagnostics = options.fetchDiagnostics ?? lspManager.diagnostics.bind(lspManager);
 
   let raw: Record<string, DiagnosticLike[]>;
   try {

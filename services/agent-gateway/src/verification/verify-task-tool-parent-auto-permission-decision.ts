@@ -36,14 +36,14 @@ async function verifyParentPermissionDecisionErrorFallback(): Promise<void> {
     },
     async () => {
       await withMockFetch(
-        (async (_url, init) => {
+        async (_url, init) => {
           const body = typeof init?.body === 'string' ? init.body : '';
           const lastUserMessage = readLastUserMessage(body);
           if (lastUserMessage.includes(DECISION_MARKER)) {
             throw new Error('simulated parent permission decision transport failure');
           }
           return createChatCompletionsStream(APPROVED_RESULT);
-        }) as typeof fetch,
+        },
         async () => {
           await connectDb();
           await migrate();
@@ -202,7 +202,7 @@ async function verifyLatePermissionDecisionFallback(): Promise<void> {
     },
     async () => {
       await withMockFetch(
-        (async (_url, init) => {
+        async (_url, init) => {
           const body = typeof init?.body === 'string' ? init.body : '';
           const lastUserMessage = readLastUserMessage(body);
           if (lastUserMessage.includes(DECISION_MARKER)) {
@@ -215,7 +215,7 @@ async function verifyLatePermissionDecisionFallback(): Promise<void> {
             );
           }
           return createChatCompletionsStream(APPROVED_RESULT);
-        }) as typeof fetch,
+        },
         async () => {
           await connectDb();
           await migrate();
@@ -398,7 +398,7 @@ async function verifyParentRejectsPermission(): Promise<void> {
     },
     async () => {
       await withMockFetch(
-        (async (_url, init) => {
+        async (_url, init) => {
           const body = typeof init?.body === 'string' ? init.body : '';
           fetchCalls.push(body);
           const lastUserMessage = readLastUserMessage(body);
@@ -413,7 +413,7 @@ async function verifyParentRejectsPermission(): Promise<void> {
             );
           }
           return createChatCompletionsStream(REJECTED_RESULT);
-        }) as typeof fetch,
+        },
         async () => {
           await connectDb();
           await migrate();
@@ -576,7 +576,7 @@ async function main(): Promise<void> {
     },
     async () => {
       await withMockFetch(
-        (async (_url, init) => {
+        async (_url, init) => {
           const body = typeof init?.body === 'string' ? init.body : '';
           fetchCalls.push(body);
           const lastUserMessage = readLastUserMessage(body);
@@ -590,7 +590,7 @@ async function main(): Promise<void> {
             );
           }
           return createChatCompletionsStream(APPROVED_RESULT);
-        }) as typeof fetch,
+        },
         async () => {
           await connectDb();
           await migrate();

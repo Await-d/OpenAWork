@@ -225,7 +225,7 @@ const ALLOWED_API_KEY_ENV_BY_TYPE: Partial<Record<ProviderType, string>> = Objec
     entry.type,
     entry.apiKeyEnv as string,
   ]),
-) as Partial<Record<ProviderType, string>>;
+);
 
 const sanitizeProviderApiKeyEnv = (provider: ProviderInput): string | undefined => {
   const allowedEnv = ALLOWED_API_KEY_ENV_BY_TYPE[provider.type];

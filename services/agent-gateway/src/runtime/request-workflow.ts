@@ -209,7 +209,7 @@ const requestWorkflowPlugin = fp(
       const workflowContext = createRequestContext(
         request.method,
         request.url,
-        request.headers as Record<string, string | string[] | undefined>,
+        request.headers,
         request.ip,
       );
       const workflowRequestStep = workflowLogger.start('request.handle', undefined, {

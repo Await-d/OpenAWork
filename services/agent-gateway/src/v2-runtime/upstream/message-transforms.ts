@@ -264,7 +264,7 @@ function interleaveMistralToolUser(messages: ModelMessage[]): ModelMessage[] {
       result.push({
         role: 'assistant',
         content: [{ type: 'text', text: 'Done.' }],
-      } as ModelMessage);
+      });
     }
   }
   return result;
@@ -279,7 +279,7 @@ function withDeepSeekReasoning(messages: ModelMessage[]): ModelMessage[] {
     if (Array.isArray(content)) {
       if ((content as unknown[]).some((part) => isRecord(part) && part['type'] === 'reasoning'))
         return message;
-      return { ...message, content: [...content, { type: 'reasoning', text: '' }] } as ModelMessage;
+      return { ...message, content: [...content, { type: 'reasoning', text: '' }] };
     }
     if (typeof content === 'string') {
       return {
@@ -290,7 +290,7 @@ function withDeepSeekReasoning(messages: ModelMessage[]): ModelMessage[] {
         ],
       } as ModelMessage;
     }
-    return { ...message, content: [{ type: 'reasoning', text: '' }] } as ModelMessage;
+    return { ...message, content: [{ type: 'reasoning', text: '' }] };
   });
 }
 

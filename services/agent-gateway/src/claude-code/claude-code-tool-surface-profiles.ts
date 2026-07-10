@@ -25,4 +25,4 @@ export const CANONICAL_TO_PRESENTED: Readonly<Record<string, string>> = Object.f
     .filter(
       ([canonical], index, entries) => entries.findIndex(([name]) => name === canonical) === index,
     ),
-) as Readonly<Record<string, string>>;
+);

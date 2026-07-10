@@ -834,7 +834,7 @@ export async function runArtifactChain(input: ArtifactChainInput): Promise<Artif
       type: 'artifact.needs-clarification',
       taskId: input.handoff.id,
       sessionId: input.sessionId,
-      layer: 'pm1' as HandoffRoleLayer,
+      layer: 'pm1',
       timestamp: Date.now(),
       payload: {
         clarifications,
@@ -964,7 +964,7 @@ export async function runArtifactChain(input: ArtifactChainInput): Promise<Artif
       type: 'artifact.constitution-conflict',
       taskId: input.handoff.id,
       sessionId: input.sessionId,
-      layer: 'pm1' as HandoffRoleLayer,
+      layer: 'pm1',
       timestamp: Date.now(),
       payload: {
         warnings: constitutionWarnings.filter((w) => w.status !== 'pass'),

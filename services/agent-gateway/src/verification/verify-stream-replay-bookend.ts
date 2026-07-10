@@ -29,7 +29,7 @@ async function main(): Promise<void> {
     },
     async () => {
       await withMockFetch(
-        (async (_input, init) => {
+        async (_input, init) => {
           const body = typeof init?.body === 'string' ? init.body : '';
           const isStreamingRequest = body.includes('"stream":true');
           if (isStreamingRequest) {
@@ -52,7 +52,7 @@ async function main(): Promise<void> {
               headers: { 'Content-Type': 'application/json' },
             },
           );
-        }) as typeof fetch,
+        },
         async () => {
           await connectDb();
           await migrate();

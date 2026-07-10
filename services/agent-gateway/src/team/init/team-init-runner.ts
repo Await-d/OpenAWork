@@ -1018,7 +1018,7 @@ function syncBindingsIntoMemberSlots(
     teamDefinition: { ...def, memberSlots: nextSlots },
   };
   const { metadata: merged } = mergeSessionMetadataForUpdate(metadata, {
-    teamDefinition: nextMetadata['teamDefinition'] as Record<string, unknown>,
+    teamDefinition: nextMetadata['teamDefinition'],
   });
   sqliteRun(`UPDATE sessions SET metadata_json = ? WHERE id = ? AND user_id = ?`, [
     JSON.stringify(merged),

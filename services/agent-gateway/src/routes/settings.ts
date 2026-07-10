@@ -71,11 +71,7 @@ import {
 import type { AIProvider } from '@openAwork/agent-core';
 import { WORKSPACE_ROOT } from '../infra/db.js';
 import { z } from 'zod';
-import {
-  getTelemetryConsent,
-  setTelemetryConsent,
-  type TelemetryConsentStatus,
-} from '../telemetry/telemetry-consent-store.js';
+import { getTelemetryConsent, setTelemetryConsent } from '../telemetry/telemetry-consent-store.js';
 import { trackEvent } from '../telemetry/telemetry-service.js';
 import type { TelemetryEventName } from '@openAwork/telemetry';
 
@@ -1622,7 +1618,7 @@ ${contextBlock}
       const { step } = startRequestWorkflow(request, 'settings.telemetry.consent.put');
       const user = request.user as JwtPayload;
       const parsed = parseBody(telemetryConsentSchema, request.body);
-      setTelemetryConsent(user.sub, parsed.status as TelemetryConsentStatus);
+      setTelemetryConsent(user.sub, parsed.status);
       step.succeed(undefined, { status: parsed.status });
       return reply.send({ ok: true, status: parsed.status });
     },

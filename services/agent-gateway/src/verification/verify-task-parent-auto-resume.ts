@@ -34,7 +34,7 @@ async function main(): Promise<void> {
     },
     async () => {
       await withMockFetch(
-        (async (_url, init) => {
+        async (_url, init) => {
           const body = typeof init?.body === 'string' ? init.body : '';
           fetchCalls.push(body);
           const lastUserMessage = readLastUserMessage(body);
@@ -42,7 +42,7 @@ async function main(): Promise<void> {
             return createChatCompletionsStream(AUTO_RESUME_RESULT);
           }
           return createChatCompletionsStream(CHILD_RESULT);
-        }) as typeof fetch,
+        },
         async () => {
           await connectDb();
           await migrate();
@@ -104,8 +104,7 @@ async function main(): Promise<void> {
                 const parentMessages = listSessionMessages({ sessionId: parentSessionId, userId });
                 return parentMessages.some(
                   (message) =>
-                    message.role === 'assistant' &&
-                    readTextMessage(message as never) === AUTO_RESUME_RESULT,
+                    message.role === 'assistant' && readTextMessage(message) === AUTO_RESUME_RESULT,
                 );
               },
               'parent session should receive the auto-resumed assistant reply',
@@ -123,7 +122,7 @@ async function main(): Promise<void> {
               if (message.role !== 'assistant') {
                 return false;
               }
-              const text = readTextMessage(message as never);
+              const text = readTextMessage(message);
               return text.includes('子代理已完成 · 让子代理完成后自动回流');
             });
 

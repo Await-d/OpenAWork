@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Message, MessageContent } from '@openAwork/shared';
-import type { CompactionTrigger, PersistedCompactionMemory } from './compaction-metadata.js';
+import type { PersistedCompactionMemory } from './compaction-metadata.js';
 
 const DEFAULT_COMPACTION_MARKER_TYPE = 'compaction_marker';
 
@@ -87,7 +87,7 @@ export function parseCompactionMarkerText(
 
     return {
       summary: parsed.payload.summary,
-      trigger: parsed.payload.trigger as CompactionTrigger,
+      trigger: parsed.payload.trigger,
       ...(parsed.payload.persistedMemory && typeof parsed.payload.persistedMemory === 'object'
         ? { persistedMemory: parsed.payload.persistedMemory as PersistedCompactionMemory }
         : {}),

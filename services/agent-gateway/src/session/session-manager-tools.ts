@@ -123,14 +123,14 @@ function formatDate(value: string | number | undefined): string {
 function formatMessageParts(message: Message): string {
   return message.content
     .map((content: MessageContent) => {
-      const contentType = Reflect.get(content as object, 'type');
+      const contentType = Reflect.get(content, 'type');
       if (contentType === 'text') {
-        const text = Reflect.get(content as object, 'text');
+        const text = Reflect.get(content, 'text');
         return typeof text === 'string' ? text : '';
       }
       if (contentType === 'tool_call') {
-        const toolName = Reflect.get(content as object, 'toolName');
-        const toolInput = Reflect.get(content as object, 'input');
+        const toolName = Reflect.get(content, 'toolName');
+        const toolInput = Reflect.get(content, 'input');
         const normalizedInput = truncateText(
           normalizeToolArgumentsForStorage(toolInput ?? {}),
           MAX_FORMATTED_TOOL_PART_CHARS,
@@ -138,7 +138,7 @@ function formatMessageParts(message: Message): string {
         return `[tool_call] ${typeof toolName === 'string' ? toolName : ''} ${normalizedInput}`;
       }
       if (contentType === 'tool_result') {
-        const output = Reflect.get(content as object, 'output');
+        const output = Reflect.get(content, 'output');
         const normalizedOutput = truncateText(
           stringifyToolResultOutput(output),
           MAX_FORMATTED_TOOL_PART_CHARS,
@@ -146,12 +146,12 @@ function formatMessageParts(message: Message): string {
         return `[tool_result] ${normalizedOutput}`;
       }
       if (contentType === 'reasoning') {
-        const text = Reflect.get(content as object, 'text');
+        const text = Reflect.get(content, 'text');
         return typeof text === 'string' ? text : '';
       }
       if (contentType === 'modified_files_summary') {
-        const title = Reflect.get(content as object, 'title');
-        const summary = Reflect.get(content as object, 'summary');
+        const title = Reflect.get(content, 'title');
+        const summary = Reflect.get(content, 'summary');
         return `${typeof title === 'string' ? title : ''}: ${typeof summary === 'string' ? summary : ''}`;
       }
       return '';

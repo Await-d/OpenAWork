@@ -151,7 +151,7 @@ export function __setSessionRunEventRetentionForTesting(
 const PERSISTED_RUN_EVENT = Symbol('persistedRunEvent');
 
 export function getRunEventRunId(event: RunEvent): string | null {
-  const runId = Reflect.get(event as object, 'runId');
+  const runId = Reflect.get(event, 'runId');
   return typeof runId === 'string' && runId.length > 0 ? runId : null;
 }
 

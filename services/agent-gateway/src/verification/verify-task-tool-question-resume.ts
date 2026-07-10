@@ -33,7 +33,7 @@ async function main(): Promise<void> {
     },
     async () => {
       await withMockFetch(
-        (async () => createChatCompletionsStream('问题恢复后的子代理结论')) as typeof fetch,
+        async () => createChatCompletionsStream('问题恢复后的子代理结论'),
         async () => {
           await connectDb();
           await migrate();

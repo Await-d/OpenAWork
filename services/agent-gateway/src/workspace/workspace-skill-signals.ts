@@ -276,7 +276,7 @@ function stableStringify(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map((entry) => stableStringify(entry)).join(',')}]`;
   }
-  const keys = Object.keys(value as Record<string, unknown>).sort();
+  const keys = Object.keys(value).sort();
   return `{${keys
     .map(
       (key) => `${JSON.stringify(key)}:${stableStringify((value as Record<string, unknown>)[key])}`,

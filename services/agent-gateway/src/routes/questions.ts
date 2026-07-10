@@ -364,7 +364,7 @@ function parseQuestionResumePayload(
             },
           }
         : {}),
-    } as Omit<ApprovedPermissionResumePayload, 'toolName'>;
+    };
   } catch {
     return null;
   }

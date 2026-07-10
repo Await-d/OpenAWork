@@ -100,7 +100,7 @@ export function buildReadToolOutputResponse(input: {
       note: selectionTarget.message,
       topLevelKeys:
         input.output && typeof input.output === 'object' && !Array.isArray(input.output)
-          ? Object.keys(input.output as Record<string, unknown>).slice(0, 100)
+          ? Object.keys(input.output).slice(0, 100)
           : undefined,
     };
   }

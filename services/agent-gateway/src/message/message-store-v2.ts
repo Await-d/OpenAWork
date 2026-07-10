@@ -245,7 +245,7 @@ export function updatePart(input: { sessionId: string; userId: string; part: Mes
       sessionID: input.sessionId,
       part: input.part,
       time: getPartTimeCreated(input.part),
-    } as { sessionID: string; part: unknown; time: number },
+    },
   });
 }
 

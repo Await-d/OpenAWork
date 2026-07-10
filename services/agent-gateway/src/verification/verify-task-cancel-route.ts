@@ -29,7 +29,7 @@ async function main(): Promise<void> {
     },
     async () => {
       await withMockFetch(
-        (async (_url, init) => {
+        async (_url, init) => {
           fetchStarted = true;
           const signal = init?.signal;
           return new Response(
@@ -53,7 +53,7 @@ async function main(): Promise<void> {
             }),
             { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
           );
-        }) as typeof fetch,
+        },
         async () => {
           const [
             { default: Fastify },

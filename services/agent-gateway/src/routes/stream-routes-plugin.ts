@@ -239,7 +239,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       const connectionContext = createRequestContext(
         'WS',
         `/sessions/${(request.params as { id: string }).id}/stream`,
-        request.headers as Record<string, string | string[] | undefined>,
+        request.headers,
         request.ip,
       );
       const connectionStep = connectionLogger.start('stream.socket.connect');
@@ -318,9 +318,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       // the socket + its run-event subscription would linger for the process
       // lifetime. The probe terminates a peer that stops answering pongs,
       // which then triggers the normal 'close' teardown below.
-      const stopHeartbeat = installWsHeartbeat(
-        socket as unknown as Parameters<typeof installWsHeartbeat>[0],
-      );
+      const stopHeartbeat = installWsHeartbeat(socket);
       socket.on('close', () => {
         stopHeartbeat();
         if (socketClosed) return;
@@ -339,7 +337,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
           const ctx = createRequestContext(
             'WS',
             `/sessions/${sessionId}/stream`,
-            request.headers as Record<string, string | string[] | undefined>,
+            request.headers,
             request.ip,
           );
 
@@ -439,7 +437,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
             const streamResult = await handleStreamRequest({
               method: 'WS',
               path: `/sessions/${sessionId}/stream`,
-              headers: request.headers as Record<string, string | string[] | undefined>,
+              headers: request.headers,
               ip: request.ip,
               requestData: body.data,
               sessionContext,
@@ -498,12 +496,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/sessions/:id/stream/sse', async (request: FastifyRequest, reply: FastifyReply) => {
     const wl = new WorkflowLogger();
-    const ctx = createRequestContext(
-      request.method,
-      request.url,
-      request.headers as Record<string, string | string[] | undefined>,
-      request.ip,
-    );
+    const ctx = createRequestContext(request.method, request.url, request.headers, request.ip);
     const routeStep = wl.start('stream.sse.connect');
     const authStep = wl.startChild(routeStep, 'stream.sse.auth');
     const rawQuery = request.query as Record<string, string>;
@@ -601,7 +594,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       const streamResult = await handleStreamRequest({
         method: request.method,
         path: request.url,
-        headers: request.headers as Record<string, string | string[] | undefined>,
+        headers: request.headers,
         ip: request.ip,
         requestData: query.data,
         sessionContext,
@@ -661,12 +654,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/sessions/:id/stream/attach', async (request: FastifyRequest, reply: FastifyReply) => {
     const wl = new WorkflowLogger();
-    const ctx = createRequestContext(
-      request.method,
-      request.url,
-      request.headers as Record<string, string | string[] | undefined>,
-      request.ip,
-    );
+    const ctx = createRequestContext(request.method, request.url, request.headers, request.ip);
     const routeStep = wl.start('stream.attach.connect');
     const authStep = wl.startChild(routeStep, 'stream.attach.auth');
     const rawQuery = request.query as Record<string, string>;
@@ -897,12 +885,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
     '/sessions/:id/stream/multi-attach',
     async (request: FastifyRequest, reply: FastifyReply) => {
       const wl = new WorkflowLogger();
-      const ctx = createRequestContext(
-        request.method,
-        request.url,
-        request.headers as Record<string, string | string[] | undefined>,
-        request.ip,
-      );
+      const ctx = createRequestContext(request.method, request.url, request.headers, request.ip);
       const routeStep = wl.start('stream.multi-attach.connect');
       const authStep = wl.startChild(routeStep, 'stream.multi-attach.auth');
       const rawQuery = request.query as Record<string, string>;

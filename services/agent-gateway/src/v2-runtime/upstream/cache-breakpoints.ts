@@ -136,7 +136,7 @@ function uniqueMessages(messages: ModelMessage[]): ModelMessage[] {
 
 function mergeProviderOptionsIntoMessage(message: ModelMessage): void {
   message.providerOptions = mergeDeep(
-    (message.providerOptions ?? {}) as ProviderOptionsRecord,
+    message.providerOptions ?? {},
     CACHE_PROVIDER_OPTIONS,
   ) as NonNullable<ModelMessage['providerOptions']>;
 }
@@ -159,8 +159,7 @@ function applyCacheBreakpointToMessage(message: ModelMessage, model: PromptCache
 
   if (shouldUseContentOptions) {
     const lastContent = message.content[message.content.length - 1] as
-      | ProviderOptionsRecord
-      | undefined;
+      ProviderOptionsRecord | undefined;
     if (
       lastContent &&
       typeof lastContent === 'object' &&
@@ -219,7 +218,7 @@ export function applyCachingToSystemMessages(
 
   const toCache = system.slice(0, 2);
   for (const message of toCache) {
-    applyCacheBreakpointToMessage(message as unknown as ModelMessage, model);
+    applyCacheBreakpointToMessage(message, model);
   }
 
   return system;

@@ -2562,7 +2562,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         teamDefinition: {
           ...(typeof normalizedMetadata.metadata['teamDefinition'] === 'object' &&
           normalizedMetadata.metadata['teamDefinition'] !== null
-            ? (normalizedMetadata.metadata['teamDefinition'] as Record<string, unknown>)
+            ? normalizedMetadata.metadata['teamDefinition']
             : {}),
           createdAt: new Date().toISOString(),
           memberSlots,
@@ -2702,7 +2702,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         teamDefinition: {
           ...(typeof normalizedMetadata.metadata['teamDefinition'] === 'object' &&
           normalizedMetadata.metadata['teamDefinition'] !== null
-            ? (normalizedMetadata.metadata['teamDefinition'] as Record<string, unknown>)
+            ? normalizedMetadata.metadata['teamDefinition']
             : {}),
           createdAt: new Date().toISOString(),
           memberSlots: legacyRosterSource,

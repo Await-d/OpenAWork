@@ -1,6 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import type { CreateManagedAgentInput, UpdateManagedAgentInput } from '@openAwork/shared';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
 import { parseBody, parseParams } from '../infra/parse-request.js';
@@ -114,7 +113,7 @@ export async function agentsRoutes(app: FastifyInstance): Promise<void> {
     const parsed = parseBody(createManagedAgentSchema, request.body ?? {});
 
     try {
-      const agent = createManagedAgentForUser(user.sub, parsed as CreateManagedAgentInput);
+      const agent = createManagedAgentForUser(user.sub, parsed);
       step.succeed(undefined, { agentId: agent.id });
       return reply.status(201).send({ agent });
     } catch (error) {
@@ -131,11 +130,7 @@ export async function agentsRoutes(app: FastifyInstance): Promise<void> {
     const parsed = parseBody(updateManagedAgentSchema, request.body ?? {});
 
     try {
-      const agent = updateManagedAgentForUser(
-        user.sub,
-        params.agentId,
-        parsed as UpdateManagedAgentInput,
-      );
+      const agent = updateManagedAgentForUser(user.sub, params.agentId, parsed);
       step.succeed(undefined, { agentId: agent.id });
       return reply.send({ agent });
     } catch (error) {

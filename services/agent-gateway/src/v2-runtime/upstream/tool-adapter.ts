@@ -63,7 +63,7 @@ export function wrapToolsForAiSdk(tools: ToolDefinition[]): ToolSet {
   for (const definition of tools) {
     set[definition.name] = wrapToolForAiSdk(definition);
   }
-  return set as ToolSet;
+  return set;
 }
 
 /**
@@ -85,7 +85,7 @@ export function wrapToolsForAiSdkDeclarationsOnly(tools: ToolDefinition[]): Tool
       inputSchema: definition.inputSchema,
     });
   }
-  return set as ToolSet;
+  return set;
 }
 
 /**
@@ -132,5 +132,5 @@ export function wrapGatewayToolsForAiSdkDeclarationsOnly(
       inputSchema: jsonSchema(def.function.parameters),
     });
   }
-  return set as ToolSet;
+  return set;
 }

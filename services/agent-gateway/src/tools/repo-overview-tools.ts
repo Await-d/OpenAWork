@@ -266,12 +266,12 @@ function packageJsonEntrypoints(pkg: Record<string, unknown> | undefined): strin
   if (typeof pkg['types'] === 'string') out.push(`types: ${pkg['types']}`);
   if (typeof pkg['bin'] === 'string') out.push(`bin: ${pkg['bin']}`);
   if (pkg['bin'] && typeof pkg['bin'] === 'object' && !Array.isArray(pkg['bin'])) {
-    for (const name of Object.keys(pkg['bin'] as Record<string, unknown>)) {
+    for (const name of Object.keys(pkg['bin'])) {
       out.push(`bin: ${name}`);
     }
   }
   if (pkg['exports'] && typeof pkg['exports'] === 'object' && !Array.isArray(pkg['exports'])) {
-    for (const name of Object.keys(pkg['exports'] as Record<string, unknown>).slice(0, 10)) {
+    for (const name of Object.keys(pkg['exports']).slice(0, 10)) {
       out.push(`exports: ${name}`);
     }
   }

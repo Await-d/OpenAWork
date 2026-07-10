@@ -28,7 +28,7 @@ async function main(): Promise<void> {
     },
     async () => {
       await withMockFetch(
-        (async (_url, init) => {
+        async (_url, init) => {
           const body = typeof init?.body === 'string' ? init.body : '';
           const lastUserMessage = readLastUserMessage(body);
           if (lastUserMessage.includes('以下是后台子代理已完成后自动回流到主对话的结果')) {
@@ -39,7 +39,7 @@ async function main(): Promise<void> {
             status: 500,
             headers: { 'Content-Type': 'application/json' },
           });
-        }) as typeof fetch,
+        },
         async () => {
           await connectDb();
           await migrate();
@@ -119,9 +119,7 @@ async function main(): Promise<void> {
               if (message.role !== 'assistant') {
                 return false;
               }
-              const text = readSingleTextMessage(
-                message as { content: Array<{ type: string; text?: string }> },
-              );
+              const text = readSingleTextMessage(message);
               return text.includes('子代理失败 · 让子代理触发失败');
             });
             assert(
