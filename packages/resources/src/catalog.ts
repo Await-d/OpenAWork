@@ -86,6 +86,38 @@ export const RESOURCE_SOUL_NAMES = [
 
 export type ResourceSoulName = (typeof RESOURCE_SOUL_NAMES)[number];
 
+export interface ResourceSoulProfile {
+  readonly title: string;
+  readonly description: string;
+}
+
+export const RESOURCE_SOUL_PROFILES = {
+  'balanced-collaborator': {
+    title: '稳健协作者',
+    description: '适合日常工作、混合咨询和通道自动回复的稳健默认人格。',
+  },
+  'daily-life-assistant': {
+    title: '日常生活助手',
+    description: '适合计划、提醒、生活决策、学习和个人组织的实用助手人格。',
+  },
+  'emotionally-attuned-companion': {
+    title: '情绪陪伴者',
+    description: '适合反思对话、关系措辞和困难时刻支持的细腻陪伴人格。',
+  },
+  'product-strategy-operator': {
+    title: '产品策略操盘手',
+    description: '适合优先级、用户体验取舍、上线规划和运营判断的产品人格。',
+  },
+  'research-writing-strategist': {
+    title: '研究写作策略师',
+    description: '适合资料综合、写作计划、编辑润色和论证质量把关的研究人格。',
+  },
+  'senior-engineering-partner': {
+    title: '资深工程伙伴',
+    description: '适合读代码、改代码、调试、评审和技术决策的工程协作人格。',
+  },
+} satisfies Record<ResourceSoulName, ResourceSoulProfile>;
+
 export const RESOURCE_COMMAND_NAMES = [
   'agents',
   'commit',

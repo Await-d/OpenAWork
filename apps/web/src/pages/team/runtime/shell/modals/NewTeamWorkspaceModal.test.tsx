@@ -42,7 +42,7 @@ const webClientMocks = vi.hoisted(() => ({
       {
         id: 'resource-soul-balanced',
         name: 'balanced-collaborator',
-        title: 'Balanced Collaborator',
+        title: '稳健协作者',
         description: '通道人设，不应出现在工作区模板选择中',
         integration: 'reference',
         visibility: 'feature',
@@ -119,7 +119,7 @@ describe('NewTeamWorkspaceModal', () => {
 
     expect(await screen.findByText('AGENTS.md')).toBeTruthy();
     expect(screen.getByText('USER.md')).toBeTruthy();
-    expect(screen.queryByText('Balanced Collaborator')).toBeNull();
+    expect(screen.queryByText('稳健协作者')).toBeNull();
   });
 
   it('Given a selected workspace template When creating workspace Then it initializes workspace knowledge', async () => {

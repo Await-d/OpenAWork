@@ -6,6 +6,7 @@ import {
   type ChannelCommandActions,
   type ChannelCommandContext,
 } from './channel-commands.js';
+import { channelLogInfo, channelLogWarn, summarizeChannelMessage } from './channel-log.js';
 
 export type { ChannelCommandActions, ChannelCommandContext } from './channel-commands.js';
 
@@ -17,6 +18,7 @@ export interface AutoReplyOptions {
     message: string;
     pluginId: string;
     chatId: string;
+    messageId: string;
     onPartialText?: (text: string) => Promise<void> | void;
   }) => Promise<string>;
 }
@@ -65,11 +67,23 @@ export class AutoReplyPipeline {
     if (event.type !== 'message') return;
 
     const { pluginId, message } = event;
+    channelLogInfo('auto-reply received message', {
+      pluginId,
+      ...summarizeChannelMessage(message),
+    });
     const service = channelManager.getService(pluginId);
-    if (!service) return;
+    if (!service) {
+      channelLogWarn('auto-reply skipped: service not found', { pluginId });
+      return;
+    }
 
     const channel = this.options.resolveChannel?.(pluginId);
     if (channel && (!channel.enabled || channel.features?.autoReply === false)) {
+      channelLogInfo('auto-reply skipped: channel disabled or autoReply off', {
+        pluginId,
+        enabled: channel.enabled,
+        autoReply: channel.features?.autoReply ?? true,
+      });
       return;
     }
 
@@ -81,6 +95,7 @@ export class AutoReplyPipeline {
     });
 
     if (commandResult.kind === 'skip') {
+      channelLogInfo('auto-reply command skipped normal handling', { pluginId });
       return;
     }
 
@@ -132,6 +147,14 @@ export class AutoReplyPipeline {
       !!service.sendStreamingMessage;
 
     const enqueued = await this.enqueueSessionTask(sessionKey, async () => {
+      const startedAt = Date.now();
+      channelLogInfo('auto-reply agent run started', {
+        pluginId,
+        chatId: message.chatId,
+        sessionKey,
+        supportsStreaming,
+        messageLength: effectiveMessage.length,
+      });
       if (supportsStreaming && service.sendStreamingMessage) {
         const handle = await service.sendStreamingMessage(message.chatId, '…', message.id);
 
@@ -141,12 +164,27 @@ export class AutoReplyPipeline {
             message: effectiveMessage,
             pluginId,
             chatId: message.chatId,
+            messageId: message.id,
             onPartialText: async (text) => {
               await handle.update(text);
             },
           });
           await handle.finish(response);
+          channelLogInfo('auto-reply streaming response finished', {
+            pluginId,
+            chatId: message.chatId,
+            sessionKey,
+            durationMs: Date.now() - startedAt,
+            responseLength: response.length,
+          });
         } catch (err) {
+          channelLogWarn('auto-reply streaming response failed', {
+            pluginId,
+            chatId: message.chatId,
+            sessionKey,
+            durationMs: Date.now() - startedAt,
+            error: err instanceof Error ? err.message : String(err),
+          });
           // The recovery `finish` reuses the same (possibly broken) upstream
           // connection, so it can itself throw — guard it so the failure is
           // logged rather than re-thrown into `handle`'s wrapper.
@@ -161,9 +199,24 @@ export class AutoReplyPipeline {
             message: effectiveMessage,
             pluginId,
             chatId: message.chatId,
+            messageId: message.id,
+          });
+          channelLogInfo('auto-reply agent response ready', {
+            pluginId,
+            chatId: message.chatId,
+            sessionKey,
+            durationMs: Date.now() - startedAt,
+            responseLength: response.length,
           });
           await this.sendChannelReply({ channel, content: response, message: event, service });
         } catch (err) {
+          channelLogWarn('auto-reply agent run failed', {
+            pluginId,
+            chatId: message.chatId,
+            sessionKey,
+            durationMs: Date.now() - startedAt,
+            error: err instanceof Error ? err.message : String(err),
+          });
           await this.safeSend(pluginId, () =>
             this.sendChannelReply({
               channel,
@@ -265,10 +318,32 @@ export class AutoReplyPipeline {
 
   private async sendChannelReply(context: AutoReplySendContext): Promise<{ messageId: string }> {
     const message = context.message.message;
+    channelLogInfo('sending channel reply', {
+      pluginId: context.message.pluginId,
+      pluginType: context.channel?.type,
+      chatId: message.chatId,
+      replyToMessageId: message.id,
+      contentLength: context.content.length,
+      replyMode: shouldReplyToQQReferencedMessage(context.channel, message.id) ? 'reply' : 'send',
+    });
     if (shouldReplyToQQReferencedMessage(context.channel, message.id)) {
-      return context.service.replyMessage(message.id, context.content);
+      const result = await context.service.replyMessage(message.id, context.content);
+      channelLogInfo('channel reply sent', {
+        pluginId: context.message.pluginId,
+        pluginType: context.channel?.type,
+        chatId: message.chatId,
+        messageId: result.messageId,
+      });
+      return result;
     }
-    return context.service.sendMessage(message.chatId, context.content);
+    const result = await context.service.sendMessage(message.chatId, context.content);
+    channelLogInfo('channel message sent', {
+      pluginId: context.message.pluginId,
+      pluginType: context.channel?.type,
+      chatId: message.chatId,
+      messageId: result.messageId,
+    });
+    return result;
   }
 }
 

@@ -67,7 +67,7 @@ describe('createResourcesClient', () => {
               {
                 id: 'resource-soul-balanced-collaborator',
                 name: 'balanced-collaborator',
-                title: 'Balanced Collaborator',
+                title: '稳健协作者',
                 description: '通道人设',
                 integration: 'reference',
                 visibility: 'feature',

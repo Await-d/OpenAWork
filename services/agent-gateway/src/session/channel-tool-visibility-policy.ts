@@ -21,6 +21,7 @@ export const WEIXIN_CHANNEL_TOOL_NAMES: ReadonlySet<string> = new Set([
 export const CHANNEL_SEND_TOOL_NAMES: ReadonlySet<string> = new Set([
   'PluginSendMessage',
   'PluginReplyMessage',
+  'PluginSendImage',
   'PluginGetGroupMessages',
   'PluginListGroups',
   'PluginSummarizeGroup',

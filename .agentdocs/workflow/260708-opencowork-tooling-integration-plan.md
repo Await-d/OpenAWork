@@ -234,6 +234,8 @@ packages/resources/
 - [x] T-12 ✅: 保留已有 channel session 的显式 `channelLlmToolsEnabled:true`，新建/普通保存实例默认 false，避免保存实例时意外清掉用户明确 opt-in。
 - [x] T-13 ✅: 补充 session tool visibility 与 channel session metadata 回归测试，并运行通道/自动回复/QQ 相关验证命令。
 - [x] T-14 ✅: 参考 OpenCowork renderer 自动回复队列，为 OpenAWork `AutoReplyPipeline` 增加 per sessionKey 串行队列，修复 QQ/channel 快速连续消息“一发一回、非多轮状态”的冲突丢消息问题；队列带 per-chat 上限和忙碌回执，避免外部消息无限积压，并补同会话串行、不同会话并发、跨 plugin 隔离、队列超限后恢复、streaming 串行与异常推进测试。
+- [x] T-15 ✅: 增强 channel 统一链路日志，覆盖实例 start/stop/restart、router notify/filter/manual-send、auto-reply 入站/跳过/Agent run/发送回复、QQ webhook/文本/图片发送与富媒体上传；日志只记录 messageId/chatId、长度、预览、附件摘要与状态，不记录密钥或完整长正文。
+- [x] T-16 ✅: 按 QQ 官方富媒体发送流程补齐 `PluginSendImage` 与 QQ 图片发送：C2C/群聊先调用 `/v2/users/{openid}/files` 或 `/v2/groups/{group_openid}/files` 上传/登记图片，再用 `msg_type:7` + `media.file_info` 发送；自动回复场景会携带原始 `msg_id` 与递增 `msg_seq`，网络图片优先走官方 `url` 字段而不是 Markdown 图片链接。
 
 ## Notes
 
@@ -251,3 +253,8 @@ packages/resources/
 - 2026-07-09 root cause: channel 自动回复入口是 fire-and-forget 并发执行；`stream.ts` 在同 session 已有 in-flight request 时会于用户消息持久化之前返回 `SESSION_ALREADY_RUNNING`，所以外部平台快速连续发消息时第二条可能不会进入历史，表现为“一发一回”而不是多轮。OpenCowork 在 renderer 侧用 `pluginTaskChains` 按 `pluginId + chatId` 排队，OpenAWork 已在 gateway `AutoReplyPipeline` 侧迁移等价策略，覆盖所有 channel；当前实现同一 chat 最多保留 8 个正在处理/等待处理的自动回复任务，超过后直接给忙碌提示，防止无限排队与延迟 LLM 调用风暴。
 - 2026-07-09 verification: `pnpm --filter @openAwork/agent-gateway exec vitest run src/__tests__/channels/auto-reply.test.ts src/__tests__/channels/channel-session-tool-e2e.test.ts src/__tests__/channels/channel-sessions.test.ts src/__tests__/channels/inbound-parsers.test.ts --testTimeout 20000` 通过，4 files / 29 tests。
 - 2026-07-09 verification: 针对复查提出的“是否真正形成多轮历史”缺口，已新增 route 级回归：两次 `/channels/:id/inbound` 同 chat 入站必须复用同一个 channel session，并留下 `user/assistant/user/assistant` 历史；后续复查又把该用例改成第一轮仍 in-flight 时发第二条入站，断言第二轮会等第一轮释放后才进入 runtime。
+- 2026-07-10 plan maintenance: QQ 网络图片展示问题不再交给模型用 Markdown 解释；本地 channel 工具新增 `PluginSendImage`，工具描述明确要求 WebFetch / 网络图片 URL 场景优先发送真实图片。QQ 执行层对 C2C/群聊使用官方富媒体 `/files` 上传/登记接口，拿到 `file_info` 后发 `msg_type:7` 图片消息；频道消息暂未纳入该 sender，保持显式报错，避免误用不匹配的官方接口。
+- 2026-07-10 plan maintenance: `PluginSendImage` 默认走当前 active channel 的 `sendImage`；QQ 自动回复 session 若带有当前入站 `channelMessageId`，会优先调用 `replyImage`，从而携带被动回复所需的原始 `msg_id` 与 `msg_seq`。
+- 2026-07-10 verification: `pnpm --filter @openAwork/agent-gateway exec vitest run src/__tests__/channels/qq-service.test.ts src/__tests__/tools/channel-tools.test.ts src/__tests__/session/session-tool-visibility.test.ts src/__tests__/channels/channel-persona-prompt.test.ts src/__tests__/channels/channel-sessions.test.ts src/__tests__/channels/channel-descriptors.test.ts --testTimeout 20000` 通过，6 files / 51 tests。
+- 2026-07-10 verification: `pnpm --filter @openAwork/agent-gateway exec tsc -p tsconfig.typecheck.json --pretty false --noEmit`、`pnpm --filter @openAwork/agent-core exec tsc -p tsconfig.typecheck.json --pretty false --noEmit`、改动文件 scoped ESLint 与 Prettier check 均通过。
+- 2026-07-10 verification: 资源/中文人设展示相关回归通过：`@openAwork/resources` 1 file / 9 tests，`@openAwork/web-client` 1 file / 4 tests，`@openAwork/web` targeted 5 files / 16 tests。

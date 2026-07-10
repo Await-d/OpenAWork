@@ -116,6 +116,18 @@ export const weixinSendImageToolDefinition: ToolDefinition<
   execute: gatewayOnly,
 };
 
+export const pluginSendImageToolDefinition: ToolDefinition<
+  typeof weixinMediaInputSchema,
+  typeof channelToolOutputSchema
+> = {
+  name: 'PluginSendImage',
+  description:
+    '向当前消息渠道会话发送真实图片附件。file_path 支持工作区内绝对路径或 HTTP/HTTPS URL，可附带 content 文本。当前通道支持图片时，看到 WebFetch 返回图片 URL 应优先调用本工具，不要只发送 Markdown 图片链接。',
+  inputSchema: weixinMediaInputSchema,
+  outputSchema: channelToolOutputSchema,
+  execute: gatewayOnly,
+};
+
 export const weixinSendFileToolDefinition: ToolDefinition<
   typeof weixinMediaInputSchema,
   typeof channelToolOutputSchema
@@ -131,6 +143,7 @@ export const weixinSendFileToolDefinition: ToolDefinition<
 export const CHANNEL_TOOL_DEFINITIONS = [
   pluginSendMessageToolDefinition,
   pluginReplyMessageToolDefinition,
+  pluginSendImageToolDefinition,
   pluginGetGroupMessagesToolDefinition,
   pluginListGroupsToolDefinition,
   pluginSummarizeGroupToolDefinition,

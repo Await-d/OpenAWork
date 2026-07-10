@@ -563,6 +563,32 @@ export const CHANNEL_SUBSCRIPTION_SETTINGS_STYLES = `
   height: 14px;
 }
 
+.channel-tool-gate {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  margin-bottom: 6px;
+  border: 1px solid var(--accent-border);
+  border-radius: 8px;
+  background: var(--accent-subtle);
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease;
+}
+
+.channel-tool-gate:hover {
+  border-color: var(--border-emphasis);
+  background: var(--bg-base);
+}
+
+.channel-tool-gate input {
+  margin-top: 2px;
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+}
+
 .channel-check-card__title {
   color: var(--fg-strong);
   font-size: 12px;

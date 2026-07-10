@@ -34,6 +34,7 @@ import { whatsAppFactory } from './whatsapp.js';
 import { qqFactory } from './qq.js';
 import { shouldHandleChannelEvent } from './subscription-filter.js';
 import type { ChannelDiagnostics, ChannelEvent, ChannelInstance } from './types.js';
+import { channelLogInfo, summarizeChannelEvent } from './channel-log.js';
 import {
   parseDingTalkInboundMessage,
   parseDiscordInboundMessage,
@@ -99,7 +100,7 @@ const autoReply = new AutoReplyPipeline({
     getUsageStats: getChannelUsageStats,
     resetConversation: resetChannelConversation,
   },
-  onAgentRun: async ({ message, pluginId, chatId, onPartialText }) => {
+  onAgentRun: async ({ message, pluginId, chatId, messageId, onPartialText }) => {
     const channel = channels.get(pluginId);
     if (!channel?.ownerUserId) {
       throw new Error('Channel owner is missing for auto reply session');
@@ -108,6 +109,7 @@ const autoReply = new AutoReplyPipeline({
     const sessionId = upsertChannelSession({
       chatId,
       channel,
+      currentMessageId: messageId,
       sessionKey: buildChannelSessionKey(pluginId, chatId),
       userId: channel.ownerUserId,
     });
@@ -167,11 +169,13 @@ const autoReply = new AutoReplyPipeline({
 
 function notifyChannel(event: ChannelEvent): void {
   const channel = channels.get(event.pluginId);
+  channelLogInfo('notify channel event', summarizeChannelEvent(event));
   if (event.type === 'message') {
     recordChannelMessage(event.pluginId, event.message);
   }
 
   if (!shouldHandleChannelEvent(channel, event)) {
+    channelLogInfo('channel event filtered by subscription/settings', summarizeChannelEvent(event));
     return;
   }
 
@@ -610,7 +614,17 @@ export async function channelRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(409).send({ error: 'Channel service not running' });
       }
 
+      channelLogInfo('manual channel send requested', {
+        channelId: id,
+        chatId: parsedBody.data.chatId,
+        contentLength: parsedBody.data.content.length,
+      });
       const result = await service.sendMessage(parsedBody.data.chatId, parsedBody.data.content);
+      channelLogInfo('manual channel send completed', {
+        channelId: id,
+        chatId: parsedBody.data.chatId,
+        messageId: result.messageId,
+      });
       step.succeed(undefined, { channelId: id });
       return reply.send(result);
     },

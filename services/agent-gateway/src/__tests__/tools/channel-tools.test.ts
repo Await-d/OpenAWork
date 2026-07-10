@@ -20,6 +20,9 @@ type SqliteGetMockRow = {
   readonly user_id?: string;
 };
 
+type SendImageMock = NonNullable<MessagingChannelService['sendImage']>;
+type ReplyImageMock = NonNullable<MessagingChannelService['replyImage']>;
+
 const mocks = vi.hoisted(() => ({
   metadataJson: JSON.stringify({
     source: 'channel',
@@ -32,8 +35,12 @@ const mocks = vi.hoisted(() => ({
     },
   }),
   sendMessageMock: vi.fn(async () => ({ messageId: 'message-1' })),
+  sendImageMock: vi.fn<SendImageMock>(async () => ({ messageId: 'image-1' })),
   replyMessageMock: vi.fn(async (_messageId: string, _content: string) => ({
     messageId: 'reply-1',
+  })),
+  replyImageMock: vi.fn<ReplyImageMock>(async (_messageId: string) => ({
+    messageId: 'reply-image-1',
   })),
   sqliteAllMock: vi.fn(() => []),
   sqliteGetMock: vi.fn((query: string): SqliteGetMockRow | undefined => {
@@ -56,13 +63,17 @@ const mocks = vi.hoisted(() => ({
   transitionToolToRunningMock: vi.fn(),
 }));
 
-function makeChannelMetadata(): string {
+function makeChannelMetadata(
+  type: ChannelInstance['type'] = 'telegram',
+  currentMessageId?: string,
+): string {
   return JSON.stringify({
     source: 'channel',
     channelChatId: 'chat-1',
+    ...(currentMessageId ? { channelMessageId: currentMessageId } : {}),
     channel: {
       id: 'channel-1',
-      type: 'telegram',
+      type,
       name: '测试通道',
       tools: {},
     },
@@ -83,10 +94,10 @@ vi.mock('../../message/message-store-v2.js', () => ({
   transitionToolToRunning: mocks.transitionToolToRunningMock,
 }));
 
-function makeChannel(): ChannelInstance {
+function makeChannel(type: ChannelInstance['type'] = 'telegram'): ChannelInstance {
   return {
     id: 'channel-1',
-    type: 'telegram',
+    type,
     name: '测试通道',
     enabled: true,
     config: {},
@@ -96,10 +107,10 @@ function makeChannel(): ChannelInstance {
   };
 }
 
-function makeService(): MessagingChannelService {
+function makeService(pluginType: ChannelInstance['type'] = 'telegram'): MessagingChannelService {
   return {
     pluginId: 'channel-1',
-    pluginType: 'telegram',
+    pluginType,
     async start() {
       return undefined;
     },
@@ -110,9 +121,11 @@ function makeService(): MessagingChannelService {
       return true;
     },
     sendMessage: mocks.sendMessageMock,
+    sendImage: mocks.sendImageMock,
     async replyMessage(messageId: string, content: string) {
       return mocks.replyMessageMock(messageId, content);
     },
+    replyImage: mocks.replyImageMock,
     async getGroupMessages(chatId: string, count?: number) {
       return listRecentChannelMessages('channel-1', chatId, count);
     },
@@ -126,13 +139,16 @@ describe('channel tools', () => {
   beforeEach(async () => {
     mocks.metadataJson = makeChannelMetadata();
     mocks.sendMessageMock.mockClear();
+    mocks.sendImageMock.mockClear();
     mocks.replyMessageMock.mockClear();
+    mocks.replyImageMock.mockClear();
     mocks.sqliteAllMock.mockClear();
     mocks.sqliteGetMock.mockClear();
     mocks.sqliteRunMock.mockClear();
     mocks.transitionToolToRunningMock.mockClear();
     const { channelManager } = await import('../../channels/manager.js');
-    channelManager.registerFactory('telegram', () => makeService());
+    channelManager.registerFactory('telegram', () => makeService('telegram'));
+    channelManager.registerFactory('qq', () => makeService('qq'));
     await channelManager.startPlugin(makeChannel(), (_event: ChannelEvent) => undefined);
   });
 
@@ -202,6 +218,67 @@ describe('channel tools', () => {
     expect(result.output).toBe(JSON.stringify({ messageId: 'reply-1' }));
     expect(mocks.replyMessageMock).toHaveBeenCalledWith('chat-1:message-42', '收到');
   });
+
+  it('Given channel session When PluginSendImage executes Then it sends an image through current channel service', async () => {
+    const { createDefaultSandbox } = await import('../../tools/tool-sandbox.js');
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-channel-image',
+        toolName: 'PluginSendImage',
+        rawInput: {
+          file_path: '/home/await/project/OpenAWork/package.json',
+          content: '图片说明',
+        },
+      },
+      new AbortController().signal,
+      'session-1',
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.output).toBe(JSON.stringify({ messageId: 'image-1' }));
+    expect(mocks.sendImageMock).toHaveBeenCalledTimes(1);
+    const sendImageCall = mocks.sendImageMock.mock.calls[0];
+    if (!sendImageCall) {
+      throw new Error('sendImage was not called');
+    }
+    expect(sendImageCall[0]).toBe('chat-1');
+    expect(sendImageCall[1]).toMatchObject({
+      fileName: 'package.json',
+      text: '图片说明',
+    });
+    expect(Buffer.isBuffer(sendImageCall[1].buffer)).toBe(true);
+  }, 15_000);
+
+  it('Given QQ channel session with current message When PluginSendImage executes Then it replies with image to that message', async () => {
+    const { channelManager } = await import('../../channels/manager.js');
+    await channelManager.stopAll();
+    mocks.metadataJson = makeChannelMetadata('qq', 'c2c:user-open-id|incoming-msg-id');
+    await channelManager.startPlugin(makeChannel('qq'), (_event: ChannelEvent) => undefined);
+    const { createDefaultSandbox } = await import('../../tools/tool-sandbox.js');
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-qq-channel-image',
+        toolName: 'PluginSendImage',
+        rawInput: {
+          file_path: '/home/await/project/OpenAWork/package.json',
+        },
+      },
+      new AbortController().signal,
+      'session-1',
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.output).toBe(JSON.stringify({ messageId: 'reply-image-1' }));
+    expect(mocks.replyImageMock).toHaveBeenCalledWith(
+      'c2c:user-open-id|incoming-msg-id',
+      expect.objectContaining({
+        fileName: 'package.json',
+      }),
+    );
+    expect(mocks.sendImageMock).not.toHaveBeenCalled();
+  }, 15_000);
 
   it('Given cached current chat messages When PluginGetCurrentChatMessages executes Then it returns the active channel history', async () => {
     recordChannelMessage('channel-1', {

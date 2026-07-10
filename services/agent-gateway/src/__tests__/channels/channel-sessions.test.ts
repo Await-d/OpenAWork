@@ -29,7 +29,7 @@ function makeChannel(): ChannelInstance {
     features: { autoReply: true, streamingReply: false, autoStart: false },
     persona: {
       resourceId: 'resource-soul-balanced-collaborator',
-      title: 'Balanced Collaborator',
+      title: '稳健协作者',
     },
     ownerUserId: USER_ID,
     createdAt: 1_788_000_000_000,
@@ -143,6 +143,47 @@ describe('channel session commands', () => {
     expect(currentSessionMetadata()['channelLlmToolsEnabled']).toBe(true);
   });
 
+  it('Given channel 配置显式允许模型工具 When 写入 channel session Then metadata 打开 LLM tool declarations', () => {
+    channelSessions.getChannelUsageStats({
+      channel: { ...makeChannel(), channelLlmToolsEnabled: true },
+      chatId: CHAT_ID,
+    });
+
+    expect(currentSessionMetadata()['channelLlmToolsEnabled']).toBe(true);
+  });
+
+  it('Given 旧 channel 配置已勾选模型工具但缺少总开关 When 写入 channel session Then 兼容打开 LLM tool declarations', () => {
+    channelSessions.getChannelUsageStats({
+      channel: {
+        ...makeChannel(),
+        tools: {
+          web_search: true,
+          read: true,
+          PluginReplyMessage: true,
+        },
+      },
+      chatId: CHAT_ID,
+    });
+
+    expect(currentSessionMetadata()['channelLlmToolsEnabled']).toBe(true);
+  });
+
+  it('Given 旧 session 开过模型工具 When channel 配置显式关闭 Then metadata 同步关闭', () => {
+    const sessionId = currentSessionId();
+    dbModule.sqliteRun('UPDATE sessions SET metadata_json = ? WHERE id = ? AND user_id = ?', [
+      JSON.stringify({ ...currentSessionMetadata(), channelLlmToolsEnabled: true }),
+      sessionId,
+      USER_ID,
+    ]);
+
+    channelSessions.getChannelUsageStats({
+      channel: { ...makeChannel(), channelLlmToolsEnabled: false },
+      chatId: CHAT_ID,
+    });
+
+    expect(currentSessionMetadata()['channelLlmToolsEnabled']).toBe(false);
+  });
+
   it('通道绑定 souls persona 时写入 channel session metadata', () => {
     const row = dbModule.sqliteGet<{ metadata_json: string }>(
       'SELECT metadata_json FROM sessions WHERE user_id = ? AND title = ?',
@@ -156,7 +197,7 @@ describe('channel session commands', () => {
       channelPersona?: { resourceId?: string; title?: string; content?: string };
     };
     expect(metadata.channelPersona?.resourceId).toBe('resource-soul-balanced-collaborator');
-    expect(metadata.channelPersona?.title).toBe('Balanced Collaborator');
+    expect(metadata.channelPersona?.title).toBe('稳健协作者');
     expect(metadata.channelPersona?.content).toContain(
       'You are the balanced professional collaborator',
     );

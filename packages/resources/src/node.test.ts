@@ -234,6 +234,8 @@ describe('resource catalog', () => {
       expect.arrayContaining([
         expect.objectContaining({
           id: 'resource-soul-balanced-collaborator',
+          title: '稳健协作者',
+          description: '适合日常工作、混合咨询和通道自动回复的稳健默认人格。',
           visibility: 'feature',
           feature: 'channels',
           usageKind: 'channel-persona',

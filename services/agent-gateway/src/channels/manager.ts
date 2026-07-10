@@ -8,6 +8,12 @@ import type {
   MessagingChannelService,
 } from './types.js';
 import { ChannelRelay } from './channel-relay.js';
+import {
+  channelLogInfo,
+  channelLogWarn,
+  summarizeChannelEvent,
+  summarizeChannelInstance,
+} from './channel-log.js';
 
 export class ChannelManager {
   private factories = new Map<string, ChannelServiceFactory>();
@@ -49,6 +55,10 @@ export class ChannelManager {
         const existing = this.services.get(instance.id);
         if (existing?.isRunning()) {
           try {
+            channelLogInfo(
+              'restarting existing channel service',
+              summarizeChannelInstance(instance),
+            );
             this.stopRelay(instance.id);
             await existing.stop();
             this.statuses.set(instance.id, 'stopped');
@@ -63,14 +73,20 @@ export class ChannelManager {
         this.statuses.set(instance.id, 'stopped');
 
         try {
+          channelLogInfo('starting channel service', summarizeChannelInstance(instance));
           await service.start();
           this.startRelay(instance, notify);
           this.statuses.set(instance.id, 'running');
+          channelLogInfo('channel service started', summarizeChannelInstance(instance));
           notify({ type: 'status', pluginId: instance.id, status: 'running' });
         } catch (err) {
           this.stopRelay(instance.id);
           this.services.delete(instance.id);
           this.statuses.set(instance.id, 'error');
+          channelLogWarn('channel service start failed', {
+            ...summarizeChannelInstance(instance),
+            error: err instanceof Error ? err.message : String(err),
+          });
           notify({
             type: 'error',
             pluginId: instance.id,
@@ -97,12 +113,19 @@ export class ChannelManager {
       return;
     }
     try {
+      channelLogInfo('stopping channel service', { pluginId: id, pluginType: service.pluginType });
       this.stopRelay(id);
       await service.stop();
       this.services.delete(id);
       this.statuses.set(id, 'stopped');
+      channelLogInfo('channel service stopped', { pluginId: id, pluginType: service.pluginType });
     } catch (err) {
       this.statuses.set(id, 'error');
+      channelLogWarn('channel service stop failed', {
+        pluginId: id,
+        pluginType: service.pluginType,
+        error: err instanceof Error ? err.message : String(err),
+      });
       throw err;
     }
   }
@@ -179,7 +202,14 @@ export class ChannelManager {
     if (!parser) {
       return;
     }
-    const relay = new ChannelRelay({ channel: instance, parser, notify });
+    const relay = new ChannelRelay({
+      channel: instance,
+      parser,
+      notify: (event) => {
+        channelLogInfo('relay received channel event', summarizeChannelEvent(event));
+        notify(event);
+      },
+    });
     this.relays.set(instance.id, relay);
     relay.start();
   }

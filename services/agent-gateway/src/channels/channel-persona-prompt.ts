@@ -1,5 +1,13 @@
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
 
+const CHANNEL_REPLY_POLICY_PROMPT = [
+  '<channel-reply-policy>',
+  '你正在通过外部消息通道回复用户。',
+  '默认使用中文回复；除非用户明确要求其他语言，或用户最新消息主要使用其他语言，否则保持中文。',
+  '回复应适合聊天软件阅读：自然、直接、避免不必要的长篇铺垫。',
+  '</channel-reply-policy>',
+].join('\n');
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -12,16 +20,18 @@ export function buildChannelPersonaPromptFromMetadata(metadataJson: string): str
 
   const persona = metadata['channelPersona'];
   if (!isRecord(persona)) {
-    return null;
+    return CHANNEL_REPLY_POLICY_PROMPT;
   }
 
   const title = persona['title'];
   const content = persona['content'];
   if (typeof title !== 'string' || typeof content !== 'string' || content.trim().length === 0) {
-    return null;
+    return CHANNEL_REPLY_POLICY_PROMPT;
   }
 
   return [
+    CHANNEL_REPLY_POLICY_PROMPT,
+    '',
     '<channel-persona>',
     `当前消息通道绑定的人设资源：${title.trim()}`,
     '',

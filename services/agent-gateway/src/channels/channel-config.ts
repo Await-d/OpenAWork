@@ -7,6 +7,7 @@ import type {
   ChannelSubscription,
 } from './types.js';
 import { SUPPORTED_CHANNEL_PLATFORMS } from './types.js';
+import { resolveChannelLlmToolsEnabled } from './channel-tool-gate.js';
 
 const channelFeaturesSchema = z.object({
   autoReply: z.boolean().default(false),
@@ -38,6 +39,7 @@ const channelBaseSchema = z.object({
   name: z.string().min(1),
   enabled: z.boolean().default(true),
   config: z.record(z.string(), z.string()).default({}),
+  channelLlmToolsEnabled: z.boolean().optional(),
   tools: z.record(z.string(), z.boolean()).optional(),
   providerId: z.string().nullable().optional(),
   model: z.string().nullable().optional(),
@@ -140,6 +142,10 @@ export const createChannelInstance = (
     {
       ...input,
       tools: input.tools ?? existing?.tools,
+      channelLlmToolsEnabled:
+        input.channelLlmToolsEnabled === undefined
+          ? existing?.channelLlmToolsEnabled
+          : input.channelLlmToolsEnabled,
       providerId: input.providerId === undefined ? existing?.providerId : input.providerId,
       model: input.model === undefined ? existing?.model : input.model,
       permissions: input.permissions ?? existing?.permissions,
@@ -161,6 +167,10 @@ function normalizeChannel(input: StoredChannelInput, ownerUserId: string): Chann
     enabled: input.enabled,
     config: normalizeConfig(input.config),
     tools: input.tools,
+    channelLlmToolsEnabled: resolveChannelLlmToolsEnabled({
+      explicit: input.channelLlmToolsEnabled,
+      tools: input.tools,
+    }),
     providerId: input.providerId ?? null,
     model: input.model ?? null,
     features: { ...defaultFeatures(), ...(input.features ?? {}) },

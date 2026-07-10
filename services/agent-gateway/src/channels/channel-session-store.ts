@@ -3,6 +3,7 @@ import { listResourceCatalog } from '@openAwork/resources/node';
 import type { ResourceTextDescriptor } from '@openAwork/resources/node';
 import { sqliteGet, sqliteRun } from '../infra/db.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
+import { resolveChannelLlmToolsEnabled } from './channel-tool-gate.js';
 import type { ChannelInstance } from './types.js';
 
 interface ReusableSessionRow {
@@ -19,17 +20,24 @@ export function buildChannelSessionMetadata(
   chatId: string,
   userId: string,
   currentMetadata: Record<string, unknown> = {},
+  currentMessageId?: string,
 ): Record<string, unknown> {
   const persona = resolveChannelPersona(channel, userId);
+  const channelLlmToolsEnabled = resolveChannelLlmToolsEnabled({
+    explicit: channel.channelLlmToolsEnabled,
+    tools: channel.tools,
+    fallback: currentMetadata['channelLlmToolsEnabled'] === true,
+  });
   const nextMetadata: Record<string, unknown> = {
     ...currentMetadata,
     source: 'channel',
     channelChatId: chatId,
+    ...(currentMessageId ? { channelMessageId: currentMessageId } : {}),
     webSearchEnabled: channel.tools?.['web_search'] === true,
     taskToolEnabled:
       channel.tools?.['task'] === true && (channel.permissions?.allowSubAgents ?? true),
     questionToolEnabled: false,
-    channelLlmToolsEnabled: currentMetadata['channelLlmToolsEnabled'] === true,
+    channelLlmToolsEnabled,
     channel: {
       id: channel.id,
       type: channel.type,
@@ -43,6 +51,7 @@ export function buildChannelSessionMetadata(
             title: persona.title,
           }
         : null,
+      channelLlmToolsEnabled,
       tools: channel.tools ?? {},
     },
   };
@@ -140,6 +149,7 @@ function findReusableChannelSession(userId: string, sessionKey: string): Reusabl
 export function upsertChannelSession(input: {
   readonly chatId: string;
   readonly channel: ChannelInstance;
+  readonly currentMessageId?: string;
   readonly sessionKey: string;
   readonly userId: string;
 }): string {
@@ -149,6 +159,7 @@ export function upsertChannelSession(input: {
     input.chatId,
     input.userId,
     parseSessionMetadataJson(existingSession?.metadata_json ?? '{}'),
+    input.currentMessageId,
   );
 
   if (existingSession) {

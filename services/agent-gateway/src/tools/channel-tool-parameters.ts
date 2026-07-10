@@ -12,6 +12,8 @@ export function buildChannelToolParameters(toolName: string): ToolParameters | n
       return textMessageParameters();
     case 'PluginReplyMessage':
       return replyMessageParameters();
+    case 'PluginSendImage':
+      return weixinMediaParameters();
     case 'PluginGetGroupMessages':
     case 'PluginSummarizeGroup':
     case 'PluginGetCurrentChatMessages':

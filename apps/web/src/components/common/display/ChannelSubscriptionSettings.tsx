@@ -1,165 +1,43 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { ChannelQuickLinks } from './ChannelQuickLinks.js';
-import type { ChannelQuickLinkEntry } from './ChannelQuickLinks.js';
 import { CHANNEL_SUBSCRIPTION_SETTINGS_STYLES } from './channel-subscription-settings.styles.js';
-
-export type ChannelEditorType =
-  'telegram' | 'discord' | 'slack' | 'feishu' | 'dingtalk' | 'weixin' | 'wecom' | 'whatsapp' | 'qq';
-
-export type ChannelEditorStatus = 'connected' | 'disconnected' | 'error' | 'pending';
-export type ChannelDescriptorCategory = 'china' | 'international' | 'custom';
-export type ChannelDescriptorFieldType = 'text' | 'secret';
-
-export interface ChannelSubscriptionEntry {
-  chatId: string;
-  name: string;
-  enabled: boolean;
-}
-
-export interface ChannelTargetEntry {
-  id: string;
-  name: string;
-  memberCount?: number;
-}
-
-export interface ChannelFeaturesEntry {
-  autoReply: boolean;
-  streamingReply: boolean;
-  autoStart: boolean;
-}
-
-export interface ChannelPermissionsEntry {
-  allowReadHome: boolean;
-  readablePathPrefixes: string[];
-  allowWriteOutside: boolean;
-  allowShell: boolean;
-  allowSubAgents: boolean;
-}
-
-export interface ChannelProviderOption {
-  id: string;
-  name: string;
-  defaultModels: Array<{ id: string; label: string; enabled: boolean }>;
-}
-
-export interface ChannelPersonaOption {
-  resourceId: string;
-  title: string;
-  description: string;
-  source: 'reference' | 'user' | 'builtin';
-}
-
-export interface ChannelPersonaSelection {
-  resourceId: string;
-  title: string;
-}
-
-export interface ChannelDescriptorField {
-  key: string;
-  label: string;
-  type: ChannelDescriptorFieldType;
-  required?: boolean;
-  placeholder?: string;
-  description?: string;
-}
-
-export interface ChannelDescriptorTool {
-  key: string;
-  label: string;
-  description: string;
-  defaultEnabled?: boolean;
-}
-
-export type ChannelDescriptorLink = ChannelQuickLinkEntry;
-
-export interface ChannelTypeDescriptor {
-  type: ChannelEditorType;
-  displayName: string;
-  description: string;
-  icon: string;
-  category: ChannelDescriptorCategory;
-  configSchema: ChannelDescriptorField[];
-  quickLinks?: ChannelDescriptorLink[];
-  tools: ChannelDescriptorTool[];
-}
-
-export interface ChannelSettingsEntry {
-  id: string;
-  type: ChannelEditorType;
-  name: string;
-  enabled: boolean;
-  status: ChannelEditorStatus;
-  config: Record<string, string>;
-  subscriptions: ChannelSubscriptionEntry[];
-  features: ChannelFeaturesEntry;
-  providerId?: string | null;
-  model?: string | null;
-  tools?: Record<string, boolean>;
-  permissions?: ChannelPermissionsEntry;
-  persona?: ChannelPersonaSelection | null;
-  errorMessage?: string;
-  availableTargets?: ChannelTargetEntry[];
-  loadingTargets?: boolean;
-}
-
-export interface ChannelDraft {
-  type: ChannelEditorType;
-  name: string;
-  enabled: boolean;
-  config: Record<string, string>;
-  subscriptions: ChannelSubscriptionEntry[];
-  features: ChannelFeaturesEntry;
-  providerId: string | null;
-  model: string | null;
-  tools: Record<string, boolean>;
-  permissions: ChannelPermissionsEntry;
-  persona: ChannelPersonaSelection | null;
-}
-
-export interface WeixinLoginStartInput {
-  accountId?: string;
-  baseUrl?: string;
-  routeTag?: string;
-  force?: boolean;
-}
-
-export interface WeixinLoginStartResult {
-  sessionKey: string;
-  qrCodeUrl?: string;
-  message: string;
-}
-
-export interface WeixinLoginWaitInput {
-  sessionKey: string;
-  baseUrl?: string;
-  routeTag?: string;
-  timeoutMs?: number;
-}
-
-export interface WeixinLoginWaitResult {
-  connected: boolean;
-  message: string;
-  token?: string;
-  accountId?: string;
-  baseUrl?: string;
-  userId?: string;
-}
-
-export interface ChannelSubscriptionSettingsProps {
-  channels: ChannelSettingsEntry[];
-  descriptors: ChannelTypeDescriptor[];
-  providers?: ChannelProviderOption[];
-  personas?: readonly ChannelPersonaOption[];
-  onSave: (channelId: string | null, draft: ChannelDraft) => Promise<ChannelSettingsEntry>;
-  onDelete?: (channelId: string) => Promise<void>;
-  onConnect?: (channelId: string) => Promise<void>;
-  onDisconnect?: (channelId: string) => Promise<void>;
-  onRefreshTargets?: (channelId: string) => Promise<void>;
-  onStartWeixinLogin?: (input: WeixinLoginStartInput) => Promise<WeixinLoginStartResult>;
-  onWaitWeixinLogin?: (input: WeixinLoginWaitInput) => Promise<WeixinLoginWaitResult>;
-  style?: CSSProperties;
-}
+import type {
+  ChannelDescriptorCategory,
+  ChannelDraft,
+  ChannelEditorStatus,
+  ChannelEditorType,
+  ChannelFeaturesEntry,
+  ChannelPermissionsEntry,
+  ChannelSettingsEntry,
+  ChannelSubscriptionSettingsProps,
+  ChannelTargetEntry,
+  ChannelTypeDescriptor,
+} from './channel-subscription-settings.types.js';
+export type {
+  ChannelDescriptorCategory,
+  ChannelDescriptorField,
+  ChannelDescriptorFieldType,
+  ChannelDescriptorLink,
+  ChannelDescriptorTool,
+  ChannelDraft,
+  ChannelEditorStatus,
+  ChannelEditorType,
+  ChannelFeaturesEntry,
+  ChannelPermissionsEntry,
+  ChannelPersonaOption,
+  ChannelPersonaSelection,
+  ChannelProviderOption,
+  ChannelSettingsEntry,
+  ChannelSubscriptionEntry,
+  ChannelSubscriptionSettingsProps,
+  ChannelTargetEntry,
+  ChannelTypeDescriptor,
+  WeixinLoginStartInput,
+  WeixinLoginStartResult,
+  WeixinLoginWaitInput,
+  WeixinLoginWaitResult,
+} from './channel-subscription-settings.types.js';
 
 type PendingAction = 'save' | 'connect' | 'disconnect' | 'delete' | 'refresh' | 'weixin' | null;
 
@@ -243,6 +121,7 @@ const EMPTY_DRAFT: ChannelDraft = {
     streamingReply: true,
     autoStart: true,
   },
+  channelLlmToolsEnabled: false,
   providerId: null,
   model: null,
   tools: {},
@@ -323,6 +202,7 @@ function createDraftFromDescriptor(descriptor: ChannelTypeDescriptor): ChannelDr
     }, {}),
     subscriptions: [],
     features: createDefaultFeatures(),
+    channelLlmToolsEnabled: false,
     providerId: null,
     model: null,
     tools: createToolsFromDescriptor(descriptor),
@@ -353,6 +233,7 @@ function buildDraftFromEntry(
     },
     subscriptions: entry.subscriptions,
     features: { ...createDefaultFeatures(), ...(entry.features ?? {}) },
+    channelLlmToolsEnabled: entry.channelLlmToolsEnabled ?? false,
     providerId: entry.providerId ?? null,
     model: entry.model ?? null,
     tools,
@@ -644,6 +525,13 @@ export function ChannelSubscriptionSettings({
         ...current.tools,
         [toolKey]: !current.tools[toolKey],
       },
+    }));
+  }
+
+  function updateChannelLlmToolsEnabled(enabled: boolean): void {
+    setDraft((current) => ({
+      ...current,
+      channelLlmToolsEnabled: enabled,
     }));
   }
 
@@ -1300,13 +1188,13 @@ export function ChannelSubscriptionSettings({
                   <div>
                     <h4 className="channel-section__title">通道人设</h4>
                     <div className="channel-muted">
-                      仅读取资源目录中标记为 channel-persona 的 souls，用于当前通道的个人角色设定。
+                      仅读取资源目录中标记为通道人设的 SOUL 资源，用于当前通道的个人角色设定。
                     </div>
                   </div>
                 </div>
                 <div className="channel-section__body channel-persona-layout">
                   <div className="channel-field">
-                    <div className="channel-field__label">Persona</div>
+                    <div className="channel-field__label">人设模板</div>
                     <select
                       value={draft.persona?.resourceId ?? ''}
                       onChange={(event) => selectPersona(event.target.value)}
@@ -1325,7 +1213,7 @@ export function ChannelSubscriptionSettings({
                     </div>
                     <div className="channel-persona-preview__desc">
                       {selectedPersona?.description ??
-                        '未绑定 souls 资源时，通道回复继续使用会话默认系统提示。'}
+                        '未绑定 SOUL 资源时，通道回复继续使用通道默认助手人格。'}
                     </div>
                     <span className="channel-mini-badge">
                       {selectedPersona
@@ -1348,6 +1236,19 @@ export function ChannelSubscriptionSettings({
                   </div>
                 </div>
                 <div className="channel-section__body channel-tool-grid">
+                  <label className="channel-tool-gate">
+                    <input
+                      type="checkbox"
+                      checked={draft.channelLlmToolsEnabled}
+                      onChange={(event) => updateChannelLlmToolsEnabled(event.target.checked)}
+                    />
+                    <div>
+                      <div className="channel-check-card__title">允许模型调用工作台工具</div>
+                      <div className="channel-check-card__desc">
+                        开启后才会把下方已勾选的搜索、文件、Shell、MCP 与子代理工具声明给模型。
+                      </div>
+                    </div>
+                  </label>
                   {toolOptions.map((tool) => (
                     <label key={tool.key} className="channel-check-card">
                       <input

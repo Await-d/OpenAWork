@@ -96,6 +96,17 @@ export interface MessagingChannelService {
       readonly buffer: Buffer;
       readonly fileName?: string;
       readonly signal?: AbortSignal;
+      readonly sourceUrl?: string;
+      readonly text?: string;
+    },
+  ): Promise<{ messageId: string }>;
+  replyImage?(
+    messageId: string,
+    input: {
+      readonly buffer: Buffer;
+      readonly fileName?: string;
+      readonly signal?: AbortSignal;
+      readonly sourceUrl?: string;
       readonly text?: string;
     },
   ): Promise<{ messageId: string }>;
@@ -218,6 +229,7 @@ export interface ChannelInstance {
   name: string;
   enabled: boolean;
   config: Record<string, string>;
+  channelLlmToolsEnabled?: boolean;
   tools?: Record<string, boolean>;
   providerId?: string | null;
   model?: string | null;

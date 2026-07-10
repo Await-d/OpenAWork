@@ -42,6 +42,8 @@ export async function executeChannelTool(input: {
         ),
       );
     }
+    case 'PluginSendImage':
+      return executeChannelMediaTool(input, weixinMediaInputSchema.parse(input.rawInput), 'image');
     case 'PluginGetGroupMessages':
     case 'PluginSummarizeGroup':
     case 'PluginGetCurrentChatMessages': {
@@ -60,9 +62,9 @@ export async function executeChannelTool(input: {
       return JSON.stringify(await service.listGroups());
     }
     case 'WeixinSendImage':
-      return executeWeixinMediaTool(input, weixinMediaInputSchema.parse(input.rawInput), 'image');
+      return executeChannelMediaTool(input, weixinMediaInputSchema.parse(input.rawInput), 'image');
     case 'WeixinSendFile':
-      return executeWeixinMediaTool(input, weixinMediaInputSchema.parse(input.rawInput), 'file');
+      return executeChannelMediaTool(input, weixinMediaInputSchema.parse(input.rawInput), 'file');
     default:
       if (FEISHU_TOOL_NAME_SET.has(input.toolName)) {
         return executeFeishuChannelTool(input);
@@ -71,7 +73,7 @@ export async function executeChannelTool(input: {
   }
 }
 
-async function executeWeixinMediaTool(
+async function executeChannelMediaTool(
   input: { readonly sessionId: string; readonly signal: AbortSignal },
   parsed: WeixinMediaInput,
   kind: 'file' | 'image',
@@ -86,6 +88,15 @@ async function executeWeixinMediaTool(
   const textInput = parsed.content ? { text: parsed.content } : {};
   if (kind === 'image') {
     if (!service?.sendImage) throw new Error('Current channel does not support image sending.');
+    if (service.replyImage && ctx.pluginType === 'qq' && ctx.currentMessageId) {
+      return JSON.stringify(
+        await service.replyImage(ctx.currentMessageId, {
+          ...media,
+          ...textInput,
+          signal: input.signal,
+        }),
+      );
+    }
     return JSON.stringify(
       await service.sendImage(ctx.chatId, { ...media, ...textInput, signal: input.signal }),
     );

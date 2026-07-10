@@ -70,6 +70,7 @@ describe('resolvePermissionCategory', () => {
     expect(resolvePermissionCategory('ast_grep_replace')).toBe('edit');
     expect(resolvePermissionCategory('PluginSendMessage')).toBe('channel');
     expect(resolvePermissionCategory('PluginReplyMessage')).toBe('channel');
+    expect(resolvePermissionCategory('PluginSendImage')).toBe('channel');
     expect(resolvePermissionCategory('WeixinSendImage')).toBe('channel');
     expect(resolvePermissionCategory('WeixinSendFile')).toBe('channel');
     for (const toolName of FEISHU_CHANNEL_TOOL_NAMES) {
@@ -129,6 +130,7 @@ describe('default permission rule evaluation', () => {
   it("forces 'ask' for messaging channel send tools", () => {
     expect(effectiveActionFor('PluginSendMessage')).toBe('ask');
     expect(effectiveActionFor('PluginReplyMessage')).toBe('ask');
+    expect(effectiveActionFor('PluginSendImage')).toBe('ask');
     expect(effectiveActionFor('WeixinSendImage')).toBe('ask');
     expect(effectiveActionFor('WeixinSendFile')).toBe('ask');
     for (const toolName of FEISHU_CHANNEL_TOOL_NAMES) {

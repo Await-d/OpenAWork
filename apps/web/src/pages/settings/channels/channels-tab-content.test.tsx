@@ -39,14 +39,14 @@ const resourcesClientMocks = vi.hoisted(() => ({
       {
         id: 'resource-soul-balanced-collaborator',
         name: 'balanced-collaborator',
-        title: 'Balanced Collaborator',
+        title: '稳健协作者',
         description: '稳健协作人设',
         integration: 'reference',
         visibility: 'feature',
         feature: 'channels',
         usageKind: 'channel-persona',
         path: '/resources/souls/reference/balanced-collaborator.md',
-        content: '# Balanced Collaborator',
+        content: '# 稳健协作者',
       },
     ],
     prompts: [],
@@ -160,6 +160,6 @@ describe('ChannelsTabContent', () => {
     await waitFor(() => {
       expect(resourcesClientMocks.list).toHaveBeenCalledWith('token-1');
     });
-    expect(await screen.findByText('Balanced Collaborator')).toBeTruthy();
+    expect(await screen.findByText('稳健协作者')).toBeTruthy();
   });
 });

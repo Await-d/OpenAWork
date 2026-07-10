@@ -8,6 +8,7 @@ import {
   RESOURCE_EXTENSION_NAMES,
   RESOURCE_PROMPT_NAMES,
   RESOURCE_SOUL_NAMES,
+  RESOURCE_SOUL_PROFILES,
   resourceAgentId,
   type IntegratedResourceAgentName,
   type ResourceAgentName,
@@ -176,11 +177,12 @@ export function listResourceCommandDescriptors(): readonly ResourceTextDescripto
 export function createResourceSoulDescriptor(
   soulName: ResourceSoulName,
 ): ResourceTextDescriptor<ResourceSoulName> {
+  const profile = RESOURCE_SOUL_PROFILES[soulName];
   return {
     id: `resource-soul-${soulName}`,
     name: soulName,
-    title: toTitle(soulName),
-    description: `通道与个人会话人设模板：${toTitle(soulName)}`,
+    title: profile.title,
+    description: profile.description,
     integration: 'reference',
     visibility: 'feature',
     feature: 'channels',

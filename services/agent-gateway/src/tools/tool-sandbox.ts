@@ -1650,6 +1650,7 @@ function buildPermissionRequestContext(
       };
     }
     case 'PluginSendMessage':
+    case 'PluginSendImage':
     case 'WeixinSendImage':
     case 'WeixinSendFile':
     case 'FeishuSendImage':

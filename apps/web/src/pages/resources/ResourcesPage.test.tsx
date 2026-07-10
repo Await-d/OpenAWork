@@ -57,7 +57,7 @@ const resources = vi.hoisted(
         {
           id: 'soul-balanced',
           name: 'balanced-collaborator',
-          title: 'Balanced Collaborator',
+          title: '稳健协作者',
           description: '通道人设',
           integration: 'reference',
           visibility: 'feature',
@@ -125,12 +125,12 @@ describe('ResourcesPage', () => {
 
     expect(screen.getByRole('heading', { name: '主资源目录' })).not.toBeNull();
     expect(screen.getAllByText('PDF Skill')).toHaveLength(2);
-    expect(screen.queryByText('Balanced Collaborator')).toBeNull();
+    expect(screen.queryByText('稳健协作者')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: /功能专用资源/ }));
 
     expect(screen.getByRole('heading', { name: '功能专用资源' })).not.toBeNull();
-    expect(screen.getByText('Balanced Collaborator')).not.toBeNull();
+    expect(screen.getByText('稳健协作者')).not.toBeNull();
     expect(screen.getAllByText('SOUL.md').length).toBeGreaterThan(0);
     expect(screen.getAllByText('/review').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Codex Instructions').length).toBeGreaterThan(0);

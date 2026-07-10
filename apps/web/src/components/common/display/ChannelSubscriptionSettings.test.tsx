@@ -70,6 +70,7 @@ function makeChannel(): ChannelSettingsEntry {
     config: { appId: 'cli_test', appSecret: 'secret_test' },
     subscriptions: [],
     features: { autoReply: true, streamingReply: true, autoStart: true },
+    channelLlmToolsEnabled: false,
     providerId: null,
     model: null,
     tools: {
@@ -158,6 +159,53 @@ describe('ChannelSubscriptionSettings · 工具白名单保存语义', () => {
     expect(savedDraft.tools['FeishuSendUrgent']).toBe(false);
   });
 
+  it('Given 工具白名单全勾选 When 打开模型工具总开关并保存 Then payload 写入 LLM 工具声明开关', async () => {
+    const channel = makeChannel();
+    const onSave = vi.fn(
+      async (channelId: string | null, draft: ChannelDraft): Promise<ChannelSettingsEntry> => ({
+        ...channel,
+        id: channelId ?? channel.id,
+        channelLlmToolsEnabled: draft.channelLlmToolsEnabled,
+        tools: draft.tools,
+      }),
+    );
+
+    render(
+      <ChannelSubscriptionSettings
+        channels={[channel]}
+        descriptors={[FEISHU_DESCRIPTOR]}
+        onSave={onSave}
+      />,
+    );
+
+    const gate = checkboxFor('允许模型调用工作台工具');
+    expect(gate.checked).toBe(false);
+
+    fireEvent.click(gate);
+    fireEvent.click(screen.getByRole('button', { name: '保存改动' }));
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledTimes(1);
+    });
+    const firstCall = onSave.mock.calls[0];
+    if (!firstCall) {
+      throw new Error('Expected onSave to be called');
+    }
+    expect(firstCall[1].channelLlmToolsEnabled).toBe(true);
+  });
+
+  it('Given 已允许模型工具的通道 When 打开配置面板 Then 总开关保持选中', async () => {
+    render(
+      <ChannelSubscriptionSettings
+        channels={[{ ...makeChannel(), channelLlmToolsEnabled: true }]}
+        descriptors={[FEISHU_DESCRIPTOR]}
+        onSave={vi.fn()}
+      />,
+    );
+
+    expect(checkboxFor('允许模型调用工作台工具').checked).toBe(true);
+  });
+
   it('Given 微信模板尚未扫码绑定 When 创建实例 Then 允许空凭证先保存', async () => {
     const onSave = vi.fn(
       async (_channelId: string | null, draft: ChannelDraft): Promise<ChannelSettingsEntry> => ({
@@ -240,7 +288,7 @@ describe('ChannelSubscriptionSettings · 工具白名单保存语义', () => {
         personas={[
           {
             resourceId: 'resource-soul-balanced-collaborator',
-            title: 'Balanced Collaborator',
+            title: '稳健协作者',
             description: '稳健协作人设',
             source: 'reference',
           },
@@ -263,7 +311,7 @@ describe('ChannelSubscriptionSettings · 工具白名单保存语义', () => {
     }
     expect(firstCall[1].persona).toEqual({
       resourceId: 'resource-soul-balanced-collaborator',
-      title: 'Balanced Collaborator',
+      title: '稳健协作者',
     });
   });
 });

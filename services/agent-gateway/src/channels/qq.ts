@@ -12,6 +12,7 @@ import { QQApiClient } from './qq-api.js';
 import { QQGatewayClient } from './qq-gateway.js';
 import { parseQQInboundMessage } from './inbound-parsers/qq.js';
 import { parseQQChatId } from './qq-target.js';
+import { channelLogInfo, summarizeChannelMessage } from './channel-log.js';
 export { parseQQChatId } from './qq-target.js';
 
 function parseBooleanConfig(value: string | undefined): boolean {
@@ -93,6 +94,10 @@ export class QQChannelService implements MessagingChannelService {
     this.gateway = gateway;
     try {
       await gateway.start();
+      channelLogInfo('qq gateway channel started', {
+        pluginId: this.pluginId,
+        transport: this.gatewayUrl === undefined ? 'gateway' : 'gateway-custom-url',
+      });
     } catch (error) {
       this.gateway = null;
       this.running = false;
@@ -104,6 +109,7 @@ export class QQChannelService implements MessagingChannelService {
     this.gateway?.stop();
     this.gateway = null;
     this.running = false;
+    channelLogInfo('qq gateway channel stopped', { pluginId: this.pluginId });
   }
 
   isRunning(): boolean {
@@ -133,7 +139,50 @@ export class QQChannelService implements MessagingChannelService {
   }
 
   async sendMessage(chatId: string, content: string): Promise<{ messageId: string }> {
-    return this.api.sendMessage(parseQQChatId(chatId), content);
+    channelLogInfo('qq sending text message', {
+      pluginId: this.pluginId,
+      chatId,
+      contentLength: content.length,
+    });
+    const result = await this.api.sendMessage(parseQQChatId(chatId), content);
+    channelLogInfo('qq text message sent', {
+      pluginId: this.pluginId,
+      chatId,
+      messageId: result.messageId,
+    });
+    return result;
+  }
+
+  async sendImage(
+    chatId: string,
+    input: {
+      readonly buffer: Buffer;
+      readonly fileName?: string;
+      readonly signal?: AbortSignal;
+      readonly sourceUrl?: string;
+      readonly text?: string;
+    },
+  ): Promise<{ messageId: string }> {
+    void input.fileName;
+    void input.signal;
+    channelLogInfo('qq sending image message', {
+      pluginId: this.pluginId,
+      chatId,
+      fileName: input.fileName,
+      byteLength: input.buffer.byteLength,
+      textLength: input.text?.length ?? 0,
+    });
+    const result = await this.api.sendImage(parseQQChatId(chatId), {
+      buffer: input.buffer,
+      ...(input.sourceUrl ? { sourceUrl: input.sourceUrl } : {}),
+      ...(input.text ? { text: input.text } : {}),
+    });
+    channelLogInfo('qq image message sent', {
+      pluginId: this.pluginId,
+      chatId,
+      messageId: result.messageId,
+    });
+    return result;
   }
 
   async replyMessage(messageId: string, content: string): Promise<{ messageId: string }> {
@@ -141,13 +190,69 @@ export class QQChannelService implements MessagingChannelService {
     if (!chatId || !replyToMessageId) {
       throw new Error('QQ reply requires "<chatId>|<messageId>" reference');
     }
-    return this.api.sendMessage(parseQQChatId(chatId), content, replyToMessageId);
+    channelLogInfo('qq replying text message', {
+      pluginId: this.pluginId,
+      chatId,
+      replyToMessageId,
+      contentLength: content.length,
+    });
+    const result = await this.api.sendMessage(parseQQChatId(chatId), content, replyToMessageId);
+    channelLogInfo('qq text reply sent', {
+      pluginId: this.pluginId,
+      chatId,
+      replyToMessageId,
+      messageId: result.messageId,
+    });
+    return result;
+  }
+
+  async replyImage(
+    messageId: string,
+    input: {
+      readonly buffer: Buffer;
+      readonly fileName?: string;
+      readonly signal?: AbortSignal;
+      readonly sourceUrl?: string;
+      readonly text?: string;
+    },
+  ): Promise<{ messageId: string }> {
+    void input.fileName;
+    void input.signal;
+    const [chatId, replyToMessageId] = messageId.split('|');
+    if (!chatId || !replyToMessageId) {
+      throw new Error('QQ image reply requires "<chatId>|<messageId>" reference');
+    }
+    channelLogInfo('qq replying image message', {
+      pluginId: this.pluginId,
+      chatId,
+      replyToMessageId,
+      fileName: input.fileName,
+      byteLength: input.buffer.byteLength,
+      textLength: input.text?.length ?? 0,
+    });
+    const result = await this.api.sendImage(parseQQChatId(chatId), {
+      buffer: input.buffer,
+      replyToMessageId,
+      ...(input.sourceUrl ? { sourceUrl: input.sourceUrl } : {}),
+      ...(input.text ? { text: input.text } : {}),
+    });
+    channelLogInfo('qq image reply sent', {
+      pluginId: this.pluginId,
+      chatId,
+      replyToMessageId,
+      messageId: result.messageId,
+    });
+    return result;
   }
 
   handleWebhookEvent(body: unknown, signature?: string): void {
     void signature;
     const message = parseQQInboundMessage(body);
     if (message) {
+      channelLogInfo('qq webhook message parsed', {
+        pluginId: this.pluginId,
+        ...summarizeChannelMessage(message),
+      });
       this.safeNotify({ type: 'message', pluginId: this.pluginId, message });
     }
   }

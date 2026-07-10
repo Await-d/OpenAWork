@@ -18,6 +18,7 @@ interface ChannelSessionRow {
 
 export interface ChannelContext {
   readonly chatId: string;
+  readonly currentMessageId?: string;
   readonly pluginId: string;
   readonly pluginType?: string;
 }
@@ -37,6 +38,8 @@ function readCurrentChannelContext(sessionId: string): ChannelContext | null {
   const pluginType = typeof channel?.['type'] === 'string' ? channel['type'] : undefined;
   const metadataChatId =
     typeof metadata['channelChatId'] === 'string' ? metadata['channelChatId'] : '';
+  const currentMessageId =
+    typeof metadata['channelMessageId'] === 'string' ? metadata['channelMessageId'] : '';
   const titlePrefix = pluginId ? `channel:${pluginId}:chat:` : '';
   const titleChatId =
     row?.title && titlePrefix && row.title.startsWith(titlePrefix)
@@ -46,7 +49,12 @@ function readCurrentChannelContext(sessionId: string): ChannelContext | null {
   if (metadata['source'] !== 'channel' || !pluginId || !chatId) {
     return null;
   }
-  return pluginType ? { pluginId, chatId, pluginType } : { pluginId, chatId };
+  return {
+    pluginId,
+    chatId,
+    ...(pluginType ? { pluginType } : {}),
+    ...(currentMessageId ? { currentMessageId } : {}),
+  };
 }
 
 export function assertChannelContext(
@@ -70,7 +78,7 @@ export async function readChannelMedia(input: {
   readonly filePath: string;
   readonly sessionId: string;
   readonly signal: AbortSignal;
-}): Promise<{ readonly buffer: Buffer; readonly fileName: string }> {
+}): Promise<{ readonly buffer: Buffer; readonly fileName: string; readonly sourceUrl?: string }> {
   if (input.filePath.startsWith('http://') || input.filePath.startsWith('https://')) {
     const response = await channelFetch(input.filePath, {
       signal: input.signal,
@@ -82,6 +90,7 @@ export async function readChannelMedia(input: {
     return {
       buffer: Buffer.from(await response.arrayBuffer()),
       fileName: basename(new URL(input.filePath).pathname) || 'download.bin',
+      sourceUrl: input.filePath,
     };
   }
 

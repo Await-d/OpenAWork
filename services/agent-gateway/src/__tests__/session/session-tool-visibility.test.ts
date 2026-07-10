@@ -79,6 +79,7 @@ describe('session tool visibility', () => {
 
     expect(isGatewayToolEnabledForSessionMetadata('PluginSendMessage', metadata)).toBe(true);
     expect(isGatewayToolEnabledForSessionMetadata('PluginReplyMessage', metadata)).toBe(true);
+    expect(isGatewayToolEnabledForSessionMetadata('PluginSendImage', metadata)).toBe(true);
     expect(isGatewayToolEnabledForSessionMetadata('WeixinSendImage', metadata)).toBe(false);
     expect(isGatewayToolEnabledForSessionMetadata('WeixinSendFile', metadata)).toBe(false);
     expect(isGatewayToolEnabledForSessionMetadata('FeishuSendImage', metadata)).toBe(false);
@@ -148,6 +149,7 @@ describe('session tool visibility', () => {
 
     expect(isGatewayToolEnabledForSessionMetadata('PluginSendMessage', metadata)).toBe(false);
     expect(isGatewayToolEnabledForSessionMetadata('PluginReplyMessage', metadata)).toBe(false);
+    expect(isGatewayToolEnabledForSessionMetadata('PluginSendImage', metadata)).toBe(false);
     expect(isGatewayToolEnabledForSessionMetadata('WeixinSendImage', metadata)).toBe(false);
     expect(isGatewayToolEnabledForSessionMetadata('WeixinSendFile', metadata)).toBe(false);
     for (const toolName of FEISHU_TOOL_NAMES) {
@@ -165,7 +167,12 @@ describe('session tool visibility', () => {
         },
       },
     });
-    const tools = [makeTool('websearch'), makeTool('read'), makeTool('PluginReplyMessage')];
+    const tools = [
+      makeTool('websearch'),
+      makeTool('read'),
+      makeTool('PluginReplyMessage'),
+      makeTool('PluginSendImage'),
+    ];
 
     expect(filterEnabledGatewayToolsForSession(tools, metadata)).toEqual([]);
   });
@@ -191,6 +198,7 @@ describe('session tool visibility', () => {
     };
 
     expect(isGatewayToolEnabledForSessionMetadata('PluginReplyMessage', metadata)).toBe(true);
+    expect(isGatewayToolEnabledForSessionMetadata('PluginSendImage', metadata)).toBe(true);
     expect(isGatewayToolEnabledForSessionMetadata('websearch', metadata)).toBe(false);
     expect(isGatewayToolEnabledForSessionMetadata('read', metadata)).toBe(false);
     expect(isGatewayToolEnabledForSessionMetadata('bash', metadata)).toBe(false);
@@ -221,12 +229,13 @@ describe('session tool visibility', () => {
       makeTool('websearch'),
       makeTool('desktop_control'),
       makeTool('PluginReplyMessage'),
+      makeTool('PluginSendImage'),
       makeTool('WeixinSendImage'),
     ];
 
     expect(
       filterEnabledGatewayToolsForSession(tools, metadata).map((tool) => tool.function.name),
-    ).toEqual(['websearch', 'PluginReplyMessage']);
+    ).toEqual(['websearch', 'PluginReplyMessage', 'PluginSendImage']);
   });
 
   it('Given channel-managed metadata with LLM tool opt-in When only web search is allowed Then unmapped tools stay disabled', () => {
