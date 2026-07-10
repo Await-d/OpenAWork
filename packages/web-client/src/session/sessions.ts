@@ -149,8 +149,7 @@ export interface SessionSnapshotRestorePreviewResult {
 }
 
 export type SessionRestorePreviewResult =
-  | SessionBackupRestorePreviewResult
-  | SessionSnapshotRestorePreviewResult;
+  SessionBackupRestorePreviewResult | SessionSnapshotRestorePreviewResult;
 
 export interface SessionRestoreApplyResult {
   applied: true;
@@ -780,11 +779,7 @@ async function performSessionRequest<
     if (!res.ok) {
       const data = await readJsonErrorData<TError>(res);
       throw new HttpError(
-        buildSessionActionErrorMessage(
-          input.actionLabel,
-          res.status,
-          data as SessionErrorData | undefined,
-        ),
+        buildSessionActionErrorMessage(input.actionLabel, res.status, data),
         res.status,
         data,
       );
@@ -1167,7 +1162,7 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
       const params = new URLSearchParams();
       appendBooleanQuery(params, 'includeText', options?.includeText);
       const query = params.size > 0 ? `?${params.toString()}` : '';
-      return (await performSessionRequest<{
+      return await performSessionRequest<{
         clientRequestId: string;
         fileChanges: SessionFileChangesProjection;
       }>({
@@ -1180,10 +1175,7 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
               signal: options?.signal,
             },
           ),
-      })) as {
-        clientRequestId: string;
-        fileChanges: SessionFileChangesProjection;
-      };
+      });
     },
 
     async listSnapshots(token, sessionId, options) {
@@ -1440,11 +1432,7 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
               ...(input.force ? { force: true } : {}),
             }),
           }),
-      }) as Promise<{
-        ok: true;
-        workingDirectory: string | null;
-        warped?: boolean;
-      }>;
+      });
     },
   };
 }
@@ -1533,8 +1521,7 @@ export function createMultiAttachStream(input: {
       const envelopePayload = payload as Record<string, unknown>;
       const runEvent = envelopePayload['event'] as RunEvent;
       const cursor = envelopePayload['cursor'] as
-        | { seq?: number; clientRequestId?: string }
-        | undefined;
+        { seq?: number; clientRequestId?: string } | undefined;
       const rowId = cursor?.seq ?? (parsed['seq'] as number | undefined) ?? 0;
       const clientRequestId = cursor?.clientRequestId;
 
