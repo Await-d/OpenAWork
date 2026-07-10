@@ -193,6 +193,19 @@ describe('buildProviderOptions', () => {
     });
   });
 
+  it('normalizes legacy OpenAI max reasoning effort to xhigh', () => {
+    const options = buildProviderOptions({
+      thinking: {
+        ...baseThinking,
+        providerType: 'openai',
+        effort: 'max',
+      },
+      model: 'gpt-5.4-nano',
+    });
+
+    expect(options?.['openai']).toMatchObject({ reasoningEffort: 'xhigh' });
+  });
+
   it('emits qwen.enable_thinking + thinking_budget for qwen', () => {
     const options = buildProviderOptions({
       thinking: { ...baseThinking, providerType: 'qwen', enabled: true, effort: 'medium' },
@@ -217,8 +230,7 @@ describe('buildProviderOptions', () => {
       model: 'gemini-3-pro',
     });
     const oc = options?.['gemini'] as
-      | { google?: { thinking_config?: Record<string, unknown> } }
-      | undefined;
+      { google?: { thinking_config?: Record<string, unknown> } } | undefined;
     expect(oc?.google?.thinking_config).toMatchObject({
       include_thoughts: true,
       thinking_level: 'medium',

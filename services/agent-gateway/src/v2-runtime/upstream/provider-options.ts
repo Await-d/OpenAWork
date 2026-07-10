@@ -38,10 +38,11 @@ import type { JSONValue, SharedV2ProviderOptions } from '@ai-sdk/provider';
 import { resolveThinkingStyle, catalogModelSupportsThinking } from '@openAwork/agent-core';
 
 export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+export type ProviderReasoningEffort = ReasoningEffort | 'max';
 
 export interface ThinkingConfig {
   enabled: boolean;
-  effort: ReasoningEffort;
+  effort: ProviderReasoningEffort;
   /** Provider type (e.g. 'anthropic', 'openai', 'qwen', 'moonshot'). */
   providerType: string;
   /** Whether the upstream model is known to support thinking. */
@@ -223,6 +224,10 @@ const EFFORT_RANK: Record<ReasoningEffort, number> = {
   xhigh: 4,
 };
 
+function normalizeProviderReasoningEffort(effort: ProviderReasoningEffort): ReasoningEffort {
+  return effort === 'max' ? 'xhigh' : effort;
+}
+
 const GPT5_FAMILY_RE = /(?:^|\/)gpt-5(?:[.-]|$)/;
 const GPT5_VERSION_RE = /(?:^|\/)gpt-5[.-](\d+)(?:[.-]|$)/;
 const GPT5_PRO_RE = /(?:^|\/)gpt-5[.-]?pro(?:[.-]|$)/;
@@ -281,13 +286,14 @@ function gpt5SupportedEfforts(apiId: string): readonly ReasoningEffort[] | undef
  */
 export function clampReasoningEffortForModel(
   modelId: string,
-  requested: ReasoningEffort,
+  requested: ProviderReasoningEffort,
 ): ReasoningEffort {
   const id = modelId.toLowerCase();
+  const normalized = normalizeProviderReasoningEffort(requested);
   const supported = gpt5SupportedEfforts(id);
-  if (!supported || supported.length === 0) return requested;
-  if (supported.includes(requested)) return requested;
-  const targetRank = EFFORT_RANK[requested];
+  if (!supported || supported.length === 0) return normalized;
+  if (supported.includes(normalized)) return normalized;
+  const targetRank = EFFORT_RANK[normalized];
   const sortedDesc = [...supported].sort((a, b) => EFFORT_RANK[b] - EFFORT_RANK[a]);
   for (const eff of sortedDesc) {
     if (EFFORT_RANK[eff] <= targetRank) return eff;
@@ -406,7 +412,7 @@ export function mergeProviderOptions(
 ): SharedV2ProviderOptions | undefined {
   const merged = items.reduce<ProviderOptionsRecord>((acc, item) => {
     if (!item) return acc;
-    return mergeDeep(acc, item as ProviderOptionsRecord);
+    return mergeDeep(acc, item);
   }, {});
   return Object.keys(merged).length > 0 ? (merged as SharedV2ProviderOptions) : undefined;
 }
@@ -505,6 +511,7 @@ export function buildProviderOptions(input: {
   }
 
   const model = input.model.toLowerCase();
+  const effort = normalizeProviderReasoningEffort(thinking.effort);
   const style = resolveThinkingStyle(thinking.providerType, input.model);
   const modelInfo = buildProviderOptionsModelInfo({
     providerType: thinking.providerType,
@@ -525,7 +532,7 @@ export function buildProviderOptions(input: {
       if (thinking.enabled) {
         anthropic['thinking'] = {
           type: 'enabled',
-          budgetTokens: ANTHROPIC_THINKING_BUDGETS[thinking.effort],
+          budgetTokens: ANTHROPIC_THINKING_BUDGETS[effort],
         };
       } else {
         anthropic['thinking'] = { type: 'disabled' };
@@ -541,7 +548,7 @@ export function buildProviderOptions(input: {
       // clamp before send to avoid 400s on e.g. gpt-5.1 (no `minimal`),
       // gpt-5-pro (only `high`), gpt-5-chat (only `medium`).
       return providerOptions(modelInfo, {
-        reasoningEffort: clampReasoningEffortForModel(input.model, thinking.effort),
+        reasoningEffort: clampReasoningEffortForModel(input.model, effort),
       });
     }
 
@@ -551,10 +558,10 @@ export function buildProviderOptions(input: {
       }
       // OpenRouter routes GPT-5 traffic to OpenAI; the same per-model
       // effort subset rules apply when the upstream is GPT-5.
-      const effort = clampReasoningEffortForModel(input.model, thinking.effort);
+      const openRouterEffort = clampReasoningEffortForModel(input.model, effort);
       return providerOptions(modelInfo, {
         body: {
-          reasoning: thinking.enabled ? { effort } : { enabled: false },
+          reasoning: thinking.enabled ? { effort: openRouterEffort } : { enabled: false },
         },
       });
     }
@@ -576,7 +583,7 @@ export function buildProviderOptions(input: {
       //   - thinking: { type: 'enabled' } 开启思维链
       //   - reasoning_effort: 'high' | 'max' 控制推理力度
       // minimal/low 不发送 reasoning_effort（让上游用默认行为）。
-      const effortParam = deepseekReasoningEffort(thinking.effort);
+      const effortParam = deepseekReasoningEffort(effort);
       return providerOptions(modelInfo, {
         body: {
           thinking: { type: 'enabled' },
@@ -610,7 +617,7 @@ export function buildProviderOptions(input: {
             google: {
               thinking_config: {
                 include_thoughts: true,
-                thinking_level: googleThinkingLevelForEffort(model, thinking.effort),
+                thinking_level: googleThinkingLevelForEffort(model, effort),
               },
             },
           },
@@ -621,7 +628,7 @@ export function buildProviderOptions(input: {
           google: {
             thinking_config: {
               include_thoughts: true,
-              thinking_budget: googleThinkingBudgetForEffort(model, thinking.effort),
+              thinking_budget: googleThinkingBudgetForEffort(model, effort),
             },
           },
         },
@@ -639,7 +646,7 @@ export function buildProviderOptions(input: {
       return providerOptions(modelInfo, {
         body: {
           enable_thinking: true,
-          thinking_budget: QWEN_THINKING_BUDGETS[thinking.effort],
+          thinking_budget: QWEN_THINKING_BUDGETS[effort],
         },
       });
     }
