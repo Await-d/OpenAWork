@@ -19,8 +19,7 @@ const poolMock = vi.hoisted(() => ({
   // Registered listener captured here so individual tests can fire
   // synthetic ToolListChanged events without a real MCP server.
   capturedListener: null as
-    | null
-    | ((evt: { userId: string; mcpName: string; serverId: string }) => void | Promise<void>),
+    null | ((evt: { userId: string; mcpName: string; serverId: string }) => void | Promise<void>),
   onToolListChanged: vi.fn(
     (
       listener: (evt: {

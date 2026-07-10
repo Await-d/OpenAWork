@@ -340,7 +340,9 @@ export function WorkspaceFileTreePanel({
         background: 'color-mix(in oklab, var(--bg-overlay) 82%, var(--bg-base) 18%)',
       };
 
-  const toolBtnSize = isEmbedded ? { width: 22, height: 22, borderRadius: 5 } : { width: 26, height: 26, borderRadius: 7 };
+  const toolBtnSize = isEmbedded
+    ? { width: 22, height: 22, borderRadius: 5 }
+    : { width: 26, height: 26, borderRadius: 7 };
 
   const searchWrapStyle: React.CSSProperties = isEmbedded
     ? {
@@ -543,8 +545,7 @@ export function WorkspaceFileTreePanel({
               padding: '8px 10px',
               margin: isEmbedded ? '0 8px' : undefined,
               borderRadius: isEmbedded ? 6 : 8,
-              border:
-                '1px solid color-mix(in oklab, var(--danger) 32%, var(--border-default) 68%)',
+              border: '1px solid color-mix(in oklab, var(--danger) 32%, var(--border-default) 68%)',
               background: 'color-mix(in oklab, var(--danger) 10%, var(--bg-overlay) 90%)',
               color: 'var(--fg-default)',
               fontSize: 11,
@@ -674,9 +675,7 @@ export function WorkspaceFileTreePanel({
             x={fileTreeContextMenu.x}
             y={fileTreeContextMenu.y}
             targetLabel={
-              fileTreeContextMenu.targetType === 'root'
-                ? '工作区根目录'
-                : fileTreeContextMenu.name
+              fileTreeContextMenu.targetType === 'root' ? '工作区根目录' : fileTreeContextMenu.name
             }
             targetType={fileTreeContextMenu.targetType}
             relativePath={getFileTreeRelativePath(fileTreeRootPath, fileTreeContextMenu.path)}

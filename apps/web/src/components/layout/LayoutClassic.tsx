@@ -35,44 +35,44 @@ export function LayoutClassic({ shared, theme, onToggleTheme }: LayoutClassicPro
         background: 'var(--bg-base)',
       }}
     >
-        {!hideGlobalSidebar ? (
-          <AppSidebar
-            accessToken={accessToken}
-            gatewayUrl={gatewayUrl}
-            theme={theme}
-            onToggleTheme={onToggleTheme}
-            onLogout={() => {
-              clearAuth();
-              void navigate('/');
-            }}
-            pendingPermissionIndicator={pendingPermissionIndicator}
-          />
-        ) : null}
-
-        <div
-          style={{
-            display: 'flex',
-            flex: 1,
-            minWidth: 0,
-            flexDirection: 'column',
-            overflow: 'hidden',
+      {!hideGlobalSidebar ? (
+        <AppSidebar
+          accessToken={accessToken}
+          gatewayUrl={gatewayUrl}
+          theme={theme}
+          onToggleTheme={onToggleTheme}
+          onLogout={() => {
+            clearAuth();
+            void navigate('/');
           }}
-        >
-          <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', minWidth: 0 }}>
-            <div
-              className="outlet-content-wrap"
-              style={{
-                flex: 1,
-                overflow: 'hidden',
-                display: 'flex',
-                minWidth: 0,
-                position: 'relative',
-              }}
-            >
-              <CachedRouteOutlet />
-            </div>
+          pendingPermissionIndicator={pendingPermissionIndicator}
+        />
+      ) : null}
+
+      <div
+        style={{
+          display: 'flex',
+          flex: 1,
+          minWidth: 0,
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+      >
+        <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', minWidth: 0 }}>
+          <div
+            className="outlet-content-wrap"
+            style={{
+              flex: 1,
+              overflow: 'hidden',
+              display: 'flex',
+              minWidth: 0,
+              position: 'relative',
+            }}
+          >
+            <CachedRouteOutlet />
           </div>
         </div>
+      </div>
     </div>
   );
 }

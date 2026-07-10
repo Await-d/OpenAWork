@@ -7,34 +7,34 @@ import {
   readFileSync,
   readdirSync,
   statSync,
-  writeFileSync
-} from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+  writeFileSync,
+} from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const scriptPath = fileURLToPath(import.meta.url)
-const skillRoot = path.resolve(path.dirname(scriptPath), '..')
-const templateRoot = path.join(skillRoot, 'templates', 'prototype')
+const scriptPath = fileURLToPath(import.meta.url);
+const skillRoot = path.resolve(path.dirname(scriptPath), '..');
+const templateRoot = path.join(skillRoot, 'templates', 'prototype');
 
 function parseArgs(argv) {
-  const args = {}
+  const args = {};
   for (let index = 0; index < argv.length; index += 1) {
-    const item = argv[index]
-    if (!item.startsWith('--')) continue
-    const [key, inlineValue] = item.slice(2).split('=', 2)
+    const item = argv[index];
+    if (!item.startsWith('--')) continue;
+    const [key, inlineValue] = item.slice(2).split('=', 2);
     if (inlineValue !== undefined) {
-      args[key] = inlineValue
-      continue
+      args[key] = inlineValue;
+      continue;
     }
-    const next = argv[index + 1]
+    const next = argv[index + 1];
     if (next && !next.startsWith('--')) {
-      args[key] = next
-      index += 1
+      args[key] = next;
+      index += 1;
     } else {
-      args[key] = true
+      args[key] = true;
     }
   }
-  return args
+  return args;
 }
 
 function slugify(value) {
@@ -44,56 +44,56 @@ function slugify(value) {
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '') || 'design-prototype'
-  )
+  );
 }
 
 function ensureEmptyDirectory(dest) {
   if (existsSync(dest) && statSync(dest).isFile()) {
-    throw new Error(`Destination exists and is not a directory: ${dest}`)
+    throw new Error(`Destination exists and is not a directory: ${dest}`);
   }
   if (existsSync(dest) && readdirSync(dest).length > 0) {
-    throw new Error(`Destination exists and is not empty: ${dest}`)
+    throw new Error(`Destination exists and is not empty: ${dest}`);
   }
-  mkdirSync(dest, { recursive: true })
+  mkdirSync(dest, { recursive: true });
 }
 
 function updatePackageName(dest) {
-  const packagePath = path.join(dest, 'package.json')
-  const pkg = JSON.parse(readFileSync(packagePath, 'utf8'))
-  pkg.name = slugify(path.basename(dest))
-  writeFileSync(packagePath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8')
+  const packagePath = path.join(dest, 'package.json');
+  const pkg = JSON.parse(readFileSync(packagePath, 'utf8'));
+  pkg.name = slugify(path.basename(dest));
+  writeFileSync(packagePath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8');
 }
 
 function main() {
-  const args = parseArgs(process.argv.slice(2))
-  const dest = path.resolve(String(args.dest || args.root || 'design-prototype'))
+  const args = parseArgs(process.argv.slice(2));
+  const dest = path.resolve(String(args.dest || args.root || 'design-prototype'));
 
   if (!existsSync(templateRoot)) {
-    throw new Error(`Prototype template is missing: ${templateRoot}`)
+    throw new Error(`Prototype template is missing: ${templateRoot}`);
   }
 
-  ensureEmptyDirectory(dest)
+  ensureEmptyDirectory(dest);
   cpSync(templateRoot, dest, {
     recursive: true,
     force: true,
     filter(current) {
       return !['node_modules', 'dist', '.vite', '.npm-cache', '.DS_Store'].includes(
-        path.basename(current)
-      )
-    }
-  })
-  updatePackageName(dest)
+        path.basename(current),
+      );
+    },
+  });
+  updatePackageName(dest);
   writeFileSync(
     path.join(dest, '.npmrc'),
     `cache=${path.join(dest, '.npm-cache')}\nfund=false\naudit=false\n`,
-    'utf8'
-  )
-  console.log(JSON.stringify({ status: 'created', root: dest }, null, 2))
+    'utf8',
+  );
+  console.log(JSON.stringify({ status: 'created', root: dest }, null, 2));
 }
 
 try {
-  main()
+  main();
 } catch (error) {
-  console.error(error instanceof Error ? error.message : String(error))
-  process.exit(1)
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
 }

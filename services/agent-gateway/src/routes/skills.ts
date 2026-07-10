@@ -2303,8 +2303,7 @@ export async function skillsRoutes(app: FastifyInstance): Promise<void> {
       const builtinEntry = builtinsToSkillEntries().find((e) => e.id === skillId);
       if (builtinEntry) {
         const manifest = builtinEntry.manifest as
-          | { readme?: string; license?: string; permissions?: Array<{ id: string }> }
-          | undefined;
+          { readme?: string; license?: string; permissions?: Array<{ id: string }> } | undefined;
         step.succeed(undefined, { source: 'builtin' });
         return reply.send({
           ...builtinEntry,

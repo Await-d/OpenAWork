@@ -1,8 +1,7 @@
 export type ImageGenerationSizePresetTier = '1k' | '2k' | '4k';
 export type ImageGenerationSizeAspect = 'square' | 'landscape' | 'portrait';
 export type ImageGenerationSizePresetId =
-  | `${ImageGenerationSizePresetTier}-${ImageGenerationSizeAspect}`
-  | 'custom';
+  `${ImageGenerationSizePresetTier}-${ImageGenerationSizeAspect}` | 'custom';
 export type ImageGenerationQuality = 'low' | 'medium' | 'high';
 export type ImageGenerationOutputFormat = 'png' | 'jpeg' | 'webp';
 export type ImageGenerationBackground = 'auto' | 'opaque';

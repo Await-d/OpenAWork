@@ -2,12 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import * as Updates from 'expo-updates';
 
 export type OtaUpdateStatus =
-  | 'idle'
-  | 'checking'
-  | 'downloading'
-  | 'ready'
-  | 'error'
-  | 'up-to-date';
+  'idle' | 'checking' | 'downloading' | 'ready' | 'error' | 'up-to-date';
 
 export interface OtaUpdateState {
   status: OtaUpdateStatus;

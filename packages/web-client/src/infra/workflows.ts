@@ -23,11 +23,7 @@ export interface WorkflowEdgeRecord {
 }
 
 export type WorkflowTemplateRequiredRole =
-  | 'leader'
-  | 'planner'
-  | 'researcher'
-  | 'executor'
-  | 'reviewer';
+  'leader' | 'planner' | 'researcher' | 'executor' | 'reviewer';
 export type WorkflowTemplateScale = 'full' | 'large' | 'medium' | 'small';
 
 export interface WorkflowTeamTemplateRoleBinding {

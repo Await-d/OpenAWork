@@ -374,8 +374,7 @@ export function getSshConnection(
 export function getSshConnectionUnscoped(connectionId: string): PersistedSshConnection | null {
   migrateSshTables();
   const row = db.prepare('SELECT * FROM ssh_connections WHERE id = ?').get(connectionId) as
-    | SshConnectionRow
-    | undefined;
+    SshConnectionRow | undefined;
   return row ? rowToConnection(row) : null;
 }
 

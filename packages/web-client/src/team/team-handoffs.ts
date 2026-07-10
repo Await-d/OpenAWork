@@ -25,13 +25,7 @@ import {
 } from '../gateway/http.js';
 
 export type HandoffRoleLayer =
-  | 'user'
-  | 'reception'
-  | 'pm1'
-  | 'pm2'
-  | 'executor'
-  | 'tester'
-  | 'reviewer';
+  'user' | 'reception' | 'pm1' | 'pm2' | 'executor' | 'tester' | 'reviewer';
 
 export type HandoffState = 'pending' | 'claimed' | 'running' | 'completed' | 'failed' | 'cancelled';
 

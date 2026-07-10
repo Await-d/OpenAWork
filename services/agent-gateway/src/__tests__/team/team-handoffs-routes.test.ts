@@ -1237,8 +1237,7 @@ describe('POST /team/sessions/:sessionId/resume-all', () => {
         }),
       );
       const backgroundRequest = runSessionInBackgroundMock.mock.calls.at(-1)?.[0] as
-        | { requestData?: Record<string, unknown> }
-        | undefined;
+        { requestData?: Record<string, unknown> } | undefined;
       expect(String(backgroundRequest?.requestData?.['clientRequestId'])).toMatch(
         /^team-resume:s-from-rt:/,
       );

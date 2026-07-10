@@ -145,23 +145,23 @@
 
 <script>
   window.addEventListener('extension-props', (event) => {
-    const props = event.detail || {}
+    const props = event.detail || {};
     const rows = Array.isArray(props.shops)
       ? props.shops
       : Array.isArray(props.products)
         ? props.products
-        : []
+        : [];
 
-    document.getElementById('title').textContent = props.title || 'Luckin list'
-    document.getElementById('subtitle').textContent = props.subtitle || ''
-    document.getElementById('count').textContent = rows.length ? `${rows.length} items` : ''
+    document.getElementById('title').textContent = props.title || 'Luckin list';
+    document.getElementById('subtitle').textContent = props.subtitle || '';
+    document.getElementById('count').textContent = rows.length ? `${rows.length} items` : '';
     document.getElementById('rows').innerHTML = rows.length
       ? rows.map(renderRow).join('')
-      : '<div class="empty">当前结果里没有可展示的条目。</div>'
-  })
+      : '<div class="empty">当前结果里没有可展示的条目。</div>';
+  });
 
   function renderRow(row) {
-    const title = row.deptName || row.productName || row.name || row.title || 'Item'
+    const title = row.deptName || row.productName || row.name || row.title || 'Item';
     const badge =
       row.badgeText ||
       row.estimatePrice ||
@@ -169,10 +169,10 @@
       row.deptId ||
       row.productId ||
       row.skuCode ||
-      ''
+      '';
     const imageUrl = safeUrl(
-      row.imageUrl || row.pictureUrl || row.breviaryPicUrl || row.bigPicUrl || row.picture
-    )
+      row.imageUrl || row.pictureUrl || row.breviaryPicUrl || row.bigPicUrl || row.picture,
+    );
     const meta = (
       Array.isArray(row.metaParts)
         ? row.metaParts
@@ -185,9 +185,9 @@
             row.initialPriceText && row.initialPriceText !== row.estimatePrice
               ? `原价 ${row.initialPriceText}`
               : '',
-            row.estimatePrice ? `价格 ${row.estimatePrice}` : row.initialPriceText
+            row.estimatePrice ? `价格 ${row.estimatePrice}` : row.initialPriceText,
           ]
-    ).filter(Boolean)
+    ).filter(Boolean);
     const details = (
       Array.isArray(row.details)
         ? row.details
@@ -195,9 +195,9 @@
             row.workStatus ? `状态: ${row.workStatus}` : '',
             row.number ? `门店编号: ${row.number}` : '',
             row.productId ? `商品 ID: ${row.productId}` : '',
-            row.skuCode ? `SKU: ${row.skuCode}` : ''
+            row.skuCode ? `SKU: ${row.skuCode}` : '',
           ]
-    ).filter(Boolean)
+    ).filter(Boolean);
     return `<article class="row">
       <div class="row-body${imageUrl ? ' has-image' : ''}">
         ${imageUrl ? `<div class="thumb-wrap"><img class="thumb" src="${escapeHtmlAttr(imageUrl)}" alt="${escapeHtmlAttr(title)}" /></div>` : ''}
@@ -207,20 +207,20 @@
           ${details.length ? `<div class="details">${details.map((detail) => `<div class="detail">${escapeHtml(detail)}</div>`).join('')}</div>` : ''}
         </div>
       </div>
-    </article>`
+    </article>`;
   }
 
   function safeUrl(value) {
     try {
-      const url = new URL(String(value || ''))
-      return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : ''
+      const url = new URL(String(value || ''));
+      return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : '';
     } catch {
-      return ''
+      return '';
     }
   }
 
   function escapeHtmlAttr(value) {
-    return escapeHtml(value)
+    return escapeHtml(value);
   }
 
   function escapeHtml(value) {
@@ -229,6 +229,6 @@
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;')
+      .replace(/'/g, '&#039;');
   }
 </script>

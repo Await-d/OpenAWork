@@ -2,8 +2,7 @@ import type { SessionTask } from '@openAwork/web-client';
 import type { HandoffEntry, HandoffEvent, LayerNode } from '../../../../stores/team/team-events.js';
 
 type SessionScopeNode =
-  | Pick<LayerNode, 'parentSessionId' | 'sessionId'>
-  | { id: string; parentSessionId: string | null };
+  Pick<LayerNode, 'parentSessionId' | 'sessionId'> | { id: string; parentSessionId: string | null };
 
 function readNodeSessionId(node: SessionScopeNode): string {
   return 'sessionId' in node ? node.sessionId : node.id;

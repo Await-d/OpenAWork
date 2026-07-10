@@ -36,11 +36,7 @@ const VERDICT_STYLES: Record<string, CSSProperties> = {
 };
 
 export type ReviewVerdict =
-  | 'pass'
-  | 'implementation-failure'
-  | 'planning-failure'
-  | 'execution-protocol-failure'
-  | null;
+  'pass' | 'implementation-failure' | 'planning-failure' | 'execution-protocol-failure' | null;
 
 export interface ReviewReportViewProps {
   reportMarkdown: string | null;

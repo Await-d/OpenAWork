@@ -4,13 +4,7 @@ import * as path from 'node:path';
 export const APP_NAME = 'OpenAWork';
 
 export type SupportedPlatform =
-  | 'darwin'
-  | 'linux'
-  | 'win32'
-  | 'android'
-  | 'freebsd'
-  | 'openbsd'
-  | 'netbsd';
+  'darwin' | 'linux' | 'win32' | 'android' | 'freebsd' | 'openbsd' | 'netbsd';
 
 export interface PlatformAdapter {
   getPlatform(): SupportedPlatform;

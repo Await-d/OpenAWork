@@ -16,13 +16,7 @@
 import { extractTextFromOutput } from './extract-text.js';
 
 export type LspVisualState =
-  | 'running'
-  | 'completed'
-  | 'failed'
-  | 'paused'
-  | 'pending'
-  | 'cancelled'
-  | 'idle';
+  'running' | 'completed' | 'failed' | 'paused' | 'pending' | 'cancelled' | 'idle';
 
 const SNIPPET_MAX = 60;
 

@@ -27,8 +27,7 @@ export async function prepareImageGenerationInput(
   const { files, gatewayUrl, selectedImageEditReferenceArtifact, sessionId, token } = options;
 
   let imageEditArtifacts:
-    | Array<{ artifactId: string; fileName?: string; mimeType?: string }>
-    | undefined;
+    Array<{ artifactId: string; fileName?: string; mimeType?: string }> | undefined;
   let localImageInputs: InputImageContent[] | undefined;
 
   if (selectedImageEditReferenceArtifact) {

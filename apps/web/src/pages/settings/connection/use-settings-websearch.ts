@@ -15,15 +15,7 @@ import { createSettingsClient } from '@openAwork/web-client';
 import { logger } from '../../../utils/log/logger.js';
 
 export type WebsearchProvider =
-  | 'duckduckgo'
-  | 'tavily'
-  | 'exa'
-  | 'serper'
-  | 'searxng'
-  | 'bocha'
-  | 'zhipu'
-  | 'google'
-  | 'bing';
+  'duckduckgo' | 'tavily' | 'exa' | 'serper' | 'searxng' | 'bocha' | 'zhipu' | 'google' | 'bing';
 
 export type WebsearchRolloutMode = 'sequential' | 'first-success' | 'merge';
 

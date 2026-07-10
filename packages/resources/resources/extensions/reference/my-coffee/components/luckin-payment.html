@@ -109,36 +109,36 @@
 
 <script>
   window.addEventListener('extension-props', (event) => {
-    const props = event.detail || {}
-    const fields = Array.isArray(props.fields) ? props.fields : []
-    const qrCodeUrl = safeUrl(props.qrCodeUrl || props.payOrderQrCodeUrl)
-    const openUrl = safeUrl(props.openUrl) || qrCodeUrl
+    const props = event.detail || {};
+    const fields = Array.isArray(props.fields) ? props.fields : [];
+    const qrCodeUrl = safeUrl(props.qrCodeUrl || props.payOrderQrCodeUrl);
+    const openUrl = safeUrl(props.openUrl) || qrCodeUrl;
 
-    document.getElementById('title').textContent = props.title || 'Luckin payment'
-    document.getElementById('subtitle').textContent = props.subtitle || ''
-    document.getElementById('fields').innerHTML = fields.map(renderField).join('')
+    document.getElementById('title').textContent = props.title || 'Luckin payment';
+    document.getElementById('subtitle').textContent = props.subtitle || '';
+    document.getElementById('fields').innerHTML = fields.map(renderField).join('');
 
-    const qr = document.getElementById('qr')
-    const qrWrap = document.getElementById('qrWrap')
-    qr.src = qrCodeUrl
-    qrWrap.style.display = qrCodeUrl ? 'flex' : 'none'
+    const qr = document.getElementById('qr');
+    const qrWrap = document.getElementById('qrWrap');
+    qr.src = qrCodeUrl;
+    qrWrap.style.display = qrCodeUrl ? 'flex' : 'none';
 
-    const link = document.getElementById('link')
-    link.href = openUrl
-    link.textContent = openUrl
-    link.style.display = openUrl ? 'block' : 'none'
-  })
+    const link = document.getElementById('link');
+    link.href = openUrl;
+    link.textContent = openUrl;
+    link.style.display = openUrl ? 'block' : 'none';
+  });
 
   function renderField(field) {
-    return `<div class="field"><dt>${escapeHtml(field.label || field.name)}</dt><dd>${escapeHtml(field.value)}</dd></div>`
+    return `<div class="field"><dt>${escapeHtml(field.label || field.name)}</dt><dd>${escapeHtml(field.value)}</dd></div>`;
   }
 
   function safeUrl(value) {
     try {
-      const url = new URL(String(value || ''))
-      return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : ''
+      const url = new URL(String(value || ''));
+      return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : '';
     } catch {
-      return ''
+      return '';
     }
   }
 
@@ -148,6 +148,6 @@
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;')
+      .replace(/'/g, '&#039;');
   }
 </script>

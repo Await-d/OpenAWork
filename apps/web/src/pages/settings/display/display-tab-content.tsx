@@ -359,7 +359,11 @@ export function DisplayTabContent() {
 // ── 布局模式选择 ──────────────────────────────────────────
 
 const LAYOUT_OPTIONS: { value: WorkbenchLayoutMode; label: string; description: string }[] = [
-  { value: 'fusion', label: '融合布局', description: '侧栏 Rail + Panel 分离，支持工作区切换 peek' },
+  {
+    value: 'fusion',
+    label: '融合布局',
+    description: '侧栏 Rail + Panel 分离，支持工作区切换 peek',
+  },
   { value: 'classic', label: '经典布局', description: '侧栏一体化，简洁紧凑' },
 ];
 

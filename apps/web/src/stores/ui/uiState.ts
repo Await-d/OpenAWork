@@ -657,8 +657,7 @@ export const useUIStateStore = create<UIStateStore>()(
       setActiveTeamSessionId: (id) => set({ activeTeamSessionId: id }),
 
       resetToWelcomeSignal: null,
-      triggerResetToWelcome: (route) =>
-        set({ resetToWelcomeSignal: { route, nonce: Date.now() } }),
+      triggerResetToWelcome: (route) => set({ resetToWelcomeSignal: { route, nonce: Date.now() } }),
       consumeResetToWelcomeSignal: () => set({ resetToWelcomeSignal: null }),
 
       // Pinned sessions

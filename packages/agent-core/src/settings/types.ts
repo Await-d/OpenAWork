@@ -10,15 +10,7 @@ export interface AppSettings {
   toolResultFormat: 'toon' | 'json';
   webSearchEnabled: boolean;
   webSearchProvider:
-    | 'duckduckgo'
-    | 'tavily'
-    | 'exa'
-    | 'serper'
-    | 'searxng'
-    | 'bocha'
-    | 'zhipu'
-    | 'google'
-    | 'bing';
+    'duckduckgo' | 'tavily' | 'exa' | 'serper' | 'searxng' | 'bocha' | 'zhipu' | 'google' | 'bing';
   webSearchApiKey: string;
   webSearchBaseUrl: string;
   webSearchMaxResults: number;

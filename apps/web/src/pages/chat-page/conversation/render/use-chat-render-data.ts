@@ -385,11 +385,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
                 text: visibleStreamBuffer,
                 toolCalls: toolCallCards.map((toolCall) => ({
                   kind: resolveAssistantCapabilityKind(toolCall.toolName) as
-                    | 'tool'
-                    | 'agent'
-                    | 'skill'
-                    | 'mcp'
-                    | undefined,
+                    'tool' | 'agent' | 'skill' | 'mcp' | undefined,
                   toolCallId: toolCall.toolCallId,
                   toolName: toolCall.toolName,
                   input: toolCall.input as Record<string, unknown>,
@@ -428,11 +424,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
                   text: visibleStreamBuffer,
                   toolCalls: toolCallCards.map((toolCall) => ({
                     kind: resolveAssistantCapabilityKind(toolCall.toolName) as
-                      | 'tool'
-                      | 'agent'
-                      | 'skill'
-                      | 'mcp'
-                      | undefined,
+                      'tool' | 'agent' | 'skill' | 'mcp' | undefined,
                     toolCallId: toolCall.toolCallId,
                     toolName: toolCall.toolName,
                     input: toolCall.input as Record<string, unknown>,

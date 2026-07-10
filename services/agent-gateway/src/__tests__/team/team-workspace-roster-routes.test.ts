@@ -183,8 +183,7 @@ describe('team workspace default roster routes', () => {
       const threadBody = thread.json() as { id: string; metadata_json: string };
       const metadata = parseSessionMetadataJson(threadBody.metadata_json);
       const teamDefinition = metadata['teamDefinition'] as
-        | { memberSlots?: Array<{ id: string }> }
-        | undefined;
+        { memberSlots?: Array<{ id: string }> } | undefined;
 
       expect(Array.isArray(teamDefinition?.memberSlots)).toBe(true);
       expect(teamDefinition?.memberSlots?.[0]?.id).toBe('custom-executor-devops-route');

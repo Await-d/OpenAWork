@@ -60,14 +60,13 @@ describe('InMemoryTokenStore.autoRefresh concurrency', () => {
     store.save(expiredToken());
 
     const client: OAuthClient = {
-      refreshToken: vi.fn(
-        (_m, _r, _rt: string): Promise<OAuthTokenResponse> =>
-          Promise.resolve({
-            access_token: 'a2',
-            token_type: 'Bearer',
-            refresh_token: 'r2',
-            expires_in: -10,
-          }),
+      refreshToken: vi.fn((_m, _r, _rt: string): Promise<OAuthTokenResponse> =>
+        Promise.resolve({
+          access_token: 'a2',
+          token_type: 'Bearer',
+          refresh_token: 'r2',
+          expires_in: -10,
+        }),
       ),
     } as unknown as OAuthClient;
 

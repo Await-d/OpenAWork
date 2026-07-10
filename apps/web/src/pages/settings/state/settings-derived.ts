@@ -7,12 +7,7 @@ import type {
 } from './settings-types.js';
 
 type StreamStopReason =
-  | 'end_turn'
-  | 'tool_use'
-  | 'max_tokens'
-  | 'error'
-  | 'cancelled'
-  | 'tool_permission';
+  'end_turn' | 'tool_use' | 'max_tokens' | 'error' | 'cancelled' | 'tool_permission';
 
 interface UpstreamStreamSummaryPayload {
   stopReason?: StreamStopReason;

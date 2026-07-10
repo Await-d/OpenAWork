@@ -42,11 +42,7 @@ export interface RetryPolicy {
 }
 
 export type RootCauseCategory =
-  | 'logic_error'
-  | 'missing_dependency'
-  | 'env_issue'
-  | 'input_format'
-  | 'model_capability';
+  'logic_error' | 'missing_dependency' | 'env_issue' | 'input_format' | 'model_capability';
 
 export interface RootCauseAnalysis {
   category: RootCauseCategory;

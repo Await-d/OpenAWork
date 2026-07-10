@@ -57,9 +57,8 @@ describe('ContextManagerImpl.addUrl', () => {
   });
 
   it('给底层 fetch 传入超时 AbortSignal', async () => {
-    const fetchSpy = vi.fn(
-      (_url: string, _init?: RequestInit): Promise<Response> =>
-        Promise.resolve(new Response('ok', { status: 200 })),
+    const fetchSpy = vi.fn((_url: string, _init?: RequestInit): Promise<Response> =>
+      Promise.resolve(new Response('ok', { status: 200 })),
     );
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
 

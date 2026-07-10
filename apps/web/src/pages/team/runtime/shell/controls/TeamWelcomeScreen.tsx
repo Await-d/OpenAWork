@@ -178,7 +178,9 @@ export function TeamWelcomeScreen({
           disabled={!sessionActionEnabled}
           onClick={sessionActionEnabled ? onNewSession : undefined}
           onMouseEnter={(e) => {
-            if (sessionActionEnabled) e.currentTarget.style.background = 'color-mix(in srgb, var(--accent) 88%, var(--fg-strong))';
+            if (sessionActionEnabled)
+              e.currentTarget.style.background =
+                'color-mix(in srgb, var(--accent) 88%, var(--fg-strong))';
           }}
           onMouseLeave={(e) => {
             e.currentTarget.style.background = 'var(--accent)';

@@ -32,9 +32,7 @@ interface SessionSelectionRow {
 }
 
 type MemoriesRouteErrorCode =
-  | 'memory_not_found'
-  | 'memory_write_blocked'
-  | 'memory_extract_session_not_found';
+  'memory_not_found' | 'memory_write_blocked' | 'memory_extract_session_not_found';
 
 const MEMORIES_ROUTE_ERROR_MESSAGES: Record<MemoriesRouteErrorCode, string> = {
   memory_not_found: '目标记忆不存在。',

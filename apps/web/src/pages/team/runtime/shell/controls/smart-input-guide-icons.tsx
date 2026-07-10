@@ -1,14 +1,7 @@
 import type { ReactNode } from 'react';
 
 export type CommandIconName =
-  | 'new'
-  | 'help'
-  | 'template'
-  | 'retry'
-  | 'pause'
-  | 'resume'
-  | 'status'
-  | 'agent';
+  'new' | 'help' | 'template' | 'retry' | 'pause' | 'resume' | 'status' | 'agent';
 
 export type GuideIconTone = 'failure' | 'default';
 

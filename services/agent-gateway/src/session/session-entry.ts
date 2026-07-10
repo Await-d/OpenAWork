@@ -77,9 +77,7 @@ export interface SessionEntryAssistantReasoning {
 }
 
 export type SessionEntryAssistantContent =
-  | SessionEntryAssistantText
-  | SessionEntryAssistantReasoning
-  | SessionEntryAssistantTool;
+  SessionEntryAssistantText | SessionEntryAssistantReasoning | SessionEntryAssistantTool;
 
 export interface SessionEntryAssistantRetry {
   attempt: number;
@@ -130,10 +128,7 @@ export interface SessionEntryCompaction {
 }
 
 export type SessionEntry =
-  | SessionEntryUser
-  | SessionEntrySynthetic
-  | SessionEntryAssistant
-  | SessionEntryCompaction;
+  SessionEntryUser | SessionEntrySynthetic | SessionEntryAssistant | SessionEntryCompaction;
 
 // ─── Aggregation: SessionEvent[] → SessionEntry[] ───
 

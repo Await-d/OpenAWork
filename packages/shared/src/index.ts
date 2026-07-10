@@ -700,12 +700,7 @@ export function formatCanonicalRole(descriptor: CanonicalRoleDescriptor): string
 }
 
 export type CapabilitySource =
-  | 'builtin'
-  | 'installed'
-  | 'configured'
-  | 'runtime'
-  | 'reference'
-  | 'custom';
+  'builtin' | 'installed' | 'configured' | 'runtime' | 'reference' | 'custom';
 
 export interface CapabilityDescriptor {
   id: string;
@@ -962,13 +957,7 @@ export interface TaskRunRecord {
   executorType: 'subagent' | 'shell' | 'remote' | 'teammate';
   sessionRef: string;
   status:
-    | 'pending'
-    | 'running'
-    | 'waiting'
-    | 'cancel_requested'
-    | 'completed'
-    | 'failed'
-    | 'cancelled';
+    'pending' | 'running' | 'waiting' | 'cancel_requested' | 'completed' | 'failed' | 'cancelled';
   deliveryState: 'pending_delivery' | 'delivered' | 'suppressed';
   outputRef?: string;
   outputOffset: number;

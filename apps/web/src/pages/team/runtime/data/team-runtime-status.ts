@@ -190,10 +190,7 @@ export function formatSidebarTeamStatus(status: AgentTeamsSidebarTeam['status'])
  * - 'failed'：兜底
  */
 export type RefinedFailedStatus =
-  | 'partial_blocked'
-  | 'awaiting_confirmation'
-  | 'system_error'
-  | 'failed';
+  'partial_blocked' | 'awaiting_confirmation' | 'system_error' | 'failed';
 
 export function refineFailedStatus(input: {
   status: AgentTeamsSidebarTeam['status'];

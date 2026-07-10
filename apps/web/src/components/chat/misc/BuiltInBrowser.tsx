@@ -401,8 +401,7 @@ export function BuiltInBrowser({
   useEffect(() => {
     const handler = (event: Event) => {
       const detail = (event as CustomEvent).detail as
-        | { url?: string; mode?: 'newTab' | 'currentTab' }
-        | undefined;
+        { url?: string; mode?: 'newTab' | 'currentTab' } | undefined;
       const url = detail?.url;
       if (typeof url !== 'string' || url.length === 0) return;
       if (detail?.mode === 'currentTab') {

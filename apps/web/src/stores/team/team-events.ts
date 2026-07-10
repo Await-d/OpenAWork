@@ -21,13 +21,7 @@ import { useTeamUsageStore, useTeamToolCallStore } from './team-usage.js';
 export type HandoffState = 'pending' | 'claimed' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 export type TeamRoleLayer =
-  | 'user'
-  | 'reception'
-  | 'pm1'
-  | 'pm2'
-  | 'executor'
-  | 'tester'
-  | 'reviewer';
+  'user' | 'reception' | 'pm1' | 'pm2' | 'executor' | 'tester' | 'reviewer';
 
 export interface HandoffEvent {
   type: string;
@@ -78,12 +72,7 @@ export interface LayerNode {
 }
 
 export type TeamEventsConnectionState =
-  | 'idle'
-  | 'connecting'
-  | 'connected'
-  | 'offline'
-  | 'reconnecting'
-  | 'stopped';
+  'idle' | 'connecting' | 'connected' | 'offline' | 'reconnecting' | 'stopped';
 
 interface TeamRuntimeSnapshotHandoffRecord {
   claimedAt?: string | null;

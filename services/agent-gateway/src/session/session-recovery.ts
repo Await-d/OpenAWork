@@ -19,10 +19,7 @@ import { extractToolResultContentsFromMessage } from '../tools/tool-result-contr
 // ---------------------------------------------------------------------------
 
 export type RecoveryErrorType =
-  | 'tool_result_missing'
-  | 'thinking_block_order'
-  | 'thinking_disabled_violation'
-  | null;
+  'tool_result_missing' | 'thinking_block_order' | 'thinking_disabled_violation' | null;
 
 export function detectRecoveryErrorType(error: unknown): RecoveryErrorType {
   const message = extractErrorMessageText(error);

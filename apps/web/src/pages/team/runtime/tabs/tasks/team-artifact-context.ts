@@ -4,10 +4,7 @@ type ArtifactRoleLayer = HandoffRecord['fromRoleLayer'] | null;
 
 /** 后端 ReviewReport.overallVerdict 的完整 union 类型 */
 export type ReviewOverallVerdict =
-  | 'pass'
-  | 'implementation-failure'
-  | 'planning-failure'
-  | 'execution-protocol-failure';
+  'pass' | 'implementation-failure' | 'planning-failure' | 'execution-protocol-failure';
 
 interface DispatchPayload {
   dispatch_package?: DispatchPackagePayload;

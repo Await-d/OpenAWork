@@ -38,12 +38,7 @@ export interface ErrorState {
 }
 
 export type AgentState =
-  | IdleState
-  | RunningState
-  | ToolCallingState
-  | RetryState
-  | InterruptedState
-  | ErrorState;
+  IdleState | RunningState | ToolCallingState | RetryState | InterruptedState | ErrorState;
 
 export type AgentEvent =
   | { type: 'START'; requestId: string; abortController: AbortController }

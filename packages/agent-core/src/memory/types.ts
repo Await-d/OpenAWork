@@ -1,9 +1,5 @@
 export type MemoryType =
-  | 'preference'
-  | 'fact'
-  | 'instruction'
-  | 'project_context'
-  | 'learned_pattern';
+  'preference' | 'fact' | 'instruction' | 'project_context' | 'learned_pattern';
 
 export type MemorySource = 'manual' | 'auto_extracted' | 'api';
 

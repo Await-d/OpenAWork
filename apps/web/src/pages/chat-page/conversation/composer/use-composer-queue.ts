@@ -25,9 +25,7 @@ export interface ComposerQueueOptions {
   queuedComposerScope: string | null;
   setComposerMenu: (
     value:
-      | ComposerMenuState
-      | null
-      | ((prev: ComposerMenuState | null) => ComposerMenuState | null),
+      ComposerMenuState | null | ((prev: ComposerMenuState | null) => ComposerMenuState | null),
   ) => void;
   setStreamError: (value: string | null) => void;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;

@@ -1,4 +1,11 @@
-import { type CSSProperties, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import {
+  type CSSProperties,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { EditorBrowserWorkspace, type EditorPaneTab } from './EditorBrowserWorkspace.js';
 import type { OpenFile, RevealTarget } from '../../hooks/editor/useFileEditor.js';
 

@@ -18,18 +18,17 @@ function makeClient() {
 
 describe('OAuthClientImpl HTTP timeouts', () => {
   it('discoverMetadata 给底层 fetch 传入超时 AbortSignal', async () => {
-    const fetchSpy = vi.fn(
-      (_url: string, _init?: RequestInit): Promise<Response> =>
-        Promise.resolve(
-          new Response(
-            JSON.stringify({
-              issuer: 'https://auth.test',
-              authorization_endpoint: 'https://auth.test/authorize',
-              token_endpoint: 'https://auth.test/token',
-            }),
-            { status: 200, headers: { 'content-type': 'application/json' } },
-          ),
+    const fetchSpy = vi.fn((_url: string, _init?: RequestInit): Promise<Response> =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            issuer: 'https://auth.test',
+            authorization_endpoint: 'https://auth.test/authorize',
+            token_endpoint: 'https://auth.test/token',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
         ),
+      ),
     );
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
 

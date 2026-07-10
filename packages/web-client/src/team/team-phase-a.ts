@@ -67,11 +67,7 @@ export interface UserMemoryRecord {
 }
 
 export type TeamWorkspaceKnowledgeType =
-  | 'preference'
-  | 'fact'
-  | 'instruction'
-  | 'project_context'
-  | 'learned_pattern';
+  'preference' | 'fact' | 'instruction' | 'project_context' | 'learned_pattern';
 
 export type TeamWorkspaceKnowledgeSource = 'manual' | 'auto_extracted' | 'api';
 export type TeamWorkspaceKnowledgeRoleLayer = 'reception' | 'pm1' | 'pm2' | 'executor' | 'reviewer';
@@ -584,8 +580,7 @@ function isGenericTeamPhaseANetworkErrorMessage(message: string): boolean {
 function normalizeTeamPhaseAActionError(actionLabel: string, error: unknown): Error {
   if (error instanceof HttpError) {
     const data = (error.data ?? undefined) as
-      | (JsonErrorData & { error?: string; message?: string })
-      | undefined;
+      (JsonErrorData & { error?: string; message?: string }) | undefined;
     const knowledgeConflictMessage = extractKnowledgeKeyConflictMessage(data);
     if (knowledgeConflictMessage) {
       return new HttpError(knowledgeConflictMessage, error.status, error.data);

@@ -24,19 +24,15 @@ const mocks = vi.hoisted(() => ({
   deleteWorkspace: vi.fn(async () => true),
   disconnectTeamEvents: vi.fn(),
   navigate: vi.fn(),
-  pauseAllRuntimeSessions: vi.fn(
-    async (): Promise<Record<string, unknown>> => ({
-      pausedCount: 1,
-    }),
-  ),
+  pauseAllRuntimeSessions: vi.fn(async (): Promise<Record<string, unknown>> => ({
+    pausedCount: 1,
+  })),
   refreshWorkspaceSnapshot: vi.fn(),
   refreshWorkspaces: vi.fn(),
   renameWorkspace: vi.fn(async () => true),
-  resumeAllRuntimeSessions: vi.fn(
-    async (): Promise<Record<string, unknown>> => ({
-      resumedCount: 1,
-    }),
-  ),
+  resumeAllRuntimeSessions: vi.fn(async (): Promise<Record<string, unknown>> => ({
+    resumedCount: 1,
+  })),
   selectTeam: vi.fn(),
   sendMessage: vi.fn(async () => true),
 }));

@@ -2,13 +2,7 @@ import { ToolGlyph } from '@openAwork/shared-ui';
 import type { ToolCallCardProps } from '@openAwork/shared-ui';
 
 export type ToolVisualStatus =
-  | 'cancelled'
-  | 'completed'
-  | 'failed'
-  | 'idle'
-  | 'paused'
-  | 'pending'
-  | 'running';
+  'cancelled' | 'completed' | 'failed' | 'idle' | 'paused' | 'pending' | 'running';
 
 export function ToolIcon({
   kind,

@@ -30,8 +30,7 @@ function geminiCfg(model: string, effort: ReasoningEffort, enabled = true) {
     model,
   });
   return options?.['gemini'] as
-    | { google?: { thinking_config?: Record<string, unknown> } }
-    | undefined;
+    { google?: { thinking_config?: Record<string, unknown> } } | undefined;
 }
 
 describe('buildProviderOptions — gemini-3 thinking_level subsets', () => {

@@ -7,10 +7,7 @@ export interface QualityReviewDispositionInput {
    * - `planning-failure`：规划层问题
    */
   overallVerdict?:
-    | 'pass'
-    | 'implementation-failure'
-    | 'planning-failure'
-    | 'execution-protocol-failure';
+    'pass' | 'implementation-failure' | 'planning-failure' | 'execution-protocol-failure';
   qualityIssues: string[];
   qualityReviewPassed: boolean;
   specIssues: string[];

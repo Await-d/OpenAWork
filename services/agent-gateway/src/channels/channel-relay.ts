@@ -1,4 +1,9 @@
-import type { ChannelEvent, ChannelInstance, ChannelMessage, ChannelWsMessageParser } from './types.js';
+import type {
+  ChannelEvent,
+  ChannelInstance,
+  ChannelMessage,
+  ChannelWsMessageParser,
+} from './types.js';
 
 const BASE_RECONNECT_DELAY_MS = 1_000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
@@ -47,7 +52,11 @@ export class ChannelRelay {
     }
     const current = this.ws;
     this.ws = null;
-    if (current && current.readyState !== WebSocket.CLOSED && current.readyState !== WebSocket.CLOSING) {
+    if (
+      current &&
+      current.readyState !== WebSocket.CLOSED &&
+      current.readyState !== WebSocket.CLOSING
+    ) {
       current.close();
     }
   }

@@ -2,12 +2,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 export type OAuthStatus =
-  | 'idle'
-  | 'pending_browser'
-  | 'pending_callback'
-  | 'exchanging'
-  | 'connected'
-  | 'error';
+  'idle' | 'pending_browser' | 'pending_callback' | 'exchanging' | 'connected' | 'error';
 
 export type Platform = 'mobile' | 'desktop' | 'sandbox';
 

@@ -29,9 +29,8 @@ function makeManager() {
 
 describe('TelemetryManager send timeout', () => {
   it('flush 时给底层 fetch 传入 AbortSignal', async () => {
-    const fetchSpy = vi.fn(
-      (_url: string, _init?: RequestInit): Promise<Response> =>
-        Promise.resolve(new Response(null, { status: 200 })),
+    const fetchSpy = vi.fn((_url: string, _init?: RequestInit): Promise<Response> =>
+      Promise.resolve(new Response(null, { status: 200 })),
     );
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
 

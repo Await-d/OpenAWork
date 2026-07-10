@@ -380,8 +380,7 @@ describe('team-init-store + runner', () => {
     );
     const metadata = JSON.parse(row?.metadata_json ?? '{}') as Record<string, unknown>;
     const teamDefinition = metadata['teamDefinition'] as
-      | { memberSlots?: Array<{ skillIds?: string[]; mcpServerIds?: string[] }> }
-      | undefined;
+      { memberSlots?: Array<{ skillIds?: string[]; mcpServerIds?: string[] }> } | undefined;
     expect(teamDefinition?.memberSlots?.[0]?.skillIds).toBeUndefined();
     expect(teamDefinition?.memberSlots?.[0]?.mcpServerIds).toBeUndefined();
   });

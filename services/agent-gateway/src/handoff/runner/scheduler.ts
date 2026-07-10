@@ -31,12 +31,7 @@
  */
 
 export type ScheduledTaskStatus =
-  | 'pending'
-  | 'running'
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
-  | 'paused';
+  'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'paused';
 
 export interface ScheduledTaskSnapshot {
   id: string;

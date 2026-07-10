@@ -13,7 +13,11 @@
       "@openAwork/skill-types": ["../skill-types/src/index.ts"]
     }
   },
-  "references": [{ "path": "../mcp-client" }, { "path": "../resources" }, { "path": "../skill-types" }],
+  "references": [
+    { "path": "../mcp-client" },
+    { "path": "../resources" },
+    { "path": "../skill-types" }
+  ],
   "include": ["src"],
   "exclude": ["node_modules", "dist"]
 }

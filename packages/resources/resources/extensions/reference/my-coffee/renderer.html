@@ -59,15 +59,15 @@
 
 <script>
   window.addEventListener('extension-props', (event) => {
-    const props = event.detail || {}
-    document.getElementById('title').textContent = props.title || '瑞幸咖啡'
-    document.getElementById('subtitle').textContent = props.subtitle || ''
+    const props = event.detail || {};
+    document.getElementById('title').textContent = props.title || '瑞幸咖啡';
+    document.getElementById('subtitle').textContent = props.subtitle || '';
 
-    const fields = Array.isArray(props.fields) ? props.fields : []
+    const fields = Array.isArray(props.fields) ? props.fields : [];
     document.getElementById('fields').innerHTML = fields
       .map((field) => `<dt>${escapeHtml(field.label)}</dt><dd>${escapeHtml(field.value)}</dd>`)
-      .join('')
-  })
+      .join('');
+  });
 
   function escapeHtml(value) {
     return String(value ?? '')
@@ -75,6 +75,6 @@
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;')
+      .replace(/'/g, '&#039;');
   }
 </script>

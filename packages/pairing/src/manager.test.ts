@@ -97,9 +97,8 @@ describe('PairingManagerImpl.waitForClient', () => {
 
 describe('PairingManagerImpl HTTP timeouts', () => {
   it('connectWithToken 透传 AbortSignal 给底层 fetch', async () => {
-    const fetchSpy = vi.fn(
-      (_url: string, _init?: RequestInit): Promise<Response> =>
-        Promise.resolve(new Response(null, { status: 200 })),
+    const fetchSpy = vi.fn((_url: string, _init?: RequestInit): Promise<Response> =>
+      Promise.resolve(new Response(null, { status: 200 })),
     );
     vi.stubGlobal('fetch', fetchSpy);
 
@@ -113,17 +112,15 @@ describe('PairingManagerImpl HTTP timeouts', () => {
   });
 
   it('verifyConnection 在 fetch 失败时返回 false 而不抛', async () => {
-    const fetchSpy = vi.fn(
-      (_url: string, _init?: RequestInit): Promise<Response> =>
-        Promise.reject(new Error('network down')),
+    const fetchSpy = vi.fn((_url: string, _init?: RequestInit): Promise<Response> =>
+      Promise.reject(new Error('network down')),
     );
     vi.stubGlobal('fetch', fetchSpy);
 
     const mgr = new PairingManagerImpl(3000);
     // connectWithToken 需要先成功一次以设置 connectedHost。
-    const okFetch = vi.fn(
-      (_url: string, _init?: RequestInit): Promise<Response> =>
-        Promise.resolve(new Response(null, { status: 200 })),
+    const okFetch = vi.fn((_url: string, _init?: RequestInit): Promise<Response> =>
+      Promise.resolve(new Response(null, { status: 200 })),
     );
     vi.stubGlobal('fetch', okFetch);
     await mgr.connectWithToken('http://host.test', 'tok');

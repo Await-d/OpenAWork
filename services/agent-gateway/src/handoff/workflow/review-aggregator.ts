@@ -38,10 +38,7 @@ export interface ReviewReport {
   specIssues: string[];
   qualityIssues: string[];
   overallVerdict:
-    | 'pass'
-    | 'implementation-failure'
-    | 'planning-failure'
-    | 'execution-protocol-failure';
+    'pass' | 'implementation-failure' | 'planning-failure' | 'execution-protocol-failure';
   reportMarkdown: string;
 }
 

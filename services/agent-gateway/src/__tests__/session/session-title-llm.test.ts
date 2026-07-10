@@ -150,8 +150,7 @@ describe('generateSessionTitleLlm', () => {
 
     expect(mocks.runUpstreamGenerate).toHaveBeenCalledTimes(1);
     const callArgs = mocks.runUpstreamGenerate.mock.calls[0]?.[0] as
-      | { providerType?: string; upstreamProtocol?: string }
-      | undefined;
+      { providerType?: string; upstreamProtocol?: string } | undefined;
     expect(callArgs?.providerType).toBe('anthropic');
     expect(callArgs?.upstreamProtocol).toBe('anthropic_messages');
   });

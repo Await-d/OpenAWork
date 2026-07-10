@@ -700,8 +700,7 @@ export function useTeamConversationState(
               if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
                 const metadata = parsed as Record<string, unknown>;
                 const roleInstance = metadata['teamRoleInstance'] as
-                  | Record<string, unknown>
-                  | undefined;
+                  Record<string, unknown> | undefined;
                 if (roleInstance) {
                   if (typeof roleInstance['displayName'] === 'string') {
                     displayName = roleInstance['displayName'];

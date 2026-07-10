@@ -3,11 +3,7 @@ import type { CSSProperties } from 'react';
 
 export interface RootCauseInfo {
   category:
-    | 'logic_error'
-    | 'missing_dependency'
-    | 'env_issue'
-    | 'input_format'
-    | 'model_capability';
+    'logic_error' | 'missing_dependency' | 'env_issue' | 'input_format' | 'model_capability';
   whyRetryFailed: string;
   fixSuggestion: string;
   requiresHuman: boolean;

@@ -21,9 +21,7 @@ export function parseDingTalkInboundMessage(raw: unknown): ChannelMessage | null
     return null;
   }
   const payload =
-    headers?.['topic'] === '/v1.0/im/bot/messages/get'
-      ? parseDingTalkStreamData(data)
-      : data;
+    headers?.['topic'] === '/v1.0/im/bot/messages/get' ? parseDingTalkStreamData(data) : data;
   if (!payload) {
     return null;
   }
@@ -43,7 +41,9 @@ export function parseDingTalkInboundMessage(raw: unknown): ChannelMessage | null
     chatId,
     chatName: readString(payload, 'conversationTitle') || undefined,
     content,
-    timestamp: readTimestamp(readString(payload, 'msgCreateTime') || readString(payload, 'createAt')),
+    timestamp: readTimestamp(
+      readString(payload, 'msgCreateTime') || readString(payload, 'createAt'),
+    ),
     raw: data,
   };
 }

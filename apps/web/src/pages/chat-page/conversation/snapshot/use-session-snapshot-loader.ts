@@ -59,8 +59,7 @@ export interface SessionSnapshotLoaderSetters {
   ) => void;
   setPendingQuestions: (
     value:
-      | PendingQuestionRequest[]
-      | ((prev: PendingQuestionRequest[]) => PendingQuestionRequest[]),
+      PendingQuestionRequest[] | ((prev: PendingQuestionRequest[]) => PendingQuestionRequest[]),
   ) => void;
   setSessionStateStatus: (value: SessionStateStatus | null) => void;
   setRecoveryActiveStream: (value: SessionActiveStream | null) => void;

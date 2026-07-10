@@ -4,10 +4,7 @@ import type { RunEvent } from '@openAwork/shared';
 type WorkflowTask = Awaited<ReturnType<AgentTaskManagerImpl['loadOrCreate']>>['tasks'][string];
 
 export type StartWorkVerifierVerdict =
-  | 'confirmed'
-  | 'needs-fix'
-  | 'false-positive'
-  | 'needs-human-review';
+  'confirmed' | 'needs-fix' | 'false-positive' | 'needs-human-review';
 
 export interface StartWorkGateState {
   completionBlocked: boolean;

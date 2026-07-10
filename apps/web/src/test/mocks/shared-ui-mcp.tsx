@@ -18,8 +18,7 @@ export interface MCPServerEntry {
   disabledTools?: string[];
   headers?: Record<string, string>;
   oauth?:
-    | false
-    | { clientId?: string; clientSecret?: string; redirectUri?: string; scope?: string };
+    false | { clientId?: string; clientSecret?: string; redirectUri?: string; scope?: string };
 }
 
 export interface MCPServerConfigProps {

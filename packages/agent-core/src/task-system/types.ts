@@ -9,12 +9,7 @@ import type {
 } from '@openAwork/shared';
 
 export type AgentTaskStatus =
-  | 'pending'
-  | 'running'
-  | 'blocked'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
+  'pending' | 'running' | 'blocked' | 'completed' | 'failed' | 'cancelled';
 
 export interface AgentTask extends Omit<
   TaskEntityRecord,

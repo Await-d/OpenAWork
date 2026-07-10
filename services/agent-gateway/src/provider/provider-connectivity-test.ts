@@ -24,12 +24,7 @@ const PROBE_MAX_OUTPUT_TOKENS = 16;
 const DEFAULT_PROBE_TIMEOUT_MS = 20_000;
 
 export type ProviderTestStatus =
-  | 'ok'
-  | 'auth_error'
-  | 'rate_limited'
-  | 'timeout'
-  | 'not_found'
-  | 'error';
+  'ok' | 'auth_error' | 'rate_limited' | 'timeout' | 'not_found' | 'error';
 
 export interface ProviderConnectivityTestResult {
   /** 是否连通可用。 */

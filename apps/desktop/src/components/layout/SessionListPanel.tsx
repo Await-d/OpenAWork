@@ -24,13 +24,11 @@ export default function SessionListPanel() {
     createSessionsClient(gatewayUrl)
       .list(token ?? '')
       .then((list) => {
-        const nextSessions: SessionRow[] = list.map(
-          (session): SessionRow => ({
-            id: session.id,
-            state_status: session.state_status ?? 'idle',
-            updated_at: String(session.updatedAt ?? ''),
-          }),
-        );
+        const nextSessions: SessionRow[] = list.map((session): SessionRow => ({
+          id: session.id,
+          state_status: session.state_status ?? 'idle',
+          updated_at: String(session.updatedAt ?? ''),
+        }));
         setSessions(nextSessions);
       })
       .catch((error) => {

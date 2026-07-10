@@ -259,8 +259,7 @@ describe('POST /skills/recommend', () => {
       expect(res.statusCode).toBe(200);
       expect(upstreamMock.runUpstreamGenerate).toHaveBeenCalledTimes(1);
       const callArgs = upstreamMock.runUpstreamGenerate.mock.calls[0]?.[0] as
-        | { providerType?: string; upstreamProtocol?: string; model?: string }
-        | undefined;
+        { providerType?: string; upstreamProtocol?: string; model?: string } | undefined;
       expect(callArgs).toBeDefined();
       expect(callArgs?.providerType).toBe('anthropic');
       // The bug fix: protocol must be propagated so the AI SDK uses

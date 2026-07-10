@@ -466,7 +466,7 @@ function FilesTabContent({
           fontSize: 12,
         }}
       >
-        {(!gatewayUrl || !accessToken) ? '未连接到网关，无法浏览文件。' : '编辑器未就绪。'}
+        {!gatewayUrl || !accessToken ? '未连接到网关，无法浏览文件。' : '编辑器未就绪。'}
       </div>
     );
   }

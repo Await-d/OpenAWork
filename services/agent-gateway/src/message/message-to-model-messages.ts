@@ -107,10 +107,7 @@ export interface ToolResultMessage {
 }
 
 export type UnifiedMessage =
-  | SystemMessage
-  | UserMessageUnified
-  | AssistantMessageUnified
-  | ToolResultMessage;
+  SystemMessage | UserMessageUnified | AssistantMessageUnified | ToolResultMessage;
 
 /**
  * Conversion options. Intentionally narrow — this matches opencode's

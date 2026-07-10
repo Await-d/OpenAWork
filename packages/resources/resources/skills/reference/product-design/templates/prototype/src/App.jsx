@@ -1,3 +1,3 @@
 export function App() {
-  return <main className="prototype-root" />
+  return <main className="prototype-root" />;
 }

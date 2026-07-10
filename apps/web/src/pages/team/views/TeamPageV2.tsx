@@ -1416,9 +1416,7 @@ export default function TeamPageV2() {
                   }
                   onSubmitMessage={data.canManageSessionEntries ? handleSubmitMessage : undefined}
                   onRetryConnection={handleRetryConnection}
-                  receptionSessionId={
-                    selectedTeamId ? conversationReceptionSessionId : null
-                  }
+                  receptionSessionId={selectedTeamId ? conversationReceptionSessionId : null}
                   receptionComposerEnabled={true}
                   topBar={
                     selectedTeamId ? (
@@ -1455,68 +1453,68 @@ export default function TeamPageV2() {
                               />
                             ) : null
                           }
-                        centerSlot={
-                          !isMobile ? (
-                            <div
-                              className="team-v2-control team-v2-control--transparent"
-                              style={SUPERBAR_STATUS_TRIGGER_STYLE}
-                              onClick={handleStatusBarClick}
-                              role="button"
-                              tabIndex={0}
-                              aria-label="展开层级对话抽屉"
-                              onKeyDown={(event) => {
-                                if (event.key === 'Enter' || event.key === ' ') {
-                                  event.preventDefault();
-                                  setDrawerVisible(true);
-                                }
-                              }}
-                            >
-                              <TeamStatusBar
-                                paused={effectiveMode === 'paused'}
-                                selectedSessionId={selectedTeamId || null}
-                                onPauseAll={
-                                  canManageSelectedRuntimeTree ? handlePauseAll : undefined
-                                }
-                                onResumeAll={
-                                  effectiveMode === 'paused'
-                                    ? undefined
-                                    : canManageSelectedRuntimeTree
-                                      ? handleRequestResumeAll
-                                      : undefined
-                                }
-                              />
-                            </div>
-                          ) : null
-                        }
-                        stackCenterSlot={isTablet || isFusionWorkbench}
-                        trailingSlot={
-                          !isMobile ? (
-                            isFusionWorkbench ? (
-                              <TeamFusionSuperbarSummary
-                                description={data.topSummary.description}
-                                footerLead={data.footerLead}
-                                footerStats={data.footerStats}
-                              />
-                            ) : (
-                              <TeamPageSuperbarSummary
-                                description={data.topSummary.description}
-                                footerLead={data.footerLead}
-                                footerStats={data.footerStats}
-                              />
-                            )
-                          ) : null
-                        }
-                      />
-                      {focusedHandoffId ? (
-                        <TeamFocusHandoffBanner
-                          focusHandoffId={focusedHandoffId}
-                          entry={focusedHandoffEntry}
-                          suggestedTab={focusSuggestedTab}
-                          onSelectTab={handleMiddleTabChange}
-                          onClear={() => setFocusedHandoffId(null)}
+                          centerSlot={
+                            !isMobile ? (
+                              <div
+                                className="team-v2-control team-v2-control--transparent"
+                                style={SUPERBAR_STATUS_TRIGGER_STYLE}
+                                onClick={handleStatusBarClick}
+                                role="button"
+                                tabIndex={0}
+                                aria-label="展开层级对话抽屉"
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter' || event.key === ' ') {
+                                    event.preventDefault();
+                                    setDrawerVisible(true);
+                                  }
+                                }}
+                              >
+                                <TeamStatusBar
+                                  paused={effectiveMode === 'paused'}
+                                  selectedSessionId={selectedTeamId || null}
+                                  onPauseAll={
+                                    canManageSelectedRuntimeTree ? handlePauseAll : undefined
+                                  }
+                                  onResumeAll={
+                                    effectiveMode === 'paused'
+                                      ? undefined
+                                      : canManageSelectedRuntimeTree
+                                        ? handleRequestResumeAll
+                                        : undefined
+                                  }
+                                />
+                              </div>
+                            ) : null
+                          }
+                          stackCenterSlot={isTablet || isFusionWorkbench}
+                          trailingSlot={
+                            !isMobile ? (
+                              isFusionWorkbench ? (
+                                <TeamFusionSuperbarSummary
+                                  description={data.topSummary.description}
+                                  footerLead={data.footerLead}
+                                  footerStats={data.footerStats}
+                                />
+                              ) : (
+                                <TeamPageSuperbarSummary
+                                  description={data.topSummary.description}
+                                  footerLead={data.footerLead}
+                                  footerStats={data.footerStats}
+                                />
+                              )
+                            ) : null
+                          }
                         />
-                      ) : null}
-                    </>
+                        {focusedHandoffId ? (
+                          <TeamFocusHandoffBanner
+                            focusHandoffId={focusedHandoffId}
+                            entry={focusedHandoffEntry}
+                            suggestedTab={focusSuggestedTab}
+                            onSelectTab={handleMiddleTabChange}
+                            onClear={() => setFocusedHandoffId(null)}
+                          />
+                        ) : null}
+                      </>
                     ) : null
                   }
                   messagesOverride={conversationAreaMessagesOverride}

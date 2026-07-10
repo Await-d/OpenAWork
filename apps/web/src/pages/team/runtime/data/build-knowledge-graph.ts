@@ -16,22 +16,12 @@ import {
 } from './workspace-knowledge-key-classification.js';
 
 export type GraphNodeKind =
-  | 'workspace'
-  | 'category'
-  | 'architecture'
-  | 'constitution'
-  | 'memory'
-  | 'knowledge'
-  | 'artifact';
+  'workspace' | 'category' | 'architecture' | 'constitution' | 'memory' | 'knowledge' | 'artifact';
 
 export type GraphNodeGroup = 'workspace' | 'architecture' | 'governance' | 'memory' | 'knowledge';
 
 export type GraphMemoryType =
-  | 'preference'
-  | 'fact'
-  | 'instruction'
-  | 'project_context'
-  | 'learned_pattern';
+  'preference' | 'fact' | 'instruction' | 'project_context' | 'learned_pattern';
 
 export type GraphRoleLayer = 'reception' | 'pm1' | 'pm2' | 'executor' | 'reviewer';
 

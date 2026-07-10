@@ -239,8 +239,7 @@ async function dispatchHook<K extends keyof PluginHooks>(
 ): Promise<void> {
   for (const plugin of loadedPlugins) {
     const fn = plugin.hooks[hookName] as
-      | ((i: typeof input, o: typeof output) => void | Promise<void>)
-      | undefined;
+      ((i: typeof input, o: typeof output) => void | Promise<void>) | undefined;
     if (!fn) continue;
     try {
       await fn(input, output);

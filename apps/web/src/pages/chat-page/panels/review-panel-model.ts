@@ -39,10 +39,7 @@ export interface ReviewPanelErrorState {
 }
 
 export type ReviewPanelContentState =
-  | ReviewPanelErrorState
-  | ReviewPanelLoadingState
-  | ReviewPanelReadyState
-  | ReviewPanelWaitingState;
+  ReviewPanelErrorState | ReviewPanelLoadingState | ReviewPanelReadyState | ReviewPanelWaitingState;
 
 export function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError';

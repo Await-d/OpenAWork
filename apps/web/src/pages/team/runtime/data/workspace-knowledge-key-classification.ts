@@ -28,12 +28,7 @@ export function isArchitectureKnowledgeKey(key: string): boolean {
 }
 
 export type WorkspaceKnowledgeSemanticSearchKind =
-  | 'architecture'
-  | 'artifact'
-  | 'fact'
-  | 'instruction'
-  | 'memory'
-  | 'project-memory';
+  'architecture' | 'artifact' | 'fact' | 'instruction' | 'memory' | 'project-memory';
 
 export type WorkspaceKnowledgeRoleLayer = 'reception' | 'pm1' | 'pm2' | 'executor' | 'reviewer';
 

@@ -158,15 +158,7 @@ interface CopiedToolCardSections {
 }
 
 export type AssistantEventKind =
-  | 'agent'
-  | 'audit'
-  | 'compaction'
-  | 'mcp'
-  | 'permission'
-  | 'question'
-  | 'skill'
-  | 'task'
-  | 'tool';
+  'agent' | 'audit' | 'compaction' | 'mcp' | 'permission' | 'question' | 'skill' | 'task' | 'tool';
 
 export type AssistantEventStatus = 'error' | 'paused' | 'running' | 'success';
 

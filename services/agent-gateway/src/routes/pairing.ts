@@ -15,9 +15,7 @@ import { parseBody } from '../infra/parse-request.js';
 const ADMIN_EMAIL = globalThis.process?.env['ADMIN_EMAIL'] ?? 'admin@openAwork.local';
 
 type PairingRouteErrorCode =
-  | 'invalid_pairing_token'
-  | 'default_admin_not_found'
-  | 'pairing_qr_forbidden';
+  'invalid_pairing_token' | 'default_admin_not_found' | 'pairing_qr_forbidden';
 
 const PAIRING_ROUTE_ERROR_MESSAGES: Record<PairingRouteErrorCode, string> = {
   invalid_pairing_token: '配对令牌无效或已过期。',

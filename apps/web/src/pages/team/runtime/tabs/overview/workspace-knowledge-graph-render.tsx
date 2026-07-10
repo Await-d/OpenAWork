@@ -1,11 +1,5 @@
 type LegendTone =
-  | 'architecture'
-  | 'governance'
-  | 'memory'
-  | 'knowledge'
-  | 'contains'
-  | 'derives'
-  | 'persisted';
+  'architecture' | 'governance' | 'memory' | 'knowledge' | 'contains' | 'derives' | 'persisted';
 
 export function GraphLegend() {
   const items: Array<{ label: string; kind: 'edge' | 'node' | 'badge'; tone: LegendTone }> = [

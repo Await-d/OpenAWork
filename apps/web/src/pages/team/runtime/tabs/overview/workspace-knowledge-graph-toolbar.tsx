@@ -153,12 +153,10 @@ export function GraphToolbar({
               onSelectRoleLayer(val === '__all__' ? null : (val as GraphRoleLayer))
             }
             options={[
-              ...ROLE_LAYER_ORDER.map(
-                (rl): SegmentedToggleOption<string> => ({
-                  value: rl,
-                  label: ROLE_LAYER_LABELS[rl],
-                }),
-              ),
+              ...ROLE_LAYER_ORDER.map((rl): SegmentedToggleOption<string> => ({
+                value: rl,
+                label: ROLE_LAYER_LABELS[rl],
+              })),
               { value: '__all__', label: '全部' },
             ]}
           />

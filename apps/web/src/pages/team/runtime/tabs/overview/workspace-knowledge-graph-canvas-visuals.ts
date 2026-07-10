@@ -2,13 +2,7 @@ import type { GraphNode } from '../../data/build-knowledge-graph.js';
 import { seededUnit } from './workspace-knowledge-graph-canvas-helpers.js';
 
 export type NodeGlyphKind =
-  | 'workspace'
-  | 'category'
-  | 'architecture'
-  | 'constitution'
-  | 'memory'
-  | 'knowledge'
-  | 'artifact';
+  'workspace' | 'category' | 'architecture' | 'constitution' | 'memory' | 'knowledge' | 'artifact';
 
 export interface NodeVisualStyle {
   baseColor: string;

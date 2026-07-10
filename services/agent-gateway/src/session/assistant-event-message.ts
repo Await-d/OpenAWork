@@ -3,14 +3,7 @@ import type { MessageContent, RunEvent } from '@openAwork/shared';
 const INTERNAL_ASSISTANT_EVENT_SOURCE = 'openawork_internal';
 
 type AssistantEventKind =
-  | 'agent'
-  | 'audit'
-  | 'compaction'
-  | 'mcp'
-  | 'permission'
-  | 'skill'
-  | 'task'
-  | 'tool';
+  'agent' | 'audit' | 'compaction' | 'mcp' | 'permission' | 'skill' | 'task' | 'tool';
 
 type AssistantEventStatus = 'error' | 'paused' | 'running' | 'success';
 

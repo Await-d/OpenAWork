@@ -13,9 +13,7 @@ export interface ComposerCallbacksOptions {
   composerMenu: ComposerMenuState | null;
   setComposerMenu: (
     value:
-      | ComposerMenuState
-      | null
-      | ((prev: ComposerMenuState | null) => ComposerMenuState | null),
+      ComposerMenuState | null | ((prev: ComposerMenuState | null) => ComposerMenuState | null),
   ) => void;
   input: string;
   setInput: (value: string | ((prev: string) => string)) => void;

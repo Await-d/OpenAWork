@@ -186,8 +186,7 @@ export function TeamInitSummaryPanel({
   const level1 = teamInit ? findStepResult(teamInit.steps, 'read-project-level1') : null;
   const memoryExcerpts = teamInit
     ? ((findStepResult(teamInit.steps, 'extract-project-memory')?.['excerpts'] as
-        | Array<{ label: string; excerpt: string }>
-        | undefined) ?? [])
+        Array<{ label: string; excerpt: string }> | undefined) ?? [])
     : [];
   const bindResult = teamInit ? findStepResult(teamInit.steps, 'bind-tools-per-layer') : null;
   const perLayer =

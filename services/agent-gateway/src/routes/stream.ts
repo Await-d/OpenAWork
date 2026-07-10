@@ -2474,8 +2474,7 @@ export async function handleStreamRequest(input: {
       );
       let syntheticContinuationPrompt: string | undefined;
       let lastRoundUsage:
-        | { inputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number }
-        | undefined;
+        { inputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number } | undefined;
 
       for (let round = 1; ; round += 1) {
         const roundStartedAt = Date.now();

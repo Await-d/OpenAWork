@@ -21,8 +21,7 @@ export type CodegraphStatusResult = {
   readonly schemaVersion: number;
   readonly freshness: CodegraphFreshness;
   readonly startup:
-    | CodegraphStartupStatusRecord
-    | { readonly status: 'degraded'; readonly degradedReason: string };
+    CodegraphStartupStatusRecord | { readonly status: 'degraded'; readonly degradedReason: string };
   readonly fileCount: number;
   readonly latestRun?: {
     readonly status: string;

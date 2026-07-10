@@ -72,8 +72,7 @@ describe('callCompactionLlm — upstreamProtocol forwarding', () => {
 
     expect(mocks.runUpstreamGenerate).toHaveBeenCalledTimes(1);
     const callArgs = mocks.runUpstreamGenerate.mock.calls[0]?.[0] as
-      | { providerType?: string; upstreamProtocol?: string }
-      | undefined;
+      { providerType?: string; upstreamProtocol?: string } | undefined;
     expect(callArgs?.providerType).toBe('anthropic');
     expect(callArgs?.upstreamProtocol).toBe('anthropic_messages');
   });
@@ -92,8 +91,7 @@ describe('callCompactionLlm — upstreamProtocol forwarding', () => {
     });
 
     const callArgs = mocks.runUpstreamGenerate.mock.calls[0]?.[0] as
-      | { upstreamProtocol?: string }
-      | undefined;
+      { upstreamProtocol?: string } | undefined;
     expect(callArgs?.upstreamProtocol).toBe('responses');
   });
 });

@@ -11,13 +11,7 @@ import { UpdateErrorDialog } from './UpdateErrorDialog.js';
 import { restartDesktopApp } from '../utils/tauri-gateway.js';
 
 type UpdateState =
-  | 'idle'
-  | 'checking'
-  | 'available'
-  | 'downloading'
-  | 'installing'
-  | 'done'
-  | 'up-to-date';
+  'idle' | 'checking' | 'available' | 'downloading' | 'installing' | 'done' | 'up-to-date';
 
 export interface UpdateProgressDialogProps {
   autoCheck?: boolean;

@@ -5,14 +5,7 @@ import { UnifiedCodeDiff } from '../tools/UnifiedCodeDiff.js';
 
 export interface GenerativeUIMessage {
   type:
-    | 'form'
-    | 'table'
-    | 'chart'
-    | 'approval'
-    | 'code_diff'
-    | 'status'
-    | 'compaction'
-    | 'tool_call';
+    'form' | 'table' | 'chart' | 'approval' | 'code_diff' | 'status' | 'compaction' | 'tool_call';
   payload: Record<string, unknown>;
 }
 

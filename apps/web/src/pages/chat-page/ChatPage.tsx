@@ -2600,11 +2600,7 @@ export default function ChatPage() {
             input: parseToolCallInputText(nextInputText),
             status: 'running',
             kind: resolveAssistantCapabilityKind(event.toolName) as
-              | 'agent'
-              | 'mcp'
-              | 'skill'
-              | 'tool'
-              | undefined,
+              'agent' | 'mcp' | 'skill' | 'tool' | undefined,
           });
           scheduleSegmentsFlush();
         }
@@ -3521,11 +3517,7 @@ export default function ChatPage() {
             : {}),
           ...(toolCallState.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
           kind: resolveAssistantCapabilityKind(toolCallState.toolName) as
-            | 'agent'
-            | 'mcp'
-            | 'skill'
-            | 'tool'
-            | undefined,
+            'agent' | 'mcp' | 'skill' | 'tool' | undefined,
         });
       }
       accumulatedSegments = seededSegments;
@@ -3595,11 +3587,7 @@ export default function ChatPage() {
               input: parseToolCallInputText(nextInputText),
               status: 'running',
               kind: resolveAssistantCapabilityKind(event.toolName) as
-                | 'agent'
-                | 'mcp'
-                | 'skill'
-                | 'tool'
-                | undefined,
+                'agent' | 'mcp' | 'skill' | 'tool' | undefined,
             });
             scheduleSegmentsFlush();
           }
@@ -4632,8 +4620,7 @@ export default function ChatPage() {
     };
     const handleComposerInsert = (event: Event) => {
       const detail = (event as CustomEvent).detail as
-        | { text?: string; mode?: 'append' | 'replace' }
-        | undefined;
+        { text?: string; mode?: 'append' | 'replace' } | undefined;
       const insertText = detail?.text;
       if (typeof insertText !== 'string' || insertText.length === 0) return;
       setInput((prev) => {

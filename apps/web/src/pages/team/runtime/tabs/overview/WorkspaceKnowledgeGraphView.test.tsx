@@ -659,8 +659,7 @@ describe('WorkspaceKnowledgeGraphView', () => {
       );
     });
     const savedInput = mockKnowledgeState.saveKnowledge.mock.calls[0]?.[0] as
-      | { confidence?: number; priority?: number; source?: string }
-      | undefined;
+      { confidence?: number; priority?: number; source?: string } | undefined;
     expect(savedInput).toBeDefined();
     expect(savedInput).not.toHaveProperty('confidence');
     expect(savedInput).not.toHaveProperty('priority');

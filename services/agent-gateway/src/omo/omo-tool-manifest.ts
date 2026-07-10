@@ -39,9 +39,7 @@ type OmoNativeToolCapability = {
 type OmoAdapterToolCapability = { readonly kind: 'adapter-candidate'; readonly sourceId: string };
 
 export type OmoMcpServer =
-  | OmoNativeMcpServerAlias
-  | OmoRemoteMcpServerCandidate
-  | OmoStdioMcpServerCandidate;
+  OmoNativeMcpServerAlias | OmoRemoteMcpServerCandidate | OmoStdioMcpServerCandidate;
 export type OmoToolCapability = OmoNativeToolCapability | OmoAdapterToolCapability;
 
 export type OmoMcpServersManifest = { readonly servers: readonly OmoMcpServer[] };

@@ -1,12 +1,7 @@
 import type { Session, SessionTask } from '@openAwork/web-client';
 
 export type TaskToolRuntimeStatus =
-  | 'pending'
-  | 'running'
-  | 'paused'
-  | 'done'
-  | 'failed'
-  | 'cancelled';
+  'pending' | 'running' | 'paused' | 'done' | 'failed' | 'cancelled';
 
 export interface TaskToolRuntimeSnapshot {
   assignedAgent?: string;

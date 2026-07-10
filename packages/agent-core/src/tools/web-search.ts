@@ -2,15 +2,7 @@ import { z } from 'zod';
 import type { ToolDefinition } from './tool-contract.js';
 
 type WebSearchProvider =
-  | 'duckduckgo'
-  | 'tavily'
-  | 'exa'
-  | 'serper'
-  | 'searxng'
-  | 'bocha'
-  | 'zhipu'
-  | 'google'
-  | 'bing';
+  'duckduckgo' | 'tavily' | 'exa' | 'serper' | 'searxng' | 'bocha' | 'zhipu' | 'google' | 'bing';
 
 export interface WebSearchConfig {
   provider: WebSearchProvider;

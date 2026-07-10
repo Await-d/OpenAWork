@@ -27,8 +27,7 @@ export interface MobilePromptTemplate {
 }
 
 export type MobileMessageSegment =
-  | { kind: 'text'; text: string }
-  | { code: string; kind: 'code'; language?: string };
+  { kind: 'text'; text: string } | { code: string; kind: 'code'; language?: string };
 
 export interface MobileCodeBlockSummary {
   collapsedCode: string;

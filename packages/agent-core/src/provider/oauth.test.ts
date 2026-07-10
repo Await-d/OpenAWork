@@ -18,14 +18,13 @@ const config: OAuthConfig = {
 
 describe('OAuthFlowManagerImpl token endpoints', () => {
   it('refreshToken 给底层 fetch 传入超时 AbortSignal 并解析新 token', async () => {
-    const fetchSpy = vi.fn(
-      (_url: string, _init?: RequestInit): Promise<Response> =>
-        Promise.resolve(
-          new Response(JSON.stringify({ access_token: 'new-a', refresh_token: 'new-r' }), {
-            status: 200,
-            headers: { 'content-type': 'application/json' },
-          }),
-        ),
+    const fetchSpy = vi.fn((_url: string, _init?: RequestInit): Promise<Response> =>
+      Promise.resolve(
+        new Response(JSON.stringify({ access_token: 'new-a', refresh_token: 'new-r' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
     );
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
@@ -46,9 +45,8 @@ describe('OAuthFlowManagerImpl token endpoints', () => {
   });
 
   it('revokeToken 给底层 fetch 传入超时 AbortSignal', async () => {
-    const fetchSpy = vi.fn(
-      (_url: string, _init?: RequestInit): Promise<Response> =>
-        Promise.resolve(new Response(null, { status: 200 })),
+    const fetchSpy = vi.fn((_url: string, _init?: RequestInit): Promise<Response> =>
+      Promise.resolve(new Response(null, { status: 200 })),
     );
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
 

@@ -1,13 +1,7 @@
 import type { WorkflowTemplateRecord } from '@openAwork/web-client';
 
 export type AgentTeamsTabKey =
-  | 'conversation'
-  | 'tasks'
-  | 'messages'
-  | 'overview'
-  | 'review'
-  | 'teams'
-  | 'office';
+  'conversation' | 'tasks' | 'messages' | 'overview' | 'review' | 'teams' | 'office';
 
 export interface AgentTeamsSidebarTemplateBadge {
   label: string;

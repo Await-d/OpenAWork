@@ -16,7 +16,8 @@
 import type { MiddleTabKey } from './MiddleTabRouter.js';
 import type { TeamTabIconName } from './team-tab-icons.js';
 
-export type PrimaryTabKey = 'overview' | 'files' | 'conversation' | 'tasks' | 'metrics' | 'governance';
+export type PrimaryTabKey =
+  'overview' | 'files' | 'conversation' | 'tasks' | 'metrics' | 'governance';
 
 export interface SubTabDef {
   key: MiddleTabKey;

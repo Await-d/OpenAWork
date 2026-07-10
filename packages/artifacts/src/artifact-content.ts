@@ -13,11 +13,7 @@ export const ARTIFACT_CONTENT_TYPES = [
 export type ArtifactContentType = (typeof ARTIFACT_CONTENT_TYPES)[number];
 
 export type ArtifactRenderStrategy =
-  | 'inline-text'
-  | 'iframe-sandbox'
-  | 'inline-svg'
-  | 'image'
-  | 'download';
+  'inline-text' | 'iframe-sandbox' | 'inline-svg' | 'image' | 'download';
 
 export interface ArtifactTypeConfig {
   renderStrategy: ArtifactRenderStrategy;

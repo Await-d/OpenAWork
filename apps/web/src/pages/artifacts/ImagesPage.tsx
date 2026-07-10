@@ -407,8 +407,7 @@ export default function ImagesPage() {
 
     try {
       let inputArtifacts:
-        | Array<{ artifactId: string; fileName?: string; mimeType?: string }>
-        | undefined;
+        Array<{ artifactId: string; fileName?: string; mimeType?: string }> | undefined;
 
       if (selectedReferenceArtifact) {
         inputArtifacts = [
