@@ -71,9 +71,7 @@ export interface AssistantTraceToolPart {
 }
 
 export type AssistantTracePart =
-  | AssistantTraceTextPart
-  | AssistantTraceReasoningPart
-  | AssistantTraceToolPart;
+  AssistantTraceTextPart | AssistantTraceReasoningPart | AssistantTraceToolPart;
 
 export function createAssistantTraceContent(payload: AssistantTracePayload): string {
   return JSON.stringify({
@@ -130,8 +128,12 @@ export function parseAssistantTraceContent(
     const rawReasoningTimings = Array.isArray(parsed.payload?.reasoningBlocksTimings)
       ? parsed.payload.reasoningBlocksTimings
       : [];
+    type ReasoningPair = {
+      readonly text: string;
+      readonly timing: AssistantReasoningBlockTiming | undefined;
+    };
     const reasoningPairs = rawReasoningBlocks
-      .map((item, index) => {
+      .map((item, index): ReasoningPair | null => {
         if (typeof item !== 'string') return null;
         const normalized = options?.normalizeReasoningText
           ? options.normalizeReasoningText(item)
@@ -150,18 +152,19 @@ export function parseAssistantTraceContent(
           timing && typeof timing['endedAt'] === 'number' && Number.isFinite(timing['endedAt'])
             ? timing['endedAt']
             : undefined;
+        const blockTiming: AssistantReasoningBlockTiming | undefined =
+          startedAt !== undefined || endedAt !== undefined
+            ? {
+                ...(startedAt !== undefined ? { startedAt } : {}),
+                ...(endedAt !== undefined ? { endedAt } : {}),
+              }
+            : undefined;
         return {
           text: normalized,
-          timing:
-            startedAt !== undefined || endedAt !== undefined
-              ? ({ startedAt, endedAt } as AssistantReasoningBlockTiming)
-              : undefined,
+          timing: blockTiming,
         };
       })
-      .filter(
-        (item): item is { text: string; timing: AssistantReasoningBlockTiming | undefined } =>
-          item !== null,
-      );
+      .filter((item): item is ReasoningPair => item !== null);
     const reasoningBlocks = reasoningPairs.map((entry) => entry.text);
     const reasoningBlocksTimings: AssistantReasoningBlockTiming[] = reasoningPairs.map(
       (entry) => entry.timing ?? {},
