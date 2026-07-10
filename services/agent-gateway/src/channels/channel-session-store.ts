@@ -29,7 +29,7 @@ export function buildChannelSessionMetadata(
     taskToolEnabled:
       channel.tools?.['task'] === true && (channel.permissions?.allowSubAgents ?? true),
     questionToolEnabled: false,
-    channelLlmToolsEnabled: false,
+    channelLlmToolsEnabled: currentMetadata['channelLlmToolsEnabled'] === true,
     channel: {
       id: channel.id,
       type: channel.type,

@@ -17,6 +17,11 @@ process.env['AI_DEFAULT_MODEL'] = '';
 const USER_ID = 'u-channel-session-tools';
 const TELEGRAM_CHANNEL_ID = 'channel-tool-telegram';
 
+interface Deferred<T> {
+  readonly promise: Promise<T>;
+  readonly resolve: (value: T) => void;
+}
+
 let authPlugin: typeof AuthModule.default;
 let channelRoutes: typeof ChannelsRouterModule.channelRoutes;
 let dbModule: typeof DbModule;
@@ -72,6 +77,14 @@ function bearer(app: FastifyInstance): string {
   return `Bearer ${app.jwt.sign({ sub: USER_ID, email: `${USER_ID}@example.com` })}`;
 }
 
+function createDeferred<T>(): Deferred<T> {
+  let resolveValue: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((resolve) => {
+    resolveValue = resolve;
+  });
+  return { promise, resolve: resolveValue };
+}
+
 beforeAll(async () => {
   dbModule = await import('../../infra/db.js');
   await dbModule.migrate();
@@ -86,6 +99,8 @@ beforeAll(async () => {
 beforeEach(() => {
   vi.unstubAllGlobals();
   dbModule.sqliteRun('DELETE FROM user_settings', []);
+  dbModule.sqliteRun('DELETE FROM part_v2', []);
+  dbModule.sqliteRun('DELETE FROM message_v2', []);
   dbModule.sqliteRun('DELETE FROM sessions', []);
   dbModule.sqliteRun('DELETE FROM users', []);
   seedUser();
@@ -176,6 +191,127 @@ describe('channel session tool e2e', () => {
           }),
         );
       });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('Given two inbound messages for the same channel chat When auto-reply runs Then it reuses one session and preserves multi-turn history', async () => {
+    const fetchMock = vi.fn((url: string, _init?: RequestInit) => {
+      if (url.includes('/getUpdates')) {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true, result: [] })));
+      }
+      if (url.includes('/sendMessage')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ ok: true, result: { message_id: 77 } })),
+        );
+      }
+      return Promise.resolve(new Response(JSON.stringify({ ok: true })));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const streamRuntime = await import('../../routes/stream-runtime.js');
+    const messageAdapter = await import('../../message/message-v2-adapter.js');
+    const sessionIds: string[] = [];
+    const firstRun = createDeferred<void>();
+    vi.mocked(streamRuntime.runSessionInBackground).mockImplementation(
+      async ({ requestData, sessionId, userId }) => {
+        const message = typeof requestData['message'] === 'string' ? requestData['message'] : '';
+        sessionIds.push(sessionId);
+        messageAdapter.appendSessionMessageV2({
+          sessionId,
+          userId,
+          role: 'user',
+          content: [{ type: 'text', text: message }],
+          clientRequestId:
+            typeof requestData['clientRequestId'] === 'string'
+              ? requestData['clientRequestId']
+              : undefined,
+        });
+        if (message === '第一条') {
+          await firstRun.promise;
+        }
+        messageAdapter.appendSessionMessageV2({
+          sessionId,
+          userId,
+          role: 'assistant',
+          content: [{ type: 'text', text: `reply:${message}` }],
+          clientRequestId:
+            typeof requestData['clientRequestId'] === 'string'
+              ? requestData['clientRequestId']
+              : undefined,
+        });
+        return { statusCode: 200, stopReason: 'end_turn' };
+      },
+    );
+    const app = await buildApp();
+    try {
+      const startResponse = await app.inject({
+        method: 'POST',
+        url: `/channels/${TELEGRAM_CHANNEL_ID}/start`,
+        headers: { authorization: bearer(app) },
+      });
+      expect(startResponse.statusCode).toBe(200);
+
+      const firstRequest = app.inject({
+        method: 'POST',
+        url: `/channels/${TELEGRAM_CHANNEL_ID}/inbound`,
+        headers: { 'x-openawork-channel-secret': 'relay-secret' },
+        payload: {
+          chatId: 'chat-1',
+          senderId: 'sender-1',
+          senderName: 'Sender',
+          content: '第一条',
+          messageId: 'message-1',
+        },
+      });
+
+      const firstResponse = await firstRequest;
+      expect(firstResponse.statusCode).toBe(202);
+      await vi.waitFor(() => {
+        expect(streamRuntime.runSessionInBackground).toHaveBeenCalledTimes(1);
+      });
+
+      const secondRequest = app.inject({
+        method: 'POST',
+        url: `/channels/${TELEGRAM_CHANNEL_ID}/inbound`,
+        headers: { 'x-openawork-channel-secret': 'relay-secret' },
+        payload: {
+          chatId: 'chat-1',
+          senderId: 'sender-1',
+          senderName: 'Sender',
+          content: '第二条',
+          messageId: 'message-2',
+        },
+      });
+
+      const secondResponse = await secondRequest;
+      expect(secondResponse.statusCode).toBe(202);
+      expect(streamRuntime.runSessionInBackground).toHaveBeenCalledTimes(1);
+
+      firstRun.resolve(undefined);
+      await vi.waitFor(() => {
+        expect(streamRuntime.runSessionInBackground).toHaveBeenCalledTimes(2);
+      });
+
+      expect(new Set(sessionIds).size).toBe(1);
+      const sessionId = sessionIds[0];
+      expect(sessionId).toBeDefined();
+      const messages = messageAdapter.listSessionMessagesV2({
+        sessionId: sessionId ?? '',
+        userId: USER_ID,
+      });
+      expect(messages.map((message) => message.role)).toEqual([
+        'user',
+        'assistant',
+        'user',
+        'assistant',
+      ]);
+      expect(messages.map((message) => message.content[0])).toEqual([
+        { type: 'text', text: '第一条' },
+        { type: 'text', text: 'reply:第一条' },
+        { type: 'text', text: '第二条' },
+        { type: 'text', text: 'reply:第二条' },
+      ]);
     } finally {
       await app.close();
     }

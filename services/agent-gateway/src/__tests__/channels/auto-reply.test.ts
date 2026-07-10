@@ -5,6 +5,7 @@ import type {
   ChannelEvent,
   ChannelInstance,
   ChannelMessage,
+  ChannelStreamingHandle,
   MessagingChannelService,
 } from '../../channels/types.js';
 
@@ -13,6 +14,16 @@ interface FakeServiceOptions {
   pluginType?: string;
   sendMessage?: (chatId: string, content: string) => Promise<{ messageId: string }>;
   replyMessage?: (messageId: string, content: string) => Promise<{ messageId: string }>;
+  sendStreamingMessage?: (
+    chatId: string,
+    initialContent: string,
+    replyToMessageId?: string,
+  ) => Promise<ChannelStreamingHandle>;
+}
+
+interface Deferred<T> {
+  readonly promise: Promise<T>;
+  readonly resolve: (value: T) => void;
 }
 
 class FakeService implements MessagingChannelService {
@@ -41,6 +52,19 @@ class FakeService implements MessagingChannelService {
     if (this.opts.replyMessage) return this.opts.replyMessage(messageId, content);
     return { messageId: 'fake' };
   }
+  async sendStreamingMessage(
+    chatId: string,
+    initialContent: string,
+    replyToMessageId?: string,
+  ): Promise<ChannelStreamingHandle> {
+    if (this.opts.sendStreamingMessage) {
+      return this.opts.sendStreamingMessage(chatId, initialContent, replyToMessageId);
+    }
+    return {
+      update: async () => undefined,
+      finish: async () => undefined,
+    };
+  }
   async getGroupMessages(): Promise<ChannelMessage[]> {
     return [];
   }
@@ -60,6 +84,13 @@ function makeInstance(id: string): ChannelInstance {
     ownerUserId: 'user-1',
     createdAt: 0,
     updatedAt: 0,
+  };
+}
+
+function makeStreamingInstance(id: string): ChannelInstance {
+  return {
+    ...makeInstance(id),
+    features: { autoReply: true, streamingReply: true, autoStart: false },
   };
 }
 
@@ -84,6 +115,14 @@ function makeCommandActions(): ChannelCommandActions {
     getUsageStats: vi.fn(() => ({ content: 'Usage statistics ready.' })),
     resetConversation: vi.fn(() => ({ content: 'Session cleared.' })),
   };
+}
+
+function createDeferred<T>(): Deferred<T> {
+  let resolveValue: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((resolve) => {
+    resolveValue = resolve;
+  });
+  return { promise, resolve: resolveValue };
 }
 
 /** Install a fake service into the singleton manager via a one-off factory. */
@@ -149,6 +188,272 @@ describe('AutoReplyPipeline error isolation', () => {
 
     await pipeline.handle(messageEvent(id));
     expect(sendMessage).toHaveBeenCalledWith('chat-1', 'the answer');
+  });
+
+  it('同一通道会话的自动回复串行执行，避免上一轮运行中时下一条消息被会话冲突丢弃', async () => {
+    const sendMessage = vi.fn(async (_chatId: string, _content: string) => ({ messageId: 'ok' }));
+    const id = 'tg-serialized-session';
+    await installFakeService(id, new FakeService(id, { sendMessage }));
+    const firstRun = createDeferred<string>();
+    const secondRun = createDeferred<string>();
+    const onAgentRun = vi.fn(({ message }: { readonly message: string }) => {
+      return message === 'first' ? firstRun.promise : secondRun.promise;
+    });
+    const pipeline = new AutoReplyPipeline({
+      resolveChannel: () => makeInstance(id),
+      onAgentRun,
+    });
+
+    const first = pipeline.handle(messageEvent(id, 'first'));
+    await vi.waitFor(() => {
+      expect(onAgentRun).toHaveBeenCalledTimes(1);
+    });
+
+    const second = pipeline.handle(messageEvent(id, 'second'));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(onAgentRun).toHaveBeenCalledTimes(1);
+
+    firstRun.resolve('reply first');
+    await vi.waitFor(() => {
+      expect(onAgentRun).toHaveBeenCalledTimes(2);
+    });
+    secondRun.resolve('reply second');
+    await Promise.all([first, second]);
+
+    expect(sendMessage.mock.calls.map((call) => call[1])).toEqual(['reply first', 'reply second']);
+  });
+
+  it('不同通道会话的自动回复保持并发，不被单个会话队列全局阻塞', async () => {
+    const sendMessage = vi.fn(async (_chatId: string, _content: string) => ({ messageId: 'ok' }));
+    const id = 'tg-parallel-sessions';
+    await installFakeService(id, new FakeService(id, { sendMessage }));
+    const firstRun = createDeferred<string>();
+    const secondRun = createDeferred<string>();
+    const onAgentRun = vi.fn(({ chatId }: { readonly chatId: string }) => {
+      return chatId === 'chat-1' ? firstRun.promise : secondRun.promise;
+    });
+    const pipeline = new AutoReplyPipeline({
+      resolveChannel: () => makeInstance(id),
+      onAgentRun,
+    });
+
+    const first = pipeline.handle(messageEvent(id, 'first'));
+    await vi.waitFor(() => {
+      expect(onAgentRun).toHaveBeenCalledTimes(1);
+    });
+
+    const secondEvent = messageEvent(id, 'second');
+    if (secondEvent.type === 'message') {
+      secondEvent.message.chatId = 'chat-2';
+    }
+    const second = pipeline.handle(secondEvent);
+
+    await vi.waitFor(() => {
+      expect(onAgentRun).toHaveBeenCalledTimes(2);
+    });
+
+    secondRun.resolve('reply second');
+    await second;
+    firstRun.resolve('reply first');
+    await first;
+
+    expect(sendMessage.mock.calls.map((call) => call[0])).toEqual(['chat-2', 'chat-1']);
+  });
+
+  it('不同插件即使 chatId 相同也保持独立队列，避免跨实例互相阻塞', async () => {
+    const firstSendMessage = vi.fn(async (_chatId: string, _content: string) => ({
+      messageId: 'first-ok',
+    }));
+    const secondSendMessage = vi.fn(async (_chatId: string, _content: string) => ({
+      messageId: 'second-ok',
+    }));
+    const firstPluginId = 'tg-plugin-a';
+    const secondPluginId = 'tg-plugin-b';
+    await installFakeService(
+      firstPluginId,
+      new FakeService(firstPluginId, { sendMessage: firstSendMessage }),
+    );
+    await installFakeService(
+      secondPluginId,
+      new FakeService(secondPluginId, { sendMessage: secondSendMessage }),
+    );
+    const firstRun = createDeferred<string>();
+    const secondRun = createDeferred<string>();
+    const onAgentRun = vi.fn(({ pluginId }: { readonly pluginId: string }) => {
+      return pluginId === firstPluginId ? firstRun.promise : secondRun.promise;
+    });
+    const pipeline = new AutoReplyPipeline({
+      resolveChannel: (pluginId) => makeInstance(pluginId),
+      onAgentRun,
+    });
+
+    const first = pipeline.handle(messageEvent(firstPluginId, 'first'));
+    await vi.waitFor(() => {
+      expect(onAgentRun).toHaveBeenCalledTimes(1);
+    });
+    const second = pipeline.handle(messageEvent(secondPluginId, 'second'));
+
+    await vi.waitFor(() => {
+      expect(onAgentRun).toHaveBeenCalledTimes(2);
+    });
+
+    secondRun.resolve('reply second');
+    await second;
+    firstRun.resolve('reply first');
+    await first;
+
+    expect(firstSendMessage).toHaveBeenCalledWith('chat-1', 'reply first');
+    expect(secondSendMessage).toHaveBeenCalledWith('chat-1', 'reply second');
+  });
+
+  it('同一通道会话队列超过上限时回复忙碌提示，避免无限积压 agent run', async () => {
+    const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const sendMessage = vi.fn(async (_chatId: string, _content: string) => ({ messageId: 'ok' }));
+    const id = 'tg-queue-depth-limit';
+    await installFakeService(id, new FakeService(id, { sendMessage }));
+    const firstRun = createDeferred<string>();
+    const onAgentRun = vi.fn(({ message }: { readonly message: string }) => {
+      return message === 'msg-1' ? firstRun.promise : Promise.resolve(`reply ${message}`);
+    });
+    const pipeline = new AutoReplyPipeline({
+      resolveChannel: () => makeInstance(id),
+      onAgentRun,
+    });
+
+    const tasks = [pipeline.handle(messageEvent(id, 'msg-1'))];
+    await vi.waitFor(() => {
+      expect(onAgentRun).toHaveBeenCalledTimes(1);
+    });
+
+    for (let index = 2; index <= 9; index += 1) {
+      tasks.push(pipeline.handle(messageEvent(id, `msg-${index}`)));
+    }
+
+    await vi.waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledWith(
+        'chat-1',
+        '当前会话正在处理较多消息，请稍后再发送。',
+      );
+    });
+    expect(onAgentRun).toHaveBeenCalledTimes(1);
+    expect(consoleSpy).toHaveBeenCalled();
+
+    firstRun.resolve('reply msg-1');
+    await Promise.all(tasks);
+
+    expect(onAgentRun).toHaveBeenCalledTimes(8);
+    expect(sendMessage.mock.calls.map((call) => call[1])).toContain(
+      '当前会话正在处理较多消息，请稍后再发送。',
+    );
+
+    await pipeline.handle(messageEvent(id, 'msg-10'));
+
+    expect(onAgentRun).toHaveBeenCalledTimes(9);
+    expect(sendMessage).toHaveBeenCalledWith('chat-1', 'reply msg-10');
+  });
+
+  it('streaming 自动回复也在同一通道会话内串行创建 handle 和运行 agent', async () => {
+    const finishes: string[] = [];
+    const updates: string[] = [];
+    const sendStreamingMessage = vi.fn(
+      async (
+        _chatId: string,
+        _initialContent: string,
+        _replyToMessageId?: string,
+      ): Promise<ChannelStreamingHandle> => ({
+        update: async (content: string) => {
+          updates.push(content);
+        },
+        finish: async (finalContent: string) => {
+          finishes.push(finalContent);
+        },
+      }),
+    );
+    const id = 'tg-streaming-serialized-session';
+    await installFakeService(
+      id,
+      new FakeService(id, { supportsStreaming: true, sendStreamingMessage }),
+    );
+    const firstRun = createDeferred<string>();
+    const secondRun = createDeferred<string>();
+    const onAgentRun = vi.fn(
+      async ({
+        message,
+        onPartialText,
+      }: {
+        readonly message: string;
+        readonly onPartialText?: (text: string) => Promise<void> | void;
+      }) => {
+        await onPartialText?.(`partial ${message}`);
+        return message === 'first' ? firstRun.promise : secondRun.promise;
+      },
+    );
+    const pipeline = new AutoReplyPipeline({
+      resolveChannel: () => makeStreamingInstance(id),
+      onAgentRun,
+    });
+
+    const first = pipeline.handle(messageEvent(id, 'first'));
+    await vi.waitFor(() => {
+      expect(sendStreamingMessage).toHaveBeenCalledTimes(1);
+      expect(onAgentRun).toHaveBeenCalledTimes(1);
+    });
+
+    const second = pipeline.handle(messageEvent(id, 'second'));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(sendStreamingMessage).toHaveBeenCalledTimes(1);
+    expect(onAgentRun).toHaveBeenCalledTimes(1);
+
+    firstRun.resolve('stream first');
+    await vi.waitFor(() => {
+      expect(sendStreamingMessage).toHaveBeenCalledTimes(2);
+      expect(onAgentRun).toHaveBeenCalledTimes(2);
+    });
+    secondRun.resolve('stream second');
+    await Promise.all([first, second]);
+
+    expect(updates).toEqual(['partial first', 'partial second']);
+    expect(finishes).toEqual(['stream first', 'stream second']);
+  });
+
+  it('streaming handle 创建失败不会毒化同一通道会话后续队列任务', async () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const finishes: string[] = [];
+    let createAttempts = 0;
+    const sendStreamingMessage = vi.fn(async (): Promise<ChannelStreamingHandle> => {
+      createAttempts += 1;
+      if (createAttempts === 1) {
+        throw new Error('streaming unavailable');
+      }
+      return {
+        update: async () => undefined,
+        finish: async (finalContent: string) => {
+          finishes.push(finalContent);
+        },
+      };
+    });
+    const id = 'tg-streaming-rejection-continues';
+    await installFakeService(
+      id,
+      new FakeService(id, { supportsStreaming: true, sendStreamingMessage }),
+    );
+    const pipeline = new AutoReplyPipeline({
+      resolveChannel: () => makeStreamingInstance(id),
+      onAgentRun: async ({ message }) => `reply ${message}`,
+    });
+
+    const first = pipeline.handle(messageEvent(id, 'first'));
+    const second = pipeline.handle(messageEvent(id, 'second'));
+
+    await Promise.all([first, second]);
+
+    expect(consoleSpy).toHaveBeenCalled();
+    expect(sendStreamingMessage).toHaveBeenCalledTimes(2);
+    expect(finishes).toEqual(['reply second']);
   });
 
   it('QQ 群聊自动回复使用入站 message id 进行 reply，避免 QQ API 缺少 msg_id', async () => {

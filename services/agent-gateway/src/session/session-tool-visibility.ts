@@ -84,6 +84,11 @@ function resolveChannelToolKey(toolName: string): string | null {
     case 'lsp_prepare_rename':
     case 'lsp_hover':
     case 'lsp_call_hierarchy':
+    case 'codegraph_status':
+    case 'codegraph_search':
+    case 'codegraph_node':
+    case 'codegraph_callers':
+    case 'codegraph_impact':
     case 'read_tool_output':
     case 'workspace_tree':
     case 'workspace_read_file':
@@ -102,6 +107,10 @@ function resolveChannelToolKey(toolName: string): string | null {
     case 'workspace_review_diff':
       return 'read';
     case 'bash':
+    case 'interactive_bash':
+    case 'run_bash_in_background':
+    case 'read_background_bash_output':
+    case 'terminate_background_bash':
       return 'bash';
     case 'mcp_list_tools':
     case 'mcp_call':
@@ -149,18 +158,22 @@ function isChannelPolicyToolEnabled(metadata: Record<string, unknown>, toolName:
     return false;
   }
 
+  if (!areChannelLlmToolDeclarationsEnabled(metadata)) {
+    return false;
+  }
+
   const channelTools = readChannelTools(metadata);
   const toolKey = resolveChannelToolKey(toolName);
-  if (channelTools && toolKey && channelTools[toolKey] !== true) {
+  if (!toolKey || channelTools?.[toolKey] !== true) {
     return false;
   }
 
   const permissions = readChannelPermissions(metadata);
-  if (toolName === 'bash' && permissions?.allowShell === false) {
+  if (toolKey === 'bash' && permissions?.allowShell !== true) {
     return false;
   }
 
-  if (toolName === 'task' && permissions?.allowSubAgents === false) {
+  if (toolKey === 'task' && permissions?.allowSubAgents !== true) {
     return false;
   }
 
@@ -169,12 +182,12 @@ function isChannelPolicyToolEnabled(metadata: Record<string, unknown>, toolName:
 
 export function isTaskToolEnabledForSessionMetadata(metadata: Record<string, unknown>): boolean {
   const explicitTaskToolEnabled = metadata['taskToolEnabled'];
-  if (typeof explicitTaskToolEnabled === 'boolean') {
-    return explicitTaskToolEnabled;
+  if (isChannelManagedSession(metadata)) {
+    return explicitTaskToolEnabled !== false && isChannelPolicyToolEnabled(metadata, 'task');
   }
 
-  if (isChannelManagedSession(metadata)) {
-    return isChannelPolicyToolEnabled(metadata, 'task');
+  if (typeof explicitTaskToolEnabled === 'boolean') {
+    return explicitTaskToolEnabled;
   }
 
   return metadata['createdByTool'] !== 'task';

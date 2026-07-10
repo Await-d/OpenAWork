@@ -28,8 +28,17 @@ interface AutoReplySendContext {
   readonly service: MessagingChannelService;
 }
 
+interface SessionTaskChain {
+  readonly promise: Promise<void>;
+  readonly queuedCount: number;
+}
+
+const MAX_SESSION_TASK_QUEUE_DEPTH = 8;
+const CHANNEL_BUSY_MESSAGE = '当前会话正在处理较多消息，请稍后再发送。';
+
 export class AutoReplyPipeline {
   private options: AutoReplyOptions;
+  private readonly sessionTaskChains = new Map<string, SessionTaskChain>();
 
   constructor(options: AutoReplyOptions) {
     this.options = options;
@@ -122,46 +131,96 @@ export class AutoReplyPipeline {
       service.supportsStreaming &&
       !!service.sendStreamingMessage;
 
-    if (supportsStreaming && service.sendStreamingMessage) {
-      const handle = await service.sendStreamingMessage(message.chatId, '…', message.id);
+    const enqueued = await this.enqueueSessionTask(sessionKey, async () => {
+      if (supportsStreaming && service.sendStreamingMessage) {
+        const handle = await service.sendStreamingMessage(message.chatId, '…', message.id);
 
-      try {
-        const response = await this.options.onAgentRun({
-          sessionKey,
-          message: effectiveMessage,
-          pluginId,
-          chatId: message.chatId,
-          onPartialText: async (text) => {
-            await handle.update(text);
-          },
-        });
-        await handle.finish(response);
-      } catch (err) {
-        // The recovery `finish` reuses the same (possibly broken) upstream
-        // connection, so it can itself throw — guard it so the failure is
-        // logged rather than re-thrown into `handle`'s wrapper.
-        await this.safeSend(pluginId, () =>
-          handle.finish(`Error: ${err instanceof Error ? err.message : String(err)}`),
-        );
+        try {
+          const response = await this.options.onAgentRun({
+            sessionKey,
+            message: effectiveMessage,
+            pluginId,
+            chatId: message.chatId,
+            onPartialText: async (text) => {
+              await handle.update(text);
+            },
+          });
+          await handle.finish(response);
+        } catch (err) {
+          // The recovery `finish` reuses the same (possibly broken) upstream
+          // connection, so it can itself throw — guard it so the failure is
+          // logged rather than re-thrown into `handle`'s wrapper.
+          await this.safeSend(pluginId, () =>
+            handle.finish(`Error: ${err instanceof Error ? err.message : String(err)}`),
+          );
+        }
+      } else {
+        try {
+          const response = await this.options.onAgentRun({
+            sessionKey,
+            message: effectiveMessage,
+            pluginId,
+            chatId: message.chatId,
+          });
+          await this.sendChannelReply({ channel, content: response, message: event, service });
+        } catch (err) {
+          await this.safeSend(pluginId, () =>
+            this.sendChannelReply({
+              channel,
+              content: `Error: ${err instanceof Error ? err.message : String(err)}`,
+              message: event,
+              service,
+            }),
+          );
+        }
       }
-    } else {
-      try {
-        const response = await this.options.onAgentRun({
-          sessionKey,
-          message: effectiveMessage,
-          pluginId,
-          chatId: message.chatId,
-        });
-        await this.sendChannelReply({ channel, content: response, message: event, service });
-      } catch (err) {
-        await this.safeSend(pluginId, () =>
-          this.sendChannelReply({
-            channel,
-            content: `Error: ${err instanceof Error ? err.message : String(err)}`,
-            message: event,
-            service,
-          }),
-        );
+    });
+    if (!enqueued) {
+      console.warn('[auto-reply] session queue is full; rejecting channel message', {
+        pluginId,
+        sessionKey,
+        maxDepth: MAX_SESSION_TASK_QUEUE_DEPTH,
+      });
+      await this.safeSend(pluginId, () =>
+        this.sendChannelReply({
+          channel,
+          content: CHANNEL_BUSY_MESSAGE,
+          message: event,
+          service,
+        }),
+      );
+    }
+  }
+
+  private async enqueueSessionTask(
+    sessionKey: string,
+    task: () => Promise<void>,
+  ): Promise<boolean> {
+    const existing = this.sessionTaskChains.get(sessionKey);
+    const queuedCount = existing?.queuedCount ?? 0;
+    if (queuedCount >= MAX_SESSION_TASK_QUEUE_DEPTH) {
+      return false;
+    }
+
+    const previous = existing?.promise ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(task);
+    this.sessionTaskChains.set(sessionKey, { promise: current, queuedCount: queuedCount + 1 });
+
+    try {
+      await current;
+      return true;
+    } finally {
+      const latest = this.sessionTaskChains.get(sessionKey);
+      if (latest) {
+        const nextQueuedCount = latest.queuedCount - 1;
+        if (nextQueuedCount <= 0) {
+          this.sessionTaskChains.delete(sessionKey);
+        } else {
+          this.sessionTaskChains.set(sessionKey, {
+            promise: latest.promise,
+            queuedCount: nextQueuedCount,
+          });
+        }
       }
     }
   }

@@ -3,6 +3,7 @@ import type * as ChannelSessionsModule from '../../channels/channel-sessions.js'
 import type * as DbModule from '../../infra/db.js';
 import type * as MessageAdapterModule from '../../message/message-v2-adapter.js';
 import type { ChannelInstance } from '../../channels/types.js';
+import { parseSessionMetadataJson } from '../../session/session-workspace-metadata.js';
 
 process.env['DATABASE_URL'] = ':memory:';
 process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
@@ -64,6 +65,17 @@ function currentSessionId(): string {
   return row.id;
 }
 
+function currentSessionMetadata(): Record<string, unknown> {
+  const row = dbModule.sqliteGet<{ metadata_json: string }>(
+    'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ?',
+    [currentSessionId(), USER_ID],
+  );
+  if (!row) {
+    throw new Error('expected seeded channel session metadata');
+  }
+  return parseSessionMetadataJson(row.metadata_json);
+}
+
 function appendUserMessage(index: number): void {
   messageAdapter.appendSessionMessageV2({
     sessionId: currentSessionId(),
@@ -111,6 +123,26 @@ afterAll(async () => {
 });
 
 describe('channel session commands', () => {
+  it('新建 channel session 默认不启用 LLM tool declarations', () => {
+    const metadata = currentSessionMetadata();
+
+    expect(metadata['source']).toBe('channel');
+    expect(metadata['channelLlmToolsEnabled']).toBe(false);
+  });
+
+  it('重新保存 channel session 时保留显式 LLM tool opt-in', () => {
+    const sessionId = currentSessionId();
+    dbModule.sqliteRun('UPDATE sessions SET metadata_json = ? WHERE id = ? AND user_id = ?', [
+      JSON.stringify({ ...currentSessionMetadata(), channelLlmToolsEnabled: true }),
+      sessionId,
+      USER_ID,
+    ]);
+
+    channelSessions.getChannelUsageStats({ channel: makeChannel(), chatId: CHAT_ID });
+
+    expect(currentSessionMetadata()['channelLlmToolsEnabled']).toBe(true);
+  });
+
   it('通道绑定 souls persona 时写入 channel session metadata', () => {
     const row = dbModule.sqliteGet<{ metadata_json: string }>(
       'SELECT metadata_json FROM sessions WHERE user_id = ? AND title = ?',

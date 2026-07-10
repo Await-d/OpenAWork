@@ -170,6 +170,42 @@ describe('session tool visibility', () => {
     expect(filterEnabledGatewayToolsForSession(tools, metadata)).toEqual([]);
   });
 
+  it('Given channel-managed metadata without LLM tool opt-in When gateway tools are checked Then only local channel tools are enabled', () => {
+    const metadata = {
+      source: 'channel',
+      taskToolEnabled: true,
+      channel: {
+        type: 'qq',
+        permissions: {
+          allowShell: true,
+          allowSubAgents: true,
+        },
+        tools: {
+          web_search: true,
+          read: true,
+          bash: true,
+          mcp: true,
+          task: true,
+        },
+      },
+    };
+
+    expect(isGatewayToolEnabledForSessionMetadata('PluginReplyMessage', metadata)).toBe(true);
+    expect(isGatewayToolEnabledForSessionMetadata('websearch', metadata)).toBe(false);
+    expect(isGatewayToolEnabledForSessionMetadata('read', metadata)).toBe(false);
+    expect(isGatewayToolEnabledForSessionMetadata('bash', metadata)).toBe(false);
+    expect(isGatewayToolEnabledForSessionMetadata('run_bash_in_background', metadata)).toBe(false);
+    expect(isGatewayToolEnabledForSessionMetadata('interactive_bash', metadata)).toBe(false);
+    expect(isGatewayToolEnabledForSessionMetadata('mcp__omo__adapter_catalog', metadata)).toBe(
+      false,
+    );
+    expect(isGatewayToolEnabledForSessionMetadata('task', metadata)).toBe(false);
+    expect(isGatewayToolEnabledForSessionMetadata('Agent', metadata)).toBe(false);
+    expect(isGatewayToolEnabledForSessionMetadata('generate_image', metadata)).toBe(false);
+    expect(isGatewayToolEnabledForSessionMetadata('repo_clone', metadata)).toBe(false);
+    expect(isGatewayToolEnabledForSessionMetadata('codegraph_search', metadata)).toBe(false);
+  });
+
   it('Given channel-managed metadata with LLM tool opt-in When filtering upstream tools Then existing channel policy still applies', () => {
     const metadata = JSON.stringify({
       source: 'channel',
@@ -191,5 +227,66 @@ describe('session tool visibility', () => {
     expect(
       filterEnabledGatewayToolsForSession(tools, metadata).map((tool) => tool.function.name),
     ).toEqual(['websearch', 'PluginReplyMessage']);
+  });
+
+  it('Given channel-managed metadata with LLM tool opt-in When only web search is allowed Then unmapped tools stay disabled', () => {
+    const metadata = {
+      source: 'channel',
+      channelLlmToolsEnabled: true,
+      channel: {
+        type: 'qq',
+        tools: {
+          web_search: true,
+        },
+      },
+    };
+
+    expect(isGatewayToolEnabledForSessionMetadata('websearch', metadata)).toBe(true);
+    expect(isGatewayToolEnabledForSessionMetadata('webfetch', metadata)).toBe(true);
+    expect(isGatewayToolEnabledForSessionMetadata('generate_image', metadata)).toBe(false);
+    expect(isGatewayToolEnabledForSessionMetadata('repo_clone', metadata)).toBe(false);
+    expect(isGatewayToolEnabledForSessionMetadata('codegraph_search', metadata)).toBe(false);
+    expect(isGatewayToolEnabledForSessionMetadata('run_bash_in_background', metadata)).toBe(false);
+    expect(isGatewayToolEnabledForSessionMetadata('interactive_bash', metadata)).toBe(false);
+  });
+
+  it('Given channel-managed metadata with LLM tool opt-in When sub-agents are allowed Then task tools follow channel policy', () => {
+    const metadata = {
+      source: 'channel',
+      taskToolEnabled: true,
+      channelLlmToolsEnabled: true,
+      channel: {
+        type: 'qq',
+        permissions: {
+          allowSubAgents: true,
+        },
+        tools: {
+          task: true,
+        },
+      },
+    };
+
+    expect(isGatewayToolEnabledForSessionMetadata('task', metadata)).toBe(true);
+    expect(isGatewayToolEnabledForSessionMetadata('Agent', metadata)).toBe(true);
+  });
+
+  it('Given channel-managed metadata with LLM tool opt-in When sub-agent permission is denied Then task tools stay disabled', () => {
+    const metadata = {
+      source: 'channel',
+      taskToolEnabled: true,
+      channelLlmToolsEnabled: true,
+      channel: {
+        type: 'qq',
+        permissions: {
+          allowSubAgents: false,
+        },
+        tools: {
+          task: true,
+        },
+      },
+    };
+
+    expect(isGatewayToolEnabledForSessionMetadata('task', metadata)).toBe(false);
+    expect(isGatewayToolEnabledForSessionMetadata('Agent', metadata)).toBe(false);
   });
 });
