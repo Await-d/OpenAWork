@@ -37,7 +37,7 @@ const DIALOGUE_MODE_DEFINITIONS = [
     icon: '⌨',
     desc: '以工程协作视角处理实现、修改、调试和验证',
   },
-] satisfies readonly DialogueModeDefinition[];
+] satisfies readonly [DialogueModeDefinition, ...DialogueModeDefinition[]];
 
 export const DIALOGUE_MODES: { value: DialogueMode; label: string; icon: string; desc: string }[] =
   DIALOGUE_MODE_DEFINITIONS.map(({ value, label, icon, desc }) => ({ value, label, icon, desc }));
@@ -55,9 +55,7 @@ const MODE_COLOR: Record<DialogueMode, string> = {
 
 export function DialogueModeSelector({ mode, onChange }: DialogueModeSelectorProps) {
   const [visible, setVisible] = useState(false);
-  const current =
-    DIALOGUE_MODES.find((m) => m.value === mode) ??
-    (DIALOGUE_MODES[0] as NonNullable<(typeof DIALOGUE_MODES)[number]>);
+  const current = DIALOGUE_MODES.find((m) => m.value === mode) ?? DIALOGUE_MODE_DEFINITIONS[0];
   const color = MODE_COLOR[mode] ?? '#6366f1';
 
   return (
