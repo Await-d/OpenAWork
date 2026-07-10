@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
+import { useSearchParams } from 'react-router';
 import { createSettingsClient } from '@openAwork/web-client';
 import type { AIProviderRef } from '@openAwork/shared-ui';
 import { MCPServerConfig, MCPServerList } from '@openAwork/shared-ui';
@@ -33,6 +34,21 @@ interface PluginsTabContentProps {
   providers: AIProviderRef[];
   activeImageProviderId?: string;
   activeImageModelId?: string;
+}
+
+type PluginId = 'desktop-control' | 'image-generation' | 'mcp' | 'skills' | 'websearch';
+
+function normalizePluginId(value: string | null): PluginId {
+  switch (value) {
+    case 'desktop-control':
+    case 'image-generation':
+    case 'mcp':
+    case 'skills':
+    case 'websearch':
+      return value;
+    default:
+      return 'image-generation';
+  }
 }
 
 // ── Styles ────────────────────────────────────────────────────
@@ -149,12 +165,18 @@ export function PluginsTabContent({
   activeImageProviderId,
   activeImageModelId,
 }: PluginsTabContentProps) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedPluginFromUrl = normalizePluginId(searchParams.get('plugin'));
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
   const token = useAuthStore((s) => s.accessToken);
   const [pluginSettings, setPluginSettings] = useState<PluginSettings>({});
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [selectedPluginId, setSelectedPluginId] = useState<string>('image-generation');
+  const [selectedPluginId, setSelectedPluginId] = useState<PluginId>(selectedPluginFromUrl);
+
+  useEffect(() => {
+    setSelectedPluginId(selectedPluginFromUrl);
+  }, [selectedPluginFromUrl]);
 
   // Web 搜索策略——独立加载/保存
   const {
@@ -245,6 +267,16 @@ export function PluginsTabContent({
     [saveSettings],
   );
 
+  const selectPlugin = useCallback(
+    (pluginId: PluginId) => {
+      setSelectedPluginId(pluginId);
+      const nextSearchParams = new URLSearchParams(searchParams);
+      nextSearchParams.set('plugin', pluginId);
+      setSearchParams(nextSearchParams, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
+
   const imgPlugin = pluginSettings.imageGeneration ?? { enabled: false, modelSource: 'global' };
   const desktopControlPlugin = pluginSettings.desktopControl ?? { enabled: false };
 
@@ -259,7 +291,7 @@ export function PluginsTabContent({
 
   // Plugin list definition
   const PLUGINS: Array<{
-    id: string;
+    id: PluginId;
     icon: React.ReactElement;
     label: string;
     description: string;
@@ -403,7 +435,7 @@ export function PluginsTabContent({
               <button
                 key={plugin.id}
                 type="button"
-                onClick={() => setSelectedPluginId(plugin.id)}
+                onClick={() => selectPlugin(plugin.id)}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
