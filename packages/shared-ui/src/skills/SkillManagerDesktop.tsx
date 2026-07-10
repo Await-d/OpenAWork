@@ -160,7 +160,7 @@ export function SkillManagerDesktop({
                       <button
                         type="button"
                         onClick={() => onUninstall(skill.id)}
-                        style={actionBtn('var(--fg-subtle)', clr.danger as string)}
+                        style={actionBtn('var(--fg-subtle)', clr.danger)}
                       >
                         移除
                       </button>

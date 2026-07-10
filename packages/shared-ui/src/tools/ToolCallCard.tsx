@@ -883,7 +883,7 @@ function resolveDiffView(output: unknown): ToolCallCardDisplayData['diffView'] |
         afterText: single.afterText,
         filePath: single.filePath,
         summary: single.summary,
-      } as ToolCallCardDisplayData['diffView'];
+      };
     }
     const added = multiFiles.reduce((count, item) => {
       const match = item.summary.match(/\+(\d+)/);
@@ -920,7 +920,7 @@ function resolveDiffView(output: unknown): ToolCallCardDisplayData['diffView'] |
         afterText: snapshot.afterText,
         filePath: snapshot.filePath,
         summary: snapshot.summary,
-      } as ToolCallCardDisplayData['diffView'];
+      };
     }
   }
 
@@ -935,7 +935,7 @@ function resolveDiffView(output: unknown): ToolCallCardDisplayData['diffView'] |
           afterText: snapshot.afterText,
           filePath: snapshot.filePath,
           summary: snapshot.summary,
-        } as ToolCallCardDisplayData['diffView'];
+        };
       }
     }
   }
@@ -952,7 +952,7 @@ function resolveDiffView(output: unknown): ToolCallCardDisplayData['diffView'] |
     afterText,
     filePath,
     summary: `${filePath ? `${trimFileLikePath(filePath)} · ` : ''}+${summary.added} / -${summary.removed}`,
-  } as ToolCallCardDisplayData['diffView'];
+  };
 }
 
 export function resolveToolCallCardDisplayData(input: {

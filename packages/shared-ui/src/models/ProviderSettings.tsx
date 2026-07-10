@@ -50,7 +50,7 @@ function ProviderLogo({ type, size = 28 }: { type: string; size?: number }) {
           height={Math.round(size * 0.72)}
           style={{ objectFit: 'contain', filter: 'var(--provider-logo-filter, none)' }}
           onError={(e: SyntheticEvent<HTMLImageElement>) => {
-            (e.currentTarget as HTMLImageElement).style.display = 'none';
+            e.currentTarget.style.display = 'none';
           }}
         />
       ) : (
@@ -859,7 +859,7 @@ export function ProviderSettings({
                 height={11}
                 style={{ objectFit: 'contain', filter: 'var(--provider-logo-filter, none)' }}
                 onError={(event: SyntheticEvent<HTMLImageElement>) => {
-                  (event.currentTarget as HTMLImageElement).style.display = 'none';
+                  event.currentTarget.style.display = 'none';
                 }}
               />
             </div>

@@ -140,7 +140,7 @@ export function SkillManagerMobile({
                   <button
                     type="button"
                     onClick={() => onUninstall(skill.id)}
-                    style={actionBtn('var(--fg-subtle)', clr.danger as string)}
+                    style={actionBtn('var(--fg-subtle)', clr.danger)}
                   >
                     Remove
                   </button>
