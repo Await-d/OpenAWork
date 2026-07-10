@@ -6,6 +6,7 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "composite": true,
+    "types": ["node"],
     "paths": {
       "@openAwork/agent-core": ["../agent-core/src/index.ts"],
       "@openAwork/shared": ["../shared/src/index.ts"]
