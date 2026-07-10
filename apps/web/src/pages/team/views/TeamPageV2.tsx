@@ -1213,7 +1213,7 @@ export default function TeamPageV2() {
         handoffs,
         gatewayUrl,
         accessToken,
-        activeWorkspaceName: fileTreeWorkspacePath,
+        activeWorkspaceName: fileTreeWorkspacePath ?? undefined,
         onWorkspaceChanged: workspaceState.refresh,
         teamWorkspaceId: resolvedTeamWorkspaceId,
         onUseTemplate: handleOpenNewSessionModal,

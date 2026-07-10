@@ -103,6 +103,7 @@ export interface MiddleTabRenderArgs {
     activeFilePath: string | null;
     isDirty: (path: string) => boolean;
     saveError: string | null;
+    openFile: (path: string) => Promise<void>;
     setActiveFilePath: (path: string | null) => void;
     closeFile: (path: string) => void;
     updateContent: (path: string, content: string) => void;
@@ -428,6 +429,7 @@ function FilesTabContent({
     activeFilePath: string | null;
     isDirty: (path: string) => boolean;
     saveError: string | null;
+    openFile: (path: string) => Promise<void>;
     setActiveFilePath: (path: string | null) => void;
     closeFile: (path: string) => void;
     updateContent: (path: string, content: string) => void;

@@ -1,10 +1,11 @@
 import { render } from '@testing-library/react';
-import { vi } from 'vitest';
+import { vi, type Mock } from 'vitest';
 import { MemoryRouter, useLocation } from 'react-router';
 import type { Session } from '../../hooks/workspace/useSessions.js';
 import type {
   TeamSidebarSession,
   TeamWorkspaceGroup,
+  UseTeamSidebarSessionsResult,
 } from '../../hooks/workspace/useTeamSidebarSessions.js';
 import type {
   WorkspaceSessionGroup,
@@ -16,11 +17,45 @@ import { FusionSidebar } from './FusionSidebar.js';
 export const OPENAWORK_PATH = '/home/await/project/OpenAWork';
 export const MARKET_PATH = '/home/await/project/MarketAgent';
 
-const fusionSidebarMocks = vi.hoisted(() => ({
-  createWorkspaceClient: vi.fn(() => ({})),
-  preloadRouteModuleByPath: vi.fn(),
-  useSessions: vi.fn(),
-  useTeamSidebarSessions: vi.fn(),
+interface FusionSidebarSessionsResult {
+  readonly collapsedGroups: Set<string>;
+  readonly commitRename: (sessionId: string) => Promise<void>;
+  readonly exportSessionAsJson: (sessionId: string) => Promise<void>;
+  readonly exportSessionAsMarkdown: (sessionId: string) => Promise<void>;
+  readonly groupedSessionTrees: WorkspaceSessionTreeGroup<Session>[];
+  readonly groupedSessions: WorkspaceSessionGroup<Session>[];
+  readonly hoveredSessionId: string | null;
+  readonly isDeletingSession: (sessionId: string) => boolean;
+  readonly newSession: (
+    workspacePath?: string | null,
+    parentSessionId?: string | null,
+  ) => Promise<void>;
+  readonly quickDeleteSession: (sessionId: string) => Promise<boolean>;
+  readonly quickExportSession: (sessionId: string) => Promise<void>;
+  readonly renameValue: string;
+  readonly renamingSessionId: string | null;
+  readonly sessionCountByWorkspace: Map<string, number>;
+  readonly sessionSearch: string;
+  readonly sessions: Session[];
+  readonly setHoveredSessionId: (sessionId: string | null) => void;
+  readonly setRenameValue: (value: string) => void;
+  readonly setSessionSearch: (value: string) => void;
+  readonly startRename: (session: Session) => void;
+  readonly toggleGroupCollapsed: (key: string) => void;
+}
+
+interface FusionSidebarMocks {
+  readonly createWorkspaceClient: Mock<() => Record<string, never>>;
+  readonly preloadRouteModuleByPath: Mock<() => void>;
+  readonly useSessions: Mock<() => FusionSidebarSessionsResult>;
+  readonly useTeamSidebarSessions: Mock<() => UseTeamSidebarSessionsResult>;
+}
+
+const fusionSidebarMocks = vi.hoisted((): FusionSidebarMocks => ({
+  createWorkspaceClient: vi.fn<() => Record<string, never>>(() => ({})),
+  preloadRouteModuleByPath: vi.fn<() => void>(),
+  useSessions: vi.fn<() => FusionSidebarSessionsResult>(),
+  useTeamSidebarSessions: vi.fn<() => UseTeamSidebarSessionsResult>(),
 }));
 
 vi.mock('@openAwork/web-client', () => ({
@@ -98,7 +133,7 @@ const teamGroups: TeamWorkspaceGroup[] = [
   },
 ];
 
-function createSessionsResult() {
+function createSessionsResult(): FusionSidebarSessionsResult {
   return {
     collapsedGroups: new Set<string>(),
     commitRename: vi.fn(async () => undefined),
@@ -127,7 +162,7 @@ function createSessionsResult() {
   };
 }
 
-function createTeamSidebarSessionsResult() {
+function createTeamSidebarSessionsResult(): UseTeamSidebarSessionsResult {
   return {
     error: null,
     loading: false,
