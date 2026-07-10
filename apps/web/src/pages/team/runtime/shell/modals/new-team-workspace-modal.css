@@ -1,0 +1,65 @@
+.new-team-workspace-modal__icon-button,
+.new-team-workspace-modal__secondary-button,
+.new-team-workspace-modal__primary-button,
+.new-team-workspace-modal__directory-button,
+.new-team-workspace-modal__template-card {
+  transition:
+    background var(--dur-micro) var(--ease-micro),
+    border-color var(--dur-micro) var(--ease-micro),
+    color var(--dur-micro) var(--ease-micro),
+    box-shadow var(--dur-micro) var(--ease-micro),
+    transform var(--dur-micro) var(--ease-micro);
+}
+
+.new-team-workspace-modal__icon-button:hover {
+  background: var(--bg-hover);
+  color: var(--fg-strong);
+}
+
+.new-team-workspace-modal__icon-button:active {
+  background: var(--bg-active);
+}
+
+.new-team-workspace-modal__secondary-button:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-emphasis);
+  color: var(--fg-strong);
+}
+
+.new-team-workspace-modal__secondary-button:active {
+  background: var(--bg-active);
+  border-color: var(--border-strong);
+}
+
+.new-team-workspace-modal__primary-button:not(:disabled):hover {
+  background: var(--accent-hover);
+  box-shadow: var(--shadow-glow);
+  transform: translateY(-1px);
+}
+
+.new-team-workspace-modal__primary-button:not(:disabled):active {
+  background: var(--accent-active);
+  transform: translateY(0);
+}
+
+.new-team-workspace-modal__directory-button:hover,
+.new-team-workspace-modal__template-card:hover {
+  border-color: var(--border-emphasis);
+  background: var(--bg-hover);
+}
+
+.new-team-workspace-modal__directory-button:active,
+.new-team-workspace-modal__template-card:active {
+  border-color: var(--border-strong);
+  background: var(--bg-active);
+}
+
+.new-team-workspace-modal__icon-button:focus-visible,
+.new-team-workspace-modal__secondary-button:focus-visible,
+.new-team-workspace-modal__primary-button:focus-visible,
+.new-team-workspace-modal__directory-button:focus-visible,
+.new-team-workspace-modal__template-card:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
