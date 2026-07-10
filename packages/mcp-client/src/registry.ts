@@ -6,7 +6,6 @@ import type {
   SkillManifest,
   SkillExecutor,
   MCPToolDef,
-  JSONSchema,
 } from '@openAwork/skill-types';
 
 export class ToolRegistryImpl implements ToolRegistry {
@@ -14,8 +13,7 @@ export class ToolRegistryImpl implements ToolRegistry {
   private skills = new Map<string, { manifest: SkillManifest; executor: SkillExecutor }>();
   private mcpTools = new Map<string, { serverId: string; def: MCPToolDef }>();
   private mcpExecutor:
-    | ((serverId: string, toolName: string, args: unknown) => Promise<ToolResult>)
-    | null = null;
+    ((serverId: string, toolName: string, args: unknown) => Promise<ToolResult>) | null = null;
   private disabledToolNames = new Set<string>();
 
   setMCPExecutor(
@@ -72,7 +70,7 @@ export class ToolRegistryImpl implements ToolRegistry {
         id: manifest.id,
         name: manifest.name,
         description: manifest.description,
-        inputSchema: {} as JSONSchema,
+        inputSchema: {},
         source: 'skill',
         sourceId: manifest.id,
       });

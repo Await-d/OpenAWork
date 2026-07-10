@@ -351,7 +351,7 @@ export class MCPClientAdapterImpl implements MCPClientAdapter {
       }
       await connectWithTimeout(
         server.id,
-        client as unknown as SDKClient,
+        client,
         new sdk.StdioClientTransport({
           command: server.command,
           args: server.args ?? [],
@@ -371,7 +371,7 @@ export class MCPClientAdapterImpl implements MCPClientAdapter {
       try {
         await connectWithTimeout(
           server.id,
-          client as unknown as SDKClient,
+          client,
           new sdk.StreamableHTTPClientTransport(baseUrl, transportOpts),
         );
       } catch (streamableErr) {
@@ -384,7 +384,7 @@ export class MCPClientAdapterImpl implements MCPClientAdapter {
         }
         await connectWithTimeout(
           server.id,
-          client as unknown as SDKClient,
+          client,
           new sdk.SSEClientTransport(baseUrl, transportOpts),
         );
       }
