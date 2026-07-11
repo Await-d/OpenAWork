@@ -14,7 +14,10 @@ import { Routes, Route, Navigate, useNavigate } from 'react-router';
 import { UnlockOverlay } from './components/common/modal/UnlockOverlay.js';
 import { tauriInvoke } from './pages/settings/shared/settings-page-helpers.js';
 import { useAuthStore } from './stores/auth/auth.js';
-import { useDisplayPreferencesStore } from './stores/settings/display-preferences.js';
+import {
+  useDisplayPreferencesHydrated,
+  useDisplayPreferencesStore,
+} from './stores/settings/display-preferences.js';
 import LoginPage from './pages/misc/LoginPage.js';
 import NotFoundPage from './pages/misc/NotFoundPage.js';
 import HomePage from './pages/home/HomePage.js';
@@ -275,6 +278,7 @@ function useDesktopGatewayBootstrap(
 
 export default function App() {
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
+  const displayPreferencesHydrated = useDisplayPreferencesHydrated();
   const themeMode = useDisplayPreferencesStore((s) => s.themeMode);
   const setThemeMode = useDisplayPreferencesStore((s) => s.setThemeMode);
   const openFileRef = useRef<OpenFileFn | null>(null);
@@ -295,6 +299,7 @@ export default function App() {
 
   // 主题模式：system 跟随系统，light/dark 强制。
   useEffect(() => {
+    if (!displayPreferencesHydrated) return;
     if (themeMode === 'system') {
       const mql = window.matchMedia('(prefers-color-scheme: light)');
       const next: Theme = mql.matches ? 'light' : 'dark';
@@ -306,7 +311,7 @@ export default function App() {
       return () => mql.removeEventListener('change', handler);
     }
     setTheme(themeMode === 'light' ? 'light' : 'dark');
-  }, [themeMode]);
+  }, [displayPreferencesHydrated, themeMode]);
 
   useEffect(() => {
     if (theme === 'light') {

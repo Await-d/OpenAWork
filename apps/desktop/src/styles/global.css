@@ -36,6 +36,24 @@ body,
   color-scheme: dark;
 }
 
+:root.light {
+  --background: 225 38% 97%;
+  --foreground: 224 32% 16%;
+  --muted: 220 32% 92%;
+  --muted-foreground: 224 16% 42%;
+  --border: 223 22% 82%;
+  --primary: 229 65% 47%;
+  --primary-foreground: 0 0% 100%;
+  --accent: 229 65% 47%;
+  --accent-foreground: 0 0% 100%;
+  --color-accent: hsl(var(--accent));
+  --color-accent-hover: hsl(229 70% 42%);
+  --color-warning: #a06d1a;
+  --card: 0 0% 100%;
+  --destructive: 3 72% 52%;
+  color-scheme: light;
+}
+
 body {
   background: hsl(var(--background));
   color: hsl(var(--foreground));

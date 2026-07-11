@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
@@ -82,7 +83,51 @@ export interface DisplayPreferencesStore {
   resetToDefaults: () => void;
 }
 
-const DEFAULTS = {
+type DisplayPreferenceValues = Omit<
+  DisplayPreferencesStore,
+  | 'setShowMessageTimestamps'
+  | 'setShowProviderLabel'
+  | 'setShowModelName'
+  | 'setShowDuration'
+  | 'setShowStopReason'
+  | 'setShowTokenBreakdown'
+  | 'setShowEstimatedTokens'
+  | 'setShowReasoningBlock'
+  | 'setReasoningExpandedByDefault'
+  | 'setToolCallsExpandedByDefault'
+  | 'setShowComposerStatsBar'
+  | 'setShowCommandPaletteButton'
+  | 'setShowGatewayStatusIndicator'
+  | 'setShowTerminalButton'
+  | 'setThemeMode'
+  | 'resetToDefaults'
+>;
+
+const DISPLAY_PREFERENCES_STORAGE_KEY = 'openAwork-display-preferences';
+const LEGACY_THEME_STORAGE_KEY = 'theme';
+
+function normalizeThemeMode(value: unknown): ThemeMode {
+  if (value === 'light' || value === 'dark' || value === 'system') {
+    return value;
+  }
+  return 'system';
+}
+
+function getInitialThemeMode(): ThemeMode {
+  if (typeof window === 'undefined') {
+    return 'system';
+  }
+  try {
+    return normalizeThemeMode(window.localStorage.getItem(LEGACY_THEME_STORAGE_KEY));
+  } catch (caught) {
+    if (caught instanceof DOMException && caught.name === 'SecurityError') {
+      return 'system';
+    }
+    throw caught;
+  }
+}
+
+const DEFAULTS: DisplayPreferenceValues = {
   showMessageTimestamps: true,
   showProviderLabel: true,
   showModelName: true,
@@ -97,8 +142,8 @@ const DEFAULTS = {
   showCommandPaletteButton: true,
   showGatewayStatusIndicator: true,
   showTerminalButton: true,
-  themeMode: 'system' as ThemeMode,
-} as const;
+  themeMode: getInitialThemeMode(),
+};
 
 export const useDisplayPreferencesStore = create<DisplayPreferencesStore>()(
   persist(
@@ -122,9 +167,32 @@ export const useDisplayPreferencesStore = create<DisplayPreferencesStore>()(
       resetToDefaults: () => set({ ...DEFAULTS }),
     }),
     {
-      name: 'openAwork-display-preferences',
-      version: 1,
+      name: DISPLAY_PREFERENCES_STORAGE_KEY,
+      version: 2,
       storage: createJSONStorage(() => localStorage),
+      migrate: (persistedState) => {
+        const persisted =
+          typeof persistedState === 'object' && persistedState !== null
+            ? (persistedState as Partial<typeof DEFAULTS>)
+            : {};
+        return {
+          ...DEFAULTS,
+          ...persisted,
+          themeMode: normalizeThemeMode(persisted.themeMode ?? DEFAULTS.themeMode),
+        };
+      },
     },
   ),
 );
+
+export function useDisplayPreferencesHydrated(): boolean {
+  const [hydrated, setHydrated] = useState(() => useDisplayPreferencesStore.persist.hasHydrated());
+
+  useEffect(() => {
+    const unsub = useDisplayPreferencesStore.persist.onFinishHydration(() => setHydrated(true));
+    setHydrated(useDisplayPreferencesStore.persist.hasHydrated());
+    return unsub;
+  }, []);
+
+  return hydrated;
+}

@@ -2,6 +2,10 @@ import { useState, useEffect } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router';
 import { listen } from '@tauri-apps/api/event';
 import { useAuthStore } from '../../web/src/stores/auth/auth.js';
+import {
+  useDisplayPreferencesHydrated,
+  useDisplayPreferencesStore,
+} from '../../web/src/stores/settings/display-preferences.js';
 import OnboardingWizard from './onboarding/OnboardingWizard.js';
 import ArtifactsPage from '../../web/src/pages/artifacts/ArtifactsPage.js';
 import ChatPage from '../../web/src/pages/chat-page/ChatPage.js';
@@ -22,6 +26,14 @@ import { startDesktopGateway } from './utils/tauri-gateway.js';
 interface NotificationAction {
   type: 'open_session' | 'open_channel';
   targetId: string;
+}
+
+type Theme = 'dark' | 'light';
+
+function getInitialTheme(): Theme {
+  const stored = localStorage.getItem('theme');
+  if (stored === 'light' || stored === 'dark') return stored;
+  return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
 }
 
 function useHasHydrated(): boolean {
@@ -216,7 +228,10 @@ function useDesktopGatewayBootstrap(
 }
 
 export default function App() {
+  const [theme, setTheme] = useState<Theme>(getInitialTheme);
   const [onboarded, setOnboarded] = useState(() => localStorage.getItem('onboarded') === '1');
+  const displayPreferencesHydrated = useDisplayPreferencesHydrated();
+  const themeMode = useDisplayPreferencesStore((state) => state.themeMode);
   const accessToken = useAuthStore((state) => state.accessToken);
   const clearAuth = useAuthStore((state) => state.clearAuth);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
@@ -224,6 +239,27 @@ export default function App() {
   const [showUpdateDialog, setShowUpdateDialog] = useState(false);
 
   useDesktopGatewayBootstrap(onboarded, accessToken, bootstrapRetry, setBootstrapError);
+
+  useEffect(() => {
+    if (!displayPreferencesHydrated) return;
+    if (themeMode === 'system') {
+      const mql = window.matchMedia('(prefers-color-scheme: light)');
+      const next: Theme = mql.matches ? 'light' : 'dark';
+      setTheme(next);
+      const handler = (event: MediaQueryListEvent) => {
+        setTheme(event.matches ? 'light' : 'dark');
+      };
+      mql.addEventListener('change', handler);
+      return () => mql.removeEventListener('change', handler);
+    }
+    setTheme(themeMode === 'light' ? 'light' : 'dark');
+  }, [displayPreferencesHydrated, themeMode]);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('light', theme === 'light');
+    document.documentElement.style.colorScheme = theme;
+    localStorage.setItem('theme', theme);
+  }, [theme]);
 
   useEffect(() => {
     const unlisten = listen('tray:check-updates', () => {
