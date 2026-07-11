@@ -93,6 +93,7 @@ import {
   requestCurrentSessionRefresh,
   requestSessionListRefresh,
 } from '../../utils/session/session-list-events.js';
+import { subscribeSessionStreamResumeAttach } from '../../utils/session/session-stream-resume-events.js';
 import { extractWorkingDirectory } from '../../utils/session/session-metadata.js';
 import {
   shouldAttemptAttachToSession,
@@ -662,6 +663,26 @@ export default function ChatPage() {
   }, [resetToWelcomeSignal, consumeResetToWelcomeSignal]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { attachRetryNonce, cancelAttachRetry, scheduleAttachRetry } = useStreamAttachRetry();
+  useEffect(() => {
+    return subscribeSessionStreamResumeAttach((sessionId) => {
+      if (sessionId !== currentSessionId || !isPageActive) {
+        return;
+      }
+
+      attachAttemptedSessionRef.current = null;
+      setSessionStateStatus('running');
+      requestCurrentSessionRefresh(sessionId);
+      scheduleAttachRetry({
+        delayMs: 100,
+        beforeRetry: () => {
+          if (activeSessionRef.current !== sessionId) {
+            return false;
+          }
+          attachAttemptedSessionRef.current = null;
+        },
+      });
+    });
+  }, [currentSessionId, isPageActive, scheduleAttachRetry]);
   const artifactsWorkspaceHref = currentSessionId
     ? `/artifacts?sessionId=${encodeURIComponent(currentSessionId)}`
     : null;

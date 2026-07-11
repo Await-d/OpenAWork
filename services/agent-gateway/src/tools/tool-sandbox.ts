@@ -31,7 +31,7 @@ import {
   backgroundOutputToolDefinition,
 } from './background-task-tools.js';
 import { bashToolDefinition, deriveBashDescription, runBashCommand } from './bash-tools.js';
-import { buildBashApprovalPatterns } from './bash-arity.js';
+import { buildBashApprovalPatterns, tokenizeCommand } from './bash-arity.js';
 import {
   bashKillToolDefinition,
   bashOutputToolDefinition,
@@ -1534,6 +1534,32 @@ function hasWorkspaceScopedExecutionInput(request: ToolCallRequest): boolean {
   }
 }
 
+function parseReadOnlyGitBashCatCommand(command: string): string | null {
+  if (/[;&|<>`$()]/.test(command)) {
+    return null;
+  }
+  const tokens = tokenizeCommand(command.trim());
+  if (tokens.length === 2 && tokens[0] === 'cat') {
+    return tokens[1] ?? null;
+  }
+  if (tokens.length === 3 && tokens[0] === 'cat' && tokens[1] === '--') {
+    return tokens[2] ?? null;
+  }
+  return null;
+}
+
+function isAutoAllowedGitBashRead(input: {
+  rawInput: Record<string, unknown>;
+  sessionId: string;
+}): boolean {
+  const command = typeof input.rawInput.command === 'string' ? input.rawInput.command.trim() : '';
+  const filePath = command ? parseReadOnlyGitBashCatCommand(command) : null;
+  if (!filePath) {
+    return false;
+  }
+  return validateSessionWorkspacePath({ path: filePath, sessionId: input.sessionId }).ok;
+}
+
 function buildPermissionRequestContext(
   sessionId: string,
   request: ToolCallRequest,
@@ -1554,6 +1580,13 @@ function buildPermissionRequestContext(
   // prompt after the flattening rollout.
   const flatMcp = parseFlatMcpToolName(request.toolName);
   if (flatMcp) {
+    if (
+      flatMcp.serverId === 'git_bash' &&
+      flatMcp.toolName === 'run' &&
+      isAutoAllowedGitBashRead({ rawInput, sessionId })
+    ) {
+      return null;
+    }
     try {
       const server = getConfiguredMcpServerForSession(sessionId, flatMcp.serverId);
       const serverFingerprint = getMcpServerFingerprint(server);

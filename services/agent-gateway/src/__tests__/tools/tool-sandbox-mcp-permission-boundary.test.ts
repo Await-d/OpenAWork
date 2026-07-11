@@ -178,4 +178,53 @@ describe('tool-sandbox flat MCP permission boundary', () => {
     expect(permissionInsertParams()).toBeUndefined();
     expect(mocks.callMcpToolForSessionMock).not.toHaveBeenCalled();
   });
+
+  it('allows strict git_bash cat reads inside the session workspace without approval', async () => {
+    mocks.callMcpToolForSessionMock.mockResolvedValue({
+      serverId: 'git_bash',
+      toolName: 'run',
+      content: [{ type: 'text', text: '{"name":"openawork"}' }],
+      isError: false,
+    });
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-git-bash-read',
+        toolName: 'mcp__git_bash__run',
+        rawInput: {
+          command: 'cat "/home/await/project/OpenAWork/package.json"',
+          description: '读取 package.json',
+        },
+      },
+      new AbortController().signal,
+      'session-1',
+      executionContext('req-git-bash-read'),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(permissionInsertParams()).toBeUndefined();
+    expect(mocks.callMcpToolForSessionMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps git_bash shell commands with control operators behind approval', async () => {
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-git-bash-shell',
+        toolName: 'mcp__git_bash__run',
+        rawInput: {
+          command: 'cat "/home/await/project/OpenAWork/package.json"; rm package.json',
+          description: '读取 package.json',
+        },
+      },
+      new AbortController().signal,
+      'session-1',
+      executionContext('req-git-bash-shell'),
+    );
+
+    expect(result.pendingPermissionRequestId).toBeDefined();
+    expect(permissionInsertParams()).toEqual(
+      expect.arrayContaining(['mcp_call', 'git_bash:run:fp-git_bash']),
+    );
+    expect(mocks.callMcpToolForSessionMock).not.toHaveBeenCalled();
+  });
 });

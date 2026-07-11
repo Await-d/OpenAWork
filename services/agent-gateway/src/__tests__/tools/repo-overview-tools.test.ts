@@ -211,6 +211,16 @@ describe('repo_overview tool — path input', () => {
     }
   });
 
+  it('accepts an absolute path inside a configured workspace root', async () => {
+    const tool = createRepoOverviewTool({ gitRun: fakeGit() });
+    const result = await tool.execute(
+      { path: process.cwd(), depth: 1 } as RepoOverviewInput,
+      NO_SIGNAL,
+    );
+    expect(result.path).toBe(process.cwd());
+    expect(result.dependencyFiles).toContain('package.json');
+  });
+
   it('allows arbitrary paths when OPENAWORK_REPO_OVERVIEW_ALLOW_ANY_PATH=1', async () => {
     const outside = mkdtempSync(join(tmpdir(), 'openawork-repo-overview-allow-any-'));
     try {

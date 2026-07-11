@@ -11,7 +11,8 @@
  *     (b) an absolute path the caller provides. To avoid making this
  *     a "read any path on disk" tool, when `path` is provided we
  *     refuse anything that escapes the repos cache root unless the
- *     caller explicitly opted in via
+ *     path is already inside a configured workspace root or the caller
+ *     explicitly opted in via
  *     `OPENAWORK_REPO_OVERVIEW_ALLOW_ANY_PATH=1`. Future iterations
  *     can layer the existing workspace-permission system on top.
  *   - **Dependency injection**. `createRepoOverviewTool({ gitRun })`
@@ -27,6 +28,8 @@ import { z } from 'zod';
 
 import { parseRepositoryReference, repositoryCachePath } from '../workspace/repo-reference.js';
 import { resolveGatewayReposDir } from '../infra/storage-paths.js';
+import { WORKSPACE_ROOTS } from '../infra/db.js';
+import { isPathWithinRoot } from '../workspace/workspace-paths.js';
 import { defaultGitRunner, type GitRunner } from './repo-clone-tools.js';
 
 const STRUCTURE_LIMIT = 200;
@@ -162,11 +165,12 @@ function resolveTargetPath(input: RepoOverviewInput): ResolveTargetResult {
     const allowAny = process.env['OPENAWORK_REPO_OVERVIEW_ALLOW_ANY_PATH'] === '1';
     if (!allowAny) {
       const reposRootResolved = path.resolve(reposRoot);
-      const inside =
-        resolved === reposRootResolved || resolved.startsWith(reposRootResolved + path.sep);
+      const insideReposCache = isPathWithinRoot(resolved, reposRootResolved);
+      const insideWorkspaceRoot = WORKSPACE_ROOTS.some((root) => isPathWithinRoot(resolved, root));
+      const inside = insideReposCache || insideWorkspaceRoot;
       if (!inside) {
         throw new Error(
-          `repo_overview path must live under the repos cache (${reposRootResolved}). Set OPENAWORK_REPO_OVERVIEW_ALLOW_ANY_PATH=1 to override.`,
+          `repo_overview path must live under the repos cache (${reposRootResolved}) or a configured workspace root. Set OPENAWORK_REPO_OVERVIEW_ALLOW_ANY_PATH=1 to override.`,
         );
       }
     }

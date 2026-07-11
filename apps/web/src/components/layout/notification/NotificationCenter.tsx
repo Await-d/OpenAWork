@@ -17,6 +17,7 @@ import type {
 } from '@openAwork/web-client';
 import { subscribeNotificationPreferenceRefresh } from '../../../utils/chat/notification-preference-events.js';
 import { preloadRouteModuleByPath } from '../../../routes/preloadable-route-modules.js';
+import { requestSessionStreamResumeAttach } from '../../../utils/session/session-stream-resume-events.js';
 import { toast } from '../../common/feedback/ToastNotification.js';
 import { BellIcon } from './notification-icons.js';
 import { NotificationPanel } from './NotificationPanel.js';
@@ -398,6 +399,9 @@ export default function NotificationCenter({
           decision,
           ...(alwaysOverride ? { alwaysOverride } : {}),
         });
+        if (decision !== 'reject') {
+          requestSessionStreamResumeAttach(notification.sessionId);
+        }
         const labels: Record<PermissionDecision, string> = {
           once: '允许一次',
           session: '本会话允许',

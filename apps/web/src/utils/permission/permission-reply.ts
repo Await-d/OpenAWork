@@ -1,5 +1,6 @@
 import { createPermissionsClient } from '@openAwork/web-client';
 import type { PermissionDecision } from '@openAwork/web-client';
+import { requestSessionStreamResumeAttach } from '../session/session-stream-resume-events.js';
 
 export async function replyPermissionRequest(input: {
   alwaysOverride?: string[];
@@ -16,6 +17,9 @@ export async function replyPermissionRequest(input: {
     ...(input.alwaysOverride ? { alwaysOverride: input.alwaysOverride } : {}),
     ...(input.decision === 'reject' && input.feedback ? { feedback: input.feedback } : {}),
   });
+  if (input.decision !== 'reject') {
+    requestSessionStreamResumeAttach(input.sessionId);
+  }
 }
 
 export function getPermissionReplySuccessMessage(decision: PermissionDecision): string {
