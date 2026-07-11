@@ -732,6 +732,23 @@ fn resolve_web_dist_path(app: &tauri::AppHandle) -> Option<String> {
     Some(candidate.to_string_lossy().to_string())
 }
 
+fn resolve_gateway_resources_path(app: &tauri::AppHandle) -> Option<String> {
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let candidate = resource_dir.join("gateway-resources");
+        if candidate.is_dir() {
+            return Some(candidate.to_string_lossy().to_string());
+        }
+    }
+
+    let source_candidate = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packages/resources/resources");
+    if source_candidate.is_dir() {
+        return Some(source_candidate.to_string_lossy().to_string());
+    }
+
+    None
+}
+
 /// gateway sidecar spawn 的核心实现。`start_gateway` 命令与 crash watchdog 共用此函数。
 ///
 /// 端口抢占语义：目标端口已有健康 sidecar 时 **不会** 静默 adopt（历史实现的 bug：
@@ -839,6 +856,9 @@ async fn spawn_gateway_sidecar(
     // web-static.ts 会回退到源码相对路径或直接跳过托管。
     if let Some(web_dist) = resolve_web_dist_path(&app) {
         command = command.env("OPENAWORK_WEB_DIST", web_dist);
+    }
+    if let Some(resources_dir) = resolve_gateway_resources_path(&app) {
+        command = command.env("OPENAWORK_RESOURCES_DIR", resources_dir);
     }
     command = command.env("OPENAWORK_DESKTOP_CONTROL_URL", desktop_control_url);
 

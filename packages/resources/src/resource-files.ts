@@ -1,21 +1,21 @@
-import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export interface ParsedMarkdownDocument {
   readonly frontmatter: Readonly<Record<string, string>>;
   readonly body: string;
 }
 
-const resourcesRootUrl = new URL('../resources/', import.meta.url);
+const sourceResourcesRootPath = fileURLToPath(new URL('../resources/', import.meta.url));
+const RESOURCES_ROOT_SENTINEL = join('skills', 'builtin', 'git-master.md');
 
 export function resourcePath(...segments: readonly string[]): string {
-  return fileURLToPath(resourceUrl(...segments));
+  return join(resolveResourcesRootPath(), ...segments);
 }
 
 export function resourceUrl(...segments: readonly string[]): URL {
-  const relativePath = segments.join('/');
-  return new URL(relativePath, resourcesRootUrl);
+  return pathToFileURL(resourcePath(...segments));
 }
 
 export function readTextResource(...segments: readonly string[]): string {
@@ -102,6 +102,60 @@ export function toTitle(value: string): string {
     .split('-')
     .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
     .join(' ');
+}
+
+function resolveResourcesRootPath(): string {
+  for (const candidate of resourceRootCandidates()) {
+    if (isValidResourcesRoot(candidate)) {
+      return candidate;
+    }
+  }
+  return sourceResourcesRootPath;
+}
+
+function resourceRootCandidates(): readonly string[] {
+  const execPath = globalThis.process?.execPath;
+  const execDir = execPath ? dirname(execPath) : undefined;
+  const cwd = readCurrentWorkingDirectory();
+  const envOverride = readResourcesEnvOverride();
+
+  return Array.from(
+    new Set(
+      [
+        envOverride,
+        sourceResourcesRootPath,
+        execDir ? resolve(execDir, 'resources', 'gateway-resources') : undefined,
+        execDir ? resolve(execDir, 'Resources', 'gateway-resources') : undefined,
+        execDir ? resolve(execDir, 'gateway-resources') : undefined,
+        execDir ? resolve(execDir, '..', 'resources', 'gateway-resources') : undefined,
+        execDir ? resolve(execDir, '..', 'Resources', 'gateway-resources') : undefined,
+        execDir ? resolve(execDir, 'resources') : undefined,
+        execDir ? resolve(execDir, 'Resources') : undefined,
+        execDir ? resolve(execDir, '..', 'resources') : undefined,
+        execDir ? resolve(execDir, '..', 'Resources') : undefined,
+        cwd ? resolve(cwd, 'packages/resources/resources') : undefined,
+        cwd ? resolve(cwd, 'resources', 'gateway-resources') : undefined,
+        cwd ? resolve(cwd, 'gateway-resources') : undefined,
+      ].filter((candidate): candidate is string => typeof candidate === 'string'),
+    ),
+  );
+}
+
+function readResourcesEnvOverride(): string | undefined {
+  const value = globalThis.process?.env['OPENAWORK_RESOURCES_DIR']?.trim();
+  return value ? resolve(value) : undefined;
+}
+
+function readCurrentWorkingDirectory(): string | undefined {
+  try {
+    return globalThis.process?.cwd();
+  } catch {
+    return undefined;
+  }
+}
+
+function isValidResourcesRoot(rootPath: string): boolean {
+  return existsSync(join(rootPath, RESOURCES_ROOT_SENTINEL));
 }
 
 function isReadonlyRecord(value: unknown): value is Readonly<Record<string, unknown>> {

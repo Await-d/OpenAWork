@@ -39,14 +39,21 @@ export async function registerOpenApi(app: FastifyInstance): Promise<void> {
   // 及其静态资源嵌入编译产物。
   if (!process.env.DESKTOP_AUTOMATION) {
     const swaggerUiPkg = ['@fastify', 'swagger-ui'].join('/');
-    const { default: swaggerUi } = await import(/* webpackIgnore: true */ swaggerUiPkg);
-    await app.register(swaggerUi, {
-      routePrefix: '/docs',
-      uiConfig: {
-        docExpansion: 'list',
-        deepLinking: true,
-        defaultModelsExpandDepth: 3,
-      },
-    });
+    try {
+      const { default: swaggerUi } = await import(/* webpackIgnore: true */ swaggerUiPkg);
+      await app.register(swaggerUi, {
+        routePrefix: '/docs',
+        uiConfig: {
+          docExpansion: 'list',
+          deepLinking: true,
+          defaultModelsExpandDepth: 3,
+        },
+      });
+    } catch (error) {
+      app.log.warn(
+        { err: error },
+        'openapi: @fastify/swagger-ui unavailable; interactive docs disabled',
+      );
+    }
   }
 }
