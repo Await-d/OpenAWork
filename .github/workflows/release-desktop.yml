@@ -396,19 +396,41 @@ jobs:
           fi
 
           upload=()
-          for file in apps/desktop/src-tauri/target/release/bundle/**/*; do
-            [ -f "$file" ] || continue
-            case "$file" in
-              *.AppImage|*.appimage|*.deb|*.sig|*.json) upload+=("$file") ;;
-            esac
+          while IFS= read -r pattern; do
+            [ -n "$pattern" ] || continue
+            for file in $pattern; do
+              [ -f "$file" ] || continue
+              upload+=("$file")
+            done
+          done <<'EOF'
+          apps/desktop/src-tauri/target/release/bundle/deb/*.deb
+          apps/desktop/src-tauri/target/release/bundle/deb/*.sig
+          apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage
+          apps/desktop/src-tauri/target/release/bundle/appimage/*.sig
+          apps/desktop/src-tauri/target/release/bundle/appimage/*.tar.gz
+          apps/desktop/src-tauri/target/release/bundle/appimage/*.json
+          EOF
+
+          deduped=()
+          for file in "${upload[@]}"; do
+            skip='false'
+            for existing in "${deduped[@]}"; do
+              if [ "$existing" = "$file" ]; then
+                skip='true'
+                break
+              fi
+            done
+            if [ "$skip" = 'false' ]; then
+              deduped+=("$file")
+            fi
           done
 
-          if [ "${#upload[@]}" -eq 0 ]; then
+          if [ "${#deduped[@]}" -eq 0 ]; then
             echo 'No Linux installer assets found.' >&2
             exit 1
           fi
 
-          gh release upload "$release_tag" "${upload[@]}" --clobber
+          gh release upload "$release_tag" "${deduped[@]}" --clobber
 
       - name: Build Tauri app (macOS signed)
         if: matrix.runner == 'macos-latest' && env.MACOS_CODESIGN_READY == 'true' && env.MACOS_NOTARIZATION_READY != 'true'
