@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { ArtifactRecord, ArtifactVersionRecord } from '@openAwork/artifacts';
 import { tokens } from '@openAwork/shared-ui';
 import { toast } from '../../../components/common/feedback/ToastNotification.js';
+import { exportFile } from '../../../utils/export-file.js';
 import { TrashIcon } from '../../team/runtime/shared/TeamIcons.js';
 import { ArtifactCodeEditor } from '../views/artifact-code-editor.js';
 import { ArtifactPreviewSurface } from '../views/artifact-preview-surface.js';
@@ -192,7 +193,7 @@ export function ArtifactWorkbench({
               </button>
               <button
                 type="button"
-                onClick={() => downloadArtifact(artifact, draftContent)}
+                onClick={() => void downloadArtifact(artifact, draftContent)}
                 style={secondaryButtonStyle}
               >
                 下载
@@ -252,25 +253,28 @@ export function ArtifactWorkbench({
   );
 }
 
-function downloadArtifact(artifact: ArtifactRecord, content: string) {
-  const anchor = document.createElement('a');
+async function downloadArtifact(artifact: ArtifactRecord, content: string) {
   const metadataFileName =
     artifact.metadata && typeof artifact.metadata['fileName'] === 'string'
       ? artifact.metadata['fileName']
       : null;
-  anchor.download = metadataFileName ?? buildArtifactDownloadName(artifact);
+  const filename = metadataFileName ?? buildArtifactDownloadName(artifact);
 
-  if (artifact.type === 'image' && content.startsWith('data:')) {
-    anchor.href = content;
-    anchor.click();
-    return;
+  try {
+    const result =
+      artifact.type === 'image' && content.startsWith('data:')
+        ? await exportFile({ dataUrl: content, filename })
+        : await exportFile({
+            content,
+            filename,
+            mimeType: 'text/plain;charset=utf-8',
+          });
+    if (result.kind === 'desktop') {
+      toast(`已保存到 ${result.path}`, 'success');
+    }
+  } catch (error: unknown) {
+    toast(error instanceof Error ? error.message : '下载失败', 'error');
   }
-
-  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  anchor.href = url;
-  anchor.click();
-  URL.revokeObjectURL(url);
 }
 
 const inputStyle: React.CSSProperties = {

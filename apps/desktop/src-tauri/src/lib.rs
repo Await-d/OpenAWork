@@ -1095,6 +1095,66 @@ async fn open_artifact_path(app: tauri::AppHandle, path: String) -> Result<(), S
         .map_err(|e| e.to_string())
 }
 
+fn sanitize_export_filename(filename: &str) -> String {
+    let fallback = "openawork-export.txt";
+    let base = Path::new(filename)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or(fallback);
+    let sanitized: String = base
+        .chars()
+        .map(|value| {
+            if value.is_control() || value == '/' || value == '\\' {
+                '_'
+            } else {
+                value
+            }
+        })
+        .collect();
+    if sanitized.trim().is_empty() {
+        fallback.to_string()
+    } else {
+        sanitized
+    }
+}
+
+fn save_export_bytes_with_dialog(
+    app: &tauri::AppHandle,
+    filename: &str,
+    bytes: &[u8],
+) -> Result<Option<String>, String> {
+    let filename = sanitize_export_filename(filename);
+    let Some(path) = app
+        .dialog()
+        .file()
+        .set_file_name(&filename)
+        .blocking_save_file()
+    else {
+        return Ok(None);
+    };
+    let path = path.to_string();
+    fs::write(&path, bytes).map_err(|error| error.to_string())?;
+    Ok(Some(path))
+}
+
+#[tauri::command]
+async fn save_export_file(
+    app: tauri::AppHandle,
+    filename: String,
+    content: String,
+) -> Result<Option<String>, String> {
+    save_export_bytes_with_dialog(&app, &filename, content.as_bytes())
+}
+
+#[tauri::command]
+async fn save_export_file_bytes(
+    app: tauri::AppHandle,
+    filename: String,
+    bytes: Vec<u8>,
+) -> Result<Option<String>, String> {
+    save_export_bytes_with_dialog(&app, &filename, &bytes)
+}
+
 /// 把 PathBuf 转为前端友好的字符串（lossy 处理非 UTF-8 字节，避免 panic）。
 fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
@@ -1838,6 +1898,8 @@ pub fn run() {
             admin_set_password,
             pick_folder,
             open_artifact_path,
+            save_export_file,
+            save_export_file_bytes,
             get_desktop_settings,
             update_desktop_settings,
             set_autostart_enabled,

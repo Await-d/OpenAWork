@@ -5,6 +5,7 @@ import type {
   SettingsDiagnosticRecord,
   SettingsDevLogRecord,
 } from '../state/settings-types.js';
+import { exportFile } from '../../../utils/export-file.js';
 import {
   buildDiagnosticClipboardRecord,
   buildDiagnosticKey,
@@ -374,16 +375,12 @@ export function buildErrorExportMarkdown(
   return lines.join('\n');
 }
 
-export function triggerDownload(content: string, mimeType: string, filename: string): void {
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  document.body.removeChild(anchor);
-  URL.revokeObjectURL(url);
+export async function triggerDownload(
+  content: string,
+  mimeType: string,
+  filename: string,
+): Promise<void> {
+  await exportFile({ content, filename, mimeType });
 }
 
 export interface ErrorReportContext {
