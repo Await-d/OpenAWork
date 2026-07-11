@@ -741,7 +741,7 @@ fn resolve_gateway_resources_path(app: &tauri::AppHandle) -> Option<String> {
     }
 
     let source_candidate = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../packages/resources/resources");
+        .join("../../../packages/resources/resources");
     if source_candidate.is_dir() {
         return Some(source_candidate.to_string_lossy().to_string());
     }

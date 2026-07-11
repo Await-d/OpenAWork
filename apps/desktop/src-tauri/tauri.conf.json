@@ -40,7 +40,7 @@
     "externalBin": ["binaries/agent-gateway"],
     "resources": {
       "../../web/dist/": "web-dist/",
-      "../../packages/resources/resources/": "gateway-resources/"
+      "../../../packages/resources/resources/": "gateway-resources/"
     },
     "windows": {
       "nsis": {
