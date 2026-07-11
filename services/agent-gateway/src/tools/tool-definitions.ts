@@ -1468,7 +1468,7 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
           path: {
             type: 'string',
             description:
-              '要查看的目录绝对路径（代替缓存仓库）。除非 OPENAWORK_REPO_OVERVIEW_ALLOW_ANY_PATH=1，否则必须位于 repos 缓存根目录下',
+              '要查看的目录绝对路径（代替缓存仓库）。除非 OPENAWORK_REPO_OVERVIEW_ALLOW_ANY_PATH=1，否则必须位于 repos 缓存根目录或已配置的 workspace root 内',
           },
           depth: {
             type: 'integer',

@@ -14,6 +14,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { useChatConversationState } from './use-chat-conversation-state.js';
+import { subscribeSessionStreamResumeAttach } from '../../../utils/session/session-stream-resume-events.js';
 
 const SESSION_ID = 'session-test-001';
 const TOKEN = 'tok-fake';
@@ -263,6 +264,89 @@ describe('useChatConversationState — 加载快照', () => {
     expect(result.current.messages).toEqual([]);
     expect(result.current.isSessionSnapshotReady).toBe(false);
     expect(result.current.sessionStateStatus).toBeNull();
+  });
+});
+
+describe('useChatConversationState — 权限回复续跑', () => {
+  it('允许权限后发布续跑 attach 信号并把会话状态切回 running', async () => {
+    let recoveryCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+      if (url.includes('/permissions/reply')) {
+        const body: unknown = JSON.parse(init?.body?.toString() ?? '{}');
+        const decision =
+          typeof body === 'object' && body !== null ? Reflect.get(body, 'decision') : undefined;
+        expect(decision).toBe('once');
+        return new Response(null, { status: 204 });
+      }
+      recoveryCount += 1;
+      return new Response(
+        JSON.stringify({
+          recovery: {
+            pendingPermissions:
+              recoveryCount === 1
+                ? [
+                    {
+                      requestId: 'perm-allow',
+                      sessionId: SESSION_ID,
+                      toolName: 'mcp__git_bash__run',
+                      scope: 'cat package.json',
+                      reason: '读取 package.json',
+                      riskLevel: 'low',
+                      status: 'pending',
+                      createdAt: '2026-07-11T00:00:00.000Z',
+                    },
+                  ]
+                : [],
+            pendingQuestions: [],
+            session: {
+              id: SESSION_ID,
+              state_status: recoveryCount === 1 ? 'paused' : 'running',
+              messages: [],
+            },
+            todoLanes: { lanes: [] },
+            tasks: [],
+            children: [],
+            ratings: [],
+            activeStream: null,
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    let resumedSessionId: string | null = null;
+    const unsubscribe = subscribeSessionStreamResumeAttach((sessionId) => {
+      resumedSessionId = sessionId;
+    });
+
+    try {
+      const { result } = renderHook(() =>
+        useChatConversationState({
+          sessionId: SESSION_ID,
+          currentUserEmail: EMAIL,
+          gatewayUrl: GATEWAY,
+          token: TOKEN,
+          enableWriters: true,
+        }),
+      );
+
+      await waitFor(() => {
+        expect(result.current.sessionStateStatus).toBe('paused');
+      });
+
+      await act(async () => {
+        await result.current.replyPermission('perm-allow', 'once');
+      });
+
+      expect(resumedSessionId).toBe(SESSION_ID);
+      await waitFor(() => {
+        expect(result.current.sessionStateStatus).toBe('running');
+      });
+      expect(result.current.pendingPermissions).toEqual([]);
+    } finally {
+      unsubscribe();
+    }
   });
 });
 

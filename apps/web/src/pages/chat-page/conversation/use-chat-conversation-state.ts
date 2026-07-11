@@ -36,7 +36,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { InputImageContent, RunEvent } from '@openAwork/shared';
 import type { UpstreamStreamSummary } from '@openAwork/shared';
 import {
-  createPermissionsClient,
   createQuestionsClient,
   createSessionsClient,
   createTeamInboundClient,
@@ -75,6 +74,7 @@ import { useStreamReveal } from '../../../components/conversation-runtime/reveal
 import { useConversationStream } from '../../../components/conversation-runtime/stream/use-conversation-stream.js';
 import { makeOrderedMessageId } from '../../../components/conversation-runtime/messages/ordered-id.js';
 import { estimateTokenCount } from '../../../components/conversation-runtime/messages/support.js';
+import { replyPermissionRequest } from '../../../utils/permission/permission-reply.js';
 
 function extractLatestUpstreamSummaryFromRunEvents(
   events: RunEvent[] | undefined,
@@ -764,16 +764,23 @@ export function useChatConversationState(
       if (!sessionId || !token) {
         throw new Error('当前会话或登录状态无效，无法处理权限请求。');
       }
-      await createPermissionsClient(gatewayUrl).reply(token, sessionId, {
+      await replyPermissionRequest({
+        gatewayUrl,
         requestId,
         decision,
         ...(feedback ? { feedback } : {}),
+        sessionId,
+        token,
       });
+      if (decision !== 'reject') {
+        setSessionStateStatus('running');
+        void reload();
+      }
       // Optimistically remove from pending list; the permission_replied event
       // will also clear on receipt.
       setPendingPermissions((prev) => prev.filter((p) => p.requestId !== requestId));
     },
-    [enableWriters, sessionId, token, gatewayUrl],
+    [enableWriters, sessionId, token, gatewayUrl, reload],
   );
 
   const replyQuestion: SessionConversationState['replyQuestion'] = useCallback(

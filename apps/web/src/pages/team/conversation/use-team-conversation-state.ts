@@ -33,7 +33,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { InputImageContent, RunEvent, UpstreamStreamSummary } from '@openAwork/shared';
 import {
-  createPermissionsClient,
   createQuestionsClient,
   createSessionsClient,
   createTeamInboundClient,
@@ -66,6 +65,7 @@ import {
   publishSessionRunState,
 } from '../../../utils/session/session-list-events.js';
 import { toSessionPendingPermissionState } from '../../../utils/permission/pending-permission-state.js';
+import { replyPermissionRequest } from '../../../utils/permission/permission-reply.js';
 import {
   useLayerStore,
   useTeamEventsConnectionStore,
@@ -375,6 +375,21 @@ function isSessionBusyForSidebar(
   sessionStateStatus: SessionStateStatus | null,
 ): boolean {
   return streaming || sessionStateStatus === 'running' || sessionStateStatus === 'paused';
+}
+
+function toTeamRoleLayer(value: string | null | undefined): TeamRoleLayer | null {
+  switch (value) {
+    case 'user':
+    case 'reception':
+    case 'pm1':
+    case 'pm2':
+    case 'executor':
+    case 'tester':
+    case 'reviewer':
+      return value;
+    default:
+      return null;
+  }
 }
 
 // ─── 主 hook 实现 ─────────────────────────────────────────────────────────
@@ -979,6 +994,8 @@ export function useTeamConversationState(
   // 视图至少能看到当前这层的节点，handoff 链路一旦展开再由 WS/快照补全。
   useEffect(() => {
     if (!sessionId || !enabled || !roleLayer) return;
+    const normalizedRoleLayer = toTeamRoleLayer(roleLayer);
+    if (!normalizedRoleLayer) return;
     const existingNode = useLayerStore.getState().nodes.get(sessionId);
     const metadataParentSessionId =
       typeof sessionMetadata?.['parentSessionId'] === 'string'
@@ -1022,9 +1039,7 @@ export function useTeamConversationState(
     }
     useLayerStore.getState().addNode({
       sessionId,
-      // 运行时为字符串；LayerNode.roleLayer 是 TeamRoleLayer 联合。未知值在
-      // 渲染层会回退到中性身份，这里按已知层字符串传入即可。
-      roleLayer: roleLayer as TeamRoleLayer,
+      roleLayer: normalizedRoleLayer,
       parentSessionId,
       // 用远端运行状态映射节点状态；未知时给 idle（store 接受 'idle'）。
       state:
@@ -1618,21 +1633,45 @@ export function useTeamConversationState(
       if (!sessionId || !token) {
         throw new Error('当前团队会话或登录状态无效，无法处理权限请求。');
       }
-      await createPermissionsClient(gatewayUrl).reply(
+      const targetSessionId = options?.targetSessionId ?? sessionId;
+      await replyPermissionRequest({
+        gatewayUrl,
+        requestId,
+        decision,
+        ...(options?.alwaysOverride ? { alwaysOverride: options.alwaysOverride } : {}),
+        ...(options?.feedback ? { feedback: options.feedback } : {}),
+        sessionId: targetSessionId,
         token,
-        options?.targetSessionId ?? sessionId,
-        {
-          requestId,
-          decision,
-          ...(options?.alwaysOverride ? { alwaysOverride: options.alwaysOverride } : {}),
-          ...(options?.feedback ? { feedback: options.feedback } : {}),
-        },
-      );
+      });
+      if (decision !== 'reject' && targetSessionId === sessionId) {
+        attachAttemptedSessionRef.current = null;
+        attachRetryCountRef.current = 0;
+        setSessionStateStatus('running');
+        void reload();
+      } else if (decision !== 'reject') {
+        const layerStore = useLayerStore.getState();
+        const existingNode = layerStore.nodes.get(targetSessionId);
+        if (existingNode) {
+          layerStore.updateNodeState(targetSessionId, 'running');
+        } else {
+          const childSession = childSessions.find((child) => child.id === targetSessionId);
+          const childRoleLayer = toTeamRoleLayer(childSession?.role_layer);
+          if (childRoleLayer) {
+            layerStore.addNode({
+              sessionId: targetSessionId,
+              roleLayer: childRoleLayer,
+              parentSessionId: sessionId,
+              state: 'running',
+            });
+          }
+        }
+        void reload();
+      }
       // Optimistically remove from pending list; the permission_replied event
       // will also clear on receipt.
       setPendingPermissions((prev) => prev.filter((p) => p.requestId !== requestId));
     },
-    [sessionId, token, gatewayUrl],
+    [sessionId, token, gatewayUrl, reload, childSessions],
   );
 
   const replyQuestion: TeamConversationState['replyQuestion'] = useCallback(
