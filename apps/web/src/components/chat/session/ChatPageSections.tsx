@@ -1390,9 +1390,9 @@ const WELCOME_KEYFRAMES = `
 @keyframes ws-glow-pulse{0%,100%{box-shadow:0 0 0 1px var(--glow),0 2px 16px color-mix(in srgb,var(--glow) 18%,transparent)}50%{box-shadow:0 0 0 1.5px var(--glow),0 4px 24px color-mix(in srgb,var(--glow) 30%,transparent)}}
 @keyframes ws-shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
 .ws-card{transition:border-color .22s,background .22s,box-shadow .22s,transform .22s}
-.ws-card:hover{transform:translateY(-3px);box-shadow:0 6px 24px rgba(0,0,0,.08)!important}
+.ws-card:hover{transform:translateY(-3px);box-shadow:var(--shadow-md)!important}
 .ws-pill{transition:transform .18s,box-shadow .18s}
-.ws-pill:hover{transform:translateY(-1px);box-shadow:0 3px 12px rgba(0,0,0,.1)}
+.ws-pill:hover{transform:translateY(-1px);box-shadow:var(--shadow-sm)}
 .ws-pill:active{transform:scale(.97)}
 .ws-mode-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;width:100%}
 @media (max-width: 900px){

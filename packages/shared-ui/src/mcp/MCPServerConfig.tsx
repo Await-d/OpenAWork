@@ -15,6 +15,8 @@ export function MCPServerConfig({
   onAdd,
   onRemove,
   onUpdate,
+  title,
+  showAddForm = true,
   style,
 }: MCPServerConfigProps) {
   const [formError, setFormError] = useState<string | null>(null);
@@ -24,7 +26,7 @@ export function MCPServerConfig({
       <style>{mcpServerConfigFocusVisibleCss}</style>
       <div style={headerStyle}>
         <h2 style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--fg-default)' }}>
-          MCP 服务器配置
+          {title ?? 'MCP 服务器配置'}
         </h2>
       </div>
 
@@ -36,7 +38,7 @@ export function MCPServerConfig({
             padding: 'var(--spacing-5, 20px) var(--spacing-6, 24px)',
           }}
         >
-          暂无服务器配置。添加同 id（如 websearch / grep_app）可覆盖或禁用系统内置 MCP。
+          暂无服务器配置。添加同 id 可覆盖或禁用系统内置 MCP，也可以接入新的自定义服务器。
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -53,7 +55,9 @@ export function MCPServerConfig({
         </div>
       )}
 
-      <MCPServerConfigForm onAdd={onAdd} formError={formError} setFormError={setFormError} />
+      {showAddForm ? (
+        <MCPServerConfigForm onAdd={onAdd} formError={formError} setFormError={setFormError} />
+      ) : null}
     </div>
   );
 }

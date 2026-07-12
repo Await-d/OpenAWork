@@ -443,7 +443,7 @@ export function SessionTerminalsPanel({
           background: 'var(--bg-overlay)',
           border: '1px solid var(--border-subtle)',
           borderRadius: 10,
-          boxShadow: '0 12px 32px rgba(0,0,0,0.18)',
+          boxShadow: 'var(--shadow-lg)',
           zIndex: 999,
           overflow: 'hidden',
         }}

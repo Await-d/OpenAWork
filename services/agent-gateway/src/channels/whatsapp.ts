@@ -7,6 +7,7 @@ import type {
   ChannelServiceFactory,
 } from './types.js';
 import { channelFetch } from './channel-http.js';
+import { parseWhatsAppInboundMessage } from './inbound-parsers/whatsapp.js';
 import { listRecentChannelGroups, listRecentChannelMessages } from './channel-message-cache.js';
 
 export class WhatsAppChannelService implements MessagingChannelService {
@@ -144,18 +145,24 @@ export class WhatsAppChannelService implements MessagingChannelService {
         const value = change.value;
         if (!value?.messages) continue;
         for (const message of value.messages) {
-          if (!message.text?.body) continue;
           const contact = value.contacts?.find((contact) => contact.wa_id === message.from);
-          const channelMessage: ChannelMessage = {
-            id: message.id,
-            senderId: message.from,
-            senderName: contact?.profile.name ?? message.from,
-            chatId: message.from,
-            content: message.text.body,
-            timestamp: Number(message.timestamp) * 1000,
-            raw: message,
-          };
-          this.safeNotify({ type: 'message', pluginId: this.pluginId, message: channelMessage });
+          const parsed = parseWhatsAppInboundMessage({
+            entry: [
+              {
+                changes: [
+                  {
+                    value: {
+                      ...value,
+                      messages: [message],
+                      contacts: contact ? [contact] : value.contacts,
+                    },
+                  },
+                ],
+              },
+            ],
+          });
+          if (!parsed) continue;
+          this.safeNotify({ type: 'message', pluginId: this.pluginId, message: parsed });
         }
       }
     }

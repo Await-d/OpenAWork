@@ -344,7 +344,7 @@ describe('channel inbound route', () => {
           'https://dingtalk-webhook.example/send',
           expect.objectContaining({
             method: 'POST',
-            body: expect.stringContaining('Available commands'),
+            body: expect.stringContaining('**快捷指令**'),
           }),
         );
       });

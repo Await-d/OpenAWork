@@ -482,7 +482,7 @@ function SvgPreview({ content }: { content: string }) {
           borderRadius: 12,
           border: '1px solid var(--border-subtle)',
           background:
-            'repeating-conic-gradient(var(--bg-elevated) 0% 25%, #ffffff 0% 50%) 50% / 16px 16px',
+            'repeating-conic-gradient(var(--bg-elevated) 0% 25%, var(--bg-base) 0% 50%) 50% / 16px 16px',
         }}
         // biome-ignore lint/security/noDangerouslySetInnerHtml: SVG preview requires innerHTML
         dangerouslySetInnerHTML={{ __html: sanitizeSvg(content) }}
@@ -553,7 +553,7 @@ function ImagePreviewPane({ path, content }: { path: string; content: string }) 
           borderRadius: 12,
           border: '1px solid var(--border-subtle)',
           background:
-            'repeating-conic-gradient(var(--bg-elevated) 0% 25%, #ffffff 0% 50%) 50% / 16px 16px',
+            'repeating-conic-gradient(var(--bg-elevated) 0% 25%, var(--bg-base) 0% 50%) 50% / 16px 16px',
         }}
       >
         <img

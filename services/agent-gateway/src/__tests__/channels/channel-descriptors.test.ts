@@ -42,7 +42,21 @@ describe('channel descriptors', () => {
   });
 
   it('暴露 Discord Gateway URL 覆盖字段', () => {
-    expect(configKeysFor('discord')).toEqual(expect.arrayContaining(['gatewayUrl']));
+    expect(configKeysFor('discord')).toEqual(
+      expect.arrayContaining(['gatewayUrl', 'botUserId', 'requireMentionInGroup']),
+    );
+  });
+
+  it('暴露群聊 mention 触发开关与运行时身份字段', () => {
+    expect(configKeysFor('telegram')).toEqual(
+      expect.arrayContaining(['botUsername', 'memberAclJson', 'requireMentionInGroup']),
+    );
+    expect(configKeysFor('slack')).toEqual(
+      expect.arrayContaining(['botUserId', 'memberAclJson', 'requireMentionInGroup']),
+    );
+    expect(configKeysFor('wecom')).toEqual(
+      expect.arrayContaining(['botName', 'memberAclJson', 'requireMentionInGroup']),
+    );
   });
 
   it('暴露钉钉 AI Card 流式回复模板字段', () => {

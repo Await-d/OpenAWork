@@ -196,7 +196,7 @@ function AgentAvatar({ label, origin }: { label: string; origin: ManagedAgentRec
         justifyContent: 'center',
         fontSize: 11,
         fontWeight: 700,
-        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08)',
+        boxShadow: 'var(--shadow-sm)',
       }}
     >
       {label.slice(0, 2).toUpperCase()}
@@ -217,15 +217,15 @@ function Tag({
       color: 'var(--fg-default)',
     },
     accent: {
-      background: 'rgba(99, 102, 241, 0.16)',
+      background: 'var(--accent-muted)',
       color: 'var(--chart-5)',
     },
     warning: {
-      background: 'rgba(251, 191, 36, 0.14)',
+      background: 'var(--warning-muted)',
       color: 'var(--warning)',
     },
     success: {
-      background: 'rgba(16, 185, 129, 0.16)',
+      background: 'var(--success-muted)',
       color: 'var(--success)',
     },
   };
@@ -256,7 +256,7 @@ function fieldStyle(): React.CSSProperties {
     padding: '11px 12px',
     fontSize: 13,
     outline: 'none',
-    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
+    boxShadow: 'var(--shadow-sm)',
   };
 }
 
@@ -289,14 +289,14 @@ function primaryButtonStyle(disabled: boolean): React.CSSProperties {
     border: 'none',
     borderRadius: 14,
     background: disabled
-      ? 'rgba(99, 102, 241, 0.35)'
+      ? 'var(--accent-border)'
       : 'linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%)',
     color: 'var(--fg-on-accent)',
     padding: '11px 16px',
     fontSize: 13,
     fontWeight: 700,
     cursor: disabled ? 'not-allowed' : 'pointer',
-    boxShadow: disabled ? 'none' : '0 10px 24px rgba(79, 70, 229, 0.22)',
+    boxShadow: disabled ? 'none' : 'var(--shadow-glow)',
   };
 }
 
@@ -316,10 +316,10 @@ function secondaryButtonStyle(disabled = false): React.CSSProperties {
 
 function dangerButtonStyle(disabled = false): React.CSSProperties {
   return {
-    border: '1px solid rgba(248, 113, 113, 0.35)',
+    border: '1px solid var(--danger-border)',
     borderRadius: 14,
-    background: disabled ? 'rgba(127, 29, 29, 0.06)' : 'rgba(127, 29, 29, 0.12)',
-    color: disabled ? 'rgba(252, 165, 165, 0.65)' : 'var(--danger)',
+    background: disabled ? 'var(--complement-subtle)' : 'var(--complement-muted)',
+    color: disabled ? 'var(--fg-subtle)' : 'var(--danger)',
     padding: '11px 16px',
     fontSize: 13,
     fontWeight: 700,
@@ -651,7 +651,7 @@ function ToggleRow({
       style={{
         border: '1px solid var(--border-subtle)',
         borderRadius: 14,
-        background: checked ? 'rgba(99, 102, 241, 0.08)' : 'var(--bg-overlay)',
+        background: checked ? 'var(--accent-subtle)' : 'var(--bg-overlay)',
         color: 'var(--fg-strong)',
         padding: '12px 14px',
         display: 'flex',
@@ -671,7 +671,7 @@ function ToggleRow({
           width: 44,
           height: 24,
           borderRadius: 999,
-          background: checked ? 'var(--accent)' : 'rgba(148, 163, 184, 0.25)',
+          background: checked ? 'var(--accent)' : 'var(--border-strong)',
           display: 'inline-flex',
           alignItems: 'center',
           padding: 3,
@@ -684,7 +684,7 @@ function ToggleRow({
             height: 18,
             borderRadius: '50%',
             background: 'var(--fg-on-accent)',
-            boxShadow: '0 2px 6px rgba(15, 23, 42, 0.28)',
+            boxShadow: 'var(--shadow-sm)',
           }}
         />
       </span>

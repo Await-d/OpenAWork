@@ -14,7 +14,7 @@ const styles: Record<string, CSSProperties> = {
   overlay: {
     position: 'fixed',
     inset: 0,
-    background: 'rgba(0, 0, 0, 0.58)',
+    background: 'color-mix(in srgb, var(--bg-base) 60%, transparent)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -27,7 +27,7 @@ const styles: Record<string, CSSProperties> = {
     borderRadius: 16,
     border: '1px solid color-mix(in oklch, var(--danger) 20%, var(--border-subtle))',
     background: 'linear-gradient(180deg, var(--bg-overlay) 0%, var(--bg-base)',
-    boxShadow: '0 24px 64px rgba(0, 0, 0, 0.34)',
+    boxShadow: 'var(--shadow-lg)',
     padding: 20,
     display: 'flex',
     flexDirection: 'column',

@@ -376,7 +376,7 @@ function NotificationItemImpl({
             color: typeMeta.color,
             display: 'grid',
             placeItems: 'center',
-            boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.08)',
+            boxShadow: 'var(--shadow-sm)',
           }}
         >
           <NotificationTypeIcon type={typeMeta.icon} size={14} />

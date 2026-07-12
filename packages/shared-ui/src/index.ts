@@ -246,6 +246,7 @@ export {
   PanelSection,
   StatusPill,
   InlineEditor,
+  BrandLogo,
 } from './primitives/index.js';
 export type {
   ShellCardProps,
@@ -253,6 +254,7 @@ export type {
   PanelSectionProps,
   StatusPillProps,
   InlineEditorProps,
+  BrandLogoProps,
 } from './primitives/index.js';
 
 export { DeveloperModePanel } from './agent/DeveloperModePanel.js';

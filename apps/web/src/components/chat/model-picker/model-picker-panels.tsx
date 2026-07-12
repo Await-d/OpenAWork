@@ -67,11 +67,14 @@ function resolveFloatingPanelPosition(
   width: number,
   maxDesiredHeight: number,
   align: 'start' | 'end',
+  preferAbove = false,
 ) {
   const margin = 12;
+  const gap = 6;
   const viewportWidth = window.innerWidth;
   const viewportHeight = window.innerHeight;
 
+  // Horizontal: clamp panel within viewport
   const leftCandidate =
     align === 'start' ? anchorRect.left : Math.max(margin, anchorRect.right - width);
   const left = Math.min(
@@ -82,23 +85,29 @@ function resolveFloatingPanelPosition(
   const spaceBelow = viewportHeight - anchorRect.bottom - margin;
   const spaceAbove = anchorRect.top - margin;
 
-  if (spaceBelow >= Math.min(180, maxDesiredHeight) || spaceBelow >= spaceAbove) {
+  // Decide direction: prefer above when requested (composer is at bottom),
+  // otherwise follow original space-based heuristic.
+  const openAbove = preferAbove
+    ? spaceAbove >= 160 || spaceAbove >= spaceBelow
+    : spaceBelow >= Math.min(180, maxDesiredHeight) || spaceBelow >= spaceAbove;
+
+  if (!openAbove) {
+    // Open below
+    const effectiveHeight = Math.max(160, Math.min(maxDesiredHeight, spaceBelow));
     return {
       left,
-      top: Math.min(
-        anchorRect.bottom + 8,
-        viewportHeight - margin - Math.min(maxDesiredHeight, Math.max(160, spaceBelow)),
-      ),
-      maxHeight: Math.max(160, Math.min(maxDesiredHeight, spaceBelow)),
+      top: Math.min(anchorRect.bottom + gap, viewportHeight - margin - effectiveHeight),
+      maxHeight: effectiveHeight,
       transformOrigin: align === 'start' ? ('top left' as const) : ('top right' as const),
     };
   }
 
-  const maxHeight = Math.max(160, Math.min(maxDesiredHeight, spaceAbove));
+  // Open above
+  const effectiveHeight = Math.max(160, Math.min(maxDesiredHeight, spaceAbove));
   return {
     left,
-    top: Math.max(margin, anchorRect.top - maxHeight - 8),
-    maxHeight,
+    top: Math.max(margin, anchorRect.top - effectiveHeight - gap),
+    maxHeight: effectiveHeight,
     transformOrigin: align === 'start' ? ('bottom left' as const) : ('bottom right' as const),
   };
 }
@@ -133,7 +142,7 @@ export function ModelPicker({
   const [maxHeight, setMaxHeight] = React.useState(430);
   const [transformOrigin, setTransformOrigin] = React.useState<
     'top left' | 'top right' | 'bottom left' | 'bottom right'
-  >('top right');
+  >('bottom right');
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const previousFocusRef = React.useRef<HTMLElement | null>(null);
   const listboxRef = React.useRef<HTMLDivElement | null>(null);
@@ -145,10 +154,12 @@ export function ModelPicker({
       const el = anchorRef.current;
       if (!el) return;
       const rect = el.getBoundingClientRect();
-      // Match the settings page model dropdown — wider panel keeps
-      // long model labels from getting elided, and gives the search
-      // results enough room to breathe.
-      const next = resolveFloatingPanelPosition(rect, 420, 480, 'start');
+      // Composer sits at the bottom of the viewport, so prefer opening
+      // above the button. Width 420 keeps long model labels readable.
+      // Composer button is at the bottom-left; open above and align the
+      // panel's right edge to the toolbar's right side so it grows
+      // leftward/upward naturally from the button area.
+      const next = resolveFloatingPanelPosition(rect, 400, 460, 'end', true);
       setTop(next.top);
       setLeft(next.left);
       setMaxHeight(next.maxHeight);
@@ -308,48 +319,114 @@ export function ModelPicker({
           background: 'var(--bg-overlay)',
           border: '1px solid var(--border-default)',
           borderRadius: 12,
-          padding: '6px 0 0',
+          padding: 0,
           boxShadow: 'var(--shadow-lg)',
-          minWidth: 360,
-          width: 420,
-          maxWidth: 'min(420px, calc(100vw - 16px))',
+          minWidth: 340,
+          width: 400,
+          maxWidth: 'min(400px, calc(100vw - 16px))',
           maxHeight,
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
           transformOrigin,
+          animation: 'chat-model-picker-enter 180ms cubic-bezier(0.16, 1, 0.3, 1)',
         }}
       >
+        <style>{`
+          @keyframes chat-model-picker-enter {
+            from { opacity: 0; transform: scale(0.96) translateY(4px); }
+            to   { opacity: 1; transform: scale(1) translateY(0); }
+          }
+          .chat-model-picker-option {
+            transition: background 100ms ease, color 100ms ease;
+          }
+          .chat-model-picker-option:hover:not([aria-selected="true"]) {
+            background: color-mix(in oklch, var(--accent) 6%, transparent);
+          }
+          .chat-model-picker-search-shell:focus-within {
+            border-color: color-mix(in oklch, var(--accent) 50%, var(--border-default));
+            box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 14%, transparent);
+          }
+          .chat-model-picker-scroll::-webkit-scrollbar { width: 5px; }
+          .chat-model-picker-scroll::-webkit-scrollbar-track { background: transparent; }
+          .chat-model-picker-scroll::-webkit-scrollbar-thumb {
+            background: var(--border-default);
+            border-radius: 999px;
+          }
+          .chat-model-picker-scroll::-webkit-scrollbar-thumb:hover {
+            background: var(--border-emphasis);
+          }
+        `}</style>
+        {/* Header */}
         <div
-          id={titleId}
           style={{
-            padding: '2px 12px 6px',
-            fontSize: 10,
-            fontWeight: 700,
-            color: 'var(--fg-muted)',
-            textTransform: 'uppercase',
-            letterSpacing: '0.08em',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '10px 14px 8px',
+            borderBottom: '1px solid var(--border-subtle)',
           }}
         >
-          选择模型
+          <div
+            id={titleId}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: 11,
+              fontWeight: 700,
+              color: 'var(--fg-strong)',
+              letterSpacing: '0.01em',
+            }}
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+              style={{ color: 'var(--accent)', flexShrink: 0 }}
+            >
+              <rect x="3" y="3" width="7" height="7" rx="1.5" />
+              <rect x="14" y="3" width="7" height="7" rx="1.5" />
+              <rect x="3" y="14" width="7" height="7" rx="1.5" />
+              <rect x="14" y="14" width="7" height="7" rx="1.5" />
+            </svg>
+            选择模型
+          </div>
+          <span
+            style={{
+              fontSize: 10,
+              color: 'var(--fg-muted)',
+              fontWeight: 500,
+            }}
+          >
+            {groups.reduce((sum, g) => sum + g.models.length, 0)} 个可用
+          </span>
         </div>
-        <div style={{ padding: '0 12px 8px' }}>
+        {/* Search */}
+        <div style={{ padding: '8px 14px 8px' }}>
           <div
             className="chat-model-picker-search-shell"
             style={{
               display: 'flex',
               alignItems: 'center',
               gap: 7,
-              height: 30,
+              height: 32,
               borderRadius: 8,
               border: '1px solid var(--border-subtle)',
-              background: 'var(--bg-overlay)',
-              padding: '0 9px',
+              background: 'var(--bg-base)',
+              padding: '0 10px',
+              transition: 'border-color 120ms ease, box-shadow 120ms ease',
             }}
           >
             <svg
-              width="12"
-              height="12"
+              width="13"
+              height="13"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -379,29 +456,78 @@ export function ModelPicker({
                 fontSize: 12.5,
               }}
             />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                aria-label="清除搜索"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 16,
+                  height: 16,
+                  borderRadius: 999,
+                  border: 'none',
+                  background: 'var(--border-subtle)',
+                  color: 'var(--fg-muted)',
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                  fontSize: 10,
+                  lineHeight: 1,
+                }}
+              >
+                ×
+              </button>
+            )}
           </div>
         </div>
+        {/* List */}
         <div
           ref={listboxRef}
           role="listbox"
           aria-label="模型列表"
-          style={{ overflowY: 'auto', padding: '0 0 8px', flex: 1, overscrollBehavior: 'contain' }}
+          className="chat-model-picker-scroll"
+          style={{
+            overflowY: 'auto',
+            padding: '0 0 8px',
+            flex: 1,
+            overscrollBehavior: 'contain',
+          }}
         >
           {groups.length === 0 && (
             <div
               style={{
-                padding: '24px 16px',
+                padding: '28px 20px',
                 textAlign: 'center',
-                color: 'var(--fg-muted)',
-                fontSize: 12,
-                lineHeight: 1.6,
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 4,
+                alignItems: 'center',
+                gap: 8,
               }}
             >
-              <span style={{ color: 'var(--fg-default)', fontWeight: 600 }}>未匹配到模型</span>
-              <span>试试提供商名、模型别名（如 sonnet / 4o / qwen）或模型 ID</span>
+              <svg
+                width="28"
+                height="28"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+                style={{ color: 'var(--fg-muted)', opacity: 0.5 }}
+              >
+                <circle cx="11" cy="11" r="8" />
+                <path d="m21 21-4.3-4.3" />
+                <path d="M8 11h6" />
+              </svg>
+              <span style={{ color: 'var(--fg-default)', fontWeight: 600, fontSize: 12.5 }}>
+                未匹配到模型
+              </span>
+              <span style={{ color: 'var(--fg-muted)', fontSize: 11, lineHeight: 1.5 }}>
+                试试提供商名、模型别名（如 sonnet / 4o / qwen）或模型 ID
+              </span>
             </div>
           )}
           {groups.map(({ provider, models }) => {
@@ -412,21 +538,22 @@ export function ModelPicker({
             });
             return (
               <div key={provider.id}>
+                {/* Provider header */}
                 <div
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 5,
-                    padding: '5px 12px 3px',
+                    gap: 6,
+                    padding: '7px 14px 4px',
                     borderTop: '1px solid var(--border-subtle)',
                   }}
                 >
                   <div
                     style={{
-                      width: 15,
-                      height: 15,
+                      width: 16,
+                      height: 16,
                       borderRadius: 4,
-                      background: 'var(--bg-overlay)',
+                      background: 'var(--bg-base)',
                       border: '1px solid var(--border-subtle)',
                       overflow: 'hidden',
                       display: 'flex',
@@ -435,14 +562,15 @@ export function ModelPicker({
                       fontSize: 9,
                       fontWeight: 700,
                       color: 'var(--fg-muted)',
+                      flexShrink: 0,
                     }}
                   >
                     {providerVisual.logoUrl ? (
                       <img
                         src={providerVisual.logoUrl}
                         alt={provider.name}
-                        width={11}
-                        height={11}
+                        width={12}
+                        height={12}
                         style={{
                           objectFit: 'contain',
                           filter: 'var(--provider-logo-filter, none)',
@@ -466,7 +594,17 @@ export function ModelPicker({
                   >
                     {provider.name}
                   </span>
+                  <span
+                    style={{
+                      fontSize: 9,
+                      color: 'var(--fg-subtle)',
+                      fontWeight: 500,
+                    }}
+                  >
+                    {models.length}
+                  </span>
                 </div>
+                {/* Model options */}
                 {models.map((model) => {
                   const isActive = provider.id === activeProviderId && model.id === activeModelId;
                   const optionKey = `${provider.id}:${model.id}`;
@@ -486,26 +624,28 @@ export function ModelPicker({
                       }}
                       style={{
                         display: 'flex',
-                        alignItems: 'flex-start',
-                        gap: 8,
-                        width: '100%',
-                        padding: '9px 12px',
+                        alignItems: 'center',
+                        gap: 7,
+                        width: 'calc(100% - 8px)',
+                        padding: '5px 10px',
                         border: 'none',
                         background: isActive ? 'var(--accent-muted)' : 'transparent',
                         color: isActive ? 'var(--accent)' : 'var(--fg-strong)',
-                        fontSize: 12.5,
+                        fontSize: 12,
                         cursor: 'pointer',
                         textAlign: 'left',
-                        borderRadius: 8,
-                        margin: '0 6px 1px',
+                        borderRadius: 7,
+                        margin: '1px 4px',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
                       }}
                     >
                       <span
                         style={{
-                          width: 18,
+                          width: 16,
                           display: 'flex',
                           justifyContent: 'center',
-                          paddingTop: 2,
+                          alignItems: 'center',
                           color: isActive ? 'var(--accent)' : 'var(--fg-muted)',
                           flexShrink: 0,
                         }}
@@ -535,42 +675,42 @@ export function ModelPicker({
                             strokeLinecap="round"
                             strokeLinejoin="round"
                             aria-hidden="true"
+                            style={{ opacity: 0.35 }}
                           >
                             <circle cx="12" cy="12" r="8" />
                           </svg>
                         )}
                       </span>
                       <span
-                        style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}
+                        style={{
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          fontWeight: 600,
+                          fontSize: 12,
+                          flexShrink: 1,
+                          minWidth: 0,
+                        }}
                       >
-                        <span
-                          style={{
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                            fontWeight: 600,
-                            fontSize: 12.5,
-                          }}
-                        >
-                          {model.name}
-                        </span>
-                        <span
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 4,
-                            flexWrap: 'wrap',
-                          }}
-                        >
-                          {model.supportsVision && <CapabilityTag label="视觉" tone="emerald" />}
-                          {model.supportsTools && <CapabilityTag label="工具" tone="accent" />}
-                          {inferSupportsThinking(
-                            provider.type,
-                            model.id,
-                            model.supportsThinking === true,
-                          ) && <CapabilityTag label="思考" tone="violet" />}
-                          {contextLabel && <CapabilityTag label={contextLabel} />}
-                        </span>
+                        {model.name}
+                      </span>
+                      <span
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 3,
+                          flexShrink: 0,
+                          marginLeft: 'auto',
+                        }}
+                      >
+                        {model.supportsVision && <CapabilityTag label="视觉" tone="emerald" />}
+                        {model.supportsTools && <CapabilityTag label="工具" tone="accent" />}
+                        {inferSupportsThinking(
+                          provider.type,
+                          model.id,
+                          model.supportsThinking === true,
+                        ) && <CapabilityTag label="思考" tone="violet" />}
+                        {contextLabel && <CapabilityTag label={contextLabel} />}
                       </span>
                     </button>
                   );
@@ -600,6 +740,8 @@ export function ModelSettingsPopover({
   reasoningEffort,
   onChangeThinkingEnabled,
   onChangeReasoningEffort,
+  fastEnabled = false,
+  onFastToggle,
 }: {
   anchorRef: React.RefObject<HTMLButtonElement | null>;
   open: boolean;
@@ -616,16 +758,20 @@ export function ModelSettingsPopover({
   reasoningEffort: ReasoningEffort;
   onChangeThinkingEnabled: (value: boolean) => void;
   onChangeReasoningEffort: (value: ReasoningEffort) => void;
+  fastEnabled?: boolean;
+  onFastToggle?: (enabled: boolean) => Promise<void> | void;
 }) {
   const [top, setTop] = React.useState(0);
   const [left, setLeft] = React.useState(0);
-  const [maxHeight, setMaxHeight] = React.useState(250);
+  const [maxHeight, setMaxHeight] = React.useState(320);
   const [transformOrigin, setTransformOrigin] = React.useState<
     'top left' | 'top right' | 'bottom left' | 'bottom right'
-  >('top right');
+  >('bottom right');
   const panelRef = React.useRef<HTMLDivElement | null>(null);
   const previousFocusRef = React.useRef<HTMLElement | null>(null);
   const titleId = React.useId();
+  const [localFastEnabled, setLocalFastEnabled] = React.useState(fastEnabled);
+  const effectiveFastEnabled = localFastEnabled;
 
   React.useLayoutEffect(() => {
     if (!open) return;
@@ -633,7 +779,7 @@ export function ModelSettingsPopover({
       const el = anchorRef.current;
       if (!el) return;
       const rect = el.getBoundingClientRect();
-      const next = resolveFloatingPanelPosition(rect, 236, 260, 'end');
+      const next = resolveFloatingPanelPosition(rect, 320, 360, 'end', true);
       setLeft(next.left);
       setTop(next.top);
       setMaxHeight(next.maxHeight);
@@ -697,9 +843,14 @@ export function ModelSettingsPopover({
     };
   }, [onClose, open]);
 
+  React.useEffect(() => {
+    setLocalFastEnabled(fastEnabled);
+  }, [fastEnabled]);
+
   if (!open) return null;
 
   const supportedEfforts = getSupportedReasoningEffortsForModel(providerType, modelId);
+  const showFastSettings = providerType === 'openai';
 
   return (
     <div
@@ -712,7 +863,15 @@ export function ModelSettingsPopover({
         type="button"
         aria-label="关闭"
         onClick={onClose}
-        style={{ position: 'absolute', inset: 0, background: 'transparent', border: 'none' }}
+        style={{
+          position: 'absolute',
+          inset: 0,
+          background: 'transparent',
+          border: 'none',
+          cursor: 'default',
+          width: '100%',
+          height: '100%',
+        }}
       />
       <div
         id="chat-model-settings-dialog"
@@ -722,209 +881,395 @@ export function ModelSettingsPopover({
           top,
           left,
           zIndex: 1,
-          width: 236,
+          minWidth: 300,
+          width: 320,
+          maxWidth: 'min(320px, calc(100vw - 16px))',
           background: 'var(--bg-overlay)',
           border: '1px solid var(--border-default)',
           borderRadius: 12,
           boxShadow: 'var(--shadow-lg)',
-          padding: 9,
+          padding: 0,
           maxHeight,
-          overflowY: 'auto',
-          overscrollBehavior: 'contain',
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
           transformOrigin,
+          animation: 'chat-model-picker-enter 160ms cubic-bezier(0.16, 1, 0.3, 1)',
         }}
       >
+        <style>{`
+          .chat-model-settings-option {
+            transition: background 100ms ease, color 100ms ease;
+          }
+          .chat-model-settings-option:hover:not([disabled]):not(.is-active) {
+            background: color-mix(in oklch, var(--accent) 6%, transparent) !important;
+          }
+          .chat-model-settings-scroll::-webkit-scrollbar { width: 5px; }
+          .chat-model-settings-scroll::-webkit-scrollbar-track { background: transparent; }
+          .chat-model-settings-scroll::-webkit-scrollbar-thumb {
+            background: var(--border-default);
+            border-radius: 999px;
+          }
+          .chat-model-settings-scroll::-webkit-scrollbar-thumb:hover {
+            background: var(--border-emphasis);
+          }
+        `}</style>
+        {/* Header */}
         <div
-          id={titleId}
           style={{
-            fontSize: 9,
-            fontWeight: 700,
-            color: 'var(--fg-muted)',
-            textTransform: 'uppercase',
-            letterSpacing: '0.08em',
-            marginBottom: 8,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '10px 14px 8px',
+            borderBottom: '1px solid var(--border-subtle)',
           }}
         >
-          模型设置
-        </div>
-        <div style={{ marginBottom: 9 }}>
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            style={{ color: 'var(--accent)', flexShrink: 0 }}
+          >
+            <path
+              d="M9.5 9a2.5 2.5 0 1 1 5 0c0 1.6-1.5 2.2-2.2 2.8-.4.3-.6.7-.6 1.2"
+              stroke="currentColor"
+            />
+            <circle cx="12" cy="17" r=".8" fill="currentColor" />
+            <path d="M12 2a8.5 8.5 0 0 0-5.7 14.8c.4.4.7.9.8 1.5l.2 1.1a1.4 1.4 0 0 0 1.4 1.1h6.6a1.4 1.4 0 0 0 1.4-1.1l.2-1.1c.1-.6.4-1.1.8-1.5A8.5 8.5 0 0 0 12 2Z" />
+          </svg>
           <div
-            style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-strong)', marginBottom: 4 }}
-          >
-            {modelLabel}
-          </div>
-          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-            {supportsVision && <CapabilityTag label="视觉" tone="emerald" />}
-            {supportsTools && <CapabilityTag label="工具" tone="accent" />}
-            {supportsThinking && <CapabilityTag label="思考" tone="violet" />}
-            {contextWindow ? (
-              <CapabilityTag label={formatContextWindow(contextWindow) ?? ''} />
-            ) : null}
-          </div>
-        </div>
-        <div
-          style={{
-            marginBottom: 9,
-            padding: '8px 9px',
-            borderRadius: 9,
-            background: 'color-mix(in oklch, var(--accent) 8%, transparent)',
-            border: '1px solid color-mix(in oklch, var(--accent) 22%, var(--border-subtle) 78%)',
-            display: 'grid',
-            gap: 7,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--fg-strong)' }}>
-              Fast 快速模型
-            </span>
-            <span
-              style={{
-                borderRadius: 999,
-                padding: '2px 6px',
-                fontSize: 9,
-                fontWeight: 700,
-                color: 'var(--accent)',
-                background: 'var(--accent-muted)',
-              }}
-            >
-              全局
-            </span>
-          </div>
-          <div style={{ fontSize: 9.5, color: 'var(--fg-muted)', lineHeight: 1.45 }}>
-            用于标题、内联、辅助与子任务等轻量路径；在设置里选择模型并开启默认思考等级。
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              window.location.href = '/settings/connection';
-            }}
+            id={titleId}
             style={{
-              justifySelf: 'start',
-              border: '1px solid var(--border-default)',
-              borderRadius: 8,
-              background: 'var(--bg-overlay)',
-              color: 'var(--accent)',
-              cursor: 'pointer',
-              fontSize: 10,
+              fontSize: 11,
               fontWeight: 700,
-              padding: '5px 8px',
+              color: 'var(--fg-strong)',
+              letterSpacing: '0.01em',
             }}
           >
-            打开 Fast 设置
-          </button>
+            模型设置
+          </div>
         </div>
-        {supportsThinking ? (
-          <>
-            {!canConfigureThinking ? (
-              <div
-                style={{
-                  marginBottom: 8,
-                  padding: '7px 9px',
-                  borderRadius: 8,
-                  background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
-                  color: 'var(--fg-default)',
-                  fontSize: 9.5,
-                  lineHeight: 1.45,
-                }}
-              >
-                当前模型具备思考能力，但它的思考模式由模型本身决定，不能在这里单独开关。
-              </div>
-            ) : null}
+        {/* Scrollable body */}
+        <div
+          className="chat-model-settings-scroll"
+          style={{ overflowY: 'auto', overscrollBehavior: 'contain', flex: 1, minHeight: 0 }}
+        >
+          {/* Model info */}
+          <div
+            style={{
+              padding: '8px 14px',
+              borderBottom: '1px solid var(--border-subtle)',
+            }}
+          >
             <div
               style={{
-                fontSize: 9,
-                fontWeight: 700,
-                color: 'var(--fg-muted)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.08em',
-                marginBottom: 6,
+                fontSize: 12,
+                fontWeight: 600,
+                color: 'var(--fg-strong)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                marginBottom: 5,
               }}
             >
-              思考等级
+              {modelLabel}
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+              {supportsVision && <CapabilityTag label="视觉" tone="emerald" />}
+              {supportsTools && <CapabilityTag label="工具" tone="accent" />}
+              {supportsThinking && <CapabilityTag label="思考" tone="violet" />}
+              {contextWindow ? (
+                <CapabilityTag label={formatContextWindow(contextWindow) ?? ''} />
+              ) : null}
+            </div>
+          </div>
+          {/* Fast settings — use current chat model as fast model */}
+          {showFastSettings && (
+            <div
+              style={{
+                margin: '8px 14px',
+                padding: '9px 12px',
+                borderRadius: 9,
+                background: 'color-mix(in oklch, var(--accent) 7%, transparent)',
+                border:
+                  '1px solid color-mix(in oklch, var(--accent) 20%, var(--border-subtle) 80%)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+              }}
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--fg-strong)' }}>
+                  Fast 快速模型
+                </span>
+                <span
+                  style={{
+                    fontSize: 9.5,
+                    color: 'var(--fg-muted)',
+                    lineHeight: 1.4,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {effectiveFastEnabled
+                    ? `用当前模型（${modelLabel}）处理标题/辅助任务`
+                    : '关闭 — 标题/辅助任务走默认路径'}
+                </span>
+              </div>
               <button
-                className="chat-model-settings-option"
                 type="button"
-                disabled={!canConfigureThinking}
-                onClick={() => onChangeThinkingEnabled(false)}
+                role="switch"
+                aria-checked={effectiveFastEnabled}
+                onClick={() => {
+                  const next = !effectiveFastEnabled;
+                  setLocalFastEnabled(next);
+                  void onFastToggle?.(next);
+                }}
+                disabled={!onFastToggle}
+                style={{
+                  position: 'relative',
+                  width: 32,
+                  height: 18,
+                  borderRadius: 999,
+                  border: 'none',
+                  background: effectiveFastEnabled ? 'var(--accent)' : 'var(--border-default)',
+                  cursor: onFastToggle ? 'pointer' : 'default',
+                  flexShrink: 0,
+                  transition: 'background 120ms ease',
+                }}
+              >
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: 2,
+                    left: effectiveFastEnabled ? 16 : 2,
+                    width: 14,
+                    height: 14,
+                    borderRadius: '50%',
+                    background: 'var(--fg-on-accent)',
+                    transition: 'left 120ms ease',
+                  }}
+                />
+              </button>
+            </div>
+          )}
+          {/* Thinking section */}
+          {supportsThinking ? (
+            <div style={{ padding: '4px 14px 10px' }}>
+              {!canConfigureThinking ? (
+                <div
+                  style={{
+                    marginBottom: 7,
+                    padding: '7px 9px',
+                    borderRadius: 8,
+                    background: 'color-mix(in oklch, var(--accent) 9%, transparent)',
+                    color: 'var(--fg-default)',
+                    fontSize: 10,
+                    lineHeight: 1.45,
+                  }}
+                >
+                  当前模型具备思考能力，但它的思考模式由模型本身决定，不能在这里单独开关。
+                </div>
+              ) : null}
+              <div
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  justifyContent: 'space-between',
-                  border: 'none',
-                  borderRadius: 8,
-                  background: !thinkingEnabled ? 'var(--accent-muted)' : 'transparent',
-                  color: !thinkingEnabled ? 'var(--accent)' : 'var(--fg-default)',
-                  padding: '7px 9px',
-                  cursor: canConfigureThinking ? 'pointer' : 'not-allowed',
-                  opacity: canConfigureThinking ? 1 : 0.45,
-                  fontSize: 11,
+                  gap: 6,
+                  fontSize: 9,
+                  fontWeight: 700,
+                  color: 'var(--fg-muted)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                  marginBottom: 6,
+                  padding: '0 2px',
                 }}
               >
-                <span>关闭思考</span>
-              </button>
-              {supportedEfforts.map((level) => {
-                const active = thinkingEnabled && reasoningEffort === level;
-                const desc = describeReasoningEffort(level);
-                return (
-                  <button
-                    className="chat-model-settings-option"
-                    key={level}
-                    type="button"
-                    disabled={!canConfigureThinking}
-                    onClick={() => {
-                      onChangeThinkingEnabled(true);
-                      onChangeReasoningEffort(level);
-                    }}
+                思考等级
+              </div>
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 2,
+                }}
+              >
+                {/* Off option */}
+                <button
+                  className={`chat-model-settings-option${!thinkingEnabled ? ' is-active' : ''}`}
+                  type="button"
+                  disabled={!canConfigureThinking}
+                  onClick={() => onChangeThinkingEnabled(false)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 7,
+                    border: 'none',
+                    borderRadius: 7,
+                    background: !thinkingEnabled ? 'var(--accent-muted)' : 'transparent',
+                    color: !thinkingEnabled ? 'var(--accent)' : 'var(--fg-default)',
+                    padding: '7px 10px',
+                    cursor: canConfigureThinking ? 'pointer' : 'not-allowed',
+                    opacity: canConfigureThinking ? 1 : 0.45,
+                    fontSize: 11,
+                    textAlign: 'left',
+                  }}
+                >
+                  <span
                     style={{
+                      width: 14,
                       display: 'flex',
-                      alignItems: 'flex-start',
-                      gap: 7,
-                      border: 'none',
-                      borderRadius: 8,
-                      background: active
-                        ? 'color-mix(in oklch, var(--accent) 14%, transparent)'
-                        : 'transparent',
-                      color: active
-                        ? 'color-mix(in oklch, var(--accent) 82%, var(--fg-on-accent) 18%)'
-                        : 'var(--fg-default)',
-                      padding: '7px 9px',
-                      cursor: canConfigureThinking ? 'pointer' : 'not-allowed',
-                      opacity: canConfigureThinking ? 1 : 0.45,
-                      textAlign: 'left',
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      flexShrink: 0,
                     }}
-                    title={desc}
                   >
-                    <span
+                    {!thinkingEnabled ? (
+                      <svg
+                        width="9"
+                        height="9"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="3"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    ) : (
+                      <svg
+                        width="9"
+                        height="9"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                        style={{ opacity: 0.3 }}
+                      >
+                        <circle cx="12" cy="12" r="8" />
+                      </svg>
+                    )}
+                  </span>
+                  <span style={{ fontWeight: 600 }}>关闭思考</span>
+                </button>
+                {/* Effort levels */}
+                {supportedEfforts.map((level) => {
+                  const active = thinkingEnabled && reasoningEffort === level;
+                  const desc = describeReasoningEffort(level);
+                  return (
+                    <button
+                      className={`chat-model-settings-option${active ? ' is-active' : ''}`}
+                      key={level}
+                      type="button"
+                      disabled={!canConfigureThinking}
+                      onClick={() => {
+                        onChangeThinkingEnabled(true);
+                        onChangeReasoningEffort(level);
+                      }}
+                      title={desc}
                       style={{
-                        minWidth: 44,
-                        fontSize: 10,
-                        fontWeight: 700,
-                        textTransform: 'uppercase',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 7,
+                        border: 'none',
+                        borderRadius: 7,
+                        background: active
+                          ? 'color-mix(in oklch, var(--accent) 14%, transparent)'
+                          : 'transparent',
+                        color: active
+                          ? 'color-mix(in oklch, var(--accent) 85%, var(--fg-on-accent) 15%)'
+                          : 'var(--fg-default)',
+                        padding: '7px 10px',
+                        cursor: canConfigureThinking ? 'pointer' : 'not-allowed',
+                        opacity: canConfigureThinking ? 1 : 0.45,
+                        textAlign: 'left',
+                        fontSize: 11,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
                       }}
                     >
-                      {level}
-                    </span>
-                    <span
-                      style={{
-                        fontSize: 9.5,
-                        color: active ? 'inherit' : 'var(--fg-muted)',
-                        lineHeight: 1.4,
-                      }}
-                    >
-                      {desc}
-                    </span>
-                  </button>
-                );
-              })}
+                      <span
+                        style={{
+                          width: 14,
+                          display: 'flex',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {active ? (
+                          <svg
+                            width="9"
+                            height="9"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="3"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden="true"
+                          >
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                        ) : (
+                          <svg
+                            width="9"
+                            height="9"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden="true"
+                            style={{ opacity: 0.3 }}
+                          >
+                            <circle cx="12" cy="12" r="8" />
+                          </svg>
+                        )}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 10.5,
+                          fontWeight: 700,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.03em',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {level}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </>
-        ) : (
-          <div style={{ fontSize: 10, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
-            当前模型没有单独的思考等级设置。
-          </div>
-        )}
+          ) : (
+            <div
+              style={{
+                padding: '10px 14px',
+                fontSize: 10.5,
+                color: 'var(--fg-muted)',
+                lineHeight: 1.5,
+              }}
+            >
+              当前模型没有单独的思考等级设置。
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

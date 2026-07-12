@@ -138,7 +138,7 @@ export const webfetchTool: ToolDefinition<typeof webfetchInputSchema, typeof web
   {
     name: 'webfetch',
     description:
-      'Fetch content from a specific URL in markdown, text, html, or image-preview format. Use websearch for discovery and webfetch for a concrete URL. If the user asks to fetch, find, show, or display an existing web image, use websearch/webfetch and return the existing image URL; do not use generate_image unless the user explicitly asks to create/draw/design a new image.',
+      'Fetch content from a specific URL in markdown, text, html, or image-preview format. Use open_websearch for discovery by default, fall back to websearch when open_websearch is unavailable, and use webfetch for a concrete URL. If the user asks to fetch, find, show, or display an existing web image, use open_websearch/websearch plus webfetch and return the existing image URL; do not use generate_image unless the user explicitly asks to create/draw/design a new image.',
     inputSchema: webfetchInputSchema,
     outputSchema: webfetchOutputSchema,
     timeout: MAX_WEBFETCH_TIMEOUT_SECONDS * 1000,

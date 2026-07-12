@@ -3,6 +3,7 @@ import { SS, ST } from '../shared/settings-section-styles.js';
 import {
   useDisplayPreferencesStore,
   type ThemeMode,
+  type ThemeStyle,
 } from '../../../stores/settings/display-preferences.js';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
 import type { WorkbenchLayoutMode } from '../../../stores/ui/uiState.js';
@@ -131,6 +132,62 @@ const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
   { value: 'system', label: '跟随系统' },
   { value: 'light', label: '浅色' },
   { value: 'dark', label: '深色' },
+];
+
+const THEME_STYLE_OPTIONS: {
+  value: ThemeStyle;
+  label: string;
+  description: string;
+  swatches: string[];
+}[] = [
+  {
+    value: 'nebula',
+    label: 'Nebula',
+    description: '深海蓝调 · 靛青+琥珀四色系',
+    swatches: ['#080b12', '#5cd4c0', '#f0b429'],
+  },
+  {
+    value: 'aurora',
+    label: 'Aurora',
+    description: '极光毛玻璃 · 渐变 · 梦幻',
+    swatches: ['#060818', '#8b9dff', '#a06bff'],
+  },
+  {
+    value: 'linear',
+    label: 'Linear',
+    description: '极简精致 · 单一靛蓝强调',
+    swatches: ['#0a0c10', '#5b6cff', '#e8eaf2'],
+  },
+  {
+    value: 'forest',
+    label: 'Forest',
+    description: '森林墨绿 · 暖橙 · 自然有机',
+    swatches: ['#0a0f0d', '#4ade80', '#f97316'],
+  },
+  {
+    value: 'sakura',
+    label: 'Sakura',
+    description: '樱花粉墨 · 玫红 · 日系温柔',
+    swatches: ['#100a10', '#f472b6', '#c084fc'],
+  },
+  {
+    value: 'carbon',
+    label: 'Carbon',
+    description: '纯碳灰 · 电光蓝 · 硬核工业',
+    swatches: ['#08090a', '#00b4ff', '#ffaa00'],
+  },
+  {
+    value: 'sunset',
+    label: 'Sunset',
+    description: '暮光紫橙 · 落日金 · 温暖浪漫',
+    swatches: ['#120a08', '#f97316', '#c084fc'],
+  },
+  {
+    value: 'ocean',
+    label: 'Ocean',
+    description: '深海青蓝 · 珊瑚 · 清冷通透',
+    swatches: ['#050e12', '#22d3ee', '#fb923c'],
+  },
 ];
 
 const THEME_SELECT: React.CSSProperties = {
@@ -320,9 +377,10 @@ export function DisplayTabContent() {
 
       <section style={SS}>
         <h3 style={ST}>外观</h3>
+        <ThemeStyleRow />
         <SelectRow
           title="主题模式"
-          description="选择界面的颜色主题（跟随系统 / 浅色 / 深色）"
+          description="选择界面的明暗模式（跟随系统 / 浅色 / 深色）"
           value={store.themeMode}
           options={THEME_OPTIONS}
           onChange={(v) => store.setThemeMode(v as ThemeMode)}
@@ -379,5 +437,78 @@ function LayoutModeRow() {
       options={LAYOUT_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label }))}
       onChange={(v) => setLayoutMode(v as WorkbenchLayoutMode)}
     />
+  );
+}
+
+// ── 主题风格选择 ──────────────────────────────────────────
+
+function ThemeStyleRow() {
+  const themeStyle = useDisplayPreferencesStore((s) => s.themeStyle);
+  const setThemeStyle = useDisplayPreferencesStore((s) => s.setThemeStyle);
+
+  return (
+    <div style={{ padding: '10px 0' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 10 }}>
+        <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--fg-strong)' }}>主题风格</span>
+        <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
+          选择界面的设计风格，与明暗模式独立组合
+        </span>
+      </div>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        {THEME_STYLE_OPTIONS.map((opt) => {
+          const active = themeStyle === opt.value;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setThemeStyle(opt.value)}
+              aria-label={opt.label}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6,
+                padding: '10px 14px',
+                borderRadius: 10,
+                border: `1px solid ${active ? 'var(--accent-border)' : 'var(--border-default)'}`,
+                background: active ? 'var(--accent-subtle)' : 'var(--bg-surface)',
+                cursor: 'pointer',
+                transition: 'all 180ms ease',
+                minWidth: 120,
+                textAlign: 'left',
+                boxShadow: active ? 'var(--shadow-glow)' : 'none',
+              }}
+            >
+              <div style={{ display: 'flex', gap: 4 }}>
+                {opt.swatches.map((sw, i) => (
+                  <span
+                    key={i}
+                    style={{
+                      width: 16,
+                      height: 16,
+                      borderRadius: 4,
+                      background: sw,
+                      border: '1px solid var(--border-subtle)',
+                      flexShrink: 0,
+                    }}
+                  />
+                ))}
+              </div>
+              <span
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: active ? 'var(--accent)' : 'var(--fg-strong)',
+                }}
+              >
+                {opt.label}
+              </span>
+              <span style={{ fontSize: 10.5, color: 'var(--fg-muted)', lineHeight: 1.4 }}>
+                {opt.description}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }

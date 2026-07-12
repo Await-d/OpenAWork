@@ -287,7 +287,7 @@ export const SessionCard = memo(function SessionCard({
                 style={{
                   ...smallBtn,
                   color: 'var(--danger)',
-                  borderColor: 'rgba(239,68,68,0.3)',
+                  borderColor: 'var(--danger-border)',
                   opacity: isDeleting ? 0.5 : 1,
                   cursor: isDeleting ? 'wait' : smallBtn.cursor,
                 }}

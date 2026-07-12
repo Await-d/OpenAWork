@@ -436,19 +436,11 @@ describe('retryMcpConnectionForUser', () => {
   });
 
   it('works for built-in MCPs (no user override needed)', async () => {
-    // No user_settings row at all — the runtime should still find
-    // `websearch` via `mergeBuiltinAndConfiguredMcps`.
-    poolMock.withOperationRetryMock.mockImplementation(async (_userId, _poolKey, _ref, op) => {
-      const fakeAdapter = {
-        listTools: vi.fn(async () => [{ name: 'web_search_exa' }]),
-      };
-      return op(fakeAdapter as unknown as never, 'websearch');
-    });
-
-    const result = await retryMcpConnectionForUser(USER_ID, 'websearch');
+    const result = await retryMcpConnectionForUser(USER_ID, 'open_websearch');
 
     expect(result.status).toBe('connected');
-    expect(result.toolCount).toBe(1);
+    expect(result.toolCount).toBe(3);
+    expect(poolMock.withOperationRetryMock).not.toHaveBeenCalled();
   });
 });
 

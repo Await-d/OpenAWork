@@ -52,6 +52,8 @@ export interface SettingsClient {
     options?: { signal?: AbortSignal },
   ): Promise<{ ok: boolean; providerCount?: number; modelCount?: number; message?: string }>;
   putProviders(token: string, payload: unknown): Promise<unknown>;
+  /** 单独更新 active-selection（chat / fast / image / compaction 的 provider+model 绑定）。 */
+  putActiveSelection(token: string, payload: unknown): Promise<unknown>;
   // MCP servers
   listMcpServers(token: string, options?: { signal?: AbortSignal }): Promise<unknown>;
   putMcpServers(token: string, payload: unknown): Promise<void>;
@@ -278,6 +280,18 @@ export function createSettingsClient(baseUrl: string): SettingsClient {
         actionLabel: '保存 Provider 配置',
         request: () =>
           fetchWithTimeout(`${baseUrl}/settings/providers`, {
+            method: 'PUT',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify(payload),
+          }),
+      });
+    },
+
+    async putActiveSelection(token, payload) {
+      return performSettingsRequest<unknown>({
+        actionLabel: '保存模型选择',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/settings/active-selection`, {
             method: 'PUT',
             headers: jsonAuthHeaders(token),
             body: JSON.stringify(payload),

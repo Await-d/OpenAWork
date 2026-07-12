@@ -163,7 +163,7 @@ const SPINNER_STYLE: CSSProperties = {
   flexShrink: 0,
 };
 
-const DANGER = 'var(--danger, #e5484d)';
+const DANGER = 'var(--danger)';
 
 const STATUS_META: Record<TeamInitStepStatus, { label: string; color: string; icon: string }> = {
   proposed: { label: '待确认', color: 'var(--fg-muted)', icon: '○' },

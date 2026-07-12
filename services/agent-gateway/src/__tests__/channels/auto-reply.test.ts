@@ -5,6 +5,7 @@ import type {
   ChannelEvent,
   ChannelInstance,
   ChannelMessage,
+  ChannelReplyLanguage,
   ChannelStreamingHandle,
   MessagingChannelService,
 } from '../../channels/types.js';
@@ -73,13 +74,14 @@ class FakeService implements MessagingChannelService {
   }
 }
 
-function makeInstance(id: string): ChannelInstance {
+function makeInstance(id: string, replyLanguage: ChannelReplyLanguage = 'zh-CN'): ChannelInstance {
   return {
     id,
     type: 'telegram',
     name: id,
     enabled: true,
     config: {},
+    replyLanguage,
     features: { autoReply: true, streamingReply: false, autoStart: false },
     ownerUserId: 'user-1',
     createdAt: 0,
@@ -87,9 +89,12 @@ function makeInstance(id: string): ChannelInstance {
   };
 }
 
-function makeStreamingInstance(id: string): ChannelInstance {
+function makeStreamingInstance(
+  id: string,
+  replyLanguage: ChannelReplyLanguage = 'zh-CN',
+): ChannelInstance {
   return {
-    ...makeInstance(id),
+    ...makeInstance(id, replyLanguage),
     features: { autoReply: true, streamingReply: true, autoStart: false },
   };
 }
@@ -375,10 +380,7 @@ describe('AutoReplyPipeline error isolation', () => {
     }
 
     await vi.waitFor(() => {
-      expect(sendMessage).toHaveBeenCalledWith(
-        'chat-1',
-        '当前会话正在处理较多消息，请稍后再发送。',
-      );
+      expect(sendMessage).toHaveBeenCalledWith('chat-1', expect.stringContaining('**会话繁忙**'));
     });
     expect(onAgentRun).toHaveBeenCalledTimes(1);
     expect(consoleSpy).toHaveBeenCalled();
@@ -387,9 +389,7 @@ describe('AutoReplyPipeline error isolation', () => {
     await Promise.all(tasks);
 
     expect(onAgentRun).toHaveBeenCalledTimes(8);
-    expect(sendMessage.mock.calls.map((call) => call[1])).toContain(
-      '当前会话正在处理较多消息，请稍后再发送。',
-    );
+    expect(sendMessage.mock.calls.some((call) => call[1]?.includes('**会话繁忙**'))).toBe(true);
 
     await pipeline.handle(messageEvent(id, 'msg-10'));
 
@@ -555,6 +555,51 @@ describe('AutoReplyPipeline error isolation', () => {
 });
 
 describe('AutoReplyPipeline built-in commands', () => {
+  it('/help 和帮助关键词都会直接回复统一命令列表', async () => {
+    const sendMessage = vi.fn(async (_chatId: string, _content: string) => ({ messageId: 'ok' }));
+    const onAgentRun = vi.fn(async () => 'should not run');
+    const id = 'tg-help';
+    await installFakeService(id, new FakeService(id, { sendMessage }));
+
+    const pipeline = new AutoReplyPipeline({
+      resolveChannel: () => makeInstance(id),
+      onAgentRun,
+    });
+
+    await pipeline.handle(messageEvent(id, '帮助'));
+
+    expect(onAgentRun).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    const firstCall = sendMessage.mock.calls[0];
+    const sentContent = firstCall ? firstCall[1] : '';
+    expect(sentContent).toContain('**快捷指令**');
+    expect(sentContent).toContain('`/help`');
+    expect(sentContent).toContain('`/new`');
+    expect(sentContent).toContain('当前平台：Telegram');
+    expect(sentContent).toContain('输入框里输入 `/`');
+    expect(sentContent).toContain('关键词兜底：直接发送 `帮助`');
+  });
+
+  it('英文回复语言下 /help 直接返回英文命令列表', async () => {
+    const sendMessage = vi.fn(async (_chatId: string, _content: string) => ({ messageId: 'ok' }));
+    const onAgentRun = vi.fn(async () => 'should not run');
+    const id = 'tg-help-en';
+    await installFakeService(id, new FakeService(id, { sendMessage }));
+
+    const pipeline = new AutoReplyPipeline({
+      resolveChannel: () => makeInstance(id, 'en-US'),
+      onAgentRun,
+    });
+
+    await pipeline.handle(messageEvent(id, '/help'));
+
+    expect(onAgentRun).not.toHaveBeenCalled();
+    const sentContent = sendMessage.mock.calls[0]?.[1] ?? '';
+    expect(sentContent).toContain('**Quick commands**');
+    expect(sentContent).toContain('Platform: Telegram');
+    expect(sentContent).toContain('Universal fallback: send `/help` as a normal message');
+  });
+
   it('/stats 直接回复渠道，不进入 agent loop', async () => {
     const sendMessage = vi.fn(async (_chatId: string, _content: string) => ({ messageId: 'ok' }));
     const onAgentRun = vi.fn(async () => 'should not run');
@@ -575,10 +620,13 @@ describe('AutoReplyPipeline built-in commands', () => {
     const firstCall = sendMessage.mock.calls[0];
     const sentContent = firstCall ? firstCall[1] : '';
     expect(sentContent).toContain('Usage statistics');
-    expect(commandActions.getUsageStats).toHaveBeenCalledWith({
-      channel: makeInstance(id),
-      chatId: 'chat-1',
-    });
+    expect(commandActions.getUsageStats).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: makeInstance(id),
+        chatId: 'chat-1',
+        replyLanguage: 'zh-CN',
+      }),
+    );
   });
 
   it('/compress 直接回复渠道，不进入 agent loop', async () => {
@@ -601,10 +649,13 @@ describe('AutoReplyPipeline built-in commands', () => {
     const firstCall = sendMessage.mock.calls[0];
     const sentContent = firstCall ? firstCall[1] : '';
     expect(sentContent).toContain('Context compression');
-    expect(commandActions.compactConversation).toHaveBeenCalledWith({
-      channel: makeInstance(id),
-      chatId: 'chat-1',
-    });
+    expect(commandActions.compactConversation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: makeInstance(id),
+        chatId: 'chat-1',
+        replyLanguage: 'zh-CN',
+      }),
+    );
   });
 
   it('/status 返回当前通道配置和会话状态，不进入 agent loop', async () => {
@@ -627,13 +678,38 @@ describe('AutoReplyPipeline built-in commands', () => {
     expect(onAgentRun).not.toHaveBeenCalled();
     const firstCall = sendMessage.mock.calls[0];
     const sentContent = firstCall ? firstCall[1] : '';
-    expect(sentContent).toContain('Channel status');
-    expect(sentContent).toContain(`Name: ${id}`);
-    expect(sentContent).toContain('Type: telegram');
-    expect(sentContent).toContain('Provider: openai');
-    expect(sentContent).toContain('Model: gpt-5-mini');
-    expect(sentContent).toContain('Current chat: chat-1');
-    expect(sentContent).toContain('Auto reply: on');
+    expect(sentContent).toContain('**通道状态**');
+    expect(sentContent).toContain('**概览**');
+    expect(sentContent).toContain(`- 名称：\`${id}\``);
+    expect(sentContent).toContain('- 类型：`telegram`');
+    expect(sentContent).toContain('- Provider：`openai`');
+    expect(sentContent).toContain('- Model：`gpt-5-mini`');
+    expect(sentContent).toContain('- 当前会话：`chat-1`');
+    expect(sentContent).toContain('- 自动回复：`开启`');
+  });
+
+  it('英文回复语言下 /status 返回英文状态信息', async () => {
+    const sendMessage = vi.fn(async (_chatId: string, _content: string) => ({ messageId: 'ok' }));
+    const onAgentRun = vi.fn(async () => 'should not run');
+    const id = 'tg-status-en';
+    await installFakeService(id, new FakeService(id, { sendMessage }));
+
+    const pipeline = new AutoReplyPipeline({
+      resolveChannel: () => ({
+        ...makeInstance(id, 'en-US'),
+        model: 'gpt-5-mini',
+        providerId: 'openai',
+      }),
+      onAgentRun,
+    });
+
+    await pipeline.handle(messageEvent(id, '/status'));
+
+    expect(onAgentRun).not.toHaveBeenCalled();
+    const sentContent = sendMessage.mock.calls[0]?.[1] ?? '';
+    expect(sentContent).toContain('**Channel status**');
+    expect(sentContent).toContain(`- Name: \`${id}\``);
+    expect(sentContent).toContain('- Reply language: `English (en-US)`');
   });
 
   it('群聊 @ 机器人前缀后面的命令也会被识别', async () => {
@@ -656,6 +732,41 @@ describe('AutoReplyPipeline built-in commands', () => {
     const firstCall = sendMessage.mock.calls[0];
     const sentContent = firstCall ? firstCall[1] : '';
     expect(sentContent).toContain('Usage statistics');
+    expect(commandActions.getUsageStats).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: makeInstance(id),
+        chatId: 'chat-1',
+        replyLanguage: 'zh-CN',
+      }),
+    );
+  });
+
+  it('Telegram 群聊 /command@bot 形式也会命中内置命令', async () => {
+    const sendMessage = vi.fn(async (_chatId: string, _content: string) => ({ messageId: 'ok' }));
+    const onAgentRun = vi.fn(async () => 'should not run');
+    const commandActions = makeCommandActions();
+    const id = 'tg-native-command';
+    await installFakeService(id, new FakeService(id, { sendMessage }));
+
+    const pipeline = new AutoReplyPipeline({
+      commandActions,
+      resolveChannel: () => makeInstance(id),
+      onAgentRun,
+    });
+
+    await pipeline.handle(messageEvent(id, '/stats@OpenAWorkBot'));
+
+    expect(onAgentRun).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    const sentContent = sendMessage.mock.calls[0]?.[1] ?? '';
+    expect(sentContent).toContain('Usage statistics');
+    expect(commandActions.getUsageStats).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: makeInstance(id),
+        chatId: 'chat-1',
+        replyLanguage: 'zh-CN',
+      }),
+    );
   });
 
   it('/new 直接清空当前 channel conversation', async () => {
@@ -674,10 +785,39 @@ describe('AutoReplyPipeline built-in commands', () => {
     await pipeline.handle(messageEvent(id, '/new'));
 
     expect(onAgentRun).not.toHaveBeenCalled();
-    expect(commandActions.resetConversation).toHaveBeenCalledWith({
-      channel: makeInstance(id),
-      chatId: 'chat-1',
+    expect(commandActions.resetConversation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: makeInstance(id),
+        chatId: 'chat-1',
+        replyLanguage: 'zh-CN',
+      }),
+    );
+    expect(sendMessage).toHaveBeenCalledWith('chat-1', 'Session cleared.');
+  });
+
+  it('新对话 作为文本兜底也会清空当前 channel conversation', async () => {
+    const sendMessage = vi.fn(async (_chatId: string, _content: string) => ({ messageId: 'ok' }));
+    const onAgentRun = vi.fn(async () => 'should not run');
+    const commandActions = makeCommandActions();
+    const id = 'tg-new-keyword';
+    await installFakeService(id, new FakeService(id, { sendMessage }));
+
+    const pipeline = new AutoReplyPipeline({
+      commandActions,
+      resolveChannel: () => makeInstance(id),
+      onAgentRun,
     });
+
+    await pipeline.handle(messageEvent(id, '新对话'));
+
+    expect(onAgentRun).not.toHaveBeenCalled();
+    expect(commandActions.resetConversation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: makeInstance(id),
+        chatId: 'chat-1',
+        replyLanguage: 'zh-CN',
+      }),
+    );
     expect(sendMessage).toHaveBeenCalledWith('chat-1', 'Session cleared.');
   });
 });

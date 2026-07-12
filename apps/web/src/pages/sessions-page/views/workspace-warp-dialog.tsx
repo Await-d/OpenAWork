@@ -51,7 +51,7 @@ const PANEL_STYLE: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   gap: 14,
-  boxShadow: '0 14px 40px var(--shadow-strong, rgba(0,0,0,0.25))',
+  boxShadow: 'var(--shadow-lg)',
   color: 'var(--fg-strong)',
 };
 

@@ -22,7 +22,7 @@ const TOGGLE_KNOB: React.CSSProperties = {
   borderRadius: '50%',
   background: 'var(--bg-raised)',
   transition: 'left 200ms ease',
-  boxShadow: '0 1px 3px rgba(0,0,0,0.18)',
+  boxShadow: 'var(--shadow-sm)',
 };
 
 function ToggleRow({

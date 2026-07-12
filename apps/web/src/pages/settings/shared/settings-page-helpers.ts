@@ -130,11 +130,13 @@ export const BUILTIN_PROVIDER_TYPE_SET = new Set<string>([
 ]);
 
 export function normalizeReasoningEffort(value: unknown): ReasoningEffortRef {
-  return value === 'minimal' ||
+  return value === 'none' ||
+    value === 'minimal' ||
     value === 'low' ||
     value === 'medium' ||
     value === 'high' ||
-    value === 'xhigh'
+    value === 'xhigh' ||
+    value === 'max'
     ? value
     : 'medium';
 }

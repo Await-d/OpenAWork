@@ -17,7 +17,7 @@ export type ProviderType =
 export interface ThinkingConfig {
   enabled: boolean;
   budgetTokens?: number;
-  mode?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+  mode?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 }
 
 export interface RequestOverrides {

@@ -126,7 +126,7 @@ const TAB_BUTTON_ACTIVE: React.CSSProperties = {
   ...TAB_BUTTON_BASE,
   borderColor: 'var(--accent)',
   color: 'var(--accent)',
-  background: 'var(--accent-soft, rgba(99,102,241,0.08))',
+  background: 'var(--accent-subtle)',
 };
 
 const SECTION: React.CSSProperties = {
@@ -160,7 +160,7 @@ const PILL: React.CSSProperties = {
   fontSize: 10,
   padding: '1px 6px',
   borderRadius: 6,
-  background: 'var(--accent-soft, rgba(99,102,241,0.12))',
+  background: 'var(--accent-muted)',
   color: 'var(--accent)',
 };
 
@@ -196,10 +196,10 @@ const ORIGIN_LABEL: Record<EffectiveSkillDto['origin'], string> = {
 };
 
 const ORIGIN_PILL_STYLE: Record<EffectiveSkillDto['origin'], React.CSSProperties> = {
-  workspace: { background: 'var(--accent-soft, rgba(99,102,241,0.12))', color: 'var(--accent)' },
+  workspace: { background: 'var(--accent-muted)', color: 'var(--accent)' },
   'workspace-fallback': { background: 'var(--warning-muted)', color: 'var(--warning)' },
   'session-override': { background: 'var(--danger-muted)', color: 'var(--danger)' },
-  builtin: { background: 'rgba(100,116,139,0.16)', color: 'var(--fg-muted)' },
+  builtin: { background: 'var(--bg-elevated)', color: 'var(--fg-muted)' },
 };
 
 const DRAG_HANDLE_STYLE: React.CSSProperties = {

@@ -1,21 +1,40 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { ChannelAccessConfigSection } from './ChannelAccessConfigSection.js';
+import { validateMemberAclDocumentForSave } from './ChannelMemberAclEditor.js';
 import { ChannelDiagnosticsPanel } from './ChannelDiagnosticsPanel.js';
+import { ChannelPromptInjectionSection } from './ChannelPromptInjectionSection.js';
 import { ChannelQuickLinks } from './ChannelQuickLinks.js';
+import { ChannelSecuritySection } from './ChannelSecuritySection.js';
+import {
+  CATEGORY_LABEL,
+  CATEGORY_ORDER,
+  CHANNEL_ICON,
+  FEATURE_OPTIONS,
+} from './channel-subscription-settings.constants.js';
 import { CHANNEL_SUBSCRIPTION_SETTINGS_STYLES } from './channel-subscription-settings.styles.js';
+import {
+  DEFAULT_CHANNEL_CAPABILITY_CONTEXT_TOOL_PROMPT_INJECTIONS,
+  normalizeChannelCapabilityContextToolPromptInjections,
+} from './channel-capability-tool-groups.js';
 import type {
-  ChannelDescriptorCategory,
+  ChannelCapabilityCatalogCounts,
   ChannelDraft,
   ChannelEditorStatus,
   ChannelEditorType,
   ChannelFeaturesEntry,
   ChannelPermissionsEntry,
+  ChannelPromptInjections,
   ChannelSettingsEntry,
   ChannelSubscriptionSettingsProps,
   ChannelTargetEntry,
   ChannelTypeDescriptor,
 } from './channel-subscription-settings.types.js';
+import { logger } from '../../../utils/log/logger.js';
 export type {
+  ChannelCapabilityCatalogDraft,
+  ChannelCapabilityCatalogCounts,
+  ChannelCapabilityContextPromptInjections,
   ChannelDescriptorCategory,
   ChannelDescriptorField,
   ChannelDescriptorFieldType,
@@ -28,6 +47,8 @@ export type {
   ChannelPermissionsEntry,
   ChannelPersonaOption,
   ChannelPersonaSelection,
+  ChannelPromptInjections,
+  ChannelReplyLanguage,
   ChannelProviderOption,
   ChannelSettingsEntry,
   ChannelSubscriptionEntry,
@@ -42,81 +63,14 @@ export type {
 
 type PendingAction =
   'save' | 'connect' | 'disconnect' | 'delete' | 'refresh' | 'diagnostics' | 'weixin' | null;
-
-const CATEGORY_ORDER: ChannelDescriptorCategory[] = ['china', 'international', 'custom'];
-
-const CATEGORY_LABEL: Record<ChannelDescriptorCategory, string> = {
-  china: '国内渠道',
-  international: '国际渠道',
-  custom: '自定义',
-};
-
-const CHANNEL_ICON: Record<string, string> = {
-  telegram: '✈',
-  discord: '◈',
-  slack: '#',
-  feishu: '飞',
-  dingtalk: '钉',
-  weixin: '微',
-  wecom: '企',
-  whatsapp: '◎',
-  qq: 'Q',
-};
-
-const FEATURE_OPTIONS: Array<{
-  key: keyof ChannelFeaturesEntry;
-  label: string;
-  description: string;
-}> = [
-  {
-    key: 'autoReply',
-    label: '自动回复',
-    description: '收到新消息后自动创建会话并生成回复。',
-  },
-  {
-    key: 'streamingReply',
-    label: '流式回复',
-    description: '渠道支持时优先使用逐步更新的流式输出。',
-  },
-  {
-    key: 'autoStart',
-    label: '自动启动',
-    description: 'Gateway 重启后自动拉起当前通道实例。',
-  },
-];
-
-const PERMISSION_OPTIONS: Array<{
-  key: Exclude<keyof ChannelPermissionsEntry, 'readablePathPrefixes'>;
-  label: string;
-  description: string;
-}> = [
-  {
-    key: 'allowReadHome',
-    label: '允许读取 Home',
-    description: '允许代理读取用户目录内的文件。',
-  },
-  {
-    key: 'allowWriteOutside',
-    label: '允许工作区外写入',
-    description: '允许代理修改工作区之外的文件。',
-  },
-  {
-    key: 'allowShell',
-    label: '允许 Shell',
-    description: '允许代理运行终端命令与脚本。',
-  },
-  {
-    key: 'allowSubAgents',
-    label: '允许子代理',
-    description: '允许代理继续派生子任务协作执行。',
-  },
-];
+const TRUTHY_BOOLEAN_CONFIG_VALUES = new Set(['1', 'true', 'yes', 'on']);
 
 const EMPTY_DRAFT: ChannelDraft = {
   type: 'telegram',
   name: '',
   enabled: true,
   config: {},
+  replyLanguage: 'zh-CN',
   subscriptions: [],
   features: {
     autoReply: true,
@@ -135,6 +89,16 @@ const EMPTY_DRAFT: ChannelDraft = {
     allowSubAgents: true,
   },
   persona: null,
+  promptInjections: {
+    capabilityContext: {
+      agents: true,
+      skills: true,
+      mcps: true,
+      tools: true,
+      toolGroups: { ...DEFAULT_CHANNEL_CAPABILITY_CONTEXT_TOOL_PROMPT_INJECTIONS },
+      commands: true,
+    },
+  },
 };
 
 function cloneDraft(draft: ChannelDraft): ChannelDraft {
@@ -149,6 +113,12 @@ function cloneDraft(draft: ChannelDraft): ChannelDraft {
       readablePathPrefixes: [...draft.permissions.readablePathPrefixes],
     },
     persona: draft.persona ? { ...draft.persona } : null,
+    promptInjections: {
+      capabilityContext: {
+        ...draft.promptInjections.capabilityContext,
+        toolGroups: { ...draft.promptInjections.capabilityContext.toolGroups },
+      },
+    },
   };
 }
 
@@ -170,8 +140,21 @@ function createDefaultFeatures(): ChannelFeaturesEntry {
   };
 }
 
+function createDefaultPromptInjections(): ChannelPromptInjections {
+  return {
+    capabilityContext: {
+      agents: true,
+      skills: true,
+      mcps: true,
+      tools: true,
+      toolGroups: { ...DEFAULT_CHANNEL_CAPABILITY_CONTEXT_TOOL_PROMPT_INJECTIONS },
+      commands: true,
+    },
+  };
+}
+
 function getChannelIcon(icon: string): string {
-  return CHANNEL_ICON[icon] ?? CHANNEL_ICON['slack'] ?? '•';
+  return CHANNEL_ICON[icon as ChannelEditorType] ?? CHANNEL_ICON['slack'] ?? '•';
 }
 
 function createToolsFromDescriptor(
@@ -202,6 +185,7 @@ function createDraftFromDescriptor(descriptor: ChannelTypeDescriptor): ChannelDr
       acc[field.key] = '';
       return acc;
     }, {}),
+    replyLanguage: 'zh-CN',
     subscriptions: [],
     features: createDefaultFeatures(),
     channelLlmToolsEnabled: false,
@@ -210,6 +194,7 @@ function createDraftFromDescriptor(descriptor: ChannelTypeDescriptor): ChannelDr
     tools: createToolsFromDescriptor(descriptor),
     permissions: createDefaultPermissions(),
     persona: null,
+    promptInjections: createDefaultPromptInjections(),
   };
 }
 
@@ -233,6 +218,7 @@ function buildDraftFromEntry(
       ...(descriptor ? createDraftFromDescriptor(descriptor).config : {}),
       ...entry.config,
     },
+    replyLanguage: entry.replyLanguage ?? 'zh-CN',
     subscriptions: entry.subscriptions,
     features: { ...createDefaultFeatures(), ...(entry.features ?? {}) },
     channelLlmToolsEnabled: entry.channelLlmToolsEnabled ?? false,
@@ -241,6 +227,15 @@ function buildDraftFromEntry(
     tools,
     permissions: { ...createDefaultPermissions(), ...(entry.permissions ?? {}) },
     persona: entry.persona ?? null,
+    promptInjections: {
+      capabilityContext: {
+        ...createDefaultPromptInjections().capabilityContext,
+        ...(entry.promptInjections?.capabilityContext ?? {}),
+        toolGroups: normalizeChannelCapabilityContextToolPromptInjections(
+          entry.promptInjections?.capabilityContext?.toolGroups,
+        ),
+      },
+    },
   });
 }
 
@@ -276,12 +271,19 @@ function normalizeDraft(draft: ChannelDraft): ChannelDraft {
     ...draft,
     name: draft.name.trim(),
     config: normalizedConfig,
+    replyLanguage: draft.replyLanguage,
     tools: { ...draft.tools },
     permissions: {
       ...draft.permissions,
       readablePathPrefixes: normalizedPrefixes,
     },
     persona: draft.persona,
+    promptInjections: {
+      capabilityContext: {
+        ...draft.promptInjections.capabilityContext,
+        toolGroups: { ...draft.promptInjections.capabilityContext.toolGroups },
+      },
+    },
     subscriptions: normalizedSubscriptions,
   };
 }
@@ -331,9 +333,19 @@ function isDraftValid(draft: ChannelDraft, descriptor: ChannelTypeDescriptor | u
     return false;
   }
 
-  return (descriptor?.configSchema ?? []).every(
-    (field) => !field.required || Boolean(normalized.config[field.key]?.trim()),
-  );
+  return (descriptor?.configSchema ?? []).every((field) => {
+    const value = normalized.config[field.key];
+    if (field.required && !value?.trim()) {
+      return false;
+    }
+    if (field.key === 'memberAclJson') {
+      return validateMemberAclDocumentForSave(value ?? '');
+    }
+    if (field.key === 'requireMentionInGroup' && value) {
+      return TRUTHY_BOOLEAN_CONFIG_VALUES.has(value.trim().toLowerCase());
+    }
+    return true;
+  });
 }
 
 function buildAutoStartFailureMessage(channel: ChannelSettingsEntry): string {
@@ -347,6 +359,8 @@ export function ChannelSubscriptionSettings({
   descriptors,
   providers = [],
   personas = [],
+  capabilityCatalogCounts,
+  onResolveCapabilityCatalogCounts,
   onSave,
   onDelete,
   onConnect,
@@ -367,6 +381,8 @@ export function ChannelSubscriptionSettings({
   const [actionError, setActionError] = useState<string | null>(null);
   const [weixinQrCodeUrl, setWeixinQrCodeUrl] = useState('');
   const [weixinLoginMessage, setWeixinLoginMessage] = useState('');
+  const [resolvedCapabilityCatalogCounts, setResolvedCapabilityCatalogCounts] =
+    useState<ChannelCapabilityCatalogCounts | null>(capabilityCatalogCounts ?? null);
   const firstInputRef = useRef<HTMLInputElement | null>(null);
 
   const descriptorMap = useMemo(
@@ -448,6 +464,10 @@ export function ChannelSubscriptionSettings({
     };
   }, [creatingType, selectedChannel?.id]);
 
+  useEffect(() => {
+    setResolvedCapabilityCatalogCounts(capabilityCatalogCounts ?? null);
+  }, [capabilityCatalogCounts, creatingType, selectedChannel?.id]);
+
   const baselineDraft = useMemo(() => {
     if (creatingType) {
       const descriptor = descriptorMap.get(creatingType);
@@ -481,6 +501,44 @@ export function ChannelSubscriptionSettings({
       })),
     ];
   }, [activeDescriptor, draft.tools]);
+  const capabilityPreviewDraft = useMemo(
+    () => ({
+      type: draft.type,
+      channelLlmToolsEnabled: draft.channelLlmToolsEnabled,
+      tools: { ...draft.tools },
+      permissions: {
+        ...draft.permissions,
+        readablePathPrefixes: [...draft.permissions.readablePathPrefixes],
+      },
+    }),
+    [draft.channelLlmToolsEnabled, draft.permissions, draft.tools, draft.type],
+  );
+
+  useEffect(() => {
+    if (!onResolveCapabilityCatalogCounts) {
+      return;
+    }
+
+    let cancelled = false;
+    const timer = globalThis.setTimeout(() => {
+      void onResolveCapabilityCatalogCounts(capabilityPreviewDraft)
+        .then((counts) => {
+          if (!cancelled) {
+            setResolvedCapabilityCatalogCounts(counts);
+          }
+        })
+        .catch((error: unknown) => {
+          if (!cancelled) {
+            logger.warn('failed to resolve channel capability catalog counts', error);
+          }
+        });
+    }, 120);
+
+    return () => {
+      cancelled = true;
+      globalThis.clearTimeout(timer);
+    };
+  }, [capabilityPreviewDraft, onResolveCapabilityCatalogCounts]);
 
   const statusTone = selectedChannel
     ? getStatusTone(selectedChannel.status)
@@ -1010,58 +1068,38 @@ export function ChannelSubscriptionSettings({
                     <div className="channel-field__label">渠道模板</div>
                     <input value={activeDescriptor?.displayName ?? draft.type} disabled />
                   </div>
+                  <div className="channel-field">
+                    <div className="channel-field__label">回复语言</div>
+                    <select
+                      value={draft.replyLanguage}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          replyLanguage: event.target.value === 'en-US' ? 'en-US' : 'zh-CN',
+                        }))
+                      }
+                    >
+                      <option value="zh-CN">中文</option>
+                      <option value="en-US">English</option>
+                    </select>
+                  </div>
                 </div>
               </section>
 
-              <section className="channel-section">
-                <div className="channel-section__head">
-                  <div>
-                    <h4 className="channel-section__title">接入参数</h4>
-                    <div className="channel-muted">
-                      字段由 Gateway 的渠道描述符下发，和实际后端实现保持一致。
-                    </div>
-                  </div>
-                </div>
-                <div className="channel-section__body channel-grid-fields">
-                  {(activeDescriptor?.configSchema ?? []).map((field) => (
-                    <div key={field.key} className="channel-field">
-                      <div className="channel-field__label">
-                        {field.label}
-                        {field.required ? <span style={{ color: 'var(--danger)' }}>*</span> : null}
-                      </div>
-                      {field.description ? (
-                        <div className="channel-field__hint">{field.description}</div>
-                      ) : null}
-                      <div className="channel-field__input-wrap">
-                        <input
-                          type={
-                            field.type === 'secret' && !visibleSecrets[field.key]
-                              ? 'password'
-                              : 'text'
-                          }
-                          value={draft.config[field.key] ?? ''}
-                          onChange={(event) =>
-                            setDraft((current) => ({
-                              ...current,
-                              config: { ...current.config, [field.key]: event.target.value },
-                            }))
-                          }
-                          placeholder={field.placeholder}
-                        />
-                        {field.type === 'secret' ? (
-                          <button
-                            type="button"
-                            className="channel-field__secret-toggle"
-                            onClick={() => toggleSecret(field.key)}
-                          >
-                            {visibleSecrets[field.key] ? '隐藏' : '显示'}
-                          </button>
-                        ) : null}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
+              <ChannelAccessConfigSection
+                configSchema={activeDescriptor?.configSchema ?? []}
+                config={draft.config}
+                visibleSecrets={visibleSecrets}
+                onToggleSecret={toggleSecret}
+                onConfigChange={(key, value) =>
+                  setDraft((current) => ({
+                    ...current,
+                    config: { ...current.config, [key]: value },
+                  }))
+                }
+                toolOptions={toolOptions}
+                permissions={draft.permissions}
+              />
 
               {draft.type === 'weixin' ? (
                 <section className="channel-section">
@@ -1285,79 +1323,32 @@ export function ChannelSubscriptionSettings({
                 </div>
               </section>
 
-              <section className="channel-section">
-                <div className="channel-section__head">
-                  <div>
-                    <h4 className="channel-section__title">安全边界</h4>
-                    <div className="channel-muted">
-                      把工具权限显式写进通道配置，便于后续在执行链路中做强约束。
-                    </div>
-                  </div>
-                </div>
-                <div className="channel-section__body" style={{ display: 'grid', gap: 14 }}>
-                  <div className="channel-tool-grid">
-                    {PERMISSION_OPTIONS.map((option) => (
-                      <label key={option.key} className="channel-check-card">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(draft.permissions[option.key])}
-                          onChange={(event) => updatePermission(option.key, event.target.checked)}
-                        />
-                        <div>
-                          <div className="channel-check-card__title">{option.label}</div>
-                          <div className="channel-check-card__desc">{option.description}</div>
-                        </div>
-                      </label>
-                    ))}
-                  </div>
+              <ChannelPromptInjectionSection
+                channelLlmToolsEnabled={draft.channelLlmToolsEnabled}
+                descriptorTools={activeDescriptor?.tools}
+                tools={draft.tools}
+                permissions={draft.permissions}
+                promptInjections={draft.promptInjections}
+                capabilityCatalogCounts={resolvedCapabilityCatalogCounts ?? capabilityCatalogCounts}
+                onChange={(promptInjections) =>
+                  setDraft((current) => ({
+                    ...current,
+                    promptInjections,
+                  }))
+                }
+              />
 
-                  <div className="channel-field">
-                    <div className="channel-field__label">可读取路径前缀</div>
-                    <div className="channel-field__hint">
-                      当未开启"允许读取 Home"时，可通过这里补充精确白名单路径。
-                    </div>
-                    <div className="channel-path-entry">
-                      <input
-                        value={newReadPath}
-                        onChange={(event) => setNewReadPath(event.target.value)}
-                        onKeyDown={handleReadPathKeyDown}
-                        placeholder="/workspace 或 /home/user/project"
-                      />
-                      <button
-                        type="button"
-                        className="channel-button channel-button--ghost"
-                        onClick={addReadablePath}
-                      >
-                        添加路径
-                      </button>
-                    </div>
-                    <div className="channel-path-list">
-                      {draft.permissions.readablePathPrefixes.length === 0 ? (
-                        <span className="channel-mini-badge">暂未设置路径白名单</span>
-                      ) : (
-                        draft.permissions.readablePathPrefixes.map((prefix) => (
-                          <span key={prefix} className="channel-path-pill">
-                            {prefix}
-                            <button
-                              type="button"
-                              onClick={() =>
-                                updatePermission(
-                                  'readablePathPrefixes',
-                                  draft.permissions.readablePathPrefixes.filter(
-                                    (item) => item !== prefix,
-                                  ),
-                                )
-                              }
-                            >
-                              移除
-                            </button>
-                          </span>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </section>
+              <ChannelSecuritySection
+                permissions={draft.permissions}
+                newReadPath={newReadPath}
+                onNewReadPathChange={setNewReadPath}
+                onAddReadablePath={addReadablePath}
+                onReadPathKeyDown={handleReadPathKeyDown}
+                onBooleanPermissionChange={(key, value) => updatePermission(key, value)}
+                onReadablePathPrefixesChange={(value) =>
+                  updatePermission('readablePathPrefixes', value)
+                }
+              />
 
               <section className="channel-section">
                 <div className="channel-section__head">

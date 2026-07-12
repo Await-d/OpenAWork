@@ -7,6 +7,7 @@ import type {
   ChannelStreamingHandle,
   MessagingChannelService,
 } from './types.js';
+import { parseSlackInboundMessage } from './inbound-parsers/slack.js';
 
 type SlackApp = {
   start(port?: number): Promise<unknown>;
@@ -35,6 +36,9 @@ type SlackMessage = {
 };
 
 type SlackWebClient = {
+  auth: {
+    test(): Promise<{ user_id?: string }>;
+  };
   chat: {
     postMessage(args: {
       channel: string;
@@ -71,6 +75,7 @@ export class SlackChannelService implements MessagingChannelService {
   private running = false;
   private notify: (event: ChannelEvent) => void;
   private instance: ChannelInstance;
+  private botUserId: string | undefined;
 
   constructor(instance: ChannelInstance, notify: (event: ChannelEvent) => void) {
     this.pluginId = instance.id;
@@ -91,6 +96,7 @@ export class SlackChannelService implements MessagingChannelService {
       socketMode: Boolean(appToken),
       appToken,
     });
+    await this.resolveBotUserId();
     this.registerHandlers();
     await this.app.start(Number(this.instance.config['port'] ?? 3000));
     this.running = true;
@@ -170,6 +176,23 @@ export class SlackChannelService implements MessagingChannelService {
     return this.app.client;
   }
 
+  private async resolveBotUserId(): Promise<void> {
+    const configuredBotUserId = this.instance.config['botUserId']?.trim();
+    if (configuredBotUserId) {
+      this.botUserId = configuredBotUserId;
+      return;
+    }
+    try {
+      const result = await this.client().auth.test();
+      this.botUserId = result.user_id?.trim() || undefined;
+    } catch (error) {
+      console.warn(
+        `[slack] auth.test failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      this.botUserId = undefined;
+    }
+  }
+
   private toChannelMessage(m: SlackMessage, chatId: string): ChannelMessage {
     return {
       id: m.ts,
@@ -216,8 +239,11 @@ export class SlackChannelService implements MessagingChannelService {
     });
 
     this.app.message(/.*/, async ({ message }) => {
-      if (!message.user) return;
-      const msg = this.toChannelMessage(message, message.channel);
+      const msg = parseSlackInboundMessage(message, {
+        channel: this.instance,
+        botId: this.botUserId,
+      });
+      if (!msg) return;
       this.notify({ type: 'message', pluginId: this.pluginId, message: msg });
     });
   }

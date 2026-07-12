@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import type * as ChannelSessionStoreModule from '../../channels/channel-session-store.js';
 import type * as ChannelSessionsModule from '../../channels/channel-sessions.js';
 import type * as DbModule from '../../infra/db.js';
 import type * as MessageAdapterModule from '../../message/message-v2-adapter.js';
@@ -16,6 +17,7 @@ const CHANNEL_ID = 'channel-session-commands';
 const CHAT_ID = 'chat-1';
 
 let channelSessions: typeof ChannelSessionsModule;
+let channelSessionStore: typeof ChannelSessionStoreModule;
 let dbModule: typeof DbModule;
 let messageAdapter: typeof MessageAdapterModule;
 
@@ -26,6 +28,7 @@ function makeChannel(): ChannelInstance {
     name: 'Telegram 工程群',
     enabled: true,
     config: { token: 'redacted' },
+    replyLanguage: 'zh-CN',
     features: { autoReply: true, streamingReply: false, autoStart: false },
     persona: {
       resourceId: 'resource-soul-balanced-collaborator',
@@ -106,6 +109,7 @@ beforeAll(async () => {
   await dbModule.migrate();
   messageAdapter = await import('../../message/message-v2-adapter.js');
   channelSessions = await import('../../channels/channel-sessions.js');
+  channelSessionStore = await import('../../channels/channel-session-store.js');
 });
 
 beforeEach(() => {
@@ -127,7 +131,13 @@ describe('channel session commands', () => {
     const metadata = currentSessionMetadata();
 
     expect(metadata['source']).toBe('channel');
+    expect(metadata['replyLanguage']).toBe('zh-CN');
     expect(metadata['channelLlmToolsEnabled']).toBe(false);
+    expect(metadata['channel']).toEqual(
+      expect.objectContaining({
+        replyLanguage: 'zh-CN',
+      }),
+    );
   });
 
   it('重新保存 channel session 时保留显式 LLM tool opt-in', () => {
@@ -166,6 +176,120 @@ describe('channel session commands', () => {
     });
 
     expect(currentSessionMetadata()['channelLlmToolsEnabled']).toBe(true);
+  });
+
+  it('写入群成员 ACL 快照时会把 sender 身份、allowlist 与有效工具状态写入 metadata', () => {
+    channelSessionStore.upsertChannelSession({
+      actor: {
+        aclConfigured: true,
+        matched: true,
+        permissions: {
+          allowReadHome: false,
+          readablePathPrefixes: [],
+          allowWriteOutside: false,
+          allowShell: false,
+          allowSubAgents: false,
+        },
+        platformUserId: 'member-1',
+        senderName: 'Alice',
+        toolAllowlist: ['PluginReplyMessage', 'read'],
+        userId: 'workspace-user-1',
+        workspaceId: 'workspace-1',
+      },
+      chatId: CHAT_ID,
+      channel: {
+        ...makeChannel(),
+        channelLlmToolsEnabled: true,
+        permissions: {
+          allowReadHome: false,
+          readablePathPrefixes: [],
+          allowWriteOutside: false,
+          allowShell: true,
+          allowSubAgents: true,
+        },
+        tools: {
+          web_search: true,
+          read: true,
+          task: true,
+          PluginReplyMessage: true,
+        },
+      },
+      sessionKey: `channel:${CHANNEL_ID}:chat:${CHAT_ID}`,
+      userId: USER_ID,
+    });
+
+    const metadata = currentSessionMetadata();
+    expect(metadata['channelActor']).toEqual(
+      expect.objectContaining({
+        aclConfigured: true,
+        matched: true,
+        platformUserId: 'member-1',
+        senderName: 'Alice',
+        userId: 'workspace-user-1',
+        workspaceId: 'workspace-1',
+      }),
+    );
+    expect(metadata['channelToolAllowlist']).toEqual(['PluginReplyMessage', 'read']);
+    expect(metadata['webSearchEnabled']).toBe(false);
+    expect(metadata['taskToolEnabled']).toBe(false);
+  });
+
+  it('Given channel 配置声明 capability 注入开关 When 写入 channel session Then metadata 保留 promptInjections', () => {
+    channelSessions.getChannelUsageStats({
+      channel: {
+        ...makeChannel(),
+        promptInjections: {
+          capabilityContext: {
+            agents: false,
+            skills: true,
+            mcps: false,
+            tools: true,
+            toolGroups: {
+              web: true,
+              lsp: false,
+              files: true,
+              shell: false,
+              orchestration: true,
+              session: true,
+              mcp: false,
+              desktop: false,
+              repo: true,
+              channel: true,
+              other: true,
+            },
+            commands: false,
+          },
+        },
+      },
+      chatId: CHAT_ID,
+    });
+
+    expect(currentSessionMetadata()['channel']).toEqual(
+      expect.objectContaining({
+        promptInjections: expect.objectContaining({
+          capabilityContext: expect.objectContaining({
+            agents: false,
+            skills: true,
+            mcps: false,
+            tools: true,
+            toolGroups: expect.objectContaining({
+              web: true,
+              lsp: false,
+              files: true,
+              shell: false,
+              orchestration: true,
+              session: true,
+              mcp: false,
+              desktop: false,
+              repo: true,
+              channel: true,
+              other: true,
+            }),
+            commands: false,
+          }),
+        }),
+      }),
+    );
   });
 
   it('Given 旧 session 开过模型工具 When channel 配置显式关闭 Then metadata 同步关闭', () => {
@@ -251,10 +375,26 @@ describe('channel session commands', () => {
       chatId: CHAT_ID,
     });
 
-    expect(result.content).toContain('Total: 280 tokens');
-    expect(result.content).toContain('Input: 200');
-    expect(result.content).toContain('Output: 80');
-    expect(result.content).toContain('Assistant replies: 2');
+    expect(result.content).toContain('**用量统计**');
+    expect(result.content).toContain('**总览**');
+    expect(result.content).toContain('- 总计：`280 tokens`');
+    expect(result.content).toContain('- 输入：`200`');
+    expect(result.content).toContain('- 输出：`80`');
+    expect(result.content).toContain('- 助手回复数：`2`');
+  });
+
+  it('英文回复语言下统计信息返回英文', () => {
+    appendUserMessage(1);
+    appendAssistantMessage(1);
+
+    const result = channelSessions.getChannelUsageStats({
+      channel: { ...makeChannel(), replyLanguage: 'en-US' },
+      chatId: CHAT_ID,
+      replyLanguage: 'en-US',
+    });
+
+    expect(result.content).toContain('**Usage statistics**');
+    expect(result.content).toContain('- Total: `140 tokens`');
   });
 
   it('/new 清空当前 channel conversation 的消息历史', () => {
@@ -270,8 +410,20 @@ describe('channel session commands', () => {
       sessionId: currentSessionId(),
       userId: USER_ID,
     });
-    expect(result.content).toContain('Session cleared');
+    expect(result.content).toContain('**新对话**');
+    expect(result.content).toContain('- 状态：`已清空当前会话`');
     expect(messages).toHaveLength(0);
+  });
+
+  it('英文回复语言下 /new 返回英文文案', () => {
+    const result = channelSessions.resetChannelConversation({
+      channel: { ...makeChannel(), replyLanguage: 'en-US' },
+      chatId: CHAT_ID,
+      replyLanguage: 'en-US',
+    });
+
+    expect(result.content).toContain('**New session**');
+    expect(result.content).toContain('- Status: `session cleared`');
   });
 
   it('/compress 为当前 channel conversation 写入压缩标记', async () => {
@@ -289,7 +441,25 @@ describe('channel session commands', () => {
       sessionId: currentSessionId(),
       userId: USER_ID,
     });
-    expect(result.content).toContain('Context compressed');
+    expect(result.content).toContain('**上下文压缩**');
+    expect(result.content).toContain('**已完成**');
+    expect(result.content).toContain('整理消息');
     expect(messages.length).toBeGreaterThan(8);
+  });
+
+  it('英文回复语言下 /compress 返回英文文案', async () => {
+    for (let index = 1; index <= 4; index += 1) {
+      appendUserMessage(index);
+      appendAssistantMessage(index);
+    }
+
+    const result = await channelSessions.compactChannelConversation({
+      channel: { ...makeChannel(), replyLanguage: 'en-US' },
+      chatId: CHAT_ID,
+      replyLanguage: 'en-US',
+    });
+
+    expect(result.content).toContain('**Context compression**');
+    expect(result.content).toContain('- Messages cleaned: `');
   });
 });

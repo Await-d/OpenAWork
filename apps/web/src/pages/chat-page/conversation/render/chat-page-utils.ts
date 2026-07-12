@@ -10,6 +10,7 @@ import type {
   ReasoningEffort,
 } from '../../../../components/conversation-runtime/messages/support.js';
 import type { DialogueMode } from '../../mode/dialogue-mode.js';
+import type { ModelSelectionSource } from '../settings/model-selection-source.js';
 import type {
   SessionStateStatus,
   SessionTodoItem,
@@ -88,6 +89,7 @@ export function createSessionMetadataSnapshot(metadata: {
   agentId?: string;
   dialogueMode?: DialogueMode;
   modelId?: string;
+  modelSelectionSource?: ModelSelectionSource | null;
   providerId?: string;
   reasoningEffort?: ReasoningEffort;
   thinkingEnabled?: boolean;
@@ -106,6 +108,10 @@ export function createSessionMetadataSnapshot(metadata: {
   if (providerId) snapshot['providerId'] = providerId;
   const modelId = metadata.modelId?.trim();
   if (modelId) snapshot['modelId'] = modelId;
+  const modelSelectionSource = metadata.modelSelectionSource?.trim();
+  if (providerId && modelId && modelSelectionSource) {
+    snapshot['modelSelectionSource'] = modelSelectionSource;
+  }
   const workingDirectory = metadata.workingDirectory?.trim();
   if (workingDirectory) snapshot['workingDirectory'] = workingDirectory;
   const agentId = metadata.agentId?.trim();

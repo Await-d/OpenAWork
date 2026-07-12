@@ -87,7 +87,8 @@ describe('channel /init command', () => {
 
     await pipeline.handle(messageEvent('channel-init-1', '/init keep existing voice notes'));
 
-    expect(service.sentMessages[0]?.content).toContain('Initializing workspace memory templates');
+    expect(service.sentMessages[0]?.content).toContain('**初始化工作区记忆**');
+    expect(service.sentMessages[0]?.content).toContain('目标文件');
     expect(agentMessages).toHaveLength(1);
     expect(agentMessages[0]).toContain('AGENTS.md');
     expect(agentMessages[0]).toContain('SOUL.md');

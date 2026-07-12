@@ -60,4 +60,21 @@ describe('FusionSidebar 展开 Panel', () => {
     });
     expect(getFusionSidebarMocks().preloadRouteModuleByPath).toHaveBeenCalledWith('/team');
   });
+
+  it('团队没有工作区或会话时仍展示团队分区', () => {
+    getFusionSidebarMocks().useTeamSidebarSessions.mockReturnValue({
+      error: null,
+      loading: false,
+      refresh: () => undefined,
+      sessions: [],
+      workspaceGroups: [],
+      workspaces: [],
+    });
+
+    renderFusionSidebar('/chat/open-session');
+
+    expect(screen.getByText('团队工作空间')).not.toBeNull();
+    expect(screen.getByText('暂无团队工作空间')).not.toBeNull();
+    expect(screen.getByTitle('新建团队工作区')).not.toBeNull();
+  });
 });

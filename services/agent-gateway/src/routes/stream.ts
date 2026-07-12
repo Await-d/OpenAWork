@@ -92,6 +92,7 @@ import { parseSessionMetadataJson } from '../session/session-workspace-metadata.
 import { validateWorkspacePath } from '../workspace/workspace-paths.js';
 import { resolveSessionWorkspacePath } from '../session/session-workspace-resolution.js';
 import { filterEnabledGatewayToolsForSession } from '../session/session-tool-visibility.js';
+import { resolveSessionRuntimePolicy } from '../session/session-runtime-policy.js';
 import { resolveCanonicalName } from '../claude-code/claude-code-tool-surface.js';
 import {
   clearInFlightStreamRequest,
@@ -499,7 +500,7 @@ export function isWebSearchEnabled(metadataJson: string): boolean {
   }
 }
 
-const reasoningEffortSchema = z.enum(['minimal', 'low', 'medium', 'high', 'xhigh']);
+const reasoningEffortSchema = z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 
 const inputImagePartSchema = z
   .object({
@@ -1173,6 +1174,11 @@ function normalizeRequestedAgentId(value: string | undefined): string | undefine
   return normalized && normalized.length > 0 ? normalized : undefined;
 }
 
+function normalizeRequestedProviderId(providerId: string | undefined): string | undefined {
+  const normalized = providerId?.trim();
+  return normalized && normalized.length > 0 ? normalized : undefined;
+}
+
 function normalizeManagedAgentIdentifier(value: string): string {
   return value.trim().toLowerCase();
 }
@@ -1295,7 +1301,14 @@ export async function resolveStreamModelRoute(input: {
     requestedAgentId: input.requestData.agentId,
     userId: input.userId,
   });
+  const requestedProviderId = normalizeRequestedProviderId(input.requestData.providerId);
   const requestedModelId = normalizeRequestedModelId(input.requestData.model);
+  const echoedSessionProviderId = normalizeRequestedProviderId(sessionSelection.providerId);
+  const echoedSessionModelId = normalizeRequestedModelId(sessionSelection.modelId);
+  const hasExplicitProviderOverride =
+    requestedProviderId !== undefined && requestedProviderId !== echoedSessionProviderId;
+  const hasExplicitModelOverride =
+    requestedModelId !== undefined && requestedModelId !== echoedSessionModelId;
   const hasAuthoritativeTeamModel =
     (isTeamRoleLayer(input.roleLayer) || hasTeamDefinition(input.metadataJson)) &&
     Boolean(sessionSelection.providerId && sessionSelection.modelId);
@@ -1311,9 +1324,7 @@ export async function resolveStreamModelRoute(input: {
     providerId:
       hasAuthoritativeTeamModel && sessionSelection.providerId
         ? sessionSelection.providerId
-        : (input.requestData.providerId ??
-          agentSelection.providerId ??
-          sessionSelection.providerId),
+        : (requestedProviderId ?? agentSelection.providerId ?? sessionSelection.providerId),
     variant:
       hasAuthoritativeTeamModel && sessionSelection.variant
         ? sessionSelection.variant
@@ -1334,6 +1345,30 @@ export async function resolveStreamModelRoute(input: {
         ? (sessionSelection.reasoningEffort as StreamRequest['reasoningEffort'])
         : input.requestData.reasoningEffort,
   };
+  // When Fast is enabled (user toggled it on in the model settings popover),
+  // use the fast provider+model for the main conversation stream too — not
+  // just title generation. This only applies when the request doesn't
+  // explicitly specify a provider/model and there's no team template binding.
+  const useFastForChat =
+    !hasAuthoritativeTeamModel &&
+    !hasExplicitProviderOverride &&
+    !hasExplicitModelOverride &&
+    !agentSelection.providerId;
+
+  if (useFastForChat) {
+    const fastConfig = await getFastProvider(input.userId);
+    if (fastConfig) {
+      return {
+        ...agentSelection,
+        ...resolveModelRouteFromProvider(
+          fastConfig.provider,
+          fastConfig.modelId,
+          resolvedRequestData,
+        ),
+      };
+    }
+  }
+
   const providerConfig = await getProviderForSelection(
     input.userId,
     {
@@ -1954,11 +1989,15 @@ export async function handleStreamRequest(input: {
     metadataJson: input.sessionContext.metadataJson,
     requestData,
   });
+  const sessionMeta = parseSessionMetadataJson(input.sessionContext.metadataJson);
+  const runtimePolicy = resolveSessionRuntimePolicy(sessionMeta);
   const companionPrompt = buildCompanionPrompt(
     loadCompanionSettingsForUser(input.user.sub, input.user.email, requestData.agentId),
     userVisibleMessage,
   );
-  const capabilityContext = buildCapabilityContext(input.user.sub, input.sessionId);
+  const capabilityContext = runtimePolicy.includeCapabilityContext
+    ? buildCapabilityContext(input.user.sub, input.sessionId)
+    : null;
   // Dynamic agent prompt (oh-my-opencode dynamic-agent-prompt-builder pattern):
   // For orchestrator agents (sisyphus, atlas, zeus), inject delegation table,
   // tool selection table, key triggers, and agent-specific sections.
@@ -1973,7 +2012,6 @@ export async function handleStreamRequest(input: {
   // Start-work (oh-my-opencode start-work pattern):
   // Detect "ultrawork/ulw" keyword and inject plan context + create boulder state.
   let startWorkContext: string | null = null;
-  const sessionMeta = parseSessionMetadataJson(input.sessionContext.metadataJson);
   const workspaceRootForStartWork =
     resolveSessionWorkspacePath({
       metadataJson: input.sessionContext.metadataJson,
@@ -1991,10 +2029,11 @@ export async function handleStreamRequest(input: {
   // Command templates (oh-my-opencode builtin-commands pattern):
   // Detect active command context from session metadata and inject workflow instructions.
   const commandContext = detectActiveCommandContext(input.sessionContext.metadataJson);
-  const lspGuidance =
-    interactionModes.dialogueMode === 'clarify'
+  const lspGuidance = runtimePolicy.includeLspGuidance
+    ? interactionModes.dialogueMode === 'clarify'
       ? CLARIFY_LSP_TOOL_GUIDANCE_SYSTEM_PROMPT
-      : LSP_TOOL_GUIDANCE_SYSTEM_PROMPT;
+      : LSP_TOOL_GUIDANCE_SYSTEM_PROMPT
+    : null;
   const hasExplicitAgent = !!route.effectiveAgentId;
   const dialogueModePrompt =
     !hasExplicitAgent && interactionModes.dialogueMode !== undefined
@@ -2240,15 +2279,17 @@ export async function handleStreamRequest(input: {
 
       // Dynamic tool loading: scan workspace {tool,tools}/*.{js,ts} for custom tools
       let dynamicToolDefs: DynamicToolEntry[] = [];
-      try {
-        dynamicToolDefs = await loadDynamicToolsForWorkspace(
-          workspaceRootForStartWork,
-          input.sessionId,
-        );
-      } catch (err) {
-        console.warn(
-          `[stream] Failed to load dynamic tools: ${err instanceof Error ? err.message : String(err)}`,
-        );
+      if (runtimePolicy.includeDynamicWorkspaceTools) {
+        try {
+          dynamicToolDefs = await loadDynamicToolsForWorkspace(
+            workspaceRootForStartWork,
+            input.sessionId,
+          );
+        } catch (err) {
+          console.warn(
+            `[stream] Failed to load dynamic tools: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
       }
 
       const effectiveSkills = getEffectiveSkillsFromSessionContext({
@@ -2267,33 +2308,36 @@ export async function handleStreamRequest(input: {
       // so that mid-session pinning by the user does NOT leak into this
       // session: `applyPinnedSnapshot` reads an empty snapshot as "session
       // started without pinned, suppress any newly pinned entries".
-      let pinnedSnapshot: PinnedSkillsSnapshot | null =
-        (sessionMeta['pinnedSkillsSnapshot'] as PinnedSkillsSnapshot | undefined) ?? null;
-      if (!pinnedSnapshot) {
-        const captured = snapshotFromEffective(effectiveSkills);
-        pinnedSnapshot = captured;
-        // Persist back to sessions.metadata_json so subsequent turns and
-        // any replay path reads the same list. Re-read the row first to
-        // avoid clobbering metadata mutations made between read and write.
-        const sessionRowForSnapshot = sqliteGet<{ metadata_json: string }>(
-          'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ?',
-          [input.sessionId, input.user.sub],
-        );
-        const currentMetadata = sessionRowForSnapshot
-          ? parseSessionMetadataJson(sessionRowForSnapshot.metadata_json)
-          : {};
-        currentMetadata['pinnedSkillsSnapshot'] = captured;
-        sqliteRun('UPDATE sessions SET metadata_json = ? WHERE id = ? AND user_id = ?', [
-          JSON.stringify(currentMetadata),
-          input.sessionId,
-          input.user.sub,
-        ]);
-      }
+      let pinnedSkillsPrompt: string | null = null;
+      if (runtimePolicy.includePinnedSkillsPrompt) {
+        let pinnedSnapshot: PinnedSkillsSnapshot | null =
+          (sessionMeta['pinnedSkillsSnapshot'] as PinnedSkillsSnapshot | undefined) ?? null;
+        if (!pinnedSnapshot) {
+          const captured = snapshotFromEffective(effectiveSkills);
+          pinnedSnapshot = captured;
+          // Persist back to sessions.metadata_json so subsequent turns and
+          // any replay path reads the same list. Re-read the row first to
+          // avoid clobbering metadata mutations made between read and write.
+          const sessionRowForSnapshot = sqliteGet<{ metadata_json: string }>(
+            'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ?',
+            [input.sessionId, input.user.sub],
+          );
+          const currentMetadata = sessionRowForSnapshot
+            ? parseSessionMetadataJson(sessionRowForSnapshot.metadata_json)
+            : {};
+          currentMetadata['pinnedSkillsSnapshot'] = captured;
+          sqliteRun('UPDATE sessions SET metadata_json = ? WHERE id = ? AND user_id = ?', [
+            JSON.stringify(currentMetadata),
+            input.sessionId,
+            input.user.sub,
+          ]);
+        }
 
-      const pinnedSection = buildPinnedSkillsPromptSection(
-        applyPinnedSnapshot(effectiveSkills, pinnedSnapshot),
-      );
-      const pinnedSkillsPrompt = pinnedSection.section;
+        const pinnedSection = buildPinnedSkillsPromptSection(
+          applyPinnedSnapshot(effectiveSkills, pinnedSnapshot),
+        );
+        pinnedSkillsPrompt = pinnedSection.section;
+      }
 
       const baseTools = filterPluginControlledToolsForUser(
         getEnabledTools(webSearchEnabled, {
@@ -2320,12 +2364,13 @@ export async function handleStreamRequest(input: {
       // — MCP outages must NOT block the assistant turn.
       let flatMcpDefs: ReturnType<typeof buildFlatMcpToolDefinitions>['definitions'] = [];
       const flatModeOn = !isFlatMcpToolsDisabled();
-      if (flatModeOn) {
+      const flatMcpToolDefinitionsEnabled =
+        flatModeOn && runtimePolicy.includeFlatMcpToolDefinitions;
+      if (flatMcpToolDefinitionsEnabled) {
         try {
           // 模板初始 MCP 绑定：会话 metadata 里的 requestedMcpServers 作为白名单。
-          const mcpMeta = parseSessionMetadataJson(input.sessionContext.metadataJson);
-          const allowedMcp = Array.isArray(mcpMeta['requestedMcpServers'])
-            ? (mcpMeta['requestedMcpServers'] as unknown[]).filter(
+          const allowedMcp = Array.isArray(sessionMeta['requestedMcpServers'])
+            ? (sessionMeta['requestedMcpServers'] as unknown[]).filter(
                 (v): v is string => typeof v === 'string' && v.length > 0,
               )
             : [];
@@ -2368,7 +2413,7 @@ export async function handleStreamRequest(input: {
       //   - When flat mode is OFF: leave the wrappers in place — sites
       //     that opted out via `OPENAWORK_DISABLE_MCP_FLAT_TOOLS=1`
       //     continue with the pre-PR-C contract.
-      const baseToolsForTurn = flatModeOn
+      const baseToolsForTurn = flatMcpToolDefinitionsEnabled
         ? baseTools.filter(
             (tool) => tool.function.name !== 'mcp_list_tools' && tool.function.name !== 'mcp_call',
           )
@@ -2577,6 +2622,7 @@ export async function handleStreamRequest(input: {
           startWorkContext,
           commandContext: commandContext?.instruction ?? null,
           pinnedSkillsPrompt,
+          flatMcpToolsEnabled: flatMcpToolDefinitionsEnabled,
           teamInstructionStack,
           teamResumePrompt,
           teamStatusPrompt,

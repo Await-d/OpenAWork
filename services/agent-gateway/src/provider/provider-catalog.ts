@@ -181,12 +181,22 @@ export async function getChatProvider(userId: string) {
 }
 
 /**
- * 获取 fast provider 配置
+ * 获取 fast provider 配置。
+ * 当用户未显式配置 fast（providerId/modelId 为空）时返回 null，
+ * 让调用方回退到 chat route 而不是强制使用 fallback 的 fast 模型。
  */
 export async function getFastProvider(userId: string) {
   const catalog = await getCatalog(userId);
-  const { provider, model } = catalog.manager.getFastProviderConfig();
-  return { provider, modelId: model.id };
+  const active = catalog.activeSelection;
+  if (!active?.fast?.providerId || !active?.fast?.modelId) {
+    return null;
+  }
+  try {
+    const { provider, model } = catalog.manager.getFastProviderConfig();
+    return { provider, modelId: model.id };
+  } catch {
+    return null;
+  }
 }
 
 interface ProviderSelectionOptions {

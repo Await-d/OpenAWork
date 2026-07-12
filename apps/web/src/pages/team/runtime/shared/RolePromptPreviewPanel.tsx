@@ -107,7 +107,7 @@ const OVERLAY_STYLE: CSSProperties = {
   flexDirection: 'column',
   background: 'color-mix(in srgb, var(--bg-overlay) 97%, var(--bg-base))',
   borderLeft: `1px solid ${CK_BORDER}`,
-  boxShadow: '-8px 0 32px rgba(0,0,0,0.18)',
+  boxShadow: 'var(--shadow-lg)',
   animation: 'role-prompt-slide-in 180ms cubic-bezier(0.22, 1, 0.36, 1)',
 };
 
@@ -593,7 +593,7 @@ function EditView({
             ...BTN_STYLE,
             border: 'none',
             background: 'var(--accent)',
-            color: '#fff',
+            color: 'var(--fg-on-accent)',
             fontWeight: 800,
             cursor: canSave ? 'pointer' : 'not-allowed',
             opacity: canSave ? 1 : 0.6,

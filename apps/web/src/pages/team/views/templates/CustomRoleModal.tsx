@@ -223,7 +223,7 @@ export function CustomRoleModal({
       style={{
         position: 'fixed',
         inset: 0,
-        background: 'rgba(0,0,0,0.45)',
+        background: 'color-mix(in srgb, var(--bg-base) 55%, transparent)',
         display: 'grid',
         placeItems: 'center',
         zIndex: 10000,
@@ -239,7 +239,7 @@ export function CustomRoleModal({
           maxHeight: '88vh',
           display: 'grid',
           gridTemplateRows: 'auto 1fr auto',
-          boxShadow: '0 16px 48px rgba(0,0,0,0.4)',
+          boxShadow: 'var(--shadow-lg)',
           border: '1px solid var(--border-default)',
           overflow: 'hidden',
         }}
@@ -602,7 +602,7 @@ export function CustomRoleModal({
               appearance: 'none',
               border: 'none',
               background: 'var(--accent)',
-              color: '#fff',
+              color: 'var(--fg-on-accent)',
               fontSize: 12,
               fontWeight: 800,
               padding: '8px 20px',

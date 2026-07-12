@@ -2,6 +2,24 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { refreshAccessToken as apiRefreshToken } from '@openAwork/web-client';
 
+/**
+ * 根据当前浏览器地址动态计算默认 Gateway 地址。
+ * - 浏览器端口为 5173（Vite 默认开发端口）时，Gateway 默认端口 3000；
+ * - 浏览器端口非 5173 时（如生产部署或自定义端口），Gateway 默认端口与浏览器端口保持一致。
+ * - 非 browser 环境（SSR / Tauri）回退到 http://localhost:3000。
+ */
+function getDefaultGatewayUrl(): string {
+  if (typeof window === 'undefined' || !window.location) {
+    return 'http://localhost:3000';
+  }
+  const { port, protocol } = window.location;
+  const isViteDevPort = port === '5173';
+  if (isViteDevPort) {
+    return 'http://localhost:3000';
+  }
+  return `${protocol}//${window.location.hostname}:${port}`;
+}
+
 interface AuthState {
   accessToken: string | null;
   refreshToken: string | null;
@@ -41,7 +59,7 @@ export const useAuthStore = create<AuthState>()(
       refreshToken: null,
       tokenExpiresAt: null,
       email: null,
-      gatewayUrl: 'http://localhost:3000',
+      gatewayUrl: getDefaultGatewayUrl(),
       webAccessEnabled: false,
       webPort: 3000,
       webExposeLan: false,

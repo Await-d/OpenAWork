@@ -251,7 +251,7 @@ export function PromptSnippetsPanel({
           background: 'var(--bg-overlay)',
           border: '1px solid var(--border-default)',
           borderRadius: 12,
-          boxShadow: '0 12px 40px rgba(15, 23, 42, 0.35)',
+          boxShadow: 'var(--shadow-lg)',
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
@@ -452,7 +452,7 @@ export function PromptSnippetsPanel({
                             type="button"
                             onClick={() => void handleDeleteSnippet(s.id)}
                             title="删除"
-                            style={{ ...smallBtnStyle, color: 'var(--danger, #ef4444)' }}
+                            style={{ ...smallBtnStyle, color: 'var(--danger)' }}
                           >
                             ✕
                           </button>
@@ -651,8 +651,8 @@ function FormSection({
             onClick={onDelete}
             style={{
               ...actionBtnStyle,
-              color: 'var(--danger, #ef4444)',
-              border: '1px solid color-mix(in srgb, var(--danger, #ef4444) 30%, transparent)',
+              color: 'var(--danger)',
+              border: '1px solid var(--danger-border)',
               marginRight: 'auto',
             }}
           >
@@ -669,7 +669,7 @@ function FormSection({
           style={{
             ...actionBtnStyle,
             background: 'var(--accent)',
-            color: 'var(--fg-on-accent, #fff)',
+            color: 'var(--fg-on-accent)',
             border: 'none',
             opacity: confirmDisabled ? 0.5 : 1,
             cursor: confirmDisabled ? 'not-allowed' : 'pointer',

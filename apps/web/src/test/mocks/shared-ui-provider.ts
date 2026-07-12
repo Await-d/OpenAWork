@@ -70,7 +70,8 @@ export function inferProviderLabelFromModelId(_modelId: string): string | undefi
   return undefined;
 }
 
-export type SupportedReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+export type SupportedReasoningEffort =
+  'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 const OPENAI_REASONING_MODEL_RE = /(?:^|\/)(?:gpt-5(?:[.-]|$)|o[134](?:[.-]|$))/;
 
@@ -171,14 +172,20 @@ export function getSupportedReasoningEffortsForModel(
   const effectiveType = resolveEffectiveProviderType(providerType, modelId);
   if (effectiveType === 'openai') {
     if (/^gpt-5(?:\.\d+)?-pro/.test(id)) return [];
+    if (/^gpt-5\.6\b/.test(id)) return ['none', 'low', 'medium', 'high', 'max'];
+    if (/^gpt-5\.5\b/.test(id)) return ['none', 'low', 'medium', 'high', 'xhigh'];
     if (id.includes('codex-max')) return ['medium', 'high', 'xhigh'];
     if (id === 'gpt-5' || id.startsWith('gpt-5-')) return ['minimal', 'low', 'medium', 'high'];
     return ['low', 'medium', 'high'];
   }
-  if (['anthropic', 'claude', 'gemini', 'openrouter', 'deepseek', 'qwen'].includes(effectiveType)) {
+  if (['anthropic', 'claude'].includes(effectiveType)) {
+    return ['low', 'medium', 'high', 'xhigh'];
+  }
+  if (['gemini', 'openrouter', 'deepseek', 'qwen'].includes(effectiveType)) {
     return ['minimal', 'low', 'medium', 'high', 'xhigh'];
   }
-  if (effectiveType === 'moonshot' || effectiveType === 'mimo') return ['medium'];
+  if (effectiveType === 'mimo') return ['low', 'medium', 'high'];
+  if (effectiveType === 'moonshot') return ['medium'];
   return ['low', 'medium', 'high'];
 }
 

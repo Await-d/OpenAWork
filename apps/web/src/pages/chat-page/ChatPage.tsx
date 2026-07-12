@@ -250,6 +250,12 @@ import { useSessionContentArtifactCount } from './conversation/snapshot/use-sess
 import { useSessionTerminals } from '../../components/conversation-runtime/terminals/use-session-terminals.js';
 import { detectTerminalDevServer } from './conversation/render/detect-terminal-dev-server.js';
 import { useSessionSettingsCallbacks } from './conversation/settings/use-session-settings-callbacks.js';
+import {
+  resolveModelSelectionSourceFromMetadata,
+  shouldAdoptSessionModelSelectionDefaults,
+  shouldSendExplicitStreamModelSelection,
+  type ModelSelectionSource,
+} from './conversation/settings/model-selection-source.js';
 import { useSessionSidebarRunState } from './conversation/snapshot/use-session-sidebar-run-state.js';
 import { useSessionSnapshotLoader } from './conversation/snapshot/use-session-snapshot-loader.js';
 import { type SessionArtifactsResponse } from '../artifacts/workspace/artifact-workspace-types.js';
@@ -375,6 +381,7 @@ export default function ChatPage() {
   const [activeModelId, setActiveModelId] = useState<string>('');
   const currentUserEmail = useAuthStore((s) => s.email) ?? '';
   const [providers, setProviders] = useState<ChatSettingsProvider[]>([]);
+  const [fastEnabled, setFastEnabled] = useState(false);
   const [input, setInput] = useState('');
   const [companionComposerActivity, setCompanionComposerActivity] =
     useState<UnifiedComposerActivity>({
@@ -538,6 +545,7 @@ export default function ChatPage() {
   const [sessionModesHydrated, setSessionModesHydrated] = useState(false);
   const [sessionMetadataDirty, setSessionMetadataDirty] = useState(false);
   const [workspaceFileItems, setWorkspaceFileItems] = useState<WorkspaceFileMentionItem[]>([]);
+  const sessionModelSelectionSourceRef = useRef<ModelSelectionSource | null>(null);
 
   // ─── Enhanced chat operations state ───────────────────────────────────────
   const [showTemplatePanel, setShowTemplatePanel] = useState(false);
@@ -1045,10 +1053,16 @@ export default function ChatPage() {
       defaults,
       imageDefaults,
       providers: loadedProviders,
+      fastSelection: loadedFastSelection,
     } = await loadSavedChatSessionDefaults(gatewayUrl, token);
     savedChatDefaultsRef.current = defaults;
 
-    return { defaults, imageDefaults, providers: loadedProviders };
+    return {
+      defaults,
+      imageDefaults,
+      providers: loadedProviders,
+      fastSelection: loadedFastSelection,
+    };
   }, [gatewayUrl, token]);
 
   useEffect(() => {
@@ -1121,7 +1135,17 @@ export default function ChatPage() {
           return;
         }
 
-        const { defaults, imageDefaults, providers: loadedProviders } = loaded;
+        const {
+          defaults,
+          imageDefaults,
+          providers: loadedProviders,
+          fastSelection: loadedFastSelection,
+        } = loaded;
+        setFastEnabled(
+          Boolean(
+            loadedFastSelection && loadedFastSelection.providerId && loadedFastSelection.modelId,
+          ),
+        );
 
         setActiveProviderId((prev) => {
           const normalizedPrev = prev.trim();
@@ -1155,6 +1179,29 @@ export default function ChatPage() {
       })
       .catch(() => null);
   }, [applySavedImageDefaults, loadSavedChatDefaults, sessionId, token]);
+
+  useEffect(() => {
+    const savedDefaults = savedChatDefaultsRef.current;
+    if (!savedDefaults || !sessionModesHydrated) {
+      return;
+    }
+
+    if (
+      !shouldAdoptSessionModelSelectionDefaults({
+        sessionId,
+        source: sessionModelSelectionSourceRef.current,
+        defaultProviderId: savedDefaults.providerId,
+        defaultModelId: savedDefaults.modelId,
+      })
+    ) {
+      return;
+    }
+
+    sessionModelSelectionSourceRef.current = 'defaults';
+    setActiveProviderId((prev) => prev.trim() || savedDefaults.providerId);
+    setActiveModelId((prev) => prev.trim() || savedDefaults.modelId);
+    markSessionMetadataDirty();
+  }, [markSessionMetadataDirty, sessionId, sessionModesHydrated]);
 
   const { loadSessionRuntimeSnapshot, syncRecoveredStreamSnapshot, loadCurrentSessionSnapshot } =
     useSessionSnapshotLoader(
@@ -1641,6 +1688,7 @@ export default function ChatPage() {
     setIsSessionSnapshotReady(false);
     setSessionModesHydrated(false);
     setSessionMetadataDirty(false);
+    sessionModelSelectionSourceRef.current = null;
     lastPersistedSessionMetadataSnapshotRef.current = null;
     resetStreamState();
     setStreamError(null);
@@ -1742,6 +1790,10 @@ export default function ChatPage() {
               setReasoningEffort(metadata.reasoningEffort);
               setActiveProviderId(metadata.providerId ?? '');
               setActiveModelId(metadata.modelId ?? '');
+              sessionModelSelectionSourceRef.current = resolveModelSelectionSourceFromMetadata({
+                providerId: metadata.providerId,
+                modelId: metadata.modelId,
+              });
             }
             lastPersistedSessionMetadataSnapshotRef.current = createSessionMetadataSnapshot({
               dialogueMode: metadata.dialogueMode,
@@ -1919,6 +1971,12 @@ export default function ChatPage() {
           return;
         }
         lastPersistedSessionMetadataSnapshotRef.current = nextSnapshot;
+        sessionModelSelectionSourceRef.current = resolveModelSelectionSourceFromMetadata({
+          providerId:
+            typeof nextMetadata['providerId'] === 'string' ? nextMetadata['providerId'] : undefined,
+          modelId:
+            typeof nextMetadata['modelId'] === 'string' ? nextMetadata['modelId'] : undefined,
+        });
         clearSessionMetadataDirty();
         requestSessionListRefresh();
       })
@@ -2157,6 +2215,10 @@ export default function ChatPage() {
 
     lastPersistedSessionMetadataSnapshotRef.current =
       createSessionMetadataSnapshot(resolvedMetadata);
+    sessionModelSelectionSourceRef.current = resolveModelSelectionSourceFromMetadata({
+      providerId: resolvedProviderId,
+      modelId: resolvedModelId,
+    });
     activateSessionView(session.id);
     pendingBootstrapSessionRef.current = session.id;
     setCurrentSessionId(session.id);
@@ -2441,6 +2503,9 @@ export default function ChatPage() {
     const liveToolCalls = new Map<string, LiveToolCallState>();
     const requestProviderId = activeProviderId || undefined;
     const requestModelLabel = (activeModelOption?.label ?? activeModelId) || undefined;
+    const shouldSendExplicitSelection = shouldSendExplicitStreamModelSelection(
+      sessionModelSelectionSourceRef.current,
+    );
     const requestAgentId = effectiveAgentId || undefined;
 
     const buildAssistantTraceMessage = (
@@ -2508,6 +2573,7 @@ export default function ChatPage() {
     let toolPanelRevealed = false;
     let pausedForPermission = false;
     let pausedForQuestion = false;
+    let latestRoundUpstreamSummary: UpstreamStreamSummary | null = null;
     let currentRoundStartedAt = requestStartedAt;
     let firstTokenLatencyAttached = false;
 
@@ -2576,8 +2642,8 @@ export default function ChatPage() {
       agentId: effectiveAgentId,
       dialogueMode,
       displayMessage: displayMessageForStream,
-      model: activeModelId || 'default',
-      ...(activeProviderId ? { providerId: activeProviderId } : {}),
+      model: shouldSendExplicitSelection ? activeModelId || 'default' : 'default',
+      ...(shouldSendExplicitSelection && activeProviderId ? { providerId: activeProviderId } : {}),
       thinkingEnabled: resolvedThinkingRequest.thinkingEnabled,
       reasoningEffort: resolvedThinkingRequest.reasoningEffort,
       webSearchEnabled,
@@ -2586,6 +2652,11 @@ export default function ChatPage() {
       onEvent: (event) => {
         if (activeSessionRef.current !== sid) {
           return;
+        }
+
+        if ((event.type === 'done' || event.type === 'error') && event.upstreamSummary) {
+          latestRoundUpstreamSummary = event.upstreamSummary;
+          setLatestUpstreamSummary(event.upstreamSummary);
         }
 
         if (event.type === 'tool_call_delta') {
@@ -2922,8 +2993,10 @@ export default function ChatPage() {
           requestSessionListRefresh();
           return;
         }
-        if (upstreamSummary) {
-          setLatestUpstreamSummary(upstreamSummary);
+        const resolvedUpstreamSummary = upstreamSummary ?? latestRoundUpstreamSummary;
+        if (resolvedUpstreamSummary) {
+          latestRoundUpstreamSummary = resolvedUpstreamSummary;
+          setLatestUpstreamSummary(resolvedUpstreamSummary);
         }
         const finishedAt = Date.now();
         const resolvedStopReason = stopReason ?? 'end_turn';
@@ -2971,6 +3044,8 @@ export default function ChatPage() {
             : isPausedForPermission
               ? 'paused'
               : 'completed';
+        const resolvedMessageModel = resolvedUpstreamSummary?.modelId ?? requestModelLabel;
+        const resolvedMessageProviderId = resolvedUpstreamSummary?.providerId ?? requestProviderId;
         const hasRenderableAssistantReply =
           finalAccumulatedText.trim().length > 0 ||
           accumulatedThinking.trim().length > 0 ||
@@ -2989,8 +3064,8 @@ export default function ChatPage() {
             firstTokenLatencyAttached,
             firstTokenObservedAt,
             messageId: msgId,
-            model: requestModelLabel,
-            providerId: requestProviderId,
+            model: resolvedMessageModel,
+            providerId: resolvedMessageProviderId,
             requestStartedAt,
             setMessages,
             status: 'completed',
@@ -3013,8 +3088,8 @@ export default function ChatPage() {
             firstTokenLatencyAttached,
             firstTokenObservedAt,
             messageId: msgId,
-            model: requestModelLabel,
-            providerId: requestProviderId,
+            model: resolvedMessageModel,
+            providerId: resolvedMessageProviderId,
             requestStartedAt,
             setMessages,
             status: 'completed',
@@ -3047,6 +3122,9 @@ export default function ChatPage() {
         const errorContent = `[错误: ${code}] ${resolvedMessage}`;
         logger.error('stream error', `${code}: ${resolvedMessage}`);
         const errorMsgId = makeOrderedMessageId();
+        const resolvedMessageModel = latestRoundUpstreamSummary?.modelId ?? requestModelLabel;
+        const resolvedMessageProviderId =
+          latestRoundUpstreamSummary?.providerId ?? requestProviderId;
         const finalized = finalizeStreamMessage({
           accumulatedSegments: [],
           accumulatedThinking,
@@ -3059,8 +3137,8 @@ export default function ChatPage() {
           firstTokenLatencyAttached,
           firstTokenObservedAt,
           messageId: errorMsgId,
-          model: requestModelLabel,
-          providerId: requestProviderId,
+          model: resolvedMessageModel,
+          providerId: resolvedMessageProviderId,
           requestStartedAt,
           setMessages,
           status: 'error',
@@ -3257,6 +3335,7 @@ export default function ChatPage() {
     let firstTokenObservedAt: number | null = null;
     let pausedForPermission = false;
     let pausedForQuestion = false;
+    let latestRoundUpstreamSummary: UpstreamStreamSummary | null = null;
     let currentRoundStartedAt = requestStartedAt;
     let firstTokenLatencyAttached = false;
     const toolCallIds = new Set<string>();
@@ -3569,6 +3648,11 @@ export default function ChatPage() {
             return;
           }
           ensureAttachStateInitialized();
+
+          if ((event.type === 'done' || event.type === 'error') && event.upstreamSummary) {
+            latestRoundUpstreamSummary = event.upstreamSummary;
+            setLatestUpstreamSummary(event.upstreamSummary);
+          }
 
           if (
             event.type === 'tool_call_delta' ||
@@ -3907,8 +3991,10 @@ export default function ChatPage() {
             requestSessionListRefresh();
             return;
           }
-          if (upstreamSummary) {
-            setLatestUpstreamSummary(upstreamSummary);
+          const resolvedUpstreamSummary = upstreamSummary ?? latestRoundUpstreamSummary;
+          if (resolvedUpstreamSummary) {
+            latestRoundUpstreamSummary = resolvedUpstreamSummary;
+            setLatestUpstreamSummary(resolvedUpstreamSummary);
           }
           ensureAttachStateInitialized();
           const finishedAt = Date.now();
@@ -3923,6 +4009,9 @@ export default function ChatPage() {
               : isPausedForPermission
                 ? 'paused'
                 : 'completed';
+          const resolvedMessageModel = resolvedUpstreamSummary?.modelId ?? requestModelLabel;
+          const resolvedMessageProviderId =
+            resolvedUpstreamSummary?.providerId ?? requestProviderId;
           const hasRenderableAssistantReply =
             finalAccumulatedText.trim().length > 0 ||
             accumulatedThinking.trim().length > 0 ||
@@ -3942,8 +4031,8 @@ export default function ChatPage() {
               firstTokenLatencyAttached,
               firstTokenObservedAt,
               messageId: attachMsgId,
-              model: requestModelLabel,
-              providerId: requestProviderId,
+              model: resolvedMessageModel,
+              providerId: resolvedMessageProviderId,
               requestStartedAt,
               setMessages,
               status: 'completed',
@@ -3978,6 +4067,9 @@ export default function ChatPage() {
           logger.error('attach stream error', `${code}: ${resolvedMessage}`);
           const attachErrorMsgId =
             currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId();
+          const resolvedMessageModel = latestRoundUpstreamSummary?.modelId ?? requestModelLabel;
+          const resolvedMessageProviderId =
+            latestRoundUpstreamSummary?.providerId ?? requestProviderId;
           const finalized = finalizeStreamMessage({
             accumulatedSegments: [],
             accumulatedThinking,
@@ -3990,8 +4082,8 @@ export default function ChatPage() {
             firstTokenLatencyAttached,
             firstTokenObservedAt,
             messageId: attachErrorMsgId,
-            model: requestModelLabel,
-            providerId: requestProviderId,
+            model: resolvedMessageModel,
+            providerId: resolvedMessageProviderId,
             requestStartedAt,
             setMessages,
             status: 'error',
@@ -5165,6 +5257,8 @@ export default function ChatPage() {
             chatSearch={chatSearch}
             composerVariant={composerVariant}
             providers={providers}
+            fastEnabled={fastEnabled}
+            onFastEnabledChange={setFastEnabled}
             activeProvider={activeProvider}
             activeModelOption={activeModelOption}
             activeModelCanConfigureThinking={activeModelCanConfigureThinking}
@@ -5218,6 +5312,7 @@ export default function ChatPage() {
               setActiveModelId(mid);
               setThinkingEnabled(normalizedThinkingState.thinkingEnabled);
               setReasoningEffort(normalizedThinkingState.reasoningEffort);
+              sessionModelSelectionSourceRef.current = 'manual';
               markSessionMetadataDirty();
             }}
             onToggleWebSearch={handleToggleWebSearch}

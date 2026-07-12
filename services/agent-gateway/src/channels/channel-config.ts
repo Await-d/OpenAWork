@@ -2,12 +2,16 @@ import { z } from 'zod';
 import type {
   ChannelFeatures,
   ChannelInstance,
+  ChannelPromptInjections,
   ChannelPersonaSelection,
   ChannelPermissions,
+  ChannelReplyLanguage,
   ChannelSubscription,
 } from './types.js';
 import { SUPPORTED_CHANNEL_PLATFORMS } from './types.js';
 import { resolveChannelLlmToolsEnabled } from './channel-tool-gate.js';
+import { normalizeChannelPromptInjections } from './channel-prompt-injections.js';
+import { normalizeChannelReplyLanguage } from './channel-reply-language.js';
 
 const channelFeaturesSchema = z.object({
   autoReply: z.boolean().default(false),
@@ -28,6 +32,35 @@ const channelPersonaSchema = z.object({
   title: z.string().trim().min(1).max(200),
 });
 
+const channelPromptInjectionsSchema = z.object({
+  capabilityContext: z
+    .object({
+      agents: z.boolean().optional(),
+      skills: z.boolean().optional(),
+      mcps: z.boolean().optional(),
+      tools: z.boolean().optional(),
+      toolGroups: z
+        .object({
+          web: z.boolean().optional(),
+          lsp: z.boolean().optional(),
+          files: z.boolean().optional(),
+          shell: z.boolean().optional(),
+          orchestration: z.boolean().optional(),
+          session: z.boolean().optional(),
+          mcp: z.boolean().optional(),
+          desktop: z.boolean().optional(),
+          repo: z.boolean().optional(),
+          channel: z.boolean().optional(),
+          other: z.boolean().optional(),
+        })
+        .optional(),
+      commands: z.boolean().optional(),
+    })
+    .optional(),
+});
+
+const channelReplyLanguageSchema = z.enum(['zh-CN', 'en-US']);
+
 export const channelSubscriptionSchema = z.object({
   chatId: z.string().min(1),
   name: z.string().min(1),
@@ -39,6 +72,7 @@ const channelBaseSchema = z.object({
   name: z.string().min(1),
   enabled: z.boolean().default(true),
   config: z.record(z.string(), z.string()).default({}),
+  replyLanguage: channelReplyLanguageSchema.optional(),
   channelLlmToolsEnabled: z.boolean().optional(),
   tools: z.record(z.string(), z.boolean()).optional(),
   providerId: z.string().nullable().optional(),
@@ -46,6 +80,7 @@ const channelBaseSchema = z.object({
   features: channelFeaturesSchema.optional(),
   permissions: channelPermissionsSchema.optional(),
   persona: channelPersonaSchema.nullable().optional(),
+  promptInjections: channelPromptInjectionsSchema.optional(),
   subscriptions: z.array(channelSubscriptionSchema).optional(),
 });
 
@@ -114,6 +149,18 @@ const normalizePersona = (
   return { resourceId, title };
 };
 
+const normalizeReplyLanguage = (
+  replyLanguage: ChannelReplyLanguage | null | undefined,
+): ChannelReplyLanguage => {
+  return normalizeChannelReplyLanguage(replyLanguage);
+};
+
+const normalizePromptInjections = (
+  promptInjections: ChannelPromptInjections | null | undefined,
+): { capabilityContext: Required<NonNullable<ChannelPromptInjections['capabilityContext']>> } => {
+  return normalizeChannelPromptInjections(promptInjections);
+};
+
 export const materializeStoredChannels = (raw: unknown, ownerUserId: string): ChannelInstance[] => {
   if (!Array.isArray(raw)) {
     return [];
@@ -142,6 +189,8 @@ export const createChannelInstance = (
     {
       ...input,
       tools: input.tools ?? existing?.tools,
+      replyLanguage:
+        input.replyLanguage === undefined ? existing?.replyLanguage : input.replyLanguage,
       channelLlmToolsEnabled:
         input.channelLlmToolsEnabled === undefined
           ? existing?.channelLlmToolsEnabled
@@ -150,6 +199,8 @@ export const createChannelInstance = (
       model: input.model === undefined ? existing?.model : input.model,
       permissions: input.permissions ?? existing?.permissions,
       persona: input.persona === undefined ? existing?.persona : input.persona,
+      promptInjections:
+        input.promptInjections === undefined ? existing?.promptInjections : input.promptInjections,
       id: input.id ?? existing?.id ?? crypto.randomUUID(),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
@@ -166,6 +217,7 @@ function normalizeChannel(input: StoredChannelInput, ownerUserId: string): Chann
     name: input.name.trim(),
     enabled: input.enabled,
     config: normalizeConfig(input.config),
+    replyLanguage: normalizeReplyLanguage(input.replyLanguage),
     tools: input.tools,
     channelLlmToolsEnabled: resolveChannelLlmToolsEnabled({
       explicit: input.channelLlmToolsEnabled,
@@ -176,6 +228,7 @@ function normalizeChannel(input: StoredChannelInput, ownerUserId: string): Chann
     features: { ...defaultFeatures(), ...(input.features ?? {}) },
     permissions: { ...defaultPermissions(), ...(input.permissions ?? {}) },
     persona: normalizePersona(input.persona),
+    promptInjections: normalizePromptInjections(input.promptInjections),
     subscriptions: normalizeSubscriptions(input.subscriptions),
     ownerUserId,
     createdAt: input.createdAt ?? Date.now(),

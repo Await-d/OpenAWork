@@ -87,7 +87,7 @@ const POPOVER_STYLE: CSSProperties = {
   background: 'var(--bg-overlay)',
   border: '1px solid var(--border-default)',
   borderRadius: 8,
-  boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
+  boxShadow: 'var(--shadow-md)',
   zIndex: 200,
   padding: '4px 0',
 };
@@ -150,7 +150,7 @@ const SUBMENU_STYLE: CSSProperties = {
   background: 'var(--bg-overlay)',
   border: '1px solid var(--border-default)',
   borderRadius: 8,
-  boxShadow: '0 8px 24px color-mix(in srgb, #000 22%, transparent)',
+  boxShadow: 'var(--shadow-md)',
   padding: '4px 0',
   zIndex: 101,
 };

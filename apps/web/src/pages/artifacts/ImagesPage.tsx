@@ -784,7 +784,7 @@ export default function ImagesPage() {
                       maxHeight: '100%',
                       objectFit: 'contain',
                       borderRadius: 4,
-                      boxShadow: '0 8px 30px rgba(0,0,0,0.2)',
+                      boxShadow: 'var(--shadow-lg)',
                     }}
                   />
                   <div
@@ -800,7 +800,7 @@ export default function ImagesPage() {
                       background: 'var(--bg-overlay)',
                       borderRadius: 12,
                       border: '1px solid var(--border-subtle)',
-                      boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+                      boxShadow: 'var(--shadow-lg)',
                       maxWidth: 600,
                       margin: '0 auto',
                     }}
@@ -892,7 +892,7 @@ export default function ImagesPage() {
                   background: 'var(--bg-overlay)',
                   padding: '24px 32px',
                   borderRadius: 16,
-                  boxShadow: '0 4px 20px rgba(0,0,0,0.1)',
+                  boxShadow: 'var(--shadow-lg)',
                 }}
               >
                 <div

@@ -29,7 +29,7 @@ const OVERLAY_STYLE: CSSProperties = {
   zIndex: 800,
   display: 'grid',
   placeItems: 'center',
-  background: 'rgba(0, 0, 0, 0.6)',
+  background: 'color-mix(in srgb, var(--bg-base) 60%, transparent)',
   backdropFilter: 'blur(4px)',
 };
 
@@ -40,7 +40,7 @@ const MODAL_STYLE: CSSProperties = {
   borderRadius: 16,
   background: 'var(--bg-overlay)',
   border: '1px solid var(--border-default)',
-  boxShadow: '0 24px 64px rgba(0, 0, 0, 0.4)',
+  boxShadow: 'var(--shadow-lg)',
   padding: 22,
   display: 'grid',
   gap: 16,

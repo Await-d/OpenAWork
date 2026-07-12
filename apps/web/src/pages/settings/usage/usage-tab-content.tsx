@@ -29,8 +29,8 @@ function UsageErrorNotice({ title, detail }: { title: string; detail: string }) 
       style={{
         padding: '0.9rem 1rem',
         borderRadius: 10,
-        border: '1px solid rgba(248, 113, 113, 0.4)',
-        background: 'rgba(127, 29, 29, 0.18)',
+        border: '1px solid var(--danger-border)',
+        background: 'var(--danger-muted)',
         color: 'var(--text-1)',
       }}
     >

@@ -3,6 +3,7 @@ import type { FileDiffContent, RunEvent } from '@openAwork/shared';
 import type { HandleStreamResult } from './stream-types.js';
 import { WorkflowLogger, createRequestContext } from '@openAwork/logger';
 import { filterEnabledGatewayToolsForSession } from '../session/session-tool-visibility.js';
+import { resolveSessionRuntimePolicy } from '../session/session-runtime-policy.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
 import { resolveSessionWorkspacePath } from '../session/session-workspace-resolution.js';
 import {
@@ -134,6 +135,8 @@ async function continueFromApprovedToolResult(input: {
     sessionId: input.sessionId,
     userId: input.userId,
   });
+  const sessionMeta = parseSessionMetadataJson(sessionContext.metadataJson);
+  const runtimePolicy = resolveSessionRuntimePolicy(sessionMeta);
   const resumedUser = loadSessionUser(input.sessionId, input.userId);
   const companionPrompt = resumedUser
     ? buildCompanionPrompt(
@@ -141,14 +144,17 @@ async function continueFromApprovedToolResult(input: {
         requestData.message,
       )
     : null;
-  const capabilityContext = buildCapabilityContext(input.userId, input.sessionId);
+  const capabilityContext = runtimePolicy.includeCapabilityContext
+    ? buildCapabilityContext(input.userId, input.sessionId)
+    : null;
   const detector = new KeywordDetectorImpl();
   const detection = detector.detect(requestData.message);
   const injectedPrompt = detection.injectedPrompt ?? null;
-  const lspGuidance =
-    requestData.dialogueMode === 'clarify'
+  const lspGuidance = runtimePolicy.includeLspGuidance
+    ? requestData.dialogueMode === 'clarify'
       ? CLARIFY_LSP_TOOL_GUIDANCE_SYSTEM_PROMPT
-      : LSP_TOOL_GUIDANCE_SYSTEM_PROMPT;
+      : LSP_TOOL_GUIDANCE_SYSTEM_PROMPT
+    : null;
   const dialogueModePrompt =
     requestData.dialogueMode !== undefined
       ? DIALOGUE_MODE_SYSTEM_PROMPTS[requestData.dialogueMode]
@@ -166,7 +172,6 @@ async function continueFromApprovedToolResult(input: {
     ),
     sessionContext.metadataJson,
   );
-  const sessionMeta = parseSessionMetadataJson(sessionContext.metadataJson);
   // 团队层（pm1/pm2/executor/reviewer 后台执行经此路径）：与 stream.ts 一致地
   //   1) 注入按会话绑定的 flat MCP 工具，2) 施加 toolset 门控 + 内置指令注入。
   //   早期本路径漏了这步，导致干活层拿不到 submit_artifact/submit_patch 等指令 + MCP。
@@ -186,6 +191,7 @@ async function continueFromApprovedToolResult(input: {
     }
   }
   let toolsForSession = filteredTools;
+  let flatMcpToolsEnabled = false;
   if (isTeamRoleLayer(roleLayerForTools)) {
     // flat MCP（按 requestedMcpServers 白名单动态注入）
     try {
@@ -209,6 +215,7 @@ async function continueFromApprovedToolResult(input: {
             (t) => t.function.name !== 'mcp_list_tools' && t.function.name !== 'mcp_call',
           );
           toolsForSession = [...base, ...flat];
+          flatMcpToolsEnabled = true;
         }
       }
     } catch (err) {
@@ -468,6 +475,7 @@ async function continueFromApprovedToolResult(input: {
           dialogueModePrompt,
           yoloModePrompt,
           companionPrompt,
+          flatMcpToolsEnabled,
           memoryBlock,
           teamInstructionStack,
           teamResumePrompt,

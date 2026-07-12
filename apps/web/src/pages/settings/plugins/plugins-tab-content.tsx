@@ -3,10 +3,10 @@ import type { CSSProperties } from 'react';
 import { useSearchParams } from 'react-router';
 import { createSettingsClient } from '@openAwork/web-client';
 import type { AIProviderRef } from '@openAwork/shared-ui';
-import { MCPServerConfig, MCPServerList } from '@openAwork/shared-ui';
+import { MCPServerConfig, MCPServerList, type MCPServerEntry } from '@openAwork/shared-ui';
 import { useAuthStore } from '../../../stores/auth/auth.js';
 import { SkillsPluginPanel } from './skills-plugin-panel.js';
-import { WebsearchSection } from '../connection/websearch-section.js';
+import { WebsearchPluginPanel } from './websearch-plugin-panel.js';
 import { resolvePersistableMcpServerSource } from '../connection/mcp-server-source-utils.js';
 import { useSettingsWebsearch } from '../connection/use-settings-websearch.js';
 import { useMcpServers } from '../connection/use-mcp-servers.js';
@@ -37,6 +37,8 @@ interface PluginsTabContentProps {
 }
 
 type PluginId = 'desktop-control' | 'image-generation' | 'mcp' | 'skills' | 'websearch';
+
+const SEARCH_MANAGED_MCP_IDS = new Set(['open_websearch', 'websearch']);
 
 function normalizePluginId(value: string | null): PluginId {
   switch (value) {
@@ -150,7 +152,7 @@ function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: b
           height: 20,
           borderRadius: '50%',
           background: 'var(--bg-overlay)',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.18)',
+          boxShadow: 'var(--shadow-sm)',
           transition: 'left 180ms ease',
         }}
       />
@@ -279,6 +281,58 @@ export function PluginsTabContent({
 
   const imgPlugin = pluginSettings.imageGeneration ?? { enabled: false, modelSource: 'global' };
   const desktopControlPlugin = pluginSettings.desktopControl ?? { enabled: false };
+  const searchManagedMcpServers = mcpServers.filter((server) =>
+    SEARCH_MANAGED_MCP_IDS.has(server.id),
+  );
+  const searchManagedMcpStatuses = mcpStatuses.filter((server) =>
+    SEARCH_MANAGED_MCP_IDS.has(server.id),
+  );
+  const generalMcpServers = mcpServers.filter((server) => !SEARCH_MANAGED_MCP_IDS.has(server.id));
+  const generalMcpStatuses = mcpStatuses.filter((server) => !SEARCH_MANAGED_MCP_IDS.has(server.id));
+
+  const handleAddMcpServer = useCallback(
+    (entry: MCPServerEntry) => {
+      setMcpServers((prev) => [...prev, { ...entry, source: 'user' }]);
+    },
+    [setMcpServers],
+  );
+
+  const handleRemoveMcpServer = useCallback(
+    (id: string) => {
+      setMcpServers((prev) => {
+        const target = prev.find((server) => server.id === id);
+        if (target?.builtin && target.source === 'builtin') {
+          return prev.map((server) =>
+            server.id === id
+              ? {
+                  ...server,
+                  enabled: false,
+                  source: resolvePersistableMcpServerSource(server, undefined),
+                }
+              : server,
+          );
+        }
+        return prev.filter((server) => server.id !== id);
+      });
+    },
+    [setMcpServers],
+  );
+
+  const handleUpdateMcpServer = useCallback(
+    (id: string, entry: MCPServerEntry) => {
+      setMcpServers((prev) =>
+        prev.map((server) =>
+          server.id === id
+            ? {
+                ...entry,
+                source: resolvePersistableMcpServerSource(server, entry.source),
+              }
+            : server,
+        ),
+      );
+    },
+    [setMcpServers],
+  );
 
   // Resolve the active image model info for display
   const imageProviders = providers.filter(
@@ -383,8 +437,10 @@ export function PluginsTabContent({
         </svg>
       ),
       label: 'Web 搜索',
-      description: '为 Agent 的 websearch 工具配置多 provider 策略。',
-      enabled: websearchSavedPolicy.providers.length > 0,
+      description: '统一管理默认搜索 MCP 与原生 Provider 回退策略。',
+      enabled:
+        searchManagedMcpServers.some((server) => server.enabled !== false) ||
+        websearchSavedPolicy.providers.length > 0,
     },
     {
       id: 'mcp',
@@ -407,8 +463,8 @@ export function PluginsTabContent({
         </svg>
       ),
       label: 'MCP 服务器',
-      description: '管理内置与自定义 MCP 服务器，扩展 Agent 工具能力。',
-      enabled: mcpServers.length > 0,
+      description: '管理除网络搜索外的内置与自定义 MCP 服务器。',
+      enabled: generalMcpServers.some((server) => server.enabled !== false),
     },
   ];
 
@@ -786,26 +842,20 @@ export function PluginsTabContent({
         )}
 
         {selectedPlugin && selectedPluginId === 'websearch' && (
-          <>
-            <div>
-              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--fg-strong)' }}>
-                Web 搜索
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginTop: 2 }}>
-                为 Agent 的 websearch 工具配置多 provider
-                策略，支持顺序回退、首个成功和合并去重三种模式。
-              </div>
-            </div>
-            <WebsearchSection
-              isSaving={websearchSaving}
-              policy={websearchPolicy}
-              savedPolicy={websearchSavedPolicy}
-              setPolicy={setWebsearchPolicy}
-              onSave={() => {
-                void saveWebsearchPolicy();
-              }}
-            />
-          </>
+          <WebsearchPluginPanel
+            isSaving={websearchSaving}
+            policy={websearchPolicy}
+            savedPolicy={websearchSavedPolicy}
+            setPolicy={setWebsearchPolicy}
+            searchServers={searchManagedMcpServers}
+            searchStatuses={searchManagedMcpStatuses}
+            onRemoveMcp={handleRemoveMcpServer}
+            onRetryMcp={onRetryMcp}
+            onSave={() => {
+              void saveWebsearchPolicy();
+            }}
+            onUpdateMcp={handleUpdateMcpServer}
+          />
         )}
 
         {selectedPlugin && selectedPluginId === 'mcp' && (
@@ -815,54 +865,25 @@ export function PluginsTabContent({
                 MCP 服务器
               </div>
               <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginTop: 2 }}>
-                系统内置 websearch、grep_app、codegraph、git_bash、lsp、omo；也可以接入自定义 SSE /
-                stdio MCP，并对同 id 内置项做禁用或覆盖。
+                管理除 Web 搜索外的内置 MCP（如 grep_app、codegraph、lsp、omo），也可以接入 自定义
+                SSE / stdio MCP，并对同 id 内置项做禁用或覆盖。
               </div>
             </div>
             <section style={{ ...SS, marginBottom: 0, padding: '10px 12px', gap: '0.5rem' }}>
               <h3 style={ST}>服务器配置</h3>
               <div style={UV}>
                 <MCPServerConfig
-                  servers={mcpServers}
-                  onAdd={(entry) =>
-                    setMcpServers((prev) => [...prev, { ...entry, source: 'user' }])
-                  }
-                  onRemove={(id) => {
-                    setMcpServers((prev) => {
-                      const target = prev.find((server) => server.id === id);
-                      if (target?.builtin && target.source === 'builtin') {
-                        return prev.map((server) =>
-                          server.id === id
-                            ? {
-                                ...server,
-                                enabled: false,
-                                source: resolvePersistableMcpServerSource(server, undefined),
-                              }
-                            : server,
-                        );
-                      }
-                      return prev.filter((server) => server.id !== id);
-                    });
-                  }}
-                  onUpdate={(id, entry) =>
-                    setMcpServers((prev) =>
-                      prev.map((server) =>
-                        server.id === id
-                          ? {
-                              ...entry,
-                              source: resolvePersistableMcpServerSource(server, entry.source),
-                            }
-                          : server,
-                      ),
-                    )
-                  }
+                  servers={generalMcpServers}
+                  onAdd={handleAddMcpServer}
+                  onRemove={handleRemoveMcpServer}
+                  onUpdate={handleUpdateMcpServer}
                 />
               </div>
             </section>
             <section style={{ ...SS, marginBottom: 0, padding: '10px 12px', gap: '0.5rem' }}>
               <h3 style={ST}>运行状态</h3>
               <div style={UV}>
-                <MCPServerList servers={mcpStatuses} onRetry={onRetryMcp} />
+                <MCPServerList servers={generalMcpStatuses} onRetry={onRetryMcp} />
               </div>
             </section>
           </>

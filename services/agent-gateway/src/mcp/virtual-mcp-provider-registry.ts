@@ -4,6 +4,10 @@ import { callCodegraphVirtualMcp, CODEGRAPH_VIRTUAL_MCP_TOOLS } from './virtual-
 import { callGitBashVirtualMcp, listGitBashVirtualMcpTools } from './virtual-git-bash-mcp.js';
 import { callLspVirtualMcp, LSP_VIRTUAL_MCP_TOOLS } from './virtual-lsp-mcp.js';
 import { callOmoVirtualMcp, listOmoVirtualMcpTools } from './virtual-omo-mcp.js';
+import {
+  callOpenWebSearchVirtualMcp,
+  OPEN_WEBSEARCH_VIRTUAL_MCP_TOOLS,
+} from './virtual-open-websearch-mcp.js';
 
 export interface VirtualMcpProvider {
   readonly id: string;
@@ -16,6 +20,12 @@ export interface VirtualMcpProvider {
 }
 
 export const VIRTUAL_MCP_PROVIDERS = [
+  {
+    id: 'open_websearch',
+    listTools: () => [...OPEN_WEBSEARCH_VIRTUAL_MCP_TOOLS],
+    callTool: async (sessionId, server, input) =>
+      textOutput(server.id, input.toolName, await callOpenWebSearchVirtualMcp(sessionId, input)),
+  },
   {
     id: 'codegraph',
     listTools: () => [...CODEGRAPH_VIRTUAL_MCP_TOOLS],

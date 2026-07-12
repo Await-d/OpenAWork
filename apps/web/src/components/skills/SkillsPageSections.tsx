@@ -42,14 +42,14 @@ function primaryButtonStyle(disabled: boolean): React.CSSProperties {
     border: 'none',
     borderRadius: 14,
     background: disabled
-      ? 'rgba(99, 102, 241, 0.35)'
+      ? 'var(--accent-border)'
       : 'linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%)',
     color: 'var(--fg-on-accent)',
     padding: '11px 16px',
     fontSize: 13,
     fontWeight: 700,
     cursor: disabled ? 'not-allowed' : 'pointer',
-    boxShadow: disabled ? 'none' : '0 10px 24px rgba(79, 70, 229, 0.22)',
+    boxShadow: disabled ? 'none' : 'var(--shadow-glow)',
   };
 }
 

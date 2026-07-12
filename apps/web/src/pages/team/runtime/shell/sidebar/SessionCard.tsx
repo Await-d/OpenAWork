@@ -150,7 +150,7 @@ const AGENT_CHIP_STYLE: CSSProperties = {
   flexShrink: 0,
   border: '1.5px solid var(--bg-overlay, rgba(0,0,0,0.3))',
   marginLeft: -3,
-  boxShadow: '0 1px 2px rgba(0,0,0,0.2)',
+  boxShadow: 'var(--shadow-sm)',
 };
 
 const AGENT_PALETTE = [
@@ -353,7 +353,7 @@ export function SessionCard({
           border: '2px solid var(--bg-overlay, rgba(0,0,0,0.6))',
           boxShadow: isLiveRunning
             ? `0 0 5px ${dot}, 0 0 10px color-mix(in srgb, ${dot} 35%, transparent)`
-            : '0 1px 2px rgba(0,0,0,0.35)',
+            : 'var(--shadow-sm)',
           animation: isLiveRunning ? 'pulse 2s ease-in-out infinite' : undefined,
         }}
       />

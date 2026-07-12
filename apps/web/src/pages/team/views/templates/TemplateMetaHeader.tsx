@@ -144,7 +144,7 @@ export function TemplateMetaHeader({
                   borderRight:
                     i < SCALE_OPTIONS.length - 1 ? '1px solid var(--border-subtle)' : 'none',
                   background: active ? 'var(--accent)' : 'transparent',
-                  color: active ? '#fff' : 'var(--fg-muted)',
+                  color: active ? 'var(--fg-on-accent)' : 'var(--fg-muted)',
                   fontSize: 11,
                   fontWeight: 700,
                   padding: '6px 12px',

@@ -22,7 +22,7 @@ const teamMemberSlotSchema = z.object({
   modelId: z.string().min(1).max(200).optional(),
   variant: z.string().min(1).max(80).optional(),
   thinkingEnabled: z.boolean().optional(),
-  reasoningEffort: z.enum(['minimal', 'low', 'medium', 'high', 'xhigh']).optional(),
+  reasoningEffort: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']).optional(),
   // 自定义角色字段（specialty === 'custom'）。
   custom: z.boolean().optional(),
   systemPrompt: z.string().max(8000).optional(),
@@ -137,7 +137,9 @@ const sessionMetadataPatchSchema = z
     parentSessionId: z.string().min(1).max(200).optional(),
     planMode: z.boolean().optional(),
     providerId: z.string().min(1).max(200).optional(),
-    reasoningEffort: z.enum(['minimal', 'low', 'medium', 'high', 'xhigh']).optional(),
+    reasoningEffort: z
+      .enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+      .optional(),
     teamDefinition: teamDefinitionSchema.optional(),
     teamInit: teamInitStateSchema.optional(),
     teamRoleInstance: teamRoleInstanceSchema.optional(),

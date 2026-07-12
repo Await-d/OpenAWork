@@ -451,7 +451,7 @@
 }
 
 .tool-call-block-elapsed[data-duration-tier='slow'] {
-  color: var(--warning, color-mix(in oklch, var(--accent) 60%, #d4a017));
+  color: var(--warning);
   font-weight: 600;
 }
 

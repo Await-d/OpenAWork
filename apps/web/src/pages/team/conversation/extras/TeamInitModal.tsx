@@ -32,7 +32,7 @@ const OVERLAY_STYLE: CSSProperties = {
   zIndex: 1000,
   display: 'grid',
   placeItems: 'center',
-  background: 'color-mix(in srgb, var(--bg-base) 55%, rgba(0,0,0,0.45))',
+  background: 'color-mix(in srgb, var(--bg-base) 55%, transparent)',
   backdropFilter: 'blur(2px)',
   padding: 24,
 };
@@ -44,7 +44,7 @@ const MODAL_STYLE: CSSProperties = {
   borderRadius: 16,
   border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
   background: 'var(--bg-base)',
-  boxShadow: '0 24px 64px rgba(0,0,0,0.32)',
+  boxShadow: 'var(--shadow-lg)',
   padding: 18,
   display: 'grid',
   gap: 12,
@@ -210,8 +210,8 @@ export function TeamInitModal({ sessionId, sessionMetadata }: TeamInitModalProps
                 <span
                   style={{
                     ...REOPEN_PROGRESS_PILL_STYLE,
-                    background: 'color-mix(in srgb, var(--danger, #e5484d) 16%, transparent)',
-                    color: 'var(--danger, #e5484d)',
+                    background: 'color-mix(in srgb, var(--danger) 16%, transparent)',
+                    color: 'var(--danger)',
                   }}
                 >
                   {failedCount} 项失败

@@ -219,6 +219,83 @@ describe('WeixinChannelService', () => {
     ]);
   });
 
+  it('群会话消息会按 chat_id 缓存 context_token，并回发到群会话', async () => {
+    const sentMessages: Array<{ toUserId: string; text: string; contextToken: string }> = [];
+    let getUpdatesCalls = 0;
+    const api: WeixinApiClient = {
+      async getUpdates(_syncBuf, _timeoutMs, signal) {
+        getUpdatesCalls += 1;
+        if (getUpdatesCalls === 1) {
+          return { ret: 0 };
+        }
+        if (getUpdatesCalls === 2) {
+          return {
+            ret: 0,
+            msgs: [
+              {
+                message_type: 1,
+                chat_id: 'weixin-group-1',
+                chat_name: '产品群',
+                from_user_id: 'weixin-user',
+                sender_name: 'Alice',
+                message_id: 1788004,
+                create_time_ms: Date.now(),
+                context_token: 'ctx-group',
+                item_list: [{ type: 1, text_item: { text: '群里问一句' } }],
+              },
+            ],
+          };
+        }
+
+        return new Promise((resolve, reject) => {
+          const abort = (): void => {
+            reject(new DOMException('Aborted', 'AbortError'));
+          };
+          signal?.addEventListener('abort', abort, { once: true });
+        });
+      },
+      async sendMessage(params) {
+        sentMessages.push(params);
+        return { messageId: 'sent-weixin-group-1' };
+      },
+      async sendImage() {
+        return { messageId: 'sent-weixin-image-1' };
+      },
+      async sendFile() {
+        return { messageId: 'sent-weixin-file-1' };
+      },
+    };
+    const events: ChannelEvent[] = [];
+    const service = new WeixinChannelService(
+      makeWeixinChannel(),
+      (event) => {
+        events.push(event);
+      },
+      () => api,
+    );
+
+    await service.start();
+    await expect.poll(() => events.find((event) => event.type === 'message')?.type).toBe('message');
+
+    const result = await service.sendMessage('weixin-group-1', '群里回一句');
+    await service.stop();
+
+    expect(result).toEqual({ messageId: 'sent-weixin-group-1' });
+    expect(events).toContainEqual({
+      type: 'message',
+      pluginId: 'weixin-service-1',
+      message: expect.objectContaining({
+        chatId: 'weixin-group-1',
+        chatName: '产品群',
+        senderId: 'weixin-user',
+        senderName: 'Alice',
+      }),
+    });
+    expect(sentMessages).toEqual([
+      { toUserId: 'weixin-group-1', text: '群里回一句', contextToken: 'ctx-group' },
+    ]);
+  });
+
   it('启动时先校验 iLink getupdates，避免凭证错误时误标运行', async () => {
     const api: WeixinApiClient = {
       async getUpdates() {

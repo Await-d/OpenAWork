@@ -4,6 +4,7 @@ import type {
   ChannelEvent,
   ChannelInstance,
   ChannelMessage,
+  ChannelStatus,
   MessagingChannelService,
 } from '../../channels/types.js';
 
@@ -78,6 +79,61 @@ class FakeService implements MessagingChannelService {
   }
 }
 
+class RecoverableService implements MessagingChannelService {
+  readonly pluginId: string;
+  readonly pluginType = 'telegram';
+  private running = false;
+
+  constructor(
+    pluginId: string,
+    private readonly notify: (event: ChannelEvent) => void,
+    private readonly startResult: 'ok' | 'fail',
+  ) {
+    this.pluginId = pluginId;
+  }
+
+  async start(): Promise<void> {
+    if (this.startResult === 'fail') {
+      this.running = false;
+      throw new Error(`start failed for ${this.pluginId}`);
+    }
+    this.running = true;
+  }
+
+  async stop(): Promise<void> {
+    this.running = false;
+  }
+
+  isRunning(): boolean {
+    return this.running;
+  }
+
+  emitStatus(status: ChannelStatus): void {
+    this.running = status === 'running';
+    this.notify({ type: 'status', pluginId: this.pluginId, status });
+  }
+
+  emitError(error: string): void {
+    this.notify({ type: 'error', pluginId: this.pluginId, error });
+  }
+
+  async sendMessage(): Promise<{ messageId: string }> {
+    return { messageId: 'recoverable' };
+  }
+
+  async replyMessage(): Promise<{ messageId: string }> {
+    return { messageId: 'recoverable' };
+  }
+
+  async getGroupMessages(): Promise<ChannelMessage[]> {
+    return [];
+  }
+
+  async listGroups(): Promise<[]> {
+    return [];
+  }
+}
+
 function makeChannel(id: string): ChannelInstance {
   return {
     id,
@@ -91,7 +147,16 @@ function makeChannel(id: string): ChannelInstance {
   };
 }
 
+function makeAutoStartChannel(id: string): ChannelInstance {
+  return {
+    ...makeChannel(id),
+    features: { autoReply: true, streamingReply: false, autoStart: true },
+  };
+}
+
 afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   FakeWebSocket.instances = [];
 });
@@ -151,6 +216,110 @@ describe('ChannelManager relay wiring', () => {
     await manager.startPlugin(makeChannel('relay-no-parser'), () => undefined);
 
     expect(FakeWebSocket.instances).toHaveLength(0);
+    await manager.stopAll();
+  });
+});
+
+describe('ChannelManager 自动恢复', () => {
+  it('autoStart 通道首次启动失败后会按退避自动重试', async () => {
+    vi.useFakeTimers();
+    const manager = new ChannelManager();
+    const events: ChannelEvent[] = [];
+    const services: RecoverableService[] = [];
+    let startAttempt = 0;
+
+    manager.registerFactory('telegram', (instance, notify) => {
+      startAttempt += 1;
+      const service = new RecoverableService(
+        instance.id,
+        notify,
+        startAttempt === 1 ? 'fail' : 'ok',
+      );
+      services.push(service);
+      return service;
+    });
+
+    await expect(
+      manager.startPlugin(makeAutoStartChannel('auto-restart-1'), (event) => {
+        events.push(event);
+      }),
+    ).rejects.toThrow('start failed for auto-restart-1');
+
+    expect(manager.getStatus('auto-restart-1')).toBe('error');
+    expect(startAttempt).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(startAttempt).toBe(2);
+    expect(manager.getStatus('auto-restart-1')).toBe('running');
+    expect(services.at(-1)?.isRunning()).toBe(true);
+    expect(events).toContainEqual({
+      type: 'error',
+      pluginId: 'auto-restart-1',
+      error: 'start failed for auto-restart-1',
+    });
+    expect(events).toContainEqual({
+      type: 'status',
+      pluginId: 'auto-restart-1',
+      status: 'running',
+    });
+
+    await manager.stopAll();
+  });
+
+  it('服务非人工停止后会自动重新拉起', async () => {
+    vi.useFakeTimers();
+    const manager = new ChannelManager();
+    const services: RecoverableService[] = [];
+
+    manager.registerFactory('telegram', (instance, notify) => {
+      const service = new RecoverableService(instance.id, notify, 'ok');
+      services.push(service);
+      return service;
+    });
+
+    await manager.startPlugin(makeAutoStartChannel('auto-restart-2'), () => undefined);
+    expect(services).toHaveLength(1);
+
+    services[0]?.emitStatus('stopped');
+    expect(manager.getStatus('auto-restart-2')).toBe('error');
+
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(services).toHaveLength(2);
+    expect(manager.getStatus('auto-restart-2')).toBe('running');
+    expect(services[1]?.isRunning()).toBe(true);
+
+    await manager.stopAll();
+  });
+
+  it('运行中的服务只上报瞬时 error 事件时不会误触发整实例重启', async () => {
+    vi.useFakeTimers();
+    const manager = new ChannelManager();
+    const events: ChannelEvent[] = [];
+    const services: RecoverableService[] = [];
+
+    manager.registerFactory('telegram', (instance, notify) => {
+      const service = new RecoverableService(instance.id, notify, 'ok');
+      services.push(service);
+      return service;
+    });
+
+    await manager.startPlugin(makeAutoStartChannel('auto-restart-3'), (event) => {
+      events.push(event);
+    });
+
+    services[0]?.emitError('transient poll hiccup');
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(services).toHaveLength(1);
+    expect(manager.getStatus('auto-restart-3')).toBe('running');
+    expect(events).toContainEqual({
+      type: 'error',
+      pluginId: 'auto-restart-3',
+      error: 'transient poll hiccup',
+    });
+
     await manager.stopAll();
   });
 });

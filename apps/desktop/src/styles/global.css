@@ -18,7 +18,9 @@ body,
     sans-serif;
 }
 
-:root {
+:root,
+:root[data-mode='dark'],
+:root:not([data-mode]) {
   --background: 222 47% 7%;
   --foreground: 213 31% 91%;
   --muted: 223 47% 11%;
@@ -36,7 +38,7 @@ body,
   color-scheme: dark;
 }
 
-:root.light {
+:root[data-mode='light'] {
   --background: 225 38% 97%;
   --foreground: 224 32% 16%;
   --muted: 220 32% 92%;

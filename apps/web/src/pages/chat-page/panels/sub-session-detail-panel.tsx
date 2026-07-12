@@ -893,8 +893,8 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
             <div
               style={{
                 borderRadius: 12,
-                border: '1px solid rgba(239, 68, 68, 0.24)',
-                background: 'rgba(239, 68, 68, 0.08)',
+                border: '1px solid var(--danger-border)',
+                background: 'var(--danger-muted)',
                 color: 'var(--danger)',
                 padding: '11px 12px',
                 fontSize: 11,
@@ -1040,7 +1040,7 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
                 padding: '0 10px',
                 gap: 6,
                 fontSize: 11,
-                background: 'rgba(239, 68, 68, 0.14)',
+                background: 'var(--danger-muted)',
                 color: 'rgb(252, 165, 165)',
                 opacity: cancellingTask ? 0.55 : 1,
               }}

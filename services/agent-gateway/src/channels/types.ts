@@ -3,6 +3,8 @@ import type { Buffer } from 'node:buffer';
 export type ChannelPlatform =
   'telegram' | 'discord' | 'slack' | 'feishu' | 'dingtalk' | 'weixin' | 'wecom' | 'whatsapp' | 'qq';
 
+export type ChannelReplyLanguage = 'zh-CN' | 'en-US';
+
 export const SUPPORTED_CHANNEL_PLATFORMS = [
   'telegram',
   'discord',
@@ -213,7 +215,17 @@ export type ChannelServiceFactory = (
   notify: (event: ChannelEvent) => void,
 ) => MessagingChannelService;
 
-export type ChannelWsMessageParser = (raw: unknown) => ChannelMessage | null;
+export interface ChannelParseContext {
+  readonly channel?: ChannelInstance;
+  readonly botId?: string;
+  readonly botName?: string;
+  readonly botUsername?: string;
+}
+
+export type ChannelWsMessageParser = (
+  raw: unknown,
+  context?: ChannelParseContext,
+) => ChannelMessage | null;
 
 export interface ChannelPermissions {
   allowReadHome: boolean;
@@ -240,12 +252,53 @@ export interface ChannelPersonaSelection {
   title: string;
 }
 
+export type ChannelCapabilityToolGroupKey =
+  | 'web'
+  | 'lsp'
+  | 'files'
+  | 'shell'
+  | 'orchestration'
+  | 'session'
+  | 'mcp'
+  | 'desktop'
+  | 'repo'
+  | 'channel'
+  | 'other';
+
+export interface ChannelCapabilityContextToolPromptInjections {
+  web?: boolean;
+  lsp?: boolean;
+  files?: boolean;
+  shell?: boolean;
+  orchestration?: boolean;
+  session?: boolean;
+  mcp?: boolean;
+  desktop?: boolean;
+  repo?: boolean;
+  channel?: boolean;
+  other?: boolean;
+}
+
+export interface ChannelCapabilityContextPromptInjections {
+  agents?: boolean;
+  skills?: boolean;
+  mcps?: boolean;
+  tools?: boolean;
+  toolGroups?: ChannelCapabilityContextToolPromptInjections;
+  commands?: boolean;
+}
+
+export interface ChannelPromptInjections {
+  capabilityContext?: ChannelCapabilityContextPromptInjections;
+}
+
 export interface ChannelInstance {
   id: string;
   type: ChannelPlatform;
   name: string;
   enabled: boolean;
   config: Record<string, string>;
+  replyLanguage?: ChannelReplyLanguage;
   channelLlmToolsEnabled?: boolean;
   tools?: Record<string, boolean>;
   providerId?: string | null;
@@ -253,6 +306,7 @@ export interface ChannelInstance {
   features?: ChannelFeatures;
   permissions?: ChannelPermissions;
   persona?: ChannelPersonaSelection | null;
+  promptInjections?: ChannelPromptInjections;
   subscriptions?: ChannelSubscription[];
   ownerUserId?: string;
   createdAt: number;

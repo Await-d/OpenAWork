@@ -1,5 +1,5 @@
 import { parseDiscordInboundMessage } from './inbound-parsers/discord.js';
-import type { ChannelEvent } from './types.js';
+import type { ChannelEvent, ChannelInstance } from './types.js';
 
 const DEFAULT_DISCORD_GATEWAY_URL = 'wss://gateway.discord.gg/?v=10&encoding=json';
 const DISCORD_GATEWAY_INTENTS = (1 << 9) | (1 << 12) | (1 << 15);
@@ -7,6 +7,7 @@ const RECONNECT_DELAY_MS = 1_000;
 const STARTUP_TIMEOUT_MS = 15_000;
 
 interface DiscordGatewayOptions {
+  readonly channel: ChannelInstance;
   readonly pluginId: string;
   readonly token: string;
   readonly gatewayUrl?: string;
@@ -21,6 +22,7 @@ interface DiscordGatewayFrame {
 }
 
 export class DiscordGatewayClient {
+  private readonly channel: ChannelInstance;
   private readonly pluginId: string;
   private readonly token: string;
   private readonly gatewayUrl: string;
@@ -33,12 +35,15 @@ export class DiscordGatewayClient {
   private rejectStartup: ((error: Error) => void) | null = null;
   private lastSeq: number | null = null;
   private running = false;
+  private selfUserId: string | undefined;
 
   constructor(options: DiscordGatewayOptions) {
+    this.channel = options.channel;
     this.pluginId = options.pluginId;
     this.token = options.token;
     this.gatewayUrl = options.gatewayUrl ?? DEFAULT_DISCORD_GATEWAY_URL;
     this.notify = options.notify;
+    this.selfUserId = options.channel.config['botUserId']?.trim() || undefined;
   }
 
   async start(): Promise<void> {
@@ -136,7 +141,16 @@ export class DiscordGatewayClient {
       return;
     }
 
-    const message = parseDiscordInboundMessage(frame);
+    if (frame.t === 'READY') {
+      this.selfUserId =
+        readReadyUserId(frame.d) || this.channel.config['botUserId']?.trim() || undefined;
+      return;
+    }
+
+    const message = parseDiscordInboundMessage(frame, {
+      channel: this.channel,
+      botId: this.selfUserId,
+    });
     if (message) {
       this.safeNotify({ type: 'message', pluginId: this.pluginId, message });
     }
@@ -298,4 +312,22 @@ export class DiscordGatewayClient {
       });
     }
   }
+}
+
+function readReadyUserId(payload: unknown): string {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+    return '';
+  }
+  const user = (payload as Record<string, unknown>)['user'];
+  if (typeof user !== 'object' || user === null || Array.isArray(user)) {
+    return '';
+  }
+  const value = (user as Record<string, unknown>)['id'];
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    return String(value);
+  }
+  return '';
 }

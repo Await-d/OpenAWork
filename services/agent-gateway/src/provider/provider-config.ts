@@ -25,10 +25,10 @@ const providerTypeSchema = z.custom<ProviderType>(
 const thinkingConfigSchema = z.object({
   enabled: z.boolean(),
   budgetTokens: z.number().int().positive().optional(),
-  mode: z.enum(['minimal', 'low', 'medium', 'high', 'xhigh']).optional(),
+  mode: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']).optional(),
 });
 
-const reasoningEffortSchema = z.enum(['minimal', 'low', 'medium', 'high', 'xhigh']);
+const reasoningEffortSchema = z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 
 const defaultThinkingEntrySchema = z.object({
   enabled: z.boolean(),
@@ -438,6 +438,10 @@ export const getFastProviderConfig = (
 ): Promise<{ provider: AIProvider; modelId: string } | null> =>
   createProviderManager(rawProviders, rawActiveSelection)
     .then((manager) => {
+      const active = manager.getConfig().active;
+      if (!active?.fast?.providerId || !active?.fast?.modelId) {
+        return null;
+      }
       const { provider, model } = manager.getFastProviderConfig();
       return { provider, modelId: model.id };
     })

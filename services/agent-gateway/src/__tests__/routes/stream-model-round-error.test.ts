@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildUpstreamStreamSummaryLog,
   buildUserFacingStreamErrorMessage,
+  toUpstreamStreamSummary,
 } from '../../routes/stream-model-round.js';
 
 describe('buildUserFacingStreamErrorMessage', () => {
@@ -71,6 +72,39 @@ describe('buildUpstreamStreamSummaryLog', () => {
         stalled: false,
       },
       isError: false,
+    });
+  });
+});
+
+describe('toUpstreamStreamSummary', () => {
+  it('把实际上游模型与 provider 一起带回前端', () => {
+    expect(
+      toUpstreamStreamSummary(
+        'end_turn',
+        {
+          textDeltaCount: 2,
+          reasoningDeltaCount: 1,
+          toolCallDeltaCount: 0,
+          sawDone: true,
+          sawError: false,
+          stalled: false,
+        },
+        {
+          model: 'gpt-5.4',
+          providerId: 'openai-fast',
+          providerType: 'openai',
+        },
+      ),
+    ).toEqual({
+      stopReason: 'end_turn',
+      textDeltaCount: 2,
+      reasoningDeltaCount: 1,
+      toolCallDeltaCount: 0,
+      modelId: 'gpt-5.4',
+      providerId: 'openai-fast',
+      sawDone: true,
+      sawError: false,
+      stalled: false,
     });
   });
 });

@@ -143,9 +143,9 @@
   background: linear-gradient(
     90deg,
     transparent 0%,
-    rgba(255, 255, 255, 0.08) 40%,
-    rgba(255, 255, 255, 0.14) 50%,
-    rgba(255, 255, 255, 0.08) 60%,
+    var(--border-subtle) 40%,
+    var(--border-default) 50%,
+    var(--border-subtle) 60%,
     transparent 100%
   );
   animation: omo-skeleton-glow-scan 2.8s ease-in-out infinite;

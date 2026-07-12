@@ -117,7 +117,7 @@ export function CommandPalette({ items, isOpen, onClose }: CommandPaletteProps) 
         alignItems: 'flex-start',
         justifyContent: 'center',
         paddingTop: '15vh',
-        background: 'rgba(0, 0, 0, 0.4)',
+        background: 'color-mix(in srgb, var(--bg-base) 55%, transparent)',
         backdropFilter: 'blur(2px)',
       }}
     >
@@ -134,7 +134,7 @@ export function CommandPalette({ items, isOpen, onClose }: CommandPaletteProps) 
           borderRadius: 12,
           border: '1px solid var(--border-default)',
           background: 'var(--bg-overlay)',
-          boxShadow: '0 20px 60px rgba(0,0,0,0.3), 0 0 0 1px var(--border-subtle)',
+          boxShadow: 'var(--shadow-lg), 0 0 0 1px var(--border-subtle)',
           overflow: 'hidden',
         }}
       >

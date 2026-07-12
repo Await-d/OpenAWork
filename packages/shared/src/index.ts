@@ -118,7 +118,7 @@ export type TeamRuntimeLayer = 'reception' | 'pm1' | 'pm2' | 'executor' | 'revie
  * 推理强度等级（与聊天端 ReasoningEffort 保持一致）。
  * 用于团队模板中按成员/层独立配置思考模式。
  */
-export type TeamReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+export type TeamReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export type TeamMemberSpecialty =
   | 'intake'
@@ -1182,6 +1182,8 @@ export interface UpstreamStreamSummary {
   textDeltaCount: number;
   reasoningDeltaCount: number;
   toolCallDeltaCount: number;
+  modelId?: string;
+  providerId?: string;
   sawDone: boolean;
   sawError: boolean;
   stalled: boolean;

@@ -1,10 +1,21 @@
 import { stripLeadingMentions } from './inbound-utils.js';
 import { channelManager } from './manager.js';
-import type { ChannelInstance, ChannelMessage } from './types.js';
+import {
+  buildChannelHelpMessage,
+  buildInitCommandAck,
+  buildStatusReply as buildLocalizedStatusReply,
+} from './channel-localization.js';
+import {
+  matchBuiltinChannelCommand,
+  type BuiltinChannelCommandId,
+} from './channel-command-experience.js';
+import { normalizeChannelReplyLanguage } from './channel-reply-language.js';
+import type { ChannelInstance, ChannelMessage, ChannelReplyLanguage } from './types.js';
 
 export interface ChannelCommandContext {
   readonly channel: ChannelInstance;
   readonly chatId: string;
+  readonly replyLanguage: ChannelReplyLanguage;
 }
 
 export interface ChannelCommandActions {
@@ -33,27 +44,25 @@ export interface BuiltinCommandContext {
 
 type CommandHandler = (context: BuiltinCommandContext) => Promise<CommandResult>;
 
-const BUILTIN_COMMANDS: Record<string, CommandHandler> = {
-  '/help': async () => ({
+const BUILTIN_COMMANDS: Record<BuiltinChannelCommandId, CommandHandler> = {
+  help: async (context) => ({
     kind: 'reply',
-    content:
-      'Available commands: /help, /new, /status, /init, /stats, /compress\n' +
-      'Use @bot + command in group chats, for example: @Bot /help',
+    content: buildChannelHelpMessage(context.channel?.type, resolveReplyLanguage(context.channel)),
   }),
-  '/status': async (context) => ({
+  status: async (context) => ({
     kind: 'reply',
-    content: buildStatusReply(context),
+    content: buildStatusReplyContent(context),
   }),
-  '/new': async () => ({
+  new: async () => ({
     kind: 'action',
     action: 'resetConversation',
   }),
-  '/init': async (context) => buildInitCommandResult(context),
-  '/stats': async () => ({
+  init: async (context) => buildInitCommandResult(context),
+  stats: async () => ({
     kind: 'action',
     action: 'getUsageStats',
   }),
-  '/compress': async () => ({
+  compress: async () => ({
     kind: 'action',
     action: 'compactConversation',
   }),
@@ -61,15 +70,15 @@ const BUILTIN_COMMANDS: Record<string, CommandHandler> = {
 
 function buildInitCommandResult(context: BuiltinCommandContext): CommandResult {
   const raw = stripLeadingMentions(context.message.content);
-  const args = raw.replace(/^\/init\b/i, '').trim();
+  const matched = matchBuiltinChannelCommand(raw);
+  const args = matched?.command.id === 'init' ? matched.args : '';
   const targetFiles = ['AGENTS.md', 'SOUL.md', 'USER.md', 'MEMORY.md'].join(', ');
   const userRequest = args ? `\n\nUser-provided /init arguments:\n${args}` : '';
+  const replyLanguage = resolveReplyLanguage(context.channel);
 
   return {
     kind: 'rewrite',
-    reply:
-      `Initializing workspace memory templates (${targetFiles}) and analyzing this project. ` +
-      'I will update AGENTS.md when needed.',
+    reply: buildInitCommandAck(replyLanguage, targetFiles),
     content:
       `Initialize this workspace for agent work. Ensure workspace memory files exist where appropriate: ${targetFiles}. ` +
       'Analyze the project structure and update AGENTS.md with durable, accurate guidance for future agents. ' +
@@ -82,49 +91,33 @@ export async function tryHandleChannelCommand(
   context: BuiltinCommandContext,
 ): Promise<CommandResult> {
   const text = stripLeadingMentions(context.message.content);
-  const cmd = text.split(' ')[0]?.toLowerCase();
-  if (!cmd?.startsWith('/')) {
+  const matched = matchBuiltinChannelCommand(text);
+  if (!matched) {
     return { kind: 'none' };
   }
-  const handler = BUILTIN_COMMANDS[cmd];
+  const handler = BUILTIN_COMMANDS[matched.command.id];
   if (!handler) {
     return { kind: 'none' };
   }
   return handler(context);
 }
 
-function buildStatusReply(context: BuiltinCommandContext): string {
+function buildStatusReplyContent(context: BuiltinCommandContext): string {
   const { channel, message, pluginId } = context;
   const status = channelManager.getStatus(pluginId);
-  if (!channel) {
-    return [
-      'Channel status',
-      `ID: ${pluginId}`,
-      `Runtime: ${status}`,
-      `Current chat: ${message.chatId}`,
-      'Configuration: missing',
-    ].join('\n');
-  }
-
   const service = channelManager.getService(pluginId);
   const streamingEnabled =
-    Boolean(channel.features?.streamingReply) && Boolean(service?.supportsStreaming);
-
-  return [
-    'Channel status',
-    `Name: ${channel.name}`,
-    `Type: ${channel.type}`,
-    `ID: ${channel.id}`,
-    `Runtime: ${status}`,
-    `Current chat: ${message.chatId}`,
-    `Provider: ${channel.providerId ?? 'global default'}`,
-    `Model: ${channel.model ?? 'global default'}`,
-    `Auto reply: ${formatToggle(channel.features?.autoReply ?? false)}`,
-    `Streaming reply: ${formatToggle(streamingEnabled)}`,
-    `Auto start: ${formatToggle(channel.features?.autoStart ?? false)}`,
-  ].join('\n');
+    Boolean(channel?.features?.streamingReply) && Boolean(service?.supportsStreaming);
+  return buildLocalizedStatusReply({
+    channel,
+    language: resolveReplyLanguage(channel),
+    message,
+    pluginId,
+    runtimeStatus: status,
+    streamingEnabled,
+  });
 }
 
-function formatToggle(value: boolean): string {
-  return value ? 'on' : 'off';
+function resolveReplyLanguage(channel: ChannelInstance | undefined): ChannelReplyLanguage {
+  return normalizeChannelReplyLanguage(channel?.replyLanguage);
 }

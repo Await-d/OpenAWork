@@ -12,7 +12,15 @@ import {
   type ChannelCommandActions,
   type ChannelCommandContext,
 } from './channel-commands.js';
+import {
+  buildBusyMessage,
+  buildChannelCommandActionsUnavailableMessage,
+  buildLocalizedErrorMessage,
+  buildNoChannelConfigurationMessage,
+} from './channel-localization.js';
 import { channelLogInfo, channelLogWarn, summarizeChannelMessage } from './channel-log.js';
+import { normalizeChannelReplyLanguage } from './channel-reply-language.js';
+import type { ChannelReplyLanguage } from './types.js';
 
 export type { ChannelCommandActions, ChannelCommandContext } from './channel-commands.js';
 
@@ -24,6 +32,8 @@ export interface AutoReplyOptions {
     message: string;
     pluginId: string;
     chatId: string;
+    senderId: string;
+    senderName: string;
     inputParts?: InputImageContent[];
     messageId: string;
     onPartialText?: (text: string) => Promise<void> | void;
@@ -43,7 +53,6 @@ interface SessionTaskChain {
 }
 
 const MAX_SESSION_TASK_QUEUE_DEPTH = 8;
-const CHANNEL_BUSY_MESSAGE = '当前会话正在处理较多消息，请稍后再发送。';
 
 export class AutoReplyPipeline {
   private options: AutoReplyOptions;
@@ -85,6 +94,7 @@ export class AutoReplyPipeline {
     }
 
     const channel = this.options.resolveChannel?.(pluginId);
+    const replyLanguage = resolveReplyLanguage(channel);
     if (channel && (!channel.enabled || channel.features?.autoReply === false)) {
       channelLogInfo('auto-reply skipped: channel disabled or autoReply off', {
         pluginId,
@@ -110,7 +120,7 @@ export class AutoReplyPipeline {
       if (!channel) {
         await this.sendChannelReply({
           channel,
-          content: 'No channel configuration found.',
+          content: buildNoChannelConfigurationMessage(replyLanguage),
           message: event,
           service,
         });
@@ -119,6 +129,7 @@ export class AutoReplyPipeline {
       const result = await this.handleCommandAction(commandResult.action, {
         channel,
         chatId: message.chatId,
+        replyLanguage,
       });
       await this.sendChannelReply({ channel, content: result.content, message: event, service });
       return;
@@ -174,6 +185,8 @@ export class AutoReplyPipeline {
             message: effectiveMessage,
             pluginId,
             chatId: message.chatId,
+            senderId: message.senderId,
+            senderName: message.senderName,
             ...(inputParts.length > 0 ? { inputParts } : {}),
             messageId: message.id,
             onPartialText: async (text) => {
@@ -200,7 +213,12 @@ export class AutoReplyPipeline {
           // connection, so it can itself throw — guard it so the failure is
           // logged rather than re-thrown into `handle`'s wrapper.
           await this.safeSend(pluginId, () =>
-            handle.finish(`Error: ${err instanceof Error ? err.message : String(err)}`),
+            handle.finish(
+              buildLocalizedErrorMessage(
+                replyLanguage,
+                err instanceof Error ? err.message : String(err),
+              ),
+            ),
           );
         }
       } else {
@@ -210,6 +228,8 @@ export class AutoReplyPipeline {
             message: effectiveMessage,
             pluginId,
             chatId: message.chatId,
+            senderId: message.senderId,
+            senderName: message.senderName,
             ...(inputParts.length > 0 ? { inputParts } : {}),
             messageId: message.id,
           });
@@ -232,7 +252,10 @@ export class AutoReplyPipeline {
           await this.safeSend(pluginId, () =>
             this.sendChannelReply({
               channel,
-              content: `Error: ${err instanceof Error ? err.message : String(err)}`,
+              content: buildLocalizedErrorMessage(
+                replyLanguage,
+                err instanceof Error ? err.message : String(err),
+              ),
               message: event,
               service,
             }),
@@ -249,7 +272,7 @@ export class AutoReplyPipeline {
       await this.safeSend(pluginId, () =>
         this.sendChannelReply({
           channel,
-          content: CHANNEL_BUSY_MESSAGE,
+          content: buildBusyMessage(replyLanguage),
           message: event,
           service,
         }),
@@ -296,7 +319,7 @@ export class AutoReplyPipeline {
   ): Promise<{ readonly content: string }> {
     const actions = this.options.commandActions;
     if (!actions) {
-      return { content: 'Channel command actions are not configured.' };
+      return { content: buildChannelCommandActionsUnavailableMessage(context.replyLanguage) };
     }
 
     switch (action) {
@@ -357,6 +380,10 @@ export class AutoReplyPipeline {
     });
     return result;
   }
+}
+
+function resolveReplyLanguage(channel: ChannelInstance | undefined): ChannelReplyLanguage {
+  return normalizeChannelReplyLanguage(channel?.replyLanguage);
 }
 
 function assertNever(value: never): never {

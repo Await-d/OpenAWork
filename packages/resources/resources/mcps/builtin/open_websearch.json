@@ -1,0 +1,8 @@
+{
+  "id": "open_websearch",
+  "title": "Open WebSearch",
+  "description": "内置免 API Key 网络搜索与网页正文提取 MCP 适配器",
+  "transport": "stdio",
+  "builtinKind": "adapter",
+  "enabledByDefault": true
+}

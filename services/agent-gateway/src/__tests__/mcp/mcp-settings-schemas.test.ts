@@ -10,6 +10,7 @@ describe('mcp settings schemas', () => {
     const builtins = buildSettingsBuiltinMcpServers();
 
     expect(builtins.map((server) => server.id)).toEqual([
+      'open_websearch',
       'websearch',
       'grep_app',
       'codegraph',
@@ -17,11 +18,18 @@ describe('mcp settings schemas', () => {
       'lsp',
       'omo',
     ]);
+    expect(builtins.find((server) => server.id === 'open_websearch')).toMatchObject({
+      builtin: true,
+      builtinKind: 'adapter',
+      source: 'system',
+    });
+    expect(builtins.find((server) => server.id === 'open_websearch')?.command).toBeUndefined();
     expect(builtins.find((server) => server.id === 'websearch')).toMatchObject({
       builtin: true,
       builtinKind: 'system',
       source: 'system',
       url: 'https://mcp.exa.ai/mcp?tools=web_search_exa',
+      enabled: false,
     });
     for (const serverId of ['codegraph', 'git_bash', 'lsp']) {
       expect(builtins.find((server) => server.id === serverId)).toMatchObject({
@@ -31,12 +39,46 @@ describe('mcp settings schemas', () => {
       });
       expect(builtins.find((server) => server.id === serverId)?.command).toBeUndefined();
     }
-    expect(builtins.find((server) => server.id === 'omo')).toMatchObject({
-      builtin: true,
-      builtinKind: 'adapter',
-      source: 'system',
+    for (const serverId of ['omo']) {
+      expect(builtins.find((server) => server.id === serverId)).toMatchObject({
+        builtin: true,
+        builtinKind: 'adapter',
+        source: 'system',
+      });
+      expect(builtins.find((server) => server.id === serverId)?.command).toBeUndefined();
+    }
+  });
+
+  it('accepts adapter builtin management patches for open_websearch while stripping fake endpoints', () => {
+    const parsed = mcpServersBodySchema.parse({
+      servers: [
+        {
+          id: 'open_websearch',
+          name: 'Open WebSearch',
+          transport: 'stdio',
+          builtin: true,
+          builtinKind: 'adapter',
+          source: 'system',
+          enabled: false,
+          command: 'malicious-command-that-must-not-persist',
+          url: 'https://fake.invalid/sse',
+          disabledTools: ['search', 'search'],
+        },
+      ],
     });
-    expect(builtins.find((server) => server.id === 'omo')?.command).toBeUndefined();
+
+    expect(parsed.servers).toEqual([
+      {
+        id: 'open_websearch',
+        name: 'Open WebSearch',
+        transport: 'stdio',
+        builtin: true,
+        builtinKind: 'adapter',
+        source: 'system',
+        enabled: false,
+        disabledTools: ['search'],
+      },
+    ]);
   });
 
   it('accepts virtual builtin management patches while stripping fake command edits', () => {

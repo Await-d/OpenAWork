@@ -10,6 +10,9 @@ import { extractMessageText } from '../session/session-message-store.js';
 import { runSessionInBackground } from '../routes/stream-runtime.js';
 import { AutoReplyPipeline } from './auto-reply.js';
 import { recordChannelMessage } from './channel-message-cache.js';
+import { resolveChannelMemberAcl } from './channel-member-acl.js';
+import { buildNoTextReplyMessage } from './channel-localization.js';
+import { normalizeChannelReplyLanguage } from './channel-reply-language.js';
 import { buildChannelSessionKey, upsertChannelSession } from './channel-session-store.js';
 import {
   compactChannelConversation,
@@ -40,6 +43,7 @@ import {
   parseDiscordInboundMessage,
   parseFeishuInboundMessage,
   parseQQInboundMessage,
+  parseSlackInboundMessage,
   parseTelegramInboundMessage,
   parseWeComInboundMessage,
   parseWeixinInboundMessage,
@@ -76,6 +80,7 @@ channelManager.registerParser('telegram', parseTelegramInboundMessage);
 channelManager.registerFactory('discord', discordFactory);
 channelManager.registerParser('discord', parseDiscordInboundMessage);
 channelManager.registerFactory('slack', slackFactory);
+channelManager.registerParser('slack', parseSlackInboundMessage);
 channelManager.registerFactory('wecom', weComFactory);
 channelManager.registerParser('wecom', parseWeComInboundMessage);
 channelManager.registerFactory('weixin', weixinFactory);
@@ -100,15 +105,29 @@ const autoReply = new AutoReplyPipeline({
     getUsageStats: getChannelUsageStats,
     resetConversation: resetChannelConversation,
   },
-  onAgentRun: async ({ inputParts, message, pluginId, chatId, messageId, onPartialText }) => {
+  onAgentRun: async ({
+    inputParts,
+    message,
+    pluginId,
+    chatId,
+    messageId,
+    onPartialText,
+    senderId,
+    senderName,
+  }) => {
     const channel = channels.get(pluginId);
     if (!channel?.ownerUserId) {
       throw new Error('Channel owner is missing for auto reply session');
     }
+    const memberAcl = resolveChannelMemberAcl(channel, {
+      platformUserId: senderId,
+      senderName,
+    });
 
     const sessionId = upsertChannelSession({
       chatId,
-      channel,
+      actor: memberAcl.actor,
+      channel: memberAcl.effectiveChannel,
       currentMessageId: messageId,
       sessionKey: buildChannelSessionKey(pluginId, chatId),
       userId: channel.ownerUserId,
@@ -148,11 +167,18 @@ const autoReply = new AutoReplyPipeline({
 
     await partialUpdates.flush();
 
+    if (result.statusCode >= 400 || result.stopReason === 'error') {
+      throw new Error(
+        result.errorSummary ??
+          `Channel session ${sessionId} failed with status ${result.statusCode}`,
+      );
+    }
+
     const latestAssistantMessage = listSessionMessagesV2({
       sessionId,
       userId: channel.ownerUserId,
     })
-      .filter((entry) => entry.role === 'assistant')
+      .filter((entry) => entry.role === 'assistant' && entry.clientRequestId === clientRequestId)
       .at(-1);
     const assistantText = extractMessageText(latestAssistantMessage) || partialText.trim();
 
@@ -160,11 +186,7 @@ const autoReply = new AutoReplyPipeline({
       return assistantText;
     }
 
-    if (result.statusCode >= 400) {
-      throw new Error(`Channel session ${sessionId} failed with status ${result.statusCode}`);
-    }
-
-    return '已处理消息，但没有生成可发送的文本回复。';
+    return buildNoTextReplyMessage(normalizeChannelReplyLanguage(channel.replyLanguage));
   },
 });
 
@@ -318,7 +340,7 @@ export async function channelRoutes(app: FastifyInstance): Promise<void> {
   await registerWeixinLoginRoutes(app);
   await registerChannelInboundRoutes(app, {
     resolveChannel: resolveAnyChannel,
-    parseMessage: (type, raw) => channelManager.parseMessage(type, raw),
+    parseMessage: (type, raw, channel) => channelManager.parseMessage(type, raw, { channel }),
     notifyChannel,
     recordInboundDiagnostic: (input) => channelManager.recordInboundDiagnostic(input),
   });
@@ -410,6 +432,7 @@ export async function channelRoutes(app: FastifyInstance): Promise<void> {
       syncChannelCache(user.sub, nextChannels);
 
       const isRunning = channelManager.getStatus(id) === 'running';
+      const shouldAutoStart = nextInstance.enabled && nextInstance.features?.autoStart === true;
       let updateErrorMessage: string | undefined;
       if (!nextInstance.enabled) {
         try {
@@ -420,6 +443,18 @@ export async function channelRoutes(app: FastifyInstance): Promise<void> {
       } else if (isRunning) {
         try {
           await channelManager.restartPlugin(nextInstance, notifyChannel);
+        } catch (error) {
+          updateErrorMessage = error instanceof Error ? error.message : String(error);
+        }
+      } else if (shouldAutoStart) {
+        try {
+          await channelManager.startPlugin(nextInstance, notifyChannel);
+        } catch (error) {
+          updateErrorMessage = error instanceof Error ? error.message : String(error);
+        }
+      } else {
+        try {
+          await channelManager.stopPlugin(id);
         } catch (error) {
           updateErrorMessage = error instanceof Error ? error.message : String(error);
         }

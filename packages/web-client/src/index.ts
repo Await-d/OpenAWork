@@ -22,7 +22,14 @@ export type {
   NotificationsClient,
 } from './infra/notifications.js';
 export { createCapabilitiesClient } from './session/capabilities.js';
-export type { CapabilitiesClient, CapabilitiesListResult } from './session/capabilities.js';
+export type {
+  CapabilitiesClient,
+  CapabilitiesListResult,
+  ChannelCapabilityCatalogCounts,
+  ChannelCapabilityCatalogToolGroupCounts,
+  ChannelCapabilityPreviewInput,
+  ChannelCapabilityPreviewPermissions,
+} from './session/capabilities.js';
 export { RESOURCE_USAGE_DEFAULTS, createResourcesClient } from './session/resources.js';
 export type {
   ResourceAgentCatalogEntry,

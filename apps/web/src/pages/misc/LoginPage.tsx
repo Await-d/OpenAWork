@@ -4,6 +4,7 @@ import { Navigate } from 'react-router';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { preloadRouteModuleByPath } from '../../routes/preloadable-route-modules.js';
 import { login } from '@openAwork/web-client';
+import { BrandLogo } from '@openAwork/shared-ui';
 import {
   type DesktopGatewayMode,
   DEFAULT_GATEWAY_PORT,
@@ -173,7 +174,7 @@ export default function LoginPage({ theme, onToggleTheme }: LoginPageProps = {})
 
             <div className="login-hero-brand">
               <div className="login-hero-logo">
-                <AppIcon size={36} />
+                <BrandLogo size={36} variant="plain" />
               </div>
               <h1 className="login-hero-title">OpenAWork</h1>
             </div>
@@ -432,48 +433,6 @@ export default function LoginPage({ theme, onToggleTheme }: LoginPageProps = {})
 }
 
 /* ─── Icon Components ─── */
-
-function AppIcon({ size }: { size: number }) {
-  return (
-    <svg
-      aria-hidden="true"
-      width={size}
-      height={size}
-      viewBox="0 0 28 28"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <path
-        d="M 14,2.6 C 22.75,2.6 25.4,10.5 14,14"
-        stroke="currentColor"
-        strokeWidth="2.45"
-        strokeLinecap="round"
-        fill="none"
-        opacity="0.92"
-        transform="rotate(0, 14, 14)"
-      />
-      <path
-        d="M 14,2.6 C 22.75,2.6 25.4,10.5 14,14"
-        stroke="currentColor"
-        strokeWidth="2.45"
-        strokeLinecap="round"
-        fill="none"
-        opacity="0.92"
-        transform="rotate(120, 14, 14)"
-      />
-      <path
-        d="M 14,2.6 C 22.75,2.6 25.4,10.5 14,14"
-        stroke="currentColor"
-        strokeWidth="2.45"
-        strokeLinecap="round"
-        fill="none"
-        opacity="0.92"
-        transform="rotate(240, 14, 14)"
-      />
-      <circle cx="14" cy="14" r="2.2" fill="currentColor" />
-    </svg>
-  );
-}
 
 function SparkleIcon() {
   return (

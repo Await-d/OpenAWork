@@ -38,7 +38,7 @@ interface StreamCallbacks {
   onReconnectRequired?: (reason: 'attach_stream_disconnected') => void;
   model?: string;
   thinkingEnabled?: boolean;
-  reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+  reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   webSearchEnabled?: boolean;
   yoloMode?: boolean;
 }

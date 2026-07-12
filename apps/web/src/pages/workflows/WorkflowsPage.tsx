@@ -46,7 +46,7 @@ export default function WorkflowsPage() {
               padding: 22,
               borderRadius: 24,
               background:
-                'radial-gradient(circle at top left, rgba(99, 102, 241, 0.24), transparent 36%), linear-gradient(135deg, color-mix(in srgb, var(--bg-overlay) 94%, rgba(17, 24, 39, 0.34)) 0%, var(--bg-overlay) 100%)',
+                'radial-gradient(circle at top left, var(--accent-border), transparent 36%), linear-gradient(135deg, var(--bg-overlay) 0%, var(--bg-overlay) 100%)',
             }}
           >
             <div style={{ display: 'grid', gap: 8 }}>
@@ -83,13 +83,12 @@ export default function WorkflowsPage() {
                 style={{
                   padding: '10px 14px',
                   borderRadius: 10,
-                  border: `1px solid ${feedback.tone === 'success' ? 'var(--success-border, rgba(34, 197, 94, 0.35))' : 'var(--complement-border)'}`,
+                  border: `1px solid ${feedback.tone === 'success' ? 'var(--success-border)' : 'var(--complement-border)'}`,
                   background:
                     feedback.tone === 'success'
-                      ? 'var(--success-muted, rgba(34, 197, 94, 0.08))'
+                      ? 'var(--success-muted)'
                       : 'var(--complement-muted)',
-                  color:
-                    feedback.tone === 'success' ? 'var(--success, #22c55e)' : 'var(--complement)',
+                  color: feedback.tone === 'success' ? 'var(--success)' : 'var(--complement)',
                   fontSize: 12,
                   fontWeight: 500,
                 }}

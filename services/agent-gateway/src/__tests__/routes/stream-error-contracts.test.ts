@@ -1,5 +1,6 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type * as AgentCoreModule from '@openAwork/agent-core';
 import type * as AuthModule from '../../infra/auth.js';
 import type * as DbModule from '../../infra/db.js';
 import { registerErrorHandler } from '../../infra/error-handler.js';
@@ -29,6 +30,29 @@ let resolveStreamModelRoute: typeof StreamRoutesModule.resolveStreamModelRoute;
 
 const SESSION_ID = 'sess-stream-routes';
 const USER_ID = 'u-stream-routes';
+
+const chatProvider = {
+  id: 'openai-chat',
+  type: 'openai',
+  name: 'OpenAI Chat',
+  enabled: true,
+  baseUrl: 'https://api.openai.com/v1',
+  defaultModels: [{ id: 'gpt-4o', label: 'GPT-4o', enabled: true }],
+  createdAt: '2026-07-12T00:00:00.000Z',
+  updatedAt: '2026-07-12T00:00:00.000Z',
+} satisfies AgentCoreModule.AIProvider;
+
+const fastProvider = {
+  id: 'openai-fast',
+  type: 'openai',
+  name: 'OpenAI Fast',
+  enabled: true,
+  baseUrl: 'https://api.openai.com/v1',
+  upstreamProtocol: 'responses',
+  defaultModels: [{ id: 'gpt-5.4-nano', label: 'GPT-5.4 Nano', enabled: true }],
+  createdAt: '2026-07-12T00:00:00.000Z',
+  updatedAt: '2026-07-12T00:00:00.000Z',
+} satisfies AgentCoreModule.AIProvider;
 
 async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify();
@@ -76,6 +100,8 @@ beforeAll(async () => {
 beforeEach(() => {
   dbModule.sqliteRun('DELETE FROM sessions', []);
   dbModule.sqliteRun('DELETE FROM users', []);
+  providerCatalogMocks.getChatProvider.mockReset();
+  providerCatalogMocks.getFastProvider.mockReset();
   providerCatalogMocks.getProviderForSelection.mockReset();
   seedUser(USER_ID);
   seedSession(SESSION_ID);
@@ -153,6 +179,39 @@ describe('stream error contracts', () => {
       },
       { fallbackToChat: false },
     );
+  });
+
+  it('请求仅回显 session chat 模型时仍允许 Fast 覆盖主对话流', async () => {
+    providerCatalogMocks.getFastProvider.mockResolvedValueOnce({
+      provider: fastProvider,
+      modelId: 'gpt-5.4-nano',
+    });
+    providerCatalogMocks.getProviderForSelection.mockResolvedValueOnce({
+      provider: chatProvider,
+      modelId: 'gpt-4o',
+    });
+
+    const route = await resolveStreamModelRoute({
+      metadataJson: JSON.stringify({
+        providerId: 'openai-chat',
+        modelId: 'gpt-4o',
+      }),
+      requestData: {
+        clientRequestId: 'req-fast-echo',
+        maxTokens: 2048,
+        message: 'hello',
+        model: 'gpt-4o',
+        providerId: 'openai-chat',
+        temperature: 1,
+      },
+      userId: USER_ID,
+    });
+
+    expect(route.model).toBe('gpt-5.4-nano');
+    expect(route.providerType).toBe('openai');
+    expect(route.upstreamProtocol).toBe('responses');
+    expect(providerCatalogMocks.getFastProvider).toHaveBeenCalledWith(USER_ID);
+    expect(providerCatalogMocks.getProviderForSelection).not.toHaveBeenCalled();
   });
 
   it('GET /sessions/:id/stream/attach 在请求流已失活时返回中文 409', async () => {

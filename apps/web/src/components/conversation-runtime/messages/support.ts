@@ -181,7 +181,7 @@ export interface ChatUsageDetails {
   tokensPerSecond?: number;
 }
 
-export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 type StatusTone = 'info' | 'success' | 'warning' | 'error';
 
@@ -1608,11 +1608,13 @@ export function parseSessionModeMetadata(metadataJson: string | undefined): {
       webSearchEnabled: parsed.webSearchEnabled !== false,
       thinkingEnabled: parsed.thinkingEnabled === true,
       reasoningEffort:
+        parsed.reasoningEffort === 'none' ||
         parsed.reasoningEffort === 'minimal' ||
         parsed.reasoningEffort === 'low' ||
         parsed.reasoningEffort === 'medium' ||
         parsed.reasoningEffort === 'high' ||
-        parsed.reasoningEffort === 'xhigh'
+        parsed.reasoningEffort === 'xhigh' ||
+        parsed.reasoningEffort === 'max'
           ? parsed.reasoningEffort
           : 'medium',
       providerId: typeof parsed.providerId === 'string' ? parsed.providerId : undefined,

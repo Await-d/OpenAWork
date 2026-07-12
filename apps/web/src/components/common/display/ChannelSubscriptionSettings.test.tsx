@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ChannelSubscriptionSettings,
@@ -60,6 +60,51 @@ const WEIXIN_DESCRIPTOR: ChannelTypeDescriptor = {
   tools: [{ key: 'PluginSendMessage', label: '发送渠道消息', description: '允许发送渠道消息' }],
 };
 
+const TELEGRAM_DESCRIPTOR: ChannelTypeDescriptor = {
+  type: 'telegram',
+  displayName: 'Telegram Bot',
+  description: 'Telegram 渠道',
+  icon: 'telegram',
+  category: 'international',
+  configSchema: [
+    { key: 'botToken', label: 'Bot Token', type: 'secret', required: true },
+    {
+      key: 'requireMentionInGroup',
+      label: 'Require Mention In Group',
+      type: 'text',
+      description: '群聊中仅在明确 @ 机器人时触发自动回复。',
+    },
+    {
+      key: 'memberAclJson',
+      label: 'Member ACL JSON',
+      type: 'text',
+      description: '按 senderId 控制群成员的工具和权限。',
+    },
+  ],
+  tools: [
+    {
+      key: 'PluginReplyMessage',
+      label: '回复消息',
+      description: '允许命中的成员把文本回复回传到 Telegram。',
+    },
+    {
+      key: 'web_search',
+      label: '网页搜索',
+      description: '允许命中的成员调用网页搜索能力。',
+    },
+    {
+      key: 'read',
+      label: '读取文件',
+      description: '允许命中的成员读取工作区文件。',
+    },
+    {
+      key: 'bash',
+      label: '命令行',
+      description: '允许命中的成员调用 Shell。',
+    },
+  ],
+};
+
 function makeChannel(): ChannelSettingsEntry {
   return {
     id: 'feishu-1',
@@ -87,6 +132,40 @@ function makeChannel(): ChannelSettingsEntry {
   };
 }
 
+function makeTelegramChannel(
+  config: Record<string, string> = {
+    botToken: 'telegram_token',
+  },
+): ChannelSettingsEntry {
+  return {
+    id: 'telegram-1',
+    type: 'telegram',
+    name: 'Telegram 群助手',
+    enabled: true,
+    status: 'disconnected',
+    config,
+    replyLanguage: 'zh-CN',
+    subscriptions: [],
+    features: { autoReply: true, streamingReply: true, autoStart: true },
+    channelLlmToolsEnabled: true,
+    providerId: null,
+    model: null,
+    tools: {
+      PluginReplyMessage: true,
+      web_search: true,
+      read: true,
+      bash: true,
+    },
+    permissions: {
+      allowReadHome: false,
+      readablePathPrefixes: [],
+      allowWriteOutside: false,
+      allowShell: true,
+      allowSubAgents: false,
+    },
+  };
+}
+
 function checkboxFor(label: string): HTMLInputElement {
   const text = screen.getByText(label);
   const input = text.closest('label')?.querySelector('input');
@@ -94,6 +173,24 @@ function checkboxFor(label: string): HTMLInputElement {
     throw new Error(`Missing checkbox for ${label}`);
   }
   return input;
+}
+
+function selectFor(label: string): HTMLSelectElement {
+  const text = screen.getByText(label);
+  const select = text.parentElement?.querySelector('select');
+  if (!(select instanceof HTMLSelectElement)) {
+    throw new Error(`Missing select for ${label}`);
+  }
+  return select;
+}
+
+function panelByTitle(title: string): HTMLElement {
+  const heading = screen.getByText(title);
+  const panel = heading.closest('.channel-inline-panel');
+  if (!(panel instanceof HTMLElement)) {
+    throw new Error(`Missing panel for ${title}`);
+  }
+  return panel;
 }
 
 afterEach(() => {
@@ -204,6 +301,388 @@ describe('ChannelSubscriptionSettings · 工具白名单保存语义', () => {
     );
 
     expect(checkboxFor('允许模型调用工作台工具').checked).toBe(true);
+  });
+
+  it('Given 旧通道缺少提示词注入配置 When 打开配置面板 Then capability 注入默认全开启', async () => {
+    render(
+      <ChannelSubscriptionSettings
+        channels={[makeChannel()]}
+        descriptors={[FEISHU_DESCRIPTOR]}
+        capabilityCatalogCounts={{
+          agents: 30,
+          skills: 28,
+          mcps: 6,
+          tools: 12,
+          toolGroups: {
+            web: 3,
+            lsp: 10,
+            files: 12,
+            shell: 8,
+            orchestration: 11,
+            session: 8,
+            mcp: 3,
+            desktop: 4,
+            repo: 10,
+            channel: 21,
+            other: 0,
+          },
+          commands: 18,
+        }}
+        onSave={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText('提示词注入')).toBeTruthy();
+    expect(checkboxFor('注入 Agents 目录').checked).toBe(true);
+    expect(checkboxFor('注入 Skills 目录').checked).toBe(true);
+    expect(checkboxFor('注入 MCP 目录').checked).toBe(true);
+    expect(checkboxFor('注入 Tools 目录').checked).toBe(true);
+    expect(checkboxFor('注入 Commands 目录').checked).toBe(true);
+    expect(screen.getByText('当前共 30 个')).toBeTruthy();
+    expect(screen.getByText('当前共 28 个')).toBeTruthy();
+    expect(screen.getByText('当前共 6 个')).toBeTruthy();
+  });
+
+  it('Given 调整 capability 注入开关 When 保存 Then payload 写入 promptInjections', async () => {
+    const channel = makeChannel();
+    const onSave = vi.fn(
+      async (channelId: string | null, draft: ChannelDraft): Promise<ChannelSettingsEntry> => ({
+        ...channel,
+        id: channelId ?? channel.id,
+        promptInjections: draft.promptInjections,
+      }),
+    );
+
+    render(
+      <ChannelSubscriptionSettings
+        channels={[channel]}
+        descriptors={[FEISHU_DESCRIPTOR]}
+        onSave={onSave}
+      />,
+    );
+
+    fireEvent.click(checkboxFor('注入 Agents 目录'));
+    fireEvent.click(checkboxFor('注入 MCP 目录'));
+    fireEvent.click(checkboxFor('注入 Commands 目录'));
+    fireEvent.click(screen.getByRole('button', { name: '保存改动' }));
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledTimes(1);
+    });
+    const firstCall = onSave.mock.calls[0];
+    if (!firstCall) {
+      throw new Error('Expected onSave to be called');
+    }
+    expect(firstCall[1].promptInjections).toEqual({
+      capabilityContext: {
+        agents: false,
+        skills: true,
+        mcps: false,
+        tools: true,
+        toolGroups: {
+          web: true,
+          lsp: true,
+          files: true,
+          shell: true,
+          orchestration: true,
+          session: true,
+          mcp: true,
+          desktop: true,
+          repo: true,
+          channel: true,
+          other: true,
+        },
+        commands: false,
+      },
+    });
+  });
+
+  it('Given Tools 注入已开启 When 关闭 LSP 细分目录 Then payload 写入 toolGroups', async () => {
+    const channel = makeChannel();
+    const onSave = vi.fn(
+      async (channelId: string | null, draft: ChannelDraft): Promise<ChannelSettingsEntry> => ({
+        ...channel,
+        id: channelId ?? channel.id,
+        promptInjections: draft.promptInjections,
+      }),
+    );
+
+    render(
+      <ChannelSubscriptionSettings
+        channels={[channel]}
+        descriptors={[FEISHU_DESCRIPTOR]}
+        capabilityCatalogCounts={{
+          agents: 30,
+          skills: 28,
+          mcps: 6,
+          tools: 90,
+          toolGroups: {
+            web: 3,
+            lsp: 10,
+            files: 12,
+            shell: 8,
+            orchestration: 11,
+            session: 8,
+            mcp: 3,
+            desktop: 4,
+            repo: 10,
+            channel: 21,
+            other: 0,
+          },
+          commands: 18,
+        }}
+        onSave={onSave}
+      />,
+    );
+
+    expect(screen.queryByText('LSP')).toBeNull();
+    fireEvent.click(checkboxFor('允许模型调用工作台工具'));
+    expect(await screen.findByText('LSP')).toBeTruthy();
+    fireEvent.click(checkboxFor('LSP'));
+    fireEvent.click(screen.getByRole('button', { name: '保存改动' }));
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledTimes(1);
+    });
+    expect(onSave.mock.calls[0]?.[1].promptInjections.capabilityContext.toolGroups.lsp).toBe(false);
+  });
+
+  it('Given preview counts are narrower than global catalog When rendering tool groups Then it follows preview counts', async () => {
+    render(
+      <ChannelSubscriptionSettings
+        channels={[{ ...makeChannel(), channelLlmToolsEnabled: true }]}
+        descriptors={[FEISHU_DESCRIPTOR]}
+        capabilityCatalogCounts={{
+          agents: 30,
+          skills: 28,
+          mcps: 6,
+          tools: 90,
+          toolGroups: {
+            web: 3,
+            lsp: 10,
+            files: 12,
+            shell: 8,
+            orchestration: 11,
+            session: 8,
+            mcp: 3,
+            desktop: 4,
+            repo: 10,
+            channel: 21,
+            other: 0,
+          },
+          commands: 18,
+        }}
+        onResolveCapabilityCatalogCounts={vi.fn(async () => ({
+          agents: 30,
+          skills: 28,
+          mcps: 6,
+          tools: 1,
+          toolGroups: {
+            web: 0,
+            lsp: 1,
+            files: 0,
+            shell: 0,
+            orchestration: 0,
+            session: 0,
+            mcp: 0,
+            desktop: 0,
+            repo: 0,
+            channel: 0,
+            other: 0,
+          },
+          commands: 18,
+        }))}
+        onSave={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText('文件与工作区')).toBeNull();
+    });
+    expect(screen.getByText('LSP')).toBeTruthy();
+    expect(screen.getAllByText('当前共 1 个').length).toBeGreaterThan(0);
+  });
+
+  it('Given 切换回复语言 When 保存 Then payload 写入 replyLanguage', async () => {
+    const channel = makeChannel();
+    const onSave = vi.fn(
+      async (channelId: string | null, draft: ChannelDraft): Promise<ChannelSettingsEntry> => ({
+        ...channel,
+        id: channelId ?? channel.id,
+        replyLanguage: draft.replyLanguage,
+      }),
+    );
+
+    render(
+      <ChannelSubscriptionSettings
+        channels={[channel]}
+        descriptors={[FEISHU_DESCRIPTOR]}
+        onSave={onSave}
+      />,
+    );
+
+    expect(selectFor('回复语言').value).toBe('zh-CN');
+
+    fireEvent.change(selectFor('回复语言'), { target: { value: 'en-US' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存改动' }));
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledTimes(1);
+    });
+    expect(onSave.mock.calls[0]?.[1].replyLanguage).toBe('en-US');
+  });
+
+  it('Given 群聊要求显式提及 When 关闭触发限制并保存 Then payload 移除 requireMentionInGroup', async () => {
+    const channel = makeTelegramChannel({
+      botToken: 'telegram_token',
+      requireMentionInGroup: '1',
+    });
+    const onSave = vi.fn(
+      async (channelId: string | null, draft: ChannelDraft): Promise<ChannelSettingsEntry> => ({
+        ...channel,
+        id: channelId ?? channel.id,
+        config: draft.config,
+      }),
+    );
+
+    render(
+      <ChannelSubscriptionSettings
+        channels={[channel]}
+        descriptors={[TELEGRAM_DESCRIPTOR]}
+        onSave={onSave}
+      />,
+    );
+
+    const mentionToggle = checkboxFor('仅在明确 @ 机器人时触发');
+    expect(mentionToggle.checked).toBe(true);
+
+    fireEvent.click(mentionToggle);
+    fireEvent.click(screen.getByRole('button', { name: '保存改动' }));
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledTimes(1);
+    });
+    expect(onSave.mock.calls[0]?.[1].config['requireMentionInGroup']).toBeUndefined();
+  });
+
+  it('Given 空白的群成员 ACL When 新增成员规则 Then 结构化面板保留未完成规则', async () => {
+    render(
+      <ChannelSubscriptionSettings
+        channels={[makeTelegramChannel()]}
+        descriptors={[TELEGRAM_DESCRIPTOR]}
+        onSave={vi.fn()}
+      />,
+    );
+
+    const aclPanel = panelByTitle('群成员访问控制');
+    fireEvent.click(within(aclPanel).getByRole('button', { name: '新增成员规则' }));
+
+    expect(await within(aclPanel).findByText('成员规则 1')).toBeTruthy();
+    expect(within(aclPanel).getByLabelText('成员规则 1 的平台 senderId')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '保存改动' }).hasAttribute('disabled')).toBe(true);
+  });
+
+  it('Given 已配置的群成员 ACL When 调整备注与工具 Then payload 回写结构化 memberAclJson', async () => {
+    const channel = makeTelegramChannel({
+      botToken: 'telegram_token',
+      memberAclJson: JSON.stringify(
+        [
+          {
+            platformUserId: '123456',
+            senderName: 'Alice',
+            toolAllowlist: ['PluginReplyMessage'],
+            permissions: {
+              allowShell: true,
+            },
+          },
+        ],
+        null,
+        2,
+      ),
+    });
+    const onSave = vi.fn(
+      async (channelId: string | null, draft: ChannelDraft): Promise<ChannelSettingsEntry> => ({
+        ...channel,
+        id: channelId ?? channel.id,
+        config: draft.config,
+      }),
+    );
+
+    render(
+      <ChannelSubscriptionSettings
+        channels={[channel]}
+        descriptors={[TELEGRAM_DESCRIPTOR]}
+        onSave={onSave}
+      />,
+    );
+
+    const aclPanel = panelByTitle('群成员访问控制');
+    fireEvent.change(within(aclPanel).getByDisplayValue('Alice'), {
+      target: { value: 'Alice Ops' },
+    });
+    fireEvent.click(within(aclPanel).getByText('网页搜索'));
+    fireEvent.click(screen.getByRole('button', { name: '保存改动' }));
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledTimes(1);
+    });
+
+    const serializedAcl = onSave.mock.calls[0]?.[1].config['memberAclJson'];
+    expect(serializedAcl).toBeTruthy();
+    const parsedAcl = JSON.parse(serializedAcl ?? '[]') as Array<{
+      platformUserId: string;
+      senderName?: string;
+      toolAllowlist?: string[];
+      permissions?: { allowShell?: boolean };
+    }>;
+    expect(parsedAcl).toEqual([
+      {
+        platformUserId: '123456',
+        senderName: 'Alice Ops',
+        toolAllowlist: ['PluginReplyMessage', 'web_search'],
+        permissions: {
+          allowShell: true,
+        },
+      },
+    ]);
+  });
+
+  it('Given 非法的群成员 ACL JSON When 打开面板 Then 回退到原始 JSON 修复模式', async () => {
+    render(
+      <ChannelSubscriptionSettings
+        channels={[
+          makeTelegramChannel({
+            botToken: 'telegram_token',
+            memberAclJson: '{"broken":',
+          }),
+        ]}
+        descriptors={[TELEGRAM_DESCRIPTOR]}
+        onSave={vi.fn()}
+      />,
+    );
+
+    const aclPanel = panelByTitle('群成员访问控制');
+    expect(within(aclPanel).getByText(/结构化面板暂时不可用/)).toBeTruthy();
+    expect(within(aclPanel).getByLabelText('群成员 ACL 原始 JSON')).toBeTruthy();
+  });
+
+  it('Given 结构错误的群成员 ACL JSON When 打开面板 Then 回退到原始 JSON 修复模式', async () => {
+    render(
+      <ChannelSubscriptionSettings
+        channels={[
+          makeTelegramChannel({
+            botToken: 'telegram_token',
+            memberAclJson: JSON.stringify(['broken-shape']),
+          }),
+        ]}
+        descriptors={[TELEGRAM_DESCRIPTOR]}
+        onSave={vi.fn()}
+      />,
+    );
+
+    const aclPanel = panelByTitle('群成员访问控制');
+    expect(within(aclPanel).getByText(/结构化面板暂时不可用/)).toBeTruthy();
+    expect(within(aclPanel).getByLabelText('群成员 ACL 原始 JSON')).toBeTruthy();
   });
 
   it('Given 微信模板尚未扫码绑定 When 创建实例 Then 允许空凭证先保存', async () => {

@@ -119,7 +119,7 @@ export function UnlockOverlay({ onUnlocked }: { onUnlocked: () => void }) {
           border: '1px solid var(--border-subtle)',
           minWidth: 360,
           maxWidth: 420,
-          boxShadow: '0 24px 60px -16px rgba(0,0,0,0.45)',
+          boxShadow: 'var(--shadow-lg)',
         }}
         onClick={(e) => e.stopPropagation()}
       >

@@ -40,6 +40,18 @@ describe('buildAISdkProvider', () => {
     });
     expect(built.protocol).toBe('chat_completions');
   });
+
+  it('honors an explicit Anthropic Messages protocol for a Mimo-compatible relay', () => {
+    const built = buildAISdkProvider({
+      providerType: 'mimo',
+      apiKey: 'test',
+      baseURL: 'https://relay.example.test/v1',
+      upstreamProtocol: 'anthropic_messages',
+    });
+
+    expect(built.protocol).toBe('anthropic_messages');
+    expect(built.languageModel('mimo-v2.5')).toBeTruthy();
+  });
 });
 
 // ─── Stream runner ──────────────────────────────────────────────────

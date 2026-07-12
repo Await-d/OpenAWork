@@ -45,7 +45,7 @@ const TOGGLE_KNOB: CSSProperties = {
   width: 12,
   height: 12,
   borderRadius: '50%',
-  background: '#fff',
+  background: 'var(--fg-on-accent)',
   transition: 'transform 0.15s',
 };
 

@@ -9,7 +9,8 @@
  */
 
 import React from 'react';
-import { BP, SS, ST } from '../shared/settings-section-styles.js';
+import type { CSSProperties } from 'react';
+import { BP, SS } from '../shared/settings-section-styles.js';
 import type {
   WebsearchPolicy,
   WebsearchProvider,
@@ -56,7 +57,55 @@ const ROLLOUT_MODES: ReadonlyArray<{ id: WebsearchRolloutMode; label: string; hi
   },
 ];
 
-const PILL_BUTTON: React.CSSProperties = {
+// ── 样式常量 ──────────────────────────────────────────────────
+
+const SECTION_HEADER: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+};
+
+const SECTION_ICON_WRAP: CSSProperties = {
+  width: 24,
+  height: 24,
+  borderRadius: 6,
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  flexShrink: 0,
+};
+
+const SECTION_TITLE_TEXT: CSSProperties = {
+  fontSize: 12,
+  fontWeight: 700,
+  color: 'var(--fg-strong)',
+};
+
+/** 子区块分组容器 —— 用于 rollout / provider 列表 / 超时等逻辑分组 */
+const SUBGROUP: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 8,
+};
+
+/** 子区块之间的分隔线 */
+const DIVIDER: CSSProperties = {
+  height: 1,
+  background: 'var(--border-subtle)',
+  margin: '2px 0',
+  flexShrink: 0,
+};
+
+const SUBGROUP_LABEL: CSSProperties = {
+  fontSize: 11,
+  fontWeight: 600,
+  color: 'var(--fg-default)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+};
+
+const PILL_BUTTON: CSSProperties = {
   minWidth: 52,
   borderRadius: 999,
   border: '1px solid var(--border-default)',
@@ -69,15 +118,107 @@ const PILL_BUTTON: React.CSSProperties = {
   transition: 'all 150ms ease',
 };
 
-const INPUT_STYLE: React.CSSProperties = {
-  flex: '1 1 160px',
-  minWidth: 120,
-  padding: '5px 8px',
+const INPUT_STYLE: CSSProperties = {
+  flex: '1 1 140px',
+  minWidth: 100,
+  padding: '6px 8px',
   border: '1px solid var(--border-default)',
   borderRadius: 6,
   fontSize: 11,
   background: 'var(--bg-overlay)',
   color: 'var(--fg-strong)',
+  outline: 'none',
+};
+
+const PROVIDER_ROW: CSSProperties = {
+  display: 'flex',
+  gap: 8,
+  alignItems: 'center',
+  padding: '8px 10px',
+  border: '1px solid var(--border-subtle)',
+  borderRadius: 8,
+  background: 'var(--bg-overlay)',
+  transition: 'border-color 150ms ease',
+};
+
+const PROVIDER_NAME: CSSProperties = {
+  fontSize: 11,
+  fontWeight: 700,
+  color: 'var(--fg-strong)',
+  width: 100,
+  flexShrink: 0,
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+};
+
+const PROVIDER_INDEX: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 18,
+  height: 18,
+  borderRadius: 4,
+  background: 'var(--accent-muted)',
+  color: 'var(--accent)',
+  fontSize: 10,
+  fontWeight: 700,
+  flexShrink: 0,
+};
+
+const PROVIDER_INPUTS: CSSProperties = {
+  display: 'flex',
+  gap: 6,
+  alignItems: 'center',
+  flex: 1,
+  minWidth: 0,
+};
+
+const PROVIDER_ACTIONS: CSSProperties = {
+  display: 'inline-flex',
+  gap: 4,
+  flexShrink: 0,
+};
+
+const EMPTY_STATE: CSSProperties = {
+  padding: '8px 12px',
+  border: '1px dashed var(--border-emphasis)',
+  borderRadius: 8,
+  color: 'var(--fg-muted)',
+  fontSize: 11,
+  lineHeight: 1.4,
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+};
+
+const SAVED_BADGE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 4,
+  padding: '3px 8px',
+  borderRadius: 999,
+  background: 'var(--accent-muted)',
+  color: 'var(--accent)',
+  fontSize: 10,
+  fontWeight: 600,
+  border: '1px solid var(--accent-border)',
+  flexShrink: 0,
+};
+
+const ROLLOUT_HINT: CSSProperties = {
+  fontSize: 11,
+  color: 'var(--fg-muted)',
+  lineHeight: 1.4,
+  display: 'flex',
+  alignItems: 'flex-start',
+  gap: 4,
+};
+
+const ADD_BTN_GROUP: CSSProperties = {
+  display: 'flex',
+  gap: 6,
+  flexWrap: 'wrap',
 };
 
 function shallowEqualPolicy(a: WebsearchPolicy, b: WebsearchPolicy): boolean {
@@ -119,9 +260,6 @@ export function WebsearchSection({
 
   function addProvider(provider: WebsearchProvider): void {
     setPolicy((prev) => {
-      // Cap the configured list at the gateway-side schema's maximum
-      // (8 entries). We deliberately do not silently drop further
-      // additions — the button is just disabled instead.
       if (prev.providers.length >= 8) return prev;
       return {
         ...prev,
@@ -149,48 +287,70 @@ export function WebsearchSection({
   }
 
   return (
-    <section style={{ ...SS, marginBottom: 0, padding: '10px 12px', gap: '0.5rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-        <div style={{ minWidth: 200, flex: '1 1 240px' }}>
-          <h3 style={ST}>Web 搜索 Provider</h3>
-          <p
-            style={{
-              margin: '2px 0 0',
-              color: 'var(--fg-default)',
-              fontSize: 11,
-              lineHeight: 1.5,
-            }}
-          >
-            为 LLM 工具 <code>websearch</code> 配置 provider 列表。未配置时仍按默认 DuckDuckGo
-            单次调用；多 provider 配合并行 rollout 模式可获得更稳的覆盖。
-          </p>
-        </div>
-        <div
+    <section style={{ ...SS, marginBottom: 0, padding: '12px 16px', gap: '10px' }}>
+      {/* ── 标题行 ── */}
+      <div style={SECTION_HEADER}>
+        <span
           style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '4px 8px',
-            borderRadius: 999,
-            background: 'color-mix(in srgb, var(--accent) 10%, transparent)',
+            ...SECTION_ICON_WRAP,
+            background: 'var(--accent-muted)',
+            border: '1px solid var(--accent-border)',
             color: 'var(--accent)',
-            fontSize: 11,
-            fontWeight: 600,
           }}
         >
-          已保存
-          <span style={{ color: 'var(--fg-strong)', fontWeight: 700 }}>
-            {savedPolicy.providers.length} 个 / {savedPolicy.rolloutMode}
-          </span>
-        </div>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M12 2L2 7l10 5 10-5-10-5z" />
+            <path d="M2 17l10 5 10-5M2 12l10 5 10-5" />
+          </svg>
+        </span>
+        <span style={SECTION_TITLE_TEXT}>Web 搜索 Provider</span>
+        <span style={SAVED_BADGE}>
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+            <path d="M22 4L12 14.01l-3-3" />
+          </svg>
+          {savedPolicy.providers.length} 个 / {savedPolicy.rolloutMode}
+        </span>
       </div>
+      {/* 描述文字 */}
+      <p
+        style={{
+          margin: 0,
+          color: 'var(--fg-muted)',
+          fontSize: 11,
+          lineHeight: 1.5,
+        }}
+      >
+        为原生 <code>websearch</code> 配置 provider 回退链路。未配置时按默认 DuckDuckGo 单次调用。
+      </p>
 
-      {/* Rollout mode picker */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-default)' }}>
-          Rollout 模式
+      {/* ── 分隔线 ── */}
+      <div style={DIVIDER} />
+
+      {/* ── Rollout 模式 ── */}
+      <div style={SUBGROUP}>
+        <div style={SUBGROUP_LABEL}>
+          <span>Rollout 模式</span>
         </div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {ROLLOUT_MODES.map((mode) => {
             const selected = mode.id === policy.rolloutMode;
             return (
@@ -202,11 +362,11 @@ export function WebsearchSection({
                 onClick={() => setPolicy((prev) => ({ ...prev, rolloutMode: mode.id }))}
                 style={{
                   ...PILL_BUTTON,
-                  background: selected
-                    ? 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay))'
-                    : PILL_BUTTON.background,
+                  background: selected ? 'var(--accent-muted)' : 'var(--bg-overlay)',
                   borderColor: selected ? 'var(--accent)' : 'var(--border-default)',
-                  color: selected ? 'var(--accent)' : PILL_BUTTON.color,
+                  color: selected ? 'var(--accent)' : 'var(--fg-default)',
+                  boxShadow: selected ? '0 0 0 3px var(--accent-subtle)' : 'none',
+                  padding: '6px 14px',
                 }}
               >
                 {mode.label}
@@ -214,85 +374,113 @@ export function WebsearchSection({
             );
           })}
         </div>
-        <span style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.4 }}>
+        <span style={ROLLOUT_HINT}>
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ flexShrink: 0, marginTop: 1, opacity: 0.7 }}
+          >
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 16v-4M12 8h.01" />
+          </svg>
           {ROLLOUT_MODES.find((m) => m.id === policy.rolloutMode)?.hint ?? ''}
         </span>
       </div>
 
-      {/* Configured provider list */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-default)' }}>
-          已配置 provider（{policy.providers.length} / 8）
-        </div>
-        {policy.providers.length === 0 && (
-          <div
+      {/* ── 分隔线 ── */}
+      <div style={DIVIDER} />
+
+      {/* ── Provider 列表 ── */}
+      <div style={SUBGROUP}>
+        <div style={SUBGROUP_LABEL}>
+          <span>已配置 provider</span>
+          <span
             style={{
-              padding: '6px 10px',
-              border: '1px dashed var(--border-default)',
-              borderRadius: 6,
-              color: 'var(--fg-muted)',
               fontSize: 11,
-              lineHeight: 1.4,
+              fontWeight: 600,
+              color: policy.providers.length >= 8 ? 'var(--contrast)' : 'var(--fg-muted)',
             }}
           >
-            未配置时，<code>websearch</code> 会回退到内置默认（DuckDuckGo 免 key）。
+            {policy.providers.length} / 8
+          </span>
+        </div>
+
+        {policy.providers.length === 0 && (
+          <div style={EMPTY_STATE}>
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{ flexShrink: 0, opacity: 0.6 }}
+            >
+              <circle cx="11" cy="11" r="8" />
+              <path d="M21 21l-4.35-4.35" />
+            </svg>
+            <span>
+              未配置时，原生 <code>websearch</code> 会回退到内置默认（DuckDuckGo 免 key）。
+            </span>
           </div>
         )}
+
         {policy.providers.map((entry, index) => {
           const meta = PROVIDER_OPTIONS.find((opt) => opt.id === entry.provider);
           return (
             <div
               key={`${entry.provider}-${index}`}
-              style={{
-                display: 'flex',
-                gap: 6,
-                alignItems: 'center',
-                flexWrap: 'wrap',
-                padding: 6,
-                border: '1px solid var(--border-subtle)',
-                borderRadius: 6,
-                background: 'var(--bg-overlay)',
+              style={PROVIDER_ROW}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = 'var(--border-emphasis)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = 'var(--border-subtle)';
               }}
             >
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  color: 'var(--fg-strong)',
-                  minWidth: 88,
-                }}
-              >
+              <span style={PROVIDER_NAME}>
+                <span style={PROVIDER_INDEX}>{index + 1}</span>
                 {meta?.label ?? entry.provider}
               </span>
-              <input
-                type="password"
-                placeholder={meta?.needsKey ? 'API key（必填）' : 'API key（可选）'}
-                value={entry.apiKey ?? ''}
-                onChange={(e) => updateProviderAt(index, { apiKey: e.target.value })}
-                style={INPUT_STYLE}
-                autoComplete="off"
-              />
-              <input
-                type="text"
-                placeholder="Base URL（可选）"
-                value={entry.baseUrl ?? ''}
-                onChange={(e) => updateProviderAt(index, { baseUrl: e.target.value })}
-                style={INPUT_STYLE}
-              />
-              <input
-                type="number"
-                placeholder="权重"
-                value={entry.weight ?? ''}
-                min={0}
-                max={100}
-                onChange={(e) =>
-                  updateProviderAt(index, {
-                    weight: e.target.value === '' ? undefined : Number(e.target.value),
-                  })
-                }
-                style={{ ...INPUT_STYLE, flex: '0 0 80px', minWidth: 64 }}
-              />
-              <div style={{ display: 'inline-flex', gap: 3 }}>
+              <div style={PROVIDER_INPUTS}>
+                <input
+                  type="password"
+                  placeholder={meta?.needsKey ? 'API key（必填）' : 'API key（可选）'}
+                  value={entry.apiKey ?? ''}
+                  onChange={(e) => updateProviderAt(index, { apiKey: e.target.value })}
+                  style={INPUT_STYLE}
+                  autoComplete="off"
+                />
+                <input
+                  type="text"
+                  placeholder="Base URL（可选）"
+                  value={entry.baseUrl ?? ''}
+                  onChange={(e) => updateProviderAt(index, { baseUrl: e.target.value })}
+                  style={INPUT_STYLE}
+                />
+                <input
+                  type="number"
+                  placeholder="权重"
+                  value={entry.weight ?? ''}
+                  min={0}
+                  max={100}
+                  onChange={(e) =>
+                    updateProviderAt(index, {
+                      weight: e.target.value === '' ? undefined : Number(e.target.value),
+                    })
+                  }
+                  style={{ ...INPUT_STYLE, flex: '0 0 64px', minWidth: 64 }}
+                />
+              </div>
+              <div style={PROVIDER_ACTIONS}>
                 <button
                   type="button"
                   onClick={() => moveProviderAt(index, -1)}
@@ -301,8 +489,9 @@ export function WebsearchSection({
                   style={{
                     ...PILL_BUTTON,
                     minWidth: 28,
-                    padding: '3px 6px',
+                    padding: '4px 7px',
                     opacity: index === 0 ? 0.4 : 1,
+                    cursor: index === 0 ? 'not-allowed' : 'pointer',
                   }}
                 >
                   ↑
@@ -315,8 +504,9 @@ export function WebsearchSection({
                   style={{
                     ...PILL_BUTTON,
                     minWidth: 28,
-                    padding: '3px 6px',
+                    padding: '4px 7px',
                     opacity: index === policy.providers.length - 1 ? 0.4 : 1,
+                    cursor: index === policy.providers.length - 1 ? 'not-allowed' : 'pointer',
                   }}
                 >
                   ↓
@@ -328,8 +518,9 @@ export function WebsearchSection({
                   style={{
                     ...PILL_BUTTON,
                     minWidth: 28,
-                    padding: '3px 6px',
-                    color: 'var(--danger)',
+                    padding: '4px 7px',
+                    color: 'var(--complement)',
+                    borderColor: 'var(--border-default)',
                   }}
                 >
                   ×
@@ -339,8 +530,8 @@ export function WebsearchSection({
           );
         })}
 
-        {/* Add buttons */}
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+        {/* 添加 provider 按钮 */}
+        <div style={ADD_BTN_GROUP}>
           {PROVIDER_OPTIONS.map((opt) => (
             <button
               key={opt.id}
@@ -351,6 +542,7 @@ export function WebsearchSection({
                 ...PILL_BUTTON,
                 opacity: policy.providers.length >= 8 ? 0.5 : 1,
                 cursor: policy.providers.length >= 8 ? 'not-allowed' : 'pointer',
+                padding: '5px 10px',
               }}
             >
               + {opt.label}
@@ -359,48 +551,58 @@ export function WebsearchSection({
         </div>
       </div>
 
-      {/* Optional merge timeout */}
-      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-        <label style={{ fontSize: 11, color: 'var(--fg-default)' }}>
-          合并模式超时 (ms)，仅 <code>merge</code> 生效；范围 1000–120000：
-        </label>
-        <input
-          type="number"
-          min={1000}
-          max={120000}
-          step={500}
-          placeholder="不限"
-          value={policy.timeoutMs ?? ''}
-          onChange={(e) =>
-            setPolicy((prev) => ({
-              ...prev,
-              timeoutMs: e.target.value === '' ? undefined : Number(e.target.value),
-            }))
-          }
-          style={{ ...INPUT_STYLE, flex: '0 0 100px' }}
-        />
-      </div>
+      {/* ── 分隔线 ── */}
+      <div style={DIVIDER} />
 
+      {/* ── 合并超时 + 底部操作栏 ── */}
       <div
         style={{
           display: 'flex',
-          justifyContent: 'space-between',
           alignItems: 'center',
-          gap: 8,
+          gap: 12,
           flexWrap: 'wrap',
         }}
       >
-        <span style={{ color: 'var(--fg-muted)', fontSize: 11, lineHeight: 1.4 }}>
-          LLM 在调用 websearch 时显式指定 provider 仍会被尊重；多 provider rollout 仅在 LLM
-          未指定时生效。
+        <label
+          style={{
+            fontSize: 11,
+            color: 'var(--fg-default)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            flexShrink: 0,
+          }}
+        >
+          <code>merge</code> 超时
+          <input
+            type="number"
+            min={1000}
+            max={120000}
+            step={500}
+            placeholder="不限"
+            value={policy.timeoutMs ?? ''}
+            onChange={(e) =>
+              setPolicy((prev) => ({
+                ...prev,
+                timeoutMs: e.target.value === '' ? undefined : Number(e.target.value),
+              }))
+            }
+            style={{ ...INPUT_STYLE, flex: '0 0 80px', minWidth: 80, width: 80 }}
+          />
+          <span style={{ color: 'var(--fg-muted)', fontSize: 10 }}>ms</span>
+        </label>
+
+        <span style={{ flex: 1, color: 'var(--fg-subtle)', fontSize: 10, lineHeight: 1.4 }}>
+          LLM 显式指定 provider 时始终优先
         </span>
+
         <button
           type="button"
           onClick={onSave}
           disabled={!isDirty || isSaving}
           style={{
             ...BP,
-            padding: '5px 12px',
+            padding: '6px 16px',
             opacity: !isDirty || isSaving ? 0.6 : 1,
             cursor: !isDirty || isSaving ? 'not-allowed' : 'pointer',
           }}

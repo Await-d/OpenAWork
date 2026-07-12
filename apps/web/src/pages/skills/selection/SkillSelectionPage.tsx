@@ -107,7 +107,7 @@ const PILL: React.CSSProperties = {
   fontSize: 11,
   padding: '2px 6px',
   borderRadius: 6,
-  background: 'var(--accent-soft, rgba(99,102,241,0.12))',
+  background: 'var(--accent-muted)',
   color: 'var(--accent)',
 };
 

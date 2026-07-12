@@ -218,6 +218,11 @@ describe('resources routes', () => {
       expect(body.resources.mcps).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
+            id: 'open_websearch',
+            name: 'open_websearch',
+            integration: 'builtin',
+          }),
+          expect.objectContaining({
             id: 'websearch',
             name: 'websearch',
             integration: 'builtin',

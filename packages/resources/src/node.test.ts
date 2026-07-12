@@ -169,6 +169,12 @@ describe('resource catalog', () => {
     expect(catalog.mcps).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
+          id: 'open_websearch',
+          name: 'open_websearch',
+          integration: 'builtin',
+          transport: 'stdio',
+        }),
+        expect.objectContaining({
           id: 'websearch',
           name: 'websearch',
           integration: 'builtin',

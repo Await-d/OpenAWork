@@ -30,6 +30,7 @@ export type ModelRequest = z.infer<typeof modelRequestSchema>;
 
 export interface ModelRouteConfig {
   model: string;
+  providerId?: string;
   variant?: string;
   apiBaseUrl: string;
   apiKey: string;
@@ -83,9 +84,30 @@ const normalizeBaseUrl = (value: string | undefined): string => {
   return withProtocol.replace(/\/+$/, '');
 };
 
+const normalizeRuntimeBaseUrl = (
+  providerType: AIProvider['type'] | undefined,
+  baseUrl: string,
+): string => {
+  if (providerType !== 'openai' || baseUrl.length === 0) {
+    return baseUrl;
+  }
+
+  try {
+    const url = new URL(baseUrl);
+    if (url.pathname === '/' || url.pathname.length === 0) {
+      url.pathname = '/v1';
+      return url.toString().replace(/\/+$/, '');
+    }
+  } catch {
+    return baseUrl;
+  }
+
+  return baseUrl;
+};
+
 const resolveProviderDefaultBaseUrl = (providerType: AIProvider['type']): string => {
   if (providerType === 'openai') {
-    return normalizeBaseUrl(getOpenAiBaseUrl());
+    return normalizeRuntimeBaseUrl(providerType, normalizeBaseUrl(getOpenAiBaseUrl()));
   }
 
   if (providerType === 'anthropic') {
@@ -145,11 +167,14 @@ export function resolveModelRoute(request: ModelRequest): ModelRouteConfig {
   const providerType =
     builtinProvider?.type ?? (model.startsWith('claude') ? 'anthropic' : undefined);
   const isAnthropic = providerType === 'anthropic';
-  const apiBaseUrl = normalizeBaseUrl(
-    (builtinProvider ? resolveProviderDefaultBaseUrl(builtinProvider.type) : undefined) ??
-      (isAnthropic
-        ? (globalThis.process?.env['ANTHROPIC_API_BASE_URL'] ?? 'https://api.anthropic.com/v1')
-        : getOpenAiBaseUrl()),
+  const apiBaseUrl = normalizeRuntimeBaseUrl(
+    providerType,
+    normalizeBaseUrl(
+      (builtinProvider ? resolveProviderDefaultBaseUrl(builtinProvider.type) : undefined) ??
+        (isAnthropic
+          ? (globalThis.process?.env['ANTHROPIC_API_BASE_URL'] ?? 'https://api.anthropic.com/v1')
+          : getOpenAiBaseUrl()),
+    ),
   );
 
   // 方案 5：插件优先解析协议，fallback 到原有逻辑
@@ -175,6 +200,7 @@ export function resolveModelRoute(request: ModelRequest): ModelRouteConfig {
 
   return {
     model,
+    ...(builtinProvider?.id ? { providerId: builtinProvider.id } : {}),
     variant: request.variant,
     apiBaseUrl,
     apiKey,
@@ -207,8 +233,10 @@ export function resolveModelRouteFromProvider(
     modelConfig?.requestOverrides,
     modelId,
   );
-  const resolvedProviderBaseUrl =
-    normalizeBaseUrl(provider.baseUrl) || resolveProviderDefaultBaseUrl(provider.type);
+  const resolvedProviderBaseUrl = normalizeRuntimeBaseUrl(
+    provider.type,
+    normalizeBaseUrl(provider.baseUrl) || resolveProviderDefaultBaseUrl(provider.type),
+  );
 
   // 方案 5：插件优先解析协议（显式 override 仍然最优先）
   const upstreamProtocol =
@@ -243,6 +271,7 @@ export function resolveModelRouteFromProvider(
 
   return {
     model: modelId,
+    providerId: provider.id,
     variant: request.variant,
     apiBaseUrl: resolvedProviderBaseUrl,
     apiKey,
@@ -274,8 +303,10 @@ export function resolveCompactionRoute(
     modelConfig?.requestOverrides,
     modelId,
   );
-  const resolvedCompactionBaseUrl =
-    normalizeBaseUrl(provider.baseUrl) || resolveProviderDefaultBaseUrl(provider.type);
+  const resolvedCompactionBaseUrl = normalizeRuntimeBaseUrl(
+    provider.type,
+    normalizeBaseUrl(provider.baseUrl) || resolveProviderDefaultBaseUrl(provider.type),
+  );
 
   // 方案 5：插件优先解析协议
   const upstreamProtocol =
@@ -310,6 +341,7 @@ export function resolveCompactionRoute(
 
   return {
     model: modelId,
+    providerId: provider.id,
     apiBaseUrl: resolvedCompactionBaseUrl,
     apiKey,
     maxTokens: mergedOverrides.maxTokens ?? 4096,

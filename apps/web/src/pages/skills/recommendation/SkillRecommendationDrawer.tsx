@@ -56,7 +56,7 @@ export interface SkillRecommendationDrawerProps {
 const DRAWER_BACKDROP: React.CSSProperties = {
   position: 'fixed',
   inset: 0,
-  background: 'rgba(0,0,0,0.4)',
+  background: 'color-mix(in srgb, var(--bg-base) 55%, transparent)',
   zIndex: 50,
   display: 'flex',
   justifyContent: 'flex-end',
@@ -149,7 +149,7 @@ const PILL: React.CSSProperties = {
   fontSize: 11,
   padding: '2px 6px',
   borderRadius: 6,
-  background: 'var(--accent-soft, rgba(99,102,241,0.12))',
+  background: 'var(--accent-muted)',
   color: 'var(--accent)',
 };
 

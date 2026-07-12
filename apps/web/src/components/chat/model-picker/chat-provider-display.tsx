@@ -164,7 +164,7 @@ export function ProviderAvatar({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.04)',
+          boxShadow: 'var(--shadow-sm)',
         }}
       >
         <img
@@ -196,7 +196,7 @@ export function ProviderAvatar({
         flexShrink: 0,
         fontSize: size * 0.36,
         fontWeight: 700,
-        boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.04)',
+        boxShadow: 'var(--shadow-sm)',
       }}
     >
       {providerIdentity.fallbackGlyph ??
@@ -222,7 +222,7 @@ export function UserAvatar({ email, size = 32 }: { email: string; size?: number 
         fontSize: size * 0.4,
         fontWeight: 700,
         border: '1px solid color-mix(in oklab, var(--accent) 78%, white 22%)',
-        boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.18)',
+        boxShadow: 'var(--shadow-sm)',
       }}
     >
       {initials}

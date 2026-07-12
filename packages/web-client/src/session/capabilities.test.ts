@@ -102,4 +102,71 @@ describe('createCapabilitiesClient', () => {
       capabilities: [],
     });
   });
+
+  it('previewChannel 会向 channel-preview 发送 POST 并返回计数', async () => {
+    const calls: Array<{ readonly url: string; readonly init?: RequestInit }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({
+        url: typeof input === 'string' ? input : input.toString(),
+        init,
+      });
+      return {
+        ok: true,
+        json: async () => ({
+          counts: {
+            agents: 1,
+            skills: 2,
+            mcps: 3,
+            tools: 4,
+            toolGroups: {
+              web: 0,
+              lsp: 1,
+              files: 2,
+              shell: 0,
+              orchestration: 0,
+              session: 0,
+              mcp: 0,
+              desktop: 0,
+              repo: 1,
+              channel: 0,
+              other: 0,
+            },
+            commands: 5,
+          },
+        }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createCapabilitiesClient('http://localhost:3000');
+    const counts = await client.previewChannel('token-123', {
+      type: 'telegram',
+      channelLlmToolsEnabled: true,
+      tools: { read: true },
+      permissions: {
+        allowReadHome: false,
+        readablePathPrefixes: ['/workspace'],
+        allowWriteOutside: false,
+        allowShell: false,
+        allowSubAgents: false,
+      },
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe('http://localhost:3000/capabilities/channel-preview');
+    expect(calls[0]?.init?.method).toBe('POST');
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      type: 'telegram',
+      channelLlmToolsEnabled: true,
+      tools: { read: true },
+      permissions: {
+        allowReadHome: false,
+        readablePathPrefixes: ['/workspace'],
+        allowWriteOutside: false,
+        allowShell: false,
+        allowSubAgents: false,
+      },
+    });
+    expect(counts.toolGroups.files).toBe(2);
+    expect(counts.commands).toBe(5);
+  });
 });

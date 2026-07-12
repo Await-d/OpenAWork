@@ -11,7 +11,7 @@ describe('VirtualMcpProviderRegistry', () => {
     const providerIds = providers.map((provider) => provider.id);
     const resolvedProviders = providers.map((provider) => getVirtualMcpProvider(provider.id));
 
-    expect(providerIds).toEqual(['codegraph', 'git_bash', 'lsp', 'omo']);
+    expect(providerIds).toEqual(['open_websearch', 'codegraph', 'git_bash', 'lsp', 'omo']);
     expect(new Set(providerIds).size).toBe(providerIds.length);
     expect(resolvedProviders).toEqual(providers);
     expect(getVirtualMcpProvider('missing')).toBeUndefined();

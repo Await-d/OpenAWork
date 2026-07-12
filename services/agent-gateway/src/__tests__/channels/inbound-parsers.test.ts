@@ -4,11 +4,28 @@ import {
   parseDiscordInboundMessage,
   parseFeishuInboundMessage,
   parseQQInboundMessage,
+  parseSlackInboundMessage,
   parseTelegramInboundMessage,
   parseWeComInboundMessage,
   parseWeixinInboundMessage,
   parseWhatsAppInboundMessage,
 } from '../../channels/inbound-parsers.js';
+import type { ChannelInstance } from '../../channels/types.js';
+
+function makeChannel(
+  type: ChannelInstance['type'],
+  config: Record<string, string> = {},
+): ChannelInstance {
+  return {
+    id: `${type}-channel`,
+    type,
+    name: `${type}-channel`,
+    enabled: true,
+    config,
+    createdAt: 0,
+    updatedAt: 0,
+  };
+}
 
 describe('channel inbound parsers', () => {
   it('解析通用 relay envelope', () => {
@@ -61,6 +78,218 @@ describe('channel inbound parsers', () => {
       content: 'ship it',
     });
     expect(bot).toBeNull();
+  });
+
+  it('按配置要求 Telegram 群聊必须 @ 机器人，并规范 /command@bot 形式', () => {
+    const context = {
+      channel: makeChannel('telegram', { requireMentionInGroup: 'true' }),
+      botUsername: 'OpenAWorkBot',
+    };
+    const addressed = parseTelegramInboundMessage(
+      {
+        message: {
+          message_id: 1001,
+          from: { id: 42, first_name: 'Alice' },
+          chat: { id: -1001, title: '产品群', type: 'supergroup' },
+          text: '/stats@OpenAWorkBot',
+          date: 1_788_000_000,
+        },
+      },
+      context,
+    );
+    const ignored = parseTelegramInboundMessage(
+      {
+        message: {
+          message_id: 1002,
+          from: { id: 42, first_name: 'Alice' },
+          chat: { id: -1001, title: '产品群', type: 'supergroup' },
+          text: '普通群聊消息',
+          date: 1_788_000_000,
+        },
+      },
+      context,
+    );
+
+    expect(addressed).toMatchObject({
+      chatId: '-1001',
+      chatName: '产品群',
+      content: '/stats',
+    });
+    expect(ignored).toBeNull();
+  });
+
+  it('Telegram relay envelope 也会遵守群聊 mention 门槛', () => {
+    const context = {
+      channel: makeChannel('telegram', { requireMentionInGroup: 'true' }),
+      botUsername: 'OpenAWorkBot',
+    };
+    const addressed = parseTelegramInboundMessage(
+      {
+        chatId: '-1001',
+        senderId: '42',
+        senderName: 'Alice',
+        content: '@OpenAWorkBot /stats',
+        messageId: 'relay-tg-1',
+        timestamp: 1_788_000_000_000,
+      },
+      context,
+    );
+    const ignored = parseTelegramInboundMessage(
+      {
+        chatId: '-1001',
+        senderId: '42',
+        senderName: 'Alice',
+        content: '/stats',
+        messageId: 'relay-tg-2',
+        timestamp: 1_788_000_000_000,
+      },
+      context,
+    );
+
+    expect(addressed).toMatchObject({
+      id: 'relay-tg-1',
+      chatId: '-1001',
+      content: '/stats',
+    });
+    expect(ignored).toBeNull();
+  });
+
+  it('Telegram 缺少 botUsername 时，不会把任意 @ 当成群聊命中', () => {
+    const ignored = parseTelegramInboundMessage(
+      {
+        message: {
+          message_id: 1003,
+          from: { id: 42, first_name: 'Alice' },
+          chat: { id: -1001, title: '产品群', type: 'supergroup' },
+          text: '@OtherBot 普通消息',
+          date: 1_788_000_000,
+        },
+      },
+      {
+        channel: makeChannel('telegram', { requireMentionInGroup: 'true' }),
+      },
+    );
+
+    expect(ignored).toBeNull();
+  });
+
+  it('按配置要求 Discord 群频道必须 @ 机器人', () => {
+    const context = {
+      channel: makeChannel('discord', { requireMentionInGroup: 'true' }),
+      botId: 'discord-bot-1',
+    };
+    const addressed = parseDiscordInboundMessage(
+      {
+        t: 'MESSAGE_CREATE',
+        d: {
+          id: 'm-discord-mentioned',
+          guild_id: 'guild-1',
+          channel_id: 'c-discord',
+          content: '<@discord-bot-1> ship it',
+          timestamp: '2026-07-08T12:00:00.000Z',
+          mentions: [{ id: 'discord-bot-1' }],
+          author: { id: 'u-discord', username: 'Dev' },
+        },
+      },
+      context,
+    );
+    const ignored = parseDiscordInboundMessage(
+      {
+        t: 'MESSAGE_CREATE',
+        d: {
+          id: 'm-discord-ignored',
+          guild_id: 'guild-1',
+          channel_id: 'c-discord',
+          content: 'ship it',
+          timestamp: '2026-07-08T12:00:00.000Z',
+          author: { id: 'u-discord', username: 'Dev' },
+        },
+      },
+      context,
+    );
+
+    expect(addressed).toMatchObject({
+      id: 'm-discord-mentioned',
+      chatId: 'c-discord',
+      content: 'ship it',
+    });
+    expect(ignored).toBeNull();
+  });
+
+  it('Discord 缺少 botUserId 时，不会把任意 mention 当成群频道命中', () => {
+    const ignored = parseDiscordInboundMessage(
+      {
+        t: 'MESSAGE_CREATE',
+        d: {
+          id: 'm-discord-other-mention',
+          guild_id: 'guild-1',
+          channel_id: 'c-discord',
+          content: '<@someone-else> ship it',
+          timestamp: '2026-07-08T12:00:00.000Z',
+          mentions: [{ id: 'someone-else' }],
+          author: { id: 'u-discord', username: 'Dev' },
+        },
+      },
+      {
+        channel: makeChannel('discord', { requireMentionInGroup: 'true' }),
+      },
+    );
+
+    expect(ignored).toBeNull();
+  });
+
+  it('按配置要求 Slack 频道必须 @ 机器人', () => {
+    const context = {
+      channel: makeChannel('slack', { requireMentionInGroup: 'true' }),
+      botId: 'U-BOT-1',
+    };
+    const addressed = parseSlackInboundMessage(
+      {
+        ts: '1788000000.001',
+        channel: 'C123456',
+        channel_type: 'channel',
+        user: 'U123',
+        username: 'Slack User',
+        text: '<@U-BOT-1> summarize this',
+      },
+      context,
+    );
+    const ignored = parseSlackInboundMessage(
+      {
+        ts: '1788000000.002',
+        channel: 'C123456',
+        channel_type: 'channel',
+        user: 'U123',
+        username: 'Slack User',
+        text: 'summarize this',
+      },
+      context,
+    );
+
+    expect(addressed).toMatchObject({
+      chatId: 'C123456',
+      senderId: 'U123',
+      content: 'summarize this',
+    });
+    expect(ignored).toBeNull();
+  });
+
+  it('Slack 缺少 botUserId 时，不会把任意 mention 当成群频道命中', () => {
+    const ignored = parseSlackInboundMessage(
+      {
+        ts: '1788000000.003',
+        channel: 'C123456',
+        channel_type: 'channel',
+        user: 'U123',
+        username: 'Slack User',
+        text: '<@U-OTHER-1> summarize this',
+      },
+      {
+        channel: makeChannel('slack', { requireMentionInGroup: 'true' }),
+      },
+    );
+
+    expect(ignored).toBeNull();
   });
 
   it('解析飞书 im.message.receive_v1 文本事件', () => {
@@ -161,6 +390,59 @@ describe('channel inbound parsers', () => {
     });
   });
 
+  it('按配置要求企业微信群聊必须 @ 机器人', () => {
+    const context = {
+      channel: makeChannel('wecom', { requireMentionInGroup: 'true', botName: 'OpenAWorkBot' }),
+      botName: 'OpenAWorkBot',
+    };
+    const addressed = parseWeComInboundMessage(
+      {
+        MsgType: 'text',
+        ChatId: 'wecom-group',
+        FromUserName: 'wecom-user',
+        Content: '@OpenAWorkBot 企业微信群消息',
+        MsgId: 'm-wecom-mentioned',
+        CreateTime: '1788000000',
+      },
+      context,
+    );
+    const ignored = parseWeComInboundMessage(
+      {
+        MsgType: 'text',
+        ChatId: 'wecom-group',
+        FromUserName: 'wecom-user',
+        Content: '普通群聊消息',
+        MsgId: 'm-wecom-ignored',
+        CreateTime: '1788000000',
+      },
+      context,
+    );
+
+    expect(addressed).toMatchObject({
+      chatId: 'wecom-group',
+      content: '企业微信群消息',
+    });
+    expect(ignored).toBeNull();
+  });
+
+  it('企业微信缺少 botName 时，不会把任意 @ 文本当成群聊命中', () => {
+    const ignored = parseWeComInboundMessage(
+      {
+        MsgType: 'text',
+        ChatId: 'wecom-group',
+        FromUserName: 'wecom-user',
+        Content: '@OtherBot 企业微信群消息',
+        MsgId: 'm-wecom-other-bot',
+        CreateTime: '1788000000',
+      },
+      {
+        channel: makeChannel('wecom', { requireMentionInGroup: 'true' }),
+      },
+    );
+
+    expect(ignored).toBeNull();
+  });
+
   it('解析微信公众平台 getupdates 文本消息', () => {
     const parsed = parseWeixinInboundMessage({
       message_type: 1,
@@ -178,6 +460,29 @@ describe('channel inbound parsers', () => {
       senderName: 'weixin-user',
       content: '微信消息',
       timestamp: 1_788_000_000_000,
+    });
+  });
+
+  it('解析微信公众平台群会话元信息并保留发送者', () => {
+    const parsed = parseWeixinInboundMessage({
+      message_type: 1,
+      chat_id: 'weixin-group-1',
+      chat_name: '产品群',
+      from_user_id: 'weixin-user',
+      sender_name: 'Alice',
+      message_id: 1788003,
+      create_time_ms: 1_788_000_000_000,
+      context_token: 'ctx-group',
+      item_list: [{ type: 1, text_item: { text: '群里消息' } }],
+    });
+
+    expect(parsed).toMatchObject({
+      id: '1788003',
+      chatId: 'weixin-group-1',
+      chatName: '产品群',
+      senderId: 'weixin-user',
+      senderName: 'Alice',
+      content: '群里消息',
     });
   });
 
@@ -209,6 +514,41 @@ describe('channel inbound parsers', () => {
       chatId: '15550001111',
       senderName: 'WA User',
       content: 'whatsapp hello',
+    });
+  });
+
+  it('解析 WhatsApp 群会话元信息并区分会话与发送者', () => {
+    const parsed = parseWhatsAppInboundMessage({
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                conversation: { id: '1203630-group@g.us', name: 'OpenAWork Group' },
+                messages: [
+                  {
+                    id: 'm-wa-group',
+                    from: '15550001111',
+                    author: '15550002222',
+                    timestamp: '1788000000',
+                    text: { body: 'group hello' },
+                  },
+                ],
+                contacts: [{ wa_id: '15550002222', profile: { name: 'WA Group User' } }],
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(parsed).toMatchObject({
+      id: 'm-wa-group',
+      chatId: '1203630-group@g.us',
+      chatName: 'OpenAWork Group',
+      senderId: '15550002222',
+      senderName: 'WA Group User',
+      content: 'group hello',
     });
   });
 

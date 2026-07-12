@@ -152,6 +152,8 @@ export interface Message {
   createdAt: number;
   agentId?: string;
   clientRequestId?: string;
+  model?: string;
+  providerId?: string;
   durationMs?: number;
   firstTokenLatencyMs?: number;
   providerUsage?: {

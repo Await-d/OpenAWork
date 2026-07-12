@@ -2,6 +2,8 @@ import { useState, type CSSProperties, type HTMLAttributes, type ReactNode } fro
 import { color, radius, spacing, shadow, motion } from '../tokens.js';
 export { InlineEditor } from './InlineEditor.js';
 export type { InlineEditorProps } from './InlineEditor.js';
+export { BrandLogo } from './BrandLogo.js';
+export type { BrandLogoProps } from './BrandLogo.js';
 
 // ── ShellCard ─────────────────────────────────────────────
 

@@ -909,7 +909,7 @@ function DetailPopover({
         background: 'var(--bg-overlay)',
         border: `1px solid color-mix(in oklch, ${layerColor} 35%, transparent)`,
         borderRadius: 12,
-        boxShadow: '0 12px 32px rgba(0,0,0,0.28)',
+        boxShadow: 'var(--shadow-lg)',
         padding: 12,
         display: 'grid',
         gap: 10,

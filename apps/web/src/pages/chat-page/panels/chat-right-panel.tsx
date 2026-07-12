@@ -863,8 +863,8 @@ function RightPanelTerminalsContent({
                   style={{
                     margin: 0,
                     padding: '6px 8px',
-                    background: 'color-mix(in srgb, var(--bg-overlay) 60%, #000 30%)',
-                    color: '#dcdcdc',
+                    background: 'var(--bg-overlay)',
+                    color: 'var(--fg-default)',
                     border: '1px solid var(--border-subtle)',
                     borderRadius: 6,
                     maxHeight: 220,

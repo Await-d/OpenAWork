@@ -38,12 +38,12 @@ export function AssistantEventRow({ payload }: { payload: AssistantEventPayload 
           : 'var(--danger)';
   const statusBackground =
     payload.status === 'running'
-      ? 'rgba(59, 130, 246, 0.16)'
+      ? 'var(--aux-muted)'
       : payload.status === 'success'
-        ? 'rgba(16, 185, 129, 0.16)'
+        ? 'var(--success-muted)'
         : payload.status === 'paused'
-          ? 'rgba(245, 158, 11, 0.16)'
-          : 'rgba(239, 68, 68, 0.16)';
+          ? 'var(--warning-muted)'
+          : 'var(--danger-muted)';
 
   return (
     <div

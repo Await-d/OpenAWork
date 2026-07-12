@@ -1,6 +1,6 @@
-import type { Diagnostic, LogEntry } from '@openAwork/shared-ui';
+import type { Diagnostic, LogEntry, SupportedReasoningEffort } from '@openAwork/shared-ui';
 
-export type ReasoningEffortRef = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+export type ReasoningEffortRef = SupportedReasoningEffort;
 
 export interface ThinkingModeRef {
   enabled: boolean;

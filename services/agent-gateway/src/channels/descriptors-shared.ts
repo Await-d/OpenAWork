@@ -191,3 +191,21 @@ export const WS_RELAY_FIELD: ChannelDescriptorField = {
   placeholder: 'wss://your-relay-server/ws',
   description: '可选，用于接入外部消息中转服务的实时入站消息。',
 };
+
+export const REQUIRE_MENTION_IN_GROUP_FIELD: ChannelDescriptorField = {
+  key: 'requireMentionInGroup',
+  label: 'Require Mention In Group',
+  type: 'text',
+  placeholder: 'true / false',
+  description: '填 true 时，群聊/频道消息只有在明确 @ 当前机器人时才会触发自动回复。',
+};
+
+export const MEMBER_ACL_JSON_FIELD: ChannelDescriptorField = {
+  key: 'memberAclJson',
+  label: 'Member ACL JSON',
+  type: 'text',
+  placeholder:
+    '[{"platformUserId":"123456","toolAllowlist":["web_search","read","PluginReplyMessage"]}]',
+  description:
+    '可选；群成员 ACL。配置后，只有命中的 senderId 才会获得 JSON 中允许的工具/权限；未命中的成员默认禁用工具调用。',
+};

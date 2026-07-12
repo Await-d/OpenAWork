@@ -36,11 +36,13 @@ const VALID_SPECIALTIES = new Set<TeamMemberSpecialty>([
 ]);
 
 const VALID_REASONING_EFFORTS = new Set<TeamReasoningEffort>([
+  'none',
   'minimal',
   'low',
   'medium',
   'high',
   'xhigh',
+  'max',
 ]);
 
 /**

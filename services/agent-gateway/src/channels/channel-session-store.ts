@@ -4,6 +4,8 @@ import type { ResourceTextDescriptor } from '@openAwork/resources/node';
 import { sqliteGet, sqliteRun } from '../infra/db.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
 import { resolveChannelLlmToolsEnabled } from './channel-tool-gate.js';
+import { normalizeChannelPromptInjections } from './channel-prompt-injections.js';
+import { normalizeChannelReplyLanguage } from './channel-reply-language.js';
 import type { ChannelInstance } from './types.js';
 
 interface ReusableSessionRow {
@@ -11,48 +13,108 @@ interface ReusableSessionRow {
   readonly metadata_json: string;
 }
 
+export interface ChannelSessionActorContext {
+  readonly aclConfigured: boolean;
+  readonly matched: boolean;
+  readonly permissions: {
+    readonly allowReadHome: boolean;
+    readonly readablePathPrefixes: readonly string[];
+    readonly allowWriteOutside: boolean;
+    readonly allowShell: boolean;
+    readonly allowSubAgents: boolean;
+  };
+  readonly platformUserId: string;
+  readonly senderName: string;
+  readonly toolAllowlist: readonly string[] | null;
+  readonly userId?: string;
+  readonly workspaceId?: string;
+}
+
+interface BuildChannelSessionMetadataInput {
+  readonly actor?: ChannelSessionActorContext;
+  readonly channel: ChannelInstance;
+  readonly chatId: string;
+  readonly currentMessageId?: string;
+  readonly currentMetadata?: Record<string, unknown>;
+  readonly userId: string;
+}
+
 export function buildChannelSessionKey(pluginId: string, chatId: string): string {
   return `channel:${pluginId}:chat:${chatId}`;
 }
 
+function readStoredChannelToolAllowlist(
+  metadata: Record<string, unknown>,
+): readonly string[] | null | undefined {
+  const value = metadata['channelToolAllowlist'];
+  if (value === null) {
+    return null;
+  }
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  return value.filter((entry): entry is string => typeof entry === 'string');
+}
+
+function isAllowlistEnabledForTool(
+  toolAllowlist: readonly string[] | null | undefined,
+  toolKey: string,
+): boolean {
+  if (!toolAllowlist) {
+    return true;
+  }
+
+  return (
+    toolAllowlist.includes('*') || toolAllowlist.includes('all') || toolAllowlist.includes(toolKey)
+  );
+}
+
 export function buildChannelSessionMetadata(
-  channel: ChannelInstance,
-  chatId: string,
-  userId: string,
-  currentMetadata: Record<string, unknown> = {},
-  currentMessageId?: string,
+  input: BuildChannelSessionMetadataInput,
 ): Record<string, unknown> {
-  const persona = resolveChannelPersona(channel, userId);
+  const currentMetadata = input.currentMetadata ?? {};
+  const persona = resolveChannelPersona(input.channel, input.userId);
   const channelLlmToolsEnabled = resolveChannelLlmToolsEnabled({
-    explicit: channel.channelLlmToolsEnabled,
-    tools: channel.tools,
+    explicit: input.channel.channelLlmToolsEnabled,
+    tools: input.channel.tools,
     fallback: currentMetadata['channelLlmToolsEnabled'] === true,
   });
+  const promptInjections = normalizeChannelPromptInjections(input.channel.promptInjections);
+  const toolAllowlist = input.actor
+    ? input.actor.toolAllowlist
+    : readStoredChannelToolAllowlist(currentMetadata);
   const nextMetadata: Record<string, unknown> = {
     ...currentMetadata,
     source: 'channel',
-    channelChatId: chatId,
-    ...(currentMessageId ? { channelMessageId: currentMessageId } : {}),
-    webSearchEnabled: channel.tools?.['web_search'] === true,
+    channelChatId: input.chatId,
+    ...(input.currentMessageId ? { channelMessageId: input.currentMessageId } : {}),
+    webSearchEnabled:
+      input.channel.tools?.['web_search'] === true &&
+      isAllowlistEnabledForTool(toolAllowlist, 'web_search'),
     taskToolEnabled:
-      channel.tools?.['task'] === true && (channel.permissions?.allowSubAgents ?? true),
+      input.channel.tools?.['task'] === true &&
+      isAllowlistEnabledForTool(toolAllowlist, 'task') &&
+      (input.channel.permissions?.allowSubAgents ?? true),
     questionToolEnabled: false,
+    replyLanguage: normalizeChannelReplyLanguage(input.channel.replyLanguage),
     channelLlmToolsEnabled,
     channel: {
-      id: channel.id,
-      type: channel.type,
-      name: channel.name,
-      providerId: channel.providerId ?? null,
-      model: channel.model ?? null,
-      permissions: channel.permissions ?? null,
+      id: input.channel.id,
+      type: input.channel.type,
+      name: input.channel.name,
+      replyLanguage: normalizeChannelReplyLanguage(input.channel.replyLanguage),
+      providerId: input.channel.providerId ?? null,
+      model: input.channel.model ?? null,
+      permissions: input.channel.permissions ?? null,
       persona: persona
         ? {
             resourceId: persona.resourceId,
             title: persona.title,
           }
         : null,
+      promptInjections,
       channelLlmToolsEnabled,
-      tools: channel.tools ?? {},
+      tools: input.channel.tools ?? {},
     },
   };
 
@@ -62,14 +124,34 @@ export function buildChannelSessionMetadata(
     delete nextMetadata['channelPersona'];
   }
 
-  if (channel.providerId) {
-    nextMetadata['providerId'] = channel.providerId;
+  if (toolAllowlist !== undefined) {
+    nextMetadata['channelToolAllowlist'] = toolAllowlist;
+  } else {
+    delete nextMetadata['channelToolAllowlist'];
+  }
+
+  if (input.actor) {
+    nextMetadata['channelActor'] = {
+      aclConfigured: input.actor.aclConfigured,
+      matched: input.actor.matched,
+      permissions: input.actor.permissions,
+      platformUserId: input.actor.platformUserId,
+      senderName: input.actor.senderName,
+      ...(input.actor.workspaceId ? { workspaceId: input.actor.workspaceId } : {}),
+      ...(input.actor.userId ? { userId: input.actor.userId } : {}),
+    };
+  } else if (!currentMetadata['channelActor']) {
+    delete nextMetadata['channelActor'];
+  }
+
+  if (input.channel.providerId) {
+    nextMetadata['providerId'] = input.channel.providerId;
   } else {
     delete nextMetadata['providerId'];
   }
 
-  if (channel.model) {
-    nextMetadata['modelId'] = channel.model;
+  if (input.channel.model) {
+    nextMetadata['modelId'] = input.channel.model;
   } else {
     delete nextMetadata['modelId'];
   }
@@ -147,6 +229,7 @@ function findReusableChannelSession(userId: string, sessionKey: string): Reusabl
 }
 
 export function upsertChannelSession(input: {
+  readonly actor?: ChannelSessionActorContext;
   readonly chatId: string;
   readonly channel: ChannelInstance;
   readonly currentMessageId?: string;
@@ -154,13 +237,14 @@ export function upsertChannelSession(input: {
   readonly userId: string;
 }): string {
   const existingSession = findReusableChannelSession(input.userId, input.sessionKey);
-  const nextMetadata = buildChannelSessionMetadata(
-    input.channel,
-    input.chatId,
-    input.userId,
-    parseSessionMetadataJson(existingSession?.metadata_json ?? '{}'),
-    input.currentMessageId,
-  );
+  const nextMetadata = buildChannelSessionMetadata({
+    actor: input.actor,
+    channel: input.channel,
+    chatId: input.chatId,
+    currentMessageId: input.currentMessageId,
+    currentMetadata: parseSessionMetadataJson(existingSession?.metadata_json ?? '{}'),
+    userId: input.userId,
+  });
 
   if (existingSession) {
     sqliteRun(

@@ -8,19 +8,23 @@ export const TOOL_OUTPUT_REFERENCE_SYSTEM_PROMPT =
 /**
  * 网络搜索 / 代码搜索 工具的路由策略。
  *
- * 系统同时存在两条搜索路径，目的不同，**必须**按下面规则路由，避免
- * LLM 把 `web_search` 工具与 `websearch` MCP 视作同义工具反复试用：
+ * 系统同时存在三条网页搜索路径，目的不同，**必须**按下面规则路由，避免
+ * LLM 把原生 `websearch` 工具与多个 MCP 搜索入口视作同义工具反复试用：
  *
- *   1. `web_search`（原生 tool）— 多 provider 竞速 / 合并 / 顺序兜底，
+ *   1. 默认搜索 MCP：`open_websearch`
+ *      - 免 API Key，Gateway 内置适配器，优先用于网页发现。
+ *      - 暴露 `search` / `fetch_web` / `fetch_github_readme` 三个工具。
+ *
+ *   2. `websearch`（原生 tool）— 多 provider 竞速 / 合并 / 顺序兜底，
  *      由用户在 settings 中自行配置 provider 与 API key（DDG / Tavily /
  *      Exa / Serper / SearXNG / Bocha / 智谱 / Google / Bing 任选）。
- *      具备 race / merge / sequential 三种 rollout 策略，是**首选**。
+ *      当默认 MCP 不可用，或用户希望走自定义 provider 时再回退到这里。
  *
- *   2. 默认 flat MCP 模式下，系统内置 Exa MCP 会以
+ *   3. Exa MCP：默认 flat MCP 模式下，系统内置 Exa MCP 会以
  *      `mcp__websearch__web_search_exa` 这类扁平工具名直接出现在本轮
- *      tools 列表中；仅作为 `web_search` 不可用时的兜底。
+ *      tools 列表中；仅作为前两条路径都不可用时的最后兜底。
  *
- *   3. grep.app 公开 GitHub 仓库代码检索同理使用本轮 tools 列表里的
+ *   4. grep.app 公开 GitHub 仓库代码检索同理使用本轮 tools 列表里的
  *      `mcp__grep_app__...` 扁平工具；`web_search` 不擅长这种「查代码示例」
  *      场景，遇到 "搜搜开源项目里 X 怎么用 / Y 是怎么实现的" 时直接走
  *      grep_app。
@@ -33,21 +37,27 @@ export function buildWebSearchRoutingSystemPrompt(
   options: WebSearchRoutingPromptOptions = {},
 ): string {
   const flatMcpToolsEnabled = options.flatMcpToolsEnabled ?? !isFlatMcpToolsDisabled();
-  const mcpWebSearchFallback = flatMcpToolsEnabled
-    ? '- 仅当 `web_search` 不可用、或者用户未配置任何 provider 时，才回退到本轮工具列表中实际存在的 `mcp__websearch__web_search_exa`（或同 server 的 websearch 扁平 MCP 工具）；不要调用未列出的 MCP 工具名'
-    : '- 仅当 `web_search` 不可用、或者用户未配置任何 provider 时，才回退到 `mcp_call({ serverId: "websearch", toolName: "web_search_exa", arguments: {...} })`';
+  const openWebSearchPrimary = flatMcpToolsEnabled
+    ? '- 优先使用本轮工具列表中实际存在的 `mcp__open_websearch__search` 做网页发现；需要公开网页正文或 GitHub README 时，再用同 server 的 `fetch_web` / `fetch_github_readme`'
+    : '- 优先使用 `mcp_call({ serverId: "open_websearch", toolName: "search", arguments: {...} })` 做网页发现；需要正文或 README 时使用同 server 的 `fetch_web` / `fetch_github_readme`';
+  const nativeWebSearchFallback =
+    '- 若 `open_websearch` 当前不可用，回退到 `websearch` 工具（原生多 provider / 用户自定义 provider）';
+  const exaMcpFallback = flatMcpToolsEnabled
+    ? '- 只有前两条路径都不可用，或你明确需要 Exa 结果时，才回退到本轮工具列表中实际存在的 `mcp__websearch__web_search_exa`；不要调用未列出的 MCP 工具名'
+    : '- 只有前两条路径都不可用，或你明确需要 Exa 结果时，才回退到 `mcp_call({ serverId: "websearch", toolName: "web_search_exa", arguments: {...} })`';
   const mcpCodeSearchFallback = flatMcpToolsEnabled
-    ? '- 想搜「开源项目里 X 是怎么用的 / Y 的真实实现」走本轮工具列表中实际存在的 `mcp__grep_app__...` 扁平 MCP 工具，不要用 `web_search`；不要猜测或调用未列出的旧 MCP 包装入口'
+    ? '- 想搜「开源项目里 X 是怎么用的 / Y 的真实实现」走本轮工具列表中实际存在的 `mcp__grep_app__...` 扁平 MCP 工具，不要用 `websearch`；不要猜测或调用未列出的旧 MCP 包装入口'
     : '- 想搜「开源项目里 X 是怎么用的 / Y 的真实实现」走 `mcp_call({ serverId: "grep_app", toolName: "<实际工具名>", arguments: {...} })`，不要用 `web_search`';
 
   return [
     '网络搜索 / 代码搜索 路由策略：',
     '',
     '【网页与时效性信息】',
-    '- 优先使用 `web_search` 工具（原生多 provider，用户已付费配置）',
-    mcpWebSearchFallback,
-    '- 不要在同一轮中既调 `web_search` 又调 websearch MCP — 它们是同一类能力的两条路径',
-    '- 用户要抓取、查找、获取、展示互联网上已经存在的图片时：先用 `web_search`/websearch MCP 找到页面或图片，再用 `webfetch` 抓取具体图片 URL；这不是图片生成任务',
+    openWebSearchPrimary,
+    nativeWebSearchFallback,
+    exaMcpFallback,
+    '- 不要为了同一个普通网页查询在同一轮里连续试完三条搜索路径；只有上一条明确失败、限流或结果明显不够时才继续回退',
+    '- 用户要抓取、查找、获取、展示互联网上已经存在的图片时：先用 `open_websearch` 找到页面或图片；只有 `open_websearch` 不可用时再回退到 `websearch`，然后用 `webfetch` 抓取具体图片 URL；这不是图片生成任务',
     '- 只有用户明确要求创建、画、设计、生成一张新的图片时，才允许调用 `generate_image`；不要把“抓取网络图片 / 展示已有图片”误路由到图片生成工具',
     '',
     '【公开仓库的代码检索】',
@@ -431,6 +441,7 @@ export interface RoundSystemMessagesInput {
   lspGuidance?: string | null;
   dialogueModePrompt?: string | null;
   yoloModePrompt?: string | null;
+  flatMcpToolsEnabled?: boolean;
   memoryBlock?: string | null;
   thinkingLanguagePrompt?: string | null;
   /** Dynamic agent prompt sections (delegation table, tool selection, etc.) for orchestrator agents */
@@ -457,6 +468,7 @@ export interface SystemPromptChainInput {
   lspGuidance?: string | null;
   dialogueModePrompt?: string | null;
   yoloModePrompt?: string | null;
+  flatMcpToolsEnabled?: boolean;
   memoryBlock?: string | null;
   thinkingLanguagePrompt?: string | null;
   dynamicAgentPrompt?: string | null;
@@ -509,7 +521,9 @@ export function buildSystemPromptChain(input: SystemPromptChainInput): string[] 
     input.yoloModePrompt ?? YOLO_MODE_PLACEHOLDER,
     // Slot 9: Tool output reference strategy + 网络/代码搜索 路由策略
     TOOL_OUTPUT_REFERENCE_SYSTEM_PROMPT,
-    buildWebSearchRoutingSystemPrompt(),
+    buildWebSearchRoutingSystemPrompt({
+      flatMcpToolsEnabled: input.flatMcpToolsEnabled,
+    }),
     // Slot 10: Thinking language hint
     input.thinkingLanguagePrompt ?? THINKING_LANGUAGE_PLACEHOLDER,
     // Slot 11: Pinned skills section (PR3 of skill-workspace-selection spec)
@@ -549,7 +563,9 @@ export function buildTwoPartSystemPrompts(input: SystemPromptChainInput): {
     input.dialogueModePrompt ?? DIALOGUE_MODE_PLACEHOLDER,
     input.yoloModePrompt ?? YOLO_MODE_PLACEHOLDER,
     TOOL_OUTPUT_REFERENCE_SYSTEM_PROMPT,
-    buildWebSearchRoutingSystemPrompt(),
+    buildWebSearchRoutingSystemPrompt({
+      flatMcpToolsEnabled: input.flatMcpToolsEnabled,
+    }),
     input.thinkingLanguagePrompt ?? THINKING_LANGUAGE_PLACEHOLDER,
     // Pinned skills section: stable for the lifetime of a session because
     // the snapshot is captured at session start. Empty string is filtered
@@ -591,7 +607,9 @@ export function buildRoundSystemMessages(input: RoundSystemMessagesInput) {
     input.dialogueModePrompt ?? DIALOGUE_MODE_PLACEHOLDER,
     input.yoloModePrompt ?? YOLO_MODE_PLACEHOLDER,
     TOOL_OUTPUT_REFERENCE_SYSTEM_PROMPT,
-    buildWebSearchRoutingSystemPrompt(),
+    buildWebSearchRoutingSystemPrompt({
+      flatMcpToolsEnabled: input.flatMcpToolsEnabled,
+    }),
     input.thinkingLanguagePrompt ?? THINKING_LANGUAGE_PLACEHOLDER,
     // 260515-team-phase-a · 7 层团队指令栈（stable 段，含 ForceApply cache breaker）
     input.teamInstructionStack ?? '',

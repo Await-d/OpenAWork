@@ -7,8 +7,23 @@ import { useAuthStore } from '../../../stores/auth/auth.js';
 import { PluginsTabContent } from './plugins-tab-content.js';
 
 vi.mock('@openAwork/shared-ui', () => ({
-  MCPServerConfig: () => <div>MCP 配置表单</div>,
-  MCPServerList: () => <div>MCP 状态列表</div>,
+  MCPServerConfig: ({
+    servers,
+    title,
+    showAddForm = true,
+  }: {
+    servers: Array<{ id: string }>;
+    title?: string;
+    showAddForm?: boolean;
+  }) => (
+    <div>
+      {title ?? 'MCP 配置表单'}:{servers.map((server) => server.id).join(',')}
+      {showAddForm ? <span>显示新增</span> : <span>隐藏新增</span>}
+    </div>
+  ),
+  MCPServerList: ({ servers }: { servers: Array<{ id: string }> }) => (
+    <div>MCP 状态列表:{servers.map((server) => server.id).join(',')}</div>
+  ),
 }));
 
 vi.mock('@openAwork/web-client', () => ({
@@ -44,9 +59,44 @@ vi.mock('../connection/use-settings-websearch.js', () => ({
 
 vi.mock('../connection/use-mcp-servers.js', () => ({
   useMcpServers: () => ({
-    mcpServers: [],
+    mcpServers: [
+      {
+        id: 'open_websearch',
+        name: 'Open WebSearch',
+        builtin: true,
+        builtinKind: 'adapter',
+        source: 'builtin',
+        enabled: true,
+      },
+      {
+        id: 'websearch',
+        name: 'Exa Web Search',
+        builtin: true,
+        builtinKind: 'system',
+        source: 'builtin',
+        enabled: false,
+      },
+      {
+        id: 'codegraph',
+        name: 'codegraph',
+        builtin: true,
+        builtinKind: 'virtual',
+        source: 'builtin',
+        enabled: true,
+      },
+    ],
     setMcpServers: vi.fn(),
-    mcpStatuses: [],
+    mcpStatuses: [
+      {
+        id: 'open_websearch',
+        name: 'Open WebSearch',
+        status: 'connected',
+        toolCount: 3,
+        tools: [],
+      },
+      { id: 'websearch', name: 'Exa Web Search', status: 'disabled', toolCount: 0, tools: [] },
+      { id: 'codegraph', name: 'codegraph', status: 'connected', toolCount: 4, tools: [] },
+    ],
     onRetryMcp: vi.fn(),
   }),
 }));
@@ -87,7 +137,20 @@ describe('PluginsTabContent', () => {
     await waitFor(() => {
       expect(screen.getAllByText('MCP 服务器').length).toBeGreaterThan(0);
     });
-    expect(screen.getByText('MCP 配置表单')).toBeTruthy();
-    expect(screen.getByText('MCP 状态列表')).toBeTruthy();
+    expect(screen.getByText('MCP 配置表单:codegraph')).toBeTruthy();
+    expect(screen.getByText('MCP 状态列表:codegraph')).toBeTruthy();
+    expect(screen.queryByText(/open_websearch/)).toBeNull();
+  });
+
+  it('根据 plugin=websearch 直达统一搜索管理面', async () => {
+    renderPluginsTab('/settings/plugins?plugin=websearch');
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Web 搜索').length).toBeGreaterThan(0);
+    });
+    expect(screen.getByText('搜索 MCP 配置:open_websearch,websearch')).toBeTruthy();
+    expect(screen.getByText('MCP 状态列表:open_websearch,websearch')).toBeTruthy();
+    expect(screen.getByText('隐藏新增')).toBeTruthy();
+    expect(screen.getByText('Web 搜索策略')).toBeTruthy();
   });
 });

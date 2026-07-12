@@ -8,18 +8,18 @@ interface SessionModeBadgesProps {
 }
 
 const CLARIFY_BADGE_STYLE: CSSProperties = {
-  background: 'rgba(245, 158, 11, 0.10)',
-  color: 'rgb(245, 158, 11)',
+  background: 'var(--warning-muted)',
+  color: 'var(--warning)',
 };
 
 const CODING_BADGE_STYLE: CSSProperties = {
-  background: 'rgba(139, 92, 246, 0.12)',
-  color: 'rgb(167, 139, 250)',
+  background: 'var(--contrast-muted)',
+  color: 'var(--contrast)',
 };
 
 const PROGRAMMER_BADGE_STYLE: CSSProperties = {
-  background: 'rgba(16, 185, 129, 0.12)',
-  color: 'rgb(52, 211, 153)',
+  background: 'var(--success-muted)',
+  color: 'var(--success)',
 };
 
 const YOLO_BADGE_STYLE: CSSProperties = {

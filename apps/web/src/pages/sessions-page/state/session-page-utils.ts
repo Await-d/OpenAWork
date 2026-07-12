@@ -28,9 +28,9 @@ export function statusDotColor(s: string): string {
 }
 
 export function statusBadgeBg(s: string): string {
-  if (s === 'running') return 'rgba(34,197,94,0.12)';
-  if (s === 'error') return 'rgba(239,68,68,0.12)';
-  if (s === 'paused') return 'rgba(245,158,11,0.12)';
+  if (s === 'running') return 'var(--success-muted)';
+  if (s === 'error') return 'var(--danger-muted)';
+  if (s === 'paused') return 'var(--warning-muted)';
   return 'var(--accent-muted)';
 }
 

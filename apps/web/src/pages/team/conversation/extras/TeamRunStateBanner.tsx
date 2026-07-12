@@ -69,7 +69,7 @@ const SPINNER_STYLE: CSSProperties = {
   flexShrink: 0,
 };
 
-const DANGER = 'var(--danger, #e5484d)';
+const DANGER = 'var(--danger)';
 
 export function TeamRunStateBanner({
   diagnostics,

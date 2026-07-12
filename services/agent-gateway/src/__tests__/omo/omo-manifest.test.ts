@@ -169,9 +169,10 @@ describe('OMO adapter manifest parser', () => {
       mcpServers: {
         'git-bash': { command: 'node' },
         'grep-app': { url: 'https://mcp.grep.app' },
+        'open-websearch': { command: 'node' },
       },
     };
-    const capabilityManifest = { capabilities: ['git-bash', 'grep-app'] };
+    const capabilityManifest = { capabilities: ['git-bash', 'grep-app', 'open-websearch'] };
 
     const parsedMcp = expectOk(parseOmoMcpServersManifest(mcpManifest));
     const parsedCapabilities = expectOk(parseOmoToolCapabilityManifest(capabilityManifest));
@@ -189,10 +190,21 @@ describe('OMO adapter manifest parser', () => {
         nativeServerId: 'grep_app',
         required: false,
       },
+      {
+        kind: 'native-alias',
+        sourceId: 'open-websearch',
+        nativeServerId: 'open_websearch',
+        required: false,
+      },
     ]);
     expect(parsedCapabilities.capabilities).toEqual([
       { kind: 'native-alias', sourceId: 'git-bash', nativeServerId: 'git_bash' },
       { kind: 'native-alias', sourceId: 'grep-app', nativeServerId: 'grep_app' },
+      {
+        kind: 'native-alias',
+        sourceId: 'open-websearch',
+        nativeServerId: 'open_websearch',
+      },
     ]);
   });
 

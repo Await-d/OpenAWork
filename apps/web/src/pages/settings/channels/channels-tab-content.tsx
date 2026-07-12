@@ -1,7 +1,15 @@
 import React from 'react';
-import { createChannelsClient, createResourcesClient } from '@openAwork/web-client';
+import type { CapabilityDescriptor } from '@openAwork/shared';
+import {
+  createCapabilitiesClient,
+  createChannelsClient,
+  createResourcesClient,
+} from '@openAwork/web-client';
 import { StatusPill } from '@openAwork/shared-ui';
+import { buildChannelCapabilityToolGroupCounts } from '../../../components/common/display/channel-capability-tool-groups.js';
 import type {
+  ChannelCapabilityCatalogDraft,
+  ChannelCapabilityCatalogCounts,
   ChannelDraft,
   ChannelPersonaOption,
   ChannelTypeDescriptor,
@@ -39,6 +47,25 @@ function toChannelPersonaSource(
   return 'reference';
 }
 
+function buildCapabilityCatalogCounts(
+  capabilities: readonly CapabilityDescriptor[],
+): ChannelCapabilityCatalogCounts {
+  return {
+    agents: capabilities.filter((capability) => capability.kind === 'agent').length,
+    skills: capabilities.filter((capability) => capability.kind === 'skill').length,
+    mcps: capabilities.filter(
+      (capability) => capability.kind === 'mcp' && capability.enabled !== false,
+    ).length,
+    tools: capabilities.filter(
+      (capability) => capability.kind === 'tool' && capability.callable === true,
+    ).length,
+    toolGroups: buildChannelCapabilityToolGroupCounts(capabilities),
+    commands: capabilities.filter(
+      (capability) => capability.kind === 'command' && capability.enabled !== false,
+    ).length,
+  };
+}
+
 export function ChannelsTabContent({
   channels,
   setChannels,
@@ -57,8 +84,14 @@ export function ChannelsTabContent({
       ),
     [gatewayUrl],
   );
+  const capabilitiesClient = React.useMemo(
+    () => createCapabilitiesClient(gatewayUrl),
+    [gatewayUrl],
+  );
   const resourcesClient = React.useMemo(() => createResourcesClient(gatewayUrl), [gatewayUrl]);
   const [personas, setPersonas] = React.useState<readonly ChannelPersonaOption[]>([]);
+  const [capabilityCatalogCounts, setCapabilityCatalogCounts] =
+    React.useState<ChannelCapabilityCatalogCounts | null>(null);
   const [personaError, setPersonaError] = React.useState<string | null>(null);
   const ensureToken = (): string => {
     if (!token) throw new Error('未登录');
@@ -105,6 +138,35 @@ export function ChannelsTabContent({
 
     return () => abortController.abort();
   }, [resourcesClient, token]);
+
+  React.useEffect(() => {
+    if (!token) {
+      setCapabilityCatalogCounts(null);
+      return;
+    }
+
+    let cancelled = false;
+    void capabilitiesClient
+      .list(token)
+      .then((capabilities) => {
+        if (cancelled) {
+          return;
+        }
+        setCapabilityCatalogCounts(buildCapabilityCatalogCounts(capabilities));
+      })
+      .catch((error: unknown) => {
+        if (cancelled) {
+          return;
+        }
+        logger.error('failed to load channel capability catalog counts', error);
+        setCapabilityCatalogCounts(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [capabilitiesClient, token]);
+
   const applyChannelError = (channelId: string, errorMessage?: string) => {
     setChannels((prev) =>
       prev.map((channel) =>
@@ -117,6 +179,18 @@ export function ChannelsTabContent({
       ),
     );
   };
+
+  const resolveCapabilityCatalogCounts = React.useCallback(
+    async (draft: ChannelCapabilityCatalogDraft): Promise<ChannelCapabilityCatalogCounts> => {
+      return capabilitiesClient.previewChannel(ensureToken(), {
+        type: draft.type,
+        channelLlmToolsEnabled: draft.channelLlmToolsEnabled,
+        tools: draft.tools,
+        permissions: draft.permissions,
+      });
+    },
+    [capabilitiesClient, token],
+  );
 
   const saveChannel = async (
     channelId: string | null,
@@ -357,6 +431,8 @@ export function ChannelsTabContent({
         descriptors={descriptors}
         providers={providers}
         personas={personas}
+        capabilityCatalogCounts={capabilityCatalogCounts ?? undefined}
+        onResolveCapabilityCatalogCounts={token ? resolveCapabilityCatalogCounts : undefined}
         onSave={saveChannel}
         onConnect={connectChannel}
         onDisconnect={disconnectChannel}

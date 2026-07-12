@@ -17,7 +17,13 @@ import { useAuthStore } from './stores/auth/auth.js';
 import {
   useDisplayPreferencesHydrated,
   useDisplayPreferencesStore,
+  type ThemeStyle,
 } from './stores/settings/display-preferences.js';
+import {
+  readThemeStyle as storageReadThemeStyle,
+  readThemeMode as storageReadThemeMode,
+  diagnoseThemeStorage,
+} from './stores/settings/theme-storage.js';
 import LoginPage from './pages/misc/LoginPage.js';
 import NotFoundPage from './pages/misc/NotFoundPage.js';
 import HomePage from './pages/home/HomePage.js';
@@ -88,9 +94,15 @@ function LazyRoutePage({ component: Component, prefersReducedMotion, title }: La
 }
 
 function getInitialTheme(): Theme {
-  const stored = localStorage.getItem('theme');
-  if (stored === 'light' || stored === 'dark') return stored;
+  const mode = storageReadThemeMode();
+  if (mode === 'light') return 'light';
+  if (mode === 'dark') return 'dark';
+  // system → 跟随系统偏好
   return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+}
+
+function getInitialThemeStyle(): ThemeStyle {
+  return storageReadThemeStyle();
 }
 
 function useHasHydrated(): boolean {
@@ -170,7 +182,7 @@ function DesktopGatewayRecovery({
           border: '1px solid var(--border-default)',
           borderRadius: 16,
           background: 'var(--bg-overlay)',
-          boxShadow: '0 24px 80px rgba(0, 0, 0, 0.34)',
+          boxShadow: 'var(--shadow-lg)',
         }}
       >
         <strong style={{ color: 'var(--fg-strong)', fontSize: 18 }}>无法建立桌面默认身份</strong>
@@ -278,9 +290,12 @@ function useDesktopGatewayBootstrap(
 
 export default function App() {
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
+  const [initialThemeStyle, setInitialThemeStyle] = useState<ThemeStyle>(getInitialThemeStyle);
   const displayPreferencesHydrated = useDisplayPreferencesHydrated();
   const themeMode = useDisplayPreferencesStore((s) => s.themeMode);
   const setThemeMode = useDisplayPreferencesStore((s) => s.setThemeMode);
+  const storeThemeStyle = useDisplayPreferencesStore((s) => s.themeStyle);
+  const themeStyle = displayPreferencesHydrated ? storeThemeStyle : initialThemeStyle;
   const openFileRef = useRef<OpenFileFn | null>(null);
   const prefersReducedMotion = usePrefersReducedMotion();
   const authHydrated = useHasHydrated();
@@ -296,6 +311,28 @@ export default function App() {
   const [showOnboarding, setShowOnboarding] = useState(
     () => localStorage.getItem('onboarded') !== '1',
   );
+
+  // 登录成功后（accessToken 从 null 变为有值），强制从 localStorage 重新读取主题。
+  // 这解决了：登录前显示默认主题，登录后没有切换到用户保存的主题的问题。
+  useEffect(() => {
+    if (!accessToken) return;
+    const savedStyle = storageReadThemeStyle();
+    const savedMode = storageReadThemeMode();
+    console.log('[theme-auth] login detected, re-reading theme:', savedStyle, savedMode);
+    diagnoseThemeStorage();
+
+    // 如果读到的主题与当前 store 不同，更新 store
+    const store = useDisplayPreferencesStore.getState();
+    if (savedStyle !== store.themeStyle) {
+      store.setThemeStyle(savedStyle);
+    }
+    if (savedMode !== store.themeMode) {
+      store.setThemeMode(savedMode);
+    }
+
+    // 更新 initialThemeStyle 以防 displayPreferencesHydrated 仍为 false
+    setInitialThemeStyle(savedStyle);
+  }, [accessToken]);
 
   // 主题模式：system 跟随系统，light/dark 强制。
   useEffect(() => {
@@ -314,13 +351,21 @@ export default function App() {
   }, [displayPreferencesHydrated, themeMode]);
 
   useEffect(() => {
-    if (theme === 'light') {
-      document.documentElement.classList.add('light');
-    } else {
-      document.documentElement.classList.remove('light');
+    const root = document.documentElement;
+    root.setAttribute('data-theme', themeStyle);
+    root.setAttribute('data-mode', theme);
+    // 仅在 Zustand persist 水合完成后才写入独立 key，
+    // 避免在水合前用默认值覆盖之前保存的真实偏好。
+    if (displayPreferencesHydrated) {
+      try {
+        localStorage.setItem('theme-style', themeStyle);
+        localStorage.setItem('theme-mode', themeMode === 'system' ? 'system' : theme);
+        localStorage.setItem('theme', theme);
+      } catch {
+        // ignore
+      }
     }
-    localStorage.setItem('theme', theme);
-  }, [theme]);
+  }, [theme, themeStyle, displayPreferencesHydrated, themeMode]);
 
   useDesktopGatewayBootstrap(
     authHydrated && !showOnboarding,

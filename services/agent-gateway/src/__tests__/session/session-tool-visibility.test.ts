@@ -144,6 +144,20 @@ describe('session tool visibility', () => {
     expect(isGatewayToolEnabledForSessionMetadata('PluginReplyMessage', metadata)).toBe(true);
   });
 
+  it('Given channel member allowlist When a channel send tool is omitted Then that tool is hidden even if channel defaults would allow it', () => {
+    const metadata = {
+      source: 'channel',
+      channelToolAllowlist: ['PluginReplyMessage'],
+      channel: {
+        type: 'telegram',
+        tools: {},
+      },
+    };
+
+    expect(isGatewayToolEnabledForSessionMetadata('PluginReplyMessage', metadata)).toBe(true);
+    expect(isGatewayToolEnabledForSessionMetadata('PluginSendImage', metadata)).toBe(false);
+  });
+
   it('Given normal session metadata When channel tools are checked Then channel send tools are hidden', () => {
     const metadata = { source: 'desktop' };
 
@@ -257,6 +271,25 @@ describe('session tool visibility', () => {
     expect(isGatewayToolEnabledForSessionMetadata('codegraph_search', metadata)).toBe(false);
     expect(isGatewayToolEnabledForSessionMetadata('run_bash_in_background', metadata)).toBe(false);
     expect(isGatewayToolEnabledForSessionMetadata('interactive_bash', metadata)).toBe(false);
+  });
+
+  it('Given channel member allowlist When only read is granted Then unrelated model tools remain hidden', () => {
+    const metadata = {
+      source: 'channel',
+      channelLlmToolsEnabled: true,
+      channelToolAllowlist: ['read'],
+      channel: {
+        type: 'qq',
+        tools: {
+          web_search: true,
+          read: true,
+        },
+      },
+    };
+
+    expect(isGatewayToolEnabledForSessionMetadata('read', metadata)).toBe(true);
+    expect(isGatewayToolEnabledForSessionMetadata('workspace_tree', metadata)).toBe(true);
+    expect(isGatewayToolEnabledForSessionMetadata('websearch', metadata)).toBe(false);
   });
 
   it('Given channel-managed metadata with LLM tool opt-in When sub-agents are allowed Then task tools follow channel policy', () => {

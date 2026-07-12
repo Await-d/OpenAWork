@@ -169,7 +169,7 @@ export const OVERLAY_STYLE: CSSProperties = {
   zIndex: 800,
   display: 'grid',
   placeItems: 'center',
-  background: 'rgba(0, 0, 0, 0.6)',
+  background: 'color-mix(in srgb, var(--bg-base) 60%, transparent)',
   backdropFilter: 'blur(4px)',
   padding: 16,
 };
@@ -183,7 +183,7 @@ export const MODAL_STYLE: CSSProperties = {
   borderRadius: 18,
   background: 'var(--bg-overlay)',
   border: '1px solid var(--border-default)',
-  boxShadow: '0 24px 64px rgba(0, 0, 0, 0.4)',
+  boxShadow: 'var(--shadow-lg)',
   display: 'grid',
   gridTemplateColumns: '240px 1fr',
 };
@@ -364,7 +364,7 @@ export const SOURCE_TAB_BTN_ACTIVE_STYLE: CSSProperties = {
   ...SOURCE_TAB_BTN_BASE_STYLE,
   background: 'var(--bg-overlay)',
   color: 'var(--fg-strong)',
-  boxShadow: '0 1px 4px color-mix(in srgb, #000 10%, transparent)',
+  boxShadow: '0 1px 4px color-mix(in srgb, var(--bg-base) 10%, transparent)',
 };
 
 export const CARD_BASE_STYLE: CSSProperties = {

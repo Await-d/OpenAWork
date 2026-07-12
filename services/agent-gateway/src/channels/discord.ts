@@ -15,6 +15,7 @@ export class DiscordChannelService implements MessagingChannelService {
   readonly pluginId: string;
   readonly pluginType = 'discord';
 
+  private readonly instance: ChannelInstance;
   private token: string;
   private running = false;
   private notify: (event: ChannelEvent) => void;
@@ -22,6 +23,7 @@ export class DiscordChannelService implements MessagingChannelService {
   private gatewayUrl: string | undefined;
 
   constructor(instance: ChannelInstance, notify: (event: ChannelEvent) => void) {
+    this.instance = instance;
     this.pluginId = instance.id;
     this.token = instance.config['token'] ?? '';
     this.gatewayUrl = instance.config['gatewayUrl'];
@@ -41,6 +43,7 @@ export class DiscordChannelService implements MessagingChannelService {
       return;
     }
     const gateway = new DiscordGatewayClient({
+      channel: this.instance,
       pluginId: this.pluginId,
       token: this.token,
       gatewayUrl: this.gatewayUrl,

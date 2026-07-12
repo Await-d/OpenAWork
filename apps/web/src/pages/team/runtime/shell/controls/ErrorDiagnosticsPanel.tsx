@@ -65,7 +65,7 @@ const HEADER_COUNT_STYLE: CSSProperties = {
   padding: '1px 8px',
   borderRadius: 999,
   background: 'var(--complement)',
-  color: 'var(--fg-on-accent, #fff)',
+  color: 'var(--fg-on-accent)',
   fontSize: 10,
   fontWeight: 700,
   fontVariantNumeric: 'tabular-nums',

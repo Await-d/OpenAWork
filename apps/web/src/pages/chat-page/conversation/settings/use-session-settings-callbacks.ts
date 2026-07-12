@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import type { DialogueMode } from '../../mode/dialogue-mode.js';
 import type { ReasoningEffort } from '../../../../components/conversation-runtime/messages/support.js';
+import type { ModelSelectionSource } from './model-selection-source.js';
 
 export interface SessionSettingsState {
   dialogueMode: DialogueMode;
@@ -10,6 +11,7 @@ export interface SessionSettingsState {
   reasoningEffort: ReasoningEffort;
   activeProviderId: string;
   activeModelId: string;
+  modelSelectionSource: ModelSelectionSource | null;
   manualAgentId: string;
   effectiveWorkingDirectory: string | null;
   sessionMetadataDirty: boolean;
@@ -53,6 +55,7 @@ export function useSessionSettingsCallbacks(
     reasoningEffort,
     activeProviderId,
     activeModelId,
+    modelSelectionSource,
     manualAgentId,
     effectiveWorkingDirectory,
     sessionMetadataDirtyRef,
@@ -78,12 +81,16 @@ export function useSessionSettingsCallbacks(
       };
       if (activeProviderId) metadata['providerId'] = activeProviderId;
       if (activeModelId) metadata['modelId'] = activeModelId;
+      if (activeProviderId && activeModelId && modelSelectionSource) {
+        metadata['modelSelectionSource'] = modelSelectionSource;
+      }
       if (manualAgentId.trim()) metadata['agentId'] = manualAgentId.trim();
       if (effectiveWorkingDirectory) metadata['workingDirectory'] = effectiveWorkingDirectory;
       return { ...metadata, ...overrides };
     },
     [
       activeModelId,
+      modelSelectionSource,
       activeProviderId,
       dialogueMode,
       effectiveWorkingDirectory,

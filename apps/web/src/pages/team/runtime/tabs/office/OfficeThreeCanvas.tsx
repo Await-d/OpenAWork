@@ -1244,7 +1244,7 @@ export function OfficeThreeCanvas({
         overflow: 'hidden',
         borderRadius: 10,
         border: '1px solid var(--border-subtle)',
-        background: '#1a1c2c',
+        background: 'var(--bg-elevated)',
         cursor: 'grab',
         touchAction: 'none',
         position: 'relative',

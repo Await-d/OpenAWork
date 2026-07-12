@@ -949,7 +949,7 @@ export function CompanionStage({
                   borderRadius: 12,
                   border: '1px solid var(--border-default)',
                   background: 'var(--bg-overlay)',
-                  boxShadow: '0 12px 32px -12px rgba(0,0,0,0.32)',
+                  boxShadow: 'var(--shadow-lg)',
                   zIndex: 999,
                 }}
               >

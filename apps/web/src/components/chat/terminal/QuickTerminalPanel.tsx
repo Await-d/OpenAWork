@@ -268,7 +268,7 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
         minHeight: height,
         background: 'var(--bg-overlay)',
         borderTop: '1px solid var(--border-subtle)',
-        boxShadow: inlinePresentation ? 'none' : '0 -8px 24px rgba(0,0,0,0.18)',
+        boxShadow: inlinePresentation ? 'none' : 'var(--shadow-md)',
         display: 'flex',
         flexDirection: 'column',
         flexShrink: 0,

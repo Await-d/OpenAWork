@@ -123,6 +123,12 @@ export interface UpstreamStreamDiagnosticsSummary {
   stalled: boolean;
 }
 
+interface UpstreamSummaryRouteMeta {
+  model: string;
+  providerId?: string;
+  providerType?: string;
+}
+
 function createEmptyStreamDiagnosticsSummary(): UpstreamStreamDiagnosticsSummary {
   return {
     textDeltaCount: 0,
@@ -132,6 +138,10 @@ function createEmptyStreamDiagnosticsSummary(): UpstreamStreamDiagnosticsSummary
     sawError: false,
     stalled: false,
   };
+}
+
+function resolveRouteProviderId(route: UpstreamSummaryRouteMeta): string | undefined {
+  return route.providerId ?? route.providerType;
 }
 
 export function buildUpstreamStreamSummaryLog(input: {
@@ -172,15 +182,19 @@ export function buildUpstreamStreamSummaryLog(input: {
   };
 }
 
-function toUpstreamStreamSummary(
+export function toUpstreamStreamSummary(
   stopReason: StreamStopReason,
   diagnostics: UpstreamStreamDiagnosticsSummary,
+  route: UpstreamSummaryRouteMeta,
 ): UpstreamStreamSummary {
+  const providerId = resolveRouteProviderId(route);
   return {
     stopReason,
     textDeltaCount: diagnostics.textDeltaCount,
     reasoningDeltaCount: diagnostics.reasoningDeltaCount,
     toolCallDeltaCount: diagnostics.toolCallDeltaCount,
+    modelId: route.model,
+    ...(providerId ? { providerId } : {}),
     sawDone: diagnostics.sawDone,
     sawError: diagnostics.sawError,
     stalled: diagnostics.stalled,
@@ -943,6 +957,7 @@ export async function runModelRound(input: {
   lspGuidance?: string | null;
   dialogueModePrompt?: string | null;
   yoloModePrompt?: string | null;
+  flatMcpToolsEnabled?: boolean;
   companionPrompt?: string | null;
   dynamicAgentPrompt?: string | null;
   startWorkContext?: string | null;
@@ -1012,9 +1027,10 @@ export async function runModelRound(input: {
   // different (providerID, modelID) than the current call have their
   // reasoning metadata (signature/encryptedContent/summary) stripped so
   // we never replay an opaque payload an unrelated model cannot consume.
+  const routeProviderId = resolveRouteProviderId(input.route);
   const unifiedMessagesRaw = toModelMessages(messagesV2, {
     currentModel: {
-      providerID: input.route.providerType ?? 'unknown',
+      providerID: routeProviderId ?? 'unknown',
       modelID: input.route.model,
     },
   });
@@ -1067,6 +1083,7 @@ export async function runModelRound(input: {
     lspGuidance: input.lspGuidance,
     dialogueModePrompt: input.dialogueModePrompt,
     yoloModePrompt: input.yoloModePrompt,
+    flatMcpToolsEnabled: input.flatMcpToolsEnabled,
     thinkingLanguagePrompt,
     dynamicAgentPrompt: input.dynamicAgentPrompt,
     startWorkContext: input.startWorkContext,
@@ -1184,7 +1201,7 @@ export async function runModelRound(input: {
           timestamp: stepStartedAt,
           model: {
             id: input.route.model,
-            providerID: input.route.providerType ?? 'unknown',
+            providerID: routeProviderId ?? 'unknown',
             ...(input.route.variant ? { variant: input.route.variant } : {}),
           },
         },
@@ -1264,6 +1281,8 @@ export async function runModelRound(input: {
       createdAt: stepStartedAt,
       completedAt: Date.now(),
       firstContentAt: state.firstContentAt,
+      modelID: input.route.model,
+      ...(routeProviderId ? { providerID: routeProviderId } : {}),
       ...(input.agentId ? { agentId: input.agentId } : {}),
       ...(usage ? { usage } : {}),
     });
@@ -1561,6 +1580,8 @@ export async function runModelRound(input: {
         clientRequestId: input.clientRequestId,
         status: 'error',
         replaceExisting: true,
+        modelID: input.route.model,
+        ...(routeProviderId ? { providerID: routeProviderId } : {}),
         ...(input.agentId ? { agentId: input.agentId } : {}),
       });
       input.writeChunk(
@@ -1568,7 +1589,7 @@ export async function runModelRound(input: {
           'V2_UPSTREAM_ERROR',
           userFacingMessage,
           input.runId,
-          toUpstreamStreamSummary('error', streamDiagnostics),
+          toUpstreamStreamSummary('error', streamDiagnostics, input.route),
           input.clientRequestId,
         ),
       );
@@ -1602,7 +1623,7 @@ export async function runModelRound(input: {
         type: 'done',
         stopReason,
         requestId: input.clientRequestId,
-        upstreamSummary: toUpstreamStreamSummary(stopReason, streamDiagnostics),
+        upstreamSummary: toUpstreamStreamSummary(stopReason, streamDiagnostics, input.route),
         ...createRunEventMeta(input.runId, input.eventSequence),
       });
     }
@@ -1673,7 +1694,7 @@ export async function runModelRound(input: {
         type: 'done',
         stopReason: 'cancelled',
         requestId: input.clientRequestId,
-        upstreamSummary: toUpstreamStreamSummary('cancelled', streamDiagnostics),
+        upstreamSummary: toUpstreamStreamSummary('cancelled', streamDiagnostics, input.route),
         ...createRunEventMeta(input.runId, input.eventSequence),
       });
       const streamSummaryLog = buildUpstreamStreamSummaryLog({
@@ -1749,6 +1770,8 @@ export async function runModelRound(input: {
       clientRequestId: input.clientRequestId,
       status: 'error',
       replaceExisting: true,
+      modelID: input.route.model,
+      ...(routeProviderId ? { providerID: routeProviderId } : {}),
       ...(input.agentId ? { agentId: input.agentId } : {}),
     });
     input.writeChunk(
@@ -1756,7 +1779,7 @@ export async function runModelRound(input: {
         'STREAM_ERROR',
         userFacingMessage,
         input.runId,
-        toUpstreamStreamSummary('error', streamDiagnostics),
+        toUpstreamStreamSummary('error', streamDiagnostics, input.route),
         input.clientRequestId,
       ),
     );

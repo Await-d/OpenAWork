@@ -25,7 +25,7 @@ const FRAME_STYLE: CSSProperties = {
   overflow: 'hidden',
   background: 'var(--bg-surface)',
   border: '1px solid var(--border-subtle)',
-  boxShadow: 'var(--shadow-md, 0 2px 4px rgba(0,0,0,0.2), 0 8px 24px -8px rgba(0,0,0,0.4))',
+  boxShadow: 'var(--shadow-md)',
   minWidth: 0,
 };
 
@@ -37,8 +37,7 @@ export function SessionPanelFrame({ children, raised, style }: SessionPanelFrame
         ...FRAME_STYLE,
         ...(raised
           ? {
-              boxShadow:
-                'var(--shadow-lg, 0 4px 8px rgba(0,0,0,0.2), 0 24px 56px -16px rgba(0,0,0,0.5))',
+              boxShadow: 'var(--shadow-lg)',
             }
           : {}),
         ...style,

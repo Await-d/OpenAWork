@@ -212,7 +212,7 @@ const menuStyle: React.CSSProperties = {
   borderRadius: 10,
   padding: '6px 0',
   minWidth: 232,
-  boxShadow: '0 14px 34px rgba(0,0,0,.24)',
+  boxShadow: 'var(--shadow-lg)',
 };
 
 const dividerStyle: React.CSSProperties = {

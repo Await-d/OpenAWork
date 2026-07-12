@@ -5,7 +5,12 @@ import { useAuthStore } from '../../web/src/stores/auth/auth.js';
 import {
   useDisplayPreferencesHydrated,
   useDisplayPreferencesStore,
+  type ThemeStyle,
 } from '../../web/src/stores/settings/display-preferences.js';
+import {
+  readThemeStyle as storageReadThemeStyle,
+  readThemeMode as storageReadThemeMode,
+} from '../../web/src/stores/settings/theme-storage.js';
 import OnboardingWizard from './onboarding/OnboardingWizard.js';
 import ArtifactsPage from '../../web/src/pages/artifacts/ArtifactsPage.js';
 import ChatPage from '../../web/src/pages/chat-page/ChatPage.js';
@@ -31,9 +36,14 @@ interface NotificationAction {
 type Theme = 'dark' | 'light';
 
 function getInitialTheme(): Theme {
-  const stored = localStorage.getItem('theme');
-  if (stored === 'light' || stored === 'dark') return stored;
+  const mode = storageReadThemeMode();
+  if (mode === 'light') return 'light';
+  if (mode === 'dark') return 'dark';
   return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+}
+
+function getInitialThemeStyle(): ThemeStyle {
+  return storageReadThemeStyle();
 }
 
 function useHasHydrated(): boolean {
@@ -229,9 +239,12 @@ function useDesktopGatewayBootstrap(
 
 export default function App() {
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
+  const [initialThemeStyle, setInitialThemeStyle] = useState<ThemeStyle>(getInitialThemeStyle);
   const [onboarded, setOnboarded] = useState(() => localStorage.getItem('onboarded') === '1');
   const displayPreferencesHydrated = useDisplayPreferencesHydrated();
   const themeMode = useDisplayPreferencesStore((state) => state.themeMode);
+  const storeThemeStyle = useDisplayPreferencesStore((state) => state.themeStyle);
+  const themeStyle = displayPreferencesHydrated ? storeThemeStyle : initialThemeStyle;
   const accessToken = useAuthStore((state) => state.accessToken);
   const clearAuth = useAuthStore((state) => state.clearAuth);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
@@ -239,6 +252,24 @@ export default function App() {
   const [showUpdateDialog, setShowUpdateDialog] = useState(false);
 
   useDesktopGatewayBootstrap(onboarded, accessToken, bootstrapRetry, setBootstrapError);
+
+  // 登录成功后（accessToken 从 null 变为有值），强制从 localStorage 重新读取主题。
+  useEffect(() => {
+    if (!accessToken) return;
+    const savedStyle = storageReadThemeStyle();
+    const savedMode = storageReadThemeMode();
+    console.log('[theme-auth] login detected, re-reading theme:', savedStyle, savedMode);
+
+    const store = useDisplayPreferencesStore.getState();
+    if (savedStyle !== store.themeStyle) {
+      store.setThemeStyle(savedStyle);
+    }
+    if (savedMode !== store.themeMode) {
+      store.setThemeMode(savedMode);
+    }
+
+    setInitialThemeStyle(savedStyle);
+  }, [accessToken]);
 
   useEffect(() => {
     if (!displayPreferencesHydrated) return;
@@ -256,10 +287,21 @@ export default function App() {
   }, [displayPreferencesHydrated, themeMode]);
 
   useEffect(() => {
-    document.documentElement.classList.toggle('light', theme === 'light');
-    document.documentElement.style.colorScheme = theme;
-    localStorage.setItem('theme', theme);
-  }, [theme]);
+    const root = document.documentElement;
+    root.setAttribute('data-theme', themeStyle);
+    root.setAttribute('data-mode', theme);
+    root.style.colorScheme = theme;
+    // 仅在 Zustand persist 水合完成后才写入独立 key
+    if (displayPreferencesHydrated) {
+      try {
+        localStorage.setItem('theme-style', themeStyle);
+        localStorage.setItem('theme-mode', themeMode === 'system' ? 'system' : theme);
+        localStorage.setItem('theme', theme);
+      } catch {
+        // ignore
+      }
+    }
+  }, [theme, themeStyle, displayPreferencesHydrated, themeMode]);
 
   useEffect(() => {
     const unlisten = listen('tray:check-updates', () => {

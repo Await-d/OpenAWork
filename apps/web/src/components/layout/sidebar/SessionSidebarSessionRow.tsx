@@ -254,14 +254,14 @@ export function SessionSidebarSessionRow({
               textOverflow: 'ellipsis',
               color:
                 label === '澄清(方案)'
-                  ? 'rgb(245, 158, 11)'
+                  ? 'var(--warning)'
                   : label === '编程'
-                    ? 'rgb(167, 139, 250)'
+                    ? 'var(--contrast)'
                     : label === '程序员'
-                      ? 'rgb(52, 211, 153)'
+                      ? 'var(--success)'
                       : label === 'YOLO'
                         ? 'var(--accent)'
-                        : 'rgb(96, 165, 250)',
+                        : 'var(--aux)',
             }}
           >
             {label}

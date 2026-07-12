@@ -10,8 +10,8 @@
  * - 用户可以在 user_settings 里用同 id 管理内置 server。system builtin
  *   可被完整覆盖；virtual / adapter builtin 只接受 enabled 与 disabledTools
  *   等管理字段，endpoint 始终由 runtime 内置桥接提供。
- * - 环境变量（如 `EXA_API_KEY`）若可用，会被自动注入为请求 header；
- *   不可用则透明回退到匿名访问（Exa 的 web_search_exa 有免费额度）。
+ * - Open WebSearch 通过受保护的 adapter 直接运行在 gateway 内，不暴露
+ *   独立 HTTP 服务，也不在运行时下载 npm 包；Exa 保留为可选远程补充。
  *
  * 灵感来自 oh-my-opencode 的 `src/mcp/index.ts`：它给 opencode 注入
  * websearch / context7 / grep_app 三个内置 remote MCP。OpenAWork 仅
@@ -35,7 +35,7 @@ export type BuiltinMcpKind = 'system' | 'virtual' | 'adapter';
 
 interface RuntimeBuiltinMcpBase {
   readonly id: BuiltinMcpId;
-  readonly name: BuiltinMcpId;
+  readonly name: string;
   readonly enabled: boolean;
   readonly builtin: true;
   readonly builtinKind: BuiltinMcpKind;
@@ -68,24 +68,31 @@ export function buildBuiltinMcpServers(
 
   const exaApiKey = readEnvString(env, 'EXA_API_KEY');
   return listSystemBuiltinMcpDescriptors().map((descriptor) =>
-    buildRuntimeBuiltinMcpServer(descriptor.id, descriptor.builtinKind, exaApiKey),
+    buildRuntimeBuiltinMcpServer(descriptor, exaApiKey),
   );
 }
 
 function buildRuntimeBuiltinMcpServer(
-  id: BuiltinMcpId,
-  kind: BuiltinMcpKind,
+  descriptor: {
+    readonly builtinKind: BuiltinMcpKind;
+    readonly enabledByDefault: boolean;
+    readonly id: BuiltinMcpId;
+    readonly title: string;
+  },
   exaApiKey: string | undefined,
 ): ConfiguredMCPServer {
   const base: RuntimeBuiltinMcpBase = {
-    id,
-    name: id,
-    enabled: id === 'git_bash' ? process.platform === 'win32' : true,
+    id: descriptor.id,
+    name: descriptor.title,
+    enabled:
+      descriptor.id === 'git_bash' ? process.platform === 'win32' : descriptor.enabledByDefault,
     builtin: true,
-    builtinKind: kind,
+    builtinKind: descriptor.builtinKind,
     source: 'system' as const,
   };
-  switch (id) {
+  switch (descriptor.id) {
+    case 'open_websearch':
+      return virtualBuiltinMcpServer(base, 'openawork-virtual-open-websearch');
     case 'websearch':
       return {
         ...base,

@@ -15,7 +15,7 @@ const DRAWER_STYLE: CSSProperties = {
   zIndex: 100,
   borderTop: '1px solid color-mix(in srgb, var(--border-default) 82%, transparent)',
   background: 'var(--bg-overlay)',
-  boxShadow: '0 -2px 12px rgba(0,0,0,0.1)',
+  boxShadow: 'var(--shadow-sm)',
   transition: 'transform 200ms ease',
 };
 

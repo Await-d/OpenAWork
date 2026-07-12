@@ -59,6 +59,7 @@ export const SYSTEM_BUILTIN_COMMAND_IDS = [
 export type SystemBuiltinCommandId = (typeof SYSTEM_BUILTIN_COMMAND_IDS)[number];
 
 export const SYSTEM_BUILTIN_MCP_IDS = [
+  'open_websearch',
   'websearch',
   'grep_app',
   'codegraph',

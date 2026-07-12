@@ -265,6 +265,7 @@ export interface ChatConversationViewProps {
   dialogueMode: DialogueMode;
   manualAgentId: string;
   yoloMode: boolean;
+  fastEnabled?: boolean;
   webSearchEnabled: boolean;
   thinkingEnabled: boolean;
   reasoningEffort: ReasoningEffort;
@@ -295,6 +296,7 @@ export interface ChatConversationViewProps {
   onComposerSubmit: (payload: UnifiedComposerSubmitPayload) => Promise<void> | void;
   onStopComposer: () => void | Promise<void>;
   onComposerModelSelect?: (providerId: string, modelId: string) => Promise<void>;
+  onFastEnabledChange?: (enabled: boolean) => void;
   onToggleWebSearch: () => void;
   onThinkingEnabledChange: (enabled: boolean) => void;
   onReasoningEffortChange: (effort: ReasoningEffort) => void;
@@ -478,6 +480,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
     dialogueMode,
     manualAgentId,
     yoloMode,
+    fastEnabled,
     webSearchEnabled,
     thinkingEnabled,
     reasoningEffort,
@@ -504,6 +507,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
     onComposerSubmit,
     onStopComposer,
     onComposerModelSelect,
+    onFastEnabledChange,
     onToggleWebSearch,
     onThinkingEnabledChange,
     onReasoningEffortChange,
@@ -795,6 +799,8 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
           dialogueMode={dialogueMode}
           manualAgentId={manualAgentId}
           yoloMode={yoloMode}
+          fastEnabled={fastEnabled}
+          onFastEnabledChange={onFastEnabledChange}
           webSearchEnabled={webSearchEnabled}
           thinkingEnabled={thinkingEnabled}
           reasoningEffort={reasoningEffort}

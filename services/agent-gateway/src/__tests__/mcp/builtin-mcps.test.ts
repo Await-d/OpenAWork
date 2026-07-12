@@ -2,8 +2,9 @@
  * Tests for `builtin-mcps.ts`：内置远程 MCP 注册与"用户配置覆盖"
  * 合并语义。覆盖：
  *
- *  1. **默认产出**：在零环境变量下输出 websearch + grep_app 远程 MCP，
- *     以及 codegraph / git_bash / lsp / omo 四条内置虚拟 MCP。
+ *  1. **默认产出**：在零环境变量下输出 open_websearch / websearch /
+ *     grep_app 三条搜索相关内置 MCP，以及 codegraph / git_bash / lsp /
+ *     omo 四条虚拟/adapter MCP。
  *  2. **EXA_API_KEY 注入**：`process.env.EXA_API_KEY` 存在时，会被
  *     当作 `x-api-key` header 写到 websearch；不存在时不挂任何
  *     header（确保不污染匿名访问）。
@@ -36,15 +37,27 @@ import type { ConfiguredMCPServer } from '../../mcp/mcp-runtime.js';
 describe('buildBuiltinMcpServers', () => {
   it('exposes remote and virtual builtin MCP servers by default', () => {
     const out = buildBuiltinMcpServers({ env: {} });
-    expect(out).toHaveLength(6);
+    expect(out).toHaveLength(7);
+
+    const openWebsearch = out.find((server) => server.id === 'open_websearch');
+    expect(openWebsearch).toMatchObject({
+      id: 'open_websearch',
+      name: 'Open WebSearch',
+      transport: 'stdio',
+      command: 'openawork-virtual-open-websearch',
+      required: false,
+      enabled: true,
+      builtin: true,
+      builtinKind: 'adapter',
+    });
 
     const websearch = out.find((server) => server.id === 'websearch');
     expect(websearch).toMatchObject({
       id: 'websearch',
-      name: 'websearch',
+      name: 'Exa Web Search',
       transport: 'sse',
       url: 'https://mcp.exa.ai/mcp?tools=web_search_exa',
-      enabled: true,
+      enabled: false,
       builtin: true,
     });
     // 没传 EXA_API_KEY 时不挂 header，避免给匿名访问加奇怪头。
@@ -123,6 +136,8 @@ describe('virtual builtin MCP provider registry', () => {
       expect(isVirtualBuiltinMcpId(providerId)).toBe(true);
       expect(provider?.listTools()).toEqual(listVirtualMcpTools(providerId));
     }
+    expect(getVirtualMcpProvider('open_websearch')).toBeDefined();
+    expect(isVirtualBuiltinMcpId('open_websearch')).toBe(true);
     expect(getVirtualMcpProvider('websearch')).toBeUndefined();
     expect(isVirtualBuiltinMcpId('websearch')).toBe(false);
   });
@@ -132,9 +147,11 @@ describe('mergeBuiltinAndConfiguredMcps', () => {
   it('returns the full builtin set when the user has no custom config', () => {
     const merged = mergeBuiltinAndConfiguredMcps([]);
     const ids = merged.map((server) => server.id);
+    expect(ids).toContain('open_websearch');
     expect(ids).toContain('websearch');
     expect(ids).toContain('grep_app');
-    expect(merged.find((server) => server.id === 'websearch')?.enabled).toBe(true);
+    expect(merged.find((server) => server.id === 'open_websearch')?.enabled).toBe(true);
+    expect(merged.find((server) => server.id === 'websearch')?.enabled).toBe(false);
     expect(merged.find((server) => server.id === 'grep_app')?.enabled).toBe(true);
     expect(merged.find((server) => server.id === 'codegraph')?.enabled).toBe(true);
     expect(merged.find((server) => server.id === 'lsp')?.enabled).toBe(true);
@@ -175,6 +192,7 @@ describe('mergeBuiltinAndConfiguredMcps', () => {
     const merged = mergeBuiltinAndConfiguredMcps([customServer]);
     expect(merged.map((server) => server.id)).toEqual(
       expect.arrayContaining([
+        'open_websearch',
         'websearch',
         'grep_app',
         'codegraph',

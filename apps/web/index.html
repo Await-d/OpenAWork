@@ -5,6 +5,80 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OpenAWork</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script>
+      // 在 React 加载之前同步设置主题属性，消除首次加载闪烁
+      (function () {
+        try {
+          var root = document.documentElement;
+          var validStyles = ['nebula','aurora','linear','forest','sakura','carbon','sunset','ocean'];
+          var validModes = ['system','light','dark'];
+
+          // 辅助：从 Zustand persist key 读取
+          function readFromPersist() {
+            try {
+              var raw = localStorage.getItem('openAwork-display-preferences');
+              if (!raw) return null;
+              var parsed = JSON.parse(raw);
+              if (!parsed || typeof parsed !== 'object' || !parsed.state) return null;
+              return parsed.state;
+            } catch (e) { return null; }
+          }
+
+          // 1. 优先从独立 key 读取
+          var themeStyle = localStorage.getItem('theme-style');
+          var themeMode = localStorage.getItem('theme-mode');
+
+          // 2. 如果独立 key 缺失，从 Zustand persist key 读取
+          if (!themeStyle || !themeMode) {
+            var persisted = readFromPersist();
+            if (persisted) {
+              if (!themeStyle && persisted.themeStyle) themeStyle = persisted.themeStyle;
+              if (!themeMode && persisted.themeMode) themeMode = persisted.themeMode;
+            }
+          }
+
+          // 3. 兼容旧 key
+          if ((!themeMode || themeMode === 'system') && !localStorage.getItem('theme-mode')) {
+            var legacy = localStorage.getItem('theme');
+            if (legacy === 'light' || legacy === 'dark') {
+              themeMode = legacy;
+            }
+          }
+
+          // 4. 默认值
+          if (!themeStyle || validStyles.indexOf(themeStyle) === -1) themeStyle = 'nebula';
+          if (!themeMode || validModes.indexOf(themeMode) === -1) themeMode = 'system';
+
+          var resolvedMode = themeMode;
+          if (themeMode === 'system') {
+            resolvedMode = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+          }
+
+          console.log('[theme-init] style:', themeStyle, 'mode:', resolvedMode,
+            '| keys:', 'theme-style=' + localStorage.getItem('theme-style'),
+            'theme-mode=' + localStorage.getItem('theme-mode'),
+            'persist=' + (localStorage.getItem('openAwork-display-preferences') ? 'yes' : 'no'));
+
+          // 额外诊断：打印所有 localStorage key
+          try {
+            var allKeys = [];
+            for (var i = 0; i < localStorage.length; i++) {
+              allKeys.push(localStorage.key(i));
+            }
+            console.log('[theme-init] all localStorage keys:', allKeys.join(', '));
+          } catch(e) {
+            console.log('[theme-init] cannot enumerate localStorage:', e);
+          }
+
+          root.setAttribute('data-theme', themeStyle);
+          root.setAttribute('data-mode', resolvedMode);
+        } catch (e) {
+          console.error('[theme-init] error:', e);
+          document.documentElement.setAttribute('data-theme', 'nebula');
+          document.documentElement.setAttribute('data-mode', 'dark');
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

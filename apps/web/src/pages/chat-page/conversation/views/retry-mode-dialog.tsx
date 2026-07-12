@@ -27,7 +27,7 @@ export default function RetryModeDialog({
       style={{
         position: 'fixed',
         inset: 0,
-        background: 'rgba(0, 0, 0, 0.58)',
+        background: 'color-mix(in srgb, var(--bg-base) 60%, transparent)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',

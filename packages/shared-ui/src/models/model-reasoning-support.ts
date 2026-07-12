@@ -1,4 +1,5 @@
-export type SupportedReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+export type SupportedReasoningEffort =
+  'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 const DEFAULT_REASONING_EFFORTS = [
   'low',
@@ -142,6 +143,16 @@ const OPENAI_REASONING_SUPPORT_RULES: readonly OpenAIReasoningSupportRule[] = [
     efforts: ['medium', 'high', 'xhigh'],
     matches: (modelId) => modelId.includes('codex-max'),
   },
+  // GPT-5.6 系列（Sol/Terra/Luna）：支持 none/low/medium/high/max。
+  {
+    efforts: ['none', 'low', 'medium', 'high', 'max'],
+    matches: (modelId) => /^gpt-5\.6\b/.test(modelId),
+  },
+  // GPT-5.5：支持 none/low/medium/high/xhigh。
+  {
+    efforts: ['none', 'low', 'medium', 'high', 'xhigh'],
+    matches: (modelId) => /^gpt-5\.5\b/.test(modelId),
+  },
   {
     efforts: ['low', 'medium', 'high', 'xhigh'],
     matches: (modelId) => {
@@ -149,7 +160,7 @@ const OPENAI_REASONING_SUPPORT_RULES: readonly OpenAIReasoningSupportRule[] = [
       const minorRaw = match?.[1];
       if (!minorRaw) return false;
       const minor = Number.parseInt(minorRaw, 10);
-      return Number.isFinite(minor) && minor >= 2;
+      return Number.isFinite(minor) && minor >= 2 && minor < 5;
     },
   },
   {
@@ -193,11 +204,9 @@ export function canConfigureThinkingForModel(
   }
 
   if (effectiveType === 'mimo') {
-    // 小米 MiMo V2.5 系列与 V2 Flash 均支持 enabled/disabled 思维链开关，
-    // 后端 provider-options.ts 的 body_thinking_type 分支会下发
-    // `thinking: { type: 'enabled' | 'disabled' }`。MiMo API 不支持力度调节
-    // 参数（无 thinking_budget / effort / thinking_level），因此 getSupported-
-    // ReasoningEffortsForModel 对 mimo 返回单档 'medium'，UI 表现为纯开关。
+    // 小米 MiMo V2.5 系列与 V2 Flash 均支持思维链开关，且上游 API
+    // 已支持 reasoning_effort 参数（low/medium/high）。后端 provider-options.ts
+    // 的 body_thinking_type 风格会同时下发 thinking.type 和 reasoning_effort。
     return true;
   }
 
@@ -232,8 +241,11 @@ export function canConfigureThinkingForModel(
 // thinking_level / enable_thinking / body.thinking.type 等），档位越多不代表
 // 上游一定区分——但对 Anthropic / Gemini 等确实有 budget 区分的渠道，暴露
 // minimal / xhigh 能让用户更精细地控制思考力度。
+
+// Anthropic：新一代（Opus 4.6+）改用 adaptive + effort，支持 low/medium/high/max。
+// 旧代（3.7 / Sonnet 4 / Opus 4）仍用 budget_tokens，支持 minimal~xhigh。
+// 统一暴露 low/medium/high/xhigh（xhigh 对新代映射到 max），后端自行 clamp。
 const ANTHROPIC_REASONING_EFFORTS = [
-  'minimal',
   'low',
   'medium',
   'high',
@@ -278,10 +290,16 @@ const QWEN_REASONING_EFFORTS = [
   'xhigh',
 ] as const satisfies readonly SupportedReasoningEffort[];
 
-// 纯开关渠道（后端只区分 enabled/disabled，不区分 effort 档位）。
-// body_thinking_type 风格 → body.thinking = { type: 'enabled' }（Moonshot / MiMo）
-// 上游 API 不暴露 thinking_budget / effort / thinking_level 等力度参数，
-// 展示多档位会误导用户。返回单档 'medium' 作为"开启思考"的默认选项，
+// MiMo：上游 API 已支持 reasoning_effort 参数（low/medium/high），
+// 同时保留 thinking.type 开关。暴露 3 档，后端映射到上游取值。
+const MIMO_REASONING_EFFORTS = [
+  'low',
+  'medium',
+  'high',
+] as const satisfies readonly SupportedReasoningEffort[];
+
+// Moonshot：上游 API 仅支持 thinking.type enabled/disabled 开关，
+// 不支持力度调节参数。返回单档 'medium' 作为"开启思考"的默认选项，
 // UI 上表现为"关闭思考" + "开启思考"二选一。
 const BINARY_TOGGLE_EFFORTS = ['medium'] as const satisfies readonly SupportedReasoningEffort[];
 
@@ -334,10 +352,16 @@ export function getSupportedReasoningEffortsForModel(
     return QWEN_REASONING_EFFORTS;
   }
 
-  // Moonshot / MiMo：后端只区分 enabled/disabled，上游 API 不支持力度
-  // 调节参数。返回单档 'medium'，UI 表现为纯开关。
-  if (effectiveType === 'moonshot' || effectiveType === 'mimo') {
+  // Moonshot：上游 API 仅支持 thinking.type enabled/disabled 开关，
+  // 不支持力度调节参数。返回单档 'medium'，UI 表现为纯开关。
+  if (effectiveType === 'moonshot') {
     return BINARY_TOGGLE_EFFORTS;
+  }
+
+  // MiMo：上游 API 已支持 reasoning_effort（low/medium/high），
+  // 同时保留 thinking.type 开关。暴露 3 档。
+  if (effectiveType === 'mimo') {
+    return MIMO_REASONING_EFFORTS;
   }
 
   return DEFAULT_REASONING_EFFORTS;
@@ -345,6 +369,8 @@ export function getSupportedReasoningEffortsForModel(
 
 export function describeReasoningEffort(level: SupportedReasoningEffort): string {
   switch (level) {
+    case 'none':
+      return '不进行推理';
     case 'minimal':
       return '最少推理开销';
     case 'low':
@@ -355,5 +381,7 @@ export function describeReasoningEffort(level: SupportedReasoningEffort): string
       return '更充分的深度推理';
     case 'xhigh':
       return '最高推理强度';
+    case 'max':
+      return '最高推理强度（GPT-5.6 Sol 独占）';
   }
 }

@@ -112,6 +112,7 @@ describe('buildWebSearchRoutingSystemPrompt · MCP 工具面一致性', () => {
   it('flat MCP 模式不提示模型调用隐藏的 legacy 包装工具', () => {
     const prompt = buildWebSearchRoutingSystemPrompt({ flatMcpToolsEnabled: true });
 
+    expect(prompt).toContain('mcp__open_websearch__search');
     expect(prompt).toContain('mcp__websearch__web_search_exa');
     expect(prompt).toContain('mcp__grep_app__');
     expect(prompt).not.toContain('mcp_call({');
@@ -121,9 +122,10 @@ describe('buildWebSearchRoutingSystemPrompt · MCP 工具面一致性', () => {
   it('legacy MCP 模式才提示 mcp_call 包装工具', () => {
     const prompt = buildWebSearchRoutingSystemPrompt({ flatMcpToolsEnabled: false });
 
+    expect(prompt).toContain('mcp_call({ serverId: "open_websearch"');
     expect(prompt).toContain('mcp_call({ serverId: "websearch"');
     expect(prompt).toContain('mcp_call({ serverId: "grep_app"');
-    expect(prompt).not.toContain('mcp__websearch__web_search_exa');
+    expect(prompt).not.toContain('mcp__open_websearch__search');
   });
 
   it('明确区分抓取已有网络图片与生成新图片', () => {
@@ -133,5 +135,21 @@ describe('buildWebSearchRoutingSystemPrompt · MCP 工具面一致性', () => {
     expect(prompt).toContain('webfetch');
     expect(prompt).toContain('generate_image');
     expect(prompt).toContain('不要把“抓取网络图片 / 展示已有图片”误路由到图片生成工具');
+  });
+
+  it('system prompt chain 会透传 flat MCP 开关，确保文案与真实工具面一致', () => {
+    const { stable: flatStable } = buildTwoPartSystemPrompts({
+      ...INPUT,
+      flatMcpToolsEnabled: true,
+    });
+    const { stable: legacyStable } = buildTwoPartSystemPrompts({
+      ...INPUT,
+      flatMcpToolsEnabled: false,
+    });
+
+    expect(flatStable).toContain('mcp__websearch__web_search_exa');
+    expect(flatStable).not.toContain('mcp_call({ serverId: "websearch"');
+    expect(legacyStable).toContain('mcp_call({ serverId: "websearch"');
+    expect(legacyStable).not.toContain('mcp__websearch__web_search_exa');
   });
 });

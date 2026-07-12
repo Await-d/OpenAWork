@@ -24,15 +24,15 @@
   "devDependencies": {
     "@commitlint/cli": "^19.8.1",
     "@commitlint/config-conventional": "^19.8.1",
-    "@eslint/js": "^9.39.4",
+    "@eslint/js": "^9.39.5",
     "@typescript-eslint/eslint-plugin": "^8.63.0",
     "@typescript-eslint/parser": "^8.63.0",
-    "eslint": "^9.39.4",
+    "eslint": "^9.39.5",
     "eslint-config-prettier": "^9.1.2",
     "eslint-plugin-import": "^2.32.0",
     "husky": "^9.1.7",
     "lint-staged": "^15.5.2",
-    "prettier": "^3.9.4",
+    "prettier": "^3.9.5",
     "typescript": "^5.9.3",
     "vitest": "^4.1.10"
   },
@@ -71,6 +71,7 @@
       "@sentry/cli",
       "better-sqlite3",
       "esbuild",
+      "koffi",
       "msw"
     ],
     "allowedDeprecatedVersions": {

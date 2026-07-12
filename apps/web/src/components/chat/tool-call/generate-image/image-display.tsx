@@ -111,7 +111,7 @@ const hoverButtonStyle: React.CSSProperties = {
   height: 28,
   borderRadius: 8,
   border: 'none',
-  background: 'rgba(255,255,255,0.18)',
+  background: 'var(--border-strong)',
   backdropFilter: 'blur(6px)',
   color: 'var(--fg-on-accent)',
   fontSize: 14,

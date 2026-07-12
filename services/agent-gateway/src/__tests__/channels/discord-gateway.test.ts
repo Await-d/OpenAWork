@@ -40,7 +40,7 @@ class FakeWebSocket extends EventTarget {
   }
 }
 
-function makeDiscordChannel(): ChannelInstance {
+function makeDiscordChannel(configOverride: Record<string, string> = {}): ChannelInstance {
   return {
     id: 'discord-gateway-1',
     type: 'discord',
@@ -49,6 +49,7 @@ function makeDiscordChannel(): ChannelInstance {
     config: {
       token: 'bot-token',
       gatewayUrl: 'wss://discord-gateway.test/?v=10&encoding=json',
+      ...configOverride,
     },
     features: { autoReply: true, streamingReply: false, autoStart: false },
     ownerUserId: 'u-discord',
@@ -89,6 +90,14 @@ describe('DiscordChannelService Gateway 入站', () => {
 
     socket?.emitMessage({
       op: 0,
+      t: 'READY',
+      d: {
+        user: { id: 'discord-bot-1', username: 'OpenAWork Bot' },
+      },
+    });
+
+    socket?.emitMessage({
+      op: 0,
       t: 'MESSAGE_CREATE',
       d: {
         id: 'discord-message-1',
@@ -114,6 +123,72 @@ describe('DiscordChannelService Gateway 入站', () => {
 
     await service.stop();
     expect(socket?.closeCount).toBe(1);
+  });
+
+  it('配置群聊必须 @ 后，仅接受提及当前机器人的 guild 消息', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+    const events: ChannelEvent[] = [];
+    const service = new DiscordChannelService(
+      makeDiscordChannel({ requireMentionInGroup: 'true' }),
+      (event) => {
+        events.push(event);
+      },
+    );
+
+    const startPromise = service.start();
+    const socket = FakeWebSocket.instances[0];
+    socket?.emitOpen();
+    socket?.emitMessage({ op: 10, d: { heartbeat_interval: 30_000 } });
+    await startPromise;
+
+    socket?.emitMessage({
+      op: 0,
+      t: 'READY',
+      d: {
+        user: { id: 'discord-bot-1', username: 'OpenAWork Bot' },
+      },
+    });
+    socket?.emitMessage({
+      op: 0,
+      t: 'MESSAGE_CREATE',
+      d: {
+        id: 'discord-ignored-1',
+        guild_id: 'guild-1',
+        channel_id: 'discord-channel-1',
+        content: 'not addressed',
+        timestamp: '2026-07-08T12:00:00.000Z',
+        author: { id: 'discord-user-1', username: 'Discord User' },
+      },
+    });
+    socket?.emitMessage({
+      op: 0,
+      t: 'MESSAGE_CREATE',
+      d: {
+        id: 'discord-mentioned-1',
+        guild_id: 'guild-1',
+        channel_id: 'discord-channel-1',
+        content: '<@discord-bot-1> help me',
+        timestamp: '2026-07-08T12:00:01.000Z',
+        mentions: [{ id: 'discord-bot-1' }],
+        author: { id: 'discord-user-1', username: 'Discord User' },
+      },
+    });
+    await Promise.resolve();
+
+    const messageEvents = events.filter((event) => event.type === 'message');
+    expect(messageEvents).toHaveLength(1);
+    expect(messageEvents[0]).toMatchObject({
+      type: 'message',
+      pluginId: 'discord-gateway-1',
+      message: expect.objectContaining({
+        id: 'discord-mentioned-1',
+        chatId: 'discord-channel-1',
+        content: 'help me',
+      }),
+    });
+
+    await service.stop();
   });
 
   it('启动必须等到 Gateway hello 并发送 Identify，不能只创建 WebSocket 就标记运行', async () => {

@@ -113,7 +113,7 @@ const PRIMARY_SPLIT_BTN_STYLE: CSSProperties = {
   justifyContent: 'center',
   borderRadius: '0 8px 8px 0',
   background: 'var(--accent)',
-  borderLeft: '1px solid oklch(from var(--accent) calc(l - 0.08) c h / 0.5)',
+  borderLeft: '1px solid color-mix(in srgb, var(--accent) 50%, transparent)',
   color: 'var(--fg-on-accent)',
   cursor: 'pointer',
   flexShrink: 0,

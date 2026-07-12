@@ -458,7 +458,12 @@ export class ProviderManagerImpl implements ProviderManager {
 
   private ensureActiveSelectionValid(): void {
     const chatValid = this.isSelectionValid(this.active.chat);
-    const fastValid = this.isSelectionValid(this.active.fast);
+    // Fast selection: when the user explicitly sets fast to empty
+    // (providerId=''), preserve it as-is — this means "Fast disabled".
+    // Only fallback when fast was never set (undefined) or points to
+    // a now-deleted provider/model.
+    const fastIsEmpty = !this.active.fast.providerId && !this.active.fast.modelId;
+    const fastValid = fastIsEmpty || this.isSelectionValid(this.active.fast);
     const fallback = this.pickFirstAvailableSelection();
     const modelFallback = this.pickFirstAvailableModelSelection();
     const imageFallback = this.pickFirstAvailableModelSelection({
@@ -481,7 +486,11 @@ export class ProviderManagerImpl implements ProviderManager {
 
     this.active = {
       chat: chatValid ? this.active.chat : fallback.chat,
-      fast: fastValid ? this.active.fast : fallback.fast,
+      fast: fastIsEmpty
+        ? { providerId: '', modelId: '' }
+        : fastValid
+          ? this.active.fast
+          : fallback.fast,
       ...(this.active.compaction
         ? compactionValid
           ? { compaction: this.active.compaction }

@@ -1147,7 +1147,7 @@ function parseStoredSettingJson(value: string | undefined): unknown {
 
 function resolveDelegatedChildThinkingDefaults(userId: string): {
   enabled: boolean;
-  effort: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+  effort: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 } {
   const row = sqliteGet<{ value: string }>(
     `SELECT value FROM user_settings WHERE user_id = ? AND key = 'default_thinking'`,

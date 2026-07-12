@@ -71,6 +71,8 @@ export interface UnifiedComposerProps {
   sessionBusyState: 'running' | 'paused' | null;
   editorMode?: boolean;
   providers: ChatSettingsProvider[];
+  fastEnabled?: boolean;
+  onFastEnabledChange?: (enabled: boolean) => void;
   activeProviderId: string;
   activeModelId: string;
   activeProvider?: { name?: string; type?: string } | null;
@@ -182,6 +184,8 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
     sessionBusyState,
     editorMode = false,
     providers,
+    fastEnabled,
+    onFastEnabledChange,
     activeProviderId,
     activeModelId,
     activeProvider,
@@ -569,6 +573,17 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
           reasoningEffort={reasoningEffort}
           onChangeThinkingEnabled={onThinkingEnabledChange}
           onChangeReasoningEffort={onReasoningEffortChange}
+          fastEnabled={fastEnabled ?? false}
+          onFastToggle={async (enabled) => {
+            if (!token) return;
+            const { createSettingsClient } = await import('@openAwork/web-client');
+            await createSettingsClient(gatewayUrl).putActiveSelection(token, {
+              fast: enabled
+                ? { providerId: activeProviderId, modelId: activeModelId }
+                : { providerId: '', modelId: '' },
+            });
+            onFastEnabledChange?.(enabled);
+          }}
         />
       )}
     </>

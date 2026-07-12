@@ -65,7 +65,7 @@ function ToggleRow({ checked, description, label, onToggle }: ToggleRowProps) {
             height: 20,
             borderRadius: '50%',
             background: 'var(--bg-overlay)',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.18)',
+            boxShadow: 'var(--shadow-sm)',
             transition: 'left 180ms ease',
           }}
         />

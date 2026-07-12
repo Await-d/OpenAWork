@@ -353,7 +353,7 @@ const panelStyles = `
   background: var(--bg-overlay);
   overflow: hidden;
   animation: iqp-slide-up 280ms cubic-bezier(0.22, 1, 0.36, 1);
-  box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.06);
+  box-shadow: var(--shadow-sm);
 }
 
 @keyframes iqp-slide-up {

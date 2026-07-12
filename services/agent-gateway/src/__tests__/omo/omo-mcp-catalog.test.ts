@@ -90,19 +90,15 @@ describe('OMO virtual MCP catalog', () => {
   });
 
   it('does not duplicate OMO native aliases under the omo server', async () => {
-    // Given: OMO defaults include native aliases for codegraph, lsp, git_bash, grep_app, and websearch.
-
-    // When: the runtime exposes the OMO virtual MCP tools.
     const catalogs = await listMcpToolsForUser(USER_ID, { serverId: 'omo' });
     const flat = buildFlatMcpToolDefinitions(catalogs);
     const flatNames = flat.definitions.map((definition) => definition.function.name);
 
-    // Then: native OpenAWork abilities are aliases only, not repeated as mcp__omo__* tools.
     expect(flatNames.some((name) => name.startsWith('mcp__omo__codegraph'))).toBe(false);
     expect(flatNames.some((name) => name.startsWith('mcp__omo__lsp'))).toBe(false);
     expect(flatNames.some((name) => name.startsWith('mcp__omo__git_bash'))).toBe(false);
     expect(flatNames.some((name) => name.startsWith('mcp__omo__grep_app'))).toBe(false);
-    expect(flatNames.some((name) => name.startsWith('mcp__omo__websearch'))).toBe(false);
+    expect(flatNames.some((name) => name.startsWith('mcp__omo__open_websearch'))).toBe(false);
   });
 
   it('honors disabledTools for the omo virtual MCP catalog and flat injection', async () => {

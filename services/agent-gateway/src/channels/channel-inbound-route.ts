@@ -31,7 +31,11 @@ type ChannelInboundQuery = z.infer<typeof channelInboundQuerySchema>;
 
 interface ChannelInboundRouteDeps {
   readonly resolveChannel: (channelId: string) => ChannelInstance | null;
-  readonly parseMessage: (type: ChannelInstance['type'], raw: unknown) => ChannelMessage | null;
+  readonly parseMessage: (
+    type: ChannelInstance['type'],
+    raw: unknown,
+    channel: ChannelInstance,
+  ) => ChannelMessage | null;
   readonly notifyChannel: (event: ChannelEvent) => void;
   readonly recordInboundDiagnostic?: (input: {
     readonly pluginId: string;
@@ -241,7 +245,7 @@ export async function registerChannelInboundRoutes(
         });
       }
 
-      const message = deps.parseMessage(channel.type, request.body);
+      const message = deps.parseMessage(channel.type, request.body, channel);
       if (message) {
         deps.recordInboundDiagnostic?.({
           pluginId: channel.id,
@@ -270,7 +274,7 @@ export async function registerChannelInboundRoutes(
       return reply.status(403).send({ error: 'Invalid channel inbound secret' });
     }
 
-    const message = deps.parseMessage(channel.type, request.body);
+    const message = deps.parseMessage(channel.type, request.body, channel);
     if (!message) {
       deps.recordInboundDiagnostic?.({
         pluginId: channel.id,

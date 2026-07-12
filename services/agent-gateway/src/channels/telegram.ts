@@ -4,11 +4,15 @@ import type {
   ChannelEvent,
   ChannelMessage,
   ChannelGroup,
+  ChannelReplyLanguage,
   ChannelStreamingHandle,
   ChannelServiceFactory,
 } from './types.js';
 import { channelFetch, computeChannelRetryDelayMs } from './channel-http.js';
+import { parseTelegramInboundMessage } from './inbound-parsers/telegram.js';
+import { listTelegramBotCommands } from './channel-localization.js';
 import { listRecentChannelGroups, listRecentChannelMessages } from './channel-message-cache.js';
+import { normalizeChannelReplyLanguage } from './channel-reply-language.js';
 
 /**
  * Telegram long-poll uses `timeout=25`, so the upstream intentionally
@@ -23,10 +27,11 @@ interface TelegramUpdate {
   update_id: number;
   message?: {
     message_id: number;
-    from?: { id: number; first_name: string; username?: string };
+    from?: { id: number; first_name: string; last_name?: string; username?: string };
     chat: { id: number; title?: string; type: string };
     text?: string;
     date: number;
+    entities?: Array<{ type?: string; offset?: number; length?: number }>;
   };
 }
 
@@ -35,6 +40,7 @@ export class TelegramChannelService implements MessagingChannelService {
   readonly pluginType = 'telegram';
   readonly supportsStreaming = true;
 
+  private readonly instance: ChannelInstance;
   private token: string;
   private running = false;
   private pollOffset = 0;
@@ -42,11 +48,15 @@ export class TelegramChannelService implements MessagingChannelService {
   private notify: (event: ChannelEvent) => void;
   private pollFailureCount = 0;
   private pollAbort: AbortController | null = null;
+  private readonly replyLanguage: ChannelReplyLanguage;
+  private botUsername: string | undefined;
 
   constructor(instance: ChannelInstance, notify: (event: ChannelEvent) => void) {
+    this.instance = instance;
     this.pluginId = instance.id;
     this.token = instance.config['token'] ?? '';
     this.notify = notify;
+    this.replyLanguage = normalizeChannelReplyLanguage(instance.replyLanguage);
   }
 
   private get apiBase(): string {
@@ -78,7 +88,8 @@ export class TelegramChannelService implements MessagingChannelService {
     if (this.running) {
       return;
     }
-    await this.verifyBotToken();
+    this.botUsername = await this.verifyBotToken();
+    await this.registerBuiltinCommands();
     this.running = true;
     this.poll();
   }
@@ -148,32 +159,50 @@ export class TelegramChannelService implements MessagingChannelService {
     }, delay);
   }
 
-  private async verifyBotToken(): Promise<void> {
+  private async verifyBotToken(): Promise<string | undefined> {
     const res = await channelFetch(`${this.apiBase}/getMe`, {
       timeoutMs: TELEGRAM_STARTUP_TIMEOUT_MS,
     });
     if (!res.ok) {
       throw new Error(`Telegram getMe failed: HTTP ${res.status}`);
     }
-    const data = (await res.json()) as { ok?: boolean; description?: string };
+    const data = (await res.json()) as {
+      ok?: boolean;
+      description?: string;
+      result?: { username?: string };
+    };
     if (data.ok !== true) {
       throw new Error(`Telegram getMe failed: ${data.description ?? 'invalid response'}`);
+    }
+    const username = data.result?.username?.trim();
+    return username || this.instance.config['botUsername']?.trim() || undefined;
+  }
+
+  private async registerBuiltinCommands(): Promise<void> {
+    try {
+      const res = await channelFetch(`${this.apiBase}/setMyCommands`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          commands: listTelegramBotCommands(this.replyLanguage),
+        }),
+        timeoutMs: TELEGRAM_STARTUP_TIMEOUT_MS,
+      });
+      if (!res.ok) {
+        console.warn(`[telegram] setMyCommands failed: HTTP ${res.status}`);
+      }
+    } catch (err) {
+      console.warn(
+        `[telegram] setMyCommands failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 
   private parseUpdate(update: TelegramUpdate): ChannelMessage | null {
-    const msg = update.message;
-    if (!msg) return null;
-    return {
-      id: String(msg.message_id),
-      senderId: String(msg.from?.id ?? 'unknown'),
-      senderName: msg.from?.first_name ?? 'Unknown',
-      chatId: String(msg.chat.id),
-      chatName: msg.chat.title,
-      content: msg.text ?? '',
-      timestamp: msg.date * 1000,
-      raw: update,
-    };
+    return parseTelegramInboundMessage(update, {
+      channel: this.instance,
+      botUsername: this.botUsername,
+    });
   }
 
   async sendMessage(chatId: string, content: string): Promise<{ messageId: string }> {

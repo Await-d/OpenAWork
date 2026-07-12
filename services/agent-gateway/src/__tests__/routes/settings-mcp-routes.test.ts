@@ -91,6 +91,7 @@ describe('settings MCP route contracts', () => {
       expect(response.statusCode).toBe(200);
       const body = response.json<SettingsMcpServersResponse>();
       expect(body.builtinServers.map((server) => server.id)).toEqual([
+        'open_websearch',
         'websearch',
         'grep_app',
         'codegraph',
@@ -98,6 +99,13 @@ describe('settings MCP route contracts', () => {
         'lsp',
         'omo',
       ]);
+      const openWebsearch = body.builtinServers.find((server) => server.id === 'open_websearch');
+      expect(openWebsearch).toMatchObject({
+        builtinKind: 'adapter',
+        source: 'system',
+      });
+      expect(openWebsearch).not.toHaveProperty('command');
+
       const codegraph = body.builtinServers.find((server) => server.id === 'codegraph');
       expect(codegraph).toMatchObject({
         builtinKind: 'virtual',

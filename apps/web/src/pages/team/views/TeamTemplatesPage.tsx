@@ -902,7 +902,7 @@ export default function TeamTemplatesPage() {
                 borderRadius: 12,
                 border: '1px solid color-mix(in oklch, var(--accent) 35%, transparent)',
                 background: 'color-mix(in oklch, var(--accent) 10%, var(--bg-overlay))',
-                boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
+                boxShadow: 'var(--shadow-md)',
                 backdropFilter: 'blur(8px)',
               }}
             >
@@ -969,7 +969,7 @@ export default function TeamTemplatesPage() {
                       borderRadius: 8,
                       border: 'none',
                       background: 'var(--accent)',
-                      color: '#fff',
+                      color: 'var(--fg-on-accent)',
                       fontSize: 11,
                       fontWeight: 800,
                       cursor: !validation.valid || templateBusy ? 'not-allowed' : 'pointer',
@@ -1063,7 +1063,7 @@ export default function TeamTemplatesPage() {
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'rgba(0,0,0,0.4)',
+            background: 'color-mix(in srgb, var(--bg-base) 55%, transparent)',
             display: 'grid',
             placeItems: 'center',
             zIndex: 9999,
@@ -1079,7 +1079,7 @@ export default function TeamTemplatesPage() {
               gap: 12,
               maxWidth: 360,
               width: '90%',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+              boxShadow: 'var(--shadow-lg)',
             }}
           >
             <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--fg-strong)' }}>

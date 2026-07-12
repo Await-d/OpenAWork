@@ -273,7 +273,7 @@ export function BaseSessionRow({
         boxShadow: active
           ? '0 1px 6px color-mix(in srgb, var(--accent) 14%, transparent)'
           : hovered
-            ? '0 2px 8px rgba(0,0,0,0.1)'
+            ? 'var(--shadow-sm)'
             : 'none',
         transform: hovered && !active ? 'translateY(-1px)' : 'translateY(0)',
       }}

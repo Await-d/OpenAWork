@@ -24,7 +24,7 @@ const OVERLAY_STYLE: CSSProperties = {
   flexDirection: 'column',
   background: 'color-mix(in srgb, var(--bg-overlay) 97%, var(--bg-base))',
   borderLeft: '1px solid color-mix(in srgb, var(--border-default) 70%, transparent)',
-  boxShadow: '-8px 0 32px rgba(0,0,0,0.18)',
+  boxShadow: 'var(--shadow-lg)',
 };
 
 const HEADER_STYLE: CSSProperties = {

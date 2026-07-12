@@ -35,7 +35,15 @@ export interface OmoVirtualCatalog {
 
 const DEFAULT_OMO_CATALOG_SOURCE = {
   toolCapabilityManifest: {
-    capabilities: ['codegraph', 'git_bash', 'lsp', 'grep_app', 'websearch', 'context7', 'ast-grep'],
+    capabilities: [
+      'codegraph',
+      'git_bash',
+      'lsp',
+      'grep_app',
+      'open_websearch',
+      'context7',
+      'ast-grep',
+    ],
   },
   mcpServersManifest: {
     mcpServers: {
@@ -43,7 +51,7 @@ const DEFAULT_OMO_CATALOG_SOURCE = {
       git_bash: { command: 'openawork-virtual-git-bash' },
       lsp: { command: 'openawork-virtual-lsp' },
       grep_app: { url: 'https://mcp.grep.app' },
-      websearch: { url: 'https://mcp.exa.ai/mcp?tools=web_search_exa' },
+      open_websearch: { command: 'openawork-virtual-open-websearch' },
       context7: { url: 'https://mcp.context7.com/mcp' },
     },
   },

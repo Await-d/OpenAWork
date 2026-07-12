@@ -49,7 +49,7 @@ const PageTransitionLoader = memo(function PageTransitionLoader({
           borderRadius: 22,
           background: 'var(--bg-overlay)',
           border: '1px solid var(--border-default)',
-          boxShadow: 'var(--shadow-md), var(--shadow-lg), inset 0 1px 0 rgba(255, 255, 255, 0.04)',
+          boxShadow: 'var(--shadow-md), var(--shadow-lg)',
 
           animation: animate
             ? 'route-loader-panel-in 320ms cubic-bezier(0.16, 1, 0.3, 1) both'
@@ -201,7 +201,7 @@ const PageTransitionLoader = memo(function PageTransitionLoader({
             borderRadius: 999,
             background:
               'linear-gradient(90deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.04))',
-            boxShadow: 'inset 0 1px 1px rgba(0, 0, 0, 0.18)',
+            boxShadow: 'var(--shadow-sm)',
           }}
         >
           {/* Trailing shadow stream */}

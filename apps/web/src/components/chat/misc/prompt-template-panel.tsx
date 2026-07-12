@@ -60,7 +60,7 @@ export function PromptTemplatePanel({ isOpen, onClose, onInsert }: PromptTemplat
         alignItems: 'flex-start',
         justifyContent: 'center',
         paddingTop: '12vh',
-        background: 'rgba(0, 0, 0, 0.35)',
+        background: 'color-mix(in srgb, var(--bg-base) 40%, transparent)',
         backdropFilter: 'blur(2px)',
       }}
     >
@@ -77,7 +77,7 @@ export function PromptTemplatePanel({ isOpen, onClose, onInsert }: PromptTemplat
           borderRadius: 12,
           border: '1px solid var(--border-default)',
           background: 'var(--bg-overlay)',
-          boxShadow: '0 16px 48px rgba(0,0,0,0.25)',
+          boxShadow: 'var(--shadow-lg)',
           overflow: 'hidden',
         }}
       >

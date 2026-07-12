@@ -20,6 +20,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+function readChannelToolAllowlist(
+  metadata: Record<string, unknown>,
+): readonly string[] | null | undefined {
+  const allowlist = metadata['channelToolAllowlist'];
+  if (allowlist === null) {
+    return null;
+  }
+  if (!Array.isArray(allowlist)) {
+    return undefined;
+  }
+  return allowlist.filter((entry): entry is string => typeof entry === 'string');
+}
+
 function readChannelTools(metadata: Record<string, unknown>): ChannelToolsLike | null {
   const channel = metadata['channel'];
   if (!isRecord(channel)) {
@@ -130,6 +143,23 @@ function areChannelLlmToolDeclarationsEnabled(metadata: Record<string, unknown>)
   return !isChannelManagedSession(metadata) || metadata['channelLlmToolsEnabled'] === true;
 }
 
+function isToolAllowedByChannelAllowlist(
+  allowlist: readonly string[] | null | undefined,
+  toolName: string,
+  toolKey?: string | null,
+): boolean {
+  if (allowlist === undefined || allowlist === null) {
+    return true;
+  }
+
+  return (
+    allowlist.includes('*') ||
+    allowlist.includes('all') ||
+    allowlist.includes(toolName) ||
+    (toolKey !== null && toolKey !== undefined && allowlist.includes(toolKey))
+  );
+}
+
 function isChannelPolicyToolEnabled(metadata: Record<string, unknown>, toolName: string): boolean {
   const isChannelTool = CHANNEL_SEND_TOOL_NAMES.has(toolName);
   const isChannelSession = isChannelManagedSession(metadata);
@@ -151,7 +181,7 @@ function isChannelPolicyToolEnabled(metadata: Record<string, unknown>, toolName:
     if (FEISHU_CHANNEL_TOOL_NAMES.has(toolName)) {
       return readChannelType(metadata) === 'feishu';
     }
-    return true;
+    return isToolAllowedByChannelAllowlist(readChannelToolAllowlist(metadata), toolName);
   }
 
   if (toolName === 'desktop_automation' || toolName === 'desktop_control') {
@@ -165,6 +195,10 @@ function isChannelPolicyToolEnabled(metadata: Record<string, unknown>, toolName:
   const channelTools = readChannelTools(metadata);
   const toolKey = resolveChannelToolKey(toolName);
   if (!toolKey || channelTools?.[toolKey] !== true) {
+    return false;
+  }
+
+  if (!isToolAllowedByChannelAllowlist(readChannelToolAllowlist(metadata), toolName, toolKey)) {
     return false;
   }
 

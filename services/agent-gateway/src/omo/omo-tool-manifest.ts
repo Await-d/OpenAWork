@@ -5,7 +5,8 @@ import {
   zodToOmoManifestError,
 } from './omo-adapter-errors.js';
 
-export type OmoNativeMcpServerId = 'codegraph' | 'git_bash' | 'lsp' | 'grep_app' | 'websearch';
+export type OmoNativeMcpServerId =
+  'codegraph' | 'git_bash' | 'lsp' | 'grep_app' | 'open_websearch' | 'websearch';
 
 type OmoNativeMcpServerAlias = {
   readonly kind: 'native-alias';
@@ -179,6 +180,8 @@ export function toNativeServerId(sourceId: string): OmoNativeMcpServerId | null 
       return 'lsp';
     case 'grep_app':
       return 'grep_app';
+    case 'open_websearch':
+      return 'open_websearch';
     case 'websearch':
       return 'websearch';
     default:

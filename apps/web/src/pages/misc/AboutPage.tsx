@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createSettingsClient } from '@openAwork/web-client';
+import { BrandLogo } from '@openAwork/shared-ui';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { toast } from '../../components/common/feedback/ToastNotification.js';
 import { isTauri } from '../settings/shared/settings-page-helpers.js';
@@ -607,45 +608,12 @@ export default function AboutPage() {
               flexShrink: 0,
               boxShadow:
                 '0 0 0 1px color-mix(in oklch, var(--accent) 30%, transparent), 0 12px 36px -16px color-mix(in oklch, var(--accent) 50%, transparent)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
           >
-            <svg width="56" height="56" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
-              <defs>
-                <linearGradient id="aboutLogoBg" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop
-                    offset="0%"
-                    style={{ stopColor: 'color-mix(in oklch, var(--accent) 100%, white 16%)' }}
-                  />
-                  <stop offset="100%" style={{ stopColor: 'var(--accent)' }} />
-                </linearGradient>
-              </defs>
-              <rect width="32" height="32" rx="8" fill="url(#aboutLogoBg)" />
-              <path
-                d="M 16,3 C 26,3 29,12 16,16"
-                stroke="var(--fg-on-accent)"
-                strokeWidth="2.6"
-                strokeLinecap="round"
-                fill="none"
-                transform="rotate(0, 16, 16)"
-              />
-              <path
-                d="M 16,3 C 26,3 29,12 16,16"
-                stroke="var(--fg-on-accent)"
-                strokeWidth="2.6"
-                strokeLinecap="round"
-                fill="none"
-                transform="rotate(120, 16, 16)"
-              />
-              <path
-                d="M 16,3 C 26,3 29,12 16,16"
-                stroke="var(--fg-on-accent)"
-                strokeWidth="2.6"
-                strokeLinecap="round"
-                fill="none"
-                transform="rotate(240, 16, 16)"
-              />
-              <circle cx="16" cy="16" r="2.8" fill="var(--fg-on-accent)" />
-            </svg>
+            <BrandLogo size={56} />
           </span>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
             <h1

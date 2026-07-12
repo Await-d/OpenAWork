@@ -7,6 +7,7 @@ export type ChannelEditorType =
 export type ChannelEditorStatus = 'connected' | 'disconnected' | 'error' | 'pending';
 export type ChannelDescriptorCategory = 'china' | 'international' | 'custom';
 export type ChannelDescriptorFieldType = 'text' | 'secret';
+export type ChannelReplyLanguage = 'zh-CN' | 'en-US';
 
 export interface ChannelSubscriptionEntry {
   chatId: string;
@@ -79,6 +80,86 @@ export interface ChannelPersonaSelection {
   title: string;
 }
 
+export interface ChannelMemberAclPermissionPatchDraft {
+  allowReadHome?: boolean;
+  readablePathPrefixes?: string[];
+  allowWriteOutside?: boolean;
+  allowShell?: boolean;
+  allowSubAgents?: boolean;
+}
+
+export interface ChannelMemberAclRuleDraft {
+  platformUserId: string;
+  senderName?: string;
+  workspaceId?: string;
+  userId?: string;
+  toolAllowlist?: string[] | null;
+  permissions?: ChannelMemberAclPermissionPatchDraft;
+}
+
+export type ChannelCapabilityToolGroupKey =
+  | 'web'
+  | 'lsp'
+  | 'files'
+  | 'shell'
+  | 'orchestration'
+  | 'session'
+  | 'mcp'
+  | 'desktop'
+  | 'repo'
+  | 'channel'
+  | 'other';
+
+export interface ChannelCapabilityContextToolPromptInjections {
+  web: boolean;
+  lsp: boolean;
+  files: boolean;
+  shell: boolean;
+  orchestration: boolean;
+  session: boolean;
+  mcp: boolean;
+  desktop: boolean;
+  repo: boolean;
+  channel: boolean;
+  other: boolean;
+}
+
+export interface ChannelCapabilityContextPromptInjections {
+  agents: boolean;
+  skills: boolean;
+  mcps: boolean;
+  tools: boolean;
+  toolGroups: ChannelCapabilityContextToolPromptInjections;
+  commands: boolean;
+}
+
+export interface ChannelPromptInjections {
+  capabilityContext: ChannelCapabilityContextPromptInjections;
+}
+
+export interface ChannelCapabilityCatalogToolGroupCounts {
+  web: number;
+  lsp: number;
+  files: number;
+  shell: number;
+  orchestration: number;
+  session: number;
+  mcp: number;
+  desktop: number;
+  repo: number;
+  channel: number;
+  other: number;
+}
+
+export interface ChannelCapabilityCatalogCounts {
+  agents: number;
+  skills: number;
+  mcps: number;
+  tools: number;
+  toolGroups: ChannelCapabilityCatalogToolGroupCounts;
+  commands: number;
+}
+
 export interface ChannelDescriptorField {
   key: string;
   label: string;
@@ -115,6 +196,7 @@ export interface ChannelSettingsEntry {
   enabled: boolean;
   status: ChannelEditorStatus;
   config: Record<string, string>;
+  replyLanguage?: ChannelReplyLanguage;
   subscriptions: ChannelSubscriptionEntry[];
   features: ChannelFeaturesEntry;
   channelLlmToolsEnabled?: boolean;
@@ -124,6 +206,7 @@ export interface ChannelSettingsEntry {
   permissions?: ChannelPermissionsEntry;
   diagnostics?: ChannelDiagnosticsEntry;
   persona?: ChannelPersonaSelection | null;
+  promptInjections?: ChannelPromptInjections;
   errorMessage?: string;
   availableTargets?: ChannelTargetEntry[];
   loadingTargets?: boolean;
@@ -134,6 +217,7 @@ export interface ChannelDraft {
   name: string;
   enabled: boolean;
   config: Record<string, string>;
+  replyLanguage: ChannelReplyLanguage;
   subscriptions: ChannelSubscriptionEntry[];
   features: ChannelFeaturesEntry;
   channelLlmToolsEnabled: boolean;
@@ -142,7 +226,13 @@ export interface ChannelDraft {
   tools: Record<string, boolean>;
   permissions: ChannelPermissionsEntry;
   persona: ChannelPersonaSelection | null;
+  promptInjections: ChannelPromptInjections;
 }
+
+export type ChannelCapabilityCatalogDraft = Pick<
+  ChannelDraft,
+  'type' | 'channelLlmToolsEnabled' | 'tools' | 'permissions'
+>;
 
 export interface WeixinLoginStartInput {
   accountId?: string;
@@ -178,6 +268,10 @@ export interface ChannelSubscriptionSettingsProps {
   descriptors: ChannelTypeDescriptor[];
   providers?: ChannelProviderOption[];
   personas?: readonly ChannelPersonaOption[];
+  capabilityCatalogCounts?: ChannelCapabilityCatalogCounts;
+  onResolveCapabilityCatalogCounts?: (
+    draft: ChannelCapabilityCatalogDraft,
+  ) => Promise<ChannelCapabilityCatalogCounts>;
   onSave: (channelId: string | null, draft: ChannelDraft) => Promise<ChannelSettingsEntry>;
   onDelete?: (channelId: string) => Promise<void>;
   onConnect?: (channelId: string) => Promise<void>;

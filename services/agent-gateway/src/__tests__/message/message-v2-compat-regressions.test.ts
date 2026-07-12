@@ -35,7 +35,7 @@ vi.mock('../../session/session-search-store.js', () => ({
   upsertSessionMessageSearchDocument: mocks.upsertSearchDocument,
 }));
 
-import { appendSessionMessageV2 } from '../../message/message-v2-adapter.js';
+import { appendSessionMessageV2, v2ToV1Message } from '../../message/message-v2-adapter.js';
 import { filterCompacted, toModelMessages } from '../../message/message-to-model-messages.js';
 import { hasSessionMessage } from '../../session/session-message-rating-store.js';
 import type { MessageID, MessageWithParts, PartID } from '../../message/message-v2-schema.js';
@@ -183,6 +183,71 @@ describe('message-v2 compatibility regressions', () => {
           agent: 'prometheus',
         },
       },
+    });
+  });
+
+  it('persists assistant route metadata and rehydrates model/provider on reads', () => {
+    mocks.sqliteGet.mockReturnValue({ max_seq: null });
+
+    const message = appendSessionMessageV2({
+      sessionId: 'session-1',
+      userId: 'user-1',
+      role: 'assistant',
+      messageId: 'message-route-meta',
+      createdAt: 123,
+      modelID: 'gpt-5.4',
+      providerID: 'openai-fast',
+      content: [{ type: 'text', text: '走 Fast 路由' }],
+    });
+
+    expect(message).toMatchObject({
+      id: 'message-route-meta',
+      role: 'assistant',
+      model: 'gpt-5.4',
+      providerId: 'openai-fast',
+    });
+    const createdCall = mocks.emitEvent.mock.calls.find(
+      (call) =>
+        (call[0] as { definition?: { type?: string } }).definition?.type === 'message.created',
+    );
+    expect(createdCall?.[0]).toMatchObject({
+      data: {
+        info: {
+          role: 'assistant',
+          modelID: 'gpt-5.4',
+          providerID: 'openai-fast',
+        },
+      },
+    });
+
+    expect(
+      v2ToV1Message({
+        info: {
+          id: asMessageId('message-route-meta'),
+          sessionID: 'session-1',
+          role: 'assistant',
+          time: { created: 123 },
+          modelID: 'gpt-5.4',
+          providerID: 'openai-fast',
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        },
+        parts: [
+          {
+            id: asPartId('part-route-meta'),
+            sessionID: 'session-1',
+            messageID: asMessageId('message-route-meta'),
+            type: 'text',
+            text: '走 Fast 路由',
+          },
+        ],
+      }),
+    ).toMatchObject({
+      id: 'message-route-meta',
+      role: 'assistant',
+      model: 'gpt-5.4',
+      providerId: 'openai-fast',
+      content: [{ type: 'text', text: '走 Fast 路由' }],
     });
   });
 

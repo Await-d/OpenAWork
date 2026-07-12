@@ -61,7 +61,7 @@ export const generateImageToolDefinition: ToolDefinition<
   description:
     '使用配置好的图片生成模型（GPT Image 2 系列）按文本 prompt 生成图片。' +
     '用户要你创建、画、设计、生成图片时使用本工具。' +
-    '如果用户要抓取、查找、获取、展示互联网上已经存在的图片，必须使用 websearch/webfetch 等联网工具返回原图 URL，不要调用本工具。' +
+    '如果用户要抓取、查找、获取、展示互联网上已经存在的图片，必须优先使用 open_websearch 配合 webfetch 返回原图 URL；只有 open_websearch 不可用时才回退到 websearch 等联网工具，不要调用本工具。' +
     '生成的图片会在对话中内联展示。' +
     '**不需要**用户切到图片模式——本工具在普通聊天中直接可用。' +
     '请选择能满足需求的最小尺寸档（1K 最快；2K 适海报 / 精细画面；4K 实验性且慢，仅在用户明确要求超高分辨率时使用）。',

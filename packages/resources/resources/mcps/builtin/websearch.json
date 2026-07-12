@@ -1,8 +1,8 @@
 {
   "id": "websearch",
-  "title": "websearch",
-  "description": "内置 Web Search MCP server（Exa SSE）",
+  "title": "Exa Web Search",
+  "description": "可选的 Exa 远程 Web Search MCP server（SSE）",
   "transport": "sse",
   "builtinKind": "system",
-  "enabledByDefault": true
+  "enabledByDefault": false
 }

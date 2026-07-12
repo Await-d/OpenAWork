@@ -4,7 +4,7 @@ export interface AppSettings {
   devMode: boolean;
   thinkingEnabled: boolean;
   fastModeEnabled: boolean;
-  reasoningEffort: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+  reasoningEffort: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   teamToolsEnabled: boolean;
   contextCompressionEnabled: boolean;
   toolResultFormat: 'toon' | 'json';

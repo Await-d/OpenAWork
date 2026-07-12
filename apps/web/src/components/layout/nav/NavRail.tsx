@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router';
 import { createHealthClient } from '@openAwork/web-client';
+import { BrandLogo } from '@openAwork/shared-ui';
 import { railGroups, railLabelCn, railIcon, type RailItem } from './RailIcon.js';
 import { preloadRouteModuleByPath } from '../../../routes/preloadable-route-modules.js';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
@@ -267,59 +268,7 @@ export default function NavRail({
           }}
         >
           <span className="layout-nav-rail-brand-logo" style={{ width: 22, height: 22 }}>
-            <svg
-              aria-hidden="true"
-              width={22}
-              height={22}
-              viewBox="0 0 32 32"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <defs>
-                <linearGradient id="navRailLogoBg" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop
-                    offset="0%"
-                    style={{
-                      stopColor: 'color-mix(in oklch, var(--accent) 100%, white 14%)',
-                    }}
-                  />
-                  <stop offset="100%" style={{ stopColor: 'var(--accent)' }} />
-                </linearGradient>
-                <linearGradient id="navRailLogoStroke" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" style={{ stopColor: 'var(--fg-on-accent)' }} stopOpacity="1" />
-                  <stop
-                    offset="100%"
-                    style={{ stopColor: 'var(--fg-on-accent)' }}
-                    stopOpacity="0.85"
-                  />
-                </linearGradient>
-              </defs>
-              <rect width="32" height="32" rx="9" fill="url(#navRailLogoBg)" />
-              <path
-                d="M 16,3 C 26,3 29,12 16,16"
-                stroke="url(#navRailLogoStroke)"
-                strokeWidth="2.6"
-                strokeLinecap="round"
-                fill="none"
-                transform="rotate(0, 16, 16)"
-              />
-              <path
-                d="M 16,3 C 26,3 29,12 16,16"
-                stroke="url(#navRailLogoStroke)"
-                strokeWidth="2.6"
-                strokeLinecap="round"
-                fill="none"
-                transform="rotate(120, 16, 16)"
-              />
-              <path
-                d="M 16,3 C 26,3 29,12 16,16"
-                stroke="url(#navRailLogoStroke)"
-                strokeWidth="2.6"
-                strokeLinecap="round"
-                fill="none"
-                transform="rotate(240, 16, 16)"
-              />
-              <circle cx="16" cy="16" r="2.8" fill="var(--fg-on-accent)" />
-            </svg>
+            <BrandLogo size={22} />
           </span>
           <span
             className="nav-rail-label"

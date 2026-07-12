@@ -51,6 +51,22 @@ describe('MCPServerConfig shared-ui real public boundary', () => {
     expect(scopedStyle?.textContent).toContain('box-shadow: 0 0 0 4px var(--complement-subtle)');
   });
 
+  it('supports a custom title and can hide the add form for curated MCP views', () => {
+    render(
+      <MCPServerConfig
+        servers={[]}
+        onAdd={vi.fn()}
+        onRemove={vi.fn()}
+        onUpdate={vi.fn()}
+        title="搜索 MCP 配置"
+        showAddForm={false}
+      />,
+    );
+
+    expect(screen.getByText('搜索 MCP 配置')).toBeTruthy();
+    expect(screen.queryByText('+ 添加服务器')).toBeNull();
+  });
+
   it('locks virtual and adapter endpoints while saving editable management fields', () => {
     // Given: protected builtin MCP rows carry fake endpoint fields from an unsafe source.
     const onUpdate = vi.fn<(id: string, entry: MCPServerEntry) => void>();

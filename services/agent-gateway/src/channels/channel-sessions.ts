@@ -11,8 +11,18 @@ import {
 } from '../provider/provider-config.js';
 import { resolveCompactionRoute, type ModelRouteConfig } from '../provider/model-router.js';
 import { executeSessionCompaction } from '../session/session-compaction.js';
+import {
+  buildAlreadyCompactMessage,
+  buildContextCompressedMessage,
+  buildNoChannelOwnerMessage,
+  buildNoTokenUsageDataMessage,
+  buildResetConversationMessage,
+  buildTooFewMessagesToCompressMessage,
+  buildUsageStatisticsMessage,
+} from './channel-localization.js';
+import { normalizeChannelReplyLanguage } from './channel-reply-language.js';
 import { buildChannelSessionKey, upsertChannelSession } from './channel-session-store.js';
-import type { ChannelInstance } from './types.js';
+import type { ChannelInstance, ChannelReplyLanguage } from './types.js';
 
 interface SessionMetadataRow {
   readonly metadata_json: string;
@@ -21,6 +31,7 @@ interface SessionMetadataRow {
 interface ChannelSessionCommandContext {
   readonly channel: ChannelInstance;
   readonly chatId: string;
+  readonly replyLanguage?: ChannelReplyLanguage;
 }
 
 export interface ChannelSessionCommandResult {
@@ -86,8 +97,9 @@ function readChannelMessages(input: ChannelSessionCommandContext): Message[] {
 export function resetChannelConversation(
   input: ChannelSessionCommandContext,
 ): ChannelSessionCommandResult {
+  const language = resolveReplyLanguage(input);
   if (!input.channel.ownerUserId) {
-    return { content: 'No channel owner is available for this conversation.' };
+    return { content: buildNoChannelOwnerMessage(language) };
   }
 
   const sessionId = upsertChannelSession({
@@ -108,7 +120,7 @@ export function resetChannelConversation(
     "UPDATE sessions SET state_status = 'idle', updated_at = datetime('now') WHERE id = ? AND user_id = ?",
     [sessionId, input.channel.ownerUserId],
   );
-  return { content: 'Session cleared. Starting fresh.' };
+  return { content: buildResetConversationMessage(language) };
 }
 
 function formatNumber(value: number): string {
@@ -124,6 +136,7 @@ function formatNumber(value: number): string {
 export function getChannelUsageStats(
   input: ChannelSessionCommandContext,
 ): ChannelSessionCommandResult {
+  const language = resolveReplyLanguage(input);
   const messages = readChannelMessages(input);
   const assistantMessages = messages.filter((message) => message.role === 'assistant');
   const usage = assistantMessages.reduce(
@@ -147,28 +160,30 @@ export function getChannelUsageStats(
   );
   const totalTokens = usage.inputTokens + usage.outputTokens;
   if (totalTokens === 0) {
-    return { content: 'No token usage data available.' };
+    return { content: buildNoTokenUsageDataMessage(language) };
   }
 
   return {
-    content: [
-      'Usage statistics',
-      `Total: ${formatNumber(totalTokens)} tokens`,
-      `Input: ${formatNumber(usage.inputTokens)}`,
-      `Output: ${formatNumber(usage.outputTokens)}`,
-      `Reasoning: ${formatNumber(usage.reasoningTokens)}`,
-      `Cache read: ${formatNumber(usage.cacheReadTokens)}`,
-      `Cache write: ${formatNumber(usage.cacheWriteTokens)}`,
-      `Assistant replies: ${assistantMessages.length}`,
-    ].join('\n'),
+    content: buildUsageStatisticsMessage({
+      assistantReplies: assistantMessages.length,
+      cacheReadTokens: usage.cacheReadTokens,
+      cacheWriteTokens: usage.cacheWriteTokens,
+      formatNumber,
+      inputTokens: usage.inputTokens,
+      language,
+      outputTokens: usage.outputTokens,
+      reasoningTokens: usage.reasoningTokens,
+      totalTokens: `${formatNumber(totalTokens)} tokens`,
+    }),
   };
 }
 
 export async function compactChannelConversation(
   input: ChannelSessionCommandContext,
 ): Promise<ChannelSessionCommandResult> {
+  const language = resolveReplyLanguage(input);
   if (!input.channel.ownerUserId) {
-    return { content: 'No channel owner is available for this conversation.' };
+    return { content: buildNoChannelOwnerMessage(language) };
   }
 
   const userId = input.channel.ownerUserId;
@@ -180,7 +195,7 @@ export async function compactChannelConversation(
   });
   const messages = listSessionMessagesV2({ sessionId, userId });
   if (messages.length < 6) {
-    return { content: 'Too few messages to compress.' };
+    return { content: buildTooFewMessagesToCompressMessage(language) };
   }
 
   const compactionSettingsRow = sqliteGet<{ readonly value: string }>(
@@ -200,8 +215,12 @@ export async function compactChannelConversation(
   });
   const compactedCount = compaction.durableSummary?.newlySummarizedMessages ?? 0;
   if (compactedCount === 0) {
-    return { content: 'Context is already compact.' };
+    return { content: buildAlreadyCompactMessage(language) };
   }
 
-  return { content: `Context compressed. Cleaned ${compactedCount} messages.` };
+  return { content: buildContextCompressedMessage(language, compactedCount) };
+}
+
+function resolveReplyLanguage(input: ChannelSessionCommandContext): ChannelReplyLanguage {
+  return normalizeChannelReplyLanguage(input.replyLanguage ?? input.channel.replyLanguage);
 }

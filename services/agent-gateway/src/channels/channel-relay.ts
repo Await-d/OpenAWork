@@ -116,7 +116,7 @@ export class ChannelRelay {
 
   private async handleMessage(data: unknown): Promise<void> {
     const raw = await this.normalizeMessageData(data);
-    const message = this.parser(raw);
+    const message = this.parser(raw, { channel: this.channel });
     if (!message || this.isStale(message)) {
       return;
     }

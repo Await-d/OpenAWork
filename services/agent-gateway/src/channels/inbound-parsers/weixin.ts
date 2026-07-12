@@ -2,6 +2,7 @@ import type { ChannelMessage } from '../types.js';
 import {
   normalizeInboundRaw,
   parseSimpleEnvelope,
+  readFirstString,
   readRecord,
   readRecordArray,
   readString,
@@ -48,6 +49,51 @@ function readWeixinContent(items: readonly Record<string, unknown>[]): string {
   return '';
 }
 
+function resolveWeixinChatId(data: unknown): string {
+  return readFirstString(data, [
+    'chat_id',
+    'conversation_id',
+    'conversationId',
+    'room_id',
+    'roomid',
+    'group_id',
+    'groupId',
+    'group_openid',
+    'group_open_id',
+    'from_user_id',
+  ]);
+}
+
+function resolveWeixinSenderId(data: unknown): string {
+  return readFirstString(data, [
+    'sender_user_id',
+    'sender_id',
+    'senderId',
+    'from_user_id',
+    'user_id',
+  ]);
+}
+
+function resolveWeixinChatName(data: unknown): string | undefined {
+  const chatName = readFirstString(data, [
+    'chat_name',
+    'conversation_title',
+    'conversationTitle',
+    'room_name',
+    'group_name',
+    'title',
+  ]);
+  return chatName || undefined;
+}
+
+function resolveWeixinSenderName(data: unknown, senderId: string, chatId: string): string {
+  return (
+    readFirstString(data, ['sender_name', 'senderName', 'nickname', 'from_user_name']) ||
+    senderId ||
+    chatId
+  );
+}
+
 export function parseWeixinInboundMessage(raw: unknown): ChannelMessage | null {
   const envelope = parseSimpleEnvelope(raw);
   if (envelope) {
@@ -59,18 +105,21 @@ export function parseWeixinInboundMessage(raw: unknown): ChannelMessage | null {
     return null;
   }
 
-  const chatId = readString(data, 'from_user_id');
+  const chatId = resolveWeixinChatId(data);
   const content = readWeixinContent(readRecordArray(data, 'item_list'));
   if (!chatId || !content) {
     return null;
   }
 
+  const senderId = resolveWeixinSenderId(data) || chatId;
+  const senderName = resolveWeixinSenderName(data, senderId, chatId);
+
   return {
     id: readString(data, 'message_id') || readString(data, 'client_id') || `${Date.now()}`,
-    senderId: chatId,
-    senderName: chatId,
+    senderId,
+    senderName,
     chatId,
-    chatName: chatId,
+    chatName: resolveWeixinChatName(data) || chatId,
     content,
     timestamp: readTimestamp(
       readRecord(data, 'meta')?.['timestamp'] ?? readString(data, 'create_time_ms'),

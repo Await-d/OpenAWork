@@ -107,7 +107,7 @@ const menuStyle: React.CSSProperties = {
   borderRadius: 8,
   padding: '4px 0',
   minWidth: 160,
-  boxShadow: '0 4px 16px rgba(0,0,0,.18)',
+  boxShadow: 'var(--shadow-md)',
 };
 
 const sepStyle: React.CSSProperties = {

@@ -35,5 +35,7 @@ export interface MCPServerConfigProps {
   onAdd: (entry: MCPServerEntry) => void;
   onRemove: (id: string) => void;
   onUpdate?: (id: string, entry: MCPServerEntry) => void;
+  title?: string;
+  showAddForm?: boolean;
   style?: CSSProperties;
 }

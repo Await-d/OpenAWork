@@ -90,10 +90,10 @@ export interface AISdkProviderConfig {
    */
   supportsThinking?: boolean;
   /**
-   * Per-provider explicit upstream protocol override. When set to
-   * `'responses'`, the factory routes through `@ai-sdk/openai`'s
-   * Responses API (`/responses`). When omitted, the factory falls
-   * back to the protocol implied by `providerType`.
+   * Per-provider explicit upstream protocol override. The factory
+   * routes to the corresponding native API surface when it is set;
+   * when omitted, it falls back to the protocol implied by
+   * `providerType`.
    */
   upstreamProtocol?: UpstreamProtocolKind;
 }
@@ -199,6 +199,9 @@ function buildOpenAIResponses(config: AISdkProviderConfig): BuiltAISdkProvider {
 export function buildAISdkProvider(config: AISdkProviderConfig): BuiltAISdkProvider {
   const kind = config.providerType.toLowerCase();
   if (kind === 'anthropic' || kind === 'claude') {
+    return buildAnthropic(config);
+  }
+  if (config.upstreamProtocol === 'anthropic_messages') {
     return buildAnthropic(config);
   }
   // Honour explicit Responses protocol override even on non-OpenAI

@@ -1,11 +1,6 @@
 import type { ReactNode } from 'react';
-import {
-  FolderIcon,
-  OverviewIcon,
-  PlayIcon,
-  PlusIcon,
-  TemplateIcon,
-} from '../../shared/TeamIcons.js';
+import { BrandLogo } from '@openAwork/shared-ui';
+import { FolderIcon, PlayIcon, PlusIcon, TemplateIcon } from '../../shared/TeamIcons.js';
 
 export interface TeamWelcomeScreenProps {
   readonly canCreateSession?: boolean;
@@ -125,9 +120,6 @@ export function TeamWelcomeScreen({
             justifyContent: 'center',
             width: 44,
             height: 44,
-            borderRadius: 14,
-            background:
-              'linear-gradient(135deg, var(--accent), color-mix(in oklch, var(--accent) 60%, var(--chart-5, var(--accent))))',
             marginBottom: 12,
             boxShadow: '0 4px 24px color-mix(in srgb, var(--accent) 28%, transparent)',
             animation: 'tws-float 3s ease-in-out infinite',
@@ -135,7 +127,7 @@ export function TeamWelcomeScreen({
             zIndex: 1,
           }}
         >
-          <OverviewIcon size={22} color="var(--fg-on-accent)" />
+          <BrandLogo size={44} />
         </div>
         <h2
           id="team-welcome-title"

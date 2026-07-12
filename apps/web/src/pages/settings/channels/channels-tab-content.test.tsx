@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
+  ChannelCapabilityCatalogDraft,
   ChannelSettingsEntry,
   ChannelTargetEntry,
   ChannelTypeDescriptor,
@@ -55,7 +56,70 @@ const resourcesClientMocks = vi.hoisted(() => ({
   })),
 }));
 
+const capabilitiesClientMocks = vi.hoisted(() => ({
+  list: vi.fn(async () => [
+    {
+      id: 'agent-1',
+      kind: 'agent',
+      label: 'Agent 1',
+      description: 'desc',
+      source: 'builtin',
+    },
+    {
+      id: 'skill-1',
+      kind: 'skill',
+      label: 'Skill 1',
+      description: 'desc',
+      source: 'builtin',
+    },
+    {
+      id: 'mcp-1',
+      kind: 'mcp',
+      label: 'MCP 1',
+      description: 'desc',
+      source: 'builtin',
+      enabled: true,
+    },
+    {
+      id: 'tool-1',
+      kind: 'tool',
+      label: 'Tool 1',
+      description: 'desc',
+      source: 'runtime',
+      callable: true,
+    },
+    {
+      id: 'command-1',
+      kind: 'command',
+      label: 'Command 1',
+      description: 'desc',
+      source: 'builtin',
+    },
+  ]),
+  previewChannel: vi.fn(async () => ({
+    agents: 1,
+    skills: 1,
+    mcps: 1,
+    tools: 1,
+    toolGroups: {
+      web: 0,
+      lsp: 0,
+      files: 1,
+      shell: 0,
+      orchestration: 0,
+      session: 0,
+      mcp: 0,
+      desktop: 0,
+      repo: 0,
+      channel: 0,
+      other: 0,
+    },
+    commands: 1,
+  })),
+}));
+
 vi.mock('@openAwork/web-client', () => ({
+  createCapabilitiesClient: vi.fn(() => capabilitiesClientMocks),
   createChannelsClient: vi.fn(() => clientMocks),
   createResourcesClient: vi.fn(() => resourcesClientMocks),
 }));
@@ -67,10 +131,52 @@ vi.mock('@openAwork/shared-ui', () => ({
 vi.mock('../../../components/common/display/ChannelSubscriptionSettings.js', () => ({
   ChannelSubscriptionSettings: ({
     channels,
+    capabilityCatalogCounts,
+    onResolveCapabilityCatalogCounts,
     personas,
     onConnect,
   }: {
     readonly channels: readonly ChannelSettingsEntry[];
+    readonly capabilityCatalogCounts?: {
+      readonly agents: number;
+      readonly skills: number;
+      readonly mcps: number;
+      readonly tools: number;
+      readonly toolGroups: {
+        readonly web: number;
+        readonly lsp: number;
+        readonly files: number;
+        readonly shell: number;
+        readonly orchestration: number;
+        readonly session: number;
+        readonly mcp: number;
+        readonly desktop: number;
+        readonly repo: number;
+        readonly channel: number;
+        readonly other: number;
+      };
+      readonly commands: number;
+    };
+    readonly onResolveCapabilityCatalogCounts?: (draft: ChannelCapabilityCatalogDraft) => Promise<{
+      readonly agents: number;
+      readonly skills: number;
+      readonly mcps: number;
+      readonly tools: number;
+      readonly toolGroups: {
+        readonly web: number;
+        readonly lsp: number;
+        readonly files: number;
+        readonly shell: number;
+        readonly orchestration: number;
+        readonly session: number;
+        readonly mcp: number;
+        readonly desktop: number;
+        readonly repo: number;
+        readonly channel: number;
+        readonly other: number;
+      };
+      readonly commands: number;
+    }>;
     readonly personas?: readonly { readonly title: string }[];
     readonly onConnect?: (channelId: string) => Promise<void>;
   }) => (
@@ -78,7 +184,27 @@ vi.mock('../../../components/common/display/ChannelSubscriptionSettings.js', () 
       <button type="button" onClick={() => void onConnect?.(channels[0]?.id ?? '')}>
         连接
       </button>
+      <button
+        type="button"
+        onClick={() =>
+          void onResolveCapabilityCatalogCounts?.({
+            type: 'telegram',
+            channelLlmToolsEnabled: true,
+            tools: { read: true },
+            permissions: {
+              allowReadHome: false,
+              readablePathPrefixes: [],
+              allowWriteOutside: false,
+              allowShell: false,
+              allowSubAgents: false,
+            },
+          })
+        }
+      >
+        预览能力
+      </button>
       <span>{personas?.[0]?.title ?? '无人设'}</span>
+      <span>{capabilityCatalogCounts?.agents ?? 0} agents</span>
     </div>
   ),
 }));
@@ -161,5 +287,35 @@ describe('ChannelsTabContent', () => {
       expect(resourcesClientMocks.list).toHaveBeenCalledWith('token-1');
     });
     expect(await screen.findByText('稳健协作者')).toBeTruthy();
+  });
+
+  it('Given capabilities catalog When rendering Then it passes category counts to channel settings', async () => {
+    renderChannelsTab();
+
+    await waitFor(() => {
+      expect(capabilitiesClientMocks.list).toHaveBeenCalledWith('token-1');
+    });
+    expect(await screen.findByText('1 agents')).toBeTruthy();
+  });
+
+  it('Given channel draft preview is requested When settings asks for counts Then it proxies to capabilities preview client', async () => {
+    renderChannelsTab();
+
+    fireEvent.click(screen.getByRole('button', { name: '预览能力' }));
+
+    await waitFor(() => {
+      expect(capabilitiesClientMocks.previewChannel).toHaveBeenCalledWith('token-1', {
+        type: 'telegram',
+        channelLlmToolsEnabled: true,
+        tools: { read: true },
+        permissions: {
+          allowReadHome: false,
+          readablePathPrefixes: [],
+          allowWriteOutside: false,
+          allowShell: false,
+          allowSubAgents: false,
+        },
+      });
+    });
   });
 });

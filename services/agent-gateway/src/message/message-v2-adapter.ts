@@ -70,7 +70,7 @@ import './message-v2-projectors.js';
 
 // ─── V1 → V2 Conversion ───
 
-function v2ToV1Message(withParts: MessageWithParts): Message {
+export function v2ToV1Message(withParts: MessageWithParts): Message {
   const { info, parts } = withParts;
   const content: MessageContent[] = [];
 
@@ -197,6 +197,10 @@ function v2ToV1Message(withParts: MessageWithParts): Message {
     content,
     ...('agent' in info && typeof info.agent === 'string' ? { agentId: info.agent } : {}),
     ...(info.clientRequestId ? { clientRequestId: info.clientRequestId } : {}),
+    ...('modelID' in info && typeof info.modelID === 'string' ? { model: info.modelID } : {}),
+    ...('providerID' in info && typeof info.providerID === 'string'
+      ? { providerId: info.providerID }
+      : {}),
     ...(typeof durationMs === 'number' && durationMs > 0 ? { durationMs } : {}),
     ...(typeof firstTokenLatencyMs === 'number' && firstTokenLatencyMs > 0
       ? { firstTokenLatencyMs }
@@ -401,6 +405,8 @@ export function appendSessionMessageV2(input: {
   createdAt?: number;
   completedAt?: number;
   firstContentAt?: number;
+  modelID?: string;
+  providerID?: string;
   messageId?: string;
   replaceExisting?: boolean;
   status?: string;
@@ -459,6 +465,8 @@ export function appendSessionMessageV2(input: {
             ...baseInfo,
             ...(input.agentId ? { agent: input.agentId } : {}),
             role: 'assistant',
+            ...(input.modelID ? { modelID: input.modelID } : {}),
+            ...(input.providerID ? { providerID: input.providerID } : {}),
             time: {
               created: timeCreated,
               ...(input.completedAt ? { completed: input.completedAt } : {}),
@@ -724,6 +732,8 @@ export function appendSessionMessageV2(input: {
     createdAt: timeCreated,
     content: input.content,
     ...(input.agentId ? { agentId: input.agentId } : {}),
+    ...(input.role === 'assistant' && input.modelID ? { model: input.modelID } : {}),
+    ...(input.role === 'assistant' && input.providerID ? { providerId: input.providerID } : {}),
     ...(providerUsage ? { providerUsage } : {}),
   };
 }

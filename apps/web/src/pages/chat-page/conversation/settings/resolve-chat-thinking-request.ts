@@ -6,11 +6,13 @@ import {
 import type { ReasoningEffort } from '../../../../components/conversation-runtime/messages/support.js';
 
 const EFFORT_RANK: Record<ReasoningEffort, number> = {
+  none: -1,
   minimal: 0,
   low: 1,
   medium: 2,
   high: 3,
   xhigh: 4,
+  max: 5,
 };
 
 export interface NormalizeChatThinkingStateInput {

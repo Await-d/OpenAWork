@@ -626,8 +626,8 @@ h2 { font-size: 16px; margin: 24px 0 12px; padding-bottom: 8px; border-bottom: 1
 }
 .meta-bar span { font-family: monospace; }
 .meta-bar .badge { padding: 2px 8px; border-radius: 999px; font-weight: 600; }
-.meta-bar .badge.version { background: rgba(92,212,192,0.14); color: var(--accent); }
-.meta-bar .badge.danger { background: rgba(240,107,126,0.14); color: var(--danger); }
+.meta-bar .badge.version { background: var(--accent-muted); color: var(--accent); }
+.meta-bar .badge.danger { background: var(--danger-muted); color: var(--danger); }
 .summary-grid {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 12px; margin-bottom: 24px;
@@ -654,7 +654,7 @@ summary:hover { background: var(--surface-2); }
 .error-item.active { border-left: 3px solid var(--danger); }
 .error-item summary .error-severity {
   font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;
-  background: rgba(240,107,126,0.18); color: var(--danger); text-transform: uppercase; flex-shrink: 0;
+  background: var(--danger-muted); color: var(--danger); text-transform: uppercase; flex-shrink: 0;
 }
 .error-item summary .error-message {
   flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -679,9 +679,9 @@ pre {
   font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;
   text-transform: uppercase; flex-shrink: 0;
 }
-.log-level.error { background: rgba(240,107,126,0.18); color: var(--danger); }
-.log-level.info, .log-level.debug { background: rgba(92,212,192,0.14); color: var(--accent); }
-.log-level.warn { background: rgba(240,180,41,0.18); color: var(--warning); }
+.log-level.error { background: var(--danger-muted); color: var(--danger); }
+.log-level.info, .log-level.debug { background: var(--accent-muted); color: var(--accent); }
+.log-level.warn { background: var(--warning-muted); color: var(--warning); }
 .log-item summary .log-message { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .log-item summary .log-meta { font-size: 11px; color: var(--text-muted); font-family: monospace; flex-shrink: 0; }
 .worker-card {
@@ -692,8 +692,8 @@ pre {
 .worker-header { display: flex; justify-content: space-between; align-items: center; }
 .worker-name { font-size: 13px; font-weight: 600; }
 .worker-status { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px; text-transform: uppercase; }
-.worker-status.error { background: rgba(240,107,126,0.18); color: var(--danger); }
-.worker-status.ok { background: rgba(92,212,192,0.14); color: var(--accent); }
+.worker-status.error { background: var(--danger-muted); color: var(--danger); }
+.worker-status.ok { background: var(--accent-muted); color: var(--accent); }
 .worker-meta { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11px; color: var(--text-muted); margin-top: 6px; }
 .worker-meta code { font-size: 10px; }
 .source-card {
@@ -706,10 +706,10 @@ pre {
 .source-header { display: flex; justify-content: space-between; align-items: center; }
 .source-label { font-size: 12px; font-weight: 600; }
 .source-status { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px; text-transform: uppercase; }
-.source-status.error { background: rgba(240,107,126,0.18); color: var(--danger); }
-.source-status.ok { background: rgba(92,212,192,0.14); color: var(--accent); }
-.source-status.warn { background: rgba(240,180,41,0.18); color: var(--warning); }
-.source-status.info { background: rgba(123,138,158,0.18); color: var(--text-muted); }
+.source-status.error { background: var(--danger-muted); color: var(--danger); }
+.source-status.ok { background: var(--accent-muted); color: var(--accent); }
+.source-status.warn { background: var(--warning-muted); color: var(--warning); }
+.source-status.info { background: var(--bg-elevated); color: var(--fg-muted); }
 .source-detail { font-size: 11px; color: var(--text); margin-top: 4px; }
 .source-endpoint { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
 .source-endpoint code { font-family: monospace; }

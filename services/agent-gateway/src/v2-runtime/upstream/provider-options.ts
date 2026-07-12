@@ -37,8 +37,8 @@
 import type { JSONValue, SharedV2ProviderOptions } from '@ai-sdk/provider';
 import { resolveThinkingStyle, catalogModelSupportsThinking } from '@openAwork/agent-core';
 
-export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
-export type ProviderReasoningEffort = ReasoningEffort | 'max';
+export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export type ProviderReasoningEffort = ReasoningEffort;
 
 export interface ThinkingConfig {
   enabled: boolean;
@@ -59,30 +59,36 @@ export interface ProviderOptionsModelInfo {
 }
 
 const ANTHROPIC_THINKING_BUDGETS: Record<ReasoningEffort, number> = {
+  none: 0,
   minimal: 1024,
   low: 4096,
   medium: 8192,
   high: 16384,
   xhigh: 31999,
+  max: 31999,
 };
 
 const GEMINI_THINKING_BUDGETS: Record<ReasoningEffort, number> = {
+  none: 0,
   minimal: 1024,
   low: 4096,
   medium: 8192,
   high: 16384,
   xhigh: 24576,
+  max: 24576,
 };
 
 // Qwen DashScope thinking_budget 映射。Qwen3 系列支持 enable_thinking +
 // thinking_budget（整数 Token 数）。QwQ 系列不响应这两个参数但也不会报错。
 // 参考 https://help.aliyun.com/zh/model-studio/deep-thinking
 const QWEN_THINKING_BUDGETS: Record<ReasoningEffort, number> = {
+  none: 0,
   minimal: 512,
   low: 2048,
   medium: 8192,
   high: 16384,
   xhigh: 32768,
+  max: 32768,
 };
 
 // DeepSeek reasoning_effort 映射。DeepSeek API 支持 reasoning_effort 参数，
@@ -91,6 +97,7 @@ const QWEN_THINKING_BUDGETS: Record<ReasoningEffort, number> = {
 // 参考 https://api-docs.deepseek.com/guides/thinking_mode
 function deepseekReasoningEffort(effort: ReasoningEffort): string | undefined {
   switch (effort) {
+    case 'none':
     case 'minimal':
     case 'low':
       // 不发送 reasoning_effort，让 DeepSeek 使用默认（较低）行为
@@ -99,6 +106,7 @@ function deepseekReasoningEffort(effort: ReasoningEffort): string | undefined {
       return 'high';
     case 'high':
     case 'xhigh':
+    case 'max':
       return 'max';
   }
 }
@@ -217,16 +225,21 @@ function googleSmallThinkingBudget(apiId: string): number {
 // ---------------------------------------------------------------------------
 
 const EFFORT_RANK: Record<ReasoningEffort, number> = {
+  none: -1,
   minimal: 0,
   low: 1,
   medium: 2,
   high: 3,
   xhigh: 4,
+  max: 5,
 };
 
 function normalizeProviderReasoningEffort(effort: ProviderReasoningEffort): ReasoningEffort {
-  return effort === 'max' ? 'xhigh' : effort;
+  return effort;
 }
+
+// GPT-5.5 / 5.6 use `none` and `max` directly as reasoning_effort values.
+// No mapping needed — the effort values are passed through as-is.
 
 const GPT5_FAMILY_RE = /(?:^|\/)gpt-5(?:[.-]|$)/;
 const GPT5_VERSION_RE = /(?:^|\/)gpt-5[.-](\d+)(?:[.-]|$)/;
@@ -238,6 +251,8 @@ const GPT5_VERSIONED_PRO_EFFORTS: readonly ReasoningEffort[] = ['medium', 'high'
 const GPT5_CHAT_EFFORTS: readonly ReasoningEffort[] = ['medium'];
 const GPT5_1_EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high'];
 const GPT5_2_PLUS_EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
+const GPT5_5_EFFORTS: readonly ReasoningEffort[] = ['none', 'low', 'medium', 'high', 'xhigh'];
+const GPT5_6_EFFORTS: readonly ReasoningEffort[] = ['none', 'low', 'medium', 'high', 'max'];
 const GPT5_CODEX_3_PLUS_EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
 const GPT5_CODEX_XHIGH_EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
 const GPT5_CODEX_DEFAULT_EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high'];
@@ -267,6 +282,8 @@ function gpt5SupportedEfforts(apiId: string): readonly ReasoningEffort[] | undef
     return GPT5_CODEX_DEFAULT_EFFORTS;
   }
   const version = gpt5Version(apiId);
+  if (version === 5) return GPT5_5_EFFORTS;
+  if (version === 6) return GPT5_6_EFFORTS;
   if (version === 1) return GPT5_1_EFFORTS;
   if (version !== undefined && version >= 2) return GPT5_2_PLUS_EFFORTS;
   return GPT5_DEFAULT_EFFORTS;
@@ -547,6 +564,7 @@ export function buildProviderOptions(input: {
       // GPT-5 sub-models accept different reasoning_effort subsets;
       // clamp before send to avoid 400s on e.g. gpt-5.1 (no `minimal`),
       // gpt-5-pro (only `high`), gpt-5-chat (only `medium`).
+      // GPT-5.5/5.6 use `none`/`max` as native effort values.
       return providerOptions(modelInfo, {
         reasoningEffort: clampReasoningEffortForModel(input.model, effort),
       });
@@ -657,6 +675,28 @@ export function buildProviderOptions(input: {
       // Moonshot 仅 kimi-k2.5 系列)，由 catalog 的 thinkingModelMatcher 决定。
       if (!catalogModelSupportsThinking(thinking.providerType, model)) {
         return undefined;
+      }
+      // MiMo V2.5+ 支持 reasoning_effort 参数（low/medium/high），
+      // 在 thinking 开启时一并下发，与 DeepSeek "deepseek" 格式一致。
+      if (thinking.providerType === 'mimo' && thinking.enabled) {
+        const mimoSupported: ReasoningEffort[] = ['low', 'medium', 'high'];
+        const requested = normalizeProviderReasoningEffort(thinking.effort ?? 'medium');
+        const mimoEffort = mimoSupported.includes(requested)
+          ? requested
+          : (() => {
+              const rank = EFFORT_RANK[requested];
+              const sorted = [...mimoSupported].sort((a, b) => EFFORT_RANK[a] - EFFORT_RANK[b]);
+              for (const eff of [...sorted].reverse()) {
+                if (EFFORT_RANK[eff] <= rank) return eff;
+              }
+              return sorted[0] as ReasoningEffort;
+            })();
+        return providerOptions(modelInfo, {
+          body: {
+            thinking: { type: 'enabled' },
+            reasoning_effort: mimoEffort,
+          },
+        });
       }
       return providerOptions(modelInfo, {
         body: { thinking: { type: thinking.enabled ? 'enabled' : 'disabled' } },

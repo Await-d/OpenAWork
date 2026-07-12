@@ -1,6 +1,7 @@
 import { createSettingsClient, type SettingsProvidersLoadResult } from '@openAwork/web-client';
 import { DEFAULT_IMAGE_GENERATION_SIZE, normalizeImageGenerationSize } from '@openAwork/shared';
 import type { ReasoningEffort } from '../../components/conversation-runtime/messages/support.js';
+import type { ModelSelectionSource } from '../../pages/chat-page/conversation/settings/model-selection-source.js';
 
 export interface ChatSettingsModel {
   id: string;
@@ -43,6 +44,7 @@ export interface SavedChatDefaults {
 interface SettingsProvidersResponse {
   activeSelection?: {
     chat?: { providerId?: string; modelId?: string };
+    fast?: { providerId?: string; modelId?: string };
     image?: { providerId?: string; modelId?: string };
   };
   defaultThinking?: {
@@ -69,6 +71,7 @@ export async function loadSavedChatSessionDefaults(
   defaults: SavedChatDefaults;
   imageDefaults: SavedChatImageDefaults;
   providers: ChatSettingsProvider[];
+  fastSelection: { providerId: string; modelId: string } | null;
 }> {
   const result = await loadSavedChatSessionDefaultsResult(gatewayUrl, token);
   if (result.ok === false) {
@@ -86,6 +89,7 @@ export async function loadSavedChatSessionDefaultsResult(
         defaults: SavedChatDefaults;
         imageDefaults: SavedChatImageDefaults;
         providers: ChatSettingsProvider[];
+        fastSelection: { providerId: string; modelId: string } | null;
       };
       ok: true;
       retryable: false;
@@ -125,6 +129,12 @@ export async function loadSavedChatSessionDefaultsResult(
         thinkingEnabled: data.defaultThinking?.chat?.enabled === true,
         reasoningEffort: normalizeReasoningEffort(data.defaultThinking?.chat?.effort),
       },
+      fastSelection: data.activeSelection?.fast
+        ? {
+            providerId: data.activeSelection.fast.providerId?.trim() ?? '',
+            modelId: data.activeSelection.fast.modelId?.trim() ?? '',
+          }
+        : null,
       imageDefaults: {
         providerId: data.activeSelection?.image?.providerId?.trim() ?? '',
         modelId: data.activeSelection?.image?.modelId?.trim() ?? '',
@@ -152,6 +162,7 @@ export async function loadSavedChatSessionDefaultsResult(
 export function buildSavedChatSessionMetadata(
   defaults: SavedChatDefaults,
   options?: {
+    modelSelectionSource?: ModelSelectionSource | null;
     parentSessionId?: string | null;
     workingDirectory?: string | null;
   },
@@ -167,6 +178,9 @@ export function buildSavedChatSessionMetadata(
 
   if (defaults.modelId) {
     metadata['modelId'] = defaults.modelId;
+  }
+  if (defaults.providerId && defaults.modelId) {
+    metadata['modelSelectionSource'] = options?.modelSelectionSource ?? 'defaults';
   }
 
   const workingDirectory = options?.workingDirectory?.trim();

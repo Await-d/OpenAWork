@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router';
-import { createWorkspaceClient } from '@openAwork/web-client';
+import { createWorkspaceClient, createTeamClient } from '@openAwork/web-client';
 import { useUIStateStore } from '../../stores/ui/uiState.js';
 import { useSessions } from '../../hooks/workspace/useSessions.js';
 import { useTeamSidebarSessions } from '../../hooks/workspace/useTeamSidebarSessions.js';
@@ -19,7 +19,12 @@ import type { TeamWorkspaceGroup } from '../../hooks/workspace/useTeamSidebarSes
 import { SessionSidebarSessionRow } from '../layout/sidebar/SessionSidebarSessionRow.js';
 import { BaseSessionRow } from '../layout/sidebar/BaseSessionRow.js';
 import { WorkspaceGitBadge } from '../layout/sidebar/SidebarHelpers.js';
+import TeamSessionContextMenu from '../layout/sidebar/TeamSessionContextMenu.js';
+import TeamWorkspaceContextMenu from '../layout/sidebar/TeamWorkspaceContextMenu.js';
+import ChatWorkspaceContextMenu from '../layout/sidebar/ChatWorkspaceContextMenu.js';
 import { getWorkspaceGroupKey } from '../../utils/session/session-grouping.js';
+import { requestSessionListRefresh } from '../../utils/session/session-list-events.js';
+import { useAuthStore } from '../../stores/auth/auth.js';
 import { preloadRouteModuleByPath } from '../../routes/preloadable-route-modules.js';
 import WorkspacePickerModal from '../common/modal/WorkspacePickerModal.js';
 import { buildWorkspacePickerDataSource } from '../common/modal/workspace-picker-data-source.js';
@@ -135,6 +140,16 @@ function TeamWorkspaceGroupItem({
   navigate,
   onNewSession,
   onSelectSession,
+  onSessionContextMenu,
+  renamingSessionId,
+  renameValue,
+  onRenameChange,
+  onRenameCommit,
+  onWorkspaceContextMenu,
+  workspaceRenamingId,
+  workspaceRenameValue,
+  onWorkspaceRenameChange,
+  onWorkspaceRenameCommit,
 }: {
   group: TeamWorkspaceGroup;
   activeTeamSessionId: string | null;
@@ -142,6 +157,25 @@ function TeamWorkspaceGroupItem({
   navigate: (path: string) => void | Promise<void>;
   onNewSession: (workspaceId: string) => void;
   onSelectSession: (workspaceId: string, sessionId: string) => void;
+  onSessionContextMenu: (
+    session: {
+      id: string;
+      title: string;
+      stateStatus: string;
+      teamWorkspaceId: string | null;
+    },
+    x: number,
+    y: number,
+  ) => void;
+  renamingSessionId: string | null;
+  renameValue: string;
+  onRenameChange: (value: string) => void;
+  onRenameCommit: (sessionId: string) => void;
+  onWorkspaceContextMenu: (workspace: { id: string; name: string }, x: number, y: number) => void;
+  workspaceRenamingId: string | null;
+  workspaceRenameValue: string;
+  onWorkspaceRenameChange: (value: string) => void;
+  onWorkspaceRenameCommit: (workspaceId: string) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -163,6 +197,11 @@ function TeamWorkspaceGroupItem({
         <button
           type="button"
           onClick={() => setCollapsed((v) => !v)}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onWorkspaceContextMenu({ id: group.id, name: group.label }, e.clientX, e.clientY);
+          }}
           style={{
             flex: 1,
             display: 'flex',
@@ -221,7 +260,34 @@ function TeamWorkspaceGroupItem({
               whiteSpace: 'nowrap',
             }}
           >
-            {group.label}
+            {workspaceRenamingId === group.id ? (
+              <input
+                className="session-rename-input"
+                ref={(element) => element?.focus()}
+                value={workspaceRenameValue}
+                onChange={(event) => onWorkspaceRenameChange(event.target.value)}
+                onKeyDown={(event) => {
+                  event.stopPropagation();
+                  if (event.key === 'Enter' || event.key === 'Escape') {
+                    onWorkspaceRenameCommit(group.id);
+                  }
+                }}
+                onBlur={() => onWorkspaceRenameCommit(group.id)}
+                onClick={(event) => event.stopPropagation()}
+                style={{
+                  width: '100%',
+                  background: 'var(--bg-overlay)',
+                  border: '1px solid var(--accent)',
+                  borderRadius: 4,
+                  padding: '1px 4px',
+                  color: 'var(--fg-strong)',
+                  fontSize: 11,
+                  fontWeight: 700,
+                }}
+              />
+            ) : (
+              group.label
+            )}
           </span>
           <span style={{ fontSize: 10, color: 'var(--fg-muted)', flexShrink: 0, marginRight: 2 }}>
             {group.sessions.length}
@@ -262,7 +328,23 @@ function TeamWorkspaceGroupItem({
                     void navigate('/team');
                   }
                 }}
+                onContextMenu={(_event, id) => {
+                  onSessionContextMenu(
+                    {
+                      id,
+                      title: ts.title,
+                      stateStatus: ts.stateStatus,
+                      teamWorkspaceId: ts.teamWorkspaceId,
+                    },
+                    _event.clientX,
+                    _event.clientY,
+                  );
+                }}
                 onPreload={() => preloadRoute('/team')}
+                renaming={renamingSessionId === ts.id}
+                renameValue={renameValue}
+                onRenameChange={onRenameChange}
+                onRenameCommit={onRenameCommit}
                 icon={
                   <span
                     style={{
@@ -467,6 +549,176 @@ export function FusionSidebar({
     (_sessionId: string, _x: number, _y: number) => undefined,
     [],
   );
+
+  // ─── 团队会话右键菜单状态 ───
+  const [teamContextMenu, setTeamContextMenu] = useState<{
+    session: {
+      id: string;
+      title: string;
+      stateStatus: string;
+      teamWorkspaceId: string | null;
+    };
+    x: number;
+    y: number;
+  } | null>(null);
+
+  // ─── 团队会话重命名状态 ───
+  const [teamRenamingSessionId, setTeamRenamingSessionId] = useState<string | null>(null);
+  const [teamRenameValue, setTeamRenameValue] = useState('');
+  const [teamDeletingSessionId, setTeamDeletingSessionId] = useState<string | null>(null);
+
+  const teamAccessToken = useAuthStore((s) => s.accessToken);
+  const teamGatewayUrl = useAuthStore((s) => s.gatewayUrl);
+
+  const handleTeamSessionContextMenu = useCallback(
+    (
+      session: {
+        id: string;
+        title: string;
+        stateStatus: string;
+        teamWorkspaceId: string | null;
+      },
+      x: number,
+      y: number,
+    ) => {
+      setTeamContextMenu({ session, x, y });
+    },
+    [],
+  );
+
+  const handleTeamRename = useCallback((session: { id: string; title: string }) => {
+    setTeamRenamingSessionId(session.id);
+    setTeamRenameValue(session.title);
+  }, []);
+
+  const handleTeamRenameCommit = useCallback(
+    async (sessionId: string) => {
+      if (!teamAccessToken || !teamGatewayUrl) {
+        setTeamRenamingSessionId(null);
+        return;
+      }
+      const trimmed = teamRenameValue.trim();
+      if (!trimmed) {
+        setTeamRenamingSessionId(null);
+        return;
+      }
+      try {
+        await createTeamClient(teamGatewayUrl).updateSessionState(teamAccessToken, sessionId, {
+          title: trimmed,
+        });
+        requestSessionListRefresh();
+      } catch (err) {
+        console.error('[TeamSession] 重命名失败:', err);
+      }
+      setTeamRenamingSessionId(null);
+    },
+    [teamAccessToken, teamGatewayUrl, teamRenameValue],
+  );
+
+  const handleTeamTogglePause = useCallback(
+    async (sessionId: string, stateStatus: string) => {
+      if (!teamAccessToken || !teamGatewayUrl) return;
+      const nextState = stateStatus === 'running' ? 'paused' : 'running';
+      try {
+        await createTeamClient(teamGatewayUrl).updateSessionState(teamAccessToken, sessionId, {
+          stateStatus: nextState,
+        });
+        requestSessionListRefresh();
+      } catch (err) {
+        console.error('[TeamSession] 切换暂停/恢复失败:', err);
+      }
+    },
+    [teamAccessToken, teamGatewayUrl],
+  );
+
+  const handleTeamCopyId = useCallback((sessionId: string) => {
+    void navigator.clipboard?.writeText(sessionId);
+  }, []);
+
+  const handleTeamDelete = useCallback(
+    async (sessionId: string) => {
+      if (!teamAccessToken || !teamGatewayUrl) return;
+      if (teamDeletingSessionId === sessionId) return;
+      setTeamDeletingSessionId(sessionId);
+      try {
+        await createTeamClient(teamGatewayUrl).deleteSession(teamAccessToken, sessionId);
+        requestSessionListRefresh();
+      } catch (err) {
+        console.error('[TeamSession] 删除失败:', err);
+      }
+      setTeamDeletingSessionId(null);
+    },
+    [teamAccessToken, teamDeletingSessionId, teamGatewayUrl],
+  );
+
+  // ─── 团队工作区右键菜单状态 ───
+  const [teamWorkspaceContextMenu, setTeamWorkspaceContextMenu] = useState<{
+    workspace: { id: string; name: string };
+    x: number;
+    y: number;
+  } | null>(null);
+
+  // ─── 团队工作区重命名状态 ───
+  const [teamWorkspaceRenamingId, setTeamWorkspaceRenamingId] = useState<string | null>(null);
+  const [teamWorkspaceRenameValue, setTeamWorkspaceRenameValue] = useState('');
+  const [teamWorkspaceDeletingId, setTeamWorkspaceDeletingId] = useState<string | null>(null);
+
+  const handleTeamWorkspaceContextMenu = useCallback(
+    (workspace: { id: string; name: string }, x: number, y: number) => {
+      setTeamWorkspaceContextMenu({ workspace, x, y });
+    },
+    [],
+  );
+
+  const handleTeamWorkspaceRename = useCallback((workspace: { id: string; name: string }) => {
+    setTeamWorkspaceRenamingId(workspace.id);
+    setTeamWorkspaceRenameValue(workspace.name);
+  }, []);
+
+  const handleTeamWorkspaceRenameCommit = useCallback(
+    async (workspaceId: string) => {
+      if (!teamAccessToken || !teamGatewayUrl) {
+        setTeamWorkspaceRenamingId(null);
+        return;
+      }
+      const trimmed = teamWorkspaceRenameValue.trim();
+      if (!trimmed) {
+        setTeamWorkspaceRenamingId(null);
+        return;
+      }
+      try {
+        await createTeamClient(teamGatewayUrl).updateWorkspace(teamAccessToken, workspaceId, {
+          name: trimmed,
+        });
+        requestSessionListRefresh();
+      } catch (err) {
+        console.error('[TeamWorkspace] 重命名失败:', err);
+      }
+      setTeamWorkspaceRenamingId(null);
+    },
+    [teamAccessToken, teamGatewayUrl, teamWorkspaceRenameValue],
+  );
+
+  const handleTeamWorkspaceCopyId = useCallback((workspaceId: string) => {
+    void navigator.clipboard?.writeText(workspaceId);
+  }, []);
+
+  const handleTeamWorkspaceDelete = useCallback(
+    async (workspaceId: string) => {
+      if (!teamAccessToken || !teamGatewayUrl) return;
+      if (teamWorkspaceDeletingId === workspaceId) return;
+      setTeamWorkspaceDeletingId(workspaceId);
+      try {
+        await createTeamClient(teamGatewayUrl).deleteWorkspace(teamAccessToken, workspaceId);
+        requestSessionListRefresh();
+      } catch (err) {
+        console.error('[TeamWorkspace] 删除失败:', err);
+      }
+      setTeamWorkspaceDeletingId(null);
+    },
+    [teamAccessToken, teamGatewayUrl, teamWorkspaceDeletingId],
+  );
+
   const handlePointerPositionChange = useCallback(
     (_position: { x: number; y: number } | null) => undefined,
     [],
@@ -589,8 +841,7 @@ export function FusionSidebar({
           style={{
             flex: 1,
             minHeight: 0,
-            overflowY: 'auto',
-            overflowX: 'hidden',
+            overflow: 'hidden',
             display: 'flex',
             flexDirection: 'column',
           }}
@@ -607,7 +858,12 @@ export function FusionSidebar({
 
           <div
             style={{
-              flex: 1,
+              flexGrow: 1,
+              flexShrink: 1,
+              flexBasis: '0%',
+              minHeight: 0,
+              overflowY: 'auto',
+              overflowX: 'hidden',
               padding: '4px 6px',
               display: 'flex',
               flexDirection: 'column',
@@ -651,32 +907,81 @@ export function FusionSidebar({
             ))}
 
             {/* 团队会话 */}
-            {(teamWorkspaceGroups.length > 0 || teamLoading) && (
+            <div
+              style={{
+                flexGrow: 1,
+                flexShrink: 1,
+                flexBasis: '0%',
+                minHeight: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                marginTop: 6,
+                paddingTop: 6,
+                borderTop: '1px solid var(--border-subtle)',
+              }}
+            >
               <div
-                style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border-subtle)' }}
+                onClick={() => {
+                  if (!location.pathname.startsWith('/team')) {
+                    void navigate('/team');
+                  }
+                  triggerResetToWelcome('team');
+                }}
+                title="点击回到团队欢迎页面"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '4px 8px',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: 'var(--fg-muted)',
+                  cursor: 'pointer',
+                }}
               >
-                <div
-                  onClick={() => {
-                    if (!location.pathname.startsWith('/team')) {
-                      void navigate('/team');
-                    }
-                    triggerResetToWelcome('team');
-                  }}
-                  title="点击回到团队欢迎页面"
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                  style={{ flexShrink: 0 }}
+                >
+                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                  <circle cx="9" cy="7" r="4" />
+                  <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                </svg>
+                <span>团队工作空间</span>
+                <span style={{ fontSize: 10 }}>{teamLoading ? '…' : teamSessions.length}</span>
+                <button
+                  type="button"
+                  onClick={handleNewTeamWorkspace}
+                  title="新建团队工作区"
                   style={{
+                    flexShrink: 0,
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 6,
-                    padding: '4px 8px',
-                    fontSize: 11,
-                    fontWeight: 700,
+                    justifyContent: 'center',
+                    width: 20,
+                    height: 20,
+                    borderRadius: 5,
+                    background: 'transparent',
+                    border: 'none',
                     color: 'var(--fg-muted)',
                     cursor: 'pointer',
+                    padding: 0,
+                    marginLeft: 'auto',
+                    marginRight: 2,
                   }}
                 >
                   <svg
-                    width="13"
-                    height="13"
+                    width="12"
+                    height="12"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
@@ -684,53 +989,40 @@ export function FusionSidebar({
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     aria-hidden="true"
-                    style={{ flexShrink: 0 }}
                   >
-                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                    <circle cx="9" cy="7" r="4" />
-                    <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                    <line x1="12" y1="11" x2="12" y2="17" />
+                    <line x1="9" y1="14" x2="15" y2="14" />
                   </svg>
-                  <span>团队工作空间</span>
-                  <span style={{ fontSize: 10 }}>{teamLoading ? '…' : teamSessions.length}</span>
-                  <button
-                    type="button"
-                    onClick={handleNewTeamWorkspace}
-                    title="新建团队工作区"
+                </button>
+              </div>
+              {/* 团队会话滚动区域 */}
+              <div
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  overflowY: 'auto',
+                  overflowX: 'hidden',
+                }}
+              >
+                {teamError && (
+                  <div style={{ padding: '6px 10px', fontSize: 11, color: 'var(--fg-muted)' }}>
+                    {teamError}
+                  </div>
+                )}
+                {!teamLoading && !teamError && teamWorkspaceGroups.length === 0 && (
+                  <div
                     style={{
-                      flexShrink: 0,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      width: 20,
-                      height: 20,
-                      borderRadius: 5,
-                      background: 'transparent',
-                      border: 'none',
+                      padding: '16px 10px',
+                      textAlign: 'center',
+                      fontSize: 11,
+                      lineHeight: 1.5,
                       color: 'var(--fg-muted)',
-                      cursor: 'pointer',
-                      padding: 0,
-                      marginLeft: 'auto',
-                      marginRight: 2,
                     }}
                   >
-                    <svg
-                      width="12"
-                      height="12"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                    >
-                      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                      <line x1="12" y1="11" x2="12" y2="17" />
-                      <line x1="9" y1="14" x2="15" y2="14" />
-                    </svg>
-                  </button>
-                </div>
+                    暂无团队工作空间
+                  </div>
+                )}
                 {teamWorkspaceGroups.map((wg) => (
                   <TeamWorkspaceGroupItem
                     key={wg.id}
@@ -748,10 +1040,20 @@ export function FusionSidebar({
                       triggerTeamSelectSession(wsId, sessionId);
                       void navigate(`/team/${wsId}`);
                     }}
+                    onSessionContextMenu={handleTeamSessionContextMenu}
+                    renamingSessionId={teamRenamingSessionId}
+                    renameValue={teamRenameValue}
+                    onRenameChange={setTeamRenameValue}
+                    onRenameCommit={(id) => void handleTeamRenameCommit(id)}
+                    onWorkspaceContextMenu={handleTeamWorkspaceContextMenu}
+                    workspaceRenamingId={teamWorkspaceRenamingId}
+                    workspaceRenameValue={teamWorkspaceRenameValue}
+                    onWorkspaceRenameChange={setTeamWorkspaceRenameValue}
+                    onWorkspaceRenameCommit={(id) => void handleTeamWorkspaceRenameCommit(id)}
                   />
                 ))}
               </div>
-            )}
+            </div>
           </div>
         </div>
 
@@ -788,6 +1090,50 @@ export function FusionSidebar({
         />,
         document.body,
       )}
+
+      {/* 团队会话右键菜单 Portal */}
+      {teamContextMenu &&
+        createPortal(
+          <TeamSessionContextMenu
+            sessionId={teamContextMenu.session.id}
+            sessionTitle={teamContextMenu.session.title}
+            x={teamContextMenu.x}
+            y={teamContextMenu.y}
+            stateStatus={teamContextMenu.session.stateStatus}
+            isRenaming={teamRenamingSessionId === teamContextMenu.session.id}
+            isDeleting={teamDeletingSessionId === teamContextMenu.session.id}
+            onClose={() => setTeamContextMenu(null)}
+            onRename={() => handleTeamRename(teamContextMenu.session)}
+            onTogglePause={() =>
+              void handleTeamTogglePause(
+                teamContextMenu.session.id,
+                teamContextMenu.session.stateStatus,
+              )
+            }
+            onCopyId={() => handleTeamCopyId(teamContextMenu.session.id)}
+            onDelete={() => void handleTeamDelete(teamContextMenu.session.id)}
+          />,
+          document.body,
+        )}
+
+      {/* 团队工作区右键菜单 Portal */}
+      {teamWorkspaceContextMenu &&
+        createPortal(
+          <TeamWorkspaceContextMenu
+            workspaceId={teamWorkspaceContextMenu.workspace.id}
+            workspaceName={teamWorkspaceContextMenu.workspace.name}
+            x={teamWorkspaceContextMenu.x}
+            y={teamWorkspaceContextMenu.y}
+            isRenaming={teamWorkspaceRenamingId === teamWorkspaceContextMenu.workspace.id}
+            isDeleting={teamWorkspaceDeletingId === teamWorkspaceContextMenu.workspace.id}
+            isUnbound={teamWorkspaceContextMenu.workspace.id === '__unbound__'}
+            onClose={() => setTeamWorkspaceContextMenu(null)}
+            onRename={() => handleTeamWorkspaceRename(teamWorkspaceContextMenu.workspace)}
+            onCopyId={() => handleTeamWorkspaceCopyId(teamWorkspaceContextMenu.workspace.id)}
+            onDelete={() => void handleTeamWorkspaceDelete(teamWorkspaceContextMenu.workspace.id)}
+          />,
+          document.body,
+        )}
     </div>
   );
 }

@@ -39,7 +39,10 @@ export class WeixinChannelService implements MessagingChannelService {
   private readonly notify: (event: ChannelEvent) => void;
   private readonly apiFactory: WeixinApiFactory;
   private readonly contextTokens = new Map<string, string>();
-  private readonly messageReplyMeta = new Map<string, { userId: string; contextToken: string }>();
+  private readonly messageReplyMeta = new Map<
+    string,
+    { chatId: string; userId?: string; contextToken: string }
+  >();
   private api: WeixinApiClient | null = null;
   private running = false;
   private syncBuf = '';
@@ -137,7 +140,7 @@ export class WeixinChannelService implements MessagingChannelService {
       throw new Error('Weixin reply context not found for messageId');
     }
     return this.requireApi().sendMessage({
-      toUserId: meta.userId,
+      toUserId: meta.chatId,
       text: content,
       contextToken: meta.contextToken,
     });
@@ -197,12 +200,24 @@ export class WeixinChannelService implements MessagingChannelService {
     return contextToken;
   }
 
-  private rememberContext(messageId: string, userId: string, contextToken: string): void {
+  private rememberContext(
+    messageId: string,
+    chatId: string,
+    userId: string,
+    contextToken: string,
+  ): void {
     if (!contextToken) {
       return;
     }
-    this.contextTokens.set(`${this.accountId}:${userId}`, contextToken);
-    this.messageReplyMeta.set(messageId, { userId, contextToken });
+    this.contextTokens.set(`${this.accountId}:${chatId}`, contextToken);
+    if (userId) {
+      this.contextTokens.set(`${this.accountId}:${userId}`, contextToken);
+    }
+    this.messageReplyMeta.set(messageId, {
+      chatId,
+      ...(userId ? { userId } : {}),
+      contextToken,
+    });
     trimCache(this.contextTokens);
     trimCache(this.messageReplyMeta);
   }
@@ -211,16 +226,21 @@ export class WeixinChannelService implements MessagingChannelService {
     if (!isRecord(rawMessage) || readString(rawMessage, 'message_type') !== '1') {
       return;
     }
-    const userId = readString(rawMessage, 'from_user_id');
     const timestamp = readTimestamp(rawMessage['create_time_ms']);
-    if (!userId || timestamp < Date.now() - STALE_MESSAGE_WINDOW_MS) {
+    if (timestamp < Date.now() - STALE_MESSAGE_WINDOW_MS) {
       return;
     }
     const message = parseWeixinInboundMessage(rawMessage);
     if (!message) {
       return;
     }
-    this.rememberContext(message.id, userId, readString(rawMessage, 'context_token'));
+    const userId = readString(rawMessage, 'from_user_id') || message.senderId;
+    this.rememberContext(
+      message.id,
+      message.chatId,
+      userId,
+      readString(rawMessage, 'context_token'),
+    );
     this.safeNotify({ type: 'message', pluginId: this.pluginId, message });
   }
 
