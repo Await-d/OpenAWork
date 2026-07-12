@@ -4,6 +4,7 @@ import type {
   Message,
   RunEvent,
   StreamThinkingChunk,
+  UpstreamRouteDescriptor,
   UpstreamStreamSummary,
   WorkflowRuntimeState,
 } from '@openAwork/shared';
@@ -846,6 +847,7 @@ export default function ChatPage() {
       reasoningEffort,
       activeProviderId,
       activeModelId,
+      modelSelectionSource: sessionModelSelectionSourceRef.current,
       manualAgentId,
       effectiveWorkingDirectory,
       sessionMetadataDirty,
@@ -1791,6 +1793,7 @@ export default function ChatPage() {
               setActiveProviderId(metadata.providerId ?? '');
               setActiveModelId(metadata.modelId ?? '');
               sessionModelSelectionSourceRef.current = resolveModelSelectionSourceFromMetadata({
+                modelSelectionSource: metadata.modelSelectionSource,
                 providerId: metadata.providerId,
                 modelId: metadata.modelId,
               });
@@ -1804,6 +1807,7 @@ export default function ChatPage() {
               reasoningEffort: metadata.reasoningEffort,
               providerId: metadata.providerId,
               modelId: metadata.modelId,
+              modelSelectionSource: metadata.modelSelectionSource,
               workingDirectory: extractWorkingDirectory(prepared.session.metadata_json),
             });
             if (!sessionMetadataDirtyRef.current) {
@@ -1972,6 +1976,10 @@ export default function ChatPage() {
         }
         lastPersistedSessionMetadataSnapshotRef.current = nextSnapshot;
         sessionModelSelectionSourceRef.current = resolveModelSelectionSourceFromMetadata({
+          modelSelectionSource:
+            typeof nextMetadata['modelSelectionSource'] === 'string'
+              ? nextMetadata['modelSelectionSource']
+              : undefined,
           providerId:
             typeof nextMetadata['providerId'] === 'string' ? nextMetadata['providerId'] : undefined,
           modelId:
@@ -2170,6 +2178,12 @@ export default function ChatPage() {
     const resolvedReasoningEffort = sessionMetadataDirty
       ? reasoningEffort
       : (savedDefaults?.reasoningEffort ?? reasoningEffort);
+    const resolvedModelSelectionSource =
+      sessionMetadataDirty && sessionModelSelectionSourceRef.current
+        ? sessionModelSelectionSourceRef.current
+        : resolvedProviderId && resolvedModelId
+          ? 'defaults'
+          : sessionModelSelectionSourceRef.current;
 
     if (!activeProviderId && resolvedProviderId) {
       setActiveProviderId(resolvedProviderId);
@@ -2200,6 +2214,9 @@ export default function ChatPage() {
     const resolvedMetadata = buildSessionMetadata({
       ...(resolvedProviderId ? { providerId: resolvedProviderId } : {}),
       ...(resolvedModelId ? { modelId: resolvedModelId } : {}),
+      ...(resolvedModelSelectionSource
+        ? { modelSelectionSource: resolvedModelSelectionSource }
+        : {}),
       reasoningEffort: normalizedThinkingState.reasoningEffort,
       thinkingEnabled: normalizedThinkingState.thinkingEnabled,
     });
@@ -2216,6 +2233,10 @@ export default function ChatPage() {
     lastPersistedSessionMetadataSnapshotRef.current =
       createSessionMetadataSnapshot(resolvedMetadata);
     sessionModelSelectionSourceRef.current = resolveModelSelectionSourceFromMetadata({
+      modelSelectionSource:
+        typeof resolvedMetadata['modelSelectionSource'] === 'string'
+          ? resolvedMetadata['modelSelectionSource']
+          : undefined,
       providerId: resolvedProviderId,
       modelId: resolvedModelId,
     });
@@ -2573,9 +2594,14 @@ export default function ChatPage() {
     let toolPanelRevealed = false;
     let pausedForPermission = false;
     let pausedForQuestion = false;
+    let latestUpstreamRoute: UpstreamRouteDescriptor | null = null;
     let latestRoundUpstreamSummary: UpstreamStreamSummary | null = null;
     let currentRoundStartedAt = requestStartedAt;
     let firstTokenLatencyAttached = false;
+    const resolveRoundModelLabel = (summary?: UpstreamStreamSummary | null): string | undefined =>
+      summary?.modelId ?? latestUpstreamRoute?.modelId ?? requestModelLabel;
+    const resolveRoundProviderId = (summary?: UpstreamStreamSummary | null): string | undefined =>
+      summary?.providerId ?? latestUpstreamRoute?.providerId ?? requestProviderId;
 
     // Round boundary commit:
     // The gateway persists one assistant message per agent round (see
@@ -2602,8 +2628,8 @@ export default function ChatPage() {
         firstTokenObservedAt,
         liveToolCalls,
         requestAgentId,
-        requestModelLabel,
-        requestProviderId,
+        requestModelLabel: resolveRoundModelLabel(),
+        requestProviderId: resolveRoundProviderId(),
         requestStartedAt,
         setMessages,
         setStreamBuffer,
@@ -2654,8 +2680,24 @@ export default function ChatPage() {
           return;
         }
 
+        if (event.type === 'upstream_route') {
+          latestUpstreamRoute = {
+            modelId: event.modelId,
+            ...(event.providerId ? { providerId: event.providerId } : {}),
+          };
+        }
+
         if ((event.type === 'done' || event.type === 'error') && event.upstreamSummary) {
           latestRoundUpstreamSummary = event.upstreamSummary;
+          const nextRouteModelId = event.upstreamSummary.modelId ?? latestUpstreamRoute?.modelId;
+          const nextRouteProviderId =
+            event.upstreamSummary.providerId ?? latestUpstreamRoute?.providerId;
+          if (nextRouteModelId) {
+            latestUpstreamRoute = {
+              modelId: nextRouteModelId,
+              ...(nextRouteProviderId ? { providerId: nextRouteProviderId } : {}),
+            };
+          }
           setLatestUpstreamSummary(event.upstreamSummary);
         }
 
@@ -3044,8 +3086,8 @@ export default function ChatPage() {
             : isPausedForPermission
               ? 'paused'
               : 'completed';
-        const resolvedMessageModel = resolvedUpstreamSummary?.modelId ?? requestModelLabel;
-        const resolvedMessageProviderId = resolvedUpstreamSummary?.providerId ?? requestProviderId;
+        const resolvedMessageModel = resolveRoundModelLabel(resolvedUpstreamSummary);
+        const resolvedMessageProviderId = resolveRoundProviderId(resolvedUpstreamSummary);
         const hasRenderableAssistantReply =
           finalAccumulatedText.trim().length > 0 ||
           accumulatedThinking.trim().length > 0 ||
@@ -3122,9 +3164,8 @@ export default function ChatPage() {
         const errorContent = `[错误: ${code}] ${resolvedMessage}`;
         logger.error('stream error', `${code}: ${resolvedMessage}`);
         const errorMsgId = makeOrderedMessageId();
-        const resolvedMessageModel = latestRoundUpstreamSummary?.modelId ?? requestModelLabel;
-        const resolvedMessageProviderId =
-          latestRoundUpstreamSummary?.providerId ?? requestProviderId;
+        const resolvedMessageModel = resolveRoundModelLabel(latestRoundUpstreamSummary);
+        const resolvedMessageProviderId = resolveRoundProviderId(latestRoundUpstreamSummary);
         const finalized = finalizeStreamMessage({
           accumulatedSegments: [],
           accumulatedThinking,
@@ -3335,9 +3376,15 @@ export default function ChatPage() {
     let firstTokenObservedAt: number | null = null;
     let pausedForPermission = false;
     let pausedForQuestion = false;
+    let latestUpstreamRoute: UpstreamRouteDescriptor | null =
+      recoveredStreamSnapshot?.upstreamRoute ?? null;
     let latestRoundUpstreamSummary: UpstreamStreamSummary | null = null;
     let currentRoundStartedAt = requestStartedAt;
     let firstTokenLatencyAttached = false;
+    const resolveRoundModelLabel = (summary?: UpstreamStreamSummary | null): string | undefined =>
+      summary?.modelId ?? latestUpstreamRoute?.modelId ?? requestModelLabel;
+    const resolveRoundProviderId = (summary?: UpstreamStreamSummary | null): string | undefined =>
+      summary?.providerId ?? latestUpstreamRoute?.providerId ?? requestProviderId;
     const toolCallIds = new Set<string>();
     const liveToolCalls = new Map<string, LiveToolCallState>();
     const buildAttachToolCalls = (): AssistantTraceToolCall[] => {
@@ -3418,8 +3465,8 @@ export default function ChatPage() {
         firstTokenObservedAt,
         liveToolCalls,
         requestAgentId,
-        requestModelLabel,
-        requestProviderId,
+        requestModelLabel: resolveRoundModelLabel(),
+        requestProviderId: resolveRoundProviderId(),
         requestStartedAt,
         setMessages,
         setStreamBuffer,
@@ -3649,8 +3696,24 @@ export default function ChatPage() {
           }
           ensureAttachStateInitialized();
 
+          if (event.type === 'upstream_route') {
+            latestUpstreamRoute = {
+              modelId: event.modelId,
+              ...(event.providerId ? { providerId: event.providerId } : {}),
+            };
+          }
+
           if ((event.type === 'done' || event.type === 'error') && event.upstreamSummary) {
             latestRoundUpstreamSummary = event.upstreamSummary;
+            const nextRouteModelId = event.upstreamSummary.modelId ?? latestUpstreamRoute?.modelId;
+            const nextRouteProviderId =
+              event.upstreamSummary.providerId ?? latestUpstreamRoute?.providerId;
+            if (nextRouteModelId) {
+              latestUpstreamRoute = {
+                modelId: nextRouteModelId,
+                ...(nextRouteProviderId ? { providerId: nextRouteProviderId } : {}),
+              };
+            }
             setLatestUpstreamSummary(event.upstreamSummary);
           }
 
@@ -4009,9 +4072,8 @@ export default function ChatPage() {
               : isPausedForPermission
                 ? 'paused'
                 : 'completed';
-          const resolvedMessageModel = resolvedUpstreamSummary?.modelId ?? requestModelLabel;
-          const resolvedMessageProviderId =
-            resolvedUpstreamSummary?.providerId ?? requestProviderId;
+          const resolvedMessageModel = resolveRoundModelLabel(resolvedUpstreamSummary);
+          const resolvedMessageProviderId = resolveRoundProviderId(resolvedUpstreamSummary);
           const hasRenderableAssistantReply =
             finalAccumulatedText.trim().length > 0 ||
             accumulatedThinking.trim().length > 0 ||
@@ -4067,9 +4129,8 @@ export default function ChatPage() {
           logger.error('attach stream error', `${code}: ${resolvedMessage}`);
           const attachErrorMsgId =
             currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId();
-          const resolvedMessageModel = latestRoundUpstreamSummary?.modelId ?? requestModelLabel;
-          const resolvedMessageProviderId =
-            latestRoundUpstreamSummary?.providerId ?? requestProviderId;
+          const resolvedMessageModel = resolveRoundModelLabel(latestRoundUpstreamSummary);
+          const resolvedMessageProviderId = resolveRoundProviderId(latestRoundUpstreamSummary);
           const finalized = finalizeStreamMessage({
             accumulatedSegments: [],
             accumulatedThinking,

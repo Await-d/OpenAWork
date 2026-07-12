@@ -855,6 +855,44 @@ export function createRunEventMeta(runId: string, sequence: { value: number }) {
   };
 }
 
+function resolveStreamRouteProviderId(route: ModelRouteConfig): string | undefined {
+  return route.providerId ?? route.providerType;
+}
+
+export function createStreamUpstreamRouteChunk(
+  route: ModelRouteConfig,
+  runId: string,
+  sequence: { value: number },
+  requestId?: string,
+) {
+  const providerId = resolveStreamRouteProviderId(route);
+  return {
+    type: 'upstream_route' as const,
+    modelId: route.model,
+    ...(providerId ? { providerId } : {}),
+    ...(requestId ? { requestId } : {}),
+    ...createRunEventMeta(runId, sequence),
+  };
+}
+
+function buildRouteOnlyUpstreamSummary(
+  route: ModelRouteConfig,
+  stopReason: UpstreamStreamSummary['stopReason'],
+): UpstreamStreamSummary {
+  const providerId = resolveStreamRouteProviderId(route);
+  return {
+    stopReason,
+    textDeltaCount: 0,
+    reasoningDeltaCount: 0,
+    toolCallDeltaCount: 0,
+    ...(route.model ? { modelId: route.model } : {}),
+    ...(providerId ? { providerId } : {}),
+    sawDone: false,
+    sawError: stopReason === 'error',
+    stalled: stopReason === 'error',
+  };
+}
+
 function buildMissingToolArgumentsMessage(toolName: string, workingDirectory?: string): string {
   const examplePath = workingDirectory ?? '/absolute/workspace/path';
 
@@ -1908,7 +1946,7 @@ export async function handleStreamRequest(input: {
     ? (requestData.displayMessage ?? '恢复团队会话')
     : requestData.message;
   const stepRoute = wl.start('stream.model-resolve');
-  let route: ResolvedStreamModelRoute;
+  let route: ResolvedStreamModelRoute | undefined;
   try {
     route = await resolveStreamModelRoute({
       metadataJson: input.sessionContext.metadataJson,
@@ -1956,6 +1994,9 @@ export async function handleStreamRequest(input: {
     }
     wl.flush(ctx, 500);
     throw error;
+  }
+  if (!route) {
+    throw new Error('resolved stream route missing');
   }
 
   // PR-D-Plugin: notify `chat.message` plugins that a new user
@@ -2155,6 +2196,9 @@ export async function handleStreamRequest(input: {
     });
     input.writeChunk(chunk);
   };
+  emitChunk(
+    createStreamUpstreamRouteChunk(route, runId, eventSequence, requestData.clientRequestId),
+  );
   const execution: Promise<HandleStreamResult> = (async () => {
     let shouldKeepPausedState = false;
     const runtimeThreadStartedAt = Date.now();
@@ -2990,6 +3034,7 @@ ${result.upstreamError.technicalDetail}`
       emitChunk({
         type: 'done',
         stopReason: 'cancelled',
+        upstreamSummary: buildRouteOnlyUpstreamSummary(route, 'cancelled'),
         ...createRunEventMeta(runId, eventSequence),
         ...(cascadeSummary ? { cancellation: cascadeSummary } : {}),
       });
@@ -3023,9 +3068,21 @@ ${result.upstreamError.technicalDetail}`
       clientRequestId: requestData.clientRequestId,
       status: 'error',
       replaceExisting: true,
+      modelID: route.model,
+      ...(resolveStreamRouteProviderId(route)
+        ? { providerID: resolveStreamRouteProviderId(route) }
+        : {}),
       ...(requestData.agentId ? { agentId: requestData.agentId } : {}),
     });
-    emitChunk(createStreamErrorChunk('STREAM_ERROR', String(err), runId));
+    emitChunk(
+      createStreamErrorChunk(
+        'STREAM_ERROR',
+        String(err),
+        runId,
+        buildRouteOnlyUpstreamSummary(route, 'error'),
+        requestData.clientRequestId,
+      ),
+    );
     wl.flush(ctx, 500);
     throw err;
   });
