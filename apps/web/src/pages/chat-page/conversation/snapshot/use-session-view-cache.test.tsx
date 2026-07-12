@@ -15,6 +15,10 @@ describe('useSessionViewCache', () => {
         text: 'hello',
         thinkingBlocks: [],
         toolCalls: [],
+        upstreamRoute: {
+          modelId: 'gpt-5.4',
+          providerId: 'openai-fast',
+        },
         usage: null,
         upstreamSummary: {
           stopReason: 'cancelled',
@@ -48,6 +52,10 @@ describe('useSessionViewCache', () => {
       sawDone: false,
       sawError: false,
       stalled: false,
+    });
+    expect(restored?.streamingSnapshot?.recoveredStream.upstreamRoute).toEqual({
+      modelId: 'gpt-5.4',
+      providerId: 'openai-fast',
     });
   });
 });

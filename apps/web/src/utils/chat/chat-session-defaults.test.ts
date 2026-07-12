@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { loadSavedChatSessionDefaultsResult } from './chat-session-defaults.js';
+import {
+  buildSavedChatSessionMetadata,
+  loadSavedChatSessionDefaultsResult,
+} from './chat-session-defaults.js';
 
 const originalFetch = globalThis.fetch;
 
@@ -47,6 +50,23 @@ describe('loadSavedChatSessionDefaultsResult', () => {
           reasoningEffort: 'high',
         },
       },
+    });
+  });
+});
+
+describe('buildSavedChatSessionMetadata', () => {
+  it('会把默认 chat 选型标记为 defaults 来源', () => {
+    expect(
+      buildSavedChatSessionMetadata({
+        providerId: 'openai',
+        modelId: 'gpt-5.4',
+        thinkingEnabled: true,
+        reasoningEffort: 'high',
+      }),
+    ).toMatchObject({
+      providerId: 'openai',
+      modelId: 'gpt-5.4',
+      modelSelectionSource: 'defaults',
     });
   });
 });

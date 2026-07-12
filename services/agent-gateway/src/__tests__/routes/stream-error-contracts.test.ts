@@ -26,6 +26,7 @@ let streamRoutes: typeof StreamRoutesPluginModule.streamRoutes;
 let STREAM_ERROR_MESSAGES: typeof StreamRoutesModule.STREAM_ERROR_MESSAGES;
 let STREAM_PLUGIN_ERROR_MESSAGES: typeof StreamRoutesPluginModule.STREAM_PLUGIN_ERROR_MESSAGES;
 let createStreamErrorChunk: typeof StreamRoutesModule.createStreamErrorChunk;
+let createStreamUpstreamRouteChunk: typeof StreamRoutesModule.createStreamUpstreamRouteChunk;
 let resolveStreamModelRoute: typeof StreamRoutesModule.resolveStreamModelRoute;
 
 const SESSION_ID = 'sess-stream-routes';
@@ -91,6 +92,7 @@ beforeAll(async () => {
   streamRequestSchema = streamModule.streamRequestSchema;
   STREAM_ERROR_MESSAGES = streamModule.STREAM_ERROR_MESSAGES;
   createStreamErrorChunk = streamModule.createStreamErrorChunk;
+  createStreamUpstreamRouteChunk = streamModule.createStreamUpstreamRouteChunk;
   resolveStreamModelRoute = streamModule.resolveStreamModelRoute;
   const pluginModule = await import('../../routes/stream-routes-plugin.js');
   streamRoutes = pluginModule.streamRoutes;
@@ -141,6 +143,34 @@ describe('stream error contracts', () => {
       code: 'REQUEST_REPLAY_FAILED',
       message: '请求重放失败。',
       runId: 'run-1',
+    });
+  });
+
+  it('createStreamUpstreamRouteChunk 暴露真实上游模型与 provider', () => {
+    const chunk = createStreamUpstreamRouteChunk(
+      {
+        model: 'gpt-5.4',
+        providerId: 'openai-fast',
+        providerType: 'openai',
+        apiBaseUrl: 'https://api.openai.com/v1',
+        apiKey: 'test',
+        maxTokens: 2048,
+        temperature: 1,
+        upstreamProtocol: 'responses',
+        requestOverrides: {},
+        supportsThinking: false,
+      },
+      'run-route-1',
+      { value: 1 },
+      'req-route-1',
+    );
+
+    expect(chunk).toMatchObject({
+      type: 'upstream_route',
+      modelId: 'gpt-5.4',
+      providerId: 'openai-fast',
+      requestId: 'req-route-1',
+      runId: 'run-route-1',
     });
   });
 
