@@ -1,6 +1,7 @@
 import type {
   ModifiedFilesSummaryContent,
   RunEvent,
+  UpstreamRouteDescriptor,
   UpstreamStreamSummary,
 } from '@openAwork/shared';
 import type { SessionStateStatus } from '../session/session-runtime.js';
@@ -23,6 +24,7 @@ export interface RecoveredActiveAssistantStream {
   text: string;
   thinkingBlocks: StreamingThinkingBlock[];
   toolCalls: AssistantTraceToolCall[];
+  upstreamRoute?: UpstreamRouteDescriptor;
   usage: ChatBackendUsageSnapshot | null;
   upstreamSummary?: UpstreamStreamSummary;
 }
@@ -166,6 +168,7 @@ export function recoverActiveAssistantStream(
   let text = '';
   let thinkingBlocks: StreamingThinkingBlock[] = [];
   let usage: ChatBackendUsageSnapshot | null = null;
+  let upstreamRoute: UpstreamRouteDescriptor | undefined;
   let upstreamSummary: UpstreamStreamSummary | undefined;
   let startedAt: number | null = null;
   let hasRenderableContent = false;
@@ -195,6 +198,14 @@ export function recoverActiveAssistantStream(
 
     if (event.type === 'usage') {
       usage = mergeChatBackendUsageSnapshot(usage, event);
+      continue;
+    }
+
+    if (event.type === 'upstream_route') {
+      upstreamRoute = {
+        modelId: event.modelId,
+        ...(event.providerId ? { providerId: event.providerId } : {}),
+      };
       continue;
     }
 
@@ -229,6 +240,7 @@ export function recoverActiveAssistantStream(
     text,
     thinkingBlocks,
     toolCalls: recoveredAssistantAnchor?.toolCalls ?? [],
+    ...(upstreamRoute ? { upstreamRoute } : {}),
     usage,
     ...(upstreamSummary ? { upstreamSummary } : {}),
   };

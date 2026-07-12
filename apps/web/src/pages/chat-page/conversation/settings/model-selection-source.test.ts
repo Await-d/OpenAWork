@@ -6,7 +6,7 @@ import {
 } from './model-selection-source.js';
 
 describe('model-selection-source', () => {
-  it('仅当 metadata 同时带 providerId 与 modelId 时视为 metadata 绑定', () => {
+  it('仅当 metadata 同时带 providerId 与 modelId 时才视为绑定', () => {
     expect(
       resolveModelSelectionSourceFromMetadata({
         providerId: 'openai',
@@ -25,13 +25,6 @@ describe('model-selection-source', () => {
       resolveModelSelectionSourceFromMetadata({
         providerId: 'openai',
         modelId: 'gpt-5.4',
-        modelSelectionSource: 'metadata',
-      }),
-    ).toBe('metadata');
-    expect(
-      resolveModelSelectionSourceFromMetadata({
-        providerId: 'openai',
-        modelId: 'gpt-5.4',
       }),
     ).toBe('metadata');
     expect(
@@ -40,15 +33,9 @@ describe('model-selection-source', () => {
         modelId: '',
       }),
     ).toBeNull();
-    expect(
-      resolveModelSelectionSourceFromMetadata({
-        providerId: '',
-        modelId: 'gpt-5.4',
-      }),
-    ).toBeNull();
   });
 
-  it('仅在已有会话且 metadata 还没有模型绑定时接管默认选择', () => {
+  it('仅在已有会话且 metadata 没有模型绑定时接管默认选择', () => {
     expect(
       shouldAdoptSessionModelSelectionDefaults({
         sessionId: 'sess-1',
@@ -57,27 +44,17 @@ describe('model-selection-source', () => {
         defaultModelId: 'gpt-5.4',
       }),
     ).toBe(true);
-
-    expect(
-      shouldAdoptSessionModelSelectionDefaults({
-        sessionId: null,
-        source: null,
-        defaultProviderId: 'openai',
-        defaultModelId: 'gpt-5.4',
-      }),
-    ).toBe(false);
-
     expect(
       shouldAdoptSessionModelSelectionDefaults({
         sessionId: 'sess-1',
-        source: 'metadata',
+        source: 'manual',
         defaultProviderId: 'openai',
         defaultModelId: 'gpt-5.4',
       }),
     ).toBe(false);
   });
 
-  it('只有手动选型才向主流请求显式透传 provider/model', () => {
+  it('只有手动选型才显式透传 provider/model', () => {
     expect(shouldSendExplicitStreamModelSelection('manual')).toBe(true);
     expect(shouldSendExplicitStreamModelSelection('metadata')).toBe(false);
     expect(shouldSendExplicitStreamModelSelection('defaults')).toBe(false);

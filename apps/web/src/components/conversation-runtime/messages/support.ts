@@ -1572,6 +1572,7 @@ export function parseSessionModeMetadata(metadataJson: string | undefined): {
   webSearchEnabled: boolean;
   thinkingEnabled: boolean;
   reasoningEffort: ReasoningEffort;
+  modelSelectionSource?: 'metadata' | 'defaults' | 'manual';
   providerId?: string;
   modelId?: string;
 } {
@@ -1593,6 +1594,7 @@ export function parseSessionModeMetadata(metadataJson: string | undefined): {
       webSearchEnabled?: boolean;
       thinkingEnabled?: boolean;
       reasoningEffort?: ReasoningEffort;
+      modelSelectionSource?: 'metadata' | 'defaults' | 'manual';
       providerId?: string;
       modelId?: string;
     };
@@ -1617,6 +1619,12 @@ export function parseSessionModeMetadata(metadataJson: string | undefined): {
         parsed.reasoningEffort === 'max'
           ? parsed.reasoningEffort
           : 'medium',
+      modelSelectionSource:
+        parsed.modelSelectionSource === 'metadata' ||
+        parsed.modelSelectionSource === 'defaults' ||
+        parsed.modelSelectionSource === 'manual'
+          ? parsed.modelSelectionSource
+          : undefined,
       providerId: typeof parsed.providerId === 'string' ? parsed.providerId : undefined,
       modelId: typeof parsed.modelId === 'string' ? parsed.modelId : undefined,
     };
