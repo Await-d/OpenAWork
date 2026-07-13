@@ -13,6 +13,7 @@
     "lint:rules": "node scripts/eslint-rules/no-cross-layer-runner-import.test.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "check:fastify-alignment": "node scripts/check-fastify-dependency-alignment.mjs",
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",
     "test:e2e": "pnpm -r run test:e2e",
@@ -43,6 +44,9 @@
   },
   "packageManager": "pnpm@10.25.0",
   "lint-staged": {
+    "{package.json,pnpm-lock.yaml,apps/*/package.json,packages/*/package.json,services/*/package.json}": [
+      "node scripts/check-fastify-dependency-alignment.mjs"
+    ],
     "packages/**/*.{ts,tsx}": [
       "eslint --no-warn-ignored",
       "prettier --check"
