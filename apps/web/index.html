@@ -10,8 +10,17 @@
       (function () {
         try {
           var root = document.documentElement;
-          var validStyles = ['nebula','aurora','linear','forest','sakura','carbon','sunset','ocean'];
-          var validModes = ['system','light','dark'];
+          var validStyles = [
+            'nebula',
+            'aurora',
+            'linear',
+            'forest',
+            'sakura',
+            'carbon',
+            'sunset',
+            'ocean',
+          ];
+          var validModes = ['system', 'light', 'dark'];
 
           // 辅助：从 Zustand persist key 读取
           function readFromPersist() {
@@ -21,7 +30,9 @@
               var parsed = JSON.parse(raw);
               if (!parsed || typeof parsed !== 'object' || !parsed.state) return null;
               return parsed.state;
-            } catch (e) { return null; }
+            } catch (e) {
+              return null;
+            }
           }
 
           // 1. 优先从独立 key 读取
@@ -51,13 +62,21 @@
 
           var resolvedMode = themeMode;
           if (themeMode === 'system') {
-            resolvedMode = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+            resolvedMode = window.matchMedia('(prefers-color-scheme: light)').matches
+              ? 'light'
+              : 'dark';
           }
 
-          console.log('[theme-init] style:', themeStyle, 'mode:', resolvedMode,
-            '| keys:', 'theme-style=' + localStorage.getItem('theme-style'),
+          console.log(
+            '[theme-init] style:',
+            themeStyle,
+            'mode:',
+            resolvedMode,
+            '| keys:',
+            'theme-style=' + localStorage.getItem('theme-style'),
             'theme-mode=' + localStorage.getItem('theme-mode'),
-            'persist=' + (localStorage.getItem('openAwork-display-preferences') ? 'yes' : 'no'));
+            'persist=' + (localStorage.getItem('openAwork-display-preferences') ? 'yes' : 'no'),
+          );
 
           // 额外诊断：打印所有 localStorage key
           try {
@@ -66,7 +85,7 @@
               allKeys.push(localStorage.key(i));
             }
             console.log('[theme-init] all localStorage keys:', allKeys.join(', '));
-          } catch(e) {
+          } catch (e) {
             console.log('[theme-init] cannot enumerate localStorage:', e);
           }
 
