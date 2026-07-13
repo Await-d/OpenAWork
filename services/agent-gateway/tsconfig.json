@@ -38,5 +38,5 @@
     { "path": "../../packages/skill-types" },
     { "path": "../../packages/telemetry" }
   ],
-  "include": ["src/**/*.ts", "src/**/*.tsx"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts"]
 }
