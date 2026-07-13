@@ -7,15 +7,9 @@ import { useDisplayPreferencesStore } from '../../../stores/settings/display-pre
 import {
   type AssistantTracePayload,
   type ChatMessage,
-  type ChatMessagePart,
   type ChatReasoningPart,
   type ChatToolPart,
-  type ChatUsageDetails,
-  estimateTokenCount,
   extractInputImages,
-  formatDurationLabel,
-  formatShortTime,
-  formatStopReasonLabel,
   parseAssistantEventContent,
   parseAssistantTraceContent,
   parseCopiedToolCardContent,
@@ -27,7 +21,6 @@ import {
 } from '../../../pages/chat-page/conversation/render/task-tool-runtime.js';
 import type { DialogueMode } from '../../../pages/chat-page/mode/dialogue-mode.js';
 import { DIALOGUE_MODE_OPTIONS } from '../../../pages/chat-page/mode/dialogue-mode.js';
-import { resolveAgentAccentColor } from '../misc/agent-color-map.js';
 import {
   AssistantErrorContent,
   looksLikeAssistantErrorContent,
@@ -38,15 +31,8 @@ import {
   AssistantReasoningBlock,
   buildReasoningBlockKey,
 } from '../assistant/assistant-reasoning-block.js';
-import {
-  normalizeProviderKey,
-  ProviderAvatar,
-  resolveProviderIdentity,
-  UserAvatar,
-} from '../model-picker/chat-provider-display.js';
 import { CollapsibleAssistantContent } from '../message/collapsible-assistant-content.js';
 import { ImageLightbox } from '../image/image-lightbox.js';
-import { MessageHoverActions } from '../message/message-hover-actions.js';
 import { ModifiedFilesSummaryCard } from '../misc/modified-files-summary-card.js';
 import StreamingMarkdownContent from '../markdown/streaming-markdown-content.js';
 import { TaskToolInline } from '../tool-call/display/task-tool-inline.js';
@@ -60,6 +46,7 @@ import {
   tryParseIncidentJson,
   IncidentReadableCard,
 } from '../../../pages/team/conversation/extras/incident-readable-card.js';
+export { MessageRow } from './message-row.js';
 
 export const sharedUiThemeVars = {
   '--color-bg': 'var(--bg-base)',
@@ -82,365 +69,6 @@ export { ModelPicker, ModelSettingsPopover } from '../model-picker/model-picker-
 
 const MarkdownMessageContent = React.lazy(() => import('../markdown/markdown-message-content.js'));
 
-export function MessageRow({
-  message,
-  providerId,
-  providerName,
-  providerType,
-  modelId,
-  email,
-  actions,
-  groupedWithPrevious = false,
-  identityOverride,
-  presentationMode = 'chat',
-  renderContent,
-  sharedUiThemeVars,
-  usageDetails,
-}: {
-  message: ChatMessage;
-  providerId: string;
-  providerName?: string;
-  providerType?: string;
-  modelId: string;
-  email: string;
-  actions?: Array<{
-    id: string;
-    label: string;
-    onClick: () => void;
-    title?: string;
-  }>;
-  groupedWithPrevious?: boolean;
-  identityOverride?: {
-    color?: string;
-    displayName: string;
-    icon?: string;
-    initials?: string;
-  };
-  presentationMode?: 'chat' | 'team';
-  renderContent: (m: ChatMessage) => React.ReactNode;
-  sharedUiThemeVars: React.CSSProperties;
-  usageDetails?: ChatUsageDetails;
-}) {
-  const isUser = message.role === 'user';
-  const showMessageTimestamps = useDisplayPreferencesStore((s) => s.showMessageTimestamps);
-  const showModelNamePref = useDisplayPreferencesStore((s) => s.showModelName);
-  const showProviderLabelPref = useDisplayPreferencesStore((s) => s.showProviderLabel);
-  const showDurationPref = useDisplayPreferencesStore((s) => s.showDuration);
-  const showStopReasonPref = useDisplayPreferencesStore((s) => s.showStopReason);
-  const showTokenBreakdownPref = useDisplayPreferencesStore((s) => s.showTokenBreakdown);
-  const showEstimatedTokensPref = useDisplayPreferencesStore((s) => s.showEstimatedTokens);
-  const resolvedProviderId = message.providerId?.trim() || providerId.trim();
-  const resolvedProviderIdentity = resolveProviderIdentity({
-    providerId: resolvedProviderId,
-    providerName,
-    providerType,
-  });
-  const resolvedModelLabel = message.model?.trim() || modelId.trim();
-  const assistantModelLabel =
-    resolvedModelLabel || (!isUser ? resolvedProviderIdentity.displayName : '助手');
-  const normalizedAssistantLabel = normalizeProviderKey(assistantModelLabel);
-  const normalizedResolvedProvider = normalizeProviderKey(resolvedProviderIdentity.displayName);
-  const overrideDisplayName = identityOverride?.displayName?.trim();
-  const displayName = isUser
-    ? overrideDisplayName || email || '你'
-    : overrideDisplayName || (showModelNamePref ? assistantModelLabel : '助手');
-  const timestamp = formatShortTime(message.createdAt);
-  const tokenCount = message.tokenEstimate ?? estimateTokenCount(message.content);
-  // During streaming, `message.durationMs` on the live virtual assistant
-  // message is not yet set (it's only attached when the round finalizes via
-  // `closeCurrentStreamingRoundIntoMessage` / on stream done). However the
-  // render layer already computes a live `usageDetails.durationMs`
-  // (`activeDurationMs = Date.now() - visibleStreamStartedAt`). Prefer that
-  // so the assistant footer shows a real "耗时 5.2s" instead of "耗时 --"
-  // while the model is still streaming. For finalized assistant messages
-  // both values agree because `assistantUsageDetails` mirrors
-  // `message.durationMs`, so this also keeps historical rows unchanged.
-  const effectiveDurationMs = !isUser
-    ? (usageDetails?.durationMs ?? message.durationMs)
-    : undefined;
-  const durationLabel = !isUser ? formatDurationLabel(effectiveDurationMs) : null;
-  const stopReasonLabel = !isUser ? formatStopReasonLabel(message.stopReason) : null;
-  const providerLabel =
-    !isUser && resolvedProviderId && normalizedAssistantLabel !== normalizedResolvedProvider
-      ? resolvedProviderIdentity.displayName
-      : null;
-  const toolLabel = !isUser && message.toolCallCount ? `${message.toolCallCount} 工具` : null;
-  const statusLabel =
-    message.status === 'streaming' ? '生成中' : message.status === 'error' ? '错误' : null;
-  const showMeta =
-    !isUser &&
-    (presentationMode === 'team'
-      ? Boolean(
-          toolLabel ||
-          statusLabel ||
-          (showStopReasonPref && stopReasonLabel) ||
-          message.modifiedFilesSummary,
-        )
-      : (showEstimatedTokensPref && tokenCount > 0) ||
-        (showDurationPref && durationLabel) ||
-        toolLabel ||
-        (showStopReasonPref && stopReasonLabel) ||
-        (showTokenBreakdownPref && usageDetails) ||
-        statusLabel);
-  const avatarProviderId = resolvedProviderId || 'assistant';
-  const agentAccent = !isUser
-    ? identityOverride?.color || resolveAgentAccentColor(message.agentId)
-    : undefined;
-  const agentPillStyle: React.CSSProperties | undefined = agentAccent
-    ? {
-        borderColor: `color-mix(in oklch, ${agentAccent} 30%, var(--border-subtle) 70%)`,
-        background: `linear-gradient(135deg, color-mix(in oklch, ${agentAccent} 12%, var(--bg-overlay) 88%), var(--bg-overlay))`,
-        color: `color-mix(in oklch, ${agentAccent} 75%, var(--fg-default) 25%)`,
-      }
-    : undefined;
-  const metaItems: Array<{
-    label: string;
-    tone?: 'default' | 'accent' | 'danger';
-  }> = [];
-
-  if (!isUser) {
-    if (presentationMode !== 'team' && usageDetails) {
-      metaItems.push({ label: `请求 ${usageDetails.requestIndex}` });
-      if (showTokenBreakdownPref) {
-        metaItems.push({
-          label: `${formatCompactTokenCount(usageDetails.totalTokens)} tokens (${formatCompactTokenCount(usageDetails.inputTokens)}↓ ${formatCompactTokenCount(usageDetails.outputTokens)}↑)`,
-        });
-      }
-      if (usageDetails.estimatedCostUsd !== undefined) {
-        metaItems.push({ label: formatUsdCost(usageDetails.estimatedCostUsd) });
-      }
-      if (showDurationPref) {
-        metaItems.push({ label: durationLabel ?? '耗时 --' });
-      }
-      metaItems.push({
-        label:
-          usageDetails.firstTokenLatencyMs && usageDetails.firstTokenLatencyMs > 0
-            ? `首 token ${formatDurationLabel(usageDetails.firstTokenLatencyMs)}`
-            : '首 token --',
-      });
-      metaItems.push({
-        label:
-          usageDetails.tokensPerSecond && Number.isFinite(usageDetails.tokensPerSecond)
-            ? `TPS ${usageDetails.tokensPerSecond.toFixed(1)}`
-            : 'TPS --',
-      });
-    } else if (presentationMode !== 'team' && tokenCount > 0) {
-      if (showEstimatedTokensPref) {
-        metaItems.push({ label: `~${tokenCount} tok` });
-      }
-      if (showDurationPref && durationLabel) metaItems.push({ label: durationLabel });
-    } else if (presentationMode !== 'team' && showDurationPref && durationLabel) {
-      metaItems.push({ label: durationLabel });
-    }
-
-    if (toolLabel) metaItems.push({ label: toolLabel });
-    if (message.modifiedFilesSummary && message.modifiedFilesSummary.files.length > 0) {
-      metaItems.push({
-        label: `修改 ${message.modifiedFilesSummary.files.length} 文件`,
-      });
-    }
-    if (showStopReasonPref && stopReasonLabel) {
-      metaItems.push({
-        label: stopReasonLabel,
-        tone: message.status === 'error' ? 'danger' : 'accent',
-      });
-    }
-    if (statusLabel) {
-      metaItems.push({
-        label: statusLabel,
-        tone: message.status === 'error' ? 'danger' : 'accent',
-      });
-    }
-  }
-
-  return (
-    <article
-      className={`chat-message-row${groupedWithPrevious ? ' is-grouped' : ''}${agentAccent ? ' has-agent-accent' : ''}`}
-      data-role={message.role}
-      data-message-id={message.id}
-      data-grouped={groupedWithPrevious ? 'true' : 'false'}
-      data-status={message.status ?? 'completed'}
-      data-agent-id={message.agentId || undefined}
-      style={agentAccent ? ({ '--agent-accent': agentAccent } as React.CSSProperties) : undefined}
-    >
-      <div
-        className="chat-message-avatar-frame"
-        data-role={message.role}
-        data-grouped={groupedWithPrevious ? 'true' : 'false'}
-      >
-        {isUser && identityOverride ? (
-          <div
-            aria-hidden
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: '50%',
-              display: 'grid',
-              placeItems: 'center',
-              fontSize: 13,
-              fontWeight: 700,
-              color: identityOverride.color ?? 'var(--fg-strong)',
-              background: `color-mix(in srgb, ${identityOverride.color ?? 'var(--accent)'} 12%, var(--bg-overlay))`,
-              border: `1px solid color-mix(in srgb, ${identityOverride.color ?? 'var(--accent)'} 28%, transparent)`,
-            }}
-            title={identityOverride.displayName}
-          >
-            {identityOverride.icon ??
-              identityOverride.initials ??
-              identityOverride.displayName.slice(0, 1)}
-          </div>
-        ) : isUser ? (
-          <UserAvatar email={email} size={28} />
-        ) : identityOverride ? (
-          <div
-            aria-hidden
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: '50%',
-              display: 'grid',
-              placeItems: 'center',
-              fontSize: 13,
-              fontWeight: 700,
-              color: identityOverride.color ?? 'var(--fg-strong)',
-              background: `color-mix(in srgb, ${identityOverride.color ?? 'var(--accent)'} 12%, var(--bg-overlay))`,
-              border: `1px solid color-mix(in srgb, ${identityOverride.color ?? 'var(--accent)'} 28%, transparent)`,
-            }}
-            title={identityOverride.displayName}
-          >
-            {identityOverride.icon ??
-              identityOverride.initials ??
-              identityOverride.displayName.slice(0, 1)}
-          </div>
-        ) : (
-          <ProviderAvatar
-            providerId={avatarProviderId}
-            providerName={providerName}
-            providerType={providerType}
-            size={28}
-          />
-        )}
-      </div>
-      <div className="chat-message-main">
-        {!groupedWithPrevious && (
-          <div className="chat-message-header">
-            <div className="chat-message-title-group">
-              <div
-                className="chat-message-display-name"
-                style={agentAccent ? { color: agentAccent } : undefined}
-              >
-                {displayName}
-              </div>
-              {presentationMode !== 'team' && showProviderLabelPref && providerLabel && (
-                <span className="chat-message-provider-pill" style={agentPillStyle}>
-                  {providerLabel}
-                </span>
-              )}
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              {actions && actions.length > 0 && (
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    flexWrap: 'wrap',
-                  }}
-                >
-                  {actions.map((action) => (
-                    <button
-                      key={action.id}
-                      type="button"
-                      className="chat-message-action-button"
-                      data-testid={`chat-message-action-${action.id}-${message.id}`}
-                      onClick={action.onClick}
-                      title={action.title}
-                      style={{
-                        height: 22,
-                        padding: '0 8px',
-                        borderRadius: 999,
-                        border: '1px solid var(--border-subtle)',
-                        background: 'var(--bg-overlay)',
-                        color: 'var(--fg-default)',
-                        fontSize: 10,
-                        fontWeight: 500,
-                        cursor: 'pointer',
-                        transition: 'background 120ms ease, border-color 120ms ease',
-                      }}
-                    >
-                      {action.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {showMessageTimestamps && timestamp && (
-                <div className="chat-message-timestamp">{timestamp}</div>
-              )}
-            </div>
-          </div>
-        )}
-        <div
-          className="chat-message-content-shell"
-          data-role={message.role}
-          data-status={message.status ?? 'completed'}
-        >
-          <MessageHoverActions getCopyText={() => message.content} />
-          <div className="chat-message-content" data-role={message.role} style={sharedUiThemeVars}>
-            {renderContent(message)}
-          </div>
-        </div>
-        {showMeta && <MetaLine items={metaItems} />}
-      </div>
-    </article>
-  );
-}
-
-function formatCompactTokenCount(value: number): string {
-  if (value >= 1_000_000) {
-    return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 1 : 2)}M`;
-  }
-  if (value >= 1_000) {
-    return `${(value / 1_000).toFixed(value >= 100_000 ? 0 : 1)}k`;
-  }
-  return String(Math.round(value));
-}
-
-function formatUsdCost(value: number): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: value >= 1 ? 2 : 3,
-    maximumFractionDigits: value >= 1 ? 2 : 4,
-  }).format(value);
-}
-
-function MetaLine({
-  items,
-}: {
-  items: Array<{ label: string; tone?: 'default' | 'accent' | 'danger' }>;
-}) {
-  let offset = 0;
-
-  return (
-    <div className="chat-message-meta-row" data-message-meta-row="true">
-      {items.map((item) => {
-        const fragmentKey = `${item.tone ?? 'default'}-${offset}-${item.label}`;
-        const shouldPrefixSeparator = offset > 0;
-        offset += item.label.length + 1;
-
-        return (
-          <React.Fragment key={fragmentKey}>
-            {shouldPrefixSeparator && <span className="chat-message-meta-separator">·</span>}
-            <span className={`chat-message-meta-item${item.tone ? ` is-${item.tone}` : ''}`}>
-              {item.label}
-            </span>
-          </React.Fragment>
-        );
-      })}
-    </div>
-  );
-}
-
 export function renderChatMessageContent(m: ChatMessage) {
   if (m.role !== 'assistant') return m.content;
   return renderAssistantMessageContentValue(m.content, { messageId: m.id });
@@ -453,6 +81,7 @@ export function renderStreamingChatMessageContent(content: string) {
 export interface ChatToolRenderOptions {
   messageId?: string;
   onOpenChildSession?: (sessionId: string) => void;
+  presentationMode?: 'chat' | 'team';
   resolveInlinePermissionActions?: (requestId: string) =>
     | {
         errorMessage?: string;
@@ -800,6 +429,7 @@ function renderAssistantMessageContentValue(
       <AssistantTraceContent
         messageId={options?.messageId}
         payload={assistantTrace}
+        presentationMode={options?.presentationMode}
         reasoningBlocksEndedFlags={reasoningBlocksEndedFlags}
         reasoningBlocksDurationsMs={reasoningBlocksDurationsMs}
         resolveInlinePermissionActions={options?.resolveInlinePermissionActions}
@@ -927,14 +557,25 @@ function AssistantPartsContent({
   );
 
   let reasoningCursor = 0;
-  let toolCursor = 0;
 
   return (
     <div className="assistant-rich-content" style={{ minWidth: 0, gap: 4 }}>
       {parts.map((part) => {
         if (part.type === 'reasoning') {
-          if (!showReasoningBlock) return null;
           const myIndex = reasoningCursor++;
+          if (!showReasoningBlock) {
+            if (options?.presentationMode === 'team') {
+              return null;
+            }
+            return (
+              <HiddenReasoningNotice
+                key={part.id}
+                index={myIndex}
+                streaming={streaming}
+                total={totalReasoning}
+              />
+            );
+          }
           // Default to "ended" when no streaming flag list is supplied
           // (i.e. message is finalized / loaded from history). While
           // streaming, prefer the per-block flag, then fall back to
@@ -985,7 +626,6 @@ function AssistantPartsContent({
           );
         }
         if (part.type === 'tool') {
-          const myIndex = toolCursor++;
           return renderToolCallContent({
             reactKey: part.id,
             kind: part.kind,
@@ -1006,7 +646,6 @@ function AssistantPartsContent({
             status: part.status,
             taskRuntimeLookup: options?.taskRuntimeLookup,
           });
-          // Note: myIndex used only as a stable counter; reactKey prefers part.id
         }
         if (part.type === 'event') {
           return <AssistantEventRow key={part.id} payload={part.payload} />;
@@ -1024,6 +663,7 @@ function AssistantTraceContent({
   messageId,
   onOpenChildSession,
   payload,
+  presentationMode = 'chat',
   reasoningBlocksEndedFlags,
   reasoningBlocksDurationsMs,
   resolveInlinePermissionActions,
@@ -1034,6 +674,7 @@ function AssistantTraceContent({
   messageId?: string;
   onOpenChildSession?: (sessionId: string) => void;
   payload: AssistantTracePayload;
+  presentationMode?: 'chat' | 'team';
   reasoningBlocksEndedFlags?: boolean[];
   reasoningBlocksDurationsMs?: number[];
   resolveInlinePermissionActions?: ChatToolRenderOptions['resolveInlinePermissionActions'];
@@ -1053,7 +694,23 @@ function AssistantTraceContent({
   return (
     <div className="assistant-rich-content" style={{ minWidth: 0, gap: 4 }}>
       {(payload.reasoningBlocks ?? []).map((reasoning, index) => {
-        if (!showReasoningBlockStreaming) return null;
+        if (!showReasoningBlockStreaming) {
+          if (presentationMode === 'team') {
+            return null;
+          }
+          return (
+            <HiddenReasoningNotice
+              key={
+                streaming
+                  ? `streaming-hidden-reasoning-${index}`
+                  : buildReasoningBlockKey(reasoning, index)
+              }
+              index={index}
+              streaming={streaming}
+              total={payload.reasoningBlocks?.length ?? 0}
+            />
+          );
+        }
         // Default: when no explicit ended-flag list is supplied (i.e. the
         // message is finalized / loaded from history), treat every reasoning
         // block as ended. While streaming, use the per-block flag from the
@@ -1147,6 +804,40 @@ function AssistantTraceContent({
       {payload.modifiedFilesSummary && (
         <ModifiedFilesSummaryCard summary={payload.modifiedFilesSummary} />
       )}
+    </div>
+  );
+}
+
+function HiddenReasoningNotice({
+  index,
+  streaming,
+  total,
+}: {
+  index: number;
+  streaming: boolean;
+  total: number;
+}) {
+  const label = total > 1 ? `思考过程 ${index + 1}` : '思考过程';
+
+  return (
+    <div
+      aria-label={`${label}已简化展示`}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 8,
+        maxWidth: '100%',
+        padding: '6px 10px',
+        borderRadius: 8,
+        border: '1px solid var(--border-subtle)',
+        background: 'color-mix(in oklch, var(--bg-overlay) 90%, var(--accent) 10%)',
+        color: 'var(--fg-muted)',
+        fontSize: 11,
+        lineHeight: 1.5,
+      }}
+    >
+      <span style={{ fontWeight: 600, color: 'var(--fg-default)' }}>{label}</span>
+      <span>{streaming ? '简化展示中' : '已简化展示'}</span>
     </div>
   );
 }

@@ -16,7 +16,7 @@ import { ChatComposerPasteCollapse } from './ChatComposerPasteCollapse.js';
 import { ChatComposerImagePanel } from './ChatComposerFeatureToggles.js';
 import { ChatComposerQueue } from './ChatComposerQueue.js';
 import { ChatComposerToolbar } from './ChatComposerToolbar.js';
-import { ComposerStatsBar } from './ComposerStatsBar.js';
+import { CompactComposerStatsSummary, ComposerStatsBar } from './ComposerStatsBar.js';
 import type { ComposerStatsData } from './ComposerStatsBar.js';
 import { getComposerCharacterCount } from './composer-character-count.js';
 import { useComposerPlaceholder } from './use-composer-placeholder.js';
@@ -374,11 +374,6 @@ export function ChatComposer({
     Boolean(onQueueMessage) &&
     (showStopAction || hasRemoteSessionBusyState) &&
     canSubmit;
-  const primaryButtonDisabled = showStopAction
-    ? stoppingStream
-    : hasRemoteSessionBusyState
-      ? true
-      : imageGenerationBusy || !canSubmit;
 
   return (
     <div
@@ -888,9 +883,12 @@ export function ChatComposer({
             </button>
           </div>
         )}
-        {showComposerStatsBar && statsData && (
-          <ComposerStatsBar data={statsData} variant={variant} />
-        )}
+        {statsData &&
+          (showComposerStatsBar ? (
+            <ComposerStatsBar data={statsData} variant={variant} />
+          ) : (
+            <CompactComposerStatsSummary data={statsData} variant={variant} />
+          ))}
       </div>
     </div>
   );

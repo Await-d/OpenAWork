@@ -338,7 +338,10 @@ function buildMergedEntries(
     return {
       message,
       renderContent: (m: ChatMessage) =>
-        renderChatMessageContentWithOptions(m, { resolveInlinePermissionActions }),
+        renderChatMessageContentWithOptions(m, {
+          presentationMode: 'team',
+          resolveInlinePermissionActions,
+        }),
       ...(identity ?? {}),
       actions: [] as ChatRenderAction[],
     };
@@ -363,7 +366,10 @@ function buildSingleLayerEntries(
     return {
       message,
       renderContent: (m: ChatMessage) =>
-        renderChatMessageContentWithOptions(m, { resolveInlinePermissionActions }),
+        renderChatMessageContentWithOptions(m, {
+          presentationMode: 'team',
+          resolveInlinePermissionActions,
+        }),
       ...(identity ?? {}),
       actions: [] as ChatRenderAction[],
     };

@@ -301,6 +301,112 @@ export interface ComposerStatsBarProps {
   variant?: 'home' | 'session';
 }
 
+export const CompactComposerStatsSummary: React.FC<ComposerStatsBarProps> = React.memo(
+  function CompactComposerStatsSummary({ data }) {
+    const contextPct = useMemo(() => {
+      if (!data || data.contextMaxTokens <= 0) return null;
+      return Math.min(100, Math.round((data.contextUsedTokens / data.contextMaxTokens) * 100));
+    }, [data]);
+
+    const contextColor = useMemo(() => {
+      if (contextPct == null) return 'var(--fg-muted)';
+      if (contextPct >= 90) return 'var(--danger)';
+      if (contextPct >= 70) return 'var(--warning)';
+      return 'var(--accent)';
+    }, [contextPct]);
+
+    if (!data || (data.messageTurns === 0 && !data.streaming)) return null;
+
+    const summaryItems: Array<{
+      readonly label: string;
+      readonly value: string;
+      readonly valueColor: string;
+    }> = [];
+
+    if (contextPct != null) {
+      summaryItems.push({
+        label: '上下文',
+        value: `${contextPct}%`,
+        valueColor: contextColor,
+      });
+    }
+
+    if (data.currentRoundDurationMs != null && data.currentRoundDurationMs > 0) {
+      summaryItems.push({
+        label: data.streaming ? '本轮' : '耗时',
+        value: formatDuration(data.currentRoundDurationMs),
+        valueColor: data.streaming ? COLOR_OUTPUT : COLOR_DURATION,
+      });
+    } else if (data.totalDurationMs > 0) {
+      summaryItems.push({
+        label: '总耗时',
+        value: formatDurationLong(data.totalDurationMs),
+        valueColor: COLOR_DURATION,
+      });
+    }
+
+    if (data.currentRoundCostUsd > 0) {
+      summaryItems.push({
+        label: '本轮',
+        value: formatCost(data.currentRoundCostUsd),
+        valueColor: COLOR_COST,
+      });
+    } else if (data.totalCostUsd > 0) {
+      summaryItems.push({
+        label: '总消费',
+        value: formatCost(data.totalCostUsd),
+        valueColor: COLOR_COST,
+      });
+    }
+
+    if (summaryItems.length === 0) {
+      summaryItems.push({
+        label: '轮数',
+        value: String(data.messageTurns),
+        valueColor: COLOR_COUNT,
+      });
+    }
+
+    return (
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          flexWrap: 'wrap',
+          padding: '2px 4px 0',
+        }}
+      >
+        {summaryItems.map((item) => (
+          <span
+            key={`${item.label}-${item.value}`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '2px 8px',
+              borderRadius: 999,
+              border: '1px solid var(--border-subtle)',
+              background: 'var(--bg-overlay)',
+              color: 'var(--fg-muted)',
+              fontSize: 10,
+              lineHeight: 1.4,
+            }}
+          >
+            <span>{item.label}</span>
+            <span style={{ color: item.valueColor, fontWeight: 600 }}>{item.value}</span>
+          </span>
+        ))}
+        {data.contextIsEstimated && (
+          <span style={{ fontSize: 9, color: 'var(--fg-subtle)', fontStyle: 'italic' }}>
+            * 估算
+          </span>
+        )}
+      </div>
+    );
+  },
+);
+
 export const ComposerStatsBar: React.FC<ComposerStatsBarProps> = React.memo(
   function ComposerStatsBar({ data }) {
     const contextPct = useMemo(() => {

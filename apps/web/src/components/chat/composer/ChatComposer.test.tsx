@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ChatComposer } from './ChatComposer.js';
 import { getComposerCharacterCount } from './composer-character-count.js';
+import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
 
 function makeComposerProps(
   overrides: Partial<React.ComponentProps<typeof ChatComposer>> = {},
@@ -73,6 +74,7 @@ function makeComposerProps(
 
 afterEach(() => {
   cleanup();
+  useDisplayPreferencesStore.setState({ showComposerStatsBar: true });
   vi.restoreAllMocks();
 });
 
@@ -300,5 +302,43 @@ describe('ChatComposer', () => {
     expect(screen.queryByTitle('开启联网搜索')).toBeNull();
     expect(screen.queryByTitle('语音输入')).toBeNull();
     expect(screen.queryByTitle('请先在设置中配置图片模型')).toBeNull();
+  });
+
+  it('关闭统计栏后退化为紧凑摘要而不是完全不展示', () => {
+    useDisplayPreferencesStore.setState({ showComposerStatsBar: false });
+
+    render(
+      <ChatComposer
+        {...makeComposerProps({
+          input: '继续处理这个需求',
+          statsData: {
+            totalCostUsd: 1.25,
+            currentRoundCostUsd: 0.25,
+            totalInputTokens: 1200,
+            totalOutputTokens: 800,
+            contextUsedTokens: 500,
+            contextMaxTokens: 2000,
+            contextIsEstimated: false,
+            messageTurns: 2,
+            hiddenMessageCount: 0,
+            serverTotalTurnCount: null,
+            childSessionCount: 0,
+            sessionTaskCount: 0,
+            currentRoundDurationMs: 1500,
+            totalDurationMs: 3200,
+            streaming: false,
+          },
+        })}
+      />,
+    );
+
+    expect(screen.getByText('上下文')).not.toBeNull();
+    expect(screen.getByText('25%')).not.toBeNull();
+    expect(screen.getByText('耗时')).not.toBeNull();
+    expect(screen.getByText('1.5s')).not.toBeNull();
+    expect(screen.getByText('$0.250')).not.toBeNull();
+    expect(screen.queryByText(/^Token$/)).toBeNull();
+    expect(screen.queryByText(/^输入$/)).toBeNull();
+    expect(screen.queryByText(/^输出$/)).toBeNull();
   });
 });

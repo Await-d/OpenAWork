@@ -40,9 +40,11 @@ export function buildTeamGroupedMessageEntries(input: {
       renderContent: (m) =>
         m.role === 'assistant'
           ? renderChatMessageContentWithOptions(m, {
+              presentationMode: 'team',
               resolveInlinePermissionActions: input.resolveInlinePermissionActions,
             })
           : renderChatMessageContentWithOptions(m, {
+              presentationMode: 'team',
               resolveInlinePermissionActions: input.resolveInlinePermissionActions,
             }),
       ...(message.role === 'assistant'
@@ -78,6 +80,7 @@ export function buildTeamGroupedMessageEntries(input: {
       message: streamingMessage,
       renderContent: (m) =>
         renderStreamingChatMessageContentWithOptions(m, {
+          presentationMode: 'team',
           resolveInlinePermissionActions: input.resolveInlinePermissionActions,
         }),
       groupIdentityKey:
