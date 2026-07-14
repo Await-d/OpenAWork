@@ -291,6 +291,9 @@ Docker：`docker-compose up` 启动网关 + Web + Redis，并把 Gateway durable
 
 - `apps/desktop` 使用 `useHasHydrated()` 模式（Zustand persist 水合守卫）——`apps/web` 中也有相同模式，两者均为有意保留，并非重复。
 - 移动端使用手动屏幕状态机（非 React Navigation 栈）——`apps/mobile/src/navigation/AppNavigator.tsx`
+- 若 `agent-gateway` 或 Fastify 插件类型突然出现 `app.jwt`、`request.user`、`request.jwtVerify`、`injectWS`、`websocket`、`hide` 等属性缺失，优先排查 **Fastify 依赖是否分叉**，先运行 `pnpm check:fastify-alignment`；这类问题常由 `pnpm-lock.yaml` 中同时解析出多份 `fastify` / `fastify-plugin` 版本引起，表现会像“类型增强失效”而非业务代码直接报错。
+- `pnpm check:fastify-alignment` 已接入根 `package.json` 的 `lint-staged`，凡是改动 `package.json` / `pnpm-lock.yaml` / workspace 子包清单后，提交前都应以它为首要排查入口；如果它失败，先修依赖对齐，再看后续 lint / typecheck。
+- `.husky/` 当前被 `.gitignore` 忽略，仓库里的 Husky hook 属于**本地机器状态**，不会随 Git 提交共享；因此排查“本地能拦、远端没拦”或“我改了 pre-push 但别人没生效”时，应先确认规则是否真正落在受版本控制的 `package.json`、`scripts/` 或 `.github/workflows/` 中。
 - `packages/agent-core/src/catwalk/` — 模型评测/对比模块
 - `packages/agent-core/src/crush-ignore/` — 文件排除规则（Agent 上下文的 .gitignore）
 - `.agentdocs/` — AI 工作流规划文档，非运行时代码
