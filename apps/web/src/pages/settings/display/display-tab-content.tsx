@@ -298,7 +298,7 @@ export function DisplayTabContent() {
   const reasoningToolRows: SettingRowProps[] = [
     {
       title: '显示推理过程',
-      description: '显示 AI 的思考过程（Thinking）区块，关闭则完全隐藏',
+      description: '显示 AI 的思考过程；关闭后聊天页退化为简化提示，团队页保持精简展示',
       checked: store.showReasoningBlock,
       onChange: store.setShowReasoningBlock,
     },
@@ -310,7 +310,7 @@ export function DisplayTabContent() {
     },
     {
       title: '工具调用默认展开',
-      description: '工具调用结果默认以展开形式展示（否则仅在输出超长时折叠）',
+      description: '块状、分组、批量和内联工具卡默认展开；关闭后优先显示摘要，按需再展开',
       checked: store.toolCallsExpandedByDefault,
       onChange: store.setToolCallsExpandedByDefault,
     },
@@ -319,7 +319,7 @@ export function DisplayTabContent() {
   const composerRows: SettingRowProps[] = [
     {
       title: '输入框统计栏',
-      description: '在输入框下方显示费用、Token 明细、上下文使用率等统计信息',
+      description: '显示完整统计栏；关闭后保留上下文、耗时、费用等紧凑摘要',
       checked: store.showComposerStatsBar,
       onChange: store.setShowComposerStatsBar,
     },

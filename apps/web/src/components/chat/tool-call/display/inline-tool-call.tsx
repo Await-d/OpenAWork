@@ -1,5 +1,6 @@
 import { resolveToolVisualStatus, type ToolCallCardProps } from '@openAwork/shared-ui';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useDisplayPreferencesStore } from '../../../../stores/settings/display-preferences.js';
 import { ToolIcon } from './tool-icon';
 import { colorizeSummary, getToolCategory } from '../shared/colorize-summary.js';
 import { extractErrorSummary } from '../shared/extract-error-summary.js';
@@ -156,21 +157,18 @@ export function InlineToolCall({
   const hasInput = Object.keys(input).length > 0;
   const hasOutput = output !== undefined;
   const canExpand = !isLsp && (hasInput || hasOutput);
-  // Default expanded so users see the parameters/output of every tool
-  // call without an extra click. They can still toggle via the chevron.
-  //
-  // Important: we use `true` (not `canExpand`) here because streaming
-  // tool calls render *before* their args arrive — on the first tick
-  // `input` is `{}` and `output` is undefined, so `canExpand` evaluates
-  // to `false` and `useState` locks the initial value in. By the time
-  // input.todos / output stream in, `canExpand` flips to `true` but the
-  // `expanded` state is still `false` — the bug the user flagged where
-  // todowrite cards always rendered collapsed. LSP tools (canExpand
-  // never true) still hide the panel via the `expanded && canExpand`
-  // render guard below, and the chevron + click handler only attach
-  // when canExpand is true, so the harmless `true` default for the
-  // LSP path has no visual effect.
-  const [expanded, setExpanded] = useState(true);
+  const toolCallsExpandedByDefault = useDisplayPreferencesStore(
+    (s) => s.toolCallsExpandedByDefault,
+  );
+  const shouldAutoExpand =
+    toolCallsExpandedByDefault || visualState === 'running' || visualState === 'failed';
+  const [expanded, setExpanded] = useState(shouldAutoExpand);
+
+  useEffect(() => {
+    if (canExpand && shouldAutoExpand) {
+      setExpanded(true);
+    }
+  }, [canExpand, shouldAutoExpand]);
 
   // Surface a short red error line in the header on failure so users
   // see *what went wrong* without expanding. The full payload (stack

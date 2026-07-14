@@ -1,5 +1,6 @@
 import { resolveToolVisualStatus, type ToolCallCardProps } from '@openAwork/shared-ui';
 import { useEffect, useMemo, useState } from 'react';
+import { useDisplayPreferencesStore } from '../../../../stores/settings/display-preferences.js';
 import { ToolIcon } from '../display/tool-icon';
 import { formatElapsed } from '../shared/format.js';
 import { extractFilePath } from '../shared/input-paths.js';
@@ -150,8 +151,13 @@ function BatchSubCallRow({
   parentTerminalState?: 'completed' | 'failed';
   renderToolCallDisplay: RenderToolCallDisplay;
 }) {
-  const [open, setOpen] = useState(false);
+  const toolCallsExpandedByDefault = useDisplayPreferencesStore(
+    (s) => s.toolCallsExpandedByDefault,
+  );
   const visualState = batchSubVisualState(result, parentTerminalState);
+  const shouldAutoExpand =
+    toolCallsExpandedByDefault || visualState === 'running' || visualState === 'failed';
+  const [open, setOpen] = useState(shouldAutoExpand);
   const summary = useMemo(() => batchSubInputSummary(tool, input), [tool, input]);
   const childStatus: ToolCallCardProps['status'] =
     visualState === 'running' ? 'running' : 'completed';
@@ -175,21 +181,11 @@ function BatchSubCallRow({
     return output;
   }, [output, visualState, tool, result?.partialOutput, input]);
 
-  // Auto-expand a sub-call once it starts streaming partial output, so the
-  // user immediately sees the live terminal without having to click. We
-  // only flip from closed → open (never re-collapse) so manual collapses
-  // by the user are honored.
   useEffect(() => {
-    if (
-      !open &&
-      visualState === 'running' &&
-      tool.trim().toLowerCase() === 'bash' &&
-      typeof result?.partialOutput === 'string' &&
-      result.partialOutput.length > 0
-    ) {
+    if (shouldAutoExpand) {
       setOpen(true);
     }
-  }, [open, visualState, tool, result?.partialOutput]);
+  }, [shouldAutoExpand]);
 
   return (
     <div className="tool-call-batch-child" data-batch-sub-status={visualState}>

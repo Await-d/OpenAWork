@@ -1,5 +1,6 @@
 import type { AssistantTraceToolCall } from '@openAwork/shared';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useDisplayPreferencesStore } from '../../../../stores/settings/display-preferences.js';
 import { ToolIcon } from '../display/tool-icon.js';
 import { colorizeSummary, getToolCategory } from '../shared/colorize-summary.js';
 import { extractFilePath, trimPath } from '../shared/input-paths.js';
@@ -62,7 +63,9 @@ export function GroupedToolCallPill({
   toolName: string;
   calls: AssistantTraceToolCall[];
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const toolCallsExpandedByDefault = useDisplayPreferencesStore(
+    (s) => s.toolCallsExpandedByDefault,
+  );
 
   const summary = useMemo(() => {
     const items = calls.map((c) => formatGroupItem(toolName, c.input)).filter((s) => s.length > 0);
@@ -76,9 +79,21 @@ export function GroupedToolCallPill({
     () => calls.filter((c) => c.isError === true || c.status === 'failed').length,
     [calls],
   );
+  const hasActiveCalls = useMemo(
+    () => calls.some((c) => c.status === 'running' || c.status === 'paused'),
+    [calls],
+  );
   // Visual: a single error inside a group surfaces as red dot. The
   // detailed per-call status is still visible after expansion.
   const visualState: 'completed' | 'failed' = errorCount > 0 ? 'failed' : 'completed';
+  const shouldAutoExpand = toolCallsExpandedByDefault || hasActiveCalls || errorCount > 0;
+  const [expanded, setExpanded] = useState(shouldAutoExpand);
+
+  useEffect(() => {
+    if (shouldAutoExpand) {
+      setExpanded(true);
+    }
+  }, [shouldAutoExpand]);
 
   return (
     <div className="tool-call-grouped" data-tool-status={visualState}>
