@@ -1,4 +1,12 @@
-import { Suspense, useState, useEffect, createContext, useContext, useRef } from 'react';
+import {
+  Suspense,
+  useState,
+  useEffect,
+  useLayoutEffect,
+  createContext,
+  useContext,
+  useRef,
+} from 'react';
 import type { ComponentType, LazyExoticComponent, MutableRefObject } from 'react';
 import type { OpenFileOptions } from './hooks/editor/useFileEditor.js';
 
@@ -47,6 +55,7 @@ import {
   startDesktopGateway,
   waitForGatewayHealth,
 } from './utils/gateway/desktop-gateway.js';
+import { migrateDesktopWorkbenchLayout } from './stores/ui/desktop-workbench-layout-migration.js';
 
 type UnlistenFn = () => void;
 
@@ -312,6 +321,13 @@ export default function App() {
   const [showOnboarding, setShowOnboarding] = useState(
     () => localStorage.getItem('onboarded') !== '1',
   );
+
+  useLayoutEffect(() => {
+    migrateDesktopWorkbenchLayout({
+      isDesktopRuntime: desktopRuntime,
+      storage: typeof localStorage === 'undefined' ? undefined : localStorage,
+    });
+  }, [desktopRuntime]);
 
   useCurrentUserProfileBootstrap(authHydrated);
 
