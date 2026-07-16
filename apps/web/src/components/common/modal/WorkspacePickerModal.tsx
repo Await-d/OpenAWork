@@ -1,5 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FolderIcon } from '../../file-editor/preview/FileIcon.js';
+import { isTauriRuntime, pickDesktopFolder } from '../../../utils/gateway/desktop-gateway.js';
+import {
+  findContainingRoot,
+  getParentPath,
+  joinDirectoryPath,
+} from '../../../utils/workspace-path.js';
 
 export interface FileTreeNode {
   path: string;
@@ -19,58 +25,6 @@ export interface WorkspacePickerModalProps {
   validatePath?: (path: string) => Promise<{ valid: boolean; error?: string; path?: string }>;
   loading?: boolean;
   initialPath?: string;
-}
-
-function isPathWithinRoot(path: string, rootPath: string): boolean {
-  if (rootPath === '/') {
-    return path.startsWith('/');
-  }
-
-  return path === rootPath || path.startsWith(`${rootPath}/`);
-}
-
-function findContainingRoot(path: string, roots: string[]): string | null {
-  return roots.find((root) => isPathWithinRoot(path, root)) ?? null;
-}
-
-function getParentPath(path: string): string | null {
-  const normalizedPath = path.trim();
-  if (!normalizedPath || normalizedPath === '/') {
-    return null;
-  }
-
-  const trimmedPath = normalizedPath.endsWith('/')
-    ? normalizedPath.replace(/\/+$/, '') || '/'
-    : normalizedPath;
-
-  if (trimmedPath === '/') {
-    return null;
-  }
-
-  const lastSlashIndex = trimmedPath.lastIndexOf('/');
-  if (lastSlashIndex <= 0) {
-    return '/';
-  }
-
-  return trimmedPath.slice(0, lastSlashIndex);
-}
-
-function joinDirectoryPath(parentPath: string, directoryName: string): string {
-  const trimmedParentPath = parentPath.trim();
-  const trimmedDirectoryName = directoryName.trim();
-  const separator =
-    trimmedParentPath.includes('\\') && !trimmedParentPath.includes('/') ? '\\' : '/';
-
-  if (!trimmedParentPath || trimmedParentPath === separator) {
-    return `${separator}${trimmedDirectoryName}`;
-  }
-
-  const parentWithoutTrailingSeparator = trimmedParentPath.replace(/[\\/]+$/, '');
-  if (!parentWithoutTrailingSeparator) {
-    return `${separator}${trimmedDirectoryName}`;
-  }
-
-  return `${parentWithoutTrailingSeparator}${separator}${trimmedDirectoryName}`;
 }
 
 function validateDirectoryName(name: string): string | null {
@@ -110,12 +64,14 @@ export default function WorkspacePickerModal({
   const [pathInput, setPathInput] = useState('');
   const [confirming, setConfirming] = useState(false);
   const [browsing, setBrowsing] = useState(false);
+  const [nativePicking, setNativePicking] = useState(false);
   const [creatingDirectory, setCreatingDirectory] = useState(false);
   const [showCreateDirectoryForm, setShowCreateDirectoryForm] = useState(false);
   const [newDirectoryName, setNewDirectoryName] = useState('');
   const lastActionRef = useRef<{ kind: 'initialize' } | { kind: 'open'; path: string } | null>(
     null,
   );
+  const supportsNativePicker = isTauriRuntime();
 
   const openDirectory = useCallback(
     async (path: string) => {
@@ -150,10 +106,17 @@ export default function WorkspacePickerModal({
       const resolvedRoots = normalizedRoots.length > 0 ? normalizedRoots : [fallbackRoot];
       const startPath =
         initialPath && findContainingRoot(initialPath, resolvedRoots) ? initialPath : fallbackRoot;
-      const nodes = fetchTree ? await fetchTree(startPath, 1) : [];
       setAvailableRoots(resolvedRoots);
       setCurrentPath(startPath);
       setPathInput(startPath);
+
+      if (supportsNativePicker && !initialPath) {
+        setDirectories([]);
+        lastActionRef.current = { kind: 'initialize' };
+        return;
+      }
+
+      const nodes = fetchTree ? await fetchTree(startPath, 1) : [];
       setDirectories(nodes.filter((node) => node.type === 'directory'));
       lastActionRef.current = { kind: 'initialize' };
     } catch (err) {
@@ -161,7 +124,7 @@ export default function WorkspacePickerModal({
     } finally {
       setBrowsing(false);
     }
-  }, [fetchRootPath, fetchTree, fetchWorkspaceRoots, initialPath]);
+  }, [fetchRootPath, fetchTree, fetchWorkspaceRoots, initialPath, supportsNativePicker]);
 
   const retryLastAction = useCallback(async () => {
     if (lastActionRef.current?.kind === 'open') {
@@ -180,6 +143,7 @@ export default function WorkspacePickerModal({
       setPathInput('');
       setConfirming(false);
       setBrowsing(false);
+      setNativePicking(false);
       setCreatingDirectory(false);
       setShowCreateDirectoryForm(false);
       setNewDirectoryName('');
@@ -210,7 +174,7 @@ export default function WorkspacePickerModal({
     return () => window.removeEventListener('online', handleOnline);
   }, [error, isOpen, retryLastAction]);
 
-  const busy = loading || confirming || browsing || creatingDirectory;
+  const busy = loading || confirming || browsing || nativePicking || creatingDirectory;
 
   const currentRoot = useMemo(() => {
     if (availableRoots.length === 0) {
@@ -236,6 +200,25 @@ export default function WorkspacePickerModal({
     const parentPath = getParentPath(currentPath);
     if (!parentPath) return;
     await openDirectory(parentPath);
+  }
+
+  async function handlePickNativeFolder() {
+    setNativePicking(true);
+    setError(null);
+
+    try {
+      const pickedPath = await pickDesktopFolder();
+      if (!pickedPath) {
+        return;
+      }
+
+      await onSelect(pickedPath);
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '打开系统文件夹选择器失败');
+    } finally {
+      setNativePicking(false);
+    }
   }
 
   async function handleOpenPathInput() {
@@ -441,6 +424,52 @@ export default function WorkspacePickerModal({
           </label>
         )}
 
+        {supportsNativePicker ? (
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+              padding: '14px 16px',
+              borderRadius: 12,
+              border: '1px solid var(--accent-border)',
+              background:
+                'linear-gradient(135deg, var(--accent-subtle), color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-surface)))',
+            }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={{ fontSize: 12, color: 'var(--fg-strong)', fontWeight: 700 }}>
+                系统文件夹选择器
+              </span>
+              <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
+                桌面端会调用 Windows、macOS 或 Linux 的原生文件夹窗口，支持多磁盘、
+                收藏位置和最近目录。
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handlePickNativeFolder()}
+              className="workspace-picker-action"
+              disabled={busy}
+              style={{
+                height: 40,
+                padding: '0 14px',
+                borderRadius: 10,
+                border: '1px solid var(--accent-border)',
+                background: 'var(--accent)',
+                color: 'var(--fg-on-accent)',
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: busy ? 'not-allowed' : 'pointer',
+                opacity: busy ? 0.6 : 1,
+                alignSelf: 'flex-start',
+              }}
+            >
+              {nativePicking ? '打开中…' : '使用系统选择器'}
+            </button>
+          </div>
+        ) : null}
+
         <div
           style={{
             display: 'flex',
@@ -458,6 +487,7 @@ export default function WorkspacePickerModal({
             </span>
             <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
               输入框同步显示当前目录，也可以直接编辑绝对路径后打开。
+              {supportsNativePicker ? ' 桌面端更推荐使用上方系统选择器。' : ''}
             </span>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -475,7 +505,7 @@ export default function WorkspacePickerModal({
                   void handleOpenPathInput();
                 }
               }}
-              placeholder="例如：/home/await/project/OpenAWork"
+              placeholder="例如：/home/await/project/OpenAWork 或 C:\\Users\\Alice\\OpenAWork"
               disabled={busy}
               title={currentPath ?? pathInput}
               style={{

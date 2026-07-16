@@ -60,6 +60,24 @@ function makePermissionRequest(requestId: string): PendingPermissionRequest {
   } satisfies PendingPermissionRequest;
 }
 
+function makeMcpPermissionRequest(
+  requestId: string,
+  overrides?: Partial<PendingPermissionRequest>,
+): PendingPermissionRequest {
+  return {
+    createdAt: new Date(1700000000000).toISOString(),
+    previewAction: '调用 open_websearch/fetch_web {"url":"https://example.com"}',
+    reason: '需要调用 MCP 工具',
+    requestId,
+    riskLevel: 'high',
+    scope: 'open_websearch:fetch_web:fp-open_websearch',
+    sessionId: SESSION_ID,
+    status: 'pending',
+    toolName: 'mcp_call',
+    ...(overrides ?? {}),
+  } satisfies PendingPermissionRequest;
+}
+
 function makeOptions(overrides?: Partial<Parameters<typeof useChatPendingActions>[0]>) {
   return {
     gatewayUrl: GATEWAY,
@@ -351,6 +369,24 @@ describe('useChatPendingActions — handleInlinePermissionDecision', () => {
       alwaysOverride?: string[];
     };
     expect(body.alwaysOverride).toEqual(['npm run *']);
+  });
+
+  it('MCP 请求缺少 always 时，默认仍会提交推导出的同类指令范围', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useChatPendingActions(makeOptions()));
+    const request = makeMcpPermissionRequest('mcp-1', { always: undefined });
+
+    await act(async () => {
+      await result.current.handleInlinePermissionDecision(request, 'session');
+    });
+
+    const firstCall = fetchMock.mock.calls[0] as [RequestInfo | URL, RequestInit] | undefined;
+    const body = JSON.parse(String(firstCall?.[1].body)) as {
+      alwaysOverride?: string[];
+    };
+    expect(body.alwaysOverride).toEqual(['open_websearch:*']);
   });
 
   it('永久允许会使用用户选中的仅本次指令范围提交 alwaysOverride', async () => {

@@ -4,6 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FloatingPermissionPrompt } from './FloatingPermissionPrompt.js';
 
 const mocks = vi.hoisted(() => ({
+  createNotificationsList: vi.fn(),
+  createPermissionsListPending: vi.fn(),
+  getSessionPendingInteractionSnapshot: vi.fn(() => ({
+    pendingPermissionBySession: new Map(),
+    pendingQuestionBySession: new Map(),
+  })),
   navigate: vi.fn(),
   subscribeSessionPendingPermission: vi.fn(),
   requestCurrentSessionRefresh: vi.fn(),
@@ -29,6 +35,7 @@ vi.mock('../../stores/auth/auth.js', () => ({
 }));
 
 vi.mock('../../utils/session/session-list-events.js', () => ({
+  getSessionPendingInteractionSnapshot: mocks.getSessionPendingInteractionSnapshot,
   requestCurrentSessionRefresh: mocks.requestCurrentSessionRefresh,
   requestSessionListRefresh: mocks.requestSessionListRefresh,
   subscribeSessionPendingPermission: mocks.subscribeSessionPendingPermission,
@@ -43,6 +50,12 @@ vi.mock('../common/feedback/ToastNotification.js', () => ({
 }));
 
 vi.mock('@openAwork/web-client', () => ({
+  createNotificationsClient: () => ({
+    list: mocks.createNotificationsList,
+  }),
+  createPermissionsClient: () => ({
+    listPending: mocks.createPermissionsListPending,
+  }),
   createSessionsClient: () => ({
     get: mocks.sessionsClientGet,
   }),
@@ -51,6 +64,8 @@ vi.mock('@openAwork/web-client', () => ({
 beforeEach(() => {
   cleanup();
   vi.clearAllMocks();
+  mocks.createNotificationsList.mockResolvedValue([]);
+  mocks.createPermissionsListPending.mockResolvedValue([]);
   mocks.subscribeSessionPendingPermission.mockImplementation((onChange) => {
     onChange('target-session-1', {
       requestId: 'perm-1',
@@ -102,5 +117,55 @@ describe('FloatingPermissionPrompt', () => {
     await waitFor(() => {
       expect(mocks.navigate).toHaveBeenCalledWith('/team/workspace-1?sessionId=target-session-1');
     });
+  });
+
+  it('错过实时事件时会从未读通知恢复待审批弹层', async () => {
+    mocks.subscribeSessionPendingPermission.mockImplementation(() => () => undefined);
+    mocks.createNotificationsList.mockResolvedValue([
+      {
+        id: 'notif-1',
+        title: '等待权限 · write',
+        body: 'requestId=perm-2\n写入工作区文件\nwrite /tmp/demo.md\nwrite:workspace\nhigh',
+        eventType: 'permission_asked',
+        sessionId: 'target-session-2',
+        status: 'unread',
+        readAt: null,
+        createdAt: '2026-07-16T07:30:45.000Z',
+      },
+    ]);
+    mocks.createPermissionsListPending.mockResolvedValue([
+      {
+        requestId: 'perm-2',
+        sessionId: 'target-session-2',
+        toolName: 'write',
+        scope: 'write:workspace',
+        reason: '写入工作区文件',
+        riskLevel: 'high',
+        previewAction: 'write /tmp/demo.md',
+        status: 'pending',
+        createdAt: '2026-07-16T07:30:45.000Z',
+      },
+    ]);
+    mocks.sessionsClientGet.mockResolvedValue({
+      id: 'target-session-2',
+      title: '恢复出来的审批',
+      role_layer: null,
+      metadata_json: '{}',
+    });
+
+    render(<FloatingPermissionPrompt />);
+
+    expect(await screen.findByText('write')).toBeTruthy();
+    expect(await screen.findByRole('button', { name: '恢复出来的审批' })).toBeTruthy();
+    await waitFor(() => {
+      expect(mocks.createNotificationsList).toHaveBeenCalledWith('token-test', {
+        limit: 20,
+        status: 'unread',
+      });
+    });
+    expect(mocks.createPermissionsListPending).toHaveBeenCalledWith(
+      'token-test',
+      'target-session-2',
+    );
   });
 });

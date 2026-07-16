@@ -2,6 +2,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { CapabilitiesListResult } from '@openAwork/web-client';
 import type {
   ChannelCapabilityCatalogDraft,
   ChannelSettingsEntry,
@@ -56,8 +57,8 @@ const resourcesClientMocks = vi.hoisted(() => ({
   })),
 }));
 
-const capabilitiesClientMocks = vi.hoisted(() => ({
-  list: vi.fn(async () => [
+const capabilitiesClientMocks = vi.hoisted(() => {
+  const capabilities = [
     {
       id: 'agent-1',
       kind: 'agent',
@@ -95,27 +96,43 @@ const capabilitiesClientMocks = vi.hoisted(() => ({
       description: 'desc',
       source: 'builtin',
     },
-  ]),
-  previewChannel: vi.fn(async () => ({
-    agents: 1,
-    skills: 1,
-    mcps: 1,
-    tools: 1,
-    toolGroups: {
-      web: 0,
-      lsp: 0,
-      files: 1,
-      shell: 0,
-      orchestration: 0,
-      session: 0,
-      mcp: 0,
-      desktop: 0,
-      repo: 0,
-      channel: 0,
-      other: 0,
-    },
-    commands: 1,
-  })),
+  ] as const;
+
+  const listResult = vi.fn(async (): Promise<CapabilitiesListResult> => ({
+    ok: true,
+    retryable: false,
+    capabilities: [...capabilities],
+  }));
+
+  return {
+    capabilities,
+    listResult,
+    previewChannel: vi.fn(async () => ({
+      agents: 1,
+      skills: 1,
+      mcps: 1,
+      tools: 1,
+      toolGroups: {
+        web: 0,
+        lsp: 0,
+        files: 1,
+        shell: 0,
+        orchestration: 0,
+        session: 0,
+        mcp: 0,
+        desktop: 0,
+        repo: 0,
+        channel: 0,
+        other: 0,
+      },
+      commands: 1,
+    })),
+  };
+});
+
+const loggerMocks = vi.hoisted(() => ({
+  error: vi.fn(),
+  warn: vi.fn(),
 }));
 
 vi.mock('@openAwork/web-client', () => ({
@@ -126,6 +143,10 @@ vi.mock('@openAwork/web-client', () => ({
 
 vi.mock('@openAwork/shared-ui', () => ({
   StatusPill: ({ label }: { readonly label: string }) => <span>{label}</span>,
+}));
+
+vi.mock('../../../utils/log/logger.js', () => ({
+  logger: loggerMocks,
 }));
 
 vi.mock('../../../components/common/display/ChannelSubscriptionSettings.js', () => ({
@@ -256,9 +277,15 @@ function renderChannelsTab(channel: ChannelSettingsEntry = makeTelegramChannel()
   return { setChannels };
 }
 
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 
 describe('ChannelsTabContent', () => {
@@ -293,9 +320,50 @@ describe('ChannelsTabContent', () => {
     renderChannelsTab();
 
     await waitFor(() => {
-      expect(capabilitiesClientMocks.list).toHaveBeenCalledWith('token-1');
+      expect(capabilitiesClientMocks.listResult).toHaveBeenCalledWith('token-1');
     });
     expect(await screen.findByText('1 agents')).toBeTruthy();
+  });
+
+  it('Given a retryable capability catalog failure When rendering Then it retries and recovers without logging an error', async () => {
+    vi.useFakeTimers();
+    capabilitiesClientMocks.listResult
+      .mockImplementationOnce(async (): Promise<CapabilitiesListResult> => ({
+        ok: false,
+        retryable: true,
+        errorMessage: '网络异常，加载能力列表失败。',
+        capabilities: [],
+      }))
+      .mockImplementationOnce(async (): Promise<CapabilitiesListResult> => ({
+        ok: true,
+        retryable: false,
+        capabilities: [...capabilitiesClientMocks.capabilities],
+      }));
+
+    renderChannelsTab();
+
+    await flushMicrotasks();
+    expect(capabilitiesClientMocks.listResult).toHaveBeenCalledTimes(1);
+    expect(loggerMocks.warn).toHaveBeenCalledWith(
+      'failed to load channel capability catalog counts, will retry',
+      expect.objectContaining({
+        attempt: 1,
+        delayMs: 2_000,
+        error: expect.any(Error),
+      }),
+    );
+    expect(screen.getByText('0 agents')).toBeTruthy();
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushMicrotasks();
+
+    expect(capabilitiesClientMocks.listResult).toHaveBeenCalledTimes(2);
+    expect(screen.getByText('1 agents')).toBeTruthy();
+    expect(
+      loggerMocks.error.mock.calls.some(
+        ([message]) => message === 'failed to load channel capability catalog counts',
+      ),
+    ).toBe(false);
   });
 
   it('Given channel draft preview is requested When settings asks for counts Then it proxies to capabilities preview client', async () => {

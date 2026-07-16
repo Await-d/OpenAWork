@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useUIStateStore } from '../../stores/ui/uiState.js';
 import {
   getFusionSidebarMocks,
@@ -8,6 +8,38 @@ import {
   renderFusionSidebar,
   resetFusionSidebarUiState,
 } from './FusionSidebar.test-utils.js';
+
+function installMatchMedia(width: number): () => void {
+  const originalMatchMedia = window.matchMedia;
+
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => {
+      const maxWidth = /max-width:\s*(\d+)px/.exec(query)?.[1];
+      const matches = maxWidth ? width <= Number(maxWidth) : false;
+
+      return {
+        matches,
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      };
+    }),
+  });
+
+  return () => {
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      writable: true,
+      value: originalMatchMedia,
+    });
+  };
+}
 
 beforeEach(() => {
   cleanup();
@@ -76,5 +108,29 @@ describe('FusionSidebar 展开 Panel', () => {
     expect(screen.getByText('团队工作空间')).not.toBeNull();
     expect(screen.getByText('暂无团队工作空间')).not.toBeNull();
     expect(screen.getByTitle('新建团队工作区')).not.toBeNull();
+  });
+
+  it('紧凑视口下通过抽屉承载 Panel，并支持打开后关闭', () => {
+    const restoreMatchMedia = installMatchMedia(640);
+    prepareFusionSidebarMocks(false);
+
+    try {
+      renderFusionSidebar('/chat/open-session');
+
+      expect(screen.getByRole('button', { name: '展开会话侧栏' })).not.toBeNull();
+      expect(screen.queryByRole('dialog', { name: '会话侧栏' })).toBeNull();
+
+      fireEvent.click(screen.getByRole('button', { name: '展开会话侧栏' }));
+
+      expect(screen.getByRole('dialog', { name: '会话侧栏' })).not.toBeNull();
+      expect(screen.getByRole('button', { name: '关闭会话侧栏' })).not.toBeNull();
+
+      fireEvent.click(screen.getByRole('button', { name: '关闭会话侧栏' }));
+
+      expect(screen.queryByRole('dialog', { name: '会话侧栏' })).toBeNull();
+      expect(screen.getByRole('button', { name: '展开会话侧栏' })).not.toBeNull();
+    } finally {
+      restoreMatchMedia();
+    }
   });
 });

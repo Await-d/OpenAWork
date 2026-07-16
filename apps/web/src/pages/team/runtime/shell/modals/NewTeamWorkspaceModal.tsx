@@ -9,6 +9,7 @@ import { NewTeamWorkspaceHero } from './NewTeamWorkspaceHero.js';
 import { buildWorkspaceTemplateKnowledgeInput } from './new-team-workspace-agent-templates.js';
 import { MODAL_STYLE, OVERLAY_STYLE } from './new-team-workspace-modal-config.js';
 import { useNewTeamWorkspaceAgentTemplates } from './use-new-team-workspace-agent-templates.js';
+import { getPathBasename } from '../../../../../utils/workspace-path.js';
 import './new-team-workspace-modal.css';
 
 export interface NewTeamWorkspaceModalProps {
@@ -182,8 +183,7 @@ export function NewTeamWorkspaceModal({ onClose, onCreated }: NewTeamWorkspaceMo
 }
 
 function extractFolderName(path: string): string {
-  const trimmed = path.replace(/\/+$/, '');
-  return trimmed.includes('/') ? trimmed.slice(trimmed.lastIndexOf('/') + 1) : trimmed;
+  return getPathBasename(path, path);
 }
 
 function nextWorkspaceName(folderName: string, existingNames: ReadonlySet<string>): string {

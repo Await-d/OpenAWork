@@ -163,10 +163,10 @@ function ActionButton({
         transition: 'background 0.15s',
       }}
       onMouseEnter={(e) => {
-        (e.currentTarget as HTMLButtonElement).style.background = 'hsl(var(--muted) / 0.6)';
+        e.currentTarget.style.background = 'hsl(var(--muted) / 0.6)';
       }}
       onMouseLeave={(e) => {
-        (e.currentTarget as HTMLButtonElement).style.background = 'hsl(var(--muted) / 0.3)';
+        e.currentTarget.style.background = 'hsl(var(--muted) / 0.3)';
       }}
     >
       <span style={{ fontSize: 20, flexShrink: 0 }}>{icon}</span>

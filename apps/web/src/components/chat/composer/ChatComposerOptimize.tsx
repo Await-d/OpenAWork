@@ -4,14 +4,16 @@
 
 import type { RefObject } from 'react';
 import type { PromptCandidate, PromptOptimizerResult } from '@openAwork/web-client';
+import type { ComposerOptimizeError } from './composer-optimize-error.js';
 
 export interface ChatComposerOptimizeProps {
-  optimizeError: string | null;
+  optimizeError: ComposerOptimizeError | null;
   optimizeResult: PromptOptimizerResult | null;
   optimizePopoverRef: RefObject<HTMLDivElement | null>;
   onClearError: () => void;
   onClose: () => void;
   onSelectCandidate: (candidate: PromptCandidate) => void;
+  onRetryOptimize?: () => void;
 }
 
 export function ChatComposerOptimize({
@@ -21,6 +23,7 @@ export function ChatComposerOptimize({
   onClearError,
   onClose,
   onSelectCandidate,
+  onRetryOptimize,
 }: ChatComposerOptimizeProps) {
   return (
     <>
@@ -54,7 +57,26 @@ export function ChatComposerOptimize({
             <line x1="15" y1="9" x2="9" y2="15" />
             <line x1="9" y1="9" x2="15" y2="15" />
           </svg>
-          {optimizeError}
+          {optimizeError.message}
+          {optimizeError.retryable && onRetryOptimize && (
+            <button
+              type="button"
+              onClick={onRetryOptimize}
+              style={{
+                border: 'none',
+                background: 'transparent',
+                color: 'inherit',
+                cursor: 'pointer',
+                padding: 0,
+                fontSize: 10,
+                fontWeight: 600,
+                lineHeight: 1,
+                marginLeft: 4,
+              }}
+            >
+              重试
+            </button>
+          )}
           <button
             type="button"
             onClick={onClearError}

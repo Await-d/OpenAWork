@@ -19,11 +19,35 @@ import type { ResolvedAuxiliaryLlmConfig } from '../provider/auxiliary-llm-confi
 import { requestWorkflowLlmCompletion } from './workflow-llm.js';
 import { assignTeamModels, pickAnalysisModels } from '../team/team-model-assignment.js';
 
-type AgentCoreWithExtras = typeof agentCore & {
-  PromptOptimizerImpl?: typeof agentCore.PromptOptimizerImpl;
-  TranslationWorkflowImpl?: typeof agentCore.TranslationWorkflowImpl;
+type ErrorConstructor<T extends Error = Error> = new (...args: unknown[]) => T;
+type PromptOptimizerErrorLike = Error & { kind?: string };
+
+function isErrorInstance<T extends Error>(
+  error: unknown,
+  constructor: ErrorConstructor<T> | undefined,
+): error is T {
+  return typeof constructor === 'function' && error instanceof constructor;
+}
+
+const agentCoreRecord = agentCore as Record<string, unknown>;
+const {
+  PromptOptimizerError,
+  PromptOptimizerImpl,
+  PromptOptimizerResultParseError,
+  PromptOptimizerUpstreamError,
+  TranslationWorkflowImpl,
+} = {
+  PromptOptimizerError: agentCoreRecord['PromptOptimizerError'] as
+    ErrorConstructor<PromptOptimizerErrorLike> | undefined,
+  PromptOptimizerImpl: agentCoreRecord['PromptOptimizerImpl'] as
+    typeof agentCore.PromptOptimizerImpl | undefined,
+  PromptOptimizerResultParseError: agentCoreRecord['PromptOptimizerResultParseError'] as
+    ErrorConstructor<PromptOptimizerErrorLike> | undefined,
+  PromptOptimizerUpstreamError: agentCoreRecord['PromptOptimizerUpstreamError'] as
+    ErrorConstructor<Error> | undefined,
+  TranslationWorkflowImpl: agentCoreRecord['TranslationWorkflowImpl'] as
+    typeof agentCore.TranslationWorkflowImpl | undefined,
 };
-const { PromptOptimizerImpl, TranslationWorkflowImpl } = agentCore as AgentCoreWithExtras;
 
 const TEAM_MEMBER_SPECIALTY_VALUES = Array.from(
   new Set<TeamMemberSpecialty>([
@@ -322,12 +346,23 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
       if (!llmConfig) {
         step.fail('no llm config');
         return reply.status(503).send({
+          code: 'optimizer_unavailable',
           error:
             '提示词优化器未找到可用模型：请在 设置 → 提供商 中启用一个「快速 / 内联」或「会话」模型并填写 API Key，或在网关环境变量中设置 AI_API_BASE_URL 与 AI_API_KEY 后重启网关。',
+          retryable: true,
         });
       }
+      if (!PromptOptimizerImpl) {
+        step.fail('prompt optimizer implementation unavailable');
+        return reply.status(503).send({
+          code: 'optimizer_unavailable',
+          error: '优化提示词失败，请稍后重试。',
+          retryable: true,
+        });
+      }
+      const PromptOptimizerImplCtor = PromptOptimizerImpl;
 
-      const optimizer = new PromptOptimizerImpl(async (prompt: string) => {
+      const optimizer = new PromptOptimizerImplCtor(async (prompt: string) => {
         return requestWorkflowLlmCompletion({
           apiBaseUrl: llmConfig.apiBaseUrl,
           apiKey: llmConfig.apiKey,
@@ -347,12 +382,33 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
         });
         return reply.send(result);
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        step.fail(message);
-        // Bubble the upstream / parser error message into the JSON body
-        // so the frontend can show e.g. "AI_APICallError: 401" instead
-        // of the opaque "Failed to optimize prompt: 500".
-        return reply.status(500).send({ error: `优化提示词失败：${message}` });
+        if (isErrorInstance(err, PromptOptimizerUpstreamError)) {
+          step.fail('prompt optimizer upstream unavailable');
+          return reply.status(502).send({
+            code: 'upstream_unavailable',
+            error: `优化提示词失败：${err.message}`,
+            retryable: true,
+          });
+        }
+
+        if (
+          isErrorInstance(err, PromptOptimizerResultParseError) ||
+          (isErrorInstance(err, PromptOptimizerError) && err.kind === 'invalid_response')
+        ) {
+          step.fail('prompt optimizer invalid response');
+          return reply.status(502).send({
+            code: 'invalid_response',
+            error: '优化提示词失败：模型返回结果格式无效，请重试。',
+            retryable: false,
+          });
+        }
+
+        step.fail(err instanceof Error ? err.name : 'prompt optimizer unexpected error');
+        return reply.status(500).send({
+          code: 'unexpected_error',
+          error: '优化提示词失败，请稍后重试。',
+          retryable: true,
+        });
       }
     },
   );
@@ -373,8 +429,15 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
             '翻译工作流未找到可用模型：请在 设置 → 提供商 中启用一个「快速 / 内联」或「会话」模型并填写 API Key，或在网关环境变量中设置 AI_API_BASE_URL 与 AI_API_KEY 后重启网关。',
         });
       }
+      if (!TranslationWorkflowImpl) {
+        step.fail('translation workflow implementation unavailable');
+        return reply.status(503).send({
+          error: '翻译工作流暂时不可用，请稍后重试。',
+        });
+      }
+      const TranslationWorkflowImplCtor = TranslationWorkflowImpl;
 
-      const workflow = new TranslationWorkflowImpl(async (prompt: string) => {
+      const workflow = new TranslationWorkflowImplCtor(async (prompt: string) => {
         return requestWorkflowLlmCompletion({
           apiBaseUrl: llmConfig.apiBaseUrl,
           apiKey: llmConfig.apiKey,

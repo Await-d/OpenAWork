@@ -62,6 +62,9 @@ async function resolveCompactCommandRoute(userId: string): Promise<ModelRouteCon
 
   const providers = parseStoredJson(providerRow?.value);
   const activeSelection = parseStoredJson(selectionRow?.value);
+  if (!providers) {
+    return null;
+  }
   const compactionConfig = await getCompactionProviderConfig(providers, activeSelection);
   if (compactionConfig) {
     return resolveCompactionRoute(compactionConfig.provider, compactionConfig.modelId);

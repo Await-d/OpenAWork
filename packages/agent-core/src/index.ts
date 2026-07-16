@@ -362,8 +362,12 @@ export { WorkflowTemplateManagerImpl } from './workflow/types.js';
 export type { WorkflowEngine } from './workflow/engine.js';
 export { WorkflowEngineImpl } from './workflow/engine.js';
 export {
+  PromptOptimizerError,
   PromptOptimizerImpl,
+  PromptOptimizerResultParseError,
+  PromptOptimizerUpstreamError,
   type PromptOptimizer,
+  type PromptOptimizerErrorKind,
   type PromptOptimizerOptions,
   type PromptOptimizerResult,
   type PromptCandidate,

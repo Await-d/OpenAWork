@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 import type { Session } from '../../hooks/workspace/useSessions.js';
 import type { WorkspaceSessionTreeNode } from '../../utils/session/session-grouping.js';
+import { getPathBasename } from '../../utils/workspace-path.js';
 
 export interface FusionSidebarPeekProps {
   readonly activeSessionId: string | null;
@@ -97,13 +98,7 @@ const FOOTER_BUTTON_STYLE: CSSProperties = {
 };
 
 function basename(path: string | null): string {
-  if (!path) {
-    return 'OpenAWork';
-  }
-
-  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
-  const parts = normalized.split('/').filter(Boolean);
-  return parts.at(-1) ?? 'OpenAWork';
+  return getPathBasename(path, 'OpenAWork');
 }
 
 function flattenNodes(

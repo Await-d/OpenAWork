@@ -26,6 +26,17 @@
   justify-content: space-between;
 }
 
+.fusion-side-panel__action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+}
+
+.fusion-side-panel__action-row .fusion-side-panel__ghost-button {
+  flex: 1 1 0;
+  min-width: 112px;
+}
+
 .fusion-side-panel__eyebrow {
   color: var(--fg-subtle);
   font-size: 10px;
@@ -111,6 +122,79 @@
   white-space: nowrap;
 }
 
+.fusion-side-panel__meta-card small {
+  color: var(--fg-muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.fusion-side-panel__section,
+.fusion-side-panel__subsection-head {
+  display: grid;
+  gap: var(--spacing-2);
+}
+
+.fusion-side-panel__editor-shell,
+.fusion-side-panel__workspace-tree-shell {
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  display: flex;
+  overflow: hidden;
+}
+
+.fusion-side-panel__workspace-tree-shell {
+  min-height: 320px;
+}
+
+.fusion-side-panel__editor-shell {
+  min-height: 420px;
+}
+
+.fusion-side-panel__pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-1);
+}
+
+.fusion-side-panel__file-pill {
+  align-items: center;
+  background: var(--bg-base);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-pill);
+  color: var(--fg-default);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 650;
+  gap: 4px;
+  max-width: 100%;
+  min-height: 24px;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  padding: 0 var(--spacing-2);
+  transition:
+    background var(--dur-micro) var(--ease-micro),
+    border-color var(--dur-micro) var(--ease-micro),
+    box-shadow var(--dur-micro) var(--ease-micro),
+    color var(--dur-micro) var(--ease-micro);
+}
+
+.fusion-side-panel__file-pill:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-emphasis);
+  color: var(--fg-strong);
+}
+
+.fusion-side-panel__file-pill:focus-visible {
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+  outline-color: var(--accent);
+}
+
+.fusion-side-panel__file-pill[data-passive='true'] {
+  cursor: default;
+}
+
 .fusion-side-panel__file-list {
   display: grid;
   gap: var(--spacing-2);
@@ -121,10 +205,39 @@
 
 .fusion-side-panel__file-row {
   align-items: center;
+  appearance: none;
+  color: inherit;
   display: grid;
   gap: var(--spacing-2);
   grid-template-columns: 24px minmax(0, 1fr);
+  outline: 2px solid transparent;
+  outline-offset: 2px;
   padding: var(--spacing-2);
+  text-align: left;
+  transition:
+    background var(--dur-micro) var(--ease-micro),
+    border-color var(--dur-micro) var(--ease-micro),
+    box-shadow var(--dur-micro) var(--ease-micro),
+    transform var(--dur-micro) var(--ease-micro);
+  width: 100%;
+}
+
+button.fusion-side-panel__file-row {
+  cursor: pointer;
+}
+
+button.fusion-side-panel__file-row:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-emphasis);
+}
+
+button.fusion-side-panel__file-row:active {
+  transform: translateY(1px);
+}
+
+button.fusion-side-panel__file-row:focus-visible {
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+  outline-color: var(--accent);
 }
 
 .fusion-side-panel__file-icon {

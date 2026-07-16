@@ -103,7 +103,7 @@ export interface RetryPromptInput {
  * SessionConversationView 完整 props。
  *
  * 字段分组（**严格保持顺序便于 review**）：
- * - 必填基础（sessionId、currentUserEmail、gatewayUrl、token）
+ * - 必填基础（sessionId、currentUserEmail、currentUserDisplayName、gatewayUrl、token）
  * - chrome slots（topBar / beforeMessages / afterMessages）
  * - composer 能力开关
  * - 消息列表 props（messages、render entries、pendingPermissions 等）
@@ -118,6 +118,7 @@ export interface TeamConversationLayoutProps {
   sessionId: string | null;
   sessionSource: SessionConversationSource;
   currentUserEmail: string;
+  currentUserDisplayName?: string;
   gatewayUrl: string;
   token: string | null;
 
@@ -299,7 +300,9 @@ export interface TeamConversationLayoutProps {
   input: string;
   setInput: React.Dispatch<React.SetStateAction<string>>;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
-  onComposerSubmit: (payload: UnifiedComposerSubmitPayload) => Promise<void> | void;
+  onComposerSubmit: (
+    payload: UnifiedComposerSubmitPayload,
+  ) => Promise<boolean | void> | boolean | void;
   onStopComposer: () => void | Promise<void>;
   onComposerModelSelect?: (providerId: string, modelId: string) => Promise<void>;
   onToggleWebSearch: () => void;
@@ -410,6 +413,7 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
   const {
     sessionId,
     currentUserEmail,
+    currentUserDisplayName,
     gatewayUrl,
     token,
 
@@ -679,6 +683,7 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
                     activeModelLabel={activeModelLabel}
                     activeProviderId={activeProviderId}
                     bottomRef={bottomRef}
+                    currentUserDisplayName={currentUserDisplayName}
                     currentUserEmail={currentUserEmail}
                     groups={groupedMessageEntries}
                     pendingPermissions={pendingPermissions}

@@ -184,6 +184,27 @@ export function markNotificationRead(input: { id: string; userId: string }): voi
   );
 }
 
+export function markPermissionNotificationsReadByRequestIds(input: {
+  requestIds: readonly string[];
+  sessionId: string;
+  userId: string;
+}): void {
+  const requestIds = [...new Set(input.requestIds.map((value) => value.trim()).filter(Boolean))];
+  for (const requestId of requestIds) {
+    const prefix = `requestId=${requestId}\n`;
+    sqliteRun(
+      `UPDATE notifications
+       SET status = 'read', read_at = COALESCE(read_at, datetime('now'))
+       WHERE user_id = ?
+         AND session_id = ?
+         AND event_type = 'permission_asked'
+         AND status = 'unread'
+         AND substr(body, 1, ?) = ?`,
+      [input.userId, input.sessionId, prefix.length, prefix],
+    );
+  }
+}
+
 export function markAllNotificationsRead(input: { userId: string }): void {
   sqliteRun(
     `UPDATE notifications
@@ -269,9 +290,8 @@ export function buildNotificationFromRunEvent(input: {
 
 function mapRunEventToNotification(event: RunEvent): { body: string; title: string } | null {
   if (event.type === 'permission_asked') {
-    // Body format: "reason\npreviewAction\nscope\nriskLevel"
-    // Front-end parses this to show three-level structured display.
     const parts = [
+      `requestId=${event.requestId}`,
       event.reason,
       event.previewAction ?? '',
       event.scope ?? '',

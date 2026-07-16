@@ -26,6 +26,7 @@ import { getWorkspaceGroupKey } from '../../utils/session/session-grouping.js';
 import { requestSessionListRefresh } from '../../utils/session/session-list-events.js';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { preloadRouteModuleByPath } from '../../routes/preloadable-route-modules.js';
+import { getPathBasename } from '../../utils/workspace-path.js';
 import WorkspacePickerModal from '../common/modal/WorkspacePickerModal.js';
 import { buildWorkspacePickerDataSource } from '../common/modal/workspace-picker-data-source.js';
 import { SidebarRailV2 } from '../layout/SidebarRailV2.js';
@@ -118,11 +119,59 @@ const NEW_SESSION_BTN_STYLE: CSSProperties = {
   borderTop: '1px solid var(--border-subtle)',
 };
 
+const MOBILE_TRIGGER_STYLE: CSSProperties = {
+  position: 'fixed',
+  top: 'calc(var(--spacing-4) + var(--spacing-5) + var(--spacing-2))',
+  left: 'var(--spacing-2)',
+  width: 38,
+  height: 38,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  borderRadius: 10,
+  border: '1px solid var(--border-default)',
+  background: 'color-mix(in srgb, var(--bg-surface) 94%, transparent)',
+  color: 'var(--fg-default)',
+  boxShadow: 'var(--shadow-md)',
+  backdropFilter: 'blur(16px)',
+  cursor: 'pointer',
+  zIndex: 30,
+};
+
+const MOBILE_BACKDROP_STYLE: CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  background: 'color-mix(in srgb, var(--bg-base) 38%, transparent)',
+  backdropFilter: 'blur(4px)',
+  zIndex: 40,
+};
+
+const MOBILE_DRAWER_STYLE: CSSProperties = {
+  position: 'absolute',
+  top: 'calc(var(--spacing-4) + var(--spacing-5) + var(--spacing-2))',
+  left: 'var(--spacing-2)',
+  bottom: 'var(--spacing-2)',
+  width: 'min(86vw, 320px)',
+  maxWidth: 'calc(100vw - (var(--spacing-2) * 2))',
+  display: 'flex',
+  flexDirection: 'column',
+  borderRadius: 'var(--radius-lg)',
+  border: '1px solid var(--border-default)',
+  background: 'var(--bg-surface)',
+  boxShadow: 'var(--shadow-lg)',
+  overflow: 'hidden',
+};
+
+const MOBILE_CLOSE_LAYER_STYLE: CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  border: 'none',
+  background: 'transparent',
+  cursor: 'default',
+};
+
 function basename(path: string | null): string {
-  if (!path) return 'OpenAWork';
-  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
-  const parts = normalized.split('/').filter(Boolean);
-  return parts.at(-1) ?? 'OpenAWork';
+  return getPathBasename(path, 'OpenAWork');
 }
 
 function isCompactFusionSidebarViewport(): boolean {
@@ -421,8 +470,17 @@ export function FusionSidebar({
       setSelectedWorkspacePath(path);
       setFileTreeRootPath(path);
       setShowWorkspacePicker(false);
+      if (compactViewport) {
+        setLeftSidebarOpen(false);
+      }
     },
-    [addSavedWorkspacePath, setFileTreeRootPath, setSelectedWorkspacePath],
+    [
+      addSavedWorkspacePath,
+      compactViewport,
+      setFileTreeRootPath,
+      setLeftSidebarOpen,
+      setSelectedWorkspacePath,
+    ],
   );
 
   const preloadRoute = useCallback((path: string) => {
@@ -498,21 +556,30 @@ export function FusionSidebar({
   const openChatSession = useCallback(
     (sessionIdToOpen: string) => {
       preloadChatRoute(sessionIdToOpen);
+      if (compactViewport) {
+        setLeftSidebarOpen(false);
+      }
       void navigate(`/chat/${sessionIdToOpen}`);
     },
-    [navigate, preloadChatRoute],
+    [compactViewport, navigate, preloadChatRoute, setLeftSidebarOpen],
   );
 
   const handleNewTask = useCallback(() => {
     navigateToHome();
     preloadRoute('/chat');
+    if (compactViewport) {
+      setLeftSidebarOpen(false);
+    }
     void navigate('/chat');
-  }, [navigate, navigateToHome, preloadRoute]);
+  }, [compactViewport, navigate, navigateToHome, preloadRoute, setLeftSidebarOpen]);
 
   const handleNewTeamWorkspace = useCallback(() => {
     preloadRoute('/team');
+    if (compactViewport) {
+      setLeftSidebarOpen(false);
+    }
     void navigate('/team?action=newWorkspace');
-  }, [navigate, preloadRoute]);
+  }, [compactViewport, navigate, preloadRoute, setLeftSidebarOpen]);
   const clearPeekCloseTimer = useCallback(() => {
     if (peekCloseTimerRef.current) {
       clearTimeout(peekCloseTimerRef.current);
@@ -748,33 +815,357 @@ export function FusionSidebar({
     }
   }, [compactViewport]);
 
+  const closeCompactSidebar = useCallback(() => {
+    if (compactViewport) {
+      setLeftSidebarOpen(false);
+    }
+  }, [compactViewport, setLeftSidebarOpen]);
+
+  const mobileDrawerOpen = compactViewport && leftSidebarOpen;
+  const panelContent = (
+    <>
+      {/* 项目名 + 路径 + 菜单 */}
+      <div style={PANEL_HEADER_STYLE}>
+        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, gap: 1 }}>
+          <span style={PANEL_TITLE_STYLE}>{basename(selectedWorkspacePath)}</span>
+          <span style={PANEL_SUBTITLE_STYLE}>{selectedWorkspacePath ?? '未选择工作区'}</span>
+        </div>
+        <button
+          type="button"
+          title="更多"
+          aria-label="更多"
+          onClick={() => setShowWorkspacePicker(true)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 26,
+            height: 26,
+            borderRadius: 6,
+            border: 'none',
+            background: 'transparent',
+            color: 'var(--fg-muted)',
+            cursor: 'pointer',
+            flexShrink: 0,
+          }}
+        >
+          <svg
+            aria-hidden="true"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+          >
+            <circle cx="12" cy="5" r="1" />
+            <circle cx="12" cy="12" r="1" />
+            <circle cx="12" cy="19" r="1" />
+          </svg>
+        </button>
+      </div>
+
+      {/* 搜索 + 会话列表 */}
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        <div style={{ padding: '6px 8px', flexShrink: 0 }}>
+          <input
+            type="text"
+            placeholder="搜索会话…"
+            value={sessionSearch}
+            onChange={(e) => setSessionSearch(e.target.value)}
+            style={SEARCH_STYLE}
+          />
+        </div>
+
+        <div
+          style={{
+            flexGrow: 1,
+            flexShrink: 1,
+            flexBasis: '0%',
+            minHeight: 0,
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            padding: '4px 6px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 0,
+          }}
+        >
+          {/* S2 扁平会话列表：不按工作区分组，直接列出所有会话 */}
+          {groupedSessions.length === 0 && (
+            <p
+              style={{
+                padding: '24px 8px',
+                textAlign: 'center',
+                fontSize: 12,
+                color: 'var(--fg-muted)',
+              }}
+            >
+              暂无工作区
+            </p>
+          )}
+          {chatSessionNodes.map((node) => (
+            <SessionSidebarSessionRow
+              key={node.session.id}
+              activeSessionId={currentSessionId ?? undefined}
+              commitRename={commitRename}
+              hoveredSessionId={hoveredSessionId}
+              isDeletingSession={isDeletingSession}
+              isPinned={() => false}
+              node={node}
+              onHoveredSessionChange={setHoveredSessionId}
+              onOpenContextMenu={handleSessionContextMenu}
+              onPointerPositionChange={handlePointerPositionChange}
+              openChatSession={openChatSession}
+              preloadChatRoute={preloadChatRoute}
+              quickDeleteSession={quickDeleteSession}
+              quickExportSession={quickExportSession}
+              renameValue={renameValue}
+              renamingSessionId={renamingSessionId}
+              setRenameValue={setRenameValue}
+              startRename={startRename}
+            />
+          ))}
+
+          {/* 团队会话 */}
+          <div
+            style={{
+              flexGrow: 1,
+              flexShrink: 1,
+              flexBasis: '0%',
+              minHeight: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              marginTop: 6,
+              paddingTop: 6,
+              borderTop: '1px solid var(--border-subtle)',
+            }}
+          >
+            <div
+              onClick={() => {
+                if (!location.pathname.startsWith('/team')) {
+                  void navigate('/team');
+                }
+                closeCompactSidebar();
+                triggerResetToWelcome('team');
+              }}
+              title="点击回到团队欢迎页面"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '4px 8px',
+                fontSize: 11,
+                fontWeight: 700,
+                color: 'var(--fg-muted)',
+                cursor: 'pointer',
+              }}
+            >
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+                style={{ flexShrink: 0 }}
+              >
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg>
+              <span>团队工作空间</span>
+              <span style={{ fontSize: 10 }}>{teamLoading ? '…' : teamSessions.length}</span>
+              <button
+                type="button"
+                onClick={handleNewTeamWorkspace}
+                title="新建团队工作区"
+                style={{
+                  flexShrink: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 20,
+                  height: 20,
+                  borderRadius: 5,
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--fg-muted)',
+                  cursor: 'pointer',
+                  padding: 0,
+                  marginLeft: 'auto',
+                  marginRight: 2,
+                }}
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                  <line x1="12" y1="11" x2="12" y2="17" />
+                  <line x1="9" y1="14" x2="15" y2="14" />
+                </svg>
+              </button>
+            </div>
+            {/* 团队会话滚动区域 */}
+            <div
+              style={{
+                flex: 1,
+                minHeight: 0,
+                overflowY: 'auto',
+                overflowX: 'hidden',
+              }}
+            >
+              {teamError && (
+                <div style={{ padding: '6px 10px', fontSize: 11, color: 'var(--fg-muted)' }}>
+                  {teamError}
+                </div>
+              )}
+              {!teamLoading && !teamError && teamWorkspaceGroups.length === 0 && (
+                <div
+                  style={{
+                    padding: '16px 10px',
+                    textAlign: 'center',
+                    fontSize: 11,
+                    lineHeight: 1.5,
+                    color: 'var(--fg-muted)',
+                  }}
+                >
+                  暂无团队工作空间
+                </div>
+              )}
+              {teamWorkspaceGroups.map((wg) => (
+                <TeamWorkspaceGroupItem
+                  key={wg.id}
+                  group={wg}
+                  activeTeamSessionId={activeTeamSessionId}
+                  preloadRoute={preloadRoute}
+                  navigate={navigate}
+                  onNewSession={(wsId) => {
+                    preloadRoute('/team');
+                    triggerTeamNewSession(wsId);
+                    closeCompactSidebar();
+                    void navigate(`/team/${wsId}`);
+                  }}
+                  onSelectSession={(wsId, sessionId) => {
+                    preloadRoute('/team');
+                    triggerTeamSelectSession(wsId, sessionId);
+                    closeCompactSidebar();
+                    void navigate(`/team/${wsId}`);
+                  }}
+                  onSessionContextMenu={handleTeamSessionContextMenu}
+                  renamingSessionId={teamRenamingSessionId}
+                  renameValue={teamRenameValue}
+                  onRenameChange={setTeamRenameValue}
+                  onRenameCommit={(id) => void handleTeamRenameCommit(id)}
+                  onWorkspaceContextMenu={handleTeamWorkspaceContextMenu}
+                  workspaceRenamingId={teamWorkspaceRenamingId}
+                  workspaceRenameValue={teamWorkspaceRenameValue}
+                  onWorkspaceRenameChange={setTeamWorkspaceRenameValue}
+                  onWorkspaceRenameCommit={(id) => void handleTeamWorkspaceRenameCommit(id)}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 新建会话 */}
+      <button type="button" onClick={handleNewTask} style={NEW_SESSION_BTN_STYLE}>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <line x1="12" y1="5" x2="12" y2="19" />
+          <line x1="5" y1="12" x2="19" y2="12" />
+        </svg>
+        新建会话
+      </button>
+    </>
+  );
+
   return (
     <div
       className="fusion-sidebar"
       data-compact-viewport={compactViewport ? 'true' : 'false'}
-      style={CONTAINER_STYLE}
+      style={{
+        ...CONTAINER_STYLE,
+        ...(compactViewport ? { width: 0 } : {}),
+      }}
     >
-      <SidebarRailV2
-        accessToken={accessToken}
-        gatewayUrl={gatewayUrl}
-        theme={theme}
-        onToggleTheme={onToggleTheme}
-        onLogout={onLogout}
-        pendingPermissionIndicator={pendingPermissionIndicator}
-        onOpenWorkspacePicker={() => setShowWorkspacePicker(true)}
-        onProjectHover={(path) => {
-          if (path) {
-            openProjectPeek(path);
-          } else {
-            scheduleCloseProjectPeek();
-          }
-        }}
-        onSelectWorkspace={(path) => {
-          void handleSelectWorkspace(path);
-        }}
-      />
+      {!compactViewport ? (
+        <SidebarRailV2
+          accessToken={accessToken}
+          gatewayUrl={gatewayUrl}
+          theme={theme}
+          onToggleTheme={onToggleTheme}
+          onLogout={onLogout}
+          pendingPermissionIndicator={pendingPermissionIndicator}
+          onOpenWorkspacePicker={() => setShowWorkspacePicker(true)}
+          onProjectHover={(path) => {
+            if (path) {
+              openProjectPeek(path);
+            } else {
+              scheduleCloseProjectPeek();
+            }
+          }}
+          onSelectWorkspace={(path) => {
+            void handleSelectWorkspace(path);
+          }}
+        />
+      ) : !mobileDrawerOpen ? (
+        <button
+          type="button"
+          aria-label="展开会话侧栏"
+          title="展开会话侧栏"
+          onClick={() => setLeftSidebarOpen(true)}
+          style={MOBILE_TRIGGER_STYLE}
+        >
+          <svg
+            aria-hidden="true"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M4 6h16" />
+            <path d="M4 12h16" />
+            <path d="M4 18h16" />
+          </svg>
+        </button>
+      ) : null}
 
-      {!expanded && peekWorkspacePath ? (
+      {!compactViewport && !expanded && peekWorkspacePath ? (
         <FusionSidebarPeek
           activeSessionId={currentSessionId}
           nodes={peekSessionNodes}
@@ -787,294 +1178,27 @@ export function FusionSidebar({
       ) : null}
 
       {/* Panel */}
-      <div
-        style={{
-          ...PANEL_STYLE,
-          width: expanded ? SIDEBAR_WIDTH : 0,
-        }}
-        aria-hidden={!expanded}
-      >
-        {/* 项目名 + 路径 + 菜单 */}
-        <div style={PANEL_HEADER_STYLE}>
-          <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, gap: 1 }}>
-            <span style={PANEL_TITLE_STYLE}>{basename(selectedWorkspacePath)}</span>
-            <span style={PANEL_SUBTITLE_STYLE}>{selectedWorkspacePath ?? '未选择工作区'}</span>
-          </div>
-          <button
-            type="button"
-            title="更多"
-            aria-label="更多"
-            onClick={() => setShowWorkspacePicker(true)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 26,
-              height: 26,
-              borderRadius: 6,
-              border: 'none',
-              background: 'transparent',
-              color: 'var(--fg-muted)',
-              cursor: 'pointer',
-              flexShrink: 0,
-            }}
-          >
-            <svg
-              aria-hidden="true"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.75"
-              strokeLinecap="round"
-            >
-              <circle cx="12" cy="5" r="1" />
-              <circle cx="12" cy="12" r="1" />
-              <circle cx="12" cy="19" r="1" />
-            </svg>
-          </button>
-        </div>
-
-        {/* 搜索 + 会话列表 */}
+      {!compactViewport ? (
         <div
           style={{
-            flex: 1,
-            minHeight: 0,
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
+            ...PANEL_STYLE,
+            width: expanded ? SIDEBAR_WIDTH : 0,
           }}
+          aria-hidden={!expanded}
         >
-          <div style={{ padding: '6px 8px', flexShrink: 0 }}>
-            <input
-              type="text"
-              placeholder="搜索会话…"
-              value={sessionSearch}
-              onChange={(e) => setSessionSearch(e.target.value)}
-              style={SEARCH_STYLE}
-            />
-          </div>
-
-          <div
-            style={{
-              flexGrow: 1,
-              flexShrink: 1,
-              flexBasis: '0%',
-              minHeight: 0,
-              overflowY: 'auto',
-              overflowX: 'hidden',
-              padding: '4px 6px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 0,
-            }}
-          >
-            {/* S2 扁平会话列表：不按工作区分组，直接列出所有会话 */}
-            {groupedSessions.length === 0 && (
-              <p
-                style={{
-                  padding: '24px 8px',
-                  textAlign: 'center',
-                  fontSize: 12,
-                  color: 'var(--fg-muted)',
-                }}
-              >
-                暂无工作区
-              </p>
-            )}
-            {chatSessionNodes.map((node) => (
-              <SessionSidebarSessionRow
-                key={node.session.id}
-                activeSessionId={currentSessionId ?? undefined}
-                commitRename={commitRename}
-                hoveredSessionId={hoveredSessionId}
-                isDeletingSession={isDeletingSession}
-                isPinned={() => false}
-                node={node}
-                onHoveredSessionChange={setHoveredSessionId}
-                onOpenContextMenu={handleSessionContextMenu}
-                onPointerPositionChange={handlePointerPositionChange}
-                openChatSession={openChatSession}
-                preloadChatRoute={preloadChatRoute}
-                quickDeleteSession={quickDeleteSession}
-                quickExportSession={quickExportSession}
-                renameValue={renameValue}
-                renamingSessionId={renamingSessionId}
-                setRenameValue={setRenameValue}
-                startRename={startRename}
-              />
-            ))}
-
-            {/* 团队会话 */}
-            <div
-              style={{
-                flexGrow: 1,
-                flexShrink: 1,
-                flexBasis: '0%',
-                minHeight: 0,
-                display: 'flex',
-                flexDirection: 'column',
-                marginTop: 6,
-                paddingTop: 6,
-                borderTop: '1px solid var(--border-subtle)',
-              }}
-            >
-              <div
-                onClick={() => {
-                  if (!location.pathname.startsWith('/team')) {
-                    void navigate('/team');
-                  }
-                  triggerResetToWelcome('team');
-                }}
-                title="点击回到团队欢迎页面"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  padding: '4px 8px',
-                  fontSize: 11,
-                  fontWeight: 700,
-                  color: 'var(--fg-muted)',
-                  cursor: 'pointer',
-                }}
-              >
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                  style={{ flexShrink: 0 }}
-                >
-                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                  <circle cx="9" cy="7" r="4" />
-                  <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                </svg>
-                <span>团队工作空间</span>
-                <span style={{ fontSize: 10 }}>{teamLoading ? '…' : teamSessions.length}</span>
-                <button
-                  type="button"
-                  onClick={handleNewTeamWorkspace}
-                  title="新建团队工作区"
-                  style={{
-                    flexShrink: 0,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    width: 20,
-                    height: 20,
-                    borderRadius: 5,
-                    background: 'transparent',
-                    border: 'none',
-                    color: 'var(--fg-muted)',
-                    cursor: 'pointer',
-                    padding: 0,
-                    marginLeft: 'auto',
-                    marginRight: 2,
-                  }}
-                >
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                    <line x1="12" y1="11" x2="12" y2="17" />
-                    <line x1="9" y1="14" x2="15" y2="14" />
-                  </svg>
-                </button>
-              </div>
-              {/* 团队会话滚动区域 */}
-              <div
-                style={{
-                  flex: 1,
-                  minHeight: 0,
-                  overflowY: 'auto',
-                  overflowX: 'hidden',
-                }}
-              >
-                {teamError && (
-                  <div style={{ padding: '6px 10px', fontSize: 11, color: 'var(--fg-muted)' }}>
-                    {teamError}
-                  </div>
-                )}
-                {!teamLoading && !teamError && teamWorkspaceGroups.length === 0 && (
-                  <div
-                    style={{
-                      padding: '16px 10px',
-                      textAlign: 'center',
-                      fontSize: 11,
-                      lineHeight: 1.5,
-                      color: 'var(--fg-muted)',
-                    }}
-                  >
-                    暂无团队工作空间
-                  </div>
-                )}
-                {teamWorkspaceGroups.map((wg) => (
-                  <TeamWorkspaceGroupItem
-                    key={wg.id}
-                    group={wg}
-                    activeTeamSessionId={activeTeamSessionId}
-                    preloadRoute={preloadRoute}
-                    navigate={navigate}
-                    onNewSession={(wsId) => {
-                      preloadRoute('/team');
-                      triggerTeamNewSession(wsId);
-                      void navigate(`/team/${wsId}`);
-                    }}
-                    onSelectSession={(wsId, sessionId) => {
-                      preloadRoute('/team');
-                      triggerTeamSelectSession(wsId, sessionId);
-                      void navigate(`/team/${wsId}`);
-                    }}
-                    onSessionContextMenu={handleTeamSessionContextMenu}
-                    renamingSessionId={teamRenamingSessionId}
-                    renameValue={teamRenameValue}
-                    onRenameChange={setTeamRenameValue}
-                    onRenameCommit={(id) => void handleTeamRenameCommit(id)}
-                    onWorkspaceContextMenu={handleTeamWorkspaceContextMenu}
-                    workspaceRenamingId={teamWorkspaceRenamingId}
-                    workspaceRenameValue={teamWorkspaceRenameValue}
-                    onWorkspaceRenameChange={setTeamWorkspaceRenameValue}
-                    onWorkspaceRenameCommit={(id) => void handleTeamWorkspaceRenameCommit(id)}
-                  />
-                ))}
-              </div>
-            </div>
-          </div>
+          {panelContent}
         </div>
-
-        {/* 新建会话 */}
-        <button type="button" onClick={handleNewTask} style={NEW_SESSION_BTN_STYLE}>
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-          新建会话
-        </button>
-      </div>
+      ) : mobileDrawerOpen ? (
+        <div role="dialog" aria-modal="true" aria-label="会话侧栏" style={MOBILE_BACKDROP_STYLE}>
+          <button
+            type="button"
+            aria-label="关闭会话侧栏"
+            style={MOBILE_CLOSE_LAYER_STYLE}
+            onClick={closeCompactSidebar}
+          />
+          <aside style={MOBILE_DRAWER_STYLE}>{panelContent}</aside>
+        </div>
+      ) : null}
 
       {createPortal(
         <WorkspacePickerModal

@@ -1,9 +1,4 @@
-import type {
-  SkillManifest,
-  SkillPermission,
-  SkillExecutor,
-  ToolResult,
-} from '@openAwork/skill-types';
+import type { SkillManifest, SkillPermission, SkillExecutor } from '@openAwork/skill-types';
 import { MCPClientAdapterImpl, ToolRegistryImpl } from '@openAwork/mcp-client';
 
 export interface InstalledSkill {
@@ -44,7 +39,7 @@ export class SkillRegistry {
       return {
         content: result.content,
         isError: result.isError,
-      } as ToolResult;
+      };
     });
   }
 

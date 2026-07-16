@@ -13,14 +13,21 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router';
 import { PermissionPrompt } from '@openAwork/shared-ui';
 import type { AlwaysScopeLevel, PermissionDecision } from '@openAwork/shared-ui';
-import { createSessionsClient } from '@openAwork/web-client';
+import {
+  createNotificationsClient,
+  createPermissionsClient,
+  createSessionsClient,
+} from '@openAwork/web-client';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import {
+  getSessionPendingInteractionSnapshot,
   requestCurrentSessionRefresh,
   requestSessionListRefresh,
   subscribeSessionPendingPermission,
 } from '../../utils/session/session-list-events.js';
 import type { SessionPendingPermissionState } from '../../utils/permission/pending-permission-state.js';
+import { toSessionPendingPermissionStateFromRequest } from '../../utils/permission/pending-permission-state.js';
+import { matchPendingPermissionForNotification } from '../../utils/permission/permission-notification.js';
 import { replyPermissionRequest } from '../../utils/permission/permission-reply.js';
 import { resolvePermissionAlwaysOverride } from '../../utils/permission/permission-scope.js';
 import { toast } from '../common/feedback/ToastNotification.js';
@@ -210,10 +217,76 @@ export function FloatingPermissionPrompt({ onPendingChange }: FloatingPermission
       updatePendingPermission(null);
       return;
     }
-    return subscribeSessionPendingPermission((_sessionId, permission) => {
+
+    const snapshotPendingPermission = Array.from(
+      getSessionPendingInteractionSnapshot().pendingPermissionBySession.values(),
+    )[0];
+    if (snapshotPendingPermission) {
+      updatePendingPermission(snapshotPendingPermission);
+    }
+
+    let cancelled = false;
+    const notificationsClient = createNotificationsClient(gatewayUrl);
+    const permissionsClient = createPermissionsClient(gatewayUrl);
+
+    const hydrateFromUnreadNotifications = async (): Promise<void> => {
+      if (pendingPermissionRef.current !== null) {
+        return;
+      }
+
+      const notifications = await notificationsClient.list(accessToken, {
+        limit: 20,
+        status: 'unread',
+      });
+      if (cancelled || pendingPermissionRef.current !== null) {
+        return;
+      }
+
+      for (const notification of notifications) {
+        if (notification.eventType !== 'permission_asked' || !notification.sessionId) {
+          continue;
+        }
+
+        const pendingRequests = await permissionsClient.listPending(
+          accessToken,
+          notification.sessionId,
+        );
+        if (cancelled || pendingPermissionRef.current !== null) {
+          return;
+        }
+
+        const matched = matchPendingPermissionForNotification(notification, pendingRequests);
+        if (!matched) {
+          continue;
+        }
+
+        updatePendingPermission(toSessionPendingPermissionStateFromRequest(matched));
+        return;
+      }
+    };
+
+    void hydrateFromUnreadNotifications().catch(() => undefined);
+
+    const intervalId = window.setInterval(() => {
+      if (pendingPermissionRef.current !== null) {
+        return;
+      }
+      void hydrateFromUnreadNotifications().catch(() => undefined);
+    }, 15_000);
+
+    const unsubscribe = subscribeSessionPendingPermission((_sessionId, permission) => {
       updatePendingPermission(permission);
+      if (permission === null) {
+        void hydrateFromUnreadNotifications().catch(() => undefined);
+      }
     });
-  }, [accessToken, updatePendingPermission]);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      unsubscribe();
+    };
+  }, [accessToken, gatewayUrl, updatePendingPermission]);
 
   const handleDecision = useCallback(
     async (requestId: string, decision: PermissionDecision, scopeLevel?: AlwaysScopeLevel) => {

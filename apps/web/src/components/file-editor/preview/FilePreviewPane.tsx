@@ -498,19 +498,48 @@ function sanitizeSvg(svg: string): string {
     .replace(/\bon\w+\s*=\s*["'][^"']*["']/giu, '');
 }
 
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    const chunk = bytes.subarray(offset, offset + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+function encodeUtf8ToBase64(value: string): string {
+  return bytesToBase64(new TextEncoder().encode(value));
+}
+
+function looksLikeBase64(value: string): boolean {
+  return value.length > 0 && value.length % 4 === 0 && /^[A-Za-z0-9+/]+={0,2}$/u.test(value);
+}
+
+function resolveImagePreviewSrc(content: string, mimeType: string): string {
+  const trimmed = content.trim();
+  if (
+    trimmed.startsWith('data:') ||
+    trimmed.startsWith('blob:') ||
+    trimmed.startsWith('/') ||
+    trimmed.startsWith('http://') ||
+    trimmed.startsWith('https://')
+  ) {
+    return trimmed;
+  }
+  if (looksLikeBase64(trimmed)) {
+    return `data:${mimeType};base64,${trimmed}`;
+  }
+  return `data:${mimeType};base64,${encodeUtf8ToBase64(content)}`;
+}
+
 // ---------------------------------------------------------------------------
 // Image Preview (for binary files loaded as base64 or data URLs)
 // ---------------------------------------------------------------------------
 function ImagePreviewPane({ path, content }: { path: string; content: string }) {
   const ext = path.split('.').pop()?.toLowerCase() ?? 'png';
   const mimeType = ext === 'svg' ? 'image/svg+xml' : `image/${ext === 'jpg' ? 'jpeg' : ext}`;
-
-  // If content looks like base64 or a data URL, use it directly
-  const src = content.startsWith('data:')
-    ? content
-    : content.startsWith('/') || content.startsWith('http')
-      ? content
-      : `data:${mimeType};base64,${btoa(content)}`;
+  const src = resolveImagePreviewSrc(content, mimeType);
 
   return (
     <div

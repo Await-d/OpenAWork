@@ -81,7 +81,8 @@
 }
 
 .fusion-chat-main-shell__conversation-pane--docked {
-  flex: 0 0 clamp(520px, 44vw, 600px);
+  flex: 0 0 600px;
+  max-width: min(100%, 600px);
 }
 
 .fusion-chat-main-shell__conversation-pane--fluid {
@@ -98,10 +99,10 @@
 }
 
 .fusion-chat-main-shell__conversation-frame--fusion {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-md);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .fusion-chat-main-shell__conversation-frame--classic {

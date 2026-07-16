@@ -8,30 +8,14 @@ import type {
 } from '@openAwork/web-client';
 import { getNotificationTypeMeta, NotificationTypeIcon, CloseIcon } from './notification-icons.js';
 import { formatRelativeTime, formatAbsoluteTime } from './format-time.js';
+import {
+  extractPermissionToolName,
+  matchPendingPermissionForNotification,
+  parsePermissionNotificationBody,
+} from '../../../utils/permission/permission-notification.js';
 
 // ── Body parsing ───────────────────────────────────────────────
-
-interface ParsedPermissionBody {
-  reason: string;
-  previewAction: string;
-  scope: string;
-  riskLevel: string;
-}
-
-/**
- * Parse the structured notification body for permission_asked events.
- * Format: "reason\npreviewAction\nscope\nriskLevel"
- */
-export function parsePermissionNotificationBody(body: string): ParsedPermissionBody | null {
-  const lines = body.split('\n');
-  if (lines.length < 2) return null;
-  return {
-    reason: lines[0] ?? '',
-    previewAction: lines[1] ?? '',
-    scope: lines[2] ?? '',
-    riskLevel: lines[3] ?? '',
-  };
-}
+export { matchPendingPermissionForNotification, parsePermissionNotificationBody };
 
 // ── Permission detail ──────────────────────────────────────────
 
@@ -56,9 +40,8 @@ function buildPermissionDetail(
   }
   const p = parsePermissionNotificationBody(notification.body);
   if (!p) return null;
-  const titleMatch = notification.title.match(/·\s*(.+)$/);
   return {
-    toolName: titleMatch?.[1]?.trim() ?? '',
+    toolName: extractPermissionToolName(notification.title) ?? '',
     reason: p.reason,
     previewAction: p.previewAction,
     riskLevel: p.riskLevel,
@@ -98,6 +81,17 @@ function riskLevelLabel(riskLevel: string): string {
   }
 }
 
+function scopeOrderLabel(category: AlwaysScopeLevel['category']): string {
+  switch (category) {
+    case 'full':
+      return '第一档';
+    case 'partial':
+      return '第二档';
+    case 'base':
+      return '第三档';
+  }
+}
+
 // ── Permission action buttons ──────────────────────────────────
 
 interface PermissionActionsProps {
@@ -127,7 +121,7 @@ function PermissionActions({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 2 }}>
       {levels.length > 0 && (
-        <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
           <span
             style={{
               fontSize: 10,
@@ -151,25 +145,72 @@ function PermissionActions({
                 }}
                 title={`${level.description}: ${level.pattern}`}
                 style={{
-                  fontSize: 9,
-                  fontWeight: isSelected ? 700 : 500,
-                  padding: '2px 7px',
-                  borderRadius: 4,
+                  appearance: 'none',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'flex-start',
+                  gap: 2,
+                  width: '100%',
+                  padding: '6px 8px',
+                  borderRadius: 6,
                   border: isSelected ? '1px solid var(--accent)' : '1px solid var(--border-subtle)',
                   background: isSelected
                     ? 'color-mix(in srgb, var(--accent) 12%, transparent)'
                     : 'transparent',
                   color: isSelected ? 'var(--accent)' : 'var(--fg-muted)',
                   cursor: 'pointer',
-                  fontFamily: 'var(--font-mono, monospace)',
-                  maxWidth: 120,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  transition: 'all 100ms cubic-bezier(0.4,0,0.2,1)',
+                  textAlign: 'left',
+                  transition:
+                    'border-color 100ms cubic-bezier(0.4,0,0.2,1), background 100ms cubic-bezier(0.4,0,0.2,1), color 100ms cubic-bezier(0.4,0,0.2,1)',
                 }}
               >
-                {level.label}
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    fontSize: 9,
+                    fontWeight: 700,
+                    color: isSelected ? 'var(--accent)' : 'var(--fg-muted)',
+                    letterSpacing: '0.02em',
+                  }}
+                >
+                  <span
+                    style={{
+                      padding: '1px 5px',
+                      borderRadius: 999,
+                      background: isSelected
+                        ? 'color-mix(in srgb, var(--accent) 14%, transparent)'
+                        : 'color-mix(in srgb, var(--fg-muted) 10%, transparent)',
+                    }}
+                  >
+                    {scopeOrderLabel(level.category)}
+                  </span>
+                  <span>{level.label}</span>
+                </span>
+                <code
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    fontFamily: 'var(--font-mono, monospace)',
+                    fontSize: 10,
+                    lineHeight: 1.45,
+                    color: isSelected ? 'var(--fg-strong)' : 'var(--fg-default)',
+                    wordBreak: 'break-all',
+                    whiteSpace: 'pre-wrap',
+                  }}
+                >
+                  {level.pattern}
+                </code>
+                <span
+                  style={{
+                    fontSize: 10,
+                    lineHeight: 1.4,
+                    color: 'var(--fg-muted)',
+                  }}
+                >
+                  {level.description}
+                </span>
               </button>
             );
           })}

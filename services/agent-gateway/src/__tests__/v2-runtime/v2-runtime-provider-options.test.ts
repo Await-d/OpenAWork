@@ -245,13 +245,13 @@ describe('buildProviderOptions', () => {
     expect(options).toBeUndefined();
   });
 
-  it('emits mimo.thinking enabled for mimo models', () => {
+  it('emits mimo.thinking + reasoning_effort for mimo models', () => {
     const options = buildProviderOptions({
       thinking: { ...baseThinking, providerType: 'mimo', enabled: true },
       model: 'mimo-v2.5-pro',
     });
     const oc = options?.['mimo'] as Record<string, unknown> | undefined;
-    expect(oc).toEqual({ thinking: { type: 'enabled' } });
+    expect(oc).toEqual({ thinking: { type: 'enabled' }, reasoning_effort: 'medium' });
   });
 
   it('emits mimo.thinking disabled when thinking is turned off', () => {

@@ -728,6 +728,20 @@ function hasTeamDefinition(metadataJson: string): boolean {
   return typeof teamDefinition === 'object' && teamDefinition !== null;
 }
 
+function hasProviderlessModelSelection(input: {
+  agentSelection: StreamAgentSelection;
+  echoedSessionModelId: string | undefined;
+  echoedSessionProviderId: string | undefined;
+  requestedModelId: string | undefined;
+  requestedProviderId: string | undefined;
+}): boolean {
+  return (
+    (input.requestedModelId !== undefined && input.requestedProviderId === undefined) ||
+    (input.echoedSessionModelId !== undefined && input.echoedSessionProviderId === undefined) ||
+    (input.agentSelection.modelId !== undefined && input.agentSelection.providerId === undefined)
+  );
+}
+
 interface StreamAccumulationState {
   toolCalls: Map<string, { toolName: string; inputText: string }>;
 }
@@ -1383,6 +1397,13 @@ export async function resolveStreamModelRoute(input: {
         ? (sessionSelection.reasoningEffort as StreamRequest['reasoningEffort'])
         : input.requestData.reasoningEffort,
   };
+  const providerlessModelSelection = hasProviderlessModelSelection({
+    agentSelection,
+    echoedSessionModelId,
+    echoedSessionProviderId,
+    requestedModelId,
+    requestedProviderId,
+  });
   // When Fast is enabled (user toggled it on in the model settings popover),
   // use the fast provider+model for the main conversation stream too — not
   // just title generation. This only applies when the request doesn't
@@ -1391,7 +1412,8 @@ export async function resolveStreamModelRoute(input: {
     !hasAuthoritativeTeamModel &&
     !hasExplicitProviderOverride &&
     !hasExplicitModelOverride &&
-    !agentSelection.providerId;
+    !agentSelection.providerId &&
+    !providerlessModelSelection;
 
   if (useFastForChat) {
     const fastConfig = await getFastProvider(input.userId);

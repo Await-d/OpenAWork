@@ -4,6 +4,7 @@ import { useAuthStore } from '../../stores/auth/auth.js';
 import { useUIStateStore } from '../../stores/ui/uiState.js';
 import { resolveBareFilename } from '../../components/chat/file-preview/resolve-bare-filename.js';
 import { getFilePreviewKind, isBinaryPreviewKind } from '../../utils/file/file-preview.js';
+import { loadPreviewContent } from '../../utils/file/load-preview-content.js';
 
 export interface OpenFile {
   path: string;
@@ -11,6 +12,7 @@ export interface OpenFile {
   content: string;
   originalContent: string;
   language: string;
+  disposeContent?: () => void;
 }
 
 export interface OpenFileOptions {
@@ -74,6 +76,10 @@ function workspaceKey(workspacePath: string | null | undefined): string {
   return workspacePath && workspacePath.trim().length > 0 ? workspacePath : '__default__';
 }
 
+function releaseOpenFileContent(file: OpenFile | null | undefined): void {
+  file?.disposeContent?.();
+}
+
 /**
  * useFileEditor:按 workspace 隔离的文件编辑器状态。
  *
@@ -108,6 +114,8 @@ export function useFileEditor(workspacePath?: string | null) {
   // consumed by the editor pane once the file is active + Monaco mounted.
   const [revealTarget, setRevealTarget] = useState<RevealTarget | null>(null);
   const revealNonceRef = useRef(0);
+  const openFilesRef = useRef(openFiles);
+  openFilesRef.current = openFiles;
 
   // 当 workspace 切换时清掉内存中的 openFiles,后续 reload effect 会按新 workspace
   // 的 persistedPaths 加载文件。
@@ -115,8 +123,19 @@ export function useFileEditor(workspacePath?: string | null) {
   useEffect(() => {
     if (lastSeenWorkspaceKeyRef.current === wsKey) return;
     lastSeenWorkspaceKeyRef.current = wsKey;
+    for (const file of openFilesRef.current) {
+      releaseOpenFileContent(file);
+    }
     setOpenFiles([]);
   }, [wsKey]);
+
+  useEffect(() => {
+    return () => {
+      for (const file of openFilesRef.current) {
+        releaseOpenFileContent(file);
+      }
+    };
+  }, []);
 
   // 把内存 openFiles 同步到当前 workspace 桶。
   // 注意:绝不在 openFiles 为空时回写 store(否则会在 workspace 切换瞬间把刚恢复的
@@ -204,18 +223,20 @@ export function useFileEditor(workspacePath?: string | null) {
       setLoading(true);
       setSaveError(null);
       try {
-        const readOptions: { workspaceRoot?: string } = {};
-        if (workspacePath && workspacePath.trim().length > 0) {
-          readOptions.workspaceRoot = workspacePath;
-        }
-        const data = await workspaceClient.readFile(token ?? '', resolvedPath, readOptions);
+        const loaded = await loadPreviewContent({
+          client: workspaceClient,
+          token: token ?? '',
+          path: resolvedPath,
+          workspaceRoot: workspacePath ?? null,
+        });
         const name = resolvedPath.split('/').pop() ?? resolvedPath;
         const file: OpenFile = {
           path: resolvedPath,
           name,
-          content: data.content,
-          originalContent: data.content,
+          content: loaded.content,
+          originalContent: loaded.content,
           language: getLanguage(resolvedPath),
+          disposeContent: loaded.dispose,
         };
         setOpenFiles((prev) => [...prev, file]);
         setActiveFilePath(resolvedPath);
@@ -238,17 +259,30 @@ export function useFileEditor(workspacePath?: string | null) {
       const loaded: OpenFile[] = [];
       for (const path of persistedPaths) {
         try {
-          const readOptions: { workspaceRoot?: string } = {};
-          if (workspacePath && workspacePath.trim().length > 0) {
-            readOptions.workspaceRoot = workspacePath;
+          const previewKind = getFilePreviewKind(path);
+          if (isBinaryPreviewKind(previewKind)) {
+            loaded.push({
+              path,
+              name: path.split('/').pop() ?? path,
+              content: '',
+              originalContent: '',
+              language: 'plaintext',
+            });
+            continue;
           }
-          const data = await workspaceClient.readFile(token ?? '', path, readOptions);
+          const next = await loadPreviewContent({
+            client: workspaceClient,
+            token: token ?? '',
+            path,
+            workspaceRoot: workspacePath ?? null,
+          });
           loaded.push({
             path,
             name: path.split('/').pop() ?? path,
-            content: data.content,
-            originalContent: data.content,
+            content: next.content,
+            originalContent: next.content,
             language: getLanguage(path),
+            disposeContent: next.dispose,
           });
         } catch (_e) {
           // 单个文件加载失败不阻塞其他文件
@@ -268,7 +302,9 @@ export function useFileEditor(workspacePath?: string | null) {
     (path: string) => {
       setOpenFiles((prev) => {
         const idx = prev.findIndex((f) => f.path === path);
+        const closingFile = idx >= 0 ? prev[idx] : null;
         const next = prev.filter((f) => f.path !== path);
+        releaseOpenFileContent(closingFile);
         if (activeFilePath === path) {
           const nextActive = next[Math.max(0, idx - 1)]?.path ?? next[0]?.path ?? null;
           setActiveFilePath(nextActive);

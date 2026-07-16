@@ -12,7 +12,7 @@
 > - `apps/web/src/pages/chat-page/ChatPage.tsx`（当前会话页）
 > - `.agentdocs/workflow/260627-sidebar-layout-refactor-plan.md`（上一轮侧边栏改造记录）
 >
-> 状态：**进行中（2026-07-04 已完成 W1/W2，W5 基础子集已落）**
+> 状态：**进行中（2026-07-04 已完成 W1/W2，W5 基础子集已落；2026-07-14 起剩余工作仅允许落在 Fusion 新版布局）**
 
 ---
 
@@ -42,6 +42,7 @@
 - **色彩体系**：必须遵循 `packages/shared-ui/DESIGN-TOKENS.md` 的 E · Nebula 色彩 token
 - **技术栈**：React + Zustand + react-router，不引入 SolidJS 或其他框架
 - **后端不变**：不改 `agent-gateway` 路由或 `agent-core` 逻辑
+- **范围更新（2026-07-14）**：后续剩余波次只允许落在新版本 Fusion 布局；旧版本 Classic 布局冻结，不再接受结构、样式或交互调整。若某任务需要触碰 Classic 文件，必须先改写为 Fusion-only 等价方案或显式移出本工作流。
 
 ## Solution Design
 
@@ -94,6 +95,8 @@ Layout.tsx
 | Wave 6 | 交互增强 | 拖拽排序 + 内联重命名 + 命令系统扩充 | AppSidebar, ChatPage, commands | P2 |
 
 各波次之间**无硬依赖**，可并行推进，但建议按 P0→P1→P2 顺序执行。
+
+> 2026-07-14 收口说明：W1/W2 的历史实现保留，但从现在开始，本工作流剩余的 W3/W4/W6 任务统一只在 Fusion 路径推进；Classic 旧布局不再作为可调整交付面。
 
 ### Wave 1 — 顶部标签页栏 (P0)
 

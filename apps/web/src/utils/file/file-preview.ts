@@ -120,6 +120,10 @@ export function isBinaryPreviewKind(kind: FilePreviewKind | null): boolean {
   );
 }
 
+export function isNonTextPreviewKind(kind: FilePreviewKind | null): boolean {
+  return kind === 'image' || isBinaryPreviewKind(kind);
+}
+
 const RESIZE_SCRIPT = `<script>
 (function () {
   function postHeight() {

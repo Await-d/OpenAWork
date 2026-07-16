@@ -46,6 +46,7 @@ export interface AlwaysScopeLevel {
 }
 
 const BASH_PREVIEW_PREFIXES = ['执行命令:', '执行 tmux 命令:'] as const;
+const NAMESPACE_PATTERN_SEGMENT = /^(?:\*|[A-Za-z0-9._-]+)$/;
 const SHELL_CONTROL_TOKENS = new Set(['|', '||', '&&', ';', '&', '>', '>>', '<', '<<']);
 
 function isBashLikePreviewAction(previewAction: string | undefined): boolean {
@@ -151,8 +152,50 @@ function deriveBashLikeAlwaysPatterns(previewAction: string | undefined, scope: 
   return [...patterns];
 }
 
+function parseNamespaceLikeSegments(value: string): string[] | null {
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || /\s/.test(trimmed) || !trimmed.includes(':')) {
+    return null;
+  }
+
+  const segments = trimmed.split(':');
+  if (segments.length < 2) {
+    return null;
+  }
+
+  return segments.every((segment) => NAMESPACE_PATTERN_SEGMENT.test(segment)) ? segments : null;
+}
+
+function deriveNamespaceLikeAlwaysPatterns(scope: string): string[] {
+  const segments = parseNamespaceLikeSegments(scope);
+  if (!segments) {
+    return [];
+  }
+
+  const patterns = new Set<string>();
+  for (let keepCount = segments.length - 1; keepCount >= 1; keepCount -= 1) {
+    patterns.add(`${segments.slice(0, keepCount).join(':')}:*`);
+  }
+
+  patterns.delete(scope.trim());
+  return [...patterns];
+}
+
 function countNonControlTokens(pattern: string): number {
   return tokenizeShellCommand(pattern).filter((token) => !SHELL_CONTROL_TOKENS.has(token)).length;
+}
+
+function countPatternSpecificity(pattern: string): number {
+  const namespaceSegments = parseNamespaceLikeSegments(pattern);
+  if (namespaceSegments) {
+    let meaningfulCount = namespaceSegments.length;
+    while (meaningfulCount > 0 && namespaceSegments[meaningfulCount - 1] === '*') {
+      meaningfulCount -= 1;
+    }
+    return meaningfulCount;
+  }
+
+  return countNonControlTokens(pattern);
 }
 
 function isValidBashLikeAlwaysPattern(pattern: string): boolean {
@@ -169,9 +212,13 @@ function resolveAlwaysCandidates(
   scope: string,
   always: string[] | undefined,
 ): string[] {
-  const fallbackPatterns = deriveBashLikeAlwaysPatterns(previewAction, scope);
-  if (!isBashLikePreviewAction(previewAction)) {
-    return always ?? fallbackPatterns;
+  const fallbackPatterns = [
+    ...deriveBashLikeAlwaysPatterns(previewAction, scope),
+    ...deriveNamespaceLikeAlwaysPatterns(scope),
+  ];
+  const shouldFilterAsBash = isBashLikePreviewAction(previewAction);
+  if (!shouldFilterAsBash && (!always || always.length === 0)) {
+    return fallbackPatterns;
   }
 
   const candidates = new Map<string, number>();
@@ -181,10 +228,10 @@ function resolveAlwaysCandidates(
     if (trimmed.length === 0 || trimmed === scope) {
       continue;
     }
-    if (!isValidBashLikeAlwaysPattern(trimmed)) {
+    if (shouldFilterAsBash && !isValidBashLikeAlwaysPattern(trimmed)) {
       continue;
     }
-    candidates.set(trimmed, countNonControlTokens(trimmed));
+    candidates.set(trimmed, countPatternSpecificity(trimmed));
   }
 
   for (const pattern of fallbackPatterns) {
@@ -192,7 +239,10 @@ function resolveAlwaysCandidates(
     if (trimmed.length === 0 || trimmed === scope) {
       continue;
     }
-    candidates.set(trimmed, Math.max(candidates.get(trimmed) ?? 0, countNonControlTokens(trimmed)));
+    candidates.set(
+      trimmed,
+      Math.max(candidates.get(trimmed) ?? 0, countPatternSpecificity(trimmed)),
+    );
   }
 
   return [...candidates.entries()]

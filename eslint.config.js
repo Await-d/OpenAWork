@@ -174,11 +174,20 @@ export default [
     },
   },
   {
+    files: ['packages/resources/resources/extensions/reference/**/*.js'],
+    languageOptions: {
+      globals: {
+        URL: 'readonly',
+      },
+    },
+  },
+  {
     files: ['**/*.mjs'],
     languageOptions: {
       globals: {
         process: 'readonly',
         console: 'readonly',
+        fetch: 'readonly',
         Buffer: 'readonly',
         setTimeout: 'readonly',
         clearTimeout: 'readonly',

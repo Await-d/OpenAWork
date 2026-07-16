@@ -148,6 +148,7 @@ async function main(): Promise<void> {
 
         const readOnlyChannelMetadata: Record<string, unknown> = {
           source: 'channel',
+          channelLlmToolsEnabled: true,
           channel: {
             tools: {
               read: true,
@@ -163,6 +164,7 @@ async function main(): Promise<void> {
 
         const editOnlyChannelMetadata: Record<string, unknown> = {
           source: 'channel',
+          channelLlmToolsEnabled: true,
           channel: {
             tools: {
               read: false,

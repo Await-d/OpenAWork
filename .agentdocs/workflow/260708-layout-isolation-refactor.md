@@ -1,4 +1,4 @@
-# 新旧布局文件夹与逻辑隔离重构方案
+# 新旧布局文件夹与逻辑隔离重构方案（Fusion-only 收口）
 
 > 创建时间：2026-07-08
 > 关联文档：
@@ -8,25 +8,31 @@
 > - `apps/web/src/components/layout/useLayoutShared.ts`（共享 Hook，608 行）
 > - `apps/web/src/pages/chat-page/ChatPage.tsx`（会话页，25 处 isFusionLayout 分支）
 >
-> 状态：**待执行**
+> 状态：**待执行（已收口为仅允许调整 Fusion 新版布局；Classic 冻结）**
 
 ---
 
 ## Task Overview
 
-将新旧版本布局（Fusion / Classic）在**文件夹结构**和**布局逻辑**两个维度做物理隔离，降低耦合性，为后续废弃旧版布局铺路。
+在**不调整 Classic 旧版布局实现**的前提下，将 Fusion 新版布局在**文件夹结构**和**布局逻辑**两个维度做物理隔离与解耦，降低耦合性，为后续废弃旧版布局铺路。
 
 核心目标：
-1. **文件夹隔离**：Fusion 专用组件移入 `layout/fusion/`，Classic 专用组件移入 `layout/classic/`，共享组件留在 `layout/shared/`
+1. **文件夹隔离**：Fusion 专用组件移入 `layout/fusion/`；共享层只抽离不会迫使 Classic 改动的公共能力
 2. **死代码清理**：删除 4 个无引用文件
-3. **共享 Hook 拆分**：`useLayoutShared` 拆为公共层 + 各布局专属逻辑
-4. **ChatPage 布局感知解耦**：将 26 处 `isFusionLayout` 引用 + 3 个子组件透传重构为策略模式
+3. **共享 Hook 收口**：为 Fusion 提取专属 hook / helper，但不重写 Classic 路径
+4. **ChatPage 布局感知解耦**：优先抽离 Fusion 分支；Classic fallback 保持冻结，不因“策略对称”被改写
 
 ---
 
 ## Current Analysis
 
 ### 现状文件归属（精确引用追踪结果）
+
+### 2026-07-14 范围更新
+
+- **唯一允许调整面**：Fusion 新版布局及其必要共享入口（如 `Layout.tsx`、Fusion 专属组件、Fusion 侧的 ChatPage 分支）。
+- **冻结兼容边界**：`LayoutClassic.tsx`、`AppSidebar.tsx`、`ClassicWorkbenchTitlebar.tsx`、`WorkbenchModeTabs.tsx` 以及其它 Classic 旧路径文件仅作为兼容边界保留，不再接受结构、样式或交互层面的持续演进。
+- **执行规则**：如果某个任务必须修改 Classic 文件才能成立，则该任务应被改写为 Fusion-only 等价方案，或从本工作流中移出。
 
 #### Fusion 专用（18 个文件）
 
@@ -51,7 +57,7 @@
 | `TitlebarActionButtons.tsx` | `TitlebarTabStrip.tsx`（仅 Fusion 引用） |
 | `TitlebarHomeButton.tsx` | `TitlebarActionButtons.tsx`（仅 Fusion 链路引用） |
 
-#### Classic 专用（5 个文件）
+#### Classic 专用（5 个文件，冻结）
 
 | 文件 | 被引用方 |
 |------|---------|
@@ -127,21 +133,21 @@
 | `panels/ChatTerminalToggle.tsx` | 根据 `isFusionLayout` 切换 terminalPanelOpened / quickTerminalOpen |
 | `layout/FusionChatMainShell.tsx` | 根据 `isFusionLayout` 切换 6 处 CSS 类名 + 侧面板/终端渲染 |
 
-> **影响**：Phase 3 策略模式重构时，这 3 个子组件也需要同步改造——要么从策略对象获取属性，要么由 ChatPage 在 props 层面屏蔽差异。
+> **影响**：后续解耦时只允许抽离 Fusion 正向分支；Classic fallback 继续保留原行为，不再为了“策略对称”创建 Classic 对应实现。
 
 ---
 
 ## Complexity Assessment
 
-- Atomic steps: ~12（4 Phase × 3 步） → 0
-- Parallel streams: yes（Phase 1 文件移动 + 死代码清理可并行；Phase 2 的 fusion/classic hook 拆分可并行） → +2
+- Atomic steps: 8（4 Phase） → +2
+- Parallel streams: yes（Fusion 文件移动 + 死代码清理可并行；Fusion hook 抽离与 ChatPage 收口可分阶段推进） → +2
 - Modules/systems/services: 3（layout 组件目录 / ChatPage / uiState store） → +1
-- Long step (>5 min): yes（useLayoutShared 拆分 + ChatPage isFusionLayout 重构） → +1
+- Long step (>5 min): yes（Fusion hook 抽离 + ChatPage Fusion 分支收口） → +1
 - Persisted review artifacts: yes → +1
 - OpenCode available: no（当前为 CodeBuddy IDE） → +0
-- **Total score**: 5
+- **Total score**: 7
 - **Chosen mode**: Full orchestration
-- **Routing rationale**: 横跨 layout 目录、ChatPage、uiState 三个模块，Phase 间有并行空间，需要持久化产物供多轮迭代追踪。
+- **Routing rationale**: 横跨 layout 目录、ChatPage、uiState 三个模块，且需要在“不改 Classic”的硬约束下做 Fusion-only 收口，必须保留明确的执行边界和验收记录。
 
 ---
 
@@ -151,8 +157,8 @@
 
 ```
 apps/web/src/components/layout/
-├── shared/                          # 共享层（~13 个文件）
-│   ├── useLayoutShared.ts           # 拆分后只保留真正公共的逻辑
+├── shared/                          # 共享层（仅放不会迫使 Classic 改 import 的公共能力）
+│   ├── useLayoutShared.ts           # 保持 Classic 兼容基线；只做必要的纯公共抽离
 │   ├── layout-mode-options.ts
 │   ├── LayoutModeSwitch.tsx
 │   ├── LayoutModeSwitch.css
@@ -186,13 +192,12 @@ apps/web/src/components/layout/
 │   ├── useTitlebarKeyboardShortcuts.ts
 │   └── useTitlebarResponsiveState.ts
 │
-├── classic/                         # 旧版本布局（~6 个文件）
-│   ├── LayoutClassic.tsx
-│   ├── AppSidebar.tsx
-│   ├── ClassicWorkbenchTitlebar.tsx
-│   ├── ClassicWorkbenchTitlebar.css
-│   ├── ClassicWorkbenchTitlebar.test.tsx
-│   └── WorkbenchModeTabs.tsx
+├── LayoutClassic.tsx                # Classic 冻结，保留原位
+├── AppSidebar.tsx                   # Classic 冻结，保留原位
+├── ClassicWorkbenchTitlebar.tsx     # Classic 冻结，保留原位
+├── ClassicWorkbenchTitlebar.css     # Classic 冻结，保留原位
+├── ClassicWorkbenchTitlebar.test.tsx
+├── WorkbenchModeTabs.tsx            # Classic 冻结，保留原位
 │
 ├── nav/                             # 共享子目录（保持原位）
 ├── sidebar/                         # 共享子目录（保持原位）
@@ -201,14 +206,13 @@ apps/web/src/components/layout/
 └── notification/                    # 共享子目录（保持原位）
 ```
 
-### useLayoutShared 拆分策略
+### useLayoutShared 收口策略
 
 ```
-useLayoutShared.ts (608行, 当前)
-    ↓ 拆分为
-shared/useLayoutShared.ts           # 公共层：认证、命令面板、权限/问题订阅、键盘快捷键
-fusion/useFusionLayout.ts           # Fusion 专属：fusion sidebarTab、panel 状态、dock 判定
-classic/useClassicLayout.ts         # Classic 专属：classic sidebarTab、editor auto-open、quick terminal
+useLayoutShared.ts (608行, 当前，保持 Classic 兼容基线)
+    ↓ 增量收口为
+shared/useLayoutShared.ts           # 只抽离纯公共 helper；Classic 不强制改调用方式
+fusion/useFusionLayout.ts           # Fusion 专属：sidebarTab、panel 状态、dock 判定、Fusion 派生值
 ```
 
 **拆分原则**：
@@ -219,69 +223,60 @@ classic/useClassicLayout.ts         # Classic 专属：classic sidebarTab、edit
 - 权限/问题（pendingPermission、pendingQuestion）→ 公共
 - `sidebarTab`、`expandedDirs`、`leftSidebarOpen` → 保留在公共层（两种布局都读取）
 - `layoutMode` 本身 → 保留在公共层（Layout.tsx 需要它做分支）
+- Classic 旧布局继续消费稳定基线，不新建 `classic/useClassicLayout.ts`，避免为了目录对称而修改旧路径
 
-### ChatPage isFusionLayout 解耦策略
+### ChatPage isFusionLayout 收口策略
 
-引入 `ChatLayoutStrategy` 接口，将布局差异封装为策略对象：
+不再追求一次性消除所有 `isFusionLayout`。本轮只把 Fusion 分支抽离为独立 helper / shell，Classic fallback 保持原样：
 
 ```typescript
-// shared/ChatLayoutStrategy.ts
-interface ChatLayoutStrategy {
-  readonly layoutMode: 'fusion' | 'classic';
-  // 渲染
-  shouldRenderStatusStrip: boolean;
+// fusion/use-fusion-chat-layout.ts
+interface FusionChatLayoutState {
+  shouldRenderStatusStrip: true;
   shouldRenderQuickTerminal: boolean;
-  shouldRenderChatRightPanel: boolean;
   shouldRenderDockedSidePanel: boolean;
-  // 样式
   pageRootClassName: string;
-  pageRootStyle: CSSProperties;
   compactConversation: boolean;
   centerContent: boolean;
   contentMaxWidth: number | 'fluid' | undefined;
-  // 回调
   toggleReviewPanel: () => void;
-  // 副作用控制
-  shouldAutoOpenEditor: boolean;
   shouldAutoOpenTerminal: boolean;
 }
 ```
 
-ChatPage 通过 `useChatLayoutStrategy(layoutMode)` 获取策略对象，消除所有 `isFusionLayout` 分支。
+ChatPage 只在 `isFusionLayout === true` 时读取 `useFusionChatLayout()` 的返回值；Classic 分支继续保留当前 fallback，不新增对称的 Classic strategy 实现。
 
 ---
 
 ## Implementation Plan
 
-### Phase 1: 死代码清理 + 文件夹创建（低风险，可并行）
+### Phase 1: Fusion 目录隔离 + 死代码清理（低风险，可并行）
 
 - [ ] T-01: 删除 4 个死代码文件（`AppSidebarIcons.tsx`、`AppSidebarSections.tsx`、`AppSidebar.styles.ts`、`TitlebarTab.tsx`）
-- [ ] T-02: 创建 `layout/fusion/`、`layout/classic/`、`layout/shared/` 三个子目录
-- [ ] T-03: 将 Fusion 专用文件移入 `fusion/`，更新所有 import 路径
-- [ ] T-04: 将 Classic 专用文件移入 `classic/`，更新所有 import 路径
-- [ ] T-05: 将共享文件移入 `shared/`，更新所有 import 路径
-- [ ] T-06: 运行 `pnpm typecheck` + `pnpm lint` 验证，修复 import 路径
+- [ ] T-02: 创建 `layout/fusion/` 与必要的 `layout/shared/` 子目录（不为 Classic 建新目录）
+- [ ] T-03: 将 Fusion 专用文件移入 `fusion/`，仅更新 Fusion 路径与共享入口 import
+- [ ] T-04: 将不会迫使 Classic 文件改 import 的公共能力移入 `shared/`
+- [ ] T-05: 运行 `pnpm typecheck` + `pnpm lint` 验证，确认未引入 Classic 行为漂移
 
-### Phase 2: useLayoutShared 拆分（中等风险，fusion/classic 可并行）
+### Phase 2: Fusion hook 抽离（中等风险）
 
-- [ ] T-07: 分析 `useLayoutShared.ts` 608 行，标记每个字段的归属（公共 / fusion / classic）
-- [ ] T-08: 创建 `fusion/useFusionLayout.ts`，提取 Fusion 专属逻辑
-- [ ] T-09: 创建 `classic/useClassicLayout.ts`，提取 Classic 专属逻辑
-- [ ] T-10: 精简 `shared/useLayoutShared.ts` 为纯公共层，`LayoutFusion` / `LayoutClassic` 各自组合公共 + 专属 hook
-- [ ] T-11: 更新 `Layout.tsx` import 路径，运行 typecheck + lint
+- [ ] T-06: 分析 `useLayoutShared.ts` 608 行，标记每个字段的归属（公共 / fusion 增量 / classic 冻结）
+- [ ] T-07: 创建 `fusion/useFusionLayout.ts`，提取 Fusion 专属逻辑
+- [ ] T-08: 将 `useLayoutShared.ts` 收口为 Classic-safe 基线，只抽离纯公共 helper；`LayoutFusion` 组合公共层 + Fusion hook
+- [ ] T-09: 更新 `Layout.tsx` / `LayoutFusion.tsx` import 路径，运行 typecheck + lint
 
-### Phase 3: ChatPage isFusionLayout 解耦（高收益，工作量大）
+### Phase 3: ChatPage Fusion 分支解耦（高收益，工作量大）
 
-- [ ] T-12: 创建 `ChatLayoutStrategy` 接口 + `FusionChatLayoutStrategy` / `ClassicChatLayoutStrategy` 两个实现
-- [ ] T-13: 创建 `useChatLayoutStrategy` hook，按 `layoutMode` 返回对应策略
-- [ ] T-14: 重构 ChatPage.tsx，将 26 处 `isFusionLayout` 分支替换为策略对象属性读取；同步改造 3 个子组件（`ChatWorkbenchStatusStrip`、`ChatTerminalToggle`、`FusionChatMainShell`）
-- [ ] T-15: 运行全量测试 `pnpm --filter @openAwork/web test`（如有）+ typecheck + lint
+- [ ] T-10: 创建 `useFusionChatLayout` 或等价 helper，只承接 Fusion 分支的样式 / 回调 / 自动展开规则
+- [ ] T-11: 重构 ChatPage.tsx，将 Fusion 正向分支替换为 helper 读取；Classic fallback 保持原样
+- [ ] T-12: 同步改造 3 个 Fusion 侧子组件（`ChatWorkbenchStatusStrip`、`ChatTerminalToggle`、`FusionChatMainShell`），避免继续把 Classic 逻辑耦合进去
+- [ ] T-13: 运行全量测试 `pnpm --filter @openAwork/web test`（如有）+ typecheck + lint
 
 ### Phase 4: 验证与收口
 
-- [ ] T-16: 手动切换 Fusion ↔ Classic 布局，验证两种模式功能正常
-- [ ] T-17: 验证桌面端（`apps/desktop`）布局切换正常
-- [ ] T-18: 更新 `.agentdocs/index.md` 记录架构决策
+- [ ] T-14: 手动验证 Fusion 新版布局功能正常；Classic 只做回归观察，不作为本轮改动面
+- [ ] T-15: 验证桌面端（`apps/desktop`）Fusion 布局切换正常
+- [ ] T-16: 更新 `.agentdocs/index.md` 记录“Fusion-only，Classic 冻结”的架构决策
 
 ---
 
@@ -291,28 +286,29 @@ ChatPage 通过 `useChatLayoutStrategy(layoutMode)` 获取策略对象，消除�
 
 | Phase | 风险 | 缓解措施 |
 |-------|------|---------|
-| Phase 1 | import 路径遗漏 | typecheck 全量覆盖 |
-| Phase 2 | hook 拆分后状态不同步 | 保持 `useLayoutShared` 返回类型不变，专属 hook 作为扩展 |
-| Phase 3 | 策略对象遗漏边缘 case | 逐行对照 26 处分支 + 3 个子组件透传，保持行为等价 |
-| Phase 3 | ChatPage.tsx 5000+ 行，改动范围大 | 策略对象只替换读取方式，不改变渲染结构 |
+| Phase 1 | Fusion 文件迁移误伤 Classic import | 只迁移 Fusion 专用文件；Classic 路径保持原位 |
+| Phase 2 | hook 抽离后 Classic 行为漂移 | `useLayoutShared` 保持 Classic-safe 基线，不强制旧布局改调用方式 |
+| Phase 3 | Fusion helper 漏掉边缘 case | 逐行对照 Fusion 正向分支与 3 个子组件透传，保持 Classic fallback 原样 |
+| Phase 3 | ChatPage.tsx 5000+ 行，改动范围大 | 只替换 Fusion 读取方式，不重写 Classic 渲染结构 |
 
 ### 执行顺序建议
 
 ```
-Phase 1 (T-01 ~ T-06)  ← 可立即执行，纯机械操作
+Phase 1 (T-01 ~ T-05)  ← 可立即执行，Fusion-only 机械操作
     ↓
-Phase 2 (T-07 ~ T-11)  ← 依赖 Phase 1 的目录结构
+Phase 2 (T-06 ~ T-09)  ← 依赖 Phase 1 的目录结构
     ↓
-Phase 3 (T-12 ~ T-15)  ← 依赖 Phase 2 的 hook 拆分
+Phase 3 (T-10 ~ T-13)  ← 依赖 Phase 2 的 hook 抽离
     ↓
-Phase 4 (T-16 ~ T-18)  ← 验证收口
+Phase 4 (T-14 ~ T-16)  ← 验证收口
 ```
 
-Phase 1 内部：T-01 与 T-02~T-05 可并行（死代码清理不受目录移动影响）。
-Phase 2 内部：T-08 与 T-09 可并行。
+Phase 1 内部：T-01 与 T-02~T-04 可并行（死代码清理不受 Fusion 目录迁移影响）。
+Phase 2 内部：T-07 与 T-08 可分段推进，但不引入 Classic 对称改造。
 
 ### 不在本次范围
 
-- AppSidebar.tsx（1453 行）的内部拆分——单独工作流处理
+- AppSidebar.tsx（1453 行）的内部拆分——旧版 Classic 冻结，不在本工作流处理
 - ChatPage.tsx 整体拆分——单独工作流处理
+- 任何要求继续演进 Classic 旧布局的任务——显式移出范围
 - Fusion 布局功能补齐（F3/F4/F5）——由 `260706-fusion-layout-t1-s2-refactor.md` 跟踪

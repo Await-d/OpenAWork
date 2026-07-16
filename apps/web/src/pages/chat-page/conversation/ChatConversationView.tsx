@@ -26,7 +26,6 @@
 import type { CSSProperties, ReactNode, RefObject } from 'react';
 import type { CommandDescriptor } from '@openAwork/shared';
 import type { UpstreamStreamSummary } from '@openAwork/shared';
-import type { AttachmentItem } from '@openAwork/shared-ui';
 import type { PendingPermissionRequest, PendingQuestionRequest } from '@openAwork/web-client';
 import './ChatConversationView.css';
 import { ChatMessageGroupList } from '../../../components/chat/message/chat-message-group-list.js';
@@ -67,17 +66,11 @@ import { ChatStreamErrorBar } from '../../../components/conversation-runtime/vie
 // ChatTodoFloatingPanel 现在由 ChatTopBar 内部挂载（顶部右侧），本组件不再渲染浮层；
 // 仅保留与 todo 相关的最小 props（sessionTodos / rightOpen），用于消息列展示。
 import { SessionRunStateBar } from '../../../components/conversation-runtime/views/session-run-state-bar.js';
-import type {
-  SessionStateStatus,
-  SessionTodoItem,
-} from '../../../components/conversation-runtime/session/session-runtime.js';
+import type { SessionTodoItem } from '../../../components/conversation-runtime/session/session-runtime.js';
 import type {
   ChatMessage,
-  ComposerMenuState,
   ReasoningEffort,
-  WorkspaceFileMentionItem,
 } from '../../../components/conversation-runtime/messages/support.js';
-import type { ImageEditReferenceArtifact } from './render/image-edit-reference-artifacts.js';
 
 // ─── Props 类型定义 ────────────────────────────────────────────────────────
 
@@ -107,13 +100,14 @@ export interface HistoryEditPromptInput {
 /** 重试提示。 */
 export interface RetryPromptInput {
   text: string;
+  sourceMessageId?: string;
 }
 
 /**
  * SessionConversationView 完整 props。
  *
  * 字段分组（**严格保持顺序便于 review**）：
- * - 必填基础（sessionId、currentUserEmail、gatewayUrl、token）
+ * - 必填基础（sessionId、currentUserEmail、currentUserDisplayName、gatewayUrl、token）
  * - chrome slots（topBar / beforeMessages / afterMessages）
  * - composer 能力开关
  * - 消息列表 props（messages、render entries、pendingPermissions 等）
@@ -128,6 +122,7 @@ export interface ChatConversationViewProps {
   sessionId: string | null;
   sessionSource: SessionConversationSource;
   currentUserEmail: string;
+  currentUserDisplayName?: string;
   gatewayUrl: string;
   token: string | null;
 
@@ -293,7 +288,9 @@ export interface ChatConversationViewProps {
   input: string;
   setInput: React.Dispatch<React.SetStateAction<string>>;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
-  onComposerSubmit: (payload: UnifiedComposerSubmitPayload) => Promise<void> | void;
+  onComposerSubmit: (
+    payload: UnifiedComposerSubmitPayload,
+  ) => Promise<boolean | void> | boolean | void;
   onStopComposer: () => void | Promise<void>;
   onComposerModelSelect?: (providerId: string, modelId: string) => Promise<void>;
   onFastEnabledChange?: (enabled: boolean) => void;
@@ -302,6 +299,7 @@ export interface ChatConversationViewProps {
   onReasoningEffortChange: (effort: ReasoningEffort) => void;
   onManualAgentChange: (agentId: string) => void;
   onClearManualAgentId: () => void;
+  onEditPreviousUserMessage?: () => void;
   onContinueEditingImage?: () => void;
   onNavigateToArtifacts?: () => void;
   onSelectImageReferenceArtifactId?: (id: string | null) => void;
@@ -395,6 +393,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
   const {
     sessionId,
     currentUserEmail,
+    currentUserDisplayName,
     gatewayUrl,
     token,
 
@@ -444,9 +443,6 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
     compact,
     contentMaxWidth,
     centerContent,
-
-    sessionTodos,
-    rightOpen,
 
     activePendingQuestion,
     inlineQuestionAnswers,
@@ -513,6 +509,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
     onReasoningEffortChange,
     onManualAgentChange,
     onClearManualAgentId,
+    onEditPreviousUserMessage,
     onContinueEditingImage,
     onNavigateToArtifacts,
     onSelectImageReferenceArtifactId,
@@ -525,7 +522,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
 
   const composerFeatures = buildComposerFeatures(composerExtras);
 
-  const snapshotAwareAction = useSnapshotAwareAction({ sessionId, gatewayUrl });
+  const snapshotAwareAction = useSnapshotAwareAction({ sessionId, gatewayUrl, messages });
 
   const showWelcome =
     welcomeScreen !== undefined &&
@@ -584,6 +581,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
         onResendCurrent={(text, editedInputParts) => {
           snapshotAwareAction.checkAndExecute({
             action: 'edit',
+            sourceMessageId: historyEditPrompt?.messageId,
             onProceed: () => onResendHistoryEdit(text, editedInputParts),
           });
         }}
@@ -602,6 +600,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
         onRetryCurrent={() => {
           snapshotAwareAction.checkAndExecute({
             action: 'retry',
+            sourceMessageId: retryPrompt?.sourceMessageId,
             onProceed: onRetryCurrent,
           });
         }}
@@ -673,6 +672,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
                     activeModelLabel={activeModelLabel}
                     activeProviderId={activeProviderId}
                     bottomRef={bottomRef}
+                    currentUserDisplayName={currentUserDisplayName}
                     currentUserEmail={currentUserEmail}
                     groups={groupedMessageEntries}
                     pendingPermissions={pendingPermissions}
@@ -833,6 +833,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
           onReasoningEffortChange={onReasoningEffortChange}
           onManualAgentChange={onManualAgentChange}
           onClearManualAgentId={onClearManualAgentId}
+          onEditPreviousUserMessage={onEditPreviousUserMessage}
           onContinueEditingImage={onContinueEditingImage}
           onNavigateToArtifacts={onNavigateToArtifacts}
           onSelectImageReferenceArtifactId={onSelectImageReferenceArtifactId}

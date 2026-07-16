@@ -38,11 +38,9 @@ export interface TeamMultiLayerFeedProps {
   activeModelLabel?: string;
   activeProviderId: string;
   providerCatalog: Map<string, { id: string; name: string; type: string }>;
-  /** 当前用户邮箱。 */
   currentUserEmail: string;
-  /** 滚动容器 ref。 */
+  currentUserDisplayName?: string;
   scrollRegionRef: RefObject<HTMLDivElement | null>;
-  /** 权限审批解析器。 */
   resolveInlinePermissionActions?: (requestId: string) =>
     | {
         errorMessage?: string;
@@ -385,6 +383,7 @@ export function TeamMultiLayerFeed({
   activeProviderId,
   providerCatalog,
   currentUserEmail,
+  currentUserDisplayName,
   scrollRegionRef,
   resolveInlinePermissionActions,
 }: TeamMultiLayerFeedProps): React.ReactElement {
@@ -472,6 +471,7 @@ export function TeamMultiLayerFeed({
               activeModelLabel={activeModelLabel}
               activeProviderId={activeProviderId}
               bottomRef={STUB_BOTTOM_REF}
+              currentUserDisplayName={currentUserDisplayName}
               currentUserEmail={currentUserEmail}
               groups={groupedEntries}
               providerCatalog={providerCatalog}

@@ -61,6 +61,7 @@ interface ChatMessageGroupListProps {
   activeModelLabel?: string;
   activeProviderId: string;
   bottomRef: React.RefObject<HTMLDivElement | null>;
+  currentUserDisplayName?: string;
   currentUserEmail: string;
   groups: ChatRenderGroup[];
   pendingPermissions?: InlinePermissionQuickBarPermission[];
@@ -84,6 +85,7 @@ export function ChatMessageGroupList({
   activeModelLabel,
   activeProviderId,
   bottomRef,
+  currentUserDisplayName,
   currentUserEmail,
   groups,
   pendingPermissions,
@@ -107,6 +109,7 @@ export function ChatMessageGroupList({
             activeModelId={activeModelId}
             activeModelLabel={activeModelLabel}
             activeProviderId={activeProviderId}
+            currentUserDisplayName={currentUserDisplayName}
             currentUserEmail={currentUserEmail}
             group={group}
             providerCatalog={providerCatalog}
@@ -130,6 +133,7 @@ export function ChatMessageGroupList({
       activeModelLabel={activeModelLabel}
       activeProviderId={activeProviderId}
       bottomRef={bottomRef}
+      currentUserDisplayName={currentUserDisplayName}
       currentUserEmail={currentUserEmail}
       dividerLabels={dividerLabels}
       groups={groups}
@@ -174,6 +178,7 @@ function VirtualizedChatGroupViewport({
   activeModelLabel,
   activeProviderId,
   bottomRef,
+  currentUserDisplayName,
   currentUserEmail,
   dividerLabels,
   groups,
@@ -369,6 +374,7 @@ function VirtualizedChatGroupViewport({
                 activeModelId={activeModelId}
                 activeModelLabel={activeModelLabel}
                 activeProviderId={activeProviderId}
+                currentUserDisplayName={currentUserDisplayName}
                 currentUserEmail={currentUserEmail}
                 group={group}
                 providerCatalog={providerCatalog}
@@ -393,6 +399,7 @@ const ChatGroupBlock = React.memo(function ChatGroupBlock({
   activeModelId,
   activeModelLabel,
   activeProviderId,
+  currentUserDisplayName,
   currentUserEmail,
   group,
   providerCatalog,
@@ -401,6 +408,7 @@ const ChatGroupBlock = React.memo(function ChatGroupBlock({
   activeModelId: string;
   activeModelLabel?: string;
   activeProviderId: string;
+  currentUserDisplayName?: string;
   currentUserEmail: string;
   group: ChatRenderGroup;
   providerCatalog?: ReadonlyMap<string, ChatProviderDescriptor>;
@@ -429,6 +437,7 @@ const ChatGroupBlock = React.memo(function ChatGroupBlock({
             providerType={resolvedProvider?.type}
             modelId={entry.message.model?.trim() || activeModelLabel || activeModelId}
             email={currentUserEmail}
+            currentUserDisplayName={currentUserDisplayName}
             actions={entryIndex === 0 ? (group.actions ?? entry.actions) : entry.actions}
             groupedWithPrevious={entryIndex > 0}
             identityOverride={entry.identityOverride}

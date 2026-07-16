@@ -131,7 +131,11 @@ describe('createWorkflowsClient mutation error handling', () => {
       return {
         ok: false,
         status: 500,
-        json: async () => ({ error: 'AI_API_KEY missing' }),
+        json: async () => ({
+          code: 'upstream_unavailable',
+          error: '上游模型暂时不可用，请稍后重试。',
+          retryable: true,
+        }),
       } as unknown as Response;
     }) as typeof fetch;
 
@@ -141,7 +145,14 @@ describe('createWorkflowsClient mutation error handling', () => {
       client.optimizePrompt('token-1', {
         originalPrompt: 'summarize this',
       }),
-    ).rejects.toThrow('AI_API_KEY missing');
+    ).rejects.toMatchObject({
+      message: '上游模型暂时不可用，请稍后重试。',
+      data: {
+        code: 'upstream_unavailable',
+        retryable: true,
+      },
+      status: 500,
+    });
   });
 
   it('translate 网络异常时会转换成中文网络错误', async () => {

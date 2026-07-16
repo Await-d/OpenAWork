@@ -22,6 +22,7 @@ import type { ImageEditReferenceArtifact } from '../../../pages/chat-page/conver
 import type { ChatImageGenerationReferenceArtifact } from '../image/ChatImageGenerationControls.js';
 import type { ComposerWorkspaceCatalog } from '../../../hooks/chat/useComposerWorkspaceCatalog.js';
 import { useUnifiedComposerState } from './use-unified-composer-state.js';
+import { buildPromptOptimizationContext } from './prompt-optimization-context.js';
 
 export interface UnifiedComposerFeatures {
   attachments?: boolean;
@@ -101,7 +102,7 @@ export interface UnifiedComposerProps {
   } | null;
   artifactsWorkspaceHref?: string | null;
   features?: UnifiedComposerFeatures;
-  onSubmit: (payload: UnifiedComposerSubmitPayload) => void | Promise<void>;
+  onSubmit: (payload: UnifiedComposerSubmitPayload) => boolean | void | Promise<boolean | void>;
   onStop: () => void | Promise<void>;
   onModelSelect?: (providerId: string, modelId: string) => Promise<void>;
   onToggleWebSearch: () => void;
@@ -109,6 +110,7 @@ export interface UnifiedComposerProps {
   onReasoningEffortChange: (effort: ReasoningEffort) => void;
   onManualAgentChange: (agentId: string) => void;
   onClearManualAgentId: () => void;
+  onEditPreviousUserMessage?: () => void;
   onContinueEditingImage?: () => void;
   onNavigateToArtifacts?: () => void;
   onSelectImageReferenceArtifactId?: (id: string | null) => void;
@@ -210,6 +212,7 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
     onReasoningEffortChange,
     onManualAgentChange,
     onClearManualAgentId,
+    onEditPreviousUserMessage,
     onContinueEditingImage,
     onNavigateToArtifacts,
     onSelectImageReferenceArtifactId,
@@ -364,6 +367,7 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
     fileInputRef,
     modelPickerBtnRef,
     modelSettingsBtnRef,
+    isBrowsingInputHistory,
     agentOptions,
     defaultAgentLabel,
     queuedComposerPreviews,
@@ -387,6 +391,7 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
     handlePaste,
     applyComposerSelection,
     sendMessage,
+    restoreInputFromHistory,
     slashCommandItems,
     mentionItems,
     attachedFiles,
@@ -398,12 +403,51 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
       const client = createWorkflowsClient(gatewayUrl);
       return client.optimizePrompt(token, {
         originalPrompt: text,
-        context: 'AI对话提示词优化：提取关键内容、转换为专业术语、增强指令明确性',
+        context: buildPromptOptimizationContext({
+          dialogueMode,
+          providerId: activeProviderId,
+          providerType: activeProvider?.type,
+          modelId: activeModelId,
+          input: text,
+          imageGenerationMode,
+          imageGenerationBackground: imageGenerationDefaults.background,
+          imageGenerationOutputFormat: imageGenerationDefaults.outputFormat,
+          imageGenerationQuality: imageGenerationDefaults.quality,
+          imageGenerationSize: imageGenerationDefaults.size,
+          webSearchEnabled,
+          thinkingEnabled,
+          reasoningEffort,
+          attachmentCount: attachmentItems.length,
+          hasAgentOverride: manualAgentId.trim().length > 0,
+          hasSlashCommands: features.slashCommands,
+          hasMentions: features.mentions,
+          hasSelectedImageReference: Boolean(selectedImageRefIdProp),
+        }),
         targetAudience: 'AI助手',
         candidateCount: 3,
       });
     },
-    [gatewayUrl, token],
+    [
+      activeModelId,
+      activeProvider?.type,
+      activeProviderId,
+      attachmentItems.length,
+      dialogueMode,
+      features.mentions,
+      features.slashCommands,
+      gatewayUrl,
+      imageGenerationDefaults.background,
+      imageGenerationDefaults.outputFormat,
+      imageGenerationDefaults.quality,
+      imageGenerationDefaults.size,
+      imageGenerationMode,
+      manualAgentId,
+      reasoningEffort,
+      selectedImageRefIdProp,
+      thinkingEnabled,
+      token,
+      webSearchEnabled,
+    ],
   );
 
   const composerVariant = props.variant;
@@ -504,8 +548,11 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
         agentOptions={features.agentSwitch ? agentOptions : []}
         manualAgentId={manualAgentId}
         defaultAgentLabel={defaultAgentLabel}
+        isBrowsingInputHistory={isBrowsingInputHistory}
         onChangeManualAgentId={onManualAgentChange}
         onClearManualAgentId={onClearManualAgentId}
+        onEditPreviousUserMessage={onEditPreviousUserMessage}
+        onRestoreInputFromHistory={restoreInputFromHistory}
         onOptimizePrompt={features.promptOptimize && token ? handleOptimizePrompt : undefined}
         onDropFiles={appendFiles}
         onReplaceInput={(nextValue: string) => setInput(nextValue)}

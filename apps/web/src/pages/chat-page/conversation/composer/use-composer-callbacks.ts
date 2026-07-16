@@ -1,4 +1,3 @@
-import { useCallback } from 'react';
 import type {
   SlashCommandItem,
   MentionItem,
@@ -25,9 +24,12 @@ export interface ComposerCallbacksOptions {
   canStopCurrentSessionStream: boolean;
   remoteSessionBusyState: unknown;
   stopActiveMessage: () => void;
-  enqueueComposerMessage: () => void;
+  enqueueComposerMessage: () => Promise<boolean>;
   sendMessage: () => Promise<boolean>;
   appendFiles: (files: File[]) => void;
+  navigateInputHistory: (direction: 'older' | 'newer') => boolean;
+  isBrowsingInputHistory: boolean;
+  exitInputHistoryBrowsing: () => void;
 }
 
 export interface ComposerCallbacksReturn {
@@ -57,12 +59,16 @@ export function useComposerCallbacks(opts: ComposerCallbacksOptions): ComposerCa
     enqueueComposerMessage,
     sendMessage,
     appendFiles,
+    navigateInputHistory,
+    isBrowsingInputHistory,
+    exitInputHistoryBrowsing,
   } = opts;
 
   function replaceComposerToken(start: number, end: number, replacement: string) {
     const before = input.slice(0, start);
     const after = input.slice(end);
     const nextValue = `${before}${replacement}${after}`;
+    exitInputHistoryBrowsing();
     setInput(nextValue);
     setComposerMenu(null);
     requestAnimationFrame(() => {
@@ -85,6 +91,20 @@ export function useComposerCallbacks(opts: ComposerCallbacksOptions): ComposerCa
       return;
     }
     replaceComposerToken(composerMenu.start, composerMenu.end, item.insertText);
+  }
+
+  function shouldNavigateOlderInputHistory(textarea: HTMLTextAreaElement) {
+    const selectionStart = textarea.selectionStart ?? 0;
+    const selectionEnd = textarea.selectionEnd ?? selectionStart;
+    if (selectionStart !== selectionEnd) {
+      return false;
+    }
+
+    if (!input.includes('\n')) {
+      return true;
+    }
+
+    return selectionStart === 0;
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -130,6 +150,26 @@ export function useComposerCallbacks(opts: ComposerCallbacksOptions): ComposerCa
         return;
       }
     }
+    const isPlainHistoryNavigationKey =
+      !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.nativeEvent.isComposing;
+    if (
+      isPlainHistoryNavigationKey &&
+      e.key === 'ArrowUp' &&
+      shouldNavigateOlderInputHistory(e.currentTarget) &&
+      navigateInputHistory('older')
+    ) {
+      e.preventDefault();
+      return;
+    }
+    if (
+      isPlainHistoryNavigationKey &&
+      e.key === 'ArrowDown' &&
+      isBrowsingInputHistory &&
+      navigateInputHistory('newer')
+    ) {
+      e.preventDefault();
+      return;
+    }
     if ((stopCapability === 'precise' || stopCapability === 'best_effort') && e.key === 'Escape') {
       e.preventDefault();
       void stopActiveMessage();
@@ -141,11 +181,7 @@ export function useComposerCallbacks(opts: ComposerCallbacksOptions): ComposerCa
       !e.shiftKey
     ) {
       e.preventDefault();
-      enqueueComposerMessage();
-      return;
-    }
-    if (canStopCurrentSessionStream && e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
+      void enqueueComposerMessage();
       return;
     }
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -156,6 +192,7 @@ export function useComposerCallbacks(opts: ComposerCallbacksOptions): ComposerCa
 
   function handleInputChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     const nextValue = e.target.value;
+    exitInputHistoryBrowsing();
     setInput(nextValue);
     updateComposerMenu(nextValue, e.target.selectionStart ?? nextValue.length);
   }
@@ -185,6 +222,7 @@ export function useComposerCallbacks(opts: ComposerCallbacksOptions): ComposerCa
     if (imageFiles.length > 0 || shouldInterceptTextPaste) {
       e.preventDefault();
       if (sanitizedPastedText.length > 0) {
+        exitInputHistoryBrowsing();
         const target = e.currentTarget;
         const selectionStart = target.selectionStart ?? target.value.length;
         const selectionEnd = target.selectionEnd ?? selectionStart;

@@ -21,6 +21,7 @@ import {
   createPermissionRepliedEvent,
 } from '../session/session-permission-events.js';
 import { publishSessionRunEvent } from '../session/session-run-events.js';
+import { markPermissionNotificationsReadByRequestIds } from '../session/notification-store.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { setPersistedSessionStateStatus } from './stream.js';
 import {
@@ -406,6 +407,11 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
         }),
         requestClientRequestId ? { clientRequestId: requestClientRequestId } : undefined,
       );
+      markPermissionNotificationsReadByRequestIds({
+        requestIds: [body.requestId, ...cascadedRequestIds],
+        sessionId,
+        userId: user.sub,
+      });
 
       if (body.decision === 'reject' && !continueOnDeny && requestClientRequestId) {
         clearInternalTeamResumeRequest(requestClientRequestId);

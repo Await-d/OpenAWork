@@ -1,8 +1,11 @@
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { editor as MonacoEditorNs } from 'monaco-editor';
 import type { OpenFile, RevealTarget } from '../../../hooks/editor/useFileEditor.js';
-import { isBinaryPreviewKind } from '../../../utils/file/file-preview.js';
-import { getFilePreviewKind } from '../../../utils/file/file-preview.js';
+import {
+  getFilePreviewKind,
+  isBinaryPreviewKind,
+  isNonTextPreviewKind,
+} from '../../../utils/file/file-preview.js';
 import { ContextMenu, type ContextMenuItem } from '../../common/display/ContextMenu.js';
 import { EditorTabBar } from '../tabs/EditorTabBar.js';
 import { FileBreadcrumb } from '../tabs/FileBreadcrumb.js';
@@ -180,6 +183,7 @@ export function FileEditorPanel({
     () => (activeFile ? getFilePreviewKind(activeFile.path) : null),
     [activeFile],
   );
+  const isPreviewOnly = isNonTextPreviewKind(activePreviewKind);
 
   // Track the last file path we auto-applied a default panel mode for.
   // We only want to auto-switch to preview when the user opens a NEW
@@ -211,7 +215,7 @@ export function FileEditorPanel({
     // would otherwise be dumped into Monaco.
     lastAutoAppliedPathRef.current = currentPath;
 
-    if (isBinaryPreviewKind(activePreviewKind)) {
+    if (isPreviewOnly) {
       setPanelMode('preview');
       return;
     }
@@ -248,13 +252,13 @@ export function FileEditorPanel({
   useEffect(() => {
     const currentPath = activeFile?.path;
     if (!currentPath || !activePreviewKind) return;
-    if (isBinaryPreviewKind(activePreviewKind)) return;
+    if (isPreviewOnly) return;
     writePanelModeFor(currentPath, panelMode);
-  }, [activeFile?.path, activePreviewKind, panelMode]);
+  }, [activeFile?.path, isPreviewOnly, activePreviewKind, panelMode]);
 
   // Lock panelMode to 'preview' for binary files — there's nothing
   // useful to show in the code editor for these.
-  const effectivePanelMode = isBinaryPreviewKind(activePreviewKind) ? 'preview' : panelMode;
+  const effectivePanelMode = isPreviewOnly ? 'preview' : panelMode;
 
   const handlePreview = useCallback(
     (path: string) => {
@@ -344,7 +348,7 @@ export function FileEditorPanel({
 
     const targetKind = getFilePreviewKind(targetPath);
     const previewSupported = targetKind !== null;
-    const isBinary = isBinaryPreviewKind(targetKind);
+    const isBinary = isNonTextPreviewKind(targetKind);
     const targetIdx = files.findIndex((f) => f.path === targetPath);
     const hasOthers = files.length > 1;
     const hasRight = targetIdx >= 0 && targetIdx < files.length - 1;
@@ -514,12 +518,8 @@ export function FileEditorPanel({
                     type="button"
                     aria-pressed={effectivePanelMode === 'code'}
                     onClick={() => setPanelMode('code')}
-                    disabled={isBinaryPreviewKind(activePreviewKind)}
-                    title={
-                      isBinaryPreviewKind(activePreviewKind)
-                        ? '二进制文件无法以代码形式查看'
-                        : undefined
-                    }
+                    disabled={isPreviewOnly}
+                    title={isPreviewOnly ? '该文件只能以预览方式查看' : undefined}
                     style={{
                       height: 24,
                       padding: '0 10px',
@@ -530,8 +530,8 @@ export function FileEditorPanel({
                       color: effectivePanelMode === 'code' ? 'var(--fg-strong)' : 'var(--fg-muted)',
                       fontSize: 11,
                       fontWeight: effectivePanelMode === 'code' ? 600 : 500,
-                      cursor: isBinaryPreviewKind(activePreviewKind) ? 'not-allowed' : 'pointer',
-                      opacity: isBinaryPreviewKind(activePreviewKind) ? 0.5 : 1,
+                      cursor: isPreviewOnly ? 'not-allowed' : 'pointer',
+                      opacity: isPreviewOnly ? 0.5 : 1,
                     }}
                   >
                     代码

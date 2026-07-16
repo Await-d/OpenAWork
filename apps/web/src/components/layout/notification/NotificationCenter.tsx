@@ -18,10 +18,14 @@ import type {
 import { subscribeNotificationPreferenceRefresh } from '../../../utils/chat/notification-preference-events.js';
 import { preloadRouteModuleByPath } from '../../../routes/preloadable-route-modules.js';
 import { requestSessionStreamResumeAttach } from '../../../utils/session/session-stream-resume-events.js';
+import { subscribeSessionListRefresh } from '../../../utils/session/session-list-events.js';
 import { toast } from '../../common/feedback/ToastNotification.js';
 import { BellIcon } from './notification-icons.js';
 import { NotificationPanel } from './NotificationPanel.js';
-import { parsePermissionNotificationBody } from './NotificationItem.js';
+import {
+  matchPendingPermissionForNotification,
+  parsePermissionNotificationBody,
+} from './NotificationItem.js';
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -342,12 +346,14 @@ export default function NotificationCenter({
       void permClient
         .listPending(accessToken, sessionId)
         .then((pending) => {
-          const firstPending = pending.find((p) => p.status === 'pending');
-          if (firstPending) {
-            const updates: Record<string, PendingPermissionRequest> = {};
-            notifs.forEach((n) => {
-              updates[n.id] = firstPending;
-            });
+          const updates: Record<string, PendingPermissionRequest> = {};
+          notifs.forEach((notification) => {
+            const matched = matchPendingPermissionForNotification(notification, pending);
+            if (matched) {
+              updates[notification.id] = matched;
+            }
+          });
+          if (Object.keys(updates).length > 0) {
             setPermissionDetails((prev) => ({ ...prev, ...updates }));
           }
         })
@@ -368,17 +374,20 @@ export default function NotificationCenter({
       setReplyingIds((prev) => new Set(prev).add(notification.id));
       try {
         const permClient = createPermissionsClient(gatewayUrl);
-        const details = permissionDetails[notification.id];
-        let requestId = details?.requestId;
+        const cachedDetails = permissionDetails[notification.id];
+        let details = cachedDetails;
+        let requestId = cachedDetails?.requestId;
         if (!requestId) {
           const pending = await permClient.listPending(accessToken, notification.sessionId);
-          const firstPending = pending.find((p) => p.status === 'pending');
-          if (!firstPending) {
+          const matched = matchPendingPermissionForNotification(notification, pending);
+          if (!matched) {
             toast('该权限请求已被处理或已过期', 'info');
             void handleDismissNotification(notification);
             return;
           }
-          requestId = firstPending.requestId;
+          details = matched;
+          requestId = matched.requestId;
+          setPermissionDetails((prev) => ({ ...prev, [notification.id]: matched }));
         }
         let alwaysOverride: string[] | undefined;
         if (decision !== 'once' && decision !== 'reject' && details) {
@@ -464,6 +473,12 @@ export default function NotificationCenter({
       void loadPreferences().catch(() => undefined);
     });
   }, [loadPreferences]);
+
+  useEffect(() => {
+    return subscribeSessionListRefresh(() => {
+      void loadNotifications().catch(() => undefined);
+    });
+  }, [loadNotifications]);
 
   if (!accessToken) return null;
 

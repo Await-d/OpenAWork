@@ -130,6 +130,7 @@ export interface ChatRightPanelProps {
   setRightTab: (tab: RightPanelTabId) => void;
   selectedChildSessionId: string | null;
   currentUserEmail: string | undefined;
+  currentUserDisplayName?: string;
   gatewayUrl: string;
   token: string | null | undefined;
   navigate: (path: string) => void;
@@ -211,6 +212,7 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
     setRightTab,
     selectedChildSessionId,
     currentUserEmail,
+    currentUserDisplayName,
     gatewayUrl,
     token,
     navigate,
@@ -410,6 +412,7 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
                 <SubSessionDetailPanel
                   childSessionId={selectedChildSessionId}
                   currentUserEmail={currentUserEmail ?? ''}
+                  currentUserDisplayName={currentUserDisplayName}
                   gatewayUrl={gatewayUrl}
                   onOpenFullSession={(nextSessionId) => {
                     void navigate(`/chat/${nextSessionId}`);

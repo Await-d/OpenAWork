@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TerminalPanel } from './TerminalPanel.js';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
@@ -130,5 +130,29 @@ describe('TerminalPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'mock close' }));
 
     expect(useUIStateStore.getState().terminalPanelOpened).toBe(false);
+  });
+
+  it('最后一个活跃终端结束后自动收起 fusion 终端面板', async () => {
+    useUIStateStore.setState({
+      terminalPanelOpened: true,
+    });
+
+    const { rerender } = render(
+      <TerminalPanel
+        {...DEFAULT_PROPS}
+        terminals={[makeTerminal({ terminalId: 'terminal-active', status: 'running' })]}
+      />,
+    );
+
+    rerender(
+      <TerminalPanel
+        {...DEFAULT_PROPS}
+        terminals={[makeTerminal({ terminalId: 'terminal-active', status: 'exited' })]}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(useUIStateStore.getState().terminalPanelOpened).toBe(false);
+    });
   });
 });

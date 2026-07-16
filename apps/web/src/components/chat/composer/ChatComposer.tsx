@@ -18,9 +18,11 @@ import { ChatComposerQueue } from './ChatComposerQueue.js';
 import { ChatComposerToolbar } from './ChatComposerToolbar.js';
 import { CompactComposerStatsSummary, ComposerStatsBar } from './ComposerStatsBar.js';
 import type { ComposerStatsData } from './ComposerStatsBar.js';
+import type { ComposerOptimizeError } from './composer-optimize-error.js';
 import { getComposerCharacterCount } from './composer-character-count.js';
 import { useComposerPlaceholder } from './use-composer-placeholder.js';
 import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
+import { getUserVisibleErrorDescriptor } from '../../../utils/errors/user-visible-error.js';
 import './ChatComposer.css';
 
 interface ChatComposerProps {
@@ -98,6 +100,9 @@ interface ChatComposerProps {
   onUpdateImageGenerationDefaults: (updates: Partial<SavedChatImageDefaults>) => void;
   onChangeManualAgentId: (agentId: string) => void;
   onClearManualAgentId: () => void;
+  onEditPreviousUserMessage?: () => void;
+  isBrowsingInputHistory?: boolean;
+  onRestoreInputFromHistory?: () => boolean;
   onDropFiles?: (files: File[]) => void;
   onOptimizePrompt?: (text: string) => Promise<PromptOptimizerResult>;
   onReplaceInput?: (nextValue: string) => void;
@@ -194,6 +199,9 @@ export function ChatComposer({
   onUpdateImageGenerationDefaults,
   onChangeManualAgentId,
   onClearManualAgentId,
+  onEditPreviousUserMessage,
+  isBrowsingInputHistory = false,
+  onRestoreInputFromHistory,
   onDropFiles,
   onOptimizePrompt,
   onReplaceInput,
@@ -209,7 +217,7 @@ export function ChatComposer({
   const composerDragCounterRef = useRef(0);
   const [optimizeLoading, setOptimizeLoading] = useState(false);
   const [optimizeResult, setOptimizeResult] = useState<PromptOptimizerResult | null>(null);
-  const [optimizeError, setOptimizeError] = useState<string | null>(null);
+  const [optimizeError, setOptimizeError] = useState<ComposerOptimizeError | null>(null);
   const optimizePopoverRef = useRef<HTMLDivElement | null>(null);
   const isHomeVariant = variant === 'home';
   const [undoText, setUndoText] = useState<string | null>(null);
@@ -258,6 +266,7 @@ export function ChatComposer({
   }, [imagePreviews]);
 
   const currentItems = composerMenu?.type === 'slash' ? slashCommandItems : mentionItems;
+  const lastEmptyEscapeAtRef = useRef(0);
 
   const agentCycleList = useMemo(
     () => ['__default__', ...agentOptions.map((a) => a.id)],
@@ -277,15 +286,26 @@ export function ChatComposer({
     stopCapability !== 'none' ? stopCapability : canStopSession ? 'precise' : 'none';
   const showStopAction =
     streaming || effectiveStopCapability === 'precise' || effectiveStopCapability === 'best_effort';
+  const hasRemoteSessionBusyState = !showStopAction && sessionBusyState !== null;
+  const showQueueAction =
+    !imageGenerationMode &&
+    Boolean(onQueueMessage) &&
+    (showStopAction || hasRemoteSessionBusyState) &&
+    canSubmit;
+  const composerKeyboardShortcuts = showQueueAction
+    ? 'Tab Enter'
+    : showStopAction
+      ? 'Escape'
+      : undefined;
 
-  const handleAgentTabCycle = useCallback(
-    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  const advanceAgentSelection = useCallback(
+    (direction: 'next' | 'previous' = 'next') => {
       if (agentCycleList.length <= 1) return;
-      e.preventDefault();
       const currentIdx = agentCycleList.indexOf(effectiveAgentId);
-      const nextIdx = e.shiftKey
-        ? (currentIdx - 1 + agentCycleList.length) % agentCycleList.length
-        : (currentIdx + 1) % agentCycleList.length;
+      const nextIdx =
+        direction === 'previous'
+          ? (currentIdx - 1 + agentCycleList.length) % agentCycleList.length
+          : (currentIdx + 1) % agentCycleList.length;
       const nextId = agentCycleList[nextIdx] ?? '__default__';
       if (nextId === '__default__') {
         onClearManualAgentId();
@@ -298,8 +318,35 @@ export function ChatComposer({
 
   const wrappedOnKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === 'Tab' && !composerMenu) {
-        handleAgentTabCycle(e);
+      if (e.key !== 'Escape') {
+        lastEmptyEscapeAtRef.current = 0;
+      }
+      if (e.key === 'Tab' && !composerMenu && showQueueAction && !e.shiftKey) {
+        e.preventDefault();
+        void onQueueMessage?.();
+        return;
+      }
+      if (e.key === 'Escape' && isBrowsingInputHistory && onRestoreInputFromHistory) {
+        e.preventDefault();
+        lastEmptyEscapeAtRef.current = 0;
+        onRestoreInputFromHistory();
+        return;
+      }
+      if (
+        e.key === 'Escape' &&
+        !showStopAction &&
+        !composerMenu &&
+        input.length === 0 &&
+        onEditPreviousUserMessage
+      ) {
+        e.preventDefault();
+        const now = Date.now();
+        if (now - lastEmptyEscapeAtRef.current <= 700) {
+          lastEmptyEscapeAtRef.current = 0;
+          onEditPreviousUserMessage();
+          return;
+        }
+        lastEmptyEscapeAtRef.current = now;
         return;
       }
       if (
@@ -310,6 +357,7 @@ export function ChatComposer({
         !streaming
       ) {
         e.preventDefault();
+        lastEmptyEscapeAtRef.current = 0;
         setUndoText(input);
         onReplaceInput?.('');
         return;
@@ -318,12 +366,16 @@ export function ChatComposer({
     },
     [
       composerMenu,
-      handleAgentTabCycle,
-      onKeyDown,
-      showStopAction,
       input,
-      streaming,
+      onEditPreviousUserMessage,
+      onKeyDown,
+      onQueueMessage,
       onReplaceInput,
+      onRestoreInputFromHistory,
+      showQueueAction,
+      showStopAction,
+      streaming,
+      isBrowsingInputHistory,
     ],
   );
 
@@ -347,6 +399,24 @@ export function ChatComposer({
     [onInputPaste],
   );
 
+  const runOptimizePrompt = useCallback(() => {
+    if (!onOptimizePrompt || optimizeLoading || streaming || input.trim().length === 0) {
+      return;
+    }
+    setOptimizeLoading(true);
+    setOptimizeError(null);
+    void onOptimizePrompt(input.trim())
+      .then((result) => {
+        setOptimizeResult(result);
+      })
+      .catch((error: unknown) => {
+        setOptimizeError(getUserVisibleErrorDescriptor(error, '提示词优化失败，请稍后重试。'));
+      })
+      .finally(() => {
+        setOptimizeLoading(false);
+      });
+  }, [input, onOptimizePrompt, optimizeLoading, streaming]);
+
   useEffect(() => {
     composerItemRefs.current.length = currentItems.length;
   }, [currentItems.length]);
@@ -367,13 +437,6 @@ export function ChatComposer({
 
     selectedItem.scrollIntoView({ block: 'nearest' });
   }, [composerMenu, currentItems.length]);
-
-  const hasRemoteSessionBusyState = !showStopAction && sessionBusyState !== null;
-  const showQueueAction =
-    !imageGenerationMode &&
-    Boolean(onQueueMessage) &&
-    (showStopAction || hasRemoteSessionBusyState) &&
-    canSubmit;
 
   return (
     <div
@@ -593,6 +656,7 @@ export function ChatComposer({
                   onFocus={composerPlaceholder.onFocus}
                   onBlur={composerPlaceholder.onBlur}
                   placeholder={composerPlaceholder.placeholder}
+                  aria-keyshortcuts={composerKeyboardShortcuts}
                   rows={3}
                   style={{
                     width: '100%',
@@ -618,7 +682,9 @@ export function ChatComposer({
                   </span>
                 )}
                 {agentOptions.length > 1 && (
-                  <span
+                  <button
+                    type="button"
+                    onClick={() => advanceAgentSelection()}
                     style={{
                       position: 'absolute',
                       top: 6,
@@ -642,10 +708,12 @@ export function ChatComposer({
                       cursor: 'pointer',
                       flexShrink: 0,
                       userSelect: 'none',
+                      appearance: 'none',
                       transition:
                         'color 150ms ease, background 150ms ease, border-color 150ms ease',
                     }}
-                    title="Tab 切换代理"
+                    title="点击切换代理"
+                    aria-label={`当前代理：${currentAgentLabel}，点击切换代理`}
                   >
                     <svg
                       width="10"
@@ -662,7 +730,7 @@ export function ChatComposer({
                       <path d="M9 22h6" />
                     </svg>
                     {currentAgentLabel}
-                  </span>
+                  </button>
                 )}
               </div>
 
@@ -741,6 +809,7 @@ export function ChatComposer({
                 optimizeResult={optimizeResult}
                 optimizePopoverRef={optimizePopoverRef}
                 onClearError={() => setOptimizeError(null)}
+                onRetryOptimize={optimizeError?.retryable ? runOptimizePrompt : undefined}
                 onClose={() => {
                   setOptimizeResult(null);
                   setOptimizeError(null);
@@ -794,15 +863,15 @@ export function ChatComposer({
                 showStopAction={showStopAction}
                 showQueueAction={showQueueAction}
                 queuedMessageCount={queuedMessages.length}
+                optimizeError={optimizeError}
                 optimizeLoading={optimizeLoading}
                 optimizeResult={optimizeResult}
                 gatewayUrl={gatewayUrl}
                 snippetsToken={snippetsToken}
                 onInsertAtCursor={onInsertAtCursor}
-                onOptimizePrompt={onOptimizePrompt}
-                onSetOptimizeLoading={setOptimizeLoading}
-                onSetOptimizeResult={setOptimizeResult}
-                onSetOptimizeError={setOptimizeError}
+                onRunOptimizePrompt={runOptimizePrompt}
+                onClearOptimizeResult={() => setOptimizeResult(null)}
+                onClearOptimizeError={() => setOptimizeError(null)}
                 onQueueMessage={onQueueMessage}
                 onSend={onSend}
                 onStop={onStop}

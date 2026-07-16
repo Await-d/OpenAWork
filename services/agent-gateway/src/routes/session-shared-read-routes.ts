@@ -59,6 +59,7 @@ import { resolvePermissionCategory } from '@openAwork/agent-core';
 import { logTeamAudit } from '../team/team-audit-store.js';
 import { toPublicSessionResponse } from './session-route-helpers.js';
 import { mergeRuntimeSafeSessionMessages } from '../session/runtime-safe-message-merge.js';
+import { markPermissionNotificationsReadByRequestIds } from '../session/notification-store.js';
 
 interface SessionRow {
   created_at: string;
@@ -692,6 +693,11 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
         }),
         requestClientRequestId ? { clientRequestId: requestClientRequestId } : undefined,
       );
+      markPermissionNotificationsReadByRequestIds({
+        requestIds: [body.requestId],
+        sessionId,
+        userId: sharedAccess.ownerUserId,
+      });
       if (resumePayload) {
         void resumeApprovedPermissionRequest({
           payload: {

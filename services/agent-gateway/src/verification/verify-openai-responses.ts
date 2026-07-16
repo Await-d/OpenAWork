@@ -48,6 +48,8 @@ const RESPONSES_PORT = 3311;
 const OPENAI_PROVIDER_ID = 'openai';
 const OPENAI_ALIAS_MODEL = 'team-model-alias';
 const DISABLED_TOOL_NAME = 'fake_tool';
+const RESPONSES_API_PATH = '/v1/responses';
+const CHAT_COMPLETIONS_API_PATH = '/chat/completions';
 
 async function main(): Promise<void> {
   await withTempEnv(
@@ -59,7 +61,11 @@ async function main(): Promise<void> {
     async () => {
       const capturedRequests: ScenarioRequestCapture[] = [];
       const upstream = createServer((req, res) => {
-        if (req.url !== '/responses' && req.url !== '/chat/completions') {
+        if (
+          req.url !== RESPONSES_API_PATH &&
+          req.url !== CHAT_COMPLETIONS_API_PATH &&
+          req.url !== '/v1/chat/completions'
+        ) {
           res.statusCode = 404;
           res.end();
           return;
@@ -444,7 +450,7 @@ async function verifyToolPlainReasoningScenario(input: VerificationContext): Pro
       `expected plain reasoning tool scenario to issue at least 2 upstream requests, got ${requests.length}`,
     );
   }
-  assertRequestsPath(requests, '/responses', 'tool plain reasoning scenario path');
+  assertRequestsPath(requests, RESPONSES_API_PATH, 'tool plain reasoning scenario path');
   assertResponsesPayloadShape(requests[0]!.body, 'provider alias responses 本地推理工具验证');
   assertResponsesPayloadShape(requests[1]!.body, 'provider alias responses 本地推理工具验证');
   if (!hasFunctionCallOutput(requests[1]!.body)) {
@@ -501,7 +507,7 @@ async function verifyToolMetadataReasoningScenario(input: VerificationContext): 
       `expected metadata reasoning tool scenario to issue at least 2 upstream requests, got ${requests.length}`,
     );
   }
-  assertRequestsPath(requests, '/responses', 'tool metadata reasoning scenario path');
+  assertRequestsPath(requests, RESPONSES_API_PATH, 'tool metadata reasoning scenario path');
   assertResponsesPayloadShape(requests[0]!.body, 'provider alias responses 元数据推理工具验证');
   assertResponsesPayloadShape(requests[1]!.body, 'provider alias responses 元数据推理工具验证');
   if (!hasFunctionCallOutput(requests[1]!.body)) {
@@ -609,7 +615,7 @@ async function verifyResponsesToolEofScenario(input: VerificationContext): Promi
     );
   }
 
-  assertRequestsPath(requests, '/responses', 'responses eof tool scenario path');
+  assertRequestsPath(requests, RESPONSES_API_PATH, 'responses eof tool scenario path');
   assertResponsesPayloadShape(requests[0]!.body, 'provider alias responses EOF工具验证');
   assertResponsesPayloadShape(requests[1]!.body, 'provider alias responses EOF工具验证');
   if (!hasFunctionCallOutput(requests[1]!.body)) {
@@ -658,7 +664,7 @@ async function verifyChatCompletionsToolEofScenario(input: VerificationContext):
     throw new Error(`expected chat eof tool scenario to issue 2 requests, got ${requests.length}`);
   }
 
-  assertRequestsPath(requests, '/chat/completions', 'chat eof tool scenario path');
+  assertRequestsPath(requests, CHAT_COMPLETIONS_API_PATH, 'chat eof tool scenario path');
   assertChatPayloadShape(requests[0]!.body, 'provider alias chat EOF工具验证');
   assertChatPayloadShape(requests[1]!.body, 'provider alias chat EOF工具验证');
   if (!hasChatToolResult(requests[1]!.body)) {

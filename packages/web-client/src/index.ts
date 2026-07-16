@@ -236,6 +236,7 @@ export type {
 export { withTokenRefresh } from './gateway/token-refresh.js';
 export type { TokenStore } from './gateway/token-refresh.js';
 export { authHeader, jsonAuthHeaders, HttpError } from './gateway/http.js';
+export type { JsonErrorData } from './gateway/http.js';
 
 // 新增的资源域客户端
 export { createWorkspaceClient } from './infra/workspace.js';

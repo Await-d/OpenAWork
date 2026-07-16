@@ -1,16 +1,21 @@
 // @vitest-environment jsdom
 
-import { act } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  attachActiveStreamSession,
+  useGatewayClient,
   connectAttachEventSource,
   formatGatewayStreamErrorMessage,
   resolveChatWsLivenessAction,
   safeParseGatewayEventData,
   STREAM_CLIENT_ERROR_MESSAGES,
 } from './useGatewayClient.js';
+import { useAuthStore } from '../../stores/auth/auth.js';
 
 class MockEventSource {
+  static instances: MockEventSource[] = [];
+
   onerror: (() => void) | null = null;
   onmessage: ((event: MessageEvent) => void) | null = null;
   onopen: (() => void) | null = null;
@@ -19,6 +24,7 @@ class MockEventSource {
 
   constructor(url: string) {
     this.url = url;
+    MockEventSource.instances.push(this);
   }
 
   close() {
@@ -34,9 +40,39 @@ interface TestActiveStreamSnapshot {
   transport: 'attach-sse' | 'sse' | 'ws';
 }
 
+class MockWebSocket {
+  static instances: MockWebSocket[] = [];
+  static readonly OPEN = 1;
+  static readonly CLOSED = 3;
+
+  onclose: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onopen: (() => void) | null = null;
+  readyState = MockWebSocket.OPEN;
+  sentPayloads: string[] = [];
+  url: string;
+
+  constructor(url: string) {
+    this.url = url;
+    MockWebSocket.instances.push(this);
+  }
+
+  send(payload: string) {
+    this.sentPayloads.push(payload);
+  }
+
+  close() {
+    this.readyState = MockWebSocket.CLOSED;
+    this.onclose?.();
+  }
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   sessionStorage.clear();
+  MockEventSource.instances.length = 0;
+  MockWebSocket.instances.length = 0;
 });
 
 describe('safeParseGatewayEventData', () => {
@@ -161,6 +197,164 @@ describe('connectAttachEventSource', () => {
     );
     expect(eventSource.closed).toBe(true);
   });
+
+  it('attach SSE 收到 run envelope 时会推进 lastSeq，重复 eventId 不重复分发', async () => {
+    let currentEventSource: MockEventSource | null = null;
+    let currentActiveRequest: TestActiveStreamSnapshot | null = {
+      clientRequestId: 'req-attach',
+      lastSeq: 2,
+      sessionId: 'session-1',
+      startedAt: 1,
+      transport: 'attach-sse',
+    };
+
+    const callbacks = {
+      onDelta: vi.fn(),
+      onDone: vi.fn(),
+      onError: vi.fn(),
+    };
+
+    const eventSource = new MockEventSource('https://gw.test/sessions/session-1/stream/attach');
+    const connectPromise = connectAttachEventSource({
+      activeStream: {
+        clientRequestId: 'req-attach',
+        lastSeq: 2,
+        sessionId: 'session-1',
+        startedAtMs: 1,
+      },
+      callbacks,
+      createEventSource: () => eventSource,
+      gatewayUrl: 'https://gw.test',
+      getCurrentActiveRequest: () => currentActiveRequest,
+      getCurrentEventSource: () => currentEventSource,
+      isStopRequested: () => false,
+      requestedAfterSeq: 2,
+      sessionId: 'session-1',
+      setCurrentEventSource: (next) => {
+        currentEventSource = next as MockEventSource | null;
+      },
+      syncActiveRequest: (next) => {
+        currentActiveRequest = next;
+      },
+      token: 'token-test',
+      clearCallbacks: vi.fn(),
+      resetStopRequested: vi.fn(),
+    });
+
+    act(() => {
+      eventSource.onopen?.();
+    });
+
+    await expect(connectPromise).resolves.toBe(true);
+
+    act(() => {
+      eventSource.onmessage?.({
+        data: JSON.stringify({
+          aggregateType: 'run',
+          seq: 3,
+          payload: {
+            cursor: { seq: 3 },
+            event: {
+              type: 'text_delta',
+              delta: 'hello',
+              eventId: 'evt-attach-3',
+            },
+          },
+        }),
+      } as MessageEvent);
+      eventSource.onmessage?.({
+        data: JSON.stringify({
+          aggregateType: 'run',
+          seq: 4,
+          payload: {
+            cursor: { seq: 4 },
+            event: {
+              type: 'text_delta',
+              delta: 'hello',
+              eventId: 'evt-attach-3',
+            },
+          },
+        }),
+      } as MessageEvent);
+    });
+
+    expect(currentActiveRequest).toMatchObject({
+      clientRequestId: 'req-attach',
+      lastSeq: 4,
+      sessionId: 'session-1',
+      transport: 'attach-sse',
+    });
+    expect(callbacks.onDelta).toHaveBeenCalledTimes(1);
+    expect(callbacks.onDelta).toHaveBeenCalledWith('hello');
+    expect(callbacks.onError).not.toHaveBeenCalled();
+  });
+});
+
+describe('attachActiveStreamSession', () => {
+  it('续挂同一 clientRequestId 时会用客户端已见 lastSeq 作为 afterSeq', async () => {
+    const connectEventSource = vi.fn(async () => true);
+    const clearCallbacks = vi.fn();
+    const closeExistingTransports = vi.fn();
+    const resetStopRequested = vi.fn();
+    const setCallbacks = vi.fn();
+    const setCurrentEventSource = vi.fn();
+    let currentActiveRequest: TestActiveStreamSnapshot | null = {
+      clientRequestId: 'req-attach',
+      lastSeq: 7,
+      sessionId: 'session-1',
+      startedAt: 1,
+      transport: 'attach-sse',
+    };
+
+    const attached = await attachActiveStreamSession({
+      callbacks: {
+        onDelta: vi.fn(),
+        onDone: vi.fn(),
+        onError: vi.fn(),
+      },
+      clearCallbacks,
+      closeExistingTransports,
+      connectEventSource,
+      gatewayUrl: 'https://gw.test',
+      getCurrentActiveRequest: () => currentActiveRequest,
+      getCurrentEventSource: () => null,
+      hasOpenTransports: () => false,
+      isStopRequested: () => false,
+      resetStopRequested,
+      sessionId: 'session-1',
+      sessionsClient: {
+        getActiveStream: vi.fn(async () => ({
+          clientRequestId: 'req-attach',
+          lastSeq: 9,
+          sessionId: 'session-1',
+          startedAtMs: 10,
+        })),
+      },
+      setCallbacks,
+      setCurrentEventSource,
+      syncActiveRequest: (next) => {
+        currentActiveRequest = next;
+      },
+      token: 'token-test',
+    });
+
+    expect(attached).toBe(true);
+    expect(connectEventSource).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestedAfterSeq: 7,
+      }),
+    );
+    expect(currentActiveRequest).toMatchObject({
+      clientRequestId: 'req-attach',
+      lastSeq: 7,
+      sessionId: 'session-1',
+      transport: 'attach-sse',
+    });
+    expect(setCallbacks).toHaveBeenCalledTimes(1);
+    expect(closeExistingTransports).toHaveBeenCalledTimes(1);
+    expect(resetStopRequested).toHaveBeenCalledTimes(1);
+    expect(clearCallbacks).not.toHaveBeenCalled();
+  });
 });
 
 describe('resolveChatWsLivenessAction (§0.153 半开探活)', () => {
@@ -185,5 +379,80 @@ describe('resolveChatWsLivenessAction (§0.153 半开探活)', () => {
   it('默认容忍窗口：单次丢 pong（15s）不误判，长期静默才 reconnect', () => {
     expect(resolveChatWsLivenessAction({ msSinceLastServerActivity: 16_000 })).toBe('ping');
     expect(resolveChatWsLivenessAction({ msSinceLastServerActivity: 60_000 })).toBe('reconnect');
+  });
+});
+
+describe('useGatewayClient', () => {
+  it('WS 断开后切到 SSE replay 时，不会重复分发已经收到过的 eventId', () => {
+    vi.stubGlobal('WebSocket', MockWebSocket);
+    vi.stubGlobal('EventSource', MockEventSource);
+    useAuthStore.setState({
+      accessToken: 'token-test',
+      clearAuth: () => undefined,
+      email: 'qa@example.com',
+      gatewayUrl: 'https://gw.test',
+      refreshAccessToken: async () => undefined,
+      refreshToken: null,
+      setAuth: () => undefined,
+      setGatewayUrl: () => undefined,
+      setWebAccess: () => undefined,
+      tokenExpiresAt: null,
+      webAccessEnabled: false,
+      webExposeLan: false,
+      webPort: 3000,
+    });
+
+    const onDelta = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    const { result } = renderHook(() => useGatewayClient('token-test'));
+
+    act(() => {
+      result.current.stream('session-1', 'hello', {
+        onDelta,
+        onDone,
+        onError,
+      });
+    });
+
+    const ws = MockWebSocket.instances[0];
+    expect(ws).toBeDefined();
+
+    act(() => {
+      ws?.onopen?.();
+      ws?.onmessage?.({
+        data: JSON.stringify({
+          type: 'text_delta',
+          delta: 'hello',
+          eventId: 'evt-1',
+        }),
+      } as MessageEvent);
+      ws?.onclose?.();
+    });
+
+    const sse = MockEventSource.instances[0];
+    expect(sse?.url).toContain('/sessions/session-1/stream/sse?');
+
+    act(() => {
+      sse?.onmessage?.({
+        data: JSON.stringify({
+          type: 'text_delta',
+          delta: 'hello',
+          eventId: 'evt-1',
+        }),
+      } as MessageEvent);
+      sse?.onmessage?.({
+        data: JSON.stringify({
+          type: 'done',
+          stopReason: 'end_turn',
+          eventId: 'evt-2',
+        }),
+      } as MessageEvent);
+    });
+
+    expect(onDelta).toHaveBeenCalledTimes(1);
+    expect(onDelta).toHaveBeenCalledWith('hello');
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(onError).not.toHaveBeenCalled();
   });
 });

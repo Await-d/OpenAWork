@@ -3,7 +3,10 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
 import { FusionDockedSidePanel } from './FusionDockedSidePanel.js';
-import { FusionSessionSidePanel } from './FusionSessionSidePanel.js';
+import {
+  FusionSessionSidePanel,
+  type FusionSessionSidePanelProps,
+} from './FusionSessionSidePanel.js';
 import {
   makeReviewPanelDiffEntry,
   makeReviewPanelProjection,
@@ -25,6 +28,29 @@ vi.mock('@openAwork/shared-ui', () => ({
   ),
 }));
 
+vi.mock('../../../components/layout/sidebar/WorkspaceFileTreePanel.js', () => ({
+  WorkspaceFileTreePanel: (props: {
+    readonly allowMutations?: boolean;
+    readonly onOpenFile?: (path: string) => void;
+  }) => (
+    <div>
+      <span>{props.allowMutations === false ? '只读文件树' : '可写文件树'}</span>
+      <button
+        type="button"
+        onClick={() => props.onOpenFile?.('/home/await/project/OpenAWork/src/tree-entry.ts')}
+      >
+        打开工作区树文件
+      </button>
+    </div>
+  ),
+}));
+
+vi.mock('../../../components/file-editor/EditorBrowserWorkspace.js', () => ({
+  EditorBrowserWorkspace: (props: { readonly fileTree?: React.ReactNode }) => (
+    <div data-testid="editor-browser-workspace-mock">{props.fileTree}</div>
+  ),
+}));
+
 function resetUiState(): void {
   useUIStateStore.setState({
     reviewPanelOpened: true,
@@ -33,17 +59,37 @@ function resetUiState(): void {
   });
 }
 
-const BASE_PROPS = {
-  contextUsageSnapshot: null,
-  currentSessionId: 'session-1',
-  effectiveWorkingDirectory: '/home/await/project/OpenAWork',
-  gatewayUrl: 'http://localhost:3000',
-  onCompactSession: () => undefined,
-  onOpenWorkspace: () => undefined,
-  onTabChange: () => undefined,
-  token: 'token',
-  workspaceFileItems: [],
-} as const;
+function createBaseProps(): Omit<FusionSessionSidePanelProps, 'activeTab'> {
+  return {
+    activeEditorFilePath: null,
+    contextUsageSnapshot: null,
+    currentSessionId: 'session-1',
+    editorMode: false,
+    editorFileState: {
+      activeFile: null,
+      activeFilePath: null,
+      closeFile: () => undefined,
+      isDirty: () => false,
+      openFiles: [],
+      saveError: null,
+      setActiveFilePath: () => undefined,
+      updateContent: () => undefined,
+    },
+    editorOpenFilePaths: [],
+    effectiveWorkingDirectory: '/home/await/project/OpenAWork',
+    fetchTree: vi.fn(async () => []),
+    gatewayUrl: 'http://localhost:3000',
+    handleSaveFile: async () => undefined,
+    onCompactSession: () => undefined,
+    onOpenFileInEditor: () => undefined,
+    onOpenWorkspace: () => undefined,
+    onShowEditor: () => undefined,
+    onTabChange: () => undefined,
+    token: 'token',
+    workspaceFileItems: [],
+    saving: false,
+  };
+}
 
 const RUNTIME_SUMMARY = {
   activePlanTaskCount: 2,
@@ -92,7 +138,7 @@ describe('FusionSessionSidePanel', () => {
       ]),
     );
 
-    render(<FusionSessionSidePanel {...BASE_PROPS} activeTab="review" />);
+    render(<FusionSessionSidePanel {...createBaseProps()} activeTab="review" />);
 
     await waitFor(() => {
       expect(screen.getAllByText('src/app.ts').length).toBeGreaterThan(0);
@@ -107,7 +153,13 @@ describe('FusionSessionSidePanel', () => {
     getFileChangesMock.mockResolvedValue(makeReviewPanelProjection([]));
     const onTabChange = vi.fn();
 
-    render(<FusionSessionSidePanel {...BASE_PROPS} activeTab="review" onTabChange={onTabChange} />);
+    render(
+      <FusionSessionSidePanel
+        {...createBaseProps()}
+        activeTab="review"
+        onTabChange={onTabChange}
+      />,
+    );
 
     const tablist = screen.getByRole('tablist', { name: '会话侧面板' });
     const reviewTab = screen.getByRole('tab', { name: '审查' });
@@ -125,7 +177,13 @@ describe('FusionSessionSidePanel', () => {
     getFileChangesMock.mockResolvedValue(makeReviewPanelProjection([]));
     const onTabChange = vi.fn();
 
-    render(<FusionSessionSidePanel {...BASE_PROPS} activeTab="review" onTabChange={onTabChange} />);
+    render(
+      <FusionSessionSidePanel
+        {...createBaseProps()}
+        activeTab="review"
+        onTabChange={onTabChange}
+      />,
+    );
 
     const reviewTab = screen.getByRole('tab', { name: '审查' });
     const filesTab = screen.getByRole('tab', { name: '文件' });
@@ -137,15 +195,25 @@ describe('FusionSessionSidePanel', () => {
     expect(document.activeElement).toBe(filesTab);
   });
 
-  it('在文件 tab 展示工作区文件上下文并触发工作区选择', () => {
+  it('在文件 tab 接入工作区树，并支持打开编辑器文件与触发工作区选择', () => {
     getFileChangesMock.mockResolvedValue(makeReviewPanelProjection([]));
+    const openEditorFile = vi.fn();
+    const showEditor = vi.fn();
     const openWorkspace = vi.fn();
 
     render(
       <FusionSessionSidePanel
-        {...BASE_PROPS}
+        {...createBaseProps()}
         activeTab="files"
+        activeEditorFilePath="/home/await/project/OpenAWork/apps/web/src/pages/chat-page/ChatPage.tsx"
+        editorMode={true}
+        editorOpenFilePaths={[
+          '/home/await/project/OpenAWork/apps/web/src/pages/chat-page/ChatPage.tsx',
+          '/home/await/project/OpenAWork/apps/web/src/pages/chat-page/panels/FusionFilesTab.tsx',
+        ]}
+        onOpenFileInEditor={openEditorFile}
         onOpenWorkspace={openWorkspace}
+        onShowEditor={showEditor}
         workspaceFileItems={[
           {
             label: 'ChatPage.tsx',
@@ -156,11 +224,22 @@ describe('FusionSessionSidePanel', () => {
       />,
     );
 
-    expect(screen.getByText('1 个索引文件')).not.toBeNull();
-    expect(screen.getByText('ChatPage.tsx')).not.toBeNull();
+    expect(screen.getByText('当前工作区代码视图')).not.toBeNull();
+    expect(screen.getByText('只读文件树')).not.toBeNull();
+    expect(screen.getByRole('button', { name: '切换到 ChatPage.tsx' })).not.toBeNull();
+    expect(screen.getByText(/2 个已打开文件/)).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '打开编辑器' }));
+    fireEvent.click(screen.getByRole('button', { name: '在编辑器中打开 ChatPage.tsx' }));
+    fireEvent.click(screen.getByRole('button', { name: '打开工作区树文件' }));
 
     fireEvent.click(screen.getByRole('button', { name: '选择工作区' }));
 
+    expect(showEditor).toHaveBeenCalledTimes(1);
+    expect(openEditorFile).toHaveBeenCalledWith(
+      '/home/await/project/OpenAWork/apps/web/src/pages/chat-page/ChatPage.tsx',
+    );
+    expect(openEditorFile).toHaveBeenCalledWith('/home/await/project/OpenAWork/src/tree-entry.ts');
     expect(openWorkspace).toHaveBeenCalledTimes(1);
   });
 
@@ -170,7 +249,7 @@ describe('FusionSessionSidePanel', () => {
 
     render(
       <FusionSessionSidePanel
-        {...BASE_PROPS}
+        {...createBaseProps()}
         activeTab="context"
         contextUsageSnapshot={{ estimated: false, maxTokens: 4000, usedTokens: 2000 }}
         onCompactSession={compactSession}
@@ -192,7 +271,7 @@ describe('FusionSessionSidePanel', () => {
 
     render(
       <FusionSessionSidePanel
-        {...BASE_PROPS}
+        {...createBaseProps()}
         activeTab="context"
         runtimeSummary={RUNTIME_SUMMARY}
       />,
@@ -219,7 +298,7 @@ describe('FusionSessionSidePanel', () => {
 
     render(
       <FusionSessionSidePanel
-        {...BASE_PROPS}
+        {...createBaseProps()}
         activeTab="context"
         overview={{
           attachmentItems: [],
@@ -261,7 +340,7 @@ describe('FusionSessionSidePanel', () => {
   it('在融合 dock 内拖拽手柄可调整右侧面板宽度', () => {
     getFileChangesMock.mockResolvedValue(makeReviewPanelProjection([]));
 
-    render(<FusionDockedSidePanel {...BASE_PROPS} activeTab="files" />);
+    render(<FusionDockedSidePanel {...createBaseProps()} activeTab="files" />);
 
     expect(screen.getByTestId('fusion-docked-side-panel').style.flex).toBe('1 1 400px');
 

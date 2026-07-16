@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AttachmentItem } from '@openAwork/shared-ui';
 import type { CommandDescriptor } from '@openAwork/shared';
 import { useComposerCallbacks } from '../../../pages/chat-page/conversation/composer/use-composer-callbacks.js';
 import { useComposerMenuItems } from '../../../pages/chat-page/conversation/composer/use-composer-menu-items.js';
 import { useComposerQueue } from '../../../pages/chat-page/conversation/composer/use-composer-queue.js';
+import { useComposerInputHistory } from './use-composer-input-history.js';
+import { useComposerInputHistoryStore } from '../../../stores/chat/composer-input-history.js';
 
 import { buildQueuedComposerScopeKey } from '../../../pages/chat-page/conversation/render/chat-page-utils.js';
 import {
@@ -12,14 +14,12 @@ import {
   type QueuedComposerMessage,
   toPersistedQueuedComposerMessage,
 } from '../../../pages/chat-page/conversation/composer/queued-composer-state.js';
-import {
-  deleteQueuedComposerFiles,
-  restoreQueuedComposerFiles,
-} from '../../../pages/chat-page/conversation/composer/queued-composer-file-store.js';
+import { restoreQueuedComposerFiles } from '../../../pages/chat-page/conversation/composer/queued-composer-file-store.js';
 import type {
   ComposerMenuState,
   WorkspaceFileMentionItem,
 } from '../../conversation-runtime/messages/support.js';
+import { sanitizeComposerPlainText } from '../../conversation-runtime/messages/support.js';
 import { useChatQueueStore } from '../../../stores/chat/chat-queue.js';
 import type { ChatSettingsProvider } from '../../../utils/chat/chat-session-defaults.js';
 import type { SavedChatImageDefaults } from '../../../utils/chat/chat-session-defaults.js';
@@ -48,7 +48,7 @@ export interface UseUnifiedComposerStateOptions {
   features: Required<UnifiedComposerFeatures>;
   imageReferenceArtifacts: ImageEditReferenceArtifact[];
   selectedImageReferenceArtifactId: string | null;
-  onSubmit: (payload: UnifiedComposerSubmitPayload) => void | Promise<void>;
+  onSubmit: (payload: UnifiedComposerSubmitPayload) => boolean | void | Promise<boolean | void>;
   onStop: () => void | Promise<void>;
   stopActiveMessage: () => void;
 
@@ -167,6 +167,43 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
     if (!sessionId) return null;
     return buildQueuedComposerScopeKey(currentUserEmail, sessionId);
   }, [sessionId, currentUserEmail]);
+  const inputHistoryIdentity = useMemo(() => {
+    if (!token) return null;
+    const normalizedEmail = currentUserEmail.trim().toLowerCase();
+    if (normalizedEmail.length === 0) return null;
+    const normalizedGatewayUrl = gatewayUrl.trim().toLowerCase();
+    return `${normalizedGatewayUrl}::${normalizedEmail}`;
+  }, [currentUserEmail, gatewayUrl, token]);
+  const pendingInputHistoryScope = useMemo(() => {
+    if (!inputHistoryIdentity) return null;
+    return `${inputHistoryIdentity}::pending`;
+  }, [inputHistoryIdentity]);
+  const inputHistoryScope = useMemo(() => {
+    if (!inputHistoryIdentity) return null;
+    return sessionId ? `${inputHistoryIdentity}::session:${sessionId}` : pendingInputHistoryScope;
+  }, [inputHistoryIdentity, pendingInputHistoryScope, sessionId]);
+  const {
+    isBrowsingInputHistory,
+    navigateInputHistory,
+    exitInputHistoryBrowsing,
+    restoreInputFromHistory,
+    recordSubmittedInputHistory,
+  } = useComposerInputHistory({
+    input,
+    setInput,
+    historyScope: inputHistoryScope,
+    textareaRef,
+  });
+  const moveInputHistoryEntries = useComposerInputHistoryStore((state) => state.moveEntries);
+  const pendingInputHistoryEntryCount = useComposerInputHistoryStore(
+    useCallback(
+      (state) =>
+        pendingInputHistoryScope
+          ? (state.historyByScope[pendingInputHistoryScope]?.length ?? 0)
+          : 0,
+      [pendingInputHistoryScope],
+    ),
+  );
 
   // ─── Queue hook ───────────────────────────────────────────────────────────
   const replacePersistedQueue = useChatQueueStore((state) => state.replaceQueue);
@@ -175,7 +212,7 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
     handleFileChange,
     removeAttachment,
     clearComposerDraft,
-    enqueueComposerMessage,
+    enqueueComposerMessage: enqueueComposerMessageDirect,
     removeQueuedComposerMessage,
     restoreQueuedComposerMessage,
   } = useComposerQueue({
@@ -193,9 +230,42 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
     textareaRef,
     fileInputRef,
   });
+  const composerDraftRevisionRef = useRef(0);
+  useLayoutEffect(() => {
+    composerDraftRevisionRef.current += 1;
+  }, [attachmentItems, attachedFiles, input]);
+  const enqueueComposerMessage = useCallback(async (): Promise<boolean> => {
+    const queuedText = sanitizeComposerPlainText(input).trim();
+    const queued = await enqueueComposerMessageDirect();
+    if (queued) {
+      recordSubmittedInputHistory(queuedText);
+    }
+    return queued;
+  }, [enqueueComposerMessageDirect, input, recordSubmittedInputHistory]);
+
+  useEffect(() => {
+    if (
+      !pendingInputHistoryScope ||
+      !sessionId ||
+      !inputHistoryScope ||
+      pendingInputHistoryEntryCount === 0
+    ) {
+      return;
+    }
+
+    moveInputHistoryEntries(pendingInputHistoryScope, inputHistoryScope);
+  }, [
+    inputHistoryScope,
+    moveInputHistoryEntries,
+    pendingInputHistoryEntryCount,
+    pendingInputHistoryScope,
+    sessionId,
+  ]);
 
   // ─── Send handler (constructs payload and delegates to parent) ────────────
   const sendMessage = useCallback(async (): Promise<boolean> => {
+    const submittedText = input;
+    const submittedDraftRevision = composerDraftRevisionRef.current;
     const payload: UnifiedComposerSubmitPayload = {
       text: input,
       files: attachedFiles,
@@ -212,8 +282,14 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
       effectiveAgentId: effectiveAgentId ?? '',
       imageModelLabel,
     };
-    clearComposerDraft();
-    await onSubmit(payload);
+    const submitResult = await onSubmit(payload);
+    if (submitResult === false) {
+      return false;
+    }
+    if (composerDraftRevisionRef.current === submittedDraftRevision) {
+      clearComposerDraft();
+    }
+    recordSubmittedInputHistory(submittedText);
     return true;
   }, [
     input,
@@ -229,6 +305,7 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
     imageModelLabel,
     clearComposerDraft,
     onSubmit,
+    recordSubmittedInputHistory,
   ]);
 
   // ─── Menu items hook ──────────────────────────────────────────────────────
@@ -262,6 +339,9 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
     enqueueComposerMessage,
     sendMessage,
     appendFiles,
+    navigateInputHistory,
+    isBrowsingInputHistory,
+    exitInputHistoryBrowsing,
   });
 
   // ─── Queue hydration effect ───────────────────────────────────────────────
@@ -385,7 +465,10 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
       if (overrideText === undefined && options?.queuedFiles === undefined) {
         clearComposerDraft();
       }
-      await onSubmit(payload);
+      const submitResult = await onSubmit(payload);
+      if (submitResult === false) {
+        return false;
+      }
       return true;
     };
   });
@@ -452,6 +535,7 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
     setShowModelSettings,
     streamError,
     setStreamError,
+    isBrowsingInputHistory,
 
     // Refs
     textareaRef,
@@ -493,6 +577,7 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
     handlePaste,
     applyComposerSelection,
     sendMessage,
+    restoreInputFromHistory,
 
     // Menu items
     slashCommandItems,

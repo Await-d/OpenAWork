@@ -22,7 +22,7 @@
  */
 
 import { sqliteAll } from '../infra/db.js';
-import { isPathWithinRoot } from './workspace-paths.js';
+import { isPathWithinRoot, validateWorkspacePath } from './workspace-paths.js';
 
 interface SessionRow {
   metadata_json: string | null;
@@ -79,10 +79,9 @@ function fetchUserWorkspaceRootsFromDb(userId: string): string[] {
       const meta = JSON.parse(row.metadata_json) as { workingDirectory?: unknown };
       const cwd = typeof meta.workingDirectory === 'string' ? meta.workingDirectory.trim() : '';
       if (cwd.length === 0) continue;
-      if (!cwd.startsWith('/')) continue; // require absolute
-      // Normalize: drop any trailing slash so prefix checks behave.
-      const normalized = cwd.replace(/\/+$/u, '');
-      if (normalized.length > 0) roots.add(normalized);
+      const normalized = validateWorkspacePath(cwd);
+      if (!normalized) continue;
+      roots.add(normalized);
     } catch {
       /* malformed metadata — skip */
     }

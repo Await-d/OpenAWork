@@ -1,4 +1,4 @@
-import type { ManagedAgentRecord } from '@openAwork/shared';
+import { REFERENCE_AGENT_ROLE_METADATA, type ManagedAgentRecord } from '@openAwork/shared';
 import { BUILTIN_SKILLS } from '@openAwork/skills';
 import { listManagedAgentsForUser } from '../agent/agent-catalog.js';
 import type { EffectiveSkill } from '../skill/skill-selection.js';
@@ -85,21 +85,32 @@ function injectBuiltinSkillInstructions(requestedSkills: string[]): string | nul
 
 function findManagedAgent(userId: string, identifier: string): ManagedAgentRecord | undefined {
   const normalizedIdentifier = identifier.trim().toLowerCase();
-  return listManagedAgentsForUser(userId).find((agent) => {
-    if (!agent.enabled) {
-      return false;
-    }
-
-    if (agent.id.trim().toLowerCase() === normalizedIdentifier) {
-      return true;
-    }
-
-    if (agent.label.trim().toLowerCase() === normalizedIdentifier) {
-      return true;
-    }
-
-    return agent.aliases.some((alias) => alias.trim().toLowerCase() === normalizedIdentifier);
+  const enabledAgents = listManagedAgentsForUser(userId).filter((agent) => agent.enabled);
+  const exactMatch = enabledAgents.find((agent) => {
+    return (
+      agent.id.trim().toLowerCase() === normalizedIdentifier ||
+      agent.label.trim().toLowerCase() === normalizedIdentifier
+    );
   });
+  if (exactMatch) {
+    return exactMatch;
+  }
+
+  const referenceAliasAgentId = Object.entries(REFERENCE_AGENT_ROLE_METADATA).find(
+    ([, metadata]) =>
+      metadata.aliases?.some((alias) => alias.trim().toLowerCase() === normalizedIdentifier) ??
+      false,
+  )?.[0];
+  if (referenceAliasAgentId) {
+    const referenceMatch = enabledAgents.find((agent) => agent.id === referenceAliasAgentId);
+    if (referenceMatch) {
+      return referenceMatch;
+    }
+  }
+
+  return enabledAgents.find((agent) =>
+    agent.aliases.some((alias) => alias.trim().toLowerCase() === normalizedIdentifier),
+  );
 }
 
 function normalizeModelCandidate(value: string): string {

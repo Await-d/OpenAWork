@@ -116,6 +116,34 @@ describe('sessions route error contracts', () => {
     }
   });
 
+  it('POST /sessions 接受 modelSelectionSource 元数据字段', async () => {
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/sessions',
+        headers: {
+          authorization: bearer(app),
+          'content-type': 'application/json',
+        },
+        payload: {
+          metadata: {
+            modelId: 'gpt-5.4',
+            modelSelectionSource: 'defaults',
+            providerId: 'openai',
+          },
+        },
+      });
+
+      expect(response.statusCode).toBe(201);
+      expect(response.json()).toMatchObject({
+        sessionId: expect.any(String),
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   it('POST /sessions 对越界 workingDirectory 返回中文 403', async () => {
     const app = await buildApp();
     try {
@@ -187,6 +215,35 @@ describe('sessions route error contracts', () => {
       expect(response.statusCode).toBe(400);
       expect(response.json()).toMatchObject({
         error: '会话元数据无效。',
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('PATCH /sessions/:sessionId 接受 modelSelectionSource 元数据字段', async () => {
+    seedSession();
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/sessions/${SESSION_ID}`,
+        headers: {
+          authorization: bearer(app),
+          'content-type': 'application/json',
+        },
+        payload: {
+          metadata: {
+            modelId: 'gpt-5.4',
+            modelSelectionSource: 'manual',
+            providerId: 'openai',
+          },
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        ok: true,
       });
     } finally {
       await app.close();
@@ -297,6 +354,33 @@ describe('sessions route error contracts', () => {
       expect(response.statusCode).toBe(409);
       expect(response.json()).toMatchObject({
         error: '当前会话已绑定工作区，不能直接修改。',
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('PATCH /sessions/:sessionId/workspace 首次绑定新目录时不受旧 allowlist 预校验影响', async () => {
+    seedSession();
+    const nextWorkspace = join(workspaceRoot, 'project-first-bind');
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/sessions/${SESSION_ID}/workspace`,
+        headers: {
+          authorization: bearer(app),
+          'content-type': 'application/json',
+        },
+        payload: {
+          workingDirectory: nextWorkspace,
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        ok: true,
+        workingDirectory: nextWorkspace,
       });
     } finally {
       await app.close();

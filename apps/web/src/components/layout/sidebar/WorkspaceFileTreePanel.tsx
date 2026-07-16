@@ -67,6 +67,7 @@ export interface WorkspaceFileTreePanelProps {
    *   panel where the parent already provides structural chrome.
    */
   variant?: 'sidebar' | 'embedded';
+  allowMutations?: boolean;
   /** Optional className / style overrides for the root container. */
   className?: string;
   style?: React.CSSProperties;
@@ -88,6 +89,7 @@ export function WorkspaceFileTreePanel({
   onCreateSession,
   workspacePath: workspacePathOverride,
   variant = 'sidebar',
+  allowMutations = true,
   className,
   style,
 }: WorkspaceFileTreePanelProps) {
@@ -364,6 +366,13 @@ export function WorkspaceFileTreePanel({
       };
 
   const treePadding = isEmbedded ? '4px 0' : undefined;
+  const rootActionHint = allowMutations
+    ? hasSelectedWorkspace
+      ? '右键可在根目录新建文件或文件夹'
+      : '请先选择工作区'
+    : hasSelectedWorkspace
+      ? '右键可刷新目录或复制路径'
+      : '请先选择工作区';
 
   return (
     <>
@@ -382,7 +391,7 @@ export function WorkspaceFileTreePanel({
           <button
             type="button"
             onContextMenu={handleOpenRootContextMenu}
-            title={hasSelectedWorkspace ? '右键可在根目录新建文件或文件夹' : '请先选择工作区'}
+            title={rootActionHint}
             style={{
               display: 'flex',
               flexDirection: isEmbedded ? 'row' : 'column',
@@ -450,63 +459,67 @@ export function WorkspaceFileTreePanel({
               </>
             )}
           </button>
-          <button
-            type="button"
-            title={hasSelectedWorkspace ? '在根目录新建文件' : '请先选择工作区'}
-            onClick={() => handleCreateRootEntry('file')}
-            disabled={fileTreeLoading || !hasSelectedWorkspace}
-            className="icon-btn"
-            style={{
-              ...ICON_BTN_STYLE,
-              ...toolBtnSize,
-              opacity: fileTreeLoading || !hasSelectedWorkspace ? 0.5 : 1,
-            }}
-          >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-              <polyline points="14 2 14 8 20 8" />
-              <line x1="12" y1="12" x2="12" y2="18" />
-              <line x1="9" y1="15" x2="15" y2="15" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            title={hasSelectedWorkspace ? '在根目录新建文件夹' : '请先选择工作区'}
-            onClick={() => handleCreateRootEntry('directory')}
-            disabled={fileTreeLoading || !hasSelectedWorkspace}
-            className="icon-btn"
-            style={{
-              ...ICON_BTN_STYLE,
-              ...toolBtnSize,
-              opacity: fileTreeLoading || !hasSelectedWorkspace ? 0.5 : 1,
-            }}
-          >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-              <line x1="12" y1="11" x2="12" y2="17" />
-              <line x1="9" y1="14" x2="15" y2="14" />
-            </svg>
-          </button>
+          {allowMutations ? (
+            <>
+              <button
+                type="button"
+                title={hasSelectedWorkspace ? '在根目录新建文件' : '请先选择工作区'}
+                onClick={() => handleCreateRootEntry('file')}
+                disabled={fileTreeLoading || !hasSelectedWorkspace}
+                className="icon-btn"
+                style={{
+                  ...ICON_BTN_STYLE,
+                  ...toolBtnSize,
+                  opacity: fileTreeLoading || !hasSelectedWorkspace ? 0.5 : 1,
+                }}
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                  <line x1="12" y1="12" x2="12" y2="18" />
+                  <line x1="9" y1="15" x2="15" y2="15" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                title={hasSelectedWorkspace ? '在根目录新建文件夹' : '请先选择工作区'}
+                onClick={() => handleCreateRootEntry('directory')}
+                disabled={fileTreeLoading || !hasSelectedWorkspace}
+                className="icon-btn"
+                style={{
+                  ...ICON_BTN_STYLE,
+                  ...toolBtnSize,
+                  opacity: fileTreeLoading || !hasSelectedWorkspace ? 0.5 : 1,
+                }}
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                  <line x1="12" y1="11" x2="12" y2="17" />
+                  <line x1="9" y1="14" x2="15" y2="14" />
+                </svg>
+              </button>
+            </>
+          ) : null}
           <button
             type="button"
             title={hasSelectedWorkspace ? '刷新目录' : '请先选择工作区'}
@@ -590,7 +603,9 @@ export function WorkspaceFileTreePanel({
               color: 'var(--fg-muted)',
             }}
           >
-            当前目录为空，可使用上方按钮或右键新建文件 / 文件夹
+            {allowMutations
+              ? '当前目录为空，可使用上方按钮或右键新建文件 / 文件夹'
+              : '当前目录为空，可在此浏览目录并从工作区中打开文件'}
           </p>
         ) : (
           <>
@@ -705,29 +720,37 @@ export function WorkspaceFileTreePanel({
                 ? () => onCreateSession(fileTreeContextMenu.path)
                 : undefined
             }
-            onCreateFile={() => {
-              const label =
-                fileTreeContextMenu.targetType === 'root'
-                  ? '工作区根目录'
-                  : fileTreeContextMenu.targetType === 'file'
-                    ? `${fileTreeContextMenu.name} 所在目录`
-                    : fileTreeContextMenu.name;
-              void handleCreateEntry('file', fileTreeContextMenu.directoryPath, label);
-            }}
-            onCreateFolder={() => {
-              const label =
-                fileTreeContextMenu.targetType === 'root'
-                  ? '工作区根目录'
-                  : fileTreeContextMenu.targetType === 'file'
-                    ? `${fileTreeContextMenu.name} 所在目录`
-                    : fileTreeContextMenu.name;
-              void handleCreateEntry('directory', fileTreeContextMenu.directoryPath, label);
-            }}
+            onCreateFile={
+              allowMutations
+                ? () => {
+                    const label =
+                      fileTreeContextMenu.targetType === 'root'
+                        ? '工作区根目录'
+                        : fileTreeContextMenu.targetType === 'file'
+                          ? `${fileTreeContextMenu.name} 所在目录`
+                          : fileTreeContextMenu.name;
+                    void handleCreateEntry('file', fileTreeContextMenu.directoryPath, label);
+                  }
+                : undefined
+            }
+            onCreateFolder={
+              allowMutations
+                ? () => {
+                    const label =
+                      fileTreeContextMenu.targetType === 'root'
+                        ? '工作区根目录'
+                        : fileTreeContextMenu.targetType === 'file'
+                          ? `${fileTreeContextMenu.name} 所在目录`
+                          : fileTreeContextMenu.name;
+                    void handleCreateEntry('directory', fileTreeContextMenu.directoryPath, label);
+                  }
+                : undefined
+            }
             onRefresh={() => {
               void refreshDirectoryWithVersion(fileTreeContextMenu.directoryPath);
             }}
             onDelete={
-              fileTreeContextMenu.targetType !== 'root'
+              allowMutations && fileTreeContextMenu.targetType !== 'root'
                 ? () => {
                     const targetPath = fileTreeContextMenu.path;
                     const targetName = fileTreeContextMenu.name;
@@ -754,7 +777,7 @@ export function WorkspaceFileTreePanel({
                 : undefined
             }
             onRename={
-              fileTreeContextMenu.targetType !== 'root'
+              allowMutations && fileTreeContextMenu.targetType !== 'root'
                 ? () => {
                     const targetPath = fileTreeContextMenu.path;
                     const targetName = fileTreeContextMenu.name;

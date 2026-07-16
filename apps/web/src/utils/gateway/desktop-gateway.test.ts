@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { authenticateDesktopGateway, gatewayBindHost } from './desktop-gateway.js';
+import {
+  authenticateDesktopGateway,
+  gatewayBindHost,
+  pickDesktopFolder,
+} from './desktop-gateway.js';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -26,5 +30,22 @@ describe('authenticateDesktopGateway', () => {
     await expect(authenticateDesktopGateway('http://127.0.0.1:3000')).rejects.toThrow(
       '当前不在 Tauri 桌面环境中运行。',
     );
+  });
+});
+
+describe('pickDesktopFolder', () => {
+  it('在 Tauri 环境下调用原生 pick_folder 命令', async () => {
+    const invoke = vi.fn(async () => 'D:\\Projects\\OpenAWork');
+    const tauriWindow = {
+      __TAURI__: {
+        core: {
+          invoke,
+        },
+      },
+    };
+    vi.stubGlobal('window', tauriWindow);
+
+    await expect(pickDesktopFolder()).resolves.toBe('D:\\Projects\\OpenAWork');
+    expect(invoke).toHaveBeenCalledWith('pick_folder', undefined);
   });
 });

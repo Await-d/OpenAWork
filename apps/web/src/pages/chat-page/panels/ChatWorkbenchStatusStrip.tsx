@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react';
 import { ChatWorkbenchSignalChip } from './ChatWorkbenchSignalChip.js';
+import { getPathBasename } from '../../../utils/workspace-path.js';
 
 interface ChatWorkbenchStatusStripProps {
   readonly activeTerminalCount: number;
@@ -102,14 +103,7 @@ const SIGNAL_ROW_STYLE: CSSProperties = {
 };
 
 function basename(path: string | null): string {
-  const trimmed = path?.trim();
-  if (!trimmed) {
-    return '未选择工作区';
-  }
-
-  const normalized = trimmed.replace(/\/+$/, '');
-  const parts = normalized.split('/').filter(Boolean);
-  return parts.at(-1) ?? normalized;
+  return getPathBasename(path, '未选择工作区');
 }
 
 function formatSessionLabel(sessionId: string | null): string {

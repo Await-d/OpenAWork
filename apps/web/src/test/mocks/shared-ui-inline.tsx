@@ -84,19 +84,118 @@ export interface AlwaysScopeLevel {
   category: 'full' | 'partial' | 'base';
 }
 
+export type PermissionDecision = 'reject' | 'once' | 'session' | 'permanent';
+
+export interface PermissionPromptProps {
+  requestId: string;
+  toolName: string;
+  scope: string;
+  reason: string;
+  riskLevel: 'low' | 'medium' | 'high';
+  previewAction?: string;
+  always?: string[];
+  pendingDecision?: PermissionDecision | null;
+  errorMessage?: string;
+  onDecide: (
+    requestId: string,
+    decision: PermissionDecision,
+    scopeLevel?: AlwaysScopeLevel,
+  ) => void;
+  onScopeLevelChange?: (level: AlwaysScopeLevel) => void;
+  sessionTitle?: string;
+  onNavigateToSession?: () => void;
+}
+
+export function PermissionPrompt(props: PermissionPromptProps): ReactElement {
+  return (
+    <div>
+      <div>{props.toolName}</div>
+      <div>{props.reason}</div>
+      <div>{props.previewAction ?? props.scope}</div>
+      {props.sessionTitle ? (
+        props.onNavigateToSession ? (
+          <button type="button" onClick={props.onNavigateToSession}>
+            {props.sessionTitle}
+          </button>
+        ) : (
+          <span>{props.sessionTitle}</span>
+        )
+      ) : null}
+      {props.errorMessage ? <div>{props.errorMessage}</div> : null}
+    </div>
+  );
+}
+
+const NAMESPACE_PATTERN_SEGMENT = /^(?:\*|[A-Za-z0-9._-]+)$/;
+
+function parseNamespaceLikeSegments(value: string): string[] | null {
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || /\s/.test(trimmed) || !trimmed.includes(':')) {
+    return null;
+  }
+
+  const segments = trimmed.split(':');
+  if (segments.length < 2) {
+    return null;
+  }
+
+  return segments.every((segment) => NAMESPACE_PATTERN_SEGMENT.test(segment)) ? segments : null;
+}
+
+function deriveNamespaceLikeAlwaysPatterns(scope: string): string[] {
+  const segments = parseNamespaceLikeSegments(scope);
+  if (!segments) {
+    return [];
+  }
+
+  const patterns = new Set<string>();
+  for (let keepCount = segments.length - 1; keepCount >= 1; keepCount -= 1) {
+    patterns.add(`${segments.slice(0, keepCount).join(':')}:*`);
+  }
+
+  patterns.delete(scope.trim());
+  return [...patterns];
+}
+
+function countPatternSpecificity(pattern: string): number {
+  const namespaceSegments = parseNamespaceLikeSegments(pattern);
+  if (!namespaceSegments) {
+    return 1;
+  }
+
+  let meaningfulCount = namespaceSegments.length;
+  while (meaningfulCount > 0 && namespaceSegments[meaningfulCount - 1] === '*') {
+    meaningfulCount -= 1;
+  }
+  return meaningfulCount;
+}
+
 export function categorizeAlwaysPatterns(
   _previewAction: string | undefined,
   scope: string,
   always: string[] | undefined,
 ): AlwaysScopeLevel[] {
+  const fallbackPatterns = deriveNamespaceLikeAlwaysPatterns(scope);
   const seenPatterns = new Set<string>([scope]);
-  const uniqueAlways: string[] = [];
+  const uniqueAlways = new Map<string, number>();
 
-  for (const pattern of always ?? []) {
+  for (const pattern of [...(always ?? []), ...fallbackPatterns]) {
     if (pattern.trim().length === 0 || seenPatterns.has(pattern)) continue;
     seenPatterns.add(pattern);
-    uniqueAlways.push(pattern);
+    uniqueAlways.set(
+      pattern,
+      Math.max(uniqueAlways.get(pattern) ?? 0, countPatternSpecificity(pattern)),
+    );
   }
+
+  const sortedPatterns = [...uniqueAlways.entries()]
+    .sort((left, right) => {
+      if (right[1] !== left[1]) {
+        return right[1] - left[1];
+      }
+      return right[0].length - left[0].length;
+    })
+    .map(([pattern]) => pattern);
 
   return [
     {
@@ -108,19 +207,19 @@ export function categorizeAlwaysPatterns(
     {
       label: '同子命令',
       description:
-        uniqueAlways.length >= 2
+        sortedPatterns.length >= 1
           ? '覆盖网关提供的相同子命令模式。'
           : '当前没有可用的同子命令规则，选择后仍只覆盖当前命令。',
-      pattern: uniqueAlways.length >= 2 ? uniqueAlways[0]! : scope,
+      pattern: sortedPatterns.length >= 1 ? sortedPatterns[0]! : scope,
       category: 'partial',
     },
     {
       label: '同类指令',
       description:
-        uniqueAlways.length >= 1
+        sortedPatterns.length >= 2
           ? '覆盖网关提供的同类指令模式。'
           : '当前没有可用的同类指令规则，选择后仍只覆盖当前命令。',
-      pattern: uniqueAlways.length >= 1 ? uniqueAlways[uniqueAlways.length - 1]! : scope,
+      pattern: sortedPatterns.length >= 2 ? sortedPatterns[sortedPatterns.length - 1]! : scope,
       category: 'base',
     },
   ];

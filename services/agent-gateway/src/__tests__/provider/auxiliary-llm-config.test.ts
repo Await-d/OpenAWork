@@ -44,6 +44,20 @@ import {
   resolveAuxiliaryLlmConfigCandidates,
 } from '../../provider/auxiliary-llm-config.js';
 
+function mockStoredSettings(input: { providers?: unknown; activeSelection?: unknown }): void {
+  mocks.sqliteGet.mockImplementation((query: string) => {
+    if (query.includes(`key = 'providers'`)) {
+      return input.providers === undefined ? undefined : { value: JSON.stringify(input.providers) };
+    }
+    if (query.includes(`key = 'active_selection'`)) {
+      return input.activeSelection === undefined
+        ? undefined
+        : { value: JSON.stringify(input.activeSelection) };
+    }
+    return undefined;
+  });
+}
+
 describe('resolveAuxiliaryLlmConfig', () => {
   const ORIGINAL_ENV = { ...process.env };
 
@@ -63,7 +77,7 @@ describe('resolveAuxiliaryLlmConfig', () => {
   });
 
   it("forwards the user provider's providerType and upstreamProtocol", async () => {
-    mocks.sqliteGet.mockReturnValue(undefined);
+    mockStoredSettings({ providers: [{ id: 'stored-fast' }] });
     mocks.getFastProviderConfig.mockResolvedValue({
       provider: {
         id: 'p1',
@@ -90,7 +104,7 @@ describe('resolveAuxiliaryLlmConfig', () => {
   });
 
   it('forwards OpenAI fast provider through the Responses protocol', async () => {
-    mocks.sqliteGet.mockReturnValue(undefined);
+    mockStoredSettings({ providers: [{ id: 'stored-fast' }] });
     mocks.getFastProviderConfig.mockResolvedValue({
       provider: {
         id: 'openai-fast',
@@ -116,7 +130,7 @@ describe('resolveAuxiliaryLlmConfig', () => {
   });
 
   it('falls back to active-chat provider when fast is unavailable', async () => {
-    mocks.sqliteGet.mockReturnValue(undefined);
+    mockStoredSettings({ providers: [{ id: 'stored-chat' }] });
     mocks.getFastProviderConfig.mockResolvedValue(null);
     mocks.getActiveChatProviderConfig.mockResolvedValue({
       provider: {
@@ -138,7 +152,7 @@ describe('resolveAuxiliaryLlmConfig', () => {
   });
 
   it('omits upstreamProtocol when the provider has none configured', async () => {
-    mocks.sqliteGet.mockReturnValue(undefined);
+    mockStoredSettings({ providers: [{ id: 'stored-openai' }] });
     mocks.getFastProviderConfig.mockResolvedValue({
       provider: {
         id: 'p3',
@@ -188,7 +202,7 @@ describe('resolveAuxiliaryLlmConfig', () => {
   });
 
   it('skips provider entries missing baseUrl or apiKey', async () => {
-    mocks.sqliteGet.mockReturnValue(undefined);
+    mockStoredSettings({ providers: [{ id: 'stored-broken' }] });
     mocks.getFastProviderConfig.mockResolvedValue({
       provider: {
         id: 'broken',
@@ -218,7 +232,7 @@ describe('resolveAuxiliaryLlmConfig', () => {
   });
 
   it('does not fallback to active chat or env when an explicit override is unavailable', async () => {
-    mocks.sqliteGet.mockReturnValue(undefined);
+    mockStoredSettings({ providers: [{ id: 'stored-override' }] });
     mocks.getProviderConfigForSelection.mockResolvedValue(null);
     mocks.getFastProviderConfig.mockResolvedValue({
       provider: {
@@ -251,7 +265,7 @@ describe('resolveAuxiliaryLlmConfig', () => {
 
     expect(cfg).toBeNull();
     expect(mocks.getProviderConfigForSelection).toHaveBeenCalledWith(
-      undefined,
+      [{ id: 'stored-override' }],
       undefined,
       {
         providerId: 'fixed-provider',
@@ -292,7 +306,7 @@ describe('resolveAuxiliaryLlmConfig', () => {
   });
 
   it('candidate resolver returns fast, active-chat, then env fallback in order', async () => {
-    mocks.sqliteGet.mockReturnValue(undefined);
+    mockStoredSettings({ providers: [{ id: 'stored-fast' }] });
     mocks.getFastProviderConfig.mockResolvedValue({
       provider: {
         id: 'fast',
@@ -350,7 +364,7 @@ describe('resolveAuxiliaryLlmConfig', () => {
       baseUrl: 'https://same.example.com/v1',
       apiKey: 'same-key',
     };
-    mocks.sqliteGet.mockReturnValue(undefined);
+    mockStoredSettings({ providers: [{ id: 'stored-same' }] });
     mocks.getFastProviderConfig.mockResolvedValue({ provider, modelId: 'same-model' });
     mocks.getActiveChatProviderConfig.mockResolvedValue({ provider, modelId: 'same-model' });
 

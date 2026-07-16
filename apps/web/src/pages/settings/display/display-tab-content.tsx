@@ -7,6 +7,7 @@ import {
 } from '../../../stores/settings/display-preferences.js';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
 import type { WorkbenchLayoutMode } from '../../../stores/ui/uiState.js';
+import { CurrentUserProfileSection } from './current-user-profile-section.js';
 
 // ── Toggle 开关组件 ─────────────────────────────────────────
 
@@ -354,6 +355,8 @@ export function DisplayTabContent() {
           控制聊天消息、工具调用、界面元素和主题的展示行为。所有设置即时生效并自动保存。
         </p>
       </div>
+
+      <CurrentUserProfileSection />
 
       <section style={SS}>
         <h3 style={ST}>消息元信息</h3>

@@ -19,6 +19,7 @@ import {
   useDisplayPreferencesStore,
   type ThemeStyle,
 } from './stores/settings/display-preferences.js';
+import { useCurrentUserProfileBootstrap } from './stores/user-profile/current-user-profile.js';
 import {
   readThemeStyle as storageReadThemeStyle,
   readThemeMode as storageReadThemeMode,
@@ -311,6 +312,8 @@ export default function App() {
   const [showOnboarding, setShowOnboarding] = useState(
     () => localStorage.getItem('onboarded') !== '1',
   );
+
+  useCurrentUserProfileBootstrap(authHydrated);
 
   // 登录成功后（accessToken 从 null 变为有值），强制从 localStorage 重新读取主题。
   // 这解决了：登录前显示默认主题，登录后没有切换到用户保存的主题的问题。

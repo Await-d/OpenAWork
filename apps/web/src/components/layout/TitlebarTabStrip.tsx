@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useUIStateStore } from '../../stores/ui/uiState.js';
-import { TitlebarNewSessionButton, TitlebarNewTeamButton } from './TitlebarActionButtons.js';
 import { TitlebarHomeButton } from './TitlebarHomeButton.js';
-import { TitlebarLayoutModeControl } from './TitlebarLayoutModeControl.js';
 import { TeamTitlebarSummary } from './TeamTitlebarSummary.js';
 import { TitlebarTab } from './TitlebarTab.js';
 import { TitlebarToolsMenu } from './TitlebarToolsMenu.js';
+import { isTauriRuntime } from '../../utils/gateway/desktop-gateway.js';
 import { useTitlebarKeyboardShortcuts } from './useTitlebarKeyboardShortcuts.js';
 import { useTitlebarResponsiveState } from './useTitlebarResponsiveState.js';
 import './TitlebarTabStrip.css';
@@ -14,6 +13,22 @@ import './TitlebarTabStrip.css';
 export interface TitlebarTabStripProps {
   readonly theme?: 'dark' | 'light';
   readonly onToggleTheme?: () => void;
+}
+
+type TitlebarWindowAction = 'close' | 'minimize' | 'toggleMaximize';
+
+function isMacDesktopTauri(): boolean {
+  if (typeof navigator === 'undefined' || !isTauriRuntime()) {
+    return false;
+  }
+
+  const navigatorWithUserAgentData = navigator as Navigator & {
+    userAgentData?: { platform?: string };
+  };
+  const platform =
+    navigatorWithUserAgentData.userAgentData?.platform ?? navigator.platform ?? navigator.userAgent;
+
+  return /mac/i.test(platform);
 }
 
 export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps = {}) {
@@ -30,7 +45,7 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
   const navigateToHome = useUIStateStore((s) => s.navigateToHome);
 
   const [dragFromIndex, setDragFromIndex] = useState<number | null>(null);
-  const { compactActionLabels, stackedTeamTitlebar } = useTitlebarResponsiveState();
+  const { stackedTeamTitlebar } = useTitlebarResponsiveState();
 
   const currentSessionId = location.pathname.split('/chat/')[1]?.split('/')[0] ?? null;
   const isTeamRoute = location.pathname.startsWith('/team');
@@ -117,18 +132,71 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
     void navigate('/chat');
   }, [navigate, navigateToHome]);
 
-  const handleNewTeamWorkspace = useCallback(() => {
-    void navigate('/team?action=newWorkspace');
-  }, [navigate]);
+  const handleWindowAction = useCallback((action: TitlebarWindowAction) => {
+    if (!isMacDesktopTauri()) {
+      return;
+    }
+
+    void import('@tauri-apps/api/window')
+      .then(async ({ getCurrentWindow }) => {
+        const currentWindow = getCurrentWindow();
+
+        switch (action) {
+          case 'close':
+            await currentWindow.close();
+            break;
+          case 'minimize':
+            await currentWindow.minimize();
+            break;
+          case 'toggleMaximize':
+            await currentWindow.toggleMaximize();
+            break;
+        }
+      })
+      .catch(() => undefined);
+  }, []);
 
   const isHomeActive = !currentSessionId && location.pathname.startsWith('/chat');
   const teamTitlebarStacked = isTeamRoute && stackedTeamTitlebar;
+  const showTrafficLights = isMacDesktopTauri();
   const className = teamTitlebarStacked
     ? 'titlebar-tab-strip titlebar-tab-strip--stacked'
     : 'titlebar-tab-strip';
+  const leadingControls = (
+    <div className="titlebar-tab-strip__leading-controls">
+      {showTrafficLights ? (
+        <div className="titlebar-tab-strip__traffic-lights" aria-label="窗口控制">
+          <button
+            type="button"
+            title="关闭窗口"
+            aria-label="关闭窗口"
+            className="titlebar-tab-strip__traffic-light"
+            data-tone="close"
+            onClick={() => handleWindowAction('close')}
+          />
+          <button
+            type="button"
+            title="最小化窗口"
+            aria-label="最小化窗口"
+            className="titlebar-tab-strip__traffic-light"
+            data-tone="minimize"
+            onClick={() => handleWindowAction('minimize')}
+          />
+          <button
+            type="button"
+            title="切换窗口最大化"
+            aria-label="切换窗口最大化"
+            className="titlebar-tab-strip__traffic-light"
+            data-tone="maximize"
+            onClick={() => handleWindowAction('toggleMaximize')}
+          />
+        </div>
+      ) : null}
+      <TitlebarHomeButton active={isHomeActive} onClick={handleGoHome} />
+    </div>
+  );
   const layoutControls = (
     <div className="titlebar-tab-strip__global-actions">
-      <TitlebarLayoutModeControl density={teamTitlebarStacked ? 'compact' : 'normal'} />
       <TitlebarToolsMenu theme={theme} onToggleTheme={onToggleTheme} />
     </div>
   );
@@ -138,21 +206,16 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
       {teamTitlebarStacked ? (
         <>
           <div aria-label="全局工作台控制" className="titlebar-tab-strip__global-row">
-            <TitlebarHomeButton active={isHomeActive} onClick={handleGoHome} />
+            {leadingControls}
             {layoutControls}
           </div>
           <div aria-label="Team 工作台上下文" className="titlebar-tab-strip__team-row">
             <TeamTitlebarSummary pathname={location.pathname} />
-            <TitlebarNewTeamButton
-              compact={compactActionLabels}
-              stacked={teamTitlebarStacked}
-              onClick={handleNewTeamWorkspace}
-            />
           </div>
         </>
       ) : (
         <>
-          <TitlebarHomeButton active={isHomeActive} onClick={handleGoHome} />
+          {leadingControls}
 
           {(!isTeamRoute && tabs.length > 0) || isTeamRoute ? (
             <div aria-hidden="true" className="titlebar-tab-strip__divider" />
@@ -176,16 +239,6 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
             </div>
           ) : (
             <TeamTitlebarSummary pathname={location.pathname} />
-          )}
-
-          {!isTeamRoute ? (
-            <TitlebarNewSessionButton onClick={handleNewTab} />
-          ) : (
-            <TitlebarNewTeamButton
-              compact={compactActionLabels}
-              stacked={teamTitlebarStacked}
-              onClick={handleNewTeamWorkspace}
-            />
           )}
           {layoutControls}
         </>

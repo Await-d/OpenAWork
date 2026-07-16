@@ -168,6 +168,10 @@ export async function stopDesktopGateway(): Promise<void> {
   await invokeTauri<void>('stop_gateway');
 }
 
+export async function pickDesktopFolder(): Promise<string | null> {
+  return await invokeTauri<string | null>('pick_folder');
+}
+
 /**
  * 列出本机所有可在局域网中分发给其他设备的 IPv4 地址（RFC1918 私有段）。
  *

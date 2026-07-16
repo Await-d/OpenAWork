@@ -50,6 +50,8 @@ interface ThinkingChunkDispatchCallbacks {
   onThinkingEnd?: (chunk: StreamThinkingEndChunk) => void;
 }
 
+type GatewayErrorChunk = Extract<StreamChunk | RunEvent, { type: 'error' }>;
+
 interface GatewayClient {
   attachToActiveStream: (sessionId: string, callbacks: StreamCallbacks) => Promise<boolean>;
   getActiveStreamSessionId: () => string | null;
@@ -257,6 +259,7 @@ export function connectAttachEventSource(
   return new Promise<boolean>((resolve) => {
     let settled = false;
     let opened = false;
+    const deliveredEventIds = new Set<string>();
 
     const cleanup = (clearSnapshot: boolean, eventSource: AttachEventSourceLike) => {
       eventSource.close();
@@ -270,51 +273,6 @@ export function connectAttachEventSource(
       }
     };
 
-    const handleChunk = (chunk: StreamChunk | RunEvent, eventSource: AttachEventSourceLike) => {
-      if (settled) return;
-      if (isThinkingStartChunk(chunk)) {
-        dispatchThinkingStartChunk(callbacks, chunk);
-        return;
-      }
-      if (isThinkingDeltaChunk(chunk)) {
-        dispatchThinkingChunk(callbacks, chunk);
-        return;
-      }
-      if (isThinkingEndChunk(chunk)) {
-        dispatchThinkingEndChunk(callbacks, chunk);
-        return;
-      }
-      switch (chunk.type) {
-        case 'text_delta':
-          callbacks.onDelta(extractRuntimeTextDelta(chunk.delta));
-          return;
-        case 'tool_call_delta':
-          callbacks.onToolCall?.(chunk);
-          callbacks.onEvent?.(chunk);
-          return;
-        case 'done':
-          settled = true;
-          cleanup(true, eventSource);
-          callbacks.onEvent?.(chunk);
-          callbacks.onDone(
-            chunk.stopReason,
-            chunk.agentId,
-            chunk.cancellation,
-            chunk.upstreamSummary,
-          );
-          return;
-        case 'error':
-          settled = true;
-          cleanup(true, eventSource);
-          callbacks.onEvent?.(chunk);
-          callbacks.onError(chunk.code, chunk.message);
-          return;
-        default:
-          callbacks.onEvent?.(chunk);
-          return;
-      }
-    };
-
     const params = new URLSearchParams({
       afterSeq: String(requestedAfterSeq),
       clientRequestId: activeStream.clientRequestId,
@@ -324,6 +282,28 @@ export function connectAttachEventSource(
       `${gatewayUrl}/sessions/${sessionId}/stream/attach?${params.toString()}`,
     );
     setCurrentEventSource(eventSource);
+    const handleChunk = createGatewayChunkDispatcher({
+      callbacks,
+      deliveredEventIds,
+      isSettled: () => settled,
+      onDoneChunk: (chunk) => {
+        settled = true;
+        cleanup(true, eventSource);
+        callbacks.onEvent?.(chunk);
+        callbacks.onDone(
+          chunk.stopReason,
+          chunk.agentId,
+          chunk.cancellation,
+          chunk.upstreamSummary,
+        );
+      },
+      onErrorChunk: (chunk) => {
+        settled = true;
+        cleanup(true, eventSource);
+        callbacks.onEvent?.(chunk);
+        callbacks.onError(chunk.code, chunk.message);
+      },
+    });
 
     eventSource.onopen = () => {
       opened = true;
@@ -354,10 +334,10 @@ export function connectAttachEventSource(
             transport: 'attach-sse',
           });
         }
-        handleChunk(parsed.payload.event, eventSource);
+        handleChunk(parsed.payload.event);
         return;
       }
-      handleChunk(parsed, eventSource);
+      handleChunk(parsed);
     };
 
     eventSource.onerror = () => {
@@ -503,6 +483,15 @@ function extractRuntimeTextDelta(value: unknown): string {
   return candidates.map((item) => extractRuntimeTextDelta(item)).join('');
 }
 
+function readGatewayEventId(value: unknown): string | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const eventId = (value as { eventId?: unknown }).eventId;
+  return typeof eventId === 'string' && eventId.length > 0 ? eventId : null;
+}
+
 function isThinkingDeltaChunk(value: unknown): value is StreamThinkingChunk {
   if (!value || typeof value !== 'object') {
     return false;
@@ -555,6 +544,60 @@ export function dispatchThinkingStartChunk(
 ): void {
   callbacks.onThinkingStart?.(chunk);
   callbacks.onEvent?.(chunk);
+}
+
+function createGatewayChunkDispatcher(input: {
+  callbacks: StreamCallbacks;
+  deliveredEventIds?: Set<string>;
+  isSettled: () => boolean;
+  onDoneChunk: (chunk: StreamDoneChunk) => void;
+  onErrorChunk: (chunk: GatewayErrorChunk) => void;
+}): (chunk: StreamChunk | RunEvent) => void {
+  const { callbacks, deliveredEventIds, isSettled, onDoneChunk, onErrorChunk } = input;
+
+  return (chunk) => {
+    if (isSettled()) return;
+
+    const eventId = readGatewayEventId(chunk);
+    if (eventId && deliveredEventIds) {
+      if (deliveredEventIds.has(eventId)) {
+        return;
+      }
+      deliveredEventIds.add(eventId);
+    }
+
+    if (isThinkingStartChunk(chunk)) {
+      dispatchThinkingStartChunk(callbacks, chunk);
+      return;
+    }
+    if (isThinkingDeltaChunk(chunk)) {
+      dispatchThinkingChunk(callbacks, chunk);
+      return;
+    }
+    if (isThinkingEndChunk(chunk)) {
+      dispatchThinkingEndChunk(callbacks, chunk);
+      return;
+    }
+
+    switch (chunk.type) {
+      case 'text_delta':
+        callbacks.onDelta(extractRuntimeTextDelta(chunk.delta));
+        return;
+      case 'tool_call_delta':
+        callbacks.onToolCall?.(chunk);
+        callbacks.onEvent?.(chunk);
+        return;
+      case 'done':
+        onDoneChunk(chunk);
+        return;
+      case 'error':
+        onErrorChunk(chunk);
+        return;
+      default:
+        callbacks.onEvent?.(chunk);
+        return;
+    }
+  };
 }
 
 function getActiveStreamStorageKey(): string {
@@ -751,6 +794,7 @@ export function useGatewayClient(token: string | null): GatewayClient {
 
       let settled = false;
       let fallbackStarted = false;
+      const deliveredEventIds = new Set<string>();
       // §0.153: chat-WS half-open liveness probe state (scoped to this stream).
       let livenessTimer: ReturnType<typeof setInterval> | null = null;
       let lastServerActivityAt = 0;
@@ -772,50 +816,28 @@ export function useGatewayClient(token: string | null): GatewayClient {
         stopRequestedRef.current = false;
       };
 
-      const handleChunk = (chunk: StreamChunk | RunEvent) => {
-        if (settled) return;
-        if (isThinkingStartChunk(chunk)) {
-          dispatchThinkingStartChunk(callbacks, chunk);
-          return;
-        }
-        if (isThinkingDeltaChunk(chunk)) {
-          dispatchThinkingChunk(callbacks, chunk);
-          return;
-        }
-        if (isThinkingEndChunk(chunk)) {
-          dispatchThinkingEndChunk(callbacks, chunk);
-          return;
-        }
-        switch (chunk.type) {
-          case 'text_delta':
-            callbacks.onDelta(extractRuntimeTextDelta(chunk.delta));
-            return;
-          case 'tool_call_delta':
-            callbacks.onToolCall?.(chunk);
-            callbacks.onEvent?.(chunk);
-            return;
-          case 'done':
-            settled = true;
-            cleanup();
-            callbacks.onEvent?.(chunk);
-            callbacks.onDone(
-              chunk.stopReason,
-              chunk.agentId,
-              chunk.cancellation,
-              chunk.upstreamSummary,
-            );
-            return;
-          case 'error':
-            settled = true;
-            cleanup();
-            callbacks.onEvent?.(chunk);
-            callbacks.onError(chunk.code, chunk.message);
-            return;
-          default:
-            callbacks.onEvent?.(chunk);
-            return;
-        }
-      };
+      const handleChunk = createGatewayChunkDispatcher({
+        callbacks,
+        deliveredEventIds,
+        isSettled: () => settled,
+        onDoneChunk: (chunk) => {
+          settled = true;
+          cleanup();
+          callbacks.onEvent?.(chunk);
+          callbacks.onDone(
+            chunk.stopReason,
+            chunk.agentId,
+            chunk.cancellation,
+            chunk.upstreamSummary,
+          );
+        },
+        onErrorChunk: (chunk) => {
+          settled = true;
+          cleanup();
+          callbacks.onEvent?.(chunk);
+          callbacks.onError(chunk.code, chunk.message);
+        },
+      });
 
       const startSse = () => {
         if (fallbackStarted || settled || streamGenerationRef.current !== streamGeneration) {

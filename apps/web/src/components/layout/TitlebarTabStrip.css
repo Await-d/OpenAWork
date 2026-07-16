@@ -47,6 +47,64 @@
   flex-shrink: 0;
 }
 
+.titlebar-tab-strip__leading-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.titlebar-tab-strip__traffic-lights {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.titlebar-tab-strip__traffic-light {
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 1px solid color-mix(in oklch, currentColor 40%, var(--bg-base));
+  border-radius: 9999px;
+  background: currentColor;
+  cursor: pointer;
+  opacity: 0.94;
+  transition:
+    box-shadow var(--dur-micro) var(--ease-micro),
+    opacity var(--dur-micro) var(--ease-micro),
+    transform var(--dur-micro) var(--ease-micro);
+}
+
+.titlebar-tab-strip__traffic-light[data-tone='close'] {
+  color: var(--danger);
+}
+
+.titlebar-tab-strip__traffic-light[data-tone='minimize'] {
+  color: var(--warning);
+}
+
+.titlebar-tab-strip__traffic-light[data-tone='maximize'] {
+  color: var(--success);
+}
+
+.titlebar-tab-strip__traffic-light:hover {
+  opacity: 1;
+  box-shadow: 0 0 0 3px color-mix(in oklch, currentColor 18%, transparent);
+}
+
+.titlebar-tab-strip__traffic-light:active {
+  transform: translateY(1px);
+}
+
+.titlebar-tab-strip__traffic-light:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+  opacity: 1;
+}
+
 .titlebar-tab-strip__home-button,
 .titlebar-tab-strip__new-session-button,
 .titlebar-tab-strip__new-team-button {
@@ -162,6 +220,14 @@
 
   .titlebar-tab-strip__global-actions {
     gap: var(--spacing-1);
+  }
+
+  .titlebar-tab-strip__leading-controls {
+    gap: var(--spacing-1);
+  }
+
+  .titlebar-tab-strip__traffic-lights {
+    gap: 4px;
   }
 
   .titlebar-tab-strip__divider {

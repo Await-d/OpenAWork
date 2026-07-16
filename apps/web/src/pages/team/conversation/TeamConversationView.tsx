@@ -54,6 +54,7 @@ import type { PendingPermissionRequest, PermissionDecision } from '@openAwork/we
 import type { ChatMessage } from '../../../components/conversation-runtime/messages/support.js';
 import type { InputImageContent } from '@openAwork/shared';
 import { useAuthStore } from '../../../stores/auth/auth.js';
+import { useCurrentUserDisplayName } from '../../../stores/user-profile/current-user-profile.js';
 import { useChatKeyboardShortcuts } from '../../../hooks/chat/useChatKeyboardShortcuts.js';
 import { useComposerWorkspaceCatalog } from '../../../hooks/chat/useComposerWorkspaceCatalog.js';
 import { useMessageMultiSelect } from '../../../components/chat/message/message-multi-select.js';
@@ -158,12 +159,16 @@ function escapeCssAttributeValue(value: string): string {
   return value.replace(/["\\]/g, '\\$&');
 }
 
-async function disabledComposerAsyncAction(): Promise<void> {
-  return Promise.resolve();
+async function disabledComposerSubmitAction(): Promise<boolean> {
+  return false;
 }
 
 function disabledComposerAction(): void {
   return undefined;
+}
+
+async function disabledComposerAsyncAction(): Promise<void> {
+  return Promise.resolve();
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -197,6 +202,7 @@ export function TeamConversationView({
   const token = useAuthStore((s) => s.accessToken);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
   const currentUserEmail = useAuthStore((s) => s.email) ?? '';
+  const currentUserDisplayName = useCurrentUserDisplayName();
   const { diagnostics } = useTeamRuntimeReferenceViewData();
   const layerNodes = useLayerStore((s) => s.nodes);
 
@@ -623,19 +629,19 @@ export function TeamConversationView({
   );
 
   const handleComposerSubmit = useCallback(
-    async (payload: UnifiedComposerSubmitPayload) => {
-      if (!composerEnabled) return;
+    async (payload: UnifiedComposerSubmitPayload): Promise<boolean> => {
+      if (!composerEnabled) return false;
       const text = payload.text.trim();
       // 纯附件（无文本）也允许发送：用一个占位描述让后端/LLM 知道用户发了图片。
       // 早期实现 `if (!text) return` 会静默丢弃纯图片提交，用户无任何反馈。
       const hasFiles = payload.files.length > 0;
-      if (!text && !hasFiles) return;
+      if (!text && !hasFiles) return false;
 
       // 流式进行中直接挡掉，并保留输入框内容 + 给出明确提示，避免"清空输入框→
       // startStream 静默 return→消息凭空消失"的旧行为（端到端健壮性 🔴#2）。
       if (state.streaming) {
         state.setStreamError('正在生成回复，请等待当前回复完成或点击停止后再发送。');
-        return;
+        return false;
       }
 
       // 先把 composer 附件（图片）上传并转成 inputParts，与 chat 的发送文件能力对齐。
@@ -657,7 +663,7 @@ export function TeamConversationView({
           const message = err instanceof Error ? err.message : '附件上传失败';
           console.warn('[TeamConversationView] attachment upload failed:', message);
           state.setStreamError(`附件上传失败，消息未发送（请重试或移除附件后重发）：${message}`);
-          return;
+          return false;
         }
       }
 
@@ -669,6 +675,7 @@ export function TeamConversationView({
       if (accepted) {
         state.setInput('');
       }
+      return accepted;
     },
     [composerEnabled, state, gatewayUrl, sessionId, token, dispatchTeamText],
   );
@@ -1315,6 +1322,7 @@ export function TeamConversationView({
               sessionId={sessionId}
               sessionSource="team"
               currentUserEmail={currentUserEmail}
+              currentUserDisplayName={currentUserDisplayName}
               gatewayUrl={gatewayUrl}
               token={token}
               topBar={effectiveTopBar}
@@ -1463,7 +1471,7 @@ export function TeamConversationView({
               setInput={state.setInput}
               textareaRef={state.textareaRef}
               onComposerSubmit={
-                composerEnabled ? handleComposerSubmit : disabledComposerAsyncAction
+                composerEnabled ? handleComposerSubmit : disabledComposerSubmitAction
               }
               onStopComposer={composerEnabled ? handleStopStream : disabledComposerAsyncAction}
               onComposerModelSelect={handleComposerModelSelect}
@@ -1489,6 +1497,7 @@ export function TeamConversationView({
             activeProviderId={state.activeProviderId}
             providerCatalog={providerCatalog}
             currentUserEmail={currentUserEmail}
+            currentUserDisplayName={currentUserDisplayName}
             scrollRegionRef={state.scrollRegionRef}
             resolveInlinePermissionActions={resolveInlinePermissionActions}
             onLayerSelect={handlePanelLayerSelect}

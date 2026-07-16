@@ -13,6 +13,9 @@ function getAppVersion(): string {
 export default function UpdateBanner() {
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [reg, setReg] = useState<ServiceWorkerRegistration | null>(null);
+  const [compactViewport, setCompactViewport] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(max-width: 767px)').matches : false,
+  );
 
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return;
@@ -31,6 +34,21 @@ export default function UpdateBanner() {
     });
   }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia('(max-width: 767px)');
+    const syncViewport = (event?: MediaQueryListEvent) => {
+      setCompactViewport(event?.matches ?? mediaQuery.matches);
+    };
+
+    syncViewport();
+    mediaQuery.addEventListener('change', syncViewport);
+    return () => mediaQuery.removeEventListener('change', syncViewport);
+  }, []);
+
   const handleReload = () => {
     if (reg?.waiting) {
       reg.waiting.postMessage({ type: 'SKIP_WAITING' });
@@ -42,6 +60,7 @@ export default function UpdateBanner() {
 
   if (!updateAvailable) {
     if (version === 'dev') return null;
+    if (compactViewport) return null;
     return (
       <div
         style={{

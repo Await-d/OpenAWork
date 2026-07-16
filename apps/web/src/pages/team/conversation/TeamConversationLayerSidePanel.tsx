@@ -29,6 +29,7 @@ export interface TeamConversationLayerSidePanelProps {
   activeProviderId: string;
   currentSessionId: string;
   currentUserEmail: string;
+  currentUserDisplayName?: string;
   isOpen: boolean;
   layers: LayerMessages[];
   mode: MultiLayerViewMode;
@@ -56,6 +57,7 @@ export function TeamConversationLayerSidePanel({
   activeProviderId,
   currentSessionId,
   currentUserEmail,
+  currentUserDisplayName,
   isOpen,
   layers,
   mode,
@@ -83,6 +85,7 @@ export function TeamConversationLayerSidePanel({
           activeProviderId={activeProviderId}
           providerCatalog={providerCatalog}
           currentUserEmail={currentUserEmail}
+          currentUserDisplayName={currentUserDisplayName}
           scrollRegionRef={scrollRegionRef}
           resolveInlinePermissionActions={resolveInlinePermissionActions}
         />

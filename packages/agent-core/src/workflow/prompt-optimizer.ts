@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 export interface PromptOptimizerOptions {
   originalPrompt: string;
   context?: string;
@@ -23,6 +25,174 @@ export interface PromptOptimizerResult {
 
 export interface PromptOptimizer {
   optimize(options: PromptOptimizerOptions): Promise<PromptOptimizerResult>;
+}
+
+export type PromptOptimizerErrorKind = 'invalid_response' | 'upstream_unavailable';
+
+export class PromptOptimizerError extends Error {
+  readonly kind: PromptOptimizerErrorKind;
+  readonly retryable: boolean;
+  override readonly cause?: unknown;
+
+  constructor(input: {
+    cause?: unknown;
+    kind: PromptOptimizerErrorKind;
+    message: string;
+    retryable: boolean;
+  }) {
+    super(input.message);
+    this.name = 'PromptOptimizerError';
+    this.kind = input.kind;
+    this.retryable = input.retryable;
+    this.cause = input.cause;
+  }
+}
+
+export class PromptOptimizerResultParseError extends PromptOptimizerError {
+  constructor(cause?: unknown) {
+    super({
+      cause,
+      kind: 'invalid_response',
+      message: '模型返回结果格式无效，请重试。',
+      retryable: false,
+    });
+    this.name = 'PromptOptimizerResultParseError';
+  }
+}
+
+export class PromptOptimizerUpstreamError extends PromptOptimizerError {
+  constructor(cause?: unknown) {
+    super({
+      cause,
+      kind: 'upstream_unavailable',
+      message: '上游模型暂时不可用，请稍后重试。',
+      retryable: true,
+    });
+    this.name = 'PromptOptimizerUpstreamError';
+  }
+}
+
+const optionalNonEmptyStringSchema = z.preprocess((value) => {
+  if (typeof value !== 'string') {
+    return value;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}, z.string().trim().min(1).optional());
+
+const promptCandidatePayloadSchema = z.object({
+  id: optionalNonEmptyStringSchema,
+  text: z.string().trim().min(1),
+  improvements: z.array(z.string().trim().min(1)).optional().default([]),
+  score: z.number().finite().optional(),
+});
+
+const promptOptimizerPayloadSchema = z.object({
+  candidates: z.array(promptCandidatePayloadSchema).min(1),
+  recommended: optionalNonEmptyStringSchema,
+  rationale: z.string().trim().optional().default(''),
+});
+
+function extractJsonCodeBlocks(raw: string): string[] {
+  const matches = raw.matchAll(/```(?:json)?\s*([\s\S]*?)```/giu);
+  return Array.from(matches, (match) => match[1]?.trim() ?? '').filter((value) => value.length > 0);
+}
+
+function extractBalancedJsonObjects(raw: string): string[] {
+  const payloads: string[] = [];
+  let start = -1;
+  let depth = 0;
+  let inString = false;
+  let escaping = false;
+
+  for (let index = 0; index < raw.length; index += 1) {
+    const char = raw[index];
+    if (char === undefined) {
+      continue;
+    }
+
+    if (start === -1) {
+      if (char === '{') {
+        start = index;
+        depth = 1;
+      }
+      continue;
+    }
+
+    if (inString) {
+      if (escaping) {
+        escaping = false;
+        continue;
+      }
+      if (char === '\\') {
+        escaping = true;
+        continue;
+      }
+      if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (char === '{') {
+      depth += 1;
+      continue;
+    }
+
+    if (char === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        payloads.push(raw.slice(start, index + 1));
+        start = -1;
+      }
+    }
+  }
+
+  return payloads;
+}
+
+function normalizeCandidateId(
+  rawId: string | undefined,
+  index: number,
+  seenIds: Set<string>,
+): string {
+  const baseId = rawId?.trim() || `candidate-${index + 1}`;
+  let nextId = baseId;
+  let suffix = 2;
+  while (seenIds.has(nextId)) {
+    nextId = `${baseId}-${suffix}`;
+    suffix += 1;
+  }
+  seenIds.add(nextId);
+  return nextId;
+}
+
+function parsePromptOptimizerPayload(raw: string): z.infer<typeof promptOptimizerPayloadSchema> {
+  const payloadCandidates = [...extractJsonCodeBlocks(raw), ...extractBalancedJsonObjects(raw)];
+  if (payloadCandidates.length === 0) {
+    throw new PromptOptimizerResultParseError();
+  }
+
+  let lastError: unknown = undefined;
+  for (const payload of payloadCandidates) {
+    try {
+      const parsedJson = JSON.parse(payload) as unknown;
+      const parsedPayload = promptOptimizerPayloadSchema.safeParse(parsedJson);
+      if (parsedPayload.success) {
+        return parsedPayload.data;
+      }
+      lastError = parsedPayload.error;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw new PromptOptimizerResultParseError(lastError);
 }
 
 export class PromptOptimizerImpl implements PromptOptimizer {
@@ -71,21 +241,32 @@ export class PromptOptimizerImpl implements PromptOptimizer {
       `${options.originalPrompt}`,
     ].join('\n');
 
-    const raw = await this.callLLM(metaPrompt);
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('LLM returned no JSON payload from prompt optimizer');
+    let raw: string;
+    try {
+      raw = await this.callLLM(metaPrompt);
+    } catch (error) {
+      throw new PromptOptimizerUpstreamError(error);
+    }
 
-    const parsed = JSON.parse(jsonMatch[0]) as {
-      candidates: PromptCandidate[];
-      recommended: string;
-      rationale: string;
-    };
+    const parsed = parsePromptOptimizerPayload(raw);
+    const seenIds = new Set<string>();
+    const candidates = parsed.candidates.map((candidate, index) => ({
+      ...candidate,
+      id: normalizeCandidateId(candidate.id, index, seenIds),
+      improvements: candidate.improvements,
+    }));
+    const firstCandidate = candidates[0];
+    if (!firstCandidate) {
+      throw new PromptOptimizerResultParseError();
+    }
+    const recommended =
+      candidates.find((candidate) => candidate.id === parsed.recommended)?.id ?? firstCandidate.id;
 
     return {
       requestId: crypto.randomUUID(),
       originalPrompt: options.originalPrompt,
-      candidates: parsed.candidates,
-      recommended: parsed.recommended,
+      candidates,
+      recommended,
       rationale: parsed.rationale,
       completedAt: Date.now(),
     };

@@ -1,5 +1,6 @@
 import type { PromptOptimizerResult } from '@openAwork/web-client';
 import { useEffect, useState } from 'react';
+import type { ComposerOptimizeError } from './composer-optimize-error.js';
 
 export type ComposerStopCapability = 'none' | 'precise' | 'best_effort' | 'observe_only';
 export type ComposerBusyState = 'running' | 'paused' | null;
@@ -16,12 +17,12 @@ export interface ChatComposerPrimaryActionsProps {
   readonly showStopAction: boolean;
   readonly showQueueAction: boolean;
   readonly queuedMessageCount: number;
+  readonly optimizeError: ComposerOptimizeError | null;
   readonly optimizeLoading: boolean;
   readonly optimizeResult: PromptOptimizerResult | null;
-  readonly onOptimizePrompt?: (text: string) => Promise<PromptOptimizerResult>;
-  readonly onSetOptimizeLoading: (loading: boolean) => void;
-  readonly onSetOptimizeResult: (result: PromptOptimizerResult | null) => void;
-  readonly onSetOptimizeError: (message: string | null) => void;
+  readonly onRunOptimizePrompt?: () => void;
+  readonly onClearOptimizeResult: () => void;
+  readonly onClearOptimizeError: () => void;
   readonly onQueueMessage?: () => void | Promise<void>;
   readonly onSend: () => void | Promise<void>;
   readonly onStop: () => void | Promise<void>;
@@ -30,7 +31,7 @@ export interface ChatComposerPrimaryActionsProps {
 export function ChatComposerPrimaryActions(props: ChatComposerPrimaryActionsProps) {
   return (
     <div className="composer-primary-actions">
-      {props.onOptimizePrompt && props.input.trim().length > 0 && !props.streaming && (
+      {props.onRunOptimizePrompt && props.input.trim().length > 0 && !props.streaming && (
         <OptimizeButton {...props} />
       )}
       {props.showQueueAction && (
@@ -57,26 +58,20 @@ function OptimizeButton(props: ChatComposerPrimaryActionsProps) {
       type="button"
       onClick={() => {
         if (props.optimizeResult) {
-          props.onSetOptimizeResult(null);
-          props.onSetOptimizeError(null);
+          props.onClearOptimizeResult();
+          props.onClearOptimizeError();
           return;
         }
-        props.onSetOptimizeLoading(true);
-        props.onSetOptimizeError(null);
-        props
-          .onOptimizePrompt?.(props.input.trim())
-          .then((result) => {
-            props.onSetOptimizeResult(result);
-          })
-          .catch((err: unknown) => {
-            props.onSetOptimizeError(err instanceof Error ? err.message : '提示词优化失败。');
-          })
-          .finally(() => {
-            props.onSetOptimizeLoading(false);
-          });
+        props.onRunOptimizePrompt?.();
       }}
-      disabled={props.optimizeLoading}
-      title={props.optimizeLoading ? '正在优化提示词…' : '提示词优化'}
+      disabled={props.optimizeLoading || !props.onRunOptimizePrompt}
+      title={
+        props.optimizeLoading
+          ? '正在优化提示词…'
+          : props.optimizeError?.retryable
+            ? '重新尝试提示词优化'
+            : '提示词优化'
+      }
       aria-busy={props.optimizeLoading}
       className={`icon-btn composer-optimize-button${props.optimizeResult ? ' active' : ''}`}
     >
@@ -147,7 +142,7 @@ function getComposerStatusLabel(props: ChatComposerPrimaryActionsProps): string 
       : '当前运行流仍受此页控制 · 可直接停止';
   }
   if (props.showQueueAction) {
-    return `可先追加到队列${props.queuedMessageCount > 0 ? ` · 已排队 ${props.queuedMessageCount} 条` : ''}`;
+    return `Tab / Enter 可排队${props.queuedMessageCount > 0 ? ` · 已排队 ${props.queuedMessageCount} 条` : ''}`;
   }
   if (props.imageGenerationBusy) return '图片生成中 · 请等待结果返回';
   if (props.sessionBusyState === 'running') return '会话持续运行中 · 正在同步最新结果';

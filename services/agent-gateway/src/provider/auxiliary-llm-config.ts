@@ -142,6 +142,7 @@ async function resolveAuxiliaryLlmConfigs(input: {
   );
   const rawProviders = parseUserSettingValue(providersRow?.value, 'providers');
   const rawSelection = parseUserSettingValue(selectionRow?.value, 'active_selection');
+  const hasStoredProviders = Array.isArray(rawProviders) && rawProviders.length > 0;
   const configs: ResolvedAuxiliaryLlmConfig[] = [];
   const seen = new Set<string>();
   const pushResolved = (
@@ -158,6 +159,9 @@ async function resolveAuxiliaryLlmConfigs(input: {
   };
 
   if (input.override?.providerId && input.override.modelId) {
+    if (!hasStoredProviders) {
+      return [];
+    }
     const cfg = await getProviderConfigForSelection(
       rawProviders,
       rawSelection,
@@ -171,15 +175,17 @@ async function resolveAuxiliaryLlmConfigs(input: {
     return resolved ? configs : [];
   }
 
-  const candidates = [
-    () => getFastProviderConfig(rawProviders, rawSelection),
-    () => getActiveChatProviderConfig(rawProviders, rawSelection),
-  ];
-  for (const lookup of candidates) {
-    const cfg = await lookup();
-    const resolved = pushResolved(cfg);
-    if (resolved && !input.collectAll) {
-      return configs;
+  if (hasStoredProviders) {
+    const candidates = [
+      () => getFastProviderConfig(rawProviders, rawSelection),
+      () => getActiveChatProviderConfig(rawProviders, rawSelection),
+    ];
+    for (const lookup of candidates) {
+      const cfg = await lookup();
+      const resolved = pushResolved(cfg);
+      if (resolved && !input.collectAll) {
+        return configs;
+      }
     }
   }
 

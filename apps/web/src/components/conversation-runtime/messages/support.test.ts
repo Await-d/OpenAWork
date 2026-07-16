@@ -28,6 +28,7 @@ import {
   applyToolResultToLocalAssistantMessages,
   normalizeChatMessages,
   partsFromOrderedAssistantContent,
+  reconcileSnapshotChatMessages,
   type ChatMessage,
   type ChatMessagePart,
   type ChatToolPart,
@@ -308,6 +309,38 @@ describe('partsFromOrderedAssistantContent', () => {
     const parts = partsFromOrderedAssistantContent(MSG_ID, wire);
     expect(parts).toHaveLength(1);
     expect(parts[0]).toMatchObject({ type: 'text', text: 'hello' });
+  });
+});
+
+describe('reconcileSnapshotChatMessages', () => {
+  it('把权限审批后的软刷新视为同位 user 消息，不重复保留本地 optimistic 文本', () => {
+    const previousMessages: ChatMessage[] = [
+      {
+        id: 'local-user-temp',
+        role: 'user',
+        content: '帮我执行 npm run build',
+        rawContent: [{ type: 'text', text: '帮我执行 npm run build' }],
+        createdAt: 1_000,
+        status: 'completed',
+      },
+    ];
+
+    const snapshotMessages: ChatMessage[] = [
+      {
+        id: 'server-user-1',
+        role: 'user',
+        content: '帮我执行 npm run build',
+        rawContent: [{ type: 'text', text: '帮我执行 npm run build' }],
+        createdAt: 61_000,
+        status: 'completed',
+      },
+    ];
+
+    const reconciled = reconcileSnapshotChatMessages(previousMessages, snapshotMessages);
+
+    expect(reconciled).toHaveLength(1);
+    expect(reconciled[0]?.id).toBe('server-user-1');
+    expect(reconciled[0]?.content).toBe('帮我执行 npm run build');
   });
 });
 

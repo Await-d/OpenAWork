@@ -28,7 +28,20 @@ export interface SettingsProvidersLoadResult {
   status?: number;
 }
 
+export interface SettingsProfileResponse {
+  displayName: string;
+  email: string;
+  nickname: string | null;
+  updatedAt?: string | null;
+}
+
+export interface SettingsProfileUpdateInput {
+  nickname?: string | null;
+}
+
 export interface SettingsClient {
+  getProfile(token: string, options?: { signal?: AbortSignal }): Promise<SettingsProfileResponse>;
+  putProfile(token: string, payload: SettingsProfileUpdateInput): Promise<SettingsProfileResponse>;
   // Providers / 模型选择
   getProviders(
     token: string,
@@ -234,6 +247,29 @@ export function createSettingsClient(baseUrl: string): SettingsClient {
   };
 
   return {
+    async getProfile(token, options) {
+      return performSettingsRequest<SettingsProfileResponse>({
+        actionLabel: '读取个人资料',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/settings/profile`, {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
+      });
+    },
+
+    async putProfile(token, payload) {
+      return performSettingsRequest<SettingsProfileResponse>({
+        actionLabel: '保存个人资料',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/settings/profile`, {
+            method: 'PUT',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify(payload),
+          }),
+      });
+    },
+
     async getProviders(token, options) {
       const result = await getProvidersResult(token, options);
       if (!result.ok) {

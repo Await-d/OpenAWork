@@ -1,9 +1,19 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, useLocation } from 'react-router';
 import { TitlebarTabStrip } from './TitlebarTabStrip.js';
 import { useUIStateStore } from '../../stores/ui/uiState.js';
+
+const tauriWindowControls = vi.hoisted(() => ({
+  close: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+  minimize: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+  toggleMaximize: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+}));
+
+vi.mock('@tauri-apps/api/window', () => ({
+  getCurrentWindow: () => tauriWindowControls,
+}));
 
 function resetUiState(): void {
   useUIStateStore.setState({
@@ -26,6 +36,42 @@ function renderTitlebar(initialPath: string) {
       <LocationProbe />
     </MemoryRouter>,
   );
+}
+
+function installDesktopRuntime(platform: string, userAgent: string): () => void {
+  const isTauriDescriptor = Object.getOwnPropertyDescriptor(window, 'isTauri');
+  const platformDescriptor = Object.getOwnPropertyDescriptor(navigator, 'platform');
+  const userAgentDescriptor = Object.getOwnPropertyDescriptor(navigator, 'userAgent');
+
+  Object.defineProperty(window, 'isTauri', {
+    configurable: true,
+    writable: true,
+    value: true,
+  });
+  Object.defineProperty(navigator, 'platform', {
+    configurable: true,
+    value: platform,
+  });
+  Object.defineProperty(navigator, 'userAgent', {
+    configurable: true,
+    value: userAgent,
+  });
+
+  return () => {
+    if (isTauriDescriptor) {
+      Object.defineProperty(window, 'isTauri', isTauriDescriptor);
+    } else {
+      delete (window as Window & { isTauri?: boolean }).isTauri;
+    }
+
+    if (platformDescriptor) {
+      Object.defineProperty(navigator, 'platform', platformDescriptor);
+    }
+
+    if (userAgentDescriptor) {
+      Object.defineProperty(navigator, 'userAgent', userAgentDescriptor);
+    }
+  };
 }
 
 function installMatchMedia(width: number): () => void {
@@ -63,6 +109,9 @@ function installMatchMedia(width: number): () => void {
 beforeEach(() => {
   cleanup();
   resetUiState();
+  tauriWindowControls.close.mockClear();
+  tauriWindowControls.minimize.mockClear();
+  tauriWindowControls.toggleMaximize.mockClear();
 });
 
 afterEach(() => {
@@ -99,12 +148,9 @@ describe('TitlebarTabStrip', () => {
       expect(screen.getByLabelText('全局工作台控制')).not.toBeNull();
       expect(screen.getByLabelText('Team 工作台上下文')).not.toBeNull();
       expect(screen.getByLabelText('Team 工作台层级').textContent).toContain('worksp…');
-      expect(screen.getByRole('button', { name: '新建' })).not.toBeNull();
       expect(screen.getByRole('tab', { name: '首页' })).not.toBeNull();
-      expect(
-        screen.getByRole('button', { name: '当前布局：融合，点击切换到经典布局' }),
-      ).not.toBeNull();
       expect(screen.queryByRole('tablist', { name: 'Chat 会话标签' })).toBeNull();
+      expect(screen.queryByRole('button', { name: '工具菜单' })).not.toBeNull();
     } finally {
       restoreMatchMedia();
     }
@@ -127,23 +173,8 @@ describe('TitlebarTabStrip', () => {
 
     expect(screen.getByRole('tablist', { name: 'Chat 会话标签' })).not.toBeNull();
     expect(screen.getByText('Chat 会话一')).not.toBeNull();
-    expect(
-      screen.getByRole('button', { name: '当前布局：融合，点击切换到经典布局' }),
-    ).not.toBeNull();
     expect(screen.getByRole('button', { name: '工具菜单' })).not.toBeNull();
-  });
-
-  it('顶部布局入口点击后直接切回经典布局', () => {
-    useUIStateStore.getState().addSessionTab('chat-session-1', 'Chat 会话一');
-
-    renderTitlebar('/chat/chat-session-1');
-
-    fireEvent.click(screen.getByRole('button', { name: '当前布局：融合，点击切换到经典布局' }));
-
-    expect(useUIStateStore.getState().workbenchLayoutMode).toBe('classic');
-    expect(
-      screen.getByRole('button', { name: '当前布局：经典，点击切换到融合布局' }),
-    ).not.toBeNull();
+    expect(screen.queryByRole('button', { name: '新建会话' })).toBeNull();
   });
 
   it('在工具菜单中仍可切换 classic/fusion 布局', () => {
@@ -155,5 +186,38 @@ describe('TitlebarTabStrip', () => {
     fireEvent.click(screen.getByRole('menuitemradio', { name: /经典/ }));
 
     expect(useUIStateStore.getState().workbenchLayoutMode).toBe('classic');
+  });
+
+  it('仅在 macOS Tauri 环境下展示交通灯并触发窗口控制', async () => {
+    const restoreDesktopRuntime = installDesktopRuntime('MacIntel', 'Mozilla/5.0 (Macintosh)');
+
+    try {
+      renderTitlebar('/chat');
+
+      expect(screen.getByLabelText('窗口控制')).not.toBeNull();
+
+      fireEvent.click(screen.getByRole('button', { name: '最小化窗口' }));
+      await waitFor(() => {
+        expect(tauriWindowControls.minimize).toHaveBeenCalledTimes(1);
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: '切换窗口最大化' }));
+      await waitFor(() => {
+        expect(tauriWindowControls.toggleMaximize).toHaveBeenCalledTimes(1);
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: '关闭窗口' }));
+      await waitFor(() => {
+        expect(tauriWindowControls.close).toHaveBeenCalledTimes(1);
+      });
+    } finally {
+      restoreDesktopRuntime();
+    }
+  });
+
+  it('在普通 Web 环境下隐藏交通灯', () => {
+    renderTitlebar('/chat');
+
+    expect(screen.queryByLabelText('窗口控制')).toBeNull();
   });
 });

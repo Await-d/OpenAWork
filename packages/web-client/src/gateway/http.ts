@@ -26,6 +26,7 @@ export interface JsonErrorData {
   error?: string;
   message?: string;
   name?: string;
+  retryable?: boolean;
 }
 
 export function extractJsonErrorMessage(data: JsonErrorData | undefined): string | null {

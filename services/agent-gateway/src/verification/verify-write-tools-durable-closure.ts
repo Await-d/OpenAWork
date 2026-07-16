@@ -159,6 +159,7 @@ async function main(): Promise<void> {
             JSON.stringify({
               workingDirectory: workspaceRoot,
               source: 'channel',
+              channelLlmToolsEnabled: true,
               channel: {
                 tools: {
                   read: true,

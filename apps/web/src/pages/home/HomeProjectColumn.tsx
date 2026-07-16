@@ -23,8 +23,11 @@ export function HomeProjectColumn({
     <aside className="home-project-column" aria-label="项目列表">
       <header className="home-project-column-header">
         <div>
-          <span className="home-eyebrow">Projects</span>
-          <h2>项目</h2>
+          <span className="home-eyebrow">工作区</span>
+          <h2>按项目筛选</h2>
+          <p className="home-project-column-description">
+            先切上下文，右侧欢迎区和会话列表会同步切换。
+          </p>
         </div>
         <button
           type="button"

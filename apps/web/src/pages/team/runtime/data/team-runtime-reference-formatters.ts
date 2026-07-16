@@ -14,14 +14,14 @@ import {
   mapSemanticStatusToSidebarStatus,
   type TeamRuntimeSemanticStatus,
 } from './team-runtime-status.js';
+import { getPathBasename } from '../../../../utils/workspace-path.js';
 
 export function formatWorkspaceLabel(workspacePath: string | null): string {
   if (!workspacePath) {
     return '未绑定工作区';
   }
 
-  const segments = workspacePath.split('/').filter(Boolean);
-  return segments[segments.length - 1] ?? workspacePath;
+  return getPathBasename(workspacePath, workspacePath);
 }
 
 export function formatClock(value: number | string): string {

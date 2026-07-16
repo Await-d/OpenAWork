@@ -205,8 +205,17 @@ export function ProviderAvatar({
   );
 }
 
-export function UserAvatar({ email, size = 32 }: { email: string; size?: number }) {
-  const initials = email ? (email[0]?.toUpperCase() ?? 'U') : 'U';
+export function UserAvatar({
+  email,
+  displayName,
+  size = 32,
+}: {
+  email: string;
+  displayName?: string;
+  size?: number;
+}) {
+  const preferredLabel = displayName?.trim() || email;
+  const initials = preferredLabel ? (preferredLabel[0]?.toUpperCase() ?? 'U') : 'U';
   return (
     <div
       style={{

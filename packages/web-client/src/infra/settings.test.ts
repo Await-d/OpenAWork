@@ -9,6 +9,68 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe('createSettingsClient profile methods', () => {
+  it('getProfile 成功时返回昵称资料', async () => {
+    const fetchMock = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({
+          email: 'user@example.com',
+          nickname: '林雾',
+          displayName: '林雾',
+          updatedAt: '2026-07-16T00:00:00.000Z',
+        }),
+      } as unknown as Response;
+    }) as typeof fetch;
+    globalThis.fetch = fetchMock;
+
+    const client = createSettingsClient('http://localhost:3000');
+    const result = await client.getProfile('token-1');
+
+    expect(result).toMatchObject({
+      email: 'user@example.com',
+      nickname: '林雾',
+      displayName: '林雾',
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:3000/settings/profile',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer token-1' }),
+      }),
+    );
+  });
+
+  it('putProfile 通过 settings profile endpoint 保存昵称', async () => {
+    const fetchMock = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({
+          email: 'user@example.com',
+          nickname: null,
+          displayName: 'user@example.com',
+        }),
+      } as unknown as Response;
+    }) as typeof fetch;
+    globalThis.fetch = fetchMock;
+
+    const client = createSettingsClient('http://localhost:3000');
+    const result = await client.putProfile('token-1', { nickname: null });
+
+    expect(result).toMatchObject({
+      email: 'user@example.com',
+      nickname: null,
+      displayName: 'user@example.com',
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:3000/settings/profile',
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ nickname: null }),
+      }),
+    );
+  });
+});
+
 describe('createSettingsClient.getProvidersResult', () => {
   it('成功时返回 providers 载荷', async () => {
     globalThis.fetch = vi.fn(async () => {

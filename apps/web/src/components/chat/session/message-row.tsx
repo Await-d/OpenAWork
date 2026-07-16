@@ -158,6 +158,7 @@ export function MessageRow({
   providerType,
   modelId,
   email,
+  currentUserDisplayName,
   actions,
   groupedWithPrevious = false,
   identityOverride,
@@ -172,6 +173,7 @@ export function MessageRow({
   providerType?: string;
   modelId: string;
   email: string;
+  currentUserDisplayName?: string;
   actions?: readonly MessageRowAction[];
   groupedWithPrevious?: boolean;
   identityOverride?: MessageRowIdentityOverride;
@@ -200,8 +202,9 @@ export function MessageRow({
   const normalizedAssistantLabel = normalizeProviderKey(assistantModelLabel);
   const normalizedResolvedProvider = normalizeProviderKey(resolvedProviderIdentity.displayName);
   const overrideDisplayName = identityOverride?.displayName?.trim();
+  const resolvedCurrentUserDisplayName = currentUserDisplayName?.trim();
   const displayName = isUser
-    ? overrideDisplayName || email || '你'
+    ? overrideDisplayName || resolvedCurrentUserDisplayName || email || '你'
     : overrideDisplayName || (showModelNamePref ? assistantModelLabel : '助手');
   const timestamp = formatShortTime(message.createdAt);
   const tokenCount = message.tokenEstimate ?? estimateTokenCount(message.content);
@@ -280,7 +283,11 @@ export function MessageRow({
               identityOverride.displayName.slice(0, 1)}
           </div>
         ) : isUser ? (
-          <UserAvatar email={email} size={28} />
+          <UserAvatar
+            email={email}
+            displayName={resolvedCurrentUserDisplayName || undefined}
+            size={28}
+          />
         ) : identityOverride ? (
           <div
             aria-hidden

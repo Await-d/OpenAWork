@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createWorkspaceClient } from '@openAwork/web-client';
 import { useAuthStore } from '../../../stores/auth/auth.js';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
-import { getFilePreviewKind, isBinaryPreviewKind } from '../../../utils/file/file-preview.js';
+import { getFilePreviewKind, isNonTextPreviewKind } from '../../../utils/file/file-preview.js';
 import { extractSnippet, type FileSnippet } from './extract-snippet.js';
 import { resolveBareFilename } from './resolve-bare-filename.js';
 
@@ -119,11 +119,11 @@ export function useFilePreview(path: string, line: number | null): FilePreviewSt
         // a "binary, no text preview" message instead of fetching
         // the bytes and feeding mojibake to extractSnippet.
         const previewKind = getFilePreviewKind(resolvedPath);
-        if (isBinaryPreviewKind(previewKind)) {
+        if (isNonTextPreviewKind(previewKind)) {
           if (cancelled) return;
           setState({
             status: 'error',
-            error: '该文件为二进制内容,无法以文本方式预览',
+            error: '该文件为非文本内容，无法以文本方式预览',
             staleSnippet: lastSuccessfulSnippetsRef.current.get(resolvedPath),
           });
           return;

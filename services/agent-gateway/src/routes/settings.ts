@@ -63,6 +63,12 @@ import {
   loadCompanionSettingsForUser,
 } from '../workspace/companion-settings.js';
 import {
+  loadUserProfileSettings,
+  resolveUserDisplayName,
+  saveUserProfileSettings,
+  userProfileSettingsUpdateSchema,
+} from '../user/user-profile-settings.js';
+import {
   listEffectiveWorkspacePermissionRules,
   loadWorkspacePermissionConfig,
   writeWorkspacePermissionConfig,
@@ -259,6 +265,65 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
   const companionSettingsQuerySchema = z.object({
     agentId: z.string().trim().min(1).max(120).optional(),
   });
+
+  app.get(
+    '/settings/profile',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'settings.profile.get');
+      const user = request.user as JwtPayload;
+
+      const loadStep = child('load');
+      const settings = loadUserProfileSettings(user.sub);
+      loadStep.succeed(undefined, { hasNickname: settings.nickname !== null });
+      step.succeed(undefined, { hasNickname: settings.nickname !== null });
+
+      return reply.send({
+        email: user.email,
+        nickname: settings.nickname,
+        displayName: resolveUserDisplayName({
+          email: user.email,
+          nickname: settings.nickname,
+        }),
+        updatedAt: settings.updatedAt ?? null,
+      });
+    },
+  );
+
+  app.put(
+    '/settings/profile',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'settings.profile.put');
+      const user = request.user as JwtPayload;
+
+      const parseStep = child('parse-body');
+      const body = parseBody(userProfileSettingsUpdateSchema, request.body);
+      parseStep.succeed(undefined, {
+        nickname:
+          typeof body.nickname === 'string'
+            ? body.nickname
+            : body.nickname === null
+              ? '(cleared)'
+              : '(unchanged)',
+      });
+
+      const saveStep = child('save');
+      const settings = saveUserProfileSettings(user.sub, body);
+      saveStep.succeed(undefined, { hasNickname: settings.nickname !== null });
+      step.succeed(undefined, { hasNickname: settings.nickname !== null });
+
+      return reply.send({
+        email: user.email,
+        nickname: settings.nickname,
+        displayName: resolveUserDisplayName({
+          email: user.email,
+          nickname: settings.nickname,
+        }),
+        updatedAt: settings.updatedAt ?? null,
+      });
+    },
+  );
 
   app.get(
     '/settings/companion',

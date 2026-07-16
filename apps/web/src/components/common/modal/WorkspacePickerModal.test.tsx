@@ -2,11 +2,21 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+const desktopGatewayMocks = vi.hoisted(() => ({
+  isTauriRuntime: vi.fn(() => false),
+  pickDesktopFolder: vi.fn<() => Promise<string | null>>(async () => null),
+}));
+
+vi.mock('../../../utils/gateway/desktop-gateway.js', () => desktopGatewayMocks);
+
 import WorkspacePickerModal, { type FileTreeNode } from './WorkspacePickerModal.js';
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  desktopGatewayMocks.isTauriRuntime.mockReturnValue(false);
+  desktopGatewayMocks.pickDesktopFolder.mockReset().mockResolvedValue(null);
 });
 
 describe('WorkspacePickerModal', () => {
@@ -144,5 +154,62 @@ describe('WorkspacePickerModal', () => {
       expect(screen.getByText('文件夹名称不能包含路径分隔符')).toBeTruthy();
     });
     expect(createDirectory).not.toHaveBeenCalled();
+  });
+
+  it('桌面端可通过系统文件夹选择器直接完成选择', async () => {
+    desktopGatewayMocks.isTauriRuntime.mockReturnValue(true);
+    desktopGatewayMocks.pickDesktopFolder.mockResolvedValue('D:\\Projects\\OpenAWork');
+    const onSelect = vi.fn(async () => undefined);
+    const onClose = vi.fn();
+    const validatePath = vi.fn(async () => ({
+      valid: true,
+      path: 'D:\\Projects\\OpenAWork',
+    }));
+
+    render(
+      <WorkspacePickerModal
+        isOpen
+        onClose={onClose}
+        onSelect={onSelect}
+        fetchWorkspaceRoots={async () => ['C:\\', 'D:\\']}
+        fetchTree={async () => []}
+        validatePath={validatePath}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: '使用系统选择器' }));
+
+    await waitFor(() => {
+      expect(desktopGatewayMocks.pickDesktopFolder).toHaveBeenCalledTimes(1);
+    });
+
+    await waitFor(() => {
+      expect(onSelect).toHaveBeenCalledWith('D:\\Projects\\OpenAWork');
+    });
+    expect(validatePath).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('桌面端打开弹窗时优先等待系统选择器，不会先因根目录树加载失败报错', async () => {
+    desktopGatewayMocks.isTauriRuntime.mockReturnValue(true);
+    const fetchTree = vi.fn(async () => {
+      throw new Error('当前账号无权访问该工作区路径。');
+    });
+
+    render(
+      <WorkspacePickerModal
+        isOpen
+        onClose={() => {}}
+        onSelect={async () => {}}
+        fetchWorkspaceRoots={async () => ['C:\\', 'D:\\']}
+        fetchTree={fetchTree}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('系统文件夹选择器')).toBeTruthy();
+    });
+    expect(fetchTree).not.toHaveBeenCalled();
+    expect(screen.queryByText('当前账号无权访问该工作区路径。')).toBeNull();
   });
 });

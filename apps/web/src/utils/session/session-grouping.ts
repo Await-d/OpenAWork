@@ -1,4 +1,5 @@
 import { extractParentSessionId, extractWorkingDirectory } from './session-metadata.js';
+import { getPathBasename } from '../workspace-path.js';
 
 export interface SessionWithWorkspaceLike {
   id: string;
@@ -369,6 +370,5 @@ function normalizeWorkspacePath(path: string): string | null {
 }
 
 function basename(path: string): string {
-  const parts = path.split('/').filter(Boolean);
-  return parts.length > 0 ? (parts[parts.length - 1] ?? path) : path;
+  return getPathBasename(path, path);
 }

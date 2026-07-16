@@ -1744,12 +1744,20 @@ export function reconcileSnapshotChatMessages(
         ) {
           const candidate = previousMessages[candidateIndex]!;
           const matchedByParts = hasOverlappingPartIds(candidate.parts, snapshotMessage.parts);
-          if (matchedByParts || areSnapshotMessagesEquivalent(candidate, snapshotMessage)) {
+          const matchedByNearbyUserMessage = areLikelySameNearbyUserMessage(
+            candidate,
+            snapshotMessage,
+          );
+          if (
+            matchedByParts ||
+            matchedByNearbyUserMessage ||
+            areSnapshotMessagesEquivalent(candidate, snapshotMessage)
+          ) {
             matchedPreviousIndices.add(candidateIndex);
             reconciledSnapshotEntries.push({
               matchedPreviousIndex: candidateIndex,
               // Part-ID match → use snapshot (authoritative); content-equivalence → preserve local.
-              message: matchedByParts ? snapshotMessage : candidate,
+              message: matchedByParts || matchedByNearbyUserMessage ? snapshotMessage : candidate,
             });
             foundEquivalent = true;
           }
@@ -2584,6 +2592,52 @@ function areSnapshotMessagesEquivalent(left: ChatMessage, right: ChatMessage): b
   }
 
   return false;
+}
+
+function areLikelySameNearbyUserMessage(left: ChatMessage, right: ChatMessage): boolean {
+  if (left.role !== 'user' || right.role !== 'user') {
+    return false;
+  }
+
+  if (left.content !== right.content) {
+    return false;
+  }
+
+  const leftRawContent = Array.isArray(left.rawContent) ? left.rawContent : [];
+  const rightRawContent = Array.isArray(right.rawContent) ? right.rawContent : [];
+  const leftDisplayText =
+    leftRawContent.length > 0 ? extractDisplayText(leftRawContent) : left.content.trim();
+  const rightDisplayText =
+    rightRawContent.length > 0 ? extractDisplayText(rightRawContent) : right.content.trim();
+  if (leftDisplayText !== rightDisplayText) {
+    return false;
+  }
+
+  return areInputImagesEquivalent(
+    leftRawContent.length > 0 ? extractInputImages(leftRawContent) : [],
+    rightRawContent.length > 0 ? extractInputImages(rightRawContent) : [],
+  );
+}
+
+function areInputImagesEquivalent(
+  left: ChatInputImageItem[],
+  right: ChatInputImageItem[],
+): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((item, index) => {
+    const candidate = right[index];
+    return (
+      candidate?.artifactId === item.artifactId &&
+      candidate?.detail === item.detail &&
+      candidate?.fileId === item.fileId &&
+      candidate?.fileName === item.fileName &&
+      candidate?.imageUrl === item.imageUrl &&
+      candidate?.mimeType === item.mimeType
+    );
+  });
 }
 
 function extractDisplayText(rawContent: unknown[]): string {

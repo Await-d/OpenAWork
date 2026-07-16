@@ -66,6 +66,17 @@ function buildCapabilityCatalogCounts(
   };
 }
 
+const CHANNEL_CAPABILITY_CATALOG_RETRY_BASE_MS = 2_000;
+const CHANNEL_CAPABILITY_CATALOG_RETRY_MAX_MS = 15_000;
+
+function computeCapabilityCatalogRetryDelay(attempt: number): number {
+  const safeAttempt = Math.max(0, attempt);
+  return Math.min(
+    CHANNEL_CAPABILITY_CATALOG_RETRY_BASE_MS * 2 ** safeAttempt,
+    CHANNEL_CAPABILITY_CATALOG_RETRY_MAX_MS,
+  );
+}
+
 export function ChannelsTabContent({
   channels,
   setChannels,
@@ -93,10 +104,21 @@ export function ChannelsTabContent({
   const [capabilityCatalogCounts, setCapabilityCatalogCounts] =
     React.useState<ChannelCapabilityCatalogCounts | null>(null);
   const [personaError, setPersonaError] = React.useState<string | null>(null);
+  const capabilityCatalogRetryAttemptRef = React.useRef(0);
+  const capabilityCatalogRetryTimerRef = React.useRef<ReturnType<
+    typeof globalThis.setTimeout
+  > | null>(null);
   const ensureToken = (): string => {
     if (!token) throw new Error('未登录');
     return token;
   };
+  const clearCapabilityCatalogRetry = React.useCallback(() => {
+    if (capabilityCatalogRetryTimerRef.current === null) {
+      return;
+    }
+    globalThis.clearTimeout(capabilityCatalogRetryTimerRef.current);
+    capabilityCatalogRetryTimerRef.current = null;
+  }, []);
 
   React.useEffect(() => {
     if (!token) {
@@ -141,31 +163,73 @@ export function ChannelsTabContent({
 
   React.useEffect(() => {
     if (!token) {
+      clearCapabilityCatalogRetry();
+      capabilityCatalogRetryAttemptRef.current = 0;
       setCapabilityCatalogCounts(null);
       return;
     }
 
     let cancelled = false;
-    void capabilitiesClient
-      .list(token)
-      .then((capabilities) => {
+
+    capabilityCatalogRetryAttemptRef.current = 0;
+    clearCapabilityCatalogRetry();
+    const loadCapabilityCatalogCounts = async (): Promise<void> => {
+      try {
+        const result = await capabilitiesClient.listResult(token);
         if (cancelled) {
           return;
         }
-        setCapabilityCatalogCounts(buildCapabilityCatalogCounts(capabilities));
-      })
-      .catch((error: unknown) => {
-        if (cancelled) {
+        if (result.ok) {
+          clearCapabilityCatalogRetry();
+          capabilityCatalogRetryAttemptRef.current = 0;
+          setCapabilityCatalogCounts(buildCapabilityCatalogCounts(result.capabilities));
           return;
         }
+
+        const error = new Error(result.errorMessage ?? '加载能力列表失败');
+        if (result.retryable) {
+          const attempt = capabilityCatalogRetryAttemptRef.current + 1;
+          const delayMs = computeCapabilityCatalogRetryDelay(
+            capabilityCatalogRetryAttemptRef.current,
+          );
+          capabilityCatalogRetryAttemptRef.current = attempt;
+          logger.warn('failed to load channel capability catalog counts, will retry', {
+            attempt,
+            delayMs,
+            error,
+          });
+          clearCapabilityCatalogRetry();
+          capabilityCatalogRetryTimerRef.current = globalThis.setTimeout(() => {
+            capabilityCatalogRetryTimerRef.current = null;
+            if (!cancelled) {
+              void loadCapabilityCatalogCounts();
+            }
+          }, delayMs);
+          return;
+        }
+
+        clearCapabilityCatalogRetry();
+        capabilityCatalogRetryAttemptRef.current = 0;
         logger.error('failed to load channel capability catalog counts', error);
         setCapabilityCatalogCounts(null);
-      });
+      } catch (error: unknown) {
+        if (cancelled) {
+          return;
+        }
+        clearCapabilityCatalogRetry();
+        capabilityCatalogRetryAttemptRef.current = 0;
+        logger.error('failed to load channel capability catalog counts', error);
+        setCapabilityCatalogCounts(null);
+      }
+    };
+
+    void loadCapabilityCatalogCounts();
 
     return () => {
       cancelled = true;
+      clearCapabilityCatalogRetry();
     };
-  }, [capabilitiesClient, token]);
+  }, [capabilitiesClient, clearCapabilityCatalogRetry, token]);
 
   const applyChannelError = (channelId: string, errorMessage?: string) => {
     setChannels((prev) =>

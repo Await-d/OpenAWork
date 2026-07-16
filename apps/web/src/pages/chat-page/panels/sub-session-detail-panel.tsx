@@ -165,6 +165,7 @@ function buildGroupedMessages(
 const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
   childSessionId,
   currentUserEmail,
+  currentUserDisplayName,
   gatewayUrl,
   onOpenFullSession,
   parentTaskRuntimeLookup,
@@ -173,6 +174,7 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
 }: {
   childSessionId: string | null;
   currentUserEmail: string;
+  currentUserDisplayName?: string;
   gatewayUrl: string;
   onOpenFullSession: (sessionId: string) => void;
   parentTaskRuntimeLookup?: TaskToolRuntimeLookup;
@@ -909,6 +911,7 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
                 activeModelId={childSessionSelection.modelId}
                 activeProviderId={childSessionSelection.providerId}
                 bottomRef={bottomRef}
+                currentUserDisplayName={currentUserDisplayName}
                 currentUserEmail={currentUserEmail}
                 groups={renderedMessages}
                 providerCatalog={providerCatalog}

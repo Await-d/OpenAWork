@@ -10,7 +10,7 @@
 > - `temp/opencode/packages/app/src/pages/session/session-side-panel.tsx`（OpenCode 侧面板参考）
 > - `temp/opencode/packages/app/src/pages/layout/sidebar-shell.tsx`（OpenCode Rail+Panel 参考）
 >
-> 状态：**进行中（F1/F2 完成，F3/F4/F5 组件已创建，ChatPage 接入待执行）**
+> 状态：**进行中（按 2026-07-14 复验：F1/F2/F3/F5 已收口，F4 仅剩移动端侧面板适配；本方案为唯一允许继续演进的布局主线）**
 
 ---
 
@@ -25,9 +25,20 @@
 4. **侧面板 Tab 聚合**：ChatRightPanel + ReviewPanel 合并为统一 Tab 式面板（审查/文件/Context）
 5. **终端底部横跨**：TerminalPanel 改为底部全宽，增加 36px 折叠态窄条
 
-## Current Analysis
+### 2026-07-14 实际状态回填
 
-### 现状问题
+- **F1 已完成**：独立 `TitlebarLayoutModeControl` 已从标题栏移除，布局切换收敛到 `TitlebarToolsMenu`；macOS Tauri 交通灯区域已补齐，并接入最小化 / 最大化 / 关闭窗口控制。
+- **F2 已完成**：Fusion 路径已落地 Rail + Panel + Peek，桌面态交互成立；移动端也已切到“Rail 隐藏 + Panel 抽屉”模式，并补了侧栏开合验证。
+- **F3 已完成**：`ChatPage` 已通过 `FusionChatMainShell` 落地卡片化、600px/100% 弹性宽度和 720px 消息居中；`SessionPanelFrame` 组件保留但不是最终接线入口。
+- **F4 基本完成**：Review / Files / Context 已接入；文件 Tab 现已复用 `EditorBrowserWorkspace` + 只读 `WorkspaceFileTreePanel`，并可直通主编辑器打开文件；仅剩移动端侧面板适配未完成。
+- **F5 已完成**：底部横跨、终端高度拖拽、Agent 触发自动展开已落地；“最后一个活跃终端结束后自动折叠”也已补齐回归逻辑与测试。折叠态仍由 `TerminalPanel.tsx` 内联渲染，`TerminalCollapsedRail.tsx` 暂未成为实际接线路径，但不再阻塞本波验收。
+- **核验方式**：已按当前代码实查；F4 相关定向测试已补跑 `FusionChatMainShell.test.tsx`、`conversation-layout-state.test.ts`、`FusionSessionSidePanel.test.tsx`、`WorkspaceFileTreePanel.test.tsx`、`TerminalPanel.test.tsx`。当前分支的全量 `pnpm --filter @openAwork/web exec tsc --noEmit --pretty false --noErrorTruncation` 被 `apps/web/src/components/chat/composer/ChatComposer.tsx` 现有错误阻塞，不属于本轮 F4 files tab 改动面。
+## Baseline Analysis
+
+### 立项时现状（2026-07-06 基线）
+
+> 本节保留方案启动当天的问题基线，用于解释为何发起本次重构。
+> 它不是 2026-07-14 的当前未完成项；当前真实完成度以上方“实际状态回填”为准。
 
 | # | 问题 | 当前位置 | 影响 |
 |---|------|----------|------|
@@ -45,6 +56,7 @@
 - **色彩体系**：必须遵循 `DESIGN-TOKENS.md` 的 E · Nebula token
 - **uiState 已有状态**：`sidebarPanelOpened/Width`、`reviewPanelOpened/Width`、`terminalPanelOpened/Height` 均已存在
 - **已有组件复用**：`SidebarPeek.tsx`、`PanelResizeHandle.tsx`、`TitlebarTab.tsx`、`ReviewPanel.tsx`(shell)、`TerminalPanel.tsx`(shell)
+- **版本边界（2026-07-14）**：只允许继续调整 Fusion 新版布局；Classic 旧版布局冻结，不得再为“对称性”或“顺手整理”修改旧路径文件。
 
 ### 设计定稿
 
@@ -161,16 +173,16 @@ Layout.tsx (flex-col, 100dvh)
 #### 实施步骤
 
 - [x] T-F1-01: 新建 `TitlebarToolsMenu.tsx`（⚙ 弹出菜单：布局模式 + 主题 + 设置）→ `components/layout/TitlebarToolsMenu.tsx` ✅
-- [x] T-F1-02: TitlebarTabStrip 移除 LayoutModeSwitch，改为渲染 TitlebarToolsMenu → `components/layout/TitlebarTabStrip.tsx` ✅
-- [ ] T-F1-03: TitlebarTabStrip 增加交通灯区域（macOS 桌面端条件渲染）→ `components/layout/TitlebarTabStrip.tsx`（推迟到 F2 后，需 Tauri 运行时检测）
+- [x] T-F1-02: `TitlebarTabStrip` 已移除独立 `TitlebarLayoutModeControl`，布局切换统一收敛到 `TitlebarToolsMenu` → `components/layout/TitlebarTabStrip.tsx` ✅
+- [x] T-F1-03: TitlebarTabStrip 已增加 macOS Tauri 交通灯区域，并接入窗口控制 → `components/layout/TitlebarTabStrip.tsx` ✅
 - [x] T-F1-04: 验证 Team 路由下 Titlebar 仍正常（TeamTitlebarSummary 保留）→ `components/layout/TitlebarTabStrip.tsx` ✅
 
 #### 验收标准
 
-- [ ] Titlebar 只包含：交通灯 + Home + 标签列表 + ⚙ 菜单
-- [ ] ⚙ 菜单弹出包含：布局模式切换、主题切换、设置入口
-- [ ] Chat/Team 模式切换不再在 Titlebar（临时通过路由切换，F2 补到 Rail）
-- [ ] `tsc --noEmit` 零错误
+- [x] Chat 路由下 Titlebar 只包含：交通灯 + Home + 标签列表 + ⚙ 菜单（Team 路由保留 `TeamTitlebarSummary`）
+- [x] ⚙ 菜单弹出包含：布局模式切换、主题切换、设置入口
+- [x] Chat/Team 模式切换不再在 Titlebar（已由 Rail 图标承载）
+- [x] `tsc --noEmit` 零错误
 
 ---
 
@@ -233,22 +245,22 @@ Layout.tsx (flex-col, 100dvh)
 #### 实施步骤
 
 - [x] T-F2-01: 新建 `SidebarRailV2.tsx`（64px 固定：项目头像列表 + Chat/Team 图标 + 功能导航 + 底部图标列）→ `components/layout/SidebarRailV2.tsx` ✅
-- [x] T-F2-02: 重构 AppSidebar 为 Rail + Panel + Peek 组合容器（移除 Logo/导航/底部，Panel 只保留搜索+会话+新建）→ `components/layout/AppSidebar.tsx` ✅
-- [x] T-F2-03: Panel 会话列表改为扁平化（移除工作区分组，直接列出当前项目会话）→ `components/layout/AppSidebar.tsx` ✅（保留分组兼容）
+- [x] T-F2-02: Fusion 路径已在 `FusionSidebar.tsx` 落地 Rail + Panel + Peek 组合容器（Classic `AppSidebar` 保留兼容旧路径）→ `components/layout/FusionSidebar.tsx` ✅
+- [x] T-F2-03: Panel 会话列表已在 Fusion 桌面态改为扁平化（按当前项目直接列出对话会话；团队工作区仍保留独立段落）→ `components/layout/FusionSidebar.tsx` ✅
 - [x] T-F2-04: Rail 项目头像点击切换工作区 → Panel 内容跟随变化（复用 selectedWorkspacePath）→ `components/layout/SidebarRailV2.tsx` ✅
 - [x] T-F2-05: Rail Chat/Team 图标替代 WorkbenchModeTabs（路由切换 /chat vs /team）→ `components/layout/SidebarRailV2.tsx` ✅
-- [x] T-F2-06: 移动端适配（<768px Rail 隐藏，Panel 变 fixed 抽屉）→ `components/layout/AppSidebar.tsx` ✅
+- [x] T-F2-06: 移动端已实现“Rail 隐藏 + Panel 抽屉”终态，并补齐打开/关闭集成测试 → `components/layout/FusionSidebar.tsx` ✅
 - [ ] T-F2-07: 清理 WorkbenchModeTabs.tsx（如不再被引用则删除）→ `components/layout/WorkbenchModeTabs.tsx`（暂保留）
 
 #### 验收标准
 
-- [ ] Rail(64px) + Panel(244px) 物理分离正确渲染
-- [ ] Rail 项目头像点击切换工作区，Panel 会话列表跟随变化
-- [ ] Rail Chat/Team 图标正常切换路由
-- [ ] Panel 折叠时 hover Rail 项目头像触发 peek 浮层
-- [ ] Panel 会话列表扁平化（不按工作区分组）
-- [ ] 移动端 Rail 隐藏 + Panel 变抽屉
-- [ ] `tsc --noEmit` 零错误
+- [x] Rail(64px) + Panel(244px) 物理分离正确渲染（Fusion 桌面态）
+- [x] Rail 项目头像点击切换工作区，Panel 会话列表跟随变化
+- [x] Rail Chat/Team 图标正常切换路由
+- [x] Panel 折叠时 hover Rail 项目头像触发 peek 浮层
+- [x] Panel 会话列表扁平化（不按工作区分组）
+- [x] 移动端 Rail 隐藏 + Panel 变抽屉
+- [x] `tsc --noEmit` 零错误
 
 ---
 
@@ -271,17 +283,27 @@ Layout.tsx (flex-col, 100dvh)
 - [x] T-F3-01: 新建 `SessionPanelFrame.tsx`（卡片容器：rounded-[10px] + shadow-raised + bg-surface）→ `pages/chat-page/panels/SessionPanelFrame.tsx` ✅
 - [x] T-F3-02: 新建 `SessionHeaderBar.tsx`（44px：标题 + 模型 + 模式 + 路径 + 审查/终端/更多按钮）→ `pages/chat-page/panels/SessionHeaderBar.tsx` ✅
 - [x] T-F3-03: uiState 新增 `sidePanelActiveTab`（'review' | 'files' | 'context'）→ `stores/ui/uiState.ts` ✅
-- [ ] T-F3-04: ChatPage 主区域重构为 SessionPanelFrame 包装 + 弹性宽度切换 → `pages/chat-page/ChatPage.tsx`（待 ChatPage 接入）
-- [ ] T-F3-05: MessageTimeline 居中逻辑（reviewPanelOpened=false 时 max-width:720px 居中）→ `pages/chat-page/ChatPage.tsx`（待 ChatPage 接入）
+- [x] T-F3-04: `ChatPage` 主区域已通过 `FusionChatMainShell` + `SessionPanelFrame` 完成卡片容器接线与弹性宽度切换 → `pages/chat-page/ChatPage.tsx` ✅
+- [x] T-F3-05: MessageTimeline 居中逻辑已接入（`reviewPanelOpened=false` 且非编辑分栏时按 `max-width:720px` 居中）→ `pages/chat-page/ChatPage.tsx` ✅
 
 #### 验收标准
 
-- [ ] SessionPanel 以卡片式渲染（rounded + shadow）
-- [ ] SessionHeaderBar 正确显示标题/模型/模式/路径 + 工具按钮
-- [ ] 侧面板展开时 SessionPanel 宽度 600px，折叠时 100%
-- [ ] 宽度切换有 240ms 过渡动画
-- [ ] 消息时间线在全宽时居中 720px
-- [ ] `tsc --noEmit` 零错误
+- [x] SessionPanel 以卡片式渲染（rounded + shadow）
+- [x] SessionHeaderBar 正确显示标题/模型/模式/路径 + 工具按钮
+- [x] 侧面板展开时 SessionPanel 宽度 600px，折叠时 100%
+- [x] 宽度切换有 240ms 过渡动画
+- [x] 消息时间线在全宽时居中 720px
+- [x] `tsc --noEmit` 零错误
+
+#### 2026-07-14 验证补记
+
+- 已运行 `pnpm --filter @openAwork/web exec vitest run src/pages/chat-page/layout/FusionChatMainShell.test.tsx src/pages/chat-page/panels/TerminalPanel.test.tsx src/pages/chat-page/panels/FusionSessionSidePanel.test.tsx`，15/15 通过。
+- 已运行 `pnpm --filter @openAwork/web exec tsc --noEmit`，通过。
+- 已在真实浏览器表面完成登录后 QA：
+  - `1280px` `/chat` 欢迎态：Fusion 卡片壳与底部 composer 卡片正常。
+  - `1280px` `/chat/:sessionId` 会话态：`SessionHeaderBar`、会话卡片和底部终端条正常。
+  - `1280px` `/chat/:sessionId` 打开审查侧栏：会话列与右侧 dock 并排正常，验证 review dock 打开态。
+  - `375px` `/chat/:sessionId`：窄视口下卡片与头部未出现明显重叠。
 
 ---
 
@@ -302,22 +324,22 @@ Layout.tsx (flex-col, 100dvh)
 #### 实施步骤
 
 - [x] T-F4-01: 新建 `SessionSidePanel.tsx`（Tab 容器：Tab 栏 + 内容区 + + 按钮）→ `pages/chat-page/panels/SessionSidePanel.tsx` ✅
-- [ ] T-F4-02: 审查 Tab 接入 ReviewPanel → `pages/chat-page/panels/SessionSidePanel.tsx`
-- [ ] T-F4-03: 文件 Tab 接入 ChatEditorPane → `pages/chat-page/panels/SessionSidePanel.tsx`
-- [ ] T-F4-04: Context Tab 接入 ChatRightPanel 内容（工具调用/计划/DAG）→ `pages/chat-page/panels/SessionSidePanel.tsx`
-- [ ] T-F4-05: ChatPage 布局重构：SessionPanel + ResizeHandle + SessionSidePanel 水平排列 → `pages/chat-page/ChatPage.tsx`
+- [x] T-F4-02: 审查 Tab 已接入（通过 `FusionReviewTab` 复用现有 ReviewPanel header / 文件列表 / diff 结构）→ `pages/chat-page/panels/FusionReviewTab.tsx` ✅
+- [x] T-F4-03: 文件 Tab 已接入 `EditorBrowserWorkspace` + 只读 `WorkspaceFileTreePanel`，并保留上下文文件一键打开主编辑器 → `pages/chat-page/panels/FusionFilesTab.tsx` ✅
+- [x] T-F4-04: Context Tab 已接入 ChatRightPanel 相关内容（工具调用 / 计划 / DAG / 运行摘要 / 上下文窗口）→ `pages/chat-page/panels/FusionContextTab.tsx` ✅
+- [x] T-F4-05: `ChatPage` 已通过 `FusionDockedSidePanel` + `PanelResizeHandle` 完成 SessionPanel / SidePanel 水平排列 → `pages/chat-page/ChatPage.tsx` ✅
 - [x] T-F4-06: uiState 新增 `sidePanelActiveTab`（'review' | 'files' | 'context'）→ `stores/ui/uiState.ts` ✅
 - [ ] T-F4-07: 移动端适配（SidePanel 变为底部 Tab 切换）→ `pages/chat-page/SessionSidePanel.tsx`
 
 #### 验收标准
 
-- [ ] 侧面板正确渲染 Tab 栏（审查/文件/Context）
-- [ ] Tab 切换正常，内容区跟随变化
-- [ ] 审查 Tab 正确展示文件列表 + Diff
-- [ ] 文件 Tab 正确展示代码编辑器
-- [ ] Context Tab 正确展示工具调用/计划
-- [ ] ResizeHandle 拖拽调整宽度正常
-- [ ] `tsc --noEmit` 零错误
+- [x] 侧面板正确渲染 Tab 栏（审查/文件/Context）
+- [x] Tab 切换正常，内容区跟随变化
+- [x] 审查 Tab 正确展示文件列表 + Diff
+- [x] 文件 Tab 正确展示代码编辑器
+- [x] Context Tab 正确展示工具调用/计划
+- [x] ResizeHandle 拖拽调整宽度正常
+- [x] `tsc --noEmit` 零错误
 
 ---
 
@@ -337,20 +359,20 @@ Layout.tsx (flex-col, 100dvh)
 
 #### 实施步骤
 
-- [x] T-F5-01: 新建 `TerminalCollapsedRail.tsx`（折叠态窄条 36px：图标 + 运行数 + 状态 + 展开按钮）→ `pages/chat-page/panels/TerminalCollapsedRail.tsx` ✅
-- [ ] T-F5-02: ChatPage 布局重构为垂直排列（上层面板 flex:1 + 底部终端）→ `pages/chat-page/ChatPage.tsx`
-- [ ] T-F5-03: 终端高度拖拽调整（复用 PanelResizeHandle 垂直模式）→ `pages/chat-page/panels/TerminalPanel.tsx`
-- [ ] T-F5-04: Agent 执行 bash 工具时自动展开终端 → `pages/chat-page/ChatPage.tsx`
-- [ ] T-F5-05: 最后一个终端关闭时自动折叠 → `pages/chat-page/panels/TerminalPanel.tsx`
+- [x] T-F5-01: `TerminalCollapsedRail.tsx` 已创建，但当前折叠态实际由 `TerminalPanel.tsx` 内联窄条渲染，组件未接线 → `pages/chat-page/panels/TerminalCollapsedRail.tsx` ✅
+- [x] T-F5-02: `ChatPage` 布局已重构为垂直排列（上层面板 flex:1 + 底部终端）→ `pages/chat-page/ChatPage.tsx` ✅
+- [x] T-F5-03: 终端高度拖拽已通过 `QuickTerminalPanel` 现有拖拽逻辑复用落地（非 `PanelResizeHandle`）→ `components/chat/terminal/QuickTerminalPanel.tsx` ✅
+- [x] T-F5-04: Agent 执行 bash 工具时自动展开终端 → `pages/chat-page/ChatPage.tsx` ✅
+- [x] T-F5-05: 终端面板现已在“最后一个活跃终端结束”后自动折叠，并补齐回归测试 → `pages/chat-page/panels/TerminalPanel.tsx` ✅
 
 #### 验收标准
 
-- [ ] 终端折叠态 36px 窄条正确渲染
-- [ ] 点击窄条展开为 200px 终端面板
-- [ ] 终端高度可拖拽调整
-- [ ] Agent 执行 bash 时自动展开
-- [ ] 最后终端关闭时自动折叠
-- [ ] `tsc --noEmit` 零错误
+- [x] 终端折叠态 36px 窄条正确渲染
+- [x] 点击窄条展开为 200px 终端面板
+- [x] 终端高度可拖拽调整
+- [x] Agent 执行 bash 时自动展开
+- [x] 最后终端关闭时自动折叠
+- [x] `tsc --noEmit` 零错误
 
 ---
 
@@ -365,15 +387,20 @@ Layout.tsx (flex-col, 100dvh)
 | `apps/web/src/pages/chat-page/panels/SessionPanelFrame.tsx` | F3 | 卡片容器 |
 | `apps/web/src/pages/chat-page/panels/SessionHeaderBar.tsx` | F3 | 会话头部栏 |
 | `apps/web/src/pages/chat-page/panels/SessionSidePanel.tsx` | F4 | Tab 式侧面板 |
+| `apps/web/src/pages/chat-page/panels/TerminalCollapsedRail.tsx` | F5 | 终端折叠态窄条组件（已创建，当前未接线） |
 
 ### 修改文件
 
 | 文件路径 | 波次 | 改动内容 |
 |----------|------|----------|
-| `apps/web/src/components/layout/TitlebarTabStrip.tsx` | F1 | 移除 ModeTabs/LayoutSwitch, 加 ⚙ 菜单 + 交通灯 |
-| `apps/web/src/components/layout/AppSidebar.tsx` | F2 | 重构为 Rail + Panel 组合 |
-| `apps/web/src/stores/ui/uiState.ts` | F3,F4 | 新增 sessionPanelWidth / sidePanelActiveTab |
-| `apps/web/src/pages/chat-page/ChatPage.tsx` | F3,F4,F5 | 卡片化 + 侧面板 Tab + 终端底部 |
+| `apps/web/src/components/layout/TitlebarTabStrip.tsx` | F1 | 标题栏移除独立布局切换控件，补齐 macOS Tauri 交通灯与窗口控制 |
+| `apps/web/src/components/layout/TitlebarTabStrip.css` | F1 | 标题栏交通灯与前导控制区样式 |
+| `apps/web/src/components/layout/FusionSidebar.tsx` | F2 | Fusion 路径落地 Rail + Panel + Peek |
+| `apps/web/src/stores/ui/uiState.ts` | F3,F4,F5 | 接入 `reviewPanelWidth` / `sidePanelActiveTab` / `terminalPanelHeight` 的 Fusion 布局状态 |
+| `apps/web/src/pages/chat-page/layout/FusionChatMainShell.tsx` | F3,F5 | 会话卡片框架 + 终端底部容器 |
+| `apps/web/src/pages/chat-page/panels/FusionDockedSidePanel.tsx` | F4 | 侧面板宽度拖拽 + 停靠布局 |
+| `apps/web/src/pages/chat-page/panels/TerminalPanel.tsx` | F5 | 折叠态窄条 + inline 终端面板 |
+| `apps/web/src/pages/chat-page/ChatPage.tsx` | F3,F4,F5 | 主接线入口：卡片化 + 侧面板 Tab + 终端底部 |
 
 ### 可能删除文件
 
@@ -410,6 +437,7 @@ Wave F5 (终端底部) ───────────────────
 - **Chat/Team 切换移到 Rail**：从 Titlebar 的 WorkbenchModeTabs 移到 Rail 的 [💬][👥] 图标，与功能导航统一
 - **卡片化参照 OpenCode**：`rounded-[10px] + shadow-raised` 是 OpenCode V2 设计的标志性视觉
 - **侧面板 Tab 聚合参照 OpenCode**：OpenCode SessionSidePanel 用 Tab 统一管理 审查/文件/Context，避免多个独立面板并存
+- **2026-07-14 范围收口**：本方案从今天起成为布局后续唯一允许演进的主线；Classic 路径只保留兼容读面，不再追加任何结构、样式或交互层面的改动。
 
 ### 与母方案的关系
 

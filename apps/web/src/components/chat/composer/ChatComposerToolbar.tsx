@@ -1,6 +1,7 @@
 import type React from 'react';
 import type { PromptOptimizerResult } from '@openAwork/web-client';
 import type { SavedChatImageDefaults } from '../../../utils/chat/chat-session-defaults.js';
+import type { ComposerOptimizeError } from './composer-optimize-error.js';
 import { PromptSnippetsTrigger } from '../prompt-snippets/PromptSnippetsTrigger.js';
 import { ComposerHintChip } from './chat-composer-primitives.js';
 import { ChatComposerFeatureToggles } from './ChatComposerFeatureToggles.js';
@@ -45,15 +46,15 @@ export interface ChatComposerToolbarProps {
   readonly showStopAction: boolean;
   readonly showQueueAction: boolean;
   readonly queuedMessageCount: number;
+  readonly optimizeError: ComposerOptimizeError | null;
   readonly optimizeLoading: boolean;
   readonly optimizeResult: PromptOptimizerResult | null;
   readonly gatewayUrl?: string;
   readonly snippetsToken?: string | null;
   readonly onInsertAtCursor?: (text: string) => void;
-  readonly onOptimizePrompt?: (text: string) => Promise<PromptOptimizerResult>;
-  readonly onSetOptimizeLoading: (loading: boolean) => void;
-  readonly onSetOptimizeResult: (result: PromptOptimizerResult | null) => void;
-  readonly onSetOptimizeError: (message: string | null) => void;
+  readonly onRunOptimizePrompt?: () => void;
+  readonly onClearOptimizeResult: () => void;
+  readonly onClearOptimizeError: () => void;
   readonly onQueueMessage?: () => void | Promise<void>;
   readonly onSend: () => void | Promise<void>;
   readonly onStop: () => void | Promise<void>;
@@ -130,12 +131,12 @@ export function ChatComposerToolbar(props: ChatComposerToolbarProps) {
         showStopAction={props.showStopAction}
         showQueueAction={props.showQueueAction}
         queuedMessageCount={props.queuedMessageCount}
+        optimizeError={props.optimizeError}
         optimizeLoading={props.optimizeLoading}
         optimizeResult={props.optimizeResult}
-        onOptimizePrompt={props.onOptimizePrompt}
-        onSetOptimizeLoading={props.onSetOptimizeLoading}
-        onSetOptimizeResult={props.onSetOptimizeResult}
-        onSetOptimizeError={props.onSetOptimizeError}
+        onRunOptimizePrompt={props.onRunOptimizePrompt}
+        onClearOptimizeResult={props.onClearOptimizeResult}
+        onClearOptimizeError={props.onClearOptimizeError}
         onQueueMessage={props.onQueueMessage}
         onSend={props.onSend}
         onStop={props.onStop}

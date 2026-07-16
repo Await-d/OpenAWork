@@ -10,7 +10,13 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { categorizeAlwaysPatterns, getPermissionDecisionOptions } from './PermissionPrompt.js';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { createElement } from 'react';
+import {
+  categorizeAlwaysPatterns,
+  getPermissionDecisionOptions,
+  PermissionPrompt,
+} from './PermissionPrompt.js';
 
 describe('getPermissionDecisionOptions', () => {
   it('orders buttons reject → once → session → permanent', () => {
@@ -298,7 +304,63 @@ describe('categorizeAlwaysPatterns', () => {
     ]);
   });
 
-  it('MCP 工具单层级 always 分配到 同子命令，同类指令 fallback 到 scope', () => {
+  it('MCP scope 即使缺少 always，也能从 server:tool:fingerprint 推导三档范围', () => {
+    const levels = categorizeAlwaysPatterns(
+      '调用 open_websearch/fetch_web {"url":"https://example.com"}',
+      'open_websearch:fetch_web:fp-open_websearch',
+      undefined,
+    );
+    expect(levels).toEqual([
+      {
+        label: '仅本次指令',
+        description: '只覆盖当前命令，不会扩大到其它参数或子命令。',
+        pattern: 'open_websearch:fetch_web:fp-open_websearch',
+        category: 'full',
+      },
+      {
+        label: '同子命令',
+        description: '覆盖网关提供的相同子命令模式。',
+        pattern: 'open_websearch:fetch_web:*',
+        category: 'partial',
+      },
+      {
+        label: '同类指令',
+        description: '覆盖网关提供的同类指令模式。',
+        pattern: 'open_websearch:*',
+        category: 'base',
+      },
+    ]);
+  });
+
+  it('skill MCP 只有全局 * 时，也会先补出更细的命名空间范围', () => {
+    const levels = categorizeAlwaysPatterns(
+      '调用 skill MCP context7/query_docs',
+      'context7:query_docs',
+      ['*'],
+    );
+    expect(levels).toEqual([
+      {
+        label: '仅本次指令',
+        description: '只覆盖当前命令，不会扩大到其它参数或子命令。',
+        pattern: 'context7:query_docs',
+        category: 'full',
+      },
+      {
+        label: '同子命令',
+        description: '覆盖网关提供的相同子命令模式。',
+        pattern: 'context7:*',
+        category: 'partial',
+      },
+      {
+        label: '同类指令',
+        description: '覆盖网关提供的同类指令模式。',
+        pattern: '*',
+        category: 'base',
+      },
+    ]);
+  });
+
+  it('MCP 工具单层级 always 也会补出更细的 tool 级范围', () => {
     const levels = categorizeAlwaysPatterns(
       '调用 websearch/web_search_exa {"query":"test"}',
       'websearch:web_search_exa:abc123',
@@ -314,15 +376,34 @@ describe('categorizeAlwaysPatterns', () => {
       {
         label: '同子命令',
         description: '覆盖网关提供的相同子命令模式。',
-        pattern: 'websearch:*',
+        pattern: 'websearch:web_search_exa:*',
         category: 'partial',
       },
       {
         label: '同类指令',
-        description: '当前没有可用的同类指令规则，选择后仍只覆盖当前命令。',
-        pattern: 'websearch:web_search_exa:abc123',
+        description: '覆盖网关提供的同类指令模式。',
+        pattern: 'websearch:*',
         category: 'base',
       },
     ]);
+  });
+});
+
+describe('PermissionPrompt', () => {
+  it('渲染 MCP scope 时会展示推导出的 tool 级和 server 级审批范围', () => {
+    const html = renderToStaticMarkup(
+      createElement(PermissionPrompt, {
+        requestId: 'perm-mcp-1',
+        toolName: 'mcp_call',
+        scope: 'open_websearch:fetch_web:fp-open_websearch',
+        reason: '需要调用 MCP 工具',
+        riskLevel: 'high',
+        previewAction: '调用 open_websearch/fetch_web {"url":"https://example.com"}',
+        onDecide: () => undefined,
+      }),
+    );
+
+    expect(html).toContain('open_websearch:fetch_web:*');
+    expect(html).toContain('open_websearch:*');
   });
 });

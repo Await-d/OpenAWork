@@ -1,5 +1,6 @@
 import type { ChatContextUsageSnapshot } from '../../../components/conversation-runtime/messages/context-usage.js';
 import type { WorkspaceFileMentionItem } from '../../../components/conversation-runtime/messages/support.js';
+import { getPathBasename } from '../../../utils/workspace-path.js';
 import { ChatOverviewTabContent } from './right-panel-sections.js';
 
 export type FusionContextOverviewProps = Parameters<typeof ChatOverviewTabContent>[0];
@@ -34,9 +35,7 @@ function formatTokenCount(value: number | null): string {
 }
 
 function basename(path: string): string {
-  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
-  const parts = normalized.split('/').filter(Boolean);
-  return parts.at(-1) ?? path;
+  return getPathBasename(path, path);
 }
 
 function renderRuntimeSummary(summary: FusionContextRuntimeSummary) {

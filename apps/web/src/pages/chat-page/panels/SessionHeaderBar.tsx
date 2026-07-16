@@ -5,6 +5,7 @@
  * 右侧工具按钮：审查面板切换 / 终端面板切换 / 更多
  */
 
+import { getPathBasename } from '../../../utils/workspace-path.js';
 import './SessionHeaderBar.css';
 
 export interface SessionHeaderBarProps {
@@ -20,10 +21,7 @@ export interface SessionHeaderBarProps {
 }
 
 function basename(path: string | null): string {
-  if (!path) return '';
-  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
-  const parts = normalized.split('/').filter(Boolean);
-  return parts.at(-1) ?? normalized;
+  return getPathBasename(path);
 }
 
 export function SessionHeaderBar({

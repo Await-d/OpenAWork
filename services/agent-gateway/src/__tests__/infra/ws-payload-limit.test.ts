@@ -54,15 +54,30 @@ interface InjectedClient {
   on: (event: 'message' | 'close', cb: (arg: unknown) => void) => void;
 }
 
+type WebsocketCapableApp = FastifyInstance & {
+  injectWS: (path?: string) => Promise<unknown>;
+};
+
+type WebsocketRouteRegistrar = {
+  get: (
+    path: string,
+    opts: { websocket: true },
+    handler: (socket: {
+      send: (data: string) => void;
+      on: (event: string, cb: (data: Buffer) => void) => void;
+    }) => void,
+  ) => FastifyInstance;
+};
+
 describe('@fastify/websocket maxPayload wiring', () => {
-  let app: FastifyInstance;
+  let app: WebsocketCapableApp;
   const cap = 1024;
 
   beforeEach(async () => {
-    app = Fastify();
+    app = Fastify() as WebsocketCapableApp;
     // Mirror index.ts: register with an explicit inbound-frame ceiling.
     await app.register(websocket, { options: { maxPayload: cap } });
-    app.get(
+    (app as WebsocketRouteRegistrar).get(
       '/ws-echo',
       { websocket: true },
       (socket: { send: (d: string) => void; on: (e: string, cb: (d: Buffer) => void) => void }) => {

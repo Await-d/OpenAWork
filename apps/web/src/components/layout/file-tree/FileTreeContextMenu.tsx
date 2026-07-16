@@ -197,8 +197,8 @@ export interface FileTreeContextMenuProps {
   onCopyRelativePath: () => void;
   onReferenceInChat?: () => void;
   onCreateSession?: () => void;
-  onCreateFile: () => void;
-  onCreateFolder: () => void;
+  onCreateFile?: () => void;
+  onCreateFolder?: () => void;
   onRefresh: () => void;
   onDelete?: () => void;
   onRename?: () => void;
@@ -419,23 +419,27 @@ export default function FileTreeContextMenu({
             }}
           />
         ) : null}
-        <div style={dividerStyle} />
-        <MenuItem
-          label={`在${baseLabel}中新建文件`}
-          icon={<FilePlusIcon />}
-          onClick={() => {
-            onCreateFile();
-            onClose();
-          }}
-        />
-        <MenuItem
-          label={`在${baseLabel}中新建文件夹`}
-          icon={<FolderPlusIcon />}
-          onClick={() => {
-            onCreateFolder();
-            onClose();
-          }}
-        />
+        {onCreateFile || onCreateFolder ? <div style={dividerStyle} /> : null}
+        {onCreateFile ? (
+          <MenuItem
+            label={`在${baseLabel}中新建文件`}
+            icon={<FilePlusIcon />}
+            onClick={() => {
+              onCreateFile();
+              onClose();
+            }}
+          />
+        ) : null}
+        {onCreateFolder ? (
+          <MenuItem
+            label={`在${baseLabel}中新建文件夹`}
+            icon={<FolderPlusIcon />}
+            onClick={() => {
+              onCreateFolder();
+              onClose();
+            }}
+          />
+        ) : null}
         <MenuItem
           label={targetType === 'root' ? '刷新文件树' : `刷新${baseLabel}`}
           icon={<RefreshIcon />}

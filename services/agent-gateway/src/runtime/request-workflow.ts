@@ -1,4 +1,4 @@
-import type { FastifyRequest } from 'fastify';
+import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import fp from 'fastify-plugin';
 import {
   WorkflowLogger,
@@ -52,6 +52,7 @@ export type RequestWorkflowScope<TRoot extends string> = {
 };
 
 type StoredRequestWorkflow = ActiveRequestWorkflow & {
+  cleanup?: () => void;
   workflowLogFlushed: boolean;
 };
 
@@ -177,6 +178,8 @@ function flushRequestWorkflow(request: FastifyRequest, statusCode: number, messa
     return;
   }
 
+  workflow.cleanup?.();
+
   const fields = { statusCode };
   settlePendingWorkflowStep(
     workflow.workflowLogger,
@@ -202,30 +205,51 @@ function flushRequestWorkflow(request: FastifyRequest, statusCode: number, messa
   requestWorkflows.delete(request);
 }
 
-const requestWorkflowPlugin = fp(
-  async (app) => {
-    app.addHook('onRequest', async (request) => {
-      const workflowLogger = new WorkflowLogger();
-      const workflowContext = createRequestContext(
-        request.method,
-        request.url,
-        request.headers,
-        request.ip,
-      );
-      const workflowRequestStep = workflowLogger.start('request.handle', undefined, {
-        method: request.method,
-        path: resolveRequestPath(request.url),
-      });
+const requestWorkflowPluginImpl: FastifyPluginAsync = async (app): Promise<void> => {
+  app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    const workflowLogger = new WorkflowLogger();
+    const workflowContext = createRequestContext(
+      request.method,
+      request.url,
+      request.headers,
+      request.ip,
+    );
+    const workflowRequestStep = workflowLogger.start('request.handle', undefined, {
+      method: request.method,
+      path: resolveRequestPath(request.url),
+    });
+    const socket = request.raw.socket;
+    let handleSocketTimeout: (() => void) | null = null;
+    if (request.ws !== true && socket) {
+      handleSocketTimeout = () => {
+        flushRequestWorkflow(request, 408, 'request timeout');
+      };
+      socket.once('timeout', handleSocketTimeout);
+    }
+    const cleanup = (): void => {
+      if (!socket || !handleSocketTimeout) {
+        return;
+      }
+      socket.off('timeout', handleSocketTimeout);
+      handleSocketTimeout = null;
+    };
 
-      requestWorkflows.set(request, {
-        workflowLogger,
-        workflowContext,
-        workflowRequestStep,
-        workflowLogFlushed: false,
-      });
+    requestWorkflows.set(request, {
+      cleanup,
+      workflowLogger,
+      workflowContext,
+      workflowRequestStep,
+      workflowLogFlushed: false,
     });
 
-    app.addHook('onError', async (request, _reply, error) => {
+    reply.raw.once('finish', () => {
+      flushRequestWorkflow(request, reply.statusCode);
+    });
+  });
+
+  app.addHook(
+    'onError',
+    async (request: FastifyRequest, _reply: FastifyReply, error: Error): Promise<void> => {
       const workflow = requestWorkflows.get(request);
       if (!workflow) {
         return;
@@ -237,21 +261,14 @@ const requestWorkflowPlugin = fp(
         'error',
         error.message,
       );
-    });
+    },
+  );
 
-    app.addHook('onTimeout', async (request) => {
-      flushRequestWorkflow(request, 408, 'request timeout');
-    });
+  app.addHook('onRequestAbort', async (request: FastifyRequest): Promise<void> => {
+    flushRequestWorkflow(request, 499, 'request aborted');
+  });
+};
 
-    app.addHook('onRequestAbort', async (request) => {
-      flushRequestWorkflow(request, 499, 'request aborted');
-    });
-
-    app.addHook('onResponse', async (request, reply) => {
-      flushRequestWorkflow(request, reply.statusCode);
-    });
-  },
-  { name: 'request-workflow' },
-);
+const requestWorkflowPlugin = fp(requestWorkflowPluginImpl, { name: 'request-workflow' });
 
 export default requestWorkflowPlugin;

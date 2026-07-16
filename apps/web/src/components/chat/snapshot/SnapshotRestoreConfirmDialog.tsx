@@ -17,26 +17,21 @@ import type { SnapshotTreeEntry } from '@openAwork/web-client';
 // ─── 类型 ──────────────────────────────────────────────────────────────
 
 export interface SnapshotRestoreConfirmDialogProps {
-  /** 对话框是否打开 */
   open: boolean;
-  /** 被影响的快照列表 */
   affectedSnapshots: SnapshotTreeEntry[];
-  /** 操作类型（用于文案） */
   action: 'edit' | 'retry';
-  /** 用户选择"保留文件并继续" */
   onContinueWithoutRestore: () => void;
-  /** 用户选择"恢复文件后继续"，传入要恢复到的 treeHash */
-  onRestoreAndContinue: (treeHash: string) => void;
-  /** 用户取消 */
+  onRestoreAndContinue: () => void;
   onCancel: () => void;
-  /** 恢复中状态（外部控制） */
+  restoreTargetTreeHash: string | null;
+  restoreUnavailableReason?: string | null;
+  restoreErrorMessage?: string | null;
   restoring?: boolean;
 }
 
 // ─── 辅助 ──────────────────────────────────────────────────────────────
 
 function computeAffectedSummary(snapshots: SnapshotTreeEntry[]) {
-  const totalFiles = new Set<string>();
   let totalAdditions = 0;
   let totalDeletions = 0;
 
@@ -66,19 +61,16 @@ export function SnapshotRestoreConfirmDialog({
   onContinueWithoutRestore,
   onRestoreAndContinue,
   onCancel,
+  restoreTargetTreeHash,
+  restoreUnavailableReason = null,
+  restoreErrorMessage = null,
   restoring = false,
 }: SnapshotRestoreConfirmDialogProps) {
   if (!open || affectedSnapshots.length === 0) return null;
 
   const summary = computeAffectedSummary(affectedSnapshots);
   const actionLabel = getActionLabel(action);
-
-  // 恢复目标：被影响范围中最早的快照的 parentTreeHash（即编辑点之前的状态）
-  // 如果没有 parent，则使用最早快照本身
-  const sortedByTime = [...affectedSnapshots].sort((a, b) =>
-    a.createdAt.localeCompare(b.createdAt),
-  );
-  const restoreTarget = sortedByTime[0]?.parentTreeHash ?? sortedByTime[0]?.treeHash ?? null;
+  const canRestore = Boolean(restoreTargetTreeHash) && !restoreUnavailableReason;
 
   return (
     <div
@@ -133,6 +125,40 @@ export function SnapshotRestoreConfirmDialog({
           </div>
         </div>
 
+        {restoreUnavailableReason ? (
+          <div
+            role="status"
+            style={{
+              borderRadius: 12,
+              border: '1px solid color-mix(in oklch, var(--warning) 40%, var(--border-default))',
+              background: 'color-mix(in oklch, var(--warning) 8%, var(--bg-overlay))',
+              padding: '10px 12px',
+              fontSize: 12,
+              lineHeight: 1.6,
+              color: 'var(--fg-default)',
+            }}
+          >
+            {restoreUnavailableReason}
+          </div>
+        ) : null}
+
+        {restoreErrorMessage ? (
+          <div
+            role="alert"
+            style={{
+              borderRadius: 12,
+              border: '1px solid color-mix(in oklch, var(--danger) 40%, var(--border-default))',
+              background: 'color-mix(in oklch, var(--danger) 8%, var(--bg-overlay))',
+              padding: '10px 12px',
+              fontSize: 12,
+              lineHeight: 1.6,
+              color: 'var(--fg-default)',
+            }}
+          >
+            恢复文件失败：{restoreErrorMessage}
+          </div>
+        ) : null}
+
         {/* 快照摘要 */}
         <div
           style={{
@@ -144,7 +170,7 @@ export function SnapshotRestoreConfirmDialog({
             overflow: 'auto',
           }}
         >
-          {sortedByTime.slice(0, 5).map((snap) => (
+          {affectedSnapshots.slice(0, 5).map((snap) => (
             <div
               key={snap.treeHash}
               style={{
@@ -241,10 +267,10 @@ export function SnapshotRestoreConfirmDialog({
           >
             保留文件并继续
           </button>
-          {restoreTarget && (
+          {canRestore ? (
             <button
               type="button"
-              onClick={() => onRestoreAndContinue(restoreTarget)}
+              onClick={onRestoreAndContinue}
               disabled={restoring}
               style={{
                 height: 34,
@@ -261,7 +287,7 @@ export function SnapshotRestoreConfirmDialog({
             >
               {restoring ? '恢复中...' : '恢复文件后继续'}
             </button>
-          )}
+          ) : null}
         </div>
       </div>
     </div>

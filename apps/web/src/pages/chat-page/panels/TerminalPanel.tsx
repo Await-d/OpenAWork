@@ -9,7 +9,7 @@
  * Fusion 布局下使用 terminalPanelHeight，避免复用 classic 快捷终端的抽屉高度。
  */
 
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
 import { QuickTerminalPanel } from '../../../components/chat/terminal/QuickTerminalPanel.js';
 import type { SessionTerminalView } from '../../../components/conversation-runtime/terminals/terminals-api.js';
@@ -45,6 +45,8 @@ export function TerminalPanel(props: TerminalPanelProps) {
   const setTerminalPanelOpened = useUIStateStore((s) => s.setTerminalPanelOpened);
   const terminalPanelHeight = useUIStateStore((s) => s.terminalPanelHeight);
   const setTerminalPanelHeight = useUIStateStore((s) => s.setTerminalPanelHeight);
+  const previousSessionIdRef = useRef<string | null>(props.sessionId);
+  const previousActiveTerminalCountRef = useRef(0);
 
   const handleClose = useCallback(() => {
     setTerminalPanelOpened(false);
@@ -60,6 +62,20 @@ export function TerminalPanel(props: TerminalPanelProps) {
       : props.loading
         ? '正在同步终端'
         : gatewayStatus;
+
+  useEffect(() => {
+    if (previousSessionIdRef.current !== props.sessionId) {
+      previousSessionIdRef.current = props.sessionId;
+      previousActiveTerminalCountRef.current = activeTerminalCount;
+      return;
+    }
+
+    if (opened && previousActiveTerminalCountRef.current > 0 && activeTerminalCount === 0) {
+      setTerminalPanelOpened(false);
+    }
+
+    previousActiveTerminalCountRef.current = activeTerminalCount;
+  }, [activeTerminalCount, opened, props.sessionId, setTerminalPanelOpened]);
 
   if (!opened) {
     return (

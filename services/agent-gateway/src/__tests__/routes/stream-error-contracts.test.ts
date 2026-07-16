@@ -31,6 +31,7 @@ let resolveStreamModelRoute: typeof StreamRoutesModule.resolveStreamModelRoute;
 
 const SESSION_ID = 'sess-stream-routes';
 const USER_ID = 'u-stream-routes';
+const STREAM_ERROR_CONTRACTS_COLD_IMPORT_HOOK_TIMEOUT_MS = 30_000;
 
 const chatProvider = {
   id: 'openai-chat',
@@ -51,6 +52,17 @@ const fastProvider = {
   baseUrl: 'https://api.openai.com/v1',
   upstreamProtocol: 'responses',
   defaultModels: [{ id: 'gpt-5.4-nano', label: 'GPT-5.4 Nano', enabled: true }],
+  createdAt: '2026-07-12T00:00:00.000Z',
+  updatedAt: '2026-07-12T00:00:00.000Z',
+} satisfies AgentCoreModule.AIProvider;
+
+const anthropicProvider = {
+  id: 'anthropic-chat',
+  type: 'anthropic',
+  name: 'Anthropic Chat',
+  enabled: true,
+  baseUrl: 'https://api.anthropic.com/v1',
+  defaultModels: [{ id: 'claude-opus-4-0', label: 'Claude Opus 4', enabled: true }],
   createdAt: '2026-07-12T00:00:00.000Z',
   updatedAt: '2026-07-12T00:00:00.000Z',
 } satisfies AgentCoreModule.AIProvider;
@@ -97,7 +109,7 @@ beforeAll(async () => {
   const pluginModule = await import('../../routes/stream-routes-plugin.js');
   streamRoutes = pluginModule.streamRoutes;
   STREAM_PLUGIN_ERROR_MESSAGES = pluginModule.STREAM_PLUGIN_ERROR_MESSAGES;
-});
+}, STREAM_ERROR_CONTRACTS_COLD_IMPORT_HOOK_TIMEOUT_MS);
 
 beforeEach(() => {
   dbModule.sqliteRun('DELETE FROM sessions', []);
@@ -242,6 +254,46 @@ describe('stream error contracts', () => {
     expect(route.upstreamProtocol).toBe('responses');
     expect(providerCatalogMocks.getFastProvider).toHaveBeenCalledWith(USER_ID);
     expect(providerCatalogMocks.getProviderForSelection).not.toHaveBeenCalled();
+  });
+
+  it('provider 缺失的 delegated model 绑定不会被 Fast 覆盖', async () => {
+    providerCatalogMocks.getFastProvider.mockResolvedValueOnce({
+      provider: fastProvider,
+      modelId: 'gpt-5.4-nano',
+    });
+    providerCatalogMocks.getProviderForSelection.mockResolvedValueOnce({
+      provider: anthropicProvider,
+      modelId: 'claude-opus-4-0',
+    });
+
+    const route = await resolveStreamModelRoute({
+      metadataJson: JSON.stringify({
+        delegatedSystemPrompt: 'delegated',
+        modelId: 'grok-code-fast-1',
+      }),
+      requestData: {
+        agentId: 'explore',
+        clientRequestId: 'req-delegated-model-only',
+        maxTokens: 2048,
+        message: 'hello',
+        model: 'grok-code-fast-1',
+        temperature: 1,
+      },
+      userId: USER_ID,
+    });
+
+    expect(route.model).toBe('claude-opus-4-0');
+    expect(route.providerId).toBe('anthropic-chat');
+    expect(route.providerType).toBe('anthropic');
+    expect(providerCatalogMocks.getFastProvider).not.toHaveBeenCalled();
+    expect(providerCatalogMocks.getProviderForSelection).toHaveBeenCalledWith(
+      USER_ID,
+      {
+        providerId: undefined,
+        modelId: 'grok-code-fast-1',
+      },
+      { fallbackToChat: true },
+    );
   });
 
   it('GET /sessions/:id/stream/attach 在请求流已失活时返回中文 409', async () => {
