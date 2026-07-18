@@ -26,11 +26,11 @@ export function useNarrowConversationLayout(
     update();
 
     const container = containerRef?.current;
-    const resizeObserver =
-      container && typeof ResizeObserver !== 'undefined'
-        ? new ResizeObserver(() => update())
-        : null;
-    resizeObserver?.observe(container);
+    let resizeObserver: ResizeObserver | null = null;
+    if (container && typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(() => update());
+      resizeObserver.observe(container);
+    }
 
     window.addEventListener('resize', update);
     return () => {

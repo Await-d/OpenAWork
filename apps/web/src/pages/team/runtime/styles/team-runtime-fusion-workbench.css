@@ -36,7 +36,8 @@
   .team-conversation-area__workbench:has(
     .team-v2-fusion-side-panel[data-active-primary='conversation'][data-active-tab='dashboard']
   ) {
-  block-size: var(--team-fusion-workbench-conversation-block);
+  /* 先服从父容器剩余高度，避免顶部 chrome 增高时把 composer 挤出可视区。 */
+  block-size: 100%;
   max-block-size: var(--team-fusion-workbench-conversation-block);
   overflow: hidden;
 }
@@ -76,7 +77,7 @@
       [data-active-primary='conversation'][data-active-tab='dashboard']
     )
   ) {
-  block-size: var(--team-fusion-workbench-conversation-block);
+  block-size: 100%;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1.08fr) minmax(var(--team-fusion-workbench-session-min), 0.92fr);
   max-block-size: var(--team-fusion-workbench-conversation-block);
