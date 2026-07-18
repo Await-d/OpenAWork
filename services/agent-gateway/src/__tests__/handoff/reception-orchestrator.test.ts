@@ -32,8 +32,14 @@ const llmCompletion = vi.fn(async ({ prompt }: { prompt: string }) => {
   return '【改写结果】创建一个任务看板\n【推荐角色】planner\n【下一步】拆解任务并派发执行';
 });
 
+const runSessionInBackgroundMock = vi.fn(async () => ({ statusCode: 200 }));
+
 vi.mock('../../routes/workflow-llm.js', () => ({
   requestWorkflowLlmCompletion: (cfg: { prompt: string }) => llmCompletion(cfg),
+}));
+
+vi.mock('../../routes/stream-runtime.js', () => ({
+  runSessionInBackground: runSessionInBackgroundMock,
 }));
 
 process.env['DATABASE_URL'] = ':memory:';
@@ -138,6 +144,8 @@ afterEach(() => {
   delete process.env['AI_API_KEY'];
   delete process.env['AI_DEFAULT_MODEL'];
   llmCompletion.mockClear();
+  runSessionInBackgroundMock.mockReset();
+  runSessionInBackgroundMock.mockResolvedValue({ statusCode: 200 });
 });
 
 afterAll(async () => {
@@ -185,6 +193,39 @@ describe('orchestrateReceptionInput', () => {
     // 如果 session 不存在或 LLM 不可用，会 catch 并返回
     expect(result.triggered).toBe(false);
   }, 10_000);
+
+  it('direct 路径会把前端选中的模型思考配置传给后台流', async () => {
+    process.env['AI_API_BASE_URL'] = 'https://example.test/v1';
+    process.env['AI_API_KEY'] = 'sk-test';
+    process.env['AI_DEFAULT_MODEL'] = 'gpt-test';
+
+    const result = await orchestrator.orchestrateReceptionInput({
+      userId: USER_ID,
+      receptionSessionId: SESSION_ID,
+      userIntent: '你好',
+      requestedProviderId: 'openai',
+      requestedModelId: 'gpt-5.4',
+      requestedThinkingEnabled: true,
+      requestedReasoningEffort: 'high',
+      persistUserMessage: false,
+      persistAckMessage: false,
+    });
+
+    expect(result).toMatchObject({ triggered: false, reason: 'direct-answer' });
+    expect(runSessionInBackgroundMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: SESSION_ID,
+        userId: USER_ID,
+        requestData: expect.objectContaining({
+          message: '你好',
+          providerId: 'openai',
+          model: 'gpt-5.4',
+          thinkingEnabled: true,
+          reasoningEffort: 'high',
+        }),
+      }),
+    );
+  });
 
   it('并发编排同一 reception 会话时只创建一条 handoff（in-flight 守卫，防并行 pm1 链路）', async () => {
     // 无 LLM 配置：body 在 await resolveAuxiliaryLlmConfig 后立刻返回 no-llm-config。

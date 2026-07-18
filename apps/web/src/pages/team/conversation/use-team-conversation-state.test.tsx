@@ -1291,7 +1291,7 @@ describe('useTeamConversationState — submitInbound (v0.2)', () => {
     expect(payload.model).toBe('gpt-5.4');
     expect(payload.providerId).toBe('openai');
     expect(payload.thinkingEnabled).toBe(true);
-    expect(payload.reasoningEffort).toBe('xhigh');
+    expect(payload.reasoningEffort).toBe('high');
   });
 
   it('startStream 会为 custom 代理下的其他平台模型下发思考请求', async () => {
@@ -1364,7 +1364,12 @@ describe('useTeamConversationState — submitInbound (v0.2)', () => {
             recovery: {
               pendingPermissions: [],
               pendingQuestions: [],
-              session: { id: SESSION_ID, state_status: 'idle', messages: [] },
+              session: {
+                id: SESSION_ID,
+                state_status: 'idle',
+                role_layer: 'reception',
+                messages: [],
+              },
               todoLanes: { lanes: [] },
               tasks: [],
               children: [],
@@ -1381,6 +1386,10 @@ describe('useTeamConversationState — submitInbound (v0.2)', () => {
         const body = JSON.parse((init?.body as string) ?? '{}');
         expect(body.messageType).toBe('user_input');
         expect(body.payload.text).toBe('hello team');
+        expect(body.payload.providerId).toBe('openai');
+        expect(body.payload.modelId).toBe('gpt-5.4');
+        expect(body.payload.thinkingEnabled).toBe(true);
+        expect(body.payload.reasoningEffort).toBe('high');
         return new Response(
           JSON.stringify({ messageId: 'imsg-001', createdAt: '2026-05-16T15:00:00Z' }),
           { status: 200, headers: { 'content-type': 'application/json' } },
@@ -1396,11 +1405,35 @@ describe('useTeamConversationState — submitInbound (v0.2)', () => {
         currentUserEmail: EMAIL,
         gatewayUrl: GATEWAY,
         token: TOKEN,
+        defaults: {
+          activeProviderId: 'openai',
+          activeModelId: 'gpt-5.4',
+          thinkingEnabled: true,
+          reasoningEffort: 'xhigh',
+        },
       }),
     );
 
     await waitFor(() => {
       expect(result.current.isSessionSnapshotReady).toBe(true);
+    });
+    act(() => {
+      result.current.setProviders([
+        {
+          id: 'openai',
+          name: 'OpenAI',
+          type: 'openai',
+          enabled: true,
+          defaultModels: [
+            {
+              id: 'gpt-5.4',
+              label: 'GPT-5.4',
+              enabled: true,
+              supportsThinking: true,
+            },
+          ],
+        },
+      ]);
     });
 
     const response = await result.current.submitInbound('user_input', { text: 'hello team' });

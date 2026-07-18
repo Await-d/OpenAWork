@@ -215,6 +215,44 @@ describe('POST /team/sessions/:sessionId/inbound-messages', () => {
     }
   });
 
+  it('reception user_input 会把模型与思考配置透传给编排器', async () => {
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/team/sessions/${SESSION_ID}/inbound-messages`,
+        headers: { authorization: bearer(app) },
+        payload: {
+          messageType: 'user_input',
+          payload: {
+            text: '你好',
+            providerId: 'openai',
+            modelId: 'gpt-5.4',
+            thinkingEnabled: true,
+            reasoningEffort: 'high',
+          },
+          clientIdempotencyKey: 'route-user-input-thinking-1',
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+      expect(orchestrateReceptionInputMock).toHaveBeenCalledWith({
+        userId: USER_ID,
+        receptionSessionId: SESSION_ID,
+        userIntent: '你好',
+        teamWorkspaceId: TEAM_WORKSPACE_ID,
+        streamClientRequestId: 'route-user-input-thinking-1',
+        requestedProviderId: 'openai',
+        requestedModelId: 'gpt-5.4',
+        requestedThinkingEnabled: true,
+        requestedReasoningEffort: 'high',
+        persistUserMessage: false,
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   it('未传 clientIdempotencyKey 时生成内部 clientRequestId 并传给编排', async () => {
     const app = await buildApp();
     try {

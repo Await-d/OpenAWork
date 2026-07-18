@@ -13,6 +13,7 @@
  * **错误处理**：失败抛 `HttpError`（与其他 client 一致），保留后端 `error` 文案。
  */
 
+import type { TeamReasoningEffort } from '@openAwork/shared';
 import {
   fetchWithTimeout,
   extractJsonErrorMessage,
@@ -45,6 +46,10 @@ export interface UserInputPayload {
   text: string;
   intent?: 'add_requirement' | 'clarify_existing' | 'change_priority';
   attachments?: string[];
+  providerId?: string;
+  modelId?: string;
+  thinkingEnabled?: boolean;
+  reasoningEffort?: TeamReasoningEffort;
 }
 
 export interface CancelSignalPayload {

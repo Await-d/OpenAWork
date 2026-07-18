@@ -18,6 +18,7 @@
 
 import { sqliteAll, sqliteGet, sqliteRun as dbSqliteRun } from '../../infra/db.js';
 import { createHash, randomUUID } from 'node:crypto';
+import type { TeamReasoningEffort } from '@openAwork/shared';
 import { resolveAuxiliaryLlmConfig } from '../../provider/auxiliary-llm-config.js';
 import { resolveMemberModelForSessionLayer } from '../bus/resolve-member-model.js';
 import { createHandoff } from '../store/handoff-store.js';
@@ -132,6 +133,10 @@ export interface OrchestrateReceptionInput {
   clientIdempotencyKey?: string | null;
   /** stream/message 去重使用的 request id，必须满足 stream schema 的长度约束。 */
   streamClientRequestId?: string | null;
+  requestedModelId?: string;
+  requestedProviderId?: string;
+  requestedThinkingEnabled?: boolean;
+  requestedReasoningEffort?: TeamReasoningEffort;
   /**
    * 任务派发前是否自动跑完未完成的初始化步骤（了解项目 / 提取记忆 / 绑定工具）。
    * 默认 true（周全性：用户直接提任务时也先让团队了解项目）。仅在 orchestrate
@@ -271,25 +276,47 @@ async function runReceptionOrchestrationBody(
     sessionId: input.receptionSessionId,
     layer: 'reception',
   });
-  const llmConfig = await resolveAuxiliaryLlmConfig(input.userId, receptionMemberModel);
-  if (!llmConfig) {
-    if (persistAck) {
-      writeAck(input.userId, input.receptionSessionId, FALLBACK_ACK_NO_LLM);
+  let auxiliaryContext:
+    | {
+        llmConfig: NonNullable<Awaited<ReturnType<typeof resolveAuxiliaryLlmConfig>>>;
+        instructionPrefix: string | null;
+      }
+    | null
+    | undefined;
+  const ensureAuxiliaryContext = async () => {
+    if (auxiliaryContext !== undefined) {
+      return auxiliaryContext;
     }
-    return { triggered: false, reason: 'no-llm-config' };
-  }
-  const instructionPrefix = await buildAuxiliaryTeamInstructionPrefix({
-    userId: input.userId,
-    sessionId: input.receptionSessionId,
-    teamWorkspaceId: input.teamWorkspaceId ?? null,
-    roleLayer: 'reception',
-  });
+    const llmConfig = await resolveAuxiliaryLlmConfig(input.userId, receptionMemberModel);
+    if (!llmConfig) {
+      auxiliaryContext = null;
+      return auxiliaryContext;
+    }
+    auxiliaryContext = {
+      llmConfig,
+      instructionPrefix: await buildAuxiliaryTeamInstructionPrefix({
+        userId: input.userId,
+        sessionId: input.receptionSessionId,
+        teamWorkspaceId: input.teamWorkspaceId ?? null,
+        roleLayer: 'reception',
+      }),
+    };
+    return auxiliaryContext;
+  };
 
   // ─── L1.2 b.router：意图路由判断 ─────────────────────────────────────────
   // 规则做确定性预筛（问候/致谢→direct，空/极短→clarify），其余交给 LLM。
   // LLM 同时看到用户输入和历史任务上下文，判断是 resume / orchestrate / direct / clarify。
   let routeResult: RouteResult | null = routeByRules(input.userIntent);
   if (!routeResult) {
+    const resolvedAuxiliaryContext = await ensureAuxiliaryContext();
+    if (!resolvedAuxiliaryContext) {
+      if (persistAck) {
+        writeAck(input.userId, input.receptionSessionId, FALLBACK_ACK_NO_LLM);
+      }
+      return { triggered: false, reason: 'no-llm-config' };
+    }
+    const { llmConfig, instructionPrefix } = resolvedAuxiliaryContext;
     // 构建 LLM 路由上下文：让 LLM 看到上次任务的状态，从而判断是否需要续接
     const routeLlmContext = await buildRouteLlmContext({
       userId: input.userId,
@@ -354,7 +381,14 @@ async function runReceptionOrchestrationBody(
         userId: input.userId,
         requestData: {
           message: input.userIntent,
-          model: 'default',
+          model: input.requestedModelId ?? 'default',
+          ...(input.requestedProviderId ? { providerId: input.requestedProviderId } : {}),
+          ...(input.requestedThinkingEnabled !== undefined
+            ? { thinkingEnabled: input.requestedThinkingEnabled }
+            : {}),
+          ...(input.requestedReasoningEffort
+            ? { reasoningEffort: input.requestedReasoningEffort }
+            : {}),
           clientRequestId: streamClientRequestId,
         },
       });
@@ -481,6 +515,21 @@ async function runReceptionOrchestrationBody(
     userId: input.userId,
     roleLayer: 'reception',
   });
+
+  const resolvedAuxiliaryContext = await ensureAuxiliaryContext();
+  if (!resolvedAuxiliaryContext) {
+    setSubstate({
+      sessionId: input.receptionSessionId,
+      substate: SUBSTATES_RECEPTION.IDLE,
+      userId: input.userId,
+      roleLayer: 'reception',
+    });
+    if (persistAck) {
+      writeAck(input.userId, input.receptionSessionId, FALLBACK_ACK_NO_LLM);
+    }
+    return { triggered: false, reason: 'no-llm-config' };
+  }
+  const { llmConfig, instructionPrefix } = resolvedAuxiliaryContext;
 
   let rewritten = '';
   try {

@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { createHash, randomUUID } from 'node:crypto';
+import type { TeamReasoningEffort } from '@openAwork/shared';
 import { z } from 'zod';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
@@ -77,6 +78,48 @@ function normalizeStreamClientRequestId(clientIdempotencyKey: string): string {
   return `team-client:${digest}`;
 }
 
+const VALID_REASONING_EFFORTS = new Set<TeamReasoningEffort>([
+  'none',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+]);
+
+interface InboundUserInputModelSelection {
+  requestedModelId?: string;
+  requestedProviderId?: string;
+  requestedThinkingEnabled?: boolean;
+  requestedReasoningEffort?: TeamReasoningEffort;
+}
+
+function normalizeOptionalPayloadString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function extractInboundUserInputModelSelection(
+  payload: Record<string, unknown> | undefined,
+): InboundUserInputModelSelection {
+  const requestedModelId = normalizeOptionalPayloadString(payload?.['modelId']);
+  const requestedProviderId = normalizeOptionalPayloadString(payload?.['providerId']);
+  const requestedReasoningEffort = normalizeOptionalPayloadString(payload?.['reasoningEffort']);
+  return {
+    ...(requestedModelId ? { requestedModelId } : {}),
+    ...(requestedProviderId ? { requestedProviderId } : {}),
+    ...(typeof payload?.['thinkingEnabled'] === 'boolean'
+      ? { requestedThinkingEnabled: payload['thinkingEnabled'] }
+      : {}),
+    ...(requestedReasoningEffort &&
+    VALID_REASONING_EFFORTS.has(requestedReasoningEffort as TeamReasoningEffort)
+      ? { requestedReasoningEffort: requestedReasoningEffort as TeamReasoningEffort }
+      : {}),
+  };
+}
+
 function teamInboundRouteErrorPayload(
   code: TeamInboundRouteErrorCode,
   extra?: Record<string, unknown>,
@@ -111,6 +154,7 @@ export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
 
       const parseStep = child('parse-body');
       const body = parseBody(inboundSubmitSchema, request.body);
+      const bodyPayload = body.payload ?? {};
       const inboundClientIdempotencyKey = resolveInboundClientIdempotencyKey({
         clientIdempotencyKey: body.clientIdempotencyKey,
         messageType: body.messageType,
@@ -148,20 +192,17 @@ export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
           // 这与 layer-capabilities 矩阵的 canReceiveInboundFrom 对齐。
           fromRoleLayer: session.role_layer === 'reception' ? 'user' : 'reception',
           messageType: body.messageType,
-          payload: body.payload ?? {},
+          payload: bodyPayload,
           clientIdempotencyKey: inboundClientIdempotencyKey,
           ...(expiresAtIso ? { expiresAt: expiresAtIso } : {}),
         });
 
         if (body.messageType === 'clarification_answer') {
           const questionId =
-            typeof body.payload?.['questionId'] === 'string' ? body.payload['questionId'] : null;
-          const answer =
-            typeof body.payload?.['answer'] === 'string' ? body.payload['answer'] : null;
+            typeof bodyPayload['questionId'] === 'string' ? bodyPayload['questionId'] : null;
+          const answer = typeof bodyPayload['answer'] === 'string' ? bodyPayload['answer'] : null;
           const answeredAt =
-            typeof body.payload?.['answeredAt'] === 'number'
-              ? body.payload['answeredAt']
-              : Date.now();
+            typeof bodyPayload['answeredAt'] === 'number' ? bodyPayload['answeredAt'] : Date.now();
           if (questionId && answer) {
             try {
               const { resolveClarificationEscalationRequest } =
@@ -222,8 +263,7 @@ export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
         }
 
         if (body.messageType === 'user_input' && !result.reused) {
-          const userInputText =
-            typeof body.payload?.['text'] === 'string' ? body.payload['text'] : '';
+          const userInputText = typeof bodyPayload['text'] === 'string' ? bodyPayload['text'] : '';
           if (userInputText.trim().length > 0) {
             try {
               const { appendSessionMessageV2 } = await import('../message/message-v2-adapter.js');
@@ -245,8 +285,8 @@ export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
         const shouldOrchestrate =
           !result.reused && session.role_layer === 'reception' && body.messageType === 'user_input';
         if (shouldOrchestrate) {
-          const userInputText =
-            typeof body.payload?.['text'] === 'string' ? body.payload['text'] : '';
+          const userInputText = typeof bodyPayload['text'] === 'string' ? bodyPayload['text'] : '';
+          const userInputModelSelection = extractInboundUserInputModelSelection(bodyPayload);
           const sessionMeta = sqliteGet<{ metadata_json: string | null }>(
             `SELECT metadata_json FROM sessions WHERE id = ? LIMIT 1`,
             [sessionId],
@@ -279,6 +319,7 @@ export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
                 userIntent: userInputText,
                 teamWorkspaceId: teamWorkspaceIdFromMeta,
                 streamClientRequestId,
+                ...userInputModelSelection,
                 // user 消息已在上面同步写过，避免重复写
                 persistUserMessage: false,
               });

@@ -42,6 +42,7 @@ import {
   type PendingPermissionRequest,
   type PendingQuestionRequest,
   type PermissionDecision,
+  type UserInputPayload,
 } from '@openAwork/web-client';
 import type {
   ChatMessage,
@@ -1064,15 +1065,51 @@ export function useTeamConversationState(
       if (!token) {
         throw new Error('未登录，无法提交团队消息。');
       }
+      let resolvedPayload = payload;
+      if (messageType === 'user_input' && roleLayer === 'reception') {
+        const inboundPayload = payload as UserInputPayload;
+        const activeProvider = providers.find((provider) => provider.id === activeProviderId);
+        const activeModel = activeProvider?.defaultModels.find(
+          (model) => model.id === activeModelId,
+        );
+        const resolvedThinkingRequest = resolveChatThinkingRequest({
+          providerType: activeProvider?.type,
+          modelId: activeModel?.id ?? activeModelId,
+          declaredSupportsThinking: activeModel?.supportsThinking === true,
+          thinkingEnabled,
+          reasoningEffort,
+        });
+        resolvedPayload = {
+          ...inboundPayload,
+          ...(activeModelId ? { modelId: activeModelId } : {}),
+          ...(activeProviderId ? { providerId: activeProviderId } : {}),
+          ...(resolvedThinkingRequest.thinkingEnabled !== undefined
+            ? { thinkingEnabled: resolvedThinkingRequest.thinkingEnabled }
+            : {}),
+          ...(resolvedThinkingRequest.reasoningEffort
+            ? { reasoningEffort: resolvedThinkingRequest.reasoningEffort }
+            : {}),
+        } as InboundPayloadByType[typeof messageType];
+      }
       const inboundClient = createTeamInboundClient(gatewayUrl);
       return inboundClient.submit(token, sessionId, {
         messageType,
-        payload,
+        payload: resolvedPayload,
         clientIdempotencyKey: opts?.clientIdempotencyKey,
         expiresAt: opts?.expiresAt,
       });
     },
-    [sessionId, token, gatewayUrl],
+    [
+      sessionId,
+      token,
+      gatewayUrl,
+      roleLayer,
+      providers,
+      activeProviderId,
+      activeModelId,
+      thinkingEnabled,
+      reasoningEffort,
+    ],
   );
 
   // ─── v0.3 writers / stream consumer ───────────────────────────────
