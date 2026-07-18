@@ -480,6 +480,7 @@ function spawnAndCollect(
     const chunks: Buffer[] = [];
     let totalSize = 0;
     const KEEP_BYTES = MAX_OUTPUT_BYTES * 2;
+    let timeoutHandle: NodeJS.Timeout | null = null;
 
     // Throttle partial output emission: at most one snapshot every
     // PARTIAL_THROTTLE_MS so a chatty `find /` won't flood the SSE
@@ -533,10 +534,30 @@ function spawnAndCollect(
     child.stdout?.on('data', (chunk: Buffer) => appendChunk(chunk));
     child.stderr?.on('data', (chunk: Buffer) => appendChunk(chunk));
 
+    function onAbort(): void {
+      if (exited) return;
+      killTree('SIGTERM');
+      setTimeout(() => {
+        if (!exited) killTree('SIGKILL');
+      }, SIGKILL_GRACE_MS);
+      finalize('aborted', 130);
+    }
+
+    const cleanup = () => {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+        timeoutHandle = null;
+      }
+      if (externalSignal) {
+        externalSignal.removeEventListener('abort', onAbort);
+      }
+    };
+
     const finalize = (next: SpawnOutcome['kind'], code: number) => {
       if (exited) return;
       exited = true;
       kind = next;
+      cleanup();
       // Cancel any pending trailing partial emit — the final value will
       // arrive via the resolved `rawOutput` path; sending one more
       // partial after that would race with the completion event.
@@ -579,7 +600,7 @@ function spawnAndCollect(
       }
     };
 
-    const timeoutHandle = setTimeout(() => {
+    timeoutHandle = setTimeout(() => {
       if (exited) return;
       killTree('SIGTERM');
       setTimeout(() => {
@@ -588,14 +609,6 @@ function spawnAndCollect(
       finalize('timeout', 124);
     }, timeoutMs);
 
-    const onAbort = () => {
-      if (exited) return;
-      killTree('SIGTERM');
-      setTimeout(() => {
-        if (!exited) killTree('SIGKILL');
-      }, SIGKILL_GRACE_MS);
-      finalize('aborted', 130);
-    };
     if (externalSignal) {
       if (externalSignal.aborted) {
         onAbort();
@@ -605,7 +618,7 @@ function spawnAndCollect(
     }
 
     child.on('error', (error) => {
-      clearTimeout(timeoutHandle);
+      cleanup();
       if (exited) return;
       exited = true;
       resolve({
@@ -616,9 +629,7 @@ function spawnAndCollect(
       });
     });
 
-    child.on('exit', (code, signal) => {
-      clearTimeout(timeoutHandle);
-      if (externalSignal) externalSignal.removeEventListener('abort', onAbort);
+    child.on('close', (code, signal) => {
       if (exited) return;
       const exitCode = typeof code === 'number' ? code : signal ? 128 : 1;
       finalize('exit', exitCode);
