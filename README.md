@@ -416,7 +416,7 @@ docker compose up --build
 # 启动所有 workspace
 pnpm dev
 
-# 构建所有包
+# 构建共享包、服务与 Web
 pnpm build
 
 # 类型检查

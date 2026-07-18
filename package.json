@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "pnpm --parallel -r run dev",
-    "build": "pnpm -r run build",
+    "build": "pnpm --filter \"./packages/**\" --filter \"./services/**\" --filter @openAwork/web build",
     "build:desktop": "pnpm --filter @openAwork/desktop build",
     "package:desktop": "pnpm --filter @openAwork/desktop build",
     "lint": "pnpm run lint:eslint && pnpm run lint:rules",

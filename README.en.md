@@ -414,7 +414,7 @@ docker compose up --build
 # Start all workspaces
 pnpm dev
 
-# Build all packages
+# Build shared packages, services, and Web
 pnpm build
 
 # Type check
