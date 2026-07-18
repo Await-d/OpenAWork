@@ -1,8 +1,10 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
-let isPathWithinRoot: typeof import('../../workspace/workspace-paths.js').isPathWithinRoot;
-let isSamePath: typeof import('../../workspace/workspace-paths.js').isPathWithinRoot;
-let validateWorkspaceRelativePath: typeof import('../../workspace/workspace-paths.js').validateWorkspaceRelativePath;
+import type * as WorkspacePathsModule from '../../workspace/workspace-paths.js';
+
+let isPathWithinRoot: typeof WorkspacePathsModule.isPathWithinRoot;
+let isSamePath: typeof WorkspacePathsModule.isSamePath;
+let validateWorkspaceRelativePath: typeof WorkspacePathsModule.validateWorkspaceRelativePath;
 
 beforeAll(async () => {
   process.env['DATABASE_URL'] = ':memory:';
