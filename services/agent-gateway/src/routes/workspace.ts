@@ -801,10 +801,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         step.fail('path outside workspace root');
         return reply.status(403).send({ error: WORKSPACE_ERROR_MESSAGES.pathOutsideWorkspace });
       }
-      if (
-        scopeRoot &&
-        (isSamePath(safeOldPath, scopeRoot) || isSamePath(safeNewPath, scopeRoot))
-      ) {
+      if (scopeRoot && (isSamePath(safeOldPath, scopeRoot) || isSamePath(safeNewPath, scopeRoot))) {
         pathStep.fail('workspace root operation forbidden');
         step.fail('workspace root operation forbidden');
         return reply.status(400).send({

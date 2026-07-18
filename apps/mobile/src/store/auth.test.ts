@@ -28,9 +28,7 @@ describe('resolveDefaultMobileGatewayUrl', () => {
 
 describe('normalizeMobileGatewayUrl', () => {
   it('允许局域网私网 HTTP 地址', () => {
-    expect(normalizeMobileGatewayUrl('http://192.168.1.20:3000/')).toBe(
-      'http://192.168.1.20:3000',
-    );
+    expect(normalizeMobileGatewayUrl('http://192.168.1.20:3000/')).toBe('http://192.168.1.20:3000');
   });
 
   it('拒绝公网 HTTP 地址', () => {

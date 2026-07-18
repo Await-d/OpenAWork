@@ -552,7 +552,9 @@ function TimelineView({ layers }: { layers: LayerMessages[] }) {
             return (
               <div key={layer.layer} style={TIMELINE_ROLE_HEADER_CELL_STYLE}>
                 <span style={{ fontSize: 12, flexShrink: 0 }}>{id.icon}</span>
-                <span style={{ ...TIMELINE_ROLE_HEADER_TEXT_STYLE, color: id.color }}>{id.short}</span>
+                <span style={{ ...TIMELINE_ROLE_HEADER_TEXT_STYLE, color: id.color }}>
+                  {id.short}
+                </span>
               </div>
             );
           })}
