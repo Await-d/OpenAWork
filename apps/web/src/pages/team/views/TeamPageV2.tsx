@@ -111,6 +111,7 @@ import type { EditorPaneTab } from '../../../components/file-editor/EditorBrowse
 import { toast } from '../../../components/common/feedback/ToastNotification.js';
 import { usePageActivation } from '../../../components/common/routing/CachedRouteOutlet.js';
 import { requestSessionListRefresh } from '../../../utils/session/session-list-events.js';
+import { isPathWithinRoot } from '../../../utils/workspace-path.js';
 import {
   IdleHint,
   TeamFocusHandoffBanner,
@@ -388,11 +389,7 @@ export default function TeamPageV2() {
   const workspaceRoot = workspaceState.activeWorkspace?.defaultWorkingRoot ?? null;
   const fileTreeWorkspacePath = useMemo(() => {
     if (workspaceRoot && selectedTeam?.workingDirectory) {
-      // 仅当 workingDirectory 是 workspaceRoot 的子路径时才使用
-      if (
-        selectedTeam.workingDirectory === workspaceRoot ||
-        selectedTeam.workingDirectory.startsWith(`${workspaceRoot}/`)
-      ) {
+      if (isPathWithinRoot(selectedTeam.workingDirectory, workspaceRoot)) {
         return selectedTeam.workingDirectory;
       }
     }
@@ -616,9 +613,7 @@ export default function TeamPageV2() {
         const sessionPath = sessionGroup.workspacePath;
         const targetWorkspace = workspaceState.workspaces.find(
           (ws) =>
-            ws.defaultWorkingRoot != null &&
-            (sessionPath === ws.defaultWorkingRoot ||
-              sessionPath.startsWith(`${ws.defaultWorkingRoot}/`)),
+            ws.defaultWorkingRoot != null && isPathWithinRoot(sessionPath, ws.defaultWorkingRoot),
         );
         if (targetWorkspace && targetWorkspace.id !== resolvedTeamWorkspaceId) {
           navigate(`/team/${targetWorkspace.id}`);
@@ -801,6 +796,8 @@ export default function TeamPageV2() {
   // URL 参数 ?action=newWorkspace → 打开新建团队工作区弹窗
   const teamNewSessionSignal = useUIStateStore((s) => s.teamNewSessionSignal);
   const consumeTeamNewSessionSignal = useUIStateStore((s) => s.consumeTeamNewSessionSignal);
+  const teamNewWorkspaceSignal = useUIStateStore((s) => s.teamNewWorkspaceSignal);
+  const consumeTeamNewWorkspaceSignal = useUIStateStore((s) => s.consumeTeamNewWorkspaceSignal);
   const teamSelectSessionSignal = useUIStateStore((s) => s.teamSelectSessionSignal);
   const consumeTeamSelectSessionSignal = useUIStateStore((s) => s.consumeTeamSelectSessionSignal);
   const resetToWelcomeSignal = useUIStateStore((s) => s.resetToWelcomeSignal);
@@ -826,6 +823,14 @@ export default function TeamPageV2() {
   }, [teamNewSessionSignal, resolvedTeamWorkspaceId, consumeTeamNewSessionSignal]);
 
   useEffect(() => {
+    if (!teamNewWorkspaceSignal) {
+      return;
+    }
+    setShowNewWorkspaceModal(true);
+    consumeTeamNewWorkspaceSignal();
+  }, [teamNewWorkspaceSignal, consumeTeamNewWorkspaceSignal]);
+
+  useEffect(() => {
     if (!teamSelectSessionSignal) {
       return;
     }
@@ -846,18 +851,34 @@ export default function TeamPageV2() {
     consumeTeamSelectSessionSignal();
   }, [teamSelectSessionSignal, resolvedTeamWorkspaceId, data, consumeTeamSelectSessionSignal]);
 
-  useEffect(() => {
-    const action = searchParams.get('action')?.trim();
-    if (!action) {
+  const clearNewWorkspaceAction = useCallback(() => {
+    if (searchParams.get('action')?.trim() !== 'newWorkspace') {
       return;
     }
-    if (action === 'newWorkspace') {
-      setShowNewWorkspaceModal(true);
-      const nextSearchParams = new URLSearchParams(searchParams);
-      nextSearchParams.delete('action');
-      setSearchParams(nextSearchParams, { replace: true });
-    }
+    const nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams.delete('action');
+    setSearchParams(nextSearchParams, { replace: true });
   }, [searchParams, setSearchParams]);
+
+  const hasPendingNewWorkspaceAction = searchParams.get('action')?.trim() === 'newWorkspace';
+
+  useEffect(() => {
+    if (!teamNewWorkspaceSignal && !hasPendingNewWorkspaceAction) {
+      return;
+    }
+    setShowNewWorkspaceModal(true);
+    if (teamNewWorkspaceSignal) {
+      consumeTeamNewWorkspaceSignal();
+    }
+    if (hasPendingNewWorkspaceAction) {
+      clearNewWorkspaceAction();
+    }
+  }, [
+    teamNewWorkspaceSignal,
+    hasPendingNewWorkspaceAction,
+    consumeTeamNewWorkspaceSignal,
+    clearNewWorkspaceAction,
+  ]);
 
   const handleDeleteSession = useCallback(
     (sessionId: string) => {
@@ -1591,9 +1612,13 @@ export default function TeamPageV2() {
 
         {showNewWorkspaceModal ? (
           <NewTeamWorkspaceModal
-            onClose={() => setShowNewWorkspaceModal(false)}
+            onClose={() => {
+              setShowNewWorkspaceModal(false);
+              clearNewWorkspaceAction();
+            }}
             onCreated={(newWorkspaceId) => {
               workspaceState.refresh();
+              requestSessionListRefresh();
               if (newWorkspaceId) {
                 navigate(`/team/${newWorkspaceId}`);
               }

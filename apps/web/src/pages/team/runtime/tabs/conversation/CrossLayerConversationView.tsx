@@ -11,7 +11,7 @@
  * 数据来源：runtime snapshot sessions + useLayerStore + useHandoffStore。
  */
 
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   useHandoffStore,
   useLayerStore,
@@ -53,8 +53,8 @@ const SPLIT_STYLE: CSSProperties = {
   flex: 1,
   minHeight: 0,
   display: 'grid',
-  gridTemplateColumns: 'minmax(240px, 300px) minmax(0, 1fr)',
-  gap: 12,
+  gridTemplateColumns: 'minmax(280px, 360px) minmax(0, 1fr)',
+  gap: 14,
 };
 
 const DETAIL_PANEL_STYLE: CSSProperties = {
@@ -94,7 +94,8 @@ export function CrossLayerConversationView({
   selectedTeam = null,
   embedded = false,
 }: CrossLayerConversationViewProps) {
-  const isNarrowLayout = useNarrowConversationLayout();
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const isNarrowLayout = useNarrowConversationLayout(containerRef, 1180);
   const handoffs = useHandoffStore((s) => s.handoffs);
   const nodes = useLayerStore((s) => s.nodes);
   const { sessions } = useTeamRuntimeReferenceViewData();
@@ -219,7 +220,7 @@ export function CrossLayerConversationView({
       )}
     </div>
   ) : (
-    <div style={CONTAINER_STYLE}>
+    <div ref={containerRef} style={CONTAINER_STYLE}>
       <div
         style={
           isNarrowLayout

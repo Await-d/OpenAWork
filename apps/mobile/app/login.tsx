@@ -12,10 +12,14 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { router } from 'expo-router';
-import { normalizeMobileGatewayUrl, useAuthStore } from '../src/store/auth';
+import {
+  DEFAULT_MOBILE_GATEWAY_URL,
+  normalizeMobileGatewayUrl,
+  useAuthStore,
+} from '../src/store/auth';
 
 export default function LoginScreen() {
-  const [gatewayUrl, setGatewayUrl] = useState('http://localhost:3000');
+  const [gatewayUrl, setGatewayUrl] = useState(DEFAULT_MOBILE_GATEWAY_URL);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);

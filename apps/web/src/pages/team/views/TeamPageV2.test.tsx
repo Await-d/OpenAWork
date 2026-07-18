@@ -40,6 +40,7 @@ const toastMock = vi.hoisted(() => vi.fn());
 const modalState = vi.hoisted(() => ({
   onCreated: undefined as ((newWorkspaceId?: string) => void) | undefined,
 }));
+const requestSessionListRefreshMock = vi.hoisted(() => vi.fn());
 const routeState = vi.hoisted(() => ({
   teamWorkspaceId: 'workspace-1' as string | undefined,
   searchParams: new URLSearchParams(),
@@ -82,6 +83,14 @@ vi.mock('../../../components/common/feedback/ToastNotification.js', () => ({
   toast: toastMock,
 }));
 
+vi.mock('../../../utils/session/session-list-events.js', async () => {
+  const actual = await vi.importActual('../../../utils/session/session-list-events.js');
+  return {
+    ...actual,
+    requestSessionListRefresh: requestSessionListRefreshMock,
+  };
+});
+
 vi.mock('../runtime/data/team-runtime-reference-data.js', () => ({
   TeamRuntimeReferenceDataProvider: ({ children }: { children: React.ReactNode }) => (
     <>{children}</>
@@ -108,6 +117,7 @@ vi.mock('../runtime/shell/controls/ConversationArea.js', () => ({
     topBar,
     messagesOverride,
     fallbackContent,
+    onCreateWorkspace,
     onNewSession,
     onSubmitMessage,
     onSelectSuggestion,
@@ -116,6 +126,7 @@ vi.mock('../runtime/shell/controls/ConversationArea.js', () => ({
     topBar?: React.ReactNode;
     messagesOverride?: React.ReactNode;
     fallbackContent?: React.ReactNode;
+    onCreateWorkspace?: (() => void) | undefined;
     onNewSession?: (() => void) | undefined;
     onSubmitMessage?: ((text: string) => void | Promise<void>) | undefined;
     onSelectSuggestion?: ((text: string) => void | Promise<void>) | undefined;
@@ -133,6 +144,15 @@ vi.mock('../runtime/shell/controls/ConversationArea.js', () => ({
       {onNewSession ? (
         <button type="button" data-testid="conversation-open-new-session" onClick={onNewSession}>
           新建会话入口
+        </button>
+      ) : null}
+      {onCreateWorkspace ? (
+        <button
+          type="button"
+          data-testid="conversation-open-new-workspace"
+          onClick={onCreateWorkspace}
+        >
+          新建工作区入口
         </button>
       ) : null}
     </div>
@@ -735,6 +755,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   useUIStateStore.getState().setActiveTeamSessionId(null);
   useUIStateStore.getState().consumeTeamNewSessionSignal();
+  useUIStateStore.getState().consumeTeamNewWorkspaceSignal();
   useUIStateStore.getState().consumeTeamSelectSessionSignal();
   teamConversationViewState.sessionIds = [];
   toastMock.mockReset();
@@ -742,6 +763,7 @@ beforeEach(() => {
   mocks.pauseAllRuntimeSessions.mockReset().mockResolvedValue(createPauseAllResult());
   mocks.resumeAllRuntimeSessions.mockReset().mockResolvedValue(createResumeAllResult());
   modalState.onCreated = undefined;
+  requestSessionListRefreshMock.mockReset();
   routeState.teamWorkspaceId = 'workspace-1';
   routeState.searchParams = new URLSearchParams();
   authState.accessToken = 'token-test';
@@ -1381,11 +1403,15 @@ describe('TeamPageV2', () => {
     renderPage();
 
     expect(screen.getByTestId('new-team-workspace-modal')).toBeTruthy();
+    await waitFor(() => {
+      expect(routeState.searchParams.toString()).toBe('');
+    });
     fireEvent.click(screen.getByTestId('new-team-workspace-modal'));
 
     await waitFor(() => {
       expect(mocks.refreshWorkspaces).toHaveBeenCalled();
     });
+    expect(requestSessionListRefreshMock).toHaveBeenCalledOnce();
     expect(mocks.navigate).toHaveBeenCalledWith('/team/workspace-2');
   });
 
@@ -1499,6 +1525,39 @@ describe('TeamPageV2', () => {
     fireEvent.click(screen.getByTestId('conversation-open-new-session'));
 
     expect(screen.getByTestId('new-team-session-modal')).toBeTruthy();
+  });
+
+  it('对话欢迎页的新建工作区入口会打开新建工作区弹窗', () => {
+    renderPage();
+
+    fireEvent.click(screen.getByTestId('conversation-open-new-workspace'));
+
+    expect(screen.getByTestId('new-team-workspace-modal')).toBeTruthy();
+  });
+
+  it('运行时触发 teamNewWorkspaceSignal 时会立即打开新建工作区弹窗', async () => {
+    renderPage();
+
+    await act(async () => {
+      useUIStateStore.getState().triggerTeamNewWorkspace();
+    });
+
+    expect(screen.getByTestId('new-team-workspace-modal')).toBeTruthy();
+  });
+
+  it('signal 打开 modal 后即使路由随后补上 action=newWorkspace，也会清掉 URL 查询参数', async () => {
+    const view = renderPage();
+
+    await act(async () => {
+      useUIStateStore.getState().triggerTeamNewWorkspace();
+    });
+    routeState.searchParams = new URLSearchParams('action=newWorkspace');
+    view.rerender(<TeamPageV2 />);
+
+    expect(screen.getByTestId('new-team-workspace-modal')).toBeTruthy();
+    await waitFor(() => {
+      expect(routeState.searchParams.toString()).toBe('');
+    });
   });
 
   it('真路径会把当前选中会话同步给全局侧栏状态', async () => {

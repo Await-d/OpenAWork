@@ -3,7 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 import { isGatewayHealthy, login, loginWithPairingToken } from '@openAwork/web-client';
 import { useAuthStore } from '../store/auth';
-import { normalizeMobileGatewayUrl } from '../store/auth';
+import { DEFAULT_MOBILE_GATEWAY_URL, normalizeMobileGatewayUrl } from '../store/auth';
 
 function parseExpIn(expiresIn: string): number {
   const m = /^(\d+)(s|m|h)?$/.exec(expiresIn);
@@ -233,7 +233,7 @@ function HostWorkspaceStep({ step, hostConfig, onNext, onBack }: StepProps) {
       <TextInput
         autoCapitalize="none"
         autoCorrect={false}
-        placeholder="/home/user/openawork"
+        placeholder="输入工作区目录路径"
         placeholderTextColor={MUTED}
         style={styles.input}
         value={workspace}
@@ -252,7 +252,7 @@ function HostWorkspaceStep({ step, hostConfig, onNext, onBack }: StepProps) {
 }
 
 function HostGatewayStep({ step, onNext, onBack }: StepProps) {
-  const [gatewayUrl, setGatewayUrlInput] = useState('http://localhost:3000');
+  const [gatewayUrl, setGatewayUrlInput] = useState(DEFAULT_MOBILE_GATEWAY_URL);
   const isDisabled = gatewayUrl.trim().length < 8;
 
   return (
@@ -364,10 +364,10 @@ function HostHealthStep({ step, hostConfig, onNext, onBack }: StepProps) {
       try {
         return normalizeMobileGatewayUrl(
           (hostConfig.gatewayUrl || hostConfig.workspace).trim().replace(/\/$/, '') ||
-            'http://localhost:3000',
+            DEFAULT_MOBILE_GATEWAY_URL,
         );
       } catch {
-        return 'http://localhost:3000';
+        return DEFAULT_MOBILE_GATEWAY_URL;
       }
     })();
     void (async () => {
@@ -634,7 +634,7 @@ function ClientLoginStep({ step, hostConfig, onNext, onBack }: StepProps) {
 
 function CloudLoginStep({ step, onNext, onBack }: StepProps) {
   const { setGatewayUrl, setTokens } = useAuthStore();
-  const [gatewayUrl, setGatewayUrlInput] = useState('http://localhost:3000');
+  const [gatewayUrl, setGatewayUrlInput] = useState(DEFAULT_MOBILE_GATEWAY_URL);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);

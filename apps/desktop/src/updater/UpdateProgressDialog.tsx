@@ -3,12 +3,15 @@ import {
   checkForUpdate,
   downloadUpdate,
   installUpdate,
+  supportsProxyAutoInstall,
+  toUpdateError,
+  UpdateError,
   type UpdateCheckResult,
-  type UpdateError,
   type GitHubProxy,
 } from './auto-update.js';
+import { downloadAndInstallProxyUpdate } from './proxy-update.js';
 import { UpdateErrorDialog } from './UpdateErrorDialog.js';
-import { restartDesktopApp } from '../utils/tauri-gateway.js';
+import { restartDesktopApp, stopDesktopGateway } from '../utils/tauri-gateway.js';
 
 type UpdateState =
   'idle' | 'checking' | 'available' | 'downloading' | 'installing' | 'done' | 'up-to-date';
@@ -61,6 +64,15 @@ export function UpdateProgressDialog({ autoCheck = false, onClose }: UpdateProgr
   const autoCheckStartedRef = useRef(false);
   const cancelledRef = useRef(false);
 
+  const stopGatewayBeforeInstall = useCallback(async () => {
+    try {
+      await stopDesktopGateway();
+    } catch (stopError) {
+      const message = stopError instanceof Error ? stopError.message : String(stopError);
+      throw new UpdateError('unknown', `安装更新前停止本地网关失败：${message}`);
+    }
+  }, []);
+
   const handleCheck = useCallback(async () => {
     cancelledRef.current = false;
     setState('checking');
@@ -74,22 +86,12 @@ export function UpdateProgressDialog({ autoCheck = false, onClose }: UpdateProgr
       setProxyUsed(r.proxyUsed);
       setState(r.available ? 'available' : 'up-to-date');
     } catch (e) {
-      setError(e as UpdateError);
+      setError(toUpdateError(e));
     }
   }, []);
 
   const handleDownload = useCallback(async () => {
     if (!result) return;
-
-    if (result.proxiedDownloadUrl && !result.update) {
-      // Proxy path: open in browser for manual download + install
-      // (native Tauri install is unavailable without the Update object)
-      window.open(result.proxiedDownloadUrl, '_blank');
-      setState('done');
-      return;
-    }
-
-    if (!result.update) return;
     cancelledRef.current = false;
     setState('downloading');
     setProgress(0);
@@ -98,6 +100,34 @@ export function UpdateProgressDialog({ autoCheck = false, onClose }: UpdateProgr
     setError(null);
 
     try {
+      if (!result.update) {
+        if (!result.proxyUsed) {
+          throw new UpdateError('unknown', '当前更新缺少可安装句柄。');
+        }
+        if (result.installMode === 'manual') {
+          if (!result.proxiedDownloadUrl) {
+            throw new UpdateError('unknown', '当前代理模式缺少可下载的更新地址。');
+          }
+          window.open(result.proxiedDownloadUrl, '_blank');
+          setState('done');
+          return;
+        }
+        if (!supportsProxyAutoInstall(result.proxyUsed)) {
+          throw new UpdateError('unknown', `代理 ${result.proxyUsed.name} 当前不支持自动安装。`);
+        }
+        await stopGatewayBeforeInstall();
+        await downloadAndInstallProxyUpdate(result.proxyUsed, (p) => {
+          if (cancelledRef.current) return;
+          setProgress(p.percent);
+          setDownloaded(p.downloaded);
+          setTotal(p.total);
+        });
+        if (cancelledRef.current) return;
+        setProgress(100);
+        setState('done');
+        return;
+      }
+
       await downloadUpdate(result.update, (p) => {
         if (cancelledRef.current) return;
         setProgress(p.percent);
@@ -107,14 +137,16 @@ export function UpdateProgressDialog({ autoCheck = false, onClose }: UpdateProgr
       if (cancelledRef.current) return;
       setProgress(100);
       setState('installing');
-      await installUpdate(result.update);
+      await installUpdate(result.update, {
+        beforeInstall: stopGatewayBeforeInstall,
+      });
       if (cancelledRef.current) return;
       setState('done');
     } catch (e) {
       if (cancelledRef.current) return;
-      setError(e as UpdateError);
+      setError(toUpdateError(e));
     }
-  }, [result]);
+  }, [result, stopGatewayBeforeInstall]);
 
   const handleClose = useCallback(() => {
     cancelledRef.current = true;
@@ -147,8 +179,8 @@ export function UpdateProgressDialog({ autoCheck = false, onClose }: UpdateProgr
     );
   }
 
-  const isProxyMode = !!proxyUsed;
   const proxyHint = proxyUsed ? `（通过 ${proxyUsed.name} 加速）` : '';
+  const isManualProxyMode = result?.installMode === 'manual';
   const STATUS_MSG: Record<UpdateState, string> = {
     idle: '检查更新以获取最新功能和修复。',
     checking: '正在检查更新…',
@@ -161,8 +193,8 @@ ${releaseNotes}`
     }`,
     downloading: `下载中${proxyHint}… ${progress}%`,
     installing: '下载完成，正在安装更新…',
-    done: isProxyMode
-      ? '已通过代理下载完成，请手动安装更新包。'
+    done: isManualProxyMode
+      ? '更新包已在浏览器中打开。安装前请先完全退出 OpenAWork，再运行下载的安装包。'
       : '更新已下载，重启应用以应用更新。',
     'up-to-date': '当前已是最新版本。',
   };
@@ -307,7 +339,7 @@ ${releaseNotes}`
               更新
             </button>
           )}
-          {state === 'done' && !isProxyMode && (
+          {state === 'done' && !isManualProxyMode && (
             <button
               type="button"
               onClick={() => void restartDesktopApp()}
@@ -325,7 +357,7 @@ ${releaseNotes}`
               重启
             </button>
           )}
-          {state === 'done' && isProxyMode && (
+          {state === 'done' && isManualProxyMode && (
             <button
               type="button"
               onClick={handleClose}

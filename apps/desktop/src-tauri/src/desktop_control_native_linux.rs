@@ -3,6 +3,7 @@ use crate::desktop_control_native::{
     DesktopControlCapabilities, DesktopControlCapability, DesktopControlError, DesktopControlStatus,
     ScreenshotRequest,
 };
+use std::env;
 use std::path::Path;
 use std::thread;
 use std::time::Duration;
@@ -11,6 +12,8 @@ use std::time::Duration;
 mod input;
 
 const INPUT_UNAVAILABLE: &str = "xdotool not found; install xdotool and run under an X11 session";
+const WAYLAND_INPUT_UNAVAILABLE: &str =
+    "Wayland session detected; input control requires xdotool and an X11 session";
 const SCREENSHOT_UNAVAILABLE: &str =
     "no supported screenshot command found; expected gnome-screenshot, grim, spectacle, scrot, or import";
 
@@ -20,23 +23,23 @@ struct CommandSpec {
     args: Vec<String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LinuxSessionKind {
+    Wayland,
+    X11,
+    Unknown,
+}
+
 pub fn status() -> DesktopControlStatus {
+    let session = linux_session_kind();
     let screenshot = match screenshot_driver() {
         Some(driver) => DesktopControlCapability::available(driver),
         None => DesktopControlCapability::unavailable(SCREENSHOT_UNAVAILABLE),
     };
-    let input = match input_driver() {
-        Some(driver) => DesktopControlCapability::available(driver),
-        None => DesktopControlCapability::unavailable(INPUT_UNAVAILABLE),
-    };
-    let reason = if screenshot.available && input.available {
-        None
-    } else {
-        Some("desktop control bridge is running with limited native drivers".to_owned())
-    };
+    let input = input_capability(session);
     DesktopControlStatus {
         enabled: true,
-        reason,
+        reason: limited_native_reason(session, &screenshot, &input),
         capabilities: DesktopControlCapabilities {
             screenshot,
             click: input.clone(),
@@ -78,12 +81,82 @@ fn screenshot_driver() -> Option<&'static str> {
         .find(|program| command_exists(program))
 }
 
-fn input_driver() -> Option<&'static str> {
-    if command_exists("xdotool") {
-        Some("xdotool")
-    } else {
-        None
+fn linux_session_kind() -> LinuxSessionKind {
+    linux_session_kind_from_env(
+        env::var("XDG_SESSION_TYPE").ok().as_deref(),
+        env::var_os("WAYLAND_DISPLAY").is_some(),
+        env::var_os("DISPLAY").is_some(),
+    )
+}
+
+fn linux_session_kind_from_env(
+    xdg_session_type: Option<&str>,
+    has_wayland_display: bool,
+    has_display: bool,
+) -> LinuxSessionKind {
+    if let Some(session_type) = xdg_session_type {
+        if session_type.eq_ignore_ascii_case("wayland") {
+            return LinuxSessionKind::Wayland;
+        }
+        if session_type.eq_ignore_ascii_case("x11") {
+            return LinuxSessionKind::X11;
+        }
     }
+
+    if has_wayland_display {
+        LinuxSessionKind::Wayland
+    } else if has_display {
+        LinuxSessionKind::X11
+    } else {
+        LinuxSessionKind::Unknown
+    }
+}
+
+fn input_unavailable_reason_for(session: LinuxSessionKind) -> &'static str {
+    match session {
+        LinuxSessionKind::Wayland => WAYLAND_INPUT_UNAVAILABLE,
+        LinuxSessionKind::X11 | LinuxSessionKind::Unknown => INPUT_UNAVAILABLE,
+    }
+}
+
+pub(super) fn input_unavailable_reason() -> &'static str {
+    input_unavailable_reason_for(linux_session_kind())
+}
+
+fn input_capability(session: LinuxSessionKind) -> DesktopControlCapability {
+    if matches!(session, LinuxSessionKind::Wayland) {
+        DesktopControlCapability::unavailable(WAYLAND_INPUT_UNAVAILABLE)
+    } else if command_exists("xdotool") {
+        DesktopControlCapability::available("xdotool")
+    } else {
+        DesktopControlCapability::unavailable(INPUT_UNAVAILABLE)
+    }
+}
+
+fn limited_native_reason(
+    session: LinuxSessionKind,
+    screenshot: &DesktopControlCapability,
+    input: &DesktopControlCapability,
+) -> Option<String> {
+    if screenshot.available && input.available {
+        return None;
+    }
+
+    let mut reason = String::from("desktop control bridge is running with limited native drivers");
+    if !screenshot.available {
+        reason.push_str("; ");
+        reason.push_str(SCREENSHOT_UNAVAILABLE);
+    }
+    if !input.available {
+        reason.push_str("; ");
+        reason.push_str(
+            input
+                .reason
+                .as_deref()
+                .unwrap_or_else(|| input_unavailable_reason_for(session)),
+        );
+    }
+    Some(reason)
 }
 
 fn capture_screenshot(
@@ -140,4 +213,44 @@ fn screenshot_commands(path: &Path) -> Vec<CommandSpec> {
             args: vec!["-window".to_owned(), "root".to_owned(), file],
         },
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_wayland_from_session_type_or_wayland_display() {
+        assert_eq!(
+            linux_session_kind_from_env(Some("wayland"), false, true),
+            LinuxSessionKind::Wayland,
+        );
+        assert_eq!(
+            linux_session_kind_from_env(None, true, true),
+            LinuxSessionKind::Wayland,
+        );
+    }
+
+    #[test]
+    fn detects_x11_from_explicit_session_type_or_display() {
+        assert_eq!(linux_session_kind_from_env(Some("x11"), true, true), LinuxSessionKind::X11);
+        assert_eq!(linux_session_kind_from_env(None, false, true), LinuxSessionKind::X11);
+    }
+
+    #[test]
+    fn wayland_session_disables_input_even_when_xdotool_is_present() {
+        let input = input_capability(LinuxSessionKind::Wayland);
+        assert!(!input.available);
+        assert_eq!(input.reason.as_deref(), Some(WAYLAND_INPUT_UNAVAILABLE));
+    }
+
+    #[test]
+    fn limited_native_reason_includes_session_specific_input_detail() {
+        let screenshot = DesktopControlCapability::available("grim");
+        let input = DesktopControlCapability::unavailable(WAYLAND_INPUT_UNAVAILABLE);
+        let reason = limited_native_reason(LinuxSessionKind::Wayland, &screenshot, &input)
+            .expect("reason should exist when input is unavailable");
+        assert!(reason.contains("limited native drivers"));
+        assert!(reason.contains("Wayland session detected"));
+    }
 }

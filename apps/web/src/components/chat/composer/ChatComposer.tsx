@@ -525,7 +525,7 @@ export function ChatComposer({
               display: 'flex',
               flexDirection: 'column',
               gap: 7,
-              borderRadius: 12,
+              borderRadius: 'var(--radius-xl)',
               flex: 1,
               minWidth: 0,
               transition:
@@ -546,7 +546,7 @@ export function ChatComposer({
                 style={{
                   position: 'absolute',
                   inset: 0,
-                  borderRadius: 14,
+                  borderRadius: 'var(--radius-xl)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -634,7 +634,7 @@ export function ChatComposer({
                 background: isHomeVariant
                   ? 'linear-gradient(180deg, var(--bg-raised), var(--bg-overlay)'
                   : 'transparent',
-                borderRadius: 10,
+                borderRadius: 'var(--radius-lg)',
                 padding: '6px 8px 6px',
                 display: 'flex',
                 flexDirection: 'column',

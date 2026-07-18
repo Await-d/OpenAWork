@@ -147,6 +147,10 @@ export interface UIStateStore {
   triggerTeamNewSession: (teamWorkspaceId: string) => void;
   consumeTeamNewSessionSignal: () => void;
 
+  teamNewWorkspaceSignal: { nonce: number } | null;
+  triggerTeamNewWorkspace: () => void;
+  consumeTeamNewWorkspaceSignal: () => void;
+
   teamSelectSessionSignal: { teamWorkspaceId: string; sessionId: string; nonce: number } | null;
   triggerTeamSelectSession: (teamWorkspaceId: string, sessionId: string) => void;
   consumeTeamSelectSessionSignal: () => void;
@@ -642,6 +646,15 @@ export const useUIStateStore = create<UIStateStore>()(
           },
         }),
       consumeTeamNewSessionSignal: () => set({ teamNewSessionSignal: null }),
+
+      teamNewWorkspaceSignal: null,
+      triggerTeamNewWorkspace: () =>
+        set({
+          teamNewWorkspaceSignal: {
+            nonce: Date.now(),
+          },
+        }),
+      consumeTeamNewWorkspaceSignal: () => set({ teamNewWorkspaceSignal: null }),
 
       teamSelectSessionSignal: null,
       triggerTeamSelectSession: (teamWorkspaceId, sessionId) =>

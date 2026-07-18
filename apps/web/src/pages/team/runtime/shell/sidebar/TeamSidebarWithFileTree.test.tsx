@@ -216,7 +216,7 @@ function renderSidebar() {
       collapsed={false}
       onToggleCollapsed={() => {}}
       workspaceGroups={[]}
-      selectedTeamId=""
+      selectedTeamId="session-team-1"
       onSelectTeam={() => {}}
       onSubmitDraft={vi.fn(async () => undefined)}
       teamWorkspaceId="workspace-1"
@@ -234,7 +234,7 @@ function renderSidebarWithProps(
       collapsed={false}
       onToggleCollapsed={() => {}}
       workspaceGroups={[]}
-      selectedTeamId=""
+      selectedTeamId="session-team-1"
       onSelectTeam={() => {}}
       onSubmitDraft={vi.fn(async () => undefined)}
       teamWorkspaceId="workspace-1"
@@ -418,6 +418,10 @@ describe('TeamSidebarWithFileTree', () => {
         'token-test',
         '/workspace/demo/src/index.ts',
         '/workspace/demo/src/renamed.ts',
+        {
+          sessionId: 'session-team-1',
+          workspaceRoot: '/workspace/demo',
+        },
       );
     });
     expect(state.applyRenamedEntry).toHaveBeenCalledWith({
@@ -433,6 +437,10 @@ describe('TeamSidebarWithFileTree', () => {
       expect(workspaceClientMocks.deleteEntry).toHaveBeenCalledWith(
         'token-test',
         '/workspace/demo/src/index.ts',
+        {
+          sessionId: 'session-team-1',
+          workspaceRoot: '/workspace/demo',
+        },
       );
     });
     expect(confirmSpy).toHaveBeenCalled();

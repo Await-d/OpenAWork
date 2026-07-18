@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FileTreeNode } from '../../common/modal/WorkspacePickerModal.js';
+import { isPathWithinRoot, rebasePath } from '../../../utils/workspace-path.js';
 
 const SESSION_SIDEBAR_FILE_TREE_RETRY_BASE_MS = 2_000;
 const SESSION_SIDEBAR_FILE_TREE_RETRY_MAX_MS = 30_000;
@@ -107,7 +108,7 @@ export function removeSessionSidebarFileTreeNode(
 
 function remapNodePath(node: FileTreeNode, oldPath: string, newPath: string): FileTreeNode {
   const nextPath =
-    node.path === oldPath ? newPath : node.path.replace(`${oldPath}/`, `${newPath}/`);
+    node.path === oldPath ? newPath : (rebasePath(node.path, oldPath, newPath) ?? node.path);
   return {
     ...node,
     path: nextPath,

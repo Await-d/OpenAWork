@@ -1005,7 +1005,7 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
           display: 'flex',
           flexDirection: 'column',
           gap: 7,
-          borderRadius: 14,
+          borderRadius: 'var(--radius-xl)',
         }}
       >
         {currentTaskSelection && (
@@ -1070,7 +1070,7 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
           style={{
             border: 'none',
             background: 'transparent',
-            borderRadius: 10,
+            borderRadius: 'var(--radius-lg)',
             padding: '6px 8px 6px',
             display: 'flex',
             flexDirection: 'column',

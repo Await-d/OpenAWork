@@ -11,16 +11,17 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager, State, WindowEvent, Wry};
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, ShortcutState};
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
+use tauri_plugin_updater::UpdaterExt;
 
 /// 桌面端统一根目录（存放 desktop-settings.json 与默认 agent-gateway 数据）。
 ///
@@ -29,6 +30,11 @@ use tauri_plugin_shell::ShellExt;
 /// 拿到自定义的 data_root；否则会出现先有蛋还是先有鸡的问题。
 const DESKTOP_HOME_FOLDER: &str = ".openAwork";
 const DESKTOP_SETTINGS_FILE: &str = "desktop-settings.json";
+const EVT_PROXY_UPDATE_DOWNLOAD: &str = "desktop:proxy-update-download";
+const PROXY_UPDATE_ENDPOINTS: [&str; 2] = [
+    "https://github.com/Await-d/OpenAWork/releases/latest/download/latest-cn.json",
+    "https://github.com/Await-d/OpenAWork/releases/download/desktop-latest-preview/latest-cn.json",
+];
 /// gateway 子目录名（在 effective data_root 下）。与 storage-paths.ts 中的
 /// `DEFAULT_GATEWAY_DATA_SUBDIR` 对齐。
 const GATEWAY_SUBDIR: &str = "agent-gateway";
@@ -38,6 +44,19 @@ struct GatewayState {
     port: Option<u16>,
     generation: u64,
     desktop_auth_token: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "event", content = "data")]
+enum ProxyUpdateDownloadEvent {
+    #[serde(rename_all = "camelCase")]
+    Started { content_length: Option<u64> },
+    #[serde(rename_all = "camelCase")]
+    Progress {
+        chunk_length: usize,
+        downloaded: usize,
+        content_length: Option<u64>,
+    },
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -50,14 +69,19 @@ struct DesktopTokenPair {
 
 struct GatewayProcess(Arc<Mutex<GatewayState>>);
 
+fn shutdown_gateway_child_from_state(gateway_state: &Arc<Mutex<GatewayState>>) {
+    if let Ok(mut guard) = gateway_state.lock() {
+        guard.generation = guard.generation.wrapping_add(1);
+        if let Some(child) = guard.child.take() {
+            let _ = child.kill();
+        }
+        guard.port = None;
+    }
+}
+
 impl Drop for GatewayProcess {
     fn drop(&mut self) {
-        if let Ok(mut guard) = self.0.lock() {
-            if let Some(child) = guard.child.take() {
-                let _ = child.kill();
-            }
-            guard.port = None;
-        }
+        shutdown_gateway_child_from_state(&self.0);
     }
 }
 
@@ -125,12 +149,9 @@ fn clear_gateway_child(gateway_state: &Arc<Mutex<GatewayState>>, generation: u64
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 enum CloseBehavior {
-    /// 每次都弹对话框询问（默认）。
-    #[default]
     Ask,
-    /// 直接最小化到托盘。
     Minimize,
-    /// 直接退出应用。
+    #[default]
     Exit,
 }
 
@@ -326,11 +347,7 @@ fn legacy_settings_file(app: &tauri::AppHandle) -> Option<PathBuf> {
         .map(|dir| dir.join("settings.json"))
 }
 
-/// 托盘菜单中需要动态更新 checked 状态的菜单项句柄。
 struct TrayMenuHandles {
-    cb_ask: CheckMenuItem<Wry>,
-    cb_minimize: CheckMenuItem<Wry>,
-    cb_exit: CheckMenuItem<Wry>,
     autostart: CheckMenuItem<Wry>,
 }
 
@@ -349,7 +366,8 @@ fn load_settings(app: &tauri::AppHandle) -> PersistedSettings {
 
     // 先尝试新位置。
     if let Ok(content) = fs::read_to_string(&new_path) {
-        if let Ok(parsed) = serde_json::from_str::<PersistedSettings>(&content) {
+        if let Ok(mut parsed) = serde_json::from_str::<PersistedSettings>(&content) {
+            parsed.close_behavior = CloseBehavior::Exit;
             return parsed;
         }
     }
@@ -358,7 +376,8 @@ fn load_settings(app: &tauri::AppHandle) -> PersistedSettings {
     if let Some(legacy) = legacy_settings_file(app) {
         if legacy.exists() {
             if let Ok(content) = fs::read_to_string(&legacy) {
-                if let Ok(parsed) = serde_json::from_str::<PersistedSettings>(&content) {
+                if let Ok(mut parsed) = serde_json::from_str::<PersistedSettings>(&content) {
+                    parsed.close_behavior = CloseBehavior::Exit;
                     if let Some(parent) = new_path.parent() {
                         let _ = fs::create_dir_all(parent);
                     }
@@ -383,27 +402,12 @@ fn save_settings(app: &tauri::AppHandle, settings: &PersistedSettings) {
     }
 }
 
-/// 读取当前关闭行为（带默认兜底）。
-fn read_close_behavior(app: &tauri::AppHandle) -> CloseBehavior {
-    app.try_state::<SettingsState>()
-        .and_then(|state| state.0.lock().ok().map(|guard| guard.close_behavior))
-        .unwrap_or_default()
-}
-
-/// 更新关闭行为：写 state、持久化到磁盘、同步刷新托盘菜单 checked。
-fn apply_close_behavior(app: &tauri::AppHandle, behavior: CloseBehavior) {
+fn apply_close_behavior(app: &tauri::AppHandle, _behavior: CloseBehavior) {
     if let Some(state) = app.try_state::<SettingsState>() {
         if let Ok(mut guard) = state.0.lock() {
-            guard.close_behavior = behavior;
+            guard.close_behavior = CloseBehavior::Exit;
             save_settings(app, &guard);
         }
-    }
-    if let Some(handles) = app.try_state::<TrayMenuHandles>() {
-        let _ = handles.cb_ask.set_checked(behavior == CloseBehavior::Ask);
-        let _ = handles
-            .cb_minimize
-            .set_checked(behavior == CloseBehavior::Minimize);
-        let _ = handles.cb_exit.set_checked(behavior == CloseBehavior::Exit);
     }
 }
 
@@ -581,15 +585,7 @@ async fn check_local_gateway_health(port: u16) -> Result<bool, String> {
 /// bundle-sidecar 的 `rm -rf` 触发 EBUSY、Tauri build 复制资源 PermissionDenied。
 fn shutdown_gateway_child(app: &tauri::AppHandle) {
     let gateway_state = app.state::<GatewayProcess>().0.clone();
-    let mut guard = match gateway_state.lock() {
-        Ok(g) => g,
-        Err(_) => return,
-    };
-    guard.generation = guard.generation.wrapping_add(1);
-    if let Some(child) = guard.child.take() {
-        let _ = child.kill();
-    }
-    guard.port = None;
+    shutdown_gateway_child_from_state(&gateway_state);
 }
 
 #[tauri::command]
@@ -713,6 +709,43 @@ fn normalize_gateway_host(input: Option<&str>) -> &'static str {
         Some("0.0.0.0") => "0.0.0.0",
         _ => "127.0.0.1",
     }
+}
+
+fn updater_platform_key() -> Result<&'static str, String> {
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    {
+        return Ok("windows-x86_64");
+    }
+    #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
+    {
+        return Ok("windows-aarch64");
+    }
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    {
+        return Ok("darwin-x86_64");
+    }
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        return Ok("darwin-aarch64");
+    }
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    {
+        return Ok("linux-x86_64");
+    }
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    {
+        return Ok("linux-aarch64");
+    }
+    #[cfg(all(target_os = "linux", target_arch = "arm"))]
+    {
+        return Ok("linux-armv7");
+    }
+
+    Err(format!(
+        "unsupported updater platform: {}-{}",
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    ))
 }
 
 /// 解析 sidecar 启动时 `OPENAWORK_WEB_DIST` 应该指向的目录。
@@ -1077,6 +1110,74 @@ async fn restart_app(app: tauri::AppHandle, state: State<'_, GatewayProcess>) ->
 }
 
 #[tauri::command]
+async fn download_and_install_proxy_update(
+    app: tauri::AppHandle,
+    proxy_prefix: String,
+) -> Result<(), String> {
+    let proxy_prefix = proxy_prefix.trim();
+    if proxy_prefix.is_empty() {
+        return Err("代理前缀不能为空。".to_string());
+    }
+
+    let endpoints = PROXY_UPDATE_ENDPOINTS
+        .iter()
+        .map(|url| format!("{proxy_prefix}{url}"))
+        .collect::<Vec<_>>();
+
+    let updater = app
+        .updater_builder()
+        .endpoints(endpoints)
+        .map_err(|error| format!("构建代理更新端点失败：{error}"))?
+        .timeout(Duration::from_secs(60))
+        .build()
+        .map_err(|error| format!("初始化代理更新器失败：{error}"))?;
+
+    let Some(update) = updater
+        .check()
+        .await
+        .map_err(|error| format!("通过代理检查更新失败：{error}"))?
+    else {
+        return Err("当前没有可安装的更新。".to_string());
+    };
+
+    let progress_app = app.clone();
+    let mut first_chunk = true;
+    let mut downloaded = 0_usize;
+
+    update
+        .download_and_install(
+            |chunk_length, content_length| {
+                if first_chunk {
+                    first_chunk = false;
+                    let _ = progress_app.emit(
+                        EVT_PROXY_UPDATE_DOWNLOAD,
+                        ProxyUpdateDownloadEvent::Started { content_length },
+                    );
+                }
+                downloaded += chunk_length;
+                let _ = progress_app.emit(
+                    EVT_PROXY_UPDATE_DOWNLOAD,
+                    ProxyUpdateDownloadEvent::Progress {
+                        chunk_length,
+                        downloaded,
+                        content_length,
+                    },
+                );
+            },
+            || {},
+        )
+        .await
+        .map_err(|error| format!("通过代理下载或安装更新失败：{error}"))?;
+
+    Ok(())
+}
+
+#[tauri::command]
+fn current_updater_platform() -> Result<String, String> {
+    Ok(updater_platform_key()?.to_string())
+}
+
+#[tauri::command]
 async fn gateway_status(state: State<'_, GatewayProcess>) -> Result<bool, String> {
     let guard = state.0.lock().map_err(|e| e.to_string())?;
     Ok(guard.child.is_some())
@@ -1176,7 +1277,7 @@ async fn get_desktop_settings(
     let default_root = default_data_root(&app);
     let settings_path = settings_file(&app);
     Ok(DesktopSettingsView {
-        close_behavior: snapshot.close_behavior,
+        close_behavior: CloseBehavior::Exit,
         has_seen_tray_hint: snapshot.has_seen_tray_hint,
         effective_data_root: path_to_string(&effective),
         custom_data_root: custom,
@@ -1334,14 +1435,12 @@ async fn get_lock_state(app: tauri::AppHandle) -> Result<LockStateView, String> 
     })
 }
 
-/// PATCH 桌面端非数据根目录字段。修改 close_behavior 时同步刷新托盘菜单。
 #[tauri::command]
 async fn update_desktop_settings(
     app: tauri::AppHandle,
     patch: DesktopSettingsPatch,
 ) -> Result<DesktopSettingsView, String> {
     if let Some(behavior) = patch.close_behavior {
-        // apply_close_behavior 内部会写盘 + 刷新托盘 checked。
         apply_close_behavior(&app, behavior);
     }
     if let Some(seen) = patch.has_seen_tray_hint {
@@ -1611,41 +1710,9 @@ fn hide_to_tray(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
 ///
 /// 左键点击图标：toggle 主窗口显示 / 隐藏；右键点击：弹出菜单。
 fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
-    let initial_close = read_close_behavior(app);
     let initial_autostart = autostart_enabled(app);
 
     let show_item = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
-
-    let cb_ask = CheckMenuItem::with_id(
-        app,
-        "cb_ask",
-        "每次询问",
-        true,
-        initial_close == CloseBehavior::Ask,
-        None::<&str>,
-    )?;
-    let cb_minimize = CheckMenuItem::with_id(
-        app,
-        "cb_minimize",
-        "直接最小化到托盘",
-        true,
-        initial_close == CloseBehavior::Minimize,
-        None::<&str>,
-    )?;
-    let cb_exit = CheckMenuItem::with_id(
-        app,
-        "cb_exit",
-        "直接退出",
-        true,
-        initial_close == CloseBehavior::Exit,
-        None::<&str>,
-    )?;
-    let close_behavior_submenu = Submenu::with_items(
-        app,
-        "关闭按钮行为",
-        true,
-        &[&cb_ask, &cb_minimize, &cb_exit],
-    )?;
 
     let autostart_item = CheckMenuItem::with_id(
         app,
@@ -1680,7 +1747,6 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         &[
             &show_item,
             &sep1,
-            &close_behavior_submenu,
             &autostart_item,
             &sep2,
             &show_pairing,
@@ -1694,12 +1760,7 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     )?;
 
     // 把需要动态更新 checked 状态的菜单项存到 managed state。
-    app.manage(TrayMenuHandles {
-        cb_ask,
-        cb_minimize,
-        cb_exit,
-        autostart: autostart_item,
-    });
+    app.manage(TrayMenuHandles { autostart: autostart_item });
 
     let mut builder = TrayIconBuilder::with_id("main")
         .tooltip("OpenAWork")
@@ -1707,9 +1768,6 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => restore_main_window(app),
-            "cb_ask" => apply_close_behavior(app, CloseBehavior::Ask),
-            "cb_minimize" => apply_close_behavior(app, CloseBehavior::Minimize),
-            "cb_exit" => apply_close_behavior(app, CloseBehavior::Exit),
             "autostart" => apply_autostart(app, !autostart_enabled(app)),
             "show_pairing_qr" => {
                 // 先 restore 窗口，再 emit 事件。前端 App 监听到后会
@@ -1792,55 +1850,19 @@ fn show_about_dialog(app: &tauri::AppHandle) {
         .show(|_| {});
 }
 
-/// 拦截主窗口的关闭按钮：根据持久化设置 `CloseBehavior` 决定行为。
-///
-/// - `Ask`（默认）：弹对话框让用户选；
-/// - `Minimize`：直接 `hide_to_tray`，不弹窗；
-/// - `Exit`：直接 `app.exit(0)` → `RunEvent::Exit` 钩子清理 sidecar。
-///
-/// 用户可以从托盘菜单"关闭按钮行为"子菜单切换偏好；下次起立即生效。
 fn handle_window_close_request(window: &tauri::Window, api: &tauri::CloseRequestApi) {
     api.prevent_close();
-    let app = window.app_handle().clone();
-    let label = window.label().to_string();
-
-    match read_close_behavior(&app) {
-        CloseBehavior::Exit => app.exit(0),
-        CloseBehavior::Minimize => {
-            if let Some(webview_window) = app.get_webview_window(&label) {
-                hide_to_tray(&app, &webview_window);
-            }
-        }
-        CloseBehavior::Ask => prompt_close_dialog(app, label),
-    }
-}
-
-/// 弹出关闭确认对话框；用户选择后执行对应动作。
-fn prompt_close_dialog(app: tauri::AppHandle, window_label: String) {
-    app.clone()
-        .dialog()
-        .message(
-            "最小化到托盘可保留桌面端与本地网关在后台运行；选择退出会关闭桌面端，\
-             并停止本会话启动的 sidecar。\n\n提示：可在托盘菜单的\"关闭按钮行为\"中\
-             调整默认动作，下次不再弹此窗。",
-        )
-        .title("关闭 OpenAWork")
-        .kind(MessageDialogKind::Info)
-        .buttons(MessageDialogButtons::OkCancelCustom(
-            "退出 OpenAWork".into(),
-            "最小化到托盘".into(),
-        ))
-        .show(move |chose_exit| {
-            if chose_exit {
-                app.exit(0);
-            } else if let Some(window) = app.get_webview_window(&window_label) {
-                hide_to_tray(&app, &window);
-            }
-        });
+    window.app_handle().exit(0);
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let gateway_process_for_updater = Arc::new(Mutex::new(GatewayState {
+        child: None,
+        port: None,
+        generation: 0,
+        desktop_auth_token: load_or_create_desktop_auth_token(),
+    }));
     let app = tauri::Builder::default()
         // single-instance 必须最先注册：第二个实例启动时直接回调 → 激活已有窗口然后退出。
         // 防止用户开多个 OpenAWork 桌面端，避免端口冲突 / sidecar 抢占等问题。
@@ -1855,7 +1877,16 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(
+            tauri_plugin_updater::Builder::new()
+                .on_before_exit({
+                    let gateway_process_for_updater = gateway_process_for_updater.clone();
+                    move || {
+                        shutdown_gateway_child_from_state(&gateway_process_for_updater);
+                    }
+                })
+                .build()
+        )
         // C-8 窗口状态记忆：自动持久化窗口大小/位置，下次启动恢复。
         .plugin(tauri_plugin_window_state::Builder::default().build())
         // C-7 全局快捷键：Alt+Shift+O 唤醒主窗口，Alt+Shift+P 显示配对 QR。
@@ -1878,18 +1909,15 @@ pub fn run() {
                 })
                 .build()
         )
-        .manage(GatewayProcess(Arc::new(Mutex::new(GatewayState {
-            child: None,
-            port: None,
-            generation: 0,
-            desktop_auth_token: load_or_create_desktop_auth_token(),
-        }))))
+        .manage(GatewayProcess(gateway_process_for_updater))
         .manage(DesktopControlBridgeProcess::default())
         .manage(GatewayHealthState(Arc::new(Mutex::new(GatewayHealth::Stopped))))
         .invoke_handler(tauri::generate_handler![
             start_gateway,
             stop_gateway,
             restart_app,
+            download_and_install_proxy_update,
+            current_updater_platform,
             list_lan_addresses,
             check_local_gateway_health,
             gateway_status,

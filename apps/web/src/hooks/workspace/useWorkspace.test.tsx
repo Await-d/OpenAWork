@@ -146,6 +146,48 @@ describe('useWorkspace', () => {
     expect(result.current.workingDirectory).toBeNull();
   });
 
+  it('子会话会沿父链继承 workingDirectory', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/sessions/session-child')) {
+        return new Response(
+          JSON.stringify({
+            session: {
+              id: 'session-child',
+              parentSessionId: 'session-parent',
+              metadata_json: JSON.stringify({ parentSessionId: 'session-parent' }),
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (url.includes('/sessions/session-parent')) {
+        return new Response(
+          JSON.stringify({
+            session: {
+              id: 'session-parent',
+              metadata_json: JSON.stringify({ workingDirectory: '/workspace/inherited' }),
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useWorkspace('session-child'));
+
+    await waitFor(() => {
+      expect(result.current.workingDirectory).toBe('/workspace/inherited');
+    });
+
+    expect(useUIStateStore.getState().activeSessionWorkspace).toMatchObject({
+      sessionId: 'session-child',
+      path: '/workspace/inherited',
+    });
+  });
+
   it('fetchFile 会读取结构化结果并带上当前 workspaceRoot', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString();

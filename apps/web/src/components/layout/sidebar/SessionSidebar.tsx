@@ -28,13 +28,6 @@ import {
   getWorkspaceGroupKey,
 } from '../../../utils/session/session-grouping.js';
 
-function getParentDir(path: string): string {
-  if (path === '/') return '/';
-  const lastSlash = path.lastIndexOf('/');
-  if (lastSlash <= 0) return '/';
-  return path.slice(0, lastSlash);
-}
-
 const sessionIconBtnStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
@@ -701,6 +694,7 @@ export function SessionSidebar({
             onOpenFile={onOpenFile}
             fetchTree={fetchTree}
             active={sidebarTab === 'files'}
+            sessionId={sessionId ?? null}
             onCreateSession={(directoryPath) => void newSession(directoryPath)}
           />
         )}

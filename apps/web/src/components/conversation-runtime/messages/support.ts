@@ -35,6 +35,7 @@ import {
   isReasoningRecord,
   normalizeReasoningText,
 } from './reasoning-content.js';
+import { getRelativePath } from '../../../utils/workspace-path.js';
 
 // ---------------------------------------------------------------------------
 // Parts-based message model (inspired by opencode MessageV2.Part).
@@ -1542,9 +1543,10 @@ export function flattenWorkspaceFiles(
   const visit = (entries: WorkspaceTreeNode[]) => {
     for (const entry of entries) {
       if (entry.type === 'file') {
-        const relativePath = entry.path.startsWith(workingDirectory)
-          ? entry.path.slice(workingDirectory.length).replace(/^\//, '')
-          : entry.path;
+        const relativePath =
+          getRelativePath(entry.path, workingDirectory) === '.'
+            ? entry.name
+            : (getRelativePath(entry.path, workingDirectory) ?? entry.path);
         output.push({
           path: entry.path,
           label: entry.name,

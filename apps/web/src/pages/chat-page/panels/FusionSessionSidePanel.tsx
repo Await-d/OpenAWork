@@ -91,6 +91,7 @@ export function FusionSessionSidePanel({
       ) : activeTab === 'files' ? (
         <FusionFilesTab
           activeEditorFilePath={activeEditorFilePath}
+          currentSessionId={currentSessionId}
           editorMode={editorMode}
           editorFileState={editorFileState}
           editorOpenFilePaths={editorOpenFilePaths}

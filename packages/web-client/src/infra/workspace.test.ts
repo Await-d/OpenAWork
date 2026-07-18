@@ -124,6 +124,64 @@ describe('createWorkspaceClient mutation error handling', () => {
     );
   });
 
+  it('deleteEntry 会附带 sessionId 与 workspaceRoot 查询参数', async () => {
+    const fetchMock = vi.fn(async () => {
+      return {
+        ok: true,
+        status: 204,
+      } as unknown as Response;
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const client = createWorkspaceClient('http://localhost:3000');
+    await client.deleteEntry('token-1', 'src/index.ts', {
+      sessionId: 'session-1',
+      workspaceRoot: '/workspace/demo',
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstCall = fetchMock.mock.calls[0] as [unknown, RequestInit?] | undefined;
+    if (!firstCall) {
+      throw new Error('expected fetch to be called');
+    }
+    const [url] = firstCall;
+    expect(String(url)).toContain('/workspace/entry?');
+    expect(String(url)).toContain('path=src%2Findex.ts');
+    expect(String(url)).toContain('sessionId=session-1');
+    expect(String(url)).toContain('workspaceRoot=%2Fworkspace%2Fdemo');
+  });
+
+  it('renameEntry 会附带 sessionId 与 workspaceRoot 请求体', async () => {
+    const fetchMock = vi.fn(async () => {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true }),
+      } as unknown as Response;
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const client = createWorkspaceClient('http://localhost:3000');
+    await client.renameEntry('token-1', 'src/index.ts', 'src/main.ts', {
+      sessionId: 'session-1',
+      workspaceRoot: '/workspace/demo',
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstCall = fetchMock.mock.calls[0] as [unknown, RequestInit?] | undefined;
+    if (!firstCall) {
+      throw new Error('expected fetch to be called');
+    }
+    const [, init] = firstCall;
+    const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
+    expect(body).toMatchObject({
+      oldPath: 'src/index.ts',
+      newPath: 'src/main.ts',
+      sessionId: 'session-1',
+      workspaceRoot: '/workspace/demo',
+    });
+  });
+
   it('listImage-like search 操作 403 时会给出权限文案', async () => {
     globalThis.fetch = vi.fn(async () => {
       return {

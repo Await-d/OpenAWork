@@ -96,6 +96,33 @@ export function findContainingRoot(path: string, roots: readonly string[]): stri
   return roots.find((root) => isPathWithinRoot(path, root)) ?? null;
 }
 
+export function getRelativePath(path: string, rootPath: string): string | null {
+  const trimmedPath = path.trim();
+  const trimmedRootPath = rootPath.trim();
+  if (!trimmedPath || !trimmedRootPath) {
+    return null;
+  }
+
+  const windows = isWindowsPath(trimmedPath) || isWindowsPath(trimmedRootPath);
+  const normalizedPath = trimTrailingSeparators(trimmedPath, windows);
+  const normalizedRootPath = trimTrailingSeparators(trimmedRootPath, windows);
+
+  if (!isPathWithinRoot(normalizedPath, normalizedRootPath)) {
+    return null;
+  }
+
+  if (normalizeForComparison(normalizedPath) === normalizeForComparison(normalizedRootPath)) {
+    return '.';
+  }
+
+  const separator = windows ? '\\' : '/';
+  let relativePath = normalizedPath.slice(normalizedRootPath.length);
+  if (relativePath.startsWith(separator)) {
+    relativePath = relativePath.slice(1);
+  }
+  return relativePath.replaceAll('\\', '/');
+}
+
 export function getParentPath(path: string): string | null {
   const trimmed = path.trim();
   if (!trimmed) {
@@ -136,4 +163,17 @@ export function joinDirectoryPath(parentPath: string, directoryName: string): st
   }
 
   return `${normalizedParentPath}${separator}${trimmedDirectoryName}`;
+}
+
+export function rebasePath(path: string, oldRoot: string, newRoot: string): string | null {
+  const relativePath = getRelativePath(path, oldRoot);
+  if (relativePath === null) {
+    return null;
+  }
+  if (relativePath === '.') {
+    return newRoot;
+  }
+  const windows = isWindowsPath(path) || isWindowsPath(oldRoot) || isWindowsPath(newRoot);
+  const normalizedRelativePath = windows ? relativePath.replaceAll('/', '\\') : relativePath;
+  return joinDirectoryPath(newRoot, normalizedRelativePath);
 }

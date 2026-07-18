@@ -204,9 +204,18 @@ export interface WorkspaceClient {
   /** POST `/workspace/review/revert`，回退指定文件的工作区改动。 */
   reviewRevert(token: string, path: string, filePath: string): Promise<void>;
   /** DELETE `/workspace/entry?path=`，删除文件或目录。 */
-  deleteEntry(token: string, path: string): Promise<void>;
+  deleteEntry(
+    token: string,
+    path: string,
+    options?: { sessionId?: string | null; workspaceRoot?: string | null },
+  ): Promise<void>;
   /** POST `/workspace/rename`，重命名/移动文件或目录。 */
-  renameEntry(token: string, oldPath: string, newPath: string): Promise<void>;
+  renameEntry(
+    token: string,
+    oldPath: string,
+    newPath: string,
+    options?: { sessionId?: string | null; workspaceRoot?: string | null },
+  ): Promise<void>;
   /**
    * PATCH `/sessions/:sessionId/workspace`，绑定 / 解绑会话工作目录。
    * 传 `null` 解绑。
@@ -721,8 +730,11 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
       });
     },
 
-    async deleteEntry(token, path) {
-      const params = buildPathParams(path);
+    async deleteEntry(token, path, options) {
+      const params = buildPathParams(path, {
+        sessionId: options?.sessionId ?? undefined,
+        workspaceRoot: options?.workspaceRoot ?? undefined,
+      });
       await performWorkspaceJsonRequest({
         actionLabel: '删除工作区条目',
         parseJson: false,
@@ -734,7 +746,7 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
       });
     },
 
-    async renameEntry(token, oldPath, newPath) {
+    async renameEntry(token, oldPath, newPath, options) {
       await performWorkspaceJsonRequest({
         actionLabel: '重命名工作区条目',
         parseJson: false,
@@ -742,7 +754,12 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
           fetchWithTimeout(`${baseUrl}/workspace/rename`, {
             method: 'POST',
             headers: jsonAuthHeaders(token),
-            body: JSON.stringify({ oldPath, newPath }),
+            body: JSON.stringify({
+              oldPath,
+              newPath,
+              ...(options?.sessionId ? { sessionId: options.sessionId } : {}),
+              ...(options?.workspaceRoot ? { workspaceRoot: options.workspaceRoot } : {}),
+            }),
           }),
       });
     },

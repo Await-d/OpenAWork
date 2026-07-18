@@ -25,7 +25,6 @@ import { BP, IS, SS, ST } from '../shared/settings-section-styles.js';
  */
 type BusyState =
   | null
-  | 'close'
   | 'autostart'
   | 'migrate:prepare'
   | 'migrate:restart'
@@ -35,7 +34,6 @@ type BusyState =
   | 'reset:auth';
 
 const BUSY_LABELS: Record<Exclude<BusyState, null>, string> = {
-  close: '保存关闭行为中…',
   autostart: '切换开机自启中…',
   'migrate:prepare': '迁移数据中（停止 sidecar / 拷贝 / 校验）…',
   'migrate:restart': '以新目录重启本地网关中…',
@@ -73,28 +71,6 @@ const IDLE_LOCK_PRESETS: ReadonlyArray<{ label: string; value: number | null }> 
 
 /** PIN 管理面板的交互阶段。 */
 type PinPanelMode = 'idle' | 'set' | 'change' | 'remove';
-
-const CLOSE_BEHAVIOR_OPTIONS: ReadonlyArray<{
-  value: CloseBehaviorValue;
-  label: string;
-  description: string;
-}> = [
-  {
-    value: 'ask',
-    label: '每次询问',
-    description: '点击关闭按钮时弹出对话框，由用户当场选择最小化或退出。',
-  },
-  {
-    value: 'minimize',
-    label: '直接最小化到托盘',
-    description: '保留后台运行（含本地网关），不再弹窗确认。',
-  },
-  {
-    value: 'exit',
-    label: '直接退出',
-    description: '关闭按钮 = 完全退出应用，并停止本会话启动的 sidecar。',
-  },
-];
 
 const ROW_STYLE: React.CSSProperties = {
   display: 'flex',
@@ -225,27 +201,6 @@ export function DesktopTabContent() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
-
-  const updateCloseBehavior = useCallback(
-    async (next: CloseBehaviorValue) => {
-      if (!view || view.closeBehavior === next) return;
-      setBusy('close');
-      try {
-        const updated = await tauriInvoke<DesktopSettingsView>('update_desktop_settings', {
-          patch: { closeBehavior: next },
-        });
-        setView(updated);
-        setError(null);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        setError(msg);
-        logger.error('update_desktop_settings(close_behavior) failed', err);
-      } finally {
-        setBusy(null);
-      }
-    },
-    [view],
-  );
 
   const toggleAutostart = useCallback(async () => {
     if (!view) return;
@@ -600,72 +555,46 @@ export function DesktopTabContent() {
       ) : null}
 
       <section style={SS}>
-        <h3 style={ST}>关闭按钮行为</h3>
+        <h3 style={ST}>关闭行为</h3>
         <div style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
-          决定点击主窗口右上角 X
-          按钮时的默认动作。也可在右键托盘菜单的「关闭按钮行为」子菜单实时切换。
+          点击主窗口右上角 X 会直接退出 OpenAWork，并同时停止本地网关。
+          当前版本不再提供“每次询问”或“最小化到托盘”的关闭模式。
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {CLOSE_BEHAVIOR_OPTIONS.map((opt) => {
-            const active = view.closeBehavior === opt.value;
-            return (
-              <button
-                key={opt.value}
-                type="button"
-                disabled={busy === 'close' || migrationInFlight}
-                onClick={() => void updateCloseBehavior(opt.value)}
-                style={{
-                  ...ROW_STYLE,
-                  cursor: 'pointer',
-                  borderColor: active ? 'var(--accent)' : 'var(--border-subtle)',
-                  background: active
-                    ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))'
-                    : ROW_STYLE.background,
-                  textAlign: 'left',
-                }}
-              >
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
-                    {opt.label}
-                  </div>
-                  <div
-                    style={{
-                      marginTop: 3,
-                      fontSize: 11,
-                      lineHeight: 1.5,
-                      color: 'var(--fg-muted)',
-                    }}
-                  >
-                    {opt.description}
-                  </div>
-                </div>
-                <div
-                  aria-hidden
-                  style={{
-                    width: 18,
-                    height: 18,
-                    borderRadius: '50%',
-                    border: `2px solid ${active ? 'var(--accent)' : 'var(--border-default)'}`,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0,
-                  }}
-                >
-                  {active ? (
-                    <span
-                      style={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: '50%',
-                        background: 'var(--accent)',
-                      }}
-                    />
-                  ) : null}
-                </div>
-              </button>
-            );
-          })}
+        <div
+          style={{
+            ...ROW_STYLE,
+            borderColor: 'var(--accent)',
+            background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
+          }}
+        >
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
+              固定为：直接退出
+            </div>
+            <div
+              style={{
+                marginTop: 3,
+                fontSize: 11,
+                lineHeight: 1.5,
+                color: 'var(--fg-muted)',
+              }}
+            >
+              关闭主窗口时会结束桌面程序，并停止本会话启动的本地 gateway sidecar。
+            </div>
+          </div>
+          <div
+            style={{
+              padding: '4px 8px',
+              borderRadius: 999,
+              border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
+              color: 'var(--accent)',
+              fontSize: 11,
+              fontWeight: 600,
+              flexShrink: 0,
+            }}
+          >
+            已启用
+          </div>
         </div>
       </section>
 

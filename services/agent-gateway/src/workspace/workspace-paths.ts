@@ -9,6 +9,10 @@ function pathFlavorFor(...paths: string[]): PathFlavor {
   return paths.some((path) => WINDOWS_ABSOLUTE_PATH_PATTERN.test(path)) ? win32 : posix;
 }
 
+function normalizeRelativeSeparators(path: string, flavor: PathFlavor): string {
+  return flavor === win32 ? path.replaceAll('/', '\\') : path.replaceAll('\\', '/');
+}
+
 function normalizeForComparison(path: string, flavor: PathFlavor): string {
   const resolvedPath = flavor.resolve(path);
   return flavor === win32 ? resolvedPath.toLowerCase() : resolvedPath;
@@ -19,6 +23,10 @@ function resolveWorkspacePath(path: string): string {
 }
 
 export const WORKSPACE_ROOT_PATHS = WORKSPACE_ROOTS.map((root) => resolveWorkspacePath(root));
+
+export function isWorkspaceAbsolutePath(path: string): boolean {
+  return pathFlavorFor(path).isAbsolute(path);
+}
 
 export function isPathWithinRoot(path: string, rootPath: string): boolean {
   const flavor = pathFlavorFor(path, rootPath);
@@ -34,6 +42,45 @@ export function isPathWithinRoot(path: string, rootPath: string): boolean {
     normalizedPath === normalizedRootPath ||
     normalizedPath.startsWith(`${normalizedRootPath}${flavor.sep}`)
   );
+}
+
+export function isSamePath(leftPath: string, rightPath: string): boolean {
+  const flavor = pathFlavorFor(leftPath, rightPath);
+  return normalizeForComparison(leftPath, flavor) === normalizeForComparison(rightPath, flavor);
+}
+
+export function resolveWorkspaceEntryPath(
+  path: string,
+  workspaceRoot?: string | null,
+): string | null {
+  const flavor = pathFlavorFor(path, workspaceRoot ?? '');
+  if (flavor.isAbsolute(path)) {
+    const safePath = validateWorkspacePath(path);
+    if (!safePath) {
+      return null;
+    }
+    if (!workspaceRoot) {
+      return safePath;
+    }
+    const safeRoot = validateWorkspacePath(workspaceRoot);
+    if (!safeRoot) {
+      return null;
+    }
+    return isPathWithinRoot(safePath, safeRoot) ? safePath : null;
+  }
+
+  if (!workspaceRoot) {
+    return null;
+  }
+
+  const safeRoot = validateWorkspacePath(workspaceRoot);
+  if (!safeRoot) {
+    return null;
+  }
+
+  const normalizedRelativePath = normalizeRelativeSeparators(path, flavor);
+  const resolvedPath = flavor.resolve(safeRoot, normalizedRelativePath);
+  return isPathWithinRoot(resolvedPath, safeRoot) ? resolvedPath : null;
 }
 
 export function validateWorkspacePath(path: string): string | null {

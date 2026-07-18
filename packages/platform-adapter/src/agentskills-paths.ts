@@ -7,6 +7,11 @@ export interface AgentSkillsPathsConfig {
   skillsPaths: string[];
 }
 
+function getAndroidPackageName(): string {
+  const configured = process.env['ANDROID_PACKAGE']?.trim();
+  return configured && configured.length > 0 ? configured : 'com.openAwork.mobile';
+}
+
 function getDefaultSkillsPaths(platform: SupportedPlatform): string[] {
   const envDir = process.env['CRUSH_SKILLS_DIR'] ?? process.env['OPENWORK_SKILLS_DIR'];
 
@@ -37,8 +42,7 @@ function getDefaultSkillsPaths(platform: SupportedPlatform): string[] {
       );
       break;
     case 'android': {
-      const pkg = process.env['ANDROID_PACKAGE'] ?? 'dev.openwork.app';
-      paths.push(path.join('/data', 'data', pkg, 'files', 'config', 'skills'));
+      paths.push(path.join('/data', 'data', getAndroidPackageName(), 'files', 'config', 'skills'));
       break;
     }
     default:

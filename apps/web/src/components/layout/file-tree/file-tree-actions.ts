@@ -1,3 +1,5 @@
+import { getRelativePath, joinDirectoryPath } from '../../../utils/workspace-path.js';
+
 const HIDDEN_FILE_TREE_ENTRY_NAMES = new Set([
   'node_modules',
   '.git',
@@ -8,11 +10,7 @@ const HIDDEN_FILE_TREE_ENTRY_NAMES = new Set([
 ]);
 
 export function joinFileTreePath(directoryPath: string, entryName: string): string {
-  if (directoryPath === '/') {
-    return `/${entryName}`;
-  }
-
-  return `${directoryPath}/${entryName}`;
+  return joinDirectoryPath(directoryPath, entryName);
 }
 
 export function isValidFileTreeEntryName(entryName: string): boolean {
@@ -49,20 +47,7 @@ export function getFileTreeRelativePath(
   if (!rootPath) {
     return null;
   }
-
-  const normalizedRoot = rootPath === '/' ? rootPath : rootPath.replace(/\/+$/, '');
-  const normalizedTarget = targetPath === '/' ? targetPath : targetPath.replace(/\/+$/, '');
-
-  if (normalizedRoot === normalizedTarget) {
-    return '.';
-  }
-
-  const rootPrefix = normalizedRoot === '/' ? '/' : `${normalizedRoot}/`;
-  if (!normalizedTarget.startsWith(rootPrefix)) {
-    return null;
-  }
-
-  return normalizedTarget.slice(rootPrefix.length);
+  return getRelativePath(targetPath, rootPath);
 }
 
 function copyWithHiddenTextArea(text: string): void {

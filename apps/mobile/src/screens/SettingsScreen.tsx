@@ -18,6 +18,7 @@ import {
   validateImageGenerationSize,
 } from '@openAwork/shared';
 import { useOtaUpdate } from '../hooks/useOtaUpdate';
+import { DEFAULT_MOBILE_GATEWAY_URL } from '../store/auth';
 import ExpoPersistenceAdapter, {
   buildMobileProviderConfig,
   DEFAULT_MOBILE_IMAGE_GENERATION_DEFAULTS,
@@ -215,7 +216,7 @@ export function SettingsScreen({ onLogout }: SettingsScreenProps) {
         style={styles.input}
         value={gatewayInput}
         onChangeText={setGatewayInput}
-        placeholder="http://localhost:3000"
+        placeholder={DEFAULT_MOBILE_GATEWAY_URL}
         placeholderTextColor="#64748b"
         autoCapitalize="none"
         keyboardType="url"

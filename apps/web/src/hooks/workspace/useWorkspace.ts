@@ -38,6 +38,87 @@ function parseSessionWorkingDirectory(
     : null;
 }
 
+function normalizeOptionalPath(value: unknown): string | null {
+  return typeof value === 'string' ? value.trim() || null : null;
+}
+
+function parseSessionParentSessionId(
+  session: Session & {
+    metadata?: { parentSessionId?: string | null };
+  },
+): string | null {
+  const directTeamParentSessionId = normalizeOptionalPath(session.team_parent_session_id);
+  if (directTeamParentSessionId) {
+    return directTeamParentSessionId;
+  }
+
+  const directParentSessionId = normalizeOptionalPath(session.parentSessionId);
+  if (directParentSessionId) {
+    return directParentSessionId;
+  }
+
+  if (typeof session.metadata_json === 'string') {
+    try {
+      const parsed = JSON.parse(session.metadata_json) as {
+        parentSessionId?: string | null;
+      };
+      return normalizeOptionalPath(parsed.parentSessionId);
+    } catch {
+      return null;
+    }
+  }
+
+  return normalizeOptionalPath(session.metadata?.parentSessionId);
+}
+
+type SessionWorkspaceLookupResult =
+  | {
+      kind: 'resolved';
+      path: string | null;
+    }
+  | {
+      errorMessage: string;
+      kind: 'unavailable';
+    };
+
+async function resolveSessionWorkingDirectoryWithParentFallback(input: {
+  sessionId: string;
+  sessionsClient: ReturnType<typeof createSessionsClient>;
+  signal: AbortSignal;
+  token: string;
+}): Promise<SessionWorkspaceLookupResult> {
+  const seenSessionIds = new Set<string>();
+  let currentSessionId: string | null = input.sessionId;
+  let isRootSession = true;
+
+  while (currentSessionId && !seenSessionIds.has(currentSessionId)) {
+    seenSessionIds.add(currentSessionId);
+
+    const result = await input.sessionsClient.getResult(input.token, currentSessionId, {
+      signal: input.signal,
+    });
+    if (!result.ok || !result.session) {
+      if (isRootSession) {
+        return {
+          kind: 'unavailable',
+          errorMessage: result.errorMessage ?? '加载会话失败',
+        };
+      }
+      return { kind: 'resolved', path: null };
+    }
+
+    const workingDirectory = parseSessionWorkingDirectory(result.session);
+    if (workingDirectory) {
+      return { kind: 'resolved', path: workingDirectory };
+    }
+
+    currentSessionId = parseSessionParentSessionId(result.session);
+    isRootSession = false;
+  }
+
+  return { kind: 'resolved', path: null };
+}
+
 export function useWorkspace(sessionId: string | null) {
   const [workingDirectoryState, setWorkingDirectoryState] = useState<SessionWorkingDirectoryState>({
     path: null,
@@ -81,25 +162,29 @@ export function useWorkspace(sessionId: string | null) {
 
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
+    const controller = new AbortController();
     const startingVersion =
       useUIStateStore.getState().activeSessionWorkspace?.sessionId === sessionId
         ? (useUIStateStore.getState().activeSessionWorkspace?.version ?? 0)
         : 0;
 
     setLoading(true);
-    void sessionsClient
-      .getResult(accessToken ?? '', sessionId)
+    void resolveSessionWorkingDirectoryWithParentFallback({
+      sessionId,
+      sessionsClient,
+      signal: controller.signal,
+      token: accessToken ?? '',
+    })
       .then((result) => {
         if (requestIdRef.current !== requestId) {
           return;
         }
 
-        if (!result.ok || !result.session) {
-          setError(result.errorMessage ?? '加载会话失败');
+        if (result.kind === 'unavailable') {
+          setError(result.errorMessage);
           return;
         }
 
-        const normalizedWorkingDirectory = parseSessionWorkingDirectory(result.session);
         const currentSessionWorkspace = useUIStateStore.getState().activeSessionWorkspace;
         if (
           currentSessionWorkspace?.sessionId === sessionId &&
@@ -109,17 +194,30 @@ export function useWorkspace(sessionId: string | null) {
         }
 
         setWorkingDirectoryState({
-          path: normalizedWorkingDirectory,
+          path: result.path,
           sessionId,
         });
-        setActiveSessionWorkspace(sessionId, normalizedWorkingDirectory);
+        setActiveSessionWorkspace(sessionId, result.path);
         setError(null);
+      })
+      .catch((error: unknown) => {
+        if (requestIdRef.current !== requestId) {
+          return;
+        }
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return;
+        }
+        setError(error instanceof Error ? error.message : '加载会话失败');
       })
       .finally(() => {
         if (requestIdRef.current === requestId) {
           setLoading(false);
         }
       });
+
+    return () => {
+      controller.abort();
+    };
   }, [sessionId, accessToken, sessionsClient, setActiveSessionWorkspace]);
 
   const setWorkspace = useCallback(

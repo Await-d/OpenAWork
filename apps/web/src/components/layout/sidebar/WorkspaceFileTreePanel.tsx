@@ -15,12 +15,10 @@ import { FileTreeView, type FileTreeContextTarget } from './SidebarHelpers.js';
 import type { FileTreeNode } from '../../common/modal/WorkspacePickerModal.js';
 import { toast } from '../../common/feedback/ToastNotification.js';
 import { dispatchComposerReference } from '../../../utils/chat/composer-reference-events.js';
+import { getParentPath } from '../../../utils/workspace-path.js';
 
 function getParentDir(path: string): string {
-  if (path === '/') return '/';
-  const lastSlash = path.lastIndexOf('/');
-  if (lastSlash <= 0) return '/';
-  return path.slice(0, lastSlash);
+  return getParentPath(path) ?? path;
 }
 
 type FileTreeContextMenuState = FileTreeContextTarget & {
@@ -68,6 +66,7 @@ export interface WorkspaceFileTreePanelProps {
    */
   variant?: 'sidebar' | 'embedded';
   allowMutations?: boolean;
+  sessionId?: string | null;
   /** Optional className / style overrides for the root container. */
   className?: string;
   style?: React.CSSProperties;
@@ -90,6 +89,7 @@ export function WorkspaceFileTreePanel({
   workspacePath: workspacePathOverride,
   variant = 'sidebar',
   allowMutations = true,
+  sessionId = null,
   className,
   style,
 }: WorkspaceFileTreePanelProps) {
@@ -763,7 +763,10 @@ export function WorkspaceFileTreePanel({
                     void (async () => {
                       try {
                         if (!accessToken) return;
-                        await workspaceClient.deleteEntry(accessToken, targetPath);
+                        await workspaceClient.deleteEntry(accessToken, targetPath, {
+                          ...(sessionId ? { sessionId } : {}),
+                          ...(fileTreeRootPath ? { workspaceRoot: fileTreeRootPath } : {}),
+                        });
                         applyDeletedEntry(targetPath);
                         toast(`已删除: ${targetName}`, 'success');
                         void refreshDirectoryWithVersion(fileTreeContextMenu.directoryPath);
@@ -795,7 +798,10 @@ export function WorkspaceFileTreePanel({
                           parentDir === targetPath ? getParentDir(targetPath) : parentDir,
                           newName.trim(),
                         );
-                        await workspaceClient.renameEntry(accessToken, targetPath, newPath);
+                        await workspaceClient.renameEntry(accessToken, targetPath, newPath, {
+                          ...(sessionId ? { sessionId } : {}),
+                          ...(fileTreeRootPath ? { workspaceRoot: fileTreeRootPath } : {}),
+                        });
                         applyRenamedEntry({
                           oldPath: targetPath,
                           newPath,

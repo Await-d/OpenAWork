@@ -4911,6 +4911,7 @@ export default function ChatPage() {
             fileTree={
               <WorkspaceFileTreePanel
                 workspacePath={effectiveWorkingDirectory}
+                sessionId={currentSessionId}
                 onOpenFile={(path) => void fileEditor.openFile(path)}
                 fetchTree={workspace.fetchTree}
                 active={editorMode}

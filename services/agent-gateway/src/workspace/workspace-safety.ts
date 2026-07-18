@@ -9,7 +9,11 @@ import {
 import { WORKSPACE_ROOT, WORKSPACE_ROOTS, sqliteGet } from '../infra/db.js';
 import { resolveSessionWorkspacePath } from '../session/session-workspace-resolution.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
-import { isPathWithinRoot, validateWorkspacePath } from './workspace-paths.js';
+import {
+  isPathWithinRoot,
+  resolveWorkspaceEntryPath,
+  validateWorkspacePath,
+} from './workspace-paths.js';
 
 interface SessionMetadataRow {
   metadata_json: string;
@@ -30,7 +34,7 @@ function resolveWorkspaceRootForPath(path: string | null | undefined): string {
   const normalized = resolve(path);
   const matched = [...WORKSPACE_ROOTS]
     .sort((left, right) => right.length - left.length)
-    .find((root) => normalized === root || normalized.startsWith(`${root}/`));
+    .find((root) => isPathWithinRoot(normalized, root));
   return matched ?? WORKSPACE_ROOT;
 }
 
@@ -50,6 +54,24 @@ export function getSessionWorkingDirectory(sessionId: string): string | null {
     userId: row.user_id,
   });
   return workingDirectory;
+}
+
+export function getSessionWorkingDirectoryForUser(
+  sessionId: string,
+  userId: string,
+): string | null {
+  const row = sqliteGet<SessionMetadataRow>(
+    'SELECT metadata_json, user_id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+    [sessionId, userId],
+  );
+  if (!row) {
+    return null;
+  }
+  return resolveSessionWorkspacePath({
+    metadataJson: row.metadata_json,
+    sessionId,
+    userId,
+  });
 }
 
 export function getSessionWorkspaceRoot(sessionId: string): string | null {
@@ -157,6 +179,25 @@ export function assertSessionWorkspacePath(input: { path: string; sessionId: str
     throw new Error(`Target path is outside current session workspace: ${result.safePath}`);
   }
   return result.safePath;
+}
+
+export function resolveWorkspaceEntryPathForRequest(input: {
+  path: string;
+  sessionId?: string | null;
+  userId?: string | null;
+  workspaceRoot?: string | null;
+}): string | null {
+  if (input.sessionId) {
+    const sessionWorkingDirectory = input.userId
+      ? getSessionWorkingDirectoryForUser(input.sessionId, input.userId)
+      : getSessionWorkingDirectory(input.sessionId);
+    if (sessionWorkingDirectory) {
+      return resolveWorkspaceEntryPath(input.path, sessionWorkingDirectory);
+    }
+  }
+
+  const workspaceRoot = input.workspaceRoot ? validateWorkspacePath(input.workspaceRoot) : null;
+  return resolveWorkspaceEntryPath(input.path, workspaceRoot);
 }
 
 export async function ensureIgnoreRulesLoadedForPath(path?: string | null): Promise<void> {

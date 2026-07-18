@@ -71,6 +71,8 @@ export function TeamWelcomeScreen({
   onSelectSuggestion,
 }: TeamWelcomeScreenProps) {
   const sessionActionEnabled = (canCreateSession ?? Boolean(onNewSession)) && Boolean(onNewSession);
+  const workspaceActionEnabled =
+    (canCreateWorkspace ?? Boolean(onCreateWorkspace)) && Boolean(onCreateWorkspace);
 
   return (
     <section
@@ -198,6 +200,40 @@ export function TeamWelcomeScreen({
           <PlusIcon size={14} color="var(--fg-on-accent)" />
           <span>新建团队会话</span>
         </button>
+        {workspaceActionEnabled ? (
+          <button
+            type="button"
+            onClick={onCreateWorkspace}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'var(--accent-subtle)';
+              e.currentTarget.style.borderColor = 'var(--accent-border)';
+              e.currentTarget.style.color = 'var(--accent)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'var(--bg-surface)';
+              e.currentTarget.style.borderColor = 'var(--border-default)';
+              e.currentTarget.style.color = 'var(--fg-default)';
+            }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              height: 38,
+              padding: '0 18px',
+              borderRadius: 10,
+              border: '1px solid var(--border-default)',
+              background: 'var(--bg-surface)',
+              color: 'var(--fg-default)',
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: 'pointer',
+              transition: 'background 120ms ease, border-color 120ms ease, color 120ms ease',
+            }}
+          >
+            <FolderIcon size={14} color="currentColor" />
+            <span>{workspaceLabel ? '新建并切换工作区' : '新建工作区'}</span>
+          </button>
+        ) : null}
       </div>
 
       {/* Feature cards */}

@@ -19,6 +19,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
+vi.mock('@openAwork/shared-ui', () => ({
+  BrandLogo: ({ size = 22 }: { readonly size?: number }) => (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 32 32">
+      <path d="M 16,3 C 26,3 29,12 16,16" />
+      <path d="M 16,3 C 26,3 29,12 16,16" transform="rotate(120 16 16)" />
+      <path d="M 16,3 C 26,3 29,12 16,16" transform="rotate(240 16 16)" />
+      <circle cx="16" cy="16" r="2.8" />
+    </svg>
+  ),
+}));
+
 vi.mock('../../../../../stores/team/team-events.js', async () => {
   const actual = await vi.importActual('../../../../../stores/team/team-events.js');
   return {
@@ -173,6 +184,24 @@ describe('ConversationArea — 三态路由', () => {
 
     expect(onSelectSuggestion).toHaveBeenCalledOnce();
     expect(onSelectSuggestion).toHaveBeenCalledWith('基于当前仓库制定一个交付计划');
+  });
+
+  it('receptionSessionId 为空时展示团队欢迎页，并可触发快捷创建工作区入口', () => {
+    const onCreateWorkspace = vi.fn();
+
+    render(
+      <ConversationArea
+        receptionSessionId={null}
+        canCreateWorkspace
+        workspaceLabel="当前仓库"
+        onCreateWorkspace={onCreateWorkspace}
+      />,
+    );
+
+    const createWorkspaceButton = screen.getByRole('button', { name: '新建并切换工作区' });
+    fireEvent.click(createWorkspaceButton);
+
+    expect(onCreateWorkspace).toHaveBeenCalledOnce();
   });
 
   it('没有 team 会话但存在工作台侧栏时，使用 workspace-first 布局避免空对话区抢占首屏', () => {

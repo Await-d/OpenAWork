@@ -3,10 +3,9 @@ use crate::desktop_control_native::{
     DesktopControlError, HotkeyRequest, HotkeyResponse, KeyRequest, KeyResponse, MouseButton,
     ScrollRequest, ScrollResponse, TypeTextRequest, TypeTextResponse, WaitRequest, WaitResponse,
 };
+use super::input_unavailable_reason;
 use std::thread;
 use std::time::Duration;
-
-const INPUT_UNAVAILABLE: &str = "xdotool not found; install xdotool and run under an X11 session";
 
 pub fn click(request: ClickRequest) -> Result<ClickResponse, DesktopControlError> {
     require_xdotool()?;
@@ -133,7 +132,7 @@ fn require_xdotool() -> Result<(), DesktopControlError> {
     if command_exists("xdotool") {
         Ok(())
     } else {
-        Err(DesktopControlError::new(INPUT_UNAVAILABLE))
+        Err(DesktopControlError::new(input_unavailable_reason()))
     }
 }
 

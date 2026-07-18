@@ -218,11 +218,11 @@ const SPINNER_STYLE: CSSProperties = {
 
 const RECEPTION_CARD_STYLE: CSSProperties = {
   display: 'grid',
-  gap: 14,
-  margin: '24px auto',
-  padding: '22px 26px',
+  gap: 18,
+  margin: '20px 0 24px',
+  padding: '24px 28px',
   width: '100%',
-  maxWidth: 820,
+  maxWidth: 1280,
   borderRadius: 16,
   border: '1px solid color-mix(in srgb, var(--accent) 28%, transparent)',
   background: 'color-mix(in srgb, var(--accent) 5%, var(--bg-overlay))',
@@ -232,6 +232,7 @@ const CARD_HEADER_STYLE: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   gap: 6,
+  maxWidth: 760,
 };
 
 const CARD_BADGE_STYLE: CSSProperties = {

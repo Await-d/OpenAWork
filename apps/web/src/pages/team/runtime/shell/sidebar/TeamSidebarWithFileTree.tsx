@@ -22,6 +22,7 @@ import {
   joinFileTreePath,
 } from '../../../../../components/layout/file-tree/file-tree-actions.js';
 import { dispatchComposerReference } from '../../../../../utils/chat/composer-reference-events.js';
+import { getParentPath } from '../../../../../utils/workspace-path.js';
 import type {
   AgentTeamsSidebarTeam,
   AgentTeamsWorkspaceGroup,
@@ -64,10 +65,7 @@ import { useTeamFilePreview } from './use-team-file-preview.js';
 import { TeamFilePreviewPanel } from './TeamFilePreviewPanel.js';
 
 function getParentDirectory(path: string): string {
-  if (path === '/') return '/';
-  const lastSlashIndex = path.lastIndexOf('/');
-  if (lastSlashIndex <= 0) return '/';
-  return path.slice(0, lastSlashIndex);
+  return getParentPath(path) ?? path;
 }
 
 // ─── Styles (与 chat SessionSidebar 完全对齐) ───────────────────────────────
@@ -182,6 +180,7 @@ export function TeamSidebarWithFileTree({
   canManageSessionEntries = true,
   onSubmitDraft,
   teamWorkspaceId,
+  selectedTeamId,
   initialTemplateId,
   initialWorkingDirectory,
   showNewSessionModal: controlledShowModal,
@@ -391,7 +390,10 @@ export function TeamSidebarWithFileTree({
         : contextMenu.target.directoryPath;
 
     try {
-      await workspaceClient.deleteEntry(token, contextMenu.target.path);
+      await workspaceClient.deleteEntry(token, contextMenu.target.path, {
+        ...(selectedTeamId ? { sessionId: selectedTeamId } : {}),
+        ...(workspacePath ? { workspaceRoot: workspacePath } : {}),
+      });
       applyDeletedEntry(contextMenu.target.path);
       void refreshDirectory(refreshPath);
       toast(`已删除：${contextMenu.target.name}`, 'success');
@@ -400,7 +402,15 @@ export function TeamSidebarWithFileTree({
     } finally {
       setContextMenu(null);
     }
-  }, [applyDeletedEntry, contextMenu, refreshDirectory, token, workspaceClient]);
+  }, [
+    applyDeletedEntry,
+    contextMenu,
+    refreshDirectory,
+    selectedTeamId,
+    token,
+    workspaceClient,
+    workspacePath,
+  ]);
 
   const handleRenameEntry = useCallback(async () => {
     if (!contextMenu || !token) {
@@ -435,7 +445,10 @@ export function TeamSidebarWithFileTree({
     const newPath = joinFileTreePath(parentDirectory, trimmed);
 
     try {
-      await workspaceClient.renameEntry(token, contextMenu.target.path, newPath);
+      await workspaceClient.renameEntry(token, contextMenu.target.path, newPath, {
+        ...(selectedTeamId ? { sessionId: selectedTeamId } : {}),
+        ...(workspacePath ? { workspaceRoot: workspacePath } : {}),
+      });
       applyRenamedEntry({
         oldPath: contextMenu.target.path,
         newPath,
@@ -448,7 +461,15 @@ export function TeamSidebarWithFileTree({
     } finally {
       setContextMenu(null);
     }
-  }, [applyRenamedEntry, contextMenu, refreshDirectory, token, workspaceClient]);
+  }, [
+    applyRenamedEntry,
+    contextMenu,
+    refreshDirectory,
+    selectedTeamId,
+    token,
+    workspaceClient,
+    workspacePath,
+  ]);
 
   const handleReferenceInChat = useCallback(() => {
     if (!contextMenu) {

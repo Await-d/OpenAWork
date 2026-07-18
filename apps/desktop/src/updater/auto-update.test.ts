@@ -13,7 +13,7 @@ vi.mock('./github-proxy.js', () => ({
   proxyUrl: (url: string) => url,
 }));
 
-import { downloadUpdateViaProxy, UpdateError } from './auto-update.js';
+import { downloadUpdateViaProxy, installUpdate, UpdateError } from './auto-update.js';
 
 const originalFetch = globalThis.fetch;
 
@@ -145,5 +145,22 @@ describe('downloadUpdateViaProxy (§0.149 stall watchdog)', () => {
     await expect(
       downloadUpdateViaProxy('https://proxy.test/app.tar.gz', () => undefined, 20),
     ).rejects.toMatchObject({ kind: 'network' });
+  });
+
+  it('安装前先执行 beforeInstall 钩子，避免旧 sidecar 占用更新文件', async () => {
+    const calls: string[] = [];
+    const update = {
+      install: vi.fn(async () => {
+        calls.push('install');
+      }),
+    } as unknown as import('@tauri-apps/plugin-updater').Update;
+
+    await installUpdate(update, {
+      beforeInstall: async () => {
+        calls.push('before');
+      },
+    });
+
+    expect(calls).toEqual(['before', 'install']);
   });
 });

@@ -223,46 +223,96 @@ const TIMELINE_CONTAINER_STYLE: CSSProperties = {
   overflow: 'hidden',
 };
 
-const TIMELINE_HEADER_STYLE: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 0,
-  padding: '6px 8px',
-  borderBottom: '1px solid color-mix(in srgb, var(--border-default) 30%, transparent)',
-  background: 'var(--bg-overlay)',
-  flexShrink: 0,
-};
+const TIMELINE_TIME_COLUMN_WIDTH = 80;
+const TIMELINE_ROLE_COLUMN_MIN_WIDTH = 104;
 
-const TIMELINE_LANE_LABEL_STYLE: CSSProperties = {
-  width: 80,
-  flexShrink: 0,
-  fontSize: 11,
-  fontWeight: 700,
-  padding: '4px 8px',
-  textAlign: 'right',
-  borderRight: '1px solid color-mix(in srgb, var(--border-default) 30%, transparent)',
-};
-
-const TIMELINE_BODY_STYLE: CSSProperties = {
+const TIMELINE_SCROLL_STYLE: CSSProperties = {
   flex: 1,
   overflow: 'auto',
+  background: 'var(--bg-base)',
+};
+
+const TIMELINE_HEADER_GRID_STYLE: CSSProperties = {
+  position: 'sticky',
+  top: 0,
+  zIndex: 1,
+  borderBottom: '1px solid color-mix(in srgb, var(--border-default) 30%, transparent)',
+  background: 'var(--bg-overlay)',
+};
+
+const TIMELINE_TIME_HEADER_STYLE: CSSProperties = {
+  position: 'sticky',
+  left: 0,
+  zIndex: 2,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'flex-end',
+  padding: '10px 12px',
+  fontSize: 11,
+  fontWeight: 700,
+  color: 'var(--fg-strong)',
+  borderRight: '1px solid color-mix(in srgb, var(--border-default) 30%, transparent)',
+  background: 'var(--bg-overlay)',
+};
+
+const TIMELINE_ROLE_HEADER_CELL_STYLE: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 4,
+  minWidth: 0,
+  padding: '10px 10px',
+  fontSize: 11,
+  fontWeight: 700,
+  borderLeft: '1px solid color-mix(in srgb, var(--border-default) 18%, transparent)',
+};
+
+const TIMELINE_ROLE_HEADER_TEXT_STYLE: CSSProperties = {
+  minWidth: 0,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+};
+
+const TIMELINE_ROWS_STYLE: CSSProperties = {
+  display: 'grid',
+  gap: 8,
   padding: 8,
 };
 
-const TIMELINE_LANE_STYLE: CSSProperties = {
-  display: 'flex',
-  alignItems: 'flex-start',
-  gap: 8,
-  marginBottom: 8,
-  minHeight: 40,
+const TIMELINE_ROW_GRID_STYLE: CSSProperties = {
+  borderRadius: 8,
+  overflow: 'hidden',
+  border: '1px solid color-mix(in srgb, var(--border-default) 18%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-surface) 40%, transparent)',
 };
 
-const TIMELINE_LANE_CONTENT_STYLE: CSSProperties = {
-  flex: 1,
+const TIMELINE_LANE_LABEL_STYLE: CSSProperties = {
+  position: 'sticky',
+  left: 0,
+  zIndex: 1,
   display: 'flex',
-  gap: 6,
-  overflowX: 'auto',
-  padding: '2px 0',
+  alignItems: 'center',
+  justifyContent: 'flex-end',
+  fontSize: 11,
+  fontWeight: 700,
+  padding: '10px 12px',
+  borderRight: '1px solid color-mix(in srgb, var(--border-default) 30%, transparent)',
+  background: 'var(--bg-base)',
+  color: 'var(--fg-strong)',
+  fontVariantNumeric: 'tabular-nums',
+};
+
+const TIMELINE_CELL_STYLE: CSSProperties = {
+  minWidth: 0,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 4,
+  padding: 6,
+  borderLeft: '1px solid color-mix(in srgb, var(--border-default) 18%, transparent)',
+};
+
+const TIMELINE_EMPTY_CELL_STYLE: CSSProperties = {
+  minHeight: 36,
 };
 
 const TIMELINE_ITEM_STYLE: CSSProperties = {
@@ -295,6 +345,15 @@ function formatTime(ts: number | string | undefined): string {
 
 function getMessageSummary(message: ChatMessage): string {
   return getTeamMessagePreviewText(message, 100);
+}
+
+function buildTimelineGridStyle(layerCount: number): CSSProperties {
+  return {
+    display: 'grid',
+    gridTemplateColumns: `${TIMELINE_TIME_COLUMN_WIDTH}px repeat(${layerCount}, minmax(${TIMELINE_ROLE_COLUMN_MIN_WIDTH}px, 1fr))`,
+    minWidth: TIMELINE_TIME_COLUMN_WIDTH + layerCount * TIMELINE_ROLE_COLUMN_MIN_WIDTH,
+    alignItems: 'stretch',
+  };
 }
 
 function LayerDetailHeader({ layer }: { layer: LayerMessages }) {
@@ -481,66 +540,51 @@ function TimelineView({ layers }: { layers: LayerMessages[] }) {
     timeSlots.set(key, bucket);
   }
 
+  const timelineGridStyle = buildTimelineGridStyle(layers.length);
+
   return (
     <div style={TIMELINE_CONTAINER_STYLE}>
-      <div style={TIMELINE_HEADER_STYLE}>
-        <div style={TIMELINE_LANE_LABEL_STYLE}>时间</div>
-        {layers.map((layer) => {
-          const id = getRoleLayerIdentity(layer.layer);
-          return (
-            <div
-              key={layer.layer}
-              style={{
-                flex: 1,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-                padding: '4px 6px',
-                fontSize: 11,
-                fontWeight: 700,
-                color: id.color,
-              }}
-            >
-              <span style={{ fontSize: 12 }}>{id.icon}</span>
-              <span>{id.short}</span>
-            </div>
-          );
-        })}
-      </div>
-      <div style={TIMELINE_BODY_STYLE}>
-        {Array.from(timeSlots.entries()).map(([time, msgs]) => (
-          <div key={time} style={TIMELINE_LANE_STYLE}>
-            <div style={TIMELINE_LANE_LABEL_STYLE}>{time}</div>
-            <div style={TIMELINE_LANE_CONTENT_STYLE}>
+      <div style={TIMELINE_SCROLL_STYLE} aria-label="团队层级时间线">
+        <div style={{ ...timelineGridStyle, ...TIMELINE_HEADER_GRID_STYLE }}>
+          <div style={TIMELINE_TIME_HEADER_STYLE}>时间</div>
+          {layers.map((layer) => {
+            const id = getRoleLayerIdentity(layer.layer);
+            return (
+              <div key={layer.layer} style={TIMELINE_ROLE_HEADER_CELL_STYLE}>
+                <span style={{ fontSize: 12, flexShrink: 0 }}>{id.icon}</span>
+                <span style={{ ...TIMELINE_ROLE_HEADER_TEXT_STYLE, color: id.color }}>{id.short}</span>
+              </div>
+            );
+          })}
+        </div>
+        <div style={TIMELINE_ROWS_STYLE}>
+          {Array.from(timeSlots.entries()).map(([time, msgs]) => (
+            <div key={time} style={{ ...timelineGridStyle, ...TIMELINE_ROW_GRID_STYLE }}>
+              <div style={TIMELINE_LANE_LABEL_STYLE}>{time}</div>
               {layers.map((layer) => {
                 const layerMsgs = msgs.filter((m) => m._layer === layer.layer);
-                const id = getRoleLayerIdentity(layer.layer);
                 return (
-                  <div
-                    key={layer.layer}
-                    style={{
-                      flex: 1,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 4,
-                    }}
-                  >
-                    {layerMsgs.map((msg) => (
-                      <div
-                        key={msg.id}
-                        style={{
-                          ...TIMELINE_ITEM_STYLE,
-                        }}
-                      >
-                        <div style={MESSAGE_SUMMARY_STYLE}>{getMessageSummary(msg)}</div>
-                      </div>
-                    ))}
+                  <div key={layer.layer} style={TIMELINE_CELL_STYLE}>
+                    {layerMsgs.length > 0 ? (
+                      layerMsgs.map((msg) => (
+                        <div
+                          key={msg.id}
+                          style={{
+                            ...TIMELINE_ITEM_STYLE,
+                          }}
+                        >
+                          <div style={MESSAGE_SUMMARY_STYLE}>{getMessageSummary(msg)}</div>
+                        </div>
+                      ))
+                    ) : (
+                      <div style={TIMELINE_EMPTY_CELL_STYLE} aria-hidden />
+                    )}
                   </div>
                 );
               })}
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
     </div>
   );

@@ -33,7 +33,8 @@ function detectPlatform(): SupportedPlatform {
 }
 
 function getAndroidPackageName(): string {
-  return process.env['ANDROID_PACKAGE'] ?? 'dev.openwork.app';
+  const configured = process.env['ANDROID_PACKAGE']?.trim();
+  return configured && configured.length > 0 ? configured : 'com.openAwork.mobile';
 }
 
 function resolveConfigDir(platform: SupportedPlatform): string {
@@ -81,7 +82,7 @@ function resolveTempDir(platform: SupportedPlatform): string {
   return path.join(os.tmpdir(), APP_NAME);
 }
 
-function resolveSkillsDir(platform: SupportedPlatform, configDir: string): string {
+function resolveSkillsDir(configDir: string): string {
   return path.join(configDir, 'skills');
 }
 
@@ -97,7 +98,7 @@ class DefaultPlatformAdapter implements PlatformAdapter {
     this.configDir = resolveConfigDir(this.platform);
     this.dataDir = resolveDataDir(this.platform);
     this.tempDir = resolveTempDir(this.platform);
-    this.skillsDir = resolveSkillsDir(this.platform, this.configDir);
+    this.skillsDir = resolveSkillsDir(this.configDir);
   }
 
   getPlatform(): SupportedPlatform {

@@ -43,9 +43,9 @@ export const SPLIT_STYLE: CSSProperties = {
   flex: 1,
   minHeight: 0,
   display: 'grid',
-  gridTemplateColumns: 'minmax(240px, 0.34fr) minmax(0, 1fr)',
+  gridTemplateColumns: 'minmax(280px, 360px) minmax(0, 1fr)',
   gridTemplateRows: 'minmax(0, 1fr)',
-  gap: 12,
+  gap: 14,
   overflow: 'hidden',
 };
 

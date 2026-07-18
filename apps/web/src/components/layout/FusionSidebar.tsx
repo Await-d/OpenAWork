@@ -450,6 +450,7 @@ export function FusionSidebar({
   const setFileTreeRootPath = useUIStateStore((s) => s.setFileTreeRootPath);
   const fileTreeRootPath = useUIStateStore((s) => s.fileTreeRootPath);
   const triggerTeamNewSession = useUIStateStore((s) => s.triggerTeamNewSession);
+  const triggerTeamNewWorkspace = useUIStateStore((s) => s.triggerTeamNewWorkspace);
   const triggerTeamSelectSession = useUIStateStore((s) => s.triggerTeamSelectSession);
   const triggerResetToWelcome = useUIStateStore((s) => s.triggerResetToWelcome);
 
@@ -575,11 +576,12 @@ export function FusionSidebar({
 
   const handleNewTeamWorkspace = useCallback(() => {
     preloadRoute('/team');
+    triggerTeamNewWorkspace();
     if (compactViewport) {
       setLeftSidebarOpen(false);
     }
     void navigate('/team?action=newWorkspace');
-  }, [compactViewport, navigate, preloadRoute, setLeftSidebarOpen]);
+  }, [compactViewport, navigate, preloadRoute, setLeftSidebarOpen, triggerTeamNewWorkspace]);
   const clearPeekCloseTimer = useCallback(() => {
     if (peekCloseTimerRef.current) {
       clearTimeout(peekCloseTimerRef.current);

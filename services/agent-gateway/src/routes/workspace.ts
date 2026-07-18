@@ -18,8 +18,13 @@ import {
   validateWorkspacePath,
   validateWorkspaceRelativePath,
   isPathWithinRoot,
+  isSamePath,
 } from '../workspace/workspace-paths.js';
-import { ensureIgnoreRulesLoadedForPath } from '../workspace/workspace-safety.js';
+import {
+  resolveWorkspaceEntryPathForRequest,
+  ensureIgnoreRulesLoadedForPath,
+  getSessionWorkingDirectoryForUser,
+} from '../workspace/workspace-safety.js';
 import { isPathInUserAllowlist } from '../workspace/user-workspace-allowlist.js';
 import {
   getWorkspaceReviewDiff,
@@ -71,6 +76,8 @@ const WORKSPACE_ERROR_MESSAGES = {
   forbiddenWorkspaceRoot: '指定的工作区根目录不在允许范围内。',
   pathOutsideWorkspace: '目标路径超出当前工作区范围。',
   forbiddenByIgnoreRules: '目标路径已被工作区忽略规则拦截。',
+  workspaceRootOperationForbidden: '不能直接操作工作区根目录。',
+  sessionWorkspaceUnavailable: '当前会话未绑定工作区或工作区不可用。',
   userWorkspaceForbidden: '当前账号无权访问该工作区路径。',
   pathNotDirectory: '目标路径不是文件夹。',
   pathDoesNotExist: '目标路径不存在。',
@@ -85,6 +92,8 @@ const WORKSPACE_ERROR_MESSAGES = {
   createFileFailed: '创建文件失败。',
   directoryAlreadyExists: '目标文件夹已存在。',
   createDirectoryFailed: '创建文件夹失败。',
+  renameFailed: '重命名/移动文件失败。',
+  deleteFailed: '删除文件或目录失败。',
   invalidReviewFilePath: '目标文件路径无效。',
 } as const;
 
@@ -137,6 +146,40 @@ async function readTree(
     if (left.type === right.type) return left.name.localeCompare(right.name);
     return left.type === 'directory' ? -1 : 1;
   });
+}
+
+function resolveScopedWorkspacePath(input: {
+  path: string;
+  sessionId?: string;
+  userId: string;
+  workspaceRoot?: string;
+}): { safePath: string | null; scopeRoot: string | null; missingSessionWorkspace: boolean } {
+  if (input.sessionId) {
+    const scopeRoot = getSessionWorkingDirectoryForUser(input.sessionId, input.userId);
+    if (!scopeRoot) {
+      return { safePath: null, scopeRoot: null, missingSessionWorkspace: true };
+    }
+    return {
+      safePath: resolveWorkspaceEntryPathForRequest({
+        path: input.path,
+        sessionId: input.sessionId,
+        userId: input.userId,
+      }),
+      scopeRoot,
+      missingSessionWorkspace: false,
+    };
+  }
+
+  const scopeRoot = input.workspaceRoot ? validateWorkspacePath(input.workspaceRoot) : null;
+  return {
+    safePath: resolveWorkspaceEntryPathForRequest({
+      path: input.path,
+      userId: input.userId,
+      workspaceRoot: input.workspaceRoot,
+    }),
+    scopeRoot,
+    missingSessionWorkspace: false,
+  };
 }
 
 export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
@@ -632,6 +675,197 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         mkdirStep.fail(String(error));
         step.fail(String(error));
         return reply.status(500).send({ error: WORKSPACE_ERROR_MESSAGES.createDirectoryFailed });
+      }
+    },
+  );
+
+  app.delete(
+    '/workspace/entry',
+    { preHandler: requireAuth },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'workspace.entry.delete');
+      const user = request.user as JwtPayload;
+      const schema = z.object({
+        path: z.string().min(1),
+        sessionId: z.string().min(1).optional(),
+        workspaceRoot: z.string().min(1).optional(),
+      });
+      const parsed = parseQuery(schema, request.query);
+
+      const pathStep = child('path-safety');
+      const { safePath, scopeRoot, missingSessionWorkspace } = resolveScopedWorkspacePath({
+        path: parsed.path,
+        ...(parsed.sessionId ? { sessionId: parsed.sessionId } : {}),
+        userId: user.sub,
+        ...(parsed.workspaceRoot ? { workspaceRoot: parsed.workspaceRoot } : {}),
+      });
+      if (missingSessionWorkspace) {
+        pathStep.fail('session workspace unavailable');
+        step.fail('session workspace unavailable');
+        return reply.status(400).send({
+          error: WORKSPACE_ERROR_MESSAGES.sessionWorkspaceUnavailable,
+        });
+      }
+      if (!safePath) {
+        pathStep.fail('forbidden path');
+        step.fail('forbidden path');
+        return reply.status(403).send({ error: WORKSPACE_ERROR_MESSAGES.forbiddenPath });
+      }
+
+      if (scopeRoot && isSamePath(safePath, scopeRoot)) {
+        pathStep.fail('workspace root operation forbidden');
+        step.fail('workspace root operation forbidden');
+        return reply.status(400).send({
+          error: WORKSPACE_ERROR_MESSAGES.workspaceRootOperationForbidden,
+        });
+      }
+
+      pathStep.succeed();
+      if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
+      await ensureIgnoreRulesLoadedForPath(safePath);
+      if (defaultIgnoreManager.shouldIgnore(safePath)) {
+        step.fail('ignored path');
+        return reply.status(403).send({ error: WORKSPACE_ERROR_MESSAGES.forbiddenByIgnoreRules });
+      }
+
+      const statStep = child('stat');
+      try {
+        const stat = await fsp.stat(safePath);
+        statStep.succeed(undefined, { isDirectory: stat.isDirectory(), isFile: stat.isFile() });
+      } catch {
+        statStep.fail('path not found');
+        step.fail('path not found');
+        return reply.status(404).send({ error: WORKSPACE_ERROR_MESSAGES.pathDoesNotExist });
+      }
+
+      const deleteStep = child('delete');
+      try {
+        await fsp.rm(safePath, { recursive: true, force: false });
+        deleteStep.succeed();
+        step.succeed(undefined, { path: safePath });
+        return reply.send({ ok: true, path: safePath });
+      } catch (error) {
+        deleteStep.fail(String(error));
+        step.fail(String(error));
+        return reply.status(500).send({ error: WORKSPACE_ERROR_MESSAGES.deleteFailed });
+      }
+    },
+  );
+
+  app.post(
+    '/workspace/rename',
+    { preHandler: requireAuth },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'workspace.entry.rename');
+      const user = request.user as JwtPayload;
+      const schema = z.object({
+        oldPath: z.string().min(1),
+        newPath: z.string().min(1),
+        sessionId: z.string().min(1).optional(),
+        workspaceRoot: z.string().min(1).optional(),
+      });
+      const parsed = parseBody(schema, request.body);
+
+      const pathStep = child('path-safety');
+      const oldPathResolution = resolveScopedWorkspacePath({
+        path: parsed.oldPath,
+        ...(parsed.sessionId ? { sessionId: parsed.sessionId } : {}),
+        userId: user.sub,
+        ...(parsed.workspaceRoot ? { workspaceRoot: parsed.workspaceRoot } : {}),
+      });
+      const newPathResolution = resolveScopedWorkspacePath({
+        path: parsed.newPath,
+        ...(parsed.sessionId ? { sessionId: parsed.sessionId } : {}),
+        userId: user.sub,
+        ...(parsed.workspaceRoot ? { workspaceRoot: parsed.workspaceRoot } : {}),
+      });
+      const { safePath: safeOldPath, scopeRoot, missingSessionWorkspace } = oldPathResolution;
+      const { safePath: safeNewPath } = newPathResolution;
+      if (missingSessionWorkspace || newPathResolution.missingSessionWorkspace) {
+        pathStep.fail('session workspace unavailable');
+        step.fail('session workspace unavailable');
+        return reply.status(400).send({
+          error: WORKSPACE_ERROR_MESSAGES.sessionWorkspaceUnavailable,
+        });
+      }
+      if (!safeOldPath || !safeNewPath) {
+        pathStep.fail('forbidden path');
+        step.fail('forbidden path');
+        return reply.status(403).send({ error: WORKSPACE_ERROR_MESSAGES.forbiddenPath });
+      }
+      if (
+        scopeRoot &&
+        (!isPathWithinRoot(safeOldPath, scopeRoot) || !isPathWithinRoot(safeNewPath, scopeRoot))
+      ) {
+        pathStep.fail('path outside workspace root');
+        step.fail('path outside workspace root');
+        return reply.status(403).send({ error: WORKSPACE_ERROR_MESSAGES.pathOutsideWorkspace });
+      }
+      if (
+        scopeRoot &&
+        (isSamePath(safeOldPath, scopeRoot) || isSamePath(safeNewPath, scopeRoot))
+      ) {
+        pathStep.fail('workspace root operation forbidden');
+        step.fail('workspace root operation forbidden');
+        return reply.status(400).send({
+          error: WORKSPACE_ERROR_MESSAGES.workspaceRootOperationForbidden,
+        });
+      }
+
+      pathStep.succeed();
+      if (!checkUserWorkspaceAccess(request, reply, safeOldPath)) return;
+      if (!checkUserWorkspaceAccess(request, reply, safeNewPath)) return;
+      await ensureIgnoreRulesLoadedForPath(safeOldPath);
+      await ensureIgnoreRulesLoadedForPath(safeNewPath);
+      if (
+        defaultIgnoreManager.shouldIgnore(safeOldPath) ||
+        defaultIgnoreManager.shouldIgnore(safeNewPath)
+      ) {
+        step.fail('ignored path');
+        return reply.status(403).send({ error: WORKSPACE_ERROR_MESSAGES.forbiddenByIgnoreRules });
+      }
+
+      if (!isSamePath(safeOldPath, safeNewPath)) {
+        const targetStep = child('target-conflict-check');
+        try {
+          await fsp.stat(safeNewPath);
+          targetStep.fail('target already exists');
+          step.fail('target already exists');
+          return reply.status(409).send({ error: WORKSPACE_ERROR_MESSAGES.fileAlreadyExists });
+        } catch (error) {
+          if (error instanceof Error && 'code' in error && String(error.code) === 'ENOENT') {
+            targetStep.succeed(undefined, { exists: false });
+          } else {
+            targetStep.fail(String(error));
+            step.fail(String(error));
+            return reply.status(500).send({ error: WORKSPACE_ERROR_MESSAGES.renameFailed });
+          }
+        }
+      }
+
+      const renameStep = child('rename');
+      try {
+        await fsp.rename(safeOldPath, safeNewPath);
+        renameStep.succeed(undefined, { oldPath: safeOldPath, newPath: safeNewPath });
+        step.succeed(undefined, { oldPath: safeOldPath, newPath: safeNewPath });
+        return reply.send({ ok: true, oldPath: safeOldPath, newPath: safeNewPath });
+      } catch (error) {
+        if (error instanceof Error && 'code' in error) {
+          const code = String(error.code);
+          if (code === 'ENOENT') {
+            renameStep.fail('path not found');
+            step.fail('path not found');
+            return reply.status(404).send({ error: WORKSPACE_ERROR_MESSAGES.pathDoesNotExist });
+          }
+          if (code === 'EEXIST') {
+            renameStep.fail('target already exists');
+            step.fail('target already exists');
+            return reply.status(409).send({ error: WORKSPACE_ERROR_MESSAGES.fileAlreadyExists });
+          }
+        }
+        renameStep.fail(String(error));
+        step.fail(String(error));
+        return reply.status(500).send({ error: WORKSPACE_ERROR_MESSAGES.renameFailed });
       }
     },
   );

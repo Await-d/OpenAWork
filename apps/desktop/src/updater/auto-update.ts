@@ -1,4 +1,5 @@
 import { check, type Update } from '@tauri-apps/plugin-updater';
+import { invoke } from '@tauri-apps/api/core';
 import { detectFastestProxy, proxyUrl, type GitHubProxy } from './github-proxy.js';
 
 export type UpdateChannel = 'stable' | 'preview';
@@ -14,6 +15,7 @@ export interface UpdateCheckResult {
   update: Update | null;
   version: string | null;
   notes: string | null;
+  installMode: 'native' | 'proxy-auto' | 'manual';
   /** Non-null when the result was obtained through a proxy */
   proxyUsed: GitHubProxy | null;
   /** Proxied download URL (available when proxyUsed is set and update is available) */
@@ -32,7 +34,7 @@ export class UpdateError extends Error {
   }
 }
 
-function classifyError(err: unknown): UpdateError {
+export function toUpdateError(err: unknown): UpdateError {
   if (err instanceof UpdateError) {
     return err;
   }
@@ -54,6 +56,10 @@ function classifyError(err: unknown): UpdateError {
     return new UpdateError('permission', msg);
   }
   return new UpdateError('unknown', msg);
+}
+
+export function supportsProxyAutoInstall(proxy: GitHubProxy): boolean {
+  return proxy.prefix === 'https://ghp.ci/';
 }
 
 function clampPercent(value: number): number {
@@ -80,13 +86,22 @@ const UPDATER_ENDPOINTS = [
 ];
 
 /** Detect current platform key for Tauri updater JSON */
-function getCurrentPlatformKey(): string {
-  const platform = navigator.platform?.toLowerCase() ?? '';
-  if (platform.includes('win')) return 'windows-x86_64';
-  if (platform.includes('mac')) {
-    // Apple Silicon vs Intel - navigator doesn't reliably distinguish,
-    // but aarch64 is far more common on modern Macs
-    return 'darwin-aarch64';
+async function getCurrentPlatformKey(): Promise<string> {
+  try {
+    const platformKey = await invoke<string>('current_updater_platform');
+    if (platformKey.trim().length > 0) {
+      return platformKey;
+    }
+  } catch (error: unknown) {
+    if (!(error instanceof Error)) {
+      throw error;
+    }
+  }
+
+  const userAgent = navigator.userAgent.toLowerCase();
+  if (userAgent.includes('windows')) return 'windows-x86_64';
+  if (userAgent.includes('mac os x') || userAgent.includes('macintosh')) {
+    return /arm|aarch64/.test(userAgent) ? 'darwin-aarch64' : 'darwin-x86_64';
   }
   return 'linux-x86_64';
 }
@@ -97,6 +112,7 @@ function getCurrentPlatformKey(): string {
 async function fetchUpdaterJsonViaProxy(
   proxy: GitHubProxy,
 ): Promise<{ json: TauriUpdaterJson; platformEntry: TauriUpdaterPlatform } | null> {
+  const platformKey = await getCurrentPlatformKey();
   for (const endpoint of UPDATER_ENDPOINTS) {
     const url = proxyUrl(endpoint, proxy);
     try {
@@ -107,7 +123,6 @@ async function fetchUpdaterJsonViaProxy(
       if (!res.ok) continue;
       const json: TauriUpdaterJson = await res.json();
       if (!json.version || !json.platforms) continue;
-      const platformKey = getCurrentPlatformKey();
       const platformEntry = json.platforms[platformKey];
       if (!platformEntry?.url) continue;
       return { json, platformEntry };
@@ -127,17 +142,25 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
   try {
     const update = await check();
     if (!update) {
-      return { available: false, update: null, version: null, notes: null, proxyUsed: null };
+      return {
+        available: false,
+        update: null,
+        version: null,
+        notes: null,
+        installMode: 'native',
+        proxyUsed: null,
+      };
     }
     return {
       available: true,
       update,
       version: update.version,
       notes: update.body ?? null,
+      installMode: 'native',
       proxyUsed: null,
     };
   } catch (nativeErr) {
-    const classified = classifyError(nativeErr);
+    const classified = toUpdateError(nativeErr);
     // Only fall back to proxy for network errors
     if (classified.kind !== 'network') {
       throw classified;
@@ -164,6 +187,7 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
     update: null, // No native Update object — will use proxy download path
     version: json.version,
     notes: json.notes ?? null,
+    installMode: supportsProxyAutoInstall(proxy) ? 'proxy-auto' : 'manual',
     proxyUsed: proxy,
     proxiedDownloadUrl: proxiedUrl,
   };
@@ -194,7 +218,7 @@ export async function downloadUpdate(
       }
     });
   } catch (err) {
-    const classified = classifyError(err);
+    const classified = toUpdateError(err);
     // On download network failure, try proxy fallback
     if (classified.kind === 'network') {
       throw new UpdateError('network', '下载失败，网络不可达。请尝试使用代理更新。');
@@ -300,11 +324,19 @@ export async function downloadUpdateViaProxy(
   }
 }
 
-export async function installUpdate(update: Update): Promise<void> {
+export interface InstallUpdateOptions {
+  beforeInstall?: () => void | Promise<void>;
+}
+
+export async function installUpdate(
+  update: Update,
+  options: InstallUpdateOptions = {},
+): Promise<void> {
   try {
+    await options.beforeInstall?.();
     await update.install();
   } catch (err) {
-    throw classifyError(err);
+    throw toUpdateError(err);
   }
 }
 

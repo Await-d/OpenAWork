@@ -182,6 +182,7 @@ export function resetFusionSidebarUiState(leftSidebarOpen: boolean): void {
     savedWorkspacePaths: [OPENAWORK_PATH, MARKET_PATH],
     selectedWorkspacePath: OPENAWORK_PATH,
     teamNewSessionSignal: null,
+    teamNewWorkspaceSignal: null,
     teamSelectSessionSignal: null,
   });
 }

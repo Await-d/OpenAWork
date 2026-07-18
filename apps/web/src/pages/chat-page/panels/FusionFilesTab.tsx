@@ -4,7 +4,7 @@ import { WorkspaceFileTreePanel } from '../../../components/layout/sidebar/Works
 import type { WorkspaceFileTreePanelProps } from '../../../components/layout/sidebar/WorkspaceFileTreePanel.js';
 import type { WorkspaceFileMentionItem } from '../../../components/conversation-runtime/messages/support.js';
 import type { OpenFile, RevealTarget } from '../../../hooks/editor/useFileEditor.js';
-import { getPathBasename } from '../../../utils/workspace-path.js';
+import { getParentPath, getPathBasename, getRelativePath } from '../../../utils/workspace-path.js';
 
 export interface FusionFilesEditorState {
   readonly activeFile: OpenFile | null;
@@ -22,6 +22,7 @@ export interface FusionFilesEditorState {
 
 export interface FusionFilesTabProps {
   readonly activeEditorFilePath: string | null;
+  readonly currentSessionId: string | null;
   readonly editorMode: boolean;
   readonly editorFileState: FusionFilesEditorState;
   readonly editorOpenFilePaths: readonly string[];
@@ -40,26 +41,16 @@ function basename(path: string): string {
 }
 
 function dirname(path: string): string {
-  const normalized = path.replace(/\\/g, '/');
-  const index = normalized.lastIndexOf('/');
-  return index > 0 ? normalized.slice(0, index) : normalized;
+  return getParentPath(path) ?? path;
 }
 
 function toWorkspaceRelativePath(path: string, workspacePath: string | null): string {
-  if (!workspacePath) {
-    return path;
-  }
-  const normalizedWorkspace = workspacePath.replace(/\\/g, '/').replace(/\/+$/, '');
-  const normalizedPath = path.replace(/\\/g, '/');
-  if (normalizedPath === normalizedWorkspace) {
-    return basename(path);
-  }
-  const prefix = `${normalizedWorkspace}/`;
-  return normalizedPath.startsWith(prefix) ? normalizedPath.slice(prefix.length) : path;
+  return workspacePath ? (getRelativePath(path, workspacePath) ?? path) : path;
 }
 
 export function FusionFilesTab({
   activeEditorFilePath,
+  currentSessionId,
   editorMode,
   editorFileState,
   editorOpenFilePaths,
@@ -157,6 +148,7 @@ export function FusionFilesTab({
             <div className="fusion-side-panel__workspace-tree-shell">
               <WorkspaceFileTreePanel
                 workspacePath={effectiveWorkingDirectory}
+                sessionId={currentSessionId}
                 onOpenFile={onOpenFileInEditor}
                 fetchTree={fetchTree}
                 active={true}

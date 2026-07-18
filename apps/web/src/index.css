@@ -2491,7 +2491,7 @@ textarea {
 }
 .composer-shell {
   border: 1px solid var(--border-default);
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
   background: linear-gradient(180deg, var(--bg-overlay), var(--bg-surface));
   box-shadow:
     0 1px 0 var(--border-subtle),

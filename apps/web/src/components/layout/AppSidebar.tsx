@@ -629,6 +629,10 @@ export default function AppSidebar({
     [navigate, preloadChatRoute],
   );
 
+  const triggerTeamNewSession = useUIStateStore((s) => s.triggerTeamNewSession);
+  const triggerTeamNewWorkspace = useUIStateStore((s) => s.triggerTeamNewWorkspace);
+  const triggerTeamSelectSession = useUIStateStore((s) => s.triggerTeamSelectSession);
+
   const handleNewTask = useCallback(() => {
     navigateToHome();
     preloadRoute('/chat');
@@ -637,8 +641,9 @@ export default function AppSidebar({
 
   const handleNewTeamWorkspace = useCallback(() => {
     preloadRoute('/team');
+    triggerTeamNewWorkspace();
     void navigate('/team?action=newWorkspace');
-  }, [navigate, preloadRoute]);
+  }, [navigate, preloadRoute, triggerTeamNewWorkspace]);
 
   // ─── 团队会话操作 ───
   const handleTeamSessionContextMenu = useCallback(
@@ -805,9 +810,6 @@ export default function AppSidebar({
     },
     [removeSavedWorkspacePath],
   );
-
-  const triggerTeamNewSession = useUIStateStore((s) => s.triggerTeamNewSession);
-  const triggerTeamSelectSession = useUIStateStore((s) => s.triggerTeamSelectSession);
 
   // ─── 渲染 ───
   return (

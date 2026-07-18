@@ -393,6 +393,7 @@ export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
         <FilesTabContent
           gatewayUrl={gatewayUrl}
           accessToken={accessToken}
+          selectedTeamId={selectedTeamId}
           workspacePath={activeWorkspaceName ?? null}
           fileEditor={fileEditor}
           onSaveFile={onSaveFile}
@@ -416,12 +417,14 @@ export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
 function FilesTabContent({
   gatewayUrl,
   accessToken,
+  selectedTeamId,
   workspacePath,
   fileEditor,
   onSaveFile,
 }: {
   gatewayUrl: string | null;
   accessToken: string | null;
+  selectedTeamId: string;
   workspacePath: string | null;
   fileEditor?: {
     openFiles: OpenFile[];
@@ -482,6 +485,7 @@ function FilesTabContent({
       fileTree={
         <WorkspaceFileTreePanel
           workspacePath={workspacePath}
+          sessionId={selectedTeamId || null}
           onOpenFile={(path) => void fileEditor.openFile(path)}
           fetchTree={fetchTree}
           active

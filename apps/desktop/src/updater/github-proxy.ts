@@ -23,8 +23,10 @@ export const GITHUB_PROXIES: GitHubProxy[] = [
   { name: 'GHProxy.net', prefix: 'https://ghproxy.net/' },
 ];
 
-/** A small file on GitHub used to probe proxy connectivity (< 1KB) */
-const PROBE_URL = 'https://github.com/Await-d/OpenAWork/releases/latest/download/latest.json';
+const PROBE_URLS = [
+  'https://github.com/Await-d/OpenAWork/releases/latest/download/latest.json',
+  'https://github.com/Await-d/OpenAWork/releases/download/desktop-latest-preview/latest.json',
+] as const;
 
 /** Timeout for probe requests (ms) */
 const PROBE_TIMEOUT_MS = 8000;
@@ -35,25 +37,25 @@ let cacheExpiry = 0;
 
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-/**
- * Probe a single proxy by trying to fetch the probe URL through it.
- * Returns the proxy if reachable, or null on failure.
- */
-async function probeProxy(proxy: GitHubProxy, signal: AbortSignal): Promise<GitHubProxy | null> {
-  const url = `${proxy.prefix}${PROBE_URL}`;
+async function probeUrl(url: string, signal: AbortSignal): Promise<boolean> {
   try {
     const res = await fetch(url, {
       method: 'HEAD',
       signal,
       redirect: 'follow',
     });
-    if (res.ok || res.status === 302 || res.status === 301) {
-      return proxy;
-    }
-    return null;
+    return res.ok || res.status === 302 || res.status === 301;
   } catch {
-    return null;
+    return false;
   }
+}
+
+async function probeProxy(proxy: GitHubProxy, signal: AbortSignal): Promise<GitHubProxy | null> {
+  const probes = PROBE_URLS.map((probeUrlCandidate) =>
+    probeUrl(`${proxy.prefix}${probeUrlCandidate}`, signal),
+  );
+  const results = await Promise.all(probes);
+  return results.some(Boolean) ? proxy : null;
 }
 
 /**
@@ -114,13 +116,11 @@ export async function canReachGitHubDirectly(): Promise<boolean> {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 5000);
-    const res = await fetch(PROBE_URL, {
-      method: 'HEAD',
-      signal: controller.signal,
-      redirect: 'follow',
-    });
+    const results = await Promise.all(
+      PROBE_URLS.map((probeUrlCandidate) => probeUrl(probeUrlCandidate, controller.signal)),
+    );
     clearTimeout(timer);
-    return res.ok || res.status === 302 || res.status === 301;
+    return results.some(Boolean);
   } catch {
     return false;
   }

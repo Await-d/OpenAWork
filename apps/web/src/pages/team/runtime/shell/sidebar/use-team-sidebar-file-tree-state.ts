@@ -5,6 +5,7 @@ import {
   formatRecoverableLoadError,
 } from '../../../hooks/recoverable-read-model.js';
 import { useRecoverableRetryController } from '../../../hooks/use-recoverable-retry.js';
+import { isPathWithinRoot, rebasePath } from '../../../../../utils/workspace-path.js';
 
 const TEAM_SIDEBAR_FILE_TREE_RETRY_BASE_MS = 2_000;
 const TEAM_SIDEBAR_FILE_TREE_RETRY_MAX_MS = 30_000;
@@ -366,7 +367,7 @@ export function useTeamSidebarFileTreeState(
       setExpandedDirs((current) => {
         const next = new Set<string>();
         for (const entry of current) {
-          if (entry === path || entry.startsWith(`${path}/`)) {
+          if (isPathWithinRoot(entry, path)) {
             continue;
           }
           next.add(entry);
@@ -383,8 +384,9 @@ export function useTeamSidebarFileTreeState(
             next.add(newPath);
             continue;
           }
-          if (entry.startsWith(`${oldPath}/`)) {
-            next.add(entry.replace(`${oldPath}/`, `${newPath}/`));
+          const rebasedPath = rebasePath(entry, oldPath, newPath);
+          if (rebasedPath && rebasedPath !== entry) {
+            next.add(rebasedPath);
             continue;
           }
           next.add(entry);

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useHandoffStore, useLayerStore } from '../../../../../stores/team/team-events.js';
 import { TabContainer } from '../TabContainer.js';
 import { EmptyState, SegmentedToggle } from '../../shared/content-kit/index.js';
@@ -43,7 +43,8 @@ export interface LayerFlowViewProps {
 }
 
 export function LayerFlowView({ selectedTeam = null }: LayerFlowViewProps) {
-  const isNarrowLayout = useNarrowConversationLayout();
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const isNarrowLayout = useNarrowConversationLayout(containerRef, 1220);
   const handoffs = useHandoffStore((state) => state.handoffs);
   const nodes = useLayerStore((state) => state.nodes);
   const { sessions } = useTeamRuntimeReferenceViewData();
@@ -164,7 +165,7 @@ export function LayerFlowView({ selectedTeam = null }: LayerFlowViewProps) {
       subtitle="把消息在 接待 → 规划 → 管控 → 执行 → 评审 各层之间的传递实时画成流水线。点左侧记录切换，右侧面板只显示对话。"
       scroll={false}
     >
-      <div style={CONTAINER_STYLE}>
+      <div ref={containerRef} style={CONTAINER_STYLE}>
         <div
           style={
             isNarrowLayout
